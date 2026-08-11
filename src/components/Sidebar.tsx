@@ -55,7 +55,7 @@ function BotListItem({ bot }: { bot: Bot }) {
 export function Sidebar() {
   const { state, dispatch } = useStore();
   return (
-    <aside className="flex h-full w-[370px] shrink-0 flex-col border-r border-hairline/40 bg-panel">
+    <aside className="flex h-full w-[320px] shrink-0 flex-col border-r border-hairline/40 bg-panel">
       {/* Titlebar: real traffic lights in Electron, faux ones in the browser */}
       <div
         className="flex items-center justify-between px-4 pt-3.5 pb-1"
