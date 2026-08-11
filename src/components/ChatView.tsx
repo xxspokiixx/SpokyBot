@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef } from "react";
 import { Check, Loader2, Monitor, Square, X } from "lucide-react";
 import { useStore, formatTime, type Bot, type Message } from "@/state/store";
 import { BlobAvatar } from "./Avatar";
@@ -75,10 +75,8 @@ function StreamingBubble({ text }: { text: string }) {
 export function ChatView({ bot }: { bot: Bot }) {
   const { state, dispatch } = useStore();
   const scrollRef = useRef<HTMLDivElement>(null);
-  const [showScreen, setShowScreen] = useState(true);
 
   const streaming = state.streaming[bot.threadId];
-  const liveScreen = state.screens[bot.id];
   const provisioning = state.provisioning[bot.id];
 
   useEffect(() => {
@@ -113,12 +111,12 @@ export function ChatView({ bot }: { bot: Bot }) {
           )}
           <ModelPicker bot={bot} />
           <button
-            onClick={() => setShowScreen((s) => !s)}
+            onClick={() => dispatch({ type: "toggleComputer" })}
             className={cn(
               "rounded-md p-1.5 hover:bg-raised",
-              liveScreen && showScreen ? "text-accent" : "text-ink-secondary hover:text-ink",
+              state.computerOpen ? "text-accent" : "text-ink-secondary hover:text-ink",
             )}
-            title="Bot's screen"
+            title="Bot's computer"
           >
             <Monitor size={18} />
           </button>
@@ -177,19 +175,6 @@ export function ChatView({ bot }: { bot: Bot }) {
           )}
         </div>
       </div>
-
-      {/* Live view of the bot's computer while it works */}
-      {liveScreen && showScreen && bot.busy && (
-        <div className="absolute bottom-24 right-5 z-20 w-[280px] overflow-hidden rounded-xl border border-hairline/50 bg-panel shadow-2xl shadow-black/50">
-          <div className="flex items-center justify-between px-2.5 py-1.5 text-[11px] text-ink-secondary">
-            <span>Bot's screen</span>
-            <button onClick={() => setShowScreen(false)} className="hover:text-ink">
-              <X size={12} />
-            </button>
-          </div>
-          <img src={`data:${liveScreen.mime};base64,${liveScreen.png}`} alt="Live screen" className="w-full" />
-        </div>
-      )}
 
       <Composer bot={bot} />
     </main>

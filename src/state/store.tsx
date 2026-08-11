@@ -59,6 +59,13 @@ export interface Bot {
   messages: Message[];
 }
 
+/** GET /api/config — configured flags only; secrets are never echoed. */
+export interface ConfigStatus {
+  xai: { configured: boolean };
+  composio: { configured: boolean };
+  box: { configured: boolean };
+}
+
 /** One row of GET /api/instances — the model picker's data. */
 export interface InstanceInfo {
   instanceId: string;
@@ -76,6 +83,7 @@ export interface InstanceInfo {
 interface AppState {
   bots: Bot[];
   instances: InstanceInfo[];
+  config: ConfigStatus | null;
   selectedId: string;
   settingsOpen: boolean;
   pluginsOpen: boolean;
@@ -93,6 +101,7 @@ interface AppState {
 type Action =
   | { type: "hydrate"; bots: Bot[] }
   | { type: "instances"; instances: InstanceInfo[] }
+  | { type: "configStatus"; config: ConfigStatus }
   | { type: "select"; id: string }
   | { type: "send"; botId: string; text: string }
   | { type: "answerCard"; botId: string; messageId: string; answer: string }
@@ -143,6 +152,8 @@ function reducer(state: AppState, action: Action): AppState {
     }
     case "instances":
       return { ...state, instances: action.instances };
+    case "configStatus":
+      return { ...state, config: action.config };
     case "select":
       return updateBot({ ...state, selectedId: action.id }, action.id, (b) => ({ ...b, unread: false }));
     // optimistic card settle; the server's message.patch confirms it later
@@ -227,6 +238,7 @@ function reducer(state: AppState, action: Action): AppState {
 const initialState: AppState = {
   bots: [],
   instances: [],
+  config: null,
   selectedId: "",
   settingsOpen: false,
   pluginsOpen: false,
@@ -239,7 +251,7 @@ const initialState: AppState = {
 };
 
 // ── API client ─────────────────────────────────────────────────────────
-async function api(path: string, init?: RequestInit): Promise<any> {
+export async function api(path: string, init?: RequestInit): Promise<any> {
   const res = await fetch(path, {
     headers: { "content-type": "application/json" },
     ...init,
@@ -373,6 +385,9 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       api("/api/instances")
         .then(({ instances }) => alive && rawDispatch({ type: "instances", instances }))
         .catch(() => {});
+      api("/api/config")
+        .then((config) => alive && rawDispatch({ type: "configStatus", config }))
+        .catch(() => {});
     };
     loadAll();
 
@@ -424,6 +439,17 @@ export function StoreProvider({ children }: { children: ReactNode }) {
           break;
         case "computer":
           rawDispatch({ type: "provisioning", botId: frame.botId, on: frame.state === "provisioning" });
+          break;
+        // a key changed and the fleet hot-reloaded — refresh the picker so
+        // newly available providers un-dim immediately
+        case "config":
+          rawDispatch({
+            type: "configStatus",
+            config: { xai: frame.xai, composio: frame.composio, box: frame.box },
+          });
+          api("/api/instances")
+            .then(({ instances }) => rawDispatch({ type: "instances", instances }))
+            .catch(() => {});
           break;
       }
     };

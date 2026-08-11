@@ -4,6 +4,7 @@ import { Sidebar } from "@/components/Sidebar";
 import { ChatView } from "@/components/ChatView";
 import { SettingsPanel } from "@/components/SettingsPanel";
 import { PluginsPanel } from "@/components/PluginsPanel";
+import { ComputerPanel } from "@/components/ComputerPanel";
 
 function Shell() {
   const { state } = useStore();
@@ -27,6 +28,7 @@ function Shell() {
         </main>
       )}
       {state.settingsOpen && bot && <SettingsPanel bot={bot} />}
+      {state.computerOpen && bot && <ComputerPanel bot={bot} />}
       {state.pluginsOpen && <PluginsPanel />}
     </div>
   );
