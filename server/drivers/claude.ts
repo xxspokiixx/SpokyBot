@@ -135,6 +135,12 @@ export const ClaudeDriver: ProviderDriver<ClaudeConfig> = {
           },
         };
         allowed.push("mcp__computer");
+      } else if (turn.integrations?.localComputer) {
+        // this Mac, via the Electron-owned cua-driver daemon (spawn config
+        // read from cua-connection.json — same "computer" name either way,
+        // the agent just sees a computer)
+        mcpServers.computer = { ...turn.integrations.localComputer };
+        allowed.push("mcp__computer");
       }
       if (Object.keys(mcpServers).length) {
         args.push("--mcp-config", JSON.stringify({ mcpServers }));

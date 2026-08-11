@@ -46,6 +46,9 @@ export interface BotRecord {
   modelSelection: ModelSelection;
   /** provider-native continuation per instance (e.g. claude session id) */
   resumeCursors: Record<string, unknown>;
+  /** which computer the bot acts on: its cloud box, this Mac (local CUA),
+   * or none. Unset = auto (box when it exists, else local when available). */
+  computer?: "cloud" | "local" | "off";
   busy?: boolean;
   createdAt: number;
 }

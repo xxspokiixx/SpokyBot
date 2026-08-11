@@ -1,7 +1,10 @@
 // OpenGrokBot server — the harness host. Clients hold no transports
 // (upstream rule): the React app dispatches typed commands over HTTP and
 // folds one SSE event stream; every provider process runs here.
+import { readFileSync } from "node:fs";
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
+import { homedir } from "node:os";
+import { join } from "node:path";
 
 import * as box from "./box.ts";
 import * as composio from "./composio.ts";
@@ -167,6 +170,20 @@ function stopScreenPoller(botId: string): Frame | null {
   return entry.last;
 }
 
+// Local computer-use contract written by Electron main on startup
+// (~/Library/Application Support/OpenGrokBot/cua-connection.json). Read
+// fresh each turn — Electron may restart or permissions may change.
+function readCuaConnection(): { command: string; args: string[]; env: Record<string, string> } | null {
+  try {
+    const p = join(homedir(), "Library", "Application Support", "OpenGrokBot", "cua-connection.json");
+    const conn = JSON.parse(readFileSync(p, "utf8"));
+    if (!conn || conn.mode === "unavailable" || !conn.mcpCommand) return null;
+    return { command: conn.mcpCommand, args: conn.mcpArgs ?? ["mcp"], env: conn.mcpEnv ?? {} };
+  } catch {
+    return null;
+  }
+}
+
 // ── turn dispatch (upstream ProviderCommandReactor, miniature) ──────────
 async function startTurn(botId: string, text: string) {
   const bot = store.bot(botId);
@@ -209,7 +226,8 @@ async function startTurn(botId: string, text: string) {
     try {
       const integrations: NonNullable<Parameters<typeof instance.adapter.sendTurn>[0]["integrations"]> = {};
       if (cfg.composio?.key) integrations.composio = { key: cfg.composio.key, url: cfg.composio.url };
-      if (box.boxConfigured(cfg)) {
+      const wants = bot.computer; // 'cloud' | 'local' | 'off' | undefined(auto)
+      if (wants !== "off" && wants !== "local" && box.boxConfigured(cfg)) {
         let b = await box.findBox(cfg, bot.id).catch(() => null);
         // the Computer driver runs ON the box — provision it on first use
         if (!b && instance.driverKind === "boxAgent") {
@@ -218,6 +236,13 @@ async function startTurn(botId: string, text: string) {
           b = await box.findBox(cfg, bot.id).catch(() => null);
         }
         if (b) integrations.computer = { boxId: b.id, token: cfg.box!.token! };
+      }
+      // local computer (this Mac) via the Electron-hosted cua-driver: the
+      // Electron main process owns the daemon (TCC attribution) and writes
+      // its spawn contract to cua-connection.json; the harness only reads it
+      if (!integrations.computer && wants !== "off" && wants !== "cloud") {
+        const cua = readCuaConnection();
+        if (cua) integrations.localComputer = cua;
       }
 
       await instance.adapter.sendTurn({
@@ -230,7 +255,9 @@ async function startTurn(botId: string, text: string) {
           persona +
           (integrations.computer && instance.driverKind !== "boxAgent"
             ? " You have your own cloud computer — use the computer tools (screenshot, computer_exec, open_url) whenever browsing or acting on a desktop helps."
-            : ""),
+            : integrations.localComputer
+              ? " You can act on the user's computer through the computer tools — take a screenshot or read the desktop state first, prefer accessibility actions over raw coordinates, and act carefully."
+              : ""),
         integrations,
       });
       if (integrations.computer) startScreenPoller(bot.id);
@@ -314,7 +341,7 @@ const server = createServer(async (req, res) => {
     if (m && method === "PATCH") {
       const body = await readBody(req);
       const patch: Record<string, unknown> = {};
-      for (const key of ["name", "title", "description", "notifications", "modelSelection", "unread"] as const) {
+      for (const key of ["name", "title", "description", "notifications", "modelSelection", "unread", "computer"] as const) {
         if (body[key] !== undefined) patch[key] = body[key];
       }
       const bot = store.patchBot(m[1], patch);
