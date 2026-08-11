@@ -26,14 +26,14 @@ await registry.load(instanceConfigs(cfg));
 const bus = new EventBus();
 bus.attach(registry.instances());
 
-// default selection for new bots: first available instance, grok preferred
+// default selection for new bots: first available instance, claude preferred
 async function defaultSelection() {
   const described = await registry.describe();
   const available = described.filter((d) => d.snapshot.state === "available");
-  const pick = available.find((d) => d.driverKind === "grok") ?? available[0] ?? described[0];
-  return { instanceId: pick?.instanceId ?? "grok", model: pick?.models.default || "grok-4" };
+  const pick = available.find((d) => d.driverKind === "claudeAgent") ?? available[0] ?? described[0];
+  return { instanceId: pick?.instanceId ?? "claude", model: pick?.models.default || "claude-sonnet-5" };
 }
-let bootSelection = { instanceId: "grok", model: "grok-4" };
+let bootSelection = { instanceId: "claude", model: "claude-sonnet-5" };
 const store = new Store(() => bootSelection);
 bootSelection = await defaultSelection();
 store.seedIfEmpty();
@@ -279,7 +279,7 @@ async function startTurn(botId: string, text: string) {
 function configStatus() {
   return {
     xai: { configured: Boolean(cfg.xai?.key) },
-    composio: { configured: Boolean(cfg.composio?.key) },
+    composio: { configured: Boolean(cfg.composio?.key), apiKeyConfigured: Boolean(cfg.composio?.apiKey) },
     box: { configured: Boolean(cfg.box?.token) },
   };
 }

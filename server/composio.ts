@@ -139,10 +139,11 @@ export async function listToolkits(cfg: AppConfig): Promise<{ cards: ToolkitCard
   if (toolkitCache && Date.now() - toolkitCache.at < 10 * 60_000) {
     return { cards: toolkitCache.cards, source: "api" };
   }
-  if (cfg.composio?.key) {
+  const backendKey = cfg.composio?.apiKey ?? cfg.composio?.key;
+  if (backendKey) {
     try {
       const res = await fetch(`${BACKEND_URL}/toolkits?limit=500&sort_by=usage`, {
-        headers: { "x-api-key": cfg.composio.key },
+        headers: { "x-api-key": backendKey },
         signal: AbortSignal.timeout(15_000),
       });
       if (res.ok) {

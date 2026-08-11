@@ -9,7 +9,10 @@ import type { InstanceConfigMap } from "./contracts.ts";
 
 export interface AppConfig {
   xai?: { key?: string; url?: string };
-  composio?: { key?: string; url?: string };
+  /** key = ck_… Connect consumer key (connections + agent tools);
+   * apiKey = ak_… project API key — optional, unlocks the full toolkit
+   * catalog with official logos in the plugins marketplace. */
+  composio?: { key?: string; apiKey?: string; url?: string };
   box?: { token?: string };
   instances?: InstanceConfigMap;
 }
@@ -59,11 +62,13 @@ export function saveConfig(patch: Partial<AppConfig>): void {
 // Config-file keys are injected as per-instance environment so drivers
 // see them without needing real process env vars.
 export function instanceConfigs(cfg: AppConfig): InstanceConfigMap {
+  // No grok instance by default: the xAI API key is a credential Milind
+  // doesn't want to manage — the CLI agents + the box are the fleet. The
+  // driver stays registered; an `instances` entry brings it back anytime.
   const map: InstanceConfigMap =
     cfg.instances && Object.keys(cfg.instances).length
       ? cfg.instances
       : {
-          grok: { driver: "grok" },
           claude: { driver: "claudeAgent" },
           codex: { driver: "codex" },
           computer: { driver: "boxAgent" },
