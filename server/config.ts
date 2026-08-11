@@ -43,5 +43,6 @@ export function instanceConfigs(cfg: AppConfig): InstanceConfigMap {
     grok: { driver: "grok" },
     claude: { driver: "claudeAgent" },
     codex: { driver: "codex" },
+    computer: { driver: "boxAgent" },
   };
 }

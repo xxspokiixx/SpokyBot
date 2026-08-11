@@ -93,6 +93,14 @@ export interface SendTurnInput {
   resumeCursor?: unknown;
   /** Prior turns for transcript-replay providers (API-backed drivers). */
   transcript?: Array<{ role: "user" | "assistant"; text: string }>;
+  /** Bot persona (name/title/description) as a system prompt. */
+  system?: string;
+  /** Per-bot integrations the driver may hand to the agent as tools. */
+  integrations?: {
+    composio?: { url?: string; key: string };
+    /** The bot's cloud computer (box.ascii.dev) for desktop/browser use. */
+    computer?: { boxId: string; token: string };
+  };
   cwd?: string;
 }
 

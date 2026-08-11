@@ -23,11 +23,14 @@ export interface OptionCardData {
 export interface Message {
   id: string;
   role: "bot" | "user";
-  kind: "text" | "options" | "activity";
+  kind: "text" | "options" | "activity" | "screen";
   text?: string;
   card?: OptionCardData;
   /** activity messages: tool name + outcome */
   tool?: { name: string; ok?: boolean };
+  /** screen messages: a frame of the bot's computer (base64 image) */
+  png?: string;
+  mime?: string;
   at: number;
 }
 
@@ -61,8 +64,10 @@ const onboardingCard = (): OptionCardData => ({
 export class Store {
   bots: BotRecord[] = [];
   private messages = new Map<string, Message[]>();
+  private defaultSelection: () => ModelSelection;
 
-  constructor(private defaultSelection: () => ModelSelection) {
+  constructor(defaultSelection: () => ModelSelection) {
+    this.defaultSelection = defaultSelection;
     mkdirSync(DATA_DIR, { recursive: true });
     try {
       this.bots = JSON.parse(readFileSync(BOTS_FILE, "utf8"));
