@@ -6,11 +6,14 @@
   "main": "electron/main.mjs",
   "scripts": {
     "dev": "vite",
+    "dev:server": "node server/index.ts",
     "dev:desktop": "electron .",
-    "build": "tsc -b && vite build",
+    "build": "tsc -b && tsc -p tsconfig.server.json && vite build",
+    "typecheck": "tsc -b && tsc -p tsconfig.server.json",
     "preview": "vite preview"
   },
   "dependencies": {
+    "@trycua/cua-driver": "^0.19.3",
     "clsx": "^2.1.1",
     "lucide-react": "^0.539.0",
     "react": "^19.1.0",

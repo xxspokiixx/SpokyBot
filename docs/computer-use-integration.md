@@ -41,9 +41,8 @@ bundled `cua-driver` binary. Alternatives evaluated and rejected:
 | Option | Verdict |
 | --- | --- |
 | cua `computer-server` (Python/FastAPI) | ✗ 200MB+ frozen Python, second TCC prompt under wrong identity |
-| axstream (Python MCP + Vision OCR) | ✗ as a bundle (needs Python 3.11 + pyobjc); ✓ steal its ideas |
-| cliclick / MacosUseSDK / robotjs-class native modules | ✗ rejected — CUA-only policy |
-| **cua-driver Rust binary, embedded mode** | ✓ THE provider: zero deps, 20+ tools, MCP-over-stdio *and* socket daemon *and* TS SDK, agent-cursor overlay, permission tooling |
+| axstream / cliclick / robotjs-class | ✗ rejected — CUA-only policy |
+| **cua-driver binary, embedded mode** | ✓ THE provider: zero deps, 20+ tools, its own stdio MCP proxy + socket daemon + TS SDK (`@trycua/cua-driver`), agent-cursor overlay, permission tooling |
 
 ### The rules (from `cua/libs/cua-driver/rust/Skills/cua-driver/EMBEDDING.md` — read it end to end)
 
@@ -81,32 +80,51 @@ bundled `cua-driver` binary. Alternatives evaluated and rejected:
   re-prompt; the `persistent-content-capture` entitlement is Apple-gated and
   not realistically available to us.
 
-### MCP exposure: `server/computer-proxy-local.ts`
+### MCP exposure: the official `cua-driver mcp` proxy (no custom proxy)
 
-Sibling of the existing cloud `computer-proxy.ts`, same house style (raw
-JSON-RPC 2.0 over stdio, NO MCP SDK). Each tool call forwards to the embedded
-daemon's socket; frame format is newline-delimited JSON:
-`{"method":"call","name":<tool>,"args":<json>}\n` (see
-`axstream/axstream/driver.py:_tool_socket`). Port axstream's
-non-idempotent-retry guard verbatim (`driver.py:_IDEMPOTENT`): blind-retry
-reads only, never clicks — prevents double-clicks after socket hiccups.
+Do NOT hand-roll a socket proxy. The driver ships its own stdio MCP proxy:
 
-Driver tools available: click / double_click / right_click / drag / scroll /
-type_text / press_key / hotkey / move_cursor / get_window_state /
-get_desktop_state / get_accessibility_tree / list_windows / list_apps /
-launch_app / bring_to_front / check_permissions / get_screen_size / zoom.
-Delivery ladder inside the driver: `ax → ax_fg → cgevent → cgevent_fg →
-cgevent_hid` (background pid-addressed input first; it does not steal the
-user's cursor).
+```
+cua-driver mcp                              # standalone (attaches to running daemon)
+cua-driver mcp --embedded --socket <path>   # embedded (host-owned daemon)
+```
 
-### Worth porting from axstream later (not bundling)
+It speaks line-delimited JSON-RPC 2.0 on stdin/stdout, executes nothing
+itself, and forwards to the host-owned daemon. Verified round-trip against the
+installed `CuaDriver.app` binary:
+`tools/call get_screen_size` → `{"width":1512,"height":982,"scale_factor":1}`.
 
-- Click ladder: AX element → OCR text anchor → visual patch anchor →
-  window-relative pixel (`axstream/act.py`).
-- Macro record/replay format (`macrofile.py`, `SPEC.md`) — this is how bots
-  get "teach once, replay instantly".
-- macOS Vision OCR is reachable without Python; `screen_text`/`find` can be
-  reimplemented natively.
+So the harness just adds one entry to a bot's `--mcp-config`:
+
+```jsonc
+{ "mcpServers": { "computer": {
+    "command": "<cua-driver binary>",
+    "args": ["mcp", "--embedded", "--socket", "<socketPath>"],
+    "env": { "CUA_DRIVER_EMBEDDED": "1", "CUA_DRIVER_HOST_BUNDLE_ID": "com.opengrokbot.app" }
+} } }
+```
+
+Electron main writes that descriptor to
+`<userData>/cua-connection.json` (see `electron/cua.mjs`); the harness reads
+it and injects the block. The driver's own non-idempotent-action safety and
+the `ax → ax_fg → cgevent → cgevent_fg → cgevent_hid` delivery ladder
+(background pid-addressed input first — does not steal the user's cursor) are
+handled inside the binary; the host adds nothing.
+
+Driver tool surface (per `cua-driver list-tools`): start_session, click,
+double_click, right_click, drag, scroll, type_text, press_key, hotkey,
+move_cursor, get_window_state, get_desktop_state, get_accessibility_tree,
+list_windows, list_apps, launch_app, bring_to_front, check_permissions,
+get_screen_size, zoom, screenshot. AX element paths are preferred over pixel
+coordinates and work on backgrounded/hidden windows.
+
+### Policy: CUA is the only computer-use path
+
+No axstream, no cliclick, no robotjs/nut.js, no Python computer-server. If a
+capability is missing (e.g. OCR-anchored clicking, macro record/replay), it is
+added to cua-driver upstream or requested as a driver tool — never bolted on
+beside it. This keeps one TCC identity, one binary to sign/notarize, and one
+behavior contract.
 
 ## Browser use: three tiers
 
