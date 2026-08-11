@@ -10,10 +10,13 @@
 //     — screenshot/exec/open_url, the CUA-on-the-box bridge
 import { spawn } from "node:child_process";
 import { execFile } from "node:child_process";
-import { existsSync } from "node:fs";
+import { existsSync, unlinkSync } from "node:fs";
+import { createServer as createNetServer } from "node:net";
 import { homedir } from "node:os";
 import { join, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
+
+import { DATA_DIR } from "../config.ts";
 
 import type {
   DriverCreateInput,
@@ -46,6 +49,118 @@ const MODELS = {
 };
 
 const PROXY_PATH = join(dirname(fileURLToPath(import.meta.url)), "..", "computer-proxy.ts");
+const PERM_PROXY_PATH = join(dirname(fileURLToPath(import.meta.url)), "..", "permission-proxy.ts");
+
+// ── permission broker (ported from agentcal drivers/claude.js) ─────────
+// A headless run that hits a permission acceptEdits doesn't cover should
+// neither stall silently NOR get blanket-denied — it should ask the user.
+// The broker is a net server on a per-turn socket; the proxy (spawned by
+// the claude CLI) forwards asks over it and waits. Unanswered permission
+// asks deny after timeoutMs with a keep-moving note; unanswered questions
+// answer with "use your best judgment" — guidance, never a block.
+interface Ask {
+  id: string;
+  kind: "permission" | "question";
+  tool: string;
+  input: Record<string, unknown>;
+  at: number;
+}
+
+const DENY_TIMEOUT_NOTE =
+  "OpenGrokBot: nobody answered this permission request in time. Skip this action and finish what you can without it.";
+const QUESTION_TIMEOUT_NOTE = "OpenGrokBot: nobody answered in time. Use your best judgment and continue.";
+
+/** One human-readable line for an ask — what the card subtitle shows. */
+function askSummary(ask: Ask): string {
+  const input = ask.input ?? {};
+  if (typeof input.question === "string") return input.question.slice(0, 300);
+  if (typeof input.command === "string") return input.command.slice(0, 200);
+  if (typeof input.url === "string") return input.url.slice(0, 200);
+  const text = JSON.stringify(input);
+  return text === "{}" ? (ask.tool ?? "tool") : text.slice(0, 200);
+}
+
+function permissionSocketPath(threadId: string) {
+  const tag = threadId.replace(/[^\w-]/g, "").slice(0, 8);
+  return join(DATA_DIR, `perm-${tag}.sock`);
+}
+
+function createPermissionBroker(opts: {
+  socketPath: string;
+  onAsk: (ask: Ask) => void;
+  onResolve: (resolved: Ask & { behavior: string; source: string }) => void;
+  timeoutMs?: number;
+}) {
+  const timeoutMs = opts.timeoutMs ?? 15 * 60_000;
+  const pending = new Map<string, { ask: Ask; finish: (behavior: string, message: string | undefined, source: string) => void }>();
+  try {
+    unlinkSync(opts.socketPath);
+  } catch {}
+  const server = createNetServer((conn) => {
+    conn.on("error", () => {});
+    let buf = "";
+    conn.on("data", (chunk) => {
+      buf += chunk;
+      let nl;
+      while ((nl = buf.indexOf("\n")) !== -1) {
+        const line = buf.slice(0, nl);
+        buf = buf.slice(nl + 1);
+        let msg: any;
+        try {
+          msg = JSON.parse(line);
+        } catch {
+          continue;
+        }
+        if (msg.t !== "ask") continue;
+        const askId = String(msg.id ?? newId());
+        const kind = msg.kind === "question" ? ("question" as const) : ("permission" as const);
+        const ask: Ask = { id: askId, kind, tool: msg.tool ?? "tool", input: msg.input ?? {}, at: Date.now() };
+        const finish = (behavior: string, message: string | undefined, source: string) => {
+          if (!pending.delete(askId)) return;
+          clearTimeout(timer);
+          try {
+            conn.write(JSON.stringify({ t: "answer", id: askId, behavior, message }) + "\n");
+          } catch {}
+          opts.onResolve({ ...ask, behavior, source });
+        };
+        const timer = setTimeout(
+          () =>
+            kind === "question"
+              ? finish("answer", QUESTION_TIMEOUT_NOTE, "timeout")
+              : finish("deny", DENY_TIMEOUT_NOTE, "timeout"),
+          timeoutMs,
+        );
+        timer.unref?.();
+        pending.set(askId, { ask, finish });
+        opts.onAsk(ask);
+      }
+    });
+  });
+  server.on("error", () => {});
+  server.listen(opts.socketPath);
+  return {
+    answer(askId: string, behavior: string, message?: string): boolean {
+      const p = pending.get(askId);
+      if (!p) return false;
+      const valid = p.ask.kind === "question" ? ["answer"] : ["allow", "deny"];
+      if (!valid.includes(behavior)) return false;
+      p.finish(behavior, message, "user");
+      return true;
+    },
+    close() {
+      for (const p of [...pending.values()]) {
+        if (p.ask.kind === "question") p.finish("answer", "OpenGrokBot: the turn is ending — wrap up.", "shutdown");
+        else p.finish("deny", "OpenGrokBot: the turn ended", "shutdown");
+      }
+      try {
+        server.close();
+      } catch {}
+      try {
+        unlinkSync(opts.socketPath);
+      } catch {}
+    },
+  };
+}
 
 function decodeConfig(raw: unknown): ClaudeConfig {
   const o = (raw ?? {}) as Record<string, unknown>;
@@ -81,7 +196,7 @@ export const ClaudeDriver: ProviderDriver<ClaudeConfig> = {
     const { instanceId, config } = input;
     const listeners = new Set<RuntimeEventListener>();
     // one active turn per thread; a second send while busy is a caller bug
-    const active = new Map<string, { stop: () => void; turnId: string }>();
+    const active = new Map<string, { stop: () => void; turnId: string; broker?: ReturnType<typeof createPermissionBroker> }>();
 
     const emit = (event: RuntimeEvent) => {
       for (const l of [...listeners]) l(event);
@@ -142,6 +257,37 @@ export const ClaudeDriver: ProviderDriver<ClaudeConfig> = {
         mcpServers.computer = { ...turn.integrations.localComputer };
         allowed.push("mcp__computer");
       }
+      // permission broker: anything acceptEdits would silently deny becomes
+      // an Allow/Deny card in chat, and the agent gets ask_user. Skipped in
+      // bypassPermissions (fullAuto) — nothing would ever ask.
+      let broker: ReturnType<typeof createPermissionBroker> | undefined;
+      if (config.permissionMode !== "bypassPermissions") {
+        const socketPath = permissionSocketPath(threadId);
+        broker = createPermissionBroker({
+          socketPath,
+          onAsk: (ask) =>
+            emit({
+              ...base(threadId, turnId),
+              type: "request.opened",
+              requestId: ask.id,
+              requestType: ask.kind,
+              tool: ask.tool,
+              summary: askSummary(ask),
+              choices: Array.isArray(ask.input?.choices) ? (ask.input.choices as string[]).slice(0, 5) : undefined,
+            }),
+          onResolve: (resolved) =>
+            emit({
+              ...base(threadId, turnId),
+              type: "request.resolved",
+              requestId: resolved.id,
+              behavior: resolved.behavior,
+              source: resolved.source,
+            }),
+        });
+        args.push("--permission-prompt-tool", "mcp__ogb__approve");
+        mcpServers.ogb = { command: process.execPath, args: [PERM_PROXY_PATH, socketPath] };
+        allowed.push("mcp__ogb");
+      }
       if (Object.keys(mcpServers).length) {
         args.push("--mcp-config", JSON.stringify({ mcpServers }));
         args.push("--allowedTools", allowed.join(","));
@@ -165,6 +311,7 @@ export const ClaudeDriver: ProviderDriver<ClaudeConfig> = {
       const settle = (ok: boolean, stopReason: string | null, cost: number | null = null) => {
         if (settled) return;
         settled = true;
+        broker?.close();
         active.delete(threadId);
         emit({ ...base(threadId, turnId), type: "turn.completed", ok, stopReason, cost });
       };
@@ -262,7 +409,7 @@ export const ClaudeDriver: ProviderDriver<ClaudeConfig> = {
           } catch {}
         }
       };
-      active.set(threadId, { stop, turnId });
+      active.set(threadId, { stop, turnId, broker });
       emit({ ...base(threadId, turnId), type: "turn.started" });
 
       // prompt over stdin as a stream-json message — never argv (ARG_MAX)
@@ -297,8 +444,13 @@ export const ClaudeDriver: ProviderDriver<ClaudeConfig> = {
         capabilities: { sessionModelSwitch: "in-session" },
         sendTurn,
         interruptTurn: async (threadId) => active.get(threadId)?.stop(),
-        respondToRequest: async () => {
-          throw new Error("claude driver has no pending asks (permission broker not wired)");
+        respondToRequest: async (threadId, requestId, decision) => {
+          const broker = active.get(threadId)?.broker;
+          if (!broker) throw new Error("no active turn with a permission broker on this thread");
+          const behavior = decision.behavior === "answer" ? "answer" : decision.behavior;
+          if (!broker.answer(requestId, behavior, decision.message)) {
+            throw new Error("no such pending request (it may have timed out)");
+          }
         },
         hasSession: (threadId) => active.has(threadId),
         stopAll: async () => {
