@@ -147,7 +147,7 @@ export const ClaudeDriver: ProviderDriver<ClaudeConfig> = {
         args.push("--allowedTools", allowed.join(","));
       }
 
-      const env = { ...process.env, NPM_CONFIG_LOGLEVEL: "error" };
+      const env: Record<string, string | undefined> = { ...process.env, NPM_CONFIG_LOGLEVEL: "error" };
       // subscription users get billed pay-as-you-go if this leaks through;
       // and a nested CLI must not inherit this session's identity (agentcal)
       delete env.ANTHROPIC_API_KEY;

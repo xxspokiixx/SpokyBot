@@ -135,7 +135,7 @@ export const GrokDriver: ProviderDriver<GrokConfig> = {
       const messages = [
         ...(turn.system ? [{ role: "system", content: turn.system }] : []),
         ...(turn.transcript ?? []).map((m) => ({
-          role: m.role === "bot" || m.role === "assistant" ? "assistant" : "user",
+          role: m.role === "assistant" ? "assistant" : "user",
           content: m.text,
         })),
         { role: "user", content: turn.text },

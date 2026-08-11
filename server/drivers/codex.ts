@@ -86,7 +86,7 @@ export const CodexDriver: ProviderDriver<CodexConfig> = {
       if (active.has(threadId)) throw new Error("a turn is already running on this thread");
       const turnId = newId();
 
-      const env = { ...process.env, NPM_CONFIG_LOGLEVEL: "error" };
+      const env: Record<string, string | undefined> = { ...process.env, NPM_CONFIG_LOGLEVEL: "error" };
       // the CLI owns its own ChatGPT login; a leaked API key silently flips
       // billing to pay-as-you-go (agentcal)
       delete env.OPENAI_API_KEY;

@@ -10,7 +10,7 @@ import * as box from "./box.ts";
 import * as composio from "./composio.ts";
 import { ensureDirs, instanceConfigs, loadConfig } from "./config.ts";
 import type { RuntimeEvent } from "./contracts.ts";
-import { newEventId } from "./contracts.ts";
+
 import { BUILT_IN_DRIVERS } from "./drivers/builtIn.ts";
 import { EventBus } from "./harness/bus.ts";
 import { ProviderRegistry } from "./harness/registry.ts";
