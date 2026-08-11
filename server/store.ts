@@ -1,0 +1,164 @@
+// Bot + thread persistence. bots.json holds bot records (including the
+// thread→instance binding and per-instance resume cursors — t3code's
+// ProviderSessionDirectory, recipe step 6: persist the binding from day
+// one). messages-<threadId>.json holds the folded transcript.
+import { readFileSync, writeFileSync, mkdirSync } from "node:fs";
+import { join } from "node:path";
+
+import { DATA_DIR } from "./config.ts";
+import { newId, type ModelSelection, type ThreadId } from "./contracts.ts";
+
+export type BlobColor = "red" | "orange" | "blue" | "green" | "purple";
+
+export interface OptionCardData {
+  title: string;
+  subtitle: string;
+  options: string[];
+  answered?: string;
+  dismissed?: boolean;
+  /** Present when this card is a live provider ask (approval/question). */
+  requestId?: string;
+}
+
+export interface Message {
+  id: string;
+  role: "bot" | "user";
+  kind: "text" | "options" | "activity";
+  text?: string;
+  card?: OptionCardData;
+  /** activity messages: tool name + outcome */
+  tool?: { name: string; ok?: boolean };
+  at: number;
+}
+
+export interface BotRecord {
+  id: string;
+  threadId: ThreadId;
+  name: string;
+  title: string;
+  description: string;
+  notifications: boolean;
+  color: BlobColor;
+  unread: boolean;
+  modelSelection: ModelSelection;
+  /** provider-native continuation per instance (e.g. claude session id) */
+  resumeCursors: Record<string, unknown>;
+  busy?: boolean;
+  createdAt: number;
+}
+
+const BOTS_FILE = join(DATA_DIR, "bots.json");
+const messagesFile = (threadId: string) => join(DATA_DIR, `messages-${threadId}.json`);
+
+const COLORS: BlobColor[] = ["blue", "red", "orange", "green", "purple"];
+
+const onboardingCard = (): OptionCardData => ({
+  title: "What do you mostly want help with?",
+  subtitle: "Pick whatever's closest; we can always expand from there.",
+  options: ["Work & projects", "Writing & research", "Life admin", "A bit of everything"],
+});
+
+export class Store {
+  bots: BotRecord[] = [];
+  private messages = new Map<string, Message[]>();
+
+  constructor(private defaultSelection: () => ModelSelection) {
+    mkdirSync(DATA_DIR, { recursive: true });
+    try {
+      this.bots = JSON.parse(readFileSync(BOTS_FILE, "utf8"));
+    } catch {
+      this.bots = [];
+    }
+    // busy never survives a restart — no turn does either
+    for (const b of this.bots) b.busy = false;
+  }
+
+  private saveBots() {
+    writeFileSync(BOTS_FILE, JSON.stringify(this.bots, null, 2));
+  }
+
+  messagesFor(threadId: string): Message[] {
+    let list = this.messages.get(threadId);
+    if (!list) {
+      try {
+        list = JSON.parse(readFileSync(messagesFile(threadId), "utf8"));
+      } catch {
+        list = [];
+      }
+      this.messages.set(threadId, list!);
+    }
+    return list!;
+  }
+
+  appendMessage(threadId: string, message: Omit<Message, "id" | "at"> & { at?: number }): Message {
+    const full: Message = { id: newId(), at: Date.now(), ...message };
+    const list = this.messagesFor(threadId);
+    list.push(full);
+    writeFileSync(messagesFile(threadId), JSON.stringify(list, null, 2));
+    return full;
+  }
+
+  patchMessage(threadId: string, messageId: string, patch: Partial<Message>): Message | null {
+    const list = this.messagesFor(threadId);
+    const idx = list.findIndex((m) => m.id === messageId);
+    if (idx === -1) return null;
+    list[idx] = { ...list[idx], ...patch, card: patch.card ?? list[idx].card };
+    writeFileSync(messagesFile(threadId), JSON.stringify(list, null, 2));
+    return list[idx];
+  }
+
+  bot(id: string) {
+    return this.bots.find((b) => b.id === id) ?? null;
+  }
+
+  botByThread(threadId: string) {
+    return this.bots.find((b) => b.threadId === threadId) ?? null;
+  }
+
+  createBot(): BotRecord {
+    const bot: BotRecord = {
+      id: newId(),
+      threadId: newId(),
+      name: "New Bot",
+      title: "",
+      description: "",
+      notifications: true,
+      color: COLORS[this.bots.length % COLORS.length],
+      unread: false,
+      modelSelection: this.defaultSelection(),
+      resumeCursors: {},
+      createdAt: Date.now(),
+    };
+    this.bots.unshift(bot);
+    this.saveBots();
+    this.appendMessage(bot.threadId, {
+      role: "bot",
+      kind: "text",
+      text: "Hey — I'm your new bot. Nice to meet you.",
+    });
+    this.appendMessage(bot.threadId, { role: "bot", kind: "options", card: onboardingCard() });
+    return bot;
+  }
+
+  patchBot(id: string, patch: Partial<BotRecord>): BotRecord | null {
+    const bot = this.bot(id);
+    if (!bot) return null;
+    Object.assign(bot, patch);
+    this.saveBots();
+    return bot;
+  }
+
+  setResumeCursor(botId: string, instanceId: string, cursor: unknown) {
+    const bot = this.bot(botId);
+    if (!bot) return;
+    bot.resumeCursors[instanceId] = cursor;
+    this.saveBots();
+  }
+
+  /** First-run seed: one bot so the app never opens empty. */
+  seedIfEmpty() {
+    if (this.bots.length) return;
+    const bot = this.createBot();
+    this.patchBot(bot.id, { name: "Milind", color: "blue" });
+  }
+}

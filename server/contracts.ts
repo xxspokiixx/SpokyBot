@@ -1,0 +1,170 @@
+// Canonical harness contracts — ported from t3code
+// (apps/server/src/provider/ProviderDriver.ts, Services/ProviderAdapter.ts,
+// packages/contracts/src/{provider,providerInstance,providerRuntime}.ts),
+// de-Effect-ed: Promises instead of Effect, listener callbacks instead of
+// Stream. The shapes and names are kept so the two codebases stay mutually
+// readable.
+
+export type DriverKind = string;
+export type InstanceId = string;
+export type ThreadId = string;
+export type TurnId = string;
+
+// ── model selection ────────────────────────────────────────────────────
+// "Which model" is a data value carried on the request, never a service
+// binding (t3code ModelSelectionWire). instanceId is the routing key.
+export interface ModelSelection {
+  instanceId: InstanceId;
+  model: string;
+}
+
+// ── instance configuration envelope ────────────────────────────────────
+// `driver` is any slug — NOT validated against known drivers; unknown
+// drivers round-trip and surface as unavailable shadow snapshots so a
+// config from a newer build downgrades safely.
+export interface InstanceConfig {
+  driver: DriverKind;
+  displayName?: string;
+  accentColor?: string;
+  environment?: Record<string, string>;
+  enabled?: boolean;
+  config?: unknown;
+}
+
+export type InstanceConfigMap = Record<InstanceId, InstanceConfig>;
+
+// ── canonical runtime events ───────────────────────────────────────────
+// Subset of t3code's 49-member ProviderRuntimeEvent union — the ~12 types
+// the recipe says to start with, sharing one base. `raw` carries the
+// native protocol message when a consumer needs to see behind the
+// normalization.
+export interface RuntimeEventBase {
+  eventId: string;
+  provider: DriverKind;
+  providerInstanceId?: InstanceId;
+  threadId: ThreadId;
+  createdAt: string;
+  turnId?: TurnId;
+  itemId?: string;
+  requestId?: string;
+  raw?: { source: string; payload: unknown };
+}
+
+export type RuntimeEvent = RuntimeEventBase &
+  (
+    | { type: "session.started"; sessionId: string | null; model?: string | null }
+    | { type: "session.exited"; reason?: string }
+    | { type: "turn.started" }
+    | {
+        type: "turn.completed";
+        ok: boolean;
+        stopReason?: string | null;
+        cost?: number | null;
+        denials?: string[];
+      }
+    | { type: "item.started"; itemType: "tool" | "reasoning"; title?: string }
+    | { type: "item.updated"; itemType: "tool" | "reasoning"; tokens?: number | null }
+    | { type: "item.completed"; itemType: "tool"; ok: boolean }
+    | { type: "item.completed"; itemType: "assistant_text"; text: string }
+    | { type: "content.delta"; streamKind: "assistant_text" | "reasoning_text"; delta: string }
+    | {
+        type: "request.opened";
+        requestType: "permission" | "question";
+        tool: string;
+        summary: string;
+        choices?: string[];
+      }
+    | { type: "request.resolved"; behavior: string; source: string }
+    | { type: "thread.token-usage.updated"; input: number; output: number }
+    | { type: "runtime.error"; message: string }
+  );
+
+export type RuntimeEventListener = (event: RuntimeEvent) => void;
+
+// ── adapter contract (t3code ProviderAdapterShape, promise-flavored) ──
+// The conversation runtime every provider is flattened into. streamEvents
+// becomes onEvent(listener) → unsubscribe; sessions start implicitly on
+// the first turn (the agentcal per-turn-process model) with resumeCursor
+// carrying the provider-native continuation (e.g. a claude session id).
+export interface SendTurnInput {
+  threadId: ThreadId;
+  text: string;
+  model?: string;
+  resumeCursor?: unknown;
+  /** Prior turns for transcript-replay providers (API-backed drivers). */
+  transcript?: Array<{ role: "user" | "assistant"; text: string }>;
+  cwd?: string;
+}
+
+export interface TurnStartResult {
+  turnId: TurnId;
+}
+
+export interface ProviderAdapter {
+  readonly provider: DriverKind;
+  readonly capabilities: { sessionModelSwitch: "in-session" | "unsupported" };
+  sendTurn(input: SendTurnInput): Promise<TurnStartResult>;
+  interruptTurn(threadId: ThreadId, turnId?: TurnId): Promise<void>;
+  respondToRequest(
+    threadId: ThreadId,
+    requestId: string,
+    decision: { behavior: "allow" | "deny" | "answer"; message?: string },
+  ): Promise<void>;
+  hasSession(threadId: ThreadId): boolean;
+  stopAll(): Promise<void>;
+  onEvent(listener: RuntimeEventListener): () => void;
+}
+
+// ── provider snapshot (t3code ServerProviderShape, reduced) ────────────
+export interface ProviderSnapshot {
+  state: "available" | "unavailable";
+  reason?: string;
+  authenticated?: boolean;
+  version?: string | null;
+}
+
+// ── driver SPI (t3code ProviderDriver — a plain record, not a service) ─
+// `create` owns ALL per-instance state; two create calls share nothing.
+// Failures must reject, never throw synchronously — the registry downgrades
+// a rejection to an unavailable shadow snapshot.
+export interface ModelCatalog {
+  default: string;
+  options: Array<{ id: string; label: string }>;
+}
+
+export interface DriverCreateInput<Config> {
+  instanceId: InstanceId;
+  displayName: string | undefined;
+  environment: Record<string, string>;
+  enabled: boolean;
+  config: Config;
+}
+
+export interface ProviderInstance {
+  readonly instanceId: InstanceId;
+  readonly driverKind: DriverKind;
+  readonly displayName: string | undefined;
+  readonly enabled: boolean;
+  readonly models: ModelCatalog;
+  readonly adapter: ProviderAdapter;
+  snapshot(): Promise<ProviderSnapshot>;
+  /** Cheap one-shot text call (t3code TextGeneration) — titles, summaries. */
+  generateText?(prompt: string): Promise<string>;
+  dispose(): Promise<void>;
+}
+
+export interface ProviderDriver<Config = unknown> {
+  readonly driverKind: DriverKind;
+  readonly metadata: { displayName: string; supportsMultipleInstances?: boolean };
+  /** Decode the opaque config envelope; throw on invalid (→ shadow). */
+  decodeConfig(raw: unknown): Config;
+  defaultConfig(): Config;
+  readonly models: ModelCatalog;
+  create(input: DriverCreateInput<Config>): Promise<ProviderInstance>;
+}
+
+export type AnyProviderDriver = ProviderDriver<any>;
+
+let eventCounter = 0;
+export const newEventId = () => `ev-${Date.now().toString(36)}-${(eventCounter++).toString(36)}`;
+export const newId = () => crypto.randomUUID();
