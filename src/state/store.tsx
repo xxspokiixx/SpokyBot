@@ -61,8 +61,8 @@ export interface Bot {
 
 /** GET /api/config — configured flags only; secrets are never echoed. */
 export interface ConfigStatus {
-  xai: { configured: boolean };
-  composio: { configured: boolean };
+  xai?: { configured: boolean };
+  composio: { configured: boolean; apiKeyConfigured?: boolean };
   box: { configured: boolean };
 }
 
@@ -88,6 +88,7 @@ interface AppState {
   settingsOpen: boolean;
   pluginsOpen: boolean;
   computerOpen: boolean;
+  appSettingsOpen: boolean;
   /** in-flight assistant text per threadId (content.delta fold) */
   streaming: Record<string, string>;
   /** latest live frame of a bot's computer, per botId */
@@ -122,6 +123,7 @@ type Action =
   | { type: "toggleSettings"; open?: boolean }
   | { type: "togglePlugins"; open?: boolean }
   | { type: "toggleComputer"; open?: boolean }
+  | { type: "toggleAppSettings"; open?: boolean }
   | {
       type: "updateBot";
       botId: string;
@@ -214,16 +216,36 @@ function reducer(state: AppState, action: Action): AppState {
       return { ...state, connected: action.value };
     case "error":
       return { ...state, error: action.message };
-    // settings and the computer panel share the right-side slot
+    // bot settings, the computer panel, and app settings share the right slot
     case "toggleSettings": {
       const open = action.open ?? !state.settingsOpen;
-      return { ...state, settingsOpen: open, computerOpen: open ? false : state.computerOpen };
+      return {
+        ...state,
+        settingsOpen: open,
+        computerOpen: open ? false : state.computerOpen,
+        appSettingsOpen: open ? false : state.appSettingsOpen,
+      };
     }
     case "togglePlugins":
       return { ...state, pluginsOpen: action.open ?? !state.pluginsOpen };
     case "toggleComputer": {
       const open = action.open ?? !state.computerOpen;
-      return { ...state, computerOpen: open, settingsOpen: open ? false : state.settingsOpen };
+      return {
+        ...state,
+        computerOpen: open,
+        settingsOpen: open ? false : state.settingsOpen,
+        appSettingsOpen: open ? false : state.appSettingsOpen,
+      };
+    }
+    case "toggleAppSettings": {
+      const open = action.open ?? !state.appSettingsOpen;
+      return {
+        ...state,
+        appSettingsOpen: open,
+        settingsOpen: open ? false : state.settingsOpen,
+        computerOpen: open ? false : state.computerOpen,
+        pluginsOpen: open ? false : state.pluginsOpen,
+      };
     }
     case "updateBot":
       return updateBot(state, action.botId, (b) => ({ ...b, ...action.patch }));
@@ -243,6 +265,7 @@ const initialState: AppState = {
   settingsOpen: false,
   pluginsOpen: false,
   computerOpen: false,
+  appSettingsOpen: false,
   streaming: {},
   screens: {},
   provisioning: {},

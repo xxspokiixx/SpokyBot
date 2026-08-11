@@ -2,7 +2,6 @@ import { ChevronLeft, X } from "lucide-react";
 import { useStore, type Bot } from "@/state/store";
 import { BlobAvatar } from "./Avatar";
 import { ModelPicker } from "./ModelPicker";
-import { ApiKeyRow } from "./ApiKeys";
 import { cn } from "@/lib/cn";
 
 function Field({
@@ -137,19 +136,6 @@ export function SettingsPanel({ bot }: { bot: Bot }) {
                 )}
               />
             </button>
-          </div>
-
-          {/* App-level provider keys — write-only, hot-reloads the fleet */}
-          <div className="rounded-xl bg-card p-4">
-            <div className="text-[15px] font-medium text-ink">API keys</div>
-            <div className="mt-0.5 text-[13px] text-ink-secondary">
-              Shared by all bots. Saving a key reloads providers instantly.
-            </div>
-            <div className="mt-4 flex flex-col gap-4">
-              <ApiKeyRow section="xai" label="xAI API key" placeholder="xai-…" />
-              <ApiKeyRow section="composio" label="Composio key" placeholder="ck_…" />
-              <ApiKeyRow section="box" label="Box token" placeholder="Token from box.ascii.dev" />
-            </div>
           </div>
         </div>
       </div>

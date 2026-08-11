@@ -10,10 +10,11 @@ Two processes:
 
 - **Harness server** (`server/`, port 8799) — owns every provider process.
   A driver registry turns instance configs into live provider instances
-  (Grok over the xAI API, Claude and Codex over their local CLIs, and a
-  cloud-computer agent). Every driver's native protocol is normalized into
-  one canonical runtime event stream, which is logged per-thread as NDJSON,
-  folded into persistent transcripts, and fanned out to clients over SSE.
+  (Claude and Codex over their local CLIs, and a cloud-computer agent; a
+  Grok/xAI API driver exists behind config). Every driver's native protocol
+  is normalized into one canonical runtime event stream, which is logged
+  per-thread as NDJSON, folded into persistent transcripts, and fanned out
+  to clients over SSE.
 - **App** (`src/`, port 5199) — React + Tailwind. Holds no transports of its
   own: it sends typed commands over HTTP (`/api/...`, proxied by Vite) and
   folds the one SSE stream into local state.
@@ -28,9 +29,15 @@ Features wired end-to-end:
 - **Model selector** — in the chat header and in Settings: per-instance rail
   with provider marks, model list with defaults, unavailable providers shown
   disabled with the reason (missing API key, CLI not installed, …)
+- **Computer** — each bot gets a computer: a cloud box (auto-provisioned,
+  live screen preview, hand-over via browser) or this Mac (frames via the
+  desktop app), with a per-bot cloud/local/off switch
+- **Voice** — the composer mic dictates via native macOS speech recognition
+  (desktop app; on-device when supported)
 - **Settings** — per-bot Name / Title / Description (become the bot's system
-  prompt), model selection, Notifications toggle
-- **Plugins** — Composio connectors + the bot's cloud computer (Box)
+  prompt), model selection, Notifications toggle; app-level credentials
+  (Composio, Box) are pasted once in App Settings and hot-reload the fleet
+- **Connected apps** — Composio Connect marketplace with one-click OAuth
 
 ## Run
 
@@ -41,18 +48,11 @@ pnpm dev          # app on http://localhost:5199 (proxies /api to the server)
 pnpm dev:desktop  # Electron shell (loads the dev URL)
 ```
 
-Provider setup (`~/.opengrokbot/config.json`, all optional — configured
-providers just light up in the model picker):
-
-```json
-{
-  "xai": { "key": "xai-…" },
-  "composio": { "key": "ck_…" },
-  "box": { "token": "…" }
-}
-```
-
-Claude and Codex need their CLIs (`claude`, `codex`) installed and logged in.
+Provider setup: paste keys in **App Settings** (gear in the sidebar footer)
+— Composio Connect key, optional Composio API key (full app catalog), Box
+token. They persist to `~/.opengrokbot/config.json` and the provider fleet
+hot-reloads. Claude and Codex need their CLIs (`claude`, `codex`) installed
+and logged in.
 
 ```sh
 pnpm typecheck    # app + server

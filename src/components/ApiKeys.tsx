@@ -3,15 +3,21 @@
 // are write-only — GET /api/config returns configured flags, never values.
 import { useState } from "react";
 import { Check, Loader2 } from "lucide-react";
-import { api, useStore } from "@/state/store";
+import { api, useStore, type ConfigStatus } from "@/state/store";
 import { cn } from "@/lib/cn";
 
-export type ConfigSection = "xai" | "composio" | "box";
+export type ConfigSection = "composio" | "composioApi" | "box";
 
-const FIELD_NAME: Record<ConfigSection, "key" | "token"> = {
-  xai: "key",
-  composio: "key",
-  box: "token",
+const SECTIONS: Record<
+  ConfigSection,
+  { body: (value: string) => unknown; flag: (config: ConfigStatus) => boolean }
+> = {
+  composio: { body: (v) => ({ composio: { key: v } }), flag: (c) => c.composio.configured },
+  composioApi: {
+    body: (v) => ({ composio: { apiKey: v } }),
+    flag: (c) => c.composio.apiKeyConfigured ?? false,
+  },
+  box: { body: (v) => ({ box: { token: v } }), flag: (c) => c.box.configured },
 };
 
 export function ApiKeyRow({
@@ -31,7 +37,7 @@ export function ApiKeyRow({
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  const configured = state.config?.[section]?.configured ?? false;
+  const configured = state.config ? SECTIONS[section].flag(state.config) : false;
   const clearing = !value.trim() && configured;
 
   const save = () => {
@@ -40,12 +46,12 @@ export function ApiKeyRow({
     setError(null);
     api("/api/config", {
       method: "PUT",
-      body: JSON.stringify({ [section]: { [FIELD_NAME[section]]: value.trim() } }),
+      body: JSON.stringify(SECTIONS[section].body(value.trim())),
     })
-      .then((status) => {
+      .then((status: ConfigStatus) => {
         dispatch({ type: "configStatus", config: status });
         setValue("");
-        onSaved?.(status[section]?.configured ?? false);
+        onSaved?.(SECTIONS[section].flag(status));
       })
       .catch((e) => setError(e.message))
       .finally(() => setSaving(false));
