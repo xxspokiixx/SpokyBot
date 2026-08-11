@@ -86,6 +86,8 @@ bus.subscribe((event: RuntimeEvent) => {
           if (patched) broadcast({ kind: "message.patch", threadId: event.threadId, message: patched });
           toolMessageByItem.delete(event.itemId);
         }
+        // the bot just finished acting — refresh its screen preview now
+        pokeScreenPoller(bot.id);
       }
       break;
     case "item.started":
@@ -142,24 +144,40 @@ bus.subscribe((event: RuntimeEvent) => {
 // Frames stream to clients as SSE {kind:'screen'} (the "Bot's screen"
 // panel); the final frame is folded into the transcript on turn end.
 type Frame = { png: string; mime: string };
-const screenPollers = new Map<string, { timer: ReturnType<typeof setInterval>; last: Frame | null }>();
+const screenPollers = new Map<
+  string,
+  { timer: ReturnType<typeof setInterval>; capture: () => Promise<void>; last: Frame | null }
+>();
 
 function startScreenPoller(botId: string) {
   if (screenPollers.has(botId) || !box.boxConfigured(cfg)) return;
+  let inFlight = false;
+  const capture = async () => {
+    if (inFlight) return;
+    inFlight = true;
+    try {
+      const { png, format } = await box.screenshotBox(cfg, botId);
+      const frame = { png, mime: format === "jpeg" ? "image/jpeg" : "image/png" };
+      entry.last = frame;
+      broadcast({ kind: "screen", botId, ...frame });
+    } catch {
+      /* box asleep or mid-command — try again next tick */
+    } finally {
+      inFlight = false;
+    }
+  };
   const entry = {
-    timer: setInterval(async () => {
-      try {
-        const { png, format } = await box.screenshotBox(cfg, botId);
-        const frame = { png, mime: format === "jpeg" ? "image/jpeg" : "image/png" };
-        entry.last = frame;
-        broadcast({ kind: "screen", botId, ...frame });
-      } catch {
-        /* box asleep or mid-command — try again next tick */
-      }
-    }, 4000),
+    timer: setInterval(capture, 4000),
+    capture,
     last: null as Frame | null,
   };
   screenPollers.set(botId, entry);
+}
+
+/** Event-driven refresh: capture NOW (the bot just acted on its screen)
+ * instead of waiting for the next interval tick. */
+function pokeScreenPoller(botId: string) {
+  void screenPollers.get(botId)?.capture();
 }
 
 function stopScreenPoller(botId: string): Frame | null {

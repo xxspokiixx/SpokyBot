@@ -54,13 +54,24 @@ const X = "export DISPLAY=${DISPLAY:-:0}; ";
 
 // capture to a file on the box, read back via the files API — base64 over
 // command stdout corrupts (probed 2026-08-12), never ship binary that way
+const SHOT_WIDTH = 1280;
 const SHOT_CMD = [
   "export DISPLAY=${DISPLAY:-:0}",
   "f=/tmp/ogb-shot.png",
   'scrot -o "$f" 2>/dev/null || import -window root "$f" 2>/dev/null || ffmpeg -y -f x11grab -i "$DISPLAY" -frames:v 1 "$f" >/dev/null 2>&1',
-  'command -v convert >/dev/null && convert "$f" -resize 1280x "$f" 2>/dev/null || true',
+  `command -v convert >/dev/null && convert "$f" -resize ${SHOT_WIDTH}x "$f" 2>/dev/null || true`,
   'test -s "$f" && echo captured',
 ].join("; ");
+
+// real display size, fetched once per proxy lifetime (per turn)
+let geometryCache: { width: number; height: number } | null | undefined;
+async function displayGeometry() {
+  if (geometryCache !== undefined) return geometryCache;
+  const out = await runOnBox(`${X}xdotool getdisplaygeometry`);
+  const m = out.stdout.trim().match(/^(\d+)\s+(\d+)/);
+  geometryCache = m ? { width: Number(m[1]), height: Number(m[2]) } : null;
+  return geometryCache;
+}
 
 async function readBoxFile(path: string): Promise<string | null> {
   const res = await fetch(
@@ -85,7 +96,8 @@ const TOOLS = [
   },
   {
     name: "click",
-    description: "Click on the computer's screen at pixel coordinates (from the most recent screenshot).",
+    description:
+      "Click on the computer's screen. Use pixel coordinates as they appear in the most recent screenshot — scaling to the real display resolution is handled for you.",
     inputSchema: {
       type: "object",
       properties: {
@@ -151,15 +163,23 @@ async function call(id: unknown, name: string, args: any) {
     const x = Math.round(Number(args.x));
     const y = Math.round(Number(args.y));
     if (!Number.isFinite(x) || !Number.isFinite(y)) return text(id, "click needs numeric x,y", true);
-    const command = args.double ? "double_click" : args.button === "right" ? "right_click" : "left_click";
-    const cua = await cuaCmd(command, { x, y });
-    if (!cua) {
-      const btn = args.button === "right" ? 3 : 1;
-      const rep = args.double ? "--repeat 2 " : "";
-      const out = await runOnBox(`${X}xdotool mousemove ${x} ${y} click ${rep}${btn}`);
-      if (!out.ok) return text(id, `click failed: ${out.stderr.slice(0, 200)}`, true);
-    }
-    return text(id, `clicked ${x},${y}${args.double ? " (double)" : ""}${args.button === "right" ? " (right)" : ""} — screenshot to verify`);
+    // screenshot space is 1280 wide (files-API capture is downscaled) but
+    // the real display can be larger — scale uniformly by width or clicks
+    // land short (probed live: 1920×1080 display, 1280×720 screenshots,
+    // every raw click 1.5× off). xdotool only; CUA's own scaler assumes a
+    // different (1280×800) API space and would double-convert.
+    const geometry = await displayGeometry();
+    const scale = geometry ? geometry.width / SHOT_WIDTH : 1;
+    const sx = Math.round(x * scale);
+    const sy = Math.round(y * scale);
+    const btn = args.button === "right" ? 3 : 1;
+    const rep = args.double ? "--repeat 2 --delay 150 " : "";
+    const out = await runOnBox(`${X}xdotool mousemove ${sx} ${sy} click ${rep}${btn}`);
+    if (!out.ok) return text(id, `click failed: ${out.stderr.slice(0, 200)}`, true);
+    return text(
+      id,
+      `clicked ${x},${y}${scale !== 1 ? ` (scaled to ${sx},${sy} on the ${geometry!.width}x${geometry!.height} display)` : ""}${args.double ? " (double)" : ""}${args.button === "right" ? " (right)" : ""} — screenshot to verify`,
+    );
   }
   if (name === "type_text") {
     const t = String(args.text ?? "");
