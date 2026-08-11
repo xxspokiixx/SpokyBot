@@ -1,7 +1,8 @@
-import { app, BrowserWindow, shell } from "electron";
+import { app, BrowserWindow, desktopCapturer, ipcMain, shell } from "electron";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { startCua, stopCua, registerCuaIpc } from "./cua.mjs";
+import { startSpeech, stopSpeech } from "./speech.mjs";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const DEV_URL = process.env.ELECTRON_START_URL ?? "http://localhost:5199";
@@ -12,11 +13,12 @@ function createWindow() {
     height: 920,
     minWidth: 900,
     minHeight: 600,
-    backgroundColor: "#202022",
+    backgroundColor: "#070707",
     titleBarStyle: "hiddenInset",
     trafficLightPosition: { x: 16, y: 16 },
     webPreferences: {
       contextIsolation: true,
+      preload: path.join(__dirname, "preload.cjs"),
     },
   });
 
@@ -31,6 +33,22 @@ function createWindow() {
     win.loadURL(DEV_URL);
   }
 }
+
+// "This Mac" screen preview — served from the main process so the Screen
+// Recording permission prompt attributes to the app, never the server
+ipcMain.handle("screen:frame", async () => {
+  const sources = await desktopCapturer.getSources({
+    types: ["screen"],
+    thumbnailSize: { width: 1280, height: 800 },
+  });
+  return sources[0]?.thumbnail.toDataURL() ?? null;
+});
+
+ipcMain.handle("speech:start", (event) => {
+  const win = BrowserWindow.fromWebContents(event.sender);
+  if (win) startSpeech(win);
+});
+ipcMain.handle("speech:stop", () => stopSpeech());
 
 app.whenReady().then(async () => {
   registerCuaIpc();
