@@ -322,6 +322,24 @@ const server = createServer(async (req, res) => {
       broadcast({ kind: "bot", bot });
       return json(res, 200, { bot });
     }
+    // onboarding/ask cards persist their answered/dismissed state
+    m = path.match(/^\/api\/bots\/([\w-]+)\/cards\/([\w-]+)$/);
+    if (m && method === "PATCH") {
+      const bot = store.bot(m[1]);
+      if (!bot) return json(res, 404, { error: "no such bot" });
+      const existing = store.messagesFor(bot.threadId).find((msg) => msg.id === m![2]);
+      if (!existing?.card) return json(res, 404, { error: "no such card" });
+      const body = await readBody(req);
+      const patched = store.patchMessage(bot.threadId, m[2], {
+        card: {
+          ...existing.card,
+          ...(body.answered !== undefined ? { answered: body.answered } : {}),
+          ...(body.dismissed !== undefined ? { dismissed: body.dismissed } : {}),
+        },
+      });
+      broadcast({ kind: "message.patch", threadId: bot.threadId, message: patched });
+      return json(res, 200, { message: patched });
+    }
     m = path.match(/^\/api\/bots\/([\w-]+)\/messages$/);
     if (m && method === "POST") {
       const body = await readBody(req);
