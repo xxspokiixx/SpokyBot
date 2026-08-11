@@ -52,13 +52,25 @@ async function cuaCmd(command: string, params: Record<string, unknown>, timeoutM
 
 const X = "export DISPLAY=${DISPLAY:-:0}; ";
 
-const SHOT_FALLBACK = [
+// capture to a file on the box, read back via the files API — base64 over
+// command stdout corrupts (probed 2026-08-12), never ship binary that way
+const SHOT_CMD = [
   "export DISPLAY=${DISPLAY:-:0}",
   "f=/tmp/ogb-shot.png",
   'scrot -o "$f" 2>/dev/null || import -window root "$f" 2>/dev/null || ffmpeg -y -f x11grab -i "$DISPLAY" -frames:v 1 "$f" >/dev/null 2>&1',
   'command -v convert >/dev/null && convert "$f" -resize 1280x "$f" 2>/dev/null || true',
-  'base64 < "$f"',
+  'test -s "$f" && echo captured',
 ].join("; ");
+
+async function readBoxFile(path: string): Promise<string | null> {
+  const res = await fetch(
+    `${BOX_API}/boxes/${boxId}/files?path=${encodeURIComponent(path)}&encoding=base64`,
+    { headers: { authorization: `Bearer ${token}` }, signal: AbortSignal.timeout(30_000) },
+  );
+  const body: any = await res.json().catch(() => null);
+  const content = body?.content;
+  return res.ok && typeof content === "string" && content ? content : null;
+}
 
 const send = (obj: unknown) => process.stdout.write(JSON.stringify(obj) + "\n");
 const text = (id: unknown, t: string, isError = false) =>
@@ -123,18 +135,12 @@ const TOOLS = [
 
 async function call(id: unknown, name: string, args: any) {
   if (name === "screenshot") {
-    // CUA first (jpeg, scaled), scrot chain second
-    const cua = await cuaCmd("screenshot", { format: "jpeg", quality: 70 }, 20_000);
-    if (cua?.image_data) {
-      return send({
-        jsonrpc: "2.0",
-        id,
-        result: { content: [{ type: "image", data: String(cua.image_data).replace(/\s+/g, ""), mimeType: "image/jpeg" }] },
-      });
+    const out = await runOnBox(SHOT_CMD, 60_000);
+    if (!/captured/.test(out.stdout)) {
+      return text(id, `screenshot failed: ${out.stderr.slice(0, 200) || "capture produced no file"}`, true);
     }
-    const out = await runOnBox(SHOT_FALLBACK, 90_000);
-    const data = out.stdout.replace(/\s+/g, "");
-    if (!data) return text(id, `screenshot failed: ${out.stderr.slice(0, 200) || "no output"}`, true);
+    const data = await readBoxFile("/tmp/ogb-shot.png");
+    if (!data) return text(id, "screenshot failed: could not read the frame back", true);
     return send({
       jsonrpc: "2.0",
       id,

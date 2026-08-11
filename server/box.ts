@@ -203,29 +203,30 @@ export async function execOnBox(cfg: AppConfig, botId: string, command: string) 
   return { exitCode: out.exitCode, stdout: out.stdout.slice(-4000), stderr: out.stderr.slice(-2000) };
 }
 
-// Screenshot for the Computer panel + screen-in-chat. Prefers the CUA
-// computer-server on the box's loopback (jpeg, resolution-scaled), falls
-// back to the scrot/import/ffmpeg chain. Driven entirely through the
-// run-command endpoint — no inbound port on the box.
+// Screenshot for the Computer panel + screen-in-chat. Two hops, both
+// deterministic: capture to a file on the box (scrot/import/ffmpeg chain,
+// downscaled), then read it back via the files API with encoding=base64.
+// Base64 over command stdout is NOT reliable (probed 2026-08-12: an
+// otherwise-complete payload came back with a corrupted length) — never
+// ship binary through the commands endpoint.
 const SHOT_CMD = [
-  'if curl -sf -m 8 -X POST http://127.0.0.1:8000/cmd -H "Content-Type: application/json" -d \'{"command":"screenshot","params":{"format":"jpeg","quality":70}}\' 2>/dev/null | grep -o \'"image_data": *"[^"]*"\' | head -1 | sed \'s/.*"image_data": *"//;s/"$//\' | grep -q .; then',
-  '  curl -sf -m 8 -X POST http://127.0.0.1:8000/cmd -H "Content-Type: application/json" -d \'{"command":"screenshot","params":{"format":"jpeg","quality":70}}\' | grep -o \'"image_data": *"[^"]*"\' | head -1 | sed \'s/.*"image_data": *"//;s/"$//\'',
-  "  echo FMT:jpeg 1>&2",
-  "else",
-  "  export DISPLAY=${DISPLAY:-:0}",
-  "  f=/tmp/ogb-panel.png",
-  '  scrot -o "$f" 2>/dev/null || import -window root "$f" 2>/dev/null || ffmpeg -y -f x11grab -i "$DISPLAY" -frames:v 1 "$f" >/dev/null 2>&1',
-  '  command -v convert >/dev/null && convert "$f" -resize 1024x "$f" 2>/dev/null || true',
-  '  base64 < "$f"',
-  "fi",
-].join("\n");
+  "export DISPLAY=${DISPLAY:-:0}",
+  "f=/tmp/ogb-panel.png",
+  'scrot -o "$f" 2>/dev/null || import -window root "$f" 2>/dev/null || ffmpeg -y -f x11grab -i "$DISPLAY" -frames:v 1 "$f" >/dev/null 2>&1',
+  'command -v convert >/dev/null && convert "$f" -resize 1024x "$f" 2>/dev/null || true',
+  'test -s "$f" && echo captured',
+].join("; ");
 
 export async function screenshotBox(cfg: AppConfig, botId: string) {
   const box = await findBox(cfg, botId);
   if (!box) throw new Error("no computer for this bot yet");
   if (!READY.has(box.state)) throw new Error(`box is ${box.state}`);
-  const out = await runCommand(cfg, box.id, SHOT_CMD, { timeoutMs: 90_000 });
-  const data = out.stdout.replace(/\s+/g, "");
-  if (!data) throw new Error(out.stderr.slice(0, 200) || "screenshot produced no output");
-  return { png: data, format: /FMT:jpeg/.test(out.stderr) ? "jpeg" : "png" };
+  const out = await runCommand(cfg, box.id, SHOT_CMD, { timeoutMs: 60_000 });
+  if (!/captured/.test(out.stdout)) {
+    throw new Error(out.stderr.slice(0, 200) || "screen capture failed on the box");
+  }
+  const { ok, body } = await boxJson(cfg, `/boxes/${box.id}/files?path=/tmp/ogb-panel.png&encoding=base64`);
+  const png = body?.content;
+  if (!ok || typeof png !== "string" || !png) throw new Error("could not read the frame back from the box");
+  return { png, format: "png" };
 }
