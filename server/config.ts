@@ -35,7 +35,7 @@ export function loadConfig(): AppConfig {
   return cfg;
 }
 
-// Default fleet: one instance per built-in driver (t3code
+// Default fleet: one instance per built-in driver (upstream
 // defaultInstanceIdForDriver — instanceId defaults to the driver kind).
 export function instanceConfigs(cfg: AppConfig): InstanceConfigMap {
   if (cfg.instances && Object.keys(cfg.instances).length) return cfg.instances;

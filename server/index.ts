@@ -1,5 +1,5 @@
 // OpenGrokBot server — the harness host. Clients hold no transports
-// (t3code rule): the React app dispatches typed commands over HTTP and
+// (upstream rule): the React app dispatches typed commands over HTTP and
 // folds one SSE event stream; every provider process runs here.
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
 
@@ -48,7 +48,7 @@ function broadcast(payload: unknown) {
   }
 }
 
-// ── server-side event folding (t3code's ingestion worker, miniature) ──
+// ── server-side event folding (upstream's ingestion worker, miniature) ──
 // The canonical stream is the source of truth; the persisted transcript
 // and every client view are projections of it.
 const toolMessageByItem = new Map<string, string>(); // itemId -> messageId
@@ -167,7 +167,7 @@ function stopScreenPoller(botId: string): Frame | null {
   return entry.last;
 }
 
-// ── turn dispatch (t3code ProviderCommandReactor, miniature) ──────────
+// ── turn dispatch (upstream ProviderCommandReactor, miniature) ──────────
 async function startTurn(botId: string, text: string) {
   const bot = store.bot(botId);
   if (!bot) throw Object.assign(new Error("no such bot"), { status: 404 });

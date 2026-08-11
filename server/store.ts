@@ -1,5 +1,5 @@
 // Bot + thread persistence. bots.json holds bot records (including the
-// thread→instance binding and per-instance resume cursors — t3code's
+// thread→instance binding and per-instance resume cursors — upstream's
 // ProviderSessionDirectory, recipe step 6: persist the binding from day
 // one). messages-<threadId>.json holds the folded transcript.
 import { readFileSync, writeFileSync, mkdirSync } from "node:fs";

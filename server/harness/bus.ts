@@ -1,7 +1,7 @@
-// Fan-in event bus — port of t3code's ProviderService fan-in +
+// Fan-in event bus — port of upstream's ProviderService fan-in +
 // EventNdjsonLogger tee, minus Effect. Every adapter's event stream merges
 // into one bus; each event is stamped with its providerInstanceId, teed to
-// a per-thread canonical NDJSON log (the debugging trick both t3code and
+// a per-thread canonical NDJSON log (the debugging trick both upstream and
 // agentcal lean on), and delivered to subscribers (the SSE endpoint and
 // the server-side message folder).
 import { appendFileSync } from "node:fs";

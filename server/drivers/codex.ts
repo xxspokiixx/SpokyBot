@@ -1,4 +1,4 @@
-// Codex driver — t3code CodexDriver skeleton over agentcal's
+// Codex driver — upstream CodexDriver skeleton over agentcal's
 // drivers/codex.js runtime: the official `codex` CLI headless over its
 // app-server JSON-RPC protocol (newline-delimited JSON on stdio).
 // Completion is a real `turn/completed` notification; approval requests
@@ -26,7 +26,7 @@ import { appendNative } from "./native.ts";
 
 const DRIVER_KIND = "codex";
 
-// catalog ported from t3code packages/contracts/src/model.ts
+// catalog ported from upstream packages/contracts/src/model.ts
 const MODELS = {
   default: "gpt-5.6-sol",
   options: [

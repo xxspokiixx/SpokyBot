@@ -1,4 +1,4 @@
-// Built-in driver registration — t3code builtInDrivers.ts: a static
+// Built-in driver registration — upstream builtInDrivers.ts: a static
 // array, nothing more. Adding a driver = write drivers/<x>.ts, append.
 import type { AnyProviderDriver } from "../contracts.ts";
 import { BoxAgentDriver } from "./boxagent.ts";

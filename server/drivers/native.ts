@@ -1,4 +1,4 @@
-// Native (un-normalized) protocol tee — the debugging trick from t3code's
+// Native (un-normalized) protocol tee — the debugging trick from upstream's
 // EventNdjsonLogger and agentcal's onRaw: every provider-native message is
 // written verbatim next to the canonical stream, so protocol drift can be
 // diagnosed by diffing the two.

@@ -1,4 +1,4 @@
-// Provider instance registry — port of t3code's ProviderInstanceRegistryLive
+// Provider instance registry — port of upstream's ProviderInstanceRegistryLive
 // behavior, minus Effect: config map → live instances; unknown driver or
 // config-decode failure becomes an UNAVAILABLE SHADOW SNAPSHOT instead of a
 // startup failure (that behavior is what makes settings forward/backward

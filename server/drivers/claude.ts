@@ -1,4 +1,4 @@
-// Claude driver — t3code ClaudeDriver skeleton over agentcal's
+// Claude driver — upstream ClaudeDriver skeleton over agentcal's
 // drivers/claude.js runtime (stream-json both directions, prompt over
 // stdin, completion from a real `result` event — verified against
 // claude 2.1.211 by agentcal). Per-turn CLI process; the conversation
@@ -34,7 +34,7 @@ export interface ClaudeConfig {
   permissionMode: "acceptEdits" | "auto" | "bypassPermissions";
 }
 
-// model catalog ported from t3code packages/contracts/src/model.ts
+// model catalog ported from upstream packages/contracts/src/model.ts
 const MODELS = {
   default: "claude-sonnet-5",
   options: [

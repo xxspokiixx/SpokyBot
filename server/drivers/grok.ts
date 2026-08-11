@@ -2,7 +2,7 @@
 // CLI drivers this one is transcript-replay: the server hands it the
 // folded thread history each turn (SendTurnInput.transcript) and it emits
 // true token-level content.delta events. Also supplies the instance's
-// generateText (bot titles, thread names) — t3code's TextGeneration slot.
+// generateText (bot titles, thread names) — upstream's TextGeneration slot.
 import type {
   DriverCreateInput,
   ProviderDriver,

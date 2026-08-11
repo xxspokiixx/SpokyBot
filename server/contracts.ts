@@ -1,4 +1,4 @@
-// Canonical harness contracts — ported from t3code
+// Canonical harness contracts — ported from upstream
 // (apps/server/src/provider/ProviderDriver.ts, Services/ProviderAdapter.ts,
 // packages/contracts/src/{provider,providerInstance,providerRuntime}.ts),
 // de-Effect-ed: Promises instead of Effect, listener callbacks instead of
@@ -12,7 +12,7 @@ export type TurnId = string;
 
 // ── model selection ────────────────────────────────────────────────────
 // "Which model" is a data value carried on the request, never a service
-// binding (t3code ModelSelectionWire). instanceId is the routing key.
+// binding (upstream ModelSelectionWire). instanceId is the routing key.
 export interface ModelSelection {
   instanceId: InstanceId;
   model: string;
@@ -34,7 +34,7 @@ export interface InstanceConfig {
 export type InstanceConfigMap = Record<InstanceId, InstanceConfig>;
 
 // ── canonical runtime events ───────────────────────────────────────────
-// Subset of t3code's 49-member ProviderRuntimeEvent union — the ~12 types
+// Subset of upstream's 49-member ProviderRuntimeEvent union — the ~12 types
 // the recipe says to start with, sharing one base. `raw` carries the
 // native protocol message when a consumer needs to see behind the
 // normalization.
@@ -81,7 +81,7 @@ export type RuntimeEvent = RuntimeEventBase &
 
 export type RuntimeEventListener = (event: RuntimeEvent) => void;
 
-// ── adapter contract (t3code ProviderAdapterShape, promise-flavored) ──
+// ── adapter contract (upstream ProviderAdapterShape, promise-flavored) ──
 // The conversation runtime every provider is flattened into. streamEvents
 // becomes onEvent(listener) → unsubscribe; sessions start implicitly on
 // the first turn (the agentcal per-turn-process model) with resumeCursor
@@ -123,7 +123,7 @@ export interface ProviderAdapter {
   onEvent(listener: RuntimeEventListener): () => void;
 }
 
-// ── provider snapshot (t3code ServerProviderShape, reduced) ────────────
+// ── provider snapshot (upstream ServerProviderShape, reduced) ────────────
 export interface ProviderSnapshot {
   state: "available" | "unavailable";
   reason?: string;
@@ -131,7 +131,7 @@ export interface ProviderSnapshot {
   version?: string | null;
 }
 
-// ── driver SPI (t3code ProviderDriver — a plain record, not a service) ─
+// ── driver SPI (upstream ProviderDriver — a plain record, not a service) ─
 // `create` owns ALL per-instance state; two create calls share nothing.
 // Failures must reject, never throw synchronously — the registry downgrades
 // a rejection to an unavailable shadow snapshot.
@@ -156,7 +156,7 @@ export interface ProviderInstance {
   readonly models: ModelCatalog;
   readonly adapter: ProviderAdapter;
   snapshot(): Promise<ProviderSnapshot>;
-  /** Cheap one-shot text call (t3code TextGeneration) — titles, summaries. */
+  /** Cheap one-shot text call (upstream TextGeneration) — titles, summaries. */
   generateText?(prompt: string): Promise<string>;
   dispose(): Promise<void>;
 }
