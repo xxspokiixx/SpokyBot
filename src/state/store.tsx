@@ -1,9 +1,14 @@
+// Server-backed store. The React app holds no transports of its own:
+// it dispatches typed commands over HTTP and folds the one SSE event
+// stream from the harness server into local state. The reducer stays
+// pure; everything async lives in the wrapped dispatch + SSE fold.
 import {
   createContext,
   useContext,
   useEffect,
   useMemo,
   useReducer,
+  useRef,
   type ReactNode,
 } from "react";
 
@@ -15,280 +20,233 @@ export interface OptionCardData {
   options: string[];
   answered?: string;
   dismissed?: boolean;
+  /** Present when this card is a live provider ask (approval/question). */
+  requestId?: string;
 }
 
 export interface Message {
   id: string;
   role: "bot" | "user";
-  kind: "text" | "options";
+  kind: "text" | "options" | "activity" | "screen";
   text?: string;
   card?: OptionCardData;
+  /** activity messages: tool name + outcome */
+  tool?: { name: string; ok?: boolean };
+  /** screen messages: a frame of the bot's computer (base64) */
+  png?: string;
+  mime?: string;
   at: number;
+}
+
+export interface ModelSelection {
+  instanceId: string;
+  model: string;
 }
 
 export interface Bot {
   id: string;
+  threadId: string;
   name: string;
   title: string;
   description: string;
   notifications: boolean;
   color: BlobColor;
   unread: boolean;
-  typing?: boolean;
+  busy?: boolean;
+  modelSelection: ModelSelection;
+  /** Where this bot's computer runs; unset = auto (cloud box if one exists, else local). */
+  computer?: "cloud" | "local" | "off";
   messages: Message[];
+}
+
+/** One row of GET /api/instances — the model picker's data. */
+export interface InstanceInfo {
+  instanceId: string;
+  driverKind: string;
+  displayName: string;
+  snapshot: {
+    state: "available" | "unavailable";
+    reason?: string;
+    authenticated?: boolean;
+    version?: string | null;
+  };
+  models: { default: string; options: Array<{ id: string; label: string }> };
 }
 
 interface AppState {
   bots: Bot[];
+  instances: InstanceInfo[];
   selectedId: string;
   settingsOpen: boolean;
   pluginsOpen: boolean;
+  computerOpen: boolean;
+  /** in-flight assistant text per threadId (content.delta fold) */
+  streaming: Record<string, string>;
+  /** latest live frame of a bot's computer, per botId */
+  screens: Record<string, { png: string; mime: string }>;
+  /** bots whose cloud computer is being provisioned */
+  provisioning: Record<string, boolean>;
+  connected: boolean;
+  error: string | null;
 }
 
 type Action =
+  | { type: "hydrate"; bots: Bot[] }
+  | { type: "instances"; instances: InstanceInfo[] }
   | { type: "select"; id: string }
   | { type: "send"; botId: string; text: string }
   | { type: "answerCard"; botId: string; messageId: string; answer: string }
   | { type: "dismissCard"; botId: string; messageId: string }
   | { type: "newBot" }
-  | { type: "typing"; botId: string; typing: boolean }
-  | { type: "botReply"; botId: string; text: string }
+  | { type: "botAdded"; bot: Bot }
+  | { type: "botPatched"; bot: Partial<Bot> & { id: string } }
+  | { type: "messageAdded"; threadId: string; message: Message }
+  | { type: "messagePatched"; threadId: string; message: Message }
+  | { type: "streamDelta"; threadId: string; delta: string }
+  | { type: "streamClear"; threadId: string }
+  | { type: "screenFrame"; botId: string; png: string; mime: string }
+  | { type: "provisioning"; botId: string; on: boolean }
+  | { type: "setModel"; botId: string; selection: ModelSelection }
+  | { type: "interrupt"; botId: string }
+  | { type: "connected"; value: boolean }
+  | { type: "error"; message: string | null }
   | { type: "toggleSettings"; open?: boolean }
   | { type: "togglePlugins"; open?: boolean }
+  | { type: "toggleComputer"; open?: boolean }
   | {
       type: "updateBot";
       botId: string;
-      patch: Partial<
-        Pick<Bot, "name" | "title" | "description" | "notifications">
-      >;
+      patch: Partial<Pick<Bot, "name" | "title" | "description" | "notifications" | "computer">>;
     };
 
-let counter = 0;
-const uid = () => `id-${Date.now()}-${counter++}`;
-
-const onboardingCard = (): OptionCardData => ({
-  title: "What do you mostly want help with?",
-  subtitle: "Pick whatever's closest; we can always expand from there.",
-  options: [
-    "Work & projects",
-    "Writing & research",
-    "Life admin",
-    "A bit of everything",
-  ],
-});
-
-function seed(): AppState {
-  const milind: Bot = {
-    id: "bot-milind",
-    name: "Milind",
-    title: "",
-    description: "",
-    notifications: true,
-    color: "blue",
-    unread: false,
-    messages: [
-      {
-        id: uid(),
-        role: "bot",
-        kind: "text",
-        text: "Hey — I'm Milind. Nice to meet you.",
-        at: Date.now(),
-      },
-      {
-        id: uid(),
-        role: "bot",
-        kind: "options",
-        card: onboardingCard(),
-        at: Date.now(),
-      },
-    ],
-  };
-  const red: Bot = {
-    id: "bot-red",
-    name: "New Bot",
-    title: "",
-    description: "",
-    notifications: true,
-    color: "red",
-    unread: true,
-    messages: [
-      {
-        id: uid(),
-        role: "bot",
-        kind: "text",
-        text: "What do you mainly want me to help with?",
-        at: Date.now() - 1000 * 60 * 9,
-      },
-    ],
-  };
-  const orange: Bot = {
-    id: "bot-orange",
-    name: "New Bot",
-    title: "",
-    description: "",
-    notifications: true,
-    color: "orange",
-    unread: true,
-    messages: [
-      {
-        id: uid(),
-        role: "bot",
-        kind: "text",
-        text: "What do you want me around for?",
-        at: Date.now() - 1000 * 60 * 5,
-      },
-    ],
-  };
-  return {
-    bots: [red, orange, milind],
-    selectedId: milind.id,
-    settingsOpen: false,
-    pluginsOpen: false,
-  };
+function updateBot(state: AppState, botId: string, fn: (b: Bot) => Bot): AppState {
+  return { ...state, bots: state.bots.map((b) => (b.id === botId ? fn(b) : b)) };
 }
 
-const STORAGE_KEY = "opengrokbot-state-v1";
-
-function load(): AppState {
-  try {
-    const raw = localStorage.getItem(STORAGE_KEY);
-    if (raw) {
-      const parsed = JSON.parse(raw) as AppState;
-      if (Array.isArray(parsed.bots) && parsed.bots.length > 0) {
-        return {
-          ...parsed,
-          settingsOpen: false,
-          pluginsOpen: false,
-          bots: parsed.bots.map((b) => ({ ...b, typing: false })),
-        };
-      }
-    }
-  } catch {
-    // corrupted state — fall through to seed
-  }
-  return seed();
-}
-
-function updateBot(state: AppState, botId: string, fn: (b: Bot) => Bot) {
-  return {
-    ...state,
-    bots: state.bots.map((b) => (b.id === botId ? fn(b) : b)),
-  };
+function patchCard(state: AppState, botId: string, messageId: string, patch: Partial<OptionCardData>): AppState {
+  return updateBot(state, botId, (b) => ({
+    ...b,
+    messages: b.messages.map((m) =>
+      m.id === messageId && m.card ? { ...m, card: { ...m.card, ...patch } } : m,
+    ),
+  }));
 }
 
 function reducer(state: AppState, action: Action): AppState {
   switch (action.type) {
+    case "hydrate": {
+      const selectedId =
+        action.bots.some((b) => b.id === state.selectedId) && state.selectedId
+          ? state.selectedId
+          : (action.bots[0]?.id ?? "");
+      return { ...state, bots: action.bots, selectedId };
+    }
+    case "instances":
+      return { ...state, instances: action.instances };
     case "select":
-      return updateBot({ ...state, selectedId: action.id }, action.id, (b) => ({
-        ...b,
-        unread: false,
-      }));
-    case "send":
-      return updateBot(state, action.botId, (b) => ({
-        ...b,
-        messages: [
-          ...b.messages,
-          {
-            id: uid(),
-            role: "user",
-            kind: "text",
-            text: action.text,
-            at: Date.now(),
-          },
-        ],
-      }));
+      return updateBot({ ...state, selectedId: action.id }, action.id, (b) => ({ ...b, unread: false }));
+    // optimistic card settle; the server's message.patch confirms it later
     case "answerCard":
-      return updateBot(state, action.botId, (b) => ({
-        ...b,
-        messages: b.messages
-          .map((m) =>
-            m.id === action.messageId && m.card
-              ? { ...m, card: { ...m.card, answered: action.answer } }
-              : m,
-          )
-          .concat({
-            id: uid(),
-            role: "user",
-            kind: "text",
-            text: action.answer,
-            at: Date.now(),
-          }),
-      }));
+      return patchCard(state, action.botId, action.messageId, { answered: action.answer });
     case "dismissCard":
-      return updateBot(state, action.botId, (b) => ({
+      return patchCard(state, action.botId, action.messageId, { dismissed: true });
+    case "botAdded":
+      return { ...state, bots: [action.bot, ...state.bots], selectedId: action.bot.id };
+    case "botPatched":
+      return updateBot(state, action.bot.id, (b) => ({ ...b, ...action.bot, messages: b.messages }));
+    case "messageAdded": {
+      const bot = state.bots.find((b) => b.threadId === action.threadId);
+      if (!bot) return state;
+      const next = updateBot(state, bot.id, (b) =>
+        b.messages.some((m) => m.id === action.message.id)
+          ? b
+          : { ...b, messages: [...b.messages, action.message] },
+      );
+      // a settled assistant bubble replaces the in-flight stream
+      if (action.message.role === "bot" && action.message.kind === "text") {
+        const { [action.threadId]: _, ...rest } = next.streaming;
+        return { ...next, streaming: rest };
+      }
+      return next;
+    }
+    case "messagePatched": {
+      const bot = state.bots.find((b) => b.threadId === action.threadId);
+      if (!bot) return state;
+      return updateBot(state, bot.id, (b) => ({
         ...b,
-        messages: b.messages.map((m) =>
-          m.id === action.messageId && m.card
-            ? { ...m, card: { ...m.card, dismissed: true } }
-            : m,
-        ),
+        messages: b.messages.map((m) => (m.id === action.message.id ? action.message : m)),
       }));
-    case "typing":
-      return updateBot(state, action.botId, (b) => ({
-        ...b,
-        typing: action.typing,
-      }));
-    case "botReply":
-      return updateBot(state, action.botId, (b) => ({
-        ...b,
-        typing: false,
-        unread: state.selectedId !== b.id ? true : b.unread,
-        messages: [
-          ...b.messages,
-          { id: uid(), role: "bot", kind: "text", text: action.text, at: Date.now() },
-        ],
-      }));
-    case "toggleSettings":
-      return { ...state, settingsOpen: action.open ?? !state.settingsOpen };
+    }
+    case "streamDelta":
+      return {
+        ...state,
+        streaming: {
+          ...state.streaming,
+          [action.threadId]: (state.streaming[action.threadId] ?? "") + action.delta,
+        },
+      };
+    case "streamClear": {
+      const { [action.threadId]: _, ...rest } = state.streaming;
+      return { ...state, streaming: rest };
+    }
+    case "screenFrame":
+      return {
+        ...state,
+        screens: { ...state.screens, [action.botId]: { png: action.png, mime: action.mime } },
+        provisioning: { ...state.provisioning, [action.botId]: false },
+      };
+    case "provisioning":
+      return { ...state, provisioning: { ...state.provisioning, [action.botId]: action.on } };
+    case "setModel":
+      return updateBot(state, action.botId, (b) => ({ ...b, modelSelection: action.selection }));
+    case "connected":
+      return { ...state, connected: action.value };
+    case "error":
+      return { ...state, error: action.message };
+    // settings and the computer panel share the right-side slot
+    case "toggleSettings": {
+      const open = action.open ?? !state.settingsOpen;
+      return { ...state, settingsOpen: open, computerOpen: open ? false : state.computerOpen };
+    }
     case "togglePlugins":
       return { ...state, pluginsOpen: action.open ?? !state.pluginsOpen };
+    case "toggleComputer": {
+      const open = action.open ?? !state.computerOpen;
+      return { ...state, computerOpen: open, settingsOpen: open ? false : state.settingsOpen };
+    }
     case "updateBot":
       return updateBot(state, action.botId, (b) => ({ ...b, ...action.patch }));
-    case "newBot": {
-      const colors: BlobColor[] = ["green", "purple", "red", "orange", "blue"];
-      const color = colors[state.bots.length % colors.length];
-      const bot: Bot = {
-        id: uid(),
-        name: "New Bot",
-        title: "",
-        description: "",
-        notifications: true,
-        color,
-        unread: false,
-        messages: [
-          {
-            id: uid(),
-            role: "bot",
-            kind: "text",
-            text: "Hey — I'm your new bot. Nice to meet you.",
-            at: Date.now(),
-          },
-          {
-            id: uid(),
-            role: "bot",
-            kind: "options",
-            card: onboardingCard(),
-            at: Date.now(),
-          },
-        ],
-      };
-      return { ...state, bots: [bot, ...state.bots], selectedId: bot.id };
-    }
+    // handled entirely by the async wrapper
+    case "send":
+    case "newBot":
+    case "interrupt":
+      return state;
   }
 }
 
-const REPLIES = [
-  "Got it — noted. What else is on your mind?",
-  "Nice. Want me to dig into that now or keep it for later?",
-  "Understood. I'll keep that in mind as we go.",
-  "Sounds good. Anything specific you want me to start with?",
-];
+const initialState: AppState = {
+  bots: [],
+  instances: [],
+  selectedId: "",
+  settingsOpen: false,
+  pluginsOpen: false,
+  computerOpen: false,
+  streaming: {},
+  screens: {},
+  provisioning: {},
+  connected: false,
+  error: null,
+};
 
-function scriptedReply(userText: string, replyIndex: number): string {
-  if (replyIndex === 0) {
-    return `Great — ${userText.toLowerCase()} it is. What's on your plate right now?`;
-  }
-  return REPLIES[replyIndex % REPLIES.length];
+// ── API client ─────────────────────────────────────────────────────────
+async function api(path: string, init?: RequestInit): Promise<any> {
+  const res = await fetch(path, {
+    headers: { "content-type": "application/json" },
+    ...init,
+  });
+  const body = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(body.error ?? `${res.status} ${res.statusText}`);
+  return body;
 }
 
 const StoreContext = createContext<{
@@ -297,43 +255,186 @@ const StoreContext = createContext<{
 } | null>(null);
 
 export function StoreProvider({ children }: { children: ReactNode }) {
-  const [state, rawDispatch] = useReducer(reducer, undefined, load);
+  const [state, rawDispatch] = useReducer(reducer, initialState);
+  const stateRef = useRef(state);
+  stateRef.current = state;
 
-  // Side effects around the pure reducer: scripted bot replies with a
-  // typing delay whenever the user sends something.
+  // debounced PATCH per bot for text-field edits (name/title/description)
+  const patchTimers = useRef(new Map<string, { timer: ReturnType<typeof setTimeout>; patch: Record<string, unknown> }>());
+
   const dispatch = useMemo(() => {
+    const showError = (e: unknown) => {
+      rawDispatch({ type: "error", message: e instanceof Error ? e.message : String(e) });
+      setTimeout(() => rawDispatch({ type: "error", message: null }), 6000);
+    };
+    // fire-and-forget card persistence; the route is optional server-side
+    const persistCard = (botId: string, messageId: string, patch: Partial<OptionCardData>) => {
+      fetch(`/api/bots/${botId}/cards/${messageId}`, {
+        method: "PATCH",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify(patch),
+      }).catch(() => {});
+    };
+
     const wrapped: React.Dispatch<Action> = (action) => {
       rawDispatch(action);
-      if (action.type === "send" || action.type === "answerCard") {
-        const botId = action.botId;
-        const userText =
-          action.type === "send" ? action.text : action.answer;
-        const isOnboarding = action.type === "answerCard";
-        setTimeout(() => rawDispatch({ type: "typing", botId, typing: true }), 350);
-        setTimeout(() => {
-          rawDispatch({
-            type: "botReply",
-            botId,
-            text: scriptedReply(userText, isOnboarding ? 0 : 1 + Math.floor(Math.random() * (REPLIES.length - 1))),
+      switch (action.type) {
+        case "send":
+          api(`/api/bots/${action.botId}/messages`, {
+            method: "POST",
+            body: JSON.stringify({ text: action.text }),
+          }).catch(showError);
+          break;
+        case "answerCard": {
+          const bot = stateRef.current.bots.find((b) => b.id === action.botId);
+          const card = bot?.messages.find((m) => m.id === action.messageId)?.card;
+          if (card?.requestId) {
+            const behavior =
+              action.answer === "Allow" ? "allow" : action.answer === "Deny" ? "deny" : "answer";
+            api(`/api/bots/${action.botId}/respond`, {
+              method: "POST",
+              body: JSON.stringify({
+                requestId: card.requestId,
+                behavior,
+                message: behavior === "answer" ? action.answer : undefined,
+              }),
+            }).catch(showError);
+          } else {
+            persistCard(action.botId, action.messageId, { answered: action.answer });
+            api(`/api/bots/${action.botId}/messages`, {
+              method: "POST",
+              body: JSON.stringify({ text: action.answer }),
+            }).catch(showError);
+          }
+          break;
+        }
+        case "dismissCard": {
+          const bot = stateRef.current.bots.find((b) => b.id === action.botId);
+          const card = bot?.messages.find((m) => m.id === action.messageId)?.card;
+          if (card?.requestId) {
+            api(`/api/bots/${action.botId}/respond`, {
+              method: "POST",
+              body: JSON.stringify({ requestId: card.requestId, behavior: "deny", message: "Dismissed by user." }),
+            }).catch(() => {});
+          } else {
+            persistCard(action.botId, action.messageId, { dismissed: true });
+          }
+          break;
+        }
+        case "newBot":
+          api("/api/bots", { method: "POST" })
+            .then(({ bot }) => rawDispatch({ type: "botAdded", bot }))
+            .catch(showError);
+          break;
+        case "select": {
+          const bot = stateRef.current.bots.find((b) => b.id === action.id);
+          if (bot?.unread) {
+            api(`/api/bots/${action.id}`, { method: "PATCH", body: JSON.stringify({ unread: false }) }).catch(() => {});
+          }
+          break;
+        }
+        case "setModel":
+          api(`/api/bots/${action.botId}`, {
+            method: "PATCH",
+            body: JSON.stringify({ modelSelection: action.selection }),
+          }).catch(showError);
+          break;
+        case "interrupt":
+          api(`/api/bots/${action.botId}/interrupt`, { method: "POST" }).catch(showError);
+          break;
+        case "updateBot": {
+          const timers = patchTimers.current;
+          const pending = timers.get(action.botId);
+          const patch = { ...pending?.patch, ...action.patch };
+          if (pending) clearTimeout(pending.timer);
+          timers.set(action.botId, {
+            patch,
+            timer: setTimeout(() => {
+              timers.delete(action.botId);
+              api(`/api/bots/${action.botId}`, { method: "PATCH", body: JSON.stringify(patch) }).catch(showError);
+            }, 400),
           });
-        }, 1200 + Math.random() * 600);
+          break;
+        }
+        default:
+          break;
       }
     };
     return wrapped;
   }, []);
 
+  // ── initial load + SSE fold ──────────────────────────────────────────
   useEffect(() => {
-    try {
-      localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
-    } catch {
-      // storage full/unavailable — persistence is best-effort
-    }
-  }, [state]);
+    let alive = true;
+    const loadAll = () => {
+      api("/api/bots")
+        .then(({ bots }) => alive && rawDispatch({ type: "hydrate", bots }))
+        .catch(() => {});
+      api("/api/instances")
+        .then(({ instances }) => alive && rawDispatch({ type: "instances", instances }))
+        .catch(() => {});
+    };
+    loadAll();
+
+    const es = new EventSource("/api/events");
+    es.onopen = () => {
+      rawDispatch({ type: "connected", value: true });
+      loadAll(); // resync anything missed while disconnected
+    };
+    es.onerror = () => rawDispatch({ type: "connected", value: false });
+    es.onmessage = (raw) => {
+      let frame: any;
+      try {
+        frame = JSON.parse(raw.data);
+      } catch {
+        return;
+      }
+      switch (frame.kind) {
+        case "message":
+          rawDispatch({ type: "messageAdded", threadId: frame.threadId, message: frame.message });
+          break;
+        case "message.patch":
+          rawDispatch({ type: "messagePatched", threadId: frame.threadId, message: frame.message });
+          break;
+        case "bot": {
+          const bot = frame.bot as Partial<Bot> & { id: string };
+          // reading the selected chat clears its badge immediately
+          if (bot.unread && bot.id === stateRef.current.selectedId) {
+            bot.unread = false;
+            fetch(`/api/bots/${bot.id}`, {
+              method: "PATCH",
+              headers: { "content-type": "application/json" },
+              body: JSON.stringify({ unread: false }),
+            }).catch(() => {});
+          }
+          rawDispatch({ type: "botPatched", bot });
+          break;
+        }
+        case "runtime": {
+          const event = frame.event;
+          if (event.type === "content.delta" && event.streamKind === "assistant_text") {
+            rawDispatch({ type: "streamDelta", threadId: event.threadId, delta: event.delta });
+          } else if (event.type === "turn.completed") {
+            rawDispatch({ type: "streamClear", threadId: event.threadId });
+          }
+          break;
+        }
+        case "screen":
+          rawDispatch({ type: "screenFrame", botId: frame.botId, png: frame.png, mime: frame.mime ?? "image/png" });
+          break;
+        case "computer":
+          rawDispatch({ type: "provisioning", botId: frame.botId, on: frame.state === "provisioning" });
+          break;
+      }
+    };
+    return () => {
+      alive = false;
+      es.close();
+    };
+  }, []);
 
   const value = useMemo(() => ({ state, dispatch }), [state, dispatch]);
-  return (
-    <StoreContext.Provider value={value}>{children}</StoreContext.Provider>
-  );
+  return <StoreContext.Provider value={value}>{children}</StoreContext.Provider>;
 }
 
 export function useStore() {

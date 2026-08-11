@@ -1,6 +1,7 @@
 import { ChevronLeft, X } from "lucide-react";
 import { useStore, type Bot } from "@/state/store";
 import { BlobAvatar } from "./Avatar";
+import { ModelPicker } from "./ModelPicker";
 import { cn } from "@/lib/cn";
 
 function Field({
@@ -24,7 +25,7 @@ const inputCls =
 export function SettingsPanel({ bot }: { bot: Bot }) {
   const { dispatch } = useStore();
   const patch = (
-    p: Partial<Pick<Bot, "name" | "title" | "description" | "notifications">>,
+    p: Partial<Pick<Bot, "name" | "title" | "description" | "notifications" | "computer">>,
   ) => dispatch({ type: "updateBot", botId: bot.id, patch: p });
 
   return (
@@ -75,6 +76,40 @@ export function SettingsPanel({ bot }: { bot: Bot }) {
               onChange={(e) => patch({ description: e.target.value })}
             />
           </Field>
+
+          <div className="flex items-center justify-between gap-4 rounded-xl bg-card p-4">
+            <div>
+              <div className="text-[15px] font-medium text-ink">Model</div>
+              <div className="mt-0.5 text-[13px] text-ink-secondary">
+                Which provider and model this bot runs on
+              </div>
+            </div>
+            <ModelPicker bot={bot} />
+          </div>
+
+          <div className="rounded-xl bg-card p-4">
+            <div className="text-[15px] font-medium text-ink">Computer</div>
+            <div className="mt-0.5 text-[13px] text-ink-secondary">
+              Where this bot's computer runs{bot.computer ? "" : " (currently: auto)"}
+            </div>
+            <div className="mt-3 flex overflow-hidden rounded-lg border border-hairline/40">
+              {(["cloud", "local", "off"] as const).map((mode, i) => (
+                <button
+                  key={mode}
+                  onClick={() => patch({ computer: mode })}
+                  className={cn(
+                    "flex-1 py-1.5 text-[13px] capitalize",
+                    i > 0 && "border-l border-hairline/40",
+                    bot.computer === mode
+                      ? "bg-raised text-ink"
+                      : "text-ink-secondary hover:bg-raised/60 hover:text-ink",
+                  )}
+                >
+                  {mode}
+                </button>
+              ))}
+            </div>
+          </div>
 
           <div className="flex items-center justify-between gap-4 rounded-xl bg-card p-4">
             <div>

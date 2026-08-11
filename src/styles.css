@@ -1,19 +1,28 @@
 @import "tailwindcss";
 
+/* Grok Bot dark palette (pixel-sampled from the real app) */
 @theme {
-  --color-app: #202022;
-  --color-panel: #1b1b1d;
-  --color-raised: #2e2e30;
-  --color-raised-hover: #343437;
-  --color-card: #262629;
-  --color-inset: #1c1c1e;
-  --color-hairline: #3a3a3d;
-  --color-ink: #ececee;
-  --color-ink-secondary: #9b9ba0;
-  --color-accent: #3f8cff;
+  --color-app: #070707;
+  --color-panel: #111111;
+  --color-raised: #2f2f2f;
+  --color-raised-hover: #3d3d3d;
+  --color-card: #262626;
+  --color-inset: #191919;
+  --color-hairline: #333333;
+  --color-ink: #fcfcfc;
+  --color-ink-secondary: #fcfcfc99;
+  --color-accent: #1084fe;
+  --color-accent-border: #459ffe;
+  --color-bubble-user: #5a5a5a;
+  --color-success: #38d591;
+  --color-danger: #ff5667;
+  --color-warning: #ff9800;
 
-  --font-sans: -apple-system, BlinkMacSystemFont, "SF Pro Text", "Segoe UI",
-    system-ui, sans-serif;
+  --font-sans: "Inter", -apple-system, BlinkMacSystemFont, "SF Pro Text",
+    "Segoe UI", system-ui, sans-serif;
+
+  --radius-lg: 6px;
+  --radius-xl: 10px;
 }
 
 html,
@@ -34,7 +43,7 @@ body {
   width: 8px;
 }
 ::-webkit-scrollbar-thumb {
-  background: #3a3a3d;
+  background: #3d3d3d;
   border-radius: 4px;
 }
 ::-webkit-scrollbar-track {

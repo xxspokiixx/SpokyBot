@@ -1,3 +1,4 @@
+import { Loader2 } from "lucide-react";
 import { StoreProvider, useStore } from "@/state/store";
 import { Sidebar } from "@/components/Sidebar";
 import { ChatView } from "@/components/ChatView";
@@ -10,8 +11,22 @@ function Shell() {
   return (
     <div className="relative flex h-full">
       <Sidebar />
-      <ChatView bot={bot} />
-      {state.settingsOpen && <SettingsPanel bot={bot} />}
+      {bot ? (
+        <ChatView bot={bot} />
+      ) : (
+        <main className="flex h-full min-w-0 flex-1 flex-col items-center justify-center gap-3 bg-app text-ink-secondary">
+          <Loader2 size={20} className="animate-spin" />
+          <div className="text-[14px]">
+            {state.connected ? "No bots yet" : "Connecting to the bot server…"}
+          </div>
+          {!state.connected && (
+            <div className="text-[12px]">
+              Start it with <code className="rounded bg-raised px-1.5 py-0.5">pnpm dev:server</code>
+            </div>
+          )}
+        </main>
+      )}
+      {state.settingsOpen && bot && <SettingsPanel bot={bot} />}
       {state.pluginsOpen && <PluginsPanel />}
     </div>
   );

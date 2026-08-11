@@ -6,9 +6,12 @@ import { cn } from "@/lib/cn";
 const isElectron = navigator.userAgent.includes("Electron");
 
 function preview(bot: Bot): string {
+  if (bot.busy) return "Working…";
   const last = bot.messages[bot.messages.length - 1];
   if (!last) return "";
   if (last.kind === "options" && last.card) return last.card.title;
+  if (last.kind === "activity" && last.tool) return last.tool.name;
+  if (last.kind === "screen") return "Screen frame";
   return last.text ?? "";
 }
 
