@@ -28,6 +28,9 @@ export interface Message {
 export interface Bot {
   id: string;
   name: string;
+  title: string;
+  description: string;
+  notifications: boolean;
   color: BlobColor;
   unread: boolean;
   messages: Message[];
@@ -36,6 +39,7 @@ export interface Bot {
 interface AppState {
   bots: Bot[];
   selectedId: string;
+  settingsOpen: boolean;
 }
 
 type Action =
@@ -43,7 +47,15 @@ type Action =
   | { type: "send"; botId: string; text: string }
   | { type: "answerCard"; botId: string; messageId: string; answer: string }
   | { type: "dismissCard"; botId: string; messageId: string }
-  | { type: "newBot" };
+  | { type: "newBot" }
+  | { type: "toggleSettings"; open?: boolean }
+  | {
+      type: "updateBot";
+      botId: string;
+      patch: Partial<
+        Pick<Bot, "name" | "title" | "description" | "notifications">
+      >;
+    };
 
 let counter = 0;
 const uid = () => `id-${Date.now()}-${counter++}`;
@@ -63,6 +75,9 @@ function seed(): AppState {
   const milind: Bot = {
     id: "bot-milind",
     name: "Milind",
+    title: "",
+    description: "",
+    notifications: true,
     color: "blue",
     unread: false,
     messages: [
@@ -85,6 +100,9 @@ function seed(): AppState {
   const red: Bot = {
     id: "bot-red",
     name: "New Bot",
+    title: "",
+    description: "",
+    notifications: true,
     color: "red",
     unread: true,
     messages: [
@@ -100,6 +118,9 @@ function seed(): AppState {
   const orange: Bot = {
     id: "bot-orange",
     name: "New Bot",
+    title: "",
+    description: "",
+    notifications: true,
     color: "orange",
     unread: true,
     messages: [
@@ -112,7 +133,7 @@ function seed(): AppState {
       },
     ],
   };
-  return { bots: [red, orange, milind], selectedId: milind.id };
+  return { bots: [red, orange, milind], selectedId: milind.id, settingsOpen: false };
 }
 
 function updateBot(state: AppState, botId: string, fn: (b: Bot) => Bot) {
@@ -169,12 +190,19 @@ function reducer(state: AppState, action: Action): AppState {
             : m,
         ),
       }));
+    case "toggleSettings":
+      return { ...state, settingsOpen: action.open ?? !state.settingsOpen };
+    case "updateBot":
+      return updateBot(state, action.botId, (b) => ({ ...b, ...action.patch }));
     case "newBot": {
       const colors: BlobColor[] = ["green", "purple", "red", "orange", "blue"];
       const color = colors[state.bots.length % colors.length];
       const bot: Bot = {
         id: uid(),
         name: "New Bot",
+        title: "",
+        description: "",
+        notifications: true,
         color,
         unread: false,
         messages: [
@@ -194,7 +222,7 @@ function reducer(state: AppState, action: Action): AppState {
           },
         ],
       };
-      return { bots: [bot, ...state.bots], selectedId: bot.id };
+      return { ...state, bots: [bot, ...state.bots], selectedId: bot.id };
     }
   }
 }
