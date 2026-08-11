@@ -8,7 +8,7 @@ import { join } from "node:path";
 
 import * as box from "./box.ts";
 import * as composio from "./composio.ts";
-import { ensureDirs, instanceConfigs, loadConfig } from "./config.ts";
+import { ensureDirs, instanceConfigs, loadConfig, saveConfig } from "./config.ts";
 import type { RuntimeEvent } from "./contracts.ts";
 
 import { BUILT_IN_DRIVERS } from "./drivers/builtIn.ts";
@@ -275,6 +275,24 @@ async function startTurn(botId: string, text: string) {
   })();
 }
 
+// ── config hot-reload ─────────────────────────────────────────────────
+function configStatus() {
+  return {
+    xai: { configured: Boolean(cfg.xai?.key) },
+    composio: { configured: Boolean(cfg.composio?.key) },
+    box: { configured: Boolean(cfg.box?.token) },
+  };
+}
+
+/** Rebuild the provider fleet after a config change so new keys take
+ * effect without a server restart (kills any in-flight turns). */
+async function reloadProviders() {
+  bus.detachAll();
+  await registry.disposeAll();
+  await registry.load(instanceConfigs(cfg));
+  bus.attach(registry.instances());
+}
+
 // ── HTTP plumbing ─────────────────────────────────────────────────────
 function json(res: ServerResponse, status: number, body: unknown) {
   const data = JSON.stringify(body);
@@ -400,6 +418,25 @@ const server = createServer(async (req, res) => {
     // ── provider instances (model picker) ──
     if (method === "GET" && path === "/api/instances") {
       return json(res, 200, { instances: await registry.describe() });
+    }
+
+    // ── app config (API keys — never echoed back, booleans only) ──
+    if (method === "GET" && path === "/api/config") {
+      return json(res, 200, configStatus());
+    }
+    if ((method === "PUT" || method === "PATCH") && path === "/api/config") {
+      const body = await readBody(req);
+      const patch: Record<string, object> = {};
+      for (const key of ["xai", "composio", "box"] as const) {
+        if (body[key] && typeof body[key] === "object") patch[key] = body[key];
+      }
+      if (!Object.keys(patch).length) return json(res, 400, { error: "nothing to save" });
+      saveConfig(patch);
+      Object.assign(cfg, loadConfig());
+      await reloadProviders();
+      const status = configStatus();
+      broadcast({ kind: "config", ...status });
+      return json(res, 200, status);
     }
 
     // ── connectors (Composio) ──

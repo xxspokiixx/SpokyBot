@@ -1,7 +1,7 @@
 // Config + data dirs. One file, ~/.opengrokbot/config.json, env fallbacks:
 //   { "xai": {"key":"xai-…"}, "composio": {"key":"ck_…"}, "box": {"token":"…"},
 //     "instances": { "<instanceId>": {"driver":"grok", …} } }
-import { readFileSync, mkdirSync } from "node:fs";
+import { readFileSync, writeFileSync, mkdirSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
 
@@ -35,14 +35,45 @@ export function loadConfig(): AppConfig {
   return cfg;
 }
 
+/** Merge a partial config into ~/.opengrokbot/config.json (secrets never
+ * echoed back — callers report configured-or-not booleans only). */
+export function saveConfig(patch: Partial<AppConfig>): void {
+  const p = join(DATA_DIR, "config.json");
+  let disk: Record<string, unknown> = {};
+  try {
+    disk = JSON.parse(readFileSync(p, "utf8"));
+  } catch {
+    /* first write */
+  }
+  for (const key of ["xai", "composio", "box"] as const) {
+    if (patch[key] && typeof patch[key] === "object") {
+      disk[key] = { ...(disk[key] as object), ...patch[key] };
+    }
+  }
+  mkdirSync(DATA_DIR, { recursive: true });
+  writeFileSync(p, JSON.stringify(disk, null, 2));
+}
+
 // Default fleet: one instance per built-in driver (upstream
 // defaultInstanceIdForDriver — instanceId defaults to the driver kind).
+// Config-file keys are injected as per-instance environment so drivers
+// see them without needing real process env vars.
 export function instanceConfigs(cfg: AppConfig): InstanceConfigMap {
-  if (cfg.instances && Object.keys(cfg.instances).length) return cfg.instances;
-  return {
-    grok: { driver: "grok" },
-    claude: { driver: "claudeAgent" },
-    codex: { driver: "codex" },
-    computer: { driver: "boxAgent" },
-  };
+  const map: InstanceConfigMap =
+    cfg.instances && Object.keys(cfg.instances).length
+      ? cfg.instances
+      : {
+          grok: { driver: "grok" },
+          claude: { driver: "claudeAgent" },
+          codex: { driver: "codex" },
+          computer: { driver: "boxAgent" },
+        };
+  for (const entry of Object.values(map)) {
+    entry.environment = {
+      ...(cfg.xai?.key ? { XAI_API_KEY: cfg.xai.key } : {}),
+      ...(cfg.box?.token ? { BOX_TOKEN: cfg.box.token } : {}),
+      ...entry.environment,
+    };
+  }
+  return map;
 }
