@@ -7,6 +7,18 @@
     <uses-permission android:name="android.permission.CHANGE_WIFI_MULTICAST_STATE" />
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
     <!--
+      Pairing QR only, and asked for only when the scanner is opened. The app is
+      fully usable without it: the NSD list and a typed address are the other two
+      ways in (§6), so a camera the user never grants costs nothing.
+    -->
+    <uses-permission android:name="android.permission.CAMERA" />
+    <uses-feature
+        android:name="android.hardware.camera"
+        android:required="false" />
+    <uses-feature
+        android:name="android.hardware.camera.autofocus"
+        android:required="false" />
+    <!--
       Android 13+ NSD / Wi-Fi peer discovery. neverForLocation: we only browse
       for _openmausbot._tcp, never derive physical location from the scan.
       Without this (and the multicast permission), NsdManager returns an empty
@@ -38,15 +50,42 @@
         android:supportsRtl="true"
         android:theme="@style/Theme.OpenMausMobile">
 
+        <!--
+          persistNever: nothing about this Activity, its launching Intent
+          included, may be written to task state that survives a reboot. It only
+          ever receives ACTION_MAIN or the sanitized Intent PairingLinkActivity
+          builds, but a one-time pairing credential is not the kind of thing to
+          protect by one layer.
+        -->
         <activity
             android:name=".MainActivity"
             android:exported="true"
             android:launchMode="singleTop"
+            android:persistableMode="persistNever"
             android:windowSoftInputMode="adjustResize">
             <intent-filter>
                 <action android:name="android.intent.action.MAIN" />
                 <category android:name="android.intent.category.LAUNCHER" />
             </intent-filter>
+        </activity>
+
+        <!--
+          The deep-link door. A pairing URL carries a one-time credential, and the
+          system keeps a copy of an Activity's launching Intent — handing it back
+          on restart, and under the default persistRootOnly writing a root
+          Activity's Intent across a reboot. This one is therefore never the root
+          of the main task (its own taskAffinity), never kept in history, never in
+          recents, and never persisted. It moves the invite into process memory
+          and starts MainActivity with an Intent carrying no data and no extras.
+        -->
+        <activity
+            android:name=".PairingLinkActivity"
+            android:excludeFromRecents="true"
+            android:exported="true"
+            android:noHistory="true"
+            android:persistableMode="persistNever"
+            android:taskAffinity=""
+            android:theme="@android:style/Theme.Translucent.NoTitleBar">
             <intent-filter>
                 <action android:name="android.intent.action.VIEW" />
                 <category android:name="android.intent.category.DEFAULT" />

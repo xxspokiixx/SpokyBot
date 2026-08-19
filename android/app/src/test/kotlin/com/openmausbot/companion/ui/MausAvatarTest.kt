@@ -1,0 +1,111 @@
+package com.openmausbot.companion.ui
+
+import kotlin.test.Test
+import kotlin.test.assertEquals
+import kotlin.test.assertTrue
+
+/**
+ * The palette and the silhouette are copied artwork. A copy that drifts is the
+ * failure mode these guard against — a bot you know by its shape and colour must
+ * look the same on the phone as it does on the laptop.
+ */
+class MausAvatarTest {
+
+    @Test
+    fun `every MAUS_COLORS entry maps to its desktop hex`() {
+        assertEquals(0xFF009957.toInt(), MausPalette.argb("green"))
+        assertEquals(0xFF377FE6.toInt(), MausPalette.argb("blue"))
+        assertEquals(0xFFD94B52.toInt(), MausPalette.argb("red"))
+        assertEquals(0xFFE78531.toInt(), MausPalette.argb("orange"))
+        assertEquals(0xFF8057C8.toInt(), MausPalette.argb("purple"))
+        assertEquals(0xFF0EA5C6.toInt(), MausPalette.argb("cyan"))
+        assertEquals(0xFFD84F8B.toInt(), MausPalette.argb("pink"))
+        assertEquals(0xFFD8A729.toInt(), MausPalette.argb("yellow"))
+        assertEquals(0xFF01A492.toInt(), MausPalette.argb("teal"))
+        assertEquals(0xFFE5634E.toInt(), MausPalette.argb("coral"))
+        assertEquals(10, MausPalette.names.size)
+    }
+
+    @Test
+    fun `an unknown colour falls back to grey rather than crashing`() {
+        assertEquals(MausPalette.FALLBACK, MausPalette.argb("chartreuse"))
+        assertEquals(MausPalette.FALLBACK, MausPalette.argb(""))
+        assertEquals(0xFF8E8E93.toInt(), MausPalette.FALLBACK)
+    }
+
+    @Test
+    fun `mix walks linearly between two colours in sRGB`() {
+        val black = 0xFF000000.toInt()
+        val white = 0xFFFFFFFF.toInt()
+        assertEquals(black, MausPalette.mix(black, white, 0.0))
+        assertEquals(white, MausPalette.mix(black, white, 1.0))
+        assertEquals(0xFF7F7F7F.toInt(), MausPalette.mix(black, white, 0.5))
+    }
+
+    @Test
+    fun `the gradient is the desktop's three stops around the base colour`() {
+        val stops = MausPalette.gradient("green")
+        assertEquals(listOf(0f, 0.55f, 1f), stops.map { it.first })
+        assertEquals(MausPalette.argb("green"), stops[1].second)
+        // lighter at the top, darker at the bottom
+        fun luminance(argb: Int) =
+            ((argb shr 16) and 0xFF) + ((argb shr 8) and 0xFF) + (argb and 0xFF)
+        assertTrue(luminance(stops[0].second) > luminance(stops[1].second))
+        assertTrue(luminance(stops[2].second) < luminance(stops[1].second))
+    }
+
+    @Test
+    fun `the silhouette parses to the artwork it was copied from`() {
+        val commands = MausSilhouette.commands
+        assertEquals(59, commands.size)
+        assertEquals(MausSilhouette.Command.MoveTo(0f, 0f), commands.first())
+        assertEquals(MausSilhouette.Command.Close, commands.last())
+        assertEquals(57, commands.count { it is MausSilhouette.Command.CurveTo })
+    }
+
+    @Test
+    fun `the silhouette bounds enclose every on-curve point`() {
+        val bounds = MausSilhouette.bounds
+        assertTrue(bounds.width > 0f && bounds.height > 0f)
+        for (command in MausSilhouette.commands) {
+            val point = when (command) {
+                is MausSilhouette.Command.MoveTo -> command.x to command.y
+                is MausSilhouette.Command.CurveTo -> command.x to command.y
+                MausSilhouette.Command.Close -> continue
+            }
+            assertTrue(point.first >= bounds.minX && point.first <= bounds.maxX, "x ${point.first}")
+            assertTrue(point.second >= bounds.minY && point.second <= bounds.maxY, "y ${point.second}")
+        }
+    }
+
+    @Test
+    fun `the silhouette bounds are the tight path box, not the control hull`() {
+        val bounds = MausSilhouette.bounds
+        assertEquals(-83.234f, bounds.minX, 0.01f)
+        assertEquals(-16.563f, bounds.minY, 0.01f)
+        assertEquals(238.506f, bounds.maxX, 0.01f)
+        assertEquals(368.251f, bounds.maxY, 0.01f)
+    }
+
+    @Test
+    fun `the parser understands several curves after one C`() {
+        val parsed = MausSilhouette.parse("M0 0 C1 2 3 4 5 6 7 8 9 10 11 12 Z")
+        assertEquals(
+            listOf(
+                MausSilhouette.Command.MoveTo(0f, 0f),
+                MausSilhouette.Command.CurveTo(1f, 2f, 3f, 4f, 5f, 6f),
+                MausSilhouette.Command.CurveTo(7f, 8f, 9f, 10f, 11f, 12f),
+                MausSilhouette.Command.Close,
+            ),
+            parsed,
+        )
+    }
+
+    @Test
+    fun `a minus starts a new number unless it is an exponent sign`() {
+        val parsed = MausSilhouette.parse("M-1-2 C1e-2 0 0 0 0 0")
+        assertEquals(MausSilhouette.Command.MoveTo(-1f, -2f), parsed.first())
+        val curve = parsed[1] as MausSilhouette.Command.CurveTo
+        assertEquals(0.01f, curve.c1x, 1e-6f)
+    }
+}
