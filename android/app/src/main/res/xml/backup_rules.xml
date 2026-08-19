@@ -1,0 +1,13 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  Auto Backup (API 23–30): exclude the Keystore-backed token prefs.
+  Connection DataStore may back up; the device token must not.
+-->
+<full-backup-content>
+    <exclude
+        domain="sharedpref"
+        path="companion_device_token.xml" />
+    <exclude
+        domain="sharedpref"
+        path="__androidx_security_crypto_encrypted_prefs__.xml" />
+</full-backup-content>

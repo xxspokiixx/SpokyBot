@@ -4,6 +4,7 @@ import java.net.ConnectException
 import java.net.SocketTimeoutException
 import java.net.UnknownHostException
 import javax.net.ssl.SSLException
+import kotlin.coroutines.cancellation.CancellationException
 
 class CandidateRotation(val hosts: List<String>) {
     private var index = 0
@@ -42,10 +43,48 @@ object ConnectionAdvice {
         ConnectionFailure.SECURE_CONNECTION_FAILED,
     )
 
-    fun shouldTryAnotherHost(error: Throwable): Boolean = when (error) {
-        is APIError.Transport -> error.cause?.let(::shouldTryAnotherHost) ?: false
-        is UnknownHostException, is ConnectException, is SocketTimeoutException, is SSLException -> true
-        else -> false
+    fun shouldTryAnotherHost(error: Throwable): Boolean =
+        shouldTryAnotherHost(classify(error))
+
+    /** Map a transport failure to the URLError-shaped categories Session walks on. */
+    fun classify(error: Throwable): ConnectionFailure {
+        val chain = generateSequence(error) { it.cause }.toList()
+        for (candidate in chain) {
+            when (candidate) {
+                is CancellationException -> return ConnectionFailure.CANCELLED
+                is UnknownHostException -> return ConnectionFailure.CANNOT_FIND_HOST
+                is ConnectException -> return ConnectionFailure.CANNOT_CONNECT_TO_HOST
+                is SocketTimeoutException -> return ConnectionFailure.TIMED_OUT
+                is SSLException -> return ConnectionFailure.SECURE_CONNECTION_FAILED
+                is java.net.NoRouteToHostException -> return ConnectionFailure.TIMED_OUT
+                is java.net.SocketException -> {
+                    val detail = candidate.message.orEmpty().lowercase()
+                    if ("network is unreachable" in detail || "no route" in detail) {
+                        return ConnectionFailure.TIMED_OUT
+                    }
+                    if ("connection refused" in detail) {
+                        return ConnectionFailure.CANNOT_CONNECT_TO_HOST
+                    }
+                    if ("reset" in detail || "broken pipe" in detail || "connection abort" in detail) {
+                        return ConnectionFailure.NETWORK_CONNECTION_LOST
+                    }
+                }
+            }
+        }
+        val detail = chain.joinToString(" ") { it.message.orEmpty() }.lowercase()
+        return when {
+            "unable to resolve host" in detail || "unknown host" in detail ->
+                ConnectionFailure.CANNOT_FIND_HOST
+            "failed to connect" in detail || "connection refused" in detail ->
+                ConnectionFailure.CANNOT_CONNECT_TO_HOST
+            "timeout" in detail || "timed out" in detail ->
+                ConnectionFailure.TIMED_OUT
+            "cleartext" in detail || "ssl" in detail || "tls" in detail ->
+                ConnectionFailure.SECURE_CONNECTION_FAILED
+            "offline" in detail || "no address associated" in detail ->
+                ConnectionFailure.NOT_CONNECTED_TO_INTERNET
+            else -> ConnectionFailure.OTHER
+        }
     }
 
     fun message(
@@ -66,5 +105,19 @@ object ConnectionAdvice {
         }
         val fallback = tryingNext?.let { " Trying $it next." }.orEmpty()
         return advice + fallback + " The app keeps retrying automatically."
+    }
+
+    fun message(
+        error: Throwable,
+        host: String,
+        port: Int,
+        tryingNext: String? = null,
+    ): String {
+        val failure = classify(error)
+        return if (failure == ConnectionFailure.OTHER) {
+            error.message?.takeIf { it.isNotBlank() } ?: message(failure, host, port, tryingNext)
+        } else {
+            message(failure, host, port, tryingNext)
+        }
     }
 }

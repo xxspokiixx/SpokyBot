@@ -1,0 +1,18 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  Device transfer / cloud backup (API 31+): never copy the device token.
+  EncryptedSharedPreferences file is listed explicitly; Keystore key material
+  is already device-bound, but the ciphertext must not leave the device either.
+-->
+<data-extraction-rules>
+    <cloud-backup>
+        <exclude
+            domain="sharedpref"
+            path="companion_device_token.xml" />
+    </cloud-backup>
+    <device-transfer>
+        <exclude
+            domain="sharedpref"
+            path="companion_device_token.xml" />
+    </device-transfer>
+</data-extraction-rules>
