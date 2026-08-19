@@ -79,9 +79,14 @@ private fun PairedScreen(pendingThreadId: String?, onPendingThreadConsumed: () -
 
     when (val destination = navigator.current) {
         Destination.Roster -> RosterScreen(navigator)
-        Destination.Settings -> SettingsStubScreen(onBack = navigator::pop)
+        Destination.Settings -> SettingsScreen(onBack = navigator::pop)
         is Destination.Thread -> ChatScreen(
             threadId = destination.threadId,
+            onBack = navigator::pop,
+            onOpenComputer = { navigator.push(Destination.Computer(it)) },
+        )
+        is Destination.Computer -> ComputerScreen(
+            botId = destination.botId,
             onBack = navigator::pop,
         )
     }

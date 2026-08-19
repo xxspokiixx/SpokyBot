@@ -62,6 +62,14 @@ dependencies {
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.10.2")
     implementation("androidx.core:core-ktx:1.17.0")
 
+    // Chrome Custom Tabs, for the cloud desktop's noVNC viewer — the Android
+    // counterpart of the SFSafariViewController iOS uses. A hardened browser
+    // process with its own visible origin, cookie jar and WebSocket support,
+    // rather than a WebView that would put the provider's session inside this
+    // process and hide the origin from someone about to grant full control of a
+    // cloud machine. ~200 KB, no transitive weight beyond androidx.core.
+    implementation("androidx.browser:browser:1.9.0")
+
     // Pairing QR scanner. CameraX gives the preview and frame pipeline; ML Kit's
     // *bundled* barcode model reads them. Bundled rather than the Play-services
     // variants (`play-services-code-scanner` / unbundled ML Kit) because pairing

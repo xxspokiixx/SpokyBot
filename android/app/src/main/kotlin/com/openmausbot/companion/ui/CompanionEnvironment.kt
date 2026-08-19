@@ -2,7 +2,9 @@ package com.openmausbot.companion.ui
 
 import androidx.compose.runtime.Immutable
 import androidx.compose.runtime.staticCompositionLocalOf
+import com.openmausbot.companion.core.ExportedTranscript
 import com.openmausbot.companion.core.Session
+import java.net.URI
 import com.openmausbot.companion.discovery.NsdDiscovery
 import com.openmausbot.companion.permissions.CompanionPermissions
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -54,10 +56,15 @@ class CompanionEnvironment(
     val permissions: CompanionPermissions,
     val discovery: NsdDiscovery,
     val camera: CameraPermissionController,
+    val notifications: NotificationPermissionController,
     /** Fires the activity's `RequestMultiplePermissions` launcher. */
     val requestPermissions: (Array<String>) -> Unit,
     /** Opens the OS app-settings page, for a permission the user denied. */
     val openAppSettings: () -> Unit,
+    /** Hands an exported transcript to the share sheet; null on success. */
+    val shareTranscript: (ExportedTranscript, ShareFormat) -> String?,
+    /** Opens a freshly minted cloud-desktop URL in Custom Tabs; null on success. */
+    val openCloudDesktop: (URI) -> String?,
 )
 
 val LocalCompanion = staticCompositionLocalOf<CompanionEnvironment> {

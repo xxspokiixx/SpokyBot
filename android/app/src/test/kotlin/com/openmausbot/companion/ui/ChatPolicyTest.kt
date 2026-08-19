@@ -1,6 +1,7 @@
 package com.openmausbot.companion.ui
 
 import com.openmausbot.companion.core.Bot
+import com.openmausbot.companion.core.BotTask
 import com.openmausbot.companion.core.Chat
 import com.openmausbot.companion.core.CompanionState
 import com.openmausbot.companion.core.ChatSummary
@@ -58,6 +59,63 @@ class ThreadResolutionTest {
         val state = CompanionState(bots = listOf(bot()), cursor = "stream-1:1")
         val resolved = ThreadResolution.resolve(state, "thread-bot-1")
         assertEquals(Chat.BotChat(bot()), (resolved as ThreadResolution.Result.Open).chat)
+    }
+
+    @Test
+    fun `a task switch keeps the chat open, on the new task`() {
+        val tasks = listOf(
+            BotTask(threadId = "thread-bot-1", title = "First", createdAt = 0.0),
+            BotTask(threadId = "thread-two", title = "Second", createdAt = 1.0),
+        )
+        // The chat was opened on the bot's first task.
+        val before = CompanionState(bots = listOf(bot().copy(tasks = tasks)), cursor = "s:1")
+        assertEquals(
+            "thread-bot-1",
+            ThreadResolution.chatOrNull(before, "thread-bot-1")?.threadId,
+        )
+
+        // Switching moves the bot to the second task; the destination still names
+        // the first. The chat must follow the bot rather than pop to the roster.
+        val after = CompanionState(
+            bots = listOf(bot().copy(threadId = "thread-two", tasks = tasks)),
+            cursor = "s:2",
+        )
+        val resolved = ThreadResolution.resolve(after, "thread-bot-1")
+        assertTrue(resolved is ThreadResolution.Result.Open, "resolved to $resolved")
+        assertEquals("thread-two", (resolved as ThreadResolution.Result.Open).chat.threadId)
+        assertEquals("bot-1", resolved.chat.id)
+    }
+
+    @Test
+    fun `a thread belonging to no bot's tasks is still gone`() {
+        val state = CompanionState(
+            bots = listOf(
+                bot().copy(
+                    tasks = listOf(BotTask("thread-bot-1", "First", 0.0)),
+                ),
+            ),
+            cursor = "s:1",
+        )
+        assertEquals(ThreadResolution.Result.Gone, ThreadResolution.resolve(state, "thread-alien"))
+    }
+
+    @Test
+    fun `the open thread wins over a task list that also contains it`() {
+        // Two bots, one of which lists the other's thread — the live owner wins.
+        val state = CompanionState(
+            bots = listOf(
+                bot(id = "bot-2").copy(
+                    threadId = "thread-shared",
+                    tasks = listOf(BotTask("thread-shared", "Mine", 0.0)),
+                ),
+                bot(id = "bot-1").copy(
+                    threadId = "thread-elsewhere",
+                    tasks = listOf(BotTask("thread-shared", "Stale", 0.0)),
+                ),
+            ),
+            cursor = "s:1",
+        )
+        assertEquals("bot-2", ThreadResolution.chatOrNull(state, "thread-shared")?.id)
     }
 
     @Test

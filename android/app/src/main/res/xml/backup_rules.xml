@@ -1,7 +1,13 @@
 <?xml version="1.0" encoding="utf-8"?>
 <!--
-  Auto Backup (API 23–30): exclude the Keystore-backed token prefs.
-  Connection DataStore may back up; the device token must not.
+  Auto Backup (API 23–30): exclude the Keystore-backed token prefs, and the
+  permission-prompt bookkeeping.
+
+  Connection DataStore may back up; the device token must not. The permission
+  prefs are not a secret, but they record that this install has already used up
+  its notification prompt — restoring that onto a fresh install, where the OS has
+  reset the permission and would happily ask again, would show "Open notification
+  settings" for a prompt that was never spent here.
 -->
 <full-backup-content>
     <exclude
@@ -10,4 +16,7 @@
     <exclude
         domain="sharedpref"
         path="__androidx_security_crypto_encrypted_prefs__.xml" />
+    <exclude
+        domain="sharedpref"
+        path="openmaus.permissions.xml" />
 </full-backup-content>

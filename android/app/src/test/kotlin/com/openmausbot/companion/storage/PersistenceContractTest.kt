@@ -3,6 +3,7 @@ package com.openmausbot.companion.storage
 import com.openmausbot.companion.core.Connection
 import com.openmausbot.companion.core.ConnectionStore
 import com.openmausbot.companion.core.TokenStore
+import com.openmausbot.companion.ui.PermissionPreferences
 import java.io.File
 import kotlin.test.Test
 import kotlin.test.assertEquals
@@ -66,6 +67,38 @@ class PersistenceContractTest {
         val transfer = extraction.substringAfter("<device-transfer>").substringBefore("</device-transfer>")
         assertTrue(cloud.contains("""path="$tokenFile""""), "cloud-backup missing $tokenFile")
         assertTrue(transfer.contains("""path="$tokenFile""""), "device-transfer missing $tokenFile")
+    }
+
+    /**
+     * The permission-prompt bookkeeping is not a secret, but it is device-local
+     * truth: it records that *this* install has spent its notification prompt.
+     * Restoring it onto a fresh install — where the OS has reset the permission
+     * and would ask again — would show "Open notification settings" for a prompt
+     * that was never used here, contradicting the uninstall-resets premise the
+     * design leans on.
+     */
+    @Test
+    fun backupAndTransferXmlExcludePermissionPrefsFile() {
+        val prefsFile = PermissionPreferences.FILE
+        val needle = "path=\"$prefsFile\""
+        val backup = readXml("backup_rules.xml")
+        val extraction = readXml("data_extraction_rules.xml")
+
+        assertTrue(
+            backup.contains(needle),
+            "backup_rules.xml must exclude $prefsFile; was:\n$backup",
+        )
+        val cloud = extraction.substringAfter("<cloud-backup>").substringBefore("</cloud-backup>")
+        val transfer = extraction.substringAfter("<device-transfer>").substringBefore("</device-transfer>")
+        assertTrue(cloud.contains(needle), "cloud-backup missing $prefsFile")
+        assertTrue(transfer.contains(needle), "device-transfer missing $prefsFile")
+    }
+
+    @Test
+    fun permissionPrefsFileNameMatchesWhatTheAppOpens() {
+        // The rules above are only worth anything if they name the real file.
+        assertEquals("openmaus.permissions", PermissionPreferences.NAME)
+        assertEquals(PermissionPreferences.NAME + ".xml", PermissionPreferences.FILE)
     }
 
     private fun readXml(name: String): String {

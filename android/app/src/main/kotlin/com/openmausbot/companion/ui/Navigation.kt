@@ -24,6 +24,9 @@ sealed interface Destination {
     data object Roster : Destination
     data class Thread(val threadId: String) : Destination
     data object Settings : Destination
+
+    /** A bot's computer, watch-only. Addressed by bot id for the same reason. */
+    data class Computer(val botId: String) : Destination
 }
 
 @Stable
@@ -56,12 +59,14 @@ class CompanionNavigator(initial: List<Destination> = listOf(Destination.Roster)
         private const val ROSTER = "roster"
         private const val SETTINGS = "settings"
         private const val THREAD = "thread:"
+        private const val COMPUTER = "computer:"
 
         fun encode(stack: List<Destination>): List<String> = stack.map {
             when (it) {
                 Destination.Roster -> ROSTER
                 Destination.Settings -> SETTINGS
                 is Destination.Thread -> THREAD + it.threadId
+                is Destination.Computer -> COMPUTER + it.botId
             }
         }
 
@@ -70,6 +75,7 @@ class CompanionNavigator(initial: List<Destination> = listOf(Destination.Roster)
                 it == ROSTER -> Destination.Roster
                 it == SETTINGS -> Destination.Settings
                 it.startsWith(THREAD) -> Destination.Thread(it.removePrefix(THREAD))
+                it.startsWith(COMPUTER) -> Destination.Computer(it.removePrefix(COMPUTER))
                 else -> null
             }
         }

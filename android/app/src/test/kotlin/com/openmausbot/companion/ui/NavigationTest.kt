@@ -47,8 +47,30 @@ class NavigationTest {
 
     @Test
     fun `the stack survives a round trip through the saver`() {
-        val stack = listOf(Destination.Roster, Destination.Thread("thread:with:colons"))
+        val stack = listOf(
+            Destination.Roster,
+            Destination.Thread("thread:with:colons"),
+            Destination.Computer("bot:with:colons"),
+        )
         assertEquals(stack, CompanionNavigator.decode(CompanionNavigator.encode(stack)))
+    }
+
+    @Test
+    fun `a computer sits above the chat it was opened from`() {
+        val navigator = CompanionNavigator()
+        navigator.push(Destination.Thread("t1"))
+        navigator.push(Destination.Computer("bot-1"))
+        assertEquals(Destination.Computer("bot-1"), navigator.current)
+        navigator.pop()
+        assertEquals(Destination.Thread("t1"), navigator.current)
+    }
+
+    @Test
+    fun `threads and computers do not collide in saved state`() {
+        val encoded = CompanionNavigator.encode(
+            listOf(Destination.Thread("x"), Destination.Computer("x")),
+        )
+        assertEquals(encoded.size, encoded.toSet().size, "encodings must be distinguishable")
     }
 
     @Test

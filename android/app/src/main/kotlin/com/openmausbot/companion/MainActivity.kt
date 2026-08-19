@@ -4,6 +4,7 @@ import android.Manifest
 import android.content.Intent
 import android.content.pm.PackageManager
 import android.net.Uri
+import android.os.Build
 import android.os.Bundle
 import android.provider.Settings
 import androidx.activity.ComponentActivity
@@ -12,12 +13,18 @@ import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.core.app.NotificationManagerCompat
 import androidx.core.content.ContextCompat
 import com.openmausbot.companion.notifications.LocalNotificationPoster
+import com.openmausbot.companion.browser.CloudDesktopBrowser
+import com.openmausbot.companion.sharing.TranscriptSharing
 import com.openmausbot.companion.ui.CameraPermissionController
 import com.openmausbot.companion.ui.CompanionEnvironment
 import com.openmausbot.companion.ui.CompanionRoot
 import com.openmausbot.companion.ui.LocalCompanion
+import com.openmausbot.companion.ui.NotificationPermissionController
+import com.openmausbot.companion.ui.PermissionPreferences
+import com.openmausbot.companion.ui.PermissionRequests
 import com.openmausbot.companion.ui.PendingThreadNavigation
 
 /**
@@ -36,17 +43,29 @@ class MainActivity : ComponentActivity() {
     private lateinit var notificationNavigation: PendingThreadNavigation
 
     private lateinit var camera: CameraPermissionController
+    private lateinit var notifications: NotificationPermissionController
+    private lateinit var permissionRequests: PermissionRequests
 
     private val permissionLauncher = registerForActivityResult(
         ActivityResultContracts.RequestMultiplePermissions(),
     ) { results ->
         app.permissions.onRequestResult(results)
+        permissionRequests.onResults(results)
     }
 
     private val cameraLauncher = registerForActivityResult(
         ActivityResultContracts.RequestPermission(),
     ) { granted ->
         camera.onResult(granted)
+    }
+
+    private val notificationLauncher = registerForActivityResult(
+        ActivityResultContracts.RequestPermission(),
+    ) { granted ->
+        app.permissions.refresh()
+        permissionRequests.onResults(
+            mapOf(PermissionPreferences.POST_NOTIFICATIONS to granted),
+        )
     }
 
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -64,13 +83,57 @@ class MainActivity : ComponentActivity() {
             request = { cameraLauncher.launch(Manifest.permission.CAMERA) },
         )
 
+        val permissionPrefs = getSharedPreferences(PermissionPreferences.NAME, MODE_PRIVATE)
+        // The only thing in the app that launches a permission prompt, so the
+        // "we have asked" flag cannot be missed by a path that forgot to write it.
+        permissionRequests = PermissionRequests(
+            markAsked = { permission ->
+                permissionPrefs.edit().putBoolean(askedKey(permission), true).apply()
+            },
+            launchMultiple = { permissions -> permissionLauncher.launch(permissions) },
+            launchSingle = { permission -> notificationLauncher.launch(permission) },
+            onNotificationResult = { granted -> notifications.onResult(granted) },
+        )
+
+        notifications = NotificationPermissionController(
+            // The runtime grant is not the question: notifications can be off in
+            // system settings on any version, including below API 33 where no
+            // runtime permission exists at all.
+            isGranted = { NotificationManagerCompat.from(this).areNotificationsEnabled() },
+            canRequest = { Build.VERSION.SDK_INT >= 33 },
+            shouldShowRationale = {
+                Build.VERSION.SDK_INT >= 33 &&
+                    shouldShowRequestPermissionRationale(Manifest.permission.POST_NOTIFICATIONS)
+            },
+            // Outlives the Activity and the process, so a recreation cannot turn a
+            // spent prompt back into a live-looking button. Not a secret.
+            hasAskedBefore = {
+                permissionPrefs.getBoolean(
+                    askedKey(PermissionPreferences.POST_NOTIFICATIONS),
+                    false,
+                )
+            },
+            request = {
+                if (Build.VERSION.SDK_INT >= 33) {
+                    permissionRequests.request(PermissionPreferences.POST_NOTIFICATIONS)
+                }
+            },
+            openSettings = ::openNotificationSettings,
+        )
+
+        val sharing = TranscriptSharing(this)
+        val browser = CloudDesktopBrowser(this)
+
         val environment = CompanionEnvironment(
             session = app.session,
             permissions = app.permissions,
             discovery = app.discovery,
             camera = camera,
-            requestPermissions = { permissions -> permissionLauncher.launch(permissions) },
+            notifications = notifications,
+            requestPermissions = { permissions -> permissionRequests.request(permissions) },
             openAppSettings = ::openAppSettings,
+            shareTranscript = sharing::share,
+            openCloudDesktop = browser::open,
         )
 
         handleIntent(intent)
@@ -105,6 +168,7 @@ class MainActivity : ComponentActivity() {
         // made in Settings should take effect on return, not on next launch.
         app.permissions.refresh()
         camera.refresh()
+        notifications.refresh()
     }
 
     /**
@@ -128,6 +192,21 @@ class MainActivity : ComponentActivity() {
         )
     }
 
+    /**
+     * The app's own notification page, which is where notifications are turned
+     * back on — the generic app-details page is a level further away and, below
+     * API 33, the only place the switch exists at all.
+     */
+    private fun openNotificationSettings() {
+        val intent = Intent(Settings.ACTION_APP_NOTIFICATION_SETTINGS)
+            .putExtra(Settings.EXTRA_APP_PACKAGE, packageName)
+        if (intent.resolveActivity(packageManager) != null) {
+            startActivity(intent)
+        } else {
+            openAppSettings()
+        }
+    }
+
     private fun openAppSettings() {
         startActivity(
             Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS).apply {
@@ -138,5 +217,9 @@ class MainActivity : ComponentActivity() {
 
     private companion object {
         const val STATE_CONSUMED_THREAD_ID = "openmaus.consumedThreadId"
+
+        /** One key per tracked permission, so a second one needs no new plumbing. */
+        fun askedKey(permission: String): String =
+            "${PermissionPreferences.ASKED_NOTIFICATIONS}:$permission"
     }
 }

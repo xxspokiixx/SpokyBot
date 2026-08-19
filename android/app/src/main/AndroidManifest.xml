@@ -95,5 +95,19 @@
                     android:scheme="openmausbot" />
             </intent-filter>
         </activity>
+        <!--
+          Share sheet hand-off for exported transcripts. Not exported, no
+          granted URI permissions by default: each share grants read access to
+          one file for one Intent, and only for the receiving app.
+        -->
+        <provider
+            android:name="androidx.core.content.FileProvider"
+            android:authorities="${applicationId}.transcripts"
+            android:exported="false"
+            android:grantUriPermissions="true">
+            <meta-data
+                android:name="android.support.FILE_PROVIDER_PATHS"
+                android:resource="@xml/file_paths" />
+        </provider>
     </application>
 </manifest>

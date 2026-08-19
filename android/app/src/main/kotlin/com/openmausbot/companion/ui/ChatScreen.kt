@@ -69,7 +69,7 @@ import kotlinx.coroutines.launch
  * and having two folds is how two clients start disagreeing.
  */
 @Composable
-fun ChatScreen(threadId: String, onBack: () -> Unit) {
+fun ChatScreen(threadId: String, onBack: () -> Unit, onOpenComputer: (String) -> Unit) {
     val session = LocalCompanion.current.session
     val state by session.state.collectAsState()
 
@@ -80,7 +80,8 @@ fun ChatScreen(threadId: String, onBack: () -> Unit) {
         ThreadResolution.Result.Waiting -> OpeningThread(onBack)
         ThreadResolution.Result.Gone -> LaunchedEffect(threadId) { onBack() }
         // The live chat record, so busy/unread stay current as frames land.
-        is ThreadResolution.Result.Open -> LoadedChat(resolution.chat, threadId, state, onBack)
+        is ThreadResolution.Result.Open ->
+            LoadedChat(resolution.chat, state, onBack, onOpenComputer)
     }
 }
 
@@ -113,12 +114,18 @@ private fun OpeningThread(onBack: () -> Unit) {
 @Composable
 private fun LoadedChat(
     chat: Chat,
-    threadId: String,
     state: CompanionState,
     onBack: () -> Unit,
+    onOpenComputer: (String) -> Unit,
 ) {
-    val session = LocalCompanion.current.session
+    // The bot's *current* thread, not the one the destination named. Switching or
+    // creating a task moves a bot to another thread; everything below re-keys on
+    // that, so the screen follows the bot to the task it is now in.
+    val threadId = chat.threadId
+    val environment = LocalCompanion.current
+    val session = environment.session
     val scope = rememberCoroutineScope()
+    var showingTasks by remember { mutableStateOf(false) }
     val focusedMessageId by session.focusedMessageId.collectAsState()
 
     val transcript = remember(state, threadId) { state.visibleTranscript(threadId) }
@@ -178,6 +185,17 @@ private fun LoadedChat(
             onStop = {
                 val bot = (chat as? Chat.BotChat)?.bot ?: return@ChatToolbar
                 scope.launch { session.interrupt(bot) }
+            },
+            onWatchComputer = {
+                val bot = (chat as? Chat.BotChat)?.bot ?: return@ChatToolbar
+                onOpenComputer(bot.id)
+            },
+            onTasks = { showingTasks = true },
+            onShare = { format ->
+                scope.launch {
+                    val exported = session.export(threadId, format.wire) ?: return@launch
+                    environment.shareTranscript(exported, format)?.let { session.actionError = it }
+                }
             },
         )
 
@@ -247,6 +265,12 @@ private fun LoadedChat(
             }
         }
 
+        if (showingTasks) {
+            (chat as? Chat.BotChat)?.let {
+                TaskSheet(botId = it.bot.id, onDismiss = { showingTasks = false })
+            }
+        }
+
         Composer(
             name = chat.name,
             draft = draft,
@@ -280,7 +304,14 @@ private fun androidx.compose.foundation.lazy.LazyListScope.itemsIndexedKeyed(
 }
 
 @Composable
-private fun ChatToolbar(chat: Chat, onBack: () -> Unit, onStop: () -> Unit) {
+private fun ChatToolbar(
+    chat: Chat,
+    onBack: () -> Unit,
+    onStop: () -> Unit,
+    onWatchComputer: () -> Unit,
+    onTasks: () -> Unit,
+    onShare: (ShareFormat) -> Unit,
+) {
     var menuOpen by remember { mutableStateOf(false) }
     val isBot = chat is Chat.BotChat
 
@@ -329,28 +360,35 @@ private fun ChatToolbar(chat: Chat, onBack: () -> Unit, onStop: () -> Unit) {
                     .padding(4.dp),
             )
             DropdownMenu(expanded = menuOpen, onDismissRequest = { menuOpen = false }) {
-                // Pass 4 destinations. Present so the shape of the screen is
-                // honest, disabled so nothing here pretends to work yet.
+                // Computer and tasks are bot ideas; a room has neither (§12).
                 if (isBot) {
                     DropdownMenuItem(
                         text = { Text("Watch this computer") },
-                        enabled = false,
-                        onClick = {},
+                        onClick = {
+                            menuOpen = false
+                            onWatchComputer()
+                        },
                     )
-                    DropdownMenuItem(text = { Text("Tasks") }, enabled = false, onClick = {})
+                    DropdownMenuItem(
+                        text = { Text("Tasks") },
+                        // A running bot refuses task changes underneath it.
+                        enabled = (chat as Chat.BotChat).bot.busy != true,
+                        onClick = {
+                            menuOpen = false
+                            onTasks()
+                        },
+                    )
+                    HorizontalDivider()
                 }
-                DropdownMenuItem(
-                    text = { Text("Share as Markdown") },
-                    enabled = false,
-                    onClick = {},
-                )
-                DropdownMenuItem(text = { Text("Share as JSON") }, enabled = false, onClick = {})
-                HorizontalDivider()
-                DropdownMenuItem(
-                    text = { Text("Coming in a later release", fontSize = 12.sp) },
-                    enabled = false,
-                    onClick = {},
-                )
+                ShareFormat.entries.forEach { format ->
+                    DropdownMenuItem(
+                        text = { Text(format.label) },
+                        onClick = {
+                            menuOpen = false
+                            onShare(format)
+                        },
+                    )
+                }
             }
         }
     }

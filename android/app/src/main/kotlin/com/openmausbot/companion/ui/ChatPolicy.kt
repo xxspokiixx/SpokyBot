@@ -46,6 +46,14 @@ object ThreadResolution {
     fun resolve(state: CompanionState, threadId: String): Result {
         state.botForThread(threadId)?.let { return Result.Open(Chat.BotChat(it)) }
         state.roomForThread(threadId)?.let { return Result.Open(Chat.RoomChat(it)) }
+        // A bot that switched task now answers to a different thread, and a
+        // notification may name a task that is no longer the open one. The chat
+        // follows the bot, not the thread it was opened on — so a thread that is
+        // one of a bot's tasks still resolves to that bot, and the screen shows
+        // whichever task the bot is in now.
+        state.bots
+            .firstOrNull { bot -> bot.tasks.orEmpty().any { it.threadId == threadId } }
+            ?.let { return Result.Open(Chat.BotChat(it)) }
         return if (hydrated(state)) Result.Gone else Result.Waiting
     }
 }
