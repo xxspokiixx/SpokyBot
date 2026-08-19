@@ -48,7 +48,8 @@ class LocalNotificationPoster(
             PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
         )
         val builder = NotificationCompat.Builder(appContext, channelId)
-            .setSmallIcon(android.R.drawable.ic_dialog_info)
+            // The app's own mark, monochrome as the status bar requires.
+            .setSmallIcon(R.drawable.ic_maus_mark)
             .setContentTitle(notification.title)
             .setContentText(notification.body)
             .setStyle(NotificationCompat.BigTextStyle().bigText(notification.body))

@@ -129,6 +129,8 @@ private fun MarkdownBlockView(block: MarkdownBlock, tail: Boolean) {
                 // Horizontal scroll rather than wrapping: wrapped code is harder
                 // to read than code you have to push sideways, and indentation is
                 // most of what a snippet is saying.
+                // Selection is the caller's to grant: a settled bubble wraps this
+                // whole block in a SelectionContainer, and the live one must not.
                 Text(
                     text = buildAnnotatedString {
                         append(block.text)

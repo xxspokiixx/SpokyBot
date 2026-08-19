@@ -19,6 +19,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Person
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Search
@@ -43,11 +44,14 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.SolidColor
+import androidx.compose.ui.graphics.vector.rememberVectorPainter
+import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.openmausbot.companion.R
 import com.openmausbot.companion.core.Chat
 import com.openmausbot.companion.core.ChatSummary
 import com.openmausbot.companion.core.OptionCard
@@ -403,6 +407,23 @@ private fun SearchHitRow(hit: SearchHit, onClick: () -> Unit) {
         horizontalArrangement = Arrangement.spacedBy(12.dp),
         verticalAlignment = Alignment.Top,
     ) {
+        // Who said it. Two hits with the same words are otherwise identical.
+        Icon(
+            // A person for what you said, the Maus mark for what a bot said —
+            // iOS makes the same split with person.fill and a speech bubble.
+            painter = if (SearchHitRole.isFromUser(hit.role)) {
+                rememberVectorPainter(Icons.Filled.Person)
+            } else {
+                painterResource(R.drawable.ic_maus_mark)
+            },
+            contentDescription = SearchHitRole.contentDescription(hit.role, hit.name),
+            tint = secondaryTint,
+            modifier = Modifier
+                .size(26.dp)
+                .background(secondaryTint.copy(alpha = 0.13f), CircleShape)
+                .padding(5.dp),
+        )
+
         Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
             Row(
                 horizontalArrangement = Arrangement.spacedBy(8.dp),

@@ -1,5 +1,6 @@
 package com.openmausbot.companion.ui
 
+import android.content.ClipData
 import android.graphics.BitmapFactory
 import android.util.Base64
 import androidx.compose.foundation.Image
@@ -7,6 +8,7 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.combinedClickable
+import androidx.compose.foundation.text.selection.SelectionContainer
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -27,6 +29,7 @@ import androidx.compose.material.icons.automirrored.filled.KeyboardArrowRight
 import androidx.compose.material.icons.filled.Warning
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
+import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
@@ -50,6 +53,8 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.ImageBitmap
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.platform.ClipEntry
+import androidx.compose.ui.platform.LocalClipboard
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -59,6 +64,9 @@ import com.openmausbot.companion.core.OptionCard
 import com.openmausbot.companion.core.ToolActivity
 import kotlinx.coroutines.launch
 
+/** What the clipboard shows this came from. */
+private const val MESSAGE_CLIP_LABEL = "OpenMausMobile message"
+
 /**
  * One row of the transcript — the port of `MessageRow` in `ios/App/ChatView.swift`.
  */
@@ -67,6 +75,7 @@ fun MessageRow(chat: Chat, message: Message) {
     val session = LocalCompanion.current.session
     val scope = rememberCoroutineScope()
     val state by session.state.collectAsState()
+    val clipboard = LocalClipboard.current
     var menuOpen by remember { mutableStateOf(false) }
     var editing by remember { mutableStateOf(false) }
     var editText by remember { mutableStateOf("") }
@@ -192,6 +201,20 @@ fun MessageRow(chat: Chat, message: Message) {
                     )
                 }
             }
+            MessageActions.copyableText(message)?.let { text ->
+                HorizontalDivider()
+                DropdownMenuItem(
+                    text = { Text("Copy") },
+                    onClick = {
+                        menuOpen = false
+                        scope.launch {
+                            clipboard.setClipEntry(
+                                ClipEntry(ClipData.newPlainText(MESSAGE_CLIP_LABEL, text)),
+                            )
+                        }
+                    },
+                )
+            }
             // Edit and retry is user text on a bot only, and never while it runs.
             if (mine && message.kind == Message.Kind.TEXT && bot != null) {
                 HorizontalDivider()
@@ -293,10 +316,15 @@ private fun TextBubble(message: Message) {
             // Bots get markdown, you do not — the same split the desktop makes.
             // Markdown you did not intend is worse than markdown you did: a
             // message about `**` should show the asterisks.
-            if (mine) {
-                Text(text = message.text.orEmpty(), fontSize = 17.sp)
-            } else {
-                MarkdownText(source = message.text.orEmpty())
+            // Settled text is selectable, so a command, a URL or a paragraph can
+            // be copied — as it can on iOS. The live bubble below is deliberately
+            // left out: selecting text that is still growing fights the reader.
+            SelectionContainer {
+                if (mine) {
+                    Text(text = message.text.orEmpty(), fontSize = 17.sp)
+                } else {
+                    MarkdownText(source = message.text.orEmpty())
+                }
             }
         }
         if (!mine) Spacer(Modifier.width(44.dp))
@@ -363,7 +391,10 @@ private fun CardView(chat: Chat, message: Message) {
         verticalArrangement = Arrangement.spacedBy(12.dp),
     ) {
         Text(card.title, fontSize = 16.sp, fontWeight = FontWeight.SemiBold)
-        Text(card.subtitle, fontSize = 15.sp, color = secondaryTint)
+        // The detail of what is being approved is the thing worth copying.
+        SelectionContainer {
+            Text(card.subtitle, fontSize = 15.sp, color = secondaryTint)
+        }
 
         card.held?.let {
             Text(it, fontSize = 13.sp, color = Color(MausPalette.argb("orange")))
@@ -374,6 +405,7 @@ private fun CardView(chat: Chat, message: Message) {
                 // The buttons are the card's own options, never a string
                 // invented here. Session maps the choice to allow/deny/answer.
                 card.options.forEach { option ->
+                    val refusal = ApprovalChoices.emphasis(option) == OptionEmphasis.SECONDARY
                     Button(
                         onClick = {
                             answering = true
@@ -383,6 +415,14 @@ private fun CardView(chat: Chat, message: Message) {
                             }
                         },
                         enabled = !answering,
+                        // Same `isRefusal` that picks the allow choice picks the
+                        // weight, so the most sensible action on the most
+                        // sensitive screen is not the same shape as the refusal.
+                        colors = if (refusal) {
+                            ButtonDefaults.filledTonalButtonColors()
+                        } else {
+                            ButtonDefaults.buttonColors()
+                        },
                     ) {
                         Text(option)
                     }

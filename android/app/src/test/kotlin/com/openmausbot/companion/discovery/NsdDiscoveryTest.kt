@@ -10,6 +10,7 @@ import kotlin.test.assertNull
 import kotlin.test.assertTrue
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.test.advanceTimeBy
 import kotlinx.coroutines.test.advanceUntilIdle
 import kotlinx.coroutines.test.runCurrent
 import kotlinx.coroutines.test.runTest
@@ -43,12 +44,179 @@ class NsdDiscoveryTest {
         assertFalse(lock.isHeld)
         assertEquals(1, lock.releaseCount)
         assertTrue(collectJob.isCompleted)
-        assertEquals(1, stopCalls)
+        // A listener whose start failed was never registered with NsdManager, so
+        // stopping it would throw "listener not registered". Nothing to stop.
+        assertEquals(0, stopCalls)
 
         val last = assertIs<DiscoveryState.Active>(states.last())
         assertFalse(last.browsing)
         assertEquals("failed:${NsdManager.FAILURE_INTERNAL_ERROR}", last.failure)
         assertTrue(last.found.isEmpty())
+    }
+
+    // GAP-02: a transient FAILURE_MAX_LIMIT is the Android shape of iOS's defunct
+    // DNS-SD connection — the platform is momentarily out of discovery slots, and
+    // recreating the browser is the only useful recovery.
+
+    @Test
+    fun maxLimitRetriesThreeTimesWithIncrementalBackoffThenGoesTerminal() = runTest {
+        val lock = FakeMulticastLock(held = true)
+        val listeners = mutableListOf<NsdManager.DiscoveryListener>()
+        val states = mutableListOf<DiscoveryState>()
+
+        val collectJob = launch {
+            browseDiscoveryFlow(
+                serviceType = NsdDiscovery.SERVICE_TYPE,
+                acquireMulticastLock = { lock },
+                startBrowse = { listener -> listeners += listener },
+                stopBrowse = { },
+                resolveService = { _, _ -> },
+                hostAddress = { null },
+                failureMessage = { code -> "terminal:$code" },
+            ).collect { states += it }
+        }
+        runCurrent()
+        assertEquals(1, listeners.size)
+
+        // Attempt 1 fails: a retry is pending, and the copy says so.
+        listeners.last().onStartDiscoveryFailed(NsdDiscovery.SERVICE_TYPE, NsdManager.FAILURE_MAX_LIMIT)
+        runCurrent()
+        assertEquals(DiscoveryRetry.RETRYING, assertIs<DiscoveryState.Active>(states.last()).failure)
+        assertFalse(collectJob.isCompleted)
+
+        // 350ms, and not a millisecond sooner.
+        advanceTimeBy(349)
+        runCurrent()
+        assertEquals(1, listeners.size, "the retry must wait out its backoff")
+        advanceTimeBy(1)
+        runCurrent()
+        assertEquals(2, listeners.size)
+        assertNotSame(listeners[0], listeners[1], "a rejected listener must not be reused")
+
+        // Attempt 2 fails: 700ms.
+        listeners.last().onStartDiscoveryFailed(NsdDiscovery.SERVICE_TYPE, NsdManager.FAILURE_MAX_LIMIT)
+        runCurrent()
+        advanceTimeBy(699)
+        runCurrent()
+        assertEquals(2, listeners.size)
+        advanceTimeBy(1)
+        runCurrent()
+        assertEquals(3, listeners.size)
+
+        // Attempt 3 fails: 1050ms.
+        listeners.last().onStartDiscoveryFailed(NsdDiscovery.SERVICE_TYPE, NsdManager.FAILURE_MAX_LIMIT)
+        runCurrent()
+        advanceTimeBy(1049)
+        runCurrent()
+        assertEquals(3, listeners.size)
+        advanceTimeBy(1)
+        runCurrent()
+        assertEquals(4, listeners.size)
+        assertTrue(lock.isHeld, "the lock is held across restarts, not re-taken")
+        assertEquals(0, lock.releaseCount)
+
+        // The fourth failure is past the bound: terminal, with copy that does not
+        // promise a retry that is not coming.
+        listeners.last().onStartDiscoveryFailed(NsdDiscovery.SERVICE_TYPE, NsdManager.FAILURE_MAX_LIMIT)
+        advanceUntilIdle()
+
+        assertTrue(collectJob.isCompleted)
+        assertEquals(4, listeners.size, "the bound is three retries, not four")
+        assertFalse(lock.isHeld)
+        assertEquals(1, lock.releaseCount)
+        val last = assertIs<DiscoveryState.Active>(states.last())
+        assertEquals("terminal:${NsdManager.FAILURE_MAX_LIMIT}", last.failure)
+        assertFalse(last.browsing)
+    }
+
+    @Test
+    fun aRetryThatSucceedsClearsTheInterruptedMessage() = runTest {
+        val lock = FakeMulticastLock(held = true)
+        val listeners = mutableListOf<NsdManager.DiscoveryListener>()
+        val states = mutableListOf<DiscoveryState>()
+
+        val collectJob = launch {
+            browseDiscoveryFlow(
+                serviceType = NsdDiscovery.SERVICE_TYPE,
+                acquireMulticastLock = { lock },
+                startBrowse = { listener -> listeners += listener },
+                stopBrowse = { },
+                resolveService = { _, _ -> },
+                hostAddress = { null },
+                failureMessage = { "unused" },
+            ).collect { states += it }
+        }
+        runCurrent()
+
+        listeners.last().onStartDiscoveryFailed(NsdDiscovery.SERVICE_TYPE, NsdManager.FAILURE_MAX_LIMIT)
+        advanceTimeBy(DiscoveryRetry.BASE_DELAY_MILLIS)
+        runCurrent()
+        assertEquals(2, listeners.size)
+
+        listeners.last().onDiscoveryStarted(NsdDiscovery.SERVICE_TYPE)
+        runCurrent()
+
+        val active = assertIs<DiscoveryState.Active>(states.last())
+        assertTrue(active.browsing)
+        assertNull(active.failure, "a browse that came back must not still say it was interrupted")
+        assertFalse(collectJob.isCompleted)
+
+        collectJob.cancel()
+        advanceUntilIdle()
+        assertEquals(1, lock.releaseCount)
+    }
+
+    @Test
+    fun leavingTheScreenDuringBackoffStopsRetryingAndReleasesTheLockOnce() = runTest {
+        val lock = FakeMulticastLock(held = true)
+        val listeners = mutableListOf<NsdManager.DiscoveryListener>()
+
+        val collectJob = launch {
+            browseDiscoveryFlow(
+                serviceType = NsdDiscovery.SERVICE_TYPE,
+                acquireMulticastLock = { lock },
+                startBrowse = { listener -> listeners += listener },
+                stopBrowse = { },
+                resolveService = { _, _ -> },
+                hostAddress = { null },
+                failureMessage = { "unused" },
+            ).collect { }
+        }
+        runCurrent()
+        listeners.last().onStartDiscoveryFailed(NsdDiscovery.SERVICE_TYPE, NsdManager.FAILURE_MAX_LIMIT)
+        runCurrent()
+
+        // The user leaves mid-backoff.
+        collectJob.cancel()
+        advanceUntilIdle()
+
+        assertEquals(1, listeners.size, "a retry must not outlive the collector")
+        assertFalse(lock.isHeld)
+        assertEquals(1, lock.releaseCount)
+    }
+
+    @Test
+    fun internalErrorIsTerminalWithoutRetrying() = runTest {
+        val lock = FakeMulticastLock(held = true)
+        val listeners = mutableListOf<NsdManager.DiscoveryListener>()
+
+        val collectJob = launch {
+            browseDiscoveryFlow(
+                serviceType = NsdDiscovery.SERVICE_TYPE,
+                acquireMulticastLock = { lock },
+                startBrowse = { listener -> listeners += listener },
+                stopBrowse = { },
+                resolveService = { _, _ -> },
+                hostAddress = { null },
+                failureMessage = { "terminal" },
+            ).collect { }
+        }
+        runCurrent()
+        listeners.last().onStartDiscoveryFailed(NsdDiscovery.SERVICE_TYPE, NsdManager.FAILURE_INTERNAL_ERROR)
+        advanceUntilIdle()
+
+        assertTrue(collectJob.isCompleted)
+        assertEquals(1, listeners.size, "an internal error is not worth starting again")
     }
 
     @Test
@@ -188,6 +356,32 @@ class NsdDiscoveryTest {
         advanceUntilIdle()
         assertFalse(locks[1].isHeld)
         assertEquals(1, locks[1].releaseCount)
+    }
+}
+
+class DiscoveryRetryTest {
+    @Test
+    fun onlyAMomentaryShortageIsWorthStartingAgain() {
+        assertTrue(DiscoveryRetry.isRecoverable(NsdManager.FAILURE_MAX_LIMIT))
+        assertFalse(DiscoveryRetry.isRecoverable(NsdManager.FAILURE_INTERNAL_ERROR))
+        assertFalse(DiscoveryRetry.isRecoverable(NsdManager.FAILURE_ALREADY_ACTIVE))
+    }
+
+    @Test
+    fun retriesAreBoundedToThree() {
+        val code = NsdManager.FAILURE_MAX_LIMIT
+        assertTrue(DiscoveryRetry.canRetry(0, code))
+        assertTrue(DiscoveryRetry.canRetry(2, code))
+        assertFalse(DiscoveryRetry.canRetry(3, code))
+        assertFalse(DiscoveryRetry.canRetry(0, NsdManager.FAILURE_INTERNAL_ERROR))
+    }
+
+    @Test
+    fun theBackoffIsIncremental() {
+        // iOS: retryCount * 350ms.
+        assertEquals(350L, DiscoveryRetry.delayFor(1))
+        assertEquals(700L, DiscoveryRetry.delayFor(2))
+        assertEquals(1050L, DiscoveryRetry.delayFor(3))
     }
 }
 

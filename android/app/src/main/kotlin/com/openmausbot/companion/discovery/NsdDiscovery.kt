@@ -11,6 +11,8 @@ import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.Executor
 import java.util.concurrent.Executors
 import kotlinx.coroutines.channels.awaitClose
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.callbackFlow
 import kotlinx.coroutines.flow.distinctUntilChanged
@@ -37,6 +39,36 @@ sealed interface DiscoveryState {
         /** True when the browser is ready and the result set is empty. */
         val emptyWhileBrowsing: Boolean = false,
     ) : DiscoveryState
+}
+
+/**
+ * When a failed browse is worth starting again, and how long to wait.
+ *
+ * iOS recreates its DNS-SD browser on a *defunct connection* — the system
+ * browser went away, which says nothing about the companion or its Tailscale
+ * route — up to three times with an incremental 350ms delay, and only then goes
+ * terminal. `FAILURE_MAX_LIMIT` is the Android shape of the same thing: the
+ * platform is momentarily out of discovery slots, usually because another app
+ * just took them. Everything else — a policy refusal, an internal error — is a
+ * state that retrying cannot improve.
+ *
+ * Bounded on purpose: a persistent local-network problem must not become a
+ * retry loop holding a multicast wake.
+ */
+internal object DiscoveryRetry {
+    const val MAX_ATTEMPTS = 3
+    const val BASE_DELAY_MILLIS = 350L
+
+    /** Shown while a retry is actually pending, and only then. */
+    const val RETRYING = "Local discovery was interrupted. Retrying…"
+
+    fun isRecoverable(errorCode: Int): Boolean = errorCode == NsdManager.FAILURE_MAX_LIMIT
+
+    fun canRetry(attemptsSoFar: Int, errorCode: Int): Boolean =
+        isRecoverable(errorCode) && attemptsSoFar < MAX_ATTEMPTS
+
+    /** Incremental, as iOS has it: 350ms, 700ms, 1050ms. */
+    fun delayFor(attempt: Int): Long = BASE_DELAY_MILLIS * attempt
 }
 
 /**
@@ -103,7 +135,20 @@ internal fun browseDiscoveryFlow(
 
     trySend(DiscoveryState.Active(browsing = false, found = emptyList()))
 
-    val discoveryListener = object : NsdManager.DiscoveryListener {
+    var attempts = 0
+    var started = false
+    // Assigned below; the listener needs to reach the starter to retry, and the
+    // starter needs to build a listener.
+    var startAttempt: (() -> Unit)? = null
+
+    fun terminal(message: String) {
+        failure = message
+        emit()
+        releaseLockOnce()
+        close()
+    }
+
+    fun newListener(): NsdManager.DiscoveryListener = object : NsdManager.DiscoveryListener {
         override fun onDiscoveryStarted(regType: String) {
             browsing = true
             failure = null
@@ -136,12 +181,23 @@ internal fun browseDiscoveryFlow(
 
         override fun onStartDiscoveryFailed(regType: String, errorCode: Int) {
             browsing = false
-            failure = failureMessage(errorCode)
+            // This listener never registered, so nothing is left to stop.
+            started = false
+            if (!DiscoveryRetry.canRetry(attempts, errorCode)) {
+                // No active browse — drop the lock and close so the collector
+                // cannot hold a multicast wake for the screen lifetime.
+                terminal(failureMessage(errorCode))
+                return
+            }
+            attempts += 1
+            failure = DiscoveryRetry.RETRYING
             emit()
-            // Terminal: no active browse — drop the lock and close so the
-            // collector cannot hold a multicast wake for the screen lifetime.
-            releaseLockOnce()
-            close()
+            launch {
+                delay(DiscoveryRetry.delayFor(attempts))
+                // Leaving the screen during the backoff cancels this scope, so a
+                // retry never outlives the collector.
+                startAttempt?.invoke()
+            }
         }
 
         override fun onStopDiscoveryFailed(regType: String, errorCode: Int) {
@@ -151,23 +207,34 @@ internal fun browseDiscoveryFlow(
         }
     }
 
-    var started = false
-    try {
-        startBrowse(discoveryListener)
-        started = true
-    } catch (error: SecurityException) {
-        failure = "Local Network access is off. Enable nearby devices permission, or enter a Tailscale address below."
-        emit()
-        close()
-    } catch (error: Exception) {
-        failure = error.message
-            ?: "Local discovery isn't available right now. Enter the address shown by Companion below."
-        emit()
-        close()
+    var activeListener: NsdManager.DiscoveryListener? = null
+    startAttempt = {
+        // A fresh listener per attempt, as iOS builds a fresh browser: a listener
+        // the framework has already rejected must not be handed back to it.
+        val listener = newListener()
+        activeListener = listener
+        try {
+            startBrowse(listener)
+            started = true
+        } catch (error: SecurityException) {
+            started = false
+            terminal(
+                "Local Network access is off. Enable nearby devices permission, " +
+                    "or enter a Tailscale address below.",
+            )
+        } catch (error: Exception) {
+            started = false
+            terminal(
+                error.message
+                    ?: "Local discovery isn't available right now. " +
+                    "Enter the address shown by Companion below.",
+            )
+        }
     }
+    startAttempt.invoke()
 
     awaitClose {
-        if (started) runCatching { stopBrowse(discoveryListener) }
+        if (started) activeListener?.let { runCatching { stopBrowse(it) } }
         releaseLockOnce()
     }
 }.distinctUntilChanged()
@@ -279,7 +346,9 @@ class NsdDiscovery(
         NsdManager.FAILURE_INTERNAL_ERROR ->
             "Local discovery isn't available right now. Enter the address shown by Companion below."
         NsdManager.FAILURE_MAX_LIMIT ->
-            "Local discovery was interrupted. Retrying…"
+            // Only reached once the retries are spent — nothing is retrying now.
+            "Local discovery keeps getting interrupted on this phone. " +
+                "Enter the address shown by Companion below."
         else ->
             "Local Network access is off. Enable nearby devices permission, or enter a Tailscale address below."
     }

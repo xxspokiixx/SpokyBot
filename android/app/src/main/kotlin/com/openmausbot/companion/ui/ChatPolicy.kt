@@ -115,10 +115,28 @@ object SearchPolicy {
  * and is not repeated here; [alwaysAllowChoice] documents where that mapping
  * forces this screen to diverge from iOS.
  */
+/** How much visual weight an approval option carries. */
+enum class OptionEmphasis {
+    /** The accented, filled button — anything that lets the bot continue. */
+    PRIMARY,
+
+    /** Quieter, for the refusal. */
+    SECONDARY,
+}
+
 object ApprovalChoices {
     const val ALLOW = "Allow"
 
     fun isRefusal(option: String): Boolean = option.equals("Deny", ignoreCase = true)
+
+    /**
+     * The same `isRefusal` that picks the allow choice also picks the styling, so
+     * the two cannot drift: whatever the card calls its refusal is the one option
+     * that does not get accent weight (`ios/App/ChatView.swift` tints it
+     * `Color.secondary` against `Color.accentColor` for the rest).
+     */
+    fun emphasis(option: String): OptionEmphasis =
+        if (isRefusal(option)) OptionEmphasis.SECONDARY else OptionEmphasis.PRIMARY
 
     fun allowChoice(options: List<String>): String? =
         options.firstOrNull { it.equals(ALLOW, ignoreCase = true) }
@@ -162,6 +180,43 @@ object ApprovalChoices {
      */
     fun showsAlwaysAllow(card: OptionCard, chat: Chat): Boolean =
         chat is Chat.BotChat && alwaysAllowChoice(card) != null
+}
+
+/**
+ * What a search hit shows about who said it — `ios/App/ChatListView.swift` puts a
+ * person glyph on a user hit and a speech bubble on a bot one, so two hits with
+ * the same words are still told apart.
+ */
+object SearchHitRole {
+    fun isFromUser(role: Message.Role): Boolean = role == Message.Role.USER
+
+    /** The glyph carries meaning, so it carries a description too. */
+    fun contentDescription(role: Message.Role, name: String): String =
+        if (isFromUser(role)) "Your message" else "Message from $name"
+}
+
+/**
+ * What a message offers the clipboard.
+ *
+ * Selection covers the settled bubbles, but a gesture can only belong to one
+ * owner: where text selection claims the long press, the reactions menu does
+ * not open, and where the menu opens, selection did not start. A Copy action in
+ * that menu makes the outcome the same either way, which is the point — the
+ * reader wants the command, the URL or the approval detail, not a particular
+ * gesture.
+ */
+object MessageActions {
+    /** The text worth putting on the clipboard, or null when there is none. */
+    fun copyableText(message: Message): String? = when (message.kind) {
+        Message.Kind.TEXT, Message.Kind.UNKNOWN -> message.text?.takeIf { it.isNotBlank() }
+        // An approval card is worth copying for what it is asking to do.
+        Message.Kind.OPTIONS -> message.card
+            ?.let { card -> listOf(card.title, card.subtitle).filter { it.isNotBlank() } }
+            ?.takeIf { it.isNotEmpty() }
+            ?.joinToString("\n\n")
+        // A tool chip is context, and a screenshot is pixels.
+        Message.Kind.ACTIVITY, Message.Kind.SCREEN -> null
+    }
 }
 
 /** Reactions, grouped for display. `by == "user"` is yours. */

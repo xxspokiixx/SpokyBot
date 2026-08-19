@@ -366,3 +366,121 @@ internal fun room(id: String = "room-1") = Room(
     unread = false,
     createdAt = 0.0,
 )
+
+/** GAP-03: the role a hit carries must survive into what the row shows. */
+class SearchHitRoleTest {
+    @Test
+    fun `a user hit and a bot hit are told apart`() {
+        assertTrue(SearchHitRole.isFromUser(Message.Role.USER))
+        assertFalse(SearchHitRole.isFromUser(Message.Role.BOT))
+    }
+
+    @Test
+    fun `the glyph carries a description, because it carries meaning`() {
+        assertEquals("Your message", SearchHitRole.contentDescription(Message.Role.USER, "Scout"))
+        assertEquals(
+            "Message from Scout",
+            SearchHitRole.contentDescription(Message.Role.BOT, "Scout"),
+        )
+    }
+
+    @Test
+    fun `an unknown role is attributed to the bot, never to you`() {
+        // Message.Role decodes anything unrecognised as BOT (§8), and the row
+        // must not claim you said something you did not.
+        assertFalse(SearchHitRole.isFromUser(Message.Role.BOT))
+    }
+}
+
+/** GAP-05: the refusal is the one option that does not get accent weight. */
+class OptionEmphasisTest {
+    @Test
+    fun `deny is secondary, case-insensitively`() {
+        for (deny in listOf("Deny", "deny", "DENY", "DeNy")) {
+            assertEquals(OptionEmphasis.SECONDARY, ApprovalChoices.emphasis(deny), deny)
+        }
+    }
+
+    @Test
+    fun `everything else keeps accent weight`() {
+        for (option in listOf("Allow", "allow", "Approve", "Yes", "Allow once", "Deny once")) {
+            assertEquals(OptionEmphasis.PRIMARY, ApprovalChoices.emphasis(option), option)
+        }
+    }
+
+    @Test
+    fun `the same isRefusal drives both the choice and the styling`() {
+        val options = listOf("Approve", "Deny")
+        val allow = ApprovalChoices.allowChoice(options)
+        assertEquals("Approve", allow)
+        // The option that means "go ahead" is the one drawn with accent weight.
+        assertEquals(OptionEmphasis.PRIMARY, ApprovalChoices.emphasis(allow!!))
+        assertEquals(
+            OptionEmphasis.SECONDARY,
+            ApprovalChoices.emphasis(options.first { ApprovalChoices.isRefusal(it) }),
+        )
+    }
+
+    @Test
+    fun `a card with no refusal draws every option the same`() {
+        for (option in listOf("Yes", "Later")) {
+            assertEquals(OptionEmphasis.PRIMARY, ApprovalChoices.emphasis(option))
+        }
+    }
+}
+
+/** GAP-04: what the Copy action puts on the clipboard. */
+class MessageActionsTest {
+    private fun message(
+        kind: Message.Kind,
+        text: String? = null,
+        card: OptionCard? = null,
+    ) = Message(id = "m1", role = Message.Role.BOT, kind = kind, at = 0.0, text = text, card = card)
+
+    @Test
+    fun `settled text is copyable`() {
+        assertEquals("ls -la", MessageActions.copyableText(message(Message.Kind.TEXT, "ls -la")))
+    }
+
+    @Test
+    fun `an unknown kind carrying text is copyable, like it is renderable`() {
+        assertEquals("hello", MessageActions.copyableText(message(Message.Kind.UNKNOWN, "hello")))
+    }
+
+    @Test
+    fun `empty or absent text offers nothing`() {
+        assertNull(MessageActions.copyableText(message(Message.Kind.TEXT, null)))
+        assertNull(MessageActions.copyableText(message(Message.Kind.TEXT, "   ")))
+    }
+
+    @Test
+    fun `an approval card copies what it is asking to do`() {
+        val card = OptionCard(
+            title = "Run a command",
+            subtitle = "rm -rf build",
+            options = listOf("Allow", "Deny"),
+            requestId = "r1",
+            tool = "shell",
+        )
+        assertEquals(
+            "Run a command\n\nrm -rf build",
+            MessageActions.copyableText(message(Message.Kind.OPTIONS, card = card)),
+        )
+    }
+
+    @Test
+    fun `a card with only a subtitle copies just that`() {
+        val card = OptionCard(title = "", subtitle = "Which branch?", options = listOf("main"))
+        assertEquals(
+            "Which branch?",
+            MessageActions.copyableText(message(Message.Kind.OPTIONS, card = card)),
+        )
+    }
+
+    @Test
+    fun `a tool chip and a screenshot offer nothing to copy`() {
+        assertNull(MessageActions.copyableText(message(Message.Kind.ACTIVITY, "shell")))
+        assertNull(MessageActions.copyableText(message(Message.Kind.SCREEN)))
+    }
+}
+
