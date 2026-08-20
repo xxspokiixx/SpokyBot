@@ -599,6 +599,18 @@ class Session(
         }
     }
 
+    suspend fun createRoom(name: String?, memberIds: List<String>): Room? {
+        val activeClient = client ?: return null
+        return try {
+            val room = activeClient.createRoom(name, memberIds)
+            _state.update { it.apply(Frame.Room(room)) }
+            room
+        } catch (error: Throwable) {
+            _actionError.value = error.message
+            null
+        }
+    }
+
     suspend fun interrupt(bot: Bot) {
         perform { it.interrupt(bot.id) }
     }

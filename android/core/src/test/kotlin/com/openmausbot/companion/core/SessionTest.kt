@@ -19,6 +19,8 @@ import kotlinx.coroutines.test.advanceUntilIdle
 import kotlinx.coroutines.test.runCurrent
 import kotlinx.coroutines.test.runTest
 import kotlinx.coroutines.yield
+import okhttp3.mockwebserver.MockResponse
+import okhttp3.mockwebserver.MockWebServer
 
 @OptIn(ExperimentalCoroutinesApi::class)
 class SessionTest {
@@ -350,6 +352,42 @@ class SessionTest {
         assertEquals(Session.Status.Unpaired, session.status.value)
         assertNull(connections.saved)
         assertTrue(tokens.saved.isEmpty())
+    }
+
+    @Test
+    fun createRoomFoldsTheResultAndSurfacesFailure() = runTest {
+        val server = MockWebServer()
+        server.start()
+        try {
+            val connection = requireNotNull(Connection.parse(server.url("/").toString()))
+            val tokens = FakeTokenStore().apply { saved[connection.id] = "tok" }
+            val session = session(
+                connectionStore = FakeConnectionStore(connection),
+                tokenStore = tokens,
+            )
+            session.awaitRestored()
+
+            server.enqueue(MockResponse()
+                .setResponseCode(200)
+                .setHeader("Content-Type", "application/json")
+                .setBody("""{"group":${roomJson()}}"""))
+            val room = session.createRoom("Launch Team", listOf("b1", "b2"))
+
+            assertEquals("g-new", room?.id)
+            assertEquals(room, session.state.value.rooms.single())
+            assertEquals(emptyList(), session.state.value.transcript("t-new"))
+            assertNull(session.actionError)
+
+            server.enqueue(MockResponse()
+                .setResponseCode(403)
+                .setHeader("Content-Type", "application/json")
+                .setBody("""{"error":"Room creation is not allowed."}"""))
+            assertNull(session.createRoom(null, listOf("b1")))
+            assertEquals("Room creation is not allowed.", session.actionError)
+            assertEquals(listOf("g-new"), session.state.value.rooms.map(Room::id))
+        } finally {
+            server.shutdown()
+        }
     }
 
     @Test
@@ -716,6 +754,17 @@ class SessionTest {
         eventsFn = { _, since, screens -> events(since, screens) },
         hydrateFn = { _, _ -> hydrate() },
     )
+
+    private fun roomJson(): String = """{
+        "id":"g-new",
+        "threadId":"t-new",
+        "name":"Launch Team",
+        "memberIds":["b1","b2"],
+        "defaultResponder":{"kind":"mentions"},
+        "bulletin":"",
+        "unread":false,
+        "createdAt":3
+    }""".trimIndent()
 }
 
 private fun sampleBot(id: String, threadId: String) = Bot(

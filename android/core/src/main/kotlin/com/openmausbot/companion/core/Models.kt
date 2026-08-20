@@ -343,6 +343,9 @@ data class ScreenFrame(val png: String, val mime: String) {
 data class CreatedBot(val bot: Bot)
 
 @Serializable
+data class CreatedRoom(val group: Room)
+
+@Serializable
 internal data class SearchResponse(val hits: List<SearchHit>)
 
 @Serializable

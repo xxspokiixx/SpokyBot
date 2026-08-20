@@ -37,6 +37,31 @@ class ConnectionTest {
     }
 
     @Test
+    fun normalizesZonesOnlyForNonIpv6Hosts() {
+        assertEquals("", Connection.urlHost(""))
+        assertEquals("", Connection.urlHost("%"))
+        assertEquals("192.168.1.3", Connection.urlHost("192.168.1.3%en0"))
+        assertEquals("mac.local", Connection.urlHost("mac.local%en0"))
+        assertEquals("[fe80::1%en0]", Connection.urlHost("fe80::1%en0"))
+        assertEquals("[fe80::1%en0]", Connection.urlHost("[fe80::1%en0]"))
+        assertEquals("192.168.1.3", Connection.urlHost("192.168.1.3"))
+        assertEquals("mac.local", Connection.urlHost("mac.local"))
+    }
+
+    @Test
+    fun parsersNormalizeNonIpv6ZoneSuffixes() {
+        val connection = Connection.parse("192.168.1.3%en0:9910")
+        assertEquals("192.168.1.3", connection?.host)
+        assertEquals(9910, connection?.port)
+
+        val invite = PairingInvite.parse(
+            URI("openmausbot://pair?address=192.168.1.3%25en0%3A9910&code=004209"),
+        )
+        assertEquals("192.168.1.3", invite?.connection?.host)
+        assertEquals(9910, invite?.connection?.port)
+    }
+
+    @Test
     fun parsesIpv6WithAndWithoutAnExplicitPort() {
         val bare = Connection.parse("2001:db8::1")
         assertEquals("[2001:db8::1]", bare?.host)

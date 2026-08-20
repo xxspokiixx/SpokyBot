@@ -47,7 +47,7 @@ data class Connection(
             } else {
                 host
             }
-            return if (':' in bare) "[$bare]" else bare
+            return if (':' in bare) "[$bare]" else bare.substringBefore('%')
         }
 
         fun parse(text: String, defaultPort: Int = 8810): Connection? {

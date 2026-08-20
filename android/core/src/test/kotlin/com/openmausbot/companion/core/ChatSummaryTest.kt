@@ -55,9 +55,61 @@ class ChatSummaryTest {
             listOf("pinned", "r1", "unread", "new", "old"),
             summaries.map { it.id },
         )
-        assertEquals("Waiting on you", summaries.first { it.id == "r1" }.preview)
+        assertEquals("Allow shell?", summaries.first { it.id == "r1" }.preview)
         assertEquals(false, summaries.first { it.id == "r1" }.pinned)
         assertTrue(summaries.none { it.id == "hidden" })
+    }
+
+    @Test
+    fun optionPreviewUsesThePendingQuestionOtherwiseTheTitle() {
+        assertEquals(
+            "Run the shell command?",
+            optionPreview(OptionCard(
+                title = "Allow shell?",
+                subtitle = "Run the shell command?",
+                options = listOf("Allow", "Deny"),
+                requestId = "req",
+            )),
+        )
+        assertEquals(
+            "Allow shell?",
+            optionPreview(OptionCard(
+                title = "Allow shell?",
+                subtitle = "",
+                options = listOf("Allow", "Deny"),
+                requestId = "req",
+            )),
+        )
+        assertEquals(
+            "   ",
+            optionPreview(OptionCard(
+                title = "Allow shell?",
+                subtitle = "   ",
+                options = listOf("Allow", "Deny"),
+                requestId = "req",
+            )),
+        )
+        assertEquals(
+            "Choose a mode",
+            optionPreview(OptionCard(
+                title = "Choose a mode",
+                subtitle = "Which mode should run?",
+                options = listOf("Fast", "Safe"),
+                answered = "Safe",
+                requestId = "req",
+            )),
+        )
+        assertEquals(
+            "Dismissed question",
+            optionPreview(OptionCard(
+                title = "Dismissed question",
+                subtitle = "Question details",
+                options = listOf("Allow", "Deny"),
+                dismissed = true,
+                requestId = "req",
+            )),
+        )
+        assertEquals("", optionPreview(null))
     }
 
     @Test
@@ -130,3 +182,19 @@ private fun text(id: String, at: Double, body: String) = Message(
     at = at,
     text = body,
 )
+
+private fun optionPreview(card: OptionCard?): String {
+    val state = CompanionState(
+        bots = listOf(sampleBot("b", "t")),
+        messages = mapOf(
+            "t" to listOf(Message(
+                id = "m",
+                role = Message.Role.BOT,
+                kind = Message.Kind.OPTIONS,
+                at = 1.0,
+                card = card,
+            )),
+        ),
+    )
+    return state.chatSummaries.single().preview
+}

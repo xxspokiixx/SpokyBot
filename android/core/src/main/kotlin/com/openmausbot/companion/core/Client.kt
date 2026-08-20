@@ -12,7 +12,9 @@ import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.suspendCancellableCoroutine
 import kotlinx.serialization.SerializationException
 import kotlinx.serialization.decodeFromString
+import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonObject
+import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.put
 import okhttp3.Call
@@ -170,6 +172,19 @@ class CompanionClient(
     }
 
     suspend fun createBot(): Bot = send<CreatedBot>(makeRequest("POST", "/api/bots")).bot
+
+    suspend fun createRoom(name: String?, memberIds: List<String>): Room {
+        val body = buildJsonObject {
+            put("memberIds", JsonArray(memberIds.map(::JsonPrimitive)))
+            name?.let { value ->
+                val trimmed = value.trim { character ->
+                    character == '\t' || character.category == CharCategory.SPACE_SEPARATOR
+                }
+                if (trimmed.isNotEmpty()) put("name", value)
+            }
+        }
+        return send<CreatedRoom>(makeRequest("POST", "/api/groups", body = body)).group
+    }
 
     suspend fun sendToBot(botId: String, text: String) {
         sendUnit(makeRequest("POST", "/api/bots/$botId/messages", body = jsonBody("text" to text)))

@@ -4,6 +4,7 @@ import kotlinx.coroutines.flow.take
 import kotlinx.coroutines.flow.toList
 import kotlinx.coroutines.runBlocking
 import kotlinx.serialization.json.JsonObject
+import kotlinx.serialization.json.jsonArray
 import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
 import okhttp3.mockwebserver.MockResponse
@@ -101,6 +102,45 @@ class ClientTest {
             requests.map { "${it.method} ${it.path}" },
         )
         requests.forEach { assertEquals("Bearer device-token", it.getHeader("Authorization")) }
+    }
+
+    @Test
+    fun createRoomSendsMembersAndMirrorsIosWhitespaceNameRules() = runBlocking {
+        val cases = listOf<Pair<String?, Boolean>>(
+            "Launch Team" to true,
+            null to false,
+            "" to false,
+            "   " to false,
+            "\t" to false,
+            " \t\n" to true,
+            "\n" to true,
+            "\r" to true,
+        )
+        repeat(cases.size) { server.enqueue(json("""{"group":${roomJson()}}""")) }
+
+        cases.forEachIndexed { index, (name, includesName) ->
+            val memberIds = if (index == 0) listOf("b1", "b2") else listOf("b$index")
+            val room = client.createRoom(name, memberIds)
+            if (index == 0) {
+                assertEquals("g-new", room.id)
+                assertEquals("Launch Team", room.name)
+                assertEquals(listOf("b1", "b2"), room.memberIds)
+            }
+
+            val request = server.takeRequest()
+            assertEquals("POST", request.method)
+            assertEquals("/api/groups", request.path)
+            val body = CompanionJson.parseToJsonElement(request.body.readUtf8()).jsonObject
+            assertEquals(
+                memberIds,
+                body.getValue("memberIds").jsonArray.map { it.jsonPrimitive.content },
+            )
+            if (includesName) {
+                assertEquals(name, body.getValue("name").jsonPrimitive.content)
+            } else {
+                assertFalse("name" in body)
+            }
+        }
     }
 
     @Test
@@ -220,4 +260,15 @@ class ClientTest {
         val root = CompanionJson.parseToJsonElement(fixtureText("bots-full")).jsonObject
         return root.getValue("bots").toString().removePrefix("[").removeSuffix("]")
     }
+
+    private fun roomJson(): String = """{
+        "id":"g-new",
+        "threadId":"t-new",
+        "name":"Launch Team",
+        "memberIds":["b1","b2"],
+        "defaultResponder":{"kind":"mentions"},
+        "bulletin":"",
+        "unread":false,
+        "createdAt":3
+    }""".trimIndent()
 }

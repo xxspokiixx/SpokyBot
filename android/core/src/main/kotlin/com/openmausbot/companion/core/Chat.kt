@@ -78,7 +78,10 @@ private fun previewOf(last: Message?): String {
     if (last == null) return ""
     return when (last.kind) {
         Message.Kind.TEXT -> last.text.orEmpty()
-        Message.Kind.OPTIONS -> if (last.card?.isPending == true) "Waiting on you" else last.card?.title.orEmpty()
+        Message.Kind.OPTIONS -> {
+            val card = last.card ?: return ""
+            if (card.isPending && card.subtitle.isNotEmpty()) card.subtitle else card.title
+        }
         Message.Kind.ACTIVITY -> last.tool?.name.orEmpty()
         Message.Kind.SCREEN -> "Screenshot"
         Message.Kind.UNKNOWN -> last.text.orEmpty()
