@@ -88,6 +88,20 @@ class MausAvatarTest {
     }
 
     @Test
+    fun `the silhouette lands in the desktop's face box`() {
+        // Which is what puts the eyes and the mouth on the body rather than beside
+        // it: every face coordinate is expressed in this box.
+        val bounds = MausSilhouette.faceBoxBounds
+        assertEquals(0f, bounds.minY, 0.01f)
+        assertEquals(MausFaceData.FACE_BOX, bounds.maxY, 0.01f)
+        assertEquals(18.73f, bounds.minX, 0.01f)
+        assertEquals(209.81f, bounds.maxX, 0.01f)
+        // the eye anchor sits inside the body it is painted on
+        assertTrue(MausFaceData.ANCHOR_X in bounds.minX..bounds.maxX)
+        assertTrue(MausFaceData.ANCHOR_Y in bounds.minY..bounds.maxY)
+    }
+
+    @Test
     fun `the parser understands several curves after one C`() {
         val parsed = MausSilhouette.parse("M0 0 C1 2 3 4 5 6 7 8 9 10 11 12 Z")
         assertEquals(

@@ -10,10 +10,8 @@ package com.openmausbot.companion.ui
  * no build step that could read the web source, and a 4KB string is a cheap
  * thing to keep in sync by hand — it has changed once in the life of the project.
  *
- * What is NOT copied: the desktop's 25 expressions, blinking, gaze tracking and
- * motion. A 28-point avatar in a list is a silhouette and two eyes.
- *
- * The parse result is plain data rather than a Compose `Path` so the artwork —
+ * The face the body wears is [MausFaceData]; this is only the shape it is painted
+ * on. The parse result is plain data rather than a Compose `Path` so the artwork —
  * which is the thing that could silently go wrong — is unit-testable on the JVM.
  */
 object MausSilhouette {
@@ -99,6 +97,26 @@ object MausSilhouette {
      * `CGPath.boundingBoxOfPath` which is what the iOS view normalises against.
      */
     val bounds: Bounds by lazy { boundsOf(commands) }
+
+    /** The desktop's viewBox is `-15 -15 258.541 258.541`: room to bob and sway. */
+    const val FACE_MARGIN: Float = 15f
+
+    /**
+     * Artwork → the desktop's face box: `translate(210, 80)`, `scale(0.593899)`,
+     * `translate(-56.5564, -37.6751)` — exactly the transforms its SVG applies.
+     * Every face coordinate ([MausFaceData.ANCHOR_X], the mouth) is expressed in
+     * that box, so the body has to land in the same one or the face sits wrong.
+     */
+    fun faceBoxX(x: Float): Float = (x + 210f) * FACE_BOX_SCALE - 56.5564f
+
+    fun faceBoxY(y: Float): Float = (y + 80f) * FACE_BOX_SCALE - 37.6751f
+
+    /** The body's own bounds inside the face box, for the gradient. */
+    val faceBoxBounds: Bounds by lazy {
+        Bounds(faceBoxX(bounds.minX), faceBoxY(bounds.minY), faceBoxX(bounds.maxX), faceBoxY(bounds.maxY))
+    }
+
+    private const val FACE_BOX_SCALE = 0.593899f
 
     /** The SVG path data into commands. Only `M`, `C` and `Z` appear in the artwork. */
     fun parse(source: String): List<Command> {

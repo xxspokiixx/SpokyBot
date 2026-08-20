@@ -181,6 +181,7 @@ private fun LoadedChat(
     Column(modifier = Modifier.fillMaxSize()) {
         ChatToolbar(
             chat = chat,
+            face = remember(chat, transcript) { MausState.forChat(chat, transcript.lastOrNull()) },
             onBack = onBack,
             onStop = {
                 val bot = (chat as? Chat.BotChat)?.bot ?: return@ChatToolbar
@@ -306,6 +307,7 @@ private fun androidx.compose.foundation.lazy.LazyListScope.itemsIndexedKeyed(
 @Composable
 private fun ChatToolbar(
     chat: Chat,
+    face: MausState,
     onBack: () -> Unit,
     onStop: () -> Unit,
     onWatchComputer: () -> Unit,
@@ -339,7 +341,7 @@ private fun ChatToolbar(
             horizontalArrangement = Arrangement.spacedBy(8.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
-            MausAvatar(color = chat.color, size = 26.dp)
+            MausAvatar(color = chat.color, size = 26.dp, state = face)
             Text(chat.name, fontSize = 17.sp, fontWeight = FontWeight.SemiBold)
         }
 

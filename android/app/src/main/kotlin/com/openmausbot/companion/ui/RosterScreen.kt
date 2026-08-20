@@ -105,6 +105,11 @@ fun RosterScreen(navigator: CompanionNavigator) {
 
     val summaries = remember(state, query) { SearchPolicy.filter(state.chatSummaries, query) }
     val approvals = remember(state) { state.pendingApprovals }
+    // One pass over the fleet rather than one per row: resolving a face walks the
+    // chat's visible transcript.
+    val faces = remember(state, summaries) {
+        summaries.associate { it.id to MausState.forChat(it.chat, state) }
+    }
 
     Column(modifier = Modifier.fillMaxSize()) {
         RosterHeader(
@@ -155,6 +160,7 @@ fun RosterScreen(navigator: CompanionNavigator) {
                             WaitingRow(
                                 chat = chat,
                                 card = pending.message.card,
+                                face = MausState.forChat(chat, state),
                                 onClick = { navigator.push(Destination.Thread(chat.threadId)) },
                             )
                         }
@@ -205,6 +211,7 @@ fun RosterScreen(navigator: CompanionNavigator) {
                 items(summaries, key = { it.chat.threadId }) { summary ->
                     ChatRow(
                         summary = summary,
+                        face = faces[summary.id] ?: MausState.IDLE,
                         onClick = { navigator.push(Destination.Thread(summary.chat.threadId)) },
                     )
                 }
@@ -287,7 +294,7 @@ private fun RosterHeader(
 }
 
 @Composable
-private fun ChatRow(summary: ChatSummary, onClick: () -> Unit) {
+private fun ChatRow(summary: ChatSummary, face: MausState, onClick: () -> Unit) {
     val chat = summary.chat
     val now = remember(summary.lastActivity) { System.currentTimeMillis() }
     Row(
@@ -298,7 +305,7 @@ private fun ChatRow(summary: ChatSummary, onClick: () -> Unit) {
         horizontalArrangement = Arrangement.spacedBy(14.dp),
         verticalAlignment = Alignment.Top,
     ) {
-        MausAvatar(color = chat.color, size = 52.dp)
+        MausAvatar(color = chat.color, size = 52.dp, state = face)
 
         Column(verticalArrangement = Arrangement.spacedBy(5.dp), modifier = Modifier.weight(1f)) {
             Row(
@@ -366,7 +373,7 @@ private fun ChatRow(summary: ChatSummary, onClick: () -> Unit) {
  * to sit above the roster and look unlike everything else.
  */
 @Composable
-private fun WaitingRow(chat: Chat, card: OptionCard?, onClick: () -> Unit) {
+private fun WaitingRow(chat: Chat, card: OptionCard?, face: MausState, onClick: () -> Unit) {
     Row(
         modifier = Modifier
             .fillMaxWidth()
@@ -378,7 +385,7 @@ private fun WaitingRow(chat: Chat, card: OptionCard?, onClick: () -> Unit) {
         horizontalArrangement = Arrangement.spacedBy(12.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
-        MausAvatar(color = chat.color, size = 38.dp)
+        MausAvatar(color = chat.color, size = 38.dp, state = face)
         Column(verticalArrangement = Arrangement.spacedBy(3.dp)) {
             Text(
                 text = "${chat.name} is waiting on you",
