@@ -5,7 +5,10 @@ import com.openmausbot.companion.core.ChatSummary
 import com.openmausbot.companion.core.CompanionState
 import com.openmausbot.companion.core.Message
 import com.openmausbot.companion.core.OptionCard
+import com.openmausbot.companion.core.PendingApproval
 import com.openmausbot.companion.core.Reaction
+import com.openmausbot.companion.core.Room
+import com.openmausbot.companion.core.Session
 
 /**
  * The decisions the chat and roster screens make that are worth testing without
@@ -68,6 +71,32 @@ object TranscriptLayout {
         if (index >= messages.size) return false
         return messages[index].at - messages[index - 1].at > GAP_MILLIS
     }
+
+    /**
+     * True when the next message is from someone else (or there is none), which is
+     * where a run of bubbles gets its tail — one per run, like every messaging app,
+     * rather than one per bubble. The port of `endsRun` in `ios/App/ChatView.swift`.
+     *
+     * The three ways a run breaks, in the Swift's order: the role changes, the
+     * speaker's name changes, or the next row is not text — a card or a tool chip
+     * between two texts breaks the run visually. What this message itself is is
+     * deliberately not asked: only [TextBubble] draws a tail, so an activity chip
+     * that is followed by more text costs the run nothing.
+     */
+    fun endsRun(messages: List<Message>, index: Int): Boolean {
+        val next = messages.getOrNull(index + 1) ?: return true
+        val current = messages.getOrNull(index) ?: return true
+        if (current.role != next.role) return true
+        if (current.from?.name != next.from?.name) return true
+        return next.kind != Message.Kind.TEXT
+    }
+
+    /** Which side the tail hangs from, or none while the run continues. */
+    fun tail(message: Message, endsRun: Boolean): BubbleTail = when {
+        !endsRun -> BubbleTail.NONE
+        message.role == Message.Role.USER -> BubbleTail.TRAILING
+        else -> BubbleTail.LEADING
+    }
 }
 
 /**
@@ -99,6 +128,187 @@ object SearchPolicy {
 
     fun filter(summaries: List<ChatSummary>, query: String): List<ChatSummary> =
         if (query.isEmpty()) summaries else summaries.filter { matches(it, query) }
+}
+
+/**
+ * Everything the chat's name pill and the composer's + can do — the port of
+ * `chatActions` and `plusActions` in `ios/App/ChatView.swift`.
+ *
+ * One list, two doors: the pill for "about this chat", the + for "do something".
+ * Tasks and the computer are bot ideas, and a room has neither (§12); only a
+ * running bot can be interrupted. Exporting is not a bot idea — a room has a
+ * transcript like anything else, so both doors offer it for every chat.
+ */
+enum class ChatActionId { NEW_TASK, TASKS, WATCH_COMPUTER, SHARE_MARKDOWN, SHARE_JSON, INTERRUPT }
+
+data class ChatAction(
+    val id: ChatActionId,
+    val title: String,
+    /** The line under the title. The pill's menu has no room for it; the sheet does. */
+    val subtitle: String,
+    val destructive: Boolean = false,
+    val enabled: Boolean = true,
+)
+
+object ChatActions {
+    /**
+     * What the + opens. iOS offers Markdown only here and both formats in the
+     * pill's menu, so neither door loses an export.
+     */
+    fun sheet(chat: Chat): List<ChatAction> {
+        val bot = (chat as? Chat.BotChat)?.bot
+        val out = mutableListOf<ChatAction>()
+        if (bot != null) {
+            out += ChatAction(
+                id = ChatActionId.NEW_TASK,
+                title = "New task",
+                subtitle = "Start a fresh thread with ${bot.name}",
+                enabled = bot.busy != true,
+            )
+            out += ChatAction(
+                id = ChatActionId.TASKS,
+                title = "Tasks",
+                subtitle = "Switch, rename or remove one",
+            )
+            out += ChatAction(
+                id = ChatActionId.WATCH_COMPUTER,
+                title = "Watch computer",
+                subtitle = "Live view of what ${bot.name} is doing",
+            )
+        }
+        out += ChatAction(
+            id = ChatActionId.SHARE_MARKDOWN,
+            title = "Share transcript",
+            subtitle = "This chat as Markdown",
+        )
+        if (chat.busy && bot != null) {
+            out += ChatAction(
+                id = ChatActionId.INTERRUPT,
+                title = "Interrupt",
+                subtitle = "Stop the current turn",
+                destructive = true,
+            )
+        }
+        return out
+    }
+
+    /**
+     * What the name pill opens. The same actions with both export formats and no
+     * sublines — a dropdown row is one line.
+     *
+     * Tasks carries no busy gate, exactly as the Swift menu does not: the sheet
+     * behind it gates create, delete and switch itself ([TaskRules]), and renaming
+     * is deliberately allowed mid-turn ([TaskDialogRules.renameEnabled]) — a gate
+     * on the door made that unreachable.
+     */
+    fun menu(chat: Chat): List<ChatAction> {
+        val bot = (chat as? Chat.BotChat)?.bot
+        val out = mutableListOf<ChatAction>()
+        if (bot != null) {
+            out += ChatAction(
+                id = ChatActionId.NEW_TASK,
+                title = "New task",
+                subtitle = "",
+                enabled = bot.busy != true,
+            )
+            out += ChatAction(id = ChatActionId.TASKS, title = "Tasks", subtitle = "")
+            out += ChatAction(
+                id = ChatActionId.WATCH_COMPUTER,
+                title = "Watch computer",
+                subtitle = "",
+            )
+        }
+        out += ChatAction(
+            id = ChatActionId.SHARE_MARKDOWN,
+            title = ShareFormat.MARKDOWN.label,
+            subtitle = "",
+        )
+        out += ChatAction(id = ChatActionId.SHARE_JSON, title = ShareFormat.JSON.label, subtitle = "")
+        if (chat.busy && bot != null) {
+            out += ChatAction(
+                id = ChatActionId.INTERRUPT,
+                title = "Interrupt",
+                subtitle = "",
+                destructive = true,
+            )
+        }
+        return out
+    }
+}
+
+/**
+ * How the roster arranges itself — the port of `ios/App/ChatListView.swift`.
+ *
+ * Messages-shaped: your groups across the top, every bot below, and a floating
+ * bar at the bottom whose pill is Updates. Which chats are rows and which are
+ * tiles is decided here rather than in the composable, because it is a rule and
+ * not a layout.
+ */
+object RosterLayout {
+    /** iOS: rooms live in the strip, so an unsearched roster lists only bots. */
+    fun rows(summaries: List<ChatSummary>, query: String): List<ChatSummary> =
+        if (query.isEmpty()) {
+            summaries.filter { it.chat is Chat.BotChat }
+        } else {
+            SearchPolicy.filter(summaries, query)
+        }
+
+    /** The strip is part of the roster, not of a search result. */
+    fun showsGroups(query: String): Boolean = query.isEmpty()
+
+    /**
+     * The chats a pending approval is waiting in — what puts "Waiting on you" on a
+     * row. [pending] is passed in because [CompanionState.pendingApprovals] walks
+     * every thread's transcript and the screen already holds the answer.
+     */
+    fun waitingChats(state: CompanionState, pending: List<PendingApproval>): Set<String> =
+        pending.mapNotNullTo(mutableSetOf()) {
+            ThreadResolution.chatOrNull(state, it.threadId)?.id
+        }
+
+    /** The first two of these are the faces a group tile stacks. */
+    fun memberColors(state: CompanionState, room: Room): List<String> =
+        room.memberIds.mapNotNull { state.bot(it)?.color }
+
+    /** The header's second line: who this phone is paired with, and how it is doing. */
+    fun headerSubtitle(connectionName: String?, status: Session.Status): String {
+        val name = connectionName ?: NOT_PAIRED
+        return when (status) {
+            Session.Status.Live -> "$name · connected"
+            Session.Status.Connecting -> "$name · connecting…"
+            is Session.Status.Offline -> "$name · offline"
+            Session.Status.Unauthorized -> "$name · unpaired"
+            // The one branch that drops the name: unpaired has no computer to name.
+            Session.Status.Unpaired -> NOT_PAIRED
+        }
+    }
+
+    /**
+     * A section heading. Uppercased by the invariant rules, which is what Swift's
+     * `uppercased()` does — a reader in `tr-TR` must still read BOTS, not BOTS
+     * spelled with a dotted capital.
+     */
+    fun sectionLabel(text: String): String = text.uppercase()
+
+    private const val NOT_PAIRED = "Not paired"
+}
+
+/**
+ * The floating bar's two faces: Updates beside the two round actions, or the
+ * search field beside Cancel (`bottomBar` in `ios/App/ChatListView.swift`).
+ *
+ * Cancel takes the query with it, which is what returns the list to bots-only and
+ * puts the groups strip back — so the two are one state, not two.
+ */
+data class RosterBar(val searchOpen: Boolean = false, val query: String = "") {
+    fun openSearch(): RosterBar = copy(searchOpen = true)
+
+    fun cancelSearch(): RosterBar = RosterBar(searchOpen = false, query = "")
+
+    fun typed(text: String): RosterBar = copy(query = text)
+
+    /** iOS clears the field without closing it; Cancel is what closes it. */
+    fun clearQuery(): RosterBar = copy(query = "")
 }
 
 /**

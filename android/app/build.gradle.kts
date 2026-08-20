@@ -50,9 +50,15 @@ dependencies {
     implementation("androidx.compose.ui:ui")
     implementation("androidx.compose.material3:material3")
     // Part of Compose, version-managed by the BOM above: the ~40 icons in the
-    // core set cover every glyph these screens draw. The `-extended` artifact is
-    // deliberately not used — it is thousands of vectors for a handful of uses.
+    // core set cover all but one glyph these screens draw, and that one — the
+    // display in the chat header — is a vector in `res/drawable`. The
+    // `-extended` artifact is deliberately not used: it is thousands of vectors
+    // for a handful of uses.
     implementation("androidx.compose.material:material-icons-core")
+    // Already on the classpath through material3; declared because the chat's +
+    // sheet and the composer's + use `AnimatedVisibility` and `animateFloatAsState`
+    // directly, and a direct use deserves a direct dependency.
+    implementation("androidx.compose.animation:animation")
     implementation("androidx.activity:activity-compose:1.11.0")
     implementation("androidx.lifecycle:lifecycle-runtime-ktx:2.9.4")
     implementation("androidx.lifecycle:lifecycle-process:2.9.4")

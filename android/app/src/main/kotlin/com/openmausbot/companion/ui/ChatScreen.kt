@@ -1,27 +1,45 @@
 package com.openmausbot.companion.ui
 
+import androidx.activity.compose.BackHandler
+import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.core.tween
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.slideInVertically
+import androidx.compose.animation.slideOutVertically
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxScope
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.defaultMinSize
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material.icons.automirrored.filled.KeyboardArrowRight
+import androidx.compose.material.icons.automirrored.filled.List
 import androidx.compose.material.icons.automirrored.filled.Send
-import androidx.compose.material.icons.filled.MoreVert
+import androidx.compose.material.icons.filled.Add
+import androidx.compose.material.icons.filled.Close
+import androidx.compose.material.icons.filled.Share
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
@@ -42,6 +60,11 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.drawWithCache
+import androidx.compose.ui.graphics.Brush
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.input.key.Key
 import androidx.compose.ui.input.key.KeyEventType
@@ -49,10 +72,18 @@ import androidx.compose.ui.input.key.isShiftPressed
 import androidx.compose.ui.input.key.key
 import androidx.compose.ui.input.key.onPreviewKeyEvent
 import androidx.compose.ui.input.key.type
+import androidx.compose.ui.platform.LocalFocusManager
+import androidx.compose.ui.res.painterResource
+import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.ImeAction
+import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.openmausbot.companion.R
 import com.openmausbot.companion.core.Chat
 import com.openmausbot.companion.core.CompanionState
 import com.openmausbot.companion.core.Message
@@ -67,6 +98,10 @@ import kotlinx.coroutines.launch
  * option cards, screenshots. This renders those and nothing else; it does not
  * re-derive anything from provider events, because the server already did that
  * and having two folds is how two clients start disagreeing.
+ *
+ * The chrome floats: back and the bot's computer on a strip that fades into the
+ * transcript, the bot's face and name over it, and the composer below. Everything
+ * else scrolls underneath, which is what makes the conversation the screen.
  */
 @Composable
 fun ChatScreen(threadId: String, onBack: () -> Unit, onOpenComputer: (String) -> Unit) {
@@ -92,18 +127,10 @@ private fun OpeningThread(onBack: () -> Unit) {
         Row(
             modifier = Modifier
                 .fillMaxWidth()
-                .padding(horizontal = 10.dp, vertical = 8.dp),
+                .padding(horizontal = 12.dp, vertical = 4.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
-            Icon(
-                imageVector = Icons.AutoMirrored.Filled.ArrowBack,
-                contentDescription = "Back",
-                modifier = Modifier
-                    .size(32.dp)
-                    .background(secondaryTint.copy(alpha = 0.16f), CircleShape)
-                    .clickable(onClick = onBack)
-                    .padding(6.dp),
-            )
+            BackPill(unreadElsewhere = 0, onBack = onBack)
         }
         Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
             CircularProgressIndicator(modifier = Modifier.size(22.dp), strokeWidth = 2.dp)
@@ -126,6 +153,8 @@ private fun LoadedChat(
     val session = environment.session
     val scope = rememberCoroutineScope()
     var showingTasks by remember { mutableStateOf(false) }
+    var showingPlus by remember(threadId) { mutableStateOf(false) }
+    val focusManager = LocalFocusManager.current
     val focusedMessageId by session.focusedMessageId.collectAsState()
 
     val transcript = remember(state, threadId) { state.visibleTranscript(threadId) }
@@ -178,114 +207,173 @@ private fun LoadedChat(
         settled = true
     }
 
-    Column(modifier = Modifier.fillMaxSize()) {
-        ChatToolbar(
-            chat = chat,
-            face = remember(chat, transcript) { MausState.forChat(chat, transcript.lastOrNull()) },
-            onBack = onBack,
-            onStop = {
-                val bot = (chat as? Chat.BotChat)?.bot ?: return@ChatToolbar
-                scope.launch { session.interrupt(bot) }
-            },
-            onWatchComputer = {
-                val bot = (chat as? Chat.BotChat)?.bot ?: return@ChatToolbar
-                onOpenComputer(bot.id)
-            },
-            onTasks = { showingTasks = true },
-            onShare = { format ->
-                scope.launch {
-                    val exported = session.export(threadId, format.wire) ?: return@launch
-                    environment.shareTranscript(exported, format)?.let { session.actionError = it }
-                }
-            },
-        )
+    val bot = (chat as? Chat.BotChat)?.bot
+    // One handler for both doors: the name pill lists every action, the + lists
+    // the ones you would reach for mid-conversation. Neither invents anything the
+    // other does not have.
+    val onAction: (ChatActionId) -> Unit = { action ->
+        when (action) {
+            ChatActionId.NEW_TASK -> if (bot != null) scope.launch { session.createTask(bot, null) }
+            ChatActionId.TASKS -> showingTasks = true
+            ChatActionId.WATCH_COMPUTER -> if (bot != null) onOpenComputer(bot.id)
+            ChatActionId.SHARE_MARKDOWN -> share(scope, environment, threadId, ShareFormat.MARKDOWN)
+            ChatActionId.SHARE_JSON -> share(scope, environment, threadId, ShareFormat.JSON)
+            ChatActionId.INTERRUPT -> if (bot != null) scope.launch { session.interrupt(bot) }
+        }
+        Unit
+    }
 
-        LazyColumn(
-            state = listState,
-            modifier = Modifier
-                .weight(1f)
-                .fillMaxWidth(),
-            contentPadding = PaddingValues(horizontal = 16.dp, vertical = 12.dp),
-            verticalArrangement = Arrangement.spacedBy(12.dp),
-        ) {
-            if (hasMore) {
-                item(key = LOAD_EARLIER_KEY) {
-                    TextButton(
-                        onClick = {
-                            // Keep the reader where they were: after older
-                            // messages are prepended, sit back on the one that
-                            // used to be at the top.
-                            val anchor = transcript.firstOrNull()?.id
-                            scope.launch {
-                                session.loadOlder(threadId)
-                                if (anchor == null) return@launch
-                                val fresh = session.state.value
-                                val index = fresh.visibleTranscript(threadId)
-                                    .indexOfFirst { it.id == anchor }
-                                if (index < 0) return@launch
-                                // The "load earlier" row is item 0 for as long as
-                                // there is still more to fetch.
-                                val offset = if (fresh.hasMore[threadId] == true) 1 else 0
-                                listState.scrollToItem(index + offset)
+    BackHandler(enabled = showingPlus) { showingPlus = false }
+
+    Box(modifier = Modifier.fillMaxSize()) {
+        Column(modifier = Modifier.fillMaxSize()) {
+            Box(
+                modifier = Modifier
+                    .weight(1f)
+                    .fillMaxWidth(),
+            ) {
+                LazyColumn(
+                    state = listState,
+                    modifier = Modifier.fillMaxSize(),
+                    contentPadding = PaddingValues(
+                        start = 16.dp,
+                        end = 16.dp,
+                        // Room for the floating face when scrolled to the top.
+                        top = HEADER_CLEARANCE,
+                        bottom = 12.dp,
+                    ),
+                    verticalArrangement = Arrangement.spacedBy(6.dp),
+                ) {
+                    if (hasMore) {
+                        item(key = LOAD_EARLIER_KEY) {
+                            TextButton(
+                                onClick = {
+                                    // Keep the reader where they were: after older
+                                    // messages are prepended, sit back on the one
+                                    // that used to be at the top.
+                                    val anchor = transcript.firstOrNull()?.id
+                                    scope.launch {
+                                        session.loadOlder(threadId)
+                                        if (anchor == null) return@launch
+                                        val fresh = session.state.value
+                                        val index = fresh.visibleTranscript(threadId)
+                                            .indexOfFirst { it.id == anchor }
+                                        if (index < 0) return@launch
+                                        // The "load earlier" row is item 0 for as
+                                        // long as there is still more to fetch.
+                                        val offset = if (fresh.hasMore[threadId] == true) 1 else 0
+                                        listState.scrollToItem(index + offset)
+                                    }
+                                },
+                                modifier = Modifier.fillMaxWidth(),
+                            ) {
+                                Text("Load earlier messages", fontSize = 13.sp)
                             }
-                        },
-                        modifier = Modifier.fillMaxWidth(),
-                    ) {
-                        Text("Load earlier messages", fontSize = 13.sp)
+                        }
+                    }
+
+                    itemsIndexedKeyed(transcript) { index, message ->
+                        Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                            // A gap in time is worth marking; a timestamp on every
+                            // message is just noise.
+                            if (TranscriptLayout.startsNewStretch(transcript, index)) {
+                                Text(
+                                    text = RelativeStamp.separator(
+                                        message.at,
+                                        System.currentTimeMillis(),
+                                        locale = Locale.getDefault(),
+                                    ),
+                                    fontSize = 13.sp,
+                                    color = secondaryTint,
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .padding(top = 6.dp),
+                                    textAlign = TextAlign.Center,
+                                )
+                            }
+                            MessageRow(
+                                chat = chat,
+                                message = message,
+                                // One tail per run of bubbles from the same author,
+                                // not one per bubble.
+                                endsRun = TranscriptLayout.endsRun(transcript, index),
+                            )
+                        }
+                    }
+
+                    if (liveCount == 1) {
+                        item(key = LIVE_BUBBLE_KEY) {
+                            StreamingBubble(text = liveText, reasoning = liveReasoning)
+                        }
                     }
                 }
+
+                ChatHeader(
+                    chat = chat,
+                    face = remember(chat, transcript) {
+                        MausState.forChat(chat, transcript.lastOrNull())
+                    },
+                    unreadElsewhere = remember(state, chat) {
+                        (state.unreadCount - if (chat.unread) 1 else 0).coerceAtLeast(0)
+                    },
+                    actions = remember(chat) { ChatActions.menu(chat) },
+                    onBack = onBack,
+                    onWatchComputer = { if (bot != null) onOpenComputer(bot.id) },
+                    onAction = onAction,
+                )
             }
 
-            itemsIndexedKeyed(transcript) { index, message ->
-                Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                    // A gap in time is worth marking; a timestamp on every
-                    // message is just noise.
-                    if (TranscriptLayout.startsNewStretch(transcript, index)) {
-                        Text(
-                            text = RelativeStamp.separator(
-                                message.at,
-                                System.currentTimeMillis(),
-                                locale = Locale.getDefault(),
-                            ),
-                            fontSize = 13.sp,
-                            color = secondaryTint,
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .padding(top = 6.dp),
-                            textAlign = androidx.compose.ui.text.style.TextAlign.Center,
-                        )
-                    }
-                    MessageRow(chat = chat, message = message)
-                }
-            }
-
-            if (liveCount == 1) {
-                item(key = LIVE_BUBBLE_KEY) {
-                    StreamingBubble(text = liveText, reasoning = liveReasoning)
-                }
-            }
+            Composer(
+                name = chat.name,
+                draft = draft,
+                plusOpen = showingPlus,
+                onTogglePlus = {
+                    // iOS drops the composer's focus before the sheet rises; a
+                    // keyboard under it would leave the sheet nowhere to go.
+                    if (!showingPlus) focusManager.clearFocus()
+                    showingPlus = !showingPlus
+                },
+                onDraftChange = { draft = it },
+                onSend = {
+                    val text = draft.trim()
+                    if (text.isEmpty()) return@Composer
+                    draft = ""
+                    // Deliberately not disabled while the bot is busy: the harness
+                    // answers 409 and Session surfaces "The bot is busy — stop it
+                    // first." That is a clearer answer than a dead button.
+                    scope.launch { session.send(text, chat) }
+                },
+            )
         }
 
-        if (showingTasks) {
-            (chat as? Chat.BotChat)?.let {
-                TaskSheet(botId = it.bot.id, onDismiss = { showingTasks = false })
-            }
-        }
-
-        Composer(
-            name = chat.name,
-            draft = draft,
-            onDraftChange = { draft = it },
-            onSend = {
-                val text = draft.trim()
-                if (text.isEmpty()) return@Composer
-                draft = ""
-                // Deliberately not disabled while the bot is busy: the harness
-                // answers 409 and Session surfaces "The bot is busy — stop it
-                // first." That is a clearer answer than a dead button.
-                scope.launch { session.send(text, chat) }
+        PlusSheet(
+            open = showingPlus,
+            actions = remember(chat) { ChatActions.sheet(chat) },
+            onDismiss = { showingPlus = false },
+            onAction = {
+                showingPlus = false
+                onAction(it)
             },
         )
+    }
+
+    if (showingTasks) {
+        (chat as? Chat.BotChat)?.let {
+            TaskSheet(botId = it.bot.id, onDismiss = { showingTasks = false })
+        }
+    }
+}
+
+private fun share(
+    scope: kotlinx.coroutines.CoroutineScope,
+    environment: CompanionEnvironment,
+    threadId: String,
+    format: ShareFormat,
+) {
+    scope.launch {
+        val session = environment.session
+        val exported = session.export(threadId, format.wire) ?: return@launch
+        environment.shareTranscript(exported, format)?.let { session.actionError = it }
     }
 }
 
@@ -304,172 +392,435 @@ private fun androidx.compose.foundation.lazy.LazyListScope.itemsIndexedKeyed(
     )
 }
 
+// The strip the top controls sit on, and the air the transcript needs below the
+// name pill before its first row.
+private val HEADER_BAR = 56.dp
+private val HEADER_SCRIM_FADE = 24.dp
+private val HEADER_CLEARANCE = 128.dp
+
+/**
+ * Back on the left with the rest-of-app unread count, the bot's computer on the
+ * right, and the bot itself between them over its name.
+ *
+ * The strip behind the two buttons is opaque and then fades out, so the
+ * transcript slides under the chrome and disappears rather than stopping at a
+ * line. The face and the name pill float below it on their own tiles.
+ */
 @Composable
-private fun ChatToolbar(
+private fun ChatHeader(
     chat: Chat,
     face: MausState,
+    unreadElsewhere: Int,
+    actions: List<ChatAction>,
     onBack: () -> Unit,
-    onStop: () -> Unit,
     onWatchComputer: () -> Unit,
-    onTasks: () -> Unit,
-    onShare: (ShareFormat) -> Unit,
+    onAction: (ChatActionId) -> Unit,
 ) {
-    var menuOpen by remember { mutableStateOf(false) }
-    val isBot = chat is Chat.BotChat
+    val surface = MaterialTheme.colorScheme.surface
+    Box(modifier = Modifier.fillMaxWidth()) {
+        Spacer(
+            modifier = Modifier
+                .fillMaxWidth()
+                .height(HEADER_BAR + HEADER_SCRIM_FADE)
+                .drawWithCache {
+                    val solid = HEADER_BAR.toPx() / size.height
+                    val brush = Brush.verticalGradient(
+                        0f to surface,
+                        solid to surface,
+                        1f to Color.Transparent,
+                    )
+                    onDrawBehind { drawRect(brush) }
+                },
+        )
 
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 12.dp, vertical = 4.dp),
+            verticalAlignment = Alignment.Top,
+        ) {
+            BackPill(unreadElsewhere = unreadElsewhere, onBack = onBack)
+            Spacer(Modifier.weight(1f))
+            // The computer is a bot idea; a room has none (§12).
+            if (chat is Chat.BotChat) {
+                ChromeButton(
+                    painter = painterResource(R.drawable.ic_display),
+                    contentDescription = "Watch ${chat.name}'s computer",
+                    onClick = onWatchComputer,
+                )
+            } else {
+                Spacer(Modifier.size(MIN_TOUCH_TARGET))
+            }
+        }
+
+        Column(
+            modifier = Modifier
+                .align(Alignment.TopCenter)
+                .padding(top = 2.dp),
+            horizontalAlignment = Alignment.CenterHorizontally,
+            verticalArrangement = Arrangement.spacedBy(6.dp),
+        ) {
+            MausAvatar(color = chat.color, size = 60.dp, state = face)
+            NamePill(chat = chat, actions = actions, onAction = onAction)
+        }
+    }
+}
+
+/** Leaving, with what is unread everywhere else — the badge Messages puts there. */
+@Composable
+private fun BackPill(unreadElsewhere: Int, onBack: () -> Unit) {
     Row(
         modifier = Modifier
-            .fillMaxWidth()
-            .padding(horizontal = 10.dp, vertical = 8.dp),
-        horizontalArrangement = Arrangement.spacedBy(8.dp),
+            .chromeCapsule()
+            .clip(CircleShape)
+            .heightIn(min = MIN_TOUCH_TARGET)
+            .clickable(role = Role.Button, onClick = onBack)
+            .padding(
+                start = 14.dp,
+                end = if (unreadElsewhere > 0) 10.dp else 14.dp,
+            ),
+        horizontalArrangement = Arrangement.spacedBy(6.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
         Icon(
             imageVector = Icons.AutoMirrored.Filled.ArrowBack,
             contentDescription = "Back",
-            modifier = Modifier
-                .size(32.dp)
-                .background(secondaryTint.copy(alpha = 0.16f), CircleShape)
-                .clickable(onClick = onBack)
-                .padding(6.dp),
+            modifier = Modifier.size(20.dp),
         )
+        if (unreadElsewhere > 0) {
+            Text(
+                text = "$unreadElsewhere",
+                fontSize = 13.sp,
+                fontWeight = FontWeight.SemiBold,
+                color = MaterialTheme.colorScheme.onSecondaryContainer,
+                modifier = Modifier
+                    .background(MaterialTheme.colorScheme.secondaryContainer, CircleShape)
+                    .defaultMinSize(minWidth = 22.dp, minHeight = 22.dp)
+                    .padding(horizontal = 7.dp, vertical = 2.dp),
+                textAlign = TextAlign.Center,
+            )
+        }
+    }
+}
 
+/**
+ * The bot's name over its job, and the door to everything this chat can do —
+ * "about this chat", as against the composer's + for "do something".
+ */
+@Composable
+private fun NamePill(chat: Chat, actions: List<ChatAction>, onAction: (ChatActionId) -> Unit) {
+    var menuOpen by remember { mutableStateOf(false) }
+    Box {
         Row(
             modifier = Modifier
-                .background(secondaryTint.copy(alpha = 0.16f), CircleShape)
-                .padding(start = 6.dp, end = 14.dp, top = 5.dp, bottom = 5.dp),
-            horizontalArrangement = Arrangement.spacedBy(8.dp),
+                .chromeCapsule()
+                .clip(CircleShape)
+                .heightIn(min = MIN_TOUCH_TARGET)
+                .clickable(
+                    role = Role.Button,
+                    onClickLabel = "Open conversation actions",
+                    onClick = { menuOpen = true },
+                )
+                .padding(start = 14.dp, end = 10.dp),
+            horizontalArrangement = Arrangement.spacedBy(6.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
-            MausAvatar(color = chat.color, size = 26.dp, state = face)
-            Text(chat.name, fontSize = 17.sp, fontWeight = FontWeight.SemiBold)
-        }
-
-        Spacer(Modifier.weight(1f))
-
-        // Stop is a bot action. A room has no single runner to interrupt (§12).
-        if (isBot && chat.busy) {
-            TextButton(onClick = onStop) { Text("Stop") }
-        }
-
-        Box {
-            Icon(
-                imageVector = Icons.Filled.MoreVert,
-                contentDescription = "Conversation actions",
-                modifier = Modifier
-                    .size(32.dp)
-                    .clickable { menuOpen = true }
-                    .padding(4.dp),
+            Text(
+                text = chat.name,
+                fontSize = 15.sp,
+                fontWeight = FontWeight.SemiBold,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+                modifier = Modifier.weight(1f, fill = false),
             )
-            DropdownMenu(expanded = menuOpen, onDismissRequest = { menuOpen = false }) {
-                // Computer and tasks are bot ideas; a room has neither (§12).
-                if (isBot) {
-                    DropdownMenuItem(
-                        text = { Text("Watch this computer") },
-                        onClick = {
-                            menuOpen = false
-                            onWatchComputer()
-                        },
-                    )
-                    DropdownMenuItem(
-                        text = { Text("Tasks") },
-                        // A running bot refuses task changes underneath it.
-                        enabled = (chat as Chat.BotChat).bot.busy != true,
-                        onClick = {
-                            menuOpen = false
-                            onTasks()
-                        },
-                    )
-                    HorizontalDivider()
+            if (chat.subtitle.isNotEmpty()) {
+                Text(
+                    text = chat.subtitle,
+                    fontSize = 13.sp,
+                    color = secondaryTint,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                    modifier = Modifier.weight(1f, fill = false),
+                )
+            }
+            Icon(
+                imageVector = Icons.AutoMirrored.Filled.KeyboardArrowRight,
+                contentDescription = null,
+                tint = secondaryTint,
+                modifier = Modifier.size(16.dp),
+            )
+        }
+
+        DropdownMenu(expanded = menuOpen, onDismissRequest = { menuOpen = false }) {
+            actions.forEachIndexed { index, action ->
+                if (action.destructive && index > 0) HorizontalDivider()
+                DropdownMenuItem(
+                    text = {
+                        Text(
+                            text = action.title,
+                            color = if (action.destructive) {
+                                MaterialTheme.colorScheme.error
+                            } else {
+                                Color.Unspecified
+                            },
+                        )
+                    },
+                    enabled = action.enabled,
+                    onClick = {
+                        menuOpen = false
+                        onAction(action.id)
+                    },
+                )
+            }
+        }
+    }
+}
+
+/**
+ * What the composer's + opens: the things you can do here, each with a line
+ * saying what it does. Rises above the composer; tapping anywhere else, the back
+ * gesture, or the × the + became, puts it away.
+ */
+@Composable
+private fun BoxScope.PlusSheet(
+    open: Boolean,
+    actions: List<ChatAction>,
+    onDismiss: () -> Unit,
+    onAction: (ChatActionId) -> Unit,
+) {
+    AnimatedVisibility(
+        visible = open,
+        enter = fadeIn(tween(PLUS_MILLIS)),
+        exit = fadeOut(tween(PLUS_MILLIS)),
+        modifier = Modifier.matchParentSize(),
+    ) {
+        Box(
+            modifier = Modifier
+                .fillMaxSize()
+                .background(MaterialTheme.colorScheme.scrim.copy(alpha = 0.35f))
+                // The scrim is a dismissal, not a control: no ripple, and the
+                // back gesture does the same thing for anyone not using touch.
+                .clickable(
+                    interactionSource = remember { MutableInteractionSource() },
+                    indication = null,
+                    role = Role.Button,
+                    onClick = onDismiss,
+                )
+                .semantics { contentDescription = "Close" },
+        )
+    }
+
+    AnimatedVisibility(
+        visible = open,
+        enter = slideInVertically(tween(PLUS_MILLIS)) { it / 2 } + fadeIn(tween(PLUS_MILLIS)),
+        exit = slideOutVertically(tween(PLUS_MILLIS)) { it / 2 } + fadeOut(tween(PLUS_MILLIS)),
+        modifier = Modifier
+            .align(Alignment.BottomStart)
+            .padding(start = 12.dp, end = 44.dp, bottom = 70.dp),
+    ) {
+        Column(
+            modifier = Modifier
+                .chromeSheet()
+                .clip(RoundedCornerShape(PLUS_SHEET_RADIUS))
+                .padding(vertical = 10.dp),
+        ) {
+            actions.forEach { action ->
+                val tint = if (action.destructive) {
+                    MaterialTheme.colorScheme.error
+                } else {
+                    MaterialTheme.colorScheme.onSurface
                 }
-                ShareFormat.entries.forEach { format ->
-                    DropdownMenuItem(
-                        text = { Text(format.label) },
-                        onClick = {
-                            menuOpen = false
-                            onShare(format)
-                        },
-                    )
+                val alpha = if (action.enabled) 1f else 0.45f
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .heightIn(min = 64.dp)
+                        .clickable(
+                            enabled = action.enabled,
+                            role = Role.Button,
+                            onClick = { onAction(action.id) },
+                        )
+                        .padding(horizontal = 18.dp),
+                    horizontalArrangement = Arrangement.spacedBy(16.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Box(
+                        modifier = Modifier
+                            .size(44.dp)
+                            .background(
+                                MaterialTheme.colorScheme.onSurface.copy(alpha = 0.10f * alpha),
+                                CircleShape,
+                            ),
+                        contentAlignment = Alignment.Center,
+                    ) {
+                        ChatActionIcon(id = action.id, tint = tint.copy(alpha = alpha))
+                    }
+                    Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                        Text(
+                            text = action.title,
+                            fontSize = 18.sp,
+                            fontWeight = FontWeight.Medium,
+                            color = tint.copy(alpha = alpha),
+                        )
+                        Text(
+                            text = action.subtitle,
+                            fontSize = 13.sp,
+                            color = secondaryTint.copy(alpha = alpha),
+                        )
+                    }
                 }
             }
         }
     }
 }
 
+private const val PLUS_MILLIS = 280
+private val PLUS_SHEET_RADIUS = 28.dp
+
+/** The + becomes an ×. */
+private const val PLUS_TURN_DEGREES = 45f
+
+/**
+ * The glyph beside an action. Decorative: the row's own text is the label, and
+ * TalkBack reading the icon too would say everything twice.
+ */
+@Composable
+private fun ChatActionIcon(id: ChatActionId, tint: Color) {
+    val modifier = Modifier.size(22.dp)
+    when (id) {
+        ChatActionId.NEW_TASK ->
+            Icon(Icons.Filled.Add, null, tint = tint, modifier = modifier)
+        ChatActionId.TASKS ->
+            Icon(Icons.AutoMirrored.Filled.List, null, tint = tint, modifier = modifier)
+        ChatActionId.WATCH_COMPUTER ->
+            Icon(painterResource(R.drawable.ic_display), null, tint = tint, modifier = modifier)
+        ChatActionId.SHARE_MARKDOWN, ChatActionId.SHARE_JSON ->
+            Icon(Icons.Filled.Share, null, tint = tint, modifier = modifier)
+        ChatActionId.INTERRUPT ->
+            Icon(Icons.Filled.Close, null, tint = tint, modifier = modifier)
+    }
+}
+
+/** A round + and a pill with the send button inside it. */
 @Composable
 private fun Composer(
     name: String,
     draft: String,
+    plusOpen: Boolean,
+    onTogglePlus: () -> Unit,
     onDraftChange: (String) -> Unit,
     onSend: () -> Unit,
 ) {
     val canSend = draft.isNotBlank()
+    // Held as the state rather than unwrapped with `by`: read inside the layer
+    // block, the turn is a new frame, not a new composition of the composer.
+    val turn = animateFloatAsState(
+        targetValue = if (plusOpen) PLUS_TURN_DEGREES else 0f,
+        animationSpec = tween(PLUS_MILLIS),
+        label = "plus",
+    )
     Row(
         modifier = Modifier
             .fillMaxWidth()
-            .background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.4f))
-            .padding(horizontal = 14.dp, vertical = 10.dp),
+            .padding(start = 12.dp, end = 12.dp, top = 6.dp, bottom = 8.dp),
         horizontalArrangement = Arrangement.spacedBy(10.dp),
         verticalAlignment = Alignment.Bottom,
     ) {
-        Box(
-            modifier = Modifier
-                .weight(1f)
-                .background(secondaryTint.copy(alpha = 0.16f), CircleShape)
-                .padding(horizontal = 16.dp, vertical = 10.dp),
+        TouchTarget(
+            onClick = onTogglePlus,
+            contentDescription = if (plusOpen) "Close" else "More",
         ) {
-            if (draft.isEmpty()) {
-                Text("Ask $name", fontSize = 17.sp, color = secondaryTint)
-            }
-            BasicTextField(
-                value = draft,
-                onValueChange = onDraftChange,
-                maxLines = 5,
-                textStyle = LocalTextStyle.current.copy(
-                    fontSize = 17.sp,
-                    color = MaterialTheme.colorScheme.onSurface,
-                ),
-                cursorBrush = SolidColor(MaterialTheme.colorScheme.onSurface),
-                // Software keyboards have no Shift+Return, so their Return key
-                // is a send — which is what the Send action promises.
-                keyboardOptions = KeyboardOptions(imeAction = ImeAction.Send),
-                keyboardActions = KeyboardActions(onSend = { onSend() }),
+            Box(
                 modifier = Modifier
-                    .fillMaxWidth()
-                    // Return sends, Shift+Return breaks the line — the shape
-                    // every chat app has on a hardware keyboard.
-                    .onPreviewKeyEvent { event ->
-                        val isReturn = event.key == Key.Enter || event.key == Key.NumPadEnter
-                        if (event.type == KeyEventType.KeyDown && isReturn && !event.isShiftPressed) {
-                            onSend()
-                            true
+                    .size(44.dp)
+                    .chromeCapsule()
+                    .then(
+                        if (plusOpen) {
+                            Modifier.background(MaterialTheme.colorScheme.onSurface, CircleShape)
                         } else {
-                            false
-                        }
+                            Modifier
+                        },
+                    ),
+                contentAlignment = Alignment.Center,
+            ) {
+                Icon(
+                    imageVector = Icons.Filled.Add,
+                    contentDescription = null,
+                    tint = if (plusOpen) {
+                        MaterialTheme.colorScheme.surface
+                    } else {
+                        MaterialTheme.colorScheme.onSurface
                     },
-            )
+                    modifier = Modifier
+                        .size(22.dp)
+                        .graphicsLayer { rotationZ = turn.value },
+                )
+            }
         }
 
-        Box(
+        Row(
             modifier = Modifier
-                .size(36.dp)
-                .background(
-                    if (canSend) {
-                        MaterialTheme.colorScheme.primary
-                    } else {
-                        secondaryTint.copy(alpha = 0.35f)
-                    },
-                    CircleShape,
-                )
-                .clickable(enabled = canSend, onClick = onSend),
-            contentAlignment = Alignment.Center,
+                .weight(1f)
+                .chromeCapsule()
+                .heightIn(min = MIN_TOUCH_TARGET),
+            horizontalArrangement = Arrangement.spacedBy(6.dp),
+            verticalAlignment = Alignment.Bottom,
         ) {
-            Icon(
-                imageVector = Icons.AutoMirrored.Filled.Send,
-                contentDescription = "Send",
-                tint = MaterialTheme.colorScheme.onPrimary,
-                modifier = Modifier.size(18.dp),
-            )
+            Box(
+                modifier = Modifier
+                    .weight(1f)
+                    .padding(start = 16.dp, top = 13.dp, bottom = 13.dp),
+            ) {
+                if (draft.isEmpty()) {
+                    Text("Ask $name", fontSize = 17.sp, color = secondaryTint)
+                }
+                BasicTextField(
+                    value = draft,
+                    onValueChange = onDraftChange,
+                    maxLines = 5,
+                    textStyle = LocalTextStyle.current.copy(
+                        fontSize = 17.sp,
+                        color = MaterialTheme.colorScheme.onSurface,
+                    ),
+                    cursorBrush = SolidColor(MaterialTheme.colorScheme.onSurface),
+                    // Software keyboards have no Shift+Return, so their Return key
+                    // is a send — which is what the Send action promises.
+                    keyboardOptions = KeyboardOptions(imeAction = ImeAction.Send),
+                    keyboardActions = KeyboardActions(onSend = { onSend() }),
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        // Return sends, Shift+Return breaks the line — the shape
+                        // every chat app has on a hardware keyboard.
+                        .onPreviewKeyEvent { event ->
+                            val isReturn = event.key == Key.Enter || event.key == Key.NumPadEnter
+                            if (event.type == KeyEventType.KeyDown && isReturn && !event.isShiftPressed) {
+                                onSend()
+                                true
+                            } else {
+                                false
+                            }
+                        },
+                )
+            }
+
+            TouchTarget(onClick = onSend, enabled = canSend) {
+                Box(
+                    modifier = Modifier
+                        .size(32.dp)
+                        .background(
+                            if (canSend) BubbleColor.mine else secondaryTint.copy(alpha = 0.18f),
+                            CircleShape,
+                        ),
+                    contentAlignment = Alignment.Center,
+                ) {
+                    Icon(
+                        imageVector = Icons.AutoMirrored.Filled.Send,
+                        contentDescription = "Send",
+                        tint = if (canSend) BubbleColor.mineText else secondaryTint,
+                        modifier = Modifier.size(16.dp),
+                    )
+                }
+            }
         }
     }
 }

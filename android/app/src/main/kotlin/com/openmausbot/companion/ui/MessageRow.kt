@@ -69,9 +69,13 @@ private const val MESSAGE_CLIP_LABEL = "OpenMausMobile message"
 
 /**
  * One row of the transcript — the port of `MessageRow` in `ios/App/ChatView.swift`.
+ *
+ * [endsRun] is the last bubble of a run from the same side: the one that gets the
+ * tail. [TranscriptLayout.endsRun] decides it, over the whole transcript, so a row
+ * never has to look at its neighbours.
  */
 @Composable
-fun MessageRow(chat: Chat, message: Message) {
+fun MessageRow(chat: Chat, message: Message, endsRun: Boolean = true) {
     val session = LocalCompanion.current.session
     val scope = rememberCoroutineScope()
     val state by session.state.collectAsState()
@@ -102,7 +106,7 @@ fun MessageRow(chat: Chat, message: Message) {
             horizontalAlignment = if (mine) Alignment.End else Alignment.Start,
             verticalArrangement = Arrangement.spacedBy(6.dp),
         ) {
-            MessageContent(chat = chat, message = message)
+            MessageContent(chat = chat, message = message, endsRun = endsRun)
 
             message.comm?.let {
                 Text(
@@ -269,9 +273,9 @@ fun MessageRow(chat: Chat, message: Message) {
 }
 
 @Composable
-private fun MessageContent(chat: Chat, message: Message) {
+private fun MessageContent(chat: Chat, message: Message, endsRun: Boolean) {
     when (message.kind) {
-        Message.Kind.TEXT -> TextBubble(message)
+        Message.Kind.TEXT -> TextBubble(message, endsRun)
         Message.Kind.OPTIONS -> CardView(chat, message)
         Message.Kind.ACTIVITY -> ActivityChip(message.tool)
         Message.Kind.SCREEN -> ScreenShot(chat.threadId, message)
@@ -280,38 +284,47 @@ private fun MessageContent(chat: Chat, message: Message) {
         // always better than a gap in the transcript. When there is nothing to
         // show, show nothing — a placeholder saying "unsupported" is a worse gap
         // than the gap.
-        Message.Kind.UNKNOWN -> if (!message.text.isNullOrEmpty()) TextBubble(message)
+        Message.Kind.UNKNOWN -> if (!message.text.isNullOrEmpty()) TextBubble(message, endsRun)
     }
 }
 
 @Composable
-private fun TextBubble(message: Message) {
+private fun TextBubble(message: Message, endsRun: Boolean) {
     val mine = message.role == Message.Role.USER
+    val tail = TranscriptLayout.tail(message, endsRun)
+    // No face beside the bubble: the bot's face is in the header, and in a room
+    // the name line says who spoke. The bubble sits at the edge.
     Row(
         modifier = Modifier.fillMaxWidth(),
         horizontalArrangement = if (mine) Arrangement.End else Arrangement.Start,
+        verticalAlignment = Alignment.Bottom,
     ) {
-        // iOS uses `Spacer(minLength: 44)` on the far side; a non-filling weight
+        // iOS spaces the far side with `Spacer(minLength:)`; a non-filling weight
         // lets the bubble shrink to its text while never crossing that gutter.
-        if (mine) Spacer(Modifier.width(44.dp))
+        if (mine) Spacer(Modifier.width(56.dp))
         Column(
             modifier = Modifier
                 .weight(1f, fill = false)
+                // Room for the tail below, so the next row does not sit on it.
+                .padding(bottom = if (endsRun) SpeechBubble.tailDrop() else 0.dp)
                 .background(
-                    secondaryTint.copy(alpha = if (mine) 0.24f else 0.13f),
-                    RoundedCornerShape(22.dp),
+                    if (mine) BubbleColor.mine else BubbleColor.theirs,
+                    SpeechBubbleShape.of(tail),
                 )
-                .padding(horizontal = 16.dp, vertical = 12.dp),
+                .padding(horizontal = 15.dp, vertical = 11.dp),
             verticalArrangement = Arrangement.spacedBy(4.dp),
         ) {
-            // Rooms attribute each line to the member who said it.
-            message.from?.let {
-                Text(
-                    text = it.name,
-                    fontSize = 13.sp,
-                    fontWeight = FontWeight.SemiBold,
-                    color = Color(MausPalette.argb(it.color)),
-                )
+            // Rooms attribute each line to the member who said it. Only theirs:
+            // your own bubble is already on your side.
+            if (!mine) {
+                message.from?.let {
+                    Text(
+                        text = it.name,
+                        fontSize = 13.sp,
+                        fontWeight = FontWeight.SemiBold,
+                        color = Color(MausPalette.argb(it.color)),
+                    )
+                }
             }
             // Bots get markdown, you do not — the same split the desktop makes.
             // Markdown you did not intend is worse than markdown you did: a
@@ -321,7 +334,11 @@ private fun TextBubble(message: Message) {
             // left out: selecting text that is still growing fights the reader.
             SelectionContainer {
                 if (mine) {
-                    Text(text = message.text.orEmpty(), fontSize = 17.sp)
+                    Text(
+                        text = message.text.orEmpty(),
+                        fontSize = 17.sp,
+                        color = BubbleColor.mineText,
+                    )
                 } else {
                     MarkdownText(source = message.text.orEmpty())
                 }
@@ -521,12 +538,13 @@ private fun ScreenShot(threadId: String, message: Message) {
  */
 @Composable
 fun StreamingBubble(text: String?, reasoning: String?) {
-    Row(modifier = Modifier.fillMaxWidth()) {
+    Row(modifier = Modifier.fillMaxWidth(), verticalAlignment = Alignment.Bottom) {
         Column(
             modifier = Modifier
                 .weight(1f, fill = false)
-                .background(secondaryTint.copy(alpha = 0.13f), RoundedCornerShape(22.dp))
-                .padding(horizontal = 16.dp, vertical = 12.dp),
+                .padding(bottom = SpeechBubble.tailDrop())
+                .background(BubbleColor.theirs, SpeechBubbleShape.of(BubbleTail.LEADING))
+                .padding(horizontal = 15.dp, vertical = 11.dp),
             verticalArrangement = Arrangement.spacedBy(4.dp),
         ) {
             if (!reasoning.isNullOrEmpty() && text.isNullOrEmpty()) {

@@ -1,0 +1,217 @@
+package com.openmausbot.companion.ui
+
+import com.openmausbot.companion.core.Chat
+import com.openmausbot.companion.core.Message
+import com.openmausbot.companion.core.Sender
+import kotlin.test.Test
+import kotlin.test.assertEquals
+import kotlin.test.assertFalse
+import kotlin.test.assertTrue
+
+/**
+ * DELTA-06: where a run of bubbles ends, pinned against `endsRun` in
+ * `ios/App/ChatView.swift`.
+ *
+ * The Swift asks three questions of the *next* message and none of this one:
+ * a different role ends the run, a different speaker ends the run, and anything
+ * that is not text ends the run. Everything else continues it, which is what
+ * gives a stretch of replies one tail instead of one per bubble.
+ */
+class TranscriptRunTest {
+
+    @Test
+    fun `the last message always ends the run`() {
+        // iOS: `guard index + 1 < messages.count else { return true }`.
+        val messages = listOf(botText("m1"), botText("m2"))
+        assertTrue(TranscriptLayout.endsRun(messages, 1))
+        assertTrue(TranscriptLayout.endsRun(listOf(botText("only")), 0))
+        assertTrue(TranscriptLayout.endsRun(emptyList(), 0))
+    }
+
+    @Test
+    fun `two texts from the same side are one run`() {
+        val messages = listOf(botText("m1"), botText("m2"))
+        assertFalse(TranscriptLayout.endsRun(messages, 0))
+    }
+
+    @Test
+    fun `the run ends where the side changes`() {
+        // iOS: `if this.role != next.role { return true }`.
+        assertTrue(TranscriptLayout.endsRun(listOf(botText("m1"), userText("m2")), 0))
+        assertTrue(TranscriptLayout.endsRun(listOf(userText("m1"), botText("m2")), 0))
+    }
+
+    @Test
+    fun `in a room the run ends where the speaker changes`() {
+        // iOS: `if this.from?.name != next.from?.name { return true }`.
+        val nora = Sender(botId = "bot-1", name = "Nora", color = "green")
+        val ravi = Sender(botId = "bot-2", name = "Ravi", color = "cyan")
+        assertTrue(
+            TranscriptLayout.endsRun(listOf(botText("m1", nora), botText("m2", ravi)), 0),
+        )
+        assertFalse(
+            TranscriptLayout.endsRun(listOf(botText("m1", nora), botText("m2", nora)), 0),
+        )
+        // A bot chat attributes nothing, so both sides are null and match.
+        assertFalse(TranscriptLayout.endsRun(listOf(botText("m1"), botText("m2")), 0))
+        // Named then unnamed is still a change.
+        assertTrue(TranscriptLayout.endsRun(listOf(botText("m1", nora), botText("m2")), 0))
+    }
+
+    @Test
+    fun `a card or a tool chip between two texts breaks the run visually`() {
+        // iOS: `return next.kind != .text`.
+        assertTrue(TranscriptLayout.endsRun(listOf(botText("m1"), botActivity("m2")), 0))
+        assertTrue(TranscriptLayout.endsRun(listOf(botText("m1"), botOptions("m2")), 0))
+        assertTrue(TranscriptLayout.endsRun(listOf(botText("m1"), botScreen("m2")), 0))
+        assertTrue(TranscriptLayout.endsRun(listOf(botText("m1"), botUnknown("m2")), 0))
+    }
+
+    @Test
+    fun `what this message is never matters — only what the next one is`() {
+        // The Swift reads `this.role` and `this.from`, never `this.kind`. A tool
+        // chip followed by more of the same bot's text does not end the run, and
+        // the bubble that eventually does end it is the one that gets the tail.
+        val messages = listOf(botActivity("m1"), botText("m2"))
+        assertFalse(TranscriptLayout.endsRun(messages, 0))
+        assertTrue(TranscriptLayout.endsRun(messages, 1))
+    }
+
+    @Test
+    fun `an index off the end of the transcript ends the run rather than throwing`() {
+        assertTrue(TranscriptLayout.endsRun(listOf(botText("m1")), 5))
+        assertTrue(TranscriptLayout.endsRun(listOf(botText("m1")), -1))
+    }
+
+    @Test
+    fun `the tail hangs on the speaker's own side, and only at the end of a run`() {
+        // iOS: `SpeechBubble(tail: tailed ? (mine ? .trailing : .leading) : .none)`.
+        assertEquals(BubbleTail.TRAILING, TranscriptLayout.tail(userText("m1"), endsRun = true))
+        assertEquals(BubbleTail.LEADING, TranscriptLayout.tail(botText("m1"), endsRun = true))
+        assertEquals(BubbleTail.NONE, TranscriptLayout.tail(userText("m1"), endsRun = false))
+        assertEquals(BubbleTail.NONE, TranscriptLayout.tail(botText("m1"), endsRun = false))
+    }
+}
+
+/**
+ * DELTA-05: what the name pill and the composer's + offer, pinned against
+ * `chatActions` and `plusActions` in `ios/App/ChatView.swift`.
+ */
+class ChatActionsTest {
+
+    @Test
+    fun `the sheet offers a bot everything, in the Swift's order`() {
+        val actions = ChatActions.sheet(Chat.BotChat(bot(name = "Scout")))
+        assertEquals(
+            listOf(
+                ChatActionId.NEW_TASK,
+                ChatActionId.TASKS,
+                ChatActionId.WATCH_COMPUTER,
+                ChatActionId.SHARE_MARKDOWN,
+            ),
+            actions.map { it.id },
+        )
+        assertEquals("New task", actions[0].title)
+        assertEquals("Start a fresh thread with Scout", actions[0].subtitle)
+        assertEquals("Tasks", actions[1].title)
+        assertEquals("Switch, rename or remove one", actions[1].subtitle)
+        assertEquals("Watch computer", actions[2].title)
+        assertEquals("Live view of what Scout is doing", actions[2].subtitle)
+        assertEquals("Share transcript", actions[3].title)
+        assertEquals("This chat as Markdown", actions[3].subtitle)
+    }
+
+    @Test
+    fun `a running bot can be interrupted, and cannot be given a second task`() {
+        val actions = ChatActions.sheet(Chat.BotChat(bot(busy = true)))
+        val interrupt = actions.last()
+        assertEquals(ChatActionId.INTERRUPT, interrupt.id)
+        assertEquals("Interrupt", interrupt.title)
+        assertEquals("Stop the current turn", interrupt.subtitle)
+        assertTrue(interrupt.destructive)
+        // iOS: `.disabled(bot.busy == true)` on New task only.
+        assertFalse(actions.single { it.id == ChatActionId.NEW_TASK }.enabled)
+        assertTrue(actions.single { it.id == ChatActionId.TASKS }.enabled)
+    }
+
+    @Test
+    fun `an idle bot offers no interrupt`() {
+        val actions = ChatActions.sheet(Chat.BotChat(bot()))
+        assertFalse(actions.any { it.id == ChatActionId.INTERRUPT })
+        assertTrue(actions.single { it.id == ChatActionId.NEW_TASK }.enabled)
+    }
+
+    @Test
+    fun `a room has no tasks, no computer and nothing to interrupt`() {
+        // iOS guards all three with `if case let .bot(bot) = current`, and the
+        // interrupt with `current.busy, case let .bot(bot)` — a busy room has no
+        // single runner to stop (§12).
+        val busyRoom = Chat.RoomChat(room().copy(busyBotId = "bot-1"))
+        assertEquals(listOf(ChatActionId.SHARE_MARKDOWN), ChatActions.sheet(busyRoom).map { it.id })
+        assertEquals(
+            listOf(ChatActionId.SHARE_MARKDOWN, ChatActionId.SHARE_JSON),
+            ChatActions.menu(busyRoom).map { it.id },
+        )
+    }
+
+    @Test
+    fun `the pill's menu carries both exports, and the sheet only Markdown`() {
+        // iOS: `chatActions` has "Share as Markdown" and "Share as JSON";
+        // `plusActions` has one "Share transcript — This chat as Markdown".
+        val chat = Chat.BotChat(bot(busy = true))
+        assertEquals(
+            listOf(
+                ChatActionId.NEW_TASK,
+                ChatActionId.TASKS,
+                ChatActionId.WATCH_COMPUTER,
+                ChatActionId.SHARE_MARKDOWN,
+                ChatActionId.SHARE_JSON,
+                ChatActionId.INTERRUPT,
+            ),
+            ChatActions.menu(chat).map { it.id },
+        )
+        assertEquals("Share as Markdown", ChatActions.menu(chat)[3].title)
+        assertEquals("Share as JSON", ChatActions.menu(chat)[4].title)
+        assertFalse(ChatActions.sheet(chat).any { it.id == ChatActionId.SHARE_JSON })
+    }
+
+    @Test
+    fun `no action the overflow used to reach has gone missing`() {
+        // What PORT7 shipped in the overflow menu: watch computer, tasks and both
+        // export formats, with Stop beside it while the bot ran.
+        val ids = ChatActions.menu(Chat.BotChat(bot(busy = true))).map { it.id }.toSet()
+        assertTrue(ChatActionId.WATCH_COMPUTER in ids)
+        assertTrue(ChatActionId.TASKS in ids)
+        assertTrue(ChatActionId.SHARE_MARKDOWN in ids)
+        assertTrue(ChatActionId.SHARE_JSON in ids)
+        assertTrue(ChatActionId.INTERRUPT in ids)
+    }
+}
+
+private fun botText(id: String, from: Sender? = null): Message = Message(
+    id = id,
+    role = Message.Role.BOT,
+    kind = Message.Kind.TEXT,
+    at = 1.0,
+    text = "hello",
+    from = from,
+)
+
+private fun userText(id: String): Message = Message(
+    id = id,
+    role = Message.Role.USER,
+    kind = Message.Kind.TEXT,
+    at = 1.0,
+    text = "hello",
+)
+
+private fun botActivity(id: String): Message =
+    botText(id).copy(kind = Message.Kind.ACTIVITY, text = null)
+
+private fun botOptions(id: String): Message =
+    botText(id).copy(kind = Message.Kind.OPTIONS, text = null)
+
+private fun botScreen(id: String): Message =
+    botText(id).copy(kind = Message.Kind.SCREEN, text = null)
+
+private fun botUnknown(id: String): Message = botText(id).copy(kind = Message.Kind.UNKNOWN)

@@ -58,15 +58,13 @@ import kotlinx.coroutines.launch
 
 /** The floating pill: who is doing what right now, at a glance. */
 @Composable
-internal fun UpdatesBar(updates: List<ChatUpdate>, onOpen: () -> Unit) {
+internal fun UpdatesBar(updates: List<ChatUpdate>, onOpen: () -> Unit, modifier: Modifier = Modifier) {
     val first = updates.firstOrNull()
     val stack = remember(updates) { updates.take(UpdatesSummary.MASCOTS).map { it.chat.color } }
     Row(
-        modifier = Modifier
-            .fillMaxWidth()
-            .padding(horizontal = 16.dp, vertical = 8.dp)
+        modifier = modifier
+            .chromeCapsule()
             .clip(CircleShape)
-            .background(secondaryTint.copy(alpha = 0.16f))
             .clickable(onClickLabel = "Open updates", role = Role.Button, onClick = onOpen)
             .heightIn(min = 52.dp)
             .padding(start = if (first == null) 16.dp else 7.dp, end = 12.dp),
