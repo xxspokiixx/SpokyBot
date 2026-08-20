@@ -56,6 +56,8 @@ internal fun MausAvatar(
     color: String,
     size: Dp = 52.dp,
     state: MausState = MausState.IDLE,
+    /** Off draws the state's resting face, still. For lists of many. */
+    animated: Boolean = true,
     modifier: Modifier = Modifier,
 ) {
     val engine = remember { MausFaceEngine() }
@@ -77,16 +79,17 @@ internal fun MausAvatar(
     // nobody can see has no business asking for frames.
     var shown by remember { mutableStateOf(true) }
 
-    LaunchedEffect(Unit) {
+    LaunchedEffect(animated) {
         // Android says "reduce motion" through the animator duration scale, which
         // is the same signal Compose's own animations honour. At zero the face
         // holds the still pose of whatever state it is in.
         val durationScale = coroutineContext[MotionDurationScale]
-        snapshotFlow { shown && (durationScale?.scaleFactor ?: 1f) > 0f }.collectLatest { live ->
-            moving = live
-            if (!live) return@collectLatest
-            while (true) withFrameNanos(clock.onFrame)
-        }
+        snapshotFlow { animated && shown && (durationScale?.scaleFactor ?: 1f) > 0f }
+            .collectLatest { live ->
+                moving = live
+                if (!live) return@collectLatest
+                while (true) withFrameNanos(clock.onFrame)
+            }
     }
 
     Canvas(

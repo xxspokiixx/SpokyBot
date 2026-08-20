@@ -22,10 +22,12 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Person
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Close
+import androidx.compose.material.icons.filled.Create
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
 import androidx.compose.material3.LocalTextStyle
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
@@ -85,6 +87,8 @@ fun RosterScreen(navigator: CompanionNavigator) {
     var hits by remember { mutableStateOf<List<SearchHit>>(emptyList()) }
     var searching by remember { mutableStateOf(false) }
     var refreshing by remember { mutableStateOf(false) }
+    var showingUpdates by remember { mutableStateOf(false) }
+    var showingNewGroup by remember { mutableStateOf(false) }
 
     // Local filtering is always on; the computer is only asked past two
     // characters and after a quiet moment (§10).
@@ -110,6 +114,9 @@ fun RosterScreen(navigator: CompanionNavigator) {
     val faces = remember(state, summaries) {
         summaries.associate { it.id to MausState.forChat(it.chat, state) }
     }
+    // Read by the bar below the list and by nothing inside it, so the rows never
+    // recompose for it. `approvals` is handed over rather than walked again.
+    val updates = remember(state, approvals) { state.updates(approvals) }
 
     Column(modifier = Modifier.fillMaxSize()) {
         RosterHeader(
@@ -122,6 +129,7 @@ fun RosterScreen(navigator: CompanionNavigator) {
                     session.createBot()?.let { navigator.push(Destination.Thread(it.threadId)) }
                 }
             },
+            onCreateGroup = { showingNewGroup = true },
         )
         StatusBanner()
 
@@ -136,7 +144,9 @@ fun RosterScreen(navigator: CompanionNavigator) {
                     refreshing = false
                 }
             },
-            modifier = Modifier.fillMaxSize(),
+            modifier = Modifier
+                .fillMaxWidth()
+                .weight(1f),
         ) {
             if (summaries.isEmpty() && hits.isEmpty()) {
                 EmptyState(
@@ -217,6 +227,31 @@ fun RosterScreen(navigator: CompanionNavigator) {
                 }
             }
         }
+
+        // Pinned under the roster, the way iOS floats it over the bottom of the
+        // list: only the chats that need you, are working, or have something you
+        // have not read.
+        UpdatesBar(updates = updates, onOpen = { showingUpdates = true })
+    }
+
+    if (showingUpdates) {
+        UpdatesSheet(
+            onOpen = { chat ->
+                showingUpdates = false
+                navigator.push(Destination.Thread(chat.threadId))
+            },
+            onDismiss = { showingUpdates = false },
+        )
+    }
+
+    if (showingNewGroup) {
+        NewGroupSheet(
+            onCreated = { room ->
+                showingNewGroup = false
+                navigator.push(Destination.Thread(room.threadId))
+            },
+            onDismiss = { showingNewGroup = false },
+        )
     }
 }
 
@@ -228,6 +263,7 @@ private fun RosterHeader(
     onQueryChange: (String) -> Unit,
     onProfile: () -> Unit,
     onCreateBot: () -> Unit,
+    onCreateGroup: () -> Unit,
 ) {
     Row(
         modifier = Modifier
@@ -281,15 +317,26 @@ private fun RosterHeader(
             }
         }
 
-        // Same place the desktop puts it, top-right of the roster.
-        Icon(
-            imageVector = Icons.Filled.Add,
-            contentDescription = "New bot",
-            modifier = Modifier
-                .size(34.dp)
-                .clickable(onClick = onCreateBot)
-                .padding(6.dp),
-        )
+        // The roster has no groups strip yet, so the plus iOS puts on its empty
+        // group tile lives here instead, beside the one that makes a bot. Both
+        // are IconButtons: the glyph is 22dp, the target the full 48dp.
+        IconButton(onClick = onCreateGroup) {
+            Icon(
+                imageVector = Icons.Filled.Add,
+                contentDescription = "New group",
+                modifier = Modifier.size(22.dp),
+            )
+        }
+
+        // Same place the desktop puts it, top-right of the roster — and the same
+        // pencil iOS draws, so the two creations are not two plus signs.
+        IconButton(onClick = onCreateBot) {
+            Icon(
+                imageVector = Icons.Filled.Create,
+                contentDescription = "New bot",
+                modifier = Modifier.size(22.dp),
+            )
+        }
     }
 }
 
