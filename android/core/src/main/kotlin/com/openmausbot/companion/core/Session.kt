@@ -4,6 +4,8 @@ import java.net.URI
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.async
+import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.ensureActive
@@ -826,6 +828,169 @@ class Session(
             _state.update { it.apply(Frame.Bot(activeClient.deleteTask(forBot.id, task.threadId))) }
         } catch (error: Throwable) {
             _actionError.value = error.message
+        }
+    }
+
+    suspend fun updateProfile(patch: BotProfilePatch, forBot: Bot): Bot? {
+        val activeClient = client ?: return null
+        return try {
+            val updated = activeClient.updateProfile(forBot.id, patch)
+            currentCoroutineContext().ensureActive()
+            _state.update { it.apply(Frame.Bot(updated)) }
+            updated
+        } catch (error: Throwable) {
+            if (error is kotlinx.coroutines.CancellationException) throw error
+            _actionError.value = error.message
+            null
+        }
+    }
+
+    suspend fun uploadAvatar(
+        data: ByteArray,
+        mime: String,
+        forBot: Bot,
+        crop: AvatarCrop,
+    ): Bot? {
+        val activeClient = client ?: return null
+        return try {
+            val avatarUrl = activeClient.uploadAvatar(data, mime)
+            currentCoroutineContext().ensureActive()
+            val current = _state.value.bot(forBot.id) ?: forBot
+            updateProfile(
+                BotProfilePatch(
+                    avatarUrl = BotProfilePatch.AvatarURL.Set(avatarUrl),
+                    avatarCrop = crop,
+                ),
+                current,
+            )
+        } catch (error: Throwable) {
+            if (error is kotlinx.coroutines.CancellationException) throw error
+            _actionError.value = error.message
+            null
+        }
+    }
+
+    suspend fun generateAvatar(prompt: String, forBot: Bot): Bot? {
+        val activeClient = client ?: return null
+        return try {
+            val updated = activeClient.generateAvatar(forBot.id, prompt)
+            currentCoroutineContext().ensureActive()
+            _state.update { it.apply(Frame.Bot(updated)) }
+            updated
+        } catch (error: Throwable) {
+            if (error is kotlinx.coroutines.CancellationException) throw error
+            _actionError.value = error.message
+            null
+        }
+    }
+
+    suspend fun avatarData(forBot: Bot): ByteArray? {
+        val path = forBot.avatarUrl ?: return null
+        return try {
+            client?.avatar(path)
+        } catch (error: Throwable) {
+            if (error is kotlinx.coroutines.CancellationException) throw error
+            null
+        }
+    }
+
+    suspend fun voiceOptions(): List<Voice> {
+        val activeClient = client ?: return emptyList()
+        return try {
+            activeClient.voices()
+        } catch (error: Throwable) {
+            if (error is kotlinx.coroutines.CancellationException) throw error
+            _actionError.value = error.message
+            emptyList()
+        }
+    }
+
+    suspend fun previewVoice(voiceId: String, forBot: Bot): ByteArray? {
+        val activeClient = client ?: return null
+        return try {
+            activeClient.previewVoice("Hello, I'm ${forBot.name}.", voiceId)
+        } catch (error: Throwable) {
+            if (error is kotlinx.coroutines.CancellationException) throw error
+            _actionError.value = error.message
+            null
+        }
+    }
+
+    suspend fun configStatus(): ConfigStatus? = try {
+        client?.config()
+    } catch (error: Throwable) {
+        if (error is kotlinx.coroutines.CancellationException) throw error
+        null
+    }
+
+    suspend fun loadRoutines(): RoutinesResponse {
+        val activeClient = client ?: return RoutinesResponse(emptyList(), emptyList())
+        return try {
+            activeClient.routines()
+        } catch (error: Throwable) {
+            if (error is kotlinx.coroutines.CancellationException) throw error
+            _actionError.value = error.message
+            RoutinesResponse(emptyList(), emptyList())
+        }
+    }
+
+    suspend fun loadRoutineRunAvailability(): RoutineRunAvailability? {
+        val activeClient = client ?: return null
+        return try {
+            coroutineScope {
+                val config = async { activeClient.config() }
+                val instances = async { activeClient.instances() }
+                RoutineRunAvailability(config.await(), instances.await())
+            }
+        } catch (error: Throwable) {
+            if (error is kotlinx.coroutines.CancellationException) throw error
+            _actionError.value = error.message
+            null
+        }
+    }
+
+    suspend fun saveRoutine(input: RoutineInput, id: String?): Routine? {
+        val activeClient = client ?: return null
+        return try {
+            if (id == null) activeClient.createRoutine(input) else activeClient.updateRoutine(id, input)
+        } catch (error: Throwable) {
+            if (error is kotlinx.coroutines.CancellationException) throw error
+            _actionError.value = error.message
+            null
+        }
+    }
+
+    suspend fun setRoutineEnabled(routine: Routine, enabled: Boolean): Routine? {
+        val activeClient = client ?: return null
+        return try {
+            activeClient.setRoutineEnabled(routine.id, enabled)
+        } catch (error: Throwable) {
+            if (error is kotlinx.coroutines.CancellationException) throw error
+            _actionError.value = error.message
+            null
+        }
+    }
+
+    suspend fun runRoutine(routine: Routine): RoutineRun? {
+        val activeClient = client ?: return null
+        return try {
+            activeClient.runRoutine(routine.id)
+        } catch (error: Throwable) {
+            if (error is kotlinx.coroutines.CancellationException) throw error
+            _actionError.value = error.message
+            null
+        }
+    }
+
+    suspend fun deleteRoutine(routine: Routine): Boolean {
+        val activeClient = client ?: return false
+        return try {
+            activeClient.deleteRoutine(routine.id)
+            true
+        } catch (error: Throwable) {
+            if (error is kotlinx.coroutines.CancellationException) throw error
+            _actionError.value = error.message
+            false
         }
     }
 

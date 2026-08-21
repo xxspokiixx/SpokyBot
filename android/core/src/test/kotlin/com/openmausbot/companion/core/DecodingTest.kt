@@ -33,6 +33,45 @@ class DecodingTest {
     }
 
     @Test
+    fun oldAndNewAvatarProfilesDecodeTogether() {
+        val oldBot = decodeFixture<Fleet>("bots-full").bots.first()
+        assertNull(oldBot.avatarUrl)
+        assertNull(oldBot.avatarCrop)
+
+        val newBot = decodeFixture<Fleet>("bot-avatar-profile").bots.first()
+        assertEquals(
+            "/api/attachments/123e4567-e89b-12d3-a456-426614174000.webp",
+            newBot.avatarUrl,
+        )
+        assertEquals(AvatarCrop.ROUNDED, newBot.avatarCrop)
+        assertEquals("voice-1", newBot.voice)
+        assertEquals(true, newBot.speakReplies)
+    }
+
+    @Test
+    fun futureAvatarCropFallsBackWithoutDroppingTheBot() {
+        listOf("hexagon", "ROUNDED").forEach { futureValue ->
+            val fixture = fixtureText("bot-avatar-profile")
+                .replace("\"avatarCrop\":\"rounded\"", "\"avatarCrop\":\"$futureValue\"")
+            val fleet = CompanionJson.decodeFromString<Fleet>(fixture)
+
+            assertEquals(1, fleet.bots.size)
+            assertEquals(AvatarCrop.MASCOT, fleet.bots.first().avatarCrop)
+        }
+    }
+
+    @Test
+    fun futureRoutineScheduleKindRemainsVisibleAsUnknown() {
+        val schedule = CompanionJson.decodeFromString<RoutineSchedule>(
+            """{"type":"weekly","time":"09:00","weekdays":[1]}""",
+        )
+
+        assertEquals(RoutineSchedule.Kind.UNKNOWN, schedule.type)
+        assertEquals("09:00", schedule.time)
+        assertEquals(listOf(1), schedule.weekdays)
+    }
+
+    @Test
     fun decodesTheCloudBackendAndItsAbsence() {
         val fleet = CompanionJson.decodeFromString<Fleet>(
             """{"bots":[

@@ -12,10 +12,13 @@ import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.suspendCancellableCoroutine
 import kotlinx.serialization.SerializationException
 import kotlinx.serialization.decodeFromString
+import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.buildJsonObject
+import kotlinx.serialization.json.encodeToJsonElement
+import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.put
 import okhttp3.Call
 import okhttp3.Callback
@@ -108,6 +111,14 @@ class CompanionClient(
         .writeTimeout(ACTION_TIMEOUT_SECONDS, TimeUnit.SECONDS)
         .build()
 
+    private val avatarGenerationClient = baseClient.newBuilder()
+        .dns(endpoint?.dns ?: baseClient.dns)
+        .callTimeout(AVATAR_GENERATION_TIMEOUT_SECONDS, TimeUnit.SECONDS)
+        .connectTimeout(AVATAR_GENERATION_TIMEOUT_SECONDS, TimeUnit.SECONDS)
+        .readTimeout(AVATAR_GENERATION_TIMEOUT_SECONDS, TimeUnit.SECONDS)
+        .writeTimeout(AVATAR_GENERATION_TIMEOUT_SECONDS, TimeUnit.SECONDS)
+        .build()
+
     suspend fun health(): JsonObject = send(makeRequest("GET", "/api/health"))
 
     suspend fun fleet(messages: Int? = 50): Fleet = send(makeRequest(
@@ -171,7 +182,90 @@ class CompanionClient(
         return raw.data
     }
 
+    suspend fun avatar(path: String): ByteArray {
+        if (!validAvatarPath(path)) throw APIError.BadUrl
+        val raw = perform(makeRequest("GET", path))
+        check(raw)
+        return raw.data
+    }
+
+    suspend fun voices(): List<Voice> = send<VoiceListResponse>(
+        makeRequest("GET", "/api/tts/voices"),
+    ).voices
+
+    suspend fun routines(): RoutinesResponse = send(makeRequest("GET", "/api/routines"))
+
     suspend fun createBot(): Bot = send<CreatedBot>(makeRequest("POST", "/api/bots")).bot
+
+    suspend fun updateProfile(botId: String, patch: BotProfilePatch): Bot {
+        val body = CompanionJson.encodeToJsonElement(BotProfilePatch.serializer(), patch).jsonObject
+        return send<BotResponse>(
+            makeRequest("PATCH", "/api/bots/$botId/profile", body = body),
+        ).bot
+    }
+
+    suspend fun uploadAvatar(data: ByteArray, mime: String): String {
+        if (mime !in AVATAR_MIME_TYPES || data.size > AVATAR_MAX_BYTES) {
+            throw APIError.Transport("Choose a PNG, JPEG, GIF, or WebP image up to 10 MB.")
+        }
+        val saved = send<AttachmentResponse>(makeRequest(
+            "POST",
+            "/api/attachments",
+            rawBody = data.toRequestBody(mime.toMediaType()),
+        ))
+        val name = saved.path.substringAfterLast('/')
+        if (name.isEmpty() || '/' in name) {
+            throw APIError.Transport("The uploaded image could not be used.")
+        }
+        return "/api/attachments/$name"
+    }
+
+    suspend fun generateAvatar(botId: String, prompt: String): Bot =
+        send<GeneratedAvatarResponse>(
+            makeRequest(
+                "POST",
+                "/api/bots/$botId/avatar/generate",
+                body = jsonBody("prompt" to prompt.take(400)),
+            ),
+            avatarGenerationClient,
+        ).bot
+
+    suspend fun previewVoice(text: String, voiceId: String): ByteArray {
+        val raw = perform(makeRequest(
+            "POST",
+            "/api/tts/speak",
+            body = jsonBody("text" to text.take(500), "voiceId" to voiceId),
+        ))
+        check(raw)
+        return raw.data
+    }
+
+    suspend fun createRoutine(input: RoutineInput): Routine {
+        requireSupported(input.schedule)
+        return send<RoutineResponse>(
+            makeRequest("POST", "/api/routines", body = routineBody(input)),
+        ).routine
+    }
+
+    suspend fun updateRoutine(id: String, input: RoutineInput): Routine {
+        requireSupported(input.schedule)
+        return send<RoutineResponse>(
+            makeRequest("PATCH", "/api/routines/$id", body = routineBody(input)),
+        ).routine
+    }
+
+    suspend fun setRoutineEnabled(id: String, enabled: Boolean): Routine =
+        send<RoutineResponse>(
+            makeRequest("PATCH", "/api/routines/$id", body = buildJsonObject { put("enabled", enabled) }),
+        ).routine
+
+    suspend fun runRoutine(id: String): RoutineRun = send<RoutineRunResponse>(
+        makeRequest("POST", "/api/routines/$id/run"),
+    ).run
+
+    suspend fun deleteRoutine(id: String) {
+        sendUnit(makeRequest("DELETE", "/api/routines/$id"))
+    }
 
     suspend fun createRoom(name: String?, memberIds: List<String>): Room {
         val body = buildJsonObject {
@@ -289,12 +383,15 @@ class CompanionClient(
         path: String,
         query: List<Pair<String, String>> = emptyList(),
         body: JsonObject? = null,
+        rawBody: RequestBody? = null,
     ): Request {
+        require(body == null || rawBody == null)
         val base = endpoint?.baseUrl ?: throw APIError.BadUrl
         val url = base.newBuilder().encodedPath(path).apply {
             query.forEach { (name, value) -> addQueryParameter(name, value) }
         }.build()
         val requestBody = when {
+            rawBody != null -> rawBody
             body != null -> CompanionJson.encodeToString(JsonObject.serializer(), body)
                 .toRequestBody(JSON_MEDIA_TYPE)
             method == "POST" || method == "PATCH" -> EMPTY_BODY
@@ -307,8 +404,11 @@ class CompanionClient(
             .build()
     }
 
-    private suspend inline fun <reified T> send(request: Request): T {
-        val raw = perform(request)
+    private suspend inline fun <reified T> send(
+        request: Request,
+        requestClient: OkHttpClient = actionClient,
+    ): T {
+        val raw = perform(request, requestClient)
         check(raw)
         return try {
             CompanionJson.decodeFromString(raw.data.toString(Charsets.UTF_8))
@@ -322,8 +422,11 @@ class CompanionClient(
         check(raw)
     }
 
-    private suspend fun perform(request: Request): RawResponse = suspendCancellableCoroutine { continuation ->
-        val call = actionClient.newCall(request)
+    private suspend fun perform(
+        request: Request,
+        requestClient: OkHttpClient = actionClient,
+    ): RawResponse = suspendCancellableCoroutine { continuation ->
+        val call = requestClient.newCall(request)
         continuation.invokeOnCancellation { call.cancel() }
         call.enqueue(object : Callback {
             override fun onFailure(call: Call, e: IOException) {
@@ -367,9 +470,47 @@ class CompanionClient(
 
     companion object {
         private const val ACTION_TIMEOUT_SECONDS = 20L
+        private const val AVATAR_GENERATION_TIMEOUT_SECONDS = 150L
         private const val STREAM_IDLE_TIMEOUT_SECONDS = 90L
+        private const val AVATAR_MAX_BYTES = 10 * 1_024 * 1_024
+        private val AVATAR_MIME_TYPES = setOf("image/png", "image/jpeg", "image/gif", "image/webp")
         private val JSON_MEDIA_TYPE = "application/json".toMediaType()
         private val EMPTY_BODY: RequestBody = ByteArray(0).toRequestBody(null)
+
+        private fun validAvatarPath(path: String): Boolean {
+            val prefix = "/api/attachments/"
+            if (!path.startsWith(prefix)) return false
+            val name = path.removePrefix(prefix)
+            val dot = name.lastIndexOf('.')
+            if (dot <= 0) return false
+            val stem = name.substring(0, dot)
+            val extension = name.substring(dot + 1)
+            return stem.all { it in '0'..'9' || it in 'A'..'Z' || it in 'a'..'z' || it == '-' } &&
+                extension in setOf("png", "jpg", "gif", "webp")
+        }
+
+        private fun requireSupported(schedule: RoutineSchedule) {
+            if (schedule.type == RoutineSchedule.Kind.UNKNOWN) {
+                throw APIError.Transport("Choose a supported schedule before saving this routine.")
+            }
+        }
+
+        private fun routineBody(input: RoutineInput): JsonObject = buildJsonObject {
+            put("name", input.name)
+            put("prompt", input.prompt)
+            put("botId", input.botId)
+            put("runOn", input.runOn)
+            input.enabled?.let { put("enabled", it) }
+            put("schedule", buildJsonObject {
+                put("type", input.schedule.type.name.lowercase())
+                input.schedule.at?.let { put("at", it) }
+                input.schedule.time?.let { put("time", it) }
+                input.schedule.weekdays?.let { days ->
+                    put("weekdays", JsonArray(days.map(::JsonPrimitive)))
+                }
+            })
+            put("durationMinutes", input.durationMinutes)
+        }
 
         suspend fun pair(
             connection: Connection,
