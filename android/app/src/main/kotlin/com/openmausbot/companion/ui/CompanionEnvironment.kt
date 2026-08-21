@@ -2,6 +2,8 @@ package com.openmausbot.companion.ui
 
 import androidx.compose.runtime.Immutable
 import androidx.compose.runtime.staticCompositionLocalOf
+import com.openmausbot.companion.audio.VoicePreviewPlayer
+import com.openmausbot.companion.avatar.AvatarImageStore
 import com.openmausbot.companion.core.ExportedTranscript
 import com.openmausbot.companion.core.Session
 import java.net.URI
@@ -57,6 +59,10 @@ class CompanionEnvironment(
     val discovery: NsdDiscovery,
     val camera: CameraPermissionController,
     val notifications: NotificationPermissionController,
+    /** Bounded in-memory avatar bytes/bitmaps; cleared on sign-out. */
+    val avatars: AvatarImageStore,
+    /** One-at-a-time TTS preview; bind to the profile screen lifecycle. */
+    val voicePreview: VoicePreviewPlayer,
     /** Fires the activity's `RequestMultiplePermissions` launcher. */
     val requestPermissions: (Array<String>) -> Unit,
     /** Opens the OS app-settings page, for a permission the user denied. */

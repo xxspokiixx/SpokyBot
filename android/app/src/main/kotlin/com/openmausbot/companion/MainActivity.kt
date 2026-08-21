@@ -130,6 +130,8 @@ class MainActivity : ComponentActivity() {
             discovery = app.discovery,
             camera = camera,
             notifications = notifications,
+            avatars = app.avatars,
+            voicePreview = app.voicePreview,
             requestPermissions = { permissions -> permissionRequests.request(permissions) },
             openAppSettings = ::openAppSettings,
             shareTranscript = sharing::share,
