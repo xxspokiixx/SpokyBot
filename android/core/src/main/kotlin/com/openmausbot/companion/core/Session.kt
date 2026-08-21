@@ -55,6 +55,12 @@ class Session(
         data class Offline(val message: String) : Status
     }
 
+    sealed interface RestoreState {
+        data object Pending : RestoreState
+        data object Ready : RestoreState
+        data object Unpaired : RestoreState
+    }
+
     private val _state = MutableStateFlow(CompanionState())
     val state: StateFlow<CompanionState> = _state.asStateFlow()
 
@@ -63,6 +69,9 @@ class Session(
 
     private val _status = MutableStateFlow<Status>(Status.Unpaired)
     val status: StateFlow<Status> = _status.asStateFlow()
+
+    private val _restoreState = MutableStateFlow<RestoreState>(RestoreState.Pending)
+    val restoreState: StateFlow<RestoreState> = _restoreState.asStateFlow()
 
     private val _actionError = MutableStateFlow<String?>(null)
     var actionError: String?
@@ -83,7 +92,6 @@ class Session(
     private var streamGeneration = 0
     private var reconnectDelaySeconds: Long = 0
     private var screenWatchers = 0
-    private var restorePending = false
     private val gate = Mutex()
     private val notificationGate = Mutex()
     private val restored = CompletableDeferred<Unit>()
@@ -168,7 +176,7 @@ class Session(
             rotation = CandidateRotation(stored.orderedHosts)
             client = clientFactory(stored, paired.token)
             _state.value = CompanionState()
-            restorePending = false
+            _restoreState.value = RestoreState.Ready
             _pairingInvite.value = null
         }
         connect()
@@ -220,7 +228,7 @@ class Session(
         _connection.value != null ||
             token != null ||
             client != null ||
-            restorePending ||
+            _restoreState.value is RestoreState.Pending ||
             _status.value !is Status.Unpaired
 
     private fun burnQrCredential(credential: String) {
@@ -245,7 +253,7 @@ class Session(
         streamJob = null
         scope.launch {
             gate.withLock {
-                restorePending = false
+                _restoreState.value = RestoreState.Unpaired
                 _connection.value?.id?.let { tokenStore.remove(it) }
                 connectionStore.clear()
                 _connection.value = null
@@ -264,7 +272,7 @@ class Session(
         streamJob?.cancel()
         streamJob = null
         gate.withLock {
-            restorePending = false
+            _restoreState.value = RestoreState.Unpaired
             _connection.value?.id?.let { tokenStore.remove(it) }
             connectionStore.clear()
             _connection.value = null
@@ -282,7 +290,7 @@ class Session(
         scope.launch {
             restored.await()
             val generation = gate.withLock {
-                if (client == null && restorePending) {
+                if (client == null && _restoreState.value is RestoreState.Pending) {
                     restoreLocked()
                 }
                 if (client == null || streamJob != null) return@withLock null
@@ -306,12 +314,15 @@ class Session(
     }
 
     private suspend fun restoreLocked() {
-        restorePending = false
-        val saved = connectionStore.load() ?: return
+        val saved = connectionStore.load()
+        if (saved == null) {
+            _restoreState.value = RestoreState.Unpaired
+            return
+        }
         when (val stored = tokenStore.read(saved.id)) {
             is TokenStore.ReadResult.Unavailable -> {
                 _connection.value = saved
-                restorePending = true
+                _restoreState.value = RestoreState.Pending
                 _status.value = Status.Offline(
                     if (stored.locked) {
                         "Unlock this phone to reach your computer."
@@ -320,12 +331,15 @@ class Session(
                     },
                 )
             }
-            TokenStore.ReadResult.Missing -> Unit
+            TokenStore.ReadResult.Missing -> {
+                _restoreState.value = RestoreState.Unpaired
+            }
             is TokenStore.ReadResult.Found -> {
                 _connection.value = saved
                 token = stored.token
                 rotation = CandidateRotation(saved.orderedHosts)
                 client = clientFactory(saved, stored.token)
+                _restoreState.value = RestoreState.Ready
                 _status.value = Status.Connecting
             }
         }
@@ -341,7 +355,7 @@ class Session(
     suspend fun refresh() {
         awaitRestored()
         gate.withLock {
-            if (client == null && restorePending) {
+            if (client == null && _restoreState.value is RestoreState.Pending) {
                 restoreLocked()
             }
             if (client == null) return@withLock

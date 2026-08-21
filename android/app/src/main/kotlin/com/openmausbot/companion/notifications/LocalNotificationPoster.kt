@@ -5,21 +5,20 @@ import android.app.NotificationChannel
 import android.app.NotificationManager
 import android.app.PendingIntent
 import android.content.Context
-import android.content.Intent
 import android.content.pm.PackageManager
 import android.os.Build
 import androidx.core.app.NotificationCompat
 import androidx.core.app.NotificationManagerCompat
 import androidx.core.content.ContextCompat
-import com.openmausbot.companion.MainActivity
 import com.openmausbot.companion.R
 import com.openmausbot.companion.core.NotificationFrame
 import com.openmausbot.companion.core.NotificationSink
 
 /**
  * Local-only notifications from live/replayed notify frames. No FCM.
- * PendingIntent carries threadId so a later pass can navigate on tap
- * (the one allowed quality delta vs iOS).
+ * PendingIntent carries both `botId` and `threadId` — the same pair iOS puts
+ * in `userInfo` — so a tap opens the exact task (the one allowed quality
+ * delta vs iOS, which only presents the banner).
  */
 class LocalNotificationPoster(
     context: Context,
@@ -34,16 +33,12 @@ class LocalNotificationPoster(
     override fun deliver(notification: NotificationFrame, sequence: Int?) {
         if (!canPost()) return
         val channelId = NotificationMapping.channelId(notification)
-        val intent = Intent(appContext, MainActivity::class.java).apply {
-            flags = Intent.FLAG_ACTIVITY_SINGLE_TOP or Intent.FLAG_ACTIVITY_CLEAR_TOP
-            putExtra(EXTRA_THREAD_ID, notification.threadId)
-            putExtra(EXTRA_BOT_ID, notification.botId)
-            putExtra(EXTRA_KIND, notification.kind)
-        }
-        val requestCode = notification.threadId.hashCode()
+        // Identity lives in Intent data (botId + threadId), not a hashed
+        // requestCode — extras alone cannot distinguish PendingIntents.
+        val intent = NotificationIntents.contentIntent(appContext, notification)
         val pending = PendingIntent.getActivity(
             appContext,
-            requestCode,
+            0,
             intent,
             PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
         )

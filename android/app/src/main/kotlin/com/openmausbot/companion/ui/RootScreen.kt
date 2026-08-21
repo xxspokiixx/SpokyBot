@@ -16,10 +16,15 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableIntStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.saveable.rememberSaveable
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
+import com.openmausbot.companion.core.NotificationTarget
 import com.openmausbot.companion.core.Session
 
 /**
@@ -28,12 +33,13 @@ import com.openmausbot.companion.core.Session
  */
 @Composable
 fun CompanionRoot(
-    pendingThreadId: String?,
-    onPendingThreadConsumed: () -> Unit,
+    pendingNotification: NotificationTarget?,
+    onPendingTargetConsumed: (NotificationTarget) -> Unit,
 ) {
     val environment = LocalCompanion.current
     val session = environment.session
     val status by session.status.collectAsState()
+    val restoreState by session.restoreState.collectAsState()
 
     // What the app needs to do its job: notifications, because approvals are the
     // reason it exists, and nearby/local-network per SDK, because without them
@@ -44,6 +50,30 @@ fun CompanionRoot(
         if (missing.isNotEmpty()) environment.requestPermissions(missing)
     }
 
+    // Resolve above PairingScreen / UnpairedScreen / PairedScreen so a tap
+    // while unpaired or unauthorized is consumed (and cannot open against the
+    // next bond). Re-runs when restoreState leaves Pending so a deferred
+    // target is not stranded after a cold-start restore that finishes unpaired.
+    // The coordinator owns every consume: identified no-chat inside onPending,
+    // and navigate→consume inside commit. RootScreen cannot omit or invert.
+    val tapCoordinator = remember { NotificationTapCoordinator() }
+    val resolution by tapCoordinator.resolution.collectAsState()
+    // Persistable: bumping this keys the navigator saver with a generation that
+    // is also written into the saved value, so a stack captured while
+    // Unauthorized/Unpaired was landing cannot restore after the next pair (§6).
+    var bondGeneration by rememberSaveable { mutableIntStateOf(0) }
+
+    LaunchedEffect(status) {
+        if (NotificationTapCoordinator.leavesBond(status)) {
+            tapCoordinator.discardResolved()
+            bondGeneration += 1
+        }
+    }
+    LaunchedEffect(pendingNotification, status, restoreState) {
+        val target = pendingNotification ?: return@LaunchedEffect
+        tapCoordinator.onPending(session, target, onPendingTargetConsumed)
+    }
+
     CompanionTheme {
         // One place for system insets: the app draws edge to edge, and every
         // screen wants the same answer — keep content clear of the status bar,
@@ -52,7 +82,13 @@ fun CompanionRoot(
             when (status) {
                 is Session.Status.Unpaired -> PairingScreen()
                 is Session.Status.Unauthorized -> UnpairedScreen()
-                else -> PairedScreen(pendingThreadId, onPendingThreadConsumed)
+                else -> PairedScreen(
+                    resolution = resolution,
+                    bondGeneration = bondGeneration,
+                    onCommit = { held, navigator ->
+                        tapCoordinator.commit(held, navigator, onPendingTargetConsumed)
+                    },
+                )
             }
         }
         // Pairing failures are shown inline on the pairing form, where the
@@ -64,15 +100,19 @@ fun CompanionRoot(
 }
 
 @Composable
-private fun PairedScreen(pendingThreadId: String?, onPendingThreadConsumed: () -> Unit) {
-    val navigator = rememberCompanionNavigator()
+private fun PairedScreen(
+    resolution: NotificationTapCoordinator.Resolution?,
+    bondGeneration: Int,
+    onCommit: (NotificationTapCoordinator.Resolution, CompanionNavigator) -> Unit,
+) {
+    val navigator = rememberCompanionNavigator(bondGeneration)
 
-    // Notification tap → the thread it is about. The one quality delta over iOS,
-    // which only presents the banner (§16).
-    LaunchedEffect(pendingThreadId) {
-        val threadId = pendingThreadId ?: return@LaunchedEffect
-        navigator.openThread(threadId)
-        onPendingThreadConsumed()
+    // Session already resolved the exact task; the coordinator records the
+    // stack and consumes in one commit — keyed on generation so a superseded
+    // tap cannot run against a newer pending target.
+    LaunchedEffect(resolution?.generation) {
+        val held = resolution ?: return@LaunchedEffect
+        onCommit(held, navigator)
     }
 
     BackHandler(enabled = navigator.canGoBack) { navigator.pop() }

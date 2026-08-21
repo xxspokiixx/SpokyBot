@@ -35,10 +35,10 @@ sealed interface Destination {
     /**
      * A conversation, in one of the two ways something can name one.
      *
-     * [Chat] is the addressed form and what everything on screen produces. [Thread]
-     * is what a notification tap arrives carrying — a thread, with the agent that
-     * owns it still to be learned — and it becomes a [Chat] the moment the fleet
-     * resolves it.
+     * [Chat] is the addressed form: what the screens produce, and what a
+     * notification tap becomes after Session resolves the exact task. [Thread]
+     * remains for an address that still only knows a thread id — it becomes a
+     * [Chat] the moment the fleet names the owner.
      */
     sealed interface Conversation : Destination
 
@@ -76,6 +76,14 @@ class CompanionNavigator(initial: List<Destination> = listOf(Destination.Roster)
     /** A notification tap lands on the thread, with the roster behind it. */
     fun openThread(threadId: String) {
         stack = listOf(Destination.Roster, Destination.Thread(threadId))
+    }
+
+    /**
+     * A notification tap that Session has already resolved to a chat — roster
+     * behind it, same shape as [openThread], addressed by the stable owner.
+     */
+    fun openFromNotification(chat: Chat) {
+        stack = listOf(Destination.Roster, Destination.Chat(chat.target))
     }
 
     /**
@@ -142,13 +150,53 @@ class CompanionNavigator(initial: List<Destination> = listOf(Destination.Roster)
             return raw.substring(start, start + length) to raw.substring(start + length)
         }
 
-        val Saver: Saver<CompanionNavigator, List<String>> = Saver(
-            save = { encode(it.stack) },
-            restore = { CompanionNavigator(decode(it)) },
+        /**
+         * First entry of a bonded save. Carrying the generation inside the
+         * saved value — not only as a [rememberSaveable] input — is what lets
+         * a restore from a previous bond be recognised and rejected: after
+         * recreation the registry key is still call position, so inputs alone
+         * cannot compare against a generation that was never written.
+         */
+        private const val BOND_MARKER = "bond:"
+
+        /**
+         * Saver keyed to [bondGeneration]. Restoring a value whose saved
+         * generation differs (or that has no marker) returns null so
+         * [rememberSaveable] runs its init and the next bond starts on roster.
+         */
+        fun saver(bondGeneration: Int): Saver<CompanionNavigator, List<String>> = Saver(
+            save = { listOf(BOND_MARKER + bondGeneration) + encode(it.stack) },
+            restore = { restoreForGeneration(it, bondGeneration) },
         )
+
+        /**
+         * Pure restore path for JVM tests: returns null when [raw] was saved
+         * under a different bond generation (or is not a bonded save).
+         */
+        fun restoreForGeneration(raw: List<String>, expectedGeneration: Int): CompanionNavigator? {
+            val header = raw.firstOrNull() ?: return null
+            if (!header.startsWith(BOND_MARKER)) return null
+            val saved = header.removePrefix(BOND_MARKER).toIntOrNull() ?: return null
+            if (saved != expectedGeneration) return null
+            return CompanionNavigator(decode(raw.drop(1)))
+        }
+
+        /** Encode a stack together with the bond generation that owns it. */
+        fun encodeWithBond(stack: List<Destination>, bondGeneration: Int): List<String> =
+            listOf(BOND_MARKER + bondGeneration) + encode(stack)
     }
 }
 
+/**
+ * @param bondGeneration bumped whenever the bond is left ([NotificationTapCoordinator.leavesBond]).
+ *   Written into the saver value and passed as a [rememberSaveable] input: a
+ *   configuration change that captured `Roster → Chat` while Unauthorized /
+ *   Unpaired was landing cannot materialise that chat after sign-out → pair
+ *   again (§6 / single computer), because restore rejects a mismatched
+ *   generation.
+ */
 @Composable
-fun rememberCompanionNavigator(): CompanionNavigator =
-    rememberSaveable(saver = CompanionNavigator.Saver) { CompanionNavigator() }
+fun rememberCompanionNavigator(bondGeneration: Int = 0): CompanionNavigator =
+    rememberSaveable(bondGeneration, saver = CompanionNavigator.saver(bondGeneration)) {
+        CompanionNavigator()
+    }

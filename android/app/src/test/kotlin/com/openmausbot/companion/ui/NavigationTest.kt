@@ -89,6 +89,19 @@ class NavigationTest {
     }
 
     @Test
+    fun `a resolved notification chat lands with the roster behind it`() {
+        val navigator = CompanionNavigator()
+        navigator.push(Destination.Settings)
+        navigator.openFromNotification(Chat.BotChat(bot(id = "bot-1").copy(threadId = "task-2")))
+        assertEquals(
+            listOf(Destination.Roster, Destination.Chat(ChatTarget.Bot("bot-1", "task-2"))),
+            navigator.stack,
+        )
+        navigator.pop()
+        assertEquals(Destination.Roster, navigator.current)
+    }
+
+    @Test
     fun `the stack survives a round trip through the saver`() {
         val stack = listOf(
             Destination.Roster,
@@ -98,6 +111,27 @@ class NavigationTest {
             Destination.Chat(ChatTarget.Room("room::9", "")),
         )
         assertEquals(stack, CompanionNavigator.decode(CompanionNavigator.encode(stack)))
+    }
+
+    @Test
+    fun `a bonded save from a previous generation is rejected on restore`() {
+        val stack = listOf(
+            Destination.Roster,
+            Destination.Chat(ChatTarget.Bot("old-bot", "old-task")),
+        )
+        val saved = CompanionNavigator.encodeWithBond(stack, bondGeneration = 0)
+        assertNull(CompanionNavigator.restoreForGeneration(saved, expectedGeneration = 1))
+        assertEquals(
+            stack,
+            requireNotNull(CompanionNavigator.restoreForGeneration(saved, expectedGeneration = 0)).stack,
+        )
+        // A pre-bond encoding (no generation marker) cannot restore into a later bond.
+        assertNull(
+            CompanionNavigator.restoreForGeneration(
+                CompanionNavigator.encode(stack),
+                expectedGeneration = 0,
+            ),
+        )
     }
 
     @Test
@@ -152,63 +186,81 @@ class NavigationTest {
  * The notification tap has to fire once and only once — and "once" has to
  * survive a configuration change, because a rotation during the cold-start
  * restore is exactly when the tap is slowest to be consumed.
+ *
+ * Expectations come from `_temp/PARITY_DELTA_AUDIT_2.md` §D2-03 and from
+ * iOS carrying both ids (`Notifications.swift:35-38`, `Models.swift:624-643`):
+ * the composite `(botId, threadId)` is what is offered, consumed, and
+ * remembered across recreation — never a bare thread.
  */
 class PendingThreadNavigationTest {
 
     @Test
-    fun `a tap is offered to the UI`() {
+    fun `a tap is offered to the UI as a notification target`() {
         val navigation = PendingThreadNavigation()
-        navigation.offer("t1")
-        assertEquals("t1", navigation.pending.value)
+        navigation.offer("bot-1", "t1")
+        assertEquals(target("bot-1", "t1"), navigation.pending.value)
     }
 
     @Test
-    fun `an absent or empty extra offers nothing`() {
+    fun `an absent or blank extra offers nothing`() {
         val navigation = PendingThreadNavigation()
-        navigation.offer(null)
-        navigation.offer("")
+        navigation.offer(null, "t1")
+        navigation.offer("bot-1", null)
+        navigation.offer("bot-1", "")
+        navigation.offer(" ", "t1")
+        navigation.offer(null as String?, null as String?)
         assertNull(navigation.pending.value)
     }
 
     @Test
     fun `a rotation before the UI consumed it still navigates`() {
         val launch = PendingThreadNavigation()
-        launch.offer("t1")
+        launch.offer("bot-1", "t1")
         // Recreated without the UI ever consuming: the token is still null.
-        val recreated = PendingThreadNavigation(launch.consumedThreadId())
-        recreated.offer("t1")
-        assertEquals("t1", recreated.pending.value)
+        val recreated = PendingThreadNavigation(launch.consumedToken())
+        recreated.offer("bot-1", "t1")
+        assertEquals(target("bot-1", "t1"), recreated.pending.value)
     }
 
     @Test
     fun `a rotation after the UI consumed it does not navigate again`() {
         val launch = PendingThreadNavigation()
-        launch.offer("t1")
+        launch.offer("bot-1", "t1")
         launch.consume()
         assertNull(launch.pending.value)
 
-        val recreated = PendingThreadNavigation(launch.consumedThreadId())
-        recreated.offer("t1")
+        val recreated = PendingThreadNavigation(launch.consumedToken())
+        recreated.offer("bot-1", "t1")
         assertNull(recreated.pending.value)
     }
 
     @Test
-    fun `tapping the same thread again while the app is up navigates again`() {
+    fun `two notifications in a row for the same thread navigate again while the app is up`() {
         val navigation = PendingThreadNavigation()
-        navigation.offer("t1")
+        navigation.offer("bot-1", "t1")
         navigation.consume()
-        navigation.offer("t1", fresh = true)
-        assertEquals("t1", navigation.pending.value)
+        navigation.offer("bot-1", "t1", fresh = true)
+        assertEquals(target("bot-1", "t1"), navigation.pending.value)
     }
 
     @Test
-    fun `a different thread always navigates`() {
+    fun `a different target always navigates`() {
         val navigation = PendingThreadNavigation()
-        navigation.offer("t1")
+        navigation.offer("bot-1", "t1")
         navigation.consume()
-        navigation.offer("t2")
-        assertEquals("t2", navigation.pending.value)
+        navigation.offer("bot-1", "t2")
+        assertEquals(target("bot-1", "t2"), navigation.pending.value)
     }
+
+    @Test
+    fun `the consumed token round-trips bot and thread including colons`() {
+        val target = target("bot:1:x", "thread:2:y")
+        val token = PendingThreadNavigation.tokenOf(target)
+        assertEquals(target, PendingThreadNavigation.parseToken(token))
+    }
+
+    private fun target(botId: String, threadId: String) =
+        requireNotNull(com.openmausbot.companion.core.NotificationTarget.from(botId, threadId))
 }
 
 /**

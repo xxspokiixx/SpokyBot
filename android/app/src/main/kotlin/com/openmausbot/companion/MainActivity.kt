@@ -15,7 +15,7 @@ import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.core.app.NotificationManagerCompat
 import androidx.core.content.ContextCompat
-import com.openmausbot.companion.notifications.LocalNotificationPoster
+import com.openmausbot.companion.notifications.notificationTarget
 import com.openmausbot.companion.browser.CloudDesktopBrowser
 import com.openmausbot.companion.sharing.TranscriptSharing
 import com.openmausbot.companion.ui.CameraPermissionController
@@ -39,7 +39,7 @@ class MainActivity : ComponentActivity() {
     private val app: OpenMausApp
         get() = application as OpenMausApp
 
-    /** Notification tap → the thread it is about; delivered to the UI once. */
+    /** Notification tap → `(botId, threadId)`; delivered to the UI once. */
     private lateinit var notificationNavigation: PendingThreadNavigation
 
     private lateinit var camera: CameraPermissionController
@@ -72,7 +72,7 @@ class MainActivity : ComponentActivity() {
         super.onCreate(savedInstanceState)
 
         notificationNavigation = PendingThreadNavigation(
-            savedInstanceState?.getString(STATE_CONSUMED_THREAD_ID),
+            savedInstanceState?.getString(STATE_CONSUMED_NOTIFICATION),
         )
 
         camera = CameraPermissionController(
@@ -139,11 +139,11 @@ class MainActivity : ComponentActivity() {
         handleIntent(intent)
 
         setContent {
-            val threadId by notificationNavigation.pending.collectAsState()
+            val pendingTarget by notificationNavigation.pending.collectAsState()
             CompositionLocalProvider(LocalCompanion provides environment) {
                 CompanionRoot(
-                    pendingThreadId = threadId,
-                    onPendingThreadConsumed = notificationNavigation::consume,
+                    pendingNotification = pendingTarget,
+                    onPendingTargetConsumed = notificationNavigation::consume,
                 )
             }
         }
@@ -151,14 +151,14 @@ class MainActivity : ComponentActivity() {
 
     override fun onSaveInstanceState(outState: Bundle) {
         super.onSaveInstanceState(outState)
-        outState.putString(STATE_CONSUMED_THREAD_ID, notificationNavigation.consumedThreadId())
+        outState.putString(STATE_CONSUMED_NOTIFICATION, notificationNavigation.consumedToken())
     }
 
     override fun onNewIntent(intent: Intent) {
         super.onNewIntent(intent)
         setIntent(intent)
         // A tap that arrives while the app is already up is always a new request,
-        // even for a thread that was opened from a notification before.
+        // even for a target that was opened from a notification before.
         handleIntent(intent, fresh = true)
     }
 
@@ -172,7 +172,7 @@ class MainActivity : ComponentActivity() {
     }
 
     /**
-     * Deliberately reads only the notification extra.
+     * Deliberately reads only the notification extras.
      *
      * Pairing deep links belong to [PairingLinkActivity] and never reach here:
      * this Activity is the root of the main task, so the system keeps and may
@@ -183,13 +183,10 @@ class MainActivity : ComponentActivity() {
     private fun handleIntent(intent: Intent?, fresh: Boolean = false) {
         if (intent == null) return
 
-        // The extra deliberately stays on the Intent: PendingThreadNavigation
+        // The extras deliberately stay on the Intent: PendingThreadNavigation
         // remembers what has already been opened, so a rotation before the
         // composition consumed it still navigates, and one after it does not.
-        notificationNavigation.offer(
-            intent.getStringExtra(LocalNotificationPoster.EXTRA_THREAD_ID),
-            fresh = fresh,
-        )
+        notificationNavigation.offer(intent.notificationTarget(), fresh = fresh)
     }
 
     /**
@@ -216,7 +213,7 @@ class MainActivity : ComponentActivity() {
     }
 
     private companion object {
-        const val STATE_CONSUMED_THREAD_ID = "openmaus.consumedThreadId"
+        const val STATE_CONSUMED_NOTIFICATION = "openmaus.consumedNotification"
 
         /** One key per tracked permission, so a second one needs no new plumbing. */
         fun askedKey(permission: String): String =

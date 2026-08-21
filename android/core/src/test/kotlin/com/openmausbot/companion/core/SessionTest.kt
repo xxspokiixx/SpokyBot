@@ -29,6 +29,7 @@ class SessionTest {
         val session = session()
         session.awaitRestored()
         assertEquals(Session.Status.Unpaired, session.status.value)
+        assertEquals(Session.RestoreState.Unpaired, session.restoreState.value)
         assertNull(session.connection.value)
     }
 
@@ -45,8 +46,49 @@ class SessionTest {
         )
         session.awaitRestored()
         assertEquals(connection, session.connection.value)
+        assertEquals(Session.RestoreState.Pending, session.restoreState.value)
         val status = assertIs<Session.Status.Offline>(session.status.value)
-        assertTrue(status.message.contains("Unlock"))
+        assertEquals("Unlock this phone to reach your computer.", status.message)
+    }
+
+    @Test
+    fun unavailableTokenErrorRemainsPendingWithoutLockedCopy() = runTest {
+        val connection = Connection(id = "c1", name = "Mac", host = "192.168.1.2", port = 8810)
+        val tokens = FakeTokenStore().apply {
+            unavailable["c1"] = TokenStore.ReadResult.Unavailable(
+                locked = false,
+                message = "Secure storage is temporarily unavailable.",
+            )
+        }
+        val session = session(
+            connectionStore = FakeConnectionStore(connection),
+            tokenStore = tokens,
+            events = { _, _ -> emptyFlow() },
+        )
+
+        session.awaitRestored()
+
+        assertEquals(connection, session.connection.value)
+        assertEquals(Session.RestoreState.Pending, session.restoreState.value)
+        assertEquals(
+            "Secure storage is temporarily unavailable.",
+            assertIs<Session.Status.Offline>(session.status.value).message,
+        )
+    }
+
+    @Test
+    fun restoredTokenIsReady() = runTest {
+        val connection = Connection(id = "c1", name = "Mac", host = "192.168.1.2", port = 8810)
+        val session = session(
+            connectionStore = FakeConnectionStore(connection),
+            tokenStore = FakeTokenStore().apply { saved["c1"] = "device-token" },
+            events = { _, _ -> emptyFlow() },
+        )
+
+        session.awaitRestored()
+
+        assertEquals(Session.RestoreState.Ready, session.restoreState.value)
+        assertEquals(Session.Status.Connecting, session.status.value)
     }
 
     @Test
