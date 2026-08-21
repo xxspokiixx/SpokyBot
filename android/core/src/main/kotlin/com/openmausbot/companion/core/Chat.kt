@@ -31,6 +31,31 @@ sealed class Chat {
     }
 }
 
+sealed interface ChatTarget {
+    val threadId: String
+
+    data class Bot(
+        val botId: String,
+        override val threadId: String,
+    ) : ChatTarget
+
+    data class Room(
+        val roomId: String,
+        override val threadId: String,
+    ) : ChatTarget
+}
+
+val Chat.target: ChatTarget
+    get() = when (this) {
+        is Chat.BotChat -> ChatTarget.Bot(bot.id, threadId)
+        is Chat.RoomChat -> ChatTarget.Room(room.id, threadId)
+    }
+
+fun CompanionState.chat(target: ChatTarget): Chat? = when (target) {
+    is ChatTarget.Bot -> bot(target.botId)?.let(Chat::BotChat)
+    is ChatTarget.Room -> rooms.firstOrNull { it.id == target.roomId }?.let(Chat::RoomChat)
+}
+
 /**
  * A chat plus the two things a roster row shows that the record itself does not carry:
  * the preview line, and when the thread last moved.

@@ -42,6 +42,39 @@ data class OptionCard(
 ) {
     val isPending: Boolean get() = requestId != null && answered == null && dismissed != true
     val isPermission: Boolean get() = tool != null
+
+    fun responseBehavior(choice: String): String = responseBehavior(choice, isPermission)
+
+    fun shouldRememberPermission(choice: String): Boolean =
+        isPermission && allowKey != null && choice.trim().equals("Always allow", ignoreCase = true)
+
+    companion object {
+        fun responseBehavior(choice: String, isPermission: Boolean): String = when {
+            !isPermission -> "answer"
+            isRefusal(choice) -> "deny"
+            else -> "allow"
+        }
+
+        fun isRefusal(choice: String): Boolean = choice.trim().equals("Deny", ignoreCase = true)
+    }
+}
+
+@ConsistentCopyVisibility
+data class NotificationTarget private constructor(
+    val botId: String,
+    val threadId: String,
+) {
+    fun requiresTaskSwitch(activeThreadId: String): Boolean = threadId != activeThreadId
+
+    companion object {
+        fun from(botId: String?, threadId: String?): NotificationTarget? {
+            if (botId.isNullOrBlank() || threadId.isNullOrBlank()) return null
+            return NotificationTarget(botId, threadId)
+        }
+
+        fun from(payload: Map<String, String>): NotificationTarget? =
+            from(payload["botId"], payload["threadId"])
+    }
 }
 
 @Serializable

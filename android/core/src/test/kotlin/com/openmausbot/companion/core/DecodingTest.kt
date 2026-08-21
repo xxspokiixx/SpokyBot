@@ -95,8 +95,58 @@ class DecodingTest {
         assertTrue(card.isPending)
         assertTrue(card.isPermission)
         assertEquals("Bash:rm", card.allowKey)
+        assertEquals("allow", card.responseBehavior("Allow"))
+        assertEquals("allow", card.responseBehavior("Approve"))
+        assertEquals("allow", card.responseBehavior("Yes"))
+        assertEquals("allow", card.responseBehavior("Always allow"))
+        assertEquals("deny", card.responseBehavior("Deny"))
+        assertEquals("deny", card.responseBehavior(" \tdeny \r\n"))
+        assertTrue(OptionCard.isRefusal("\nDeNy\t"))
+        assertTrue(card.shouldRememberPermission(" \nAlways allow\t"))
+        assertFalse(card.shouldRememberPermission("Allow"))
+        assertFalse(card.shouldRememberPermission(" deny "))
         assertFalse(card.copy(answered = "Allow").isPending)
         assertFalse(card.copy(dismissed = true).isPending)
+    }
+
+    @Test
+    fun questionSendsItsLiteralChoiceAsAnAnswer() {
+        val card = assertNotNull(decodeFixture<Message>("options-card").card)
+        assertFalse(card.isPermission)
+        assertEquals("answer", card.responseBehavior("Anything"))
+        assertEquals("answer", OptionCard.responseBehavior("\nDeny\t", isPermission = false))
+        assertFalse(card.shouldRememberPermission("Always allow"))
+    }
+
+    @Test
+    fun standingGrantRequiresPermissionAndProviderKey() {
+        val base = OptionCard(
+            title = "Approval needed",
+            subtitle = "git push",
+            options = listOf("Always allow", "Deny"),
+            requestId = "req-1",
+        )
+        assertFalse(base.shouldRememberPermission("Always allow"))
+        assertFalse(base.copy(allowKey = "Bash:git").shouldRememberPermission("Always allow"))
+        assertTrue(
+            base.copy(tool = "Bash", allowKey = "Bash:git")
+                .shouldRememberPermission("Always allow"),
+        )
+    }
+
+    @Test
+    fun notificationTargetRequiresBothExactIds() {
+        assertEquals(
+            NotificationTarget.from("bot-1", "detached-task-2"),
+            NotificationTarget.from(mapOf("botId" to "bot-1", "threadId" to "detached-task-2")),
+        )
+        assertNull(NotificationTarget.from(mapOf("botId" to "bot-1")))
+        assertNull(NotificationTarget.from(mapOf("threadId" to "task-1")))
+        assertNull(NotificationTarget.from(" ", "task-1"))
+        assertNull(NotificationTarget.from("bot-1", "\n\t"))
+        val detached = assertNotNull(NotificationTarget.from("bot-1", "task-2"))
+        assertTrue(detached.requiresTaskSwitch("task-1"))
+        assertFalse(detached.requiresTaskSwitch("task-2"))
     }
 
     @Test

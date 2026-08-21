@@ -85,6 +85,7 @@ class Session(
     private var screenWatchers = 0
     private var restorePending = false
     private val gate = Mutex()
+    private val notificationGate = Mutex()
     private val restored = CompletableDeferred<Unit>()
     /** QR credentials that already failed a redeem — never replay (§6). */
     private val spentQrCredentials = mutableSetOf<String>()
@@ -562,23 +563,52 @@ class Session(
         }
     }
 
+    suspend fun answer(
+        chat: Chat,
+        card: OptionCard,
+        choice: String,
+        rememberingPermission: Boolean = true,
+    ) {
+        val requestId = card.requestId ?: return
+        if (
+            rememberingPermission &&
+            card.shouldRememberPermission(choice) &&
+            chat is Chat.BotChat
+        ) {
+            alwaysAllow(chat.bot, card)
+        }
+        answer(chat.threadId, requestId, choice, card.isPermission)
+    }
+
+    /**
+     * Answers [card] in [threadId] using the card's permission-aware response behavior.
+     *
+     * This overload cannot persist a standing permission grant because it has no [Chat], and thus no
+     * bot. Call sites must migrate to the [answer] overload that accepts a [Chat].
+     */
+    @Deprecated(
+        message = "Use the answer(Chat, OptionCard, String) overload so standing grants can be persisted.",
+        level = DeprecationLevel.WARNING,
+    )
     suspend fun answer(threadId: String, card: OptionCard, choice: String) {
         val requestId = card.requestId ?: return
+        answer(threadId, requestId, choice, card.isPermission)
+    }
+
+    suspend fun answer(
+        threadId: String,
+        requestId: String,
+        choice: String,
+        isPermission: Boolean,
+    ) {
         perform {
-            if (card.isPermission) {
-                it.respond(
-                    threadId = threadId,
-                    requestId = requestId,
-                    behavior = if (choice.equals("allow", ignoreCase = true)) "allow" else "deny",
-                )
-            } else {
-                it.respond(
-                    threadId = threadId,
-                    requestId = requestId,
-                    behavior = "answer",
-                    message = choice,
-                )
-            }
+            val behavior = OptionCard.responseBehavior(choice, isPermission)
+            it.respond(
+                threadId = threadId,
+                requestId = requestId,
+                behavior = behavior,
+                message = choice.takeIf { behavior == "answer" },
+            )
         }
     }
 
@@ -695,6 +725,51 @@ class Session(
         } catch (error: Throwable) {
             _actionError.value = error.message
             null
+        }
+    }
+
+    suspend fun openNotification(target: NotificationTarget): Chat? {
+        awaitRestored()
+        return notificationGate.withLock {
+            val activeClient = client
+            if (activeClient == null) {
+                _actionError.value = "Pair this phone with your computer to open that task."
+                return@withLock null
+            }
+
+            try {
+                _state.value.roomForThread(target.threadId)?.let {
+                    return@withLock Chat.RoomChat(it)
+                }
+
+                var bot = _state.value.bot(target.botId)
+                if (bot == null) {
+                    val fleet = hydrateFn(activeClient, 50)
+                    _state.update { it.hydrate(fleet) }
+                    notificationSink.setBadge(_state.value.unreadCount)
+                    _state.value.roomForThread(target.threadId)?.let {
+                        return@withLock Chat.RoomChat(it)
+                    }
+                    bot = _state.value.bot(target.botId)
+                }
+
+                var selected = bot
+                    ?: throw APIError.Status(404, "That agent no longer exists.")
+                if (target.requiresTaskSwitch(selected.threadId)) {
+                    try {
+                        selected = activeClient.switchTask(selected.id, target.threadId)
+                        _state.update { it.apply(Frame.Bot(selected)) }
+                    } catch (error: Throwable) {
+                        if (error is kotlinx.coroutines.CancellationException) throw error
+                        // The requested task can disappear between notification delivery and the tap.
+                    }
+                }
+                Chat.BotChat(selected)
+            } catch (error: Throwable) {
+                if (error is kotlinx.coroutines.CancellationException) throw error
+                _actionError.value = error.message
+                null
+            }
         }
     }
 
