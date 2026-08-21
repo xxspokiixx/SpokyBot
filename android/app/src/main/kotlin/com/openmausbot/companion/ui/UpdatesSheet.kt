@@ -223,7 +223,7 @@ private fun UpdateRow(update: ChatUpdate, face: MausState, onOpen: () -> Unit) {
         horizontalArrangement = Arrangement.spacedBy(12.dp),
         verticalAlignment = Alignment.Top,
     ) {
-        MausAvatar(color = update.chat.color, size = 40.dp, state = face)
+        ChatAvatar(chat = update.chat, size = 40.dp, state = face)
 
         Column(
             modifier = Modifier.weight(1f),

@@ -65,18 +65,22 @@ class RosterLayoutTest {
     }
 
     @Test
-    fun `a tile stacks its members' colours, in the room's own order`() {
-        // iOS: `room.memberIds.compactMap { session.state.bot($0)?.color }` —
-        // unresolvable members fall out rather than leaving a hole.
+    fun `a tile stacks its member bots, in the room's own order`() {
+        // iOS: `room.memberIds.compactMap { session.state.bot($0) }` — the whole
+        // record, because the tile now draws each member's own avatar, and an
+        // unresolvable member falls out rather than leaving a hole.
         val state = CompanionState(
             bots = listOf(
                 bot(id = "a").copy(color = "red"),
                 bot(id = "b").copy(color = "cyan"),
-                bot(id = "c").copy(color = "pink"),
+                bot(id = "c").copy(color = "pink", avatarUrl = "/api/attachments/c.png"),
             ),
         )
         val room = room().copy(memberIds = listOf("c", "a", "missing", "b"))
-        assertEquals(listOf("pink", "red", "cyan"), RosterLayout.memberColors(state, room))
+        val members = RosterLayout.memberBots(state, room)
+        assertEquals(listOf("c", "a", "b"), members.map { it.id })
+        assertEquals(listOf("pink", "red", "cyan"), members.map { it.color })
+        assertEquals("/api/attachments/c.png", members.first().avatarUrl)
     }
 
     @Test
@@ -86,7 +90,7 @@ class RosterLayoutTest {
         val state = CompanionState(bots = listOf(bot(id = "a").copy(color = "teal", hidden = true)))
         assertEquals(
             listOf("teal"),
-            RosterLayout.memberColors(state, room().copy(memberIds = listOf("a"))),
+            RosterLayout.memberBots(state, room().copy(memberIds = listOf("a"))).map { it.color },
         )
     }
 

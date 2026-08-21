@@ -105,6 +105,8 @@ class NavigationTest {
     fun `the stack survives a round trip through the saver`() {
         val stack = listOf(
             Destination.Roster,
+            Destination.Settings,
+            Destination.Routines,
             Destination.Thread("thread:with:colons"),
             Destination.Computer("bot:with:colons"),
             Destination.Chat(ChatTarget.Bot("bot:1:x", "thread:1:y")),
@@ -132,6 +134,21 @@ class NavigationTest {
                 expectedGeneration = 0,
             ),
         )
+    }
+
+    @Test
+    fun `a receipt's task opens above Tasks and Routines, and back returns there`() {
+        // iOS appends the chat to the same navigation path Settings →
+        // TasksRoutinesView is on, so leaving it lands back on the receipts.
+        val navigator = CompanionNavigator()
+        navigator.push(Destination.Settings)
+        navigator.push(Destination.Routines)
+        navigator.push(botChat)
+        assertEquals(botChat, navigator.current)
+        navigator.pop()
+        assertEquals(Destination.Routines, navigator.current)
+        navigator.pop()
+        assertEquals(Destination.Settings, navigator.current)
     }
 
     @Test

@@ -119,7 +119,16 @@ private fun PairedScreen(
 
     when (val destination = navigator.current) {
         Destination.Roster -> RosterScreen(navigator)
-        Destination.Settings -> SettingsScreen(onBack = navigator::pop)
+        Destination.Settings -> SettingsScreen(
+            onBack = navigator::pop,
+            onOpenRoutines = { navigator.push(Destination.Routines) },
+        )
+        Destination.Routines -> TasksRoutinesScreen(
+            onBack = navigator::pop,
+            // A receipt's "Open task" pushes the chat above this screen, the way
+            // iOS appends it to the same navigation path.
+            onOpenChat = navigator::open,
+        )
         // One branch for both shapes of chat address, so a notification's thread
         // becoming an addressed chat re-reads the same screen instead of
         // rebuilding it.

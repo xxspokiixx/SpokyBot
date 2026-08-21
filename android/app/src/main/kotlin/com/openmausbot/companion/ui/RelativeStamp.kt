@@ -59,6 +59,19 @@ object RelativeStamp {
         .withLocale(locale)
         .format(zoned(atMillis, zone))
 
+    /**
+     * A schedule's instant, spelled out — Swift's
+     * `.formatted(date: .abbreviated, time: .shortened)`, which is a medium
+     * date beside a short time in the reader's locale.
+     */
+    fun dateAndTime(
+        atMillis: Double,
+        zone: ZoneId = ZoneId.systemDefault(),
+        locale: Locale = Locale.getDefault(),
+    ): String = DateTimeFormatter.ofLocalizedDateTime(FormatStyle.MEDIUM, FormatStyle.SHORT)
+        .withLocale(locale)
+        .format(zoned(atMillis, zone))
+
     private fun zoned(millis: Double, zone: ZoneId): ZonedDateTime =
         ZonedDateTime.ofInstant(Instant.ofEpochMilli(millis.toLong()), zone)
 

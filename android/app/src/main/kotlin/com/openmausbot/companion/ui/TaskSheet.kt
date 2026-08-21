@@ -110,6 +110,26 @@ fun TaskSheet(botId: String, onDismiss: () -> Unit) {
                     )
                 }
 
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 20.dp, vertical = 8.dp),
+                    horizontalArrangement = Arrangement.spacedBy(12.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    BotAvatar(bot = bot, size = 48.dp, state = MausState.IDLE, animated = false)
+                    Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                        Text(bot.name, fontSize = 16.sp, fontWeight = FontWeight.SemiBold)
+                        Text(TaskRules.subtitle(bot), fontSize = 14.sp, color = secondaryTint)
+                    }
+                }
+                Text(
+                    text = TaskRules.CONTEXT_FOOTER,
+                    fontSize = 13.sp,
+                    color = secondaryTint,
+                    modifier = Modifier.padding(horizontal = 20.dp, vertical = 2.dp),
+                )
+
                 LazyColumn(modifier = Modifier.heightIn(max = 360.dp)) {
                     items(tasks, key = { it.threadId }) { task ->
                         TaskRow(

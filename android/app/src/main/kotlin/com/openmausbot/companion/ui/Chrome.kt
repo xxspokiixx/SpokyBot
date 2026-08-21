@@ -4,9 +4,12 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxScope
+import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.runtime.Composable
@@ -133,6 +136,27 @@ private fun ChromeButton(
                 .chromeCapsule(),
             contentAlignment = Alignment.Center,
             content = { glyph() },
+        )
+    }
+}
+
+/**
+ * Leaving a flat header — Settings and the screens it opens.
+ *
+ * The glyph keeps the 32 dp tile the header is drawn with; the target around it
+ * is [MIN_TOUCH_TARGET], because a 32 dp target is one Android considers too
+ * small to hit.
+ */
+@Composable
+internal fun HeaderBackButton(onBack: () -> Unit, modifier: Modifier = Modifier) {
+    TouchTarget(onClick = onBack, modifier = modifier, contentDescription = "Back") {
+        Icon(
+            imageVector = Icons.AutoMirrored.Filled.ArrowBack,
+            contentDescription = null,
+            modifier = Modifier
+                .size(32.dp)
+                .background(secondaryTint.copy(alpha = 0.16f), CircleShape)
+                .padding(6.dp),
         )
     }
 }

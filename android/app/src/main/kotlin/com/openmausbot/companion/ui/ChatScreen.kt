@@ -34,16 +34,14 @@ import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
-import androidx.compose.material.icons.automirrored.filled.KeyboardArrowRight
 import androidx.compose.material.icons.automirrored.filled.List
 import androidx.compose.material.icons.automirrored.filled.Send
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Close
+import androidx.compose.material.icons.filled.MoreVert
+import androidx.compose.material.icons.filled.Person
 import androidx.compose.material.icons.filled.Share
 import androidx.compose.material3.CircularProgressIndicator
-import androidx.compose.material3.DropdownMenu
-import androidx.compose.material3.DropdownMenuItem
-import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.LocalTextStyle
 import androidx.compose.material3.MaterialTheme
@@ -170,6 +168,9 @@ private fun LoadedChat(
     val session = environment.session
     val scope = rememberCoroutineScope()
     var showingTasks by remember { mutableStateOf(false) }
+    // Saveable: the profile form is a form, and a rotation must not throw away
+    // what was typed into it — the sheet has to come back for that to matter.
+    var showingProfile by rememberSaveable { mutableStateOf(false) }
     var showingPlus by remember(threadId) { mutableStateOf(false) }
     val focusManager = LocalFocusManager.current
     val focusedMessageId by session.focusedMessageId.collectAsState()
@@ -225,9 +226,9 @@ private fun LoadedChat(
     }
 
     val bot = (chat as? Chat.BotChat)?.bot
-    // One handler for both doors: the name pill lists every action, the + lists
-    // the ones you would reach for mid-conversation. Neither invents anything the
-    // other does not have.
+    // One handler for the one door. The name pill stopped being the second when
+    // it became the way into a bot's profile, so the + now carries every action
+    // there is — including both export formats.
     val onAction: (ChatActionId) -> Unit = { action ->
         when (action) {
             ChatActionId.NEW_TASK -> if (bot != null) scope.launch { session.createTask(bot, null) }
@@ -333,10 +334,19 @@ private fun LoadedChat(
                     unreadElsewhere = remember(state, chat) {
                         (state.unreadCount - if (chat.unread) 1 else 0).coerceAtLeast(0)
                     },
-                    actions = remember(chat) { ChatActions.menu(chat) },
                     onBack = onBack,
                     onWatchComputer = { if (bot != null) onOpenComputer(bot.id) },
-                    onAction = onAction,
+                    // A bot's face and its name pill are both the door to its
+                    // profile; a room has no profile, so its pill opens the same
+                    // sheet the + does.
+                    onOpenProfile = {
+                        if (bot != null) {
+                            showingProfile = true
+                        } else {
+                            focusManager.clearFocus()
+                            showingPlus = true
+                        }
+                    },
                 )
             }
 
@@ -378,6 +388,10 @@ private fun LoadedChat(
         (chat as? Chat.BotChat)?.let {
             TaskSheet(botId = it.bot.id, onDismiss = { showingTasks = false })
         }
+    }
+
+    if (showingProfile && bot != null) {
+        AgentProfileSheet(bot = bot, onDismiss = { showingProfile = false })
     }
 }
 
@@ -428,10 +442,9 @@ private fun ChatHeader(
     chat: Chat,
     face: MausState,
     unreadElsewhere: Int,
-    actions: List<ChatAction>,
     onBack: () -> Unit,
     onWatchComputer: () -> Unit,
-    onAction: (ChatActionId) -> Unit,
+    onOpenProfile: () -> Unit,
 ) {
     val surface = MaterialTheme.colorScheme.surface
     Box(modifier = Modifier.fillMaxWidth()) {
@@ -477,8 +490,19 @@ private fun ChatHeader(
             horizontalAlignment = Alignment.CenterHorizontally,
             verticalArrangement = Arrangement.spacedBy(6.dp),
         ) {
-            MausAvatar(color = chat.color, size = 60.dp, state = face)
-            NamePill(chat = chat, actions = actions, onAction = onAction)
+            ChatAvatar(
+                chat = chat,
+                size = 60.dp,
+                state = face,
+                modifier = if (chat is Chat.BotChat) {
+                    Modifier
+                        .clickable(role = Role.Button, onClick = onOpenProfile)
+                        .semantics { contentDescription = "Open ${chat.name} profile" }
+                } else {
+                    Modifier
+                },
+            )
+            NamePill(chat = chat, onOpen = onOpenProfile)
         }
     }
 }
@@ -521,75 +545,55 @@ private fun BackPill(unreadElsewhere: Int, onBack: () -> Unit) {
 }
 
 /**
- * The bot's name over its job, and the door to everything this chat can do —
- * "about this chat", as against the composer's + for "do something".
+ * The bot's name over its job, and the door to its profile — "who this is", as
+ * against the composer's + for "do something". A room has no profile, so its
+ * pill opens that same + sheet.
  */
 @Composable
-private fun NamePill(chat: Chat, actions: List<ChatAction>, onAction: (ChatActionId) -> Unit) {
-    var menuOpen by remember { mutableStateOf(false) }
-    Box {
-        Row(
-            modifier = Modifier
-                .chromeCapsule()
-                .clip(CircleShape)
-                .heightIn(min = MIN_TOUCH_TARGET)
-                .clickable(
-                    role = Role.Button,
-                    onClickLabel = "Open conversation actions",
-                    onClick = { menuOpen = true },
-                )
-                .padding(start = 14.dp, end = 10.dp),
-            horizontalArrangement = Arrangement.spacedBy(6.dp),
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
+private fun NamePill(chat: Chat, onOpen: () -> Unit) {
+    val isBot = chat is Chat.BotChat
+    Row(
+        modifier = Modifier
+            .chromeCapsule()
+            .clip(CircleShape)
+            .heightIn(min = MIN_TOUCH_TARGET)
+            .clickable(
+                role = Role.Button,
+                onClickLabel = if (isBot) {
+                    "Open ${chat.name} profile"
+                } else {
+                    "Open ${chat.name} chat options"
+                },
+                onClick = onOpen,
+            )
+            .padding(start = 14.dp, end = 10.dp),
+        horizontalArrangement = Arrangement.spacedBy(6.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Text(
+            text = chat.name,
+            fontSize = 15.sp,
+            fontWeight = FontWeight.SemiBold,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis,
+            modifier = Modifier.weight(1f, fill = false),
+        )
+        if (chat.subtitle.isNotEmpty()) {
             Text(
-                text = chat.name,
-                fontSize = 15.sp,
-                fontWeight = FontWeight.SemiBold,
+                text = chat.subtitle,
+                fontSize = 13.sp,
+                color = secondaryTint,
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis,
                 modifier = Modifier.weight(1f, fill = false),
             )
-            if (chat.subtitle.isNotEmpty()) {
-                Text(
-                    text = chat.subtitle,
-                    fontSize = 13.sp,
-                    color = secondaryTint,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis,
-                    modifier = Modifier.weight(1f, fill = false),
-                )
-            }
-            Icon(
-                imageVector = Icons.AutoMirrored.Filled.KeyboardArrowRight,
-                contentDescription = null,
-                tint = secondaryTint,
-                modifier = Modifier.size(16.dp),
-            )
         }
-
-        DropdownMenu(expanded = menuOpen, onDismissRequest = { menuOpen = false }) {
-            actions.forEachIndexed { index, action ->
-                if (action.destructive && index > 0) HorizontalDivider()
-                DropdownMenuItem(
-                    text = {
-                        Text(
-                            text = action.title,
-                            color = if (action.destructive) {
-                                MaterialTheme.colorScheme.error
-                            } else {
-                                Color.Unspecified
-                            },
-                        )
-                    },
-                    enabled = action.enabled,
-                    onClick = {
-                        menuOpen = false
-                        onAction(action.id)
-                    },
-                )
-            }
-        }
+        Icon(
+            imageVector = if (isBot) Icons.Filled.Person else Icons.Filled.MoreVert,
+            contentDescription = null,
+            tint = secondaryTint,
+            modifier = Modifier.size(16.dp),
+        )
     }
 }
 

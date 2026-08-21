@@ -19,6 +19,10 @@ object SettingsPolicy {
             "frames replayed after a short background pause. Closed-app push needs a " +
             "separate push-relay release that does not exist yet."
 
+    const val WORKSPACE_FOOTER =
+        "Routine schedules are safe to manage here. Provider keys, webhook secrets, " +
+            "pairing, revocation, Local VM, and agent execution policy stay on your computer."
+
     const val UNPAIR_FOOTER =
         "Removes the pairing from this phone only. To stop it reaching the computer at all, " +
             "remove the device in OpenMausBot → Settings → Companion."

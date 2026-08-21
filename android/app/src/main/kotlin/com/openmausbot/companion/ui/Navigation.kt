@@ -12,11 +12,11 @@ import com.openmausbot.companion.core.ChatTarget
 import com.openmausbot.companion.core.target
 
 /**
- * Where the app can be. Four places, one stack, no dependency.
+ * Where the app can be. Five places, one stack, no dependency.
  *
  * `androidx.navigation-compose` would add a library, a graph DSL and an argument
- * encoding to express roster ⇄ chat ⇄ settings — CONTRIBUTING asks not to add a
- * dependency where a short module will do, and this is the short module.
+ * encoding to express roster ⇄ chat ⇄ settings ⇄ routines — CONTRIBUTING asks not
+ * to add a dependency where a short module will do, and this is the short module.
  *
  * A chat is addressed by its owner rather than by a captured `Chat`: the record
  * has to be re-read from `Session.state` on every frame anyway so busy/unread
@@ -28,6 +28,9 @@ import com.openmausbot.companion.core.target
 sealed interface Destination {
     data object Roster : Destination
     data object Settings : Destination
+
+    /** Settings → Workspace → Tasks & Routines. */
+    data object Routines : Destination
 
     /** A bot's computer, watch-only. Addressed by bot id for the same reason. */
     data class Computer(val botId: String) : Destination
@@ -101,6 +104,7 @@ class CompanionNavigator(initial: List<Destination> = listOf(Destination.Roster)
     companion object {
         private const val ROSTER = "roster"
         private const val SETTINGS = "settings"
+        private const val ROUTINES = "routines"
         private const val THREAD = "thread:"
         private const val COMPUTER = "computer:"
         private const val BOT_CHAT = "botchat:"
@@ -110,6 +114,7 @@ class CompanionNavigator(initial: List<Destination> = listOf(Destination.Roster)
             when (it) {
                 Destination.Roster -> ROSTER
                 Destination.Settings -> SETTINGS
+                Destination.Routines -> ROUTINES
                 is Destination.Thread -> THREAD + it.threadId
                 is Destination.Computer -> COMPUTER + it.botId
                 is Destination.Chat -> when (val target = it.target) {
@@ -123,6 +128,7 @@ class CompanionNavigator(initial: List<Destination> = listOf(Destination.Roster)
             when {
                 it == ROSTER -> Destination.Roster
                 it == SETTINGS -> Destination.Settings
+                it == ROUTINES -> Destination.Routines
                 it.startsWith(THREAD) -> Destination.Thread(it.removePrefix(THREAD))
                 it.startsWith(COMPUTER) -> Destination.Computer(it.removePrefix(COMPUTER))
                 it.startsWith(BOT_CHAT) -> split(it.removePrefix(BOT_CHAT))

@@ -1,20 +1,16 @@
 package com.openmausbot.companion.ui
 
-import androidx.compose.foundation.background
-import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.rememberScrollState
-import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
-import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
@@ -30,11 +26,13 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.openmausbot.companion.R
 
 /**
  * What little the phone gets to configure — the port of
@@ -45,7 +43,7 @@ import androidx.compose.ui.unit.sp
  * lock it out (§13). This is a status page with an unpair button.
  */
 @Composable
-fun SettingsScreen(onBack: () -> Unit) {
+fun SettingsScreen(onBack: () -> Unit, onOpenRoutines: () -> Unit) {
     val environment = LocalCompanion.current
     val session = environment.session
     val connection by session.connection.collectAsState()
@@ -65,15 +63,7 @@ fun SettingsScreen(onBack: () -> Unit) {
             horizontalArrangement = Arrangement.spacedBy(10.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
-            Icon(
-                imageVector = Icons.AutoMirrored.Filled.ArrowBack,
-                contentDescription = "Back",
-                modifier = Modifier
-                    .size(32.dp)
-                    .background(secondaryTint.copy(alpha = 0.16f), CircleShape)
-                    .clickable(onClick = onBack)
-                    .padding(6.dp),
-            )
+            HeaderBackButton(onBack)
             Text("Settings", fontSize = 17.sp, fontWeight = FontWeight.SemiBold)
         }
         HorizontalDivider()
@@ -110,6 +100,15 @@ fun SettingsScreen(onBack: () -> Unit) {
                     onClick = environment.notifications::act,
                 )
                 Footnote(SettingsPolicy.NOTIFICATIONS_FOOTER)
+            }
+
+            SettingsSection("Workspace") {
+                SettingsButton(
+                    text = "Tasks & Routines",
+                    icon = R.drawable.ic_schedule,
+                    onClick = onOpenRoutines,
+                )
+                Footnote(SettingsPolicy.WORKSPACE_FOOTER)
             }
 
             SettingsSection(null) {
@@ -230,23 +229,39 @@ private fun SettingsButton(
     text: String,
     enabled: Boolean = true,
     destructive: Boolean = false,
+    icon: Int? = null,
     onClick: () -> Unit,
 ) {
+    val tint = if (destructive) {
+        MaterialTheme.colorScheme.error
+    } else {
+        MaterialTheme.colorScheme.primary
+    }
     TextButton(
         onClick = onClick,
         enabled = enabled,
-        modifier = Modifier.fillMaxWidth(),
+        modifier = Modifier.fillMaxWidth().heightIn(min = MIN_TOUCH_TARGET),
     ) {
-        Text(
-            text = text,
+        Row(
             modifier = Modifier.fillMaxWidth(),
-            textAlign = TextAlign.Start,
-            color = if (destructive) {
-                MaterialTheme.colorScheme.error
-            } else {
-                MaterialTheme.colorScheme.primary
-            },
-        )
+            horizontalArrangement = Arrangement.spacedBy(12.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            icon?.let {
+                Icon(
+                    painter = painterResource(it),
+                    contentDescription = null,
+                    tint = tint,
+                    modifier = Modifier.size(20.dp),
+                )
+            }
+            Text(
+                text = text,
+                modifier = Modifier.weight(1f),
+                textAlign = TextAlign.Start,
+                color = tint,
+            )
+        }
     }
 }
 

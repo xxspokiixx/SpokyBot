@@ -94,8 +94,12 @@ class TranscriptRunTest {
 }
 
 /**
- * DELTA-05: what the name pill and the composer's + offer, pinned against
- * `chatActions` and `plusActions` in `ios/App/ChatView.swift`.
+ * What the composer's + offers, pinned against `plusActions` in
+ * `ios/App/ChatView.swift`.
+ *
+ * The name pill is no longer a second door: for a bot it opens the agent
+ * profile and for a room it opens this same sheet, so every action the pill's
+ * menu used to carry has to be here — both export formats included.
  */
 class ChatActionsTest {
 
@@ -108,6 +112,7 @@ class ChatActionsTest {
                 ChatActionId.TASKS,
                 ChatActionId.WATCH_COMPUTER,
                 ChatActionId.SHARE_MARKDOWN,
+                ChatActionId.SHARE_JSON,
             ),
             actions.map { it.id },
         )
@@ -119,6 +124,8 @@ class ChatActionsTest {
         assertEquals("Live view of what Scout is doing", actions[2].subtitle)
         assertEquals("Share transcript", actions[3].title)
         assertEquals("This chat as Markdown", actions[3].subtitle)
+        assertEquals("Share as JSON", actions[4].title)
+        assertEquals("Structured transcript data", actions[4].subtitle)
     }
 
     @Test
@@ -147,39 +154,20 @@ class ChatActionsTest {
         // interrupt with `current.busy, case let .bot(bot)` — a busy room has no
         // single runner to stop (§12).
         val busyRoom = Chat.RoomChat(room().copy(busyBotId = "bot-1"))
-        assertEquals(listOf(ChatActionId.SHARE_MARKDOWN), ChatActions.sheet(busyRoom).map { it.id })
         assertEquals(
             listOf(ChatActionId.SHARE_MARKDOWN, ChatActionId.SHARE_JSON),
-            ChatActions.menu(busyRoom).map { it.id },
+            ChatActions.sheet(busyRoom).map { it.id },
         )
     }
 
     @Test
-    fun `the pill's menu carries both exports, and the sheet only Markdown`() {
-        // iOS: `chatActions` has "Share as Markdown" and "Share as JSON";
-        // `plusActions` has one "Share transcript — This chat as Markdown".
-        val chat = Chat.BotChat(bot(busy = true))
-        assertEquals(
-            listOf(
-                ChatActionId.NEW_TASK,
-                ChatActionId.TASKS,
-                ChatActionId.WATCH_COMPUTER,
-                ChatActionId.SHARE_MARKDOWN,
-                ChatActionId.SHARE_JSON,
-                ChatActionId.INTERRUPT,
-            ),
-            ChatActions.menu(chat).map { it.id },
-        )
-        assertEquals("Share as Markdown", ChatActions.menu(chat)[3].title)
-        assertEquals("Share as JSON", ChatActions.menu(chat)[4].title)
-        assertFalse(ChatActions.sheet(chat).any { it.id == ChatActionId.SHARE_JSON })
-    }
-
-    @Test
-    fun `no action the overflow used to reach has gone missing`() {
-        // What PORT7 shipped in the overflow menu: watch computer, tasks and both
-        // export formats, with Stop beside it while the bot ran.
-        val ids = ChatActions.menu(Chat.BotChat(bot(busy = true))).map { it.id }.toSet()
+    fun `no action the pill's menu used to reach has gone missing`() {
+        // What PORT7 shipped in the overflow and PORT13 kept in the name pill:
+        // watch computer, tasks and both export formats, with Stop beside them
+        // while the bot ran. The pill now opens the profile, so the + carries
+        // all of it.
+        val ids = ChatActions.sheet(Chat.BotChat(bot(busy = true))).map { it.id }.toSet()
+        assertTrue(ChatActionId.NEW_TASK in ids)
         assertTrue(ChatActionId.WATCH_COMPUTER in ids)
         assertTrue(ChatActionId.TASKS in ids)
         assertTrue(ChatActionId.SHARE_MARKDOWN in ids)

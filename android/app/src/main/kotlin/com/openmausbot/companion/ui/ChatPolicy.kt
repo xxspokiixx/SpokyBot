@@ -1,5 +1,6 @@
 package com.openmausbot.companion.ui
 
+import com.openmausbot.companion.core.Bot
 import com.openmausbot.companion.core.Chat
 import com.openmausbot.companion.core.ChatSummary
 import com.openmausbot.companion.core.CompanionState
@@ -153,30 +154,28 @@ object SearchPolicy {
 }
 
 /**
- * Everything the chat's name pill and the composer's + can do — the port of
- * `chatActions` and `plusActions` in `ios/App/ChatView.swift`.
+ * Everything the composer's + can do — the port of `plusActions` in
+ * `ios/App/ChatView.swift`.
  *
- * One list, two doors: the pill for "about this chat", the + for "do something".
- * Tasks and the computer are bot ideas, and a room has neither (§12); only a
- * running bot can be interrupted. Exporting is not a bot idea — a room has a
- * transcript like anything else, so both doors offer it for every chat.
+ * One list, one door. The name pill stopped being a second one when it became
+ * the way into an agent's profile, so every action lives here, including both
+ * export formats. Tasks and the computer are bot ideas, and a room has neither
+ * (§12); only a running bot can be interrupted. Exporting is not a bot idea — a
+ * room has a transcript like anything else.
  */
 enum class ChatActionId { NEW_TASK, TASKS, WATCH_COMPUTER, SHARE_MARKDOWN, SHARE_JSON, INTERRUPT }
 
 data class ChatAction(
     val id: ChatActionId,
     val title: String,
-    /** The line under the title. The pill's menu has no room for it; the sheet does. */
+    /** The line under the title, which the sheet has room for. */
     val subtitle: String,
     val destructive: Boolean = false,
     val enabled: Boolean = true,
 )
 
 object ChatActions {
-    /**
-     * What the + opens. iOS offers Markdown only here and both formats in the
-     * pill's menu, so neither door loses an export.
-     */
+    /** What the + opens, in the Swift's order. */
     fun sheet(chat: Chat): List<ChatAction> {
         val bot = (chat as? Chat.BotChat)?.bot
         val out = mutableListOf<ChatAction>()
@@ -203,54 +202,16 @@ object ChatActions {
             title = "Share transcript",
             subtitle = "This chat as Markdown",
         )
+        out += ChatAction(
+            id = ChatActionId.SHARE_JSON,
+            title = "Share as JSON",
+            subtitle = "Structured transcript data",
+        )
         if (chat.busy && bot != null) {
             out += ChatAction(
                 id = ChatActionId.INTERRUPT,
                 title = "Interrupt",
                 subtitle = "Stop the current turn",
-                destructive = true,
-            )
-        }
-        return out
-    }
-
-    /**
-     * What the name pill opens. The same actions with both export formats and no
-     * sublines — a dropdown row is one line.
-     *
-     * Tasks carries no busy gate, exactly as the Swift menu does not: the sheet
-     * behind it gates create, delete and switch itself ([TaskRules]), and renaming
-     * is deliberately allowed mid-turn ([TaskDialogRules.renameEnabled]) — a gate
-     * on the door made that unreachable.
-     */
-    fun menu(chat: Chat): List<ChatAction> {
-        val bot = (chat as? Chat.BotChat)?.bot
-        val out = mutableListOf<ChatAction>()
-        if (bot != null) {
-            out += ChatAction(
-                id = ChatActionId.NEW_TASK,
-                title = "New task",
-                subtitle = "",
-                enabled = bot.busy != true,
-            )
-            out += ChatAction(id = ChatActionId.TASKS, title = "Tasks", subtitle = "")
-            out += ChatAction(
-                id = ChatActionId.WATCH_COMPUTER,
-                title = "Watch computer",
-                subtitle = "",
-            )
-        }
-        out += ChatAction(
-            id = ChatActionId.SHARE_MARKDOWN,
-            title = ShareFormat.MARKDOWN.label,
-            subtitle = "",
-        )
-        out += ChatAction(id = ChatActionId.SHARE_JSON, title = ShareFormat.JSON.label, subtitle = "")
-        if (chat.busy && bot != null) {
-            out += ChatAction(
-                id = ChatActionId.INTERRUPT,
-                title = "Interrupt",
-                subtitle = "",
                 destructive = true,
             )
         }
@@ -289,8 +250,8 @@ object RosterLayout {
         }
 
     /** The first two of these are the faces a group tile stacks. */
-    fun memberColors(state: CompanionState, room: Room): List<String> =
-        room.memberIds.mapNotNull { state.bot(it)?.color }
+    fun memberBots(state: CompanionState, room: Room): List<Bot> =
+        room.memberIds.mapNotNull { state.bot(it) }
 
     /** The header's second line: who this phone is paired with, and how it is doing. */
     fun headerSubtitle(connectionName: String?, status: Session.Status): String {

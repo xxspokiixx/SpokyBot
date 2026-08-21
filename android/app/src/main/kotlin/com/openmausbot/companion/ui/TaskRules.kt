@@ -13,6 +13,13 @@ import com.openmausbot.companion.core.BotTask
 object TaskRules {
     const val UNTITLED = "Untitled task"
 
+    /** The line that tells a task apart from a routine. */
+    const val CONTEXT_FOOTER =
+        "A task is one conversation and result. Routines create fresh tasks on a schedule."
+
+    /** The agent's job, or what this sheet is for when it has none. */
+    fun subtitle(bot: Bot): String = bot.title.ifEmpty { "Agent tasks" }
+
     fun tasks(bot: Bot): List<BotTask> = bot.tasks.orEmpty()
 
     fun title(task: BotTask): String = task.title.ifEmpty { UNTITLED }

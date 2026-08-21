@@ -71,6 +71,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.openmausbot.companion.R
+import com.openmausbot.companion.core.Bot
 import com.openmausbot.companion.core.Chat
 import com.openmausbot.companion.core.ChatSummary
 import com.openmausbot.companion.core.Room
@@ -145,7 +146,7 @@ fun RosterScreen(navigator: CompanionNavigator) {
     // item's recompose scope the whole fleet.
     val rooms = state.rooms
     val tiles = remember(state) {
-        rooms.associate { it.id to RosterLayout.memberColors(state, it) }
+        rooms.associate { it.id to RosterLayout.memberBots(state, it) }
     }
     // Read by the bar over the list and by nothing inside it, so the rows never
     // recompose for it. `approvals` is handed over rather than walked again.
@@ -194,7 +195,7 @@ fun RosterScreen(navigator: CompanionNavigator) {
                         item(key = "groups") {
                             GroupsStrip(
                                 rooms = rooms,
-                                colors = tiles,
+                                members = tiles,
                                 onOpen = { navigator.open(Chat.RoomChat(it)) },
                                 onCreate = { showingNewGroup = true },
                             )
@@ -368,7 +369,7 @@ private fun SectionLabel(text: String, modifier: Modifier = Modifier) {
 @Composable
 private fun GroupsStrip(
     rooms: List<Room>,
-    colors: Map<String, List<String>>,
+    members: Map<String, List<Bot>>,
     onOpen: (Room) -> Unit,
     onCreate: () -> Unit,
 ) {
@@ -384,7 +385,7 @@ private fun GroupsStrip(
             items(rooms, key = { it.id }) { room ->
                 GroupTile(
                     room = room,
-                    colors = colors[room.id].orEmpty(),
+                    members = members[room.id].orEmpty(),
                     onClick = { onOpen(room) },
                 )
             }
@@ -398,7 +399,7 @@ private fun GroupsStrip(
  * beneath.
  */
 @Composable
-private fun GroupTile(room: Room, colors: List<String>, onClick: () -> Unit) {
+private fun GroupTile(room: Room, members: List<Bot>, onClick: () -> Unit) {
     GroupTileFrame(
         label = room.name,
         labelColor = MaterialTheme.colorScheme.onSurface,
@@ -409,23 +410,23 @@ private fun GroupTile(room: Room, colors: List<String>, onClick: () -> Unit) {
                 .size(64.dp)
                 .background(secondaryTint.copy(alpha = 0.14f), CircleShape),
         )
-        colors.getOrNull(0)?.let {
-            MausAvatar(
-                color = it,
+        members.getOrNull(0)?.let {
+            BotAvatar(
+                bot = it,
                 size = 34.dp,
                 state = MausState.HAPPY,
                 animated = false,
                 modifier = Modifier.offset(x = (-9).dp, y = (-6).dp),
             )
         }
-        colors.getOrNull(1)?.let {
+        members.getOrNull(1)?.let {
             Box(
                 modifier = Modifier
                     .offset(x = 11.dp, y = 9.dp)
                     .background(MaterialTheme.colorScheme.surface, CircleShape)
                     .padding(2.dp),
             ) {
-                MausAvatar(color = it, size = 30.dp, state = MausState.HAPPY, animated = false)
+                BotAvatar(bot = it, size = 30.dp, state = MausState.HAPPY, animated = false)
             }
         }
         if (room.unread) {
@@ -535,8 +536,8 @@ private fun ChatRow(
             horizontalArrangement = Arrangement.spacedBy(14.dp),
             verticalAlignment = Alignment.Top,
         ) {
-            MausAvatar(
-                color = chat.color,
+            ChatAvatar(
+                chat = chat,
                 size = 52.dp,
                 state = face,
                 modifier = Modifier.padding(top = 12.dp),
