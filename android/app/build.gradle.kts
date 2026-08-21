@@ -99,4 +99,9 @@ dependencies {
     testImplementation("org.jetbrains.kotlin:kotlin-test-junit:2.2.21")
     testImplementation("org.jetbrains.kotlinx:kotlinx-coroutines-test:1.10.2")
     testImplementation("junit:junit:4.13.2")
+    // The approval card's two buttons are only correct in what they put on the
+    // wire — one standing grant, one answer, never two grants — so the test that
+    // pins them drives a real Session against a real socket rather than a stub
+    // that could agree with the wrong thing. Same server the :core tests use.
+    testImplementation("com.squareup.okhttp3:mockwebserver:4.12.0")
 }

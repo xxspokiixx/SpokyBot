@@ -251,7 +251,7 @@ private fun UpdateRow(update: ChatUpdate, face: MausState, onOpen: () -> Unit) {
                             onClick = {
                                 answering = true
                                 scope.launch {
-                                    session.answer(update.chat.threadId, card, option)
+                                    ApprovalAnswers.choose(session, update.chat, card, option)
                                     answering = false
                                 }
                             },

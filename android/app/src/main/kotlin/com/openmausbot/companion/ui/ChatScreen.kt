@@ -85,8 +85,10 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.openmausbot.companion.R
 import com.openmausbot.companion.core.Chat
+import com.openmausbot.companion.core.ChatTarget
 import com.openmausbot.companion.core.CompanionState
 import com.openmausbot.companion.core.Message
+import com.openmausbot.companion.core.target
 import java.util.Locale
 import kotlinx.coroutines.launch
 
@@ -104,19 +106,34 @@ import kotlinx.coroutines.launch
  * else scrolls underneath, which is what makes the conversation the screen.
  */
 @Composable
-fun ChatScreen(threadId: String, onBack: () -> Unit, onOpenComputer: (String) -> Unit) {
+fun ChatScreen(
+    destination: Destination.Conversation,
+    onResolved: (ChatTarget) -> Unit,
+    onBack: () -> Unit,
+    onOpenComputer: (String) -> Unit,
+) {
     val session = LocalCompanion.current.session
     val state by session.state.collectAsState()
 
-    // A notification tap at a cold start arrives before the fleet is hydrated:
-    // wait for it rather than concluding the thread is gone and bouncing back to
-    // the roster, which would make the tap open nothing.
-    when (val resolution = remember(state, threadId) { ThreadResolution.resolve(state, threadId) }) {
+    // A notification tap at a cold start arrives before the fleet is hydrated,
+    // and so does a navigation stack restored after the process was killed: wait
+    // for it rather than concluding the chat is gone and bouncing back to the
+    // roster, which would make the tap open nothing.
+    val resolution = remember(state, destination) {
+        ThreadResolution.resolve(state, destination)
+    }
+    when (resolution) {
         ThreadResolution.Result.Waiting -> OpeningThread(onBack)
-        ThreadResolution.Result.Gone -> LaunchedEffect(threadId) { onBack() }
+        ThreadResolution.Result.Gone -> LaunchedEffect(destination) { onBack() }
         // The live chat record, so busy/unread stay current as frames land.
-        is ThreadResolution.Result.Open ->
+        is ThreadResolution.Result.Open -> {
+            // A thread the fleet has now put a name to stops being a thread, so
+            // this chat follows its bot from here on — including when the task
+            // that is open is the one deleted.
+            val resolved = (destination as? Destination.Thread)?.let { resolution.chat.target }
+            LaunchedEffect(resolved) { if (resolved != null) onResolved(resolved) }
             LoadedChat(resolution.chat, state, onBack, onOpenComputer)
+        }
     }
 }
 

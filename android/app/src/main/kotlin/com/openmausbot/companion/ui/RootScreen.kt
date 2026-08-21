@@ -80,8 +80,16 @@ private fun PairedScreen(pendingThreadId: String?, onPendingThreadConsumed: () -
     when (val destination = navigator.current) {
         Destination.Roster -> RosterScreen(navigator)
         Destination.Settings -> SettingsScreen(onBack = navigator::pop)
-        is Destination.Thread -> ChatScreen(
-            threadId = destination.threadId,
+        // One branch for both shapes of chat address, so a notification's thread
+        // becoming an addressed chat re-reads the same screen instead of
+        // rebuilding it.
+        is Destination.Conversation -> ChatScreen(
+            destination = destination,
+            onResolved = { target ->
+                (destination as? Destination.Thread)?.let {
+                    navigator.resolveThread(it.threadId, target)
+                }
+            },
             onBack = navigator::pop,
             onOpenComputer = { navigator.push(Destination.Computer(it)) },
         )

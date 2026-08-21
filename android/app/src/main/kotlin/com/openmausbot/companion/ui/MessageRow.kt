@@ -427,7 +427,7 @@ private fun CardView(chat: Chat, message: Message) {
                         onClick = {
                             answering = true
                             scope.launch {
-                                session.answer(chat.threadId, card, option)
+                                ApprovalAnswers.choose(session, chat, card, option)
                                 answering = false
                             }
                         },
@@ -448,16 +448,15 @@ private fun CardView(chat: Chat, message: Message) {
 
             // The grant key comes from the card. The phone never derives its
             // own, so it cannot permit something subtly wider than the computer
-            // would have.
+            // would have. The same goes for the answer: it is one of the options
+            // the card offered, never a string invented here.
             val alwaysAllow = ApprovalChoices.alwaysAllowChoice(card)
             if (alwaysAllow != null && chat is Chat.BotChat) {
-                val bot = chat.bot
                 TextButton(
                     onClick = {
                         answering = true
                         scope.launch {
-                            session.alwaysAllow(bot, card)
-                            session.answer(chat.threadId, card, alwaysAllow)
+                            ApprovalAnswers.grant(session, chat, card, alwaysAllow)
                             answering = false
                         }
                     },

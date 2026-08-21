@@ -1,5 +1,7 @@
 package com.openmausbot.companion.ui
 
+import com.openmausbot.companion.core.Chat
+import com.openmausbot.companion.core.ChatTarget
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFalse
@@ -7,6 +9,7 @@ import kotlin.test.assertNull
 import kotlin.test.assertTrue
 
 class NavigationTest {
+    private val botChat = Destination.Chat(ChatTarget.Bot("bot-1", "thread-1"))
 
     @Test
     fun `the roster is the floor of the stack`() {
@@ -20,9 +23,9 @@ class NavigationTest {
     @Test
     fun `pushing and popping walks the stack`() {
         val navigator = CompanionNavigator()
-        navigator.push(Destination.Thread("t1"))
+        navigator.push(botChat)
         assertTrue(navigator.canGoBack)
-        assertEquals(Destination.Thread("t1"), navigator.current)
+        assertEquals(botChat, navigator.current)
         navigator.pop()
         assertEquals(Destination.Roster, navigator.current)
     }
@@ -30,9 +33,49 @@ class NavigationTest {
     @Test
     fun `pushing the destination already on top is a no-op`() {
         val navigator = CompanionNavigator()
-        navigator.push(Destination.Thread("t1"))
-        navigator.push(Destination.Thread("t1"))
+        navigator.push(botChat)
+        navigator.push(botChat)
         assertEquals(2, navigator.stack.size)
+    }
+
+    @Test
+    fun `opening a chat addresses it by its owner`() {
+        val navigator = CompanionNavigator()
+        navigator.open(Chat.BotChat(bot(id = "bot-9")))
+        navigator.open(Chat.RoomChat(room(id = "room-9")))
+
+        assertEquals(
+            listOf(
+                Destination.Roster,
+                Destination.Chat(ChatTarget.Bot("bot-9", "thread-bot-9")),
+                Destination.Chat(ChatTarget.Room("room-9", "thread-room-9")),
+            ),
+            navigator.stack,
+        )
+    }
+
+    @Test
+    fun `a resolved notification thread is re-addressed in place`() {
+        val navigator = CompanionNavigator()
+        navigator.openThread("task-2")
+        navigator.resolveThread("task-2", ChatTarget.Bot("bot-1", "task-2"))
+
+        assertEquals(
+            listOf(Destination.Roster, Destination.Chat(ChatTarget.Bot("bot-1", "task-2"))),
+            navigator.stack,
+        )
+        // Back still leads where it did before the address changed.
+        navigator.pop()
+        assertEquals(Destination.Roster, navigator.current)
+    }
+
+    @Test
+    fun `resolving a thread the reader already left changes nothing`() {
+        val navigator = CompanionNavigator()
+        navigator.openThread("task-2")
+        navigator.pop()
+        navigator.resolveThread("task-2", ChatTarget.Bot("bot-1", "task-2"))
+        assertEquals(listOf(Destination.Roster), navigator.stack)
     }
 
     @Test
@@ -51,6 +94,8 @@ class NavigationTest {
             Destination.Roster,
             Destination.Thread("thread:with:colons"),
             Destination.Computer("bot:with:colons"),
+            Destination.Chat(ChatTarget.Bot("bot:1:x", "thread:1:y")),
+            Destination.Chat(ChatTarget.Room("room::9", "")),
         )
         assertEquals(stack, CompanionNavigator.decode(CompanionNavigator.encode(stack)))
     }
@@ -58,19 +103,35 @@ class NavigationTest {
     @Test
     fun `a computer sits above the chat it was opened from`() {
         val navigator = CompanionNavigator()
-        navigator.push(Destination.Thread("t1"))
+        navigator.push(botChat)
         navigator.push(Destination.Computer("bot-1"))
         assertEquals(Destination.Computer("bot-1"), navigator.current)
         navigator.pop()
-        assertEquals(Destination.Thread("t1"), navigator.current)
+        assertEquals(botChat, navigator.current)
     }
 
     @Test
-    fun `threads and computers do not collide in saved state`() {
+    fun `the four addressable destinations do not collide in saved state`() {
         val encoded = CompanionNavigator.encode(
-            listOf(Destination.Thread("x"), Destination.Computer("x")),
+            listOf(
+                Destination.Thread("x"),
+                Destination.Computer("x"),
+                Destination.Chat(ChatTarget.Bot("x", "x")),
+                Destination.Chat(ChatTarget.Room("x", "x")),
+            ),
         )
         assertEquals(encoded.size, encoded.toSet().size, "encodings must be distinguishable")
+    }
+
+    @Test
+    fun `a chat entry that cannot be read back is dropped rather than crashing`() {
+        // Truncated, malformed and over-long length prefixes all mean "unreadable".
+        assertEquals(
+            listOf(Destination.Roster),
+            CompanionNavigator.decode(
+                listOf("roster", "botchat:", "botchat:x:abc", "roomchat:99:abc"),
+            ),
+        )
     }
 
     @Test

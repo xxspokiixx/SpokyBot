@@ -9,21 +9,24 @@ import com.openmausbot.companion.core.PendingApproval
 import com.openmausbot.companion.core.Reaction
 import com.openmausbot.companion.core.Room
 import com.openmausbot.companion.core.Session
+import com.openmausbot.companion.core.chat
 
 /**
  * The decisions the chat and roster screens make that are worth testing without
  * a device. Everything here is pure; the composables call in, they do not
- * re-derive.
+ * re-derive. The one deliberate exception is [ApprovalAnswers], which is a pair
+ * of session calls rather than a decision, and is here for the same reason: so
+ * the pair can be tested rather than trusted.
  */
 
 /**
- * Turning a thread id into a chat, honestly.
+ * Turning a chat destination into a chat, honestly.
  *
  * A notification tap can arrive at a cold start, before the stream has said
- * hello and the fleet has been hydrated. At that moment no thread exists, and
- * treating "not found" as "deleted" would bounce the reader straight back to the
- * roster — the tap would open nothing, which is the one thing the notification
- * promised.
+ * hello and the fleet has been hydrated — and so can a navigation stack restored
+ * after the process was killed. At that moment nothing exists, and treating "not
+ * found" as "deleted" would bounce the reader straight back to the roster — the
+ * tap would open nothing, which is the one thing the notification promised.
  *
  * `cursor` is the honest signal: `Session` commits `resetCursor` only after a
  * cold hydrate succeeds, and a fresh process starts with none.
@@ -46,6 +49,22 @@ object ThreadResolution {
     fun chatOrNull(state: CompanionState, threadId: String): Chat? =
         (resolve(state, threadId) as? Result.Open)?.chat
 
+    /**
+     * The chat a destination points at.
+     *
+     * An addressed chat resolves by its owner alone, so the screen follows the
+     * bot: through a task switch, through a task being created, and through the
+     * deletion of the very task that was open — where the desktop moves the bot
+     * to another task and the phone has no business going home. Only an owner
+     * that is really gone closes the chat.
+     */
+    fun resolve(state: CompanionState, destination: Destination.Conversation): Result =
+        when (destination) {
+            is Destination.Chat -> state.chat(destination.target)?.let(Result::Open)
+                ?: unknown(state)
+            is Destination.Thread -> resolve(state, destination.threadId)
+        }
+
     fun resolve(state: CompanionState, threadId: String): Result {
         state.botForThread(threadId)?.let { return Result.Open(Chat.BotChat(it)) }
         state.roomForThread(threadId)?.let { return Result.Open(Chat.RoomChat(it)) }
@@ -57,8 +76,11 @@ object ThreadResolution {
         state.bots
             .firstOrNull { bot -> bot.tasks.orEmpty().any { it.threadId == threadId } }
             ?.let { return Result.Open(Chat.BotChat(it)) }
-        return if (hydrated(state)) Result.Gone else Result.Waiting
+        return unknown(state)
     }
+
+    private fun unknown(state: CompanionState): Result =
+        if (hydrated(state)) Result.Gone else Result.Waiting
 }
 
 /** A gap in time is worth marking; a timestamp on every message is just noise. */
@@ -311,20 +333,6 @@ data class RosterBar(val searchOpen: Boolean = false, val query: String = "") {
     fun clearQuery(): RosterBar = copy(query = "")
 }
 
-/**
- * Which option on an approval card means "go ahead", and when the phone may
- * offer a standing grant.
- *
- * [allowChoice] is deliberately not the literal string "Allow": `options` is
- * whatever the harness sent, and it only falls back to `["Allow", "Deny"]` when
- * the provider event named no choices of its own — a card is free to say "Yes",
- * "Approve", "Allow once". The conventional label wins when it is present.
- * (`CardView` in `ios/App/ChatView.swift`.)
- *
- * The allow/deny *behavior* mapping itself lives in `:core`'s `Session.answer`
- * and is not repeated here; [alwaysAllowChoice] documents where that mapping
- * forces this screen to diverge from iOS.
- */
 /** How much visual weight an approval option carries. */
 enum class OptionEmphasis {
     /** The accented, filled button — anything that lets the bot continue. */
@@ -334,17 +342,29 @@ enum class OptionEmphasis {
     SECONDARY,
 }
 
+/**
+ * Which option on an approval card means "go ahead", and when the phone may
+ * offer a standing grant.
+ *
+ * [allowChoice] is deliberately not the literal string "Allow": `options` is
+ * whatever the harness sent, and it only falls back to `["Allow", "Deny"]` when
+ * the provider event named no choices of its own — a card is free to say "Yes",
+ * "Approve", "Allow once". The conventional label wins when it is present.
+ * (`CardView` in `ios/App/ChatView.swift`.)
+ */
 object ApprovalChoices {
     const val ALLOW = "Allow"
 
-    fun isRefusal(option: String): Boolean = option.equals("Deny", ignoreCase = true)
-
     /**
-     * The same `isRefusal` that picks the allow choice also picks the styling, so
-     * the two cannot drift: whatever the card calls its refusal is the one option
-     * that does not get accent weight (`ios/App/ChatView.swift` tints it
-     * `Color.secondary` against `Color.accentColor` for the rest).
+     * One definition of "the refusal", shared by the button tint, the choice the
+     * standing grant answers with, and the behavior `Session.answer` puts on the
+     * wire — so a card that pads its labels cannot be tinted as one thing and
+     * answered as another. `OptionCard.isRefusal` is that definition
+     * (`ios/App/UpdatesSheet.swift`'s `CardStyle` and `ios/App/ChatView.swift`
+     * both delegate to it for exactly this reason).
      */
+    fun isRefusal(option: String): Boolean = OptionCard.isRefusal(option)
+
     fun emphasis(option: String): OptionEmphasis =
         if (isRefusal(option)) OptionEmphasis.SECONDARY else OptionEmphasis.PRIMARY
 
@@ -354,34 +374,17 @@ object ApprovalChoices {
 
     /**
      * What "Always allow this tool" answers with once the grant is written, or
-     * null when the phone cannot honour it coherently.
+     * null when the card offered nothing that means "go ahead" — in which case
+     * the button is not shown, as `ios/App/ChatView.swift` does not show it.
      *
-     * This is a **deliberate divergence from iOS**, and the reason is a defect
-     * there. `ios/App/ChatView.swift` answers with [allowChoice], and
-     * `Session.answer` maps a permission card's choice to `allow` only when the
-     * string is literally "allow". So a card offering `Approve / Deny` — which is
-     * a shape the harness allows, since `options` is whatever the provider event
-     * named — writes the standing grant and then sends `behavior: "deny"`: the
-     * bot stays stopped, now with a permission it was never given the chance to
-     * use. A card whose only option is `Deny` hides the button entirely, even
-     * though `behavior: "allow"` was available the whole time.
-     *
-     * The briefing's wording is the coherent one: uses the card's key, **then
-     * answers Allow**. For a permission card `Session.answer` sends
-     * `{behavior}` and no message, so the choice string never reaches the
-     * harness — only its allow/deny classification does. Preferring the card's
-     * own wording when it has an allow-shaped literal keeps the ordinary card
-     * behaving exactly as before.
-     *
-     * A question card is different: there the literal *is* the answer, so only
-     * one of the card's own options may be sent, and the phone still invents
-     * nothing.
+     * One of the card's own options, never a string invented here, for a
+     * permission card as much as for a question: a permission answer is
+     * classified by `OptionCard.responseBehavior`, under which every offered
+     * option but the refusal already means allow, so a fabricated label would
+     * only be a label the harness never named.
      */
-    fun alwaysAllowChoice(card: OptionCard): String? = when {
-        !card.isPending || card.allowKey == null -> null
-        card.isPermission -> card.options.firstOrNull { it.equals(ALLOW, ignoreCase = true) } ?: ALLOW
-        else -> allowChoice(card.options)
-    }
+    fun alwaysAllowChoice(card: OptionCard): String? =
+        if (!card.isPending || card.allowKey == null) null else allowChoice(card.options)
 
     /**
      * "Always allow this tool" needs a key the card itself carried and a bot to
@@ -390,6 +393,31 @@ object ApprovalChoices {
      */
     fun showsAlwaysAllow(card: OptionCard, chat: Chat): Boolean =
         chat is Chat.BotChat && alwaysAllowChoice(card) != null
+}
+
+/**
+ * The two ways a card can be answered, and the reason they are two.
+ *
+ * A card's own options go through [choose], which lets `Session` decide whether
+ * the option is also the standing grant the provider offered: on a permission
+ * card carrying a key, "Always allow" is, and nothing else is
+ * (`ios/App/Session.swift`).
+ *
+ * The separate "Always allow this tool" button goes through [grant], which
+ * writes the grant itself and then answers with `rememberingPermission = false`.
+ * That flag is the whole point: [allowChoice] can legitimately land on the
+ * card's own "Always allow", and without it one tap would record the same grant
+ * twice (`ios/App/ChatView.swift`).
+ */
+object ApprovalAnswers {
+    suspend fun choose(session: Session, chat: Chat, card: OptionCard, choice: String) {
+        session.answer(chat, card, choice)
+    }
+
+    suspend fun grant(session: Session, chat: Chat.BotChat, card: OptionCard, choice: String) {
+        session.alwaysAllow(chat.bot, card)
+        session.answer(chat, card, choice, rememberingPermission = false)
+    }
 }
 
 /**

@@ -3,14 +3,16 @@ package com.openmausbot.companion.ui
 import com.openmausbot.companion.core.Bot
 import com.openmausbot.companion.core.BotTask
 import com.openmausbot.companion.core.Chat
-import com.openmausbot.companion.core.CompanionState
 import com.openmausbot.companion.core.ChatSummary
+import com.openmausbot.companion.core.ChatTarget
+import com.openmausbot.companion.core.CompanionState
 import com.openmausbot.companion.core.GroupResponder
 import com.openmausbot.companion.core.Message
 import com.openmausbot.companion.core.ModelSelection
 import com.openmausbot.companion.core.OptionCard
 import com.openmausbot.companion.core.Reaction
 import com.openmausbot.companion.core.Room
+import com.openmausbot.companion.core.target
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFalse
@@ -128,6 +130,101 @@ class ThreadResolutionTest {
     }
 }
 
+/**
+ * The chat the reader is in follows its bot, and closes only when the bot is
+ * really gone — `ios/App/ChatView.swift` resolves `current` by the stable id and
+ * derives every transcript lookup from `current.threadId`.
+ *
+ * `server/store.ts:deleteTask` is the case that used to break it: deleting the
+ * open task drops that thread and moves the bot to `bot.tasks[0]`, so a chat
+ * addressed by the thread has nothing left to resolve, while one addressed by
+ * the bot has.
+ */
+class ConversationResolutionTest {
+    private val hydrated = "stream-1:1"
+
+    @Test
+    fun `deleting the open task follows the bot to the task the desktop chose`() {
+        val bot = bot().copy(
+            threadId = "task-2",
+            tasks = listOf(BotTask("task-1", "First", 0.0), BotTask("task-2", "Second", 1.0)),
+        )
+        val opened = Destination.Chat(Chat.BotChat(bot).target)
+
+        // The desktop deleted task-2, the one on screen, and selected task-1.
+        val after = CompanionState(
+            bots = listOf(bot.copy(threadId = "task-1", tasks = listOf(BotTask("task-1", "First", 0.0)))),
+            cursor = hydrated,
+        )
+
+        val resolved = ThreadResolution.resolve(after, opened)
+        assertTrue(resolved is ThreadResolution.Result.Open, "resolved to $resolved")
+        assertEquals("task-1", (resolved as ThreadResolution.Result.Open).chat.threadId)
+        assertEquals("bot-1", resolved.chat.id)
+    }
+
+    @Test
+    fun `a bot that was removed closes the chat`() {
+        val opened = Destination.Chat(Chat.BotChat(bot()).target)
+        val after = CompanionState(bots = listOf(bot(id = "bot-2")), cursor = hydrated)
+        assertEquals(ThreadResolution.Result.Gone, ThreadResolution.resolve(after, opened))
+    }
+
+    @Test
+    fun `a restored stack waits for the fleet rather than closing itself`() {
+        val opened = Destination.Chat(Chat.BotChat(bot()).target)
+        assertEquals(
+            ThreadResolution.Result.Waiting,
+            ThreadResolution.resolve(CompanionState(), opened),
+        )
+    }
+
+    @Test
+    fun `an addressed chat never picks another owner that holds the same thread`() {
+        val opened = Destination.Chat(ChatTarget.Bot("bot-1", "thread-shared"))
+        val state = CompanionState(
+            bots = listOf(
+                bot(id = "bot-2").copy(
+                    threadId = "thread-shared",
+                    tasks = listOf(BotTask("thread-shared", "Mine", 0.0)),
+                ),
+            ),
+            cursor = hydrated,
+        )
+        assertEquals(ThreadResolution.Result.Gone, ThreadResolution.resolve(state, opened))
+    }
+
+    @Test
+    fun `a room is addressed by its own id`() {
+        val opened = Destination.Chat(Chat.RoomChat(room()).target)
+        val state = CompanionState(rooms = listOf(room()), cursor = hydrated)
+        assertEquals(
+            Chat.RoomChat(room()),
+            (ThreadResolution.resolve(state, opened) as ThreadResolution.Result.Open).chat,
+        )
+        assertEquals(
+            ThreadResolution.Result.Gone,
+            ThreadResolution.resolve(CompanionState(rooms = emptyList(), cursor = hydrated), opened),
+        )
+    }
+
+    @Test
+    fun `a notification thread resolves to the owner the chat then keeps`() {
+        val bot = bot().copy(
+            threadId = "task-1",
+            tasks = listOf(BotTask("task-1", "First", 0.0), BotTask("task-2", "Second", 1.0)),
+        )
+        val state = CompanionState(bots = listOf(bot), cursor = hydrated)
+
+        val resolved = ThreadResolution.resolve(state, Destination.Thread("task-2"))
+        assertTrue(resolved is ThreadResolution.Result.Open, "resolved to $resolved")
+        assertEquals(
+            ChatTarget.Bot("bot-1", "task-1"),
+            (resolved as ThreadResolution.Result.Open).chat.target,
+        )
+    }
+}
+
 class TranscriptLayoutTest {
     private fun message(id: String, at: Double) = Message(
         id = id,
@@ -228,10 +325,21 @@ class ApprovalChoicesTest {
     }
 
     @Test
-    fun `deny is the refusal, case-insensitively`() {
-        assertTrue(ApprovalChoices.isRefusal("Deny"))
-        assertTrue(ApprovalChoices.isRefusal("DENY"))
+    fun `deny is the refusal, case-insensitively and after trimming`() {
+        // `OptionCard.isRefusal` in `ios/Sources/CompanionCore/Models.swift`
+        // trims `.whitespacesAndNewlines` before comparing, so padding is not a
+        // different answer.
+        for (deny in listOf("Deny", "DENY", " deny ", "\nDeNy\t", "\r\ndeny")) {
+            assertTrue(ApprovalChoices.isRefusal(deny), deny)
+        }
         assertFalse(ApprovalChoices.isRefusal("Decline"))
+        assertFalse(ApprovalChoices.isRefusal("Deny once"))
+    }
+
+    @Test
+    fun `a padded refusal is not mistaken for the allow choice`() {
+        assertEquals("Approve", ApprovalChoices.allowChoice(listOf(" deny ", "Approve")))
+        assertNull(ApprovalChoices.allowChoice(listOf(" deny ", "\nDENY\n")))
     }
 
     @Test
@@ -251,43 +359,39 @@ class ApprovalChoicesTest {
         assertNull(ApprovalChoices.alwaysAllowChoice(answered))
     }
 
-    // Regression: `Session.answer` maps a permission card's choice to `allow`
-    // only when the string is literally "allow". Answering a standing grant with
-    // anything else wrote the grant and then denied the request.
+    // The standing grant answers with one of the card's own options — for a
+    // permission card as much as for a question. `ios/App/ChatView.swift` builds
+    // that button's choice from `allowChoice` alone and shows it only when
+    // `allowChoice` exists; nothing is fabricated for a card that offered no way
+    // to say yes.
 
     @Test
-    fun `always allow answers a permission card with an allow-behaving choice`() {
-        for (options in listOf(
-            listOf("Allow", "Deny"),
-            listOf("Approve", "Deny"),
-            listOf("Yes", "No"),
-            listOf("Deny"),
-            emptyList(),
-        )) {
-            val choice = ApprovalChoices.alwaysAllowChoice(
-                card(allowKey = "shell:ls").copy(options = options),
-            )
-            assertTrue(
-                choice != null && choice.equals("allow", ignoreCase = true),
-                "options $options produced <$choice>, which Session.answer maps to deny",
+    fun `always allow answers with an option the card offered`() {
+        val expected = mapOf(
+            listOf("Allow", "Deny") to "Allow",
+            listOf("allow", "Deny") to "allow",
+            listOf("Approve", "Deny") to "Approve",
+            listOf("Always allow", "Allow once", "Deny") to "Always allow",
+            listOf("Yes", "No") to "Yes",
+        )
+        for ((options, choice) in expected) {
+            assertEquals(
+                choice,
+                ApprovalChoices.alwaysAllowChoice(
+                    card(allowKey = "shell:ls").copy(options = options),
+                ),
+                "options $options",
             )
         }
     }
 
     @Test
-    fun `a permission card whose own wording is Allow keeps that wording`() {
-        assertEquals(
-            "allow",
-            ApprovalChoices.alwaysAllowChoice(
-                card(allowKey = "shell:ls").copy(options = listOf("allow", "Deny")),
-            ),
-        )
-    }
-
-    @Test
-    fun `a deny-only permission card still offers the standing grant`() {
-        val denyOnly = card(allowKey = "shell:ls").copy(options = listOf("Deny"))
-        assertTrue(ApprovalChoices.showsAlwaysAllow(denyOnly, Chat.BotChat(bot())))
+    fun `a card that offered no way to say yes hides the standing grant`() {
+        for (options in listOf(listOf("Deny"), listOf(" deny "), emptyList())) {
+            val card = card(allowKey = "shell:ls").copy(options = options)
+            assertNull(ApprovalChoices.alwaysAllowChoice(card), "options $options")
+            assertFalse(ApprovalChoices.showsAlwaysAllow(card, Chat.BotChat(bot())), "options $options")
+        }
     }
 
     @Test
@@ -395,9 +499,20 @@ class SearchHitRoleTest {
 /** GAP-05: the refusal is the one option that does not get accent weight. */
 class OptionEmphasisTest {
     @Test
-    fun `deny is secondary, case-insensitively`() {
-        for (deny in listOf("Deny", "deny", "DENY", "DeNy")) {
+    fun `deny is secondary, case-insensitively and after trimming`() {
+        for (deny in listOf("Deny", "deny", "DENY", "DeNy", " deny ", "\nDeNy\t")) {
             assertEquals(OptionEmphasis.SECONDARY, ApprovalChoices.emphasis(deny), deny)
+        }
+    }
+
+    @Test
+    fun `the tint and the answer read the same refusal`() {
+        // A padded refusal must not be drawn with accent weight while
+        // `OptionCard.responseBehavior` puts it on the wire as a deny.
+        for (option in listOf("Deny", " deny ", "\nDENY\n", "Approve", " Approve ")) {
+            val secondary = ApprovalChoices.emphasis(option) == OptionEmphasis.SECONDARY
+            val denied = OptionCard.responseBehavior(option, isPermission = true) == "deny"
+            assertEquals(denied, secondary, option)
         }
     }
 

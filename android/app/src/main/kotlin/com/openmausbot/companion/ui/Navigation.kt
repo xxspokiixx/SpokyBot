@@ -7,6 +7,9 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.saveable.Saver
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
+import com.openmausbot.companion.core.Chat
+import com.openmausbot.companion.core.ChatTarget
+import com.openmausbot.companion.core.target
 
 /**
  * Where the app can be. Four places, one stack, no dependency.
@@ -15,18 +18,33 @@ import androidx.compose.runtime.setValue
  * encoding to express roster ⇄ chat ⇄ settings — CONTRIBUTING asks not to add a
  * dependency where a short module will do, and this is the short module.
  *
- * A chat is addressed by `threadId`, not by a captured `Chat`: the record has to
- * be re-read from `Session.state` on every frame anyway so busy/unread stay
- * current (iOS `ChatView.current` does the same), and a thread id is also what a
- * notification tap arrives carrying.
+ * A chat is addressed by its owner rather than by a captured `Chat`: the record
+ * has to be re-read from `Session.state` on every frame anyway so busy/unread
+ * stay current (iOS `ChatView.current` does the same). The owner is what makes
+ * the address survive: a bot keeps its id when the desktop moves it to another
+ * task, and it keeps it when the task that was open is deleted — a thread does
+ * not.
  */
 sealed interface Destination {
     data object Roster : Destination
-    data class Thread(val threadId: String) : Destination
     data object Settings : Destination
 
     /** A bot's computer, watch-only. Addressed by bot id for the same reason. */
     data class Computer(val botId: String) : Destination
+
+    /**
+     * A conversation, in one of the two ways something can name one.
+     *
+     * [Chat] is the addressed form and what everything on screen produces. [Thread]
+     * is what a notification tap arrives carrying — a thread, with the agent that
+     * owns it still to be learned — and it becomes a [Chat] the moment the fleet
+     * resolves it.
+     */
+    sealed interface Conversation : Destination
+
+    data class Chat(val target: ChatTarget) : Conversation
+
+    data class Thread(val threadId: String) : Conversation
 }
 
 @Stable
@@ -42,6 +60,11 @@ class CompanionNavigator(initial: List<Destination> = listOf(Destination.Roster)
         stack = stack + destination
     }
 
+    /** The chat behind [chat], addressed by its owner. */
+    fun open(chat: Chat) {
+        push(Destination.Chat(chat.target))
+    }
+
     fun pop() {
         if (canGoBack) stack = stack.dropLast(1)
     }
@@ -55,11 +78,25 @@ class CompanionNavigator(initial: List<Destination> = listOf(Destination.Roster)
         stack = listOf(Destination.Roster, Destination.Thread(threadId))
     }
 
+    /**
+     * The fleet said who owns [threadId]: the entry stops being a thread, in
+     * place, so back still leads where it did and the chat now follows its bot.
+     *
+     * Guarded on the entry still being that thread — the reader can leave while
+     * the fleet is landing, and this must not re-address whatever they left to.
+     */
+    fun resolveThread(threadId: String, target: ChatTarget) {
+        if (stack.last() != Destination.Thread(threadId)) return
+        stack = stack.dropLast(1) + Destination.Chat(target)
+    }
+
     companion object {
         private const val ROSTER = "roster"
         private const val SETTINGS = "settings"
         private const val THREAD = "thread:"
         private const val COMPUTER = "computer:"
+        private const val BOT_CHAT = "botchat:"
+        private const val ROOM_CHAT = "roomchat:"
 
         fun encode(stack: List<Destination>): List<String> = stack.map {
             when (it) {
@@ -67,6 +104,10 @@ class CompanionNavigator(initial: List<Destination> = listOf(Destination.Roster)
                 Destination.Settings -> SETTINGS
                 is Destination.Thread -> THREAD + it.threadId
                 is Destination.Computer -> COMPUTER + it.botId
+                is Destination.Chat -> when (val target = it.target) {
+                    is ChatTarget.Bot -> BOT_CHAT + join(target.botId, target.threadId)
+                    is ChatTarget.Room -> ROOM_CHAT + join(target.roomId, target.threadId)
+                }
             }
         }
 
@@ -76,8 +117,29 @@ class CompanionNavigator(initial: List<Destination> = listOf(Destination.Roster)
                 it == SETTINGS -> Destination.Settings
                 it.startsWith(THREAD) -> Destination.Thread(it.removePrefix(THREAD))
                 it.startsWith(COMPUTER) -> Destination.Computer(it.removePrefix(COMPUTER))
+                it.startsWith(BOT_CHAT) -> split(it.removePrefix(BOT_CHAT))
+                    ?.let { (owner, thread) -> Destination.Chat(ChatTarget.Bot(owner, thread)) }
+                it.startsWith(ROOM_CHAT) -> split(it.removePrefix(ROOM_CHAT))
+                    ?.let { (owner, thread) -> Destination.Chat(ChatTarget.Room(owner, thread)) }
                 else -> null
             }
+        }
+
+        /**
+         * Two ids in one string. Length-prefixed rather than separated, because
+         * the harness's ids are opaque and a chosen separator is a guess about
+         * what they cannot contain.
+         */
+        private fun join(owner: String, threadId: String): String =
+            "${owner.length}:$owner$threadId"
+
+        private fun split(raw: String): Pair<String, String>? {
+            val mark = raw.indexOf(':')
+            if (mark <= 0) return null
+            val length = raw.substring(0, mark).toIntOrNull() ?: return null
+            val start = mark + 1
+            if (length < 0 || start + length > raw.length) return null
+            return raw.substring(start, start + length) to raw.substring(start + length)
         }
 
         val Saver: Saver<CompanionNavigator, List<String>> = Saver(

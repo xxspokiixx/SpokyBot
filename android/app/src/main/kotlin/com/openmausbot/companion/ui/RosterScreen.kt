@@ -71,6 +71,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.openmausbot.companion.R
+import com.openmausbot.companion.core.Chat
 import com.openmausbot.companion.core.ChatSummary
 import com.openmausbot.companion.core.Room
 import com.openmausbot.companion.core.SearchHit
@@ -194,7 +195,7 @@ fun RosterScreen(navigator: CompanionNavigator) {
                             GroupsStrip(
                                 rooms = rooms,
                                 colors = tiles,
-                                onOpen = { navigator.push(Destination.Thread(it.threadId)) },
+                                onOpen = { navigator.open(Chat.RoomChat(it)) },
                                 onCreate = { showingNewGroup = true },
                             )
                         }
@@ -232,9 +233,7 @@ fun RosterScreen(navigator: CompanionNavigator) {
                                         // active branch, loads the `around` page
                                         // and focuses the message — the chat
                                         // screen honours the focus when it opens.
-                                        session.open(hit)?.let {
-                                            navigator.push(Destination.Thread(it.threadId))
-                                        }
+                                        session.open(hit)?.let(navigator::open)
                                     }
                                 },
                             )
@@ -250,7 +249,7 @@ fun RosterScreen(navigator: CompanionNavigator) {
                             face = faces[summary.id] ?: MausState.IDLE,
                             waiting = summary.id in waiting,
                             last = index == rows.lastIndex,
-                            onClick = { navigator.push(Destination.Thread(summary.chat.threadId)) },
+                            onClick = { navigator.open(summary.chat) },
                         )
                     }
                 }
@@ -264,7 +263,7 @@ fun RosterScreen(navigator: CompanionNavigator) {
             onOpenUpdates = { showingUpdates = true },
             onCreateBot = {
                 scope.launch {
-                    session.createBot()?.let { navigator.push(Destination.Thread(it.threadId)) }
+                    session.createBot()?.let { navigator.open(Chat.BotChat(it)) }
                 }
             },
             modifier = Modifier.align(Alignment.BottomCenter),
@@ -275,7 +274,7 @@ fun RosterScreen(navigator: CompanionNavigator) {
         UpdatesSheet(
             onOpen = { chat ->
                 showingUpdates = false
-                navigator.push(Destination.Thread(chat.threadId))
+                navigator.open(chat)
             },
             onDismiss = { showingUpdates = false },
         )
@@ -285,7 +284,7 @@ fun RosterScreen(navigator: CompanionNavigator) {
         NewGroupSheet(
             onCreated = { room ->
                 showingNewGroup = false
-                navigator.push(Destination.Thread(room.threadId))
+                navigator.open(Chat.RoomChat(room))
             },
             onDismiss = { showingNewGroup = false },
         )
