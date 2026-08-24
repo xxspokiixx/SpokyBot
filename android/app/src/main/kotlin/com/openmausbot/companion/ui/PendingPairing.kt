@@ -125,3 +125,96 @@ internal val PendingPairingSaver: Saver<PendingPairing?, String> = Saver(
             .getOrNull()
     },
 )
+
+/**
+ * What the confirmation says about a [PendingPairing], worked out before any of
+ * it is drawn so the wording itself can be pinned by a test.
+ *
+ * The port of `confirmationView(for:)` in `ios/App/PairingView.swift`. There the
+ * name and `host:port` sit *above* the branch, so they are on screen whether the
+ * user is confirming a scan or about to type the six digits the desktop shows.
+ * That placement is §6 substance, not layout: a scan never pairs by itself, and
+ * what the user is confirming is which computer, at which address.
+ */
+internal data class PairingConfirmation(
+    val name: String,
+    /** `host:port`, the form `PairingView.swift` prints under the name. */
+    val address: String,
+    val step: Step,
+) {
+    sealed interface Step {
+        /** A scan whose one-time credential is still in this process: one tap pairs. */
+        data class Confirm(val credential: String) : Step
+
+        /** A discovered or typed computer: six digits, read off the desktop. */
+        data object EnterCode : Step
+
+        /** The process died between the scan and the confirmation; §6 forbids the retry. */
+        data object Rescan : Step
+    }
+
+    val notice: String
+        get() = when (step) {
+            is Step.Confirm -> PairingCopy.CONFIRM_SCAN
+            Step.EnterCode -> PairingCopy.ENTER_CODE
+            Step.Rescan -> PairingCopy.RESCAN
+        }
+
+    companion object {
+        fun of(
+            pending: PendingPairing,
+            secrets: PairingSecretStore = PairingSecrets,
+        ): PairingConfirmation {
+            val connection = pending.connection
+            val address = "${connection.host}:${connection.port}"
+            return PairingConfirmation(
+                // A discovered service is named by whatever it advertised, so a
+                // blank name is possible in a way `Connection.parse` and
+                // `PairingInvite.parse` are not. The address is then the honest
+                // heading, and the confirmation never opens without one.
+                name = connection.name.ifBlank { address },
+                address = address,
+                step = when {
+                    pending.needsRescan(secrets) -> Step.Rescan
+                    else -> pending.credential(secrets)?.let(Step::Confirm) ?: Step.EnterCode
+                },
+            )
+        }
+    }
+}
+
+/**
+ * The confirmation's wording, in one place because this is the part §6 cares
+ * about: what pairing authenticates, and what it does not encrypt.
+ */
+internal object PairingCopy {
+    /**
+     * Mirrors `ios/App/PairingView.swift`, which says of a scanned computer:
+     * "Confirm this computer to establish an authenticated companion connection.
+     * Use a trusted Wi-Fi network or a tailnet; OpenMausBot does not encrypt
+     * local Wi-Fi traffic."
+     *
+     * The pairing handshake authenticates the phone to the computer; the session
+     * that follows is plain HTTP on the local network. Those are different
+     * claims and the user is the one who has to choose the network, so both are
+     * said out loud.
+     */
+    const val CONFIRM_SCAN: String =
+        "Only continue if this is the computer whose QR code you just scanned. " +
+            "Confirming establishes an authenticated companion connection. Use a " +
+            "trusted Wi-Fi network or a tailnet; OpenMausBot does not encrypt " +
+            "local Wi-Fi traffic."
+
+    /** `PairingView.swift`: "Enter the 6-digit code shown on your desktop:". */
+    const val ENTER_CODE: String = "Enter the 6-digit code shown on your desktop:"
+
+    /**
+     * No iOS counterpart: SwiftUI's `@State` dies with the process, so iOS never
+     * restores a half-finished scan. Android's saved state does, and the answer
+     * §6 demands is a new QR rather than a replay.
+     */
+    const val RESCAN: String =
+        "This app restarted before the pairing finished. That one-time code is " +
+            "never reused, because it may already have been redeemed. Start pairing " +
+            "again on your computer and scan the new QR code."
+}

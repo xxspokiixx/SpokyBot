@@ -41,6 +41,7 @@ import com.openmausbot.companion.core.Connection
 import com.openmausbot.companion.core.PairingInvite
 import com.openmausbot.companion.discovery.DiscoveredService
 import com.openmausbot.companion.discovery.DiscoveryState
+import com.openmausbot.companion.discovery.toConnection
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 
@@ -192,9 +193,7 @@ fun PairingScreen() {
         val selected = pending
         if (selected != null) {
             CodeSection(
-                pending = selected,
-                scannedCredential = selected.credential(secrets),
-                needsRescan = selected.needsRescan(secrets),
+                confirmation = PairingConfirmation.of(selected, secrets),
                 code = code,
                 onCodeChange = { value ->
                     val digits = value.filter { it in '0'..'9' }.take(6)
@@ -222,7 +221,7 @@ fun PairingScreen() {
                 searchedLongEnough = searchedLongEnough,
                 onChoose = { service ->
                     failure = null
-                    val connection = environment.discovery.toConnection(service)
+                    val connection = service.toConnection()
                     if (connection == null) {
                         failure = "That computer did not answer with an address. " +
                             "Enter the address shown by Companion instead."
@@ -377,44 +376,29 @@ private fun ManualSection(
 
 @Composable
 private fun CodeSection(
-    pending: PendingPairing,
-    scannedCredential: String?,
-    needsRescan: Boolean,
+    confirmation: PairingConfirmation,
     code: String,
     onCodeChange: (String) -> Unit,
     pairing: Boolean,
     onSubmit: (String) -> Unit,
     onCancel: () -> Unit,
 ) {
-    val connection = pending.connection
-    SectionCard(title = if (!pending.fromScan) connection.name else "Confirm computer") {
-        if (needsRescan) {
-            // The app was restarted between the scan and the confirmation. The
-            // token may already have reached the computer, and §6 is absolute
-            // about never sending one twice, so there is nothing to retry here.
-            Text(connection.name, fontSize = 17.sp, fontWeight = FontWeight.SemiBold)
-            Text(
-                text = "This app restarted before the pairing finished. That one-time code is " +
-                    "never reused, because it may already have been redeemed. Start pairing " +
-                    "again on your computer and scan the new QR code.",
-                fontSize = 13.sp,
-                color = secondaryTint,
-            )
-        } else if (scannedCredential != null) {
-            Text(connection.name, fontSize = 17.sp, fontWeight = FontWeight.SemiBold)
-            Row(modifier = Modifier.fillMaxWidth()) {
-                Text("Address", color = secondaryTint, fontSize = 15.sp)
-                Spacer(Modifier.weight(1f))
-                Text("${connection.host}:${connection.port}", fontSize = 15.sp)
-            }
-            Text(
-                text = "Only continue if this is the computer whose QR code you just scanned. " +
-                    "This phone will be able to open chats, send work, and answer approvals on it.",
-                fontSize = 13.sp,
-                color = secondaryTint,
-            )
-            Button(
-                onClick = { onSubmit(scannedCredential) },
+    SectionCard(title = "Confirm computer") {
+        // Name and address sit above the branch, as they do in `PairingView.swift`:
+        // the user is confirming which computer at which address, and that is the
+        // same question whether the credential came from a QR code or the six
+        // digits are about to be typed.
+        Text(confirmation.name, fontSize = 17.sp, fontWeight = FontWeight.SemiBold)
+        Row(modifier = Modifier.fillMaxWidth()) {
+            Text("Address", color = secondaryTint, fontSize = 15.sp)
+            Spacer(Modifier.weight(1f))
+            Text(confirmation.address, fontSize = 15.sp, fontFamily = FontFamily.Monospace)
+        }
+        Text(confirmation.notice, fontSize = 13.sp, color = secondaryTint)
+
+        when (val step = confirmation.step) {
+            is PairingConfirmation.Step.Confirm -> Button(
+                onClick = { onSubmit(step.credential) },
                 enabled = !pairing,
                 modifier = Modifier.fillMaxWidth(),
             ) {
@@ -424,30 +408,41 @@ private fun CodeSection(
                     Text("Pair with this computer")
                 }
             }
-        } else {
-            OutlinedTextField(
-                value = code,
-                onValueChange = onCodeChange,
-                placeholder = { Text("000000") },
-                singleLine = true,
-                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.NumberPassword),
-                textStyle = MaterialTheme.typography.headlineSmall.copy(
-                    fontFamily = FontFamily.Monospace,
-                    textAlign = TextAlign.Center,
-                ),
-                modifier = Modifier.fillMaxWidth(),
-            )
-            Button(
-                onClick = { onSubmit(code) },
-                enabled = code.length == 6 && !pairing,
-                modifier = Modifier.fillMaxWidth(),
-            ) {
-                if (pairing) {
-                    CircularProgressIndicator(modifier = Modifier.size(18.dp), strokeWidth = 2.dp)
-                } else {
-                    Text("Connect")
+
+            PairingConfirmation.Step.EnterCode -> {
+                OutlinedTextField(
+                    value = code,
+                    onValueChange = onCodeChange,
+                    placeholder = { Text("000000") },
+                    singleLine = true,
+                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.NumberPassword),
+                    textStyle = MaterialTheme.typography.headlineSmall.copy(
+                        fontFamily = FontFamily.Monospace,
+                        textAlign = TextAlign.Center,
+                    ),
+                    modifier = Modifier.fillMaxWidth(),
+                )
+                Button(
+                    onClick = { onSubmit(code) },
+                    enabled = code.length == 6 && !pairing,
+                    modifier = Modifier.fillMaxWidth(),
+                ) {
+                    if (pairing) {
+                        CircularProgressIndicator(
+                            modifier = Modifier.size(18.dp),
+                            strokeWidth = 2.dp,
+                        )
+                    } else {
+                        Text("Connect")
+                    }
                 }
             }
+
+            // The app was restarted between the scan and the confirmation. The
+            // token may already have reached the computer, and §6 is absolute
+            // about never sending one twice, so there is nothing to retry here —
+            // only the computer's name and address, and the way back.
+            PairingConfirmation.Step.Rescan -> Unit
         }
 
         OutlinedButton(onClick = onCancel, enabled = !pairing, modifier = Modifier.fillMaxWidth()) {

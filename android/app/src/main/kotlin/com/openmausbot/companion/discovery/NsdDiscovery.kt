@@ -26,6 +26,21 @@ data class DiscoveredService(
 }
 
 /**
+ * The chosen service as a computer to pair with, or null when NSD listed a name
+ * but never answered with an address.
+ *
+ * Top-level rather than a member of [NsdDiscovery] because this refusal is the
+ * only way the discovery path can fail to produce a `host:port`, and the pairing
+ * confirmation is not allowed to open without one (§6). [NsdDiscovery] needs a
+ * `Context` to exist; this does not, so the refusal can be pinned by a test.
+ */
+fun DiscoveredService.toConnection(): Connection? {
+    val resolvedHost = host ?: return null
+    val resolvedPort = port ?: return null
+    return Connection(name = name, host = Connection.urlHost(resolvedHost), port = resolvedPort)
+}
+
+/**
  * Discovery surface for the UI. Distinguishes "still looking", "looked and
  * found nothing", and "permission/policy failure" — NsdManager's silent empty
  * list is the Android twin of the iOS Bonjour Info.plist footgun (§19).
@@ -318,12 +333,6 @@ class NsdDiscovery(
                 },
             )
         }
-    }
-
-    fun toConnection(service: DiscoveredService): Connection? {
-        val host = service.host ?: return null
-        val port = service.port ?: return null
-        return Connection(name = service.name, host = Connection.urlHost(host), port = port)
     }
 
     private fun hostAddress(info: NsdServiceInfo): String? {

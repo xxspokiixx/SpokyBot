@@ -2,6 +2,9 @@ package com.openmausbot.companion.ui
 
 import androidx.compose.runtime.saveable.SaverScope
 import com.openmausbot.companion.core.Connection
+import com.openmausbot.companion.core.PairingInvite
+import com.openmausbot.companion.discovery.DiscoveredService
+import com.openmausbot.companion.discovery.toConnection
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFalse
@@ -227,5 +230,189 @@ class PairingSecretStoreTest {
     fun `a pairing with no credential has none to give`() {
         val secrets = PairingSecretStore()
         assertNull(secrets.credential(secrets.open()))
+    }
+}
+
+/**
+ * The confirmation, read against `confirmationView(for:)` in
+ * `ios/App/PairingView.swift`.
+ *
+ * The expectations here come from the Swift, not from the Kotlin they check.
+ * Two things are load-bearing there:
+ *
+ *  - `Text(connection.name)` and `Text("\(connection.host):\(connection.port)")`
+ *    sit **above** `if let credential = scannedCredential`, so both are on
+ *    screen before confirming a scan *and* before typing six digits.
+ *  - the scanned branch reads: "Confirm this computer to establish an
+ *    authenticated companion connection. Use a trusted Wi-Fi network or a
+ *    tailnet; OpenMausBot does not encrypt local Wi-Fi traffic." Authenticated
+ *    and encrypted are different claims, and only one of them is true of the
+ *    local network.
+ */
+class PairingConfirmationTest {
+    private val connection = Connection(
+        id = "conn-1",
+        name = "Kesley's Ubuntu",
+        host = "192.168.1.42",
+        port = 8810,
+    )
+
+    private val credential = "omb_pair_ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789abcdefg"
+
+    private fun scanned(secrets: PairingSecretStore) =
+        PendingPairing(connection, fromScan = true, handle = secrets.open(credential))
+
+    private fun typed(secrets: PairingSecretStore) =
+        PendingPairing(connection, fromScan = false, handle = secrets.open())
+
+    @Test
+    fun `a scanned computer is confirmed by name and by host and port`() {
+        val secrets = PairingSecretStore()
+        val confirmation = PairingConfirmation.of(scanned(secrets), secrets)
+
+        assertEquals("Kesley's Ubuntu", confirmation.name)
+        assertEquals("192.168.1.42:8810", confirmation.address)
+        assertEquals(
+            PairingConfirmation.Step.Confirm(credential),
+            confirmation.step,
+        )
+    }
+
+    @Test
+    fun `a discovered or typed computer shows the same name and host and port`() {
+        // The gap this pass closes: the six-digit path used to show the name as a
+        // section title and never repeat the address.
+        val secrets = PairingSecretStore()
+        val confirmation = PairingConfirmation.of(typed(secrets), secrets)
+
+        assertEquals("Kesley's Ubuntu", confirmation.name)
+        assertEquals("192.168.1.42:8810", confirmation.address)
+        assertEquals(PairingConfirmation.Step.EnterCode, confirmation.step)
+    }
+
+    @Test
+    fun `a scan that outlived its credential still names the computer and address`() {
+        val restarted = PairingSecretStore()
+        val restored = PendingPairing(connection, fromScan = true, handle = "handle-from-a-dead-process")
+        val confirmation = PairingConfirmation.of(restored, restarted)
+
+        assertEquals(PairingConfirmation.Step.Rescan, confirmation.step)
+        assertEquals("Kesley's Ubuntu", confirmation.name)
+        assertEquals("192.168.1.42:8810", confirmation.address)
+    }
+
+    @Test
+    fun `no step of the confirmation is reachable without a name and an address`() {
+        val secrets = PairingSecretStore()
+        val every = listOf(
+            PairingConfirmation.of(scanned(secrets), secrets),
+            PairingConfirmation.of(typed(PairingSecretStore()), PairingSecretStore()),
+            PairingConfirmation.of(
+                PendingPairing(connection, fromScan = true, handle = "orphan"),
+                PairingSecretStore(),
+            ),
+        )
+        assertEquals(
+            listOf(
+                PairingConfirmation.Step.Confirm(credential),
+                PairingConfirmation.Step.EnterCode,
+                PairingConfirmation.Step.Rescan,
+            ),
+            every.map { it.step },
+            "the three steps of confirmationView(for:) are not all covered",
+        )
+        for (confirmation in every) {
+            assertTrue(confirmation.name.isNotBlank(), "a step with no name: ${confirmation.step}")
+            assertEquals(
+                "${connection.host}:${connection.port}",
+                confirmation.address,
+                "a step without host:port: ${confirmation.step}",
+            )
+            assertTrue(confirmation.notice.isNotBlank(), "a step with no notice: ${confirmation.step}")
+        }
+    }
+
+    @Test
+    fun `a computer that never told us its name is headed by its address`() {
+        val secrets = PairingSecretStore()
+        val nameless = PendingPairing(
+            connection = connection.copy(name = "  "),
+            fromScan = false,
+            handle = secrets.open(),
+        )
+        val confirmation = PairingConfirmation.of(nameless, secrets)
+        assertEquals("192.168.1.42:8810", confirmation.name)
+        assertEquals("192.168.1.42:8810", confirmation.address)
+    }
+
+    @Test
+    fun `an IPv6 computer keeps its brackets in the address`() {
+        val secrets = PairingSecretStore()
+        val ipv6 = PendingPairing(
+            connection = Connection(name = "fe80", host = "[fe80::1]", port = 8810),
+            fromScan = false,
+            handle = secrets.open(),
+        )
+        assertEquals("[fe80::1]:8810", PairingConfirmation.of(ipv6, secrets).address)
+    }
+
+    @Test
+    fun `the scanned notice says authenticated and says the local network is not encrypted`() {
+        val notice = PairingCopy.CONFIRM_SCAN
+        // The clauses of the Swift line, each carrying its own claim.
+        assertTrue(notice.contains("authenticated companion connection"), notice)
+        assertTrue(notice.contains("trusted Wi-Fi"), notice)
+        assertTrue(notice.contains("tailnet"), notice)
+        assertTrue(notice.contains("does not encrypt local Wi-Fi traffic"), notice)
+        // And it still asks the question a scan must never answer for the user.
+        assertTrue(notice.contains("Only continue if this is the computer"), notice)
+    }
+
+    @Test
+    fun `the scanned notice no longer talks about what the phone gains instead`() {
+        // The copy this replaces listed the phone's new powers and left the
+        // transport unmentioned, which is the half that matters on a shared LAN.
+        val notice = PairingCopy.CONFIRM_SCAN
+        assertFalse(notice.contains("answer approvals"), notice)
+        assertFalse(notice.contains("send work"), notice)
+    }
+
+    @Test
+    fun `the six-digit step asks for the code the desktop is showing`() {
+        // `PairingView.swift`: "Enter the 6-digit code shown on your desktop:".
+        val notice = PairingCopy.ENTER_CODE
+        assertTrue(notice.contains("6-digit code"), notice)
+        assertTrue(notice.contains("desktop"), notice)
+    }
+
+    @Test
+    fun `a QR or deep link without an address never becomes a pending pairing`() {
+        assertNull(PairingInvite.parse("openmausbot://pair?token=$credential"))
+        // The control: with one, the invite carries a host and a port.
+        val invite = PairingInvite.parse(
+            "openmausbot://pair?address=192.168.1.42:8810&name=Kesley%27s%20Ubuntu&token=$credential",
+        )
+        assertEquals("192.168.1.42", invite?.connection?.host)
+        assertEquals(8810, invite?.connection?.port)
+    }
+
+    @Test
+    fun `a typed address that is not one never becomes a pending pairing`() {
+        assertNull(Connection.parse(""))
+        assertNull(Connection.parse("   "))
+        assertNull(Connection.parse("http://"))
+        assertNull(Connection.parse("192.168.1.42:not-a-port"))
+        assertEquals(8810, Connection.parse("192.168.1.42")?.port)
+    }
+
+    @Test
+    fun `a discovered service that answered without an address is refused`() {
+        assertNull(DiscoveredService(name = "Kesley's Ubuntu", host = null, port = 8810).toConnection())
+        assertNull(DiscoveredService(name = "Kesley's Ubuntu", host = "192.168.1.42", port = null).toConnection())
+        // The control: a resolved one carries both, so the confirmation can open.
+        val resolved = DiscoveredService(name = "Kesley's Ubuntu", host = "192.168.1.42", port = 8810)
+            .toConnection()
+        assertEquals("192.168.1.42", resolved?.host)
+        assertEquals(8810, resolved?.port)
     }
 }
