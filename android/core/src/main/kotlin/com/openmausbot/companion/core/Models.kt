@@ -394,6 +394,69 @@ data class ConfigStatus(
         isTTSConfigured && (!agentVoice.isNullOrBlank() || hasWorkspaceDefaultVoice)
 }
 
+object ConnectedAppsRules {
+    const val MAX_ACCOUNT_ALIAS_LENGTH = 64
+    const val MAX_ACCOUNTS_PER_CONNECTOR = 5
+    const val PRIMARY_ACCOUNT_LABEL = "Primary account"
+
+    val firstAccountAlias: String? = null
+
+    fun additionalAccountAlias(input: String): String? =
+        trimmedAlias(input)?.take(MAX_ACCOUNT_ALIAS_LENGTH)
+
+    fun canAddAnotherAccount(accounts: List<ConnectorAccount>): Boolean =
+        accounts.size < MAX_ACCOUNTS_PER_CONNECTOR
+
+    internal fun trimmedAlias(input: String?): String? =
+        input?.trim { it.isWhitespace() }?.takeIf { it.isNotEmpty() }
+}
+
+@Serializable
+data class ConnectorCard(
+    val slug: String,
+    val label: String,
+    val blurb: String,
+    val logo: String? = null,
+    val domain: String? = null,
+) {
+    val id: String get() = slug
+}
+
+@Serializable
+data class ConnectorAccount(
+    val id: String,
+    val alias: String? = null,
+    val status: String,
+) {
+    val displayName: String
+        get() = ConnectedAppsRules.trimmedAlias(alias) ?: ConnectedAppsRules.PRIMARY_ACCOUNT_LABEL
+
+    val isActive: Boolean
+        get() = status.trim { it.isWhitespace() }.uppercase() == "ACTIVE"
+}
+
+@Serializable
+data class ConnectorStatus(
+    val connected: Boolean,
+    val pending: Boolean? = null,
+    val status: String? = null,
+    val accounts: List<ConnectorAccount>? = null,
+)
+
+@Serializable
+data class ConnectorCatalog(
+    val configured: Boolean,
+    val mode: String? = null,
+    val source: String? = null,
+    val cards: List<ConnectorCard>,
+)
+
+@Serializable
+data class ConnectorStatuses(
+    val configured: Boolean,
+    val services: Map<String, ConnectorStatus>,
+)
+
 @Serializable(with = BotProfilePatchSerializer::class)
 data class BotProfilePatch(
     val name: String? = null,
@@ -671,3 +734,6 @@ internal data class RoutineResponse(val routine: Routine)
 
 @Serializable
 internal data class RoutineRunResponse(val run: RoutineRun)
+
+@Serializable
+internal data class ConnectorAuthorizationResponse(val url: String)

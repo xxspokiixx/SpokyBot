@@ -923,6 +923,39 @@ class Session(
         null
     }
 
+    suspend fun loadConnectorCatalog(): ConnectorCatalog? {
+        val activeClient = client ?: return null
+        return try {
+            activeClient.connectorCatalog()
+        } catch (error: Throwable) {
+            if (error is kotlinx.coroutines.CancellationException) throw error
+            _actionError.value = error.message
+            null
+        }
+    }
+
+    suspend fun loadAllConnectorStatuses(): ConnectorStatuses? {
+        val activeClient = client ?: return null
+        return try {
+            activeClient.allConnectorStatuses()
+        } catch (error: Throwable) {
+            if (error is kotlinx.coroutines.CancellationException) throw error
+            _actionError.value = error.message
+            null
+        }
+    }
+
+    suspend fun authorizeConnector(slug: String, alias: String?): URI? {
+        val activeClient = client ?: return null
+        return try {
+            activeClient.authorizeConnector(slug, alias)
+        } catch (error: Throwable) {
+            if (error is kotlinx.coroutines.CancellationException) throw error
+            _actionError.value = error.message
+            null
+        }
+    }
+
     suspend fun loadRoutines(): RoutinesResponse {
         val activeClient = client ?: return RoutinesResponse(emptyList(), emptyList())
         return try {
