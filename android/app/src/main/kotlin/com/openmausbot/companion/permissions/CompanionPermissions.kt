@@ -35,6 +35,8 @@ class CompanionPermissions(
         val notificationsGranted: Boolean,
         val localNetworkGranted: Boolean,
         val nearbyWifiGranted: Boolean,
+        /** Microphone for composer dictation — never part of the startup prompt. */
+        val recordAudioGranted: Boolean,
         /** Permissions that are relevant on this device and not yet granted. */
         val missing: List<String>,
     ) {
@@ -63,6 +65,9 @@ class CompanionPermissions(
 
     fun localNetworkGranted(): Boolean = refresh().localNetworkGranted
 
+    /** Composer mic — checked at the button, never at cold start. */
+    fun recordAudioGranted(): Boolean = refresh().recordAudioGranted
+
     private fun read(): Snapshot {
         val notifications = if (sdkInt >= 33) {
             granted(Manifest.permission.POST_NOTIFICATIONS)
@@ -79,6 +84,9 @@ class CompanionPermissions(
         } else {
             true
         }
+        val recordAudio = granted(Manifest.permission.RECORD_AUDIO)
+        // Startup / first-entry prompt only. RECORD_AUDIO is asked from the
+        // composer mic button via [requestRecordAudio], never here.
         val missing = buildList {
             if (sdkInt >= 33 && !notifications) add(Manifest.permission.POST_NOTIFICATIONS)
             if (sdkInt >= 33 && !nearby) add(Manifest.permission.NEARBY_WIFI_DEVICES)
@@ -88,6 +96,7 @@ class CompanionPermissions(
             notificationsGranted = notifications,
             localNetworkGranted = localNetwork,
             nearbyWifiGranted = nearby,
+            recordAudioGranted = recordAudio,
             missing = missing,
         )
     }
@@ -102,7 +111,16 @@ class CompanionPermissions(
          */
         const val PERMISSION_ACCESS_LOCAL_NETWORK = "android.permission.ACCESS_LOCAL_NETWORK"
 
-        /** Permissions the app declares and may need to request at runtime. */
+        /** Literal for JVM unit tests that lack a full android.jar Manifest. */
+        const val PERMISSION_RECORD_AUDIO = "android.permission.RECORD_AUDIO"
+
+        /**
+         * Permissions the app declares and may need to request at runtime.
+         *
+         * Includes [PERMISSION_RECORD_AUDIO] so the asked-flag chokepoint and
+         * the manifest stay honest about it, but [requestablePermissions] /
+         * [Snapshot.missing] deliberately omit it so cold start never prompts.
+         */
         fun declaredRuntimePermissions(sdkInt: Int = Build.VERSION.SDK_INT): List<String> =
             buildList {
                 if (sdkInt >= 33) {
@@ -112,6 +130,14 @@ class CompanionPermissions(
                 if (sdkInt >= LOCAL_NETWORK_SDK) {
                     add(PERMISSION_ACCESS_LOCAL_NETWORK)
                 }
+                add(Manifest.permission.RECORD_AUDIO)
             }
+
+        /**
+         * Single-permission request for the composer mic. Returns null when
+         * already granted so callers do not open a no-op sheet.
+         */
+        fun requestableRecordAudio(granted: Boolean): String? =
+            if (granted) null else Manifest.permission.RECORD_AUDIO
     }
 }

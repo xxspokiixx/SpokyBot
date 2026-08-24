@@ -67,6 +67,7 @@ class CompanionPermissionsTest {
                 Manifest.permission.POST_NOTIFICATIONS,
                 Manifest.permission.NEARBY_WIFI_DEVICES,
                 CompanionPermissions.PERMISSION_ACCESS_LOCAL_NETWORK,
+                Manifest.permission.RECORD_AUDIO,
             ),
             CompanionPermissions.declaredRuntimePermissions(37),
         )
@@ -74,9 +75,31 @@ class CompanionPermissionsTest {
             listOf(
                 Manifest.permission.POST_NOTIFICATIONS,
                 Manifest.permission.NEARBY_WIFI_DEVICES,
+                Manifest.permission.RECORD_AUDIO,
             ),
             CompanionPermissions.declaredRuntimePermissions(33),
         )
-        assertTrue(CompanionPermissions.declaredRuntimePermissions(32).isEmpty())
+        assertEquals(
+            listOf(Manifest.permission.RECORD_AUDIO),
+            CompanionPermissions.declaredRuntimePermissions(32),
+        )
+    }
+
+    @Test
+    fun recordAudioIsNeverPartOfTheStartupPrompt() {
+        val permissions = CompanionPermissions(
+            sdkInt = 37,
+            granted = { false },
+        )
+        assertFalse(permissions.recordAudioGranted())
+        assertFalse(
+            permissions.requestablePermissions().contains(Manifest.permission.RECORD_AUDIO),
+            "RECORD_AUDIO must only be asked from the mic button",
+        )
+        assertEquals(
+            Manifest.permission.RECORD_AUDIO,
+            CompanionPermissions.requestableRecordAudio(granted = false),
+        )
+        assertEquals(null, CompanionPermissions.requestableRecordAudio(granted = true))
     }
 }

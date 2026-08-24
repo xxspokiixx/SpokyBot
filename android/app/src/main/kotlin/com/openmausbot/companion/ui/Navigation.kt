@@ -72,6 +72,24 @@ class CompanionNavigator(initial: List<Destination> = listOf(Destination.Roster)
         if (canGoBack) stack = stack.dropLast(1)
     }
 
+    /**
+     * Whether a composer draft for [chatId] should survive the current
+     * destination leaving composition.
+     *
+     * True while a [Destination.Chat] for that id is still on the stack —
+     * including under [Destination.Computer]. False after a pop back to the
+     * roster (or any stack rewrite that dropped the chat). That is the
+     * push-vs-pop distinction: Computer removes `ChatScreen` but keeps the
+     * chat entry underneath; roster pop does not.
+     */
+    fun retainsChatDraft(chatId: String): Boolean =
+        stack.any { destination ->
+            destination is Destination.Chat && when (val target = destination.target) {
+                is ChatTarget.Bot -> target.botId == chatId
+                is ChatTarget.Room -> target.roomId == chatId
+            }
+        }
+
     fun resetToRoster() {
         stack = listOf(Destination.Roster)
     }

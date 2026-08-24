@@ -6,6 +6,7 @@ import com.openmausbot.companion.audio.VoicePreviewPlayer
 import com.openmausbot.companion.avatar.AvatarImageStore
 import com.openmausbot.companion.core.ExportedTranscript
 import com.openmausbot.companion.core.Session
+import com.openmausbot.companion.dictation.SpeechDictation
 import java.net.URI
 import com.openmausbot.companion.discovery.NsdDiscovery
 import com.openmausbot.companion.permissions.CompanionPermissions
@@ -49,6 +50,43 @@ class CameraPermissionController(
 }
 
 /**
+ * Microphone permission for composer dictation. Asked only from the mic button,
+ * through [PermissionRequests] so the asked-flag has a single owner. Callers
+ * pass a result callback; a stop that races the system sheet is discarded by
+ * [SpeechDictation]'s generation guard, not by dropping this callback.
+ */
+class MicPermissionController(
+    private val isGranted: () -> Boolean,
+    private val request: () -> Unit,
+) {
+    private var pending: ((Boolean) -> Unit)? = null
+
+    fun ensure(onResult: (Boolean) -> Unit) {
+        if (isGranted()) {
+            onResult(true)
+            return
+        }
+        pending = onResult
+        request()
+    }
+
+    fun onResult(granted: Boolean) {
+        val callback = pending
+        pending = null
+        callback?.invoke(granted)
+    }
+
+    fun refresh() {
+        // No published state — SpeechDictation re-checks grant on each start.
+        if (isGranted()) {
+            val callback = pending
+            pending = null
+            callback?.invoke(true)
+        }
+    }
+}
+
+/**
  * The SwiftUI `@EnvironmentObject` analogue: the long-lived objects every screen
  * reaches for, provided once at the top of the composition.
  */
@@ -58,11 +96,19 @@ class CompanionEnvironment(
     val permissions: CompanionPermissions,
     val discovery: NsdDiscovery,
     val camera: CameraPermissionController,
+    val mic: MicPermissionController,
     val notifications: NotificationPermissionController,
     /** Bounded in-memory avatar bytes/bitmaps; cleared on sign-out. */
     val avatars: AvatarImageStore,
     /** One-at-a-time TTS preview; bind to the profile screen lifecycle. */
     val voicePreview: VoicePreviewPlayer,
+    /** Composer dictation; bind to the chat screen lifecycle. */
+    val dictation: SpeechDictation,
+    /**
+     * Volatile composer drafts keyed by [com.openmausbot.companion.core.Chat.id].
+     * Survives Computer navigation without entering saved state.
+     */
+    val chatDrafts: ChatDraftHolder,
     /** Fires the activity's `RequestMultiplePermissions` launcher. */
     val requestPermissions: (Array<String>) -> Unit,
     /** Opens the OS app-settings page, for a permission the user denied. */

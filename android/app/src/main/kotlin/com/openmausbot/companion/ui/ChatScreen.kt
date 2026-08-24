@@ -48,6 +48,7 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
@@ -81,10 +82,12 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.lifecycle.compose.LocalLifecycleOwner
 import com.openmausbot.companion.R
 import com.openmausbot.companion.core.Chat
 import com.openmausbot.companion.core.ChatTarget
 import com.openmausbot.companion.core.CompanionState
+import com.openmausbot.companion.core.Dictation
 import com.openmausbot.companion.core.Message
 import com.openmausbot.companion.core.target
 import java.util.Locale
@@ -109,6 +112,12 @@ fun ChatScreen(
     onResolved: (ChatTarget) -> Unit,
     onBack: () -> Unit,
     onOpenComputer: (String) -> Unit,
+    /**
+     * True while this conversation is still on the navigator stack (including
+     * under Computer). Used on dispose to keep the in-memory draft across a
+     * push and drop it after a pop that removed the chat.
+     */
+    retainsDraft: (chatId: String) -> Boolean = { false },
 ) {
     val session = LocalCompanion.current.session
     val state by session.state.collectAsState()
@@ -130,7 +139,7 @@ fun ChatScreen(
             // that is open is the one deleted.
             val resolved = (destination as? Destination.Thread)?.let { resolution.chat.target }
             LaunchedEffect(resolved) { if (resolved != null) onResolved(resolved) }
-            LoadedChat(resolution.chat, state, onBack, onOpenComputer)
+            LoadedChat(resolution.chat, state, onBack, onOpenComputer, retainsDraft)
         }
     }
 }
@@ -159,14 +168,22 @@ private fun LoadedChat(
     state: CompanionState,
     onBack: () -> Unit,
     onOpenComputer: (String) -> Unit,
+    retainsDraft: (chatId: String) -> Boolean,
 ) {
     // The bot's *current* thread, not the one the destination named. Switching or
     // creating a task moves a bot to another thread; everything below re-keys on
     // that, so the screen follows the bot to the task it is now in.
     val threadId = chat.threadId
+    // Stable conversation identity — not threadId. iOS keeps `@State draft`
+    // across a task switch inside the same ChatView; keying the draft on
+    // threadId would wipe it.
+    val chatId = chat.id
     val environment = LocalCompanion.current
     val session = environment.session
+    val dictation = environment.dictation
+    val chatDrafts = environment.chatDrafts
     val scope = rememberCoroutineScope()
+    val lifecycleOwner = LocalLifecycleOwner.current
     var showingTasks by remember { mutableStateOf(false) }
     // Saveable: the profile form is a form, and a rotation must not throw away
     // what was typed into it — the sheet has to come back for that to matter.
@@ -175,6 +192,11 @@ private fun LoadedChat(
     val focusManager = LocalFocusManager.current
     val focusedMessageId by session.focusedMessageId.collectAsState()
 
+    val dictationListening by dictation.isListening.collectAsState()
+    val dictationStarting by dictation.isStarting.collectAsState()
+    val dictationError by dictation.error.collectAsState()
+    val dictationLocked = dictationListening || dictationStarting
+
     val transcript = remember(state, threadId) { state.visibleTranscript(threadId) }
     val streaming = state.streaming[threadId]
     val reasoning = state.reasoning[threadId]
@@ -182,8 +204,88 @@ private fun LoadedChat(
     val liveReasoning = reasoning?.takeIf { it.isNotEmpty() && liveText == null }
     val hasMore = state.hasMore[threadId] == true
 
-    var draft by rememberSaveable(threadId) { mutableStateOf("") }
+    // Two halves of the composer draft:
+    // (a) ChatComposerDraft under its saver — rememberSaveable persists only
+    //     [ChatComposerDraft.saveableValue] (typed before any dictation). The
+    //     screen never chooses a field; the saver is the only bridge (§6).
+    // (b) draft — volatile TextField mirror; the holder keeps the full string
+    //     across a Computer push (which removes ChatScreen from composition).
+    // iOS `@State draft` survives rotation and an in-view Computer push
+    // because ChatView's identity stays; Android needs this split to match
+    // that without serialising transcripts.
+    //
+    // Push vs pop: leave-to-roster clears both halves via
+    // [ChatComposerDraft.onLeaveToRoster] before pop. Computer must not —
+    // [retainsDraft] stays true while the chat is under Computer.
+    //
+    // Keys include chatDrafts as well as chatId: the saver and ChatComposerDraft
+    // both capture the holder, so a replaced CompanionEnvironment must remount
+    // them together. Today MainActivity builds the holder once per Activity
+    // (unreachable while the same chat stays composed); the key still guards
+    // that latent case. Factory stays inside remember — never per recomposition.
+    val heldOnEntry = remember(chatId, chatDrafts) { chatDrafts.get(chatId) }
+    // Hoist the saver: building it inline in rememberSaveable reallocates the
+    // Saver + both lambdas on every LoadedChat recomposition (partials included).
+    val composerSaver = remember(chatId, chatDrafts) {
+        ChatComposerDraft.saver(chatId, chatDrafts)
+    }
+    val composer = rememberSaveable(chatId, chatDrafts, saver = composerSaver) {
+        ChatComposerDraft(
+            chatId,
+            chatDrafts,
+            initialSaveable = heldOnEntry?.typedSnapshot.orEmpty(),
+        )
+    }
+    var draft by remember(chatId, chatDrafts) { mutableStateOf(composer.text) }
     val listState = rememberLazyListState()
+
+    fun publishFrom(composerDraft: ChatComposerDraft) {
+        // UI mirror only. Saveable half is owned by the composer + its saver.
+        draft = composerDraft.text
+    }
+
+    // Bind dictation to this chat's lifecycle: leaving the screen (including
+    // pushing Computer) and process background both stop capture.
+    DisposableEffect(lifecycleOwner, threadId) {
+        dictation.bind(lifecycleOwner)
+        onDispose { dictation.unbind(lifecycleOwner) }
+    }
+
+    // Drop the in-memory entry when the chat leaves the stack (roster pop or
+    // stack rewrite). Keep it when Computer is pushed on top.
+    DisposableEffect(chatId) {
+        onDispose {
+            if (!retainsDraft(chatId)) {
+                chatDrafts.clear(chatId)
+            }
+        }
+    }
+
+    // Always join against the text frozen at capture start. A newer partial
+    // then replaces the older partial instead of duplicating it. Skip the
+    // first emission: StateFlow replays a sticky transcript from a prior
+    // session, and applying that on open would clobber this chat's draft.
+    // Merged text stays in the volatile draft / holder — never in the
+    // saveable typed snapshot.
+    LaunchedEffect(threadId, dictation) {
+        var first = true
+        dictation.transcript.collect { next ->
+            if (first) {
+                first = false
+                return@collect
+            }
+            val merged = Dictation.draft(base = dictation.base, transcript = next)
+            composer.onDictation(merged)
+            publishFrom(composer)
+        }
+    }
+    LaunchedEffect(dictationListening) {
+        if (dictationListening) focusManager.clearFocus()
+    }
+    // Stop when computer / tasks / profile / plus open — matching ChatView.swift.
+    LaunchedEffect(showingPlus) { if (showingPlus) dictation.stop() }
+    LaunchedEffect(showingTasks) { if (showingTasks) dictation.stop() }
+    LaunchedEffect(showingProfile) { if (showingProfile) dictation.stop() }
 
     // Opening a chat is what marks it read, exactly as on the desktop — and a
     // message can arrive while it is already on screen, so this keys on the bit
@@ -233,7 +335,13 @@ private fun LoadedChat(
         when (action) {
             ChatActionId.NEW_TASK -> if (bot != null) scope.launch { session.createTask(bot, null) }
             ChatActionId.TASKS -> showingTasks = true
-            ChatActionId.WATCH_COMPUTER -> if (bot != null) onOpenComputer(bot.id)
+            ChatActionId.WATCH_COMPUTER -> {
+                // iOS stops on showingComputer; Android leaves ChatScreen when
+                // Computer is pushed, but stop here too so capture ends before
+                // the navigation frame, not only on dispose.
+                dictation.stop()
+                if (bot != null) onOpenComputer(bot.id)
+            }
             ChatActionId.SHARE_MARKDOWN -> share(scope, environment, threadId, ShareFormat.MARKDOWN)
             ChatActionId.SHARE_JSON -> share(scope, environment, threadId, ShareFormat.JSON)
             ChatActionId.INTERRUPT -> if (bot != null) scope.launch { session.interrupt(bot) }
@@ -241,7 +349,16 @@ private fun LoadedChat(
         Unit
     }
 
+    // Clear draft while still composed so rememberSaveable does not resurrect
+    // it after a roster pop. Computer push never takes this path.
+    fun leaveToRoster() {
+        composer.onLeaveToRoster()
+        publishFrom(composer)
+        onBack()
+    }
+
     BackHandler(enabled = showingPlus) { showingPlus = false }
+    BackHandler(enabled = !showingPlus) { leaveToRoster() }
 
     Box(modifier = Modifier.fillMaxSize()) {
         Column(modifier = Modifier.fillMaxSize()) {
@@ -334,8 +451,11 @@ private fun LoadedChat(
                     unreadElsewhere = remember(state, chat) {
                         (state.unreadCount - if (chat.unread) 1 else 0).coerceAtLeast(0)
                     },
-                    onBack = onBack,
-                    onWatchComputer = { if (bot != null) onOpenComputer(bot.id) },
+                    onBack = { leaveToRoster() },
+                    onWatchComputer = {
+                        dictation.stop()
+                        if (bot != null) onOpenComputer(bot.id)
+                    },
                     // A bot's face and its name pill are both the door to its
                     // profile; a room has no profile, so its pill opens the same
                     // sheet the + does.
@@ -343,6 +463,7 @@ private fun LoadedChat(
                         if (bot != null) {
                             showingProfile = true
                         } else {
+                            dictation.stop()
                             focusManager.clearFocus()
                             showingPlus = true
                         }
@@ -354,17 +475,33 @@ private fun LoadedChat(
                 name = chat.name,
                 draft = draft,
                 plusOpen = showingPlus,
+                dictationListening = dictationListening,
+                dictationLocked = dictationLocked,
+                dictationError = dictationError,
                 onTogglePlus = {
                     // iOS drops the composer's focus before the sheet rises; a
                     // keyboard under it would leave the sheet nowhere to go.
+                    dictation.stop()
                     if (!showingPlus) focusManager.clearFocus()
                     showingPlus = !showingPlus
                 },
-                onDraftChange = { draft = it },
+                onDraftChange = { next ->
+                    if (dictationLocked) return@Composer
+                    composer.onTypedChange(next)
+                    publishFrom(composer)
+                },
+                onToggleDictation = {
+                    focusManager.clearFocus()
+                    dictation.toggle(capturing = draft)
+                },
                 onSend = {
+                    // Cancels an in-flight permission prompt before it can open
+                    // the microphone after the message has already been sent.
+                    dictation.stop()
                     val text = draft.trim()
                     if (text.isEmpty()) return@Composer
-                    draft = ""
+                    composer.onSend()
+                    publishFrom(composer)
                     // Deliberately not disabled while the bot is busy: the harness
                     // answers 409 and Session surfaces "The bot is busy — stop it
                     // first." That is a clearer answer than a dead button.
@@ -728,8 +865,12 @@ private fun Composer(
     name: String,
     draft: String,
     plusOpen: Boolean,
+    dictationListening: Boolean,
+    dictationLocked: Boolean,
+    dictationError: String?,
     onTogglePlus: () -> Unit,
     onDraftChange: (String) -> Unit,
+    onToggleDictation: () -> Unit,
     onSend: () -> Unit,
 ) {
     val canSend = draft.isNotBlank()
@@ -740,106 +881,156 @@ private fun Composer(
         animationSpec = tween(PLUS_MILLIS),
         label = "plus",
     )
-    Row(
+    Column(
         modifier = Modifier
             .fillMaxWidth()
             .padding(start = 12.dp, end = 12.dp, top = 6.dp, bottom = 8.dp),
-        horizontalArrangement = Arrangement.spacedBy(10.dp),
-        verticalAlignment = Alignment.Bottom,
+        verticalArrangement = Arrangement.spacedBy(6.dp),
     ) {
-        TouchTarget(
-            onClick = onTogglePlus,
-            contentDescription = if (plusOpen) "Close" else "More",
-        ) {
-            Box(
-                modifier = Modifier
-                    .size(44.dp)
-                    .chromeCapsule()
-                    .then(
-                        if (plusOpen) {
-                            Modifier.background(MaterialTheme.colorScheme.onSurface, CircleShape)
-                        } else {
-                            Modifier
-                        },
-                    ),
-                contentAlignment = Alignment.Center,
-            ) {
-                Icon(
-                    imageVector = Icons.Filled.Add,
-                    contentDescription = null,
-                    tint = if (plusOpen) {
-                        MaterialTheme.colorScheme.surface
-                    } else {
-                        MaterialTheme.colorScheme.onSurface
-                    },
-                    modifier = Modifier
-                        .size(22.dp)
-                        .graphicsLayer { rotationZ = turn.value },
-                )
-            }
+        if (dictationError != null) {
+            Text(
+                text = dictationError,
+                fontSize = 13.sp,
+                color = Color(0xFFFF9800),
+                modifier = Modifier.padding(horizontal = 4.dp),
+            )
         }
-
         Row(
-            modifier = Modifier
-                .weight(1f)
-                .chromeCapsule()
-                .heightIn(min = MIN_TOUCH_TARGET),
-            horizontalArrangement = Arrangement.spacedBy(6.dp),
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.spacedBy(10.dp),
             verticalAlignment = Alignment.Bottom,
         ) {
-            Box(
-                modifier = Modifier
-                    .weight(1f)
-                    .padding(start = 16.dp, top = 13.dp, bottom = 13.dp),
+            TouchTarget(
+                onClick = onTogglePlus,
+                contentDescription = if (plusOpen) "Close" else "More",
             ) {
-                if (draft.isEmpty()) {
-                    Text("Ask $name", fontSize = 17.sp, color = secondaryTint)
-                }
-                BasicTextField(
-                    value = draft,
-                    onValueChange = onDraftChange,
-                    maxLines = 5,
-                    textStyle = LocalTextStyle.current.copy(
-                        fontSize = 17.sp,
-                        color = MaterialTheme.colorScheme.onSurface,
-                    ),
-                    cursorBrush = SolidColor(MaterialTheme.colorScheme.onSurface),
-                    // Software keyboards have no Shift+Return, so their Return key
-                    // is a send — which is what the Send action promises.
-                    keyboardOptions = KeyboardOptions(imeAction = ImeAction.Send),
-                    keyboardActions = KeyboardActions(onSend = { onSend() }),
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        // Return sends, Shift+Return breaks the line — the shape
-                        // every chat app has on a hardware keyboard.
-                        .onPreviewKeyEvent { event ->
-                            val isReturn = event.key == Key.Enter || event.key == Key.NumPadEnter
-                            if (event.type == KeyEventType.KeyDown && isReturn && !event.isShiftPressed) {
-                                onSend()
-                                true
-                            } else {
-                                false
-                            }
-                        },
-                )
-            }
-
-            TouchTarget(onClick = onSend, enabled = canSend) {
                 Box(
                     modifier = Modifier
-                        .size(32.dp)
-                        .background(
-                            if (canSend) BubbleColor.mine else secondaryTint.copy(alpha = 0.18f),
-                            CircleShape,
+                        .size(44.dp)
+                        .chromeCapsule()
+                        .then(
+                            if (plusOpen) {
+                                Modifier.background(MaterialTheme.colorScheme.onSurface, CircleShape)
+                            } else {
+                                Modifier
+                            },
                         ),
                     contentAlignment = Alignment.Center,
                 ) {
                     Icon(
-                        imageVector = Icons.AutoMirrored.Filled.Send,
-                        contentDescription = "Send",
-                        tint = if (canSend) BubbleColor.mineText else secondaryTint,
-                        modifier = Modifier.size(16.dp),
+                        imageVector = Icons.Filled.Add,
+                        contentDescription = null,
+                        tint = if (plusOpen) {
+                            MaterialTheme.colorScheme.surface
+                        } else {
+                            MaterialTheme.colorScheme.onSurface
+                        },
+                        modifier = Modifier
+                            .size(22.dp)
+                            .graphicsLayer { rotationZ = turn.value },
                     )
+                }
+            }
+
+            Row(
+                modifier = Modifier
+                    .weight(1f)
+                    .chromeCapsule()
+                    .heightIn(min = MIN_TOUCH_TARGET),
+                horizontalArrangement = Arrangement.spacedBy(6.dp),
+                verticalAlignment = Alignment.Bottom,
+            ) {
+                Box(
+                    modifier = Modifier
+                        .weight(1f)
+                        .padding(start = 16.dp, top = 13.dp, bottom = 13.dp),
+                ) {
+                    if (draft.isEmpty()) {
+                        Text(
+                            text = if (dictationListening) "Listening…" else "Ask $name",
+                            fontSize = 17.sp,
+                            color = secondaryTint,
+                        )
+                    }
+                    BasicTextField(
+                        value = draft,
+                        onValueChange = onDraftChange,
+                        // Partials rebuild from a frozen base; prevent competing
+                        // edits without dimming the text.
+                        readOnly = dictationLocked,
+                        maxLines = 5,
+                        textStyle = LocalTextStyle.current.copy(
+                            fontSize = 17.sp,
+                            color = MaterialTheme.colorScheme.onSurface,
+                        ),
+                        cursorBrush = SolidColor(MaterialTheme.colorScheme.onSurface),
+                        // Software keyboards have no Shift+Return, so their Return key
+                        // is a send — which is what the Send action promises.
+                        keyboardOptions = KeyboardOptions(imeAction = ImeAction.Send),
+                        keyboardActions = KeyboardActions(onSend = { onSend() }),
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            // Return sends, Shift+Return breaks the line — the shape
+                            // every chat app has on a hardware keyboard.
+                            .onPreviewKeyEvent { event ->
+                                val isReturn = event.key == Key.Enter || event.key == Key.NumPadEnter
+                                if (event.type == KeyEventType.KeyDown && isReturn && !event.isShiftPressed) {
+                                    onSend()
+                                    true
+                                } else {
+                                    false
+                                }
+                            },
+                    )
+                }
+
+                TouchTarget(
+                    onClick = onToggleDictation,
+                    contentDescription = if (dictationListening) {
+                        "Stop dictation"
+                    } else {
+                        "Start dictation"
+                    },
+                ) {
+                    Box(
+                        modifier = Modifier
+                            .size(32.dp)
+                            .background(
+                                if (dictationListening) {
+                                    Color.Red.copy(alpha = 0.2f)
+                                } else {
+                                    secondaryTint.copy(alpha = 0.12f)
+                                },
+                                CircleShape,
+                            ),
+                        contentAlignment = Alignment.Center,
+                    ) {
+                        Icon(
+                            painter = painterResource(R.drawable.ic_mic),
+                            contentDescription = null,
+                            tint = if (dictationListening) Color.Red else MaterialTheme.colorScheme.onSurface,
+                            modifier = Modifier.size(16.dp),
+                        )
+                    }
+                }
+
+                TouchTarget(onClick = onSend, enabled = canSend) {
+                    Box(
+                        modifier = Modifier
+                            .size(32.dp)
+                            .background(
+                                if (canSend) BubbleColor.mine else secondaryTint.copy(alpha = 0.18f),
+                                CircleShape,
+                            ),
+                        contentAlignment = Alignment.Center,
+                    ) {
+                        Icon(
+                            imageVector = Icons.AutoMirrored.Filled.Send,
+                            contentDescription = "Send",
+                            tint = if (canSend) BubbleColor.mineText else secondaryTint,
+                            modifier = Modifier.size(16.dp),
+                        )
+                    }
                 }
             }
         }

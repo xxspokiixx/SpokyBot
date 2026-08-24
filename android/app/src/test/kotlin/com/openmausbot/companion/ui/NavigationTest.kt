@@ -162,6 +162,27 @@ class NavigationTest {
     }
 
     @Test
+    fun `retainsChatDraft is true under Computer and false after pop to roster`() {
+        val navigator = CompanionNavigator()
+        navigator.push(botChat)
+        assertTrue(navigator.retainsChatDraft("bot-1"))
+        assertFalse(navigator.retainsChatDraft("bot-other"))
+
+        navigator.push(Destination.Computer("bot-1"))
+        assertTrue(
+            navigator.retainsChatDraft("bot-1"),
+            "Computer push must keep the chat on the stack so the draft holder survives",
+        )
+
+        navigator.pop()
+        navigator.pop()
+        assertFalse(
+            navigator.retainsChatDraft("bot-1"),
+            "Roster pop must drop the chat so dispose clears the holder",
+        )
+    }
+
+    @Test
     fun `the four addressable destinations do not collide in saved state`() {
         val encoded = CompanionNavigator.encode(
             listOf(

@@ -15,6 +15,9 @@ internal object PermissionPreferences {
      * from a plain JVM test with no android.jar behaviour behind it.
      */
     const val POST_NOTIFICATIONS = "android.permission.POST_NOTIFICATIONS"
+
+    /** Composer dictation mic — asked only from the mic button's flow. */
+    const val RECORD_AUDIO = "android.permission.RECORD_AUDIO"
 }
 
 /**
@@ -38,8 +41,16 @@ internal class PermissionRequests(
     private val launchMultiple: (Array<String>) -> Unit,
     private val launchSingle: (String) -> Unit,
     private val onNotificationResult: (Boolean) -> Unit,
-    /** Permissions whose "already asked" state has to outlive the process. */
-    private val tracked: Set<String> = setOf(PermissionPreferences.POST_NOTIFICATIONS),
+    private val onRecordAudioResult: (Boolean) -> Unit = {},
+    /**
+     * Permissions whose "already asked" state has to outlive the process.
+     * RECORD_AUDIO joins notifications so a permanent denial through the mic
+     * button cannot be misread as "never asked" after a recreation.
+     */
+    private val tracked: Set<String> = setOf(
+        PermissionPreferences.POST_NOTIFICATIONS,
+        PermissionPreferences.RECORD_AUDIO,
+    ),
 ) {
     /** The root's first-entry request for everything still missing. */
     fun request(permissions: Array<String>) {
@@ -48,7 +59,7 @@ internal class PermissionRequests(
         launchMultiple(permissions)
     }
 
-    /** The Settings row's request for one permission. */
+    /** The Settings row's request for one permission, or the composer mic. */
     fun request(permission: String) {
         if (permission in tracked) markAsked(permission)
         launchSingle(permission)
@@ -57,5 +68,6 @@ internal class PermissionRequests(
     /** Results from either launcher, routed to whoever is showing that state. */
     fun onResults(results: Map<String, Boolean>) {
         results[PermissionPreferences.POST_NOTIFICATIONS]?.let(onNotificationResult)
+        results[PermissionPreferences.RECORD_AUDIO]?.let(onRecordAudioResult)
     }
 }

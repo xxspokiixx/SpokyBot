@@ -6,6 +6,7 @@ import android.content.pm.PackageManager
 import android.net.Uri
 import android.os.Build
 import android.os.Bundle
+import android.os.LocaleList
 import android.provider.Settings
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
@@ -15,13 +16,16 @@ import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.core.app.NotificationManagerCompat
 import androidx.core.content.ContextCompat
+import com.openmausbot.companion.dictation.SpeechDictation
 import com.openmausbot.companion.notifications.notificationTarget
 import com.openmausbot.companion.browser.CloudDesktopBrowser
 import com.openmausbot.companion.sharing.TranscriptSharing
 import com.openmausbot.companion.ui.CameraPermissionController
+import com.openmausbot.companion.ui.ChatDraftHolder
 import com.openmausbot.companion.ui.CompanionEnvironment
 import com.openmausbot.companion.ui.CompanionRoot
 import com.openmausbot.companion.ui.LocalCompanion
+import com.openmausbot.companion.ui.MicPermissionController
 import com.openmausbot.companion.ui.NotificationPermissionController
 import com.openmausbot.companion.ui.PermissionPreferences
 import com.openmausbot.companion.ui.PermissionRequests
@@ -43,8 +47,14 @@ class MainActivity : ComponentActivity() {
     private lateinit var notificationNavigation: PendingThreadNavigation
 
     private lateinit var camera: CameraPermissionController
+    private lateinit var mic: MicPermissionController
+    private lateinit var dictation: SpeechDictation
+    private lateinit var chatDrafts: ChatDraftHolder
     private lateinit var notifications: NotificationPermissionController
     private lateinit var permissionRequests: PermissionRequests
+
+    /** Tracks which single-permission launch is in flight for [singlePermissionLauncher]. */
+    private var pendingSinglePermission: String? = null
 
     private val permissionLauncher = registerForActivityResult(
         ActivityResultContracts.RequestMultiplePermissions(),
@@ -59,13 +69,15 @@ class MainActivity : ComponentActivity() {
         camera.onResult(granted)
     }
 
-    private val notificationLauncher = registerForActivityResult(
+    private val singlePermissionLauncher = registerForActivityResult(
         ActivityResultContracts.RequestPermission(),
     ) { granted ->
+        val permission = pendingSinglePermission
+        pendingSinglePermission = null
         app.permissions.refresh()
-        permissionRequests.onResults(
-            mapOf(PermissionPreferences.POST_NOTIFICATIONS to granted),
-        )
+        if (permission != null) {
+            permissionRequests.onResults(mapOf(permission to granted))
+        }
     }
 
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -83,6 +95,13 @@ class MainActivity : ComponentActivity() {
             request = { cameraLauncher.launch(Manifest.permission.CAMERA) },
         )
 
+        mic = MicPermissionController(
+            isGranted = { app.permissions.recordAudioGranted() },
+            request = {
+                permissionRequests.request(PermissionPreferences.RECORD_AUDIO)
+            },
+        )
+
         val permissionPrefs = getSharedPreferences(PermissionPreferences.NAME, MODE_PRIVATE)
         // The only thing in the app that launches a permission prompt, so the
         // "we have asked" flag cannot be missed by a path that forgot to write it.
@@ -91,8 +110,12 @@ class MainActivity : ComponentActivity() {
                 permissionPrefs.edit().putBoolean(askedKey(permission), true).apply()
             },
             launchMultiple = { permissions -> permissionLauncher.launch(permissions) },
-            launchSingle = { permission -> notificationLauncher.launch(permission) },
+            launchSingle = { permission ->
+                pendingSinglePermission = permission
+                singlePermissionLauncher.launch(permission)
+            },
             onNotificationResult = { granted -> notifications.onResult(granted) },
+            onRecordAudioResult = { granted -> mic.onResult(granted) },
         )
 
         notifications = NotificationPermissionController(
@@ -121,6 +144,19 @@ class MainActivity : ComponentActivity() {
             openSettings = ::openNotificationSettings,
         )
 
+        dictation = SpeechDictation(
+            context = this,
+            hasRecordAudio = { app.permissions.recordAudioGranted() },
+            requestRecordAudio = { onResult -> mic.ensure(onResult) },
+            preferredLanguages = ::preferredLanguageTags,
+        )
+        // Process memory only — outlives ChatScreen when Computer is on top,
+        // dies with the Activity so rotation never restores spoken text.
+        // Built once here and handed into CompanionEnvironment for the
+        // Activity lifetime; LoadedChat still keys its saver on this instance
+        // so a future environment swap cannot restore into a stale holder.
+        chatDrafts = ChatDraftHolder()
+
         val sharing = TranscriptSharing(this)
         val browser = CloudDesktopBrowser(this)
 
@@ -129,9 +165,12 @@ class MainActivity : ComponentActivity() {
             permissions = app.permissions,
             discovery = app.discovery,
             camera = camera,
+            mic = mic,
             notifications = notifications,
             avatars = app.avatars,
             voicePreview = app.voicePreview,
+            dictation = dictation,
+            chatDrafts = chatDrafts,
             requestPermissions = { permissions -> permissionRequests.request(permissions) },
             openAppSettings = ::openAppSettings,
             shareTranscript = sharing::share,
@@ -170,7 +209,15 @@ class MainActivity : ComponentActivity() {
         // made in Settings should take effect on return, not on next launch.
         app.permissions.refresh()
         camera.refresh()
+        mic.refresh()
         notifications.refresh()
+    }
+
+    override fun onDestroy() {
+        // Activity teardown releases the recognizer; process-background stop is
+        // already handled inside SpeechDictation via ProcessLifecycleOwner.
+        if (isFinishing && ::dictation.isInitialized) dictation.stop()
+        super.onDestroy()
     }
 
     /**
@@ -212,6 +259,15 @@ class MainActivity : ComponentActivity() {
                 data = Uri.fromParts("package", packageName, null)
             },
         )
+    }
+
+    private fun preferredLanguageTags(): List<String> {
+        val list = LocaleList.getDefault()
+        return buildList(list.size()) {
+            for (i in 0 until list.size()) {
+                add(list[i].toLanguageTag())
+            }
+        }
     }
 
     private companion object {
