@@ -3,6 +3,7 @@ package com.openmausbot.companion.ui
 import android.content.ClipData
 import android.graphics.BitmapFactory
 import android.util.Base64
+import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
@@ -47,14 +48,22 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
+import androidx.compose.runtime.snapshotFlow
+import androidx.compose.runtime.withFrameNanos
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.MotionDurationScale
+import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.ImageBitmap
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.ClipEntry
 import androidx.compose.ui.platform.LocalClipboard
+import androidx.compose.ui.semantics.LiveRegionMode
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.liveRegion
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -64,6 +73,7 @@ import com.openmausbot.companion.core.OptionCard
 import com.openmausbot.companion.core.ToolActivity
 import com.openmausbot.companion.core.TranscriptCard
 import com.openmausbot.companion.core.TranscriptCards
+import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.launch
 
 /** What the clipboard shows this came from. */
@@ -369,34 +379,73 @@ private fun TextBubble(message: Message, endsRun: Boolean) {
 }
 
 /**
- * A tool the bot ran. Deliberately quiet — these are the bulk of a busy
- * transcript and they are context, not content.
+ * A tool the bot ran, and what became of it — the status half of
+ * `ios/App/Cards/SkillExecutionReceiptView.swift`.
+ *
+ * Deliberately quiet: these are the bulk of a busy transcript and they are
+ * context, not content. So the receipt is a dot and a name, and the badge word
+ * appears only for the two states worth a glance ([ActivityReceipt.showsLabel]).
+ * A row that failed keeps the warning glyph it already had, so failure is a
+ * shape and not only a colour — and the whole row reads as one sentence to a
+ * screen reader whichever state it is in.
+ *
+ * None of iOS's detail is here, because none of it has data: `durationMs`,
+ * `parameters` and `output` are dormant on that view and absent from
+ * [ToolActivity]. Nothing to expand means nothing to tap, which is why this is
+ * not a button.
  */
 @Composable
 private fun ActivityChip(tool: ToolActivity?) {
     if (tool == null) return
-    val failed = tool.ok == false
+    val status = ActivityReceipt.status(tool.ok)
+    val tint = when (status) {
+        ActivityStatus.RUNNING -> MaterialTheme.colorScheme.tertiary
+        ActivityStatus.SUCCESS -> secondaryTint
+        ActivityStatus.ERROR -> MaterialTheme.colorScheme.error
+    }
     Row(
-        modifier = Modifier.padding(start = 4.dp),
+        modifier = Modifier
+            .padding(start = 4.dp)
+            .semantics(mergeDescendants = true) {
+                contentDescription = ActivityReceipt.announcement(tool.name, status)
+            },
         horizontalArrangement = Arrangement.spacedBy(6.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
-        if (failed) {
+        if (status == ActivityStatus.ERROR) {
             Icon(
                 imageVector = Icons.Filled.Warning,
                 contentDescription = null,
-                tint = MaterialTheme.colorScheme.error,
+                tint = tint,
                 modifier = Modifier.size(14.dp),
+            )
+        } else {
+            Box(
+                modifier = Modifier
+                    .size(ACTIVITY_DOT)
+                    .background(tint, CircleShape),
             )
         }
         Text(
             text = tool.name,
             fontSize = 13.sp,
             maxLines = 1,
-            color = if (failed) MaterialTheme.colorScheme.error else secondaryTint,
+            color = if (status == ActivityStatus.ERROR) tint else secondaryTint,
         )
+        if (ActivityReceipt.showsLabel(status)) {
+            Text(
+                text = ActivityReceipt.label(status),
+                fontSize = 12.sp,
+                fontWeight = FontWeight.Medium,
+                maxLines = 1,
+                color = tint,
+            )
+        }
     }
 }
+
+/** The receipt's status dot, sized to sit level with the 13 sp name beside it. */
+private val ACTIVITY_DOT = 7.dp
 
 /**
  * An option card. When it still has a request behind it, this is the screen the
@@ -584,3 +633,78 @@ fun StreamingBubble(text: String?, reasoning: String?) {
         Spacer(Modifier.width(44.dp))
     }
 }
+
+/**
+ * The beat between "go" and the first token — the port of the `else if
+ * current.busy` branch of `ChatView.swift` and of `TypingIndicatorView`.
+ *
+ * The reason this exists is the sentence in the semantics block, not the dots.
+ * Busy already reaches a sighted reader twice over — the mascot wears a working
+ * face and the composer offers an interrupt — and reached a TalkBack reader
+ * through neither. The row is a polite live region, so it is spoken when it
+ * appears, and it carries a name of its own, so it can also be found by swiping
+ * to the end of the transcript.
+ *
+ * Drawn in the same bubble as the reply that will replace it, and in the bot's
+ * own colour, so the handover is the text arriving rather than the shape
+ * changing. Everything Apple about the original — the capsule, the secondary
+ * fill, the `TimelineView`, the scale wave — is left where it was; see
+ * [WorkingDots].
+ */
+@Composable
+fun WorkingBubble(name: String, color: String) {
+    val clock = remember { MausFrameClock() }
+    // Android says "reduce motion" through the animator duration scale, and this
+    // reads it the way MausAvatar does — through a snapshotFlow, so turning the
+    // setting off while a turn is running stops the dots on the next frame
+    // rather than at the end of the turn. At zero they hold their rest alpha:
+    // still three dots, just still ones.
+    var moving by remember { mutableStateOf(false) }
+    LaunchedEffect(Unit) {
+        val durationScale = coroutineContext[MotionDurationScale]
+        snapshotFlow { (durationScale?.scaleFactor ?: 1f) > 0f }
+            .collectLatest { live ->
+                moving = live
+                if (!live) return@collectLatest
+                while (true) withFrameNanos(clock.onFrame)
+            }
+    }
+
+    val dots = Color(MausPalette.argb(color))
+    val label = LiveTail.workingLabel(name)
+    Row(modifier = Modifier.fillMaxWidth(), verticalAlignment = Alignment.Bottom) {
+        Box(
+            modifier = Modifier
+                .padding(bottom = SpeechBubble.tailDrop())
+                .background(BubbleColor.theirs, SpeechBubbleShape.of(BubbleTail.LEADING))
+                .padding(horizontal = 15.dp, vertical = 11.dp)
+                .semantics {
+                    contentDescription = label
+                    liveRegion = LiveRegionMode.Polite
+                },
+        ) {
+            Canvas(modifier = Modifier.size(WORKING_DOTS_WIDTH, WORKING_DOT)) {
+                // Read in the draw phase: a tick repaints the dots without
+                // recomposing the bubble, let alone the transcript around it.
+                val elapsed = clock.nanos.longValue
+                val live = moving
+                val radius = size.height * 0.5f
+                val step = size.height + WORKING_DOT_GAP.toPx()
+                for (index in 0 until WorkingDots.COUNT) {
+                    drawCircle(
+                        color = dots,
+                        radius = radius,
+                        center = Offset(radius + index * step, radius),
+                        alpha = WorkingDots.alpha(index, elapsed, live),
+                    )
+                }
+            }
+        }
+        Spacer(Modifier.width(44.dp))
+    }
+}
+
+private val WORKING_DOT = 7.dp
+private val WORKING_DOT_GAP = 5.dp
+private val WORKING_DOTS_WIDTH =
+    WORKING_DOT * WorkingDots.COUNT + WORKING_DOT_GAP * (WorkingDots.COUNT - 1)

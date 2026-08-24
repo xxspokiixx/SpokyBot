@@ -63,6 +63,10 @@ fun PairingScreen() {
     val environment = LocalCompanion.current
     val session = environment.session
     val scope = rememberCoroutineScope()
+    // `PairingView.swift` fires `Haptics.selection()` on every one of these:
+    // scanning, picking a discovered computer, taking a typed address, both
+    // submits, and going back to the list.
+    val haptics = rememberHaptics()
 
     val secrets = PairingSecrets
 
@@ -202,9 +206,11 @@ fun PairingScreen() {
                 },
                 pairing = pairing,
                 onSubmit = { credential ->
+                    haptics.play(HapticCue.SELECT)
                     submit(selected.connection, credential, selected.fromScan)
                 },
                 onCancel = {
+                    haptics.play(HapticCue.SELECT)
                     pending = null
                     code = ""
                     secrets.clear()
@@ -213,6 +219,7 @@ fun PairingScreen() {
             )
         } else {
             SetupSection(onScan = {
+                haptics.play(HapticCue.SELECT)
                 failure = null
                 showingScanner = true
             })
@@ -220,6 +227,7 @@ fun PairingScreen() {
                 discovery = discovery,
                 searchedLongEnough = searchedLongEnough,
                 onChoose = { service ->
+                    haptics.play(HapticCue.SELECT)
                     failure = null
                     val connection = service.toConnection()
                     if (connection == null) {
@@ -238,6 +246,7 @@ fun PairingScreen() {
                 address = manualAddress,
                 onAddressChange = { manualAddress = it },
                 onContinue = {
+                    haptics.play(HapticCue.SELECT)
                     failure = null
                     val connection = Connection.parse(manualAddress)
                     if (connection == null) {

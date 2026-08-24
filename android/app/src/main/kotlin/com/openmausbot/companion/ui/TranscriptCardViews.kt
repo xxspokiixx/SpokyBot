@@ -93,6 +93,8 @@ fun DiffCard(card: TranscriptCard.Diff, modifier: Modifier = Modifier) {
     var showingDiff by rememberSaveable(card.text) { mutableStateOf(true) }
     var showingAll by rememberSaveable(card.text) { mutableStateOf(false) }
     val copy = rememberCopy()
+    // `GitPRDiffCardView.swift` fires `Haptics.selection()` on both of these.
+    val haptics = rememberHaptics()
 
     Column(
         modifier = modifier
@@ -146,7 +148,10 @@ fun DiffCard(card: TranscriptCard.Diff, modifier: Modifier = Modifier) {
             Disclosure(
                 expanded = showingDiff,
                 label = if (showingDiff) "Hide Diff" else "View Diff",
-                onToggle = { showingDiff = !showingDiff },
+                onToggle = {
+                    haptics.play(HapticCue.SELECT)
+                    showingDiff = !showingDiff
+                },
             )
 
             if (showingDiff) {
@@ -177,7 +182,10 @@ fun DiffCard(card: TranscriptCard.Diff, modifier: Modifier = Modifier) {
                         "Show all ${card.lines.size} lines"
                     }
                     TextButton(
-                        onClick = { showingAll = !showingAll },
+                        onClick = {
+                            haptics.play(HapticCue.SELECT)
+                            showingAll = !showingAll
+                        },
                         // Compose has no "hint" the way UIAccessibility does, so
                         // iOS's hint is folded into the name: the reader must not
                         // be left thinking Copy Diff copies the preview.
@@ -341,6 +349,8 @@ fun ThoughtChamber(
 ) {
     val steps = remember(reasoning) { Reasoning.steps(reasoning) }
     var expanded by rememberSaveable { mutableStateOf(false) }
+    // `AgentThoughtChamberView.swift` fires `Haptics.selection()` on the header.
+    val haptics = rememberHaptics()
 
     Column(
         modifier = modifier.fillMaxWidth(),
@@ -354,7 +364,10 @@ fun ThoughtChamber(
                 .clickable(
                     role = Role.Button,
                     onClickLabel = if (expanded) "Collapse" else "Expand",
-                    onClick = { expanded = !expanded },
+                    onClick = {
+                        haptics.play(HapticCue.SELECT)
+                        expanded = !expanded
+                    },
                 )
                 .semantics {
                     stateDescription = if (expanded) "Expanded" else "Collapsed"
@@ -454,18 +467,48 @@ private fun Disclosure(expanded: Boolean, label: String, onToggle: () -> Unit) {
     }
 }
 
-/** One clipboard write, reused by both cards. */
+/**
+ * A copy, as the two halves iOS gives it: the clipboard write, and the tick that
+ * says it happened.
+ *
+ * `PlatformBridge.copyToPasteboard` ends every copy with `Haptics.selection()`,
+ * unconditionally — so Copy Diff (`GitPRDiffCardView.swift`) and Copy CSV
+ * (`SQLResultTableView.swift`) are confirmed by feel and not only by a toast
+ * neither platform shows. A copy is the one action on these cards with no
+ * visible result at all: the button does not move, nothing opens, and the only
+ * evidence is in a clipboard the reader has to leave the app to see. That is
+ * exactly the interaction that needs the confirmation.
+ *
+ * Both cards go through this one object, so neither route can lose the tick
+ * without the other losing it too — and [invoke] plays exactly one cue per call,
+ * after the write is dispatched, in the order the Swift does it.
+ */
+internal class CardClipboard(
+    private val write: (String) -> Unit,
+    private val haptics: Haptics,
+) {
+    operator fun invoke(text: String) {
+        write(text)
+        haptics.play(HapticCue.SELECT)
+    }
+}
+
+/** One clipboard write and one tick, reused by both cards. */
 @Composable
-private fun rememberCopy(): (String) -> Unit {
+private fun rememberCopy(): CardClipboard {
     val clipboard = LocalClipboard.current
     val scope = rememberCoroutineScope()
-    return remember(clipboard, scope) {
-        { text: String ->
-            scope.launch {
-                clipboard.setClipEntry(ClipEntry(ClipData.newPlainText(CARD_CLIP_LABEL, text)))
-            }
-            Unit
-        }
+    val haptics = rememberHaptics()
+    return remember(clipboard, scope, haptics) {
+        CardClipboard(
+            write = { text ->
+                scope.launch {
+                    clipboard.setClipEntry(ClipEntry(ClipData.newPlainText(CARD_CLIP_LABEL, text)))
+                }
+                Unit
+            },
+            haptics = haptics,
+        )
     }
 }
 

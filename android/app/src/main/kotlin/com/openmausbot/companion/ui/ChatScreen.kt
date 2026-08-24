@@ -184,6 +184,7 @@ private fun LoadedChat(
     val session = environment.session
     val dictation = environment.dictation
     val chatDrafts = environment.chatDrafts
+    val haptics = rememberHaptics()
     val scope = rememberCoroutineScope()
     val lifecycleOwner = LocalLifecycleOwner.current
     var showingTasks by remember { mutableStateOf(false) }
@@ -202,8 +203,11 @@ private fun LoadedChat(
     val transcript = remember(state, threadId) { state.visibleTranscript(threadId) }
     val streaming = state.streaming[threadId]
     val reasoning = state.reasoning[threadId]
-    val liveText = streaming?.takeIf { it.isNotEmpty() }
-    val liveReasoning = reasoning?.takeIf { it.isNotEmpty() && liveText == null }
+    // Stream, then reasoning, then the bare fact of being busy — the order in
+    // `ChatView.swift`, and the reason it is a rule rather than three `if`s here.
+    val tail = LiveTail.of(streaming = streaming, reasoning = reasoning, busy = chat.busy)
+    val liveText = streaming?.takeIf { tail == TranscriptTail.STREAM }
+    val liveReasoning = reasoning?.takeIf { tail == TranscriptTail.REASONING }
     val hasMore = state.hasMore[threadId] == true
     // What stops the predictive chips from covering the one question on screen
     // that only a person can answer.
@@ -317,7 +321,10 @@ private fun LoadedChat(
     }
 
     val headerCount = if (hasMore) 1 else 0
-    val liveCount = if (liveText != null || liveReasoning != null) 1 else 0
+    // One slot at the bottom, whichever of the three is in it — iOS gives all of
+    // them the same `.id(Self.liveBubbleId)` for the same reason: they replace
+    // one another, they do not stack.
+    val liveCount = if (tail == TranscriptTail.NONE) 0 else 1
     val itemCount = headerCount + transcript.size + liveCount
 
     // A conversation grows from the bottom: opening a chat starts on the newest
@@ -332,10 +339,13 @@ private fun LoadedChat(
         if (!settled || itemCount == 0) return@LaunchedEffect
         listState.animateScrollToItem(itemCount - 1)
     }
-    // Follow the text as it arrives. Keyed on length rather than the string so
-    // this fires once per delta batch, and without animation — animating every
-    // token turns a smooth stream into a stutter.
-    LaunchedEffect(threadId, liveText?.length ?: 0) {
+    // Follow the live row: its arrival, its change of kind, and the text inside
+    // it. Keyed on length rather than the string so this fires once per delta
+    // batch, and without animation — animating every token turns a smooth stream
+    // into a stutter. [tail] is a key of its own because the working row appears
+    // with no text at all, and a row nobody scrolls to is a row nobody is told
+    // about.
+    LaunchedEffect(threadId, tail, liveText?.length ?: 0) {
         if (liveCount == 0 || itemCount == 0) return@LaunchedEffect
         listState.scrollToItem(itemCount - 1)
     }
@@ -397,6 +407,10 @@ private fun LoadedChat(
         // Clearing the draft closes the HUD through the rule above, which is
         // how iOS's `showCommandHUD = false` on submit happens as well.
         publishFrom(composer)
+        // Where iOS plays `SoundEffects.playSent()` and a medium impact. The
+        // motor only: the sound there is an Apple system id with no counterpart
+        // here, and the keyboard already owns that job on this platform.
+        haptics.play(HapticCue.SEND)
         // Deliberately not disabled while the bot is busy: the harness answers
         // 409 and Session surfaces "The bot is busy — stop it first." That is a
         // clearer answer than a dead button.
@@ -404,6 +418,9 @@ private fun LoadedChat(
     }
 
     fun selectCommand(command: SlashCommand) {
+        // Null for a command that sends: `submit` below plays the send cue, and
+        // two effects back to back on one gesture are one muddled buzz.
+        CompanionHaptics.forCommand(command.effect)?.let { haptics.play(it) }
         when (val effect = command.effect) {
             SlashEffect.OpenComputer -> {
                 // Stop before clearing, not after: a partial still in flight
@@ -533,7 +550,11 @@ private fun LoadedChat(
 
                     if (liveCount == 1) {
                         item(key = LIVE_BUBBLE_KEY) {
-                            StreamingBubble(text = liveText, reasoning = liveReasoning)
+                            if (tail == TranscriptTail.WORKING) {
+                                WorkingBubble(name = chat.name, color = chat.color)
+                            } else {
+                                StreamingBubble(text = liveText, reasoning = liveReasoning)
+                            }
                         }
                     }
                 }
@@ -599,9 +620,15 @@ private fun LoadedChat(
                 onSend = { submit() },
                 onToggleHud = {
                     dictation.stop()
+                    haptics.play(HapticCue.SELECT)
                     hudOpen = !hudOpen
                 },
-                onCloseHud = { closeHud() },
+                // The button, not the back gesture — `closeHud` is also what the
+                // BackHandler calls, and Android already gives back its own feel.
+                onCloseHud = {
+                    haptics.play(HapticCue.SELECT)
+                    closeHud()
+                },
                 onSelectCommand = { selectCommand(it) },
                 // A chip is the whole message, sent on the tap.
                 onSelectChip = { submit(it.prompt) },

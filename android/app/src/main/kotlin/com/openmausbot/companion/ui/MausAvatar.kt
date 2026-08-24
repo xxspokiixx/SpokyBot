@@ -141,8 +141,11 @@ fun ProfileAvatar(name: String, size: Dp = 34.dp, modifier: Modifier = Modifier)
  *
  * The origin survives the loop stopping and starting, so a face that scrolled away
  * and came back continues its own timeline rather than jumping.
+ *
+ * Shared with [WorkingBubble], which wants exactly this: a 30fps tick published as
+ * state the draw phase reads, with nothing allocated per frame.
  */
-private class MausFrameClock {
+internal class MausFrameClock {
     /** Nanoseconds since this avatar's first animated frame; read in the draw phase. */
     val nanos: MutableLongState = mutableLongStateOf(0L)
 
