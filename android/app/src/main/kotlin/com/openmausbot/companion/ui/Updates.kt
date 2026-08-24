@@ -6,8 +6,7 @@ import com.openmausbot.companion.core.CompanionState
 import com.openmausbot.companion.core.Message
 import com.openmausbot.companion.core.OptionCard
 import com.openmausbot.companion.core.PendingApproval
-import java.text.BreakIterator
-import java.util.Locale
+import com.openmausbot.companion.core.takeLastCharacters
 
 /**
  * What the Updates pill shows: only the chats doing something — the port of
@@ -94,35 +93,10 @@ internal fun CompanionState.updates(pending: List<PendingApproval>): List<ChatUp
 
 private fun CompanionState.workingLine(threadId: String): String {
     val live = streaming[threadId]
-    if (!live.isNullOrEmpty()) return live.lastCharacters(STREAM_TAIL).replace('\n', ' ')
+    if (!live.isNullOrEmpty()) return live.takeLastCharacters(STREAM_TAIL).replace('\n', ' ')
     val last = visibleTranscript(threadId).lastOrNull()
     if (last?.kind == Message.Kind.ACTIVITY) last.tool?.let { return it.name }
     return WORKING_LINE
-}
-
-/**
- * The last [count] characters the way Swift counts them.
- *
- * `String.suffix(120)` there walks `Character`s — extended grapheme clusters —
- * so it can never begin the line halfway through one. `takeLast` here counts
- * UTF-16 code units, which would start a tail on the low half of an emoji or on
- * a combining mark whose base it just dropped.
- */
-private fun String.lastCharacters(count: Int): String {
-    // A string shorter in code units than [count] cannot hold more than [count]
-    // clusters, so there is nothing to cut.
-    if (length <= count) return this
-    val clusters = BreakIterator.getCharacterInstance(Locale.ROOT)
-    clusters.setText(this)
-    var start = clusters.last()
-    var taken = 0
-    while (taken < count) {
-        val previous = clusters.previous()
-        if (previous == BreakIterator.DONE) break
-        start = previous
-        taken++
-    }
-    return substring(start)
 }
 
 private fun CompanionState.lastLine(threadId: String): String {

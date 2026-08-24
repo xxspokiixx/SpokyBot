@@ -429,3 +429,181 @@ object Reactions {
             .map { (emoji, all) -> ReactionGroup(emoji, all.size, all.any { it.by == "user" }) }
             .sortedBy { it.emoji }
 }
+
+/** The five commands, by what selecting one does rather than by its label. */
+enum class SlashCommandId { COMPUTER, TASKS, DIFF, RETRY, STEER }
+
+/**
+ * What a command *is*, which is not always a message.
+ *
+ * iOS carries a `command: String` on every item and then switches on the id
+ * before deciding whether to send it, which leaves `/computer` holding a string
+ * that must never reach the wire. Modelling the outcome instead makes that
+ * impossible: only [Send] carries a prompt, so there is nothing to send by
+ * accident.
+ */
+sealed interface SlashEffect {
+    data object OpenComputer : SlashEffect
+
+    data object OpenTasks : SlashEffect
+
+    /** Sent immediately, exactly as typing it would have been. */
+    data class Send(val prompt: String) : SlashEffect
+}
+
+data class SlashCommand(
+    val id: SlashCommandId,
+    /** The literal command, which is also what the card reads. */
+    val title: String,
+    val description: String,
+    val effect: SlashEffect,
+)
+
+/**
+ * The slash-command HUD — the port of `CommandSkillHUDView` in
+ * `ios/App/Composer/CommandSkillHUDView.swift` and the composer that drives it.
+ *
+ * Local, and deliberately so: these five are the phone's own shortcuts into
+ * navigation it already has and prompts the bot already understands. There is no
+ * skills endpoint behind them and there must not be one — a HUD that had to ask
+ * the computer what it could offer would be empty in exactly the situation the
+ * shortcuts exist for.
+ */
+object SlashCommands {
+    val ALL: List<SlashCommand> = listOf(
+        SlashCommand(
+            id = SlashCommandId.COMPUTER,
+            title = "/computer",
+            description = "Open live screen & desktop controls",
+            effect = SlashEffect.OpenComputer,
+        ),
+        SlashCommand(
+            id = SlashCommandId.TASKS,
+            title = "/tasks",
+            description = "View and manage bot task threads",
+            effect = SlashEffect.OpenTasks,
+        ),
+        SlashCommand(
+            id = SlashCommandId.DIFF,
+            title = "/diff",
+            description = "Inspect latest git changes and patches",
+            effect = SlashEffect.Send("Show git diff and list modified files"),
+        ),
+        SlashCommand(
+            id = SlashCommandId.RETRY,
+            title = "/retry",
+            description = "Retry the last turn with fresh context",
+            effect = SlashEffect.Send("Please retry the last turn"),
+        ),
+        SlashCommand(
+            id = SlashCommandId.STEER,
+            title = "/steer",
+            description = "Steer and redirect active execution",
+            effect = SlashEffect.Send("Pause and explain your current plan"),
+        ),
+    )
+
+    /** What is left of [ALL] once the two bot ideas are gone. */
+    val IN_ROOM: List<SlashCommand> = ALL.filterNot {
+        it.id == SlashCommandId.COMPUTER || it.id == SlashCommandId.TASKS
+    }
+
+    /**
+     * The computer and the task list are bot ideas; a room has neither (§12).
+     *
+     * Both answers are constants, so the composer can ask on every recomposition
+     * without allocating a list per streamed token.
+     */
+    fun forChat(chat: Chat): List<SlashCommand> = when (chat) {
+        is Chat.BotChat -> ALL
+        is Chat.RoomChat -> IN_ROOM
+    }
+
+    /**
+     * Typing a `/` is the other way in — and typing anything else is the way
+     * out, which is why this is the whole answer and not just "should it open".
+     */
+    fun opensOnDraft(draft: String): Boolean = draft.startsWith("/")
+
+    /**
+     * The HUD state a chat opens with, given the draft it opens with.
+     *
+     * Mount is not a special case, and that is the whole point. iOS keeps
+     * `draft` and `showCommandHUD` together in one `ChatView` for as long as the
+     * chat is on screen, so presenting Computer over it cannot separate them.
+     * Android takes `ChatScreen` out of composition for that push and restores
+     * the draft from the holder on the way back, and rebuilds it from the typed
+     * snapshot after the process was recreated — so the panel has to be derived
+     * from the text rather than assumed shut, or the chat comes back with `/dif`
+     * in the field and nothing above it.
+     *
+     * Named apart from [opensOnDraft] only so the entry path is something a test
+     * can hold: the rule is deliberately the same one.
+     */
+    fun openOnEntry(restoredDraft: String): Boolean = opensOnDraft(restoredDraft)
+
+    /**
+     * Filtered by what is after the `/`, over the title *and* the description —
+     * so `/git` finds `/diff` by what it does, not only by what it is called. A
+     * lone `/` filters nothing.
+     */
+    fun matching(commands: List<SlashCommand>, draft: String): List<SlashCommand> {
+        if (!draft.startsWith("/") || draft.length <= 1) return commands
+        val query = draft.drop(1).lowercase()
+        return commands.filter {
+            it.title.lowercase().contains(query) || it.description.lowercase().contains(query)
+        }
+    }
+
+    /**
+     * Closing the HUD takes back the `/` it opened on and nothing else. A draft
+     * of `/dif` is four characters someone typed; deleting three of them because
+     * a panel closed would be the panel editing the message.
+     */
+    fun draftAfterClose(draft: String): String = if (draft == "/") "" else draft
+}
+
+/** One of the four standing prompts under an empty composer. */
+data class PredictiveChip(val title: String, val prompt: String)
+
+/**
+ * The port of `PredictiveActionChipsView` in
+ * `ios/App/Composer/PredictiveActionChipsView.swift`: four things worth asking
+ * at the start of a turn, each sent the moment it is tapped.
+ */
+object PredictiveChips {
+    val ALL: List<PredictiveChip> = listOf(
+        PredictiveChip("Show diff", "Show latest git diff"),
+        PredictiveChip("Run tests", "Run all automated tests"),
+        PredictiveChip("Explain steps", "Explain the changes in detail"),
+        PredictiveChip("What's next?", "What should we do next?"),
+    )
+}
+
+/** What sits above the composer pill, if anything. */
+enum class ComposerAccessory { HUD, CHIPS, NONE }
+
+object ComposerAccessories {
+    /** iOS: `messages.contains { $0.card?.isPending == true }`. */
+    fun hasPendingApproval(messages: List<Message>): Boolean =
+        messages.any { it.card?.isPending == true }
+
+    /**
+     * The HUD wins when it is open; otherwise the chips, but only on an empty
+     * draft, only while the bot is idle, and only with nothing waiting to be
+     * approved. All three matter: a chip sends immediately, so offering one
+     * beside half a sentence would throw the sentence away, offering one to a
+     * busy bot earns a 409, and offering one over a pending approval buries the
+     * question the screen exists to ask.
+     */
+    fun accessory(
+        hudOpen: Boolean,
+        draft: String,
+        busy: Boolean,
+        pendingApproval: Boolean,
+    ): ComposerAccessory = when {
+        hudOpen -> ComposerAccessory.HUD
+        draft.isEmpty() && !busy && !pendingApproval -> ComposerAccessory.CHIPS
+        else -> ComposerAccessory.NONE
+    }
+}

@@ -62,6 +62,8 @@ import com.openmausbot.companion.core.Chat
 import com.openmausbot.companion.core.Message
 import com.openmausbot.companion.core.OptionCard
 import com.openmausbot.companion.core.ToolActivity
+import com.openmausbot.companion.core.TranscriptCard
+import com.openmausbot.companion.core.TranscriptCards
 import kotlinx.coroutines.launch
 
 /** What the clipboard shows this came from. */
@@ -292,6 +294,13 @@ private fun MessageContent(chat: Chat, message: Message, endsRun: Boolean) {
 private fun TextBubble(message: Message, endsRun: Boolean) {
     val mine = message.role == Message.Role.USER
     val tail = TranscriptLayout.tail(message, endsRun)
+    // A reply that is *entirely* a patch or a table is drawn as one. The gate is
+    // in `:core` and it is strict: anything with a sentence in it stays a
+    // paragraph, because a card around a paragraph hides the paragraph.
+    val card = remember(message.id, message.role, message.text) { TranscriptCards.of(message) }
+    // A card brings its own surface, so it drops the bubble — and with it the
+    // tail, which is a bubble's chin and not a card's.
+    val bubble = card == null
     // No face beside the bubble: the bot's face is in the header, and in a room
     // the name line says who spoke. The bubble sits at the edge.
     Row(
@@ -306,12 +315,19 @@ private fun TextBubble(message: Message, endsRun: Boolean) {
             modifier = Modifier
                 .weight(1f, fill = false)
                 // Room for the tail below, so the next row does not sit on it.
-                .padding(bottom = if (endsRun) SpeechBubble.tailDrop() else 0.dp)
-                .background(
-                    if (mine) BubbleColor.mine else BubbleColor.theirs,
-                    SpeechBubbleShape.of(tail),
-                )
-                .padding(horizontal = 15.dp, vertical = 11.dp),
+                .padding(bottom = if (bubble && endsRun) SpeechBubble.tailDrop() else 0.dp)
+                .then(
+                    if (bubble) {
+                        Modifier
+                            .background(
+                                if (mine) BubbleColor.mine else BubbleColor.theirs,
+                                SpeechBubbleShape.of(tail),
+                            )
+                            .padding(horizontal = 15.dp, vertical = 11.dp)
+                    } else {
+                        Modifier
+                    },
+                ),
             verticalArrangement = Arrangement.spacedBy(4.dp),
         ) {
             // Rooms attribute each line to the member who said it. Only theirs:
@@ -332,15 +348,19 @@ private fun TextBubble(message: Message, endsRun: Boolean) {
             // Settled text is selectable, so a command, a URL or a paragraph can
             // be copied — as it can on iOS. The live bubble below is deliberately
             // left out: selecting text that is still growing fights the reader.
-            SelectionContainer {
-                if (mine) {
-                    Text(
-                        text = message.text.orEmpty(),
-                        fontSize = 17.sp,
-                        color = BubbleColor.mineText,
-                    )
-                } else {
-                    MarkdownText(source = message.text.orEmpty())
+            when (card) {
+                is TranscriptCard.Diff -> DiffCard(card)
+                is TranscriptCard.Table -> DataTableCard(card)
+                null -> SelectionContainer {
+                    if (mine) {
+                        Text(
+                            text = message.text.orEmpty(),
+                            fontSize = 17.sp,
+                            color = BubbleColor.mineText,
+                        )
+                    } else {
+                        MarkdownText(source = message.text.orEmpty())
+                    }
                 }
             }
         }
@@ -547,16 +567,12 @@ fun StreamingBubble(text: String?, reasoning: String?) {
             verticalArrangement = Arrangement.spacedBy(4.dp),
         ) {
             if (!reasoning.isNullOrEmpty() && text.isNullOrEmpty()) {
-                // Quieter and smaller than an answer, because it is not one.
-                // Tail-limited: reasoning runs to thousands of words and the part
-                // worth seeing is always the end. Plain text, unlike the answer:
-                // the tail cut lands wherever it lands, and rendering markdown
-                // that starts mid-syntax invents structure the model did not write.
-                Text(
-                    text = reasoning.takeLast(400),
-                    fontSize = 14.sp,
-                    color = secondaryTint,
-                )
+                // Folded away by default, because reasoning is not the answer.
+                // Tail-limited: it runs to thousands of words and the part worth
+                // reading is always the end. Plain lines, unlike the answer: the
+                // tail cut lands wherever it lands, and rendering markdown that
+                // starts mid-syntax invents structure the model did not write.
+                ThoughtChamber(reasoning = reasoning)
             }
             if (!text.isNullOrEmpty()) {
                 // Same renderer as the settled bubble: a live reply showing

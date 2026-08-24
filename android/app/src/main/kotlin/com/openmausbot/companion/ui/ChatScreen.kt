@@ -76,6 +76,8 @@ import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.semantics.stateDescription
+import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.style.TextAlign
@@ -203,6 +205,11 @@ private fun LoadedChat(
     val liveText = streaming?.takeIf { it.isNotEmpty() }
     val liveReasoning = reasoning?.takeIf { it.isNotEmpty() && liveText == null }
     val hasMore = state.hasMore[threadId] == true
+    // What stops the predictive chips from covering the one question on screen
+    // that only a person can answer.
+    val pendingApproval = remember(transcript) {
+        ComposerAccessories.hasPendingApproval(transcript)
+    }
 
     // Two halves of the composer draft:
     // (a) ChatComposerDraft under its saver — rememberSaveable persists only
@@ -237,11 +244,26 @@ private fun LoadedChat(
         )
     }
     var draft by remember(chatId, chatDrafts) { mutableStateOf(composer.text) }
+    // The command HUD opens from the button *or* from a draft that starts with a
+    // slash — and typing anything else closes it again. iOS drives that from
+    // `onChange(of: draft)`, which fires however the draft moved, so the rule
+    // lives in the one funnel every draft change goes through rather than in the
+    // text field's callback alone.
+    //
+    // Seeded from the restored draft rather than from `false`: coming back from
+    // Computer, or from a process death, is a mount and not an edit, so nothing
+    // would ever re-apply the rule to a `/dif` that is already in the field.
+    // Closing the HUD by hand still sticks — the seed runs once per mount, and
+    // `remember` does not re-run it.
+    var hudOpen by remember(chatId, chatDrafts) {
+        mutableStateOf(SlashCommands.openOnEntry(composer.text))
+    }
     val listState = rememberLazyListState()
 
     fun publishFrom(composerDraft: ChatComposerDraft) {
         // UI mirror only. Saveable half is owned by the composer + its saver.
         draft = composerDraft.text
+        hudOpen = SlashCommands.opensOnDraft(draft)
     }
 
     // Bind dictation to this chat's lifecycle: leaving the screen (including
@@ -328,6 +350,9 @@ private fun LoadedChat(
     }
 
     val bot = (chat as? Chat.BotChat)?.bot
+    // A room drops the computer and the task list (§12). Both answers are
+    // constants, so this needs no `remember` and allocates nothing.
+    val commands = SlashCommands.forChat(chat)
     // One handler for the one door. The name pill stopped being the second when
     // it became the way into a bot's profile, so the + now carries every action
     // there is — including both export formats.
@@ -349,6 +374,73 @@ private fun LoadedChat(
         Unit
     }
 
+    // A slash command that navigates clears the draft the way emptying the
+    // field does — including its provenance, so a spoken word cannot outlive it.
+    fun clearDraft() {
+        composer.onTypedChange("")
+        publishFrom(composer)
+    }
+
+    /**
+     * The port of iOS `submit(_ explicitText:)`. A command or a chip sends its
+     * own prompt and still clears the composer, exactly as the Swift does: the
+     * `/dif` you had half-typed is what you were asking for, and leaving it
+     * behind would send it again on the next tap of the send button.
+     */
+    fun submit(explicitText: String? = null) {
+        // Cancels an in-flight permission prompt before it can open the
+        // microphone after the message has already been sent.
+        dictation.stop()
+        val text = (explicitText ?: draft).trim()
+        if (text.isEmpty()) return
+        composer.onSend()
+        // Clearing the draft closes the HUD through the rule above, which is
+        // how iOS's `showCommandHUD = false` on submit happens as well.
+        publishFrom(composer)
+        // Deliberately not disabled while the bot is busy: the harness answers
+        // 409 and Session surfaces "The bot is busy — stop it first." That is a
+        // clearer answer than a dead button.
+        scope.launch { session.send(text, chat) }
+    }
+
+    fun selectCommand(command: SlashCommand) {
+        when (val effect = command.effect) {
+            SlashEffect.OpenComputer -> {
+                // Stop before clearing, not after: a partial still in flight
+                // would land on the draft this just emptied. iOS stops on
+                // `showingComputer`; Android leaves ChatScreen when Computer is
+                // pushed, so stop here too — before the navigation frame, not
+                // only on dispose.
+                dictation.stop()
+                clearDraft()
+                if (bot != null) onOpenComputer(bot.id)
+            }
+
+            SlashEffect.OpenTasks -> {
+                dictation.stop()
+                clearDraft()
+                showingTasks = true
+            }
+
+            is SlashEffect.Send -> submit(effect.prompt)
+        }
+        hudOpen = false
+    }
+
+    /**
+     * Closing takes back the `/` that opened the HUD and nothing else. Routed
+     * around [publishFrom] when the draft did not change, because re-applying
+     * the open rule to an unchanged `/dif` would reopen what was just closed.
+     */
+    fun closeHud() {
+        val next = SlashCommands.draftAfterClose(draft)
+        if (next != draft) {
+            composer.onTypedChange(next)
+            publishFrom(composer)
+        }
+        hudOpen = false
+    }
+
     // Clear draft while still composed so rememberSaveable does not resurrect
     // it after a roster pop. Computer push never takes this path.
     fun leaveToRoster() {
@@ -358,7 +450,10 @@ private fun LoadedChat(
     }
 
     BackHandler(enabled = showingPlus) { showingPlus = false }
-    BackHandler(enabled = !showingPlus) { leaveToRoster() }
+    // Back dismisses an open panel before it leaves the screen — the platform's
+    // own gesture, applied to the HUD the way it already was to the + sheet.
+    BackHandler(enabled = !showingPlus && hudOpen) { closeHud() }
+    BackHandler(enabled = !showingPlus && !hudOpen) { leaveToRoster() }
 
     Box(modifier = Modifier.fillMaxSize()) {
         Column(modifier = Modifier.fillMaxSize()) {
@@ -474,6 +569,13 @@ private fun LoadedChat(
             Composer(
                 name = chat.name,
                 draft = draft,
+                accessory = ComposerAccessories.accessory(
+                    hudOpen = hudOpen,
+                    draft = draft,
+                    busy = chat.busy,
+                    pendingApproval = pendingApproval,
+                ),
+                commands = commands,
                 plusOpen = showingPlus,
                 dictationListening = dictationListening,
                 dictationLocked = dictationLocked,
@@ -494,19 +596,15 @@ private fun LoadedChat(
                     focusManager.clearFocus()
                     dictation.toggle(capturing = draft)
                 },
-                onSend = {
-                    // Cancels an in-flight permission prompt before it can open
-                    // the microphone after the message has already been sent.
+                onSend = { submit() },
+                onToggleHud = {
                     dictation.stop()
-                    val text = draft.trim()
-                    if (text.isEmpty()) return@Composer
-                    composer.onSend()
-                    publishFrom(composer)
-                    // Deliberately not disabled while the bot is busy: the harness
-                    // answers 409 and Session surfaces "The bot is busy — stop it
-                    // first." That is a clearer answer than a dead button.
-                    scope.launch { session.send(text, chat) }
+                    hudOpen = !hudOpen
                 },
+                onCloseHud = { closeHud() },
+                onSelectCommand = { selectCommand(it) },
+                // A chip is the whole message, sent on the tap.
+                onSelectChip = { submit(it.prompt) },
             )
         }
 
@@ -864,6 +962,8 @@ private fun ChatActionIcon(id: ChatActionId, tint: Color) {
 private fun Composer(
     name: String,
     draft: String,
+    accessory: ComposerAccessory,
+    commands: List<SlashCommand>,
     plusOpen: Boolean,
     dictationListening: Boolean,
     dictationLocked: Boolean,
@@ -872,6 +972,10 @@ private fun Composer(
     onDraftChange: (String) -> Unit,
     onToggleDictation: () -> Unit,
     onSend: () -> Unit,
+    onToggleHud: () -> Unit,
+    onCloseHud: () -> Unit,
+    onSelectCommand: (SlashCommand) -> Unit,
+    onSelectChip: (PredictiveChip) -> Unit,
 ) {
     val canSend = draft.isNotBlank()
     // Held as the state rather than unwrapped with `by`: read inside the layer
@@ -894,6 +998,21 @@ private fun Composer(
                 color = Color(0xFFFF9800),
                 modifier = Modifier.padding(horizontal = 4.dp),
             )
+        }
+        // One or the other, never both: the HUD is what the composer is doing
+        // right now, and a row of send-immediately chips under it would be a
+        // second thing to tap by accident.
+        when (accessory) {
+            ComposerAccessory.HUD -> CommandSkillHud(
+                commands = commands,
+                draft = draft,
+                onSelect = onSelectCommand,
+                onClose = onCloseHud,
+            )
+
+            ComposerAccessory.CHIPS -> PredictiveChipsRow(onSelect = onSelectChip)
+
+            ComposerAccessory.NONE -> Unit
         }
         Row(
             modifier = Modifier.fillMaxWidth(),
@@ -940,10 +1059,38 @@ private fun Composer(
                 horizontalArrangement = Arrangement.spacedBy(6.dp),
                 verticalAlignment = Alignment.Bottom,
             ) {
+                // The way into the HUD that does not start with typing. iOS draws
+                // the `command` glyph here; Android's core icon set has no
+                // counterpart, and the character the feature is named after says
+                // it better than a borrowed symbol would.
+                TouchTarget(
+                    onClick = onToggleHud,
+                    contentDescription = "Slash commands",
+                    modifier = Modifier.semantics {
+                        stateDescription = if (accessory == ComposerAccessory.HUD) {
+                            "Expanded"
+                        } else {
+                            "Collapsed"
+                        }
+                    },
+                ) {
+                    Text(
+                        text = "/",
+                        fontSize = 18.sp,
+                        fontWeight = FontWeight.Bold,
+                        fontFamily = FontFamily.Monospace,
+                        color = if (accessory == ComposerAccessory.HUD) {
+                            MaterialTheme.colorScheme.onSurface
+                        } else {
+                            secondaryTint
+                        },
+                    )
+                }
+
                 Box(
                     modifier = Modifier
                         .weight(1f)
-                        .padding(start = 16.dp, top = 13.dp, bottom = 13.dp),
+                        .padding(top = 13.dp, bottom = 13.dp),
                 ) {
                     if (draft.isEmpty()) {
                         Text(
