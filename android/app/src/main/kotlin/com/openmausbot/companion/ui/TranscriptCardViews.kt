@@ -6,14 +6,11 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.IntrinsicSize
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
-import androidx.compose.foundation.layout.width
-import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -39,6 +36,8 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.layout.Layout
+import androidx.compose.ui.layout.MeasurePolicy
 import androidx.compose.ui.platform.ClipEntry
 import androidx.compose.ui.platform.LocalClipboard
 import androidx.compose.ui.res.painterResource
@@ -48,6 +47,10 @@ import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.semantics.stateDescription
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.unit.Constraints
+import androidx.compose.ui.unit.Dp
+import androidx.compose.ui.unit.constrainHeight
+import androidx.compose.ui.unit.constrainWidth
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.openmausbot.companion.R
@@ -240,11 +243,34 @@ private fun DiffLine(line: String) {
 /**
  * A table the reader can actually read across, and take away as CSV.
  *
- * Laid out column by column rather than row by row: a column that measures
- * itself is a column whose cells line up, which is the whole reason to draw a
- * table instead of the pipes it arrived as. iOS gives every cell the same
- * `minWidth` and lets them drift apart; that is the one place this deliberately
- * does better rather than the same.
+ * Read across in the literal sense: heading row first, then one row at a time,
+ * left to right, exactly the order `SQLResultTableView.swift` builds — a
+ * `VStack` of `HStack`s. This used to be the transpose of that, a `Row` of
+ * self-measuring `Column`s, and on an API 34 emulator TalkBack duly announced
+ * *"LANGUAGE, Python, Java, Rust, YEAR, 1991, 1995, 2010"*: every value of the
+ * first column before the second, so `Python`↔`1991` was not a row at all for
+ * a reader who cannot see the screen. The composition decided that order, and
+ * it built it the wrong way round.
+ *
+ * Composition order is not the whole of the answer:
+ * `AndroidComposeViewAccessibilityDelegateCompat` runs its own traversal pass
+ * over the merged tree, groups nodes by geometry and publishes
+ * `traversalBefore`/`traversalAfter` relations from that grouping. Here the two
+ * stages agree, because the children are emitted row-major and then placed
+ * row-major, so neither has anything left to reorder. That agreement is the
+ * reason the fix holds, not an excuse to skip the check: `TableReadingOrderTest`
+ * pins the tree, and TalkBack on a device is what pins the reading.
+ *
+ * Holding both — the row order *and* columns that still line up — is why the
+ * grid is its own [Layout] rather than a `Row` or a `Column` of anything. The
+ * children arrive row-major, which is the order the reader gets; the measure
+ * pass then widens each column to its widest cell, which is the alignment iOS
+ * gives up by handing every cell the same `minWidth` and letting them drift.
+ * The rules come last on purpose, and this is the point the old comment here
+ * made and it still holds: inside a horizontal scroll the incoming width is
+ * unbounded and `fillMaxWidth` against an unbounded constraint measures zero,
+ * so a rule is only as wide as its column if something measures the column
+ * first and then hands it that width.
  */
 @Composable
 fun DataTableCard(card: TranscriptCard.Table, modifier: Modifier = Modifier) {
@@ -282,52 +308,154 @@ fun DataTableCard(card: TranscriptCard.Table, modifier: Modifier = Modifier) {
         }
 
         SelectionContainer {
-            Row(
+            DataGrid(
+                headers = card.headers,
+                rows = card.rows,
                 modifier = Modifier
                     .fillMaxWidth()
                     .horizontalScroll(scroll),
-                horizontalArrangement = Arrangement.spacedBy(18.dp),
-            ) {
-                card.headers.forEachIndexed { index, header ->
-                    Column(
-                        // Intrinsic width is what makes the rule under a heading
-                        // as wide as the column it belongs to: inside a scroll the
-                        // incoming width is unbounded, and `fillMaxWidth` against
-                        // an unbounded constraint measures zero.
-                        modifier = Modifier
-                            .widthIn(min = 64.dp)
-                            .width(IntrinsicSize.Max),
-                        verticalArrangement = Arrangement.spacedBy(4.dp),
-                    ) {
-                        Text(
-                            // Uppercased by the invariant rules, like every other
-                            // section label in this app: a reader in `tr-TR` must
-                            // still read the column name, not a dotted capital.
-                            text = header.uppercase(Locale.ROOT),
-                            fontSize = 11.sp,
-                            fontFamily = FontFamily.Monospace,
-                            fontWeight = FontWeight.Bold,
-                            color = MaterialTheme.colorScheme.primary,
-                            softWrap = false,
-                        )
-                        HorizontalDivider(color = secondaryTint.copy(alpha = 0.25f))
-                        card.rows.forEach { row ->
-                            Text(
-                                text = row.getOrElse(index) { "" },
-                                fontSize = 12.sp,
-                                fontFamily = FontFamily.Monospace,
-                                softWrap = false,
-                            )
-                        }
-                    }
-                }
-            }
+            )
         }
 
         HorizontalDivider(color = secondaryTint.copy(alpha = 0.2f))
 
         TextButton(onClick = { copy(card.csv()) }) {
             Text("Copy CSV", fontSize = 13.sp)
+        }
+    }
+}
+
+/**
+ * The cells, in the order they are read: headings, then row by row.
+ *
+ * The children are emitted in three runs — the [headers], one rule per column,
+ * then the body row-major — because that is the contract
+ * [tableGridMeasurePolicy] measures against, and because the run that carries
+ * meaning (headings, then rows) comes first and in reading order. The rules
+ * carry no semantics at all, so where they sit among the children is a measuring
+ * detail and nothing a screen reader ever stops on.
+ */
+@Composable
+private fun DataGrid(
+    headers: List<String>,
+    rows: List<List<String>>,
+    modifier: Modifier = Modifier,
+) {
+    if (headers.isEmpty()) return
+    val ruleColour = secondaryTint.copy(alpha = 0.25f)
+    Layout(
+        modifier = modifier,
+        content = {
+            headers.forEach { header ->
+                Text(
+                    // Uppercased by the invariant rules, like every other
+                    // section label in this app: a reader in `tr-TR` must still
+                    // read the column name, not a dotted capital.
+                    text = header.uppercase(Locale.ROOT),
+                    fontSize = 11.sp,
+                    fontFamily = FontFamily.Monospace,
+                    fontWeight = FontWeight.Bold,
+                    color = MaterialTheme.colorScheme.primary,
+                    softWrap = false,
+                )
+            }
+            repeat(headers.size) {
+                HorizontalDivider(color = ruleColour)
+            }
+            rows.forEach { row ->
+                headers.indices.forEach { column ->
+                    Text(
+                        // A short row is padded, not dropped: iOS reads
+                        // `colIdx < row.count ? row[colIdx] : ""` for the same
+                        // reason, and a missing cell that took no space would
+                        // slide the rest of the row under the wrong heading.
+                        text = row.getOrElse(column) { "" },
+                        fontSize = 12.sp,
+                        fontFamily = FontFamily.Monospace,
+                        softWrap = false,
+                    )
+                }
+            }
+        },
+        measurePolicy = tableGridMeasurePolicy(columnCount = headers.size),
+    )
+}
+
+/** iOS asks every cell for `minWidth: 65`; this is that, in whole dp. */
+private val TABLE_MIN_COLUMN_WIDTH = 64.dp
+
+/** The gutter between two columns, and the leading between two rows. */
+private val TABLE_COLUMN_GAP = 18.dp
+private val TABLE_ROW_GAP = 4.dp
+
+/**
+ * Column widths from the content, row positions from the columns.
+ *
+ * Expects its children in the order [DataGrid] emits them: [columnCount]
+ * headings, then [columnCount] rules, then the body cells row-major. Everything
+ * but the rules is measured against no constraint at all — inside a horizontal
+ * scroller there isn't one, and a cell that wrapped would stop being a cell —
+ * and only then is each column's width known: the widest thing in it, floored at
+ * [minColumnWidth]. The rules are measured last, each against the fixed width of
+ * the column it underlines, which is the only way a rule inside an unbounded
+ * width gets one.
+ *
+ * Internal rather than private so a test can drive this exact policy with its
+ * own children and read back what each rule was given; the alternative was a
+ * test tag in the drawing, which would put test scaffolding in front of a screen
+ * reader for the sake of a measurement.
+ */
+internal fun tableGridMeasurePolicy(
+    columnCount: Int,
+    minColumnWidth: Dp = TABLE_MIN_COLUMN_WIDTH,
+    columnGap: Dp = TABLE_COLUMN_GAP,
+    rowGap: Dp = TABLE_ROW_GAP,
+): MeasurePolicy = MeasurePolicy { measurables, constraints ->
+    require(columnCount > 0) { "a table with no columns has nothing to lay out" }
+    val rowCount = (measurables.size - columnCount * 2) / columnCount
+    val unbounded = Constraints()
+    val headings = List(columnCount) { measurables[it].measure(unbounded) }
+    val cells = List(rowCount * columnCount) {
+        measurables[columnCount * 2 + it].measure(unbounded)
+    }
+
+    val floor = minColumnWidth.roundToPx()
+    val widths = IntArray(columnCount) { column ->
+        var widest = maxOf(floor, headings[column].width)
+        for (row in 0 until rowCount) {
+            widest = maxOf(widest, cells[row * columnCount + column].width)
+        }
+        widest
+    }
+    val rules = List(columnCount) {
+        measurables[columnCount + it].measure(Constraints.fixedWidth(widths[it]))
+    }
+
+    val gutter = columnGap.roundToPx()
+    val leading = rowGap.roundToPx()
+    val x = IntArray(columnCount)
+    var pen = 0
+    for (column in 0 until columnCount) {
+        x[column] = pen
+        pen += widths[column] + gutter
+    }
+    val width = pen - gutter
+
+    val headingHeight = headings.maxOf { it.height }
+    val ruleY = headingHeight + leading
+    val y = IntArray(rowCount)
+    var baseline = ruleY + rules.maxOf { it.height }
+    for (row in 0 until rowCount) {
+        baseline += leading
+        y[row] = baseline
+        baseline += (0 until columnCount).maxOf { cells[row * columnCount + it].height }
+    }
+
+    layout(constraints.constrainWidth(width), constraints.constrainHeight(baseline)) {
+        headings.forEachIndexed { column, heading -> heading.placeRelative(x[column], 0) }
+        rules.forEachIndexed { column, rule -> rule.placeRelative(x[column], ruleY) }
+        cells.forEachIndexed { index, cell ->
+            cell.placeRelative(x[index % columnCount], y[index / columnCount])
         }
     }
 }

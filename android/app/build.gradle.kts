@@ -36,6 +36,16 @@ android {
             excludes += "/META-INF/{AL2.0,LGPL2.1}"
         }
     }
+
+    testOptions {
+        unitTests {
+            // Robolectric needs the merged manifest and the compiled resources
+            // to stand a real Android runtime up inside the JVM suite. Only the
+            // handful of tests that mount a composition ask for it; the rest of
+            // the suite never loads Robolectric at all.
+            isIncludeAndroidResources = true
+        }
+    }
 }
 
 kotlin {
@@ -104,4 +114,15 @@ dependencies {
     // pins them drives a real Session against a real socket rather than a stub
     // that could agree with the wrong thing. Same server the :core tests use.
     testImplementation("com.squareup.okhttp3:mockwebserver:4.12.0")
+    // The table card is only correct in the *order* a screen reader walks it,
+    // and that order lives in the semantics tree — not in any value a pure
+    // function could return. Robolectric stands the Android runtime up in the
+    // JVM suite so `createComposeRule` can mount the card and the test can read
+    // the tree it actually produces; without it the assertion would be about a
+    // list the composable is free to ignore.
+    testImplementation("org.robolectric:robolectric:4.16.1")
+    testImplementation(composeBom)
+    testImplementation("androidx.compose.ui:ui-test-junit4")
+    debugImplementation(composeBom)
+    debugImplementation("androidx.compose.ui:ui-test-manifest")
 }
