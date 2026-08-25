@@ -44,27 +44,10 @@ data class Connection(
         }
 
     /**
-     * Every complete route this connection may dial, best first.
+     * Every complete route this connection may dial, in selection order.
      *
-     * Typed routes win over the legacy fields because they can represent hosted HTTPS; an older
-     * desktop derives direct routes from `host`/`hosts` instead — never a mixture.
-     *
-     * **The desktop's advertised priority decides the order.** It decides it between hosted and
-     * tailnet, it keeps deciding it after a failover, and a later authenticated snapshot is how
-     * the computer restates that policy — so nothing here may quietly outrank it.
-     *
-     * The one thing this ordering adds is a trust rule, and it is about the credential rather
-     * than about which route happens to be in use: **once the connection sits on a route that
-     * protects credentials, no cleartext route may lead.** Reaching a protected route is a
-     * one-way upgrade, so a cleartext route it superseded must not head the next launch's walk
-     * again merely because it carries a smaller priority number — which is exactly what a
-     * hand-typed local address gets (`Session.updateAddress` mints it at priority 0). Cleartext
-     * routes are moved behind the protected ones and keep their own advertised order; they stay
-     * in the list, available for display and for a later explicit choice, and only stop being
-     * the head that [automaticEndpoints] reads as "the local route this person picked".
-     *
-     * While the connection *is* on a cleartext route, that route is the person's explicit
-     * choice and nothing is demoted.
+     * When the active route protects credentials, no cleartext route leads. Among protected
+     * routes, the advertised priority determines the order.
      */
     val orderedEndpoints: List<CompanionEndpoint>
         get() {

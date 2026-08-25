@@ -8,26 +8,11 @@ import javax.net.ssl.SSLException
 import kotlin.coroutines.cancellation.CancellationException
 
 /**
- * The ordered walk through a connection's routes, governed by a trust ratchet.
+ * Walks candidates without weakening credential protection: a cleartext route may upgrade to a
+ * protected route, but once protected, rotation never returns to cleartext.
  *
- * Pairing stores one route, and one route is one point of failure. The connection still carries
- * every address the computer advertised, but a bearer credential cannot be sprayed onto whatever
- * LAN happens to reuse a private address later. So walking is a ratchet rather than a list scan:
- * a protected route walks only to other protected routes, while the single cleartext route the
- * person chose explicitly is the only local candidate at all, and it can only move to a stronger
- * transport. The first such upgrade removes it from this walk for good, so a later wrap cannot
- * put the token back on it.
- *
- * That last rule is about the walk, not about the socket. While the explicit local route is the
- * only candidate there is nowhere to advance to, so the reconnect loop keeps retrying that same
- * authority after its backoff — which is the address the person typed, so it is exactly where
- * the credential is allowed to go. What must never happen is reaching a *second* cleartext
- * address, or returning to the first after an upgrade. `Connection.orderedEndpoints` carries that
- * same trust rule — and only that rule — across a restart, so the upgrade survives being written
- * down while the desktop's advertised priority still decides which protected route leads.
- *
- * Pure — no sockets, no clocks — so the rules are testable without a network; [Session] owns
- * when they run.
+ * See `FailoverTest.explicitLocalRouteCanUpgradeButNeverDowngradeAgain` and
+ * `FailoverTest.walksProtectedCandidatesInOrderAndWraps`.
  */
 class CandidateRotation(endpoints: List<CompanionEndpoint>) {
     var endpoints: List<CompanionEndpoint> = CompanionEndpoint.automaticCandidates(endpoints)
