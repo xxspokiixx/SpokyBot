@@ -248,6 +248,51 @@ class ClientTest {
         assertTrue(unauthorized.isUnauthorized)
     }
 
+    @Test
+    fun opaqueIdsCannotReshapeTheRoute() = runBlocking {
+        server.enqueue(json("""{"ok":true}"""))
+        client.markBotRead("../../evil")
+        assertEquals("/api/bots/..%2F..%2Fevil/read", server.takeRequest().path)
+
+        server.enqueue(json("""{"ok":true}"""))
+        client.markRoomRead("g/../..")
+        assertEquals("/api/groups/g%2F..%2F../read", server.takeRequest().path)
+
+        // `%2e` is a dot to OkHttp's resolver, so the escape itself is escaped.
+        server.enqueue(json("""{"ok":true}"""))
+        client.interrupt("%2e%2e")
+        assertEquals("/api/bots/%252e%252e/interrupt", server.takeRequest().path)
+
+        server.enqueue(json("""{"ok":true}"""))
+        client.markBotRead("b 1")
+        assertEquals("/api/bots/b%201/read", server.takeRequest().path)
+
+        server.enqueue(json("""{"ok":true}"""))
+        client.deleteRoutine("r#1")
+        assertEquals("/api/routines/r%231", server.takeRequest().path)
+    }
+
+    @Test
+    fun idsThatAreOnlyPathSyntaxAreRefusedBeforeTheRequest() = runBlocking {
+        assertFailsWith<APIError.BadUrl> { client.markBotRead("..") }
+        assertFailsWith<APIError.BadUrl> { client.markBotRead(".") }
+        assertFailsWith<APIError.BadUrl> { client.markBotRead("") }
+        assertFailsWith<APIError.BadUrl> { client.deleteRoutine("..") }
+        assertFailsWith<APIError.BadUrl> { client.image("t1", "..") }
+        assertEquals(0, server.requestCount)
+    }
+
+    @Test
+    fun ordinaryIdsReachTheSameRouteAsBefore() = runBlocking {
+        server.enqueue(json("""{"ok":true}"""))
+        client.markBotRead("b-1.2_x~y")
+        assertEquals("/api/bots/b-1.2_x~y/read", server.takeRequest().path)
+
+        server.enqueue(json("""{"ok":true}"""))
+        client.markRoomRead("g1")
+        assertEquals("/api/groups/g1/read", server.takeRequest().path)
+    }
+
     private fun json(body: String, code: Int = 200) = MockResponse()
         .setResponseCode(code)
         .setHeader("Content-Type", "application/json")

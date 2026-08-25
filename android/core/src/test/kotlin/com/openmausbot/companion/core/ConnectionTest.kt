@@ -18,6 +18,7 @@ import okhttp3.Call
 import okhttp3.Dns
 import okhttp3.EventListener
 import okhttp3.OkHttpClient
+import org.junit.jupiter.api.Assumptions.assumeTrue
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFailsWith
@@ -82,12 +83,15 @@ class ConnectionTest {
 
     @Test
     fun zonedIpv6UsesScopedAddressOnTheRealOkHttpConnectPath() = runBlocking {
-        val networkInterface = assertNotNull(
-            Collections.list(NetworkInterface.getNetworkInterfaces()).firstOrNull { candidate ->
+        // Everything below needs a real interface name and index to build the
+        // scoped address with. Where the JVM exposes no IPv6 interface, failing
+        // here would measure the machine, not Connection — so skip instead.
+        val ipv6Interface = Collections.list(NetworkInterface.getNetworkInterfaces())
+            .firstOrNull { candidate ->
                 Collections.list(candidate.inetAddresses).any { it is Inet6Address }
-            },
-            "the JVM must expose an IPv6-capable interface",
-        )
+            }
+        assumeTrue(ipv6Interface != null, "this JVM exposes no IPv6-capable interface")
+        val networkInterface = assertNotNull(ipv6Interface)
         var fallbackCalled = false
         val fallback = object : Dns {
             override fun lookup(hostname: String) = emptyList<InetAddress>().also {

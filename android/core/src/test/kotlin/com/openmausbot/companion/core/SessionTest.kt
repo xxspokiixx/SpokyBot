@@ -1,6 +1,7 @@
 package com.openmausbot.companion.core
 
 import java.net.ConnectException
+import kotlin.coroutines.CoroutineContext
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFailsWith
@@ -8,12 +9,17 @@ import kotlin.test.assertIs
 import kotlin.test.assertNull
 import kotlin.test.assertTrue
 import kotlinx.coroutines.CompletableDeferred
+import kotlinx.coroutines.CoroutineDispatcher
+import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.ExperimentalCoroutinesApi
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.cancel
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.emptyFlow
 import kotlinx.coroutines.flow.flow
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.test.advanceTimeBy
 import kotlinx.coroutines.test.advanceUntilIdle
 import kotlinx.coroutines.test.runCurrent
@@ -778,6 +784,97 @@ class SessionTest {
         assertTrue(message.contains("port 8810"))
     }
 
+    @Test
+    fun aConnectionStoreThatThrowsStaysPairedAndOfflineInsteadOfEscaping() = runTest {
+        val session = session(connectionStore = ThrowingConnectionStore(IllegalStateException()))
+        session.awaitRestored()
+        advanceUntilIdle()
+
+        assertEquals(Session.RestoreState.Pending, session.restoreState.value)
+        assertEquals(
+            Session.STORAGE_UNAVAILABLE_MESSAGE,
+            assertIs<Session.Status.Offline>(session.status.value).message,
+        )
+        // Inconclusive is not "unpaired": a new pairing must still be refused.
+        assertFailsWith<AlreadyPairedException> {
+            session.pair(Connection(id = "c2", name = "Other", host = "10.0.0.2", port = 8810), "004209")
+        }
+    }
+
+    @Test
+    fun aTokenStoreThatThrowsKeepsTheConnectionAndReportsOffline() = runTest {
+        val connection = Connection(id = "c1", name = "Mac", host = "192.168.1.2", port = 8810)
+        val session = session(
+            connectionStore = FakeConnectionStore(connection),
+            tokenStore = ThrowingTokenStore(IllegalStateException("Secure storage is busy.")),
+        )
+        session.awaitRestored()
+        advanceUntilIdle()
+
+        assertEquals(connection, session.connection.value)
+        assertEquals(Session.RestoreState.Pending, session.restoreState.value)
+        assertEquals(
+            "Secure storage is busy.",
+            assertIs<Session.Status.Offline>(session.status.value).message,
+        )
+    }
+
+    @Test
+    fun aClientThatCannotBeRebuiltStaysPairedAndOffline() = runTest {
+        val connection = Connection(id = "c1", name = "Mac", host = "192.168.1.2", port = 8810)
+        val session = session(
+            connectionStore = FakeConnectionStore(connection),
+            tokenStore = FakeTokenStore().apply { saved["c1"] = "tok" },
+            clientFactory = { _, _ -> throw IllegalStateException("The saved address can't be dialled.") },
+        )
+        session.awaitRestored()
+        advanceUntilIdle()
+
+        assertEquals(connection, session.connection.value)
+        assertEquals(Session.RestoreState.Pending, session.restoreState.value)
+        assertEquals(
+            "The saved address can't be dialled.",
+            assertIs<Session.Status.Offline>(session.status.value).message,
+        )
+    }
+
+    @Test
+    fun connectPublishesTheStreamHandleBeforeTheStreamCanClearIt() = runBlocking {
+        // EagerDispatcher starts each child before the coroutine that launched it
+        // runs its next line — the ordering a multi-threaded scope allows and a
+        // single-threaded event loop hides. The stream then fails without ever
+        // suspending, so its `finally` reaches the mutex first; publishing the
+        // handle outside the lock would leave that finished job in streamJob and
+        // block every later connect().
+        val scope = CoroutineScope(EagerDispatcher + Job())
+        var opens = 0
+        val session = Session(
+            scope = scope,
+            connectionStore = FakeConnectionStore(
+                Connection(id = "c1", name = "Mac", host = "127.0.0.1", port = 8810),
+            ),
+            tokenStore = FakeTokenStore().apply { saved["c1"] = "tok" },
+            deviceNameProvider = { "Pixel" },
+            notificationSink = RecordingNotifications(),
+            clientFactory = { connection, token -> CompanionClient(connection, token) },
+            pairFn = { _, _, _ -> error("pair not expected") },
+            eventsFn = { _, _, _ ->
+                opens++
+                flow { throw APIError.Status(401, "revoked") }
+            },
+            hydrateFn = { _, _ -> Fleet(emptyList(), emptyList()) },
+        )
+        session.awaitRestored()
+
+        session.connect()
+        assertEquals(1, opens)
+        assertEquals(Session.Status.Unauthorized, session.status.value)
+
+        session.connect()
+        assertEquals(2, opens)
+        scope.cancel()
+    }
+
     private fun kotlinx.coroutines.test.TestScope.session(
         connectionStore: ConnectionStore = FakeConnectionStore(),
         tokenStore: TokenStore = FakeTokenStore(),
@@ -785,13 +882,16 @@ class SessionTest {
         events: (String?, Boolean) -> Flow<StreamFrame> = { _, _ -> emptyFlow() },
         hydrate: suspend () -> Fleet = { Fleet(emptyList(), emptyList()) },
         notifications: NotificationSink = RecordingNotifications(),
+        clientFactory: (Connection, String?) -> CompanionClient = { connection, token ->
+            CompanionClient(connection, token)
+        },
     ): Session = Session(
         scope = backgroundScope,
         connectionStore = connectionStore,
         tokenStore = tokenStore,
         deviceNameProvider = { "Pixel" },
         notificationSink = notifications,
-        clientFactory = { connection, token -> CompanionClient(connection, token) },
+        clientFactory = clientFactory,
         pairFn = pairFn,
         eventsFn = { _, since, screens -> events(since, screens) },
         hydrateFn = { _, _ -> hydrate() },
@@ -854,6 +954,23 @@ private class FakeTokenStore : TokenStore {
         saved.remove(connectionId)
         unavailable.remove(connectionId)
     }
+}
+
+private class ThrowingConnectionStore(private val error: Throwable) : ConnectionStore {
+    override suspend fun load(): Connection = throw error
+    override suspend fun save(connection: Connection) = throw error
+    override suspend fun clear() = throw error
+}
+
+private class ThrowingTokenStore(private val error: Throwable) : TokenStore {
+    override suspend fun save(connectionId: String, token: String) = throw error
+    override suspend fun read(connectionId: String): TokenStore.ReadResult = throw error
+    override suspend fun remove(connectionId: String) = throw error
+}
+
+/** Starts every coroutine before the code that launched it continues. */
+private object EagerDispatcher : CoroutineDispatcher() {
+    override fun dispatch(context: CoroutineContext, block: Runnable) = block.run()
 }
 
 private class RecordingNotifications : NotificationSink {

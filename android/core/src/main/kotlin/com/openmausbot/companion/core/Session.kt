@@ -1,6 +1,7 @@
 package com.openmausbot.companion.core
 
 import java.net.URI
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Job
@@ -101,6 +102,10 @@ class Session(
     private val spentQrCredentials = mutableSetOf<String>()
 
     init {
+        // No Exception other than cancellation leaves this launch: it is a root
+        // coroutine with no caller to catch for it, so [restoreLocked] reports a
+        // failed read instead of throwing it. An Error still propagates, on
+        // purpose — a fatal one is not this boundary's to swallow.
         scope.launch {
             try {
                 restore()
@@ -225,6 +230,15 @@ class Session(
         _pairingInvite.value = invite
     }
 
+    /** Hold the paired-but-unproven state and say why the phone is offline. */
+    private fun markRestoreInconclusive(error: Throwable) {
+        _restoreState.value = RestoreState.Pending
+        _status.value = Status.Offline(storeFailureMessage(error))
+    }
+
+    private fun storeFailureMessage(error: Throwable): String =
+        error.message?.takeIf { it.isNotBlank() } ?: STORAGE_UNAVAILABLE_MESSAGE
+
     /** True when a computer is already bound — including locked-token restore. */
     private fun isPairedLocked(): Boolean =
         _connection.value != null ||
@@ -291,37 +305,78 @@ class Session(
     fun connect() {
         scope.launch {
             restored.await()
-            val generation = gate.withLock {
+            gate.withLock {
                 if (client == null && _restoreState.value is RestoreState.Pending) {
                     restoreLocked()
                 }
-                if (client == null || streamJob != null) return@withLock null
+                if (client == null || streamJob != null) return@withLock
                 reconnectDelaySeconds = 0
                 streamGeneration += 1
-                streamGeneration
-            } ?: return@launch
-            val job = scope.launch {
-                try {
-                    runStream()
-                } finally {
-                    gate.withLock {
-                        if (streamGeneration == generation) {
-                            streamJob = null
+                val generation = streamGeneration
+                // Publish the handle while still holding `gate`, exactly as
+                // restartStreamLocked() does. On a scope that starts children
+                // eagerly or on another thread, a stream that fails without ever
+                // suspending can reach its `finally` before the launching
+                // coroutine's next line: it would clear a streamJob still null
+                // and the finished job would then be published behind it, after
+                // which connect() — which only tests `streamJob != null` — never
+                // reopens the stream. Holding the lock makes that `finally` wait.
+                streamJob = scope.launch {
+                    try {
+                        runStream()
+                    } finally {
+                        gate.withLock {
+                            if (streamGeneration == generation) {
+                                streamJob = null
+                            }
                         }
                     }
                 }
             }
-            gate.withLock { streamJob = job }
         }
     }
 
+    /**
+     * Rebuild the saved pairing, reporting a failed read instead of throwing it.
+     *
+     * Cancellation still propagates, and so does anything that is not an
+     * `Exception`: an `Error` is left to the handler it was always headed for.
+     *
+     * Two of the three callers are fire-and-forget launches, where a thrown
+     * failure has no one to catch it and reaches the uncaught handler. A read
+     * that could not complete is also inconclusive: it did not establish that
+     * this phone is unpaired, so the pairing is left standing (`Pending` keeps
+     * [isPairedLocked] true) and the phone reads offline. That extends the
+     * answer `ios/App/Session.swift` already gives for a Keychain it cannot
+     * open, and that a locked token already gets here, to a store that throws.
+     */
     private suspend fun restoreLocked() {
+        try {
+            restoreFromStoresLocked()
+        } catch (cancellation: CancellationException) {
+            throw cancellation
+        } catch (error: Exception) {
+            markRestoreInconclusive(error)
+        }
+    }
+
+    private suspend fun restoreFromStoresLocked() {
         val saved = connectionStore.load()
         if (saved == null) {
             _restoreState.value = RestoreState.Unpaired
             return
         }
-        when (val stored = tokenStore.read(saved.id)) {
+        val stored = try {
+            tokenStore.read(saved.id)
+        } catch (cancellation: CancellationException) {
+            throw cancellation
+        } catch (error: Exception) {
+            // Same distinction the TokenStore contract already draws — a store
+            // that cannot answer is unavailable, not empty. Mapping it here and
+            // not in [restoreLocked] keeps the connection that was already read.
+            TokenStore.ReadResult.Unavailable(locked = false, message = storeFailureMessage(error))
+        }
+        when (stored) {
             is TokenStore.ReadResult.Unavailable -> {
                 _connection.value = saved
                 _restoreState.value = RestoreState.Pending
@@ -1080,6 +1135,8 @@ class Session(
     companion object {
         const val ALREADY_PAIRED_MESSAGE =
             "This phone is already paired. Unpair it in Settings before connecting it to another computer."
+        const val STORAGE_UNAVAILABLE_MESSAGE =
+            "This phone couldn't read its saved connection just now."
         const val SPENT_QR_MESSAGE =
             "That pairing code was already used. Start pairing again on your computer and rescan the new QR code."
 

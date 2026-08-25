@@ -133,13 +133,13 @@ class CompanionClient(
             add("limit" to limit.toString())
             before?.let { add("before" to it) }
         }
-        return send(makeRequest("GET", "/api/threads/$threadId/messages", query))
+        return send(makeRequest("GET", "/api/threads/${segment(threadId)}/messages", query))
     }
 
     suspend fun messagesAround(threadId: String, messageId: String, limit: Int = 50): ThreadPage = send(
         makeRequest(
             "GET",
-            "/api/threads/$threadId/messages",
+            "/api/threads/${segment(threadId)}/messages",
             listOf("limit" to limit.toString(), "around" to messageId),
         ),
     )
@@ -151,7 +151,7 @@ class CompanionClient(
     suspend fun export(threadId: String, format: String): TranscriptExport {
         val raw = perform(makeRequest(
             "GET",
-            "/api/threads/$threadId/export",
+            "/api/threads/${segment(threadId)}/export",
             listOf("format" to format),
         ))
         check(raw)
@@ -184,7 +184,7 @@ class CompanionClient(
         send(makeRequest("GET", "/api/connectors/connected"))
 
     suspend fun image(threadId: String, messageId: String): ByteArray {
-        val raw = perform(makeRequest("GET", "/api/threads/$threadId/messages/$messageId/image"))
+        val raw = perform(makeRequest("GET", "/api/threads/${segment(threadId)}/messages/${segment(messageId)}/image"))
         check(raw)
         return raw.data
     }
@@ -207,7 +207,7 @@ class CompanionClient(
     suspend fun updateProfile(botId: String, patch: BotProfilePatch): Bot {
         val body = CompanionJson.encodeToJsonElement(BotProfilePatch.serializer(), patch).jsonObject
         return send<BotResponse>(
-            makeRequest("PATCH", "/api/bots/$botId/profile", body = body),
+            makeRequest("PATCH", "/api/bots/${segment(botId)}/profile", body = body),
         ).bot
     }
 
@@ -231,7 +231,7 @@ class CompanionClient(
         send<GeneratedAvatarResponse>(
             makeRequest(
                 "POST",
-                "/api/bots/$botId/avatar/generate",
+                "/api/bots/${segment(botId)}/avatar/generate",
                 body = jsonBody("prompt" to prompt.take(400)),
             ),
             avatarGenerationClient,
@@ -257,21 +257,21 @@ class CompanionClient(
     suspend fun updateRoutine(id: String, input: RoutineInput): Routine {
         requireSupported(input.schedule)
         return send<RoutineResponse>(
-            makeRequest("PATCH", "/api/routines/$id", body = routineBody(input)),
+            makeRequest("PATCH", "/api/routines/${segment(id)}", body = routineBody(input)),
         ).routine
     }
 
     suspend fun setRoutineEnabled(id: String, enabled: Boolean): Routine =
         send<RoutineResponse>(
-            makeRequest("PATCH", "/api/routines/$id", body = buildJsonObject { put("enabled", enabled) }),
+            makeRequest("PATCH", "/api/routines/${segment(id)}", body = buildJsonObject { put("enabled", enabled) }),
         ).routine
 
     suspend fun runRoutine(id: String): RoutineRun = send<RoutineRunResponse>(
-        makeRequest("POST", "/api/routines/$id/run"),
+        makeRequest("POST", "/api/routines/${segment(id)}/run"),
     ).run
 
     suspend fun deleteRoutine(id: String) {
-        sendUnit(makeRequest("DELETE", "/api/routines/$id"))
+        sendUnit(makeRequest("DELETE", "/api/routines/${segment(id)}"))
     }
 
     suspend fun createRoom(name: String?, memberIds: List<String>): Room {
@@ -288,11 +288,11 @@ class CompanionClient(
     }
 
     suspend fun sendToBot(botId: String, text: String) {
-        sendUnit(makeRequest("POST", "/api/bots/$botId/messages", body = jsonBody("text" to text)))
+        sendUnit(makeRequest("POST", "/api/bots/${segment(botId)}/messages", body = jsonBody("text" to text)))
     }
 
     suspend fun sendToRoom(groupId: String, text: String) {
-        sendUnit(makeRequest("POST", "/api/groups/$groupId/messages", body = jsonBody("text" to text)))
+        sendUnit(makeRequest("POST", "/api/groups/${segment(groupId)}/messages", body = jsonBody("text" to text)))
     }
 
     suspend fun respond(
@@ -306,11 +306,11 @@ class CompanionClient(
             put("behavior", behavior)
             message?.let { put("message", it) }
         }
-        sendUnit(makeRequest("POST", "/api/threads/$threadId/respond", body = body))
+        sendUnit(makeRequest("POST", "/api/threads/${segment(threadId)}/respond", body = body))
     }
 
     suspend fun alwaysAllow(botId: String, key: String) {
-        sendUnit(makeRequest("POST", "/api/bots/$botId/always-allow", body = jsonBody("allowKey" to key)))
+        sendUnit(makeRequest("POST", "/api/bots/${segment(botId)}/always-allow", body = jsonBody("allowKey" to key)))
     }
 
     suspend fun authorizeConnector(slug: String, alias: String?): URI {
@@ -331,14 +331,14 @@ class CompanionClient(
     suspend fun toggleReaction(threadId: String, messageId: String, emoji: String): Message =
         send<MessageResponse>(makeRequest(
             "POST",
-            "/api/threads/$threadId/messages/$messageId/reactions",
+            "/api/threads/${segment(threadId)}/messages/${segment(messageId)}/reactions",
             body = jsonBody("emoji" to emoji),
         )).message
 
     suspend fun edit(botId: String, messageId: String, text: String) {
         sendUnit(makeRequest(
             "POST",
-            "/api/bots/$botId/messages/$messageId/edit",
+            "/api/bots/${segment(botId)}/messages/${segment(messageId)}/edit",
             body = jsonBody("text" to text),
         ))
     }
@@ -346,7 +346,7 @@ class CompanionClient(
     suspend fun setActiveBranch(botId: String, messageId: String): String =
         send<ActiveBranchResponse>(makeRequest(
             "POST",
-            "/api/bots/$botId/active-branch",
+            "/api/bots/${segment(botId)}/active-branch",
             body = jsonBody("messageId" to messageId),
         )).activeLeafId
 
@@ -354,39 +354,39 @@ class CompanionClient(
         val body = buildJsonObject {
             title?.takeIf(String::isNotEmpty)?.let { put("title", it) }
         }
-        return send<BotResponse>(makeRequest("POST", "/api/bots/$botId/tasks", body = body)).bot
+        return send<BotResponse>(makeRequest("POST", "/api/bots/${segment(botId)}/tasks", body = body)).bot
     }
 
     suspend fun switchTask(botId: String, threadId: String): Bot = send<BotResponse>(
-        makeRequest("POST", "/api/bots/$botId/tasks/$threadId"),
+        makeRequest("POST", "/api/bots/${segment(botId)}/tasks/${segment(threadId)}"),
     ).bot
 
     suspend fun renameTask(botId: String, threadId: String, title: String) {
         sendUnit(makeRequest(
             "PATCH",
-            "/api/bots/$botId/tasks/$threadId",
+            "/api/bots/${segment(botId)}/tasks/${segment(threadId)}",
             body = jsonBody("title" to title),
         ))
     }
 
     suspend fun deleteTask(botId: String, threadId: String): Bot = send<BotResponse>(
-        makeRequest("DELETE", "/api/bots/$botId/tasks/$threadId"),
+        makeRequest("DELETE", "/api/bots/${segment(botId)}/tasks/${segment(threadId)}"),
     ).bot
 
     suspend fun interrupt(botId: String) {
-        sendUnit(makeRequest("POST", "/api/bots/$botId/interrupt"))
+        sendUnit(makeRequest("POST", "/api/bots/${segment(botId)}/interrupt"))
     }
 
     suspend fun cloudDesktop(botId: String): CloudDesktopSession = send(
-        makeRequest("POST", "/api/bots/$botId/computer/join"),
+        makeRequest("POST", "/api/bots/${segment(botId)}/computer/join"),
     )
 
     suspend fun markBotRead(botId: String) {
-        sendUnit(makeRequest("POST", "/api/bots/$botId/read"))
+        sendUnit(makeRequest("POST", "/api/bots/${segment(botId)}/read"))
     }
 
     suspend fun markRoomRead(roomId: String) {
-        sendUnit(makeRequest("POST", "/api/groups/$roomId/read"))
+        sendUnit(makeRequest("POST", "/api/groups/${segment(roomId)}/read"))
     }
 
     fun events(since: String?, screens: Boolean = false): Flow<StreamFrame> {
@@ -498,6 +498,42 @@ class CompanionClient(
         private val AVATAR_MIME_TYPES = setOf("image/png", "image/jpeg", "image/gif", "image/webp")
         private val JSON_MEDIA_TYPE = "application/json".toMediaType()
         private val EMPTY_BODY: RequestBody = ByteArray(0).toRequestBody(null)
+        private const val HEX_DIGITS = "0123456789ABCDEF"
+
+        /**
+         * Escape one opaque id so it can only ever be a single path segment.
+         *
+         * [makeRequest] hands the finished string to `encodedPath`, which reads
+         * it as already-encoded path syntax: an id holding `/` splits into extra
+         * segments, and an id that is `.` or `..` is resolved away against the
+         * segments before it. Percent-escaping alone cannot save a dot segment —
+         * OkHttp resolves `%2e` and `%2e%2e` the same way — so those two ids are
+         * refused outright, as is the empty id that would collapse the route.
+         * Ids the sidecar issues carry no path syntax, so nothing valid changes.
+         */
+        private fun segment(value: String): String {
+            if (value.isEmpty() || value == "." || value == "..") throw APIError.BadUrl
+            val escaped = StringBuilder(value.length)
+            for (byte in value.toByteArray(Charsets.UTF_8)) {
+                val code = byte.toInt() and 0xFF
+                val character = code.toChar()
+                val unreserved = character in '0'..'9' ||
+                    character in 'A'..'Z' ||
+                    character in 'a'..'z' ||
+                    character == '-' ||
+                    character == '.' ||
+                    character == '_' ||
+                    character == '~'
+                if (unreserved) {
+                    escaped.append(character)
+                } else {
+                    escaped.append('%')
+                        .append(HEX_DIGITS[code shr 4])
+                        .append(HEX_DIGITS[code and 0x0F])
+                }
+            }
+            return escaped.toString()
+        }
 
         private fun validAvatarPath(path: String): Boolean {
             val prefix = "/api/attachments/"
