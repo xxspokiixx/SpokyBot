@@ -7,6 +7,7 @@ import java.net.NetworkInterface
 import java.net.Socket
 import java.net.SocketAddress
 import java.net.SocketException
+import java.net.SocketTimeoutException
 import java.net.URI
 import java.util.Base64
 import java.util.Collections
@@ -388,6 +389,180 @@ class ConnectionTest {
     }
 
     @Test
+    fun anUpgradeToAProtectedRouteOutranksAStoredCleartextPriority() {
+        // `Session.updateAddress` mints a hand-typed route at priority 0, so it leads the stored
+        // order — that is the explicit choice being recorded. Once the walk has upgraded away
+        // from it, that priority must stop meaning "this is the local route the person picked",
+        // or the next launch hands the bearer straight back to cleartext.
+        val local = assertNotNull(
+            CompanionEndpoint.create("http://192.168.1.42:8810", CompanionEndpointKind.LAN, 0),
+        )
+        val hosted = assertNotNull(
+            CompanionEndpoint.create("https://mac.example", CompanionEndpointKind.HOSTED, 100),
+        )
+        val chosen = Connection(
+            name = "Mac",
+            host = local.host,
+            port = local.port,
+            activeEndpoint = local,
+            endpoints = listOf(local, hosted),
+        )
+        assertEquals(listOf(local, hosted), chosen.automaticEndpoints, "the typed route leads")
+
+        val upgraded = chosen.promoting(hosted)
+
+        assertEquals(listOf(hosted, local), upgraded.orderedEndpoints)
+        assertEquals(listOf(hosted), upgraded.automaticEndpoints)
+        assertTrue(
+            upgraded.endpoints.orEmpty().any { it.url == local.url },
+            "the superseded route is still stored, for display and a later explicit choice",
+        )
+
+        // And that later explicit choice still works: choosing the local route by hand makes it
+        // the head again, so the person is never locked out of their own network.
+        val rechosen = upgraded.promoting(local)
+        assertEquals(listOf(local, hosted), rechosen.automaticEndpoints)
+    }
+
+    @Test
+    fun advertisedPriorityGovernsBetweenEquallyProtectedRoutes() {
+        // The computer says hosted first, tailnet second, and the LAN sits between them by
+        // number. The session is on tailnet — a transient hosted outage failed over to it.
+        // The cleartext route must fall behind both; the two protected routes must keep the
+        // order the computer asked for, including the one that is currently carrying traffic.
+        val hosted = assertNotNull(
+            CompanionEndpoint.create("https://mac.example", CompanionEndpointKind.HOSTED, 0),
+        )
+        val lan = assertNotNull(
+            CompanionEndpoint.create("http://192.168.1.42:8810", CompanionEndpointKind.LAN, 50),
+        )
+        val tailnet = assertNotNull(
+            CompanionEndpoint.create("http://mac.tail1234.ts.net:8810", CompanionEndpointKind.TAILNET, 100),
+        )
+        val onTailnet = Connection(
+            name = "Mac",
+            host = tailnet.host,
+            port = tailnet.port,
+            activeEndpoint = tailnet,
+            endpoints = listOf(hosted, lan, tailnet),
+        )
+
+        assertEquals(listOf(hosted, tailnet, lan), onTailnet.orderedEndpoints)
+        assertEquals(
+            listOf(hosted, tailnet),
+            onTailnet.automaticEndpoints,
+            "being active earns a protected route nothing: the desktop's priority still governs",
+        )
+
+        // The same connection restated by an authenticated snapshot keeps that answer, which is
+        // the whole point of the refresh — the computer gets to reassert its transport policy.
+        val restated = onTailnet.reconciling(
+            CompanionJson.decodeFromString<CompanionConnectionMetadata>(
+                """{"serverName":"Mac","endpoints":[{"url":"https://mac.example","kind":"hosted","priority":0},""" +
+                    """{"url":"http://192.168.1.42:8810","kind":"lan","priority":50},""" +
+                    """{"url":"http://mac.tail1234.ts.net:8810","kind":"tailnet","priority":100}]}""",
+            ),
+        )
+
+        assertEquals(tailnet, restated.activeEndpoint, "the live route is not swapped by a refresh")
+        assertEquals(listOf(hosted, tailnet, lan), restated.orderedEndpoints)
+        assertEquals(listOf(hosted, tailnet), restated.automaticEndpoints)
+    }
+
+    @Test
+    fun protectedConnectionDoesNotDowngradeWhenHostedIsWithdrawn() {
+        val hosted = assertNotNull(
+            CompanionEndpoint.create("https://mac.companion.example", CompanionEndpointKind.HOSTED, 0),
+        )
+        val lan = assertNotNull(
+            CompanionEndpoint.create("http://192.168.1.42:8810", CompanionEndpointKind.LAN, 200),
+        )
+        val connection = Connection(
+            name = "Mac",
+            host = hosted.host,
+            port = hosted.port,
+            activeEndpoint = hosted,
+            endpoints = listOf(hosted, lan),
+        )
+        val metadata = CompanionJson.decodeFromString<CompanionConnectionMetadata>(
+            """{"serverName":"Mac","hosts":["192.168.1.42"],"endpoints":[{"url":"http://192.168.1.42:8810","kind":"lan","priority":200}]}""",
+        )
+
+        val reconciled = connection.reconciling(metadata)
+
+        assertEquals(hosted, reconciled.activeEndpoint)
+        assertEquals(listOf(hosted.url, lan.url), reconciled.orderedEndpoints.map { it.url })
+        assertEquals(listOf(hosted), reconciled.automaticEndpoints)
+    }
+
+    @Test
+    fun existingLocalPairingLearnsHostedWithoutRepairing() {
+        val local = assertNotNull(
+            CompanionEndpoint.create("http://192.168.1.42:8810", CompanionEndpointKind.LAN, 200),
+        )
+        val connection = Connection(
+            name = "Mac",
+            host = local.host,
+            port = local.port,
+            activeEndpoint = local,
+            endpoints = listOf(local),
+        )
+        val metadata = CompanionJson.decodeFromString<CompanionConnectionMetadata>(FULL_METADATA)
+
+        val reconciled = connection.reconciling(metadata)
+
+        assertEquals(local, reconciled.activeEndpoint, "the live local stream is not switched underneath itself")
+        assertEquals("Milind's computer", reconciled.name)
+        assertEquals(
+            CompanionEndpointKind.HOSTED,
+            reconciled.orderedEndpoints.first().kind,
+            "the next launch upgrades to hosted HTTPS",
+        )
+        // A route advertised with an unusable authority for its kind never enters the snapshot.
+        assertFalse(reconciled.orderedEndpoints.any { it.host == "not-a-tailnet.example" })
+
+        val liveRotation = CandidateRotation(
+            listOf(local) + reconciled.orderedEndpoints.filterNot { it.url == local.url },
+        )
+        assertEquals(local, liveRotation.currentEndpoint)
+        assertEquals(
+            CompanionEndpointKind.HOSTED,
+            liveRotation.advanceEndpoint(SocketTimeoutException())?.kind,
+            "this session may upgrade after its explicitly chosen local route fails",
+        )
+        assertTrue(liveRotation.endpoints.all { it.protectsCredentials })
+    }
+
+    @Test
+    fun reconcilingKeepsTheExactPreviousRouteWhenNoProtectedReplacementIsOffered() {
+        val local = assertNotNull(
+            CompanionEndpoint.create("http://192.168.1.42:8810", CompanionEndpointKind.LAN, 200),
+        )
+        val connection = Connection(
+            name = "Mac",
+            host = local.host,
+            port = local.port,
+            activeEndpoint = local,
+            endpoints = listOf(local),
+        )
+        val metadata = CompanionJson.decodeFromString<CompanionConnectionMetadata>(
+            """{"serverName":"  ","hosts":["10.0.0.9","bad\u002Fslash","10.0.0.9"],"endpoints":[{"url":"http://10.0.0.9:8810","kind":"lan","priority":0}]}""",
+        )
+
+        val reconciled = connection.reconciling(metadata)
+
+        // Retained at priority 0 so it still leads the order — same route, not a new authority.
+        assertEquals(local.url, reconciled.activeEndpoint?.url, "another cleartext LAN address is not authorized")
+        assertEquals(0, reconciled.activeEndpoint?.priority)
+        assertEquals(
+            listOf("http://192.168.1.42:8810", "http://10.0.0.9:8810"),
+            reconciled.orderedEndpoints.map { it.url },
+        )
+        assertEquals("Mac", reconciled.name, "a blank advertised name never replaces the stored one")
+        assertEquals(listOf("10.0.0.9"), reconciled.hosts)
+    }
+
+    @Test
     fun rejectsUntrustedOrMalformedPairingInvites() {
         listOf(
             "https://example.com/pair?address=mac.local&code=123456",
@@ -428,6 +603,15 @@ class ConnectionTest {
         override fun dnsEnd(call: Call, domainName: String, inetAddressList: List<InetAddress>) {
             dnsAddresses.set(inetAddressList)
         }
+    }
+
+    private companion object {
+        private const val FULL_METADATA =
+            """{"serverName":"Milind's computer","hosts":["mac.tail1234.ts.net","192.168.1.42"],""" +
+                """"endpoints":[{"url":"http://192.168.1.42:8810","kind":"lan","priority":200},""" +
+                """{"url":"http://not-a-tailnet.example:8810","kind":"tailnet","priority":50},""" +
+                """{"url":"http://mac.tail1234.ts.net:8810","kind":"tailnet","priority":100},""" +
+                """{"url":"https://mac.companion.example","kind":"hosted","priority":0}]}"""
     }
 
     private fun base64Url(value: String): String =

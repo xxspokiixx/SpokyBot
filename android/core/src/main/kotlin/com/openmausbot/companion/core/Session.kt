@@ -49,6 +49,10 @@ class Session(
     private val hydrateFn: suspend (CompanionClient, Int?) -> Fleet = { client, messages ->
         client.fleet(messages)
     },
+    /** Test seam: override the authenticated endpoint snapshot. */
+    private val metadataFn: suspend (CompanionClient) -> CompanionConnectionMetadata = { client ->
+        client.connectionMetadata()
+    },
 ) {
     sealed interface Status {
         data object Unpaired : Status
@@ -92,6 +96,7 @@ class Session(
     private var token: String? = null
     private var rotation = CandidateRotation(emptyList())
     private var streamJob: Job? = null
+    private var endpointRefreshJob: Job? = null
     private var streamGeneration = 0
     private var reconnectDelaySeconds: Long = 0
     private var screenWatchers = 0
@@ -183,7 +188,9 @@ class Session(
 
             _connection.value = stored
             token = paired.token
-            rotation = CandidateRotation(stored.orderedHosts)
+            // The route that just redeemed leads this session; later launches return to the
+            // desktop's security-prioritized typed order.
+            rotation = CandidateRotation(liveRoutes(stored, winner))
             client = clientFactory(stored, paired.token)
             _state.value = CompanionState()
             _restoreState.value = RestoreState.Ready
@@ -273,6 +280,8 @@ class Session(
         scope.launch {
             gate.withLock {
                 _restoreState.value = RestoreState.Unpaired
+                endpointRefreshJob?.cancel()
+                endpointRefreshJob = null
                 _connection.value?.id?.let { tokenStore.remove(it) }
                 connectionStore.clear()
                 _connection.value = null
@@ -292,6 +301,8 @@ class Session(
         streamJob = null
         gate.withLock {
             _restoreState.value = RestoreState.Unpaired
+            endpointRefreshJob?.cancel()
+            endpointRefreshJob = null
             _connection.value?.id?.let { tokenStore.remove(it) }
             connectionStore.clear()
             _connection.value = null
@@ -397,8 +408,13 @@ class Session(
             is TokenStore.ReadResult.Found -> {
                 _connection.value = saved
                 token = stored.token
-                rotation = CandidateRotation(saved.orderedHosts)
-                client = clientFactory(saved, stored.token)
+                // A restored pairing walks the desktop's advertised priority, and it walks
+                // it credential-safely: a connection already on a protected route never
+                // reaches for a local one. Surviving a failover is not a promotion — the
+                // computer still decides which protected route leads.
+                rotation = CandidateRotation(saved.orderedEndpoints)
+                val first = rotation.currentEndpoint?.let(saved::dialing) ?: saved
+                client = clientFactory(first, stored.token)
                 _restoreState.value = RestoreState.Ready
                 _status.value = Status.Connecting
             }
@@ -500,6 +516,8 @@ class Session(
     fun disconnect() {
         streamJob?.cancel()
         streamJob = null
+        endpointRefreshJob?.cancel()
+        endpointRefreshJob = null
     }
 
     private suspend fun runStream() {
@@ -519,7 +537,8 @@ class Session(
                                     _state.update { it.resetCursor(payload.cursor) }
                                 }
                                 _status.value = Status.Live
-                                promoteWorkingHost()
+                                promoteWorkingRoute()
+                                refreshConnectionMetadata(activeClient)
                             }
                             else -> {
                                 _state.update { it.apply(frame) }
@@ -558,36 +577,125 @@ class Session(
         notificationSink.setBadge(_state.value.unreadCount)
     }
 
+    /**
+     * Turn a stream failure into advice a person can act on and, when the failure belongs to the
+     * route rather than to the pairing, move the dial so the retry that follows tries somewhere
+     * new. The trust ratchet in [CandidateRotation] decides what "somewhere new" may be, so the
+     * banner only names a route the client was actually rebuilt for — it can no longer promise a
+     * switch a policy guard then refuses.
+     *
+     * A 401 never reaches here: the unauthorized path returns before this is called.
+     */
     private fun failureMessage(error: Throwable): String {
         val connection = _connection.value
             ?: return error.message?.takeIf { it.isNotBlank() } ?: "Could not reach the computer."
-        val failure = ConnectionAdvice.classify(error)
-        val failed = rotation.current.ifEmpty { connection.host }
+        val failed = rotation.currentEndpoint
+            ?: connection.activeEndpoint
+            ?: CompanionEndpoint.direct(connection.host, connection.port, priority = 10_000)
         var next: String? = null
-        if (ConnectionAdvice.shouldTryAnotherHost(failure) && rotation.count > 1) {
-            val candidate = rotation.advance()
-            val dialed = connection.dialing(candidate)
-            val activeToken = token
-            if (activeToken != null) {
-                client = clientFactory(dialed, activeToken)
-            }
-            if (dialed != connection) next = candidate
+        val candidate = rotation.advanceEndpoint(error)
+        val activeToken = token
+        if (candidate != null && activeToken != null) {
+            client = clientFactory(connection.dialing(candidate), activeToken)
+            next = candidate.displayAddress
         }
+        val failedAddress = failed?.displayAddress ?: connection.host
+        val failedPort = failed?.port ?: connection.port
+        ConnectionAdvice.gatewayStatus(error)?.let { status ->
+            return ConnectionAdvice.message(status, failedAddress, next)
+        }
+        val failure = ConnectionAdvice.classify(error)
         return if (failure == ConnectionFailure.OTHER) {
             error.message?.takeIf { it.isNotBlank() }
-                ?: ConnectionAdvice.message(failure, failed, connection.port, next)
+                ?: ConnectionAdvice.message(failure, failedAddress, failedPort, next)
         } else {
-            ConnectionAdvice.message(failure, failed, connection.port, next)
+            ConnectionAdvice.message(failure, failedAddress, failedPort, next)
         }
     }
 
-    private suspend fun promoteWorkingHost() {
-        val winner = rotation.current
+    /**
+     * Persist the route that carried a live stream.
+     *
+     * A legacy host list promotes the winner for the next launch. A typed list is *not*
+     * reordered: the desktop's advertised priority keeps deciding which protected route leads,
+     * so a route that merely survived a failover does not outrank a hosted route the computer
+     * put first. The one thing recording a protected winner changes is that cleartext routes it
+     * superseded stop leading — see [Connection.orderedEndpoints].
+     */
+    private suspend fun promoteWorkingRoute() {
+        val winner = rotation.currentEndpoint ?: return
         val updated = _connection.value ?: return
-        if (winner.isEmpty() || updated.host == Connection.urlHost(winner)) return
+        if (updated.activeEndpoint?.url == winner.url) return
         val promoted = updated.promoting(winner)
         _connection.value = promoted
         connectionStore.save(promoted)
+    }
+
+    /**
+     * Learn routes the computer enabled after this phone paired. The snapshot is authenticated
+     * with the device token already in hand and carries no account or pairing credential, so an
+     * already-paired phone can discover hosted HTTPS without another QR code.
+     *
+     * Failure is deliberately non-fatal: an older sidecar answers 404 and a transient refresh
+     * error must not tear down a healthy event stream.
+     *
+     * The live route is not swapped underneath the stream either, and that is worth being exact
+     * about: the replacement order takes effect **on the next launch and on the next route
+     * change** — not on every reconnect. [runStream] re-reads `client` each lap but nothing here
+     * rebuilds it, so a stream that simply ends and reopens comes back on the same authority it
+     * was already using. That is deliberate. The live route is at the head of the walk precisely
+     * because the advertised head just failed; re-preferring it after every clean reconnect would
+     * pay that failure's timeout again and again, and would move a working session onto another
+     * authority for no reason. A route change — a real failure that advances the walk — reads the
+     * refreshed list, and a launch reads the persisted order, which is where the new policy lands.
+     *
+     * And it is the computer's order that lands there. This request is how the desktop restates
+     * its transport policy, so nothing local may quietly outrank it; if it could, the refresh
+     * would be decorative.
+     */
+    private fun refreshConnectionMetadata(source: CompanionClient) {
+        val connectionId = _connection.value?.id ?: return
+        val workingEndpoint = rotation.currentEndpoint ?: source.connection.activeEndpoint
+        endpointRefreshJob?.cancel()
+        endpointRefreshJob = scope.launch {
+            // Best-effort from end to end, and this is a root coroutine: a store that cannot
+            // write is as survivable here as a sidecar that answers 404, and neither has a
+            // caller left to catch for it.
+            try {
+                val metadata = metadataFn(source)
+                gate.withLock {
+                    val current = _connection.value ?: return@withLock
+                    // The stream that asked for this snapshot may already have been replaced by
+                    // a sign-out, a manual address edit or a route advance. Applying it then
+                    // would reorder a walk that no longer belongs to this client.
+                    if (current.id != connectionId) return@withLock
+                    if (client?.connection?.baseUrl != source.connection.baseUrl) return@withLock
+                    val updated = current.reconciling(metadata)
+                    _connection.value = updated
+                    connectionStore.save(updated)
+                    rotation = CandidateRotation(liveRoutes(updated, workingEndpoint))
+                }
+            } catch (cancellation: CancellationException) {
+                throw cancellation
+            } catch (error: Exception) {
+                return@launch
+            }
+        }
+    }
+
+    /**
+     * [winner] first, then the stored policy order — the walk a live session may take without
+     * abandoning the route that is already carrying it.
+     *
+     * The head here is a transient cursor for one session, not a stored preference: what gets
+     * written down is [Connection.orderedEndpoints], where the desktop's priority governs.
+     */
+    private fun liveRoutes(
+        connection: Connection,
+        winner: CompanionEndpoint?,
+    ): List<CompanionEndpoint> {
+        val routes = connection.orderedEndpoints
+        return if (winner == null) routes else listOf(winner) + routes.filterNot { it.url == winner.url }
     }
 
     /** Replace the stored address by hand, keeping the pairing and its token. */
@@ -605,7 +713,7 @@ class Session(
             gate.withLock {
                 _connection.value = updated
                 connectionStore.save(updated)
-                rotation = CandidateRotation(updated.orderedHosts)
+                rotation = CandidateRotation(liveRoutes(updated, endpoint))
                 val activeToken = token
                 if (activeToken != null) {
                     client = clientFactory(updated, activeToken)
@@ -629,7 +737,7 @@ class Session(
         gate.withLock {
             _connection.value = updated
             connectionStore.save(updated)
-            rotation = CandidateRotation(updated.orderedHosts)
+            rotation = CandidateRotation(liveRoutes(updated, endpoint))
             val activeToken = token
             if (activeToken != null) {
                 client = clientFactory(updated, activeToken)

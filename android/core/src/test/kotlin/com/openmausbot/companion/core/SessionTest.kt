@@ -1,6 +1,7 @@
 package com.openmausbot.companion.core
 
 import java.net.ConnectException
+import java.net.UnknownHostException
 import kotlin.coroutines.CoroutineContext
 import kotlin.test.Test
 import kotlin.test.assertEquals
@@ -15,11 +16,13 @@ import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.awaitCancellation
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.emptyFlow
 import kotlinx.coroutines.flow.flow
+import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.test.advanceTimeBy
@@ -201,20 +204,573 @@ class SessionTest {
         session.connect()
         runCurrent()
 
-        assertEquals(2, attempts.size)
+        // The trust ratchet keeps the LAN fallback out of the walk entirely, so the refused
+        // hosted route is never even swapped for another client: one build, one authority.
+        assertEquals(1, attempts.size)
         assertTrue(attempts.all { (connection, token) ->
             connection.baseUrl.toString() == "https://mac.example" && token == "device-token"
         })
-        assertFalse(
-            assertIs<Session.Status.Offline>(session.status.value).message
-                .contains("Trying 192.168.1.42 next."),
-        )
+        val offline = assertIs<Session.Status.Offline>(session.status.value).message
+        assertFalse(offline.contains("192.168.1.42"))
+        // Message and behaviour now agree: nothing was switched, so nothing is promised.
+        assertFalse(offline.contains("Trying"))
 
         advanceTimeBy(1_000)
         runCurrent()
 
         assertEquals("https://mac.example", session.connection.value?.activeEndpoint?.url)
         assertEquals("https://mac.example", connections.saved?.activeEndpoint?.url)
+    }
+
+    @Test
+    fun aSavedTailnetRecordNeverWalksToItsLegacyLanFallback() = runTest {
+        // The record a phone paired over the tailnet before routes carried a type: the LAN and
+        // Bonjour fallbacks were saved as bare hosts, and the token must never reach them.
+        val saved = Connection(
+            id = "legacy",
+            name = "Mac",
+            host = "mac.tail1234.ts.net",
+            port = 8810,
+            hosts = listOf("mac.tail1234.ts.net", "192.168.1.42", "openmausbot-aa.local"),
+        )
+        val connections = FakeConnectionStore(saved)
+        val dialed = mutableListOf<String>()
+        val session = session(
+            connectionStore = connections,
+            tokenStore = FakeTokenStore().apply { this.saved["legacy"] = "device-token" },
+            clientFactory = { connection, token ->
+                dialed += connection.baseUrl.toString()
+                CompanionClient(connection, token)
+            },
+            events = { _, _ -> flow { throw UnknownHostException("mac.tail1234.ts.net") } },
+        )
+        session.awaitRestored()
+
+        session.connect()
+        runCurrent()
+        advanceTimeBy(4_000)
+        runCurrent()
+
+        assertEquals(listOf("http://mac.tail1234.ts.net:8810"), dialed.distinct())
+        val offline = assertIs<Session.Status.Offline>(session.status.value).message
+        assertFalse(offline.contains("192.168.1.42"))
+        assertFalse(offline.contains("openmausbot-aa.local"))
+        assertFalse(offline.contains("Trying"))
+    }
+
+    @Test
+    fun aTunnelGatewayFailureWalksToTheNextProtectedRouteAndSaysSo() = runTest {
+        val hosted = assertNotNull(
+            CompanionEndpoint.create("https://mac.example", CompanionEndpointKind.HOSTED, 0),
+        )
+        val tailnet = assertNotNull(
+            CompanionEndpoint.create("http://mac.tail1234.ts.net:8810", CompanionEndpointKind.TAILNET, 100),
+        )
+        val lan = assertNotNull(
+            CompanionEndpoint.create("http://192.168.1.42:8810", CompanionEndpointKind.LAN, 200),
+        )
+        val saved = Connection(
+            id = "hosted",
+            name = "Mac",
+            host = hosted.host,
+            port = hosted.port,
+            activeEndpoint = hosted,
+            endpoints = listOf(hosted, tailnet, lan),
+        )
+        val dialed = mutableListOf<String>()
+        val connections = FakeConnectionStore(saved)
+        var opens = 0
+        val session = session(
+            connectionStore = connections,
+            tokenStore = FakeTokenStore().apply { this.saved["hosted"] = "device-token" },
+            clientFactory = { connection, token ->
+                dialed += connection.baseUrl.toString()
+                CompanionClient(connection, token)
+            },
+            events = { _, _ ->
+                opens += 1
+                if (opens == 1) {
+                    flow { throw APIError.Status(522) }
+                } else {
+                    flow {
+                        emit(StreamFrame(Frame.Hello(cursor = "s:1", resumed = true), seq = 1))
+                        awaitCancellation()
+                    }
+                }
+            },
+        )
+        session.awaitRestored()
+
+        session.connect()
+        runCurrent()
+
+        // A gateway that answered for the computer is a route failure, and the route it moves to
+        // is the next protected one — never the advertised LAN address.
+        assertEquals(
+            listOf("https://mac.example", "http://mac.tail1234.ts.net:8810"),
+            dialed,
+        )
+        val offline = assertIs<Session.Status.Offline>(session.status.value).message
+        assertTrue(offline.contains("HTTP 522"))
+        assertTrue(offline.contains("Trying mac.tail1234.ts.net next."))
+        assertFalse(offline.contains("192.168.1.42"))
+
+        advanceTimeBy(1_100)
+        runCurrent()
+
+        // The route that carried the stream is written down with its scheme and port intact,
+        // and the hosted route it replaced stays in the advertised order for the next launch.
+        assertEquals(Session.Status.Live, session.status.value)
+        val stored = assertNotNull(connections.saved)
+        assertEquals(tailnet.url, stored.activeEndpoint?.url)
+        assertEquals("http://mac.tail1234.ts.net:8810", stored.baseUrl.toString())
+        assertTrue(stored.orderedEndpoints.any { it.url == hosted.url })
+    }
+
+    @Test
+    fun anApplicationErrorStaysOnTheRouteThatProducedIt() = runTest {
+        val hosted = assertNotNull(
+            CompanionEndpoint.create("https://mac.example", CompanionEndpointKind.HOSTED, 0),
+        )
+        val tailnet = assertNotNull(
+            CompanionEndpoint.create("http://mac.tail1234.ts.net:8810", CompanionEndpointKind.TAILNET, 100),
+        )
+        val saved = Connection(
+            id = "hosted",
+            name = "Mac",
+            host = hosted.host,
+            port = hosted.port,
+            activeEndpoint = hosted,
+            endpoints = listOf(hosted, tailnet),
+        )
+        val dialed = mutableListOf<String>()
+        val session = session(
+            connectionStore = FakeConnectionStore(saved),
+            tokenStore = FakeTokenStore().apply { this.saved["hosted"] = "device-token" },
+            clientFactory = { connection, token ->
+                dialed += connection.baseUrl.toString()
+                CompanionClient(connection, token)
+            },
+            events = { _, _ -> flow { throw APIError.Status(500) } },
+        )
+        session.awaitRestored()
+
+        session.connect()
+        runCurrent()
+
+        assertEquals(listOf("https://mac.example"), dialed)
+        assertFalse(assertIs<Session.Status.Offline>(session.status.value).message.contains("Trying"))
+    }
+
+    @Test
+    fun aLiveStreamLearnsHostedRoutesWithoutSwitchingTheRouteCarryingIt() = runTest {
+        val local = assertNotNull(
+            CompanionEndpoint.create("http://192.168.1.42:8810", CompanionEndpointKind.LAN, 200),
+        )
+        val hosted = assertNotNull(
+            CompanionEndpoint.create("https://mac.example", CompanionEndpointKind.HOSTED, 0),
+        )
+        val saved = Connection(
+            id = "local",
+            name = "Mac",
+            host = local.host,
+            port = local.port,
+            activeEndpoint = local,
+            endpoints = listOf(local),
+        )
+        val connections = FakeConnectionStore(saved)
+        val dialed = mutableListOf<String>()
+        val session = session(
+            connectionStore = connections,
+            tokenStore = FakeTokenStore().apply { this.saved["local"] = "device-token" },
+            clientFactory = { connection, token ->
+                dialed += connection.baseUrl.toString()
+                CompanionClient(connection, token)
+            },
+            events = { _, _ ->
+                flow {
+                    emit(StreamFrame(Frame.Hello(cursor = "s:1", resumed = true), seq = 1))
+                    awaitCancellation()
+                }
+            },
+            metadata = {
+                CompanionConnectionMetadata(
+                    serverName = "Ada's Mac",
+                    hosts = listOf("mac.example", "192.168.1.42"),
+                    endpoints = listOf(hosted, local),
+                )
+            },
+        )
+        session.awaitRestored()
+
+        session.connect()
+        runCurrent()
+
+        assertEquals(Session.Status.Live, session.status.value)
+        // The snapshot is learned and persisted…
+        val stored = assertNotNull(connections.saved)
+        assertEquals("Ada's Mac", stored.name)
+        assertEquals(listOf(hosted.url, local.url), stored.orderedEndpoints.map { it.url })
+        // …but the client carrying the live stream is not rebuilt underneath it.
+        assertEquals(listOf("http://192.168.1.42:8810"), dialed)
+        assertEquals(local.url, stored.activeEndpoint?.url)
+        // Route metadata only: nothing the snapshot teaches is a secret.
+        assertFalse(CompanionJson.encodeToString(stored).contains("device-token"))
+    }
+
+    @Test
+    fun aLearnedHostedRouteBecomesTheUpgradeWhenTheChosenLocalRouteFails() = runTest {
+        val local = assertNotNull(
+            CompanionEndpoint.create("http://192.168.1.42:8810", CompanionEndpointKind.LAN, 200),
+        )
+        val hosted = assertNotNull(
+            CompanionEndpoint.create("https://mac.example", CompanionEndpointKind.HOSTED, 0),
+        )
+        val saved = Connection(
+            id = "local",
+            name = "Mac",
+            host = local.host,
+            port = local.port,
+            activeEndpoint = local,
+            endpoints = listOf(local),
+        )
+        val dialed = mutableListOf<String>()
+        var opens = 0
+        val session = session(
+            connectionStore = FakeConnectionStore(saved),
+            tokenStore = FakeTokenStore().apply { this.saved["local"] = "device-token" },
+            clientFactory = { connection, token ->
+                dialed += connection.baseUrl.toString()
+                CompanionClient(connection, token)
+            },
+            events = { _, _ ->
+                opens += 1
+                if (opens == 1) {
+                    flow {
+                        emit(StreamFrame(Frame.Hello(cursor = "s:1", resumed = true), seq = 1))
+                        throw UnknownHostException("192.168.1.42")
+                    }
+                } else {
+                    flow { throw UnknownHostException("192.168.1.42") }
+                }
+            },
+            metadata = {
+                CompanionConnectionMetadata(
+                    serverName = "Mac",
+                    hosts = null,
+                    endpoints = listOf(hosted, local),
+                )
+            },
+        )
+        session.awaitRestored()
+
+        session.connect()
+        runCurrent()
+
+        // The route that failed is the one the person chose, and before the snapshot arrives
+        // there is nowhere safe to go — so the banner promises nothing.
+        assertEquals(listOf("http://192.168.1.42:8810"), dialed)
+        assertFalse(assertIs<Session.Status.Offline>(session.status.value).message.contains("Trying"))
+
+        advanceTimeBy(1_100)
+        runCurrent()
+
+        // The refreshed snapshot arrived while the retry backed off: the explicitly chosen local
+        // route has now been tried, and the upgrade it may take is the hosted one it just learned.
+        assertEquals(listOf("http://192.168.1.42:8810", "https://mac.example"), dialed)
+        val offline = assertIs<Session.Status.Offline>(session.status.value).message
+        assertTrue(offline.contains("192.168.1.42"))
+        assertTrue(offline.contains("Trying https://mac.example next."))
+    }
+
+    @Test
+    fun aProtectedFailoverDoesNotOutrankTheDesktopPolicyOnTheNextLaunch() = runTest {
+        // A transient hosted outage fails over to tailnet, the stream goes live there, and the
+        // authenticated snapshot restates the computer's policy — hosted first. A brand-new
+        // Session must go back to hosted: surviving a failover is not a promotion, and the
+        // refresh is the computer's chance to say so. Only cleartext is held down by the ratchet.
+        val hosted = assertNotNull(
+            CompanionEndpoint.create("https://mac.example", CompanionEndpointKind.HOSTED, 0),
+        )
+        val tailnet = assertNotNull(
+            CompanionEndpoint.create("http://mac.tail1234.ts.net:8810", CompanionEndpointKind.TAILNET, 100),
+        )
+        val lan = assertNotNull(
+            CompanionEndpoint.create("http://192.168.1.42:8810", CompanionEndpointKind.LAN, 200),
+        )
+        val connections = FakeConnectionStore(
+            Connection(
+                id = "c1",
+                name = "Mac",
+                host = hosted.host,
+                port = hosted.port,
+                activeEndpoint = hosted,
+                endpoints = listOf(hosted, tailnet),
+            ),
+        )
+        val tokens = FakeTokenStore().apply { saved["c1"] = "device-token" }
+        var dialing = ""
+        val first = session(
+            connectionStore = connections,
+            tokenStore = tokens,
+            clientFactory = { connection, token ->
+                dialing = connection.baseUrl.toString()
+                CompanionClient(connection, token)
+            },
+            events = { _, _ ->
+                if (dialing == hosted.url) {
+                    // The tunnel is up but its origin is not.
+                    flow { throw APIError.Status(522) }
+                } else {
+                    flow {
+                        emit(StreamFrame(Frame.Hello(cursor = "s:1", resumed = true), seq = 1))
+                        awaitCancellation()
+                    }
+                }
+            },
+            metadata = {
+                CompanionConnectionMetadata(
+                    serverName = "Mac",
+                    hosts = null,
+                    endpoints = listOf(hosted, tailnet, lan),
+                )
+            },
+        )
+        first.awaitRestored()
+
+        first.connect()
+        runCurrent()
+        advanceTimeBy(1_100)
+        runCurrent()
+
+        assertEquals(Session.Status.Live, first.status.value)
+        first.disconnect()
+
+        val persisted = assertNotNull(connections.saved)
+        assertEquals(tailnet.url, persisted.activeEndpoint?.url, "tailnet carried the stream")
+        assertEquals(
+            listOf(hosted, tailnet),
+            persisted.automaticEndpoints,
+            "but the computer's advertised priority still governs between two protected routes",
+        )
+
+        // A brand-new Session, as after a cold launch.
+        val secondDialed = mutableListOf<String>()
+        val second = session(
+            connectionStore = FakeConnectionStore(persisted),
+            tokenStore = tokens,
+            clientFactory = { connection, token ->
+                secondDialed += connection.baseUrl.toString()
+                CompanionClient(connection, token)
+            },
+            events = { _, _ -> emptyFlow() },
+            metadata = { throw APIError.Status(404) },
+        )
+        second.awaitRestored()
+
+        assertEquals(
+            listOf(hosted.url),
+            secondDialed,
+            "the launch goes back to the route the computer put first",
+        )
+    }
+
+    @Test
+    fun anUpgradeAwayFromAHandTypedLocalRouteSurvivesIntoTheNextSession() = runTest {
+        // The whole regression, end to end: a person types a LAN address by hand, that route
+        // does not answer, the session upgrades to the protected route and remembers it, the
+        // best-effort endpoint refresh is unavailable (404 — the older sidecar), and a
+        // brand-new Session then restores from exactly what was written down.
+        val hosted = assertNotNull(
+            CompanionEndpoint.create("https://mac.example", CompanionEndpointKind.HOSTED, 100),
+        )
+        val connections = FakeConnectionStore(
+            Connection(
+                id = "c1",
+                name = "Mac",
+                host = hosted.host,
+                port = hosted.port,
+                activeEndpoint = hosted,
+                endpoints = listOf(hosted),
+            ),
+        )
+        val tokens = FakeTokenStore().apply { saved["c1"] = "device-token" }
+        val firstDialed = mutableListOf<String>()
+        // The stream answers on the hosted route and refuses on the LAN one, which is what the
+        // two routes really are here — not a turn counter.
+        var dialing = ""
+        val first = session(
+            connectionStore = connections,
+            tokenStore = tokens,
+            clientFactory = { connection, token ->
+                dialing = connection.baseUrl.toString()
+                firstDialed += dialing
+                CompanionClient(connection, token)
+            },
+            events = { _, _ ->
+                if (dialing.startsWith("http://192.168.")) {
+                    flow { throw ConnectException("refused") }
+                } else {
+                    flow {
+                        emit(StreamFrame(Frame.Hello(cursor = "s:1", resumed = true), seq = 1))
+                        awaitCancellation()
+                    }
+                }
+            },
+            // Nothing repairs the stored order after the fact. This is a path the pass
+            // deliberately tolerates, not an exotic one.
+            metadata = { throw APIError.Status(404) },
+        )
+        first.awaitRestored()
+        first.connect()
+        runCurrent()
+        assertEquals(Session.Status.Live, first.status.value)
+
+        assertTrue(first.updateAddressAndAwait("192.168.1.42"))
+        runCurrent()
+
+        // The typed route is dialed, refuses, and the walk upgrades within the same tick.
+        assertEquals(
+            listOf("https://mac.example", "http://192.168.1.42:8810", "https://mac.example"),
+            firstDialed,
+        )
+        assertEquals(
+            "http://192.168.1.42:8810",
+            assertNotNull(connections.saved).activeEndpoint?.url,
+            "and it is the explicit choice while it is being tried",
+        )
+
+        advanceTimeBy(1_100)
+        runCurrent()
+
+        assertEquals(Session.Status.Live, first.status.value)
+        assertEquals(hosted.url, firstDialed.last(), "the failed local route upgraded to hosted")
+        first.disconnect()
+
+        // Everything below reads only what reached the store.
+        val persisted = assertNotNull(connections.saved)
+        assertEquals(hosted.url, persisted.activeEndpoint?.url)
+        assertTrue(
+            persisted.endpoints.orEmpty().any { it.url == "http://192.168.1.42:8810" },
+            "the superseded route stays stored for display and a later explicit choice",
+        )
+        assertEquals(
+            listOf(hosted),
+            persisted.automaticEndpoints,
+            "but it is no longer a route the credential may walk to on its own",
+        )
+
+        // A brand-new Session, as after a cold launch.
+        val secondDialed = mutableListOf<String>()
+        val second = session(
+            connectionStore = FakeConnectionStore(persisted),
+            tokenStore = tokens,
+            clientFactory = { connection, token ->
+                secondDialed += connection.baseUrl.toString()
+                CompanionClient(connection, token)
+            },
+            events = { _, _ -> flow { throw ConnectException("refused") } },
+            metadata = { throw APIError.Status(404) },
+        )
+        second.awaitRestored()
+
+        second.connect()
+        runCurrent()
+        advanceTimeBy(4_000)
+        runCurrent()
+
+        assertEquals(
+            listOf(hosted.url),
+            secondDialed.distinct(),
+            "the pruned cleartext route never carries the bearer again",
+        )
+        assertFalse(
+            assertIs<Session.Status.Offline>(second.status.value).message.contains("192.168.1.42"),
+        )
+    }
+
+    @Test
+    fun aStoreThatCannotWriteTheRefreshedSnapshotDoesNotEndTheStream() = runTest {
+        val local = assertNotNull(
+            CompanionEndpoint.create("http://192.168.1.42:8810", CompanionEndpointKind.LAN, 200),
+        )
+        val hosted = assertNotNull(
+            CompanionEndpoint.create("https://mac.example", CompanionEndpointKind.HOSTED, 0),
+        )
+        // Reads fine, refuses to write — the refresh is a root coroutine, so a throw here would
+        // otherwise reach the uncaught handler and take the session's scope down with it.
+        val connections = object : ConnectionStore {
+            override suspend fun load() = Connection(
+                id = "local",
+                name = "Mac",
+                host = local.host,
+                port = local.port,
+                activeEndpoint = local,
+                endpoints = listOf(local),
+            )
+            override suspend fun save(connection: Connection): Unit =
+                throw IllegalStateException("Secure storage is busy.")
+            override suspend fun clear() = Unit
+        }
+        val session = session(
+            connectionStore = connections,
+            tokenStore = FakeTokenStore().apply { saved["local"] = "device-token" },
+            events = { _, _ ->
+                flow {
+                    emit(StreamFrame(Frame.Hello(cursor = "s:1", resumed = true), seq = 1))
+                    awaitCancellation()
+                }
+            },
+            metadata = {
+                CompanionConnectionMetadata(
+                    serverName = "Mac",
+                    hosts = null,
+                    endpoints = listOf(hosted, local),
+                )
+            },
+        )
+        session.awaitRestored()
+
+        session.connect()
+        runCurrent()
+
+        assertEquals(Session.Status.Live, session.status.value)
+        assertTrue(backgroundScope.isActive)
+    }
+
+    @Test
+    fun anEndpointRefreshThatFailsLeavesTheLiveSessionAlone() = runTest {
+        val saved = Connection(id = "c1", name = "Mac", host = "192.168.1.42", port = 8810)
+        val connections = FakeConnectionStore(saved)
+        var refreshCalls = 0
+        val session = session(
+            connectionStore = connections,
+            tokenStore = FakeTokenStore().apply { this.saved["c1"] = "device-token" },
+            events = { _, _ ->
+                flow {
+                    emit(StreamFrame(Frame.Hello(cursor = "s:1", resumed = true), seq = 1))
+                    awaitCancellation()
+                }
+            },
+            metadata = {
+                refreshCalls += 1
+                // An older sidecar has no such route at all.
+                throw APIError.Status(404)
+            },
+        )
+        session.awaitRestored()
+
+        session.connect()
+        runCurrent()
+
+        assertEquals(1, refreshCalls)
+        // A 404 from an older sidecar is not a session failure, and it teaches nothing: the
+        // phone keeps dialing exactly the authority it already had.
+        assertEquals(Session.Status.Live, session.status.value)
+        val stored = assertNotNull(connections.saved)
+        assertEquals("http://192.168.1.42:8810", stored.baseUrl.toString())
+        assertEquals("Mac", stored.name)
+        assertNull(stored.endpoints)
     }
 
     @Test
@@ -991,6 +1547,8 @@ class SessionTest {
         clientFactory: (Connection, String?) -> CompanionClient = { connection, token ->
             CompanionClient(connection, token)
         },
+        // Default: the older sidecar every existing test implicitly speaks to.
+        metadata: suspend (CompanionClient) -> CompanionConnectionMetadata = { throw APIError.Status(404) },
     ): Session = Session(
         scope = backgroundScope,
         connectionStore = connectionStore,
@@ -1001,6 +1559,7 @@ class SessionTest {
         pairFn = pairFn,
         eventsFn = { _, since, screens -> events(since, screens) },
         hydrateFn = { _, _ -> hydrate() },
+        metadataFn = metadata,
     )
 
     private fun roomJson(): String = """{

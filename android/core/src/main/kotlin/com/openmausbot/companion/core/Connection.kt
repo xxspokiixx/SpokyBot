@@ -43,6 +43,29 @@ data class Connection(
             }
         }
 
+    /**
+     * Every complete route this connection may dial, best first.
+     *
+     * Typed routes win over the legacy fields because they can represent hosted HTTPS; an older
+     * desktop derives direct routes from `host`/`hosts` instead — never a mixture.
+     *
+     * **The desktop's advertised priority decides the order.** It decides it between hosted and
+     * tailnet, it keeps deciding it after a failover, and a later authenticated snapshot is how
+     * the computer restates that policy — so nothing here may quietly outrank it.
+     *
+     * The one thing this ordering adds is a trust rule, and it is about the credential rather
+     * than about which route happens to be in use: **once the connection sits on a route that
+     * protects credentials, no cleartext route may lead.** Reaching a protected route is a
+     * one-way upgrade, so a cleartext route it superseded must not head the next launch's walk
+     * again merely because it carries a smaller priority number — which is exactly what a
+     * hand-typed local address gets (`Session.updateAddress` mints it at priority 0). Cleartext
+     * routes are moved behind the protected ones and keep their own advertised order; they stay
+     * in the list, available for display and for a later explicit choice, and only stop being
+     * the head that [automaticEndpoints] reads as "the local route this person picked".
+     *
+     * While the connection *is* on a cleartext route, that route is the person's explicit
+     * choice and nothing is demoted.
+     */
     val orderedEndpoints: List<CompanionEndpoint>
         get() {
             val candidates = if (endpoints.isNullOrEmpty()) {
@@ -50,18 +73,58 @@ data class Connection(
                     CompanionEndpoint.direct(candidate, port, priority = index)
                 }
             } else {
-                buildList {
+                val advertised = buildList {
                     addAll(endpoints)
                     activeEndpoint?.takeIf { active -> endpoints.none { it.url == active.url } }?.let(::add)
                 }.withIndex()
                     .sortedWith(compareBy<IndexedValue<CompanionEndpoint>> { it.value.priority }.thenBy { it.index })
                     .map { it.value }
+                if (activeEndpoint?.protectsCredentials == true) {
+                    // A stable partition: both classes keep the advertised order they just got,
+                    // so this can only move cleartext down — never reorder protected routes.
+                    val (protectedRoutes, cleartextRoutes) = advertised.partition { it.protectsCredentials }
+                    protectedRoutes + cleartextRoutes
+                } else {
+                    advertised
+                }
             }
             return candidates.distinctBy { it.url }.take(MAX_ENDPOINTS)
         }
 
     val automaticEndpoints: List<CompanionEndpoint>
         get() = CompanionEndpoint.automaticCandidates(orderedEndpoints)
+
+    /**
+     * Apply an authenticated endpoint snapshot, which is a replacement rather than a hint.
+     *
+     * The caller owns the client carrying the live stream; this value only decides what a future
+     * launch, or a future route change, may dial. The advertised version of the active route is kept when it is
+     * still advertised. If it disappeared, a protected route is a safe upgrade; with no protected
+     * replacement the exact previous route stays first, rather than silently authorizing some
+     * other cleartext address that happens to be advertised now.
+     */
+    fun reconciling(metadata: CompanionConnectionMetadata): Connection {
+        val previousActive = activeEndpoint
+        val refreshedActive = previousActive?.let { active ->
+            metadata.endpoints.firstOrNull { it.url == active.url }
+        }
+        val protectedReplacement = metadata.endpoints.firstOrNull { it.protectsCredentials }
+        val retained = previousActive?.let { CompanionEndpoint.create(it.url, it.kind, priority = 0) }
+        val active = refreshedActive ?: protectedReplacement ?: retained ?: metadata.endpoints.firstOrNull()
+        val routes = if (refreshedActive == null && protectedReplacement == null && retained != null) {
+            listOf(retained) + metadata.endpoints.filterNot { it.url == retained.url }.take(MAX_ENDPOINTS - 1)
+        } else {
+            metadata.endpoints
+        }
+        return copy(
+            name = displayName(metadata.serverName) ?: name,
+            host = active?.host ?: host,
+            port = active?.port ?: port,
+            hosts = metadata.hosts?.let(::advertisedHosts) ?: hosts,
+            activeEndpoint = active,
+            endpoints = routes,
+        )
+    }
 
     /** Legacy host failover must not turn a protected route into implicit local cleartext. */
     fun dialing(candidate: String): Connection {
@@ -103,6 +166,31 @@ data class Connection(
     }
 
     companion object {
+        /** Trim a server-supplied display name to something printable; null when nothing remains. */
+        fun displayName(raw: String): String? = raw.trim()
+            .filter { character ->
+                character != '\n' && character != '\r' &&
+                    (character.code > 127 || (character.code >= 32 && character.code != 127))
+            }
+            .take(80)
+            .takeIf { it.isNotEmpty() }
+
+        /** Normalize, deduplicate and cap an advertised legacy host list. */
+        fun advertisedHosts(advertised: List<String>): List<String> {
+            val seen = mutableSetOf<String>()
+            return advertised.mapNotNull { raw ->
+                val candidate = raw.trim()
+                if (candidate.isEmpty() ||
+                    candidate.toByteArray(StandardCharsets.UTF_8).size > 253 ||
+                    candidate.any { it.isWhitespace() || it in "/?#" }
+                ) {
+                    null
+                } else {
+                    urlHost(candidate).takeIf(seen::add)
+                }
+            }.take(MAX_ENDPOINTS)
+        }
+
         fun urlHost(host: String): String {
             val bare = if (host.startsWith("[") && host.endsWith("]")) {
                 host.substring(1, host.length - 1)
