@@ -1,13 +1,14 @@
 package com.openmausbot.companion
 
 import android.app.Application
-import androidx.lifecycle.DefaultLifecycleObserver
-import androidx.lifecycle.LifecycleOwner
 import androidx.lifecycle.ProcessLifecycleOwner
 import com.openmausbot.companion.audio.VoicePreviewPlayer
 import com.openmausbot.companion.avatar.AvatarImageStore
 import com.openmausbot.companion.core.Session
 import com.openmausbot.companion.discovery.NsdDiscovery
+import com.openmausbot.companion.lifecycle.ServiceProcessAnchor
+import com.openmausbot.companion.lifecycle.SessionLingerController
+import com.openmausbot.companion.lifecycle.installSessionLinger
 import com.openmausbot.companion.notifications.LocalNotificationPoster
 import com.openmausbot.companion.permissions.CompanionPermissions
 import com.openmausbot.companion.storage.DataStoreConnectionStore
@@ -21,7 +22,7 @@ import kotlinx.coroutines.launch
 
 /**
  * Application entry: owns the long-lived [Session] and wires
- * [ProcessLifecycleOwner] the way iOS `scenePhase` drives connect/disconnect.
+ * [ProcessLifecycleOwner] the way iOS `scenePhase` drives connect and linger.
  */
 class OpenMausApp : Application() {
     private val appJob = SupervisorJob()
@@ -38,6 +39,8 @@ class OpenMausApp : Application() {
     lateinit var avatars: AvatarImageStore
         private set
     lateinit var voicePreview: VoicePreviewPlayer
+        private set
+    lateinit var linger: SessionLingerController
         private set
 
     override fun onCreate() {
@@ -71,14 +74,15 @@ class OpenMausApp : Application() {
                 }
         }
 
-        ProcessLifecycleOwner.get().lifecycle.addObserver(object : DefaultLifecycleObserver {
-            override fun onStart(owner: LifecycleOwner) {
-                session.connect()
-            }
-
-            override fun onStop(owner: LifecycleOwner) {
-                session.disconnect()
-            }
-        })
+        // Foreground reconnects; background lingers. Cutting the stream at
+        // onStop would drop a turn that completes seconds after Home — the
+        // notification is produced by this stream and nothing else.
+        // `session.linger()` on iOS (`ios/App/CompanionApp.swift:26`).
+        linger = installSessionLinger(
+            lifecycle = ProcessLifecycleOwner.get().lifecycle,
+            session = session,
+            scope = appScope,
+            anchor = ServiceProcessAnchor(this),
+        )
     }
 }

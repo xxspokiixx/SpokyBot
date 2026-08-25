@@ -117,6 +117,20 @@
             </intent-filter>
         </activity>
         <!--
+          The 25-second linger anchor (iOS buys the same window with
+          beginBackgroundTask). An ordinary started service: no intent filter,
+          no binder, no foreground service permission, no foregroundServiceType,
+          and nothing to export — its only caller is this process, and its only
+          effect is keeping this process out of the cached class while the
+          window is open. stopWithTask: swiping the task away is the user
+          saying they are done, so the window goes with it.
+        -->
+        <service
+            android:name=".lifecycle.SessionLingerService"
+            android:exported="false"
+            android:stopWithTask="true" />
+
+        <!--
           Share sheet hand-off for exported transcripts. Not exported, no
           granted URI permissions by default: each share grants read access to
           one file for one Intent, and only for the receiving app.
