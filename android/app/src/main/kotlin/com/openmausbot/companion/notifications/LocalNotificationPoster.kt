@@ -42,12 +42,16 @@ class LocalNotificationPoster(
             intent,
             PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
         )
+        // The shade is SystemUI's window, so the app's reading-direction policy
+        // has to travel inside the string. See NotificationText.
+        val title = NotificationText.anchored(notification.title)
+        val body = NotificationText.anchored(notification.body)
         val builder = NotificationCompat.Builder(appContext, channelId)
             // The app's own mark, monochrome as the status bar requires.
             .setSmallIcon(R.drawable.ic_maus_mark)
-            .setContentTitle(notification.title)
-            .setContentText(notification.body)
-            .setStyle(NotificationCompat.BigTextStyle().bigText(notification.body))
+            .setContentTitle(title)
+            .setContentText(body)
+            .setStyle(NotificationCompat.BigTextStyle().bigText(body))
             .setContentIntent(pending)
             .setAutoCancel(true)
             .setNumber(lastBadge)

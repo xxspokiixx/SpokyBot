@@ -80,10 +80,9 @@ private val DarkColors = darkColorScheme(
  *
  * Its reach ends where the theme does. Notifications are drawn by SystemUI in
  * its own window, from strings that never pass through a Compose typography, so
- * a notification still orders its glyphs by the locale and can show the defects
- * above. That gap is known and left open deliberately: closing it means
- * carrying the policy in the string itself, which is a different decision from
- * this one and has not been made.
+ * the same policy has to be carried there inside the string itself — see
+ * `notifications.NotificationText`, which anchors each notification paragraph
+ * that would otherwise take the shade's base direction.
  */
 private fun TextStyle.readingFromContent(): TextStyle =
     copy(textDirection = TextDirection.ContentOrLtr)
