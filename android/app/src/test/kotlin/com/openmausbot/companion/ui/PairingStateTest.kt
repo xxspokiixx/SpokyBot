@@ -3,6 +3,7 @@ package com.openmausbot.companion.ui
 import androidx.compose.runtime.saveable.SaverScope
 import com.openmausbot.companion.core.Connection
 import com.openmausbot.companion.core.PairingInvite
+import com.openmausbot.companion.core.PairingRouteError
 import com.openmausbot.companion.discovery.DiscoveredService
 import com.openmausbot.companion.discovery.toConnection
 import kotlin.test.Test
@@ -46,16 +47,18 @@ class PairingStateTest {
     )
 
     @Test
-    fun `the saved form never contains the credential or the code`() {
+    fun `the saved form never contains the credential code or request id`() {
         val secrets = PairingSecretStore()
         val pending = scanned(secrets)
         secrets.setCode(pending.handle, "123456")
+        val requestId = secrets.pairRequestId(pending.handle)!!
 
         val encoded = saved(pending)
         assertTrue(encoded != null && encoded.isNotEmpty())
         assertFalse(encoded!!.contains(credential), "the credential reached saved state: $encoded")
         assertFalse(encoded.contains("omb_pair_"), "a credential prefix reached saved state: $encoded")
         assertFalse(encoded.contains("123456"), "the six-digit code reached saved state: $encoded")
+        assertFalse(encoded.contains(requestId), "the pair request id reached saved state: $encoded")
     }
 
     @Test
@@ -200,6 +203,19 @@ class PairingSecretStoreTest {
     }
 
     @Test
+    fun `route retry keeps the request id and an authoritative retry replaces it`() {
+        val secrets = PairingSecretStore()
+        val handle = secrets.open(credential)
+        val first = secrets.pairRequestId(handle)
+        assertEquals(first, secrets.pairRequestId(handle))
+
+        secrets.setCode(handle, "123456")
+        secrets.resetAttempt(handle)
+        assertNotEquals(first, secrets.pairRequestId(handle))
+        assertEquals("", secrets.code(handle))
+    }
+
+    @Test
     fun `clear wipes both secrets`() {
         val secrets = PairingSecretStore()
         val handle = secrets.open(credential)
@@ -207,6 +223,7 @@ class PairingSecretStoreTest {
         secrets.clear()
         assertNull(secrets.credential(handle))
         assertEquals("", secrets.code(handle))
+        assertNull(secrets.pairRequestId(handle))
     }
 
     @Test
@@ -230,6 +247,34 @@ class PairingSecretStoreTest {
     fun `a pairing with no credential has none to give`() {
         val secrets = PairingSecretStore()
         assertNull(secrets.credential(secrets.open()))
+    }
+}
+
+class PairingFailureDispositionTest {
+    @Test
+    fun `route failure retains either kind of in-memory attempt`() {
+        val error = PairingRouteError(listOf("https://mac.example"))
+        assertEquals(
+            PairingFailureDisposition.RETAIN_ATTEMPT,
+            pairingFailureDisposition(error, cameFromScanner = true),
+        )
+        assertEquals(
+            PairingFailureDisposition.RETAIN_ATTEMPT,
+            pairingFailureDisposition(error, cameFromScanner = false),
+        )
+    }
+
+    @Test
+    fun `authoritative failure drops qr but only resets a typed code`() {
+        val error = IllegalStateException("pairing rejected")
+        assertEquals(
+            PairingFailureDisposition.DROP_SCANNED_ATTEMPT,
+            pairingFailureDisposition(error, cameFromScanner = true),
+        )
+        assertEquals(
+            PairingFailureDisposition.RESET_TYPED_ATTEMPT,
+            pairingFailureDisposition(error, cameFromScanner = false),
+        )
     }
 }
 

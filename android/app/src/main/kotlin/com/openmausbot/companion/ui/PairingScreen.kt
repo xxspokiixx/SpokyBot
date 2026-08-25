@@ -39,6 +39,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.openmausbot.companion.core.Connection
 import com.openmausbot.companion.core.PairingInvite
+import com.openmausbot.companion.core.PairingRouteError
 import com.openmausbot.companion.discovery.DiscoveredService
 import com.openmausbot.companion.discovery.DiscoveryState
 import com.openmausbot.companion.discovery.toConnection
@@ -156,24 +157,31 @@ fun PairingScreen() {
     }
 
     fun submit(connection: Connection, credential: String, cameFromScanner: Boolean) {
+        val selectedHandle = pending?.handle
+        val pairRequestId = secrets.pairRequestId(selectedHandle) ?: return
         pairing = true
         failure = null
         scope.launch {
             try {
-                session.pair(connection, credential)
+                session.pair(connection, credential, pairRequestId)
+                secrets.clear()
             } catch (error: Throwable) {
                 if (error is kotlinx.coroutines.CancellationException) throw error
-                // Session already appended "Start pairing again … rescan the new
-                // QR code." for a one-time credential; a burned token must never
-                // be replayed, so the form goes back to choosing a computer.
                 failure = session.actionError ?: error.message ?: "Pairing failed."
                 session.actionError = null
-                if (cameFromScanner) {
-                    pending = null
-                    secrets.clear()
-                } else {
-                    code = ""
-                    secrets.setCode(pending?.handle, "")
+                when (pairingFailureDisposition(error, cameFromScanner)) {
+                    PairingFailureDisposition.RETAIN_ATTEMPT -> {
+                        // Neither the credential nor its request id leaves memory: Retry is the
+                        // same idempotent logical request, possibly recovering a lost response.
+                    }
+                    PairingFailureDisposition.DROP_SCANNED_ATTEMPT -> {
+                        pending = null
+                        secrets.clear()
+                    }
+                    PairingFailureDisposition.RESET_TYPED_ATTEMPT -> {
+                        code = ""
+                        secrets.resetAttempt(selectedHandle)
+                    }
                 }
             } finally {
                 pairing = false
@@ -276,6 +284,22 @@ fun PairingScreen() {
             )
         }
     }
+}
+
+internal enum class PairingFailureDisposition {
+    RETAIN_ATTEMPT,
+    DROP_SCANNED_ATTEMPT,
+    RESET_TYPED_ATTEMPT,
+}
+
+/** Route ambiguity is the only failure that may keep the same logical request alive. */
+internal fun pairingFailureDisposition(
+    error: Throwable,
+    cameFromScanner: Boolean,
+): PairingFailureDisposition = when {
+    error is PairingRouteError -> PairingFailureDisposition.RETAIN_ATTEMPT
+    cameFromScanner -> PairingFailureDisposition.DROP_SCANNED_ATTEMPT
+    else -> PairingFailureDisposition.RESET_TYPED_ATTEMPT
 }
 
 @Composable

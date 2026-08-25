@@ -169,6 +169,53 @@ class SessionTest {
     }
 
     @Test
+    fun pairPersistsTheFallbackEndpointThatActuallyReturnedTheToken() = runTest {
+        val connections = FakeConnectionStore()
+        val hosted = assertNotNull(
+            CompanionEndpoint.create("https://mac.example", CompanionEndpointKind.HOSTED, 0),
+        )
+        val tailnet = assertNotNull(
+            CompanionEndpoint.create(
+                "http://mac.tail1234.ts.net:8810",
+                CompanionEndpointKind.TAILNET,
+                100,
+            ),
+        )
+        val invitation = Connection(
+            name = "Mac",
+            host = hosted.host,
+            port = hosted.port,
+            activeEndpoint = hosted,
+            endpoints = listOf(hosted, tailnet),
+        )
+        val session = session(
+            connectionStore = connections,
+            pairOutcomeFn = { _, _, _, _ ->
+                PairingOutcome(
+                    PairResponse(
+                        token = "device-token",
+                        device = PairedDevice("d1", "Pixel", 1.0, 1.0),
+                        serverName = "Mac",
+                        endpoints = listOf(hosted, tailnet),
+                    ),
+                    invitation.dialing(tailnet),
+                )
+            },
+            events = { _, _ -> emptyFlow() },
+        )
+        session.awaitRestored()
+
+        session.pair(invitation, "123456", "request-id-winner")
+        advanceUntilIdle()
+
+        val stored = assertNotNull(connections.saved)
+        assertEquals(tailnet, stored.activeEndpoint)
+        assertEquals(tailnet.host, stored.host)
+        assertEquals(listOf(tailnet.host), stored.hosts)
+        assertEquals(tailnet, session.connection.value?.activeEndpoint)
+    }
+
+    @Test
     fun hostedFailureNeverDialsOrPersistsLanCleartextWithTheToken() = runTest {
         val hosted = assertNotNull(Connection.parse("https://mac.example")).copy(
             id = "hosted",
@@ -307,13 +354,24 @@ class SessionTest {
     }
 
     @Test
-    fun failedQrRedeemBurnsInviteAndRejectsReplay() = runTest {
+    fun routeFailureKeepsQrInviteAndReusesTheSameLogicalRequest() = runTest {
         val qr = "omb_pair_" + "b".repeat(43)
+        val requestId = "4c825d5b-cf40-4db7-aac5-2455f805a8ec"
         var attempts = 0
+        val requestIds = mutableListOf<String>()
         val session = session(
-            pairFn = { _, _, _ ->
+            pairOutcomeFn = { connection, _, _, seenRequestId ->
                 attempts++
-                throw APIError.Transport("redeem failed")
+                requestIds += seenRequestId
+                if (attempts == 1) throw PairingRouteError(listOf(connection.displayAddress))
+                PairingOutcome(
+                    PairResponse(
+                        token = "device-token",
+                        device = PairedDevice("d1", "Pixel", 1.0, 1.0),
+                        serverName = "Mac",
+                    ),
+                    connection,
+                )
             },
             events = { _, _ -> emptyFlow() },
         )
@@ -321,8 +379,35 @@ class SessionTest {
         session.receivePairingURL("openmausbot://pair?address=192.168.1.2:8810&token=$qr&code=123456")
         assertEquals(qr, session.pairingInvite.value?.credential)
 
-        assertFailsWith<APIError.Transport> {
-            session.pair(session.pairingInvite.value!!)
+        assertFailsWith<PairingRouteError> {
+            session.pair(session.pairingInvite.value!!, requestId)
+        }
+        assertEquals(qr, session.pairingInvite.value?.credential)
+        assertFalse(session.actionError!!.contains("rescan", ignoreCase = true))
+
+        session.pair(session.pairingInvite.value!!, requestId)
+        advanceUntilIdle()
+        assertEquals(2, attempts)
+        assertEquals(listOf(requestId, requestId), requestIds)
+        assertNotNull(session.connection.value)
+    }
+
+    @Test
+    fun authoritativeQrRejectionBurnsInviteAndRejectsReplay() = runTest {
+        val qr = "omb_pair_" + "e".repeat(43)
+        var attempts = 0
+        val session = session(
+            pairOutcomeFn = { _, _, _, _ ->
+                attempts++
+                throw APIError.Status(401, "pairing expired")
+            },
+            events = { _, _ -> emptyFlow() },
+        )
+        session.awaitRestored()
+        session.receivePairingURL("openmausbot://pair?address=192.168.1.2:8810&token=$qr")
+
+        assertFailsWith<APIError.Status> {
+            session.pair(session.pairingInvite.value!!, "request-id-authoritative")
         }
         assertNull(session.pairingInvite.value)
         assertTrue(session.actionError!!.contains("rescan the new QR code"))
@@ -455,21 +540,29 @@ class SessionTest {
     }
 
     @Test
-    fun qrBurnedWhenCancelledAfterRedeemStarts() = runTest {
+    fun cancelledQrAttemptCanResumeWithTheSameLogicalRequest() = runTest {
         val qr = "omb_pair_" + "d".repeat(43)
+        val requestId = "d350b2ac-7f92-4f30-bf80-21e040c1494b"
         var attempts = 0
+        val requestIds = mutableListOf<String>()
         val redeemStarted = CompletableDeferred<Unit>()
         val blockRedeem = CompletableDeferred<Unit>()
         val session = session(
-            pairFn = { _, _, _ ->
+            pairOutcomeFn = { connection, _, _, seenRequestId ->
                 attempts++
-                redeemStarted.complete(Unit)
-                blockRedeem.await()
-                PairResponse(
-                    token = "device-token",
-                    device = PairedDevice("d1", "Pixel", 1.0, 1.0),
-                    serverName = "Mac",
-                    hosts = null,
+                requestIds += seenRequestId
+                if (attempts == 1) {
+                    redeemStarted.complete(Unit)
+                    blockRedeem.await()
+                }
+                PairingOutcome(
+                    PairResponse(
+                        token = "device-token",
+                        device = PairedDevice("d1", "Pixel", 1.0, 1.0),
+                        serverName = "Mac",
+                        hosts = null,
+                    ),
+                    connection,
                 )
             },
             events = { _, _ -> emptyFlow() },
@@ -477,7 +570,11 @@ class SessionTest {
         session.awaitRestored()
 
         val job = launch {
-            session.pair(Connection(name = "Mac", host = "192.168.1.2", port = 8810), qr)
+            session.pair(
+                Connection(name = "Mac", host = "192.168.1.2", port = 8810),
+                qr,
+                requestId,
+            )
         }
         redeemStarted.await()
         job.cancel()
@@ -485,10 +582,15 @@ class SessionTest {
         assertTrue(job.isCancelled)
         assertNull(session.connection.value)
 
-        assertFailsWith<SpentPairingCredentialException> {
-            session.pair(Connection(name = "Mac", host = "192.168.1.2", port = 8810), qr)
-        }
-        assertEquals(1, attempts)
+        session.pair(
+            Connection(name = "Mac", host = "192.168.1.2", port = 8810),
+            qr,
+            requestId,
+        )
+        advanceUntilIdle()
+        assertEquals(2, attempts)
+        assertEquals(listOf(requestId, requestId), requestIds)
+        assertNotNull(session.connection.value)
     }
 
     @Test
@@ -963,7 +1065,7 @@ class SessionTest {
             deviceNameProvider = { "Pixel" },
             notificationSink = RecordingNotifications(),
             clientFactory = { connection, token -> CompanionClient(connection, token) },
-            pairFn = { _, _, _ -> error("pair not expected") },
+            pairFn = { _, _, _, _ -> error("pair not expected") },
             eventsFn = { _, _, _ ->
                 opens++
                 flow { throw APIError.Status(401, "revoked") }
@@ -985,6 +1087,10 @@ class SessionTest {
         connectionStore: ConnectionStore = FakeConnectionStore(),
         tokenStore: TokenStore = FakeTokenStore(),
         pairFn: suspend (Connection, String, String) -> PairResponse = { _, _, _ -> error("pair not expected") },
+        pairOutcomeFn: suspend (Connection, String, String, String) -> PairingOutcome =
+            { connection, credential, deviceName, _ ->
+                PairingOutcome(pairFn(connection, credential, deviceName), connection)
+            },
         events: (String?, Boolean) -> Flow<StreamFrame> = { _, _ -> emptyFlow() },
         hydrate: suspend () -> Fleet = { Fleet(emptyList(), emptyList()) },
         notifications: NotificationSink = RecordingNotifications(),
@@ -998,7 +1104,7 @@ class SessionTest {
         deviceNameProvider = { "Pixel" },
         notificationSink = notifications,
         clientFactory = clientFactory,
-        pairFn = pairFn,
+        pairFn = pairOutcomeFn,
         eventsFn = { _, since, screens -> events(since, screens) },
         hydrateFn = { _, _ -> hydrate() },
     )
