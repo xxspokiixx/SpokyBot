@@ -3,24 +3,100 @@ package com.openmausbot.companion.core
 import java.net.ConnectException
 import java.net.SocketTimeoutException
 import java.net.UnknownHostException
+import java.security.cert.CertificateException
 import javax.net.ssl.SSLException
 import kotlin.coroutines.cancellation.CancellationException
 
-class CandidateRotation(val hosts: List<String>) {
+/**
+ * The ordered walk through a connection's routes, governed by a trust ratchet.
+ *
+ * Pairing stores one route, and one route is one point of failure. The connection still carries
+ * every address the computer advertised, but a bearer credential cannot be sprayed onto whatever
+ * LAN happens to reuse a private address later. So walking is a ratchet rather than a list scan:
+ * a protected route walks only to other protected routes, while the single cleartext route the
+ * person chose explicitly is the only local candidate at all, and it can only move to a stronger
+ * transport. The first such upgrade removes it from this walk for good, so a later wrap cannot
+ * put the token back on it.
+ *
+ * That last rule is about the walk, not about the socket. While the explicit local route is the
+ * only candidate there is nowhere to advance to, so the reconnect loop keeps retrying that same
+ * authority after its backoff — which is the address the person typed, so it is exactly where
+ * the credential is allowed to go. What must never happen is reaching a *second* cleartext
+ * address, or returning to the first after an upgrade. `Connection.orderedEndpoints` carries that
+ * same trust rule — and only that rule — across a restart, so the upgrade survives being written
+ * down while the desktop's advertised priority still decides which protected route leads.
+ *
+ * Pure — no sockets, no clocks — so the rules are testable without a network; [Session] owns
+ * when they run.
+ */
+class CandidateRotation(endpoints: List<CompanionEndpoint>) {
+    var endpoints: List<CompanionEndpoint> = CompanionEndpoint.automaticCandidates(endpoints)
+        private set
+
     private var index = 0
 
-    val current: String get() = hosts.getOrNull(index).orEmpty()
-    val count: Int get() = hosts.size
+    val currentEndpoint: CompanionEndpoint? get() = endpoints.getOrNull(index)
 
-    fun advance(): String {
-        if (hosts.isEmpty()) return ""
-        index = (index + 1) % hosts.size
-        return current
+    /**
+     * Compatibility view for callers that only understand the old host list. Dialing code uses
+     * [currentEndpoint] so it never loses a route's HTTPS scheme or distinct port.
+     */
+    val hosts: List<String> get() = endpoints.map { it.displayAddress }
+
+    val current: String get() = currentEndpoint?.displayAddress.orEmpty()
+
+    val count: Int get() = endpoints.size
+
+    fun advance(): String = advanceEndpoint()?.displayAddress.orEmpty()
+
+    /** Move to the next candidate and return it, wrapping past the end. */
+    fun advanceEndpoint(): CompanionEndpoint? {
+        if (endpoints.isEmpty()) return null
+        index = (index + 1) % endpoints.size
+        val next = currentEndpoint ?: return null
+        // An explicit local route may upgrade to a protected route, but that upgrade is one-way.
+        // Pruning the local route prevents a later wrap from downgrading the transport again.
+        if (next.protectsCredentials && endpoints.any { !it.protectsCredentials }) {
+            endpoints = endpoints.filter { it.protectsCredentials }
+            index = endpoints.indexOfFirst { it.url == next.url }.takeIf { it >= 0 } ?: 0
+        }
+        return currentEndpoint
     }
 
-    fun promoted(): List<String> {
-        val winner = hosts.getOrNull(index) ?: return hosts
-        return listOf(winner) + hosts.filterIndexed { candidateIndex, _ -> candidateIndex != index }
+    /**
+     * Move only when the failure belongs to this route rather than to the pairing or to the
+     * phone as a whole. Keeping that decision beside the rotation makes reconnects handle
+     * address failures and HTTP gateway failures alike.
+     *
+     * A single remaining candidate never advances: the caller's retry loop simply dials that
+     * same authority again after its backoff.
+     */
+    fun advanceEndpoint(after: Throwable): CompanionEndpoint? {
+        if (endpoints.size <= 1 || !ConnectionAdvice.shouldTryAnotherRoute(after)) return null
+        return advanceEndpoint()
+    }
+
+    fun promotedEndpoints(): List<CompanionEndpoint> {
+        val winner = endpoints.getOrNull(index) ?: return endpoints
+        return listOf(winner) + endpoints.filterIndexed { candidateIndex, _ -> candidateIndex != index }
+    }
+
+    fun promoted(): List<String> = promotedEndpoints().map { it.displayAddress }
+
+    companion object {
+        /**
+         * Migration for bare host lists that carry no port of their own: a `.ts.net` name is
+         * protected, `.local` and everything else are explicit-local cleartext, and every route
+         * is assumed to answer on [CompanionEndpoint.DEFAULT_COMPANION_PORT].
+         *
+         * A saved [Connection] knows its own port and its own schemes, so it walks
+         * `orderedEndpoints` instead — dialing through here would silently rewrite both.
+         */
+        fun ofHosts(hosts: List<String>): CandidateRotation = CandidateRotation(
+            hosts.mapIndexedNotNull { position, host ->
+                CompanionEndpoint.direct(host, CompanionEndpoint.DEFAULT_COMPANION_PORT, priority = position)
+            },
+        )
     }
 }
 
@@ -36,6 +112,12 @@ enum class ConnectionFailure {
 }
 
 object ConnectionAdvice {
+    /** Ordinary reverse-proxy failures. */
+    private val PROXY_GATEWAY_STATUSES = 502..504
+
+    /** The gateway family Cloudflare returns when a tunnel or its origin is unhealthy. */
+    private val TUNNEL_GATEWAY_STATUSES = 520..530
+
     fun shouldTryAnotherHost(failure: ConnectionFailure): Boolean = failure in setOf(
         ConnectionFailure.CANNOT_FIND_HOST,
         ConnectionFailure.CANNOT_CONNECT_TO_HOST,
@@ -46,12 +128,40 @@ object ConnectionAdvice {
     fun shouldTryAnotherHost(error: Throwable): Boolean =
         shouldTryAnotherHost(classify(error))
 
-    /** Pairing may move past transport failures and reverse-proxy gateway failures only. */
-    fun shouldTryAnotherRoute(error: APIError): Boolean = when (error) {
+    /**
+     * Pairing may replay the same idempotent request on another identified route after an
+     * ambiguous transport result or a gateway failure. This is deliberately broader than
+     * [shouldTryAnotherRoute]: an unreadable or lost pairing response is not proof that the
+     * one-time credential was rejected, even when it is not an address failure.
+     */
+    fun shouldRetryPairingOnAnotherRoute(error: APIError): Boolean = when (error) {
         is APIError.Transport -> true
-        is APIError.Status -> error.code in 502..504 || error.code in 520..530
+        is APIError.Status -> isGatewayStatus(error.code)
         APIError.BadUrl -> false
     }
+
+    /**
+     * Classify the errors another advertised route can actually repair: address and
+     * TLS/certificate failures, plus the gateway statuses a tunnel returns when its origin is
+     * unreachable. Application errors such as 400/401/404/500 deliberately stay on the route —
+     * every other address would answer them identically.
+     */
+    fun shouldTryAnotherRoute(error: Throwable): Boolean {
+        val status = statusCode(error) ?: return shouldTryAnotherHost(classify(error))
+        return isGatewayStatus(status)
+    }
+
+    /** The HTTP status this failure should be reported as, when a gateway produced it. */
+    fun gatewayStatus(error: Throwable): Int? = statusCode(error)?.takeIf(::isGatewayStatus)
+
+    private fun statusCode(error: Throwable): Int? =
+        generateSequence(error) { it.cause }
+            .filterIsInstance<APIError.Status>()
+            .firstOrNull()
+            ?.code
+
+    private fun isGatewayStatus(status: Int): Boolean =
+        status in PROXY_GATEWAY_STATUSES || status in TUNNEL_GATEWAY_STATUSES
 
     /** Map a transport failure to the URLError-shaped categories Session walks on. */
     fun classify(error: Throwable): ConnectionFailure {
@@ -63,6 +173,9 @@ object ConnectionAdvice {
                 is ConnectException -> return ConnectionFailure.CANNOT_CONNECT_TO_HOST
                 is SocketTimeoutException -> return ConnectionFailure.TIMED_OUT
                 is SSLException -> return ConnectionFailure.SECURE_CONNECTION_FAILED
+                // A rejected or untrusted certificate is a property of this route, not of the
+                // pairing: another advertised route can repair it.
+                is CertificateException -> return ConnectionFailure.SECURE_CONNECTION_FAILED
                 is java.net.NoRouteToHostException -> return ConnectionFailure.TIMED_OUT
                 is java.net.SocketException -> {
                     val detail = candidate.message.orEmpty().lowercase()
@@ -110,9 +223,16 @@ object ConnectionAdvice {
             ConnectionFailure.NOT_CONNECTED_TO_INTERNET -> "You're offline."
             else -> "Could not reach $host."
         }
-        val fallback = tryingNext?.let { " Trying $it next." }.orEmpty()
-        return advice + fallback + " The app keeps retrying automatically."
+        return advice + fallbackAdvice(tryingNext)
     }
+
+    /** A tunnel or reverse proxy answered for the computer, and the computer did not. */
+    fun message(
+        gatewayStatus: Int,
+        host: String,
+        tryingNext: String? = null,
+    ): String = "The route through $host is temporarily unavailable (HTTP $gatewayStatus)." +
+        fallbackAdvice(tryingNext)
 
     fun message(
         error: Throwable,
@@ -120,6 +240,7 @@ object ConnectionAdvice {
         port: Int,
         tryingNext: String? = null,
     ): String {
+        gatewayStatus(error)?.let { return message(it, host, tryingNext) }
         val failure = classify(error)
         return if (failure == ConnectionFailure.OTHER) {
             error.message?.takeIf { it.isNotBlank() } ?: message(failure, host, port, tryingNext)
@@ -127,4 +248,7 @@ object ConnectionAdvice {
             message(failure, host, port, tryingNext)
         }
     }
+
+    private fun fallbackAdvice(tryingNext: String?): String =
+        tryingNext?.let { " Trying $it next." }.orEmpty() + " The app keeps retrying automatically."
 }
