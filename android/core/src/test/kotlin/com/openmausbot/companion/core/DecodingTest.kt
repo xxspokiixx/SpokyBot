@@ -205,6 +205,43 @@ class DecodingTest {
     }
 
     @Test
+    fun malformedAdvisoryEndpointDoesNotDiscardAPairedToken() {
+        val paired = CompanionJson.decodeFromString<PairResponse>(
+            """
+            {
+              "token":"omb_device",
+              "device":{"id":"d1","name":"Ada's Pixel","createdAt":1,"lastSeenAt":1},
+              "serverName":"Ada's Mac",
+              "hosts":["192.168.1.42"],
+              "endpoints":[
+                {"url":"https://mac.example","kind":"hosted","priority":0},
+                {"url":"https://future.example","kind":"future-transport","priority":10},
+                {"url":"http://192.168.1.42:8810","kind":"lan","priority":200}
+              ]
+            }
+            """.trimIndent(),
+        )
+
+        assertEquals("omb_device", paired.token)
+        assertEquals(listOf("192.168.1.42"), paired.hosts)
+        assertEquals(
+            listOf(CompanionEndpointKind.HOSTED, CompanionEndpointKind.LAN),
+            paired.endpoints?.map { it.kind },
+        )
+    }
+
+    @Test
+    fun nonArrayAdvisoryEndpointsAreExplicitlyDiscardedWithoutLosingTheToken() {
+        val paired = CompanionJson.decodeFromString<PairResponse>(
+            """{"token":"omb_device","device":{"id":"d1","name":"Pixel","createdAt":1,"lastSeenAt":1},"serverName":"Mac","hosts":["192.168.1.42"],"endpoints":{"url":"https://mac.example"}}""",
+        )
+
+        assertEquals("omb_device", paired.token)
+        assertEquals(listOf("192.168.1.42"), paired.hosts)
+        assertEquals(emptyList(), paired.endpoints)
+    }
+
+    @Test
     fun decodesTheHarnessErrorBodies() {
         assertTrue(decodeFixture<APIErrorBody>("unauthorized").error.contains("pair"))
         assertTrue(decodeFixture<APIErrorBody>("forbidden").error.isNotEmpty())

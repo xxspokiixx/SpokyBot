@@ -240,7 +240,7 @@ class PairingSecretStoreTest {
  * The expectations here come from the Swift, not from the Kotlin they check.
  * Two things are load-bearing there:
  *
- *  - `Text(connection.name)` and `Text("\(connection.host):\(connection.port)")`
+ *  - `Text(connection.name)` and `Text(connection.displayAddress)`
  *    sit **above** `if let credential = scannedCredential`, so both are on
  *    screen before confirming a scan *and* before typing six digits.
  *  - the scanned branch reads: "Confirm this computer to establish an
@@ -266,12 +266,12 @@ class PairingConfirmationTest {
         PendingPairing(connection, fromScan = false, handle = secrets.open())
 
     @Test
-    fun `a scanned computer is confirmed by name and by host and port`() {
+    fun `a scanned computer is confirmed by name and address`() {
         val secrets = PairingSecretStore()
         val confirmation = PairingConfirmation.of(scanned(secrets), secrets)
 
         assertEquals("Kesley's Ubuntu", confirmation.name)
-        assertEquals("192.168.1.42:8810", confirmation.address)
+        assertEquals("192.168.1.42", confirmation.address)
         assertEquals(
             PairingConfirmation.Step.Confirm(credential),
             confirmation.step,
@@ -279,14 +279,14 @@ class PairingConfirmationTest {
     }
 
     @Test
-    fun `a discovered or typed computer shows the same name and host and port`() {
+    fun `a discovered or typed computer shows the same name and address`() {
         // The gap this pass closes: the six-digit path used to show the name as a
         // section title and never repeat the address.
         val secrets = PairingSecretStore()
         val confirmation = PairingConfirmation.of(typed(secrets), secrets)
 
         assertEquals("Kesley's Ubuntu", confirmation.name)
-        assertEquals("192.168.1.42:8810", confirmation.address)
+        assertEquals("192.168.1.42", confirmation.address)
         assertEquals(PairingConfirmation.Step.EnterCode, confirmation.step)
     }
 
@@ -298,7 +298,7 @@ class PairingConfirmationTest {
 
         assertEquals(PairingConfirmation.Step.Rescan, confirmation.step)
         assertEquals("Kesley's Ubuntu", confirmation.name)
-        assertEquals("192.168.1.42:8810", confirmation.address)
+        assertEquals("192.168.1.42", confirmation.address)
     }
 
     @Test
@@ -324,9 +324,9 @@ class PairingConfirmationTest {
         for (confirmation in every) {
             assertTrue(confirmation.name.isNotBlank(), "a step with no name: ${confirmation.step}")
             assertEquals(
-                "${connection.host}:${connection.port}",
+                connection.displayAddress,
                 confirmation.address,
-                "a step without host:port: ${confirmation.step}",
+                "a step without a display authority: ${confirmation.step}",
             )
             assertTrue(confirmation.notice.isNotBlank(), "a step with no notice: ${confirmation.step}")
         }
@@ -341,8 +341,8 @@ class PairingConfirmationTest {
             handle = secrets.open(),
         )
         val confirmation = PairingConfirmation.of(nameless, secrets)
-        assertEquals("192.168.1.42:8810", confirmation.name)
-        assertEquals("192.168.1.42:8810", confirmation.address)
+        assertEquals("192.168.1.42", confirmation.name)
+        assertEquals("192.168.1.42", confirmation.address)
     }
 
     @Test
@@ -353,7 +353,20 @@ class PairingConfirmationTest {
             fromScan = false,
             handle = secrets.open(),
         )
-        assertEquals("[fe80::1]:8810", PairingConfirmation.of(ipv6, secrets).address)
+        assertEquals("[fe80::1]", PairingConfirmation.of(ipv6, secrets).address)
+    }
+
+    @Test
+    fun `a hosted scan shows the complete HTTPS authority and HTTPS notice`() {
+        val secrets = PairingSecretStore()
+        val hosted = requireNotNull(Connection.parse("https://mac.example:9443")).copy(name = "Hosted Mac")
+        val pending = PendingPairing(hosted, fromScan = true, handle = secrets.open(credential))
+
+        val confirmation = PairingConfirmation.of(pending, secrets)
+
+        assertEquals("https://mac.example:9443", confirmation.address)
+        assertTrue(confirmation.notice.contains("authenticated HTTPS companion connection"))
+        assertFalse(confirmation.notice.contains("does not encrypt"))
     }
 
     @Test

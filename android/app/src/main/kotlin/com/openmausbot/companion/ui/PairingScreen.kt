@@ -250,7 +250,7 @@ fun PairingScreen() {
                     failure = null
                     val connection = Connection.parse(manualAddress)
                     if (connection == null) {
-                        failure = "That should look like 192.168.1.42:8810."
+                        failure = AddressEdit.INVALID
                     } else {
                         pending = PendingPairing(
                             connection = connection,
@@ -362,7 +362,7 @@ private fun ManualSection(
         OutlinedTextField(
             value = address,
             onValueChange = onAddressChange,
-            placeholder = { Text("192.168.1.42:8810") },
+            placeholder = { Text("https://mac.example or 192.168.1.42:8810") },
             singleLine = true,
             keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Uri),
             modifier = Modifier.fillMaxWidth(),
@@ -375,8 +375,8 @@ private fun ManualSection(
             Text("Continue")
         }
         Text(
-            text = "Whatever the Companion panel shows — an address on this network, or a " +
-                "Tailscale name like macbook.tail1234.ts.net:8810, which works from anywhere.",
+            text = "Whatever the Companion panel shows — a secure https:// address, an address " +
+                "on this network, or a Tailscale name like macbook.tail1234.ts.net:8810.",
             fontSize = 13.sp,
             color = secondaryTint,
         )

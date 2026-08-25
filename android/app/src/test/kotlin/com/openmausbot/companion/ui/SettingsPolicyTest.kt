@@ -28,10 +28,14 @@ class SettingsPolicyTest {
     }
 
     @Test
-    fun `the address reads host and port, and says so when there is none`() {
+    fun `the address uses the route display authority and says so when there is none`() {
         assertEquals(
-            "192.168.1.42:8810",
+            "192.168.1.42",
             SettingsPolicy.addressText(Connection(name = "n", host = "192.168.1.42", port = 8810)),
+        )
+        assertEquals(
+            "https://mac.example:9443",
+            SettingsPolicy.addressText(requireNotNull(Connection.parse("https://mac.example:9443"))),
         )
         assertEquals("—", SettingsPolicy.addressText(null))
     }
@@ -39,7 +43,7 @@ class SettingsPolicyTest {
     @Test
     fun `an IPv6 address keeps its brackets`() {
         assertEquals(
-            "[fe80::1%eth0]:8810",
+            "[fe80::1%eth0]",
             SettingsPolicy.addressText(
                 Connection(name = "n", host = "[fe80::1%eth0]", port = 8810),
             ),

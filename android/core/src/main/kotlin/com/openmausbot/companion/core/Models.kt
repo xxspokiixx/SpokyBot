@@ -301,13 +301,122 @@ data class PairedDevice(
     val lastSeenAt: Double,
 )
 
-@Serializable
+@Serializable(with = PairResponseSerializer::class)
 data class PairResponse(
     val token: String,
     val device: PairedDevice,
     val serverName: String,
     val hosts: List<String>? = null,
+    val endpoints: List<CompanionEndpoint>? = null,
 )
+
+/**
+ * Pairing has already minted the durable token by the time this body arrives. Endpoint metadata
+ * is therefore lossy per element: a future kind or malformed advisory route cannot discard the
+ * usable token and legacy host fields beside it.
+ */
+object PairResponseSerializer : KSerializer<PairResponse> {
+    override val descriptor: SerialDescriptor = JsonObject.serializer().descriptor
+
+    override fun deserialize(decoder: Decoder): PairResponse {
+        val input = decoder as? JsonDecoder
+            ?: throw SerializationException("PairResponse must be decoded from JSON")
+        val value = input.decodeJsonElement() as? JsonObject
+            ?: throw SerializationException("PairResponse must be a JSON object")
+        val json = input.json
+        val token = json.decodeFromJsonElement<String>(
+            value["token"] ?: throw SerializationException("PairResponse.token is required"),
+        )
+        val device = json.decodeFromJsonElement<PairedDevice>(
+            value["device"] ?: throw SerializationException("PairResponse.device is required"),
+        )
+        val serverName = json.decodeFromJsonElement<String>(
+            value["serverName"] ?: throw SerializationException("PairResponse.serverName is required"),
+        )
+        val hosts = value["hosts"]?.takeUnless { it is JsonNull }?.let {
+            json.decodeFromJsonElement<List<String>>(it)
+        }
+        val endpoints = when (val element = value["endpoints"]) {
+            null -> null
+            is JsonArray -> element.mapNotNull { candidate ->
+                runCatching { json.decodeFromJsonElement<CompanionEndpoint>(candidate) }.getOrNull()
+            }
+            // The field is advisory and the token already exists. A malformed container is
+            // discarded just like malformed entries, but is handled explicitly rather than
+            // becoming an empty array through a nullable cast.
+            else -> emptyList()
+        }
+        return PairResponse(token, device, serverName, hosts, endpoints)
+    }
+
+    override fun serialize(encoder: Encoder, value: PairResponse) {
+        val output = encoder as? JsonEncoder
+            ?: throw SerializationException("PairResponse must be encoded as JSON")
+        output.encodeJsonElement(buildJsonObject {
+            put("token", value.token)
+            put("device", output.json.encodeToJsonElement(value.device))
+            put("serverName", value.serverName)
+            value.hosts?.let { put("hosts", output.json.encodeToJsonElement(it)) }
+            value.endpoints?.let { put("endpoints", output.json.encodeToJsonElement(it)) }
+        })
+    }
+}
+
+/** Non-secret connection snapshot returned by GET /api/companion/endpoints. */
+@Serializable(with = CompanionConnectionMetadataSerializer::class)
+data class CompanionConnectionMetadata(
+    val serverName: String,
+    val hosts: List<String>? = null,
+    val endpoints: List<CompanionEndpoint>,
+)
+
+/**
+ * Refresh metadata also drops malformed individual routes, but unlike PairResponse it is a
+ * replacement snapshot. With no usable route the whole response is rejected so callers retain
+ * their last known-good connection.
+ */
+object CompanionConnectionMetadataSerializer : KSerializer<CompanionConnectionMetadata> {
+    override val descriptor: SerialDescriptor = JsonObject.serializer().descriptor
+
+    override fun deserialize(decoder: Decoder): CompanionConnectionMetadata {
+        val input = decoder as? JsonDecoder
+            ?: throw SerializationException("Companion connection metadata must be JSON")
+        val value = input.decodeJsonElement() as? JsonObject
+            ?: throw SerializationException("Companion connection metadata must be a JSON object")
+        val json = input.json
+        val serverName = json.decodeFromJsonElement<String>(
+            value["serverName"]
+                ?: throw SerializationException("Companion connection metadata needs serverName"),
+        )
+        val hosts = value["hosts"]?.takeUnless { it is JsonNull }?.let {
+            json.decodeFromJsonElement<List<String>>(it)
+        }
+        val decoded = (value["endpoints"] as? JsonArray).orEmpty().mapNotNull { element ->
+            runCatching { json.decodeFromJsonElement<CompanionEndpoint>(element) }.getOrNull()
+        }
+        val endpoints = decoded.withIndex()
+            .sortedWith(compareBy<IndexedValue<CompanionEndpoint>> { it.value.priority }.thenBy { it.index })
+            .map { it.value }
+            .distinctBy { it.url }
+            .take(8)
+        if (endpoints.isEmpty()) {
+            throw SerializationException(
+                "Companion endpoint metadata must contain at least one valid route.",
+            )
+        }
+        return CompanionConnectionMetadata(serverName, hosts, endpoints)
+    }
+
+    override fun serialize(encoder: Encoder, value: CompanionConnectionMetadata) {
+        val output = encoder as? JsonEncoder
+            ?: throw SerializationException("Companion connection metadata must be JSON")
+        output.encodeJsonElement(buildJsonObject {
+            put("serverName", value.serverName)
+            value.hosts?.let { put("hosts", output.json.encodeToJsonElement(it)) }
+            put("endpoints", output.json.encodeToJsonElement(value.endpoints))
+        })
+    }
+}
 
 @Serializable(with = CloudDesktopSessionSerializer::class)
 data class CloudDesktopSession(val url: URI)

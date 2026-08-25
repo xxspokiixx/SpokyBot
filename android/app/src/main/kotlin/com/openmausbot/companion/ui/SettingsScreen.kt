@@ -138,7 +138,7 @@ fun SettingsScreen(onBack: () -> Unit, onOpenRoutines: () -> Unit) {
                             addressText = it
                             addressError = null
                         },
-                        placeholder = { Text("192.168.1.42:8810") },
+                        placeholder = { Text("https://mac.example or 192.168.1.42:8810") },
                         singleLine = true,
                         isError = addressError != null,
                         keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Uri),

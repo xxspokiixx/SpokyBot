@@ -131,15 +131,16 @@ internal val PendingPairingSaver: Saver<PendingPairing?, String> = Saver(
  * it is drawn so the wording itself can be pinned by a test.
  *
  * The port of `confirmationView(for:)` in `ios/App/PairingView.swift`. There the
- * name and `host:port` sit *above* the branch, so they are on screen whether the
+ * name and display authority sit *above* the branch, so they are on screen whether the
  * user is confirming a scan or about to type the six digits the desktop shows.
  * That placement is §6 substance, not layout: a scan never pairs by itself, and
  * what the user is confirming is which computer, at which address.
  */
 internal data class PairingConfirmation(
     val name: String,
-    /** `host:port`, the form `PairingView.swift` prints under the name. */
+    /** Complete HTTPS authority for hosted routes; direct host form for local routes. */
     val address: String,
+    val usesHttps: Boolean,
     val step: Step,
 ) {
     sealed interface Step {
@@ -155,7 +156,7 @@ internal data class PairingConfirmation(
 
     val notice: String
         get() = when (step) {
-            is Step.Confirm -> PairingCopy.CONFIRM_SCAN
+            is Step.Confirm -> if (usesHttps) PairingCopy.CONFIRM_HTTPS else PairingCopy.CONFIRM_SCAN
             Step.EnterCode -> PairingCopy.ENTER_CODE
             Step.Rescan -> PairingCopy.RESCAN
         }
@@ -166,7 +167,7 @@ internal data class PairingConfirmation(
             secrets: PairingSecretStore = PairingSecrets,
         ): PairingConfirmation {
             val connection = pending.connection
-            val address = "${connection.host}:${connection.port}"
+            val address = connection.displayAddress
             return PairingConfirmation(
                 // A discovered service is named by whatever it advertised, so a
                 // blank name is possible in a way `Connection.parse` and
@@ -174,6 +175,7 @@ internal data class PairingConfirmation(
                 // heading, and the confirmation never opens without one.
                 name = connection.name.ifBlank { address },
                 address = address,
+                usesHttps = connection.activeEndpoint?.isSecure == true,
                 step = when {
                     pending.needsRescan(secrets) -> Step.Rescan
                     else -> pending.credential(secrets)?.let(Step::Confirm) ?: Step.EnterCode
@@ -188,6 +190,10 @@ internal data class PairingConfirmation(
  * about: what pairing authenticates, and what it does not encrypt.
  */
 internal object PairingCopy {
+    const val CONFIRM_HTTPS: String =
+        "Only continue if this is the computer whose QR code you just scanned. " +
+            "Confirming establishes an authenticated HTTPS companion connection."
+
     /**
      * Mirrors `ios/App/PairingView.swift`, which says of a scanned computer:
      * "Confirm this computer to establish an authenticated companion connection.

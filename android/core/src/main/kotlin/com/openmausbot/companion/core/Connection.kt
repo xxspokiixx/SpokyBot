@@ -6,8 +6,10 @@ import java.net.URI
 import java.nio.ByteBuffer
 import java.nio.charset.CodingErrorAction
 import java.nio.charset.StandardCharsets
+import java.util.Base64
 import java.util.UUID
 import kotlinx.serialization.Serializable
+import kotlinx.serialization.decodeFromString
 
 @Serializable
 data class Connection(
@@ -16,12 +18,21 @@ data class Connection(
     val host: String,
     val port: Int,
     val hosts: List<String>? = null,
+    val activeEndpoint: CompanionEndpoint? = null,
+    val endpoints: List<CompanionEndpoint>? = null,
 ) {
     val baseUrl: URI?
-        get() = runCatching {
+        get() = activeEndpoint?.baseUrl ?: runCatching {
             val normalized = urlHost(host).replace("%", "%25")
             URI("http://$normalized:$port")
         }.getOrNull()
+
+    val displayAddress: String
+        get() = activeEndpoint?.displayAddress ?: if (port == CompanionEndpoint.DEFAULT_COMPANION_PORT) {
+            host
+        } else {
+            "$host:$port"
+        }
 
     val orderedHosts: List<String>
         get() = buildList {
@@ -32,12 +43,63 @@ data class Connection(
             }
         }
 
-    fun dialing(candidate: String): Connection = copy(host = urlHost(candidate))
+    val orderedEndpoints: List<CompanionEndpoint>
+        get() {
+            val candidates = if (endpoints.isNullOrEmpty()) {
+                orderedHosts.mapIndexedNotNull { index, candidate ->
+                    CompanionEndpoint.direct(candidate, port, priority = index)
+                }
+            } else {
+                buildList {
+                    addAll(endpoints)
+                    activeEndpoint?.takeIf { active -> endpoints.none { it.url == active.url } }?.let(::add)
+                }.withIndex()
+                    .sortedWith(compareBy<IndexedValue<CompanionEndpoint>> { it.value.priority }.thenBy { it.index })
+                    .map { it.value }
+            }
+            return candidates.distinctBy { it.url }.take(MAX_ENDPOINTS)
+        }
+
+    val automaticEndpoints: List<CompanionEndpoint>
+        get() = CompanionEndpoint.automaticCandidates(orderedEndpoints)
+
+    /** Legacy host failover must not turn a protected route into implicit local cleartext. */
+    fun dialing(candidate: String): Connection {
+        val endpoint = CompanionEndpoint.direct(candidate, port, priority = 10_000) ?: return this
+        if (activeEndpoint?.protectsCredentials == true && !endpoint.protectsCredentials) return this
+        return dialing(endpoint)
+    }
+
+    fun dialing(candidate: CompanionEndpoint): Connection = copy(
+        host = candidate.host,
+        port = candidate.port,
+        activeEndpoint = candidate,
+    )
 
     fun promoting(winner: String): Connection {
         val normalized = urlHost(winner)
+        val endpoint = CompanionEndpoint.direct(normalized, port, priority = 10_000) ?: return this
+        if (activeEndpoint?.protectsCredentials == true && !endpoint.protectsCredentials) return this
         val rest = orderedHosts.filterNot { it == normalized }
-        return copy(host = normalized, hosts = listOf(normalized) + rest)
+        return copy(hosts = listOf(normalized) + rest).promoting(endpoint)
+    }
+
+    fun promoting(winner: CompanionEndpoint): Connection {
+        val typed = endpoints?.let { existing ->
+            if (existing.any { it.url == winner.url }) existing else existing + winner
+        }
+        val promotedHosts = if (winner.kind == CompanionEndpointKind.HOSTED) {
+            hosts
+        } else {
+            listOf(winner.host) + orderedHosts.filterNot { it == winner.host }
+        }
+        return copy(
+            host = winner.host,
+            port = winner.port,
+            hosts = promotedHosts,
+            activeEndpoint = winner,
+            endpoints = typed,
+        )
     }
 
     companion object {
@@ -52,11 +114,22 @@ data class Connection(
 
         fun parse(text: String, defaultPort: Int = 8810): Connection? {
             var trimmed = text.trim()
-            for (prefix in listOf("http://", "https://")) {
-                if (trimmed.startsWith(prefix, ignoreCase = true)) {
-                    trimmed = trimmed.drop(prefix.length)
-                    break
+            val lowercased = trimmed.lowercase()
+            if (lowercased.startsWith("http://") || lowercased.startsWith("https://")) {
+                val parsed = runCatching { URI(trimmed) }.getOrNull() ?: return null
+                val kind = if (lowercased.startsWith("https://")) {
+                    CompanionEndpointKind.HOSTED
+                } else {
+                    CompanionEndpoint.inferredDirectKind(parsed.host.orEmpty())
                 }
+                val endpoint = CompanionEndpoint.create(trimmed, kind, priority = 0) ?: return null
+                return Connection(
+                    name = endpoint.host,
+                    host = endpoint.host,
+                    port = endpoint.port,
+                    activeEndpoint = endpoint,
+                    endpoints = listOf(endpoint),
+                )
             }
             trimmed = trimmed.trimEnd('/')
             if (trimmed.isEmpty()) return null
@@ -82,11 +155,15 @@ data class Connection(
             if (parsedPort !in 1..65535) return null
             return Connection(name = parsedHost, host = urlHost(parsedHost), port = parsedPort)
         }
+
+        private const val MAX_ENDPOINTS = 8
     }
 }
 
 data class PairingInvite(val connection: Connection, val credential: String) {
     companion object {
+        private const val MAX_ENDPOINTS = 8
+
         fun parse(url: URI): PairingInvite? {
             if (!url.scheme.equals("openmausbot", ignoreCase = true) ||
                 !url.host.equals("pair", ignoreCase = true)
@@ -130,6 +207,11 @@ data class PairingInvite(val connection: Connection, val credential: String) {
                 if (candidates.isNotEmpty()) connection = connection.copy(hosts = candidates)
             }
 
+            values["endpoints"]?.let { encoded ->
+                val endpoints = decodeEndpoints(encoded) ?: return null
+                connection = connection.copy(endpoints = endpoints).dialing(endpoints.first())
+            }
+
             return PairingInvite(connection, credential)
         }
 
@@ -145,6 +227,30 @@ data class PairingInvite(val connection: Connection, val credential: String) {
                 return null
             }
             return values["code"]?.takeIf { code -> code.length == 6 && code.all { it in '0'..'9' } }
+        }
+
+        private fun decodeEndpoints(encoded: String): List<CompanionEndpoint>? {
+            if (encoded.isEmpty() || encoded.toByteArray(StandardCharsets.UTF_8).size > 8_192) return null
+            if (encoded.any { character ->
+                    character.code !in '0'.code..'9'.code &&
+                        character.code !in 'A'.code..'Z'.code &&
+                        character.code !in 'a'.code..'z'.code &&
+                        character != '-' && character != '_'
+                }
+            ) {
+                return null
+            }
+            val decoded = runCatching { Base64.getUrlDecoder().decode(encoded) }.getOrNull() ?: return null
+            val endpoints = runCatching {
+                CompanionJson.decodeFromString<List<CompanionEndpoint>>(decoded.toString(StandardCharsets.UTF_8))
+            }.getOrNull() ?: return null
+            if (endpoints.isEmpty() || endpoints.size > MAX_ENDPOINTS) return null
+
+            return endpoints.withIndex()
+                .sortedWith(compareBy<IndexedValue<CompanionEndpoint>> { it.value.priority }.thenBy { it.index })
+                .map { it.value }
+                .distinctBy { it.url }
+                .takeIf { it.isNotEmpty() }
         }
 
         /** Percent-decode a URI query component without form-url-decoding '+'. */

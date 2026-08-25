@@ -8,12 +8,14 @@ import java.net.Socket
 import java.net.SocketAddress
 import java.net.SocketException
 import java.net.URI
+import java.util.Base64
 import java.util.Collections
 import java.util.concurrent.atomic.AtomicReference
 import javax.net.SocketFactory
 import kotlinx.coroutines.runBlocking
 import kotlinx.serialization.SerializationException
 import kotlinx.serialization.decodeFromString
+import kotlinx.serialization.encodeToString
 import okhttp3.Call
 import okhttp3.Dns
 import okhttp3.EventListener
@@ -25,6 +27,7 @@ import kotlin.test.assertFailsWith
 import kotlin.test.assertFalse
 import kotlin.test.assertNotNull
 import kotlin.test.assertNull
+import kotlin.test.assertTrue
 
 class ConnectionTest {
     @Test
@@ -35,6 +38,65 @@ class ConnectionTest {
         val explicit = Connection.parse("http://192.168.1.42:9910/")
         assertEquals("192.168.1.42", explicit?.host)
         assertEquals(9910, explicit?.port)
+
+        val hosted = Connection.parse("https://Companion.Example.com")
+        assertEquals("companion.example.com", hosted?.host)
+        assertEquals(443, hosted?.port)
+        assertEquals("https://companion.example.com", hosted?.baseUrl.toString())
+        assertEquals(CompanionEndpointKind.HOSTED, hosted?.activeEndpoint?.kind)
+
+        val tailnet = Connection.parse("http://macbook.tailnet.ts.net:8810")
+        assertEquals(CompanionEndpointKind.TAILNET, tailnet?.activeEndpoint?.kind)
+        assertTrue(tailnet?.activeEndpoint?.protectsCredentials == true)
+    }
+
+    @Test
+    fun legacyAndTypedLanUseTheSameDefaultPortDisplayAddress() {
+        val legacy = Connection(name = "Mac", host = "192.168.1.42", port = 8810)
+        val typed = requireNotNull(Connection.parse("http://192.168.1.42:8810"))
+
+        assertEquals("192.168.1.42", legacy.displayAddress)
+        assertEquals(typed.displayAddress, legacy.displayAddress)
+    }
+
+    @Test
+    fun endpointValidationEnforcesKindAndAbsoluteAuthorityPolicy() {
+        val hosted = assertNotNull(
+            CompanionEndpoint.create("https://mac.example", CompanionEndpointKind.HOSTED, 0),
+        )
+        val tailnet = assertNotNull(
+            CompanionEndpoint.create("http://mac.tail1234.ts.net:8810", CompanionEndpointKind.TAILNET, 1),
+        )
+        val lan = assertNotNull(
+            CompanionEndpoint.create("http://192.168.1.42:8810", CompanionEndpointKind.LAN, 2),
+        )
+        val bonjour = assertNotNull(
+            CompanionEndpoint.create("http://mac.local:8810", CompanionEndpointKind.BONJOUR, 3),
+        )
+        assertEquals(CompanionEndpointSecurityClass.PROTECTED, hosted.securityClass)
+        assertEquals(CompanionEndpointSecurityClass.PROTECTED, tailnet.securityClass)
+        assertEquals(CompanionEndpointSecurityClass.EXPLICIT_LOCAL, lan.securityClass)
+        assertEquals(CompanionEndpointSecurityClass.EXPLICIT_LOCAL, bonjour.securityClass)
+
+        listOf(
+            Triple("http://public.example", CompanionEndpointKind.HOSTED, 0),
+            Triple("https://mac.tail1234.ts.net", CompanionEndpointKind.TAILNET, 0),
+            Triple("http://public.example", CompanionEndpointKind.TAILNET, 0),
+            Triple("https://192.168.1.42", CompanionEndpointKind.LAN, 0),
+            Triple("https://mac.local", CompanionEndpointKind.BONJOUR, 0),
+            Triple("https://user:secret@public.example", CompanionEndpointKind.HOSTED, 0),
+            Triple("https://public.example/path", CompanionEndpointKind.HOSTED, 0),
+            Triple("https://public.example?query=1", CompanionEndpointKind.HOSTED, 0),
+            Triple("https://public.example#fragment", CompanionEndpointKind.HOSTED, 0),
+            Triple("https://public.example:0", CompanionEndpointKind.HOSTED, 0),
+            Triple("https://public.example:65536", CompanionEndpointKind.HOSTED, 0),
+            Triple("https://public.example:", CompanionEndpointKind.HOSTED, 0),
+            Triple("https://public.example", CompanionEndpointKind.HOSTED, -1),
+            Triple("https://public.example", CompanionEndpointKind.HOSTED, 1_000_001),
+            Triple("https://${"a".repeat(2_048)}.example", CompanionEndpointKind.HOSTED, 0),
+        ).forEach { (url, kind, priority) ->
+            assertNull(CompanionEndpoint.create(url, kind, priority), "$kind accepted $url at $priority")
+        }
     }
 
     @Test
@@ -123,6 +185,15 @@ class ConnectionTest {
     }
 
     @Test
+    fun okHttpEndpointPreservesTypedHttpsSchemeAndDefaultPort() {
+        val connection = assertNotNull(Connection.parse("https://mac.example"))
+        val endpoint = assertNotNull(connection.httpEndpoint(Dns.SYSTEM))
+        assertEquals("https", endpoint.baseUrl.scheme)
+        assertEquals("mac.example", endpoint.baseUrl.host)
+        assertEquals(443, endpoint.baseUrl.port)
+    }
+
+    @Test
     fun olderSavedIpv6ConnectionIsNormalizedWhenUsed() {
         val saved = CompanionJson.decodeFromString<Connection>(
             """{"id":"saved","name":"Mac","host":"::1","port":8810}""",
@@ -178,6 +249,70 @@ class ConnectionTest {
     }
 
     @Test
+    fun carriesSortedDeduplicatedTypedEndpointsFromTheInvite() {
+        val routes = """
+            [
+              {"url":"http://192.168.1.42:8810","kind":"lan","priority":200},
+              {"url":"https://MAC.example/","kind":"hosted","priority":0},
+              {"url":"http://first.tail.ts.net:8810","kind":"tailnet","priority":100},
+              {"url":"http://second.tail.ts.net:8810","kind":"tailnet","priority":100},
+              {"url":"https://mac.example","kind":"hosted","priority":999}
+            ]
+        """.trimIndent()
+        val token = "omb_pair_" + "a".repeat(43)
+        val invite = assertNotNull(PairingInvite.parse(URI(
+            "openmausbot://pair?address=192.168.1.42%3A8810&token=$token&endpoints=${base64Url(routes)}",
+        )))
+
+        assertEquals("https://mac.example", invite.connection.baseUrl.toString())
+        assertEquals(CompanionEndpointKind.HOSTED, invite.connection.activeEndpoint?.kind)
+        assertEquals(
+            listOf(
+                CompanionEndpointKind.HOSTED,
+                CompanionEndpointKind.TAILNET,
+                CompanionEndpointKind.TAILNET,
+                CompanionEndpointKind.LAN,
+            ),
+            invite.connection.orderedEndpoints.map { it.kind },
+        )
+        assertEquals(
+            listOf("first.tail.ts.net", "second.tail.ts.net"),
+            invite.connection.orderedEndpoints.filter { it.kind == CompanionEndpointKind.TAILNET }.map { it.host },
+            "equal priorities retain advertisement order",
+        )
+    }
+
+    @Test
+    fun presentButInvalidTypedEndpointsRejectTheWholeInvite() {
+        val token = "omb_pair_" + "a".repeat(43)
+        val invalidRoutes = listOf(
+            """[{"url":"http://public.example","kind":"hosted","priority":0}]""",
+            """[{"url":"https://public.example","kind":"future-transport","priority":0}]""",
+            """[{"url":"https://user:secret@public.example","kind":"hosted","priority":0}]""",
+            """[{"url":"https://public.example/path","kind":"hosted","priority":0}]""",
+            "[]",
+            (0..8).joinToString(prefix = "[", postfix = "]") {
+                """{"url":"http://192.168.1.${it + 1}:8810","kind":"lan","priority":$it}"""
+            },
+        )
+        invalidRoutes.forEach { routes ->
+            val invite = PairingInvite.parse(URI(
+                "openmausbot://pair?address=192.168.1.42%3A8810&token=$token&endpoints=${base64Url(routes)}",
+            ))
+            assertNull(invite, routes)
+        }
+        assertNull(PairingInvite.parse(URI(
+            "openmausbot://pair?address=192.168.1.42%3A8810&token=$token&endpoints=not-json",
+        )))
+        assertNull(PairingInvite.parse(URI(
+            "openmausbot://pair?address=192.168.1.42%3A8810&token=$token&endpoints=",
+        )))
+        assertNull(PairingInvite.parse(URI(
+            "openmausbot://pair?address=192.168.1.42%3A8810&token=$token&endpoints=${"a".repeat(8_193)}",
+        )))
+    }
+
+    @Test
     fun dropsUnusableFallbackHostsWithoutRefusingTheInvite() {
         val invite = PairingInvite.parse(URI(
             "openmausbot://pair?address=mac.local&code=004209&hosts=%20192.168.1.42%20,,bad%2Fslash,has%20space",
@@ -196,6 +331,22 @@ class ConnectionTest {
         )
         assertNull(saved.hosts)
         assertEquals(listOf("mac.tail1234.ts.net"), saved.orderedHosts)
+        assertNull(saved.activeEndpoint)
+        assertEquals("http://mac.tail1234.ts.net:8810", saved.baseUrl.toString())
+    }
+
+    @Test
+    fun typedConnectionRoundTripsWithTheCompleteNonSecretUrl() {
+        val connection = assertNotNull(Connection.parse("https://mac.example:9443"))
+            .copy(id = "saved", name = "Mac")
+
+        val encoded = CompanionJson.encodeToString(connection)
+        val restored = CompanionJson.decodeFromString<Connection>(encoded)
+
+        assertEquals(connection, restored)
+        assertEquals("https://mac.example:9443", restored.activeEndpoint?.url)
+        assertEquals("https://mac.example:9443", restored.baseUrl.toString())
+        assertFalse(encoded.contains("token", ignoreCase = true))
     }
 
     @Test
@@ -208,6 +359,32 @@ class ConnectionTest {
             """{"token":"omb_x","device":{"id":"d","name":"p","createdAt":1,"lastSeenAt":1},"serverName":"Mac","hosts":["a.ts.net","192.168.1.42"]}""",
         )
         assertEquals(listOf("a.ts.net", "192.168.1.42"), newer.hosts)
+        val typed = CompanionJson.decodeFromString<PairResponse>(
+            """{"token":"omb_x","device":{"id":"d","name":"p","createdAt":1,"lastSeenAt":1},"serverName":"Mac","endpoints":[{"url":"https://mac.example","kind":"hosted","priority":0}]}""",
+        )
+        assertEquals("https://mac.example", typed.endpoints?.first()?.url)
+        assertEquals(CompanionEndpointKind.HOSTED, typed.endpoints?.first()?.kind)
+    }
+
+    @Test
+    fun refreshMetadataIsLossySortedAndRequiresAUsableRoute() {
+        val metadata = CompanionJson.decodeFromString<CompanionConnectionMetadata>(
+            """{"serverName":"Mac","endpoints":[{"url":"http://192.168.1.42:8810","kind":"lan","priority":200},{"url":"https://future.example","kind":"future","priority":1},{"url":"https://mac.example","kind":"hosted","priority":0},{"url":"https://MAC.example/","kind":"hosted","priority":50}]}""",
+        )
+        assertEquals(
+            listOf("https://mac.example", "http://192.168.1.42:8810"),
+            metadata.endpoints.map { it.url },
+        )
+        assertFailsWith<SerializationException> {
+            CompanionJson.decodeFromString<CompanionConnectionMetadata>(
+                """{"serverName":"Mac","endpoints":[{"url":"https://future.example","kind":"future","priority":0}]}""",
+            )
+        }
+        assertFailsWith<SerializationException> {
+            CompanionJson.decodeFromString<CompanionConnectionMetadata>(
+                """{"serverName":"Mac","endpoints":[]}""",
+            )
+        }
     }
 
     @Test
@@ -252,6 +429,9 @@ class ConnectionTest {
             dnsAddresses.set(inetAddressList)
         }
     }
+
+    private fun base64Url(value: String): String =
+        Base64.getUrlEncoder().withoutPadding().encodeToString(value.toByteArray())
 
     private class RecordingSocketFactory : SocketFactory() {
         val connectTarget = AtomicReference<InetSocketAddress>()

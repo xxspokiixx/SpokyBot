@@ -46,7 +46,7 @@ object SettingsPolicy {
     }
 
     fun addressText(connection: Connection?): String =
-        connection?.let { "${it.host}:${it.port}" } ?: "—"
+        connection?.displayAddress ?: "—"
 }
 
 /**
@@ -57,7 +57,8 @@ object SettingsPolicy {
  */
 object AddressEdit {
     const val INVALID =
-        "That should look like 192.168.1.42:8810, or a name like macbook.tail1234.ts.net."
+        "Enter a secure https:// address, 192.168.1.42:8810, or a name like " +
+            "macbook.tail1234.ts.net."
 
     /** The same parse `Session.updateAddress` will do, so the form can say no first. */
     fun isValid(text: String): Boolean = Connection.parse(text) != null

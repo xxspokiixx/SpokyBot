@@ -4,7 +4,8 @@
   WireGuard (*.ts.net / CGNAT 100.64/10). Domain config cannot express raw IP
   allowlists, and Tailscale CGNAT addresses look like public internet to the
   platform — so cleartext is permitted at the base config. Product policy:
-  LAN-is-trusted-only; there is no OpenMausBot-operated relay.
+  LAN-is-trusted-only. Hosted routes use certificate-validated HTTPS; permitting
+  cleartext here does not make a local route an automatic credential fallback.
 -->
 <network-security-config>
     <base-config cleartextTrafficPermitted="true" />

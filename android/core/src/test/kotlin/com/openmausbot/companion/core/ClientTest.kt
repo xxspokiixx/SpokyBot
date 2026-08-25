@@ -105,6 +105,22 @@ class ClientTest {
     }
 
     @Test
+    fun endpointRefreshUsesAuthenticatedWireRouteAndRequiresUsableMetadata() = runBlocking {
+        server.enqueue(json(
+            """{"serverName":"Mac","endpoints":[{"url":"https://future.example","kind":"future","priority":1},{"url":"https://mac.example","kind":"hosted","priority":0}]}""",
+        ))
+
+        val metadata = client.connectionMetadata()
+
+        assertEquals(listOf("https://mac.example"), metadata.endpoints.map { it.url })
+        server.takeRequest().let { request ->
+            assertEquals("GET", request.method)
+            assertEquals("/api/companion/endpoints", request.path)
+            assertEquals("Bearer device-token", request.getHeader("Authorization"))
+        }
+    }
+
+    @Test
     fun createRoomSendsMembersAndMirrorsIosWhitespaceNameRules() = runBlocking {
         val cases = listOf<Pair<String?, Boolean>>(
             "Launch Team" to true,

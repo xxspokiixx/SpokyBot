@@ -5,7 +5,9 @@ import kotlin.coroutines.CoroutineContext
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFailsWith
+import kotlin.test.assertFalse
 import kotlin.test.assertIs
+import kotlin.test.assertNotNull
 import kotlin.test.assertNull
 import kotlin.test.assertTrue
 import kotlinx.coroutines.CompletableDeferred
@@ -25,6 +27,7 @@ import kotlinx.coroutines.test.advanceUntilIdle
 import kotlinx.coroutines.test.runCurrent
 import kotlinx.coroutines.test.runTest
 import kotlinx.coroutines.yield
+import kotlinx.serialization.encodeToString
 import okhttp3.mockwebserver.MockResponse
 import okhttp3.mockwebserver.MockWebServer
 
@@ -129,6 +132,109 @@ class SessionTest {
         assertEquals("device-token-abc", tokens.saved[connections.saved!!.id])
         assertEquals("Ada's Mac", connections.saved!!.name)
         assertTrue(tokens.saved.values.none { it.startsWith("omb_pair_") })
+    }
+
+    @Test
+    fun pairPersistsTypedEndpointMetadataAndKeepsTheRedeemingHttpsRouteActive() = runTest {
+        val connections = FakeConnectionStore()
+        val hosted = assertNotNull(
+            CompanionEndpoint.create("https://mac.example", CompanionEndpointKind.HOSTED, 0),
+        )
+        val lan = assertNotNull(
+            CompanionEndpoint.create("http://192.168.1.42:8810", CompanionEndpointKind.LAN, 200),
+        )
+        val session = session(
+            connectionStore = connections,
+            pairFn = { _, _, _ ->
+                PairResponse(
+                    token = "device-token",
+                    device = PairedDevice("d1", "Pixel", 1.0, 1.0),
+                    serverName = "Ada's Mac",
+                    endpoints = listOf(hosted, lan),
+                )
+            },
+            events = { _, _ -> emptyFlow() },
+        )
+        session.awaitRestored()
+
+        val invitation = assertNotNull(Connection.parse("https://mac.example"))
+        session.pair(invitation, "123456")
+        advanceUntilIdle()
+
+        val stored = assertNotNull(connections.saved)
+        assertEquals("https://mac.example", stored.activeEndpoint?.url)
+        assertEquals(listOf(hosted, lan), stored.endpoints)
+        assertEquals("https://mac.example", stored.baseUrl.toString())
+        assertFalse(CompanionJson.encodeToString(stored).contains("device-token"))
+    }
+
+    @Test
+    fun hostedFailureNeverDialsOrPersistsLanCleartextWithTheToken() = runTest {
+        val hosted = assertNotNull(Connection.parse("https://mac.example")).copy(
+            id = "hosted",
+            name = "Mac",
+            hosts = listOf("mac.example", "192.168.1.42"),
+        )
+        val connections = FakeConnectionStore(hosted)
+        val attempts = mutableListOf<Pair<Connection, String?>>()
+        var opens = 0
+        val session = session(
+            connectionStore = connections,
+            tokenStore = FakeTokenStore().apply { saved[hosted.id] = "device-token" },
+            clientFactory = { connection, token ->
+                attempts += connection to token
+                CompanionClient(connection, token)
+            },
+            events = { _, _ ->
+                opens++
+                if (opens == 1) {
+                    flow { throw ConnectException("refused") }
+                } else {
+                    flow {
+                        emit(StreamFrame(Frame.Hello(cursor = "hosted:1", resumed = true), seq = 1))
+                    }
+                }
+            },
+        )
+        session.awaitRestored()
+
+        session.connect()
+        runCurrent()
+
+        assertEquals(2, attempts.size)
+        assertTrue(attempts.all { (connection, token) ->
+            connection.baseUrl.toString() == "https://mac.example" && token == "device-token"
+        })
+        assertFalse(
+            assertIs<Session.Status.Offline>(session.status.value).message
+                .contains("Trying 192.168.1.42 next."),
+        )
+
+        advanceTimeBy(1_000)
+        runCurrent()
+
+        assertEquals("https://mac.example", session.connection.value?.activeEndpoint?.url)
+        assertEquals("https://mac.example", connections.saved?.activeEndpoint?.url)
+    }
+
+    @Test
+    fun editingAddressPersistsAndDialsTheCompleteHttpsAuthority() = runTest {
+        val original = Connection(id = "c1", name = "Mac", host = "192.168.1.42", port = 8810)
+        val connections = FakeConnectionStore(original)
+        val session = session(
+            connectionStore = connections,
+            tokenStore = FakeTokenStore().apply { saved[original.id] = "device-token" },
+            events = { _, _ -> emptyFlow() },
+        )
+        session.awaitRestored()
+
+        assertTrue(session.updateAddressAndAwait("https://new.example:9443"))
+
+        val updated = assertNotNull(connections.saved)
+        assertEquals(original.id, updated.id)
+        assertEquals("https://new.example:9443", updated.activeEndpoint?.url)
+        assertEquals("https://new.example:9443", updated.baseUrl.toString())
+        assertEquals(updated, session.connection.value)
     }
 
     @Test

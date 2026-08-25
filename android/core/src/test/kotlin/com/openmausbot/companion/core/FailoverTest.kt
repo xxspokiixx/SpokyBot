@@ -150,6 +150,20 @@ class FailoverTest {
     }
 
     @Test
+    fun legacyFailoverCannotClobberAProtectedEndpointWithLocalCleartext() {
+        val connection = requireNotNull(Connection.parse("https://mac.example")).copy(
+            hosts = listOf("mac.example", "192.168.1.42"),
+        )
+        val explicitLocal = requireNotNull(
+            CompanionEndpoint.direct("192.168.1.42", 8810, priority = 0),
+        )
+
+        assertEquals(connection, connection.dialing("192.168.1.42"))
+        assertEquals(connection, connection.promoting("192.168.1.42"))
+        assertEquals(explicitLocal, connection.promoting(explicitLocal).activeEndpoint)
+    }
+
+    @Test
     fun promoteReordersAndKeepsEveryCandidate() {
         val connection = Connection(
             name = "Mac",

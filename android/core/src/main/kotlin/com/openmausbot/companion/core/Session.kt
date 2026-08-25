@@ -167,7 +167,10 @@ class Session(
             var stored = connection
             if (paired.serverName.isNotEmpty()) stored = stored.copy(name = paired.serverName)
             if (!paired.hosts.isNullOrEmpty()) stored = stored.copy(hosts = paired.hosts)
-            stored = stored.promoting(stored.host)
+            if (!paired.endpoints.isNullOrEmpty()) stored = stored.copy(endpoints = paired.endpoints.take(8))
+            val winner = connection.activeEndpoint
+                ?: CompanionEndpoint.direct(connection.host, connection.port, priority = 10_000)
+            stored = winner?.let(stored::promoting) ?: stored.promoting(stored.host)
 
             try {
                 tokenStore.save(stored.id, paired.token)
@@ -563,11 +566,12 @@ class Session(
         var next: String? = null
         if (ConnectionAdvice.shouldTryAnotherHost(failure) && rotation.count > 1) {
             val candidate = rotation.advance()
+            val dialed = connection.dialing(candidate)
             val activeToken = token
             if (activeToken != null) {
-                client = clientFactory(connection.dialing(candidate), activeToken)
+                client = clientFactory(dialed, activeToken)
             }
-            next = candidate
+            if (dialed != connection) next = candidate
         }
         return if (failure == ConnectionFailure.OTHER) {
             error.message?.takeIf { it.isNotBlank() }
@@ -590,7 +594,13 @@ class Session(
     fun updateAddress(text: String): Boolean {
         val parsed = Connection.parse(text) ?: return false
         val current = _connection.value ?: return false
-        val updated = current.copy(port = parsed.port).promoting(parsed.host)
+        val endpoint = parsed.activeEndpoint
+            ?: CompanionEndpoint.direct(parsed.host, parsed.port, priority = 0)
+            ?: return false
+        val existingRoutes = current.orderedEndpoints
+        val updated = current.promoting(endpoint).copy(
+            endpoints = (listOf(endpoint) + existingRoutes.filterNot { it.url == endpoint.url }).take(8),
+        )
         scope.launch {
             gate.withLock {
                 _connection.value = updated
@@ -609,7 +619,13 @@ class Session(
     suspend fun updateAddressAndAwait(text: String): Boolean {
         val parsed = Connection.parse(text) ?: return false
         val current = _connection.value ?: return false
-        val updated = current.copy(port = parsed.port).promoting(parsed.host)
+        val endpoint = parsed.activeEndpoint
+            ?: CompanionEndpoint.direct(parsed.host, parsed.port, priority = 0)
+            ?: return false
+        val existingRoutes = current.orderedEndpoints
+        val updated = current.promoting(endpoint).copy(
+            endpoints = (listOf(endpoint) + existingRoutes.filterNot { it.url == endpoint.url }).take(8),
+        )
         gate.withLock {
             _connection.value = updated
             connectionStore.save(updated)

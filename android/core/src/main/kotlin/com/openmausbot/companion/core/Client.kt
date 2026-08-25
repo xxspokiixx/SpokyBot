@@ -44,10 +44,13 @@ internal const val SCOPED_IPV6_HTTP_HOST = "scoped-ipv6.openmausbot.invalid"
  * straight to the scoped Inet6Address OkHttp passes to Socket.connect.
  */
 internal fun Connection.httpEndpoint(fallbackDns: Dns): ConnectionEndpoint? = runCatching {
-    val bareHost = if (host.startsWith('[') && host.endsWith(']')) {
-        host.substring(1, host.length - 1)
+    val dialingHost = activeEndpoint?.host ?: host
+    val dialingPort = activeEndpoint?.port ?: port
+    val dialingScheme = if (activeEndpoint?.isSecure == true) "https" else "http"
+    val bareHost = if (dialingHost.startsWith('[') && dialingHost.endsWith(']')) {
+        dialingHost.substring(1, dialingHost.length - 1)
     } else {
-        host
+        dialingHost
     }
     val zoneAt = if (':' in bareHost) bareHost.indexOf('%') else -1
     require(zoneAt < 0 || zoneAt < bareHost.lastIndex) { "IPv6 zone identifier is empty" }
@@ -55,9 +58,9 @@ internal fun Connection.httpEndpoint(fallbackDns: Dns): ConnectionEndpoint? = ru
     val httpHost = if (zoneAt >= 0) SCOPED_IPV6_HTTP_HOST else addressHost
     val zone = if (zoneAt >= 0) bareHost.substring(zoneAt + 1) else null
     val url = HttpUrl.Builder()
-        .scheme("http")
+        .scheme(dialingScheme)
         .host(httpHost)
-        .port(port)
+        .port(dialingPort)
         .build()
     val dns = if (zone == null) {
         fallbackDns
@@ -121,6 +124,10 @@ class CompanionClient(
         .build()
 
     suspend fun health(): JsonObject = send(makeRequest("GET", "/api/health"))
+
+    /** Wire support for P1-03; applying the snapshot to a live session is deliberately later. */
+    suspend fun connectionMetadata(): CompanionConnectionMetadata =
+        send(makeRequest("GET", "/api/companion/endpoints"))
 
     suspend fun fleet(messages: Int? = 50): Fleet = send(makeRequest(
         method = "GET",
