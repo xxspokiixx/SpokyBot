@@ -7,10 +7,11 @@ import java.util.UUID
 import kotlinx.serialization.Serializable
 
 /**
- * The one-time pairing secrets — the QR credential and the six-digit code — held
- * in process memory and nowhere else.
+ * Pairing attempt state — the QR credential, six-digit code, and stable request
+ * id — held in process memory and nowhere else.
  *
- * §6 is explicit: *never persist the QR credential or the code*. Only the
+ * §6 is explicit: *never persist the QR credential or the code*. The request id
+ * shares their process-only lifetime. Only the
  * long-lived device token is written down. Saved instance state does not count
  * as memory for this purpose — the system holds those Bundles across a
  * process kill, which is exactly how `rememberSaveable` survives one — so
@@ -30,6 +31,7 @@ internal class PairingSecretStore {
     private var handle: String? = null
     private var credential: String? = null
     private var code: String = ""
+    private var pairRequestId: String? = null
 
     /**
      * Begin a pending pairing and return its handle — a random, non-secret id
@@ -41,6 +43,7 @@ internal class PairingSecretStore {
         handle = minted
         this.credential = credential
         this.code = ""
+        this.pairRequestId = UUID.randomUUID().toString()
         return minted
     }
 
@@ -55,9 +58,21 @@ internal class PairingSecretStore {
     @Synchronized
     fun code(handle: String?): String = if (owns(handle)) code else ""
 
+    /** Stable for Retry, and absent from saved state alongside the one-time credential. */
+    @Synchronized
+    fun pairRequestId(handle: String?): String? = if (owns(handle)) pairRequestId else null
+
     @Synchronized
     fun setCode(handle: String?, value: String) {
         if (owns(handle)) code = value
+    }
+
+    /** A server rejection ends one logical code attempt without changing the chosen computer. */
+    @Synchronized
+    fun resetAttempt(handle: String?) {
+        if (!owns(handle)) return
+        code = ""
+        pairRequestId = UUID.randomUUID().toString()
     }
 
     @Synchronized
@@ -65,6 +80,7 @@ internal class PairingSecretStore {
         handle = null
         credential = null
         code = ""
+        pairRequestId = null
     }
 }
 

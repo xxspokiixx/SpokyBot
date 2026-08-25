@@ -46,6 +46,13 @@ object ConnectionAdvice {
     fun shouldTryAnotherHost(error: Throwable): Boolean =
         shouldTryAnotherHost(classify(error))
 
+    /** Pairing may move past transport failures and reverse-proxy gateway failures only. */
+    fun shouldTryAnotherRoute(error: APIError): Boolean = when (error) {
+        is APIError.Transport -> true
+        is APIError.Status -> error.code in 502..504 || error.code in 520..530
+        APIError.BadUrl -> false
+    }
+
     /** Map a transport failure to the URLError-shaped categories Session walks on. */
     fun classify(error: Throwable): ConnectionFailure {
         val chain = generateSequence(error) { it.cause }.toList()

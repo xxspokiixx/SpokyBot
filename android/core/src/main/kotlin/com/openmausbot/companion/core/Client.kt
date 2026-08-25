@@ -6,11 +6,16 @@ import java.net.InetAddress
 import java.net.NetworkInterface
 import java.net.URI
 import java.net.UnknownHostException
+import java.util.UUID
 import java.util.concurrent.TimeUnit
 import kotlin.coroutines.resume
 import kotlin.coroutines.resumeWithException
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.async
+import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.suspendCancellableCoroutine
+import kotlinx.serialization.Serializable
 import kotlinx.serialization.SerializationException
 import kotlinx.serialization.decodeFromString
 import kotlinx.serialization.encodeToString
@@ -34,6 +39,18 @@ import okhttp3.RequestBody.Companion.toRequestBody
 import okhttp3.Response
 
 internal data class ConnectionEndpoint(val baseUrl: HttpUrl, val dns: Dns)
+
+/** The durable pairing result together with the route that actually redeemed it. */
+data class PairingOutcome(
+    val response: PairResponse,
+    val connection: Connection,
+)
+
+/** No automatically permitted route identified itself and completed the logical pairing. */
+class PairingRouteError(val attemptedRoutes: List<String>) : IOException(
+    "Couldn't reach this computer through any available route " +
+        "(${attemptedRoutes.joinToString()}). Keep OpenMausBot's Companion turned on, then try again.",
+)
 
 internal const val SCOPED_IPV6_HTTP_HOST = "scoped-ipv6.openmausbot.invalid"
 
@@ -586,6 +603,7 @@ class CompanionClient(
             connection: Connection,
             credential: String,
             deviceName: String,
+            pairRequestId: String? = null,
             client: OkHttpClient = OkHttpClient(),
         ): PairResponse {
             val field = if (credential.length == 6 && credential.all { it in '0'..'9' }) {
@@ -594,15 +612,139 @@ class CompanionClient(
                 "credential"
             }
             val companion = CompanionClient(connection, token = null, baseClient = client)
+            val body = buildList {
+                add(field to credential)
+                add("deviceName" to deviceName)
+                pairRequestId?.let { add("pairRequestId" to it) }
+            }
+            val pairClient = client.newBuilder()
+                .dns(companion.endpoint?.dns ?: client.dns)
+                .callTimeout(PAIR_TIMEOUT_SECONDS, TimeUnit.SECONDS)
+                .connectTimeout(PAIR_TIMEOUT_SECONDS, TimeUnit.SECONDS)
+                .readTimeout(PAIR_TIMEOUT_SECONDS, TimeUnit.SECONDS)
+                .writeTimeout(PAIR_TIMEOUT_SECONDS, TimeUnit.SECONDS)
+                .build()
             return companion.send(companion.makeRequest(
                 "POST",
                 "/api/pair",
-                body = jsonBody(field to credential, "deviceName" to deviceName),
-            ))
+                body = jsonBody(*body.toTypedArray()),
+            ), pairClient)
         }
+
+        /**
+         * Source-compatible entry point for callers written before request ids existed.
+         *
+         * This overload sends the credential directly to [connection], without a health/identity
+         * preflight or request id. It is not safe for new multi-route pairing invitations; those
+         * callers must use [pairFirstReachable].
+         */
+        suspend fun pair(
+            connection: Connection,
+            credential: String,
+            deviceName: String,
+            client: OkHttpClient,
+        ): PairResponse = pair(
+            connection,
+            credential,
+            deviceName,
+            pairRequestId = null,
+            client = client,
+        )
+
+        /**
+         * Identify every automatically permitted route before presenting the one-time credential.
+         * Probes run together, but the advertised order wins rather than response speed.
+         */
+        suspend fun pairFirstReachable(
+            connection: Connection,
+            credential: String,
+            deviceName: String,
+            pairRequestId: String = UUID.randomUUID().toString(),
+            client: OkHttpClient = OkHttpClient(),
+        ): PairingOutcome {
+            val endpoints = connection.automaticEndpoints
+            val attemptedRoutes = endpoints.map(CompanionEndpoint::url)
+            val remaining = endpoints.map(connection::dialing).toMutableList()
+
+            while (remaining.isNotEmpty()) {
+                val winnerIndex = firstHealthy(remaining, client)
+                    ?: throw PairingRouteError(attemptedRoutes)
+                val winner = remaining.removeAt(winnerIndex)
+                try {
+                    val response = pair(
+                        connection = winner,
+                        credential = credential,
+                        deviceName = deviceName,
+                        pairRequestId = pairRequestId,
+                        client = client,
+                    )
+                    return PairingOutcome(response, winner)
+                } catch (error: CancellationException) {
+                    throw error
+                } catch (error: APIError) {
+                    if (ConnectionAdvice.shouldTryAnotherRoute(error)) continue
+                    throw error
+                } catch (_: Exception) {
+                    // An unreadable/lost response is ambiguous. A newer sidecar replays the
+                    // result for this exact request id through the next verified route.
+                    continue
+                }
+            }
+            throw PairingRouteError(attemptedRoutes)
+        }
+
+        private suspend fun firstHealthy(
+            candidates: List<Connection>,
+            client: OkHttpClient,
+        ): Int? = coroutineScope {
+            val probes = candidates.map { candidate ->
+                async { healthy(candidate, client) }
+            }
+            try {
+                for (index in probes.indices) {
+                    if (probes[index].await()) {
+                        probes.forEachIndexed { offset, probe ->
+                            if (offset != index) probe.cancel()
+                        }
+                        return@coroutineScope index
+                    }
+                }
+                null
+            } finally {
+                probes.forEach { it.cancel() }
+            }
+        }
+
+        private suspend fun healthy(connection: Connection, client: OkHttpClient): Boolean {
+            val companion = CompanionClient(connection, token = null, baseClient = client)
+            val probeClient = client.newBuilder()
+                .dns(companion.endpoint?.dns ?: client.dns)
+                .callTimeout(PROBE_TIMEOUT_SECONDS, TimeUnit.SECONDS)
+                .connectTimeout(PROBE_TIMEOUT_SECONDS, TimeUnit.SECONDS)
+                .readTimeout(PROBE_TIMEOUT_SECONDS, TimeUnit.SECONDS)
+                .writeTimeout(PROBE_TIMEOUT_SECONDS, TimeUnit.SECONDS)
+                .build()
+            return try {
+                val identity = companion.send<HealthIdentity>(
+                    companion.makeRequest("GET", "/api/health"),
+                    probeClient,
+                )
+                identity.app == "openmausbot"
+            } catch (error: CancellationException) {
+                throw error
+            } catch (_: Exception) {
+                false
+            }
+        }
+
+        @Serializable
+        private data class HealthIdentity(val app: String)
 
         private fun jsonBody(vararg values: Pair<String, String>): JsonObject = buildJsonObject {
             values.forEach { (name, value) -> put(name, value) }
         }
+
+        private const val PROBE_TIMEOUT_SECONDS = 4L
+        private const val PAIR_TIMEOUT_SECONDS = 8L
     }
 }

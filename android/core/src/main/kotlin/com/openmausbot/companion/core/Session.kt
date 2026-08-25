@@ -1,6 +1,7 @@
 package com.openmausbot.companion.core
 
 import java.net.URI
+import java.util.UUID
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.CoroutineScope
@@ -38,9 +39,16 @@ class Session(
     private val clientFactory: (Connection, String?) -> CompanionClient = { connection, token ->
         CompanionClient(connection, token, httpClient)
     },
-    private val pairFn: suspend (Connection, String, String) -> PairResponse = { connection, credential, deviceName ->
-        CompanionClient.pair(connection, credential, deviceName, httpClient)
-    },
+    private val pairFn: suspend (Connection, String, String, String) -> PairingOutcome =
+        { connection, credential, deviceName, pairRequestId ->
+            CompanionClient.pairFirstReachable(
+                connection = connection,
+                credential = credential,
+                deviceName = deviceName,
+                pairRequestId = pairRequestId,
+                client = httpClient,
+            )
+        },
     /** Test seam: override the SSE Flow without subclassing [CompanionClient]. */
     private val eventsFn: (CompanionClient, String?, Boolean) -> Flow<StreamFrame> = { client, since, screens ->
         client.events(since, screens)
@@ -98,7 +106,7 @@ class Session(
     private val gate = Mutex()
     private val notificationGate = Mutex()
     private val restored = CompletableDeferred<Unit>()
-    /** QR credentials that already failed a redeem — never replay (§6). */
+    /** QR credentials authoritatively rejected or redeemed — never start a new request (§6). */
     private val spentQrCredentials = mutableSetOf<String>()
 
     init {
@@ -133,12 +141,17 @@ class Session(
      * or when another [pair] is already in the redeem+persist critical section —
      * concurrent callers must not silently replace a pairing.
      *
-     * High-entropy QR credentials are burned at the point of no return (before
-     * the redeem request) so a successful remote redeem followed by a save
-     * failure, or cancellation after the request may have been sent, cannot
-     * leave a spent QR reusable. Six-digit codes remain retryable.
+     * A route failure is retryable with the same in-memory request id because
+     * it is either preflight-only or an ambiguous replay of the same logical
+     * redemption. An authoritative response, or receiving the durable token,
+     * burns a high-entropy QR before any local save. Six-digit codes remain
+     * retryable for compatibility with manual pairing.
      */
-    suspend fun pair(connection: Connection, credential: String) {
+    suspend fun pair(
+        connection: Connection,
+        credential: String,
+        pairRequestId: String = UUID.randomUUID().toString(),
+    ) {
         awaitRestored()
         gate.withLock {
             if (isPairedLocked()) {
@@ -151,25 +164,26 @@ class Session(
                 throw SpentPairingCredentialException()
             }
 
-            // Point of no return for high-entropy QR: once redeem runs the
-            // server may consume it regardless of later save/cancel outcomes.
             val qr = isQrCredential(credential)
-            if (qr) burnQrCredential(credential)
-
             val deviceName = deviceNameProvider()
-            val paired = try {
-                pairFn(connection, credential, deviceName)
+            val outcome = try {
+                pairFn(connection, credential, deviceName, pairRequestId)
             } catch (error: Throwable) {
                 if (error is kotlinx.coroutines.CancellationException) throw error
-                _actionError.value = if (qr) qrFailureMessage(error) else error.message
+                val routeFailure = error is PairingRouteError
+                if (qr && !routeFailure) burnQrCredential(credential)
+                _actionError.value = if (qr && !routeFailure) qrFailureMessage(error) else error.message
                 throw error
             }
-            var stored = connection
+            if (qr) burnQrCredential(credential)
+
+            val paired = outcome.response
+            var stored = outcome.connection
             if (paired.serverName.isNotEmpty()) stored = stored.copy(name = paired.serverName)
             if (!paired.hosts.isNullOrEmpty()) stored = stored.copy(hosts = paired.hosts)
             if (!paired.endpoints.isNullOrEmpty()) stored = stored.copy(endpoints = paired.endpoints.take(8))
-            val winner = connection.activeEndpoint
-                ?: CompanionEndpoint.direct(connection.host, connection.port, priority = 10_000)
+            val winner = outcome.connection.activeEndpoint
+                ?: CompanionEndpoint.direct(outcome.connection.host, outcome.connection.port, priority = 10_000)
             stored = winner?.let(stored::promoting) ?: stored.promoting(stored.host)
 
             try {
@@ -192,7 +206,10 @@ class Session(
         connect()
     }
 
-    suspend fun pair(invite: PairingInvite) = pair(invite.connection, invite.credential)
+    suspend fun pair(
+        invite: PairingInvite,
+        pairRequestId: String = UUID.randomUUID().toString(),
+    ) = pair(invite.connection, invite.credential, pairRequestId)
 
     /**
      * Accept a deep-link invite only after restore has settled and only while
