@@ -114,6 +114,19 @@ class Session(
     /** QR credentials authoritatively rejected or redeemed — never start a new request (§6). */
     private val spentQrCredentials = mutableSetOf<String>()
 
+    /**
+     * One pairing attempt at a time, plus the invite that arrived during it.
+     *
+     * [gate] already serialises the redemption, but it is a suspending Mutex and
+     * a deep link lands synchronously on whatever thread delivered the Intent.
+     * This monitor is the one both sides can hold, so "an attempt is in flight",
+     * "an invite is waiting", and the published invite are read and written as a
+     * single decision.
+     */
+    private val inviteLock = Any()
+    private var pairingInFlight = false
+    private var deferredInvite: PairingInvite? = null
+
     init {
         // No Exception other than cancellation leaves this launch: it is a root
         // coroutine with no caller to catch for it, so [restoreLocked] reports a
@@ -151,6 +164,10 @@ class Session(
      * redemption. An authoritative response, or receiving the durable token,
      * burns a high-entropy QR before any local save. Six-digit codes remain
      * retryable for compatibility with manual pairing.
+     *
+     * This is also the one active attempt: from the moment it is marked in
+     * flight until [settlePairingAttempt], a deep link waits in memory rather
+     * than replacing the credential being redeemed.
      */
     suspend fun pair(
         connection: Connection,
@@ -169,57 +186,63 @@ class Session(
                 throw SpentPairingCredentialException()
             }
 
-            val qr = isQrCredential(credential)
-            val deviceName = deviceNameProvider()
-            // A parsed QR already carries this policy. Manual/discovered entry establishes the
-            // same boundary here, before pairFirstReachable can probe or redeem on any route.
-            val invited = if (connection.allowedRouteKinds == null) {
-                connection.establishingRoutePolicyFromInvite()
-            } else {
-                connection
-            }
-            val outcome = try {
-                pairFn(invited, credential, deviceName, pairRequestId)
-            } catch (error: Throwable) {
-                if (error is kotlinx.coroutines.CancellationException) throw error
-                val routeFailure = error is PairingRouteError
-                if (qr && !routeFailure) burnQrCredential(credential)
-                _actionError.value = if (qr && !routeFailure) qrFailureMessage(error) else error.message
-                throw error
-            }
-            if (qr) burnQrCredential(credential)
-
-            val paired = outcome.response
-            // Route dialing may change the active endpoint, but neither it nor the response may
-            // replace the policy captured from the user's original selection.
-            var stored = outcome.connection.copy(
-                allowedRouteKinds = invited.allowedRouteKinds,
-                allowedLocalRouteURLs = invited.allowedLocalRouteURLs,
-            )
-            if (paired.serverName.isNotEmpty()) stored = stored.copy(name = paired.serverName)
-            stored = stored.applyingPairingAdvertisement(paired.hosts, paired.endpoints)
-            val winner = outcome.connection.activeEndpoint
-                ?: CompanionEndpoint.direct(outcome.connection.host, outcome.connection.port, priority = 10_000)
-            stored = winner?.let(stored::promoting) ?: stored.promoting(stored.host)
-
+            // From here this is *the* active attempt. A deep link that arrives
+            // now waits in memory instead of taking over the credential slot.
+            synchronized(inviteLock) { pairingInFlight = true }
             try {
-                tokenStore.save(stored.id, paired.token)
-                connectionStore.save(stored)
-            } catch (error: Throwable) {
-                if (error is kotlinx.coroutines.CancellationException) throw error
-                _actionError.value = if (qr) qrFailureMessage(error) else error.message
-                throw error
-            }
+                val qr = isQrCredential(credential)
+                val deviceName = deviceNameProvider()
+                // A parsed QR already carries this policy. Manual/discovered entry establishes the
+                // same boundary here, before pairFirstReachable can probe or redeem on any route.
+                val invited = if (connection.allowedRouteKinds == null) {
+                    connection.establishingRoutePolicyFromInvite()
+                } else {
+                    connection
+                }
+                val outcome = try {
+                    pairFn(invited, credential, deviceName, pairRequestId)
+                } catch (error: Throwable) {
+                    if (error is kotlinx.coroutines.CancellationException) throw error
+                    val routeFailure = error is PairingRouteError
+                    if (qr && !routeFailure) burnQrCredential(credential)
+                    _actionError.value = if (qr && !routeFailure) qrFailureMessage(error) else error.message
+                    throw error
+                }
+                if (qr) burnQrCredential(credential)
 
-            _connection.value = stored
-            token = paired.token
-            // The route that just redeemed leads this session; later launches return to the
-            // desktop's security-prioritized typed order.
-            rotation = CandidateRotation(liveRoutes(stored, winner))
-            client = clientFactory(stored, paired.token)
-            _state.value = CompanionState()
-            _restoreState.value = RestoreState.Ready
-            _pairingInvite.value = null
+                val paired = outcome.response
+                // Route dialing may change the active endpoint, but neither it nor the response may
+                // replace the policy captured from the user's original selection.
+                var stored = outcome.connection.copy(
+                    allowedRouteKinds = invited.allowedRouteKinds,
+                    allowedLocalRouteURLs = invited.allowedLocalRouteURLs,
+                )
+                if (paired.serverName.isNotEmpty()) stored = stored.copy(name = paired.serverName)
+                stored = stored.applyingPairingAdvertisement(paired.hosts, paired.endpoints)
+                val winner = outcome.connection.activeEndpoint
+                    ?: CompanionEndpoint.direct(outcome.connection.host, outcome.connection.port, priority = 10_000)
+                stored = winner?.let(stored::promoting) ?: stored.promoting(stored.host)
+
+                try {
+                    tokenStore.save(stored.id, paired.token)
+                    connectionStore.save(stored)
+                } catch (error: Throwable) {
+                    if (error is kotlinx.coroutines.CancellationException) throw error
+                    _actionError.value = if (qr) qrFailureMessage(error) else error.message
+                    throw error
+                }
+
+                _connection.value = stored
+                token = paired.token
+                // The route that just redeemed leads this session; later launches return to the
+                // desktop's security-prioritized typed order.
+                rotation = CandidateRotation(liveRoutes(stored, winner))
+                client = clientFactory(stored, paired.token)
+                _state.value = CompanionState()
+                _restoreState.value = RestoreState.Ready
+            } finally {
+                settlePairingAttempt()
+            }
         }
         connect()
     }
@@ -247,25 +270,62 @@ class Session(
 
     fun receivePairingURI(uri: URI) = receivePairingURL(uri.toString())
 
-    fun consumePairingInvite() {
+    /** The screen took the published invite. A waiting one is not touched. */
+    fun consumePairingInvite() = synchronized(inviteLock) {
         _pairingInvite.value = null
     }
 
     private fun acceptPairingURL(url: String) {
-        if (isPairedLocked()) {
-            _actionError.value = ALREADY_PAIRED_MESSAGE
-            return
+        synchronized(inviteLock) {
+            if (isPairedLocked()) {
+                _actionError.value = ALREADY_PAIRED_MESSAGE
+                return
+            }
+            val invite = PairingInvite.parse(url)
+            if (invite == null) {
+                _actionError.value =
+                    "That pairing invitation is not valid. Start pairing again on your computer."
+                return
+            }
+            if (isQrCredential(invite.credential) && invite.credential in spentQrCredentials) {
+                _actionError.value = SPENT_QR_MESSAGE
+                return
+            }
+            // An attempt already in flight owns the screen and the credential
+            // slot. This invite waits in memory until that attempt settles;
+            // publishing it now would let the finishing attempt erase a
+            // credential it never redeemed, and the user would be sent back to
+            // the computer for a third QR code (§6).
+            if (pairingInFlight) {
+                deferredInvite = invite
+                return
+            }
+            _pairingInvite.value = invite
         }
-        val invite = PairingInvite.parse(url)
-        if (invite == null) {
-            _actionError.value = "That pairing invitation is not valid. Start pairing again on your computer."
-            return
+    }
+
+    /**
+     * Close the single active attempt and answer for any invite that arrived
+     * while it was in flight.
+     *
+     * The port of the `defer` block of `submit(_:credential:)` in
+     * `ios/App/PairingView.swift`: the waiting invite is presented only if this
+     * phone is still unconnected, and a pairing that succeeded consumes it
+     * instead, because §6 gives a one-time credential no second life.
+     */
+    private fun settlePairingAttempt() {
+        synchronized(inviteLock) {
+            pairingInFlight = false
+            val waiting = deferredInvite
+            deferredInvite = null
+            if (isPairedLocked()) {
+                _pairingInvite.value = null
+                return
+            }
+            val invite = waiting ?: return
+            if (isQrCredential(invite.credential) && invite.credential in spentQrCredentials) return
+            _pairingInvite.value = invite
         }
-        if (isQrCredential(invite.credential) && invite.credential in spentQrCredentials) {
-            _actionError.value = SPENT_QR_MESSAGE
-            return
-        }
-        _pairingInvite.value = invite
     }
 
     /** Hold the paired-but-unproven state and say why the phone is offline. */
@@ -285,12 +345,17 @@ class Session(
             _restoreState.value is RestoreState.Pending ||
             _status.value !is Status.Unpaired
 
-    private fun burnQrCredential(credential: String) {
+    /**
+     * Held under [inviteLock] so adding to the spent set and dropping the invite
+     * are one step: an accept that had already read the set must not publish an
+     * invite this call is in the middle of burning.
+     */
+    private fun burnQrCredential(credential: String) = synchronized(inviteLock) {
         spentQrCredentials += credential
         clearInviteIfCredential(credential)
     }
 
-    private fun clearInviteIfCredential(credential: String) {
+    private fun clearInviteIfCredential(credential: String) = synchronized(inviteLock) {
         val current = _pairingInvite.value
         if (current?.credential == credential) {
             _pairingInvite.value = null
@@ -319,6 +384,7 @@ class Session(
                 _state.value = CompanionState()
                 notificationSink.setBadge(0)
                 _status.value = Status.Unpaired
+                emptyInviteQueue()
             }
         }
     }
@@ -340,7 +406,20 @@ class Session(
             _state.value = CompanionState()
             notificationSink.setBadge(0)
             _status.value = Status.Unpaired
+            emptyInviteQueue()
         }
+    }
+
+    /**
+     * Unpairing takes the invite queue with it. An invite that outlived the
+     * binding it was meant for comes back on a later pairing screen and
+     * redeems a credential the computer retired long ago.
+     *
+     * There is never a waiting invite left to clear here: [settlePairingAttempt]
+     * releases or drops it inside the same [gate] section sign-out is waiting on.
+     */
+    private fun emptyInviteQueue() = synchronized(inviteLock) {
+        _pairingInvite.value = null
     }
 
     /** Called when the app comes to the front, and once at launch. */

@@ -93,6 +93,9 @@ fun PairingScreen() {
     // Read back out of the process-scoped store, so a rotation does not lose the
     // digits and a process restart does.
     var code by remember(pending?.handle) { mutableStateOf(secrets.code(pending?.handle)) }
+    // Presentational only: the spinner and the disabled buttons. Whether an
+    // attempt is in flight is the secret store's answer, not this flag's —
+    // `PairingSecrets` is the one object that can refuse to replace the slot.
     var pairing by remember { mutableStateOf(false) }
     var failure by remember { mutableStateOf<String?>(null) }
     var showingScanner by remember { mutableStateOf(false) }
@@ -110,19 +113,32 @@ fun PairingScreen() {
     // saying what a refusal costs, next to the list it makes empty.
     val permissionSnapshot by environment.permissions.snapshot.collectAsState()
 
-    val invite by session.pairingInvite.collectAsState()
-    LaunchedEffect(invite) {
-        val accepted = invite ?: return@LaunchedEffect
-        // The credential goes to the process-scoped store; only the handle is
-        // ever held by composition state.
-        pending = PendingPairing(
-            connection = accepted.connection,
-            fromScan = true,
-            handle = secrets.open(accepted.credential),
-        )
+    // The credential goes to the process-scoped store; only the handle is ever
+    // held by composition state, and the handle is minted with the computer it
+    // belongs to, so this screen never has two halves to line up.
+    fun openPending(connection: Connection, fromScan: Boolean) {
+        val opened = PendingPairing.opening(secrets, connection, fromScan) ?: return
+        pending = opened
         code = ""
         failure = null
-        session.consumePairingInvite()
+    }
+
+    val invite by session.pairingInvite.collectAsState()
+    // One key, and it is the invite. `takeInvite` refuses while a redemption
+    // holds the slot, and what brings the refused invitation back is not a
+    // second key on this effect but `endAttemptTaking` in submit's `finally` —
+    // releasing the slot is the retry. Opening the confirmation and emptying
+    // the queue are one transaction on the other side of the boundary, which is
+    // what `accept(_:)` in `ios/App/PairingView.swift` expresses as
+    // `guard submission.allowsNavigation`.
+    LaunchedEffect(invite) {
+        val accepted = invite ?: return@LaunchedEffect
+        val next = secrets.takeInvite(pending, accepted, session::consumePairingInvite)
+        if (next !== pending) {
+            pending = next
+            code = ""
+            failure = null
+        }
     }
 
     // Session raises pairing problems through actionError; on this screen they
@@ -159,12 +175,19 @@ fun PairingScreen() {
     fun submit(connection: Connection, credential: String, cameFromScanner: Boolean) {
         val selectedHandle = pending?.handle
         val pairRequestId = secrets.pairRequestId(selectedHandle) ?: return
+        // Claims the slot for this redemption. It refuses a second submit, and
+        // from here the store will not open a slot for an arriving deep link,
+        // so the credential being redeemed cannot be replaced under it.
+        if (!secrets.beginAttempt(selectedHandle)) return
         pairing = true
         failure = null
         scope.launch {
             try {
                 session.pair(connection, credential, pairRequestId)
-                secrets.clear()
+                // Every cleanup below names the handle this attempt owns. The
+                // slot may already belong to a newer invite, and erasing that
+                // one would cost the user a trip back to the computer (§6).
+                secrets.clear(selectedHandle)
             } catch (error: Throwable) {
                 if (error is kotlinx.coroutines.CancellationException) throw error
                 failure = session.actionError ?: error.message ?: "Pairing failed."
@@ -175,15 +198,30 @@ fun PairingScreen() {
                         // same idempotent logical request, possibly recovering a lost response.
                     }
                     PairingFailureDisposition.DROP_SCANNED_ATTEMPT -> {
-                        pending = null
-                        secrets.clear()
+                        if (pending?.handle == selectedHandle) pending = null
+                        secrets.clear(selectedHandle)
                     }
                     PairingFailureDisposition.RESET_TYPED_ATTEMPT -> {
-                        code = ""
+                        if (pending?.handle == selectedHandle) code = ""
                         secrets.resetAttempt(selectedHandle)
                     }
                 }
             } finally {
+                // Releasing the slot is also the retry. An invite that landed in
+                // the window before Session marked this attempt was published
+                // rather than deferred, and refused above; this is where it is
+                // finally taken, in the same step that frees the slot.
+                val next = secrets.endAttemptTaking(
+                    handle = selectedHandle,
+                    current = pending,
+                    invite = session.pairingInvite.value,
+                    consume = session::consumePairingInvite,
+                )
+                if (next !== pending) {
+                    pending = next
+                    code = ""
+                    failure = null
+                }
                 pairing = false
             }
         }
@@ -221,7 +259,7 @@ fun PairingScreen() {
                     haptics.play(HapticCue.SELECT)
                     pending = null
                     code = ""
-                    secrets.clear()
+                    secrets.clear(selected.handle)
                     failure = null
                 },
             )
@@ -242,11 +280,7 @@ fun PairingScreen() {
                         failure = "That computer did not answer with an address. " +
                             "Enter the address shown by Companion instead."
                     } else {
-                        pending = PendingPairing(
-                            connection = connection,
-                            fromScan = false,
-                            handle = secrets.open(),
-                        )
+                        openPending(connection, fromScan = false)
                     }
                 },
             )
@@ -260,11 +294,7 @@ fun PairingScreen() {
                     if (connection == null) {
                         failure = AddressEdit.INVALID
                     } else {
-                        pending = PendingPairing(
-                            connection = connection,
-                            fromScan = false,
-                            handle = secrets.open(),
-                        )
+                        openPending(connection, fromScan = false)
                     }
                 },
             )
