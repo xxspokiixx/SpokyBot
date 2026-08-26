@@ -5,6 +5,7 @@ import com.openmausbot.companion.core.Bot
 import com.openmausbot.companion.core.BotProfilePatch
 import com.openmausbot.companion.core.ConfigStatus
 import com.openmausbot.companion.core.Voice
+import com.openmausbot.companion.core.VoiceProvider
 
 /**
  * The paired-safe agent profile, as rules — the decision half of
@@ -50,36 +51,81 @@ object ProfileRules {
     /** `String(prompt.trimming….prefix(400))` in `generateImage`. */
     const val GENERATE_PROMPT_LIMIT: Int = 400
 
+    // Visibility here is a rule, not a habit. A string that is one *arm* of a
+    // state-dependent choice is private, so the selector below it is the only
+    // way to reach it: a screen cannot draw the wrong arm, because it cannot
+    // name one. A string with no alternative — nothing to pick between — stays
+    // public and is drawn directly. Adding a second arm to any of those means
+    // making it private and giving it a selector, in the same edit.
+
     const val AVATAR_FOOTER: String =
         "PNG, JPEG, GIF, or WebP, up to 10 MB. Images are stored on your paired computer " +
             "and loaded with this phone's pairing token."
 
-    const val GENERATE_READY_FOOTER: String =
+    private const val GENERATE_READY_FOOTER: String =
         "Generation uses the shared image provider configured on your computer. No provider " +
             "key is sent to or stored on this phone."
 
-    const val GENERATE_BLOCKED_FOOTER: String =
+    private const val GENERATE_BLOCKED_FOOTER: String =
         "To generate images, configure the shared image provider in OpenMausBot on your " +
             "computer. Provider keys cannot be added from a phone."
 
-    const val TTS_UNCONFIGURED: String = "ElevenLabs is not configured"
+    // The ElevenLabs copy below is what iOS ships and is correct under that
+    // engine, so it stays byte-identical. Each string that names the engine or
+    // its credential has a built-in-provider twin, because under `provider:
+    // "system"` there is no key and "not configured" means something else
+    // entirely. The desktop is called "the computer" throughout, the way the
+    // rest of this file already does.
+
+    private const val TTS_UNCONFIGURED: String = "ElevenLabs is not configured"
+
+    /**
+     * The same slot under the built-in provider, where `configured = false`
+     * means the computer reports no voices it can use — not that a key is
+     * missing, because this engine has none to miss.
+     */
+    private const val SYSTEM_TTS_UNCONFIGURED: String = "Your computer's built-in voices are unavailable"
 
     // iOS ends this sentence with "never returned to iOS"; the platform word is
     // the only edit, for the same reason SettingsPolicy does not offer to open
     // iPhone Settings.
-    const val VOICE_UNCONFIGURED_FOOTER: String =
+    private const val VOICE_UNCONFIGURED_FOOTER: String =
         "Add the shared ElevenLabs key in this agent's profile on the computer. The key is " +
             "never returned to this phone."
 
-    const val VOICE_NO_DEFAULT_FOOTER: String =
+    /**
+     * The built-in engine's remedy is a different engine, not a credential.
+     * Telling the user to add a key here would name a fix that changes
+     * nothing; the computer's voice settings are where the engine is chosen,
+     * and that control stays reachable in exactly this state.
+     */
+    private const val SYSTEM_VOICE_UNCONFIGURED_FOOTER: String =
+        "Your computer's built-in voices need no key, and it reports none it can use. Switch " +
+            "the voice engine in OpenMausBot on the computer to turn speech back on."
+
+    private const val VOICE_NO_DEFAULT_FOOTER: String =
         "No workspace default voice is selected. Choose an agent-specific voice above; " +
             "synthesis still uses the shared ElevenLabs key on your computer."
 
-    const val VOICE_READY_FOOTER: String =
+    /** The same sentence with the clause that would be a lie replaced. */
+    private const val SYSTEM_VOICE_NO_DEFAULT_FOOTER: String =
+        "No workspace default voice is selected. Choose an agent-specific voice above; " +
+            "synthesis still uses your computer's built-in voices."
+
+    // The two below name no engine and no credential. They are true word for
+    // word under both providers, so they have no twin to choose between — and
+    // that is exactly why they stay public: there is no wrong arm to draw.
+
+    private const val VOICE_READY_FOOTER: String =
         "The voice choice belongs to this agent. Workspace default uses the shared voice " +
             "selected on your computer."
 
-    const val PICK_A_VOICE: String = "Pick a voice for this agent before enabling speech."
+    // Private because it is reached through [pickAVoiceHint], for the reason
+    // given there: as a bare Boolean its selector was swappable with the
+    // toggle's own predicate. PREVIEW_REFUSED below has no alternative arm and
+    // no selector, so it stays public and is drawn directly.
+    private const val PICK_A_VOICE: String =
+        "Pick a voice for this agent before enabling speech."
 
     const val PREVIEW_REFUSED: String =
         "Pick an agent voice or configure a workspace default on your computer first."
@@ -143,20 +189,84 @@ object ProfileRules {
         !busy && selectedVoiceCanSpeak(config, voice)
 
     /**
-     * The voice section is only drawn when the shared key exists; without it the
-     * phone has nothing honest to offer, and no field that could add one.
+     * Whether the chosen engine can speak at all: the shared key under
+     * ElevenLabs, a usable voice on the computer under the built-in provider.
+     *
+     * This picks the section's *contents*, not its existence. The Voice
+     * section is drawn in every state — here, and in `AgentProfileView.swift`,
+     * where `Section` is likewise unconditional — and this decides whether it
+     * holds the picker or the muted-speaker notice, and which of the three
+     * footer sentences explains it. Neither cause is repairable from the
+     * phone, which is why the closed state explains rather than offers.
      */
     fun voiceConfigured(config: ConfigStatus?): Boolean = config?.isTTSConfigured == true
 
-    fun voiceFooter(config: ConfigStatus?): String = when {
-        !voiceConfigured(config) -> VOICE_UNCONFIGURED_FOOTER
-        config?.hasWorkspaceDefaultVoice != true -> VOICE_NO_DEFAULT_FOOTER
+    /**
+     * Which engine's words to use. An unloaded status is ElevenLabs for the
+     * same reason a missing `provider` is: that is what the server falls back
+     * to, so the phone says nothing new while it does not yet know.
+     */
+    private fun provider(config: ConfigStatus?): VoiceProvider =
+        config?.voiceProvider ?: VoiceProvider.ELEVENLABS
+
+    private fun ttsUnconfiguredLabel(config: ConfigStatus?): String = when (provider(config)) {
+        VoiceProvider.ELEVENLABS -> TTS_UNCONFIGURED
+        VoiceProvider.SYSTEM -> SYSTEM_TTS_UNCONFIGURED
+    }
+
+    private fun voiceFooter(config: ConfigStatus?): String = when {
+        !voiceConfigured(config) -> when (provider(config)) {
+            VoiceProvider.ELEVENLABS -> VOICE_UNCONFIGURED_FOOTER
+            VoiceProvider.SYSTEM -> SYSTEM_VOICE_UNCONFIGURED_FOOTER
+        }
+        config?.hasWorkspaceDefaultVoice != true -> when (provider(config)) {
+            VoiceProvider.ELEVENLABS -> VOICE_NO_DEFAULT_FOOTER
+            VoiceProvider.SYSTEM -> SYSTEM_VOICE_NO_DEFAULT_FOOTER
+        }
         else -> VOICE_READY_FOOTER
     }
 
-    /** The hint under the toggle, shown only when nothing can speak yet. */
-    fun showsPickAVoice(config: ConfigStatus?, voice: String): Boolean =
-        config?.hasWorkspaceDefaultVoice != true && voice.isEmpty()
+    /**
+     * Everything the voice section says, decided once.
+     *
+     * The footer and the notice describe the same state, so they are answered
+     * together rather than by two calls the screen has to pair correctly. Two
+     * public selectors of the same shape — `(ConfigStatus?) -> String` — are
+     * interchangeable to the compiler, and swapping them put the wrong
+     * sentence in the footer with the suite still green. One entry point
+     * leaves no wrong selector to pick.
+     */
+    data class VoiceCopy(
+        /** The explanatory line under the section, in every state. */
+        val footer: String,
+        /**
+         * The line that stands in place of the picker, or null when the
+         * section can speak. Null is also the branch: whether the picker is
+         * drawn and which words explain it are one decision, not two that
+         * could drift apart.
+         */
+        val unconfiguredNotice: String?,
+    )
+
+    fun voiceCopy(config: ConfigStatus?): VoiceCopy = VoiceCopy(
+        footer = voiceFooter(config),
+        unconfiguredNotice = if (voiceConfigured(config)) null else ttsUnconfiguredLabel(config),
+    )
+
+    /**
+     * The hint under the toggle, or null when something can already speak.
+     *
+     * It hands back the sentence rather than a flag so that it cannot be
+     * confused with [selectedVoiceCanSpeak]. Both once read
+     * `(ConfigStatus?, String) -> Boolean`, both are wired into this same
+     * section — the toggle's `enabled` and this hint's visibility — and
+     * swapping the two call sites compiled and stayed green: the toggle would
+     * enable itself exactly when nothing could speak, and the hint would
+     * appear only once it was needless. Returning `String?` makes that swap a
+     * type error rather than a silent inversion.
+     */
+    fun pickAVoiceHint(config: ConfigStatus?, voice: String): String? =
+        if (config?.hasWorkspaceDefaultVoice != true && voice.isEmpty()) PICK_A_VOICE else null
 
     /**
      * The picker's rows, in the Swift's order: the empty tag first — usable only

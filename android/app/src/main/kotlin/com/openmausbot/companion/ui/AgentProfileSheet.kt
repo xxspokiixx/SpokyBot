@@ -341,63 +341,53 @@ internal fun AgentProfileSheet(bot: Bot, onDismiss: () -> Unit) {
                     )
                 }
 
-                FormSection(header = "Voice", footer = ProfileRules.voiceFooter(config)) {
-                    if (ProfileRules.voiceConfigured(config)) {
-                        VoicePicker(
-                            choices = ProfileRules.voiceChoices(config, voices, form.voice),
-                            selected = form.voice,
-                            onSelect = { form = form.copy(voice = it) },
-                        )
-                        SwitchRow(
-                            label = "Speak replies",
-                            checked = form.speakReplies,
-                            enabled = ProfileRules.selectedVoiceCanSpeak(config, form.voice),
-                            onCheckedChange = { form = form.copy(speakReplies = it) },
-                        )
-                        ActionRow(
-                            text = "Preview voice",
-                            painter = R.drawable.ic_volume_up,
-                            enabled = ProfileRules.canPreview(busy, config, form.voice),
-                            onClick = {
-                                scope.launch {
-                                    if (!ProfileRules.selectedVoiceCanSpeak(config, form.voice)) {
-                                        session.actionError = ProfileRules.PREVIEW_REFUSED
-                                        return@launch
-                                    }
-                                    busy = true
-                                    try {
-                                        val data = session.previewVoice(form.voice, liveBot())
-                                            ?: return@launch
-                                        // `rememberCoroutineScope` dispatches on
-                                        // main, and starting a preview reaches
-                                        // MediaPlayer.prepare(), which blocks
-                                        // until the source is decodable. The
-                                        // controller serialises every transition
-                                        // on its own lock and its callbacks are
-                                        // delivered on the main Looper, so it is
-                                        // safe to start from a worker; the result
-                                        // lands back on main to be reported.
-                                        val failure = withContext(Dispatchers.IO) {
-                                            player.play(data)
-                                        }
-                                        failure?.let { session.actionError = it }
-                                    } finally {
-                                        busy = false
-                                    }
+                VoiceSection(config = config) {
+                    VoicePicker(
+                        choices = ProfileRules.voiceChoices(config, voices, form.voice),
+                        selected = form.voice,
+                        onSelect = { form = form.copy(voice = it) },
+                    )
+                    SwitchRow(
+                        label = "Speak replies",
+                        checked = form.speakReplies,
+                        enabled = ProfileRules.selectedVoiceCanSpeak(config, form.voice),
+                        onCheckedChange = { form = form.copy(speakReplies = it) },
+                    )
+                    ActionRow(
+                        text = "Preview voice",
+                        painter = R.drawable.ic_volume_up,
+                        enabled = ProfileRules.canPreview(busy, config, form.voice),
+                        onClick = {
+                            scope.launch {
+                                if (!ProfileRules.selectedVoiceCanSpeak(config, form.voice)) {
+                                    session.actionError = ProfileRules.PREVIEW_REFUSED
+                                    return@launch
                                 }
-                            },
-                        )
-                        if (ProfileRules.showsPickAVoice(config, form.voice)) {
-                            IconNote(
-                                text = ProfileRules.PICK_A_VOICE,
-                                icon = Icons.Filled.Info,
-                            )
-                        }
-                    } else {
-                        IconNote(
-                            text = ProfileRules.TTS_UNCONFIGURED,
-                            painter = R.drawable.ic_volume_off,
-                        )
+                                busy = true
+                                try {
+                                    val data = session.previewVoice(form.voice, liveBot())
+                                        ?: return@launch
+                                    // `rememberCoroutineScope` dispatches on
+                                    // main, and starting a preview reaches
+                                    // MediaPlayer.prepare(), which blocks
+                                    // until the source is decodable. The
+                                    // controller serialises every transition
+                                    // on its own lock and its callbacks are
+                                    // delivered on the main Looper, so it is
+                                    // safe to start from a worker; the result
+                                    // lands back on main to be reported.
+                                    val failure = withContext(Dispatchers.IO) {
+                                        player.play(data)
+                                    }
+                                    failure?.let { session.actionError = it }
+                                } finally {
+                                    busy = false
+                                }
+                            }
+                        },
+                    )
+                    ProfileRules.pickAVoiceHint(config, form.voice)?.let { hint ->
+                        IconNote(text = hint, icon = Icons.Filled.Info)
                     }
                 }
 
@@ -477,6 +467,28 @@ private fun VoicePicker(
                     },
                 )
             }
+        }
+    }
+}
+
+/**
+ * The Voice section: its words, and which of them stand in for the picker.
+ *
+ * Both come from one [ProfileRules.voiceCopy] call, so the branch and the
+ * sentence explaining it cannot disagree. This exists as its own composable
+ * because the defect it guards lives in the composition rather than in any
+ * value a rule returns — the screen once drew a correct sentence in the wrong
+ * slot with the whole suite green — and, like `DataTableCard`, the assertion
+ * has to be over what is mounted. `VoiceSectionWiringTest` mounts exactly this.
+ */
+@Composable
+internal fun VoiceSection(config: ConfigStatus?, canSpeak: @Composable () -> Unit) {
+    val copy = ProfileRules.voiceCopy(config)
+    FormSection(header = "Voice", footer = copy.footer) {
+        if (copy.unconfiguredNotice != null) {
+            IconNote(text = copy.unconfiguredNotice, painter = R.drawable.ic_volume_off)
+        } else {
+            canSpeak()
         }
     }
 }

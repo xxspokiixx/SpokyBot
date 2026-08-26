@@ -2,6 +2,7 @@ package com.openmausbot.companion.core
 
 import kotlinx.serialization.decodeFromString
 import kotlin.test.Test
+import kotlin.test.assertEquals
 import kotlin.test.assertFalse
 import kotlin.test.assertTrue
 
@@ -58,6 +59,57 @@ class ProfileRoutinePolicyTest {
         )
         assertTrue(withDefault.hasWorkspaceDefaultVoice)
         assertTrue(withDefault.canSpeak(agentVoice = null))
+    }
+
+    @Test
+    fun voiceProviderFallsBackTheWayTheServerDoes() {
+        assertEquals(
+            VoiceProvider.SYSTEM,
+            decodeConfig("""{"tts":{"configured":true,"provider":"system"}}""").voiceProvider,
+        )
+        assertEquals(
+            VoiceProvider.ELEVENLABS,
+            decodeConfig("""{"tts":{"configured":true,"provider":"elevenlabs"}}""").voiceProvider,
+        )
+        assertEquals(
+            VoiceProvider.ELEVENLABS,
+            decodeConfig("""{"tts":{"configured":true}}""").voiceProvider,
+            "a desktop too old to send the field keeps the engine it always had",
+        )
+        assertEquals(
+            VoiceProvider.ELEVENLABS,
+            decodeConfig("""{"tts":{"configured":true,"provider":"azure"}}""").voiceProvider,
+            "an engine this build has never heard of is not the built-in one",
+        )
+        assertEquals(
+            VoiceProvider.ELEVENLABS,
+            decodeConfig("""{"tts":{"configured":true,"provider":"System"}}""").voiceProvider,
+            "the server compares the exact string, and so does this",
+        )
+        assertEquals(
+            VoiceProvider.ELEVENLABS,
+            decodeConfig("{}").voiceProvider,
+            "no tts block at all is still the fallback engine, not a third state",
+        )
+    }
+
+    @Test
+    fun theBuiltInProviderSpeaksWithoutAnyCredential() {
+        val speaking = decodeConfig(
+            """{"tts":{"configured":true,"ready":true,"voice":"Albert","provider":"system"}}""",
+        )
+        assertTrue(
+            speaking.isTTSConfigured,
+            "no key is on file and none is needed: configured means the engine can speak",
+        )
+        assertTrue(speaking.canSpeak(agentVoice = null))
+
+        val noVoices = decodeConfig("""{"tts":{"configured":false,"voice":"","provider":"system"}}""")
+        assertFalse(
+            noVoices.isTTSConfigured,
+            "under this engine a false flag means the computer reports no usable voices",
+        )
+        assertFalse(noVoices.canSpeak(agentVoice = "Albert"))
     }
 
     @Test

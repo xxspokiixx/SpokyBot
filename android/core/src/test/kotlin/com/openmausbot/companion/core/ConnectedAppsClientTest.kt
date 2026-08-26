@@ -36,6 +36,59 @@ class ConnectedAppsClientTest {
     }
 
     @Test
+    fun anUnreadableCredentialStoreIsNotAnEmptyInventory() {
+        val unreadable = CompanionJson.decodeFromString<ConnectorStatuses>(
+            """{"configured":false,"credentialStore":"unavailable","services":{}}""",
+        )
+        assertFalse(
+            unreadable.isAuthoritative,
+            "the store could not be read, so this empty map is ignorance, not an inventory",
+        )
+        assertTrue(unreadable.services.isEmpty())
+
+        val readable = CompanionJson.decodeFromString<ConnectorStatuses>(
+            """{"configured":true,"credentialStore":"ok","services":{}}""",
+        )
+        assertTrue(
+            readable.isAuthoritative,
+            "a store that was read and holds nothing is a real answer",
+        )
+
+        val older = CompanionJson.decodeFromString<ConnectorStatuses>(
+            """{"configured":true,"services":{}}""",
+        )
+        assertTrue(
+            older.isAuthoritative,
+            "a desktop too old to send the field still answers for itself",
+        )
+
+        val switchedOff = CompanionJson.decodeFromString<ConnectorStatuses>(
+            """{"configured":false,"credentialStore":"ok","services":{}}""",
+        )
+        assertTrue(
+            switchedOff.isAuthoritative,
+            "Composio being unconfigured is knowledge, and only an unreadable store is not",
+        )
+
+        // Only the exact string withdraws authority. The server writes it from
+        // one literal, so a variant is not a store we failed to read — it is a
+        // value this build does not recognise, and the contract says an
+        // unrecognised answer still answers. Without these two the rule accepts
+        // a silent widening: `equals(ignoreCase = true)`, or "anything that is
+        // not ok is unavailable", would both pass on the cases above alone.
+        listOf("Unavailable", "UNAVAILABLE", "unavailable ", "degraded", "", "unknown")
+            .forEach { value ->
+                val decoded = CompanionJson.decodeFromString<ConnectorStatuses>(
+                    """{"configured":true,"credentialStore":"$value","services":{}}""",
+                )
+                assertTrue(
+                    decoded.isAuthoritative,
+                    "only the exact string \"unavailable\" withdraws authority, not \"$value\"",
+                )
+            }
+    }
+
+    @Test
     fun accountStatusAndDisplayRulesMatchSwift() {
         val statuses = CompanionJson.decodeFromString<ConnectorStatuses>(
             """{

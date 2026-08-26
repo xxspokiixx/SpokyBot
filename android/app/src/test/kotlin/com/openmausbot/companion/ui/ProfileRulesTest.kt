@@ -138,14 +138,19 @@ class ProfileRulesTest {
     @Test
     fun `the generate footer says which computer holds the provider key`() {
         assertEquals(
-            ProfileRules.GENERATE_READY_FOOTER,
+            "Generation uses the shared image provider configured on your computer. " +
+                "No provider key is sent to or stored on this phone.",
             ProfileRules.generateFooter(ConfigStatus(imageGen = ConfigFlag(configured = true))),
         )
-        assertEquals(ProfileRules.GENERATE_BLOCKED_FOOTER, ProfileRules.generateFooter(null))
+        assertEquals(
+            "To generate images, configure the shared image provider in OpenMausBot on your " +
+                "computer. Provider keys cannot be added from a phone.",
+            ProfileRules.generateFooter(null),
+        )
     }
 
     @Test
-    fun `the voice section only appears once the shared key exists`() {
+    fun `what makes the chosen engine count as able to speak`() {
         assertFalse(ProfileRules.voiceConfigured(null))
         assertFalse(ProfileRules.voiceConfigured(ConfigStatus(tts = ConfigFlag(configured = false))))
         assertTrue(ProfileRules.voiceConfigured(ConfigStatus(tts = ConfigFlag(configured = true))))
@@ -153,7 +158,13 @@ class ProfileRulesTest {
             ProfileRules.voiceConfigured(
                 ConfigStatus(tts = ConfigFlag(configured = false, apiKeyConfigured = true)),
             ),
-            "either flag means the computer holds a key",
+            "the legacy key flag still answers for a desktop that only sends that one",
+        )
+        assertTrue(
+            ProfileRules.voiceConfigured(
+                ConfigStatus(tts = ConfigFlag(configured = true, provider = "system")),
+            ),
+            "under the built-in engine the same true means usable voices, and no key at all",
         )
     }
 
@@ -214,19 +225,129 @@ class ProfileRulesTest {
 
     @Test
     fun `the hint appears exactly when nothing can speak yet`() {
-        assertTrue(ProfileRules.showsPickAVoice(configuredWithoutDefault(), ""))
-        assertFalse(ProfileRules.showsPickAVoice(configuredWithoutDefault(), "voice-1"))
-        assertFalse(ProfileRules.showsPickAVoice(speaking(), ""))
+        assertEquals(
+            "Pick a voice for this agent before enabling speech.",
+            ProfileRules.pickAVoiceHint(configuredWithoutDefault(), ""),
+        )
+        assertNull(ProfileRules.pickAVoiceHint(configuredWithoutDefault(), "voice-1"))
+        assertNull(ProfileRules.pickAVoiceHint(speaking(), ""))
     }
 
     @Test
     fun `each voice footer answers the state it belongs to`() {
-        assertEquals(ProfileRules.VOICE_UNCONFIGURED_FOOTER, ProfileRules.voiceFooter(null))
         assertEquals(
-            ProfileRules.VOICE_NO_DEFAULT_FOOTER,
-            ProfileRules.voiceFooter(configuredWithoutDefault()),
+            "Add the shared ElevenLabs key in this agent's profile on the computer. " +
+                "The key is never returned to this phone.",
+            ProfileRules.voiceCopy(null).footer,
         )
-        assertEquals(ProfileRules.VOICE_READY_FOOTER, ProfileRules.voiceFooter(speaking()))
+        assertEquals(
+            "No workspace default voice is selected. Choose an agent-specific voice above; " +
+                "synthesis still uses the shared ElevenLabs key on your computer.",
+            ProfileRules.voiceCopy(configuredWithoutDefault()).footer,
+        )
+        assertEquals(
+            "The voice choice belongs to this agent. Workspace default uses the shared voice " +
+                "selected on your computer.",
+            ProfileRules.voiceCopy(speaking()).footer,
+        )
+    }
+
+    @Test
+    fun `an absent provider leaves the ElevenLabs copy exactly as iOS ships it`() {
+        // Spelled out rather than compared to the constants: this is the test
+        // that must fail if the decode ever defaults to the built-in engine,
+        // and comparing a constant to itself would survive that.
+        val unconfigured = ConfigStatus(tts = ConfigFlag(configured = false))
+
+        assertEquals(
+            "ElevenLabs is not configured",
+            ProfileRules.voiceCopy(unconfigured).unconfiguredNotice,
+        )
+        assertEquals(
+            "Add the shared ElevenLabs key in this agent's profile on the computer. " +
+                "The key is never returned to this phone.",
+            ProfileRules.voiceCopy(unconfigured).footer,
+        )
+        assertEquals(
+            "No workspace default voice is selected. Choose an agent-specific voice above; " +
+                "synthesis still uses the shared ElevenLabs key on your computer.",
+            ProfileRules.voiceCopy(configuredWithoutDefault()).footer,
+        )
+        assertEquals(
+            "ElevenLabs is not configured",
+            ProfileRules.voiceCopy(null).unconfiguredNotice,
+            "an unloaded status says what it said before the field existed",
+        )
+        assertEquals(
+            "ElevenLabs is not configured",
+            ProfileRules.voiceCopy(
+                ConfigStatus(tts = ConfigFlag(configured = false, provider = "azure")),
+            ).unconfiguredNotice,
+            "an unrecognised engine is not explained as the built-in one",
+        )
+    }
+
+    @Test
+    fun `the built-in provider is never explained as a missing key`() {
+        val noVoices = ConfigStatus(tts = ConfigFlag(configured = false, provider = "system"))
+        assertEquals(
+            "Your computer's built-in voices are unavailable",
+            ProfileRules.voiceCopy(noVoices).unconfiguredNotice,
+        )
+        assertEquals(
+            "Your computer's built-in voices need no key, and it reports none it can use. " +
+                "Switch the voice engine in OpenMausBot on the computer to turn speech back on.",
+            ProfileRules.voiceCopy(noVoices).footer,
+        )
+
+        val noDefault =
+            ConfigStatus(tts = ConfigFlag(configured = true, voice = "   ", provider = "system"))
+        assertEquals(
+            "No workspace default voice is selected. Choose an agent-specific voice above; " +
+                "synthesis still uses your computer's built-in voices.",
+            ProfileRules.voiceCopy(noDefault).footer,
+        )
+
+        val ready =
+            ConfigStatus(tts = ConfigFlag(configured = true, voice = "Albert", provider = "system"))
+        assertEquals(
+            ProfileRules.voiceCopy(speaking()).footer,
+            ProfileRules.voiceCopy(ready).footer,
+            "this sentence names no engine, so both providers share it",
+        )
+        assertNull(
+            ProfileRules.voiceCopy(ready).unconfiguredNotice,
+            "a section that can speak has no notice, and so draws the picker",
+        )
+
+        // What the screen can actually be handed under this engine, rather than
+        // the constants behind it: the strings are private precisely so that
+        // these three calls are the only way to reach them.
+        listOf(
+            ProfileRules.voiceCopy(noVoices).unconfiguredNotice.orEmpty(),
+            ProfileRules.voiceCopy(noVoices).footer,
+            ProfileRules.voiceCopy(noDefault).footer,
+        ).forEach {
+            assertFalse(it.contains("ElevenLabs"), "the built-in engine's copy names no brand: $it")
+        }
+    }
+
+    @Test
+    fun `the provider-neutral sentences are shared, not duplicated`() {
+        // Nothing about an engine or a credential appears in these, so a
+        // provider-specific twin would be a second string to keep in sync for
+        // no reason. Pinned so a future edit cannot quietly make one of them
+        // provider-specific while the selector still hands it to both.
+        listOf(
+            ProfileRules.voiceCopy(speaking()).footer,
+            ProfileRules.pickAVoiceHint(configuredWithoutDefault(), "").orEmpty(),
+            ProfileRules.PREVIEW_REFUSED,
+        ).forEach { assertFalse(it.contains("ElevenLabs"), "provider-neutral copy names no engine: $it") }
+
+        val system =
+            ConfigStatus(tts = ConfigFlag(configured = true, voice = "Albert", provider = "system"))
+        val elevenlabs = ConfigStatus(tts = ConfigFlag(configured = true, voice = "shared-voice"))
+        assertEquals(ProfileRules.voiceCopy(elevenlabs).footer, ProfileRules.voiceCopy(system).footer)
     }
 
     @Test

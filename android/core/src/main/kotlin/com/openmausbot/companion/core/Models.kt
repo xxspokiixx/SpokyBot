@@ -474,12 +474,21 @@ data class Instance(
 @Serializable
 data class InstanceList(val instances: List<Instance>)
 
+/** Which engine actually speaks. `VoiceProvider` in `server/tts/index.ts`. */
+enum class VoiceProvider { ELEVENLABS, SYSTEM }
+
 @Serializable
 data class ConfigFlag(
     val configured: Boolean,
     val apiKeyConfigured: Boolean? = null,
     val ready: Boolean? = null,
     val voice: String? = null,
+    /**
+     * The voice engine, absent on desktops older than the built-in provider.
+     * Read it through `ConfigStatus.voiceProvider`, which applies the
+     * server's own fallback; nothing should compare this string directly.
+     */
+    val provider: String? = null,
 )
 
 @Serializable
@@ -493,6 +502,12 @@ data class ConfigStatus(
     val imageGen: ConfigFlag? = null,
     val profile: Profile? = null,
 ) {
+    /**
+     * "This engine can speak", not "a key is on file" — under the built-in
+     * provider `providerConfigured` in `server/tts/index.ts` reports whether
+     * the computer has usable voices, and no credential exists at all. The
+     * flag stays provider-neutral; only the reason behind it changes.
+     */
     val isTTSConfigured: Boolean
         get() = tts?.configured == true || tts?.apiKeyConfigured == true
 
@@ -501,6 +516,17 @@ data class ConfigStatus(
 
     fun canSpeak(agentVoice: String?): Boolean =
         isTTSConfigured && (!agentVoice.isNullOrBlank() || hasWorkspaceDefaultVoice)
+
+    /**
+     * `voiceProvider(cfg)` in `server/tts/index.ts`: only the exact string
+     * "system" selects the built-in engine. A missing field — an older
+     * desktop that predates the choice — and a provider this build has never
+     * heard of both fall back to ElevenLabs, which is the server's own rule
+     * and keeps an unrecognised engine from being explained with copy
+     * written for a different one.
+     */
+    val voiceProvider: VoiceProvider
+        get() = if (tts?.provider == "system") VoiceProvider.SYSTEM else VoiceProvider.ELEVENLABS
 }
 
 object ConnectedAppsRules {
@@ -564,7 +590,29 @@ data class ConnectorCatalog(
 data class ConnectorStatuses(
     val configured: Boolean,
     val services: Map<String, ConnectorStatus>,
-)
+    /**
+     * "ok", "unavailable", or absent on a desktop that predates the field.
+     * Read it through `isAuthoritative`; nothing should compare it directly.
+     */
+    val credentialStore: String? = null,
+) {
+    /**
+     * Whether `services` is an inventory or an admission of ignorance.
+     *
+     * `server/index.ts` answers an unreadable Composio credential store with
+     * an empty map *and* `credentialStore: "unavailable"`, because not being
+     * able to read the store means we do not know what is connected — which
+     * is not the same as knowing nothing is. An empty map that arrives this
+     * way must never be shown as "nothing is connected"; every account may
+     * still be live on the computer.
+     *
+     * Only that exact string withdraws the claim. "ok" is authoritative, and
+     * so is a missing field: a desktop old enough not to send it would
+     * otherwise have every answer treated as unknowable.
+     */
+    val isAuthoritative: Boolean
+        get() = credentialStore != "unavailable"
+}
 
 @Serializable(with = BotProfilePatchSerializer::class)
 data class BotProfilePatch(
