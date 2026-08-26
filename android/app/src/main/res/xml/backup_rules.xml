@@ -8,6 +8,11 @@
   its notification prompt — restoring that onto a fresh install, where the OS has
   reset the permission and would happily ask again, would show "Open notification
   settings" for a prompt that was never spent here.
+
+  The onboarding markers are the same kind of device-local truth: they record
+  which first-run steps this install has already shown and answered. Carried onto
+  a fresh install they would skip the welcome and the notification explanation
+  for someone who has seen neither.
 -->
 <full-backup-content>
     <exclude
@@ -19,4 +24,7 @@
     <exclude
         domain="sharedpref"
         path="openmaus.permissions.xml" />
+    <exclude
+        domain="sharedpref"
+        path="openmaus.onboarding.xml" />
 </full-backup-content>

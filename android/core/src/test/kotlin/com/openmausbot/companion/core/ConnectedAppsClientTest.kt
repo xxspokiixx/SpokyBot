@@ -227,6 +227,7 @@ class ConnectedAppsClientTest {
             scope = backgroundScope,
             connectionStore = connectionStore,
             tokenStore = tokenStore,
+            onboardingStore = InMemoryOnboardingStore(),
             deviceNameProvider = { "Pixel" },
             eventsFn = { _, _, _ -> emptyFlow() },
         )

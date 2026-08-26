@@ -17,19 +17,43 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
+import com.openmausbot.companion.core.Connection
+import com.openmausbot.companion.core.NotificationAuthorizationState
+import com.openmausbot.companion.core.NotificationOnboardingPolicy
 import com.openmausbot.companion.core.NotificationTarget
+import com.openmausbot.companion.core.OnboardingContext
+import com.openmausbot.companion.core.OnboardingPairingState
+import com.openmausbot.companion.core.OnboardingRoute
+import com.openmausbot.companion.core.OnboardingRouter
 import com.openmausbot.companion.core.Session
+import kotlinx.coroutines.launch
 
 /**
- * Which of the three worlds the app is in — the port of `RootView` in
+ * Which of the six worlds the app is in — the port of `RootView` in
  * `ios/App/CompanionApp.swift`.
+ *
+ * The decision itself is not here. It is
+ * [com.openmausbot.companion.core.OnboardingRouter], in `:core`, because the
+ * orderings that matter are invisible until they are wrong: revocation has to
+ * outrank a pending deep link, a deep link has to outrank the welcome, and a
+ * pairing someone already had must never be handed first-pair education. This
+ * file's job is to hand the router honest inputs and to render what it answers.
+ *
+ * **Nothing here asks the system for a permission.** It used to: the first frame
+ * fired a batch request for notifications *and* nearby devices before the app
+ * had said what it was, which made refusing both the reasonable answer. Each
+ * permission now belongs to the moment it is earned — notifications to the
+ * explained step after a first pairing ([NotificationOnboardingScreen]), nearby
+ * devices to opening the list of computers ([PairingScreen]).
  */
 @Composable
 fun CompanionRoot(
@@ -38,24 +62,119 @@ fun CompanionRoot(
 ) {
     val environment = LocalCompanion.current
     val session = environment.session
-    val status by session.status.collectAsState()
-    val restoreState by session.restoreState.collectAsState()
+    val onboarding = environment.onboarding
+    val scope = rememberCoroutineScope()
 
-    // What the app needs to do its job: notifications, because approvals are the
-    // reason it exists, and nearby/local-network per SDK, because without them
-    // NSD browses and silently finds nothing. Asked once, at the first screen —
-    // pairing for a new phone, the roster for one that is already paired.
-    LaunchedEffect(Unit) {
-        val missing = environment.permissions.requestablePermissions()
-        if (missing.isNotEmpty()) environment.requestPermissions(missing)
+    val status by session.status.collectAsState()
+    val connection by session.connection.collectAsState()
+    val invite by session.pairingInvite.collectAsState()
+    val restoreState by session.restoreState.collectAsState()
+    val notificationAccess by environment.notifications.access.collectAsState()
+    val welcomeSeen by onboarding.welcomeSeen.collectAsState()
+    val notificationPromptSeen by onboarding.notificationPromptSeen.collectAsState()
+    val notificationPending by onboarding.notificationPending.collectAsState()
+
+    // "Someone asked to connect" — the port of iOS's `@State pairingRequested`.
+    // Saveable rather than durable: a rotation must not throw the person out of
+    // the pairing form, but a relaunch is a fresh decision, and a stale `true`
+    // on disk would reopen pairing after a voluntary unpair.
+    var pairingRequested by rememberSaveable { mutableStateOf(false) }
+    // Settings, reachable from the unpaired home. iOS puts it in a toolbar
+    // `NavigationLink`; there is no navigator in the unpaired world, so this is
+    // the whole of that stack.
+    var showingUnpairedSettings by rememberSaveable { mutableStateOf(false) }
+    var enablingNotifications by remember { mutableStateOf(false) }
+
+    val authorization = notificationAuthorization(notificationAccess)
+    val route = OnboardingRouter.route(
+        OnboardingContext(
+            pairingState = onboardingPairingState(status, connection),
+            hasSeenWelcome = welcomeSeen,
+            pairingRequested = pairingRequested,
+            hasPendingPairingInvite = invite != null,
+            notificationOnboardingPending = notificationPending,
+            hasSeenNotificationPrompt = notificationPromptSeen,
+            notificationAuthorization = authorization,
+        ),
+    )
+
+    /**
+     * Settle the durable marker against what is now known.
+     *
+     * Reads the flows rather than the values captured by this composition: the
+     * coroutine may run after another write landed, and the marker is the one
+     * piece of state here that a stale snapshot could destroy.
+     */
+    fun reconcileNotificationOnboarding() {
+        scope.launch {
+            onboarding.setNotificationOnboardingPending(
+                NotificationOnboardingPolicy.shouldKeepPending(
+                    isPending = onboarding.notificationPending.value,
+                    hasCompletedStep = onboarding.notificationPromptSeen.value,
+                    authorization = authorization,
+                ),
+            )
+        }
     }
 
-    // Resolve above PairingScreen / UnpairedScreen / PairedScreen so a tap
-    // while unpaired or unauthorized is consumed (and cannot open against the
-    // next bond). Re-runs when restoreState leaves Pending so a deferred
-    // target is not stranded after a cold-start restore that finishes unpaired.
-    // The coordinator owns every consume: identified no-chat inside onPending,
-    // and navigate→consume inside commit. RootScreen cannot omit or invert.
+    fun startPairing() {
+        scope.launch { onboarding.setWelcomeSeen(true) }
+        pairingRequested = true
+    }
+
+    /**
+     * Both answers to the education step end it: the step records that it was
+     * answered, and that is *all* it records.
+     *
+     * Spending the marker is deliberately not done here. It belongs to
+     * [NotificationOnboardingPolicy] and reaches disk through the one
+     * reconciliation below, so there is a single place that decides when a
+     * marker is spent instead of three that have to agree.
+     */
+    fun finishNotificationStep() {
+        scope.launch { onboarding.setNotificationPromptSeen(true) }
+    }
+
+    // Back closes Settings rather than the app. The paired world gets this from
+    // its navigator; the unpaired home has no navigator, and without this line
+    // the first thing a person who opened Settings from it presses puts them
+    // back on the launcher.
+    BackHandler(enabled = showingUnpairedSettings) { showingUnpairedSettings = false }
+    // Leaving this world closes it too, so a later unpair does not land on a
+    // Settings screen nobody asked for.
+    LaunchedEffect(route) {
+        if (route != OnboardingRoute.UNPAIRED_HOME) showingUnpairedSettings = false
+    }
+
+    // A pairing that commits answers the welcome and ends the request that
+    // opened the form, wherever the person came in from — the welcome, the
+    // unpaired home, or a deep link on a first launch nobody had answered.
+    //
+    // One place. iOS spreads the same two writes over `ChatListView.onAppear`
+    // and the education step's `onContinue`, which means two copies of "the
+    // request is over" that have to stay in agreement; a stale one is what lets
+    // a much later voluntary unpair walk straight back into the pairing form.
+    LaunchedEffect(connection != null) {
+        if (connection == null) return@LaunchedEffect
+        onboarding.setWelcomeSeen(true)
+        pairingRequested = false
+    }
+    // The only thing that spends the marker. One effect, keyed on every input
+    // the policy reads, so it runs at launch and again whenever any of them
+    // moves — an answer arriving, the step being answered, a fresh pairing
+    // setting the marker. Splitting this across the screens that happen to be
+    // on top when each changes is how a rule ends up true in one copy and false
+    // in another.
+    LaunchedEffect(authorization, notificationPromptSeen, notificationPending) {
+        reconcileNotificationOnboarding()
+    }
+
+    // Resolve above every screen so a tap while unpaired or unauthorized is
+    // consumed (and cannot open against the next bond). Re-runs when restoreState
+    // leaves Pending so a deferred target is not stranded after a cold-start
+    // restore that finishes unpaired. The coordinator owns every consume:
+    // identified no-chat inside onPending, and navigate→consume inside commit.
+    // RootScreen cannot omit or invert.
     val tapCoordinator = remember { NotificationTapCoordinator() }
     val resolution by tapCoordinator.resolution.collectAsState()
     // Persistable: bumping this keys the navigator saver with a generation that
@@ -79,24 +198,139 @@ fun CompanionRoot(
         // screen wants the same answer — keep content clear of the status bar,
         // the gesture bar, and the keyboard.
         Surface(modifier = Modifier.fillMaxSize().safeDrawingPadding()) {
-            when (status) {
-                is Session.Status.Unpaired -> PairingScreen()
-                is Session.Status.Unauthorized -> UnpairedScreen()
-                else -> PairedScreen(
-                    resolution = resolution,
-                    bondGeneration = bondGeneration,
-                    onCommit = { held, navigator ->
-                        tapCoordinator.commit(held, navigator, onPendingTargetConsumed)
+            when (route) {
+                OnboardingRoute.WELCOME -> WelcomeScreen(
+                    onConnect = ::startPairing,
+                    onSkip = {
+                        // "Not now" is an answer, not a postponement of the same
+                        // screen: it is remembered, and it leads to a home that
+                        // can still connect and still reach Settings.
+                        scope.launch { onboarding.setWelcomeSeen(true) }
+                        pairingRequested = false
+                    },
+                )
+
+                OnboardingRoute.PAIRING -> {
+                    // Being on this screen *is* the request, and it is what
+                    // keeps the screen up after `PairingScreen` consumes the
+                    // invite that opened it — at which point
+                    // `hasPendingPairingInvite` goes false and this is the only
+                    // thing left holding the route.
+                    LaunchedEffect(Unit) {
+                        onboarding.setWelcomeSeen(true)
+                        pairingRequested = true
+                    }
+                    PairingScreen(
+                        onCancel = {
+                            scope.launch { onboarding.setWelcomeSeen(true) }
+                            pairingRequested = false
+                        },
+                    )
+                }
+
+                OnboardingRoute.UNPAIRED_HOME -> if (showingUnpairedSettings) {
+                    // The same Settings screen, minus what needs a pairing.
+                    // Notifications can be recovered from here without first
+                    // entering a connection flow this person just declined.
+                    SettingsScreen(
+                        onBack = { showingUnpairedSettings = false },
+                        onConnect = {
+                            showingUnpairedSettings = false
+                            startPairing()
+                        },
+                    )
+                } else {
+                    UnpairedHomeScreen(
+                        onConnect = ::startPairing,
+                        onOpenSettings = { showingUnpairedSettings = true },
+                    )
+                }
+
+                OnboardingRoute.NOTIFICATION_PROMPT -> {
+                    NotificationOnboardingScreen(
+                        enabling = enablingNotifications,
+                        onEnable = {
+                            enablingNotifications = true
+                            scope.launch {
+                                // Marked before the prompt is launched, the way
+                                // [PermissionRequests] records every asking as
+                                // part of launching it: a process that dies while
+                                // the system sheet is up has still spent the
+                                // prompt, and re-showing this step afterwards
+                                // would offer a button the OS silently drops.
+                                onboarding.setNotificationPromptSeen(true)
+                                environment.notifications.act()
+                                enablingNotifications = false
+                            }
+                        },
+                        onSkip = ::finishNotificationStep,
+                    )
+                }
+
+                OnboardingRoute.CHATS -> {
+                    PairedScreen(
+                        resolution = resolution,
+                        bondGeneration = bondGeneration,
+                        onCommit = { held, navigator ->
+                            tapCoordinator.commit(held, navigator, onPendingTargetConsumed)
+                        },
+                    )
+                }
+
+                OnboardingRoute.REVOKED -> UnpairedScreen(
+                    onPairAgain = {
+                        session.signOut()
+                        startPairing()
                     },
                 )
             }
         }
         // Pairing failures are shown inline on the pairing form, where the
         // action was — a modal on top of it would say the same thing twice.
-        if (status !is Session.Status.Unpaired) {
+        if (route != OnboardingRoute.PAIRING) {
             ActionErrorDialog(session)
         }
     }
+}
+
+/**
+ * Which of the three worlds the pairing is in, as the router asks the question.
+ *
+ * Revocation is tested first and unconditionally. A token the computer retired
+ * is not an empty state and not a pairing: it has its own screen, and no pending
+ * invite or requested pairing may push it aside.
+ */
+internal fun onboardingPairingState(
+    status: Session.Status,
+    connection: Connection?,
+): OnboardingPairingState = when {
+    status is Session.Status.Unauthorized -> OnboardingPairingState.REVOKED
+    connection != null -> OnboardingPairingState.PAIRED
+    else -> OnboardingPairingState.UNPAIRED
+}
+
+/**
+ * The notification permission, as the marker's lifecycle asks about it.
+ *
+ * Android answers synchronously — `areNotificationsEnabled()` and
+ * `shouldShowRequestPermissionRationale()` both return immediately — so unlike
+ * iOS there is no launch window here where the answer is unknown, and
+ * [NotificationAuthorizationState.UNRESOLVED] is not produced by this mapping.
+ * It exists in the router because the rule it carries is the marker's
+ * protection, not iOS's async quirk.
+ *
+ * [NotificationAccess.BLOCKED] is DETERMINED rather than a fourth case: it means
+ * the system will not ask again — pre-33, where there is no runtime permission
+ * at all, or a prompt already spent. Education that ends in a button the OS
+ * silently drops is worse than no education, so the step is skipped and Settings
+ * keeps the recovery path.
+ */
+internal fun notificationAuthorization(
+    access: NotificationAccess,
+): NotificationAuthorizationState = when (access) {
+    NotificationAccess.ASKABLE -> NotificationAuthorizationState.NOT_DETERMINED
+    NotificationAccess.GRANTED, NotificationAccess.BLOCKED ->
+        NotificationAuthorizationState.DETERMINED
 }
 
 @Composable
@@ -171,13 +405,12 @@ private fun ActionErrorDialog(session: Session) {
  * to say so and offer to pair again.
  */
 @Composable
-private fun UnpairedScreen() {
-    val session = LocalCompanion.current.session
+private fun UnpairedScreen(onPairAgain: () -> Unit) {
     EmptyState(
         title = "This phone was unpaired",
         description = "It was removed from the computer's Phone settings, or the pairing was reset.",
     ) {
-        Button(onClick = { session.signOut() }) { Text("Pair again") }
+        Button(onClick = onPairAgain) { Text("Pair again") }
     }
 }
 

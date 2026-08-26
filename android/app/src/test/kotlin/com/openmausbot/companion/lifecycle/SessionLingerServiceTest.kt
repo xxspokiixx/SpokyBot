@@ -5,6 +5,7 @@ import android.content.Intent
 import androidx.lifecycle.LifecycleRegistry
 import androidx.lifecycle.ProcessLifecycleOwner
 import com.openmausbot.companion.OpenMausApp
+import com.openmausbot.companion.core.InMemoryOnboardingStore
 import com.openmausbot.companion.core.Session
 import com.openmausbot.companion.core.TokenStore
 import kotlinx.coroutines.CoroutineScope
@@ -121,6 +122,7 @@ class SessionLingerServiceTest {
             scope = scope,
             connectionStore = store(TEST_CONNECTION),
             tokenStore = tokens(TokenStore.ReadResult.Found("device-token")),
+            onboardingStore = InMemoryOnboardingStore(),
             deviceNameProvider = { "Pixel" },
             eventsFn = { _, _, _ -> emptyFlow() },
         )

@@ -7,6 +7,7 @@ import com.openmausbot.companion.core.Connection
 import com.openmausbot.companion.core.ConnectionStore
 import com.openmausbot.companion.core.Fleet
 import com.openmausbot.companion.core.GroupResponder
+import com.openmausbot.companion.core.InMemoryOnboardingStore
 import com.openmausbot.companion.core.ModelSelection
 import com.openmausbot.companion.core.OptionCard
 import com.openmausbot.companion.core.Room
@@ -225,6 +226,7 @@ class ApprovalAnswersTest {
                     TokenStore.ReadResult.Found("device-token")
                 override suspend fun remove(connectionId: String) = Unit
             },
+            onboardingStore = InMemoryOnboardingStore(),
             deviceNameProvider = { "Pixel" },
             eventsFn = { _, _, _ -> emptyFlow() },
             hydrateFn = { _, _ -> Fleet(emptyList(), emptyList()) },

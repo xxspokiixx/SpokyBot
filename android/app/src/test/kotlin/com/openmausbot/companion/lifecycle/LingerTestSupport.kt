@@ -4,6 +4,7 @@ import com.openmausbot.companion.core.Bot
 import com.openmausbot.companion.core.Connection
 import com.openmausbot.companion.core.ConnectionStore
 import com.openmausbot.companion.core.Fleet
+import com.openmausbot.companion.core.InMemoryOnboardingStore
 import com.openmausbot.companion.core.ModelSelection
 import com.openmausbot.companion.core.NotificationFrame
 import com.openmausbot.companion.core.NotificationSink
@@ -182,6 +183,7 @@ internal fun TestScope.session(
     scope = backgroundScope,
     connectionStore = connections,
     tokenStore = tokenStore,
+    onboardingStore = InMemoryOnboardingStore(),
     deviceNameProvider = { "Pixel" },
     notificationSink = sink,
     eventsFn = { _, since, screens -> stream.open(since, screens) },

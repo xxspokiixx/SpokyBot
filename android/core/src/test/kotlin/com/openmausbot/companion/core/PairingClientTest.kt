@@ -346,6 +346,7 @@ class PairingClientTest {
             scope = backgroundScope,
             connectionStore = connectionStore,
             tokenStore = tokenStore,
+            onboardingStore = InMemoryOnboardingStore(),
             deviceNameProvider = { "Pixel" },
             httpClient = stub.client,
             clientFactory = { connection, token ->

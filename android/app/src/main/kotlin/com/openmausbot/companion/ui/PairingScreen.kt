@@ -12,9 +12,13 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.KeyboardArrowDown
+import androidx.compose.material.icons.filled.KeyboardArrowUp
 import androidx.compose.material3.Button
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.HorizontalDivider
+import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
@@ -25,6 +29,7 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.produceState
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.saveable.rememberSaveable
@@ -55,12 +60,20 @@ import kotlinx.coroutines.launch
  * multicast off, a responder that could not take port 5353 — the address the
  * desktop panel prints is typed instead.
  *
+ * Only the first of the three is on screen to begin with. The other two live
+ * behind **Other ways to connect**, and opening that is what starts a browse and
+ * what asks for the nearby-devices permission a browse needs — the port of
+ * `.onChange(of: showingOtherWays)` in `ios/App/PairingView.swift`. This screen
+ * used to browse from the moment it existed, so someone who only ever meant to
+ * scan the QR code printed on their own computer paid for a local search they
+ * never looked at, and met a permission dialog to make it work.
+ *
  * A scan never pairs by itself. A scanned or deep-linked invite fills the form
  * and the user confirms the computer's name and address before anything is
  * redeemed (§6).
  */
 @Composable
-fun PairingScreen() {
+fun PairingScreen(onCancel: () -> Unit) {
     val environment = LocalCompanion.current
     val session = environment.session
     val scope = rememberCoroutineScope()
@@ -102,16 +115,23 @@ fun PairingScreen() {
     // "Looking…" forever is not an answer. After a few seconds with nothing
     // found, say the thing that is almost always true.
     var searchedLongEnough by remember { mutableStateOf(false) }
+    // Closed to begin with, so the QR path — the one the desktop points at — is
+    // the whole screen until somebody asks for more.
+    var showingOtherWays by rememberSaveable { mutableStateOf(false) }
 
-    LaunchedEffect(Unit) {
+    val permissionSnapshot by environment.permissions.snapshot.collectAsState()
+
+    LaunchedEffect(showingOtherWays) {
+        searchedLongEnough = false
+        if (!showingOtherWays) return@LaunchedEffect
+        // Nearby devices, and on API 37 the local network, are asked for here
+        // and nowhere else in the app. This is the first moment the app has any
+        // use for them, and the person has just said what that use is.
+        val missing = environment.permissions.discoveryPermissions()
+        if (missing.isNotEmpty()) environment.requestPermissions(missing)
         delay(8_000)
         searchedLongEnough = true
     }
-
-    // The request itself is fired once from CompanionRoot, which also covers an
-    // already-paired install that never sees this screen. What belongs here is
-    // saying what a refusal costs, next to the list it makes empty.
-    val permissionSnapshot by environment.permissions.snapshot.collectAsState()
 
     // The credential goes to the process-scoped store; only the handle is ever
     // held by composition state, and the handle is minted with the computer it
@@ -150,8 +170,17 @@ fun PairingScreen() {
         session.actionError = null
     }
 
-    val discoveryFlow = remember { environment.discovery.discover() }
-    val discovery by discoveryFlow.collectAsState(initial = DiscoveryState.Idle)
+    // Cold, and collected only while the panel is open: collecting is what
+    // starts the browse, and cancelling the collection is what stops it. The key
+    // is the panel, so closing it tears the browse down the way `.onDisappear`
+    // does on iOS — and entering this screen starts nothing at all.
+    val discovery by produceState<DiscoveryState>(DiscoveryState.Idle, showingOtherWays) {
+        if (!showingOtherWays) {
+            value = DiscoveryState.Idle
+            return@produceState
+        }
+        environment.discovery.discover().collect { value = it }
+    }
 
     if (showingScanner) {
         QrScannerScreen(
@@ -234,11 +263,22 @@ fun PairingScreen() {
             .padding(horizontal = 20.dp, vertical = 24.dp),
         verticalArrangement = Arrangement.spacedBy(24.dp),
     ) {
-        Text(
-            text = "Pair with a computer",
-            style = MaterialTheme.typography.headlineSmall,
-            fontWeight = FontWeight.SemiBold,
-        )
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Text(
+                text = "Pair with a computer",
+                style = MaterialTheme.typography.headlineSmall,
+                fontWeight = FontWeight.SemiBold,
+                modifier = Modifier.weight(1f),
+            )
+            // The way back out, which the first run needs and which iOS puts in
+            // the same place. Refused while a redemption is in flight, because a
+            // credential that may already have reached the computer must not be
+            // abandoned halfway (§6) — the port of `.disabled(!allowsNavigation)`.
+            TextButton(onClick = onCancel, enabled = !pairing) { Text("Not now") }
+        }
 
         val selected = pending
         if (selected != null) {
@@ -269,49 +309,98 @@ fun PairingScreen() {
                 failure = null
                 showingScanner = true
             })
-            DiscoverySection(
-                discovery = discovery,
-                searchedLongEnough = searchedLongEnough,
-                onChoose = { service ->
+            OtherWaysSection(
+                expanded = showingOtherWays,
+                onToggle = {
                     haptics.play(HapticCue.SELECT)
-                    failure = null
-                    val connection = service.toConnection()
-                    if (connection == null) {
-                        failure = "That computer did not answer with an address. " +
-                            "Enter the address shown in Phone settings instead."
-                    } else {
-                        openPending(connection, fromScan = false)
-                    }
+                    showingOtherWays = !showingOtherWays
                 },
-            )
-            ManualSection(
-                address = manualAddress,
-                onAddressChange = { manualAddress = it },
-                onContinue = {
-                    haptics.play(HapticCue.SELECT)
-                    failure = null
-                    val connection = Connection.parse(manualAddress)
-                    if (connection == null) {
-                        failure = AddressEdit.INVALID
-                    } else {
-                        openPending(connection, fromScan = false)
-                    }
-                },
-            )
+            ) {
+                DiscoverySection(
+                    discovery = discovery,
+                    searchedLongEnough = searchedLongEnough,
+                    onChoose = { service ->
+                        haptics.play(HapticCue.SELECT)
+                        failure = null
+                        val connection = service.toConnection()
+                        if (connection == null) {
+                            failure = "That computer did not answer with an address. " +
+                                "Enter the address shown in Phone settings instead."
+                        } else {
+                            openPending(connection, fromScan = false)
+                        }
+                    },
+                )
+                // Next to the list it makes empty, and only once the search it
+                // describes is the thing on screen.
+                if (permissionSnapshot.discoveryNeedsRequest) {
+                    Text(
+                        text = "Searching this network needs " +
+                            "${permissionSnapshot.missingDiscovery.joinToString()}, which is " +
+                            "still off. The QR code and the address below work without it.",
+                        fontSize = 13.sp,
+                        color = secondaryTint,
+                    )
+                }
+                ManualSection(
+                    address = manualAddress,
+                    onAddressChange = { manualAddress = it },
+                    onContinue = {
+                        haptics.play(HapticCue.SELECT)
+                        failure = null
+                        val connection = Connection.parse(manualAddress)
+                        if (connection == null) {
+                            failure = AddressEdit.INVALID
+                        } else {
+                            openPending(connection, fromScan = false)
+                        }
+                    },
+                )
+            }
         }
 
         failure?.let {
             Text(text = it, color = MaterialTheme.colorScheme.error, fontSize = 14.sp)
         }
+    }
+}
 
-        if (permissionSnapshot.needsRequest) {
-            Text(
-                text = "Some permissions are still off: ${permissionSnapshot.missing.joinToString()}. " +
-                    "Notifications carry approvals, and nearby-devices is what lets this phone see " +
-                    "your computer on the network.",
-                fontSize = 13.sp,
-                color = secondaryTint,
-            )
+/**
+ * The QR code is the way in; this is everything else, folded away until asked
+ * for. Opening it is a decision with a cost — a local search, and the permission
+ * that search needs — so it is a decision the person makes, not one the screen
+ * makes for them.
+ */
+@Composable
+private fun OtherWaysSection(
+    expanded: Boolean,
+    onToggle: () -> Unit,
+    content: @Composable () -> Unit,
+) {
+    Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+        TextButton(onClick = onToggle, modifier = Modifier.fillMaxWidth()) {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Text(
+                    text = "Other ways to connect",
+                    modifier = Modifier.weight(1f),
+                    textAlign = TextAlign.Start,
+                    fontWeight = FontWeight.SemiBold,
+                )
+                Icon(
+                    imageVector = if (expanded) {
+                        Icons.Filled.KeyboardArrowUp
+                    } else {
+                        Icons.Filled.KeyboardArrowDown
+                    },
+                    contentDescription = null,
+                )
+            }
+        }
+        if (expanded) {
+            Column(verticalArrangement = Arrangement.spacedBy(24.dp)) { content() }
         }
     }
 }

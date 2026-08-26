@@ -518,6 +518,7 @@ class PortP104IntegratedTest {
                 scope = scope,
                 connectionStore = stores.connectionStore,
                 tokenStore = stores.tokenStore,
+                onboardingStore = InMemoryOnboardingStore(),
                 deviceNameProvider = { "P1-04 Pixel" },
                 httpClient = sidecar.client,
             ),

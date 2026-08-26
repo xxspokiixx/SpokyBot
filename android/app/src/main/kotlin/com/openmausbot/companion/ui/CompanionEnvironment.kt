@@ -8,8 +8,9 @@ import com.openmausbot.companion.core.ExportedTranscript
 import com.openmausbot.companion.core.Session
 import com.openmausbot.companion.dictation.SpeechDictation
 import java.net.URI
-import com.openmausbot.companion.discovery.NsdDiscovery
+import com.openmausbot.companion.discovery.CompanionDiscovery
 import com.openmausbot.companion.permissions.CompanionPermissions
+import com.openmausbot.companion.storage.OnboardingPreferences
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -94,7 +95,13 @@ class MicPermissionController(
 class CompanionEnvironment(
     val session: Session,
     val permissions: CompanionPermissions,
-    val discovery: NsdDiscovery,
+    val discovery: CompanionDiscovery,
+    /**
+     * The three durable first-run markers. The same instance [Session] writes
+     * the pending marker into when a pairing commits, so the root router reads
+     * what the commit wrote without a second copy of the truth.
+     */
+    val onboarding: OnboardingPreferences,
     val camera: CameraPermissionController,
     val mic: MicPermissionController,
     val notifications: NotificationPermissionController,

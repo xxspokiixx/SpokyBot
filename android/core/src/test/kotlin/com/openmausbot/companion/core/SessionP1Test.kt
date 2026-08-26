@@ -282,6 +282,7 @@ class SessionP1Test {
                     TokenStore.ReadResult.Found("device-token")
                 override suspend fun remove(connectionId: String) = Unit
             },
+            onboardingStore = InMemoryOnboardingStore(),
             deviceNameProvider = { "Pixel" },
             eventsFn = { _, _, _ -> emptyFlow() },
             hydrateFn = { _, _ -> hydrate() },

@@ -255,18 +255,37 @@ internal fun browseDiscoveryFlow(
 }.distinctUntilChanged()
 
 /**
+ * What a screen needs from discovery, and no more.
+ *
+ * It is an interface so that the timing rule this pass installs — nothing
+ * browses the network until somebody opens the list — can be *observed* by a
+ * test that mounts the screen, rather than asserted about the source. A fake
+ * that records when it is collected answers the question "did entering this
+ * screen start a search?"; no assertion about a boolean can.
+ *
+ * [NsdDiscovery] is the only production implementation.
+ */
+interface CompanionDiscovery {
+    /**
+     * A cold Flow: collecting it starts a browse and cancelling the collection
+     * stops it, so *when it is collected* is the whole of the timing question.
+     */
+    fun discover(): Flow<DiscoveryState>
+}
+
+/**
  * NsdManager wrapper for `_openmausbot._tcp`, exposed as a Flow of [DiscoveryState].
  */
 class NsdDiscovery(
     context: Context,
     private val serviceType: String = SERVICE_TYPE,
-) {
+) : CompanionDiscovery {
     private val appContext = context.applicationContext
     private val nsdManager = appContext.getSystemService(NsdManager::class.java)
     private val wifiManager = appContext.getSystemService(Context.WIFI_SERVICE) as? WifiManager
     private val resolveExecutor: Executor = Executors.newSingleThreadExecutor()
 
-    fun discover(): Flow<DiscoveryState> {
+    override fun discover(): Flow<DiscoveryState> {
         if (nsdManager == null) {
             return kotlinx.coroutines.flow.flow {
                 emit(

@@ -27,6 +27,35 @@ interface TokenStore {
     suspend fun remove(connectionId: String)
 }
 
+/**
+ * The durable first-pair notification-education marker — the Android shape of
+ * the `UserDefaults` key `ios/App/Session.swift` writes inside its pairing
+ * commit.
+ *
+ * One boolean, and nothing else (§6). It is not a secret and never becomes a
+ * place for one: the interface admits no other type, and the store behind it
+ * is a file of its own holding only the keys in
+ * [OnboardingPreferenceKeys.ALL].
+ *
+ * [setNotificationOnboardingPending] must not return until the value is
+ * durable. [Session.pair] calls it before it saves the connection precisely so
+ * that a process that stops between the two writes leaves an orphan marker
+ * (harmless) rather than a restorable pairing that skipped education forever.
+ */
+interface OnboardingStore {
+    suspend fun notificationOnboardingPending(): Boolean
+    suspend fun setNotificationOnboardingPending(pending: Boolean)
+}
+
+/** In-memory [OnboardingStore] for tests and for callers with nothing to keep. */
+class InMemoryOnboardingStore(initial: Boolean = false) : OnboardingStore {
+    private var pending = initial
+    override suspend fun notificationOnboardingPending(): Boolean = pending
+    override suspend fun setNotificationOnboardingPending(pending: Boolean) {
+        this.pending = pending
+    }
+}
+
 /** Local notification surface fed by live/replayed notify frames. */
 interface NotificationSink {
     fun deliver(notification: NotificationFrame, sequence: Int?)

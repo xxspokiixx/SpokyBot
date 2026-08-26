@@ -7,7 +7,9 @@
   already device-bound, but the ciphertext must not leave the device either. The
   permission prefs travel to a device whose OS has its own idea of what has been
   asked, so carrying ours across would misread a re-askable install as one that
-  had spent its prompt.
+  had spent its prompt. The onboarding markers travel the same way and are
+  excluded for the same reason: they say which first-run steps this install has
+  already shown.
 -->
 <data-extraction-rules>
     <cloud-backup>
@@ -17,6 +19,9 @@
         <exclude
             domain="sharedpref"
             path="openmaus.permissions.xml" />
+        <exclude
+            domain="sharedpref"
+            path="openmaus.onboarding.xml" />
     </cloud-backup>
     <device-transfer>
         <exclude
@@ -25,5 +30,8 @@
         <exclude
             domain="sharedpref"
             path="openmaus.permissions.xml" />
+        <exclude
+            domain="sharedpref"
+            path="openmaus.onboarding.xml" />
     </device-transfer>
 </data-extraction-rules>

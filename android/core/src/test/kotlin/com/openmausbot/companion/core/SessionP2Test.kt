@@ -102,6 +102,7 @@ class SessionP2Test {
         scope = backgroundScope,
         connectionStore = P2ConnectionStore(connection),
         tokenStore = P2TokenStore(connection.id, "paired-token"),
+        onboardingStore = InMemoryOnboardingStore(),
         deviceNameProvider = { "Pixel" },
         eventsFn = { _, _, _ -> emptyFlow() },
     )

@@ -10,6 +10,7 @@ import com.openmausbot.companion.core.ConfigStatus
 import com.openmausbot.companion.core.Connection
 import com.openmausbot.companion.core.ConnectionStore
 import com.openmausbot.companion.core.Fleet
+import com.openmausbot.companion.core.InMemoryOnboardingStore
 import com.openmausbot.companion.core.ModelSelection
 import com.openmausbot.companion.core.RoutineRunLocation
 import com.openmausbot.companion.core.RoutineSchedule
@@ -349,6 +350,7 @@ class ProfileRoutineWireTest {
                     TokenStore.ReadResult.Found("device-token")
                 override suspend fun remove(connectionId: String) = Unit
             },
+            onboardingStore = InMemoryOnboardingStore(),
             deviceNameProvider = { "Pixel" },
             eventsFn = { _, _, _ -> emptyFlow() },
             hydrateFn = { _, _ -> Fleet(emptyList(), emptyList()) },

@@ -164,6 +164,7 @@ class MainActivity : ComponentActivity() {
             session = app.session,
             permissions = app.permissions,
             discovery = app.discovery,
+            onboarding = app.onboarding,
             camera = camera,
             mic = mic,
             notifications = notifications,

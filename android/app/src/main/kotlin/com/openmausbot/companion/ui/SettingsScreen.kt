@@ -41,9 +41,21 @@ import com.openmausbot.companion.R
  * Almost nothing, on purpose: Phone settings, API keys and pairing all live
  * on the computer, because losing the phone must not mean losing the ability to
  * lock it out (§13). This is a status page with an unpair button.
+ *
+ * It is also the screen the unpaired home reaches, which is why both actions are
+ * optional. `SettingsView(onConnect:)` in `ios/App/SettingsView.swift` does the
+ * same thing: someone who answered "Not now" can still get to notifications
+ * without first entering the connection flow they just declined, and the parts
+ * that need a pairing — routines, unpairing, the address — are simply not there
+ * to be pressed.
  */
 @Composable
-fun SettingsScreen(onBack: () -> Unit, onOpenRoutines: () -> Unit) {
+fun SettingsScreen(
+    onBack: () -> Unit,
+    onOpenRoutines: (() -> Unit)? = null,
+    /** Offered instead of the computer's details when there is no pairing. */
+    onConnect: (() -> Unit)? = null,
+) {
     val environment = LocalCompanion.current
     val session = environment.session
     val connection by session.connection.collectAsState()
@@ -75,16 +87,19 @@ fun SettingsScreen(onBack: () -> Unit, onOpenRoutines: () -> Unit) {
             verticalArrangement = Arrangement.spacedBy(20.dp),
         ) {
             SettingsSection("Computer") {
-                connection?.let {
-                    SettingsRow("Name", it.name)
-                    SettingsRow("Address", SettingsPolicy.addressText(it))
+                val bound = connection
+                if (bound != null) {
+                    SettingsRow("Name", bound.name)
+                    SettingsRow("Address", SettingsPolicy.addressText(bound))
                     // The stored address can simply go stale. Editing it here
                     // keeps the pairing and its token (§7).
                     SettingsButton("Edit address") {
-                        addressText = SettingsPolicy.addressText(it)
+                        addressText = SettingsPolicy.addressText(bound)
                         addressError = null
                         editingAddress = true
                     }
+                } else if (onConnect != null) {
+                    SettingsButton("Connect a computer", onClick = onConnect)
                 }
                 SettingsRow("Connection", SettingsPolicy.statusText(status))
             }
@@ -102,21 +117,28 @@ fun SettingsScreen(onBack: () -> Unit, onOpenRoutines: () -> Unit) {
                 Footnote(SettingsPolicy.NOTIFICATIONS_FOOTER)
             }
 
-            SettingsSection("Workspace") {
-                SettingsButton(
-                    text = "Tasks & Routines",
-                    icon = R.drawable.ic_schedule,
-                    onClick = onOpenRoutines,
-                )
-                Footnote(SettingsPolicy.WORKSPACE_FOOTER)
+            // Routine schedules live on the computer this phone is bound to.
+            // With no binding there is nothing to schedule against, so the row
+            // is absent rather than present and dead.
+            onOpenRoutines?.let { openRoutines ->
+                SettingsSection("Workspace") {
+                    SettingsButton(
+                        text = "Tasks & Routines",
+                        icon = R.drawable.ic_schedule,
+                        onClick = openRoutines,
+                    )
+                    Footnote(SettingsPolicy.WORKSPACE_FOOTER)
+                }
             }
 
-            SettingsSection(null) {
-                SettingsButton(
-                    text = "Unpair this phone",
-                    destructive = true,
-                ) { confirmingUnpair = true }
-                Footnote(SettingsPolicy.UNPAIR_FOOTER)
+            if (connection != null) {
+                SettingsSection(null) {
+                    SettingsButton(
+                        text = "Unpair this phone",
+                        destructive = true,
+                    ) { confirmingUnpair = true }
+                    Footnote(SettingsPolicy.UNPAIR_FOOTER)
+                }
             }
 
             SettingsSection("Not here") {

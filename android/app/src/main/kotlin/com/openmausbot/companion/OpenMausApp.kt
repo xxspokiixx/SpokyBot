@@ -12,6 +12,7 @@ import com.openmausbot.companion.lifecycle.installSessionLinger
 import com.openmausbot.companion.notifications.LocalNotificationPoster
 import com.openmausbot.companion.permissions.CompanionPermissions
 import com.openmausbot.companion.storage.DataStoreConnectionStore
+import com.openmausbot.companion.storage.OnboardingPreferences
 import com.openmausbot.companion.storage.KeystoreTokenStore
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -36,6 +37,14 @@ class OpenMausApp : Application() {
         private set
     lateinit var permissions: CompanionPermissions
         private set
+
+    /**
+     * One instance for the whole process: [Session] writes the first-pair
+     * education marker into it as part of committing a pairing, and the root
+     * router reads it to decide whether that step is due.
+     */
+    lateinit var onboarding: OnboardingPreferences
+        private set
     lateinit var avatars: AvatarImageStore
         private set
     lateinit var voicePreview: VoicePreviewPlayer
@@ -48,10 +57,12 @@ class OpenMausApp : Application() {
         notifications = LocalNotificationPoster(this)
         discovery = NsdDiscovery(this)
         permissions = CompanionPermissions(this)
+        onboarding = OnboardingPreferences(this)
         session = Session(
             scope = appScope,
             connectionStore = DataStoreConnectionStore(this),
             tokenStore = KeystoreTokenStore(this),
+            onboardingStore = onboarding,
             deviceNameProvider = {
                 // User-visible device name; Settings.Global.DEVICE_NAME on API 25+.
                 android.provider.Settings.Global.getString(contentResolver, "device_name")

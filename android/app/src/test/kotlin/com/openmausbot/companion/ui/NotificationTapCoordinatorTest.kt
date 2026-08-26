@@ -7,6 +7,7 @@ import com.openmausbot.companion.core.ChatTarget
 import com.openmausbot.companion.core.Connection
 import com.openmausbot.companion.core.ConnectionStore
 import com.openmausbot.companion.core.Fleet
+import com.openmausbot.companion.core.InMemoryOnboardingStore
 import com.openmausbot.companion.core.ModelSelection
 import com.openmausbot.companion.core.NotificationTarget
 import com.openmausbot.companion.core.Session
@@ -291,6 +292,7 @@ class NotificationTapCoordinatorTest {
                     TokenStore.ReadResult.Found("device-token")
                 override suspend fun remove(connectionId: String) = Unit
             },
+            onboardingStore = InMemoryOnboardingStore(),
             deviceNameProvider = { "Pixel" },
             eventsFn = { _, _, _ -> emptyFlow() },
             hydrateFn = { _, _ -> Fleet(listOf(bot(botId, active, active)), emptyList()) },
@@ -310,6 +312,7 @@ class NotificationTapCoordinatorTest {
                 TokenStore.ReadResult.Missing
             override suspend fun remove(connectionId: String) = Unit
         },
+        onboardingStore = InMemoryOnboardingStore(),
         deviceNameProvider = { "Pixel" },
         eventsFn = { _, _, _ -> emptyFlow() },
         hydrateFn = { _, _ -> Fleet(emptyList(), emptyList()) },

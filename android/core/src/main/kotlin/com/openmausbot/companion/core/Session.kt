@@ -33,6 +33,14 @@ class Session(
     private val scope: CoroutineScope,
     private val connectionStore: ConnectionStore,
     private val tokenStore: TokenStore,
+    /**
+     * The durable first-pair education marker. Deliberately has no default: the
+     * marker is only useful if it outlives the process, and a default would let
+     * a wiring slip in `OpenMausApp` silently swap durability for an in-memory
+     * boolean that dies with the app — the exact failure the marker exists to
+     * prevent, and one no runtime assertion would ever notice.
+     */
+    private val onboardingStore: OnboardingStore,
     private val deviceNameProvider: () -> String,
     private val notificationSink: NotificationSink = NoOpNotificationSink,
     private val httpClient: OkHttpClient = OkHttpClient(),
@@ -225,7 +233,17 @@ class Session(
 
                 try {
                     tokenStore.save(stored.id, paired.token)
-                    connectionStore.save(stored)
+                    // The education marker goes down before the connection
+                    // becomes restorable. A process that stops between the two
+                    // leaves an orphan marker, which the router ignores while
+                    // unpaired; the reverse order would leave a restorable
+                    // pairing that skips first-pair education for good.
+                    PairingCommitSequence.persist(
+                        markNotificationOnboardingPending = {
+                            onboardingStore.setNotificationOnboardingPending(true)
+                        },
+                        saveConnection = { connectionStore.save(stored) },
+                    )
                 } catch (error: Throwable) {
                     if (error is kotlinx.coroutines.CancellationException) throw error
                     _actionError.value = if (qr) qrFailureMessage(error) else error.message
@@ -371,21 +389,7 @@ class Session(
         streamJob?.cancel()
         streamJob = null
         scope.launch {
-            gate.withLock {
-                _restoreState.value = RestoreState.Unpaired
-                endpointRefreshJob?.cancel()
-                endpointRefreshJob = null
-                _connection.value?.id?.let { tokenStore.remove(it) }
-                connectionStore.clear()
-                _connection.value = null
-                client = null
-                token = null
-                rotation = CandidateRotation(emptyList())
-                _state.value = CompanionState()
-                notificationSink.setBadge(0)
-                _status.value = Status.Unpaired
-                emptyInviteQueue()
-            }
+            gate.withLock { unpairLocked() }
         }
     }
 
@@ -393,21 +397,36 @@ class Session(
     suspend fun signOutAndAwait() {
         streamJob?.cancel()
         streamJob = null
-        gate.withLock {
-            _restoreState.value = RestoreState.Unpaired
-            endpointRefreshJob?.cancel()
-            endpointRefreshJob = null
-            _connection.value?.id?.let { tokenStore.remove(it) }
-            connectionStore.clear()
-            _connection.value = null
-            client = null
-            token = null
-            rotation = CandidateRotation(emptyList())
-            _state.value = CompanionState()
-            notificationSink.setBadge(0)
-            _status.value = Status.Unpaired
-            emptyInviteQueue()
-        }
+        gate.withLock { unpairLocked() }
+    }
+
+    /**
+     * What unpairing erases, in one place.
+     *
+     * Both entry points used to carry their own copy of this list, which meant
+     * every rule about what a sign-out has to forget existed twice and could be
+     * true in one copy and false in the other.
+     */
+    private suspend fun unpairLocked() {
+        _restoreState.value = RestoreState.Unpaired
+        endpointRefreshJob?.cancel()
+        endpointRefreshJob = null
+        _connection.value?.id?.let { tokenStore.remove(it) }
+        connectionStore.clear()
+        // The pairing that earned the education step is gone, so its marker goes
+        // with it — the port of the `removeObject(forKey:)` in `signOut()` in
+        // `ios/App/Session.swift`. Leaving it behind would hand the next pairing
+        // an education step it did not earn, and, worse, hand the *same* phone
+        // one that was already answered.
+        onboardingStore.setNotificationOnboardingPending(false)
+        _connection.value = null
+        client = null
+        token = null
+        rotation = CandidateRotation(emptyList())
+        _state.value = CompanionState()
+        notificationSink.setBadge(0)
+        _status.value = Status.Unpaired
+        emptyInviteQueue()
     }
 
     /**

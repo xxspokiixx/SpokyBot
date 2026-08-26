@@ -7,25 +7,54 @@ import kotlin.test.assertFalse
 import kotlin.test.assertTrue
 
 class CompanionPermissionsTest {
+    /**
+     * The two lists are separate, and each holds only what its own moment
+     * earns. A single "everything missing" list is what put a notification
+     * dialog and a nearby-devices dialog on the first frame of a first launch;
+     * the split is the fix, so a request that names something from the other
+     * moment is the regression this asserts against.
+     */
     @Test
-    fun api37ListsNotificationsNearbyAndLocalNetwork() {
+    fun api37SplitsNotificationsFromWhatABrowseNeeds() {
         val granted = mutableSetOf<String>()
         val permissions = CompanionPermissions(
             sdkInt = 37,
             granted = { it in granted },
         )
-        val missing = permissions.requestablePermissions().toList()
+        assertEquals(
+            listOf(Manifest.permission.POST_NOTIFICATIONS),
+            permissions.notificationPermissions().toList(),
+        )
         assertEquals(
             listOf(
-                Manifest.permission.POST_NOTIFICATIONS,
                 Manifest.permission.NEARBY_WIFI_DEVICES,
                 CompanionPermissions.PERMISSION_ACCESS_LOCAL_NETWORK,
             ),
-            missing,
+            permissions.discoveryPermissions().toList(),
         )
-        assertTrue(permissions.snapshot.value.needsRequest)
+        assertFalse(
+            permissions.discoveryPermissions().contains(Manifest.permission.POST_NOTIFICATIONS),
+            "opening the list of nearby computers must not ask for notifications",
+        )
+        assertFalse(
+            permissions.notificationPermissions()
+                .contains(Manifest.permission.NEARBY_WIFI_DEVICES),
+            "the explained notification step must not ask for network access",
+        )
+        assertTrue(permissions.snapshot.value.discoveryNeedsRequest)
         assertFalse(permissions.notificationsGranted())
         assertFalse(permissions.localNetworkGranted())
+    }
+
+    @Test
+    fun grantingOneMomentDoesNotEmptyTheOther() {
+        val granted = mutableSetOf(Manifest.permission.POST_NOTIFICATIONS)
+        val permissions = CompanionPermissions(
+            sdkInt = 37,
+            granted = { it in granted },
+        )
+        assertTrue(permissions.notificationPermissions().isEmpty())
+        assertEquals(2, permissions.discoveryPermissions().size)
     }
 
     @Test
@@ -34,7 +63,8 @@ class CompanionPermissionsTest {
             sdkInt = 32,
             granted = { false },
         )
-        assertTrue(permissions.requestablePermissions().isEmpty())
+        assertTrue(permissions.notificationPermissions().isEmpty())
+        assertTrue(permissions.discoveryPermissions().isEmpty())
         assertTrue(permissions.notificationsGranted())
         assertTrue(permissions.localNetworkGranted())
     }
@@ -46,7 +76,7 @@ class CompanionPermissionsTest {
             sdkInt = 33,
             granted = { it in granted },
         )
-        assertTrue(permissions.snapshot.value.needsRequest)
+        assertTrue(permissions.snapshot.value.discoveryNeedsRequest)
         granted += Manifest.permission.POST_NOTIFICATIONS
         granted += Manifest.permission.NEARBY_WIFI_DEVICES
         val snap = permissions.onRequestResult(
@@ -57,7 +87,7 @@ class CompanionPermissionsTest {
         )
         assertTrue(snap.notificationsGranted)
         assertTrue(snap.nearbyWifiGranted)
-        assertFalse(snap.needsRequest)
+        assertFalse(snap.discoveryNeedsRequest)
     }
 
     @Test
@@ -93,7 +123,11 @@ class CompanionPermissionsTest {
         )
         assertFalse(permissions.recordAudioGranted())
         assertFalse(
-            permissions.requestablePermissions().contains(Manifest.permission.RECORD_AUDIO),
+            permissions.notificationPermissions().contains(Manifest.permission.RECORD_AUDIO),
+            "RECORD_AUDIO must only be asked from the mic button",
+        )
+        assertFalse(
+            permissions.discoveryPermissions().contains(Manifest.permission.RECORD_AUDIO),
             "RECORD_AUDIO must only be asked from the mic button",
         )
         assertEquals(

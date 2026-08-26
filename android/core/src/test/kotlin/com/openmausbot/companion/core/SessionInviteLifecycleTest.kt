@@ -301,6 +301,7 @@ class SessionInviteLifecycleTest {
         scope = backgroundScope,
         connectionStore = connectionStore,
         tokenStore = tokenStore,
+        onboardingStore = InMemoryOnboardingStore(),
         deviceNameProvider = { "Pixel" },
         clientFactory = { connection, token -> CompanionClient(connection, token) },
         pairFn = pairOutcomeFn,
