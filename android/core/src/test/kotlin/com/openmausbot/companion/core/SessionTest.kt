@@ -1472,8 +1472,11 @@ class SessionTest {
         // request this gap, not reset to null.
         assertEquals("stream:2", session.state.value.cursor)
 
+        // `watchScreen`/`stopWatchingScreen` are fire-and-forget onto the session
+        // scope, which here is `backgroundScope`. `advanceUntilIdle()` never runs
+        // background work, so it is `runCurrent()` that has to stand between the
+        // call and the refcount it is being read for.
         session.watchScreen("b1")
-        advanceUntilIdle()
         runCurrent()
         assertEquals(
             listOf<Pair<String?, Boolean>>(null to false, "stream:2" to true),
@@ -1481,16 +1484,15 @@ class SessionTest {
         )
 
         session.watchScreen("b1")
-        advanceUntilIdle()
+        runCurrent()
         assertEquals(2, opens.size)
 
         session.stopWatchingScreen("b1")
-        advanceUntilIdle()
+        runCurrent()
         assertEquals(2, opens.size)
         assertTrue(session.state.value.screens.containsKey("b1"))
 
         session.stopWatchingScreen("b1")
-        advanceUntilIdle()
         runCurrent()
         assertEquals(
             listOf<Pair<String?, Boolean>>(

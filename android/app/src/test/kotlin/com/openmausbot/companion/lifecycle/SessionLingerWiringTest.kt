@@ -9,7 +9,6 @@ import kotlin.test.assertFalse
 import kotlin.test.assertTrue
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.test.advanceTimeBy
-import kotlinx.coroutines.test.advanceUntilIdle
 import kotlinx.coroutines.test.runCurrent
 import kotlinx.coroutines.test.runTest
 import org.w3c.dom.Element
@@ -43,15 +42,11 @@ class SessionLingerWiringTest {
         val sink = RecordingSink()
         val session = session(stream, sink)
         val anchor = FakeAnchor()
-        val owner = TestOwner()
 
-        installSessionLinger(owner.registry, session, backgroundScope, anchor)
-
-        owner.registry.handleLifecycleEvent(Lifecycle.Event.ON_CREATE)
-        owner.registry.handleLifecycleEvent(Lifecycle.Event.ON_START)
-        advanceUntilIdle()
-        stream.emit(hello("s:1", resumed = false))
-        runCurrent()
+        // The same install-and-settle sequence `SessionLingerTest` drives, so
+        // `ON_STOP` below is reached on a session that is genuinely Live rather
+        // than one still Connecting behind a hello that was never collected.
+        val owner = installLive(session, stream, anchor).owner
         assertEquals(1, stream.collectors)
 
         owner.registry.handleLifecycleEvent(Lifecycle.Event.ON_STOP)

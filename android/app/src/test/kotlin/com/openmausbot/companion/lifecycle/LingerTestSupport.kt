@@ -13,9 +13,11 @@ import com.openmausbot.companion.core.TokenStore
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleOwner
 import androidx.lifecycle.LifecycleRegistry
+import kotlin.test.assertEquals
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.test.TestScope
+import kotlinx.coroutines.test.runCurrent
 
 /**
  * Shared fixtures for the linger tests.
@@ -154,6 +156,22 @@ internal fun tokens(result: TokenStore.ReadResult): TokenStore = object : TokenS
     override suspend fun remove(connectionId: String) = Unit
 }
 
+/**
+ * The session every linger test drives, rooted at `backgroundScope`.
+ *
+ * That root is load-bearing for how these tests must be pumped.
+ * `advanceUntilIdle()` never runs background work in
+ * kotlinx-coroutines-test — not a freshly launched task, not a coroutine
+ * already suspended in `delay`, not one waiting on a `Mutex`. So every
+ * fire-and-forget call on this session (`connect`, `signOut`, `watchScreen`,
+ * `stopWatchingScreen`, and the `restore()` its constructor launches) needs
+ * `runCurrent()`, `yield()`, `advanceTimeBy(...)` or an `awaitRestored()` that
+ * actually suspends between the call and any assertion that reads its result.
+ *
+ * An `advanceUntilIdle()` in that gap is a no-op, and a frame emitted across it
+ * lands on a [FakeStream] with no collector yet and is dropped silently —
+ * which leaves the test green while proving nothing. Use [installLive].
+ */
 internal fun TestScope.session(
     stream: FakeStream,
     sink: NotificationSink,
@@ -169,6 +187,45 @@ internal fun TestScope.session(
     eventsFn = { _, since, screens -> stream.open(since, screens) },
     hydrateFn = { _, _ -> hydrate() },
 )
+
+/** The installed coordinator plus the handles the linger tests assert against. */
+internal class LingerScene(
+    val owner: TestOwner,
+    val anchor: FakeAnchor,
+    val controller: SessionLingerController,
+)
+
+/**
+ * Install the real coordinator on a real lifecycle, take the app to the
+ * foreground and (unless told otherwise) settle a live stream.
+ *
+ * `awaitRestored()` + `runCurrent()` rather than `advanceUntilIdle()`: the
+ * session runs on `backgroundScope`, and `advanceUntilIdle` never runs
+ * background work at all. The two assertions below are what make the
+ * difference observable — without them a test can reach `ON_STOP` on a session
+ * that is merely `Connecting`, having silently dropped the hello it thought it
+ * had delivered.
+ */
+internal suspend fun TestScope.installLive(
+    session: Session,
+    stream: FakeStream,
+    anchor: FakeAnchor = FakeAnchor(),
+    awaitHello: Boolean = true,
+    owner: TestOwner = TestOwner(),
+): LingerScene {
+    val controller = installSessionLinger(owner.registry, session, backgroundScope, anchor)
+    owner.registry.handleLifecycleEvent(Lifecycle.Event.ON_CREATE)
+    owner.registry.handleLifecycleEvent(Lifecycle.Event.ON_START)
+    session.awaitRestored()
+    runCurrent()
+    if (awaitHello) {
+        stream.emit(hello("s:1", resumed = false))
+        runCurrent()
+        assertEquals(Session.Status.Live, session.status.value)
+        assertEquals(1, stream.opens)
+    }
+    return LingerScene(owner, anchor, controller)
+}
 
 internal fun hello(cursor: String, resumed: Boolean = true, seq: Int? = null): StreamFrame =
     StreamFrame(com.openmausbot.companion.core.Frame.Hello(cursor, resumed), seq)

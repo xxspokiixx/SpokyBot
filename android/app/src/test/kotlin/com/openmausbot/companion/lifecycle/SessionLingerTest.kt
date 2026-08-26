@@ -595,12 +595,9 @@ class SessionLingerTest {
     private lateinit var currentController: SessionLingerController
 
     /**
-     * Install the real coordinator on a real lifecycle, take the app to the
-     * foreground and (unless told otherwise) settle a live stream.
-     *
-     * `awaitRestored()` rather than `advanceUntilIdle()`: the session runs on
-     * `backgroundScope`, and `advanceUntilIdle` deliberately stops when only
-     * background work is left.
+     * [installLive], plus the two handles this class asserts against across
+     * most of its tests. The install/settle sequence itself lives in
+     * `LingerTestSupport` so the wiring test drives exactly the same one.
      */
     private suspend fun TestScope.live(
         session: Session,
@@ -609,19 +606,10 @@ class SessionLingerTest {
         awaitHello: Boolean = true,
         owner: TestOwner = TestOwner(),
     ): TestOwner {
-        currentAnchor = anchor
-        currentController = installSessionLinger(owner.registry, session, backgroundScope, anchor)
-        owner.registry.handleLifecycleEvent(Lifecycle.Event.ON_CREATE)
-        owner.registry.handleLifecycleEvent(Lifecycle.Event.ON_START)
-        session.awaitRestored()
-        runCurrent()
-        if (awaitHello) {
-            stream.emit(hello("s:1", resumed = false))
-            runCurrent()
-            assertEquals(Session.Status.Live, session.status.value)
-            assertEquals(1, stream.opens)
-        }
-        return owner
+        val scene = installLive(session, stream, anchor, awaitHello, owner)
+        currentAnchor = scene.anchor
+        currentController = scene.controller
+        return scene.owner
     }
 
     private fun delta(threadId: String, text: String, seq: Int): StreamFrame = StreamFrame(
