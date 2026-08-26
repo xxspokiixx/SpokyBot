@@ -1,6 +1,7 @@
 package com.openmausbot.companion.core
 
 import java.io.IOException
+import java.net.ConnectException
 import java.util.Collections
 import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicInteger
@@ -10,7 +11,13 @@ import kotlin.test.assertFailsWith
 import kotlin.test.assertFalse
 import kotlin.test.assertNotNull
 import kotlin.test.assertTrue
+import kotlinx.coroutines.ExperimentalCoroutinesApi
+import kotlinx.coroutines.awaitCancellation
+import kotlinx.coroutines.flow.flow
 import kotlinx.coroutines.runBlocking
+import kotlinx.coroutines.test.advanceTimeBy
+import kotlinx.coroutines.test.runCurrent
+import kotlinx.coroutines.test.runTest
 import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
 import okio.Buffer
@@ -22,6 +29,7 @@ import okhttp3.Request
 import okhttp3.Response
 import okhttp3.ResponseBody.Companion.toResponseBody
 
+@OptIn(ExperimentalCoroutinesApi::class)
 class PairingClientTest {
     @Test
     fun protectedInviteNeverProbesOrRedeemsLanOrBonjour() = runBlocking {
@@ -272,6 +280,110 @@ class PairingClientTest {
         assertEquals("omb_device", outcome.response.token)
         assertTrue(stub.requests.all { it.url.host == "192.168.1.42" })
         assertEquals("004209", stub.pairRequests.single().stringBody("code"))
+    }
+
+    @Test
+    fun pairingProbeWinnerRemainsTheRatchetHeadUntilItsOneWayUpgrade() = runTest {
+        val local = endpoint("http://192.168.1.42:8810", CompanionEndpointKind.LAN, 0)
+        val hosted = endpoint("https://mac.companion.example", CompanionEndpointKind.HOSTED, 100)
+        val unchosenBonjour = endpoint(
+            "http://openmausbot-aa.local:8810",
+            CompanionEndpointKind.BONJOUR,
+            200,
+        )
+        val pairedWithHostedFirst = """{
+            "token":"omb_device",
+            "device":{"id":"d","name":"Pixel","createdAt":1,"lastSeenAt":1},
+            "serverName":"Mac",
+            "endpoints":[
+                {"url":"${hosted.url}","kind":"hosted","priority":0},
+                {"url":"${local.url}","kind":"lan","priority":200},
+                {"url":"${unchosenBonjour.url}","kind":"bonjour","priority":300}
+            ]
+        }""".trimIndent()
+        val stub = PairingStub { request ->
+            when {
+                request.url.encodedPath == "/api/health" && request.url.host == local.host ->
+                    StubAction.reply(200, HEALTH, delayMillis = 40)
+                request.url.encodedPath == "/api/health" -> StubAction.reply(200, HEALTH)
+                request.url.encodedPath == "/api/pair" -> StubAction.reply(201, pairedWithHostedFirst)
+                else -> StubAction.reply(404, "")
+            }
+        }
+        var savedConnection: Connection? = null
+        val connectionStore = object : ConnectionStore {
+            override suspend fun load(): Connection? = savedConnection
+            override suspend fun save(connection: Connection) {
+                savedConnection = connection
+            }
+            override suspend fun clear() {
+                savedConnection = null
+            }
+        }
+        val savedTokens = mutableMapOf<String, String>()
+        val tokenStore = object : TokenStore {
+            override suspend fun save(connectionId: String, token: String) {
+                savedTokens[connectionId] = token
+            }
+            override suspend fun read(connectionId: String): TokenStore.ReadResult =
+                savedTokens[connectionId]?.let(TokenStore.ReadResult::Found)
+                    ?: TokenStore.ReadResult.Missing
+            override suspend fun remove(connectionId: String) {
+                savedTokens.remove(connectionId)
+            }
+        }
+        val streamRoutes = mutableListOf<String>()
+        val session = Session(
+            scope = backgroundScope,
+            connectionStore = connectionStore,
+            tokenStore = tokenStore,
+            deviceNameProvider = { "Pixel" },
+            httpClient = stub.client,
+            clientFactory = { connection, token ->
+                streamRoutes += connection.baseUrl.toString()
+                CompanionClient(connection, token, stub.client)
+            },
+            eventsFn = { client, _, _ ->
+                when (client.connection.baseUrl.toString()) {
+                    local.url -> flow<StreamFrame> { throw ConnectException("refused") }
+                    hosted.url -> flow {
+                        emit(StreamFrame(Frame.Hello(cursor = "s:1", resumed = true), seq = 1))
+                        awaitCancellation()
+                    }
+                    else -> flow { error("the ratchet selected an unapproved route") }
+                }
+            },
+            hydrateFn = { _, _ -> Fleet(emptyList(), emptyList()) },
+            metadataFn = { throw APIError.Status(404) },
+        )
+        session.awaitRestored()
+
+        session.pair(
+            typedConnection(local, hosted, unchosenBonjour),
+            CREDENTIAL,
+            "pair-request-integrated",
+        )
+
+        assertEquals(setOf(local.host, hosted.host), stub.healthRequests.map { it.url.host }.toSet())
+        assertEquals(listOf(local.host), stub.pairRequests.map { it.url.host })
+        assertFalse(stub.requests.any { it.url.host == unchosenBonjour.host })
+        assertEquals(listOf(local.url), streamRoutes, "the probe winner leads the live ratchet")
+        assertEquals(local.url, assertNotNull(savedConnection).activeEndpoint?.url)
+
+        runCurrent()
+
+        assertEquals(
+            listOf(local.url, hosted.url),
+            streamRoutes,
+            "the chosen cleartext route upgrades to hosted instead of being pruned or walking sideways",
+        )
+        assertFalse(streamRoutes.contains(unchosenBonjour.url))
+
+        advanceTimeBy(1_100)
+        runCurrent()
+
+        assertEquals(Session.Status.Live, session.status.value)
+        assertEquals(hosted.url, assertNotNull(savedConnection).activeEndpoint?.url)
     }
 
     private fun endpoint(url: String, kind: CompanionEndpointKind, priority: Int): CompanionEndpoint =

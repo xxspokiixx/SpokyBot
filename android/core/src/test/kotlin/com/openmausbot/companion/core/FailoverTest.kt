@@ -146,6 +146,20 @@ class FailoverTest {
     }
 
     @Test
+    fun pairingAmbiguityIsBroaderThanAuthenticatedRouteRotation() {
+        val unreadableResponse = APIError.Transport("The pairing response could not be read.")
+
+        assertTrue(
+            ConnectionAdvice.shouldRetryPairingOnAnotherRoute(unreadableResponse),
+            "pairing replays the same logical request because no authoritative rejection arrived",
+        )
+        assertFalse(
+            ConnectionAdvice.shouldTryAnotherRoute(unreadableResponse),
+            "an established session does not rotate on an unclassified application/decoding error",
+        )
+    }
+
+    @Test
     fun tunnelGatewayFailureNeverAdvancesFromHostedToLan() {
         val rotation = CandidateRotation(listOf(hosted, lan))
 

@@ -682,7 +682,7 @@ class CompanionClient(
                 } catch (error: CancellationException) {
                     throw error
                 } catch (error: APIError) {
-                    if (ConnectionAdvice.shouldTryAnotherRoute(error)) continue
+                    if (ConnectionAdvice.shouldRetryPairingOnAnotherRoute(error)) continue
                     throw error
                 } catch (_: Exception) {
                     // An unreadable/lost response is ambiguous. A newer sidecar replays the
