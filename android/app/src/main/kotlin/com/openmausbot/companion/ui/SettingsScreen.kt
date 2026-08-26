@@ -38,7 +38,7 @@ import com.openmausbot.companion.R
  * What little the phone gets to configure — the port of
  * `ios/App/SettingsView.swift`.
  *
- * Almost nothing, on purpose: companion settings, API keys and pairing all live
+ * Almost nothing, on purpose: Phone settings, API keys and pairing all live
  * on the computer, because losing the phone must not mean losing the ability to
  * lock it out (§13). This is a status page with an unpair button.
  */
@@ -179,7 +179,7 @@ fun SettingsScreen(onBack: () -> Unit, onOpenRoutines: () -> Unit) {
                     onClick = {
                         confirmingUnpair = false
                         // Local token and connection only. Revoking the device
-                        // itself is Settings → Companion on the computer (§6).
+                        // itself is Settings → Phone on the computer (§6).
                         session.signOut()
                     },
                 ) {

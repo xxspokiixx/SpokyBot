@@ -196,14 +196,21 @@ class FailoverTest {
     }
 
     @Test
-    fun refusedConnectionPointsAtTheCompanionToggle() {
+    fun refusedConnectionPointsAtThePhoneSection() {
         val message = ConnectionAdvice.message(
             ConnectionFailure.CANNOT_CONNECT_TO_HOST,
             "192.168.1.42",
             8810,
         )
-        assertTrue(message.contains("port 8810"))
-        assertTrue(message.contains("Settings → Companion"))
+        // Pinned whole: the port is what the person checks, and the section name
+        // is where they go to check it. The desktop area is called Phone, so
+        // naming a Companion section would send them to a screen that is not
+        // there (`ios/Sources/CompanionCore/Failover.swift:156`).
+        assertEquals(
+            "Reached your computer, but Phone access isn't answering on port 8810 — " +
+                "open OpenMausBot → Settings → Phone. The app keeps retrying automatically.",
+            message,
+        )
     }
 
     @Test

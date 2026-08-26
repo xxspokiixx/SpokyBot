@@ -40,6 +40,25 @@ class SettingsPolicyTest {
         assertEquals("—", SettingsPolicy.addressText(null))
     }
 
+    /**
+     * Both of these send the person to a named area of the desktop app, and that
+     * area is called Phone (`ios/App/SettingsView.swift:289,302`). Pinned whole
+     * rather than by keyword: a footer that still said "Companion" would satisfy
+     * any assertion loose enough to survive the rename.
+     */
+    @Test
+    fun `the footers name the desktop section that exists`() {
+        assertEquals(
+            "Removes the pairing from this phone only. To stop it reaching the computer at all, " +
+                "remove the device in OpenMausBot → Settings → Phone.",
+            SettingsPolicy.UNPAIR_FOOTER,
+        )
+        assertEquals(
+            "Enter whatever Phone settings on your computer shows. The pairing itself is kept.",
+            SettingsPolicy.EDIT_ADDRESS_MESSAGE,
+        )
+    }
+
     @Test
     fun `an IPv6 address keeps its brackets`() {
         assertEquals(

@@ -18,7 +18,7 @@ object ComputerPolicy {
             "signed in inside it."
     const val VNC_NOTE =
         "Interactive VNC session. Access must be enabled for this phone in the computer's " +
-            "Companion settings."
+            "Phone settings."
     const val OPEN_DESKTOP = "Open live cloud desktop"
 
     /**

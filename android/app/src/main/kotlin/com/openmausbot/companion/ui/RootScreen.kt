@@ -175,7 +175,7 @@ private fun UnpairedScreen() {
     val session = LocalCompanion.current.session
     EmptyState(
         title = "This phone was unpaired",
-        description = "It was removed from the computer's companion settings, or the pairing was reset.",
+        description = "It was removed from the computer's Phone settings, or the pairing was reset.",
     ) {
         Button(onClick = { session.signOut() }) { Text("Pair again") }
     }

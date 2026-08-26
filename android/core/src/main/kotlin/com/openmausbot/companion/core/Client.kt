@@ -49,7 +49,7 @@ data class PairingOutcome(
 /** No automatically permitted route identified itself and completed the logical pairing. */
 class PairingRouteError(val attemptedRoutes: List<String>) : IOException(
     "Couldn't reach this computer through any available route " +
-        "(${attemptedRoutes.joinToString()}). Keep OpenMausBot's Companion turned on, then try again.",
+        "(${attemptedRoutes.joinToString()}). Keep Phone access turned on in OpenMausBot, then try again.",
 )
 
 internal const val SCOPED_IPV6_HTTP_HOST = "scoped-ipv6.openmausbot.invalid"

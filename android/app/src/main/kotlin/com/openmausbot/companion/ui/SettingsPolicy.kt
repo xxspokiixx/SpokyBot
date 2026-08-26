@@ -9,7 +9,7 @@ import kotlinx.coroutines.flow.asStateFlow
 /**
  * What little the phone gets to configure — `ios/App/SettingsView.swift`.
  *
- * Almost nothing, on purpose: companion settings, API keys and pairing all live
+ * Almost nothing, on purpose: Phone settings, API keys and pairing all live
  * on the computer, because losing the phone must not mean losing the ability to
  * lock it out (§13). This is a status page with an unpair button.
  */
@@ -25,7 +25,7 @@ object SettingsPolicy {
 
     const val UNPAIR_FOOTER =
         "Removes the pairing from this phone only. To stop it reaching the computer at all, " +
-            "remove the device in OpenMausBot → Settings → Companion."
+            "remove the device in OpenMausBot → Settings → Phone."
 
     const val NOT_HERE =
         "API keys, pairing and the Local VM are managed on the computer. This phone is " +
@@ -35,7 +35,7 @@ object SettingsPolicy {
     const val UNPAIR_CONFIRM_MESSAGE = "You'll need a new pairing code to connect again."
 
     const val EDIT_ADDRESS_MESSAGE =
-        "Enter whatever the Companion panel on your computer shows. The pairing itself is kept."
+        "Enter whatever Phone settings on your computer shows. The pairing itself is kept."
 
     fun statusText(status: Session.Status): String = when (status) {
         Session.Status.Live -> "Connected"

@@ -243,9 +243,21 @@ class DecodingTest {
 
     @Test
     fun decodesTheHarnessErrorBodies() {
-        assertTrue(decodeFixture<APIErrorBody>("unauthorized").error.contains("pair"))
+        // These are captured server contracts and the client shows them to the
+        // person unchanged (`Client.kt` surfaces `APIErrorBody.error` verbatim),
+        // so they are pinned word for word — exactly as
+        // `ios/Tests/CompanionCoreTests/DecodingTests.swift:313-324` pins them.
+        // A "contains pair" assertion would have kept passing when the desktop
+        // renamed its Companion area to Phone and the fixtures were re-captured.
+        assertEquals(
+            "pair this device from Phone settings in OpenMausBot on your computer",
+            decodeFixture<APIErrorBody>("unauthorized").error,
+        )
         assertTrue(decodeFixture<APIErrorBody>("forbidden").error.isNotEmpty())
-        assertTrue(decodeFixture<APIErrorBody>("pair-rejected").error.isNotEmpty())
+        assertEquals(
+            "no pairing is in progress — open Phone settings on your computer",
+            decodeFixture<APIErrorBody>("pair-rejected").error,
+        )
     }
 
     @Test

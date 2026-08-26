@@ -47,6 +47,19 @@ class ComputerPolicyTest {
         )
     }
 
+    /**
+     * The note tells the person where to switch VNC on, so it has to name the
+     * section the desktop has: Phone (`ios/App/ComputerView.swift:89`).
+     */
+    @Test
+    fun `the VNC note names the desktop section that exists`() {
+        assertEquals(
+            "Interactive VNC session. Access must be enabled for this phone in the computer's " +
+                "Phone settings.",
+            ComputerPolicy.VNC_NOTE,
+        )
+    }
+
     @Test
     fun `the status label says whether the picture is still arriving`() {
         assertEquals("Preview", ComputerPolicy.statusLabel(bot(id = "b", busy = true)))

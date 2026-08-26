@@ -242,7 +242,7 @@ internal fun browseDiscoveryFlow(
             terminal(
                 error.message
                     ?: "Local discovery isn't available right now. " +
-                    "Enter the address shown by Companion below.",
+                    "Enter the address shown in Phone settings below.",
             )
         }
     }
@@ -273,7 +273,7 @@ class NsdDiscovery(
                     DiscoveryState.Active(
                         browsing = false,
                         found = emptyList(),
-                        failure = "Local discovery isn't available right now. Enter the address shown by Companion below.",
+                        failure = "Local discovery isn't available right now. Enter the address shown in Phone settings below.",
                     ),
                 )
             }
@@ -353,11 +353,11 @@ class NsdDiscovery(
 
     private fun failureMessage(errorCode: Int): String = when (errorCode) {
         NsdManager.FAILURE_INTERNAL_ERROR ->
-            "Local discovery isn't available right now. Enter the address shown by Companion below."
+            "Local discovery isn't available right now. Enter the address shown in Phone settings below."
         NsdManager.FAILURE_MAX_LIMIT ->
             // Only reached once the retries are spent — nothing is retrying now.
             "Local discovery keeps getting interrupted on this phone. " +
-                "Enter the address shown by Companion below."
+                "Enter the address shown in Phone settings below."
         else ->
             "Local Network access is off. Enable nearby devices permission, or enter a Tailscale address below."
     }

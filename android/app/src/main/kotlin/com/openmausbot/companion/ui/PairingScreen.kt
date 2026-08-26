@@ -278,7 +278,7 @@ fun PairingScreen() {
                     val connection = service.toConnection()
                     if (connection == null) {
                         failure = "That computer did not answer with an address. " +
-                            "Enter the address shown by Companion instead."
+                            "Enter the address shown in Phone settings instead."
                     } else {
                         openPending(connection, fromScan = false)
                     }
@@ -335,7 +335,7 @@ internal fun pairingFailureDisposition(
 @Composable
 private fun SetupSection(onScan: () -> Unit) {
     SectionCard(title = "On your computer") {
-        Text("1.  Open OpenMausBot → Settings → Companion", fontSize = 15.sp)
+        Text("1.  Open OpenMausBot → Settings → Phone", fontSize = 15.sp)
         Text("2.  Choose Set up a phone", fontSize = 15.sp)
         Button(onClick = onScan, modifier = Modifier.fillMaxWidth()) {
             Text("Scan QR Code")
@@ -384,7 +384,7 @@ private fun DiscoverySection(
                     // The honest answer when a network refuses to cooperate.
                     Text(
                         text = "If it never appears, install Tailscale on both and sign in to the " +
-                            "same account — the Companion panel will then show a name ending in " +
+                            "same account — Phone settings will then show a name ending in " +
                             ".ts.net to enter below.",
                         fontSize = 13.sp,
                         color = secondaryTint,
@@ -429,8 +429,9 @@ private fun ManualSection(
             Text("Continue")
         }
         Text(
-            text = "Whatever the Companion panel shows — a secure https:// address, an address " +
-                "on this network, or a Tailscale name like macbook.tail1234.ts.net:8810.",
+            text = "Whatever Phone settings on your computer shows — a secure https:// " +
+                "address, an address on this network, or a Tailscale name like " +
+                "macbook.tail1234.ts.net:8810.",
             fontSize = 13.sp,
             color = secondaryTint,
         )
