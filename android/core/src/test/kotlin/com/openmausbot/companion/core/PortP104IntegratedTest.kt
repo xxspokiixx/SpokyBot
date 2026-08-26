@@ -180,18 +180,18 @@ class PortP104IntegratedTest {
     }
 
     @Test
-    fun explicitLanIsTriedOnceThenTailnetUpgradePrunesItAcrossRestart() = runBlocking {
+    fun explicitLanIsTriedOnceThenHostedUpgradePrunesItAcrossRestart() = runBlocking {
         NetworkSidecar().use { sidecar ->
             val local = endpoint(sidecar.httpUrl(EXPLICIT_LAN), CompanionEndpointKind.LAN, 0)
-            val tailnet = endpoint(sidecar.httpUrl(TAILNET), CompanionEndpointKind.TAILNET, 100)
+            val hosted = endpoint(sidecar.trustedHttpsUrl(HOSTED), CompanionEndpointKind.HOSTED, 100)
             val stores = DurableStores(
                 connection = Connection(
                     id = CONNECTION_ID,
                     name = "Mac",
-                    host = tailnet.host,
-                    port = tailnet.port,
-                    activeEndpoint = tailnet,
-                    endpoints = listOf(tailnet),
+                    host = hosted.host,
+                    port = hosted.port,
+                    activeEndpoint = hosted,
+                    endpoints = listOf(hosted),
                 ),
                 token = DEVICE_TOKEN,
             )
@@ -201,10 +201,10 @@ class PortP104IntegratedTest {
                     else -> jsonResponse("", 404)
                 }
             }
-            sidecar.handle(TAILNET) { request ->
+            sidecar.handle(HOSTED) { request ->
                 when (request.path) {
                     "/api/events" -> liveStream()
-                    "/api/companion/endpoints" -> metadataResponse(listOf(local, tailnet))
+                    "/api/companion/endpoints" -> metadataResponse(listOf(local, hosted))
                     else -> jsonResponse("", 404)
                 }
             }
@@ -218,29 +218,29 @@ class PortP104IntegratedTest {
                 eventually { sidecar.requests(EXPLICIT_LAN, "/api/events").size == 1 }
                 eventually {
                     first.session.status.value == Session.Status.Live &&
-                        sidecar.requests(TAILNET, "/api/events").size >= 2
+                        sidecar.requests(HOSTED, "/api/events").size >= 2
                 }
-                eventually { stores.connection?.activeEndpoint?.url == tailnet.url }
+                eventually { stores.connection?.activeEndpoint?.url == hosted.url }
             } finally {
                 first.close()
             }
 
             val localAttempts = sidecar.requests(EXPLICIT_LAN, "/api/events").size
-            val tailnetAttempts = sidecar.requests(TAILNET, "/api/events").size
+            val hostedAttempts = sidecar.requests(HOSTED, "/api/events").size
             val restored = session(sidecar, stores)
             try {
                 restored.session.awaitRestored()
                 restored.session.connect()
                 eventually {
                     restored.session.status.value == Session.Status.Live &&
-                        sidecar.requests(TAILNET, "/api/events").size > tailnetAttempts
+                        sidecar.requests(HOSTED, "/api/events").size > hostedAttempts
                 }
                 assertEquals(
                     localAttempts,
                     sidecar.requests(EXPLICIT_LAN, "/api/events").size,
                     "store-only restart retried the pruned cleartext LAN with the bearer",
                 )
-                assertEquals(tailnet.url, restored.session.connection.value?.activeEndpoint?.url)
+                assertEquals(hosted.url, restored.session.connection.value?.activeEndpoint?.url)
             } finally {
                 restored.close()
             }
@@ -258,11 +258,11 @@ class PortP104IntegratedTest {
     @Test
     fun lostPairResponseReplaysSameRequestOnProtectedRouteWithoutOrphan() = runBlocking {
         NetworkSidecar().use { sidecar ->
-            val hosted = endpoint(sidecar.trustedHttpsUrl(HOSTED), CompanionEndpointKind.HOSTED, 0)
-            val tailnet = endpoint(sidecar.httpUrl(TAILNET), CompanionEndpointKind.TAILNET, 100)
-            val endpoints = listOf(hosted, tailnet)
+            val tailnet = endpoint(sidecar.httpUrl(TAILNET), CompanionEndpointKind.TAILNET, 0)
+            val hosted = endpoint(sidecar.trustedHttpsUrl(HOSTED), CompanionEndpointKind.HOSTED, 100)
+            val endpoints = listOf(tailnet, hosted)
             val ledger = ConcurrentHashMap<String, String>()
-            sidecar.handle(HOSTED) { request ->
+            sidecar.handle(TAILNET) { request ->
                 when (request.path) {
                     "/api/health" -> healthResponse()
                     "/api/pair" -> {
@@ -275,7 +275,7 @@ class PortP104IntegratedTest {
                     else -> jsonResponse("", 404)
                 }
             }
-            sidecar.handle(TAILNET) { request ->
+            sidecar.handle(HOSTED) { request ->
                 when (request.path) {
                     "/api/health" -> healthResponse()
                     "/api/pair" -> jsonResponse(ledger.computeIfAbsent(request.jsonField("pairRequestId")) {
@@ -287,7 +287,7 @@ class PortP104IntegratedTest {
                 }
             }
             val stores = DurableStores()
-            val connection = typedConnection(hosted, tailnet)
+            val connection = typedConnection(tailnet, hosted)
 
             val first = session(sidecar, stores)
             try {
@@ -299,18 +299,18 @@ class PortP104IntegratedTest {
             }
 
             val pairs = sidecar.requests(path = "/api/pair")
-            assertEquals(listOf(HOSTED, TAILNET), pairs.map { it.host })
+            assertEquals(listOf(TAILNET, HOSTED), pairs.map { it.host })
             assertEquals(listOf(REQUEST_ID, REQUEST_ID), pairs.map { it.jsonField("pairRequestId") })
             assertEquals(1, ledger.size, "the sidecar minted one logical device/token result")
             assertEquals(1, pairs.map { ledger.getValue(it.jsonField("pairRequestId")) }.distinct().size)
 
-            val hostedEvents = sidecar.requests(HOSTED, "/api/events").size
+            val tailnetEvents = sidecar.requests(TAILNET, "/api/events").size
             val restored = session(sidecar, stores)
             try {
                 restored.session.awaitRestored()
                 restored.session.connect()
                 eventually {
-                    sidecar.requests(HOSTED, "/api/events").size > hostedEvents &&
+                    sidecar.requests(TAILNET, "/api/events").size > tailnetEvents &&
                         restored.session.status.value == Session.Status.Live
                 }
             } finally {
@@ -323,26 +323,26 @@ class PortP104IntegratedTest {
     @Test
     fun exactHealthIdentityIsRequiredBeforeCredentialCrossesTheNetwork() = runBlocking {
         NetworkSidecar().use { sidecar ->
-            val hosted = endpoint(sidecar.trustedHttpsUrl(HOSTED), CompanionEndpointKind.HOSTED, 0)
-            val tailnet = endpoint(sidecar.httpUrl(TAILNET), CompanionEndpointKind.TAILNET, 100)
-            val endpoints = listOf(hosted, tailnet)
-            sidecar.handle(HOSTED) { request ->
+            val tailnet = endpoint(sidecar.httpUrl(TAILNET), CompanionEndpointKind.TAILNET, 0)
+            val hosted = endpoint(sidecar.trustedHttpsUrl(HOSTED), CompanionEndpointKind.HOSTED, 100)
+            val endpoints = listOf(tailnet, hosted)
+            sidecar.handle(TAILNET) { request ->
                 when (request.path) {
                     "/api/health" -> jsonResponse("""{"app":"openmausbot-proxy"}""")
                     "/api/pair" -> jsonResponse(pairResponse(endpoints = endpoints), 201)
                     else -> jsonResponse("", 404)
                 }
             }
-            sidecar.handle(TAILNET) { request -> standardSidecarResponse(request, pairResponse(endpoints = endpoints)) }
+            sidecar.handle(HOSTED) { request -> standardSidecarResponse(request, pairResponse(endpoints = endpoints)) }
             val stores = DurableStores()
             val running = session(sidecar, stores)
             try {
-                running.session.pair(typedConnection(hosted, tailnet), QR_CREDENTIAL, REQUEST_ID)
+                running.session.pair(typedConnection(tailnet, hosted), QR_CREDENTIAL, REQUEST_ID)
                 assertTrue(
-                    sidecar.requests(HOSTED, "/api/pair").isEmpty(),
+                    sidecar.requests(TAILNET, "/api/pair").isEmpty(),
                     "a service whose identity is only a prefix match received the pairing credential",
                 )
-                assertEquals(1, sidecar.requests(TAILNET, "/api/pair").size)
+                assertEquals(1, sidecar.requests(HOSTED, "/api/pair").size)
                 awaitLive(running.session)
             } finally {
                 running.close()

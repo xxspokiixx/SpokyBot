@@ -154,7 +154,7 @@ internal val PendingPairingSaver: Saver<PendingPairing?, String> = Saver(
  */
 internal data class PairingConfirmation(
     val name: String,
-    /** Complete HTTPS authority for hosted routes; direct host form for local routes. */
+    /** Complete normalized origin, without any path, query or credential. */
     val address: String,
     val usesHttps: Boolean,
     val step: Step,
@@ -183,7 +183,7 @@ internal data class PairingConfirmation(
             secrets: PairingSecretStore = PairingSecrets,
         ): PairingConfirmation {
             val connection = pending.connection
-            val address = connection.displayAddress
+            val address = connection.pairingConsentOrigin
             return PairingConfirmation(
                 // A discovered service is named by whatever it advertised, so a
                 // blank name is possible in a way `Connection.parse` and

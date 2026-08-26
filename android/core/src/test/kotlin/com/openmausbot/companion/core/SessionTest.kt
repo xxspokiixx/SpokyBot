@@ -138,6 +138,79 @@ class SessionTest {
     }
 
     @Test
+    fun pairEstablishesPolicyBeforeAnyProbeAndFiltersTheResponse() = runTest {
+        val connections = FakeConnectionStore()
+        val selected = assertNotNull(
+            CompanionEndpoint.create("http://192.168.1.42:8810", CompanionEndpointKind.LAN, 0),
+        )
+        val advertisedSelected = assertNotNull(
+            CompanionEndpoint.create("http://192.168.1.42:8810", CompanionEndpointKind.LAN, 200),
+        )
+        val otherLocal = assertNotNull(
+            CompanionEndpoint.create("http://192.168.1.99:8810", CompanionEndpointKind.LAN, 50),
+        )
+        val tailnet = assertNotNull(
+            CompanionEndpoint.create(
+                "http://mac.tail1234.ts.net:8810",
+                CompanionEndpointKind.TAILNET,
+                100,
+            ),
+        )
+        val hosted = assertNotNull(
+            CompanionEndpoint.create("https://mac.example", CompanionEndpointKind.HOSTED, 0),
+        )
+        val session = session(
+            connectionStore = connections,
+            pairOutcomeFn = { invited, _, _, _ ->
+                assertEquals(
+                    setOf(CompanionEndpointKind.LAN, CompanionEndpointKind.HOSTED),
+                    invited.allowedRouteKinds,
+                    "the consent boundary must exist before pairFirstReachable probes or posts",
+                )
+                assertEquals(setOf(selected.url), invited.allowedLocalRouteURLs)
+                PairingOutcome(
+                    response = PairResponse(
+                        token = "device-token",
+                        device = PairedDevice("d1", "Pixel", 1.0, 1.0),
+                        serverName = "Mac",
+                        hosts = listOf(otherLocal.host, selected.host, tailnet.host),
+                        endpoints = listOf(otherLocal, tailnet, hosted, advertisedSelected),
+                    ),
+                    connection = invited,
+                )
+            },
+            events = { _, _ -> emptyFlow() },
+        )
+        session.awaitRestored()
+
+        session.pair(
+            Connection(
+                name = "Mac",
+                host = selected.host,
+                port = selected.port,
+                activeEndpoint = selected,
+                endpoints = listOf(selected),
+            ),
+            "123456",
+        )
+        advanceUntilIdle()
+
+        val stored = assertNotNull(connections.saved)
+        assertEquals(
+            setOf(CompanionEndpointKind.LAN, CompanionEndpointKind.HOSTED),
+            stored.allowedRouteKinds,
+        )
+        assertEquals(setOf(selected.url), stored.allowedLocalRouteURLs)
+        assertEquals(
+            listOf(hosted.url, advertisedSelected.url),
+            stored.endpoints.orEmpty().map { it.url },
+            "the pair response must not persist unconsented authorities even if reads filter them",
+        )
+        assertEquals(listOf(hosted.url, selected.url), stored.orderedEndpoints.map { it.url })
+        assertEquals(listOf(selected.host), stored.hosts)
+    }
+
+    @Test
     fun pairPersistsTypedEndpointMetadataAndKeepsTheRedeemingHttpsRouteActive() = runTest {
         val connections = FakeConnectionStore()
         val hosted = assertNotNull(
@@ -166,7 +239,8 @@ class SessionTest {
 
         val stored = assertNotNull(connections.saved)
         assertEquals("https://mac.example", stored.activeEndpoint?.url)
-        assertEquals(listOf(hosted, lan), stored.endpoints)
+        assertEquals(listOf(hosted), stored.endpoints)
+        assertEquals(setOf(CompanionEndpointKind.HOSTED), stored.allowedRouteKinds)
         assertEquals("https://mac.example", stored.baseUrl.toString())
         assertFalse(CompanionJson.encodeToString(stored).contains("device-token"))
     }
@@ -186,14 +260,14 @@ class SessionTest {
         )
         val invitation = Connection(
             name = "Mac",
-            host = hosted.host,
-            port = hosted.port,
-            activeEndpoint = hosted,
-            endpoints = listOf(hosted, tailnet),
+            host = tailnet.host,
+            port = tailnet.port,
+            activeEndpoint = tailnet,
+            endpoints = listOf(tailnet, hosted),
         )
         val session = session(
             connectionStore = connections,
-            pairOutcomeFn = { _, _, _, _ ->
+            pairOutcomeFn = { invited, _, _, _ ->
                 PairingOutcome(
                     PairResponse(
                         token = "device-token",
@@ -201,7 +275,7 @@ class SessionTest {
                         serverName = "Mac",
                         endpoints = listOf(hosted, tailnet),
                     ),
-                    invitation.dialing(tailnet),
+                    invited.dialing(tailnet),
                 )
             },
             events = { _, _ -> emptyFlow() },
@@ -215,6 +289,10 @@ class SessionTest {
         assertEquals(tailnet, stored.activeEndpoint)
         assertEquals(tailnet.host, stored.host)
         assertEquals(listOf(tailnet.host), stored.hosts)
+        assertEquals(
+            setOf(CompanionEndpointKind.TAILNET, CompanionEndpointKind.HOSTED),
+            stored.allowedRouteKinds,
+        )
         assertEquals(tailnet, session.connection.value?.activeEndpoint)
     }
 
@@ -417,6 +495,16 @@ class SessionTest {
         val hosted = assertNotNull(
             CompanionEndpoint.create("https://mac.example", CompanionEndpointKind.HOSTED, 0),
         )
+        val tailnet = assertNotNull(
+            CompanionEndpoint.create(
+                "http://mac.tail1234.ts.net:8810",
+                CompanionEndpointKind.TAILNET,
+                100,
+            ),
+        )
+        val otherLocal = assertNotNull(
+            CompanionEndpoint.create("http://192.168.1.99:8810", CompanionEndpointKind.LAN, 50),
+        )
         val saved = Connection(
             id = "local",
             name = "Mac",
@@ -424,7 +512,7 @@ class SessionTest {
             port = local.port,
             activeEndpoint = local,
             endpoints = listOf(local),
-        )
+        ).establishingRoutePolicyFromInvite()
         val connections = FakeConnectionStore(saved)
         val dialed = mutableListOf<String>()
         val session = session(
@@ -443,8 +531,8 @@ class SessionTest {
             metadata = {
                 CompanionConnectionMetadata(
                     serverName = "Ada's Mac",
-                    hosts = listOf("mac.example", "192.168.1.42"),
-                    endpoints = listOf(hosted, local),
+                    hosts = listOf(tailnet.host, otherLocal.host, local.host),
+                    endpoints = listOf(otherLocal, tailnet, hosted, local),
                 )
             },
         )
@@ -457,6 +545,12 @@ class SessionTest {
         // The snapshot is learned and persisted…
         val stored = assertNotNull(connections.saved)
         assertEquals("Ada's Mac", stored.name)
+        assertEquals(
+            listOf(hosted, local),
+            stored.endpoints,
+            "the authenticated refresh must not persist unconsented authorities",
+        )
+        assertEquals(listOf(local.host), stored.hosts)
         assertEquals(listOf(hosted.url, local.url), stored.orderedEndpoints.map { it.url })
         // …but the client carrying the live stream is not rebuilt underneath it.
         assertEquals(listOf("http://192.168.1.42:8810"), dialed)
@@ -837,7 +931,59 @@ class SessionTest {
         assertEquals(original.id, updated.id)
         assertEquals("https://new.example:9443", updated.activeEndpoint?.url)
         assertEquals("https://new.example:9443", updated.baseUrl.toString())
+        assertEquals(setOf(CompanionEndpointKind.HOSTED), updated.allowedRouteKinds)
+        assertEquals(emptySet(), updated.allowedLocalRouteURLs)
         assertEquals(updated, session.connection.value)
+    }
+
+    @Test
+    fun editingTheAddressStopsPersistingThePreviouslyConsentedAuthorities() = runTest {
+        val hosted = assertNotNull(
+            CompanionEndpoint.create("https://mac.example", CompanionEndpointKind.HOSTED, 0),
+        )
+        val tailnet = assertNotNull(
+            CompanionEndpoint.create(
+                "http://mac.tail1234.ts.net:8810",
+                CompanionEndpointKind.TAILNET,
+                100,
+            ),
+        )
+        val typed = assertNotNull(
+            CompanionEndpoint.create("http://192.168.1.42:8810", CompanionEndpointKind.LAN, 0),
+        )
+        val paired = Connection(
+            id = "tailnet",
+            name = "Mac",
+            host = tailnet.host,
+            port = tailnet.port,
+            hosts = listOf(tailnet.host),
+            activeEndpoint = tailnet,
+            endpoints = listOf(tailnet, hosted),
+        ).establishingRoutePolicyFromInvite()
+        val connections = FakeConnectionStore(paired)
+        val session = session(
+            connectionStore = connections,
+            tokenStore = FakeTokenStore().apply { saved[paired.id] = "device-token" },
+            events = { _, _ -> emptyFlow() },
+        )
+        session.awaitRestored()
+
+        assertTrue(session.updateAddressAndAwait("192.168.1.42:8810"))
+
+        // Everything below reads the record that reached the store, not a filtered view of it.
+        val stored = assertNotNull(connections.saved)
+        assertEquals(
+            setOf(CompanionEndpointKind.LAN, CompanionEndpointKind.HOSTED),
+            stored.allowedRouteKinds,
+        )
+        assertEquals(setOf(typed.url), stored.allowedLocalRouteURLs)
+        assertEquals(
+            listOf(typed, hosted),
+            stored.endpoints,
+            "the tailnet route the user replaced by hand must not stay on disk",
+        )
+        assertEquals(listOf(typed.host), stored.hosts)
+        assertEquals(stored, session.connection.value)
     }
 
     @Test

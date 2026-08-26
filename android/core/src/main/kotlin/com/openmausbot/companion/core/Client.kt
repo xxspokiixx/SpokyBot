@@ -60,32 +60,38 @@ internal const val SCOPED_IPV6_HTTP_HOST = "scoped-ipv6.openmausbot.invalid"
  * uses a private synthetic hostname in HttpUrl. ScopedIpv6Dns maps that name
  * straight to the scoped Inet6Address OkHttp passes to Socket.connect.
  */
-internal fun Connection.httpEndpoint(fallbackDns: Dns): ConnectionEndpoint? = runCatching {
-    val dialingHost = activeEndpoint?.host ?: host
-    val dialingPort = activeEndpoint?.port ?: port
-    val dialingScheme = if (activeEndpoint?.isSecure == true) "https" else "http"
-    val bareHost = if (dialingHost.startsWith('[') && dialingHost.endsWith(']')) {
-        dialingHost.substring(1, dialingHost.length - 1)
-    } else {
-        dialingHost
-    }
-    val zoneAt = if (':' in bareHost) bareHost.indexOf('%') else -1
-    require(zoneAt < 0 || zoneAt < bareHost.lastIndex) { "IPv6 zone identifier is empty" }
-    val addressHost = if (zoneAt >= 0) bareHost.substring(0, zoneAt) else bareHost
-    val httpHost = if (zoneAt >= 0) SCOPED_IPV6_HTTP_HOST else addressHost
-    val zone = if (zoneAt >= 0) bareHost.substring(zoneAt + 1) else null
-    val url = HttpUrl.Builder()
-        .scheme(dialingScheme)
-        .host(httpHost)
-        .port(dialingPort)
-        .build()
-    val dns = if (zone == null) {
-        fallbackDns
-    } else {
-        ScopedIpv6Dns(url.host, addressHost, zone, fallbackDns)
-    }
-    ConnectionEndpoint(url, dns)
-}.getOrNull()
+internal fun Connection.httpEndpoint(fallbackDns: Dns): ConnectionEndpoint? {
+    val dialingEndpoint = activeEndpoint
+        ?: CompanionEndpoint.direct(host, port, priority = 0)
+        ?: return null
+    if (!allowsEndpoint(dialingEndpoint)) return null
+    return runCatching {
+        val dialingHost = dialingEndpoint.host
+        val dialingPort = dialingEndpoint.port
+        val dialingScheme = if (dialingEndpoint.isSecure) "https" else "http"
+        val bareHost = if (dialingHost.startsWith('[') && dialingHost.endsWith(']')) {
+            dialingHost.substring(1, dialingHost.length - 1)
+        } else {
+            dialingHost
+        }
+        val zoneAt = if (':' in bareHost) bareHost.indexOf('%') else -1
+        require(zoneAt < 0 || zoneAt < bareHost.lastIndex) { "IPv6 zone identifier is empty" }
+        val addressHost = if (zoneAt >= 0) bareHost.substring(0, zoneAt) else bareHost
+        val httpHost = if (zoneAt >= 0) SCOPED_IPV6_HTTP_HOST else addressHost
+        val zone = if (zoneAt >= 0) bareHost.substring(zoneAt + 1) else null
+        val url = HttpUrl.Builder()
+            .scheme(dialingScheme)
+            .host(httpHost)
+            .port(dialingPort)
+            .build()
+        val dns = if (zone == null) {
+            fallbackDns
+        } else {
+            ScopedIpv6Dns(url.host, addressHost, zone, fallbackDns)
+        }
+        ConnectionEndpoint(url, dns)
+    }.getOrNull()
+}
 
 internal class ScopedIpv6Dns(
     private val targetHost: String,

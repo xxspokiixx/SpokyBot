@@ -171,8 +171,15 @@ class Session(
 
             val qr = isQrCredential(credential)
             val deviceName = deviceNameProvider()
+            // A parsed QR already carries this policy. Manual/discovered entry establishes the
+            // same boundary here, before pairFirstReachable can probe or redeem on any route.
+            val invited = if (connection.allowedRouteKinds == null) {
+                connection.establishingRoutePolicyFromInvite()
+            } else {
+                connection
+            }
             val outcome = try {
-                pairFn(connection, credential, deviceName, pairRequestId)
+                pairFn(invited, credential, deviceName, pairRequestId)
             } catch (error: Throwable) {
                 if (error is kotlinx.coroutines.CancellationException) throw error
                 val routeFailure = error is PairingRouteError
@@ -183,10 +190,14 @@ class Session(
             if (qr) burnQrCredential(credential)
 
             val paired = outcome.response
-            var stored = outcome.connection
+            // Route dialing may change the active endpoint, but neither it nor the response may
+            // replace the policy captured from the user's original selection.
+            var stored = outcome.connection.copy(
+                allowedRouteKinds = invited.allowedRouteKinds,
+                allowedLocalRouteURLs = invited.allowedLocalRouteURLs,
+            )
             if (paired.serverName.isNotEmpty()) stored = stored.copy(name = paired.serverName)
-            if (!paired.hosts.isNullOrEmpty()) stored = stored.copy(hosts = paired.hosts)
-            if (!paired.endpoints.isNullOrEmpty()) stored = stored.copy(endpoints = paired.endpoints.take(8))
+            stored = stored.applyingPairingAdvertisement(paired.hosts, paired.endpoints)
             val winner = outcome.connection.activeEndpoint
                 ?: CompanionEndpoint.direct(outcome.connection.host, outcome.connection.port, priority = 10_000)
             stored = winner?.let(stored::promoting) ?: stored.promoting(stored.host)
@@ -722,10 +733,7 @@ class Session(
         val endpoint = parsed.activeEndpoint
             ?: CompanionEndpoint.direct(parsed.host, parsed.port, priority = 0)
             ?: return false
-        val existingRoutes = current.orderedEndpoints
-        val updated = current.promoting(endpoint).copy(
-            endpoints = (listOf(endpoint) + existingRoutes.filterNot { it.url == endpoint.url }).take(8),
-        )
+        val updated = current.resettingRoutePolicy(endpoint)
         scope.launch {
             gate.withLock {
                 _connection.value = updated
@@ -747,10 +755,7 @@ class Session(
         val endpoint = parsed.activeEndpoint
             ?: CompanionEndpoint.direct(parsed.host, parsed.port, priority = 0)
             ?: return false
-        val existingRoutes = current.orderedEndpoints
-        val updated = current.promoting(endpoint).copy(
-            endpoints = (listOf(endpoint) + existingRoutes.filterNot { it.url == endpoint.url }).take(8),
-        )
+        val updated = current.resettingRoutePolicy(endpoint)
         gate.withLock {
             _connection.value = updated
             connectionStore.save(updated)

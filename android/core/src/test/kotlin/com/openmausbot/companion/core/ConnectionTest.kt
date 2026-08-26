@@ -238,19 +238,19 @@ class ConnectionTest {
     }
 
     @Test
-    fun carriesFallbackHostsFromTheInvite() {
+    fun pairingInviteKeepsOnlyFallbackHostsAllowedByItsSelectedRoute() {
         val invite = PairingInvite.parse(URI(
             "openmausbot://pair?address=macbook.tail1234.ts.net%3A8810&code=004209" +
                 "&hosts=macbook.tail1234.ts.net,192.168.1.42,openmausbot-aa.local",
         ))!!
         assertEquals(
-            listOf("macbook.tail1234.ts.net", "192.168.1.42", "openmausbot-aa.local"),
+            listOf("macbook.tail1234.ts.net"),
             invite.connection.hosts,
         )
     }
 
     @Test
-    fun carriesSortedDeduplicatedTypedEndpointsFromTheInvite() {
+    fun typedInviteEstablishesPolicyFromItsSelectedEndpoint() {
         val routes = """
             [
               {"url":"http://192.168.1.42:8810","kind":"lan","priority":200},
@@ -268,19 +268,10 @@ class ConnectionTest {
         assertEquals("https://mac.example", invite.connection.baseUrl.toString())
         assertEquals(CompanionEndpointKind.HOSTED, invite.connection.activeEndpoint?.kind)
         assertEquals(
-            listOf(
-                CompanionEndpointKind.HOSTED,
-                CompanionEndpointKind.TAILNET,
-                CompanionEndpointKind.TAILNET,
-                CompanionEndpointKind.LAN,
-            ),
+            listOf(CompanionEndpointKind.HOSTED),
             invite.connection.orderedEndpoints.map { it.kind },
         )
-        assertEquals(
-            listOf("first.tail.ts.net", "second.tail.ts.net"),
-            invite.connection.orderedEndpoints.filter { it.kind == CompanionEndpointKind.TAILNET }.map { it.host },
-            "equal priorities retain advertisement order",
-        )
+        assertEquals(setOf(CompanionEndpointKind.HOSTED), invite.connection.allowedRouteKinds)
     }
 
     @Test
@@ -318,7 +309,7 @@ class ConnectionTest {
         val invite = PairingInvite.parse(URI(
             "openmausbot://pair?address=mac.local&code=004209&hosts=%20192.168.1.42%20,,bad%2Fslash,has%20space",
         ))!!
-        assertEquals(listOf("192.168.1.42"), invite.connection.hosts)
+        assertEquals(emptyList(), invite.connection.hosts)
         val empty = PairingInvite.parse(
             URI("openmausbot://pair?address=mac.local&code=004209&hosts=bad%2Fslash"),
         )

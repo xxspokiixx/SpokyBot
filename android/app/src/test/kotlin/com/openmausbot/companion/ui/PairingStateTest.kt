@@ -285,7 +285,7 @@ class PairingFailureDispositionTest {
  * The expectations here come from the Swift, not from the Kotlin they check.
  * Two things are load-bearing there:
  *
- *  - `Text(connection.name)` and `Text(connection.displayAddress)`
+ *  - `Text(connection.name)` and `Text(connection.pairingConsentOrigin)`
  *    sit **above** `if let credential = scannedCredential`, so both are on
  *    screen before confirming a scan *and* before typing six digits.
  *  - the scanned branch reads: "Confirm this computer to establish an
@@ -316,7 +316,7 @@ class PairingConfirmationTest {
         val confirmation = PairingConfirmation.of(scanned(secrets), secrets)
 
         assertEquals("Kesley's Ubuntu", confirmation.name)
-        assertEquals("192.168.1.42", confirmation.address)
+        assertEquals("http://192.168.1.42:8810", confirmation.address)
         assertEquals(
             PairingConfirmation.Step.Confirm(credential),
             confirmation.step,
@@ -331,7 +331,7 @@ class PairingConfirmationTest {
         val confirmation = PairingConfirmation.of(typed(secrets), secrets)
 
         assertEquals("Kesley's Ubuntu", confirmation.name)
-        assertEquals("192.168.1.42", confirmation.address)
+        assertEquals("http://192.168.1.42:8810", confirmation.address)
         assertEquals(PairingConfirmation.Step.EnterCode, confirmation.step)
     }
 
@@ -343,7 +343,7 @@ class PairingConfirmationTest {
 
         assertEquals(PairingConfirmation.Step.Rescan, confirmation.step)
         assertEquals("Kesley's Ubuntu", confirmation.name)
-        assertEquals("192.168.1.42", confirmation.address)
+        assertEquals("http://192.168.1.42:8810", confirmation.address)
     }
 
     @Test
@@ -369,7 +369,7 @@ class PairingConfirmationTest {
         for (confirmation in every) {
             assertTrue(confirmation.name.isNotBlank(), "a step with no name: ${confirmation.step}")
             assertEquals(
-                connection.displayAddress,
+                connection.pairingConsentOrigin,
                 confirmation.address,
                 "a step without a display authority: ${confirmation.step}",
             )
@@ -386,8 +386,8 @@ class PairingConfirmationTest {
             handle = secrets.open(),
         )
         val confirmation = PairingConfirmation.of(nameless, secrets)
-        assertEquals("192.168.1.42", confirmation.name)
-        assertEquals("192.168.1.42", confirmation.address)
+        assertEquals("http://192.168.1.42:8810", confirmation.name)
+        assertEquals("http://192.168.1.42:8810", confirmation.address)
     }
 
     @Test
@@ -398,7 +398,7 @@ class PairingConfirmationTest {
             fromScan = false,
             handle = secrets.open(),
         )
-        assertEquals("[fe80::1]", PairingConfirmation.of(ipv6, secrets).address)
+        assertEquals("http://[fe80::1]:8810", PairingConfirmation.of(ipv6, secrets).address)
     }
 
     @Test

@@ -20,12 +20,26 @@ data class Connection(
     val hosts: List<String>? = null,
     val activeEndpoint: CompanionEndpoint? = null,
     val endpoints: List<CompanionEndpoint>? = null,
+    /**
+     * Route kinds explicitly authorized when this pairing was created. Null is reserved for
+     * connections saved before route consent existed and retains their legacy behavior.
+     */
+    val allowedRouteKinds: Set<CompanionEndpointKind>? = null,
+    /** Exact normalized cleartext origins shown on the pairing confirmation. */
+    val allowedLocalRouteURLs: Set<String>? = null,
 ) {
     val baseUrl: URI?
-        get() = activeEndpoint?.baseUrl ?: runCatching {
-            val normalized = urlHost(host).replace("%", "%25")
-            URI("http://$normalized:$port")
-        }.getOrNull()
+        get() {
+            activeEndpoint?.let { endpoint ->
+                return endpoint.baseUrl.takeIf { allowsEndpoint(endpoint) }
+            }
+            val endpoint = CompanionEndpoint.direct(host, port, priority = 0) ?: return null
+            if (!allowsEndpoint(endpoint)) return null
+            return runCatching {
+                val normalized = urlHost(host).replace("%", "%25")
+                URI("http://$normalized:$port")
+            }.getOrNull()
+        }
 
     val displayAddress: String
         get() = activeEndpoint?.displayAddress ?: if (port == CompanionEndpoint.DEFAULT_COMPANION_PORT) {
@@ -34,14 +48,104 @@ data class Connection(
             "$host:$port"
         }
 
-    val orderedHosts: List<String>
-        get() = buildList {
-            val seen = mutableSetOf<String>()
-            for (candidate in listOf(host) + hosts.orEmpty()) {
-                val normalized = urlHost(candidate)
-                if (seen.add(normalized)) add(normalized)
-            }
+    /** The normalized origin whose authority the pairing confirmation authorizes. */
+    val pairingConsentOrigin: String
+        get() = activeEndpoint?.url
+            ?: CompanionEndpoint.direct(host, port, priority = 0)?.url
+            ?: displayAddress
+
+    /** Hosted is the only universally allowed upgrade once an explicit policy exists. */
+    fun allowsRouteKind(kind: CompanionEndpointKind): Boolean =
+        allowedRouteKinds == null || kind == CompanionEndpointKind.HOSTED || kind in allowedRouteKinds
+
+    /** Local cleartext additionally requires the exact normalized origin shown to the user. */
+    fun allowsEndpoint(endpoint: CompanionEndpoint): Boolean {
+        if (!allowsRouteKind(endpoint.kind)) return false
+        if (endpoint.securityClass != CompanionEndpointSecurityClass.EXPLICIT_LOCAL || allowedRouteKinds == null) {
+            return true
         }
+        return allowedLocalRouteURLs?.contains(endpoint.url) == true
+    }
+
+    fun endpointsAllowedByRoutePolicy(candidates: List<CompanionEndpoint>): List<CompanionEndpoint> =
+        candidates.filter(::allowsEndpoint)
+
+    /** Bind a new pairing to its selected route before any probe or credential redemption. */
+    fun establishingRoutePolicyFromInvite(): Connection {
+        val selected = activeEndpoint
+            ?: CompanionEndpoint.direct(host, port, priority = 0)
+        val kinds = when (selected?.kind) {
+            CompanionEndpointKind.HOSTED, null -> setOf(CompanionEndpointKind.HOSTED)
+            CompanionEndpointKind.TAILNET -> setOf(
+                CompanionEndpointKind.TAILNET,
+                CompanionEndpointKind.HOSTED,
+            )
+            CompanionEndpointKind.LAN -> setOf(
+                CompanionEndpointKind.LAN,
+                CompanionEndpointKind.HOSTED,
+            )
+            CompanionEndpointKind.BONJOUR -> setOf(
+                CompanionEndpointKind.BONJOUR,
+                CompanionEndpointKind.HOSTED,
+            )
+        }
+        val localURLs = if (selected?.securityClass == CompanionEndpointSecurityClass.EXPLICIT_LOCAL) {
+            setOf(selected.url)
+        } else {
+            emptySet()
+        }
+        val policy = copy(allowedRouteKinds = kinds, allowedLocalRouteURLs = localURLs)
+        return policy.copy(
+            endpoints = endpoints?.let(policy::endpointsAllowedByRoutePolicy)?.take(MAX_ENDPOINTS),
+            hosts = hosts?.let(policy::advertisedHostsAllowedByRoutePolicy)?.take(MAX_ENDPOINTS),
+        )
+    }
+
+    /** Apply a pairing response without letting its full interface list widen consent. */
+    fun applyingPairingAdvertisement(
+        advertisedHosts: List<String>?,
+        advertisedEndpoints: List<CompanionEndpoint>?,
+    ): Connection {
+        var updated = this
+        if (!advertisedHosts.isNullOrEmpty()) {
+            updated = updated.copy(
+                hosts = updated.advertisedHostsAllowedByRoutePolicy(advertisedHosts).take(MAX_ENDPOINTS),
+            )
+        }
+        if (!advertisedEndpoints.isNullOrEmpty()) {
+            val accepted = updated.endpointsAllowedByRoutePolicy(advertisedEndpoints)
+            if (accepted.isNotEmpty()) updated = updated.copy(endpoints = accepted.take(MAX_ENDPOINTS))
+        }
+        return updated
+    }
+
+    /** A hand-entered route is fresh consent and replaces, rather than widens, the old policy. */
+    fun resettingRoutePolicy(selected: CompanionEndpoint): Connection {
+        val previousEndpoints = orderedEndpoints
+        val kinds = setOf(selected.kind, CompanionEndpointKind.HOSTED)
+        val localURLs = if (selected.securityClass == CompanionEndpointSecurityClass.EXPLICIT_LOCAL) {
+            setOf(selected.url)
+        } else {
+            emptySet()
+        }
+        val policy = copy(
+            host = selected.host,
+            port = selected.port,
+            activeEndpoint = selected,
+            allowedRouteKinds = kinds,
+            allowedLocalRouteURLs = localURLs,
+        )
+        return policy.copy(
+            endpoints = (listOf(selected) + policy.endpointsAllowedByRoutePolicy(previousEndpoints)
+                .filterNot { it.url == selected.url }).take(MAX_ENDPOINTS),
+            hosts = policy.advertisedHostsAllowedByRoutePolicy(
+                listOf(selected.host) + hosts.orEmpty(),
+            ).take(MAX_ENDPOINTS),
+        )
+    }
+
+    val orderedHosts: List<String>
+        get() = advertisedHostsAllowedByRoutePolicy(listOf(host) + hosts.orEmpty())
 
     /**
      * Every complete route this connection may dial, in selection order.
@@ -71,7 +175,7 @@ data class Connection(
                     advertised
                 }
             }
-            return candidates.distinctBy { it.url }.take(MAX_ENDPOINTS)
+            return endpointsAllowedByRoutePolicy(candidates).distinctBy { it.url }.take(MAX_ENDPOINTS)
         }
 
     val automaticEndpoints: List<CompanionEndpoint>
@@ -87,23 +191,24 @@ data class Connection(
      * other cleartext address that happens to be advertised now.
      */
     fun reconciling(metadata: CompanionConnectionMetadata): Connection {
-        val previousActive = activeEndpoint
+        val previousActive = activeEndpoint?.takeIf(::allowsEndpoint)
+        val refreshedEndpoints = endpointsAllowedByRoutePolicy(metadata.endpoints)
         val refreshedActive = previousActive?.let { active ->
-            metadata.endpoints.firstOrNull { it.url == active.url }
+            refreshedEndpoints.firstOrNull { it.url == active.url }
         }
-        val protectedReplacement = metadata.endpoints.firstOrNull { it.protectsCredentials }
+        val protectedReplacement = refreshedEndpoints.firstOrNull { it.protectsCredentials }
         val retained = previousActive?.let { CompanionEndpoint.create(it.url, it.kind, priority = 0) }
-        val active = refreshedActive ?: protectedReplacement ?: retained ?: metadata.endpoints.firstOrNull()
+        val active = refreshedActive ?: protectedReplacement ?: retained ?: refreshedEndpoints.firstOrNull()
         val routes = if (refreshedActive == null && protectedReplacement == null && retained != null) {
-            listOf(retained) + metadata.endpoints.filterNot { it.url == retained.url }.take(MAX_ENDPOINTS - 1)
+            listOf(retained) + refreshedEndpoints.filterNot { it.url == retained.url }.take(MAX_ENDPOINTS - 1)
         } else {
-            metadata.endpoints
+            refreshedEndpoints
         }
         return copy(
             name = displayName(metadata.serverName) ?: name,
             host = active?.host ?: host,
             port = active?.port ?: port,
-            hosts = metadata.hosts?.let(::advertisedHosts) ?: hosts,
+            hosts = metadata.hosts?.let(::advertisedHostsAllowedByRoutePolicy) ?: hosts,
             activeEndpoint = active,
             endpoints = routes,
         )
@@ -116,21 +221,26 @@ data class Connection(
         return dialing(endpoint)
     }
 
-    fun dialing(candidate: CompanionEndpoint): Connection = copy(
-        host = candidate.host,
-        port = candidate.port,
-        activeEndpoint = candidate,
-    )
+    fun dialing(candidate: CompanionEndpoint): Connection {
+        if (!allowsEndpoint(candidate)) return this
+        return copy(
+            host = candidate.host,
+            port = candidate.port,
+            activeEndpoint = candidate,
+        )
+    }
 
     fun promoting(winner: String): Connection {
         val normalized = urlHost(winner)
         val endpoint = CompanionEndpoint.direct(normalized, port, priority = 10_000) ?: return this
+        if (!allowsEndpoint(endpoint)) return this
         if (activeEndpoint?.protectsCredentials == true && !endpoint.protectsCredentials) return this
         val rest = orderedHosts.filterNot { it == normalized }
         return copy(hosts = listOf(normalized) + rest).promoting(endpoint)
     }
 
     fun promoting(winner: CompanionEndpoint): Connection {
+        if (!allowsEndpoint(winner)) return this
         val typed = endpoints?.let { existing ->
             if (existing.any { it.url == winner.url }) existing else existing + winner
         }
@@ -147,6 +257,11 @@ data class Connection(
             endpoints = typed,
         )
     }
+
+    private fun advertisedHostsAllowedByRoutePolicy(candidates: List<String>): List<String> =
+        advertisedHosts(candidates).filter { candidate ->
+            CompanionEndpoint.direct(candidate, port, priority = 0)?.let(::allowsEndpoint) == true
+        }
 
     companion object {
         /** Trim a server-supplied display name to something printable; null when nothing remains. */
@@ -283,7 +398,7 @@ data class PairingInvite(val connection: Connection, val credential: String) {
                 connection = connection.copy(endpoints = endpoints).dialing(endpoints.first())
             }
 
-            return PairingInvite(connection, credential)
+            return PairingInvite(connection.establishingRoutePolicyFromInvite(), credential)
         }
 
         fun parse(url: String): PairingInvite? = runCatching { URI(url) }.getOrNull()?.let(::parse)
