@@ -278,6 +278,66 @@ class NsdDiscoveryTest {
         assertEquals(1, lock.releaseCount)
     }
 
+    /**
+     * A browse that ends — the screen closes, or a start failure goes terminal —
+     * has to hand back the resolves it started. On API 34 a resolve is a
+     * registration that is otherwise released only when the service is updated,
+     * so one left behind outlives the screen by the life of the process.
+     */
+    @Test
+    fun closingTheBrowseStopsTheResolvesStillListening() = runTest {
+        val lock = FakeMulticastLock(held = true)
+        var captured: NsdManager.DiscoveryListener? = null
+        var stopResolveCalls = 0
+
+        val collectJob = launch {
+            browseDiscoveryFlow(
+                serviceType = NsdDiscovery.SERVICE_TYPE,
+                acquireMulticastLock = { lock },
+                startBrowse = { listener -> captured = listener },
+                stopBrowse = { },
+                resolveService = { _, _ -> },
+                stopResolves = { stopResolveCalls += 1 },
+                hostAddress = { null },
+                failureMessage = { "unused" },
+            ).collect { }
+        }
+        runCurrent()
+        captured!!.onDiscoveryStarted(NsdDiscovery.SERVICE_TYPE)
+        runCurrent()
+        assertEquals(0, stopResolveCalls, "a live browse keeps its resolves")
+
+        collectJob.cancel()
+        advanceUntilIdle()
+
+        assertEquals(1, stopResolveCalls, "leaving the screen must release every resolve")
+    }
+
+    @Test
+    fun aTerminalStartFailureAlsoStopsTheResolves() = runTest {
+        var captured: NsdManager.DiscoveryListener? = null
+        var stopResolveCalls = 0
+
+        val collectJob = launch {
+            browseDiscoveryFlow(
+                serviceType = NsdDiscovery.SERVICE_TYPE,
+                acquireMulticastLock = { FakeMulticastLock(held = true) },
+                startBrowse = { listener -> captured = listener },
+                stopBrowse = { },
+                resolveService = { _, _ -> },
+                stopResolves = { stopResolveCalls += 1 },
+                hostAddress = { null },
+                failureMessage = { "terminal" },
+            ).collect { }
+        }
+        runCurrent()
+        captured!!.onStartDiscoveryFailed(NsdDiscovery.SERVICE_TYPE, NsdManager.FAILURE_INTERNAL_ERROR)
+        advanceUntilIdle()
+
+        assertTrue(collectJob.isCompleted)
+        assertEquals(1, stopResolveCalls)
+    }
+
     @Test
     fun productionFactoryPathAcquiresPerCollectionOnly() = runTest {
         // Mirrors discover()'s acquireMulticastLock factory: create+hold only when

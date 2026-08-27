@@ -229,17 +229,32 @@ class AvatarImageStore(
     /** Test / diagnostics: current resident decoded frame byte cost. */
     internal fun cachedBitmapByteCost(): Int = bitmaps.byteCost()
 
+    /**
+     * Remove the in-flight byte entry and complete joiners.
+     *
+     * Under [NonCancellable] for the same reason [completeDecode] is, and the
+     * asymmetry between the two was a real hole rather than a stylistic one.
+     * The leader reaches here from a `catch` that a cancellation put it in, so
+     * its job is already cancelling; `Mutex.lock` only checks for cancellation
+     * *when it has to suspend*, which is exactly when another coroutine holds
+     * the lock. In that window the cleanup threw before removing [inflight] or
+     * completing the deferred — and every joiner already parked on that
+     * deferred, plus every later caller of the same path, then waited forever
+     * for a leader that was gone.
+     */
     private suspend fun finish(
         path: String,
         request: Inflight,
         result: ByteArray?,
         gen: Int,
     ) {
-        mutex.withLock {
-            if (inflight[path]?.id == request.id) inflight.remove(path)
-            val keep = gen == generation
-            if (keep && result != null) cache.put(path, result)
-            request.deferred.complete(if (keep) result else null)
+        withContext(NonCancellable) {
+            mutex.withLock {
+                if (inflight[path]?.id == request.id) inflight.remove(path)
+                val keep = gen == generation
+                if (keep && result != null) cache.put(path, result)
+                request.deferred.complete(if (keep) result else null)
+            }
         }
     }
 

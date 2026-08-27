@@ -57,6 +57,19 @@ object NotificationIntents {
         putExtra(LocalNotificationPoster.EXTRA_KIND, notification.kind)
     }
 
+    /**
+     * `URLEncoder.encode(String, Charset)` is API 33. This app is `minSdk 26`
+     * with no core-library desugaring, so on Android 8.0 through 12L that
+     * overload is not on the device and the first notification would die with
+     * `NoSuchMethodError` — inside `LocalNotificationPoster.deliver`, where
+     * nothing catches it. The name overload has been there since API 1 and
+     * encodes identically; `UnsupportedEncodingException` cannot happen for a
+     * charset the JVM is required to have.
+     *
+     * A JVM unit test cannot see this: the desktop JDK has had the Charset
+     * overload since Java 10. [NotificationIntentsApiLevelTest] pins it at
+     * source level instead.
+     */
     private fun encode(value: String): String =
-        URLEncoder.encode(value, StandardCharsets.UTF_8).replace("+", "%20")
+        URLEncoder.encode(value, StandardCharsets.UTF_8.name()).replace("+", "%20")
 }

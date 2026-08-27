@@ -7,6 +7,7 @@ import android.net.wifi.WifiManager
 import android.os.Build
 import com.openmausbot.companion.core.Connection
 import java.net.InetAddress
+import java.util.Collections
 import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.Executor
 import java.util.concurrent.Executors
@@ -87,6 +88,24 @@ internal object DiscoveryRetry {
 }
 
 /**
+ * A resolve that failed is a name with no address, and a name with no address is
+ * a computer the pairing screen cannot offer. The platform fails these for
+ * reasons that pass: on API 33 and below `NsdManager.resolveService` refuses
+ * with `FAILURE_ALREADY_ACTIVE` while another resolve is in flight, and a browse
+ * that finds three computers at once starts three.
+ *
+ * So: one more try, after a beat, and then the name is left out — the same
+ * bounded shape [DiscoveryRetry] gives the browse, for the same reason. The
+ * retry runs in the Flow's own scope, so leaving the screen cancels it.
+ */
+internal object ResolveRetry {
+    const val MAX_ATTEMPTS = 2
+    const val DELAY_MILLIS = 350L
+
+    fun canRetry(attemptsSoFar: Int): Boolean = attemptsSoFar < MAX_ATTEMPTS
+}
+
+/**
  * Multicast lock held only while an NSD browse is actually active.
  * [releaseIfHeld] is idempotent so terminal failure + [awaitClose] cannot
  * double-release.
@@ -119,7 +138,19 @@ internal fun browseDiscoveryFlow(
     acquireMulticastLock: () -> MulticastLockHandle?,
     startBrowse: (NsdManager.DiscoveryListener) -> Unit,
     stopBrowse: (NsdManager.DiscoveryListener) -> Unit,
-    resolveService: (NsdServiceInfo, (NsdServiceInfo) -> Unit) -> Unit,
+    /**
+     * Resolve one service. The callback receives the resolved info, or **null**
+     * when the platform refused — a refusal the flow answers with one retry
+     * rather than by silently dropping the computer from the list.
+     */
+    resolveService: (NsdServiceInfo, (NsdServiceInfo?) -> Unit) -> Unit,
+    /**
+     * Stop every resolve still listening. Called from [awaitClose] because the
+     * API 34 resolve is a *registration*: it is released when the service is
+     * updated, and otherwise not at all, so a browse that closes mid-resolve
+     * would leave one behind for the life of the process.
+     */
+    stopResolves: () -> Unit = {},
     hostAddress: (NsdServiceInfo) -> String?,
     failureMessage: (Int) -> String,
 ): Flow<DiscoveryState> = callbackFlow {
@@ -163,6 +194,26 @@ internal fun browseDiscoveryFlow(
         close()
     }
 
+    fun attemptResolve(service: NsdServiceInfo, attemptsSoFar: Int) {
+        resolveService(service) { info ->
+            if (info == null) {
+                if (ResolveRetry.canRetry(attemptsSoFar)) {
+                    launch {
+                        delay(ResolveRetry.DELAY_MILLIS)
+                        attemptResolve(service, attemptsSoFar + 1)
+                    }
+                }
+                return@resolveService
+            }
+            resolved[info.serviceName] = DiscoveredService(
+                name = info.serviceName,
+                host = hostAddress(info),
+                port = info.port.takeIf { it > 0 },
+            )
+            emit()
+        }
+    }
+
     fun newListener(): NsdManager.DiscoveryListener = object : NsdManager.DiscoveryListener {
         override fun onDiscoveryStarted(regType: String) {
             browsing = true
@@ -174,14 +225,7 @@ internal fun browseDiscoveryFlow(
             if (service.serviceType != serviceType && !service.serviceType.contains("openmausbot")) {
                 return
             }
-            resolveService(service) { info ->
-                resolved[info.serviceName] = DiscoveredService(
-                    name = info.serviceName,
-                    host = hostAddress(info),
-                    port = info.port.takeIf { it > 0 },
-                )
-                emit()
-            }
+            attemptResolve(service, attemptsSoFar = 1)
         }
 
         override fun onServiceLost(service: NsdServiceInfo) {
@@ -250,9 +294,100 @@ internal fun browseDiscoveryFlow(
 
     awaitClose {
         if (started) activeListener?.let { runCatching { stopBrowse(it) } }
+        stopResolves()
         releaseLockOnce()
     }
 }.distinctUntilChanged()
+
+/**
+ * The API 34 side of a resolve, with the platform as two lambdas so its release
+ * rules can be *observed* rather than asserted about the source.
+ *
+ * `registerServiceInfoCallback` is a subscription, not a question:
+ * `NsdManager` documents that `onServiceUpdated` "will only be called once the
+ * service is found, so may never be called if the service is never present".
+ * Releasing only there — which is what the AOSP sample shows, because the sample
+ * assumes the service is there — leaves a live registration behind for every
+ * announced service that then goes quiet, and for every resolve still in flight
+ * when the pairing screen closes. Each one is a binder registration in the system
+ * server, an mDNS subscription on the network, and a strong reference to the Flow
+ * that asked for it.
+ *
+ * So every terminal outcome releases, and [stopAll] releases whatever a closing
+ * browse left behind. A registration that never happened is not released:
+ * `onServiceInfoCallbackRegistrationFailed` is documented as "exactly once ... No
+ * other callback will be sent in that case", and unregistering an unknown
+ * listener throws on devices below T extension 22.
+ */
+internal class ServiceInfoResolver(
+    private val unregister: (NsdManager.ServiceInfoCallback) -> Unit,
+) {
+    private val registered: MutableSet<NsdManager.ServiceInfoCallback> =
+        Collections.newSetFromMap(ConcurrentHashMap())
+
+    /** Test / diagnostics: registrations still listening. */
+    val outstanding: Int get() = registered.size
+
+    /**
+     * Start one resolve. [register] performs the platform registration for the
+     * service being resolved; [onResolved] receives the resolved info once, or
+     * null when the platform refused.
+     */
+    fun resolve(
+        register: (NsdManager.ServiceInfoCallback) -> Unit,
+        onResolved: (NsdServiceInfo?) -> Unit,
+    ) {
+        var answered = false
+        fun answer(info: NsdServiceInfo?) {
+            if (answered) return
+            answered = true
+            onResolved(info)
+        }
+
+        val callback = object : NsdManager.ServiceInfoCallback {
+            override fun onServiceInfoCallbackRegistrationFailed(errorCode: Int) {
+                registered.remove(this)
+                answer(null)
+            }
+
+            override fun onServiceUpdated(serviceInfo: NsdServiceInfo) {
+                release(this)
+                answer(serviceInfo)
+            }
+
+            override fun onServiceLost() {
+                // The service may come back, but this resolve is a question with an
+                // answer, not a subscription. A later announcement arrives as
+                // another onServiceFound and starts a fresh one.
+                release(this)
+                answer(null)
+            }
+
+            override fun onServiceInfoCallbackUnregistered() {
+                registered.remove(this)
+            }
+        }
+        registered.add(callback)
+        try {
+            register(callback)
+        } catch (error: Exception) {
+            registered.remove(callback)
+            answer(null)
+        }
+    }
+
+    /** Release every registration still listening — the browse is closing. */
+    fun stopAll() {
+        val pending = registered.toList()
+        registered.clear()
+        pending.forEach { runCatching { unregister(it) } }
+    }
+
+    private fun release(callback: NsdManager.ServiceInfoCallback) {
+        if (!registered.remove(callback)) return
+        runCatching { unregister(callback) }
+    }
+}
 
 /**
  * What a screen needs from discovery, and no more.
@@ -284,6 +419,9 @@ class NsdDiscovery(
     private val nsdManager = appContext.getSystemService(NsdManager::class.java)
     private val wifiManager = appContext.getSystemService(Context.WIFI_SERVICE) as? WifiManager
     private val resolveExecutor: Executor = Executors.newSingleThreadExecutor()
+    private val resolver = ServiceInfoResolver(
+        unregister = { callback -> nsdManager?.unregisterServiceInfoCallback(callback) },
+    )
 
     override fun discover(): Flow<DiscoveryState> {
         if (nsdManager == null) {
@@ -312,6 +450,7 @@ class NsdDiscovery(
                 nsdManager.stopServiceDiscovery(listener)
             },
             resolveService = { service, onResolved -> resolve(service, onResolved) },
+            stopResolves = resolver::stopAll,
             hostAddress = ::hostAddress,
             failureMessage = ::failureMessage,
         )
@@ -326,28 +465,28 @@ class NsdDiscovery(
             }
             ?.asHandle()
 
-    private fun resolve(service: NsdServiceInfo, onResolved: (NsdServiceInfo) -> Unit) {
-        val manager = nsdManager ?: return
+    /**
+     * One resolve attempt, reporting null when the platform refused so the browse
+     * can decide whether to try again. Pre-34 `resolveService` is a one-shot call
+     * with nothing to release; API 34 goes through [ServiceInfoResolver], which
+     * holds the registrations `awaitClose` hands back.
+     */
+    private fun resolve(service: NsdServiceInfo, onResolved: (NsdServiceInfo?) -> Unit) {
+        val manager = nsdManager ?: return onResolved(null)
         if (Build.VERSION.SDK_INT >= 34) {
-            manager.registerServiceInfoCallback(
-                service,
-                resolveExecutor,
-                object : NsdManager.ServiceInfoCallback {
-                    override fun onServiceInfoCallbackRegistrationFailed(errorCode: Int) = Unit
-                    override fun onServiceUpdated(serviceInfo: NsdServiceInfo) {
-                        onResolved(serviceInfo)
-                        runCatching { manager.unregisterServiceInfoCallback(this) }
-                    }
-                    override fun onServiceLost() = Unit
-                    override fun onServiceInfoCallbackUnregistered() = Unit
+            resolver.resolve(
+                register = { callback ->
+                    manager.registerServiceInfoCallback(service, resolveExecutor, callback)
                 },
+                onResolved = onResolved,
             )
         } else {
             @Suppress("DEPRECATION")
             manager.resolveService(
                 service,
                 object : NsdManager.ResolveListener {
-                    override fun onResolveFailed(serviceInfo: NsdServiceInfo, errorCode: Int) = Unit
+                    override fun onResolveFailed(serviceInfo: NsdServiceInfo, errorCode: Int) =
+                        onResolved(null)
                     override fun onServiceResolved(serviceInfo: NsdServiceInfo) = onResolved(serviceInfo)
                 },
             )

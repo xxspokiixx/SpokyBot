@@ -712,9 +712,38 @@ class Session(
      *
      * A 401 never reaches here: the unauthorized path returns before this is called.
      */
-    private fun failureMessage(error: Throwable): String {
-        val connection = _connection.value
+    private suspend fun failureMessage(error: Throwable): String {
+        val moved = gate.withLock { advanceRouteLocked(error) }
             ?: return error.message?.takeIf { it.isNotBlank() } ?: "Could not reach the computer."
+        ConnectionAdvice.gatewayStatus(error)?.let { status ->
+            return ConnectionAdvice.message(status, moved.failedAddress, moved.next)
+        }
+        val failure = ConnectionAdvice.classify(error)
+        return if (failure == ConnectionFailure.OTHER) {
+            error.message?.takeIf { it.isNotBlank() }
+                ?: ConnectionAdvice.message(failure, moved.failedAddress, moved.failedPort, moved.next)
+        } else {
+            ConnectionAdvice.message(failure, moved.failedAddress, moved.failedPort, moved.next)
+        }
+    }
+
+    /**
+     * Advance the walk and rebuild the client for the route it landed on, as one
+     * step under [gate]. Null when there is no pairing to move.
+     *
+     * `rotation` and `client` are one fact in two fields — which route the next
+     * attempt uses, and the client that will make it. Every other writer of that
+     * pair ([updateAddress], [refreshConnectionMetadata], [unpairLocked]) already
+     * changes them under [gate], and each of those writers *suspends* on a store
+     * in the middle. `Dispatchers.Main.immediate` does not help there: a
+     * suspension is exactly where another coroutine on the same thread runs. A
+     * failure that advanced the walk in that window used to be overwritten a line
+     * later by a refresh that had read the old rotation, leaving `client` dialing
+     * one route while `rotation.currentEndpoint` named another — and
+     * [promoteWorkingRoute] then persists the one that did not carry the stream.
+     */
+    private fun advanceRouteLocked(error: Throwable): RouteMove? {
+        val connection = _connection.value ?: return null
         val failed = rotation.currentEndpoint
             ?: connection.activeEndpoint
             ?: CompanionEndpoint.direct(connection.host, connection.port, priority = 10_000)
@@ -725,19 +754,19 @@ class Session(
             client = clientFactory(connection.dialing(candidate), activeToken)
             next = candidate.displayAddress
         }
-        val failedAddress = failed?.displayAddress ?: connection.host
-        val failedPort = failed?.port ?: connection.port
-        ConnectionAdvice.gatewayStatus(error)?.let { status ->
-            return ConnectionAdvice.message(status, failedAddress, next)
-        }
-        val failure = ConnectionAdvice.classify(error)
-        return if (failure == ConnectionFailure.OTHER) {
-            error.message?.takeIf { it.isNotBlank() }
-                ?: ConnectionAdvice.message(failure, failedAddress, failedPort, next)
-        } else {
-            ConnectionAdvice.message(failure, failedAddress, failedPort, next)
-        }
+        return RouteMove(
+            failedAddress = failed?.displayAddress ?: connection.host,
+            failedPort = failed?.port ?: connection.port,
+            next = next,
+        )
     }
+
+    /** What [advanceRouteLocked] decided, for the banner to describe. */
+    private data class RouteMove(
+        val failedAddress: String,
+        val failedPort: Int,
+        val next: String?,
+    )
 
     /**
      * Persist the route that carried a live stream.
@@ -747,11 +776,22 @@ class Session(
      * so a route that merely survived a failover does not outrank a hosted route the computer
      * put first. The one thing recording a protected winner changes is that cleartext routes it
      * superseded stop leading — see [Connection.orderedEndpoints].
+     *
+     * Under [gate], and that is the point rather than decoration. This used to read `_connection`,
+     * write it, and *then* suspend in [ConnectionStore.save] with nothing held. Every other writer
+     * of the stored connection — a manual address edit, a metadata refresh, a sign-out — runs
+     * inside [gate], so one of them could take the whole section during that suspension and save
+     * its own connection first; the promotion's older save then landed on top of it. The measured
+     * case is the address edit: the phone came back on the address the user had just replaced,
+     * because memory and disk disagreed and the next launch believes the disk.
+     *
+     * [gate] is safe to hold here: [runStream] is always its own coroutine and never enters this
+     * function holding the mutex.
      */
-    private suspend fun promoteWorkingRoute() {
-        val winner = rotation.currentEndpoint ?: return
-        val updated = _connection.value ?: return
-        if (updated.activeEndpoint?.url == winner.url) return
+    private suspend fun promoteWorkingRoute() = gate.withLock {
+        val winner = rotation.currentEndpoint ?: return@withLock
+        val updated = _connection.value ?: return@withLock
+        if (updated.activeEndpoint?.url == winner.url) return@withLock
         val promoted = updated.promoting(winner)
         _connection.value = promoted
         connectionStore.save(promoted)

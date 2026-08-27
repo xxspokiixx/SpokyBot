@@ -11,6 +11,7 @@ import kotlin.test.assertContentEquals
 import kotlin.test.assertEquals
 import kotlin.test.assertNull
 import kotlin.test.assertTrue
+import kotlinx.coroutines.CoroutineStart
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.async
 import kotlinx.coroutines.delay
@@ -309,6 +310,83 @@ class AvatarImageStoreTest {
         val again = store.bitmapFor(bot(avatarUrl = "/api/attachments/cancel.png"))
         assertNull(again)
         assertEquals(1, store.cachedBitmapCount())
+    }
+
+    /**
+     * The byte-path twin of the test above, and it needs one thing that test
+     * does not: the mutex has to be **held** when the cancelled leader reaches
+     * its cleanup. `Mutex.lock` only checks for cancellation when it has to
+     * suspend, so an uncontended cleanup survives cancellation by luck rather
+     * than by rule — which is why `finish` looked fine while `completeDecode`
+     * carried `NonCancellable`.
+     *
+     * Every critical section in this class is non-suspending, so the hold is
+     * arranged rather than waited for. `finish` completes its deferred *inside*
+     * the lock; a joiner on [Dispatchers.Unconfined] therefore resumes on the
+     * holder's own thread, still inside that section. That joiner is what
+     * cancels the other leader, so the cancelled leader's cleanup runs against a
+     * lock somebody else is holding — the one arrangement in which the bug is
+     * observable at all.
+     */
+    @Test
+    fun `a cancelled bytes leader clears its inflight entry while the lock is held`() = runBlocking {
+        val slowPath = "/api/attachments/holder.png"
+        val cancelledPath = "/api/attachments/stranded.png"
+        val holderEntered = CountDownLatch(1)
+        val releaseHolder = CountDownLatch(1)
+        val releaseCancelled = kotlinx.coroutines.CompletableDeferred<Unit>()
+        val fetches = AtomicInteger(0)
+        val store = AvatarImageStore(
+            fetch = { bot ->
+                fetches.incrementAndGet()
+                if (bot.avatarUrl == slowPath) {
+                    holderEntered.countDown()
+                    check(releaseHolder.await(5, TimeUnit.SECONDS))
+                    byteArrayOf(1)
+                } else {
+                    releaseCancelled.await()
+                    byteArrayOf(2)
+                }
+            },
+            decode = { null },
+        )
+
+        // The leader that gets cancelled, and the caller already parked behind it.
+        val cancelledLeader = launch(Dispatchers.Unconfined, CoroutineStart.UNDISPATCHED) {
+            store.bytesFor(bot(id = "cancelled", avatarUrl = cancelledPath))
+        }
+        val stranded = async(Dispatchers.Unconfined, CoroutineStart.UNDISPATCHED) {
+            store.bytesFor(bot(id = "stranded", avatarUrl = cancelledPath))
+        }
+
+        // The lock holder: a leader on a real worker thread, parked in fetch.
+        launch(Dispatchers.Default) { store.bytesFor(bot(id = "holder", avatarUrl = slowPath)) }
+        assertTrue(holderEntered.await(5, TimeUnit.SECONDS))
+
+        // Its joiner. Resumed from inside the holder's critical section, it
+        // cancels the other leader from there.
+        launch(Dispatchers.Unconfined, CoroutineStart.UNDISPATCHED) {
+            store.bytesFor(bot(id = "holder-joiner", avatarUrl = slowPath))
+            cancelledLeader.cancel()
+        }
+
+        releaseHolder.countDown()
+
+        withTimeout(5_000) {
+            assertNull(
+                stranded.await(),
+                "a cancelled leader must release the callers parked behind it",
+            )
+        }
+        withTimeout(5_000) { cancelledLeader.join() }
+
+        // And the path has to be claimable again, not owned by a dead leader.
+        releaseCancelled.complete(Unit)
+        val again = withTimeout(5_000) {
+            store.bytesFor(bot(id = "later", avatarUrl = cancelledPath))
+        }
+        assertContentEquals(byteArrayOf(2), again, "the stale in-flight entry outlived its leader")
+        assertEquals(3, fetches.get(), "holder, cancelled leader, and the retry — nothing else")
     }
 
     private fun bot(
