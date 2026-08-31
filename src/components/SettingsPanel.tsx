@@ -334,6 +334,7 @@ export function SettingsPanel({ bot }: { bot: Bot }) {
         | "autoStartVps"
         | "color"
         | "mascotExpression"
+        | "mascotBody"
         | "avatarUrl"
         | "avatarCrop"
         | "autoApprove"
