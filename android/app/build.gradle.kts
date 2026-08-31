@@ -215,6 +215,8 @@ dependencies {
     implementation("androidx.security:security-crypto:1.1.0-alpha07")
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.10.2")
     implementation("androidx.core:core-ktx:1.17.0")
+    // Share inbound: apply EXIF orientation while downsampling shared photos.
+    implementation("androidx.exifinterface:exifinterface:1.3.7")
 
     // Chrome Custom Tabs, for the cloud desktop's noVNC viewer — the Android
     // counterpart of the SFSafariViewController iOS uses. A hardened browser

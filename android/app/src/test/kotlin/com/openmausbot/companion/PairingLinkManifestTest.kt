@@ -114,6 +114,77 @@ class PairingLinkManifestTest {
     }
 }
 
+class ShareReceiveManifestTest {
+    private val android = "http://schemas.android.com/apk/res/android"
+
+    private val manifest: Element by lazy {
+        val file = locateManifest()
+        val document = DocumentBuilderFactory.newInstance()
+            .apply { isNamespaceAware = true }
+            .newDocumentBuilder()
+            .parse(file)
+        document.documentElement
+    }
+
+    private fun locateManifest(): File {
+        var directory: File? = File(".").absoluteFile
+        while (directory != null) {
+            for (candidate in listOf("src/main/AndroidManifest.xml", "app/src/main/AndroidManifest.xml")) {
+                val file = File(directory, candidate)
+                if (file.isFile) return file
+            }
+            directory = directory.parentFile
+        }
+        error("could not find AndroidManifest.xml from ${File(".").absolutePath}")
+    }
+
+    private fun activity(name: String): Element {
+        val activities = manifest.getElementsByTagName("activity")
+        for (index in 0 until activities.length) {
+            val element = activities.item(index) as Element
+            if (element.getAttributeNS(android, "name") == name) return element
+        }
+        error("no <activity android:name=\"$name\"> in the manifest")
+    }
+
+    private fun Element.hasSendFilter(): Boolean {
+        val filters = getElementsByTagName("intent-filter")
+        for (index in 0 until filters.length) {
+            val filter = filters.item(index) as Element
+            val actions = filter.getElementsByTagName("action")
+            for (actionIndex in 0 until actions.length) {
+                val action = (actions.item(actionIndex) as Element).getAttributeNS(android, "name")
+                if (action == "android.intent.action.SEND" || action == "android.intent.action.SEND_MULTIPLE") {
+                    return true
+                }
+            }
+        }
+        return false
+    }
+
+    @Test
+    fun `inbound share is handled only by the trampoline`() {
+        assertTrue(activity(".ShareReceiveActivity").hasSendFilter())
+        assertFalse(
+            activity(".MainActivity").hasSendFilter(),
+            "MainActivity must not receive ACTION_SEND: the system keeps a root Activity's launching Intent",
+        )
+    }
+
+    @Test
+    fun `the share trampoline is never kept, listed, or persisted`() {
+        val trampoline = activity(".ShareReceiveActivity")
+        assertEquals("true", trampoline.getAttributeNS(android, "noHistory"))
+        assertEquals("true", trampoline.getAttributeNS(android, "excludeFromRecents"))
+        assertEquals("persistNever", trampoline.getAttributeNS(android, "persistableMode"))
+        assertEquals("", trampoline.getAttributeNS(android, "taskAffinity"))
+        assertEquals(
+            "orientation|screenSize|keyboardHidden|screenLayout|smallestScreenSize|uiMode|density",
+            trampoline.getAttributeNS(android, "configChanges"),
+        )
+    }
+}
+
 class PairingLinkTest {
     @Test
     fun `only the pairing scheme and host are an invite`() {

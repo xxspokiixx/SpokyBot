@@ -20,6 +20,7 @@ import com.openmausbot.companion.dictation.SpeechDictation
 import com.openmausbot.companion.notifications.notificationTarget
 import com.openmausbot.companion.browser.CloudDesktopBrowser
 import com.openmausbot.companion.sharing.TranscriptSharing
+import com.openmausbot.companion.storage.ChatPreferences
 import com.openmausbot.companion.ui.CameraPermissionController
 import com.openmausbot.companion.ui.ChatDraftHolder
 import com.openmausbot.companion.ui.CompanionEnvironment
@@ -32,9 +33,10 @@ import com.openmausbot.companion.ui.PermissionRequests
 import com.openmausbot.companion.ui.PendingThreadNavigation
 
 /**
- * The single Activity. It owns the permission launchers and the two things that
- * arrive as Intents — a pairing deep link and a notification tap — and hands the
- * rest to Compose.
+ * The single Activity. It owns the permission launchers and the one thing that
+ * arrives as an Intent here — a notification tap — and hands the rest to Compose.
+ * Pairing deep links and inbound shares each have their own trampoline, so this
+ * root Activity never receives a credential or another app's content URI.
  *
  * Connect/disconnect is not here: `OpenMausApp` drives it from
  * `ProcessLifecycleOwner`, which is the Android shape of iOS's `scenePhase`.
@@ -165,6 +167,7 @@ class MainActivity : ComponentActivity() {
             permissions = app.permissions,
             discovery = app.discovery,
             onboarding = app.onboarding,
+            chatPreferences = ChatPreferences(this),
             camera = camera,
             mic = mic,
             notifications = notifications,
@@ -176,6 +179,7 @@ class MainActivity : ComponentActivity() {
             openAppSettings = ::openAppSettings,
             shareTranscript = sharing::share,
             openCloudDesktop = browser::open,
+            shareInbox = app.shareInbox,
         )
 
         handleIntent(intent)

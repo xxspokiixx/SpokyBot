@@ -11,6 +11,7 @@ import com.openmausbot.companion.lifecycle.SessionLingerController
 import com.openmausbot.companion.lifecycle.installSessionLinger
 import com.openmausbot.companion.notifications.LocalNotificationPoster
 import com.openmausbot.companion.permissions.CompanionPermissions
+import com.openmausbot.companion.sharing.ShareInbox
 import com.openmausbot.companion.storage.DataStoreConnectionStore
 import com.openmausbot.companion.storage.OnboardingPreferences
 import com.openmausbot.companion.storage.KeystoreTokenStore
@@ -51,9 +52,13 @@ class OpenMausApp : Application() {
         private set
     lateinit var linger: SessionLingerController
         private set
+    lateinit var shareInbox: ShareInbox
+        private set
 
     override fun onCreate() {
         super.onCreate()
+        shareInbox = ShareInbox()
+        ShareInbox.cleanStale(cacheDir)
         notifications = LocalNotificationPoster(this)
         discovery = NsdDiscovery(this)
         permissions = CompanionPermissions(this)
