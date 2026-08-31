@@ -90,6 +90,10 @@ class Session(
     private val _connection = MutableStateFlow<Connection?>(null)
     val connection: StateFlow<Connection?> = _connection.asStateFlow()
 
+    private val _connections = MutableStateFlow<List<Connection>>(emptyList())
+    /** All locally paired computers. Only [connection] has an active runtime. */
+    val connections: StateFlow<List<Connection>> = _connections.asStateFlow()
+
     private val _status = MutableStateFlow<Status>(Status.Unpaired)
     val status: StateFlow<Status> = _status.asStateFlow()
 
@@ -108,6 +112,11 @@ class Session(
     private val _pairingInvite = MutableStateFlow<PairingInvite?>(null)
     val pairingInvite: StateFlow<PairingInvite?> = _pairingInvite.asStateFlow()
 
+    private val _pairingRequested = MutableStateFlow(false)
+    /** Pairing may be opened while the current computer stays live. */
+    val pairingRequested: StateFlow<Boolean> = _pairingRequested.asStateFlow()
+
+    private var registry = ConnectionRegistry()
     private var client: CompanionClient? = null
     private var token: String? = null
     private var rotation = CandidateRotation(emptyList())
@@ -163,9 +172,9 @@ class Session(
      * Redeem a one-time pairing credential. Persists only the long-lived device
      * token + connection — never the QR credential/code.
      *
-     * Rejects when a pairing already exists (including a locked-token restore)
-     * or when another [pair] is already in the redeem+persist critical section —
-     * concurrent callers must not silently replace a pairing.
+     * A paired phone may add another computer. The active runtime is only
+     * replaced after the new credential has committed; another [pair] still
+     * cannot overlap this redeem+persist critical section.
      *
      * A route failure is retryable with the same in-memory request id because
      * it is either preflight-only or an ambiguous replay of the same logical
@@ -184,10 +193,7 @@ class Session(
     ) {
         awaitRestored()
         gate.withLock {
-            if (isPairedLocked()) {
-                _actionError.value = ALREADY_PAIRED_MESSAGE
-                throw AlreadyPairedException()
-            }
+            if (pairingInFlight) throw PairingInProgressException()
             if (isQrCredential(credential) && credential in spentQrCredentials) {
                 _actionError.value = SPENT_QR_MESSAGE
                 clearInviteIfCredential(credential)
@@ -230,6 +236,9 @@ class Session(
                 val winner = outcome.connection.activeEndpoint
                     ?: CompanionEndpoint.direct(outcome.connection.host, outcome.connection.port, priority = 10_000)
                 stored = winner?.let(stored::promoting) ?: stored.promoting(stored.host)
+                registry.matchingConnection(stored)?.let { existing -> stored = stored.copy(id = existing.id) }
+                val firstPairing = registry.connections.isEmpty()
+                val updatedRegistry = registry.upsert(stored)
 
                 try {
                     tokenStore.save(stored.id, paired.token)
@@ -240,9 +249,9 @@ class Session(
                     // pairing that skips first-pair education for good.
                     PairingCommitSequence.persist(
                         markNotificationOnboardingPending = {
-                            onboardingStore.setNotificationOnboardingPending(true)
+                            if (firstPairing) onboardingStore.setNotificationOnboardingPending(true)
                         },
-                        saveConnection = { connectionStore.save(stored) },
+                        saveConnection = { connectionStore.saveRegistry(updatedRegistry) },
                     )
                 } catch (error: Throwable) {
                     if (error is kotlinx.coroutines.CancellationException) throw error
@@ -250,6 +259,9 @@ class Session(
                     throw error
                 }
 
+                stopActiveRuntimeLocked()
+                registry = updatedRegistry
+                _connections.value = registry.connections
                 _connection.value = stored
                 token = paired.token
                 // The route that just redeemed leads this session; later launches return to the
@@ -258,6 +270,7 @@ class Session(
                 client = clientFactory(stored, paired.token)
                 _state.value = CompanionState()
                 _restoreState.value = RestoreState.Ready
+                _pairingRequested.value = false
             } finally {
                 settlePairingAttempt()
             }
@@ -271,9 +284,9 @@ class Session(
     ) = pair(invite.connection, invite.credential, pairRequestId)
 
     /**
-     * Accept a deep-link invite only after restore has settled and only while
-     * unpaired. Cold-start links wait for restore so they cannot overwrite a
-     * pairing that is still loading.
+     * Accept a deep-link invite after restore has settled. A paired phone can
+     * add another computer; the current runtime remains intact until that
+     * invitation commits successfully.
      */
     fun receivePairingURL(url: String) {
         if (restored.isCompleted) {
@@ -293,12 +306,17 @@ class Session(
         _pairingInvite.value = null
     }
 
+    fun beginPairing() {
+        _pairingRequested.value = true
+    }
+
+    fun endPairing() {
+        _pairingRequested.value = false
+        consumePairingInvite()
+    }
+
     private fun acceptPairingURL(url: String) {
         synchronized(inviteLock) {
-            if (isPairedLocked()) {
-                _actionError.value = ALREADY_PAIRED_MESSAGE
-                return
-            }
             val invite = PairingInvite.parse(url)
             if (invite == null) {
                 _actionError.value =
@@ -319,6 +337,7 @@ class Session(
                 return
             }
             _pairingInvite.value = invite
+            _pairingRequested.value = true
         }
     }
 
@@ -326,17 +345,18 @@ class Session(
      * Close the single active attempt and answer for any invite that arrived
      * while it was in flight.
      *
-     * The port of the `defer` block of `submit(_:credential:)` in
-     * `ios/App/PairingView.swift`: the waiting invite is presented only if this
-     * phone is still unconnected, and a pairing that succeeded consumes it
-     * instead, because §6 gives a one-time credential no second life.
+     * Port of the `defer` block of `submit(_:credential:)` in
+     * `ios/App/PairingView.swift`: the waiting invite is presented only while
+     * pairing is still requested (`pairingRequested`); a successful pairing
+     * clears that flag first and therefore consumes the waiting invite, because
+     * §6 gives a one-time credential no second life.
      */
     private fun settlePairingAttempt() {
         synchronized(inviteLock) {
             pairingInFlight = false
             val waiting = deferredInvite
             deferredInvite = null
-            if (isPairedLocked()) {
+            if (_pairingRequested.value.not()) {
                 _pairingInvite.value = null
                 return
             }
@@ -354,14 +374,6 @@ class Session(
 
     private fun storeFailureMessage(error: Throwable): String =
         error.message?.takeIf { it.isNotBlank() } ?: STORAGE_UNAVAILABLE_MESSAGE
-
-    /** True when a computer is already bound — including locked-token restore. */
-    private fun isPairedLocked(): Boolean =
-        _connection.value != null ||
-            token != null ||
-            client != null ||
-            _restoreState.value is RestoreState.Pending ||
-            _status.value !is Status.Unpaired
 
     /**
      * Held under [inviteLock] so adding to the spent set and dropping the invite
@@ -390,6 +402,7 @@ class Session(
         streamJob = null
         scope.launch {
             gate.withLock { unpairLocked() }
+            connect()
         }
     }
 
@@ -398,35 +411,109 @@ class Session(
         streamJob?.cancel()
         streamJob = null
         gate.withLock { unpairLocked() }
+        connect()
     }
 
-    /**
-     * What unpairing erases, in one place.
-     *
-     * Both entry points used to carry their own copy of this list, which meant
-     * every rule about what a sign-out has to forget existed twice and could be
-     * true in one copy and false in the other.
-     */
+    /** Remove only the selected computer. Other saved computers remain usable. */
     private suspend fun unpairLocked() {
+        val id = _connection.value?.id ?: registry.activeConnectionId
+        stopActiveRuntimeLocked()
+        if (id != null) tokenStore.remove(id)
+        registry = id?.let(registry::remove) ?: ConnectionRegistry()
+        _connections.value = registry.connections
+        connectionStore.saveRegistry(registry)
+        if (registry.connections.isEmpty()) {
+            // The pairing that earned the education step is gone, so its marker
+            // goes too. Removing one of several computers must not consume the
+            // first-pair marker for the others.
+            onboardingStore.setNotificationOnboardingPending(false)
+        }
+        _connection.value = null
+        _status.value = Status.Unpaired
         _restoreState.value = RestoreState.Unpaired
+        restoreSelectedConnectionLocked()
+        emptyInviteQueue()
+        // Two branches, matching iOS signOut:
+        // - Had a computer (id != null): forgetConnection — leave pairingRequested
+        //   alone. Pair again does signOut() then beginPairing(); a late clear
+        //   here would overwrite the new true after the first suspension above.
+        // - Nothing to forget (id == null): clearActiveConnection — zero the flag.
+        if (id == null) {
+            _pairingRequested.value = false
+        }
+    }
+
+    /** Switches active runtime only after the chosen computer's token is readable. */
+    fun switchComputer(id: String) {
+        scope.launch {
+            awaitRestored()
+            gate.withLock {
+                val saved = registry.connection(id) ?: return@withLock
+                if (_connection.value?.id == id) {
+                    restartStreamLocked()
+                    return@withLock
+                }
+                when (val stored = tokenStore.read(id)) {
+                    is TokenStore.ReadResult.Found -> {
+                        stopActiveRuntimeLocked()
+                        registry = registry.select(id) ?: registry
+                        _connections.value = registry.connections
+                        connectionStore.saveRegistry(registry)
+                        configureActiveConnectionLocked(saved, stored.token)
+                    }
+                    is TokenStore.ReadResult.Unavailable -> {
+                        _actionError.value = if (stored.locked) {
+                            "Unlock this phone, then try switching computers again."
+                        } else {
+                            stored.message
+                        }
+                    }
+                    TokenStore.ReadResult.Missing -> {
+                        _actionError.value =
+                            "This saved connection is no longer available on this phone. Remove it and pair again."
+                    }
+                }
+            }
+            connect()
+        }
+    }
+
+    fun forgetConnection(id: String) {
+        scope.launch {
+            awaitRestored()
+            gate.withLock {
+                if (registry.connection(id) == null) return@withLock
+                val wasActive = registry.activeConnectionId == id
+                if (wasActive) stopActiveRuntimeLocked()
+                tokenStore.remove(id)
+                registry = registry.remove(id)
+                _connections.value = registry.connections
+                connectionStore.saveRegistry(registry)
+                if (registry.connections.isEmpty()) onboardingStore.setNotificationOnboardingPending(false)
+                if (wasActive) {
+                    _connection.value = null
+                    _status.value = Status.Unpaired
+                    _restoreState.value = RestoreState.Unpaired
+                    restoreSelectedConnectionLocked()
+                }
+            }
+            connect()
+        }
+    }
+
+    private fun stopActiveRuntimeLocked() {
+        streamGeneration += 1
+        streamJob?.cancel()
+        streamJob = null
         endpointRefreshJob?.cancel()
         endpointRefreshJob = null
-        _connection.value?.id?.let { tokenStore.remove(it) }
-        connectionStore.clear()
-        // The pairing that earned the education step is gone, so its marker goes
-        // with it — the port of the `removeObject(forKey:)` in `signOut()` in
-        // `ios/App/Session.swift`. Leaving it behind would hand the next pairing
-        // an education step it did not earn, and, worse, hand the *same* phone
-        // one that was already answered.
-        onboardingStore.setNotificationOnboardingPending(false)
-        _connection.value = null
+        reconnectDelaySeconds = 0
+        screenWatchers = 0
         client = null
         token = null
         rotation = CandidateRotation(emptyList())
         _state.value = CompanionState()
         notificationSink.setBadge(0)
-        _status.value = Status.Unpaired
-        emptyInviteQueue()
     }
 
     /**
@@ -486,7 +573,7 @@ class Session(
      * failure has no one to catch it and reaches the uncaught handler. A read
      * that could not complete is also inconclusive: it did not establish that
      * this phone is unpaired, so the pairing is left standing (`Pending` keeps
-     * [isPairedLocked] true) and the phone reads offline. That extends the
+     * the session in a protected pending state) and the phone reads offline. That extends the
      * answer `ios/App/Session.swift` already gives for a Keychain it cannot
      * open, and that a locked token already gets here, to a store that throws.
      */
@@ -501,50 +588,85 @@ class Session(
     }
 
     private suspend fun restoreFromStoresLocked() {
-        val saved = connectionStore.load()
-        if (saved == null) {
-            _restoreState.value = RestoreState.Unpaired
-            return
-        }
-        val stored = try {
-            tokenStore.read(saved.id)
-        } catch (cancellation: CancellationException) {
-            throw cancellation
-        } catch (error: Exception) {
-            // Same distinction the TokenStore contract already draws — a store
-            // that cannot answer is unavailable, not empty. Mapping it here and
-            // not in [restoreLocked] keeps the connection that was already read.
-            TokenStore.ReadResult.Unavailable(locked = false, message = storeFailureMessage(error))
-        }
-        when (stored) {
-            is TokenStore.ReadResult.Unavailable -> {
-                _connection.value = saved
-                _restoreState.value = RestoreState.Pending
-                _status.value = Status.Offline(
-                    if (stored.locked) {
-                        "Unlock this phone to reach your computer."
-                    } else {
-                        stored.message
-                    },
-                )
+        val restoredRegistry = connectionStore.loadRegistry()
+        registry = restoredRegistry.registry.normalized()
+        _connections.value = registry.connections
+        if (restoredRegistry.migratedLegacyConnection) {
+            // The old record is still intact until a v1 write succeeds. A
+            // read-only/transiently failing store must not turn an otherwise
+            // usable legacy pairing into an offline state merely because this
+            // optional migration could not be committed today.
+            try {
+                connectionStore.saveRegistry(registry)
+            } catch (cancellation: CancellationException) {
+                throw cancellation
+            } catch (_: Exception) {
+                // Keep the in-memory registry; the next launch retries the
+                // one-way migration from the untouched legacy record.
             }
-            TokenStore.ReadResult.Missing -> {
+        }
+        restoreSelectedConnectionLocked()
+    }
+
+    /** Restore the selected record, dropping only records whose token is truly missing. */
+    private suspend fun restoreSelectedConnectionLocked() {
+        while (true) {
+            val saved = registry.activeConnection
+            if (saved == null) {
+                _connection.value = null
                 _restoreState.value = RestoreState.Unpaired
+                _status.value = Status.Unpaired
+                return
             }
-            is TokenStore.ReadResult.Found -> {
-                _connection.value = saved
-                token = stored.token
-                // A restored pairing walks the desktop's advertised priority, and it walks
-                // it credential-safely: a connection already on a protected route never
-                // reaches for a local one. Surviving a failover is not a promotion — the
-                // computer still decides which protected route leads.
-                rotation = CandidateRotation(saved.orderedEndpoints)
-                val first = rotation.currentEndpoint?.let(saved::dialing) ?: saved
-                client = clientFactory(first, stored.token)
-                _restoreState.value = RestoreState.Ready
-                _status.value = Status.Connecting
+            val stored = try {
+                tokenStore.read(saved.id)
+            } catch (cancellation: CancellationException) {
+                throw cancellation
+            } catch (error: Exception) {
+                TokenStore.ReadResult.Unavailable(locked = false, message = storeFailureMessage(error))
+            }
+            when (stored) {
+                is TokenStore.ReadResult.Unavailable -> {
+                    _connection.value = saved
+                    _restoreState.value = RestoreState.Pending
+                    _status.value = Status.Offline(
+                        if (stored.locked) "Unlock this phone to reach your computer." else stored.message,
+                    )
+                    return
+                }
+                TokenStore.ReadResult.Missing -> {
+                    registry = registry.remove(saved.id)
+                    _connections.value = registry.connections
+                    connectionStore.saveRegistry(registry)
+                }
+                is TokenStore.ReadResult.Found -> {
+                    configureActiveConnectionLocked(saved, stored.token)
+                    return
+                }
             }
         }
+    }
+
+    private fun configureActiveConnectionLocked(saved: Connection, storedToken: String) {
+        _connection.value = saved
+        token = storedToken
+        // A restored pairing walks the desktop's advertised priority, and it walks
+        // it credential-safely: a connection already on a protected route never
+        // reaches for a local one. Surviving a failover is not a promotion — the
+        // computer still decides which protected route leads.
+        rotation = CandidateRotation(saved.orderedEndpoints)
+        val first = rotation.currentEndpoint?.let(saved::dialing) ?: saved
+        client = clientFactory(first, storedToken)
+        _restoreState.value = RestoreState.Ready
+        _status.value = Status.Connecting
+    }
+
+    /** Update only the active record; never overwrite the other saved computers. */
+    private suspend fun persistActiveConnectionLocked(updated: Connection) {
+        registry = registry.upsert(updated, makeActive = false)
+        _connections.value = registry.connections
+        _connection.value = updated
+        connectionStore.saveRegistry(registry)
     }
 
     /**
@@ -793,8 +915,7 @@ class Session(
         val updated = _connection.value ?: return@withLock
         if (updated.activeEndpoint?.url == winner.url) return@withLock
         val promoted = updated.promoting(winner)
-        _connection.value = promoted
-        connectionStore.save(promoted)
+        persistActiveConnectionLocked(promoted)
     }
 
     /**
@@ -837,8 +958,7 @@ class Session(
                     if (current.id != connectionId) return@withLock
                     if (client?.connection?.baseUrl != source.connection.baseUrl) return@withLock
                     val updated = current.reconciling(metadata)
-                    _connection.value = updated
-                    connectionStore.save(updated)
+                    persistActiveConnectionLocked(updated)
                     rotation = CandidateRotation(liveRoutes(updated, workingEndpoint))
                 }
             } catch (cancellation: CancellationException) {
@@ -874,8 +994,7 @@ class Session(
         val updated = current.resettingRoutePolicy(endpoint)
         scope.launch {
             gate.withLock {
-                _connection.value = updated
-                connectionStore.save(updated)
+                persistActiveConnectionLocked(updated)
                 rotation = CandidateRotation(liveRoutes(updated, endpoint))
                 val activeToken = token
                 if (activeToken != null) {
@@ -895,8 +1014,7 @@ class Session(
             ?: return false
         val updated = current.resettingRoutePolicy(endpoint)
         gate.withLock {
-            _connection.value = updated
-            connectionStore.save(updated)
+            persistActiveConnectionLocked(updated)
             rotation = CandidateRotation(liveRoutes(updated, endpoint))
             val activeToken = token
             if (activeToken != null) {
@@ -918,6 +1036,111 @@ class Session(
         }
     }
 
+    /**
+     * Executes one idempotent share operation against the selected computer.
+     * A network/gateway failure may advance only through [CandidateRotation],
+     * which retains the HTTPS trust ratchet. Callers supply stable upload/send
+     * ids, so replaying this lambda cannot create duplicate server objects.
+     */
+    suspend fun <T> withShareClient(connectionId: String, action: suspend (CompanionClient) -> T): T {
+        val first = client ?: throw IllegalStateException("Connect to the selected computer before sharing.")
+        if (_connection.value?.id != connectionId) {
+            throw IllegalStateException("The selected computer changed. Choose the destination again.")
+        }
+        try {
+            return action(first)
+        } catch (error: CancellationException) {
+            throw error
+        } catch (error: APIError) {
+            val retry = gate.withLock {
+                if (_connection.value?.id != connectionId) null else {
+                    // Only the live computer's 401 may mark this session revoked.
+                    if (error.isUnauthorized) _status.value = Status.Unauthorized
+                    advanceRouteLocked(error)
+                    client
+                }
+            }
+            if (retry != null && retry !== first && _connection.value?.id == connectionId) {
+                return action(retry)
+            }
+            throw error
+        } catch (error: Throwable) {
+            val retry = gate.withLock {
+                if (_connection.value?.id != connectionId) null else {
+                    advanceRouteLocked(error)
+                    client
+                }
+            }
+            if (retry != null && retry !== first && _connection.value?.id == connectionId) {
+                return action(retry)
+            }
+            throw error
+        }
+    }
+
+    /**
+     * One share/upload against a saved computer without moving the live stream.
+     *
+     * The active pairing keeps its HTTPS ratchet via [withShareClient]. A share
+     * aimed at another saved computer walks only that computer's credential-
+     * approved routes and must not mark this session unauthorized: a 401 there
+     * is about that pairing, not the one currently on screen.
+     */
+    suspend fun <T> withPairedShareClient(
+        connectionId: String,
+        action: suspend (CompanionClient) -> T,
+    ): T {
+        awaitRestored()
+        if (_connection.value?.id == connectionId) {
+            return withShareClient(connectionId, action)
+        }
+        val saved = registry.connection(connectionId)
+            ?: throw APIError.Transport("This saved connection is no longer available on this phone. Remove it and pair again.")
+        val pairedToken = when (val stored = tokenStore.read(connectionId)) {
+            is TokenStore.ReadResult.Found -> stored.token
+            is TokenStore.ReadResult.Unavailable -> throw APIError.Transport(
+                if (stored.locked) {
+                    "Unlock this phone, then try sharing again."
+                } else {
+                    stored.message
+                },
+            )
+            TokenStore.ReadResult.Missing -> throw APIError.Transport(
+                "This saved connection is no longer available on this phone. Remove it and pair again.",
+            )
+        }
+        val endpoints = saved.automaticEndpoints
+        if (endpoints.isEmpty()) {
+            throw APIError.Transport(
+                "Couldn't reach ${saved.name}. Keep OpenMausBot open and Phone access on, then try again.",
+            )
+        }
+        var lastError: Throwable? = null
+        for (endpoint in endpoints) {
+            val candidate = clientFactory(saved.dialing(endpoint), pairedToken)
+            try {
+                return action(candidate)
+            } catch (error: CancellationException) {
+                throw error
+            } catch (error: Throwable) {
+                lastError = error
+                if (!canRetryShareOnAnotherRoute(error)) throw error
+            }
+        }
+        throw lastError ?: APIError.Transport(
+            "Couldn't reach ${saved.name}. Keep OpenMausBot open and Phone access on, then try again.",
+        )
+    }
+
+    private fun canRetryShareOnAnotherRoute(error: Throwable): Boolean {
+        val api = generateSequence(error) { it.cause }.filterIsInstance<APIError>().firstOrNull()
+        return if (api != null) {
+            ConnectionAdvice.shouldRetryPairingOnAnotherRoute(api)
+        } else {
+            ConnectionAdvice.shouldTryAnotherHost(error)
+        }
+    }
+
     suspend fun answer(
         chat: Chat,
         card: OptionCard,
@@ -932,7 +1155,13 @@ class Session(
         ) {
             alwaysAllow(chat.bot, card)
         }
-        answer(chat.threadId, requestId, choice, card.isPermission)
+        answer(
+            threadId = chat.threadId,
+            requestId = requestId,
+            choice = choice,
+            isPermission = card.isPermission,
+            reviewedSha256 = card.skillRequest?.reviewedSha256,
+        )
     }
 
     /**
@@ -947,7 +1176,13 @@ class Session(
     )
     suspend fun answer(threadId: String, card: OptionCard, choice: String) {
         val requestId = card.requestId ?: return
-        answer(threadId, requestId, choice, card.isPermission)
+        answer(
+            threadId = threadId,
+            requestId = requestId,
+            choice = choice,
+            isPermission = card.isPermission,
+            reviewedSha256 = card.skillRequest?.reviewedSha256,
+        )
     }
 
     suspend fun answer(
@@ -955,6 +1190,7 @@ class Session(
         requestId: String,
         choice: String,
         isPermission: Boolean,
+        reviewedSha256: String? = null,
     ) {
         perform {
             val behavior = OptionCard.responseBehavior(choice, isPermission)
@@ -963,6 +1199,7 @@ class Session(
                 requestId = requestId,
                 behavior = behavior,
                 message = choice.takeIf { behavior == "answer" },
+                reviewedSha256 = reviewedSha256.takeIf { behavior == "allow" },
             )
         }
     }
@@ -996,16 +1233,43 @@ class Session(
         }
     }
 
+    /**
+     * Create or extend a derived sidebar section in one server transaction.
+     * The desktop has no standalone section resource yet, so we merge the
+     * returned bot snapshots and let SSE reconcile later desktop-side changes.
+     */
+    suspend fun assignSection(name: String, botIds: List<String>): List<Bot>? {
+        val activeClient = client ?: return null
+        return try {
+            activeClient.assignSection(name, botIds).also { updatedBots ->
+                _state.update { state ->
+                    updatedBots.fold(state) { current, bot -> current.apply(Frame.Bot(bot)) }
+                }
+            }
+        } catch (error: Throwable) {
+            _actionError.value = error.message
+            null
+        }
+    }
+
     suspend fun interrupt(bot: Bot) {
         perform { it.interrupt(bot.id) }
     }
 
     suspend fun cloudDesktop(forBot: Bot): URI {
         val activeClient = client ?: throw APIError.Transport("This computer is offline.")
+        val connectionId = _connection.value?.id
         return try {
             activeClient.cloudDesktop(forBot.id).url
         } catch (error: APIError) {
-            if (error.isUnauthorized) _status.value = Status.Unauthorized
+            if (error.isUnauthorized) {
+                gate.withLock {
+                    // Only the live computer's 401 may mark this session revoked.
+                    if (connectionId != null && _connection.value?.id == connectionId) {
+                        _status.value = Status.Unauthorized
+                    }
+                }
+            }
             throw error
         }
     }
@@ -1070,11 +1334,15 @@ class Session(
             }
             val groupId = hit.groupId
             if (groupId != null) {
-                val room = _state.value.rooms.firstOrNull { it.id == groupId } ?: return null
+                var room = _state.value.rooms.firstOrNull { it.id == groupId } ?: return null
+                if (room.threadId != hit.threadId) {
+                    room = activeClient.switchRoomTask(room.id, hit.threadId)
+                    _state.update { it.apply(Frame.Room(room)) }
+                }
                 val page = activeClient.messagesAround(hit.threadId, hit.messageId)
                 _state.update { it.merge(page, hit.threadId) }
                 _focusedMessageId.value = hit.messageId
-                return Chat.RoomChat(room)
+                return _state.value.rooms.firstOrNull { it.id == groupId }?.let { Chat.RoomChat(it) }
             }
             null
         } catch (error: Throwable) {
@@ -1093,8 +1361,8 @@ class Session(
             }
 
             try {
-                _state.value.roomForThread(target.threadId)?.let {
-                    return@withLock Chat.RoomChat(it)
+                _state.value.roomOwningTask(target.threadId)?.let { room ->
+                    return@withLock openRoomNotification(activeClient, room, target.threadId)
                 }
 
                 var bot = _state.value.bot(target.botId)
@@ -1102,8 +1370,8 @@ class Session(
                     val fleet = hydrateFn(activeClient, 50)
                     _state.update { it.hydrate(fleet) }
                     notificationSink.setBadge(_state.value.unreadCount)
-                    _state.value.roomForThread(target.threadId)?.let {
-                        return@withLock Chat.RoomChat(it)
+                    _state.value.roomOwningTask(target.threadId)?.let { room ->
+                        return@withLock openRoomNotification(activeClient, room, target.threadId)
                     }
                     bot = _state.value.bot(target.botId)
                 }
@@ -1125,6 +1393,25 @@ class Session(
                 _actionError.value = error.message
                 null
             }
+        }
+    }
+
+    /** A room notification can name any channel task, not just the active one. */
+    private suspend fun openRoomNotification(
+        activeClient: CompanionClient,
+        room: Room,
+        threadId: String,
+    ): Chat.RoomChat {
+        if (room.threadId == threadId) return Chat.RoomChat(room)
+        return try {
+            val switched = activeClient.switchRoomTask(room.id, threadId)
+            _state.update { it.apply(Frame.Room(switched)) }
+            Chat.RoomChat(_state.value.rooms.firstOrNull { it.id == room.id } ?: switched)
+        } catch (error: Throwable) {
+            if (error is kotlinx.coroutines.CancellationException) throw error
+            // Notifications can outlive their task. Open the channel's current
+            // task rather than leaving the person with nowhere to go.
+            Chat.RoomChat(room)
         }
     }
 
@@ -1165,6 +1452,44 @@ class Session(
         val activeClient = client ?: return
         try {
             _state.update { it.apply(Frame.Bot(activeClient.deleteTask(forBot.id, task.threadId))) }
+        } catch (error: Throwable) {
+            _actionError.value = error.message
+        }
+    }
+
+    suspend fun createTask(forRoom: Room, title: String?) {
+        val activeClient = client ?: return
+        try {
+            _state.update { it.apply(Frame.Room(activeClient.createRoomTask(forRoom.id, title))) }
+        } catch (error: Throwable) {
+            _actionError.value = error.message
+        }
+    }
+
+    suspend fun switchTask(task: BotTask, forRoom: Room) {
+        if (task.threadId == forRoom.threadId) return
+        val activeClient = client ?: return
+        try {
+            _state.update { it.apply(Frame.Room(activeClient.switchRoomTask(forRoom.id, task.threadId))) }
+        } catch (error: Throwable) {
+            _actionError.value = error.message
+        }
+    }
+
+    suspend fun renameTask(task: BotTask, forRoom: Room, title: String) {
+        val activeClient = client ?: return
+        try {
+            activeClient.renameRoomTask(forRoom.id, task.threadId, title)
+            refresh()
+        } catch (error: Throwable) {
+            _actionError.value = error.message
+        }
+    }
+
+    suspend fun deleteTask(task: BotTask, forRoom: Room) {
+        val activeClient = client ?: return
+        try {
+            _state.update { it.apply(Frame.Room(activeClient.deleteRoomTask(forRoom.id, task.threadId))) }
         } catch (error: Throwable) {
             _actionError.value = error.message
         }
@@ -1403,11 +1728,17 @@ class Session(
 
     private suspend fun perform(quietly: Boolean = false, body: suspend (CompanionClient) -> Unit) {
         val activeClient = client ?: return
+        val connectionId = _connection.value?.id
         try {
             body(activeClient)
         } catch (error: APIError) {
             if (error.isUnauthorized) {
-                _status.value = Status.Unauthorized
+                gate.withLock {
+                    // Only the live computer's 401 may mark this session revoked.
+                    if (connectionId != null && _connection.value?.id == connectionId) {
+                        _status.value = Status.Unauthorized
+                    }
+                }
             } else if (!quietly) {
                 _actionError.value = error.message
             }
@@ -1417,6 +1748,7 @@ class Session(
     }
 
     companion object {
+        /** Kept for source compatibility; multi-computer builds no longer throw it. */
         const val ALREADY_PAIRED_MESSAGE =
             "This phone is already paired. Unpair it in Settings before connecting it to another computer."
         const val STORAGE_UNAVAILABLE_MESSAGE =
@@ -1431,7 +1763,11 @@ class Session(
     }
 }
 
-/** Thrown by [Session.pair] when a computer is already bound. */
+/** Thrown only when another pairing redemption is already running. */
+class PairingInProgressException : IllegalStateException("Another pairing attempt is already in progress.")
+
+/** @deprecated A paired phone may now add another computer. */
+@Deprecated("A paired phone may add another computer")
 class AlreadyPairedException : IllegalStateException(Session.ALREADY_PAIRED_MESSAGE)
 
 /** Thrown when a burned QR credential is presented again. */

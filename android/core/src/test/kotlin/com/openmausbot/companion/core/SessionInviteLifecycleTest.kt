@@ -152,11 +152,10 @@ class SessionInviteLifecycleTest {
 
         session.receivePairingURL(link(second, "192.168.1.9"))
 
-        assertNull(
+        assertNotNull(
             session.pairingInvite.value,
-            "a deep link was accepted onto a phone that is already bound",
+            "a paired phone may add another computer without replacing the live one yet",
         )
-        assertTrue(session.actionError!!.contains("already paired"))
     }
 
     @Test

@@ -7,6 +7,35 @@ interface ConnectionStore {
     suspend fun load(): Connection?
     suspend fun save(connection: Connection)
     suspend fun clear()
+
+    /**
+     * The non-secret index of computers this phone knows about.  The original
+     * single-connection methods stay as the compatibility boundary for older
+     * stores and test doubles; the Android DataStore implementation overrides
+     * these registry methods so it never loses a second computer.
+     */
+    suspend fun loadRegistry(): ConnectionRegistryRestore {
+        val legacy = load()
+        return if (legacy == null) {
+            ConnectionRegistryRestore(ConnectionRegistry(), migratedLegacyConnection = false)
+        } else {
+            // Only the concrete persistent store knows whether `load()` came
+            // from the legacy key. Compatibility stores expose one active
+            // record but must not receive a surprise migration write during a
+            // restore (some intentionally make writes suspend in tests).
+            ConnectionRegistryRestore(
+                ConnectionRegistry(listOf(legacy), legacy.id),
+                migratedLegacyConnection = false,
+            )
+        }
+    }
+
+    suspend fun saveRegistry(registry: ConnectionRegistry) {
+        val active = registry.activeConnection
+        if (active != null) save(active) else clear()
+    }
+
+    suspend fun clearRegistry() = clear()
 }
 
 /**

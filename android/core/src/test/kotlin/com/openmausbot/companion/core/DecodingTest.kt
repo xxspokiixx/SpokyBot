@@ -84,6 +84,21 @@ class DecodingTest {
     }
 
     @Test
+    fun decodesSidebarSectionsOnBotsAndChannels() {
+        val fleet = CompanionJson.decodeFromString<Fleet>(
+            """{"bots":[
+              {"id":"b1","threadId":"t1","name":"Scout","title":"","description":"","notifications":true,"color":"green","unread":false,"section":"Research","modelSelection":{"instanceId":"i1","model":"m1"},"createdAt":1}
+            ],"groups":[
+              {"id":"g1","threadId":"gt1","name":"Launch","memberIds":["b1"],"defaultResponder":{"kind":"mentions"},"bulletin":"","unread":false,"createdAt":2,"section":"Research"}
+            ]}""",
+        )
+
+        assertEquals("Research", fleet.bots.first().section)
+        assertEquals("Research", fleet.groups.first().section)
+        assertNull(decodeFixture<Fleet>("bots-full").bots.first().section)
+    }
+
+    @Test
     fun oneMalformedBotOrRoomDoesNotHideTheRestOfTheFleet() {
         val fleet = CompanionJson.decodeFromString<Fleet>(
             """{"bots":[
@@ -140,12 +155,33 @@ class DecodingTest {
         assertEquals("allow", card.responseBehavior("Always allow"))
         assertEquals("deny", card.responseBehavior("Deny"))
         assertEquals("deny", card.responseBehavior(" \tdeny \r\n"))
+        assertEquals("deny", card.responseBehavior("Cancel"))
+        assertEquals("deny", card.responseBehavior("Dismiss"))
         assertTrue(OptionCard.isRefusal("\nDeNy\t"))
         assertTrue(card.shouldRememberPermission(" \nAlways allow\t"))
         assertFalse(card.shouldRememberPermission("Allow"))
         assertFalse(card.shouldRememberPermission(" deny "))
         assertFalse(card.copy(answered = "Allow").isPending)
         assertFalse(card.copy(dismissed = true).isPending)
+    }
+
+    @Test
+    fun decodesAHashBoundSkillReviewAndLeavesLegacyCardsDenyOnly() {
+        val hash = "abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789"
+        val reviewed = CompanionJson.decodeFromString<Message>(
+            """{"id":"skill-card","role":"bot","kind":"options","at":1786742413762,
+              "card":{"title":"Enable skill?","subtitle":"Files expenses.","options":["Enable","Deny"],"requestId":"req-skill","tool":"stage_skill",
+              "skillRequest":{"version":1,"requestId":"req-skill","botId":"bot-1","threadId":"thread-1","stagedId":"staged-1","action":"create","name":"file-expense","gist":"Files expenses.","source":"learn:conversation","preview":"---\\nname: file-expense\\n---\\n","sha256":"$hash","warnings":[],"createdAt":1786742413762}}}""",
+        ).card!!.skillRequest!!
+
+        assertEquals("file-expense", reviewed.name)
+        assertEquals("learn:conversation", reviewed.source)
+        assertEquals(hash, reviewed.reviewedSha256)
+
+        val legacy = reviewed.copy(preview = null, sha256 = null)
+        assertNull(legacy.reviewedSha256)
+        assertNull(reviewed.copy(sha256 = "g".repeat(64)).reviewedSha256)
+        assertNull(reviewed.copy(sha256 = "a".repeat(63)).reviewedSha256)
     }
 
     @Test

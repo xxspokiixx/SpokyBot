@@ -31,6 +31,51 @@ class StoreTest {
     }
 
     @Test
+    fun sidebarSectionsGroupBotsAndChannelsInNaturalOrder() {
+        val source = fleet()
+        val base = source.bots.first()
+        val researchBot = base.copy(id = "research-1", threadId = "research-t1", section = "Research")
+        val personalBot = base.copy(id = "personal-1", threadId = "personal-t1", section = "Personal")
+        val pinnedResearch = base.copy(
+            id = "pinned-research",
+            threadId = "pinned-research-t",
+            section = "Research",
+            pinned = true,
+        )
+        val researchChief = base.copy(
+            id = "research-chief",
+            threadId = "research-chief-t",
+            section = "Research",
+            chiefOfStaff = true,
+            pinned = true,
+        )
+        val unsectionedChief = base.copy(
+            id = "default-chief",
+            threadId = "default-chief-t",
+            chiefOfStaff = true,
+        )
+        val hidden = base.copy(id = "hidden", threadId = "hidden-t", section = "Secret", hidden = true)
+        val baseRoom = source.groups.first()
+        val researchChannel = baseRoom.copy(id = "research-channel", section = "Research")
+        val generalChannel = baseRoom.copy(id = "general-channel", section = "  ")
+        val directChat = baseRoom.copy(id = "direct-chat", dm = true)
+        val state = CompanionState(
+            bots = listOf(researchChief, researchBot, personalBot, pinnedResearch, unsectionedChief, hidden),
+            rooms = listOf(generalChannel, researchChannel, directChat),
+        )
+
+        assertEquals(listOf("Research", "Personal"), state.sidebarSections.map(SidebarSection::name))
+        assertEquals(listOf("research-chief"), state.sidebarSections[0].chiefs.map(Bot::id))
+        assertEquals(listOf("research-1"), state.sidebarSections[0].bots.map(Bot::id))
+        assertEquals(listOf("research-channel"), state.sidebarSections[0].channels.map(Room::id))
+        assertEquals("default-chief", state.unsectionedChief?.id)
+        assertEquals(emptyList(), state.unsectionedBots)
+        assertEquals(listOf("pinned-research"), state.pinnedBots.map(Bot::id))
+        assertEquals(listOf("general-channel"), state.unsectionedChannels.map(Room::id))
+        assertEquals(listOf("direct-chat"), state.botChats.map(Room::id))
+    }
+
+    @Test
     fun applyIsPureAndLeavesThePreviousStateUntouched() {
         val before = hydrated()
         val threadId = before.bots.first().threadId
@@ -125,6 +170,23 @@ class StoreTest {
     }
 
     @Test
+    fun roomTaskSwitchReplacesTheActiveTranscript() {
+        var state = hydrated()
+        val room = state.rooms.first()
+        state = state.apply(Frame.Message(room.threadId, message("old-tail")))
+        state = state.apply(Frame.Room(room.copy(
+            threadId = "another-room-task",
+            tasks = listOf(BotTask("another-room-task", "Fresh", 2.0)),
+            messages = listOf(message("new-root", text = "new room task")),
+            hasMore = true,
+        )))
+        assertEquals("another-room-task", state.rooms.first { it.id == room.id }.threadId)
+        assertEquals(listOf("new-root"), state.transcript("another-room-task").map(Message::id))
+        assertEquals(true, state.hasMore["another-room-task"])
+        assertFalse(state.transcript("another-room-task").any { it.id == "old-tail" })
+    }
+
+    @Test
     fun visibleTranscriptFollowsTheActiveBranch() {
         val hydrated = hydrated()
         val bot = hydrated.bots.first()
@@ -156,8 +218,32 @@ class StoreTest {
         )))
         state = state.apply(Frame.Thread(bot.threadId, "other"))
         assertNull(state.streaming[bot.threadId])
-        state = state.apply(Frame.Message(bot.threadId, message("latest")))
+        state = state.apply(Frame.Message(bot.threadId, message("latest").copy(parentId = "other")))
         assertEquals("latest", state.bot(bot.id)?.activeLeafId)
+    }
+
+    @Test
+    fun lateArtifactDoesNotReplaceTheActiveLeaf() {
+        val hydrated = hydrated()
+        val bot = hydrated.bots.first()
+        val root = message("turn-done")
+        val followUp = message("follow-up", at = 2.0).copy(parentId = root.id)
+        val state = hydrated.copy(
+            messages = hydrated.messages + (bot.threadId to listOf(root, followUp)),
+        ).apply(Frame.Thread(bot.threadId, followUp.id)).apply(
+            Frame.Message(
+                bot.threadId,
+                message("late-screen", at = 3.0).copy(
+                    role = Message.Role.BOT,
+                    kind = Message.Kind.SCREEN,
+                    parentId = root.id,
+                ),
+            ),
+        )
+
+        assertEquals(followUp.id, state.bot(bot.id)?.activeLeafId)
+        assertEquals(listOf(root.id, followUp.id), state.visibleTranscript(bot.threadId).map(Message::id))
+        assertTrue(state.transcript(bot.threadId).any { it.id == "late-screen" })
     }
 
     @Test

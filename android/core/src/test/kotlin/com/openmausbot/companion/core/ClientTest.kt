@@ -160,8 +160,25 @@ class ClientTest {
     }
 
     @Test
+    fun assignSectionUsesTheNarrowAtomicOrganizerRoute() = runBlocking {
+        server.enqueue(json("""{"section":"Research","bots":[${botJson()}]}"""))
+
+        val bots = client.assignSection("Research", listOf("b2", "b1"))
+
+        val request = server.takeRequest()
+        assertEquals("POST", request.method)
+        assertEquals("/api/sidebar-sections", request.path)
+        assertEquals("Bearer device-token", request.getHeader("Authorization"))
+        val body = CompanionJson.parseToJsonElement(request.body.readUtf8()).jsonObject
+        assertEquals("Research", body.getValue("name").jsonPrimitive.content)
+        assertEquals(listOf("b2", "b1"), body.getValue("botIds").jsonArray.map { it.jsonPrimitive.content })
+        assertEquals(1, bots.size)
+    }
+
+    @Test
     fun actionCallsMatchTheAllowlist() = runBlocking {
         val bot = botJson()
+        val room = """{"id":"g1","threadId":"gt1","name":"Room","memberIds":[],"defaultResponder":{"kind":"auto"},"bulletin":"","unread":false,"createdAt":0,"tasks":[{"threadId":"gt1","title":"Room task","createdAt":0}]}"""
         val message = fixtureText("options-card")
         listOf(
             """{"bot":$bot}""", // create bot
@@ -176,6 +193,10 @@ class ClientTest {
             """{"bot":$bot}""", // switch task
             "{}", // rename task
             """{"bot":$bot}""", // delete task
+            """{"group":$room}""", // create room task
+            """{"group":$room}""", // switch room task
+            "{}", // rename room task
+            """{"group":$room}""", // delete room task
             "{}", // interrupt
             """{"joinUrl":"https://desktop.example/session/fresh"}""", // cloud desktop
             "{}", // bot read
@@ -194,12 +215,16 @@ class ClientTest {
         client.switchTask("b1", "t2")
         client.renameTask("b1", "t2", "Renamed")
         client.deleteTask("b1", "t2")
+        client.createRoomTask("g1", "Channel next")
+        client.switchRoomTask("g1", "gt2")
+        client.renameRoomTask("g1", "gt2", "Channel renamed")
+        client.deleteRoomTask("g1", "gt2")
         client.interrupt("b1")
         assertEquals("https://desktop.example/session/fresh", client.cloudDesktop("b1").url.toString())
         client.markBotRead("b1")
         client.markRoomRead("g1")
 
-        val requests = List(16) { server.takeRequest() }
+        val requests = List(20) { server.takeRequest() }
         assertEquals(
             listOf(
                 "POST /api/bots",
@@ -214,6 +239,10 @@ class ClientTest {
                 "POST /api/bots/b1/tasks/t2",
                 "PATCH /api/bots/b1/tasks/t2",
                 "DELETE /api/bots/b1/tasks/t2",
+                "POST /api/groups/g1/tasks",
+                "POST /api/groups/g1/tasks/gt2",
+                "PATCH /api/groups/g1/tasks/gt2",
+                "DELETE /api/groups/g1/tasks/gt2",
                 "POST /api/bots/b1/interrupt",
                 "POST /api/bots/b1/computer/join",
                 "POST /api/bots/b1/read",
@@ -233,7 +262,123 @@ class ClientTest {
         assertEquals(mapOf("messageId" to "m2"), stringBody(requests[7].body.readUtf8()))
         assertEquals(mapOf("title" to "Next"), stringBody(requests[8].body.readUtf8()))
         assertEquals(mapOf("title" to "Renamed"), stringBody(requests[10].body.readUtf8()))
+        assertEquals(mapOf("title" to "Channel next"), stringBody(requests[12].body.readUtf8()))
+        assertEquals(mapOf("title" to "Channel renamed"), stringBody(requests[14].body.readUtf8()))
         requests.forEach { assertEquals("Bearer device-token", it.getHeader("Authorization")) }
+    }
+
+    @Test
+    fun skillApprovalEchoesTheReviewedHashButDenialDoesNotNeedOne() = runBlocking {
+        val hash = "abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789"
+        repeat(2) { server.enqueue(json("{}")) }
+
+        client.respond("thread-1", "request-1", "allow", reviewedSha256 = hash)
+        client.respond("thread-1", "request-2", "deny")
+
+        assertEquals(
+            mapOf(
+                "requestId" to "request-1",
+                "behavior" to "allow",
+                "reviewedSha256" to hash,
+            ),
+            stringBody(server.takeRequest().body.readUtf8()),
+        )
+        assertEquals(
+            mapOf("requestId" to "request-2", "behavior" to "deny"),
+            stringBody(server.takeRequest().body.readUtf8()),
+        )
+    }
+
+    @Test
+    fun sharedUploadsAndSendUseRawBodiesAndStableIds() = runBlocking {
+        server.enqueue(json("""{"path":"/Users/test/attachments/image.png","mime":"image/png","bytes":4}""", 201))
+        server.enqueue(json("""{"path":"/Users/test/files/id.pdf","name":"Q3 plan.pdf","mime":"application/pdf","bytes":3}""", 201))
+        server.enqueue(json("{}"))
+        val imageUploadId = "7DB8737D-85B9-4BE5-A3D8-FA8D74EBA52B"
+        val fileUploadId = "8E50CD29-DBB2-4D76-971B-112DD962C9FA"
+
+        assertEquals("/Users/test/attachments/image.png", client.uploadImage(byteArrayOf(1, 2, 3, 4), "IMAGE/PNG", imageUploadId))
+        assertEquals(
+            UploadedFile("/Users/test/files/id.pdf", "Q3 plan.pdf"),
+            client.uploadFile(byteArrayOf(1, 2, 3), "../Q3 plan.pdf", "application/pdf", fileUploadId),
+        )
+        client.send(
+            text = "Review this",
+            to = MessageDestination.Bot("bot-1", "task_1"),
+            sendId = "share_1234567890123456",
+        )
+
+        val image = server.takeRequest()
+        assertEquals("/api/attachments?uploadId=$imageUploadId", image.path)
+        assertEquals("image/png", image.getHeader("Content-Type"))
+        assertEquals("\u0001\u0002\u0003\u0004", image.body.readUtf8())
+        val file = server.takeRequest()
+        assertEquals("/api/files?name=Q3%20plan.pdf&uploadId=$fileUploadId", file.path)
+        assertEquals("application/pdf", file.getHeader("Content-Type"))
+        assertEquals("\u0001\u0002\u0003", file.body.readUtf8())
+        val send = server.takeRequest()
+        assertEquals("/api/bots/bot-1/messages", send.path)
+        assertEquals(
+            mapOf("text" to "Review this", "threadId" to "task_1", "sendId" to "share_1234567890123456"),
+            stringBody(send.body.readUtf8()),
+        )
+    }
+
+    @Test
+    fun sharedSendAndUploadIdsRejectUnsafeValuesBeforeNetworking() = runBlocking {
+        assertFailsWith<APIError.BadUrl> {
+            client.send("No", MessageDestination.Bot("../config", "task"), "share_1234567890123456")
+        }
+        assertFailsWith<APIError.BadUrl> {
+            client.uploadImage(byteArrayOf(1), "image/png", "not-an-upload-id")
+        }
+        assertFailsWith<APIError.BadUrl> {
+            client.uploadFile(byteArrayOf(1), "notes.pdf", "application/pdf", "not-an-upload-id")
+        }
+        assertEquals(0, server.requestCount)
+    }
+
+    @Test
+    fun uploadsUseIdleTimeoutsWithoutACallDeadline() = runBlocking {
+        data class Seen(
+            val path: String?,
+            val callTimeoutNanos: Long,
+            val connectMs: Int,
+            val readMs: Int,
+            val writeMs: Int,
+        )
+        val seen = mutableListOf<Seen>()
+        val base = okhttp3.OkHttpClient.Builder()
+            .addInterceptor { chain ->
+                seen += Seen(
+                    path = chain.request().url.encodedPath,
+                    callTimeoutNanos = chain.call().timeout().timeoutNanos(),
+                    connectMs = chain.connectTimeoutMillis(),
+                    readMs = chain.readTimeoutMillis(),
+                    writeMs = chain.writeTimeoutMillis(),
+                )
+                chain.proceed(chain.request())
+            }
+            .build()
+        val wired = CompanionClient(connection, "device-token", base)
+        server.enqueue(json("""{"ok":true}"""))
+        server.enqueue(json("""{"path":"/Users/test/attachments/image.png","mime":"image/png","bytes":4}""", 201))
+        server.enqueue(json("""{"path":"/Users/test/files/id.pdf","name":"doc.pdf","mime":"application/pdf","bytes":3}""", 201))
+
+        wired.health()
+        wired.uploadImage(byteArrayOf(1, 2, 3, 4), "image/png")
+        wired.uploadFile(byteArrayOf(1, 2, 3), "doc.pdf", "application/pdf")
+
+        assertEquals(listOf("/api/health", "/api/attachments", "/api/files"), seen.map { it.path })
+        val actionCallTimeout = java.util.concurrent.TimeUnit.SECONDS.toNanos(20)
+        assertEquals(actionCallTimeout, seen[0].callTimeoutNanos)
+        assertEquals(0L, seen[1].callTimeoutNanos)
+        assertEquals(0L, seen[2].callTimeoutNanos)
+        seen.forEach { timeouts ->
+            assertEquals(20_000, timeouts.connectMs)
+            assertEquals(20_000, timeouts.readMs)
+            assertEquals(20_000, timeouts.writeMs)
+        }
     }
 
     @Test

@@ -130,6 +130,19 @@ class CompanionClient(
         .writeTimeout(ACTION_TIMEOUT_SECONDS, TimeUnit.SECONDS)
         .build()
 
+    /**
+     * Share uploads can be tens of MB. A wall-clock [callTimeout] would abort a
+     * steady transfer; iOS uses an idle `timeoutInterval` that resets on bytes.
+     * Connect/read/write idle limits, no overall call deadline.
+     */
+    private val uploadClient = baseClient.newBuilder()
+        .dns(endpoint?.dns ?: baseClient.dns)
+        .callTimeout(0, TimeUnit.MILLISECONDS)
+        .connectTimeout(ACTION_TIMEOUT_SECONDS, TimeUnit.SECONDS)
+        .readTimeout(ACTION_TIMEOUT_SECONDS, TimeUnit.SECONDS)
+        .writeTimeout(ACTION_TIMEOUT_SECONDS, TimeUnit.SECONDS)
+        .build()
+
     private val streamingClient = baseClient.newBuilder()
         .dns(endpoint?.dns ?: baseClient.dns)
         .callTimeout(0, TimeUnit.MILLISECONDS)
@@ -205,6 +218,11 @@ class CompanionClient(
         makeRequest("GET", "/api/instances"),
     ).instances
 
+    /** Missing capability data fails closed: image prompts must be readable by the selected model. */
+    suspend fun imageCapableInstanceIds(): Set<String> = instances()
+        .filter { it.capabilities?.images == true }
+        .mapTo(mutableSetOf(), Instance::instanceId)
+
     suspend fun config(): ConfigStatus = send(makeRequest("GET", "/api/config"))
 
     suspend fun connectorCatalog(): ConnectorCatalog =
@@ -234,6 +252,22 @@ class CompanionClient(
 
     suspend fun createBot(): Bot = send<CreatedBot>(makeRequest("POST", "/api/bots")).bot
 
+    /**
+     * Atomically file visible bots under one shared sidebar heading. This is
+     * narrower than the desktop's general bot patch: pairing a phone grants
+     * organization, never execution-policy edits.
+     */
+    suspend fun assignSection(name: String, botIds: List<String>): List<Bot> = send<SidebarSectionResponse>(
+        makeRequest(
+            "POST",
+            "/api/sidebar-sections",
+            body = buildJsonObject {
+                put("name", name)
+                put("botIds", JsonArray(botIds.map(::JsonPrimitive)))
+            },
+        ),
+    ).bots
+
     suspend fun updateProfile(botId: String, patch: BotProfilePatch): Bot {
         val body = CompanionJson.encodeToJsonElement(BotProfilePatch.serializer(), patch).jsonObject
         return send<BotResponse>(
@@ -241,20 +275,61 @@ class CompanionClient(
         ).bot
     }
 
-    suspend fun uploadAvatar(data: ByteArray, mime: String): String {
-        if (mime !in AVATAR_MIME_TYPES || data.size > AVATAR_MAX_BYTES) {
+    /** Upload a shared image as raw bytes; [uploadId] makes an interrupted retry idempotent. */
+    suspend fun uploadImage(data: ByteArray, mime: String, uploadId: String? = null): String {
+        if (!validUploadId(uploadId)) throw APIError.BadUrl
+        val normalized = mime.lowercase()
+        if (normalized !in AVATAR_MIME_TYPES || data.size > AVATAR_MAX_BYTES) {
             throw APIError.Transport("Choose a PNG, JPEG, GIF, or WebP image up to 10 MB.")
         }
-        val saved = send<AttachmentResponse>(makeRequest(
-            "POST",
-            "/api/attachments",
-            rawBody = data.toRequestBody(mime.toMediaType()),
-        ))
-        val name = saved.path.substringAfterLast('/')
-        if (name.isEmpty() || '/' in name) {
+        val saved = send<AttachmentResponse>(
+            makeRequest(
+                "POST",
+                "/api/attachments",
+                query = uploadId?.let { listOf("uploadId" to it) }.orEmpty(),
+                rawBody = data.toRequestBody(normalized.toMediaType()),
+            ),
+            uploadClient,
+        )
+        if (!validUploadedPath(saved.path)) {
             throw APIError.Transport("The uploaded image could not be used.")
         }
+        return saved.path
+    }
+
+    suspend fun uploadAvatar(data: ByteArray, mime: String): String {
+        val path = uploadImage(data, mime)
+        val name = path.substringAfterLast('/')
+        if (name.isEmpty() || '/' in name) throw APIError.Transport("The uploaded image could not be used.")
         return "/api/attachments/$name"
+    }
+
+    /** Upload a supported document. The server picks its storage path; [name] is display metadata. */
+    suspend fun uploadFile(data: ByteArray, name: String, mime: String, uploadId: String? = null): UploadedFile {
+        if (!validUploadId(uploadId)) throw APIError.BadUrl
+        val displayName = name.substringAfterLast('/').substringAfterLast('\\').trim()
+        val normalized = mime.lowercase()
+        if (
+            displayName.isEmpty() || displayName.toByteArray().size > 255 ||
+            !validUploadMime(normalized) || data.size > SHARE_FILE_MAX_BYTES
+        ) throw APIError.Transport("Choose a file up to 25 MB with a valid filename.")
+        val saved = send<FileUploadResponse>(
+            makeRequest(
+                "POST",
+                "/api/files",
+                query = buildList {
+                    add("name" to displayName)
+                    uploadId?.let { add("uploadId" to it) }
+                },
+                rawBody = data.toRequestBody(normalized.toMediaType()),
+            ),
+            uploadClient,
+        )
+        val returnedName = saved.name.trim()
+        if (!validUploadedPath(saved.path) || !validUploadedName(returnedName)) {
+            throw APIError.Transport("The uploaded file could not be used.")
+        }
+        return UploadedFile(saved.path, returnedName)
     }
 
     suspend fun generateAvatar(botId: String, prompt: String): Bot =
@@ -325,16 +400,36 @@ class CompanionClient(
         sendUnit(makeRequest("POST", "/api/groups/${segment(groupId)}/messages", body = jsonBody("text" to text)))
     }
 
+    /** Retry-safe send: [threadId] is fixed at destination selection, never inferred on retry. */
+    suspend fun send(text: String, to: MessageDestination, sendId: String) {
+        val route = when (to) {
+            is MessageDestination.Bot -> "/api/bots/${safeRouteId(to.id)}/messages"
+            is MessageDestination.Room -> "/api/groups/${safeRouteId(to.id)}/messages"
+        }
+        if (!isSafeRouteId(to.threadId) || !isSafeSendId(sendId)) throw APIError.BadUrl
+        sendUnit(makeRequest(
+            "POST",
+            route,
+            body = buildJsonObject {
+                put("text", text)
+                put("threadId", to.threadId)
+                put("sendId", sendId)
+            },
+        ))
+    }
+
     suspend fun respond(
         threadId: String,
         requestId: String,
         behavior: String,
         message: String? = null,
+        reviewedSha256: String? = null,
     ) {
         val body = buildJsonObject {
             put("requestId", requestId)
             put("behavior", behavior)
             message?.let { put("message", it) }
+            reviewedSha256?.let { put("reviewedSha256", it) }
         }
         sendUnit(makeRequest("POST", "/api/threads/${segment(threadId)}/respond", body = body))
     }
@@ -402,6 +497,31 @@ class CompanionClient(
     suspend fun deleteTask(botId: String, threadId: String): Bot = send<BotResponse>(
         makeRequest("DELETE", "/api/bots/${segment(botId)}/tasks/${segment(threadId)}"),
     ).bot
+
+    suspend fun createRoomTask(groupId: String, title: String? = null): Room {
+        val body = buildJsonObject {
+            title?.takeIf(String::isNotEmpty)?.let { put("title", it) }
+        }
+        return send<RoomResponse>(
+            makeRequest("POST", "/api/groups/${segment(groupId)}/tasks", body = body),
+        ).group
+    }
+
+    suspend fun switchRoomTask(groupId: String, threadId: String): Room = send<RoomResponse>(
+        makeRequest("POST", "/api/groups/${segment(groupId)}/tasks/${segment(threadId)}"),
+    ).group
+
+    suspend fun renameRoomTask(groupId: String, threadId: String, title: String) {
+        sendUnit(makeRequest(
+            "PATCH",
+            "/api/groups/${segment(groupId)}/tasks/${segment(threadId)}",
+            body = jsonBody("title" to title),
+        ))
+    }
+
+    suspend fun deleteRoomTask(groupId: String, threadId: String): Room = send<RoomResponse>(
+        makeRequest("DELETE", "/api/groups/${segment(groupId)}/tasks/${segment(threadId)}"),
+    ).group
 
     suspend fun interrupt(botId: String) {
         sendUnit(makeRequest("POST", "/api/bots/${segment(botId)}/interrupt"))
@@ -525,6 +645,7 @@ class CompanionClient(
         private const val AVATAR_GENERATION_TIMEOUT_SECONDS = 150L
         private const val STREAM_IDLE_TIMEOUT_SECONDS = 90L
         private const val AVATAR_MAX_BYTES = 10 * 1_024 * 1_024
+        const val SHARE_FILE_MAX_BYTES = 25 * 1_024 * 1_024
         private val AVATAR_MIME_TYPES = setOf("image/png", "image/jpeg", "image/gif", "image/webp")
         private val JSON_MEDIA_TYPE = "application/json".toMediaType()
         private val EMPTY_BODY: RequestBody = ByteArray(0).toRequestBody(null)
@@ -576,6 +697,29 @@ class CompanionClient(
             return stem.all { it in '0'..'9' || it in 'A'..'Z' || it in 'a'..'z' || it == '-' } &&
                 extension in setOf("png", "jpg", "gif", "webp")
         }
+
+        private fun validUploadMime(value: String): Boolean =
+            value.isNotEmpty() && value.toByteArray().size <= 127 && '/' in value && value.all {
+                it.isLetterOrDigit() || it in "!#$&+-. /^_".filterNot(Char::isWhitespace)
+            }
+
+        private fun validUploadId(value: String?): Boolean = value == null || runCatching {
+            UUID.fromString(value).toString().equals(value, ignoreCase = true)
+        }.getOrDefault(false)
+
+        private fun validUploadedPath(value: String): Boolean =
+            value.isNotEmpty() && value.toByteArray().size <= 4_096 && '\u0000' !in value
+
+        private fun validUploadedName(value: String): Boolean =
+            value.isNotEmpty() && value.toByteArray().size <= 255 && '/' !in value && '\\' !in value &&
+                value.none(Char::isISOControl)
+
+        private fun isSafeRouteId(value: String): Boolean =
+            value.isNotEmpty() && value.all { it.isLetterOrDigit() || it == '-' || it == '_' }
+
+        private fun safeRouteId(value: String): String = if (isSafeRouteId(value)) value else throw APIError.BadUrl
+
+        private fun isSafeSendId(value: String): Boolean = value.length in 16..80 && isSafeRouteId(value)
 
         private fun validConnectorSlug(value: String): Boolean =
             value.isNotEmpty() && value.all {

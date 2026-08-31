@@ -96,6 +96,26 @@ class OnboardingTest {
     }
 
     @Test
+    fun pairedUserCanOpenPairingToAddAnotherComputer() {
+        assertEquals(
+            OnboardingRoute.PAIRING,
+            route(
+                OnboardingPairingState.PAIRED,
+                hasSeenWelcome = true,
+                pairingRequested = true,
+            ),
+        )
+        assertEquals(
+            OnboardingRoute.PAIRING,
+            route(
+                OnboardingPairingState.PAIRED,
+                hasSeenWelcome = true,
+                hasPendingPairingInvite = true,
+            ),
+        )
+    }
+
+    @Test
     fun justPairedUserSeesNotificationExplanationOnceThenChats() {
         assertEquals(
             OnboardingRoute.NOTIFICATION_PROMPT,

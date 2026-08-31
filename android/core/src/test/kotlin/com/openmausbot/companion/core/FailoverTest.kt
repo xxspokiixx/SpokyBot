@@ -5,6 +5,8 @@ import java.net.SocketTimeoutException
 import java.net.UnknownHostException
 import java.security.cert.CertificateException
 import javax.net.ssl.SSLException
+import kotlinx.serialization.decodeFromString
+import kotlinx.serialization.encodeToString
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFalse
@@ -338,6 +340,58 @@ class FailoverTest {
         assertEquals(lan.url, connection.baseUrl.toString())
         assertEquals(listOf(hosted.url, lan.url), connection.orderedEndpoints.map { it.url })
         assertEquals(listOf(hosted), connection.automaticEndpoints)
+    }
+
+    @Test
+    fun protectedUpgradeStillLeadsAfterRestartDespiteAPriorityZeroLocalRoute() {
+        val priorityZeroLan = assertNotNull(
+            CompanionEndpoint.create("http://192.168.1.42:8810", CompanionEndpointKind.LAN, 0),
+        )
+        val lowerPriorityHosted = assertNotNull(
+            CompanionEndpoint.create("https://mac.companion.example", CompanionEndpointKind.HOSTED, 100),
+        )
+        val upgraded = Connection(
+            name = "Mac",
+            host = priorityZeroLan.host,
+            port = priorityZeroLan.port,
+            activeEndpoint = priorityZeroLan,
+            endpoints = listOf(priorityZeroLan, lowerPriorityHosted),
+        ).promoting(lowerPriorityHosted)
+
+        assertEquals(
+            listOf(lowerPriorityHosted, priorityZeroLan),
+            upgraded.orderedEndpoints,
+            "the protected winner must lead the persisted order rather than returning the bearer to LAN",
+        )
+        assertEquals(listOf(lowerPriorityHosted), upgraded.automaticEndpoints)
+
+        val restored = CompanionJson.decodeFromString<Connection>(
+            CompanionJson.encodeToString(upgraded),
+        )
+        val rotation = CandidateRotation(restored.orderedEndpoints)
+        assertEquals(lowerPriorityHosted, rotation.currentEndpoint)
+        assertEquals(listOf(lowerPriorityHosted), rotation.endpoints)
+
+        val manualLan = restored.resettingRoutePolicy(priorityZeroLan)
+        assertEquals(listOf(priorityZeroLan, lowerPriorityHosted), manualLan.orderedEndpoints)
+    }
+
+    @Test
+    fun hostedPriorityBeatsAnActiveTailnetRouteWhenBothProtectCredentials() {
+        val connection = Connection(
+            name = "Mac",
+            host = tailnet.host,
+            port = tailnet.port,
+            activeEndpoint = tailnet,
+            endpoints = listOf(tailnet, hosted),
+        )
+
+        assertEquals(
+            listOf(hosted, tailnet),
+            connection.orderedEndpoints,
+            "an active tailnet route may move ahead of cleartext only, never advertised HTTPS",
+        )
+        assertEquals(listOf(hosted, tailnet), connection.automaticEndpoints)
     }
 
     @Test

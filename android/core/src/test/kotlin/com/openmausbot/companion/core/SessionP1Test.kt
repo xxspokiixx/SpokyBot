@@ -181,6 +181,64 @@ class SessionP1Test {
     }
 
     @Test
+    fun roomTaskNotificationSwitchesTheChannelAndFallsBackWhenTheTaskIsGone() = runTest {
+        val room = room("room-1", "room-task-1", "room-task-1", "room-task-2")
+        val switched = room.copy(
+            threadId = "room-task-2",
+            messages = listOf(Message("fresh", Message.Role.USER, Message.Kind.TEXT, 2.0, text = "fresh")),
+        )
+        val session = session { Fleet(emptyList(), listOf(room)) }
+        server.enqueue(json("""{"group":${CompanionJson.encodeToString(switched)}}"""))
+
+        val opened = session.openNotification(target("asker", "room-task-2"))
+
+        assertEquals("room-task-2", assertIs<Chat.RoomChat>(opened).threadId)
+        assertEquals("room-task-2", session.state.value.rooms.single().threadId)
+        assertEquals("POST /api/groups/room-1/tasks/room-task-2", server.takeRequest().let { "${it.method} ${it.path}" })
+
+        server.enqueue(json("""{"error":"Task not found."}""", code = 404))
+        val fallback = session.openNotification(target("asker", "room-task-1"))
+        assertEquals("room-task-2", assertIs<Chat.RoomChat>(fallback).threadId)
+        assertNull(session.actionError)
+    }
+
+    @Test
+    fun roomSearchHitSwitchesItsTaskBeforeLoadingTheMatchedPage() = runTest {
+        val room = room("room-1", "room-task-1", "room-task-1", "room-task-2")
+        val switched = room.copy(threadId = "room-task-2")
+        val session = session { Fleet(emptyList(), listOf(room)) }
+        // A current task notification only hydrates the fleet; it avoids a
+        // private state seam before exercising the public search entry point.
+        assertIs<Chat.RoomChat>(session.openNotification(target("asker", "room-task-1")))
+        server.enqueue(json("""{"group":${CompanionJson.encodeToString(switched)}}"""))
+        server.enqueue(json("""{"messages":[{"id":"matched","role":"user","kind":"text","at":2,"text":"needle"}],"hasMore":false}"""))
+
+        val opened = session.open(SearchHit(
+            threadId = "room-task-2",
+            messageId = "matched",
+            at = 2.0,
+            role = Message.Role.USER,
+            kind = Message.Kind.TEXT,
+            snippet = "needle",
+            matchStart = 0,
+            matchLength = 6,
+            groupId = "room-1",
+            name = "room-1",
+            onActivePath = true,
+        ))
+
+        assertEquals("room-task-2", assertIs<Chat.RoomChat>(opened).threadId)
+        assertEquals(listOf("matched"), session.state.value.transcript("room-task-2").map(Message::id))
+        assertEquals(
+            listOf(
+                "POST /api/groups/room-1/tasks/room-task-2",
+                "GET /api/threads/room-task-2/messages?limit=50&around=matched",
+            ),
+            List(2) { server.takeRequest().let { "${it.method} ${it.path}" } },
+        )
+    }
+
+    @Test
     fun roomNotificationHydratesAndPrefersTheRoomThread() = runTest {
         var hydrates = 0
         val asker = bot("asker", "bot-task", "bot-task")
@@ -317,7 +375,7 @@ class SessionP1Test {
         },
     )
 
-    private fun room(id: String, threadId: String): Room = Room(
+    private fun room(id: String, threadId: String, vararg tasks: String): Room = Room(
         id = id,
         threadId = threadId,
         name = id,
@@ -326,6 +384,8 @@ class SessionP1Test {
         bulletin = "",
         unread = false,
         createdAt = 1.0,
+        tasks = tasks.mapIndexed { index, task -> BotTask(task, "Task ${index + 1}", index.toDouble()) }
+            .takeIf { it.isNotEmpty() },
     )
 
     private fun json(body: String, code: Int = 200): MockResponse = MockResponse()

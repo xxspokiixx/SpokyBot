@@ -129,7 +129,11 @@ object OnboardingRouter {
         OnboardingPairingState.REVOKED -> OnboardingRoute.REVOKED
 
         OnboardingPairingState.PAIRED ->
-            if (context.notificationOnboardingPending &&
+            if (context.pairingRequested || context.hasPendingPairingInvite) {
+                // Adding a computer deliberately overlays pairing over a live
+                // session. The old computer is not replaced until commit.
+                OnboardingRoute.PAIRING
+            } else if (context.notificationOnboardingPending &&
                 !context.hasSeenNotificationPrompt &&
                 context.notificationAuthorization == NotificationAuthorizationState.NOT_DETERMINED
             ) {

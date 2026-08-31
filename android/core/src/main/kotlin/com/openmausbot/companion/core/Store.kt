@@ -2,6 +2,19 @@ package com.openmausbot.companion.core
 
 data class PendingApproval(val threadId: String, val message: Message)
 
+/**
+ * A derived sidebar heading, not a persisted resource. The desktop stores
+ * membership on every bot/channel; section order itself is not synchronized.
+ */
+data class SidebarSection(
+    val name: String,
+    val chiefs: List<Bot>,
+    val bots: List<Bot>,
+    val channels: List<Room>,
+) {
+    val id: String get() = name
+}
+
 data class CompanionState(
     val bots: List<Bot> = emptyList(),
     val rooms: List<Room> = emptyList(),
@@ -33,6 +46,61 @@ data class CompanionState(
     fun bot(id: String): Bot? = bots.firstOrNull { it.id == id }
     fun botForThread(threadId: String): Bot? = bots.firstOrNull { it.threadId == threadId }
     fun roomForThread(threadId: String): Room? = rooms.firstOrNull { it.threadId == threadId }
+    fun roomOwningTask(threadId: String): Room? = rooms.firstOrNull {
+        it.threadId == threadId || it.tasks.orEmpty().any { task -> task.threadId == threadId }
+    }
+
+    /**
+     * User-named headings in the desktop's natural order: ordinary bots,
+     * Chiefs, then channels. A manual section ordering is not a server feature,
+     * so this client does not make a local order look shared.
+     */
+    val sidebarSections: List<SidebarSection>
+        get() {
+            val visibleBots = bots.filter { it.hidden != true }
+            val visibleChannels = rooms.filter { it.dm != true }
+            val sectionChiefs = visibleBots.filter {
+                it.chiefOfStaff == true && sectionName(it.section) != null
+            }
+            val sectionBots = visibleBots.filter {
+                it.chiefOfStaff != true && !isSidebarPinned(it) && sectionName(it.section) != null
+            }
+            val names = buildList {
+                (sectionBots.map(Bot::section) + sectionChiefs.map(Bot::section) +
+                    visibleChannels.map(Room::section)).forEach { raw ->
+                    sectionName(raw)?.takeIf { it !in this }?.let(::add)
+                }
+            }
+            return names.map { name ->
+                SidebarSection(
+                    name = name,
+                    chiefs = sectionChiefs.filter { sectionName(it.section) == name },
+                    bots = sectionBots.filter { sectionName(it.section) == name },
+                    channels = visibleChannels.filter { sectionName(it.section) == name },
+                )
+            }
+        }
+
+    val unsectionedChief: Bot?
+        get() = bots.firstOrNull {
+            it.hidden != true && it.chiefOfStaff == true && sectionName(it.section) == null
+        }
+
+    val unsectionedBots: List<Bot>
+        get() = bots.filter {
+            it.hidden != true && it.chiefOfStaff != true && !isSidebarPinned(it) &&
+                sectionName(it.section) == null
+        }
+
+    /** Pinned is a virtual bucket; unpinning returns the bot to its saved section. */
+    val pinnedBots: List<Bot>
+        get() = bots.filter { it.hidden != true && isSidebarPinned(it) }
+
+    val unsectionedChannels: List<Room>
+        get() = rooms.filter { it.dm != true && sectionName(it.section) == null }
+
+    val botChats: List<Room>
+        get() = rooms.filter { it.dm == true }
 
     val pendingApprovals: List<PendingApproval>
         get() = (bots.map(Bot::threadId) + rooms.map(Room::threadId))
@@ -100,7 +168,14 @@ data class CompanionState(
             var result = copy(
                 messages = append(messages, frame.threadId, frame.message),
                 bots = bots.map {
-                    if (it.threadId == frame.threadId) it.copy(activeLeafId = frame.message.id) else it
+                    if (
+                        it.threadId == frame.threadId &&
+                        frame.message.parentId == it.activeLeafId
+                    ) {
+                        it.copy(activeLeafId = frame.message.id)
+                    } else {
+                        it
+                    }
                 },
             )
             if (frame.message.role == Message.Role.BOT && frame.message.kind == Message.Kind.TEXT) {
@@ -204,7 +279,19 @@ data class CompanionState(
             }
             return copy(rooms = rooms + room, messages = nextMessages)
         }
-        return copy(rooms = rooms.replacing(index, room.copy(messages = rooms[index].messages)))
+        val previous = rooms[index]
+        // Metadata-only room frames preserve the active transcript. A task
+        // switch carries a replacement transcript and is authoritative.
+        if (room.messages == null) {
+            return copy(rooms = rooms.replacing(index, room.copy(messages = previous.messages)))
+        }
+        var result = copy(
+            rooms = rooms.replacing(index, room.copy(messages = room.messages)),
+            messages = messages + (room.threadId to room.messages),
+            hasMore = hasMore + (room.threadId to (room.hasMore ?: false)),
+        ).clearStream(previous.threadId)
+        if (previous.threadId != room.threadId) result = result.clearStream(room.threadId)
+        return result
     }
 
     private fun deleteRoom(groupId: String): CompanionState {
@@ -242,6 +329,10 @@ data class CompanionState(
     }
 
     private companion object {
+        fun sectionName(raw: String?): String? = raw?.trim()?.takeIf(String::isNotEmpty)
+
+        fun isSidebarPinned(bot: Bot): Boolean = bot.pinned == true && bot.chiefOfStaff != true
+
         fun append(
             messages: Map<String, List<Message>>,
             threadId: String,

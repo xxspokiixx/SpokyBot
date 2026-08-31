@@ -49,7 +49,7 @@ class ChatSummaryTest {
             ),
         )
 
-        val summaries = state.chatSummaries
+        val summaries = state.chatSummaries()
         // pinned → unread (by activity: room@15 before bot@5) → read (new@20 before old@1)
         assertEquals(
             listOf("pinned", "r1", "unread", "new", "old"),
@@ -118,7 +118,7 @@ class ChatSummaryTest {
             bots = listOf(sampleBot("b", "t")),
             messages = mapOf("t" to listOf(text("m", 1.0, "hello"))),
         )
-        assertEquals("hello", textState.chatSummaries.single().preview)
+        assertEquals("hello", textState.chatSummaries().single().preview)
 
         val activity = CompanionState(
             bots = listOf(sampleBot("b", "t")),
@@ -134,7 +134,7 @@ class ChatSummaryTest {
                 ),
             ),
         )
-        assertEquals("Bash", activity.chatSummaries.single().preview)
+        assertEquals("Bash", activity.chatSummaries().single().preview)
 
         val screen = CompanionState(
             bots = listOf(sampleBot("b", "t")),
@@ -149,7 +149,7 @@ class ChatSummaryTest {
                 ),
             ),
         )
-        assertEquals("Screenshot", screen.chatSummaries.single().preview)
+        assertEquals("Screenshot", screen.chatSummaries().single().preview)
     }
 }
 
@@ -196,5 +196,5 @@ private fun optionPreview(card: OptionCard?): String {
             )),
         ),
     )
-    return state.chatSummaries.single().preview
+    return state.chatSummaries().single().preview
 }

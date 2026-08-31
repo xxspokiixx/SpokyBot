@@ -106,6 +106,39 @@ class RouteConsentTest {
     }
 
     @Test
+    fun forbiddenCleartextHeadCannotInfluenceProtectedRouteOrdering() {
+        val priorityZeroLan = requireNotNull(
+            CompanionEndpoint.create("http://192.168.1.42:8810", CompanionEndpointKind.LAN, 0),
+        )
+        val hostedAfterLan = requireNotNull(
+            CompanionEndpoint.create("https://mac.companion.example", CompanionEndpointKind.HOSTED, 50),
+        )
+        val activeTailnet = requireNotNull(
+            CompanionEndpoint.create(
+                "http://mac.tail1234.ts.net:8810",
+                CompanionEndpointKind.TAILNET,
+                100,
+            ),
+        )
+        val connection = Connection(
+            name = "Mac",
+            host = activeTailnet.host,
+            port = activeTailnet.port,
+            activeEndpoint = activeTailnet,
+            endpoints = listOf(priorityZeroLan, hostedAfterLan, activeTailnet),
+            allowedRouteKinds = setOf(CompanionEndpointKind.HOSTED, CompanionEndpointKind.TAILNET),
+            allowedLocalRouteURLs = emptySet(),
+        )
+
+        assertEquals(
+            listOf(hostedAfterLan, activeTailnet),
+            connection.orderedEndpoints,
+            "a cleartext route refused by policy must neither lead nor hoist tailnet above HTTPS",
+        )
+        assertEquals(listOf(hostedAfterLan, activeTailnet), connection.automaticEndpoints)
+    }
+
+    @Test
     fun explicitLocalInviteNeverLearnsTailscaleOrAnotherLanOrigin() {
         var connection = Connection(
             name = "Mac",

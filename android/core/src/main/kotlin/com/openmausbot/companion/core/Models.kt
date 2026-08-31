@@ -34,6 +34,36 @@ val CompanionJson = Json {
 }
 
 @Serializable
+data class SkillRequestCardData(
+    val version: Int,
+    val requestId: String,
+    val botId: String,
+    val threadId: String,
+    val stagedId: String,
+    val action: String,
+    val name: String,
+    val gist: String,
+    /** Optional so approval cards persisted by older desktop builds still decode. */
+    val source: String? = null,
+    /** The exact, secret-scrubbed instructions the approval enables. */
+    val preview: String? = null,
+    val sha256: String? = null,
+    val warnings: List<String> = emptyList(),
+    val createdAt: Long,
+) {
+    /**
+     * A current client echoes this hash only after it can show the complete proposal. Legacy or
+     * malformed cards remain visible but deny-only.
+     */
+    val reviewedSha256: String?
+        get() = sha256?.takeIf { hash ->
+            !preview.isNullOrEmpty() && hash.length == 64 && hash.all { character ->
+                character in '0'..'9' || character in 'a'..'f' || character in 'A'..'F'
+            }
+        }
+}
+
+@Serializable
 data class OptionCard(
     val title: String,
     val subtitle: String,
@@ -44,6 +74,8 @@ data class OptionCard(
     val tool: String? = null,
     val held: String? = null,
     val allowKey: String? = null,
+    /** Learned skills require a complete, hash-bound review before approval. */
+    val skillRequest: SkillRequestCardData? = null,
 ) {
     val isPending: Boolean get() = requestId != null && answered == null && dismissed != true
     val isPermission: Boolean get() = tool != null
@@ -60,7 +92,8 @@ data class OptionCard(
             else -> "allow"
         }
 
-        fun isRefusal(choice: String): Boolean = choice.trim().equals("Deny", ignoreCase = true)
+        fun isRefusal(choice: String): Boolean = choice.trim().lowercase() in
+            setOf("deny", "cancel", "dismiss")
     }
 }
 
@@ -184,6 +217,8 @@ data class Bot(
     val busy: Boolean? = null,
     val pinned: Boolean? = null,
     val hidden: Boolean? = null,
+    /** Desktop sidebar section. Missing or blank means the built-in Bots area. */
+    val section: String? = null,
     val chiefOfStaff: Boolean? = null,
     val autoApprove: Boolean? = null,
     val alwaysAllow: List<String>? = null,
@@ -229,7 +264,11 @@ data class Room(
     val unread: Boolean,
     val createdAt: Double,
     val dm: Boolean? = null,
+    /** Desktop sidebar section. Missing or blank means the built-in Channels area. */
+    val section: String? = null,
     val busyBotId: String? = null,
+    /** Independent user conversations in this channel. DMs omit this field. */
+    val tasks: List<BotTask>? = null,
     val messages: List<Message>? = null,
     val hasMore: Boolean? = null,
 )
@@ -467,9 +506,14 @@ data class Instance(
     val displayName: String? = null,
     val snapshot: ProviderSnapshot,
     val models: ModelCatalog,
+    /** Older computers omit capabilities; omission is intentionally not permission. */
+    val capabilities: InstanceCapabilities? = null,
 ) {
     val id: String get() = instanceId
 }
+
+@Serializable
+data class InstanceCapabilities(val images: Boolean? = null)
 
 @Serializable
 data class InstanceList(val instances: List<Instance>)
@@ -875,10 +919,20 @@ internal data class ActiveBranchResponse(val activeLeafId: String)
 internal data class BotResponse(val bot: Bot)
 
 @Serializable
+internal data class RoomResponse(val group: Room)
+
+/** The narrow sidebar organizer route returns just the affected bots. */
+@Serializable
+internal data class SidebarSectionResponse(val section: String, val bots: List<Bot>)
+
+@Serializable
 internal data class VoiceListResponse(val voices: List<Voice>, val error: String? = null)
 
 @Serializable
 internal data class AttachmentResponse(val path: String, val mime: String, val bytes: Int)
+
+@Serializable
+internal data class FileUploadResponse(val path: String, val name: String, val mime: String, val bytes: Int)
 
 @Serializable
 internal data class GeneratedAvatarResponse(val avatarUrl: String, val bot: Bot)

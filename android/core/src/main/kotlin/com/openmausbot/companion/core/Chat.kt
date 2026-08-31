@@ -10,6 +10,13 @@ sealed class Chat {
     abstract val busy: Boolean
     abstract val color: String
 
+    /** Older desktops omit room tasks, so don't expose routes they do not support. */
+    val supportsTasks: Boolean
+        get() = when (this) {
+            is BotChat -> true
+            is RoomChat -> room.dm != true && room.tasks != null
+        }
+
     data class BotChat(val bot: Bot) : Chat() {
         override val id: String get() = bot.id
         override val threadId: String get() = bot.threadId
@@ -72,43 +79,34 @@ data class ChatSummary(
 /**
  * Everything worth showing in the chat list: pinned first, then unread, then most
  * recently active. Hidden bots stay hidden. Rooms never pin.
+ *
+ * @param activity how much of a bot's working-out the reader has asked to see. The preview honours
+ * it the same way the transcript does; `lastActivity` deliberately does not, because a thread that
+ * just ran a tool has still moved and should still rise in the list.
  */
-val CompanionState.chatSummaries: List<ChatSummary>
-    get() {
-        val chats = bots.filter { it.hidden != true }.map { Chat.BotChat(it) } +
-            rooms.map { Chat.RoomChat(it) }
-        return chats
-            .map { chat ->
-                val last = visibleTranscript(chat.threadId).lastOrNull()
-                ChatSummary(
-                    chat = chat,
-                    preview = previewOf(last),
-                    lastActivity = last?.at ?: 0.0,
-                    pinned = pinned(chat),
-                )
-            }
-            .sortedWith(
-                compareByDescending<ChatSummary> { it.pinned }
-                    .thenByDescending { it.chat.unread }
-                    .thenByDescending { it.lastActivity },
+fun CompanionState.chatSummaries(
+    activity: ActivityDetail = ActivityDetail.FULL,
+): List<ChatSummary> {
+    val chats = bots.filter { it.hidden != true }.map { Chat.BotChat(it) } +
+        rooms.map { Chat.RoomChat(it) }
+    return chats
+        .map { chat ->
+            val messages = visibleTranscript(chat.threadId)
+            ChatSummary(
+                chat = chat,
+                preview = rosterPreview(messages, activity),
+                lastActivity = messages.lastOrNull()?.at ?: 0.0,
+                pinned = pinned(chat),
             )
-    }
+        }
+        .sortedWith(
+            compareByDescending<ChatSummary> { it.pinned }
+                .thenByDescending { it.chat.unread }
+                .thenByDescending { it.lastActivity },
+        )
+}
 
 private fun pinned(chat: Chat): Boolean = when (chat) {
     is Chat.BotChat -> chat.bot.pinned == true
     is Chat.RoomChat -> false
-}
-
-private fun previewOf(last: Message?): String {
-    if (last == null) return ""
-    return when (last.kind) {
-        Message.Kind.TEXT -> last.text.orEmpty()
-        Message.Kind.OPTIONS -> {
-            val card = last.card ?: return ""
-            if (card.isPending && card.subtitle.isNotEmpty()) card.subtitle else card.title
-        }
-        Message.Kind.ACTIVITY -> last.tool?.name.orEmpty()
-        Message.Kind.SCREEN -> "Screenshot"
-        Message.Kind.UNKNOWN -> last.text.orEmpty()
-    }
 }

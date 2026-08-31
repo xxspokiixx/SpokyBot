@@ -987,7 +987,7 @@ class SessionTest {
     }
 
     @Test
-    fun alreadyPairedRejectsNewInvite() = runTest {
+    fun pairedPhoneAcceptsAnInviteForAnotherComputer() = runTest {
         val connection = Connection(id = "c1", name = "Mac", host = "192.168.1.2", port = 8810)
         val tokens = FakeTokenStore().apply { saved["c1"] = "tok" }
         val session = session(
@@ -997,31 +997,89 @@ class SessionTest {
         )
         session.awaitRestored()
         session.receivePairingURL("openmausbot://pair?address=10.0.0.1:8810&code=123456")
-        assertNull(session.pairingInvite.value)
-        assertTrue(session.actionError!!.contains("already paired"))
+        assertNotNull(session.pairingInvite.value)
+        assertTrue(session.pairingRequested.value)
     }
 
     @Test
-    fun pairItselfRejectsWhenAlreadyPaired() = runTest {
+    fun pairAddsAndSelectsAnotherComputer() = runTest {
         val connection = Connection(id = "c1", name = "Mac", host = "192.168.1.2", port = 8810)
+        val connections = FakeConnectionStore(connection)
         val tokens = FakeTokenStore().apply { saved["c1"] = "tok" }
         var pairCalls = 0
         val session = session(
-            connectionStore = FakeConnectionStore(connection),
+            connectionStore = connections,
             tokenStore = tokens,
-            pairFn = { _, _, _ ->
+            pairFn = { paired, _, _ ->
                 pairCalls++
-                error("should not redeem")
+                PairResponse(
+                    token = "other-token",
+                    device = PairedDevice("other-device", "Pixel", 1.0, 1.0),
+                    serverName = paired.name,
+                    hosts = null,
+                )
             },
             events = { _, _ -> emptyFlow() },
         )
         session.awaitRestored()
-        assertFailsWith<AlreadyPairedException> {
-            session.pair(Connection(name = "other", host = "10.0.0.1", port = 8810), "123456")
-        }
-        assertEquals(0, pairCalls)
+        session.pair(Connection(name = "other", host = "10.0.0.1", port = 8810), "123456")
+        assertEquals(1, pairCalls)
         assertEquals("tok", tokens.saved["c1"])
-        assertTrue(session.actionError!!.contains("already paired"))
+        val persisted = connections.loadRegistry().registry
+        assertEquals(2, persisted.connections.size)
+        assertEquals("other", persisted.activeConnection?.name)
+        assertEquals("other", session.connection.value?.name)
+    }
+
+    @Test
+    fun signOutThenBeginPairingKeepsPairingRequested() = runTest {
+        val connection = Connection(id = "c1", name = "Mac", host = "192.168.1.2", port = 8810)
+        val removeStarted = CompletableDeferred<Unit>()
+        val releaseRemove = CompletableDeferred<Unit>()
+        val innerTokens = FakeTokenStore().apply { saved["c1"] = "tok" }
+        val tokens = object : TokenStore {
+            override suspend fun save(connectionId: String, token: String) =
+                innerTokens.save(connectionId, token)
+            override suspend fun read(connectionId: String) = innerTokens.read(connectionId)
+            override suspend fun remove(connectionId: String) {
+                // Stand in for the Keystore I/O that yields on Main.immediate in production.
+                removeStarted.complete(Unit)
+                releaseRemove.await()
+                innerTokens.remove(connectionId)
+            }
+        }
+        val session = session(
+            connectionStore = FakeConnectionStore(connection),
+            tokenStore = tokens,
+            events = { _, _ -> flow { awaitCancellation() } },
+        )
+        session.awaitRestored()
+
+        // Pair again: unpair yields on the first store remove, beginPairing()
+        // sets true, then unpair resumes. Clearing pairingRequested there loses it.
+        // Use signOutAndAwait in a child so join proves the unpair finished; the
+        // production call site is fire-and-forget signOut() with the same body.
+        val unpair = launch { session.signOutAndAwait() }
+        removeStarted.await()
+        session.beginPairing()
+        assertTrue(session.pairingRequested.value)
+        releaseRemove.complete(Unit)
+        unpair.join()
+
+        assertTrue(session.pairingRequested.value)
+    }
+
+    @Test
+    fun signOutWithNothingPairedClearsPairingRequested() = runTest {
+        val session = session(events = { _, _ -> emptyFlow() })
+        session.awaitRestored()
+        assertNull(session.connection.value)
+
+        session.beginPairing()
+        assertTrue(session.pairingRequested.value)
+
+        session.signOutAndAwait()
+        assertFalse(session.pairingRequested.value)
     }
 
     @Test
@@ -1051,8 +1109,8 @@ class SessionTest {
         restoreGate.complete(Unit)
         session.awaitRestored()
         advanceUntilIdle()
-        assertNull(session.pairingInvite.value)
-        assertTrue(session.actionError!!.contains("already paired"))
+        assertNotNull(session.pairingInvite.value)
+        assertTrue(session.pairingRequested.value)
     }
 
     @Test
@@ -1197,12 +1255,18 @@ class SessionTest {
         first.join()
         second.join()
 
-        assertEquals(1, pairCalls)
+        assertEquals(2, pairCalls)
         assertTrue(firstResult!!.isSuccess)
-        assertTrue(secondResult!!.exceptionOrNull() is AlreadyPairedException)
-        assertEquals("tok-111111", tokens.saved.values.single())
-        assertEquals("Mac-111111", connections.saved!!.name)
-        assertTrue(session.actionError!!.contains("already paired"))
+        assertTrue(secondResult!!.isSuccess)
+        assertEquals(setOf("tok-111111", "tok-222222"), tokens.saved.values.toSet())
+        val persisted = connections.loadRegistry().registry
+        assertEquals(2, persisted.connections.size)
+        assertEquals(
+            setOf("Mac-111111", "Mac-222222"),
+            persisted.connections.map { it.name }.toSet(),
+        )
+        assertEquals("Mac-222222", persisted.activeConnection?.name)
+        assertEquals("Mac-222222", connections.saved!!.name)
     }
 
     @Test
@@ -1335,6 +1399,29 @@ class SessionTest {
             assertEquals(room, session.state.value.rooms.single())
             assertEquals(emptyList(), session.state.value.transcript("t-new"))
             assertNull(session.actionError)
+
+            val taskRoom = roomTaskJson("t-room-2", "Second")
+            server.enqueue(MockResponse()
+                .setResponseCode(200)
+                .setHeader("Content-Type", "application/json")
+                .setBody("""{"group":$taskRoom}"""))
+            session.createTask(requireNotNull(room), "Second")
+            assertEquals("t-room-2", session.state.value.rooms.single().threadId)
+
+            val switchedRoom = roomTaskJson("t-room-3", "Third")
+            server.enqueue(MockResponse()
+                .setResponseCode(200)
+                .setHeader("Content-Type", "application/json")
+                .setBody("""{"group":$switchedRoom}"""))
+            session.switchTask(BotTask("t-room-3", "Third", 3.0), session.state.value.rooms.single())
+            assertEquals("t-room-3", session.state.value.rooms.single().threadId)
+
+            server.enqueue(MockResponse()
+                .setResponseCode(200)
+                .setHeader("Content-Type", "application/json")
+                .setBody("""{"group":$taskRoom}"""))
+            session.deleteTask(BotTask("t-room-3", "Third", 3.0), session.state.value.rooms.single())
+            assertEquals("t-room-2", session.state.value.rooms.single().threadId)
 
             server.enqueue(MockResponse()
                 .setResponseCode(403)
@@ -1707,10 +1794,8 @@ class SessionTest {
             Session.STORAGE_UNAVAILABLE_MESSAGE,
             assertIs<Session.Status.Offline>(session.status.value).message,
         )
-        // Inconclusive is not "unpaired": a new pairing must still be refused.
-        assertFailsWith<AlreadyPairedException> {
-            session.pair(Connection(id = "c2", name = "Other", host = "10.0.0.2", port = 8810), "004209")
-        }
+        // Inconclusive storage must not be overwritten by a new pairing.
+        assertEquals(Session.RestoreState.Pending, session.restoreState.value)
     }
 
     @Test
@@ -1828,6 +1913,19 @@ class SessionTest {
         "unread":false,
         "createdAt":3
     }""".trimIndent()
+
+    private fun roomTaskJson(threadId: String, title: String): String = """{
+        "id":"g-new",
+        "threadId":"$threadId",
+        "name":"Launch Team",
+        "memberIds":["b1","b2"],
+        "defaultResponder":{"kind":"mentions"},
+        "bulletin":"",
+        "unread":false,
+        "createdAt":3,
+        "tasks":[{"threadId":"$threadId","title":"$title","createdAt":3}],
+        "messages":[{"id":"m-$threadId","role":"user","kind":"text","at":3,"text":"$title"}]
+    }""".trimIndent()
 }
 
 private fun sampleBot(id: String, threadId: String) = Bot(
@@ -1847,11 +1945,28 @@ private class FakeConnectionStore(
     initial: Connection? = null,
 ) : ConnectionStore {
     var saved: Connection? = initial
+    private var registry: ConnectionRegistry? = null
     override suspend fun load(): Connection? = saved
     override suspend fun save(connection: Connection) {
         saved = connection
     }
     override suspend fun clear() {
+        saved = null
+    }
+    override suspend fun loadRegistry(): ConnectionRegistryRestore {
+        registry?.let { return ConnectionRegistryRestore(it, migratedLegacyConnection = false) }
+        val legacy = saved ?: return ConnectionRegistryRestore(ConnectionRegistry(), migratedLegacyConnection = false)
+        return ConnectionRegistryRestore(
+            ConnectionRegistry.restoring(listOf(legacy), legacy.id),
+            migratedLegacyConnection = true,
+        )
+    }
+    override suspend fun saveRegistry(registry: ConnectionRegistry) {
+        this.registry = registry.normalized()
+        saved = this.registry?.activeConnection
+    }
+    override suspend fun clearRegistry() {
+        registry = ConnectionRegistry()
         saved = null
     }
 }
