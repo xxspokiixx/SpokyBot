@@ -119,31 +119,37 @@ function solveShape(def: ShapeDef): Solved {
   const mask = maskFromPolylines(applyFit(polylines, fit), RASTER_SIZE)
   const sdf = fieldFromMask(mask, RASTER_SIZE)
 
-  // Same search shape as solveFit: seed at the largest inscribed circle, then sweep
-  // outward, because a slightly worse-centred anchor often holds a bigger face.
+  // Seed at the largest inscribed circle, then sweep outward: a slightly worse-centred
+  // anchor often holds a bigger face, because the widest part of a body is rarely where
+  // its roundest part is.
+  //
+  // Coarse to fine, and deliberately WITHOUT the `if (!improved) break` that solveFit uses.
+  // That early exit is only sound when the step shrinks monotonically, so a ring that finds
+  // nothing means the neighbourhood is exhausted. Ported to a growing step it silently
+  // truncates the search: a failed ring at step s says nothing whatsoever about a ring at
+  // 2s, which probes an entirely different set of points. The cursor is exactly that case —
+  // its first ring improves nothing, so an early break reports the seed's own capacity and
+  // never looks further out. Since the tightest shape sets the clamp for the whole catalog,
+  // one truncated search shrinks every mascot. Halving the step and running every level is
+  // cheap, and the clipping assertion downstream is what makes searching harder safe.
   const circle = largestInscribedCircle(sdf)
   let best: Anchor = {
     x: circle.x,
     y: circle.y,
     scale: maxScaleAt(ALL_CLOUDS, sdf, circle.x, circle.y, CAP),
   }
-  const span = Math.max(circle.radius, 12)
-  for (let ring = 1; ring <= 3; ring++) {
-    const step = (span * ring) / 3 / 2
-    let improved = false
+  let step = Math.max(circle.radius, 12)
+  for (let level = 0; level < 8; level++) {
     for (let dy = -2; dy <= 2; dy++) {
       for (let dx = -2; dx <= 2; dx++) {
         if (!dx && !dy) continue
         const x = best.x + dx * step
         const y = best.y + dy * step
         const scale = maxScaleAt(ALL_CLOUDS, sdf, x, y, CAP)
-        if (scale > best.scale + 1e-4) {
-          best = { x, y, scale }
-          improved = true
-        }
+        if (scale > best.scale + 1e-4) best = { x, y, scale }
       }
     }
-    if (!improved) break
+    step /= 2
   }
 
   // Rounding for a tidy export can nudge a marginal expression back over the edge, so
