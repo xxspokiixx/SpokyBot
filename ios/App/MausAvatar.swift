@@ -387,7 +387,6 @@ final class MausFaceEngine {
         // Wrapping the cached `CGPath` is a retain, not a re-parse: the body
         // is parsed and placed once per id, inside `CompanionCore`.
         let body = Path(MausSilhouette.inFaceBox(bodyId))
-        let bounds = MausSilhouette.faceBoxBounds(bodyId)
         let a = MausSilhouette.anchor(bodyId)
 
         if let bodyImage {
@@ -395,9 +394,19 @@ final class MausFaceEngine {
             // into the face, which is anchored and scaled differently.
             context.drawLayer { layer in
                 layer.clip(to: body)
+                // Into the whole face box, not the body's bounds, and let the
+                // clip do the shaping — the desktop's
+                // `<image x=0 y=0 width=FACE_BOX height=FACE_BOX
+                // preserveAspectRatio="xMidYMid slice" clipPath=…>`. Slicing
+                // into per-body bounds instead would zoom `star` differently
+                // on the two screens for no reason.
                 layer.draw(
                     Image(uiImage: bodyImage),
-                    in: MausImageFit.slice(bodyImage.size, in: bounds)
+                    in: MausImageFit.slice(
+                        bodyImage.size,
+                        in: CGRect(
+                            x: 0, y: 0,
+                            width: MausFaceData.faceBox, height: MausFaceData.faceBox))
                 )
                 // The face is drawn in white and would vanish into a pale
                 // picture. Same scrim the desktop paints (the `-scrim`
@@ -418,6 +427,9 @@ final class MausFaceEngine {
                 ))
             }
         } else {
+            // The gradient runs corner to corner of the body's own bounds,
+            // which is the only place that lookup is still needed.
+            let bounds = MausSilhouette.faceBoxBounds(bodyId)
             context.fill(body, with: .linearGradient(
                 Gradient(stops: MausPalette.gradientStops(color)),
                 startPoint: CGPoint(x: bounds.maxX, y: bounds.minY),

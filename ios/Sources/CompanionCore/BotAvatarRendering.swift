@@ -53,6 +53,20 @@ public func resolveBotAvatarOutcome(
     return crop == .face ? .livingMascot : .flatImage
 }
 
+extension AvatarCrop {
+    /// The crop to persist when a picture is attached while this one is
+    /// selected.
+    ///
+    /// `mascot` means "no picture", so attaching one promotes it to `face` —
+    /// the mascot still alive, now wearing the picture. That is what the
+    /// desktop does in *both* its upload and its generate handler
+    /// (`latestCrop === "mascot" ? "face" : latestCrop` in
+    /// `src/components/BotProfileAvatarCard.tsx`), so a picture uploaded from
+    /// the phone has to land on the same crop as the same picture uploaded
+    /// from the computer. Any explicit choice is kept exactly as made.
+    public var afterAttachingAPicture: AvatarCrop { self == .mascot ? .face : self }
+}
+
 /// Where to draw an image so it covers a rect with its aspect ratio intact.
 public enum MausImageFit {
     /// The destination rect for an image of `image` size that covers `target`

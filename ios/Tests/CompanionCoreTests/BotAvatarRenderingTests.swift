@@ -96,20 +96,38 @@ final class BotAvatarRenderingTests: XCTestCase {
         XCTAssertEqual(MausImageFit.slice(CGSize(width: 10, height: 10), in: .zero), .zero)
     }
 
-    /// The fit is handed the body's own bounds, so every shipped body must
-    /// come back with a rect that actually covers it.
-    func testEveryShippedBodyIsFullyCoveredByASlicedImage() {
-        for id in MausBodies.order {
-            let bounds = MausSilhouette.faceBoxBounds(id)
-            for size in [
-                CGSize(width: 1024, height: 1024), CGSize(width: 1920, height: 1080),
-                CGSize(width: 640, height: 1136),
-            ] {
-                let rect = MausImageFit.slice(size, in: bounds)
+    /// The fit is handed the whole face box, exactly as the desktop's
+    /// `<image>` is — so the slice must cover every shipped body, whatever
+    /// the picture's shape, with the clip doing the shaping.
+    func testEveryShippedBodyIsFullyCoveredByAnImageSlicedIntoTheFaceBox() {
+        let faceBox = CGRect(
+            x: 0, y: 0, width: MausSilhouette.faceBox, height: MausSilhouette.faceBox)
+        for size in [
+            CGSize(width: 1024, height: 1024), CGSize(width: 1920, height: 1080),
+            CGSize(width: 640, height: 1136), CGSize(width: 3, height: 800),
+        ] {
+            let rect = MausImageFit.slice(size, in: faceBox)
+            for id in MausBodies.order {
+                // The bodies are asserted to sit inside the face box (±1) by
+                // `MausBodiesTests`; the same tolerance applies here.
                 XCTAssertTrue(
-                    rect.insetBy(dx: -0.001, dy: -0.001).contains(bounds),
+                    rect.insetBy(dx: -1.5, dy: -1.5).contains(MausSilhouette.faceBoxBounds(id)),
                     "\(id) is not covered by a \(size) picture")
             }
+        }
+    }
+
+    // MARK: - The crop a new picture lands on
+
+    /// The phone and the desktop must agree on what uploading a picture
+    /// means, or the same action produces two different bots.
+    func testAttachingAPicturePromotesTheMascotToLiving() {
+        XCTAssertEqual(AvatarCrop.mascot.afterAttachingAPicture, .face)
+    }
+
+    func testAttachingAPictureKeepsAnExplicitChoice() {
+        for crop in [AvatarCrop.face, .circle, .rounded, .square] {
+            XCTAssertEqual(crop.afterAttachingAPicture, crop, "\(crop) was overwritten")
         }
     }
 }

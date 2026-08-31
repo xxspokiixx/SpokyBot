@@ -229,7 +229,7 @@ struct AgentProfileView: View {
             session.actionError = "That image is larger than 10 MB."
             return
         }
-        let intendedCrop = crop == .mascot ? AvatarCrop.circle : crop
+        let intendedCrop = crop.afterAttachingAPicture
         if let updated = await session.uploadAvatar(data, mime: mime, for: current, crop: intendedCrop) {
             crop = updated.avatarCrop ?? intendedCrop
             baseline.crop = crop
@@ -239,7 +239,7 @@ struct AgentProfileView: View {
     private func generateImage() async {
         busy = true
         defer { busy = false }
-        let intendedCrop = crop == .mascot ? AvatarCrop.circle : crop
+        let intendedCrop = crop.afterAttachingAPicture
         guard let generated = await session.generateAvatar(
             prompt: String(prompt.trimmingCharacters(in: .whitespacesAndNewlines).prefix(400)),
             for: current
@@ -247,8 +247,8 @@ struct AgentProfileView: View {
         // Generation chooses a safe default crop server-side. The selector is
         // the user's explicit choice, so persist it immediately against the
         // returned attachment rather than leaving UI and server out of sync.
-        let shapePatch = BotProfilePatch(avatarCrop: intendedCrop)
-        if let updated = await session.updateProfile(shapePatch, for: generated) {
+        let cropPatch = BotProfilePatch(avatarCrop: intendedCrop)
+        if let updated = await session.updateProfile(cropPatch, for: generated) {
             crop = updated.avatarCrop ?? intendedCrop
             baseline.crop = crop
         } else {
