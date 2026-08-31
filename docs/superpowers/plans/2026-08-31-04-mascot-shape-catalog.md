@@ -1,5 +1,12 @@
 # Mascot Shape Catalog Implementation Plan
 
+> **Naming note (2026-09-01):** the code vocabulary for this feature is `body`, not
+> `shape` — `mascotBody`, `MASCOT_BODIES`, `MascotBodyId`, `shared/mascot-bodies.ts`,
+> `scripts/mascot-bodies/`, `MausBodies.swift`. The repo enforces
+> `anti-slop/no-shape-in-symbol-names` as an error, and `body` is the word this document
+> already uses in prose. Identifiers written as `mascotShape` etc. below are the original
+> design text and are stale; the ids themselves (`cursor`, `blob`, …) are unchanged.
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** Give every bot a choice of ten body shapes — plus a mode where its own uploaded image becomes the body with the live face still on top — rendered identically on desktop and iOS.

@@ -1,5 +1,12 @@
 # Mascot shape catalog
 
+> **Naming note (2026-09-01):** the code vocabulary for this feature is `body`, not
+> `shape` — `mascotBody`, `MASCOT_BODIES`, `MascotBodyId`, `shared/mascot-bodies.ts`,
+> `scripts/mascot-bodies/`, `MausBodies.swift`. The repo enforces
+> `anti-slop/no-shape-in-symbol-names` as an error, and `body` is the word this document
+> already uses in prose. Identifiers written as `mascotShape` etc. below are the original
+> design text and are stale; the ids themselves (`cursor`, `blob`, …) are unchanged.
+
 Ten selectable body shapes for the mascot, per bot, identical on desktop and
 phone — and a mode where the bot wears your own image as its body, with the
 live face still on top.
