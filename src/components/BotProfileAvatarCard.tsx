@@ -116,9 +116,14 @@ export function BotProfileAvatarCard({
       const latestCrop = cropRef.current;
       onPatch({
         avatarUrl: result.avatarUrl,
+        // The server owns this crop for generate (server/index.ts picks "circle"
+        // for a mascot bot): a generated portrait is its own subject, not the
+        // mascot's living face, so it must not be promoted the way upload is.
+        // The fallback below is never actually reached, since the server always
+        // assigns a crop; "circle" is kept only as the truthful default if it ever were.
         avatarCrop:
           latestCrop === cropAtStart
-            ? (result.bot.avatarCrop ?? "face")
+            ? (result.bot.avatarCrop ?? "circle")
             : latestCrop,
       });
     } catch (generateError) {

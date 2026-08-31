@@ -249,16 +249,18 @@ struct AgentProfileView: View {
             for: current
         ) else { return }
 
+        // `AvatarCrop.afterGenerating` is the shared decision: server's pick
+        // (deliberately not promoted to `.face` the way upload is — see its
+        // doc comment) unless the selector moved while the request was in
+        // flight, in which case that newer explicit choice wins.
+        let resolved = AvatarCrop.afterGenerating(
+            cropAtStart: cropAtStart,
+            latestCrop: crop,
+            serverCrop: generated.avatarCrop
+        )
+
         guard crop != cropAtStart else {
-            // Generation picks the crop server-side and `circle` for a mascot
-            // bot is deliberate, not a fallback: `avatarGenerationPrompt` in
-            // `server/avatar-image.ts` asks for "one polished square profile
-            // avatar" with "one centered, distinctive subject" — a character
-            // portrait, usually with a face of its own, which the mascot's
-            // eyes and mouth have no business being painted over. So take the
-            // server's choice rather than promoting to `face` the way an
-            // upload does; `server/index.ts` always sets one.
-            crop = generated.avatarCrop ?? .mascot
+            crop = resolved
             baseline.crop = crop
             return
         }
@@ -266,9 +268,8 @@ struct AgentProfileView: View {
         // The user moved the selector while the image was generating: an
         // explicit choice made after the request, so persist it against the
         // returned attachment rather than leaving UI and server out of sync.
-        let chosen = crop
-        if let updated = await session.updateProfile(BotProfilePatch(avatarCrop: chosen), for: generated) {
-            crop = updated.avatarCrop ?? chosen
+        if let updated = await session.updateProfile(BotProfilePatch(avatarCrop: resolved), for: generated) {
+            crop = updated.avatarCrop ?? resolved
         } else {
             // Generation itself succeeded. Reflect its authoritative result
             // rather than claiming the requested crop was persisted.

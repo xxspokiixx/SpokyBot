@@ -71,6 +71,29 @@ extension AvatarCrop {
     /// mascot's eyes and mouth should not be painted over. Reaching for this
     /// property on the generate path would reintroduce that divergence.
     public var afterUploadingAPicture: AvatarCrop { self == .mascot ? .face : self }
+
+    /// The crop to persist once a *generated* avatar comes back.
+    ///
+    /// Unlike `afterUploadingAPicture`, this never promotes `.mascot` to
+    /// `.face`: a generated image is a portrait the model painted on its own
+    /// prompt, not the mascot's living body, so it keeps whatever crop the
+    /// server chose (`serverCrop`, from `server/index.ts` — `circle` for a
+    /// mascot bot, per `avatarGenerationPrompt` in `server/avatar-image.ts`
+    /// asking for a centred subject that already has its own face). A `nil`
+    /// `serverCrop` falls back to `.mascot`, the same "no picture" state a
+    /// missing crop means everywhere else.
+    ///
+    /// The one thing that overrides the server is the user themselves: if
+    /// they move the crop picker while generation was still in flight,
+    /// `latestCrop` differs from `cropAtStart` and that newer explicit choice
+    /// wins outright, server pick or not.
+    public static func afterGenerating(
+        cropAtStart: AvatarCrop,
+        latestCrop: AvatarCrop,
+        serverCrop: AvatarCrop?
+    ) -> AvatarCrop {
+        latestCrop != cropAtStart ? latestCrop : (serverCrop ?? .mascot)
+    }
 }
 
 /// Where to draw an image so it covers a rect with its aspect ratio intact.

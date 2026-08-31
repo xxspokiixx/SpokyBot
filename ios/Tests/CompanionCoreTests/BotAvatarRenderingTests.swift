@@ -121,8 +121,7 @@ final class BotAvatarRenderingTests: XCTestCase {
 
     /// The phone and the desktop must agree on what uploading a picture
     /// means, or the same action produces two different bots. Generation is
-    /// deliberately *not* this rule — the server assigns that crop — and that
-    /// half cannot be pinned by a pure test here; see the report.
+    /// deliberately *not* this rule — see `afterGenerating` below.
     func testUploadingAPicturePromotesTheMascotToLiving() {
         XCTAssertEqual(AvatarCrop.mascot.afterUploadingAPicture, .face)
     }
@@ -131,5 +130,39 @@ final class BotAvatarRenderingTests: XCTestCase {
         for crop in [AvatarCrop.face, .circle, .rounded, .square] {
             XCTAssertEqual(crop.afterUploadingAPicture, crop, "\(crop) was overwritten")
         }
+    }
+
+    // MARK: - The crop a generated picture lands on
+
+    /// This is the regression that has happened twice: a mascot bot that
+    /// generates a new avatar must take the server's `circle`, not the
+    /// `face` promotion that uploading gets. A generated image is its own
+    /// portrait, already wearing a face the model painted — not the mascot's
+    /// living body — so it must never be treated like an upload.
+    func testGeneratingFromAMascotBotTakesTheServersCircleNotFacePromotion() {
+        XCTAssertEqual(
+            AvatarCrop.afterGenerating(cropAtStart: .mascot, latestCrop: .mascot, serverCrop: .circle),
+            .circle)
+    }
+
+    /// If the user moves the picker while the request is still in flight,
+    /// that newer explicit choice wins outright — the server's pick, whatever
+    /// it was, is discarded.
+    func testMovingThePickerMidFlightWinsOverTheServersPick() {
+        XCTAssertEqual(
+            AvatarCrop.afterGenerating(cropAtStart: .mascot, latestCrop: .face, serverCrop: .circle),
+            .face)
+        XCTAssertEqual(
+            AvatarCrop.afterGenerating(cropAtStart: .circle, latestCrop: .rounded, serverCrop: .square),
+            .rounded)
+    }
+
+    /// No server crop at all falls back to `.mascot` — the same "no picture"
+    /// state a missing crop means everywhere else, never a promotion to
+    /// `.face`.
+    func testNoServerCropFallsBackToMascot() {
+        XCTAssertEqual(
+            AvatarCrop.afterGenerating(cropAtStart: .mascot, latestCrop: .mascot, serverCrop: nil),
+            .mascot)
     }
 }
