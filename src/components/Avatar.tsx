@@ -226,35 +226,82 @@ export type BotAvatarProps = Omit<MausAvatarProps, "color"> & {
   };
 };
 
+export type BotAvatarOutcome = "flatImage" | "livingMascot" | "gradientMascot";
+
+/**
+ * Pick which of the three ways to render a bot's avatar, given the parsed
+ * profile plus what has actually been confirmed to load. Kept as a pure
+ * function — independent of React state and effects — so the decision can be
+ * unit-tested directly: `renderToStaticMarkup` never runs effects, so the
+ * probe that confirms a "face"-crop image is real cannot resolve inside a
+ * synchronous render test.
+ *
+ * `imageFailed` only ever affects the flat crops (circle/rounded/square),
+ * exactly as before this function existed — it is set by the flat `<img>`'s
+ * own `onError`. `livingImageReady` is the separate signal for the "face"
+ * crop: it starts false and only flips true once a background probe (a
+ * detached `Image()`, not the visible element) confirms the URL actually
+ * decodes, so a "face" bot never shows a half-drawn or broken body — it
+ * shows the gradient mascot until the picture is confirmed, then the living
+ * face.
+ */
+export function resolveBotAvatarOutcome(params: {
+  avatarCrop: BotAvatarCrop;
+  hasUrl: boolean;
+  imageFailed: boolean;
+  livingImageReady: boolean;
+}): BotAvatarOutcome {
+  const { avatarCrop, hasUrl, imageFailed, livingImageReady } = params;
+  if (!hasUrl) return "gradientMascot";
+  if (avatarCrop === "face") return livingImageReady ? "livingMascot" : "gradientMascot";
+  if (avatarCrop === "mascot") return "gradientMascot";
+  if (imageFailed) return "gradientMascot";
+  return "flatImage";
+}
+
 /**
  * The one renderer for a bot's chosen profile image. Malformed persisted
- * values and images that fail to load both fall back to the animated mascot,
- * so an old/corrupt profile can never leave a broken-image icon in the app.
+ * values, a flat image that fails to load, and a "face" image that fails to
+ * load all fall back to the animated mascot, so an old/corrupt/deleted
+ * profile can never leave a broken or empty body in the app.
  */
 export function BotAvatar({ bot, size = 44, label, ...mascotProps }: BotAvatarProps) {
   const profile = botAvatarProfile(bot);
   const [imageFailed, setImageFailed] = useState(false);
+  const [livingImageReady, setLivingImageReady] = useState(false);
 
   useEffect(() => setImageFailed(false), [profile.avatarUrl]);
 
-  const hasImage = Boolean(profile.avatarUrl) && !imageFailed;
+  // Probe the "face"-crop image off-screen before ever wearing it as a body.
+  // A stored attachment can pass schema validation at patch time and still
+  // 404 later (cleanup, migration, etc.) — this is the same class of failure
+  // the flat crops already handle via the visible `<img>`'s `onError`, just
+  // reached through a detached probe instead, since the real paint target
+  // here is an inline SVG `<image>` a few components away in CursorAvatar.
+  const faceUrl = profile.avatarCrop === "face" ? profile.avatarUrl : undefined;
+  useEffect(() => {
+    setLivingImageReady(false);
+    if (!faceUrl) return;
+    let cancelled = false;
+    const probe = new Image();
+    probe.onload = () => {
+      if (!cancelled) setLivingImageReady(true);
+    };
+    probe.onerror = () => {
+      if (!cancelled) setLivingImageReady(false);
+    };
+    probe.src = faceUrl;
+    return () => {
+      cancelled = true;
+    };
+  }, [faceUrl]);
 
-  // Three outcomes, spelled out rather than nested ternaries: a flat cropped
-  // image with no mascot at all (circle/rounded/square), the mascot wearing
-  // that same image as a living face ("face"), or the plain gradient mascot
-  // — the "mascot" crop's own look, and also the fallback whenever there is
-  // no usable image (missing, malformed, or failed to load) so a broken
-  // profile never leaves an empty body on screen.
-  let outcome: "flatImage" | "livingMascot" | "gradientMascot";
-  if (!hasImage) {
-    outcome = "gradientMascot";
-  } else if (profile.avatarCrop === "face") {
-    outcome = "livingMascot";
-  } else if (profile.avatarCrop === "mascot") {
-    outcome = "gradientMascot";
-  } else {
-    outcome = "flatImage";
-  }
+  const outcome = resolveBotAvatarOutcome({
+    avatarCrop: profile.avatarCrop,
+    hasUrl: Boolean(profile.avatarUrl),
+    imageFailed,
+    livingImageReady,
+  });
 
   if (outcome !== "flatImage") {
     return (
