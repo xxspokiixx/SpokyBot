@@ -38,29 +38,36 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.window.DialogProperties
-import com.openmausbot.companion.core.Bot
 import com.openmausbot.companion.core.BotTask
+import com.openmausbot.companion.core.Chat
+import com.openmausbot.companion.core.Session
 import java.util.Locale
 import kotlinx.coroutines.launch
 
 /**
- * A bot's separate contexts — the port of `ios/App/TaskManagerView.swift`.
+ * Separate contexts for an agent or channel — the port of
+ * `ios/App/TaskManagerView.swift`.
  *
  * A compact dialog rather than a screen, because tasks are conversation
- * navigation, not host configuration. Rooms never open it (§12).
+ * navigation, not host configuration.
  */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun TaskSheet(botId: String, onDismiss: () -> Unit) {
+fun TaskSheet(chat: Chat, onDismiss: () -> Unit) {
     val session = LocalCompanion.current.session
     val scope = rememberCoroutineScope()
     val state by session.state.collectAsState()
 
     // The live record, so busy and the task list stay current as frames land.
-    val bot = remember(state, botId) { state.bot(botId) }
-    if (bot == null) {
+    val current = remember(state, chat) {
+        when (chat) {
+            is Chat.BotChat -> state.bot(chat.bot.id)?.let(Chat::BotChat)
+            is Chat.RoomChat -> state.rooms.firstOrNull { it.id == chat.room.id }?.let(Chat::RoomChat)
+        }
+    }
+    if (current == null) {
         // Deleted while the sheet was open.
-        LaunchedEffect(botId) { onDismiss() }
+        LaunchedEffect(chat.id) { onDismiss() }
         return
     }
 
@@ -68,7 +75,7 @@ fun TaskSheet(botId: String, onDismiss: () -> Unit) {
     var renaming by remember { mutableStateOf<BotTask?>(null) }
     var title by remember { mutableStateOf("") }
 
-    val tasks = TaskRules.tasks(bot)
+    val tasks = TaskRules.tasks(current)
 
     BasicAlertDialog(
         onDismissRequest = onDismiss,
@@ -87,7 +94,7 @@ fun TaskSheet(botId: String, onDismiss: () -> Unit) {
                     verticalAlignment = Alignment.CenterVertically,
                 ) {
                     Text(
-                        text = "${bot.name}'s tasks",
+                        text = "${current.name}'s tasks",
                         fontSize = 18.sp,
                         fontWeight = FontWeight.SemiBold,
                         modifier = Modifier.weight(1f),
@@ -95,14 +102,14 @@ fun TaskSheet(botId: String, onDismiss: () -> Unit) {
                     Icon(
                         imageVector = Icons.Filled.Add,
                         contentDescription = "New task",
-                        tint = if (TaskRules.canCreate(bot)) {
+                        tint = if (TaskRules.canCreate(current)) {
                             MaterialTheme.colorScheme.onSurface
                         } else {
                             secondaryTint.copy(alpha = 0.4f)
                         },
                         modifier = Modifier
                             .size(32.dp)
-                            .clickable(enabled = TaskRules.canCreate(bot)) {
+                            .clickable(enabled = TaskRules.canCreate(current)) {
                                 title = ""
                                 creating = true
                             }
@@ -117,10 +124,10 @@ fun TaskSheet(botId: String, onDismiss: () -> Unit) {
                     horizontalArrangement = Arrangement.spacedBy(12.dp),
                     verticalAlignment = Alignment.CenterVertically,
                 ) {
-                    BotAvatar(bot = bot, size = 48.dp, state = MausState.IDLE, animated = false)
+                    ChatAvatar(chat = current, size = 48.dp, state = MausState.IDLE, animated = false)
                     Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
-                        Text(bot.name, fontSize = 16.sp, fontWeight = FontWeight.SemiBold)
-                        Text(TaskRules.subtitle(bot), fontSize = 14.sp, color = secondaryTint)
+                        Text(current.name, fontSize = 16.sp, fontWeight = FontWeight.SemiBold)
+                        Text(TaskRules.subtitle(current), fontSize = 14.sp, color = secondaryTint)
                     }
                 }
                 Text(
@@ -134,10 +141,10 @@ fun TaskSheet(botId: String, onDismiss: () -> Unit) {
                     items(tasks, key = { it.threadId }) { task ->
                         TaskRow(
                             task = task,
-                            bot = bot,
+                            chat = current,
                             onSwitch = {
                                 scope.launch {
-                                    session.switchTask(task, bot)
+                                    switchTask(session, task, current)
                                     onDismiss()
                                 }
                             },
@@ -145,7 +152,7 @@ fun TaskSheet(botId: String, onDismiss: () -> Unit) {
                                 title = task.title
                                 renaming = task
                             },
-                            onDelete = { scope.launch { session.deleteTask(task, bot) } },
+                            onDelete = { scope.launch { deleteTask(session, task, current) } },
                         )
                     }
                 }
@@ -171,12 +178,12 @@ fun TaskSheet(botId: String, onDismiss: () -> Unit) {
             confirmText = "Create",
             // Live: a bot that starts running while this is open disables Create
             // rather than sending an edit the harness answers with 409.
-            confirmEnabled = TaskDialogRules.createEnabled(bot),
+            confirmEnabled = TaskDialogRules.createEnabled(current),
             onConfirm = {
                 val requested = TaskDialogRules.createTitle(title)
                 creating = false
                 scope.launch {
-                    session.createTask(bot, requested)
+                    createTask(session, current, requested)
                     onDismiss()
                 }
             },
@@ -193,14 +200,14 @@ fun TaskSheet(botId: String, onDismiss: () -> Unit) {
             confirmText = "Save",
             // An empty rename is allowed: the server labels it the untitled task,
             // and iOS submits the field as typed.
-            confirmEnabled = TaskDialogRules.renameEnabled(bot, title),
+            confirmEnabled = TaskDialogRules.renameEnabled(current, title),
             onConfirm = {
                 val requested = TaskDialogRules.renameTitle(title)
                 renaming = null
                 // Rename re-reads the stream rather than applying a returned bot:
                 // the harness answers the rename with no record, so `Session`
                 // refreshes. Kept as iOS has it.
-                scope.launch { session.renameTask(task, bot, requested) }
+                scope.launch { renameTask(session, task, current, requested) }
             },
             onCancel = { renaming = null },
         )
@@ -210,14 +217,14 @@ fun TaskSheet(botId: String, onDismiss: () -> Unit) {
 @Composable
 private fun TaskRow(
     task: BotTask,
-    bot: Bot,
+    chat: Chat,
     onSwitch: () -> Unit,
     onRename: () -> Unit,
     onDelete: () -> Unit,
 ) {
-    val current = TaskRules.isCurrent(task, bot)
-    val canSwitch = TaskRules.canSwitch(task, bot)
-    val canDelete = TaskRules.canDelete(task, bot)
+    val current = TaskRules.isCurrent(task, chat)
+    val canSwitch = TaskRules.canSwitch(task, chat)
+    val canDelete = TaskRules.canDelete(task, chat)
     val now = remember(task.threadId) { System.currentTimeMillis() }
 
     Row(
@@ -260,7 +267,7 @@ private fun TaskRow(
             tint = secondaryTint,
             modifier = Modifier
                 .size(28.dp)
-                .clickable(enabled = TaskRules.canRename(bot), onClick = onRename)
+                .clickable(enabled = TaskRules.canRename(chat), onClick = onRename)
                 .padding(4.dp),
         )
 
@@ -273,6 +280,39 @@ private fun TaskRow(
                 .clickable(enabled = canDelete, onClick = onDelete)
                 .padding(4.dp),
         )
+    }
+}
+
+private suspend fun createTask(session: Session, chat: Chat, title: String?) {
+    when (chat) {
+        is Chat.BotChat -> session.createTask(chat.bot, title)
+        is Chat.RoomChat -> session.createTask(chat.room, title)
+    }
+}
+
+private suspend fun switchTask(session: Session, task: BotTask, chat: Chat) {
+    when (chat) {
+        is Chat.BotChat -> session.switchTask(task, chat.bot)
+        is Chat.RoomChat -> session.switchTask(task, chat.room)
+    }
+}
+
+private suspend fun renameTask(
+    session: Session,
+    task: BotTask,
+    chat: Chat,
+    title: String,
+) {
+    when (chat) {
+        is Chat.BotChat -> session.renameTask(task, chat.bot, title)
+        is Chat.RoomChat -> session.renameTask(task, chat.room, title)
+    }
+}
+
+private suspend fun deleteTask(session: Session, task: BotTask, chat: Chat) {
+    when (chat) {
+        is Chat.BotChat -> session.deleteTask(task, chat.bot)
+        is Chat.RoomChat -> session.deleteTask(task, chat.room)
     }
 }
 

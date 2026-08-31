@@ -24,11 +24,22 @@ import kotlin.test.assertTrue
 class RosterLayoutTest {
 
     @Test
-    fun `an unsearched roster lists bots, because rooms live in the strip`() {
-        // iOS: `guard !query.isEmpty else { return all.filter { if case .bot ... } }`
-        val rows = RosterLayout.rows(listOf(botSummary(), roomSummary()), "")
-        assertEquals(listOf("bot-1"), rows.map { it.id })
+    fun `an unsearched roster has nothing to filter, and keeps the strip`() {
+        // The screen assembles the unsearched roster from the fleet's own
+        // partition — chief, pinned, strips, unsectioned, sections — and asks
+        // for rows only once there is a query. So an empty query filters
+        // nothing rather than standing for a list the screen never renders.
+        val summaries = listOf(botSummary(), roomSummary())
+        assertEquals(summaries, RosterLayout.rows(summaries, ""))
         assertTrue(RosterLayout.showsGroups(""))
+    }
+
+    @Test
+    fun `no bots yet is about bots, because rooms live in the strip`() {
+        // What the empty state under an unsearched roster asks.
+        assertTrue(RosterLayout.listsAnyBot(listOf(botSummary(), roomSummary())))
+        assertFalse(RosterLayout.listsAnyBot(listOf(roomSummary())))
+        assertFalse(RosterLayout.listsAnyBot(emptyList()))
     }
 
     @Test

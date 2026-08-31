@@ -2,6 +2,7 @@ package com.openmausbot.companion.ui
 
 import com.openmausbot.companion.core.Bot
 import com.openmausbot.companion.core.BotTask
+import com.openmausbot.companion.core.Chat
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFalse
@@ -89,6 +90,17 @@ class TaskRulesTest {
     @Test
     fun `a bot with no task list reports none`() {
         assertEquals(emptyList(), TaskRules.tasks(bot(id = "bot-1")))
+    }
+
+    @Test
+    fun `room tasks use the same navigation rules as bot tasks`() {
+        val tasks = listOf(task("t1"), task("t2"))
+        val room = Chat.RoomChat(room().copy(threadId = "t1", tasks = tasks))
+        assertEquals(tasks, TaskRules.tasks(room))
+        assertTrue(TaskRules.isCurrent(task("t1"), room))
+        assertTrue(TaskRules.canSwitch(task("t2"), room))
+        assertTrue(TaskRules.canDelete(task("t2"), room))
+        assertEquals("Channel tasks", TaskRules.subtitle(room))
     }
 }
 

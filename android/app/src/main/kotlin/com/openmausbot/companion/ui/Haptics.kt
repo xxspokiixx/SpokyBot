@@ -24,6 +24,48 @@ enum class HapticCue {
 
     /** Something was picked from a list of things. */
     SELECT,
+
+    /** The computer confirmed that something new was made. */
+    SUCCESS,
+}
+
+/**
+ * The audited taps — the iOS actions added in 910822a, and the ones checked
+ * against the Swift since — named here instead of left as an anonymous tick at
+ * the call site. Keeping this small mapping separate makes the parity reviewable
+ * without turning every composable callback into a test seam, and each entry
+ * added after that first audit cites the line that plays the cue on iOS.
+ */
+internal enum class TactileAction(val cue: HapticCue) {
+    OPEN_SEARCH_RESULT(HapticCue.SELECT),
+    START_NEW_GROUP(HapticCue.SELECT),
+    TOGGLE_GROUP_MEMBER(HapticCue.SELECT),
+    OPEN_UPDATES(HapticCue.SELECT),
+    OPEN_SEARCH(HapticCue.SELECT),
+    CREATE_BOT_SUCCESS(HapticCue.SUCCESS),
+    CREATE_GROUP_SUCCESS(HapticCue.SUCCESS),
+    TOGGLE_REACTION(HapticCue.SELECT),
+    CHOOSE_APPROVAL(HapticCue.SELECT),
+    GRANT_APPROVAL(HapticCue.SELECT),
+
+    /**
+     * Opening the organizer. Both iOS entry points — the bar button
+     * (`ChatListView.swift:419`) and the compact menu item (`:385`) — are the one
+     * `openNewSection()`, which ticks before it presents (`:434-435`).
+     */
+    START_NEW_SECTION(HapticCue.SELECT),
+
+    /** The disclosure on a folded activity run (`ActivityRunChip.swift:30`). */
+    TOGGLE_ACTIVITY_RUN(HapticCue.SELECT),
+
+    /** Moving the phone to another paired computer (`SettingsView.swift:250`). */
+    SWITCH_COMPUTER(HapticCue.SELECT),
+
+    /** Starting the pairing for a second computer (`SettingsView.swift:283`). */
+    CONNECT_ANOTHER_COMPUTER(HapticCue.SELECT),
+
+    /** Picking the mark a quick reply carries (`QuickRepliesEditor.swift:138`). */
+    CHOOSE_QUICK_REPLY_ICON(HapticCue.SELECT),
 }
 
 object CompanionHaptics {
@@ -58,6 +100,12 @@ object CompanionHaptics {
      * right-click — and not one of these sites is one. Explicitly not
      * `KEYBOARD_TAP` either: that is the send's fallback, and a selection that
      * felt identical to a send would collapse the two cues into one.
+     *
+     * **Success.** `CONFIRM` is Android's explicit successful-completion effect,
+     * and is therefore the cue for a bot or group the computer actually made.
+     * It arrived in API 30. Before that, there is no honest equivalent: a virtual
+     * key or long press would describe the initial tap rather than the later
+     * result, so `NO_HAPTICS` deliberately keeps the success quiet.
      */
     fun constant(cue: HapticCue, sdkInt: Int = Build.VERSION.SDK_INT): Int = when (cue) {
         HapticCue.SEND ->
@@ -72,6 +120,13 @@ object CompanionHaptics {
                 HapticFeedbackConstants.SEGMENT_TICK
             } else {
                 HapticFeedbackConstants.CLOCK_TICK
+            }
+
+        HapticCue.SUCCESS ->
+            if (sdkInt >= Build.VERSION_CODES.R) {
+                HapticFeedbackConstants.CONFIRM
+            } else {
+                HapticFeedbackConstants.NO_HAPTICS
             }
     }
 
@@ -97,6 +152,9 @@ fun interface Haptics {
     fun play(cue: HapticCue)
 }
 
+/** Play the tactile feedback earned by one audited interaction. */
+internal fun Haptics.play(action: TactileAction) = play(action.cue)
+
 /**
  * The view is the thing that can vibrate, and it does not change under a screen;
  * this is remembered against it so a tap handler is not rebuilding the lookup.
@@ -105,6 +163,11 @@ fun interface Haptics {
 fun rememberHaptics(): Haptics {
     val view = LocalView.current
     return remember(view) {
-        Haptics { cue -> view.performHapticFeedback(CompanionHaptics.constant(cue)) }
+        Haptics { cue ->
+            val constant = CompanionHaptics.constant(cue)
+            if (constant != HapticFeedbackConstants.NO_HAPTICS) {
+                view.performHapticFeedback(constant)
+            }
+        }
     }
 }

@@ -57,6 +57,7 @@ import kotlinx.coroutines.launch
 internal fun NewGroupSheet(onCreated: (Room) -> Unit, onDismiss: () -> Unit) {
     val session = LocalCompanion.current.session
     val scope = rememberCoroutineScope()
+    val haptics = rememberHaptics()
     val state by session.state.collectAsState()
 
     var name by remember { mutableStateOf("") }
@@ -92,7 +93,10 @@ internal fun NewGroupSheet(onCreated: (Room) -> Unit, onDismiss: () -> Unit) {
                             val room = session.createRoom(name, ordered)
                             // A failure leaves the sheet open with the picks
                             // intact; `Session` raises the error dialog itself.
-                            if (room != null) onCreated(room)
+                            if (room != null) {
+                                haptics.play(TactileAction.CREATE_GROUP_SUCCESS)
+                                onCreated(room)
+                            }
                             creating = false
                         }
                     },
@@ -132,6 +136,7 @@ internal fun NewGroupSheet(onCreated: (Room) -> Unit, onDismiss: () -> Unit) {
                         selected = bot.id in members,
                         onToggle = {
                             members = if (bot.id in members) members - bot.id else members + bot.id
+                            haptics.play(TactileAction.TOGGLE_GROUP_MEMBER)
                         },
                     )
                 }
@@ -141,7 +146,7 @@ internal fun NewGroupSheet(onCreated: (Room) -> Unit, onDismiss: () -> Unit) {
 }
 
 @Composable
-private fun BotPickRow(bot: Bot, selected: Boolean, onToggle: () -> Unit) {
+internal fun BotPickRow(bot: Bot, selected: Boolean, onToggle: () -> Unit) {
     Row(
         modifier = Modifier
             .fillMaxWidth()

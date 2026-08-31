@@ -300,6 +300,28 @@ class HapticConstantPolicyTest {
     }
 
     @Test
+    fun `the successful creation effect is CONFIRM, from the release that introduced it`() {
+        for (sdk in listOf(Build.VERSION_CODES.R, 34, 37)) {
+            assertEquals(
+                HapticFeedbackConstants.CONFIRM,
+                CompanionHaptics.constant(HapticCue.SUCCESS, sdkInt = sdk),
+                "API $sdk",
+            )
+        }
+    }
+
+    @Test
+    fun `successful creation stays quiet before Android has a completion effect`() {
+        for (sdk in 26..29) {
+            assertEquals(
+                HapticFeedbackConstants.NO_HAPTICS,
+                CompanionHaptics.constant(HapticCue.SUCCESS, sdkInt = sdk),
+                "API $sdk",
+            )
+        }
+    }
+
+    @Test
     fun `the chosen selection effect is SEGMENT_TICK, from the release that introduced it`() {
         for (sdk in listOf(Build.VERSION_CODES.UPSIDE_DOWN_CAKE, 35, 37)) {
             assertEquals(
@@ -321,6 +343,33 @@ class HapticConstantPolicyTest {
                 "API $sdk",
             )
         }
+    }
+}
+
+/** Every audited tactile action, and the cue it plays, independently pinned. */
+class TactileActionTest {
+    @Test
+    fun `each audited action keeps its intended cue`() {
+        assertEquals(
+            mapOf(
+                TactileAction.OPEN_SEARCH_RESULT to HapticCue.SELECT,
+                TactileAction.START_NEW_GROUP to HapticCue.SELECT,
+                TactileAction.TOGGLE_GROUP_MEMBER to HapticCue.SELECT,
+                TactileAction.OPEN_UPDATES to HapticCue.SELECT,
+                TactileAction.OPEN_SEARCH to HapticCue.SELECT,
+                TactileAction.CREATE_BOT_SUCCESS to HapticCue.SUCCESS,
+                TactileAction.CREATE_GROUP_SUCCESS to HapticCue.SUCCESS,
+                TactileAction.TOGGLE_REACTION to HapticCue.SELECT,
+                TactileAction.CHOOSE_APPROVAL to HapticCue.SELECT,
+                TactileAction.GRANT_APPROVAL to HapticCue.SELECT,
+                TactileAction.START_NEW_SECTION to HapticCue.SELECT,
+                TactileAction.TOGGLE_ACTIVITY_RUN to HapticCue.SELECT,
+                TactileAction.SWITCH_COMPUTER to HapticCue.SELECT,
+                TactileAction.CONNECT_ANOTHER_COMPUTER to HapticCue.SELECT,
+                TactileAction.CHOOSE_QUICK_REPLY_ICON to HapticCue.SELECT,
+            ),
+            TactileAction.entries.associateWith { it.cue },
+        )
     }
 }
 

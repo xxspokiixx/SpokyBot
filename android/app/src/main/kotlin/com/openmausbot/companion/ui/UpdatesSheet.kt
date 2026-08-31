@@ -212,6 +212,7 @@ internal fun UpdatesSheet(onOpen: (Chat) -> Unit, onDismiss: () -> Unit) {
 private fun UpdateRow(update: ChatUpdate, face: MausState, onOpen: () -> Unit) {
     val session = LocalCompanion.current.session
     val scope = rememberCoroutineScope()
+    val haptics = rememberHaptics()
     var answering by remember(update.id) { mutableStateOf(false) }
     val card = update.card
 
@@ -239,30 +240,41 @@ private fun UpdateRow(update: ChatUpdate, face: MausState, onOpen: () -> Unit) {
             )
 
             if (update.kind == UpdateKind.NEEDS_YOU && card != null && card.isPending) {
-                // The answers are the card's own options, exactly as the chat
-                // screen draws them — never a choice invented here.
-                Row(
-                    horizontalArrangement = Arrangement.spacedBy(8.dp),
-                    modifier = Modifier.padding(top = 6.dp),
-                ) {
-                    card.options.forEach { option ->
-                        val refusal = ApprovalChoices.emphasis(option) == OptionEmphasis.SECONDARY
-                        Button(
-                            onClick = {
-                                answering = true
-                                scope.launch {
-                                    ApprovalAnswers.choose(session, update.chat, card, option)
-                                    answering = false
-                                }
-                            },
-                            enabled = !answering,
-                            colors = if (refusal) {
-                                ButtonDefaults.filledTonalButtonColors()
-                            } else {
-                                ButtonDefaults.buttonColors()
-                            },
-                        ) {
-                            Text(option, fontSize = 13.sp)
+                if (card.skillRequest != null) {
+                    Text(
+                        "Open the chat to review SKILL.md",
+                        fontSize = 12.sp,
+                        fontWeight = FontWeight.Medium,
+                        color = secondaryTint,
+                        modifier = Modifier.padding(top = 6.dp),
+                    )
+                } else {
+                    // The answers are the card's own options, exactly as the chat
+                    // screen draws them — never a choice invented here.
+                    Row(
+                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                        modifier = Modifier.padding(top = 6.dp),
+                    ) {
+                        card.options.forEach { option ->
+                            val refusal = ApprovalChoices.emphasis(option) == OptionEmphasis.SECONDARY
+                            Button(
+                                onClick = {
+                                    haptics.play(TactileAction.CHOOSE_APPROVAL)
+                                    answering = true
+                                    scope.launch {
+                                        ApprovalAnswers.choose(session, update.chat, card, option)
+                                        answering = false
+                                    }
+                                },
+                                enabled = !answering,
+                                colors = if (refusal) {
+                                    ButtonDefaults.filledTonalButtonColors()
+                                } else {
+                                    ButtonDefaults.buttonColors()
+                                },
+                            ) {
+                                Text(option, fontSize = 13.sp)
+                            }
                         }
                     }
                 }

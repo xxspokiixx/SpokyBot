@@ -19,6 +19,7 @@ import com.openmausbot.companion.ui.OnboardingCopy
 import com.openmausbot.companion.ui.PermissionPreferences
 import kotlin.test.assertEquals
 import kotlin.test.assertFalse
+import kotlin.test.assertNotNull
 import kotlin.test.assertNull
 import kotlin.test.assertTrue
 import org.junit.Rule
@@ -383,10 +384,9 @@ class OnboardingRoutingTest {
 
     /**
      * The honest scope of this one, measured rather than assumed: on Android a
-     * revoked phone cannot actually *have* a pending invite. `Session` refuses
-     * a deep link while any pairing record exists (`isPairedLocked`), and a
-     * revoked phone still has its connection record — so what arrives is an
-     * action error, not an invite.
+     * revoked phone can receive an invitation for another computer. The invite
+     * is retained safely by `Session`, but revocation still owns the visible
+     * route until the person chooses recovery or another saved computer.
      *
      * So this shows that a deep link arriving at a revoked phone leaves the
      * recovery screen standing, which is the real Android case. The precedence
@@ -421,10 +421,7 @@ class OnboardingRoutingTest {
         )
         compose.waitForIdle()
 
-        assertNull(
-            scene.session.pairingInvite.value,
-            "Session accepted a deep link for a phone that still holds a pairing record",
-        )
+        assertNotNull(scene.session.pairingInvite.value)
         compose.onNodeWithText("This phone was unpaired").assertIsDisplayed()
         assertTrue(scene.asked().isEmpty())
     }

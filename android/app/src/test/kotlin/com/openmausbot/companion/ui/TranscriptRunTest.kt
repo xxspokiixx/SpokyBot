@@ -1,7 +1,9 @@
 package com.openmausbot.companion.ui
 
+import com.openmausbot.companion.core.BotTask
 import com.openmausbot.companion.core.Chat
 import com.openmausbot.companion.core.Message
+import com.openmausbot.companion.core.Room
 import com.openmausbot.companion.core.Sender
 import kotlin.test.Test
 import kotlin.test.assertEquals
@@ -105,7 +107,7 @@ class ChatActionsTest {
 
     @Test
     fun `the sheet offers a bot everything, in the Swift's order`() {
-        val actions = ChatActions.sheet(Chat.BotChat(bot(name = "Scout")))
+        val actions = sheet(Chat.BotChat(bot(name = "Scout")))
         assertEquals(
             listOf(
                 ChatActionId.NEW_TASK,
@@ -130,7 +132,7 @@ class ChatActionsTest {
 
     @Test
     fun `a running bot can be interrupted, and cannot be given a second task`() {
-        val actions = ChatActions.sheet(Chat.BotChat(bot(busy = true)))
+        val actions = sheet(Chat.BotChat(bot(busy = true)))
         val interrupt = actions.last()
         assertEquals(ChatActionId.INTERRUPT, interrupt.id)
         assertEquals("Interrupt", interrupt.title)
@@ -143,21 +145,81 @@ class ChatActionsTest {
 
     @Test
     fun `an idle bot offers no interrupt`() {
-        val actions = ChatActions.sheet(Chat.BotChat(bot()))
+        val actions = sheet(Chat.BotChat(bot()))
         assertFalse(actions.any { it.id == ChatActionId.INTERRUPT })
         assertTrue(actions.single { it.id == ChatActionId.NEW_TASK }.enabled)
     }
 
     @Test
-    fun `a room has no tasks, no computer and nothing to interrupt`() {
-        // iOS guards all three with `if case let .bot(bot) = current`, and the
-        // interrupt with `current.busy, case let .bot(bot)` — a busy room has no
-        // single runner to stop (§12).
+    fun `a pending approval stops a channel's New task, and only a channel's`() {
+        // iOS: `disabled: current.busy || hasPendingApproval` inside
+        // `if case let .room(room) = current, room.dm != true`. The bot branch
+        // above it asks only `bot.busy == true`.
+        val channel = Chat.RoomChat(taskCapableRoom())
+        assertFalse(
+            ChatActions.sheet(channel, hasPendingApproval = true)
+                .single { it.id == ChatActionId.NEW_TASK }.enabled,
+        )
+        assertTrue(
+            ChatActions.sheet(channel, hasPendingApproval = false)
+                .single { it.id == ChatActionId.NEW_TASK }.enabled,
+        )
+        assertTrue(
+            ChatActions.sheet(Chat.BotChat(bot()), hasPendingApproval = true)
+                .single { it.id == ChatActionId.NEW_TASK }.enabled,
+        )
+    }
+
+    @Test
+    fun `a pending approval leaves the rest of a channel's sheet alone`() {
+        val actions = ChatActions.sheet(Chat.RoomChat(taskCapableRoom()), hasPendingApproval = true)
+        assertEquals(
+            listOf(
+                ChatActionId.NEW_TASK,
+                ChatActionId.TASKS,
+                ChatActionId.SHARE_MARKDOWN,
+                ChatActionId.SHARE_JSON,
+            ),
+            actions.map { it.id },
+        )
+        assertTrue(actions.single { it.id == ChatActionId.TASKS }.enabled)
+    }
+
+    @Test
+    fun `a DM with a task list gets no task actions at all`() {
+        // `Chat.supportsTasks` is `room.dm != true && room.tasks != null`; the
+        // channel branch is the only one that adds them.
+        val dm = Chat.RoomChat(taskCapableRoom().copy(dm = true))
+        assertEquals(
+            listOf(ChatActionId.SHARE_MARKDOWN, ChatActionId.SHARE_JSON),
+            sheet(dm).map { it.id },
+        )
+    }
+
+    @Test
+    fun `a legacy room has no tasks, no computer and nothing to interrupt`() {
         val busyRoom = Chat.RoomChat(room().copy(busyBotId = "bot-1"))
         assertEquals(
             listOf(ChatActionId.SHARE_MARKDOWN, ChatActionId.SHARE_JSON),
-            ChatActions.sheet(busyRoom).map { it.id },
+            sheet(busyRoom).map { it.id },
         )
+    }
+
+    @Test
+    fun `a task-capable channel offers task navigation but not computer or interrupt`() {
+        val room = Chat.RoomChat(taskCapableRoom().copy(busyBotId = "bot-1"))
+        val actions = sheet(room)
+        assertEquals(
+            listOf(
+                ChatActionId.NEW_TASK,
+                ChatActionId.TASKS,
+                ChatActionId.SHARE_MARKDOWN,
+                ChatActionId.SHARE_JSON,
+            ),
+            actions.map { it.id },
+        )
+        assertFalse(actions.single { it.id == ChatActionId.NEW_TASK }.enabled)
+        assertFalse(actions.any { it.id == ChatActionId.WATCH_COMPUTER || it.id == ChatActionId.INTERRUPT })
     }
 
     @Test
@@ -166,7 +228,7 @@ class ChatActionsTest {
         // watch computer, tasks and both export formats, with Stop beside them
         // while the bot ran. The pill now opens the profile, so the + carries
         // all of it.
-        val ids = ChatActions.sheet(Chat.BotChat(bot(busy = true))).map { it.id }.toSet()
+        val ids = sheet(Chat.BotChat(bot(busy = true))).map { it.id }.toSet()
         assertTrue(ChatActionId.NEW_TASK in ids)
         assertTrue(ChatActionId.WATCH_COMPUTER in ids)
         assertTrue(ChatActionId.TASKS in ids)
@@ -174,6 +236,12 @@ class ChatActionsTest {
         assertTrue(ChatActionId.SHARE_JSON in ids)
         assertTrue(ChatActionId.INTERRUPT in ids)
     }
+
+    /** The sheet with nothing waiting on an answer, which is most of these cases. */
+    private fun sheet(chat: Chat) = ChatActions.sheet(chat, hasPendingApproval = false)
+
+    private fun taskCapableRoom(): Room =
+        room().copy(tasks = listOf(BotTask("thread-room-1", "Plan", 0.0)))
 }
 
 private fun botText(id: String, from: Sender? = null): Message = Message(

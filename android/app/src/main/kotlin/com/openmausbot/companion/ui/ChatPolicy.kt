@@ -11,6 +11,7 @@ import com.openmausbot.companion.core.Reaction
 import com.openmausbot.companion.core.Room
 import com.openmausbot.companion.core.Session
 import com.openmausbot.companion.core.chat
+import com.openmausbot.companion.core.TranscriptRow
 
 /**
  * The decisions the chat and roster screens make that are worth testing without
@@ -77,6 +78,13 @@ object ThreadResolution {
         state.bots
             .firstOrNull { bot -> bot.tasks.orEmpty().any { it.threadId == threadId } }
             ?.let { return Result.Open(Chat.BotChat(it)) }
+        // Channel tasks use the same owner-following navigation as bot tasks.
+        // Session switches the room before opening a notification/search hit;
+        // until then, resolving the owner keeps a stale destination from
+        // looking deleted.
+        state.rooms
+            .firstOrNull { room -> room.tasks.orEmpty().any { it.threadId == threadId } }
+            ?.let { return Result.Open(Chat.RoomChat(it)) }
         return unknown(state)
     }
 
@@ -95,6 +103,13 @@ object TranscriptLayout {
         return messages[index].at - messages[index - 1].at > GAP_MILLIS
     }
 
+    /** Same rule after [TranscriptRow.ActivityRun] has folded several receipts. */
+    fun startsNewRowStretch(rows: List<TranscriptRow>, index: Int): Boolean {
+        if (index <= 0) return true
+        if (index >= rows.size) return false
+        return rows[index].at - rows[index - 1].endAt > GAP_MILLIS
+    }
+
     /**
      * True when the next message is from someone else (or there is none), which is
      * where a run of bubbles gets its tail — one per run, like every messaging app,
@@ -111,6 +126,15 @@ object TranscriptLayout {
         val current = messages.getOrNull(index) ?: return true
         if (current.role != next.role) return true
         if (current.from?.name != next.from?.name) return true
+        return next.kind != Message.Kind.TEXT
+    }
+
+    /** A folded activity run is one non-text neighbour for bubble-tail purposes. */
+    fun endsRowRun(rows: List<TranscriptRow>, index: Int): Boolean {
+        val next = rows.getOrNull(index + 1) ?: return true
+        val current = rows.getOrNull(index) ?: return true
+        if (current.role != next.role) return true
+        if (current.senderName != next.senderName) return true
         return next.kind != Message.Kind.TEXT
     }
 
@@ -159,9 +183,9 @@ object SearchPolicy {
  *
  * One list, one door. The name pill stopped being a second one when it became
  * the way into an agent's profile, so every action lives here, including both
- * export formats. Tasks and the computer are bot ideas, and a room has neither
- * (§12); only a running bot can be interrupted. Exporting is not a bot idea — a
- * room has a transcript like anything else.
+ * export formats. The computer and interrupt remain bot ideas; non-DM rooms
+ * with a task list get the same task controls as an agent. Exporting is not a
+ * bot idea — a room has a transcript like anything else.
  */
 enum class ChatActionId { NEW_TASK, TASKS, WATCH_COMPUTER, SHARE_MARKDOWN, SHARE_JSON, INTERRUPT }
 
@@ -175,8 +199,15 @@ data class ChatAction(
 )
 
 object ChatActions {
-    /** What the + opens, in the Swift's order. */
-    fun sheet(chat: Chat): List<ChatAction> {
+    /**
+     * What the + opens, in the Swift's order.
+     *
+     * [hasPendingApproval] is deliberately without a default: it is read only by
+     * the channel's "New task", and a call site that forgot it would offer a
+     * fresh thread over the one question on screen that only a person can
+     * answer.
+     */
+    fun sheet(chat: Chat, hasPendingApproval: Boolean): List<ChatAction> {
         val bot = (chat as? Chat.BotChat)?.bot
         val out = mutableListOf<ChatAction>()
         if (bot != null) {
@@ -195,6 +226,21 @@ object ChatActions {
                 id = ChatActionId.WATCH_COMPUTER,
                 title = "Watch computer",
                 subtitle = "Live view of what ${bot.name} is doing",
+            )
+        } else if (chat.supportsTasks) {
+            out += ChatAction(
+                id = ChatActionId.NEW_TASK,
+                title = "New task",
+                subtitle = "Start a fresh conversation in ${chat.name}",
+                // iOS: `disabled: current.busy || hasPendingApproval`, on the room
+                // branch only — a channel waiting on an answer does not get a
+                // second thread started over it.
+                enabled = !chat.busy && !hasPendingApproval,
+            )
+            out += ChatAction(
+                id = ChatActionId.TASKS,
+                title = "Tasks",
+                subtitle = "Switch, rename or remove one",
             )
         }
         out += ChatAction(
@@ -228,13 +274,21 @@ object ChatActions {
  * not a layout.
  */
 object RosterLayout {
-    /** iOS: rooms live in the strip, so an unsearched roster lists only bots. */
+    /**
+     * What a search shows: every kind of chat the query matches. Only a search
+     * asks — an unsearched roster is assembled section by section from the
+     * fleet's own partition, so there is no list to filter there.
+     */
     fun rows(summaries: List<ChatSummary>, query: String): List<ChatSummary> =
-        if (query.isEmpty()) {
-            summaries.filter { it.chat is Chat.BotChat }
-        } else {
-            SearchPolicy.filter(summaries, query)
-        }
+        SearchPolicy.filter(summaries, query)
+
+    /**
+     * Whether the unsearched roster has any row at all. Rooms live in the strip
+     * and tiles are not rows, so "no bots yet" is about bots — which is also
+     * what the empty state says.
+     */
+    fun listsAnyBot(summaries: List<ChatSummary>): Boolean =
+        summaries.any { it.chat is Chat.BotChat }
 
     /** The strip is part of the roster, not of a search result. */
     fun showsGroups(query: String): Boolean = query.isEmpty()
@@ -503,20 +557,22 @@ object SlashCommands {
         ),
     )
 
-    /** What is left of [ALL] once the two bot ideas are gone. */
-    val IN_ROOM: List<SlashCommand> = ALL.filterNot {
-        it.id == SlashCommandId.COMPUTER || it.id == SlashCommandId.TASKS
-    }
+    /** What is left once the computer-only shortcut is gone. */
+    val IN_ROOM: List<SlashCommand> = ALL.filterNot { it.id == SlashCommandId.COMPUTER }
+
+    /** Older sidecars omit room tasks and cannot accept the task routes. */
+    val IN_LEGACY_ROOM: List<SlashCommand> = IN_ROOM.filterNot { it.id == SlashCommandId.TASKS }
 
     /**
-     * The computer and the task list are bot ideas; a room has neither (§12).
+     * The computer is bot-only. A non-DM room exposes tasks when the paired
+     * desktop advertises them through a non-null task list.
      *
      * Both answers are constants, so the composer can ask on every recomposition
      * without allocating a list per streamed token.
      */
     fun forChat(chat: Chat): List<SlashCommand> = when (chat) {
         is Chat.BotChat -> ALL
-        is Chat.RoomChat -> IN_ROOM
+        is Chat.RoomChat -> if (chat.supportsTasks) IN_ROOM else IN_LEGACY_ROOM
     }
 
     /**
@@ -564,7 +620,7 @@ object SlashCommands {
 }
 
 /** One of the four standing prompts under an empty composer. */
-data class PredictiveChip(val title: String, val prompt: String)
+data class PredictiveChip(val title: String, val prompt: String, val icon: String? = null)
 
 /**
  * The port of `PredictiveActionChipsView` in
@@ -573,10 +629,10 @@ data class PredictiveChip(val title: String, val prompt: String)
  */
 object PredictiveChips {
     val ALL: List<PredictiveChip> = listOf(
-        PredictiveChip("Show diff", "Show latest git diff"),
-        PredictiveChip("Run tests", "Run all automated tests"),
-        PredictiveChip("Explain steps", "Explain the changes in detail"),
-        PredictiveChip("What's next?", "What should we do next?"),
+        PredictiveChip("Show diff", "Show latest git diff", "diff"),
+        PredictiveChip("Run tests", "Run all automated tests", "tests"),
+        PredictiveChip("Explain steps", "Explain the changes in detail", "explain"),
+        PredictiveChip("What's next?", "What should we do next?", "next"),
     )
 }
 
@@ -595,15 +651,20 @@ object ComposerAccessories {
      * beside half a sentence would throw the sentence away, offering one to a
      * busy bot earns a 409, and offering one over a pending approval buries the
      * question the screen exists to ask.
+     *
+     * [hasQuickReplies] carries no default for the same reason [PredictiveChipsRow]
+     * no longer does: the reader can empty the row, and a call site that forgot
+     * to say so would put chips back over an emptied composer.
      */
     fun accessory(
         hudOpen: Boolean,
         draft: String,
         busy: Boolean,
         pendingApproval: Boolean,
+        hasQuickReplies: Boolean,
     ): ComposerAccessory = when {
         hudOpen -> ComposerAccessory.HUD
-        draft.isEmpty() && !busy && !pendingApproval -> ComposerAccessory.CHIPS
+        draft.isEmpty() && !busy && !pendingApproval && hasQuickReplies -> ComposerAccessory.CHIPS
         else -> ComposerAccessory.NONE
     }
 }

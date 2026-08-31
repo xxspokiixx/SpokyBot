@@ -1,5 +1,6 @@
 package com.openmausbot.companion.ui
 
+import android.content.ClipData
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -9,13 +10,17 @@ import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.selection.selectable
 import androidx.compose.foundation.text.KeyboardOptions
+import androidx.compose.foundation.text.selection.SelectionContainer
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.RadioButton
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
@@ -23,16 +28,27 @@ import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.ClipEntry
+import androidx.compose.ui.platform.LocalClipboard
 import androidx.compose.ui.res.painterResource
+import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.openmausbot.companion.R
+import com.openmausbot.companion.core.ActivityDetail
+import com.openmausbot.companion.core.Connection
+import com.openmausbot.companion.core.Session
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.launch
 
 /**
  * What little the phone gets to configure — the port of
@@ -53,19 +69,31 @@ import com.openmausbot.companion.R
 fun SettingsScreen(
     onBack: () -> Unit,
     onOpenRoutines: (() -> Unit)? = null,
+    onOpenConnectedApps: (() -> Unit)? = null,
     /** Offered instead of the computer's details when there is no pairing. */
     onConnect: (() -> Unit)? = null,
 ) {
     val environment = LocalCompanion.current
     val session = environment.session
     val connection by session.connection.collectAsState()
+    val connections by session.connections.collectAsState()
     val status by session.status.collectAsState()
     val notifications by environment.notifications.access.collectAsState()
+    val activityDetail by environment.chatPreferences.activityDetail.collectAsState()
+    val scope = rememberCoroutineScope()
+    val clipboard = LocalClipboard.current
+    val haptics = rememberHaptics()
 
     var editingAddress by remember { mutableStateOf(false) }
     var addressText by remember { mutableStateOf("") }
     var addressError by remember { mutableStateOf<String?>(null) }
+    var showingFullAddress by remember { mutableStateOf(false) }
+    var addressCopied by remember { mutableStateOf(false) }
+    var reconnecting by remember { mutableStateOf(false) }
     var confirmingUnpair by remember { mutableStateOf(false) }
+    var pendingComputerRemoval by remember { mutableStateOf<Connection?>(null) }
+    var choosingActivity by remember { mutableStateOf(false) }
+    var editingQuickReplies by remember { mutableStateOf(false) }
 
     Column(modifier = Modifier.fillMaxSize()) {
         Row(
@@ -89,12 +117,28 @@ fun SettingsScreen(
             SettingsSection("Computer") {
                 val bound = connection
                 if (bound != null) {
+                    val address = SettingsPolicy.addressText(bound)
                     SettingsRow("Name", bound.name)
-                    SettingsRow("Address", SettingsPolicy.addressText(bound))
+                    AddressRow(
+                        address = address,
+                        expanded = showingFullAddress,
+                        copied = addressCopied,
+                        onToggle = { showingFullAddress = !showingFullAddress },
+                        onCopy = {
+                            scope.launch {
+                                clipboard.setClipEntry(
+                                    ClipEntry(ClipData.newPlainText(ADDRESS_CLIP_LABEL, address)),
+                                )
+                                addressCopied = true
+                                delay(COPIED_LABEL_MILLIS)
+                                addressCopied = false
+                            }
+                        },
+                    )
                     // The stored address can simply go stale. Editing it here
                     // keeps the pairing and its token (§7).
                     SettingsButton("Edit address") {
-                        addressText = SettingsPolicy.addressText(bound)
+                        addressText = address
                         addressError = null
                         editingAddress = true
                     }
@@ -102,6 +146,54 @@ fun SettingsScreen(
                     SettingsButton("Connect a computer", onClick = onConnect)
                 }
                 SettingsRow("Connection", SettingsPolicy.statusText(status))
+                if (bound != null) {
+                    SettingsButton("Connect another computer") {
+                        haptics.play(TactileAction.CONNECT_ANOTHER_COMPUTER)
+                        session.beginPairing()
+                    }
+                }
+            }
+
+            val otherComputers = connections.filter { it.id != connection?.id }
+            if (otherComputers.isNotEmpty()) {
+                SettingsSection("Other computers") {
+                    otherComputers.forEach { computer ->
+                        SettingsButton("Use ${computer.name}") {
+                            haptics.play(TactileAction.SWITCH_COMPUTER)
+                            session.switchComputer(computer.id)
+                        }
+                        SettingsButton("Remove ${computer.name}", destructive = true) {
+                            pendingComputerRemoval = computer
+                        }
+                    }
+                    Footnote("Each computer is paired separately. Only the selected computer is active at a time.")
+                }
+            }
+
+            if (connection != null) {
+                SettingsSection("Troubleshooting") {
+                    Footnote(troubleshootingText(status))
+                    SettingsButton(
+                        text = "Try reconnecting",
+                        enabled = !reconnecting,
+                        trailing = {
+                            if (reconnecting) {
+                                CircularProgressIndicator(
+                                    modifier = Modifier.size(16.dp),
+                                    strokeWidth = 2.dp,
+                                )
+                            }
+                        },
+                    ) {
+                        scope.launch {
+                            reconnecting = true
+                            // Waits until the stream leaves connecting (or 10s),
+                            // so the spinner means what it appears to mean.
+                            session.refresh()
+                            reconnecting = false
+                        }
+                    }
+                }
             }
 
             SettingsSection("Notifications") {
@@ -117,16 +209,31 @@ fun SettingsScreen(
                 Footnote(SettingsPolicy.NOTIFICATIONS_FOOTER)
             }
 
+            SettingsSection("Chat") {
+                SettingsRow("Activity", activityDetail.label)
+                SettingsButton("Change activity detail") { choosingActivity = true }
+                SettingsButton("Quick replies") { editingQuickReplies = true }
+                Footnote(activityDetail.caption)
+            }
+
             // Routine schedules live on the computer this phone is bound to.
             // With no binding there is nothing to schedule against, so the row
             // is absent rather than present and dead.
-            onOpenRoutines?.let { openRoutines ->
+            if (onOpenRoutines != null || onOpenConnectedApps != null) {
                 SettingsSection("Workspace") {
-                    SettingsButton(
-                        text = "Tasks & Routines",
-                        icon = R.drawable.ic_schedule,
-                        onClick = openRoutines,
-                    )
+                    onOpenRoutines?.let { openRoutines ->
+                        SettingsButton(
+                            text = "Tasks & Routines",
+                            icon = R.drawable.ic_schedule,
+                            onClick = openRoutines,
+                        )
+                    }
+                    onOpenConnectedApps?.let { openConnectedApps ->
+                        SettingsButton(
+                            text = "Connected Apps",
+                            onClick = openConnectedApps,
+                        )
+                    }
                     Footnote(SettingsPolicy.WORKSPACE_FOOTER)
                 }
             }
@@ -134,7 +241,7 @@ fun SettingsScreen(
             if (connection != null) {
                 SettingsSection(null) {
                     SettingsButton(
-                        text = "Unpair this phone",
+                        text = if (connections.size > 1) "Remove this computer" else "Unpair this phone",
                         destructive = true,
                     ) { confirmingUnpair = true }
                     Footnote(SettingsPolicy.UNPAIR_FOOTER)
@@ -194,8 +301,16 @@ fun SettingsScreen(
     if (confirmingUnpair) {
         AlertDialog(
             onDismissRequest = { confirmingUnpair = false },
-            title = { Text(SettingsPolicy.UNPAIR_CONFIRM_TITLE) },
-            text = { Text(SettingsPolicy.UNPAIR_CONFIRM_MESSAGE) },
+            title = { Text(if (connections.size > 1) "Remove ${connection?.name}?" else SettingsPolicy.UNPAIR_CONFIRM_TITLE) },
+            text = {
+                Text(
+                    if (connections.size > 1) {
+                        "This removes the saved connection from this phone only. Another saved computer will stay available."
+                    } else {
+                        SettingsPolicy.UNPAIR_CONFIRM_MESSAGE
+                    },
+                )
+            },
             confirmButton = {
                 TextButton(
                     onClick = {
@@ -205,12 +320,82 @@ fun SettingsScreen(
                         session.signOut()
                     },
                 ) {
-                    Text("Unpair", color = MaterialTheme.colorScheme.error)
+                    // With another computer saved this removes one of them; the
+                    // phone stays paired, so "Unpair" would be the wrong promise.
+                    Text(
+                        text = if (connections.size > 1) "Remove" else "Unpair",
+                        color = MaterialTheme.colorScheme.error,
+                    )
                 }
             },
             dismissButton = {
                 TextButton(onClick = { confirmingUnpair = false }) { Text("Cancel") }
             },
+        )
+    }
+
+    pendingComputerRemoval?.let { computer ->
+        AlertDialog(
+            onDismissRequest = { pendingComputerRemoval = null },
+            title = { Text("Remove ${computer.name}?") },
+            text = { Text("This removes the saved connection from this phone only.") },
+            confirmButton = {
+                TextButton(
+                    onClick = {
+                        pendingComputerRemoval = null
+                        session.forgetConnection(computer.id)
+                    },
+                ) { Text("Remove", color = MaterialTheme.colorScheme.error) }
+            },
+            dismissButton = {
+                TextButton(onClick = { pendingComputerRemoval = null }) { Text("Cancel") }
+            },
+        )
+    }
+
+    if (choosingActivity) {
+        AlertDialog(
+            onDismissRequest = { choosingActivity = false },
+            title = { Text("Activity detail") },
+            text = {
+                // iOS draws a Picker (SettingsView.swift:67-78), which marks the
+                // choice already in force; three plain buttons do not.
+                Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                    ActivityDetail.entries.forEach { detail ->
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .heightIn(min = MIN_TOUCH_TARGET)
+                                .selectable(
+                                    selected = detail == activityDetail,
+                                    role = Role.RadioButton,
+                                    onClick = {
+                                        environment.chatPreferences.setActivityDetail(detail)
+                                        choosingActivity = false
+                                    },
+                                )
+                                .padding(vertical = 6.dp),
+                            horizontalArrangement = Arrangement.spacedBy(10.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                        ) {
+                            RadioButton(selected = detail == activityDetail, onClick = null)
+                            Column(modifier = Modifier.weight(1f)) {
+                                Text(detail.label, textAlign = TextAlign.Start)
+                                Text(detail.caption, fontSize = 12.sp, color = secondaryTint)
+                            }
+                        }
+                    }
+                }
+            },
+            confirmButton = {},
+            dismissButton = { TextButton(onClick = { choosingActivity = false }) { Text("Cancel") } },
+        )
+    }
+
+    if (editingQuickReplies) {
+        QuickRepliesEditor(
+            preferences = environment.chatPreferences,
+            onDismiss = { editingQuickReplies = false },
         )
     }
 }
@@ -246,12 +431,59 @@ private fun SettingsRow(label: String, value: String) {
     }
 }
 
+/**
+ * The address, short enough to read at a glance and long enough to copy — the
+ * port of the connection details in `ios/App/SettingsView.swift:346-371`.
+ */
+@Composable
+private fun AddressRow(
+    address: String,
+    expanded: Boolean,
+    copied: Boolean,
+    onToggle: () -> Unit,
+    onCopy: () -> Unit,
+) {
+    Column(modifier = Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+        Text("Address", fontSize = 15.sp, color = secondaryTint)
+        if (expanded) {
+            // Selectable, because the reason to show it in full is to take it away.
+            SelectionContainer {
+                Text(
+                    text = address,
+                    fontSize = 13.sp,
+                    fontFamily = FontFamily.Monospace,
+                    color = secondaryTint,
+                )
+            }
+        } else {
+            Text(
+                text = shortenedAddress(address),
+                fontSize = 13.sp,
+                fontFamily = FontFamily.Monospace,
+                color = secondaryTint,
+                maxLines = 1,
+                overflow = TextOverflow.MiddleEllipsis,
+            )
+        }
+        Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+            TextButton(onClick = onToggle) {
+                Text(if (expanded) "Hide full address" else "Show full address")
+            }
+            TextButton(onClick = onCopy) {
+                Text(if (copied) "Copied" else "Copy")
+            }
+        }
+    }
+}
+
 @Composable
 private fun SettingsButton(
     text: String,
     enabled: Boolean = true,
     destructive: Boolean = false,
     icon: Int? = null,
+    /** Drawn at the end of the row — a progress indicator while one is running. */
+    trailing: (@Composable () -> Unit)? = null,
     onClick: () -> Unit,
 ) {
     val tint = if (destructive) {
@@ -283,6 +515,7 @@ private fun SettingsButton(
                 textAlign = TextAlign.Start,
                 color = tint,
             )
+            trailing?.invoke()
         }
     }
 }
@@ -290,4 +523,31 @@ private fun SettingsButton(
 @Composable
 private fun Footnote(text: String) {
     Text(text = text, fontSize = 13.sp, color = secondaryTint)
+}
+
+private const val ADDRESS_CLIP_LABEL = "OpenMausMobile computer address"
+
+/** Long enough for "Copied" to be read, short enough not to linger (iOS `:363-367`). */
+private const val COPIED_LABEL_MILLIS = 2_000L
+
+/**
+ * What the Troubleshooting section says before offering to reconnect — the port
+ * of `ConnectionSecurityView.troubleshootingText` (`ios/App/SettingsView.swift:445-458`).
+ */
+internal fun troubleshootingText(status: Session.Status): String = when (status) {
+    Session.Status.Live -> "This computer is connected and responding normally."
+    Session.Status.Connecting -> "OpenMausBot is trying the saved connection automatically."
+    Session.Status.Unauthorized -> "This phone was removed from the computer. Pair it again to reconnect."
+    Session.Status.Unpaired -> "This phone is not paired with a computer."
+    is Session.Status.Offline -> status.message
+}
+
+/**
+ * The address with its middle taken out, so a long tailnet name still shows the
+ * host and the port it ends in — `shortened` in `ios/App/SettingsView.swift:460-464`.
+ */
+internal fun shortenedAddress(address: String): String {
+    if (address.length <= 14) return address
+    val leading = minOf(20, maxOf(8, address.length - 8))
+    return address.take(leading) + "…" + address.takeLast(6)
 }

@@ -156,9 +156,14 @@ private fun CommandCard(command: SlashCommand, onSelect: () -> Unit) {
  * exactly this — a suggested action beside a text field — and it carries the
  * `Role.Button` semantics and the 48 dp touch expansion that a 32 dp pill drawn
  * by hand would not.
+ *
+ * [chips] carries no default. These are the reader's own quick replies, which the
+ * composer always passes; a default of [PredictiveChips.ALL] would let a future
+ * call site render the four factory ones instead — silently, and always wrongly.
  */
 @Composable
 fun PredictiveChipsRow(
+    chips: List<PredictiveChip>,
     onSelect: (PredictiveChip) -> Unit,
     modifier: Modifier = Modifier,
 ) {
@@ -170,15 +175,41 @@ fun PredictiveChipsRow(
         horizontalArrangement = Arrangement.spacedBy(6.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
-        PredictiveChips.ALL.forEach { chip ->
+        chips.forEach { chip ->
             AssistChip(
                 onClick = { onSelect(chip) },
                 label = { Text(chip.title, fontSize = 13.sp) },
+                leadingIcon = chip.icon?.let { icon ->
+                    { Text(quickReplyGlyph(icon), fontSize = 13.sp) }
+                },
                 border = AssistChipDefaults.assistChipBorder(enabled = true),
             )
         }
         Spacer(Modifier.width(4.dp))
     }
+}
+
+/**
+ * Small platform-neutral marks for the icon choices stored with a reply.
+ *
+ * One table, drawn by the composer's chips and offered by `QuickRepliesEditor`:
+ * a mark someone picks in Settings is the mark that appears above the composer
+ * because it is literally the same branch, not a copy that agrees today.
+ */
+internal fun quickReplyGlyph(icon: String): String = when (icon) {
+    "next" -> "→"
+    "diff" -> "±"
+    "tests" -> "✓"
+    "explain" -> "?"
+    "build" -> "⌁"
+    "bug" -> "!"
+    "document" -> "▤"
+    "terminal" -> ">_"
+    "send" -> "↑"
+    "search" -> "⌕"
+    "history" -> "↶"
+    "list" -> "☷"
+    else -> "•"
 }
 
 private val HUD_RADIUS = 16.dp

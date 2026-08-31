@@ -107,6 +107,7 @@ class NavigationTest {
             Destination.Roster,
             Destination.Settings,
             Destination.Routines,
+            Destination.ConnectedApps,
             Destination.Thread("thread:with:colons"),
             Destination.Computer("bot:with:colons"),
             Destination.Chat(ChatTarget.Bot("bot:1:x", "thread:1:y")),

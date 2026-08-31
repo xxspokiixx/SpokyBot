@@ -18,11 +18,14 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.automirrored.filled.KeyboardArrowLeft
@@ -61,13 +64,17 @@ import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.ClipEntry
 import androidx.compose.ui.platform.LocalClipboard
 import androidx.compose.ui.semantics.LiveRegionMode
+import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.liveRegion
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.openmausbot.companion.core.Chat
+import com.openmausbot.companion.core.AttachedMessageContent
+import com.openmausbot.companion.core.DisplayedMessageAttachment
 import com.openmausbot.companion.core.Message
 import com.openmausbot.companion.core.OptionCard
 import com.openmausbot.companion.core.ToolActivity
@@ -90,11 +97,13 @@ private const val MESSAGE_CLIP_LABEL = "OpenMausMobile message"
 fun MessageRow(chat: Chat, message: Message, endsRun: Boolean = true) {
     val session = LocalCompanion.current.session
     val scope = rememberCoroutineScope()
+    val haptics = rememberHaptics()
     val state by session.state.collectAsState()
     val clipboard = LocalClipboard.current
     var menuOpen by remember { mutableStateOf(false) }
     var editing by remember { mutableStateOf(false) }
     var editText by remember { mutableStateOf("") }
+    var selectingText by remember { mutableStateOf<String?>(null) }
 
     val bot = (chat as? Chat.BotChat)?.bot
     val versions = remember(state, message.id) { state.versions(message, chat.threadId) }
@@ -118,7 +127,7 @@ fun MessageRow(chat: Chat, message: Message, endsRun: Boolean = true) {
             horizontalAlignment = if (mine) Alignment.End else Alignment.Start,
             verticalArrangement = Arrangement.spacedBy(6.dp),
         ) {
-            MessageContent(chat = chat, message = message, endsRun = endsRun)
+            MessageContent(chat = chat, message = message, endsRun = endsRun, haptics = haptics)
 
             message.comm?.let {
                 Text(
@@ -143,6 +152,7 @@ fun MessageRow(chat: Chat, message: Message, endsRun: Boolean = true) {
                             modifier = Modifier
                                 .border(1.dp, tint.copy(alpha = 0.5f), CircleShape)
                                 .clickable {
+                                    haptics.play(TactileAction.TOGGLE_REACTION)
                                     scope.launch {
                                         session.react(message, chat.threadId, group.emoji)
                                     }
@@ -211,6 +221,7 @@ fun MessageRow(chat: Chat, message: Message, endsRun: Boolean = true) {
                         modifier = Modifier
                             .clickable {
                                 menuOpen = false
+                                haptics.play(TactileAction.TOGGLE_REACTION)
                                 scope.launch { session.react(message, chat.threadId, emoji) }
                             }
                             .padding(8.dp),
@@ -228,6 +239,13 @@ fun MessageRow(chat: Chat, message: Message, endsRun: Boolean = true) {
                                 ClipEntry(ClipData.newPlainText(MESSAGE_CLIP_LABEL, text)),
                             )
                         }
+                    },
+                )
+                DropdownMenuItem(
+                    text = { Text("Select text") },
+                    onClick = {
+                        menuOpen = false
+                        selectingText = text
                     },
                 )
             }
@@ -282,13 +300,67 @@ fun MessageRow(chat: Chat, message: Message, endsRun: Boolean = true) {
             },
         )
     }
+
+    selectingText?.let { text ->
+        SelectableTextDialog(text = text, onDismiss = { selectingText = null })
+    }
+}
+
+/**
+ * Raw message text in a separate surface where Android can own the long-press
+ * selection gesture. The bubble's long press is intentionally reserved for
+ * reactions and message actions.
+ */
+@Composable
+private fun SelectableTextDialog(text: String, onDismiss: () -> Unit) {
+    val clipboard = LocalClipboard.current
+    val scope = rememberCoroutineScope()
+    var copied by remember(text) { mutableStateOf(false) }
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("Select text") },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                SelectionContainer {
+                    Text(
+                        text = text,
+                        fontSize = 16.sp,
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .heightIn(max = 360.dp)
+                            .verticalScroll(rememberScrollState()),
+                    )
+                }
+                Text(
+                    "Touch and hold the text to select part of it.",
+                    fontSize = 12.sp,
+                    color = secondaryTint,
+                )
+            }
+        },
+        confirmButton = {
+            TextButton(
+                onClick = {
+                    scope.launch {
+                        // "Copied" after the clipboard has it, not before: the
+                        // label is a report, and `setClipEntry` suspends.
+                        clipboard.setClipEntry(
+                            ClipEntry(ClipData.newPlainText(MESSAGE_CLIP_LABEL, text)),
+                        )
+                        copied = true
+                    }
+                },
+            ) { Text(if (copied) "Copied" else "Copy all") }
+        },
+        dismissButton = { TextButton(onClick = onDismiss) { Text("Done") } },
+    )
 }
 
 @Composable
-private fun MessageContent(chat: Chat, message: Message, endsRun: Boolean) {
+private fun MessageContent(chat: Chat, message: Message, endsRun: Boolean, haptics: Haptics) {
     when (message.kind) {
         Message.Kind.TEXT -> TextBubble(message, endsRun)
-        Message.Kind.OPTIONS -> CardView(chat, message)
+        Message.Kind.OPTIONS -> CardView(chat, message, haptics)
         Message.Kind.ACTIVITY -> ActivityChip(message.tool)
         Message.Kind.SCREEN -> ScreenShot(chat.threadId, message)
         // A message kind from a newer computer. Almost everything the harness
@@ -308,6 +380,9 @@ private fun TextBubble(message: Message, endsRun: Boolean) {
     // in `:core` and it is strict: anything with a sentence in it stays a
     // paragraph, because a card around a paragraph hides the paragraph.
     val card = remember(message.id, message.role, message.text) { TranscriptCards.of(message) }
+    // Shared attachments are protocol tags in stored user text. They are not
+    // prose, and a server-controlled path must never be presented as a link.
+    val attached = remember(message.id, message.text) { AttachedMessageContent.parse(message.text.orEmpty()) }
     // A card brings its own surface, so it drops the bubble — and with it the
     // tail, which is a bubble's chin and not a card's.
     val bubble = card == null
@@ -363,11 +438,18 @@ private fun TextBubble(message: Message, endsRun: Boolean) {
                 is TranscriptCard.Table -> DataTableCard(card)
                 null -> SelectionContainer {
                     if (mine) {
-                        Text(
-                            text = message.text.orEmpty(),
-                            fontSize = 17.sp,
-                            color = BubbleColor.mineText,
-                        )
+                        Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                            attached.attachments.forEach { attachment ->
+                                SharedAttachmentChip(attachment)
+                            }
+                            if (attached.text.isNotEmpty()) {
+                                Text(
+                                    text = attached.text,
+                                    fontSize = 17.sp,
+                                    color = BubbleColor.mineText,
+                                )
+                            }
+                        }
                     } else {
                         MarkdownText(source = message.text.orEmpty())
                     }
@@ -376,6 +458,22 @@ private fun TextBubble(message: Message, endsRun: Boolean) {
         }
         if (!mine) Spacer(Modifier.width(44.dp))
     }
+}
+
+@Composable
+private fun SharedAttachmentChip(attachment: DisplayedMessageAttachment) {
+    val type = if (attachment.kind == DisplayedMessageAttachment.Kind.IMAGE) "Image" else "File"
+    Text(
+        text = "$type: ${attachment.name}",
+        fontSize = 13.sp,
+        fontWeight = FontWeight.Medium,
+        maxLines = 1,
+        color = BubbleColor.mineText.copy(alpha = 0.84f),
+        modifier = Modifier
+            .background(BubbleColor.mineText.copy(alpha = 0.10f), RoundedCornerShape(16.dp))
+            .padding(horizontal = 10.dp, vertical = 6.dp)
+            .semantics { contentDescription = "$type attachment: ${attachment.name}" },
+    )
 }
 
 /**
@@ -444,6 +542,66 @@ private fun ActivityChip(tool: ToolActivity?) {
     }
 }
 
+/** Several consecutive successful/running activity receipts, folded on demand. */
+@Composable
+fun ActivityRunChip(items: List<Message>) {
+    if (items.isEmpty()) return
+    val haptics = rememberHaptics()
+    // Keyed on the run's identity — the same one the LazyColumn keys the row by
+    // (`TranscriptRow.ActivityRun.id = "run.${head.id}"`). Keying on the last id
+    // too would throw the reader's disclosure away on every receipt that lands
+    // while the run is still going. iOS holds a `@State` with no key at all.
+    var expanded by remember(items.first().id) { mutableStateOf(false) }
+    val running = items.any { it.tool?.ok == null }
+    val summary = if (running) "Running ${items.size} steps" else "Ran ${items.size} steps"
+    Column(
+        modifier = Modifier.padding(start = 4.dp),
+        verticalArrangement = Arrangement.spacedBy(5.dp),
+    ) {
+        // The pill is ~30 dp tall; the target around it is MIN_TOUCH_TARGET, the
+        // way TouchTarget does it for the round buttons. Not TouchTarget itself:
+        // that helper is a square box, which would clip a capsule this wide.
+        Box(
+            modifier = Modifier
+                .heightIn(min = MIN_TOUCH_TARGET)
+                .clickable(role = Role.Button) {
+                    expanded = !expanded
+                    haptics.play(TactileAction.TOGGLE_ACTIVITY_RUN)
+                }
+                .semantics {
+                    contentDescription = "$summary, ${if (expanded) "expanded" else "collapsed"}"
+                },
+            contentAlignment = Alignment.CenterStart,
+        ) {
+            Row(
+                modifier = Modifier
+                    .background(secondaryTint.copy(alpha = 0.10f), RoundedCornerShape(18.dp))
+                    .padding(horizontal = 10.dp, vertical = 6.dp),
+                horizontalArrangement = Arrangement.spacedBy(6.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                if (running) {
+                    CircularProgressIndicator(modifier = Modifier.size(13.dp), strokeWidth = 1.5.dp)
+                } else {
+                    Icon(
+                        imageVector = Icons.Filled.Check,
+                        contentDescription = null,
+                        tint = Color(0xFF22C55E),
+                        modifier = Modifier.size(14.dp),
+                    )
+                }
+                Text(summary, fontSize = 13.sp, fontWeight = FontWeight.Medium)
+                Text(if (expanded) "Hide" else "Show", fontSize = 12.sp, color = secondaryTint)
+            }
+        }
+        if (expanded) {
+            Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                items.forEach { item -> ActivityChip(item.tool) }
+            }
+        }
+    }
+}
+
 /** The receipt's status dot, sized to sit level with the 13 sp name beside it. */
 private val ACTIVITY_DOT = 7.dp
 
@@ -452,11 +610,12 @@ private val ACTIVITY_DOT = 7.dp
  * companion exists for — a bot stopped, and only a person can let it continue.
  */
 @Composable
-private fun CardView(chat: Chat, message: Message) {
+private fun CardView(chat: Chat, message: Message, haptics: Haptics) {
     val card = message.card ?: return
     val session = LocalCompanion.current.session
     val scope = rememberCoroutineScope()
     var answering by remember(message.id) { mutableStateOf(false) }
+    val skillRequest = card.skillRequest
 
     Column(
         modifier = Modifier
@@ -486,6 +645,69 @@ private fun CardView(chat: Chat, message: Message) {
             Text(it, fontSize = 13.sp, color = Color(MausPalette.argb("orange")))
         }
 
+        skillRequest?.let { skill ->
+            val reviewed = skill.reviewedSha256
+            if (reviewed != null) {
+                Column(verticalArrangement = Arrangement.spacedBy(7.dp)) {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Text(
+                            "Review the complete SKILL.md",
+                            fontSize = 12.sp,
+                            fontWeight = FontWeight.SemiBold,
+                            modifier = Modifier.weight(1f),
+                        )
+                        Text(
+                            "sha256 ${reviewed.take(8)}",
+                            fontSize = 10.sp,
+                            fontFamily = FontFamily.Monospace,
+                            color = secondaryTint,
+                        )
+                    }
+                    SelectionContainer {
+                        Text(
+                            "Source: ${skill.source ?: "Unknown"}",
+                            fontSize = 11.sp,
+                            color = secondaryTint,
+                        )
+                    }
+                    SelectionContainer {
+                        Text(
+                            skill.preview.orEmpty(),
+                            fontSize = 12.sp,
+                            fontFamily = FontFamily.Monospace,
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .heightIn(max = 220.dp)
+                                .verticalScroll(rememberScrollState())
+                                .background(
+                                    secondaryTint.copy(alpha = 0.08f),
+                                    RoundedCornerShape(10.dp),
+                                )
+                                .padding(10.dp),
+                        )
+                    }
+                }
+            } else {
+                Row(
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Icon(
+                        imageVector = Icons.Filled.Warning,
+                        contentDescription = null,
+                        tint = Color(MausPalette.argb("orange")),
+                    )
+                    Text(
+                        "This proposal was created by an older build and cannot be safely enabled. " +
+                            "Deny it and ask the bot to create it again.",
+                        fontSize = 12.sp,
+                        color = Color(MausPalette.argb("orange")),
+                        modifier = Modifier.weight(1f),
+                    )
+                }
+            }
+        }
+
         if (card.isPending) {
             Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
                 // The buttons are the card's own options, never a string
@@ -494,13 +716,18 @@ private fun CardView(chat: Chat, message: Message) {
                     val refusal = ApprovalChoices.emphasis(option) == OptionEmphasis.SECONDARY
                     Button(
                         onClick = {
+                            haptics.play(TactileAction.CHOOSE_APPROVAL)
                             answering = true
                             scope.launch {
                                 ApprovalAnswers.choose(session, chat, card, option)
                                 answering = false
                             }
                         },
-                        enabled = !answering,
+                        enabled = !answering && (
+                            skillRequest == null ||
+                                refusal ||
+                                skillRequest.reviewedSha256 != null
+                            ),
                         // Same `isRefusal` that picks the allow choice picks the
                         // weight, so the most sensible action on the most
                         // sensitive screen is not the same shape as the refusal.
@@ -523,6 +750,7 @@ private fun CardView(chat: Chat, message: Message) {
             if (alwaysAllow != null && chat is Chat.BotChat) {
                 TextButton(
                     onClick = {
+                        haptics.play(TactileAction.GRANT_APPROVAL)
                         answering = true
                         scope.launch {
                             ApprovalAnswers.grant(session, chat, card, alwaysAllow)

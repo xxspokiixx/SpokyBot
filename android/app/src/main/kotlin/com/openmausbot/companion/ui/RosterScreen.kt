@@ -99,11 +99,16 @@ import kotlinx.coroutines.launch
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun RosterScreen(navigator: CompanionNavigator) {
-    val session = LocalCompanion.current.session
+    val environment = LocalCompanion.current
+    val session = environment.session
     val scope = rememberCoroutineScope()
+    val haptics = rememberHaptics()
     val state by session.state.collectAsState()
     val connection by session.connection.collectAsState()
     val status by session.status.collectAsState()
+    // The same preference the transcript folds by, from the same store: a reader
+    // who turned activity off must not still read tool names here.
+    val activityDetail by environment.chatPreferences.activityDetail.collectAsState()
 
     var bar by rememberSaveable(stateSaver = RosterBarSaver) { mutableStateOf(RosterBar()) }
     var hits by remember { mutableStateOf<List<SearchHit>>(emptyList()) }
@@ -111,6 +116,7 @@ fun RosterScreen(navigator: CompanionNavigator) {
     var refreshing by remember { mutableStateOf(false) }
     var showingUpdates by remember { mutableStateOf(false) }
     var showingNewGroup by remember { mutableStateOf(false) }
+    var showingNewSection by remember { mutableStateOf(false) }
 
     val query = bar.query
 
@@ -132,16 +138,20 @@ fun RosterScreen(navigator: CompanionNavigator) {
     }
 
     // Folding the fleet walks every thread's transcript, so it is keyed on the
-    // state alone: typing filters the fold instead of repeating it.
-    val summaries = remember(state) { state.chatSummaries }
+    // state and the activity level alone: typing filters the fold instead of
+    // repeating it.
+    val summaries = remember(state, activityDetail) { state.chatSummaries(activityDetail) }
+    // Only a search has rows to filter; the unsearched roster is assembled
+    // section by section below.
     val rows = remember(summaries, query) { RosterLayout.rows(summaries, query) }
     val approvals = remember(state) { state.pendingApprovals }
     val waiting = remember(state, approvals) { RosterLayout.waitingChats(state, approvals) }
     // One pass over the fleet rather than one per row: resolving a face walks the
     // chat's visible transcript.
-    val faces = remember(state, rows) {
-        rows.associate { it.id to MausState.forChat(it.chat, state) }
+    val faces = remember(state, summaries) {
+        summaries.associate { it.id to MausState.forChat(it.chat, state) }
     }
+    val summariesById = remember(summaries) { summaries.associateBy { it.id } }
     // Hoisted out of the list: read inside a lazy item, `state` would make that
     // item's recompose scope the whole fleet.
     val rooms = state.rooms
@@ -176,7 +186,11 @@ fun RosterScreen(navigator: CompanionNavigator) {
                     .fillMaxWidth()
                     .weight(1f),
             ) {
-                if (rows.isEmpty() && hits.isEmpty()) {
+                // Unsearched, the empty state is about bots: channels are tiles
+                // in the strip, not rows.
+                val nothingToList =
+                    if (query.isEmpty()) !RosterLayout.listsAnyBot(summaries) else rows.isEmpty()
+                if (nothingToList && hits.isEmpty()) {
                     EmptyState(
                         title = if (query.isEmpty()) "No bots yet" else "Nothing matches",
                         description = if (query.isEmpty()) {
@@ -192,16 +206,119 @@ fun RosterScreen(navigator: CompanionNavigator) {
                     contentPadding = PaddingValues(bottom = BAR_CLEARANCE),
                 ) {
                     if (RosterLayout.showsGroups(query)) {
-                        item(key = "groups") {
+                        state.unsectionedChief?.let { chief ->
+                            summariesById[chief.id]?.let { summary ->
+                                item(key = "chief-${chief.id}") {
+                                    ChatRow(
+                                        summary = summary,
+                                        face = faces[summary.id] ?: MausState.IDLE,
+                                        waiting = summary.id in waiting,
+                                        last = true,
+                                        onClick = { navigator.open(summary.chat) },
+                                    )
+                                }
+                            }
+                        }
+                        val pinned = state.pinnedBots.mapNotNull { summariesById[it.id] }
+                        if (pinned.isNotEmpty()) {
+                            item(key = "pinned-label") {
+                                SectionLabel("Pinned", Modifier.padding(top = 2.dp, bottom = 4.dp))
+                            }
+                            itemsIndexed(pinned, key = { _, summary -> "pinned-${summary.id}" }) { index, summary ->
+                                ChatRow(
+                                    summary = summary,
+                                    face = faces[summary.id] ?: MausState.IDLE,
+                                    waiting = summary.id in waiting,
+                                    last = index == pinned.lastIndex,
+                                    onClick = { navigator.open(summary.chat) },
+                                )
+                            }
+                        }
+                        item(key = "channels") {
                             GroupsStrip(
-                                rooms = rooms,
+                                title = "Channels",
+                                rooms = state.unsectionedChannels,
                                 members = tiles,
                                 onOpen = { navigator.open(Chat.RoomChat(it)) },
-                                onCreate = { showingNewGroup = true },
+                                onCreate = {
+                                    haptics.play(TactileAction.START_NEW_GROUP)
+                                    showingNewGroup = true
+                                },
                             )
                         }
-                        item(key = "bots-label") {
-                            SectionLabel("Bots", Modifier.padding(top = 18.dp, bottom = 4.dp))
+                        if (state.botChats.isNotEmpty()) {
+                            item(key = "bot-chats") {
+                                GroupsStrip(
+                                    title = "Bot chats",
+                                    rooms = state.botChats,
+                                    members = tiles,
+                                    onOpen = { navigator.open(Chat.RoomChat(it)) },
+                                    onCreate = null,
+                                )
+                            }
+                        }
+                        val unsectioned = state.unsectionedBots.mapNotNull { summariesById[it.id] }
+                        if (unsectioned.isNotEmpty()) {
+                            item(key = "bots-label") {
+                                SectionLabel("Bots", Modifier.padding(top = 18.dp, bottom = 4.dp))
+                            }
+                            itemsIndexed(unsectioned, key = { _, summary -> "bot-${summary.id}" }) { index, summary ->
+                                ChatRow(
+                                    summary = summary,
+                                    face = faces[summary.id] ?: MausState.IDLE,
+                                    waiting = summary.id in waiting,
+                                    last = index == unsectioned.lastIndex,
+                                    onClick = { navigator.open(summary.chat) },
+                                )
+                            }
+                        }
+                        // Chiefs, then the section's channels, then its bots —
+                        // the order of `rosterSections` in `ChatListView.swift`.
+                        state.sidebarSections.forEach { section ->
+                            item(key = "section-${section.id}") {
+                                SectionLabel(section.name, Modifier.padding(top = 18.dp, bottom = 4.dp))
+                            }
+                            val sectionChiefs = section.chiefs.mapNotNull { summariesById[it.id] }
+                            val sectionBots = section.bots.mapNotNull { summariesById[it.id] }
+                            itemsIndexed(
+                                sectionChiefs,
+                                key = { _, summary -> "section-${section.id}-chief-${summary.id}" },
+                            ) { index, summary ->
+                                ChatRow(
+                                    summary = summary,
+                                    face = faces[summary.id] ?: MausState.IDLE,
+                                    waiting = summary.id in waiting,
+                                    // A divider separates two rows. The strip is
+                                    // not a row, and neither is the end of the
+                                    // section.
+                                    last = index == sectionChiefs.lastIndex &&
+                                        (section.channels.isNotEmpty() || sectionBots.isEmpty()),
+                                    onClick = { navigator.open(summary.chat) },
+                                )
+                            }
+                            if (section.channels.isNotEmpty()) {
+                                item(key = "section-${section.id}-channels") {
+                                    GroupsStrip(
+                                        title = "Channels",
+                                        rooms = section.channels,
+                                        members = tiles,
+                                        onOpen = { navigator.open(Chat.RoomChat(it)) },
+                                        onCreate = null,
+                                    )
+                                }
+                            }
+                            itemsIndexed(
+                                sectionBots,
+                                key = { _, summary -> "section-${section.id}-bot-${summary.id}" },
+                            ) { index, summary ->
+                                ChatRow(
+                                    summary = summary,
+                                    face = faces[summary.id] ?: MausState.IDLE,
+                                    waiting = summary.id in waiting,
+                                    last = index == sectionBots.lastIndex,
+                                    onClick = { navigator.open(summary.chat) },
+                                )
+                            }
                         }
                     }
 
@@ -234,7 +351,10 @@ fun RosterScreen(navigator: CompanionNavigator) {
                                         // active branch, loads the `around` page
                                         // and focuses the message — the chat
                                         // screen honours the focus when it opens.
-                                        session.open(hit)?.let(navigator::open)
+                                        session.open(hit)?.let {
+                                            haptics.play(TactileAction.OPEN_SEARCH_RESULT)
+                                            navigator.open(it)
+                                        }
                                     }
                                 },
                             )
@@ -244,14 +364,16 @@ fun RosterScreen(navigator: CompanionNavigator) {
                         }
                     }
 
-                    itemsIndexed(rows, key = { _, summary -> summary.chat.threadId }) { index, summary ->
-                        ChatRow(
-                            summary = summary,
-                            face = faces[summary.id] ?: MausState.IDLE,
-                            waiting = summary.id in waiting,
-                            last = index == rows.lastIndex,
-                            onClick = { navigator.open(summary.chat) },
-                        )
+                    if (query.isNotEmpty()) {
+                        itemsIndexed(rows, key = { _, summary -> summary.chat.threadId }) { index, summary ->
+                            ChatRow(
+                                summary = summary,
+                                face = faces[summary.id] ?: MausState.IDLE,
+                                waiting = summary.id in waiting,
+                                last = index == rows.lastIndex,
+                                onClick = { navigator.open(summary.chat) },
+                            )
+                        }
                     }
                 }
             }
@@ -261,12 +383,29 @@ fun RosterScreen(navigator: CompanionNavigator) {
             updates = updates,
             bar = bar,
             onBar = { bar = it },
-            onOpenUpdates = { showingUpdates = true },
+            onOpenUpdates = {
+                haptics.play(TactileAction.OPEN_UPDATES)
+                showingUpdates = true
+            },
+            onOpenSearch = {
+                haptics.play(TactileAction.OPEN_SEARCH)
+                bar = bar.openSearch()
+            },
             onCreateBot = {
                 scope.launch {
-                    session.createBot()?.let { navigator.open(Chat.BotChat(it)) }
+                    session.createBot()?.let {
+                        haptics.play(TactileAction.CREATE_BOT_SUCCESS)
+                        navigator.open(Chat.BotChat(it))
+                    }
                 }
             },
+            onCreateSection = {
+                haptics.play(TactileAction.START_NEW_SECTION)
+                showingNewSection = true
+            },
+            // The same rule the sheet picks from: two copies of "which bots can
+            // be sectioned" could disagree about a hidden one.
+            canCreateSection = remember(state) { SectionRules.selectable(state).isNotEmpty() },
             modifier = Modifier.align(Alignment.BottomCenter),
         )
     }
@@ -289,6 +428,10 @@ fun RosterScreen(navigator: CompanionNavigator) {
             },
             onDismiss = { showingNewGroup = false },
         )
+    }
+
+    if (showingNewSection) {
+        NewSectionSheet(onDismiss = { showingNewSection = false })
     }
 }
 
@@ -368,16 +511,17 @@ private fun SectionLabel(text: String, modifier: Modifier = Modifier) {
  */
 @Composable
 private fun GroupsStrip(
+    title: String,
     rooms: List<Room>,
     members: Map<String, List<Bot>>,
     onOpen: (Room) -> Unit,
-    onCreate: () -> Unit,
+    onCreate: (() -> Unit)?,
 ) {
     Column(
         modifier = Modifier.padding(top = 2.dp),
         verticalArrangement = Arrangement.spacedBy(10.dp),
     ) {
-        SectionLabel("Groups")
+        SectionLabel(title)
         LazyRow(
             horizontalArrangement = Arrangement.spacedBy(8.dp),
             contentPadding = PaddingValues(horizontal = 16.dp),
@@ -389,7 +533,9 @@ private fun GroupsStrip(
                     onClick = { onOpen(room) },
                 )
             }
-            item(key = "new-group") { NewGroupTile(onClick = onCreate) }
+            if (onCreate != null) {
+                item(key = "new-group") { NewGroupTile(onClick = onCreate) }
+            }
         }
     }
 }
@@ -668,7 +814,10 @@ private fun RosterBottomBar(
     bar: RosterBar,
     onBar: (RosterBar) -> Unit,
     onOpenUpdates: () -> Unit,
+    onOpenSearch: () -> Unit,
     onCreateBot: () -> Unit,
+    onCreateSection: () -> Unit,
+    canCreateSection: Boolean,
     modifier: Modifier = Modifier,
 ) {
     val focus = remember { FocusRequester() }
@@ -751,7 +900,14 @@ private fun RosterBottomBar(
             ChromeButton(
                 icon = Icons.Filled.Search,
                 contentDescription = "Search",
-                onClick = { onBar(bar.openSearch()) },
+                onClick = onOpenSearch,
+                size = MIN_TOUCH_TARGET,
+            )
+            ChromeButton(
+                icon = Icons.Filled.Add,
+                contentDescription = "Organize bots into a section",
+                onClick = onCreateSection,
+                enabled = canCreateSection,
                 size = MIN_TOUCH_TARGET,
             )
             // Writing something new, which is what making a bot is. The empty

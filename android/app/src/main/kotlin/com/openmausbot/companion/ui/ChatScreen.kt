@@ -91,7 +91,9 @@ import com.openmausbot.companion.core.ChatTarget
 import com.openmausbot.companion.core.CompanionState
 import com.openmausbot.companion.core.Dictation
 import com.openmausbot.companion.core.Message
+import com.openmausbot.companion.core.TranscriptRow
 import com.openmausbot.companion.core.target
+import com.openmausbot.companion.core.transcriptRows
 import java.util.Locale
 import kotlinx.coroutines.launch
 
@@ -200,7 +202,18 @@ private fun LoadedChat(
     val dictationError by dictation.error.collectAsState()
     val dictationLocked = dictationListening || dictationStarting
 
-    val transcript = remember(state, threadId) { state.visibleTranscript(threadId) }
+    val rawTranscript = remember(state, threadId) { state.visibleTranscript(threadId) }
+    val activityDetail by environment.chatPreferences.activityDetail.collectAsState()
+    val quickReplies by environment.chatPreferences.quickReplies.collectAsState()
+    // The source transcript stays intact for approvals, mascot state and
+    // pagination. Only the rendered rows fold activity according to the local
+    // preference, so changing the choice never mutates server state.
+    val transcript = remember(rawTranscript, activityDetail) {
+        transcriptRows(rawTranscript, activityDetail)
+    }
+    val predictiveChips = remember(quickReplies) {
+        quickReplies.map { PredictiveChip(title = it.title, prompt = it.prompt, icon = it.icon) }
+    }
     val streaming = state.streaming[threadId]
     val reasoning = state.reasoning[threadId]
     // Stream, then reasoning, then the bare fact of being busy — the order in
@@ -211,8 +224,8 @@ private fun LoadedChat(
     val hasMore = state.hasMore[threadId] == true
     // What stops the predictive chips from covering the one question on screen
     // that only a person can answer.
-    val pendingApproval = remember(transcript) {
-        ComposerAccessories.hasPendingApproval(transcript)
+    val pendingApproval = remember(rawTranscript) {
+        ComposerAccessories.hasPendingApproval(rawTranscript)
     }
 
     // Two halves of the composer draft:
@@ -352,7 +365,10 @@ private fun LoadedChat(
     // A search hit lands on its message.
     LaunchedEffect(focusedMessageId, transcript.size) {
         val target = focusedMessageId ?: return@LaunchedEffect
-        val index = transcript.indexOfFirst { it.id == target }
+        val index = transcript.indexOfFirst { row ->
+            row.id == target ||
+                (row as? TranscriptRow.ActivityRun)?.items?.any { it.id == target } == true
+        }
         if (index < 0) return@LaunchedEffect
         listState.scrollToItem(headerCount + index)
         session.consumeFocus(target)
@@ -360,15 +376,20 @@ private fun LoadedChat(
     }
 
     val bot = (chat as? Chat.BotChat)?.bot
-    // A room drops the computer and the task list (§12). Both answers are
-    // constants, so this needs no `remember` and allocates nothing.
+    // The computer is bot-only; a non-DM room exposes task navigation when the
+    // paired desktop supplied a task list. Both answers are constants.
     val commands = SlashCommands.forChat(chat)
     // One handler for the one door. The name pill stopped being the second when
     // it became the way into a bot's profile, so the + now carries every action
     // there is — including both export formats.
     val onAction: (ChatActionId) -> Unit = { action ->
         when (action) {
-            ChatActionId.NEW_TASK -> if (bot != null) scope.launch { session.createTask(bot, null) }
+            ChatActionId.NEW_TASK -> scope.launch {
+                when (chat) {
+                    is Chat.BotChat -> session.createTask(chat.bot, null)
+                    is Chat.RoomChat -> if (chat.supportsTasks) session.createTask(chat.room, null)
+                }
+            }
             ChatActionId.TASKS -> showingTasks = true
             ChatActionId.WATCH_COMPUTER -> {
                 // iOS stops on showingComputer; Android leaves ChatScreen when
@@ -503,8 +524,16 @@ private fun LoadedChat(
                                         session.loadOlder(threadId)
                                         if (anchor == null) return@launch
                                         val fresh = session.state.value
-                                        val index = fresh.visibleTranscript(threadId)
-                                            .indexOfFirst { it.id == anchor }
+                                        val freshRows = transcriptRows(
+                                            fresh.visibleTranscript(threadId),
+                                            activityDetail,
+                                        )
+                                        val index = freshRows.indexOfFirst { row ->
+                                            row.id == anchor ||
+                                                (row as? TranscriptRow.ActivityRun)
+                                                    ?.items
+                                                    ?.any { it.id == anchor } == true
+                                        }
                                         if (index < 0) return@launch
                                         // The "load earlier" row is item 0 for as
                                         // long as there is still more to fetch.
@@ -523,7 +552,7 @@ private fun LoadedChat(
                         Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
                             // A gap in time is worth marking; a timestamp on every
                             // message is just noise.
-                            if (TranscriptLayout.startsNewStretch(transcript, index)) {
+                            if (TranscriptLayout.startsNewRowStretch(transcript, index)) {
                                 Text(
                                     text = RelativeStamp.separator(
                                         message.at,
@@ -538,13 +567,16 @@ private fun LoadedChat(
                                     textAlign = TextAlign.Center,
                                 )
                             }
-                            MessageRow(
-                                chat = chat,
-                                message = message,
-                                // One tail per run of bubbles from the same author,
-                                // not one per bubble.
-                                endsRun = TranscriptLayout.endsRun(transcript, index),
-                            )
+                            when (message) {
+                                is TranscriptRow.Single -> MessageRow(
+                                    chat = chat,
+                                    message = message.message,
+                                    // One tail per run of bubbles from the same author,
+                                    // not one per bubble.
+                                    endsRun = TranscriptLayout.endsRowRun(transcript, index),
+                                )
+                                is TranscriptRow.ActivityRun -> ActivityRunChip(message.items)
+                            }
                         }
                     }
 
@@ -561,8 +593,8 @@ private fun LoadedChat(
 
                 ChatHeader(
                     chat = chat,
-                    face = remember(chat, transcript) {
-                        MausState.forChat(chat, transcript.lastOrNull())
+                    face = remember(chat, rawTranscript) {
+                        MausState.forChat(chat, rawTranscript.lastOrNull())
                     },
                     unreadElsewhere = remember(state, chat) {
                         (state.unreadCount - if (chat.unread) 1 else 0).coerceAtLeast(0)
@@ -595,8 +627,10 @@ private fun LoadedChat(
                     draft = draft,
                     busy = chat.busy,
                     pendingApproval = pendingApproval,
+                    hasQuickReplies = predictiveChips.isNotEmpty(),
                 ),
                 commands = commands,
+                chips = predictiveChips,
                 plusOpen = showingPlus,
                 dictationListening = dictationListening,
                 dictationLocked = dictationLocked,
@@ -637,7 +671,9 @@ private fun LoadedChat(
 
         PlusSheet(
             open = showingPlus,
-            actions = remember(chat) { ChatActions.sheet(chat) },
+            actions = remember(chat, pendingApproval) {
+                ChatActions.sheet(chat, hasPendingApproval = pendingApproval)
+            },
             onDismiss = { showingPlus = false },
             onAction = {
                 showingPlus = false
@@ -647,9 +683,7 @@ private fun LoadedChat(
     }
 
     if (showingTasks) {
-        (chat as? Chat.BotChat)?.let {
-            TaskSheet(botId = it.bot.id, onDismiss = { showingTasks = false })
-        }
+        if (chat.supportsTasks) TaskSheet(chat = chat, onDismiss = { showingTasks = false })
     }
 
     if (showingProfile && bot != null) {
@@ -675,8 +709,8 @@ private const val LIVE_BUBBLE_KEY = "companion.live"
 
 /** `itemsIndexed` with the message id as the key — one call site, one helper. */
 private fun androidx.compose.foundation.lazy.LazyListScope.itemsIndexedKeyed(
-    messages: List<Message>,
-    content: @Composable (Int, Message) -> Unit,
+    messages: List<TranscriptRow>,
+    content: @Composable (Int, TranscriptRow) -> Unit,
 ) {
     items(
         count = messages.size,
@@ -1002,6 +1036,7 @@ private fun Composer(
     onToggleHud: () -> Unit,
     onCloseHud: () -> Unit,
     onSelectCommand: (SlashCommand) -> Unit,
+    chips: List<PredictiveChip>,
     onSelectChip: (PredictiveChip) -> Unit,
 ) {
     val canSend = draft.isNotBlank()
@@ -1037,7 +1072,7 @@ private fun Composer(
                 onClose = onCloseHud,
             )
 
-            ComposerAccessory.CHIPS -> PredictiveChipsRow(onSelect = onSelectChip)
+            ComposerAccessory.CHIPS -> PredictiveChipsRow(chips = chips, onSelect = onSelectChip)
 
             ComposerAccessory.NONE -> Unit
         }

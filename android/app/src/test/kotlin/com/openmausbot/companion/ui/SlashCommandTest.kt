@@ -3,6 +3,7 @@ package com.openmausbot.companion.ui
 import androidx.compose.runtime.saveable.SaverScope
 import com.openmausbot.companion.core.Chat
 import com.openmausbot.companion.core.ChatTarget
+import com.openmausbot.companion.core.BotTask
 import com.openmausbot.companion.core.Message
 import com.openmausbot.companion.core.OptionCard
 import kotlin.test.Test
@@ -59,6 +60,31 @@ class SlashCommandsTest {
         assertEquals(
             listOf("/diff", "/retry", "/steer"),
             SlashCommands.forChat(Chat.RoomChat(room())).map { it.title },
+        )
+    }
+
+    @Test
+    fun `a channel with tasks keeps tasks but never computer`() {
+        val channel = Chat.RoomChat(room().copy(tasks = listOf(BotTask("task-1", "Plan", 0.0))))
+        assertEquals(
+            listOf("/tasks", "/diff", "/retry", "/steer"),
+            SlashCommands.forChat(channel).map { it.title },
+        )
+    }
+
+    @Test
+    fun `a DM is still a DM, even when the desktop sends it a task list`() {
+        // `Chat.supportsTasks` is `room.dm != true && room.tasks != null`
+        // (`ios/App/Session.swift:1352`). A channel with tasks keeps /tasks; a
+        // DM with the very same list does not, and the sheet behind it is gated
+        // on the same answer.
+        val dm = Chat.RoomChat(
+            room().copy(dm = true, tasks = listOf(BotTask("task-1", "Plan", 0.0))),
+        )
+        assertFalse(dm.supportsTasks)
+        assertEquals(
+            listOf("/diff", "/retry", "/steer"),
+            SlashCommands.forChat(dm).map { it.title },
         )
     }
 
@@ -234,6 +260,7 @@ class ComposerAccessoriesTest {
                 draft = "",
                 busy = false,
                 pendingApproval = false,
+                hasQuickReplies = true,
             ),
         )
     }
@@ -266,6 +293,7 @@ class ComposerAccessoriesTest {
                 draft = "/dif",
                 busy = true,
                 pendingApproval = true,
+                hasQuickReplies = true,
             ),
         )
     }
@@ -287,7 +315,8 @@ class ComposerAccessoriesTest {
         draft: String = "",
         busy: Boolean = false,
         pendingApproval: Boolean = false,
-    ) = ComposerAccessories.accessory(hudOpen, draft, busy, pendingApproval)
+        hasQuickReplies: Boolean = true,
+    ) = ComposerAccessories.accessory(hudOpen, draft, busy, pendingApproval, hasQuickReplies)
 
     private fun card(pending: Boolean): Message = Message(
         id = if (pending) "pending" else "answered",
