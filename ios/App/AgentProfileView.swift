@@ -229,7 +229,7 @@ struct AgentProfileView: View {
             session.actionError = "That image is larger than 10 MB."
             return
         }
-        let intendedCrop = crop.afterAttachingAPicture
+        let intendedCrop = crop.afterUploadingAPicture
         if let updated = await session.uploadAvatar(data, mime: mime, for: current, crop: intendedCrop) {
             crop = updated.avatarCrop ?? intendedCrop
             baseline.crop = crop
@@ -239,24 +239,42 @@ struct AgentProfileView: View {
     private func generateImage() async {
         busy = true
         defer { busy = false }
-        let intendedCrop = crop.afterAttachingAPicture
+        // What the selector said when the request went out. The desktop
+        // compares the same way (`latestCrop === cropAtStart` in
+        // `src/components/BotProfileAvatarCard.tsx`) so a selector moved
+        // mid-flight still wins over the server's pick.
+        let cropAtStart = crop
         guard let generated = await session.generateAvatar(
             prompt: String(prompt.trimmingCharacters(in: .whitespacesAndNewlines).prefix(400)),
             for: current
         ) else { return }
-        // Generation chooses a safe default crop server-side. The selector is
-        // the user's explicit choice, so persist it immediately against the
-        // returned attachment rather than leaving UI and server out of sync.
-        let cropPatch = BotProfilePatch(avatarCrop: intendedCrop)
-        if let updated = await session.updateProfile(cropPatch, for: generated) {
-            crop = updated.avatarCrop ?? intendedCrop
-            baseline.crop = crop
-        } else {
-            // Generation itself succeeded. Reflect its authoritative fallback
-            // rather than claiming the requested crop was persisted.
+
+        guard crop != cropAtStart else {
+            // Generation picks the crop server-side and `circle` for a mascot
+            // bot is deliberate, not a fallback: `avatarGenerationPrompt` in
+            // `server/avatar-image.ts` asks for "one polished square profile
+            // avatar" with "one centered, distinctive subject" — a character
+            // portrait, usually with a face of its own, which the mascot's
+            // eyes and mouth have no business being painted over. So take the
+            // server's choice rather than promoting to `face` the way an
+            // upload does; `server/index.ts` always sets one.
             crop = generated.avatarCrop ?? .mascot
             baseline.crop = crop
+            return
         }
+
+        // The user moved the selector while the image was generating: an
+        // explicit choice made after the request, so persist it against the
+        // returned attachment rather than leaving UI and server out of sync.
+        let chosen = crop
+        if let updated = await session.updateProfile(BotProfilePatch(avatarCrop: chosen), for: generated) {
+            crop = updated.avatarCrop ?? chosen
+        } else {
+            // Generation itself succeeded. Reflect its authoritative result
+            // rather than claiming the requested crop was persisted.
+            crop = generated.avatarCrop ?? .mascot
+        }
+        baseline.crop = crop
     }
 
     private func previewVoice() async {

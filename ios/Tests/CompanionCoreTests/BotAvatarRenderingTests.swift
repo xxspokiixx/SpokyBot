@@ -117,17 +117,19 @@ final class BotAvatarRenderingTests: XCTestCase {
         }
     }
 
-    // MARK: - The crop a new picture lands on
+    // MARK: - The crop an uploaded picture lands on
 
     /// The phone and the desktop must agree on what uploading a picture
-    /// means, or the same action produces two different bots.
-    func testAttachingAPicturePromotesTheMascotToLiving() {
-        XCTAssertEqual(AvatarCrop.mascot.afterAttachingAPicture, .face)
+    /// means, or the same action produces two different bots. Generation is
+    /// deliberately *not* this rule — the server assigns that crop — and that
+    /// half cannot be pinned by a pure test here; see the report.
+    func testUploadingAPicturePromotesTheMascotToLiving() {
+        XCTAssertEqual(AvatarCrop.mascot.afterUploadingAPicture, .face)
     }
 
-    func testAttachingAPictureKeepsAnExplicitChoice() {
+    func testUploadingAPictureKeepsAnExplicitChoice() {
         for crop in [AvatarCrop.face, .circle, .rounded, .square] {
-            XCTAssertEqual(crop.afterAttachingAPicture, crop, "\(crop) was overwritten")
+            XCTAssertEqual(crop.afterUploadingAPicture, crop, "\(crop) was overwritten")
         }
     }
 }

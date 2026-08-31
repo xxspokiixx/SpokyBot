@@ -31,11 +31,14 @@ struct BotAvatarView: View {
             switch outcome {
             // The picture instead of the mascot, masked to the chosen shape.
             case .flatImage: flatImage
-            // The picture as the mascot's body, live face painted on top.
-            case .livingMascot: mascot(bodyImage: image)
-            // The bot's colours — and the fallback whenever there is no
-            // usable picture, so identity is never an empty placeholder.
-            case .gradientMascot: mascot(bodyImage: nil)
+            // The mascot either way — wearing the picture as its body, or in
+            // the bot's own colours, which is also the fallback whenever
+            // there is no usable picture so identity is never an empty
+            // placeholder. One arm, not two, on purpose: separate `switch`
+            // cases are separate `_ConditionalContent` branches, and SwiftUI
+            // would rebuild `MausAvatar` — resetting its face engine, so the
+            // face visibly pops — the moment a picture finished loading.
+            case .livingMascot, .gradientMascot: mascot(bodyImage: mascotBodyImage)
             }
         }
         .frame(width: size, height: size)
@@ -56,6 +59,9 @@ struct BotAvatarView: View {
             image = decoded
         }
     }
+
+    /// The picture, only when it is being worn as a body.
+    private var mascotBodyImage: UIImage? { outcome == .livingMascot ? image : nil }
 
     /// Only reached with a decoded image: `resolveBotAvatarOutcome` returns
     /// `.flatImage` solely when one exists.

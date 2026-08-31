@@ -54,17 +54,23 @@ public func resolveBotAvatarOutcome(
 }
 
 extension AvatarCrop {
-    /// The crop to persist when a picture is attached while this one is
-    /// selected.
+    /// The crop to persist when the user *uploads* a picture while this one
+    /// is selected.
     ///
-    /// `mascot` means "no picture", so attaching one promotes it to `face` —
+    /// `mascot` means "no picture", so uploading one promotes it to `face` —
     /// the mascot still alive, now wearing the picture. That is what the
-    /// desktop does in *both* its upload and its generate handler
-    /// (`latestCrop === "mascot" ? "face" : latestCrop` in
-    /// `src/components/BotProfileAvatarCard.tsx`), so a picture uploaded from
-    /// the phone has to land on the same crop as the same picture uploaded
-    /// from the computer. Any explicit choice is kept exactly as made.
-    public var afterAttachingAPicture: AvatarCrop { self == .mascot ? .face : self }
+    /// desktop's upload handler does (`latestCrop === "mascot" ? "face" :
+    /// latestCrop` in `src/components/BotProfileAvatarCard.tsx`), so the same
+    /// upload has to make the same bot on either screen. Any explicit choice
+    /// is kept exactly as made.
+    ///
+    /// Uploads only, hence the name: a *generated* avatar takes the crop the
+    /// server assigns it (`server/index.ts`, which picks `circle` for a
+    /// mascot bot), because `avatarGenerationPrompt` asks for a centred
+    /// square character portrait — art that already has a face, and that the
+    /// mascot's eyes and mouth should not be painted over. Reaching for this
+    /// property on the generate path would reintroduce that divergence.
+    public var afterUploadingAPicture: AvatarCrop { self == .mascot ? .face : self }
 }
 
 /// Where to draw an image so it covers a rect with its aspect ratio intact.
