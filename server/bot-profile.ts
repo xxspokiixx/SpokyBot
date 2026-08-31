@@ -1,6 +1,6 @@
 import { z } from "zod";
 
-import { botAvatarCropSchema, botAvatarUrlSchema } from "../shared/bot-avatar.ts";
+import { BOT_AVATAR_CROPS, botAvatarCropSchema, botAvatarUrlSchema } from "../shared/bot-avatar.ts";
 import { BOT_PROFILE_LIMITS } from "../shared/bot-profile.ts";
 import { MASCOT_SHAPE_IDS, mascotShapeSchema } from "../shared/mascot-shapes.ts";
 
@@ -86,7 +86,8 @@ export function parseBotProfilePatch(input: BotProfilePatchInput, strict = false
     }
     const issue = parsed.error.issues[0];
     if (issue?.path[0] === "avatarCrop") {
-      return { ok: false, error: "avatarCrop must be mascot, circle, rounded, or square" };
+      const options = `${BOT_AVATAR_CROPS.slice(0, -1).join(", ")}, or ${BOT_AVATAR_CROPS.at(-1)}`;
+      return { ok: false, error: `avatarCrop must be ${options}` };
     }
     if (issue?.path[0] === "mascotShape") {
       const options = `${MASCOT_SHAPE_IDS.slice(0, -1).join(", ")}, or ${MASCOT_SHAPE_IDS.at(-1)}`;

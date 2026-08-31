@@ -1,7 +1,12 @@
 import { z } from "zod";
 
-/** The mascot is a first-class avatar choice; the other values crop an image. */
-export const BOT_AVATAR_CROPS = ["mascot", "circle", "rounded", "square"] as const;
+/**
+ * `mascot` and `face` both draw the animated mascot body; the rest crop a
+ * flat image instead. `mascot` fills the body with a gradient, `face` fills
+ * it with the bot's own image with the live face painted on top. `circle`,
+ * `rounded`, and `square` crop the image itself, with no mascot at all.
+ */
+export const BOT_AVATAR_CROPS = ["mascot", "face", "circle", "rounded", "square"] as const;
 export const botAvatarCropSchema = z.enum(BOT_AVATAR_CROPS);
 export type BotAvatarCrop = z.infer<typeof botAvatarCropSchema>;
 

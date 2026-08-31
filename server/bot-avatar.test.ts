@@ -40,4 +40,9 @@ describe("bot avatar profile schema", () => {
     expect(botAvatarProfile({ avatarUrl: "https://example.test/pixel.png", avatarCrop: "round" }))
       .toEqual({ avatarCrop: "mascot" });
   });
+
+  it("accepts the living-image crop", () => {
+    expect(botAvatarProfile({ avatarUrl: "/api/attachments/a.webp", avatarCrop: "face" }))
+      .toEqual({ avatarUrl: "/api/attachments/a.webp", avatarCrop: "face" });
+  });
 });
