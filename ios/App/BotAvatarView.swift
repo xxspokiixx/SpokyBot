@@ -18,24 +18,24 @@ struct BotAvatarView: View {
     @State private var failed = false
 
     private var crop: AvatarCrop { bot.avatarCrop ?? .mascot }
-    /// `mascot` and `face` both draw the mascot body rather than a cropped
-    /// image — `face` fills that body with the bot's image, which this build
-    /// does not do yet, so it draws the gradient body like `mascot` does.
-    private var cropsImage: Bool { crop != .mascot && crop != .face }
-    private var usesImage: Bool { cropsImage && bot.avatarUrl != nil && !failed }
+    /// Which of the three renderings this bot gets. The decision itself is a
+    /// pure function in `CompanionCore` so it can be tested without a
+    /// rendered `Canvas`; see `resolveBotAvatarOutcome`.
+    private var outcome: BotAvatarOutcome {
+        resolveBotAvatarOutcome(
+            crop: crop, hasUrl: bot.avatarUrl != nil, imageDecoded: image != nil, failed: failed)
+    }
 
     var body: some View {
         Group {
-            if usesImage, let image {
-                Image(uiImage: image)
-                    .resizable()
-                    .scaledToFill()
-                    .frame(width: size, height: size)
-                    .clipShape(mask)
-            } else {
-                MausAvatar(
-                    color: bot.color, size: size, bodyId: bot.mascotBody, state: state,
-                    animated: animated, comets: comets)
+            switch outcome {
+            // The picture instead of the mascot, masked to the chosen shape.
+            case .flatImage: flatImage
+            // The picture as the mascot's body, live face painted on top.
+            case .livingMascot: mascot(bodyImage: image)
+            // The bot's colours — and the fallback whenever there is no
+            // usable picture, so identity is never an empty placeholder.
+            case .gradientMascot: mascot(bodyImage: nil)
             }
         }
         .frame(width: size, height: size)
@@ -44,7 +44,8 @@ struct BotAvatarView: View {
         .task(id: "\(bot.avatarUrl ?? "")|\(crop.rawValue)") {
             image = nil
             failed = false
-            guard cropsImage, bot.avatarUrl != nil else { return }
+            // `face` needs the bytes too now: it wears them as a body.
+            guard crop != .mascot, bot.avatarUrl != nil else { return }
             let data = await session.avatarData(for: bot)
             guard !Task.isCancelled else { return }
             guard let data, let decoded = UIImage(data: data) else {
@@ -54,6 +55,24 @@ struct BotAvatarView: View {
             guard !Task.isCancelled else { return }
             image = decoded
         }
+    }
+
+    /// Only reached with a decoded image: `resolveBotAvatarOutcome` returns
+    /// `.flatImage` solely when one exists.
+    @ViewBuilder private var flatImage: some View {
+        if let image {
+            Image(uiImage: image)
+                .resizable()
+                .scaledToFill()
+                .frame(width: size, height: size)
+                .clipShape(mask)
+        }
+    }
+
+    private func mascot(bodyImage: UIImage?) -> some View {
+        MausAvatar(
+            color: bot.color, size: size, bodyId: bot.mascotBody, bodyImage: bodyImage,
+            state: state, animated: animated, comets: comets)
     }
 
     private var mask: AnyShape {

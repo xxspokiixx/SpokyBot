@@ -298,13 +298,13 @@ struct AgentProfileView: View {
         return nil
     }
 
-    /// `face` fills the mascot body with the bot's own image; this build draws
-    /// the gradient body for it instead, so it is not offered as a new choice
-    /// here — only shown when the desktop already chose it, so the segmented
-    /// control reflects the bot rather than sitting blank.
-    private var cropChoices: [AvatarCrop] {
-        AvatarCrop.allCases.filter { $0 != .face || crop == .face }
-    }
+    /// All five, the desktop's list in the desktop's order: now that `face`
+    /// actually renders here — the image as the mascot's body with the live
+    /// face on it — withholding the choice would be the phone offering less
+    /// than the other screen for no reason. A `face` bot with no usable image
+    /// falls back to the gradient mascot, so the option is never a broken
+    /// state to be stuck in, and any other segment leaves it again.
+    private var cropChoices: [AvatarCrop] { AvatarCrop.allCases }
 
     private func synchronizeForm(with bot: Bot) {
         name = bot.name
@@ -345,7 +345,10 @@ private extension AvatarCrop {
         case .circle: "Circle"
         case .rounded: "Rounded"
         case .square: "Square"
-        case .face: "Face"
+        // "Living", not "Face": the desktop's own label for it, and the one
+        // that says what the segment does — the mascot stays alive, wearing
+        // the picture. See CROP_LABEL in src/components/BotProfileAvatarCard.tsx.
+        case .face: "Living"
         }
     }
 }
