@@ -116,6 +116,11 @@ export type MausAvatarProps = {
   animated?: boolean;
   /** Which body the bot wears. Unknown values fall back to the cursor. */
   bodyId?: MascotBodyId;
+  /**
+   * The bot's own image, clipped to the body silhouette with the live face
+   * painted on top. Absent, the body is a plain gradient fill.
+   */
+  bodyImage?: string;
   /** Legacy Maus face-placement knobs — accepted, ignored. */
   eyeSpacing?: number;
   faceX?: number;
@@ -142,10 +147,12 @@ function MausAvatarComponent(
     trackPointer = true,
     animated = true,
     bodyId,
+    bodyImage,
   }: MausAvatarProps,
   ref: React.Ref<MausAvatarHandle>,
 ) {
-  const silhouette = MASCOT_BODIES[botMascotBody(bodyId)];
+  const base = MASCOT_BODIES[botMascotBody(bodyId)];
+  const silhouette = bodyImage ? { ...base, bodyImage } : base;
   const inner = useRef<CursorAvatarHandle>(null);
   useImperativeHandle(ref, () => ({
     blink: () => inner.current?.blink(),
@@ -230,10 +237,30 @@ export function BotAvatar({ bot, size = 44, label, ...mascotProps }: BotAvatarPr
 
   useEffect(() => setImageFailed(false), [profile.avatarUrl]);
 
-  if (profile.avatarCrop === "mascot" || !profile.avatarUrl || imageFailed) {
+  const hasImage = Boolean(profile.avatarUrl) && !imageFailed;
+
+  // Three outcomes, spelled out rather than nested ternaries: a flat cropped
+  // image with no mascot at all (circle/rounded/square), the mascot wearing
+  // that same image as a living face ("face"), or the plain gradient mascot
+  // — the "mascot" crop's own look, and also the fallback whenever there is
+  // no usable image (missing, malformed, or failed to load) so a broken
+  // profile never leaves an empty body on screen.
+  let outcome: "flatImage" | "livingMascot" | "gradientMascot";
+  if (!hasImage) {
+    outcome = "gradientMascot";
+  } else if (profile.avatarCrop === "face") {
+    outcome = "livingMascot";
+  } else if (profile.avatarCrop === "mascot") {
+    outcome = "gradientMascot";
+  } else {
+    outcome = "flatImage";
+  }
+
+  if (outcome !== "flatImage") {
     return (
       <MausAvatar
         bodyId={bot.mascotBody ?? undefined}
+        bodyImage={outcome === "livingMascot" ? profile.avatarUrl : undefined}
         {...mascotProps}
         color={bot.color}
         size={size}
