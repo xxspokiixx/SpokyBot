@@ -79,9 +79,16 @@ interface Anchor {
   scale: number
 }
 
+/**
+ * `fitTransform`'s full result — the SVG transform string the web renderer parses, plus
+ * its numeric components. iOS has no SVG transform parser: it builds a `CGAffineTransform`
+ * straight from `scale`/`tx`/`ty`, which is the whole reason `fitTransform` returns both.
+ */
+type Fit = ReturnType<typeof fitTransform>
+
 interface Solved {
   def: ShapeDef
-  fit: string
+  fit: Fit
   sdf: Sdf
   /** The largest face this body can hold at one anchor that survives all four aims. */
   scale: number
@@ -163,7 +170,7 @@ function solveShape(def: ShapeDef): Solved {
     seed.scale = round(seed.scale - 0.005, 3)
   }
 
-  return { def, fit: fit.transform, sdf, scale: seed.scale, seed }
+  return { def, fit, sdf, scale: seed.scale, seed }
 }
 
 /** Worst clearance across every expression at every aim. Negative means something clips. */
@@ -236,7 +243,7 @@ const quote = (s: string) => JSON.stringify(s)
 interface Baked {
   id: string
   name: string
-  fit: string
+  fit: Fit
   d: string
   anchor: Anchor
   clearance: number
@@ -250,7 +257,7 @@ function emit(shapes: Baked[]): string {
         `  ${shape.id}: {`,
         `    id: ${quote(shape.id)},`,
         `    name: ${quote(shape.name)},`,
-        `    fit: ${quote(shape.fit)},`,
+        `    fit: ${quote(shape.fit.transform)},`,
         `    body: ${quote(`<path fill="{{GRADIENT}}" d="${shape.d}"/>`)},`,
         `    clip: ${quote(`<path d="${shape.d}"/>`)},`,
         `    anchor: { x: ${shape.anchor.x}, y: ${shape.anchor.y}, scale: ${shape.anchor.scale} },`,
@@ -308,6 +315,119 @@ ${entries}
 /** Runtime-safe read of an untrusted persisted or streamed shape id. */
 export function botMascotShape(value: unknown): MascotShapeId {
   return mascotShapeSchema.safeParse(value).data ?? DEFAULT_MASCOT_SHAPE;
+}
+`
+}
+
+/* -------------------------------------------------------------- emitting (iOS) */
+
+/**
+ * Wraps space-separated path tokens onto lines no wider than `width`, breaking only at
+ * whitespace — never inside a token — matching how `MausSilhouette.path` in
+ * `ios/App/MausAvatar.swift` is already formatted. That parser treats newlines as plain
+ * separators, so wrapping changes nothing about how the path reads.
+ */
+function wrapPathTokens(d: string, width = 100): string {
+  const tokens = d.trim().split(/\s+/)
+  const lines: string[] = []
+  let line = ""
+  for (const token of tokens) {
+    if (line.length === 0) line = token
+    else if (line.length + 1 + token.length <= width) line += " " + token
+    else {
+      lines.push(line)
+      line = token
+    }
+  }
+  if (line.length > 0) lines.push(line)
+  return lines.join("\n")
+}
+
+/** Prefixes every line of `text` with `spaces` worth of indentation. */
+function indent(text: string, spaces: number): string {
+  const pad = " ".repeat(spaces)
+  return text
+    .split("\n")
+    .map(line => pad + line)
+    .join("\n")
+}
+
+/** Swift string literal, close enough to JSON escaping for the plain ASCII names and ids here. */
+const swiftQuote = (s: string) => JSON.stringify(s)
+
+/**
+ * Emits the same solved catalog as a Swift source file for `CompanionCore`.
+ *
+ * CoreGraphics types only (`CGFloat`) and no `import SwiftUI`: `CompanionCore` is
+ * deliberately view-free (see the header comment in `ios/Package.swift`), and a later
+ * task wraps this data in `SwiftUI.Path` on the app side. The fit is emitted as numbers
+ * — `scale`/`tx`/`ty` — rather than the SVG transform string the web takes, because Swift
+ * has no SVG transform parser and builds a `CGAffineTransform` straight from the numbers.
+ */
+function emitSwift(shapes: Baked[]): string {
+  const order = shapes.map(s => swiftQuote(s.id)).join(", ")
+
+  const entries = shapes
+    .map(shape => {
+      const path = indent(wrapPathTokens(shape.d), 16)
+      return [
+        `        ${swiftQuote(shape.id)}: Shape(`,
+        `            id: ${swiftQuote(shape.id)},`,
+        `            name: ${swiftQuote(shape.name)},`,
+        `            path:`,
+        `                """`,
+        `${path}`,
+        `                """,`,
+        `            fit: (scale: ${shape.fit.scale}, tx: ${shape.fit.tx}, ty: ${shape.fit.ty}),`,
+        `            anchor: (x: ${shape.anchor.x}, y: ${shape.anchor.y}, scale: ${shape.anchor.scale})`,
+        `        ),`,
+      ].join("\n")
+    })
+    .join("\n")
+
+  return `// The mascot body shapes a bot can wear — the phone's half of the same solve that
+// bakes \`shared/mascot-shapes.ts\`.
+//
+// GENERATED FILE — do not hand-edit. Run \`pnpm gen:shapes\` to rebuild it from
+// \`scripts/gen-mascot-shapes.ts\`, which solves each face placement against the real
+// expression geometry and verifies that nothing clips. One solve, two writers: this file
+// and \`shared/mascot-shapes.ts\` come from the same solved anchors, which is what stops
+// the two renderers drifting apart the way desktop's 0.74 and iOS's 0.84 already did once.
+//
+// CoreGraphics only, no SwiftUI — \`CompanionCore\` is everything the phone knows that is
+// not a view (see \`ios/Package.swift\`). The fit is numbers, not an SVG transform string:
+// iOS has no SVG transform parser, so it builds a \`CGAffineTransform\` from
+// \`scale\`/\`tx\`/\`ty\` directly.
+//
+// Path data is absolute \`M\`, \`C\`, \`Z\` only — the same twenty-line parser convention as
+// \`MausSilhouette\` in \`ios/App/MausAvatar.swift\`, which treats newlines as separators.
+import CoreGraphics
+
+enum MausShapes {
+    struct Shape {
+        let id: String
+        let name: String
+        let path: String
+        let fit: (scale: CGFloat, tx: CGFloat, ty: CGFloat)
+        let anchor: (x: CGFloat, y: CGFloat, scale: CGFloat)
+    }
+
+    /// Every selectable shape id, in the order the picker shows them.
+    static let order: [String] = [${order}]
+
+    /// The shipped mascot, and the fallback for any unrecognised value.
+    static let defaultID = "cursor"
+
+    static let all: [String: Shape] = [
+${entries}
+    ]
+
+    /// Looks up a shape by id, falling back to \`defaultID\` for anything unrecognised
+    /// (including a nil id, e.g. an untrusted persisted or streamed value).
+    static func shape(_ id: String?) -> Shape {
+        if let id, let match = all[id] { return match }
+        return all[defaultID]!
+    }
 }
 `
 }
@@ -379,6 +499,14 @@ function main(): void {
   const out = fileURLToPath(new URL("../shared/mascot-shapes.ts", import.meta.url))
   writeFileSync(out, emit(baked))
   console.log(`wrote ${out}`)
+
+  // P1 ruling (task 7): emitted into `ios/Sources/CompanionCore`, not `ios/App` — that is
+  // the package `swift test` actually builds, so a later test over this catalog can run.
+  const swiftOut = fileURLToPath(
+    new URL("../ios/Sources/CompanionCore/MausShapes.swift", import.meta.url)
+  )
+  writeFileSync(swiftOut, emitSwift(baked))
+  console.log(`wrote ${swiftOut}`)
 }
 
 try {
