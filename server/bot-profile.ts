@@ -2,6 +2,7 @@ import { z } from "zod";
 
 import { botAvatarCropSchema, botAvatarUrlSchema } from "../shared/bot-avatar.ts";
 import { BOT_PROFILE_LIMITS } from "../shared/bot-profile.ts";
+import { MASCOT_SHAPE_IDS, mascotShapeSchema } from "../shared/mascot-shapes.ts";
 
 import type { BotRecord } from "./store.ts";
 
@@ -12,6 +13,7 @@ export const BOT_PROFILE_PATCH_FIELDS = [
   "notifications",
   "avatarUrl",
   "avatarCrop",
+  "mascotShape",
   "voice",
   "speakReplies",
 ] as const;
@@ -37,6 +39,7 @@ const profilePatchSchema = z.object({
     })
     .optional(),
   avatarCrop: botAvatarCropSchema.optional(),
+  mascotShape: mascotShapeSchema.optional(),
   voice: z
     .string({ error: "voice must be a string" })
     .max(BOT_PROFILE_LIMITS.voice, { error: "voice must be at most 200 characters" })
@@ -49,7 +52,15 @@ export type BotProfilePatchInput = z.input<typeof profilePatchSchema>;
 export type BotProfilePatch = Partial<
   Pick<
     BotRecord,
-    "name" | "title" | "description" | "notifications" | "avatarUrl" | "avatarCrop" | "voice" | "speakReplies"
+    | "name"
+    | "title"
+    | "description"
+    | "notifications"
+    | "avatarUrl"
+    | "avatarCrop"
+    | "mascotShape"
+    | "voice"
+    | "speakReplies"
   >
 >;
 
@@ -76,6 +87,10 @@ export function parseBotProfilePatch(input: BotProfilePatchInput, strict = false
     const issue = parsed.error.issues[0];
     if (issue?.path[0] === "avatarCrop") {
       return { ok: false, error: "avatarCrop must be mascot, circle, rounded, or square" };
+    }
+    if (issue?.path[0] === "mascotShape") {
+      const options = `${MASCOT_SHAPE_IDS.slice(0, -1).join(", ")}, or ${MASCOT_SHAPE_IDS.at(-1)}`;
+      return { ok: false, error: `mascotShape must be ${options}` };
     }
     return { ok: false, error: issue?.message ?? "invalid profile patch" };
   }

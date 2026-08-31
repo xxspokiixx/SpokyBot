@@ -14,6 +14,7 @@ import { newId, type CloudBackend, type ModelSelection, type ThreadId } from "./
 import { pickBotName } from "./names.ts";
 import { redactSecretsInText } from "./redact.ts";
 import { botAvatarProfile, type BotAvatarCrop } from "../shared/bot-avatar.ts";
+import type { MascotShapeId } from "../shared/mascot-shapes.ts";
 
 export type MausColor =
   | "green"
@@ -286,6 +287,7 @@ export interface BotRecord {
   notifications: boolean;
   color: MausColor;
   mascotExpression?: MausExpression | null;
+  mascotShape?: MascotShapeId | null;
   /** App-owned attachment served as this bot's custom profile image. */
   avatarUrl?: string;
   /** Mascot, or the crop applied to avatarUrl. */
@@ -852,7 +854,10 @@ export class Store {
 
   createBot(
     profile: Partial<
-      Pick<BotRecord, "name" | "title" | "description" | "color" | "mascotExpression" | "modelSelection" | "section">
+      Pick<
+        BotRecord,
+        "name" | "title" | "description" | "color" | "mascotExpression" | "mascotShape" | "modelSelection" | "section"
+      >
     > = {},
     opts: {
       /** false = no greeting/onboarding seed. Imported bots must not open
@@ -871,6 +876,7 @@ export class Store {
       notifications: true,
       color: profile.color ?? COLORS[this.bots.length % COLORS.length],
       ...(profile.mascotExpression ? { mascotExpression: profile.mascotExpression } : {}),
+      ...(profile.mascotShape ? { mascotShape: profile.mascotShape } : {}),
       unread: false,
       modelSelection: profile.modelSelection ?? this.defaultSelection(),
       resumeCursors: {},

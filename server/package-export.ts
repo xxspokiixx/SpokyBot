@@ -109,6 +109,7 @@ export function createBotPackageExport(input: {
   const agents: BotPackageDefinition["agents"] = bots.map((bot) => {
     const appearance: BotPackageDefinition["agents"][number]["appearance"] = { color: bot.color };
     if (bot.mascotExpression) appearance.mascotExpression = bot.mascotExpression;
+    if (bot.mascotShape) appearance.mascotShape = bot.mascotShape;
     const agent: BotPackageDefinition["agents"][number] = {
       key: idToKey.get(bot.id)!,
       name: bot.name,

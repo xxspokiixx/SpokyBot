@@ -60,3 +60,20 @@ describe("parseBotProfilePatch (both modes)", () => {
     });
   });
 });
+
+describe("mascotShape", () => {
+  it("accepts a known shape", () => {
+    expect(parseBotProfilePatch({ mascotShape: "blob" } as never, true)).toEqual({
+      ok: true,
+      patch: { mascotShape: "blob" },
+    });
+  });
+
+  it("maps an unknown shape to a readable message", () => {
+    expect(parseBotProfilePatch({ mascotShape: "hexagram" } as never, true)).toEqual({
+      ok: false,
+      error:
+        "mascotShape must be cursor, blob, circle, squircle, capsule, drop, shield, hexagon, diamond, or star",
+    });
+  });
+});
