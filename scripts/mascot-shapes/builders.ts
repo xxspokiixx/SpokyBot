@@ -296,7 +296,12 @@ export const SHAPE_DEFS: ShapeDef[] = [
   { id: "shield", name: "Shield", d: buildCone(190, 200, 0.45, 0.9), viewBox: [0, 0, 200, 200] },
   { id: "hexagon", name: "Hexagon", d: buildPolygon(196, 196, 6, 0.12), viewBox: [0, 0, 200, 200] },
   { id: "diamond", name: "Diamond", d: buildPolygon(196, 196, 4, 0.12), viewBox: [0, 0, 200, 200] },
-  { id: "star", name: "Star", d: buildStar(196, 196, 5, 0.42), viewBox: [0, 0, 200, 200] },
+  // The inner-radius factor is a face-fit constraint, not a taste knob: at the classic
+  // 0.42 the notches between the points pinch the silhouette down to a 50-unit inscribed
+  // circle, and since the catalog clamps every shape to the smallest face any one body can
+  // hold, that one number would shrink the mascot everywhere. 0.55 lets the star hold a
+  // 0.831 face — clear headroom over the cursor's 0.750, which is what sets the clamp.
+  { id: "star", name: "Star", d: buildStar(196, 196, 5, 0.55), viewBox: [0, 0, 200, 200] },
 ]
 
 export const SHAPE_IDS: string[] = SHAPE_DEFS.map(s => s.id)
