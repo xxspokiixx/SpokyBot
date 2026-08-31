@@ -14,24 +14,9 @@ import {
   type PointerEvent as ReactPointerEvent,
 } from "react";
 import { MAUS_COLORS, type MausColor, type MausMotion, type MausState } from "@/lib/mascot";
-import {
-  CursorAvatar,
-  DEFAULT_SILHOUETTE,
-  type CursorAvatarHandle,
-  type CursorSilhouette,
-} from "./CursorAvatar";
+import { CursorAvatar, type CursorAvatarHandle } from "./CursorAvatar";
 import { botAvatarProfile, type BotAvatarCrop } from "../../shared/bot-avatar";
-
-/**
- * The pack's baked-in silhouette was exported with the body fill hardcoded
- * to black instead of the {{GRADIENT}} placeholder the component
- * substitutes, which painted every bot the same. Restore the slot so the
- * per-bot gradient actually lands on the body.
- */
-const GRADIENT_SILHOUETTE: CursorSilhouette = {
-  ...DEFAULT_SILHOUETTE,
-  body: DEFAULT_SILHOUETTE.body.replace(/fill="#000000"/g, 'fill="{{GRADIENT}}"'),
-};
+import { MASCOT_SHAPES, botMascotShape, type MascotShapeId } from "../../shared/mascot-shapes";
 
 /**
  * Legacy face-placement knobs from the Maus body era. The cursor mascot
@@ -129,6 +114,8 @@ export type MausAvatarProps = {
   trackPointer?: boolean;
   /** Run the animation. Off renders the state's resting face. */
   animated?: boolean;
+  /** Which body the bot wears. Unknown values fall back to the cursor. */
+  shape?: MascotShapeId;
   /** Legacy Maus face-placement knobs — accepted, ignored. */
   eyeSpacing?: number;
   faceX?: number;
@@ -154,9 +141,11 @@ function MausAvatarComponent(
     forward = true,
     trackPointer = true,
     animated = true,
+    shape,
   }: MausAvatarProps,
   ref: React.Ref<MausAvatarHandle>,
 ) {
+  const silhouette = MASCOT_SHAPES[botMascotShape(shape)];
   const inner = useRef<CursorAvatarHandle>(null);
   useImperativeHandle(ref, () => ({
     blink: () => inner.current?.blink(),
@@ -202,7 +191,7 @@ function MausAvatarComponent(
         state={motionState ?? state}
         expression={expression}
         size={size}
-        silhouette={GRADIENT_SILHOUETTE}
+        silhouette={silhouette}
         gradient={gradientFor(color)}
         title={label ?? null}
         lookAround={forward ? 0 : 1}
@@ -226,6 +215,7 @@ export type BotAvatarProps = Omit<MausAvatarProps, "color"> & {
     color: MausColor;
     avatarUrl?: string | null;
     avatarCrop?: BotAvatarCrop;
+    mascotShape?: MascotShapeId | null;
   };
 };
 
@@ -243,6 +233,7 @@ export function BotAvatar({ bot, size = 44, label, ...mascotProps }: BotAvatarPr
   if (profile.avatarCrop === "mascot" || !profile.avatarUrl || imageFailed) {
     return (
       <MausAvatar
+        shape={bot.mascotShape ?? undefined}
         {...mascotProps}
         color={bot.color}
         size={size}

@@ -445,6 +445,7 @@ export function Composer({
                 {peer.bot ? (
                   <MausAvatar
                     color={peer.bot.color}
+                    shape={peer.bot.mascotShape ?? undefined}
                     state={normalizeState(peer.bot.mascotExpression) ?? "happy"}
                     size={24}
                   />
