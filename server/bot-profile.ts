@@ -2,7 +2,7 @@ import { z } from "zod";
 
 import { BOT_AVATAR_CROPS, botAvatarCropSchema, botAvatarUrlSchema } from "../shared/bot-avatar.ts";
 import { BOT_PROFILE_LIMITS } from "../shared/bot-profile.ts";
-import { MASCOT_SHAPE_IDS, mascotShapeSchema } from "../shared/mascot-shapes.ts";
+import { MASCOT_BODY_IDS, mascotBodySchema } from "../shared/mascot-bodies.ts";
 
 import type { BotRecord } from "./store.ts";
 
@@ -13,7 +13,7 @@ export const BOT_PROFILE_PATCH_FIELDS = [
   "notifications",
   "avatarUrl",
   "avatarCrop",
-  "mascotShape",
+  "mascotBody",
   "voice",
   "speakReplies",
 ] as const;
@@ -39,7 +39,7 @@ const profilePatchSchema = z.object({
     })
     .optional(),
   avatarCrop: botAvatarCropSchema.optional(),
-  mascotShape: mascotShapeSchema.optional(),
+  mascotBody: mascotBodySchema.optional(),
   voice: z
     .string({ error: "voice must be a string" })
     .max(BOT_PROFILE_LIMITS.voice, { error: "voice must be at most 200 characters" })
@@ -58,7 +58,7 @@ export type BotProfilePatch = Partial<
     | "notifications"
     | "avatarUrl"
     | "avatarCrop"
-    | "mascotShape"
+    | "mascotBody"
     | "voice"
     | "speakReplies"
   >
@@ -89,9 +89,9 @@ export function parseBotProfilePatch(input: BotProfilePatchInput, strict = false
       const options = `${BOT_AVATAR_CROPS.slice(0, -1).join(", ")}, or ${BOT_AVATAR_CROPS.at(-1)}`;
       return { ok: false, error: `avatarCrop must be ${options}` };
     }
-    if (issue?.path[0] === "mascotShape") {
-      const options = `${MASCOT_SHAPE_IDS.slice(0, -1).join(", ")}, or ${MASCOT_SHAPE_IDS.at(-1)}`;
-      return { ok: false, error: `mascotShape must be ${options}` };
+    if (issue?.path[0] === "mascotBody") {
+      const options = `${MASCOT_BODY_IDS.slice(0, -1).join(", ")}, or ${MASCOT_BODY_IDS.at(-1)}`;
+      return { ok: false, error: `mascotBody must be ${options}` };
     }
     return { ok: false, error: issue?.message ?? "invalid profile patch" };
   }

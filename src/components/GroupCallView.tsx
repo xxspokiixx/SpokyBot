@@ -428,7 +428,7 @@ function GroupCall({ group, members }: { group: Group; members: Bot[] }) {
               >
                 <MausAvatar
                   color={member.color}
-                  shape={member.mascotShape ?? undefined}
+                  bodyId={member.mascotBody ?? undefined}
                   state={state}
                   size={94}
                   animated

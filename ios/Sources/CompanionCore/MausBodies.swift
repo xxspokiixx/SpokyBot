@@ -1,10 +1,10 @@
-// The mascot body shapes a bot can wear — the phone's half of the same solve that
-// bakes `shared/mascot-shapes.ts`.
+// The mascot bodies a bot can wear — the phone's half of the same solve that
+// bakes `shared/mascot-bodies.ts`.
 //
-// GENERATED FILE — do not hand-edit. Run `pnpm gen:shapes` to rebuild it from
-// `scripts/gen-mascot-shapes.ts`, which solves each face placement against the real
+// GENERATED FILE — do not hand-edit. Run `pnpm gen:bodies` to rebuild it from
+// `scripts/gen-mascot-bodies.ts`, which solves each face placement against the real
 // expression geometry and verifies that nothing clips. One solve, two writers: this file
-// and `shared/mascot-shapes.ts` come from the same solved anchors, which is what stops
+// and `shared/mascot-bodies.ts` come from the same solved anchors, which is what stops
 // the two renderers drifting apart the way desktop's 0.74 and iOS's 0.84 already did once.
 //
 // CoreGraphics only, no SwiftUI — `CompanionCore` is everything the phone knows that is
@@ -16,8 +16,8 @@
 // `MausSilhouette` in `ios/App/MausAvatar.swift`, which treats newlines as separators.
 import CoreGraphics
 
-enum MausShapes {
-    struct Shape {
+enum MausBodies {
+    struct Body {
         let id: String
         let name: String
         let path: String
@@ -25,14 +25,14 @@ enum MausShapes {
         let anchor: (x: CGFloat, y: CGFloat, scale: CGFloat)
     }
 
-    /// Every selectable shape id, in the order the picker shows them.
+    /// Every selectable body id, in the order the picker shows them.
     static let order: [String] = ["cursor", "blob", "circle", "squircle", "capsule", "drop", "shield", "hexagon", "diamond", "star"]
 
     /// The shipped mascot, and the fallback for any unrecognised value.
     static let defaultID = "cursor"
 
-    static let all: [String: Shape] = [
-        "cursor": Shape(
+    static let all: [String: Body] = [
+        "cursor": Body(
             id: "cursor",
             name: "Cursor",
             path:
@@ -86,7 +86,7 @@ enum MausShapes {
             fit: (scale: 0.593918, tx: 68.1612, ty: 9.8302),
             anchor: (x: 85.54, y: 106.35, scale: 0.791)
         ),
-        "blob": Shape(
+        "blob": Body(
             id: "blob",
             name: "Blob",
             path:
@@ -110,7 +110,7 @@ enum MausShapes {
             fit: (scale: 1.134706, tx: -0.7217, ty: 2.9555),
             anchor: (x: 111.22, y: 116.58, scale: 0.791)
         ),
-        "circle": Shape(
+        "circle": Body(
             id: "circle",
             name: "Circle",
             path:
@@ -121,7 +121,7 @@ enum MausShapes {
             fit: (scale: 1.142705, tx: 0, ty: 0),
             anchor: (x: 113.82, y: 110.27, scale: 0.791)
         ),
-        "squircle": Shape(
+        "squircle": Body(
             id: "squircle",
             name: "Squircle",
             path:
@@ -133,7 +133,7 @@ enum MausShapes {
             fit: (scale: 1.142705, tx: 0, ty: 0),
             anchor: (x: 111.78, y: 111.79, scale: 0.791)
         ),
-        "capsule": Shape(
+        "capsule": Body(
             id: "capsule",
             name: "Capsule",
             path:
@@ -145,7 +145,7 @@ enum MausShapes {
             fit: (scale: 1.142705, tx: 0, ty: 0),
             anchor: (x: 113.82, y: 131.68, scale: 0.791)
         ),
-        "drop": Shape(
+        "drop": Body(
             id: "drop",
             name: "Drop",
             path:
@@ -156,7 +156,7 @@ enum MausShapes {
             fit: (scale: 1.178046, tx: -3.5341, ty: -3.5341),
             anchor: (x: 112.47, y: 138.8, scale: 0.791)
         ),
-        "shield": Shape(
+        "shield": Body(
             id: "shield",
             name: "Shield",
             path:
@@ -168,7 +168,7 @@ enum MausShapes {
             fit: (scale: 1.264316, tx: -12.1611, ty: -24.3222),
             anchor: (x: 112.38, y: 170.61, scale: 0.791)
         ),
-        "hexagon": Shape(
+        "hexagon": Body(
             id: "hexagon",
             name: "Hexagon",
             path:
@@ -184,7 +184,7 @@ enum MausShapes {
             fit: (scale: 1.183782, tx: -4.1077, ty: -4.1077),
             anchor: (x: 112.26, y: 110.7, scale: 0.791)
         ),
-        "diamond": Shape(
+        "diamond": Body(
             id: "diamond",
             name: "Diamond",
             path:
@@ -197,7 +197,7 @@ enum MausShapes {
             fit: (scale: 1.202088, tx: -5.9383, ty: -5.9383),
             anchor: (x: 112.53, y: 109.95, scale: 0.791)
         ),
-        "star": Shape(
+        "star": Body(
             id: "star",
             name: "Star",
             path:
@@ -214,9 +214,9 @@ enum MausShapes {
         ),
     ]
 
-    /// Looks up a shape by id, falling back to `defaultID` for anything unrecognised
+    /// Looks up a body by id, falling back to `defaultID` for anything unrecognised
     /// (including a nil id, e.g. an untrusted persisted or streamed value).
-    static func shape(_ id: String?) -> Shape {
+    static func body(_ id: String?) -> Body {
         if let id, let match = all[id] { return match }
         return all[defaultID]!
     }

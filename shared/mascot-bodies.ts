@@ -1,30 +1,30 @@
 /**
- * The mascot body shapes a bot can wear.
+ * The mascot bodies a bot can wear.
  *
- * GENERATED FILE — do not hand-edit. Run `pnpm gen:shapes` to rebuild it from
- * `scripts/gen-mascot-shapes.ts`, which solves each face placement against the real
+ * GENERATED FILE — do not hand-edit. Run `pnpm gen:bodies` to rebuild it from
+ * `scripts/gen-mascot-bodies.ts`, which solves each face placement against the real
  * expression geometry and verifies that nothing clips.
  *
- * Every shape carries the same face at the same size: the generator clamps the whole
+ * Every body carries the same face at the same size: the generator clamps the whole
  * catalog to the smallest face any one body can hold, so the mascot reads as one
  * character in different bodies rather than ten different mascots. Roomier bodies simply
  * end up with more margin around the face.
  *
- * The fields match `CursorSilhouette` exactly, so a shape can be handed to the renderer
+ * The fields match `CursorSilhouette` exactly, so a body can be handed to the renderer
  * with no adapter in between.
  */
 
 import { z } from "zod";
 
-/** Every selectable shape id, in the order the picker shows them. */
-export const MASCOT_SHAPE_IDS = ["cursor", "blob", "circle", "squircle", "capsule", "drop", "shield", "hexagon", "diamond", "star"] as const;
+/** Every selectable body id, in the order the picker shows them. */
+export const MASCOT_BODY_IDS = ["cursor", "blob", "circle", "squircle", "capsule", "drop", "shield", "hexagon", "diamond", "star"] as const;
 
-export type MascotShapeId = (typeof MASCOT_SHAPE_IDS)[number];
+export type MascotBodyId = (typeof MASCOT_BODY_IDS)[number];
 
-export const mascotShapeSchema = z.enum(MASCOT_SHAPE_IDS);
+export const mascotBodySchema = z.enum(MASCOT_BODY_IDS);
 
-export interface MascotShape {
-  id: MascotShapeId;
+export interface MascotBody {
+  id: MascotBodyId;
   /** Human-readable name, used for the picker and the accessible label. */
   name: string;
   /** Transform mapping the outline into the face box. */
@@ -38,9 +38,9 @@ export interface MascotShape {
 }
 
 /** The shipped mascot, and the fallback for any unrecognised value. */
-export const DEFAULT_MASCOT_SHAPE: MascotShapeId = "cursor";
+export const DEFAULT_MASCOT_BODY: MascotBodyId = "cursor";
 
-export const MASCOT_SHAPES: Record<MascotShapeId, MascotShape> = {
+export const MASCOT_BODIES: Record<MascotBodyId, MascotBody> = {
   cursor: {
     id: "cursor",
     name: "Cursor",
@@ -123,7 +123,7 @@ export const MASCOT_SHAPES: Record<MascotShapeId, MascotShape> = {
   },
 };
 
-/** Runtime-safe read of an untrusted persisted or streamed shape id. */
-export function botMascotShape(value: unknown): MascotShapeId {
-  return mascotShapeSchema.safeParse(value).data ?? DEFAULT_MASCOT_SHAPE;
+/** Runtime-safe read of an untrusted persisted or streamed body id. */
+export function botMascotBody(value: unknown): MascotBodyId {
+  return mascotBodySchema.safeParse(value).data ?? DEFAULT_MASCOT_BODY;
 }

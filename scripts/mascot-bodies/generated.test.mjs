@@ -2,20 +2,20 @@ import { execFileSync } from "node:child_process";
 import { readFileSync, writeFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
 
-import { SHAPE_DEFS } from "./builders.ts";
+import { BODY_DEFS } from "./builders.ts";
 import { maskFromPolylines } from "./raster.ts";
 import { applyFit, boundsOf, fitTransform, flatten } from "./geometry.ts";
 import { fieldFromMask } from "./sdf.ts";
 import { buildClouds, report } from "./solve.ts";
-import { MASCOT_SHAPES, MASCOT_SHAPE_IDS } from "../../shared/mascot-shapes.ts";
+import { MASCOT_BODIES, MASCOT_BODY_IDS } from "../../shared/mascot-bodies.ts";
 
 const root = new URL("../../", import.meta.url).pathname;
 
 // P1 ruling: the Swift catalog is emitted to ios/Sources/CompanionCore (reachable
 // by `swift test`), not ios/App (the Xcode app target, which `swift test` never
 // builds) — see swift-catalog.test.mjs.
-const TS_PATH = "../../shared/mascot-shapes.ts";
-const SWIFT_PATH = "../../ios/Sources/CompanionCore/MausShapes.swift";
+const TS_PATH = "../../shared/mascot-bodies.ts";
+const SWIFT_PATH = "../../ios/Sources/CompanionCore/MausBodies.swift";
 
 const read = (p) => readFileSync(new URL(p, import.meta.url), "utf8");
 const write = (p, contents) => writeFileSync(new URL(p, import.meta.url), contents);
@@ -47,15 +47,15 @@ describe("generated catalogs", () => {
     };
 
     try {
-      execFileSync("node", ["--experimental-strip-types", "scripts/gen-mascot-shapes.ts"], {
+      execFileSync("node", ["--experimental-strip-types", "scripts/gen-mascot-bodies.ts"], {
         cwd: root,
         stdio: "pipe",
       });
     } catch (err) {
       throw new Error(
-        `Running \`pnpm gen:shapes\` failed while checking the catalogs for drift. ` +
+        `Running \`pnpm gen:bodies\` failed while checking the catalogs for drift. ` +
           `The working tree may now hold a partially-written or reverted file — run ` +
-          `\`git status\` / \`git diff -- shared/mascot-shapes.ts ios/Sources/CompanionCore/MausShapes.swift\` ` +
+          `\`git status\` / \`git diff -- shared/mascot-bodies.ts ios/Sources/CompanionCore/MausBodies.swift\` ` +
           `before trusting either file. Original error:\n${err.stderr?.toString() ?? err.message}`
       );
     }
@@ -73,13 +73,13 @@ describe("generated catalogs", () => {
     write(SWIFT_PATH, before.swift);
 
     const drifts = [
-      describeDrift("shared/mascot-shapes.ts", before.ts, after.ts),
-      describeDrift("ios/Sources/CompanionCore/MausShapes.swift", before.swift, after.swift),
+      describeDrift("shared/mascot-bodies.ts", before.ts, after.ts),
+      describeDrift("ios/Sources/CompanionCore/MausBodies.swift", before.swift, after.swift),
     ].filter(Boolean);
 
     if (drifts.length > 0) {
       throw new Error(
-        `A fresh \`pnpm gen:shapes\` run produced output that does not match the ` +
+        `A fresh \`pnpm gen:bodies\` run produced output that does not match the ` +
           `checked-in catalog(s). Either a catalog was hand-edited after it was ` +
           `generated, or the generator is non-deterministic — in either case, fix the ` +
           `cause, never this assertion. The working tree has been restored to the ` +
@@ -96,14 +96,14 @@ describe("every baked anchor", () => {
   ];
 
   it("clears the silhouette across every expression and every gaze", () => {
-    for (const id of MASCOT_SHAPE_IDS) {
-      const def = SHAPE_DEFS.find(s => s.id === id);
+    for (const id of MASCOT_BODY_IDS) {
+      const def = BODY_DEFS.find(s => s.id === id);
       const polylines = flatten(def.d);
       const fit = fitTransform(boundsOf(polylines));
       const sdf = fieldFromMask(maskFromPolylines(applyFit(polylines, fit), 256), 256);
 
       for (const aim of AIMS) {
-        const result = report(buildClouds(0, undefined, aim), sdf, MASCOT_SHAPES[id].anchor);
+        const result = report(buildClouds(0, undefined, aim), sdf, MASCOT_BODIES[id].anchor);
         expect(result.clipping, `${id} clips looking (${aim.x}, ${aim.y})`).toEqual([]);
       }
     }

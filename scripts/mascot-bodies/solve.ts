@@ -150,7 +150,7 @@ export function solveFit(
 
   // Cap at the size the expressions were drawn for. The artwork is fitted to the same box
   // the face lives in, so 1.0 reproduces the original proportions; going bigger just
-  // inflates the eyes until they look like a different character. Shapes that cannot hold
+  // inflates the eyes until they look like a different character. Bodies that cannot hold
   // a full-size face get whatever they can hold.
   const cap = 1
 

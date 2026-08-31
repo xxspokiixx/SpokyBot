@@ -16,7 +16,7 @@ import {
 import { MAUS_COLORS, type MausColor, type MausMotion, type MausState } from "@/lib/mascot";
 import { CursorAvatar, type CursorAvatarHandle } from "./CursorAvatar";
 import { botAvatarProfile, type BotAvatarCrop } from "../../shared/bot-avatar";
-import { MASCOT_SHAPES, botMascotShape, type MascotShapeId } from "../../shared/mascot-shapes";
+import { MASCOT_BODIES, botMascotBody, type MascotBodyId } from "../../shared/mascot-bodies";
 
 /**
  * Legacy face-placement knobs from the Maus body era. The cursor mascot
@@ -115,7 +115,7 @@ export type MausAvatarProps = {
   /** Run the animation. Off renders the state's resting face. */
   animated?: boolean;
   /** Which body the bot wears. Unknown values fall back to the cursor. */
-  shape?: MascotShapeId;
+  bodyId?: MascotBodyId;
   /** Legacy Maus face-placement knobs — accepted, ignored. */
   eyeSpacing?: number;
   faceX?: number;
@@ -141,11 +141,11 @@ function MausAvatarComponent(
     forward = true,
     trackPointer = true,
     animated = true,
-    shape,
+    bodyId,
   }: MausAvatarProps,
   ref: React.Ref<MausAvatarHandle>,
 ) {
-  const silhouette = MASCOT_SHAPES[botMascotShape(shape)];
+  const silhouette = MASCOT_BODIES[botMascotBody(bodyId)];
   const inner = useRef<CursorAvatarHandle>(null);
   useImperativeHandle(ref, () => ({
     blink: () => inner.current?.blink(),
@@ -215,7 +215,7 @@ export type BotAvatarProps = Omit<MausAvatarProps, "color"> & {
     color: MausColor;
     avatarUrl?: string | null;
     avatarCrop?: BotAvatarCrop;
-    mascotShape?: MascotShapeId | null;
+    mascotBody?: MascotBodyId | null;
   };
 };
 
@@ -233,7 +233,7 @@ export function BotAvatar({ bot, size = 44, label, ...mascotProps }: BotAvatarPr
   if (profile.avatarCrop === "mascot" || !profile.avatarUrl || imageFailed) {
     return (
       <MausAvatar
-        shape={bot.mascotShape ?? undefined}
+        bodyId={bot.mascotBody ?? undefined}
         {...mascotProps}
         color={bot.color}
         size={size}

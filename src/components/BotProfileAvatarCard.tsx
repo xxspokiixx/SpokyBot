@@ -221,7 +221,7 @@ export function BotProfileAvatarCard({
                   title={expression}
                   aria-label={`Use ${expression} expression`}
                 >
-                  <MausAvatar color={bot.color} shape={bot.mascotShape ?? undefined} state={expression} size={42} animated={false} />
+                  <MausAvatar color={bot.color} bodyId={bot.mascotBody ?? undefined} state={expression} size={42} animated={false} />
                 </button>
               ))}
             </div>

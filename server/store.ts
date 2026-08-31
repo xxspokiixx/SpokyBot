@@ -14,7 +14,7 @@ import { newId, type CloudBackend, type ModelSelection, type ThreadId } from "./
 import { pickBotName } from "./names.ts";
 import { redactSecretsInText } from "./redact.ts";
 import { botAvatarProfile, type BotAvatarCrop } from "../shared/bot-avatar.ts";
-import type { MascotShapeId } from "../shared/mascot-shapes.ts";
+import type { MascotBodyId } from "../shared/mascot-bodies.ts";
 
 export type MausColor =
   | "green"
@@ -287,7 +287,7 @@ export interface BotRecord {
   notifications: boolean;
   color: MausColor;
   mascotExpression?: MausExpression | null;
-  mascotShape?: MascotShapeId | null;
+  mascotBody?: MascotBodyId | null;
   /** App-owned attachment served as this bot's custom profile image. */
   avatarUrl?: string;
   /** Mascot, or the crop applied to avatarUrl. */
@@ -856,7 +856,7 @@ export class Store {
     profile: Partial<
       Pick<
         BotRecord,
-        "name" | "title" | "description" | "color" | "mascotExpression" | "mascotShape" | "modelSelection" | "section"
+        "name" | "title" | "description" | "color" | "mascotExpression" | "mascotBody" | "modelSelection" | "section"
       >
     > = {},
     opts: {
@@ -876,7 +876,7 @@ export class Store {
       notifications: true,
       color: profile.color ?? COLORS[this.bots.length % COLORS.length],
       ...(profile.mascotExpression ? { mascotExpression: profile.mascotExpression } : {}),
-      ...(profile.mascotShape ? { mascotShape: profile.mascotShape } : {}),
+      ...(profile.mascotBody ? { mascotBody: profile.mascotBody } : {}),
       unread: false,
       modelSelection: profile.modelSelection ?? this.defaultSelection(),
       resumeCursors: {},

@@ -2,7 +2,7 @@
  * The mascot's face tables — 25 expressions x 2 eye rings x 48 points, a mouth
  * per expression, and the face-space constants every coordinate is expressed in.
  *
- * Split out of CursorAvatar.tsx so `scripts/gen-mascot-shapes.ts` can import it
+ * Split out of CursorAvatar.tsx so `scripts/gen-mascot-bodies.ts` can import it
  * from plain Node: the renderer is JSX and `--experimental-strip-types` cannot
  * load it, but the generator needs exactly these numbers to solve where a face
  * fits inside a new silhouette. The phone already draws this line in the same

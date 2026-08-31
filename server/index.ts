@@ -4045,7 +4045,7 @@ const server = createServer(async (req, res) => {
           else section = trimmed;
         }
       }
-      for (const key of ["modelSelection", "unread", "computer", "cloudBackend", "color", "mascotExpression", "mascotShape", "pinned", "hidden"] as const) {
+      for (const key of ["modelSelection", "unread", "computer", "cloudBackend", "color", "mascotExpression", "mascotBody", "pinned", "hidden"] as const) {
         if (body[key] !== undefined) patch[key] = body[key];
       }
       // one pinned message per thread; null/"" clears. The id is not

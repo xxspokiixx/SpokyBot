@@ -61,19 +61,19 @@ describe("parseBotProfilePatch (both modes)", () => {
   });
 });
 
-describe("mascotShape", () => {
-  it("accepts a known shape", () => {
-    expect(parseBotProfilePatch({ mascotShape: "blob" } as never, true)).toEqual({
+describe("mascotBody", () => {
+  it("accepts a known body", () => {
+    expect(parseBotProfilePatch({ mascotBody: "blob" } as never, true)).toEqual({
       ok: true,
-      patch: { mascotShape: "blob" },
+      patch: { mascotBody: "blob" },
     });
   });
 
-  it("maps an unknown shape to a readable message", () => {
-    expect(parseBotProfilePatch({ mascotShape: "hexagram" } as never, true)).toEqual({
+  it("maps an unknown body to a readable message", () => {
+    expect(parseBotProfilePatch({ mascotBody: "hexagram" } as never, true)).toEqual({
       ok: false,
       error:
-        "mascotShape must be cursor, blob, circle, squircle, capsule, drop, shield, hexagon, diamond, or star",
+        "mascotBody must be cursor, blob, circle, squircle, capsule, drop, shield, hexagon, diamond, or star",
     });
   });
 });

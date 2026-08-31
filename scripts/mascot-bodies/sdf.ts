@@ -1,7 +1,7 @@
 /**
  * Signed distance field for a silhouette.
  *
- * The face has to sit somewhere the shape can actually hold it, so we need to ask "how far
+ * The face has to sit somewhere the body can actually hold it, so we need to ask "how far
  * is this point from the edge?" thousands of times. Rasterising once into a distance field
  * makes each of those questions an array lookup.
  *

@@ -1,12 +1,12 @@
 /**
- * Bakes the mascot shape catalog into `shared/mascot-shapes.ts`.
+ * Bakes the mascot body catalog into `shared/mascot-bodies.ts`.
  *
- * Run with `pnpm gen:shapes`. Everything downstream of this script — the picker, the
+ * Run with `pnpm gen:bodies`. Everything downstream of this script — the picker, the
  * renderer, the persisted bot profile — reads the emitted module and never re-derives
  * geometry at runtime, because solving a face placement costs tens of millions of
  * distance samples and the answer never changes between runs.
  *
- * The pipeline, per shape:
+ * The pipeline, per body:
  *
  *   flatten            outline path data -> polylines
  *   boundsOf           the drawn extent, NOT the advisory `viewBox`
@@ -20,20 +20,20 @@
  *
  * 1. Four aims. The avatar renders faces `forward`, which cancels each expression's
  *    authored gaze and hands the pointer its full travel — so the eyes can be pulled to
- *    any corner. Each shape is solved against all four extreme aims at once and keeps the
+ *    any corner. Each body is solved against all four extreme aims at once and keeps the
  *    WORST of them. A single centred solve yields a face that clips the moment the mouse
  *    moves. Solving the aims separately and keeping the smallest answer is not enough
  *    either: each aim's best anchor is somewhere else, and a face has exactly one anchor.
  *    So the four aims' point clouds are pooled into a single constraint set, and the
  *    solver looks for one placement that satisfies all of them together.
  *
- * 2. One shared size. The smallest scale in the catalog is applied to every shape, and
- *    each shape's anchor is then re-solved at that fixed size. Roomier bodies get more
+ * 2. One shared size. The smallest scale in the catalog is applied to every body, and
+ *    each body's anchor is then re-solved at that fixed size. Roomier bodies get more
  *    margin rather than a bigger face, which is what makes the ten read as one character
  *    wearing different bodies instead of ten unrelated mascots.
  *
  * The run fails, loudly and with a non-zero exit, if any expression would clip at any
- * shape's final anchor at any aim. That assertion is the feature's correctness guarantee:
+ * body's final anchor at any aim. That assertion is the feature's correctness guarantee:
  * if it fires, an outline or the face data is wrong. Fix the geometry, never the check.
  *
  * The output is deterministic — no clock, no environment, no unordered iteration — so a
@@ -47,13 +47,13 @@ import { writeFileSync } from "node:fs"
 import { fileURLToPath } from "node:url"
 
 import { MOUTH_STROKE } from "../src/components/cursor-face-data.ts"
-import { SHAPE_DEFS, type ShapeDef } from "./mascot-shapes/builders.ts"
-import { applyFit, boundsOf, fitTransform, flatten } from "./mascot-shapes/geometry.ts"
-import { maskFromPolylines } from "./mascot-shapes/raster.ts"
-import { fieldFromMask, largestInscribedCircle, type Sdf } from "./mascot-shapes/sdf.ts"
-import { buildClouds, maxScaleAt, report } from "./mascot-shapes/solve.ts"
+import { BODY_DEFS, type BodyDef } from "./mascot-bodies/builders.ts"
+import { applyFit, boundsOf, fitTransform, flatten } from "./mascot-bodies/geometry.ts"
+import { maskFromPolylines } from "./mascot-bodies/raster.ts"
+import { fieldFromMask, largestInscribedCircle, type Sdf } from "./mascot-bodies/sdf.ts"
+import { buildClouds, maxScaleAt, report } from "./mascot-bodies/solve.ts"
 
-/** The id the catalog falls back to, and the shape whose face size sets the floor. */
+/** The id the catalog falls back to, and the body whose face size sets the floor. */
 const DEFAULT_ID = "cursor"
 
 /**
@@ -87,7 +87,7 @@ interface Anchor {
 type Fit = ReturnType<typeof fitTransform>
 
 interface Solved {
-  def: ShapeDef
+  def: BodyDef
   fit: Fit
   sdf: Sdf
   /** The largest face this body can hold at one anchor that survives all four aims. */
@@ -117,9 +117,9 @@ const ALL_CLOUDS = CLOUD_SETS.flat()
 /** The scale cap. 1.0 reproduces the proportions the expressions were drawn at. */
 const CAP = 1
 
-/** Runs one shape through the whole geometry pipeline and solves it against all four aims. */
-function solveShape(def: ShapeDef): Solved {
-  // `def.viewBox` is advisory and deliberately wrong for two shapes; bounds always come
+/** Runs one body through the whole geometry pipeline and solves it against all four aims. */
+function solveBody(def: BodyDef): Solved {
+  // `def.viewBox` is advisory and deliberately wrong for two bodies; bounds always come
   // from the flattened outline.
   const polylines = flatten(def.d)
   const fit = fitTransform(boundsOf(polylines))
@@ -136,7 +136,7 @@ function solveShape(def: ShapeDef): Solved {
   // truncates the search: a failed ring at step s says nothing whatsoever about a ring at
   // 2s, which probes an entirely different set of points. The cursor is exactly that case —
   // its first ring improves nothing, so an early break reports the seed's own capacity and
-  // never looks further out. Since the tightest shape sets the clamp for the whole catalog,
+  // never looks further out. Since the tightest body sets the clamp for the whole catalog,
   // one truncated search shrinks every mascot. Halving the step and running every level is
   // cheap, and the clipping assertion downstream is what makes searching harder safe.
   const circle = largestInscribedCircle(sdf)
@@ -191,7 +191,7 @@ function clippingAt(sdf: Sdf, anchor: Anchor): number[][] {
 const round = (n: number, places: number) => Number(n.toFixed(places))
 
 /**
- * Re-solves a shape's anchor with the scale held at the catalog's shared size.
+ * Re-solves a body's anchor with the scale held at the catalog's shared size.
  *
  * A coarse-to-fine sweep: evaluate a grid around the current best, keep the best
  * clearance, halve the step, repeat. Candidates are rounded to the precision they will be
@@ -249,50 +249,50 @@ interface Baked {
   clearance: number
 }
 
-function emit(shapes: Baked[]): string {
-  const ids = shapes.map(s => quote(s.id)).join(", ")
-  const entries = shapes
-    .map(shape =>
+function emit(bodies: Baked[]): string {
+  const ids = bodies.map(s => quote(s.id)).join(", ")
+  const entries = bodies
+    .map(body =>
       [
-        `  ${shape.id}: {`,
-        `    id: ${quote(shape.id)},`,
-        `    name: ${quote(shape.name)},`,
-        `    fit: ${quote(shape.fit.transform)},`,
-        `    body: ${quote(`<path fill="{{GRADIENT}}" d="${shape.d}"/>`)},`,
-        `    clip: ${quote(`<path d="${shape.d}"/>`)},`,
-        `    anchor: { x: ${shape.anchor.x}, y: ${shape.anchor.y}, scale: ${shape.anchor.scale} },`,
+        `  ${body.id}: {`,
+        `    id: ${quote(body.id)},`,
+        `    name: ${quote(body.name)},`,
+        `    fit: ${quote(body.fit.transform)},`,
+        `    body: ${quote(`<path fill="{{GRADIENT}}" d="${body.d}"/>`)},`,
+        `    clip: ${quote(`<path d="${body.d}"/>`)},`,
+        `    anchor: { x: ${body.anchor.x}, y: ${body.anchor.y}, scale: ${body.anchor.scale} },`,
         `  },`,
       ].join("\n")
     )
     .join("\n")
 
   return `/**
- * The mascot body shapes a bot can wear.
+ * The mascot bodies a bot can wear.
  *
- * GENERATED FILE — do not hand-edit. Run \`pnpm gen:shapes\` to rebuild it from
- * \`scripts/gen-mascot-shapes.ts\`, which solves each face placement against the real
+ * GENERATED FILE — do not hand-edit. Run \`pnpm gen:bodies\` to rebuild it from
+ * \`scripts/gen-mascot-bodies.ts\`, which solves each face placement against the real
  * expression geometry and verifies that nothing clips.
  *
- * Every shape carries the same face at the same size: the generator clamps the whole
+ * Every body carries the same face at the same size: the generator clamps the whole
  * catalog to the smallest face any one body can hold, so the mascot reads as one
  * character in different bodies rather than ten different mascots. Roomier bodies simply
  * end up with more margin around the face.
  *
- * The fields match \`CursorSilhouette\` exactly, so a shape can be handed to the renderer
+ * The fields match \`CursorSilhouette\` exactly, so a body can be handed to the renderer
  * with no adapter in between.
  */
 
 import { z } from "zod";
 
-/** Every selectable shape id, in the order the picker shows them. */
-export const MASCOT_SHAPE_IDS = [${ids}] as const;
+/** Every selectable body id, in the order the picker shows them. */
+export const MASCOT_BODY_IDS = [${ids}] as const;
 
-export type MascotShapeId = (typeof MASCOT_SHAPE_IDS)[number];
+export type MascotBodyId = (typeof MASCOT_BODY_IDS)[number];
 
-export const mascotShapeSchema = z.enum(MASCOT_SHAPE_IDS);
+export const mascotBodySchema = z.enum(MASCOT_BODY_IDS);
 
-export interface MascotShape {
-  id: MascotShapeId;
+export interface MascotBody {
+  id: MascotBodyId;
   /** Human-readable name, used for the picker and the accessible label. */
   name: string;
   /** Transform mapping the outline into the face box. */
@@ -306,15 +306,15 @@ export interface MascotShape {
 }
 
 /** The shipped mascot, and the fallback for any unrecognised value. */
-export const DEFAULT_MASCOT_SHAPE: MascotShapeId = ${quote(DEFAULT_ID)};
+export const DEFAULT_MASCOT_BODY: MascotBodyId = ${quote(DEFAULT_ID)};
 
-export const MASCOT_SHAPES: Record<MascotShapeId, MascotShape> = {
+export const MASCOT_BODIES: Record<MascotBodyId, MascotBody> = {
 ${entries}
 };
 
-/** Runtime-safe read of an untrusted persisted or streamed shape id. */
-export function botMascotShape(value: unknown): MascotShapeId {
-  return mascotShapeSchema.safeParse(value).data ?? DEFAULT_MASCOT_SHAPE;
+/** Runtime-safe read of an untrusted persisted or streamed body id. */
+export function botMascotBody(value: unknown): MascotBodyId {
+  return mascotBodySchema.safeParse(value).data ?? DEFAULT_MASCOT_BODY;
 }
 `
 }
@@ -364,34 +364,34 @@ const swiftQuote = (s: string) => JSON.stringify(s)
  * — `scale`/`tx`/`ty` — rather than the SVG transform string the web takes, because Swift
  * has no SVG transform parser and builds a `CGAffineTransform` straight from the numbers.
  */
-function emitSwift(shapes: Baked[]): string {
-  const order = shapes.map(s => swiftQuote(s.id)).join(", ")
+function emitSwift(bodies: Baked[]): string {
+  const order = bodies.map(s => swiftQuote(s.id)).join(", ")
 
-  const entries = shapes
-    .map(shape => {
-      const path = indent(wrapPathTokens(shape.d), 16)
+  const entries = bodies
+    .map(body => {
+      const path = indent(wrapPathTokens(body.d), 16)
       return [
-        `        ${swiftQuote(shape.id)}: Shape(`,
-        `            id: ${swiftQuote(shape.id)},`,
-        `            name: ${swiftQuote(shape.name)},`,
+        `        ${swiftQuote(body.id)}: Body(`,
+        `            id: ${swiftQuote(body.id)},`,
+        `            name: ${swiftQuote(body.name)},`,
         `            path:`,
         `                """`,
         `${path}`,
         `                """,`,
-        `            fit: (scale: ${shape.fit.scale}, tx: ${shape.fit.tx}, ty: ${shape.fit.ty}),`,
-        `            anchor: (x: ${shape.anchor.x}, y: ${shape.anchor.y}, scale: ${shape.anchor.scale})`,
+        `            fit: (scale: ${body.fit.scale}, tx: ${body.fit.tx}, ty: ${body.fit.ty}),`,
+        `            anchor: (x: ${body.anchor.x}, y: ${body.anchor.y}, scale: ${body.anchor.scale})`,
         `        ),`,
       ].join("\n")
     })
     .join("\n")
 
-  return `// The mascot body shapes a bot can wear — the phone's half of the same solve that
-// bakes \`shared/mascot-shapes.ts\`.
+  return `// The mascot bodies a bot can wear — the phone's half of the same solve that
+// bakes \`shared/mascot-bodies.ts\`.
 //
-// GENERATED FILE — do not hand-edit. Run \`pnpm gen:shapes\` to rebuild it from
-// \`scripts/gen-mascot-shapes.ts\`, which solves each face placement against the real
+// GENERATED FILE — do not hand-edit. Run \`pnpm gen:bodies\` to rebuild it from
+// \`scripts/gen-mascot-bodies.ts\`, which solves each face placement against the real
 // expression geometry and verifies that nothing clips. One solve, two writers: this file
-// and \`shared/mascot-shapes.ts\` come from the same solved anchors, which is what stops
+// and \`shared/mascot-bodies.ts\` come from the same solved anchors, which is what stops
 // the two renderers drifting apart the way desktop's 0.74 and iOS's 0.84 already did once.
 //
 // CoreGraphics only, no SwiftUI — \`CompanionCore\` is everything the phone knows that is
@@ -403,8 +403,8 @@ function emitSwift(shapes: Baked[]): string {
 // \`MausSilhouette\` in \`ios/App/MausAvatar.swift\`, which treats newlines as separators.
 import CoreGraphics
 
-enum MausShapes {
-    struct Shape {
+enum MausBodies {
+    struct Body {
         let id: String
         let name: String
         let path: String
@@ -412,19 +412,19 @@ enum MausShapes {
         let anchor: (x: CGFloat, y: CGFloat, scale: CGFloat)
     }
 
-    /// Every selectable shape id, in the order the picker shows them.
+    /// Every selectable body id, in the order the picker shows them.
     static let order: [String] = [${order}]
 
     /// The shipped mascot, and the fallback for any unrecognised value.
     static let defaultID = "cursor"
 
-    static let all: [String: Shape] = [
+    static let all: [String: Body] = [
 ${entries}
     ]
 
-    /// Looks up a shape by id, falling back to \`defaultID\` for anything unrecognised
+    /// Looks up a body by id, falling back to \`defaultID\` for anything unrecognised
     /// (including a nil id, e.g. an untrusted persisted or streamed value).
-    static func shape(_ id: String?) -> Shape {
+    static func body(_ id: String?) -> Body {
         if let id, let match = all[id] { return match }
         return all[defaultID]!
     }
@@ -435,15 +435,15 @@ ${entries}
 /* ---------------------------------------------------------------------- main */
 
 function main(): void {
-  const solved = SHAPE_DEFS.map(solveShape)
+  const solved = BODY_DEFS.map(solveBody)
 
   const cursor = solved.find(s => s.def.id === DEFAULT_ID)
-  if (!cursor) throw new Error(`the catalog has no ${DEFAULT_ID} shape to anchor its face size to`)
+  if (!cursor) throw new Error(`the catalog has no ${DEFAULT_ID} body to anchor its face size to`)
 
   const width = Math.max(...solved.map(s => s.def.id.length))
   console.log("largest face each body can hold, worst of the four pointer aims:")
-  for (const shape of solved) {
-    console.log(`  ${shape.def.id.padEnd(width)}  ${shape.scale.toFixed(3).padStart(6)}`)
+  for (const body of solved) {
+    console.log(`  ${body.def.id.padEnd(width)}  ${body.scale.toFixed(3).padStart(6)}`)
   }
   console.log("")
 
@@ -462,30 +462,30 @@ function main(): void {
 
   const baked: Baked[] = []
   const clipped: string[] = []
-  for (const shape of solved) {
-    const anchor = anchorAt(shape.sdf, shape.seed, shared)
-    const clipping = clippingAt(shape.sdf, anchor)
+  for (const body of solved) {
+    const anchor = anchorAt(body.sdf, body.seed, shared)
+    const clipping = clippingAt(body.sdf, anchor)
     clipping.forEach((expressions, i) => {
       if (expressions.length === 0) return
       const aim = AIMS[i]
-      clipped.push(`${shape.def.id} aim (${aim.x}, ${aim.y}): expressions ${expressions.join(", ")}`)
+      clipped.push(`${body.def.id} aim (${aim.x}, ${aim.y}): expressions ${expressions.join(", ")}`)
     })
     baked.push({
-      id: shape.def.id,
-      name: shape.def.name,
-      fit: shape.fit,
-      d: shape.def.d,
+      id: body.def.id,
+      name: body.def.name,
+      fit: body.fit,
+      d: body.def.d,
       anchor,
-      clearance: clearanceAt(shape.sdf, anchor),
+      clearance: clearanceAt(body.sdf, anchor),
     })
   }
 
   console.log(`shared face scale ${shared} (${DEFAULT_ID}'s own floor is ${cursor.scale})`)
-  console.log(`${"shape".padEnd(width)}  ${"scale".padStart(6)}  ${"clearance".padStart(9)}`)
-  for (const shape of baked) {
-    const scale = shape.anchor.scale.toFixed(3).padStart(6)
-    const clearance = shape.clearance.toFixed(1).padStart(9)
-    console.log(`${shape.id.padEnd(width)}  ${scale}  ${clearance}`)
+  console.log(`${"body".padEnd(width)}  ${"scale".padStart(6)}  ${"clearance".padStart(9)}`)
+  for (const body of baked) {
+    const scale = body.anchor.scale.toFixed(3).padStart(6)
+    const clearance = body.clearance.toFixed(1).padStart(9)
+    console.log(`${body.id.padEnd(width)}  ${scale}  ${clearance}`)
   }
 
   if (clipped.length > 0) {
@@ -496,14 +496,14 @@ function main(): void {
     )
   }
 
-  const out = fileURLToPath(new URL("../shared/mascot-shapes.ts", import.meta.url))
+  const out = fileURLToPath(new URL("../shared/mascot-bodies.ts", import.meta.url))
   writeFileSync(out, emit(baked))
   console.log(`wrote ${out}`)
 
   // P1 ruling (task 7): emitted into `ios/Sources/CompanionCore`, not `ios/App` — that is
   // the package `swift test` actually builds, so a later test over this catalog can run.
   const swiftOut = fileURLToPath(
-    new URL("../ios/Sources/CompanionCore/MausShapes.swift", import.meta.url)
+    new URL("../ios/Sources/CompanionCore/MausBodies.swift", import.meta.url)
   )
   writeFileSync(swiftOut, emitSwift(baked))
   console.log(`wrote ${swiftOut}`)

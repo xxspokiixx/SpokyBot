@@ -1,12 +1,12 @@
 import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
 
-import { MASCOT_SHAPES, MASCOT_SHAPE_IDS } from "../../shared/mascot-shapes.ts";
+import { MASCOT_BODIES, MASCOT_BODY_IDS } from "../../shared/mascot-bodies.ts";
 
 // P1 ruling: emitted to ios/Sources/CompanionCore (reachable by `swift test`),
 // not ios/App (the Xcode app target, which `swift test` never builds).
 const swift = readFileSync(
-  new URL("../../ios/Sources/CompanionCore/MausShapes.swift", import.meta.url),
+  new URL("../../ios/Sources/CompanionCore/MausBodies.swift", import.meta.url),
   "utf8"
 );
 
@@ -15,8 +15,8 @@ describe("the generated Swift catalog", () => {
     expect(swift).toContain("do not hand-edit");
   });
 
-  it("declares every shape the TypeScript catalog has", () => {
-    for (const id of MASCOT_SHAPE_IDS) {
+  it("declares every body the TypeScript catalog has", () => {
+    for (const id of MASCOT_BODY_IDS) {
       expect(swift, `${id} missing from Swift`).toContain(`"${id}"`);
     }
   });
@@ -26,8 +26,8 @@ describe("the generated Swift catalog", () => {
   });
 
   it("carries the same anchors as the TypeScript catalog", () => {
-    for (const id of MASCOT_SHAPE_IDS) {
-      const { anchor } = MASCOT_SHAPES[id];
+    for (const id of MASCOT_BODY_IDS) {
+      const { anchor } = MASCOT_BODIES[id];
       expect(swift, `${id} anchor.x`).toContain(`x: ${anchor.x}`);
       expect(swift, `${id} anchor.y`).toContain(`y: ${anchor.y}`);
     }
