@@ -18,7 +18,11 @@ struct BotAvatarView: View {
     @State private var failed = false
 
     private var crop: AvatarCrop { bot.avatarCrop ?? .mascot }
-    private var usesImage: Bool { crop != .mascot && bot.avatarUrl != nil && !failed }
+    /// `mascot` and `face` both draw the mascot body rather than a cropped
+    /// image — `face` fills that body with the bot's image, which this build
+    /// does not do yet, so it draws the gradient body like `mascot` does.
+    private var cropsImage: Bool { crop != .mascot && crop != .face }
+    private var usesImage: Bool { cropsImage && bot.avatarUrl != nil && !failed }
 
     var body: some View {
         Group {
@@ -29,7 +33,9 @@ struct BotAvatarView: View {
                     .frame(width: size, height: size)
                     .clipShape(mask)
             } else {
-                MausAvatar(color: bot.color, size: size, state: state, animated: animated, comets: comets)
+                MausAvatar(
+                    color: bot.color, size: size, bodyId: bot.mascotBody, state: state,
+                    animated: animated, comets: comets)
             }
         }
         .frame(width: size, height: size)
@@ -38,7 +44,7 @@ struct BotAvatarView: View {
         .task(id: "\(bot.avatarUrl ?? "")|\(crop.rawValue)") {
             image = nil
             failed = false
-            guard crop != .mascot, bot.avatarUrl != nil else { return }
+            guard cropsImage, bot.avatarUrl != nil else { return }
             let data = await session.avatarData(for: bot)
             guard !Task.isCancelled else { return }
             guard let data, let decoded = UIImage(data: data) else {
@@ -54,7 +60,7 @@ struct BotAvatarView: View {
         switch crop {
         case .circle: AnyShape(Circle())
         case .rounded: AnyShape(RoundedRectangle(cornerRadius: size * 0.22, style: .continuous))
-        case .square, .mascot: AnyShape(Rectangle())
+        case .square, .mascot, .face: AnyShape(Rectangle())
         }
     }
 }

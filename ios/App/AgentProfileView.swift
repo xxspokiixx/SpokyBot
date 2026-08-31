@@ -56,7 +56,7 @@ struct AgentProfileView: View {
                     .listRowBackground(Color.clear)
 
                     Picker("Shape", selection: $crop) {
-                        ForEach(AvatarCrop.allCases, id: \.self) { shape in
+                        ForEach(cropChoices, id: \.self) { shape in
                             Text(shape.label).tag(shape)
                         }
                     }
@@ -298,6 +298,14 @@ struct AgentProfileView: View {
         return nil
     }
 
+    /// `face` fills the mascot body with the bot's own image; this build draws
+    /// the gradient body for it instead, so it is not offered as a new choice
+    /// here — only shown when the desktop already chose it, so the segmented
+    /// control reflects the bot rather than sitting blank.
+    private var cropChoices: [AvatarCrop] {
+        AvatarCrop.allCases.filter { $0 != .face || crop == .face }
+    }
+
     private func synchronizeForm(with bot: Bot) {
         name = bot.name
         title = bot.title
@@ -337,6 +345,7 @@ private extension AvatarCrop {
         case .circle: "Circle"
         case .rounded: "Rounded"
         case .square: "Square"
+        case .face: "Face"
         }
     }
 }
