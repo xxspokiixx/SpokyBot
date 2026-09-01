@@ -300,7 +300,7 @@ export const BODY_DEFS: BodyDef[] = [
   // 0.42 the notches between the points pinch the silhouette down to a 50-unit inscribed
   // circle, and since the catalog clamps every body to the smallest face any one body can
   // hold, that one number would shrink the mascot everywhere. 0.55 lets the star hold a
-  // 0.831 face — clear headroom over the cursor's 0.750, which is what sets the clamp.
+  // 0.831 face — clear headroom over the cursor's 0.791, which is what sets the clamp.
   { id: "star", name: "Star", d: buildStar(196, 196, 5, 0.55), viewBox: [0, 0, 200, 200] },
 ]
 
