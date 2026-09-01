@@ -175,9 +175,9 @@ public struct Bot: Codable, Hashable, Identifiable, Sendable {
     /// An app-owned `/api/attachments/:name` URL. The URL is intentionally
     /// relative so every paired device fetches it from its own computer.
     public var avatarUrl: String?
-    /// `mascot` and `face` both draw the mascot body — `mascot` fills it with
-    /// the bot's gradient, `face` fills it with `avatarUrl`. The rest crop the
-    /// image itself, and the value names the mask. See `shared/bot-avatar.ts`.
+    /// `mascot` draws the mascot itself — its gradient body with the bot's
+    /// live face on top. The rest crop `avatarUrl` and replace the mascot
+    /// entirely, and the value names the mask. See `shared/bot-avatar.ts`.
     public var avatarCrop: AvatarCrop?
     public var unread: Bool
     public var modelSelection: ModelSelection

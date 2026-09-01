@@ -48,4 +48,3 @@ export function botAvatarProfile(value: BotAvatarProfileInput): BotAvatarProfile
   if (url.success) profile.avatarUrl = url.data;
   return profile;
 }
-

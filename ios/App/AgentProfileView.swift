@@ -271,8 +271,11 @@ struct AgentProfileView: View {
             crop = updated.avatarCrop ?? resolved
         } else {
             // Generation itself succeeded. Reflect its authoritative result
-            // rather than claiming the requested crop was persisted.
-            crop = generated.avatarCrop ?? .mascot
+            // rather than claiming the requested crop was persisted. A `nil`
+            // crop here matches `afterGenerating`'s own fallback: `.circle`,
+            // not `.mascot`, which would throw away the picture just
+            // generated.
+            crop = generated.avatarCrop ?? .circle
         }
         baseline.crop = crop
     }

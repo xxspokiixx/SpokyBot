@@ -130,15 +130,17 @@ function solveBody(def: BodyDef): Solved {
   // anchor often holds a bigger face, because the widest part of a body is rarely where
   // its roundest part is.
   //
-  // Coarse to fine, and deliberately WITHOUT the `if (!improved) break` that solveFit uses.
-  // That early exit is only sound when the step shrinks monotonically, so a ring that finds
-  // nothing means the neighbourhood is exhausted. Ported to a growing step it silently
-  // truncates the search: a failed ring at step s says nothing whatsoever about a ring at
-  // 2s, which probes an entirely different set of points. The cursor is exactly that case —
-  // its first ring improves nothing, so an early break reports the seed's own capacity and
-  // never looks further out. Since the tightest body sets the clamp for the whole catalog,
-  // one truncated search shrinks every mascot. Halving the step and running every level is
-  // cheap, and the clipping assertion downstream is what makes searching harder safe.
+  // Coarse to fine, and deliberately WITHOUT an early `if (!improved) break`. Each level
+  // sweeps its ring exactly once and then halves the step regardless of outcome — it never
+  // repeats at one step until failure, so a ring that improves nothing does not mean the
+  // neighbourhood at that scale is exhausted, only that these particular offsets missed.
+  // Breaking on that assumption silently truncates the search: a ring's failure says nothing
+  // about the next, finer ring, which probes an entirely different set of points. The cursor
+  // is exactly that case — its coarsest ring improves nothing, so an early break would report
+  // the seed's own capacity and never look further in. Since the tightest body sets the clamp
+  // for the whole catalog, one truncated search shrinks every mascot — this cost a real 5%
+  // face-size regression once. Halving the step and running every level regardless is cheap,
+  // and the clipping assertion downstream is what makes searching harder safe.
   const circle = largestInscribedCircle(sdf)
   let best: Anchor = {
     x: circle.x,

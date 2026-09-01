@@ -102,7 +102,9 @@ existing bot's face — so the generator fails if the shared scale would drop be
    transform mapping those bounds into the 228.541-unit face box.
 3. Scanline-fill the polyline into a 256x256 mask.
 4. `fieldFromMask(mask)` -> signed distance field.
-5. `solveFit(sdf, ...)` -> `{ anchor, clipping, clearance }`.
+5. Solve the anchor and scale directly: seed at the largest inscribed circle,
+   then sweep outward against the pooled four-aim point clouds for the
+   placement that maximizes face size without clipping.
 
 Then, across the whole catalog: compute the clamped shared scale, re-solve each
 anchor at that scale, and emit.
@@ -110,10 +112,12 @@ anchor at that scale, and emit.
 Blob Studio's `buildSdf` rasterises through `<img>` + canvas and its `measureFit`
 calls `getBBox`. Both are DOM-only. Because we generate the outlines ourselves we
 know them analytically, so steps 2 and 3 replace those two functions with a cubic
-flattener and a scanline fill — roughly 60 lines. Everything downstream
-(`fieldFromMask`, `sampleSdf`, `largestInscribedCircle`, `solveFit`, and the
+flattener and a scanline fill — roughly 60 lines. Everything downstream of the
+mask (`fieldFromMask`, `sampleSdf`, `largestInscribedCircle`, and the
 expression point-cloud construction) is already pure math and is copied verbatim
-from the studio. No headless browser, so it runs in CI.
+from the studio. The anchor/scale solve itself is the generator's own — a
+seeded outward sweep against the pooled four-aim clouds — rather than Blob
+Studio's `solveFit`. No headless browser, so it runs in CI.
 
 **The generator fails if any shape's baked anchor clips any of the 25
 expressions.** That assertion, not visual review, is the correctness guarantee.
@@ -122,7 +126,7 @@ Outputs, both checked in:
 
 - `shared/mascot-shapes.ts` — the TypeScript catalog, the id union, and the zod
   schema.
-- `ios/App/MausShapes.swift` — the Swift catalog, keyed by the same ids.
+- `ios/Sources/CompanionCore/MausBodies.swift` — the Swift catalog, keyed by the same ids.
 
 Both carry a "generated, do not hand-edit" header, matching the existing
 convention in `MausFaceData.swift`.
