@@ -80,8 +80,11 @@ extension AvatarCrop {
     /// server chose (`serverCrop`, from `server/index.ts` — `circle` for a
     /// mascot bot, per `avatarGenerationPrompt` in `server/avatar-image.ts`
     /// asking for a centred subject that already has its own face). A `nil`
-    /// `serverCrop` falls back to `.mascot`, the same "no picture" state a
-    /// missing crop means everywhere else.
+    /// `serverCrop` is unreachable in practice — the server always assigns a
+    /// crop — so the fallback matches the desktop's
+    /// (`result.bot.avatarCrop ?? "circle"` in
+    /// `src/components/BotProfileAvatarCard.tsx`): `.circle`, what the server
+    /// actually assigns a mascot bot, not the `.mascot` "no picture" state.
     ///
     /// The one thing that overrides the server is the user themselves: if
     /// they move the crop picker while generation was still in flight,
@@ -92,7 +95,7 @@ extension AvatarCrop {
         latestCrop: AvatarCrop,
         serverCrop: AvatarCrop?
     ) -> AvatarCrop {
-        latestCrop != cropAtStart ? latestCrop : (serverCrop ?? .mascot)
+        latestCrop != cropAtStart ? latestCrop : (serverCrop ?? .circle)
     }
 }
 

@@ -157,12 +157,13 @@ final class BotAvatarRenderingTests: XCTestCase {
             .rounded)
     }
 
-    /// No server crop at all falls back to `.mascot` — the same "no picture"
-    /// state a missing crop means everywhere else, never a promotion to
-    /// `.face`.
-    func testNoServerCropFallsBackToMascot() {
+    /// No server crop at all is unreachable in practice, but the fallback is
+    /// aligned with the desktop's own unreachable fallback (`?? "circle"` in
+    /// `BotProfileAvatarCard.tsx`): `.circle`, what the server actually
+    /// assigns a mascot bot, never a promotion to `.face`.
+    func testNoServerCropFallsBackToCircle() {
         XCTAssertEqual(
             AvatarCrop.afterGenerating(cropAtStart: .mascot, latestCrop: .mascot, serverCrop: nil),
-            .mascot)
+            .circle)
     }
 }
