@@ -259,24 +259,45 @@ struct AgentProfileView: View {
     private func generateImage() async {
         busy = true
         defer { busy = false }
-        let intendedCrop = crop == .mascot ? AvatarCrop.circle : crop
+        // What the selector said when the request went out. The desktop
+        // compares the same way (`latestCrop === cropAtStart` in
+        // `src/components/BotProfileAvatarCard.tsx`) so a selector moved
+        // mid-flight still wins over the server's pick.
+        let cropAtStart = crop
         guard let generated = await session.generateAvatar(
             prompt: String(prompt.trimmingCharacters(in: .whitespacesAndNewlines).prefix(400)),
             for: current
         ) else { return }
-        // Generation chooses a safe default crop server-side. The selector is
-        // the user's explicit choice, so persist it immediately against the
-        // returned attachment rather than leaving UI and server out of sync.
-        let shapePatch = BotProfilePatch(avatarCrop: intendedCrop)
-        if let updated = await session.updateProfile(shapePatch, for: generated) {
-            crop = updated.avatarCrop ?? intendedCrop
+
+        // `AvatarCrop.afterGenerating` is the shared decision: the server's
+        // pick unless the selector moved while the request was in flight, in
+        // which case that newer explicit choice wins.
+        let resolved = AvatarCrop.afterGenerating(
+            cropAtStart: cropAtStart,
+            latestCrop: crop,
+            serverCrop: generated.avatarCrop
+        )
+
+        guard crop != cropAtStart else {
+            crop = resolved
             baseline.crop = crop
-        } else {
-            // Generation itself succeeded. Reflect its authoritative fallback
-            // rather than claiming the requested crop was persisted.
-            crop = generated.avatarCrop ?? .mascot
-            baseline.crop = crop
+            return
         }
+
+        // The user moved the selector while the image was generating: an
+        // explicit choice made after the request, so persist it against the
+        // returned attachment rather than leaving UI and server out of sync.
+        if let updated = await session.updateProfile(BotProfilePatch(avatarCrop: resolved), for: generated) {
+            crop = updated.avatarCrop ?? resolved
+        } else {
+            // Generation itself succeeded. Reflect its authoritative result
+            // rather than claiming the requested crop was persisted. A `nil`
+            // crop here matches `afterGenerating`'s own fallback: `.circle`,
+            // not `.mascot`, which would throw away the picture just
+            // generated.
+            crop = generated.avatarCrop ?? .circle
+        }
+        baseline.crop = crop
     }
 
     private func previewVoice() async {

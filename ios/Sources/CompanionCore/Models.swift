@@ -205,7 +205,9 @@ public struct Bot: Codable, Hashable, Identifiable, Sendable {
     /// An app-owned `/api/attachments/:name` URL. The URL is intentionally
     /// relative so every paired device fetches it from its own computer.
     public var avatarUrl: String?
-    /// `mascot` ignores `avatarUrl`; the other values describe the image mask.
+    /// `mascot` draws the mascot itself — its gradient body with the bot's
+    /// live face on top. The rest crop `avatarUrl` and replace the mascot
+    /// entirely, and the value names the mask. See `shared/bot-avatar.ts`.
     public var avatarCrop: AvatarCrop?
     public var unread: Bool
     public var modelSelection: ModelSelection
@@ -226,6 +228,9 @@ public struct Bot: Codable, Hashable, Identifiable, Sendable {
     public var speakReplies: Bool?
     public var voice: String?
     public var mascotExpression: String?
+    /// Which body from the mascot body catalog this bot wears. Absent (an
+    /// older harness included) means the shipped `cursor` silhouette.
+    public var mascotBody: String?
     public var tasks: [BotTask]?
     public var messages: [Message]?
     public var activeLeafId: String?
@@ -564,6 +569,7 @@ public struct BotProfilePatch: Encodable, Sendable {
     public var notifications: Bool?
     public var avatarUrl: AvatarURL?
     public var avatarCrop: AvatarCrop?
+    public var mascotBody: String?
     public var voice: String?
     public var speakReplies: Bool?
 
@@ -582,6 +588,7 @@ public struct BotProfilePatch: Encodable, Sendable {
         notifications: Bool? = nil,
         avatarUrl: AvatarURL? = nil,
         avatarCrop: AvatarCrop? = nil,
+        mascotBody: String? = nil,
         voice: String? = nil,
         speakReplies: Bool? = nil
     ) {
@@ -591,12 +598,13 @@ public struct BotProfilePatch: Encodable, Sendable {
         self.notifications = notifications
         self.avatarUrl = avatarUrl
         self.avatarCrop = avatarCrop
+        self.mascotBody = mascotBody
         self.voice = voice
         self.speakReplies = speakReplies
     }
 
     private enum CodingKeys: String, CodingKey {
-        case name, title, description, notifications, avatarUrl, avatarCrop, voice, speakReplies
+        case name, title, description, notifications, avatarUrl, avatarCrop, mascotBody, voice, speakReplies
     }
 
     public func encode(to encoder: Encoder) throws {
@@ -612,6 +620,7 @@ public struct BotProfilePatch: Encodable, Sendable {
             }
         }
         try values.encodeIfPresent(avatarCrop, forKey: .avatarCrop)
+        try values.encodeIfPresent(mascotBody, forKey: .mascotBody)
         try values.encodeIfPresent(voice, forKey: .voice)
         try values.encodeIfPresent(speakReplies, forKey: .speakReplies)
     }

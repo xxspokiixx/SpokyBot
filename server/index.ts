@@ -7074,7 +7074,7 @@ const server = createServer(async (req, res) => {
           else section = trimmed;
         }
       }
-      for (const key of ["unread", "computer", "cloudBackend", "color", "mascotExpression", "pinned", "hidden"] as const) {
+      for (const key of ["unread", "computer", "cloudBackend", "color", "mascotExpression", "mascotBody", "pinned", "hidden"] as const) {
         if (body[key] !== undefined) patch[key] = body[key];
       }
       if (normalizedSelection) patch.modelSelection = normalizedSelection;

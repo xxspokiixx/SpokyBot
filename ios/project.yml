@@ -187,6 +187,12 @@ targets:
       - path: Shared
       - path: App/MausAvatar.swift
       - path: App/MausFaceData.swift
+    dependencies:
+      # MausAvatar draws whichever body a bot wears, and the body catalog and
+      # its path parser live in CompanionCore. The extension shares the
+      # drawing with the app, so it has to share the catalog too.
+      - package: CompanionCore
+        product: CompanionCore
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: com.openmausbot.app.widgets

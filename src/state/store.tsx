@@ -16,6 +16,7 @@ import {
 import type { CloudBackend, EffortLevel } from "../../server/contracts.ts";
 import type { MausColor, MausMotion } from "@/lib/mascot";
 import type { BotAvatarCrop } from "../../shared/bot-avatar";
+import type { MascotBodyId } from "../../shared/mascot-bodies";
 import type { RoutineRequestCardData } from "../../shared/routine-request";
 import type { RoutineRunCardData } from "../../shared/routine-run";
 import type { GroupGoalRunCardData } from "../../shared/group-goal-run";
@@ -222,6 +223,8 @@ export interface Bot {
   notifications: boolean;
   color: MausColor;
   mascotExpression?: string | null;
+  /** Which body the bot wears. Unknown/absent values fall back to the cursor. */
+  mascotBody?: MascotBodyId | null;
   /** App-owned image attachment used for this bot's profile. */
   avatarUrl?: string | null;
   /** Mascot, or the crop applied to avatarUrl. */

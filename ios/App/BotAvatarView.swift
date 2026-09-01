@@ -18,18 +18,23 @@ struct BotAvatarView: View {
     @State private var failed = false
 
     private var crop: AvatarCrop { bot.avatarCrop ?? .mascot }
-    private var usesImage: Bool { crop != .mascot && bot.avatarUrl != nil && !failed }
+    /// Which of the two renderings this bot gets. The decision itself is a
+    /// pure function in `CompanionCore` so it can be tested without a
+    /// rendered `Canvas`; see `resolveBotAvatarOutcome`.
+    private var outcome: BotAvatarOutcome {
+        resolveBotAvatarOutcome(
+            crop: crop, hasUrl: bot.avatarUrl != nil, imageDecoded: image != nil, failed: failed)
+    }
 
     var body: some View {
         Group {
-            if usesImage, let image {
-                Image(uiImage: image)
-                    .resizable()
-                    .scaledToFill()
-                    .frame(width: size, height: size)
-                    .clipShape(mask)
-            } else {
-                MausAvatar(color: bot.color, size: size, state: state, animated: animated, comets: comets)
+            switch outcome {
+            // The picture instead of the mascot, masked to the chosen shape.
+            case .flatImage: flatImage
+            // The mascot in the bot's own colours, which is also the fallback
+            // whenever there is no usable picture so identity is never an
+            // empty placeholder.
+            case .gradientMascot: mascot
             }
         }
         .frame(width: size, height: size)
@@ -38,6 +43,7 @@ struct BotAvatarView: View {
         .task(id: "\(bot.avatarUrl ?? "")|\(crop.rawValue)") {
             image = nil
             failed = false
+            // Only the flat crops paint the bytes; the mascot never needs them.
             guard crop != .mascot, bot.avatarUrl != nil else { return }
             let data = await session.avatarData(for: bot)
             guard !Task.isCancelled else { return }
@@ -48,6 +54,24 @@ struct BotAvatarView: View {
             guard !Task.isCancelled else { return }
             image = decoded
         }
+    }
+
+    /// Only reached with a decoded image: `resolveBotAvatarOutcome` returns
+    /// `.flatImage` solely when one exists.
+    @ViewBuilder private var flatImage: some View {
+        if let image {
+            Image(uiImage: image)
+                .resizable()
+                .scaledToFill()
+                .frame(width: size, height: size)
+                .clipShape(mask)
+        }
+    }
+
+    private var mascot: some View {
+        MausAvatar(
+            color: bot.color, size: size, bodyId: bot.mascotBody,
+            state: state, animated: animated, comets: comets)
     }
 
     private var mask: AnyShape {

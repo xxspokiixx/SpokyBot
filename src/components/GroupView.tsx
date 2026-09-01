@@ -89,6 +89,7 @@ function ClusterLabel({ bot, name, color }: { bot?: Bot; name: string; color: st
     <div className="mt-1 flex items-center gap-1.5 pl-0.5">
       <MausAvatar
         color={(bot?.color ?? color) as Bot["color"]}
+        bodyId={bot?.mascotBody ?? undefined}
         state={normalizeState(bot?.mascotExpression) ?? "happy"}
         size={16}
         motion="none"
@@ -711,6 +712,7 @@ function RoomSetup({ group, members }: { group: Group; members: Bot[] }) {
                         >
                           <MausAvatar
                             color={member.color}
+                            bodyId={member.mascotBody ?? undefined}
                             state={normalizeState(member.mascotExpression) ?? "happy"}
                             size={24}
                             animated={false}
@@ -1014,7 +1016,7 @@ export function GroupView({ group }: { group: Group }) {
         group.busyBotId === b.id && "ring-2 ring-accent/50 ring-offset-1 ring-offset-app",
       )}
     >
-      <MausAvatar color={b.color} state={normalizeState(b.mascotExpression) ?? "happy"} size={24} animated={false} />
+      <MausAvatar color={b.color} bodyId={b.mascotBody ?? undefined} state={normalizeState(b.mascotExpression) ?? "happy"} size={24} animated={false} />
       {group.busyBotId === b.id && (
         <span className="absolute -right-0.5 -top-0.5 size-2 rounded-full border border-app bg-accent" />
       )}
@@ -1202,6 +1204,7 @@ export function GroupView({ group }: { group: Group }) {
                   <MausAvatar
                     key={b.id}
                     color={b.color}
+                    bodyId={b.mascotBody ?? undefined}
                     state="happy"
                     size={44}
                     motion="none"

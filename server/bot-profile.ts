@@ -1,7 +1,8 @@
 import { z } from "zod";
 
-import { botAvatarCropSchema, botAvatarUrlSchema } from "../shared/bot-avatar.ts";
+import { BOT_AVATAR_CROPS, botAvatarCropSchema, botAvatarUrlSchema } from "../shared/bot-avatar.ts";
 import { BOT_PROFILE_LIMITS } from "../shared/bot-profile.ts";
+import { MASCOT_BODY_IDS, mascotBodySchema } from "../shared/mascot-bodies.ts";
 
 import type { BotRecord } from "./store.ts";
 
@@ -12,6 +13,7 @@ export const BOT_PROFILE_PATCH_FIELDS = [
   "notifications",
   "avatarUrl",
   "avatarCrop",
+  "mascotBody",
   "voice",
   "speakReplies",
 ] as const;
@@ -37,6 +39,7 @@ const profilePatchSchema = z.object({
     })
     .optional(),
   avatarCrop: botAvatarCropSchema.optional(),
+  mascotBody: mascotBodySchema.optional(),
   voice: z
     .string({ error: "voice must be a string" })
     .max(BOT_PROFILE_LIMITS.voice, { error: "voice must be at most 200 characters" })
@@ -49,7 +52,15 @@ export type BotProfilePatchInput = z.input<typeof profilePatchSchema>;
 export type BotProfilePatch = Partial<
   Pick<
     BotRecord,
-    "name" | "title" | "description" | "notifications" | "avatarUrl" | "avatarCrop" | "voice" | "speakReplies"
+    | "name"
+    | "title"
+    | "description"
+    | "notifications"
+    | "avatarUrl"
+    | "avatarCrop"
+    | "mascotBody"
+    | "voice"
+    | "speakReplies"
   >
 >;
 
@@ -75,7 +86,12 @@ export function parseBotProfilePatch(input: BotProfilePatchInput, strict = false
     }
     const issue = parsed.error.issues[0];
     if (issue?.path[0] === "avatarCrop") {
-      return { ok: false, error: "avatarCrop must be mascot, circle, rounded, or square" };
+      const options = `${BOT_AVATAR_CROPS.slice(0, -1).join(", ")}, or ${BOT_AVATAR_CROPS.at(-1)}`;
+      return { ok: false, error: `avatarCrop must be ${options}` };
+    }
+    if (issue?.path[0] === "mascotBody") {
+      const options = `${MASCOT_BODY_IDS.slice(0, -1).join(", ")}, or ${MASCOT_BODY_IDS.at(-1)}`;
+      return { ok: false, error: `mascotBody must be ${options}` };
     }
     return { ok: false, error: issue?.message ?? "invalid profile patch" };
   }

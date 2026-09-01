@@ -540,7 +540,7 @@ function Call({ bot }: { bot: Bot }) {
         <X size={18} />
       </button>
 
-      <MausAvatar color={bot.color} state={mascotState} size={220} animated trackPointer />
+      <MausAvatar color={bot.color} bodyId={bot.mascotBody ?? undefined} state={mascotState} size={220} animated trackPointer />
 
       <div className="flex flex-col items-center gap-1.5 text-center">
         <div className="text-[20px] font-medium text-ink">{bot.name}</div>
