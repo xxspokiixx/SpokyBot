@@ -572,6 +572,10 @@ function createBrowserSurfaceManager({
     return true;
   };
 
+  /** Records what the agent just dispatched so the native event it produces
+   * can be recognized on the way back. Returns the echo so the caller can
+   * restamp it once the CDP command returns — the window has to start when
+   * Electron can actually deliver the event, not when the command was sent. */
   const rememberAgentEcho = (entry, method, params) => {
     const until = now() + AGENT_INPUT_SUPPRESS_MS;
     let echo = null;
@@ -588,18 +592,33 @@ function createBrowserSurfaceManager({
       entry.agentEchoes.push(echo);
       if (entry.agentEchoes.length > 20) entry.agentEchoes.splice(0, entry.agentEchoes.length - 20);
     }
+    return echo;
   };
 
-  const claimHumanControl = (entry, kind = "focus", details) => {
+  /** Restart an echo's window from now. A dispatch slower than
+   * AGENT_INPUT_SUPPRESS_MS would otherwise outlive its own echo, and the
+   * native event arriving after it would be charged to the person. */
+  const restampAgentEcho = (echo) => {
+    if (echo) echo.until = now() + AGENT_INPUT_SUPPRESS_MS;
+  };
+
+  /** Did a person just do this? Only a concrete pointer or key event can
+   * claim the wheel. Focus deliberately cannot: it carries no source details,
+   * and Chromium raises it for reasons that have nothing to do with a person
+   * — a navigation commit, a view attach, focus moving between views in the
+   * same window. Trusting it charged the agent's own page loads to the person
+   * and left the bot locked out of a browser nobody had taken. */
+  const claimHumanControl = (entry, kind, details) => {
     const control = controlFor(entry.botId);
     // Once held, browser agents cannot generate input. Any further native
     // event is therefore human input and remains relevant to document taint.
     if (control.held) return true;
+    // A synthetic dispatch is still in flight: every native event this view
+    // reports is that dispatch arriving, and a person's event cannot be told
+    // apart from it. Suppress before matching so the echo survives for the
+    // event that lands after the CDP call returns.
+    if (entry.agentInputDepth > 0) return false;
     if (agentEchoMatches(entry, kind, details)) return false;
-    // Focus carries no source details. A concrete mouse/key event follows a
-    // real interaction and is compared against the exact synthetic echo;
-    // only the ambiguous focus signal needs the short time guard.
-    if (kind === "focus" && (entry.agentInputDepth > 0 || now() < entry.agentInputUntil)) return false;
     botControl.set(entry.botId, { ...control, held: true, epoch: control.epoch + 1 });
     void neutralizeAgentInput(entry);
     emitUserInteraction({ botId: entry.botId, profile: entry.profile });
@@ -828,15 +847,12 @@ function createBrowserSurfaceManager({
         emitUserInteraction({ botId: entry.botId, profile: entry.profile });
       }
     };
-    contents.on("focus", () => {
-      const wasHeld = controlFor(entry.botId).held;
-      const human = claimHumanControl(entry, "focus");
-      // A newly acquired hold emits above and may expand before Electron
-      // delivers its mouse event, so latch that gesture. An already-held view
-      // must wait for a concrete pointer event; merely restoring its focus
-      // while shrinking should not bounce the workspace open again.
-      if (human && !wasHeld && entry.mode === "compact") beginCompactGestureGuard(false);
-    });
+    // No `focus` listener on purpose. Focus is not evidence of a person: with
+    // focusOnNavigation disabled the agent's loads no longer raise it, but a
+    // view attach or a focus move between views in the same window still can,
+    // and none of those mean a hand on the wheel. The pointer and key
+    // listeners below are the only way control changes hands, and they are
+    // also the only events that can carry a secret into the page.
     contents.on("before-input-event", (_event, input) => {
       const human = claimHumanControl(entry, "keyboard", input);
       // A page can transform/copy a password on input and immediately clear
@@ -962,6 +978,13 @@ function createBrowserSurfaceManager({
         sandbox: true,
         webSecurity: true,
         allowRunningInsecureContent: false,
+        // Chromium focuses a WebContents on every navigation by default, so
+        // each agent loadURL made this child view the window's first
+        // responder — indistinguishable from the person clicking into the
+        // page, which claimed the control lease and locked the bot out of
+        // its own browser. The bot's tab must never steal focus from the
+        // chat; focus emulation below already keeps synthetic input landing.
+        focusOnNavigation: false,
         partition,
       },
     });
@@ -986,7 +1009,6 @@ function createBrowserSurfaceManager({
       dialogs: [],
       notices: [],
       agentInputDepth: 0,
-      agentInputUntil: 0,
       agentEchoes: [],
       pressedMouse: new Map(),
       pressedKeys: new Map(),
@@ -1309,14 +1331,13 @@ function createBrowserSurfaceManager({
         // but they are still synthetic. Mark them exactly like normal CDP
         // input so Electron's before-input-event cannot mistake keyUp for a
         // person taking control and leave the bot stuck behind a false hold.
-        rememberAgentEcho(entry, method, params);
+        const echo = rememberAgentEcho(entry, method, params);
         entry.agentInputDepth += 1;
-        entry.agentInputUntil = Math.max(entry.agentInputUntil, now() + AGENT_INPUT_SUPPRESS_MS);
         try {
           await dbg.sendCommand(method, params);
         } finally {
           entry.agentInputDepth = Math.max(0, entry.agentInputDepth - 1);
-          entry.agentInputUntil = Math.max(entry.agentInputUntil, now() + AGENT_INPUT_SUPPRESS_MS);
+          restampAgentEcho(echo);
         }
       };
       for (const press of mouse) {
@@ -1365,11 +1386,11 @@ function createBrowserSurfaceManager({
       commandParams = presentationMouseParams(entry, commandParams);
     }
     const isAgentInput = method.startsWith("Input.");
+    let agentEcho = null;
     if (isAgentInput) {
       assertAgentLease(entry, lease);
-      rememberAgentEcho(entry, method, commandParams);
+      agentEcho = rememberAgentEcho(entry, method, commandParams);
       entry.agentInputDepth += 1;
-      entry.agentInputUntil = Math.max(entry.agentInputUntil, now() + AGENT_INPUT_SUPPRESS_MS);
     }
     try {
       const result = await dbg.sendCommand(method, commandParams);
@@ -1385,8 +1406,10 @@ function createBrowserSurfaceManager({
       return result;
     } finally {
       if (isAgentInput) {
+        // Depth guarded the whole dispatch; the echo's window starts here, so
+        // it is measured from the moment Electron can deliver the event.
         entry.agentInputDepth = Math.max(0, entry.agentInputDepth - 1);
-        entry.agentInputUntil = Math.max(entry.agentInputUntil, now() + AGENT_INPUT_SUPPRESS_MS);
+        restampAgentEcho(agentEcho);
       }
     }
   };
@@ -1558,7 +1581,13 @@ function createBrowserSurfaceManager({
       const parts = [];
       if (above > 8) parts.push(`${Math.round(above)}px above`);
       if (below > 8) parts.push(`${Math.round(below)}px below`);
-      return `More of the page is off-screen: ${parts.join(", ")} (browser_scroll to see it).`;
+      // Deliberately does not say "scroll to see it". The tree and browser_read
+      // both cover the whole document already, so scrolling pages neither —
+      // saying otherwise sent bots into scroll/read loops that re-fetched the
+      // same prefix forever. It does not promise anything about the screenshot
+      // either: that path clips at the document origin, so it does not follow
+      // the scroll position today. Lazy-loading is the one real effect left.
+      return `More of the page is off-screen: ${parts.join(", ")}. This snapshot already covers the whole document, and browser_read covers it too — scrolling pages neither. Use browser_scroll to let the page load more content.`;
     } catch {
       return null;
     }
@@ -1593,6 +1622,7 @@ function createBrowserSurfaceManager({
     let elements = [];
     let yaml = null;
     let truncated = false;
+    let axOverflow = 0;
     // A closed shadow tree is intentionally invisible to page JavaScript,
     // including the rich snapshot helper. Use the conservative CDP AX
     // fallback so its interactive controls are not silently omitted (and its
@@ -1615,7 +1645,12 @@ function createBrowserSurfaceManager({
     if (yaml === null) {
       await cdp(entry, "Accessibility.enable");
       const { nodes = [] } = await cdp(entry, "Accessibility.getFullAXTree", { depth: AX_TREE_DEPTH });
-      elements = snapshotFromAxNodes(nodes);
+      const fallback = snapshotFromAxNodes(nodes);
+      elements = fallback.elements;
+      if (fallback.truncated) {
+        truncated = true;
+        axOverflow = fallback.total - elements.length;
+      }
       entry.refs = new Set(elements.map((element) => element.ref));
       entry.refKind = "ax";
       entry.refIntegrity = new Map();
@@ -1633,6 +1668,9 @@ function createBrowserSurfaceManager({
     const notes = [
       ...dialogs.map((dialog) => `Dialog (${dialog.type}) was ${dialog.accepted ? "acknowledged" : "dismissed"} automatically; its page-supplied text was hidden.`),
       ...notices,
+      ...(axOverflow > 0
+        ? [`Only the first ${elements.length} interactive elements are listed; ${axOverflow} more were left out. This page needs the limited accessibility fallback, which has no way to page — work from a narrower page to reach the rest.`]
+        : []),
       ...(hint ? [hint] : []),
     ];
     let afterPrivacy;

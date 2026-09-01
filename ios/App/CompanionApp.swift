@@ -37,6 +37,7 @@ struct CompanionApp: App {
                     }
                 }
         }
+        .defaultSize(CompanionLayout.defaultWindowSize)
     }
 }
 
@@ -99,6 +100,7 @@ struct RootView: View {
                 )
             }
         }
+        .background(Color(uiColor: .systemBackground).ignoresSafeArea())
         .onChange(of: session.pairingInvite) { _, invite in
             guard invite != nil else { return }
             hasSeenWelcome = true
@@ -182,7 +184,7 @@ struct UnpairedView: View {
     var body: some View {
         NavigationStack {
             ContentUnavailableView {
-                Label("This phone was unpaired", systemImage: "lock.slash")
+                Label("This device was unpaired", systemImage: "lock.slash")
             } description: {
                 Text("The connection was removed on your computer. Pair again to keep using your chats here.")
             } actions: {

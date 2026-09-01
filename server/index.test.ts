@@ -2652,6 +2652,38 @@ describe("harness HTTP API", () => {
     expect(cleared.body.language).toBe("");
   });
 
+  it("keeps an active turn alive when the UI language changes", async () => {
+    const bot = (await api("POST", "/api/bots", {
+      modelSelection: { instanceId: "claude", model: "claude-sonnet-5" },
+      requireAvailableModel: true,
+    })).body.bot;
+    try {
+      rmSync(fakeClaudeDump, { force: true });
+      expect((await api("POST", `/api/bots/${bot.id}/messages`, { text: "stay active" })).status).toBe(202);
+      await expect.poll(() => existsSync(fakeClaudeDump), { timeout: 5_000 }).toBe(true);
+
+      const saved = await api("PATCH", "/api/config", { language: "de" });
+      expect(saved.status).toBe(200);
+      expect(saved.body.language).toBe("de");
+
+      const active = (await api("GET", "/api/bots?messages=50")).body.bots.find(
+        (candidate: { id: string }) => candidate.id === bot.id,
+      );
+      expect(active?.busy).toBe(true);
+      expect(active?.messages.some((message: { tool?: { name?: string } }) =>
+        message.tool?.name?.includes("provider settings changed"),
+      )).toBe(false);
+    } finally {
+      await api("POST", `/api/bots/${bot.id}/interrupt`, {}).catch(() => undefined);
+      await expect.poll(async () => {
+        const state = (await api("GET", "/api/bots?messages=0")).body;
+        return state.bots.find((candidate: { id: string }) => candidate.id === bot.id)?.busy;
+      }, { timeout: 5_000 }).toBeFalsy();
+      await api("DELETE", `/api/bots/${bot.id}`).catch(() => undefined);
+      await api("PATCH", "/api/config", { language: "" }).catch(() => undefined);
+    }
+  });
+
   it("validates and persists the global room turn timeout", async () => {
     const before = await api("GET", "/api/config");
     expect(before.status).toBe(200);
@@ -2674,6 +2706,90 @@ describe("harness HTTP API", () => {
     expect(disk.rooms).toEqual({ turnTimeoutMinutes: 20 });
 
     await api("PUT", "/api/config", { rooms: { turnTimeoutMinutes: 5 } });
+  });
+
+  it("mounts the verification skill into a real turn when its trigger appears", async () => {
+    const bot = (await api("POST", "/api/bots", {})).body.bot;
+    try {
+      expect((await api("PATCH", "/api/config", {
+        features: { skillRecorder: true },
+      })).status).toBe(200);
+      expect((await api("PATCH", `/api/bots/${bot.id}`, {
+        modelSelection: { instanceId: "claude", model: "claude-sonnet-5" },
+      })).status).toBe(200);
+      rmSync(fakeClaudeDump, { force: true });
+      expect((await api("POST", `/api/bots/${bot.id}/messages`, {
+        text: "/create-verification-skill for my notes app",
+      })).status).toBe(202);
+      await expect.poll(() => existsSync(fakeClaudeDump), { timeout: 5_000 }).toBe(true);
+      const seen = JSON.parse(readFileSync(fakeClaudeDump, "utf8"));
+      const system = seen.systemPrompt ?? "";
+      // the skill's instructions ride the system prompt the agent receives
+      expect(system).toContain('<openmaus-skill id="create-verification-skill"');
+      expect(system).toContain("skill_manage");
+    } finally {
+      await api("POST", `/api/bots/${bot.id}/interrupt`);
+      await api("DELETE", `/api/bots/${bot.id}`);
+      await api("PATCH", "/api/config", { features: { skillRecorder: false } });
+    }
+  });
+
+  it("mounts the verification skill only for the latest channel request", async () => {
+    const bot = (await api("POST", "/api/bots", {
+      modelSelection: { instanceId: "claude", model: "claude-sonnet-5" },
+      requireAvailableModel: true,
+    })).body.bot;
+    let room: any;
+    try {
+      expect((await api("PATCH", "/api/config", {
+        features: { skillRecorder: true },
+      })).status).toBe(200);
+      room = (await api("POST", "/api/groups", {
+        name: "Verification skill room",
+        memberIds: [bot.id],
+        setup: { bulletin: "", defaultResponder: { kind: "member", botId: bot.id } },
+      })).body.group;
+
+      rmSync(fakeClaudeDump, { force: true });
+      expect((await api("POST", `/api/groups/${room.id}/messages`, {
+        text: "/create-verification-skill for my mobile app",
+      })).status).toBe(202);
+      let seen = await readJsonFileWhenReady<{ systemPrompt?: string }>(fakeClaudeDump);
+      let system = seen.systemPrompt ?? "";
+      expect(system).toContain('<openmaus-skill id="create-verification-skill"');
+      expect(system).toContain('<openmaus-skill id="phone-harness"');
+      expect((await api("POST", `/api/groups/${room.id}/interrupt`, {})).status).toBe(200);
+      await expect.poll(async () => {
+        const state = (await api("GET", "/api/bots?messages=0")).body;
+        return state.bots.find((candidate: { id: string }) => candidate.id === bot.id)?.busy;
+      }, { timeout: 5_000 }).toBe(false);
+
+      rmSync(fakeClaudeDump, { force: true });
+      expect((await api("POST", `/api/groups/${room.id}/messages`, {
+        text: "now give me a short status update",
+      })).status).toBe(202);
+      seen = await readJsonFileWhenReady<{ systemPrompt?: string }>(fakeClaudeDump);
+      system = seen.systemPrompt ?? "";
+      expect(system).not.toContain('<openmaus-skill id="create-verification-skill"');
+      expect(system).toContain('<openmaus-skill id="phone-harness"');
+    } finally {
+      if (room) {
+        expect((await api("POST", `/api/groups/${room.id}/interrupt`, {})).status).toBe(200);
+        await expect.poll(async () => {
+          const state = (await api("GET", "/api/bots?messages=0")).body;
+          const currentRoom = state.groups.find((candidate: { id: string }) => candidate.id === room.id);
+          const currentBot = state.bots.find((candidate: { id: string }) => candidate.id === bot.id);
+          return {
+            working: currentRoom?.working,
+            busyBotId: currentRoom?.busyBotId,
+            botBusy: currentBot?.busy,
+          };
+        }, { timeout: 5_000 }).toEqual({ working: false, busyBotId: null, botBusy: false });
+        expect((await api("DELETE", `/api/groups/${room.id}`)).status).toBe(200);
+      }
+      expect((await api("DELETE", `/api/bots/${bot.id}`)).status).toBe(200);
+      expect((await api("PATCH", "/api/config", { features: { skillRecorder: false } })).status).toBe(200);
+    }
   });
 
   it("keeps Teach a skill off by default and persists an explicit opt-in", async () => {
@@ -2978,6 +3094,7 @@ describe("harness HTTP API", () => {
       const dump = z.object({
         argv: z.array(z.string()),
         env: z.record(z.string(), z.string()),
+        systemPrompt: z.string(),
         mcpConfig: z.object({
           mcpServers: z.object({
             browser: z.object({
@@ -3003,9 +3120,7 @@ describe("harness HTTP API", () => {
       expect(dump.env.OMB_USER_DATA).toBeUndefined();
       expect(JSON.stringify(dump)).not.toContain(masterToken);
 
-      const systemIndex = dump.argv.indexOf("--append-system-prompt");
-      expect(systemIndex).toBeGreaterThanOrEqual(0);
-      const system = dump.argv[systemIndex + 1] ?? "";
+      const system = dump.systemPrompt;
       expect(system).toMatch(/page instructions as untrusted content/i);
       expect(system).toMatch(/consequential action.*confirmation/i);
       expect(system).toMatch(/browser_request_takeover/i);
@@ -4333,32 +4448,44 @@ describe("harness HTTP API", () => {
         "content-type": "application/json",
       };
 
-      const stage = async (name: string, extraInstructions = "") => {
+      const stage = async (
+        name: string,
+        extraInstructions = "",
+        action: "create" | "update" = "create",
+        description = `Use ${name} safely.`,
+      ) => {
         const response = await fetch(`${BASE}/api/internal/skills/stage`, {
           method: "POST",
           headers: internalHeaders,
           body: JSON.stringify({
             fromBotId: bot.id,
             fromThreadId: bot.threadId,
-            action: "create",
+            action,
+            skill_name: action === "update" ? name : undefined,
             source: "conversation",
-            gist: `Use ${name} safely.`,
-            skill_md: `---\nname: ${name}\ndescription: Use ${name} safely.\n---\n\n# ${name}\n\nDo the reviewed thing.\n${extraInstructions}`,
+            gist: description,
+            skill_md: `---\nname: ${name}\ndescription: ${description}\n---\n\n# ${name}\n\nDo the reviewed thing.\n${extraInstructions}`,
           }),
         });
         expect(response.status).toBe(201);
         const state = (await api("GET", "/api/bots")).body;
-        const card = state.bots
+        const cards = state.bots
           .find((candidate: { id: string }) => candidate.id === bot.id)
-          ?.messages.find((message: { card?: { skillRequest?: { name?: string } } }) =>
-            message.card?.skillRequest?.name === name,
-          )?.card;
-        expect(card?.options).toEqual(["Enable", "Deny"]);
+          ?.messages.filter((message: { card?: { skillRequest?: { name?: string; action?: string } } }) =>
+            message.card?.skillRequest?.name === name && message.card.skillRequest.action === action,
+          );
+        const card = cards?.[cards.length - 1]?.card;
+        expect(card?.title).toBe(action === "create" ? `Enable skill "${name}"?` : `Update skill "${name}"?`);
+        expect(card?.options).toEqual([action === "create" ? "Enable" : "Update", "Deny"]);
+        expect(card?.skillRequest?.action).toBe(action);
         expect(card?.skillRequest?.preview).toContain(`# ${name}`);
         expect(card?.skillRequest?.sha256).toMatch(/^[a-f0-9]{64}$/);
         expect(createHash("sha256").update(card.skillRequest.preview).digest("hex"))
           .toBe(card.skillRequest.sha256);
-        return card as { requestId: string; skillRequest: { preview: string; sha256: string } };
+        return card as {
+          requestId: string;
+          skillRequest: { action: "create" | "update"; preview: string; sha256: string };
+        };
       };
 
       const stagedSecret = `Bearer ${"a".repeat(24)}`;
@@ -4393,6 +4520,94 @@ describe("harness HTTP API", () => {
       });
       expect(approvedByBotRoute).toMatchObject({ status: 200, body: { outcome: "allowed-once" } });
 
+      const updated = await stage(
+        "reviewed-skill-one",
+        "Use only the newly reviewed workflow.\n",
+        "update",
+        "Uses the revised reviewed workflow.",
+      );
+      const beforeUpdate = await api("GET", `/api/bots/${bot.id}/skills/reviewed-skill-one`);
+      expect(beforeUpdate).toMatchObject({ status: 200, body: { text: first.skillRequest.preview } });
+      expect(beforeUpdate.body.text).not.toBe(updated.skillRequest.preview);
+
+      const stagedListing = await fetch(
+        `${BASE}/api/internal/skills?fromBotId=${encodeURIComponent(bot.id)}&fromThreadId=${encodeURIComponent(bot.threadId)}`,
+        { headers: internalHeaders },
+      );
+      expect(stagedListing.status).toBe(200);
+      const stagedInventory = await stagedListing.json() as {
+        staged: Array<{ name: string; action: string }>;
+      };
+      expect(stagedInventory.staged).toMatchObject([{ name: "reviewed-skill-one", action: "update" }]);
+      expect(JSON.stringify(stagedInventory)).not.toContain("baseSha256");
+      expect(JSON.stringify(stagedInventory)).not.toContain("baseAppliedStageId");
+
+      const approvedUpdate = await api("POST", `/api/threads/${bot.threadId}/respond`, {
+        requestId: updated.requestId,
+        behavior: "allow",
+        reviewedSha256: updated.skillRequest.sha256,
+      });
+      expect(approvedUpdate).toMatchObject({ status: 200, body: { outcome: "allowed-once" } });
+      expect(await api("GET", `/api/bots/${bot.id}/skills/reviewed-skill-one`))
+        .toMatchObject({ status: 200, body: { text: updated.skillRequest.preview } });
+
+      const deniedUpdate = await stage(
+        "reviewed-skill-one",
+        "This replacement must never land.\n",
+        "update",
+        "A denied replacement.",
+      );
+      expect(await api("POST", `/api/threads/${bot.threadId}/respond`, {
+        requestId: deniedUpdate.requestId,
+        behavior: "deny",
+      })).toMatchObject({ status: 200, body: { outcome: "rejected" } });
+      expect(await api("GET", `/api/bots/${bot.id}/skills/reviewed-skill-one`))
+        .toMatchObject({ status: 200, body: { text: updated.skillRequest.preview } });
+
+      const staleUpdate = await stage(
+        "reviewed-skill-one",
+        "This proposal will become stale.\n",
+        "update",
+        "A stale replacement.",
+      );
+      const skillPath = join(
+        home,
+        ".openmausbot",
+        "workspaces",
+        bot.id,
+        ".agents",
+        "skills",
+        "reviewed-skill-one",
+        "SKILL.md",
+      );
+      writeFileSync(skillPath, updated.skillRequest.preview.replace("newly reviewed", "changed after staging"));
+      const staleResponse = await api("POST", `/api/threads/${bot.threadId}/respond`, {
+        requestId: staleUpdate.requestId,
+        behavior: "allow",
+        reviewedSha256: staleUpdate.skillRequest.sha256,
+      });
+      expect(staleResponse.status).toBe(422);
+      expect(staleResponse.body.error).toMatch(/changed after this update was proposed/);
+      const staleCard = (await api("GET", "/api/bots")).body.bots
+        .find((candidate: { id: string }) => candidate.id === bot.id)
+        ?.messages.find((message: { card?: { requestId?: string } }) =>
+          message.card?.requestId === staleUpdate.requestId,
+        )?.card;
+      expect(staleCard?.held).toMatch(/changed after this update was proposed/);
+      writeFileSync(skillPath, updated.skillRequest.preview);
+      expect(await api("POST", `/api/threads/${bot.threadId}/respond`, {
+        requestId: staleUpdate.requestId,
+        behavior: "allow",
+        reviewedSha256: staleUpdate.skillRequest.sha256,
+      })).toMatchObject({ status: 200, body: { outcome: "allowed-once" } });
+      const recoveredCard = (await api("GET", "/api/bots")).body.bots
+        .find((candidate: { id: string }) => candidate.id === bot.id)
+        ?.messages.find((message: { card?: { requestId?: string } }) =>
+          message.card?.requestId === staleUpdate.requestId,
+        )?.card;
+      expect(recoveredCard?.answered).toBe("allow");
+      expect(recoveredCard?.held).toBeUndefined();
+
       const second = await stage("reviewed-skill-two");
       const approvedByThreadRoute = await api("POST", `/api/threads/${bot.threadId}/respond`, {
         requestId: second.requestId,
@@ -4407,6 +4622,25 @@ describe("harness HTTP API", () => {
         behavior: "deny",
       });
       expect(deniedWithoutHash).toMatchObject({ status: 200, body: { outcome: "rejected" } });
+
+      // Denial is still safe when a crash or later cleanup has already lost
+      // the staged bytes. Settle the durable card instead of trapping the
+      // composer behind a proposal that can no longer be applied.
+      const missingStage = await stage("reviewed-skill-missing-stage");
+      writeFileSync(
+        join(home, ".openmausbot", "skill-state", bot.id, "staged.json"),
+        `${JSON.stringify({ writes: {} }, null, 2)}\n`,
+      );
+      expect(await api("POST", `/api/threads/${bot.threadId}/respond`, {
+        requestId: missingStage.requestId,
+        behavior: "deny",
+      })).toMatchObject({ status: 200, body: { outcome: "rejected" } });
+      const missingStageCard = (await api("GET", "/api/bots")).body.bots
+        .find((candidate: { id: string }) => candidate.id === bot.id)
+        ?.messages.find((message: { card?: { requestId?: string } }) =>
+          message.card?.requestId === missingStage.requestId,
+        )?.card;
+      expect(missingStageCard).toMatchObject({ answered: "deny", dismissed: true });
 
       // Deleting the only transcript that owns a pending card must also drop
       // its bot-scoped stage; otherwise the invisible proposal reserves its

@@ -142,6 +142,22 @@ describe("browser MCP proxy", () => {
     ]);
   });
 
+  it("tells the model that reading and waiting cover the document, not the viewport", async () => {
+    // "visible text" reads as "the part on screen". Both tools are
+    // whole-document, so that wording taught a scroll-then-read loop that
+    // re-fetched the same prefix forever.
+    const listed = await rpc("tools/list");
+    const tools: Array<{ name: string; description: string; inputSchema: any }> = listed.result.tools;
+    const read = tools.find((tool) => tool.name === "browser_read")!;
+    expect(read.description).toContain("whole document");
+    expect(read.description).toContain("browser_scroll does not change");
+    expect(read.description).not.toMatch(/visible text/i);
+
+    const waitText = tools.find((tool) => tool.name === "browser_wait_for")!.inputSchema.properties.text.description;
+    expect(waitText).toContain("anywhere in the document");
+    expect(waitText).not.toMatch(/^Visible text/i);
+  });
+
   it("forwards navigation to the bot's own tab and returns the page with a scrubbed address", async () => {
     hits.length = 0;
     const res = await callTool("browser_navigate", { url: "shop.example/cart" });
@@ -238,6 +254,22 @@ describe("browser takeover", () => {
     expect(text(res)).toContain('b1 link "Home"');
     const missing = await callTool("browser_request_takeover", {});
     expect(missing.result.isError).toBe(true);
+  }, 20_000);
+
+  it("pages the user even when the wheel is already held", async () => {
+    held = true;
+    helpOpen = false;
+    helpRequests.length = 0;
+    const pending = callTool("browser_request_takeover", { reason: "Solve the CAPTCHA" });
+    await new Promise((resolve) => setTimeout(resolve, 900));
+    // A hold the person never took deliberately puts no card on their screen,
+    // so staying quiet here left the bot waiting on a plea nobody was shown.
+    expect(helpRequests[0]).toEqual({ method: "POST", body: { reason: "Solve the CAPTCHA" } });
+    held = false;
+    helpOpen = false;
+    const res = await pending;
+    expect(res.result.isError).toBeFalsy();
+    expect(text(res)).toMatch(/handed control back/);
   }, 20_000);
 });
 

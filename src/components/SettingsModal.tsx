@@ -34,7 +34,7 @@ const SECTIONS: Array<{
   { id: "experimental", label: "Experimental", icon: FlaskConical, keywords: ["early", "preview", "teach", "skill", "browser", "profiles"] },
   { id: "connections", label: "Connections", icon: KeyRound, keywords: ["keys", "api", "composio", "box", "xai", "vps"] },
   { id: "engines", label: "Engines", icon: Terminal, keywords: ["models", "claude", "grok", "providers", "cli"] },
-  { id: "companion", label: "Phone", icon: Smartphone, keywords: ["companion", "phone", "pair", "mobile"] },
+  { id: "companion", label: "Phone", icon: Smartphone, keywords: ["companion", "phone", "pair", "pairing", "mobile", "https", "secure", "tailscale", "wifi", "advanced"] },
   { id: "computer", label: "Local VM", icon: Monitor, keywords: ["vm", "virtual", "desktop"] },
   { id: "usage", label: "Usage", icon: Coins, keywords: ["tokens", "cost", "billing"] },
 ];
@@ -273,7 +273,7 @@ function ExperimentalFeaturesRow() {
         <div className="min-w-0">
           <div className="text-[14px] font-medium text-ink">Teach a skill</div>
           <div className="mt-0.5 text-[12px] leading-relaxed text-ink-secondary">
-            Show the workflow recorder and let supported bots stage skills with /learn.
+            Record a workflow, use /learn, or ask a supported bot to run /create-verification-skill. Every change waits for your review.
           </div>
         </div>
         <Switch

@@ -34,6 +34,7 @@ import { goalCoordinatorForComposer, groupComposerHint, roomRespondersForCompose
 import { PendingApprovalActions, PendingApprovalPanel, pendingApprovals } from "./PendingApproval";
 import { useDesktopCapabilities } from "./DesktopCapabilities";
 import { ReplyQuote } from "./ReplyQuote";
+import { ComposerInjectNow, composerCanInjectNow } from "./ComposerInjectNow";
 
 /** The active @mention query at the caret: the text between an `@` that
  * starts a word and the caret. null = no mention being typed. */
@@ -51,13 +52,6 @@ type MentionChoice = { id: string; name: string; bot?: Bot };
 
 interface ComposerDraftSnapshot extends ComposerSendSnapshot {
   reply: Message | null;
-}
-
-interface QueuedGroupSend {
-  text: string;
-  replyToId?: string;
-  mode: "chat" | "goal";
-  draft: ComposerDraftSnapshot;
 }
 
 /** Composer chip for Auto mode. Compact label (Ask / Auto); the menu still
@@ -339,28 +333,15 @@ export function Composer({
     });
   };
 
-  // Rooms hold one message client-side while a member speaks; it auto-sends
-  // the moment the room settles. 1:1 mid-turn sends still POST (the harness
-  // queue), but stay off the transcript until drain — the chip here is the
-  // pending row so they cannot become the active leaf mid-turn.
-  const [queued, setQueued] = useState<QueuedGroupSend | null>(null);
-  const queuedRef = useRef(queued);
-  const clearQueued = useCallback(() => {
-    queuedRef.current = null;
-    setQueued(null);
-  }, []);
-  useEffect(
-    () => () => {
-      const unsent = queuedRef.current;
-      if (unsent) restoreDraft(unsent.draft);
-    },
-    [draftId, restoreDraft],
-  );
-  // 1:1 queued sends render as ghost rows in the transcript tail (each with
-  // its own cancel); the composer chip remains only for rooms, whose queue
-  // is local to this component.
-  const pendingChip = group ? queued?.text : undefined;
-  // a chip on its own is a message: the send control has to appear for it
+  // Busy sends are owned by the harness immediately for both channels and
+  // 1:1 chats. Keeping a channel follow-up in this component used to lose its
+  // auto-send intent whenever navigation unmounted the composer.
+  const pendingCount = (state.pendingQueued[threadId] ?? []).length;
+  const canInject = composerCanInjectNow(busy, locked, pendingCount);
+  const interruptTurn = () => {
+    if (group) dispatch({ type: "interruptGroup", groupId: group.id });
+    else if (bot) dispatch({ type: "interrupt", botId: bot.id });
+  };
   const fileInput = useRef<HTMLInputElement>(null);
   const [autoWarn, setAutoWarn] = useState(false);
   const [attachmentNotice, setAttachmentNotice] = useState<string | null>(null);
@@ -422,10 +403,7 @@ export function Composer({
     }
   };
   const send = () => {
-    // A busy channel already has one locally held send. Keep any newer text
-    // as an editable draft until that send is dispatched; replacing the slot
-    // here would silently lose the first message.
-    if (locked || (group && queued)) return;
+    if (locked) return;
     if (attachments.some((attachment) => attachment.kind === "image") && !imageTargetsSupport(text, channelMode)) {
       dispatch({ type: "error", message: "The selected responder does not support image attachments." });
       return;
@@ -444,16 +422,6 @@ export function Composer({
       threadId,
       channelMode: group ? channelMode : undefined,
     };
-    if (busy && group) {
-      const pending = { text: t, replyToId: replyTo?.id, mode: channelMode, draft: sentDraft };
-      queuedRef.current = pending;
-      setQueued(pending);
-      setText("");
-      setAttachments([]);
-      onConsumeReply?.();
-      setChannelMode("chat");
-      return;
-    }
     if (group) {
       dispatch({
         type: "sendGroup",
@@ -465,7 +433,7 @@ export function Composer({
         mode: channelMode,
         onError: () => restoreDraft(sentDraft),
       });
-      track("message_sent", { room: true, mode: channelMode });
+      track("message_sent", { room: true, mode: channelMode, queued: busy });
     } else if (bot) {
       dispatch({
         type: "send",
@@ -483,29 +451,6 @@ export function Composer({
     onConsumeReply?.();
     if (group) setChannelMode("chat");
   };
-  useEffect(() => {
-    if (busy || !queued) return;
-    if (group) {
-      if (queued.text.includes("<attached-image ") && !imageTargetsSupport(queued.text, queued.mode)) {
-        dispatch({ type: "error", message: "The selected responder does not support image attachments." });
-        clearQueued();
-        restoreDraft(queued.draft);
-        return;
-      }
-      clearQueued();
-      dispatch({
-        type: "sendGroup",
-        groupId: group.id,
-        text: queued.text,
-        sendId: queued.draft.sendId,
-        replyToId: queued.replyToId,
-        threadId: queued.draft.threadId,
-        mode: queued.mode,
-        onError: () => restoreDraft(queued.draft),
-      });
-      track("message_sent", { room: true, queued: true, mode: queued.mode });
-    }
-  }, [busy, queued, group, members, state.instances, dispatch, clearQueued, restoreDraft]);
 
   // native dictation: partials stream into the input while the Swift
   // helper runs; the final transcript stays in the box, ready to edit/send
@@ -586,23 +531,6 @@ export function Composer({
             </button>
           </div>
         ))}
-        {pendingChip && (
-          <div className="mb-2 flex items-center gap-2 rounded-lg border border-hairline/40 bg-panel px-3 py-2 text-[12.5px] text-ink-secondary">
-            <Clock size={13} className="shrink-0" />
-            <span className="min-w-0 flex-1 truncate">
-              Queued — sends when {busyName} finishes: “{pendingChip}”
-            </span>
-            <button
-              type="button"
-              onClick={clearQueued}
-              aria-label="Cancel queued message"
-              title="Cancel queued message"
-              className="ml-auto flex size-5 shrink-0 items-center justify-center rounded text-ink-secondary hover:bg-raised hover:text-ink"
-            >
-              <X size={13} strokeWidth={2.5} />
-            </button>
-          </div>
-        )}
         {pickerOpen && (
           <div
             role="listbox"
@@ -647,10 +575,7 @@ export function Composer({
               pending={approval}
               threadId={threadId}
               bot={approvalBot}
-              onCancelTurn={() => {
-                if (group) dispatch({ type: "interruptGroup", groupId: group.id });
-                else if (bot) dispatch({ type: "interrupt", botId: bot.id });
-              }}
+              onCancelTurn={interruptTurn}
             />
           </div>
         )}
@@ -814,6 +739,8 @@ export function Composer({
               ? "Answer the approval above to continue"
               : recording
               ? "Listening…"
+              : canInject
+                ? `${busyName} is working — inject now to interrupt with the queued message`
               : busy && canSteer
                 ? `${busyName} is working — Enter sends this into the running turn`
               : busy
@@ -830,12 +757,13 @@ export function Composer({
             className="max-h-[9rem] min-h-6 min-w-0 flex-1 resize-none overflow-y-auto self-center bg-transparent px-1 py-1 text-[15px] leading-6 text-ink placeholder:text-ink-secondary focus:outline-none"
           />
           <div className="flex items-center gap-1">
-          {busy && !locked && (
+          {/* Inject is stop-then-steer made visible. The square stop would
+              drain the same queue, so it yields while a send is waiting.
+              Cancelling the ghost/chip brings Stop back. */}
+          {canInject && <ComposerInjectNow onInject={interruptTurn} />}
+          {busy && !locked && !canInject && (
           <button
-            onClick={() => {
-              if (group) dispatch({ type: "interruptGroup", groupId: group.id });
-              else if (bot) dispatch({ type: "interrupt", botId: bot.id });
-            }}
+            onClick={interruptTurn}
             aria-label="Stop this turn"
             className="flex size-8 shrink-0 items-center justify-center rounded-full text-ink-secondary hover:bg-raised hover:text-ink"
             title="Stop"
@@ -861,20 +789,15 @@ export function Composer({
         {hasContent && !locked && (
           <button
             onClick={send}
-            disabled={Boolean(group && queued)}
             aria-label={
-              group && queued
-                ? "Waiting for queued message"
-                : busy && canSteer
+              busy && canSteer
                   ? "Send into the running turn"
                   : busy
                     ? "Queue message"
                     : "Send message"
             }
             title={
-              group && queued
-                ? "Your earlier message will send when the current turn finishes"
-                : busy && canSteer
+              busy && canSteer
                   ? "Send into the running turn"
                   : busy
                     ? "Sends when the current turn finishes"
@@ -882,9 +805,7 @@ export function Composer({
             }
             className={cn(
               "flex size-8 shrink-0 items-center justify-center rounded-full text-white",
-              group && queued
-                ? "cursor-not-allowed bg-raised text-ink-secondary"
-                : busy && !canSteer
+              busy && !canSteer
                   ? "bg-raised text-ink-secondary hover:bg-raised-hover"
                   : "bg-accent hover:brightness-110",
             )}

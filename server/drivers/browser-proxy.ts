@@ -284,7 +284,7 @@ export const TOOLS = [
     inputSchema: {
       type: "object",
       properties: {
-        text: { type: "string", description: "Visible text to wait for." },
+        text: { type: "string", description: "Text to wait for, anywhere in the document — not only the part on screen." },
         url: { type: "string", description: "A substring the address must contain." },
         timeout_ms: { type: "integer", minimum: 250, maximum: 30000 },
       },
@@ -294,7 +294,7 @@ export const TOOLS = [
   {
     name: "browser_read",
     description:
-      "Read the page's visible text (articles, results, tables) as plain text — for understanding content, not for acting. Use browser_snapshot for things to click.",
+      "Read the page's rendered text (articles, results, tables) as plain text. Covers the whole document, not just the part on screen, so browser_scroll does not change what it returns; a long page is cut with a note saying so. For understanding content, not for acting — use browser_snapshot for things to click.",
     inputSchema: { type: "object", properties: {} },
   },
   {
@@ -356,9 +356,13 @@ async function requestTakeover(reason: string, request: HostRequest, waitMs = TA
     return textResult("Nobody can be paged for this browser right now. Tell the user in chat what you need them to do in the Browser panel.", true);
   }
   const initial = await control.state(true);
-  // if the person is already driving, don't clobber whatever plea they are reading
-  const requestId = initial.held ? null : await control.requestHelp(reason);
-  if (!initial.held && requestId === null) {
+  // Page unless a plea is already open. Skipping this whenever the person
+  // merely *held* the wheel was the silent-freeze bug: a hold they never took
+  // deliberately has no plea for them to read, so nothing appeared in the app
+  // while the bot waited out its whole window. The harness keeps an existing
+  // plea rather than replacing it, so asking while they drive is safe.
+  const requestId = initial.helpOpen ? null : await control.requestHelp(reason);
+  if (!initial.helpOpen && requestId === null) {
     return textResult("The user could not be paged right now. Tell them in chat what you need them to do in the Browser panel.", true);
   }
   let sawHold = initial.held;

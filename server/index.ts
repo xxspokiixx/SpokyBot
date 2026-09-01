@@ -108,6 +108,7 @@ import { RETRY_MAX_ATTEMPTS } from "./drivers/retry.ts";
 import {
   GROUP_GOAL_MAX_TURNS,
   groupGoalAssignmentKey,
+  groupGoalCompletionTurnId,
   groupGoalCoordinatorInstructions,
   groupGoalWorkerInstructions,
   parseGroupGoalDecision,
@@ -128,6 +129,12 @@ import {
   queuedSteeredMessage,
   queueSteeredMessage,
 } from "./steer-queue.ts";
+import {
+  cancelChannelMessage,
+  drainChannelMessages,
+  queuedChannelMessage,
+  queueChannelMessage,
+} from "./channel-queue.ts";
 import {
   acceptedSendMatch,
   parseSendId,
@@ -174,6 +181,7 @@ import {
 } from "./section-context.ts";
 import {
   applyStagedSkillWrite,
+  getStagedSkillWrite,
   installSkill,
   listSkills,
   listStagedSkillWrites,
@@ -975,6 +983,10 @@ function finishGroupTurnOperation(groupId: string, operation: GroupTurnOperation
   if (operations?.size === 0) groupTurnOperations.delete(groupId);
   const group = store.group(groupId);
   if (group) broadcast({ kind: "group", group: publicGroupState(group) });
+  // A follow-up sent while this operation was running belongs to the
+  // harness, not whichever composer happened to be mounted. Hand the next
+  // one to the ordinary channel runner as soon as the channel is truly idle.
+  drainQueuedChannelSends();
 }
 
 function finishGroupGoalRun(
@@ -1621,6 +1633,9 @@ bus.subscribe((event: RuntimeEvent) => {
   const coordinatorTurnsForThread = groupGoalCoordinatorTurns.get(event.threadId);
   const ambiguousCoordinatorText = !event.turnId && (coordinatorTurnsForThread?.size ?? 0) > 1;
   const goalCoordinatorTurn = groupGoalCoordinatorTurnForEvent(event);
+  const completedTurnId = event.type === "turn.completed"
+    ? groupGoalCompletionTurnId(event.turnId, goalCoordinatorTurn?.turnId)
+    : event.turnId;
   if (goalCoordinatorTurn?.discard && retiredProviderTurns.has(event.turnId)) {
     removeGroupGoalCoordinatorTurn(event.threadId, goalCoordinatorTurn);
     return;
@@ -1670,7 +1685,7 @@ bus.subscribe((event: RuntimeEvent) => {
   };
 
   if (coordinatorVisibleText) {
-    pushMessage({ role: "bot", kind: "text", text: coordinatorVisibleText });
+    pushMessage({ role: "bot", kind: "text", text: coordinatorVisibleText, turnId: completedTurnId });
     lastReply.set(event.threadId, coordinatorVisibleText);
   }
 
@@ -1683,7 +1698,7 @@ bus.subscribe((event: RuntimeEvent) => {
     case "item.completed":
       if (event.itemType === "assistant_text") {
         const text = event.text;
-        pushMessage({ role: "bot", kind: "text", text });
+        pushMessage({ role: "bot", kind: "text", text, turnId: event.turnId });
         // kept so "finished" can say what it finished with, rather than
         // just that something ended
         lastReply.set(event.threadId, text);
@@ -1959,6 +1974,7 @@ bus.subscribe((event: RuntimeEvent) => {
       turnUsage.set(event.threadId, { input: event.input, output: event.output, cachedInput: event.cachedInput });
       break;
     case "turn.completed": {
+      if (completedTurnId) store.markTerminalAssistantMessage(event.threadId, completedTurnId);
       const reply = lastReply.get(event.threadId) ?? "";
       lastReply.delete(event.threadId);
       const lastReported = turnUsage.get(event.threadId);
@@ -2584,7 +2600,10 @@ async function startTurn(
       let browser: Awaited<ReturnType<typeof browserIntegration>> = null;
       const selectedSkills = selectBundledSkills(
         text,
-        instance.adapter.capabilities.phoneMcp === true ? ["phoneMcp"] : [],
+        [
+          ...(instance.adapter.capabilities.phoneMcp === true ? ["phoneMcp"] : []),
+          ...(skillAuthoring ? ["skillAuthoring"] : []),
+        ],
         availableSkills(),
       );
       if (selectedSkills.some((skill) => skill.manifest.requiredCapabilities.includes("phoneMcp"))) {
@@ -2840,7 +2859,7 @@ async function startTurn(
         ? " If the user explicitly asks to list or review, schedule, run, or change routines, use list_routines and propose_routine or propose_routine_action. A proposal is not applied until the user confirms its in-app card, so never claim the action completed before that confirmation."
         : "";
       const learnPrompt = skillAuthoring
-        ? " If the user sends /learn or asks you to save a reusable procedure from this work, use skills_list and skill_manage. Only create new skills, include the URL, folder, or conversation as source provenance, and wait for the user to review and enable the staged SKILL.md."
+        ? " If the user sends /learn or asks you to save a reusable procedure from this work, use skills_list and skill_manage. Create new skills; update an existing learned skill only when the user explicitly asks to revise that exact name. Include source provenance and wait for the review card decision."
         : "";
 
       // (activeVpsThreads was already claimed above, before the provision or
@@ -3444,10 +3463,21 @@ async function runGroupMemberTurn(
   if (hop < MAX_COMMS_DEPTH && instance.adapter.capabilities.agentsMcp === true) {
     integrations.agents = agentsIntegration(bot.id, threadId, hop, skillAuthoring);
   }
-  const selectedSkills = selectBundledSkills(
-    serializeRoomContext(threadId, userName),
-    instance.adapter.capabilities.phoneMcp === true ? ["phoneMcp"] : [],
-    availableSkills(),
+  const latestUser = [...store.activePath(threadId)].reverse().find(
+    (message) => message.role === "user" && message.kind === "text" && message.text,
+  );
+  const skills = availableSkills();
+  const selectedSkills = mergeSkills(
+    selectBundledSkills(
+      serializeRoomContext(threadId, userName),
+      instance.adapter.capabilities.phoneMcp === true ? ["phoneMcp"] : [],
+      skills,
+    ),
+    selectBundledSkills(
+      latestUser?.text ?? "",
+      skillAuthoring ? ["skillAuthoring"] : [],
+      skills,
+    ),
   );
   if (selectedSkills.some((skill) => skill.manifest.requiredCapabilities.includes("phoneMcp"))) {
     integrations.phone = phoneIntegration();
@@ -3556,13 +3586,12 @@ async function runGroupMemberTurn(
     integrations.agents &&
       "If the user explicitly asks to list or review, schedule, run, or change routines, use list_routines and propose_routine or propose_routine_action. A proposal is not applied until the user confirms its in-app card, so never claim the action completed before that confirmation.",
     skillAuthoring &&
-      "If the user sends /learn or asks you to save a reusable procedure from this work, use skills_list and skill_manage. Only create new skills, include the URL, folder, or conversation as source provenance, and wait for the user to review and enable the staged SKILL.md.",
+      "If the user sends /learn or asks you to save a reusable procedure from this work, use skills_list and skill_manage. Create new skills; update an existing learned skill only when the user explicitly asks to revise that exact name. Include source provenance and wait for the review card decision.",
     orchestration?.systemInstructions,
   ]
     .filter(Boolean)
     .join("\n");
 
-  const latestUser = [...store.activePath(threadId)].reverse().find((message) => message.role === "user" && message.kind === "text" && message.text);
   const learnTurn = skillAuthoring && latestUser?.text ? expandLearnTurnText(latestUser.text) : "";
   const learnBlock = learnTurn && learnTurn !== latestUser?.text ? `\n\n${learnTurn}` : "";
   const text = `${serializeRoomContext(threadId, userName)}\n\n(Reply to the conversation above as ${bot.name}.)${learnBlock}${cardContinuation ? `\n\n${cardContinuation}` : ""
@@ -4040,6 +4069,7 @@ function startGroupTurn(
   replyTo?: Message,
   sendId?: string,
   channelMode: "chat" | "goal" = "chat",
+  queueId?: string,
 ) {
   const group = store.group(groupId);
   if (!group) throw Object.assign(new Error("no such group"), { status: 404 });
@@ -4056,6 +4086,7 @@ function startGroupTurn(
     replyToId: replyTo?.id,
     sendId,
     channelMode,
+    queueId,
   });
   if (!group.dm) store.titleGroupTaskFromFirstMessage(group.id, text, threadId);
 
@@ -4164,6 +4195,37 @@ function startGroupTurn(
   const tracked = next.finally(() => finishGroupTurnOperation(groupId, operation));
   groupQueues.set(groupId, tracked.catch(() => {}));
   return message;
+}
+
+function drainQueuedChannelSends(): void {
+  drainChannelMessages(
+    (groupId) => {
+      const group = store.group(groupId);
+      return group ? groupIsWorking(group) : false;
+    },
+    ({ groupId, threadId, text, replyToId, sendId, mode, id }) => {
+      const group = store.group(groupId);
+      const ownsThread = group?.dm
+        ? group.threadId === threadId
+        : Boolean(group && store.groupTaskByThread(group.id, threadId));
+      if (!group || !ownsThread) return;
+      try {
+        startGroupTurn(groupId, text, resolveReplyTarget(threadId, replyToId), sendId, mode, id);
+      } catch (error) {
+        store.appendMessage(threadId, {
+          role: "bot",
+          kind: "activity",
+          tool: {
+            name: `error: queued channel message could not start — ${(error instanceof Error ? error.message : String(error)).slice(0, 120)}`,
+            ok: false,
+          },
+        });
+      }
+      // A message with no eligible responder creates no operation. Continue
+      // draining instead of leaving later user messages behind it forever.
+      queueMicrotask(drainQueuedChannelSends);
+    },
+  );
 }
 
 function sameCalendarRoster(group: GroupRecord, botIds: readonly string[]): boolean {
@@ -4283,7 +4345,7 @@ function skillProposalPersistence(botId: string, threadId: string) {
 /** Listing endpoints expose lifecycle metadata, never the staged instructions
  * themselves. The exact review copy lives only on the durable approval card. */
 function stagedSkillListing(staged: ReturnType<typeof listStagedSkillWrites>[number]) {
-  const { files: _files, ...listing } = staged;
+  const { files: _files, baseSha256: _baseSha256, baseAppliedStageId: _baseAppliedStageId, ...listing } = staged;
   return listing;
 }
 
@@ -4311,14 +4373,16 @@ function rejectDeletedThreadSkillStages(cleanups: Array<{ botId: string; stagedI
   for (const cleanup of cleanups) rejectStagedSkillWrite(cleanup.botId, cleanup.stagedId);
 }
 
-function skillCardCopy(staged: { action: "create"; name: string; gist: string; warnings: string[] }): {
+function skillCardCopy(staged: { action: "create" | "update"; name: string; gist: string; warnings: string[] }): {
   title: string;
   subtitle: string;
   tool: string;
 } {
   const warnings = staged.warnings.length ? `\n\nWarnings:\n- ${staged.warnings.join("\n- ")}` : "";
   return {
-    title: `Enable skill "${staged.name}"?`,
+    title: staged.action === "create"
+      ? `Enable skill "${staged.name}"?`
+      : `Update skill "${staged.name}"?`,
     subtitle: `${staged.gist || staged.name}${warnings}`,
     tool: "stage_skill",
   };
@@ -4329,7 +4393,7 @@ function appendSkillRequestCard(args: {
   threadId: string;
   staged: {
     id: string;
-    action: "create";
+    action: "create" | "update";
     name: string;
     gist: string;
     source: string;
@@ -4363,7 +4427,7 @@ function appendSkillRequestCard(args: {
     card: {
       title: copy.title,
       subtitle: copy.subtitle,
-      options: ["Enable", "Deny"],
+      options: [args.staged.action === "create" ? "Enable" : "Update", "Deny"],
       requestId,
       tool: copy.tool,
       skillRequest: payload,
@@ -4398,14 +4462,39 @@ function resolveSkillRequest(args: {
   if (card.answered || card.dismissed) {
     // Settlement is durable before cleanup. Retry cleanup for either outcome
     // so a disk failure cannot leave a denied name permanently reserved.
-    rejectStagedSkillWrite(args.botId, request.stagedId);
+    const cleanup = rejectStagedSkillWrite(args.botId, request.stagedId);
+    if ("applied" in cleanup && cleanup.applied && card.answered !== "allow") {
+      store.patchMessage(args.threadId, message.id, {
+        card: { ...card, answered: "allow", dismissed: false, held: undefined },
+      });
+      return { claimed: true, outcome: "allowed-once", alreadySettled: true };
+    }
     return { claimed: true, outcome: card.answered === "allow" ? "allowed-once" : "rejected", alreadySettled: true };
   }
   if (args.behavior !== "allow") {
+    const rejected = rejectStagedSkillWrite(args.botId, request.stagedId);
+    if ("error" in rejected && rejected.error !== "no such staged skill") {
+      return { claimed: true, status: 409, error: rejected.error };
+    }
+    if ("applied" in rejected) {
+      store.patchMessage(args.threadId, message.id, {
+        card: { ...card, answered: "allow", dismissed: false, held: undefined },
+      });
+      appendDecision(DATA_DIR, {
+        threadId: args.threadId,
+        requestId: args.requestId,
+        botId: args.botId,
+        botName: args.botName,
+        tool: card.tool,
+        summary: card.subtitle,
+        decision: "user-approved",
+        source: "user",
+      });
+      return { claimed: true, outcome: "allowed-once" };
+    }
     store.patchMessage(args.threadId, message.id, {
-      card: { ...card, answered: "deny", dismissed: true },
+      card: { ...card, answered: "deny", dismissed: true, held: undefined },
     });
-    rejectStagedSkillWrite(args.botId, request.stagedId);
     appendDecision(DATA_DIR, {
       threadId: args.threadId,
       requestId: args.requestId,
@@ -4436,16 +4525,66 @@ function resolveSkillRequest(args: {
   if (previewSha256 !== request.sha256) {
     return { claimed: true, status: 422, error: "the skill preview changed after review — deny and recreate it" };
   }
+  const staged = getStagedSkillWrite(args.botId, request.stagedId);
+  if (!staged) {
+    // A later proposal may have pruned this already-applied replay record.
+    // The protected manifest still binds the stage id and reviewed hash, so
+    // the old card can be settled without asking the model to recreate it.
+    const replayed = applyStagedSkillWrite(args.botId, request.stagedId, {
+      expectedSha256: request.sha256,
+    });
+    if (
+      "error" in replayed ||
+      replayed.name !== request.name ||
+      replayed.source !== request.source
+    ) {
+      return {
+        claimed: true,
+        status: 422,
+        error: "the staged skill no longer matches this approval card",
+      };
+    }
+    const patched = store.patchMessage(args.threadId, message.id, {
+      card: { ...card, answered: "allow", held: undefined },
+    });
+    if (!patched) {
+      return { claimed: true, status: 409, error: "the learned-skill approval card is no longer available" };
+    }
+    appendDecision(DATA_DIR, {
+      threadId: args.threadId,
+      requestId: args.requestId,
+      botId: args.botId,
+      botName: args.botName,
+      tool: card.tool,
+      summary: card.subtitle,
+      decision: "user-approved",
+      source: "user",
+    });
+    return { claimed: true, outcome: "allowed-once" };
+  }
+  if (
+    request.requestId !== args.requestId ||
+    request.threadId !== args.threadId ||
+    staged.action !== request.action ||
+    staged.name !== request.name ||
+    staged.source !== request.source ||
+    staged.sha256 !== request.sha256
+  ) {
+    return { claimed: true, status: 422, error: "the staged skill no longer matches this approval card" };
+  }
   const applied = applyStagedSkillWrite(args.botId, request.stagedId, {
     expectedSha256: request.sha256,
     onApplied: () => {
       const patched = store.patchMessage(args.threadId, message.id, {
-        card: { ...card, answered: "allow" },
+        card: { ...card, answered: "allow", held: undefined },
       });
       if (!patched) throw new Error("the learned-skill approval card is no longer available");
     },
   });
   if ("error" in applied) {
+    store.patchMessage(args.threadId, message.id, {
+      card: { ...card, held: applied.error },
+    });
     return { claimed: true, status: 422, error: applied.error };
   }
   appendDecision(DATA_DIR, {
@@ -5111,16 +5250,21 @@ const server = createServer(async (req, res) => {
         }
         const persistence = skillProposalPersistence(from.id, fromThreadId);
         if (!persistence.ok) return json(res, persistence.status, { error: persistence.error });
-        const action = body.action === "create" ? "create" : "";
-        if (!action) return json(res, 400, { error: 'action must be "create"' });
+        const action = body.action === "create" || body.action === "update" ? body.action : "";
+        if (!action) return json(res, 400, { error: 'action must be "create" or "update"' });
         const skillMd = typeof body.skill_md === "string" ? body.skill_md : "";
         if (!skillMd.trim()) {
           return json(res, 400, { error: 'skill_manage needs skill_md: the full SKILL.md including YAML frontmatter, for example ---\\nname: file-expense\\ndescription: Files an expense in the company portal.\\n---\\n\\n# File expense\\n' });
         }
         const source = typeof body.source === "string" ? body.source.trim() : "";
         if (!source) return json(res, 400, { error: 'source must be a URL, folder, or "conversation"' });
+        const targetName = typeof body.skill_name === "string" ? body.skill_name.trim() : "";
+        if (action === "update" && !targetName) {
+          return json(res, 400, { error: "skill_name is required when action is update" });
+        }
         const staged = stageSkillWrite(from.id, {
           action,
+          targetName: targetName || undefined,
           files: [{ path: "SKILL.md", content: skillMd }],
           gist: typeof body.gist === "string" ? body.gist : undefined,
           source: learnSource(source),
@@ -6644,6 +6788,17 @@ const server = createServer(async (req, res) => {
             if (accepted.kind === "match") {
               return { ok: true as const, threadId, message: accepted.message };
             }
+            const queued = queuedChannelMessage(group.id, threadId, sendId);
+            if (queued) {
+              if (
+                queued.text !== text ||
+                queued.replyToId !== replyTo?.id ||
+                queued.mode !== channelMode
+              ) {
+                throw Object.assign(new Error("sendId already belongs to another message"), { status: 409 });
+              }
+              return { ok: true as const, queued: true as const, queueId: queued.id, threadId };
+            }
           }
           const current = store.group(group.id);
           if (!current) throw Object.assign(new Error("no such group"), { status: 404 });
@@ -6652,11 +6807,28 @@ const server = createServer(async (req, res) => {
               status: 409,
             });
           }
+          if (groupIsWorking(current)) {
+            const queued = queueChannelMessage(current.id, threadId, text, {
+              replyToId: replyTo?.id,
+              sendId,
+              mode: channelMode,
+            });
+            return { ok: true as const, queued: true as const, queueId: queued.id, threadId };
+          }
           const message = startGroupTurn(current.id, text, replyTo, sendId, channelMode);
           return { ok: true as const, threadId, message };
         },
       );
       return json(res, 202, receipt);
+    }
+    m = path.match(/^\/api\/groups\/([\w-]+)\/queue\/([\w-]+)$/);
+    if (m && method === "DELETE") {
+      const group = store.group(m[1]);
+      if (!group) return json(res, 404, { error: "no such group" });
+      if (!cancelChannelMessage(group.id, m[2])) {
+        return json(res, 404, { error: "no such queued message" });
+      }
+      return json(res, 200, { ok: true });
     }
     m = path.match(/^\/api\/groups\/([\w-]+)\/interrupt$/);
     if (m && method === "POST") {
@@ -8160,12 +8332,13 @@ const server = createServer(async (req, res) => {
           browserReferenceCleanupError = error;
         }
       }
-      // Provider keys change the fleet. Profile, voice, VPS, and room timeout
-      // changes do not rebuild it: no driver reads them, and they should not
-      // interrupt in-flight turns.
+      // Provider keys change the fleet. Profile, language, voice, VPS, and
+      // room timeout changes do not rebuild it: no driver reads them, and they
+      // should not interrupt in-flight turns.
       const reloadKeys = Object.keys(patch).filter(
         (key) =>
           key !== "profile" &&
+          key !== "language" &&
           key !== "tts" &&
           key !== "imageGen" &&
           key !== "vps" &&
