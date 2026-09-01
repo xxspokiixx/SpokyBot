@@ -5,9 +5,10 @@
  * inside the silhouette with a little clearance. The face is placed by an anchor and a
  * uniform scale, so the search space is only three numbers.
  *
- * Strategy: seed the anchor at the largest inscribed circle, binary-search the scale there,
- * then sweep anchors nearby and keep whichever allows the biggest face. The point cloud is
- * precomputed once, which is what makes a few hundred thousand tests cheap.
+ * This module supplies the pieces: `buildClouds` precomputes each expression's points once
+ * (which is what makes a few hundred thousand tests cheap), `maxScaleAt` binary-searches
+ * the largest face that fits at one anchor, and `report` says which expressions clip at a
+ * given placement. The search that drives them is `scripts/gen-mascot-bodies.ts`.
  */
 
 import {
@@ -19,15 +20,7 @@ import {
   MOUTH_STROKE,
   mouthFrame,
 } from "../../src/components/cursor-face-data.ts"
-import { largestInscribedCircle, sampleSdf, type Sdf } from "./sdf.ts"
-
-export interface FitResult {
-  anchor: { x: number; y: number; scale: number }
-  /** Expression indices that would be clipped at this placement. */
-  clipping: number[]
-  /** Smallest clearance across every expression, in face-space units. */
-  clearance: number
-}
+import { sampleSdf, type Sdf } from "./sdf.ts"
 
 /** Required clearance from the silhouette edge, in face-space units. */
 const PAD = 2
@@ -135,62 +128,6 @@ export function maxScaleAt(clouds: Cloud[], sdf: Sdf, ax: number, ay: number, ca
   return lo
 }
 
-/**
- * Finds the best placement. `lookAround` matters: centring the expressions shrinks the
- * face's footprint, which lets it be meaningfully larger on the same silhouette.
- */
-export function solveFit(
-  sdf: Sdf,
-  lookAround: number,
-  mouthStroke = MOUTH_STROKE,
-  aim: Aim = { x: 0, y: 0 }
-): FitResult {
-  const clouds = buildClouds(lookAround, mouthStroke, aim)
-  const seed = largestInscribedCircle(sdf)
-
-  // Cap at the size the expressions were drawn for. The artwork is fitted to the same box
-  // the face lives in, so 1.0 reproduces the original proportions; going bigger just
-  // inflates the eyes until they look like a different character. Bodies that cannot hold
-  // a full-size face get whatever they can hold.
-  const cap = 1
-
-  let best = { x: seed.x, y: seed.y, scale: maxScaleAt(clouds, sdf, seed.x, seed.y, cap) }
-
-  // Sweep outward from the seed; a slightly worse-centred anchor often holds a bigger face.
-  const span = Math.max(seed.radius, 12)
-  for (let ring = 1; ring <= 3; ring++) {
-    const step = (span * ring) / 3 / 2
-    let improved = false
-    for (let dy = -2; dy <= 2; dy++) {
-      for (let dx = -2; dx <= 2; dx++) {
-        if (!dx && !dy) continue
-        const x = best.x + dx * step
-        const y = best.y + dy * step
-        const scale = maxScaleAt(clouds, sdf, x, y, cap)
-        if (scale > best.scale + 1e-4) {
-          best = { x, y, scale }
-          improved = true
-        }
-      }
-    }
-    if (!improved) break
-  }
-
-  // The search guarantees a fit, but rounding the numbers for a tidy export can nudge a
-  // marginal expression back over the edge. Round first, then walk the scale down until the
-  // rounded values are honestly clean.
-  const anchor = {
-    x: round(best.x),
-    y: round(best.y),
-    scale: Math.max(Math.floor(best.scale * 1000) / 1000, 0.02),
-  }
-  for (let i = 0; i < 20 && anchor.scale > 0.02; i++) {
-    if (report(clouds, sdf, anchor).clipping.length === 0) break
-    anchor.scale = round(anchor.scale - 0.005, 3)
-  }
-  return { anchor, ...report(clouds, sdf, anchor) }
-}
-
 /** Which expressions clip at a given placement, and by how much. Used by the live UI. */
 export function report(
   clouds: Cloud[],
@@ -206,7 +143,5 @@ export function report(
   })
   return { clipping, clearance: Math.round(clearance * 10) / 10 }
 }
-
-const round = (n: number, places = 2) => Number(n.toFixed(places))
 
 const clamp = (v: number, min: number, max: number) => Math.max(min, Math.min(max, v))

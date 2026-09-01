@@ -2,7 +2,6 @@ import { describe, expect, it } from "vitest";
 
 import { maskFromPolylines } from "./raster.ts";
 import { fieldFromMask, largestInscribedCircle, sampleSdf } from "./sdf.ts";
-import { buildClouds, report, solveFit } from "./solve.ts";
 
 const FACE_BOX = 228.541;
 const SIZE = 256;
@@ -43,36 +42,5 @@ describe("sdf", () => {
     // does not have and let a face clip its own body. An under-estimate only costs a
     // slightly smaller face — the safe side to be wrong on.
     expect(found.radius).toBeLessThanOrEqual(80);
-  });
-});
-
-describe("solveFit", () => {
-  it("fits a full-size face in a roomy circle", () => {
-    const fit = solveFit(fieldFor(100), 0);
-    expect(fit.clipping).toEqual([]);
-    expect(fit.anchor.scale).toBeGreaterThan(0.8);
-  });
-
-  it("shrinks the face rather than clipping it in a tight circle", () => {
-    const roomy = solveFit(fieldFor(100), 0);
-    const tight = solveFit(fieldFor(55), 0);
-    expect(tight.clipping).toEqual([]);
-    expect(tight.anchor.scale).toBeLessThan(roomy.anchor.scale);
-  });
-
-  it("never exceeds the scale the expressions were drawn for", () => {
-    expect(solveFit(fieldFor(110), 0).anchor.scale).toBeLessThanOrEqual(1);
-  });
-
-  it("agrees with report at the anchor it returned", () => {
-    const sdf = fieldFor(90);
-    const fit = solveFit(sdf, 0);
-    expect(report(buildClouds(0), sdf, fit.anchor).clipping).toEqual([]);
-  });
-
-  it("reports clipping when a face is forced too large", () => {
-    const sdf = fieldFor(55);
-    const forced = { ...solveFit(sdf, 0).anchor, scale: 1 };
-    expect(report(buildClouds(0), sdf, forced).clipping.length).toBeGreaterThan(0);
   });
 });

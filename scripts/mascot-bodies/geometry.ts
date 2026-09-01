@@ -49,21 +49,6 @@ function tokenizeCommands(d: string): { command: string; args: number[] }[] {
 
 /* ---------------------------------------------------------------- flatten */
 
-/** Point on a cubic Bezier at parameter t. */
-function cubicAt(
-  p0: Point, p1: Point, p2: Point, p3: Point, t: number
-): Point {
-  const mt = 1 - t
-  const a = mt * mt * mt
-  const b = 3 * mt * mt * t
-  const c = 3 * mt * t * t
-  const e = t * t * t
-  return [
-    a * p0[0] + b * p1[0] + c * p2[0] + e * p3[0],
-    a * p0[1] + b * p1[1] + c * p2[1] + e * p3[1],
-  ]
-}
-
 /** Perpendicular distance from `p` to the line through `a`/`b`. */
 function pointLineDistance(p: Point, a: Point, b: Point): number {
   const dx = b[0] - a[0]
