@@ -20,7 +20,12 @@ const root = fileURLToPath(new URL("../../", import.meta.url));
 const TS_PATH = "../../shared/mascot-bodies.ts";
 const SWIFT_PATH = "../../ios/Sources/CompanionCore/MausBodies.swift";
 
-const read = (p) => readFileSync(new URL(p, import.meta.url), "utf8");
+// Normalised to LF. .gitattributes pins both catalogs to LF so this should be a
+// no-op, but a clone whose git config disagrees would otherwise fail this guard
+// over line endings — which git owns — rather than over generated content, which
+// is what the guard is actually for.
+const read = (p) =>
+  readFileSync(new URL(p, import.meta.url), "utf8").replace(/\r\n/g, "\n");
 const write = (p, contents) => writeFileSync(new URL(p, import.meta.url), contents);
 
 /**
