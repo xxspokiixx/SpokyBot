@@ -8,8 +8,18 @@
 > design text and are stale; the ids themselves (`cursor`, `blob`, …) are unchanged.
 
 Ten selectable body shapes for the mascot, per bot, identical on desktop and
-phone — and a mode where the bot wears your own image as its body, with the
-live face still on top.
+phone.
+
+> **Dropped (2026-09-01):** this design originally carried a second
+> deliverable — "custom images as a living body", a `face` crop that filled the
+> mascot's silhouette with the bot's own picture and painted the live animated
+> face on top. It was built on `feat/mascot-shape-catalog` across desktop,
+> server and iOS, reviewed visually, and rejected: a custom image should be
+> shown as it is, with no eyes or mouth drawn over it. The mode and its `face`
+> crop were removed forward, and the sections describing them deleted from this
+> document. Custom images behave exactly as they did before this branch —
+> `circle` / `rounded` / `square`, flat, no mascot. The ten bodies stay and
+> apply to the gradient mascot.
 
 ## Problem
 
@@ -27,16 +37,12 @@ either side is touched."
 
 ## What we are building
 
-Two things:
-
-1. A generated catalog of ten silhouettes, selectable per bot, rendered from one
-   solved source of truth on both platforms.
-2. A mode where a bot's uploaded or AI-generated image fills that silhouette as
-   its body, with the live animated face still painted on top.
+A generated catalog of ten silhouettes, selectable per bot, rendered from one
+solved source of truth on both platforms.
 
 Not in scope: parametric sliders, custom SVG outlines, surface styles, face
-variants, accessories. What varies is the body — its shape, and whether it is a
-gradient or a picture.
+variants, accessories. What varies is the body's shape; its fill stays the bot's
+colour gradient.
 
 ## Design
 
@@ -177,90 +183,6 @@ An absent or unrecognised value resolves to `cursor` on read, on both platforms.
 An older client that does not know the field ignores it and keeps rendering the
 default body, and an older server drops it on write — neither is a corrupt state.
 
-## Custom images as a living body
-
-Custom image avatars already ship: upload, AI generation, and circle / rounded /
-square crops, synced to the phone. What they do not do is stay alive — an image
-*replaces* the mascot, so the bot loses its face. A bot wearing a photo is a
-static sticker in a list where every mascot beside it blinks and reacts.
-
-This adds a mode where the image becomes the mascot's **body** — filling a catalog
-shape, with the live animated face painted on top of it.
-
-### The mode
-
-One new `avatarCrop` value, `face`, alongside the existing four:
-
-| crop | body | face |
-|------|------|------|
-| `mascot` | catalog shape, gradient fill | live |
-| `face` *(new)* | catalog shape, **image fill** | live |
-| `circle` / `rounded` / `square` | flat image, no shape | none |
-
-It composes with `mascotShape` rather than duplicating it: the image is clipped to
-whichever of the ten shapes the bot already wears. No new field, no new axis — the
-image is just a different fill for a body we already know how to draw.
-
-Uploading while in `mascot` mode now lands on `face` rather than `circle`, so the
-bot keeps its face by default. The existing flat crops stay reachable and
-unchanged, so nobody's current avatar moves.
-
-### Rendering
-
-`CursorSilhouette` gains one optional field:
-
-```ts
-/** When set, the body is this image clipped to the silhouette, not a gradient fill. */
-bodyImage?: string
-```
-
-The renderer already builds a `fit`-transformed clipPath at `#{uid}-clip` and
-clips the face to it. The image reuses that same clipPath and is drawn in
-face-box space — `x=0 y=0 width=height=FACE_BOX`, `preserveAspectRatio="xMidYMid
-slice"` — so it fills the shape regardless of aspect ratio, with no per-shape
-bounding-box maths. Body motion, effects and the anchored face are untouched:
-they operate on whatever the body is.
-
-It is a typed prop rendered as a React `href`, **not** a token substituted into
-the `dangerouslySetInnerHTML` body string. That is deliberate: `body` and `clip`
-are injected as raw markup, and interpolating an attachment URL into raw HTML
-would be an injection path. The URL is already constrained by
-`botAvatarUrlSchema` to this app's attachment server, but defence in depth is
-free here and the typed field is also simpler.
-
-### Face contrast
-
-The face is drawn in white — white eyes, white mouth stroke. Over a pale image it
-disappears. So `face` mode paints a scrim between the image and the face: a radial
-gradient centred on the silhouette's face anchor, darkest at the middle and
-falling to transparent by the body's edge. The face stays legible on any image
-while the outer picture keeps its colour, which a flat overlay would wash out.
-
-The scrim is a fixed renderer constant, not a per-bot setting. If it proves wrong
-for some images that is a tuning change in one place, not a knob for every user.
-
-### iOS
-
-`MausAvatar` is a `Canvas`, so the same composition applies: clip to the shape
-path, `context.draw` the image to fill it, paint the scrim, then the face — in
-place of the current gradient body fill. `Session.avatarData(for:)` already
-fetches and authenticates avatar bytes for `BotAvatarView`, so there is no new
-network path; the decoded image is handed to `MausAvatar` instead of being
-displayed directly.
-
-`BotAvatarView`'s branch changes from "image or mascot" to three cases: flat image
-(existing crops), mascot with image body (`face`), mascot with gradient body. The
-existing failure handling is the fallback for all of them — a missing, stale or
-undecodable attachment falls back to the gradient mascot, so identity is never an
-empty placeholder.
-
-### Cost
-
-An animated image body is heavier than a gradient one. The existing rule already
-handles this: `MausAvatar` animates only on opt-in, and `MausState.showsActivity`
-limits list avatars to states whose motion carries information. A resting bot
-still earns a resting face, image body or not.
-
 ## Testing
 
 - **Generator golden test**: regenerating produces the checked-in files
@@ -279,22 +201,6 @@ still earns a resting face, image body or not.
   whose bounds fall inside the face box.
 - **Manual**: all ten shapes rendered on desktop and phone side by side, across a
   few states, confirming the two platforms now agree.
-
-For the image body:
-
-- **Crop schema test**: `face` parses; an unknown crop still falls back to
-  `mascot`; the existing four values are unchanged.
-- **Upload default test**: uploading from `mascot` mode lands on `face`, and
-  uploading while already on a flat crop preserves that crop.
-- **Renderer test**: with `bodyImage` set, the body renders an `<image>` bound to
-  the shape's clipPath and no gradient fill; without it, the gradient path is
-  unchanged.
-- **Injection test**: the attachment URL reaches the DOM as an escaped attribute,
-  never as interpolated markup.
-- **Fallback test**: a bot in `face` mode whose attachment fails to decode renders
-  the gradient mascot, not an empty body.
-- **Manual**: a light image, a dark image and a busy image in each of the ten
-  shapes, confirming the scrim keeps the face readable in all three.
 
 ## Risks
 

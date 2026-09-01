@@ -68,9 +68,11 @@ describe("BotProfileAvatarCard body picker", () => {
     expect(markup).not.toContain(`aria-label="Use the ${MASCOT_BODIES.cursor.name} body"`);
   });
 
-  it("shows the body picker for the face crop, not just mascot", () => {
-    const markup = renderCard(makeBot({ avatarCrop: "face" }));
+  it("hides the body picker for every flat crop, not just circle", () => {
+    for (const crop of ["rounded", "square"] as const) {
+      const markup = renderCard(makeBot({ avatarCrop: crop }));
 
-    expect(markup).toContain(">Body<");
+      expect(markup).not.toContain(">Body<");
+    }
   });
 });

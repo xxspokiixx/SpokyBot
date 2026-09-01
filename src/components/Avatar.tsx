@@ -116,11 +116,6 @@ export type MausAvatarProps = {
   animated?: boolean;
   /** Which body the bot wears. Unknown values fall back to the cursor. */
   bodyId?: MascotBodyId;
-  /**
-   * The bot's own image, clipped to the body silhouette with the live face
-   * painted on top. Absent, the body is a plain gradient fill.
-   */
-  bodyImage?: string;
   /** Legacy Maus face-placement knobs — accepted, ignored. */
   eyeSpacing?: number;
   faceX?: number;
@@ -147,12 +142,10 @@ function MausAvatarComponent(
     trackPointer = true,
     animated = true,
     bodyId,
-    bodyImage,
   }: MausAvatarProps,
   ref: React.Ref<MausAvatarHandle>,
 ) {
-  const base = MASCOT_BODIES[botMascotBody(bodyId)];
-  const silhouette = bodyImage ? { ...base, bodyImage } : base;
+  const silhouette = MASCOT_BODIES[botMascotBody(bodyId)];
   const inner = useRef<CursorAvatarHandle>(null);
   useImperativeHandle(ref, () => ({
     blink: () => inner.current?.blink(),
@@ -226,34 +219,27 @@ export type BotAvatarProps = Omit<MausAvatarProps, "color"> & {
   };
 };
 
-export type BotAvatarOutcome = "flatImage" | "livingMascot" | "gradientMascot";
+export type BotAvatarOutcome = "flatImage" | "gradientMascot";
 
 /**
- * Pick which of the three ways to render a bot's avatar, given the parsed
- * profile plus what has actually been confirmed to load. Kept as a pure
- * function — independent of React state and effects — so the decision can be
- * unit-tested directly: `renderToStaticMarkup` never runs effects, so the
- * probe that confirms a "face"-crop image is real cannot resolve inside a
- * synchronous render test.
+ * Pick which of the two ways to render a bot's avatar, given the parsed
+ * profile plus whether the image has already failed to load. Kept as a pure
+ * function — independent of React state and effects — so both arms can be
+ * unit-tested directly: `imageFailed` is set by the `<img>`'s own `onError`,
+ * which `renderToStaticMarkup` never fires, so the failure fallback is
+ * unreachable from a synchronous render test.
  *
- * `imageFailed` only ever affects the flat crops (circle/rounded/square),
- * exactly as before this function existed — it is set by the flat `<img>`'s
- * own `onError`. `livingImageReady` is the separate signal for the "face"
- * crop: it starts false and only flips true once a background probe (a
- * detached `Image()`, not the visible element) confirms the URL actually
- * decodes, so a "face" bot never shows a half-drawn or broken body — it
- * shows the gradient mascot until the picture is confirmed, then the living
- * face.
+ * The iOS half of this decision is `resolveBotAvatarOutcome` in
+ * `ios/Sources/CompanionCore/BotAvatarRendering.swift`, which mirrors this
+ * union name for name so the two renderers can be read side by side.
  */
 export function resolveBotAvatarOutcome(params: {
   avatarCrop: BotAvatarCrop;
   hasUrl: boolean;
   imageFailed: boolean;
-  livingImageReady: boolean;
 }): BotAvatarOutcome {
-  const { avatarCrop, hasUrl, imageFailed, livingImageReady } = params;
+  const { avatarCrop, hasUrl, imageFailed } = params;
   if (!hasUrl) return "gradientMascot";
-  if (avatarCrop === "face") return livingImageReady ? "livingMascot" : "gradientMascot";
   if (avatarCrop === "mascot") return "gradientMascot";
   if (imageFailed) return "gradientMascot";
   return "flatImage";
@@ -261,53 +247,25 @@ export function resolveBotAvatarOutcome(params: {
 
 /**
  * The one renderer for a bot's chosen profile image. Malformed persisted
- * values, a flat image that fails to load, and a "face" image that fails to
- * load all fall back to the animated mascot, so an old/corrupt/deleted
- * profile can never leave a broken or empty body in the app.
+ * values and images that fail to load both fall back to the animated mascot,
+ * so an old/corrupt profile can never leave a broken-image icon in the app.
  */
 export function BotAvatar({ bot, size = 44, label, ...mascotProps }: BotAvatarProps) {
   const profile = botAvatarProfile(bot);
   const [imageFailed, setImageFailed] = useState(false);
-  const [livingImageReady, setLivingImageReady] = useState(false);
 
   useEffect(() => setImageFailed(false), [profile.avatarUrl]);
-
-  // Probe the "face"-crop image off-screen before ever wearing it as a body.
-  // A stored attachment can pass schema validation at patch time and still
-  // 404 later (cleanup, migration, etc.) — this is the same class of failure
-  // the flat crops already handle via the visible `<img>`'s `onError`, just
-  // reached through a detached probe instead, since the real paint target
-  // here is an inline SVG `<image>` a few components away in CursorAvatar.
-  const faceUrl = profile.avatarCrop === "face" ? profile.avatarUrl : undefined;
-  useEffect(() => {
-    setLivingImageReady(false);
-    if (!faceUrl) return;
-    let cancelled = false;
-    const probe = new Image();
-    probe.onload = () => {
-      if (!cancelled) setLivingImageReady(true);
-    };
-    probe.onerror = () => {
-      if (!cancelled) setLivingImageReady(false);
-    };
-    probe.src = faceUrl;
-    return () => {
-      cancelled = true;
-    };
-  }, [faceUrl]);
 
   const outcome = resolveBotAvatarOutcome({
     avatarCrop: profile.avatarCrop,
     hasUrl: Boolean(profile.avatarUrl),
     imageFailed,
-    livingImageReady,
   });
 
   if (outcome !== "flatImage") {
     return (
       <MausAvatar
         bodyId={bot.mascotBody ?? undefined}
-        bodyImage={outcome === "livingMascot" ? profile.avatarUrl : undefined}
         {...mascotProps}
         color={bot.color}
         size={size}

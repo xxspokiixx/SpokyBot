@@ -18,7 +18,7 @@ struct BotAvatarView: View {
     @State private var failed = false
 
     private var crop: AvatarCrop { bot.avatarCrop ?? .mascot }
-    /// Which of the three renderings this bot gets. The decision itself is a
+    /// Which of the two renderings this bot gets. The decision itself is a
     /// pure function in `CompanionCore` so it can be tested without a
     /// rendered `Canvas`; see `resolveBotAvatarOutcome`.
     private var outcome: BotAvatarOutcome {
@@ -31,14 +31,10 @@ struct BotAvatarView: View {
             switch outcome {
             // The picture instead of the mascot, masked to the chosen shape.
             case .flatImage: flatImage
-            // The mascot either way — wearing the picture as its body, or in
-            // the bot's own colours, which is also the fallback whenever
-            // there is no usable picture so identity is never an empty
-            // placeholder. One arm, not two, on purpose: separate `switch`
-            // cases are separate `_ConditionalContent` branches, and SwiftUI
-            // would rebuild `MausAvatar` — resetting its face engine, so the
-            // face visibly pops — the moment a picture finished loading.
-            case .livingMascot, .gradientMascot: mascot(bodyImage: mascotBodyImage)
+            // The mascot in the bot's own colours, which is also the fallback
+            // whenever there is no usable picture so identity is never an
+            // empty placeholder.
+            case .gradientMascot: mascot
             }
         }
         .frame(width: size, height: size)
@@ -47,7 +43,7 @@ struct BotAvatarView: View {
         .task(id: "\(bot.avatarUrl ?? "")|\(crop.rawValue)") {
             image = nil
             failed = false
-            // `face` needs the bytes too now: it wears them as a body.
+            // Only the flat crops paint the bytes; the mascot never needs them.
             guard crop != .mascot, bot.avatarUrl != nil else { return }
             let data = await session.avatarData(for: bot)
             guard !Task.isCancelled else { return }
@@ -59,9 +55,6 @@ struct BotAvatarView: View {
             image = decoded
         }
     }
-
-    /// The picture, only when it is being worn as a body.
-    private var mascotBodyImage: UIImage? { outcome == .livingMascot ? image : nil }
 
     /// Only reached with a decoded image: `resolveBotAvatarOutcome` returns
     /// `.flatImage` solely when one exists.
@@ -75,9 +68,9 @@ struct BotAvatarView: View {
         }
     }
 
-    private func mascot(bodyImage: UIImage?) -> some View {
+    private var mascot: some View {
         MausAvatar(
-            color: bot.color, size: size, bodyId: bot.mascotBody, bodyImage: bodyImage,
+            color: bot.color, size: size, bodyId: bot.mascotBody,
             state: state, animated: animated, comets: comets)
     }
 
@@ -85,7 +78,7 @@ struct BotAvatarView: View {
         switch crop {
         case .circle: AnyShape(Circle())
         case .rounded: AnyShape(RoundedRectangle(cornerRadius: size * 0.22, style: .continuous))
-        case .square, .mascot, .face: AnyShape(Rectangle())
+        case .square, .mascot: AnyShape(Rectangle())
         }
     }
 }

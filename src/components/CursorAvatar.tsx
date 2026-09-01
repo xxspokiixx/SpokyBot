@@ -61,13 +61,6 @@ export interface CursorSilhouette {
   clip: string
   /** Where the face sits inside the silhouette, in face-space units. */
   anchor: { x: number; y: number; scale: number }
-  /**
-   * When set, the body is this image clipped to the silhouette rather than a
-   * gradient fill. A typed prop, not a token in `body` — `body` and `clip` are
-   * injected as raw markup, and interpolating a URL into raw markup is an
-   * injection path.
-   */
-  bodyImage?: string
 }
 
 // The generator solves this body's face placement once; `MASCOT_BODIES.cursor`
@@ -1521,22 +1514,6 @@ export const CursorAvatar = React.forwardRef<CursorAvatarHandle, CursorAvatarPro
             transform={silhouette.fit || undefined}
             dangerouslySetInnerHTML={{ __html: silhouette.clip }}
           />
-          {/* Face is drawn in white; over a pale image it disappears without this scrim.
-              Centred on the silhouette's own anchor, not the face box's centre — shapes
-              like `shield` put the face far from the box centre. */}
-          {silhouette.bodyImage && (
-            <radialGradient
-              id={`${uid}-scrim`}
-              gradientUnits="userSpaceOnUse"
-              cx={silhouette.anchor.x}
-              cy={silhouette.anchor.y}
-              r={FACE_BOX * 0.55}
-            >
-              <stop offset="0%" stopColor="#000000" stopOpacity="0.42" />
-              <stop offset="65%" stopColor="#000000" stopOpacity="0.14" />
-              <stop offset="100%" stopColor="#000000" stopOpacity="0" />
-            </radialGradient>
-          )}
         </defs>
         <g transform={flip ? `translate(${FACE_BOX} 0) scale(-1 1)` : undefined}>
           {/* Ribbons sit behind the mascot, confetti in front of it. */}
@@ -1546,29 +1523,7 @@ export const CursorAvatar = React.forwardRef<CursorAvatarHandle, CursorAvatarPro
               same motion but is not faded with them, since it replaces them. */}
           <g ref={bodyGroup}>
           <g ref={bodyContent}>
-          {silhouette.bodyImage ? (
-            <>
-              <image
-                href={silhouette.bodyImage}
-                x={0}
-                y={0}
-                width={FACE_BOX}
-                height={FACE_BOX}
-                preserveAspectRatio="xMidYMid slice"
-                clipPath={`url(#${uid}-clip)`}
-              />
-              <rect
-                x={0}
-                y={0}
-                width={FACE_BOX}
-                height={FACE_BOX}
-                fill={`url(#${uid}-scrim)`}
-                clipPath={`url(#${uid}-clip)`}
-              />
-            </>
-          ) : (
-            <g transform={silhouette.fit || undefined} dangerouslySetInnerHTML={{ __html: body }} />
-          )}
+          <g transform={silhouette.fit || undefined} dangerouslySetInnerHTML={{ __html: body }} />
           <g clipPath={`url(#${uid}-clip)`}>
             <g transform={anchorTransform(silhouette.anchor)}>
               <path ref={eye0} fill={eyeColor} />

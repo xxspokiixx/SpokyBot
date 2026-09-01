@@ -25,7 +25,6 @@ type AvatarPatch = Partial<
 
 const CROP_LABEL = {
   mascot: "Mascot",
-  face: "Living",
   circle: "Circle",
   rounded: "Rounded",
   square: "Square",
@@ -65,7 +64,7 @@ export function BotProfileAvatarCard({
       const avatarUrl = botAvatarUrlFromStoredPath(saved.path);
       if (!avatarUrl) throw new Error("The uploaded image could not be used as an avatar");
       const latestCrop = cropRef.current;
-      onPatch({ avatarUrl, avatarCrop: latestCrop === "mascot" ? "face" : latestCrop });
+      onPatch({ avatarUrl, avatarCrop: latestCrop === "mascot" ? "circle" : latestCrop });
     } catch (uploadError) {
       setError(uploadError instanceof Error ? uploadError.message : String(uploadError));
     } finally {
@@ -116,11 +115,10 @@ export function BotProfileAvatarCard({
       const latestCrop = cropRef.current;
       onPatch({
         avatarUrl: result.avatarUrl,
-        // The server owns this crop for generate (server/index.ts picks "circle"
-        // for a mascot bot): a generated portrait is its own subject, not the
-        // mascot's living face, so it must not be promoted the way upload is.
-        // The fallback below is never actually reached, since the server always
-        // assigns a crop; "circle" is kept only as the truthful default if it ever were.
+        // The server owns this crop for generate (server/index.ts picks
+        // "circle" for a mascot bot). The fallback below is never actually
+        // reached, since the server always assigns a crop; "circle" is kept
+        // only as the truthful default if it ever were.
         avatarCrop:
           latestCrop === cropAtStart
             ? (result.bot.avatarCrop ?? "circle")
@@ -191,7 +189,7 @@ export function BotProfileAvatarCard({
         <div className="mb-2 mt-4 text-[12px] font-medium uppercase tracking-[0.08em] text-ink-secondary">
           Shape
         </div>
-        <div className="grid grid-cols-5 overflow-hidden rounded-lg border border-hairline/40">
+        <div className="grid grid-cols-4 overflow-hidden rounded-lg border border-hairline/40">
           {BOT_AVATAR_CROPS.map((candidate, index) => (
             <button
               key={candidate}
@@ -253,11 +251,7 @@ export function BotProfileAvatarCard({
                 />
               ))}
             </div>
-          </>
-        )}
 
-        {(crop === "mascot" || crop === "face") && (
-          <>
             <div className="mb-2 mt-4 text-[12px] font-medium uppercase tracking-[0.08em] text-ink-secondary">
               Body
             </div>

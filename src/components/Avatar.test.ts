@@ -47,93 +47,59 @@ describe("MausAvatar body", () => {
   });
 });
 
-describe("MausAvatar living image", () => {
-  it("wears the image when the bot is in face mode", () => {
-    const markup = render({ bodyId: "circle", bodyImage: "/api/attachments/cat.webp" });
-    expect(markup).toContain("<image");
-    expect(markup).toContain("/api/attachments/cat.webp");
-  });
-
-  it("keeps the gradient body when there is no image", () => {
-    expect(render({ bodyId: "circle" })).not.toContain("<image");
-  });
-});
-
-describe("BotAvatar's three avatar outcomes", () => {
+describe("BotAvatar's two avatar outcomes", () => {
   it("renders a flat cropped image for circle/rounded/square, with no mascot at all", () => {
     const markup = renderBot({ avatarUrl: "/api/attachments/cat.webp", avatarCrop: "circle" });
     expect(markup).toContain("<img");
     expect(markup).not.toContain("<svg");
-    expect(markup).not.toContain("<image");
   });
 
-  it("falls back to the gradient mascot when the crop is face but there is no valid image", () => {
-    const markup = renderBot({ avatarUrl: undefined, avatarCrop: "face" });
-    expect(markup).not.toContain("<img");
+  it("shows the image as it is, with no mascot face painted on it", () => {
+    const markup = renderBot({ avatarUrl: "/api/attachments/cat.webp", avatarCrop: "square" });
+    expect(markup).toContain("<img");
     expect(markup).not.toContain("<image");
+    expect(markup).not.toContain("radialGradient");
+  });
+
+  it("renders the gradient mascot when the crop is mascot, image or not", () => {
+    const markup = renderBot({ avatarUrl: "/api/attachments/cat.webp", avatarCrop: "mascot" });
+    expect(markup).not.toContain("<img");
     expect(markup).toContain("<svg");
   });
 
-  it("shows the gradient mascot for a face crop before the load probe resolves, never a broken or empty body", () => {
-    // renderToStaticMarkup never runs effects, so this is exactly the state
-    // a "face"-crop bot is in for its very first paint, before the
-    // background probe has had a chance to confirm the image loads. There
-    // must be no flash of a broken <image> here — it should look identical
-    // to the "no valid image" fallback above.
-    const markup = renderBot({ avatarUrl: "/api/attachments/cat.webp", avatarCrop: "face" });
+  it("falls back to the gradient mascot when a flat crop has no valid image", () => {
+    const markup = renderBot({ avatarUrl: undefined, avatarCrop: "circle" });
     expect(markup).not.toContain("<img");
-    expect(markup).not.toContain("<image");
     expect(markup).toContain("<svg");
   });
 });
 
 describe("resolveBotAvatarOutcome", () => {
-  // The probe that confirms a "face"-crop image is real runs in a
-  // useEffect (a detached Image(), not the painted element), so it cannot
-  // resolve inside renderToStaticMarkup — there are no effects to run. The
-  // decision is a pure function precisely so this branch is still testable
-  // synchronously.
-  it("wears the living face once the probe has confirmed the image loads", () => {
+  // `imageFailed` is set by the flat <img>'s own onError, which
+  // renderToStaticMarkup never fires — there are no events in a static
+  // render. The decision is a pure function precisely so this branch is
+  // still testable synchronously.
+  it("falls back to the gradient mascot for an image that failed to load", () => {
     expect(
-      resolveBotAvatarOutcome({
-        avatarCrop: "face",
-        hasUrl: true,
-        imageFailed: false,
-        livingImageReady: true,
-      }),
-    ).toBe("livingMascot");
-  });
-
-  it("falls back to the gradient mascot for a face crop whose image failed the probe", () => {
-    expect(
-      resolveBotAvatarOutcome({
-        avatarCrop: "face",
-        hasUrl: true,
-        imageFailed: false,
-        livingImageReady: false,
-      }),
+      resolveBotAvatarOutcome({ avatarCrop: "circle", hasUrl: true, imageFailed: true }),
     ).toBe("gradientMascot");
   });
 
-  it("leaves the flat-crop failure path untouched: imageFailed still forces the gradient mascot", () => {
+  it("renders a good flat image flat", () => {
     expect(
-      resolveBotAvatarOutcome({
-        avatarCrop: "circle",
-        hasUrl: true,
-        imageFailed: true,
-        livingImageReady: false,
-      }),
-    ).toBe("gradientMascot");
-  });
-
-  it("leaves the flat-crop success path untouched: a good flat image still renders flat", () => {
-    expect(
-      resolveBotAvatarOutcome({
-        avatarCrop: "rounded",
-        hasUrl: true,
-        imageFailed: false,
-        livingImageReady: false,
-      }),
+      resolveBotAvatarOutcome({ avatarCrop: "rounded", hasUrl: true, imageFailed: false }),
     ).toBe("flatImage");
+  });
+
+  it("keeps the mascot crop on the gradient mascot even with a loaded image", () => {
+    expect(
+      resolveBotAvatarOutcome({ avatarCrop: "mascot", hasUrl: true, imageFailed: false }),
+    ).toBe("gradientMascot");
+  });
+
+  it("falls back to the gradient mascot when there is no image at all", () => {
+    expect(
+      resolveBotAvatarOutcome({ avatarCrop: "square", hasUrl: false, imageFailed: false }),
+    ).toBe("gradientMascot");
   });
 });

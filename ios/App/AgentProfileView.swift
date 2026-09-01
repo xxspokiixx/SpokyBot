@@ -56,7 +56,7 @@ struct AgentProfileView: View {
                     .listRowBackground(Color.clear)
 
                     Picker("Shape", selection: $crop) {
-                        ForEach(cropChoices, id: \.self) { shape in
+                        ForEach(AvatarCrop.allCases, id: \.self) { shape in
                             Text(shape.label).tag(shape)
                         }
                     }
@@ -229,7 +229,7 @@ struct AgentProfileView: View {
             session.actionError = "That image is larger than 10 MB."
             return
         }
-        let intendedCrop = crop.afterUploadingAPicture
+        let intendedCrop = crop == .mascot ? AvatarCrop.circle : crop
         if let updated = await session.uploadAvatar(data, mime: mime, for: current, crop: intendedCrop) {
             crop = updated.avatarCrop ?? intendedCrop
             baseline.crop = crop
@@ -249,10 +249,9 @@ struct AgentProfileView: View {
             for: current
         ) else { return }
 
-        // `AvatarCrop.afterGenerating` is the shared decision: server's pick
-        // (deliberately not promoted to `.face` the way upload is — see its
-        // doc comment) unless the selector moved while the request was in
-        // flight, in which case that newer explicit choice wins.
+        // `AvatarCrop.afterGenerating` is the shared decision: the server's
+        // pick unless the selector moved while the request was in flight, in
+        // which case that newer explicit choice wins.
         let resolved = AvatarCrop.afterGenerating(
             cropAtStart: cropAtStart,
             latestCrop: crop,
@@ -317,14 +316,6 @@ struct AgentProfileView: View {
         return nil
     }
 
-    /// All five, the desktop's list in the desktop's order: now that `face`
-    /// actually renders here — the image as the mascot's body with the live
-    /// face on it — withholding the choice would be the phone offering less
-    /// than the other screen for no reason. A `face` bot with no usable image
-    /// falls back to the gradient mascot, so the option is never a broken
-    /// state to be stuck in, and any other segment leaves it again.
-    private var cropChoices: [AvatarCrop] { AvatarCrop.allCases }
-
     private func synchronizeForm(with bot: Bot) {
         name = bot.name
         title = bot.title
@@ -364,10 +355,6 @@ private extension AvatarCrop {
         case .circle: "Circle"
         case .rounded: "Rounded"
         case .square: "Square"
-        // "Living", not "Face": the desktop's own label for it, and the one
-        // that says what the segment does — the mascot stays alive, wearing
-        // the picture. See CROP_LABEL in src/components/BotProfileAvatarCard.tsx.
-        case .face: "Living"
         }
     }
 }

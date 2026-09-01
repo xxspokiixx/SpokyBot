@@ -69,11 +69,6 @@ struct MausAvatar: View {
     /// bot with no choice recorded, a newer desktop's body this build has not
     /// shipped yet — falls back to the shipped `cursor`.
     var bodyId: String? = MausSilhouette.defaultBody
-    /// When set, the body is this image clipped to the silhouette instead of
-    /// the colour gradient — the phone's half of the desktop's `bodyImage`.
-    /// The face still animates on top of it: the picture is the body, not a
-    /// replacement for the mascot.
-    var bodyImage: UIImage?
     var state: MausState = .idle
     /// Animation is OPT-IN: a mounted face costs a 30fps Canvas redraw, and a
     /// roster of them once pegged the app (and SimRenderServer) all night.
@@ -95,7 +90,7 @@ struct MausAvatar: View {
             Canvas { context, canvasSize in
                 engine.setState(state, now: timeline.date)
                 if live { engine.step(now: timeline.date) }
-                engine.draw(in: &context, size: canvasSize, color: color, bodyId: bodyId, bodyImage: bodyImage, bodyMotion: live, comets: comets, at: timeline.date)
+                engine.draw(in: &context, size: canvasSize, color: color, bodyId: bodyId, bodyMotion: live, comets: comets, at: timeline.date)
             }
         }
         .frame(width: size, height: size)
@@ -357,7 +352,7 @@ final class MausFaceEngine {
     /// face is doing — the island's "something is happening" — in addition to
     /// the states that carry their own. `at` is the clock; pass a fixed date
     /// for a still frame.
-    func draw(in context: inout GraphicsContext, size: CGSize, color: String, bodyId: String? = MausSilhouette.defaultBody, bodyImage: UIImage? = nil, bodyMotion: Bool, comets: Bool = false, at now: Date = Date()) {
+    func draw(in context: inout GraphicsContext, size: CGSize, color: String, bodyId: String? = MausSilhouette.defaultBody, bodyMotion: Bool, comets: Bool = false, at now: Date = Date()) {
         let rect = CGRect(origin: .zero, size: size)
         context.concatenate(MausSilhouette.fit(rect))
         let elapsed = CGFloat(now.timeIntervalSince(stateStart) * 1000)
@@ -378,64 +373,25 @@ final class MausFaceEngine {
         if bodyMotion {
             bodyContext.concatenate(bodyTransform(MausFaceData.motion[state] ?? MausBodyMotion(), elapsed: elapsed))
         }
-        drawBody(in: &bodyContext, color: color, bodyId: bodyId, bodyImage: bodyImage, now: now)
+        drawBody(in: &bodyContext, color: color, bodyId: bodyId, now: now)
 
         for piece in pieces where piece.front { context.fill(piece.path, with: piece.shading) }
     }
 
-    private func drawBody(in context: inout GraphicsContext, color: String, bodyId: String?, bodyImage: UIImage?, now: Date) {
+    private func drawBody(in context: inout GraphicsContext, color: String, bodyId: String?, now: Date) {
         // Wrapping the cached `CGPath` is a retain, not a re-parse: the body
         // is parsed and placed once per id, inside `CompanionCore`.
         let body = Path(MausSilhouette.inFaceBox(bodyId))
         let a = MausSilhouette.anchor(bodyId)
 
-        if let bodyImage {
-            // The picture *is* the body. Own layer so the clip does not leak
-            // into the face, which is anchored and scaled differently.
-            context.drawLayer { layer in
-                layer.clip(to: body)
-                // Into the whole face box, not the body's bounds, and let the
-                // clip do the shaping — the desktop's
-                // `<image x=0 y=0 width=FACE_BOX height=FACE_BOX
-                // preserveAspectRatio="xMidYMid slice" clipPath=…>`. Slicing
-                // into per-body bounds instead would zoom `star` differently
-                // on the two screens for no reason.
-                layer.draw(
-                    Image(uiImage: bodyImage),
-                    in: MausImageFit.slice(
-                        bodyImage.size,
-                        in: CGRect(
-                            x: 0, y: 0,
-                            width: MausFaceData.faceBox, height: MausFaceData.faceBox))
-                )
-                // The face is drawn in white and would vanish into a pale
-                // picture. Same scrim the desktop paints (the `-scrim`
-                // radialGradient in `src/components/CursorAvatar.tsx`): same
-                // stops, same 0.55-of-the-face-box radius, and centred on the
-                // body's own anchor rather than the box's centre — `shield`
-                // and friends put the face nowhere near the middle, and a
-                // box-centred scrim would miss it entirely.
-                layer.fill(body, with: .radialGradient(
-                    Gradient(stops: [
-                        .init(color: .black.opacity(0.42), location: 0),
-                        .init(color: .black.opacity(0.14), location: 0.65),
-                        .init(color: .black.opacity(0), location: 1),
-                    ]),
-                    center: CGPoint(x: a.x, y: a.y),
-                    startRadius: 0,
-                    endRadius: MausFaceData.faceBox * 0.55
-                ))
-            }
-        } else {
-            // The gradient runs corner to corner of the body's own bounds,
-            // which is the only place that lookup is still needed.
-            let bounds = MausSilhouette.faceBoxBounds(bodyId)
-            context.fill(body, with: .linearGradient(
-                Gradient(stops: MausPalette.gradientStops(color)),
-                startPoint: CGPoint(x: bounds.maxX, y: bounds.minY),
-                endPoint: CGPoint(x: bounds.minX, y: bounds.maxY)
-            ))
-        }
+        // The gradient runs corner to corner of the body's own bounds,
+        // which is the only place that lookup is still needed.
+        let bounds = MausSilhouette.faceBoxBounds(bodyId)
+        context.fill(body, with: .linearGradient(
+            Gradient(stops: MausPalette.gradientStops(color)),
+            startPoint: CGPoint(x: bounds.maxX, y: bounds.minY),
+            endPoint: CGPoint(x: bounds.minX, y: bounds.maxY)
+        ))
 
         // The face is painted on the body: clipped to it, anchored in it.
         context.clip(to: body)
