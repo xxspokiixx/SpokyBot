@@ -1,5 +1,6 @@
 import { execFileSync } from "node:child_process";
 import { readFileSync, writeFileSync } from "node:fs";
+import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
 
 import { BODY_DEFS } from "./builders.ts";
@@ -9,7 +10,9 @@ import { fieldFromMask } from "./sdf.ts";
 import { buildClouds, report } from "./solve.ts";
 import { MASCOT_BODIES, MASCOT_BODY_IDS } from "../../shared/mascot-bodies.ts";
 
-const root = new URL("../../", import.meta.url).pathname;
+// fileURLToPath, not `.pathname`: on Windows the latter yields "/C:/…" with a
+// leading slash, which is not a usable cwd — spawnSync then fails ENOENT.
+const root = fileURLToPath(new URL("../../", import.meta.url));
 
 // P1 ruling: the Swift catalog is emitted to ios/Sources/CompanionCore (reachable
 // by `swift test`), not ios/App (the Xcode app target, which `swift test` never
@@ -47,7 +50,9 @@ describe("generated catalogs", () => {
     };
 
     try {
-      execFileSync("node", ["--experimental-strip-types", "scripts/gen-mascot-bodies.ts"], {
+      // process.execPath, not "node": runs the same interpreter as the test and does
+      // not depend on `node` being resolvable on PATH.
+      execFileSync(process.execPath, ["--experimental-strip-types", "scripts/gen-mascot-bodies.ts"], {
         cwd: root,
         stdio: "pipe",
       });
