@@ -1,5 +1,6 @@
 package com.openmausbot.companion.onboarding
 
+import android.Manifest
 import android.app.Application
 import android.content.Context
 import com.openmausbot.companion.avatar.AvatarImageStore
@@ -140,8 +141,8 @@ class OnboardingScene(
             request = { record(listOf("android.permission.CAMERA")) },
         ),
         mic = MicPermissionController(
-            isGranted = { CompanionPermissions.PERMISSION_RECORD_AUDIO in granted },
-            request = { record(listOf(CompanionPermissions.PERMISSION_RECORD_AUDIO)) },
+            isGranted = { Manifest.permission.RECORD_AUDIO in granted },
+            request = { record(listOf(Manifest.permission.RECORD_AUDIO)) },
         ),
         notifications = notifications,
         avatars = AvatarImageStore(fetch = { null }),

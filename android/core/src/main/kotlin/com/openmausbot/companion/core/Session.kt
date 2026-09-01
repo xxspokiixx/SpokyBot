@@ -1164,27 +1164,6 @@ class Session(
         )
     }
 
-    /**
-     * Answers [card] in [threadId] using the card's permission-aware response behavior.
-     *
-     * This overload cannot persist a standing permission grant because it has no [Chat], and thus no
-     * bot. Call sites must migrate to the [answer] overload that accepts a [Chat].
-     */
-    @Deprecated(
-        message = "Use the answer(Chat, OptionCard, String) overload so standing grants can be persisted.",
-        level = DeprecationLevel.WARNING,
-    )
-    suspend fun answer(threadId: String, card: OptionCard, choice: String) {
-        val requestId = card.requestId ?: return
-        answer(
-            threadId = threadId,
-            requestId = requestId,
-            choice = choice,
-            isPermission = card.isPermission,
-            reviewedSha256 = card.skillRequest?.reviewedSha256,
-        )
-    }
-
     suspend fun answer(
         threadId: String,
         requestId: String,
@@ -1748,9 +1727,6 @@ class Session(
     }
 
     companion object {
-        /** Kept for source compatibility; multi-computer builds no longer throw it. */
-        const val ALREADY_PAIRED_MESSAGE =
-            "This phone is already paired. Unpair it in Settings before connecting it to another computer."
         const val STORAGE_UNAVAILABLE_MESSAGE =
             "This phone couldn't read its saved connection just now."
         const val SPENT_QR_MESSAGE =
@@ -1765,10 +1741,6 @@ class Session(
 
 /** Thrown only when another pairing redemption is already running. */
 class PairingInProgressException : IllegalStateException("Another pairing attempt is already in progress.")
-
-/** @deprecated A paired phone may now add another computer. */
-@Deprecated("A paired phone may add another computer")
-class AlreadyPairedException : IllegalStateException(Session.ALREADY_PAIRED_MESSAGE)
 
 /** Thrown when a burned QR credential is presented again. */
 class SpentPairingCredentialException : IllegalStateException(Session.SPENT_QR_MESSAGE)

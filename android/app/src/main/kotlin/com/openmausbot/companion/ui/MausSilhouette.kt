@@ -1,5 +1,10 @@
 package com.openmausbot.companion.ui
 
+import androidx.compose.ui.graphics.Matrix
+import androidx.compose.ui.graphics.Path
+import androidx.compose.ui.graphics.vector.PathParser
+import androidx.compose.ui.geometry.Rect
+
 /**
  * The mascot silhouette, as an SVG path — the same artwork the desktop draws
  * (`src/components/CursorAvatar.tsx`, `SHAPE.body`) and the same string
@@ -11,8 +16,8 @@ package com.openmausbot.companion.ui
  * thing to keep in sync by hand — it has changed once in the life of the project.
  *
  * The face the body wears is [MausFaceData]; this is only the shape it is painted
- * on. The parse result is plain data rather than a Compose `Path` so the artwork —
- * which is the thing that could silently go wrong — is unit-testable on the JVM.
+ * on. Compose parses the SVG path and Android supplies its bounds; both paths are
+ * created once rather than rebuilt while the roster scrolls.
  */
 object MausSilhouette {
     const val PATH: String =
@@ -65,182 +70,42 @@ object MausSilhouette {
         14.73242483 -72.03125 -1.625 C-50.89854752 -24.96559677 -21.34867451 -18.24899383 0 0 Z
         """
 
-    /** Absolute `M`, `C` and `Z` are all the artwork uses — so all this understands. */
-    sealed interface Command {
-        data class MoveTo(val x: Float, val y: Float) : Command
-        data class CurveTo(
-            val c1x: Float,
-            val c1y: Float,
-            val c2x: Float,
-            val c2y: Float,
-            val x: Float,
-            val y: Float,
-        ) : Command
-        data object Close : Command
-    }
-
-    data class Bounds(val minX: Float, val minY: Float, val maxX: Float, val maxY: Float) {
-        val width: Float get() = maxX - minX
-        val height: Float get() = maxY - minY
-        val midX: Float get() = (minX + maxX) / 2f
-        val midY: Float get() = (minY + maxY) / 2f
-    }
-
-    /**
-     * Parsed once. A roster is hundreds of avatars redrawn on every scroll frame;
-     * running a character-at-a-time parser inside the draw call ran it for each.
-     */
-    val commands: List<Command> by lazy { parse(PATH) }
-
-    /**
-     * The tight path bounds — curve extrema, not control points, matching
-     * `CGPath.boundingBoxOfPath` which is what the iOS view normalises against.
-     */
-    val bounds: Bounds by lazy { boundsOf(commands) }
-
     /** The desktop's viewBox is `-15 -15 258.541 258.541`: room to bob and sway. */
     const val FACE_MARGIN: Float = 15f
 
     /**
-     * Artwork → the desktop's face box: `translate(210, 80)`, `scale(0.593899)`,
-     * `translate(-56.5564, -37.6751)` — exactly the transforms its SVG applies.
-     * Every face coordinate ([MausFaceData.ANCHOR_X], the mouth) is expressed in
-     * that box, so the body has to land in the same one or the face sits wrong.
+     * Tight visible bounds of this immutable artwork. Android's native path bounds
+     * are the wider cubic control hull, so these four values stay with [PATH] to
+     * keep the desktop/iOS gradient endpoints pixel-for-pixel aligned.
      */
-    fun faceBoxX(x: Float): Float = (x + 210f) * FACE_BOX_SCALE - 56.5564f
+    val tightBounds = Rect(
+        left = -83.2342606f,
+        top = -16.5631847f,
+        right = 238.5062866f,
+        bottom = 368.2512207f,
+    )
 
-    fun faceBoxY(y: Float): Float = (y + 80f) * FACE_BOX_SCALE - 37.6751f
+    /**
+     * Artwork → the desktop's face box: `translate(210, 80)`, `scale(0.593899)`,
+     * `translate(-56.5564, -37.6751)` — the same affine map the SVG applies.
+     */
+    val faceBoxPath: Path by lazy {
+        parsePath().apply {
+            transform(faceBoxTransform)
+        }
+    }
 
     /** The body's own bounds inside the face box, for the gradient. */
-    val faceBoxBounds: Bounds by lazy {
-        Bounds(faceBoxX(bounds.minX), faceBoxY(bounds.minY), faceBoxX(bounds.maxX), faceBoxY(bounds.maxY))
-    }
+    val faceBoxBounds by lazy { faceBoxTransform.map(tightBounds) }
 
     private const val FACE_BOX_SCALE = 0.593899f
 
-    /** The SVG path data into commands. Only `M`, `C` and `Z` appear in the artwork. */
-    fun parse(source: String): List<Command> {
-        val out = mutableListOf<Command>()
-        val numbers = mutableListOf<Float>()
-        var command: Char? = null
-        var token = StringBuilder()
-
-        fun takeNumber() {
-            if (token.isNotEmpty()) token.toString().toFloatOrNull()?.let(numbers::add)
-            token = StringBuilder()
-        }
-
-        fun flush() {
-            val active = command ?: run { numbers.clear(); return }
-            when (active) {
-                'M' -> if (numbers.size >= 2) out += Command.MoveTo(numbers[0], numbers[1])
-                'C' -> {
-                    // several curves may follow one C, six numbers each
-                    var i = 0
-                    while (i + 5 < numbers.size) {
-                        out += Command.CurveTo(
-                            numbers[i], numbers[i + 1],
-                            numbers[i + 2], numbers[i + 3],
-                            numbers[i + 4], numbers[i + 5],
-                        )
-                        i += 6
-                    }
-                }
-                else -> Unit
-            }
-            numbers.clear()
-        }
-
-        for (character in source) {
-            when {
-                character.isDigit() || character == '.' || character == 'e' -> token.append(character)
-                character == '-' -> {
-                    // a minus starts a new number unless it is an exponent sign
-                    if (token.endsWith("e")) {
-                        token.append(character)
-                    } else {
-                        takeNumber()
-                        token.append('-')
-                    }
-                }
-                character == ' ' || character == ',' || character == '\n' || character == '\r' ||
-                    character == '\t' -> takeNumber()
-                character == 'Z' || character == 'z' -> {
-                    takeNumber(); flush(); out += Command.Close; command = null
-                }
-                else -> {
-                    takeNumber(); flush(); command = character
-                }
-            }
-        }
-        takeNumber()
-        flush()
-        return out
+    private val faceBoxTransform = Matrix().apply {
+        this[0, 0] = FACE_BOX_SCALE
+        this[1, 1] = FACE_BOX_SCALE
+        this[3, 0] = 210f * FACE_BOX_SCALE - 56.5564f
+        this[3, 1] = 80f * FACE_BOX_SCALE - 37.6751f
     }
 
-    /** Tight bounds: cubic extrema via the derivative's roots, plus the endpoints. */
-    fun boundsOf(commands: List<Command>): Bounds {
-        var minX = Float.MAX_VALUE
-        var minY = Float.MAX_VALUE
-        var maxX = -Float.MAX_VALUE
-        var maxY = -Float.MAX_VALUE
-        var cursorX = 0f
-        var cursorY = 0f
-        var any = false
-
-        fun include(x: Float, y: Float) {
-            any = true
-            if (x < minX) minX = x
-            if (y < minY) minY = y
-            if (x > maxX) maxX = x
-            if (y > maxY) maxY = y
-        }
-
-        for (command in commands) {
-            when (command) {
-                is Command.MoveTo -> {
-                    cursorX = command.x
-                    cursorY = command.y
-                    include(cursorX, cursorY)
-                }
-                is Command.CurveTo -> {
-                    include(command.x, command.y)
-                    for (t in cubicExtrema(cursorX, command.c1x, command.c2x, command.x)) {
-                        include(cubicAt(cursorX, command.c1x, command.c2x, command.x, t), cursorY)
-                    }
-                    for (t in cubicExtrema(cursorY, command.c1y, command.c2y, command.y)) {
-                        include(cursorX, cubicAt(cursorY, command.c1y, command.c2y, command.y, t))
-                    }
-                    cursorX = command.x
-                    cursorY = command.y
-                }
-                Command.Close -> Unit
-            }
-        }
-        return if (any) Bounds(minX, minY, maxX, maxY) else Bounds(0f, 0f, 0f, 0f)
-    }
-
-    private fun cubicAt(p0: Float, p1: Float, p2: Float, p3: Float, t: Float): Float {
-        val u = 1 - t
-        return u * u * u * p0 + 3 * u * u * t * p1 + 3 * u * t * t * p2 + t * t * t * p3
-    }
-
-    /** Roots of the derivative in (0, 1) — where a cubic can turn around. */
-    private fun cubicExtrema(p0: Float, p1: Float, p2: Float, p3: Float): List<Float> {
-        val a = (-p0 + 3 * p1 - 3 * p2 + p3) * 3
-        val b = (p0 - 2 * p1 + p2) * 6
-        val c = (-p0 + p1) * 3
-        val roots = mutableListOf<Float>()
-        if (kotlin.math.abs(a) < 1e-6f) {
-            if (kotlin.math.abs(b) > 1e-6f) roots += -c / b
-        } else {
-            val discriminant = b * b - 4 * a * c
-            if (discriminant >= 0) {
-                val root = kotlin.math.sqrt(discriminant.toDouble()).toFloat()
-                roots += (-b + root) / (2 * a)
-                roots += (-b - root) / (2 * a)
-            }
-        }
-        return roots.filter { it > 0f && it < 1f }
-    }
+    private fun parsePath(): Path = PathParser().parsePathString(PATH).toPath()
 }

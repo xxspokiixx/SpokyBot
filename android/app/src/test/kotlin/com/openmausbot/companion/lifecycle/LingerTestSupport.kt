@@ -15,6 +15,7 @@ import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleOwner
 import androidx.lifecycle.LifecycleRegistry
 import kotlin.test.assertEquals
+import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.test.TestScope
@@ -208,6 +209,7 @@ internal class LingerScene(
  * that is merely `Connecting`, having silently dropped the hello it thought it
  * had delivered.
  */
+@OptIn(ExperimentalCoroutinesApi::class)
 internal suspend fun TestScope.installLive(
     session: Session,
     stream: FakeStream,

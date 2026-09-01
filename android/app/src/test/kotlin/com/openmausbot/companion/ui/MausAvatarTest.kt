@@ -2,13 +2,19 @@ package com.openmausbot.companion.ui
 
 import kotlin.test.Test
 import kotlin.test.assertEquals
+import kotlin.test.assertFalse
 import kotlin.test.assertTrue
+import org.junit.runner.RunWith
+import org.robolectric.annotation.Config
+import org.robolectric.RobolectricTestRunner
 
 /**
  * The palette and the silhouette are copied artwork. A copy that drifts is the
  * failure mode these guard against — a bot you know by its shape and colour must
  * look the same on the phone as it does on the laptop.
  */
+@RunWith(RobolectricTestRunner::class)
+@Config(sdk = [34])
 class MausAvatarTest {
 
     @Test
@@ -55,36 +61,20 @@ class MausAvatarTest {
     }
 
     @Test
-    fun `the silhouette parses to the artwork it was copied from`() {
-        val commands = MausSilhouette.commands
-        assertEquals(59, commands.size)
-        assertEquals(MausSilhouette.Command.MoveTo(0f, 0f), commands.first())
-        assertEquals(MausSilhouette.Command.Close, commands.last())
-        assertEquals(57, commands.count { it is MausSilhouette.Command.CurveTo })
+    fun `the silhouette parses into a non-empty native path`() {
+        val path = MausSilhouette.faceBoxPath
+        assertFalse(path.isEmpty)
+        assertTrue(path.getBounds().width > 0f)
+        assertTrue(path.getBounds().height > 0f)
     }
 
     @Test
-    fun `the silhouette bounds enclose every on-curve point`() {
-        val bounds = MausSilhouette.bounds
-        assertTrue(bounds.width > 0f && bounds.height > 0f)
-        for (command in MausSilhouette.commands) {
-            val point = when (command) {
-                is MausSilhouette.Command.MoveTo -> command.x to command.y
-                is MausSilhouette.Command.CurveTo -> command.x to command.y
-                MausSilhouette.Command.Close -> continue
-            }
-            assertTrue(point.first >= bounds.minX && point.first <= bounds.maxX, "x ${point.first}")
-            assertTrue(point.second >= bounds.minY && point.second <= bounds.maxY, "y ${point.second}")
-        }
-    }
-
-    @Test
-    fun `the silhouette bounds are the tight path box, not the control hull`() {
-        val bounds = MausSilhouette.bounds
-        assertEquals(-83.234f, bounds.minX, 0.01f)
-        assertEquals(-16.563f, bounds.minY, 0.01f)
-        assertEquals(238.506f, bounds.maxX, 0.01f)
-        assertEquals(368.251f, bounds.maxY, 0.01f)
+    fun `the silhouette keeps the fixed tight artwork bounds`() {
+        val bounds = MausSilhouette.tightBounds
+        assertEquals(-83.234f, bounds.left, 0.01f)
+        assertEquals(-16.563f, bounds.top, 0.01f)
+        assertEquals(238.506f, bounds.right, 0.01f)
+        assertEquals(368.251f, bounds.bottom, 0.01f)
     }
 
     @Test
@@ -92,34 +82,12 @@ class MausAvatarTest {
         // Which is what puts the eyes and the mouth on the body rather than beside
         // it: every face coordinate is expressed in this box.
         val bounds = MausSilhouette.faceBoxBounds
-        assertEquals(0f, bounds.minY, 0.01f)
-        assertEquals(MausFaceData.FACE_BOX, bounds.maxY, 0.01f)
-        assertEquals(18.73f, bounds.minX, 0.01f)
-        assertEquals(209.81f, bounds.maxX, 0.01f)
+        assertEquals(0f, bounds.top, 0.01f)
+        assertEquals(MausFaceData.FACE_BOX, bounds.bottom, 0.01f)
+        assertEquals(18.73f, bounds.left, 0.01f)
+        assertEquals(209.81f, bounds.right, 0.01f)
         // the eye anchor sits inside the body it is painted on
-        assertTrue(MausFaceData.ANCHOR_X in bounds.minX..bounds.maxX)
-        assertTrue(MausFaceData.ANCHOR_Y in bounds.minY..bounds.maxY)
-    }
-
-    @Test
-    fun `the parser understands several curves after one C`() {
-        val parsed = MausSilhouette.parse("M0 0 C1 2 3 4 5 6 7 8 9 10 11 12 Z")
-        assertEquals(
-            listOf(
-                MausSilhouette.Command.MoveTo(0f, 0f),
-                MausSilhouette.Command.CurveTo(1f, 2f, 3f, 4f, 5f, 6f),
-                MausSilhouette.Command.CurveTo(7f, 8f, 9f, 10f, 11f, 12f),
-                MausSilhouette.Command.Close,
-            ),
-            parsed,
-        )
-    }
-
-    @Test
-    fun `a minus starts a new number unless it is an exponent sign`() {
-        val parsed = MausSilhouette.parse("M-1-2 C1e-2 0 0 0 0 0")
-        assertEquals(MausSilhouette.Command.MoveTo(-1f, -2f), parsed.first())
-        val curve = parsed[1] as MausSilhouette.Command.CurveTo
-        assertEquals(0.01f, curve.c1x, 1e-6f)
+        assertTrue(MausFaceData.ANCHOR_X in bounds.left..bounds.right)
+        assertTrue(MausFaceData.ANCHOR_Y in bounds.top..bounds.bottom)
     }
 }

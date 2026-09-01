@@ -53,7 +53,11 @@ class KeystoreTokenStore(
 
     override suspend fun save(connectionId: String, token: String) {
         try {
-            withContext(io) { prefs.edit().putString(key(connectionId), token).commit() }
+            withContext(io) {
+                check(prefs.edit().putString(key(connectionId), token).commit()) {
+                    "The device token write did not land."
+                }
+            }
         } catch (cancellation: CancellationException) {
             throw cancellation
         } catch (error: Exception) {

@@ -61,7 +61,9 @@ class MainActivity : ComponentActivity() {
     private val permissionLauncher = registerForActivityResult(
         ActivityResultContracts.RequestMultiplePermissions(),
     ) { results ->
-        app.permissions.onRequestResult(results)
+        // Re-read platform state instead of treating the launcher result map as
+        // a second source of truth.
+        app.permissions.refresh()
         permissionRequests.onResults(results)
     }
 

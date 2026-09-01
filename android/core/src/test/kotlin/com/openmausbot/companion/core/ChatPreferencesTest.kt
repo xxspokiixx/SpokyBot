@@ -94,9 +94,7 @@ class ChatPreferencesTest {
     }
 
     @Test
-    fun preferenceWireValuesUseIosDefaults() {
+    fun unknownActivityDetailUsesIosDefault() {
         assertEquals(ActivityDetail.FULL, ActivityDetail.fromWire("unknown"))
-        assertEquals(ChatIntro.ONCE_PER_BOT, ChatIntro.fromWire(null))
-        assertEquals(ChatIntro.ALWAYS, ChatIntro.fromWire("always"))
     }
 }

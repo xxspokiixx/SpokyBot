@@ -442,11 +442,10 @@ interface DictationAudioFocus {
  */
 internal class AndroidSpeechEngineFactory(
     private val context: Context,
-    private val sdkInt: Int = Build.VERSION.SDK_INT,
 ) : SpeechEngineFactory {
     override fun openers(): List<EngineOpener> {
         val list = ArrayList<EngineOpener>(2)
-        if (sdkInt >= 31 && SpeechRecognizer.isOnDeviceRecognitionAvailable(context)) {
+        if (Build.VERSION.SDK_INT >= 31 && SpeechRecognizer.isOnDeviceRecognitionAvailable(context)) {
             list += EngineOpener(isOnDevice = true) {
                 PlatformSpeechEngine(
                     SpeechRecognizer.createOnDeviceSpeechRecognizer(context),

@@ -18,19 +18,6 @@ enum class ActivityDetail(val wireValue: String, val label: String, val caption:
     }
 }
 
-/** When a platform-specific chat intro should play. */
-enum class ChatIntro(val wireValue: String, val label: String) {
-    ALWAYS("always", "Always"),
-    ONCE_PER_BOT("oncePerBot", "First time per bot"),
-    NEVER("never", "Never"),
-    ;
-
-    companion object {
-        fun fromWire(value: String?): ChatIntro =
-            entries.firstOrNull { it.wireValue == value } ?: ONCE_PER_BOT
-    }
-}
-
 /** One user-editable chip on the composer's quick-reply row. */
 @Serializable
 data class QuickReply(

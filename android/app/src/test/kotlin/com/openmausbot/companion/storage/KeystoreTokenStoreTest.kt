@@ -88,6 +88,18 @@ class KeystoreTokenStoreTest {
     }
 
     @Test
+    fun `a failed token commit fails pairing instead of saving a broken connection`() = runBlocking {
+        val prefs = RecordingPrefs(commitSucceeds = false)
+        val store = store(prefs)
+
+        val failure = assertFailsWith<TokenStoreException> { store.save("c1", "tok") }
+
+        assertFalse(failure.locked)
+        assertEquals("The device token write did not land.", failure.message)
+        assertEquals(TokenStore.ReadResult.Missing, store.read("c1"))
+    }
+
+    @Test
     fun `a saved token reads back and a missing one reads Missing`() = runBlocking {
         val prefs = RecordingPrefs()
         val store = store(prefs)
@@ -177,7 +189,9 @@ class KeystoreTokenStoreTest {
      * Records the thread of every touch and which durability the editor was
      * asked for. Backed by a map so reads observe what writes did.
      */
-    private class RecordingPrefs : SharedPreferences {
+    private class RecordingPrefs(
+        val commitSucceeds: Boolean = true,
+    ) : SharedPreferences {
         val values = mutableMapOf<String, String?>()
         val touches = mutableListOf<String>()
         val commits = AtomicInteger(0)
@@ -253,8 +267,8 @@ class KeystoreTokenStoreTest {
         override fun commit(): Boolean {
             mark()
             prefs.commits.incrementAndGet()
-            pending.forEach { it() }
-            return true
+            if (prefs.commitSucceeds) pending.forEach { it() }
+            return prefs.commitSucceeds
         }
 
         override fun apply() {

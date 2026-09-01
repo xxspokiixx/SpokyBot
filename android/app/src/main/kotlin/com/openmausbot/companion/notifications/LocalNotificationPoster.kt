@@ -66,7 +66,12 @@ class LocalNotificationPoster(
                 if (notification.isBlocking) NotificationCompat.CATEGORY_ALARM
                 else NotificationCompat.CATEGORY_STATUS,
             )
-        manager.notify(NotificationMapping.dedupeId(notification, sequence), 0, builder.build())
+        try {
+            manager.notify(NotificationMapping.dedupeId(notification, sequence), 0, builder.build())
+        } catch (_: SecurityException) {
+            // Permission can be revoked between canPost() and notify(). A missed
+            // local banner is safer than crashing the live companion session.
+        }
     }
 
     override fun setBadge(count: Int) {
@@ -109,6 +114,7 @@ class LocalNotificationPoster(
 
     /** True when the platform will accept a notification post right now. */
     fun canPost(): Boolean {
+        if (!manager.areNotificationsEnabled()) return false
         if (Build.VERSION.SDK_INT < 33) return true
         return ContextCompat.checkSelfPermission(
             appContext,
@@ -129,4 +135,3 @@ class LocalNotificationPoster(
         const val POST_NOTIFICATIONS_PERMISSION = Manifest.permission.POST_NOTIFICATIONS
     }
 }
-

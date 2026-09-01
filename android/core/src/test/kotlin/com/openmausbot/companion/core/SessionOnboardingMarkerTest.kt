@@ -4,6 +4,7 @@ import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFalse
 import kotlin.test.assertTrue
+import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.flow.emptyFlow
 import kotlinx.coroutines.yield
 import kotlinx.coroutines.test.TestScope
@@ -19,6 +20,7 @@ import kotlinx.coroutines.test.runTest
  * the order the stores were touched in, so a `pair` that stopped calling the
  * sequence — or called it around the wrong writes — fails here.
  */
+@OptIn(ExperimentalCoroutinesApi::class)
 class SessionOnboardingMarkerTest {
 
     /** Every durable write, in the order it happened, across all three stores. */

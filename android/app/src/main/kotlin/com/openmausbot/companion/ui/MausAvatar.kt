@@ -69,8 +69,8 @@ internal fun MausAvatar(
             colorStops = MausPalette.gradient(color)
                 .map { (position, argb) -> position to Color(argb) }
                 .toTypedArray(),
-            start = Offset(bounds.maxX, bounds.minY),
-            end = Offset(bounds.minX, bounds.maxY),
+            start = Offset(bounds.right, bounds.top),
+            end = Offset(bounds.left, bounds.bottom),
         )
     }
 
@@ -201,22 +201,7 @@ private class MausFaceGeometry {
  * The silhouette in the desktop's face box, parsed and mapped once — the shape
  * never changes, and only the fit below depends on the size it is drawn at.
  */
-private val faceBoxBody: Path by lazy {
-    val path = Path()
-    for (command in MausSilhouette.commands) {
-        when (command) {
-            is MausSilhouette.Command.MoveTo ->
-                path.moveTo(MausSilhouette.faceBoxX(command.x), MausSilhouette.faceBoxY(command.y))
-            is MausSilhouette.Command.CurveTo -> path.cubicTo(
-                MausSilhouette.faceBoxX(command.c1x), MausSilhouette.faceBoxY(command.c1y),
-                MausSilhouette.faceBoxX(command.c2x), MausSilhouette.faceBoxY(command.c2y),
-                MausSilhouette.faceBoxX(command.x), MausSilhouette.faceBoxY(command.y),
-            )
-            MausSilhouette.Command.Close -> path.close()
-        }
-    }
-    path
-}
+private val faceBoxBody: Path = MausSilhouette.faceBoxPath
 
 /** One instance, shared: the mouth is the same 7.5-unit round stroke every frame. */
 private val mouthStroke = Stroke(width = MausFaceData.MOUTH_STROKE, cap = StrokeCap.Round)

@@ -44,7 +44,11 @@ class AvatarImageStore(
     maxBitmapEntries: Int = DEFAULT_MAX_BITMAP_ENTRIES,
     maxBitmapBytes: Int = DEFAULT_MAX_BITMAP_BYTES,
 ) {
-    private val cache = BoundedByteCache(maxEntries = maxEntries, maxBytes = maxBytes)
+    private val cache = BoundedCostCache<ByteArray>(
+        maxEntries = maxEntries,
+        maxBytes = maxBytes,
+        costOf = ByteArray::size,
+    )
     private val bitmaps = BoundedCostCache<DecodedAvatar>(
         maxEntries = maxBitmapEntries,
         maxBytes = maxBitmapBytes,
@@ -252,7 +256,7 @@ class AvatarImageStore(
             mutex.withLock {
                 if (inflight[path]?.id == request.id) inflight.remove(path)
                 val keep = gen == generation
-                if (keep && result != null) cache.put(path, result)
+                if (keep && result != null) cache.putIfAbsent(path, result)
                 request.deferred.complete(if (keep) result else null)
             }
         }
@@ -359,51 +363,8 @@ class AvatarImageStore(
 }
 
 /**
- * Access-ordered map with both an entry cap and a total byte budget —
- * the two NSCache limits from iOS (`countLimit = 64`, `totalCostLimit = 32 MB`)
- * applied to **encoded** avatar bytes.
- */
-internal class BoundedByteCache(
-    private val maxEntries: Int,
-    private val maxBytes: Int,
-) {
-    private val map = LinkedHashMap<String, ByteArray>(16, 0.75f, true)
-    private var totalBytes = 0
-
-    @Synchronized
-    fun get(key: String): ByteArray? = map[key]
-
-    @Synchronized
-    fun put(key: String, value: ByteArray) {
-        map.remove(key)?.let { totalBytes -= it.size }
-        // A single object larger than the budget still replaces what is there,
-        // matching NSCache's willingness to hold one large entry.
-        while (map.isNotEmpty() &&
-            (map.size >= maxEntries || totalBytes + value.size > maxBytes)
-        ) {
-            val eldest = map.entries.iterator().next()
-            totalBytes -= eldest.value.size
-            map.remove(eldest.key)
-        }
-        map[key] = value
-        totalBytes += value.size
-    }
-
-    @Synchronized
-    fun clear() {
-        map.clear()
-        totalBytes = 0
-    }
-
-    @Synchronized
-    fun size(): Int = map.size
-
-    @Synchronized
-    fun byteCost(): Int = totalBytes
-}
-
-/**
- * Access-ordered cache with entry and byte-cost eviction.
+ * Access-ordered cache with entry and byte-cost eviction. Used for both the
+ * encoded-byte and decoded-frame budgets.
  * Drops the map reference only on eviction — never [Bitmap.recycle], because
  * roster/header may still be drawing that instance after eviction or sign-out.
  */

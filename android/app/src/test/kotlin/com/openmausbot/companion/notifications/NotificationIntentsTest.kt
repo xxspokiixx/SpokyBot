@@ -3,6 +3,9 @@ package com.openmausbot.companion.notifications
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertNotEquals
+import org.junit.runner.RunWith
+import org.robolectric.RobolectricTestRunner
+import org.robolectric.annotation.Config
 
 /**
  * PendingIntent identity must not collapse distinct notification payloads.
@@ -13,6 +16,8 @@ import kotlin.test.assertNotEquals
  * userInfo) and `_temp/PARITY_DELTA_AUDIT_2.md` §D2-03 (open the pair that
  * *that* notification carried).
  */
+@RunWith(RobolectricTestRunner::class)
+@Config(sdk = [26])
 class NotificationIntentsTest {
 
     @Test
@@ -38,6 +43,10 @@ class NotificationIntentsTest {
         assertEquals(
             "openmaus://notification/bot%3A1/thread%2F2",
             NotificationIntents.contentIdentity("bot:1", "thread/2"),
+        )
+        assertEquals(
+            "openmaus://notification/bot%20one/a%2Fb%3Fc",
+            NotificationIntents.contentIdentity("bot one", "a/b?c"),
         )
     }
 

@@ -1,6 +1,5 @@
 package com.openmausbot.companion.core
 
-import java.io.ByteArrayOutputStream
 import java.io.IOException
 import java.util.concurrent.atomic.AtomicReference
 import kotlinx.coroutines.CancellationException
@@ -58,9 +57,8 @@ class SSEParser {
 }
 
 /**
- * Reads an OkHttp response as raw bytes so consecutive newlines remain visible
- * to [SSEParser]. Malformed JSON drops one frame; unknown frame kinds decode as
- * [Frame.Unknown] and keep the stream alive.
+ * Malformed JSON drops one frame; unknown frame kinds decode as [Frame.Unknown]
+ * and keep the stream alive.
  */
 fun eventStream(
     request: Request,
@@ -74,28 +72,16 @@ fun eventStream(
             responseRef.set(response)
             if (response.code != 200) throw APIError.Status(response.code)
             val body = response.body ?: throw APIError.Transport("The computer sent an empty event stream.")
-            val input = body.byteStream()
+            val source = body.source()
             val parser = SSEParser()
-            val line = ByteArrayOutputStream()
-            val buffer = ByteArray(DEFAULT_BUFFER_SIZE)
 
             while (isActive) {
-                val count = input.read(buffer)
-                if (count < 0) break
-                for (index in 0 until count) {
-                    val byte = buffer[index]
-                    if (byte.toInt() != 0x0A) {
-                        line.write(byte.toInt())
-                        continue
-                    }
-                    val text = line.toByteArray().toString(Charsets.UTF_8)
-                    line.reset()
-                    val event = parser.line(text) ?: continue
-                    val frame = runCatching {
-                        CompanionJson.decodeFromString<StreamFrame>(event.data)
-                    }.getOrNull() ?: continue
-                    send(frame)
-                }
+                val line = source.readUtf8Line() ?: break
+                val event = parser.line(line) ?: continue
+                val frame = runCatching {
+                    CompanionJson.decodeFromString<StreamFrame>(event.data)
+                }.getOrNull() ?: continue
+                send(frame)
             }
             parser.reset()
             close()

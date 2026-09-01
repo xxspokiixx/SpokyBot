@@ -5,6 +5,7 @@ import android.net.nsd.NsdManager
 import android.net.nsd.NsdServiceInfo
 import android.net.wifi.WifiManager
 import android.os.Build
+import androidx.annotation.RequiresApi
 import com.openmausbot.companion.core.Connection
 import java.net.InetAddress
 import java.util.Collections
@@ -319,6 +320,7 @@ internal fun browseDiscoveryFlow(
  * other callback will be sent in that case", and unregistering an unknown
  * listener throws on devices below T extension 22.
  */
+@RequiresApi(Build.VERSION_CODES.UPSIDE_DOWN_CAKE)
 internal class ServiceInfoResolver(
     private val unregister: (NsdManager.ServiceInfoCallback) -> Unit,
 ) {
@@ -419,9 +421,13 @@ class NsdDiscovery(
     private val nsdManager = appContext.getSystemService(NsdManager::class.java)
     private val wifiManager = appContext.getSystemService(Context.WIFI_SERVICE) as? WifiManager
     private val resolveExecutor: Executor = Executors.newSingleThreadExecutor()
-    private val resolver = ServiceInfoResolver(
-        unregister = { callback -> nsdManager?.unregisterServiceInfoCallback(callback) },
-    )
+    private val resolver = if (Build.VERSION.SDK_INT >= 34) {
+        ServiceInfoResolver(
+            unregister = { callback -> nsdManager?.unregisterServiceInfoCallback(callback) },
+        )
+    } else {
+        null
+    }
 
     override fun discover(): Flow<DiscoveryState> {
         if (nsdManager == null) {
@@ -450,7 +456,9 @@ class NsdDiscovery(
                 nsdManager.stopServiceDiscovery(listener)
             },
             resolveService = { service, onResolved -> resolve(service, onResolved) },
-            stopResolves = resolver::stopAll,
+            stopResolves = {
+                if (Build.VERSION.SDK_INT >= 34) resolver?.stopAll()
+            },
             hostAddress = ::hostAddress,
             failureMessage = ::failureMessage,
         )
@@ -474,12 +482,12 @@ class NsdDiscovery(
     private fun resolve(service: NsdServiceInfo, onResolved: (NsdServiceInfo?) -> Unit) {
         val manager = nsdManager ?: return onResolved(null)
         if (Build.VERSION.SDK_INT >= 34) {
-            resolver.resolve(
+            resolver?.resolve(
                 register = { callback ->
                     manager.registerServiceInfoCallback(service, resolveExecutor, callback)
                 },
                 onResolved = onResolved,
-            )
+            ) ?: onResolved(null)
         } else {
             @Suppress("DEPRECATION")
             manager.resolveService(
@@ -525,4 +533,3 @@ class NsdDiscovery(
         const val MULTICAST_LOCK_TAG = "openmausbot-nsd"
     }
 }
-
