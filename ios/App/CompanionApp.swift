@@ -20,6 +20,7 @@ struct CompanionApp: App {
             RootView()
                 .environmentObject(session)
                 .onAppear {
+                    OpenMausSharedInbox.removeDirectories(olderThan: 60 * 60)
                     session.connect()
                     liveActivities.attach(to: session)
                 }
@@ -27,6 +28,7 @@ struct CompanionApp: App {
                 .onChange(of: scenePhase) { _, phase in
                     switch phase {
                     case .active:
+                        OpenMausSharedInbox.removeDirectories(olderThan: 60 * 60)
                         session.connect()
                         Task { await session.refreshNotificationAuthorization() }
                     case .background: session.linger()
@@ -35,6 +37,7 @@ struct CompanionApp: App {
                     }
                 }
         }
+        .defaultSize(CompanionLayout.defaultWindowSize)
     }
 }
 
@@ -44,8 +47,6 @@ struct RootView: View {
     @AppStorage("companion.onboarding.notificationsSeen") private var hasSeenNotificationPrompt = false
     @AppStorage(CompanionOnboardingPreferences.pendingNotificationOnboardingKey)
     private var notificationOnboardingPending = false
-    @State private var pairingRequested = false
-
     var body: some View {
         Group {
             switch route {
@@ -54,17 +55,17 @@ struct RootView: View {
                     onConnect: startPairing,
                     onSkip: {
                         hasSeenWelcome = true
-                        pairingRequested = false
+                        session.endPairing()
                     }
                 )
             case .pairing:
                 PairingView {
                     hasSeenWelcome = true
-                    pairingRequested = false
+                    session.endPairing()
                 }
                 .onAppear {
                     hasSeenWelcome = true
-                    pairingRequested = true
+                    session.beginPairing()
                 }
             case .unpairedHome:
                 UnpairedHomeView(onConnect: startPairing)
@@ -72,7 +73,7 @@ struct RootView: View {
                 NotificationOnboardingView {
                     hasSeenNotificationPrompt = true
                     notificationOnboardingPending = false
-                    pairingRequested = false
+                    session.endPairing()
                 }
                 .onAppear { hasSeenWelcome = true }
             case .chats:
@@ -82,20 +83,28 @@ struct RootView: View {
                         // This is either an existing pairing or a new pairing
                         // which needed no notification education. Do not let
                         // a later voluntary unpair reopen Pairing by itself.
-                        pairingRequested = false
+                        session.endPairing()
                         reconcileNotificationOnboarding()
                     }
             case .revoked:
-                UnpairedView {
-                    session.signOut()
-                    startPairing()
-                }
+                UnpairedView(
+                    onPairAgain: {
+                        session.signOut()
+                        startPairing()
+                    },
+                    onChooseAnother: session.connections.first(where: {
+                        $0.id != session.connection?.id
+                    }).map { computer in
+                        { session.switchComputer(to: computer.id) }
+                    }
+                )
             }
         }
+        .background(Color(uiColor: .systemBackground).ignoresSafeArea())
         .onChange(of: session.pairingInvite) { _, invite in
             guard invite != nil else { return }
             hasSeenWelcome = true
-            pairingRequested = true
+            session.beginPairing()
         }
         .onAppear { reconcileNotificationOnboarding() }
         .onChange(of: session.notificationAuthorizationResolved) { _, _ in
@@ -133,7 +142,7 @@ struct RootView: View {
         return CompanionOnboardingRouter.route(for: .init(
             pairingState: pairingState,
             hasSeenWelcome: hasSeenWelcome,
-            pairingRequested: pairingRequested,
+            pairingRequested: session.pairingRequested,
             hasPendingPairingInvite: session.pairingInvite != nil,
             notificationOnboardingPending: notificationOnboardingPending,
             hasSeenNotificationPrompt: hasSeenNotificationPrompt,
@@ -161,7 +170,7 @@ struct RootView: View {
 
     private func startPairing() {
         hasSeenWelcome = true
-        pairingRequested = true
+        session.beginPairing()
     }
 }
 
@@ -170,17 +179,23 @@ struct RootView: View {
 /// honest thing is to say so and offer to pair again.
 struct UnpairedView: View {
     let onPairAgain: () -> Void
+    let onChooseAnother: (() -> Void)?
 
     var body: some View {
         NavigationStack {
             ContentUnavailableView {
-                Label("This phone was unpaired", systemImage: "lock.slash")
+                Label("This device was unpaired", systemImage: "lock.slash")
             } description: {
                 Text("The connection was removed on your computer. Pair again to keep using your chats here.")
             } actions: {
                 Button("Pair again", action: onPairAgain)
                     .buttonStyle(.borderedProminent)
                     .controlSize(.large)
+                if let onChooseAnother {
+                    Button("Use another computer", action: onChooseAnother)
+                        .buttonStyle(.bordered)
+                        .controlSize(.large)
+                }
             }
         }
     }

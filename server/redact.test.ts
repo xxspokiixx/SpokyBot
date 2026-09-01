@@ -74,6 +74,35 @@ describe("redactSecrets", () => {
     expect(out).toContain('"1"'); // a non-secret value is untouched
   });
 
+  it("still content-redacts an ACP env entry whose name is not secret-shaped", () => {
+    // A credential can land under an ordinary-looking variable name (a
+    // custom env var, a feature flag someone repurposed) — the ACP
+    // {name,value} shortcut must not skip the content pass just because
+    // the NAME alone doesn't scream "secret".
+    const alpha = "abcdefghijklmnopqrstuvwxyz0123456789";
+    const leaked = `sk-ant-api03-${alpha}`;
+    const sessionNew = {
+      params: {
+        mcpServers: [
+          {
+            name: "custom",
+            env: [
+              { name: "SESSION_CONFIG", value: leaked },
+              { name: "FEATURE_FLAG", value: "enabled" },
+            ],
+          },
+        ],
+      },
+    };
+
+    const out = flat(redactSecrets(sessionNew));
+    expect(out).not.toContain(leaked);
+    expect(out).toContain("SESSION_CONFIG");
+    expect(out).toContain("FEATURE_FLAG");
+    expect(out).toContain("enabled");
+    expect(out).toMatch(/«redacted \d+ chars»/);
+  });
+
   it("leaves ordinary protocol traffic alone", () => {
     const update = {
       method: "session/update",
@@ -139,6 +168,19 @@ describe("redactSecretsInText", () => {
     expect(redactSecretsInText('curl -H "Authorization: Bearer abc.def-ghi_jkl123456789"')).toBe('curl -H "Authorization: Bearer «redacted 24 chars»"');
   });
 
+  it("is byte-for-byte idempotent for PEM blocks", () => {
+    const privateKeyBody = "c3VwZXItc2VjcmV0LXByaXZhdGUta2V5LWJ5dGVz";
+    const pem = [
+      "-----BEGIN PRIVATE KEY-----",
+      privateKeyBody,
+      "-----END PRIVATE KEY-----",
+    ].join("\n");
+    const once = redactSecretsInText(`before\n${pem}\nafter`);
+
+    expect(redactSecretsInText(once)).toBe(once);
+    expect(once).toContain(`«redacted ${privateKeyBody.length} chars»`);
+  });
+
   it("masks the value of a secret-shaped key=value or key: value, keeping the key", () => {
     expect(redactSecretsInText("export DATABASE_PASSWORD=hunter2hunter2")).toBe("export DATABASE_PASSWORD=«redacted 14 chars»");
     expect(redactSecretsInText('{"api_key": "abcd1234efgh5678"}')).toBe('{"api_key": "«redacted 16 chars»"}');
@@ -164,5 +206,15 @@ describe("redactSecretsInText", () => {
     const out = redactSecrets({ command: "curl -H 'Authorization: Bearer abcdefghijklmnop'", note: "fine" }) as Record<string, string>;
     expect(out.command).toContain("«redacted");
     expect(out.note).toBe("fine");
+  });
+
+  it("is idempotent for structurally identified credentials", () => {
+    const input = {
+      apiKey: "abcdefgh12345678",
+      env: [{ name: "OMB_COMMS_TOKEN", value: "abcdefghijklmnop" }],
+    };
+    const once = redactSecrets(input);
+
+    expect(redactSecrets(once)).toEqual(once);
   });
 });

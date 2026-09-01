@@ -259,6 +259,10 @@ export function createAcpDriver(support: AcpSupport): ProviderDriver<AcpConfig> 
             env: acpEnv(composio.env),
           });
         }
+        const browser = turn.integrations?.browser;
+        if (browser) {
+          servers.push({ name: "browser", command: browser.command, args: browser.args, env: acpEnv(browser.env) });
+        }
         // The bot's computer, mounted exactly like the Claude driver does.
         // Cloud boxes use the REST adapter; host and sandbox Cua connections
         // expose Cua Driver's official MCP server directly.
@@ -278,6 +282,13 @@ export function createAcpDriver(support: AcpSupport): ProviderDriver<AcpConfig> 
             args: local.args,
             env: acpEnv(local.env ?? {}),
           });
+        }
+        // user-configured servers, after the built-ins: a residual name
+        // collision keeps the built-in (reserved names are filtered at the
+        // config boundary; this is defense in depth).
+        for (const [name, server] of Object.entries(turn.integrations?.custom ?? {})) {
+          if (servers.some((existing) => existing.name === name)) continue;
+          servers.push({ name, command: server.command, args: server.args, env: acpEnv(server.env) });
         }
         return servers;
       };
@@ -687,7 +698,19 @@ export function createAcpDriver(support: AcpSupport): ProviderDriver<AcpConfig> 
             const reason = result?.stopReason;
             if (reason === "end_turn") settle(true, null);
             else if (reason === "cancelled") settle(true, "cancelled");
-            else settle(false, reason ?? "failed");
+            else {
+              const errorMessage = typeof result?.error === "string" && result.error
+                ? result.error
+                : typeof result?.message === "string" && result.message
+                  ? result.message
+                  : `Model turn failed: ${reason ?? "unknown error"}`;
+              emit({
+                ...base(threadId, turnId),
+                type: "runtime.error",
+                message: errorMessage,
+              });
+              settle(false, reason ?? "failed");
+            }
           } catch (e) {
             if (!state.settled) {
               const message = e instanceof Error ? e.message : String(e);
@@ -737,8 +760,10 @@ export function createAcpDriver(support: AcpSupport): ProviderDriver<AcpConfig> 
           capabilities: {
             sessionModelSwitch: "unsupported",
             agentsMcp: true,
+        customMcp: true,
             computerMcp: true,
             composioMcp: true,
+            browserMcp: true,
             images: support.images !== false,
             effortLevels: support.effortLevels,
             localComputerMcp: !config.fullAuto,

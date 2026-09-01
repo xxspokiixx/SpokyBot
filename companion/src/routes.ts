@@ -63,6 +63,9 @@ const ALLOWED: ReadonlyArray<{ method: string; path: RegExp }> = [
   // the fleet, and making a bot
   { method: "GET", path: /^\/api\/bots$/ },
   { method: "POST", path: /^\/api\/bots$/ },
+  // One narrow, atomic organizer write. This can only file visible bots;
+  // unlike the desktop's broad PATCH it cannot alter execution policy.
+  { method: "POST", path: /^\/api\/sidebar-sections$/ },
   { method: "POST", path: /^\/api\/bots\/[\w-]+\/messages$/ },
   { method: "POST", path: /^\/api\/bots\/[\w-]+\/interrupt$/ },
   { method: "POST", path: /^\/api\/bots\/[\w-]+\/read$/ },
@@ -85,6 +88,10 @@ const ALLOWED: ReadonlyArray<{ method: string; path: RegExp }> = [
   { method: "POST", path: /^\/api\/groups$/ },
   { method: "POST", path: /^\/api\/groups\/[\w-]+\/messages$/ },
   { method: "POST", path: /^\/api\/groups\/[\w-]+\/read$/ },
+  { method: "POST", path: /^\/api\/groups\/[\w-]+\/tasks$/ },
+  { method: "POST", path: /^\/api\/groups\/[\w-]+\/tasks\/[\w-]+$/ },
+  { method: "PATCH", path: /^\/api\/groups\/[\w-]+\/tasks\/[\w-]+$/ },
+  { method: "DELETE", path: /^\/api\/groups\/[\w-]+\/tasks\/[\w-]+$/ },
 
   // a transcript, its images, and answering an approval
   { method: "GET", path: /^\/api\/threads\/[\w-]+\/messages$/ },
@@ -98,6 +105,10 @@ const ALLOWED: ReadonlyArray<{ method: string; path: RegExp }> = [
   // the harness; GET is a single bare generated filename, never a path.
   { method: "POST", path: /^\/api\/attachments$/ },
   { method: "GET", path: /^\/api\/attachments\/[\w-]+\.(?:png|jpe?g|gif|webp)$/i },
+  // Share-sheet documents are raw, capped at 25 MiB, and stored under a
+  // generated filename by the harness. The display name stays in the query;
+  // only this exact upload route crosses the companion boundary.
+  { method: "POST", path: /^\/api\/files$/ },
 
   // Renderer-neutral voice operations. Neither route reads or writes the
   // workspace ElevenLabs key; the phone receives labels or audio only.

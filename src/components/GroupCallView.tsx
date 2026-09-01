@@ -17,7 +17,7 @@ import { useStore, type Bot, type Group, type Message } from "@/state/store";
 import { cn } from "@/lib/cn";
 import { MausAvatar } from "./Avatar";
 import { CallTargetButton } from "./CallView";
-import { pendingApprovals } from "./PendingApproval";
+import { isRoutineApproval, isSkillApproval, pendingApprovals, spokenApprovalPrompt } from "./PendingApproval";
 
 const YES = /^(yes|yeah|yep|yup|sure|ok|okay|go ahead|do it|allow|approve|approved|fine|please do)\b/i;
 const NO = /^(no|nope|don'?t|do not|stop|deny|denied|cancel|never|skip it)\b/i;
@@ -59,7 +59,7 @@ function questionIn(messages: Message[]): Message | undefined {
 function GroupCall({ group, members }: { group: Group; members: Bot[] }) {
   const { dispatch } = useStore();
   const speech = useSpeech();
-  const initialPhase: Phase = group.busyBotId ? "working" : "listening";
+  const initialPhase: Phase = group.working || group.busyBotId ? "working" : "listening";
   const [phase, setPhase] = useState<Phase>(initialPhase);
   const [heard, setHeard] = useState("");
   const [note, setNote] = useState<string | null>(null);
@@ -72,10 +72,10 @@ function GroupCall({ group, members }: { group: Group; members: Bot[] }) {
   const approval = pendingApprovals(messages)[0];
   const question = questionIn(messages);
   const membersRef = useRef(members);
-  const busyRef = useRef(Boolean(group.busyBotId));
+  const busyRef = useRef(Boolean(group.working || group.busyBotId));
   const defaultResponderRef = useRef(group.defaultResponder);
   membersRef.current = members;
-  busyRef.current = Boolean(group.busyBotId);
+  busyRef.current = Boolean(group.working || group.busyBotId);
   defaultResponderRef.current = group.defaultResponder;
 
   const spokenIds = useRef<Set<string>>(new Set());
@@ -85,7 +85,13 @@ function GroupCall({ group, members }: { group: Group; members: Bot[] }) {
     for (const message of messages) spokenIds.current.add(message.id);
   }
 
-  const askedApproval = useRef<{ requestId: string; member?: Bot } | null>(null);
+  const askedApproval = useRef<{
+    requestId: string;
+    member?: Bot;
+    routine: boolean;
+    skill: boolean;
+    submitted: boolean;
+  } | null>(null);
   const askedQuestion = useRef<{ requestId: string; member?: Bot } | null>(null);
   const phaseRef = useRef<Phase>(initialPhase);
   const alive = useRef(true);
@@ -212,18 +218,53 @@ function GroupCall({ group, members }: { group: Group; members: Bot[] }) {
 
       const openApproval = askedApproval.current;
       if (openApproval) {
+        if (openApproval.submitted) {
+          move("working");
+          hush();
+          return;
+        }
         if (YES.test(said) || NO.test(said)) {
           const allow = YES.test(said);
-          askedApproval.current = null;
+          if (allow && openApproval.skill) {
+            setHeard("");
+            enqueueSpeech(
+              "Open the channel chat to review the complete skill before enabling it. You can say no now to deny it.",
+              openApproval.member,
+              true,
+            );
+            return;
+          }
+          // Hold this approval in-flight until its server patch arrives so a
+          // slow response cannot reopen the microphone and submit it twice.
+          openApproval.submitted = true;
           allowBargeIn.current = false;
+          move("working");
+          hush();
+          setHeard("");
           dispatch({
             type: "decideRequest",
             threadId: group.threadId,
             requestId: openApproval.requestId,
             behavior: allow ? "allow" : "deny",
             message: allow ? undefined : "Denied by the user, on a group call.",
+            onError: (error: string) => {
+              const pending = askedApproval.current;
+              if (
+                !alive.current ||
+                currentCall() !== group.id ||
+                pending?.requestId !== openApproval.requestId ||
+                !pending.submitted
+              ) return;
+              pending.submitted = false;
+              const detail = error.trim().slice(0, 240);
+              const decision = openApproval.routine ? "routine decision" : "approval";
+              enqueueSpeech(
+                `I couldn't save that ${decision}${detail ? `: ${detail}` : "."} Please try again.`,
+                openApproval.member,
+                true,
+              );
+            },
           });
-          move("working");
           return;
         }
         enqueueSpeech("Sorry — is that a yes or a no?", openApproval.member, true);
@@ -255,7 +296,7 @@ function GroupCall({ group, members }: { group: Group; members: Bot[] }) {
 
       allowBargeIn.current = false;
       move(busyRef.current ? "working" : "sending");
-      dispatch({ type: "sendGroup", groupId: group.id, text: routed.text });
+      dispatch({ type: "sendGroup", groupId: group.id, text: routed.text, threadId: group.threadId });
       scheduleListen(false, 600);
     });
     const offEnd = bridge.onSpeechEnd(({ code, reason }) => {
@@ -274,7 +315,7 @@ function GroupCall({ group, members }: { group: Group; members: Bot[] }) {
       }
       if (phaseRef.current === "listening") listen();
     });
-    if (group.busyBotId && !approval && !question) move("working");
+    if ((group.working || group.busyBotId) && !approval && !question) move("working");
     else listen();
     return () => {
       offTranscript();
@@ -283,26 +324,41 @@ function GroupCall({ group, members }: { group: Group; members: Bot[] }) {
     };
     // Live busy/card changes are handled below without restarting native capture.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [dispatch, enqueueSpeech, group.id, group.threadId, listen, move, scheduleListen]);
+  }, [dispatch, enqueueSpeech, group.id, group.threadId, hush, listen, move, scheduleListen]);
 
   useEffect(() => {
+    let resumeAfterRoutine = false;
     if (askedApproval.current && approval?.requestId !== askedApproval.current.requestId) {
+      resumeAfterRoutine = askedApproval.current.routine && askedApproval.current.submitted;
       askedApproval.current = null;
     }
     if (askedQuestion.current && question?.card?.requestId !== askedQuestion.current.requestId) {
       askedQuestion.current = null;
     }
 
+    if (resumeAfterRoutine && !approval && !question && !group.working && !group.busyBotId) {
+      scheduleListen(true);
+      return;
+    }
+    // Keep the voice queue and microphone closed until this exact decision
+    // is settled or its request reports an error.
+    if (askedApproval.current?.submitted) return;
+
     if (approval && askedApproval.current?.requestId !== approval.requestId) {
       const member = members.find((candidate) => candidate.id === approval.message.from?.botId);
-      askedApproval.current = { requestId: approval.requestId, member };
+      askedApproval.current = {
+        requestId: approval.requestId,
+        member,
+        routine: isRoutineApproval(approval),
+        skill: isSkillApproval(approval),
+        submitted: false,
+      };
       spokenIds.current.add(approval.message.id);
       const name = member?.name ?? approval.message.from?.name ?? "A channel member";
-      enqueueSpeech(
-        name + " wants to " + approval.tool + ". " + approval.detail + ". Should I allow it?",
-        member,
-        true,
-      );
+      const skillPrompt = approval.message.card?.skillRequest?.action === "update"
+        ? `${name} wants to update a learned skill. Open the channel chat to review the complete skill before replacing the current version. You can say no to deny it.`
+        : `${name} wants to enable a new learned skill. Open the channel chat to review the complete skill before enabling it. You can say no to deny it.`;
+      enqueueSpeech(isSkillApproval(approval) ? skillPrompt : spokenApprovalPrompt(approval, name), member, true);
     }
 
     if (question?.card?.requestId && askedQuestion.current?.requestId !== question.card.requestId) {
@@ -339,10 +395,10 @@ function GroupCall({ group, members }: { group: Group; members: Bot[] }) {
         enqueueSpeech(chip.tool.spoken, member);
       }
     }
-  }, [approval, enqueueSpeech, members, messages, question]);
+  }, [approval, enqueueSpeech, group.busyBotId, group.working, members, messages, question, scheduleListen]);
 
   useEffect(() => {
-    const busy = Boolean(group.busyBotId);
+    const busy = Boolean(group.working || group.busyBotId);
     busyRef.current = busy;
     if (busy) {
       if (
@@ -364,7 +420,7 @@ function GroupCall({ group, members }: { group: Group; members: Bot[] }) {
     ) {
       scheduleListen();
     }
-  }, [group.busyBotId, hush, move, scheduleListen]);
+  }, [group.busyBotId, group.working, hush, move, scheduleListen]);
 
   useEffect(() => {
     const onKey = (event: KeyboardEvent) => {

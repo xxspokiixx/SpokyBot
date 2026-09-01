@@ -18,14 +18,6 @@ import { CursorAvatar, type CursorAvatarHandle } from "./CursorAvatar";
 import { botAvatarProfile, type BotAvatarCrop } from "../../shared/bot-avatar";
 import { MASCOT_BODIES, botMascotBody, type MascotBodyId } from "../../shared/mascot-bodies";
 
-/**
- * Legacy face-placement knobs from the Maus body era. The cursor mascot
- * places its own face; these remain only so the preview harness's sliders
- * keep compiling — the matching props are accepted and ignored.
- */
-export const FACE_X = 80;
-export const FACE_Y = 102;
-export const FACE_SCALE = 0.47;
 export const EYE_SCALE = 1.12;
 export const MOUTH_WEIGHT = 11;
 
@@ -110,17 +102,14 @@ export type MausAvatarProps = {
    * direction. Off restores the engine's own drawn-in directions.
    */
   forward?: boolean;
+  /** How much each expression glances around. Overrides `forward`'s 0-or-1. */
+  lookAround?: number;
   /** Let the eyes follow the pointer across this avatar. */
   trackPointer?: boolean;
   /** Run the animation. Off renders the state's resting face. */
   animated?: boolean;
   /** Which body the bot wears. Unknown values fall back to the cursor. */
   bodyId?: MascotBodyId;
-  /** Legacy Maus face-placement knobs — accepted, ignored. */
-  eyeSpacing?: number;
-  faceX?: number;
-  faceY?: number;
-  faceScale?: number;
 };
 
 function MausAvatarComponent(
@@ -139,6 +128,7 @@ function MausAvatarComponent(
     showMouth,
     mouthStroke,
     forward = true,
+    lookAround,
     trackPointer = true,
     animated = true,
     bodyId,
@@ -194,7 +184,7 @@ function MausAvatarComponent(
         silhouette={silhouette}
         gradient={gradientFor(color)}
         title={label ?? null}
-        lookAround={forward ? 0 : 1}
+        lookAround={lookAround ?? (forward ? 0 : 1)}
         gaze={{ x: (gaze?.x ?? 0) + pointer.x, y: (gaze?.y ?? 0) + pointer.y }}
         turn={turn}
         spring={spring}

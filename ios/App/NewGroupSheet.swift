@@ -1,4 +1,4 @@
-// Make a room from the phone: a name, and which bots are in it.
+// Make a channel from the phone: a name, and which bots are in it.
 //
 // The harness names it after the first member if the name is left blank,
 // which is what the desktop's dialog does too — one rule, two screens.
@@ -19,13 +19,14 @@ struct NewGroupSheet: View {
         NavigationStack {
             List {
                 Section {
-                    TextField("Group name (optional)", text: $name)
+                    TextField("Channel name (optional)", text: $name)
                         .autocorrectionDisabled()
                 }
                 Section("Bots") {
                     ForEach(bots) { bot in
                         Button {
                             if members.contains(bot.id) { members.remove(bot.id) } else { members.insert(bot.id) }
+                            Haptics.selection()
                         } label: {
                             HStack(spacing: 12) {
                                 BotAvatarView(bot: bot, size: 36, state: .idle, animated: false)
@@ -45,7 +46,7 @@ struct NewGroupSheet: View {
                     }
                 }
             }
-            .navigationTitle("New group")
+            .navigationTitle("New channel")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
@@ -59,6 +60,7 @@ struct NewGroupSheet: View {
                             // it defaults) follows the first bot you picked
                             let ordered = bots.map(\.id).filter(members.contains)
                             if let room = await session.createRoom(name: name, memberIds: ordered) {
+                                Haptics.success()
                                 created(room)
                             }
                             creating = false

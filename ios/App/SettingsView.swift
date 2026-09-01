@@ -7,6 +7,8 @@ import UIKit
 struct SettingsView: View {
     @EnvironmentObject private var session: Session
     @State private var enablingNotifications = false
+    @AppStorage(PrefKey.activityDetail) private var activityDetail = ActivityDetail.full.rawValue
+    @AppStorage(PrefKey.islandIntro) private var islandIntro = IslandIntro.oncePerBot.rawValue
     private let onConnect: (() -> Void)?
 
     init(onConnect: (() -> Void)? = nil) {
@@ -18,11 +20,11 @@ struct SettingsView: View {
             Section("Computer") {
                 if let connection = session.connection {
                     NavigationLink {
-                        ConnectionSecurityView()
+                        ConnectedComputersView()
                     } label: {
                         ComputerSettingsRow(
                             name: connection.name,
-                            status: statusText,
+                            status: computerStatusText,
                             connected: session.status == .live
                         )
                     }
@@ -59,6 +61,46 @@ struct SettingsView: View {
                 }
             } footer: {
                 Text("Alerts arrive while OpenMausBot is open or was recently in the background. Closed-app delivery is not available yet.")
+            }
+
+            Section {
+                Picker(selection: $activityDetail) {
+                    ForEach(ActivityDetail.allCases, id: \.rawValue) { level in
+                        Text(level.label).tag(level.rawValue)
+                    }
+                } label: {
+                    Label {
+                        Text("Activity")
+                    } icon: {
+                        SettingsIcon(symbol: "wrench.and.screwdriver.fill", color: .purple)
+                    }
+                }
+
+                Picker(selection: $islandIntro) {
+                    ForEach(IslandIntro.allCases, id: \.rawValue) { option in
+                        Text(option.label).tag(option.rawValue)
+                    }
+                } label: {
+                    Label {
+                        Text("Bot intro animation")
+                    } icon: {
+                        SettingsIcon(symbol: "sparkles", color: .pink)
+                    }
+                }
+
+                NavigationLink {
+                    QuickRepliesEditor()
+                } label: {
+                    Label {
+                        Text("Quick Replies")
+                    } icon: {
+                        SettingsIcon(symbol: "bolt.fill", color: .yellow)
+                    }
+                }
+            } header: {
+                Text("Chat")
+            } footer: {
+                Text(ActivityDetail(rawValue: activityDetail)?.caption ?? "")
             }
 
             if session.connection != nil {
@@ -99,7 +141,7 @@ struct SettingsView: View {
 
     private var notificationAccessibilityHint: String {
         if notificationsAreEnabled { return "Notifications are enabled" }
-        if session.notificationAuthorization == .denied { return "Opens iPhone Settings" }
+        if session.notificationAuthorization == .denied { return "Opens device Settings" }
         return "Asks for permission to send notifications"
     }
 
@@ -120,6 +162,11 @@ struct SettingsView: View {
     }
 
     private var statusText: String { session.status.settingsText }
+
+    private var computerStatusText: String {
+        guard session.connections.count > 1 else { return statusText }
+        return "\(statusText) · \(session.connections.count) saved"
+    }
 }
 
 private struct ComputerSettingsRow: View {
@@ -169,6 +216,98 @@ private struct SettingsIcon: View {
             .frame(width: 28, height: 28)
             .background(color, in: RoundedRectangle(cornerRadius: 7, style: .continuous))
             .accessibilityHidden(true)
+    }
+}
+
+struct ConnectedComputersView: View {
+    @EnvironmentObject private var session: Session
+    @State private var pendingRemoval: Connection?
+
+    private var otherComputers: [Connection] {
+        session.connections.filter { $0.id != session.connection?.id }
+    }
+
+    var body: some View {
+        List {
+            if let active = session.connection {
+                Section("Current computer") {
+                    NavigationLink {
+                        ConnectionSecurityView()
+                    } label: {
+                        ComputerSettingsRow(
+                            name: active.name,
+                            status: session.status.settingsText,
+                            connected: session.status == .live
+                        )
+                    }
+                }
+            }
+
+            if !otherComputers.isEmpty {
+                Section("Other computers") {
+                    ForEach(otherComputers) { computer in
+                        Button {
+                            Haptics.selection()
+                            session.switchComputer(to: computer.id)
+                        } label: {
+                            HStack(spacing: 12) {
+                                ProfileAvatar(name: computer.name, size: 38)
+                                VStack(alignment: .leading, spacing: 3) {
+                                    Text(computer.name)
+                                        .foregroundStyle(.primary)
+                                        .lineLimit(1)
+                                    Text("Tap to switch")
+                                        .font(.footnote)
+                                        .foregroundStyle(.secondary)
+                                }
+                                Spacer()
+                                Text("Use")
+                                    .font(.subheadline.weight(.semibold))
+                                    .foregroundStyle(MausPalette.color("blue"))
+                            }
+                            .contentShape(Rectangle())
+                        }
+                        .buttonStyle(.plain)
+                        .swipeActions {
+                            Button("Remove", role: .destructive) {
+                                pendingRemoval = computer
+                            }
+                        }
+                        .accessibilityHint("Switches OpenMausMobile to this computer")
+                    }
+                }
+            }
+
+            Section {
+                Button {
+                    Haptics.selection()
+                    session.beginPairing()
+                } label: {
+                    Label("Connect another computer", systemImage: "plus.circle.fill")
+                }
+            } footer: {
+                Text("Each computer is paired separately. Only the selected computer is active at a time.")
+            }
+        }
+        .navigationTitle("Computers")
+        .navigationBarTitleDisplayMode(.inline)
+        .confirmationDialog(
+            "Remove \(pendingRemoval?.name ?? "this computer")?",
+            isPresented: Binding(
+                get: { pendingRemoval != nil },
+                set: { if !$0 { pendingRemoval = nil } }
+            ),
+            titleVisibility: .visible
+        ) {
+            Button("Remove from this device", role: .destructive) {
+                guard let pendingRemoval else { return }
+                session.forgetConnection(id: pendingRemoval.id)
+                self.pendingRemoval = nil
+            }
+            Button("Cancel", role: .cancel) { pendingRemoval = nil }
+        } message: {
+            Text("This removes the saved connection from this device only.")
+        }
     }
 }
 
@@ -265,7 +404,7 @@ struct ConnectionSecurityView: View {
                 }
 
                 Section {
-                    Button("Remove connection from this iPhone", role: .destructive) {
+                    Button("Remove connection from this device", role: .destructive) {
                         confirmingSignOut = true
                     }
                 }
@@ -293,13 +432,13 @@ struct ConnectionSecurityView: View {
             isPresented: $confirmingSignOut,
             titleVisibility: .visible
         ) {
-            Button("Remove from this iPhone", role: .destructive) {
+            Button("Remove from this device", role: .destructive) {
                 session.signOut()
                 dismiss()
             }
             Button("Cancel", role: .cancel) {}
         } message: {
-            Text("This removes the connection from this iPhone only. It does not revoke this phone on your Mac. To remove Mac-side access, open OpenMausBot → Settings → Phone and remove this device.")
+            Text("This removes the connection from this device only. It does not revoke this device on your Mac. To remove Mac-side access, open OpenMausBot → Settings → Phone and remove it there.")
         }
     }
 
@@ -312,9 +451,9 @@ struct ConnectionSecurityView: View {
         case let .offline(reason):
             return reason
         case .unauthorized:
-            return "This phone was removed from the computer. Pair it again to reconnect."
+            return "This device was removed from the computer. Pair it again to reconnect."
         case .unpaired:
-            return "This phone is not paired with a computer."
+            return "This device is not paired with a computer."
         }
     }
 

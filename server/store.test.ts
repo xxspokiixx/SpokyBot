@@ -1,12 +1,14 @@
 // Store persistence contract: bots.json + messages-<threadId>.json are
 // the durable record — everything here must survive a process restart
 // except `busy`, which never does (no turn survives one either).
-import { readFileSync, rmSync, writeFileSync } from "node:fs";
+import { createHash } from "node:crypto";
+import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
-import { beforeEach, describe, expect, it } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import { DATA_DIR } from "./config.ts";
 import type { ModelSelection } from "./contracts.ts";
+import * as mdb from "./message-db.ts";
 import { peerAllowKey } from "./peer-approval-key.ts";
 import { Store, type BotRecord } from "./store.ts";
 
@@ -63,6 +65,28 @@ describe("Store", () => {
     expect(store.messagesFor(bot.threadId)[1]?.card?.dismissed).toBeUndefined();
   });
 
+  it("marks only the last assistant message from a settled provider turn as terminal", () => {
+    const store = new Store(selection);
+    const bot = store.createBot({}, { seedMessages: false });
+    const progress = store.appendMessage(bot.threadId, {
+      role: "bot",
+      kind: "text",
+      text: "Checking connected apps.",
+      turnId: "turn-1",
+    });
+    const final = store.appendMessage(bot.threadId, {
+      role: "bot",
+      kind: "text",
+      text: "Here are your tasks.",
+      turnId: "turn-1",
+    });
+
+    expect(store.markTerminalAssistantMessage(bot.threadId, "turn-1")?.id).toBe(final.id);
+    expect(store.messagesFor(bot.threadId).find((message) => message.id === progress.id)?.turnTerminal).toBeUndefined();
+    expect(store.messagesFor(bot.threadId).find((message) => message.id === final.id)?.turnTerminal).toBe(true);
+    expect(new Store(selection).messagesFor(bot.threadId).find((message) => message.id === final.id)?.turnTerminal).toBe(true);
+  });
+
   it("createBot with seedMessages:false starts with an empty transcript", () => {
     const store = new Store(selection);
     const bot = store.createBot({ name: "Imported" }, { seedMessages: false });
@@ -72,19 +96,63 @@ describe("Store", () => {
   it("addTaskUsage accumulates settled-turn totals per task and survives a restart", () => {
     const store = new Store(selection);
     const bot = store.createBot();
-    expect(store.addTaskUsage(bot.id, bot.threadId, { input: 1200, output: 300, costUsd: null })).toEqual({
+    expect(store.addTaskUsage(bot.id, bot.threadId, { input: 1200, output: 300, cachedInput: 1000, costUsd: null })).toEqual({
       input: 1200,
       output: 300,
+      cachedInput: 1000,
       costUsd: null,
       turns: 1,
     });
+    // a driver that never reports the cached share leaves it unchanged
     store.addTaskUsage(bot.id, bot.threadId, { input: 800, output: 100, costUsd: null });
-    store.addTaskUsage(bot.id, bot.threadId, { input: Number.NaN, output: -20, costUsd: null });
+    store.addTaskUsage(bot.id, bot.threadId, { input: Number.NaN, output: -20, cachedInput: -5, costUsd: null });
+    // Providers occasionally report a cache count larger than input; keep the
+    // persisted share physically possible so percentages cannot exceed 100%.
+    store.addTaskUsage(bot.id, bot.threadId, { input: 10, output: 0, cachedInput: 20, costUsd: null });
     // a different thread never inherits another task's tally
     expect(store.addTaskUsage(bot.id, "no-such-thread", { input: 5, output: 5, costUsd: null })).toBeNull();
 
     const reloaded = new Store(selection);
-    expect(reloaded.taskByThread(bot.id, bot.threadId)?.usage).toEqual({ input: 2000, output: 400, costUsd: null, turns: 3 });
+    expect(reloaded.taskByThread(bot.id, bot.threadId)?.usage).toEqual({
+      input: 2010,
+      output: 400,
+      cachedInput: 1010,
+      costUsd: null,
+      turns: 4,
+    });
+  });
+
+  it("chain-inserts a late turn artifact after its anchor without stealing the leaf", () => {
+    const store = new Store(selection);
+    const bot = store.createBot();
+    const turnEnd = store.appendMessage(bot.threadId, { role: "bot", kind: "text", text: "done with the task" });
+    // the world moves on while the settle-time capture is still in flight
+    const followUp = store.appendMessage(bot.threadId, { role: "user", kind: "text", text: "next question" });
+    const patches: string[] = [];
+    store.onChange((change) => {
+      if (change.type === "message.patch") patches.push(change.message.id);
+    });
+
+    const artifact = store.insertMessageAfter(bot.threadId, turnEnd.id, { role: "bot", kind: "screen", png: "abc" });
+
+    const path = store.activePath(bot.threadId).map((m) => m.id);
+    // turn → artifact → follow-up: the user's message stays the last message
+    expect(path.slice(-3)).toEqual([turnEnd.id, artifact.id, followUp.id]);
+    expect(store.activePath(bot.threadId).at(-1)?.id).toBe(followUp.id);
+    expect(artifact.parentId).toBe(turnEnd.id);
+    // the re-parented child was announced so live clients converge
+    expect(patches).toContain(followUp.id);
+  });
+
+  it("insertMessageAfter is a plain append when the anchor is still the leaf, or unknown", () => {
+    const store = new Store(selection);
+    const bot = store.createBot();
+    const turnEnd = store.appendMessage(bot.threadId, { role: "bot", kind: "text", text: "done" });
+    const artifact = store.insertMessageAfter(bot.threadId, turnEnd.id, { role: "bot", kind: "screen", png: "abc" });
+    expect(store.activePath(bot.threadId).at(-1)?.id).toBe(artifact.id); // became the leaf
+
+    const orphan = store.insertMessageAfter(bot.threadId, "no-such-message", { role: "bot", kind: "text", text: "x" });
+    expect(store.activePath(bot.threadId).at(-1)?.id).toBe(orphan.id);
   });
 
   it("persists the per-bot composio gate", () => {
@@ -123,6 +191,28 @@ describe("Store", () => {
 
     expect(channel.section).toBe("Work");
     expect(new Store(selection).group(channel.id)?.section).toBe("Work");
+  });
+
+  it("persists a channel's completed setup in the same create write", () => {
+    const store = new Store(selection);
+    const bot = store.createBot();
+    const channel = store.createGroup("Launch", [bot.id], false, "Work", {
+      bulletin: "Ship carefully.",
+      defaultResponder: { kind: "mentions" },
+      completed: true,
+    });
+
+    expect(channel).toMatchObject({
+      bulletin: "Ship carefully.",
+      defaultResponder: { kind: "mentions" },
+      setupSkippedAt: null,
+    });
+    expect(channel.setupCompletedAt).toEqual(expect.any(Number));
+    expect(new Store(selection).group(channel.id)).toMatchObject({
+      bulletin: "Ship carefully.",
+      defaultResponder: { kind: "mentions" },
+      setupCompletedAt: channel.setupCompletedAt,
+    });
   });
 
   it("migrates old rooms without routing to their first member", () => {
@@ -177,6 +267,80 @@ describe("Store", () => {
     expect(saved.find((bot) => bot.id === vps.id)?.cloudBackend).toBe("vps");
     expect(saved.find((bot) => bot.id === invalid.id)).not.toHaveProperty("cloudBackend");
     expect(saved.find((bot) => bot.id === absent.id)).not.toHaveProperty("cloudBackend");
+  });
+
+  it("migrates legacy browser profile references without collapsing case-distinct accounts", () => {
+    const store = new Store(selection);
+    const first = store.createBot();
+    const duplicate = store.createBot();
+    const caseVariant = store.createBot();
+    const configFile = join(DATA_DIR, "config.json");
+    const botsFile = join(DATA_DIR, "bots.json");
+    writeFileSync(configFile, JSON.stringify({
+      browserProfiles: [
+        { id: "Work", name: "Primary" },
+        { id: "Work", name: "Duplicate" },
+        { id: "work", name: "Lowercase variant" },
+      ],
+    }));
+    const bots: BotRecord[] = JSON.parse(readFileSync(botsFile, "utf8"));
+    bots.find((bot) => bot.id === first.id)!.browserProfile = "Work";
+    bots.find((bot) => bot.id === duplicate.id)!.browserProfile = "Work";
+    bots.find((bot) => bot.id === caseVariant.id)!.browserProfile = "work";
+    writeFileSync(botsFile, JSON.stringify(bots));
+
+    const reloaded = new Store(selection);
+    expect(reloaded.bot(first.id)?.browserProfile).toBe("work-2");
+    expect(reloaded.bot(duplicate.id)?.browserProfile).toBe("work-2");
+    expect(reloaded.bot(caseVariant.id)?.browserProfile).toBe("work");
+
+    const persisted: BotRecord[] = JSON.parse(readFileSync(botsFile, "utf8"));
+    expect(persisted.find((bot) => bot.id === first.id)?.browserProfile).toBe("work-2");
+    expect(persisted.find((bot) => bot.id === duplicate.id)?.browserProfile).toBe("work-2");
+    expect(persisted.find((bot) => bot.id === caseVariant.id)?.browserProfile).toBe("work");
+
+    // config.json may remain legacy until the next settings save. Repeated
+    // hydration must not reinterpret the already-canonical first id.
+    const reloadedAgain = new Store(selection);
+    expect(reloadedAgain.bot(first.id)?.browserProfile).toBe("work-2");
+    expect(reloadedAgain.bot(duplicate.id)?.browserProfile).toBe("work-2");
+    expect(reloadedAgain.bot(caseVariant.id)?.browserProfile).toBe("work");
+  });
+
+  it("keeps explicit suffix browser references stable across legacy migration", () => {
+    const store = new Store(selection);
+    const upper = store.createBot();
+    const canonical = store.createBot();
+    const suffixed = store.createBot();
+    const configFile = join(DATA_DIR, "config.json");
+    const botsFile = join(DATA_DIR, "bots.json");
+    writeFileSync(configFile, JSON.stringify({
+      browserProfiles: [
+        { id: "Work", name: "Uppercase" },
+        { id: "work", name: "Canonical" },
+        { id: "work-2", name: "Explicit suffix" },
+      ],
+    }));
+    const bots: BotRecord[] = JSON.parse(readFileSync(botsFile, "utf8"));
+    bots.find((bot) => bot.id === upper.id)!.browserProfile = "Work";
+    bots.find((bot) => bot.id === canonical.id)!.browserProfile = "work";
+    bots.find((bot) => bot.id === suffixed.id)!.browserProfile = "work-2";
+    writeFileSync(botsFile, JSON.stringify(bots));
+
+    const reloaded = new Store(selection);
+    expect(reloaded.bot(upper.id)?.browserProfile).toBe("work-3");
+    expect(reloaded.bot(canonical.id)?.browserProfile).toBe("work");
+    expect(reloaded.bot(suffixed.id)?.browserProfile).toBe("work-2");
+
+    const persisted: BotRecord[] = JSON.parse(readFileSync(botsFile, "utf8"));
+    expect(persisted.find((bot) => bot.id === upper.id)?.browserProfile).toBe("work-3");
+    expect(persisted.find((bot) => bot.id === canonical.id)?.browserProfile).toBe("work");
+    expect(persisted.find((bot) => bot.id === suffixed.id)?.browserProfile).toBe("work-2");
+
+    const reloadedAgain = new Store(selection);
+    expect(reloadedAgain.bot(upper.id)?.browserProfile).toBe("work-3");
+    expect(reloadedAgain.bot(canonical.id)?.browserProfile).toBe("work");
+    expect(reloadedAgain.bot(suffixed.id)?.browserProfile).toBe("work-2");
   });
 
   it("migrates unambiguous legacy peer grants without guessing duplicate names", () => {
@@ -238,6 +402,80 @@ describe("Store", () => {
     expect(reloaded.bot(second.id)?.chiefOfStaff).toBe(false);
   });
 
+  it("files visible bots atomically without changing Chief roles", () => {
+    const store = new Store(selection);
+    const incumbent = store.createBot({ section: "Launch" });
+    const incoming = store.createBot({ section: "Research" });
+    const teammate = store.createBot({ section: "Personal" });
+    store.setChiefOfStaff(incumbent.id);
+
+    const result = store.setBotsSection([incoming.id, teammate.id, incoming.id], "Launch");
+    expect(result.ok).toBe(true);
+    if (!result.ok) throw new Error(`unexpected section assignment failure: ${result.reason}`);
+    expect(result.bots.map((bot) => bot.id)).toEqual([incoming.id, teammate.id]);
+    expect(store.bot(incumbent.id)).toMatchObject({ section: "Launch", chiefOfStaff: true });
+    expect(store.bot(incoming.id)?.section).toBe("Launch");
+    expect(Boolean(store.bot(incoming.id)?.chiefOfStaff)).toBe(false);
+    expect(store.bot(teammate.id)?.section).toBe("Launch");
+    expect(store.bots.filter((bot) => bot.section === "Launch" && bot.chiefOfStaff)).toHaveLength(1);
+
+    const reloaded = new Store(selection);
+    expect(reloaded.bot(incumbent.id)).toMatchObject({ section: "Launch", chiefOfStaff: true });
+    expect(reloaded.bot(incoming.id)?.section).toBe("Launch");
+    expect(Boolean(reloaded.bot(incoming.id)?.chiefOfStaff)).toBe(false);
+    expect(reloaded.bot(teammate.id)?.section).toBe("Launch");
+    expect(reloaded.bots.filter((bot) => bot.section === "Launch" && bot.chiefOfStaff).map((bot) => bot.id))
+      .toEqual([incumbent.id]);
+  });
+
+  it("rejects unavailable or Chief-conflicting section assignments without changing bots", () => {
+    const store = new Store(selection);
+    const incumbent = store.createBot({ section: "Launch" });
+    const incoming = store.createBot({ section: "Research" });
+    const teammate = store.createBot({ section: "Personal" });
+    const hidden = store.createBot({ section: "Private" });
+    store.setChiefOfStaff(incumbent.id);
+    store.setChiefOfStaff(incoming.id);
+    store.patchBot(hidden.id, { hidden: true });
+
+    const snapshot = () => store.bots.map((bot) => ({
+      id: bot.id,
+      section: bot.section,
+      chief: bot.chiefOfStaff,
+    }));
+    const before = snapshot();
+
+    expect(store.setBotsSection([teammate.id, "missing"], "Launch"))
+      .toEqual({ ok: false, reason: "unavailable" });
+    expect(store.setBotsSection([teammate.id, hidden.id], "Launch"))
+      .toEqual({ ok: false, reason: "unavailable" });
+    expect(store.setBotsSection([incoming.id, teammate.id], "Launch"))
+      .toEqual({ ok: false, reason: "chief-conflict" });
+    expect(snapshot()).toEqual(before);
+
+    const reloaded = new Store(selection);
+    expect(reloaded.bot(incumbent.id)).toMatchObject({ section: "Launch", chiefOfStaff: true });
+    expect(reloaded.bot(incoming.id)).toMatchObject({ section: "Research", chiefOfStaff: true });
+    expect(reloaded.bot(teammate.id)?.section).toBe("Personal");
+    expect(Boolean(reloaded.bot(teammate.id)?.chiefOfStaff)).toBe(false);
+  });
+
+  it("does not change memory or emit section updates when the atomic write fails", () => {
+    const store = new Store(selection);
+    const bot = store.createBot({ section: "Original" });
+    const changes: string[] = [];
+    store.onChange((change) => {
+      if (change.type === "bot") changes.push(change.botId);
+    });
+    (store as unknown as { saveBots: (bots?: BotRecord[]) => void }).saveBots = () => {
+      throw new Error("disk unavailable");
+    };
+
+    expect(() => store.setBotsSection([bot.id], "Research")).toThrow("disk unavailable");
+    expect(store.bot(bot.id)?.section).toBe("Original");
+    expect(changes).toEqual([]);
+  });
+
   it("patchMessage merges card patches and returns null for unknown ids", () => {
     const store = new Store(selection);
     const bot = store.createBot();
@@ -248,6 +486,22 @@ describe("Store", () => {
     });
     expect(patched?.card?.answered).toBe("Work & projects");
     expect(store.patchMessage(bot.threadId, "nope", {})).toBeNull();
+  });
+
+  it("keeps memory and SQLite pending when a card patch cannot persist", () => {
+    const store = new Store(selection);
+    const bot = store.createBot();
+    const card = store.messagesFor(bot.threadId)[1]!;
+    const update = vi.spyOn(mdb, "updateMessage").mockImplementationOnce(() => {
+      throw new Error("simulated SQLite failure");
+    });
+    expect(() => store.patchMessage(bot.threadId, card.id, {
+      card: { ...card.card!, answered: "allow" },
+    })).toThrow("simulated SQLite failure");
+    update.mockRestore();
+
+    expect(store.messagesFor(bot.threadId).find((message) => message.id === card.id)?.card?.answered).toBeUndefined();
+    expect(new Store(selection).messagesFor(bot.threadId).find((message) => message.id === card.id)?.card?.answered).toBeUndefined();
   });
 
 
@@ -370,12 +624,16 @@ describe("Store", () => {
   it("deleteBot removes the bot and its durable transcript", () => {
     const store = new Store(selection);
     const bot = store.createBot();
+    const skillState = join(DATA_DIR, "skill-state", bot.id);
+    mkdirSync(skillState, { recursive: true });
+    writeFileSync(join(skillState, "staged.json"), '{"writes":{}}');
     // the transcript is durable — a fresh Store sees the seeded messages
     expect(new Store(selection).messagesFor(bot.threadId).length).toBeGreaterThan(0);
 
     expect(store.deleteBot(bot.id)).toBe(true);
     expect(store.bot(bot.id)).toBeNull();
     expect(new Store(selection).messagesFor(bot.threadId)).toHaveLength(0);
+    expect(existsSync(skillState)).toBe(false);
     expect(store.deleteBot(bot.id)).toBe(false);
   });
   it("migrates a pre-branching flat transcript file", () => {
@@ -485,6 +743,7 @@ describe("Store change stream", () => {
     expect(events.every((e) => e.type === "bot" && e.botId === bot.id)).toBe(true);
     expect(events).toHaveLength(7);
     store.deleteBot(bot.id);
+    expect(events).toContainEqual({ type: "thread.deleted", threadId: bot.threadId });
     expect(events.at(-1)).toEqual({ type: "bot.deleted", botId: bot.id });
   });
 
@@ -501,7 +760,25 @@ describe("Store change stream", () => {
     expect(events.map((e) => e.type)).toEqual(["group", "group"]);
     expect(store.group(g.id)?.unread).toBe(true);
     store.deleteGroup(g.id);
+    expect(events).toContainEqual({ type: "thread.deleted", threadId: g.threadId });
     expect(events.at(-1)).toEqual({ type: "group.deleted", groupId: g.id });
+  });
+
+  it("delivers each change to the listener snapshot captured before emission", () => {
+    const store = new Store(selection);
+    const bot = store.createBot();
+    const seen: string[] = [];
+    let removeSecond = () => {};
+    store.onChange(() => {
+      seen.push("first");
+      removeSecond();
+      store.onChange(() => seen.push("late"));
+    });
+    removeSecond = store.onChange(() => seen.push("second"));
+
+    store.patchBot(bot.id, { name: "Snapshot" });
+
+    expect(seen).toEqual(["first", "second"]);
   });
 
   it("unsubscribe stops delivery", () => {
@@ -576,9 +853,121 @@ describe("Store redacts bot-authored secrets on write", () => {
     const card = store.appendMessage(bot.threadId, {
       role: "bot",
       kind: "options",
-      card: { title: "Run this?", summary: `curl -H "Authorization: Bearer ${key}"`, options: [], requestId: "r1", tool: "Bash" } as never,
+      card: { title: "Run this?", summary: `curl -H "Authorization: Bearer ${key}"`, held: `Blocked ${key}`, options: [], requestId: "r1", tool: "Bash" } as never,
     });
     expect((card.card as { summary?: string }).summary).not.toContain(key);
+    expect(card.card?.held).not.toContain(key);
+    const routineCard = store.appendMessage(bot.threadId, {
+      role: "bot",
+      kind: "options",
+      card: {
+        title: "Confirm routine",
+        subtitle: "Every morning",
+        options: ["Confirm", "Cancel"],
+        requestId: "routine-request",
+        tool: "schedule_routine",
+        routineRequest: {
+          version: 1,
+          requestId: "routine-request",
+          botId: bot.id,
+          threadId: bot.threadId,
+          createdAt: 1,
+          operation: {
+            action: "create",
+            routine: {
+              name: `Use ${key}`,
+              instructions: `Send a request with ${key}`,
+              schedule: { type: "daily", time: "09:00", weekdays: [1] },
+              runOn: "maus",
+              durationMinutes: 30,
+            },
+          },
+        },
+      },
+    });
+    expect(routineCard.card?.routineRequest?.operation.action).toBe("create");
+    if (routineCard.card?.routineRequest?.operation.action !== "create") throw new Error("missing routine payload");
+    expect(routineCard.card.routineRequest.operation.routine.name).not.toContain(key);
+    expect(routineCard.card.routineRequest.operation.routine.instructions).not.toContain(key);
+    const skillCard = store.appendMessage(bot.threadId, {
+      role: "bot",
+      kind: "options",
+      card: {
+        title: "Enable learned skill?",
+        subtitle: "Review it first",
+        options: ["Enable", "Dismiss"],
+        requestId: "skill-request",
+        tool: "stage_skill",
+        skillRequest: {
+          version: 1,
+          requestId: "skill-request",
+          botId: bot.id,
+          threadId: bot.threadId,
+          stagedId: "staged-1",
+          action: "create",
+          name: "safe-skill",
+          gist: `Uses ${key}`,
+          source: `learn:${key}`,
+          preview: `---\nname: safe-skill\ndescription: Uses ${key}.\n---\n`,
+          sha256: "0".repeat(64),
+          warnings: [`Found ${key}`],
+          createdAt: 1,
+        },
+      },
+    });
+    expect(skillCard.card?.skillRequest?.gist).not.toContain(key);
+    expect(skillCard.card?.skillRequest?.source).not.toContain(key);
+    expect(skillCard.card?.skillRequest?.preview).not.toContain(key);
+    expect(skillCard.card?.skillRequest?.sha256).toBeUndefined();
+    expect(skillCard.card?.skillRequest?.warnings.join(" ")).not.toContain(key);
+
+    const reviewedPreview = "---\nname: reviewed-skill\ndescription: Already scrubbed.\n---\n";
+    const reviewedSha256 = createHash("sha256").update(reviewedPreview).digest("hex");
+    const reviewedSkillCard = store.appendMessage(bot.threadId, {
+      role: "bot",
+      kind: "options",
+      card: {
+        title: "Enable reviewed skill?",
+        subtitle: "Review it first",
+        options: ["Enable", "Deny"],
+        requestId: "reviewed-skill-request",
+        tool: "stage_skill",
+        skillRequest: {
+          version: 1,
+          requestId: "reviewed-skill-request",
+          botId: bot.id,
+          threadId: bot.threadId,
+          stagedId: "staged-2",
+          action: "create",
+          name: "reviewed-skill",
+          gist: "Already scrubbed.",
+          source: "learn:reviewed-skill",
+          preview: reviewedPreview,
+          sha256: reviewedSha256,
+          warnings: [],
+          createdAt: 2,
+        },
+      },
+    });
+    expect(reviewedSkillCard.card?.skillRequest?.preview).toBe(reviewedPreview);
+    expect(reviewedSkillCard.card?.skillRequest?.sha256).toBe(reviewedSha256);
+    const runCard = store.appendMessage(bot.threadId, {
+      role: "bot",
+      kind: "routine.run",
+      text: `Routine ${key} completed`,
+      routineRun: {
+        runId: "run-1",
+        routineId: "routine-1",
+        routineName: `Report ${key}`,
+        status: "completed",
+        executionThreadId: "execution-1",
+        summary: `Finished with ${key}`,
+        error: `Ignored ${key}`,
+      },
+    });
+    expect(runCard.routineRun?.routineName).not.toContain(key);
+    expect(runCard.routineRun?.summary).not.toContain(key);
+    expect(runCard.routineRun?.error).not.toContain(key);
     const secretCard = store.appendMessage(bot.threadId, {
       role: "bot",
       kind: "secret",

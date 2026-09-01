@@ -38,6 +38,11 @@ struct ChatView: View {
     @State private var islandVisible = false
     @State private var facePhase: CGFloat = 0
 
+    @AppStorage(PrefKey.islandIntro) private var islandIntro = IslandIntro.oncePerBot.rawValue
+    @AppStorage(PrefKey.islandSeen) private var islandSeen = ""
+    @AppStorage(PrefKey.activityDetail) private var activityDetail = ActivityDetail.full.rawValue
+    @AppStorage(PrefKey.quickReplies) private var quickReplies = ""
+
     /// The live bubble's scroll target. A constant because there is at most
     /// one per chat and it has no message id to borrow.
     static let liveBubbleId = "companion.live"
@@ -56,8 +61,31 @@ struct ChatView: View {
     /// live record instead of the snapshot that opened this screen.
     private var threadId: String { current.threadId }
 
+    /// A task changes a bot's thread, but it does not make it a new bot.
+    /// Intro history follows the chat itself so switching tasks cannot replay
+    /// a once-per-bot greeting.
+    private var islandIntroID: String {
+        switch current {
+        case let .bot(bot): "bot.\(bot.id)"
+        case let .room(room): "room.\(room.id)"
+        }
+    }
+
     private var messages: [Message] {
         session.state.visibleTranscript(forThread: threadId)
+    }
+
+    /// The transcript as the reader has asked to see it: every chip, folded
+    /// runs, or none at all.
+    private var rows: [TranscriptRow] {
+        transcriptRows(messages, detail: ActivityDetail(rawValue: activityDetail) ?? .full)
+    }
+
+    /// The composer's chip row, as edited in Settings.
+    private var storedChips: [ActionChipItem] {
+        QuickReply.decode(quickReplies).map {
+            ActionChipItem(id: $0.id, title: $0.title, icon: $0.icon, prompt: $0.prompt)
+        }
     }
 
     /// Unread elsewhere — what the back pill's badge counts, like Messages.
@@ -70,7 +98,7 @@ struct ChatView: View {
         // Read the transcript once for this render. Pagination changes the
         // array as a unit; repeatedly reaching through ObservableObject for
         // every row only recomputes the same value.
-        let transcript = messages
+        let transcript = rows
         // A VStack with the composer as a sibling, rather than a scroll view
         // with `.safeAreaInset`. The inset version sized itself to its
         // content, so a short transcript left the composer floating in the
@@ -107,25 +135,30 @@ struct ChatView: View {
                             .padding(.vertical, 8)
                         }
 
-                        ForEach(Array(transcript.enumerated()), id: \.element.id) { index, message in
+                        ForEach(Array(transcript.enumerated()), id: \.element.id) { index, row in
                             VStack(alignment: .leading, spacing: 6) {
                                 // a gap in time is worth marking; a timestamp
                                 // on every message is just noise
                                 if startsANewStretch(at: index, in: transcript) {
-                                    Text(RelativeStamp.separator(message.date))
+                                    Text(RelativeStamp.separator(row.head.date))
                                         .font(.system(size: 12, weight: .medium))
                                         .foregroundStyle(Color.secondary.opacity(0.7))
                                         .frame(maxWidth: .infinity)
                                         .padding(.top, 10)
                                         .padding(.bottom, 4)
                                 }
-                                MessageRow(
-                                    chat: current,
-                                    message: message,
-                                    endsRun: endsRun(at: index, in: transcript)
-                                )
+                                switch row {
+                                case let .message(message):
+                                    MessageRow(
+                                        chat: current,
+                                        message: message,
+                                        endsRun: endsRun(at: index, in: transcript)
+                                    )
+                                case let .activityRun(items):
+                                    ActivityRunChip(items: items)
+                                }
                             }
-                            .id(message.id)
+                            .id(row.id)
                         }
 
                         // The reply as it is typed. It sits after the last
@@ -150,7 +183,8 @@ struct ChatView: View {
                     }
                     .padding(.horizontal, 16)
                     .padding(.vertical, 12)
-                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .frame(maxWidth: CompanionLayout.chatWidth, alignment: .leading)
+                    .frame(maxWidth: .infinity)
                 }
                 // The header lives in the scroll view's top safe area: the
                 // transcript starts below it and scrolls under it — that is
@@ -189,7 +223,19 @@ struct ChatView: View {
                 }
                 .task {
                     // grow, hold a beat, shrink — the face rides along
-                    guard !reduceMotion else { return }
+                    guard CompanionLayout.supportsIslandPresentation, !reduceMotion else { return }
+                    // The intro is a greeting, and a greeting repeated every
+                    // time you open a chat stops being one.
+                    let intro = IslandIntro(rawValue: islandIntro) ?? .oncePerBot
+                    switch intro {
+                    case .never:
+                        return
+                    case .oncePerBot:
+                        guard !IslandSeen.contains(islandIntroID, in: islandSeen) else { return }
+                        islandSeen = IslandSeen.adding(islandIntroID, to: islandSeen)
+                    case .always:
+                        break
+                    }
                     islandVisible = true
                     try? await Task.sleep(for: .milliseconds(40))
                     withAnimation(.spring(response: 0.5, dampingFraction: 0.8)) { islandExpanded = true; facePhase = 1 }
@@ -290,7 +336,7 @@ struct ChatView: View {
             if listening { composerFocused = false }
         }
         .sheet(isPresented: $showingTasks) {
-            if case let .bot(bot) = current { TaskManagerView(bot: bot) }
+            if current.supportsTasks { TaskManagerView(chat: current) }
         }
         .sheet(isPresented: $showingProfile) {
             if case let .bot(bot) = current { AgentProfileView(bot: bot) }
@@ -342,6 +388,8 @@ struct ChatView: View {
         .padding(.horizontal, 16)
         .padding(.top, 4)
         .padding(.bottom, 8)
+        .frame(maxWidth: CompanionLayout.headerWidth)
+        .frame(maxWidth: .infinity)
         .background(
             Rectangle()
                 .fill(.ultraThinMaterial)
@@ -458,11 +506,11 @@ struct ChatView: View {
                     }
                 }
                 .padding(.vertical, 10)
-                .frame(maxWidth: .infinity, alignment: .leading)
+                .frame(maxWidth: CompanionLayout.chatWidth, alignment: .leading)
                 .glassSheet(cornerRadius: 30)
-                .padding(.leading, 12)
-                .padding(.trailing, 44)
+                .padding(.horizontal, 12)
                 .padding(.bottom, 70)
+                .frame(maxWidth: .infinity)
                 .transition(.move(edge: .bottom).combined(with: .opacity))
             }
             .transition(.opacity)
@@ -495,6 +543,17 @@ struct ChatView: View {
                 subtitle: "Live view of what \(bot.name) is doing"
             ) { showingComputer = true })
         }
+        if case let .room(room) = current, room.dm != true {
+            out.append(PlusAction(
+                id: "task", systemImage: "plus.square.on.square", title: "New task",
+                subtitle: "Start a fresh conversation in \(room.name)",
+                disabled: current.busy || hasPendingApproval
+            ) { Task { await session.createTask(for: room, title: nil) } })
+            out.append(PlusAction(
+                id: "tasks", systemImage: "square.stack", title: "Tasks",
+                subtitle: "Switch, rename or remove one"
+            ) { showingTasks = true })
+        }
         out.append(PlusAction(
             id: "share", systemImage: "doc.plaintext", title: "Share transcript",
             subtitle: "This chat as Markdown"
@@ -526,19 +585,19 @@ struct ChatView: View {
 
     /// True when this message opens a fresh stretch of conversation — the
     /// first one, or one that follows a gap of half an hour or more.
-    private func startsANewStretch(at index: Int, in messages: [Message]) -> Bool {
+    private func startsANewStretch(at index: Int, in rows: [TranscriptRow]) -> Bool {
         guard index > 0 else { return true }
-        return messages[index].at - messages[index - 1].at > 30 * 60 * 1000
+        return rows[index].at - rows[index - 1].endAt > 30 * 60 * 1000
     }
 
     /// True when the next message is from someone else (or there is none),
     /// which is where a run of bubbles gets its tail — one per run, like
     /// every messaging app, rather than one per bubble.
-    private func endsRun(at index: Int, in messages: [Message]) -> Bool {
-        guard index + 1 < messages.count else { return true }
-        let this = messages[index], next = messages[index + 1]
+    private func endsRun(at index: Int, in rows: [TranscriptRow]) -> Bool {
+        guard index + 1 < rows.count else { return true }
+        let this = rows[index], next = rows[index + 1]
         if this.role != next.role { return true }
-        if this.from?.name != next.from?.name { return true }
+        if this.senderName != next.senderName { return true }
         // a card or a tool chip between two texts breaks the run visually
         return next.kind != .text
     }
@@ -583,7 +642,9 @@ struct ChatView: View {
                     isVisible: $showCommandHUD,
                     commands: current.isBot
                         ? CommandSkillHUDView.defaultCommands
-                        : CommandSkillHUDView.defaultCommands.filter { $0.id != "computer" && $0.id != "tasks" },
+                        : CommandSkillHUDView.defaultCommands.filter {
+                            $0.id != "computer" && (current.supportsTasks || $0.id != "tasks")
+                        },
                     accentColor: MausPalette.color(current.color)
                 ) { command in
                     switch command.id {
@@ -597,8 +658,8 @@ struct ChatView: View {
                     }
                 }
                 .transition(.move(edge: .bottom).combined(with: .opacity))
-            } else if draft.isEmpty && !current.busy && !hasPendingApproval {
-                PredictiveActionChipsView(accentColor: MausPalette.color(current.color)) { chip in
+            } else if draft.isEmpty && !current.busy && !hasPendingApproval && !storedChips.isEmpty {
+                PredictiveActionChipsView(chips: storedChips, accentColor: MausPalette.color(current.color)) { chip in
                     submit(chip.prompt)
                 }
                 .transition(.opacity)
@@ -710,6 +771,8 @@ struct ChatView: View {
         .padding(.horizontal, 12)
         .padding(.top, 6)
         .padding(.bottom, 8)
+        .frame(maxWidth: CompanionLayout.chatWidth)
+        .frame(maxWidth: .infinity)
     }
 }
 
@@ -721,6 +784,8 @@ struct MessageRow: View {
     @EnvironmentObject private var session: Session
     @State private var editingText = ""
     @State private var showingEdit = false
+    /// The text being selected, and the sheet's presentation in one value.
+    @State private var selecting: SelectableText?
 
     private static let reactionChoices = ["👍", "❤️", "😂", "🎉", "👀"]
 
@@ -742,6 +807,7 @@ struct MessageRow: View {
                 HStack(spacing: 6) {
                     ForEach(reactionGroups(reactions), id: \.emoji) { group in
                         Button("\(group.emoji) \(group.count)") {
+                            Haptics.selection()
                             Task { await session.react(to: message, in: chat.threadId, emoji: group.emoji) }
                         }
                         .font(.system(size: 13))
@@ -771,7 +837,23 @@ struct MessageRow: View {
         }
         .contextMenu {
             ForEach(Self.reactionChoices, id: \.self) { emoji in
-                Button(emoji) { Task { await session.react(to: message, in: chat.threadId, emoji: emoji) } }
+                Button(emoji) {
+                    Haptics.selection()
+                    Task { await session.react(to: message, in: chat.threadId, emoji: emoji) }
+                }
+            }
+            if let text = message.text, !text.isEmpty {
+                Divider()
+                Button("Copy", systemImage: "doc.on.doc") {
+                    PlatformBridge.copyToPasteboard(text)
+                }
+            }
+            // Copy above takes the whole reply. Selection happens in a sheet
+            // because long-press on the bubble already opens this menu.
+            if let body = message.text, !body.isEmpty {
+                Button("Select Text", systemImage: "selection.pin.in.out") {
+                    selecting = SelectableText(text: body)
+                }
             }
             if message.role == .user, message.kind == .text, case let .bot(bot) = chat {
                 Divider()
@@ -795,6 +877,7 @@ struct MessageRow: View {
         } message: {
             Text("This creates a new version and continues from there.")
         }
+        .sheet(item: $selecting) { SelectableTextSheet(text: $0.text) }
     }
 
     @ViewBuilder
@@ -832,6 +915,12 @@ private struct ShareFile: Identifiable {
     var id: String { url.path }
 }
 
+/// A message's text on its way to the selection sheet.
+struct SelectableText: Identifiable {
+    let id = UUID()
+    let text: String
+}
+
 private struct ActivityShareSheet: UIViewControllerRepresentable {
     let items: [Any]
 
@@ -846,6 +935,10 @@ struct TextBubble: View {
     let message: Message
     let chat: Chat
     var tailed = true
+
+    private var attachedContent: AttachedMessageContent {
+        AttachedMessageContent.parse(message.text ?? "")
+    }
 
     private var parsedDiff: (filename: String, diff: String)? {
         guard message.role != .user, let source = message.text else { return nil }
@@ -943,11 +1036,29 @@ struct TextBubble: View {
                 } else if let table = parsedTable {
                     SQLResultTableView(columns: table.headers, rows: table.rows)
                 } else if mine {
-                    Text(message.text ?? "")
-                        .font(.system(size: 17))
-                        .foregroundStyle(BubbleColor.mineText)
-                        .textSelection(.enabled)
-                        .fixedSize(horizontal: false, vertical: true)
+                    let shared = attachedContent
+                    ForEach(Array(shared.attachments.enumerated()), id: \.offset) { _, attachment in
+                        Label(
+                            attachment.name,
+                            systemImage: attachment.kind == .image ? "photo" : "doc"
+                        )
+                        .font(.system(size: 13, weight: .medium))
+                        .lineLimit(1)
+                        .foregroundStyle(BubbleColor.mineText.opacity(0.82))
+                        .padding(.horizontal, 10)
+                        .padding(.vertical, 6)
+                        .background(BubbleColor.mineText.opacity(0.10), in: Capsule())
+                        .accessibilityLabel(
+                            "\(attachment.kind == .image ? "Image" : "File"): \(attachment.name)"
+                        )
+                    }
+                    if !shared.text.isEmpty {
+                        Text(shared.text)
+                            .font(.system(size: 17))
+                            .foregroundStyle(BubbleColor.mineText)
+                            .textSelection(.enabled)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
                 } else {
                     MarkdownText(source: message.text ?? "")
                         .foregroundStyle(Color.primary)
@@ -1040,6 +1151,42 @@ struct CardView: View {
                         .fixedSize(horizontal: false, vertical: true)
                 }
 
+                if let skill = card.skillRequest {
+                    if let preview = skill.preview, let sha256 = skill.reviewedSha256 {
+                        VStack(alignment: .leading, spacing: 7) {
+                            HStack {
+                                Text("Review the complete SKILL.md")
+                                    .font(.system(size: 12, weight: .semibold))
+                                Spacer()
+                                Text("sha256 \(String(sha256.prefix(8)))")
+                                    .font(.system(size: 10, design: .monospaced))
+                                    .foregroundStyle(Color.secondary)
+                            }
+                            Text("Source: \(skill.source ?? "Unknown")")
+                                .font(.system(size: 11))
+                                .foregroundStyle(Color.secondary)
+                                .textSelection(.enabled)
+                            ScrollView(.vertical) {
+                                Text(preview)
+                                    .font(.system(size: 12, design: .monospaced))
+                                    .foregroundStyle(Color.primary)
+                                    .textSelection(.enabled)
+                                    .frame(maxWidth: .infinity, alignment: .leading)
+                            }
+                            .frame(maxHeight: 220)
+                            .padding(10)
+                            .background(Color.secondary.opacity(0.08), in: RoundedRectangle(cornerRadius: 10))
+                        }
+                    } else {
+                        Label(
+                            "This proposal was created by an older build and cannot be safely applied. Deny it and ask the bot to create it again.",
+                            systemImage: "exclamationmark.shield"
+                        )
+                        .font(.system(size: 12))
+                        .foregroundStyle(.orange)
+                    }
+                }
+
                 if let held = card.held {
                     Label(held, systemImage: "exclamationmark.shield")
                         .font(.system(size: 13))
@@ -1050,6 +1197,7 @@ struct CardView: View {
                     HStack(spacing: 8) {
                         ForEach(card.options, id: \.self) { option in
                             Button {
+                                Haptics.selection()
                                 answering = true
                                 Task {
                                     await session.answer(chat: chat, card: card, choice: option)
@@ -1066,7 +1214,11 @@ struct CardView: View {
                                     )
                             }
                             .buttonStyle(.plain)
-                            .disabled(answering)
+                            .disabled(
+                                answering ||
+                                    (card.skillRequest != nil && !Self.isRefusal(option) &&
+                                        card.skillRequest?.reviewedSha256 == nil)
+                            )
                         }
                     }
                     .padding(.top, 2)
@@ -1078,6 +1230,7 @@ struct CardView: View {
                     // never a string invented here.
                     if card.allowKey != nil, let allow = allowChoice, case let .bot(bot) = chat {
                         Button("Always allow this tool") {
+                            Haptics.selection()
                             answering = true
                             Task {
                                 await session.alwaysAllow(bot: bot, card: card)

@@ -17,6 +17,7 @@ export function sumUsage(items: Array<TaskUsage | undefined>): TaskUsage {
     out.input += u.input;
     out.output += u.output;
     out.turns += u.turns;
+    if (hasFiniteCost(u.cachedInput)) out.cachedInput = (out.cachedInput ?? 0) + u.cachedInput;
     if (hasFiniteCost(u.costUsd)) out.costUsd = (out.costUsd ?? 0) + u.costUsd;
   }
   return out;
@@ -35,12 +36,46 @@ export function formatTokens(n: number): string {
 }
 const trim = (x: number) => (x >= 100 ? Math.round(x).toString() : x.toFixed(1).replace(/\.0$/, ""));
 
+/** Task-picker variant: hide unused tasks and spell out small counts. */
+export function formatTaskTokens(total: number): string | null {
+  if (!Number.isFinite(total) || total < 1) return null;
+  const n = Math.trunc(total);
+  if (n < 1000) return n === 1 ? "1 token" : `${n} tokens`;
+  const kTenths = Math.round(n / 100);
+  if (kTenths < 10_000) return `${formatTenths(kTenths)}k`;
+  return `${formatTenths(Math.round(n / 100_000))}M`;
+}
+
+const formatTenths = (value: number) => {
+  const fraction = value % 10;
+  return fraction === 0 ? `${value / 10}` : `${(value - fraction) / 10}.${fraction}`;
+};
+
 /** Dollars, with enough precision that a cheap turn isn't "$0.00". */
 export function formatUsd(usd: number): string {
   if (!hasFiniteCost(usd)) return "";
   if (usd === 0) return "$0";
   if (usd < 0.01) return `$${usd.toFixed(3)}`;
   return `$${usd.toFixed(2)}`;
+}
+
+/** How much of `input` the provider served from its prompt cache. Clamped to
+ * `input` so a provider that reports cache reads outside its input figure
+ * can never produce a negative "fresh" number. */
+export function cachedInput(u: TaskUsage): number {
+  return hasFiniteCost(u.cachedInput) ? Math.min(Math.max(0, u.cachedInput), u.input) : 0;
+}
+
+/** The in/out breakdown behind the headline figure, with the cached share
+ * called out when there is one: "88.2k in (79k cached) · 1.2k out". The
+ * headline counts every token the model processed — five short messages
+ * on a thread with a system prompt and tool schemas really do cost the
+ * model ~17k tokens of reading each turn — so the breakdown is where the
+ * "was that really 100k?" question gets answered. */
+export function usageDetail(u: TaskUsage): string {
+  const cached = cachedInput(u);
+  const input = cached > 0 ? `${formatTokens(u.input)} in (${formatTokens(cached)} cached)` : `${formatTokens(u.input)} in`;
+  return `${input} · ${formatTokens(u.output)} out`;
 }
 
 /** The chip text: tokens, and cost when known. Empty string when nothing

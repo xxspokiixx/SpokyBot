@@ -21,6 +21,7 @@ describe("credentials", () => {
       status: 401,
       error: "pair this device from Phone settings in OpenMausBot on your computer",
     });
+    expect(ask("POST", "/api/files", false)?.status).toBe(401);
   });
 
   it("lets anyone curl liveness — it is the unauthenticated smoke test", () => {
@@ -42,6 +43,7 @@ describe("what the app may do", () => {
     ["GET", "/api/companion/endpoints"],
     ["GET", "/api/bots"],
     ["POST", "/api/bots"],
+    ["POST", "/api/sidebar-sections"],
     ["POST", "/api/bots/bot_123/messages"],
     ["POST", "/api/bots/bot_123/interrupt"],
     ["POST", "/api/bots/bot_123/read"],
@@ -57,6 +59,10 @@ describe("what the app may do", () => {
     ["POST", "/api/bots/bot_123/computer/join"],
     ["POST", "/api/groups/room-1/messages"],
     ["POST", "/api/groups/room-1/read"],
+    ["POST", "/api/groups/room-1/tasks"],
+    ["POST", "/api/groups/room-1/tasks/th_1"],
+    ["PATCH", "/api/groups/room-1/tasks/th_1"],
+    ["DELETE", "/api/groups/room-1/tasks/th_1"],
     ["GET", "/api/threads/th_1/messages"],
     ["GET", "/api/threads/th_1/messages/msg_2/image"],
     ["POST", "/api/threads/th_1/messages/msg_2/reactions"],
@@ -65,6 +71,7 @@ describe("what the app may do", () => {
     ["GET", "/api/search"],
     ["POST", "/api/attachments"],
     ["GET", "/api/attachments/avatar-123.webp"],
+    ["POST", "/api/files"],
     ["GET", "/api/tts/voices"],
     ["POST", "/api/tts/speak"],
     ["GET", "/api/routines"],
@@ -161,8 +168,13 @@ describe("what it may not", () => {
     expect(allowed("GET", "/api/groups/room-1")).toBe(false);
     expect(allowed("PATCH", "/api/bots/bot_123")).toBe(false);
     expect(allowed("PATCH", "/api/bots/bot_123/profile/execution-policy")).toBe(false);
+    expect(allowed("GET", "/api/sidebar-sections")).toBe(false);
+    expect(allowed("PATCH", "/api/sidebar-sections")).toBe(false);
+    expect(allowed("POST", "/api/sidebar-sections/extra")).toBe(false);
     expect(allowed("PUT", "/api/config")).toBe(false);
     expect(allowed("GET", "/api/attachments/../config.json")).toBe(false);
+    expect(allowed("GET", "/api/files")).toBe(false);
+    expect(allowed("POST", "/api/files/anything")).toBe(false);
     expect(allowed("POST", "/api/routine-runs/run_1/cancel")).toBe(false);
     expect(allowed("DELETE", "/api/connectors/slack")).toBe(false);
     expect(allowed("GET", "/api/connectors/connected/all")).toBe(false);

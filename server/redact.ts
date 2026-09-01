@@ -24,7 +24,12 @@ function isSecretName(name: string): boolean {
   return /(^|[_.-])keys?$/.test(lower);
 }
 
-const mask = (value: string) => `«redacted ${value.length} chars»`;
+const REDACTION_MARKER = /^«redacted \d+ chars»$/;
+
+/** Keep repeated redaction byte-for-byte stable. Persisted payloads can pass
+ * through both a content scrub and the store-wide scrub; re-masking our own
+ * marker would change its reported length (and any hash over the payload). */
+const mask = (value: string) => (REDACTION_MARKER.test(value) ? value : `«redacted ${value.length} chars»`);
 
 // ── content-shaped secrets ────────────────────────────────────────────
 // What a bot's own reply, a tool title, or a permission card can carry —
@@ -79,7 +84,13 @@ export function redactSecrets(input: unknown, depth = 0): unknown {
         typeof (item as { value?: unknown }).value === "string"
       ) {
         const entry = item as { name: string; value: string };
-        return isSecretName(entry.name) ? { ...entry, value: mask(entry.value) } : entry;
+        // A non-secret-shaped name (a custom env var, a feature flag) does
+        // not clear the value of suspicion — the same content pass every
+        // other string in this tree gets is what catches a credential
+        // someone stashed under an ordinary-looking name.
+        return isSecretName(entry.name)
+          ? { ...entry, value: mask(entry.value) }
+          : { ...entry, value: redactSecretsInText(entry.value) };
       }
       return redactSecrets(item, depth + 1);
     });

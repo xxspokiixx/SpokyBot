@@ -7,10 +7,25 @@
 import { Check, ShieldCheck, X } from "lucide-react";
 import { type Bot, type Message } from "@/state/store";
 import { cn } from "@/lib/cn";
+import { SkillRequestPreview } from "@/components/SkillRequestPreview";
 
 interface ToolLabels {
   [tool: string]: string;
 }
+
+const ROUTINE_SETTLED_LABEL = {
+  create: "Routine scheduled",
+  update: "Routine updated",
+  pause: "Routine paused",
+  resume: "Routine resumed",
+  run_now: "Routine run queued",
+  delete: "Routine deleted",
+} as const;
+
+const SKILL_SETTLED_LABEL = {
+  create: "Skill enabled",
+  update: "Skill updated",
+} as const;
 
 /** The tool's own name is noise to a human: mcp__ogb__computer_batch is
  * "computer batch", Bash is "run a command". */
@@ -24,6 +39,10 @@ function toolLabel(tool?: string): string {
     Edit: "edit a file",
     WebFetch: "fetch a web page",
     WebSearch: "search the web",
+    schedule_routine: "schedule a routine",
+    manage_routine: "change a routine",
+    stage_skill: "enable a learned skill",
+    update_skill: "update a learned skill",
   };
   return nice[tool] ?? bare;
 }
@@ -39,6 +58,17 @@ export function ApprovalCard({
   const card = message.card;
   if (!card) return null;
   const settled = card.answered;
+  const isRoutineRequest = Boolean(card.routineRequest);
+  const isSkillRequest = Boolean(card.skillRequest);
+  const routineAction = card.routineRequest?.operation.action;
+  const skillAction = card.skillRequest?.action;
+  const routineSettledLabel = routineAction ? ROUTINE_SETTLED_LABEL[routineAction] : undefined;
+  const skillSettledLabel = skillAction ? SKILL_SETTLED_LABEL[skillAction] : undefined;
+  const displayTool = isRoutineRequest
+    ? routineAction === "create" ? "schedule_routine" : "manage_routine"
+    : isSkillRequest
+      ? skillAction === "update" ? "update_skill" : "stage_skill"
+    : card.tool;
 
   return (
     <div
@@ -50,15 +80,21 @@ export function ApprovalCard({
       <div className="flex items-baseline justify-between gap-3">
         <div className="text-[15px] font-semibold text-ink">
           {bot ? `${bot.name} wants to ` : "Wants to "}
-          {toolLabel(card.tool)}
+          {toolLabel(displayTool)}
         </div>
-        {card.tool && <span className="shrink-0 font-mono text-[11px] text-ink-secondary">{card.tool}</span>}
+        {displayTool && <span className="shrink-0 font-mono text-[11px] text-ink-secondary">{displayTool}</span>}
       </div>
 
       {/* what, exactly */}
-      <pre className="mt-2 max-h-40 overflow-auto whitespace-pre-wrap break-words rounded-lg bg-inset px-3 py-2 font-mono text-[12.5px] leading-relaxed text-ink">
+      <pre
+        tabIndex={0}
+        aria-label={isRoutineRequest ? "Routine details" : isSkillRequest ? "Skill details" : "Approval details"}
+        className="mt-2 max-h-40 overflow-auto whitespace-pre-wrap break-words rounded-lg bg-inset px-3 py-2 font-mono text-[12.5px] leading-relaxed text-ink"
+      >
         {card.subtitle}
       </pre>
+
+      {card.skillRequest && <SkillRequestPreview request={card.skillRequest} />}
 
       {card.held && (
         <div className="mt-2 rounded-lg border border-warning/30 bg-warning/10 px-3 py-2 text-[12.5px] text-warning">
@@ -71,15 +107,17 @@ export function ApprovalCard({
       <div className="mt-3 flex items-center gap-1.5 text-[13px] text-ink-secondary">
         {settled === "allow" ? (
           <>
-            <Check size={14} className="text-success" /> Allowed
+            <Check size={14} className="text-success" />
+            {skillSettledLabel ?? routineSettledLabel ?? (isRoutineRequest ? "Routine confirmed" : isSkillRequest ? "Skill confirmed" : "Allowed")}
           </>
         ) : settled ? (
           <>
-            <X size={14} /> Denied
+            <X size={14} /> {isRoutineRequest || isSkillRequest ? "Cancelled" : "Denied"}
           </>
         ) : (
           <>
-            <ShieldCheck size={14} className="text-accent" /> Waiting for your answer below
+            <ShieldCheck size={14} className="text-accent" />
+            {isRoutineRequest || isSkillRequest ? "Waiting for your confirmation below" : "Waiting for your answer below"}
           </>
         )}
       </div>

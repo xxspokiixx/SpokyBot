@@ -56,6 +56,18 @@ final class DecodingTests: XCTestCase {
         XCTAssertNil(fleet.bots.first?.hasMore)
     }
 
+    func testStorePreviewRemainsADecodableFleet() throws {
+        let iosDirectory = URL(fileURLWithPath: #filePath)
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+        let data = try Data(contentsOf: iosDirectory.appendingPathComponent("App/StorePreview.json"))
+        let fleet = try JSONDecoder().decode(Fleet.self, from: data)
+
+        XCTAssertFalse(fleet.bots.isEmpty)
+        XCTAssertFalse(fleet.groups.isEmpty)
+    }
+
     func testOldAndNewAvatarProfilesDecodeTogether() throws {
         let oldBot = try XCTUnwrap(decode(Fleet.self, "bots-full").bots.first)
         XCTAssertNil(oldBot.avatarUrl)
@@ -131,6 +143,33 @@ final class DecodingTests: XCTestCase {
         XCTAssertNil(fleet.bots.last?.cloudBackend)
     }
 
+    func testDecodesSidebarSectionsOnBotsAndChannels() throws {
+        let json = """
+        {
+          "bots": [
+            {
+              "id":"b1","threadId":"t1","name":"Scout","title":"","description":"",
+              "notifications":true,"color":"green","unread":false,"section":"Research",
+              "modelSelection":{"instanceId":"i1","model":"m1"},"createdAt":1
+            }
+          ],
+          "groups": [
+            {
+              "id":"g1","threadId":"gt1","name":"Launch","memberIds":["b1"],
+              "defaultResponder":{"kind":"mentions"},"bulletin":"","unread":false,
+              "createdAt":2,"section":"Research"
+            }
+          ]
+        }
+        """
+        let fleet = try JSONDecoder().decode(Fleet.self, from: Data(json.utf8))
+
+        XCTAssertEqual(fleet.bots.first?.section, "Research")
+        XCTAssertEqual(fleet.groups.first?.section, "Research")
+        XCTAssertNil(try decode(Fleet.self, "bots-full").bots.first?.section,
+                     "older computers that omit sections remain compatible")
+    }
+
     func testDecodesMultipleConnectedAccountsAndNoAuthToolkit() throws {
         let payload = #"""
         {
@@ -173,6 +212,35 @@ final class DecodingTests: XCTestCase {
         let pending = try XCTUnwrap(statuses.services["slack"])
         XCTAssertEqual(pending.pending, true)
         XCTAssertNil(pending.accounts)
+    }
+
+    func testAnUnreadableCredentialStoreIsNotAnEmptyInventory() throws {
+        func statuses(_ json: String) throws -> ConnectorStatuses {
+            try JSONDecoder().decode(ConnectorStatuses.self, from: Data(json.utf8))
+        }
+
+        // The one answer that withdraws its own authority: an empty map the
+        // server explicitly labels as "we could not read the store".
+        let unreadable = try statuses(#"{"configured":false,"credentialStore":"unavailable","services":{}}"#)
+        XCTAssertTrue(unreadable.services.isEmpty)
+        XCTAssertFalse(unreadable.isAuthoritative)
+
+        // The three ways of still being authoritative. Each is asserted
+        // separately because a rule that only recognised the case above would
+        // pass a test that only checked the case above — and every one of
+        // these would then start hiding accounts that really are gone.
+        XCTAssertTrue(
+            try statuses(#"{"configured":true,"credentialStore":"ok","services":{}}"#).isAuthoritative,
+            "an empty list from a readable store really does mean nothing is connected"
+        )
+        XCTAssertTrue(
+            try statuses(#"{"configured":true,"services":{}}"#).isAuthoritative,
+            "a computer older than the field would otherwise have every answer treated as unknowable"
+        )
+        XCTAssertTrue(
+            try statuses(#"{"configured":false,"credentialStore":"Unavailable","services":{}}"#).isAuthoritative,
+            "only the exact string server/index.ts writes withdraws the claim; anything else is as unknown as an absent field"
+        )
     }
 
     func testOneMalformedBotDoesNotHideTheRestOfTheFleet() throws {
@@ -248,6 +316,8 @@ final class DecodingTests: XCTestCase {
         XCTAssertEqual(card.responseBehavior(for: "Always allow"), "allow")
         XCTAssertEqual(card.responseBehavior(for: "Deny"), "deny")
         XCTAssertEqual(card.responseBehavior(for: " deny "), "deny")
+        XCTAssertEqual(card.responseBehavior(for: "Cancel"), "deny")
+        XCTAssertEqual(card.responseBehavior(for: "Dismiss"), "deny")
         XCTAssertTrue(card.shouldRememberPermission(for: "Always allow"))
         XCTAssertFalse(card.shouldRememberPermission(for: "Allow"))
         XCTAssertFalse(card.shouldRememberPermission(for: " deny "))
@@ -259,6 +329,75 @@ final class DecodingTests: XCTestCase {
         var dismissed = card
         dismissed.dismissed = true
         XCTAssertFalse(dismissed.isPending)
+    }
+
+    func testDecodesAReviewedSkillRequest() throws {
+        let json = """
+        {
+          "id": "skill-card", "role": "bot", "kind": "options", "at": 1786742413762,
+          "card": {
+            "title": "Enable skill?", "subtitle": "Files expenses.",
+            "options": ["Enable", "Deny"], "requestId": "req-skill", "tool": "stage_skill",
+            "skillRequest": {
+              "version": 1, "requestId": "req-skill", "botId": "bot-1", "threadId": "thread-1",
+              "stagedId": "staged-1", "action": "create", "name": "file-expense",
+              "gist": "Files expenses.", "source": "learn:conversation",
+              "preview": "---\\nname: file-expense\\n---\\n", "sha256": "abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789", "warnings": [],
+              "createdAt": 1786742413762
+            }
+          }
+        }
+        """
+        let card = try XCTUnwrap(try JSONDecoder().decode(Message.self, from: Data(json.utf8)).card)
+        XCTAssertEqual(card.skillRequest?.name, "file-expense")
+        XCTAssertEqual(card.skillRequest?.source, "learn:conversation")
+        XCTAssertEqual(card.skillRequest?.reviewedSha256, "abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789")
+        XCTAssertEqual(card.responseBehavior(for: "Enable"), "allow")
+        XCTAssertEqual(card.responseBehavior(for: "Deny"), "deny")
+    }
+
+    func testDecodesAReviewedSkillUpdate() throws {
+        let json = """
+        {
+          "id": "skill-update", "role": "bot", "kind": "options", "at": 1786742413762,
+          "card": {
+            "title": "Update skill?", "subtitle": "Refreshes verification steps.",
+            "options": ["Update", "Deny"], "requestId": "req-update", "tool": "stage_skill",
+            "skillRequest": {
+              "version": 1, "requestId": "req-update", "botId": "bot-1", "threadId": "thread-1",
+              "stagedId": "staged-update", "action": "update", "name": "verify-app",
+              "gist": "Refreshes verification steps.", "source": "learn:maintenance",
+              "preview": "---\\nname: verify-app\\n---\\n", "sha256": "abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789", "warnings": [],
+              "createdAt": 1786742413762
+            }
+          }
+        }
+        """
+        let card = try XCTUnwrap(try JSONDecoder().decode(Message.self, from: Data(json.utf8)).card)
+        XCTAssertEqual(card.skillRequest?.action, "update")
+        XCTAssertEqual(card.responseBehavior(for: "Update"), "allow")
+        XCTAssertEqual(card.responseBehavior(for: "Deny"), "deny")
+    }
+
+    func testOldSkillCardStillDecodesButCannotBeApproved() throws {
+        let json = """
+        {
+          "id": "legacy-skill", "role": "bot", "kind": "options", "at": 1786742413762,
+          "card": {
+            "title": "Enable skill?", "subtitle": "Old proposal.",
+            "options": ["Enable", "Dismiss"], "requestId": "req-old", "tool": "stage_skill",
+            "skillRequest": {
+              "version": 1, "requestId": "req-old", "botId": "bot-1", "threadId": "thread-1",
+              "stagedId": "staged-old", "action": "create", "name": "old-skill",
+              "gist": "Old proposal.", "warnings": [], "createdAt": 1786742413762
+            }
+          }
+        }
+        """
+        let card = try XCTUnwrap(try JSONDecoder().decode(Message.self, from: Data(json.utf8)).card)
+        XCTAssertEqual(card.skillRequest?.name, "old-skill")
+        XCTAssertNil(card.skillRequest?.reviewedSha256)
+        XCTAssertEqual(card.responseBehavior(for: "Dismiss"), "deny")
     }
 
     func testAQuestionSendsItsChoiceAsAnAnswer() throws {
@@ -337,6 +476,14 @@ final class DecodingTests: XCTestCase {
         let config = try decode(ConfigStatus.self, "config")
         XCTAssertEqual(config.profile?.name, "Ada Lovelace")
         XCTAssertEqual(config.box?.configured, false)
+        // Captured bytes, not our idea of them: `describeVoice` always sends
+        // the engine, so a sidecar that stopped forwarding it fails here
+        // instead of quietly sending every built-in-voices user back to an
+        // explanation about an ElevenLabs key. The captured value is stable on
+        // any platform — the fabricated config selects no provider, so the
+        // server's own fallback decides it.
+        XCTAssertEqual(config.tts?.provider, "elevenlabs")
+        XCTAssertEqual(config.voiceProvider, .elevenlabs)
     }
 
     // MARK: - Frames
