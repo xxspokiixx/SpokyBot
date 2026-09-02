@@ -138,8 +138,8 @@ const SCREEN_TOOL = /^(?:screenshot|click|type_text|press_key|scroll|open_url|wa
  * is the only fully reliable signal; a bare name is trusted only when one
  * surface was mounted, because both servers expose `browser_snapshot`. */
 export function surfaceForTool(toolName: string, mounted: MountedSurfaces): Surface | null {
-  if (/^mcp__browser__/.test(toolName)) return mounted.browser ? "browser" : null;
-  if (/^mcp__computer__/.test(toolName)) return mounted.computer;
+  if (toolName.startsWith("mcp__browser__")) return mounted.browser ? "browser" : null;
+  if (toolName.startsWith("mcp__computer__")) return mounted.computer;
   if (!SCREEN_TOOL.test(toolName)) return null;
   if (mounted.computer && !mounted.browser) return mounted.computer;
   if (!mounted.computer && mounted.browser && /^browser_/i.test(toolName)) return "browser";
