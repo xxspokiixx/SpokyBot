@@ -426,7 +426,7 @@ describe("goal-driven channel runs", () => {
     }
   });
 
-  it("stops a waiting goal without interrupting unrelated direct work, while chat still skips busy bots", async () => {
+  it("stops a waiting goal without interrupting unrelated direct work, and chat waits for busy bots the same way", async () => {
     const lead = (await api("POST", "/api/bots", {
       name: "Occupied lead",
       modelSelection: { instanceId: "directHang", model: "claude-sonnet-5" },
@@ -437,6 +437,15 @@ describe("goal-driven channel runs", () => {
       memberIds: [lead.id],
       setup: { bulletin: "", defaultResponder: { kind: "member", botId: lead.id } },
     })).body.group;
+    const chips = (messages: Array<{ kind: string; role?: string; tool?: { name?: string; ok?: boolean } }>) => ({
+      waiting: messages.some((message) =>
+        message.kind === "activity" &&
+        /finishing another conversation — will reply here when free/i.test(message.tool?.name ?? "") &&
+        message.tool?.ok === undefined
+      ),
+      skipped: messages.some((message) => /skipped this round/i.test(message.tool?.name ?? "")),
+      replies: messages.filter((message) => message.kind === "text" && message.role === "bot").length,
+    });
 
     try {
       expect((await api("POST", `/api/bots/${lead.id}/messages`, { text: "Keep this direct task running" })).status)
@@ -446,17 +455,27 @@ describe("goal-driven channel runs", () => {
         return state.bots.find((bot: { id: string }) => bot.id === lead.id)?.busy;
       }).toBe(true);
 
+      // ordinary chat: the round parks on the busy lead — visibly working,
+      // nobody named as speaker, one neutral note, and no skip
       expect((await api("POST", `/api/groups/${room.id}/messages`, { text: "Ordinary room chat" })).status).toBe(202);
+      await expect.poll(async () => {
+        const state = (await api("GET", "/api/bots?messages=30")).body;
+        const current = state.groups.find((group: { id: string }) => group.id === room.id);
+        return { working: current?.working, busyBotId: current?.busyBotId, ...chips(current?.messages ?? []) };
+      }).toEqual({ working: true, busyBotId: null, waiting: true, skipped: false, replies: 0 });
+
+      // Stop releases the parked chat round quietly: no reply, no skip chip,
+      // and the lead's unrelated direct turn is untouched
+      expect((await api("POST", `/api/groups/${room.id}/interrupt`, { threadId: room.threadId })).status).toBe(200);
       await expect.poll(async () => {
         const state = (await api("GET", "/api/bots?messages=30")).body;
         const current = state.groups.find((group: { id: string }) => group.id === room.id);
         return {
           working: current?.working,
-          skipped: current?.messages.some((message: { tool?: { name?: string } }) =>
-            /busy in another conversation.+skipped this round/i.test(message.tool?.name ?? "")
-          ),
+          directBusy: state.bots.find((bot: { id: string }) => bot.id === lead.id)?.busy,
+          ...chips(current?.messages ?? []),
         };
-      }).toEqual({ working: false, skipped: true });
+      }).toEqual({ working: false, directBusy: true, waiting: true, skipped: false, replies: 0 });
 
       expect((await api("POST", `/api/groups/${room.id}/messages`, {
         text: "Wait and run this as a goal",
