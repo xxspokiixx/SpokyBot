@@ -217,6 +217,16 @@ beforeAll(async () => {
         dm: true,
         pinnedCwd: null,
       },
+      {
+        id: "test-goal-restart-room",
+        threadId: "test-goal-restart-thread",
+        name: "Restarted goal room",
+        memberIds: ["test-bot-a"],
+        defaultResponder: { kind: "member", botId: "test-bot-a" },
+        bulletin: "",
+        unread: false,
+        createdAt: 6,
+      },
     ]),
   );
 
@@ -248,6 +258,80 @@ beforeAll(async () => {
           from: { botId: "test-bot-a", name: "Test bot A", color: "purple" },
         },
       ],
+    }),
+  );
+
+  // Goal orchestration is process-local. This durable card simulates either
+  // a manual or scheduled goal whose process exited before it could settle.
+  writeFileSync(
+    join(home, ".openmausbot", "messages-test-goal-restart-thread.json"),
+    JSON.stringify({
+      activeLeafId: "settled-routine-goal-card",
+      messages: [
+        {
+          id: "restarted-goal-card",
+          at: 5,
+          parentId: null,
+          role: "bot",
+          kind: "goal.run",
+          text: "Goal in progress: Test bot A is coordinating this goal.",
+          goalRun: {
+            runId: "restarted-goal-run",
+            goal: "Prepare the report",
+            status: "working",
+            coordinatorBotId: "test-bot-a",
+            coordinatorName: "Test bot A",
+            turnCount: 2,
+            maxTurns: 12,
+            startedAt: 4,
+          },
+        },
+        {
+          id: "settled-routine-goal-card",
+          at: 6,
+          parentId: "restarted-goal-card",
+          role: "bot",
+          kind: "goal.run",
+          text: "Goal in progress: Test bot A is coordinating this goal.",
+          goalRun: {
+            runId: "settled-routine-goal-run",
+            goal: "Ship the report",
+            status: "working",
+            coordinatorBotId: "test-bot-a",
+            coordinatorName: "Test bot A",
+            turnCount: 3,
+            maxTurns: 12,
+            startedAt: 5,
+          },
+        },
+      ],
+    }),
+  );
+  writeFileSync(
+    join(home, ".openmausbot", "routines.json"),
+    JSON.stringify({
+      version: 1,
+      routines: [],
+      runs: [{
+        id: "settled-routine-goal-run",
+        routineId: "settled-routine",
+        routineName: "Settled room goal",
+        prompt: "Ship the report",
+        target: "room-goal",
+        goalStatus: "completed",
+        groupId: "test-goal-restart-room",
+        botId: "test-bot-a",
+        runOn: "maus",
+        scheduledFor: 5,
+        status: "completed",
+        manual: false,
+        triggerSource: "schedule",
+        threadId: "test-goal-restart-thread",
+        startedAt: 5,
+        finishedAt: 6,
+        output: "The scheduled report shipped successfully.",
+        createdAt: 5,
+      }],
     }),
   );
 
@@ -406,6 +490,36 @@ afterAll(async () => {
 });
 
 describe("harness HTTP API", () => {
+  it("reconciles durable working goal cards with scheduler truth after a restart", async () => {
+    const state = await api("GET", "/api/bots?messages=30");
+    const room = state.body.groups.find(
+      (candidate: { id: string }) => candidate.id === "test-goal-restart-room",
+    );
+    expect(room.working).toBe(false);
+    expect(room.messages.find(
+      (message: { id: string }) => message.id === "restarted-goal-card",
+    )).toMatchObject({
+      text: "Goal failed: OpenMausBot restarted before this goal finished.",
+      goalRun: {
+        status: "failed",
+        detail: "OpenMausBot restarted before this goal finished.",
+        turnCount: 2,
+        finishedAt: expect.any(Number),
+      },
+    });
+    expect(room.messages.find(
+      (message: { id: string }) => message.id === "settled-routine-goal-card",
+    )).toMatchObject({
+      text: "Goal completed: The scheduled report shipped successfully.",
+      goalRun: {
+        status: "completed",
+        detail: "The scheduled report shipped successfully.",
+        turnCount: 3,
+        finishedAt: 6,
+      },
+    });
+  });
+
   it("rejects non-loopback authorities while accepting IPv4 and IPv6 loopback forms", async () => {
     expect(await statusWithHeaders({ host: "example.com" })).toBe(403);
     expect(await statusWithHeaders({ origin: "https://example.com" })).toBe(403);
@@ -524,6 +638,50 @@ describe("harness HTTP API", () => {
     } finally {
       await api("DELETE", `/api/groups/${room.id}`);
       for (const bot of [first, second, third]) await api("DELETE", `/api/bots/${bot.id}`);
+    }
+  });
+
+  it("protects a team-goal lead and pauses the routine when its room is deleted", async () => {
+    const [lead, other] = await Promise.all([api("POST", "/api/bots"), api("POST", "/api/bots")]).then(
+      (created) => created.map((response) => response.body.bot),
+    );
+    const room = (await api("POST", "/api/groups", {
+      name: "Scheduled team",
+      memberIds: [lead.id, other.id],
+      setup: { bulletin: "", defaultResponder: { kind: "member", botId: lead.id } },
+    })).body.group;
+    const created = await api("POST", "/api/routines", {
+      name: "Daily room goal",
+      prompt: "Prepare the daily team report",
+      target: "room-goal",
+      groupId: room.id,
+      botId: lead.id,
+      runOn: "maus",
+      enabled: true,
+      schedule: { type: "daily", time: "10:00", weekdays: [1, 2, 3, 4, 5] },
+    });
+    expect(created.status).toBe(201);
+    const routineId = created.body.routine.id;
+    try {
+      const blocked = await api("PATCH", `/api/groups/${room.id}`, { memberIds: [other.id] });
+      expect(blocked.status).toBe(409);
+      expect(blocked.body.error).toMatch(/pause or reassign.*team-goal routine/i);
+
+      expect((await api("PATCH", `/api/routines/${routineId}`, {
+        botId: other.id,
+      })).status).toBe(200);
+      expect((await api("PATCH", `/api/groups/${room.id}`, { memberIds: [other.id] })).status).toBe(200);
+
+      expect((await api("DELETE", `/api/groups/${room.id}`)).status).toBe(200);
+      const afterDelete = (await api("GET", "/api/routines")).body.routines.find(
+        (routine: { id: string }) => routine.id === routineId,
+      );
+      expect(afterDelete).toMatchObject({ enabled: false, nextRunAt: null, groupId: room.id });
+    } finally {
+      await api("DELETE", `/api/routines/${routineId}`).catch(() => undefined);
+      await api("DELETE", `/api/groups/${room.id}`).catch(() => undefined);
+      await api("DELETE", `/api/bots/${lead.id}`).catch(() => undefined);
+      await api("DELETE", `/api/bots/${other.id}`).catch(() => undefined);
     }
   });
 

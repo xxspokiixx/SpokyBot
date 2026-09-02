@@ -4,6 +4,15 @@ export type RoutineSchedule =
 
 export type RoutineRunOn = "maus" | "cloud";
 
+export type RoutineTarget = "bot" | "room-goal";
+export type RoutineGoalStatus =
+  | "completed"
+  | "needs-input"
+  | "blocked"
+  | "limit-reached"
+  | "stopped"
+  | "failed";
+
 export interface RoutineContextAttachment {
   id: string;
   kind: "file" | "image";
@@ -27,7 +36,9 @@ export interface Routine {
   id: string;
   name: string;
   prompt: string;
+  target: RoutineTarget;
   botId: string;
+  groupId?: string;
   runOn: RoutineRunOn;
   enabled: boolean;
   schedule: RoutineSchedule;
@@ -45,7 +56,10 @@ export interface RoutineRun {
   prompt?: string;
   durationMinutes?: number;
   attachments?: RoutineContextAttachment[];
+  target: RoutineTarget;
+  goalStatus?: RoutineGoalStatus;
   botId: string;
+  groupId?: string;
   runOn: RoutineRunOn;
   scheduledFor: number;
   status: RoutineRunStatus;
@@ -53,6 +67,8 @@ export interface RoutineRun {
   triggerSource?: RoutineRunTrigger;
   webhookId?: string;
   deliveryId?: string;
+  /** Room task created for a team-goal run. */
+  executionThreadId?: string;
   threadId?: string;
   startedAt?: number;
   finishedAt?: number;
@@ -69,7 +85,9 @@ export interface RoutineRun {
 export interface RoutineInput {
   name: string;
   prompt: string;
+  target?: RoutineTarget;
   botId: string;
+  groupId?: string | null;
   runOn?: RoutineRunOn;
   enabled?: boolean;
   schedule: RoutineSchedule;

@@ -894,6 +894,59 @@ export class Store {
     return true;
   }
 
+  /** A process restart cannot preserve an in-flight room orchestrator. Close
+   * every durable working receipt before clients load it, including manual
+   * goals that do not have a RoutineRun record to reconcile separately. */
+  reconcileInterruptedGroupGoals(
+    resolve?: (
+      runId: string,
+      threadId: string,
+    ) => {
+      status: Exclude<GroupGoalRunCardData["status"], "working">;
+      detail: string;
+      finishedAt: number;
+    } | null,
+    fallbackDetail = "OpenMausBot restarted before this goal finished.",
+    fallbackFinishedAt = Date.now(),
+  ): number {
+    const ownedThreadIds = new Set<string>();
+    for (const group of this.groups) {
+      ownedThreadIds.add(group.threadId);
+      for (const task of group.tasks ?? []) ownedThreadIds.add(task.threadId);
+    }
+    // Goal cards normally already live in SQLite. Import only genuinely
+    // legacy transcript files first; modern histories stay lazy and this
+    // recovery query remains proportional to unfinished goals.
+    for (const threadId of ownedThreadIds) {
+      if (existsSync(messagesFile(threadId))) this.messagesFor(threadId);
+    }
+    let recovered = 0;
+    for (const hit of mdb.workingGoalRunMessages()) {
+      if (!ownedThreadIds.has(hit.threadId) || !hit.message.goalRun) continue;
+      const resolution = resolve?.(hit.message.goalRun.runId, hit.threadId) ?? {
+        status: "failed" as const,
+        detail: fallbackDetail,
+        finishedAt: fallbackFinishedAt,
+      };
+      const state = resolution.status === "needs-input"
+        ? "needs your input"
+        : resolution.status === "limit-reached"
+          ? "reached its turn limit"
+          : resolution.status;
+      this.patchMessage(hit.threadId, hit.message.id, {
+        text: `Goal ${state}: ${resolution.detail}`,
+        goalRun: {
+          ...hit.message.goalRun,
+          status: resolution.status,
+          detail: resolution.detail,
+          finishedAt: resolution.finishedAt,
+        },
+      });
+      recovered += 1;
+    }
+    return recovered;
+  }
+
   // ── channel tasks ────────────────────────────────────────────────────
   groupTasks(groupId: string): GroupTaskRecord[] {
     const group = this.group(groupId);
@@ -911,7 +964,7 @@ export class Store {
     return group.tasks?.find((task) => task.threadId === threadId);
   }
 
-  createGroupTask(groupId: string, title?: string): GroupTaskRecord | null {
+  createGroupTask(groupId: string, title?: string, activate = true): GroupTaskRecord | null {
     const group = this.group(groupId);
     if (!group || group.dm) return null;
     const task: GroupTaskRecord = {
@@ -920,9 +973,11 @@ export class Store {
       createdAt: Date.now(),
     };
     group.tasks = [task, ...(group.tasks ?? [])];
-    group.threadId = task.threadId;
-    group.pinnedCwd = undefined;
-    group.pinnedMessageId = undefined;
+    if (activate) {
+      group.threadId = task.threadId;
+      group.pinnedCwd = undefined;
+      group.pinnedMessageId = undefined;
+    }
     this.saveGroups();
     this.emit({ type: "group", groupId });
     return task;
