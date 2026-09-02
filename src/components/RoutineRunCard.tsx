@@ -32,6 +32,7 @@ const GOAL_COPY = {
   "needs-input": { label: "Needs your input", tone: "text-warning", border: "border-warning/35" },
   blocked: { label: "Blocked", tone: "text-danger", border: "border-danger/35" },
   "limit-reached": { label: "Turn limit reached", tone: "text-warning", border: "border-warning/35" },
+  paused: { label: "Paused", tone: "text-warning", border: "border-warning/35" },
   stopped: { label: "Stopped", tone: "text-ink-secondary", border: "border-hairline/45" },
   failed: COPY.failed,
 } satisfies Record<

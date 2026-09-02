@@ -267,6 +267,7 @@ const ROUTINE_GOAL_STATUSES = new Set<RoutineGoalStatus>([
   "needs-input",
   "blocked",
   "limit-reached",
+  "paused",
   "stopped",
   "failed",
 ]);
@@ -1010,8 +1011,22 @@ export class RoutineManager {
     if (!run || status === "working") return null;
     const safeDetail = redactSecretsInText(detail).trim();
     run.goalStatus = status;
-    if (status === "failed") {
-      this.failRun(run, safeDetail || "The room goal failed");
+    // Only a completed goal is a completed run. A team asking the human a
+    // question is still waiting on them, and a blocked or turn-capped goal
+    // did not finish — reporting either as "completed" would silence the
+    // one outcome that most needs a person's attention.
+    if (status === "failed" || status === "blocked" || status === "limit-reached") {
+      this.failRun(
+        run,
+        safeDetail ||
+          (status === "limit-reached" ? "The room goal reached its turn limit" : "The room goal is blocked"),
+      );
+    } else if (status === "needs-input" || status === "paused") {
+      run.status = "waiting";
+      run.attention = safeDetail.slice(0, 500) || (status === "paused" ? "The room goal is paused" : "The team needs your input");
+      run.error = undefined;
+      this.save();
+      this.emitRun(run);
     } else {
       run.status = status === "stopped" ? "cancelled" : "completed";
       run.attention = undefined;

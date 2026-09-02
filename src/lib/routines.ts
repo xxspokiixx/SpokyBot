@@ -10,6 +10,7 @@ export type RoutineGoalStatus =
   | "needs-input"
   | "blocked"
   | "limit-reached"
+  | "paused"
   | "stopped"
   | "failed";
 

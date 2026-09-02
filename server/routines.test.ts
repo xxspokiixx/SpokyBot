@@ -987,30 +987,53 @@ describe("RoutineManager", () => {
     });
   });
 
-  it.each([
-    "completed",
-    "needs-input",
-    "blocked",
-    "limit-reached",
-  ] satisfies GroupGoalRunStatus[])("maps a %s room outcome to a completed routine receipt", async (status) => {
-    const h = harness();
-    const routine = h.manager.create({
-      name: "Bounded team goal",
-      prompt: "Reach a bounded result",
-      target: "room-goal",
-      botId: "chief-1",
-      groupId: "room-1",
-      schedule: { type: "once", at: new Date(2026, 7, 17, 8, 1).getTime() },
-    });
-    h.setNow(routine.nextRunAt!);
-    await h.manager.tick();
-    const run = h.manager.listRuns()[0]!;
+  it.each(["needs-input", "paused"] satisfies GroupGoalRunStatus[])(
+    "keeps a %s room outcome waiting on the human instead of completing the routine",
+    async (status) => {
+      const h = harness();
+      const routine = h.manager.create({
+        name: "Bounded team goal",
+        prompt: "Reach a bounded result",
+        target: "room-goal",
+        botId: "chief-1",
+        groupId: "room-1",
+        schedule: { type: "once", at: new Date(2026, 7, 17, 8, 1).getTime() },
+      });
+      h.setNow(routine.nextRunAt!);
+      await h.manager.tick();
+      const run = h.manager.listRuns()[0]!;
 
-    const finished = h.manager.finishGoalRun(run.id, status, `${status} detail`);
-    expect(finished).toMatchObject({ status: "completed", goalStatus: status, output: `${status} detail` });
-    expect(finished?.finishedAt).toBeTypeOf("number");
-    expect(h.failed).toEqual([]);
-  });
+      const finished = h.manager.finishGoalRun(run.id, status, `${status} detail`);
+      // the team stopped to ask — that is a run waiting on a person, and the
+      // one outcome that must never be filed as a quiet completion
+      expect(finished).toMatchObject({ status: "waiting", goalStatus: status, attention: `${status} detail` });
+      expect(finished?.finishedAt).toBeUndefined();
+      expect(h.failed).toEqual([]);
+    },
+  );
+
+  it.each(["blocked", "limit-reached"] satisfies GroupGoalRunStatus[])(
+    "records a %s room outcome as a failed routine run with the goal's own detail",
+    async (status) => {
+      const h = harness();
+      const routine = h.manager.create({
+        name: "Bounded team goal",
+        prompt: "Reach a bounded result",
+        target: "room-goal",
+        botId: "chief-1",
+        groupId: "room-1",
+        schedule: { type: "once", at: new Date(2026, 7, 17, 8, 1).getTime() },
+      });
+      h.setNow(routine.nextRunAt!);
+      await h.manager.tick();
+      const run = h.manager.listRuns()[0]!;
+
+      const finished = h.manager.finishGoalRun(run.id, status, `${status} detail`);
+      expect(finished).toMatchObject({ status: "failed", goalStatus: status, error: `${status} detail` });
+      expect(finished?.finishedAt).toBeTypeOf("number");
+      expect(h.failed).toHaveLength(1);
+    },
+  );
 
   it("maps failed and stopped room outcomes to their routine terminal states", async () => {
     const failedHarness = harness();
