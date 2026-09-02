@@ -33,15 +33,13 @@ Desktop-only for now (needs the Mac/Linux app):
 
 ## Docker (recommended)
 
-One tenant = one container for the server plus Caddy for HTTPS and login.
+One tenant = one container for the server plus Caddy for HTTPS.
 Requirements: Docker with Compose, a DNS name pointing at the machine, and
 ports 80/443 open.
 
 ```sh
 git clone https://github.com/milind-soni/OpenMausBot && cd OpenMausBot/deploy
-cp .env.example .env
-# set DOMAIN, BASIC_AUTH_USER and BASIC_AUTH_HASH (the file says how;
-# the hash's `$` signs must be doubled, Compose interpolates them)
+cp .env.example .env            # set DOMAIN
 docker compose pull omb && docker compose up -d
 ```
 
@@ -49,17 +47,20 @@ That uses the image CI publishes on every `main` push
 (`ghcr.io/milind-soni/openmausbot`, tagged `latest`, `sha-…` and `v…`).
 To build from your checkout instead: `docker compose up -d --build`.
 
-Then sign the engine CLIs in **inside the container** — their logins live
-on the `data` volume, so they survive restarts and image upgrades:
+Then sign the engine CLIs in **inside the container** (their logins live on
+the `data` volume, so they survive restarts and image upgrades) and mint a
+pairing code for your first device:
 
 ```sh
-docker compose exec omb claude     # each CLI you listed in ENGINES
+docker compose exec omb claude                       # each CLI you listed in ENGINES
+docker compose exec omb node dist-server/pair-cli.js # prints a code and a link
 ```
 
-Open `https://<DOMAIN>` and log in with the basic-auth user. Webhook URLs
-(`https://<DOMAIN>/hooks/wh_…`) work without the login — every hook
-carries its own secret — and that is the base the app prints on new hooks,
-because the stack sets `OMB_WEBHOOK_PUBLIC_URL`.
+Open the link (`https://<DOMAIN>/pair#code=…`) in a browser and it is
+paired; see "Using it from your computer" for what a session is. Webhook
+URLs (`https://<DOMAIN>/hooks/wh_…`) work without a session, and that is the
+base the app prints on new hooks because the stack sets
+`OMB_WEBHOOK_PUBLIC_URL`.
 
 What the stack does, so you can adapt it:
 
@@ -69,16 +70,15 @@ What the stack does, so you can adapt it:
   into the image.
 - [`deploy/docker-compose.yml`](../deploy/docker-compose.yml) runs Caddy
   **in the server's network namespace**, so Caddy reaches the server on
-  `127.0.0.1` and the server never binds anything public. The loopback
-  invariant above holds unchanged.
-- [`deploy/Caddyfile`](../deploy/Caddyfile) carries the two header rules
-  from "Putting a proxy in front" below. Swap `basic_auth` for
-  `forward_auth` to an identity provider (Authentik, oauth2-proxy) when you
-  outgrow a shared password — nothing in the server needs to change.
+  `127.0.0.1` and the server never binds anything public.
+- [`deploy/Caddyfile`](../deploy/Caddyfile) terminates TLS and forwards
+  the real `Host` plus `X-Forwarded-For`/`X-Forwarded-Proto`; the server's
+  own pairing is the login. A shared-password `basic_auth` block is there,
+  commented out, if you want a second wall in front of pairing.
 
 Upgrade with `docker compose pull omb && docker compose up -d` (or
 `git pull && docker compose up -d --build`). State (chats, routines,
-engine logins) is on the `data` volume; back that up.
+engine logins, paired sessions) is on the `data` volume; back that up.
 
 ## From source
 
@@ -119,40 +119,68 @@ that user (`sudo -u maus claude` etc.) before starting the service.
 
 ## Using it from your computer
 
-Open an SSH tunnel and use the web UI in any browser:
+Pair once, then use the server from any browser on any machine that can
+reach it. On the server:
+
+```sh
+pnpm pair                                  # from a checkout
+docker compose exec omb node dist-server/pair-cli.js   # Docker
+```
+
+It prints a 12-character code (single use, five minutes) and, when the
+server knows its public address (`OMB_PUBLIC_URL`, set by the Docker stack),
+a link like `https://maus.example.com/pair#code=XXXX-XXXX-XXXX`. Open the
+link, or open `/pair` on the address you use and type the code. The browser
+gets a session cookie (30 days, revocable) and the app loads. Sessions are
+listed and revoked at `GET`/`DELETE /api/auth/sessions` for now; a Settings
+screen follows.
+
+What this changes about the trust model: the server still binds loopback
+and still trusts loopback as the owner. A **paired session** is the second
+way in: a bearer token or the cookie, same-origin only, with a scope (`admin`
+by default, `--client` for a device that may chat but not change settings or
+pair others). Five bad codes from one address lock that address out for ten
+minutes. Over plain HTTP (a LAN address without TLS) the cookie is not
+marked `Secure` and travels in clear: use the Docker stack, Tailscale, or
+another TLS front for anything beyond a trusted private network.
+
+Native clients (CLI, scripts) send the token as `Authorization: Bearer …`
+and take a 5-minute ticket from `POST /api/auth/stream-ticket` for the
+event stream, because `EventSource` cannot set headers:
+`GET /api/events?ticket=…`.
+
+`GET /.well-known/openmausbot/environment` is public and tells a client what
+it is talking to: a stable `environmentId`, the label, the version and
+capabilities. Saved connections check the id so a reused address that now
+points at a different server is refused loudly.
+
+An SSH tunnel still works, and is the right answer when the server has no
+address of its own:
 
 ```sh
 ssh -L 8799:localhost:8799 you@your-server
-# then open http://localhost:8799
+# then open http://localhost:8799 — loopback, so no pairing needed
 ```
-
-The server serves the full app UI itself — no desktop install needed on the
-client. The tunnel keeps the loopback trust model intact: to the server,
-you look local, because through the tunnel you are.
-
-Note: a plain `tailscale serve` or reverse proxy is refused — the server
-checks that requests look like loopback on purpose. A proxy can satisfy
-that check; see "Putting a proxy in front" below. Only do it behind a login.
 
 ## Putting a proxy in front
 
-The server has two request gates, both aimed at browsers:
+Any reverse proxy works, given three things:
 
-1. **Host** must be loopback (`localhost`, `127.x.x.x`, `::1`). The proxy
-   must rewrite `Host` to `127.0.0.1:8799` on the way in.
-2. **Origin**, when present, must be a loopback origin. Browsers send the
-   proxy's origin (`https://your.domain`), so the proxy must map exactly
-   that one origin onto `http://127.0.0.1:8799` — and leave every other
-   Origin untouched, so cross-site requests are still refused.
+1. **Forward the real `Host`** and set `X-Forwarded-Proto`. Any request that
+   carries forwarded headers is treated as remote and needs a session, so a
+   proxy that rewrites `Host` to `127.0.0.1`, or forwards a stranger's
+   `Host: localhost`, gains nothing. The proxy's scheme decides whether the
+   session cookie is `Secure` and is part of the same-origin check.
+2. **Set `X-Forwarded-For` yourself** (Caddy and nginx do by default) and
+   drop any the client sent: the pairing lockout counts failures per first
+   forwarded address.
+3. **Do not buffer** the event stream (`flush_interval -1` in Caddy,
+   `proxy_buffering off` in nginx); the UI streams events over SSE.
 
-Plus two non-security rules: the UI streams events over SSE, so the proxy
-must not buffer responses (`flush_interval -1` in Caddy,
-`proxy_buffering off` in nginx); and the webhook receiver (port 8800,
-paths `/hooks/...`) only knows its loopback address, so set
-`OMB_WEBHOOK_PUBLIC_URL=https://your.domain` to make the app print hook
-URLs senders can reach. [`deploy/Caddyfile`](../deploy/Caddyfile) is the
-reference implementation. The proxy itself must add the login — the
-server has none — so never point it at the internet without one.
+Plus one convenience: set `OMB_PUBLIC_URL=https://your.domain` so pairing
+links, and `OMB_WEBHOOK_PUBLIC_URL=https://your.domain` so hook URLs, are
+printed with the public address. [`deploy/Caddyfile`](../deploy/Caddyfile)
+is the reference implementation.
 
 ## Using it from your phone
 
