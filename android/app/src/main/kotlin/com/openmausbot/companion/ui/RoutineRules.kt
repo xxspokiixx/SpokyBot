@@ -81,11 +81,11 @@ object RoutineRules {
     const val SCHEDULE_FOOTER: String =
         "Each occurrence creates a fresh task. No cron syntax is used."
     const val INTERVAL_SCHEDULE_FOOTER: String =
-        "Occurrences stay aligned to the chosen time. If the previous run is still active, " +
+        "Each occurrence creates a fresh task. If the previous run is still active, " +
             "the next occurrence is skipped instead of queued."
     const val UNKNOWN_SCHEDULE_NOTE: String =
         "This routine uses a schedule added by a newer OpenMausBot. Choose One time, " +
-            "Selected days, or Every few minutes before saving."
+            "Selected days, or Every X minutes before saving."
 
     const val CHECKING_CLOUD: String = "Checking Cloud VM availability…"
     const val CLOUD_STATUS_UNAVAILABLE: String = "Cloud VM status is unavailable"
@@ -134,7 +134,7 @@ object RoutineRules {
                 val minutes = schedule.everyMinutes ?: return "Interval unavailable"
                 val cadence = "Every $minutes min"
                 val anchor = schedule.anchorAt ?: return cadence
-                return "$cadence · aligned from ${RelativeStamp.dateAndTime(anchor.toDouble(), zone, locale)}"
+                return "$cadence · starting ${RelativeStamp.dateAndTime(anchor.toDouble(), zone, locale)}"
             }
             RoutineSchedule.Kind.UNKNOWN -> return "Newer schedule"
             RoutineSchedule.Kind.DAILY -> Unit

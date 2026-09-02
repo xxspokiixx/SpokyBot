@@ -24,11 +24,11 @@ import androidx.compose.material.icons.filled.Warning
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.DatePicker
 import androidx.compose.material3.DatePickerDialog
+import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.ExposedDropdownMenuBox
 import androidx.compose.material3.ExposedDropdownMenuDefaults
-import androidx.compose.material3.FilterChip
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.ExposedDropdownMenuAnchorType
@@ -139,6 +139,12 @@ internal fun RoutineEditorSheet(
             (seed?.schedule?.everyMinutes ?: RoutineRules.DEFAULT_INTERVAL).toString(),
         )
     }
+    var intervalUsesCustom by rememberSaveable {
+        mutableStateOf(
+            seed?.schedule?.everyMinutes?.let { it !in RoutineRules.INTERVAL_PRESETS } ?: false,
+        )
+    }
+    var intervalMenuExpanded by remember { mutableStateOf(false) }
     var intervalAnchor by rememberSaveable(stateSaver = OnceDraftSaver) {
         mutableStateOf(
             OnceDraft(
@@ -345,7 +351,7 @@ internal fun RoutineEditorSheet(
                     onSelect = { kind = RoutineSchedule.Kind.DAILY },
                 )
                 RadioRow(
-                    label = "Every few minutes",
+                    label = "Every X minutes",
                     selected = kind == RoutineSchedule.Kind.INTERVAL,
                     onSelect = {
                         kind = RoutineSchedule.Kind.INTERVAL
@@ -394,39 +400,99 @@ internal fun RoutineEditorSheet(
                     RoutineSchedule.Kind.INTERVAL -> {
                         FlowRow(
                             modifier = Modifier.fillMaxWidth(),
-                            horizontalArrangement = Arrangement.spacedBy(6.dp),
-                            verticalArrangement = Arrangement.spacedBy(4.dp),
+                            horizontalArrangement = Arrangement.spacedBy(2.dp),
+                            verticalArrangement = Arrangement.spacedBy(2.dp),
                         ) {
-                            RoutineRules.INTERVAL_PRESETS.forEach { minutes ->
-                                FilterChip(
-                                    selected = intervalMinutes == minutes,
-                                    onClick = { intervalMinutesText = minutes.toString() },
-                                    label = { Text("$minutes min") },
+                            Text(
+                                "Runs every",
+                                style = MaterialTheme.typography.bodyLarge,
+                                modifier = Modifier.padding(vertical = 12.dp),
+                            )
+                            Box {
+                                TextButton(
+                                    onClick = { intervalMenuExpanded = true },
                                     modifier = Modifier.semantics {
-                                        contentDescription = "Every $minutes minutes"
+                                        contentDescription = if (intervalUsesCustom) {
+                                            "Choose a custom repeat interval"
+                                        } else {
+                                            "Repeat interval, $intervalMinutesText minutes"
+                                        }
                                     },
+                                ) {
+                                    Text(
+                                        if (intervalUsesCustom) "Custom" else intervalMinutesText,
+                                        style = MaterialTheme.typography.bodyLarge,
+                                    )
+                                    ExposedDropdownMenuDefaults.TrailingIcon(
+                                        expanded = intervalMenuExpanded,
+                                    )
+                                }
+                                DropdownMenu(
+                                    expanded = intervalMenuExpanded,
+                                    onDismissRequest = { intervalMenuExpanded = false },
+                                ) {
+                                    RoutineRules.INTERVAL_PRESETS.forEach { minutes ->
+                                        DropdownMenuItem(
+                                            text = { Text(minutes.toString()) },
+                                            onClick = {
+                                                intervalMenuExpanded = false
+                                                intervalUsesCustom = false
+                                                intervalMinutesText = minutes.toString()
+                                            },
+                                        )
+                                    }
+                                    DropdownMenuItem(
+                                        text = { Text("Custom") },
+                                        onClick = {
+                                            intervalMenuExpanded = false
+                                            if (!intervalUsesCustom) intervalMinutesText = ""
+                                            intervalUsesCustom = true
+                                        },
+                                    )
+                                }
+                            }
+                            Text(
+                                "minutes, starting",
+                                style = MaterialTheme.typography.bodyLarge,
+                                modifier = Modifier.padding(vertical = 12.dp),
+                            )
+                            TextButton(
+                                onClick = { pickingDate = true },
+                                modifier = Modifier.semantics {
+                                    contentDescription = "Change when the interval starts"
+                                },
+                            ) {
+                                Text(
+                                    RelativeStamp.dateAndTime(
+                                        intervalAnchor.millis.toDouble(),
+                                        zone,
+                                    ),
+                                    style = MaterialTheme.typography.bodyLarge,
                                 )
                             }
+                            Text(
+                                ".",
+                                style = MaterialTheme.typography.bodyLarge,
+                                modifier = Modifier.padding(vertical = 12.dp),
+                            )
                         }
-                        OutlinedTextField(
-                            value = intervalMinutesText,
-                            onValueChange = { value ->
-                                if (value.length <= 4 && value.all(Char::isDigit)) {
-                                    intervalMinutesText = value
-                                }
-                            },
-                            label = { Text("Every (minutes)") },
-                            supportingText = { Text("From 5 minutes to 24 hours") },
-                            isError = intervalMinutes == null,
-                            singleLine = true,
-                            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
-                            modifier = Modifier.fillMaxWidth(),
-                        )
-                        ValueRow(
-                            label = "Aligned from",
-                            value = RelativeStamp.dateAndTime(intervalAnchor.millis.toDouble(), zone),
-                            onClick = { pickingDate = true },
-                        )
+                        if (intervalUsesCustom) {
+                            OutlinedTextField(
+                                value = intervalMinutesText,
+                                onValueChange = { value ->
+                                    if (value.length <= 4 && value.all(Char::isDigit)) {
+                                        intervalMinutesText = value
+                                    }
+                                },
+                                label = { Text("Custom interval") },
+                                suffix = { Text("minutes") },
+                                supportingText = { Text("From 5 minutes to 24 hours") },
+                                isError = intervalMinutes == null,
+                                singleLine = true,
+                                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                                modifier = Modifier.fillMaxWidth(),
+                            )
+                        }
                     }
                     RoutineSchedule.Kind.UNKNOWN -> IconNote(
                         text = RoutineRules.UNKNOWN_SCHEDULE_NOTE,

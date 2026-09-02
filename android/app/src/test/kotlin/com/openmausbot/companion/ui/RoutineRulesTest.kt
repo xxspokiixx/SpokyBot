@@ -100,7 +100,7 @@ class RoutineRulesTest {
     @Test
     fun `an interval schedule reads as its cadence`() {
         assertEquals(
-            "Every 5 min · aligned from Nov 14, 2023, 10:13 PM",
+            "Every 5 min · starting Nov 14, 2023, 10:13 PM",
             spacesNormalized(
                 RoutineRules.scheduleSummary(
                     RoutineSchedule.interval(5, 1_700_000_000_000L),

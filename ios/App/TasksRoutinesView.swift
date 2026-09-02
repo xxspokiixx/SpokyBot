@@ -288,7 +288,7 @@ private struct RoutineEditorView: View {
                         }
                         Text("One time").tag(RoutineSchedule.Kind.once)
                         Text("Selected days").tag(RoutineSchedule.Kind.daily)
-                        Text("Every few minutes").tag(RoutineSchedule.Kind.interval)
+                        Text("Every X minutes").tag(RoutineSchedule.Kind.interval)
                     }
                     if kind == .once {
                         DatePicker("Run", selection: $onceAt, in: Date()...)
@@ -305,18 +305,40 @@ private struct RoutineEditorView: View {
                             }
                         }
                     } else if kind == .interval {
-                        Picker("Frequency", selection: $intervalPreset) {
-                            ForEach(Self.intervalPresets, id: \.self) { minutes in
-                                Text("Every \(minutes) minutes").tag(minutes)
+                        HStack(spacing: 5) {
+                            Text(intervalPreset == 0 ? "Runs on" : "Runs every")
+                            Menu {
+                                ForEach(Self.intervalPresets, id: \.self) { minutes in
+                                    Button("\(minutes) minutes") {
+                                        intervalPreset = minutes
+                                    }
+                                }
+                                Divider()
+                                Button("Custom interval…") {
+                                    intervalPreset = 0
+                                }
+                            } label: {
+                                HStack(spacing: 3) {
+                                    Text(intervalPreset == 0 ? "a custom interval" : "\(intervalPreset)")
+                                        .fontWeight(.semibold)
+                                    Image(systemName: "chevron.up.chevron.down")
+                                        .font(.caption2)
+                                }
                             }
-                            Text("Custom").tag(0)
+                            .accessibilityLabel("How often this routine runs")
+                            .accessibilityValue(intervalFrequencyAccessibilityValue)
+                            if intervalPreset != 0 {
+                                Text("minutes")
+                            }
+                            Spacer(minLength: 0)
                         }
                         if intervalPreset == 0 {
                             HStack {
-                                Text("Every")
-                                TextField("Minutes", value: $customIntervalMinutes, format: .number)
+                                Text("Set the interval to")
+                                TextField("5–1,440", value: $customIntervalMinutes, format: .number)
                                     .keyboardType(.numberPad)
                                     .multilineTextAlignment(.trailing)
+                                    .frame(minWidth: 72)
                                     .accessibilityLabel("Custom interval in minutes")
                                 Text("minutes")
                                     .foregroundStyle(.secondary)
@@ -327,10 +349,10 @@ private struct RoutineEditorView: View {
                                     .foregroundStyle(.red)
                             }
                         }
-                        DatePicker("Starts", selection: $intervalAnchor)
+                        DatePicker("Starting", selection: $intervalAnchor)
                     } else {
                         Label(
-                            "This routine uses a schedule added by a newer OpenMausBot. Choose One time, Selected days, or Every few minutes before saving.",
+                            "This routine uses a schedule added by a newer OpenMausBot. Choose One time, Selected days, or Every X minutes before saving.",
                             systemImage: "exclamationmark.triangle"
                         )
                         .font(.footnote)
@@ -400,6 +422,10 @@ private struct RoutineEditorView: View {
         let minutes = intervalPreset == 0 ? customIntervalMinutes : intervalPreset
         guard let minutes, (5...1_440).contains(minutes) else { return nil }
         return minutes
+    }
+
+    private var intervalFrequencyAccessibilityValue: String {
+        intervalPreset == 0 ? "Custom interval" : "Every \(intervalPreset) minutes"
     }
 
     private func save() async {
@@ -480,7 +506,7 @@ private extension RoutineSchedule {
             guard let anchorAt else { return cadence }
             let start = Date(timeIntervalSince1970: Double(anchorAt) / 1_000)
                 .formatted(date: .abbreviated, time: .shortened)
-            return "\(cadence) · aligned from \(start)"
+            return "\(cadence) · starting \(start)"
         case .daily:
             break
         }
