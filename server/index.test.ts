@@ -2529,11 +2529,14 @@ describe("harness HTTP API", () => {
     // The cloud destination with no Box configured fails inside dispatch
     // without touching the network, which keeps this deterministic wherever
     // it runs in the file.
-    expect((await api("PUT", "/api/config", { box: { token: "" } })).status).toBe(200);
-    const bot = (await api("POST", "/api/bots")).body.bot;
-    expect((await api("PATCH", `/api/bots/${bot.id}`, { computer: "cloud" })).status).toBe(200);
-    const stream = await openSse(`${BASE}/api/events`);
+    let botId: string | undefined;
+    let stream: Awaited<ReturnType<typeof openSse>> | undefined;
     try {
+      expect((await api("PUT", "/api/config", { box: { token: "" } })).status).toBe(200);
+      const bot = (await api("POST", "/api/bots")).body.bot;
+      botId = bot.id;
+      expect((await api("PATCH", `/api/bots/${bot.id}`, { computer: "cloud" })).status).toBe(200);
+      stream = await openSse(`${BASE}/api/events`);
       await stream.until((frame) => frame.kind === "hello");
       expect((await api("POST", `/api/bots/${bot.id}/messages`, { text: "go" })).status).toBe(202);
       const buzz = await stream.until(
@@ -2554,8 +2557,8 @@ describe("harness HTTP API", () => {
         return Boolean(current?.messages.at(-1)?.tool?.name?.startsWith("error: "));
       }).toBe(true);
     } finally {
-      stream.close();
-      await api("DELETE", `/api/bots/${bot.id}`);
+      stream?.close();
+      if (botId) await api("DELETE", `/api/bots/${botId}`);
       // the token is write-only, so there is no prior value to restore —
       // leave the box unconfigured rather than half-set for whatever runs next
       await api("PUT", "/api/config", { box: { token: "" } });
@@ -2567,21 +2570,26 @@ describe("harness HTTP API", () => {
     // then reports through onDispatchError, which raises routine-failed.
     // Without the interactive guard the person would be buzzed twice for one
     // failure, so this pins the count rather than merely the presence.
-    expect((await api("PUT", "/api/config", { box: { token: "" } })).status).toBe(200);
-    const bot = (await api("POST", "/api/bots")).body.bot;
-    expect((await api("PATCH", `/api/bots/${bot.id}`, { computer: "cloud" })).status).toBe(200);
-    const created = await api("POST", "/api/routines", {
-      name: "Cloud check",
-      prompt: "look at the cloud desktop",
-      target: "bot",
-      botId: bot.id,
-      runOn: "maus",
-      enabled: true,
-      schedule: { type: "daily", time: "10:00", weekdays: [1, 2, 3, 4, 5] },
-    });
-    expect(created.status).toBe(201);
-    const stream = await openSse(`${BASE}/api/events`);
+    let botId: string | undefined;
+    let routineId: string | undefined;
+    let stream: Awaited<ReturnType<typeof openSse>> | undefined;
     try {
+      expect((await api("PUT", "/api/config", { box: { token: "" } })).status).toBe(200);
+      const bot = (await api("POST", "/api/bots")).body.bot;
+      botId = bot.id;
+      expect((await api("PATCH", `/api/bots/${bot.id}`, { computer: "cloud" })).status).toBe(200);
+      const created = await api("POST", "/api/routines", {
+        name: "Cloud check",
+        prompt: "look at the cloud desktop",
+        target: "bot",
+        botId: bot.id,
+        runOn: "maus",
+        enabled: true,
+        schedule: { type: "daily", time: "10:00", weekdays: [1, 2, 3, 4, 5] },
+      });
+      expect(created.status).toBe(201);
+      routineId = created.body.routine.id;
+      stream = await openSse(`${BASE}/api/events`);
       await stream.until((frame) => frame.kind === "hello");
       expect((await api("POST", `/api/routines/${created.body.routine.id}/run`)).status).toBe(201);
       await stream.until(
@@ -2599,9 +2607,9 @@ describe("harness HTTP API", () => {
         "routine-failed",
       ]);
     } finally {
-      stream.close();
-      await api("DELETE", `/api/routines/${created.body.routine.id}`);
-      await api("DELETE", `/api/bots/${bot.id}`);
+      stream?.close();
+      if (routineId) await api("DELETE", `/api/routines/${routineId}`);
+      if (botId) await api("DELETE", `/api/bots/${botId}`);
       await api("PUT", "/api/config", { box: { token: "" } });
     }
   });

@@ -3474,7 +3474,9 @@ async function startTurn(
       // failure. A delegated sub-turn is reported to the bot that asked
       // for it, in its own thread, so it does not need a second channel.
       if (opts?.automationSource === undefined && !opts?.commsDepth) {
-        notify(buildNotification("turn-failed", bot, threadId, message, { avatarUrl: bot.avatarUrl }));
+        notify(
+          buildNotification("turn-failed", bot, threadId, redactSecretsInText(message), { avatarUrl: bot.avatarUrl }),
+        );
       }
       store.setActivity(bot.id, "idle");
       retryDelegationsWaitingOn(bot.id);
