@@ -20,6 +20,7 @@ import kotlinx.serialization.SerializationException
 import kotlinx.serialization.decodeFromString
 import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.JsonArray
+import kotlinx.serialization.json.JsonNull
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.buildJsonObject
@@ -354,6 +355,7 @@ class CompanionClient(
 
     suspend fun createRoutine(input: RoutineInput): Routine {
         requireSupported(input.schedule)
+        requireValidTimeout(input.timeoutMinutes)
         return send<RoutineResponse>(
             makeRequest("POST", "/api/routines", body = routineBody(input)),
         ).routine
@@ -361,6 +363,7 @@ class CompanionClient(
 
     suspend fun updateRoutine(id: String, input: RoutineInput): Routine {
         requireSupported(input.schedule)
+        requireValidTimeout(input.timeoutMinutes)
         return send<RoutineResponse>(
             makeRequest("PATCH", "/api/routines/${segment(id)}", body = routineBody(input)),
         ).routine
@@ -730,6 +733,20 @@ class CompanionClient(
             if (schedule.type == RoutineSchedule.Kind.UNKNOWN) {
                 throw APIError.Transport("Choose a supported schedule before saving this routine.")
             }
+            if (
+                schedule.type == RoutineSchedule.Kind.INTERVAL &&
+                ((schedule.everyMinutes ?: 0) !in 5..1_440 || schedule.anchorAt == null)
+            ) {
+                throw APIError.Transport(
+                    "Choose an interval from 5 to 1,440 minutes and an alignment time.",
+                )
+            }
+        }
+
+        private fun requireValidTimeout(timeoutMinutes: Int?) {
+            if (timeoutMinutes != null && timeoutMinutes !in 5..240) {
+                throw APIError.Transport("Choose no timeout or a whole number from 5 to 240 minutes.")
+            }
         }
 
         private fun routineBody(input: RoutineInput): JsonObject = buildJsonObject {
@@ -745,8 +762,14 @@ class CompanionClient(
                 input.schedule.weekdays?.let { days ->
                     put("weekdays", JsonArray(days.map(::JsonPrimitive)))
                 }
+                input.schedule.everyMinutes?.let { put("everyMinutes", it) }
+                input.schedule.anchorAt?.let { put("anchorAt", it) }
             })
             put("durationMinutes", input.durationMinutes)
+            put(
+                "timeoutMinutes",
+                input.timeoutMinutes?.let(::JsonPrimitive) ?: JsonNull,
+            )
         }
 
         suspend fun pair(

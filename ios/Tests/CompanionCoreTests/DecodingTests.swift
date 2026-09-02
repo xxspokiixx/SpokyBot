@@ -100,6 +100,20 @@ final class DecodingTests: XCTestCase {
         XCTAssertEqual(schedule.weekdays, [1])
     }
 
+    func testDecodesAnIntervalRoutineSchedule() throws {
+        let schedule = try JSONDecoder().decode(
+            RoutineSchedule.self,
+            from: Data(#"{"type":"interval","everyMinutes":5,"anchorAt":1788384600000}"#.utf8)
+        )
+
+        XCTAssertEqual(schedule.type, .interval)
+        XCTAssertEqual(schedule.everyMinutes, 5)
+        XCTAssertEqual(schedule.anchorAt, 1_788_384_600_000)
+        XCTAssertNil(schedule.at)
+        XCTAssertNil(schedule.time)
+        XCTAssertNil(schedule.weekdays)
+    }
+
     func testNotificationTargetRequiresBothExactIds() {
         XCTAssertEqual(
             NotificationTarget(payload: ["botId": "bot-1", "threadId": "detached-task-2"]),
