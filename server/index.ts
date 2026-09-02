@@ -3473,7 +3473,7 @@ async function startTurn(
       // raises routine-failed; buzzing here too would ring twice for one
       // failure. A delegated sub-turn is reported to the bot that asked
       // for it, in its own thread, so it does not need a second channel.
-      if (opts?.automationSource === undefined && !opts?.commsDepth) {
+      if (opts?.automationSource === undefined && !opts?.commsDepth && !opts?.cardContinuation) {
         notify(
           buildNotification("turn-failed", bot, threadId, redactSecretsInText(message), { avatarUrl: bot.avatarUrl }),
         );
