@@ -587,6 +587,14 @@ export function SettingsPanel({ bot }: { bot: Bot }) {
   const browserFeature = builtInBrowserEnabled(state.config);
   const browserAllowed = bot.browser !== false;
   const browserEnabled = browserFeature && browserAllowed;
+  // "Works on: Browser" needs everything the switch needs except the switch
+  // itself; the box-native Computer engine has no browser-only mode.
+  const browserSelectable = desktopBrowser && browserFeature && canUseBrowser && engine?.driverKind !== "boxAgent";
+  const browserDisabledReason = !desktopBrowser
+    ? "The built-in browser needs the OpenMausBot desktop app"
+    : !browserFeature
+      ? "The built-in browser is switched off under App Settings → Experimental"
+      : "This model engine cannot use the built-in browser";
   const sectionName = bot.section?.trim() || "General";
   const currentChief = state.bots.find(
     (candidate) =>
@@ -847,30 +855,40 @@ export function SettingsPanel({ bot }: { bot: Bot }) {
           )}
 
           <div className="rounded-xl bg-card p-4">
-            <div className="text-[15px] font-medium text-ink">Computer</div>
+            <div className="text-[15px] font-medium text-ink">Works on</div>
             <div className="mt-0.5 text-[13px] text-ink-secondary">
-              Where this bot's computer runs{bot.computer ? "" : " (currently: auto)"}
+              Where this bot works{bot.computer ? "" : " (currently: auto)"}. Browser is the built-in browser tab only; no desktop.
             </div>
             <div className="mt-3 flex overflow-hidden rounded-lg border border-hairline/40">
               {([
                 ["cloud", "Cloud"],
                 ["vm", "Local VM"],
                 ["local", "This computer"],
+                ["browser", "Browser"],
                 ["off", "Off"],
               ] as const).map(([mode, label], i) => (
                 <button
                   key={mode}
-                  disabled={mode === "local" && !localSelectable}
-                  title={mode === "local" && !localSelectable ? localDisabledReason ?? undefined : undefined}
+                  disabled={(mode === "local" && !localSelectable) || (mode === "browser" && !browserSelectable)}
+                  title={
+                    mode === "local" && !localSelectable
+                      ? localDisabledReason ?? undefined
+                      : mode === "browser"
+                        ? browserSelectable ? "The built-in browser tab only; no desktop" : browserDisabledReason
+                        : undefined
+                  }
                   onClick={() => {
                     if (mode === bot.computer) return;
                     if (mode === "local" && bot.autoApprove) setLocalAutoWarning("local");
+                    // a browser-only bot must actually have its browser: flip
+                    // the per-bot switch on with the destination
+                    else if (mode === "browser") patch({ computer: mode, browser: true });
                     else patch({ computer: mode });
                   }}
                   className={cn(
                     "flex-1 py-1.5 text-[13px] capitalize",
                     i > 0 && "border-l border-hairline/40",
-                    mode === "local" && !localSelectable && "cursor-not-allowed opacity-40",
+                    ((mode === "local" && !localSelectable) || (mode === "browser" && !browserSelectable)) && "cursor-not-allowed opacity-40",
                     bot.computer === mode
                       ? "bg-control text-ink"
                       : "text-ink-secondary hover:bg-control/60 hover:text-ink",

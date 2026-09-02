@@ -236,8 +236,9 @@ export interface Bot {
   /** what the bot is doing, as the harness sees it; busy is derived from it */
   activity?: "working" | "waiting-on-you" | "idle" | "no-signal" | "dead";
   modelSelection: ModelSelection;
-  /** Where this bot's computer runs; unset = auto (cloud box if one exists, else local). */
-  computer?: "cloud" | "vm" | "local" | "off";
+  /** Where this bot works: a computer, only the built-in browser tab, or
+   * nowhere; unset = auto (cloud box if one exists, else local). */
+  computer?: "cloud" | "vm" | "local" | "browser" | "off";
   /** Which cloud computer backs `computer: "cloud"`; absent means Box. */
   cloudBackend?: CloudBackend;
   /** Allow Auto to prepare/start the managed VPS container. Off by default. */

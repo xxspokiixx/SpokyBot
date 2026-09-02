@@ -247,6 +247,7 @@ import { loadBundledSkills, loadUserSkills, mergeSkills, renderSkillInstructions
 import { installedPlaybookInstructions } from "./installed-playbooks.ts";
 import { createBotPackageExport } from "./package-export.ts";
 import { shouldMountLocalComputer } from "./local-routing.ts";
+import { resolveSurface } from "./surface.ts";
 import {
   PendingTurnCancellations,
   RetiredTurnRegistry,
@@ -3054,13 +3055,29 @@ async function startTurn(
       // tools that would fail on every call or spawn an unnecessary proxy.
       const dwebUrl = process.env.DWEB_URL?.trim();
       if (dwebUrl) integrations.dweb = { url: dwebUrl };
-      const wants = opts?.runOn === "cloud" ? "cloud" : bot.computer; // cloud routine overrides the MAUS default
       // Cloud routines always use Box/BoxAgent. The per-bot backend applies
       // only to ordinary turns that mount a computer into the local agent.
       const cloudBackend = opts?.runOn === "cloud" || bot.cloudBackend !== "vps" ? "box" : "vps";
       const mountsComputerMcp = instance.adapter.capabilities.computerMcp === true;
       const mountsCloudComputer = mountsComputerMcp || instance.driverKind === "boxAgent";
       const mountsLocalComputer = instance.adapter.capabilities.localComputerMcp === true;
+      // Where this turn's hands may land. The bot's "Works on" choice is
+      // strict; a browser-only bot gets no computer at all, and a bot whose
+      // browser is withheld (workspace flag, its own switch, or an engine
+      // without browser tools) gets told so instead of silently falling back
+      // to a desktop it was never meant to touch.
+      const browserOn =
+        builtInBrowserEnabled(cfg) &&
+        bot.browser !== false &&
+        instance.adapter.capabilities.browserMcp === true;
+      const plan = resolveSurface({
+        destination: opts?.runOn === "cloud" ? "cloud" : bot.computer, // cloud routine overrides the MAUS default
+        browserOn,
+      });
+      if (bot.computer === "browser" && plan.computer === "off" && instance.driverKind === "boxAgent") {
+        throw new Error("the Computer engine works on the cloud computer — set Works on to Cloud, or choose another engine");
+      }
+      const wants = plan.computer;
       let previewCapture: (() => Promise<{ png: string; format: string }>) | null = null;
       let computerKind: "box" | "vps" | "vm" | "local" | null = null;
       let autoVpsProblem: string | null = null;
@@ -3276,6 +3293,7 @@ async function startTurn(
       const liveBot = store.bot(bot.id);
       if (
         liveBot &&
+        plan.browser &&
         builtInBrowserEnabled(cfg) &&
         liveBot.browser !== false &&
         instance.adapter.capabilities.browserMcp === true
@@ -3327,6 +3345,7 @@ async function startTurn(
           (computerKind
             ? " At a sign-in, password, MFA, CAPTCHA, or other protected-input step, stop and ask the user to complete it on the visible computer. Never type their password or ask them to paste a password or one-time code into chat."
             : "") +
+          plan.note +
           // gated on the integration, not the key: the hint only goes to a
           // bot whose driver actually mounted the tools
           (integrations.composio
@@ -8075,9 +8094,9 @@ const server = createServer(async (req, res) => {
       }
       if (
         body.computer !== undefined &&
-        !["cloud", "vm", "local", "off"].includes(String(body.computer))
+        !["cloud", "vm", "local", "browser", "off"].includes(String(body.computer))
       ) {
-        return json(res, 400, { error: "computer must be cloud, vm, local, or off" });
+        return json(res, 400, { error: "computer must be cloud, vm, local, browser, or off" });
       }
       if (body.cloudBackend !== undefined && !["box", "vps"].includes(String(body.cloudBackend))) {
         return json(res, 400, { error: "cloudBackend must be box or vps" });
