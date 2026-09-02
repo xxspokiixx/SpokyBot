@@ -135,6 +135,15 @@ gets a session cookie (30 days, revocable) and the app loads. Sessions are
 listed and revoked at `GET`/`DELETE /api/auth/sessions` for now; a Settings
 screen follows.
 
+From the **desktop app**, use the Server menu: "Add Server from Copied
+Pairing Link…" reads the link you copied from the server, asks once, and
+opens that server's own UI in the app; the app stays signed in to it across
+restarts, and the menu switches between Local and any saved server (on
+Windows and Linux press Alt to show the menu bar). While a remote server is
+shown, this computer's screen, microphone, files and local control are not
+offered to it. "Forget" signs the app out of that server; revoke the
+session on the server too if the device is gone.
+
 What this changes about the trust model: the server still binds loopback
 and still trusts loopback as the owner. A **paired session** is the second
 way in: a bearer token or the cookie, same-origin only, with a scope (`admin`
