@@ -1219,6 +1219,70 @@ async function waitForGroupMemberBot(
   });
 }
 
+/** Ordinary chat rounds share the goal wait, with the room's own notes: one
+ * neutral chip when the wait begins (the transcript's promise that the member
+ * replies here when free), rewritten in place if the cap runs out so the
+ * promise never outlives the truth. `ok` stays undefined while waiting on
+ * purpose — this is neither a failure nor a finished step, and the live label
+ * reads `spoken` while the chip is the newest thing in the room. Stop leaves
+ * nothing extra behind: the round simply ends. */
+async function waitForChatRoomMember(
+  operation: GroupTurnOperation,
+  threadId: string,
+  bot: BotRecord,
+): Promise<"run" | "skip" | "stop"> {
+  const waitTool = {
+    name: `${bot.name} is finishing another conversation — will reply here when free`,
+    spoken: `${bot.name} is finishing another conversation`,
+  };
+  let waitChip: Message | undefined;
+  const availability = await waitForGroupMemberBot(bot, operation, () => {
+    waitChip = store.appendMessage(threadId, {
+      role: "bot",
+      kind: "activity",
+      from: { botId: bot.id, name: bot.name, color: bot.color },
+      tool: waitTool,
+    });
+  });
+  switch (availability) {
+    case "ready":
+      // The promise is kept the moment the turn starts; settle the chip so
+      // the live label stops narrating a wait that is over.
+      if (waitChip) store.patchMessage(threadId, waitChip.id, { tool: { ...waitTool, ok: true } });
+      // Membership means the bot is part of the room operation NOW, so its
+      // own Stop button reaches this turn rather than an idle 1:1 thread.
+      operation.botIds.add(bot.id);
+      return "run";
+    case "cancelled":
+      return "stop";
+    case "unavailable":
+      store.appendMessage(threadId, {
+        role: "bot",
+        kind: "activity",
+        from: { botId: bot.id, name: bot.name, color: bot.color },
+        tool: { name: `${bot.name} is no longer available — skipped this round`, ok: false },
+      });
+      return "skip";
+    case "timed_out": {
+      const minutes = Math.max(1, Math.round(GROUP_GOAL_WAIT_MAX_MS / 60_000));
+      const name =
+        `${bot.name} stayed busy in another conversation for ${minutes} minute${minutes === 1 ? "" : "s"} — skipped this round`;
+      // The cap only fires after a wait began, so the chip exists; append
+      // rather than lose the verdict if that ever stops being true.
+      if (waitChip) store.patchMessage(threadId, waitChip.id, { tool: { name, ok: false } });
+      else {
+        store.appendMessage(threadId, {
+          role: "bot",
+          kind: "activity",
+          from: { botId: bot.id, name: bot.name, color: bot.color },
+          tool: { name, ok: false },
+        });
+      }
+      return "skip";
+    }
+  }
+}
+
 function cancelGroupTurnOperations(groupId: string, threadId: string) {
   for (const operation of groupTurnOperations.get(groupId) ?? []) {
     if (operation.threadId !== threadId) continue;
@@ -3836,6 +3900,9 @@ async function runGroupMemberTurn(
   onProviderHandshakeSettled?: () => void,
   skillAuthoringClaim: { claimed: boolean } = { claimed: false },
   orchestration?: GroupTurnOrchestration,
+  // chat rounds only: lets a chained @mention wait for a busy teammate the
+  // way the responder loop does (goal runs never follow mentions)
+  operation?: GroupTurnOperation,
 ): Promise<boolean> {
   if (isCancelled?.()) return false;
   const group = store.group(groupId);
@@ -3861,7 +3928,10 @@ async function runGroupMemberTurn(
   // One turn per bot at a time, across BOTH engines. Without this a bot
   // could run its 1:1 turn and a room turn concurrently — two provider
   // processes, interleaved token spend, and an interrupt that only ever
-  // reached one of them.
+  // reached one of them. Callers wait for a busy member before getting here
+  // (waitForChatRoomMember / the goal wait), so this is the last-line guard
+  // for the narrow window in which a 1:1 re-claims the bot between that wait
+  // settling and this turn starting.
   if (bot.busy) {
     if (orchestration) {
       orchestration.result.outcome = "busy";
@@ -4278,6 +4348,17 @@ async function runGroupMemberTurn(
     for (const next of roomResponders(replyText, members, { kind: "mentions" })) {
       if (isCancelled?.()) return false;
       if (spoken.has(next.id)) continue;
+      if (operation) {
+        // a summoned teammate busy elsewhere is woken later, exactly like a
+        // direct responder; one skipped by the cap must not be retried as a
+        // direct responder of the same round
+        const verdict = await waitForChatRoomMember(operation, threadId, next);
+        if (verdict === "stop") return false;
+        if (verdict === "skip") {
+          spoken.add(next.id);
+          continue;
+        }
+      }
       if (!(await runGroupMemberTurn(
         groupId,
         threadId,
@@ -4290,6 +4371,8 @@ async function runGroupMemberTurn(
         onProviderHandshakeStarted,
         onProviderHandshakeSettled,
         skillAuthoringClaim,
+        undefined,
+        operation,
       ))) {
         return false;
       }
@@ -4761,6 +4844,16 @@ function startGroupTurn(
       for (const responder of responders) {
         if (operation.cancelled) break;
         if (spoken.has(responder.id)) continue;
+        // A responder busy in another conversation takes its turn when it
+        // frees (the host wakes each member in turn) — never skipped, only
+        // bounded. Stop ends the round; a member the cap gave up on, or one
+        // that vanished meanwhile, is passed over for this round only.
+        const verdict = await waitForChatRoomMember(operation, threadId, responder);
+        if (verdict === "stop") break;
+        if (verdict === "skip") {
+          spoken.add(responder.id);
+          continue;
+        }
         if (!(await runGroupMemberTurn(
           groupId,
           threadId,
@@ -4773,6 +4866,8 @@ function startGroupTurn(
           () => groupProviderHandshakeStarted(operation),
           () => groupProviderHandshakeSettled(operation),
           skillAuthoringClaim,
+          undefined,
+          operation,
         ))) break;
       }
     }
