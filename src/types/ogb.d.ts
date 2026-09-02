@@ -127,6 +127,19 @@ type SkillRecordingPayload = {
   interface Window {
     ogb?: {
       platform: NodeJS.Platform;
+      /** Saved servers and the active one (desktop Server menu). Present on
+       * the local server's UI; a remote server's page sees a reduced bridge. */
+      environments?: {
+        state: () => Promise<{
+          localOrigin: string;
+          remote: boolean;
+          activeId: string;
+          environments: Array<{ id: string; name: string; origin: string }>;
+        }>;
+        switch: (id: string) => Promise<void>;
+        addFromLink: (link: string) => Promise<void>;
+        forget: (id: string) => Promise<void>;
+      };
       getCapabilities(): Promise<DesktopCapabilities>;
       onCapabilitiesChanged(cb: (capabilities: DesktopCapabilities) => void): () => void;
       companionAccount?: {
