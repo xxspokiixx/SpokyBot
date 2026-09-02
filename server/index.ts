@@ -3470,6 +3470,21 @@ async function startTurn(
         kind: "activity",
         tool: { name: `error: ${message.slice(0, 160)}`, ok: false },
       });
+      // Worth a buzz for the same reason a routine failure is, and the rule
+      // notify.ts encodes: the bot is not working, and the cause is usually
+      // a setting only a person can change — an unattended user would
+      // otherwise learn nothing until they next opened the thread.
+      //
+      // Only for a turn the person started themselves. A routine reaches
+      // this same catch and then reports through onDispatchError, which
+      // raises routine-failed; buzzing here too would ring twice for one
+      // failure. A delegated sub-turn is reported to the bot that asked
+      // for it, in its own thread, so it does not need a second channel.
+      if (opts?.automationSource === undefined && !opts?.commsDepth && !opts?.cardContinuation) {
+        notify(
+          buildNotification("turn-failed", bot, threadId, redactSecretsInText(message), { avatarUrl: bot.avatarUrl }),
+        );
+      }
       store.setActivity(bot.id, "idle");
       retryDelegationsWaitingOn(bot.id);
       opts?.onDispatchError?.(message);

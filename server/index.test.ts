@@ -2520,6 +2520,158 @@ describe("harness HTTP API", () => {
     expect(patched.body.error).toContain("not recognized");
   });
 
+  it("buzzes when a turn dies before it can start", async () => {
+    // A dispatch failure already leaves an error row in the thread, but the
+    // person who has to fix it is often not looking at the thread — the cause
+    // is usually a setting, so no retry can clear it on its own. A routine
+    // failure already buzzes; an interactive turn should behave the same.
+    //
+    // The cloud destination with no Box configured fails inside dispatch
+    // without touching the network, which keeps this deterministic wherever
+    // it runs in the file.
+    let botId: string | undefined;
+    let stream: Awaited<ReturnType<typeof openSse>> | undefined;
+    try {
+      expect((await api("PUT", "/api/config", { box: { token: "" } })).status).toBe(200);
+      const bot = (await api("POST", "/api/bots")).body.bot;
+      botId = bot.id;
+      expect((await api("PATCH", `/api/bots/${bot.id}`, { computer: "cloud" })).status).toBe(200);
+      stream = await openSse(`${BASE}/api/events`);
+      await stream.until((frame) => frame.kind === "hello");
+      expect((await api("POST", `/api/bots/${bot.id}/messages`, { text: "go" })).status).toBe(202);
+      const buzz = await stream.until(
+        (frame) => frame.kind === "notify" && frame.notification?.kind === "turn-failed",
+        5_000,
+      );
+      expect(buzz.notification).toMatchObject({
+        botId: bot.id,
+        threadId: bot.threadId,
+        title: `${bot.name} couldn't start`,
+      });
+      expect(String(buzz.notification.body)).toMatch(/box|cloud/i);
+
+      // the error row the chat already renders stays exactly as it was
+      await expect.poll(async () => {
+        const current = (await api("GET", "/api/bots?messages=20")).body.bots
+          .find((candidate: { id: string }) => candidate.id === bot.id);
+        return Boolean(current?.messages.at(-1)?.tool?.name?.startsWith("error: "));
+      }).toBe(true);
+    } finally {
+      stream?.close();
+      if (botId) await api("DELETE", `/api/bots/${botId}`);
+      // the token is write-only, so there is no prior value to restore —
+      // leave the box unconfigured rather than half-set for whatever runs next
+      await api("PUT", "/api/config", { box: { token: "" } });
+    }
+  });
+
+  it("leaves a failed credential-card continuation on the card without buzzing twice", async () => {
+    let botId: string | undefined;
+    let stream: Awaited<ReturnType<typeof openSse>> | undefined;
+    try {
+      expect((await api("PUT", "/api/config", { box: { token: "" } })).status).toBe(200);
+      const bot = (await api("POST", "/api/bots")).body.bot;
+      botId = bot.id;
+      expect((await api("PATCH", `/api/bots/${bot.id}`, {
+        modelSelection: { instanceId: "claude", model: "claude-sonnet-5" },
+      })).status).toBe(200);
+      stream = await openSse(`${BASE}/api/events`);
+      await stream.until((frame) => frame.kind === "hello");
+
+      rmSync(fakeClaudeDump, { force: true });
+      expect((await api("POST", `/api/bots/${bot.id}/messages`, { text: "stay active" })).status).toBe(202);
+      const dump = await readJsonFileWhenReady<{
+        mcpConfig: { mcpServers: { agents: { env: { OMB_COMMS_TOKEN: string } } } };
+      }>(fakeClaudeDump);
+      const token = dump.mcpConfig.mcpServers.agents.env.OMB_COMMS_TOKEN;
+      const requested = await fetch(`${BASE}/api/internal/request-credential`, {
+        method: "POST",
+        headers: {
+          authorization: `Bearer ${token}`,
+          "content-type": "application/json",
+        },
+        body: JSON.stringify({
+          fromBotId: bot.id,
+          fromThreadId: bot.threadId,
+          credentialId: "openaiImageApiKey",
+          reason: "needed for the task",
+        }),
+      });
+      expect(requested.status).toBe(201);
+      const { messageId } = (await requested.json()) as { messageId: string };
+
+      expect((await api("POST", `/api/bots/${bot.id}/interrupt`)).status).toBe(200);
+      expect((await api("PATCH", `/api/bots/${bot.id}`, { computer: "cloud" })).status).toBe(200);
+      expect((await api("POST", `/api/bots/${bot.id}/secret-cards/${messageId}/dismiss`, {
+        threadId: bot.threadId,
+      })).status).toBe(200);
+
+      await expect.poll(async () => {
+        const current = (await api("GET", "/api/bots?messages=20")).body.bots
+          .find((candidate: { id: string }) => candidate.id === bot.id);
+        return current?.messages.find((message: { id: string }) => message.id === messageId)?.secret?.error;
+      }).toMatch(/box|cloud/i);
+      expect(stream.frames.some(
+        (frame) => frame.kind === "notify" && frame.notification?.kind === "turn-failed",
+      )).toBe(false);
+    } finally {
+      if (botId) await api("POST", `/api/bots/${botId}/interrupt`, {}).catch(() => undefined);
+      stream?.close();
+      if (botId) await api("DELETE", `/api/bots/${botId}`);
+      await api("PUT", "/api/config", { box: { token: "" } });
+      rmSync(fakeClaudeDump, { force: true });
+    }
+  });
+
+  it("reports a failed routine once, not twice", async () => {
+    // A routine reaches the same dispatch catch as an interactive turn and
+    // then reports through onDispatchError, which raises routine-failed.
+    // Without the interactive guard the person would be buzzed twice for one
+    // failure, so this pins the count rather than merely the presence.
+    let botId: string | undefined;
+    let routineId: string | undefined;
+    let stream: Awaited<ReturnType<typeof openSse>> | undefined;
+    try {
+      expect((await api("PUT", "/api/config", { box: { token: "" } })).status).toBe(200);
+      const bot = (await api("POST", "/api/bots")).body.bot;
+      botId = bot.id;
+      expect((await api("PATCH", `/api/bots/${bot.id}`, { computer: "cloud" })).status).toBe(200);
+      const created = await api("POST", "/api/routines", {
+        name: "Cloud check",
+        prompt: "look at the cloud desktop",
+        target: "bot",
+        botId: bot.id,
+        runOn: "maus",
+        enabled: true,
+        schedule: { type: "daily", time: "10:00", weekdays: [1, 2, 3, 4, 5] },
+      });
+      expect(created.status).toBe(201);
+      routineId = created.body.routine.id;
+      stream = await openSse(`${BASE}/api/events`);
+      await stream.until((frame) => frame.kind === "hello");
+      expect((await api("POST", `/api/routines/${created.body.routine.id}/run`)).status).toBe(201);
+      await stream.until(
+        (frame) =>
+          frame.kind === "notify" &&
+          frame.notification?.kind === "routine-failed" &&
+          frame.notification?.botId === bot.id,
+        5_000,
+      );
+      const buzzes = stream.frames.filter(
+        (frame: { kind?: string; notification?: { kind?: string; botId?: string } }) =>
+          frame.kind === "notify" && frame.notification?.botId === bot.id,
+      );
+      expect(buzzes.map((frame: { notification: { kind: string } }) => frame.notification.kind)).toEqual([
+        "routine-failed",
+      ]);
+    } finally {
+      stream?.close();
+      if (routineId) await api("DELETE", `/api/routines/${routineId}`);
+      if (botId) await api("DELETE", `/api/bots/${botId}`);
+      await api("PUT", "/api/config", { box: { token: "" } });
+    }
+  });
+
   it("creates a fully configured bot in one request and greets with its final name", async () => {
     const created = await api("POST", "/api/bots", {
       name: "  Pathfinder  ",
