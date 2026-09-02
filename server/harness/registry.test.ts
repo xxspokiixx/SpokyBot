@@ -148,6 +148,32 @@ describe("ProviderRegistry", () => {
     expect((await registry.describe())[0].capabilities.approvalReview).toBe(true);
   });
 
+  it("refreshes a live model catalog before returning each description", async () => {
+    const fake = makeFakeDriver();
+    const registry = new ProviderRegistry([fake.driver]);
+    await registry.load({ a: { driver: "fake" } });
+    const instance = registry.get("a")!;
+    let refreshes = 0;
+    Object.assign(instance, {
+      refreshModels: async () => {
+        refreshes += 1;
+        instance.models.default = `dynamic-${refreshes}`;
+        instance.models.options = [
+          { id: `dynamic-${refreshes}`, label: `Dynamic ${refreshes}` },
+        ];
+      },
+    });
+
+    expect((await registry.describe())[0].models).toEqual({
+      default: "dynamic-1",
+      options: [{ id: "dynamic-1", label: "Dynamic 1" }],
+    });
+    expect((await registry.describe())[0].models).toEqual({
+      default: "dynamic-2",
+      options: [{ id: "dynamic-2", label: "Dynamic 2" }],
+    });
+  });
+
   it("disposeAll disposes every live instance and empties the registry", async () => {
     const fake = makeFakeDriver();
     const registry = new ProviderRegistry([fake.driver]);
