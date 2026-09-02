@@ -914,12 +914,8 @@ export class Store {
       ownedThreadIds.add(group.threadId);
       for (const task of group.tasks ?? []) ownedThreadIds.add(task.threadId);
     }
-    // Goal cards normally already live in SQLite. Import only genuinely
-    // legacy transcript files first; modern histories stay lazy and this
-    // recovery query remains proportional to unfinished goals.
-    for (const threadId of ownedThreadIds) {
-      if (existsSync(messagesFile(threadId))) this.messagesFor(threadId);
-    }
+    // load() already migrated every legacy transcript file into SQLite, so
+    // this recovery query is proportional to unfinished goals, not history.
     let recovered = 0;
     for (const hit of mdb.workingGoalRunMessages()) {
       if (!ownedThreadIds.has(hit.threadId) || !hit.message.goalRun) continue;
