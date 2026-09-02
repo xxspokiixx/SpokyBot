@@ -1156,35 +1156,39 @@ function updateGroupGoalRunProgress(operation: GroupTurnOperation, detail: strin
   });
 }
 
-type GroupGoalBotAvailability = "ready" | "busy" | "unavailable" | "cancelled" | "timed_out";
+type GroupMemberBotAvailability = "ready" | "busy" | "unavailable" | "cancelled" | "timed_out";
+type GroupMemberBotWaitResult = Exclude<GroupMemberBotAvailability, "busy">;
 
-function groupGoalBotAvailability(botId: string, operation: GroupTurnOperation): GroupGoalBotAvailability {
+function groupMemberBotAvailability(botId: string, operation: GroupTurnOperation): GroupMemberBotAvailability {
   if (operation.cancelled || operation.cancellation.signal.aborted) return "cancelled";
   const bot = store.bot(botId);
   if (!bot || bot.hidden) return "unavailable";
   return bot.busy ? "busy" : "ready";
 }
 
-/** Goal runs are patient with work already in progress. Store changes are
- * the wake-up signal, so waiting consumes neither a model turn nor a polling
- * loop. The operation's abort signal lets the room Stop button release the
- * listener immediately without touching the unrelated turn that owns bot.busy. */
-async function waitForGroupGoalBot(
+/** A room is patient with a member's work already in progress: a busy bot
+ * is woken later, never dropped. Goal runs and ordinary chat rounds share
+ * this wait; only the note they leave differs (`onWaiting` fires once, when
+ * the wait actually begins). Store changes are the wake-up signal, so waiting
+ * consumes neither a model turn nor a polling loop. The operation's abort
+ * signal lets the room Stop button release the listener immediately without
+ * touching the unrelated turn that owns bot.busy. While it waits, the bot is
+ * not part of this operation: its own Stop button must keep reaching the
+ * conversation it is actually in. */
+async function waitForGroupMemberBot(
   bot: BotRecord,
   operation: GroupTurnOperation,
-): Promise<Exclude<GroupGoalBotAvailability, "busy">> {
+  onWaiting: (detail: string) => void,
+): Promise<GroupMemberBotWaitResult> {
   operation.botIds.delete(bot.id);
-  const initial = groupGoalBotAvailability(bot.id, operation);
+  const initial = groupMemberBotAvailability(bot.id, operation);
   if (initial !== "busy") return initial;
-  updateGroupGoalRunProgress(
-    operation,
-    `${bot.name} is finishing another conversation. This goal will continue when they are available.`,
-  );
+  onWaiting(`${bot.name} is finishing another conversation.`);
 
   return await new Promise((resolve) => {
     let settled = false;
     let unsubscribe = () => {};
-    const finish = (availability: Exclude<GroupGoalBotAvailability, "busy">) => {
+    const finish = (availability: GroupMemberBotWaitResult) => {
       if (settled) return;
       settled = true;
       clearTimeout(waitCap);
@@ -1192,11 +1196,11 @@ async function waitForGroupGoalBot(
       operation.cancellation.signal.removeEventListener("abort", onAbort);
       resolve(availability);
     };
-    // unref'd: a parked goal must never keep the process alive on its own
+    // unref'd: a parked room must never keep the process alive on its own
     const waitCap = setTimeout(() => finish("timed_out"), GROUP_GOAL_WAIT_MAX_MS);
     waitCap.unref?.();
     const check = () => {
-      const availability = groupGoalBotAvailability(bot.id, operation);
+      const availability = groupMemberBotAvailability(bot.id, operation);
       if (availability !== "busy") finish(availability);
     };
     const onAbort = () => finish("cancelled");
@@ -1557,10 +1561,11 @@ const TURN_STALL_MS = Math.max(60_000, Number(process.env.OMB_TURN_STALL_MS) || 
 /** How long ask_bot waits synchronously before the ask is converted into a
  * delegation claim ticket (the peer's turn keeps running either way). */
 const ASK_BOT_TIMEOUT_MS = Math.max(5_000, Number(process.env.OMB_ASK_BOT_TIMEOUT_MS) || 4 * 60_000);
-// A goal waits for a busy teammate instead of failing, but never forever: a
-// bot parked on a permission card in another chat is "busy" until a human
-// returns. Past this cap the lead is told the teammate could not free up and
-// reassigns — the wait ends as data, not as a dead goal. Tests shrink it.
+// A room waits for a busy teammate instead of dropping them, but never
+// forever: a bot parked on a permission card in another chat is "busy" until
+// a human returns. Past this cap a goal's lead is told the teammate could not
+// free up and reassigns, and a chat round moves on with a chip that says so —
+// the wait ends as data, not as a dead room. Tests shrink it.
 const GROUP_GOAL_WAIT_MAX_MS = Math.max(1_000, Number(process.env.OMB_GOAL_WAIT_MAX_MS) || 30 * 60_000);
 // Reassigning around a busy teammate is bounded too: after this many
 // exhausted waits in one run the team is blocked on availability, not stuck.
@@ -4308,7 +4313,9 @@ async function runGroupGoalStep(args: {
   }
   let retriedTransient = false;
   for (;;) {
-    const availability = await waitForGroupGoalBot(args.bot, args.operation);
+    const availability = await waitForGroupMemberBot(args.bot, args.operation, (detail) => {
+      updateGroupGoalRunProgress(args.operation, `${detail} This goal will continue when they are available.`);
+    });
     if (availability === "cancelled") return { ran: false, replyText: "", outcome: "cancelled" };
     if (availability === "unavailable") {
       return { ran: false, replyText: "", outcome: "unavailable", stopReason: `${args.bot.name} is no longer available` };
