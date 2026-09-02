@@ -753,22 +753,33 @@ export function Composer({
               {group && !group.dm && (
                 <button
                   type="button"
-                  aria-pressed={channelMode === "goal"}
+                  aria-pressed={effectiveChannelMode === "goal"}
                   aria-label="Finish together"
                   title="Finish together — the team keeps working until the goal is complete"
                   onClick={() => {
                     markDraftEdited(draftId);
+                    if (typedGoalText !== null) {
+                      const nextCaret = Math.max(0, caret - (text.length - typedGoalText.length));
+                      editText(typedGoalText);
+                      setCaret(nextCaret);
+                      setChannelMode("chat");
+                      requestAnimationFrame(() => {
+                        inputRef.current?.focus();
+                        inputRef.current?.setSelectionRange(nextCaret, nextCaret);
+                      });
+                      return;
+                    }
                     setChannelMode((current) => current === "goal" ? "chat" : "goal");
                   }}
                   className={cn(
                     "flex h-8 items-center gap-1.5 whitespace-nowrap rounded-full border px-3 text-[13px] transition-colors",
-                    channelMode === "goal"
+                    effectiveChannelMode === "goal"
                       ? "border-accent/35 bg-accent/10 text-accent"
                       : "border-hairline/20 bg-transparent text-ink-secondary hover:bg-raised hover:text-ink",
                   )}
                 >
                   <Target size={14} aria-hidden="true" />
-                  {channelMode === "goal" ? "/goal" : "Goal"}
+                  {effectiveChannelMode === "goal" ? "/goal" : "Goal"}
                 </button>
               )}
               {autoBot && <PermissionModeSelector bot={autoBot} onSetAuto={setAuto} />}

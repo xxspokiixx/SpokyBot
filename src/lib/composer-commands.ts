@@ -30,6 +30,8 @@ export function goalTextFromComposer(text: string): string | null {
   return match ? (match[1] ?? "").trimStart() : null;
 }
 
+/** Replace the active slash token and return the caret position immediately
+ * after the inserted text. */
 export function replaceComposerSlashTrigger(
   text: string,
   trigger: ComposerSlashTrigger,
