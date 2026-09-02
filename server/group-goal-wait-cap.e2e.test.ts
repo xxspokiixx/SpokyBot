@@ -9,12 +9,13 @@ import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { removeTempDir, waitForExit } from "./testing/cleanup.ts";
 import { freePortBlock } from "./testing/ports.ts";
 
-// A goal waits for a busy teammate, but not forever, and it survives one
+// A room waits for a busy teammate, but not forever, and a goal survives one
 // transient provider failure. This server runs with a short wait cap so the
 // cap fires in seconds: a worker that never frees up comes back to the lead
 // as a reassign note, a lead that never frees up ends the run as blocked —
-// never as a provider failure — and a lead whose provider dies is retried
-// once before the run gives up.
+// never as a provider failure — a lead whose provider dies is retried once
+// before the run gives up, and an ordinary chat round gives up on a member
+// that stays busy with a chip that says so, then moves on to the next one.
 
 const SERVER_DIR = dirname(fileURLToPath(import.meta.url));
 const ROOT = join(SERVER_DIR, "..");
@@ -224,6 +225,51 @@ describe("goal wait cap and transient retry", () => {
     const activity = current?.messages.filter((message: { kind: string }) => message.kind === "activity") ?? [];
     const failures = activity.filter((message: { tool?: { name?: string } }) => /error:/i.test(message.tool?.name ?? ""));
     expect(failures.length).toBeGreaterThanOrEqual(2);
+  });
+
+  it("chat: a responder that stays busy past the cap is skipped with the bounded truth, and the next responder still runs", async () => {
+    const stuck = await createBot("Stuck", "hang");
+    const helper = await createBot("Chat helper", "helper");
+    const room = (await api("POST", "/api/groups", {
+      name: "Wait cap chat",
+      memberIds: [stuck.id, helper.id],
+      setup: { bulletin: "", defaultResponder: { kind: "everyone" } },
+    })).body.group;
+
+    await holdBusy(stuck.id, "Never finish this chat");
+    expect((await api("POST", `/api/groups/${room.id}/messages`, { text: "Quick check-in" })).status).toBe(202);
+
+    await expect.poll(async () => {
+      const { room: current } = await roomState(room.id);
+      const messages: Array<{ kind: string; role?: string; from?: { botId?: string }; tool?: { name?: string; ok?: boolean } }> =
+        current?.messages ?? [];
+      const chip = messages.find((message) =>
+        message.kind === "activity" && message.from?.botId === stuck.id && /skipped this round/i.test(message.tool?.name ?? "")
+      );
+      return {
+        working: current?.working,
+        chip: chip?.tool?.name,
+        chipOk: chip?.tool?.ok,
+        // the neutral promise is rewritten, not joined by a second chip
+        waitChips: messages.filter((message) =>
+          message.kind === "activity" && message.from?.botId === stuck.id && /another conversation/i.test(message.tool?.name ?? "")
+        ).length,
+        stuckSpoke: messages.some((message) => message.kind === "text" && message.role === "bot" && message.from?.botId === stuck.id),
+        helperSpoke: messages.some((message) => message.kind === "text" && message.role === "bot" && message.from?.botId === helper.id),
+      };
+    }, { timeout: 20_000 }).toEqual({
+      working: false,
+      chip: "Stuck stayed busy in another conversation for 1 minute — skipped this round",
+      chipOk: false,
+      waitChips: 1,
+      stuckSpoke: false,
+      helperSpoke: true,
+    });
+
+    // the stuck direct turn was never touched by the room's wait
+    const state = (await api("GET", "/api/bots?messages=0")).body;
+    expect(state.bots.find((bot: { id: string }) => bot.id === stuck.id)?.busy).toBe(true);
+    expect((await api("POST", `/api/bots/${stuck.id}/interrupt`)).status).toBe(200);
   });
 
   it.todo("parks on a busy worker and leaves the room usable for chat while it waits (park-and-release)");
