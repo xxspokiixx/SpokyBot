@@ -1,6 +1,6 @@
 // The sidebar's utility rows, folded behind one chevron.
 //
-// Team map, Teach a skill, Tasks & routines and Connected apps are places you
+// Team map, Teach a skill, Automations and Connected apps are places you
 // visit occasionally; they were costing four permanent rows at the bottom of a
 // list whose whole job is showing bots. They now live behind a slim bar that
 // sits directly above the profile row and opens on hover — the pull-up handle

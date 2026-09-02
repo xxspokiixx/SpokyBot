@@ -1,4 +1,4 @@
-import { BookOpen, ChevronDown, ChevronLeft, Crown, FolderOpen, Trash2, X } from "lucide-react";
+import { BookOpen, CalendarClock, ChevronDown, ChevronLeft, Crown, FolderOpen, Plus, Trash2, X } from "lucide-react";
 import { useEffect, useState } from "react";
 import { api, useStore, type Bot } from "@/state/store";
 import { stateForBot } from "@/lib/mascot";
@@ -16,6 +16,7 @@ import { LocalComputerAutoWarning } from "./LocalComputerAutoWarning";
 import { VoiceSettings } from "./VoiceSettings";
 import { BOT_PROFILE_LIMITS } from "../../shared/bot-profile";
 import { Switch } from "./SettingsPrimitives";
+import { RoutineEditor } from "./RoutinesPage";
 
 function Field({
   label,
@@ -540,6 +541,8 @@ export function SettingsPanel({ bot }: { bot: Bot }) {
   const providerSupportsLocal = instanceSupportsLocalComputer(state.instances, bot);
   const localSelectable = localComputerSelectable({ capabilities, providerSupportsLocal });
   const [localAutoWarning, setLocalAutoWarning] = useState<"auto" | "local" | null>(null);
+  const [creatingRoutine, setCreatingRoutine] = useState(false);
+  useEffect(() => setCreatingRoutine(false), [bot.id]);
   const localDisabledReason = localComputerDisabledReason({ capabilities, providerSupportsLocal });
   const patch = (
     p: Partial<
@@ -590,6 +593,8 @@ export function SettingsPanel({ bot }: { bot: Bot }) {
       candidate.chiefOfStaff &&
       (candidate.section?.trim() || "") === (bot.section?.trim() || ""),
   );
+  const botRoutines = state.routines.filter((routine) => routine.botId === bot.id);
+  const activeBotRoutines = botRoutines.filter((routine) => routine.enabled).length;
 
   return (
     <>
@@ -650,6 +655,33 @@ export function SettingsPanel({ bot }: { bot: Bot }) {
               onChange={(e) => patch({ description: e.target.value })}
             />
           </Field>
+
+          <div className="rounded-xl bg-card p-4">
+            <div className="flex items-center gap-2">
+              <CalendarClock size={16} className="text-accent" />
+              <div className="min-w-0 flex-1 text-[15px] font-medium text-ink">Scheduled tasks</div>
+              <span className="shrink-0 text-[11.5px] tabular-nums text-ink-secondary">
+                {activeBotRoutines} active · {botRoutines.length} total
+              </span>
+            </div>
+            <div className="mt-3 flex gap-2">
+              <button
+                type="button"
+                onClick={() => setCreatingRoutine(true)}
+                className="flex flex-1 items-center justify-center gap-1.5 rounded-lg bg-accent px-3 py-2 text-[13px] font-medium text-white hover:brightness-110"
+              >
+                <Plus size={14} />
+                New schedule
+              </button>
+              <button
+                type="button"
+                onClick={() => dispatch({ type: "showRoutines" })}
+                className="rounded-lg bg-control px-3 py-2 text-[13px] text-ink hover:bg-raised-hover"
+              >
+                Manage
+              </button>
+            </div>
+          </div>
 
           <div className={cn(
             "rounded-xl border p-4",
@@ -964,6 +996,14 @@ export function SettingsPanel({ bot }: { bot: Bot }) {
         </div>
       </div>
     </aside>
+    {creatingRoutine && (
+      <RoutineEditor
+        key={bot.id}
+        bots={[bot]}
+        lockedBotId={bot.id}
+        onClose={() => setCreatingRoutine(false)}
+      />
+    )}
     <LocalComputerAutoWarning
       open={localAutoWarning !== null}
       onCancel={() => setLocalAutoWarning(null)}
