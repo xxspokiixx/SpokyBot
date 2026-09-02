@@ -42,7 +42,7 @@ import { useFocusMessage } from "@/lib/focus-message";
 import { shortPath } from "@/lib/short-path";
 import { BOTTOM_FOLLOW_THRESHOLD, shouldResumeBottomFollow } from "@/lib/bottom-follow";
 import { useComposerDockPad } from "@/lib/composer-dock";
-import { showWorkingDots } from "@/lib/turn-tail";
+import { awaitedMemberId, showWorkingDots } from "@/lib/turn-tail";
 import { liveActivityLabel } from "@/lib/live-activity";
 import { splitTranscriptAttachments } from "@/lib/composer-attachments";
 import {
@@ -883,9 +883,13 @@ export function GroupView({ group }: { group: Group }) {
   const lastGroupMessage = group.messages.at(-1);
   const toolInFlight = lastGroupMessage?.kind === "activity" && lastGroupMessage.tool?.ok === undefined;
   const activityLabel = liveActivityLabel(lastGroupMessage);
-  const waiting = Boolean(
-    speaker && showWorkingDots(true, group.messages.at(-1), speaker.id),
+  // A member busy elsewhere takes its turn when free; until then the room
+  // works with no speaker, and the presence row names who it is waiting on.
+  const awaited = members.find(
+    (b) => b.id === awaitedMemberId(group.working, group.busyBotId, lastGroupMessage),
   );
+  const waiting =
+    Boolean(speaker && showWorkingDots(true, group.messages.at(-1), speaker.id)) || awaited !== undefined;
   const wasWaiting = useRef(false);
   const [popping, setPopping] = useState<{ id: string; text: string; botId?: string } | null>(null);
   useEffect(() => {
@@ -914,7 +918,8 @@ export function GroupView({ group }: { group: Group }) {
   ]);
   const presenceVisible = waiting || popping !== null;
   const poppingMessage = popping ? group.messages.find((message) => message.id === popping.id) : undefined;
-  const presenceSpeaker = speaker ?? members.find((member) => member.id === popping?.botId) ?? members[0];
+  const presenceSpeaker =
+    speaker ?? awaited ?? members.find((member) => member.id === popping?.botId) ?? members[0];
 
   // Windowed transcript, mirroring ChatView: only a tail of the room mounts;
   // the anchored boundary re-tails on a render-phase reset when the room (or
@@ -1263,7 +1268,7 @@ export function GroupView({ group }: { group: Group }) {
               avatar={
                 <MausAvatar
                   color={presenceSpeaker?.color ?? "green"}
-                  state={toolInFlight ? "working" : "thinking"}
+                  state={toolInFlight && !awaited ? "working" : "thinking"}
                   size={36}
                   forward={false}
                   lookAround={1}
