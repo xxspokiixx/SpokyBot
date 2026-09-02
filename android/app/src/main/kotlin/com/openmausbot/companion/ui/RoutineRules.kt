@@ -344,6 +344,7 @@ object RoutineRules {
             schedule = schedule,
             durationMinutes = durationMinutes,
             timeoutMinutes = timeoutMinutes,
+            clearTimeout = timeoutMinutes == null,
         )
     }
 }

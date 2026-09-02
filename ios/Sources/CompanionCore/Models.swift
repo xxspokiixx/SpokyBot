@@ -742,12 +742,15 @@ public struct RoutineInput: Encodable, Sendable {
     public var enabled: Bool?
     public var schedule: RoutineSchedule
     public var durationMinutes: Int
+    /// A value replaces the stored limit; nil leaves it unchanged on PATCH.
     public var timeoutMinutes: Int?
+    /// Explicitly writes JSON null when `timeoutMinutes` is nil.
+    public var clearTimeout: Bool
 
     public init(
         name: String, prompt: String, botId: String, runOn: String = "maus",
         enabled: Bool? = nil, schedule: RoutineSchedule, durationMinutes: Int = 30,
-        timeoutMinutes: Int? = nil
+        timeoutMinutes: Int? = nil, clearTimeout: Bool = false
     ) {
         self.name = name
         self.prompt = prompt
@@ -757,6 +760,24 @@ public struct RoutineInput: Encodable, Sendable {
         self.schedule = schedule
         self.durationMinutes = durationMinutes
         self.timeoutMinutes = timeoutMinutes
+        self.clearTimeout = clearTimeout
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case name, prompt, botId, runOn, enabled, schedule, durationMinutes, timeoutMinutes
+    }
+
+    public func encode(to encoder: Encoder) throws {
+        var values = encoder.container(keyedBy: CodingKeys.self)
+        try values.encode(name, forKey: .name)
+        try values.encode(prompt, forKey: .prompt)
+        try values.encode(botId, forKey: .botId)
+        try values.encode(runOn, forKey: .runOn)
+        try values.encodeIfPresent(enabled, forKey: .enabled)
+        try values.encode(schedule, forKey: .schedule)
+        try values.encode(durationMinutes, forKey: .durationMinutes)
+        if let timeoutMinutes { try values.encode(timeoutMinutes, forKey: .timeoutMinutes) }
+        else if clearTimeout { try values.encodeNil(forKey: .timeoutMinutes) }
     }
 }
 

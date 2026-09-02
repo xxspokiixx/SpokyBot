@@ -879,8 +879,10 @@ data class RoutineInput(
     val schedule: RoutineSchedule,
     /** Still required by older paired desktops; it is not the execution timeout. */
     val durationMinutes: Int = 30,
-    /** `null` deliberately removes an existing execution timeout. */
+    /** A value replaces the stored limit; null leaves it unchanged on PATCH. */
     val timeoutMinutes: Int? = null,
+    /** Interpreted by CompanionClient as an explicit JSON null. */
+    @kotlinx.serialization.Transient val clearTimeout: Boolean = false,
 )
 
 @Serializable

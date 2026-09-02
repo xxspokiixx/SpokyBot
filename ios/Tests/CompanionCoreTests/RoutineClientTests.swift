@@ -108,13 +108,28 @@ final class RoutineClientTests: XCTestCase {
         XCTAssertEqual(created.schedule.type, .interval)
     }
 
-    func testSendsNullToRemoveAnOptionalRunLimit() async throws {
-        _ = try await client.createRoutine(RoutineInput(
+    func testOmitsAnUnchangedRunLimitFromPatch() async throws {
+        let unchangedTimeout: Int? = nil
+        _ = try await client.updateRoutine(id: "routine-1", input: RoutineInput(
             name: "Pulse",
             prompt: "Check status",
             botId: "bot-1",
             schedule: .interval(everyMinutes: 15, anchorAt: Date()),
-            timeoutMinutes: nil
+            timeoutMinutes: unchangedTimeout
+        ))
+
+        let data = try XCTUnwrap(RoutineRequestStub.capturedBody)
+        let body = try XCTUnwrap(JSONSerialization.jsonObject(with: data) as? [String: Any])
+        XCTAssertNil(body["timeoutMinutes"])
+    }
+
+    func testSendsNullToRemoveAnOptionalRunLimit() async throws {
+        _ = try await client.updateRoutine(id: "routine-1", input: RoutineInput(
+            name: "Pulse",
+            prompt: "Check status",
+            botId: "bot-1",
+            schedule: .interval(everyMinutes: 15, anchorAt: Date()),
+            clearTimeout: true
         ))
 
         let data = try XCTUnwrap(RoutineRequestStub.capturedBody)

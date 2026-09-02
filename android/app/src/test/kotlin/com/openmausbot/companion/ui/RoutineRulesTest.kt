@@ -372,6 +372,7 @@ class RoutineRulesTest {
         assertEquals(false, input.enabled)
         assertEquals(5, input.durationMinutes)
         assertEquals(45, input.timeoutMinutes)
+        assertFalse(input.clearTimeout)
     }
 
     @Test
@@ -389,6 +390,7 @@ class RoutineRulesTest {
         assertNull(input.enabled)
         assertEquals(30, input.durationMinutes)
         assertNull(input.timeoutMinutes)
+        assertTrue(input.clearTimeout)
     }
 
     @Test
