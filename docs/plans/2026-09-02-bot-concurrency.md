@@ -36,6 +36,21 @@ Status: decision record (Sep 2, 2026). Scopes the "parallel runtime" part of
    driver conformance and off by default. The UI must never promise parallel work for a serialized
    driver or resource.
 
+## Prerequisites before any opt-in parallelism (from the codebase audit)
+
+- `unattendedBots` is keyed per bot on the stated assumption of one turn at a time. Under two live
+  turns an attended chat turn would clear a concurrently running webhook turn's unattended mark and
+  hand it auto-approve. Rekey it per thread first — a privilege fix, not a UX one.
+- `MEMORY.md` writes go through the atomic temp→rename helper (#703); a per-bot single-writer path
+  is required before two turns of one bot may both "remember".
+- The 409 text "already working" is string-matched as control flow in three retry paths (delegation
+  wake, connector resume, secret resume). Introduce a typed error code before changing any gate.
+- Stop routing (`activeGroupTurnForBot`) is a first-match scan; it must resolve by (bot, thread).
+- Drivers need no work: Claude, Codex and every ACP driver already isolate turns by thread.
+
+Open product question: a turn parked on a human's approval card (`waiting-on-you`) counts as busy.
+Under a per-bot lane count it would consume a slot; the UI must say so or "1 of 2 busy" reads as a bug.
+
 Sources: docs.x.ai/grok-bot (bots, chat-and-collaboration, computer-and-apps, faq, overview,
 skills-routines-and-automations, teams-and-enterprises), x.ai/bot/guides/how-i-run-multiple-teams-of-grok-bots,
 brianlovin.com (first impressions), flaviocopes.com/grok-bot (Matt Palmer), cursor.com/docs/grok-bot.
