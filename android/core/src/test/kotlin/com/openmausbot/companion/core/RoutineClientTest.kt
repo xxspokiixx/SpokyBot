@@ -55,7 +55,7 @@ class RoutineClientTest {
                 prompt = exactPrompt,
                 botId = "bot-1",
                 schedule = RoutineSchedule.once(2_000_000.0),
-                durationMinutes = 15,
+                durationMinutes = 5,
             ),
         )
         client.updateRoutine(
@@ -96,7 +96,7 @@ class RoutineClientTest {
         assertEquals(exactName, create.getValue("name").jsonPrimitive.content)
         assertEquals(exactPrompt, create.getValue("prompt").jsonPrimitive.content)
         assertEquals("maus", create.getValue("runOn").jsonPrimitive.content)
-        assertEquals(15, create.getValue("durationMinutes").jsonPrimitive.content.toInt())
+        assertEquals(5, create.getValue("durationMinutes").jsonPrimitive.content.toInt())
         assertEquals(
             mapOf("type" to "once", "at" to "2000000.0"),
             create.getValue("schedule").jsonObject.mapValues { it.value.jsonPrimitive.content },

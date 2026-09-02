@@ -320,14 +320,14 @@ class RoutineRulesTest {
             runOn = RoutineRunLocation.CLOUD,
             enabled = false,
             schedule = RoutineSchedule.daily("09:00", listOf(1)),
-            durationMinutes = 45,
+            durationMinutes = 5,
         )
 
         assertEquals(80, input.name.length)
         assertEquals(20_000, input.prompt.length)
         assertEquals("cloud", input.runOn)
         assertEquals(false, input.enabled)
-        assertEquals(45, input.durationMinutes)
+        assertEquals(5, input.durationMinutes)
     }
 
     @Test
@@ -719,11 +719,15 @@ class RoutineRulesTest {
     }
 
     @Test
-    fun `the duration stepper walks 15 to 240 in quarter hours`() {
-        assertEquals(15, RoutineRules.steppedDuration(15, -15))
-        assertEquals(30, RoutineRules.steppedDuration(15, 15))
-        assertEquals(240, RoutineRules.steppedDuration(240, 15))
-        assertEquals(225, RoutineRules.steppedDuration(240, -15))
+    fun `the duration stepper walks 5 to 240 in five minute steps`() {
+        assertEquals(5, RoutineRules.DURATION_RANGE.first)
+        assertEquals(240, RoutineRules.DURATION_RANGE.last)
+        assertEquals(5, RoutineRules.DURATION_STEP)
+        assertEquals(30, RoutineRules.DEFAULT_DURATION)
+        assertEquals(5, RoutineRules.steppedDuration(5, -5))
+        assertEquals(10, RoutineRules.steppedDuration(5, 5))
+        assertEquals(240, RoutineRules.steppedDuration(240, 5))
+        assertEquals(235, RoutineRules.steppedDuration(240, -5))
     }
 
     @Test

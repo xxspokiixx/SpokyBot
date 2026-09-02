@@ -1696,8 +1696,8 @@ export function Sidebar({ open, onClose }: { open: boolean; onClose: () => void 
           )}
           <button
             onClick={() => dispatch({ type: "showRoutines" })}
-            aria-label={density === "icons" ? "Calendar" : undefined}
-            title={density === "icons" ? "Calendar" : undefined}
+            aria-label={density === "icons" ? "Automations" : undefined}
+            title={density === "icons" ? "Automations" : undefined}
             className={cn(
               "flex min-h-10 w-full items-center rounded-xl py-2 text-left transition-colors",
               density === "icons" ? "justify-center px-2" : "gap-3 px-3",
@@ -1705,7 +1705,7 @@ export function Sidebar({ open, onClose }: { open: boolean; onClose: () => void 
             )}
           >
             <CalendarDays size={20} className={state.activeView === "routines" ? "text-accent" : "text-ink-secondary"} />
-            <span className={cn("flex-1 text-[14px]", density === "icons" && "hidden")}>Calendar</span>
+            <span className={cn("flex-1 text-[14px]", density === "icons" && "hidden")}>Automations</span>
             {state.routineRuns.some((run) => ["failed", "missed"].includes(run.status) && !run.seenAt) && (
               <span className="size-2 rounded-full bg-danger" />
             )}
@@ -1750,7 +1750,7 @@ export function Sidebar({ open, onClose }: { open: boolean; onClose: () => void 
                 : []),
               {
                 key: "routines",
-                label: "Tasks & routines",
+                label: "Automations",
                 icon: <CalendarDays size={18} />,
                 active: state.activeView === "routines",
                 // folded away, this dot would otherwise vanish with the row

@@ -28,9 +28,9 @@ object RoutineRules {
     /** `String(prompt.trimming….prefix(20_000))`. */
     const val PROMPT_LIMIT: Int = 20_000
 
-    /** `Stepper(value: $duration, in: 15...240, step: 15)`. */
-    val DURATION_RANGE: IntRange = 15..240
-    const val DURATION_STEP: Int = 15
+    /** `Stepper(value: $duration, in: 5...240, step: 5)`. */
+    val DURATION_RANGE: IntRange = 5..240
+    const val DURATION_STEP: Int = 5
     const val DEFAULT_DURATION: Int = 30
 
     /** `.prefix(50)` on the sorted receipts. */
