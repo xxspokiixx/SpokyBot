@@ -995,7 +995,9 @@ describe("goal-driven channel runs", () => {
       const state = (await api("GET", "/api/bots?messages=20")).body;
       const current = state.groups.find((candidate: { id: string }) => candidate.id === room.id);
       return current?.messages.find((message: { kind: string }) => message.kind === "goal.run")?.goalRun;
-    }, { timeout: 10_000 }).toMatchObject({ status: "failed", turnCount: 1 });
+    // the failed attempt is retried once, and a retry is a model call that
+    // costs a turn like any other — so the honest count is two, still failed
+    }, { timeout: 10_000 }).toMatchObject({ status: "failed", turnCount: 2 });
   });
 
   it("validates mode and binds it to the send id", async () => {

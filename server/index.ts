@@ -1078,6 +1078,20 @@ function finishGroupGoalRun(
   // Member-level turn completions are intentionally private/intermediate for
   // a team goal, so the normal direct-routine notification path never fires.
   // Notify once from the correlated terminal receipt instead.
+  // A scheduled team goal that stops to ask is the one outcome a person
+  // most needs to hear about — it must never be filed as a quiet completion.
+  if (routineRun?.status === "waiting") {
+    const coordinator = store.bot(routineRun.botId);
+    if (coordinator) {
+      notify(buildNotification(
+        "question",
+        coordinator,
+        routineSourceThread(routineRun) ?? routineRun.threadId ?? operation.threadId,
+        safeDetail || `${routineRun.routineName} needs your input`,
+        { avatarUrl: coordinator.avatarUrl },
+      ));
+    }
+  }
   if (routineRun?.status === "completed") {
     const coordinator = store.bot(routineRun.botId);
     if (coordinator) {
@@ -1130,7 +1144,7 @@ function updateGroupGoalRunProgress(operation: GroupTurnOperation, detail: strin
   });
 }
 
-type GroupGoalBotAvailability = "ready" | "busy" | "unavailable" | "cancelled";
+type GroupGoalBotAvailability = "ready" | "busy" | "unavailable" | "cancelled" | "timed_out";
 
 function groupGoalBotAvailability(botId: string, operation: GroupTurnOperation): GroupGoalBotAvailability {
   if (operation.cancelled || operation.cancellation.signal.aborted) return "cancelled";
@@ -1161,10 +1175,14 @@ async function waitForGroupGoalBot(
     const finish = (availability: Exclude<GroupGoalBotAvailability, "busy">) => {
       if (settled) return;
       settled = true;
+      clearTimeout(waitCap);
       unsubscribe();
       operation.cancellation.signal.removeEventListener("abort", onAbort);
       resolve(availability);
     };
+    // unref'd: a parked goal must never keep the process alive on its own
+    const waitCap = setTimeout(() => finish("timed_out"), GROUP_GOAL_WAIT_MAX_MS);
+    waitCap.unref?.();
     const check = () => {
       const availability = groupGoalBotAvailability(bot.id, operation);
       if (availability !== "busy") finish(availability);
@@ -1527,6 +1545,14 @@ const TURN_STALL_MS = Math.max(60_000, Number(process.env.OMB_TURN_STALL_MS) || 
 /** How long ask_bot waits synchronously before the ask is converted into a
  * delegation claim ticket (the peer's turn keeps running either way). */
 const ASK_BOT_TIMEOUT_MS = Math.max(5_000, Number(process.env.OMB_ASK_BOT_TIMEOUT_MS) || 4 * 60_000);
+// A goal waits for a busy teammate instead of failing, but never forever: a
+// bot parked on a permission card in another chat is "busy" until a human
+// returns. Past this cap the lead is told the teammate could not free up and
+// reassigns — the wait ends as data, not as a dead goal. Tests shrink it.
+const GROUP_GOAL_WAIT_MAX_MS = Math.max(1_000, Number(process.env.OMB_GOAL_WAIT_MAX_MS) || 30 * 60_000);
+// Reassigning around a busy teammate is bounded too: after this many
+// exhausted waits in one run the team is blocked on availability, not stuck.
+const GROUP_GOAL_MAX_WAIT_EXHAUSTIONS = 3;
 const roomStallCompletions = new RoomTurnStallRegistry();
 const watchdog = new TurnWatchdog({
   stallMs: TURN_STALL_MS,
@@ -3652,7 +3678,8 @@ type GroupMemberTurnOutcome =
   | "stalled"
   | "timed_out"
   | "cancelled"
-  | "busy";
+  | "busy"
+  | "unavailable";
 type GroupTurnOrchestration = {
   systemInstructions: string;
   followMentions: boolean;
@@ -4191,11 +4218,23 @@ async function runGroupGoalStep(args: {
   if (!run || args.operation.cancelled || run.turnCount >= run.maxTurns) {
     return { ran: false, replyText: "" };
   }
+  let retriedTransient = false;
   for (;;) {
     const availability = await waitForGroupGoalBot(args.bot, args.operation);
     if (availability === "cancelled") return { ran: false, replyText: "", outcome: "cancelled" };
     if (availability === "unavailable") {
-      return { ran: false, replyText: "", stopReason: `${args.bot.name} is no longer available` };
+      return { ran: false, replyText: "", outcome: "unavailable", stopReason: `${args.bot.name} is no longer available` };
+    }
+    if (availability === "timed_out") {
+      // still busy after the cap: surface it as a busy outcome the loop can
+      // route around, never as a provider failure
+      const minutes = Math.max(1, Math.round(GROUP_GOAL_WAIT_MAX_MS / 60_000));
+      return {
+        ran: false,
+        replyText: "",
+        outcome: "busy",
+        stopReason: `${args.bot.name} stayed busy in another conversation for ${minutes} minute${minutes === 1 ? "" : "s"}`,
+      };
     }
     if (run.turnCount >= run.maxTurns) return { ran: false, replyText: "" };
 
@@ -4238,6 +4277,24 @@ async function runGroupGoalStep(args: {
         },
       );
       if (result.outcome === "busy") continue;
+      // One retry for a transient provider failure: a 13-turn goal must not
+      // die on a single blip at turn 11. The retry claims the bot again and
+      // so costs a turn like any other model call — budget is spent, never
+      // stretched, and the cap still holds.
+      const outcome = result.outcome;
+      const transient =
+        outcome === "provider_failed" ||
+        outcome === "dispatch_failed" ||
+        outcome === "stalled" ||
+        outcome === "timed_out";
+      if (transient && !retriedTransient) {
+        retriedTransient = true;
+        updateGroupGoalRunProgress(
+          args.operation,
+          `${args.bot.name}'s turn did not settle (${outcome.replace("_", " ")}) — retrying once.`,
+        );
+        continue;
+      }
       return {
         ran,
         replyText: result.replyText ?? "",
@@ -4290,8 +4347,14 @@ async function runGroupGoalOperation(args: {
     chiefOfStaff: member.chiefOfStaff,
   }));
 
+  // A teammate that stayed busy past the wait cap comes back to the lead as
+  // a note on its next turn, so the lead reassigns instead of the run dying.
+  let coordinatorNote: string | undefined;
+  let waitExhaustions = 0;
   while (!args.operation.cancelled && run.turnCount < run.maxTurns) {
     const coordinatorTurn = run.turnCount + 1;
+    const note = coordinatorNote;
+    coordinatorNote = undefined;
     const coordinatorResult = await runGroupGoalStep({
       ...args,
       bot: args.coordinator,
@@ -4303,9 +4366,25 @@ async function runGroupGoalOperation(args: {
         turn: coordinatorTurn,
         maxTurns: run.maxTurns,
         remainingTurns: run.maxTurns - coordinatorTurn,
+        note,
       }),
     });
     if (args.operation.cancelled) return;
+    if (coordinatorResult.outcome === "unavailable") {
+      finishGroupGoalRun(args.groupId, args.operation, "blocked", `${args.coordinator.name} is not available.`);
+      return;
+    }
+    if (coordinatorResult.outcome === "busy") {
+      // The lead is the one member the run cannot route around. Blocked, not
+      // failed: the goal text is intact and nothing about the team broke.
+      finishGroupGoalRun(
+        args.groupId,
+        args.operation,
+        "blocked",
+        `${coordinatorResult.stopReason ?? `${args.coordinator.name} stayed busy`} — send the goal again when they are free.`,
+      );
+      return;
+    }
     if (!coordinatorResult.ran || coordinatorResult.outcome !== "settled") {
       const reason = coordinatorResult.stopReason?.trim().slice(0, 120);
       finishGroupGoalRun(
@@ -4376,6 +4455,39 @@ async function runGroupGoalOperation(args: {
       }),
     });
     if (args.operation.cancelled) return;
+    if (workerResult.outcome === "unavailable") {
+      finishGroupGoalRun(args.groupId, args.operation, "blocked", `${workerBot.name} is not available.`);
+      return;
+    }
+    if (workerResult.outcome === "busy") {
+      // bounded: a team that keeps landing on busy teammates is blocked, not
+      // looping — three exhausted waits per run, then stop and say so
+      waitExhaustions += 1;
+      if (waitExhaustions >= GROUP_GOAL_MAX_WAIT_EXHAUSTIONS) {
+        finishGroupGoalRun(
+          args.groupId,
+          args.operation,
+          "blocked",
+          `Teammates stayed busy past the wait limit ${waitExhaustions} times — try again when the team is free.`,
+        );
+        return;
+      }
+      // Soft failure, returned to the lead as data (the way a delegation
+      // error reaches a manager): the goal keeps going with the remaining
+      // team instead of ending on one teammate's calendar.
+      const reason = workerResult.stopReason?.trim().slice(0, 120) ?? `${workerBot.name} stayed busy`;
+      store.appendMessage(args.threadId, {
+        role: "bot",
+        kind: "activity",
+        from: { botId: args.coordinator.id, name: args.coordinator.name, color: args.coordinator.color },
+        tool: { name: `${reason} — asking ${args.coordinator.name} to reassign`, ok: false },
+      });
+      updateGroupGoalRunProgress(args.operation, `${reason}. ${args.coordinator.name} is reassigning.`);
+      coordinatorNote =
+        `${reason} and could not take the assignment "${decision.instruction.slice(0, 160)}". ` +
+        "Reassign it to another available member, do it yourself if you can, or report blocked.";
+      continue;
+    }
     if (!workerResult.ran || workerResult.outcome !== "settled" || !workerResult.replyText.trim()) {
       const reason = workerResult.stopReason?.trim().slice(0, 120);
       finishGroupGoalRun(
