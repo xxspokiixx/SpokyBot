@@ -778,15 +778,24 @@ data class RoutineSchedule(
     val at: Double? = null,
     val time: String? = null,
     val weekdays: List<Int>? = null,
+    val everyMinutes: Int? = null,
+    val anchorAt: Long? = null,
 ) {
     @Serializable(with = RoutineScheduleKindSerializer::class)
-    enum class Kind { ONCE, DAILY, UNKNOWN }
+    enum class Kind { ONCE, DAILY, INTERVAL, UNKNOWN }
 
     companion object {
         fun once(atMillis: Double): RoutineSchedule = RoutineSchedule(Kind.ONCE, at = atMillis)
 
         fun daily(time: String, weekdays: List<Int>): RoutineSchedule =
             RoutineSchedule(Kind.DAILY, time = time, weekdays = weekdays)
+
+        fun interval(everyMinutes: Int, anchorAtMillis: Long): RoutineSchedule =
+            RoutineSchedule(
+                Kind.INTERVAL,
+                everyMinutes = everyMinutes,
+                anchorAt = anchorAtMillis,
+            )
     }
 }
 
@@ -796,6 +805,7 @@ object RoutineScheduleKindSerializer : KSerializer<RoutineSchedule.Kind> {
     override fun deserialize(decoder: Decoder): RoutineSchedule.Kind = when (decoder.decodeString()) {
         "once" -> RoutineSchedule.Kind.ONCE
         "daily" -> RoutineSchedule.Kind.DAILY
+        "interval" -> RoutineSchedule.Kind.INTERVAL
         else -> RoutineSchedule.Kind.UNKNOWN
     }
 
@@ -813,7 +823,10 @@ data class Routine(
     val runOn: String,
     val enabled: Boolean,
     val schedule: RoutineSchedule,
+    /** Legacy calendar/display length retained for older desktop compatibility. */
     val durationMinutes: Int,
+    /** Optional execution guard. Missing means the routine has no time limit. */
+    val timeoutMinutes: Int? = null,
     val nextRunAt: Double? = null,
     val createdAt: Double,
     val updatedAt: Double,
@@ -824,6 +837,8 @@ data class Routine(
 
     fun canToggle(atMillis: Double = System.currentTimeMillis().toDouble()): Boolean = when (schedule.type) {
         RoutineSchedule.Kind.DAILY -> true
+        RoutineSchedule.Kind.INTERVAL ->
+            (schedule.everyMinutes ?: 0) in 5..1_440 && schedule.anchorAt != null
         RoutineSchedule.Kind.ONCE -> (schedule.at ?: Double.NEGATIVE_INFINITY) > atMillis
         RoutineSchedule.Kind.UNKNOWN -> false
     }
@@ -835,7 +850,10 @@ data class RoutineRun(
     val routineId: String,
     val routineName: String,
     val prompt: String? = null,
+    /** Legacy calendar/display length snapshot. */
     val durationMinutes: Int? = null,
+    /** Optional execution-guard snapshot. */
+    val timeoutMinutes: Int? = null,
     val botId: String,
     val runOn: String,
     val scheduledFor: Double,
@@ -859,7 +877,10 @@ data class RoutineInput(
     val runOn: String = "maus",
     val enabled: Boolean? = null,
     val schedule: RoutineSchedule,
+    /** Still required by older paired desktops; it is not the execution timeout. */
     val durationMinutes: Int = 30,
+    /** `null` deliberately removes an existing execution timeout. */
+    val timeoutMinutes: Int? = null,
 )
 
 @Serializable

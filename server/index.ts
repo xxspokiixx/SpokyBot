@@ -1129,7 +1129,7 @@ function finishGroupGoalRun(
     : status === "needs-input"
       ? "needs your input"
       : status === "limit-reached"
-        ? "reached its turn limit"
+        ? "reached its limit"
         : status;
   store.patchMessage(operation.threadId, run.cardMessageId, {
     text: `Goal ${fallbackState}: ${card.detail || card.goal}`,
@@ -1286,12 +1286,19 @@ async function waitForChatRoomMember(
   }
 }
 
-function cancelGroupTurnOperations(groupId: string, threadId: string) {
+function cancelGroupTurnOperations(
+  groupId: string,
+  threadId: string,
+  outcome: { status: "stopped" | "limit-reached"; detail: string } = {
+    status: "stopped",
+    detail: "Stopped by you.",
+  },
+) {
   for (const operation of groupTurnOperations.get(groupId) ?? []) {
     if (operation.threadId !== threadId) continue;
     operation.cancelled = true;
     operation.cancellation.abort();
-    finishGroupGoalRun(groupId, operation, "stopped", "Stopped by you.");
+    finishGroupGoalRun(groupId, operation, outcome.status, outcome.detail);
     if (operation.providerHandshakePending) {
       markCancelledProviderHandshake(operation.threadId, `group:${operation.id}`);
     }
@@ -3519,7 +3526,7 @@ function routineRunFallbackText(card: NonNullable<Message["routineRun"]>): strin
     : card.goalStatus === "blocked"
       ? "was blocked"
       : card.goalStatus === "limit-reached"
-        ? "reached its turn limit"
+        ? "reached its limit"
         : card.goalStatus === "stopped"
           ? "was stopped"
           : card.goalStatus === "failed"
@@ -3578,10 +3585,14 @@ function syncRoutineRunToSource(run: RoutineRun): string | null {
   return sourceThreadId;
 }
 
-async function interruptRoutineGroupGoal(groupId: string, threadId: string): Promise<void> {
+async function interruptRoutineGroupGoal(
+  groupId: string,
+  threadId: string,
+  outcome?: { status: "stopped" | "limit-reached"; detail: string },
+): Promise<void> {
   const speaker = groupSpeakers.get(threadId);
   const bot = speaker ? store.bot(speaker.botId) : undefined;
-  cancelGroupTurnOperations(groupId, threadId);
+  cancelGroupTurnOperations(groupId, threadId, outcome);
   await releaseBrowserCapabilityForThread(threadId);
   await (bot ? registry.get(bot.modelSelection.instanceId) : undefined)
     ?.adapter.interruptTurn(threadId)
@@ -3635,7 +3646,12 @@ routines = new RoutineManager({
       : bot
         ? registry.get(bot.modelSelection.instanceId)
         : null;
-    await instance?.adapter.interruptTurn(threadId);
+    try {
+      await releaseBrowserCapabilityForThread(threadId);
+      await instance?.adapter.interruptTurn(threadId);
+    } finally {
+      closeOpenApprovals(threadId);
+    }
   },
   interruptGoal: interruptRoutineGroupGoal,
   onRunChanged: syncRoutineRunToSource,
@@ -3760,13 +3776,20 @@ const agentRoutine = (
     enabled: routine.enabled,
     runOn: routine.runOn,
     durationMinutes: routine.durationMinutes,
+    ...(routine.timeoutMinutes === undefined ? {} : { timeoutMinutes: routine.timeoutMinutes }),
     schedule: routine.schedule.type === "once"
       ? { type: "once" as const, at: new Date(routine.schedule.at).toISOString() }
-      : {
-          type: "weekly" as const,
-          time: routine.schedule.time,
-          weekdays: routine.schedule.weekdays.map((day) => ROUTINE_WEEKDAY_NAMES[day]),
-        },
+      : routine.schedule.type === "interval"
+        ? {
+            type: "interval" as const,
+            everyMinutes: routine.schedule.everyMinutes,
+            anchorAt: new Date(routine.schedule.anchorAt).toISOString(),
+          }
+        : {
+            type: "weekly" as const,
+            time: routine.schedule.time,
+            weekdays: routine.schedule.weekdays.map((day) => ROUTINE_WEEKDAY_NAMES[day]),
+          },
     nextRunAt: routine.nextRunAt === null ? null : new Date(routine.nextRunAt).toISOString(),
     latestRun: latestRun
       ? {
@@ -7371,6 +7394,7 @@ const server = createServer(async (req, res) => {
             enabled: false,
             schedule: routine.schedule,
             durationMinutes: routine.durationMinutes,
+            ...(routine.timeoutMinutes === undefined ? {} : { timeoutMinutes: routine.timeoutMinutes }),
           });
           createdRoutineIds.push(created.id);
         }

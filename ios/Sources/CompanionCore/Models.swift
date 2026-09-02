@@ -655,7 +655,7 @@ public struct Voice: Codable, Hashable, Identifiable, Sendable {
 
 public struct RoutineSchedule: Codable, Hashable, Sendable {
     public enum Kind: String, Codable, Sendable {
-        case once, daily
+        case once, daily, interval
         /// A schedule introduced by a newer desktop. It remains visible but
         /// cannot be toggled or saved until the user chooses a supported kind.
         case unknown
@@ -674,6 +674,8 @@ public struct RoutineSchedule: Codable, Hashable, Sendable {
     public var at: Double?
     public var time: String?
     public var weekdays: [Int]?
+    public var everyMinutes: Int?
+    public var anchorAt: Int64?
 
     public static func once(at: Date) -> Self {
         .init(type: .once, at: at.timeIntervalSince1970 * 1_000, time: nil, weekdays: nil)
@@ -681,6 +683,17 @@ public struct RoutineSchedule: Codable, Hashable, Sendable {
 
     public static func daily(time: String, weekdays: [Int]) -> Self {
         .init(type: .daily, at: nil, time: time, weekdays: weekdays)
+    }
+
+    public static func interval(everyMinutes: Int, anchorAt: Date) -> Self {
+        .init(
+            type: .interval,
+            at: nil,
+            time: nil,
+            weekdays: nil,
+            everyMinutes: everyMinutes,
+            anchorAt: Int64((anchorAt.timeIntervalSince1970 * 1_000).rounded())
+        )
     }
 }
 
@@ -693,6 +706,7 @@ public struct Routine: Codable, Hashable, Identifiable, Sendable {
     public var enabled: Bool
     public var schedule: RoutineSchedule
     public var durationMinutes: Int
+    public var timeoutMinutes: Int?
     public var nextRunAt: Double?
     public var createdAt: Double
     public var updatedAt: Double
@@ -704,6 +718,7 @@ public struct RoutineRun: Codable, Hashable, Identifiable, Sendable {
     public var routineName: String
     public var prompt: String?
     public var durationMinutes: Int?
+    public var timeoutMinutes: Int?
     public var botId: String
     public var runOn: String
     public var scheduledFor: Double
@@ -727,10 +742,12 @@ public struct RoutineInput: Encodable, Sendable {
     public var enabled: Bool?
     public var schedule: RoutineSchedule
     public var durationMinutes: Int
+    public var timeoutMinutes: Int?
 
     public init(
         name: String, prompt: String, botId: String, runOn: String = "maus",
-        enabled: Bool? = nil, schedule: RoutineSchedule, durationMinutes: Int = 30
+        enabled: Bool? = nil, schedule: RoutineSchedule, durationMinutes: Int = 30,
+        timeoutMinutes: Int? = nil
     ) {
         self.name = name
         self.prompt = prompt
@@ -739,6 +756,7 @@ public struct RoutineInput: Encodable, Sendable {
         self.enabled = enabled
         self.schedule = schedule
         self.durationMinutes = durationMinutes
+        self.timeoutMinutes = timeoutMinutes
     }
 }
 
@@ -780,6 +798,8 @@ public extension Routine {
         switch schedule.type {
         case .daily:
             true
+        case .interval:
+            (5...1_440).contains(schedule.everyMinutes ?? 0) && schedule.anchorAt != nil
         case .once:
             (schedule.at ?? -.infinity) > date.timeIntervalSince1970 * 1_000
         case .unknown:

@@ -1098,9 +1098,12 @@ public struct CompanionClient: Sendable {
         if let at = input.schedule.at { schedule["at"] = at }
         if let time = input.schedule.time { schedule["time"] = time }
         if let weekdays = input.schedule.weekdays { schedule["weekdays"] = weekdays }
+        if let everyMinutes = input.schedule.everyMinutes { schedule["everyMinutes"] = everyMinutes }
+        if let anchorAt = input.schedule.anchorAt { schedule["anchorAt"] = anchorAt }
         var body: [String: Any] = [
             "name": input.name, "prompt": input.prompt, "botId": input.botId,
             "runOn": input.runOn, "schedule": schedule, "durationMinutes": input.durationMinutes,
+            "timeoutMinutes": input.timeoutMinutes ?? NSNull(),
         ]
         if let enabled = input.enabled { body["enabled"] = enabled }
         return body
