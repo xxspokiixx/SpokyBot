@@ -1103,8 +1103,9 @@ public struct CompanionClient: Sendable {
         var body: [String: Any] = [
             "name": input.name, "prompt": input.prompt, "botId": input.botId,
             "runOn": input.runOn, "schedule": schedule, "durationMinutes": input.durationMinutes,
-            "timeoutMinutes": input.timeoutMinutes ?? NSNull(),
         ]
+        if let timeoutMinutes = input.timeoutMinutes { body["timeoutMinutes"] = timeoutMinutes }
+        else if input.clearTimeout { body["timeoutMinutes"] = NSNull() }
         if let enabled = input.enabled { body["enabled"] = enabled }
         return body
     }

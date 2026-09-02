@@ -462,7 +462,8 @@ private struct RoutineEditorView: View {
             name: String(name.trimmingCharacters(in: .whitespacesAndNewlines).prefix(80)),
             prompt: String(prompt.trimmingCharacters(in: .whitespacesAndNewlines).prefix(20_000)),
             botId: botId, runOn: runOn.rawValue, enabled: routine?.enabled,
-            schedule: schedule, durationMinutes: duration, timeoutMinutes: timeoutMinutes
+            schedule: schedule, durationMinutes: duration,
+            timeoutMinutes: timeoutMinutes, clearTimeout: timeoutMinutes == nil
         )
         if await session.saveRoutine(input, id: routine?.id) != nil {
             await onSaved()

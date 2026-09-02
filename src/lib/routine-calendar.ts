@@ -158,8 +158,12 @@ export function projectedRoutineItems(
     .filter((run) => run.scheduledFor >= from && run.scheduledFor < to)
     .sort((left, right) => right.scheduledFor - left.scheduledFor)
     .filter((run) => {
+      if (run.status === "queued" || run.status === "running" || run.status === "waiting") {
+        return true;
+      }
       // A routine may later be edited or deleted, so the current definition
       // cannot safely tell us whether its history came from a dense interval.
+      // Keep active receipts unbounded above, while trimming terminal history.
       const count = receiptCounts.get(run.routineId) ?? 0;
       if (count >= MAX_RECEIPTS_PER_ROUTINE_PER_RANGE) return false;
       receiptCounts.set(run.routineId, count + 1);

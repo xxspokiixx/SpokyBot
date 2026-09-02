@@ -85,7 +85,7 @@ class RoutineClientTest {
                     everyMinutes = 15,
                     anchorAtMillis = 2_500_000L,
                 ),
-                timeoutMinutes = 30,
+                clearTimeout = true,
             ),
         )
         client.setRoutineEnabled("routine-1", true)
@@ -116,7 +116,6 @@ class RoutineClientTest {
                 "runOn",
                 "schedule",
                 "durationMinutes",
-                "timeoutMinutes",
             ),
             create.keys,
         )
@@ -124,7 +123,7 @@ class RoutineClientTest {
         assertEquals(exactPrompt, create.getValue("prompt").jsonPrimitive.content)
         assertEquals("maus", create.getValue("runOn").jsonPrimitive.content)
         assertEquals(5, create.getValue("durationMinutes").jsonPrimitive.content.toInt())
-        assertEquals(JsonNull, create.getValue("timeoutMinutes"))
+        assertFalse("timeoutMinutes" in create)
         assertEquals(
             mapOf("type" to "once", "at" to "2000000.0"),
             create.getValue("schedule").jsonObject.mapValues { it.value.jsonPrimitive.content },
@@ -153,7 +152,7 @@ class RoutineClientTest {
             ),
             interval.mapValues { it.value.jsonPrimitive.content },
         )
-        assertEquals(30, intervalUpdate.getValue("timeoutMinutes").jsonPrimitive.content.toInt())
+        assertEquals(JsonNull, intervalUpdate.getValue("timeoutMinutes"))
 
         assertEquals(
             mapOf("enabled" to "true"),

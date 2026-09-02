@@ -766,10 +766,8 @@ class CompanionClient(
                 input.schedule.anchorAt?.let { put("anchorAt", it) }
             })
             put("durationMinutes", input.durationMinutes)
-            put(
-                "timeoutMinutes",
-                input.timeoutMinutes?.let(::JsonPrimitive) ?: JsonNull,
-            )
+            if (input.timeoutMinutes != null) put("timeoutMinutes", input.timeoutMinutes)
+            else if (input.clearTimeout) put("timeoutMinutes", JsonNull)
         }
 
         suspend fun pair(

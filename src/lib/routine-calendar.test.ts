@@ -231,6 +231,46 @@ describe("routine calendar projection", () => {
     expect(items.at(-1)?.at).toBe(from + 99 * 5 * 60_000);
   });
 
+  it("keeps queued, running, and waiting receipts outside the terminal history cap", () => {
+    const from = new Date(2026, 7, 31, 9).getTime();
+    const terminalRuns: RoutineRun[] = Array.from({ length: 20 }, (_, index) => ({
+      id: `completed-run-${index}`,
+      routineId: "interval-routine",
+      routineName: "Pulse",
+      target: "bot",
+      botId: "b1",
+      runOn: "maus",
+      scheduledFor: from + (index + 3) * 5 * 60_000,
+      status: "completed",
+      manual: false,
+      createdAt: from + (index + 3) * 5 * 60_000,
+    }));
+    const activeRuns: RoutineRun[] = (["queued", "running", "waiting"] as const).map((status, index) => ({
+      id: `${status}-run`,
+      routineId: "interval-routine",
+      routineName: "Pulse",
+      target: "bot",
+      botId: "b1",
+      runOn: "maus",
+      scheduledFor: from + index * 5 * 60_000,
+      status,
+      manual: false,
+      createdAt: from + index * 5 * 60_000,
+    }));
+
+    const items = projectedRoutineItems(
+      [],
+      [...activeRuns, ...terminalRuns],
+      from,
+      from + 24 * 60 * 60_000,
+    );
+
+    expect(items.filter((item) => item.run?.status === "completed")).toHaveLength(12);
+    expect(items.filter((item) => item.run?.status === "queued")).toHaveLength(1);
+    expect(items.filter((item) => item.run?.status === "running")).toHaveLength(1);
+    expect(items.filter((item) => item.run?.status === "waiting")).toHaveLength(1);
+  });
+
   it("keeps dense history bounded after its routine is deleted", () => {
     const from = new Date(2026, 7, 31, 9).getTime();
     const runs: RoutineRun[] = Array.from({ length: 100 }, (_, index) => ({
