@@ -37,7 +37,7 @@
 //
 // Keep this file dependency-free — it runs as a bare `node` subprocess.
 import { spawn } from "node:child_process";
-import { existsSync, writeFileSync } from "node:fs";
+import { appendFileSync, existsSync, readFileSync, writeFileSync } from "node:fs";
 
 const mode = process.env.FAKE_ACP_MODE ?? "happy";
 const ONE_PIXEL_PNG = "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=";
@@ -47,6 +47,35 @@ const ONE_PIXEL_PNG = "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42
 // identical to before.
 const models = (process.env.FAKE_ACP_MODELS ?? "").split(",").filter(Boolean);
 let currentModel: string | null = models[0] ?? null;
+// task id captured from the last delegate_bot reply, for a later
+// check_delegation call. Each turn is a fresh process, so the id is passed
+// through a file (same state-passing pattern as FAKE_ACP_GATE_FILE).
+const taskIdFile = process.env.FAKE_ACP_TASKID_FILE ?? "";
+const logFile = process.env.FAKE_ACP_LOG_FILE ?? "";
+function fakeLog(line: string): void {
+  if (!logFile) return;
+  try {
+    appendFileSync(logFile, `${new Date().toISOString()} ${line}\n`);
+  } catch {}
+}
+let chiefDelegatedTaskId = "";
+function rememberDelegatedTaskId(id: string): void {
+  chiefDelegatedTaskId = id;
+  if (taskIdFile) {
+    try {
+      writeFileSync(taskIdFile, id);
+    } catch {}
+  }
+}
+function savedDelegatedTaskId(): string {
+  if (chiefDelegatedTaskId) return chiefDelegatedTaskId;
+  if (taskIdFile && existsSync(taskIdFile)) {
+    try {
+      chiefDelegatedTaskId = readFileSync(taskIdFile, "utf8").trim();
+    } catch {}
+  }
+  return chiefDelegatedTaskId;
+}
 const configOptions = () =>
   models.length
     ? [
@@ -388,6 +417,59 @@ function handle(msg: any) {
         );
       };
       const promptText = String(msg.params?.prompt?.[0]?.text ?? "");
+      // A delegated reply woke this bot (control-plane continuation): the
+      // harness revived it to fold the result in. Synthesize instead of
+      // driving the mode's usual delegate/ask flow, which would loop or
+      // re-ask for approval on a turn the user did not initiate.
+      const wokeFromDelegation = promptText.includes("[A delegated task just completed]")
+        || promptText.includes("[A delegated task failed]");
+      if (wokeFromDelegation) {
+        fakeLog("branch: wokeFromDelegation");
+        const failed = promptText.includes("[A delegated task failed]");
+        const sawResult = promptText.includes("replied to the delegated task");
+        out({
+          jsonrpc: "2.0",
+          method: "session/update",
+          params: {
+            update: {
+              sessionUpdate: "agent_message_chunk",
+              content: {
+                text: failed
+                  ? "woke after delegation failure: will tell the user"
+                  : sawResult
+                    ? "woke after delegation: saw the result"
+                    : "woke after delegation: no result",
+              },
+            },
+          },
+        });
+        complete();
+        return;
+      }
+      if (mode === "chief-delegate" && agentsMcp && promptText.includes("CHECK_STATUS")) {
+        fakeLog(`branch: CHECK_STATUS savedTaskId=${JSON.stringify(savedDelegatedTaskId())}`);
+        const savedTaskId = savedDelegatedTaskId();
+        if (!savedTaskId) {
+          out({ jsonrpc: "2.0", method: "session/update", params: { update: { sessionUpdate: "agent_message_chunk", content: { text: "status check skipped: no delegated task id" } } } });
+          complete();
+          return;
+        }
+        void driveMcp(agentsMcp, [
+          {
+            name: "check_delegation",
+            args: () => ({ task_id: savedTaskId }),
+          },
+        ])
+          .then((reply) => {
+            out({ jsonrpc: "2.0", method: "session/update", params: { update: { sessionUpdate: "agent_message_chunk", content: { text: `status: ${reply}` } } } });
+            complete();
+          })
+          .catch((e) => {
+            out({ jsonrpc: "2.0", method: "session/update", params: { update: { sessionUpdate: "agent_message_chunk", content: { text: `status error: ${(e as Error).message}` } } } });
+            complete();
+          });
+        return;
+      }
       if (mode === "chief-delegate" && promptText.includes("CHIEF_RESULT_CONTEXT")) {
         const sawDelegatedResult =
           promptText.includes("@LongWorker replied to the delegated task")
@@ -427,6 +509,7 @@ function handle(msg: any) {
           },
         ])
           .then((reply) => {
+            rememberDelegatedTaskId(/Task id: ([\w-]+)/.exec(reply)?.[1] ?? "");
             out({ jsonrpc: "2.0", method: "session/update", params: { update: { sessionUpdate: "agent_message_chunk", content: { text: `assigned: ${reply}` } } } });
             complete();
           })
