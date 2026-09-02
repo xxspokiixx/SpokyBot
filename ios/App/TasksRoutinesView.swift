@@ -235,7 +235,7 @@ private struct RoutineEditorView: View {
                         ForEach(session.state.bots.filter { $0.hidden != true }) { bot in Text(bot.name).tag(bot.id) }
                     }
                     TextField("What should the agent do?", text: $prompt, axis: .vertical).lineLimit(4...10)
-                    Stepper("Allow up to \(duration) minutes", value: $duration, in: 15...240, step: 15)
+                    Stepper("Allow up to \(duration) minutes", value: $duration, in: 5...240, step: 5)
                 }
 
                 Section {

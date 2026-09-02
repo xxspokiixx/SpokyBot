@@ -1,12 +1,12 @@
-import { ChevronDown, ChevronLeft, Crown, FolderOpen, X } from "lucide-react";
-import { useState } from "react";
+import { BookOpen, CalendarClock, ChevronDown, ChevronLeft, Crown, FolderOpen, Plus, Trash2, X } from "lucide-react";
+import { useEffect, useState } from "react";
 import { api, useStore, type Bot } from "@/state/store";
 import { stateForBot } from "@/lib/mascot";
 import { CloudBackendPicker } from "./CloudBackendPicker";
 import { ModelPicker } from "./ModelPicker";
 import { useDesktopCapabilities } from "./DesktopCapabilities";
 import { cn } from "@/lib/cn";
-import { builtInBrowserEnabled } from "@/lib/feature-flags";
+import { builtInBrowserEnabled, skillRecorderEnabled } from "@/lib/feature-flags";
 import { requestNotificationPermission } from "@/lib/notify";
 import { botUsage, costCaption, formatTokens, formatUsd, hasFiniteCost } from "@/lib/usage";
 import { shortPath } from "@/lib/short-path";
@@ -15,6 +15,8 @@ import { BotProfileAvatarCard } from "./BotProfileAvatarCard";
 import { LocalComputerAutoWarning } from "./LocalComputerAutoWarning";
 import { VoiceSettings } from "./VoiceSettings";
 import { BOT_PROFILE_LIMITS } from "../../shared/bot-profile";
+import { Switch } from "./SettingsPrimitives";
+import { RoutineEditor } from "./RoutinesPage";
 
 function Field({
   label,
@@ -68,6 +70,224 @@ function BotUsageCard({ bot }: { bot: Bot }) {
       <div className="mt-2 text-[12px] text-ink-secondary">
         {hasFiniteCost(usage.costUsd) ? `Cost ${costCaption(instance?.snapshot.billing)}.` : "This engine doesn't report a price; tokens are counted."}
       </div>
+    </div>
+  );
+}
+
+interface ManagedSkill {
+  name: string;
+  description: string;
+  enabled: boolean;
+  source: string;
+  warnings: string[];
+}
+
+interface StagedSkillSummary {
+  id: string;
+  name: string;
+  gist: string;
+}
+
+/** Skills are durable behavior, so the user needs a normal way to inspect,
+ * disable, and remove them after the one-time approval card is gone. */
+function LearnedSkillsCard({ bot }: { bot: Bot }) {
+  const { state } = useStore();
+  const featureEnabled = skillRecorderEnabled(state.config);
+  const [skills, setSkills] = useState<ManagedSkill[]>([]);
+  const [staged, setStaged] = useState<StagedSkillSummary[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [working, setWorking] = useState("");
+  const [error, setError] = useState("");
+  const [reviewing, setReviewing] = useState<{ skill: ManagedSkill; text: string } | null>(null);
+
+  const refresh = async (cancelled?: () => boolean) => {
+    try {
+      const result = await api(`/api/bots/${bot.id}/skills`) as {
+        skills?: ManagedSkill[];
+        staged?: StagedSkillSummary[];
+      };
+      if (cancelled?.()) return;
+      setSkills(result.skills ?? []);
+      setStaged(result.staged ?? []);
+      setError("");
+    } catch (cause) {
+      if (!cancelled?.()) setError(cause instanceof Error ? cause.message : "Could not load learned skills.");
+    } finally {
+      if (!cancelled?.()) setLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    let cancelled = false;
+    setLoading(true);
+    setReviewing(null);
+    void refresh(() => cancelled);
+    return () => {
+      cancelled = true;
+    };
+  }, [bot.id]);
+
+  const toggle = async (skill: ManagedSkill) => {
+    setWorking(skill.name);
+    setError("");
+    try {
+      if (!skill.enabled) {
+        // A disabled import has not necessarily been reviewed. Fetch the
+        // integrity-checked bytes and require one explicit review step before
+        // they can reach the bot's prompt or native skill discovery.
+        const result = await api(`/api/bots/${bot.id}/skills/${encodeURIComponent(skill.name)}`) as { text?: string };
+        if (!result.text) throw new Error("The skill contents are unavailable; remove and import or learn it again.");
+        setReviewing({ skill, text: result.text });
+        return;
+      }
+      await api(`/api/bots/${bot.id}/skills/${encodeURIComponent(skill.name)}`, {
+        method: "PATCH",
+        body: JSON.stringify({ enabled: false }),
+      });
+      await refresh();
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : "Could not update this skill.");
+    } finally {
+      setWorking("");
+    }
+  };
+
+  const enableReviewed = async () => {
+    if (!reviewing) return;
+    const { skill } = reviewing;
+    setWorking(skill.name);
+    setError("");
+    try {
+      await api(`/api/bots/${bot.id}/skills/${encodeURIComponent(skill.name)}`, {
+        method: "PATCH",
+        body: JSON.stringify({ enabled: true }),
+      });
+      setReviewing(null);
+      await refresh();
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : "Could not enable this skill.");
+    } finally {
+      setWorking("");
+    }
+  };
+
+  const remove = async (skill: ManagedSkill) => {
+    if (!window.confirm(`Remove the learned skill “${skill.name}”?`)) return;
+    setWorking(skill.name);
+    setError("");
+    try {
+      await api(`/api/bots/${bot.id}/skills/${encodeURIComponent(skill.name)}`, { method: "DELETE" });
+      await refresh();
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : "Could not remove this skill.");
+    } finally {
+      setWorking("");
+    }
+  };
+
+  if (!featureEnabled && !loading && skills.length === 0 && staged.length === 0) return null;
+  return (
+    <div className="rounded-xl bg-card p-4">
+      <div className="flex items-center gap-2">
+        <BookOpen size={16} className="text-ink-secondary" />
+        <div className="text-[15px] font-medium text-ink">Learned skills</div>
+      </div>
+      <div className="mt-1 text-[12px] leading-relaxed text-ink-secondary">
+        {featureEnabled
+          ? "Use /learn to create a skill, or /learn update <name> to revise one. Every change waits for your review."
+          : "Skill authoring is off, but skills you already enabled stay under your control here."}
+      </div>
+      {loading ? (
+        <div className="mt-3 text-[12px] text-ink-secondary">Loading…</div>
+      ) : skills.length === 0 ? (
+        <div className="mt-3 rounded-lg bg-inset px-3 py-2 text-[12px] text-ink-secondary">No installed skills yet.</div>
+      ) : (
+        <div className="mt-3 divide-y divide-hairline/40 overflow-hidden rounded-lg border border-hairline/40">
+          {skills.map((skill) => (
+            <div key={skill.name} className="px-3 py-2.5">
+              <div className="flex items-center gap-2">
+                <div className="min-w-0 flex-1">
+                  <div className="truncate font-mono text-[12.5px] text-ink">{skill.name}</div>
+                  <div className="mt-0.5 line-clamp-2 text-[11.5px] text-ink-secondary">{skill.description}</div>
+                </div>
+                <Switch
+                  checked={skill.enabled}
+                  aria-label={`${skill.enabled ? "Disable" : "Enable"} ${skill.name}`}
+                  disabled={working === skill.name}
+                  onClick={() => void toggle(skill)}
+                />
+                <button
+                  aria-label={`Remove ${skill.name}`}
+                  title="Remove skill"
+                  disabled={working === skill.name}
+                  onClick={() => void remove(skill)}
+                  className="flex size-8 shrink-0 items-center justify-center rounded-md text-ink-secondary hover:bg-danger/10 hover:text-danger disabled:opacity-40"
+                >
+                  <Trash2 size={15} />
+                </button>
+              </div>
+              <div className="mt-1 truncate text-[10.5px] text-ink-secondary" title={skill.source}>Source: {skill.source}</div>
+              {skill.warnings.length > 0 && (
+                <div className="mt-1 text-[10.5px] text-warning">{skill.warnings.join(" · ")}</div>
+              )}
+            </div>
+          ))}
+        </div>
+      )}
+      {staged.length > 0 && (
+        <div className="mt-2 text-[11.5px] text-warning">
+          {staged.length} proposal{staged.length === 1 ? " is" : "s are"} waiting for a decision in chat.
+        </div>
+      )}
+      {error && <div role="alert" className="mt-2 text-[12px] text-danger">{error}</div>}
+      {reviewing && (
+        <div
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby="skill-review-title"
+          className="fixed inset-0 z-[80] flex items-center justify-center bg-black/45 p-6"
+        >
+          <div className="flex max-h-[min(760px,90vh)] w-full max-w-2xl flex-col rounded-2xl bg-card p-5 shadow-2xl">
+            <div id="skill-review-title" className="text-[16px] font-semibold text-ink">
+              Review {reviewing.skill.name} before enabling
+            </div>
+            <div className="mt-1 break-all text-[11.5px] text-ink-secondary">
+              Source: {reviewing.skill.source}
+            </div>
+            {reviewing.skill.warnings.length > 0 && (
+              <div className="mt-2 rounded-lg bg-warning/10 px-3 py-2 text-[11.5px] text-warning">
+                {reviewing.skill.warnings.join(" · ")}
+              </div>
+            )}
+            <pre
+              tabIndex={0}
+              aria-label={`Full SKILL.md for ${reviewing.skill.name}`}
+              className="mt-3 min-h-0 flex-1 overflow-auto whitespace-pre-wrap break-words rounded-xl bg-inset p-3 font-mono text-[12px] leading-relaxed text-ink"
+            >
+              {reviewing.text}
+            </pre>
+            {error && <div role="alert" className="mt-2 text-[12px] text-danger">{error}</div>}
+            <div className="mt-4 flex justify-end gap-2">
+              <button
+                type="button"
+                disabled={working === reviewing.skill.name}
+                onClick={() => setReviewing(null)}
+                className="rounded-lg px-4 py-2 text-[13px] font-medium text-ink-secondary hover:bg-raised disabled:opacity-40"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                disabled={working === reviewing.skill.name}
+                onClick={() => void enableReviewed()}
+                className="rounded-lg bg-accent px-4 py-2 text-[13px] font-semibold text-white disabled:opacity-40"
+              >
+                Enable reviewed skill
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
@@ -321,6 +541,8 @@ export function SettingsPanel({ bot }: { bot: Bot }) {
   const providerSupportsLocal = instanceSupportsLocalComputer(state.instances, bot);
   const localSelectable = localComputerSelectable({ capabilities, providerSupportsLocal });
   const [localAutoWarning, setLocalAutoWarning] = useState<"auto" | "local" | null>(null);
+  const [creatingRoutine, setCreatingRoutine] = useState(false);
+  useEffect(() => setCreatingRoutine(false), [bot.id]);
   const localDisabledReason = localComputerDisabledReason({ capabilities, providerSupportsLocal });
   const patch = (
     p: Partial<
@@ -335,6 +557,7 @@ export function SettingsPanel({ bot }: { bot: Bot }) {
         | "autoStartVps"
         | "color"
         | "mascotExpression"
+        | "mascotBody"
         | "avatarUrl"
         | "avatarCrop"
         | "autoApprove"
@@ -364,12 +587,22 @@ export function SettingsPanel({ bot }: { bot: Bot }) {
   const browserFeature = builtInBrowserEnabled(state.config);
   const browserAllowed = bot.browser !== false;
   const browserEnabled = browserFeature && browserAllowed;
+  // "Works on: Browser" needs everything the switch needs except the switch
+  // itself; the box-native Computer engine has no browser-only mode.
+  const browserSelectable = desktopBrowser && browserFeature && canUseBrowser && engine?.driverKind !== "boxAgent";
+  const browserDisabledReason = !desktopBrowser
+    ? "The built-in browser needs the OpenMausBot desktop app"
+    : !browserFeature
+      ? "The built-in browser is switched off under App Settings → Experimental"
+      : "This model engine cannot use the built-in browser";
   const sectionName = bot.section?.trim() || "General";
   const currentChief = state.bots.find(
     (candidate) =>
       candidate.chiefOfStaff &&
       (candidate.section?.trim() || "") === (bot.section?.trim() || ""),
   );
+  const botRoutines = state.routines.filter((routine) => routine.botId === bot.id);
+  const activeBotRoutines = botRoutines.filter((routine) => routine.enabled).length;
 
   return (
     <>
@@ -431,6 +664,33 @@ export function SettingsPanel({ bot }: { bot: Bot }) {
             />
           </Field>
 
+          <div className="rounded-xl bg-card p-4">
+            <div className="flex items-center gap-2">
+              <CalendarClock size={16} className="text-accent" />
+              <div className="min-w-0 flex-1 text-[15px] font-medium text-ink">Scheduled tasks</div>
+              <span className="shrink-0 text-[11.5px] tabular-nums text-ink-secondary">
+                {activeBotRoutines} active · {botRoutines.length} total
+              </span>
+            </div>
+            <div className="mt-3 flex gap-2">
+              <button
+                type="button"
+                onClick={() => setCreatingRoutine(true)}
+                className="flex flex-1 items-center justify-center gap-1.5 rounded-lg bg-accent px-3 py-2 text-[13px] font-medium text-white hover:brightness-110"
+              >
+                <Plus size={14} />
+                New schedule
+              </button>
+              <button
+                type="button"
+                onClick={() => dispatch({ type: "showRoutines" })}
+                className="rounded-lg bg-control px-3 py-2 text-[13px] text-ink hover:bg-raised-hover"
+              >
+                Manage
+              </button>
+            </div>
+          </div>
+
           <div className={cn(
             "rounded-xl border p-4",
             bot.chiefOfStaff ? "border-accent/40 bg-accent/10" : "border-hairline/40 bg-card",
@@ -446,25 +706,14 @@ export function SettingsPanel({ bot }: { bot: Bot }) {
                 <div className="text-[15px] font-medium text-ink">Chief of Staff</div>
                 <div className="text-[11.5px] text-ink-secondary">One for {sectionName}</div>
               </div>
-              <button
-                role="switch"
-                aria-checked={Boolean(bot.chiefOfStaff)}
+              <Switch
+                checked={Boolean(bot.chiefOfStaff)}
                 aria-label="Chief of Staff"
                 disabled={!bot.chiefOfStaff && !canCoordinate}
                 onClick={() => patch({ chiefOfStaff: !bot.chiefOfStaff })}
                 title={!bot.chiefOfStaff && !canCoordinate ? "This engine cannot contact other bots" : undefined}
-                className={cn(
-                  "relative h-[26px] w-[44px] shrink-0 rounded-full transition-colors disabled:cursor-not-allowed disabled:opacity-40",
-                  bot.chiefOfStaff ? "bg-accent" : "bg-control",
-                )}
-              >
-                <span
-                  className={cn(
-                    "absolute top-[3px] size-5 rounded-full bg-white transition-all",
-                    bot.chiefOfStaff ? "left-[21px]" : "left-[3px]",
-                  )}
-                />
-              </button>
+                className="disabled:cursor-not-allowed"
+              />
             </div>
             <div className="mt-3 text-[13px] leading-relaxed text-ink-secondary">
               {bot.chiefOfStaff && !canCoordinate
@@ -490,25 +739,14 @@ export function SettingsPanel({ bot }: { bot: Bot }) {
                   : "Let this bot talk to teammates on its own, without a confirmation step."}
               </div>
             </div>
-            <button
-              role="switch"
-              aria-checked={Boolean(bot.approvePeerComms)}
+            <Switch
+              checked={Boolean(bot.approvePeerComms)}
               aria-label="Ask me before contacting other bots"
               disabled={!bot.approvePeerComms && !canCoordinate}
               onClick={() => patch({ approvePeerComms: !bot.approvePeerComms })}
               title={!bot.approvePeerComms && !canCoordinate ? "This engine cannot contact other bots" : undefined}
-              className={cn(
-                "relative h-[26px] w-[44px] shrink-0 rounded-full transition-colors disabled:cursor-not-allowed disabled:opacity-40",
-                bot.approvePeerComms ? "bg-accent" : "bg-control",
-              )}
-            >
-              <span
-                className={cn(
-                  "absolute top-[3px] size-5 rounded-full bg-white transition-all",
-                  bot.approvePeerComms ? "left-[21px]" : "left-[3px]",
-                )}
-              />
-            </button>
+              className="disabled:cursor-not-allowed"
+            />
           </div>
 
           <div className="flex items-center justify-between gap-4 rounded-xl bg-card p-4">
@@ -524,9 +762,8 @@ export function SettingsPanel({ bot }: { bot: Bot }) {
                       : "Keep your connected apps unavailable to this bot."}
               </div>
             </div>
-            <button
-              role="switch"
-              aria-checked={connectedAppsEnabled}
+            <Switch
+              checked={connectedAppsEnabled}
               aria-label="Allow this bot to use connected apps"
               disabled={
                 !connectedAppsEnabled && (!connectedAppsConfigured || !canUseConnectedApps)
@@ -539,18 +776,8 @@ export function SettingsPanel({ bot }: { bot: Bot }) {
                     ? "This engine cannot use connected apps"
                     : undefined
               }
-              className={cn(
-                "relative h-[26px] w-[44px] shrink-0 rounded-full transition-colors disabled:cursor-not-allowed disabled:opacity-40",
-                connectedAppsEnabled ? "bg-accent" : "bg-control",
-              )}
-            >
-              <span
-                className={cn(
-                  "absolute top-[3px] size-5 rounded-full bg-white transition-all",
-                  connectedAppsEnabled ? "left-[21px]" : "left-[3px]",
-                )}
-              />
-            </button>
+              className="disabled:cursor-not-allowed"
+            />
           </div>
 
           <div className="flex items-center justify-between gap-4 rounded-xl bg-card p-4">
@@ -570,24 +797,13 @@ export function SettingsPanel({ bot }: { bot: Bot }) {
                         : "Keep the built-in browser unavailable to this bot."}
               </div>
             </div>
-            <button
-              role="switch"
-              aria-checked={browserEnabled}
+            <Switch
+              checked={browserEnabled}
               aria-label="Give this bot a built-in browser"
               disabled={!browserEnabled && (!desktopBrowser || !browserFeature || !canUseBrowser)}
               onClick={() => patch({ browser: !browserAllowed })}
-              className={cn(
-                "relative h-[26px] w-[44px] shrink-0 rounded-full transition-colors disabled:cursor-not-allowed disabled:opacity-40",
-                browserEnabled ? "bg-accent" : "bg-control",
-              )}
-            >
-              <span
-                className={cn(
-                  "absolute top-[3px] size-5 rounded-full bg-white transition-all",
-                  browserEnabled ? "left-[21px]" : "left-[3px]",
-                )}
-              />
-            </button>
+              className="disabled:cursor-not-allowed"
+            />
           </div>
 
           <div className="rounded-xl bg-card p-4">
@@ -639,30 +855,40 @@ export function SettingsPanel({ bot }: { bot: Bot }) {
           )}
 
           <div className="rounded-xl bg-card p-4">
-            <div className="text-[15px] font-medium text-ink">Computer</div>
+            <div className="text-[15px] font-medium text-ink">Works on</div>
             <div className="mt-0.5 text-[13px] text-ink-secondary">
-              Where this bot's computer runs{bot.computer ? "" : " (currently: auto)"}
+              Where this bot works{bot.computer ? "" : " (currently: auto)"}. Browser is the built-in browser tab only; no desktop.
             </div>
             <div className="mt-3 flex overflow-hidden rounded-lg border border-hairline/40">
               {([
                 ["cloud", "Cloud"],
                 ["vm", "Local VM"],
                 ["local", "This computer"],
+                ["browser", "Browser"],
                 ["off", "Off"],
               ] as const).map(([mode, label], i) => (
                 <button
                   key={mode}
-                  disabled={mode === "local" && !localSelectable}
-                  title={mode === "local" && !localSelectable ? localDisabledReason ?? undefined : undefined}
+                  disabled={(mode === "local" && !localSelectable) || (mode === "browser" && !browserSelectable)}
+                  title={
+                    mode === "local" && !localSelectable
+                      ? localDisabledReason ?? undefined
+                      : mode === "browser"
+                        ? browserSelectable ? "The built-in browser tab only; no desktop" : browserDisabledReason
+                        : undefined
+                  }
                   onClick={() => {
                     if (mode === bot.computer) return;
                     if (mode === "local" && bot.autoApprove) setLocalAutoWarning("local");
+                    // a browser-only bot must actually have its browser: flip
+                    // the per-bot switch on with the destination
+                    else if (mode === "browser") patch({ computer: mode, browser: true });
                     else patch({ computer: mode });
                   }}
                   className={cn(
                     "flex-1 py-1.5 text-[13px] capitalize",
                     i > 0 && "border-l border-hairline/40",
-                    mode === "local" && !localSelectable && "cursor-not-allowed opacity-40",
+                    ((mode === "local" && !localSelectable) || (mode === "browser" && !browserSelectable)) && "cursor-not-allowed opacity-40",
                     bot.computer === mode
                       ? "bg-control text-ink"
                       : "text-ink-secondary hover:bg-control/60 hover:text-ink",
@@ -687,23 +913,11 @@ export function SettingsPanel({ bot }: { bot: Bot }) {
                         Allow Auto to create or wake this bot's managed container when needed.
                       </div>
                     </div>
-                    <button
-                      role="switch"
-                      aria-checked={Boolean(bot.autoStartVps)}
+                    <Switch
+                      checked={Boolean(bot.autoStartVps)}
                       aria-label="Start VPS automatically"
                       onClick={() => patch({ autoStartVps: !bot.autoStartVps })}
-                      className={cn(
-                        "relative h-6 w-11 shrink-0 rounded-full transition-colors",
-                        bot.autoStartVps ? "bg-accent" : "bg-control",
-                      )}
-                    >
-                      <span
-                        className={cn(
-                          "absolute top-[3px] size-[18px] rounded-full bg-white transition-all",
-                          bot.autoStartVps ? "left-[22px]" : "left-[4px]",
-                        )}
-                      />
-                    </button>
+                    />
                   </div>
                 )}
               </>
@@ -715,6 +929,8 @@ export function SettingsPanel({ bot }: { bot: Bot }) {
 
           {/* keyed so switching bots never shows one bot's notes under another's name */}
           <MemoryCard key={bot.id} bot={bot} />
+
+          <LearnedSkillsCard key={`skills-${bot.id}`} bot={bot} />
 
           <div className="flex items-center justify-between gap-4 rounded-xl bg-card p-4">
             <div>
@@ -729,26 +945,14 @@ export function SettingsPanel({ bot }: { bot: Bot }) {
                   : "Approve each action yourself. Turn on to let this bot keep working without stopping to ask."}
               </div>
             </div>
-            <button
-              role="switch"
-              aria-checked={Boolean(bot.autoApprove)}
+            <Switch
+              checked={Boolean(bot.autoApprove)}
               aria-label="Auto mode"
               onClick={() => {
                 if (!bot.autoApprove && bot.computer === "local") setLocalAutoWarning("auto");
                 else patch({ autoApprove: !bot.autoApprove });
               }}
-              className={cn(
-                "relative h-[26px] w-[44px] shrink-0 rounded-full transition-colors",
-                bot.autoApprove ? "bg-accent" : "bg-control",
-              )}
-            >
-              <span
-                className={cn(
-                  "absolute top-[3px] size-5 rounded-full bg-white transition-all",
-                  bot.autoApprove ? "left-[21px]" : "left-[3px]",
-                )}
-              />
-            </button>
+            />
           </div>
 
           <div className="rounded-xl bg-card p-4">
@@ -797,31 +1001,27 @@ export function SettingsPanel({ bot }: { bot: Bot }) {
                 Get notified when this agent finishes or needs input
               </div>
             </div>
-            <button
-              role="switch"
-              aria-checked={bot.notifications}
+            <Switch
+              checked={bot.notifications}
               aria-label="Agent notifications"
               onClick={() => {
                 const enabled = !bot.notifications;
                 if (enabled) void requestNotificationPermission();
                 patch({ notifications: enabled });
               }}
-              className={cn(
-                "relative h-[26px] w-[44px] shrink-0 rounded-full transition-colors",
-                bot.notifications ? "bg-accent" : "bg-control",
-              )}
-            >
-              <span
-                className={cn(
-                  "absolute top-[3px] size-5 rounded-full bg-white transition-all",
-                  bot.notifications ? "left-[21px]" : "left-[3px]",
-                )}
-              />
-            </button>
+            />
           </div>
         </div>
       </div>
     </aside>
+    {creatingRoutine && (
+      <RoutineEditor
+        key={bot.id}
+        bots={[bot]}
+        lockedBotId={bot.id}
+        onClose={() => setCreatingRoutine(false)}
+      />
+    )}
     <LocalComputerAutoWarning
       open={localAutoWarning !== null}
       onCancel={() => setLocalAutoWarning(null)}

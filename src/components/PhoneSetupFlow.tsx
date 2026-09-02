@@ -44,6 +44,7 @@ import {
   phonePairingGate,
   phoneSetupBaseline,
   phoneSetupReducer,
+  preparePhonePairingRoute,
   queuePhonePairingAttempt,
   releasePhonePairingAttempt,
   shouldArmPhoneSetupProvisioningTimeout,
@@ -54,6 +55,7 @@ import {
 } from "../lib/phone-setup";
 import type { CompanionAccountState } from "../types/ogb";
 import { ConnectionDetail } from "./ConnectionDetail";
+import { brand } from "../lib/brand";
 
 export interface PhoneDevice {
   id: string;
@@ -85,6 +87,7 @@ export type CompanionBridge = {
   start: () => Promise<CompanionState>;
   stop: () => Promise<CompanionState>;
   keepAwake: (enabled: boolean) => Promise<CompanionState>;
+  refreshTailscale: () => Promise<CompanionState>;
   pairing: (open: boolean, expectedToken?: string) => Promise<CompanionState>;
   cloudDesktop: (deviceId: string, allowed: boolean) => Promise<CompanionState>;
   revoke: (deviceId: string) => Promise<CompanionState>;
@@ -202,6 +205,7 @@ export interface PhoneSetupController {
   start: () => void;
   useLocal: () => void;
   useTailscale: () => void;
+  refreshTailscale: () => void;
   requestCode: () => void;
   verifyCode: () => void;
   retryAccount: () => void;
@@ -375,12 +379,22 @@ export function usePhoneSetupController(profileEmail = ""): PhoneSetupController
       }
       setError(null);
       try {
-        const started = state?.enabled
-          ? await companion.state()
-          : await mutateCompanionBridgeState(
+        const started = await preparePhonePairingRoute(
+          routeMode,
+          Boolean(state?.enabled),
+          {
+            read: () => companion.state(),
+            start: () => mutateCompanionBridgeState(
               companionMutationEpoch,
               () => companion.start(),
-            );
+            ),
+            refreshTailscale: () => mutateCompanionBridgeState(
+              companionMutationEpoch,
+              () => companion.refreshTailscale(),
+            ),
+            shouldContinue: isCurrent,
+          },
+        );
         if (!isCurrent()) return;
         setState(started);
         const startFailure = companionStartFailure(started);
@@ -539,6 +553,10 @@ export function usePhoneSetupController(profileEmail = ""): PhoneSetupController
     setAccountError(null);
     void openPairing("tailscale", undefined, generation);
   }, [flow.active, openPairing, state?.devices]);
+
+  const refreshTailscale = useCallback(() => {
+    void act((companion) => companion.refreshTailscale());
+  }, [act]);
 
   const requestCode = useCallback(() => {
     const remote = companionAccountBridge();
@@ -840,6 +858,7 @@ export function usePhoneSetupController(profileEmail = ""): PhoneSetupController
     start,
     useLocal,
     useTailscale,
+    refreshTailscale,
     requestCode,
     verifyCode,
     retryAccount,
@@ -913,7 +932,7 @@ export function PhoneSetupFlowView({
         <div className="flex size-14 items-center justify-center rounded-2xl bg-accent/12 text-accent">
           <Smartphone size={26} />
         </div>
-        <h2 className="mt-4 text-[19px] font-semibold text-ink">Use OpenMausBot from your phone</h2>
+        <h2 className="mt-4 text-[19px] font-semibold text-ink">Use {brand().name} from your phone</h2>
         <p className="mt-1.5 max-w-[460px] text-[13.5px] leading-relaxed text-ink-secondary">
           Check chats, answer approvals, and send new work without staying at your computer.
         </p>
@@ -1048,7 +1067,7 @@ export function PhoneSetupFlowView({
         <div className="my-4 flex items-center gap-3 text-[11px] text-ink-secondary">
           <span className="h-px flex-1 bg-hairline/40" /> or <span className="h-px flex-1 bg-hairline/40" />
         </div>
-        {c.tailscaleAvailable && (
+        {variant === "onboarding" && c.tailscaleAvailable && (
           <>
             <button
               disabled={c.busy || c.accountBusy}
@@ -1065,7 +1084,7 @@ export function PhoneSetupFlowView({
         <button
           disabled={c.busy || c.accountBusy}
           onClick={c.useLocal}
-          className={`${c.tailscaleAvailable ? "mt-3" : ""} flex items-center justify-center gap-2 rounded-lg border border-hairline/50 py-2.5 text-[13px] text-ink hover:bg-control disabled:opacity-40`}
+          className={`${variant === "onboarding" && c.tailscaleAvailable ? "mt-3" : ""} flex items-center justify-center gap-2 rounded-lg border border-hairline/50 py-2.5 text-[13px] text-ink hover:bg-control disabled:opacity-40`}
         >
           <Wifi size={15} /> Pair on this Wi-Fi instead
         </button>
@@ -1121,7 +1140,7 @@ export function PhoneSetupFlowView({
           }}
           className="mt-5 w-full max-w-[280px] rounded-lg bg-accent py-2.5 text-[14px] font-medium text-white"
         >
-          {variant === "onboarding" ? "Start using OpenMausBot" : "Done"}
+          {variant === "onboarding" ? `Start using ${brand().name}` : "Done"}
         </button>
       </div>
     );

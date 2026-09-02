@@ -1,8 +1,9 @@
-import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
+import type { GroupGoalRunStatus } from "../shared/group-goal-run.ts";
 import {
   nextOccurrence,
   RoutineManager,
@@ -21,11 +22,24 @@ function tempFile() {
 function harness(start = new Date(2026, 7, 17, 8, 0, 0).getTime()) {
   let now = start;
   let bot: "ready" | "busy" | "missing" = "ready";
+  let goal: "ready" | "busy" | "missing" = "ready";
   let task = 0;
+  let goalTask = 0;
   const started: Array<{ botId: string; threadId: string; prompt: string }> = [];
+  const startedGoals: Array<{
+    groupId: string;
+    threadId: string;
+    prompt: string;
+    coordinatorBotId: string;
+    runId: string;
+    onDispatchError: (message: string) => void;
+  }> = [];
   const runOns: string[] = [];
   const triggerSources: string[] = [];
   const taskActivations: boolean[] = [];
+  const goalTasks: Array<{ groupId: string; title: string }> = [];
+  const interruptedTurns: Array<{ botId: string; threadId: string; runOn: string }> = [];
+  const interruptedGoals: Array<{ groupId: string; threadId: string }> = [];
   const emitted: any[] = [];
   const changed: any[] = [];
   const failed: any[] = [];
@@ -34,14 +48,28 @@ function harness(start = new Date(2026, 7, 17, 8, 0, 0).getTime()) {
     now: () => now,
     emit: (payload) => emitted.push(payload),
     botState: () => bot,
+    goalState: () => goal,
     createTask: (_botId, _title, activate = false) => {
       taskActivations.push(activate);
       return { threadId: `thread-${++task}` };
+    },
+    createGoalTask: (groupId, title) => {
+      goalTasks.push({ groupId, title });
+      return { threadId: `goal-thread-${++goalTask}` };
     },
     startTurn: async (botId, threadId, prompt, runOn, triggerSource) => {
       started.push({ botId, threadId, prompt });
       runOns.push(runOn);
       triggerSources.push(triggerSource);
+    },
+    startGoal: async (groupId, threadId, prompt, coordinatorBotId, runId, onDispatchError) => {
+      startedGoals.push({ groupId, threadId, prompt, coordinatorBotId, runId, onDispatchError });
+    },
+    interruptTurn: async (botId, threadId, runOn) => {
+      interruptedTurns.push({ botId, threadId, runOn });
+    },
+    interruptGoal: async (groupId, threadId) => {
+      interruptedGoals.push({ groupId, threadId });
     },
     onRunChanged: (run) => changed.push(run),
     onRunFailed: (run) => failed.push(run),
@@ -52,13 +80,18 @@ function harness(start = new Date(2026, 7, 17, 8, 0, 0).getTime()) {
     options,
     emitted,
     started,
+    startedGoals,
     runOns,
     triggerSources,
     taskActivations,
+    goalTasks,
+    interruptedTurns,
+    interruptedGoals,
     changed,
     failed,
     setNow: (value: number) => (now = value),
     setBot: (value: typeof bot) => (bot = value),
+    setGoal: (value: typeof goal) => (goal = value),
   };
 }
 
@@ -83,6 +116,36 @@ describe("nextOccurrence", () => {
 });
 
 describe("RoutineManager", () => {
+  it("accepts five-minute windows and preserves the manager's clamping semantics", () => {
+    const h = harness();
+    const create = (name: string, durationMinutes?: number) => h.manager.create({
+      name,
+      prompt: "Check the queue",
+      botId: "maus-1",
+      schedule: { type: "daily", time: "09:00", weekdays: [1] },
+      durationMinutes,
+    });
+
+    expect(create("Minimum", 5).durationMinutes).toBe(5);
+    expect(create("Below minimum", 4).durationMinutes).toBe(5);
+    expect(create("Default").durationMinutes).toBe(30);
+    expect(create("Above maximum", 241).durationMinutes).toBe(240);
+  });
+
+  it("stores routine data with owner-only permissions", () => {
+    const h = harness();
+    h.manager.create({
+      name: "Private routine",
+      prompt: "Keep this private",
+      botId: "maus-private",
+      schedule: { type: "daily", time: "09:00", weekdays: [1] },
+    });
+
+    if (process.platform !== "win32") {
+      expect(statSync(h.options.file!).mode & 0o777).toBe(0o600);
+    }
+  });
+
   it("persists definitions separately from permanent run receipts", async () => {
     const h = harness();
     const routine = h.manager.create({
@@ -118,6 +181,76 @@ describe("RoutineManager", () => {
         error: "OpenMausBot restarted while this routine was running",
       },
     ]);
+  });
+
+  it("persists attachment metadata and migrates old definitions and runs to empty arrays", () => {
+    const h = harness();
+    h.setBot("busy");
+    const routine = h.manager.create({
+      name: "Review attachment",
+      prompt: "Review the supplied context",
+      botId: "maus-attachments",
+      schedule: { type: "daily", time: "09:00", weekdays: [1] },
+      attachments: [{
+        id: "file-1",
+        kind: "file",
+        name: "brief.pdf",
+        path: "/tmp/brief.pdf",
+        size: 4_096,
+      }],
+    });
+    h.manager.runNow(routine.id);
+
+    const persisted = new RoutineManager(h.options);
+    expect(persisted.listRoutines()[0]?.attachments).toEqual([{
+      id: "file-1",
+      kind: "file",
+      name: "brief.pdf",
+      path: "/tmp/brief.pdf",
+      size: 4_096,
+    }]);
+    expect(persisted.listRuns()[0]?.attachments).toEqual(persisted.listRoutines()[0]?.attachments);
+
+    const file = h.options.file!;
+    const oldFile = JSON.parse(readFileSync(file, "utf8")) as {
+      routines: Array<{ attachments?: unknown }>;
+      runs: Array<{ attachments?: unknown }>;
+    };
+    delete oldFile.routines[0]!.attachments;
+    delete oldFile.runs[0]!.attachments;
+    writeFileSync(file, JSON.stringify(oldFile));
+
+    const migrated = new RoutineManager(h.options);
+    expect(migrated.listRoutines()[0]?.attachments).toEqual([]);
+    expect(migrated.listRuns()[0]?.attachments).toEqual([]);
+  });
+
+  it("migrates routines and run receipts without a target to bot execution", () => {
+    const h = harness();
+    h.setBot("busy");
+    const routine = h.manager.create({
+      name: "Legacy bot routine",
+      prompt: "Keep running as a bot",
+      botId: "maus-legacy",
+      schedule: { type: "daily", time: "09:00", weekdays: [1] },
+    });
+    h.manager.runNow(routine.id);
+
+    const stored = JSON.parse(readFileSync(h.options.file!, "utf8")) as {
+      routines: Array<{ target?: unknown; groupId?: unknown }>;
+      runs: Array<{ target?: unknown; groupId?: unknown }>;
+    };
+    delete stored.routines[0]!.target;
+    delete stored.runs[0]!.target;
+    stored.routines[0]!.groupId = "stale-room";
+    stored.runs[0]!.groupId = "stale-room";
+    writeFileSync(h.options.file!, JSON.stringify(stored));
+
+    const migrated = new RoutineManager(h.options);
+    expect(migrated.listRoutines()[0]).toMatchObject({ target: "bot", botId: "maus-legacy" });
+    expect(migrated.listRoutines()[0]?.groupId).toBeUndefined();
+    expect(migrated.listRuns()[0]).toMatchObject({ target: "bot", botId: "maus-legacy" });
+    expect(migrated.listRuns()[0]?.groupId).toBeUndefined();
   });
 
   it("persists confirmation receipts with the scheduler mutation and removes them after settlement", () => {
@@ -360,6 +493,98 @@ describe("RoutineManager", () => {
     expect(h.taskActivations).toEqual([false]);
   });
 
+  it("distinguishes direct bot work from room goals coordinated by the same bot", async () => {
+    const h = harness();
+    const roomRoutine = h.manager.create({
+      name: "Coordinate launch",
+      prompt: "Coordinate the room",
+      target: "room-goal",
+      botId: "chief-1",
+      groupId: "room-1",
+      schedule: { type: "daily", time: "09:00", weekdays: [1] },
+    });
+    const roomRun = h.manager.runNow(roomRoutine.id)!;
+    await h.manager.tick();
+
+    expect(h.manager.activeRunForBot("chief-1")?.id).toBe(roomRun.id);
+    expect(h.manager.activeBotRunForBot("chief-1")).toBeNull();
+
+    const botRoutine = h.manager.create({
+      name: "Private brief",
+      prompt: "Prepare the private brief",
+      botId: "chief-1",
+      schedule: { type: "daily", time: "09:00", weekdays: [1] },
+    });
+    const botRun = h.manager.runNow(botRoutine.id)!;
+    await h.manager.tick();
+
+    expect(h.manager.activeRunForBot("chief-1")?.id).toBe(roomRun.id);
+    expect(h.manager.activeBotRunForBot("chief-1")?.id).toBe(botRun.id);
+    expect(h.manager.activeBotRunForBot("another-bot")).toBeNull();
+  });
+
+  it("queues behind a busy room goal, then dispatches it into a detached room task", async () => {
+    const h = harness();
+    h.setGoal("busy");
+    const routine = h.manager.create({
+      name: "Team launch",
+      prompt: "Prepare and verify the launch",
+      target: "room-goal",
+      botId: "chief-1",
+      groupId: "room-1",
+      schedule: { type: "once", at: new Date(2026, 7, 17, 8, 1).getTime() },
+    });
+    h.setNow(routine.nextRunAt!);
+    await h.manager.tick();
+
+    expect(h.manager.listRuns()[0]).toMatchObject({
+      status: "queued",
+      target: "room-goal",
+      groupId: "room-1",
+      botId: "chief-1",
+    });
+    expect(h.startedGoals).toHaveLength(0);
+
+    h.manager.update(routine.id, { target: "bot", groupId: null });
+    h.setGoal("ready");
+    await h.manager.tick();
+    const run = h.manager.listRuns()[0]!;
+    expect(h.goalTasks).toEqual([{ groupId: "room-1", title: "Team launch" }]);
+    expect(h.startedGoals[0]).toMatchObject({
+      groupId: "room-1",
+      threadId: "goal-thread-1",
+      prompt: "Prepare and verify the launch",
+      coordinatorBotId: "chief-1",
+      runId: run.id,
+    });
+    expect(run).toMatchObject({ status: "running", threadId: "goal-thread-1" });
+    expect(h.manager.listRoutines()[0]).toMatchObject({ target: "bot", groupId: undefined });
+    expect(h.taskActivations).toEqual([]);
+  });
+
+  it("fails a queued room goal when its room or coordinator disappears", async () => {
+    const h = harness();
+    h.setGoal("busy");
+    const routine = h.manager.create({
+      name: "Team launch",
+      prompt: "Prepare the launch",
+      target: "room-goal",
+      botId: "chief-1",
+      groupId: "room-1",
+      schedule: { type: "once", at: new Date(2026, 7, 17, 8, 1).getTime() },
+    });
+    h.setNow(routine.nextRunAt!);
+    await h.manager.tick();
+    h.setGoal("missing");
+    await h.manager.tick();
+
+    expect(h.manager.listRuns()[0]).toMatchObject({
+      status: "failed",
+      error: "The assigned room or coordinator no longer exists",
+    });
+    expect(h.startedGoals).toHaveLength(0);
+  });
+
   it("cancels queued work when a routine is paused", async () => {
     const h = harness();
     h.setBot("busy");
@@ -378,6 +603,99 @@ describe("RoutineManager", () => {
 
     expect(h.manager.listRuns()[0]).toMatchObject({ status: "cancelled" });
     expect(h.started).toHaveLength(0);
+  });
+
+  it("disables a deleted room's routines and cancels only that room's active run snapshots", async () => {
+    const h = harness();
+    const schedule = { type: "daily" as const, time: "23:59", weekdays: [1] };
+    const roomRoutine = h.manager.create({
+      name: "Room one goal",
+      prompt: "Work together",
+      target: "room-goal",
+      botId: "chief-1",
+      groupId: "room-1",
+      schedule,
+    });
+    const pausedRoomRoutine = h.manager.create({
+      name: "Already paused",
+      prompt: "Stay paused",
+      target: "room-goal",
+      botId: "chief-1",
+      groupId: "room-1",
+      enabled: false,
+      schedule,
+    });
+    const otherRoomRoutine = h.manager.create({
+      name: "Room two goal",
+      prompt: "Keep working elsewhere",
+      target: "room-goal",
+      botId: "chief-1",
+      groupId: "room-2",
+      schedule,
+    });
+    const botRoutine = h.manager.create({
+      name: "Chief's private task",
+      prompt: "Keep the direct task running",
+      botId: "chief-1",
+      schedule,
+    });
+
+    const waitingRun = h.manager.runNow(roomRoutine.id)!;
+    await h.manager.tick();
+    h.manager.handleRuntimeEvent({
+      eventId: "room-waiting",
+      provider: "fake",
+      threadId: "goal-thread-1",
+      createdAt: new Date().toISOString(),
+      type: "request.opened",
+      requestType: "question",
+      tool: "ask",
+      summary: "Choose an approach",
+    });
+    const runningRun = h.manager.runNow(roomRoutine.id)!;
+    await h.manager.tick();
+    const otherRoomRun = h.manager.runNow(otherRoomRoutine.id)!;
+    await h.manager.tick();
+    const botRun = h.manager.runNow(botRoutine.id)!;
+    await h.manager.tick();
+    h.setGoal("busy");
+    const queuedRun = h.manager.runNow(roomRoutine.id)!;
+    await h.manager.tick();
+
+    const pausedBefore = h.manager.listRoutines().find((routine) => routine.id === pausedRoomRoutine.id)!;
+    h.emitted.length = 0;
+    h.changed.length = 0;
+    h.interruptedGoals.length = 0;
+    h.manager.disableForGroup("room-1");
+
+    const routines = new Map(h.manager.listRoutines().map((routine) => [routine.id, routine]));
+    expect(routines.get(roomRoutine.id)).toMatchObject({ enabled: false, nextRunAt: null });
+    expect(routines.get(pausedRoomRoutine.id)).toEqual(pausedBefore);
+    expect(routines.get(otherRoomRoutine.id)).toMatchObject({ enabled: true, groupId: "room-2" });
+    expect(routines.get(botRoutine.id)).toMatchObject({ enabled: true, target: "bot" });
+
+    const runs = new Map(h.manager.listRuns().map((run) => [run.id, run]));
+    for (const id of [waitingRun.id, runningRun.id, queuedRun.id]) {
+      expect(runs.get(id)).toMatchObject({
+        status: "cancelled",
+        error: "The assigned room was deleted",
+        finishedAt: expect.any(Number),
+      });
+      expect(runs.get(id)?.attention).toBeUndefined();
+    }
+    expect(runs.get(otherRoomRun.id)).toMatchObject({ status: "running", groupId: "room-2" });
+    expect(runs.get(botRun.id)).toMatchObject({ status: "running", target: "bot" });
+
+    expect(h.interruptedGoals).toEqual([
+      { groupId: "room-1", threadId: "goal-thread-1" },
+      { groupId: "room-1", threadId: "goal-thread-2" },
+    ]);
+    expect(h.interruptedTurns).toEqual([]);
+    expect(h.changed.map((run) => run.id)).toEqual([waitingRun.id, runningRun.id, queuedRun.id]);
+    expect(h.emitted.filter((payload) => payload.kind === "routine").map((payload) => payload.routine.id))
+      .toEqual([roomRoutine.id]);
+    expect(h.emitted.filter((payload) => payload.kind === "routine.run").map((payload) => payload.run.id))
+      .toEqual([waitingRun.id, runningRun.id, queuedRun.id]);
   });
 
   it("snapshots queued instructions so later edits do not rewrite a receipt", async () => {
@@ -401,6 +719,154 @@ describe("RoutineManager", () => {
       routineName: "Original brief",
       prompt: "Use the original instructions",
     });
+  });
+
+  it("snapshots attachment context and deep-clones it across public boundaries", async () => {
+    const h = harness();
+    h.setBot("busy");
+    const routine = h.manager.create({
+      name: "Original context",
+      prompt: "Use the original attachment",
+      botId: "maus-context",
+      schedule: { type: "once", at: new Date(2026, 7, 17, 8, 1).getTime() },
+      attachments: [{
+        id: "original",
+        kind: "file",
+        name: "original.txt",
+        path: "/tmp/original.txt",
+        size: 12,
+      }],
+    });
+    const emittedRoutine = h.emitted.find((payload) => payload.kind === "routine").routine;
+    emittedRoutine.attachments[0].path = "/tmp/tampered-emission.txt";
+    expect(h.manager.listRoutines()[0]?.attachments?.[0]?.path).toBe("/tmp/original.txt");
+    h.setNow(routine.nextRunAt!);
+    await h.manager.tick();
+    h.manager.update(routine.id, {
+      attachments: [{
+        id: "replacement",
+        kind: "file",
+        name: "replacement.txt",
+        path: "/tmp/replacement.txt",
+        size: 24,
+      }],
+    });
+
+    const publicRun = h.manager.listRuns()[0]!;
+    publicRun.attachments![0]!.path = "/tmp/tampered.txt";
+    expect(h.manager.listRuns()[0]?.attachments?.[0]?.path).toBe("/tmp/original.txt");
+
+    h.setBot("ready");
+    await h.manager.tick();
+    expect(h.started[0]?.prompt).toBe(
+      'Use the original attachment\n\n<attached-file path="/tmp/original.txt" />',
+    );
+    expect(h.manager.listRuns()[0]?.attachments?.[0]?.path).toBe("/tmp/original.txt");
+    expect(h.manager.listRoutines()[0]?.attachments?.[0]?.path).toBe("/tmp/replacement.txt");
+  });
+
+  it("escapes attachment paths only in the ephemeral dispatch prompt", async () => {
+    const h = harness();
+    const unusualPath = '/tmp/a"&<>\t\n\r.png';
+    const routine = h.manager.create({
+      name: "Inspect image",
+      prompt: "Inspect it",
+      botId: "maus-image",
+      schedule: { type: "once", at: new Date(2026, 7, 17, 8, 1).getTime() },
+      attachments: [{
+        id: "image-1",
+        kind: "image",
+        name: "image.png",
+        path: unusualPath,
+        size: 128,
+      }],
+    });
+    h.setNow(routine.nextRunAt!);
+    await h.manager.tick();
+
+    expect(h.started[0]?.prompt).toBe(
+      'Inspect it\n\n<attached-image path="/tmp/a&quot;&amp;&lt;&gt;&#9;&#10;&#13;.png" />',
+    );
+    expect(h.manager.listRoutines()[0]?.prompt).toBe("Inspect it");
+    expect(h.manager.listRoutines()[0]?.attachments?.[0]?.path).toBe(unusualPath);
+    expect(h.manager.listRuns()[0]?.prompt).toBe("Inspect it");
+  });
+
+  it("rejects local attachment context on cloud routines", () => {
+    const h = harness();
+    const attachment = {
+      id: "file-1",
+      kind: "file" as const,
+      name: "private.pdf",
+      path: "/tmp/private.pdf",
+      size: 42,
+    };
+    expect(() => h.manager.create({
+      name: "Cloud review",
+      prompt: "Review this",
+      botId: "maus-cloud",
+      runOn: "cloud",
+      schedule: { type: "daily", time: "09:00", weekdays: [1] },
+      attachments: [attachment],
+    })).toThrow(/only run on this computer/i);
+
+    const local = h.manager.create({
+      name: "Local review",
+      prompt: "Review this",
+      botId: "maus-local",
+      runOn: "maus",
+      schedule: { type: "daily", time: "09:00", weekdays: [1] },
+      attachments: [attachment],
+    });
+    expect(() => h.manager.update(local.id, { runOn: "cloud" })).toThrow(/cloud file staging/i);
+    expect(h.manager.listRoutines()[0]).toMatchObject({ runOn: "maus", attachments: [attachment] });
+  });
+
+  it("keeps room goals local and attachment-free", () => {
+    const h = harness();
+    const base = {
+      name: "Team review",
+      prompt: "Review this together",
+      target: "room-goal" as const,
+      botId: "chief-1",
+      groupId: "room-1",
+      schedule: { type: "daily" as const, time: "09:00", weekdays: [1] },
+    };
+    expect(() => h.manager.create({ ...base, runOn: "cloud" })).toThrow(/only run on this computer/i);
+    expect(() => h.manager.create({
+      ...base,
+      attachments: [{ id: "brief", kind: "file", name: "brief.txt", path: "/tmp/brief.txt", size: 10 }],
+    })).toThrow(/do not support attachments/i);
+
+    const routine = h.manager.create(base);
+    expect(() => h.manager.update(routine.id, { groupId: null })).toThrow(/choose a room/i);
+    const botRoutine = h.manager.update(routine.id, { target: "bot", groupId: null });
+    expect(botRoutine).toMatchObject({ target: "bot", botId: "chief-1" });
+    expect(botRoutine?.groupId).toBeUndefined();
+  });
+
+  it("rejects malformed or unbounded attachment metadata", () => {
+    const h = harness();
+    const base = {
+      name: "Validate context",
+      prompt: "Review this",
+      botId: "maus-local",
+      schedule: { type: "daily" as const, time: "09:00", weekdays: [1] },
+    };
+    expect(() => h.manager.create({
+      ...base,
+      attachments: [{ id: "bad", kind: "file", name: "bad.txt", path: "/tmp/bad.txt", size: -1 }],
+    })).toThrow(/valid attachment/i);
+    expect(() => h.manager.create({
+      ...base,
+      attachments: Array.from({ length: 51 }, (_, index) => ({
+        id: `file-${index}`,
+        kind: "file" as const,
+        name: `${index}.txt`,
+        path: `/tmp/${index}.txt`,
+        size: index,
+      })),
+    })).toThrow(/no more than 50 attachments/i);
   });
 
   it("snapshots and dispatches the selected execution machine", async () => {
@@ -492,6 +958,156 @@ describe("RoutineManager", () => {
       output: "Report shipped.",
       cost: 0.02,
     });
+  });
+
+  it("ignores intermediate provider completions until the room goal reports its outcome", async () => {
+    const h = harness();
+    const routine = h.manager.create({
+      name: "Team report",
+      prompt: "Write and review the report",
+      target: "room-goal",
+      botId: "chief-1",
+      groupId: "room-1",
+      schedule: { type: "once", at: new Date(2026, 7, 17, 8, 1).getTime() },
+    });
+    h.setNow(routine.nextRunAt!);
+    await h.manager.tick();
+    const run = h.manager.listRuns()[0]!;
+
+    expect(h.manager.handleRuntimeEvent({
+      eventId: "private-coordinator-text",
+      provider: "fake",
+      threadId: "goal-thread-1",
+      createdAt: new Date().toISOString(),
+      type: "item.completed",
+      itemType: "assistant_text",
+      text: "private coordinator envelope",
+    })).toBeNull();
+    const folded = h.manager.handleRuntimeEvent({
+      eventId: "coordinator-turn-1",
+      provider: "fake",
+      threadId: "goal-thread-1",
+      createdAt: new Date().toISOString(),
+      type: "turn.completed",
+      ok: true,
+      cost: 0.03,
+    });
+    expect(folded).toBeNull();
+    expect(h.manager.listRuns()[0]).toMatchObject({ status: "running" });
+    expect(h.manager.listRuns()[0]?.output).toBeUndefined();
+    expect(h.manager.listRuns()[0]?.cost).toBeUndefined();
+
+    expect(h.manager.finishGoalRun(run.id, "completed", "Report reviewed and ready.")).toMatchObject({
+      status: "completed",
+      output: "Report reviewed and ready.",
+    });
+  });
+
+  it.each(["needs-input", "paused"] satisfies GroupGoalRunStatus[])(
+    "keeps a %s room outcome waiting on the human instead of completing the routine",
+    async (status) => {
+      const h = harness();
+      const routine = h.manager.create({
+        name: "Bounded team goal",
+        prompt: "Reach a bounded result",
+        target: "room-goal",
+        botId: "chief-1",
+        groupId: "room-1",
+        schedule: { type: "once", at: new Date(2026, 7, 17, 8, 1).getTime() },
+      });
+      h.setNow(routine.nextRunAt!);
+      await h.manager.tick();
+      const run = h.manager.listRuns()[0]!;
+
+      const finished = h.manager.finishGoalRun(run.id, status, `${status} detail`);
+      // the team stopped to ask — that is a run waiting on a person, and the
+      // one outcome that must never be filed as a quiet completion
+      expect(finished).toMatchObject({ status: "waiting", goalStatus: status, attention: `${status} detail` });
+      expect(finished?.finishedAt).toBeUndefined();
+      expect(h.failed).toEqual([]);
+    },
+  );
+
+  it.each(["blocked", "limit-reached"] satisfies GroupGoalRunStatus[])(
+    "records a %s room outcome as a failed routine run with the goal's own detail",
+    async (status) => {
+      const h = harness();
+      const routine = h.manager.create({
+        name: "Bounded team goal",
+        prompt: "Reach a bounded result",
+        target: "room-goal",
+        botId: "chief-1",
+        groupId: "room-1",
+        schedule: { type: "once", at: new Date(2026, 7, 17, 8, 1).getTime() },
+      });
+      h.setNow(routine.nextRunAt!);
+      await h.manager.tick();
+      const run = h.manager.listRuns()[0]!;
+
+      const finished = h.manager.finishGoalRun(run.id, status, `${status} detail`);
+      expect(finished).toMatchObject({ status: "failed", goalStatus: status, error: `${status} detail` });
+      expect(finished?.finishedAt).toBeTypeOf("number");
+      expect(h.failed).toHaveLength(1);
+    },
+  );
+
+  it("maps failed and stopped room outcomes to their routine terminal states", async () => {
+    const failedHarness = harness();
+    const failedRoutine = failedHarness.manager.create({
+      name: "Failing team goal",
+      prompt: "Try the work",
+      target: "room-goal",
+      botId: "chief-1",
+      groupId: "room-1",
+      schedule: { type: "once", at: new Date(2026, 7, 17, 8, 1).getTime() },
+    });
+    failedHarness.setNow(failedRoutine.nextRunAt!);
+    await failedHarness.manager.tick();
+    const failedRun = failedHarness.manager.listRuns()[0]!;
+    expect(failedHarness.manager.finishGoalRun(failedRun.id, "failed", "Coordinator crashed")).toMatchObject({
+      status: "failed",
+      goalStatus: "failed",
+      error: "Coordinator crashed",
+    });
+    expect(failedHarness.failed).toMatchObject([{ id: failedRun.id, status: "failed" }]);
+
+    const stoppedHarness = harness();
+    const stoppedRoutine = stoppedHarness.manager.create({
+      name: "Stopped team goal",
+      prompt: "Try the work",
+      target: "room-goal",
+      botId: "chief-1",
+      groupId: "room-1",
+      schedule: { type: "once", at: new Date(2026, 7, 17, 8, 1).getTime() },
+    });
+    stoppedHarness.setNow(stoppedRoutine.nextRunAt!);
+    await stoppedHarness.manager.tick();
+    const stoppedRun = stoppedHarness.manager.listRuns()[0]!;
+    expect(stoppedHarness.manager.finishGoalRun(stoppedRun.id, "stopped", "Stopped by you.")).toMatchObject({
+      status: "cancelled",
+      goalStatus: "stopped",
+    });
+    expect(stoppedHarness.failed).toEqual([]);
+  });
+
+  it("cancels a running room goal through the room orchestrator", async () => {
+    const h = harness();
+    const routine = h.manager.create({
+      name: "Cancelable team goal",
+      prompt: "Work until stopped",
+      target: "room-goal",
+      botId: "chief-1",
+      groupId: "room-1",
+      schedule: { type: "once", at: new Date(2026, 7, 17, 8, 1).getTime() },
+    });
+    h.setNow(routine.nextRunAt!);
+    await h.manager.tick();
+    const run = h.manager.listRuns()[0]!;
+
+    expect(await h.manager.cancelRun(run.id)).toMatchObject({ status: "cancelled", goalStatus: "stopped" });
+    expect(h.interruptedGoals).toEqual([{ groupId: "room-1", threadId: "goal-thread-1" }]);
+    expect(h.interruptedTurns).toEqual([]);
+    expect(h.manager.finishGoalRun(run.id, "stopped", "Stopped by you.")).toBeNull();
   });
 
   it("reports a failed run once with its detached thread", async () => {

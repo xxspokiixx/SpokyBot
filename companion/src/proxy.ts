@@ -19,7 +19,7 @@ import {
   MAX_COMPANION_ENDPOINTS,
   type CompanionEndpoint,
 } from "./endpoints.ts";
-import { denyReason, isCloudDesktopJoin } from "./routes.ts";
+import { denyReason, isCloudDesktopJoin, isMessageFileDownload } from "./routes.ts";
 import { createSseScrubber, isJson, scrub } from "./wire.ts";
 
 /** What the forwarding handler needs from the process around it. */
@@ -207,6 +207,18 @@ const forwardHeaders = (req: IncomingMessage): Record<string, string> => {
   };
   const contentType = req.headers["content-type"];
   if (contentType) out["content-type"] = String(contentType);
+  // Preserve a trustworthy byte count for bounded raw uploads. Without it,
+  // the harness must grow its disk-quota reservation as each streamed chunk
+  // arrives. Node has already parsed this as one request header; keep an
+  // additional canonical-decimal check before replaying it upstream.
+  const contentLength = req.headers["content-length"];
+  if (
+    typeof contentLength === "string"
+    && /^(?:0|[1-9]\d*)$/.test(contentLength)
+    && Number.isSafeInteger(Number(contentLength))
+  ) {
+    out["content-length"] = contentLength;
+  }
   // Last-Event-ID is how a reconnecting client asks for the gap. Dropping it
   // would turn every resume into a full re-hydration, silently.
   const lastEventId = req.headers["last-event-id"];
@@ -448,7 +460,11 @@ export function createProxyHandler(options: ProxyOptions) {
         const encoding = String(harness.headers["content-encoding"] ?? "")
           .trim()
           .toLowerCase();
-        if (!isJson(String(contentType ?? "")) || (encoding && encoding !== "identity")) {
+        if (
+          isMessageFileDownload(method, path)
+          || !isJson(String(contentType ?? ""))
+          || (encoding && encoding !== "identity")
+        ) {
           // images and anything else: byte-for-byte, no parsing.
           //
           // Encoded bodies come through here too. Scrubbing one would mean

@@ -499,6 +499,24 @@ describe("pending queued chip", () => {
     expect(landed.pendingQueued).toEqual({});
   });
 
+  it("starts mascot work motion when the queued line is released into the transcript", () => {
+    const withBot = reducer(initialState, { type: "botPatched", bot });
+    const landed = reducer(withBot, {
+      type: "messageAdded",
+      threadId: "t1",
+      message: {
+        id: "landed",
+        at: 2,
+        role: "user",
+        kind: "text",
+        text: "now run this",
+        queueId: "q-landed",
+      },
+    });
+
+    expect(landed.mascotMotion).toMatchObject({ botId: "b1", kind: "working" });
+  });
+
   it("keeps a Shift+Enter multiline message as one entry", () => {
     const withBot = reducer(initialState, { type: "botPatched", bot });
     const queued = reducer(withBot, {
@@ -656,6 +674,22 @@ describe("pending queued chip", () => {
       type: "cancelQueued",
       botId: "b1",
       queueId: "q-drop",
+    });
+    expect(cancelled.pendingQueued).toEqual({});
+  });
+
+  it("drops a cancelled channel follow-up from its original task", () => {
+    const queued = reducer(initialState, {
+      type: "pendingQueued",
+      threadId: "room-task-1",
+      queueId: "q-room-drop",
+      text: "never mind",
+    });
+    const cancelled = reducer(queued, {
+      type: "cancelGroupQueued",
+      groupId: "room-1",
+      threadId: "room-task-1",
+      queueId: "q-room-drop",
     });
     expect(cancelled.pendingQueued).toEqual({});
   });

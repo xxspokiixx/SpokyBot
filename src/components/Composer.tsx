@@ -1,6 +1,6 @@
 import { track } from "@/lib/analytics";
 import { useCallback, useEffect, useMemo, useRef, useState, type SetStateAction } from "react";
-import { ArrowUp, Check, Clock, Hand, Mic, Paperclip, ShieldCheck, Square, Users, X } from "lucide-react";
+import { ArrowUp, Check, Clock, Hand, Mic, Paperclip, ShieldCheck, Square, Target, Users, X } from "lucide-react";
 import { useStore, visibleMessages, type Bot, type Group, type Message } from "@/state/store";
 import { cn } from "@/lib/cn";
 import {
@@ -30,10 +30,12 @@ import {
   type PasteAttachment,
 } from "@/lib/composer-attachments";
 import { normalizeState } from "@/lib/mascot";
-import { groupComposerHint, roomRespondersForComposer } from "@/lib/group-routing";
+import { goalCoordinatorForComposer, groupComposerHint, roomRespondersForComposer } from "@/lib/group-routing";
 import { PendingApprovalActions, PendingApprovalPanel, pendingApprovals } from "./PendingApproval";
 import { useDesktopCapabilities } from "./DesktopCapabilities";
 import { ReplyQuote } from "./ReplyQuote";
+import { ComposerInjectNow, composerCanInjectNow } from "./ComposerInjectNow";
+import { QueuedComposerMessages } from "./ComposerQueuedMessages";
 
 /** The active @mention query at the caret: the text between an `@` that
  * starts a word and the caret. null = no mention being typed. */
@@ -53,15 +55,9 @@ interface ComposerDraftSnapshot extends ComposerSendSnapshot {
   reply: Message | null;
 }
 
-interface QueuedGroupSend {
-  text: string;
-  replyToId?: string;
-  draft: ComposerDraftSnapshot;
-}
-
-/** Composer chip for Auto mode. Same `autoApprove` bit as the profile switch
- * — picking Auto mode here turns that on. The chip only changes its name,
- * not its color. */
+/** Composer chip for Auto mode. Compact label (Ask / Auto); the menu still
+ * uses the full names. Same `autoApprove` bit as the profile switch — picking
+ * Auto mode here turns that on. The chip only changes its name, not its color. */
 function PermissionModeSelector({ bot, onSetAuto }: { bot: Bot; onSetAuto: (auto: boolean) => void }) {
   const [open, setOpen] = useState(false);
   const wrapperRef = useRef<HTMLDivElement>(null);
@@ -95,7 +91,7 @@ function PermissionModeSelector({ bot, onSetAuto }: { bot: Bot; onSetAuto: (auto
         className="flex h-8 items-center gap-1.5 whitespace-nowrap rounded-full border border-hairline/20 bg-transparent px-3 text-[13px] text-ink-secondary hover:bg-raised hover:text-ink"
       >
         {on ? <ShieldCheck size={14} className="opacity-70" /> : <Hand size={14} className="opacity-70" />}
-        {on ? "Auto mode" : "Ask for approval"}
+        {on ? "Auto" : "Ask"}
       </button>
 
       {open && (
@@ -183,7 +179,7 @@ export function Composer({
   // Unified target: a 1:1 bot thread or a room. In a room the @ picker
   // offers members plus @everyone; explicit mentions override the room's
   // configured default responder.
-  const busy = group ? Boolean(group.busyBotId) : Boolean(bot?.busy);
+  const busy = group ? Boolean(group.working || group.busyBotId) : Boolean(bot?.busy);
   // an engine with a live session takes a message INTO the running turn;
   // for those the composer never locks — the server steers instead of 409
   const canSteer =
@@ -199,7 +195,7 @@ export function Composer({
       members?.find((member) => member.id === group.busyBotId)
     : bot;
   const busyName = group
-    ? (members?.find((b) => b.id === group.busyBotId)?.name ?? "A bot")
+    ? (members?.find((b) => b.id === group.busyBotId)?.name ?? (group.working ? "The team" : "A bot"))
     : (bot?.name ?? "The bot");
   // Per-thread draft: switching bots unmounts this component, so both the
   // text and its attachment chips have to outlive it (see lib/drafts).
@@ -211,6 +207,9 @@ export function Composer({
     !group && bot ? `bot:${bot.id}` : undefined,
   );
   const failedSends = useFailedComposerSends(draftId);
+  // Goal mode is opt-in and one-shot so the next ordinary channel message
+  // cannot accidentally start another multi-turn team run.
+  const [channelMode, setChannelMode] = useState<"chat" | "goal">("chat");
   const editText = useCallback(
     (next: string) => {
       markDraftEdited(draftId);
@@ -229,8 +228,9 @@ export function Composer({
     (sent: ComposerDraftSnapshot) => {
       // Shared recovery reaches a newly mounted view after navigation and
       // falls back to a separate retry item when a newer draft already exists.
-      if (recoverFailedComposerSend(sent) === "restored" && sent.reply) {
-        onRestoreReply?.(sent.reply, sent.threadId);
+      if (recoverFailedComposerSend(sent) === "restored") {
+        setChannelMode(sent.channelMode ?? "chat");
+        if (sent.reply) onRestoreReply?.(sent.reply, sent.threadId);
       }
     },
     [onRestoreReply],
@@ -277,12 +277,15 @@ export function Composer({
       candidate &&
         state.instances.find((i) => i.instanceId === candidate.modelSelection.instanceId)?.capabilities?.images,
     );
-  const imageTargetsSupport = (message: string) => {
+  const imageTargetsSupport = (message: string, mode: "chat" | "goal") => {
     if (!group) return botSupportsImages(bot);
+    if (mode === "goal") {
+      return botSupportsImages(goalCoordinatorForComposer(message, members ?? [], group) ?? undefined);
+    }
     const responders = roomRespondersForComposer(message, members ?? [], group);
     return responders.length > 0 && responders.every(botSupportsImages);
   };
-  const engineSupportsImages = imageTargetsSupport(text);
+  const engineSupportsImages = imageTargetsSupport(text, channelMode);
 
   // ── @mention picker (tag another bot; the agent reaches it via ask_bot) ──
   const mention = mentionQueryAt(text, caret);
@@ -331,28 +334,16 @@ export function Composer({
     });
   };
 
-  // Rooms hold one message client-side while a member speaks; it auto-sends
-  // the moment the room settles. 1:1 mid-turn sends still POST (the harness
-  // queue), but stay off the transcript until drain — the chip here is the
-  // pending row so they cannot become the active leaf mid-turn.
-  const [queued, setQueued] = useState<QueuedGroupSend | null>(null);
-  const queuedRef = useRef(queued);
-  const clearQueued = useCallback(() => {
-    queuedRef.current = null;
-    setQueued(null);
-  }, []);
-  useEffect(
-    () => () => {
-      const unsent = queuedRef.current;
-      if (unsent) restoreDraft(unsent.draft);
-    },
-    [draftId, restoreDraft],
-  );
-  // 1:1 queued sends render as ghost rows in the transcript tail (each with
-  // its own cancel); the composer chip remains only for rooms, whose queue
-  // is local to this component.
-  const pendingChip = group ? queued?.text : undefined;
-  // a chip on its own is a message: the send control has to appear for it
+  // Busy sends are owned by the harness immediately for both channels and
+  // 1:1 chats. Keeping a channel follow-up in this component used to lose its
+  // auto-send intent whenever navigation unmounted the composer.
+  const pendingCount = (state.pendingQueued[threadId] ?? []).length;
+  const queuedMessages = state.pendingQueued[threadId] ?? [];
+  const canInject = composerCanInjectNow(busy, locked, pendingCount);
+  const interruptTurn = () => {
+    if (group) dispatch({ type: "interruptGroup", groupId: group.id });
+    else if (bot) dispatch({ type: "interrupt", botId: bot.id });
+  };
   const fileInput = useRef<HTMLInputElement>(null);
   const [autoWarn, setAutoWarn] = useState(false);
   const [attachmentNotice, setAttachmentNotice] = useState<string | null>(null);
@@ -385,7 +376,8 @@ export function Composer({
 
   const hasContent = Boolean(text.trim()) || attachments.length > 0;
   const retryFailedSend = (failed: FailedComposerSend) => {
-    if (failed.requestText.includes("<attached-image ") && !imageTargetsSupport(failed.requestText)) {
+    const failedMode = failed.channelMode ?? "chat";
+    if (failed.requestText.includes("<attached-image ") && !imageTargetsSupport(failed.requestText, failedMode)) {
       dispatch({ type: "error", message: "The selected responder does not support image attachments." });
       return;
     }
@@ -402,21 +394,19 @@ export function Composer({
           requestText: failed.requestText,
           replyToId: failed.replyToId,
           threadId: failed.threadId,
+          channelMode: failed.channelMode,
         });
       },
     };
     if (group) {
-      dispatch({ type: "sendGroup", groupId: group.id, ...retry });
+      dispatch({ type: "sendGroup", groupId: group.id, mode: failedMode, ...retry });
     } else if (bot) {
       dispatch({ type: "send", botId: bot.id, ...retry });
     }
   };
   const send = () => {
-    // A busy channel already has one locally held send. Keep any newer text
-    // as an editable draft until that send is dispatched; replacing the slot
-    // here would silently lose the first message.
-    if (locked || (group && queued)) return;
-    if (attachments.some((attachment) => attachment.kind === "image") && !imageTargetsSupport(text)) {
+    if (locked) return;
+    if (attachments.some((attachment) => attachment.kind === "image") && !imageTargetsSupport(text, channelMode)) {
       dispatch({ type: "error", message: "The selected responder does not support image attachments." });
       return;
     }
@@ -432,16 +422,8 @@ export function Composer({
       reply: replyTo ?? null,
       replyToId: replyTo?.id,
       threadId,
+      channelMode: group ? channelMode : undefined,
     };
-    if (busy && group) {
-      const pending = { text: t, replyToId: replyTo?.id, draft: sentDraft };
-      queuedRef.current = pending;
-      setQueued(pending);
-      setText("");
-      setAttachments([]);
-      onConsumeReply?.();
-      return;
-    }
     if (group) {
       dispatch({
         type: "sendGroup",
@@ -450,9 +432,10 @@ export function Composer({
         sendId: sentDraft.sendId,
         replyToId: replyTo?.id,
         threadId,
+        mode: channelMode,
         onError: () => restoreDraft(sentDraft),
       });
-      track("message_sent", { room: true });
+      track("message_sent", { room: true, mode: channelMode, queued: busy });
     } else if (bot) {
       dispatch({
         type: "send",
@@ -468,29 +451,8 @@ export function Composer({
     setText("");
     setAttachments([]);
     onConsumeReply?.();
+    if (group) setChannelMode("chat");
   };
-  useEffect(() => {
-    if (busy || !queued) return;
-    if (group) {
-      if (queued.text.includes("<attached-image ") && !imageTargetsSupport(queued.text)) {
-        dispatch({ type: "error", message: "The selected responder does not support image attachments." });
-        clearQueued();
-        restoreDraft(queued.draft);
-        return;
-      }
-      clearQueued();
-      dispatch({
-        type: "sendGroup",
-        groupId: group.id,
-        text: queued.text,
-        sendId: queued.draft.sendId,
-        replyToId: queued.replyToId,
-        threadId: queued.draft.threadId,
-        onError: () => restoreDraft(queued.draft),
-      });
-      track("message_sent", { room: true, queued: true });
-    }
-  }, [busy, queued, group, members, state.instances, dispatch, clearQueued, restoreDraft]);
 
   // native dictation: partials stream into the input while the Swift
   // helper runs; the final transcript stays in the box, ready to edit/send
@@ -571,23 +533,6 @@ export function Composer({
             </button>
           </div>
         ))}
-        {pendingChip && (
-          <div className="mb-2 flex items-center gap-2 rounded-lg border border-hairline/40 bg-panel px-3 py-2 text-[12.5px] text-ink-secondary">
-            <Clock size={13} className="shrink-0" />
-            <span className="min-w-0 flex-1 truncate">
-              Queued — sends when {busyName} finishes: “{pendingChip}”
-            </span>
-            <button
-              type="button"
-              onClick={clearQueued}
-              aria-label="Cancel queued message"
-              title="Cancel queued message"
-              className="ml-auto flex size-5 shrink-0 items-center justify-center rounded text-ink-secondary hover:bg-raised hover:text-ink"
-            >
-              <X size={13} strokeWidth={2.5} />
-            </button>
-          </div>
-        )}
         {pickerOpen && (
           <div
             role="listbox"
@@ -609,6 +554,7 @@ export function Composer({
                 {peer.bot ? (
                   <MausAvatar
                     color={peer.bot.color}
+                    bodyId={peer.bot.mascotBody ?? undefined}
                     state={normalizeState(peer.bot.mascotExpression) ?? "happy"}
                     size={24}
                   />
@@ -632,10 +578,7 @@ export function Composer({
               pending={approval}
               threadId={threadId}
               bot={approvalBot}
-              onCancelTurn={() => {
-                if (group) dispatch({ type: "interruptGroup", groupId: group.id });
-                else if (bot) dispatch({ type: "interrupt", botId: bot.id });
-              }}
+              onCancelTurn={interruptTurn}
             />
           </div>
         )}
@@ -648,6 +591,13 @@ export function Composer({
             />
           </div>
         )}
+        <QueuedComposerMessages
+          items={queuedMessages}
+          onCancel={(queueId) => {
+            if (group) dispatch({ type: "cancelGroupQueued", groupId: group.id, threadId, queueId });
+            else if (bot) dispatch({ type: "cancelQueued", botId: bot.id, queueId });
+          }}
+        />
         <ComposerAttachments
           items={attachments}
           onAdd={addAttachments}
@@ -658,13 +608,14 @@ export function Composer({
           onNotice={setAttachmentNotice}
         />
         <div className="relative">
-          {/* App-ground from the pill's bottom radius down, full-bleed.
-              Bubbles may tuck into the pill; they must not paint under it. */}
+          {/* App-ground from the pill midline down, full-bleed. Bubbles may
+              tuck into the top half of the radius; they must not show below
+              center — including the corner pockets around the paperclip. */}
           <div
             aria-hidden
-            className="absolute -left-5 -right-5 top-[calc(100%-1.5rem)] h-[50vh] bg-app"
+            className="absolute -left-5 -right-5 top-1/2 h-[50vh] bg-app"
           />
-        <div className="relative grid grid-cols-[auto_1fr_auto] items-center gap-x-2 rounded-3xl bg-raised px-3 pb-2 pt-1">
+        <div className="relative z-[1] flex items-end gap-1 rounded-3xl bg-raised px-2 py-1.5">
           <input
             ref={fileInput}
             type="file"
@@ -677,7 +628,7 @@ export function Composer({
             }}
           />
           {!locked && (
-            <div className="col-start-1 row-start-2 mt-1 flex items-center gap-1">
+            <div className="flex items-center gap-1">
               <button
                 type="button"
                 onClick={() => fileInput.current?.click()}
@@ -687,6 +638,27 @@ export function Composer({
               >
                 <Paperclip size={17} />
               </button>
+              {group && !group.dm && (
+                <button
+                  type="button"
+                  aria-pressed={channelMode === "goal"}
+                  aria-label="Finish together"
+                  title="Finish together — the team keeps working until the goal is complete"
+                  onClick={() => {
+                    markDraftEdited(draftId);
+                    setChannelMode((current) => current === "goal" ? "chat" : "goal");
+                  }}
+                  className={cn(
+                    "flex h-8 items-center gap-1.5 whitespace-nowrap rounded-full border px-3 text-[13px] transition-colors",
+                    channelMode === "goal"
+                      ? "border-accent/35 bg-accent/10 text-accent"
+                      : "border-hairline/20 bg-transparent text-ink-secondary hover:bg-raised hover:text-ink",
+                  )}
+                >
+                  <Target size={14} aria-hidden="true" />
+                  Goal
+                </button>
+              )}
               {autoBot && <PermissionModeSelector bot={autoBot} onSetAuto={setAuto} />}
             </div>
           )}
@@ -777,6 +749,8 @@ export function Composer({
               ? "Answer the approval above to continue"
               : recording
               ? "Listening…"
+              : canInject
+                ? `${busyName} is working — inject now to interrupt with the queued message`
               : busy && canSteer
                 ? `${busyName} is working — Enter sends this into the running turn`
               : busy
@@ -784,19 +758,22 @@ export function Composer({
                   ? `${busyName} is working — Enter queues your message`
                   : `${busyName} is working — sends when this turn finishes`
                 : group
-                  ? `Message ${group.name} — ${groupComposerHint(group, members ?? [])}`
+                  ? channelMode === "goal"
+                    ? `Describe what ${group.name} should finish together`
+                    : `Message ${group.name} — ${groupComposerHint(group, members ?? [])}`
                   : `Message ${bot?.name ?? ""}`
           }
           aria-label={`Message ${group ? group.name : (bot?.name ?? "")}`}
-            className="col-span-full row-start-1 max-h-[9rem] min-h-6 w-full resize-none overflow-y-auto self-center bg-transparent px-1 py-1 text-[15px] leading-6 text-ink placeholder:text-ink-secondary focus:outline-none"
+            className="max-h-[9rem] min-h-6 min-w-0 flex-1 resize-none overflow-y-auto self-center bg-transparent px-1 py-1 text-[15px] leading-6 text-ink placeholder:text-ink-secondary focus:outline-none"
           />
-          <div className="col-start-3 row-start-2 mt-1 flex items-center gap-1">
-          {busy && !locked && (
+          <div className="flex items-center gap-1">
+          {/* Inject is stop-then-steer made visible. The square stop would
+              drain the same queue, so it yields while a send is waiting.
+              Cancelling the queued composer card brings Stop back. */}
+          {canInject && <ComposerInjectNow onInject={interruptTurn} />}
+          {busy && !locked && !canInject && (
           <button
-            onClick={() => {
-              if (group) dispatch({ type: "interruptGroup", groupId: group.id });
-              else if (bot) dispatch({ type: "interrupt", botId: bot.id });
-            }}
+            onClick={interruptTurn}
             aria-label="Stop this turn"
             className="flex size-8 shrink-0 items-center justify-center rounded-full text-ink-secondary hover:bg-raised hover:text-ink"
             title="Stop"
@@ -822,20 +799,15 @@ export function Composer({
         {hasContent && !locked && (
           <button
             onClick={send}
-            disabled={Boolean(group && queued)}
             aria-label={
-              group && queued
-                ? "Waiting for queued message"
-                : busy && canSteer
+              busy && canSteer
                   ? "Send into the running turn"
                   : busy
                     ? "Queue message"
                     : "Send message"
             }
             title={
-              group && queued
-                ? "Your earlier message will send when the current turn finishes"
-                : busy && canSteer
+              busy && canSteer
                   ? "Send into the running turn"
                   : busy
                     ? "Sends when the current turn finishes"
@@ -843,9 +815,7 @@ export function Composer({
             }
             className={cn(
               "flex size-8 shrink-0 items-center justify-center rounded-full text-white",
-              group && queued
-                ? "cursor-not-allowed bg-raised text-ink-secondary"
-                : busy && !canSteer
+              busy && !canSteer
                   ? "bg-raised text-ink-secondary hover:bg-raised-hover"
                   : "bg-accent hover:brightness-110",
             )}

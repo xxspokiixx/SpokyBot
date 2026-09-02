@@ -89,6 +89,10 @@ export function createBotPackageExport(input: {
 
   const routineKeys = new Set<string>();
   const routines: NonNullable<BotPackageDefinition["routines"]> = input.routines.flatMap((routine, index) => {
+    // Package v1 only has a single-agent routine shape. Silently exporting a
+    // room goal as a bot task would change what it does after import, so keep
+    // it out until the portable format can name a package-local room.
+    if (routine.target === "room-goal") return [];
     const agent = idToKey.get(routine.botId);
     if (!agent) return [];
     return [{
@@ -109,6 +113,7 @@ export function createBotPackageExport(input: {
   const agents: BotPackageDefinition["agents"] = bots.map((bot) => {
     const appearance: BotPackageDefinition["agents"][number]["appearance"] = { color: bot.color };
     if (bot.mascotExpression) appearance.mascotExpression = bot.mascotExpression;
+    if (bot.mascotBody) appearance.mascotBody = bot.mascotBody;
     const agent: BotPackageDefinition["agents"][number] = {
       key: idToKey.get(bot.id)!,
       name: bot.name,

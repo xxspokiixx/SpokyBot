@@ -70,6 +70,7 @@ const packageSchema = z.object({
       appearance: z.object({
         color: z.enum(COLORS, { error: "is not supported" }),
         mascotExpression: optionalText(80),
+        mascotBody: optionalText(40),
       }),
       playbooks: z.array(key).max(40).optional(),
     })).min(1).max(200),
@@ -99,7 +100,7 @@ const packageSchema = z.object({
           weekdays: z.array(z.number().int().min(0).max(6)).min(1).max(7),
         }),
       ]),
-      durationMinutes: z.number().int().min(15).max(240),
+      durationMinutes: z.number().int().min(5).max(240),
       enabledAfterInstall: z.literal(false),
     })).max(50).optional(),
     playbooks: z.array(z.object({
@@ -263,6 +264,7 @@ export function packageAgentAsMember(agent: BotPackageAgent): TeamManifestMember
     appearance: {
       color: agent.appearance.color,
       ...(agent.appearance.mascotExpression ? { mascotExpression: agent.appearance.mascotExpression } : {}),
+      ...(agent.appearance.mascotBody ? { mascotBody: agent.appearance.mascotBody } : {}),
     },
   };
 }

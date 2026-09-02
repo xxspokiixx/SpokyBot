@@ -45,20 +45,46 @@ describe("package export", () => {
         unread: false,
         createdAt: 1,
       }],
-      routines: [{
-        id: "private-routine-id",
-        name: "Release check",
-        prompt: "Verify release readiness.",
-        botId: "private-id",
-        runOn: "maus",
-        enabled: true,
-        schedule: { type: "daily", time: "09:00", weekdays: [1] },
-        durationMinutes: 30,
-        nextRunAt: 123,
-        createdAt: 1,
-        updatedAt: 1,
-      }],
+      routines: [
+        {
+          id: "private-routine-id",
+          name: "Release check",
+          prompt: "Verify release readiness.",
+          target: "bot",
+          botId: "private-id",
+          runOn: "maus",
+          enabled: true,
+          schedule: { type: "daily", time: "09:00", weekdays: [1] },
+          durationMinutes: 30,
+          attachments: [{
+            id: "private-attachment",
+            kind: "file",
+            name: "private.txt",
+            path: "/private/calendar/context.txt",
+            size: 42,
+          }],
+          nextRunAt: 123,
+          createdAt: 1,
+          updatedAt: 1,
+        },
+        {
+          id: "private-room-routine-id",
+          name: "Team release review",
+          prompt: "Review the release together.",
+          target: "room-goal",
+          groupId: "private-room-id",
+          botId: "private-id",
+          runOn: "maus",
+          enabled: true,
+          schedule: { type: "daily", time: "10:00", weekdays: [1] },
+          durationMinutes: 30,
+          nextRunAt: 456,
+          createdAt: 1,
+          updatedAt: 1,
+        },
+      ],
     });
+    expect(exported.package.routines).toHaveLength(1);
 
     expect(exported).toMatchObject({
       format: "openmaus.package",
@@ -70,7 +96,7 @@ describe("package export", () => {
         playbooks: [{ key: "launch" }],
       },
     });
-    expect(JSON.stringify(exported)).not.toMatch(/private-id|private-thread|private-engine|secret-model|secret-session|private\/path|autoApprove|alwaysAllow|nextRunAt/);
+    expect(JSON.stringify(exported)).not.toMatch(/private-id|private-thread|private-engine|secret-model|secret-session|private\/path|private-attachment|autoApprove|alwaysAllow|nextRunAt/);
   });
 
   it("shares one identical playbook definition across multiple bots", () => {

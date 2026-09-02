@@ -7,12 +7,13 @@ import { Coins, FlaskConical, Globe, KeyRound, Monitor, Search, Smartphone, Term
 import { api, useStore, type AppSettingsSection, type ConfigStatus } from "@/state/store";
 import { analyticsEnabled, setAnalyticsEnabled } from "@/lib/analytics";
 import { builtInBrowserEnabled, showToolCallsEnabled, skillRecorderEnabled } from "@/lib/feature-flags";
+import { localeChoices } from "@/locales";
 import { ApiKeyRow, VpsConnection } from "./ApiKeys";
 import { useUpdaterState } from "@/lib/updater";
 import { EnginesSettings } from "./EnginesSettings";
 import { LocalComputerSection } from "./LocalComputerSection";
 import { CompanionSection } from "./CompanionSection";
-import { Card } from "./SettingsPrimitives";
+import { Card, Switch } from "./SettingsPrimitives";
 import { UsageSection } from "./UsageSection";
 import { SkinPicker } from "./SkinPicker";
 import { RoomTurnTimeoutSettings } from "./RoomTurnTimeoutSettings";
@@ -33,7 +34,7 @@ const SECTIONS: Array<{
   { id: "experimental", label: "Experimental", icon: FlaskConical, keywords: ["early", "preview", "teach", "skill", "browser", "profiles"] },
   { id: "connections", label: "Connections", icon: KeyRound, keywords: ["keys", "api", "composio", "box", "xai", "vps"] },
   { id: "engines", label: "Engines", icon: Terminal, keywords: ["models", "claude", "grok", "providers", "cli"] },
-  { id: "companion", label: "Phone", icon: Smartphone, keywords: ["companion", "phone", "pair", "mobile"] },
+  { id: "companion", label: "Phone", icon: Smartphone, keywords: ["companion", "phone", "pair", "pairing", "mobile", "https", "secure", "tailscale", "wifi", "advanced"] },
   { id: "computer", label: "Local VM", icon: Monitor, keywords: ["vm", "virtual", "desktop"] },
   { id: "usage", label: "Usage", icon: Coins, keywords: ["tokens", "cost", "billing"] },
 ];
@@ -129,19 +130,62 @@ function AnalyticsRow() {
       title="Usage analytics"
       subtitle="Anonymous product events — app opened, which features get used. Never conversations, prompts, file contents, or bot output. Your email is only attached if you shared it during setup."
     >
-      <button
-        role="switch"
-        aria-checked={on}
+      <Switch
+        checked={on}
         aria-label="Send usage analytics"
         onClick={() => {
           const next = !on;
           setAnalyticsEnabled(next);
           setOn(next);
         }}
-        className={cnSwitch(on)}
+      />
+    </Card>
+  );
+}
+
+function LanguageRow() {
+  const { state, dispatch } = useStore();
+  const current = state.config?.language ?? "";
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState("");
+
+  const save = async (language: string) => {
+    if (saving) return;
+    setSaving(true);
+    setError("");
+    try {
+      const config: ConfigStatus = await api("/api/config", {
+        method: "PATCH",
+        body: JSON.stringify({ language }),
+      });
+      dispatch({ type: "configStatus", config });
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : "Could not save the language.");
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  return (
+    <Card
+      title="Language"
+      subtitle="The app follows your system language unless you pick one here. Only part of the interface is translated so far — untranslated text stays in English."
+    >
+      <select
+        value={current}
+        disabled={saving}
+        aria-label="App language"
+        onChange={(event) => void save(event.target.value)}
+        className="w-full max-w-[280px] rounded-lg border border-hairline/40 bg-inset px-2.5 py-1.5 text-[13.5px] text-ink disabled:cursor-wait disabled:opacity-50"
       >
-        <span className={cnKnob(on)} />
-      </button>
+        <option value="">System</option>
+        {localeChoices.map(({ code, label }) => (
+          <option key={code} value={code}>
+            {label}
+          </option>
+        ))}
+      </select>
+      {error ? <p role="alert" className="mt-2 text-[12px] text-danger">{error}</p> : null}
     </Card>
   );
 }
@@ -181,16 +225,13 @@ function ToolCallsRow() {
             Named chips for Bash, search, and other tools. Errors and bot-to-bot messages still appear.
           </div>
         </div>
-        <button
-          role="switch"
-          aria-checked={enabled}
+        <Switch
+          checked={enabled}
           aria-label="Show tool calls in chat"
           disabled={saving}
           onClick={() => void toggle()}
-          className={`${cnSwitch(enabled)} disabled:cursor-wait disabled:opacity-50`}
-        >
-          <span className={cnKnob(enabled)} />
-        </button>
+          className="disabled:cursor-wait disabled:opacity-50"
+        />
       </div>
       {error ? <p role="alert" className="mt-2 text-[12px] text-danger">{error}</p> : null}
     </Card>
@@ -232,19 +273,16 @@ function ExperimentalFeaturesRow() {
         <div className="min-w-0">
           <div className="text-[14px] font-medium text-ink">Teach a skill</div>
           <div className="mt-0.5 text-[12px] leading-relaxed text-ink-secondary">
-            Show the workflow recorder in the sidebar.
+            Record a workflow, use /learn, or ask a supported bot to run /create-verification-skill. Every change waits for your review.
           </div>
         </div>
-        <button
-          role="switch"
-          aria-checked={skillRecorder}
+        <Switch
+          checked={skillRecorder}
           aria-label="Show Teach a skill"
           disabled={saving !== null}
           onClick={() => void toggle("skillRecorder", !skillRecorder)}
-          className={`${cnSwitch(skillRecorder)} disabled:cursor-wait disabled:opacity-50`}
-        >
-          <span className={cnKnob(skillRecorder)} />
-        </button>
+          className="disabled:cursor-wait disabled:opacity-50"
+        />
       </div>
       <div className="mt-4 flex items-center justify-between gap-4 border-t border-hairline/30 pt-4">
         <div className="min-w-0">
@@ -259,16 +297,13 @@ function ExperimentalFeaturesRow() {
                 : "Needs the OpenMausBot desktop app."}
           </div>
         </div>
-        <button
-          role="switch"
-          aria-checked={browser}
+        <Switch
+          checked={browser}
           aria-label="Enable the built-in browser"
           disabled={saving !== null || (!browser && !desktopBrowser)}
           onClick={() => void toggle("browser", !browser)}
-          className={`${cnSwitch(browser)} disabled:cursor-wait disabled:opacity-50`}
-        >
-          <span className={cnKnob(browser)} />
-        </button>
+          className="disabled:cursor-wait disabled:opacity-50"
+        />
       </div>
       {error ? <p role="alert" className="mt-2 text-[12px] text-danger">{error}</p> : null}
     </Card>
@@ -428,11 +463,6 @@ function BrowserProfilesRow() {
     </Card>
   );
 }
-
-const cnSwitch = (on: boolean) =>
-  `relative h-6 w-11 shrink-0 rounded-full transition-colors ${on ? "bg-accent" : "bg-control"}`;
-const cnKnob = (on: boolean) =>
-  `absolute top-[3px] h-[18px] w-[18px] rounded-full bg-white transition-all ${on ? "left-[21px]" : "left-[3px]"}`;
 
 /** Writes a redacted diagnostics file to a location the user picks. The
  * report holds versions, configured-or-not booleans and the server.log tail —
@@ -621,7 +651,8 @@ export function SettingsModal() {
                 <Card title="Channel turns" subtitle="Set one maximum duration for every bot turn in a channel.">
                   <RoomTurnTimeoutSettings />
                 </Card>
-                <ToolCallsRow />
+                <LanguageRow />
+          <ToolCallsRow />
                 <UpdatesRow />
                 <DiagnosticsRow />
                 <AnalyticsRow />

@@ -1,12 +1,14 @@
 // Store persistence contract: bots.json + messages-<threadId>.json are
 // the durable record — everything here must survive a process restart
 // except `busy`, which never does (no turn survives one either).
-import { readFileSync, rmSync, writeFileSync } from "node:fs";
+import { createHash } from "node:crypto";
+import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
-import { beforeEach, describe, expect, it } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import { DATA_DIR } from "./config.ts";
 import type { ModelSelection } from "./contracts.ts";
+import * as mdb from "./message-db.ts";
 import { peerAllowKey } from "./peer-approval-key.ts";
 import { Store, type BotRecord } from "./store.ts";
 
@@ -61,6 +63,28 @@ describe("Store", () => {
     const bot = store.createBot();
     store.appendMessage(bot.threadId, { role: "bot", kind: "text", text: "still here" });
     expect(store.messagesFor(bot.threadId)[1]?.card?.dismissed).toBeUndefined();
+  });
+
+  it("marks only the last assistant message from a settled provider turn as terminal", () => {
+    const store = new Store(selection);
+    const bot = store.createBot({}, { seedMessages: false });
+    const progress = store.appendMessage(bot.threadId, {
+      role: "bot",
+      kind: "text",
+      text: "Checking connected apps.",
+      turnId: "turn-1",
+    });
+    const final = store.appendMessage(bot.threadId, {
+      role: "bot",
+      kind: "text",
+      text: "Here are your tasks.",
+      turnId: "turn-1",
+    });
+
+    expect(store.markTerminalAssistantMessage(bot.threadId, "turn-1")?.id).toBe(final.id);
+    expect(store.messagesFor(bot.threadId).find((message) => message.id === progress.id)?.turnTerminal).toBeUndefined();
+    expect(store.messagesFor(bot.threadId).find((message) => message.id === final.id)?.turnTerminal).toBe(true);
+    expect(new Store(selection).messagesFor(bot.threadId).find((message) => message.id === final.id)?.turnTerminal).toBe(true);
   });
 
   it("createBot with seedMessages:false starts with an empty transcript", () => {
@@ -378,6 +402,80 @@ describe("Store", () => {
     expect(reloaded.bot(second.id)?.chiefOfStaff).toBe(false);
   });
 
+  it("files visible bots atomically without changing Chief roles", () => {
+    const store = new Store(selection);
+    const incumbent = store.createBot({ section: "Launch" });
+    const incoming = store.createBot({ section: "Research" });
+    const teammate = store.createBot({ section: "Personal" });
+    store.setChiefOfStaff(incumbent.id);
+
+    const result = store.setBotsSection([incoming.id, teammate.id, incoming.id], "Launch");
+    expect(result.ok).toBe(true);
+    if (!result.ok) throw new Error(`unexpected section assignment failure: ${result.reason}`);
+    expect(result.bots.map((bot) => bot.id)).toEqual([incoming.id, teammate.id]);
+    expect(store.bot(incumbent.id)).toMatchObject({ section: "Launch", chiefOfStaff: true });
+    expect(store.bot(incoming.id)?.section).toBe("Launch");
+    expect(Boolean(store.bot(incoming.id)?.chiefOfStaff)).toBe(false);
+    expect(store.bot(teammate.id)?.section).toBe("Launch");
+    expect(store.bots.filter((bot) => bot.section === "Launch" && bot.chiefOfStaff)).toHaveLength(1);
+
+    const reloaded = new Store(selection);
+    expect(reloaded.bot(incumbent.id)).toMatchObject({ section: "Launch", chiefOfStaff: true });
+    expect(reloaded.bot(incoming.id)?.section).toBe("Launch");
+    expect(Boolean(reloaded.bot(incoming.id)?.chiefOfStaff)).toBe(false);
+    expect(reloaded.bot(teammate.id)?.section).toBe("Launch");
+    expect(reloaded.bots.filter((bot) => bot.section === "Launch" && bot.chiefOfStaff).map((bot) => bot.id))
+      .toEqual([incumbent.id]);
+  });
+
+  it("rejects unavailable or Chief-conflicting section assignments without changing bots", () => {
+    const store = new Store(selection);
+    const incumbent = store.createBot({ section: "Launch" });
+    const incoming = store.createBot({ section: "Research" });
+    const teammate = store.createBot({ section: "Personal" });
+    const hidden = store.createBot({ section: "Private" });
+    store.setChiefOfStaff(incumbent.id);
+    store.setChiefOfStaff(incoming.id);
+    store.patchBot(hidden.id, { hidden: true });
+
+    const snapshot = () => store.bots.map((bot) => ({
+      id: bot.id,
+      section: bot.section,
+      chief: bot.chiefOfStaff,
+    }));
+    const before = snapshot();
+
+    expect(store.setBotsSection([teammate.id, "missing"], "Launch"))
+      .toEqual({ ok: false, reason: "unavailable" });
+    expect(store.setBotsSection([teammate.id, hidden.id], "Launch"))
+      .toEqual({ ok: false, reason: "unavailable" });
+    expect(store.setBotsSection([incoming.id, teammate.id], "Launch"))
+      .toEqual({ ok: false, reason: "chief-conflict" });
+    expect(snapshot()).toEqual(before);
+
+    const reloaded = new Store(selection);
+    expect(reloaded.bot(incumbent.id)).toMatchObject({ section: "Launch", chiefOfStaff: true });
+    expect(reloaded.bot(incoming.id)).toMatchObject({ section: "Research", chiefOfStaff: true });
+    expect(reloaded.bot(teammate.id)?.section).toBe("Personal");
+    expect(Boolean(reloaded.bot(teammate.id)?.chiefOfStaff)).toBe(false);
+  });
+
+  it("does not change memory or emit section updates when the atomic write fails", () => {
+    const store = new Store(selection);
+    const bot = store.createBot({ section: "Original" });
+    const changes: string[] = [];
+    store.onChange((change) => {
+      if (change.type === "bot") changes.push(change.botId);
+    });
+    (store as unknown as { saveBots: (bots?: BotRecord[]) => void }).saveBots = () => {
+      throw new Error("disk unavailable");
+    };
+
+    expect(() => store.setBotsSection([bot.id], "Research")).toThrow("disk unavailable");
+    expect(store.bot(bot.id)?.section).toBe("Original");
+    expect(changes).toEqual([]);
+  });
+
   it("patchMessage merges card patches and returns null for unknown ids", () => {
     const store = new Store(selection);
     const bot = store.createBot();
@@ -388,6 +486,22 @@ describe("Store", () => {
     });
     expect(patched?.card?.answered).toBe("Work & projects");
     expect(store.patchMessage(bot.threadId, "nope", {})).toBeNull();
+  });
+
+  it("keeps memory and SQLite pending when a card patch cannot persist", () => {
+    const store = new Store(selection);
+    const bot = store.createBot();
+    const card = store.messagesFor(bot.threadId)[1]!;
+    const update = vi.spyOn(mdb, "updateMessage").mockImplementationOnce(() => {
+      throw new Error("simulated SQLite failure");
+    });
+    expect(() => store.patchMessage(bot.threadId, card.id, {
+      card: { ...card.card!, answered: "allow" },
+    })).toThrow("simulated SQLite failure");
+    update.mockRestore();
+
+    expect(store.messagesFor(bot.threadId).find((message) => message.id === card.id)?.card?.answered).toBeUndefined();
+    expect(new Store(selection).messagesFor(bot.threadId).find((message) => message.id === card.id)?.card?.answered).toBeUndefined();
   });
 
 
@@ -510,12 +624,16 @@ describe("Store", () => {
   it("deleteBot removes the bot and its durable transcript", () => {
     const store = new Store(selection);
     const bot = store.createBot();
+    const skillState = join(DATA_DIR, "skill-state", bot.id);
+    mkdirSync(skillState, { recursive: true });
+    writeFileSync(join(skillState, "staged.json"), '{"writes":{}}');
     // the transcript is durable — a fresh Store sees the seeded messages
     expect(new Store(selection).messagesFor(bot.threadId).length).toBeGreaterThan(0);
 
     expect(store.deleteBot(bot.id)).toBe(true);
     expect(store.bot(bot.id)).toBeNull();
     expect(new Store(selection).messagesFor(bot.threadId)).toHaveLength(0);
+    expect(existsSync(skillState)).toBe(false);
     expect(store.deleteBot(bot.id)).toBe(false);
   });
   it("migrates a pre-branching flat transcript file", () => {
@@ -771,6 +889,68 @@ describe("Store redacts bot-authored secrets on write", () => {
     if (routineCard.card?.routineRequest?.operation.action !== "create") throw new Error("missing routine payload");
     expect(routineCard.card.routineRequest.operation.routine.name).not.toContain(key);
     expect(routineCard.card.routineRequest.operation.routine.instructions).not.toContain(key);
+    const skillCard = store.appendMessage(bot.threadId, {
+      role: "bot",
+      kind: "options",
+      card: {
+        title: "Enable learned skill?",
+        subtitle: "Review it first",
+        options: ["Enable", "Dismiss"],
+        requestId: "skill-request",
+        tool: "stage_skill",
+        skillRequest: {
+          version: 1,
+          requestId: "skill-request",
+          botId: bot.id,
+          threadId: bot.threadId,
+          stagedId: "staged-1",
+          action: "create",
+          name: "safe-skill",
+          gist: `Uses ${key}`,
+          source: `learn:${key}`,
+          preview: `---\nname: safe-skill\ndescription: Uses ${key}.\n---\n`,
+          sha256: "0".repeat(64),
+          warnings: [`Found ${key}`],
+          createdAt: 1,
+        },
+      },
+    });
+    expect(skillCard.card?.skillRequest?.gist).not.toContain(key);
+    expect(skillCard.card?.skillRequest?.source).not.toContain(key);
+    expect(skillCard.card?.skillRequest?.preview).not.toContain(key);
+    expect(skillCard.card?.skillRequest?.sha256).toBeUndefined();
+    expect(skillCard.card?.skillRequest?.warnings.join(" ")).not.toContain(key);
+
+    const reviewedPreview = "---\nname: reviewed-skill\ndescription: Already scrubbed.\n---\n";
+    const reviewedSha256 = createHash("sha256").update(reviewedPreview).digest("hex");
+    const reviewedSkillCard = store.appendMessage(bot.threadId, {
+      role: "bot",
+      kind: "options",
+      card: {
+        title: "Enable reviewed skill?",
+        subtitle: "Review it first",
+        options: ["Enable", "Deny"],
+        requestId: "reviewed-skill-request",
+        tool: "stage_skill",
+        skillRequest: {
+          version: 1,
+          requestId: "reviewed-skill-request",
+          botId: bot.id,
+          threadId: bot.threadId,
+          stagedId: "staged-2",
+          action: "create",
+          name: "reviewed-skill",
+          gist: "Already scrubbed.",
+          source: "learn:reviewed-skill",
+          preview: reviewedPreview,
+          sha256: reviewedSha256,
+          warnings: [],
+          createdAt: 2,
+        },
+      },
+    });
+    expect(reviewedSkillCard.card?.skillRequest?.preview).toBe(reviewedPreview);
+    expect(reviewedSkillCard.card?.skillRequest?.sha256).toBe(reviewedSha256);
     const runCard = store.appendMessage(bot.threadId, {
       role: "bot",
       kind: "routine.run",

@@ -18,7 +18,7 @@ let stubPort = 0;
 let lastAuth: string | undefined;
 let lastAskBody: any = null;
 /** What the stub harness returns from /api/internal/ask-bot. */
-type StubAskResponse = { botName?: string; text?: string; busy?: boolean; taskId?: string; toBotName?: string; error?: string };
+type StubAskResponse = { botName?: string; text?: string; busy?: boolean; timeout?: boolean; waitedMs?: number; taskId?: string; toBotName?: string; error?: string };
 let askResponse: StubAskResponse = { botName: "Helper", text: "hi from helper" };
 let lastDelegateBody: any = null;
 let lastDelegationUrl: string | null = null;
@@ -41,6 +41,28 @@ let routinesResponse: unknown = {
   ],
 };
 let lastRoutineRequestBody: any = null;
+let lastSkillQuery = "";
+let lastSkillStageBody: any = null;
+let skillsResponse: unknown = {
+  skills: [
+    {
+      name: "file-expense",
+      description: "UNREVIEWED IMPORT INSTRUCTIONS",
+      enabled: false,
+      source: "github.com/example/skills",
+      editable: false,
+    },
+    {
+      name: "learned-expense",
+      description: "PRIVATE LEARNED INSTRUCTIONS",
+      enabled: true,
+      source: "learn:conversation",
+      editable: true,
+    },
+  ],
+  staged: [{ name: "pending-skill", action: "create", gist: "UNREVIEWED GIST", source: "UNREVIEWED SOURCE" }],
+};
+let skillStageResponse: unknown = { name: "file-expense", action: "create", gist: "Files an expense.", warnings: [] };
 
 let child: ChildProcess;
 const pending = new Map<number, (msg: any) => void>();
@@ -134,6 +156,21 @@ beforeAll(async () => {
       });
       return;
     }
+    if (req.method === "GET" && req.url?.startsWith("/api/internal/skills?")) {
+      lastSkillQuery = req.url;
+      res.writeHead(200, { "content-type": "application/json" });
+      return res.end(JSON.stringify(skillsResponse));
+    }
+    if (req.method === "POST" && req.url === "/api/internal/skills/stage") {
+      let data = "";
+      req.on("data", (c) => (data += c));
+      req.on("end", () => {
+        lastSkillStageBody = JSON.parse(data);
+        res.writeHead(201, { "content-type": "application/json" });
+        res.end(JSON.stringify(skillStageResponse));
+      });
+      return;
+    }
     res.writeHead(404, { "content-type": "application/json" });
     res.end(JSON.stringify({ error: "unknown" }));
   });
@@ -148,6 +185,7 @@ beforeAll(async () => {
       OMB_THREAD_ID: "thread-asker-routine",
       OMB_COMMS_TOKEN: TOKEN,
       OMB_TURN_DEPTH: "0",
+      OMB_SKILL_AUTHORING_ENABLED: "1",
     },
     stdio: ["pipe", "pipe", "inherit"],
   });
@@ -172,7 +210,7 @@ afterAll(async () => {
 });
 
 describe("agents-proxy MCP surface", () => {
-  it("answers the MCP handshake and lists all eight tools", async () => {
+  it("answers the MCP handshake and lists the agents tools", async () => {
     const init = await rpc("initialize", { protocolVersion: "2024-11-05" });
     expect(init.result.serverInfo.name).toContain("agents");
     const list = await rpc("tools/list");
@@ -187,7 +225,17 @@ describe("agents-proxy MCP surface", () => {
       "list_routines",
       "propose_routine",
       "propose_routine_action",
+      "skills_list",
+      "skill_manage",
     ]);
+    const ask = list.result.tools.find((tool: { name: string }) => tool.name === "ask_bot");
+    const delegate = list.result.tools.find((tool: { name: string }) => tool.name === "delegate_bot");
+    const wait = list.result.tools.find((tool: { name: string }) => tool.name === "wait_delegation");
+    expect(ask.description).toContain("SYNCHRONOUS consultation");
+    expect(ask.description).toContain("Do not use for assigning work");
+    expect(delegate.description).toContain("DEFAULT FOR ASSIGNING WORK");
+    expect(delegate.description).toContain("delivered automatically");
+    expect(wait.description).toContain("Never call it in the same turn as delegate_bot");
   });
 
   it("publishes a flat routine schedule schema that survives provider conversion", async () => {
@@ -212,6 +260,7 @@ describe("agents-proxy MCP surface", () => {
       "saturday",
       "sunday",
     ]);
+    expect(create.inputSchema.properties.duration_minutes).toMatchObject({ minimum: 5, maximum: 240 });
     expect(create.description).toContain("does NOT enable");
   });
 
@@ -220,6 +269,8 @@ describe("agents-proxy MCP surface", () => {
     const text = res.result.content[0].text;
     expect(text).toContain("Helper");
     expect(text).toContain("bot-helper");
+    expect(text).toContain("Assign work with delegate_bot");
+    expect(text).toContain("Use ask_bot only for a short answer");
     expect(lastAuth).toBe(`Bearer ${TOKEN}`);
   });
 
@@ -252,8 +303,36 @@ describe("agents-proxy MCP surface", () => {
     expect(text).toContain("queued as a delegation");
     expect(text).toContain("task-9");
     expect(text).toContain("check_delegation");
-    expect(text).toContain("wait_delegation");
+    expect(text).toContain("delivered to this conversation automatically");
+    expect(text).not.toContain("wait_delegation");
     expect(res.result.isError).toBeFalsy();
+
+    lastDelegationUrl = null;
+    const check = await callTool("check_delegation", { task_id: "task-9" });
+    expect(check.result.isError).toBe(true);
+    expect(check.result.content[0].text).toContain("delegated during this turn");
+    expect(check.result.content[0].text).toContain("Finish your response now");
+    expect(lastDelegationUrl).toBeNull();
+  });
+
+  it("renders a timeout conversion with the task id and guidance", async () => {
+    askResponse = { timeout: true, taskId: "task-42", toBotName: "Helper", waitedMs: 240_000 };
+    const res = await callTool("ask_bot", { bot_id: "bot-helper", message: "ping" });
+    const text = res.result.content[0].text;
+    expect(text).toContain("Helper is still working after 4 minutes");
+    expect(text).toContain("converted to a delegation");
+    expect(text).toContain("task-42");
+    expect(text).toContain("check_delegation");
+    expect(text).toContain("delivered to this conversation automatically");
+    expect(text).not.toContain("wait_delegation");
+    expect(res.result.isError).toBeFalsy();
+
+    lastDelegationUrl = null;
+    const wait = await callTool("wait_delegation", { task_id: "task-42", timeout_seconds: 240 });
+    expect(wait.result.isError).toBe(true);
+    expect(wait.result.content[0].text).toContain("delegated during this turn");
+    expect(wait.result.content[0].text).toContain("delivered to this conversation automatically");
+    expect(lastDelegationUrl).toBeNull();
   });
 
   it("surfaces the harness's depth refusal as a tool error", async () => {
@@ -327,7 +406,7 @@ describe("agents-proxy MCP surface", () => {
     expect(lastCredentialBody).toBeNull();
   });
 
-  it("hands the delegator its task id and the tools to read the outcome", async () => {
+  it("hands back the task id and rejects sequential same-turn status calls", async () => {
     delegateResponse = {
       queued: true,
       taskId: "task-abc123",
@@ -335,7 +414,19 @@ describe("agents-proxy MCP surface", () => {
     };
     const res = await callTool("delegate_bot", { bot_id: "bot-helper", message: "do the thing" });
     expect(res.result.content[0].text).toContain("Task id: task-abc123");
-    expect(res.result.content[0].text).toContain("wait_delegation");
+    expect(res.result.content[0].text).toContain("delivered to this conversation automatically");
+    expect(res.result.content[0].text).toContain("Do not check or wait for it in this turn");
+    expect(res.result.content[0].text).not.toContain("wait_delegation");
+
+    lastDelegationUrl = null;
+    for (const name of ["check_delegation", "wait_delegation"]) {
+      const status = await callTool(name, { task_id: "task-abc123", timeout_seconds: 240 });
+      expect(status.result.isError).toBe(true);
+      expect(status.result.content[0].text).toContain("delegated during this turn");
+      expect(status.result.content[0].text).toContain("Finish your response now");
+      expect(status.result.content[0].text).toContain("delivered to this conversation automatically");
+    }
+    expect(lastDelegationUrl).toBeNull();
     delegateResponse = { queued: true, message: "Delegation queued." };
   });
 
@@ -352,15 +443,15 @@ describe("agents-proxy MCP surface", () => {
     expect(bad.result.content[0].text).toContain('"task_id"');
     expect(lastDelegationUrl).toBeNull(); // guidance is free
 
-    const done = await callTool("check_delegation", { task_id: "task-abc123" });
-    expect(done.result.content[0].text).toContain("@Helper finished task task-abc123");
+    const done = await callTool("check_delegation", { task_id: "task-earlier123" });
+    expect(done.result.content[0].text).toContain("@Helper finished task task-earlier123");
     expect(done.result.content[0].text).toContain("All done.");
-    expect(lastDelegationUrl).toContain("/api/internal/delegations/task-abc123?");
+    expect(lastDelegationUrl).toContain("/api/internal/delegations/task-earlier123?");
     expect(lastDelegationUrl).toContain("wait_ms=0");
     expect(lastDelegationUrl).toContain("fromBotId=bot-asker");
 
     delegationStatusResponse = { status: "queued", toBotName: "Helper" };
-    const waiting = await callTool("wait_delegation", { task_id: "task-abc123", timeout_seconds: 45 });
+    const waiting = await callTool("wait_delegation", { task_id: "task-earlier123", timeout_seconds: 45 });
     expect(waiting.result.content[0].text).toContain("still queued");
     expect(waiting.result.content[0].text).toContain("after 45s");
     expect(lastDelegationUrl).toContain("wait_ms=45000");
@@ -547,5 +638,59 @@ describe("agents-proxy MCP surface", () => {
   it("requires bot_id and message", async () => {
     const res = await callTool("ask_bot", { bot_id: "", message: "" });
     expect(res.result.isError).toBe(true);
+  });
+
+  it("lists, views, and stages skills without enabling them", async () => {
+    const list = await rpc("tools/list");
+    const manage = list.result.tools.find((t: { name: string }) => t.name === "skill_manage");
+    expect(JSON.stringify(manage.inputSchema)).not.toMatch(/"(oneOf|anyOf|allOf|const|format)":/);
+    expect(manage.inputSchema.required).toEqual(["action", "skill_md", "source"]);
+    expect(manage.inputSchema.properties.action.enum).toEqual(["create", "update"]);
+
+    const listed = await callTool("skills_list", {});
+    expect(listed.result.content[0].text).toContain("file-expense");
+    expect(listed.result.content[0].text).toContain("file-expense (disabled, imported)");
+    expect(listed.result.content[0].text).toContain("learned-expense (enabled, learned/editable)");
+    expect(listed.result.content[0].text).toContain("pending-skill");
+    expect(listed.result.content[0].text).not.toContain("UNREVIEWED");
+    expect(listed.result.content[0].text).not.toContain("PRIVATE LEARNED");
+    expect(lastSkillQuery).toContain("fromBotId=bot-asker");
+
+    const staged = await callTool("skill_manage", {
+      action: "create",
+      skill_md: "---\nname: file-expense\ndescription: Files an expense in the company portal.\n---\n\n# File expense\n",
+      gist: "Files an expense",
+      source: "conversation",
+    });
+    expect(lastSkillStageBody).toMatchObject({
+      fromBotId: "bot-asker",
+      fromThreadId: "thread-asker-routine",
+      action: "create",
+      source: "conversation",
+    });
+    expect(staged.result.content[0].text).toContain("staged and inactive");
+    expect(staged.result.content[0].text).toContain("wait for the decision");
+
+    const updated = await callTool("skill_manage", {
+      action: "update",
+      skill_name: "file-expense",
+      skill_md: "---\nname: file-expense\ndescription: Files expenses with a receipt.\n---\n\n# File expense\n",
+      source: "conversation",
+    });
+    expect(lastSkillStageBody).toMatchObject({
+      action: "update",
+      skill_name: "file-expense",
+    });
+    expect(updated.result.content[0].text).toContain("current version remains unchanged");
+
+    lastSkillStageBody = null;
+    const missingTarget = await callTool("skill_manage", {
+      action: "update",
+      skill_md: "---\nname: file-expense\ndescription: Files expenses.\n---\n",
+      source: "conversation",
+    });
+    expect(missingTarget.result.isError).toBe(true);
+    expect(missingTarget.result.content[0].text).toContain("needs skill_name");
+    expect(lastSkillStageBody).toBeNull();
   });
 });

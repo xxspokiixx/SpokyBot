@@ -230,6 +230,29 @@ export function createAcpDriver(support: AcpSupport): ProviderDriver<AcpConfig> 
       const emit = (event: RuntimeEvent) => {
         for (const l of [...listeners]) l(event);
       };
+
+      // ACP content blocks may carry a complete raster image inline. Keep the
+      // bytes available to the normalizer, but never duplicate megabytes of
+      // base64 into the provider-native diagnostic log.
+      const nativeLogMessage = (msg: any): unknown => {
+        const content = msg?.params?.update?.content;
+        if (
+          msg?.method !== "session/update" ||
+          msg?.params?.update?.sessionUpdate !== "agent_message_chunk" ||
+          content?.type !== "image" ||
+          typeof content.data !== "string"
+        ) return msg;
+        return {
+          ...msg,
+          params: {
+            ...msg.params,
+            update: {
+              ...msg.params.update,
+              content: { ...content, data: `[image data: ${content.data.length} base64 chars]` },
+            },
+          },
+        };
+      };
       const base = (threadId: string, turnId: string) => ({
         eventId: newEventId(),
         provider: DRIVER_KIND,
@@ -282,6 +305,13 @@ export function createAcpDriver(support: AcpSupport): ProviderDriver<AcpConfig> 
             args: local.args,
             env: acpEnv(local.env ?? {}),
           });
+        }
+        // user-configured servers, after the built-ins: a residual name
+        // collision keeps the built-in (reserved names are filtered at the
+        // config boundary; this is defense in depth).
+        for (const [name, server] of Object.entries(turn.integrations?.custom ?? {})) {
+          if (servers.some((existing) => existing.name === name)) continue;
+          servers.push({ name, command: server.command, args: server.args, env: acpEnv(server.env) });
         }
         return servers;
       };
@@ -456,8 +486,18 @@ export function createAcpDriver(support: AcpSupport): ProviderDriver<AcpConfig> 
           const u = p.update ?? {};
           switch (u.sessionUpdate) {
             case "agent_message_chunk": {
-              const delta = u.content?.text;
-              if (typeof delta === "string" && delta) {
+              const content = u.content;
+              const delta = content?.text;
+              if (content?.type === "image" && typeof content.data === "string" && content.data) {
+                flushAssistantText();
+                emit({
+                  ...base(threadId, turnId),
+                  type: "item.completed",
+                  itemType: "assistant_image",
+                  data: content.data,
+                  alt: "Generated image",
+                });
+              } else if (typeof delta === "string" && delta) {
                 state.text += delta;
                 emit({ ...base(threadId, turnId), type: "content.delta", streamKind: "assistant_text", delta });
               }
@@ -513,7 +553,7 @@ export function createAcpDriver(support: AcpSupport): ProviderDriver<AcpConfig> 
             } catch {
               continue;
             }
-            appendNative(threadId, { dir: "in", source: SOURCE, msg });
+            appendNative(threadId, { dir: "in", source: SOURCE, msg: nativeLogMessage(msg) });
             if (msg.id !== undefined && (msg.result !== undefined || msg.error !== undefined)) {
               const pend = rpcPending.get(msg.id);
               if (pend) {
@@ -691,7 +731,19 @@ export function createAcpDriver(support: AcpSupport): ProviderDriver<AcpConfig> 
             const reason = result?.stopReason;
             if (reason === "end_turn") settle(true, null);
             else if (reason === "cancelled") settle(true, "cancelled");
-            else settle(false, reason ?? "failed");
+            else {
+              const errorMessage = typeof result?.error === "string" && result.error
+                ? result.error
+                : typeof result?.message === "string" && result.message
+                  ? result.message
+                  : `Model turn failed: ${reason ?? "unknown error"}`;
+              emit({
+                ...base(threadId, turnId),
+                type: "runtime.error",
+                message: errorMessage,
+              });
+              settle(false, reason ?? "failed");
+            }
           } catch (e) {
             if (!state.settled) {
               const message = e instanceof Error ? e.message : String(e);
@@ -741,6 +793,7 @@ export function createAcpDriver(support: AcpSupport): ProviderDriver<AcpConfig> 
           capabilities: {
             sessionModelSwitch: "unsupported",
             agentsMcp: true,
+        customMcp: true,
             computerMcp: true,
             composioMcp: true,
             browserMcp: true,

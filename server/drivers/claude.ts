@@ -8,8 +8,8 @@
 //   - Composio Sessions (connected apps → tools) over streamable HTTP
 //   - the bot's cloud computer (box.ascii.dev) via server/computer-proxy.ts
 //     — screenshot/exec/open_url, the CUA-on-the-box bridge
-import { createHash } from "node:crypto";
-import { mkdtempSync, readFileSync, rmSync, unlinkSync, writeFileSync } from "node:fs";
+import { createHash, randomBytes } from "node:crypto";
+import { chmodSync, mkdtempSync, readFileSync, rmSync, unlinkSync, writeFileSync } from "node:fs";
 import { createServer as createNetServer } from "node:net";
 import { homedir, tmpdir } from "node:os";
 import { join, dirname } from "node:path";
@@ -104,6 +104,7 @@ export interface ClaudeConfig {
 export const STATIC_CLAUDE_MODELS: ModelCatalog = {
   default: "claude-sonnet-5",
   options: [
+    { id: "claude-fable-5-1", label: "Claude Fable 5.1" },
     { id: "claude-fable-5", label: "Claude Fable 5" },
     { id: "claude-opus-5", label: "Claude Opus 5" },
     { id: "claude-sonnet-5", label: "Claude Sonnet 5" },
@@ -188,6 +189,16 @@ const DWEB_PROXY_PATH = SPAWNED_PROXIES.dweb;
 // makes it behave as plain node for the spawned MCP proxies (harmless in dev)
 const NODE_ENV_FLAG = { ELECTRON_RUN_AS_NODE: "1" };
 
+function removePrivateTempDir(filePath: string | null | undefined): boolean {
+  if (!filePath) return true;
+  try {
+    rmSync(dirname(filePath), { recursive: true, force: true, maxRetries: 3, retryDelay: 50 });
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 // ── permission broker (ported from agentcal drivers/claude.js) ─────────
 // A headless run that hits a permission acceptEdits doesn't cover should
 // neither stall silently NOR get blanket-denied — it should ask the user.
@@ -244,8 +255,32 @@ export function permissionSocketPath(threadId: string) {
   return brokerSocketPath(DATA_DIR, `${prefix}${digest}`);
 }
 
-function createPermissionBroker(opts: {
-  socketPath: string;
+/** Paths the broker may bind, tried in order. Windows named pipes are never
+ * unlinkable, and a hung CLI child from an earlier server process can hold a
+ * name for minutes, so fresh suffixes let the new broker bind immediately.
+ * POSIX gets a short temp fallback because macOS rejects Unix socket paths
+ * longer than its small `sun_path` limit; a deep test HOME or long username
+ * can otherwise make every approval silently unavailable. The proxy learns
+ * the actual bound path from its argv, so either fallback is transparent. */
+export function brokerSocketCandidates(threadId: string): string[] {
+  const base = permissionSocketPath(threadId);
+  if (process.platform !== "win32") {
+    const scope = createHash("sha256")
+      .update(`${DATA_DIR}\0${process.pid}\0${threadId}`)
+      .digest("hex")
+      .slice(0, 16);
+    return [base, join(tmpdir(), `omb-perm-${scope}.sock`)];
+  }
+  return [
+    base,
+    `${base}-${randomBytes(3).toString("hex")}`,
+    `${base}-${randomBytes(3).toString("hex")}`,
+  ];
+}
+
+export async function createPermissionBroker(opts: {
+  /** Candidate bind paths, tried in order; the first that listens wins. */
+  socketPaths: string[];
   onAsk: (ask: Ask) => void;
   onResolve: (resolved: Ask & { behavior: AskBehavior; source: AskResolutionSource }) => void;
   isActive?: () => boolean;
@@ -264,10 +299,8 @@ function createPermissionBroker(opts: {
   // driver already forgot (`active.delete(threadId)` already ran), which can
   // never be answered — the "zombie card" in issue #211.
   let closed = false;
-  try {
-    unlinkSync(opts.socketPath);
-  } catch {}
-  const server = createNetServer((conn) => {
+  let boundPath = opts.socketPaths[0] ?? "";
+  const connectionHandler = (conn: import("node:net").Socket) => {
     conn.on("error", () => {});
     let buf = "";
     conn.on("data", (chunk) => {
@@ -315,7 +348,7 @@ function createPermissionBroker(opts: {
         if (pending.has(askId)) {
           // askId is client-controlled; JSON.stringify escapes newlines and
           // control characters so it can't corrupt the log line or terminal.
-          console.error(`permission broker on ${opts.socketPath}: duplicate ask id ${JSON.stringify(askId)} — denying`);
+          console.error(`permission broker on ${boundPath}: duplicate ask id ${JSON.stringify(askId)} — denying`);
           try {
             conn.write(JSON.stringify({ t: "answer", id: askId, behavior: "deny", message: DUPLICATE_ASK_ID_NOTE }) + "\n");
           } catch {}
@@ -342,14 +375,63 @@ function createPermissionBroker(opts: {
         opts.onAsk(ask);
       }
     });
-  });
-  // A broker that never came up used to be silent — every approval then
-  // timed out into a deny nobody could explain. Keep the turn fail-closed,
-  // but leave an actionable diagnostic.
-  server.on("error", (error) => {
-    console.error(`permission broker unavailable on ${opts.socketPath}: ${error.message}`);
-  });
-  server.listen(opts.socketPath);
+  };
+  // Bind the first candidate that will take a listener. A broker that
+  // never came up used to be silent — every approval then timed out into a
+  // deny nobody could explain. Keep the turn fail-closed on total failure,
+  // but leave an actionable diagnostic either way.
+  let server: ReturnType<typeof createNetServer> | null = null;
+  for (const [index, candidate] of opts.socketPaths.entries()) {
+    const attempt = createNetServer(connectionHandler);
+    try {
+      unlinkSync(candidate);
+    } catch {}
+    let outcome = await new Promise<"listening" | (Error & { code?: string })>((resolve) => {
+      attempt.once("listening", () => resolve("listening"));
+      // SAFETY: net 'error' events carry syscall errors; the optional
+      // `code` is only read defensively below.
+      attempt.once("error", (error) => resolve(error as Error & { code?: string }));
+      attempt.listen(candidate);
+    });
+    // A fallback under the shared OS temp root must not be connectable by
+    // another local account. DATA_DIR is private already, but applying the
+    // same mode to every POSIX socket keeps the rule simple and fail-closed.
+    if (outcome === "listening" && process.platform !== "win32") {
+      try {
+        chmodSync(candidate, 0o600);
+      } catch (error) {
+        try {
+          attempt.close();
+        } catch {}
+        try {
+          unlinkSync(candidate);
+        } catch {}
+        outcome = error as Error & { code?: string };
+      }
+    }
+    if (outcome === "listening") {
+      if (index > 0) {
+        console.error(`permission broker: ${opts.socketPaths[0]} is still held — bound fallback ${candidate}`);
+      }
+      boundPath = candidate;
+      server = attempt;
+      attempt.on("error", (error) => {
+        console.error(`permission broker error on ${candidate}: ${error.message}`);
+      });
+      break;
+    }
+    try {
+      attempt.close();
+    } catch {}
+    if (index === opts.socketPaths.length - 1) {
+      console.error(`permission broker unavailable on ${candidate}: ${outcome.message}`);
+      break;
+    }
+  }
+  // Never hand the proxy an occupied candidate when every bind failed. That
+  // could connect it to a stale (or unrelated) listener instead of this
+  // broker, defeating the fail-closed boundary.
+  if (!server) throw new Error("claude: permission broker could not bind a local socket");
   const drain = () => {
     for (const p of [...pending.values()]) {
       const { behavior, message } = systemEndedReply(p.ask.kind);
@@ -371,12 +453,15 @@ function createPermissionBroker(opts: {
       closed = true;
       drain();
       try {
-        server.close();
+        server?.close();
       } catch {}
       try {
-        unlinkSync(opts.socketPath);
+        unlinkSync(boundPath);
       } catch {}
     },
+    /** Where the broker actually listens — argv for the proxy child must
+     * use this, not the deterministic base, when a fallback was bound. */
+    socketPath: boundPath,
   };
 }
 
@@ -458,7 +543,7 @@ export const ClaudeDriver: ProviderDriver<ClaudeConfig> = {
     await refreshModels();
     const listeners = new Set<RuntimeEventListener>();
     // one active turn per thread; a second send while busy is a caller bug
-    const active = new Map<string, { stop: () => void; turnId: string; broker?: ReturnType<typeof createPermissionBroker> }>();
+    const active = new Map<string, { stop: () => void; turnId: string; broker?: Awaited<ReturnType<typeof createPermissionBroker>> }>();
 
     // One live CLI process per thread, kept across turns. Under
     // --input-format stream-json the CLI settles a turn with `result` while
@@ -470,8 +555,9 @@ export const ClaudeDriver: ProviderDriver<ClaudeConfig> = {
     // after SESSION_IDLE_MS of quiet, and resumed by --resume when needed.
     interface Session {
       child: ReturnType<typeof spawnCli>;
-      broker?: ReturnType<typeof createPermissionBroker>;
+      broker?: Awaited<ReturnType<typeof createPermissionBroker>>;
       mcpConfigPath: string | null;
+      systemPromptPath: string | null;
       /** the spawn contract — a different one means a fresh process */
       argsKey: string;
       /** the CLI's session id from `init`, what --resume takes later */
@@ -584,7 +670,13 @@ export const ClaudeDriver: ProviderDriver<ClaudeConfig> = {
       const injected = applyClaudeInject({ ...turnEnvironment }, turnModel);
       if (injected.model) args.push("--model", injected.model);
       if (turn.effort) args.push("--effort", turn.effort);
-      if (turn.system) args.push("--append-system-prompt", turn.system);
+
+      // A room prompt can contain section context, skills, memory, playbooks,
+      // and browser/agent instructions. Passing that text directly on argv
+      // exceeds Windows' CreateProcess command-line limit and surfaces as
+      // `spawn ENAMETOOLONG`. Claude accepts the same prompt from a file, so
+      // keep both the text and its potentially sensitive contents off argv.
+      let systemPromptPath: string | null = null;
 
       // integrations → MCP servers; pre-allow their tools (a headless
       // acceptEdits run silently denies anything unlisted)
@@ -641,10 +733,19 @@ export const ClaudeDriver: ProviderDriver<ClaudeConfig> = {
         };
         allowed.push("mcp__dweb");
       }
+      // user-configured servers mount like any integration but are NOT
+      // pre-allowed: acceptEdits silently denies unlisted tools, which
+      // routes every custom tool call through the ogb permission broker
+      // into an Allow/Deny card. Reserved names were filtered upstream;
+      // skip any residual collision instead of clobbering a built-in.
+      for (const [name, server] of Object.entries(turn.integrations?.custom ?? {})) {
+        if (name in mcpServers) continue;
+        mcpServers[name] = { ...server };
+      }
       // permission broker: anything acceptEdits would silently deny becomes
       // an Allow/Deny card in chat, and the agent gets ask_user. Skipped in
       // bypassPermissions (fullAuto) — nothing would ever ask.
-      let broker: ReturnType<typeof createPermissionBroker> | undefined;
+      let broker: Awaited<ReturnType<typeof createPermissionBroker>> | undefined;
       let socketPath: string | null = null;
       if (config.permissionMode !== "bypassPermissions") {
         socketPath = permissionSocketPath(threadId);
@@ -661,18 +762,24 @@ export const ClaudeDriver: ProviderDriver<ClaudeConfig> = {
       let mcpConfigPath: string | null = null;
       if (Object.keys(mcpServers).length) {
         mcpConfigPath = join(mkdtempSync(join(tmpdir(), "omb-mcp-")), "mcp.json");
-        writeFileSync(mcpConfigPath, JSON.stringify({ mcpServers }), { mode: 0o600 });
         args.push("--mcp-config", mcpConfigPath);
         args.push("--allowedTools", allowed.join(","));
       }
 
       const env = claudeEnvironment(turnModel, turnEnvironment);
       const cwd = turn.cwd ?? homedir();
-      // everything that shapes the process, minus session/turn specifics
-      // (the --mcp-config file is a fresh temp path each time; its CONTENT
-      // is what matters and mcpServers carries that)
-      const keyArgs = args.filter((a, i) => a !== "--mcp-config" && args[i - 1] !== "--mcp-config");
-      const argsKey = JSON.stringify({ args: keyArgs, mcpServers, cwd, model: injected.model ?? null, base: env.ANTHROPIC_BASE_URL ?? null });
+      // Everything that shapes the process, minus session/turn-specific temp
+      // paths. Their contents are represented directly in the key instead.
+      const privateFileFlags = new Set(["--mcp-config"]);
+      const keyArgs = args.filter((a, i) => !privateFileFlags.has(a) && !privateFileFlags.has(args[i - 1] ?? ""));
+      const argsKey = JSON.stringify({
+        args: keyArgs,
+        system: turn.system ?? null,
+        mcpServers,
+        cwd,
+        model: injected.model ?? null,
+        base: env.ANTHROPIC_BASE_URL ?? null,
+      });
 
       // Reuse the live process when it is idle, unchanged, and is the session
       // the harness wants resumed. Anything else: close it and spawn fresh
@@ -688,6 +795,12 @@ export const ClaudeDriver: ProviderDriver<ClaudeConfig> = {
           active.delete(threadId);
           live.turn = null;
           closeSession(threadId, "stdin write failed");
+          retryState.delete(threadId);
+          if (mcpConfigPath) {
+            try {
+              rmSync(dirname(mcpConfigPath), { recursive: true, force: true });
+            } catch {}
+          }
           throw new Error("claude session stdin is not writable");
         }
         // the MCP config was for the first spawn; nothing to clean here
@@ -700,59 +813,110 @@ export const ClaudeDriver: ProviderDriver<ClaudeConfig> = {
       }
       if (live) closeSession(threadId, "spawn contract changed");
 
-      // Only create a broker for a new process. A compatible retained process
-      // keeps its existing proxy connection and broker across turns.
-      if (socketPath) {
-        // remembers which tool each pending ask came from, so the resolved
-        // event can scope approvals to real desktop-control tools only
-        const askTools = new Map<string, string | undefined>();
-        broker = createPermissionBroker({
-          socketPath,
-          isActive: () => Boolean(sessions.get(threadId)?.turn),
-          onAsk: (ask) => {
-            const eventTurnId = sessions.get(threadId)?.turn?.turnId ?? turnId;
-            askTools.set(ask.id, typeof ask.tool === "string" ? ask.tool : undefined);
-            emit({
-              ...base(threadId, eventTurnId),
-              type: "request.opened",
-              requestId: ask.id,
-              requestType: ask.kind,
-              tool: ask.tool,
-              summary: askSummary(ask),
-              approvalScope:
-                typeof ask.tool === "string" && controlsHost && ask.tool.startsWith("mcp__computer")
-                  ? "local-computer"
-                  : undefined,
-              choices: Array.isArray(ask.input?.choices) ? (ask.input.choices as string[]).slice(0, 5) : undefined,
-            });
-          },
-          onResolve: (resolved) => {
-            const eventTurnId = sessions.get(threadId)?.turn?.turnId ?? turnId;
-            emit({
-              ...base(threadId, eventTurnId),
-              type: "request.resolved",
-              requestId: resolved.id,
-              behavior: resolved.behavior,
-              source: resolved.source,
-              approvalScope:
-                controlsHost && typeof askTools.get(resolved.id) === "string" && askTools.get(resolved.id)!.startsWith("mcp__computer") ? "local-computer" : undefined,
-            });
-            askTools.delete(resolved.id);
-          },
-        });
-      }
-      if (sessionId) args.push("--resume", sessionId);
-      else args.push("--session-id", newSessionId!);
+      // Until sessions.set() below, this turn owns every launch resource.
+      // Any bind, private-config or synchronous spawn failure must release
+      // them here rather than leave a live listener or credential temp file.
+      const cleanupUnownedLaunch = () => {
+        broker?.close();
+        broker = undefined;
+        if (mcpConfigPath) {
+          try {
+            rmSync(dirname(mcpConfigPath), { recursive: true, force: true });
+          } catch {}
+          mcpConfigPath = null;
+        }
+        if (systemPromptPath) {
+          removePrivateTempDir(systemPromptPath);
+          systemPromptPath = null;
+        }
+        retryState.delete(threadId);
+      };
 
-      const child = spawnCli(config.cli, args, {
-        cwd,
-        env,
-        stdio: ["pipe", "pipe", "pipe"],
-      });
+      try {
+        // Create the prompt file only for a new process. A compatible live
+        // session has already consumed the same system prompt at launch.
+        if (turn.system) {
+          systemPromptPath = join(mkdtempSync(join(tmpdir(), "omb-system-")), "prompt.txt");
+          writeFileSync(systemPromptPath, turn.system, { mode: 0o600 });
+          args.push("--append-system-prompt-file", systemPromptPath);
+        }
+        // Only create a broker for a new process. A compatible retained
+        // process keeps its existing proxy connection and broker across turns.
+        if (socketPath) {
+          // remembers which tool each pending ask came from, so the resolved
+          // event can scope approvals to real desktop-control tools only
+          const askTools = new Map<string, string | undefined>();
+          broker = await createPermissionBroker({
+            socketPaths: brokerSocketCandidates(threadId),
+            isActive: () => Boolean(sessions.get(threadId)?.turn),
+            onAsk: (ask) => {
+              const eventTurnId = sessions.get(threadId)?.turn?.turnId ?? turnId;
+              askTools.set(ask.id, typeof ask.tool === "string" ? ask.tool : undefined);
+              emit({
+                ...base(threadId, eventTurnId),
+                type: "request.opened",
+                requestId: ask.id,
+                requestType: ask.kind,
+                tool: ask.tool,
+                summary: askSummary(ask),
+                approvalScope:
+                  typeof ask.tool === "string" && controlsHost && ask.tool.startsWith("mcp__computer")
+                    ? "local-computer"
+                    : undefined,
+                choices: Array.isArray(ask.input?.choices) ? (ask.input.choices as string[]).slice(0, 5) : undefined,
+              });
+            },
+            onResolve: (resolved) => {
+              const eventTurnId = sessions.get(threadId)?.turn?.turnId ?? turnId;
+              emit({
+                ...base(threadId, eventTurnId),
+                type: "request.resolved",
+                requestId: resolved.id,
+                behavior: resolved.behavior,
+                source: resolved.source,
+                approvalScope:
+                  controlsHost && typeof askTools.get(resolved.id) === "string" && askTools.get(resolved.id)!.startsWith("mcp__computer") ? "local-computer" : undefined,
+              });
+              askTools.delete(resolved.id);
+            },
+          });
+          // A fallback bind means the deterministic pipe is still held by an
+          // earlier process's child. The proxy learns its path from argv, so
+          // point it at the pipe we actually bound. argsKey deliberately keeps
+          // the base path: the nonce is not part of the spawn contract, and a
+          // retained session keeps its own broker object anyway.
+          if (broker.socketPath !== socketPath && mcpConfigPath) {
+            mcpServers.ogb = { command: process.execPath, args: [PERM_PROXY_PATH, broker.socketPath], env: { ...NODE_ENV_FLAG } };
+          }
+        }
+
+        // Write once, only after the broker has selected its real endpoint.
+        if (mcpConfigPath) {
+          writeFileSync(mcpConfigPath, JSON.stringify({ mcpServers }), { mode: 0o600 });
+        }
+        if (sessionId) args.push("--resume", sessionId);
+        else args.push("--session-id", newSessionId!);
+      } catch (error) {
+        cleanupUnownedLaunch();
+        throw error;
+      }
+
+      let child: ReturnType<typeof spawnCli>;
+      try {
+        child = spawnCli(config.cli, args, {
+          cwd,
+          env,
+          stdio: ["pipe", "pipe", "pipe"],
+        });
+      } catch (error) {
+        cleanupUnownedLaunch();
+        throw error;
+      }
       const session: Session = {
         child,
         broker,
         mcpConfigPath,
+        systemPromptPath,
         argsKey,
         sessionId: sessionId ?? newSessionId,
         turn: { turnId, settled: false, sawStreamDelta: false },
@@ -784,6 +948,9 @@ export const ClaudeDriver: ProviderDriver<ClaudeConfig> = {
             rmSync(dirname(session.mcpConfigPath), { recursive: true, force: true });
           } catch {}
           session.mcpConfigPath = null;
+        }
+        if (session.systemPromptPath) {
+          if (removePrivateTempDir(session.systemPromptPath)) session.systemPromptPath = null;
         }
         active.delete(threadId);
         session.turn = null;
@@ -939,6 +1106,10 @@ export const ClaudeDriver: ProviderDriver<ClaudeConfig> = {
               } catch {}
               session.mcpConfigPath = null;
             }
+            if (session.systemPromptPath) {
+              removePrivateTempDir(session.systemPromptPath);
+              session.systemPromptPath = null;
+            }
             sessions.delete(threadId);
             session.turn = null;
             retry.attempt++;
@@ -1006,6 +1177,7 @@ export const ClaudeDriver: ProviderDriver<ClaudeConfig> = {
             rmSync(dirname(session.mcpConfigPath), { recursive: true, force: true });
           } catch {}
         }
+        removePrivateTempDir(session.systemPromptPath);
         if (sessions.get(threadId) === session) sessions.delete(threadId);
       });
 
@@ -1124,6 +1296,7 @@ export const ClaudeDriver: ProviderDriver<ClaudeConfig> = {
         capabilities: {
           sessionModelSwitch: "in-session",
           agentsMcp: true,
+        customMcp: true,
           computerMcp: true,
           composioMcp: true,
           phoneMcp: true,

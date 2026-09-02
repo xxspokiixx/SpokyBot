@@ -6,6 +6,9 @@
 // did that and having two folds is how two clients start disagreeing.
 import SwiftUI
 import CompanionCore
+import PhotosUI
+import UniformTypeIdentifiers
+import ImageIO
 // Unconditional, because the uses below are: `Color(uiColor:)` and
 // `UIImage(data:)` are reached on every path through this file. A
 // `canImport` guard around the import alone does not make the file portable
@@ -29,6 +32,18 @@ struct ChatView: View {
     @State private var showingProfile = false
     @State private var showCommandHUD = false
     @State private var shareFile: ShareFile?
+    @State private var showingPhotoPicker = false
+    @State private var showingFileImporter = false
+    @State private var selectedPhotos: [PhotosPickerItem] = []
+    @State private var attachments: [PendingMessageAttachment] = []
+    @State private var preparingAttachments = false
+    @State private var sendingMessage = false
+    @State private var attachmentError: String?
+    @State private var openingFileName: String?
+    @State private var fileOpenError: String?
+    @State private var filePreview: FilePreviewItem?
+    @State private var fileDownloadTask: Task<Void, Never>?
+    @State private var acceptsNextHardwareLineBreak = false
     @FocusState private var composerFocused: Bool
     @StateObject private var dictation = SpeechDictation()
     /// The opening beat: the island grows with the bot's face in it, then
@@ -37,6 +52,11 @@ struct ChatView: View {
     @State private var islandExpanded = false
     @State private var islandVisible = false
     @State private var facePhase: CGFloat = 0
+
+    @AppStorage(PrefKey.islandIntro) private var islandIntro = IslandIntro.oncePerBot.rawValue
+    @AppStorage(PrefKey.islandSeen) private var islandSeen = ""
+    @AppStorage(PrefKey.activityDetail) private var activityDetail = ActivityDetail.full.rawValue
+    @AppStorage(PrefKey.quickReplies) private var quickReplies = ""
 
     /// The live bubble's scroll target. A constant because there is at most
     /// one per chat and it has no message id to borrow.
@@ -56,8 +76,31 @@ struct ChatView: View {
     /// live record instead of the snapshot that opened this screen.
     private var threadId: String { current.threadId }
 
+    /// A task changes a bot's thread, but it does not make it a new bot.
+    /// Intro history follows the chat itself so switching tasks cannot replay
+    /// a once-per-bot greeting.
+    private var islandIntroID: String {
+        switch current {
+        case let .bot(bot): "bot.\(bot.id)"
+        case let .room(room): "room.\(room.id)"
+        }
+    }
+
     private var messages: [Message] {
         session.state.visibleTranscript(forThread: threadId)
+    }
+
+    /// The transcript as the reader has asked to see it: every chip, folded
+    /// runs, or none at all.
+    private var rows: [TranscriptRow] {
+        transcriptRows(messages, detail: ActivityDetail(rawValue: activityDetail) ?? .full)
+    }
+
+    /// The composer's chip row, as edited in Settings.
+    private var storedChips: [ActionChipItem] {
+        QuickReply.decode(quickReplies).map {
+            ActionChipItem(id: $0.id, title: $0.title, icon: $0.icon, prompt: $0.prompt)
+        }
     }
 
     /// Unread elsewhere — what the back pill's badge counts, like Messages.
@@ -70,7 +113,7 @@ struct ChatView: View {
         // Read the transcript once for this render. Pagination changes the
         // array as a unit; repeatedly reaching through ObservableObject for
         // every row only recomputes the same value.
-        let transcript = messages
+        let transcript = rows
         // A VStack with the composer as a sibling, rather than a scroll view
         // with `.safeAreaInset`. The inset version sized itself to its
         // content, so a short transcript left the composer floating in the
@@ -107,25 +150,31 @@ struct ChatView: View {
                             .padding(.vertical, 8)
                         }
 
-                        ForEach(Array(transcript.enumerated()), id: \.element.id) { index, message in
+                        ForEach(Array(transcript.enumerated()), id: \.element.id) { index, row in
                             VStack(alignment: .leading, spacing: 6) {
                                 // a gap in time is worth marking; a timestamp
                                 // on every message is just noise
                                 if startsANewStretch(at: index, in: transcript) {
-                                    Text(RelativeStamp.separator(message.date))
+                                    Text(RelativeStamp.separator(row.head.date))
                                         .font(.system(size: 12, weight: .medium))
                                         .foregroundStyle(Color.secondary.opacity(0.7))
                                         .frame(maxWidth: .infinity)
                                         .padding(.top, 10)
                                         .padding(.bottom, 4)
                                 }
-                                MessageRow(
-                                    chat: current,
-                                    message: message,
-                                    endsRun: endsRun(at: index, in: transcript)
-                                )
+                                switch row {
+                                case let .message(message):
+                                    MessageRow(
+                                        chat: current,
+                                        message: message,
+                                        endsRun: endsRun(at: index, in: transcript),
+                                        openLink: openLink
+                                    )
+                                case let .activityRun(items):
+                                    ActivityRunChip(items: items)
+                                }
                             }
-                            .id(message.id)
+                            .id(row.id)
                         }
 
                         // The reply as it is typed. It sits after the last
@@ -150,7 +199,8 @@ struct ChatView: View {
                     }
                     .padding(.horizontal, 16)
                     .padding(.vertical, 12)
-                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .frame(maxWidth: CompanionLayout.chatWidth, alignment: .leading)
+                    .frame(maxWidth: .infinity)
                 }
                 // The header lives in the scroll view's top safe area: the
                 // transcript starts below it and scrolls under it — that is
@@ -189,7 +239,19 @@ struct ChatView: View {
                 }
                 .task {
                     // grow, hold a beat, shrink — the face rides along
-                    guard !reduceMotion else { return }
+                    guard CompanionLayout.supportsIslandPresentation, !reduceMotion else { return }
+                    // The intro is a greeting, and a greeting repeated every
+                    // time you open a chat stops being one.
+                    let intro = IslandIntro(rawValue: islandIntro) ?? .oncePerBot
+                    switch intro {
+                    case .never:
+                        return
+                    case .oncePerBot:
+                        guard !IslandSeen.contains(islandIntroID, in: islandSeen) else { return }
+                        islandSeen = IslandSeen.adding(islandIntroID, to: islandSeen)
+                    case .always:
+                        break
+                    }
                     islandVisible = true
                     try? await Task.sleep(for: .milliseconds(40))
                     withAnimation(.spring(response: 0.5, dampingFraction: 0.8)) { islandExpanded = true; facePhase = 1 }
@@ -258,7 +320,10 @@ struct ChatView: View {
             // bit here rather than leaving a badge on an open conversation.
             if unread { Task { await session.markRead(current) } }
         }
-        .onDisappear { dictation.stop() }
+        .onDisappear {
+            dictation.stop()
+            fileDownloadTask?.cancel()
+        }
         .onChange(of: scenePhase) { _, phase in
             if phase != .active { dictation.stop() }
         }
@@ -297,6 +362,28 @@ struct ChatView: View {
         }
         .sheet(item: $shareFile) { file in
             ActivityShareSheet(items: [file.url])
+        }
+        .photosPicker(
+            isPresented: $showingPhotoPicker,
+            selection: $selectedPhotos,
+            maxSelectionCount: max(1, AttachmentPolicy.maximumItems - attachments.count),
+            matching: .images,
+            preferredItemEncoding: .current
+        )
+        .onChange(of: selectedPhotos) { _, items in
+            guard !items.isEmpty else { return }
+            Task { await importPhotos(items) }
+        }
+        .fileImporter(
+            isPresented: $showingFileImporter,
+            allowedContentTypes: [.content],
+            allowsMultipleSelection: true,
+            onCompletion: importFiles
+        )
+        .fullScreenCover(item: $filePreview) { preview in
+            FilePreviewView(item: preview) {
+                filePreview = nil
+            }
         }
     }
 
@@ -342,6 +429,8 @@ struct ChatView: View {
         .padding(.horizontal, 16)
         .padding(.top, 4)
         .padding(.bottom, 8)
+        .frame(maxWidth: CompanionLayout.headerWidth)
+        .frame(maxWidth: .infinity)
         .background(
             Rectangle()
                 .fill(.ultraThinMaterial)
@@ -377,8 +466,8 @@ struct ChatView: View {
                 .buttonStyle(.plain)
                 .allowsHitTesting(!islandVisible)
                 .accessibilityHidden(islandVisible)
-                .accessibilityLabel("Open \(current.name) profile")
-                .accessibilityHint("Edits this agent's identity, avatar, notifications, and voice")
+                .accessibilityLabel("Open \(current.name) settings")
+                .accessibilityHint("Changes this bot's model, profile, notifications, and voice")
             } else {
                 Color.clear.frame(width: 60, height: 60)
             }
@@ -397,7 +486,7 @@ struct ChatView: View {
                             .foregroundStyle(Color.secondary)
                             .lineLimit(1)
                     }
-                    Image(systemName: current.isBot ? "person.crop.circle" : "ellipsis")
+                    Image(systemName: current.isBot ? "gearshape" : "ellipsis")
                         .font(.system(size: 11, weight: .bold))
                         .foregroundStyle(Color.secondary)
                 }
@@ -408,7 +497,7 @@ struct ChatView: View {
             }
             .buttonStyle(.plain)
             .glassCapsule()
-            .accessibilityLabel(current.isBot ? "Open \(current.name) profile" : "Open \(current.name) chat options")
+            .accessibilityLabel(current.isBot ? "Open \(current.name) settings" : "Open \(current.name) chat options")
         }
         .padding(.top, -4)
     }
@@ -458,11 +547,11 @@ struct ChatView: View {
                     }
                 }
                 .padding(.vertical, 10)
-                .frame(maxWidth: .infinity, alignment: .leading)
+                .frame(maxWidth: CompanionLayout.chatWidth, alignment: .leading)
                 .glassSheet(cornerRadius: 30)
-                .padding(.leading, 12)
-                .padding(.trailing, 44)
+                .padding(.horizontal, 12)
                 .padding(.bottom, 70)
+                .frame(maxWidth: .infinity)
                 .transition(.move(edge: .bottom).combined(with: .opacity))
             }
             .transition(.opacity)
@@ -480,7 +569,18 @@ struct ChatView: View {
     }
 
     private var plusActions: [PlusAction] {
-        var out: [PlusAction] = []
+        let canAddAttachment = attachments.count < AttachmentPolicy.maximumItems
+            && !preparingAttachments && !sendingMessage
+        var out: [PlusAction] = [
+            PlusAction(
+                id: "photos", systemImage: "photo.on.rectangle", title: "Photo Library",
+                subtitle: "Add a photo to this message", disabled: !canAddAttachment
+            ) { showingPhotoPicker = true },
+            PlusAction(
+                id: "files", systemImage: "paperclip", title: "Choose File",
+                subtitle: "Add a document from Files", disabled: !canAddAttachment
+            ) { showingFileImporter = true },
+        ]
         if case let .bot(bot) = current {
             out.append(PlusAction(
                 id: "task", systemImage: "plus.square.on.square", title: "New task",
@@ -490,6 +590,10 @@ struct ChatView: View {
                 id: "tasks", systemImage: "square.stack", title: "Tasks",
                 subtitle: "Switch, rename or remove one"
             ) { showingTasks = true })
+            out.append(PlusAction(
+                id: "settings", systemImage: "gearshape", title: "Bot settings",
+                subtitle: "Model, profile, voice and notifications"
+            ) { showingProfile = true })
             out.append(PlusAction(
                 id: "computer", systemImage: "display", title: "Watch computer",
                 subtitle: "Live view of what \(bot.name) is doing"
@@ -537,25 +641,49 @@ struct ChatView: View {
 
     /// True when this message opens a fresh stretch of conversation — the
     /// first one, or one that follows a gap of half an hour or more.
-    private func startsANewStretch(at index: Int, in messages: [Message]) -> Bool {
+    private func startsANewStretch(at index: Int, in rows: [TranscriptRow]) -> Bool {
         guard index > 0 else { return true }
-        return messages[index].at - messages[index - 1].at > 30 * 60 * 1000
+        return rows[index].at - rows[index - 1].endAt > 30 * 60 * 1000
     }
 
     /// True when the next message is from someone else (or there is none),
     /// which is where a run of bubbles gets its tail — one per run, like
     /// every messaging app, rather than one per bubble.
-    private func endsRun(at index: Int, in messages: [Message]) -> Bool {
-        guard index + 1 < messages.count else { return true }
-        let this = messages[index], next = messages[index + 1]
+    private func endsRun(at index: Int, in rows: [TranscriptRow]) -> Bool {
+        guard index + 1 < rows.count else { return true }
+        let this = rows[index], next = rows[index + 1]
         if this.role != next.role { return true }
-        if this.from?.name != next.from?.name { return true }
+        if this.senderName != next.senderName { return true }
         // a card or a tool chip between two texts breaks the run visually
         return next.kind != .text
     }
 
     private var canSend: Bool {
-        !draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+        (!draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || !attachments.isEmpty)
+            && !preparingAttachments && !sendingMessage
+    }
+
+    /// A vertically growing SwiftUI TextField treats the software keyboard's
+    /// Return key as a newline even when the key is labelled “Send”. Intercept
+    /// that proposed edit before it reaches the draft. Hardware Shift-Return
+    /// opts into one real line break through `acceptsNextHardwareLineBreak`.
+    private var composerDraft: Binding<String> {
+        Binding(
+            get: { draft },
+            set: { proposed in
+                if acceptsNextHardwareLineBreak {
+                    acceptsNextHardwareLineBreak = false
+                    draft = proposed
+                } else if ComposerKeyboard.shouldSubmit(
+                    previousText: draft,
+                    proposedText: proposed
+                ) {
+                    submit()
+                } else {
+                    draft = proposed
+                }
+            }
+        )
     }
 
     private var hasPendingApproval: Bool {
@@ -566,13 +694,227 @@ struct ChatView: View {
         // This also cancels an in-flight permission prompt before it can
         // open the microphone after the message has already been sent.
         dictation.stop()
-        let text = (explicitText ?? draft).trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !text.isEmpty else { return }
-        draft = ""
+        let draftAtSend = draft
+        let text = (explicitText ?? draftAtSend).trimmingCharacters(in: .whitespacesAndNewlines)
+        let outgoingAttachments = attachments
+        guard !text.isEmpty || !outgoingAttachments.isEmpty,
+              !preparingAttachments,
+              !sendingMessage
+        else { return }
+        sendingMessage = true
+        attachmentError = nil
         showCommandHUD = false
-        SoundEffects.playSent()
-        Haptics.impact(.medium)
-        Task { await session.send(text, to: current) }
+        showingPlus = false
+        Task {
+            let sent = await session.send(
+                text: text,
+                attachments: outgoingAttachments,
+                to: current
+            )
+            sendingMessage = false
+            guard sent else {
+                attachmentError = session.actionError ?? "Couldn't send this message. Try again."
+                session.actionError = nil
+                return
+            }
+            // HUD commands expand `/diff` into a longer prompt. Compare with
+            // what was actually in the field at tap time, not the expanded
+            // text, so the command clears without erasing a newer edit.
+            if draft == draftAtSend {
+                draft = ""
+            }
+            if attachments.map(\.id) == outgoingAttachments.map(\.id) {
+                attachments = []
+            }
+            SoundEffects.playSent()
+            Haptics.impact(.medium)
+        }
+    }
+
+    private func importPhotos(_ items: [PhotosPickerItem]) async {
+        guard !preparingAttachments, !sendingMessage else { return }
+        let available = AttachmentPolicy.maximumItems - attachments.count
+        guard items.count <= available else {
+            selectedPhotos = []
+            attachmentError = "Send up to \(AttachmentPolicy.maximumItems) items at a time."
+            return
+        }
+
+        preparingAttachments = true
+        attachmentError = nil
+        defer {
+            preparingAttachments = false
+            selectedPhotos = []
+        }
+
+        do {
+            var imported: [PendingMessageAttachment] = []
+            for (index, item) in items.enumerated() {
+                guard let raw = try await item.loadTransferable(type: Data.self) else {
+                    throw AttachmentImportError.unreadable("that photo")
+                }
+                let actualType = CGImageSourceCreateWithData(raw as CFData, nil)
+                    .flatMap(CGImageSourceGetType)
+                    .flatMap { UTType($0 as String) }
+                let actualMime = actualType?.preferredMIMEType
+                    .map(AttachmentPolicy.normalizedMIME)
+
+                let data: Data
+                let mime: String
+                let fileExtension: String
+                if let actualMime, AttachmentPolicy.imageMIMETypes.contains(actualMime) {
+                    data = raw
+                    mime = actualMime
+                    fileExtension = actualType?.preferredFilenameExtension ?? "jpg"
+                } else if let image = UIImage(data: raw),
+                          let jpeg = image.jpegData(compressionQuality: 0.9) {
+                    data = jpeg
+                    mime = "image/jpeg"
+                    fileExtension = "jpg"
+                } else {
+                    throw AttachmentImportError.unsupported("that photo")
+                }
+
+                let candidate = PendingMessageAttachment(
+                    id: UUID(),
+                    data: data,
+                    name: items.count == 1 ? "Photo.\(fileExtension)" : "Photo \(index + 1).\(fileExtension)",
+                    mime: mime,
+                    kind: .image
+                )
+                try AttachmentPolicy.validate(attachments + imported + [candidate])
+                imported.append(candidate)
+            }
+            attachments.append(contentsOf: imported)
+            Haptics.selection()
+        } catch {
+            attachmentError = error.localizedDescription
+        }
+    }
+
+    private func importFiles(_ result: Result<[URL], Error>) {
+        guard case let .success(urls) = result else {
+            if case let .failure(error) = result { attachmentError = error.localizedDescription }
+            return
+        }
+        guard !urls.isEmpty else { return }
+        Task { await importFiles(urls) }
+    }
+
+    private func importFiles(_ urls: [URL]) async {
+        guard !preparingAttachments, !sendingMessage else { return }
+        let available = AttachmentPolicy.maximumItems - attachments.count
+        guard urls.count <= available else {
+            attachmentError = "Send up to \(AttachmentPolicy.maximumItems) items at a time."
+            return
+        }
+
+        preparingAttachments = true
+        attachmentError = nil
+        defer { preparingAttachments = false }
+
+        do {
+            var imported: [PendingMessageAttachment] = []
+            for url in urls {
+                let usedBytes = (attachments + imported).reduce(0) { $0 + $1.data.count }
+                let remainingBytes = max(0, AttachmentPolicy.maximumTotalBytes - usedBytes)
+                let candidate = try await Task.detached(priority: .userInitiated) {
+                    try Self.readImportedFile(url, remainingBytes: remainingBytes)
+                }.value
+                try AttachmentPolicy.validate(attachments + imported + [candidate])
+                imported.append(candidate)
+            }
+            attachments.append(contentsOf: imported)
+            Haptics.selection()
+        } catch {
+            attachmentError = error.localizedDescription
+        }
+    }
+
+    nonisolated private static func readImportedFile(
+        _ url: URL,
+        remainingBytes: Int
+    ) throws -> PendingMessageAttachment {
+        let accessed = url.startAccessingSecurityScopedResource()
+        defer { if accessed { url.stopAccessingSecurityScopedResource() } }
+
+        let values = try url.resourceValues(
+            forKeys: [.contentTypeKey, .isRegularFileKey, .fileSizeKey]
+        )
+        guard values.isRegularFile != false else {
+            throw AttachmentImportError.unreadable(url.lastPathComponent)
+        }
+        let name = url.lastPathComponent.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !name.isEmpty else { throw AttachmentImportError.unreadable("that file") }
+        let inferred = values.contentType ?? UTType(filenameExtension: url.pathExtension)
+        let mime = AttachmentPolicy.normalizedMIME(
+            inferred?.preferredMIMEType ?? "application/octet-stream"
+        )
+        guard let kind = AttachmentPolicy.kind(forMIME: mime) else {
+            throw AttachmentImportError.unsupported(name)
+        }
+        let itemLimit = kind == .image
+            ? AttachmentPolicy.maximumImageBytes
+            : AttachmentPolicy.maximumFileBytes
+        let readLimit = min(itemLimit, remainingBytes)
+        if let fileSize = values.fileSize, fileSize > readLimit {
+            throw AttachmentImportError.tooLarge(name, readLimit)
+        }
+        // Some document providers do not report a size. Never let that turn
+        // into an unbounded read of a provider-controlled file: read one byte
+        // past the remaining allowance and reject it before it can become a
+        // large in-memory draft.
+        let handle = try FileHandle(forReadingFrom: url)
+        defer { try? handle.close() }
+        let data = try handle.read(upToCount: readLimit + 1) ?? Data()
+        guard data.count <= readLimit else {
+            throw AttachmentImportError.tooLarge(name, readLimit)
+        }
+        return PendingMessageAttachment(
+            id: UUID(), data: data, name: name, mime: mime, kind: kind
+        )
+    }
+
+    private func openLink(_ url: URL, from message: Message) -> OpenURLAction.Result {
+        guard let target = LocalMessageLink.resolve(url) else {
+            fileOpenError = "This link can't be opened securely."
+            return .handled
+        }
+        switch target {
+        case let .web(webURL):
+            return .systemAction(webURL)
+        case let .desktopFile(path):
+            openFile(path: path, from: message)
+            return .handled
+        }
+    }
+
+    private func openFile(path: String, from message: Message) {
+        fileDownloadTask?.cancel()
+        fileOpenError = nil
+        let name = URL(fileURLWithPath: path).lastPathComponent
+        openingFileName = name.isEmpty ? "file" : name
+        let task = Task {
+            let downloaded = await session.downloadFile(
+                threadId: threadId,
+                messageId: message.id,
+                path: path
+            )
+            guard !Task.isCancelled else { return }
+            openingFileName = nil
+            guard let downloaded, downloaded.localURL != nil else {
+                fileOpenError = session.actionError ?? "Couldn't open that file. Try again."
+                session.actionError = nil
+                return
+            }
+            filePreview?.cleanUp()
+            guard let preview = FilePreviewItem(downloaded: downloaded) else {
+                fileOpenError = "The downloaded file couldn't be previewed."
+                return
+            }
+            filePreview = preview
+        }
+        fileDownloadTask = task
     }
 
     // MARK: - Composer
@@ -580,6 +922,54 @@ struct ChatView: View {
     /// A round + and a glass pill with dictation and send inside it.
     private var composer: some View {
         VStack(spacing: 6) {
+            if preparingAttachments || sendingMessage {
+                HStack(spacing: 8) {
+                    ProgressView()
+                        .controlSize(.small)
+                    Text(preparingAttachments ? "Preparing attachments…" : "Sending…")
+                        .font(.system(size: 13, weight: .medium))
+                }
+                .foregroundStyle(Color.secondary)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .padding(.horizontal, 4)
+                .accessibilityElement(children: .combine)
+            }
+
+            if let openingFileName {
+                HStack(spacing: 8) {
+                    ProgressView()
+                        .controlSize(.small)
+                    Text("Opening \(openingFileName)…")
+                        .font(.system(size: 13, weight: .medium))
+                        .lineLimit(1)
+                }
+                .foregroundStyle(Color.secondary)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .padding(.horizontal, 4)
+                .accessibilityElement(children: .combine)
+            }
+
+            if let error = fileOpenError ?? attachmentError {
+                HStack(alignment: .firstTextBaseline, spacing: 8) {
+                    Image(systemName: "exclamationmark.triangle.fill")
+                        .foregroundStyle(Color.orange)
+                    Text(error)
+                        .font(.system(size: 13))
+                        .foregroundStyle(Color.primary)
+                        .fixedSize(horizontal: false, vertical: true)
+                    Spacer(minLength: 4)
+                    Button("Dismiss") {
+                        fileOpenError = nil
+                        attachmentError = nil
+                    }
+                    .font(.system(size: 13, weight: .semibold))
+                }
+                .padding(.horizontal, 12)
+                .padding(.vertical, 9)
+                .background(Color.orange.opacity(0.12), in: RoundedRectangle(cornerRadius: 12))
+                .accessibilityElement(children: .combine)
+            }
+
             if let error = dictation.error {
                 Text(error)
                     .font(.system(size: 13))
@@ -610,11 +1000,29 @@ struct ChatView: View {
                     }
                 }
                 .transition(.move(edge: .bottom).combined(with: .opacity))
-            } else if draft.isEmpty && !current.busy && !hasPendingApproval {
-                PredictiveActionChipsView(accentColor: MausPalette.color(current.color)) { chip in
+            } else if draft.isEmpty && attachments.isEmpty && !current.busy
+                        && !hasPendingApproval && !storedChips.isEmpty {
+                PredictiveActionChipsView(chips: storedChips, accentColor: MausPalette.color(current.color)) { chip in
                     submit(chip.prompt)
                 }
                 .transition(.opacity)
+            }
+
+            if !attachments.isEmpty {
+                ScrollView(.horizontal, showsIndicators: false) {
+                    HStack(spacing: 8) {
+                        ForEach(attachments) { attachment in
+                            PendingAttachmentChip(attachment: attachment) {
+                                guard !preparingAttachments, !sendingMessage else { return }
+                                attachments.removeAll { $0.id == attachment.id }
+                                attachmentError = nil
+                            }
+                        }
+                    }
+                    .padding(.horizontal, 2)
+                }
+                .scrollClipDisabled()
+                .transition(.move(edge: .bottom).combined(with: .opacity))
             }
 
             GlassGroup(spacing: 10) {
@@ -634,6 +1042,7 @@ struct ChatView: View {
                     }
                     .buttonStyle(.plain)
                     .glassCapsule()
+                    .disabled(preparingAttachments || sendingMessage)
                     .accessibilityLabel(showingPlus ? "Close" : "More")
 
                     HStack(alignment: .bottom, spacing: 6) {
@@ -650,13 +1059,14 @@ struct ChatView: View {
                                 .frame(width: 30, height: 32)
                         }
                         .buttonStyle(.plain)
+                        .disabled(preparingAttachments || sendingMessage)
                         .accessibilityLabel("Slash commands")
                         .padding(.leading, 6)
                         .padding(.bottom, 6)
 
                         TextField(
-                            dictation.isListening ? "Listening…" : "Ask \(current.name)",
-                            text: $draft,
+                            sendingMessage ? "Sending…" : dictation.isListening ? "Listening…" : "Ask \(current.name)",
+                            text: composerDraft,
                             axis: .vertical
                         )
                             .lineLimit(1...5)
@@ -666,14 +1076,21 @@ struct ChatView: View {
                             .submitLabel(.send)
                             // Partial transcripts rebuild from a frozen base;
                             // prevent competing edits without dimming the text.
-                            .allowsHitTesting(!dictation.isListening && !dictation.isStarting)
+                            .allowsHitTesting(
+                                !dictation.isListening && !dictation.isStarting
+                                    && !preparingAttachments && !sendingMessage
+                            )
                             .onChange(of: draft) { _, value in
                                 withAnimation(.easeInOut(duration: 0.15)) {
                                     showCommandHUD = value.hasPrefix("/")
                                 }
                             }
                             .onKeyPress(.return, phases: .down) { press in
-                                guard !press.modifiers.contains(.shift) else { return .ignored }
+                                if press.modifiers.contains(.shift) {
+                                    acceptsNextHardwareLineBreak = true
+                                    return .ignored
+                                }
+                                acceptsNextHardwareLineBreak = false
                                 submit()
                                 return .handled
                             }
@@ -697,6 +1114,7 @@ struct ChatView: View {
                                 .symbolEffect(.pulse, isActive: dictation.isListening)
                         }
                         .buttonStyle(.plain)
+                        .disabled(preparingAttachments || sendingMessage)
                         .padding(.bottom, 6)
                         .accessibilityLabel(dictation.isListening ? "Stop dictation" : "Start dictation")
 
@@ -723,6 +1141,8 @@ struct ChatView: View {
         .padding(.horizontal, 12)
         .padding(.top, 6)
         .padding(.bottom, 8)
+        .frame(maxWidth: CompanionLayout.chatWidth)
+        .frame(maxWidth: .infinity)
     }
 }
 
@@ -731,9 +1151,12 @@ struct MessageRow: View {
     let message: Message
     /// Last bubble of a run from the same side: the one that gets the tail.
     var endsRun = true
+    let openLink: (URL, Message) -> OpenURLAction.Result
     @EnvironmentObject private var session: Session
     @State private var editingText = ""
     @State private var showingEdit = false
+    /// The text being selected, and the sheet's presentation in one value.
+    @State private var selecting: SelectableText?
 
     private static let reactionChoices = ["👍", "❤️", "😂", "🎉", "👀"]
 
@@ -790,6 +1213,19 @@ struct MessageRow: View {
                     Task { await session.react(to: message, in: chat.threadId, emoji: emoji) }
                 }
             }
+            if let text = message.text, !text.isEmpty {
+                Divider()
+                Button("Copy", systemImage: "doc.on.doc") {
+                    PlatformBridge.copyToPasteboard(text)
+                }
+            }
+            // Copy above takes the whole reply. Selection happens in a sheet
+            // because long-press on the bubble already opens this menu.
+            if let body = message.text, !body.isEmpty {
+                Button("Select Text", systemImage: "selection.pin.in.out") {
+                    selecting = SelectableText(text: body)
+                }
+            }
             if message.role == .user, message.kind == .text, case let .bot(bot) = chat {
                 Divider()
                 Button("Edit and retry", systemImage: "pencil") {
@@ -812,13 +1248,14 @@ struct MessageRow: View {
         } message: {
             Text("This creates a new version and continues from there.")
         }
+        .sheet(item: $selecting) { SelectableTextSheet(text: $0.text) }
     }
 
     @ViewBuilder
     private var content: some View {
         switch message.kind {
         case .text:
-            TextBubble(message: message, chat: chat, tailed: endsRun)
+            TextBubble(message: message, chat: chat, tailed: endsRun, openLink: openLink)
         case .options:
             CardView(chat: chat, message: message)
         case .activity:
@@ -832,7 +1269,7 @@ struct MessageRow: View {
             // When there is nothing to show, show nothing — a placeholder
             // saying "unsupported" is a worse gap than the gap.
             if let text = message.text, !text.isEmpty {
-                TextBubble(message: message, chat: chat, tailed: endsRun)
+                TextBubble(message: message, chat: chat, tailed: endsRun, openLink: openLink)
             }
         }
     }
@@ -849,6 +1286,12 @@ private struct ShareFile: Identifiable {
     var id: String { url.path }
 }
 
+/// A message's text on its way to the selection sheet.
+struct SelectableText: Identifiable {
+    let id = UUID()
+    let text: String
+}
+
 private struct ActivityShareSheet: UIViewControllerRepresentable {
     let items: [Any]
 
@@ -863,6 +1306,11 @@ struct TextBubble: View {
     let message: Message
     let chat: Chat
     var tailed = true
+    let openLink: (URL, Message) -> OpenURLAction.Result
+
+    private var attachedContent: AttachedMessageContent {
+        AttachedMessageContent.parse(message.text ?? "")
+    }
 
     private var parsedDiff: (filename: String, diff: String)? {
         guard message.role != .user, let source = message.text else { return nil }
@@ -960,13 +1408,33 @@ struct TextBubble: View {
                 } else if let table = parsedTable {
                     SQLResultTableView(columns: table.headers, rows: table.rows)
                 } else if mine {
-                    Text(message.text ?? "")
-                        .font(.system(size: 17))
-                        .foregroundStyle(BubbleColor.mineText)
-                        .textSelection(.enabled)
-                        .fixedSize(horizontal: false, vertical: true)
+                    let shared = attachedContent
+                    ForEach(Array(shared.attachments.enumerated()), id: \.offset) { _, attachment in
+                        Label(
+                            attachment.name,
+                            systemImage: attachment.kind == .image ? "photo" : "doc"
+                        )
+                        .font(.system(size: 13, weight: .medium))
+                        .lineLimit(1)
+                        .foregroundStyle(BubbleColor.mineText.opacity(0.82))
+                        .padding(.horizontal, 10)
+                        .padding(.vertical, 6)
+                        .background(BubbleColor.mineText.opacity(0.10), in: Capsule())
+                        .accessibilityLabel(
+                            "\(attachment.kind == .image ? "Image" : "File"): \(attachment.name)"
+                        )
+                    }
+                    if !shared.text.isEmpty {
+                        Text(shared.text)
+                            .font(.system(size: 17))
+                            .foregroundStyle(BubbleColor.mineText)
+                            .textSelection(.enabled)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
                 } else {
-                    MarkdownText(source: message.text ?? "")
+                    MarkdownText(source: message.text ?? "") { url in
+                        openLink(url, message)
+                    }
                         .foregroundStyle(Color.primary)
                         .textSelection(.enabled)
                         .fixedSize(horizontal: false, vertical: true)
@@ -1057,6 +1525,42 @@ struct CardView: View {
                         .fixedSize(horizontal: false, vertical: true)
                 }
 
+                if let skill = card.skillRequest {
+                    if let preview = skill.preview, let sha256 = skill.reviewedSha256 {
+                        VStack(alignment: .leading, spacing: 7) {
+                            HStack {
+                                Text("Review the complete SKILL.md")
+                                    .font(.system(size: 12, weight: .semibold))
+                                Spacer()
+                                Text("sha256 \(String(sha256.prefix(8)))")
+                                    .font(.system(size: 10, design: .monospaced))
+                                    .foregroundStyle(Color.secondary)
+                            }
+                            Text("Source: \(skill.source ?? "Unknown")")
+                                .font(.system(size: 11))
+                                .foregroundStyle(Color.secondary)
+                                .textSelection(.enabled)
+                            ScrollView(.vertical) {
+                                Text(preview)
+                                    .font(.system(size: 12, design: .monospaced))
+                                    .foregroundStyle(Color.primary)
+                                    .textSelection(.enabled)
+                                    .frame(maxWidth: .infinity, alignment: .leading)
+                            }
+                            .frame(maxHeight: 220)
+                            .padding(10)
+                            .background(Color.secondary.opacity(0.08), in: RoundedRectangle(cornerRadius: 10))
+                        }
+                    } else {
+                        Label(
+                            "This proposal was created by an older build and cannot be safely applied. Deny it and ask the bot to create it again.",
+                            systemImage: "exclamationmark.shield"
+                        )
+                        .font(.system(size: 12))
+                        .foregroundStyle(.orange)
+                    }
+                }
+
                 if let held = card.held {
                     Label(held, systemImage: "exclamationmark.shield")
                         .font(.system(size: 13))
@@ -1084,7 +1588,11 @@ struct CardView: View {
                                     )
                             }
                             .buttonStyle(.plain)
-                            .disabled(answering)
+                            .disabled(
+                                answering ||
+                                    (card.skillRequest != nil && !Self.isRefusal(option) &&
+                                        card.skillRequest?.reviewedSha256 == nil)
+                            )
                         }
                     }
                     .padding(.top, 2)

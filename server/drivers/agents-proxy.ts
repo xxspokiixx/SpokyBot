@@ -1,15 +1,15 @@
 // Agent-to-agent comms MCP proxy — spawned as an MCP server inside a bot's
-// agent process (via the "agents" integration). Exposes eight tools that
-// let one bot talk to another, routed back through the harness so the
-// harness stays the single owner of turns, permissions, and recursion
-// limits:
+// agent process (via the "agents" integration). Exposes peer, routine, and
+// skill tools routed back through the harness so the harness stays the
+// single owner of turns, permissions, and recursion limits. The coordination
+// tools are:
 //
 //   list_bots()                          → the other bots in this section + their status
 //   ask_bot(bot_id, msg)                 → send msg to that bot, wait, return its reply
 //   delegate_bot(bot_id, msg, reason?)   → hand the task to a peer ASYNC: returns
 //                                          immediately, the peer runs after your
-//                                          current turn finishes, the user sees
-//                                          the peer's reply as its own turn
+//                                          current turn finishes, the result is
+//                                          delivered to the source conversation
 //   create_bot(name, role, instructions) → Chiefs can add a specialist to
 //                                          their own section
 //   request_credential(id, reason?)       → show a secure, allowlisted key card
@@ -33,8 +33,10 @@ const BOT_ID = process.env.OMB_BOT_ID ?? "";
 const THREAD_ID = process.env.OMB_THREAD_ID ?? "";
 const TOKEN = process.env.OMB_COMMS_TOKEN ?? "";
 const DEPTH = Number(process.env.OMB_TURN_DEPTH ?? "0") || 0;
+const SKILL_AUTHORING_ENABLED = process.env.OMB_SKILL_AUTHORING_ENABLED === "1";
 const MAX_CREATED_PER_TURN = 4;
 let createdThisTurn = 0;
+const delegationTaskIdsThisTurn = new Set<string>();
 
 const WEEKDAYS = [
   "monday",
@@ -175,7 +177,7 @@ const ROUTINE_FIELDS_SCHEMA = {
   },
   duration_minutes: {
     type: "integer",
-    minimum: 15,
+    minimum: 5,
     maximum: 240,
     description: "Maximum run duration in minutes. Defaults to 30.",
   },
@@ -185,13 +187,13 @@ const TOOLS = [
   {
     name: "list_bots",
     description:
-      "List the other bots (agents) in your OpenMausBot section you can message, with their model and whether they're busy. Call this before ask_bot to discover who's available.",
+      "List the other bots (agents) in your OpenMausBot section, with their model and whether they're busy. Call this before delegate_bot or ask_bot to discover who's available. Use delegate_bot for assignments; use ask_bot only for a short consultation needed inline.",
     inputSchema: { type: "object", properties: {} },
   },
   {
     name: "ask_bot",
     description:
-      "Send a message to another bot in your section and wait for its reply. Use it to delegate a subtask to a specialist bot or ask a peer a question. The other bot runs a full turn under its own model and permissions; the reply is returned to you as text. Returns promptly with a note if that bot is busy.",
+      "SYNCHRONOUS consultation: send a short question to another bot and stay blocked until its reply is returned inline. Use only when that reply is required to write your current response. Do not use for assigning work, background tasks, or potentially long work; use delegate_bot for those. Returns promptly with a note if that bot is busy.",
     inputSchema: {
       type: "object",
       properties: {
@@ -204,7 +206,7 @@ const TOOLS = [
   {
     name: "delegate_bot",
     description:
-      "Hand a task to another bot ASYNCHRONOUSLY: returns immediately and the peer runs after your current turn finishes. Use this when you want to keep working or hand off a long-running subtask without waiting. The user sees the peer's reply as its own turn; you do NOT receive the reply inline.",
+      "DEFAULT FOR ASSIGNING WORK. Hand a task to another bot asynchronously: this returns immediately, your turn can end, and you remain available while the peer works. The peer starts after your current turn finishes and its outcome is delivered automatically to the originating conversation — success or failure wakes you with it. Acknowledge the assignment; do not call check_delegation or wait_delegation in this same turn.",
     inputSchema: {
       type: "object",
       properties: {
@@ -218,7 +220,7 @@ const TOOLS = [
   {
     name: "check_delegation",
     description:
-      "Check what happened to a delegation you queued with delegate_bot, without waiting: still queued, running, or finished — and the peer's reply once it is done.",
+      "In a later turn, check what happened to a delegation without waiting: still queued, running (with elapsed time and the peer's recent activity), or finished with the result. Prefer this when a delegated bot is taking long or might be stuck — empty recent activity usually means it is stuck, not working. Do not poll it right after delegate_bot; completion is delivered to the conversation automatically.",
     inputSchema: {
       type: "object",
       properties: {
@@ -230,7 +232,7 @@ const TOOLS = [
   {
     name: "wait_delegation",
     description:
-      "Wait until a delegation you queued finishes and return the peer's reply — ONE call instead of repeated checks. Use it after your own remaining work is done; it returns immediately if the task already finished.",
+      "BLOCKING status tool for a delegation from an earlier turn. Use only when the user explicitly asks you to wait for that earlier task. Never call it in the same turn as delegate_bot: a fresh delegation cannot start until your current turn ends, and its result will arrive automatically.",
     inputSchema: {
       type: "object",
       properties: {
@@ -322,7 +324,52 @@ const TOOLS = [
       required: ["routine_id", "action"],
     },
   },
+  {
+    name: "skills_list",
+    description:
+      "List this bot's imported skills (enabled and disabled) and any staged skill writes waiting for the user to confirm. Use this before skill_manage to avoid duplicate names. Listing does not enable anything.",
+    inputSchema: { type: "object", additionalProperties: false, properties: {} },
+  },
+  {
+    name: "skill_manage",
+    description:
+      "Stage a new or updated reusable SKILL.md for the user to review. Create stays inactive until approval; update leaves the current version unchanged until approval. Never update unless the user explicitly asked to revise that named skill. After calling this, end the turn and wait for the in-app decision.",
+    inputSchema: {
+      type: "object",
+      additionalProperties: false,
+      properties: {
+        action: {
+          type: "string",
+          enum: ["create", "update"],
+          description: "Create a uniquely named skill, or update one existing learned skill.",
+        },
+        skill_name: {
+          type: "string",
+          description: "Required for update: the exact existing name from skills_list. Omit for create.",
+        },
+        skill_md: {
+          type: "string",
+          description:
+            "The full SKILL.md including YAML frontmatter. Example: ---\\nname: file-expense\\ndescription: Files an expense in the company portal.\\n---\\n\\n# File expense\\n",
+        },
+        gist: {
+          type: "string",
+          description: "Optional one-line summary shown on the user's confirmation card.",
+        },
+        source: {
+          type: "string",
+          description: "Required provenance label: the URL, folder, or 'conversation' used to author the skill.",
+        },
+      },
+      required: ["action", "skill_md", "source"],
+    },
+  },
 ];
+
+const SKILL_TOOL_NAMES = new Set(["skills_list", "skill_manage"]);
+const AVAILABLE_TOOLS = SKILL_AUTHORING_ENABLED
+  ? TOOLS
+  : TOOLS.filter((tool) => !SKILL_TOOL_NAMES.has(tool.name));
 
 type Json = Record<string, unknown>;
 type RoutineAction = "update" | "pause" | "resume" | "run_now" | "delete";
@@ -384,7 +431,9 @@ async function callTool(name: string, args: Json): Promise<{ text: string; isErr
       const about = b.description ? ` (${String(b.description).slice(0, 120)})` : "";
       return `- ${b.name}${role}${about} [id: ${b.id}, model: ${b.model}${b.busy ? ", busy" : ""}]`;
     });
-    return { text: `Other bots you can message with ask_bot:\n${lines.join("\n")}` };
+    return {
+      text: `Other bots in your section:\n${lines.join("\n")}\n\nAssign work with delegate_bot. Use ask_bot only for a short answer you need inline.`,
+    };
   }
   if (name === "ask_bot") {
     const toBotId = String(args.bot_id ?? "").trim();
@@ -394,13 +443,24 @@ async function callTool(name: string, args: Json): Promise<{ text: string; isErr
       method: "POST",
       body: JSON.stringify({ fromBotId: BOT_ID, fromThreadId: THREAD_ID, toBotId, message, depth: DEPTH }),
     });
+    if (r.timeout) {
+      // The peer's turn outlived the synchronous wait, so the harness
+      // converted the ask into a delegation — the reply is not lost.
+      const taskId = String(r.taskId ?? "").trim();
+      if (taskId) delegationTaskIdsThisTurn.add(taskId);
+      const waitedMinutes = Math.max(1, Math.round((Number(r.waitedMs) || 0) / 60_000));
+      return {
+        text: `${r.toBotName ?? "That bot"} is still working after ${waitedMinutes} minute${waitedMinutes === 1 ? "" : "s"} — the ask was converted to a delegation so the reply is not lost. Task id: ${taskId}. Finish your turn now; the result will be delivered to this conversation automatically. Use check_delegation in a later turn only if the user asks for status.`,
+      };
+    }
     if (r.busy) {
       // The harness queues the message as a delegation when it can; the
       // task id is the asker's claim ticket for the eventual reply.
       const taskId = String(r.taskId ?? "").trim();
       if (taskId) {
+        delegationTaskIdsThisTurn.add(taskId);
         return {
-          text: `${r.toBotName ?? "That bot"} is busy right now, so your message was queued as a delegation instead — it runs after your current turn ends. Task id: ${taskId}. Next turn, read the outcome with check_delegation or block on it with wait_delegation.`,
+          text: `${r.toBotName ?? "That bot"} is busy right now, so your message was queued as a delegation instead — it runs after your current turn ends. Task id: ${taskId}. Finish your turn now; the result will be delivered to this conversation automatically. Use check_delegation in a later turn only if the user asks for status.`,
         };
       }
       return { text: `That bot is busy right now — try again after it finishes.` };
@@ -427,8 +487,10 @@ async function callTool(name: string, args: Json): Promise<{ text: string; isErr
     // peer turn runs after our current turn finishes. The task id is the
     // bot's claim ticket for the outcome.
     const note = typeof r.message === "string" ? r.message : "Delegation queued.";
-    const suffix = typeof r.taskId === "string" && r.taskId
-      ? ` Task id: ${r.taskId} — after your own work is done, read the outcome with check_delegation or block on it with wait_delegation.`
+    const taskId = typeof r.taskId === "string" ? r.taskId.trim() : "";
+    if (taskId) delegationTaskIdsThisTurn.add(taskId);
+    const suffix = taskId
+      ? ` Task id: ${taskId}. Acknowledge the assignment and finish your turn; the result will be delivered to this conversation automatically. Do not check or wait for it in this turn.`
       : "";
     return { text: `${note}${suffix}` };
   }
@@ -436,6 +498,12 @@ async function callTool(name: string, args: Json): Promise<{ text: string; isErr
     const taskId = String(args.task_id ?? "").trim();
     if (!/^[\w-]{4,64}$/.test(taskId)) {
       return { text: `${name} needs the "task_id" that delegate_bot returned, e.g. {"task_id":"1f0c2f4e-..."}.`, isError: true };
+    }
+    if (delegationTaskIdsThisTurn.has(taskId)) {
+      return {
+        text: `Task ${taskId} was delegated during this turn. Finish your response now so the other bot can work; its result will be delivered to this conversation automatically. Do not check or wait for a newly delegated task until a later turn.`,
+        isError: true,
+      };
     }
     const timeout = Math.min(Math.max(Math.trunc(Number(args.timeout_seconds) || 60), 1), 240);
     const waitMs = name === "wait_delegation" ? timeout * 1000 : 0;
@@ -447,7 +515,16 @@ async function callTool(name: string, args: Json): Promise<{ text: string; isErr
       return { text: `Task ${taskId} is still queued — ${who} hasn't picked it up yet${waitMs ? ` after ${timeout}s` : ""}. Keep working and check again later.` };
     }
     if (r.status === "running") {
-      return { text: `Task ${taskId} is running with ${who}${waitMs ? ` (still going after ${timeout}s)` : ""}. Check again shortly.` };
+      const elapsedMs = Number.isFinite(r.elapsedMs) ? Number(r.elapsedMs) : 0;
+      const minutes = Math.floor(elapsedMs / 60_000);
+      const elapsed = minutes >= 1 ? `${minutes} minute${minutes === 1 ? "" : "s"}` : `${Math.round(elapsedMs / 1000)}s`;
+      const activity = Array.isArray(r.recentActivity) ? r.recentActivity.filter((line: unknown) => typeof line === "string") : [];
+      const recent = activity.length
+        ? activity.map((line: string) => `  - ${line}`).join("\n")
+        : "  (no visible activity yet — if this stays empty, the peer may be stuck, not working; say so instead of promising progress)";
+      return {
+        text: `Task ${taskId} is running with ${who} — going on ${elapsed} now.${waitMs ? ` (still going after ${timeout}s)` : ""}\nRecent activity:\n${recent}\nJudge progress by this activity, not by waiting: real work keeps producing lines; the same silence for a long stretch usually means stuck.`,
+      };
     }
     return { text: `Task ${taskId} ended without a reply — ${String(r.status ?? "unknown")}${r.result ? `: ${String(r.result)}` : ""}.`, isError: true };
   }
@@ -562,6 +639,74 @@ async function callTool(name: string, args: Json): Promise<{ text: string; isErr
     });
     return confirmationResult(r, `${action.replace("_", " ")} on routine ${routineId}`);
   }
+  if (name === "skills_list") {
+    const query = new URLSearchParams({ fromBotId: BOT_ID, fromThreadId: THREAD_ID });
+    const r = await api(`/api/internal/skills?${query.toString()}`);
+    const skills = Array.isArray(r.skills) ? r.skills : [];
+    const staged = Array.isArray(r.staged) ? r.staged : [];
+    if (!skills.length && !staged.length) {
+      return { text: "This bot has no imported skills and nothing staged. Use skill_manage action=\"create\" to stage one for the user to confirm." };
+    }
+    const live = skills.length
+      ? skills.map((skill) => {
+        const row = skill as Json;
+        // Disabled imports have not been reviewed yet. Never return their
+        // description to the authoring model: a hostile description is still
+        // prompt content. Names and lifecycle status are sufficient for
+        // duplicate detection.
+        const editable = row.editable === true;
+        const status = row.enabled ? "enabled" : "disabled";
+        return `- ${row.name} (${status}, ${editable ? "learned/editable" : "imported"})`;
+      }).join("\n")
+      : "(none)";
+    const pending = staged.length
+      ? staged.map((entry) => {
+        const row = entry as Json;
+        // A pending proposal is also unreviewed. Keep its gist and source out
+        // of provider-visible tool output until the person approves it.
+        return `- ${row.action} ${row.name}`;
+      }).join("\n")
+      : "(none)";
+    return { text: `Imported skills:\n${live}\n\nStaged (waiting for the user to confirm):\n${pending}` };
+  }
+  if (name === "skill_manage") {
+    if (args.action !== "create" && args.action !== "update") {
+      return { text: 'skill_manage action must be "create" or "update".', isError: true };
+    }
+    const skillMd = typeof args.skill_md === "string" ? args.skill_md : "";
+    if (!skillMd.trim()) {
+      return { text: 'skill_manage needs skill_md: the full SKILL.md including YAML frontmatter.', isError: true };
+    }
+    const source = typeof args.source === "string" ? args.source.trim() : "";
+    if (!source) {
+      return { text: 'skill_manage needs source: the URL, folder, or "conversation" used to author the skill.', isError: true };
+    }
+    const skillName = typeof args.skill_name === "string" ? args.skill_name.trim() : "";
+    if (args.action === "update" && !skillName) {
+      return { text: "skill_manage needs skill_name for an update. Copy the exact name from skills_list.", isError: true };
+    }
+    const r = await api("/api/internal/skills/stage", {
+      method: "POST",
+      body: JSON.stringify({
+        fromBotId: BOT_ID,
+        fromThreadId: THREAD_ID,
+        action: args.action,
+        skill_name: skillName || undefined,
+        skill_md: skillMd,
+        gist: typeof args.gist === "string" ? args.gist : undefined,
+        source,
+      }),
+    });
+    const nameLabel = typeof r.name === "string" ? r.name : "the skill";
+    const warningText = Array.isArray(r.warnings) && r.warnings.length ? `\n\nScan warnings (shown to the user):\n- ${r.warnings.join("\n- ")}` : "";
+    const status = args.action === "update"
+      ? "The current version remains unchanged until the user reviews and applies the update."
+      : "The skill is staged and inactive until the user reviews and enables it.";
+    const proposal = args.action === "update" ? `updating skill “${nameLabel}”` : `new skill “${nameLabel}”`;
+    return {
+      text: `A confirmation card is now visible to the user for ${proposal}.${warningText}\n\n${status} End this turn and wait for the decision.`,
+    };
+  }
   return { text: `Unknown tool: ${name}`, isError: true };
 }
 
@@ -585,11 +730,11 @@ async function handle(msg: Json) {
       ok(id, {});
       return;
     case "tools/list":
-      ok(id, { tools: TOOLS });
+      ok(id, { tools: AVAILABLE_TOOLS });
       return;
     case "tools/call": {
       const name = params.name as string;
-      if (!TOOLS.some((t) => t.name === name)) return rpcErr(id, -32602, `Unknown tool: ${name}`);
+      if (!AVAILABLE_TOOLS.some((t) => t.name === name)) return rpcErr(id, -32602, `Unknown tool: ${name}`);
       try {
         const { text, isError } = await callTool(name, (params.arguments ?? {}) as Json);
         textResult(id, text, isError);

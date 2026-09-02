@@ -40,8 +40,20 @@ export const CLOUD_DESKTOP_JOIN_ROUTE = {
   path: /^\/api\/bots\/[\w-]+\/computer\/join$/,
 } as const;
 
+/** A POST whose response is file bytes. Keep this exact classifier shared
+ * with the proxy: a `.json` document must not enter the ordinary JSON
+ * scrub/re-serialise path and come back as different bytes. */
+export const MESSAGE_FILE_ROUTE = {
+  method: "POST",
+  path: /^\/api\/threads\/[\w-]+\/messages\/[\w-]+\/file$/,
+} as const;
+
 export function isCloudDesktopJoin(method: string, path: string): boolean {
   return method === CLOUD_DESKTOP_JOIN_ROUTE.method && CLOUD_DESKTOP_JOIN_ROUTE.path.test(path);
+}
+
+export function isMessageFileDownload(method: string, path: string): boolean {
+  return method === MESSAGE_FILE_ROUTE.method && MESSAGE_FILE_ROUTE.path.test(path);
 }
 
 /** Every request the iOS app makes, and nothing else.
@@ -63,6 +75,9 @@ const ALLOWED: ReadonlyArray<{ method: string; path: RegExp }> = [
   // the fleet, and making a bot
   { method: "GET", path: /^\/api\/bots$/ },
   { method: "POST", path: /^\/api\/bots$/ },
+  // One narrow, atomic organizer write. This can only file visible bots;
+  // unlike the desktop's broad PATCH it cannot alter execution policy.
+  { method: "POST", path: /^\/api\/sidebar-sections$/ },
   { method: "POST", path: /^\/api\/bots\/[\w-]+\/messages$/ },
   { method: "POST", path: /^\/api\/bots\/[\w-]+\/interrupt$/ },
   { method: "POST", path: /^\/api\/bots\/[\w-]+\/read$/ },
@@ -76,6 +91,9 @@ const ALLOWED: ReadonlyArray<{ method: string; path: RegExp }> = [
   // Paired-safe profile subset. The harness route itself rejects fields
   // outside identity, avatar, notifications, and voice preferences.
   { method: "PATCH", path: /^\/api\/bots\/[\w-]+\/profile$/ },
+  // Full model selection, but no other bot settings. The harness validates
+  // the live catalog and refuses changes while the bot is working.
+  { method: "PATCH", path: /^\/api\/bots\/[\w-]+\/model$/ },
   { method: "POST", path: /^\/api\/bots\/[\w-]+\/avatar\/generate$/ },
   // Full cloud desktop access. The route is narrow and the proxy applies a
   // second, per-device capability check before it reaches the harness.
@@ -93,6 +111,7 @@ const ALLOWED: ReadonlyArray<{ method: string; path: RegExp }> = [
   // a transcript, its images, and answering an approval
   { method: "GET", path: /^\/api\/threads\/[\w-]+\/messages$/ },
   { method: "GET", path: /^\/api\/threads\/[\w-]+\/messages\/[\w-]+\/image$/ },
+  MESSAGE_FILE_ROUTE,
   { method: "POST", path: /^\/api\/threads\/[\w-]+\/messages\/[\w-]+\/reactions$/ },
   { method: "GET", path: /^\/api\/threads\/[\w-]+\/export$/ },
   { method: "POST", path: /^\/api\/threads\/[\w-]+\/respond$/ },
@@ -102,6 +121,10 @@ const ALLOWED: ReadonlyArray<{ method: string; path: RegExp }> = [
   // the harness; GET is a single bare generated filename, never a path.
   { method: "POST", path: /^\/api\/attachments$/ },
   { method: "GET", path: /^\/api\/attachments\/[\w-]+\.(?:png|jpe?g|gif|webp)$/i },
+  // Share-sheet documents are raw, capped at 25 MiB, and stored under a
+  // generated filename by the harness. The display name stays in the query;
+  // only this exact upload route crosses the companion boundary.
+  { method: "POST", path: /^\/api\/files$/ },
 
   // Renderer-neutral voice operations. Neither route reads or writes the
   // workspace ElevenLabs key; the phone receives labels or audio only.

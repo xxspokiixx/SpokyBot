@@ -16,8 +16,15 @@ import {
 import type { CloudBackend, EffortLevel } from "../../server/contracts.ts";
 import type { MausColor, MausMotion } from "@/lib/mascot";
 import type { BotAvatarCrop } from "../../shared/bot-avatar";
+import type { MascotBodyId } from "../../shared/mascot-bodies";
 import type { RoutineRequestCardData } from "../../shared/routine-request";
 import type { RoutineRunCardData } from "../../shared/routine-run";
+import type { GroupGoalRunCardData } from "../../shared/group-goal-run";
+import {
+  reviewedSkillSha256,
+  skillRequestBehavior,
+  type SkillRequestCardData,
+} from "../../shared/skill-request";
 import type { Routine, RoutineInput, RoutineRun } from "@/lib/routines";
 import type { WebhookAttempt, WebhookIngressStatus, WebhookTrigger } from "@/lib/webhooks";
 import { currentCall } from "@/lib/call";
@@ -47,6 +54,8 @@ export interface OptionCardData {
   approvalScope?: "local-computer";
   /** Persisted proposal used by the server when the user confirms it. */
   routineRequest?: RoutineRequestCardData;
+  /** Staged learned-skill change; applied only after the user confirms this card. */
+  skillRequest?: SkillRequestCardData;
 }
 
 export interface ConnectorCardData {
@@ -76,19 +85,29 @@ export interface SecretRequestCardData {
 export interface Message {
   id: string;
   role: "bot" | "user";
-  kind: "text" | "options" | "activity" | "screen" | "connector" | "secret" | "routine.run";
+  kind: "text" | "options" | "activity" | "screen" | "connector" | "secret" | "routine.run" | "goal.run";
   text?: string;
+  /** Provider-generated files attached to this assistant response. */
+  attachments?: Array<{ kind: "image"; path: string; mime: string }>;
   card?: OptionCardData;
   connector?: ConnectorCardData;
   secret?: SecretRequestCardData;
   /** Lifecycle mirror for a routine whose real work lives in a fresh task. */
   routineRun?: RoutineRunCardData;
+  /** Durable lifecycle receipt for a goal-driven channel run. */
+  goalRun?: GroupGoalRunCardData;
+  /** How a channel user message should be handled. Absent means ordinary chat. */
+  channelMode?: "chat" | "goal";
   /** activity messages: tool name + outcome. `spoken` is the server's
    * narration of the same chip ("reading a file"), used by call mode. */
   /** `setup` marks an error fixed by installing something, not by retrying. */
   tool?: { name: string; ok?: boolean; spoken?: string; setup?: boolean };
   /** user messages sent into a running turn — the model saw it mid-turn */
   steered?: boolean;
+  /** Provider turn that produced this message. */
+  turnId?: string;
+  /** Last assistant text item from a settled provider turn. */
+  turnTerminal?: boolean;
   /** screen messages: a frame of the bot's computer (base64) */
   png?: string;
   mime?: string;
@@ -133,6 +152,8 @@ export interface Group {
   /** auto-created bot⇄bot channel (ask_bot exchanges mirror here) */
   dm?: boolean;
   busyBotId?: string | null;
+  /** True for the whole orchestrated run, including hand-offs between members. */
+  working?: boolean;
   /** the room's shared desk — where member turns run their shell tools,
    * overriding each member's own folder; absent = each member's own */
   cwd?: string;
@@ -204,6 +225,8 @@ export interface Bot {
   notifications: boolean;
   color: MausColor;
   mascotExpression?: string | null;
+  /** Which body the bot wears. Unknown/absent values fall back to the cursor. */
+  mascotBody?: MascotBodyId | null;
   /** App-owned image attachment used for this bot's profile. */
   avatarUrl?: string | null;
   /** Mascot, or the crop applied to avatarUrl. */
@@ -213,8 +236,9 @@ export interface Bot {
   /** what the bot is doing, as the harness sees it; busy is derived from it */
   activity?: "working" | "waiting-on-you" | "idle" | "no-signal" | "dead";
   modelSelection: ModelSelection;
-  /** Where this bot's computer runs; unset = auto (cloud box if one exists, else local). */
-  computer?: "cloud" | "vm" | "local" | "off";
+  /** Where this bot works: a computer, only the built-in browser tab, or
+   * nowhere; unset = auto (cloud box if one exists, else local). */
+  computer?: "cloud" | "vm" | "local" | "browser" | "off";
   /** Which cloud computer backs `computer: "cloud"`; absent means Box. */
   cloudBackend?: CloudBackend;
   /** Allow Auto to prepare/start the managed VPS container. Off by default. */
@@ -299,6 +323,8 @@ export interface ConfigStatus {
   imageGen?: { configured: boolean };
   /** who's using the app — collected in onboarding, shown in the sidebar */
   profile?: { name: string; email: string };
+  /** UI language override; "" (or absent) follows the system language. */
+  language?: string;
   /** Opt-in flags. Absent means off. */
   features?: { skillRecorder: boolean; showToolCalls?: boolean; browser?: boolean };
   /** Named browser sessions any bot can be pointed at. */
@@ -315,7 +341,7 @@ export interface BrowserProfile {
 
 export type ConfigStatusFrame = Pick<
   ConfigStatus,
-  "xai" | "composio" | "box" | "vps" | "rooms" | "localVm" | "opencodeGo" | "tts" | "imageGen" | "profile" | "features" | "browserProfiles"
+  "xai" | "composio" | "box" | "vps" | "rooms" | "localVm" | "opencodeGo" | "tts" | "imageGen" | "profile" | "language" | "features" | "browserProfiles"
 >;
 
 export function configStatusFromFrame(frame: ConfigStatusFrame): ConfigStatus {
@@ -330,6 +356,7 @@ export function configStatusFromFrame(frame: ConfigStatusFrame): ConfigStatus {
     tts: frame.tts,
     imageGen: frame.imageGen,
     profile: frame.profile,
+    language: frame.language,
     features: frame.features,
     browserProfiles: frame.browserProfiles,
   };
@@ -358,7 +385,7 @@ export interface InstanceInfo {
     /** a reported cost on a subscription is notional; the UI says so */
     billing?: "metered" | "subscription";
   };
-  models: { default: string; options: Array<{ id: string; label: string; custom?: boolean; loaded?: boolean }> };
+  models: { default: string; options: Array<{ id: string; label: string; custom?: boolean; loaded?: boolean; provider?: string }> };
   capabilities?: {
     computerMcp?: boolean;
     agentsMcp?: boolean;
@@ -432,7 +459,7 @@ export interface AppState {
     nonce: number;
     kind: Exclude<MausMotion, "none">;
   } | null;
-  /** 1:1 queue-fallback lines waiting for drain; keyed by threadId.
+  /** Queued follow-up lines waiting for drain; keyed by threadId.
    * Each entry is identified by the server queueId, not by text. */
   pendingQueued: Record<string, Array<{ queueId: string; text: string }>>;
   /** queueIds whose drain frame beat the POST continuation. One-shot and
@@ -526,6 +553,7 @@ export type Action =
       sendId?: string;
       replyToId?: string;
       threadId?: string;
+      mode?: "chat" | "goal";
       onError?: () => void;
     }
   | {
@@ -538,7 +566,6 @@ export type Action =
   | { type: "switchGroupTask"; groupId: string; threadId: string }
   | { type: "renameGroupTask"; groupId: string; threadId: string; title: string }
   | { type: "deleteGroupTask"; groupId: string; threadId: string }
-  | { type: "toggleReaction"; threadId: string; messageId: string; emoji: string }
   | { type: "interruptGroup"; groupId: string }
   | { type: "instances"; instances: InstanceInfo[] }
   | { type: "configStatus"; config: ConfigStatus }
@@ -555,6 +582,7 @@ export type Action =
   | { type: "pendingQueued"; threadId: string; queueId: string; text: string }
   | { type: "consumePendingQueued"; threadId: string; queueId: string }
   | { type: "cancelQueued"; botId: string; queueId: string }
+  | { type: "cancelGroupQueued"; groupId: string; threadId: string; queueId: string }
   | { type: "editMessage"; botId: string; messageId: string; text: string }
   | { type: "switchBranch"; botId: string; messageId: string }
   | { type: "threadActive"; threadId: string; activeLeafId: string }
@@ -568,6 +596,8 @@ export type Action =
       requestId: string;
       behavior: "allow" | "deny" | "answer";
       message?: string;
+      /** Exact proposal hash displayed by a current learned-skill client. */
+      reviewedSha256?: string;
       /** remember this exact grant (the server's allowKey) for the bot */
       alwaysAllow?: { botId: string; key: string };
       /** Local UI recovery hook for voice flows. Never sent to the server. */
@@ -955,7 +985,9 @@ export function reducer(state: AppState, action: Action): AppState {
         return { ...b, messages, activeLeafId: adoptsLeaf ? action.message.id : b.activeLeafId };
       });
       const motion =
-        action.message.kind === "options"
+        action.message.role === "user" && action.message.kind === "text" && Boolean(action.message.queueId)
+          ? "working"
+          : action.message.kind === "options"
           ? "thinking"
           : action.message.kind === "activity"
             ? action.message.tool?.ok === false
@@ -1133,24 +1165,6 @@ export function reducer(state: AppState, action: Action): AppState {
         ...state,
         groups: state.groups.map((g) => (g.id === action.groupId ? { ...g, ...action.patch } : g)),
       };
-    case "toggleReaction": {
-      const toggle = (m: Message): Message => {
-        if (m.id !== action.messageId) return m;
-        const reactions = m.reactions ?? [];
-        const at = reactions.findIndex((r) => r.emoji === action.emoji && r.by === "user");
-        const next = at >= 0 ? reactions.filter((_, i) => i !== at) : [...reactions, { emoji: action.emoji, by: "user" }];
-        return { ...m, reactions: next.length ? next : undefined };
-      };
-      return {
-        ...state,
-        bots: state.bots.map((b) =>
-          b.threadId === action.threadId ? { ...b, messages: b.messages.map(toggle) } : b,
-        ),
-        groups: state.groups.map((g) =>
-          g.threadId === action.threadId ? { ...g, messages: g.messages.map(toggle) } : g,
-        ),
-      };
-    }
     // handled entirely by the async wrapper
     case "pendingQueued": {
       if (state.consumedQueueIds[action.queueId]) {
@@ -1192,6 +1206,15 @@ export function reducer(state: AppState, action: Action): AppState {
       const pendingQueued = { ...state.pendingQueued };
       if (rest.length) pendingQueued[bot.threadId] = rest;
       else delete pendingQueued[bot.threadId];
+      return { ...state, pendingQueued };
+    }
+    case "cancelGroupQueued": {
+      const prev = state.pendingQueued[action.threadId] ?? [];
+      const rest = prev.filter((entry) => entry.queueId !== action.queueId);
+      if (rest.length === prev.length) return state;
+      const pendingQueued = { ...state.pendingQueued };
+      if (rest.length) pendingQueued[action.threadId] = rest;
+      else delete pendingQueued[action.threadId];
       return { ...state, pendingQueued };
     }
     case "send":
@@ -1455,7 +1478,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       if (action.type === "deleteBot") botPatchQueue.cancel(action.botId);
       // A queued message is still real until the server confirms deletion.
       // All other actions keep their existing optimistic behavior.
-      if (action.type !== "cancelQueued") rawDispatch(action);
+      if (action.type !== "cancelQueued" && action.type !== "cancelGroupQueued") rawDispatch(action);
       switch (action.type) {
         case "createRoutine":
           api("/api/routines", { method: "POST", body: JSON.stringify(action.input) }).catch(showError);
@@ -1480,6 +1503,11 @@ export function StoreProvider({ children }: { children: ReactNode }) {
           break;
         case "cancelQueued":
           void api(`/api/bots/${action.botId}/queue/${action.queueId}`, { method: "DELETE" })
+            .then(() => rawDispatch(action))
+            .catch(showError);
+          break;
+        case "cancelGroupQueued":
+          void api(`/api/groups/${action.groupId}/queue/${action.queueId}`, { method: "DELETE" })
             .then(() => rawDispatch(action))
             .catch(showError);
           break;
@@ -1537,6 +1565,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
                 requestId: action.requestId,
                 behavior: action.behavior,
                 message: action.message,
+                reviewedSha256: action.reviewedSha256,
               }),
             }).catch((error) => {
               showError(error);
@@ -1565,14 +1594,18 @@ export function StoreProvider({ children }: { children: ReactNode }) {
           const bot = stateRef.current.bots.find((b) => b.id === action.botId);
           const card = bot?.messages.find((m) => m.id === action.messageId)?.card;
           if (card?.requestId) {
-            const behavior =
-              action.answer === "Allow" ? "allow" : action.answer === "Deny" ? "deny" : "answer";
+            const behavior = card.skillRequest
+              ? skillRequestBehavior(action.answer)
+              : action.answer === "Allow" ? "allow" : action.answer === "Deny" ? "deny" : "answer";
             api(`/api/bots/${action.botId}/respond`, {
               method: "POST",
               body: JSON.stringify({
                 requestId: card.requestId,
                 behavior,
                 message: behavior === "answer" ? action.answer : undefined,
+                reviewedSha256: behavior === "allow" && card.skillRequest
+                  ? reviewedSkillSha256(card.skillRequest)
+                  : undefined,
               }),
             }).catch(showError);
           } else {
@@ -1666,11 +1699,29 @@ export function StoreProvider({ children }: { children: ReactNode }) {
           const sendId = action.sendId ?? crypto.randomUUID();
           api(`/api/groups/${action.groupId}/messages`, {
             method: "POST",
-            body: JSON.stringify({ text: action.text, replyToId: action.replyToId, threadId, sendId }),
+            body: JSON.stringify({
+              text: action.text,
+              replyToId: action.replyToId,
+              threadId,
+              sendId,
+              mode: action.mode ?? "chat",
+            }),
           })
             .then((body) => {
               if (body?.message && typeof body.threadId === "string") {
                 rawDispatch({ type: "messageAdded", threadId: body.threadId, message: body.message });
+              }
+              if (
+                body?.queued &&
+                typeof body.threadId === "string" &&
+                typeof body.queueId === "string"
+              ) {
+                rawDispatch({
+                  type: "pendingQueued",
+                  threadId: body.threadId,
+                  queueId: body.queueId,
+                  text: action.text,
+                });
               }
             })
             .catch((error) => {
@@ -1687,12 +1738,6 @@ export function StoreProvider({ children }: { children: ReactNode }) {
           break;
         case "deleteGroup":
           api(`/api/groups/${action.groupId}`, { method: "DELETE" }).catch(showError);
-          break;
-        case "toggleReaction":
-          api(`/api/threads/${action.threadId}/messages/${action.messageId}/reactions`, {
-            method: "POST",
-            body: JSON.stringify({ emoji: action.emoji, by: "user" }),
-          }).catch(showError);
           break;
         case "setModel":
           api(`/api/bots/${action.botId}`, {

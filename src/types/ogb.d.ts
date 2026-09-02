@@ -113,7 +113,7 @@ type SkillRecordingPayload = {
     partition?: string | null;
     profile?: string | null;
     mode?: "compact" | "expanded" | null;
-    code?: "renderer-gone" | "profile-changed" | "evicted";
+    code?: "renderer-gone" | "profile-deleted" | "evicted";
   }
 
   interface DesktopWorkspaceState {
@@ -127,6 +127,19 @@ type SkillRecordingPayload = {
   interface Window {
     ogb?: {
       platform: NodeJS.Platform;
+      /** Saved servers and the active one (desktop Server menu). Present on
+       * the local server's UI; a remote server's page sees a reduced bridge. */
+      environments?: {
+        state: () => Promise<{
+          localOrigin: string;
+          remote: boolean;
+          activeId: string;
+          environments: Array<{ id: string; name: string; origin: string }>;
+        }>;
+        switch: (id: string) => Promise<void>;
+        addFromLink: (link: string) => Promise<void>;
+        forget: (id: string) => Promise<void>;
+      };
       getCapabilities(): Promise<DesktopCapabilities>;
       onCapabilitiesChanged(cb: (capabilities: DesktopCapabilities) => void): () => void;
       companionAccount?: {
@@ -215,15 +228,17 @@ type SkillRecordingPayload = {
           bounds: DesktopWorkspaceBounds | null,
           profile?: string,
           mode?: "compact" | "expanded",
+          layoutOwner?: string,
         ): Promise<BrowserSurfaceState>;
         navigate(botId: string, url: string, profile?: string): Promise<{ url: string; title: string }>;
         back(botId: string, profile?: string): Promise<{ url: string; title: string }>;
         forward?(botId: string, profile?: string): Promise<{ url: string; title: string }>;
+        reload?(botId: string, profile?: string): Promise<{ url: string; title: string }>;
         /** Immediately gates native browser mutations while the durable
          * server-side human-control snapshot catches up. */
         setHumanControl?(botId: string, held: boolean, profile?: string): Promise<boolean>;
         /** Native page focus/input means the person has taken the wheel. */
-        onUserInteraction?(cb: (event: { botId: string }) => void): () => void;
+        onUserInteraction?(cb: (event: { botId: string; profile: string }) => void): () => void;
         forgetProfile?(partitionId: string): Promise<{ dropped: number }>;
         close(botId: string): Promise<boolean>;
         onState(cb: (state: BrowserSurfaceState) => void): () => void;
@@ -263,7 +278,7 @@ type SkillRecordingPayload = {
       updater?: {
         check(): Promise<void>;
         download(): Promise<void>;
-        /** quit-and-install the downloaded update */
+        /** apply the download: quit-and-install, or copy the command and open a terminal */
         install(): Promise<void>;
         onState(cb: (s: UpdaterState) => void): () => void;
       };
@@ -292,10 +307,22 @@ export interface UpdaterState {
     | "downloading"
     | "downloaded"
     | "installing"
+    /** the command is on the clipboard; the user finishes in a terminal */
+    | "handed-off"
     | "error";
   version?: string;
   percent?: number;
   message?: string;
+  /**
+   * How the download gets applied. "restart" quits and installs in place;
+   * "handoff" copies the install command and opens a terminal so the user
+   * can finish — Ubuntu .deb (and rpm/pacman) builds use this.
+   */
+  installMode?: "restart" | "handoff";
+  /** hand-off only: the install command, already on the clipboard */
+  command?: string;
+  /** hand-off only: whether a terminal was opened to paste it into */
+  terminalOpened?: boolean;
 }
 
 export interface CompanionAccountState {

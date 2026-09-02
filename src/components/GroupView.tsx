@@ -28,9 +28,10 @@ import { ReplyQuote } from "./ReplyQuote";
 import { ConnectorCard } from "./ConnectorCard";
 import { SecretRequestCard } from "./SecretRequestCard";
 import { hasRoutineExecutionTask, RoutineRunCard } from "./RoutineRunCard";
-import { AttachedImageGallery } from "./AttachmentPreview";
+import { GoalRunCard } from "./GoalRunCard";
+import { AttachedFileChips, AttachedImageGallery } from "./AttachmentPreview";
 import { GroupCallButton, GroupCallOverlay } from "./GroupCallView";
-import { ReactionBar, ReactionChips } from "./Reactions";
+
 import { ApprovalCard } from "./ApprovalCard";
 import { ManageMembersPanel } from "./ManageMembersPanel";
 import { groupActivityRuns } from "@/lib/activity-runs";
@@ -41,9 +42,9 @@ import { useFocusMessage } from "@/lib/focus-message";
 import { shortPath } from "@/lib/short-path";
 import { BOTTOM_FOLLOW_THRESHOLD, shouldResumeBottomFollow } from "@/lib/bottom-follow";
 import { useComposerDockPad } from "@/lib/composer-dock";
-import { showWorkingDots } from "@/lib/turn-tail";
+import { awaitedMemberId, showWorkingDots } from "@/lib/turn-tail";
 import { liveActivityLabel } from "@/lib/live-activity";
-import { splitAttachedImages } from "@/lib/composer-attachments";
+import { splitTranscriptAttachments } from "@/lib/composer-attachments";
 import {
   TRANSCRIPT_WINDOW_SIZE,
   expandWindowStart,
@@ -88,6 +89,7 @@ function ClusterLabel({ bot, name, color }: { bot?: Bot; name: string; color: st
     <div className="mt-1 flex items-center gap-1.5 pl-0.5">
       <MausAvatar
         color={(bot?.color ?? color) as Bot["color"]}
+        bodyId={bot?.mascotBody ?? undefined}
         state={normalizeState(bot?.mascotExpression) ?? "happy"}
         size={16}
         motion="none"
@@ -179,7 +181,7 @@ const Transcript = memo(function Transcript({
         const m = item.message;
         if (m.id === emergingId) return null;
         const user = m.role === "user";
-        const attachedImages = user && m.text ? splitAttachedImages(m.text) : null;
+        const attachments = user && m.text ? splitTranscriptAttachments(m.text) : null;
         const newCluster = !prev || prev.role !== m.role || prev.from?.botId !== m.from?.botId || newDay;
         const routineOwner = m.kind === "routine.run" ? memberOf(m.from?.botId) : undefined;
         const routineExecutionThreadId = m.routineRun?.executionThreadId;
@@ -200,6 +202,10 @@ const Transcript = memo(function Transcript({
             <div className="flex justify-start">
               <ApprovalCard bot={memberOf(m.from?.botId)} message={m} />
             </div>
+          ) : m.kind === "goal.run" ? (
+            <div className="flex justify-start">
+              <GoalRunCard message={m} />
+            </div>
           ) : m.kind === "routine.run" ? (
             <div className="flex justify-start">
               <RoutineRunCard
@@ -213,10 +219,9 @@ const Transcript = memo(function Transcript({
             m.tool.ok === false || m.tool.name.startsWith("error:") || showToolCalls ? (
               <RoomToolChip message={m} />
             ) : null
-          ) : m.kind === "text" && m.text ? (
+          ) : m.kind === "text" && (m.text || m.attachments?.length) ? (
             <div className={cn("group flex w-full flex-col", user ? "items-end" : "items-start")}>
               <div className={cn("flex w-full items-end gap-1.5", user ? "justify-end" : "justify-start")}>
-                {user && <ReactionBar threadId={group.threadId} message={m} />}
                 {user && (
                   <>
                     <button
@@ -255,12 +260,28 @@ const Transcript = memo(function Transcript({
                   })()}
                   {user ? (
                     <>
-                      {attachedImages && attachedImages.images.length > 0 && (
-                        <AttachedImageGallery paths={attachedImages.images} />
+                      {attachments && attachments.images.length > 0 && (
+                        <AttachedImageGallery paths={attachments.images} />
                       )}
-                      {attachedImages?.display ?? m.text}
+                      {attachments && attachments.files.length > 0 && (
+                        <AttachedFileChips
+                          files={attachments.files}
+                          className={!attachments.display ? "mb-0" : undefined}
+                        />
+                      )}
+                      {attachments?.display ?? m.text}
                     </>
-                  ) : <ChatMarkdown text={m.text} />}
+                  ) : (
+                    <>
+                      {m.attachments?.length ? (
+                        <AttachedImageGallery
+                          paths={m.attachments.map((attachment) => attachment.path)}
+                          className={m.text ? "justify-start" : "mb-0 justify-start"}
+                        />
+                      ) : null}
+                      {m.text ? <ChatMarkdown text={m.text} /> : null}
+                    </>
+                  )}
                 </div>
                 {!user && (
                   <>
@@ -274,14 +295,12 @@ const Transcript = memo(function Transcript({
                       <MessageSquareReply size={14} />
                     </button>
                     <PinToggle group={group} message={m} />
-                    <ReactionBar threadId={group.threadId} message={m} />
                   </>
                 )}
                 <span className="self-end pb-1 text-[11px] tabular-nums text-ink-secondary/70 opacity-0 transition-opacity group-hover:opacity-100">
                   {formatTime(m.at)}
                 </span>
               </div>
-              <ReactionChips threadId={group.threadId} message={m} members={members} align={user ? "right" : "left"} />
             </div>
           ) : null;
         if (!row) return null;
@@ -703,6 +722,7 @@ function RoomSetup({ group, members }: { group: Group; members: Bot[] }) {
                         >
                           <MausAvatar
                             color={member.color}
+                            bodyId={member.mascotBody ?? undefined}
                             state={normalizeState(member.mascotExpression) ?? "happy"}
                             size={24}
                             animated={false}
@@ -863,9 +883,13 @@ export function GroupView({ group }: { group: Group }) {
   const lastGroupMessage = group.messages.at(-1);
   const toolInFlight = lastGroupMessage?.kind === "activity" && lastGroupMessage.tool?.ok === undefined;
   const activityLabel = liveActivityLabel(lastGroupMessage);
-  const waiting = Boolean(
-    speaker && showWorkingDots(true, undefined, group.messages.at(-1), speaker.id),
+  // A member busy elsewhere takes its turn when free; until then the room
+  // works with no speaker, and the presence row names who it is waiting on.
+  const awaited = members.find(
+    (b) => b.id === awaitedMemberId(group.working, group.busyBotId, lastGroupMessage),
   );
+  const waiting =
+    Boolean(speaker && showWorkingDots(true, group.messages.at(-1), speaker.id)) || awaited !== undefined;
   const wasWaiting = useRef(false);
   const [popping, setPopping] = useState<{ id: string; text: string; botId?: string } | null>(null);
   useEffect(() => {
@@ -893,7 +917,9 @@ export function GroupView({ group }: { group: Group }) {
     lastGroupMessage?.from?.botId,
   ]);
   const presenceVisible = waiting || popping !== null;
-  const presenceSpeaker = speaker ?? members.find((member) => member.id === popping?.botId) ?? members[0];
+  const poppingMessage = popping ? group.messages.find((message) => message.id === popping.id) : undefined;
+  const presenceSpeaker =
+    speaker ?? awaited ?? members.find((member) => member.id === popping?.botId) ?? members[0];
 
   // Windowed transcript, mirroring ChatView: only a tail of the room mounts;
   // the anchored boundary re-tails on a render-phase reset when the room (or
@@ -954,7 +980,7 @@ export function GroupView({ group }: { group: Group }) {
     if (!el || !followRef.current) return;
     el.scrollTo({ top: el.scrollHeight });
     previousScrollTop.current = el.scrollTop;
-  }, [group.id, group.messages.length, streaming, group.busyBotId, composerDock.pad]);
+  }, [group.id, group.messages.length, streaming, group.busyBotId, group.working, composerDock.pad]);
 
   // Expanding prepends rows: capture the height first, then after the commit
   // shift scrollTop by the growth so the message under the cursor stays put
@@ -1006,7 +1032,7 @@ export function GroupView({ group }: { group: Group }) {
         group.busyBotId === b.id && "ring-2 ring-accent/50 ring-offset-1 ring-offset-app",
       )}
     >
-      <MausAvatar color={b.color} state={normalizeState(b.mascotExpression) ?? "happy"} size={24} animated={false} />
+      <MausAvatar color={b.color} bodyId={b.mascotBody ?? undefined} state={normalizeState(b.mascotExpression) ?? "happy"} size={24} animated={false} />
       {group.busyBotId === b.id && (
         <span className="absolute -right-0.5 -top-0.5 size-2 rounded-full border border-app bg-accent" />
       )}
@@ -1194,6 +1220,7 @@ export function GroupView({ group }: { group: Group }) {
                   <MausAvatar
                     key={b.id}
                     color={b.color}
+                    bodyId={b.mascotBody ?? undefined}
                     state="happy"
                     size={44}
                     motion="none"
@@ -1241,7 +1268,7 @@ export function GroupView({ group }: { group: Group }) {
               avatar={
                 <MausAvatar
                   color={presenceSpeaker?.color ?? "green"}
-                  state={toolInFlight ? "working" : "thinking"}
+                  state={toolInFlight && !awaited ? "working" : "thinking"}
                   size={36}
                   forward={false}
                   lookAround={1}
@@ -1254,7 +1281,13 @@ export function GroupView({ group }: { group: Group }) {
             >
               {popping ? (
                 <div className="w-fit max-w-[min(42rem,78%)] rounded-2xl bg-card px-4 py-2.5 text-[15px] leading-relaxed text-ink">
-                  <ChatMarkdown text={popping.text} />
+                  {poppingMessage?.attachments?.length ? (
+                    <AttachedImageGallery
+                      paths={poppingMessage.attachments.map((attachment) => attachment.path)}
+                      className={popping.text ? "justify-start" : "mb-0 justify-start"}
+                    />
+                  ) : null}
+                  {popping.text ? <ChatMarkdown text={popping.text} /> : null}
                 </div>
               ) : null}
             </TurnPresence>

@@ -2,18 +2,11 @@
 // whole main column. Opened by clicking the small preview in the computer
 // panel; closing hands the tab back to the panel. Control (Take control /
 // Hand back) is the same lease the panel uses, so a hold survives the swap.
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { Globe, X } from "lucide-react";
 import { z } from "zod";
-import { useStore, type Bot } from "@/state/store";
+import { api, useStore, type Bot } from "@/state/store";
 import { BrowserPanel } from "./BrowserPanel";
-
-async function api(path: string, init?: RequestInit): Promise<any> {
-  const res = await fetch(path, { headers: { "content-type": "application/json" }, ...init });
-  const body = await res.json().catch(() => ({}));
-  if (!res.ok) throw new Error(body.error ?? `${res.status} ${res.statusText}`);
-  return body;
-}
 
 const controlSnapshotSchema = z.looseObject({
   held: z.boolean().optional().default(false),
@@ -46,7 +39,7 @@ export function BrowserWorkspace({ bot, onClose }: { bot: Bot; onClose: () => vo
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [bot.id]);
 
-  const controlAction = async (action: "take" | "release"): Promise<boolean> => {
+  const controlAction = useCallback(async (action: "take" | "release"): Promise<boolean> => {
     setControlPending(true);
     setError(null);
     try {
@@ -69,7 +62,7 @@ export function BrowserWorkspace({ bot, onClose }: { bot: Bot; onClose: () => vo
     } finally {
       setControlPending(false);
     }
-  };
+  }, [bot.id, dispatch]);
 
   return (
     <main className="flex h-full min-w-0 flex-1 flex-col bg-app">
@@ -86,14 +79,14 @@ export function BrowserWorkspace({ bot, onClose }: { bot: Bot; onClose: () => vo
         <button
           type="button"
           onClick={onClose}
-          className="rounded-md p-1.5 text-ink-secondary hover:bg-raised hover:text-ink"
+          className="rounded-md p-1.5 text-ink-secondary hover:bg-raised hover:text-ink focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent"
           aria-label="Back to the small browser"
           title="Back to the panel"
         >
           <X size={18} />
         </button>
       </header>
-      {error && <div className="mx-5 mt-3 text-[12px] text-danger">{error}</div>}
+      {error && <div role="alert" className="mx-5 mt-3 text-[12px] text-danger">{error}</div>}
       <div className="flex min-h-0 flex-1 flex-col px-5 pb-4">
         <BrowserPanel
           bot={bot}

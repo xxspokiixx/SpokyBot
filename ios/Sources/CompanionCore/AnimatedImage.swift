@@ -42,6 +42,11 @@ public enum AnimatedImageDecoder {
     static let sourceFrameLimit = 240
     static let expandedFrameLimit = 600
 
+    /// Avatars render at no more than 112 points in the app. Decode every
+    /// animation frame into a bounded thumbnail so a small compressed file
+    /// cannot expand into hundreds of full-resolution pixel buffers.
+    static let maximumFramePixelSize = 256
+
     /// Per-container timing keys, newest container first. A frame carries an
     /// unclamped delay (the author's real intent) and a clamped one (already
     /// floored by the encoder); prefer the former and fall back to the latter.
@@ -67,8 +72,20 @@ public enum AnimatedImageDecoder {
         frames.reserveCapacity(count)
         delays.reserveCapacity(count)
 
+        // ImageIO applies EXIF orientation while producing the thumbnail, so
+        // UIKit receives consistently upright frames without a second full-
+        // resolution allocation.
+        let thumbnailOptions: CFDictionary = [
+            kCGImageSourceCreateThumbnailFromImageAlways: true,
+            kCGImageSourceCreateThumbnailWithTransform: true,
+            kCGImageSourceThumbnailMaxPixelSize: maximumFramePixelSize,
+            kCGImageSourceShouldCacheImmediately: true,
+        ] as CFDictionary
+
         for index in 0..<count {
-            guard let frame = CGImageSourceCreateImageAtIndex(source, index, nil) else { continue }
+            guard let frame = CGImageSourceCreateThumbnailAtIndex(
+                source, index, thumbnailOptions
+            ) else { continue }
             frames.append(frame)
             delays.append(delay(at: index, in: source))
         }

@@ -7,7 +7,6 @@ import {
   ChevronLeft,
   ChevronRight,
   Bug,
-  Clock,
   Copy,
   Crown,
   Folder,
@@ -52,20 +51,21 @@ import { ReplyQuote } from "./ReplyQuote";
 import { ConnectorCard } from "./ConnectorCard";
 import { SecretRequestCard } from "./SecretRequestCard";
 import { hasRoutineExecutionTask, RoutineRunCard } from "./RoutineRunCard";
-import { AttachedImageGallery } from "./AttachmentPreview";
+import { AttachedFileChips, AttachedImageGallery } from "./AttachmentPreview";
 import { ModelPicker } from "./ModelPicker";
 import { RenameTitle } from "./RenameTitle";
 import { TaskPicker } from "./TaskPicker";
-import { ReactionBar, ReactionChips } from "./Reactions";
+
 import { SpeakButton } from "./SpeakButton";
 import { CallButton, CallOverlay } from "./CallView";
 import { cn } from "@/lib/cn";
 import { COMPACT_BUBBLE, COMPACT_SQUARE } from "@/lib/compact-chip";
 import { useFocusMessage } from "@/lib/focus-message";
-import { groupActivityRuns } from "@/lib/activity-runs";
+import { groupTranscript } from "@/lib/activity-runs";
 import { ActivityRun } from "./ActivityRun";
+import { TurnNarrationRun } from "./TurnNarrationRun";
 import { webhookMessageView } from "@/lib/webhook-message";
-import { splitAttachedImages } from "@/lib/composer-attachments";
+import { splitTranscriptAttachments } from "@/lib/composer-attachments";
 import { BOTTOM_FOLLOW_THRESHOLD, shouldResumeBottomFollow } from "@/lib/bottom-follow";
 import { useComposerDockPad } from "@/lib/composer-dock";
 import {
@@ -82,6 +82,7 @@ import { useReplyDraft } from "@/lib/drafts";
  * bury the conversation; bots get full markdown. */
 const USER_COLLAPSE_CHARS = 600;
 const USER_COLLAPSE_LINES = 8;
+const noop = () => {};
 
 /** "Today" / "Yesterday" / "Mon, Aug 11" — real dates, not a hardcoded label. */
 function dayLabel(at: number): string {
@@ -314,8 +315,8 @@ function Bubble({
   const [expanded, setExpanded] = useState(false);
   const text = message.text ?? "";
   const webhookView = user ? webhookMessageView(text) : null;
-  const attachedImages = user && !webhookView ? splitAttachedImages(text) : null;
-  const visibleText = webhookView?.task ?? attachedImages?.display ?? text;
+  const attachments = user && !webhookView ? splitTranscriptAttachments(text) : null;
+  const visibleText = webhookView?.task ?? attachments?.display ?? text;
   const collapsible =
     user && !webhookView && !expanded && (visibleText.length > USER_COLLAPSE_CHARS || visibleText.split("\n").length > USER_COLLAPSE_LINES);
 
@@ -349,7 +350,6 @@ function Bubble({
             <Pencil size={14} />
           </button>
         )}
-        {user && message.kind === "text" && <ReactionBar threadId={bot.threadId} message={message} />}
         {user && <CopyButton text={visibleText} />}
         {user && (
           <>
@@ -421,14 +421,19 @@ function Bubble({
             </div>
           ) : user ? (
             <>
-              {attachedImages && attachedImages.images.length > 0 && (
-                <AttachedImageGallery paths={attachedImages.images} />
+              {attachments && attachments.images.length > 0 && (
+                <AttachedImageGallery paths={attachments.images} />
               )}
-              <div
-                className={cn(collapsible && "max-h-40 overflow-hidden [mask-image:linear-gradient(to_bottom,black_60%,transparent)]")}
-              >
-                {visibleText}
-              </div>
+              {attachments && attachments.files.length > 0 && (
+                <AttachedFileChips files={attachments.files} className={!visibleText ? "mb-0" : undefined} />
+              )}
+              {visibleText && (
+                <div
+                  className={cn(collapsible && "max-h-40 overflow-hidden [mask-image:linear-gradient(to_bottom,black_60%,transparent)]")}
+                >
+                  {visibleText}
+                </div>
+              )}
               {message.steered && (
                 <div className="mt-1 text-[11px] text-ink-secondary/70" title="Sent while the bot was working — it saw this before its next step, inside the same turn.">
                   sent mid-turn
@@ -446,16 +451,22 @@ function Bubble({
               )}
             </>
           ) : (
-            <MessageBoundary fallbackText={text}>
-              <ChatMarkdown text={text} />
+            <MessageBoundary fallbackText={text || "Generated image"}>
+              {message.attachments?.length ? (
+                <AttachedImageGallery
+                  paths={message.attachments.map((attachment) => attachment.path)}
+                  className={text ? "justify-start" : "mb-0 justify-start"}
+                />
+              ) : null}
+              {text ? <ChatMarkdown text={text} /> : null}
             </MessageBoundary>
           )}
         </div>
         {!user && (
           <>
             <div className="flex flex-col gap-0.5 self-end pb-0.5">
-              <CopyButton text={text} />
-              {message.kind === "text" && (
+              {text && <CopyButton text={text} />}
+              {message.kind === "text" && text && (
                 <SpeakButton text={text} botId={bot.id} messageId={message.id} voiceId={bot.voice} />
               )}
               {isLastBotText && !bot.busy && onRegenerate && (
@@ -498,7 +509,6 @@ function Bubble({
             </button>
           </>
         )}
-        {!user && message.kind === "text" && <ReactionBar threadId={bot.threadId} message={message} />}
         <span
           className={cn(
             "self-end pb-1 text-[11px] tabular-nums text-ink-secondary/70 opacity-0 transition-opacity group-hover:opacity-100",
@@ -508,7 +518,6 @@ function Bubble({
           {formatTime(message.at)}
         </span>
       </div>
-      <ReactionChips threadId={bot.threadId} message={message} align={user ? "right" : "left"} />
       {versions.length > 1 && (
         <div className="mt-1 flex items-center gap-0.5 pr-1 text-[12px] text-ink-secondary">
           <button
@@ -538,12 +547,13 @@ function Bubble({
 
 /** A tool run: spinner while live, check/cross once settled. */
 function ActivityChip({ message }: { message: Message }) {
-  const { dispatch } = useStore();
+  const { state, dispatch } = useStore();
   const tool = message.tool;
   if (!tool) return null;
   // bot⇄bot comm chip: opens the channel where the exchange lives
   const comm = message.comm;
   if (comm) {
+    const withBot = state.bots.find((b) => b.id === comm.withBotId);
     return (
       <div className="flex justify-start">
         <button
@@ -551,7 +561,7 @@ function ActivityChip({ message }: { message: Message }) {
           title={`Open the conversation with ${comm.withName}`}
           className="flex items-center gap-2 rounded-full border border-hairline/40 bg-panel px-3 py-1.5 text-[13px] text-ink-secondary hover:bg-raised hover:text-ink"
         >
-          <MausAvatar color={comm.withColor} state="happy" size={16} />
+          <MausAvatar color={comm.withColor} bodyId={withBot?.mascotBody ?? undefined} state="happy" size={16} />
           <span className="max-w-[480px] truncate">{tool.name}</span>
           <ChevronRight size={13} />
         </button>
@@ -631,9 +641,9 @@ const MessagesList = memo(function MessagesList({
 }) {
   const { state, dispatch } = useStore();
   const showToolCalls = showToolCallsEnabled(state.config);
-  // Fold finished tool chips into runs, so a stretch of them cannot bury
-  // what the bot actually said. Hidden unless Settings → Tool calls is on.
-  const items = useMemo(() => groupActivityRuns(messages), [messages]);
+  // Finished tool chips become compact runs; settled assistant narration
+  // becomes one reversible turn row while the terminal answer stays visible.
+  const items = useMemo(() => groupTranscript(messages), [messages]);
   // A search hit inside a folded run has to open it: the fold keeps the
   // row out of the DOM, and there is nothing for the scroll to land on.
   const focus = state.focusMessage;
@@ -656,9 +666,38 @@ const MessagesList = memo(function MessagesList({
       )}
       {items.map((item, i) => {
         const previous = items[i - 1];
-        const prev = previous && (previous.kind === "run" ? previous.messages.at(-1) : previous.message);
-        const first = item.kind === "run" ? item.messages[0] : item.message;
+        const prev = previous && (previous.kind === "message" ? previous.message : previous.messages.at(-1));
+        const first = item.kind === "message" ? item.message : item.messages[0];
         const newDay = !prev || new Date(prev.at).toDateString() !== new Date(first.at).toDateString();
+        if (item.kind === "turn") {
+          return (
+            <div key={item.id} className="contents">
+              {newDay && <DaySeparator at={first.at} />}
+              <TurnNarrationRun
+                label={item.label}
+                forceOpen={item.messages.some((message) => message.id === focusedId)}
+              >
+                {item.messages.map((message) => (
+                  <div key={message.id} className="contents" data-mid={message.id}>
+                    <Bubble
+                      bot={bot}
+                      message={message}
+                      editing={false}
+                      isLastBotText={false}
+                      onStartEdit={noop}
+                      onCancelEdit={noop}
+                      onSubmitEdit={noop}
+                      replyTarget={message.replyToId
+                        ? bot.messages.find((candidate) => candidate.id === message.replyToId)
+                        : undefined}
+                      onReply={() => onReply(message)}
+                    />
+                  </div>
+                ))}
+              </TurnNarrationRun>
+            </div>
+          );
+        }
         if (item.kind === "run") {
           if (!showToolCalls) return null;
           return (
@@ -892,7 +931,7 @@ export function ChatView({ bot }: { bot: Bot }) {
   const waiting = Boolean(
     bot.busy &&
       bot.activity !== "waiting-on-you" &&
-      showWorkingDots(bot.busy, undefined, lastMessage),
+      showWorkingDots(bot.busy, lastMessage),
   );
   const wasWaiting = useRef(false);
   const [popping, setPopping] = useState<{ id: string; text: string } | null>(null);
@@ -911,6 +950,7 @@ export function ChatView({ bot }: { bot: Bot }) {
     return () => clearTimeout(timer);
   }, [lastMessage?.id, lastMessage?.role, lastMessage?.kind, lastMessage?.text]);
   const presenceVisible = waiting || popping !== null;
+  const poppingMessage = popping ? messages.find((message) => message.id === popping.id) : undefined;
   // Wall-clock anchor for the working row's elapsed readout — set when the
   // turn starts, cleared when it settles, reset on bot switch.
   const [busySince, setBusySince] = useState<number | null>(null);
@@ -1255,39 +1295,18 @@ export function ChatView({ bot }: { bot: Bot }) {
           >
             {popping ? (
               <div className="w-fit max-w-[min(42rem,78%)] rounded-2xl bg-card px-4 py-2.5 text-[15px] leading-relaxed text-ink">
-                <MessageBoundary fallbackText={popping.text}>
-                  <ChatMarkdown text={popping.text} />
+                <MessageBoundary fallbackText={popping.text || "Generated image"}>
+                  {poppingMessage?.attachments?.length ? (
+                    <AttachedImageGallery
+                      paths={poppingMessage.attachments.map((attachment) => attachment.path)}
+                      className={popping.text ? "justify-start" : "mb-0 justify-start"}
+                    />
+                  ) : null}
+                  {popping.text ? <ChatMarkdown text={popping.text} /> : null}
                 </MessageBoundary>
               </div>
             ) : null}
           </TurnPresence>
-          {/* Ghost tail: 1:1 sends made mid-turn wait in the server's steer
-              queue and stay off the transcript until drain (they must never
-              become the active leaf). These rows are that queue made visible,
-              in send order, each with its own cancel. */}
-          {bot.busy &&
-            (state.pendingQueued[bot.threadId] ?? []).map((entry) => (
-              <div key={entry.queueId} className="flex flex-col items-end">
-                <div className="w-fit max-w-[min(42rem,78%)] rounded-2xl border border-dashed border-hairline/70 bg-panel/60 px-4 py-2.5 text-[15px] leading-relaxed whitespace-pre-wrap text-ink-secondary">
-                  {entry.text}
-                </div>
-                <div className="mt-1 flex items-center gap-1 pr-1 text-[11px] text-ink-secondary/70">
-                  <Clock size={11} aria-hidden="true" />
-                  <span>Queued — sends when this turn finishes</span>
-                  <button
-                    type="button"
-                    onClick={() =>
-                      dispatch({ type: "cancelQueued", botId: bot.id, queueId: entry.queueId })
-                    }
-                    aria-label="Cancel queued message"
-                    title="Cancel queued message"
-                    className="ml-0.5 flex size-4 shrink-0 items-center justify-center rounded text-ink-secondary hover:bg-raised hover:text-ink"
-                  >
-                    <X size={11} strokeWidth={2.5} />
-                  </button>
-                </div>
-              </div>
-            ))}
         </div>
       </div>
 

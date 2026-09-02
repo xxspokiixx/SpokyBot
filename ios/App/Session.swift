@@ -88,6 +88,14 @@ final class Session: ObservableObject {
     /// for the same attachment path.
     private var avatarFetches: [String: (id: UUID, task: Task<Data?, Never>)] = [:]
     private var avatarCacheGeneration = 0
+    /// Only one downloaded document preview is retained. A replacement is
+    /// written completely before the previous directory is removed, so a
+    /// failed download cannot invalidate the file currently on screen.
+    private var filePreviewDirectory: URL?
+    /// An ambiguous network failure may happen after the server accepted a
+    /// message. Reusing this id for the exact same retained draft makes Retry
+    /// idempotent instead of sending the attachment twice.
+    private var attachmentSendIDs: [AttachmentDraftKey: String] = [:]
     /// A saved connection exists, but its token could not be read yet. Keeps
     /// "the keychain is locked" from being mistaken for "not paired".
     private var restorePending = false
@@ -96,13 +104,17 @@ final class Session: ObservableObject {
     /// paired client can be rebuilt after unlock.
     private var pendingNotification: NotificationTarget?
 
-    private var registry = CompanionConnectionRegistry()
-    private static let connectionsKey = "companion.connections.v1"
-    private static let legacyConnectionKey = "companion.connection"
+    private struct AttachmentDraftKey: Hashable {
+        let destination: MessageDestination
+        let text: String
+        let attachmentIDs: [UUID]
+    }
 
+    private var registry = CompanionConnectionRegistry()
     // MARK: - Pairing
 
     init() {
+        Self.removeStaleFilePreviews()
         _ = NotificationCoordinator.shared
         NotificationCoordinator.shared.responseHandler = { [weak self] target in
             Task { @MainActor in await self?.openNotification(target) }
@@ -156,15 +168,14 @@ final class Session: ObservableObject {
     /// only the first should ever send someone back to the pairing screen.
     private func restore() {
         restorePending = false
-        let restored = CompanionConnectionRegistryMigration.restore(
-            registryData: UserDefaults.standard.data(forKey: Self.connectionsKey),
-            legacyConnectionData: UserDefaults.standard.data(forKey: Self.legacyConnectionKey)
-        )
-        registry = restored.registry
+        registry = OpenMausSharedConnectionStore.loadRegistry()
         connections = registry.connections
-        if restored.migratedLegacyConnection {
-            persistRegistry()
-            UserDefaults.standard.removeObject(forKey: Self.legacyConnectionKey)
+        // The Share extension can target any saved computer, not only the
+        // one active at launch. Move every inactive pre-extension token into
+        // the shared Keychain group now; the active token is read below so
+        // its locked/error state can still drive the visible connection UI.
+        for saved in registry.connections where saved.id != registry.activeConnectionID {
+            _ = try? Keychain.token(for: saved.id)
         }
         restoreSelectedConnection()
     }
@@ -190,7 +201,7 @@ final class Session: ObservableObject {
             restorePending = true
             status = .offline(
                 (error as? KeychainError)?.isLocked == true
-                    ? "Unlock this phone to reach your computer."
+                    ? "Unlock this device to reach your computer."
                     : error.localizedDescription
             )
             return
@@ -266,10 +277,7 @@ final class Session: ObservableObject {
                 )
             }
         } saveConnection: {
-            UserDefaults.standard.set(
-                try? JSONEncoder().encode(updatedRegistry),
-                forKey: Self.connectionsKey
-            )
+            OpenMausSharedConnectionStore.saveRegistry(updatedRegistry)
         }
 
         stopActiveRuntime()
@@ -280,7 +288,6 @@ final class Session: ObservableObject {
         pairingRequested = false
         registry = updatedRegistry
         connections = registry.connections
-        UserDefaults.standard.removeObject(forKey: Self.legacyConnectionKey)
         self.connection = stored
         self.token = paired.token
         let liveRoutes = winner.map { route in
@@ -339,12 +346,12 @@ final class Session: ObservableObject {
             stored = try Keychain.token(for: id)
         } catch {
             actionError = (error as? KeychainError)?.isLocked == true
-                ? "Unlock this iPhone, then try switching computers again."
+                ? "Unlock this device, then try switching computers again."
                 : error.localizedDescription
             return
         }
         guard let stored else {
-            actionError = "This saved connection is no longer available on this iPhone. Remove it and pair again."
+            actionError = "This saved connection is no longer available on this device. Remove it and pair again."
             return
         }
 
@@ -410,6 +417,8 @@ final class Session: ObservableObject {
         rotation = CandidateRotation(hosts: [])
         state = CompanionState()
         resetAvatarCache()
+        clearFilePreview()
+        attachmentSendIDs.removeAll()
         NotificationCoordinator.shared.setBadge(0)
         status = .unpaired
     }
@@ -440,18 +449,13 @@ final class Session: ObservableObject {
         token = nil
         state = CompanionState()
         resetAvatarCache()
+        clearFilePreview()
+        attachmentSendIDs.removeAll()
         NotificationCoordinator.shared.setBadge(0)
     }
 
     private func persistRegistry() {
-        if registry.connections.isEmpty {
-            UserDefaults.standard.removeObject(forKey: Self.connectionsKey)
-        } else {
-            UserDefaults.standard.set(
-                try? JSONEncoder().encode(registry),
-                forKey: Self.connectionsKey
-            )
-        }
+        OpenMausSharedConnectionStore.saveRegistry(registry)
     }
 
     private func persistActiveConnection(_ updated: Connection) {
@@ -781,6 +785,198 @@ final class Session: ObservableObject {
         }
     }
 
+    /// Send a composer draft with app-owned attachments. The destination
+    /// includes the exact active thread at tap time, so neither a desktop task
+    /// switch nor an upload delay can move the message elsewhere. Callers only
+    /// clear their draft when this returns true.
+    func send(
+        text: String,
+        attachments: [PendingMessageAttachment],
+        to chat: Chat
+    ) async -> Bool {
+        guard let client else {
+            actionError = "This computer is offline."
+            return false
+        }
+        actionError = nil
+        do {
+            try AttachmentPolicy.validate(attachments)
+            let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !trimmed.isEmpty || !attachments.isEmpty else {
+                actionError = "Write a message or attach a file first."
+                return false
+            }
+
+            if attachments.contains(where: { $0.kind == .image }) {
+                let capable: Set<String>
+                do {
+                    capable = try await client.imageCapableInstanceIDs()
+                } catch APIError.status(code: 404, message: _) {
+                    actionError = "Update OpenMausBot on this computer before sending images."
+                    return false
+                }
+                guard imageSupported(by: chat, capableInstances: capable) else {
+                    actionError = imageCompatibilityMessage(for: chat)
+                    return false
+                }
+            }
+
+            let destination: MessageDestination
+            switch chat {
+            case let .bot(bot):
+                destination = .bot(id: bot.id, threadId: bot.threadId)
+            case let .room(room):
+                destination = .room(id: room.id, threadId: room.threadId)
+            }
+            let draftKey = AttachmentDraftKey(
+                destination: destination,
+                text: text,
+                attachmentIDs: attachments.map(\.id)
+            )
+            if attachmentSendIDs.count >= 20, attachmentSendIDs[draftKey] == nil {
+                attachmentSendIDs.removeAll(keepingCapacity: true)
+            }
+            let sendID = attachmentSendIDs[draftKey] ?? UUID().uuidString
+            attachmentSendIDs[draftKey] = sendID
+
+            var uploaded: [SharedAttachmentReference] = []
+            uploaded.reserveCapacity(attachments.count)
+            for attachment in attachments {
+                try Task.checkCancellation()
+                let mime = AttachmentPolicy.normalizedMIME(attachment.mime)
+                switch attachment.kind {
+                case .image:
+                    let path = try await client.uploadImage(
+                        data: attachment.data,
+                        mime: mime,
+                        uploadId: attachment.id.uuidString
+                    )
+                    uploaded.append(SharedAttachmentReference(path: path, kind: .image))
+                case .file:
+                    let file = try await client.uploadFile(
+                        data: attachment.data,
+                        name: attachment.name,
+                        mime: mime,
+                        uploadId: attachment.id.uuidString
+                    )
+                    uploaded.append(SharedAttachmentReference(
+                        path: file.path,
+                        kind: .file,
+                        displayName: file.name
+                    ))
+                }
+            }
+
+            let message = SharedMessageComposer.compose(
+                instruction: text,
+                text: [],
+                urls: [],
+                attachments: uploaded
+            )
+            try await client.send(text: message, to: destination, sendId: sendID)
+            attachmentSendIDs.removeValue(forKey: draftKey)
+            actionError = nil
+            return true
+        } catch is CancellationError {
+            return false
+        } catch let error as APIError where error.isUnauthorized {
+            status = .unauthorized
+            actionError = error.localizedDescription
+            return false
+        } catch {
+            actionError = error.localizedDescription
+            return false
+        }
+    }
+
+    private func imageSupported(by chat: Chat, capableInstances: Set<String>) -> Bool {
+        switch chat {
+        case let .bot(bot):
+            return capableInstances.contains(bot.modelSelection.instanceId)
+        case let .room(room):
+            return !room.memberIds.isEmpty && room.memberIds.allSatisfy { id in
+                guard let bot = state.bot(id) else { return false }
+                return capableInstances.contains(bot.modelSelection.instanceId)
+            }
+        }
+    }
+
+    private func imageCompatibilityMessage(for chat: Chat) -> String {
+        switch chat {
+        case let .bot(bot):
+            return "\(bot.name)'s current model doesn't support images. Choose another model or remove the image."
+        case .room:
+            return "Every bot that may answer in this channel must use a model that supports images."
+        }
+    }
+
+    /// Download one desktop path through its originating transcript message,
+    /// then place it in a private temporary directory for Quick Look.
+    func downloadFile(
+        threadId: String,
+        messageId: String,
+        path: String
+    ) async -> DownloadedFile? {
+        guard let client else {
+            actionError = "This computer is offline."
+            return nil
+        }
+        actionError = nil
+        do {
+            let download = try await client.downloadFile(
+                threadId: threadId,
+                messageId: messageId,
+                path: path
+            )
+            try Task.checkCancellation()
+            let manager = FileManager.default
+            let root = manager.temporaryDirectory
+                .appendingPathComponent("OpenMausBotFilePreviews", isDirectory: true)
+            let nextDirectory = root.appendingPathComponent(UUID().uuidString, isDirectory: true)
+            try manager.createDirectory(
+                at: nextDirectory,
+                withIntermediateDirectories: true,
+                attributes: [.protectionKey: FileProtectionType.completeUntilFirstUserAuthentication]
+            )
+            let fileURL = nextDirectory.appendingPathComponent(download.filename, isDirectory: false)
+            do {
+                try download.data.write(to: fileURL, options: [.atomic, .completeFileProtectionUntilFirstUserAuthentication])
+                // A synchronous write cannot be interrupted halfway through.
+                // Check immediately afterwards so a cancelled preview never
+                // leaves its completed temporary copy behind.
+                try Task.checkCancellation()
+            } catch {
+                try? manager.removeItem(at: nextDirectory)
+                throw error
+            }
+            let previous = filePreviewDirectory
+            filePreviewDirectory = nextDirectory
+            if let previous { try? manager.removeItem(at: previous) }
+            actionError = nil
+            return download.stored(at: fileURL)
+        } catch is CancellationError {
+            return nil
+        } catch let error as APIError where error.isUnauthorized {
+            status = .unauthorized
+            actionError = error.localizedDescription
+            return nil
+        } catch {
+            actionError = error.localizedDescription
+            return nil
+        }
+    }
+
+    private func clearFilePreview() {
+        if let filePreviewDirectory { try? FileManager.default.removeItem(at: filePreviewDirectory) }
+        filePreviewDirectory = nil
+    }
+
+    private static func removeStaleFilePreviews() {
+        let root = FileManager.default.temporaryDirectory
+            .appendingPathComponent("OpenMausBotFilePreviews", isDirectory: true)
+        try? FileManager.default.removeItem(at: root)
+    }
+
     func answer(chat: Chat, card: OptionCard, choice: String, rememberingPermission: Bool = true) async {
         guard let requestId = card.requestId else { return }
         if rememberingPermission, card.shouldRememberPermission(for: choice), case let .bot(bot) = chat {
@@ -790,13 +986,20 @@ final class Session: ObservableObject {
             threadId: chat.threadId,
             requestId: requestId,
             choice: choice,
-            isPermission: card.isPermission
+            isPermission: card.isPermission,
+            reviewedSha256: card.skillRequest?.reviewedSha256
         )
     }
 
     /// The same answer, from something that only has the ids — the Live
     /// Activity's buttons.
-    func answer(threadId: String, requestId: String, choice: String, isPermission: Bool) async {
+    func answer(
+        threadId: String,
+        requestId: String,
+        choice: String,
+        isPermission: Bool,
+        reviewedSha256: String? = nil
+    ) async {
         await perform {
             // Permission cards answer allow/deny; a question answers with
             // the chosen text. The harness tells them apart by `behavior`.
@@ -805,7 +1008,8 @@ final class Session: ObservableObject {
                 try await $0.respond(
                     threadId: threadId,
                     requestId: requestId,
-                    behavior: behavior
+                    behavior: behavior,
+                    reviewedSha256: behavior == "allow" ? reviewedSha256 : nil
                 )
             } else {
                 try await $0.respond(threadId: threadId, requestId: requestId, behavior: "answer", message: choice)
@@ -850,6 +1054,22 @@ final class Session: ObservableObject {
             let room = try await client.createRoom(name: name, memberIds: memberIds)
             state.apply(.room(room))
             return room
+        } catch {
+            actionError = error.localizedDescription
+            return nil
+        }
+    }
+
+    /// Create a sidebar section by assigning its complete starting set in one
+    /// request. The server commits the batch before returning, then these
+    /// folds make the roster move immediately instead of waiting for SSE.
+    @discardableResult
+    func assignSection(name: String, botIds: [String]) async -> [Bot]? {
+        guard let client else { return nil }
+        do {
+            let bots = try await client.assignSection(name: name, botIds: botIds)
+            for bot in bots { state.apply(.bot(bot)) }
+            return bots
         } catch {
             actionError = error.localizedDescription
             return nil
@@ -997,6 +1217,31 @@ final class Session: ObservableObject {
 
     // MARK: - Agent profile
 
+    /// The model catalog lives on the paired computer because availability
+    /// depends on which engines are installed and signed in there.
+    func modelInstances() async -> [Instance] {
+        guard let client else { return [] }
+        do {
+            return try await client.instances()
+        } catch {
+            if !Task.isCancelled { actionError = error.localizedDescription }
+            return []
+        }
+    }
+
+    func updateModel(_ selection: ModelSelection, for bot: Bot) async -> Bot? {
+        guard let client else { return nil }
+        do {
+            let updated = try await client.updateModel(botId: bot.id, selection: selection)
+            guard !Task.isCancelled else { return nil }
+            state.apply(.bot(updated))
+            return updated
+        } catch {
+            if !Task.isCancelled { actionError = error.localizedDescription }
+            return nil
+        }
+    }
+
     func updateProfile(_ patch: BotProfilePatch, for bot: Bot) async -> Bot? {
         guard let client else { return nil }
         do {
@@ -1143,7 +1388,7 @@ final class Session: ObservableObject {
                 pendingNotification = target
                 connect()
             } else {
-                actionError = "Pair this phone with your computer to open that task."
+                actionError = "Pair this device with your computer to open that task."
             }
             return
         }
@@ -1396,16 +1641,20 @@ extension CompanionState {
     /// so the same transcript was being traversed dozens of times per frame
     /// to produce an answer that had not changed. One pass, then sort the
     /// results.
-    var chatSummaries: [ChatSummary] {
+    /// - Parameter activity: how much of a bot's working-out the reader has
+    ///   asked to see. The preview honours it the same way the transcript
+    ///   does; `lastActivity` deliberately does not, because a thread that
+    ///   just ran a tool has still moved and should still rise in the list.
+    func chatSummaries(activity: ActivityDetail = .full) -> [ChatSummary] {
         let bots = self.bots.filter { $0.hidden != true }.map(Chat.bot)
         let rooms = self.rooms.map(Chat.room)
         return (bots + rooms)
             .map { chat in
-                let last = visibleTranscript(forThread: chat.threadId).last
+                let messages = visibleTranscript(forThread: chat.threadId)
                 return ChatSummary(
                     chat: chat,
-                    preview: Self.preview(of: last),
-                    lastActivity: last?.at ?? 0,
+                    preview: rosterPreview(messages, detail: activity),
+                    lastActivity: messages.last?.at ?? 0,
                     pinned: Self.pinned(chat)
                 )
             }
@@ -1421,20 +1670,4 @@ extension CompanionState {
         return false
     }
 
-    /// The one line a roster row shows under the name, from whichever kind of
-    /// message landed last.
-    private static func preview(of last: Message?) -> String {
-        guard let last else { return "" }
-        switch last.kind {
-        case .text: return last.text ?? ""
-        // a pending card's question is the preview; the roster row already
-        // says "waiting on you" beside it
-        case .options:
-            guard let card = last.card else { return "" }
-            return card.isPending && !card.subtitle.isEmpty ? card.subtitle : card.title
-        case .activity: return last.tool?.name ?? ""
-        case .screen: return "Screenshot"
-        case .unknown: return last.text ?? ""
-        }
-    }
 }

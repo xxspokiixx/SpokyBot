@@ -6,8 +6,8 @@
 // These used to be POSIX-only: the fake CLI is a shebang script Windows
 // cannot exec, and the broker is a unix socket. Both now go through
 // resolveCliSpawn / permissionSocketPath, so they run everywhere.
-import { chmodSync, existsSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
-import { connect, type Socket } from "node:net";
+import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
+import { connect, createServer as createNetServer, type Socket } from "node:net";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -16,7 +16,7 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { ensureDirs } from "../config.ts";
 import type { ProviderInstance } from "../contracts.ts";
 import { recordEvents, type EventRecorder } from "../testing/events.ts";
-import { ClaudeDriver, permissionSocketPath, type ClaudeConfig } from "./claude.ts";
+import { brokerSocketCandidates, ClaudeDriver, createPermissionBroker, permissionSocketPath, type ClaudeConfig } from "./claude.ts";
 import { removeTempDir } from "../testing/cleanup.ts";
 
 const FAKE_CLI = join(dirname(fileURLToPath(import.meta.url)), "..", "testing", "fake-claude-cli.ts");
@@ -150,6 +150,89 @@ describe("ClaudeDriver.decodeConfig", () => {
     const paths = COLLISION_THREAD_IDS.map(permissionSocketPath);
     expect(new Set(paths).size).toBe(COLLISION_THREAD_IDS.length);
   });
+
+  it("keeps the deterministic path as the first broker candidate", () => {
+    const candidates = brokerSocketCandidates("t-candidates");
+    expect(candidates[0]).toBe(permissionSocketPath("t-candidates"));
+    if (process.platform === "win32") {
+      // pipes are never unlinkable, so a held name needs fresh fallbacks
+      expect(candidates.length).toBeGreaterThan(1);
+      expect(new Set(candidates).size).toBe(candidates.length);
+    } else {
+      // macOS has a small Unix-socket path limit, so a deep HOME needs a
+      // short fallback under the OS temp root.
+      expect(candidates).toHaveLength(2);
+      expect(candidates[1]).toMatch(/omb-perm-[0-9a-f]{16}\.sock$/);
+      expect(candidates[1]).not.toBe(candidates[0]);
+    }
+  });
+
+  // Windows can't listen on filesystem socket paths at all (EACCES), so the
+  // unbindable-first-candidate unit runs on POSIX; the fake-CLI e2e below
+  // covers the real pipe fallback on Windows CI.
+  it.skipIf(process.platform === "win32")(
+    "binds the next candidate when the first is unbindable, and asks round-trip on it",
+    async () => {
+      const dir = mkdtempSync(join(tmpdir(), "omb-broker-fallback-"));
+      const held = join(dir, "held.sock");
+      // a directory squats the path the way a hung child holds a pipe:
+      // unlink fails, listen fails — the broker must move on, not go dark
+      mkdirSync(held);
+      const free = join(dir, "free.sock");
+      const asks: Array<{ id: string }> = [];
+      const broker = await createPermissionBroker({
+        socketPaths: [held, free],
+        onAsk: (ask) => asks.push(ask),
+        onResolve: () => {},
+      });
+      try {
+        expect(broker.socketPath).toBe(free);
+        const conn = connect(free);
+        await new Promise<void>((resolve, reject) => {
+          conn.on("connect", resolve);
+          conn.on("error", reject);
+        });
+        const answered = new Promise<{ behavior: string }>((resolve) => {
+          let buf = "";
+          conn.on("data", (c) => {
+            buf += c;
+            const nl = buf.indexOf("\n");
+            if (nl !== -1) resolve(JSON.parse(buf.slice(0, nl)));
+          });
+        });
+        conn.write(JSON.stringify({ t: "ask", id: "ask-fb", tool: "Bash", input: { command: "echo hi" } }) + "\n");
+        await expect.poll(() => asks.length).toBe(1);
+        expect(broker.answer("ask-fb", "allow")).toBe(true);
+        expect(await answered).toMatchObject({ behavior: "allow" });
+        conn.end();
+      } finally {
+        broker.close();
+        rmSync(dir, { recursive: true, force: true });
+      }
+    },
+  );
+
+  it.skipIf(process.platform === "win32")(
+    "rejects instead of returning an occupied path when every candidate is unavailable",
+    async () => {
+      const dir = mkdtempSync(join(tmpdir(), "omb-broker-unavailable-"));
+      const heldOne = join(dir, "held-one.sock");
+      const heldTwo = join(dir, "held-two.sock");
+      mkdirSync(heldOne);
+      mkdirSync(heldTwo);
+      try {
+        await expect(
+          createPermissionBroker({
+            socketPaths: [heldOne, heldTwo],
+            onAsk: () => {},
+            onResolve: () => {},
+          }),
+        ).rejects.toThrow(/could not bind a local socket/);
+      } finally {
+        rmSync(dir, { recursive: true, force: true });
+      }
+    },
+  );
 });
 
 describe("ClaudeDriver turns (fake CLI)", () => {
@@ -249,7 +332,7 @@ describe("ClaudeDriver turns (fake CLI)", () => {
     expect((settled[0] as any).text).toBe("hello from fake claude");
   });
 
-  it("sends the prompt over stdin, never argv, and strips identity env vars", async () => {
+  it("keeps user and system prompts off argv and strips identity env vars", async () => {
     await create();
     const dump = join(scratch, "dump.json");
     process.env.FAKE_CLAUDE_DUMP = dump;
@@ -265,8 +348,11 @@ describe("ClaudeDriver turns (fake CLI)", () => {
 
     const seen = JSON.parse(readFileSync(dump, "utf8"));
     expect(JSON.stringify(seen.argv)).not.toContain("the secret prompt");
+    expect(JSON.stringify(seen.argv)).not.toContain("You are Testy.");
     expect(seen.prompt).toMatchObject({ type: "user", message: { role: "user", content: "the secret prompt" } });
-    expect(seen.argv).toContain("--append-system-prompt");
+    expect(seen.argv).toContain("--append-system-prompt-file");
+    expect(seen.systemPrompt).toBe("You are Testy.");
+    expect(existsSync(seen.argv[seen.argv.indexOf("--append-system-prompt-file") + 1])).toBe(false);
     expect(seen.argv).toContain("--session-id");
     expect(seen.env.ANTHROPIC_API_KEY).toBeUndefined();
     expect(seen.env.CLAUDECODE).toBeUndefined();
@@ -274,6 +360,21 @@ describe("ClaudeDriver turns (fake CLI)", () => {
     expect(seen.env.XAI_API_KEY).toBeUndefined();
     expect(seen.env.BOX_TOKEN).toBeUndefined();
     expect(seen.env.OMB_TTS_KEY).toBeUndefined();
+  });
+
+  it("launches with a Windows-sized system prompt without putting it on argv", async () => {
+    await create();
+    const dump = join(scratch, "dump-long-system.json");
+    process.env.FAKE_CLAUDE_DUMP = dump;
+    const system = `room instructions\n${"context-0123456789".repeat(8_000)}`;
+
+    await instance.adapter.sendTurn({ threadId: "t-long-system", text: "review this", system });
+    await recorder.until((e) => e.type === "turn.completed");
+
+    const seen = JSON.parse(readFileSync(dump, "utf8"));
+    expect(seen.systemPrompt).toBe(system);
+    expect(JSON.stringify(seen.argv)).not.toContain("room instructions");
+    expect(JSON.stringify(seen.argv).length).toBeLessThan(8_000);
   });
 
   it("uses instance credentials when launching an injected local model", async () => {
@@ -352,6 +453,43 @@ describe("ClaudeDriver turns (fake CLI)", () => {
     expect(JSON.stringify(seen.argv)).not.toContain("tok");
     const allowed = seen.argv[seen.argv.indexOf("--allowedTools") + 1];
     expect(allowed).toContain("mcp__agents");
+  });
+
+  it("mounts custom MCP servers without pre-allowing their tools", async () => {
+    await create();
+    const dump = join(scratch, "custom-mcp.json");
+    process.env.FAKE_CLAUDE_DUMP = dump;
+
+    await instance.adapter.sendTurn({
+      threadId: "t-custom-mcp",
+      text: "hi",
+      integrations: {
+        custom: {
+          notes: { command: "npx", args: ["-y", "@x/notes-mcp"], env: { NOTES_TOKEN: "tok-notes" } },
+        },
+        agents: {
+          command: process.execPath,
+          args: ["/fake/agents-proxy.js"],
+          env: { OMB_HARNESS_URL: "http://127.0.0.1:1", OMB_BOT_ID: "b1", OMB_COMMS_TOKEN: "tok", OMB_TURN_DEPTH: "0" },
+        },
+      },
+    });
+    await recorder.until((e) => e.type === "turn.completed");
+
+    const seen = JSON.parse(readFileSync(dump, "utf8"));
+    // the server reaches the CLI through the private mcp-config file…
+    expect(seen.mcpConfig.mcpServers.notes).toMatchObject({
+      command: "npx",
+      args: ["-y", "@x/notes-mcp"],
+      env: { NOTES_TOKEN: "tok-notes" },
+    });
+    // …but its tools are NOT pre-allowed: acceptEdits denies unlisted tools,
+    // which routes every custom call through the ogb broker into a card.
+    const allowed = seen.argv[seen.argv.indexOf("--allowedTools") + 1];
+    expect(allowed).toContain("mcp__agents");
+    expect(allowed).not.toContain("mcp__notes");
+    // and its credential value stays out of argv
+    expect(JSON.stringify(seen.argv)).not.toContain("tok-notes");
   });
 
   it("passes normalized available and denied built-in tool sets to Claude", async () => {
@@ -809,6 +947,54 @@ describe("ClaudeDriver turns (fake CLI)", () => {
     conn.end();
     await instance.adapter.interruptTurn("t-perm-abc");
     await recorder.until((e) => e.type === "turn.completed");
+  });
+
+  it("binds a fallback pipe when the thread's broker path is already held", async () => {
+    await create("hang");
+    const dump = join(scratch, "dump.json");
+    process.env.FAKE_CLAUDE_DUMP = dump;
+    const basePath = permissionSocketPath("t-perm-squat");
+    // squat the deterministic path the way a hung child from an earlier
+    // process does. On POSIX the driver steals the socket file (unlink) and
+    // still binds the base; on Windows the name is unstealable and the
+    // driver must bind a fallback — either way the ask flow must work.
+    const squatter = createNetServer(() => {});
+    await new Promise<void>((resolve, reject) => {
+      squatter.once("listening", () => resolve());
+      squatter.once("error", reject);
+      squatter.listen(basePath);
+    });
+    try {
+      await instance.adapter.sendTurn({ threadId: "t-perm-squat", text: "go" });
+      await recorder.until((e) => e.type === "session.started");
+      await expect.poll(() => existsSync(dump), { timeout: 5_000 }).toBe(true);
+      const seen = JSON.parse(readFileSync(dump, "utf8"));
+      const mcpPath = seen.argv[seen.argv.indexOf("--mcp-config") + 1];
+      const actual = JSON.parse(readFileSync(mcpPath, "utf8")).mcpServers.ogb.args[1];
+      if (process.platform === "win32") expect(actual).not.toBe(basePath);
+      const conn = connect(actual);
+      await new Promise<void>((resolve, reject) => {
+        conn.on("connect", resolve);
+        conn.on("error", reject);
+      });
+      const answered = new Promise<{ behavior: string }>((resolve) => {
+        let buf = "";
+        conn.on("data", (c) => {
+          buf += c;
+          const nl = buf.indexOf("\n");
+          if (nl !== -1) resolve(JSON.parse(buf.slice(0, nl)));
+        });
+      });
+      conn.write(JSON.stringify({ t: "ask", id: "ask-squat", tool: "Bash", input: { command: "echo hi" } }) + "\n");
+      await recorder.until((e) => e.type === "request.opened" && e.requestId === "ask-squat");
+      await expect(instance.adapter.respondToRequest("t-perm-squat", "ask-squat", { behavior: "allow" })).resolves.toBe("allowed-once");
+      expect(await answered).toMatchObject({ behavior: "allow" });
+      conn.end();
+      await instance.adapter.interruptTurn("t-perm-squat");
+      await recorder.until((e) => e.type === "turn.completed");
+    } finally {
+      squatter.close();
+    }
   });
 
   it("answers to unknown or already-resolved asks resolve `unavailable` — typed, never a throw", async () => {

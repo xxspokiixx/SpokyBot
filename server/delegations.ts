@@ -19,7 +19,7 @@ import { getOrCreateChannel, mirrorExchange, type CommsBus } from "./comms-visib
 import { DATA_DIR } from "./config.ts";
 import { newId } from "./contracts.ts";
 import { requestPeerApproval, type ApprovalBus } from "./peer-approval.ts";
-import type { BotRecord, GroupRecord } from "./store.ts";
+import { sectionKey, type BotRecord, type GroupRecord } from "./store.ts";
 
 export interface DelegationItem {
   toBotId: string;
@@ -430,6 +430,9 @@ async function processOne(
     });
     return "settled";
   }
+  if (dropIfSectionsChanged(bus, sender, target, sourceThreadId, item)) {
+    return "settled";
+  }
   if (target.busy) {
     if (item.waitingOnBusy) return "requeued";
     item.attempts += 1;
@@ -494,6 +497,9 @@ async function processOne(
     const current = bus.store.bot(item.toBotId);
     const currentSender = bus.store.bot(from.id);
     if (!current || !currentSender || !bus.store.taskByThread(currentSender.id, sourceThreadId)) return "settled";
+    if (dropIfSectionsChanged(bus, currentSender, current, sourceThreadId, item)) {
+      return "settled";
+    }
     if (current.busy) {
       if (item.waitingOnBusy) return "requeued";
       item.attempts += 1;
@@ -533,6 +539,35 @@ async function processOne(
   return "settled";
 }
 
+/** Section membership is an execution boundary, not just sidebar styling.
+ * A queued handoff may wait through a turn, a busy target, or human approval,
+ * so the permission granted when it was queued must be checked again at the
+ * final dispatch edge. */
+function dropIfSectionsChanged(
+  bus: CommsBus,
+  sender: BotRecord,
+  target: BotRecord,
+  sourceThreadId: string,
+  item: PendingDelegationItem,
+): boolean {
+  if (sectionKey(sender.section) === sectionKey(target.section)) return false;
+  const result = `@${sender.name} and @${target.name} now belong to different sections`;
+  recordDelegationReceipt({
+    id: item.id,
+    sourceThreadId,
+    toBotId: target.id,
+    toBotName: target.name,
+    status: "dropped",
+    result,
+  });
+  bus.store.appendMessage(sourceThreadId, {
+    role: "bot",
+    kind: "activity",
+    tool: { name: `Delegation to @${target.name} canceled — bots now belong to different sections`, ok: false },
+  });
+  return true;
+}
+
 /** Test helper: how many items remain queued for a thread. */
 export function _pendingCount(threadId: string): number {
   return pendingDelegations.get(threadId)?.length ?? 0;
@@ -544,4 +579,112 @@ export function _resetPending(): void {
   drainingThreads.clear();
   queuedRedrains.clear();
   receipts = [];
+}
+
+// ── peer wake (delegated reply resumes the source bot) ────────────────
+// A successful delegated reply is appended to the source thread, but that
+// alone leaves the source idle — the user has to nudge it ("what did the
+// bot say?"). The harness wakes the source with a control-plane revival
+// prompt so it can fold the result in and answer. The prompt is pure and
+// testable; the burst budget below keeps a re-delegating bot from
+// ping-ponging forever.
+
+/** The revival prompt the harness feeds a delegating bot when its peer
+ * replies. The peer's text is already in the thread; this tells the source
+ * to stop idling and answer the user with the outcome. */
+export function buildDelegationRevivalPrompt(targetName: string): string {
+  return [
+    "[A delegated task just completed]",
+    `The task you delegated to @${targetName} has finished, and their reply is now in this conversation.`,
+    "Pick the work back up: review the reply, then answer the user with the outcome — lead with the concrete result and say what happens next. Do not re-delegate the same task.",
+  ].join("\n\n");
+}
+
+/** Same wake for a failed delegated turn: the source must tell the user it
+ * did not finish and decide the next step, instead of leaving the failure
+ * as a silent chip nobody acts on. */
+export function buildDelegationFailurePrompt(targetName: string, reason: string): string {
+  return [
+    "[A delegated task failed]",
+    `The task you delegated to @${targetName} did not finish: ${reason}`,
+    "Take over: tell the user what failed in plain terms, then decide the next step — retry with a narrower task, do the work yourself, or propose an alternative. Do not re-delegate the exact same task unchanged.",
+  ].join("\n\n");
+}
+
+export const DELEGATION_WAKE_MAX_PER_WINDOW = 3;
+export const DELEGATION_WAKE_WINDOW_MS = 5 * 60 * 1000;
+
+/** Bounded auto-wake budget per source thread. A delegation completion
+ * wakes the source; if that source re-delegates and the new completion
+ * wakes it again, this cap stops an A→B→A→B ping-pong. The window is
+ * short, so a user actively driving the bot outpaces it. */
+export class DelegationWakeBudget {
+  private readonly entries = new Map<string, { count: number; windowStart: number }>();
+  private readonly now: () => number;
+
+  constructor(now: () => number = Date.now) {
+    this.now = now;
+  }
+
+  tryAcquire(threadId: string): boolean {
+    const now = this.now();
+    const entry = this.entries.get(threadId);
+    if (!entry || now - entry.windowStart >= DELEGATION_WAKE_WINDOW_MS) {
+      this.entries.set(threadId, { count: 1, windowStart: now });
+      return true;
+    }
+    if (entry.count >= DELEGATION_WAKE_MAX_PER_WINDOW) return false;
+    entry.count += 1;
+    return true;
+  }
+
+  /** A genuine user turn clears the debt — the user is driving now. */
+  reset(threadId: string): void {
+    this.entries.delete(threadId);
+  }
+}
+
+// ── live status for a running delegated turn ──────────────────────────
+// check_delegation used to say only queued/running/finished. A chief that
+// coordinates specialists needs to see whether a long-running peer is
+// actually progressing, so the harness summarizes what the peer's thread
+// has done since the delegated turn started.
+
+export interface DelegatedActivityMessage {
+  at: number;
+  kind: string;
+  text?: string;
+  tool?: { name?: string } | null;
+}
+
+export function formatDelegationElapsed(elapsedMs: number): string {
+  const totalSeconds = Math.max(0, Math.round(elapsedMs / 1_000));
+  if (totalSeconds < 90) return `${totalSeconds}s`;
+  const minutes = Math.floor(totalSeconds / 60);
+  const seconds = totalSeconds % 60;
+  return seconds === 0 ? `${minutes}m` : `${minutes}m ${seconds}s`;
+}
+
+/** Recent, bounded activity from the peer's thread since the delegated
+ * turn started — newest last. Empty means the peer has produced nothing
+ * visible since dispatch, which reads as "maybe stuck" to the caller. */
+export function summarizeDelegatedActivity(
+  messages: readonly DelegatedActivityMessage[],
+  startedAtMs: number,
+  limit = 5,
+): string[] {
+  const lines: string[] = [];
+  for (const message of messages) {
+    if (message.at < startedAtMs) continue;
+    if (message.kind === "activity") {
+      const name = (message.tool?.name ?? "").trim();
+      if (name) lines.push(`tool: ${name}`);
+      continue;
+    }
+    if (message.kind === "text" && message.text?.trim()) {
+      const text = message.text.trim().replace(/\s+/g, " ");
+      lines.push(`text: ${text.slice(0, 140)}${text.length > 140 ? "…" : ""}`);
+    }
+  }
+  return lines.slice(-limit);
 }

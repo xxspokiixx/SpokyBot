@@ -1,11 +1,13 @@
 import { randomUUID } from "node:crypto";
-import { mkdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";
+import { mkdirSync, readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { z } from "zod";
 
 import { DATA_DIR } from "./config.ts";
 import type { RuntimeEvent } from "./contracts.ts";
+import { writeFileAtomic } from "./atomic.ts";
 import { redactSecretsInText } from "./redact.ts";
+import type { GroupGoalRunStatus } from "../shared/group-goal-run.ts";
 import type { RoutineRequestOperation } from "../shared/routine-request.ts";
 
 export type RoutineSchedule =
@@ -16,6 +18,16 @@ export type RoutineSchedule =
  * using the provider selected on the MAUS and only borrows its configured
  * computer tools, if any. */
 export type RoutineRunOn = "maus" | "cloud";
+export type RoutineTarget = "bot" | "room-goal";
+export type RoutineGoalStatus = Exclude<GroupGoalRunStatus, "working">;
+
+export interface RoutineContextAttachment {
+  id: string;
+  kind: "file" | "image";
+  name: string;
+  path: string;
+  size: number;
+}
 
 const persistedSourceThreadId = z.string().trim().min(1).optional().catch(undefined);
 
@@ -34,11 +46,15 @@ export interface Routine {
   id: string;
   name: string;
   prompt: string;
+  target: RoutineTarget;
+  /** A bot routine's owner, or the lead coordinator for a room goal. */
   botId: string;
+  groupId?: string;
   runOn: RoutineRunOn;
   enabled: boolean;
   schedule: RoutineSchedule;
   durationMinutes: number;
+  attachments?: RoutineContextAttachment[];
   /** Conversation that created this routine in chat. Calendar/import-created
    * routines intentionally have no source, and older files migrate in place. */
   sourceThreadId?: string;
@@ -54,6 +70,15 @@ export interface RoutineRun {
   /** Snapshot the work so an edited/deleted definition cannot rewrite history. */
   prompt?: string;
   durationMinutes?: number;
+  attachments?: RoutineContextAttachment[];
+  target: RoutineTarget;
+  /** Exact terminal room outcome. `status` remains the scheduler lifecycle
+   * while this preserves blocked/needs-input/limit semantics and closes the
+   * cross-file crash-recovery gap with the room's goal card. */
+  goalStatus?: RoutineGoalStatus;
+  /** Snapshot the room as well as the coordinator so edited definitions do
+   * not redirect already-queued team work. */
+  groupId?: string;
   botId: string;
   runOn: RoutineRunOn;
   scheduledFor: number;
@@ -108,11 +133,15 @@ type RoutineRequestCommitFor<Action extends RoutineRequestOperation["action"]> =
 export interface RoutineInput {
   name: string;
   prompt: string;
+  target?: RoutineTarget;
   botId: string;
+  /** `null` deliberately clears a room when changing the target back to a bot. */
+  groupId?: string | null;
   runOn?: RoutineRunOn;
   enabled?: boolean;
   schedule: RoutineSchedule;
   durationMinutes?: number;
+  attachments?: RoutineContextAttachment[];
 }
 
 interface RoutineFile {
@@ -136,7 +165,9 @@ export interface RoutineManagerOptions {
    * is what lets the server number and replay them. */
   emit?: (payload: Record<string, unknown>) => void;
   botState: (botId: string) => "ready" | "busy" | "missing";
+  goalState?: (groupId: string, coordinatorBotId: string) => "ready" | "busy" | "missing";
   createTask: (botId: string, title: string, activate?: boolean) => { threadId: string } | null;
+  createGoalTask?: (groupId: string, title: string) => { threadId: string } | null;
   startTurn: (
     botId: string,
     threadId: string,
@@ -145,7 +176,16 @@ export interface RoutineManagerOptions {
     triggerSource: RoutineRunTrigger,
     onDispatchError: (message: string) => void,
   ) => Promise<void>;
+  startGoal?: (
+    groupId: string,
+    threadId: string,
+    prompt: string,
+    coordinatorBotId: string,
+    runId: string,
+    onDispatchError: (message: string) => void,
+  ) => Promise<void>;
   interruptTurn?: (botId: string, threadId: string, runOn: RoutineRunOn) => Promise<void>;
+  interruptGoal?: (groupId: string, threadId: string) => Promise<void>;
   /** Projects every durable transition into the source conversation. */
   onRunChanged?: (run: RoutineRun) => void;
   onRunFailed?: (run: RoutineRun) => void;
@@ -154,6 +194,14 @@ export interface RoutineManagerOptions {
 const ALL_DAYS = [0, 1, 2, 3, 4, 5, 6];
 const CATCH_UP_MS = 12 * 60 * 60_000;
 const MAX_RUNS = 2_000;
+const MAX_ATTACHMENTS = 50;
+const attachmentSchema = z.object({
+  id: z.string().trim().min(1).max(200),
+  kind: z.enum(["file", "image"]),
+  name: z.string().trim().min(1).max(255),
+  path: z.string().trim().min(1).max(4_096),
+  size: z.number().finite().nonnegative(),
+});
 const ROUTINE_REQUEST_ACTIONS = new Set<RoutineRequestOperation["action"]>([
   "create",
   "update",
@@ -171,6 +219,105 @@ function cleanDays(days: unknown): number[] {
   if (!Array.isArray(days)) return ALL_DAYS;
   const out = [...new Set(days.filter((d): d is number => Number.isInteger(d) && d >= 0 && d <= 6))].sort();
   return out.length ? out : ALL_DAYS;
+}
+
+function cleanAttachments(value: unknown): RoutineContextAttachment[] {
+  if (value == null) return [];
+  if (!Array.isArray(value) || value.length > MAX_ATTACHMENTS) {
+    throw new Error(`Add no more than ${MAX_ATTACHMENTS} attachments`);
+  }
+  const ids = new Set<string>();
+  return value.map((candidate) => {
+    const parsed = attachmentSchema.safeParse(candidate);
+    if (!parsed.success || parsed.data.name.includes("\0") || parsed.data.path.includes("\0")) {
+      throw new Error("Choose a valid attachment");
+    }
+    if (ids.has(parsed.data.id)) throw new Error("Each attachment must be unique");
+    ids.add(parsed.data.id);
+    return { ...parsed.data };
+  });
+}
+
+/** A malformed legacy metadata field must not make the scheduler forget the
+ * otherwise valid routine or run that owns it. New writes still fail closed. */
+function loadAttachments(value: unknown): RoutineContextAttachment[] {
+  try {
+    return cleanAttachments(value);
+  } catch {
+    return [];
+  }
+}
+
+function cloneSchedule(schedule: RoutineSchedule): RoutineSchedule {
+  return schedule.type === "once"
+    ? { type: "once", at: schedule.at }
+    : { type: "daily", time: schedule.time, weekdays: [...schedule.weekdays] };
+}
+
+function cloneAttachments(attachments: readonly RoutineContextAttachment[] | undefined): RoutineContextAttachment[] {
+  return attachments?.map((attachment) => ({ ...attachment })) ?? [];
+}
+
+function loadTarget(value: unknown): RoutineTarget {
+  return value === "room-goal" ? "room-goal" : "bot";
+}
+
+const ROUTINE_GOAL_STATUSES = new Set<RoutineGoalStatus>([
+  "completed",
+  "needs-input",
+  "blocked",
+  "limit-reached",
+  "paused",
+  "stopped",
+  "failed",
+]);
+
+function loadGoalStatus(value: unknown, target: RoutineTarget): RoutineGoalStatus | undefined {
+  return target === "room-goal" && typeof value === "string" && ROUTINE_GOAL_STATUSES.has(value as RoutineGoalStatus)
+    ? value as RoutineGoalStatus
+    : undefined;
+}
+
+function loadGroupId(value: unknown, target: RoutineTarget): string | undefined {
+  if (target !== "room-goal" || typeof value !== "string") return undefined;
+  return value.trim() || undefined;
+}
+
+function cloneRoutine(routine: Routine): Routine {
+  return {
+    ...routine,
+    schedule: cloneSchedule(routine.schedule),
+    attachments: cloneAttachments(routine.attachments),
+  };
+}
+
+function cloneRun(run: RoutineRun): RoutineRun {
+  return {
+    ...run,
+    attachments: cloneAttachments(run.attachments),
+    denials: run.denials ? [...run.denials] : undefined,
+  };
+}
+
+/** Keep untrusted local paths inside the same quoted tag shape used by chat. */
+function escapeAttachmentPath(value: string): string {
+  return value
+    .replaceAll("&", "&amp;")
+    .replaceAll('"', "&quot;")
+    .replaceAll("<", "&lt;")
+    .replaceAll(">", "&gt;")
+    .replaceAll("\t", "&#9;")
+    .replaceAll("\r", "&#13;")
+    .replaceAll("\n", "&#10;");
+}
+
+function composeExecutionPrompt(prompt: string, attachments: readonly RoutineContextAttachment[] | undefined): string {
+  const parts = [prompt];
+  for (const attachment of attachments ?? []) {
+    const tag = attachment.kind === "image" ? "attached-image" : "attached-file";
+    parts.push(`<${tag} path="${escapeAttachmentPath(attachment.path)}" />`);
+  }
+  return parts.filter(Boolean).join("\n\n");
 }
 
 function cleanSchedule(schedule: RoutineSchedule): RoutineSchedule {
@@ -208,16 +355,33 @@ function sanitizeInput(input: RoutineInput): Omit<Routine, "id" | "createdAt" | 
   if (!name) throw new Error("Give the routine a name");
   if (!prompt) throw new Error("Tell the bot what to do");
   if (!botId) throw new Error("Choose a bot");
+  const target = input.target ?? "bot";
+  if (target !== "bot" && target !== "room-goal") throw new Error("Choose a valid routine target");
+  const groupId = typeof input.groupId === "string" ? input.groupId.trim() : "";
+  if (target === "room-goal" && !groupId) throw new Error("Choose a room for this goal");
   const runOn = input.runOn ?? "maus";
   if (runOn !== "maus" && runOn !== "cloud") throw new Error("Choose where this routine runs");
+  const attachments = cleanAttachments(input.attachments);
+  if (target === "room-goal" && runOn === "cloud") {
+    throw new Error("Room goals can only run on this computer");
+  }
+  if (target === "room-goal" && attachments.length > 0) {
+    throw new Error("Room goals do not support attachments yet");
+  }
+  if (runOn === "cloud" && attachments.length > 0) {
+    throw new Error("Attachments can only run on this computer until cloud file staging is available");
+  }
   return {
     name,
     prompt,
+    target,
     botId,
+    groupId: target === "room-goal" ? groupId : undefined,
     runOn,
     enabled: input.enabled !== false,
     schedule: cleanSchedule(input.schedule),
-    durationMinutes: Math.min(240, Math.max(15, Math.round(Number(input.durationMinutes) || 30))),
+    durationMinutes: Math.min(240, Math.max(5, Math.round(Number(input.durationMinutes) || 30))),
+    attachments,
   };
 }
 
@@ -238,18 +402,31 @@ export class RoutineManager {
     try {
       const disk = JSON.parse(readFileSync(this.file, "utf8")) as Partial<RoutineFile>;
       this.routines = Array.isArray(disk.routines)
-        ? disk.routines.map((routine) => ({
-            ...routine,
-            runOn: routine.runOn ?? "maus",
-            sourceThreadId: persistedSourceThreadId.parse(routine.sourceThreadId),
-          }))
+        ? disk.routines.map((routine) => {
+            const target = loadTarget(routine.target);
+            return {
+              ...routine,
+              target,
+              groupId: loadGroupId(routine.groupId, target),
+              runOn: routine.runOn ?? "maus",
+              attachments: loadAttachments(routine.attachments),
+              sourceThreadId: persistedSourceThreadId.parse(routine.sourceThreadId),
+            };
+          })
         : [];
       this.runs = Array.isArray(disk.runs)
-        ? disk.runs.map((run) => ({
-            ...run,
-            runOn: run.runOn ?? "maus",
-            sourceThreadId: persistedSourceThreadId.parse(run.sourceThreadId),
-          }))
+        ? disk.runs.map((run) => {
+            const target = loadTarget(run.target);
+            return {
+              ...run,
+              target,
+              goalStatus: loadGoalStatus(run.goalStatus, target),
+              groupId: loadGroupId(run.groupId, target),
+              runOn: run.runOn ?? "maus",
+              attachments: loadAttachments(run.attachments),
+              sourceThreadId: persistedSourceThreadId.parse(run.sourceThreadId),
+            };
+          })
         : [];
       this.routineRequestReceipts = Array.isArray(disk.routineRequestReceipts)
         ? disk.routineRequestReceipts.filter((receipt): receipt is RoutineRequestReceipt =>
@@ -274,10 +451,11 @@ export class RoutineManager {
     for (const run of this.runs) {
       if (run.status === "running" || run.status === "waiting") {
         run.status = "failed";
+        if (run.target === "room-goal") run.goalStatus = "failed";
         run.error = "OpenMausBot restarted while this routine was running";
         run.attention = undefined;
         run.finishedAt = this.now();
-        recovered.push({ ...run });
+        recovered.push(cloneRun(run));
       }
     }
     if (recovered.length > 0) {
@@ -290,21 +468,32 @@ export class RoutineManager {
   }
 
   listRoutines(): Routine[] {
-    return this.routines.map((r) => ({ ...r, schedule: { ...r.schedule } }));
+    return this.routines.map(cloneRoutine);
   }
 
   listRuns(from?: number, to?: number): RoutineRun[] {
     return this.runs
       .filter((r) => (from == null || r.scheduledFor >= from) && (to == null || r.scheduledFor <= to))
       .sort((a, b) => b.scheduledFor - a.scheduledFor)
-      .map((r) => ({ ...r }));
+      .map(cloneRun);
   }
 
   activeRunForBot(botId: string): RoutineRun | null {
     const run = this.runs.find(
       (candidate) => candidate.botId === botId && ["running", "waiting"].includes(candidate.status),
     );
-    return run ? { ...run } : null;
+    return run ? cloneRun(run) : null;
+  }
+
+  /** Active work that owns the bot's direct conversation. Room goals may use
+   * the same bot as their coordinator, but execute in a separate room task. */
+  activeBotRunForBot(botId: string): RoutineRun | null {
+    const run = this.runs.find(
+      (candidate) => candidate.target === "bot" &&
+        candidate.botId === botId &&
+        ["running", "waiting"].includes(candidate.status),
+    );
+    return run ? cloneRun(run) : null;
   }
 
   routineRequestReceipt(requestId: string): RoutineRequestReceipt | null {
@@ -372,12 +561,12 @@ export class RoutineManager {
       const receipt = this.matchingRoutineRequestReceipt(request);
       if (receipt) {
         const committed = this.routines.find((routine) => routine.id === receipt.resultId);
-        if (committed) return { ...committed, schedule: { ...committed.schedule } };
+        if (committed) return cloneRoutine(committed);
         throw new Error("This routine request was already applied");
       }
     }
     const clean = sanitizeInput(input);
-    if (this.options.botState(clean.botId) === "missing") throw new Error("That bot no longer exists");
+    if (this.targetState(clean) === "missing") throw new Error(this.missingTargetMessage(clean.target));
     const at = this.now();
     const routine: Routine = {
       id: randomUUID(),
@@ -394,7 +583,7 @@ export class RoutineManager {
       if (request) this.rememberRoutineRequest(request, routine.id, at);
     });
     this.emitRoutine(routine);
-    return { ...routine, schedule: { ...routine.schedule } };
+    return cloneRoutine(routine);
   }
 
   update(
@@ -406,7 +595,7 @@ export class RoutineManager {
       const receipt = this.matchingRoutineRequestReceipt(request);
       if (receipt) {
         const committed = this.routines.find((routine) => routine.id === receipt.resultId);
-        return committed ? { ...committed, schedule: { ...committed.schedule } } : null;
+        return committed ? cloneRoutine(committed) : null;
       }
     }
     const routine = this.routines.find((r) => r.id === id);
@@ -415,13 +604,16 @@ export class RoutineManager {
     const clean = sanitizeInput({
       name: patch.name ?? routine.name,
       prompt: patch.prompt ?? routine.prompt,
+      target: patch.target ?? routine.target,
       botId: patch.botId ?? routine.botId,
+      groupId: Object.hasOwn(patch, "groupId") ? patch.groupId : routine.groupId,
       runOn: patch.runOn ?? routine.runOn,
       enabled: patch.enabled ?? routine.enabled,
       schedule: patch.schedule ?? routine.schedule,
       durationMinutes: patch.durationMinutes ?? routine.durationMinutes,
+      attachments: patch.attachments ?? routine.attachments,
     });
-    if (this.options.botState(clean.botId) === "missing") throw new Error("That bot no longer exists");
+    if (this.targetState(clean) === "missing") throw new Error(this.missingTargetMessage(clean.target));
     const cancelledRuns: RoutineRun[] = [];
     this.commitMutation(() => {
       Object.assign(routine, clean, {
@@ -444,7 +636,7 @@ export class RoutineManager {
     });
     for (const run of cancelledRuns) this.emitRun(run);
     this.emitRoutine(routine);
-    return { ...routine, schedule: { ...routine.schedule } };
+    return cloneRoutine(routine);
   }
 
   remove(id: string, request?: RoutineRequestCommitFor<"delete">): boolean {
@@ -486,11 +678,48 @@ export class RoutineManager {
     for (const run of this.runs) {
       if (run.botId !== botId || !["queued", "running", "waiting"].includes(run.status)) continue;
       run.status = "cancelled";
+      if (run.target === "room-goal") run.goalStatus = "stopped";
       run.attention = undefined;
       run.finishedAt = this.now();
       run.error = "The assigned bot was deleted";
       this.emitRun(run);
-      if (run.threadId) void this.options.interruptTurn?.(run.botId, run.threadId, run.runOn ?? "maus").catch(() => {});
+      if (run.threadId) {
+        if (run.target === "room-goal" && run.groupId) {
+          void this.options.interruptGoal?.(run.groupId, run.threadId).catch(() => {});
+        } else {
+          void this.options.interruptTurn?.(run.botId, run.threadId, run.runOn ?? "maus").catch(() => {});
+        }
+      }
+      changed = true;
+    }
+    if (changed) this.save();
+  }
+
+  disableForGroup(groupId: string) {
+    let changed = false;
+    for (const routine of this.routines) {
+      if (routine.target !== "room-goal" || routine.groupId !== groupId || !routine.enabled) continue;
+      routine.enabled = false;
+      routine.nextRunAt = null;
+      routine.updatedAt = Math.max(this.now(), routine.updatedAt + 1);
+      this.emitRoutine(routine);
+      changed = true;
+    }
+    for (const run of this.runs) {
+      if (
+        run.target !== "room-goal" ||
+        run.groupId !== groupId ||
+        !["queued", "running", "waiting"].includes(run.status)
+      ) continue;
+      run.status = "cancelled";
+      run.goalStatus = "stopped";
+      run.attention = undefined;
+      run.finishedAt = this.now();
+      run.error = "The assigned room was deleted";
+      this.emitRun(run);
+      if (run.threadId) {
+        void this.options.interruptGoal?.(groupId, run.threadId).catch(() => {});
+      }
       changed = true;
     }
     if (changed) this.save();
@@ -501,7 +730,7 @@ export class RoutineManager {
       const receipt = this.matchingRoutineRequestReceipt(request);
       if (receipt) {
         const committed = this.runs.find((run) => run.id === receipt.resultId);
-        return committed ? { ...committed } : null;
+        return committed ? cloneRun(committed) : null;
       }
     }
     const routine = this.routines.find((r) => r.id === id);
@@ -516,7 +745,7 @@ export class RoutineManager {
     });
     this.emitRun(run);
     queueMicrotask(() => void this.tick());
-    return { ...run };
+    return cloneRun(run);
   }
 
   /** Queue an event-driven job without inventing a calendar schedule. Webhook
@@ -540,6 +769,7 @@ export class RoutineManager {
       routineId: input.webhookId,
       routineName: input.webhookName,
       prompt: input.prompt,
+      target: "bot",
       botId: input.botId,
       runOn: input.runOn,
       scheduledFor: input.receivedAt,
@@ -548,6 +778,7 @@ export class RoutineManager {
       triggerSource: "webhook",
       webhookId: input.webhookId,
       deliveryId: input.deliveryId,
+      attachments: [],
       createdAt: this.now(),
     };
     this.runs.push(run);
@@ -555,7 +786,7 @@ export class RoutineManager {
     this.save();
     this.emitRun(run);
     queueMicrotask(() => void this.tick());
-    return { ...run };
+    return cloneRun(run);
   }
 
   activeWebhookRunCount(webhookId: string): number {
@@ -582,13 +813,20 @@ export class RoutineManager {
     const run = this.runs.find((r) => r.id === id);
     if (!run || !["queued", "running", "waiting"].includes(run.status)) return null;
     run.status = "cancelled";
+    if (run.target === "room-goal") run.goalStatus = "stopped";
     run.attention = undefined;
     run.finishedAt = this.now();
     this.save();
     this.emitRun(run);
-    if (run.threadId) await this.options.interruptTurn?.(run.botId, run.threadId, run.runOn ?? "maus").catch(() => {});
+    if (run.threadId) {
+      if (run.target === "room-goal" && run.groupId) {
+        await this.options.interruptGoal?.(run.groupId, run.threadId).catch(() => {});
+      } else {
+        await this.options.interruptTurn?.(run.botId, run.threadId, run.runOn ?? "maus").catch(() => {});
+      }
+    }
     queueMicrotask(() => void this.tick());
-    return { ...run };
+    return cloneRun(run);
   }
 
   markSeen(id: string): RoutineRun | null {
@@ -599,7 +837,7 @@ export class RoutineManager {
       this.save();
       this.emitRun(run);
     }
-    return { ...run };
+    return cloneRun(run);
   }
 
   start() {
@@ -631,7 +869,7 @@ export class RoutineManager {
           missed.finishedAt = now;
           missed.error = "This computer was offline for more than 12 hours after the scheduled time";
           this.emitRun(missed);
-          missedRuns.push({ ...missed });
+          missedRuns.push(cloneRun(missed));
         } else {
           const run = this.newRun(routine, scheduledFor, false);
           this.emitRun(run);
@@ -648,17 +886,23 @@ export class RoutineManager {
 
       for (const run of [...this.runs].reverse()) {
         if (run.status !== "queued") continue;
-        const state = this.options.botState(run.botId);
+        const state = this.targetState(run);
         if (state === "busy") continue;
         if (state === "missing") {
-          this.failRun(run, "The assigned bot no longer exists");
+          this.failRun(run, this.missingTargetMessage(run.target));
           continue;
         }
         // A webhook is an incoming message, so make its task the bot's live
         // chat immediately. Scheduled work remains detached and unobtrusive.
-        const task = this.options.createTask(run.botId, run.routineName, run.triggerSource === "webhook");
+        const task = run.target === "room-goal"
+          ? run.groupId
+            ? this.options.createGoalTask?.(run.groupId, run.routineName) ?? null
+            : null
+          : this.options.createTask(run.botId, run.routineName, run.triggerSource === "webhook");
         if (!task) {
-          this.failRun(run, "Could not create a task for this run");
+          this.failRun(run, run.target === "room-goal"
+            ? "Could not create a room task for this goal"
+            : "Could not create a task for this run");
           continue;
         }
         run.threadId = task.threadId;
@@ -673,14 +917,29 @@ export class RoutineManager {
             continue;
           }
           const triggerSource = run.triggerSource ?? (run.manual ? "manual" : "schedule");
-          await this.options.startTurn(
-            run.botId,
-            task.threadId,
-            prompt,
-            run.runOn ?? "maus",
-            triggerSource,
-            (message) => this.failThread(task.threadId, message),
-          );
+          if (run.target === "room-goal") {
+            if (!run.groupId || !this.options.startGoal) {
+              this.failThread(task.threadId, "Room goal routines are unavailable");
+              continue;
+            }
+            await this.options.startGoal(
+              run.groupId,
+              task.threadId,
+              prompt,
+              run.botId,
+              run.id,
+              (message) => this.failThread(task.threadId, message),
+            );
+          } else {
+            await this.options.startTurn(
+              run.botId,
+              task.threadId,
+              composeExecutionPrompt(prompt, run.attachments),
+              run.runOn ?? "maus",
+              triggerSource,
+              (message) => this.failThread(task.threadId, message),
+            );
+          }
         } catch (error) {
           this.failThread(task.threadId, error instanceof Error ? error.message : String(error));
         }
@@ -693,6 +952,14 @@ export class RoutineManager {
   handleRuntimeEvent(event: RuntimeEvent): RoutineRun | null {
     const run = this.runs.find((r) => r.threadId === event.threadId && ["running", "waiting"].includes(r.status));
     if (!run) return null;
+    // A room goal contains several provider turns. Its orchestrator owns the
+    // terminal decision and reports it through finishGoalRun; one member's
+    // completion and private coordinator envelope are only intermediate
+    // protocol, never the routine receipt's result.
+    if (
+      run.target === "room-goal" &&
+      (event.type === "turn.completed" || (event.type === "item.completed" && event.itemType === "assistant_text"))
+    ) return null;
     if (event.type === "request.opened") {
       run.status = "waiting";
       run.attention = redactSecretsInText(event.summary).trim().slice(0, 500) || undefined;
@@ -713,7 +980,7 @@ export class RoutineManager {
       if (!event.ok) {
         this.failRun(run, event.stopReason ?? run.error ?? "The bot did not complete this run");
         queueMicrotask(() => void this.tick());
-        return { ...run };
+        return cloneRun(run);
       }
       run.status = "completed";
       run.attention = undefined;
@@ -725,7 +992,7 @@ export class RoutineManager {
     this.save();
     this.emitRun(run);
     if (event.type === "turn.completed") queueMicrotask(() => void this.tick());
-    return { ...run };
+    return cloneRun(run);
   }
 
   failThread(threadId: string, message: string) {
@@ -735,6 +1002,44 @@ export class RoutineManager {
     queueMicrotask(() => void this.tick());
   }
 
+  finishGoalRun(runId: string, status: GroupGoalRunStatus, detail: string): RoutineRun | null {
+    const run = this.runs.find(
+      (candidate) => candidate.id === runId &&
+        candidate.target === "room-goal" &&
+        ["running", "waiting"].includes(candidate.status),
+    );
+    if (!run || status === "working") return null;
+    const safeDetail = redactSecretsInText(detail).trim();
+    run.goalStatus = status;
+    // Only a completed goal is a completed run. A team asking the human a
+    // question is still waiting on them, and a blocked or turn-capped goal
+    // did not finish — reporting either as "completed" would silence the
+    // one outcome that most needs a person's attention.
+    if (status === "failed" || status === "blocked" || status === "limit-reached") {
+      this.failRun(
+        run,
+        safeDetail ||
+          (status === "limit-reached" ? "The room goal reached its turn limit" : "The room goal is blocked"),
+      );
+    } else if (status === "needs-input" || status === "paused") {
+      run.status = "waiting";
+      run.attention = safeDetail.slice(0, 500) || (status === "paused" ? "The room goal is paused" : "The team needs your input");
+      run.error = undefined;
+      this.save();
+      this.emitRun(run);
+    } else {
+      run.status = status === "stopped" ? "cancelled" : "completed";
+      run.attention = undefined;
+      run.finishedAt = this.now();
+      run.error = undefined;
+      if (status !== "stopped") run.output = safeDetail.slice(0, 2_000) || undefined;
+      this.save();
+      this.emitRun(run);
+    }
+    queueMicrotask(() => void this.tick());
+    return cloneRun(run);
+  }
+
   private failRun(run: RoutineRun, message: string) {
     run.status = "failed";
     run.attention = undefined;
@@ -742,7 +1047,21 @@ export class RoutineManager {
     run.finishedAt = this.now();
     this.save();
     this.emitRun(run);
-    this.options.onRunFailed?.({ ...run });
+    this.options.onRunFailed?.(cloneRun(run));
+  }
+
+  private targetState(target: Pick<RoutineRun, "target" | "groupId" | "botId">): "ready" | "busy" | "missing" {
+    if (target.target === "room-goal") {
+      if (!target.groupId || !this.options.goalState) return "missing";
+      return this.options.goalState(target.groupId, target.botId);
+    }
+    return this.options.botState(target.botId);
+  }
+
+  private missingTargetMessage(target: RoutineTarget): string {
+    return target === "room-goal"
+      ? "The assigned room or coordinator no longer exists"
+      : "The assigned bot no longer exists";
   }
 
   private initialOccurrence(schedule: RoutineSchedule, now: number): number | null {
@@ -763,6 +1082,9 @@ export class RoutineManager {
       routineName: routine.name,
       prompt: routine.prompt,
       durationMinutes: routine.durationMinutes,
+      attachments: cloneAttachments(routine.attachments),
+      target: routine.target,
+      groupId: routine.groupId,
       botId: routine.botId,
       runOn: routine.runOn ?? "maus",
       scheduledFor,
@@ -778,17 +1100,17 @@ export class RoutineManager {
   }
 
   private emitRoutine(routine: Routine) {
-    this.options.emit?.({ kind: "routine", routine: { ...routine, schedule: { ...routine.schedule } } });
+    this.options.emit?.({ kind: "routine", routine: cloneRoutine(routine) });
   }
 
   private emitRun(run: RoutineRun) {
-    this.options.emit?.({ kind: "routine.run", run: { ...run } });
+    this.options.emit?.({ kind: "routine.run", run: cloneRun(run) });
     this.notifyRunChanged(run);
   }
 
   private notifyRunChanged(run: RoutineRun) {
     try {
-      this.options.onRunChanged?.({ ...run });
+      this.options.onRunChanged?.(cloneRun(run));
     } catch (error) {
       // Reporting is secondary to scheduler truth. A transcript write must
       // never strand the run in memory or prevent the next tick.
@@ -833,8 +1155,8 @@ export class RoutineManager {
    */
   private commitMutation(mutate: () => void): void {
     const before = {
-      routines: this.routines.map((routine) => ({ ...routine, schedule: { ...routine.schedule } })),
-      runs: this.runs.map((run) => ({ ...run, denials: run.denials ? [...run.denials] : undefined })),
+      routines: this.routines.map(cloneRoutine),
+      runs: this.runs.map(cloneRun),
       receipts: this.routineRequestReceipts.map((receipt) => ({ ...receipt })),
     };
     try {
@@ -850,13 +1172,11 @@ export class RoutineManager {
 
   private save() {
     mkdirSync(dirname(this.file), { recursive: true });
-    const temp = `${this.file}.tmp`;
-    writeFileSync(temp, JSON.stringify({
+    writeFileAtomic(this.file, JSON.stringify({
       version: 1,
       routines: this.routines,
       runs: this.runs,
       routineRequestReceipts: this.routineRequestReceipts,
-    } satisfies RoutineFile, null, 2));
-    renameSync(temp, this.file);
+    } satisfies RoutineFile, null, 2), { mode: 0o600 });
   }
 }

@@ -59,10 +59,37 @@ final class AnimatedImageTests: XCTestCase {
         XCTAssertEqual(decoded.duration, decoded.tick * Double(decoded.frames.count), accuracy: 0.001)
     }
 
+    func testFramesAreDecodedWithinTheAvatarPixelBudget() throws {
+        let decoded = try XCTUnwrap(AnimatedImageDecoder.decode(
+            gif(delays: [0.1, 0.1], width: 1_024, height: 512)
+        ))
+
+        for frame in decoded.frames {
+            XCTAssertLessThanOrEqual(frame.width, AnimatedImageDecoder.maximumFramePixelSize)
+            XCTAssertLessThanOrEqual(frame.height, AnimatedImageDecoder.maximumFramePixelSize)
+        }
+        XCTAssertEqual(decoded.frames.first?.width, AnimatedImageDecoder.maximumFramePixelSize)
+        XCTAssertEqual(decoded.frames.first?.height, AnimatedImageDecoder.maximumFramePixelSize / 2)
+    }
+
+    func testFrameOrientationIsNormalizedWhileDownsampling() throws {
+        let decoded = try XCTUnwrap(AnimatedImageDecoder.decode(
+            gif(delays: [0.1, 0.1], width: 4, height: 2, orientation: 6)
+        ))
+
+        XCTAssertEqual(decoded.frames.first?.width, 2)
+        XCTAssertEqual(decoded.frames.first?.height, 4)
+    }
+
     // MARK: - fixture
 
-    /// One 2x2 GIF per delay, each a different shade so frames are distinct.
-    private func gif(delays: [TimeInterval]) -> Data {
+    /// One synthetic GIF per delay, each a different shade so frames are distinct.
+    private func gif(
+        delays: [TimeInterval],
+        width: Int = 2,
+        height: Int = 2,
+        orientation: Int? = nil
+    ) -> Data {
         let data = NSMutableData()
         guard let destination = CGImageDestinationCreateWithData(
             data, UTType.gif.identifier as CFString, delays.count, nil
@@ -76,30 +103,36 @@ final class AnimatedImageTests: XCTestCase {
         ] as CFDictionary)
 
         for (index, delay) in delays.enumerated() {
-            guard let frame = swatch(level: UInt8(truncatingIfNeeded: index * 60)) else {
+            guard let frame = swatch(
+                level: UInt8(truncatingIfNeeded: index * 60),
+                width: width,
+                height: height
+            ) else {
                 XCTFail("could not build a frame")
                 return Data()
             }
-            CGImageDestinationAddImage(destination, frame, [
+            var properties: [CFString: Any] = [
                 kCGImagePropertyGIFDictionary: [kCGImagePropertyGIFUnclampedDelayTime: delay],
-            ] as CFDictionary)
+            ]
+            if let orientation { properties[kCGImagePropertyOrientation] = orientation }
+            CGImageDestinationAddImage(destination, frame, properties as CFDictionary)
         }
 
         XCTAssertTrue(CGImageDestinationFinalize(destination))
         return data as Data
     }
 
-    private func swatch(level: UInt8) -> CGImage? {
-        var pixels = [UInt8](repeating: level, count: 2 * 2 * 4)
+    private func swatch(level: UInt8, width: Int, height: Int) -> CGImage? {
+        var pixels = [UInt8](repeating: level, count: width * height * 4)
         for index in stride(from: 3, to: pixels.count, by: 4) { pixels[index] = 255 }
 
         return pixels.withUnsafeMutableBytes { raw -> CGImage? in
             guard let context = CGContext(
                 data: raw.baseAddress,
-                width: 2,
-                height: 2,
+                width: width,
+                height: height,
                 bitsPerComponent: 8,
-                bytesPerRow: 2 * 4,
+                bytesPerRow: width * 4,
                 space: CGColorSpaceCreateDeviceRGB(),
                 bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue
             ) else { return nil }

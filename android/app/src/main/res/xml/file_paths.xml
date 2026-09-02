@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="utf-8"?>
+<paths>
+    <!--
+      Only the one directory transcripts are exported into, and only inside the
+      app's cache — nothing else the app stores is reachable through the
+      provider. TranscriptSharing empties it before each write, so at most the
+      most recent export is on disk.
+    -->
+    <cache-path
+        name="shared-transcripts"
+        path="shared-transcripts/" />
+</paths>
