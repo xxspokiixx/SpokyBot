@@ -212,12 +212,12 @@ export class AntigravityAcpClient {
     });
   }
 
-  async initialize(): Promise<any> {
+  async initialize(timeoutMs = 30_000): Promise<any> {
     return this.request("initialize", {
       protocolVersion: 1,
       clientInfo: { name: "openmausbot", version: "0.0.0" },
       clientCapabilities: { fs: { readTextFile: false, writeTextFile: false }, terminal: false },
-    });
+    }, timeoutMs);
   }
 
   close() {
@@ -340,12 +340,23 @@ export async function probeAntigravityModels(input: {
   profile: AntigravityProfile;
   cwd?: string;
   fallbackDefault: string;
+  timeoutMs?: number;
 }): Promise<ModelCatalog> {
+  const deadline = Date.now() + (input.timeoutMs ?? 5_000);
+  const remaining = () => {
+    const milliseconds = deadline - Date.now();
+    if (milliseconds <= 0) throw new Error("Antigravity model discovery timed out.");
+    return milliseconds;
+  };
   const client = new AntigravityAcpClient(input.runtime, input.profile, input.cwd ?? input.profile.directory);
   try {
-    await client.initialize();
-    await client.request("authenticate", { methodId: "oauth-personal" }, 30_000);
-    const session = await client.request("session/new", { cwd: input.cwd ?? input.profile.directory, mcpServers: [] }, 30_000);
+    await client.initialize(remaining());
+    await client.request("authenticate", { methodId: "oauth-personal" }, remaining());
+    const session = await client.request(
+      "session/new",
+      { cwd: input.cwd ?? input.profile.directory, mcpServers: [] },
+      remaining(),
+    );
     const catalog = catalogFromAntigravityConfigOptions(session?.configOptions, input.fallbackDefault);
     if (!catalog) throw new Error("Antigravity did not return a model catalog for this Google account.");
     return catalog;

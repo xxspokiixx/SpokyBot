@@ -131,6 +131,20 @@ export function ModelPicker({
   const railInstance =
     state.instances.find((instance) => instance.instanceId === (railId ?? selection.instanceId)) ?? state.instances[0];
 
+  const refreshLocalInstances = useCallback(() => {
+    if (refreshingRef.current) return;
+    refreshingRef.current = true;
+    setRefreshing(true);
+    void refreshInstances()
+      .catch(() => {
+        // Keep the last known catalog when the app is temporarily offline.
+      })
+      .finally(() => {
+        refreshingRef.current = false;
+        setRefreshing(false);
+      });
+  }, [refreshInstances]);
+
   const refreshModels = useCallback(() => {
     if (refreshingRef.current) return;
     refreshingRef.current = true;
@@ -148,8 +162,8 @@ export function ModelPicker({
   }, [railId, refreshInstanceModels, refreshInstances, selection.instanceId]);
 
   useEffect(() => {
-    if (open) refreshModels();
-  }, [open, refreshModels]);
+    if (open) refreshLocalInstances();
+  }, [open, refreshLocalInstances]);
 
   useEffect(() => {
     if (!open) return;

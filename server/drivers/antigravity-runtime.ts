@@ -358,10 +358,17 @@ async function installOnce(options: AntigravityInstallOptions): Promise<Antigrav
       try {
         for await (const raw of response.body as unknown as AsyncIterable<Uint8Array>) {
           const chunk = Buffer.from(raw);
-          downloaded += chunk.length;
-          if (downloaded > asset.archiveBytes) throw new Error("The Antigravity download exceeded its pinned size.");
+          if (downloaded + chunk.length > asset.archiveBytes) {
+            throw new Error("The Antigravity download exceeded its pinned size.");
+          }
+          let offset = 0;
+          while (offset < chunk.length) {
+            const { bytesWritten } = await handle.write(chunk, offset, chunk.length - offset, null);
+            if (bytesWritten <= 0) throw new Error("The Antigravity download could not be written completely.");
+            offset += bytesWritten;
+          }
           hash.update(chunk);
-          await handle.write(chunk);
+          downloaded += chunk.length;
         }
       } finally {
         await handle.close();

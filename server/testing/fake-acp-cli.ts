@@ -7,7 +7,7 @@
 //
 //   FAKE_ACP_LOAD_NULL  return null for session/load so the resume cursor is
 //                       ignored and the driver falls through to session/new
-//   FAKE_ACP_MODE   happy (default) | image | empty-reply | exit-early | fail-after-text | hang | no-auth | auth-required | permission | question
+//   FAKE_ACP_MODE   happy (default) | image | empty-reply | exit-early | fail-after-text | hang | hang-initialize | no-auth | auth-required | permission | question
 //                   | interleave (message → tool → message → tool → message)
 //                   | no-session-config (reject session/set_mode + set_model
 //                     with -32601, i.e. an agent predating those methods)
@@ -314,6 +314,10 @@ function handle(msg: any) {
 
   switch (msg.method) {
     case "initialize": {
+      if (mode === "hang-initialize") {
+        setInterval(() => {}, 1_000);
+        return;
+      }
       if (mode === "exit-early") {
         process.stderr.write("fake-acp: simulated crash before result\n");
         process.exit(3);
@@ -417,7 +421,7 @@ function handle(msg: any) {
         if (process.env.FAKE_ACP_DUMP) {
           writeFileSync(`${process.env.FAKE_ACP_DUMP}.config.json`, JSON.stringify(configCalls, null, 2));
         }
-        result(msg.id, { configOptions: configOptions() });
+        result(msg.id, process.env.FAKE_ACP_EMPTY_MODE_ACK ? {} : { configOptions: configOptions() });
         break;
       }
       if (configId !== "model" || !models.includes(value)) {

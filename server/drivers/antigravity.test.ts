@@ -7,12 +7,14 @@ import { afterEach, describe, expect, it } from "vitest";
 import { ensureDirs } from "../config.ts";
 import type { ProviderInstance } from "../contracts.ts";
 import { recordEvents, type EventRecorder } from "../testing/events.ts";
+import { removeTempDir } from "../testing/cleanup.ts";
 import {
   ANTIGRAVITY_AUTH_STDOUT_PREFIX,
   antigravityProfileDirectory,
   catalogFromAntigravityConfigOptions,
   parseAntigravityAuthorizationUrl,
   prepareAntigravityProfile,
+  probeAntigravityModels,
   validateAntigravityCallbackUrl,
 } from "./antigravity-acp.ts";
 import { resolveAntigravityReleaseAsset, type AntigravityReleaseAsset } from "./antigravity-release.ts";
@@ -46,7 +48,7 @@ afterEach(async () => {
   delete process.env.FAKE_ACP_MODELS;
   delete process.env.FAKE_ACP_MODES;
   delete process.env.FAKE_ACP_DUMP;
-  while (scratch.length) rmSync(scratch.pop()!, { recursive: true, force: true });
+  while (scratch.length) await removeTempDir(scratch.pop()!);
 });
 
 describe("official Antigravity catalog", () => {
@@ -159,6 +161,24 @@ describe("official Antigravity runtime", () => {
     expect(first.environment.GEMINI_HOME).toBe(first.directory);
     expect(first.environment.ANTIGRAVITY_HARNESS_PATH).toBe(fake.harness);
   });
+
+  it("bounds model discovery with one deadline", async () => {
+    const fake = fakeRuntime();
+    const runtime = await resolveAntigravityRuntime(fake.executable);
+    const profile = await prepareAntigravityProfile({
+      instanceId: "slow-models",
+      runtime,
+      baseEnv: { ...process.env, FAKE_ACP_MODE: "hang-initialize" },
+    });
+    const started = Date.now();
+    await expect(probeAntigravityModels({
+      runtime,
+      profile,
+      fallbackDefault: STATIC_ANTIGRAVITY_MODELS.default,
+      timeoutMs: 100,
+    })).rejects.toThrow(/timed out/u);
+    expect(Date.now() - started).toBeLessThan(1_000);
+  });
 });
 
 describe("Antigravity OAuth validation", () => {
@@ -214,6 +234,8 @@ describe("Antigravity driver over shared ACP", () => {
       instanceId,
       displayName: "Antigravity Work",
       environment: {
+        GEMINI_API_KEY: "must-not-leak",
+        GOOGLE_API_KEY: "also-must-not-leak",
         FAKE_ACP_AUTH_METHOD: "oauth-personal",
         FAKE_ACP_MODELS: "gemini-3.8-flash-high,gemini-3.8-flash-low",
         FAKE_ACP_MODES: "default,yolo",
@@ -239,6 +261,8 @@ describe("Antigravity driver over shared ACP", () => {
     const dumpState = JSON.parse(readFileSync(dump, "utf8"));
     expect(dumpState.argv).toEqual(process.platform === "linux" ? ["--uid="] : []);
     expect(dumpState.env.GEMINI_HOME).toBe(antigravityProfileDirectory(instanceId));
+    expect(dumpState.env.GEMINI_API_KEY).toBeUndefined();
+    expect(dumpState.env.GOOGLE_API_KEY).toBeUndefined();
     const calls = JSON.parse(readFileSync(`${dump}.config.json`, "utf8"));
     expect(calls).toEqual([
       { method: "session/set_config_option", params: { sessionId: "fake-acp-session", configId: "model", value: "gemini-3.8-flash-low" } },
@@ -246,6 +270,39 @@ describe("Antigravity driver over shared ACP", () => {
     ]);
     const mcp = JSON.parse(readFileSync(`${dump}.mcp.json`, "utf8"));
     expect(mcp).toEqual([{ name: "docs", command: "docs-mcp", args: ["serve"], env: [{ name: "TOKEN", value: "scoped" }] }]);
+  });
+
+  it("fails closed when Antigravity does not confirm its permission mode", async () => {
+    ensureDirs();
+    const fake = fakeRuntime();
+    const instanceId = "antigravity-unconfirmed-mode";
+    const tokenDirectory = join(antigravityProfileDirectory(instanceId), "antigravity-acp");
+    mkdirSync(tokenDirectory, { recursive: true });
+    writeFileSync(join(tokenDirectory, "acp_token.json"), "{}", { mode: 0o600 });
+    instance = await AntigravityDriver.create({
+      instanceId,
+      displayName: undefined,
+      environment: {
+        FAKE_ACP_AUTH_METHOD: "oauth-personal",
+        FAKE_ACP_MODELS: "gemini-3.8-flash-high",
+        FAKE_ACP_MODES: "default,yolo",
+        FAKE_ACP_EMPTY_MODE_ACK: "1",
+      },
+      enabled: true,
+      config: { cli: fake.executable, fullAuto: true },
+    });
+    recorder = recordEvents(instance.adapter);
+    const { turnId } = await instance.adapter.sendTurn({
+      threadId: "thread-unconfirmed-mode",
+      text: "hello",
+      cwd: fake.directory,
+    });
+    expect(await recorder.until((event) => event.type === "turn.completed" && event.turnId === turnId)).toMatchObject({
+      ok: false,
+    });
+    expect(recorder.events.some(
+      (event) => event.type === "runtime.error" && /did not apply yolo permission mode/u.test(event.message),
+    )).toBe(true);
   });
 
   it("keeps Antigravity questions interactive even in full-auto mode", async () => {

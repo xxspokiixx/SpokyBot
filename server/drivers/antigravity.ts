@@ -128,7 +128,7 @@ const support: AcpSupport = {
     });
     const mode = Array.isArray(result?.configOptions)
       ? result.configOptions.find((option: any) => option?.id === "mode")?.currentValue
-      : wanted;
+      : undefined;
     if (mode !== wanted) throw new Error(`Antigravity did not apply ${wanted} permission mode.`);
   },
 };

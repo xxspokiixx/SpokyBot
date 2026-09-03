@@ -415,7 +415,6 @@ export function createAcpDriver(support: AcpSupport): ProviderDriver<AcpConfig> 
           launch = support.resolveCommand
             ? await support.resolveCommand(env, config, instanceId)
             : { command: config.cli };
-          Object.assign(env, launch.env ?? {});
         } catch (error) {
           emit({ ...base(threadId, turnId), type: "turn.started" });
           emit({
@@ -430,7 +429,7 @@ export function createAcpDriver(support: AcpSupport): ProviderDriver<AcpConfig> 
 
         const child = spawnCli(launch.command, [...(launch.args ?? []), ...support.spawnArgs(config, cliTurn)], {
           cwd,
-          env,
+          env: launch.env ?? env,
           stdio: ["pipe", "pipe", "pipe"],
         });
 
