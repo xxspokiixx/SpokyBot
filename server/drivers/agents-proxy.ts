@@ -294,7 +294,7 @@ const TOOLS = [
   {
     name: "request_credential",
     description:
-      "Ask the user for a supported API key through OpenMausBot's secure credential card. Use this instead of asking them to paste a secret into chat. The secret is saved by the desktop app and is never returned to you. After calling this tool, end the turn; OpenMausBot resumes the task after the user saves or declines.",
+      "Ask the user for a supported API key through OpenMausBot's secure credential flow. On desktop this shows a secure entry card; on mobile it only shows a handoff telling the user to open the conversation on their computer, because credentials cannot be entered from the mobile app. Never claim a secure field opened on mobile, and never ask the user to paste a secret into chat. The secret is saved by the desktop app and is never returned to you. After calling this tool, end the turn; OpenMausBot resumes the task after the user saves or declines.",
     inputSchema: {
       type: "object",
       properties: {
@@ -611,7 +611,7 @@ async function callTool(name: string, args: Json): Promise<{ text: string; isErr
       return { text: `${r.label ?? CREDENTIAL_TARGETS[credentialId].label} is already configured. Continue the task.` };
     }
     return {
-      text: `A secure ${r.label ?? CREDENTIAL_TARGETS[credentialId].label} card is now visible to the user. End this turn; OpenMausBot will resume the task after they save or decline. Never ask them to paste the key into chat.`,
+      text: `A secure ${r.label ?? CREDENTIAL_TARGETS[credentialId].label} request is ready. The desktop app shows its secure entry card; the mobile app only shows a handoff to open this conversation on the computer and does not accept the credential. End this turn; OpenMausBot will resume the task after the user saves or declines. Do not claim a secure field opened on mobile, and never ask them to paste the key into chat.`,
     };
   }
   if (name === "list_routines") {

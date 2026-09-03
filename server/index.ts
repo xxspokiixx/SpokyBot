@@ -3308,7 +3308,7 @@ async function startTurn(
           ? "You can work with the other bots in your section through the agents tools. list_bots shows who's available. Use delegate_bot for assigned or independent work so you remain available; use ask_bot only for a short consultation whose reply is required in your current answer."
           : "";
       const credentialPrompt = integrations.agents
-        ? " If a supported API key is missing, use request_credential to show the secure in-app card. Never ask the user to paste credentials into chat."
+        ? " If a supported API key is missing, use request_credential to create a secure credential request. The desktop app shows the entry card; the mobile app only shows a handoff to the computer and never accepts the credential. Never claim a secure field opened on mobile, and never ask the user to paste credentials into chat."
         : "";
       const routinePrompt = integrations.agents
         ? " If the user explicitly asks to list or review, schedule, run, or change routines, use list_routines and propose_routine or propose_routine_action. A proposal is not applied until the user confirms its in-app card, so never claim the action completed before that confirmation."
@@ -4175,7 +4175,7 @@ async function runGroupMemberTurn(
     group.bulletin.trim() && `Room bulletin (shared instructions for everyone):\n${group.bulletin.trim()}`,
     `Reply as yourself, briefly and conversationally. To bring a teammate in, mention them like @Name — they'll see the conversation and respond.`,
     integrations.agents &&
-      "If a supported API key is missing, use request_credential to show the secure in-app card. Never ask the user to paste credentials into chat.",
+      "If a supported API key is missing, use request_credential to create a secure credential request. The desktop app shows the entry card; the mobile app only shows a handoff to the computer and never accepts the credential. Never claim a secure field opened on mobile, and never ask the user to paste credentials into chat.",
     integrations.agents &&
       "If the user explicitly asks to list or review, schedule, run, or change routines, use list_routines and propose_routine or propose_routine_action. A proposal is not applied until the user confirms its in-app card, so never claim the action completed before that confirmation.",
     skillAuthoring &&
@@ -5488,6 +5488,10 @@ type SecretResumeEntry = {
 };
 const pendingSecretResumes = new Map<string, SecretResumeEntry>();
 
+function credentialDesktopHandoff(label: string): string {
+  return `Open this conversation in OpenMausBot on your computer to securely enter the ${label}. Credential entry is not available in the mobile app.`;
+}
+
 function secretMessage(botId: string, threadId: string, messageId: string): Message | null {
   if (!connectorThread(botId, threadId)) return null;
   const message = store.messagesFor(threadId).find((candidate) => candidate.id === messageId);
@@ -6460,12 +6464,18 @@ const server = createServer(async (req, res) => {
           isReusableCredentialRequest(message, credentialId, from.id, Boolean(owner.group))
         );
         if (existing) {
+          if (!existing.text?.trim()) {
+            store.patchMessage(fromThreadId, existing.id, {
+              text: credentialDesktopHandoff(target.label),
+            });
+          }
           return json(res, 200, { messageId: existing.id, label: target.label });
         }
         const reason = typeof body.reason === "string" ? body.reason.trim().slice(0, 240) : "";
         const message = store.appendMessage(fromThreadId, {
           role: "bot",
           kind: "secret",
+          text: credentialDesktopHandoff(target.label),
           ...(owner.group ? { from: { botId: from.id, name: from.name, color: from.color } } : {}),
           secret: {
             target: credentialId,

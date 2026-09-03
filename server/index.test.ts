@@ -2599,6 +2599,14 @@ describe("harness HTTP API", () => {
       });
       expect(requested.status).toBe(201);
       const { messageId } = (await requested.json()) as { messageId: string };
+      const directCard = (await api("GET", "/api/bots?messages=20")).body.bots
+        .find((candidate: { id: string }) => candidate.id === bot.id)?.messages
+        .find((message: { id: string }) => message.id === messageId);
+      expect(directCard).toMatchObject({
+        kind: "secret",
+        text: "Open this conversation in OpenMausBot on your computer to securely enter the OpenAI API key. Credential entry is not available in the mobile app.",
+      });
+      expect(directCard).not.toHaveProperty("from");
 
       expect((await api("POST", `/api/bots/${bot.id}/interrupt`)).status).toBe(200);
       expect((await api("PATCH", `/api/bots/${bot.id}`, { computer: "cloud" })).status).toBe(200);
@@ -4576,6 +4584,15 @@ describe("harness HTTP API", () => {
       });
       expect(requested.status).toBe(201);
       const { messageId } = (await requested.json()) as { messageId: string };
+
+      const roomCard = (await api("GET", "/api/bots?messages=20")).body.groups
+        .find((candidate: { id: string }) => candidate.id === room.id)?.messages
+        .find((message: { id: string }) => message.id === messageId);
+      expect(roomCard).toMatchObject({
+        kind: "secret",
+        text: "Open this conversation in OpenMausBot on your computer to securely enter the OpenAI API key. Credential entry is not available in the mobile app.",
+        from: { botId: second.id, name: second.name, color: second.color },
+      });
 
       const resumed = await api("POST", `/api/bots/${second.id}/secret-cards/${messageId}/dismiss`, {
         threadId: room.threadId,

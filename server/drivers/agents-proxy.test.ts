@@ -231,11 +231,14 @@ describe("agents-proxy MCP surface", () => {
     const ask = list.result.tools.find((tool: { name: string }) => tool.name === "ask_bot");
     const delegate = list.result.tools.find((tool: { name: string }) => tool.name === "delegate_bot");
     const wait = list.result.tools.find((tool: { name: string }) => tool.name === "wait_delegation");
+    const credential = list.result.tools.find((tool: { name: string }) => tool.name === "request_credential");
     expect(ask.description).toContain("SYNCHRONOUS consultation");
     expect(ask.description).toContain("Do not use for assigning work");
     expect(delegate.description).toContain("DEFAULT FOR ASSIGNING WORK");
     expect(delegate.description).toContain("delivered automatically");
     expect(wait.description).toContain("Never call it in the same turn as delegate_bot");
+    expect(credential.description).toContain("on mobile it only shows a handoff");
+    expect(credential.description).toContain("Never claim a secure field opened on mobile");
   });
 
   it("publishes a flat routine schedule schema that survives provider conversion", async () => {
@@ -391,7 +394,9 @@ describe("agents-proxy MCP surface", () => {
       credential_id: "opencodeGoApiKey",
       reason: "The selected model needs it.",
     });
-    expect(res.result.content[0].text).toContain("secure OpenCode API key card");
+    expect(res.result.content[0].text).toContain("secure OpenCode API key request");
+    expect(res.result.content[0].text).toContain("mobile app only shows a handoff");
+    expect(res.result.content[0].text).toContain("Do not claim a secure field opened on mobile");
     expect(res.result.content[0].text).toContain("End this turn");
     expect(lastCredentialBody).toEqual({
       fromBotId: "bot-asker",

@@ -1258,6 +1258,12 @@ struct MessageRow: View {
             TextBubble(message: message, chat: chat, tailed: endsRun, openLink: openLink)
         case .options:
             CardView(chat: chat, message: message)
+        case .secret:
+            if let secret = message.secret {
+                CredentialRequestCardView(chat: chat, message: message, secret: secret)
+            } else if let text = message.text, !text.isEmpty {
+                TextBubble(message: message, chat: chat, tailed: endsRun, openLink: openLink)
+            }
         case .activity:
             ActivityChip(tool: message.tool)
         case .screen:
@@ -1471,6 +1477,121 @@ struct ActivityChip: View {
             )
             .padding(.leading, 2)
         }
+    }
+}
+
+/// A host credential is intentionally entered on the computer, where
+/// Electron can commit it through the operating system's encrypted store.
+/// The phone still needs a real row: an invisible blocker makes the bot look
+/// confused and encourages people to paste a key into ordinary chat.
+struct CredentialRequestCardView: View {
+    let chat: Chat
+    let message: Message
+    let secret: SecretRequestCardData
+
+    private var tint: Color { MausPalette.color(message.from?.color ?? chat.color) }
+    private var requester: String { message.from?.name ?? chat.name }
+    private var label: String { visible(secret.label) ?? "API credential" }
+    private var accessibilityStatus: String {
+        if secret.provided == true {
+            return secret.resumed == true ? "Saved securely. The task resumed." : "Saved securely on your computer."
+        }
+        if secret.dismissed == true { return "Not provided." }
+        return "Finish this credential request on your computer."
+    }
+
+    private func visible(_ value: String?) -> String? {
+        let trimmed = value?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        return trimmed.isEmpty ? nil : trimmed
+    }
+
+    private var helpURL: URL? {
+        guard let raw = secret.helpUrl,
+              let url = URL(string: raw),
+              url.scheme?.lowercased() == "https",
+              url.host != nil,
+              url.user == nil,
+              url.password == nil
+        else { return nil }
+        return url
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            HStack(alignment: .top, spacing: 11) {
+                Image(systemName: "key.fill")
+                    .font(.system(size: 17, weight: .semibold))
+                    .foregroundStyle(tint)
+                    .frame(width: 38, height: 38)
+                    .background(tint.opacity(0.13), in: RoundedRectangle(cornerRadius: 11, style: .continuous))
+
+                VStack(alignment: .leading, spacing: 3) {
+                    Text(label)
+                        .font(.system(size: 16, weight: .semibold))
+                    Text("Requested by \(requester)")
+                        .font(.system(size: 12.5))
+                        .foregroundStyle(Color.secondary)
+                }
+                Spacer(minLength: 0)
+            }
+
+            if let description = visible(secret.description) {
+                Text(description)
+                    .font(.system(size: 14.5))
+                    .foregroundStyle(Color.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+
+            if secret.provided == true {
+                Label(
+                    secret.resumed == true ? "Saved securely. The task resumed." : "Saved securely on your computer.",
+                    systemImage: "checkmark.shield.fill"
+                )
+                .foregroundStyle(.green)
+            } else if secret.dismissed == true {
+                Label("Not provided", systemImage: "xmark.circle")
+                    .foregroundStyle(Color.secondary)
+            } else {
+                VStack(alignment: .leading, spacing: 5) {
+                    Label("Finish on your computer", systemImage: "desktopcomputer")
+                        .font(.system(size: 14, weight: .semibold))
+                        .foregroundStyle(tint)
+                    Text("Open this chat in OpenMausBot on your computer to enter the key. It is stored there securely and is never added to chat.")
+                        .font(.system(size: 13))
+                        .foregroundStyle(Color.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+                .padding(11)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .background(tint.opacity(0.08), in: RoundedRectangle(cornerRadius: 13, style: .continuous))
+            }
+
+            if let error = visible(secret.error) {
+                Label(error, systemImage: "exclamationmark.triangle.fill")
+                    .font(.system(size: 12.5))
+                    .foregroundStyle(.orange)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+
+            if let helpURL {
+                Link(destination: helpURL) {
+                    Label("Where to get this key", systemImage: "arrow.up.right")
+                        .font(.system(size: 13, weight: .medium))
+                }
+            }
+        }
+        .padding(14)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(
+            RoundedRectangle(cornerRadius: 22, style: .continuous)
+                .fill(Color.secondary.opacity(0.09))
+        )
+        .overlay {
+            RoundedRectangle(cornerRadius: 22, style: .continuous)
+                .strokeBorder(secret.isPending ? tint.opacity(0.65) : Color.clear, lineWidth: 1.25)
+        }
+        .accessibilityElement(children: .combine)
+        .accessibilityLabel("\(label). \(accessibilityStatus)")
     }
 }
 
