@@ -1,10 +1,11 @@
 import { createHash, randomUUID } from "node:crypto";
-import { mkdir, mkdtemp, readFile, rm, stat, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, rm, stat } from "node:fs/promises";
 import { request as httpRequest } from "node:http";
 import { tmpdir } from "node:os";
 import { delimiter, join, resolve } from "node:path";
 
 import { DATA_DIR, stripWorkspaceCredentialEnv } from "../config.ts";
+import { writeFileAtomic } from "../atomic.ts";
 import { killCliTree, spawnCli } from "../procs.ts";
 import type { ModelCatalog } from "../contracts.ts";
 import type { ChildProcess } from "node:child_process";
@@ -72,7 +73,7 @@ export async function prepareAntigravityProfile(input: {
     await chmod(directory, 0o700);
     await chmod(acpDirectory, 0o700);
   }
-  await writeFile(
+  writeFileAtomic(
     join(acpDirectory, "settings.json"),
     `${JSON.stringify({ auth: { type: "oauth-personal" } })}\n`,
     { mode: 0o600 },

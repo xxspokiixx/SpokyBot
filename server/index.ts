@@ -9175,7 +9175,10 @@ const server = createServer(async (req, res) => {
         }
         return json(res, 200, { ok: true });
       } catch (error) {
-        return json(res, 500, { error: error instanceof Error ? error.message : String(error) });
+        const status = error && typeof error === "object" && (error as { status?: unknown }).status === 409
+          ? 409
+          : 500;
+        return json(res, status, { error: error instanceof Error ? error.message : String(error) });
       }
     }
 
