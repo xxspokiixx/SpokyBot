@@ -1,6 +1,9 @@
 // The narrow bridge the Electron preload exposes. Absent in the browser.
 
 declare global {
+/** The package.json version, inlined by Vite's define at build time. */
+const __APP_VERSION__: string;
+
 type NativeSkillRecordingEvent = {
   type: "app" | "click" | "scroll" | "key" | "typing" | "clipboard" | "download";
   atMs: number;
