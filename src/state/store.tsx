@@ -389,6 +389,7 @@ export interface EngineInstall {
   docsUrl?: string;
   signInCommand?: string;
   needsNode?: boolean;
+  managed?: { label: string; downloadBytes: number };
 }
 
 /** One row of GET /api/instances — the model picker's data. */
@@ -1392,6 +1393,8 @@ const StoreContext = createContext<{
   flushBotPatches: (botId: string) => Promise<void>;
   /** Re-fetch engine availability — after an install, without a restart. */
   refreshInstances: () => Promise<void>;
+  /** Explicit provider/network model discovery. */
+  refreshModels: (instanceId: string) => Promise<void>;
 } | null>(null);
 
 export function StoreProvider({ children }: { children: ReactNode }) {
@@ -2206,6 +2209,13 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     }
   }, []);
 
+  const refreshModels = useCallback(async (instanceId: string) => {
+    const { instances } = await api(`/api/instances/${encodeURIComponent(instanceId)}/refresh-models`, {
+      method: "POST",
+    });
+    rawDispatch({ type: "instances", instances });
+  }, []);
+
   // Installing a CLI or signing one in happens in a terminal, outside this
   // window — so the moment the user comes back is exactly when our engine
   // snapshot is most likely stale. Re-probe on focus, throttled so that
@@ -2227,8 +2237,8 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     [botPatchQueue],
   );
   const value = useMemo(
-    () => ({ state, dispatch, flushBotPatches, refreshInstances }),
-    [state, dispatch, flushBotPatches, refreshInstances],
+    () => ({ state, dispatch, flushBotPatches, refreshInstances, refreshModels }),
+    [state, dispatch, flushBotPatches, refreshInstances, refreshModels],
   );
   return (
     <StoreContext.Provider value={value}>
