@@ -225,6 +225,29 @@ describe("ACP turns (fake CLI)", () => {
     await removeTempDir(scratch);
   });
 
+  it("names the resolved executable when spawning it fails", async () => {
+    const missing = join(scratch, "resolved-managed-runtime");
+    const driver = createAcpDriver({
+      ...SELECT_MODEL_SUPPORT,
+      selectModel: undefined,
+      resolveCommand: async () => ({ command: missing }),
+    });
+    instance = await driver.create({
+      instanceId: "resolved-spawn-error",
+      displayName: "Resolved spawn error",
+      environment: {},
+      enabled: true,
+      config: { cli: "managed-alias", fullAuto: false },
+    });
+    recorder = recordEvents(instance.adapter);
+
+    await instance.adapter.sendTurn({ threadId: "t-resolved-spawn-error", text: "go" });
+    await recorder.until((event) => event.type === "turn.completed");
+    const error = recorder.events.find((event) => event.type === "runtime.error");
+    expect(error?.message).toContain(missing);
+    expect(error?.message).not.toContain("managed-alias");
+  });
+
   it("normalizes a full turn into the canonical event sequence", async () => {
     await create();
     const { turnId } = await instance.adapter.sendTurn({ threadId: "t-happy", text: "hi", model: "grok-4.5" });

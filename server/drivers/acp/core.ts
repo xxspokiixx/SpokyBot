@@ -609,7 +609,7 @@ export function createAcpDriver(support: AcpSupport): ProviderDriver<AcpConfig> 
             clearTimeout(timer);
             const want = behavior === "allow" ? "allow" : "reject";
             const named = isQuestion && behavior === "answer"
-              ? options.filter((option) => option.optionId === message || option.name === message)
+              ? options.filter((option) => option.optionId === message || option.name?.trim() === message)
               : [];
             const optionId = behavior === "cancel"
               ? null
@@ -755,7 +755,7 @@ export function createAcpDriver(support: AcpSupport): ProviderDriver<AcpConfig> 
           if (stderr.length > 8192) stderr = stderr.slice(-8192);
         });
         child.on("error", (e) => {
-          emit({ ...base(threadId, turnId), type: "runtime.error", ...describeSpawnFailure(e, config.cli) });
+          emit({ ...base(threadId, turnId), type: "runtime.error", ...describeSpawnFailure(e, launch.command) });
           settle(false, "spawn_error");
         });
         child.on("close", (code) => {

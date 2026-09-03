@@ -37,6 +37,15 @@ export interface AntigravityRuntime {
   version: string | null;
 }
 
+export class AntigravitySetupError extends Error {
+  readonly status = 409;
+
+  constructor(message: string) {
+    super(message);
+    this.name = "AntigravitySetupError";
+  }
+}
+
 interface InstallRecord {
   sha256: string;
   version: string;
@@ -129,7 +138,9 @@ export async function resolveAntigravityRuntime(
       const found = await externalRuntime(candidate, "override");
       if (found) return found;
     }
-    throw new Error("The custom Antigravity ACP executable or its localharness_external sibling is missing.");
+    throw new AntigravitySetupError(
+      "The custom Antigravity ACP executable or its localharness_external sibling is missing.",
+    );
   }
 
   const asset = resolveAntigravityReleaseAsset();
@@ -143,9 +154,11 @@ export async function resolveAntigravityRuntime(
     if (found) return found;
   }
   if (!asset) {
-    throw new Error(`Google does not publish an Antigravity runtime for ${process.platform}-${process.arch}. Set a custom executable path.`);
+    throw new AntigravitySetupError(
+      `Google does not publish an Antigravity runtime for ${process.platform}-${process.arch}. Set a custom executable path.`,
+    );
   }
-  throw new Error("Antigravity is not installed. Install the official Google runtime to continue.");
+  throw new AntigravitySetupError("Antigravity is not installed. Install the official Google runtime to continue.");
 }
 
 interface PinnedZipEntry {
@@ -344,7 +357,8 @@ async function installOnce(options: AntigravityInstallOptions): Promise<Antigrav
     try {
       const response = await (options.fetchImpl ?? fetch)(asset.url, { signal: controller.signal, redirect: "follow" });
       if (!response.ok || !response.body) throw new Error(`Google download failed (${response.status}).`);
-      if (new URL(response.url || asset.url).hostname !== "dl.google.com") {
+      const finalUrl = new URL(response.url || asset.url);
+      if (finalUrl.protocol !== "https:" || finalUrl.hostname !== "dl.google.com") {
         throw new Error("The Antigravity download redirected outside dl.google.com.");
       }
       const encoding = response.headers.get("content-encoding")?.trim().toLowerCase();

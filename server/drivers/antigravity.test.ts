@@ -1,4 +1,4 @@
-import { chmodSync, copyFileSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { chmodSync, copyFileSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -48,6 +48,7 @@ afterEach(async () => {
   delete process.env.FAKE_ACP_MODELS;
   delete process.env.FAKE_ACP_MODES;
   delete process.env.FAKE_ACP_DUMP;
+  delete process.env.FAKE_ACP_PAD_QUESTION_OPTION;
   while (scratch.length) await removeTempDir(scratch.pop()!);
 });
 
@@ -107,7 +108,47 @@ describe("official Antigravity runtime", () => {
       source: "override",
     });
     rmSync(fake.harness, { force: true });
-    await expect(resolveAntigravityRuntime(fake.executable)).rejects.toThrow(/localharness_external/u);
+    await expect(resolveAntigravityRuntime(fake.executable)).rejects.toMatchObject({
+      message: expect.stringMatching(/localharness_external/u),
+      status: 409,
+    });
+  });
+
+  it("atomically prepares one complete profile for concurrent callers", async () => {
+    const fake = fakeRuntime();
+    const runtime = await resolveAntigravityRuntime(fake.executable);
+    const profileDirectory = join(fake.directory, "profile");
+    await Promise.all(Array.from({ length: 8 }, () => prepareAntigravityProfile({
+      instanceId: "shared",
+      runtime,
+      baseEnv: {},
+      profileDirectory,
+    })));
+    const acpDirectory = join(profileDirectory, "antigravity-acp");
+    expect(JSON.parse(readFileSync(join(acpDirectory, "settings.json"), "utf8"))).toEqual({
+      auth: { type: "oauth-personal" },
+    });
+    expect(readdirSync(acpDirectory).filter((name) => name.endsWith(".tmp"))).toEqual([]);
+  });
+
+  it("rejects a download redirected to insecure HTTP", async () => {
+    const baseDir = mkdtempSync(join(tmpdir(), "omb-antigravity-insecure-"));
+    scratch.push(baseDir);
+    const asset: AntigravityReleaseAsset = {
+      version: "insecure-test",
+      url: "https://dl.google.com/test-antigravity.zip",
+      sha256: "00".repeat(32),
+      archiveBytes: 1,
+      executable: { name: "agy_acp_server.par", bytes: 1 },
+      harness: { name: "localharness_external", bytes: 1 },
+    };
+    const response = new Response(new Uint8Array([0]), { headers: { "content-length": "1" } });
+    Object.defineProperty(response, "url", { value: "http://dl.google.com/test-antigravity.zip" });
+    await expect(installAntigravityRuntime({
+      baseDir,
+      asset,
+      fetchImpl: async () => response,
+    })).rejects.toThrow(/redirected outside/u);
   });
 
   it("coalesces, verifies, extracts, and reuses a pinned managed download", async () => {
@@ -317,6 +358,7 @@ describe("Antigravity driver over shared ACP", () => {
       displayName: undefined,
       environment: {
         FAKE_ACP_MODE: "question",
+        FAKE_ACP_PAD_QUESTION_OPTION: "1",
         FAKE_ACP_AUTH_METHOD: "oauth-personal",
         FAKE_ACP_MODELS: "gemini-3.8-flash-high",
         FAKE_ACP_MODES: "default,yolo",

@@ -713,7 +713,11 @@ function handle(msg: any) {
             toolCall: { toolCallId: "interaction_color", kind: "other", title: "Which color?" },
             options: [
               { optionId: "blue-id", kind: "allow_once", name: "Blue" },
-              { optionId: "green-id", kind: "allow_once", name: "Green" },
+              {
+                optionId: "green-id",
+                kind: "allow_once",
+                name: process.env.FAKE_ACP_PAD_QUESTION_OPTION ? " Green " : "Green",
+              },
             ],
           },
         });
