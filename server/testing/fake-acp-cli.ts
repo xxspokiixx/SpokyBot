@@ -5,6 +5,8 @@
 // session/prompt, and streams session/update notifications for a scripted
 // turn. Failure modes mirror how real ACP agents misbehave:
 //
+//   FAKE_ACP_LOAD_NULL  return null for session/load so the resume cursor is
+//                       ignored and the driver falls through to session/new
 //   FAKE_ACP_MODE   happy (default) | image | empty-reply | exit-early | fail-after-text | hang | no-auth | auth-required | permission
 //                   | interleave (message → tool → message → tool → message)
 //                   | no-session-config (reject session/set_mode + set_model
@@ -336,6 +338,10 @@ function handle(msg: any) {
       break;
     }
     case "session/load": {
+      if (process.env.FAKE_ACP_LOAD_NULL) {
+        result(msg.id, null);
+        break;
+      }
       const opts = configOptions();
       const mdls = sessionModels();
       result(msg.id, { ...(opts ? { configOptions: opts } : {}), ...(mdls ? { models: mdls } : {}) });
