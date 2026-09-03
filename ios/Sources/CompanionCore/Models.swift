@@ -106,6 +106,26 @@ public struct ToolActivity: Codable, Hashable, Sendable {
     public var setup: Bool?
 }
 
+/// A credential request created by the desktop for one paused task.
+///
+/// Paired phones deliberately cannot write host credentials. Keeping the
+/// payload lets the companion render an honest handoff card instead of
+/// turning this newer message kind into an invisible row.
+public struct SecretRequestCardData: Codable, Hashable, Sendable {
+    public var target: String?
+    public var label: String?
+    public var description: String?
+    public var placeholder: String?
+    public var helpUrl: String?
+    public var requestKey: String?
+    public var provided: Bool?
+    public var dismissed: Bool?
+    public var resumed: Bool?
+    public var error: String?
+
+    public var isPending: Bool { provided != true && dismissed != true }
+}
+
 public struct Sender: Codable, Hashable, Sendable {
     public var botId: String
     public var name: String
@@ -126,7 +146,7 @@ public struct CommChip: Codable, Hashable, Sendable {
 
 public struct Message: Codable, Hashable, Identifiable, Sendable {
     public enum Kind: String, Codable, Sendable {
-        case text, options, activity, screen
+        case text, options, activity, screen, secret
         /// A kind this build has never heard of.
         ///
         /// Not decorative. `kind` is not optional, so without this a single
@@ -163,6 +183,7 @@ public struct Message: Codable, Hashable, Identifiable, Sendable {
     public var at: Double
     public var text: String?
     public var card: OptionCard?
+    public var secret: SecretRequestCardData?
     public var tool: ToolActivity?
     /// The message this one follows; nil at the thread root. Two messages
     /// sharing a parent are a fork.
