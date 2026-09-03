@@ -148,10 +148,11 @@ export interface AcpSupport {
   }): Promise<void>;
 }
 
-const INIT_TIMEOUT = 20_000;
-const SESSION_CONFIG_TIMEOUT = 20_000; // configureSession's per-request default
-const NEW_SESSION_TIMEOUT = 30_000;
-const LOAD_SESSION_TIMEOUT = 120_000; // history replay on a long thread is slow
+const envOr = (key: string, fallback: number): number => Number(process.env[key] ?? fallback);
+const INIT_TIMEOUT = envOr("OPENMAUS_ACP_INIT_TIMEOUT_MS", 300_000);
+const SESSION_CONFIG_TIMEOUT = envOr("OPENMAUS_ACP_SESSION_CONFIG_TIMEOUT_MS", 300_000); // configureSession's per-request default
+const NEW_SESSION_TIMEOUT = envOr("OPENMAUS_ACP_NEW_SESSION_TIMEOUT_MS", 300_000);
+const LOAD_SESSION_TIMEOUT = envOr("OPENMAUS_ACP_LOAD_SESSION_TIMEOUT_MS", 120_000); // history replay on a long thread is slow
 
 function decodeAcpConfig(defaultCli: string) {
   return (raw: unknown): AcpConfig => {
@@ -636,7 +637,7 @@ export function createAcpDriver(support: AcpSupport): ProviderDriver<AcpConfig> 
                   { sessionId: cursor, cwd, mcpServers },
                   LOAD_SESSION_TIMEOUT,
                 );
-                sessionId = cursor;
+                if (sessionResult) sessionId = cursor;
               } catch {
                 /* session gone, load unsupported, or too slow — start fresh */
               }

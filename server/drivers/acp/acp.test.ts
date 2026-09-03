@@ -219,6 +219,7 @@ describe("ACP turns (fake CLI)", () => {
     delete process.env.FAKE_ACP_MODELS;
     delete process.env.FAKE_ACP_MODEL_STICKS;
     delete process.env.FAKE_ACP_USAGE_ROOT;
+    delete process.env.FAKE_ACP_LOAD_NULL;
     recorder?.stop();
     await instance?.dispose();
     await removeTempDir(scratch);
@@ -673,6 +674,35 @@ describe("ACP turns (fake CLI)", () => {
     // hook must fire on a resumed thread as well
     const started = await recorder.until((e) => e.type === "session.started");
     expect(started).toMatchObject({ sessionId: "resumed-thread-1", model: "m-two" });
+    const done = await recorder.until((e) => e.type === "turn.completed");
+    expect(done).toMatchObject({ ok: true });
+  });
+
+  it("reuses a resume cursor when session/load returns a session", async () => {
+    await create(GrokAgentDriver);
+    await instance.adapter.sendTurn({
+      threadId: "t-resume-truthy",
+      text: "go",
+      resumeCursor: "resumed-cursor-1",
+    });
+
+    const started = await recorder.until((e) => e.type === "session.started");
+    expect(started).toMatchObject({ sessionId: "resumed-cursor-1" });
+    const done = await recorder.until((e) => e.type === "turn.completed");
+    expect(done).toMatchObject({ ok: true });
+  });
+
+  it("falls through to session/new when session/load returns null", async () => {
+    process.env.FAKE_ACP_LOAD_NULL = "1";
+    await create(GrokAgentDriver);
+    await instance.adapter.sendTurn({
+      threadId: "t-resume-null",
+      text: "go",
+      resumeCursor: "gone-cursor",
+    });
+
+    const started = await recorder.until((e) => e.type === "session.started");
+    expect(started).toMatchObject({ sessionId: "fake-acp-session" });
     const done = await recorder.until((e) => e.type === "turn.completed");
     expect(done).toMatchObject({ ok: true });
   });
