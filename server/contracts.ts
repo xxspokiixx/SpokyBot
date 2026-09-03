@@ -312,6 +312,18 @@ export interface EngineInstall {
   signInCommand?: string;
   /** `command` needs npm on PATH, so the UI can say so when Node is absent. */
   needsNode?: boolean;
+  /** The app downloads and verifies a pinned provider runtime itself. */
+  managed?: {
+    label: string;
+    downloadBytes: number;
+  };
+}
+
+export interface ProviderAuthenticationStart {
+  phase: "waiting" | "succeeded";
+  flowId: string | null;
+  authorizationUrl: string | null;
+  expiresAt: string | null;
 }
 
 // ── driver SPI (upstream ProviderDriver — a plain record, not a service) ─
@@ -352,6 +364,11 @@ export interface ProviderInstance {
   readonly models: ModelCatalog;
   /** Refresh a live catalog without recreating the provider instance. */
   readonly refreshModels?: () => Promise<void>;
+  /** Optional first-party runtime installation and account setup. */
+  readonly installRuntime?: () => Promise<void>;
+  readonly startAuthentication?: () => Promise<ProviderAuthenticationStart>;
+  readonly completeAuthentication?: (flowId: string, callbackUrl: string) => Promise<void>;
+  readonly cancelAuthentication?: () => Promise<void>;
   readonly adapter: ProviderAdapter;
   snapshot(): Promise<ProviderSnapshot>;
   /** Cheap one-shot text call (upstream TextGeneration) — titles, summaries. */

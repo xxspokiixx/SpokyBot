@@ -116,7 +116,7 @@ export function ModelPicker({
   contained?: boolean;
   label?: ReactNode;
 }) {
-  const { state, dispatch, refreshInstances } = useStore();
+  const { state, dispatch, refreshInstances, refreshModels: refreshInstanceModels } = useStore();
   const [open, setOpen] = useState(false);
   const [railId, setRailId] = useState<string | null>(null);
   const [pane, setPane] = useState<"main" | "custom">("main");
@@ -131,7 +131,7 @@ export function ModelPicker({
   const railInstance =
     state.instances.find((instance) => instance.instanceId === (railId ?? selection.instanceId)) ?? state.instances[0];
 
-  const refreshModels = useCallback(() => {
+  const refreshLocalInstances = useCallback(() => {
     if (refreshingRef.current) return;
     refreshingRef.current = true;
     setRefreshing(true);
@@ -145,9 +145,25 @@ export function ModelPicker({
       });
   }, [refreshInstances]);
 
+  const refreshModels = useCallback(() => {
+    if (refreshingRef.current) return;
+    refreshingRef.current = true;
+    setRefreshing(true);
+    const instanceId = railId ?? selection.instanceId;
+    void refreshInstances()
+      .then(() => refreshInstanceModels(instanceId))
+      .catch(() => {
+        // Keep the last known catalog when the app is temporarily offline.
+      })
+      .finally(() => {
+        refreshingRef.current = false;
+        setRefreshing(false);
+      });
+  }, [railId, refreshInstanceModels, refreshInstances, selection.instanceId]);
+
   useEffect(() => {
-    if (open) refreshModels();
-  }, [open, refreshModels]);
+    if (open) refreshLocalInstances();
+  }, [open, refreshLocalInstances]);
 
   useEffect(() => {
     if (!open) return;

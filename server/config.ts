@@ -715,7 +715,8 @@ export function instanceConfigs(cfg: AppConfig): InstanceConfigMap {
   // a credential Milind doesn't want to manage; an `instances` entry brings
   // it back anytime.
   //
-  // Google rides `antigravityAgent` (the `agy` CLI), not `geminiAgent`:
+  // Google rides `antigravityAgent` (the official Google ACP server), not
+  // `geminiAgent`:
   // Google retired Gemini CLI for the free/Pro/Ultra tiers on 2026-06-18
   // (developers.googleblog.com, "transitioning Gemini CLI to Antigravity
   // CLI"), so a default `gemini` instance could only ever show unavailable.

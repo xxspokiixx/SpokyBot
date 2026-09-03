@@ -9139,6 +9139,46 @@ const server = createServer(async (req, res) => {
       return json(res, 200, { instances: await registry.describe() });
     }
 
+    const instanceAction = /^\/api\/instances\/([\w.-]+)\/(refresh-models|install|auth\/start|auth\/complete|auth\/cancel)$/.exec(path);
+    if (method === "POST" && instanceAction) {
+      if (!String(req.headers["content-type"] ?? "").toLowerCase().startsWith("application/json")) {
+        return json(res, 415, { error: "content-type must be application/json" });
+      }
+      const instanceId = instanceAction[1];
+      const action = instanceAction[2];
+      try {
+        if (action === "refresh-models") {
+          if (!(await registry.refreshModels(instanceId))) return json(res, 404, { error: "unknown instance" });
+          return json(res, 200, { instances: await registry.describe() });
+        }
+        if (action === "install") {
+          if (!(await registry.installRuntime(instanceId))) return json(res, 404, { error: "managed installation is unavailable" });
+          return json(res, 200, { instances: await registry.describe() });
+        }
+        if (action === "auth/start") {
+          const auth = await registry.startAuthentication(instanceId);
+          if (!auth) return json(res, 404, { error: "account setup is unavailable" });
+          return json(res, 200, { auth });
+        }
+        if (action === "auth/complete") {
+          const body = await readBody(req);
+          const flowId = typeof body?.flowId === "string" ? body.flowId : "";
+          const callbackUrl = typeof body?.callbackUrl === "string" ? body.callbackUrl : "";
+          if (!flowId || !callbackUrl) return json(res, 400, { error: "flowId and callbackUrl are required" });
+          if (!(await registry.completeAuthentication(instanceId, flowId, callbackUrl))) {
+            return json(res, 404, { error: "account setup is unavailable" });
+          }
+          return json(res, 200, { ok: true });
+        }
+        if (!(await registry.cancelAuthentication(instanceId))) {
+          return json(res, 404, { error: "account setup is unavailable" });
+        }
+        return json(res, 200, { ok: true });
+      } catch (error) {
+        return json(res, 500, { error: error instanceof Error ? error.message : String(error) });
+      }
+    }
+
     // ── CLI binary discovery for the Engines "detected" dropdown ──
     // ?name=claude → absolute paths of every `claude` on the augmented PATH,
     // in PATH order (first = what a bare name runs). Polled when the user
