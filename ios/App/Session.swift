@@ -19,6 +19,26 @@ import UIKit
 /// the transitions are worth being able to read.
 private let log = Logger(subsystem: "com.openmausbot.companion", category: "stream")
 
+private final class CachedAttachmentDownload: NSObject {
+    let value: DownloadedFile
+
+    init(_ value: DownloadedFile) {
+        self.value = value
+    }
+}
+
+/// An immutable, ciphertext-only credential write prepared on the main
+/// actor before any asynchronous work begins. HPKE uses fresh randomness for
+/// every seal, so retries must reuse this exact value rather than encrypting
+/// the same credential again after an ambiguous network failure.
+struct PreparedPhoneCredential: Equatable, Sendable {
+    fileprivate let requestIdentity: String
+    fileprivate let connectionID: String
+    fileprivate let botID: String
+    fileprivate let messageID: String
+    fileprivate let envelope: PhoneSecretEnvelope
+}
+
 @MainActor
 final class Session: ObservableObject {
     enum Status: Equatable {
@@ -47,12 +67,20 @@ final class Session: ObservableObject {
     /// Pairing can be opened while another computer remains connected. The
     /// working session is only replaced after the new credential commits.
     @Published private(set) var pairingRequested = false
+    /// Views with sensitive input observe this value so an explicit runtime
+    /// disconnect clears the field even when the selected connection itself
+    /// has not changed.
+    @Published private(set) var credentialEntryResetGeneration = 0
 
     /// A notification response that should be pushed by the roster's
     /// NavigationStack after the exact detached task has been activated.
     @Published private(set) var notificationChat: Chat?
 
     private var client: CompanionClient?
+    /// Ciphertext-only operations survive navigation and transient
+    /// disconnects so a retry cannot accidentally reseal the same value with
+    /// a different HPKE operation id. Nothing here is persisted to disk.
+    private var preparedPhoneCredentials: [String: PreparedPhoneCredential] = [:]
     /// The device token, kept in memory so the client can be rebuilt when the
     /// dial moves to another stored host. The keychain remains the only place
     /// it is persisted.
@@ -88,10 +116,16 @@ final class Session: ObservableObject {
     /// for the same attachment path.
     private var avatarFetches: [String: (id: UUID, task: Task<Data?, Never>)] = [:]
     private var avatarCacheGeneration = 0
-    /// Only one downloaded document preview is retained. A replacement is
-    /// written completely before the previous directory is removed, so a
-    /// failed download cannot invalidate the file currently on screen.
-    private var filePreviewDirectory: URL?
+    /// Full image bytes are already fetched to draw a thumbnail. Keep a small,
+    /// cost-bounded window so tapping that thumbnail opens immediately instead
+    /// of downloading the same image twice.
+    private let attachmentCache: NSCache<NSString, CachedAttachmentDownload> = {
+        let cache = NSCache<NSString, CachedAttachmentDownload>()
+        cache.countLimit = 12
+        cache.totalCostLimit = 32 * 1_024 * 1_024
+        return cache
+    }()
+    private var attachmentCacheGeneration = 0
     /// An ambiguous network failure may happen after the server accepted a
     /// message. Reusing this id for the exact same retained draft makes Retry
     /// idempotent instead of sending the attachment twice.
@@ -103,6 +137,11 @@ final class Session: ObservableObject {
     /// is available. Retain the last explicitly tapped destination until the
     /// paired client can be rebuilt after unlock.
     private var pendingNotification: NotificationTarget?
+
+    /// The exact route the current client will use for a credential write.
+    var phoneCredentialTransportIsProtected: Bool {
+        client?.connection.activeEndpoint?.protectsCredentials == true
+    }
 
     private struct AttachmentDraftKey: Hashable {
         let destination: MessageDestination
@@ -233,6 +272,25 @@ final class Session: ObservableObject {
         if invited.allowedRouteKinds == nil {
             invited.establishRoutePolicyFromInvite()
         }
+        // A 12-character code pairs with a server directly (its own sessions,
+        // a client-scope bearer); anything else is the companion sidecar's.
+        if let code = PairingInvite.normalizedServerCode(credential) {
+            let paired = try await CompanionClient.pairWithServer(
+                connection: invited,
+                code: code,
+                label: deviceName,
+                attemptId: pairRequestId
+            )
+            var stored = invited
+            if !paired.environment.label.isEmpty { stored.name = paired.environment.label }
+            stored.serverEnvironmentId = paired.environment.environmentId
+            stored.companionDeviceId = nil
+            if let existing = registry.matchingConnection(for: stored) {
+                stored.id = existing.id
+            }
+            try commitPairing(stored, token: paired.token)
+            return
+        }
         let outcome = try await CompanionClient.pairFirstReachable(
             connection: invited,
             credential: credential,
@@ -243,6 +301,7 @@ final class Session: ObservableObject {
         // prefer the name the computer calls itself over the Bonjour label
         var stored = outcome.connection
         if !paired.serverName.isEmpty { stored.name = paired.serverName }
+        stored.companionDeviceId = paired.device.id
         // The computer knows every address it answers on, but redemption may
         // not widen the explicit route consent carried by the invite.
         stored.applyPairingAdvertisement(hosts: paired.hosts, endpoints: paired.endpoints)
@@ -258,8 +317,15 @@ final class Session: ObservableObject {
         if let existing = registry.matchingConnection(for: stored) {
             stored.id = existing.id
         }
+        try commitPairing(stored, token: paired.token, winner: winner)
+    }
 
-        try Keychain.save(paired.token, for: stored.id)
+    /// The device token goes to the keychain and the connection to defaults —
+    /// deliberately apart, so the thing that gets backed up is never the
+    /// credential. Shared by companion and server pairing; `winner` is the
+    /// route that answered, which a server pairing (one route) has no use for.
+    private func commitPairing(_ stored: Connection, token: String, winner: CompanionEndpoint? = nil) throws {
+        try Keychain.save(token, for: stored.id)
         let firstPairing = registry.connections.isEmpty
         var updatedRegistry = registry
         updatedRegistry.upsert(stored)
@@ -289,14 +355,14 @@ final class Session: ObservableObject {
         registry = updatedRegistry
         connections = registry.connections
         self.connection = stored
-        self.token = paired.token
+        self.token = token
         let liveRoutes = winner.map { route in
             [route] + stored.orderedEndpoints.filter { $0.url != route.url }
         } ?? stored.orderedEndpoints
         self.rotation = CandidateRotation(endpoints: liveRoutes)
         self.client = CompanionClient(
             connection: winner.map(stored.dialing) ?? stored,
-            token: paired.token
+            token: token
         )
         self.state = CompanionState()
         // A fresh pairing settles any restore that was still waiting on the
@@ -364,9 +430,16 @@ final class Session: ObservableObject {
     }
 
     func forgetConnection(id: String) {
-        guard registry.connection(id: id) != nil else { return }
+        guard let forgotten = registry.connection(id: id) else { return }
         let wasActive = registry.activeConnectionID == id
+        // A server session is ended on the server too, best effort: the
+        // bearer is discarded locally either way.
+        if forgotten.pairedWithServer, let token = try? Keychain.token(for: id) {
+            let client = CompanionClient(connection: forgotten, token: token)
+            Task.detached { try? await client.logout() }
+        }
         if wasActive { stopActiveRuntime() }
+        preparedPhoneCredentials = preparedPhoneCredentials.filter { $0.value.connectionID != id }
         Keychain.remove(id)
         registry.remove(id: id)
         persistRegistry()
@@ -400,6 +473,7 @@ final class Session: ObservableObject {
     }
 
     private func clearActiveConnection() {
+        resetCredentialEntry()
         streamTask?.cancel()
         streamTask = nil
         endpointRefreshTask?.cancel()
@@ -417,7 +491,7 @@ final class Session: ObservableObject {
         rotation = CandidateRotation(hosts: [])
         state = CompanionState()
         resetAvatarCache()
-        clearFilePreview()
+        resetAttachmentCache()
         attachmentSendIDs.removeAll()
         NotificationCoordinator.shared.setBadge(0)
         status = .unpaired
@@ -436,6 +510,7 @@ final class Session: ObservableObject {
     }
 
     private func stopActiveRuntime() {
+        resetCredentialEntry()
         streamGeneration += 1
         streamTask?.cancel()
         streamTask = nil
@@ -449,7 +524,7 @@ final class Session: ObservableObject {
         token = nil
         state = CompanionState()
         resetAvatarCache()
-        clearFilePreview()
+        resetAttachmentCache()
         attachmentSendIDs.removeAll()
         NotificationCoordinator.shared.setBadge(0)
     }
@@ -542,11 +617,16 @@ final class Session: ObservableObject {
     /// anyway; dropping it deliberately means the cursor is written down at
     /// a known point instead of wherever the socket happened to die.
     func disconnect() {
+        resetCredentialEntry()
         streamTask?.cancel()
         streamTask = nil
         endpointRefreshTask?.cancel()
         endpointRefreshTask = nil
         endLinger()
+    }
+
+    private func resetCredentialEntry() {
+        credentialEntryResetGeneration &+= 1
     }
 
     private var lingerTask: UIBackgroundTaskIdentifier = .invalid
@@ -851,7 +931,11 @@ final class Session: ObservableObject {
                         mime: mime,
                         uploadId: attachment.id.uuidString
                     )
-                    uploaded.append(SharedAttachmentReference(path: path, kind: .image))
+                    uploaded.append(SharedAttachmentReference(
+                        path: path,
+                        kind: .image,
+                        displayName: attachment.name
+                    ))
                 case .file:
                     let file = try await client.uploadFile(
                         data: attachment.data,
@@ -910,55 +994,112 @@ final class Session: ObservableObject {
         }
     }
 
-    /// Download one desktop path through its originating transcript message,
-    /// then place it in a private temporary directory for Quick Look.
-    func downloadFile(
+    /// Fetch one app-owned attachment through the message that introduced it.
+    /// The caller owns presentation errors so a failed thumbnail or preview can
+    /// explain itself beside the attachment that was tapped.
+    func fetchAttachment(
         threadId: String,
         messageId: String,
-        path: String
-    ) async -> DownloadedFile? {
+        path: String,
+        cacheResult: Bool = false
+    ) async throws -> DownloadedFile {
         guard let client else {
-            actionError = "This computer is offline."
-            return nil
+            throw APIError.transport("This computer is offline.")
         }
-        actionError = nil
+        let cacheKey = "\(threadId)\u{1F}\(messageId)\u{1F}\(path)"
+        if cacheResult,
+           let cached = attachmentCache.object(forKey: cacheKey as NSString) {
+            return cached.value
+        }
+        let generation = attachmentCacheGeneration
         do {
+            // Keep this structured. When the row scrolls away SwiftUI cancels
+            // its task, which now propagates directly into URLSession instead
+            // of leaving a shared unstructured download running.
             let download = try await client.downloadFile(
                 threadId: threadId,
                 messageId: messageId,
                 path: path
             )
             try Task.checkCancellation()
-            let manager = FileManager.default
-            let root = manager.temporaryDirectory
-                .appendingPathComponent("OpenMausBotFilePreviews", isDirectory: true)
-            let nextDirectory = root.appendingPathComponent(UUID().uuidString, isDirectory: true)
-            try manager.createDirectory(
-                at: nextDirectory,
-                withIntermediateDirectories: true,
-                attributes: [.protectionKey: FileProtectionType.completeUntilFirstUserAuthentication]
-            )
-            let fileURL = nextDirectory.appendingPathComponent(download.filename, isDirectory: false)
-            do {
-                try download.data.write(to: fileURL, options: [.atomic, .completeFileProtectionUntilFirstUserAuthentication])
-                // A synchronous write cannot be interrupted halfway through.
-                // Check immediately afterwards so a cancelled preview never
-                // leaves its completed temporary copy behind.
-                try Task.checkCancellation()
-            } catch {
-                try? manager.removeItem(at: nextDirectory)
-                throw error
+            guard generation == attachmentCacheGeneration else { throw CancellationError() }
+            if cacheResult {
+                attachmentCache.setObject(
+                    CachedAttachmentDownload(download),
+                    forKey: cacheKey as NSString,
+                    cost: download.data.count
+                )
             }
-            let previous = filePreviewDirectory
-            filePreviewDirectory = nextDirectory
-            if let previous { try? manager.removeItem(at: previous) }
-            actionError = nil
-            return download.stored(at: fileURL)
-        } catch is CancellationError {
-            return nil
+            return download
         } catch let error as APIError where error.isUnauthorized {
+            // A cancelled request from the previous computer may finish after
+            // a switch. Its 401 belongs to that old token and must not evict
+            // the current live session.
+            guard generation == attachmentCacheGeneration, !Task.isCancelled else {
+                throw CancellationError()
+            }
             status = .unauthorized
-            actionError = error.localizedDescription
+            throw error
+        } catch {
+            if Task.isCancelled || generation != attachmentCacheGeneration {
+                throw CancellationError()
+            }
+            throw error
+        }
+    }
+
+    /// Fetch and materialize an attachment in a protected temporary directory
+    /// for Quick Look, markdown/text preview, and the system share sheet.
+    func prepareAttachmentPreview(
+        threadId: String,
+        messageId: String,
+        path: String,
+        cacheResult: Bool = false
+    ) async throws -> DownloadedFile {
+        let download = try await fetchAttachment(
+            threadId: threadId,
+            messageId: messageId,
+            path: path,
+            cacheResult: cacheResult
+        )
+        try Task.checkCancellation()
+        let preparation = Task.detached(priority: .userInitiated) {
+            // Content-Disposition is the server's canonical, sanitised name.
+            // The transport tag's `name` is presentation-only and must never
+            // choose the on-disk preview/share filename.
+            try Self.materializePreview(download: download, filename: download.filename)
+        }
+        let prepared = try await withTaskCancellationHandler {
+            try await preparation.value
+        } onCancel: {
+            preparation.cancel()
+        }
+        do {
+            try Task.checkCancellation()
+            return prepared
+        } catch {
+            Self.removePreview(at: prepared.localURL)
+            throw error
+        }
+    }
+
+    /// Compatibility for file links in assistant markdown. User attachment
+    /// cards use the throwing API above so their feedback remains local.
+    func downloadFile(
+        threadId: String,
+        messageId: String,
+        path: String
+    ) async -> DownloadedFile? {
+        actionError = nil
+        do {
+            let download = try await prepareAttachmentPreview(
+                threadId: threadId,
+                messageId: messageId,
+                path: path
+            )
+            actionError = nil
+            return download
+        } catch is CancellationError {
             return nil
         } catch {
             actionError = error.localizedDescription
@@ -966,9 +1107,47 @@ final class Session: ObservableObject {
         }
     }
 
-    private func clearFilePreview() {
-        if let filePreviewDirectory { try? FileManager.default.removeItem(at: filePreviewDirectory) }
-        filePreviewDirectory = nil
+    private func resetAttachmentCache() {
+        attachmentCacheGeneration += 1
+        attachmentCache.removeAllObjects()
+    }
+
+    nonisolated private static func materializePreview(
+        download: DownloadedFile,
+        filename: String
+    ) throws -> DownloadedFile {
+        let manager = FileManager.default
+        let root = manager.temporaryDirectory
+            .appendingPathComponent("OpenMausBotFilePreviews", isDirectory: true)
+        let directory = root.appendingPathComponent(UUID().uuidString, isDirectory: true)
+        try Task.checkCancellation()
+        try manager.createDirectory(
+            at: directory,
+            withIntermediateDirectories: true,
+            attributes: [.protectionKey: FileProtectionType.completeUntilFirstUserAuthentication]
+        )
+        let fileURL = directory.appendingPathComponent(filename, isDirectory: false)
+        do {
+            try download.data.write(
+                to: fileURL,
+                options: [.atomic, .completeFileProtectionUntilFirstUserAuthentication]
+            )
+            try Task.checkCancellation()
+            return DownloadedFile(
+                data: download.data,
+                filename: filename,
+                contentType: download.contentType,
+                localURL: fileURL
+            )
+        } catch {
+            try? manager.removeItem(at: directory)
+            throw error
+        }
+    }
+
+    nonisolated private static func removePreview(at fileURL: URL?) {
+        guard let fileURL else { return }
+        try? FileManager.default.removeItem(at: fileURL.deletingLastPathComponent())
     }
 
     private static func removeStaleFilePreviews() {
@@ -989,6 +1168,157 @@ final class Session: ObservableObject {
             isPermission: card.isPermission,
             reviewedSha256: card.skillRequest?.reviewedSha256
         )
+    }
+
+    /// Synchronously seal a credential before the caller starts an async
+    /// request. The caller can then erase its input immediately and retain
+    /// only this ciphertext value for an exact, idempotent retry.
+    func prepareCredential(
+        _ value: String,
+        chat: Chat,
+        message: Message,
+        secret: SecretRequestCardData
+    ) throws -> PreparedPhoneCredential {
+        guard let client, let connection else {
+            throw APIError.transport("This computer is offline.")
+        }
+        guard let publicKey = connection.secretPublicKey,
+              let deviceId = connection.companionDeviceId,
+              let target = secret.target,
+              let requestKey = secret.requestKey
+        else { throw PhoneSecretError.unavailable }
+        guard client.connection.activeEndpoint?.protectsCredentials == true else {
+            throw PhoneSecretError.insecureTransport
+        }
+
+        let botId = try credentialBotID(chat: chat, message: message)
+        let context = PhoneSecretRequestContext(
+            deviceId: deviceId,
+            botId: botId,
+            threadId: chat.threadId,
+            messageId: message.id,
+            target: target,
+            requestKey: requestKey
+        )
+        let keyId = try PhoneSecretCrypto.publicKeyId(publicKey)
+        let requestIdentity = phoneCredentialRequestIdentity(
+            connectionID: connection.id,
+            botID: botId,
+            context: context,
+            keyID: keyId
+        )
+        if let prepared = preparedPhoneCredentials[requestIdentity] {
+            return prepared
+        }
+        let envelope = try PhoneSecretCrypto.encrypt(
+            value,
+            publicKey: publicKey,
+            context: context
+        )
+
+        let prepared = PreparedPhoneCredential(
+            requestIdentity: requestIdentity,
+            connectionID: connection.id,
+            botID: botId,
+            messageID: message.id,
+            envelope: envelope
+        )
+        preparedPhoneCredentials[requestIdentity] = prepared
+        return prepared
+    }
+
+    /// Recover an ambiguous ciphertext-only operation when a card view is
+    /// recreated. This is deliberately in-memory: a force-quit forgets it,
+    /// while ordinary navigation, AutoFill, and reconnects do not.
+    func preparedCredential(
+        chat: Chat,
+        message: Message,
+        secret: SecretRequestCardData
+    ) -> PreparedPhoneCredential? {
+        guard let connection,
+              let publicKey = connection.secretPublicKey,
+              let deviceId = connection.companionDeviceId,
+              let target = secret.target,
+              let requestKey = secret.requestKey,
+              let botId = try? credentialBotID(chat: chat, message: message),
+              let keyId = try? PhoneSecretCrypto.publicKeyId(publicKey)
+        else { return nil }
+        let context = PhoneSecretRequestContext(
+            deviceId: deviceId,
+            botId: botId,
+            threadId: chat.threadId,
+            messageId: message.id,
+            target: target,
+            requestKey: requestKey
+        )
+        return preparedPhoneCredentials[phoneCredentialRequestIdentity(
+            connectionID: connection.id,
+            botID: botId,
+            context: context,
+            keyID: keyId
+        )]
+    }
+
+    func discardPreparedCredential(_ prepared: PreparedPhoneCredential) {
+        if preparedPhoneCredentials[prepared.requestIdentity] == prepared {
+            preparedPhoneCredentials.removeValue(forKey: prepared.requestIdentity)
+        }
+    }
+
+    private func credentialBotID(chat: Chat, message: Message) throws -> String {
+        switch chat {
+        case let .bot(bot): return bot.id
+        case .room:
+            guard let sender = message.from?.botId else {
+                throw PhoneSecretError.invalidRequest
+            }
+            return sender
+        }
+    }
+
+    private func phoneCredentialRequestIdentity(
+        connectionID: String,
+        botID: String,
+        context: PhoneSecretRequestContext,
+        keyID: String
+    ) -> String {
+        [
+            connectionID,
+            keyID,
+            botID,
+            context.threadId,
+            context.messageId,
+            context.target,
+            context.requestKey,
+        ].joined(separator: "\u{0}")
+    }
+
+    /// Send one already-sealed operation. A retry deliberately reuses the
+    /// same HPKE envelope; the desktop derives its idempotency key from these
+    /// bytes, so a lost response cannot cause a second provider save.
+    func provideCredential(_ prepared: PreparedPhoneCredential) async throws {
+        guard let client, let connection else {
+            throw APIError.transport("This computer is offline.")
+        }
+        guard connection.id == prepared.connectionID,
+              connection.companionDeviceId == prepared.envelope.deviceId,
+              let publicKey = connection.secretPublicKey,
+              (try? PhoneSecretCrypto.publicKeyId(publicKey)) == prepared.envelope.keyId
+        else { throw PhoneSecretError.unavailable }
+        guard client.connection.activeEndpoint?.protectsCredentials == true else {
+            throw PhoneSecretError.insecureTransport
+        }
+
+        do {
+            try await client.provideCredential(
+                botId: prepared.botID,
+                messageId: prepared.messageID,
+                envelope: prepared.envelope
+            )
+        } catch let error as APIError where error.isUnauthorized {
+            status = .unauthorized
+            throw error
+        }
     }
 
     /// The same answer, from something that only has the ids — the Live

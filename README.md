@@ -233,6 +233,8 @@ See [MCP server setup and tool reference](docs/mcp-server.md).
 | **Ubuntu 24.04** (x64) | [OpenMausBot-amd64.deb](https://github.com/milind-soni/OpenMausBot/releases/latest/download/OpenMausBot-amd64.deb) · [OpenMausBot.AppImage](https://github.com/milind-soni/OpenMausBot/releases/latest/download/OpenMausBot.AppImage) | Install the `.deb` with APT (recommended), or make the AppImage executable and run it. Beta; GNOME is the supported desktop. |
 
 See the [Ubuntu Desktop guide](docs/linux-desktop.md) for installation, capabilities, and troubleshooting.
+Any desktop build can also pair as a client to another Windows, macOS, or Ubuntu host over Tailscale; see [desktop-to-desktop companion mode](docs/desktop-companion.md).
+
 
 **From source:**
 
@@ -304,9 +306,13 @@ pnpm package:linux # Ubuntu x64 .deb + AppImage → release/
 
 ### Routines and webhook triggers
 
-Routines can run once or on selected weekdays, using either a MAUS's configured model/computer or the
-Cloud VM runner. Webhook triggers are independent from schedules but reuse the same queued task executor
-and calendar receipts.
+Routines can run once, on selected weekdays, or every 5–1,440 minutes, using either a MAUS's configured
+model/computer or the Cloud VM runner. Interval schedules stay aligned to their chosen start time and skip
+an occurrence when the previous run is still active, so slow work cannot build an unbounded queue. A
+separate optional Advanced run limit can safely stop stuck work; no timeout is imposed unless one is chosen.
+The existing duration field remains calendar/display metadata. Webhook triggers are independent from schedules
+but reuse the same queued task executor and calendar
+receipts.
 
 OpenMausBot starts a webhook-only receiver on `127.0.0.1:8800` by default (or one port above `OMB_PORT`).
 Set `OMB_WEBHOOK_PORT` to choose another port. A webhook secret is shown once when the trigger is created
@@ -337,6 +343,16 @@ OpenMausBot is free and open source. If it does real work for you, you can
 [buy the project a coffee or become a monthly supporter](https://buy.polar.sh/polar_cl_EEzWmormSVBD151HkmkyId9j0GPXina0KurfS1fYYcO) —
 one-time any amount, or monthly. Payments are handled by [Polar](https://polar.sh/supamaus),
 which takes care of receipts and taxes; nothing about the app ever sits behind a paywall.
+
+## Run it on a server
+
+Bots keep working with every laptop closed when the server runs on a VPS or
+a Mac mini. One command with Node 24: `npx openmausbot serve` (add
+`--tunnel` for a public address with no domain or open port, or
+`--tailscale` for your tailnet), or the Docker stack for your own domain.
+Devices pair once with a short code. The step-by-step guide is
+[docs/deploy-vps.md](docs/deploy-vps.md); the reference is
+[docs/self-hosting.md](docs/self-hosting.md).
 
 ## License
 

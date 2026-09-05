@@ -10,7 +10,8 @@
 // turned it into `node <script>` on Windows too, so the e2e half now runs
 // everywhere alongside the mention-resolution units.
 import { spawn, type ChildProcess } from "node:child_process";
-import { chmodSync, existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { createHash } from "node:crypto";
+import { chmodSync, copyFileSync, existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -22,7 +23,6 @@ import { removeTempDir, waitForExit } from "./testing/cleanup.ts";
 
 const SERVER_DIR = dirname(fileURLToPath(import.meta.url));
 const FAKE_CLI = join(SERVER_DIR, "testing", "fake-acp-cli.ts");
-const FAKE_AGY_CLI = join(SERVER_DIR, "testing", "fake-agy-cli.ts");
 const PORT = 18800 + Math.floor(Math.random() * 10_000);
 const BASE = `http://127.0.0.1:${PORT}`;
 
@@ -105,9 +105,31 @@ describe("comms e2e (fake ACP fleet)", () => {
 
   beforeAll(async () => {
     chmodSync(FAKE_CLI, 0o755);
-    chmodSync(FAKE_AGY_CLI, 0o755);
     home = mkdtempSync(join(tmpdir(), "omb-comms-test-"));
     gateFile = join(home, "helper-gate");
+    const antigravityDirectory = join(home, "fake-antigravity");
+    const antigravityCli = join(antigravityDirectory, "agy_acp_server.ts");
+    const antigravityHarness = join(
+      antigravityDirectory,
+      process.platform === "win32" ? "localharness_external.exe" : "localharness_external",
+    );
+    mkdirSync(antigravityDirectory, { recursive: true });
+    copyFileSync(FAKE_CLI, antigravityCli);
+    copyFileSync(FAKE_CLI, antigravityHarness);
+    if (process.platform !== "win32") {
+      chmodSync(antigravityCli, 0o755);
+      chmodSync(antigravityHarness, 0o755);
+    }
+    const antigravityProfile = join(
+      home,
+      ".openmausbot",
+      "providers",
+      "antigravity",
+      createHash("sha256").update("geminiAsker").digest("hex"),
+      "antigravity-acp",
+    );
+    mkdirSync(antigravityProfile, { recursive: true });
+    writeFileSync(join(antigravityProfile, "acp_token.json"), "{}\n");
     mkdirSync(join(home, ".openmausbot"), { recursive: true });
     writeFileSync(
       join(home, ".openmausbot", "config.json"),
@@ -121,13 +143,17 @@ describe("comms e2e (fake ACP fleet)", () => {
             environment: { FAKE_ACP_MODE: "ask-peer" },
             config: { cli: FAKE_CLI, fullAuto: true },
           },
-          // Normal Gemini 3.x bots use Antigravity print mode rather than
-          // the standalone Gemini ACP driver. This instance proves its
-          // leased global MCP mount reaches the same agents proxy safely.
+          // Antigravity uses Google's official ACP server. This instance
+          // proves its session-scoped MCP mount reaches the same agents proxy.
           geminiAsker: {
             driver: "antigravityAgent",
-            environment: { FAKE_AGY_MODE: "ask-peer" },
-            config: { cli: FAKE_AGY_CLI, fullAuto: true },
+            environment: {
+              FAKE_ACP_MODE: "ask-peer",
+              FAKE_ACP_AUTH_METHOD: "oauth-personal",
+              FAKE_ACP_MODELS: "gemini-3.8-flash-high",
+              FAKE_ACP_MODES: "default,yolo",
+            },
+            config: { cli: antigravityCli, fullAuto: true },
           },
           // a separate asker instance for the async-handoff e2e. B can stay
           // on `grok` because its depth-1 turn runs without the agents
@@ -290,6 +316,10 @@ describe("comms e2e (fake ACP fleet)", () => {
       const inbound = helperBot.messages.find((m: any) => m.role === "user" && m.kind === "text");
       expect(inbound.text).toContain("[Message from @Asker");
       expect(inbound.text).toContain("ping from fake");
+      // the transport is on the line itself, not only in its wording: a
+      // later reader that never sees the note's opening still knows the
+      // words came from a bot, and which one
+      expect(inbound.peerAsk).toEqual({ botId: asker.id, name: "Asker" });
       const rnote = helperBot.messages.find((m: any) => m.kind === "activity" && m.tool?.name === "Message from @Asker");
       expect(rnote?.comm?.groupId).toBe(note.comm.groupId);
       expect(helperBot.busy).toBeFalsy();
@@ -314,7 +344,7 @@ describe("comms e2e (fake ACP fleet)", () => {
       await api("PATCH", `/api/bots/${asker.id}`, {
         name: "Gemini Asker",
         section,
-        modelSelection: { instanceId: "geminiAsker", model: "gemini-3.7-flash-high" },
+        modelSelection: { instanceId: "geminiAsker", model: "gemini-3.8-flash-high" },
       });
 
       const send = await api("POST", `/api/bots/${asker.id}/messages`, {
@@ -371,15 +401,11 @@ describe("comms e2e (fake ACP fleet)", () => {
         (message: any) => message.kind === "text" && message.role === "user",
       );
       expect(inbound.text).toContain("[Message from @Gemini Asker");
-      expect(inbound.text).toContain("ping from fake Gemini");
+      expect(inbound.text).toContain("ping from fake");
 
-      // Antigravity's global MCP config briefly carries a bearer token for
-      // this one process. It must be gone once the turn exits so neither a
-      // later bot nor the user's own agy session can inherit the capability.
-      await expect.poll(
-        () => existsSync(join(home, ".gemini", "config", "mcp_config.json")),
-        { timeout: 5_000 },
-      ).toBe(false);
+      // Official ACP receives the agents server in session/new. It must never
+      // write the capability or its bearer token to a user's global config.
+      expect(existsSync(join(home, ".gemini", "config", "mcp_config.json"))).toBe(false);
     },
     45_000,
   );

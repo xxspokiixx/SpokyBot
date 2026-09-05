@@ -106,6 +106,25 @@ public struct ToolActivity: Codable, Hashable, Sendable {
     public var setup: Bool?
 }
 
+/// A credential request created by the desktop for one paused task.
+///
+/// The phone may fill this request only through the QR-pinned HPKE transport.
+/// The payload contains identifiers and display copy, never the credential.
+public struct SecretRequestCardData: Codable, Hashable, Sendable {
+    public var target: String?
+    public var label: String?
+    public var description: String?
+    public var placeholder: String?
+    public var helpUrl: String?
+    public var requestKey: String?
+    public var provided: Bool?
+    public var dismissed: Bool?
+    public var resumed: Bool?
+    public var error: String?
+
+    public var isPending: Bool { provided != true && dismissed != true }
+}
+
 public struct Sender: Codable, Hashable, Sendable {
     public var botId: String
     public var name: String
@@ -126,7 +145,7 @@ public struct CommChip: Codable, Hashable, Sendable {
 
 public struct Message: Codable, Hashable, Identifiable, Sendable {
     public enum Kind: String, Codable, Sendable {
-        case text, options, activity, screen
+        case text, options, activity, screen, secret
         /// A kind this build has never heard of.
         ///
         /// Not decorative. `kind` is not optional, so without this a single
@@ -163,6 +182,7 @@ public struct Message: Codable, Hashable, Identifiable, Sendable {
     public var at: Double
     public var text: String?
     public var card: OptionCard?
+    public var secret: SecretRequestCardData?
     public var tool: ToolActivity?
     /// The message this one follows; nil at the thread root. Two messages
     /// sharing a parent are a fork.
@@ -227,6 +247,9 @@ public struct Bot: Codable, Hashable, Identifiable, Sendable {
     /// Desktop sidebar section. Missing or blank means the built-in Bots area.
     public var section: String?
     public var chiefOfStaff: Bool?
+    /// ask, auto, full, or custom. Missing on older harnesses; autoApprove
+    /// remains the compatibility mirror for older companion builds.
+    public var approvalMode: String?
     public var autoApprove: Bool?
     public var alwaysAllow: [String]?
     public var computer: String?
@@ -655,7 +678,7 @@ public struct Voice: Codable, Hashable, Identifiable, Sendable {
 
 public struct RoutineSchedule: Codable, Hashable, Sendable {
     public enum Kind: String, Codable, Sendable {
-        case once, daily
+        case once, daily, interval
         /// A schedule introduced by a newer desktop. It remains visible but
         /// cannot be toggled or saved until the user chooses a supported kind.
         case unknown
@@ -674,6 +697,8 @@ public struct RoutineSchedule: Codable, Hashable, Sendable {
     public var at: Double?
     public var time: String?
     public var weekdays: [Int]?
+    public var everyMinutes: Int?
+    public var anchorAt: Int64?
 
     public static func once(at: Date) -> Self {
         .init(type: .once, at: at.timeIntervalSince1970 * 1_000, time: nil, weekdays: nil)
@@ -681,6 +706,17 @@ public struct RoutineSchedule: Codable, Hashable, Sendable {
 
     public static func daily(time: String, weekdays: [Int]) -> Self {
         .init(type: .daily, at: nil, time: time, weekdays: weekdays)
+    }
+
+    public static func interval(everyMinutes: Int, anchorAt: Date) -> Self {
+        .init(
+            type: .interval,
+            at: nil,
+            time: nil,
+            weekdays: nil,
+            everyMinutes: everyMinutes,
+            anchorAt: Int64((anchorAt.timeIntervalSince1970 * 1_000).rounded())
+        )
     }
 }
 
@@ -693,6 +729,7 @@ public struct Routine: Codable, Hashable, Identifiable, Sendable {
     public var enabled: Bool
     public var schedule: RoutineSchedule
     public var durationMinutes: Int
+    public var timeoutMinutes: Int?
     public var nextRunAt: Double?
     public var createdAt: Double
     public var updatedAt: Double
@@ -704,6 +741,7 @@ public struct RoutineRun: Codable, Hashable, Identifiable, Sendable {
     public var routineName: String
     public var prompt: String?
     public var durationMinutes: Int?
+    public var timeoutMinutes: Int?
     public var botId: String
     public var runOn: String
     public var scheduledFor: Double
@@ -727,10 +765,15 @@ public struct RoutineInput: Encodable, Sendable {
     public var enabled: Bool?
     public var schedule: RoutineSchedule
     public var durationMinutes: Int
+    /// A value replaces the stored limit; nil leaves it unchanged on PATCH.
+    public var timeoutMinutes: Int?
+    /// Explicitly writes JSON null when `timeoutMinutes` is nil.
+    public var clearTimeout: Bool
 
     public init(
         name: String, prompt: String, botId: String, runOn: String = "maus",
-        enabled: Bool? = nil, schedule: RoutineSchedule, durationMinutes: Int = 30
+        enabled: Bool? = nil, schedule: RoutineSchedule, durationMinutes: Int = 30,
+        timeoutMinutes: Int? = nil, clearTimeout: Bool = false
     ) {
         self.name = name
         self.prompt = prompt
@@ -739,6 +782,25 @@ public struct RoutineInput: Encodable, Sendable {
         self.enabled = enabled
         self.schedule = schedule
         self.durationMinutes = durationMinutes
+        self.timeoutMinutes = timeoutMinutes
+        self.clearTimeout = clearTimeout
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case name, prompt, botId, runOn, enabled, schedule, durationMinutes, timeoutMinutes
+    }
+
+    public func encode(to encoder: Encoder) throws {
+        var values = encoder.container(keyedBy: CodingKeys.self)
+        try values.encode(name, forKey: .name)
+        try values.encode(prompt, forKey: .prompt)
+        try values.encode(botId, forKey: .botId)
+        try values.encode(runOn, forKey: .runOn)
+        try values.encodeIfPresent(enabled, forKey: .enabled)
+        try values.encode(schedule, forKey: .schedule)
+        try values.encode(durationMinutes, forKey: .durationMinutes)
+        if let timeoutMinutes { try values.encode(timeoutMinutes, forKey: .timeoutMinutes) }
+        else if clearTimeout { try values.encodeNil(forKey: .timeoutMinutes) }
     }
 }
 
@@ -780,6 +842,8 @@ public extension Routine {
         switch schedule.type {
         case .daily:
             true
+        case .interval:
+            (5...1_440).contains(schedule.everyMinutes ?? 0) && schedule.anchorAt != nil
         case .once:
             (schedule.at ?? -.infinity) > date.timeIntervalSince1970 * 1_000
         case .unknown:
@@ -950,4 +1014,31 @@ struct RoutineRunResponse: Codable, Sendable { var run: RoutineRun }
 
 struct ConnectorAuthorizationResponse: Codable, Sendable {
     var url: String
+}
+
+// MARK: - Server sessions (pairing with a server directly)
+
+/// What `POST /api/auth/pair` returns on a server: the bearer, the session
+/// it opened, and the server's public descriptor.
+public struct ServerPairResponse: Codable, Sendable {
+    public var token: String
+    public var session: ServerSession
+    public var environment: ServerEnvironment
+}
+
+public struct ServerSession: Codable, Hashable, Sendable {
+    public var id: String
+    public var label: String
+    public var scopes: [String]
+    public var expiresAt: Double?
+
+    public var isAdmin: Bool { scopes.contains("admin") }
+}
+
+/// `GET /.well-known/openmausbot/environment`, served without a session.
+public struct ServerEnvironment: Codable, Hashable, Sendable {
+    public var environmentId: String
+    public var label: String
+    public var platform: String?
+    public var version: String?
 }

@@ -3,7 +3,7 @@
 // does not become a wall of competing motion. Plain messages go to the room's
 // default responder; @mentions override that routing.
 import { memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
-import { ArrowDown, Check, ChevronDown, Folder, FolderOpen, Loader2, MessageSquareReply, Pin, PinOff, Plus, Search, X } from "lucide-react";
+import { ArrowDown, Check, ChevronDown, ChevronRight, Folder, FolderOpen, Loader2, MessageSquareReply, Pin, PinOff, Plus, Search, X } from "lucide-react";
 import {
   api,
   useStore,
@@ -15,9 +15,10 @@ import {
   type GroupDefaultResponder,
   type Message,
 } from "@/state/store";
-import { MausAvatar } from "./Avatar";
+import { BotAvatar, MausAvatar } from "./Avatar";
 import { TurnPresence } from "./TurnPresence";
 import { showToolCallsEnabled } from "@/lib/feature-flags";
+import { roomActivityVisible } from "@/lib/room-activity";
 import { normalizeState } from "@/lib/mascot";
 import { effectiveDefaultResponder, groupResponseHint } from "@/lib/group-routing";
 import { ChatMarkdown } from "./ChatMarkdown";
@@ -65,10 +66,34 @@ function dayLabel(at: number): string {
 }
 
 /** One finished tool step in a room. Same pill the 1:1 chat uses, minus the
- * status glyph — a room reads as a conversation, not a build log. */
-function RoomToolChip({ message }: { message: Message }) {
+ * status glyph — a room reads as a conversation, not a build log. A chip
+ * that links somewhere ("Posted in #Standup", a bot⇄bot exchange) opens it,
+ * as it would in a 1:1 — a receipt the person cannot follow is only half a
+ * receipt. When the linked channel IS this room (an ask made from here is
+ * mirrored back into it) there is nowhere to go, so it stays a plain,
+ * visible pill. */
+export function RoomToolChip({ message, roomId }: { message: Message; roomId?: string }) {
+  const { state, dispatch } = useStore();
   const tool = message.tool;
   if (!tool) return null;
+  const comm = message.comm;
+  if (comm && comm.groupId !== roomId) {
+    const withBot = state.bots.find((b) => b.id === comm.withBotId);
+    return (
+      <div className="flex justify-start">
+        <button
+          type="button"
+          onClick={() => dispatch({ type: "select", id: comm.groupId })}
+          title={`Open ${comm.withName}`}
+          className="flex items-center gap-2 rounded-full border border-hairline/40 bg-panel px-3 py-1.5 text-[13px] text-ink-secondary hover:bg-raised hover:text-ink"
+        >
+          <MausAvatar color={comm.withColor} bodyId={withBot?.mascotBody ?? undefined} state="happy" size={16} />
+          <span className="max-w-[480px] truncate">{tool.name}</span>
+          <ChevronRight size={13} />
+        </button>
+      </div>
+    );
+  }
   return (
     <div className="flex justify-start">
       <div
@@ -104,6 +129,7 @@ function ClusterLabel({ bot, name, color }: { bot?: Bot; name: string; color: st
 /** Pin toggle for one room message — one pin per room, patchGroup path. */
 function PinToggle({ group, message }: { group: Group; message: Message }) {
   const { dispatch } = useStore();
+  if (window.ogb?.remoteClient?.active) return null;
   const pinned = group.pinnedMessageId === message.id;
   return (
     <button
@@ -146,6 +172,8 @@ const Transcript = memo(function Transcript({
   // Several bots working at once turn a room into a wall of chips; fold the
   // finished ones the same way a 1:1 chat does.
   const items = useMemo(() => groupActivityRuns(messages), [messages]);
+  const newestMessageId = messages.at(-1)?.id;
+  const newestUserMessageId = [...messages].reverse().find((message) => message.role === "user")?.id;
   const focus = state.focusMessage;
   const focusedId = focus && !focus.consumed && focus.threadId === group.threadId ? focus.messageId : null;
   return (
@@ -179,7 +207,6 @@ const Transcript = memo(function Transcript({
           );
         }
         const m = item.message;
-        if (m.id === emergingId) return null;
         const user = m.role === "user";
         const attachments = user && m.text ? splitTranscriptAttachments(m.text) : null;
         const newCluster = !prev || prev.role !== m.role || prev.from?.botId !== m.from?.botId || newDay;
@@ -216,8 +243,8 @@ const Transcript = memo(function Transcript({
               />
             </div>
           ) : m.kind === "activity" && m.tool ? (
-            m.tool.ok === false || m.tool.name.startsWith("error:") || showToolCalls ? (
-              <RoomToolChip message={m} />
+            roomActivityVisible(m, showToolCalls) ? (
+              <RoomToolChip message={m} roomId={group.id} />
             ) : null
           ) : m.kind === "text" && (m.text || m.attachments?.length) ? (
             <div className={cn("group flex w-full flex-col", user ? "items-end" : "items-start")}>
@@ -239,6 +266,7 @@ const Transcript = memo(function Transcript({
                 <div
                   className={cn(
                     "w-fit max-w-[min(42rem,78%)] rounded-2xl px-4 py-2.5 text-[15px] leading-relaxed",
+                    !user && m.id === emergingId && "turn-answer",
                     user ? "whitespace-pre-wrap bg-bubble-user text-ink" : "bg-card text-ink",
                   )}
                   title={new Date(m.at).toLocaleString()}
@@ -261,15 +289,22 @@ const Transcript = memo(function Transcript({
                   {user ? (
                     <>
                       {attachments && attachments.images.length > 0 && (
-                        <AttachedImageGallery paths={attachments.images} />
+                        <AttachedImageGallery
+                          paths={attachments.images}
+                          eager={m.id === newestMessageId || m.id === newestUserMessageId}
+                        />
                       )}
                       {attachments && attachments.files.length > 0 && (
                         <AttachedFileChips
                           files={attachments.files}
+                          message={{ threadId: group.threadId, messageId: m.id }}
                           className={!attachments.display ? "mb-0" : undefined}
                         />
                       )}
                       {attachments?.display ?? m.text}
+                      {m.via === "api" && (
+                        <div className="mt-1 text-[11px] text-ink-secondary">Sent through the API, not typed here</div>
+                      )}
                     </>
                   ) : (
                     <>
@@ -277,9 +312,10 @@ const Transcript = memo(function Transcript({
                         <AttachedImageGallery
                           paths={m.attachments.map((attachment) => attachment.path)}
                           className={m.text ? "justify-start" : "mb-0 justify-start"}
+                          eager={m.id === newestMessageId || m.id === newestUserMessageId}
                         />
                       ) : null}
-                      {m.text ? <ChatMarkdown text={m.text} /> : null}
+                      {m.text ? <ChatMarkdown text={m.text} message={{ threadId: group.threadId, messageId: m.id }} /> : null}
                     </>
                   )}
                 </div>
@@ -839,6 +875,7 @@ function RoomSetup({ group, members }: { group: Group; members: Bot[] }) {
 }
 export function GroupView({ group }: { group: Group }) {
   const { state, dispatch } = useStore();
+  const remoteClient = window.ogb?.remoteClient?.active === true;
   const stream = useStreaming();
   const streaming = stream.streaming[group.threadId];
   const scrollRef = useRef<HTMLDivElement>(null);
@@ -877,7 +914,7 @@ export function GroupView({ group }: { group: Group }) {
     [group.memberIds, state.bots],
   );
   const speaker = members.find((b) => b.id === group.busyBotId);
-  const setupPending = roomNeedsSetup(group);
+  const setupPending = !remoteClient && roomNeedsSetup(group);
 
   // Mascot stays while a member works; the finished reply pops in above it.
   const lastGroupMessage = group.messages.at(-1);
@@ -891,33 +928,40 @@ export function GroupView({ group }: { group: Group }) {
   const waiting =
     Boolean(speaker && showWorkingDots(true, group.messages.at(-1), speaker.id)) || awaited !== undefined;
   const wasWaiting = useRef(false);
-  const [popping, setPopping] = useState<{ id: string; text: string; botId?: string } | null>(null);
-  useEffect(() => {
+  const [popping, setPopping] = useState<{ id: string; botId?: string } | null>(null);
+  const poppingTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  useEffect(() => () => {
+    if (poppingTimer.current) clearTimeout(poppingTimer.current);
+  }, []);
+  useLayoutEffect(() => {
+    if (poppingTimer.current) clearTimeout(poppingTimer.current);
+    poppingTimer.current = null;
     wasWaiting.current = false;
     setPopping(null);
   }, [group.id, group.threadId]);
   useEffect(() => {
     if (waiting) wasWaiting.current = true;
   }, [waiting]);
-  useEffect(() => {
+  useLayoutEffect(() => {
     if (lastGroupMessage?.role !== "bot" || lastGroupMessage.kind !== "text" || !wasWaiting.current) return;
     wasWaiting.current = false;
     setPopping({
       id: lastGroupMessage.id,
-      text: lastGroupMessage.text ?? "",
       botId: lastGroupMessage.from?.botId,
     });
-    const timer = setTimeout(() => setPopping(null), 520);
-    return () => clearTimeout(timer);
+    const messageId = lastGroupMessage.id;
+    if (poppingTimer.current) clearTimeout(poppingTimer.current);
+    poppingTimer.current = setTimeout(() => {
+      poppingTimer.current = null;
+      setPopping((current) => current?.id === messageId ? null : current);
+    }, 520);
   }, [
     lastGroupMessage?.id,
     lastGroupMessage?.role,
     lastGroupMessage?.kind,
-    lastGroupMessage?.text,
     lastGroupMessage?.from?.botId,
   ]);
   const presenceVisible = waiting || popping !== null;
-  const poppingMessage = popping ? group.messages.find((message) => message.id === popping.id) : undefined;
   const presenceSpeaker =
     speaker ?? awaited ?? members.find((member) => member.id === popping?.botId) ?? members[0];
 
@@ -1042,7 +1086,7 @@ export function GroupView({ group }: { group: Group }) {
   return (
     <main className="relative flex h-full min-w-0 flex-1 flex-col bg-app">
       <GroupCallOverlay group={group} members={members} />
-      {membersOpen && !group.dm && (
+      {membersOpen && !remoteClient && !group.dm && (
         <ManageMembersPanel group={group} onClose={closeMembers} triggerRef={membersTriggerRef} />
       )}
       {/* Header: static member mauses; a ring + dot marks the working bot. */}
@@ -1072,9 +1116,9 @@ export function GroupView({ group }: { group: Group }) {
             <Search size={18} />
           </button>
           <GroupCallButton group={group} members={members} />
-          {!setupPending && !group.dm && <RoomWorkingFolderChip group={group} onToggle={() => setFolderOpen((open) => !open)} />}
-          {!setupPending && !group.dm && <DefaultResponderSelect group={group} members={members} />}
-          {group.dm ? (
+          {!remoteClient && !setupPending && !group.dm && <RoomWorkingFolderChip group={group} onToggle={() => setFolderOpen((open) => !open)} />}
+          {!remoteClient && !setupPending && !group.dm && <DefaultResponderSelect group={group} members={members} />}
+          {group.dm || remoteClient ? (
             memberMauses
           ) : (
             // The roster lives where you already look to see who is in the
@@ -1121,13 +1165,14 @@ export function GroupView({ group }: { group: Group }) {
           </div>
         ) : (
           <button
-            onClick={() => setBulletinOpen(true)}
-            className="mb-1 flex w-full items-center gap-2 rounded-lg px-2 py-1.5 text-left hover:bg-raised/40"
+            disabled={remoteClient}
+            onClick={() => { if (!remoteClient) setBulletinOpen(true); }}
+            className={cn("mb-1 flex w-full items-center gap-2 rounded-lg px-2 py-1.5 text-left", !remoteClient && "hover:bg-raised/40")}
             title="Channel bulletin — shared instructions for every bot here"
           >
             <Pin size={12} className="shrink-0 text-ink-secondary" />
             <span className={cn("truncate text-[12.5px]", group.bulletin ? "text-ink-secondary" : "text-ink-secondary/60")}>
-              {group.bulletin.split("\n")[0] || "Add channel instructions…"}
+              {group.bulletin.split("\n")[0] || (remoteClient ? "No channel instructions" : "Add channel instructions…")}
             </span>
           </button>
         )}
@@ -1164,7 +1209,7 @@ export function GroupView({ group }: { group: Group }) {
                 onClick={() => dispatch({ type: "patchGroup", groupId: group.id, patch: { pinnedMessageId: "" } })}
                 aria-label="Unpin message"
                 title="Unpin"
-                className="shrink-0 rounded p-0.5 text-ink-secondary hover:bg-raised hover:text-ink"
+                className={cn("shrink-0 rounded p-0.5 text-ink-secondary hover:bg-raised hover:text-ink", remoteClient && "hidden")}
               >
                 <X size={13} />
               </button>
@@ -1266,8 +1311,9 @@ export function GroupView({ group }: { group: Group }) {
           {(speaker || presenceVisible) && (
             <TurnPresence
               avatar={
-                <MausAvatar
-                  color={presenceSpeaker?.color ?? "green"}
+                // the speaker's real profile image when it has one, as in ChatView
+                <BotAvatar
+                  bot={presenceSpeaker ?? { color: "green" }}
                   state={toolInFlight && !awaited ? "working" : "thinking"}
                   size={36}
                   forward={false}
@@ -1278,19 +1324,7 @@ export function GroupView({ group }: { group: Group }) {
               visible={presenceVisible}
               label={activityLabel}
               answering={popping !== null}
-            >
-              {popping ? (
-                <div className="w-fit max-w-[min(42rem,78%)] rounded-2xl bg-card px-4 py-2.5 text-[15px] leading-relaxed text-ink">
-                  {poppingMessage?.attachments?.length ? (
-                    <AttachedImageGallery
-                      paths={poppingMessage.attachments.map((attachment) => attachment.path)}
-                      className={popping.text ? "justify-start" : "mb-0 justify-start"}
-                    />
-                  ) : null}
-                  {popping.text ? <ChatMarkdown text={popping.text} /> : null}
-                </div>
-              ) : null}
-            </TurnPresence>
+            />
           )}
         </div>
         )}

@@ -23,6 +23,7 @@ describe("package export", () => {
           chiefOfStaff: true,
           composio: true,
           cwd: "/private/path",
+          approvalMode: "full",
           autoApprove: true,
           alwaysAllow: ["everything"],
           installedPackage: {
@@ -82,9 +83,30 @@ describe("package export", () => {
           createdAt: 1,
           updatedAt: 1,
         },
+        {
+          id: "private-interval-routine-id",
+          name: "Frequent release check",
+          prompt: "Watch release readiness.",
+          target: "bot",
+          botId: "private-id",
+          runOn: "maus",
+          enabled: true,
+          schedule: { type: "interval", everyMinutes: 15, anchorAt: 1_788_254_400_000 },
+          durationMinutes: 30,
+          timeoutMinutes: 20,
+          nextRunAt: 789,
+          createdAt: 1,
+          updatedAt: 1,
+        },
       ],
     });
-    expect(exported.package.routines).toHaveLength(1);
+    expect(exported.package.routines).toHaveLength(2);
+    expect(exported.package.routines?.[1]?.schedule).toEqual({
+      type: "interval",
+      everyMinutes: 15,
+      anchorAt: 1_788_254_400_000,
+    });
+    expect(exported.package.routines?.[1]?.timeoutMinutes).toBe(20);
 
     expect(exported).toMatchObject({
       format: "openmaus.package",
@@ -92,11 +114,14 @@ describe("package export", () => {
         chiefOfStaff: "lead",
         requirements: { apps: [{ slug: "github" }] },
         rooms: [{ members: ["lead"], defaultResponder: { kind: "agent", agent: "lead" } }],
-        routines: [{ agent: "lead", enabledAfterInstall: false }],
+        routines: [
+          { agent: "lead", enabledAfterInstall: false },
+          { agent: "lead", enabledAfterInstall: false },
+        ],
         playbooks: [{ key: "launch" }],
       },
     });
-    expect(JSON.stringify(exported)).not.toMatch(/private-id|private-thread|private-engine|secret-model|secret-session|private\/path|private-attachment|autoApprove|alwaysAllow|nextRunAt/);
+    expect(JSON.stringify(exported)).not.toMatch(/private-id|private-thread|private-engine|secret-model|secret-session|private\/path|private-attachment|approvalMode|autoApprove|alwaysAllow|nextRunAt/);
   });
 
   it("shares one identical playbook definition across multiple bots", () => {

@@ -20,6 +20,7 @@ import kotlinx.serialization.SerializationException
 import kotlinx.serialization.decodeFromString
 import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.JsonArray
+import kotlinx.serialization.json.JsonNull
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.buildJsonObject
@@ -237,6 +238,39 @@ class CompanionClient(
         return raw.data
     }
 
+    /**
+     * Fetch an app-owned file mentioned by one transcript message. The path
+     * still names the file on the paired computer, so it is sent in an
+     * authenticated JSON body rather than placed in the URL. The server
+     * verifies both message provenance and its attachment roots.
+     */
+    suspend fun downloadFile(threadId: String, messageId: String, path: String): DownloadedFile {
+        val link = LocalMessageLink.resolve(path) as? LocalMessageLink.DesktopFile ?: throw APIError.BadUrl
+        val raw = perform(
+            makeRequest(
+                "POST",
+                "/api/threads/${safeRouteId(threadId)}/messages/${safeRouteId(messageId)}/file",
+                body = jsonBody("path" to link.path),
+            ),
+        )
+        check(raw)
+        val declared = raw.headers["Content-Length"]?.trim()?.toLongOrNull() ?: -1L
+        if (declared > MAXIMUM_FILE_DOWNLOAD_BYTES || raw.data.size > MAXIMUM_FILE_DOWNLOAD_BYTES) {
+            throw APIError.Transport("That file is larger than 25 MB.")
+        }
+        val rawContentType = raw.headers["Content-Type"].orEmpty()
+        val contentType = if (AttachmentPolicy.validMime(rawContentType)) {
+            AttachmentPolicy.normalizedMime(rawContentType)
+        } else {
+            "application/octet-stream"
+        }
+        return DownloadedFile(
+            data = raw.data,
+            filename = downloadFilename(raw.headers["Content-Disposition"], link.path),
+            contentType = contentType,
+        )
+    }
+
     suspend fun avatar(path: String): ByteArray {
         if (!validAvatarPath(path)) throw APIError.BadUrl
         val raw = perform(makeRequest("GET", path))
@@ -366,6 +400,7 @@ class CompanionClient(
 
     suspend fun createRoutine(input: RoutineInput): Routine {
         requireSupported(input.schedule)
+        requireValidTimeout(input.timeoutMinutes)
         return send<RoutineResponse>(
             makeRequest("POST", "/api/routines", body = routineBody(input)),
         ).routine
@@ -373,6 +408,7 @@ class CompanionClient(
 
     suspend fun updateRoutine(id: String, input: RoutineInput): Routine {
         requireSupported(input.schedule)
+        requireValidTimeout(input.timeoutMinutes)
         return send<RoutineResponse>(
             makeRequest("PATCH", "/api/routines/${segment(id)}", body = routineBody(input)),
         ).routine
@@ -404,22 +440,56 @@ class CompanionClient(
         return send<CreatedRoom>(makeRequest("POST", "/api/groups", body = body)).group
     }
 
-    suspend fun sendToBot(botId: String, text: String) {
-        sendUnit(makeRequest("POST", "/api/bots/${segment(botId)}/messages", body = jsonBody("text" to text)))
-    }
+    suspend fun sendToBot(botId: String, text: String): SendReceipt =
+        sendForReceipt(
+            makeRequest("POST", "/api/bots/${segment(botId)}/messages", body = jsonBody("text" to text)),
+        )
 
-    suspend fun sendToRoom(groupId: String, text: String) {
-        sendUnit(makeRequest("POST", "/api/groups/${segment(groupId)}/messages", body = jsonBody("text" to text)))
+    suspend fun sendToRoom(groupId: String, text: String): SendReceipt =
+        sendForReceipt(
+            makeRequest("POST", "/api/groups/${segment(groupId)}/messages", body = jsonBody("text" to text)),
+        )
+
+    /**
+     * Drop a message the harness is still holding, before the turn it is
+     * waiting behind settles.
+     *
+     * An entry that drained a moment ago is not an error worth showing — that
+     * is the outcome the caller wanted. But that is matched positively on the
+     * harness's own wording and never on the status alone: the sidecar answers
+     * 404 "no route" for a route it does not allow, so a computer too old to
+     * have this route looks identical to a drained entry. Reading those as the
+     * same thing takes the message off the phone while it is still queued on
+     * the computer, and it then arrives anyway.
+     */
+    suspend fun cancelQueued(queueId: String, to: MessageDestination) {
+        if (!isSafeRouteId(queueId)) throw APIError.BadUrl
+        val route = when (to) {
+            is MessageDestination.Bot -> "/api/bots/${safeRouteId(to.id)}/queue/$queueId"
+            is MessageDestination.Room -> "/api/groups/${safeRouteId(to.id)}/queue/$queueId"
+        }
+        try {
+            sendUnit(makeRequest("DELETE", route))
+        } catch (error: APIError.Status) {
+            if (error.code != 404) throw error
+            // The harness's own words, not Throwable.message, which falls
+            // back to generic text for a 404 and would swallow everything.
+            if (error.serverMessage?.contains(ALREADY_DRAINED, ignoreCase = true) == true) return
+            throw APIError.Status(
+                404,
+                "This computer is too old to take back a queued message. Update OpenMausBot on it.",
+            )
+        }
     }
 
     /** Retry-safe send: [threadId] is fixed at destination selection, never inferred on retry. */
-    suspend fun send(text: String, to: MessageDestination, sendId: String) {
+    suspend fun send(text: String, to: MessageDestination, sendId: String): SendReceipt {
         val route = when (to) {
             is MessageDestination.Bot -> "/api/bots/${safeRouteId(to.id)}/messages"
             is MessageDestination.Room -> "/api/groups/${safeRouteId(to.id)}/messages"
         }
         if (!isSafeRouteId(to.threadId) || !isSafeSendId(sendId)) throw APIError.BadUrl
-        sendUnit(makeRequest(
+        return sendForReceipt(makeRequest(
             "POST",
             route,
             body = buildJsonObject {
@@ -606,6 +676,24 @@ class CompanionClient(
         check(raw)
     }
 
+    /**
+     * A send, and what the harness did with it. Unlike [send] an unreadable
+     * body is not an error here: the request succeeded, and an older harness
+     * answering with a shape this build has never seen still made a plain
+     * send. Only the extra mid-turn detail is lost.
+     */
+    private suspend fun sendForReceipt(request: Request): SendReceipt {
+        val raw = perform(request)
+        check(raw)
+        return try {
+            CompanionJson
+                .decodeFromString<SendReceiptBody>(raw.data.toString(Charsets.UTF_8))
+                .receipt()
+        } catch (_: SerializationException) {
+            SendReceipt.Sent(threadId = null, steered = false)
+        }
+    }
+
     private suspend fun perform(
         request: Request,
         requestClient: OkHttpClient = actionClient,
@@ -653,11 +741,43 @@ class CompanionClient(
     private data class RawResponse(val code: Int, val headers: Headers, val data: ByteArray)
 
     companion object {
+        /**
+         * The harness's own answer when the entry is not in its queue.
+         * Matched positively, never by status alone — see [cancelQueued].
+         */
+        const val ALREADY_DRAINED = "no such queued message"
+
         private const val ACTION_TIMEOUT_SECONDS = 20L
         private const val AVATAR_GENERATION_TIMEOUT_SECONDS = 150L
         private const val STREAM_IDLE_TIMEOUT_SECONDS = 90L
         private const val AVATAR_MAX_BYTES = 10 * 1_024 * 1_024
         const val SHARE_FILE_MAX_BYTES = 25 * 1_024 * 1_024
+        const val MAXIMUM_FILE_DOWNLOAD_BYTES = AttachmentPolicy.MAXIMUM_FILE_BYTES
+
+        /**
+         * The name to show a downloaded file under: `filename*=` first, then
+         * `filename=`, then the last segment of the requested path — reduced to
+         * a basename, with control and bidi-override characters blanked so a
+         * server-chosen name cannot disguise itself.
+         */
+        internal fun downloadFilename(disposition: String?, fallbackPath: String): String {
+            val parameters = disposition.orEmpty().split(';').map(String::trim)
+            val encoded = parameters.firstOrNull { it.startsWith("filename*=", ignoreCase = true) }
+                ?.drop("filename*=".length)
+            val ordinary = parameters.firstOrNull { it.startsWith("filename=", ignoreCase = true) }
+                ?.drop("filename=".length)
+            val decodedEncoded = encoded?.let { value ->
+                val unquoted = value.trim('"')
+                val payload = unquoted.split('\'', limit = 3)
+                val encodedValue = if (payload.size == 3) payload[2] else unquoted
+                runCatching { java.net.URLDecoder.decode(encodedValue.replace("+", "%2B"), "UTF-8") }.getOrNull()
+            }
+            val candidate = decodedEncoded
+                ?: ordinary?.trim('"')
+                ?: fallbackPath.split('/', '\\').lastOrNull { it.isNotEmpty() }
+                ?: "file"
+            return sanitisePortableFilename(candidate, "file")
+        }
         private val AVATAR_MIME_TYPES = setOf("image/png", "image/jpeg", "image/gif", "image/webp")
         private val JSON_MEDIA_TYPE = "application/json".toMediaType()
         private val EMPTY_BODY: RequestBody = ByteArray(0).toRequestBody(null)
@@ -742,6 +862,20 @@ class CompanionClient(
             if (schedule.type == RoutineSchedule.Kind.UNKNOWN) {
                 throw APIError.Transport("Choose a supported schedule before saving this routine.")
             }
+            if (
+                schedule.type == RoutineSchedule.Kind.INTERVAL &&
+                ((schedule.everyMinutes ?: 0) !in 5..1_440 || schedule.anchorAt == null)
+            ) {
+                throw APIError.Transport(
+                    "Choose an interval from 5 to 1,440 minutes and an alignment time.",
+                )
+            }
+        }
+
+        private fun requireValidTimeout(timeoutMinutes: Int?) {
+            if (timeoutMinutes != null && timeoutMinutes !in 5..240) {
+                throw APIError.Transport("Choose no timeout or a whole number from 5 to 240 minutes.")
+            }
         }
 
         private fun routineBody(input: RoutineInput): JsonObject = buildJsonObject {
@@ -757,8 +891,12 @@ class CompanionClient(
                 input.schedule.weekdays?.let { days ->
                     put("weekdays", JsonArray(days.map(::JsonPrimitive)))
                 }
+                input.schedule.everyMinutes?.let { put("everyMinutes", it) }
+                input.schedule.anchorAt?.let { put("anchorAt", it) }
             })
             put("durationMinutes", input.durationMinutes)
+            if (input.timeoutMinutes != null) put("timeoutMinutes", input.timeoutMinutes)
+            else if (input.clearTimeout) put("timeoutMinutes", JsonNull)
         }
 
         suspend fun pair(

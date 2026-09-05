@@ -7,7 +7,7 @@ import { useStore, type Bot, type InstanceInfo, type ModelSelection } from "@/st
 import { filterCustomModels, partitionCustomModels, suggestedModels } from "@/lib/custom-models";
 import { isCustomOnly, splitEngineRail } from "@/lib/engine-rail";
 import { ProviderMark } from "./ProviderIcons";
-import { EngineSetup, needsCli, needsSignIn } from "./EngineSetup";
+import { EngineSetup, EngineUpdateNotice, needsCli, needsSignIn } from "./EngineSetup";
 import { EngineGroupLabel } from "./EngineGroupLabel";
 import { cn } from "@/lib/cn";
 import { COMPACT_SQUARE } from "@/lib/compact-chip";
@@ -116,7 +116,7 @@ export function ModelPicker({
   contained?: boolean;
   label?: ReactNode;
 }) {
-  const { state, dispatch, refreshInstances } = useStore();
+  const { state, dispatch, refreshInstances, refreshModels: refreshInstanceModels } = useStore();
   const [open, setOpen] = useState(false);
   const [railId, setRailId] = useState<string | null>(null);
   const [pane, setPane] = useState<"main" | "custom">("main");
@@ -131,7 +131,7 @@ export function ModelPicker({
   const railInstance =
     state.instances.find((instance) => instance.instanceId === (railId ?? selection.instanceId)) ?? state.instances[0];
 
-  const refreshModels = useCallback(() => {
+  const refreshLocalInstances = useCallback(() => {
     if (refreshingRef.current) return;
     refreshingRef.current = true;
     setRefreshing(true);
@@ -145,9 +145,29 @@ export function ModelPicker({
       });
   }, [refreshInstances]);
 
+  const refreshModels = useCallback(() => {
+    if (refreshingRef.current) return;
+    refreshingRef.current = true;
+    setRefreshing(true);
+    const instanceId = railId ?? selection.instanceId;
+    void refreshInstances()
+      .then(() => refreshInstanceModels(instanceId))
+      .catch(() => {
+        // Keep the last known catalog when the app is temporarily offline.
+      })
+      .finally(() => {
+        refreshingRef.current = false;
+        setRefreshing(false);
+      });
+  }, [railId, refreshInstanceModels, refreshInstances, selection.instanceId]);
+
   useEffect(() => {
-    if (open) refreshModels();
-  }, [open, refreshModels]);
+    if (open) refreshLocalInstances();
+  }, [open, refreshLocalInstances]);
+
+  useEffect(() => {
+    if (bot.busy) setOpen(false);
+  }, [bot.busy]);
 
   useEffect(() => {
     if (!open) return;
@@ -191,6 +211,7 @@ export function ModelPicker({
   };
 
   const pick = (instance: InstanceInfo, model: string) => {
+    if (bot.busy) return;
     const sameInstance = instance.instanceId === selection.instanceId;
     const nextSelection: ModelSelection = {
       instanceId: instance.instanceId,
@@ -236,7 +257,9 @@ export function ModelPicker({
   const trigger = (
     <button
       type="button"
+      disabled={Boolean(bot.busy)}
       onClick={() => {
+        if (bot.busy) return;
         setRailId(selection.instanceId);
         setOpen((wasOpen) => {
           const next = !wasOpen;
@@ -244,17 +267,19 @@ export function ModelPicker({
           return next;
         });
       }}
-      aria-expanded={open}
+      aria-expanded={open && !bot.busy}
       aria-haspopup="dialog"
       className={cn(
-        "flex items-center gap-1.5 rounded-full border border-hairline/40 bg-control/60 py-1 pl-2 pr-2.5 text-[13px] text-ink hover:bg-raised-hover",
+        "flex items-center gap-1.5 rounded-full border border-hairline/40 bg-control/60 py-1 pl-2 pr-2.5 text-[13px] text-ink hover:bg-raised-hover disabled:cursor-not-allowed disabled:opacity-50 disabled:hover:bg-control/60",
         // in a narrow chat header fold to a rounded square with just the
         // provider mark; the model name rides the tooltip (a bot with no
         // resolved engine keeps its label — the mark is what would hide it)
         !contained && active && COMPACT_SQUARE,
       )}
       title={
-        active
+        bot.busy
+          ? "Stop this bot's turn before changing its model"
+          : active
           ? `${active.displayName} · ${modelLabel(active, selection.model)}${
               modelProvider(active, selection.model) ? ` · ${modelProvider(active, selection.model)}` : ""
             }`
@@ -290,7 +315,7 @@ export function ModelPicker({
         trigger
       )}
 
-      {open && (
+      {open && !bot.busy && (
         <div
           data-model-picker-content
           role="dialog"
@@ -307,7 +332,7 @@ export function ModelPicker({
               const { subscription, custom: local } = splitEngineRail(state.instances);
               const railButton = (instance: InstanceInfo) => {
                 const selected = instance.instanceId === railInstance?.instanceId;
-                const attention = needsCli(instance) || needsSignIn(instance);
+                const attention = needsCli(instance) || needsSignIn(instance) || Boolean(instance.snapshot.update);
                 return (
                   <button
                     type="button"
@@ -429,6 +454,9 @@ export function ModelPicker({
                     <div className="min-h-0 flex-1 overflow-y-auto px-2 pb-2">
                       {pane === "main" ? (
                         <>
+                          {railInstance.snapshot.update && (
+                            <EngineUpdateNotice update={railInstance.snapshot.update} className="mx-1 mb-2" />
+                          )}
                           <EngineGroupLabel className="px-2 pb-1 pt-0.5">
                             {query ? `${filteredOfficial.length} results` : showAll ? `All models · ${official.length}` : "Suggested"}
                           </EngineGroupLabel>

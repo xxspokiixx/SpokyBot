@@ -25,6 +25,7 @@ const validPackage: any = {
         description: "Own the brief.",
         appearance: { color: "purple" },
         playbooks: ["source-check"],
+        approvalMode: "full",
         autoApprove: true,
       },
     ],
@@ -54,6 +55,7 @@ describe("bot packages", () => {
   it("parses the complete portable structure and strips authority fields", () => {
     const parsed = parseBotPackage(validPackage);
     expect(parsed.package.rooms![0]?.defaultResponder).toEqual({ kind: "agent", agent: "lead" });
+    expect(parsed.package.agents[0]).not.toHaveProperty("approvalMode");
     expect(parsed.package.agents[0]).not.toHaveProperty("autoApprove");
     expect(packageAgentAsMember(parsed.package.agents[0]!)).toEqual({
       key: "lead",
@@ -69,6 +71,7 @@ describe("bot packages", () => {
     expect(markdown).toContain("## Activation");
     expect(markdown).toContain("Give this file to your Chief of Staff");
     expect(markdown).not.toContain("autoApprove");
+    expect(markdown).not.toContain("approvalMode");
     expect(parseBotPackage(markdown).package).toMatchObject({
       id: "research-desk",
       chiefOfStaff: "lead",
@@ -100,6 +103,50 @@ describe("bot packages", () => {
         routines: [{ ...routine, durationMinutes: 4 }],
       },
     })).toThrow(/expected number to be >=5/);
+  });
+
+  it("round-trips interval routine schedules", () => {
+    const document = {
+      ...validPackage,
+      package: {
+        ...validPackage.package,
+        routines: [{
+          key: "frequent-check",
+          name: "Frequent check",
+          agent: "lead",
+          prompt: "Check the queue.",
+          runOn: "maus",
+          schedule: { type: "interval", everyMinutes: 15, anchorAt: 1_788_254_400_000 },
+          durationMinutes: 30,
+          timeoutMinutes: 20,
+          enabledAfterInstall: false,
+        }],
+      },
+    };
+
+    const parsed = parseBotPackage(document);
+    expect(parsed.package.routines?.[0]?.schedule).toEqual({
+      type: "interval",
+      everyMinutes: 15,
+      anchorAt: 1_788_254_400_000,
+    });
+    expect(parsed.package.routines?.[0]?.timeoutMinutes).toBe(20);
+    expect(renderBotPackageMarkdown(parsed)).toContain("every 15 minutes");
+    expect(renderBotPackageMarkdown(parsed)).toContain("**Run limit:** 20 minutes");
+    expect(() => parseBotPackage({
+      ...document,
+      package: {
+        ...document.package,
+        routines: [{
+          ...document.package.routines[0],
+          schedule: {
+            type: "interval",
+            everyMinutes: 15,
+            anchorAt: Number.MAX_SAFE_INTEGER,
+          },
+        }],
+      },
+    })).toThrow();
   });
 
   it("rejects dangling agent, room, playbook, chief, and routine references", () => {

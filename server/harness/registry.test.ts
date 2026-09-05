@@ -149,7 +149,7 @@ describe("ProviderRegistry", () => {
     expect((await registry.describe())[0].capabilities.approvalReview).toBe(true);
   });
 
-  it("refreshes a live model catalog before returning each description", async () => {
+  it("refreshes a live model catalog only on an explicit provider action", async () => {
     const fake = makeFakeDriver();
     const registry = new ProviderRegistry([fake.driver]);
     await registry.load({ a: { driver: "fake" }, b: { driver: "fake" } });
@@ -168,10 +168,14 @@ describe("ProviderRegistry", () => {
       });
     }
 
+    await registry.refreshModels("a");
+    await registry.refreshModels("b");
     const first = Object.fromEntries((await registry.describe()).map((row) => [row.instanceId, row.models]));
     expect(first.a.default).toBe("a-1");
     expect(first.b.default).toBe("b-1");
 
+    await registry.refreshModels("a");
+    await registry.refreshModels("b");
     const second = Object.fromEntries((await registry.describe()).map((row) => [row.instanceId, row.models]));
     expect(second.a.default).toBe("a-2");
     expect(second.b.default).toBe("b-2");
