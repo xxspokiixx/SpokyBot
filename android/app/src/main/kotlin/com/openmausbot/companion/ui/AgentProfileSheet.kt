@@ -552,7 +552,7 @@ internal fun AgentProfileSheet(bot: Bot, onDismiss: () -> Unit) {
 @OptIn(ExperimentalMaterial3Api::class)
 /** A SwiftUI `Picker` as Material draws one: a read-only field that opens a menu. */
 @Composable
-private fun ChoicePicker(
+internal fun ChoicePicker(
     label: String,
     choices: List<VoiceChoice>,
     selected: String,
@@ -560,14 +560,14 @@ private fun ChoicePicker(
     enabled: Boolean = true,
 ) {
     var expanded by remember { mutableStateOf(false) }
-    val label = choices.firstOrNull { it.id == selected }?.label.orEmpty()
+    val selectedLabel = choices.firstOrNull { it.id == selected }?.label.orEmpty()
     ExposedDropdownMenuBox(
         expanded = expanded && enabled,
         onExpandedChange = { if (enabled) expanded = it },
         modifier = Modifier.fillMaxWidth(),
     ) {
         OutlinedTextField(
-            value = label,
+            value = selectedLabel,
             onValueChange = {},
             readOnly = true,
             enabled = enabled,
