@@ -3196,7 +3196,7 @@ describe("harness HTTP API", () => {
       for (const seeded of trustedBots) {
         const rejected = await isolatedApi("PATCH", `/api/bots/${seeded.id}/model`, targetSelection);
         expect(rejected.status, seeded.approvalMode).toBe(400);
-        expect(rejected.body.error).toMatch(/requires choosing Ask or Auto first/i);
+        expect(rejected.body.error).toMatch(/requires choosing Ask first/i);
         const unchanged = (await isolatedApi("GET", "/api/bots?messages=0")).body.bots.find(
           (candidate: { id: string }) => candidate.id === seeded.id,
         );

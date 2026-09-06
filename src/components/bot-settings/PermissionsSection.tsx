@@ -129,7 +129,7 @@ export function PermissionsSection({
         </div>
       </div>
 
-      <div className="rounded-xl bg-card p-4">
+      {!(engine?.driverKind === "antigravityAgent" && approvalMode === "full") && <div className="rounded-xl bg-card p-4">
         <div className="text-[15px] font-medium text-ink">Review routine approvals</div>
         <div className="mt-0.5 text-[13px] text-ink-secondary">
           {approvalMode === "custom"
@@ -172,7 +172,7 @@ export function PermissionsSection({
             );
           })}
         </div>
-      </div>
+      </div>}
 
       <LocalComputerAutoWarning
         open={localAutoWarning !== null}

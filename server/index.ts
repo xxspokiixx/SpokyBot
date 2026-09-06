@@ -2903,18 +2903,23 @@ bus.subscribe((event: RuntimeEvent) => {
       // the guards in auto-approve.ts; explicitly acknowledged Full does not.
       const asker = bot ?? (speaker ? store.bot(speaker.botId) : undefined);
       const unattended = permission && asker && event.requestId ? isUnattended(asker.id) : false;
+      const effectiveApprovalMode = asker ? approvalModeForTurn(asker, isInternalTurn(event.threadId)) : "ask";
       const verdict = permission && asker && event.requestId
         ? autoVerdict({
             // the same origin the dispatch used, so a peer-started turn's
             // residual asks are judged as Approve for me here too
-            approvalMode: approvalModeForTurn(asker, isInternalTurn(event.threadId)),
+            approvalMode: effectiveApprovalMode,
             autoApprove: false,
             alwaysAllow: asker.alwaysAllow,
           }, event.tool, event.summary, {
             unattended,
             scope: event.approvalScope,
             requiresExplicitApproval: event.requiresExplicitApproval,
-            nativeApproval: requiresNativeApproval(event.provider, approvalModeForTurn(asker)),
+            // Antigravity's residual asks must use a peer-started turn's
+            // effective safe Auto mode, not its durable Full grant.
+            // Preserve the existing policy of every other provider.
+            nativeApproval: requiresNativeApproval(event.provider, event.provider === "antigravityAgent"
+              ? effectiveApprovalMode : approvalModeForTurn(asker)),
           })
         : null;
       if (verdict?.approve && asker && event.requestId) {
@@ -10192,7 +10197,7 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
           registry.cliTarget(checked.selection.instanceId)?.driverKind !== registry.cliTarget(existing.modelSelection.instanceId)?.driverKind)
       ) {
         return json(res, 400, {
-          error: "Changing providers with elevated permissions requires choosing Ask or Auto first",
+          error: "Changing providers with elevated permissions requires choosing Ask first",
         });
       }
       // patchBot persists first and emits the canonical bot change, which the
@@ -10426,7 +10431,7 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
           (existingBot && normalizedSelection && registry.cliTarget(normalizedSelection.instanceId)?.driverKind !== registry.cliTarget(existingBot.modelSelection.instanceId)?.driverKind))
       ) {
         return json(res, 400, {
-          error: "This provider does not support the selected approval level, or changing providers requires choosing Ask or Auto first",
+          error: "This provider does not support the selected approval level, or changing providers requires choosing Ask first",
         });
       }
       const requiresPrivateApprovalTransition =
