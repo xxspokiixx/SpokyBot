@@ -67,6 +67,30 @@ pins, run preparation/tests and the native package gates, and ship promptly
 when browser security updates are needed. There is no independent automatic
 browser updater in the desktop bundle.
 
+### Temporary Windows engine backport
+
+Windows uses an explicitly identified OpenMausBot build of agent-browser
+0.36.0, with the handle-inheritance fix from
+[upstream PR #1781](https://github.com/vercel-labs/agent-browser/pull/1781).
+The original binary can hang when a newly started background browser holds
+the tool call's output connection open. The backport changes that Windows
+startup behavior; it does not include the PR's broader output-reader rewrite
+or unrelated changes from upstream main.
+
+The artifact-only **Windows browser vendor build** workflow builds the pinned
+source and checked-in patch, retains the licenses and build provenance, and
+tests cold start plus close/reopen through the same MCP connection on Windows.
+Its candidate must be reviewed and its exact size and SHA-256 pinned before
+the normal application packaging workflow consumes it. Candidate testing does
+not replace the packaged-app tests. Published vendor bytes must not be
+overwritten; a changed build needs a new revision and reviewed pins.
+
+The Windows revision has a separate managed installation directory so an old
+0.36.0 download is not mistaken for the patched engine. Desktop packages use
+their bundled engine. Explicit executable overrides remain user-managed.
+Remove the backport when an official release includes the fix and passes the
+same native cold-start and restart tests.
+
 Complete upstream notices and provenance are in
 [`third_party/browser`](../third_party/browser/README.md). The full Google
 Chrome distribution and its proprietary Widevine component are not bundled.

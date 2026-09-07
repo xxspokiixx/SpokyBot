@@ -8,18 +8,21 @@ import { once } from "node:events";
 import { mkdtemp, mkdir, readFile, readdir, rm, stat } from "node:fs/promises";
 import { createServer } from "node:http";
 import { tmpdir } from "node:os";
-import { isAbsolute, join, resolve } from "node:path";
+import { dirname, isAbsolute, join, resolve } from "node:path";
 import { createInterface } from "node:readline";
 import { parseArgs } from "node:util";
 import { inflateSync } from "node:zlib";
 import { browserBundlePaths, browserBundleSpec } from "../server/browser-bundle-release.ts";
+import { executableTarget } from "./prepare-cloudflared.mjs";
+import { WINDOWS_VENDOR_VERSION, verifyVendorCandidate, verifyVendorPatch } from "./build-windows-browser-vendor.mjs";
 
 const { values } = parseArgs({ options: {
   resources: { type: "string" }, target: { type: "string" },
+  "engine-candidate": { type: "string" },
   "check-only": { type: "boolean", default: false }, help: { type: "boolean" },
 } });
 if (values.help) {
-  console.log("Usage: node scripts/smoke-browser-bundle.mjs --resources /absolute/app/resources [--target darwin-arm64] [--check-only]");
+  console.log("Usage: node scripts/smoke-browser-bundle.mjs --resources /absolute/app/resources [--target darwin-arm64] [--check-only] [--engine-candidate /absolute/vendor/agent-browser-win32-x64.exe]");
   process.exit(0);
 }
 assert(values.resources && isAbsolute(values.resources), "--resources must be an absolute packaged Resources/resources directory");
@@ -37,6 +40,26 @@ for (const component of ["engine", "chrome"]) {
 assert((await readdir(paths.licenses)).length > 0, "Missing bundled third-party notices");
 assert((await stat(join(paths.directory, spec.chrome.license))).size > 0, "Missing Chromium license");
 assert((await stat(join(paths.directory, spec.chrome.about))).size > 0, "Missing Chromium notice");
+let enginePath = paths.engine;
+let engineVersionExpected = spec.engine.version;
+if (values["engine-candidate"] !== undefined) {
+  // Only the artifact-only vendor workflow uses this explicit mode. Standard
+  // app release calls still discover and execute the bundled, pinned engine.
+  assert.equal(process.platform, "win32", "Windows vendor candidates require a native Windows runner");
+  assert.equal(target, "win32-x64");
+  assert(!values["check-only"], "A candidate must execute the native browser checks");
+  assert(isAbsolute(values["engine-candidate"]), "--engine-candidate must be absolute");
+  enginePath = resolve(values["engine-candidate"]);
+  const candidateDirectory = dirname(enginePath);
+  const candidateBytes = await readFile(enginePath);
+  verifyVendorCandidate(JSON.parse(await readFile(join(candidateDirectory, "provenance.json"), "utf8")), candidateBytes);
+  verifyVendorPatch(await readFile(join(candidateDirectory, "agent-browser-windows-stdio.patch")));
+  assert.equal(executableTarget(candidateBytes), "win32-x64");
+  for (const license of ["agent-browser-LICENSE.txt", "LICENSE-axe-core.txt", "LICENSE-axe-core-THIRD-PARTY.txt"]) {
+    assert.deepEqual(await readFile(join(candidateDirectory, license)), await readFile(join(paths.licenses, license)), `Candidate changed upstream notice ${license}`);
+  }
+  engineVersionExpected = WINDOWS_VENDOR_VERSION;
+}
 // Signing changes Mach-O bytes. Source-archive digests are checked before signing;
 // this gate checks the final layout, versions, and real browser behavior instead.
 if (values["check-only"]) {
@@ -73,6 +96,7 @@ const env = {
   XDG_DATA_HOME: join(fixture, "data"), XDG_RUNTIME_DIR: join(fixture, "run"),
   TMPDIR: join(fixture, "tmp"), TMP: join(fixture, "tmp"), TEMP: join(fixture, "tmp"),
   OMB_DATA_DIR: join(fixture, "omb"), OMB_RESOURCES_PATH: resolve(values.resources),
+  ...(values["engine-candidate"] ? { OMB_AGENT_BROWSER_PATH: enginePath, AGENT_BROWSER_EXECUTABLE_PATH: paths.chrome } : {}),
   // macOS's per-user temp directory is long; keep Unix socket paths <104 bytes.
   AGENT_BROWSER_SOCKET_DIR: join(fixture, "s"),
   AGENT_BROWSER_DEFAULT_TIMEOUT: "15000", LANG: "en_US.UTF-8", NO_COLOR: "1",
@@ -216,6 +240,23 @@ function pngInfo(buffer) {
   return { width, height, bytes: buffer.length, sha256: createHash("sha256").update(buffer).digest("hex") };
 }
 
+async function ownedDaemonPid(client) {
+  const session = client.integration.env.AGENT_BROWSER_SESSION;
+  const value = (await readFile(join(env.AGENT_BROWSER_SOCKET_DIR, `${session}.pid`), "utf8")).trim();
+  assert(/^[1-9][0-9]*$/.test(value), "Owned browser daemon did not record a valid PID");
+  return Number(value);
+}
+
+async function waitForOwnedDaemonExit(pid) {
+  const deadline = Date.now() + 10_000;
+  while (Date.now() < deadline) {
+    try { process.kill(pid, 0); }
+    catch (error) { if (error.code === "ESRCH") return; throw error; }
+    await new Promise((done) => setTimeout(done, 25));
+  }
+  throw new Error(`Owned browser daemon ${pid} did not exit after close`);
+}
+
 const interrupt = () => { for (const proc of children) proc.kill("SIGTERM"); };
 process.once("SIGINT", interrupt);
 process.once("SIGTERM", interrupt);
@@ -223,10 +264,10 @@ try {
   const { browserEngineStatus, agentBrowserIntegration } = await import("../server/browser-engine.ts");
   const status = browserEngineStatus({ dataDir: env.OMB_DATA_DIR, env });
   assert.equal(status.kind, "ready", `Fresh-home runtime did not discover the bundle: ${JSON.stringify(status)}`);
-  assert.equal(resolve(status.binaryPath), resolve(paths.engine), "Runtime fell back to an unbundled engine");
-  const engineVersion = await run(paths.engine, ["--version"], env);
+  assert.equal(resolve(status.binaryPath), resolve(enginePath), "Runtime did not select the engine under test");
+  const engineVersion = await run(enginePath, ["--version"], env);
   const chromeVersion = await run(paths.chrome, ["--version"], env);
-  assert(engineVersion.includes(spec.engine.version), `Unexpected engine version: ${engineVersion}`);
+  assert.equal(engineVersion, `agent-browser ${engineVersionExpected}`, `Unexpected engine version: ${engineVersion}`);
   assert(chromeVersion.includes(spec.chrome.version), `Unexpected Chromium version: ${chromeVersion}`);
 
   const title = `OpenMausBot bundled browser ${randomBytes(6).toString("hex")}`;
@@ -266,13 +307,28 @@ try {
   assert.deepEqual((await beta.tool("agent_browser_eval", { script: storage })).data.result, { local: null, cookie: "" }, "Second bot inherited first bot's state");
   assert.deepEqual((await beta.tool("agent_browser_eval", { script: setStorage("beta") })).data.result, { local: "beta", cookie: "omb_smoke=beta" });
   assert.deepEqual((await alpha.tool("agent_browser_eval", { script: storage })).data.result, { local: "alpha", cookie: "omb_smoke=alpha" }, "First bot's state was overwritten by the second bot");
+  // Reopen through the SAME MCP process: warming a daemon before MCP would
+  // conceal the Windows inherited-pipe bug, which returns after a close.
+  const previousDaemonPid = await ownedDaemonPid(alpha);
+  await alpha.tool("agent_browser_close");
+  // Upstream acknowledges close before its delayed daemon shutdown. Wait for
+  // this exact owned process, otherwise reopen could race the old daemon.
+  await waitForOwnedDaemonExit(previousDaemonPid);
+  await alpha.tool("agent_browser_open", { url });
+  assert.notEqual(await ownedDaemonPid(alpha), previousDaemonPid, "Reopen reused the closed daemon");
+  assert.equal((await alpha.tool("agent_browser_get_title")).data.title, title);
+  assert.deepEqual((await alpha.tool("agent_browser_eval", { script: storage })).data.result, { local: null, cookie: "" }, "Guest state was restored after close");
+  assert.deepEqual((await beta.tool("agent_browser_eval", { script: storage })).data.result, { local: "beta", cookie: "omb_smoke=beta" }, "Restarting the first bot changed the second bot's state");
+  await alpha.tool("agent_browser_fill", { selector: "#message", text: "Reopened browser works" });
+  await alpha.tool("agent_browser_click", { selector: "#submit" });
+  assert.equal((await alpha.tool("agent_browser_get_text", { selector: "#result" })).data.text, "Reopened browser works");
   const screenshotPath = join(fixture, "browser.png");
   const screenshot = await alpha.tool("agent_browser_screenshot", { path: screenshotPath });
   const image = screenshot.content.find((item) => item.type === "image" && item.mimeType === "image/png");
   assert(image?.data, "MCP did not return the screenshot image to the agent");
   const screenshotInfo = pngInfo(await readFile(screenshotPath));
   assert.deepEqual(pngInfo(Buffer.from(image.data, "base64")), screenshotInfo, "MCP image differs from screenshot file");
-  report = { ok: true, target, engineVersion, chromeVersion, checks: ["fresh-home auto-discovery", "real MCP navigation", "title", "input and click", "PNG screenshot", "two-bot cookie and localStorage isolation"], screenshot: screenshotInfo };
+  report = { ok: true, target, engineMode: values["engine-candidate"] ? "vendor-candidate" : "packaged", engineVersion, chromeVersion, checks: ["fresh-home auto-discovery", "real MCP cold-start navigation", "title", "input and click", "same-MCP close and reopen", "PNG screenshot after restart", "two-bot cookie and localStorage isolation"], screenshot: screenshotInfo };
 } catch (error) {
   failure = error;
   try { await failureDiagnostics(); } catch (diagnosticError) {

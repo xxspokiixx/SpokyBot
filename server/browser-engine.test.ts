@@ -71,6 +71,7 @@ describe("finding the browser engine", () => {
     const spec = agentBrowserIntegration({ binaryPath: bundle.engine, session: "isolated", encryptionKey: "key", env });
     expect(spec.env.AGENT_BROWSER_EXECUTABLE_PATH).toBe(bundle.chrome);
     expect(spec.env.AGENT_BROWSER_SESSION).toBe("isolated");
+    expect(spec.env.AGENT_BROWSER_NO_WEBMCP).toBe("1");
     expect(spec.env).not.toHaveProperty("OMB_RESOURCES_PATH");
     const override = agentBrowserIntegration({ binaryPath: bundle.engine, session: "isolated", encryptionKey: "key", env: { ...env, AGENT_BROWSER_EXECUTABLE_PATH: "/explicit/chrome" } });
     expect(override.env.AGENT_BROWSER_EXECUTABLE_PATH).toBe("/explicit/chrome");
@@ -160,11 +161,11 @@ describe("what a bot gets", () => {
         PATH: "/usr/bin", AGENT_BROWSER_EXECUTABLE_PATH: "/opt/trusted chrome/chrome",
         PRIVATE_WORKSPACE_SECRET: "synthetic-secret",
         AGENT_BROWSER_SESSION: "wrong-session", AGENT_BROWSER_ENCRYPTION_KEY: "wrong-key",
-        AGENT_BROWSER_ARGS: "--no-sandbox",
+        AGENT_BROWSER_ARGS: "--no-sandbox", AGENT_BROWSER_NO_WEBMCP: "0",
       },
     });
     expect(spec.env).toEqual({
-      AGENT_BROWSER_SESSION: "bot-1", AGENT_BROWSER_RESTORE: "bot-1",
+      AGENT_BROWSER_SESSION: "bot-1", AGENT_BROWSER_NO_WEBMCP: "1", AGENT_BROWSER_RESTORE: "bot-1",
       AGENT_BROWSER_RESTORE_SAVE: "auto", AGENT_BROWSER_ENCRYPTION_KEY: "session-key",
       AGENT_BROWSER_HEADLESS: "1", PATH: "/usr/bin",
       AGENT_BROWSER_EXECUTABLE_PATH: "/opt/trusted chrome/chrome",
@@ -177,7 +178,7 @@ describe("what a bot gets", () => {
     vi.stubEnv("PRIVATE_WORKSPACE_SECRET", "synthetic-process-secret");
     const spec = agentBrowserIntegration({ binaryPath: "/x/agent-browser", session: "bot-1", encryptionKey: "session-key" });
     expect(spec.env).toEqual({
-      AGENT_BROWSER_SESSION: "bot-1", AGENT_BROWSER_RESTORE: "bot-1",
+      AGENT_BROWSER_SESSION: "bot-1", AGENT_BROWSER_NO_WEBMCP: "1", AGENT_BROWSER_RESTORE: "bot-1",
       AGENT_BROWSER_RESTORE_SAVE: "auto", AGENT_BROWSER_ENCRYPTION_KEY: "session-key",
       AGENT_BROWSER_HEADLESS: "1", PATH: "/usr/bin",
       AGENT_BROWSER_EXECUTABLE_PATH: "/opt/process-chrome/chrome",

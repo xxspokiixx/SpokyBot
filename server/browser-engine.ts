@@ -209,6 +209,10 @@ export function agentBrowserIntegration(input: {
 }): { command: string; args: string[]; env: Record<string, string> } {
   const env: Record<string, string> = {
     AGENT_BROWSER_SESSION: input.session,
+    // The MCP server invokes child CLI commands without forwarding its own
+    // global flags. The environment keeps page-provided tools disabled in
+    // those commands too, and avoids changing browser launch settings later.
+    AGENT_BROWSER_NO_WEBMCP: "1",
     // This is a restore *name*, not a boolean. "1" would give every bot
     // the same saved cookies despite using different daemon sessions.
     AGENT_BROWSER_RESTORE: input.session,

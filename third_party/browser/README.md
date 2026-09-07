@@ -1,6 +1,6 @@
 # Bundled bot browser: upstream provenance and notices
 
-The desktop application ships two separate, unmodified upstream components:
+The desktop application ships two separate components:
 
 - **agent-browser 0.36.0**, official Vercel release executables from
   <https://github.com/vercel-labs/agent-browser/releases/tag/v0.36.0>.
@@ -9,6 +9,20 @@ The desktop application ships two separate, unmodified upstream components:
   included as `LICENSE-axe-core.txt` and `LICENSE-axe-core-THIRD-PARTY.txt`.
   These files are copied from the same `v0.36.0` source tag; there is no
   root-level NOTICE in that tag.
+- **Windows exception: agent-browser 0.36.0-omb.1** is an OpenMausBot vendor
+  build, not an official or unmodified Vercel executable. It starts from exact
+  v0.36.0 commit `eb05921bad874cd2a1b4fa5d1149f1ed26576cae` and carries only
+  the Windows handle-inheritance fix contributed by `holny` in upstream
+  [PR1781](https://github.com/vercel-labs/agent-browser/pull/1781), commit
+  `81a98c349d04195396ffae6898bd375ad64280de`. The separate MCP output-reader
+  rewrite is deliberately excluded. `agent-browser-windows-stdio.patch`
+  includes the exact changes and modification notices, plus package-version
+  metadata; dependency versions remain locked. The original Apache and axe
+  notices remain unchanged. `scripts/build-windows-browser-vendor.mjs` pins
+  the source archive, patch, Rust 1.97.1, pnpm 11.1.3 and Windows GNU target,
+  builds the real upstream dashboard, and emits executable and build-input
+  digests in `provenance.json`. Native Windows cold-start and close/reopen
+  checks are required before those executable bytes are published and pinned.
 - **Chromium Headless Shell 152.0.7977.82**, Google's official
   `chrome-headless-shell` assets published through Chrome for Testing:
   <https://googlechromelabs.github.io/chrome-for-testing/152.0.7977.82.json>.
