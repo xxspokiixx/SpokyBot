@@ -247,7 +247,6 @@ export function BotSettingsDialog({ bot }: { bot: Bot }) {
         aria-modal="true"
         aria-labelledby="bot-settings-title"
         tabIndex={-1}
-        onMouseDown={(e) => e.stopPropagation()}
         className="flex h-[min(640px,calc(100vh-3rem))] w-full max-w-[860px] overflow-hidden rounded-2xl border border-hairline/50 bg-panel shadow-2xl outline-none"
       >
         {/* section nav */}
@@ -283,7 +282,6 @@ export function BotSettingsDialog({ bot }: { bot: Bot }) {
             )}
             {visibleSections.map(({ id, label, icon: Icon }) => (
               <button
-                type="button"
                 key={id}
                 onClick={() => dispatch({ type: "toggleSettings", open: true, section: id })}
                 aria-current={section === id ? "page" : undefined}
@@ -312,10 +310,6 @@ export function BotSettingsDialog({ bot }: { bot: Bot }) {
             <button
               type="button"
               onClick={() => dispatch({ type: "toggleSettings", open: false })}
-              onMouseDown={(e) => {
-                e.stopPropagation();
-                dispatch({ type: "toggleSettings", open: false });
-              }}
               aria-label="Close settings"
               className="rounded-md p-1 text-ink-secondary hover:bg-control hover:text-ink"
             >
