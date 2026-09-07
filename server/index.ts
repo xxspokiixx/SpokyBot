@@ -1250,8 +1250,8 @@ async function botOverview(bot: BotRecord): Promise<BotOverview> {
 /** Defense in depth for hand-edited/corrupt durable records: elevated
  * approval semantics require an implemented provider mapping. The trusted transition enforces
  * this too, but no provider dispatch or later permission callback relies on
- * persistence having been produced exclusively by that route. And a turn
- * another bot started never runs as Full — see approvalModeForOrigin. */
+ * persistence having been produced exclusively by that route. Delegation
+ * uses the receiving bot's grant, never the sender's — see approvalModeForOrigin. */
 const approvalModeForTurn = (bot: BotRecord, peerInitiated = false): ApprovalMode => {
   const mode = approvalModeForOrigin(approvalModeFor(bot), { peerInitiated });
   if (!supportsApprovalMode(registry.cliTarget(bot.modelSelection.instanceId)?.driverKind, mode)) {
@@ -2908,8 +2908,7 @@ bus.subscribe((event: RuntimeEvent) => {
       const effectiveApprovalMode = asker ? approvalModeForTurn(asker, isInternalTurn(event.threadId)) : "ask";
       const verdict = permission && asker && event.requestId
         ? autoVerdict({
-            // the same origin the dispatch used, so a peer-started turn's
-            // residual asks are judged as Approve for me here too
+            // Use the same receiving-bot mode as the provider dispatch.
             approvalMode: effectiveApprovalMode,
             autoApprove: false,
             alwaysAllow: asker.alwaysAllow,
@@ -2917,11 +2916,9 @@ bus.subscribe((event: RuntimeEvent) => {
             unattended,
             scope: event.approvalScope,
             requiresExplicitApproval: event.requiresExplicitApproval,
-            // Antigravity's residual asks must use a peer-started turn's
-            // effective safe Auto mode, not its durable Full grant.
-            // Preserve the existing policy of every other provider.
-            nativeApproval: requiresNativeApproval(event.provider, event.provider === "antigravityAgent"
-              ? effectiveApprovalMode : approvalModeForTurn(asker)),
+            // Match the dispatched mode for every provider, including
+            // delegated Custom and unattended Auto downgrades.
+            nativeApproval: requiresNativeApproval(event.provider, effectiveApprovalMode),
           })
         : null;
       if (verdict?.approve && asker && event.requestId) {
