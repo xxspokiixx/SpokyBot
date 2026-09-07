@@ -252,6 +252,7 @@ import {
   CREDENTIAL_PROMPT,
   LEARN_PROMPT,
   PROFILE_PROMPT,
+  TEAM_MEMORY_PROMPT,
   ROUTINE_PROMPT,
   WEBHOOK_PROMPT,
   type ComputerPromptKind,
@@ -295,6 +296,7 @@ import { isBotPackage, packageAgentAsMember, parseBotPackage, renderBotPackageMa
 import { createTeamManifest, importedMemberProfile, parseTeamManifest } from "./team-manifest.ts";
 import { readThreadEvents } from "./thread-events.ts";
 import { classifyError } from "./drivers/retry.ts";
+import { TeamMemory, TEAM_MEMORY_KINDS, type TeamMemoryKind } from "./team-memory.ts";
 import { describeTool, readBotActivity } from "./activity.ts";
 import { OutboundCounts } from "./outbound-counts.ts";
 import { OutboundRequestService } from "./outbound-requests.ts";
@@ -1175,6 +1177,7 @@ function previewSystemPrompt(bot: BotRecord) {
     { id: "routine", label: "Routines", text: agentsMounted ? ROUTINE_PROMPT : "" },
     { id: "profile", label: "Profile changes", text: agentsMounted ? PROFILE_PROMPT : "" },
     { id: "section-context", label: "Section context", text: sectionContextSystemPrompt(bot.section) },
+    { id: "team-memory", label: "Team memory", text: teamMemory.systemPrompt(bot.section) + (agentsMounted ? TEAM_MEMORY_PROMPT : "") },
     { id: "memory", label: "Memory", text: privateWorkspace ? memorySystemPrompt(bot.id) : "" },
     { id: "skills", label: "Skills index", text: privateWorkspace ? skillsSystemPrompt(bot.id) : "" },
   ]);
@@ -4448,6 +4451,7 @@ async function startTurn(
         { id: "profile", label: "Profile changes", text: profilePrompt },
         { id: "learn", label: "Skill authoring", text: learnPrompt },
         { id: "section-context", label: "Section context", text: sectionContextSystemPrompt(bot.section) },
+        { id: "team-memory", label: "Team memory", text: teamMemory.systemPrompt(bot.section) + (integrations.agents ? TEAM_MEMORY_PROMPT : "") },
         { id: "memory", label: "Memory", text: privateWorkspace ? memorySystemPrompt(bot.id) : "" },
         { id: "skills", label: "Skills index", text: privateWorkspace ? skillsSystemPrompt(bot.id) : "" },
         { id: "skill-instructions", label: "Skill instructions", text: skillInstructions },
@@ -4879,6 +4883,12 @@ const routineRequests = new RoutineRequestService({
 // on with the next entry in the bot's fallback chain. Hops are counted per
 // thread so a chain whose every engine is down stops after one pass rather
 // than looping; a successful turn resets the count.
+// ── team memory ──
+// People, places, decisions and terms every bot in a section shares. Bots
+// propose through propose_team_memory; places and terms land at once,
+// people and decisions wait for a card (team-memory.ts).
+const teamMemory = new TeamMemory(join(DATA_DIR, "team-memory.json"));
+
 const fallbackHops = new Map<string, number>();
 /** The last runtime.error text per thread, so the turn.completed fold can
  * read WHY the turn died: the terminal event itself carries only a stop
@@ -5601,6 +5611,7 @@ async function runGroupMemberTurn(
     { id: "browser", label: "Browser", text: integrations.browser ? BUILT_IN_BROWSER_SYSTEM_PROMPT : "" },
     { id: "recall", label: "Recall", text: integrations.agents ? SESSION_SEARCH_SYSTEM_PROMPT : "" },
     { id: "section-context", label: "Section context", text: sectionContextSystemPrompt(bot.section) },
+    { id: "team-memory", label: "Team memory", text: teamMemory.systemPrompt(bot.section) + (integrations.agents ? TEAM_MEMORY_PROMPT : "") },
     // the room path has always put a newline before memory and trimmed
     // the block's leading space; keep that so existing prompts are
     // byte-identical
@@ -7954,6 +7965,62 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
           source: "routine",
         });
         return json(res, 201, proposed);
+      }
+      if (method === "POST" && path === "/api/internal/team-memory") {
+        const parsed = z.object({
+          fromBotId: z.string().min(1).max(128),
+          fromThreadId: z.string().min(1).max(128),
+          kind: z.string(),
+          name: z.string(),
+          detail: z.string(),
+          aliases: z.array(z.string()).optional(),
+        }).strict().safeParse(await readInternalBody());
+        if (!parsed.success) return json(res, 400, { error: "invalid team memory proposal" });
+        const body = parsed.data;
+        const from = store.bot(body.fromBotId);
+        if (!from) return json(res, 403, { error: "unknown sender" });
+        const owner = connectorThread(from.id, body.fromThreadId);
+        if (!owner) return json(res, 403, { error: "source conversation does not belong to sender" });
+        if (!(TEAM_MEMORY_KINDS as readonly string[]).includes(body.kind)) {
+          return json(res, 400, { error: `kind must be one of ${TEAM_MEMORY_KINDS.join(", ")}` });
+        }
+        let proposed: ReturnType<TeamMemory["propose"]>;
+        try {
+          proposed = teamMemory.propose(
+            from.section,
+            { kind: body.kind as TeamMemoryKind, name: body.name, detail: body.detail, aliases: body.aliases },
+            { botId: from.id, botName: from.name, threadId: body.fromThreadId, at: Date.now() },
+          );
+        } catch (error) {
+          return json(res, 400, { error: error instanceof Error ? error.message : String(error) });
+        }
+        const summary = `${proposed.entry.kind[0].toUpperCase()}${proposed.entry.kind.slice(1)}: ${proposed.entry.name}${proposed.entry.aliases.length ? ` (also ${proposed.entry.aliases.join(", ")})` : ""} — ${proposed.entry.detail}`;
+        if (proposed.status !== "proposed") {
+          appendDecision(DATA_DIR, {
+            threadId: body.fromThreadId, botId: from.id, botName: from.name,
+            tool: "propose_team_memory", summary, decision: "auto-approved", source: "team-memory", rule: proposed.status,
+          });
+          return json(res, 201, { status: proposed.status, entryId: proposed.entry.id, summary });
+        }
+        const section = sectionContextKey(from.section);
+        const card = store.appendMessage(body.fromThreadId, {
+          role: "bot",
+          kind: "options",
+          ...(owner.group ? { from: { botId: from.id, name: from.name, color: from.color } } : {}),
+          card: {
+            title: "Remember this for the team?",
+            subtitle: summary,
+            options: ["Remember", "Skip"],
+            requestId: proposed.entry.id,
+            tool: "propose_team_memory",
+            teamMemoryRequest: { section, entryId: proposed.entry.id, kind: proposed.entry.kind },
+          },
+        });
+        appendDecision(DATA_DIR, {
+          threadId: body.fromThreadId, requestId: proposed.entry.id, botId: from.id, botName: from.name,
+          tool: "propose_team_memory", summary, decision: "card-shown", source: "team-memory",
+        });
+        return json(res, 201, { status: "proposed", requestId: proposed.entry.id, messageId: card.id, summary });
       }
       if (method === "POST" && path === "/api/internal/profile-requests") {
         const parsed = z.object({
@@ -11092,6 +11159,62 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
     // it. That keeps one bot from silently changing every teammate's future
     // turns. The section query parameter is required even for General (""),
     // so a malformed client cannot accidentally read or replace that brief.
+    // ── team memory: the section's shared people, places, decisions, terms ──
+    // The person's view and their edits. Same section rule as the brief:
+    // the query parameter is required even for General.
+    if (path === "/api/team-memory" && (method === "GET" || method === "POST")) {
+      if (!url.searchParams.has("section")) return json(res, 400, { error: "section is required" });
+      const section = sectionContextKey(url.searchParams.get("section") ?? "");
+      if (section.length > 60) return json(res, 400, { error: "section must be at most 60 characters" });
+      if (method === "GET") {
+        return json(res, 200, { section, label: sectionContextLabel(section), entries: teamMemory.list(section) });
+      }
+      const body = await readBody(req);
+      if (!body || typeof body !== "object" || !(TEAM_MEMORY_KINDS as readonly string[]).includes(String(body.kind))) {
+        return json(res, 400, { error: `kind must be one of ${TEAM_MEMORY_KINDS.join(", ")}` });
+      }
+      try {
+        const proposed = teamMemory.propose(
+          section,
+          { kind: body.kind as TeamMemoryKind, name: String(body.name ?? ""), detail: String(body.detail ?? ""), aliases: Array.isArray(body.aliases) ? body.aliases.map(String) : undefined },
+          { botId: "", botName: "you", threadId: "", at: Date.now() },
+        );
+        // the person's own entry never waits on the person
+        if (proposed.status === "proposed") teamMemory.resolve(section, proposed.entry.id, "accept");
+        return json(res, 201, { entries: teamMemory.list(section) });
+      } catch (error) {
+        return json(res, 400, { error: error instanceof Error ? error.message : String(error) });
+      }
+    }
+    m = path.match(/^\/api\/team-memory\/([\w-]+)$/);
+    if (m && (method === "PATCH" || method === "DELETE")) {
+      if (!url.searchParams.has("section")) return json(res, 400, { error: "section is required" });
+      const section = sectionContextKey(url.searchParams.get("section") ?? "");
+      if (method === "DELETE") {
+        if (!teamMemory.remove(section, m[1])) return json(res, 404, { error: "no such entry" });
+        return json(res, 200, { entries: teamMemory.list(section) });
+      }
+      const body = await readBody(req);
+      if (!body || typeof body !== "object") return json(res, 400, { error: "body must be a JSON object" });
+      if (body.accept === true) {
+        const result = teamMemory.resolve(section, m[1], "accept");
+        if (!result.claimed) return json(res, 404, { error: "no such entry" });
+        return json(res, 200, { entries: teamMemory.list(section) });
+      }
+      const patch: { name?: string; detail?: string; aliases?: string[]; kind?: TeamMemoryKind } = {};
+      if (typeof body.name === "string") patch.name = body.name;
+      if (typeof body.detail === "string") patch.detail = body.detail;
+      if (Array.isArray(body.aliases)) patch.aliases = body.aliases.map(String);
+      if (typeof body.kind === "string" && (TEAM_MEMORY_KINDS as readonly string[]).includes(body.kind)) patch.kind = body.kind as TeamMemoryKind;
+      try {
+        const updated = teamMemory.update(section, m[1], patch);
+        if (!updated) return json(res, 404, { error: "no such entry" });
+        return json(res, 200, { entry: updated, entries: teamMemory.list(section) });
+      } catch (error) {
+        return json(res, 400, { error: error instanceof Error ? error.message : String(error) });
+      }
+    }
+
     if (path === "/api/section-context" && (method === "GET" || method === "PUT")) {
       if (!url.searchParams.has("section")) return json(res, 400, { error: "section is required" });
       const requested = url.searchParams.get("section") ?? "";
@@ -11626,6 +11749,32 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
       const reviewedSha256 = typeof body.reviewedSha256 === "string" ? body.reviewedSha256 : undefined;
       if (!behavior) return json(res, 400, { error: "behavior must be allow, deny, or answer" });
       const requestId = String(body.requestId);
+      const teamMemoryCard = store.messagesFor(threadId).find(
+        (message) => message.card?.requestId === requestId && message.card.teamMemoryRequest,
+      );
+      if (teamMemoryCard?.card?.teamMemoryRequest) {
+        const request = teamMemoryCard.card.teamMemoryRequest;
+        const proposer = teamMemoryCard.from?.botId ? store.bot(teamMemoryCard.from.botId) : store.botByThread(threadId);
+        const result = teamMemory.resolve(request.section, request.entryId, behavior === "allow" ? "accept" : "reject");
+        if (!result.claimed) {
+          if (!teamMemoryCard.card.answered) {
+            store.patchMessage(threadId, teamMemoryCard.id, { card: { ...teamMemoryCard.card, answered: "unavailable", dismissed: true } });
+          }
+          return json(res, 200, { ok: true, outcome: "unavailable" });
+        }
+        if (result.state === "already_settled") {
+          return json(res, 200, { ok: true, outcome: "allowed-once", alreadySettled: true });
+        }
+        store.patchMessage(threadId, teamMemoryCard.id, {
+          card: { ...teamMemoryCard.card, answered: result.state === "accepted" ? "allow" : "deny" },
+        });
+        appendDecision(DATA_DIR, {
+          threadId, requestId, botId: proposer?.id, botName: proposer?.name,
+          tool: "propose_team_memory", summary: teamMemoryCard.card.subtitle,
+          decision: result.state === "accepted" ? "user-approved" : "user-denied", source: "user",
+        });
+        return json(res, 200, { ok: true, outcome: result.state === "accepted" ? "allowed-once" : "rejected" });
+      }
       const outboundCard = store.messagesFor(threadId).find(
         (message) => message.card?.requestId === requestId && message.card.outboundRequest,
       );

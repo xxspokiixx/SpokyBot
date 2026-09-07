@@ -8734,3 +8734,82 @@ describe("account profiles and fallback", () => {
     expectStoppedTestServerCleanly(isolatedChild, isolatedStderr);
   }, 60_000);
 });
+
+describe("team memory", () => {
+  // The section's shared people, places, decisions and terms. A bot
+  // proposes; a term lands at once, a person waits for a card; the person
+  // edits and deletes; every bot in the section reads it in its prompt.
+  const proposeAs = async (token: string, bot: { id: string; threadId: string }, body: Record<string, unknown>) => {
+    const response = await fetch(`${BASE}/api/internal/team-memory`, {
+      method: "POST",
+      headers: { "content-type": "application/json", authorization: `Bearer ${token}` },
+      body: JSON.stringify({ fromBotId: bot.id, fromThreadId: bot.threadId, ...body }),
+    });
+    return { status: response.status, body: (await response.json()) as any };
+  };
+
+  it("shares a term at once, holds a person for a card, and tells every bot in the prompt", async () => {
+    const bot = (await api("POST", "/api/bots", { name: "Scout" })).body.bot;
+    const teammate = (await api("POST", "/api/bots", { name: "Mate" })).body.bot;
+    try {
+      const token = await mintTestCapability(BASE, bot.id, bot.threadId);
+      const term = await proposeAs(token, bot, { kind: "term", name: "MCHQ", detail: "MissionControlHQ, the old name" });
+      expect(term.status).toBe(201);
+      expect(term.body.status).toBe("accepted");
+
+      const person = await proposeAs(token, bot, { kind: "person", name: "Ayush", detail: "Founder", aliases: ["Ayu"] });
+      expect(person.status).toBe(201);
+      expect(person.body.status).toBe("proposed");
+      const state = (await api("GET", "/api/bots")).body.bots.find((candidate: { id: string }) => candidate.id === bot.id);
+      const card = state.messages.find((message: { card?: { requestId?: string } }) => message.card?.requestId === person.body.requestId);
+      expect(card.card.title).toMatch(/remember/i);
+      expect(card.card.subtitle).toContain("Ayush");
+      expect(card.card.teamMemoryRequest).toMatchObject({ entryId: person.body.requestId, kind: "person" });
+
+      // not yet in anyone's prompt
+      let preview = JSON.stringify((await api("GET", `/api/bots/${teammate.id}/system-prompt`)).body);
+      expect(preview).toContain("MCHQ: MissionControlHQ");
+      expect(preview).not.toContain("Ayush");
+
+      const answered = await api("POST", `/api/threads/${bot.threadId}/respond`, { requestId: person.body.requestId, behavior: "allow" });
+      expect(answered.body).toMatchObject({ ok: true, outcome: "allowed-once" });
+      preview = JSON.stringify((await api("GET", `/api/bots/${teammate.id}/system-prompt`)).body);
+      expect(preview).toContain("Ayush (also: Ayu): Founder");
+
+      const listed = await api("GET", "/api/team-memory?section=");
+      expect(listed.body.entries.map((entry: { name: string; status: string }) => [entry.name, entry.status])).toEqual([
+        ["MCHQ", "accepted"],
+        ["Ayush", "accepted"],
+      ]);
+
+      await expect.poll(async () =>
+        (await api("GET", "/api/decisions")).body.decisions
+          .filter((decision: { botId?: string; tool?: string }) => decision.botId === bot.id && decision.tool === "propose_team_memory")
+          .map((decision: { decision: string; source: string }) => `${decision.decision}:${decision.source}`),
+      ).toEqual(["auto-approved:team-memory", "card-shown:team-memory", "user-approved:user"]);
+      expect((await proposeAs(token, bot, { kind: "rumor", name: "x", detail: "y" })).status).toBe(400);
+    } finally {
+      for (const entry of (await api("GET", "/api/team-memory?section=")).body.entries) {
+        await api("DELETE", `/api/team-memory/${entry.id}?section=`);
+      }
+      await api("DELETE", `/api/bots/${bot.id}`);
+      await api("DELETE", `/api/bots/${teammate.id}`);
+    }
+  });
+
+  it("lets the person add, edit, accept and delete entries", async () => {
+    const added = await api("POST", "/api/team-memory?section=Work", { kind: "person", name: "Bhanu", detail: "CTO" });
+    expect(added.status).toBe(201);
+    const entry = added.body.entries[0];
+    // the person's own entry never waits on the person
+    expect(entry.status).toBe("accepted");
+    const edited = await api("PATCH", `/api/team-memory/${entry.id}?section=Work`, { detail: "CTO, owns infra", aliases: ["B"] });
+    expect(edited.status).toBe(200);
+    expect(edited.body.entry).toMatchObject({ detail: "CTO, owns infra", aliases: ["B"] });
+    expect((await api("PATCH", `/api/team-memory/${entry.id}?section=Work`, { name: "" })).status).toBe(400);
+    expect((await api("GET", "/api/team-memory?section=")).body.entries.some((candidate: { id: string }) => candidate.id === entry.id)).toBe(false);
+    expect((await api("DELETE", `/api/team-memory/${entry.id}?section=Work`)).status).toBe(200);
+    expect((await api("DELETE", `/api/team-memory/${entry.id}?section=Work`)).status).toBe(404);
+    expect((await api("GET", "/api/team-memory")).status).toBe(400);
+  });
+});

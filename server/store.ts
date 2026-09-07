@@ -82,6 +82,9 @@ export interface OptionCardData {
   /** A connector call that would send something, held by the relay until
    * this card is answered (outbound-requests.ts). */
   outboundRequest?: { tool: string; app: string | null };
+  /** A person or decision a bot proposed for the section's team memory;
+   * the entry stays "proposed" until this card is answered (team-memory.ts). */
+  teamMemoryRequest?: { section: string; entryId: string; kind: string };
 }
 
 export interface ConnectorCardData {

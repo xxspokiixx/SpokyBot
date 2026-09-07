@@ -55,7 +55,9 @@ export type DecisionSource =
   /** the connector relay's outbound gate (shared/outbound.ts) */
   | "outbound"
   /** the connector relay's per-bot app scopes (shared/connector-scopes.ts) */
-  | "connector-scope";
+  | "connector-scope"
+  /** a bot proposed an entry for the section's team memory (team-memory.ts) */
+  | "team-memory";
 
 export interface DecisionRow {
   at: string;
