@@ -41,9 +41,14 @@ ssh root@YOUR_SERVER_IP
 No domain, no proxy, no open port. The server gets an address like `https://c-7f3a9c.openmausbot.com` through a Cloudflare tunnel; only traffic through the tunnel reaches it, and that traffic still has to pair.
 
 ```sh
+npx openmausbot setup          # once: choose AI access, connect, and choose a model
 npx openmausbot login          # once: an emailed code signs this machine in and reserves its address
 npx openmausbot serve --tunnel # runs the server there and prints the pairing link with a QR code
 ```
+
+`setup` connects an AI provider; it is separate from the OpenMausBot account.
+Use Codex's device-code option over SSH, or enter a hidden API key for a
+chat-only connection. More engines can be added later. See [CLI setup](cli-onboarding.md).
 
 `login` asks for your email, sends an 8-digit code, and prints the address it reserved for this machine. `serve --tunnel` downloads `cloudflared` on the first run (a pinned version with a verified digest, into `~/.openmausbot`), starts the server, connects the tunnel, and after a few seconds prints `tunnel: live at https://…`. Leave it running; see "Keep it running" for a service.
 

@@ -156,6 +156,7 @@ describe("pairing", () => {
     expect(opened.hint).toBeNull();
     const listed = await call("/api/auth/pairing");
     expect(listed.body.pairings.length).toBeGreaterThanOrEqual(1);
+    expect(listed.body.publicUrl).toBe(PUBLIC_URL);
   });
 
   it("refuses to mint or list codes from a client-only session", async () => {
