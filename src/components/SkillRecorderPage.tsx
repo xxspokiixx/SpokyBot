@@ -33,6 +33,7 @@ import {
   type RecordedSkillEvent,
 } from "@/lib/skill-recorder";
 import { requestScreenPreview, stopScreenPreview } from "@/lib/screen-preview";
+import { t } from "@/lib/i18n";
 import { TRANSCRIPTION_STATUS_EVENT } from "@/lib/transcription-status";
 import { useStore } from "@/state/store";
 
@@ -198,7 +199,7 @@ export function SkillRecorderPage() {
         beginIntent: () => window.ogb!.beginScreenPreviewIntent(),
         getDisplayMedia: (constraints) => navigator.mediaDevices.getDisplayMedia(constraints),
       });
-      if (!selected.ok) throw new Error(selected.message);
+      if (!selected.ok) throw new Error(t(selected.messageKey));
       screenRef.current = selected.stream;
       const video = videoRef.current;
       if (!video) throw new Error("The recorder preview is unavailable");
