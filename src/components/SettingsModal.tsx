@@ -282,27 +282,24 @@ function ExperimentalFeaturesRow() {
       });
       dispatch({ type: "configStatus", config });
     } catch (cause) {
-      setError(cause instanceof Error ? cause.message : "Could not save the experimental feature setting.");
+      setError(cause instanceof Error ? cause.message : t("settings.experimental.error"));
     } finally {
       setSaving(null);
     }
   };
 
   return (
-    <Card
-      title="Experimental features"
-      subtitle="Early features may change while we test them. They stay off unless you enable them."
-    >
+    <Card title={t("settings.experimental.title")} subtitle={t("settings.experimental.subtitle")}>
       <div className="flex items-center justify-between gap-4">
         <div className="min-w-0">
-          <div className="text-[14px] font-medium text-ink">Teach a skill</div>
+          <div className="text-[14px] font-medium text-ink">{t("settings.experimental.teachSkill")}</div>
           <div className="mt-0.5 text-[12px] leading-relaxed text-ink-secondary">
-            Record a workflow, use /learn, or ask a supported bot to run /create-verification-skill. Every change waits for your review.
+            {t("settings.experimental.teachSkillDetail")}
           </div>
         </div>
         <Switch
           checked={skillRecorder}
-          aria-label="Show Teach a skill"
+          aria-label={t("settings.experimental.teachSkillAria")}
           disabled={saving !== null}
           onClick={() => void toggle("skillRecorder", !skillRecorder)}
           className="disabled:cursor-wait disabled:opacity-50"
@@ -310,20 +307,20 @@ function ExperimentalFeaturesRow() {
       </div>
       <div className="mt-4 flex items-center justify-between gap-4 border-t border-hairline/30 pt-4">
         <div className="min-w-0">
-          <div className="text-[14px] font-medium text-ink">Built-in browser</div>
+          <div className="text-[14px] font-medium text-ink">{t("settings.experimental.browser")}</div>
           <div className="mt-0.5 text-[12px] leading-relaxed text-ink-secondary">
             {desktopBrowser
               ? browser
-                ? "Enabled for this workspace. Each bot also has its own browser switch."
-                : "Off by default. Enable it to let supported bots use a browser tab you can watch and take over."
+                ? t("settings.experimental.browserOn")
+                : t("settings.experimental.browserOff")
               : browserBlockedOnWindows
-                ? "Not available on this Windows machine yet: install the browser engine with `openmausbot browser install`."
+                ? t("settings.experimental.browserWindows")
                 : browserUnavailableReason(state.config)}
           </div>
         </div>
         <Switch
           checked={browser}
-          aria-label="Enable the built-in browser"
+          aria-label={t("settings.experimental.browserAria")}
           disabled={saving !== null || (!browser && !desktopBrowser && !browserInstallable)}
           onClick={() => void toggle("browser", !browser)}
           className="disabled:cursor-wait disabled:opacity-50"
@@ -356,7 +353,7 @@ function BrowserProfilesRow() {
       });
       dispatch({ type: "configStatus", config });
     } catch (cause) {
-      setError(cause instanceof Error ? cause.message : "Could not save browser profiles.");
+      setError(cause instanceof Error ? cause.message : t("settings.profiles.saveError"));
     } finally {
       setBusy(null);
       setRenaming(null);
@@ -373,9 +370,11 @@ function BrowserProfilesRow() {
       return;
     }
     const botSummary = referencedBots.length
-      ? ` ${referencedBots.length === 1 ? referencedBots[0]!.name : `${referencedBots.length} bots`} will switch to their own browser sessions.`
+      ? referencedBots.length === 1
+        ? t("settings.profiles.confirmOneBot", { name: referencedBots[0]!.name })
+        : t("settings.profiles.confirmManyBots", { count: referencedBots.length })
       : "";
-    if (!window.confirm(`Delete “${profile.name}”?${botSummary} This permanently signs out of this profile and erases its browser data.`)) {
+    if (!window.confirm(t("settings.profiles.confirm", { name: profile.name, bots: botSummary }))) {
       return;
     }
     setBusy(id);
@@ -394,7 +393,7 @@ function BrowserProfilesRow() {
       dispatch({ type: "configStatus", config });
       // The server clears the engine's saved session state for the profile itself.
     } catch (cause) {
-      setError(cause instanceof Error ? cause.message : "Could not delete the browser profile.");
+      setError(cause instanceof Error ? cause.message : t("settings.profiles.deleteError"));
     } finally {
       setBusy(null);
     }
@@ -410,12 +409,9 @@ function BrowserProfilesRow() {
   const usersOf = (id: string) => state.bots.filter((bot) => !bot.hidden && bot.browserProfile === id).map((bot) => bot.name);
 
   return (
-    <Card
-      title="Browser profiles"
-      subtitle="Named sign-in sessions any bot can use. Create one from a bot's Browser tab; sign in once and it stays."
-    >
+    <Card title={t("settings.profiles.title")} subtitle={t("settings.profiles.subtitle")}>
       {profiles.length === 0 ? (
-        <div className="text-[13px] text-ink-secondary">No profiles yet — pick "+ Add profile…" under a bot's browser.</div>
+        <div className="text-[13px] text-ink-secondary">{t("settings.profiles.empty")}</div>
       ) : (
         <div className="flex flex-col divide-y divide-hairline/30">
           {profiles.map((profile) => {
@@ -439,13 +435,13 @@ function BrowserProfilesRow() {
                         onChange={(event) => setRenaming({ id: profile.id, name: event.target.value })}
                         maxLength={40}
                         className="rounded-md bg-inset px-2 py-1 text-[13px] text-ink outline-none"
-                        aria-label="Profile name"
+                        aria-label={t("settings.profiles.nameAria")}
                       />
                       <button type="submit" disabled={busy !== null} className="rounded-md bg-accent px-2.5 py-1 text-[12px] font-medium text-accent-ink disabled:opacity-50">
-                        Save
+                        {t("common.save")}
                       </button>
                       <button type="button" onClick={() => setRenaming(null)} className="text-[12px] text-ink-secondary hover:text-ink">
-                        Cancel
+                        {t("common.cancel")}
                       </button>
                     </form>
                   ) : (
@@ -453,13 +449,15 @@ function BrowserProfilesRow() {
                       type="button"
                       onClick={() => setRenaming({ id: profile.id, name: profile.name })}
                       className="truncate text-left text-[14px] font-medium text-ink hover:underline"
-                      title="Rename"
+                      title={t("settings.profiles.rename")}
                     >
                       {profile.name}
                     </button>
                   )}
                   <span className="truncate text-[12px] text-ink-secondary">
-                    {users.length ? `used by ${users.join(", ")}` : "not in use"}
+                    {users.length
+                      ? t("settings.profiles.usedBy", { names: users.join(", ") })
+                      : t("settings.profiles.notInUse")}
                   </span>
                 </div>
                 <button
@@ -467,9 +465,9 @@ function BrowserProfilesRow() {
                   onClick={() => void remove(profile.id)}
                   disabled={busy !== null}
                   className="flex shrink-0 items-center gap-1 rounded-md px-2 py-1 text-[12px] text-ink-secondary hover:bg-control hover:text-danger disabled:opacity-50"
-                  title="Delete this profile and forget its logins"
+                  title={t("settings.profiles.deleteTitle")}
                 >
-                  <Trash2 size={13} /> Delete
+                  <Trash2 size={13} /> {t("common.delete")}
                 </button>
               </div>
             );
@@ -685,13 +683,13 @@ export function SettingsModal() {
 
             {section === "connections" && (
               <Card
-                title="Connections"
-                subtitle="Connected apps work automatically in the installed app. Other optional service keys stay on this computer."
+                title={t("settings.connections.title")}
+                subtitle={t("settings.connections.subtitle")}
               >
                 <div className="flex flex-col gap-4">
                   {state.config?.composio.mode === "managed" ? (
                     <div className="rounded-lg border border-success/25 bg-success/10 px-3 py-2 text-[13px] text-success">
-                      Connected apps service is ready
+                      {t("settings.connections.ready")}
                     </div>
                   ) : null}
                   <TranscriptionSettings />
@@ -699,7 +697,7 @@ export function SettingsModal() {
                   <VpsConnection />
                   <ApiKeyRow section="opencodeGo" />
                   <details className="rounded-lg border border-hairline/40 bg-inset px-3 py-2">
-                    <summary className="cursor-pointer text-[13px] text-ink-secondary">Self-host connected apps</summary>
+                    <summary className="cursor-pointer text-[13px] text-ink-secondary">{t("settings.connections.selfHost")}</summary>
                     <div className="mt-3">
                       <ApiKeyRow section="composio" />
                     </div>
@@ -709,7 +707,7 @@ export function SettingsModal() {
             )}
 
             {section === "engines" && (
-              <Card title="Engine CLIs" subtitle="Which binary each engine runs. Saved as you go.">
+              <Card title={t("settings.engines.title")} subtitle={t("settings.engines.subtitle")}>
                 <EnginesSettings />
               </Card>
             )}
