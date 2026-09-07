@@ -20,12 +20,12 @@ export function defaultResponderName(group: Group, members: Bot[]): string | nul
 }
 
 export function groupResponseHint(group: Group, members: Bot[]): string {
-  if (group.dm) return "Reply here to continue the bot-to-bot conversation.";
+  if (group.dm) return t("room.hint.dm");
   const value = effectiveDefaultResponder(group, members);
-  if (value.kind === "everyone") return "Everyone responds unless you @mention specific bots.";
-  if (value.kind === "mentions") return "Mention a bot with @ to bring them in.";
-  const name = defaultResponderName(group, members) ?? "The lead bot";
-  return `${name} responds by default — @mention someone else to choose them instead.`;
+  if (value.kind === "everyone") return t("room.hint.everyone");
+  if (value.kind === "mentions") return t("room.hint.mentions");
+  const name = defaultResponderName(group, members) ?? t("room.hint.leadFallback");
+  return t("room.hint.lead", { name });
 }
 
 export function groupComposerHint(group: Group, members: Bot[]): string {
