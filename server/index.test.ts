@@ -8391,3 +8391,22 @@ describe("computer control API (who is driving)", () => {
     expect(res.status).toBe(401);
   });
 });
+
+describe("bot activity API", () => {
+  // The receipt view: one read-only route over two logs that already exist.
+  // The reader itself is pinned in activity.test.ts; this covers the route's
+  // shape and its refusals.
+  it("returns an empty, well-formed page for a bot that has done nothing", async () => {
+    const bot = (await api("POST", "/api/bots")).body.bot;
+    const res = await api("GET", `/api/bots/${bot.id}/activity`);
+    expect(res.status).toBe(200);
+    expect(res.body).toEqual({ rows: [] });
+  });
+
+  it("refuses an unknown bot and a bad limit", async () => {
+    expect((await api("GET", "/api/bots/nope/activity")).status).toBe(404);
+    const bot = (await api("POST", "/api/bots")).body.bot;
+    expect((await api("GET", `/api/bots/${bot.id}/activity?limit=0`)).status).toBe(400);
+    expect((await api("GET", `/api/bots/${bot.id}/activity?limit=abc`)).status).toBe(400);
+  });
+});

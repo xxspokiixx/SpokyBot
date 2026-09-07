@@ -514,6 +514,8 @@ export interface AppState {
   computerOpen: boolean;
   /** the per-thread event inspector (runtime stream + native protocol tee) */
   inspectorOpen: boolean;
+  /** the bot's activity log: what it did, with the outcome */
+  activityOpen: boolean;
   appSettingsOpen: boolean;
   appSettingsSection: AppSettingsSection;
   botSettingsSection: BotSettingsSection;
@@ -708,6 +710,7 @@ export type Action =
   | { type: "togglePlugins"; open?: boolean }
   | { type: "toggleComputer"; open?: boolean }
   | { type: "toggleInspector"; open?: boolean }
+  | { type: "toggleActivity"; open?: boolean }
   | { type: "focusMessage"; threadId: string; messageId: string }
   | { type: "focusMessageConsumed"; nonce: number }
   | { type: "toggleAppSettings"; open?: boolean; section?: AppSettingsSection }
@@ -858,6 +861,7 @@ export function reducer(state: AppState, action: Action): AppState {
         settingsOpen: false,
         computerOpen: false,
         inspectorOpen: false,
+        activityOpen: false,
         appSettingsOpen: false,
         pluginsOpen: false,
       };
@@ -868,6 +872,7 @@ export function reducer(state: AppState, action: Action): AppState {
         settingsOpen: false,
         computerOpen: false,
         inspectorOpen: false,
+        activityOpen: false,
         appSettingsOpen: false,
         pluginsOpen: false,
       };
@@ -879,6 +884,7 @@ export function reducer(state: AppState, action: Action): AppState {
         settingsOpen: false,
         computerOpen: false,
         inspectorOpen: false,
+        activityOpen: false,
         appSettingsOpen: false,
         pluginsOpen: false,
       };
@@ -1276,6 +1282,7 @@ export function reducer(state: AppState, action: Action): AppState {
         computerOpen: open,
         settingsOpen: open ? false : state.settingsOpen,
         inspectorOpen: open ? false : state.inspectorOpen,
+        activityOpen: open ? false : state.activityOpen,
         appSettingsOpen: open ? false : state.appSettingsOpen,
       };
     }
@@ -1286,6 +1293,18 @@ export function reducer(state: AppState, action: Action): AppState {
         inspectorOpen: open,
         settingsOpen: open ? false : state.settingsOpen,
         computerOpen: open ? false : state.computerOpen,
+        activityOpen: open ? false : state.activityOpen,
+        appSettingsOpen: open ? false : state.appSettingsOpen,
+      };
+    }
+    case "toggleActivity": {
+      const open = action.open ?? !state.activityOpen;
+      return {
+        ...state,
+        activityOpen: open,
+        settingsOpen: open ? false : state.settingsOpen,
+        computerOpen: open ? false : state.computerOpen,
+        inspectorOpen: open ? false : state.inspectorOpen,
         appSettingsOpen: open ? false : state.appSettingsOpen,
       };
     }
@@ -1527,6 +1546,7 @@ export const initialState: AppState = {
   pluginsOpen: false,
   computerOpen: false,
   inspectorOpen: false,
+  activityOpen: false,
   appSettingsOpen: false,
   appSettingsSection: "general",
   botSettingsSection: "overview",
