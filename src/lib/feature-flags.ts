@@ -12,7 +12,7 @@ export function browserAvailable(config: FeatureFlagConfig | null | undefined): 
 /** Why a bot cannot have a browser right now, in the user's words. */
 export function browserUnavailableReason(config: FeatureFlagConfig | null | undefined): string {
   const engine = config?.browserEngine;
-  if (engine?.kind === "unavailable" && engine.installable) return "The browser engine is not installed on this machine yet. Install it from the bot's Browser panel, or run `openmausbot browser install` on the server.";
+  if (engine?.kind === "unavailable" && engine.installable) return "The browser engine is not installed on this server yet. Enable the browser switches in App Settings → Experimental and the bot's Access settings, then open Bot's computer → Browser to install it. Or run `openmausbot browser install` on the server.";
   if (engine?.kind === "unavailable" && engine.reason) return engine.reason;
   return "This server has no browser engine.";
 }

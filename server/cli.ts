@@ -154,10 +154,12 @@ status  what the server says about itself
 login   signs this machine in to an OpenMausBot account (an emailed code)
         and reserves its public address for --tunnel
 logout  releases that address and signs out
-browser install: the bots' browser engine (agent-browser, pinned) and a
-        Chrome for Testing, into the data dir; --with-deps also installs
-        the Linux libraries Chrome needs (run as root once). status: what
-        this machine has.
+browser install: the bots' browser engine (agent-browser, pinned) into the
+        data dir, and Chrome for Testing into the user's browser cache.
+        --with-deps also installs
+        the Linux libraries Chrome needs (run as root once). Then run
+        browser install as the user running serve, from that user's home.
+        status: what the current user and data directory have.
 
 --tailscale  serve over your tailnet: Tailscale terminates HTTPS and the
              link uses this machine's MagicDNS name (needs Tailscale signed in
@@ -530,10 +532,11 @@ export async function runBrowser(options: CliOptions, io: CliIo = defaultIo()): 
     await ensureChrome(binary, { withDeps: options.withDeps === true, log: io.log });
   } catch (error) {
     io.error(`Chrome is not ready: ${message(error)}`);
-    if (process.platform === "linux" && !options.withDeps) io.error("on Linux, Chrome needs system libraries: run `sudo openmausbot browser install --with-deps` once");
+    if (process.platform === "linux" && !options.withDeps) io.error("on Linux, install Chrome's system libraries with `sudo openmausbot browser install --with-deps`, then retry `openmausbot browser install` as the user running serve");
     return 1;
   }
-  io.log("bots on this server can use a browser now: turn it on under Settings → Experimental, then per bot");
+  io.log("browser installed for this user and data directory; run serve as the same user, then enable it under Settings → Experimental and per bot");
+  if (process.platform === "linux" && options.withDeps) io.log("if serve runs as another user, run `openmausbot browser install` from that user's login shell too");
   return 0;
 }
 

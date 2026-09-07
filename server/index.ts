@@ -2052,6 +2052,7 @@ function messageWindow(threadId: string, messageId: string, limit: number) {
 /** One connected client, and what it asked to be sent. */
 interface SseClient {
   res: ServerResponse;
+  admin: boolean;
   /** Live screen frames carry a base64 desktop capture every few seconds
    * while a bot works. A client that isn't showing the computer panel —
    * a phone on cellular, most of all — should not pay for them. */
@@ -2091,7 +2092,7 @@ const SSE_HEARTBEAT_MS =
     ? configuredSseHeartbeatMs
     : 15_000;
 let lastSeq = 0;
-const replayBuffer: Array<{ seq: number; kind: string; frame: string | null }> = [];
+const replayBuffer: Array<{ seq: number; kind: string; frame: string | null; clientFrame: string | null }> = [];
 
 /** Screen frames are the only kind a client can decline. */
 const wants = (client: SseClient, kind: string) => kind !== "screen" || client.screens;
@@ -2111,15 +2112,20 @@ function broadcast(payload: Record<string, unknown>) {
   const seq = ++lastSeq;
   const kind = String(payload.kind ?? "");
   const frame = `id: ${STREAM_ID}:${seq}\ndata: ${JSON.stringify({ ...payload, seq })}\n\n`;
+  // Store both projections as immutable frames: live and reconnecting clients
+  // must receive the same filtered config without changing the admin event.
+  const clientFrame = kind === "config"
+    ? `id: ${STREAM_ID}:${seq}\ndata: ${JSON.stringify({ ...configForAccess(payload as ReturnType<typeof configStatus>, false), seq })}\n\n`
+    : frame;
   // Live desktop captures can each be hundreds of kilobytes and become stale
   // as soon as the next one arrives. Keep their sequence slots so resume-gap
   // detection stays honest, but never retain their base64 payloads.
-  replayBuffer.push({ seq, kind, frame: kind === "screen" ? null : frame });
+  replayBuffer.push({ seq, kind, frame: kind === "screen" ? null : frame, clientFrame: kind === "screen" ? null : clientFrame });
   if (replayBuffer.length > REPLAY_MAX) replayBuffer.shift();
   for (const client of [...sseClients]) {
     if (!wants(client, kind)) continue;
     try {
-      client.res.write(frame);
+      client.res.write(client.admin ? frame : clientFrame);
     } catch {
       sseClients.delete(client);
     }
@@ -7375,6 +7381,18 @@ function configStatus() {
   };
 }
 
+function configForAccess(status: ReturnType<typeof configStatus>, admin: boolean) {
+  if (admin) return status;
+  // Configured-or-not is fine; an SSH alias, an email, and a browser
+  // partition id are not a client's business. Preserve the source objects.
+  return {
+    ...status,
+    vps: { configured: status.vps.configured, sshAlias: "" },
+    profile: { name: status.profile.name, email: "" },
+    browserProfiles: status.browserProfiles.map((profile) => Object.fromEntries(Object.entries(profile).filter(([key]) => key !== "partitionId"))),
+  };
+}
+
 function mcpServerResponse() {
   return { servers: listMcpServers(cfg.mcpServers) };
 }
@@ -7518,7 +7536,12 @@ function readBody(req: IncomingMessage, limit = 1_000_000): Promise<any> {
 // origins outside loopback (blocks remote-web CSRF).
 
 const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
-  const url = new URL(req.url ?? "/", `http://localhost:${PORT}`);
+  let url: URL;
+  try {
+    url = new URL(req.url ?? "/", `http://localhost:${PORT}`);
+  } catch {
+    return json(res, 400, { error: "invalid request URL" });
+  }
   const path = url.pathname;
   const method = req.method ?? "GET";
   /** scratch for route matches, shared by every `path.match` below */
@@ -8834,7 +8857,7 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
 
     // ── events stream ──
     if (method === "GET" && path === "/api/events") {
-      const client: SseClient = { res, screens: url.searchParams.get("screens") !== "off" };
+      const client: SseClient = { res, admin: auth.scopes.includes("admin"), screens: url.searchParams.get("screens") !== "off" };
       if (auth.kind === "session") client.sessionId = auth.session.id;
       res.writeHead(200, {
         "content-type": "text/event-stream",
@@ -8874,7 +8897,8 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
       );
       if (resumed) {
         for (const buffered of replayBuffer) {
-          if (buffered.seq > since && buffered.frame && wants(client, buffered.kind)) res.write(buffered.frame);
+          const frame = client.admin ? buffered.frame : buffered.clientFrame;
+          if (buffered.seq > since && frame && wants(client, buffered.kind)) res.write(frame);
         }
       }
 
@@ -12126,18 +12150,7 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
 
     // ── app config (API keys — never echoed back, booleans only) ──
     if (method === "GET" && path === "/api/config") {
-      const status = configStatus();
-      if (auth.kind === "session" && !auth.scopes.includes("admin")) {
-        // configured-or-not is fine; an SSH alias, an email, a browser
-        // partition id are not a client's business
-        return json(res, 200, {
-          ...status,
-          vps: { configured: status.vps.configured, sshAlias: "" },
-          profile: { name: status.profile.name, email: "" },
-          browserProfiles: status.browserProfiles.map((profile) => Object.fromEntries(Object.entries(profile).filter(([key]) => key !== "partitionId"))),
-        });
-      }
-      return json(res, 200, status);
+      return json(res, 200, configForAccess(configStatus(), auth.scopes.includes("admin")));
     }
     if ((method === "PUT" || method === "PATCH") && path === "/api/config") {
       const body = await readBody(req);

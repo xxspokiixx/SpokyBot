@@ -1,17 +1,15 @@
 # Self-hosting the OpenMausBot server
 
 Run the harness server on an always-on Linux box (a VPS, a home server, a
-Mac mini in a closet) and use it from other devices. This is the supported
-path **today**; first-class remote access is coming — see
-[`docs/plans/remote-workspace.md`](plans/remote-workspace.md).
+Mac mini in a closet) and pair browsers, the desktop app, or phones with it.
+The npm CLI supports a managed public tunnel, Tailscale, or your own proxy.
 
 > **Security first:** the server deliberately trusts only loopback — any
 > process that can reach `127.0.0.1:8799` has full control, including the
 > shell your bots can use. **Never expose that port directly and never bind
 > it to a public interface.** Reach it through an SSH tunnel, a private
-> network you trust, or the Docker stack below, which puts a login wall
-> (Caddy) in front. Proper token-based remote auth is exactly what the
-> Remote Workspace plan adds.
+> network you trust, or an authenticated remote path below. Requests through
+> the managed tunnel or a correctly configured proxy require a paired session.
 
 Step by step, for a server you do not have yet: [Deploy OpenMausBot on a
 VPS](deploy-vps.md) walks through the three ways in (public address, own
@@ -59,7 +57,19 @@ choose phone access, it prints a pairing link and QR code only after checking
 the HTTPS connection. Choosing **Skip for now** keeps the workspace local-only
 and creates no pairing invitation. Use `npx openmausbot setup` to configure without starting, or
 `npx openmausbot serve` to start non-interactively with your existing config
-(for services and scripts). Two ways to make it reachable from elsewhere:
+(for services and scripts).
+
+The npm package does not include engine CLIs (`claude`, `codex`, …); setup
+can offer to install and sign in supported engines on this machine.
+Run setup, engine authentication, and the server as the same unprivileged
+operating-system user. Engine credentials live in that user's CLI-specific
+directories, not all under `.openmausbot`.
+
+For a Linux service, the [VPS guide](deploy-vps.md#before-you-start) shows the
+account setup, engine installation, and browser dependency installation.
+After installing browser libraries as administrator, also run
+`npx openmausbot browser install` as the service user so that user's browser
+is present. Three ways to make the server reachable from elsewhere:
 
 - **On your Tailscale network, no domain needed:**
   `npx openmausbot serve --tailscale`. Tailscale terminates HTTPS with its
@@ -88,8 +98,11 @@ and creates no pairing invitation. Use `npx openmausbot setup` to configure with
 
 Later: `npx openmausbot pair --label "Kitchen iPad"` for another device
 (`--client` for one that may chat but not change settings), and
-`npx openmausbot sessions` to see or revoke them. Run it under systemd or
-pm2 to keep it up; `openmausbot serve` is a plain foreground process.
+`npx openmausbot sessions` to see or revoke them. `openmausbot serve` is a
+plain foreground process. For unattended use, follow the
+[systemd example](deploy-vps.md#keep-it-running), which installs a chosen
+release and runs its binary directly. Restarting that service does not
+implicitly download a new release.
 
 ## Docker (with HTTPS on your own domain)
 
@@ -280,6 +293,11 @@ node --experimental-strip-types companion/src/index.ts
 
 ## Updating
 
+For the npm service, [install the chosen new version](deploy-vps.md#update)
+as the service user while the server is stopped, then start it again.
+For a foreground invocation, `npx --yes openmausbot@X.Y.Z serve --tunnel`
+selects a particular published release; replace `X.Y.Z` with that version.
+
 ```sh
 docker compose -f deploy/docker-compose.yml pull omb && docker compose -f deploy/docker-compose.yml up -d   # Docker
 git pull && pnpm install && sudo systemctl restart openmausbot          # from source
@@ -287,3 +305,10 @@ git pull && pnpm install && sudo systemctl restart openmausbot          # from s
 
 Routines and queued work survive restarts; in-flight turns do not, so
 update between runs.
+
+Stop the server before a filesystem backup so SQLite is copied consistently.
+Back up the entire app data directory and, separately, the service user's
+engine credentials, browser state, and external workspaces. For Docker, the
+whole `/data` volume includes the CLI homes. See the
+[backup and restore instructions](deploy-vps.md#back-up) for the exact scope
+and stop/start commands.

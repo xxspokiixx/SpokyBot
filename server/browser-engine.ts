@@ -16,6 +16,7 @@ import { delimiter, join, resolve } from "node:path";
 
 import { writeFileAtomic } from "./atomic.ts";
 import { DATA_DIR } from "./config.ts";
+import { browserBundlePaths } from "./browser-bundle-release.ts";
 import {
   AGENT_BROWSER_VERSION,
   agentBrowserReleaseUrl,
@@ -57,19 +58,38 @@ function onPath(env: NodeJS.ProcessEnv, platform: NodeJS.Platform, exists: (p: s
   return null;
 }
 
-/** OMB_AGENT_BROWSER_PATH, then the pinned download under the data dir, then
- * PATH (a package or image that installed it globally). */
-export function resolveAgentBrowserBinary(options: {
+interface BrowserLookupOptions {
   dataDir?: string;
   env?: NodeJS.ProcessEnv;
   platform?: NodeJS.Platform;
+  arch?: string;
   exists?: (p: string) => boolean;
-} = {}): string | null {
+}
+
+function packagedBrowser(options: BrowserLookupOptions) {
+  const resources = (options.env ?? process.env).OMB_RESOURCES_PATH;
+  if (!resources) return null;
+  try {
+    return browserBundlePaths(join(resolve(resources), "browser-engine"), `${options.platform ?? process.platform}-${options.arch ?? process.arch}`);
+  } catch {
+    return null; // No desktop bundle for this platform/architecture.
+  }
+}
+
+function completePackage(bundle: NonNullable<ReturnType<typeof packagedBrowser>>, exists: (p: string) => boolean) {
+  return [bundle.manifest, bundle.engine, bundle.chrome, bundle.licenses].every(exists);
+}
+
+/** OMB_AGENT_BROWSER_PATH, then the complete desktop bundle, pinned download, then
+ * PATH (a package or image that installed it globally). */
+export function resolveAgentBrowserBinary(options: BrowserLookupOptions = {}): string | null {
   const env = options.env ?? process.env;
   const platform = options.platform ?? process.platform;
   const exists = options.exists ?? existsSync;
   const override = env.OMB_AGENT_BROWSER_PATH?.trim();
   if (override) return resolve(override) && exists(resolve(override)) ? resolve(override) : null;
+  const bundle = packagedBrowser(options);
+  if (bundle && exists(bundle.directory)) return completePackage(bundle, exists) ? bundle.engine : null;
   const pinned = pinnedBinaryPath(options.dataDir, platform);
   if (exists(pinned)) return pinned;
   return onPath(env, platform, exists);
@@ -120,6 +140,11 @@ export async function installAgentBrowserBinary(options: {
  * or Brave is found; `--with-deps` adds the Linux libraries (needs a package
  * manager and privileges, so it is for images and root shells). */
 export function ensureChrome(binaryPath: string, options: { withDeps?: boolean; env?: NodeJS.ProcessEnv; log?: (line: string) => void } = {}): Promise<void> {
+  const bundle = packagedBrowser(options);
+  if (!options.withDeps && bundle && resolve(binaryPath) === bundle.engine && completePackage(bundle, existsSync)) {
+    options.log?.("agent-browser: the bundled browser is ready; no download needed");
+    return Promise.resolve();
+  }
   const args = ["install", ...(options.withDeps ? ["--with-deps"] : [])];
   return new Promise((done, fail) => {
     const child = spawn(binaryPath, args, { env: options.env ?? process.env, stdio: ["ignore", "pipe", "pipe"], windowsHide: true });
@@ -155,14 +180,19 @@ export function browserEngineEncryptionKey(dataDir = DATA_DIR): string {
 }
 
 /** What the harness can offer bots right now, with the reason when nothing. */
-export function browserEngineStatus(options: { dataDir?: string; env?: NodeJS.ProcessEnv; platform?: NodeJS.Platform; exists?: (p: string) => boolean } = {}): BrowserEngineStatus {
+export function browserEngineStatus(options: BrowserLookupOptions = {}): BrowserEngineStatus {
   const binaryPath = resolveAgentBrowserBinary(options);
   if (binaryPath) return { kind: "ready", binaryPath, version: AGENT_BROWSER_VERSION };
+  const bundle = packagedBrowser(options);
+  if (bundle && (options.exists ?? existsSync)(bundle.directory)) {
+    return { kind: "unavailable", reason: "The desktop browser bundle is incomplete. Reinstall or update OpenMausBot to repair it.", installable: false };
+  }
   const platform = options.platform ?? process.platform;
-  const asset = resolveAgentBrowserReleaseAsset(platform, process.arch, isMusl(platform));
+  const arch = options.arch ?? process.arch;
+  const asset = resolveAgentBrowserReleaseAsset(platform, arch, isMusl(platform));
   return asset
     ? { kind: "unavailable", reason: "agent-browser is not installed on this machine yet", installable: true }
-    : { kind: "unavailable", reason: `agent-browser publishes no build for ${platform}-${process.arch}`, installable: false };
+    : { kind: "unavailable", reason: `agent-browser publishes no build for ${platform}-${arch}`, installable: false };
 }
 
 /** The MCP server a turn mounts so the bot gets browser tools. One isolated,
@@ -186,8 +216,16 @@ export function agentBrowserIntegration(input: {
     AGENT_BROWSER_ENCRYPTION_KEY: input.encryptionKey,
   };
   if (input.headless !== false) env.AGENT_BROWSER_HEADLESS = "1";
-  const path = (input.env ?? process.env).PATH;
-  if (path) env.PATH = path;
+  const sourceEnv = input.env ?? process.env;
+  // MCP clients may filter the parent environment. Carry the configured
+  // Chrome path explicitly without forwarding unrelated secrets or flags.
+  for (const name of ["PATH", "AGENT_BROWSER_EXECUTABLE_PATH"] as const) {
+    if (sourceEnv[name]) env[name] = sourceEnv[name];
+  }
+  const bundle = packagedBrowser({ env: sourceEnv });
+  if (!env.AGENT_BROWSER_EXECUTABLE_PATH && bundle && resolve(input.binaryPath) === bundle.engine && completePackage(bundle, existsSync)) {
+    env.AGENT_BROWSER_EXECUTABLE_PATH = bundle.chrome;
+  }
   return { command: input.binaryPath, args: ["mcp", "--tools", "core", "--no-webmcp"], env };
 }
 

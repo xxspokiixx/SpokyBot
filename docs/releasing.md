@@ -62,6 +62,15 @@ stapling silently invalidating every published hash, and a finished release
 sitting invisible as a draft. Don't remove a gate without reading the comment
 above it.
 
+## Bundled browser gates
+
+Desktop builds also stage a pinned engine and Chromium Headless Shell before
+packaging. Pre-signing checks validate complete resources and upstream hashes;
+native browser smoke tests and macOS signature checks run on the packaged
+output. See [browser packaging](browser-packaging.md) for update ownership,
+license provenance and Linux sandbox constraints. Missing browser resources
+must fail the build, not ship an installer that downloads them on first use.
+
 ## One-time setup: release secrets
 
 Set these in **OpenMausBot → Settings → Secrets and variables → Actions**.
