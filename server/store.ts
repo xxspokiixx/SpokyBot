@@ -19,6 +19,7 @@ import { redactSecretsInText } from "./redact.ts";
 import { botAvatarProfile, type BotAvatarCrop } from "../shared/bot-avatar.ts";
 import { isApprovalMode, type ApprovalMode } from "../shared/approval-mode.ts";
 import type { OutboundPolicy } from "../shared/outbound.ts";
+import type { ConnectorScopes } from "../shared/connector-scopes.ts";
 import type { MascotBodyId } from "../shared/mascot-bodies.ts";
 import type { ProfileRequestCardData, ProfileRequestChanges } from "../shared/profile-request.ts";
 import type { RoutineRequestCardData } from "../shared/routine-request.ts";
@@ -537,6 +538,9 @@ export interface BotRecord {
    * absent) or allow up to a daily cap. Independent of approvalMode — Full
    * access does not bypass it. */
   outbound?: OutboundPolicy;
+  /** Which connected apps this bot may use, and whether it may write to
+   * them. Absent: every connected app, read and write (the old behavior). */
+  connectorScopes?: ConnectorScopes;
   /** Speak this bot's replies aloud as they settle, without being asked.
    * Off by default: a hosted voice costs money per character, so speaking
    * is something you turn on, never something that happens to you. */

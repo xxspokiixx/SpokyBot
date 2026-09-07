@@ -8548,3 +8548,89 @@ describe("outbound gate", () => {
     }
   });
 });
+
+describe("connection scopes", () => {
+  // Which connected apps a bot may use, and whether it may write to them.
+  // Enforced at the relay, seeing through Composio's meta tools; absent
+  // means every app, the way it always has.
+  type McpResult = { result: { isError?: boolean; content: Array<{ type: string; text: string }> } };
+  const relay = (token: string, id: number, name: string, args: Record<string, unknown> = {}) =>
+    fetch(`${BASE}/api/internal/connectors/mcp`, {
+      method: "POST",
+      headers: { "content-type": "application/json", authorization: `Bearer ${token}` },
+      body: JSON.stringify({ jsonrpc: "2.0", id, method: "tools/call", params: { name, arguments: args } }),
+    });
+
+  it("stores a scope map on the bot, clears it with null, and refuses junk", async () => {
+    const bot = (await api("POST", "/api/bots")).body.bot;
+    try {
+      const scoped = await api("PATCH", `/api/bots/${bot.id}`, { connectorScopes: { apps: { Gmail: "read", slack: "write" } } });
+      expect(scoped.status).toBe(200);
+      expect(scoped.body.bot.connectorScopes).toEqual({ apps: { gmail: "read", slack: "write" } });
+      expect((await api("PATCH", `/api/bots/${bot.id}`, { connectorScopes: { apps: { gmail: "owner" } } })).status).toBe(400);
+      expect((await api("PATCH", `/api/bots/${bot.id}`, { connectorScopes: "gmail" })).status).toBe(400);
+      const cleared = await api("PATCH", `/api/bots/${bot.id}`, { connectorScopes: null });
+      expect(cleared.status).toBe(200);
+      expect(cleared.body.bot.connectorScopes).toBeUndefined();
+    } finally {
+      await api("DELETE", `/api/bots/${bot.id}`);
+    }
+  });
+
+  it("refuses an app that is not listed and a write on a read-only app, and lets the rest through", async () => {
+    expect((await api("PUT", "/api/config", { composio: { apiKey: "ak_good" } })).status).toBe(200);
+    const bot = (await api("POST", "/api/bots", { name: "Scoped" })).body.bot;
+    try {
+      expect((await api("PATCH", `/api/bots/${bot.id}`, { connectorScopes: { apps: { gmail: "read", slack: "write" } } })).status).toBe(200);
+      const token = await mintTestCapability(BASE, bot.id, bot.threadId, { kind: "connectors" });
+
+      const read = (await (await relay(token, 21, "GMAIL_FETCH_EMAILS", { query: "is:unread" })).json()) as McpResult;
+      expect(read.result.content[0].text).toBe("sent by stub");
+
+      const other = (await (await relay(token, 22, "STRIPE_LIST_CHARGES", {})).json()) as McpResult;
+      expect(other.result.isError).toBe(true);
+      expect(other.result.content[0].text).toMatch(/stripe/i);
+      expect(other.result.content[0].text).toMatch(/not been given/i);
+
+      const write = (await (await relay(token, 23, "GMAIL_CREATE_EMAIL_DRAFT", { subject: "x" })).json()) as McpResult;
+      expect(write.result.isError).toBe(true);
+      expect(write.result.content[0].text).toMatch(/read-only/i);
+
+      // A batch is refused whole when one call is out of scope.
+      const batch = (await (await relay(token, 24, "COMPOSIO_MULTI_EXECUTE_TOOL", {
+        tools: [{ tool_slug: "SLACK_SEARCH_MESSAGES", arguments: {} }, { tool_slug: "NOTION_SEARCH_PAGES", arguments: {} }],
+      })).json()) as McpResult;
+      expect(batch.result.isError).toBe(true);
+      expect(relayedMcpCalls.some((call) => call.params?.name === "COMPOSIO_MULTI_EXECUTE_TOOL"
+        && JSON.stringify(call.params.arguments).includes("NOTION_SEARCH_PAGES"))).toBe(false);
+
+      // Connecting an app the bot may not use is refused before any card appears.
+      const connect = await fetch(`${BASE}/api/internal/connectors/request`, {
+        method: "POST",
+        headers: { "content-type": "application/json", authorization: `Bearer ${token}` },
+        body: JSON.stringify({ botId: bot.id, threadId: bot.threadId, resumeKey: "scope-fixture-001", items: [{ slug: "stripe" }] }),
+      });
+      expect(connect.status).toBe(403);
+
+      await expect.poll(async () =>
+        (await api("GET", "/api/decisions")).body.decisions
+          .filter((decision: { botId?: string; source: string }) => decision.botId === bot.id && decision.source === "connector-scope")
+          .map((decision: { decision: string; rule?: string }) => `${decision.decision}:${decision.rule}`),
+      ).toEqual(["auto-denied:scope:stripe:app", "auto-denied:scope:gmail:write", "auto-denied:scope:notion:app", "auto-denied:scope:stripe:app"]);
+    } finally {
+      await api("DELETE", `/api/bots/${bot.id}`);
+    }
+  });
+
+  it("tells the bot what it may use, in its prompt", async () => {
+    const bot = (await api("POST", "/api/bots")).body.bot;
+    try {
+      expect((await api("PATCH", `/api/bots/${bot.id}`, { connectorScopes: { apps: { gmail: "read" } } })).status).toBe(200);
+      const preview = await api("GET", `/api/bots/${bot.id}/system-prompt`);
+      expect(preview.status).toBe(200);
+      expect(JSON.stringify(preview.body)).toContain("gmail (read only)");
+    } finally {
+      await api("DELETE", `/api/bots/${bot.id}`);
+    }
+  });
+});

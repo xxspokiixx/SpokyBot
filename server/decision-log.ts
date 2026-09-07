@@ -53,7 +53,9 @@ export type DecisionSource =
   | "auto-review"
   | "auto-review-shadow"
   /** the connector relay's outbound gate (shared/outbound.ts) */
-  | "outbound";
+  | "outbound"
+  /** the connector relay's per-bot app scopes (shared/connector-scopes.ts) */
+  | "connector-scope";
 
 export interface DecisionRow {
   at: string;

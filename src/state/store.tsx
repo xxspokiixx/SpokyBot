@@ -18,6 +18,7 @@ import type { MausColor, MausMotion } from "@/lib/mascot";
 import type { BotAvatarCrop } from "../../shared/bot-avatar";
 import { approvalModeFor, type ApprovalMode } from "../../shared/approval-mode";
 import type { OutboundPolicy } from "../../shared/outbound";
+import type { ConnectorScopes } from "../../shared/connector-scopes";
 import type { MascotBodyId } from "../../shared/mascot-bodies";
 import type { ProfileRequestCardData } from "../../shared/profile-request";
 import type { RoutineRequestCardData } from "../../shared/routine-request";
@@ -289,6 +290,8 @@ export interface Bot {
   alwaysAllow?: string[];
   /** sending on your behalf: ask every time (absent), or a daily allowance */
   outbound?: OutboundPolicy;
+  /** which connected apps this bot may use; absent means all of them */
+  connectorScopes?: ConnectorScopes;
   /** speak this bot's replies aloud as they settle */
   speakReplies?: boolean;
   /** this bot's own voice id (falls back to the app-wide one) */
@@ -1346,13 +1349,19 @@ export function reducer(state: AppState, action: Action): AppState {
         acknowledgeLocalAuto: _localAck,
         confirmFullAccess: _fullConfirmation,
         computer,
+        connectorScopes,
         ...rest
       } = action.patch;
-      const botPatch = computer === null
+      const withComputer = computer === null
         ? { ...rest, computer: undefined }
         : computer === undefined
           ? rest
           : { ...rest, computer };
+      // null is the wire form of "back to every app"; Bot state keeps that
+      // as an absent field, the same way Auto is for `computer`
+      const botPatch = connectorScopes === undefined
+        ? withComputer
+        : { ...withComputer, connectorScopes: connectorScopes ?? undefined };
       return updateBot(next, action.botId, (b) => ({ ...b, ...botPatch }));
     }
     case "threadActive": {

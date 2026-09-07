@@ -295,7 +295,8 @@ import { readThreadEvents } from "./thread-events.ts";
 import { describeTool, readBotActivity } from "./activity.ts";
 import { OutboundCounts } from "./outbound-counts.ts";
 import { OutboundRequestService } from "./outbound-requests.ts";
-import { DEFAULT_OUTBOUND_POLICY, normalizeOutboundPolicy, outboundCallsIn } from "../shared/outbound.ts";
+import { DEFAULT_OUTBOUND_POLICY, connectorCallsIn, normalizeOutboundPolicy, outboundCallsIn } from "../shared/outbound.ts";
+import { connectorAccessDecision, describeConnectorScopes, normalizeConnectorScopes } from "../shared/connector-scopes.ts";
 import { listenWebhookIngress, webhookCredential, type WebhookIngress } from "./webhook-ingress.ts";
 import { memberTurnSelection } from "./member-turn.ts";
 import { WebhookManager } from "./webhooks.ts";
@@ -1164,7 +1165,7 @@ function previewSystemPrompt(bot: BotRecord) {
       }),
     },
     { id: "computer", label: "Computer", text: computerPrompt(computerPromptKind) },
-    { id: "composio", label: "Connected apps", text: caps?.composioMcp && bot.composio !== false && composio.configured(cfg) ? COMPOSIO_PROMPT : "" },
+    { id: "composio", label: "Connected apps", text: caps?.composioMcp && bot.composio !== false && composio.configured(cfg) ? COMPOSIO_PROMPT + describeConnectorScopes(bot.connectorScopes) : "" },
     { id: "browser", label: "Browser", text: caps?.browserMcp && builtInBrowserEnabled(cfg) && bot.browser !== false && bot.computer !== "off" ? BUILT_IN_BROWSER_SYSTEM_PROMPT : "" },
     { id: "coordination", label: "Team", text: agentsMounted && coordination ? ` ${coordination}` : "" },
     { id: "credential", label: "Credentials", text: agentsMounted ? CREDENTIAL_PROMPT : "" },
@@ -4421,7 +4422,7 @@ async function startTurn(
         { id: "plan", label: "Surface", text: plan.note },
         // gated on the integration, not the key: the hint only goes to a
         // bot whose driver actually mounted the tools
-        { id: "composio", label: "Connected apps", text: integrations.composio ? COMPOSIO_PROMPT : "" },
+        { id: "composio", label: "Connected apps", text: integrations.composio ? COMPOSIO_PROMPT + describeConnectorScopes((liveBot ?? bot).connectorScopes) : "" },
         { id: "browser", label: "Browser", text: integrations.browser ? BUILT_IN_BROWSER_SYSTEM_PROMPT : "" },
         { id: "coordination", label: "Team", text: coordinationPrompt ? ` ${coordinationPrompt}` : "" },
         { id: "credential", label: "Credentials", text: credentialPrompt },
@@ -8572,6 +8573,26 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
           res.writeHead(200, { "content-type": "application/json", "cache-control": "no-store" });
           return res.end(JSON.stringify({ jsonrpc: "2.0", id: rpc?.id ?? null, result: { content: [{ type: "text", text }], isError: true } }));
         };
+        // ── connection scopes ──
+        // Checked first: an app this bot may not touch is refused outright,
+        // never turned into a question for the person.
+        const connectorCalls = rpc?.method === "tools/call" && typeof rpcParams?.name === "string"
+          ? connectorCallsIn(rpcParams.name, rpcParams.arguments)
+          : [];
+        const access = connectorAccessDecision(currentSender.connectorScopes, connectorCalls);
+        if (!access.ok) {
+          const described = describeTool(access.slug);
+          const appName = described.app ?? access.toolkit;
+          appendDecision(DATA_DIR, {
+            threadId: internalCapability.threadId, botId: currentSender.id, botName: currentSender.name,
+            tool: access.slug, decision: "auto-denied", source: "connector-scope", rule: `scope:${access.toolkit}:${access.reason}`,
+          });
+          return refuseOutbound(
+            access.reason === "app"
+              ? `OpenMausBot did not run this: ${currentSender.name} has not been given access to ${appName}. Ask the user to allow it under the bot's Access settings, and do not retry.`
+              : `OpenMausBot did not run this: ${appName} is read-only for ${currentSender.name}, and ${described.label} would write to it. Ask the user before trying again.`,
+          );
+        }
         if (outboundTool) {
           const policy = currentSender.outbound ?? DEFAULT_OUTBOUND_POLICY;
           const threadId = internalCapability.threadId;
@@ -8722,6 +8743,16 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
         if (!items.length || items.length > 12) return json(res, 400, { error: "one to twelve valid connection requests are required" });
         if (!composio.configured(cfg) || owner.bot.composio === false) {
           return json(res, 409, { error: "connected apps are not enabled for this bot" });
+        }
+        if (owner.bot.connectorScopes) {
+          const outside = slugs.find((slug) => !owner.bot.connectorScopes?.apps[slug]);
+          if (outside) {
+            appendDecision(DATA_DIR, {
+              threadId, botId: owner.bot.id, botName: owner.bot.name,
+              tool: "COMPOSIO_MANAGE_CONNECTIONS", summary: outside, decision: "auto-denied", source: "connector-scope", rule: `scope:${outside}:app`,
+            });
+            return json(res, 403, { error: `${owner.bot.name} has not been given access to ${outside}; allow it under the bot's Access settings first` });
+          }
         }
         const connectionState: Record<string, { connected?: boolean }> = await composio.connectionStatus(cfg, slugs).catch(() => ({}));
         requireActiveInternalCapability();
@@ -10447,6 +10478,15 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
       }
       if (section !== undefined) patch.section = section ?? undefined;
       if (body.chiefOfStaff === false) patch.chiefOfStaff = false;
+      // which connected apps this bot may use; null clears back to all of them
+      if (body.connectorScopes !== undefined) {
+        if (body.connectorScopes === null) patch.connectorScopes = undefined;
+        else {
+          const scopes = normalizeConnectorScopes(body.connectorScopes);
+          if (!scopes) return json(res, 400, { error: "connectorScopes must be { apps: { <toolkit>: read | write } } or null" });
+          patch.connectorScopes = scopes;
+        }
+      }
       // sending on the person's behalf: ask every time, or a daily allowance
       if (body.outbound !== undefined) {
         const policy = normalizeOutboundPolicy(body.outbound);

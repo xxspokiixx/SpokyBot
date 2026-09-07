@@ -38,7 +38,13 @@ export type BotPatch = Partial<
     | "browser"
     | "modelSelection"
   >
-> & { computer?: Bot["computer"] | null; acknowledgeLocalAuto?: boolean; confirmFullAccess?: boolean };
+> & {
+  computer?: Bot["computer"] | null;
+  /** null clears the scopes back to every connected app */
+  connectorScopes?: Bot["connectorScopes"] | null;
+  acknowledgeLocalAuto?: boolean;
+  confirmFullAccess?: boolean;
+};
 
 export function useBotSettingsDerived(bot: Bot) {
   const { state, dispatch } = useStore();
