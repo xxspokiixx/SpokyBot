@@ -355,7 +355,7 @@ export async function runPair(options: CliOptions): Promise<number> {
       if (launch.tunnel) origin = describeTunnelAccount(createTunnelAccount({ dataDir: options.dataDir, version: serverVersion() }).credentials.read()).address ?? undefined;
       if (launch.tailscale) {
         const status = await tailscaleStatus();
-        if (!("failure" in status)) origin = `https://${status.status.dnsName}`;
+        if (!("failure" in status) && status.status.dnsName) origin = `https://${status.status.dnsName}`;
       }
     }
     if (!origin || !normalizePhoneOrigin(origin)) {

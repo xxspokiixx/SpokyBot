@@ -11,6 +11,7 @@ const codex = {
     default: "codex-default",
     options: [{ id: "codex-default", label: "Default" }, { id: "selected-model", label: "Selected" }],
   } satisfies ModelCatalog,
+  capabilities: { effortLevels: ["low", "high"] as const },
 };
 const claude = {
   instanceId: "claude",
@@ -20,11 +21,27 @@ const claude = {
 };
 
 describe("new bot default model selection", () => {
-  it("honors the configured provider, model, and effort ahead of the Claude preference", () => {
-    const preferred = { instanceId: "codex", model: "selected-model", effort: "high" as const };
+  it.each(["low", "high"] as const)("honors the configured provider, model, and supported %s effort ahead of the Claude preference", (effort) => {
+    const preferred = { instanceId: "codex", model: "selected-model", effort };
     const selection = selectDefaultModelSelection([claude, codex], preferred);
     expect(selection).toEqual(preferred);
     expect(selection).not.toBe(preferred);
+  });
+
+  it.each([
+    { label: "missing capabilities", capabilities: undefined },
+    { label: "no effort control", capabilities: {} },
+    { label: "empty effort list", capabilities: { effortLevels: [] } },
+    { label: "changed effort support", capabilities: { effortLevels: ["low"] as const } },
+  ])("omits stale effort for $label without changing the provider, model, or saved preference", ({ capabilities }) => {
+    const preferred = { instanceId: "codex", model: "selected-model", effort: "high" as const };
+    const selection = selectDefaultModelSelection([
+      { ...claude, capabilities: { effortLevels: ["high"] } },
+      { ...codex, capabilities },
+    ], preferred);
+    expect(selection).toEqual({ instanceId: "codex", model: "selected-model" });
+    expect(selection).not.toHaveProperty("effort");
+    expect(preferred.effort).toBe("high");
   });
 
   it("accepts the provider default even when it is not repeated in its options", () => {

@@ -133,6 +133,17 @@ describe("guided phone pairing address discovery", () => {
     expectPhonePairing(advertisedOrigin);
   });
 
+  it("does not probe a fabricated origin when Tailscale has no MagicDNS name", async () => {
+    publicUrl = null;
+    mocks.readCliStartup.mockReturnValue({ access: "tailscale", phone: "ios" });
+    mocks.tailscaleStatus.mockResolvedValue({ status: { dnsName: null } });
+    expect(await runPair(options)).toBe(1);
+    expect(mocks.ui.choose).not.toHaveBeenCalled();
+    expect(fetchMock.mock.calls.filter(([url]) => String(url).startsWith("https://"))).toHaveLength(0);
+    expect(fetchMock.mock.calls.filter(([, init]) => init?.method === "POST")).toHaveLength(0);
+    expect(console.log).toHaveBeenCalledWith(expect.stringContaining("running only on this computer"));
+  });
+
   it("does not mint a code when the advertised endpoint identifies another workspace", async () => {
     remoteWorkspaceId = "another-workspace";
     expect(await runPair(options)).toBe(1);

@@ -54,9 +54,10 @@ Codex also offers device-code login for SSH. API-key connections currently
 support chat, not agent tools or computer use. The [setup guide](cli-onboarding.md)
 explains the choices, key storage, and how to run setup again safely.
 
-It then starts the server, keeps your data in `~/.openmausbot`, and prints a
-pairing link with a QR code: scan it with the phone, or open it on the
-laptop. Use `npx openmausbot setup` to configure without starting, or
+It then starts the server and keeps your data in `~/.openmausbot`. If you
+choose phone access, it prints a pairing link and QR code only after checking
+the HTTPS connection. Choosing **Skip for now** keeps the workspace local-only
+and creates no pairing invitation. Use `npx openmausbot setup` to configure without starting, or
 `npx openmausbot serve` to start non-interactively with your existing config
 (for services and scripts). Two ways to make it reachable from elsewhere:
 
