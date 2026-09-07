@@ -1,9 +1,13 @@
 // Compact model picker: providers live on a Cloud/Local rail. Ready engines
 // show a short suggested list with search and an explicit all-models view;
 // engines that need setup show one focused action instead of a disabled wall.
+// Reasoning effort rides along (EffortRow): model and effort are one choice to
+// the person making it, so the chat header and the settings dialog render the
+// same row and write through the same action.
 import { useCallback, useEffect, useRef, useState, type ReactNode } from "react";
 import { Check, ChevronDown, ChevronLeft, ChevronRight, Loader2, RefreshCw, Search } from "lucide-react";
 import { useStore, type Bot, type InstanceInfo, type ModelSelection } from "@/state/store";
+import type { EffortLevel } from "../../server/contracts.ts";
 import { filterCustomModels, partitionCustomModels, suggestedModels } from "@/lib/custom-models";
 import { isCustomOnly, splitEngineRail } from "@/lib/engine-rail";
 import { ProviderMark } from "./ProviderIcons";
@@ -27,6 +31,67 @@ export function engineStatus(instance: InstanceInfo): string {
   if (needsCli(instance)) return "Setup required";
   if (needsSignIn(instance)) return "Sign-in required";
   return instance.snapshot.version ?? "Ready";
+}
+
+/** The others capitalize cleanly; "xhigh" would read "Xhigh". */
+export function effortLabel(level: EffortLevel): string {
+  return level === "xhigh" ? "X-High" : level[0].toUpperCase() + level.slice(1);
+}
+
+/** How hard the bot thinks, for the engine it currently runs on. Rendered
+ * both in the picker's popover and in the settings dialog's Model section so
+ * the two cannot drift: one list of levels, one `setModel` dispatch.
+ *
+ * `undefined` ("Default") is not the `none` level — Default sends nothing and
+ * lets the engine decide, `none` is a level the engine is told to use. Only
+ * pi offers both, and dropping either would change what an existing bot
+ * sends, so both stay and the tooltips say which is which. */
+export function EffortRow({
+  bot,
+  className,
+  label,
+}: {
+  bot: Bot;
+  className?: string;
+  label?: ReactNode;
+}) {
+  const { state, dispatch } = useStore();
+  const selection = bot.modelSelection;
+  const levels = state.instances.find((instance) => instance.instanceId === selection.instanceId)?.capabilities
+    ?.effortLevels;
+  // An engine with no levels gets no control at all, not an empty one.
+  if (!levels?.length) return null;
+
+  return (
+    <div className={className}>
+      {label}
+      {/* wraps rather than dividing a fixed width: pi offers Default plus six
+          levels, which a segmented control would squeeze in the popover */}
+      <div className="mt-2 flex flex-wrap gap-1" role="group" aria-label="Reasoning effort">
+        {[undefined, ...levels].map((level) => (
+          <button
+            key={level ?? "default"}
+            type="button"
+            aria-pressed={selection.effort === level}
+            title={
+              level === undefined
+                ? "Send no effort level and let the engine decide"
+                : `Ask for ${effortLabel(level)} reasoning effort`
+            }
+            onClick={() => dispatch({ type: "setModel", botId: bot.id, selection: { ...selection, effort: level } })}
+            className={cn(
+              "rounded-full border px-2.5 py-1 text-[12px] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/70",
+              selection.effort === level
+                ? "border-accent/60 bg-control text-ink"
+                : "border-hairline/40 text-ink-secondary hover:bg-control/60 hover:text-ink",
+            )}
+          >
+            {level === undefined ? "Default" : effortLabel(level)}
+          </button>
+        ))}
+      </div>
+    </div>
+  );
 }
 
 function ModelRow({
@@ -282,15 +347,24 @@ export function ModelPicker({
           : active
           ? `${active.displayName} · ${modelLabel(active, selection.model)}${
               modelProvider(active, selection.model) ? ` · ${modelProvider(active, selection.model)}` : ""
-            }`
+            }${selection.effort ? ` · ${effortLabel(selection.effort)} effort` : ""}`
           : selection.model
       }
     >
       {active && <ProviderMark driverKind={active.driverKind} size={14} />}
-      <span className={cn("max-w-[160px] truncate", !contained && active && "@max-4xl/chathead:hidden")}>
-        {modelLabel(active, selection.model)}
-        {active && modelProvider(active, selection.model) && (
-          <span className="text-ink-secondary"> · {modelProvider(active, selection.model)}</span>
+      <span className={cn("flex min-w-0 items-center gap-1", !contained && active && "@max-4xl/chathead:hidden")}>
+        <span className="max-w-[160px] truncate">
+          {modelLabel(active, selection.model)}
+          {active && modelProvider(active, selection.model) && (
+            <span className="text-ink-secondary"> · {modelProvider(active, selection.model)}</span>
+          )}
+        </span>
+        {/* outside the truncating span: a long model name must not be what
+            hides the effort the header exists to surface */}
+        {selection.effort && (
+          <span data-model-effort className="shrink-0 text-ink-secondary">
+            · {effortLabel(selection.effort)}
+          </span>
         )}
       </span>
       <ChevronDown
@@ -512,6 +586,21 @@ export function ModelPicker({
                       )}
                     </div>
                   </>
+                )}
+
+                {/* The header has nowhere else to put effort, so the popover
+                    carries it. `contained` callers (the settings dialog) render
+                    their own EffortRow card, and two copies of one control in
+                    one view read as a bug. Reads the bot's active engine, not
+                    the rail being browsed: effort applies to the model this bot
+                    runs on now, and picking a model on another rail closes the
+                    popover. */}
+                {!contained && (
+                  <EffortRow
+                    bot={bot}
+                    className="shrink-0 border-t border-hairline/40 px-4 py-3"
+                    label={<span className="text-[12.5px] font-medium text-ink">Effort</span>}
+                  />
                 )}
 
                 {pane === "main" && (

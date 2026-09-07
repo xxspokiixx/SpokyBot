@@ -349,7 +349,7 @@ export function BotSettingsDialog({ bot }: { bot: Bot }) {
 
             {section === "access" && <AccessSection bot={bot} derived={derived} />}
 
-            {section === "model" && <ModelSection bot={bot} derived={derived} />}
+            {section === "model" && <ModelSection bot={bot} />}
 
             {section === "permissions" && <PermissionsSection bot={bot} derived={derived} />}
 
