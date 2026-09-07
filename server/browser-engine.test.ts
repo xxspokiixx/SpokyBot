@@ -17,8 +17,8 @@ import {
   pinnedBinaryPath,
   resolveAgentBrowserBinary,
 } from "./browser-engine.ts";
-import { AGENT_BROWSER_VERSION, agentBrowserReleaseUrl, resolveAgentBrowserReleaseAsset } from "./browser-engine-release.ts";
-import { browserBundlePaths, SUPPORTED_BROWSER_TARGETS } from "./browser-bundle-release.ts";
+import { AGENT_BROWSER_VERSION, agentBrowserReleaseUrl, agentBrowserReleaseVersion, resolveAgentBrowserReleaseAsset } from "./browser-engine-release.ts";
+import { browserBundlePaths, browserBundleSpec, SUPPORTED_BROWSER_TARGETS } from "./browser-bundle-release.ts";
 import { removeTempDir } from "./testing/cleanup.ts";
 
 const posix = process.platform !== "win32";
@@ -34,6 +34,45 @@ afterEach(async () => {
 });
 
 describe("finding the browser engine", () => {
+  it("pins the native-verified Windows revision in both download and desktop manifests", () => {
+    const asset = resolveAgentBrowserReleaseAsset("win32", "x64")!;
+    expect(asset).toEqual({
+      target: "win32-x64", version: "0.36.0-omb.1",
+      asset: "agent-browser-win32-x64-0.36.0-omb.1.exe",
+      url: "https://github.com/milind-soni/OpenMausBot/releases/download/browser-engine-v0.36.0-omb.1/agent-browser-win32-x64-0.36.0-omb.1.exe",
+      bytes: 13806080, sha256: "33bee834f6a6072ec8688b0914726e0262874d758f69f27e8baf7eaac6b5ed15",
+    });
+    expect(agentBrowserReleaseVersion(asset)).toBe("0.36.0-omb.1");
+    expect(browserBundleSpec("win32-x64").engine).toEqual({
+      version: asset.version, asset: asset.asset, url: asset.url,
+      bytes: asset.bytes, sha256: asset.sha256, executable: "agent-browser.exe",
+    });
+    for (const [platform, arch] of [["darwin", "arm64"], ["darwin", "x64"], ["linux", "arm64"], ["linux", "x64"]] as const) {
+      expect(agentBrowserReleaseVersion(resolveAgentBrowserReleaseAsset(platform, arch))).toBe("0.36.0");
+    }
+  });
+
+  it("does not reuse a pre-fix Windows managed install for a revised release", () => {
+    const dataDir = join(tmpdir(), "omb-versioned-browser-fixture");
+    const old = join(dataDir, "tools", "agent-browser", "0.36.0", "agent-browser.exe");
+    const revised = pinnedBinaryPath(dataDir, "win32", "x64");
+    expect(revised).toBe(join(dataDir, "tools", "agent-browser", "0.36.0-omb.1", "agent-browser.exe"));
+    const files = new Set([old]);
+    const options = { dataDir, platform: "win32" as const, arch: "x64", env: { PATH: "" }, exists: (file: string) => files.has(file) };
+    expect(resolveAgentBrowserBinary(options)).toBeNull();
+    files.add(revised);
+    expect(browserEngineStatus(options)).toMatchObject({ kind: "ready", binaryPath: revised, version: "0.36.0-omb.1" });
+    expect(resolveAgentBrowserBinary({ ...options, env: { PATH: "", OMB_AGENT_BROWSER_PATH: old } })).toBe(old);
+  });
+
+  it("retains default upstream versions and permits a pinned platform-specific asset URL", () => {
+    const official = resolveAgentBrowserReleaseAsset("linux", "x64")!;
+    expect(agentBrowserReleaseVersion(official)).toBe(AGENT_BROWSER_VERSION);
+    const revised = { ...official, version: "0.36.0-omb.1", url: "https://example.invalid/releases/download/fixed/fixture.exe" };
+    expect(agentBrowserReleaseVersion(revised)).toBe("0.36.0-omb.1");
+    expect(agentBrowserReleaseUrl(revised)).toBe(revised.url);
+  });
+
   it.each(SUPPORTED_BROWSER_TARGETS)("uses the complete %s desktop bundle before old downloaded engines", (target) => {
     const [platform, arch] = target.split("-");
     const env = { OMB_RESOURCES_PATH: join(tmpdir(), "OMB resources"), PATH: "" };
@@ -102,7 +141,7 @@ describe("finding the browser engine", () => {
     expect(resolveAgentBrowserBinary({ dataDir, env: { ...env, OMB_AGENT_BROWSER_PATH: override }, exists })).toBe(override);
     // an override that does not exist is an error, not a silent fallback
     expect(resolveAgentBrowserBinary({ dataDir, env: { ...env, OMB_AGENT_BROWSER_PATH: join(dataDir, "missing", name) }, exists })).toBeNull();
-    expect(browserEngineStatus({ dataDir, env, exists })).toMatchObject({ kind: "ready", binaryPath: pinned, version: AGENT_BROWSER_VERSION });
+    expect(browserEngineStatus({ dataDir, env, exists })).toMatchObject({ kind: "ready", binaryPath: pinned, version: agentBrowserReleaseVersion(resolveAgentBrowserReleaseAsset()) });
   });
 
   it("knows every target Vercel publishes, and picks the musl build on Alpine", () => {
@@ -110,7 +149,8 @@ describe("finding the browser engine", () => {
       const asset = resolveAgentBrowserReleaseAsset(platform, arch);
       expect(asset, `${platform}-${arch}`).not.toBeNull();
       expect(asset?.sha256).toMatch(/^[0-9a-f]{64}$/u);
-      expect(agentBrowserReleaseUrl(asset!)).toContain(`/v${AGENT_BROWSER_VERSION}/`);
+      if (asset?.url) expect(agentBrowserReleaseUrl(asset)).toBe(asset.url);
+      else expect(agentBrowserReleaseUrl(asset!)).toContain(`/v${AGENT_BROWSER_VERSION}/`);
     }
     expect(resolveAgentBrowserReleaseAsset("linux", "x64", true)?.target).toBe("linux-musl-x64");
     expect(resolveAgentBrowserReleaseAsset("freebsd", "x64")).toBeNull();

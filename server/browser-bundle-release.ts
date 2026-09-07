@@ -3,8 +3,8 @@
 // This is Chromium's headless shell, not full Chrome (which includes Widevine).
 import { join } from "node:path";
 import {
-  AGENT_BROWSER_VERSION,
   agentBrowserReleaseUrl,
+  agentBrowserReleaseVersion,
   resolveAgentBrowserReleaseAsset,
 } from "./browser-engine-release.ts";
 
@@ -30,7 +30,7 @@ export function browserBundleSpec(target: string) {
     schemaVersion: 1,
     target,
     engine: {
-      version: AGENT_BROWSER_VERSION,
+      version: agentBrowserReleaseVersion(engine),
       asset: engine.asset,
       url: agentBrowserReleaseUrl(engine),
       bytes: engine.bytes,

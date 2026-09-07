@@ -20,6 +20,7 @@ import { browserBundlePaths } from "./browser-bundle-release.ts";
 import {
   AGENT_BROWSER_VERSION,
   agentBrowserReleaseUrl,
+  agentBrowserReleaseVersion,
   resolveAgentBrowserReleaseAsset,
   type AgentBrowserReleaseAsset,
 } from "./browser-engine-release.ts";
@@ -41,8 +42,9 @@ export function isMusl(platform: NodeJS.Platform = process.platform, exists: (p:
   return platform === "linux" && (exists("/lib/ld-musl-x86_64.so.1") || exists("/lib/ld-musl-aarch64.so.1"));
 }
 
-export function pinnedBinaryPath(dataDir = DATA_DIR, platform: NodeJS.Platform = process.platform): string {
-  return join(dataDir, ENGINE_DIR, AGENT_BROWSER_VERSION, executableName(platform));
+export function pinnedBinaryPath(dataDir = DATA_DIR, platform: NodeJS.Platform = process.platform, arch: string = process.arch): string {
+  const version = agentBrowserReleaseVersion(resolveAgentBrowserReleaseAsset(platform, arch));
+  return join(dataDir, ENGINE_DIR, version, executableName(platform));
 }
 
 function onPath(env: NodeJS.ProcessEnv, platform: NodeJS.Platform, exists: (p: string) => boolean): string | null {
@@ -90,7 +92,7 @@ export function resolveAgentBrowserBinary(options: BrowserLookupOptions = {}): s
   if (override) return resolve(override) && exists(resolve(override)) ? resolve(override) : null;
   const bundle = packagedBrowser(options);
   if (bundle && exists(bundle.directory)) return completePackage(bundle, exists) ? bundle.engine : null;
-  const pinned = pinnedBinaryPath(options.dataDir, platform);
+  const pinned = pinnedBinaryPath(options.dataDir, platform, options.arch);
   if (exists(pinned)) return pinned;
   return onPath(env, platform, exists);
 }
@@ -110,11 +112,11 @@ export async function installAgentBrowserBinary(options: {
   const platform = options.platform ?? process.platform;
   const asset = options.asset ?? resolveAgentBrowserReleaseAsset(platform, options.arch ?? process.arch, options.musl ?? isMusl(platform));
   if (!asset) throw new Error(`agent-browser publishes no build for ${platform}-${options.arch ?? process.arch}.`);
-  const destination = pinnedBinaryPath(options.dataDir, platform);
+  const destination = pinnedBinaryPath(options.dataDir, platform, options.arch);
   const directory = join(destination, "..");
   mkdirSync(directory, { recursive: true, mode: 0o700 });
   const url = agentBrowserReleaseUrl(asset);
-  options.log?.(`downloading agent-browser ${AGENT_BROWSER_VERSION} (${Math.round(asset.bytes / 1024 / 1024)} MB, digest pinned)`);
+  options.log?.(`downloading agent-browser ${agentBrowserReleaseVersion(asset)} (${Math.round(asset.bytes / 1024 / 1024)} MB, digest pinned)`);
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), DOWNLOAD_TIMEOUT_MS);
   timer.unref?.();
@@ -182,8 +184,13 @@ export function browserEngineEncryptionKey(dataDir = DATA_DIR): string {
 /** What the harness can offer bots right now, with the reason when nothing. */
 export function browserEngineStatus(options: BrowserLookupOptions = {}): BrowserEngineStatus {
   const binaryPath = resolveAgentBrowserBinary(options);
-  if (binaryPath) return { kind: "ready", binaryPath, version: AGENT_BROWSER_VERSION };
   const bundle = packagedBrowser(options);
+  if (binaryPath) {
+    const platform = options.platform ?? process.platform;
+    const managed = binaryPath === bundle?.engine || binaryPath === pinnedBinaryPath(options.dataDir, platform, options.arch);
+    const version = managed ? agentBrowserReleaseVersion(resolveAgentBrowserReleaseAsset(platform, options.arch)) : AGENT_BROWSER_VERSION;
+    return { kind: "ready", binaryPath, version };
+  }
   if (bundle && (options.exists ?? existsSync)(bundle.directory)) {
     return { kind: "unavailable", reason: "The desktop browser bundle is incomplete. Reinstall or update OpenMausBot to repair it.", installable: false };
   }
