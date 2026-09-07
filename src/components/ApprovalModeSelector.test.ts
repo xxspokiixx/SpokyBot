@@ -3,15 +3,15 @@ import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 
 import {
-  APPROVAL_MODE_OPTIONS,
   ApprovalModeSelector,
+  approvalModeOptions,
   approvalModeOptionsFor,
   approvalModeSelectionRequiresLocalDesktop,
 } from "./ApprovalModeSelector";
 
 describe("approval mode selector", () => {
   it("matches the four Codex approval levels and their plain-language copy", () => {
-    expect(APPROVAL_MODE_OPTIONS.map(({ mode, label, description }) => ({ mode, label, description }))).toEqual([
+    expect(approvalModeOptions().map(({ mode, label, description }) => ({ mode, label, description }))).toEqual([
       {
         mode: "ask",
         label: "Ask for approval",
