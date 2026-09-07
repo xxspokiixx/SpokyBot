@@ -1,10 +1,12 @@
 import { createHash } from "node:crypto";
-import { mkdirSync, mkdtempSync, readFileSync, statSync, writeFileSync } from "node:fs";
+import { spawn } from "node:child_process";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, statSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { delimiter, join } from "node:path";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 
 import {
+  agentBrowserFrame,
   agentBrowserIntegration,
   browserEngineEncryptionKey,
   browserEngineStatus,
@@ -19,7 +21,12 @@ import { removeTempDir } from "./testing/cleanup.ts";
 
 const posix = process.platform !== "win32";
 const scratch: string[] = [];
+vi.mock("node:child_process", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("node:child_process")>();
+  return { ...actual, spawn: vi.fn(actual.spawn) };
+});
 afterEach(async () => {
+  vi.mocked(spawn).mockReset();
   for (const dir of scratch.splice(0)) await removeTempDir(dir);
 });
 
@@ -136,5 +143,50 @@ describe("what a bot gets", () => {
     expect(fresh).toMatch(/^[0-9a-f]{64}$/u);
     expect(fresh).not.toBe(key);
     mkdirSync(join(dataDir, "unused"));
+  });
+});
+
+
+describe("agentBrowserFrame", () => {
+  /** Use a real Node child on every OS, not an unlaunchable Windows shebang.
+   * Only the executable is substituted; arguments, env and file IO are real. */
+  async function fakeBinary(body: string): Promise<string> {
+    const actual = await vi.importActual<typeof import("node:child_process")>("node:child_process");
+    vi.mocked(spawn).mockImplementationOnce((_binary, args, options) => {
+      expect(_binary).toBe("fixture-agent-browser");
+      expect(args?.[0]).toBe("screenshot");
+      return actual.spawn(process.execPath, ["-e", body, ...args ?? []], options);
+    });
+    return "fixture-agent-browser";
+  }
+
+  it("returns the picture the browser wrote, base64 encoded", async () => {
+    // `screenshot <path>` is argument 2; the CLI writes the file there.
+    const binaryPath = await fakeBinary('require("node:fs").writeFileSync(process.argv[2], "PNGDATA")');
+    const frame = await agentBrowserFrame({ binaryPath, env: { AGENT_BROWSER_SESSION: "bot-1" } });
+    expect(frame.format).toBe("png");
+    expect(Buffer.from(frame.png, "base64").toString()).toBe("PNGDATA");
+    expect(existsSync(vi.mocked(spawn).mock.calls[0]![1]![1]!)).toBe(false);
+  });
+
+  it("carries the mount's session env, so it pictures the bot's own browser", async () => {
+    const binaryPath = await fakeBinary('require("node:fs").writeFileSync(process.argv[2], process.env.AGENT_BROWSER_SESSION)');
+    const frame = await agentBrowserFrame({ binaryPath, env: { AGENT_BROWSER_SESSION: "profile-x" } });
+    expect(Buffer.from(frame.png, "base64").toString()).toBe("profile-x");
+  });
+
+  it("fails with the browser's own reason when the capture fails", async () => {
+    const binaryPath = await fakeBinary('process.stderr.write("no open page"); process.exitCode = 3');
+    await expect(agentBrowserFrame({ binaryPath, env: {} })).rejects.toThrow(/no open page/);
+  });
+
+  it("fails rather than inventing a picture the browser never wrote", async () => {
+    const binaryPath = await fakeBinary("process.exitCode = 0");
+    await expect(agentBrowserFrame({ binaryPath, env: {} })).rejects.toThrow(/did not write/);
+  });
+
+  it("gives up on a hung browser instead of holding the turn open", async () => {
+    const binaryPath = await fakeBinary("setTimeout(() => {}, 5000)");
+    await expect(agentBrowserFrame({ binaryPath, env: {}, timeoutMs: 150 })).rejects.toThrow(/in time/);
   });
 });

@@ -157,6 +157,7 @@ import type { GroupGoalRunCardData, GroupGoalRunStatus } from "../shared/group-g
 import { BUILT_IN_DRIVERS } from "./drivers/builtIn.ts";
 import { getOrCreateChannel, mirrorActivity, mirrorExchange, mirrorReply, type CommsBus } from "./comms-visibility.ts";
 import { readMessageText, recallMessages, searchMessages } from "./message-db.ts";
+import { claimRecallCrossings, recallCrossingLabel } from "./recall-disclosure.ts";
 
 /** A session_read answer competes with the transcript for the context
  * window; a computer-use turn's output can run to hundreds of KB. */
@@ -270,6 +271,7 @@ import { RoutineManager, type RoutineRun, type RoutineRunOn, type RoutineRunTrig
 import { CalendarCallManager, type CalendarCall } from "./calendar-calls.ts";
 import { BUILT_IN_BROWSER_SYSTEM_PROMPT } from "./browser-engine.ts";
 import {
+  agentBrowserFrame,
   agentBrowserIntegration,
   browserEngineEncryptionKey,
   clearBrowserSessionState,
@@ -280,8 +282,8 @@ import {
   browserSessionId,
   describeBrowserEngine,
 } from "./browser-engine.ts";
-import { captureOutsideHumanControl } from "./private-screen-capture.ts";
-import { screenFrameHash, screenTouchingTool, settledFrameIsNews } from "./screen-frame-gate.ts";
+import { createScreenFrameSource, type ScreenCapture } from "./screen-frame-source.ts";
+import { screenFrameHash, screenSurfaceForTool, screenTouchingTool, settledFrameIsNews } from "./screen-frame-gate.ts";
 import { RoutineRequestService } from "./routine-requests.ts";
 import { buildBotOverview, type BotOverview, connectedAppsFacts } from "./bot-overview.ts";
 import { ProfileRequestService } from "./profile-requests.ts";
@@ -2867,7 +2869,7 @@ bus.subscribe((event: RuntimeEvent) => {
         if (bot) {
           const touches = screenTouchingTool(toolName);
           if (touches || /computer|screenshot|click|type_text|press_key|scroll|open_url|wait_for|browser_/i.test(toolName)) {
-            pokeScreenPoller(bot.id, touches);
+            pokeScreenPoller(bot.id, touches, screenSurfaceForTool(toolName));
           }
         }
       }
@@ -3676,7 +3678,10 @@ const screenPollers = new Map<
   string,
   {
     timer: ReturnType<typeof setInterval> | null;
-    capture: () => Promise<void>;
+    capture: (fresh?: boolean) => Promise<void>;
+    /** Which surface the last screen-touching tool acted on. A bot with both
+     * a computer and a browser must be pictured on the one it just used. */
+    surface: "browser" | "computer";
     last: Frame | null;
     /** Did this turn actually reach for the screen? A bot that merely HAS
      * a computer would otherwise end every reply — a one-word "yes"
@@ -3700,49 +3705,25 @@ const SCREEN_MIN_GAP_MS = 3000;
  * shell-only turns are kept honest by the settle-time hash gate instead. */
 function startScreenPoller(
   botId: string,
-  capture: () => Promise<{ png: string; format: string }>,
+  captures: { computer?: ScreenCapture; browser?: ScreenCapture },
   { screenIsTheWork = false } = {},
 ) {
+  if (!captures.computer && !captures.browser) return;
   if (screenPollers.has(botId)) return;
-  // One capture at a time, shared by the interval, the pokes, and the
-  // turn-end grab: awaiting the in-flight promise (rather than dropping the
-  // call) is what lets the final frame be the settled one. The min-gap keeps
-  // a tool-heavy turn from spending the box's single command endpoint on
-  // previews the user isn't waiting for.
-  let current: Promise<void> | null = null;
-  let lastAt = 0;
-  const entry = {
+  // Assign rather than spread: the source's last-frame getter deliberately
+  // hides a stale frame as soon as the selected surface changes.
+  const entry = Object.assign(createScreenFrameSource({
+    captures,
+    control: () => ({
+      held: computerControl.snapshot(botId).held,
+      revision: computerControlRevision.get(botId) ?? 0,
+    }),
+    onFrame: (frame) => broadcast({ kind: "screen", botId, ...frame }),
+    minGapMs: SCREEN_MIN_GAP_MS,
+  }), {
     timer: null as ReturnType<typeof setInterval> | null,
-    capture: (): Promise<void> => {
-      // A person can type credentials while driving any browser/computer
-      // surface. Never take a preview during that lease: live frames and the
-      // settled transcript image must retain only the last pre-takeover view.
-      if (computerControl.snapshot(botId).held) return Promise.resolve();
-      if (!current && Date.now() - lastAt < SCREEN_MIN_GAP_MS) return Promise.resolve();
-      current ??= (async () => {
-        try {
-          const frame = await captureOutsideHumanControl(
-            () => ({
-              held: computerControl.snapshot(botId).held,
-              revision: computerControlRevision.get(botId) ?? 0,
-            }),
-            capture,
-          );
-          if (!frame) return;
-          entry.last = frame;
-          broadcast({ kind: "screen", botId, ...frame });
-        } catch {
-          /* box asleep or mid-command — try again next tick */
-        } finally {
-          lastAt = Date.now();
-          current = null;
-        }
-      })();
-      return current;
-    },
-    last: null as Frame | null,
     touched: screenIsTheWork,
-  };
+  });
   entry.timer = setInterval(() => void entry.capture(), SCREEN_POLL_MS);
   screenPollers.set(botId, entry);
 }
@@ -3751,7 +3732,7 @@ function startScreenPoller(
  * instead of waiting for the next interval tick. Rate-limited inside
  * capture() — a tool-heavy turn used to fire one full REST chain per
  * completed tool, competing with the agent for the same endpoint. */
-function pokeScreenPoller(botId: string, touches: boolean) {
+function pokeScreenPoller(botId: string, touches: boolean, surface?: "browser" | "computer") {
   const entry = screenPollers.get(botId);
   if (!entry) return;
   // the same signal, read twice: a completed computer tool is both the
@@ -3762,6 +3743,10 @@ function pokeScreenPoller(botId: string, touches: boolean) {
   // named mcp__computer__*, and matching that alone used to append an
   // untouched desktop to every curl-and-answer reply.
   if (touches) entry.touched = true;
+  // Picture the surface the tool acted on. Only a touching tool moves this:
+  // a status read on the computer must not redirect the picture away from a
+  // page the browser is still showing.
+  if (touches && surface) entry.surface = surface;
   void entry.capture();
 }
 
@@ -3802,7 +3787,7 @@ async function finalScreenFrame(botId: string, threadId: string): Promise<Frame 
   if (entry.timer) clearInterval(entry.timer);
   screenPollers.delete(botId);
   if (!entry.touched) return null;
-  await entry.capture();
+  await entry.capture(true);
   const frame = entry.last;
   if (!frame || !settledFrameIsNews(shownScreenHash(botId, threadId), frame.png)) return null;
   settledScreenHashes.set(botId, screenFrameHash(frame.png));
@@ -4125,6 +4110,7 @@ async function startTurn(
       }
       const wants = plan.computer;
       let previewCapture: (() => Promise<{ png: string; format: string }>) | null = null;
+      let browserCapture: (() => Promise<{ png: string; format: string }>) | null = null;
       let computerKind: "box" | "vps" | "vm" | "local" | null = null;
       let autoVpsProblem: string | null = null;
 
@@ -4382,6 +4368,16 @@ async function startTurn(
         const selectedProfile = liveBot.browserProfile;
         browser = browserIntegration(bot.id, selectedProfile);
         if (browser) integrations.browser = browser.integration;
+        // The browser lost its frame source when the Electron surface was
+        // removed: previewCapture is set by the computer branches above, and
+        // nothing replaced it here. A bot with only a browser was pictured
+        // not at all; a bot with both was pictured on its desktop even while
+        // the work was a web page, because agent-browser runs its own headless
+        // Chrome on the host rather than inside that desktop.
+        if (browser) {
+          const frame = { binaryPath: browser.integration.command, env: browser.integration.env };
+          browserCapture = () => agentBrowserFrame(frame);
+        }
       }
       // A cancelled adapter can be between accepting sendTurn and revealing
       // its provider turn id. Never overlap a replacement with that ambiguous
@@ -4464,8 +4460,12 @@ async function startTurn(
       // after its own turn.completed would never be torn down — it would
       // keep polling the box forever, carrying dead per-turn state. busy
       // is flipped false in the fold, so it is the honest "still running".
-      if (previewCapture && store.bot(bot.id)?.busy) {
-        startScreenPoller(bot.id, previewCapture, { screenIsTheWork: instance.driverKind === "boxAgent" });
+      if ((previewCapture || browserCapture) && store.bot(bot.id)?.busy) {
+        startScreenPoller(
+          bot.id,
+          { ...(previewCapture ? { computer: previewCapture } : {}), ...(browserCapture ? { browser: browserCapture } : {}) },
+          { screenIsTheWork: instance.driverKind === "boxAgent" },
+        );
       }
       // An adapter may publish completion synchronously just before its
       // dispatch promise resolves. The event could not use the turn-id map
@@ -7908,6 +7908,19 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
       // every task included. Own-bot only, on purpose — a bot's transcripts
       // are its notebook the same way MEMORY.md is (section-context.ts draws
       // that line), and search across bots would be an isolation change.
+      // Announce in the room that a bot reached outside it. Silent when the
+      // room has already been told about that thread, so a bot searching
+      // three times in one turn leaves one chip per source, not per search.
+      const discloseRecall = (bot: BotRecord, roomThreadId: string, sourceThreadIds: readonly string[]): void => {
+        const crossing = claimRecallCrossings(roomThreadId, sourceThreadIds);
+        if (!crossing.count) return;
+        store.appendMessage(roomThreadId, {
+          role: "bot",
+          kind: "activity",
+          from: { botId: bot.id, name: bot.name, color: bot.color },
+          tool: { name: recallCrossingLabel(bot.name, crossing.count), ok: true },
+        });
+      };
       if (method === "GET" && path === "/api/internal/session-search") {
         const fromBotId = String(url.searchParams.get("fromBotId") ?? "");
         const from = store.bot(fromBotId);
@@ -7921,11 +7934,18 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
         const rawLimit = Number(url.searchParams.get("limit"));
         const limit = Number.isFinite(rawLimit) && rawLimit > 0 ? Math.min(Math.trunc(rawLimit), 25) : 12;
         const ownThreads = [...new Set([from.threadId, ...(from.tasks ?? []).map((task) => task.threadId)])];
+        // A room is the only place a recall can be a disclosure: in a 1:1 the
+        // user already owns every thread the bot can reach.
+        const inRoom = Boolean(store.groupByThread(fromThreadId));
         const hits = recallMessages(q, ownThreads, limit).map((hit) => ({
           ...hit,
           task: store.taskByThread(from.id, hit.threadId)?.title,
           current: hit.threadId === fromThreadId,
+          crossed: inRoom && hit.threadId !== fromThreadId,
         }));
+        if (inRoom) {
+          discloseRecall(from, fromThreadId, hits.filter((hit) => hit.crossed).map((hit) => hit.threadId));
+        }
         return json(res, 200, { hits });
       }
       // session_read: the whole message behind a session_search hit. Same
@@ -7945,8 +7965,12 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
         const own = threadId === from.threadId || Boolean(store.taskByThread(from.id, threadId));
         const message = own ? readMessageText(threadId, messageId) : null;
         if (!message) return json(res, 404, { error: "no such message in your conversations" });
+        const readInRoom = Boolean(store.groupByThread(fromThreadId));
+        const readCrossed = readInRoom && threadId !== fromThreadId;
+        if (readCrossed) discloseRecall(from, fromThreadId, [threadId]);
         return json(res, 200, {
           ...message,
+          crossed: readCrossed,
           text: message.text.length > SESSION_READ_MAX_CHARS ? `${message.text.slice(0, SESSION_READ_MAX_CHARS)}…` : message.text,
           task: store.taskByThread(from.id, threadId)?.title,
         });
