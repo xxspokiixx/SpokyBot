@@ -541,6 +541,10 @@ export interface BotRecord {
   /** Which connected apps this bot may use, and whether it may write to
    * them. Absent: every connected app, read and write (the old behavior). */
   connectorScopes?: ConnectorScopes;
+  /** Where a task carries on when this bot's engine hits a usage limit or
+   * is otherwise unavailable, in order. Another account of the same engine,
+   * or a different engine; the transcript replays into whichever it lands on. */
+  fallback?: Array<{ instanceId: string; model: string }>;
   /** Speak this bot's replies aloud as they settle, without being asked.
    * Off by default: a hosted voice costs money per character, so speaking
    * is something you turn on, never something that happens to you. */

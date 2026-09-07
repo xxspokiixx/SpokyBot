@@ -113,6 +113,8 @@ import {
   browserProfilePartitionTarget,
   syncCredentialEnv,
   withInstanceCli,
+  withAccountProfile,
+  withoutAccountProfile,
   vpsSshAlias,
   DATA_DIR,
   EVENTS_DIR,
@@ -292,6 +294,7 @@ import { fetchGithubTeam, fetchLibraryTeam, fetchTeamCatalog } from "./team-libr
 import { isBotPackage, packageAgentAsMember, parseBotPackage, renderBotPackageMarkdown } from "./bot-package.ts";
 import { createTeamManifest, importedMemberProfile, parseTeamManifest } from "./team-manifest.ts";
 import { readThreadEvents } from "./thread-events.ts";
+import { classifyError } from "./drivers/retry.ts";
 import { describeTool, readBotActivity } from "./activity.ts";
 import { OutboundCounts } from "./outbound-counts.ts";
 import { OutboundRequestService } from "./outbound-requests.ts";
@@ -3154,6 +3157,7 @@ bus.subscribe((event: RuntimeEvent) => {
       });
       break;
     case "runtime.error":
+      lastRuntimeError.set(event.threadId, event.message);
       pushMessage({
         role: "bot",
         kind: "activity",
@@ -3229,6 +3233,19 @@ bus.subscribe((event: RuntimeEvent) => {
         });
         // settled → idle; a setup failure already marked it dead, keep that
         if (store.bot(bot.id)?.activity !== "dead") store.setActivity(bot.id, "idle");
+        // ── account and engine fallback ──
+        // A turn that died on a usage limit, a rate limit, or an engine that
+        // could not be reached carries on with the next engine in the bot's
+        // chain; the transcript replays into it because the engine is fresh.
+        // A turn the person stopped is not a failure to route around.
+        const failureText = lastRuntimeError.get(event.threadId) ?? "";
+        lastRuntimeError.delete(event.threadId);
+        if (event.ok) {
+          fallbackHops.delete(event.threadId);
+        } else if (event.stopReason !== "interrupted") {
+          const verdict = classifyError({ text: failureText || (event.stopReason ?? "") });
+          if (FALLBACK_REASONS.has(verdict.reason)) scheduleFallback(bot.id, event.threadId, verdict.reason);
+        }
         const routineReportThread = routineRun ? routineSourceThread(routineRun) : null;
         const routineReportGroup = routineReportThread ? store.groupByThread(routineReportThread) : undefined;
         // Group-origin routines belong to that channel's unread state. Their
@@ -4857,6 +4874,63 @@ const routineRequests = new RoutineRequestService({
     return null;
   },
 });
+// ── account and engine fallback ──
+// When a bot's engine hits a usage limit or is unavailable, the task carries
+// on with the next entry in the bot's fallback chain. Hops are counted per
+// thread so a chain whose every engine is down stops after one pass rather
+// than looping; a successful turn resets the count.
+const fallbackHops = new Map<string, number>();
+/** The last runtime.error text per thread, so the turn.completed fold can
+ * read WHY the turn died: the terminal event itself carries only a stop
+ * reason, and "exit_before_result" does not say rate limit. */
+const lastRuntimeError = new Map<string, string>();
+const FALLBACK_REASONS = new Set(["rate_limited", "overloaded", "quota", "server_error", "timeout", "connection_reset", "auth"]);
+const FALLBACK_REASON_TEXT: Record<string, string> = {
+  rate_limited: "was rate limited",
+  overloaded: "was overloaded",
+  quota: "reached its usage limit",
+  server_error: "returned a server error",
+  timeout: "timed out",
+  connection_reset: "could not be reached",
+  auth: "was not signed in",
+};
+
+function scheduleFallback(botId: string, threadId: string, reason: string): void {
+  const bot = store.bot(botId);
+  if (!bot?.fallback?.length) return;
+  const hops = fallbackHops.get(threadId) ?? 0;
+  if (hops >= bot.fallback.length) return;
+  const currentIndex = bot.fallback.findIndex((entry) => entry.instanceId === bot.modelSelection.instanceId);
+  const next = bot.fallback.slice(currentIndex + 1).find((entry) => registry.get(entry.instanceId));
+  if (!next) return;
+  fallbackHops.set(threadId, hops + 1);
+  const from = registry.get(bot.modelSelection.instanceId)?.displayName ?? bot.modelSelection.instanceId;
+  const to = registry.get(next.instanceId)?.displayName ?? next.instanceId;
+  const why = FALLBACK_REASON_TEXT[reason] ?? "stopped";
+  const patched = store.patchBot(bot.id, { modelSelection: { ...bot.modelSelection, instanceId: next.instanceId, model: next.model } });
+  if (patched) broadcast({ kind: "bot", bot: wireBot(patched) });
+  store.appendMessage(threadId, {
+    role: "bot",
+    kind: "activity",
+    tool: { name: `switched to ${to}: ${from} ${why}`, ok: true },
+  });
+  // After the fold has finished settling this turn: startTurn refuses a
+  // bot that still looks busy.
+  setTimeout(() => {
+    void startTurn(
+      bot.id,
+      `[OpenMausBot moved this conversation to ${to} because ${from} ${why}. Continue the user's last request from where it left off, and do not repeat work that already finished.]`,
+      { threadId, cardContinuation: true, unattended: isUnattended(bot.id) },
+    ).catch((error) => {
+      store.appendMessage(threadId, {
+        role: "bot",
+        kind: "activity",
+        tool: { name: `error: could not continue on ${to} — ${error instanceof Error ? error.message : String(error)}`, ok: false },
+      });
+    });
+  }, 50);
+}
+
 // Sending on the person's behalf (shared/outbound.ts): the relay holds an
 // outbound connector call on a card, and counts the ones that go out.
 const outboundRequests = new OutboundRequestService();
@@ -10478,6 +10552,23 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
       }
       if (section !== undefined) patch.section = section ?? undefined;
       if (body.chiefOfStaff === false) patch.chiefOfStaff = false;
+      // where a task carries on when this engine is unavailable, in order
+      if (body.fallback !== undefined) {
+        if (!Array.isArray(body.fallback) || body.fallback.length > 5) {
+          return json(res, 400, { error: "fallback must be a list of up to five { instanceId, model } entries" });
+        }
+        const chain: Array<{ instanceId: string; model: string }> = [];
+        for (const entry of body.fallback as unknown[]) {
+          const row = entry && typeof entry === "object" ? (entry as { instanceId?: unknown; model?: unknown }) : null;
+          if (!row || typeof row.instanceId !== "string" || !/^[\w.-]+$/.test(row.instanceId) || typeof row.model !== "string") {
+            return json(res, 400, { error: "fallback must be a list of up to five { instanceId, model } entries" });
+          }
+          if (!registry.get(row.instanceId)) return json(res, 400, { error: `fallback engine "${row.instanceId}" is not available` });
+          if (chain.some((seen) => seen.instanceId === row.instanceId)) continue;
+          chain.push({ instanceId: row.instanceId, model: row.model });
+        }
+        patch.fallback = chain;
+      }
       // which connected apps this bot may use; null clears back to all of them
       if (body.connectorScopes !== undefined) {
         if (body.connectorScopes === null) patch.connectorScopes = undefined;
@@ -12178,6 +12269,47 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
     }
 
     // ── per-instance CLI path override (custom builds / versioned bins) ──
+    // POST /api/instances {driver, displayName} — a second account on an
+    // engine, as a new instance with its own login directory. Reloads
+    // providers like a CLI override does.
+    if (method === "POST" && path === "/api/instances") {
+      if (!String(req.headers["content-type"] ?? "").toLowerCase().startsWith("application/json")) {
+        return json(res, 415, { error: "content-type must be application/json" });
+      }
+      const body = await readBody(req);
+      if (typeof body?.driver !== "string" || typeof body?.displayName !== "string") {
+        return json(res, 400, { error: "driver and displayName are required" });
+      }
+      if (providerConfigBusy) return json(res, 409, { error: "provider settings are already being updated" });
+      providerConfigBusy = true;
+      try {
+        const result = withAccountProfile(cfg, { driver: body.driver, displayName: body.displayName, dataDir: DATA_DIR });
+        if (!result.ok) return json(res, 400, { error: result.error });
+        saveConfig({ instances: result.config.instances });
+        Object.assign(cfg, loadConfig());
+        await reloadProviders();
+        resetPathCache();
+        return json(res, 201, { instanceId: result.instanceId, instances: await registry.describe() });
+      } finally {
+        providerConfigBusy = false;
+      }
+    }
+    const instanceDelete = /^\/api\/instances\/([\w.-]+)$/.exec(path);
+    if (method === "DELETE" && instanceDelete) {
+      if (providerConfigBusy) return json(res, 409, { error: "provider settings are already being updated" });
+      providerConfigBusy = true;
+      try {
+        const result = withoutAccountProfile(cfg, instanceDelete[1]);
+        if (!result.ok) return json(res, result.error.startsWith("unknown") ? 404 : 400, { error: result.error });
+        saveConfig({ instances: result.config.instances }, { removeInstances: [instanceDelete[1]] });
+        Object.assign(cfg, loadConfig());
+        await reloadProviders();
+        resetPathCache();
+        return json(res, 200, { instances: await registry.describe() });
+      } finally {
+        providerConfigBusy = false;
+      }
+    }
     // PATCH /api/instances/:id {cli: "/path/to/cli" | ""} — "" reverts to the
     // driver default. Kills in-flight turns like any provider reload.
     const instancePatch = /^\/api\/instances\/([\w.-]+)$/.exec(path);

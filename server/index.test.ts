@@ -8634,3 +8634,103 @@ describe("connection scopes", () => {
     }
   });
 });
+
+describe("account profiles and fallback", () => {
+  // A second account on an engine is another instance with its own login
+  // directory; a bot's fallback chain carries a task to it when the first
+  // account hits a limit. Isolated server: the primary fixture Claude is
+  // scripted to die on a 429, and the profile (default fake mode) answers.
+  it("adds a profile, falls over to it on a rate limit, and continues the task", async () => {
+    const isolatedHome = mkdtempSync(join(tmpdir(), "omb-fallback-"));
+    const isolatedData = join(isolatedHome, ".openmausbot");
+    const isolatedStatic = join(isolatedHome, "static");
+    const isolatedPort = await freePortBlock([0, 1]);
+    mkdirSync(join(isolatedStatic, "assets"), { recursive: true });
+    mkdirSync(isolatedData, { recursive: true });
+    writeFileSync(join(isolatedStatic, "index.html"), "<!doctype html><title>Fallback test</title>");
+    writeFileSync(join(isolatedStatic, "assets", "smoke.css"), "body{}");
+    writeFileSync(join(isolatedData, "config.json"), JSON.stringify({
+      instances: {
+        claude: {
+          driver: "claudeAgent",
+          displayName: "Fixture Claude",
+          config: { cli: FAKE_CLAUDE_CLI },
+          environment: { FAKE_CLAUDE_MODE: "rate-limited", FAKE_CLAUDE_RETRY_SCALE: "0.001" },
+        },
+      },
+    }));
+    let isolatedStderr = "";
+    const isolatedChild = spawn(process.execPath, [join(SERVER_DIR, "index.ts")], {
+      cwd: ROOT,
+      env: {
+        ...(process.env.PATH ? { PATH: process.env.PATH } : {}),
+        ...(process.env.PATHEXT ? { PATHEXT: process.env.PATHEXT } : {}),
+        ...(process.env.SystemRoot ? { SystemRoot: process.env.SystemRoot } : {}),
+        HOME: isolatedHome,
+        USERPROFILE: isolatedHome,
+        OMB_PORT: String(isolatedPort),
+        OMB_WEBHOOK_PORT: String(isolatedPort + 1),
+        OMB_STATIC_DIR: isolatedStatic,
+        FAKE_CLAUDE_MODE: "happy",
+        FAKE_CLAUDE_REPLIES: JSON.stringify(["carried on from the second account"]),
+      },
+      stdio: ["ignore", "pipe", "pipe"],
+    });
+    isolatedChild.stderr!.on("data", (chunk) => (isolatedStderr += chunk));
+    const isolatedApi = async (method: string, path: string, body?: unknown): Promise<{ status: number; body: any }> => {
+      const response = await fetch(`http://127.0.0.1:${isolatedPort}${path}`, {
+        method,
+        headers: body ? { "content-type": "application/json" } : undefined,
+        body: body ? JSON.stringify(body) : undefined,
+      });
+      return { status: response.status, body: await response.json() };
+    };
+
+    try {
+      await waitForIsolatedServer(isolatedChild, isolatedPort, () => isolatedStderr);
+
+      const added = await isolatedApi("POST", "/api/instances", { driver: "claudeAgent", displayName: "Claude (second)" });
+      expect(added.status).toBe(201);
+      expect(added.body.instanceId).toBe("claude-second");
+      const second = added.body.instances.find((instance: { instanceId: string }) => instance.instanceId === "claude-second");
+      expect(second).toMatchObject({ driverKind: "claudeAgent", displayName: "Claude (second)" });
+      expect(second.snapshot.state).toBe("available");
+      expect((await isolatedApi("POST", "/api/instances", { driver: "grokAgent", displayName: "Grok 2" })).status).toBe(400);
+
+      const primary = added.body.instances.find((instance: { instanceId: string }) => instance.instanceId === "claude");
+      const bot = (await isolatedApi("POST", "/api/bots", { name: "Hopper" })).body.bot;
+      expect((await isolatedApi("PATCH", `/api/bots/${bot.id}/model`, { instanceId: "claude", model: primary.models.default })).status).toBe(200);
+      const chained = await isolatedApi("PATCH", `/api/bots/${bot.id}`, { fallback: [{ instanceId: "claude-second", model: second.models.default }] });
+      expect(chained.status).toBe(200);
+      expect(chained.body.bot.fallback).toEqual([{ instanceId: "claude-second", model: second.models.default }]);
+      expect((await isolatedApi("PATCH", `/api/bots/${bot.id}`, { fallback: [{ instanceId: "nope", model: "x" }] })).status).toBe(400);
+
+      expect([200, 202]).toContain((await isolatedApi("POST", `/api/bots/${bot.id}/messages`, { text: "chase the unpaid invoices" })).status);
+      await expect.poll(async () => {
+        const current = (await isolatedApi("GET", "/api/bots")).body.bots.find((candidate: { id: string }) => candidate.id === bot.id);
+        const replied = current.messages.some(
+          (message: { role: string; kind: string; text?: string }) =>
+            message.role === "bot" && message.kind === "text" && message.text === "carried on from the second account",
+        );
+        const trail = current.messages
+          .slice(-6)
+          .map((message: { role: string; kind: string; text?: string; tool?: { name: string } }) => message.tool?.name ?? `${message.role}:${message.kind}:${(message.text ?? "").slice(0, 40)}`)
+          .join(" | ");
+        return replied ? `${current.modelSelection.instanceId}:${replied}:${current.busy}` : `${current.modelSelection.instanceId}:${replied}:${current.busy} :: ${trail}`;
+      }, { timeout: 20_000, interval: 200 }).toBe("claude-second:true:false");
+      const final = (await isolatedApi("GET", "/api/bots")).body.bots.find((candidate: { id: string }) => candidate.id === bot.id);
+      expect(final.messages.some((message: { tool?: { name: string } }) => message.tool?.name.startsWith("switched to Claude (second)"))).toBe(true);
+      // the person's own message appears once: the continuation is control-plane, not a second user line
+      expect(final.messages.filter((message: { role: string; kind: string }) => message.role === "user" && message.kind === "text")).toHaveLength(1);
+
+      expect((await isolatedApi("DELETE", "/api/instances/claude")).status).toBe(400);
+      const removed = await isolatedApi("DELETE", "/api/instances/claude-second");
+      expect(removed.status).toBe(200);
+      expect(removed.body.instances.some((instance: { instanceId: string }) => instance.instanceId === "claude-second")).toBe(false);
+    } finally {
+      await waitForExit(isolatedChild, { signal: "SIGTERM" });
+      await removeTempDir(isolatedHome);
+    }
+    expectStoppedTestServerCleanly(isolatedChild, isolatedStderr);
+  }, 60_000);
+});

@@ -18,6 +18,7 @@ export type BotUpdatePatch = Partial<
     | "autoApprove"
     | "approvalMode"
     | "outbound"
+    | "fallback"
     | "speakReplies"
     | "voice"
     | "pinned"

@@ -292,6 +292,8 @@ export interface Bot {
   outbound?: OutboundPolicy;
   /** which connected apps this bot may use; absent means all of them */
   connectorScopes?: ConnectorScopes;
+  /** engines to carry a task on to when this one hits a limit, in order */
+  fallback?: Array<{ instanceId: string; model: string }>;
   /** speak this bot's replies aloud as they settle */
   speakReplies?: boolean;
   /** this bot's own voice id (falls back to the app-wide one) */
@@ -469,6 +471,9 @@ export interface InstanceInfo {
   /** `custom` agents sit below the rail divider — no subscription catalog. */
   access?: "subscription" | "custom";
   install?: EngineInstall;
+  /** A second account on an engine: the default instance it is another
+   * login of. Only such profiles can be removed. */
+  accountOf?: string;
   /** Configured CLI path override — set ONLY when the user overrode it;
    * absent means the driver default is in effect. */
   cli?: string;
