@@ -17,6 +17,7 @@ import type { CloudBackend, EffortLevel } from "../../server/contracts.ts";
 import type { MausColor, MausMotion } from "@/lib/mascot";
 import type { BotAvatarCrop } from "../../shared/bot-avatar";
 import { approvalModeFor, type ApprovalMode } from "../../shared/approval-mode";
+import type { OutboundPolicy } from "../../shared/outbound";
 import type { MascotBodyId } from "../../shared/mascot-bodies";
 import type { ProfileRequestCardData } from "../../shared/profile-request";
 import type { RoutineRequestCardData } from "../../shared/routine-request";
@@ -286,6 +287,8 @@ export interface Bot {
   autoReview?: "off" | "shadow" | "enforce";
   /** tools this bot may always use without asking */
   alwaysAllow?: string[];
+  /** sending on your behalf: ask every time (absent), or a daily allowance */
+  outbound?: OutboundPolicy;
   /** speak this bot's replies aloud as they settle */
   speakReplies?: boolean;
   /** this bot's own voice id (falls back to the app-wide one) */

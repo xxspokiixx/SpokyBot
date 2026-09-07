@@ -111,6 +111,7 @@ const MATCH_AFTER_MS = 30_000;
 
 const OUTCOME_OF_DECISION: Record<DecisionKind, ActivityOutcome> = {
   "auto-approved": "allowed",
+  "auto-denied": "denied",
   "user-approved": "allowed",
   "review-would-approve": "allowed",
   "user-denied": "denied",

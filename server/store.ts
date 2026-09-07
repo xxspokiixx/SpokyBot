@@ -18,6 +18,7 @@ import { pickBotName } from "./names.ts";
 import { redactSecretsInText } from "./redact.ts";
 import { botAvatarProfile, type BotAvatarCrop } from "../shared/bot-avatar.ts";
 import { isApprovalMode, type ApprovalMode } from "../shared/approval-mode.ts";
+import type { OutboundPolicy } from "../shared/outbound.ts";
 import type { MascotBodyId } from "../shared/mascot-bodies.ts";
 import type { ProfileRequestCardData, ProfileRequestChanges } from "../shared/profile-request.ts";
 import type { RoutineRequestCardData } from "../shared/routine-request.ts";
@@ -77,6 +78,9 @@ export interface OptionCardData {
   /** A durable learned-skill proposal. The skill stays staged until the
    * user confirms this card — it never rides the prompt before that. */
   skillRequest?: SkillRequestCardData;
+  /** A connector call that would send something, held by the relay until
+   * this card is answered (outbound-requests.ts). */
+  outboundRequest?: { tool: string; app: string | null };
 }
 
 export interface ConnectorCardData {
@@ -529,6 +533,10 @@ export interface BotRecord {
   /** Tools this bot may always use without asking, even outside auto mode
    * (set by "Always allow" on an approval card). */
   alwaysAllow?: string[];
+  /** Sending on the person's behalf: ask every time (the default when
+   * absent) or allow up to a daily cap. Independent of approvalMode — Full
+   * access does not bypass it. */
+  outbound?: OutboundPolicy;
   /** Speak this bot's replies aloud as they settle, without being asked.
    * Off by default: a hosted voice costs money per character, so speaking
    * is something you turn on, never something that happens to you. */

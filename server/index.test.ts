@@ -131,6 +131,8 @@ let fakeDockerFixture: string;
 let fakeDockerLog: string;
 let stderr = "";
 let connectorAccounts: Array<{ id: string; alias: string; status: string; toolkit: { slug: string } }> = [];
+/** Every JSON-RPC message the stub's MCP endpoint received through the relay. */
+let relayedMcpCalls: Array<{ id?: unknown; method?: string; params?: { name?: string; arguments?: unknown } }> = [];
 const connectorLinkRequests: Array<{ toolkit: string; alias?: string }> = [];
 const browserCapabilityCalls: Array<{ operation: string; authorization?: string; body: any }> = [];
 let browserRevokeFailuresRemaining = 0;
@@ -616,6 +618,16 @@ beforeAll(async () => {
   );
 
   boxStub = createServer(async (req, res) => {
+    // The Composio Session's MCP endpoint, so a relayed tool call lands here
+    // instead of on the internet. Answers every call with one text result.
+    if (req.url === "/mcp") {
+      let raw = "";
+      for await (const chunk of req) raw += chunk;
+      const body = raw ? JSON.parse(raw) : {};
+      relayedMcpCalls.push(body);
+      res.writeHead(200, { "content-type": "application/json" });
+      return res.end(JSON.stringify({ jsonrpc: "2.0", id: body.id, result: { content: [{ type: "text", text: "sent by stub" }] } }));
+    }
     if (req.url?.startsWith("/v1/capabilities/")) {
       let raw = "";
       for await (const chunk of req) raw += chunk;
@@ -665,7 +677,7 @@ beforeAll(async () => {
       res.writeHead(201, { "content-type": "application/json" });
       return res.end(JSON.stringify({
         session_id: "trs_config_test",
-        mcp: { type: "http", url: "https://app.composio.dev/tool_router/v3/trs_config_test/mcp" },
+        mcp: { type: "http", url: `http://${req.headers.host}/mcp` },
         config: { user_id: body.user_id },
       }));
     }
@@ -8408,5 +8420,131 @@ describe("bot activity API", () => {
     const bot = (await api("POST", "/api/bots")).body.bot;
     expect((await api("GET", `/api/bots/${bot.id}/activity?limit=0`)).status).toBe(400);
     expect((await api("GET", `/api/bots/${bot.id}/activity?limit=abc`)).status).toBe(400);
+  });
+});
+
+describe("outbound gate", () => {
+  // Sending on the person's behalf is its own confirmation in every approval
+  // mode, enforced where every connector call already passes: the relay.
+  type McpResult = { result: { isError?: boolean; content: Array<{ type: string; text: string }> } };
+  const relay = (token: string, id: number, name: string, args: Record<string, unknown> = {}) =>
+    fetch(`${BASE}/api/internal/connectors/mcp`, {
+      method: "POST",
+      headers: { "content-type": "application/json", authorization: `Bearer ${token}` },
+      body: JSON.stringify({ jsonrpc: "2.0", id, method: "tools/call", params: { name, arguments: args } }),
+    });
+  const openCardFor = async (botId: string, tool: string) => {
+    const state = await api("GET", "/api/bots");
+    const bot = state.body.bots.find((candidate: { id: string }) => candidate.id === botId);
+    return bot?.messages.find(
+      (message: { card?: { outboundRequest?: { tool: string }; answered?: string } }) =>
+        message.card?.outboundRequest?.tool === tool && !message.card.answered,
+    );
+  };
+
+  it("holds a send behind a card, and refuses it when the person denies", async () => {
+    const configured = await api("PUT", "/api/config", { composio: { apiKey: "ak_good" } });
+    expect(configured.body.error ?? "").toBe("");
+    const bot = (await api("POST", "/api/bots", { name: "Sender" })).body.bot;
+    try {
+      const token = await mintTestCapability(BASE, bot.id, bot.threadId, { kind: "connectors" });
+      const pending = relay(token, 7, "GMAIL_SEND_EMAIL", { to: "finance@example.com", subject: "Invoice 42" });
+      let card: any;
+      await expect.poll(async () => {
+        card = await openCardFor(bot.id, "GMAIL_SEND_EMAIL");
+        return Boolean(card);
+      }).toBe(true);
+      expect(card.card.title).toMatch(/send/i);
+      expect(card.card.subtitle).toContain("finance@example.com");
+      expect(card.card.heldCode).toBe("approval.held.outbound");
+      expect(card.card.outboundRequest).toEqual({ tool: "GMAIL_SEND_EMAIL", app: "Gmail" });
+
+      const answered = await api("POST", `/api/threads/${bot.threadId}/respond`, { requestId: card.card.requestId, behavior: "deny" });
+      expect(answered.body).toMatchObject({ ok: true, outcome: "rejected" });
+      const response = await pending;
+      expect(response.status).toBe(200);
+      const body = (await response.json()) as McpResult;
+      expect(body.result.isError).toBe(true);
+      expect(body.result.content[0].text).toMatch(/declined/i);
+      expect(relayedMcpCalls.some((call) => call.params?.name === "GMAIL_SEND_EMAIL")).toBe(false);
+      expect((await openCardFor(bot.id, "GMAIL_SEND_EMAIL"))).toBeUndefined();
+      await expect.poll(async () =>
+        (await api("GET", "/api/decisions")).body.decisions
+          .filter((decision: { requestId?: string }) => decision.requestId === card.card.requestId)
+          .map((decision: { decision: string; source: string }) => `${decision.decision}:${decision.source}`)
+          .sort(),
+      ).toEqual(["card-shown:outbound", "user-denied:user"]);
+    } finally {
+      await api("DELETE", `/api/bots/${bot.id}`);
+    }
+  });
+
+  it("forwards an allowed send, counts it, and stops at the daily cap", async () => {
+    expect((await api("PUT", "/api/config", { composio: { apiKey: "ak_good" } })).status).toBe(200);
+    const bot = (await api("POST", "/api/bots", { name: "Poster" })).body.bot;
+    try {
+      const allowed = await api("PATCH", `/api/bots/${bot.id}`, { outbound: { policy: "allow", dailyCap: 1 } });
+      expect(allowed.status).toBe(200);
+      expect(allowed.body.bot.outbound).toEqual({ policy: "allow", dailyCap: 1 });
+      const token = await mintTestCapability(BASE, bot.id, bot.threadId, { kind: "connectors" });
+
+      const first = (await (await relay(token, 8, "SLACK_SEND_MESSAGE", { channel: "#general", text: "hi" })).json()) as McpResult;
+      expect(first.result.content[0].text).toBe("sent by stub");
+      expect(relayedMcpCalls.filter((call) => call.params?.name === "SLACK_SEND_MESSAGE")).toHaveLength(1);
+      expect((await api("GET", `/api/bots/${bot.id}/outbound`)).body).toEqual({ policy: { policy: "allow", dailyCap: 1 }, today: 1 });
+
+      const second = (await (await relay(token, 9, "SLACK_SEND_MESSAGE", { channel: "#general", text: "again" })).json()) as McpResult;
+      expect(second.result.isError).toBe(true);
+      expect(second.result.content[0].text).toMatch(/daily limit/i);
+      expect(relayedMcpCalls.filter((call) => call.params?.name === "SLACK_SEND_MESSAGE")).toHaveLength(1);
+
+      // Reading is not sending: the cap never touches it.
+      const read = (await (await relay(token, 10, "GMAIL_FETCH_EMAILS", { query: "is:unread" })).json()) as McpResult;
+      expect(read.result.content[0].text).toBe("sent by stub");
+      expect(await openCardFor(bot.id, "GMAIL_FETCH_EMAILS")).toBeUndefined();
+    } finally {
+      await api("DELETE", `/api/bots/${bot.id}`);
+    }
+  });
+
+  it("sees a send inside a multi-execute call, and lets a read-only batch through", async () => {
+    expect((await api("PUT", "/api/config", { composio: { apiKey: "ak_good" } })).status).toBe(200);
+    const bot = (await api("POST", "/api/bots", { name: "Batcher" })).body.bot;
+    try {
+      const token = await mintTestCapability(BASE, bot.id, bot.threadId, { kind: "connectors" });
+      const reads = (await (await relay(token, 11, "COMPOSIO_MULTI_EXECUTE_TOOL", {
+        tools: [{ tool_slug: "GMAIL_FETCH_EMAILS", arguments: { query: "is:unread" } }, { tool_slug: "SLACK_SEARCH_MESSAGES", arguments: {} }],
+        sync_response_to_workbench: false,
+      })).json()) as McpResult;
+      expect(reads.result.content[0].text).toBe("sent by stub");
+
+      const pending = relay(token, 12, "COMPOSIO_MULTI_EXECUTE_TOOL", {
+        tools: [{ tool_slug: "GMAIL_FETCH_EMAILS", arguments: {} }, { tool_slug: "GMAIL_SEND_EMAIL", arguments: { to: "vendor@example.com" } }],
+        sync_response_to_workbench: false,
+      });
+      let card: any;
+      await expect.poll(async () => {
+        card = await openCardFor(bot.id, "GMAIL_SEND_EMAIL");
+        return Boolean(card);
+      }).toBe(true);
+      expect(card.card.subtitle).toContain("vendor@example.com");
+      await api("POST", `/api/threads/${bot.threadId}/respond`, { requestId: card.card.requestId, behavior: "deny" });
+      const refused = (await (await pending).json()) as McpResult;
+      expect(refused.result.isError).toBe(true);
+    } finally {
+      await api("DELETE", `/api/bots/${bot.id}`);
+    }
+  });
+
+  it("validates the policy and defaults to asking", async () => {
+    const bot = (await api("POST", "/api/bots")).body.bot;
+    try {
+      expect((await api("GET", `/api/bots/${bot.id}/outbound`)).body).toEqual({ policy: { policy: "ask", dailyCap: 25 }, today: 0 });
+      expect((await api("PATCH", `/api/bots/${bot.id}`, { outbound: { policy: "maybe" } })).status).toBe(400);
+      expect((await api("PATCH", `/api/bots/${bot.id}`, { outbound: { policy: "allow", dailyCap: 0 } })).status).toBe(400);
+      expect((await api("GET", "/api/bots/nope/outbound")).status).toBe(404);
+    } finally {
+      await api("DELETE", `/api/bots/${bot.id}`);
+    }
   });
 });

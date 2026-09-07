@@ -292,7 +292,10 @@ import { fetchGithubTeam, fetchLibraryTeam, fetchTeamCatalog } from "./team-libr
 import { isBotPackage, packageAgentAsMember, parseBotPackage, renderBotPackageMarkdown } from "./bot-package.ts";
 import { createTeamManifest, importedMemberProfile, parseTeamManifest } from "./team-manifest.ts";
 import { readThreadEvents } from "./thread-events.ts";
-import { readBotActivity } from "./activity.ts";
+import { describeTool, readBotActivity } from "./activity.ts";
+import { OutboundCounts } from "./outbound-counts.ts";
+import { OutboundRequestService } from "./outbound-requests.ts";
+import { DEFAULT_OUTBOUND_POLICY, normalizeOutboundPolicy, outboundCallsIn } from "../shared/outbound.ts";
 import { listenWebhookIngress, webhookCredential, type WebhookIngress } from "./webhook-ingress.ts";
 import { memberTurnSelection } from "./member-turn.ts";
 import { WebhookManager } from "./webhooks.ts";
@@ -4853,6 +4856,14 @@ const routineRequests = new RoutineRequestService({
     return null;
   },
 });
+// Sending on the person's behalf (shared/outbound.ts): the relay holds an
+// outbound connector call on a card, and counts the ones that go out.
+const outboundRequests = new OutboundRequestService();
+const outboundCounts = new OutboundCounts(join(DATA_DIR, "outbound-counts.json"));
+/** The relay's own deadline is ten minutes; the hold ends a little before it
+ * so a late answer meets a refusal, never a proxy that already gave up. */
+const OUTBOUND_HOLD_MS = 9 * 60_000;
+
 const profileRequests = new ProfileRequestService({
   store,
   canPersist: proposalPersistence,
@@ -8538,6 +8549,95 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
         if (!currentSender || currentSender.composio === false || !composio.configured(cfg)) {
           return json(res, 403, { error: "connected apps are not enabled for this bot" });
         }
+        // ── the outbound gate ──
+        // A tools/call that sends something (shared/outbound.ts) is its own
+        // confirmation in every approval mode, Full included: it waits on a
+        // card, or spends the bot's daily allowance. Everything else relays
+        // untouched. A refusal is an ordinary tool error so the bot reads
+        // it and carries on, rather than a transport failure it retries.
+        const rpc = body && typeof body === "object" && !Array.isArray(body)
+          ? (body as { id?: unknown; method?: unknown; params?: unknown })
+          : null;
+        const rpcParams = rpc?.params && typeof rpc.params === "object" && !Array.isArray(rpc.params)
+          ? (rpc.params as { name?: unknown; arguments?: unknown })
+          : null;
+        // The app tools this call would actually run, seen through Composio's
+        // meta tools (a multi-execute list, workbench code), and the ones
+        // among them that send.
+        const outboundCalls = rpc?.method === "tools/call" && typeof rpcParams?.name === "string"
+          ? outboundCallsIn(rpcParams.name, rpcParams.arguments)
+          : [];
+        const outboundTool = outboundCalls.length ? outboundCalls[0].slug : null;
+        const refuseOutbound = (text: string) => {
+          res.writeHead(200, { "content-type": "application/json", "cache-control": "no-store" });
+          return res.end(JSON.stringify({ jsonrpc: "2.0", id: rpc?.id ?? null, result: { content: [{ type: "text", text }], isError: true } }));
+        };
+        if (outboundTool) {
+          const policy = currentSender.outbound ?? DEFAULT_OUTBOUND_POLICY;
+          const threadId = internalCapability.threadId;
+          const { app, label } = describeTool(outboundTool);
+          const firstArgs = outboundCalls[0].arguments;
+          const argsText = firstArgs === undefined ? "" : JSON.stringify(firstArgs);
+          const others = outboundCalls.slice(1).map((call) => {
+            const described = describeTool(call.slug);
+            return `${described.app ? `${described.app} · ` : ""}${described.label}`;
+          });
+          const summary = `${app ? `${app} · ` : ""}${label}${argsText ? `\n${argsText.slice(0, 400)}` : ""}${others.length ? `\nAlso: ${others.join(", ")}` : ""}`;
+          const capNote = (count: number) =>
+            `OpenMausBot did not send this. ${currentSender.name} has reached its daily limit of ${count} outbound action${count === 1 ? "" : "s"}. Ask the user to raise the limit under the bot's Permissions before trying again.`;
+          if (policy.policy === "allow") {
+            const today = outboundCounts.today(currentSender.id);
+            if (today + outboundCalls.length > policy.dailyCap) {
+              appendDecision(DATA_DIR, {
+                threadId, botId: currentSender.id, botName: currentSender.name,
+                tool: outboundTool, summary, decision: "auto-denied", source: "outbound", rule: `daily-cap:${policy.dailyCap}`,
+              });
+              return refuseOutbound(capNote(policy.dailyCap));
+            }
+          } else {
+            const owner = connectorThread(currentSender.id, threadId);
+            const held = outboundRequests.open({ botId: currentSender.id, threadId, tool: outboundTool, timeoutMs: OUTBOUND_HOLD_MS });
+            const card = store.appendMessage(threadId, {
+              role: "bot",
+              kind: "options",
+              ...(owner?.group ? { from: { botId: currentSender.id, name: currentSender.name, color: currentSender.color } } : {}),
+              card: {
+                title: "Send on your behalf?",
+                subtitle: summary,
+                options: ["Allow", "Deny"],
+                requestId: held.requestId,
+                tool: outboundTool,
+                held: HELD_NOTE["approval.held.outbound"],
+                heldCode: "approval.held.outbound",
+                outboundRequest: { tool: outboundTool, app },
+              },
+            });
+            appendDecision(DATA_DIR, {
+              threadId, requestId: held.requestId, botId: currentSender.id, botName: currentSender.name,
+              tool: outboundTool, summary, decision: "card-shown", source: "outbound",
+            });
+            if (currentSender.busy) store.setActivity(currentSender.id, "waiting-on-you");
+            notify(buildNotification("approval", currentSender, threadId, summary, { avatarUrl: currentSender.avatarUrl }));
+            const answer = await held.answer;
+            outboundRequests.forget(held.requestId);
+            const waiting = store.bot(currentSender.id);
+            if (waiting?.activity === "waiting-on-you") store.setActivity(waiting.id, "working");
+            if (answer !== "allow") {
+              if (answer === "timeout") {
+                const stale = store.messagesFor(threadId).find((message) => message.id === card.id);
+                if (stale?.card && !stale.card.answered) {
+                  store.patchMessage(threadId, stale.id, { card: { ...stale.card, answered: "unavailable", dismissed: true } });
+                }
+              }
+              return refuseOutbound(
+                answer === "timeout"
+                  ? "OpenMausBot did not send this: nobody answered the approval in time. Ask the user before trying again."
+                  : "OpenMausBot did not send this: the user declined. Do not retry it; ask the user what they would like instead.",
+              );
+            }
+            requireActiveInternalCapability();
+          }
+        }
         const upstream = await composio.relayMcp(
           cfg,
           body,
@@ -8550,6 +8650,15 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
           "cache-control": "no-store",
         };
         if (upstream.transportSessionId) headers["mcp-session-id"] = upstream.transportSessionId;
+        if (outboundTool && upstream.status < 400 && (currentSender.outbound ?? DEFAULT_OUTBOUND_POLICY).policy === "allow") {
+          let count = 0;
+          for (let i = 0; i < outboundCalls.length; i++) count = outboundCounts.record(currentSender.id);
+          appendDecision(DATA_DIR, {
+            threadId: internalCapability.threadId, botId: currentSender.id, botName: currentSender.name,
+            tool: outboundTool, decision: "auto-approved", source: "outbound",
+            rule: `daily-allowance:${count}/${(currentSender.outbound ?? DEFAULT_OUTBOUND_POLICY).dailyCap}`,
+          });
+        }
         res.writeHead(upstream.status, headers);
         return res.end(Buffer.from(upstream.bytes));
       }
@@ -10338,6 +10447,12 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
       }
       if (section !== undefined) patch.section = section ?? undefined;
       if (body.chiefOfStaff === false) patch.chiefOfStaff = false;
+      // sending on the person's behalf: ask every time, or a daily allowance
+      if (body.outbound !== undefined) {
+        const policy = normalizeOutboundPolicy(body.outbound);
+        if (!policy) return json(res, 400, { error: "outbound must be { policy: ask | allow, dailyCap: 1..1000 }" });
+        patch.outbound = policy;
+      }
       // per-bot gate on the workspace's connected apps (Composio)
       if (body.composio !== undefined) {
         if (typeof body.composio !== "boolean") return json(res, 400, { error: "composio must be true or false" });
@@ -11380,6 +11495,34 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
       const reviewedSha256 = typeof body.reviewedSha256 === "string" ? body.reviewedSha256 : undefined;
       if (!behavior) return json(res, 400, { error: "behavior must be allow, deny, or answer" });
       const requestId = String(body.requestId);
+      const outboundCard = store.messagesFor(threadId).find(
+        (message) => message.card?.requestId === requestId && message.card.outboundRequest,
+      );
+      if (outboundCard?.card?.outboundRequest) {
+        const outboundBot = outboundCard.from?.botId ? store.bot(outboundCard.from.botId) : store.botByThread(threadId);
+        const result = outboundRequests.resolve({ threadId, requestId, behavior });
+        if (!result.claimed) {
+          // The hold is memory-only: after a restart the card outlives the
+          // relay that was waiting on it, so close it rather than leave an
+          // approval nobody can deliver owning the composer.
+          if (!outboundCard.card.answered) {
+            store.patchMessage(threadId, outboundCard.id, { card: { ...outboundCard.card, answered: "unavailable", dismissed: true } });
+          }
+          return json(res, 200, { ok: true, outcome: "unavailable" });
+        }
+        if (result.state === "already_settled") {
+          return json(res, 200, { ok: true, outcome: result.behavior === "allow" ? "allowed-once" : "rejected", alreadySettled: true });
+        }
+        store.patchMessage(threadId, outboundCard.id, {
+          card: { ...outboundCard.card, answered: result.state === "allowed" ? "allow" : "deny" },
+        });
+        appendDecision(DATA_DIR, {
+          threadId, requestId, botId: outboundBot?.id, botName: outboundBot?.name,
+          tool: outboundCard.card.tool, summary: outboundCard.card.subtitle,
+          decision: result.state === "allowed" ? "user-approved" : "user-denied", source: "user",
+        });
+        return json(res, 200, { ok: true, outcome: result.state === "allowed" ? "allowed-once" : "rejected" });
+      }
       const skillCard = store.messagesFor(threadId).find(
         (message) => message.card?.requestId === requestId && message.card.skillRequest,
       );
@@ -11859,6 +12002,14 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
       return json(res, 200, {
         rows: readBotActivity({ dataDir: DATA_DIR, eventsDir: EVENTS_DIR, botId: bot.id, threadIds, limit: parsedLimit ?? 300 }),
       });
+    }
+
+    // ── a bot's outbound allowance: the policy, and how much of it is spent ──
+    m = path.match(/^\/api\/bots\/([\w-]+)\/outbound$/);
+    if (m && method === "GET") {
+      const bot = store.bot(m[1]);
+      if (!bot) return json(res, 404, { error: "no such bot" });
+      return json(res, 200, { policy: bot.outbound ?? DEFAULT_OUTBOUND_POLICY, today: outboundCounts.today(bot.id) });
     }
 
     // ── provider instances (model picker) ──
