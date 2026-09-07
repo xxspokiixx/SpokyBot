@@ -323,10 +323,11 @@ import {
   requestOrigin,
   requestSource,
   resolveRequestAuth,
+  parseCookies,
   serializeSessionCookie,
   sessionCookieName,
 } from "./request-auth.ts";
-import { formatPairingCode, SESSION_TTL_MS, SessionRegistry, type Scope } from "./sessions.ts";
+import { cookieMaxAgeSeconds, formatPairingCode, SessionRegistry, type Scope } from "./sessions.ts";
 import { describeBrand, loadBrand } from "./brand.ts";
 import {
   PHONE_SECRET_PROTOCOL_VERSION,
@@ -7551,7 +7552,7 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
       const environment = environmentDescriptor({ environmentId: ENVIRONMENT_ID, desktopManaged: DESKTOP_MANAGED });
       if (wantsCookie) {
         const secure = requestOrigin(req)?.startsWith("https://") === true;
-        res.setHeader("set-cookie", serializeSessionCookie(SESSION_COOKIE, result.token, { secure, maxAgeSeconds: SESSION_TTL_MS / 1000 }));
+        res.setHeader("set-cookie", serializeSessionCookie(SESSION_COOKIE, result.token, { secure, maxAgeSeconds: cookieMaxAgeSeconds(result.session) }));
         return json(res, 200, { session: result.session, environment });
       }
       return json(res, 200, { token: result.token, session: result.session, environment });
@@ -7564,6 +7565,19 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
       loopbackMutationToken: desktopMutationToken,
       companionMutationToken,
     });
+    // The browser's cookie carries the term it was set with, and the
+    // session's term slides on use (sessions.ts `renew`), so re-issue the
+    // cookie on every cookie-authenticated request. One small header; and
+    // unlike "send once per renewal" it survives a lost response and a
+    // restart. Later handlers that clear the cookie (logout, self-revoke)
+    // overwrite this header, which is the order we want.
+    if (gate.auth?.kind === "session" && gate.auth.via === "cookie") {
+      const presented = parseCookies(req.headers.cookie).get(SESSION_COOKIE);
+      if (presented) {
+        const secure = requestOrigin(req)?.startsWith("https://") === true;
+        res.setHeader("set-cookie", serializeSessionCookie(SESSION_COOKIE, presented, { secure, maxAgeSeconds: cookieMaxAgeSeconds(gate.auth.session) }));
+      }
+    }
     // Reachability probe, public: the phone races it across a server's
     // addresses before it has a session, and the tunnel verifier polls it.
     // A stranger learns only the app name; pid (the desktop boot probe keys

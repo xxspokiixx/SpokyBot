@@ -10,7 +10,7 @@ Three ways to make the server reachable are covered. Pick one; the rest of the g
 | **B. Your own domain** (Docker + Caddy) | a domain name, ports 80/443 | anyone with a pairing code, over HTTPS | a permanent address you own |
 | **C. Your Tailscale network** (`serve --tailscale`) | Tailscale on the server and your devices | only your tailnet | the most private; nothing public at all |
 
-Whichever you pick, the login is the same: you **pair** each device once with a short code and it stays signed in for 30 days. There is no password.
+Whichever you pick, the login is the same: you **pair** each device once with a short code and it stays signed in. A session lasts 30 days; using it with half that or less left renews it to a full 30, up to 180 days from pairing (`OMB_SESSION_TTL_DAYS` and `OMB_SESSION_MAX_DAYS` change both numbers). There is no password.
 
 ## What runs on a server, and what does not
 
@@ -139,7 +139,7 @@ expires:       10:59:45 AM (single use)
 open or scan:  https://c-7f3a9c.openmausbot.com/pair#code=RR8Y-BLR6-H939
 ```
 
-- **A browser:** open the link. The code is filled in; press **Connect**. That browser is paired for 30 days.
+- **A browser:** open the link. The code is filled in; press **Connect**. That browser is paired for 30 days, renewed on use as above.
 - **The desktop app:** copy the link, then in the app's **Server** menu choose **Add Server from Copied Pairing Link…**. The menu switches between your own machine and every server you added.
 - **The phone:** scan the QR code from the iOS app's pairing screen, or paste the whole link into its address field. The phone can chat, approve, and read; creating bots, changing models, and connecting apps stay with you in the server's UI.
 

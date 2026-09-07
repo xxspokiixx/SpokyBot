@@ -199,7 +199,7 @@ It prints a 12-character code (single use, five minutes) and, when the
 server knows its public address (`OMB_PUBLIC_URL`, set by the Docker stack),
 a link like `https://maus.example.com/pair#code=XXXX-XXXX-XXXX`. Open the
 link, or open `/pair` on the address you use and type the code. The browser
-gets a session cookie (30 days, revocable) and the app loads. Sessions are
+gets a session cookie (30 days, renewed on use up to 180 days from pairing, revocable) and the app loads. Sessions are
 listed and revoked at `GET`/`DELETE /api/auth/sessions` for now; a Settings
 screen follows.
 
