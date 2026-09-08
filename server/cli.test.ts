@@ -1,11 +1,11 @@
 import { spawn, type ChildProcess } from "node:child_process";
-import { existsSync, mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-import { applyStartupPreferences, formatSessions, pairingBlock, parseArgs, qrToString, runLogin, runOnboardingCommand, serverEntry, verifyPhoneEndpoint, type CliOptions } from "./cli.ts";
+import { applyStartupPreferences, formatSessions, pairingBlock, parseArgs, qrToString, runAccess, runLogin, runOnboardingCommand, serverEntry, type CliOptions, verifyPhoneEndpoint } from "./cli.ts";
 import { SetupCancelled } from "./cli-prompts.ts";
 import { removeTempDir, waitForExit } from "./testing/cleanup.ts";
 import { startControlPlaneStub } from "./testing/control-plane-stub.ts";
@@ -40,6 +40,10 @@ describe("openmausbot command line", () => {
     expect(parseArgs(["browser", "status"], {})).toMatchObject({ command: "browser", browserAction: "status" });
     expect(parseArgs(["browser"], {})).toEqual({ error: "browser needs an action: install or status" });
     expect(parseArgs(["serve", "--tailscale", "--tunnel"], {})).toEqual({ error: "choose one of --tailscale (your tailnet) and --tunnel (a public address)" });
+    expect(parseArgs(["access", "add", "her@example.test", "--chat-only"], {})).toMatchObject({ command: "access", accessAction: "add", email: "her@example.test", chatOnly: true });
+    expect(parseArgs(["access", "list"], {})).toMatchObject({ command: "access", accessAction: "list" });
+    expect(parseArgs(["access"], {})).toEqual({ error: "access needs one of: list, add EMAIL [--chat-only], remove EMAIL" });
+    expect(parseArgs(["access", "add"], {})).toEqual({ error: "add needs a value" });
   });
 
   it("prints a scannable block with the link, or says where to type the code", () => {
@@ -488,4 +492,35 @@ describe.skipIf(process.platform === "win32")("serve --tunnel", () => {
       expect(dead, url).toBe(true);
     }
   }, 120_000);
+});
+
+describe("openmausbot access", () => {
+  it("edits the sign-in allow-list in config.json without a running server", async () => {
+    const home = mkdtempSync(join(tmpdir(), "omb-cli-access-"));
+    const dataDir = join(home, "data");
+    const out: string[] = [];
+    const err: string[] = [];
+    const io = { log: (line: string) => out.push(line), error: (line: string) => err.push(line), ask: async () => "" };
+    const base = { command: "access" as const, port: 1, dataDir, tailscale: false, tunnel: false, client: false, pair: true, json: false };
+    try {
+      expect(await runAccess({ ...base, accessAction: "list" }, io)).toBe(0);
+      expect(out.at(-1)).toMatch(/pairing codes only/);
+      expect(await runAccess({ ...base, accessAction: "add", email: "Her@Example.test" }, io)).toBe(0);
+      expect(await runAccess({ ...base, accessAction: "add", email: "@agentada.test", chatOnly: true }, io)).toBe(0);
+      expect(await runAccess({ ...base, accessAction: "add", email: "not-an-email" }, io)).toBe(2);
+      const saved = JSON.parse(readFileSync(join(dataDir, "config.json"), "utf8"));
+      expect(saved.signIn).toEqual({ admins: ["her@example.test"], members: ["@agentada.test"] });
+      // moving an entry between lists replaces it rather than duplicating it
+      expect(await runAccess({ ...base, accessAction: "add", email: "her@example.test", chatOnly: true }, io)).toBe(0);
+      expect(JSON.parse(readFileSync(join(dataDir, "config.json"), "utf8")).signIn).toEqual({ admins: [], members: ["@agentada.test", "her@example.test"] });
+      out.length = 0;
+      expect(await runAccess({ ...base, accessAction: "list" }, io)).toBe(0);
+      expect(out.join("\n")).toMatch(/@agentada.test\s+chat and approvals/);
+      expect(await runAccess({ ...base, accessAction: "remove", email: "her@example.test" }, io)).toBe(0);
+      expect(await runAccess({ ...base, accessAction: "remove", email: "her@example.test" }, io)).toBe(1);
+      expect(JSON.parse(readFileSync(join(dataDir, "config.json"), "utf8")).signIn).toEqual({ admins: [], members: ["@agentada.test"] });
+    } finally {
+      await removeTempDir(home);
+    }
+  });
 });

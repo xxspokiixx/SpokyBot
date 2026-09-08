@@ -337,6 +337,15 @@ OMB_SIGNIN_EMAILS="her@yourcompany.com, @yourcompany.com"   # full access
 OMB_SIGNIN_MEMBER_EMAILS="freelancer@example.com"          # chat and approvals only
 ```
 
+With the npm package, the same thing from the command line, with the server
+running or not, no restart needed:
+
+```sh
+npx openmausbot access add her@yourcompany.com
+npx openmausbot access add freelancer@example.com --chat-only
+npx openmausbot access list
+```
+
 An entry is an address or `@domain` (everyone at that domain). Admins get
 the same access as a pairing code from `openmausbot serve`; members get the
 chat-only scope, the same as `openmausbot pair --client`. The same lists live

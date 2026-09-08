@@ -30,6 +30,8 @@ import { createInterface } from "node:readline/promises";
 import { fileURLToPath } from "node:url";
 import qrcode from "qrcode-terminal";
 
+import { parseAllowList } from "./account-signin.ts";
+import { writeFileAtomic } from "./atomic.ts";
 import { explainTailscaleFailure, tailscaleServe, tailscaleServeOff, tailscaleStatus, type TailscaleStatus } from "./tailscale.ts";
 import { defaultSetupIo, SetupCancelled, type SetupIo } from "./cli-prompts.ts";
 import { normalizePhoneOrigin, phonePairingInstructions, runPhoneSetup } from "./cli-phone-setup.ts";
@@ -55,7 +57,7 @@ import {
 const HERE = dirname(fileURLToPath(import.meta.url));
 
 export interface CliOptions {
-  command: "setup" | "start" | "serve" | "pair" | "sessions" | "status" | "login" | "logout" | "browser" | "help";
+  command: "setup" | "start" | "serve" | "pair" | "sessions" | "status" | "login" | "logout" | "access" | "browser" | "help";
   port: number;
   dataDir: string;
   label?: string;
@@ -65,6 +67,9 @@ export interface CliOptions {
   client: boolean;
   pair: boolean;
   revoke?: string;
+  /** `access list|add|remove` */
+  accessAction?: "list" | "add" | "remove";
+  chatOnly?: boolean;
   email?: string;
   /** `browser install [--with-deps]` */
   browserAction?: "install" | "status";
@@ -78,7 +83,7 @@ export interface CliOptions {
   phone?: "ios" | "android";
 }
 
-const COMMANDS = ["setup", "start", "serve", "pair", "sessions", "status", "login", "logout", "browser", "help", "--help", "-h"];
+const COMMANDS = ["setup", "start", "serve", "pair", "sessions", "status", "login", "logout", "access", "browser", "help", "--help", "-h"];
 
 export function parseArgs(argv: string[], env: NodeJS.ProcessEnv = process.env): CliOptions | { error: string } {
   const implicitStart = !argv.length || (argv[0]!.startsWith("--") && argv[0] !== "--help");
@@ -96,6 +101,7 @@ export function parseArgs(argv: string[], env: NodeJS.ProcessEnv = process.env):
     pair: true,
     withDeps: false,
     json: false,
+    chatOnly: false,
   };
   for (let i = 0; i < rest.length; i += 1) {
     const arg = rest[i];
@@ -119,6 +125,10 @@ export function parseArgs(argv: string[], env: NodeJS.ProcessEnv = process.env):
       else if (arg === "--json") options.json = true;
       else if (arg === "--email") options.email = value();
       else if (options.command === "sessions" && arg === "revoke") options.revoke = value();
+      else if (options.command === "access" && !options.accessAction && (arg === "list" || arg === "add" || arg === "remove")) {
+        options.accessAction = arg;
+        if (arg !== "list") options.email = value();
+      } else if (options.command === "access" && arg === "--chat-only") options.chatOnly = true;
       else if (options.command === "browser" && (arg === "install" || arg === "status")) options.browserAction = arg;
       else if (options.command === "browser" && arg === "--with-deps") options.withDeps = true;
       else return { error: `unknown argument "${arg}"` };
@@ -129,6 +139,7 @@ export function parseArgs(argv: string[], env: NodeJS.ProcessEnv = process.env):
   if (!Number.isInteger(options.port) || options.port < 1 || options.port > 65_535) return { error: "--port must be 1-65535" };
   if (options.publicUrl && !/^https?:\/\//.test(options.publicUrl)) return { error: "--public-url must start with http:// or https://" };
   if (options.tailscale && options.tunnel) return { error: "choose one of --tailscale (your tailnet) and --tunnel (a public address)" };
+  if (options.command === "access" && !options.accessAction) return { error: "access needs one of: list, add EMAIL [--chat-only], remove EMAIL" };
   if (options.local && (options.tailscale || options.tunnel || options.publicUrl)) return { error: "--local cannot be combined with a remote-access option" };
   if (options.command === "browser" && !options.browserAction) return { error: "browser needs an action: install or status" };
   return options;
@@ -146,6 +157,7 @@ export const USAGE = `openmausbot — your team of AI bots, ready in a few steps
   openmausbot status
   openmausbot login [--email you@example.com]
   openmausbot logout
+  openmausbot access list | add EMAIL [--chat-only] | remove EMAIL
   openmausbot browser install [--with-deps] | status
 
 setup   choose AI access and optional phone access; keep existing bots and chats
@@ -157,6 +169,9 @@ status  what the server says about itself
 login   signs this machine in to an OpenMausBot account (an emailed code)
         and reserves its public address for --tunnel
 logout  releases that address and signs out
+access  who may sign in with an emailed code at /pair: an address or
+        @domain; --chat-only gives chat and approvals without settings.
+        Takes effect at once, no restart.
 browser install: the bots' browser engine (agent-browser, pinned) into the
         data dir, and Chrome for Testing into the user's browser cache.
         --with-deps also installs
@@ -441,6 +456,64 @@ export async function runStatus(options: CliOptions, io: CliIo = defaultIo()): P
     else if (account.address) io.log(`public address: ${account.address} (signed in as ${account.email ?? "?"}; serve it with --tunnel)`);
   }
   return code;
+}
+
+/** The sign-in allow-list, edited straight in config.json: the server reads
+ * it per request, so this works with the server running or stopped and
+ * needs no restart. Environment variables (OMB_SIGNIN_EMAILS) win when set.
+ * Written the way the server writes it (atomic, 0600), touching only the
+ * one key, so nothing else in the file moves. */
+export async function runAccess(options: CliOptions, io: CliIo = defaultIo()): Promise<number> {
+  const file = join(options.dataDir, "config.json");
+  let raw: Record<string, unknown> = {};
+  if (existsSync(file)) {
+    try {
+      const parsed: unknown = JSON.parse(readFileSync(file, "utf8"));
+      if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed)) throw new Error("not an object");
+      raw = Object.fromEntries(Object.entries(parsed));
+    } catch (error) {
+      io.error(`${file} could not be read (${message(error)}); fix it before changing who can sign in`);
+      return 1;
+    }
+  }
+  const current = typeof raw.signIn === "object" && raw.signIn !== null ? Object(raw.signIn) : {};
+  const list = (value: unknown) => parseAllowList(Array.isArray(value) ? value.map(String).join(",") : "");
+  const admins = list(Reflect.get(current, "admins"));
+  const members = list(Reflect.get(current, "members"));
+  const overridden = process.env.OMB_SIGNIN_EMAILS !== undefined || process.env.OMB_SIGNIN_MEMBER_EMAILS !== undefined;
+  const write = (next: { admins: string[]; members: string[] }) => {
+    mkdirSync(options.dataDir, { recursive: true, mode: 0o700 });
+    writeFileAtomic(file, `${JSON.stringify({ ...raw, signIn: next }, null, 2)}\n`, { mode: 0o600 });
+  };
+  if (options.accessAction === "list") {
+    if (!admins.length && !members.length) {
+      io.log("nobody can sign in with an email yet; pairing codes only. Add someone with: openmausbot access add you@example.com");
+      return 0;
+    }
+    for (const entry of admins) io.log(`${entry.padEnd(40)} full access`);
+    for (const entry of members) io.log(`${entry.padEnd(40)} chat and approvals`);
+    if (overridden) io.log("(OMB_SIGNIN_EMAILS / OMB_SIGNIN_MEMBER_EMAILS are set in the environment and win over this list while the server runs)");
+    return 0;
+  }
+  const entry = (options.email ?? "").trim().toLowerCase();
+  if (!entry || (!entry.startsWith("@") && !entry.includes("@")) || /\s/.test(entry)) {
+    io.error("give an email address, or @domain for everyone at that domain");
+    return 2;
+  }
+  const without = (items: string[]) => items.filter((item) => item !== entry);
+  if (options.accessAction === "remove") {
+    if (!admins.includes(entry) && !members.includes(entry)) {
+      io.error(`${entry} is not on the list`);
+      return 1;
+    }
+    write({ admins: without(admins), members: without(members) });
+    io.log(`${entry} can no longer sign in (existing sessions stay until they expire or are revoked with \`openmausbot sessions revoke\`)`);
+    return 0;
+  }
+  write(options.chatOnly ? { admins: without(admins), members: [...without(members), entry] } : { admins: [...without(admins), entry], members: without(members) });
+  io.log(`${entry} can sign in at /pair with an emailed code (${options.chatOnly ? "chat and approvals" : "full access"})`);
+  if (overridden) io.log("note: OMB_SIGNIN_EMAILS / OMB_SIGNIN_MEMBER_EMAILS are set in the environment and win over this list while the server runs");
+  return 0;
 }
 
 export async function runLogin(options: CliOptions, io: CliIo = defaultIo()): Promise<number> {
@@ -875,6 +948,8 @@ export async function main(argv = process.argv.slice(2)): Promise<number> {
       return runStatus(options);
     case "login":
       return runLogin(options);
+    case "access":
+      return runAccess(options);
     case "logout":
       return runLogout(options);
     case "browser":
