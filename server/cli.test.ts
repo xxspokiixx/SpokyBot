@@ -1,5 +1,5 @@
 import { spawn, type ChildProcess } from "node:child_process";
-import { mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -344,6 +344,67 @@ describe.skipIf(process.platform === "win32")("serve --tunnel", () => {
       await removeTempDir(home);
     }
   }, 30_000);
+
+  it("a fleet credential in the environment serves --tunnel with no account file and no code", async () => {
+    const home = mkdtempSync(join(tmpdir(), "omb-cli-fleet-"));
+    const dataDir = join(home, "data");
+    mkdirSync(dataDir, { recursive: true });
+    const stub = await startControlPlaneStub();
+    const fake = join(home, "cloudflared");
+    writeFileSync(fake, "#!/bin/sh\nexec sleep 300\n", { mode: 0o755 });
+    const port = 21000 + Math.floor(Math.random() * 9000);
+    const originPort = 31000 + Math.floor(Math.random() * 9000);
+    const fleetEnv = {
+      HOME: home,
+      USERPROFILE: home,
+      OMB_WEBHOOK_PORT: String(port + 1),
+      OMB_BROWSER_CONNECTION: join(home, "browser-connection.json"),
+      OMB_CONTROL_PLANE_URL: stub.url,
+      OMB_CLOUDFLARED_PATH: fake,
+      OMB_TUNNEL_ORIGIN_PORT: String(originPort),
+    };
+    // a credential the control plane does not know stops the start; nothing serves
+    const rejected = cli(["serve", "--tunnel", "--no-pair", "--port", String(port), "--data-dir", dataDir], {
+      ...fleetEnv,
+      OMB_INSTALLATION_CREDENTIAL: `omb_install_${"x".repeat(22)}.${"y".repeat(43)}`,
+    });
+    let err = "";
+    rejected.stderr?.on("data", (chunk) => (err += String(chunk)));
+    expect(await exited(rejected)).toBe(1);
+    expect(err).toContain("was rejected");
+
+    const child = cli(["serve", "--tunnel", "--no-pair", "--port", String(port), "--data-dir", dataDir], {
+      ...fleetEnv,
+      OMB_INSTALLATION_CREDENTIAL: stub.seedInstallation("fleet box"),
+    });
+    let out = "";
+    child.stdout?.on("data", (chunk) => (out += String(chunk)));
+    child.stderr?.on("data", (chunk) => (out += String(chunk)));
+    const gateway = `http://127.0.0.1:${originPort}`;
+    try {
+      const deadline = Date.now() + 60_000;
+      while (!out.includes("OpenMausBot is running") && Date.now() < deadline && child.exitCode === null) await new Promise((r) => setTimeout(r, 200));
+      expect(out).toContain("using the installation credential from OMB_INSTALLATION_CREDENTIAL");
+      expect(out).toContain(`reachable at ${stub.endpointUrl}`);
+      expect(existsSync(join(dataDir, "tunnel-account.json"))).toBe(false);
+      let status = 0;
+      const gatewayDeadline = Date.now() + 20_000;
+      while (Date.now() < gatewayDeadline && status !== 200) {
+        try {
+          status = (await fetch(`${gateway}/.well-known/openmausbot/environment`)).status;
+        } catch {
+          status = 0;
+        }
+        if (status !== 200) await new Promise((r) => setTimeout(r, 250));
+      }
+      expect(status).toBe(200);
+    } finally {
+      child.kill("SIGTERM");
+      await exited(child);
+      await stub.close();
+      await removeTempDir(home);
+    }
+  }, 120_000);
 
   it("serves at the account's public address through the gateway, where every request is remote", async () => {
     const home = mkdtempSync(join(tmpdir(), "omb-cli-tunnel-"));

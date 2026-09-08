@@ -41,6 +41,9 @@ import {
   describeTunnelAccount,
   describeTunnelState,
   ensureCloudflared,
+  FLEET_CREDENTIAL_ENV,
+  fleetAccess,
+  fleetCredential,
   guardianEntry,
   startTunnel,
   tunnelAccess,
@@ -434,13 +437,15 @@ export async function runStatus(options: CliOptions, io: CliIo = defaultIo()): P
   }
   if (!options.json) {
     const account = describeTunnelAccount(createTunnelAccount({ dataDir: options.dataDir, version: serverVersion() }).credentials.read());
-    if (account.address) io.log(`public address: ${account.address} (signed in as ${account.email ?? "?"}; serve it with --tunnel)`);
+    if (fleetCredential()) io.log(`public address: managed by the fleet (${FLEET_CREDENTIAL_ENV} is set; the address is fetched when serve --tunnel starts)`);
+    else if (account.address) io.log(`public address: ${account.address} (signed in as ${account.email ?? "?"}; serve it with --tunnel)`);
   }
   return code;
 }
 
 export async function runLogin(options: CliOptions, io: CliIo = defaultIo()): Promise<number> {
   const account = createTunnelAccount({ dataDir: options.dataDir, version: serverVersion() });
+  if (fleetCredential()) io.log(`note: ${FLEET_CREDENTIAL_ENV} is set, so serve --tunnel will use that credential rather than this account`);
   if (account.credentials.status === "unavailable") {
     io.error(`${account.credentials.file} exists but could not be read; fix or remove it, then try again`);
     return 1;
@@ -566,20 +571,32 @@ interface TunnelPlan {
 /** Everything `--tunnel` needs before the server starts, or the one reason
  * it cannot have it. Fails closed: no silent fallback to a local-only server. */
 async function planTunnel(options: CliOptions, log: (line: string) => void): Promise<TunnelPlan | { error: string }> {
-  const account = createTunnelAccount({ dataDir: options.dataDir, version: serverVersion() });
-  if (account.credentials.status === "unavailable") return { error: `${account.credentials.file} exists but could not be read; fix or remove it` };
-  if (!describeTunnelAccount(account.credentials.read()).email) {
-    return { error: "no account on this machine yet: run `openmausbot login` first, then `openmausbot serve --tunnel`" };
+  let access: ManagedTunnelAccess | null = null;
+  const credential = fleetCredential();
+  if (credential) {
+    // A fleet-started container: the credential is the whole identity.
+    log(`tunnel: using the installation credential from ${FLEET_CREDENTIAL_ENV}`);
+    try {
+      access = await fleetAccess({ credential });
+    } catch (error) {
+      return { error: `--tunnel: ${message(error)}` };
+    }
+  } else {
+    const account = createTunnelAccount({ dataDir: options.dataDir, version: serverVersion() });
+    if (account.credentials.status === "unavailable") return { error: `${account.credentials.file} exists but could not be read; fix or remove it` };
+    if (!describeTunnelAccount(account.credentials.read()).email) {
+      return { error: "no account on this machine yet: run `openmausbot login` first, then `openmausbot serve --tunnel`" };
+    }
+    // A fresh connector token when the control plane answers; the saved one otherwise.
+    try {
+      const state = await account.service.retry();
+      if (state.message && !tunnelAccess(account.credentials.read())) log(`tunnel: ${state.message}`);
+    } catch (error) {
+      log(`tunnel: control plane not reachable right now (${message(error)}); using the saved address`);
+    }
+    access = tunnelAccess(account.credentials.read());
+    if (!access) return { error: "this machine has no public address; run `openmausbot login` again" };
   }
-  // A fresh connector token when the control plane answers; the saved one otherwise.
-  try {
-    const state = await account.service.retry();
-    if (state.message && !tunnelAccess(account.credentials.read())) log(`tunnel: ${state.message}`);
-  } catch (error) {
-    log(`tunnel: control plane not reachable right now (${message(error)}); using the saved address`);
-  }
-  const access = tunnelAccess(account.credentials.read());
-  if (!access) return { error: "this machine has no public address; run `openmausbot login` again" };
   let binary: string;
   try {
     binary = await ensureCloudflared({ dataDir: options.dataDir, log });

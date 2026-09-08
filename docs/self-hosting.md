@@ -92,6 +92,11 @@ is present. Three ways to make the server reachable from elsewhere:
   the server treats as "through a proxy", never as the owner. `npx openmausbot
   logout` releases the address. The account credentials live in
   `~/.openmausbot/tunnel-account.json` (mode 0600).
+  Starting it from a fleet or a container, where nobody can type an emailed
+  code? Set `OMB_INSTALLATION_CREDENTIAL` to the installation credential the
+  fleet issued and skip `login`: the address and connector token are fetched
+  at every start and nothing is written to disk. A rejected credential stops
+  the start with a clear message rather than serving locally.
 - **Behind your own proxy or domain:** `npx openmausbot serve --public-url
   https://maus.example.com`, with the proxy rules from "Putting a proxy in
   front".
