@@ -30,6 +30,7 @@ import {
 import { HELD_NOTE, approvalHeldNote, approvalHeldReason, approvalModeForOrigin, autoVerdict, rememberableApprovalKey } from "./auto-approve.ts";
 import { requestReview, resolveAutoReviewMode, shouldReview } from "./auto-review.ts";
 import { updateClaudeCli } from "./claude-update.ts";
+import { configuredAccountDirectory, assertSeparateClaudeAccount, claudeAccountInfo, createClaudeAccountSchema, instanceSettingsSchema, newClaudeAccount } from "./claude-accounts.ts";
 import {
   BrowserCleanupCoordinator,
   finalizeBrowserCleanupMutation,
@@ -115,6 +116,8 @@ import {
   browserProfilePartitionTarget,
   syncCredentialEnv,
   withInstanceCli,
+  persistableInstanceConfigs,
+  type AppConfig,
   vpsSshAlias,
   DATA_DIR,
   EVENTS_DIR,
@@ -1016,6 +1019,9 @@ function checkedModelSelection(
     return { ok: false, status: 409, error: "the bot is working — stop it before changing models" };
   }
   const target = registry.get(selection.instanceId);
+  if (providerInstancesChanging.has(selection.instanceId)) {
+    return { ok: false, status: 409, error: "this provider account is being updated — try again shortly" };
+  }
   // Model IDs remain free-form at the app's general API boundary. Custom
   // engines can accept IDs that are not in their discovery catalog, and
   // several drivers only learn the final catalog when a turn starts. The
@@ -3921,6 +3927,9 @@ async function startTurn(
 
   console.error(`[omb-turn] bot=${botId} text=${JSON.stringify(resolvedImages.text.slice(0, 70))} images=${turnImages.length} depth=${commsDepth} card=${Boolean(opts?.cardContinuation)}`);
   const instanceId = instance.instanceId;
+  if (providerInstancesChanging.has(instanceId)) {
+    throw Object.assign(new Error("this provider account is being updated — try again shortly"), { status: 409 });
+  }
   const model = opts?.runOn === "cloud" ? instance.models.default : bot.modelSelection.model;
   // a cloud routine borrows the instance default model, so it borrows no
   // per-bot effort either
@@ -5200,6 +5209,10 @@ async function runGroupMemberTurn(
   const preparedComposio = bot.composio;
   const instance = registry.get(bot.modelSelection.instanceId);
   const userName = cfg.profile?.name?.trim() || "User";
+  if (providerInstancesChanging.has(bot.modelSelection.instanceId)) {
+    onDispatchError?.(`${bot.name}'s provider account is being updated — try again shortly`);
+    return true;
+  }
   if (!instance) {
     const message = `${bot.name}'s model is unavailable`;
     store.appendMessage(threadId, {
@@ -7430,6 +7443,39 @@ function persistMcpServers(next: Record<string, unknown>): void {
   cfg.mcpServers = next;
 }
 
+async function describeInstances() {
+  const configs = instanceConfigs(cfg);
+  return (await registry.describe()).map((instance) => {
+    const entry = configs[instance.instanceId];
+    if (entry?.driver !== "claudeAgent") return instance;
+    try {
+      const claudeAccount = claudeAccountInfo(instance.instanceId, entry, instance.cli ?? instance.cliDefault ?? "claude");
+      return { ...instance, claudeAccount, install: { ...instance.install, signInCommand: claudeAccount.signInCommand } };
+    } catch {
+      // A malformed saved config remains a repairable shadow, never takes
+      // the model picker down or offers a login for the wrong directory.
+      return { ...instance, install: { ...instance.install, signInCommand: undefined } };
+    }
+  });
+}
+
+async function persistProviderInstance(instanceId: string, instances: NonNullable<AppConfig["instances"]>) {
+  saveConfig({ instances }, { replaceInstances: true });
+  cfg.instances = instances;
+  providerAuthSessions.clearInstance(instanceId);
+  bus.detach(instanceId);
+  // No whole-fleet reload: other bots keep their live CLI processes, event
+  // subscriptions and approval capabilities while this one is replaced.
+  if (Object.hasOwn(instances, instanceId)) {
+    await registry.load({ [instanceId]: instanceConfigs(cfg)[instanceId] });
+    const live = registry.get(instanceId);
+    if (live) bus.attach([live]);
+  } else {
+    await registry.dispose(instanceId);
+  }
+  resetPathCache();
+}
+
 /** Rebuild the provider fleet after a config change so new keys take
  * effect without a server restart (kills any in-flight turns). */
 async function reloadProviders() {
@@ -7477,6 +7523,7 @@ async function reloadProviders() {
 // and reload sequence single-flight so two settings requests cannot drop one
 // another's changes or dispose a fleet while another reload is creating it.
 let providerConfigBusy = false;
+const providerInstancesChanging = new Set<string>();
 let mcpConfigBusy = false;
 const MAX_CONCURRENT_MCP_PROBES = 2;
 let mcpProbesInFlight = 0;
@@ -11969,7 +12016,22 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
       // Windows never pushes PATH changes into a live process, so without
       // this the answer is frozen at boot and "check again" is a no-op.
       resetPathCache();
-      return json(res, 200, { instances: await registry.describe() });
+      return json(res, 200, { instances: await describeInstances() });
+    }
+
+    if (method === "POST" && path === "/api/instances/claude-accounts") {
+      if (!String(req.headers["content-type"] ?? "").toLowerCase().startsWith("application/json")) {
+        return json(res, 415, { error: "content-type must be application/json" });
+      }
+      const parsed = createClaudeAccountSchema.safeParse(await readBody(req, 8192));
+      if (!parsed.success) return json(res, 400, { error: "Enter an account name (up to 80 characters) and an optional configuration directory." });
+      if (providerConfigBusy) return json(res, 409, { error: "provider settings are already being updated" });
+      providerConfigBusy = true;
+      try {
+        const { instanceId, instances } = newClaudeAccount(cfg, parsed.data);
+        await persistProviderInstance(instanceId, instances);
+        return json(res, 201, { instanceId, instances: await describeInstances() });
+      } finally { providerConfigBusy = false; }
     }
 
     const authStatus = /^\/api\/instances\/([\w.-]+)\/auth\/status$/.exec(path);
@@ -11990,11 +12052,11 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
       try {
         if (action === "refresh-models") {
           if (!(await registry.refreshModels(instanceId))) return json(res, 404, { error: "unknown instance" });
-          return json(res, 200, { instances: await registry.describe() });
+          return json(res, 200, { instances: await describeInstances() });
         }
         if (action === "install") {
           if (!(await registry.installRuntime(instanceId))) return json(res, 404, { error: "managed installation is unavailable" });
-          return json(res, 200, { instances: await registry.describe() });
+          return json(res, 200, { instances: await describeInstances() });
         }
         if (action === "auth/start") {
           const instance = registry.get(instanceId);
@@ -12099,33 +12161,69 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
 
     // ── per-instance CLI path override (custom builds / versioned bins) ──
     // PATCH /api/instances/:id {cli: "/path/to/cli" | ""} — "" reverts to the
-    // driver default. Kills in-flight turns like any provider reload.
+    // driver default. Only this idle instance is replaced; siblings keep running.
     const instancePatch = /^\/api\/instances\/([\w.-]+)$/.exec(path);
     if (method === "PATCH" && instancePatch) {
       // same non-simple-request gate as the local-VM lifecycle routes
       if (!String(req.headers["content-type"] ?? "").toLowerCase().startsWith("application/json")) {
         return json(res, 415, { error: "content-type must be application/json" });
       }
-      const body = await readBody(req);
-      if (typeof body?.cli !== "string") return json(res, 400, { error: "cli must be a string" });
-      if (/[\n\r]/.test(body.cli)) return json(res, 400, { error: "cli must not contain newlines" });
+      const parsed = instanceSettingsSchema.safeParse(await readBody(req, 16384));
+      if (!parsed.success) return json(res, 400, { error: "Supply a valid CLI path, account name or configuration directory." });
+      const body = parsed.data;
+      const instanceId = instancePatch[1];
       if (providerConfigBusy) return json(res, 409, { error: "provider settings are already being updated" });
+      if (store.bots.some((bot) => bot.busy && bot.modelSelection.instanceId === instanceId)) {
+        return json(res, 409, { error: "Wait for bots using this account to finish before changing its settings." });
+      }
       providerConfigBusy = true;
+      providerInstancesChanging.add(instanceId);
       try {
-        const result = withInstanceCli(cfg, instancePatch[1], body.cli);
-        if (!result.ok) return json(res, 404, { error: `unknown instance "${instancePatch[1]}"` });
-        // persist the whole instances map this rebuild produced — a fresh
-        // saveConfig({instances}) merge would re-derive defaults identically,
-        // but writing the resolved map keeps disk and runtime in lockstep
-        saveConfig({ instances: result.config.instances });
-        Object.assign(cfg, loadConfig());
-        await reloadProviders();
-        // rescan BEFORE describe(): the response's cliCandidates are computed
-        // from the memoized PATH, so resetting after would answer this request
-        // with the pre-reset cache
-        resetPathCache();
-        return json(res, 200, { instances: await registry.describe() });
+        const result = body.cli === undefined ? { ok: true, config: cfg } : withInstanceCli(cfg, instanceId, body.cli);
+        const instances = persistableInstanceConfigs(result.config);
+        if (!result.ok || !Object.hasOwn(instances, instanceId)) return json(res, 404, { error: `unknown instance "${instanceId}"` });
+        const entry = instances[instanceId];
+        if ((body.displayName !== undefined || body.configDir !== undefined) && entry.driver !== "claudeAgent") {
+          return json(res, 400, { error: "Account settings are currently available for Claude only." });
+        }
+        if (body.displayName !== undefined) entry.displayName = body.displayName;
+        if (body.configDir !== undefined) {
+          let previousDir: string | undefined;
+          try { previousDir = configuredAccountDirectory(entry); } catch { /* Allow repairing an unused malformed account. */ }
+          entry.config = { ...entry.config as Record<string, unknown>, configDir: body.configDir };
+          if (previousDir !== configuredAccountDirectory(entry)) {
+            const used = store.bots.some((bot) => bot.modelSelection.instanceId === instanceId || store.tasks(bot.id).some((task) => task.resumeCursors[instanceId] || task.lastInstanceId === instanceId));
+            if (used) return json(res, 409, { error: "This account is used by bots or conversation history. Add another account and select it for the bot instead." });
+            assertSeparateClaudeAccount(instances, instanceId, entry);
+          }
+        }
+        await persistProviderInstance(instanceId, instances);
+        return json(res, 200, { instances: await describeInstances() });
       } finally {
+        providerInstancesChanging.delete(instanceId);
+        providerConfigBusy = false;
+      }
+    }
+
+    if (method === "DELETE" && instancePatch) {
+      const instanceId = instancePatch[1];
+      if (providerConfigBusy) return json(res, 409, { error: "provider settings are already being updated" });
+      const instances = persistableInstanceConfigs(cfg);
+      if (!Object.hasOwn(instances, instanceId)) return json(res, 404, { error: "unknown instance" });
+      if (instances[instanceId].driver !== "claudeAgent" || instanceId === "claude") {
+        return json(res, 400, { error: "Only added Claude accounts can be removed here." });
+      }
+      if (cfg.defaultModelSelection?.instanceId === instanceId || store.bots.some((bot) => bot.modelSelection.instanceId === instanceId)) {
+        return json(res, 409, { error: "Choose another account for the bots and default model using this account before removing it." });
+      }
+      providerConfigBusy = true;
+      providerInstancesChanging.add(instanceId);
+      try {
+        delete instances[instanceId];
+        await persistProviderInstance(instanceId, instances);
+        return json(res, 200, { instances: await describeInstances() });
+      } finally {
+        providerInstancesChanging.delete(instanceId);
         providerConfigBusy = false;
       }
     }
