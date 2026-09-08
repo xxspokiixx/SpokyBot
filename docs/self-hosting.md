@@ -276,11 +276,20 @@ gets a session cookie (30 days, renewed on use up to 180 days from pairing, revo
 listed and revoked at `GET`/`DELETE /api/auth/sessions` for now; a Settings
 screen follows.
 
-From the **desktop app**, use the Server menu: "Add Server from Copied
-Pairing Link…" reads the link you copied from the server, asks once, and
-opens that server's own UI in the app; the app stays signed in to it across
-restarts, and the menu switches between Local and any saved server (on
-Windows and Linux press Alt to show the menu bar). While a remote server is
+From the **desktop app**, open **Settings → Remote access → Connect to another
+computer**, choose **Self-hosted server**, and paste the full HTTPS pairing
+link from your server. Custom domains and Cloudflare tunnel addresses work
+here; Tailscale is not required. Generate a fresh link for each device (use
+`npx openmausbot pair --client` for chat-only access). A code already used by
+your phone cannot also pair your desktop.
+
+Confirm the server address in the app's connection dialog, then finish pairing
+on the server page. The app stays signed in across restarts. The **Server** menu
+switches between Local and saved servers; **Add Server from Copied Pairing
+Link…** remains available there too (on Windows and Linux press Alt to show
+the menu bar). The separate **Desktop companion** option in Settings is for
+the six-digit code from another desktop app, not a self-hosted server's
+12-character code. While a remote server is
 shown, this computer's screen, microphone, files and local control are not
 offered to it. "Forget" signs the app out of that server; revoke the
 session on the server too if the device is gone.
