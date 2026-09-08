@@ -520,6 +520,7 @@ export interface AppState {
   inspectorOpen: boolean;
   appSettingsOpen: boolean;
   appSettingsSection: AppSettingsSection;
+  shortcutsOpen: boolean;
   botSettingsSection: BotSettingsSection;
   /** latest live frame of a bot's computer, per botId */
   screens: Record<string, { png: string; mime: string }>;
@@ -715,6 +716,7 @@ export type Action =
   | { type: "focusMessage"; threadId: string; messageId: string }
   | { type: "focusMessageConsumed"; nonce: number }
   | { type: "toggleAppSettings"; open?: boolean; section?: AppSettingsSection }
+  | { type: "toggleShortcuts"; open?: boolean }
   | {
       type: "updateBot";
       botId: string;
@@ -1309,6 +1311,13 @@ export function reducer(state: AppState, action: Action): AppState {
         pluginsOpen: open ? false : state.pluginsOpen,
       };
     }
+    case "toggleShortcuts": {
+      const open = action.open ?? !state.shortcutsOpen;
+      return {
+        ...state,
+        shortcutsOpen: open,
+      };
+    }
     case "updateBot": {
       const mascotChanged =
         Object.prototype.hasOwnProperty.call(action.patch, "color") ||
@@ -1537,6 +1546,7 @@ export const initialState: AppState = {
   inspectorOpen: false,
   appSettingsOpen: false,
   appSettingsSection: "general",
+  shortcutsOpen: false,
   botSettingsSection: "overview",
   screens: {},
   provisioning: {},
