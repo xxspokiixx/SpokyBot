@@ -47,10 +47,15 @@ public struct Connection: Codable, Hashable, Identifiable, Sendable {
     public var companionDeviceId: String?
     /// Set when this connection was paired against the server's own sessions
     /// (`openmausbot serve` / the Docker stack) rather than the desktop's
-    /// companion sidecar: the bearer is an `omb_sess_` token with the client
-    /// scope, so what the app may administer differs. Absent on connections
-    /// saved before servers could be paired directly.
+    /// companion sidecar: the bearer is an `omb_sess_` token whose scopes
+    /// say what the app may administer. Absent on connections saved before
+    /// servers could be paired directly.
     public var serverEnvironmentId: String?
+    /// The scopes the server granted this session at pairing, kept so the
+    /// app can tell an owner's phone (`admin`) from a chat-only one
+    /// (`client`) without asking. Absent on server connections saved by
+    /// builds that did not record them, which the app treated as chat-only.
+    public var serverScopes: [String]?
 
     public init(
         id: String = UUID().uuidString,
@@ -64,7 +69,8 @@ public struct Connection: Codable, Hashable, Identifiable, Sendable {
         allowedLocalRouteURLs: Set<String>? = nil,
         secretPublicKey: String? = nil,
         companionDeviceId: String? = nil,
-        serverEnvironmentId: String? = nil
+        serverEnvironmentId: String? = nil,
+        serverScopes: [String]? = nil
     ) {
         self.id = id
         self.name = name
@@ -78,12 +84,25 @@ public struct Connection: Codable, Hashable, Identifiable, Sendable {
         self.secretPublicKey = secretPublicKey
         self.companionDeviceId = companionDeviceId
         self.serverEnvironmentId = serverEnvironmentId
+        self.serverScopes = serverScopes
     }
 
-    /// Paired with a server directly (client scope): chat, approvals and
-    /// reading are in; creating bots, changing models, connected apps and
-    /// cloud computers are the owner's, done on the server's own UI.
+    /// Paired with a server directly rather than through the companion
+    /// sidecar. What the phone may do there is for the session's scopes to
+    /// say: see `canAdminister`.
     public var pairedWithServer: Bool { serverEnvironmentId != nil }
+
+    /// Whether this pairing may administer the workspace: create bots and
+    /// sections, change models, generate avatars, connect apps, open cloud
+    /// desktops. A companion pairing always may — the sidecar applies its
+    /// own policy to each request. A server session may only with the
+    /// `admin` scope (`openmausbot pair` grants it; `--client` does not);
+    /// the server answers 403 otherwise, so the app hides those controls
+    /// instead of offering buttons that can only fail.
+    public var canAdminister: Bool {
+        guard pairedWithServer else { return true }
+        return serverScopes?.contains("admin") == true
+    }
 
     /// The representation `URLComponents.host` accepts for a literal IPv6
     /// address. It adds brackets exactly once and leaves DNS/IPv4 names alone.
@@ -327,14 +346,30 @@ public struct PairingInvite: Equatable, Sendable {
         return PairingInvite(connection: connection, credential: code)
     }
 
-    /// A server pairing code: 12 characters from a confusion-free alphabet,
-    /// shown as three dashed groups. Only the shape is checked here; a
-    /// mistyped code fails at the server with its own message. Six-digit
-    /// codes and `omb_pair_` tokens are the companion's and return nil.
+    /// The 32 symbols a server draws pairing codes from: digits and capitals
+    /// without 0, O, 1 and I, which read alike in most fonts.
+    public static let serverCodeAlphabet = "23456789ABCDEFGHJKLMNPQRSTUVWXYZ"
+
+    /// What the server does to a typed code before comparing it
+    /// (`normalizePairingCode` in `server/sessions.ts`): uppercase, drop
+    /// dashes, spaces and anything else that is not a letter or digit, then
+    /// read 0 as O and 1 as I. Identical here so the app and the server
+    /// never disagree about which code was entered.
+    public static func normalizePairingCode(_ raw: String) -> String {
+        String(raw.uppercased().filter { $0.isASCII && ($0.isLetter || $0.isNumber) }
+            .map { $0 == "0" ? "O" : $0 == "1" ? "I" : $0 })
+    }
+
+    /// A server pairing code, normalized: exactly 12 symbols from the
+    /// server's alphabet, dashes optional. Six-digit codes and `omb_pair_`
+    /// tokens are the companion's and return nil. So does a code with a
+    /// character the alphabet does not have — the server would refuse it
+    /// and count the attempt towards its lockout, so it is refused here,
+    /// where the person can still fix it.
     public static func normalizedServerCode(_ raw: String) -> String? {
-        let cleaned = raw.uppercased().filter { $0.isASCII && ($0.isLetter || $0.isNumber) }
-        guard cleaned.count == 12, !cleaned.allSatisfy(\.isNumber) else { return nil }
-        return cleaned
+        let code = normalizePairingCode(raw)
+        guard code.count == 12, code.allSatisfy(serverCodeAlphabet.contains) else { return nil }
+        return code
     }
 
     private static func credential(from values: [String: String]) -> String? {
@@ -1502,7 +1537,15 @@ public struct CompanionClient: Sendable {
     /// send a phone on cellular. The computer panel turns it on for exactly
     /// as long as it is open, which costs a reconnect — cheap, because the
     /// stream resumes from its cursor and loses nothing.
-    public func events(since cursor: String?, screens: Bool = false) throws -> AsyncThrowingStream<StreamFrame, Error> {
+    ///
+    /// `streamingSession` is for tests, which need to see the request the
+    /// stream is opened with; the app leaves it nil and gets the session
+    /// tuned above.
+    public func events(
+        since cursor: String?,
+        screens: Bool = false,
+        streamingSession: URLSession? = nil
+    ) throws -> AsyncThrowingStream<StreamFrame, Error> {
         var query = [URLQueryItem(name: "screens", value: screens ? "on" : "off")]
         if let cursor { query.append(URLQueryItem(name: "since", value: cursor)) }
         var streamRequest = try makeRequest("GET", "/api/events", query: query)
@@ -1516,6 +1559,6 @@ public struct CompanionClient: Sendable {
         // first quiet gap and reconnect, forever, looking like a flaky network
         // rather than a number in the wrong place.
         streamRequest.timeoutInterval = 90
-        return eventStream(request: streamRequest, session: Self.streaming)
+        return eventStream(request: streamRequest, session: streamingSession ?? Self.streaming)
     }
 }

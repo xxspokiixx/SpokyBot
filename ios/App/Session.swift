@@ -53,6 +53,10 @@ final class Session: ObservableObject {
     @Published private(set) var state = CompanionState()
     @Published private(set) var connection: Connection?
     @Published private(set) var connections: [Connection] = []
+    /// Whether the live pairing may administer the workspace — see
+    /// `Connection.canAdminister`. Views hide owner-only controls when this
+    /// is false rather than offer buttons the server would answer 403 to.
+    var canAdminister: Bool { connection?.canAdminister ?? false }
     @Published private(set) var status: Status = .unpaired
     /// Transient, user-facing failures from an action they just took.
     @Published var actionError: String?
@@ -273,8 +277,12 @@ final class Session: ObservableObject {
             invited.establishRoutePolicyFromInvite()
         }
         // A 12-character code pairs with a server directly (its own sessions,
-        // a client-scope bearer); anything else is the companion sidecar's.
+        // a bearer with the code's scopes); anything else is the companion's.
         if let code = PairingInvite.normalizedServerCode(credential) {
+            // Reachability first, on the public descriptor: a wrong address
+            // then fails as an address problem rather than a code problem,
+            // and no attempt is spent against the server's lockout.
+            try await Self.confirmServer(at: invited)
             let paired = try await CompanionClient.pairWithServer(
                 connection: invited,
                 code: code,
@@ -284,6 +292,7 @@ final class Session: ObservableObject {
             var stored = invited
             if !paired.environment.label.isEmpty { stored.name = paired.environment.label }
             stored.serverEnvironmentId = paired.environment.environmentId
+            stored.serverScopes = paired.session.scopes
             stored.companionDeviceId = nil
             if let existing = registry.matchingConnection(for: stored) {
                 stored.id = existing.id
@@ -369,6 +378,21 @@ final class Session: ObservableObject {
         // keychain — the token is in hand, so there is nothing left to retry.
         restorePending = false
         connect()
+    }
+
+    /// `GET /.well-known/openmausbot/environment` on a server about to be
+    /// paired. Nothing there means this address is not a server; the message
+    /// names the address, since that is what the person can fix. Any other
+    /// answer — unreachable, a gateway error — is passed through as it is.
+    private static func confirmServer(at connection: Connection) async throws {
+        let probe = CompanionClient(connection: connection, token: nil, requestTimeout: 8)
+        do {
+            _ = try await probe.environment()
+        } catch APIError.status(404, _) {
+            throw APIError.transport(
+                "\(connection.displayAddress) isn't an OpenMausBot server. Check the address and try again."
+            )
+        }
     }
 
     func receivePairingURL(_ url: URL) {
@@ -669,6 +693,23 @@ final class Session: ObservableObject {
         while !Task.isCancelled {
             guard let client else { return }
             status = .connecting
+            // A server connection first checks it is still the same server.
+            // The descriptor is public, so this spends no credential; a
+            // changed environment id (the address now belongs to another
+            // server, or its data directory was recreated) means "pair
+            // again", exactly like a revoked token — the bearer would be
+            // refused anyway, and a fresh install must not be shown the old
+            // one. Unreachable is not "different": the stream attempt below
+            // reports that the usual way.
+            if let expected = client.connection.serverEnvironmentId {
+                let live = try? await client.environment()
+                if Task.isCancelled { return }
+                if let live, live.environmentId != expected {
+                    log.error("server identity changed: \(expected, privacy: .public) is now \(live.environmentId, privacy: .public)")
+                    status = .unauthorized
+                    return
+                }
+            }
             log.info("opening stream, cursor=\(self.state.cursor ?? "none", privacy: .public)")
             do {
                 // The query is fixed when the connection opens, so changing
@@ -793,7 +834,9 @@ final class Session: ObservableObject {
     /// sidecars return 404 and a transient refresh error must not tear down a
     /// perfectly healthy event stream.
     private func refreshConnectionMetadata(using sourceClient: CompanionClient) {
-        guard let connectionID = connection?.id else { return }
+        // A server has no companion routes to advertise (`/api/companion/*`
+        // is the sidecar's); its one address is the one that was paired.
+        guard connection?.pairedWithServer != true, let connectionID = connection?.id else { return }
         let workingEndpoint = rotation.currentEndpoint ?? sourceClient.connection.activeEndpoint
         endpointRefreshTask?.cancel()
         endpointRefreshTask = Task { [weak self] in

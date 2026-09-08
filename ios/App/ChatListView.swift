@@ -378,8 +378,10 @@ struct ChatListView: View {
             updatesButton
                 .frame(width: 180)
             searchButton
-            sectionButton
-            newBotButton
+            if session.canAdminister {
+                sectionButton
+                newBotButton
+            }
         }
     }
 
@@ -388,23 +390,23 @@ struct ChatListView: View {
             updatesButton
                 .frame(minWidth: 148)
             searchButton
-            // Creating bots and sections is the owner's, on the server's own
-            // UI, when this phone is paired with a server directly.
-            if session.connection?.pairedWithServer != true {
-            Menu {
-                Button("New section", systemImage: "folder.badge.plus", action: openNewSection)
-                    .disabled(!hasVisibleBots)
-                Button("New bot", systemImage: "square.and.pencil", action: createBot)
-            } label: {
-                Image(systemName: "plus")
-                    .font(.system(size: 20, weight: .medium))
-                    .foregroundStyle(Color.primary)
-                    .frame(width: 48, height: 48)
-                    .contentShape(Circle())
-            }
-            .buttonStyle(.plain)
-            .glassCapsule()
-            .accessibilityLabel("Create")
+            // Creating bots and sections needs the admin scope on a server;
+            // a chat-only phone is not shown buttons the server would refuse.
+            if session.canAdminister {
+                Menu {
+                    Button("New section", systemImage: "folder.badge.plus", action: openNewSection)
+                        .disabled(!hasVisibleBots)
+                    Button("New bot", systemImage: "square.and.pencil", action: createBot)
+                } label: {
+                    Image(systemName: "plus")
+                        .font(.system(size: 20, weight: .medium))
+                        .foregroundStyle(Color.primary)
+                        .frame(width: 48, height: 48)
+                        .contentShape(Circle())
+                }
+                .buttonStyle(.plain)
+                .glassCapsule()
+                .accessibilityLabel("Create")
             }
         }
     }

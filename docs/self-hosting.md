@@ -344,12 +344,17 @@ is the reference implementation.
 ## Using it from your phone
 
 The iOS app pairs with a server the same way a laptop does: scan the QR
-code that `openmausbot serve` (or `openmausbot pair`) prints, or paste the
+code that `openmausbot serve` (or `openmausbot pair`) prints, paste the
 whole `https://host/pair#code=…` link into the address field on the pairing
-screen. The phone gets a session of its own, listed and revocable with
-`openmausbot sessions`. It can chat, approve, and read; creating bots,
-changing models, connecting apps and cloud computers stay with the owner in
-the server's own UI, and the app hides those controls.
+screen, or type the address and then the code. The phone gets a session of
+its own, listed and revocable with `openmausbot sessions`. What it may do is
+the code's scope: a code from `openmausbot pair` carries `admin` and the app
+shows everything; a code from `openmausbot pair --client` (also what the
+guided phone setup mints) can chat, approve and read, and the app hides
+creating bots and sections, changing models, generating avatars, connecting
+apps and cloud desktops — those stay with the owner. A server reinstalled at
+the same address has a new identity; the app then asks to pair again rather
+than present the old session to it.
 
 Older way, still supported: run the companion sidecar next to the harness
 and pair by its own QR. It advertises on your private networks
