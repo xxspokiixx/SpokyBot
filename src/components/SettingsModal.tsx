@@ -558,9 +558,9 @@ export function SettingsModal() {
 
       const focusable = Array.from(
         dialog.querySelectorAll<HTMLElement>(
-          'button:not([disabled]), a[href], input:not([disabled]), [tabindex]:not([tabindex="-1"])',
+          'button:not([disabled]), a[href], input:not([disabled]), select:not([disabled]), textarea:not([disabled]), summary, [tabindex]:not([tabindex="-1"])',
         ),
-      );
+      ).filter((element) => element.checkVisibility());
       if (focusable.length === 0) {
         event.preventDefault();
         dialog.focus();
@@ -588,7 +588,7 @@ export function SettingsModal() {
 
   return (
     <div
-      className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-6"
+      className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-3 sm:p-6"
       onMouseDown={(e) => e.target === e.currentTarget && dispatch({ type: "toggleAppSettings", open: false })}
     >
       <div
@@ -597,11 +597,12 @@ export function SettingsModal() {
         aria-modal="true"
         aria-labelledby="app-settings-title"
         tabIndex={-1}
-        className="flex h-[560px] w-full max-w-[860px] overflow-hidden rounded-2xl border border-hairline/50 bg-panel shadow-2xl outline-none"
+        className="flex h-[560px] max-h-[calc(100dvh-24px)] w-full max-w-[860px] overflow-hidden rounded-2xl border border-hairline/50 bg-panel shadow-2xl outline-none"
       >
         {/* section nav */}
-        <nav className="flex w-[190px] shrink-0 flex-col gap-0.5 border-r border-hairline/40 p-3">
-          <div id="app-settings-title" className="shrink-0 px-2 py-3 text-[15px] font-semibold text-ink">
+        <span id="app-settings-title" className="sr-only">{t("settings.title")}</span>
+        <nav className="hidden w-[190px] shrink-0 flex-col gap-0.5 border-r border-hairline/40 p-3 sm:flex">
+          <div className="shrink-0 px-2 py-3 text-[15px] font-semibold text-ink">
             {t("settings.title")}
           </div>
           <div className="mb-2 mt-1 flex shrink-0 items-center gap-2 rounded-lg bg-control/70 px-2.5 py-2">
@@ -641,9 +642,22 @@ export function SettingsModal() {
           ))}
         </nav>
 
-        <div className="flex min-w-0 flex-1 flex-col">
-          <div className="flex items-center justify-between px-5 py-3">
-            <span className="text-[15px] font-semibold text-ink">
+        <div className="flex min-h-0 min-w-0 flex-1 flex-col">
+          <div className="flex shrink-0 items-center justify-between gap-3 px-3 py-3 sm:px-5">
+            <select
+              aria-label={t("settings.title")}
+              value={section}
+              onChange={(event) => {
+                setQuery("");
+                dispatch({ type: "toggleAppSettings", open: true, section: event.target.value as AppSettingsSection });
+              }}
+              className="min-w-0 rounded-lg bg-control px-3 py-2 text-[14px] text-ink sm:hidden"
+            >
+              {SECTIONS.filter((entry) => !remoteActive || entry.id === "companion").map(({ id, labelKey }) => (
+                <option key={id} value={id}>{t(labelKey)}</option>
+              ))}
+            </select>
+            <span className="hidden text-[15px] font-semibold text-ink sm:block">
               {sectionLabelKey ? t(sectionLabelKey) : null}
             </span>
             <button
@@ -655,7 +669,7 @@ export function SettingsModal() {
             </button>
           </div>
 
-          <div className="flex flex-1 flex-col gap-4 overflow-y-auto px-5 pb-5">
+          <div className="flex flex-1 flex-col gap-4 overflow-y-auto px-3 pb-3 sm:px-5 sm:pb-5">
             {section === "general" && (
               <>
                 <Card title={t("settings.profile.title")} subtitle={t("settings.profile.subtitle")}>
