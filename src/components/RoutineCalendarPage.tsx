@@ -1249,7 +1249,7 @@ function EventDetails({
             <div className="flex items-start gap-3">
               <UsersRound size={17} className="mt-1 shrink-0 text-ink-secondary" />
               <div className="min-w-0 flex-1">
-                <div className="text-[11px] font-medium uppercase tracking-wider text-ink-secondary">Team goal room</div>
+                <div className="text-[11px] font-medium uppercase tracking-wider text-ink-secondary">Team goal group</div>
                 <div className="mt-1 text-[12.5px] text-ink">{goalGroup?.name ?? "Group unavailable"}</div>
               </div>
             </div>

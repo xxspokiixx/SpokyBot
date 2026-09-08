@@ -285,7 +285,7 @@ fun Bot.forTask(requestedThreadId: String): Bot? {
         busy = task.busy ?: if (selected) busy else false,
         activity = task.activity ?: if (selected) activity else null,
         unread = task.unread ?: if (selected) unread else false,
-        approvalMode = task.approvalMode ?: approvalMode,
+        approvalMode = task.approvalMode ?: task.autoApprove?.let { if (it) "auto" else "ask" } ?: approvalMode,
         autoApprove = task.autoApprove ?: autoApprove,
         alwaysAllow = task.alwaysAllow ?: alwaysAllow,
         messages = if (selected) messages else null,

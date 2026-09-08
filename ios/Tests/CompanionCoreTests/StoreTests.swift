@@ -291,8 +291,41 @@ final class StoreTests: XCTestCase {
         state.apply(.thread(threadId: bot.threadId, activeLeafId: "other"))
         XCTAssertNil(state.streaming[bot.threadId])
 
-        state.apply(.message(threadId: bot.threadId, message: message("latest")))
+        var latest = message("latest")
+        latest.parentId = "other"
+        state.apply(.message(threadId: bot.threadId, message: latest))
         XCTAssertEqual(state.bot(bot.id)?.activeLeafId, "latest")
+    }
+
+    func testMessagesOnOtherBranchesDoNotMoveSelectedOrBackgroundThreadHeads() throws {
+        for selected in [true, false] {
+            var state = CompanionState()
+            var bot = try XCTUnwrap(try fleet().bots.first)
+            bot.threadId = selected ? "thread-a" : "thread-b"
+            bot.tasks = [BotTask(threadId: "thread-a", title: "A", createdAt: 1),
+                         BotTask(threadId: "thread-b", title: "B", createdAt: 2)]
+            bot.activeLeafId = selected ? "chosen" : "sibling"
+            state.apply(.bot(bot))
+            var chosen = message("chosen")
+            chosen.parentId = "root"
+            state.merge(ThreadPage(messages: [message("root"), chosen], hasMore: false, activeLeafId: "chosen"),
+                        intoThread: "thread-a")
+            var alternative = message("alternative")
+            alternative.parentId = "root"
+            state.apply(.message(threadId: "thread-a", message: alternative))
+            XCTAssertEqual(state.bot(forThread: "thread-a")?.activeLeafId, "chosen")
+            XCTAssertEqual(state.bot(bot.id)?.activeLeafId, selected ? "chosen" : "sibling")
+            XCTAssertEqual(state.visibleTranscript(forThread: "thread-a").map(\.id), ["root", "chosen"])
+
+            var tail = message("tail")
+            tail.parentId = "chosen"
+            state.apply(.message(threadId: "thread-a", message: tail))
+            XCTAssertEqual(state.visibleTranscript(forThread: "thread-a").map(\.id), ["root", "chosen", "tail"])
+            state.apply(.message(threadId: "thread-a", message: chosen)) // replay cannot rewind the head
+            XCTAssertEqual(state.bot(forThread: "thread-a")?.activeLeafId, "tail")
+            state.apply(.thread(threadId: "thread-a", activeLeafId: "alternative"))
+            XCTAssertEqual(state.visibleTranscript(forThread: "thread-a").map(\.id), ["root", "alternative"])
+        }
     }
 
     func testDeletingABotTakesItsTranscriptWithIt() throws {

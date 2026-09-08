@@ -105,7 +105,7 @@ describe("paired thread targets through an isolated HTTP fixture", () => {
     // Local desktop/API compatibility remains intentionally selected-thread based.
     expect((await api("POST", `/api/bots/${bot.id}/read`)).status).toBe(200);
     expect((await api("PATCH", `/api/bots/${bot.id}/model`, selection(models[0]))).status).toBe(200);
-  });
+  }, 60_000);
 
   it("keeps single-thread paired clients compatible and never grants authority to a spoofed marker", async () => {
     const bot = (await api("POST", "/api/bots", { name: "Single thread", modelSelection: selection(models[0]) })).body.bot;

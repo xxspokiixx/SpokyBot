@@ -28,6 +28,7 @@ describe("sidebar virtual sections", () => {
       expect(sidebarSectionLabel(id)).toBe(name);
     }
     expect(sidebarSectionLabel(CHANNELS_SECTION_ID)).toBe("Groups");
+    expect(sidebarSectionLabel(BOT_CHATS_SECTION_ID)).toBe("Bot threads");
   });
 
   it("round-trips every valid section name without URI encoding", () => {

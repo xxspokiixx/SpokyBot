@@ -3,6 +3,7 @@ import { once } from "node:events";
 import { createServer } from "node:http";
 import type { AddressInfo } from "node:net";
 import { createInterface } from "node:readline";
+import { delimiter, dirname } from "node:path";
 import { describe, expect, it } from "vitest";
 import { gatedLocalComputer } from "./local-computer.ts";
 import { SPAWNED_PROXIES } from "./proxy-paths.ts";
@@ -18,6 +19,7 @@ readline.createInterface({input: process.stdin}).on("line", (line) => {
     forwarded:message.method,calls,
     marker:process.env.CUA_FIXTURE_MARKER,
     tokenPresent:Boolean(process.env.OMB_CONTROL_TOKEN),
+    path:process.env.PATH,
     argv:process.argv.slice(1),
     tail:message.params?.large ? "x".repeat(150000) : ""
   }}) + "\\n");
@@ -46,7 +48,9 @@ describe("local computer proxy (isolated child and control endpoint)", () => {
     }, { url: `http://127.0.0.1:${(server.address() as AddressInfo).port}/control`, token: "isolated-control-token" });
     let child: ChildProcess | undefined;
     try {
-      child = spawn(connection.command, connection.args, { env: { ...process.env, ...connection.env }, stdio: ["pipe", "pipe", "pipe"] });
+      child = spawn(connection.command, connection.args, { env: { ...process.env, ...connection.env,
+        OMB_EXTRA_PATH: dirname(process.execPath), PATH: "",
+      }, stdio: ["pipe", "pipe", "pipe"] });
       const input = createInterface({ input: child.stdout! });
       const replies = new Map<number, (value: any) => void>();
       let stderr = "";
@@ -76,6 +80,7 @@ describe("local computer proxy (isolated child and control endpoint)", () => {
       held = false;
       const allowed = await rpc("tools/call", { name: "screenshot" });
       expect(allowed.result).toMatchObject({ calls: 1, marker: "preserved-driver-env", tokenPresent: false, argv: ["two words; not a shell"] });
+      expect(allowed.result.path.split(delimiter)).toContain(dirname(process.execPath));
       unavailable = true;
       expect((await rpc("tools/call", { name: "click" })).result.isError).toBe(true);
       unavailable = false;

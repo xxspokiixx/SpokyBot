@@ -1,4 +1,4 @@
-import { readFileSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { beforeEach, describe, expect, it } from "vitest";
 
@@ -6,6 +6,7 @@ import { approvalModeFor } from "../shared/approval-mode.ts";
 import { DATA_DIR } from "./config.ts";
 import type { ModelSelection } from "./contracts.ts";
 import { Store, type BotRecord, type TaskPatch } from "./store.ts";
+import { ensureTaskWorkspace } from "./workspace.ts";
 
 const selection = (): ModelSelection => ({ instanceId: "claude", model: "default" });
 const savedBots = (): BotRecord[] => JSON.parse(readFileSync(join(DATA_DIR, "bots.json"), "utf8"));
@@ -13,6 +14,31 @@ const savedBots = (): BotRecord[] => JSON.parse(readFileSync(join(DATA_DIR, "bot
 describe("independent bot task state", () => {
   // The shared Vitest setup gives this file its own disposable home.
   beforeEach(() => rmSync(DATA_DIR, { recursive: true, force: true }));
+
+  it("caps new task titles before persistence and preserves the blank-title fallback", () => {
+    const store = new Store(selection);
+    const bot = store.createBot({}, { seedMessages: false });
+    const task = store.createTask(bot.id, `  ${"t".repeat(120)}  `)!;
+    expect(task.title).toBe("t".repeat(80));
+    expect(new Store(selection).taskByThread(bot.id, task.threadId)?.title).toBe(task.title);
+    expect(store.createTask(bot.id, "  ")?.title).toBe("New thread");
+  });
+
+  it("retains generated and user-selected project files when conversations are deleted", () => {
+    const store = new Store(selection);
+    const bot = store.createBot({}, { seedMessages: false });
+    const first = ensureTaskWorkspace(bot.id, bot.threadId);
+    const secondTask = store.createTask(bot.id)!;
+    const second = ensureTaskWorkspace(bot.id, secondTask.threadId);
+    const chosen = join(DATA_DIR, "user-selected-project");
+    mkdirSync(chosen);
+    for (const folder of [first, second, chosen]) writeFileSync(join(folder, "result.txt"), "Keep my project");
+    store.patchBot(bot.id, { cwd: chosen });
+    expect(store.deleteTask(bot.id, secondTask.threadId)).not.toBeNull();
+    expect(existsSync(join(second, "result.txt"))).toBe(true);
+    expect(store.deleteBot(bot.id)).toBe(true);
+    for (const folder of [first, second, chosen]) expect(readFileSync(join(folder, "result.txt"), "utf8")).toBe("Keep my project");
+  });
 
   it("keeps model, approvals, cursor, rewind and pin snapshots across navigation, deletion and reload", () => {
     const store = new Store(selection);

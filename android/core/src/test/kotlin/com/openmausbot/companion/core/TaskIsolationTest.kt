@@ -46,6 +46,21 @@ class TaskIsolationTest {
     }
 
     @Test
+    fun taskApprovalMirrorTakesPrecedenceOverTheProfileButNotAnExplicitMode() {
+        for (taskAuto in listOf(true, false)) {
+            val old = CompanionJson.decodeFromString<BotTask>(
+                """{"threadId":"a","title":"A","createdAt":1,"autoApprove":$taskAuto}""")
+            val profile = bot.copy(approvalMode = if (taskAuto) "ask" else "auto", tasks = listOf(old, taskB))
+            assertEquals(if (taskAuto) "auto" else "ask", profile.forTask("a")?.approvalMode)
+            assertEquals(taskAuto, profile.forTask("a")?.autoApprove)
+            assertEquals("full", profile.copy(tasks = listOf(old.copy(approvalMode = "full")))
+                .forTask("a")?.approvalMode)
+            assertEquals(profile.approvalMode, profile.copy(tasks = listOf(old.copy(autoApprove = null)))
+                .forTask("a")?.approvalMode)
+        }
+    }
+
+    @Test
     fun selectedBotFramesDoNotClearASiblingsReplyOrBranchAndApprovalsStayDiscoverable() {
         val root = Message("root", Message.Role.USER, Message.Kind.TEXT, 1.0, text = "A")
         val chosen = Message("chosen", Message.Role.BOT, Message.Kind.TEXT, 2.0, parentId = "root", text = "Chosen")

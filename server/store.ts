@@ -1532,6 +1532,8 @@ export class Store {
     try {
       rmSync(workspaceDir(id), { recursive: true, force: true });
     } catch {}
+    // Generated task-workspaces are project files, not bot memory. Keep
+    // them (and user-selected cwd folders) when deleting conversations.
     // Approval state deliberately lives outside the bot-writable workspace.
     // It still belongs to the bot, so deleting the bot must remove staged
     // proposals, manifests, and native-link ownership records with it.
@@ -1926,7 +1928,7 @@ export class Store {
     if (projectId !== undefined && !this.project(botId, projectId)) return null;
     const task: TaskRecord = {
       threadId: newId(),
-      title: title?.trim() || UNTITLED_THREAD,
+      title: title?.trim().slice(0, 80) || UNTITLED_THREAD,
       createdAt: Date.now(),
       ...(projectId ? { projectId } : {}),
       resumeCursors: {},
@@ -1970,7 +1972,8 @@ export class Store {
     this.emit({ type: "bot", botId });
   }
 
-  /** Delete a task and its transcript. A bot always keeps one. */
+  /** Delete a task and its transcript, retaining generated project files.
+   * A bot always keeps one. */
   deleteTask(botId: string, threadId: string): BotRecord | null {
     const bot = this.bot(botId);
     if (!bot || !bot.tasks || bot.tasks.length < 2) return null;

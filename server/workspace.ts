@@ -136,8 +136,8 @@ export type MemoryUpdateResult =
  * shell writes by a full-access engine or an external editor. */
 export function updateMemory(botId: string, update: MemoryUpdate): MemoryUpdateResult {
   if (!["append", "replace", "remove"].includes(update.action)
-    || (update.action !== "remove" && typeof update.text !== "string")
-    || (update.action === "append" && (!update.text!.trim() || update.oldText !== undefined))
+    || (update.action !== "remove" && (typeof update.text !== "string" || !update.text.trim()))
+    || (update.action === "append" && update.oldText !== undefined)
     || (update.action !== "append" && (typeof update.oldText !== "string" || !update.oldText.trim()))
     || (update.action === "remove" && update.text !== undefined)) {
     return { ok: false, code: "invalid", error: "Use append with text, replace with text and oldText, or remove with oldText." };

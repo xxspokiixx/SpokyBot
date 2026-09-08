@@ -155,6 +155,17 @@ describe("workspace", () => {
     expect(readMemoryFile(BOT).text).toBe("repeated repeated");
   });
 
+  it("requires explicit remove to delete a memory passage", () => {
+    writeMemoryFile(BOT, "Keep this unique fact.");
+    for (const text of ["", " \n\t "]) {
+      expect(updateMemory(BOT, { action: "replace", oldText: "unique fact", text }))
+        .toMatchObject({ ok: false, code: "invalid" });
+      expect(readMemoryFile(BOT).text).toBe("Keep this unique fact.");
+    }
+    expect(updateMemory(BOT, { action: "remove", oldText: "unique fact" })).toMatchObject({ ok: true });
+    expect(readMemoryFile(BOT).text).toBe("Keep this .");
+  });
+
   it("accepts plain single-segment topic names and nothing else", () => {
     for (const good of ["deploys.md", "a.md", "my notes.md", "v1.2-rc.md", "under_score.md"]) {
       expect(isMemoryTopicName(good), good).toBe(true);

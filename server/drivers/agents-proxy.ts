@@ -355,7 +355,7 @@ const TOOLS = [
       additionalProperties: false,
       properties: {
         action: { type: "string", enum: ["append", "replace", "remove"] },
-        text: { type: "string", description: "New text for append or replace. Omit for remove." },
+        text: { type: "string", minLength: 1, pattern: "\\S", description: "Non-blank new text for append or replace. Omit for remove; use remove to delete a passage." },
         old_text: { type: "string", minLength: 1, description: "Exact unique existing passage for replace or remove. Omit for append." },
       },
       required: ["action"],
@@ -869,7 +869,7 @@ async function callTool(name: string, args: Json): Promise<{ text: string; isErr
   }
   if (name === "memory_update") {
     if (!["append", "replace", "remove"].includes(String(args.action))
-      || (args.action !== "remove" && typeof args.text !== "string")
+      || (args.action !== "remove" && (typeof args.text !== "string" || !args.text.trim()))
       || (args.action !== "append" && (typeof args.old_text !== "string" || !args.old_text.trim()))) {
       return { text: "Use memory_update action=append with text, replace with text and old_text, or remove with old_text.", isError: true };
     }

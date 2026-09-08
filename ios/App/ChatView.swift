@@ -635,8 +635,12 @@ struct ChatView: View {
         if case let .bot(bot) = current {
             out.append(PlusAction(
                 id: "task", systemImage: "plus.square.on.square", title: "New thread",
-                subtitle: "Start a fresh thread with \(bot.name)", disabled: bot.busy == true
-            ) { Task { await session.createTask(for: bot, title: nil) } })
+                subtitle: "Start a fresh thread with \(bot.name)"
+            ) { Task {
+                if let created = await session.createTask(for: bot, title: nil) {
+                    selectedThreadId = created.threadId
+                }
+            } })
             out.append(PlusAction(
                 id: "tasks", systemImage: "square.stack", title: "Threads",
                 subtitle: "Switch, rename or remove one"

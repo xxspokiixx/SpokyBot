@@ -96,6 +96,31 @@ describe("independent bot tasks through the isolated control surface", () => {
     await session.close();
   });
 
+  it("rejects blank memory replacements, caps new titles, and retains project files after deletion", async () => {
+    const created = await tool("create_bot", { name: "Release review fixture", instance_id: "claude", model: models[0] });
+    const botId = created.bot.id;
+    const task = await api("POST", `/api/bots/${botId}/tasks`, { title: `  ${"t".repeat(120)}  ` });
+    expect(task.status).toBe(201);
+    expect(task.body.task.title).toBe("t".repeat(80));
+    const threadId = task.body.task.threadId;
+    await control(["send", "--bot", botId, "--task", threadId, "--text", "REVIEW_MEMORY_OWNER"]);
+    const launched = await dump(models[0]);
+    const token = launched.mcpConfig.mcpServers.agents.env.OMB_COMMS_TOKEN;
+    expect((await internal(token, "POST", "/api/internal/memory", { action: "append", text: "A unique saved fact." })).status).toBe(200);
+    for (const text of ["", " \n\t "]) {
+      expect((await internal(token, "POST", "/api/internal/memory", { action: "replace", oldText: "unique saved fact", text })).status).toBe(400);
+      expect((await api("GET", `/api/bots/${botId}/memory`)).body.text).toBe("A unique saved fact.");
+    }
+    const project = join(session.info.dataDir, "task-workspaces", botId, threadId, "result.txt");
+    writeFileSync(project, "Generated project files are retained.");
+    await control(["interrupt", "--bot", botId, "--task", threadId]);
+    await expect.poll(async () => (await botState(botId)).busy, { timeout: 10_000 }).toBe(false);
+    expect((await api("DELETE", `/api/bots/${botId}/tasks/${threadId}`)).status).toBe(200);
+    expect((await api("DELETE", `/api/bots/${botId}`)).status).toBe(200);
+    expect(readFileSync(project, "utf8")).toBe("Generated project files are retained.");
+    evidence.push({ cappedTitleLength: 80, blankMemoryReplacementRejected: true, generatedFilesRetained: true });
+  }, 30_000);
+
   it("keeps A and B independent across selection, models, approvals, and stopping A", async () => {
     const created = await tool("create_bot", { name: "Independent fixture", instance_id: "claude", model: models[0] });
     const botId = created.bot.id;

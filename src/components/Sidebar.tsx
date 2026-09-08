@@ -797,7 +797,7 @@ export function BotDeleteMenuItem({ deleting, onClick }: { deleting: boolean; on
 
 export function BotThreadList({ bot, selected, density = "comfortable", query = "" }: { bot: Bot; selected: boolean; density?: SidebarDensity; query?: string }) {
   const { dispatch } = useStore();
-  const tasks = bot.tasks ?? [{ threadId: bot.threadId, title: "New thread", createdAt: 0 }];
+  const tasks = bot.tasks ?? [{ threadId: bot.threadId, title: t("task.newShort"), createdAt: 0 }];
   const projects = bot.projects ?? [];
   const [collapsed, setCollapsed] = useState<Set<string>>(new Set());
   const [editingProject, setEditingProject] = useState<string | null>(null);
@@ -903,8 +903,8 @@ export function BotListItem({
     iconOnly
       ? "justify-center px-1 py-1.5"
       : density === "compact"
-        ? "gap-1.5 px-1.5 py-1 pr-9"
-        : "gap-2 px-1.5 py-1.5 pr-9",
+        ? "gap-1.5 py-1 pl-6 pr-9"
+        : "gap-2 py-1.5 pl-6 pr-9",
     // Chief of Staff is called out by the crown label below, not by tinting
     // the whole row — an accent border + fill read as "selected" even when
     // another bot was active.
@@ -1052,16 +1052,15 @@ export function BotListItem({
         onContextMenu={onContextMenu}
         className={rowClass}
       >
-        {!iconOnly && <button
-          type="button"
-          aria-label={t(threadsOpen ? "task.collapseNamed" : "task.expandNamed", { name: bot.name })}
-          aria-expanded={threadsOpen}
-          onClick={(event) => { event.stopPropagation(); setThreadsOpen((open) => !open); }}
-          onKeyDown={(event) => event.stopPropagation()}
-          className="-ml-1 flex size-4 shrink-0 items-center justify-center rounded text-ink-secondary hover:bg-control hover:text-ink"
-        ><ChevronRight size={13} className={cn("transition-transform", threadsOpen && "rotate-90")} /></button>}
         {body}
       </div>
+      {!iconOnly && <button
+        type="button"
+        aria-label={t(threadsOpen ? "task.collapseNamed" : "task.expandNamed", { name: bot.name })}
+        aria-expanded={threadsOpen}
+        onClick={() => setThreadsOpen((open) => !open)}
+        className="absolute left-0.5 top-1/2 flex size-5 -translate-y-1/2 items-center justify-center rounded text-ink-secondary hover:bg-control hover:text-ink"
+      ><ChevronRight size={13} className={cn("transition-transform", threadsOpen && "rotate-90")} /></button>}
       {!renaming && iconOnly && bot.unread && (
         <span className="pointer-events-none absolute bottom-1.5 right-1.5 size-2 rounded-full border border-panel bg-accent" />
       )}

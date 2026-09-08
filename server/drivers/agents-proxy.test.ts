@@ -652,6 +652,15 @@ describe("agents-proxy MCP surface", () => {
     const missing = await callTool("memory_update", { action: "replace", text: "unsafe replacement" });
     expect(missing.result.isError).toBe(true);
     expect(lastMemoryBody.action).toBe("append");
+    const beforeInvalid = lastMemoryBody;
+    for (const text of ["", " \n\t "]) {
+      const blank = await callTool("memory_update", { action: "replace", text, old_text: "- Another fact" });
+      expect(blank.result.isError).toBe(true);
+      expect(lastMemoryBody).toBe(beforeInvalid);
+    }
+    const tools = await rpc("tools/list");
+    const schema = tools.result.tools.find((tool: { name: string }) => tool.name === "memory_update").inputSchema;
+    expect(schema.properties.text).toMatchObject({ minLength: 1, pattern: "\\S" });
     memoryStatus = 409;
     memoryResponse = { error: "oldText must match exactly once in the latest memory." };
     const stale = await callTool("memory_update", { action: "remove", old_text: "missing" });

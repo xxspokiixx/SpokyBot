@@ -580,6 +580,7 @@
   "approvalMode.noNativeReview": "This provider has no automatic review; behaves like Ask",
   "approvalMode.triggerAria": "{mode} for {provider}",
   "approvalMode.busy": "Stop this bot's turn before changing its approval level",
+  "approvalMode.threadTrustedNotice": "Full and Custom access are managed in bot settings in the desktop app.",
   "approvalMode.menuAria": "Approval mode for {provider}",
   "approvalMode.question": "How should {provider} actions be approved?",
   "approvalMode.learnMore": "Learn more",

@@ -40,6 +40,12 @@ function renderRow(candidate: Bot, archiveDisabled: boolean) {
 }
 
 describe("BotListItem", () => {
+  it("keeps the native thread toggle beside, not inside, the selectable bot row", () => {
+    const markup = renderRow(bot(), false);
+    expect(markup).toContain('role="button" tabindex="0"');
+    expect(markup).toContain('</div><button type="button" aria-label="Expand Atlas threads" aria-expanded="false"');
+  });
+
   it("leaves the full Chief card as one selectable hit area", () => {
     const markup = renderRow(bot({ chiefOfStaff: true }), false);
 

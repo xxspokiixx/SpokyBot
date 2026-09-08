@@ -859,7 +859,7 @@ export function Composer({
                   onSelect={setApprovalMode}
                   disabled={Boolean(modeBot.busy)}
                   trustedModesAvailable={false}
-                  trustedModesNotice="Full and Custom access are managed in bot settings in the desktop app."
+                  trustedModesNotice={t("approvalMode.threadTrustedNotice")}
                 />
               )}
             </div>

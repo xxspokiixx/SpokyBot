@@ -245,9 +245,11 @@ public struct CompanionState: Sendable {
 
         case let .message(threadId, message):
             append(message, to: threadId)
-            if bot(forThread: threadId) != nil { activeLeafIds[threadId] = message.id }
-            if let index = bots.firstIndex(where: { $0.threadId == threadId }) {
-                bots[index].activeLeafId = message.id
+            if let bot = bot(forThread: threadId), message.parentId == bot.activeLeafId {
+                activeLeafIds[threadId] = message.id
+                if let index = bots.firstIndex(where: { $0.threadId == threadId }) {
+                    bots[index].activeLeafId = message.id
+                }
             }
             // A settled reply supersedes whatever was streaming into it.
             // Without this the live bubble survives alongside the real one:

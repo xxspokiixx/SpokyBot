@@ -1,4 +1,4 @@
-import { mkdtempSync, mkdirSync, rmSync, symlinkSync } from "node:fs";
+import { existsSync, mkdtempSync, mkdirSync, rmSync, symlinkSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
@@ -43,6 +43,22 @@ describe("thread resource ownership", () => {
       expect(leases.claim(workspaceResource(join(root, "project", "nested")), b)).toBe(false);
       expect(leases.claim(workspaceResource(root), b)).toBe(false);
       expect(leases.claim(workspaceResource(join(root, "project-other")), b)).toBe(true);
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  it("treats differently cased paths as one workspace on case-insensitive volumes", ({ skip }) => {
+    const root = mkdtempSync(join(tmpdir(), "omb-thread-case-"));
+    try {
+      const folder = join(root, "Project");
+      const alias = join(root, "project");
+      mkdirSync(folder);
+      if (!existsSync(alias)) return skip();
+      expect(workspaceResource(alias)).toBe(workspaceResource(folder));
+      const leases = new TurnResources();
+      expect(leases.claim(workspaceResource(folder), a)).toBe(true);
+      expect(leases.claim(workspaceResource(alias), b)).toBe(false);
     } finally {
       rmSync(root, { recursive: true, force: true });
     }

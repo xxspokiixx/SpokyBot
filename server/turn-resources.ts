@@ -36,8 +36,9 @@ function sameOwner(a: TurnOwner, b: TurnOwner): boolean {
 
 export function workspaceResource(cwd: string): string {
   // Selected folders must exist before the engine starts. Resolve symlinks
-  // so aliases cannot grant two writers to the same project.
-  const canonical = realpathSync(resolve(cwd));
+  // and native filename casing so aliases cannot grant two writers to the
+  // same project on case-insensitive volumes.
+  const canonical = realpathSync.native(resolve(cwd));
   return `workspace:${process.platform === "win32" ? canonical.toLowerCase() : canonical}`;
 }
 

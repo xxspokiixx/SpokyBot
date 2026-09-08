@@ -1869,7 +1869,7 @@ const StoreContext = createContext<{
 } | null>(null);
 
 export function StoreProvider({ children }: { children: ReactNode }) {
-  const taskWrites = useRef(new Map<string, { promise: Promise<BotAnnouncement>; patch: TaskUpdatePatch }>()).current;
+  const taskWrites = useRef(new Map<string, { promise: Promise<BotAnnouncement>; execution: Promise<unknown>; patch: TaskUpdatePatch }>()).current;
   const withTaskWrites = (bot: BotAnnouncement): BotAnnouncement => ({
     ...bot,
     tasks: bot.tasks?.map((task) => ({ ...task, ...taskPatchFields(taskWrites.get(task.threadId)?.patch ?? {}) })),
@@ -1962,7 +1962,11 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     };
 
     const waitForExecutionSettings = async (expectedBots: Bot[], threadId?: string) => {
-      await Promise.all(expectedBots.map(async (expected) => {
+      // Capture this send's task save before waiting on slower profile saves.
+      // Reconciliation may clear a failed lane meanwhile; that must not turn
+      // an already-waiting send into work under reverted settings.
+      const taskWrite = threadId ? taskWrites.get(threadId)?.execution : undefined;
+      await Promise.all([taskWrite, ...expectedBots.map(async (expected) => {
         const persisted = await botPatchQueue.flush(expected.id);
         if (!persisted) return;
         const expectedSelection = expected.modelSelection;
@@ -1974,8 +1978,8 @@ export function StoreProvider({ children }: { children: ReactNode }) {
         ) {
           throw new Error("The approval level or model could not be saved, so this work was not started");
         }
-      }));
-      if (threadId) await taskWrites.get(threadId)?.promise;
+      })]);
+      if (threadId) await taskWrites.get(threadId)?.execution;
     };
 
     const persistTaskPatch = (botId: string, threadId: string, patch: TaskUpdatePatch) => {
@@ -1991,7 +1995,12 @@ export function StoreProvider({ children }: { children: ReactNode }) {
           });
           return result.bot as BotAnnouncement;
         });
-      const pending = { patch: { ...previous?.patch, ...patch }, promise };
+      // Later edits still get saved after an earlier failure, but a send
+      // awaiting this batch must observe every rejected setting in it. A
+      // successful folder move is not confirmation of a failed model change.
+      const execution = Promise.all([previous?.execution, promise]);
+      void execution.catch(() => {}); // handled by the write and send paths
+      const pending = { patch: { ...previous?.patch, ...patch }, promise, execution };
       taskWrites.set(threadId, pending);
       void pending.promise.then((bot) => {
         if (taskWrites.get(threadId) !== pending) return;
@@ -1999,14 +2008,18 @@ export function StoreProvider({ children }: { children: ReactNode }) {
         if (bot) rawDispatch({ type: "botPatched", bot: withTaskWrites(bot) });
       }).catch((error) => {
         showError(error);
-        // Reconcile rejected settings, but retain the failed promise so an
-        // immediate send cannot silently use the previous model or authority.
+        // Block sends until authoritative settings have been restored. Do
+        // not clear the failed write if reconciliation also fails or a newer
+        // write supersedes it: those settings are still unconfirmed.
         if (taskWrites.get(threadId) === pending) {
           pending.patch = {};
           void api("/api/bots").then(({ bots }) => {
             if (taskWrites.get(threadId) !== pending) return;
             const bot = bots.find((candidate: Bot) => candidate.id === botId);
-            if (bot) rawDispatch({ type: "botPatched", bot: withTaskWrites(bot) });
+            if (bot) {
+              rawDispatch({ type: "botPatched", bot: withTaskWrites(bot) });
+              taskWrites.delete(threadId);
+            }
           }).catch(() => {});
         }
       });

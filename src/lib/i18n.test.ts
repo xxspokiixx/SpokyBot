@@ -65,6 +65,16 @@ describe("t", () => {
     }
   });
 
+  it("ships translated model and trusted-access help for threads", () => {
+    for (const [code, pack] of Object.entries(locales)) {
+      if (code === "en") continue;
+      for (const key of ["model.threadBusy", "model.chooseThreadHint", "approvalMode.threadTrustedNotice"] as const) {
+        expect(pack[key], `${code}: ${key}`).toBeTruthy();
+        expect(pack[key], `${code}: ${key}`).not.toBe(en[key]);
+      }
+    }
+  });
+
   it("ships exactly one JSON catalog for every picker language", () => {
     const files = Object.keys(import.meta.glob("../locales/*.json", { eager: true }))
       .map((path) => path.split("/").at(-1))
