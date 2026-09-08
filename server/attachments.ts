@@ -291,6 +291,8 @@ const KNOWN_ATTACHMENT_EXTENSIONS = Array.from(
   new Set([...Object.values(IMAGE_MIMES), ...Object.values(FILE_MIMES)]),
 );
 
+/** Missing or unreadable candidates count as absent here; the atomic link
+ * still detects a collision if a file exists when an upload commits. */
 function statSizeIfFile(path: string): number | null {
   try {
     const stat = statSync(path);
@@ -300,6 +302,8 @@ function statSizeIfFile(path: string): number | null {
   }
 }
 
+/** Find an idempotent retry without listing the directory, rejecting an ID
+ * already committed under a different accepted content type. */
 function committedPathForUpload(uploadId: string, extension: string): string | null {
   ensureAttachmentsDir();
   const exactPath = join(ATTACHMENTS_DIR, `${uploadId}${extension}`);
@@ -434,6 +438,7 @@ export async function saveFile(
     let file: Awaited<ReturnType<typeof open>> | undefined;
     let bytes = 0;
     let closed = false;
+    let partialCleanupFailed = false;
 
     try {
       file = await open(partialPath, "wx", 0o600);
@@ -459,8 +464,8 @@ export async function saveFile(
       closed = true;
       try {
         await link(partialPath, path);
-        await unlink(partialPath);
         addCommittedBytes(bytes);
+        await unlink(partialPath);
       } catch (error) {
         if ((error as NodeJS.ErrnoException).code !== "EEXIST") throw error;
         if (statSync(path).size !== bytes || await digestFile(path) !== await digestFile(partialPath)) {
@@ -471,10 +476,13 @@ export async function saveFile(
       return { path, name, mime: normalized, bytes };
     } catch (error) {
       if (file && !closed) await file.close().catch(() => undefined);
-      await unlink(partialPath).catch(() => undefined);
+      await unlink(partialPath).catch(() => { partialCleanupFailed = true; });
       throw error;
     } finally {
       activePartials.delete(partialPath);
+      // A leftover partial was excluded from the cache while active. Rescan
+      // after releasing it so a retry cannot subtract bytes never counted.
+      if (partialCleanupFailed) committedAttachmentBytes = null;
       reservation.release();
     }
   });
@@ -508,6 +516,7 @@ export function saveImage(bytes: Buffer, mime: string, requestedUploadId?: strin
   const path = join(ATTACHMENTS_DIR, name);
   const partialPath = join(ATTACHMENTS_DIR, `.openmaus-upload-${id}-${randomUUID()}.partial`);
   activePartials.add(partialPath);
+  let partialCleanupFailed = false;
   try {
     writeFileSync(partialPath, bytes, { mode: 0o600, flag: "wx" });
     try {
@@ -526,11 +535,12 @@ export function saveImage(bytes: Buffer, mime: string, requestedUploadId?: strin
     try {
       unlinkSync(partialPath);
     } catch {
-      // The successful path already removed it, or the write never created it.
+      partialCleanupFailed = true;
     }
     throw error;
   } finally {
     activePartials.delete(partialPath);
+    if (partialCleanupFailed) committedAttachmentBytes = null;
     reservation.release();
   }
 }

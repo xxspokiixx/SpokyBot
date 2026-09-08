@@ -12935,12 +12935,16 @@ console.log(describeBrand(loadBrand()));
 // Reclaim upload partials a previous run crashed out of, and warm the
 // attachment quota cache off the same scan. This used to happen implicitly on
 // every reservation, which is exactly what made uploads quadratic in
-// directory size; start-up is the one place it costs nothing.
+// directory size; do the initial sweep before accepting requests.
 // ponytail: once per boot, not periodic. A partial orphaned while this
 // process is up survives until the next restart — add a timer only if that
 // shows up as real quota pressure.
-const reclaimedPartials = cleanupStaleAttachmentPartials();
-if (reclaimedPartials > 0) console.log(`reclaimed ${reclaimedPartials} abandoned upload partial(s)`);
+try {
+  const reclaimedPartials = cleanupStaleAttachmentPartials();
+  if (reclaimedPartials > 0) console.log(`reclaimed ${reclaimedPartials} abandoned upload partial(s)`);
+} catch (error) {
+  console.warn(`attachments: startup partial cleanup failed: ${error instanceof Error ? error.message : String(error)}`);
+}
 
 server.listen(PORT, "127.0.0.1", () => {
   console.log(`openmausbot server on http://127.0.0.1:${PORT}`);

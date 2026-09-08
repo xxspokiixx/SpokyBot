@@ -9,12 +9,29 @@ import {
   rmSync,
   statSync,
   truncateSync,
+  unlinkSync,
   utimesSync,
   writeFileSync,
 } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { unlink } from "node:fs/promises";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+
+vi.mock("node:fs/promises", async (importOriginal) => {
+  const fs = await importOriginal<typeof import("node:fs/promises")>();
+  return { ...fs, unlink: vi.fn(fs.unlink) };
+});
+vi.mock("node:fs", async (importOriginal) => {
+  const fs = await importOriginal<typeof import("node:fs")>();
+  return { ...fs, unlinkSync: vi.fn(fs.unlinkSync) };
+});
+const realUnlink = (await vi.importActual<typeof import("node:fs/promises")>("node:fs/promises")).unlink;
+const realUnlinkSync = (await vi.importActual<typeof import("node:fs")>("node:fs")).unlinkSync;
+afterEach(() => {
+  vi.mocked(unlink).mockReset().mockImplementation(realUnlink);
+  vi.mocked(unlinkSync).mockReset().mockImplementation(realUnlinkSync);
+});
 
 // The module reads DATA_DIR at import time, so the env var must be set
 // before the import is evaluated.
@@ -251,6 +268,47 @@ describe("aggregate attachment storage", () => {
     const second = saveImage(Buffer.from("yyy"), "image/png");
     expect(second.bytes).toBe(3);
     expect(readdirSync(ATTACHMENTS_DIR)).toEqual([second.path.split(/[\\/]/).pop()!]);
+  });
+
+  it.each([1, 2])("counts a committed upload after %i partial-cleanup failures and an idempotent retry", async (failures) => {
+    const existing = saveImage(Buffer.from("x"), "image/png");
+    truncateSync(existing.path, ATTACHMENTS_MAX_BYTES - 3);
+    __resetAttachmentAccountingForTests();
+    const cleanupError = Object.assign(new Error("partial file is locked"), { code: "EPERM" });
+    for (let attempt = 0; attempt < failures; attempt++) {
+      vi.mocked(unlink).mockRejectedValueOnce(cleanupError);
+    }
+    const chunks = async function* () { yield Buffer.from("xx"); };
+
+    await expect(saveFile(chunks(), "retry.txt", "text/plain", { uploadId: UPLOAD_A }))
+      .rejects.toThrow("partial file is locked");
+    expect(readFileSync(join(ATTACHMENTS_DIR, `${UPLOAD_A}.txt`), "utf8")).toBe("xx");
+    expect(readdirSync(ATTACHMENTS_DIR).filter((name) => name.endsWith(".partial"))).toHaveLength(failures - 1);
+
+    await expect(saveFile(chunks(), "retry.txt", "text/plain", { uploadId: UPLOAD_A }))
+      .resolves.toMatchObject({ bytes: 2 });
+    expect(readdirSync(ATTACHMENTS_DIR).some((name) => name.endsWith(".partial"))).toBe(false);
+    expect(() => saveImage(Buffer.from("y"), "image/png")).not.toThrow();
+    expect(() => saveImage(Buffer.from("z"), "image/png")).toThrow(/storage is full/);
+  });
+
+  it.each([1, 2])("counts an image after %i partial-cleanup failures and an idempotent retry", async (failures) => {
+    const existing = saveImage(Buffer.from("x"), "image/png");
+    truncateSync(existing.path, ATTACHMENTS_MAX_BYTES - 3);
+    __resetAttachmentAccountingForTests();
+    for (let attempt = 0; attempt < failures; attempt++) {
+      vi.mocked(unlinkSync).mockImplementationOnce(() => {
+        throw Object.assign(new Error("partial file is locked"), { code: "EPERM" });
+      });
+    }
+
+    expect(() => saveImage(Buffer.from("xx"), "image/png", UPLOAD_A)).toThrow("partial file is locked");
+    expect(readFileSync(join(ATTACHMENTS_DIR, `${UPLOAD_A}.png`), "utf8")).toBe("xx");
+    expect(readdirSync(ATTACHMENTS_DIR).filter((name) => name.endsWith(".partial"))).toHaveLength(failures - 1);
+    await expect(saveImageUpload(Buffer.from("xx"), "image/png", UPLOAD_A)).resolves.toMatchObject({ bytes: 2 });
+    expect(readdirSync(ATTACHMENTS_DIR).some((name) => name.endsWith(".partial"))).toBe(false);
+    expect(() => saveImage(Buffer.from("y"), "image/png")).not.toThrow();
+    expect(() => saveImage(Buffer.from("z"), "image/png")).toThrow(/storage is full/);
   });
 
   it("initializes correctly on a fresh process against a directory that already has files", () => {
