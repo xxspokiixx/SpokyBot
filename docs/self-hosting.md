@@ -348,6 +348,11 @@ is the reference implementation.
 
 ## Using it from your phone
 
+Signed in on a hosted server as an admin (with a pairing code or your
+email)? Settings → Remote access → **Pair a phone or another computer**
+creates a one-time code with a QR right in the browser, and lists every
+paired device with a sign-out button. Nobody needs the command line.
+
 The iOS app pairs with a server the same way a laptop does: scan the QR
 code that `openmausbot serve` (or `openmausbot pair`) prints, paste the
 whole `https://host/pair#code=…` link into the address field on the pairing
