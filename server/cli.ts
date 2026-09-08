@@ -7,7 +7,7 @@
 //   openmausbot setup [--data-dir ~/.openmausbot]
 //   openmausbot start [serve options]
 //   openmausbot serve [--port 8799] [--data-dir ~/.openmausbot] [--label "cab mini"]
-//                     [--public-url https://host] [--tailscale | --tunnel] [--no-pair]
+//                     [--public-url https://host] [--tailscale | --tunnel | --domain HOST] [--no-pair]
 //   openmausbot pair  [--label "My MacBook"] [--client] [--public-url https://host]
 //   openmausbot sessions [revoke <id>]
 //   openmausbot status
@@ -32,6 +32,7 @@ import qrcode from "qrcode-terminal";
 
 import { parseAllowList } from "./account-signin.ts";
 import { writeFileAtomic } from "./atomic.ts";
+import { ensureCaddy, normalizeDomainOption, startCaddy, type RunningCaddy } from "./caddy.ts";
 import { explainTailscaleFailure, tailscaleServe, tailscaleServeOff, tailscaleStatus, type TailscaleStatus } from "./tailscale.ts";
 import { defaultSetupIo, SetupCancelled, type SetupIo } from "./cli-prompts.ts";
 import { normalizePhoneOrigin, phonePairingInstructions, runPhoneSetup } from "./cli-phone-setup.ts";
@@ -62,6 +63,8 @@ export interface CliOptions {
   dataDir: string;
   label?: string;
   publicUrl?: string;
+  /** `serve --domain host`: HTTPS on your own domain through a managed Caddy. */
+  domain?: string;
   tailscale: boolean;
   tunnel: boolean;
   client: boolean;
@@ -117,6 +120,11 @@ export function parseArgs(argv: string[], env: NodeJS.ProcessEnv = process.env):
       else if (arg === "--label") options.label = value();
       else if (arg === "--public-url") options.publicUrl = value().replace(/\/+$/, "");
       else if (arg === "--tailscale") options.tailscale = true;
+      else if (arg === "--domain") {
+        const domain = normalizeDomainOption(value());
+        if (typeof domain !== "string") return domain;
+        options.domain = domain;
+      }
       else if (arg === "--tunnel") options.tunnel = true;
       else if (arg === "--client") options.client = true;
       else if (arg === "--no-pair") options.pair = false;
@@ -140,6 +148,7 @@ export function parseArgs(argv: string[], env: NodeJS.ProcessEnv = process.env):
   if (options.publicUrl && !/^https?:\/\//.test(options.publicUrl)) return { error: "--public-url must start with http:// or https://" };
   if (options.tailscale && options.tunnel) return { error: "choose one of --tailscale (your tailnet) and --tunnel (a public address)" };
   if (options.command === "access" && !options.accessAction) return { error: "access needs one of: list, add EMAIL [--chat-only], remove EMAIL" };
+  if (options.domain && (options.tailscale || options.tunnel || options.publicUrl)) return { error: "--domain already gives the server its address; drop --tailscale, --tunnel and --public-url" };
   if (options.local && (options.tailscale || options.tunnel || options.publicUrl)) return { error: "--local cannot be combined with a remote-access option" };
   if (options.command === "browser" && !options.browserAction) return { error: "browser needs an action: install or status" };
   return options;
@@ -151,7 +160,7 @@ export const USAGE = `openmausbot — your team of AI bots, ready in a few steps
   openmausbot setup [--data-dir DIR]
   openmausbot start [the same options as serve]
   openmausbot serve [--port 8799] [--data-dir DIR] [--label NAME]
-                    [--public-url https://host] [--tailscale | --tunnel] [--no-pair]
+                    [--public-url https://host] [--tailscale | --tunnel | --domain HOST] [--no-pair]
   openmausbot pair  [--label NAME] [--client] [--public-url https://host]
   openmausbot sessions [revoke ID]
   openmausbot status
@@ -185,6 +194,10 @@ browser install: the bots' browser engine (agent-browser, pinned) into the
 --tunnel     serve at a public https://….openmausbot.com address through a
              Cloudflare tunnel: no domain, no proxy, no open port. Run
              \`openmausbot login\` once on this machine first.
+--domain     serve at https://HOST on your own domain: a pinned Caddy is
+             downloaded once and run alongside the server, and gets the
+             certificate itself. Point the domain's DNS at this machine and
+             open ports 80 and 443.
 
 --no-open   do not open a browser window
 --no-pair   skip phone setup and do not print a pairing code
@@ -708,6 +721,16 @@ export async function runServe(options: CliOptions, log: (line: string) => void 
     if (publicUrl && publicUrl !== plan.access.endpoint) log(`note: --public-url is ignored with --tunnel; the address is ${plan.access.endpoint}`);
     publicUrl = plan.access.endpoint;
   }
+  let caddyBinary: string | null = null;
+  if (options.domain) {
+    try {
+      caddyBinary = await ensureCaddy({ dataDir: options.dataDir, log });
+    } catch (error) {
+      console.error(`--domain: ${message(error)}`);
+      return 1;
+    }
+    publicUrl = `https://${options.domain}`;
+  }
   const entry = serverEntry();
   if (!entry.staticDir) log("note: no built UI found next to the server; the API runs but browsers get no page (build with `pnpm exec vite build`)");
   const env: NodeJS.ProcessEnv = {
@@ -771,11 +794,13 @@ export async function runServe(options: CliOptions, log: (line: string) => void 
     child.once("exit", (code, signal) => { exited = code ?? (signal === "SIGTERM" || signal === "SIGINT" ? 0 : 1); done(exited); });
   });
   let tunnel: RunningTunnel | null = null;
+  let caddy: RunningCaddy | null = null;
   let stopping: Promise<void> | null = null;
   const stop = () => {
     stopping ??= (async () => {
-      // The gateway stops accepting before the server it forwards to goes away.
+      // The gateway and the edge stop accepting before the server they forward to goes away.
       if (tunnel) await tunnel.stop().catch(() => undefined);
+      if (caddy) await caddy.stop().catch(() => undefined);
       if (tailscaleServing && tailscale) await tailscaleServeOff(tailscale).catch(() => undefined);
       if (exited === null) {
         child.kill("SIGTERM");
@@ -809,6 +834,19 @@ export async function runServe(options: CliOptions, log: (line: string) => void 
       return 1;
     }
     if (stopping || exited !== null) return await childExit;
+    if (options.domain && caddyBinary) {
+      try {
+        caddy = await startCaddy({ binary: caddyBinary, dataDir: options.dataDir, domain: options.domain, appPort: options.port, webhookPort: Number(env.OMB_WEBHOOK_PORT), log });
+        log(`https: Caddy serves ${publicUrl} → http://127.0.0.1:${options.port}; it gets the certificate from Let's Encrypt once DNS for ${options.domain} points at this machine`);
+        void caddy.exited.then((code) => {
+          if (!stopping) log(`caddy: stopped (exit ${code ?? "signal"}); ${publicUrl} is no longer served. Stop and start the server again.`);
+        });
+      } catch (error) {
+        console.error(`--domain: ${message(error)}`);
+        await stop();
+        return 1;
+      }
+    }
     if (plan && child.pid) {
       tunnel = startTunnel({
         dataDir: options.dataDir,

@@ -44,6 +44,9 @@ describe("openmausbot command line", () => {
     expect(parseArgs(["access", "list"], {})).toMatchObject({ command: "access", accessAction: "list" });
     expect(parseArgs(["access"], {})).toEqual({ error: "access needs one of: list, add EMAIL [--chat-only], remove EMAIL" });
     expect(parseArgs(["access", "add"], {})).toEqual({ error: "add needs a value" });
+    expect(parseArgs(["serve", "--domain", "Maus.Example.com"], {})).toMatchObject({ command: "serve", domain: "maus.example.com" });
+    expect(parseArgs(["serve", "--domain", "localhost"], {})).toEqual({ error: expect.stringContaining("bare hostname") });
+    expect(parseArgs(["serve", "--domain", "maus.example.com", "--tunnel"], {})).toEqual({ error: expect.stringContaining("--domain already gives") });
   });
 
   it("prints a scannable block with the link, or says where to type the code", () => {
@@ -523,4 +526,43 @@ describe("openmausbot access", () => {
       await removeTempDir(home);
     }
   });
+});
+
+describe.skipIf(process.platform === "win32")("serve --domain", () => {
+  it("runs a managed Caddy for the domain and serves the pairing link there", async () => {
+    const home = mkdtempSync(join(tmpdir(), "omb-cli-domain-"));
+    const dataDir = join(home, "data");
+    mkdirSync(dataDir, { recursive: true });
+    const fake = join(home, "fake-caddy");
+    writeFileSync(fake, `#!/bin/sh\necho "$@" > "${join(home, "caddy-args.txt")}"\necho $$ > "${join(home, "caddy.pid")}"\nexec sleep 300\n`, { mode: 0o755 });
+    const port = 21000 + Math.floor(Math.random() * 9000);
+    const child = spawn(process.execPath, ["--experimental-strip-types", join(SERVER_DIR, "openmausbot.ts"), "serve", "--domain", "omb.example.test", "--port", String(port), "--data-dir", dataDir], {
+      cwd: join(SERVER_DIR, ".."),
+      env: { PATH: process.env.PATH ?? "", HOME: home, USERPROFILE: home, OMB_WEBHOOK_PORT: String(port + 1), OMB_BROWSER_CONNECTION: join(home, "browser-connection.json"), OMB_CADDY_PATH: fake },
+      stdio: ["ignore", "pipe", "pipe"],
+    });
+    let out = "";
+    child.stdout?.on("data", (chunk) => (out += String(chunk)));
+    child.stderr?.on("data", (chunk) => (out += String(chunk)));
+    try {
+      const deadline = Date.now() + 60_000;
+      while (!out.includes("open or scan:") && Date.now() < deadline && child.exitCode === null) await new Promise((r) => setTimeout(r, 200));
+      expect(out).toContain(`OpenMausBot is running on http://127.0.0.1:${port}, reachable at https://omb.example.test`);
+      expect(out).toContain("https: Caddy serves https://omb.example.test");
+      expect(out).toContain("open or scan:  https://omb.example.test/pair#code=");
+      const args = readFileSync(join(home, "caddy-args.txt"), "utf8").trim();
+      expect(args).toMatch(/^run --config .*Caddyfile --adapter caddyfile$/);
+      const caddyfile = readFileSync(join(dataDir, "caddy", "Caddyfile"), "utf8");
+      expect(caddyfile).toContain("omb.example.test {");
+      expect(caddyfile).toContain(`reverse_proxy 127.0.0.1:${port}`);
+      expect(caddyfile).toContain(`reverse_proxy 127.0.0.1:${port + 1}`);
+    } finally {
+      const caddyPid = Number(readFileSync(join(home, "caddy.pid"), "utf8").trim() || "0");
+      child.kill("SIGTERM");
+      await exited(child);
+      await new Promise((r) => setTimeout(r, 300));
+      if (caddyPid) expect(() => process.kill(caddyPid, 0)).toThrow();
+      await removeTempDir(home);
+    }
+  }, 120_000);
 });

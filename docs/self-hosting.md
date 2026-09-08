@@ -97,6 +97,18 @@ is present. Three ways to make the server reachable from elsewhere:
   fleet issued and skip `login`: the address and connector token are fetched
   at every start and nothing is written to disk. A rejected credential stops
   the start with a clear message rather than serving locally.
+- **Your own domain, still one command:**
+
+  ```sh
+  npx openmausbot serve --domain maus.example.com
+  ```
+
+  Point the domain's A record at this machine and open ports 80 and 443.
+  The server downloads a pinned Caddy once into its data dir, writes the
+  same Caddyfile the Docker stack uses, runs it as a child, and Caddy gets
+  and renews the certificate from Let's Encrypt. On Linux, binding ports 80
+  and 443 as a normal user needs one privilege grant; when Caddy reports the
+  refusal, `serve` prints the exact `setcap` command to run once.
 - **Behind your own proxy or domain:** `npx openmausbot serve --public-url
   https://maus.example.com`, with the proxy rules from "Putting a proxy in
   front".
