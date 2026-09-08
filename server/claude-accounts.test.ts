@@ -31,6 +31,7 @@ describe("named Claude accounts", () => {
     const normal = claudeAccountInfo("claude", { driver: "claudeAgent" }, "claude");
     expect(normal.configDir).toBe("");
     expect(normal.signInCommand).not.toContain("export CLAUDE_CONFIG_DIR=");
+    expect(() => claudeAccountInfo("broken", { driver: "claudeAgent", config: { configDir: 42 } }, "claude")).toThrow(/absolute/);
     const win = claudeSignInCommand("claude", "C:\\Users\\O'Neil\\Work $ account", "win32");
     expect(win).toContain("C:\\Users\\O''Neil\\Work $ account");
     expect(win).toContain("finally");

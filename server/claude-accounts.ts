@@ -26,7 +26,8 @@ function rawConfig(entry: InstanceConfig): Record<string, unknown> {
 export function accountDirectory(entry: InstanceConfig): string {
   const raw = rawConfig(entry).configDir;
   try {
-    return resolveClaudeConfigDir(typeof raw === "string" ? raw : undefined, { ...process.env, ...entry.environment });
+    if (raw !== undefined && typeof raw !== "string") throw new Error("Invalid saved directory");
+    return resolveClaudeConfigDir(raw, { ...process.env, ...entry.environment });
   } catch {
     throw Object.assign(new Error("Use an absolute Claude configuration directory or a path beginning with ~/."), { status: 400 });
   }
@@ -34,6 +35,7 @@ export function accountDirectory(entry: InstanceConfig): string {
 
 export function configuredAccountDirectory(entry: InstanceConfig): string {
   const explicit = rawConfig(entry).configDir;
+  if (explicit !== undefined && typeof explicit !== "string") return accountDirectory(entry);
   return (typeof explicit === "string" && explicit.trim()) || entry.environment?.CLAUDE_CONFIG_DIR || process.env.CLAUDE_CONFIG_DIR
     ? accountDirectory(entry) : "";
 }
