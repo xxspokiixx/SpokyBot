@@ -262,6 +262,20 @@ WantedBy=multi-user.target
 Engine CLIs read their logins from the service user's home — sign in as
 that user (`sudo -u maus claude` etc.) before starting the service.
 
+## Signing the engines in without a terminal
+
+On a hosted server, the engine CLIs sign in from Settings → Engines:
+
+- **Codex**: "Connect ChatGPT" shows a one-time code to enter on OpenAI's
+  device page.
+- **Claude Code**: "Sign in to Claude" opens Anthropic's own sign-in page in
+  your browser; after you sign in it shows a code, which you paste back into
+  Settings. The server hands that code to the unmodified `claude` CLI once and
+  never stores it; the login lands where Claude Code keeps it for the account
+  that runs your bots. This is the sign-in Anthropic permits for a hosted,
+  unmodified Claude Code with your own subscription; the bots then share that
+  subscription's usage limits.
+
 ## Using it from your computer
 
 Pair once, then use the server from any browser on any machine that can

@@ -1376,5 +1376,16 @@
   "remote.serverPairing.minutesAgo": "{minutes} 分钟前",
   "remote.serverPairing.hoursAgo": "{hours} 小时前",
   "remote.serverPairing.daysAgo": "{days} 天前",
-  "remote.serverPairing.error": "无法连接服务器：{error}"
+  "remote.serverPairing.error": "无法连接服务器：{error}",
+  "engineSetup.claude.description": "用你自己的 Claude 订阅在此服务器上登录 Claude Code。在浏览器中打开 Anthropic 的登录页面并登录，然后把页面显示的代码粘贴到这里。无需终端，也不用共享密码。",
+  "engineSetup.claude.start": "登录 Claude",
+  "engineSetup.claude.starting": "正在准备登录…",
+  "engineSetup.claude.open": "打开 Claude 登录页面",
+  "engineSetup.claude.codeLabel": "粘贴该页面显示的代码",
+  "engineSetup.claude.finish": "完成登录",
+  "engineSetup.claude.finishing": "正在与 Claude Code 核对…",
+  "engineSetup.claude.security": "只粘贴你在此处发起的登录所得到的代码。代码只会交给此服务器上的 Claude Code 一次，绝不保存；你的密码只留在 Anthropic。此服务器上的机器人共享你订阅的用量限制。",
+  "engineSetup.claude.connected": "Claude 已连接，正在刷新你的模型。",
+  "engineSetup.claude.connectedAccount": "此服务器已连接 Claude",
+  "engineSetup.claude.invalidChallenge": "Claude Code 没有返回有效的 Anthropic 登录链接。请取消后重试。"
 }

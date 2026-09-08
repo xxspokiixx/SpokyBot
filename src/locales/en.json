@@ -1482,5 +1482,16 @@
   "remote.serverPairing.minutesAgo": "{minutes} min ago",
   "remote.serverPairing.hoursAgo": "{hours} h ago",
   "remote.serverPairing.daysAgo": "{days} d ago",
-  "remote.serverPairing.error": "Could not talk to the server: {error}"
+  "remote.serverPairing.error": "Could not talk to the server: {error}",
+  "engineSetup.claude.description": "Sign in to Claude Code on this server with your own Claude subscription. Open Anthropic's sign-in page in your browser, sign in, then paste the code it shows you here. No terminal and no password sharing.",
+  "engineSetup.claude.start": "Sign in to Claude",
+  "engineSetup.claude.starting": "Preparing sign-in…",
+  "engineSetup.claude.open": "Open the Claude sign-in page",
+  "engineSetup.claude.codeLabel": "Paste the code from that page",
+  "engineSetup.claude.finish": "Finish sign-in",
+  "engineSetup.claude.finishing": "Checking with Claude Code…",
+  "engineSetup.claude.security": "Only paste a code from a sign-in you started here. It is handed to Claude Code on this server once and never stored; your password stays with Anthropic. Bots on this server share your subscription's usage limits.",
+  "engineSetup.claude.connected": "Claude connected. Your models are being refreshed.",
+  "engineSetup.claude.connectedAccount": "Claude connected on this server",
+  "engineSetup.claude.invalidChallenge": "Claude Code did not return a valid Anthropic sign-in link. Cancel and try again."
 }

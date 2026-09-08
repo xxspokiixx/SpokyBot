@@ -1376,5 +1376,16 @@
   "remote.serverPairing.minutesAgo": "{minutes} 分前",
   "remote.serverPairing.hoursAgo": "{hours} 時間前",
   "remote.serverPairing.daysAgo": "{days} 日前",
-  "remote.serverPairing.error": "サーバーと通信できませんでした: {error}"
+  "remote.serverPairing.error": "サーバーと通信できませんでした: {error}",
+  "engineSetup.claude.description": "自分の Claude サブスクリプションで、このサーバーの Claude Code にサインインします。ブラウザで Anthropic のサインインページを開いてサインインし、表示されたコードをここに貼り付けてください。ターミナルもパスワードの共有も不要です。",
+  "engineSetup.claude.start": "Claude にサインイン",
+  "engineSetup.claude.starting": "サインインを準備中…",
+  "engineSetup.claude.open": "Claude のサインインページを開く",
+  "engineSetup.claude.codeLabel": "そのページのコードを貼り付け",
+  "engineSetup.claude.finish": "サインインを完了",
+  "engineSetup.claude.finishing": "Claude Code で確認中…",
+  "engineSetup.claude.security": "ここで開始したサインインで得たコードだけを貼り付けてください。コードはこのサーバーの Claude Code に一度だけ渡され、保存されません。パスワードは Anthropic にのみ残ります。このサーバーのボットはあなたのサブスクリプションの利用上限を共有します。",
+  "engineSetup.claude.connected": "Claude に接続しました。モデルを更新しています。",
+  "engineSetup.claude.connectedAccount": "このサーバーで Claude に接続済み",
+  "engineSetup.claude.invalidChallenge": "Claude Code が有効な Anthropic のサインインリンクを返しませんでした。キャンセルしてやり直してください。"
 }

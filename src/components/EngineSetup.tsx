@@ -7,6 +7,7 @@ import { api, type EngineInstall, type InstanceInfo, useStore } from "@/state/st
 import { cn } from "@/lib/cn";
 import { t } from "@/lib/i18n";
 import { CodexDeviceSignIn } from "./CodexDeviceSignIn";
+import { ClaudeSignIn } from "./ClaudeSignIn";
 
 type Platform = "darwin" | "win32" | "linux";
 
@@ -316,6 +317,7 @@ export function EngineSetup({
   const signInCommand = install?.signInCommand;
   const signInOnly = intent === "cloud" && needsSignIn(instance);
   const deviceSignIn = signInOnly && instance.authentication?.method === "device-code";
+  const pasteSignIn = signInOnly && instance.authentication?.method === "paste-code";
   const command = signInOnly ? signInCommand : installCommand;
   const title = signInOnly
     ? t("engineSetup.signInTitle", { name: instance.displayName })
@@ -323,6 +325,8 @@ export function EngineSetup({
   const description = signInOnly
     ? deviceSignIn
       ? t("engineSetup.device.description")
+      : pasteSignIn
+      ? t("engineSetup.claude.description")
       : install?.managed
       ? t("engineSetup.managedSignIn")
       : t("engineSetup.terminalSignIn")
@@ -367,6 +371,8 @@ export function EngineSetup({
 
       {deviceSignIn ? (
         <CodexDeviceSignIn key={instance.instanceId} instanceId={instance.instanceId} />
+      ) : pasteSignIn ? (
+        <ClaudeSignIn key={instance.instanceId} instanceId={instance.instanceId} />
       ) : install.managed ? (
         <ManagedEngineSetup instance={instance} signInOnly={signInOnly} />
       ) : command ? (

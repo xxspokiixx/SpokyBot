@@ -1379,7 +1379,18 @@
       "remote.serverPairing.minutesAgo": "5a0d9752dcc98ad174b74fb774137062709188753404e9337d7271c0b0120765",
       "remote.serverPairing.hoursAgo": "15c7928eb8c8a23a031fa4285a389f713d67fa26262565c0574801cb3f3dc0c1",
       "remote.serverPairing.daysAgo": "de3a2d58e357b552aa9c313bfbda543e0e98eea4a23fe65dcc257ca6ea06514c",
-      "remote.serverPairing.error": "45037f1c0212f956e66bb6e3bc627c6be2880a1c09afb973ea238225a7ab38ac"
+      "remote.serverPairing.error": "45037f1c0212f956e66bb6e3bc627c6be2880a1c09afb973ea238225a7ab38ac",
+      "engineSetup.claude.description": "b36c19aa9140ffea9171b6b7525513c4e9653d00726c242d673e998c1fd7dea5",
+      "engineSetup.claude.start": "168e2c1b9cf37745b05a14f30c971f8f1a047e83f300b4205db74c9fdca7c29e",
+      "engineSetup.claude.starting": "cdca9524ec00f4e3f6a911f36d30c6a460a5bd6ec96e5803ee25fd08ba805c7e",
+      "engineSetup.claude.open": "2026f9f179ebe3aa4afdb35e276e93503c7a80ef8f44becf7ab02df0c2b2f49c",
+      "engineSetup.claude.codeLabel": "a96080b9680863fc258b3eff690a46bebfb012f381b9c445111a0f6d395ec920",
+      "engineSetup.claude.finish": "ab9b21071bf9a3adddadd2b3b8580cc37916d3854913fa87fb85a86d06e10c5b",
+      "engineSetup.claude.finishing": "e3384d33d9a29df0adfef9bc707cec43fad3267b48dd853af43d4a60039d1597",
+      "engineSetup.claude.security": "34ee9beac3350e3ba101e25b69d2c80996a2f263e1291a48decc19a302a2b207",
+      "engineSetup.claude.connected": "426ba959753edfbe38d7a030bd5d094ecbb418206304e58afcc91307a00b44ab",
+      "engineSetup.claude.connectedAccount": "7c74fb2ecc04b81046affe78b7d74dde6fe3e5dad50ba4ba02492620d8451e13",
+      "engineSetup.claude.invalidChallenge": "a50de7d5c3c08440695083b57382773171cfdddaf7e6f5b299e873bc2164eefe"
     },
     "es": {
       "noEngines.title": "af88855a5f80377de709995229ba3907df9e8fb3b940fbf7c0d9cbe6eea54afe",
@@ -2759,7 +2770,18 @@
       "remote.serverPairing.minutesAgo": "5a0d9752dcc98ad174b74fb774137062709188753404e9337d7271c0b0120765",
       "remote.serverPairing.hoursAgo": "15c7928eb8c8a23a031fa4285a389f713d67fa26262565c0574801cb3f3dc0c1",
       "remote.serverPairing.daysAgo": "de3a2d58e357b552aa9c313bfbda543e0e98eea4a23fe65dcc257ca6ea06514c",
-      "remote.serverPairing.error": "45037f1c0212f956e66bb6e3bc627c6be2880a1c09afb973ea238225a7ab38ac"
+      "remote.serverPairing.error": "45037f1c0212f956e66bb6e3bc627c6be2880a1c09afb973ea238225a7ab38ac",
+      "engineSetup.claude.description": "b36c19aa9140ffea9171b6b7525513c4e9653d00726c242d673e998c1fd7dea5",
+      "engineSetup.claude.start": "168e2c1b9cf37745b05a14f30c971f8f1a047e83f300b4205db74c9fdca7c29e",
+      "engineSetup.claude.starting": "cdca9524ec00f4e3f6a911f36d30c6a460a5bd6ec96e5803ee25fd08ba805c7e",
+      "engineSetup.claude.open": "2026f9f179ebe3aa4afdb35e276e93503c7a80ef8f44becf7ab02df0c2b2f49c",
+      "engineSetup.claude.codeLabel": "a96080b9680863fc258b3eff690a46bebfb012f381b9c445111a0f6d395ec920",
+      "engineSetup.claude.finish": "ab9b21071bf9a3adddadd2b3b8580cc37916d3854913fa87fb85a86d06e10c5b",
+      "engineSetup.claude.finishing": "e3384d33d9a29df0adfef9bc707cec43fad3267b48dd853af43d4a60039d1597",
+      "engineSetup.claude.security": "34ee9beac3350e3ba101e25b69d2c80996a2f263e1291a48decc19a302a2b207",
+      "engineSetup.claude.connected": "426ba959753edfbe38d7a030bd5d094ecbb418206304e58afcc91307a00b44ab",
+      "engineSetup.claude.connectedAccount": "7c74fb2ecc04b81046affe78b7d74dde6fe3e5dad50ba4ba02492620d8451e13",
+      "engineSetup.claude.invalidChallenge": "a50de7d5c3c08440695083b57382773171cfdddaf7e6f5b299e873bc2164eefe"
     },
     "fr": {
       "noEngines.title": "af88855a5f80377de709995229ba3907df9e8fb3b940fbf7c0d9cbe6eea54afe",
@@ -4139,7 +4161,18 @@
       "remote.serverPairing.minutesAgo": "5a0d9752dcc98ad174b74fb774137062709188753404e9337d7271c0b0120765",
       "remote.serverPairing.hoursAgo": "15c7928eb8c8a23a031fa4285a389f713d67fa26262565c0574801cb3f3dc0c1",
       "remote.serverPairing.daysAgo": "de3a2d58e357b552aa9c313bfbda543e0e98eea4a23fe65dcc257ca6ea06514c",
-      "remote.serverPairing.error": "45037f1c0212f956e66bb6e3bc627c6be2880a1c09afb973ea238225a7ab38ac"
+      "remote.serverPairing.error": "45037f1c0212f956e66bb6e3bc627c6be2880a1c09afb973ea238225a7ab38ac",
+      "engineSetup.claude.description": "b36c19aa9140ffea9171b6b7525513c4e9653d00726c242d673e998c1fd7dea5",
+      "engineSetup.claude.start": "168e2c1b9cf37745b05a14f30c971f8f1a047e83f300b4205db74c9fdca7c29e",
+      "engineSetup.claude.starting": "cdca9524ec00f4e3f6a911f36d30c6a460a5bd6ec96e5803ee25fd08ba805c7e",
+      "engineSetup.claude.open": "2026f9f179ebe3aa4afdb35e276e93503c7a80ef8f44becf7ab02df0c2b2f49c",
+      "engineSetup.claude.codeLabel": "a96080b9680863fc258b3eff690a46bebfb012f381b9c445111a0f6d395ec920",
+      "engineSetup.claude.finish": "ab9b21071bf9a3adddadd2b3b8580cc37916d3854913fa87fb85a86d06e10c5b",
+      "engineSetup.claude.finishing": "e3384d33d9a29df0adfef9bc707cec43fad3267b48dd853af43d4a60039d1597",
+      "engineSetup.claude.security": "34ee9beac3350e3ba101e25b69d2c80996a2f263e1291a48decc19a302a2b207",
+      "engineSetup.claude.connected": "426ba959753edfbe38d7a030bd5d094ecbb418206304e58afcc91307a00b44ab",
+      "engineSetup.claude.connectedAccount": "7c74fb2ecc04b81046affe78b7d74dde6fe3e5dad50ba4ba02492620d8451e13",
+      "engineSetup.claude.invalidChallenge": "a50de7d5c3c08440695083b57382773171cfdddaf7e6f5b299e873bc2164eefe"
     },
     "hi": {
       "noEngines.title": "af88855a5f80377de709995229ba3907df9e8fb3b940fbf7c0d9cbe6eea54afe",
@@ -5519,7 +5552,18 @@
       "remote.serverPairing.minutesAgo": "5a0d9752dcc98ad174b74fb774137062709188753404e9337d7271c0b0120765",
       "remote.serverPairing.hoursAgo": "15c7928eb8c8a23a031fa4285a389f713d67fa26262565c0574801cb3f3dc0c1",
       "remote.serverPairing.daysAgo": "de3a2d58e357b552aa9c313bfbda543e0e98eea4a23fe65dcc257ca6ea06514c",
-      "remote.serverPairing.error": "45037f1c0212f956e66bb6e3bc627c6be2880a1c09afb973ea238225a7ab38ac"
+      "remote.serverPairing.error": "45037f1c0212f956e66bb6e3bc627c6be2880a1c09afb973ea238225a7ab38ac",
+      "engineSetup.claude.description": "b36c19aa9140ffea9171b6b7525513c4e9653d00726c242d673e998c1fd7dea5",
+      "engineSetup.claude.start": "168e2c1b9cf37745b05a14f30c971f8f1a047e83f300b4205db74c9fdca7c29e",
+      "engineSetup.claude.starting": "cdca9524ec00f4e3f6a911f36d30c6a460a5bd6ec96e5803ee25fd08ba805c7e",
+      "engineSetup.claude.open": "2026f9f179ebe3aa4afdb35e276e93503c7a80ef8f44becf7ab02df0c2b2f49c",
+      "engineSetup.claude.codeLabel": "a96080b9680863fc258b3eff690a46bebfb012f381b9c445111a0f6d395ec920",
+      "engineSetup.claude.finish": "ab9b21071bf9a3adddadd2b3b8580cc37916d3854913fa87fb85a86d06e10c5b",
+      "engineSetup.claude.finishing": "e3384d33d9a29df0adfef9bc707cec43fad3267b48dd853af43d4a60039d1597",
+      "engineSetup.claude.security": "34ee9beac3350e3ba101e25b69d2c80996a2f263e1291a48decc19a302a2b207",
+      "engineSetup.claude.connected": "426ba959753edfbe38d7a030bd5d094ecbb418206304e58afcc91307a00b44ab",
+      "engineSetup.claude.connectedAccount": "7c74fb2ecc04b81046affe78b7d74dde6fe3e5dad50ba4ba02492620d8451e13",
+      "engineSetup.claude.invalidChallenge": "a50de7d5c3c08440695083b57382773171cfdddaf7e6f5b299e873bc2164eefe"
     },
     "ja": {
       "noEngines.title": "af88855a5f80377de709995229ba3907df9e8fb3b940fbf7c0d9cbe6eea54afe",
@@ -6899,7 +6943,18 @@
       "remote.serverPairing.minutesAgo": "5a0d9752dcc98ad174b74fb774137062709188753404e9337d7271c0b0120765",
       "remote.serverPairing.hoursAgo": "15c7928eb8c8a23a031fa4285a389f713d67fa26262565c0574801cb3f3dc0c1",
       "remote.serverPairing.daysAgo": "de3a2d58e357b552aa9c313bfbda543e0e98eea4a23fe65dcc257ca6ea06514c",
-      "remote.serverPairing.error": "45037f1c0212f956e66bb6e3bc627c6be2880a1c09afb973ea238225a7ab38ac"
+      "remote.serverPairing.error": "45037f1c0212f956e66bb6e3bc627c6be2880a1c09afb973ea238225a7ab38ac",
+      "engineSetup.claude.description": "b36c19aa9140ffea9171b6b7525513c4e9653d00726c242d673e998c1fd7dea5",
+      "engineSetup.claude.start": "168e2c1b9cf37745b05a14f30c971f8f1a047e83f300b4205db74c9fdca7c29e",
+      "engineSetup.claude.starting": "cdca9524ec00f4e3f6a911f36d30c6a460a5bd6ec96e5803ee25fd08ba805c7e",
+      "engineSetup.claude.open": "2026f9f179ebe3aa4afdb35e276e93503c7a80ef8f44becf7ab02df0c2b2f49c",
+      "engineSetup.claude.codeLabel": "a96080b9680863fc258b3eff690a46bebfb012f381b9c445111a0f6d395ec920",
+      "engineSetup.claude.finish": "ab9b21071bf9a3adddadd2b3b8580cc37916d3854913fa87fb85a86d06e10c5b",
+      "engineSetup.claude.finishing": "e3384d33d9a29df0adfef9bc707cec43fad3267b48dd853af43d4a60039d1597",
+      "engineSetup.claude.security": "34ee9beac3350e3ba101e25b69d2c80996a2f263e1291a48decc19a302a2b207",
+      "engineSetup.claude.connected": "426ba959753edfbe38d7a030bd5d094ecbb418206304e58afcc91307a00b44ab",
+      "engineSetup.claude.connectedAccount": "7c74fb2ecc04b81046affe78b7d74dde6fe3e5dad50ba4ba02492620d8451e13",
+      "engineSetup.claude.invalidChallenge": "a50de7d5c3c08440695083b57382773171cfdddaf7e6f5b299e873bc2164eefe"
     },
     "pt-br": {
       "noEngines.title": "af88855a5f80377de709995229ba3907df9e8fb3b940fbf7c0d9cbe6eea54afe",
@@ -8279,7 +8334,18 @@
       "remote.serverPairing.minutesAgo": "5a0d9752dcc98ad174b74fb774137062709188753404e9337d7271c0b0120765",
       "remote.serverPairing.hoursAgo": "15c7928eb8c8a23a031fa4285a389f713d67fa26262565c0574801cb3f3dc0c1",
       "remote.serverPairing.daysAgo": "de3a2d58e357b552aa9c313bfbda543e0e98eea4a23fe65dcc257ca6ea06514c",
-      "remote.serverPairing.error": "45037f1c0212f956e66bb6e3bc627c6be2880a1c09afb973ea238225a7ab38ac"
+      "remote.serverPairing.error": "45037f1c0212f956e66bb6e3bc627c6be2880a1c09afb973ea238225a7ab38ac",
+      "engineSetup.claude.description": "b36c19aa9140ffea9171b6b7525513c4e9653d00726c242d673e998c1fd7dea5",
+      "engineSetup.claude.start": "168e2c1b9cf37745b05a14f30c971f8f1a047e83f300b4205db74c9fdca7c29e",
+      "engineSetup.claude.starting": "cdca9524ec00f4e3f6a911f36d30c6a460a5bd6ec96e5803ee25fd08ba805c7e",
+      "engineSetup.claude.open": "2026f9f179ebe3aa4afdb35e276e93503c7a80ef8f44becf7ab02df0c2b2f49c",
+      "engineSetup.claude.codeLabel": "a96080b9680863fc258b3eff690a46bebfb012f381b9c445111a0f6d395ec920",
+      "engineSetup.claude.finish": "ab9b21071bf9a3adddadd2b3b8580cc37916d3854913fa87fb85a86d06e10c5b",
+      "engineSetup.claude.finishing": "e3384d33d9a29df0adfef9bc707cec43fad3267b48dd853af43d4a60039d1597",
+      "engineSetup.claude.security": "34ee9beac3350e3ba101e25b69d2c80996a2f263e1291a48decc19a302a2b207",
+      "engineSetup.claude.connected": "426ba959753edfbe38d7a030bd5d094ecbb418206304e58afcc91307a00b44ab",
+      "engineSetup.claude.connectedAccount": "7c74fb2ecc04b81046affe78b7d74dde6fe3e5dad50ba4ba02492620d8451e13",
+      "engineSetup.claude.invalidChallenge": "a50de7d5c3c08440695083b57382773171cfdddaf7e6f5b299e873bc2164eefe"
     },
     "zh": {
       "noEngines.title": "af88855a5f80377de709995229ba3907df9e8fb3b940fbf7c0d9cbe6eea54afe",
@@ -9659,7 +9725,18 @@
       "remote.serverPairing.minutesAgo": "5a0d9752dcc98ad174b74fb774137062709188753404e9337d7271c0b0120765",
       "remote.serverPairing.hoursAgo": "15c7928eb8c8a23a031fa4285a389f713d67fa26262565c0574801cb3f3dc0c1",
       "remote.serverPairing.daysAgo": "de3a2d58e357b552aa9c313bfbda543e0e98eea4a23fe65dcc257ca6ea06514c",
-      "remote.serverPairing.error": "45037f1c0212f956e66bb6e3bc627c6be2880a1c09afb973ea238225a7ab38ac"
+      "remote.serverPairing.error": "45037f1c0212f956e66bb6e3bc627c6be2880a1c09afb973ea238225a7ab38ac",
+      "engineSetup.claude.description": "b36c19aa9140ffea9171b6b7525513c4e9653d00726c242d673e998c1fd7dea5",
+      "engineSetup.claude.start": "168e2c1b9cf37745b05a14f30c971f8f1a047e83f300b4205db74c9fdca7c29e",
+      "engineSetup.claude.starting": "cdca9524ec00f4e3f6a911f36d30c6a460a5bd6ec96e5803ee25fd08ba805c7e",
+      "engineSetup.claude.open": "2026f9f179ebe3aa4afdb35e276e93503c7a80ef8f44becf7ab02df0c2b2f49c",
+      "engineSetup.claude.codeLabel": "a96080b9680863fc258b3eff690a46bebfb012f381b9c445111a0f6d395ec920",
+      "engineSetup.claude.finish": "ab9b21071bf9a3adddadd2b3b8580cc37916d3854913fa87fb85a86d06e10c5b",
+      "engineSetup.claude.finishing": "e3384d33d9a29df0adfef9bc707cec43fad3267b48dd853af43d4a60039d1597",
+      "engineSetup.claude.security": "34ee9beac3350e3ba101e25b69d2c80996a2f263e1291a48decc19a302a2b207",
+      "engineSetup.claude.connected": "426ba959753edfbe38d7a030bd5d094ecbb418206304e58afcc91307a00b44ab",
+      "engineSetup.claude.connectedAccount": "7c74fb2ecc04b81046affe78b7d74dde6fe3e5dad50ba4ba02492620d8451e13",
+      "engineSetup.claude.invalidChallenge": "a50de7d5c3c08440695083b57382773171cfdddaf7e6f5b299e873bc2164eefe"
     }
   }
 }

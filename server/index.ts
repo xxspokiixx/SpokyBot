@@ -12248,8 +12248,9 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
         if (action === "auth/complete") {
           const body = await readBody(req);
           const flowId = typeof body?.flowId === "string" ? body.flowId : "";
-          const callbackUrl = typeof body?.callbackUrl === "string" ? body.callbackUrl : "";
-          if (!flowId || !callbackUrl) return json(res, 400, { error: "flowId and callbackUrl are required" });
+          // `code` for a pasted sign-in code (Claude), `callbackUrl` for a browser callback
+          const callbackUrl = typeof body?.callbackUrl === "string" ? body.callbackUrl : typeof body?.code === "string" ? body.code : "";
+          if (!flowId || !callbackUrl) return json(res, 400, { error: "flowId and a code or callbackUrl are required" });
           await providerAuthSessions.complete(instanceId, owner, flowId, callbackUrl);
           return json(res, 200, { ok: true });
         }
