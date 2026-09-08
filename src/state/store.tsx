@@ -434,6 +434,7 @@ export interface InstanceInfo {
     state: "available" | "unavailable";
     reason?: string;
     authenticated?: boolean;
+    account?: { email?: string; organization?: string };
     version?: string | null;
     /** A newer provider version unlocks capabilities, but this installed
      * version and its current models remain usable. */
@@ -471,6 +472,8 @@ export interface InstanceInfo {
   cliDefault?: string;
   /** Absolute paths of every default binary found on PATH, PATH order. */
   cliCandidates?: string[];
+  /** Server-owned Claude profile; a saved directory does not prove sign-in. */
+  claudeAccount?: { configDir: string; signInCommand: string; signInShell: "powershell" | "sh"; isDefault: boolean };
 }
 
 export type AppSettingsSection =
