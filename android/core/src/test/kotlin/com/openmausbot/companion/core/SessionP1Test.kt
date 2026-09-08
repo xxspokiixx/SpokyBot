@@ -34,6 +34,56 @@ class SessionP1Test {
     }
 
     @Test
+    fun capturedTaskPinsPlainMessagesStopReadGrantsEditsAndQueueCancellation() = runTest {
+        val captured = bot("b1", "task-a", "task-a", "task-b")
+        val elsewhere = captured.copy(threadId = "task-b")
+        val session = session { Fleet(listOf(elsewhere), emptyList()) }
+        session.openNotification(target("b1", "task-b"))
+        val chat = Chat.BotChat(captured)
+        val message = Message("message-a", Message.Role.USER, Message.Kind.TEXT, 1.0, text = "original")
+        repeat(6) { server.enqueue(json("{}")) }
+        server.enqueue(json("""{"activeLeafId":"message-a"}"""))
+        server.enqueue(json("{}"))
+
+        session.send("plain text", chat)
+        session.send("/quick command", chat)
+        session.interrupt(captured)
+        session.markRead(chat)
+        session.alwaysAllow(captured, permissionCard(listOf("Always allow"), "Read"))
+        session.edit(message, captured, "edited")
+        session.switchVersion(message, captured)
+        session.cancelQueued(QueuedSend("queue-a", "queued"), chat)
+
+        val requests = List(8) { server.takeRequest() }
+        assertEquals(listOf("messages", "messages", "interrupt", "read", "always-allow",
+            "messages/message-a/edit", "active-branch", "queue/queue-a"),
+            requests.map { it.path!!.removePrefix("/api/bots/b1/") })
+        assertEquals(List(8) { "task-a" }, requests.map { body(it)["threadId"] })
+        assertEquals("task-b", session.state.value.bot("b1")?.threadId)
+        assertNull(session.actionError)
+    }
+
+    @Test
+    fun changingAModelReturnsTheCapturedTaskModelNotTheSiblingOrProfileDefault() = runTest {
+        val chosen = ModelSelection("instance", "new-a")
+        val captured = bot("b1", "task-a", "task-a", "task-b")
+        val canonical = captured.copy(threadId = "task-b", tasks = listOf(
+            BotTask("task-a", "A", 1.0, modelSelection = chosen, busy = false),
+            BotTask("task-b", "B", 2.0, modelSelection = ModelSelection("instance", "b"), busy = true),
+        ))
+        val session = session { Fleet(listOf(canonical), emptyList()) }
+        server.enqueue(json("""{"bot":${CompanionJson.encodeToString(canonical)}}"""))
+
+        val updated = session.updateModel(chosen, captured)
+
+        assertEquals("task-a", updated?.threadId)
+        assertEquals(chosen, updated?.modelSelection)
+        assertEquals("model", session.state.value.bot("b1")?.modelSelection?.model)
+        assertEquals("task-b", session.state.value.bot("b1")?.threadId)
+        assertEquals("/api/bots/b1/tasks/task-a", server.takeRequest().path)
+    }
+
+    @Test
     fun permissionAnswersUseTheSwiftBehaviorForOfferedProviderChoices() = runTest {
         val session = session()
         val chat = Chat.BotChat(bot("b1", "task-1", "task-1"))
@@ -96,7 +146,7 @@ class SessionP1Test {
         val grant = server.takeRequest()
         val answer = server.takeRequest()
         assertEquals("/api/bots/b1/always-allow", grant.path)
-        assertEquals(mapOf("allowKey" to "Bash:git push"), body(grant))
+        assertEquals(mapOf("allowKey" to "Bash:git push", "threadId" to "task-1"), body(grant))
         assertEquals("/api/threads/task-1/respond", answer.path)
         assertEquals(
             mapOf("requestId" to "request-1", "behavior" to "allow"),
@@ -144,7 +194,7 @@ class SessionP1Test {
     }
 
     @Test
-    fun taskActionsApplyDesktopBotsAndTheStableTargetFollowsEveryTransition() = runTest {
+    fun taskActionsReturnTheExplicitSelectionWithoutRetargetingAnOpenChat() = runTest {
         val initial = bot("b1", "task-1", "task-1", "old-inactive")
         val created = bot("b1", "task-2", "task-1", "old-inactive", "task-2")
         val switched = bot("b1", "task-1", "task-1", "old-inactive", "task-2")
@@ -158,17 +208,17 @@ class SessionP1Test {
             server.enqueue(json("""{"bot":${CompanionJson.encodeToString(returned)}}"""))
         }
 
-        session.createTask(initial, null)
-        assertEquals("task-2", assertIs<Chat.BotChat>(session.state.value.chat(stableTarget)).threadId)
+        assertEquals("task-2", session.createTask(initial, null)?.threadId)
+        assertEquals("task-1", assertIs<Chat.BotChat>(session.state.value.chat(stableTarget)).threadId)
 
-        session.switchTask(BotTask("task-1", "Task 1", 1.0), created)
+        assertEquals("task-1", session.switchTask(BotTask("task-1", "Task 1", 1.0), created)?.threadId)
         assertEquals("task-1", assertIs<Chat.BotChat>(session.state.value.chat(stableTarget)).threadId)
 
         session.deleteTask(BotTask("old-inactive", "Old", 0.0), switched)
         assertEquals("task-1", assertIs<Chat.BotChat>(session.state.value.chat(stableTarget)).threadId)
 
-        session.deleteTask(BotTask("task-1", "Task 1", 1.0), inactiveDeleted)
-        assertEquals("task-2", assertIs<Chat.BotChat>(session.state.value.chat(stableTarget)).threadId)
+        assertEquals("task-2", session.deleteTask(BotTask("task-1", "Task 1", 1.0), inactiveDeleted)?.threadId)
+        assertNull(session.state.value.chat(stableTarget))
         assertEquals(
             listOf(
                 "POST /api/bots/b1/tasks",

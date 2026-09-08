@@ -1,7 +1,7 @@
 import { track } from "@/lib/analytics";
 import { useCallback, useEffect, useMemo, useRef, useState, type SetStateAction } from "react";
 import { ArrowUp, BookOpen, Clock, Mic, Paperclip, Square, Target, Users, X } from "lucide-react";
-import { useStore, visibleMessages, type Bot, type Group, type Message } from "@/state/store";
+import { useStore, visibleMessages, currentTaskBot, type Bot, type Group, type Message } from "@/state/store";
 import { cn } from "@/lib/cn";
 import { activeLocale, t } from "@/lib/i18n";
 import {
@@ -25,7 +25,7 @@ import { BotAvatar } from "./Avatar";
 import { ComposerAttachments, pathForFile } from "./ComposerAttachments";
 import { LocalComputerAutoWarning } from "./LocalComputerAutoWarning";
 import { ApprovalModeSelector } from "./ApprovalModeSelector";
-import { FullAccessWarning } from "./FullAccessWarning";
+import { ModelPicker } from "./ModelPicker";
 import { approvalModeFor, type ApprovalMode } from "../../shared/approval-mode";
 import {
   appendPastedText,
@@ -79,7 +79,7 @@ interface ComposerDraftSnapshot extends ComposerSendSnapshot {
 
 /** Renders the editable message composer and its pending attachments. */
 export function Composer({
-  bot,
+  bot: profile,
   group,
   members,
   onEditLast,
@@ -100,6 +100,7 @@ export function Composer({
   /** New rooms keep the composer inert until their setup is saved or skipped. */
   locked?: boolean;
 }) {
+  const bot = profile ? currentTaskBot(profile) : undefined;
   const { state, dispatch } = useStore();
   const { capabilities } = useDesktopCapabilities();
   const remoteClient = window.ogb?.remoteClient?.active === true;
@@ -345,8 +346,8 @@ export function Composer({
   );
   const [steering, setSteering] = useState(false);
   const interruptTurn = () => {
-    if (group) dispatch({ type: "interruptGroup", groupId: group.id });
-    else if (bot) dispatch({ type: "interrupt", botId: bot.id });
+    if (group) dispatch({ type: "interruptGroup", groupId: group.id, threadId });
+    else if (bot) dispatch({ type: "interrupt", botId: bot.id, threadId });
   };
   const steerQueued = () => {
     setSteering(true);
@@ -373,8 +374,9 @@ export function Composer({
   }, [busy, pendingCount, steering]);
   const fileInput = useRef<HTMLInputElement>(null);
   const [approvalWarning, setApprovalWarning] = useState<{
-    mode: "auto" | "full";
+    mode: "auto";
     botId: string;
+    threadId: string;
   } | null>(null);
   const [attachmentNotice, setAttachmentNotice] = useState<string | null>(null);
   // Approval mode belongs to one bot; a room has several, each with its own.
@@ -424,16 +426,13 @@ export function Composer({
   };
   const setApprovalMode = (mode: ApprovalMode) => {
     if (!modeBot || modeBot.busy || mode === approvalModeFor(modeBot)) return;
-    if (mode === "full") {
-      setApprovalWarning({ mode: "full", botId: modeBot.id });
-      return;
-    }
+    if (mode === "full" || mode === "custom") return;
     // Safe Auto still needs its dedicated warning when it can drive the host.
     if (mode === "auto" && modeBot.computer === "local") {
-      setApprovalWarning({ mode: "auto", botId: modeBot.id });
+      setApprovalWarning({ mode: "auto", botId: modeBot.id, threadId: modeBot.threadId });
       return;
     }
-    dispatch({ type: "updateBot", botId: modeBot.id, patch: { approvalMode: mode } });
+    dispatch({ type: "updateTask", botId: modeBot.id, threadId: modeBot.threadId, patch: { approvalMode: mode } });
   };
 
   const hasContent = Boolean(effectiveText.trim()) || attachments.length > 0;
@@ -783,16 +782,34 @@ export function Composer({
           steering={steering}
           onCancel={(queueId) => {
             if (group) dispatch({ type: "cancelGroupQueued", groupId: group.id, threadId, queueId });
-            else if (bot) dispatch({ type: "cancelQueued", botId: bot.id, queueId });
+            else if (bot) dispatch({ type: "cancelQueued", botId: bot.id, threadId, queueId });
           }}
         />
+        {modeBot && !remoteClient && !locked && (
+          <div className="relative z-[2] mb-1 flex flex-wrap items-center gap-2 px-2" aria-label="Thread settings">
+            <ModelPicker bot={modeBot} threadId={modeBot.threadId} />
+            {approvalEngine && <ApprovalModeSelector
+              approvalMode={modeBot.approvalMode}
+              autoApprove={modeBot.autoApprove}
+              providerName={approvalEngine.displayName}
+              driverKind={approvalEngine.driverKind}
+              onSelect={setApprovalMode}
+              disabled={Boolean(modeBot.busy)}
+              trustedModesAvailable={false}
+              trustedModesNotice="Full and Custom access are managed in bot settings in the desktop app."
+            />}
+          </div>
+        )}
         <div className="relative">
           {/* App-ground from the pill midline down, full-bleed. Bubbles may
               tuck into the top half of the radius; they must not show below
-              center — including the corner pockets around the paperclip. */}
+              center. End at the dock's pb-3 padding: a viewport-height
+              backdrop extends the document and lets focus scroll the header
+              away. Only the decoration is bounded; upward menus stay free. */}
           <div
             aria-hidden
-            className="absolute -left-5 -right-5 top-1/2 h-[50vh] bg-app"
+            data-composer-backdrop
+            className="pointer-events-none absolute -left-5 -right-5 -bottom-3 top-1/2 bg-app"
           />
         <div className="relative z-[1] flex items-end gap-1 rounded-3xl bg-raised px-2 py-1.5">
           <input
@@ -848,17 +865,6 @@ export function Composer({
                   <Target size={14} aria-hidden="true" />
                   {effectiveChannelMode === "goal" ? "/goal" : t("composer.goal.chip")}
                 </button>
-              )}
-              {modeBot && approvalEngine && !remoteClient && (
-                <ApprovalModeSelector
-                  approvalMode={modeBot.approvalMode}
-                  autoApprove={modeBot.autoApprove}
-                  providerName={approvalEngine.displayName}
-                  driverKind={approvalEngine.driverKind}
-                  onSelect={setApprovalMode}
-                  disabled={Boolean(modeBot.busy)}
-                  trustedModesAvailable={Boolean(window.ogb?.approvals && capabilities.host.packaged)}
-                />
               )}
             </div>
           )}
@@ -1022,23 +1028,10 @@ export function Composer({
         onConfirm={() => {
           if (approvalWarning?.mode === "auto") {
             dispatch({
-              type: "updateBot",
+              type: "updateTask",
               botId: approvalWarning.botId,
+              threadId: approvalWarning.threadId,
               patch: { approvalMode: "auto", acknowledgeLocalAuto: true },
-            });
-          }
-          setApprovalWarning(null);
-        }}
-      />
-      <FullAccessWarning
-        open={approvalWarning?.mode === "full"}
-        onCancel={() => setApprovalWarning(null)}
-        onConfirm={() => {
-          if (approvalWarning?.mode === "full") {
-            dispatch({
-              type: "updateBot",
-              botId: approvalWarning.botId,
-              patch: { approvalMode: "full", confirmFullAccess: true },
             });
           }
           setApprovalWarning(null);

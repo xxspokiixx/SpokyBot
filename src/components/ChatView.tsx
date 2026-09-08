@@ -26,6 +26,7 @@ import { WorkingDots } from "@/components/WorkingIndicator";
 import { cachedInput, costCaption, formatTokens, formatUsd, hasFiniteCost, usageChip, usageDetail } from "@/lib/usage";
 import {
   api,
+  currentTaskBot,
   useStore,
   useStreaming,
   formatTime,
@@ -53,7 +54,6 @@ import { ConnectorCard } from "./ConnectorCard";
 import { SecretRequestCard } from "./SecretRequestCard";
 import { hasRoutineExecutionTask, RoutineRunCard } from "./RoutineRunCard";
 import { AttachedFileChips, AttachedImageGallery } from "./AttachmentPreview";
-import { ModelPicker } from "./ModelPicker";
 import { RenameTitle } from "./RenameTitle";
 import { TaskPicker } from "./TaskPicker";
 import { ExportTranscriptMenu } from "./ExportTranscriptMenu";
@@ -341,7 +341,7 @@ function Bubble({
   const versions = user ? messageVersions(bot, message) : [message];
   const versionIndex = versions.findIndex((v) => v.id === message.id);
   const switchTo = (v: Message | undefined) => {
-    if (v && !bot.busy) dispatch({ type: "switchBranch", botId: bot.id, messageId: v.id });
+    if (v && !bot.busy) dispatch({ type: "switchBranch", botId: bot.id, threadId: bot.threadId, messageId: v.id });
   };
 
   return (
@@ -374,8 +374,9 @@ function Bubble({
             <button
               onClick={() =>
                 dispatch({
-                  type: "updateBot",
+                  type: "updateTask",
                   botId: bot.id,
+                  threadId: bot.threadId,
                   patch: { pinnedMessageId: bot.pinnedMessageId === message.id ? "" : message.id },
                 })
               }
@@ -502,8 +503,9 @@ function Bubble({
             <button
               onClick={() =>
                 dispatch({
-                  type: "updateBot",
+                  type: "updateTask",
                   botId: bot.id,
+                  threadId: bot.threadId,
                   patch: { pinnedMessageId: bot.pinnedMessageId === message.id ? "" : message.id },
                 })
               }
@@ -750,7 +752,7 @@ const MessagesList = memo(function MessagesList({
                 return <ApprovalCard bot={bot} message={m} />;
               }
               if (shouldHideOnboardingCard(m, transcript)) return null;
-              return <OptionCard botId={bot.id} message={m} />;
+              return <OptionCard botId={bot.id} threadId={bot.threadId} message={m} />;
             case "routine.run": {
               const executionThreadId = m.routineRun?.executionThreadId;
               const canOpen = hasRoutineExecutionTask(bot.tasks, executionThreadId);
@@ -863,7 +865,8 @@ function PinnedBanner({
   );
 }
 
-export function ChatView({ bot }: { bot: Bot }) {
+export function ChatView({ bot: profile }: { bot: Bot }) {
+  const bot = useMemo(() => currentTaskBot(profile), [profile]);
   const { state, dispatch } = useStore();
   const remoteClient = window.ogb?.remoteClient?.active === true;
   const scrollRef = useRef<HTMLDivElement>(null);
@@ -933,16 +936,16 @@ export function ChatView({ bot }: { bot: Bot }) {
 
   // one message at a time may be in edit mode
   const [editingId, setEditingId] = useState<string | null>(null);
-  useEffect(() => setEditingId(null), [bot.id]);
+  useEffect(() => setEditingId(null), [bot.id, bot.threadId]);
   // stable handler identities — MessagesList is memo'd on them
   const startEdit = useCallback((id: string) => setEditingId(id), []);
   const cancelEdit = useCallback(() => setEditingId(null), []);
   const submitEdit = useCallback(
     (messageId: string, text: string) => {
       setEditingId(null); // closes the editor first — a double Enter can't fork twice
-      dispatch({ type: "editMessage", botId: bot.id, messageId, text });
+      dispatch({ type: "editMessage", botId: bot.id, threadId: bot.threadId, messageId, text });
     },
-    [bot.id, dispatch],
+    [bot.id, bot.threadId, dispatch],
   );
   const lastUserMessage = useMemo(
     () => [...messages].reverse().find((m) => m.role === "user" && m.kind === "text"),
@@ -996,15 +999,15 @@ export function ChatView({ bot }: { bot: Bot }) {
   const [busySince, setBusySince] = useState<number | null>(null);
   useEffect(() => {
     setBusySince(bot.busy ? Date.now() : null);
-  }, [bot.busy, bot.id]);
+  }, [bot.busy, bot.id, bot.threadId]);
 
   // regenerate = fork the last user message with the same text — reuses the
   // existing branch machinery, so the old answer stays reachable via ‹ ›
   const regenerate = useCallback(() => {
     if (lastUserMessage?.text && !bot.busy) {
-      dispatch({ type: "editMessage", botId: bot.id, messageId: lastUserMessage.id, text: lastUserMessage.text });
+      dispatch({ type: "editMessage", botId: bot.id, threadId: bot.threadId, messageId: lastUserMessage.id, text: lastUserMessage.text });
     }
-  }, [lastUserMessage, bot.busy, bot.id, dispatch]);
+  }, [lastUserMessage, bot.busy, bot.id, bot.threadId, dispatch]);
 
   // Scroll pinning: follow the bottom while the user hasn't scrolled away.
   // Follow breaks ONLY on an upward user gesture (wheel/touch), never on
@@ -1178,7 +1181,7 @@ export function ChatView({ bot }: { bot: Bot }) {
           />
           {bot.busy && (
             <button
-              onClick={() => dispatch({ type: "interrupt", botId: bot.id })}
+              onClick={() => dispatch({ type: "interrupt", botId: bot.id, threadId: bot.threadId })}
               className={cn(
                 "flex items-center gap-1.5 rounded-full border border-hairline/40 bg-raised/60 px-2.5 py-1 text-[13px] text-ink-secondary hover:bg-raised hover:text-ink",
                 COMPACT_BUBBLE,
@@ -1192,7 +1195,6 @@ export function ChatView({ bot }: { bot: Bot }) {
           <TaskPicker bot={bot} />
           <UsageChip bot={bot} />
           {!remoteClient && <WorkingFolderChip bot={bot} />}
-          {!remoteClient && <ModelPicker bot={bot} />}
           <CallButton bot={bot} />
           <button
             onClick={() => dispatch({ type: "toggleComputer" })}
@@ -1239,7 +1241,7 @@ export function ChatView({ bot }: { bot: Bot }) {
           dispatch({ type: "focusMessage", threadId: bot.threadId, messageId })
         }
         onUnpin={remoteClient ? undefined : () =>
-          dispatch({ type: "updateBot", botId: bot.id, patch: { pinnedMessageId: "" } })
+          dispatch({ type: "updateTask", botId: bot.id, threadId: bot.threadId, patch: { pinnedMessageId: "" } })
         }
       />
 
@@ -1425,12 +1427,18 @@ function UsageChip({ bot }: { bot: Bot }) {
 /** The folder this task's tools run in — quiet unless it's somewhere other
  * than home. Shows the pinned task folder when there is one, else the bot's
  * folder a first turn would pin. Click opens bot settings to change it. */
+export function workingFolderLabel(folder: string, botId: string, threadId: string): string {
+  const normalized = folder.replace(/\\/g, "/").replace(/\/+$/, "");
+  if (normalized.endsWith(`/task-workspaces/${botId}/${threadId}`)) return "Thread workspace";
+  return normalized.split("/").pop() || folder;
+}
+
 function WorkingFolderChip({ bot }: { bot: Bot }) {
   const { dispatch } = useStore();
   const task = bot.tasks?.find((t) => t.threadId === bot.threadId);
   const folder = task?.cwd === undefined ? bot.cwd : (task.cwd ?? undefined);
   if (!folder) return null;
-  const name = folder.replace(/[\\/]+$/, "").split(/[\\/]/).pop() || folder;
+  const name = workingFolderLabel(folder, bot.id, bot.threadId);
   return (
     <button
       onClick={() => dispatch({ type: "toggleSettings", open: true, section: "access" })}

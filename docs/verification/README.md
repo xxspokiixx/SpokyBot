@@ -55,6 +55,9 @@ watching, takeover, input, and profile switching.
 The [bot settings fixture](bot-settings.md) checks profile saves, standing
 instructions, history restore, skill/memory refresh, and stale-response isolation.
 
+The [independent threads fixture](threads.md) checks nested sidebar navigation,
+per-thread models, simultaneous direct conversations and thread-scoped Stop.
+
 The [server settings recipe](server-settings.md) checks browser provider sign-in
 with an offline CLI and custom-domain validation without touching live accounts.
 

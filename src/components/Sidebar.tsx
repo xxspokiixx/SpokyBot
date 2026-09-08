@@ -8,14 +8,17 @@ import {
   Bot as BotIcon,
   CalendarDays,
   Check,
+  ChevronRight,
   ClipboardCopy,
   Copy,
   Crown,
+  Folder,
   FolderMinus,
   FolderPlus,
   Library,
   Loader2,
   Network,
+  MoreHorizontal,
   Pencil,
   PanelLeftClose,
   PanelLeftOpen,
@@ -29,7 +32,7 @@ import {
   Users,
   X,
 } from "lucide-react";
-import { api, useStore, formatTime, visibleMessages, type Bot, type Group } from "@/state/store";
+import { api, useStore, formatTime, visibleMessages, currentTaskBot, type Bot, type Group } from "@/state/store";
 
 import { BotAvatar, InitialsAvatar } from "./Avatar";
 import { stateForBot } from "@/lib/mascot";
@@ -46,6 +49,8 @@ import { MIN_QUERY, SearchResults } from "./SearchResults";
 import { TeamLibraryPanel } from "./TeamLibraryPanel";
 import { RenameTitle } from "./RenameTitle";
 import { BotPickerList } from "./BotPickerList";
+import { BotProjectDialog, NewThreadButton } from "./BotProjects";
+import { SidebarThreadRow, visibleSidebarThreads } from "./SidebarThreadRow";
 import {
   loadCollapsedSections,
   loadSectionOrder,
@@ -134,11 +139,11 @@ function groupPreview(group: Group, bots: Bot[]): string {
   return last.from ? `${last.from.name}: ${text}` : text;
 }
 
-/** Room avatar: 2–3 overlapping mauses in the same 56px slot a bot gets. */
+/** A small member stack identifies a group without turning it into a card. */
 function StackedMauses({ members, density }: { members: Bot[]; density: SidebarDensity }) {
   const iconOnly = density === "icons";
-  const slotSize = iconOnly ? "size-12" : density === "compact" ? "size-10" : "size-14";
-  const singleSize = iconOnly ? 44 : density === "compact" ? 40 : 56;
+  const slotSize = iconOnly ? "size-12" : density === "compact" ? "size-7" : "size-8";
+  const singleSize = iconOnly ? 44 : density === "compact" ? 26 : 32;
   if (members.length <= 1) {
     const b = members[0];
     return (
@@ -147,16 +152,16 @@ function StackedMauses({ members, density }: { members: Bot[]; density: SidebarD
       </div>
     );
   }
-  const shown = members.slice(0, 3);
+  const shown = members.slice(0, 2);
   const extra = members.length - shown.length;
   return (
     <div className={cn("flex shrink-0 items-center justify-center", slotSize)}>
-      <div className="flex items-center -space-x-3">
+      <div className="flex items-center -space-x-2.5">
         {shown.map((b) => (
-          <BotAvatar key={b.id} bot={b} state="happy" size={30} animated={false} />
+          <BotAvatar key={b.id} bot={b} state="happy" size={iconOnly ? 30 : 20} animated={false} />
         ))}
         {extra > 0 && (
-          <span className="z-10 flex size-[22px] items-center justify-center rounded-full border border-hairline/40 bg-raised text-[10px] font-medium text-ink-secondary">
+          <span className="z-10 flex size-4 items-center justify-center rounded-full border border-hairline/40 bg-raised text-[9px] font-medium text-ink-secondary">
             +{extra}
           </span>
         )}
@@ -165,22 +170,29 @@ function StackedMauses({ members, density }: { members: Bot[]; density: SidebarD
   );
 }
 
-function GroupListItem({
+export function GroupListItem({
   group,
   density,
+  query = "",
   onMenu,
 }: {
   group: Group;
   density: SidebarDensity;
+  query?: string;
   onMenu: (menu: { groupId: string; x: number; y: number }) => void;
 }) {
   const { state, dispatch } = useStore();
   const selected = state.activeView === "chat" && state.selectedId === group.id;
+  const [threadsOpen, setThreadsOpen] = useState(selected || Boolean(query));
+  useEffect(() => { if (selected || query) setThreadsOpen(true); }, [selected, query]);
+  const expanded = !group.dm && threadsOpen && density !== "icons";
   const members = group.memberIds
     .map((id) => state.bots.find((b) => b.id === id))
     .filter((b): b is Bot => Boolean(b));
   const last = group.messages.at(-1);
   return (
+    <>
+    <div className="group relative">
     <button
       onClick={() => dispatch({ type: "select", id: group.id })}
       onContextMenu={(e) => {
@@ -197,9 +209,9 @@ function GroupListItem({
         onMenu({ groupId: group.id, x: rect.left + rect.width / 2, y: rect.top + rect.height / 2 });
       }}
       className={cn(
-        "relative flex w-full items-center rounded-xl text-left",
-        density === "icons" ? "justify-center px-1 py-1.5" : density === "compact" ? "gap-2 px-2 py-1.5" : "gap-3 px-3 py-2.5",
-        selected ? "bg-raised" : "hover:bg-raised/50",
+        "relative flex w-full items-center rounded-md text-left outline-none focus-visible:ring-1 focus-visible:ring-accent/60",
+        density === "icons" ? "justify-center px-1 py-1.5" : density === "compact" ? "gap-1.5 py-1 pl-6 pr-2" : "gap-2 py-1.5 pl-6 pr-2",
+        selected && !expanded ? "bg-raised/70" : "hover:bg-raised/40",
       )}
       title={density === "icons" ? group.name : undefined}
       aria-label={density === "icons" ? group.name : undefined}
@@ -207,19 +219,48 @@ function GroupListItem({
       <StackedMauses members={members} density={density} />
       <div className={cn("min-w-0 flex-1", density === "icons" && "hidden")}>
         <div className="flex items-baseline justify-between gap-2">
-          <span className="truncate text-[15px] font-semibold text-ink">{group.name}</span>
-          {selected && last && <span className="shrink-0 text-xs text-ink-secondary">{formatTime(last.at)}</span>}
+          <span className="truncate text-[13px] font-semibold text-ink">{group.name}</span>
+          {selected && last && !expanded && <span className="shrink-0 text-[10px] text-ink-secondary">{formatTime(last.at)}</span>}
+          {expanded && group.unread && <span className="size-1.5 shrink-0 rounded-full bg-accent" aria-label={t("task.unreadMany")} />}
         </div>
-        <div className="flex items-center justify-between gap-2">
-          <span className="truncate text-[13px] text-ink-secondary">{groupPreview(group, state.bots)}</span>
+        {!expanded && <div className="flex items-center justify-between gap-2">
+          <span className="truncate text-[11px] text-ink-secondary">{groupPreview(group, state.bots)}</span>
           {group.unread && <span className="size-2 shrink-0 rounded-full bg-accent" />}
-        </div>
+        </div>}
       </div>
       {density === "icons" && group.unread && (
         <span className="absolute bottom-1.5 right-1.5 size-2 rounded-full border border-panel bg-accent" />
       )}
     </button>
+    {!group.dm && density !== "icons" && <button type="button" aria-label={t(expanded ? "task.collapseNamed" : "task.expandNamed", { name: group.name })} aria-expanded={expanded}
+      onClick={() => setThreadsOpen((open) => !open)} className="absolute left-0.5 top-1/2 flex size-5 -translate-y-1/2 items-center justify-center rounded text-ink-secondary hover:bg-raised hover:text-ink">
+      <ChevronRight size={12} className={cn("transition-transform", expanded && "rotate-90")} />
+    </button>}
+    </div>
+    {expanded && <GroupThreadList group={group} selected={selected} density={density} query={group.name.toLowerCase().includes(query.toLowerCase()) ? "" : query} />}
+    </>
   );
+}
+
+export function GroupThreadList({ group, selected, density = "comfortable", query = "" }: { group: Group; selected: boolean; density?: SidebarDensity; query?: string }) {
+  const { state, dispatch } = useStore();
+  const [showAll, setShowAll] = useState(false);
+  const busy = Boolean(group.working || group.busyBotId);
+  const waiting = state.bots.find((bot) => bot.id === group.busyBotId)?.activity === "waiting-on-you";
+  const tasks = (group.tasks ?? [{ threadId: group.threadId, title: group.name, createdAt: group.createdAt }]).map((task) => ({
+    ...task, busy: task.threadId === group.threadId && busy, unread: task.threadId === group.threadId && group.unread,
+    activity: task.threadId === group.threadId && waiting ? "waiting-on-you" as const : undefined,
+  }));
+  const visible = visibleSidebarThreads(tasks, group.threadId, query, [], showAll);
+  return <div className="mb-2 ml-5 space-y-0.5 border-l border-hairline/30 pl-2" role="group" aria-label={t("task.namedList", { name: group.name })}>
+    {visible.map((task) => <SidebarThreadRow key={task.threadId} task={task} current={selected && task.threadId === group.threadId} compact={density === "compact"}
+      onSelect={() => { if (task.threadId !== group.threadId) dispatch({ type: "switchGroupTask", groupId: group.id, threadId: task.threadId }); else dispatch({ type: "select", id: group.id }); }}
+      onRename={(title) => dispatch({ type: "renameGroupTask", groupId: group.id, threadId: task.threadId, title })}
+      onDelete={() => dispatch({ type: "deleteGroupTask", groupId: group.id, threadId: task.threadId })} />)}
+    {!query && !showAll && tasks.length > visible.length && <button type="button" onClick={() => setShowAll(true)} className="px-3 py-1.5 text-[11px] text-ink-secondary hover:text-ink">{t("task.showAll", { count: tasks.length })}</button>}
+    <button type="button" disabled={busy} onClick={() => dispatch({ type: "newGroupTask", groupId: group.id })} title={t(busy ? "task.newBusy" : "task.newShort")}
+      className="mt-1 flex min-h-8 w-full items-center gap-2 rounded-md px-3 py-1.5 text-left text-[12px] text-ink-secondary hover:bg-raised/40 hover:text-ink disabled:opacity-40"><Plus size={12} />{t("task.newShort")}</button>
+  </div>;
 }
 
 function RoomContextMenu({
@@ -754,15 +795,85 @@ export function BotDeleteMenuItem({ deleting, onClick }: { deleting: boolean; on
   );
 }
 
+export function BotThreadList({ bot, selected, density = "comfortable", query = "" }: { bot: Bot; selected: boolean; density?: SidebarDensity; query?: string }) {
+  const { dispatch } = useStore();
+  const tasks = bot.tasks ?? [{ threadId: bot.threadId, title: "New thread", createdAt: 0 }];
+  const projects = bot.projects ?? [];
+  const [collapsed, setCollapsed] = useState<Set<string>>(new Set());
+  const [editingProject, setEditingProject] = useState<string | null>(null);
+  const [showAll, setShowAll] = useState(false);
+  const currentProjectId = tasks.find((task) => task.threadId === bot.threadId)?.projectId;
+  useEffect(() => {
+    if (selected && currentProjectId) setCollapsed((previous) => {
+      if (!previous.has(currentProjectId)) return previous;
+      const next = new Set(previous);
+      next.delete(currentProjectId);
+      return next;
+    });
+  }, [selected, currentProjectId]);
+  const visibleTasks = visibleSidebarThreads(tasks, bot.threadId, query, projects, showAll);
+  const renderThread = (task: (typeof tasks)[number]) => {
+    const thread = currentTaskBot(bot, task.threadId);
+    return <SidebarThreadRow key={task.threadId} task={{ ...task, busy: thread.busy, activity: thread.activity }} current={selected && task.threadId === bot.threadId} compact={density === "compact"} folders={projects}
+      onSelect={() => { if (task.threadId !== bot.threadId) dispatch({ type: "switchTask", botId: bot.id, threadId: task.threadId }); else dispatch({ type: "select", id: bot.id }); }}
+      onRename={(title) => dispatch({ type: "renameTask", botId: bot.id, threadId: task.threadId, title })}
+      onDelete={() => dispatch({ type: "deleteTask", botId: bot.id, threadId: task.threadId })}
+      onMove={(projectId) => dispatch({ type: "updateTask", botId: bot.id, threadId: task.threadId, patch: { projectId } })} />;
+  };
+  const ungrouped = visibleTasks.filter((task) => !projects.some((project) => project.id === task.projectId));
+  const projectToEdit = projects.find((project) => project.id === editingProject);
+  return (
+    <div className="mb-2 ml-5 space-y-0.5 border-l border-hairline/30 pl-2" role="group" aria-label={t("task.namedList", { name: bot.name })}>
+      {projects.map((project) => {
+        const projectTasks = tasks.filter((task) => task.projectId === project.id);
+        const visible = visibleTasks.filter((task) => task.projectId === project.id);
+        if (query && visible.length === 0 && !project.name.toLowerCase().includes(query.toLowerCase())) return null;
+        const open = Boolean(query) || !collapsed.has(project.id);
+        const waiting = projectTasks.some((task) => task.activity === "waiting-on-you");
+        const working = projectTasks.some((task) => task.busy);
+        return <div key={project.id} data-sidebar-project={project.id}>
+          <div className="group/folder flex items-center gap-0.5 rounded-md text-ink-secondary hover:bg-raised/30">
+            <button type="button" aria-expanded={open} onClick={() => setCollapsed((previous) => {
+              const next = new Set(previous);
+              if (next.has(project.id)) next.delete(project.id); else next.add(project.id);
+              return next;
+            })} className="flex min-h-8 min-w-0 flex-1 items-center gap-1.5 py-1 pl-1 text-left text-[12px] font-medium" title={project.name}>
+              <ChevronRight size={11} className={cn("shrink-0 transition-transform", open && "rotate-90")} />
+              <Folder size={12} className="shrink-0" /><span className="truncate">{project.name}</span>
+              <span className="shrink-0 text-[10px] font-normal opacity-50">{projectTasks.length}</span>
+              {!open && (waiting ? <span className="text-[10px] text-warning">{t("task.waiting")}</span> : working ? <Loader2 size={10} className="shrink-0 animate-spin text-success" /> : projectTasks.some((task) => task.unread) ? <span className="size-1.5 shrink-0 rounded-full bg-accent" aria-label={t("task.unreadMany")} /> : null)}
+            </button>
+            <button type="button" title={t("task.newIn", { name: project.name })} aria-label={t("task.newIn", { name: project.name })} onClick={() => dispatch({ type: "newTask", botId: bot.id, projectId: project.id })}
+              className="flex size-6 items-center justify-center rounded opacity-0 hover:bg-raised hover:text-ink focus-visible:opacity-100 group-hover/folder:opacity-100 max-md:opacity-70"><Plus size={12} /></button>
+            <button type="button" title={t("folder.namedSettings", { name: project.name })} aria-label={t("folder.namedSettings", { name: project.name })} onClick={() => setEditingProject(project.id)}
+              className="flex size-6 items-center justify-center rounded opacity-0 hover:bg-raised hover:text-ink focus-visible:opacity-100 group-hover/folder:opacity-100 max-md:opacity-70"><MoreHorizontal size={13} /></button>
+          </div>
+          {open && <div className="ml-3 border-l border-hairline/25 pl-2" role="group" aria-label={t("task.namedList", { name: project.name })}>
+            {visible.map(renderThread)}
+            {projectTasks.length === 0 && <p className="px-2.5 py-1 text-[11px] text-ink-secondary/70">{t("task.empty")}</p>}
+          </div>}
+        </div>;
+      })}
+      {projects.length > 0 && ungrouped.length > 0 && <div className="px-3 pb-1 pt-2 text-[10.5px] text-ink-secondary/70">{t("task.list")}</div>}
+      {ungrouped.map(renderThread)}
+      {!query && !showAll && tasks.length > visibleTasks.length && <button type="button" onClick={() => setShowAll(true)} className="px-3 py-1.5 text-[11px] text-ink-secondary hover:text-ink">{t("task.showAll", { count: tasks.length })}</button>}
+      <NewThreadButton bot={bot} className="mt-1 w-full rounded-md" />
+      {projectToEdit && <BotProjectDialog bot={bot} project={projectToEdit} onClose={() => setEditingProject(null)} />}
+    </div>
+  );
+}
+
 export function BotListItem({
   bot,
   density,
+  query = "",
   onMenu,
   onArchive,
   archiveDisabled,
 }: {
   bot: Bot;
   density: SidebarDensity;
+  query?: string;
   onMenu: (menu: MenuState) => void;
   onArchive: (bot: Bot) => void;
   archiveDisabled: boolean;
@@ -771,13 +882,15 @@ export function BotListItem({
   const remoteClient = typeof window !== "undefined" && window.ogb?.remoteClient?.active === true;
   const [renaming, setRenaming] = useState(false);
   const selected = state.activeView === "chat" && state.selectedId === bot.id;
+  const [threadsOpen, setThreadsOpen] = useState(selected || Boolean(query));
+  useEffect(() => { if (selected || query) setThreadsOpen(true); }, [selected, query]);
   const deleting = state.deletingBots[bot.id] === true;
   const mascotMotion = selected && state.mascotMotion?.botId === bot.id ? state.mascotMotion : null;
   const iconOnly = density === "icons";
   useEffect(() => {
     if (iconOnly) setRenaming(false);
   }, [iconOnly]);
-  const avatarSize = iconOnly ? 44 : density === "compact" ? 40 : 56;
+  const avatarSize = iconOnly ? 44 : density === "compact" ? 26 : 32;
   // the visible branch, so a version switch changes the row with the chat
   const visible = visibleMessages(bot);
   const last = visible.at(-1);
@@ -786,16 +899,16 @@ export function BotListItem({
   // line above the name lets both truncate independently instead.
   const title = bot.title.trim();
   const rowClass = cn(
-    "flex w-full items-center rounded-xl border text-left",
+    "flex w-full items-center rounded-md text-left outline-none focus-visible:ring-1 focus-visible:ring-accent/60",
     iconOnly
       ? "justify-center px-1 py-1.5"
       : density === "compact"
-        ? "gap-2 px-2 py-1.5 pr-12"
-        : "gap-3 px-3 py-2.5 pr-12",
+        ? "gap-1.5 px-1.5 py-1 pr-9"
+        : "gap-2 px-1.5 py-1.5 pr-9",
     // Chief of Staff is called out by the crown label below, not by tinting
     // the whole row — an accent border + fill read as "selected" even when
     // another bot was active.
-    selected ? "border-transparent bg-raised" : "border-transparent hover:bg-raised/50",
+    selected && (iconOnly || !threadsOpen) ? "bg-raised/70" : "hover:bg-raised/40",
   );
   const working = Boolean(bot.busy) && bot.activity !== "waiting-on-you";
   const body = (
@@ -823,8 +936,7 @@ export function BotListItem({
             data-testid="working-dot"
             className={cn(
               "absolute -right-0.5 -bottom-0.5 rounded-full border-2 border-panel bg-success",
-              // scale with the avatar: 56px comfortable, 40/44px compact + icons
-              density === "comfortable" ? "size-3.5" : "size-3",
+              iconOnly ? "size-3" : "size-2.5",
             )}
           />
         )}
@@ -838,7 +950,7 @@ export function BotListItem({
           <div className="truncate text-[11px] font-medium leading-4 text-ink-secondary">{title}</div>
         )}
         <div className="flex items-baseline justify-between gap-2">
-          <span className="flex min-w-0 grow items-center gap-1.5 truncate text-[15px] font-semibold text-ink">
+          <span className="flex min-w-0 grow items-center gap-1.5 truncate text-[13px] font-semibold text-ink">
             {bot.pinned && <Pin size={12} className="shrink-0 text-ink-secondary" />}
             <RenameTitle
               key={iconOnly ? "icons" : "expanded"}
@@ -854,14 +966,15 @@ export function BotListItem({
               }}
               onEditingChange={setRenaming}
               className="truncate"
-              inputClassName="w-full rounded bg-inset px-1 py-0.5 text-[15px] font-semibold"
+              inputClassName="w-full rounded bg-inset px-1 py-0.5 text-[13px] font-semibold"
             />
           </span>
-          {selected && last && !renaming && (
+          {selected && last && !renaming && !threadsOpen && (
             <span className="shrink-0 text-xs text-ink-secondary transition-opacity group-hover:opacity-0 group-focus-within:opacity-0">
               {formatTime(last.at)}
             </span>
           )}
+          {threadsOpen && bot.unread && <span className="size-1.5 shrink-0 rounded-full bg-accent" aria-label={t("task.unreadMany")} />}
         </div>
         {bot.chiefOfStaff && !renaming && (
           // Chief of Staff gets its own line under the name so a long name
@@ -870,14 +983,14 @@ export function BotListItem({
             <Crown size={11} className="shrink-0" /> {t("sidebar.bot.chiefOfStaff")}
           </span>
         )}
-        <div className="flex items-center justify-between gap-2">
+        {(!threadsOpen || deleting) && <div className="flex items-center justify-between gap-2">
           {deleting ? (
-            <span role="status" className="flex min-w-0 items-center gap-1.5 truncate text-[13px] text-ink-secondary">
+            <span role="status" className="flex min-w-0 items-center gap-1.5 truncate text-[11px] text-ink-secondary">
               <Loader2 size={12} className="shrink-0 animate-spin" />
               {t("sidebar.bot.deletingRow")}
             </span>
           ) : (
-            <span className="flex min-w-0 items-center gap-1.5 truncate text-[13px] text-ink-secondary">
+            <span className="flex min-w-0 items-center gap-1.5 truncate text-[11px] text-ink-secondary">
               {bot.busy && bot.activity !== "waiting-on-you" ? (
                 // the same typing dots as the chat header; sized to the text's
                 // line box so the row does not jump when work starts or ends
@@ -893,7 +1006,7 @@ export function BotListItem({
           {bot.unread && (
             <span className="size-2 shrink-0 rounded-full bg-accent" />
           )}
-        </div>
+        </div>}
       </div>
     </>
   );
@@ -910,6 +1023,7 @@ export function BotListItem({
   };
 
   return (
+    <>
     <div className="group relative" title={iconOnly ? bot.name : undefined}>
       {/* Keep this wrapper mounted while RenameTitle swaps its label for an
           input. Replacing the wrapper tree remounts RenameTitle, loses its
@@ -938,6 +1052,14 @@ export function BotListItem({
         onContextMenu={onContextMenu}
         className={rowClass}
       >
+        {!iconOnly && <button
+          type="button"
+          aria-label={t(threadsOpen ? "task.collapseNamed" : "task.expandNamed", { name: bot.name })}
+          aria-expanded={threadsOpen}
+          onClick={(event) => { event.stopPropagation(); setThreadsOpen((open) => !open); }}
+          onKeyDown={(event) => event.stopPropagation()}
+          className="-ml-1 flex size-4 shrink-0 items-center justify-center rounded text-ink-secondary hover:bg-control hover:text-ink"
+        ><ChevronRight size={13} className={cn("transition-transform", threadsOpen && "rotate-90")} /></button>}
         {body}
       </div>
       {!renaming && iconOnly && bot.unread && (
@@ -955,11 +1077,13 @@ export function BotListItem({
         onClick={() => onArchive(bot)}
         aria-label={t("sidebar.bot.archiveAria", { name: bot.name })}
         title={t("sidebar.bot.archiveAria", { name: bot.name })}
-        className="absolute right-1 top-1/2 flex size-10 -translate-y-1/2 items-center justify-center rounded-lg bg-card/90 text-ink-secondary opacity-0 shadow-sm transition hover:bg-raised hover:text-ink focus:opacity-100 group-hover:opacity-100 group-focus-within:opacity-100 max-md:opacity-100"
+        className="absolute right-1 top-1/2 flex size-7 -translate-y-1/2 items-center justify-center rounded text-ink-secondary opacity-0 transition hover:bg-raised hover:text-ink focus:opacity-100 group-hover:opacity-100 group-focus-within:opacity-100 max-md:opacity-70"
       >
         <Archive size={14} />
       </button>}
     </div>
+    {!iconOnly && threadsOpen && <BotThreadList bot={bot} selected={selected} density={density} query={bot.name.toLowerCase().includes(query.toLowerCase()) || bot.title.toLowerCase().includes(query.toLowerCase()) ? "" : query} />}
+    </>
   );
 }
 
@@ -1296,9 +1420,11 @@ export function Sidebar({ open, onClose }: { open: boolean; onClose: () => void 
         !q ||
         b.name.toLowerCase().includes(q) ||
         (b.title ?? "").toLowerCase().includes(q) ||
-        preview(b).toLowerCase().includes(q),
+        preview(b).toLowerCase().includes(q) ||
+        b.tasks?.some((task) => task.title.toLowerCase().includes(q)) ||
+        b.projects?.some((folder) => folder.name.toLowerCase().includes(q)),
     );
-  const visibleGroups = state.groups.filter((g) => !q || g.name.toLowerCase().includes(q));
+  const visibleGroups = state.groups.filter((g) => !q || g.name.toLowerCase().includes(q) || g.tasks?.some((task) => task.title.toLowerCase().includes(q)));
   const {
     unsectionedChief,
     pinnedBots,
@@ -1577,16 +1703,16 @@ export function Sidebar({ open, onClose }: { open: boolean; onClose: () => void 
       </div>
 
       {/* Search */}
-      <div className={cn("pt-2 pb-3", density === "icons" ? "hidden" : "px-3")}>
-        <div className="flex items-center gap-2 rounded-lg bg-raised/70 px-3 py-2">
-          <Search size={16} className="text-ink-secondary" />
+      <div className={cn("pt-1 pb-3", density === "icons" ? "hidden" : "px-3")}>
+        <div className="flex items-center gap-2 rounded-md border border-hairline/40 bg-inset/40 px-2.5 py-1.5 focus-within:border-accent/50">
+          <Search size={14} className="text-ink-secondary" />
           <input
             value={query}
             onChange={(e) => setQuery(e.target.value)}
             onKeyDown={(e) => e.key === "Escape" && setQuery("")}
             placeholder={t("sidebar.search")}
             aria-label={t("sidebar.searchAria")}
-            className="w-full bg-transparent text-[14px] text-ink placeholder:text-ink-secondary focus:outline-none"
+            className="w-full bg-transparent text-[12.5px] text-ink placeholder:text-ink-secondary focus:outline-none"
           />
         </div>
       </div>
@@ -1602,6 +1728,7 @@ export function Sidebar({ open, onClose }: { open: boolean; onClose: () => void 
               <BotListItem
                 bot={unsectionedChief}
                 density={density}
+                query={q}
                 onMenu={setMenu}
                 onArchive={requestArchive}
                 archiveDisabled
@@ -1676,6 +1803,7 @@ export function Sidebar({ open, onClose }: { open: boolean; onClose: () => void 
                         key={bot.id}
                         bot={bot}
                         density={density}
+                        query={q}
                         onMenu={setMenu}
                         onArchive={requestArchive}
                         archiveDisabled
@@ -1686,6 +1814,7 @@ export function Sidebar({ open, onClose }: { open: boolean; onClose: () => void 
                         key={group.id}
                         group={group}
                         density={density}
+                        query={q}
                         onMenu={setRoomMenu}
                       />
                     ))}
@@ -1694,6 +1823,7 @@ export function Sidebar({ open, onClose }: { open: boolean; onClose: () => void 
                         key={bot.id}
                         bot={bot}
                         density={density}
+                        query={q}
                         onMenu={setMenu}
                         onArchive={requestArchive}
                         archiveDisabled={activeBotCount <= 1}

@@ -54,6 +54,9 @@ let lastProfileRequestBody: any = null;
 let profileRequestResponse: unknown = { requestId: "profile-request-1", summary: "Name → Kiwi" };
 let lastSessionSearchUrl = "";
 let lastSessionReadUrl = "";
+let lastMemoryBody: any = null;
+let memoryResponse: unknown = { ok: true, text: "- new fact", truncated: false, bytes: 10 };
+let memoryStatus = 200;
 let sessionSearchResponse: unknown = {
   hits: [
     { threadId: "thread-old", messageId: "m-audit", at: Date.UTC(2026, 8, 1), role: "bot", snippet: "the [audit] found three [broken] [links]", task: "Site audit", current: false },
@@ -202,6 +205,16 @@ beforeAll(async () => {
       });
       return;
     }
+    if (req.method === "POST" && req.url === "/api/internal/memory") {
+      let data = "";
+      req.on("data", (c) => (data += c));
+      req.on("end", () => {
+        lastMemoryBody = JSON.parse(data);
+        res.writeHead(memoryStatus, { "content-type": "application/json" });
+        res.end(JSON.stringify(memoryResponse));
+      });
+      return;
+    }
     if (req.method === "GET" && req.url?.startsWith("/api/internal/session-search?")) {
       lastSessionSearchUrl = req.url;
       res.writeHead(200, { "content-type": "application/json" });
@@ -286,6 +299,7 @@ describe("agents-proxy MCP surface", () => {
       "post_to_room",
       "create_bot",
       "request_credential",
+      "memory_update",
       "session_search",
       "session_read",
       "list_routines",
@@ -616,6 +630,35 @@ describe("agents-proxy MCP surface", () => {
     expect(waiting.result.content[0].text).toContain("after 45s");
     expect(lastDelegationUrl).toContain("wait_ms=45000");
     delegationStatusResponse = { status: "done", toBotName: "Helper", result: "All done." };
+  });
+
+  it("memory_update forwards only the configured owner and thread with its capability token", async () => {
+    const result = await callTool("memory_update", {
+      action: "replace", text: "- New preference", old_text: "- Old preference",
+      fromBotId: "spoofed-bot", fromThreadId: "spoofed-thread",
+    });
+    expect(result.result.isError).toBe(false);
+    expect(result.result.content[0].text).toBe("Memory updated.");
+    expect(lastAuth).toBe(`Bearer ${TOKEN}`);
+    expect(lastMemoryBody).toEqual({
+      fromBotId: "bot-asker", fromThreadId: "thread-asker-routine",
+      action: "replace", text: "- New preference", oldText: "- Old preference",
+    });
+    const append = await callTool("memory_update", { action: "append", text: "- Another fact" });
+    expect(append.result.isError).toBe(false);
+    expect(lastMemoryBody).toEqual({
+      fromBotId: "bot-asker", fromThreadId: "thread-asker-routine", action: "append", text: "- Another fact",
+    });
+    const missing = await callTool("memory_update", { action: "replace", text: "unsafe replacement" });
+    expect(missing.result.isError).toBe(true);
+    expect(lastMemoryBody.action).toBe("append");
+    memoryStatus = 409;
+    memoryResponse = { error: "oldText must match exactly once in the latest memory." };
+    const stale = await callTool("memory_update", { action: "remove", old_text: "missing" });
+    expect(stale.result.isError).toBe(true);
+    expect(stale.result.content[0].text).toContain("latest memory");
+    memoryStatus = 200;
+    memoryResponse = { ok: true, text: "- new fact", truncated: false, bytes: 10 };
   });
 
   it("session_search recalls the bot's own past threads through the harness, scoped to the sender", async () => {

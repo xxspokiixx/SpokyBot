@@ -380,9 +380,7 @@ private fun PairedScreen(
         is Destination.Conversation -> ChatScreen(
             destination = destination,
             onResolved = { target ->
-                (destination as? Destination.Thread)?.let {
-                    navigator.resolveThread(it.threadId, target)
-                }
+                navigator.selectTask(destination, target)
             },
             onBack = navigator::pop,
             onOpenComputer = { navigator.push(Destination.Computer(it)) },

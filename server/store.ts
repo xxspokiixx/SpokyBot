@@ -17,7 +17,7 @@ import { newId, type CloudBackend, type ModelSelection, type ThreadId } from "./
 import { pickBotName } from "./names.ts";
 import { redactSecretsInText } from "./redact.ts";
 import { botAvatarProfile, type BotAvatarCrop } from "../shared/bot-avatar.ts";
-import { isApprovalMode, type ApprovalMode } from "../shared/approval-mode.ts";
+import { approvalModeFor, isApprovalMode, type ApprovalMode } from "../shared/approval-mode.ts";
 import type { MascotBodyId } from "../shared/mascot-bodies.ts";
 import type { ProfileRequestCardData, ProfileRequestChanges } from "../shared/profile-request.ts";
 import type { RoutineRequestCardData } from "../shared/routine-request.ts";
@@ -252,6 +252,12 @@ export interface GroupRecord {
   setupSkippedAt?: number | null;
 }
 
+/** A lightweight organizational label within one bot. */
+export interface BotProjectRecord {
+  id: string;
+  name: string;
+}
+
 /** One task = one conversation with its own context.
  *
  * A bot used to be a single endless thread, which meant every job
@@ -264,6 +270,20 @@ export interface TaskRecord {
   threadId: ThreadId;
   title: string;
   createdAt: number;
+  /** Organizational grouping only; never a directory or provider context. */
+  projectId?: string;
+  /** Defaults are copied when a task is created; older records fall back
+   * to the bot until migration seeds their model selection. */
+  modelSelection?: ModelSelection;
+  approvalMode?: ApprovalMode;
+  autoApprove?: boolean;
+  alwaysAllow?: string[];
+  unread?: boolean;
+  rewound?: boolean;
+  pinnedMessageId?: string;
+  /** Runtime-only state, reset on load and never written to bots.json. */
+  activity?: BotActivity;
+  busy?: boolean;
   /** provider-native continuation per instance, for THIS task only */
   resumeCursors: Record<string, unknown>;
   /** which instance dispatched the most recent turn. A cursor alone can't
@@ -280,6 +300,12 @@ export interface TaskRecord {
    * = pinned to the default (home); absent = not pinned yet. */
   cwd?: string | null;
 }
+
+const TASK_PATCH_FIELDS = [
+  "title", "projectId", "modelSelection", "approvalMode", "autoApprove", "alwaysAllow",
+  "unread", "rewound", "pinnedMessageId", "resumeCursors", "lastInstanceId", "cwd",
+] as const satisfies readonly (keyof TaskRecord)[];
+export type TaskPatch = Partial<Pick<TaskRecord, typeof TASK_PATCH_FIELDS[number]>>;
 
 export interface TaskUsage {
   input: number;
@@ -453,6 +479,7 @@ export type StoreChange =
 
 /** What a task is called before its first message names it. */
 export const UNTITLED_TASK = "New task";
+export const UNTITLED_THREAD = "New thread";
 
 /** A task's name, taken from the first thing you asked it to do. */
 export function titleFromMessage(text: string): string {
@@ -462,10 +489,12 @@ export function titleFromMessage(text: string): string {
 
 export interface BotRecord {
   id: string;
-  /** the ACTIVE task's thread — everything that runs a turn reads this */
+  /** The task selected in the UI; running turns keep their own thread id. */
   threadId: ThreadId;
   /** every task this bot has, newest first */
   tasks?: TaskRecord[];
+  /** Projects group this bot's threads; older bots have no projects. */
+  projects?: BotProjectRecord[];
   name: string;
   title: string;
   description: string;
@@ -491,7 +520,9 @@ export interface BotRecord {
   avatarUrl?: string;
   /** Mascot, or the crop applied to avatarUrl. */
   avatarCrop?: BotAvatarCrop;
+  /** True when any task has unread output. */
   unread: boolean;
+  /** Default for new tasks; navigating tasks never changes this value. */
   modelSelection: ModelSelection;
   /** provider-native continuation per instance (e.g. claude session id) */
   resumeCursors: Record<string, unknown>;
@@ -581,8 +612,8 @@ export interface BotRecord {
   /** Listing provenance and connector intent retained for package details
    * and future re-export. It never means the apps are authorized. */
   installedPackage?: InstalledPackageMetadata;
-  /** Derived from `activity` — kept so the 200+ readers across the app and
-   * tests keep working unchanged. Write through setActivity(), never here. */
+  /** Aggregate of task and room activity. Change through setTaskActivity()
+   * or the legacy setActivity() room slot, never directly. */
   busy?: boolean;
   /** What the bot is doing right now, as the harness sees it. `busy` alone
    * could not tell working from waiting-on-you from a stalled engine.
@@ -710,6 +741,9 @@ export class Store {
   private threads = new Map<string, ThreadState>();
   private defaultSelection: () => ModelSelection;
   private listeners = new Set<(change: StoreChange) => void>();
+  /** Room turns and old callers have their own activity slot. Clearing
+   * that slot must not clear a concurrently running independent task. */
+  private legacyActivities = new Map<string, BotActivity>();
 
   constructor(defaultSelection: () => ModelSelection) {
     this.defaultSelection = defaultSelection;
@@ -780,6 +814,12 @@ export class Store {
         b.approvalMode = "ask";
         b.autoApprove = false;
         delete b.approvalGrant;
+        for (const task of b.tasks ?? []) {
+          if (task.approvalMode === "full" || task.approvalMode === "custom") {
+            task.approvalMode = "ask";
+            task.autoApprove = false;
+          }
+        }
         botsMigrated = true;
       }
       const avatar = botAvatarProfile(b);
@@ -860,21 +900,73 @@ export class Store {
       g.pinnedCwd = active.pinnedCwd;
       g.pinnedMessageId = active.pinnedMessageId;
     }
-    if (botsMigrated) this.saveBots();
     if (groupsMigrated) this.saveGroups();
     // bots saved before tasks existed have one endless thread; adopt it as
     // their first task so nothing is lost and nothing special-cases it
     for (const b of this.bots) {
-      if (b.tasks?.length) continue;
-      b.tasks = [
-        {
+      // Folders are organizational only. Preserve existing thread model
+      // snapshots while discarding the unshipped folder-default setting.
+      if (b.projects?.some((project) => "modelSelection" in project)) {
+        b.projects = b.projects.map(({ id, name }) => ({ id, name }));
+        botsMigrated = true;
+      }
+      if (!b.tasks?.length) {
+        b.tasks = [{
           threadId: b.threadId,
           title: this.firstUserLine(b.threadId) ?? UNTITLED_TASK,
           createdAt: b.createdAt,
           resumeCursors: b.resumeCursors ?? {},
-        },
-      ];
+        }];
+        botsMigrated = true;
+      }
+      // Retain an old active transcript even if a stale tasks array omitted
+      // it. Repairing the pointer by selecting another task would hide it.
+      let active = b.tasks.find((task) => task.threadId === b.threadId);
+      if (!active) {
+        active = {
+          threadId: b.threadId,
+          title: this.firstUserLine(b.threadId) ?? UNTITLED_TASK,
+          createdAt: b.createdAt,
+          resumeCursors: b.resumeCursors ?? {},
+        };
+        b.tasks.unshift(active);
+        botsMigrated = true;
+      }
+      for (const task of b.tasks) {
+        if (task.modelSelection === undefined) {
+          task.modelSelection = structuredClone(b.modelSelection);
+          botsMigrated = true;
+        }
+        if (!task.resumeCursors) {
+          task.resumeCursors = task === active ? (b.resumeCursors ?? {}) : {};
+          botsMigrated = true;
+        }
+        if (task.unread === undefined) {
+          task.unread = task === active && b.unread;
+          botsMigrated = true;
+        }
+        if (task === active) {
+          if (task.rewound === undefined && b.rewound !== undefined) {
+            task.rewound = b.rewound;
+            botsMigrated = true;
+          }
+          if (task.pinnedMessageId === undefined && b.pinnedMessageId !== undefined) {
+            task.pinnedMessageId = b.pinnedMessageId;
+            botsMigrated = true;
+          }
+        }
+        if (task.approvalMode !== undefined && !isApprovalMode(task.approvalMode)) {
+          delete task.approvalMode;
+          botsMigrated = true;
+        }
+        if (task.busy !== undefined || task.activity !== undefined) botsMigrated = true;
+        task.busy = false;
+        task.activity = "idle";
+      }
+      this.mirrorActiveTask(b, active);
+      b.unread = b.tasks.some((task) => task.unread);
     }
+    if (botsMigrated) this.saveBots();
     // Search reads SQLite directly, so migrate every known legacy transcript
     // at startup rather than waiting until the user happens to open it. Only
     // pending JSON files are touched; already-migrated threads stay lazy.
@@ -889,7 +981,10 @@ export class Store {
   }
 
   private saveBots(bots: BotRecord[] = this.bots) {
-    writeFileAtomic(BOTS_FILE, JSON.stringify(bots, null, 2));
+    writeFileAtomic(BOTS_FILE, JSON.stringify(bots.map(({ busy: _busy, activity: _activity, ...bot }) => ({
+      ...bot,
+      tasks: bot.tasks?.map(({ busy: _taskBusy, activity: _taskActivity, ...task }) => task),
+    })), null, 2));
   }
 
   private saveGroups() {
@@ -1389,7 +1484,16 @@ export class Store {
       createdAt: Date.now(),
     };
     if (section) bot.section = section;
-    bot.tasks = [{ threadId: bot.threadId, title: UNTITLED_TASK, createdAt: bot.createdAt, resumeCursors: {} }];
+    bot.tasks = [{
+      threadId: bot.threadId,
+      title: UNTITLED_THREAD,
+      createdAt: bot.createdAt,
+      resumeCursors: {},
+      modelSelection: structuredClone(bot.modelSelection),
+      unread: false,
+      activity: "idle",
+      busy: false,
+    }];
     this.bots.unshift(bot);
     this.saveBots();
     // The folder exists from the first moment, so the user can open
@@ -1418,6 +1522,7 @@ export class Store {
     const bot = this.bot(id);
     if (!bot) return false;
     this.bots = this.bots.filter((b) => b.id !== id);
+    this.legacyActivities.delete(id);
     // every task's transcript goes with the bot, not just the open one
     for (const threadId of new Set([bot.threadId, ...(bot.tasks ?? []).map((t) => t.threadId)])) {
       this.deleteThreadRecord(threadId);
@@ -1446,6 +1551,15 @@ export class Store {
     // Runtime revocations must become effective in memory even when disk is
     // unavailable. Profile edits use the separate atomic path below.
     Object.assign(bot, patch);
+    const task = this.activeTask(id);
+    if (task) {
+      for (const key of ["resumeCursors", "rewound", "pinnedMessageId", "unread"] as const) {
+        if (Object.prototype.hasOwnProperty.call(patch, key)) {
+          Object.assign(task, { [key]: structuredClone(patch[key]) });
+        }
+      }
+      bot.unread = bot.tasks!.some((candidate) => candidate.unread);
+    }
     this.saveBots();
     this.emit({ type: "bot", botId: id });
     return bot;
@@ -1528,18 +1642,36 @@ export class Store {
     return { ok: true, bots: ids.map((id) => this.bot(id)!) };
   }
 
-  /** The one way runtime state changes. Sets `activity` and derives `busy`
-   * from it, so a reader that only knows busy sees the same truth. */
+  /** Legacy bot/room activity occupies its own slot; direct conversations
+   * use setTaskActivity so settling one thread cannot clear another. */
   setActivity(botId: string, activity: BotActivity): BotRecord | null {
     const bot = this.bot(botId);
     if (!bot) return null;
-    const busy = ACTIVITY_BUSY.has(activity);
-    if (bot.activity === activity && Boolean(bot.busy) === busy) return bot;
-    bot.activity = activity;
-    bot.busy = busy;
-    this.saveBots();
+    if ((this.legacyActivities.get(botId) ?? "idle") === activity) return bot;
+    this.legacyActivities.set(botId, activity);
+    this.refreshBotActivity(bot);
     this.emit({ type: "bot", botId });
     return bot;
+  }
+
+  setTaskActivity(botId: string, threadId: string, activity: BotActivity): BotRecord | null {
+    const bot = this.bot(botId);
+    const task = this.taskByThread(botId, threadId);
+    if (!bot || !task) return null;
+    const busy = ACTIVITY_BUSY.has(activity);
+    if ((task.activity ?? "idle") === activity && Boolean(task.busy) === busy) return bot;
+    task.activity = activity;
+    task.busy = busy;
+    this.refreshBotActivity(bot);
+    this.emit({ type: "bot", botId });
+    return bot;
+  }
+
+  private refreshBotActivity(bot: BotRecord) {
+    const activities = [this.legacyActivities.get(bot.id), ...(bot.tasks ?? []).map((task) => task.activity)];
+    bot.activity = (["waiting-on-you", "no-signal", "working", "dead"] as const)
+      .find((activity) => activities.includes(activity)) ?? "idle";
+    bot.busy = ACTIVITY_BUSY.has(bot.activity);
   }
 
   /** Elect one Chief of Staff in its section (or clear one section) as one persisted change.
@@ -1682,6 +1814,44 @@ export class Store {
   }
 
   // ── tasks ─────────────────────────────────────────────────────────────
+  project(botId: string, projectId: string): BotProjectRecord | undefined {
+    return this.bot(botId)?.projects?.find((project) => project.id === projectId);
+  }
+
+  createProject(botId: string, name: string): BotProjectRecord | null {
+    const bot = this.bot(botId);
+    if (!bot || !name.trim()) return null;
+    const project: BotProjectRecord = {
+      id: newId(), name: name.trim().slice(0, 80),
+    };
+    bot.projects = [...(bot.projects ?? []), project];
+    this.saveBots();
+    this.emit({ type: "bot", botId });
+    return project;
+  }
+
+  patchProject(botId: string, projectId: string, patch: Partial<Pick<BotProjectRecord, "name">>): BotProjectRecord | null {
+    const project = this.project(botId, projectId);
+    if (!project || (patch.name !== undefined && !patch.name.trim())) return null;
+    if (patch.name !== undefined) project.name = patch.name.trim().slice(0, 80);
+    this.saveBots();
+    this.emit({ type: "bot", botId });
+    return project;
+  }
+
+  /** Removing an organizational label never removes its conversations. */
+  deleteProject(botId: string, projectId: string): BotRecord | null {
+    const bot = this.bot(botId);
+    if (!bot || !this.project(botId, projectId)) return null;
+    bot.projects = bot.projects!.filter((project) => project.id !== projectId);
+    for (const task of bot.tasks ?? []) {
+      if (task.projectId === projectId) delete task.projectId;
+    }
+    this.saveBots();
+    this.emit({ type: "bot", botId });
+    return bot;
+  }
+
   /** The first thing the human asked in a thread — a task's natural name. */
   private firstUserLine(threadId: string): string | null {
     const first = this.messagesFor(threadId).find((m) => m.role === "user" && m.kind === "text" && m.text?.trim());
@@ -1701,21 +1871,76 @@ export class Store {
     return this.bot(botId)?.tasks?.find((t) => t.threadId === threadId);
   }
 
+  /** A turn gets an independent snapshot without changing the selected task
+   * or mutating the bot's defaults while another turn is running. */
+  projectBotForTask(botId: string, threadId: string): BotRecord | null {
+    const bot = this.bot(botId);
+    const task = this.taskByThread(botId, threadId);
+    if (!bot || !task) return null;
+    return {
+      ...bot,
+      threadId: task.threadId,
+      modelSelection: structuredClone(task.modelSelection ?? bot.modelSelection),
+      resumeCursors: structuredClone(task.resumeCursors),
+      approvalMode: task.approvalMode ?? (task.autoApprove === undefined ? bot.approvalMode : undefined),
+      autoApprove: task.autoApprove ?? bot.autoApprove,
+      alwaysAllow: structuredClone(task.alwaysAllow ?? bot.alwaysAllow),
+      unread: Boolean(task.unread),
+      rewound: task.rewound,
+      pinnedMessageId: task.pinnedMessageId,
+      activity: task.activity ?? "idle",
+      busy: Boolean(task.busy),
+    };
+  }
+
+  patchTask(botId: string, threadId: string, patch: TaskPatch): TaskRecord | null {
+    const bot = this.bot(botId);
+    const task = this.taskByThread(botId, threadId);
+    if (!bot || !task) return null;
+    if (patch.projectId !== undefined && !this.project(botId, patch.projectId)) return null;
+    for (const key of TASK_PATCH_FIELDS) {
+      if (Object.prototype.hasOwnProperty.call(patch, key)) {
+        Object.assign(task, { [key]: structuredClone(patch[key]) });
+      }
+    }
+    if (typeof patch.title === "string") task.title = patch.title.trim().slice(0, 80) || UNTITLED_THREAD;
+    if (bot.threadId === threadId) this.mirrorActiveTask(bot, task);
+    bot.unread = bot.tasks!.some((candidate) => candidate.unread);
+    this.saveBots();
+    this.emit({ type: "bot", botId });
+    return task;
+  }
+
+  private mirrorActiveTask(bot: BotRecord, task: TaskRecord) {
+    bot.threadId = task.threadId;
+    bot.resumeCursors = structuredClone(task.resumeCursors);
+    bot.rewound = task.rewound;
+    bot.pinnedMessageId = task.pinnedMessageId;
+  }
+
   /** A fresh context on the same bot: new thread, new session, same
    * persona/tools/computer. Becomes the active task. */
-  createTask(botId: string, title?: string, activate = true): TaskRecord | null {
+  createTask(botId: string, title?: string, activate = true, projectId?: string): TaskRecord | null {
     const bot = this.bot(botId);
     if (!bot) return null;
+    if (projectId !== undefined && !this.project(botId, projectId)) return null;
     const task: TaskRecord = {
       threadId: newId(),
-      title: title?.trim() || UNTITLED_TASK,
+      title: title?.trim() || UNTITLED_THREAD,
       createdAt: Date.now(),
+      ...(projectId ? { projectId } : {}),
       resumeCursors: {},
+      modelSelection: structuredClone(bot.modelSelection),
+      approvalMode: approvalModeFor(bot),
+      autoApprove: Boolean(bot.autoApprove),
+      alwaysAllow: [...(bot.alwaysAllow ?? [])],
+      unread: false,
+      activity: "idle",
+      busy: false,
     };
     bot.tasks = [task, ...(bot.tasks ?? [])];
     if (activate) {
-      bot.threadId = task.threadId;
-      bot.resumeCursors = {}; // legacy mirror follows the active task
+      this.mirrorActiveTask(bot, task);
     }
     this.saveBots();
     this.emit({ type: "bot", botId });
@@ -1726,26 +1951,20 @@ export class Store {
     const bot = this.bot(botId);
     const task = bot?.tasks?.find((t) => t.threadId === threadId);
     if (!bot || !task) return null;
-    bot.threadId = task.threadId;
-    bot.resumeCursors = { ...task.resumeCursors };
+    this.mirrorActiveTask(bot, task);
     this.saveBots();
     this.emit({ type: "bot", botId });
     return bot;
   }
 
   renameTask(botId: string, threadId: string, title: string): TaskRecord | null {
-    const task = this.bot(botId)?.tasks?.find((t) => t.threadId === threadId);
-    if (!task) return null;
-    task.title = title.trim().slice(0, 80) || UNTITLED_TASK;
-    this.saveBots();
-    this.emit({ type: "bot", botId });
-    return task;
+    return this.patchTask(botId, threadId, { title });
   }
 
   /** Name a task after its first message, once. */
   titleTaskFromFirstMessage(botId: string, text: string, threadId?: string) {
     const task = threadId ? this.taskByThread(botId, threadId) : this.activeTask(botId);
-    if (!task || task.title !== UNTITLED_TASK) return;
+    if (!task || (task.title !== UNTITLED_TASK && task.title !== UNTITLED_THREAD)) return;
     task.title = titleFromMessage(text);
     this.saveBots();
     this.emit({ type: "bot", botId });
@@ -1759,9 +1978,10 @@ export class Store {
     bot.tasks = bot.tasks.filter((t) => t.threadId !== threadId);
     this.deleteThreadRecord(threadId);
     if (bot.threadId === threadId) {
-      bot.threadId = bot.tasks[0]!.threadId;
-      bot.resumeCursors = { ...bot.tasks[0]!.resumeCursors };
+      this.mirrorActiveTask(bot, bot.tasks[0]!);
     }
+    bot.unread = bot.tasks.some((task) => task.unread);
+    this.refreshBotActivity(bot);
     this.saveBots();
     this.emit({ type: "bot", botId });
     return bot;

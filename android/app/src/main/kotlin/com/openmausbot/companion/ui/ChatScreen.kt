@@ -161,12 +161,10 @@ fun ChatScreen(
         ThreadResolution.Result.Gone -> LaunchedEffect(destination) { onBack() }
         // The live chat record, so busy/unread stay current as frames land.
         is ThreadResolution.Result.Open -> {
-            // A thread the fleet has now put a name to stops being a thread, so
-            // this chat follows its bot from here on — including when the task
-            // that is open is the one deleted.
+            // Resolve the owner without changing the task named by the destination.
             val resolved = (destination as? Destination.Thread)?.let { resolution.chat.target }
             LaunchedEffect(resolved) { if (resolved != null) onResolved(resolved) }
-            LoadedChat(resolution.chat, state, onBack, onOpenComputer, onOpenOverview, retainsDraft)
+            LoadedChat(resolution.chat, state, onBack, onOpenComputer, onOpenOverview, retainsDraft, onResolved)
         }
     }
 }
@@ -197,10 +195,9 @@ private fun LoadedChat(
     onOpenComputer: (String) -> Unit,
     onOpenOverview: (String) -> Unit,
     retainsDraft: (chatId: String) -> Boolean,
+    onSelectTask: (ChatTarget) -> Unit,
 ) {
-    // The bot's *current* thread, not the one the destination named. Switching or
-    // creating a task moves a bot to another thread; everything below re-keys on
-    // that, so the screen follows the bot to the task it is now in.
+    // This screen's selected task, independent of the desktop's selection.
     val threadId = chat.threadId
     // Stable conversation identity — not threadId. iOS keeps `@State draft`
     // across a task switch inside the same ChatView; keying the draft on
@@ -532,6 +529,9 @@ private fun LoadedChat(
     LaunchedEffect(threadId, chat.unread) {
         if (chat.unread) session.markRead(chat)
     }
+    LaunchedEffect(threadId, state.messages.containsKey(threadId)) {
+        if (!state.messages.containsKey(threadId)) session.loadThread(threadId)
+    }
 
     val headerCount = if (hasMore) 1 else 0
     // One slot at the bottom, whichever of the three is in it — iOS gives all of
@@ -592,8 +592,9 @@ private fun LoadedChat(
             )
             ChatActionId.NEW_TASK -> scope.launch {
                 when (chat) {
-                    is Chat.BotChat -> session.createTask(chat.bot, null)
+                    is Chat.BotChat -> session.createTask(chat.bot, null)?.let { onSelectTask(Chat.BotChat(it).target) }
                     is Chat.RoomChat -> if (chat.supportsTasks) session.createTask(chat.room, null)
+                        ?.let { onSelectTask(Chat.RoomChat(it).target) }
                 }
             }
             ChatActionId.TASKS -> showingTasks = true
@@ -961,7 +962,7 @@ private fun LoadedChat(
     }
 
     if (showingTasks) {
-        if (chat.supportsTasks) TaskSheet(chat = chat, onDismiss = { showingTasks = false })
+        if (chat.supportsTasks) TaskSheet(chat = chat, onDismiss = { showingTasks = false }, onSelectTask = onSelectTask)
     }
 
     if (showingProfile && bot != null) {

@@ -219,7 +219,19 @@ data class ModelSelection(
 )
 
 @Serializable
-data class BotTask(val threadId: String, val title: String, val createdAt: Double)
+data class BotTask(
+    val threadId: String,
+    val title: String,
+    val createdAt: Double,
+    val modelSelection: ModelSelection? = null,
+    val activity: String? = null,
+    val busy: Boolean? = null,
+    val unread: Boolean? = null,
+    val approvalMode: String? = null,
+    val autoApprove: Boolean? = null,
+    val alwaysAllow: List<String>? = null,
+    val projectId: String? = null,
+)
 
 @Serializable
 data class Bot(
@@ -236,6 +248,7 @@ data class Bot(
     val avatarUrl: String? = null,
     val avatarCrop: AvatarCrop? = null,
     val busy: Boolean? = null,
+    val activity: String? = null,
     val pinned: Boolean? = null,
     val hidden: Boolean? = null,
     /** Desktop sidebar section. Missing or blank means the built-in Bots area. */
@@ -260,6 +273,26 @@ data class Bot(
     val activeLeafId: String? = null,
     val hasMore: Boolean? = null,
 )
+
+/** Project only task-local controls; the original fleet record stays profile-global. */
+fun Bot.forTask(requestedThreadId: String): Bot? {
+    val task = tasks?.firstOrNull { it.threadId == requestedThreadId }
+    if (task == null) return takeIf { threadId == requestedThreadId }
+    val selected = threadId == requestedThreadId
+    return copy(
+        threadId = requestedThreadId,
+        modelSelection = task.modelSelection ?: modelSelection,
+        busy = task.busy ?: if (selected) busy else false,
+        activity = task.activity ?: if (selected) activity else null,
+        unread = task.unread ?: if (selected) unread else false,
+        approvalMode = task.approvalMode ?: approvalMode,
+        autoApprove = task.autoApprove ?: autoApprove,
+        alwaysAllow = task.alwaysAllow ?: alwaysAllow,
+        messages = if (selected) messages else null,
+        activeLeafId = if (selected) activeLeafId else null,
+        hasMore = if (selected) hasMore else null,
+    )
+}
 
 @Serializable(with = AvatarCropSerializer::class)
 enum class AvatarCrop { MASCOT, CIRCLE, ROUNDED, SQUARE }
@@ -337,7 +370,7 @@ object FleetSerializer : KSerializer<Fleet> {
 }
 
 @Serializable
-data class ThreadPage(val messages: List<Message>, val hasMore: Boolean? = null)
+data class ThreadPage(val messages: List<Message>, val hasMore: Boolean? = null, val activeLeafId: String? = null)
 
 @Serializable
 data class SearchHit(

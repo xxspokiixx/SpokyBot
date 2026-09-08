@@ -23,14 +23,13 @@ import type { BotRecord, Message } from "./store.ts";
 /** The slice of Store this module needs — narrow so tests can fake it. */
 export interface SteerStore {
   bot(id: string): BotRecord | null;
+  projectBotForTask?(botId: string, threadId: string): BotRecord | null;
   appendMessage(threadId: string, message: Omit<Message, "id" | "at">): Message;
   patchMessage(threadId: string, messageId: string, patch: Partial<Message>): Message | null;
 }
 
 interface QueueEntry {
-  /** Kept beside the threadId because the settle that frees the bot can
-   * happen on a DIFFERENT thread (a room turn) — drain matches on "this
-   * queue's bot is idle now", which needs the bot, not the settling thread. */
+  /** Keep ownership pinned even when the selected task changes. */
   botId: string;
   items: Array<{ messageId: string; text: string; prompt: string; replyToId?: string; sendId?: string }>;
 }
@@ -64,7 +63,7 @@ export function queueSteeredMessage(
   return { id };
 }
 
-/** Drain every queue whose bot is idle: append the held lines (leaf is now
+/** Drain every queue whose task is idle: append the held lines (leaf is now
  * the finished turn's last item), then one run per thread whose prompt is
  * the texts separated by a blank line. `userMessage` is the last appended line
  * so startTurn does not duplicate it; `excludeIds` is every drained line
@@ -80,16 +79,19 @@ export function drainSteeredMessages(
     userMessage: Message,
     excludeIds: string[],
   ) => void | Promise<void>,
+  isBlocked?: (botId: string, threadId: string) => boolean,
 ): void {
   // deleting only the entry being visited is safe under Map iteration
   for (const [threadId, entry] of queues) {
-    const bot = store.bot(entry.botId);
+    const bot = store.projectBotForTask
+      ? store.projectBotForTask(entry.botId, threadId)
+      : store.bot(entry.botId);
     if (!bot) {
-      // the bot was deleted while messages waited — nothing left to steer
+      // the bot or task was deleted while messages waited
       queues.delete(threadId);
       continue;
     }
-    if (bot.busy) continue; // still working — the next settle tries again
+    if (bot.busy || isBlocked?.(entry.botId, threadId)) continue;
     // committed to draining: the entry leaves the map before anything runs,
     // so a settle racing another settle can never fire the same queue twice
     queues.delete(threadId);
@@ -141,9 +143,9 @@ export function queuedSteeredMessage(
  * is stable even if the bot switches away from the task while the request is
  * in flight. Returns false when it was already drained, belongs to another
  * bot, or a restart lost the in-memory auto-run intent. */
-export function cancelSteeredMessage(botId: string, messageId: string): boolean {
+export function cancelSteeredMessage(botId: string, messageId: string, expectedThreadId?: string): boolean {
   for (const [threadId, entry] of queues) {
-    if (entry.botId !== botId) continue;
+    if (entry.botId !== botId || (expectedThreadId !== undefined && threadId !== expectedThreadId)) continue;
     const items = entry.items.filter((item) => item.messageId !== messageId);
     if (items.length === entry.items.length) continue;
     if (items.length === 0) queues.delete(threadId);

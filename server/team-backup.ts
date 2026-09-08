@@ -128,6 +128,7 @@ export function importTeamBackup(store: Store, routines: RoutineManager, input: 
       const bot = store.bot(botIds.get(source.key)!)!;
       const tasks = source.tasks.map((task, i) => ({
         threadId: i === 0 ? bot.threadId : newId(), title: task.title, createdAt: task.createdAt, resumeCursors: {},
+        modelSelection: structuredClone(selection), activity: "idle" as const, busy: false, unread: false,
       }));
       // Own the task IDs before writing their transcripts, so rollback also
       // removes partially imported history if persistence fails midway.

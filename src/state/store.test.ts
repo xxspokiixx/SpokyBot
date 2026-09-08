@@ -2,10 +2,12 @@ import { describe, expect, it, vi } from "vitest";
 
 import {
   configStatusFromFrame,
+  currentTaskBot,
   initialState,
   loadSnapshotBoundary,
   openNotificationTarget,
   persistBotUpdate,
+  pinBotThreadAction,
   reducer,
   requestConfirmedBotDeletion,
   visibleNotificationThread,
@@ -13,9 +15,109 @@ import {
   type BotAnnouncement,
   type Group,
   type Message,
+  type Action,
 } from "./store";
 import { openLiveEvents, type LiveEventSourceLike, type LiveEventsPlatform } from "../lib/live-events";
 import type { RoutineRun } from "../lib/routines";
+
+describe("independent bot threads", () => {
+  const bot: Bot = {
+    id: "thread-bot", threadId: "first", name: "Maus", title: "Helper", description: "",
+    notifications: true, color: "green", unread: true, busy: true, activity: "waiting-on-you",
+    modelSelection: { instanceId: "default", model: "default-model" }, approvalMode: "ask", alwaysAllow: [],
+    messages: [{ id: "first-message", role: "user", kind: "text", text: "First conversation", at: 1 }],
+    activeLeafId: "first-message",
+    tasks: [
+      { threadId: "first", title: "First", createdAt: 1, activity: "idle", busy: false, unread: false,
+        modelSelection: { instanceId: "codex", model: "thread-model", effort: "high" }, approvalMode: "auto", alwaysAllow: ["Read"] },
+      { threadId: "second", title: "Second", createdAt: 2, activity: "waiting-on-you", busy: true, unread: true,
+        modelSelection: { instanceId: "claude", model: "other-model" }, approvalMode: "ask" },
+    ],
+  };
+  const start = () => ({ ...initialState, bots: [bot], selectedId: bot.id });
+
+  it("keeps the profile aggregate while projecting the selected thread's model, permissions and idle composer", () => {
+    const current = currentTaskBot(bot);
+    expect(current).toMatchObject({ busy: false, activity: "idle", unread: false, approvalMode: "auto", alwaysAllow: ["Read"] });
+    expect(current.modelSelection).toEqual(bot.tasks?.[0]?.modelSelection);
+    expect(bot.busy).toBe(true);
+    expect(currentTaskBot(bot, "second")).toMatchObject({ busy: true, activity: "waiting-on-you", approvalMode: "ask" });
+    expect(currentTaskBot({ ...bot, tasks: [{ threadId: "first", title: "Legacy", createdAt: 1 }] }).modelSelection).toEqual(bot.modelSelection);
+  });
+
+  it("edits only the pinned thread model and approval defaults", () => {
+    const modelSelection = { instanceId: "codex", model: "new-model" };
+    const modeled = reducer(start(), { type: "setModel", botId: bot.id, threadId: "first", selection: modelSelection });
+    const updated = reducer(modeled, { type: "updateTask", botId: bot.id, threadId: "first", patch: { approvalMode: "ask" } });
+    expect(updated.bots[0]?.modelSelection).toEqual(bot.modelSelection);
+    expect(updated.bots[0]?.tasks?.[0]).toMatchObject({ modelSelection, approvalMode: "ask" });
+    expect(updated.bots[0]?.tasks?.[1]).toEqual(bot.tasks?.[1]);
+  });
+
+  it("pins send, stop, edit, approval and queued-message actions before navigation", () => {
+    const actions: Action[] = [
+      { type: "send", botId: bot.id, text: "Go" }, { type: "interrupt", botId: bot.id },
+      { type: "editMessage", botId: bot.id, messageId: "first-message", text: "Changed" },
+      { type: "answerCard", botId: bot.id, messageId: "approval", answer: "Allow" },
+      { type: "dismissCard", botId: bot.id, messageId: "approval" },
+      { type: "cancelQueued", botId: bot.id, queueId: "queued" },
+    ];
+    for (const action of actions) expect(pinBotThreadAction(action, [bot])).toMatchObject({ threadId: "first" });
+    const pinned: Action = { type: "send", botId: bot.id, text: "Background", threadId: "second" };
+    expect(pinBotThreadAction(pinned, [bot])).toBe(pinned);
+  });
+
+  it("keeps background bot frames from switching the visible transcript or clearing unread", () => {
+    const patched = reducer(start(), { type: "botPatched", bot: { ...bot, threadId: "second", messages: [], activeLeafId: "other" } });
+    expect(patched.bots[0]?.threadId).toBe("first");
+    expect(patched.bots[0]?.messages).toEqual(bot.messages);
+    expect(patched.bots[0]?.activeLeafId).toBe("first-message");
+    const read = reducer(patched, { type: "select", id: bot.id });
+    expect(read.bots[0]?.unread).toBe(true);
+    expect(read.bots[0]?.tasks?.[1]?.unread).toBe(true);
+  });
+
+  it("folds background messages racing a switch snapshot without changing the original conversation", () => {
+    let state = reducer(start(), { type: "switchTask", botId: bot.id, threadId: "second" });
+    const reply: Message = { id: "second-reply", role: "bot", kind: "text", text: "Second answer", at: 3, parentId: null };
+    state = reducer(state, { type: "messageAdded", threadId: "second", message: reply });
+    expect(state.bots[0]?.messages).toEqual(bot.messages);
+    state = reducer(state, { type: "taskSwitched", bot: { ...bot, threadId: "second", messages: [], activeLeafId: null } });
+    expect(state.bots[0]?.messages).toEqual([reply]);
+    expect(state.bots[0]?.activeLeafId).toBe(reply.id);
+    expect(state.backgroundThreadEvents.second).toBeUndefined();
+    expect(currentTaskBot(state.bots[0]!).modelSelection.model).toBe("other-model");
+  });
+
+  it("can start a new thread while another waits and cancels only the pinned queue", () => {
+    const opened = reducer(start(), { type: "newTask", botId: bot.id });
+    expect(opened.selectedId).toBe(bot.id);
+    expect(opened.bots[0]?.busy).toBe(true);
+    const queued = { ...opened, pendingQueued: { first: [{ queueId: "one", text: "First" }], second: [{ queueId: "two", text: "Second" }] } };
+    const cancelled = reducer(queued, { type: "cancelQueued", botId: bot.id, threadId: "second", queueId: "two" });
+    expect(cancelled.pendingQueued.first).toEqual(queued.pendingQueued.first);
+    expect(cancelled.pendingQueued.second).toBeUndefined();
+  });
+
+  it("keeps folder name edits separate from every thread and the bot default", () => {
+    const projectBot = { ...bot, projects: [{ id: "work", name: "Work" }, { id: "personal", name: "Personal" }] };
+    const state = reducer({ ...start(), bots: [projectBot] }, { type: "updateProject", botId: bot.id, projectId: "work", patch: { name: "Research" } });
+    expect(state.bots[0]?.projects).toEqual([{ id: "work", name: "Research" }, { id: "personal", name: "Personal" }]);
+    expect(state.bots[0]?.tasks).toEqual(bot.tasks);
+    expect(state.bots[0]?.messages).toEqual(bot.messages);
+    expect(state.bots[0]?.modelSelection).toEqual(bot.modelSelection);
+  });
+
+  it("moves or ungroups a busy thread without changing its model, state, or selected conversation", () => {
+    const grouped = reducer(start(), { type: "updateTask", botId: bot.id, threadId: "second", patch: { projectId: "work" } });
+    expect(grouped.bots[0]?.tasks?.[1]).toEqual({ ...bot.tasks?.[1], projectId: "work" });
+    expect(grouped.bots[0]?.threadId).toBe("first");
+    expect(grouped.bots[0]?.messages).toEqual(bot.messages);
+    const ungrouped = reducer(grouped, { type: "updateTask", botId: bot.id, threadId: "second", patch: { projectId: null } });
+    expect(ungrouped.bots[0]?.tasks?.[1]).toEqual({ ...bot.tasks?.[1], projectId: undefined });
+    expect(ungrouped.bots[0]?.tasks?.[0]).toEqual(bot.tasks?.[0]);
+  });
+});
 
 describe("keyboard shortcuts dialog state", () => {
   it("opens and closes without replacing bot settings navigation", () => {

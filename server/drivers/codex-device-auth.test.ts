@@ -16,7 +16,10 @@ const mode = process.env.FAKE_AUTH_MODE || 'success';
 const args = process.argv.slice(2);
 appendFileSync(join(home, 'calls.jsonl'), JSON.stringify({args, home, codexHome: process.env.CODEX_HOME, marker: process.env.INSTANCE_MARKER}) + '\\n');
 if (args.join(' ') === 'login status') {
-  if (mode === 'status-hang') setInterval(() => {}, 1000);
+  if (mode === 'unconfirmed' && existsSync(join(home, 'authenticated'))) {
+    // Account confirmation can exceed the assertion library's default 1s poll window.
+    setTimeout(() => { process.stderr.write('Not logged in\\n'); process.exit(1); }, 1200);
+  } else if (mode === 'status-hang') setInterval(() => {}, 1000);
   else if (mode === 'already' || (existsSync(join(home, 'authenticated')) && mode !== 'unconfirmed')) {
     process.stderr.write('Logged in using ChatGPT\\n'); process.exit(0);
   } else if (mode === 'api') {
@@ -174,10 +177,11 @@ describe("Codex server-owned device authentication", () => {
   });
 
   it("requires a confirmed ChatGPT login even after an exit-0 device command", async () => {
-    const controller = create("unconfirmed");
+    const controller = create("unconfirmed", { startupTimeoutMs: 3000, lifetimeMs: 8000 });
     const start = await controller.start();
-    await expect.poll(async () => (await controller.get(start.flowId!)).phase).toBe("failed");
+    await expect.poll(async () => (await controller.get(start.flowId!)).phase, { timeout: 5000 }).toBe("failed");
     expect((await controller.get(start.flowId!)).message).toContain("did not confirm");
+    expect(calls().map((call) => call.args)).toEqual([["login", "status"], ["login", "--device-auth"], ["login", "status"]]);
   });
 
   it("reports failure after a prompt without disclosing raw provider output", async () => {

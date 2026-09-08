@@ -21,6 +21,7 @@ import AVFoundation
 
 struct ChatView: View {
     let chat: Chat
+    @State private var selectedThreadId: String
     @EnvironmentObject private var session: Session
     @Environment(\.dismiss) private var dismiss
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
@@ -59,6 +60,11 @@ struct ChatView: View {
     @AppStorage(PrefKey.activityDetail) private var activityDetail = ActivityDetail.full.rawValue
     @AppStorage(PrefKey.quickReplies) private var quickReplies = ""
 
+    init(chat: Chat) {
+        self.chat = chat
+        _selectedThreadId = State(initialValue: chat.threadId)
+    }
+
     /// The live bubble's scroll target. A constant because there is at most
     /// one per chat and it has no message id to borrow.
     static let liveBubbleId = "companion.live"
@@ -66,16 +72,28 @@ struct ChatView: View {
     /// The live chat record, so busy/unread stay current as frames land.
     private var current: Chat {
         switch chat {
-        case let .bot(bot): return session.state.bot(bot.id).map(Chat.bot) ?? chat
+        case let .bot(bot):
+            if let view = session.state.bot(bot.id)?.projected(forThread: selectedThreadId) { return .bot(view) }
+            // Keep the exact target until a removed thread dismisses. Never
+            // briefly fall back to a sibling while the view is closing.
+            var removed = bot
+            removed.threadId = selectedThreadId
+            removed.busy = false
+            return .bot(removed)
         case let .room(room):
             return session.state.rooms.first { $0.id == room.id }.map(Chat.room) ?? chat
         }
     }
 
-    /// A bot receives a new thread when its task changes. Navigation keeps
-    /// the original Chat value, so every transcript lookup must follow the
-    /// live record instead of the snapshot that opened this screen.
+    /// Bot selection is local to this screen; another device's navigation
+    /// must not move a draft, approval, or Stop action to a different thread.
     private var threadId: String { current.threadId }
+
+    private var selectedThreadWasRemoved: Bool {
+        guard case let .bot(bot) = chat else { return false }
+        guard let live = session.state.bot(bot.id) else { return true }
+        return live.tasks.map { !$0.contains { $0.threadId == selectedThreadId } } ?? false
+    }
 
     /// A task changes a bot's thread, but it does not make it a new bot.
     /// Intro history follows the chat itself so switching tasks cannot replay
@@ -318,8 +336,11 @@ struct ChatView: View {
             if case let .bot(bot) = current { ComputerView(bot: bot) }
         }
         .task(id: threadId) {
+            if selectedThreadWasRemoved { dismiss(); return }
+            let openedChat = current
+            await session.loadThreadIfNeeded(openedChat.threadId)
             // opening a chat is what marks it read, exactly as on the desktop
-            if current.unread { await session.markRead(current) }
+            if openedChat.unread { await session.markRead(openedChat) }
 #if DEBUG
             // `-open-plus`: the + sheet up, for the screenshot harness
             if ProcessInfo.processInfo.arguments.contains("-open-plus") { showingPlus = true }
@@ -328,14 +349,22 @@ struct ChatView: View {
             if ProcessInfo.processInfo.arguments.contains("-open-profile") { showingProfile = true }
 #endif
         }
+        .onChange(of: selectedThreadWasRemoved) { _, removed in
+            if removed { dismiss() }
+        }
+        .onChange(of: session.state.messages[threadId] == nil) { _, missing in
+            let requestedThread = threadId
+            if missing { Task { await session.loadThreadIfNeeded(requestedThread) } }
+        }
         .onChange(of: current.unread) { _, unread in
             // A message can arrive while this chat is already on screen. The
             // initial task above will not run again, so clear that new unread
             // bit here rather than leaving a badge on an open conversation.
-            if unread { Task { await session.markRead(current) } }
+            let readChat = current
+            if unread { Task { await session.markRead(readChat) } }
         }
         .onChange(of: threadId) { _, _ in
-            // ChatView follows a bot when its active task changes. A download
+            // The local task picker changed threads. A download
             // started in the previous task must not open a sheet (or surface
             // its error) in the new one when the network reply arrives late.
             resetFilePreview()
@@ -375,7 +404,9 @@ struct ChatView: View {
             if listening { composerFocused = false }
         }
         .sheet(isPresented: $showingTasks) {
-            if current.supportsTasks { TaskManagerView(chat: current) }
+            if current.supportsTasks {
+                TaskManagerView(chat: current) { selectedThreadId = $0 }
+            }
         }
         .sheet(isPresented: $showingProfile) {
             if case let .bot(bot) = current { AgentProfileView(bot: bot) }
@@ -517,7 +548,7 @@ struct ChatView: View {
             }
             .buttonStyle(.plain)
             .glassCapsule()
-            .accessibilityLabel(current.isBot ? "Open \(current.name) settings" : "Open \(current.name) chat options")
+            .accessibilityLabel(current.isBot ? "Open \(current.name) settings" : "Open \(current.name) thread options")
         }
         .padding(.top, -4)
     }
@@ -603,11 +634,11 @@ struct ChatView: View {
         ]
         if case let .bot(bot) = current {
             out.append(PlusAction(
-                id: "task", systemImage: "plus.square.on.square", title: "New task",
+                id: "task", systemImage: "plus.square.on.square", title: "New thread",
                 subtitle: "Start a fresh thread with \(bot.name)", disabled: bot.busy == true
             ) { Task { await session.createTask(for: bot, title: nil) } })
             out.append(PlusAction(
-                id: "tasks", systemImage: "square.stack", title: "Tasks",
+                id: "tasks", systemImage: "square.stack", title: "Threads",
                 subtitle: "Switch, rename or remove one"
             ) { showingTasks = true })
             out.append(PlusAction(
@@ -621,18 +652,18 @@ struct ChatView: View {
         }
         if case let .room(room) = current, room.dm != true {
             out.append(PlusAction(
-                id: "task", systemImage: "plus.square.on.square", title: "New task",
+                id: "task", systemImage: "plus.square.on.square", title: "New thread",
                 subtitle: "Start a fresh conversation in \(room.name)",
                 disabled: current.busy || hasPendingApproval
             ) { Task { await session.createTask(for: room, title: nil) } })
             out.append(PlusAction(
-                id: "tasks", systemImage: "square.stack", title: "Tasks",
+                id: "tasks", systemImage: "square.stack", title: "Threads",
                 subtitle: "Switch, rename or remove one"
             ) { showingTasks = true })
         }
         out.append(PlusAction(
             id: "share", systemImage: "doc.plaintext", title: "Share transcript",
-            subtitle: "This chat as Markdown"
+            subtitle: "This thread as Markdown"
         ) {
             Task {
                 if let url = await session.export(threadId: current.threadId, format: "markdown") {
@@ -717,6 +748,7 @@ struct ChatView: View {
         let draftAtSend = draft
         let text = (explicitText ?? draftAtSend).trimmingCharacters(in: .whitespacesAndNewlines)
         let outgoingAttachments = attachments
+        let chatAtSend = current
         guard !text.isEmpty || !outgoingAttachments.isEmpty,
               !preparingAttachments,
               !sendingMessage
@@ -729,7 +761,7 @@ struct ChatView: View {
             let sent = await session.send(
                 text: text,
                 attachments: outgoingAttachments,
-                to: current
+                to: chatAtSend
             )
             sendingMessage = false
             guard sent else {

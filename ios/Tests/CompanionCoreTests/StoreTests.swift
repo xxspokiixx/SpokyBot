@@ -187,6 +187,55 @@ final class StoreTests: XCTestCase {
         XCTAssertFalse(state.transcript(forThread: "another-task").contains { $0.id == "old-tail" })
     }
 
+    func testPinnedTaskKeepsItsModelRunAndBranchWhenAnotherDeviceSwitches() throws {
+        var state = CompanionState()
+        var bot = try XCTUnwrap(try fleet().bots.first)
+        bot.threadId = "thread-a"
+        bot.modelSelection = ModelSelection(instanceId: "codex", model: "profile-default")
+        bot.tasks = [
+            BotTask(threadId: "thread-a", title: "A", createdAt: 1, modelSelection: ModelSelection(instanceId: "codex", model: "model-a"), busy: true, unread: true),
+            BotTask(threadId: "thread-b", title: "B", createdAt: 2, modelSelection: ModelSelection(instanceId: "claude", model: "model-b"), busy: false, unread: false),
+        ]
+        var leafA = message("leaf-a")
+        leafA.parentId = "root-a"
+        var alternativeA = message("alternative-a")
+        alternativeA.parentId = "root-a"
+        bot.messages = [message("root-a"), leafA, alternativeA]
+        bot.activeLeafId = "leaf-a"
+        state.apply(.bot(bot))
+        state.apply(.runtime(RuntimeEvent(type: "content.delta", threadId: "thread-a", delta: "still running", streamKind: "assistant_text")))
+
+        // A desktop selection frame is canonical profile state, not phone
+        // navigation. Projecting A must never borrow B's model or transcript.
+        bot.threadId = "thread-b"
+        bot.busy = true // aggregate: A is still working
+        bot.messages = [message("root-b")]
+        bot.activeLeafId = "root-b"
+        state.apply(.bot(bot))
+        XCTAssertEqual(state.bot(bot.id)?.threadId, "thread-b")
+        XCTAssertEqual(state.bot(bot.id)?.modelSelection.model, "profile-default")
+        let pinned = try XCTUnwrap(state.bot(forThread: "thread-a"))
+        XCTAssertEqual(pinned.threadId, "thread-a")
+        XCTAssertEqual(pinned.modelSelection.model, "model-a")
+        XCTAssertEqual(pinned.busy, true)
+        XCTAssertEqual(pinned.unread, true)
+        XCTAssertEqual(state.bot(forThread: "thread-b")?.busy, false)
+        XCTAssertEqual(state.streaming["thread-a"], "still running")
+        XCTAssertEqual(state.visibleTranscript(forThread: "thread-a").map(\.id), ["root-a", "leaf-a"])
+        state.apply(.thread(threadId: "thread-a", activeLeafId: "alternative-a"))
+        XCTAssertEqual(state.visibleTranscript(forThread: "thread-a").map(\.id), ["root-a", "alternative-a"])
+        XCTAssertEqual(state.visibleTranscript(forThread: "thread-b").map(\.id), ["root-b"])
+        XCTAssertNil(bot.projected(forThread: "not-owned"))
+    }
+
+    func testColdBackgroundPageCarriesItsOwnBranchHead() {
+        var state = CompanionState()
+        var leaf = message("chosen")
+        leaf.parentId = "root"
+        state.merge(ThreadPage(messages: [message("root"), leaf, message("other")], hasMore: false, activeLeafId: "chosen"), intoThread: "thread-a")
+        XCTAssertEqual(state.visibleTranscript(forThread: "thread-a").map(\.id), ["root", "chosen"])
+    }
+
     func testAChannelTaskSwitchReplacesTheActiveTranscript() throws {
         var state = try hydrated()
         var room = try XCTUnwrap(state.rooms.first)

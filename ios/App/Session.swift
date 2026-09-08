@@ -902,7 +902,7 @@ final class Session: ObservableObject {
     func send(_ text: String, to chat: Chat) async {
         await perform {
             switch chat {
-            case let .bot(bot): try await $0.send(text: text, toBot: bot.id)
+            case let .bot(bot): try await $0.send(text: text, toBot: bot.id, threadId: bot.threadId)
             case let .room(room): try await $0.send(text: text, toRoom: room.id)
             }
         }
@@ -1019,7 +1019,7 @@ final class Session: ObservableObject {
     private func imageSupported(by chat: Chat, capableInstances: Set<String>) -> Bool {
         switch chat {
         case let .bot(bot):
-            return capableInstances.contains(bot.modelSelection.instanceId)
+            return capableInstances.contains(bot.currentTaskModelSelection.instanceId)
         case let .room(room):
             return !room.memberIds.isEmpty && room.memberIds.allSatisfy { id in
                 guard let bot = state.bot(id) else { return false }
@@ -1395,7 +1395,7 @@ final class Session: ObservableObject {
     /// about what was just permitted.
     func alwaysAllow(bot: Bot, card: OptionCard) async {
         guard let key = card.allowKey else { return }
-        await perform { try await $0.alwaysAllow(botId: bot.id, key: key) }
+        await perform { try await $0.alwaysAllow(botId: bot.id, key: key, threadId: bot.threadId) }
     }
 
     /// Make a new bot. The harness chooses its name, colour and greeting, so
@@ -1450,7 +1450,7 @@ final class Session: ObservableObject {
     }
 
     func interrupt(bot: Bot) async {
-        await perform { try await $0.interrupt(botId: bot.id) }
+        await perform { try await $0.interrupt(botId: bot.id, threadId: bot.threadId) }
     }
 
     /// Ask for one fresh cloud viewer URL. Unlike ordinary actions this
@@ -1468,7 +1468,7 @@ final class Session: ObservableObject {
     func markRead(_ chat: Chat) async {
         await perform(quietly: true) {
             switch chat {
-            case let .bot(bot): try await $0.markRead(botId: bot.id)
+            case let .bot(bot): try await $0.markRead(botId: bot.id, threadId: bot.threadId)
             case let .room(room): try await $0.markRead(roomId: room.id)
             }
         }
@@ -1482,6 +1482,15 @@ final class Session: ObservableObject {
         } catch {
             actionError = error.localizedDescription
         }
+    }
+
+    /// A pinned background thread may not be in a fresh fleet snapshot.
+    func loadThreadIfNeeded(_ threadId: String) async {
+        guard let client, state.messages[threadId] == nil else { return }
+        do {
+            let page = try await client.messages(threadId: threadId)
+            state.merge(page, intoThread: threadId)
+        } catch { if !Task.isCancelled { actionError = error.localizedDescription } }
     }
 
     func image(threadId: String, messageId: String) async -> Data? {
@@ -1509,13 +1518,13 @@ final class Session: ObservableObject {
                     state.apply(.bot(bot))
                 }
                 if !hit.onActivePath {
-                    let leaf = try await client.setActiveBranch(botId: bot.id, messageId: hit.messageId)
+                    let leaf = try await client.setActiveBranch(botId: bot.id, messageId: hit.messageId, threadId: hit.threadId)
                     state.apply(.thread(threadId: hit.threadId, activeLeafId: leaf))
                 }
                 let page = try await client.messages(threadId: hit.threadId, around: hit.messageId)
                 state.merge(page, intoThread: hit.threadId)
                 focusedMessageId = hit.messageId
-                return state.bot(bot.id).map(Chat.bot)
+                return state.bot(forThread: hit.threadId).map(Chat.bot)
             }
             if let groupId = hit.groupId,
                var room = state.rooms.first(where: { $0.id == groupId }) {
@@ -1536,16 +1545,24 @@ final class Session: ObservableObject {
         if focusedMessageId == messageId { focusedMessageId = nil }
     }
 
-    func createTask(for bot: Bot, title: String?) async {
-        guard let client else { return }
-        do { state.apply(.bot(try await client.createTask(botId: bot.id, title: title))) }
-        catch { actionError = error.localizedDescription }
+    @discardableResult
+    func createTask(for bot: Bot, title: String?) async -> Bot? {
+        guard let client else { return nil }
+        do {
+            let updated = try await client.createTask(botId: bot.id, title: title)
+            state.apply(.bot(updated))
+            return updated
+        } catch { actionError = error.localizedDescription; return nil }
     }
 
-    func switchTask(_ task: BotTask, for bot: Bot) async {
-        guard let client, task.threadId != bot.threadId else { return }
-        do { state.apply(.bot(try await client.switchTask(botId: bot.id, threadId: task.threadId))) }
-        catch { actionError = error.localizedDescription }
+    @discardableResult
+    func switchTask(_ task: BotTask, for bot: Bot) async -> Bot? {
+        guard let client else { return nil }
+        do {
+            let updated = try await client.switchTask(botId: bot.id, threadId: task.threadId)
+            state.apply(.bot(updated))
+            return updated
+        } catch { actionError = error.localizedDescription; return nil }
     }
 
     func renameTask(_ task: BotTask, for bot: Bot, title: String) async {
@@ -1556,10 +1573,14 @@ final class Session: ObservableObject {
         } catch { actionError = error.localizedDescription }
     }
 
-    func deleteTask(_ task: BotTask, for bot: Bot) async {
-        guard let client else { return }
-        do { state.apply(.bot(try await client.deleteTask(botId: bot.id, threadId: task.threadId))) }
-        catch { actionError = error.localizedDescription }
+    @discardableResult
+    func deleteTask(_ task: BotTask, for bot: Bot) async -> Bot? {
+        guard let client else { return nil }
+        do {
+            let updated = try await client.deleteTask(botId: bot.id, threadId: task.threadId)
+            state.apply(.bot(updated))
+            return updated
+        } catch { actionError = error.localizedDescription; return nil }
     }
 
     func createTask(for room: Room, title: String?) async {
@@ -1605,7 +1626,7 @@ final class Session: ObservableObject {
     func updateModel(_ selection: ModelSelection, for bot: Bot) async -> Bot? {
         guard let client else { return nil }
         do {
-            let updated = try await client.updateModel(botId: bot.id, selection: selection)
+            let updated = try await client.updateModel(botId: bot.id, selection: selection, threadId: bot.threadId)
             guard !Task.isCancelled else { return nil }
             state.apply(.bot(updated))
             return updated
@@ -1832,13 +1853,13 @@ final class Session: ObservableObject {
     }
 
     func edit(_ message: Message, for bot: Bot, text: String) async {
-        await perform { try await $0.edit(botId: bot.id, messageId: message.id, text: text) }
+        await perform { try await $0.edit(botId: bot.id, messageId: message.id, text: text, threadId: bot.threadId) }
     }
 
     func switchVersion(to message: Message, for bot: Bot) async {
         guard let client else { return }
         do {
-            let leaf = try await client.setActiveBranch(botId: bot.id, messageId: message.id)
+            let leaf = try await client.setActiveBranch(botId: bot.id, messageId: message.id, threadId: bot.threadId)
             state.apply(.thread(threadId: bot.threadId, activeLeafId: leaf))
         } catch { actionError = error.localizedDescription }
     }
