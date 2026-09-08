@@ -25,7 +25,6 @@ import { BotAvatar } from "./Avatar";
 import { ComposerAttachments, pathForFile } from "./ComposerAttachments";
 import { LocalComputerAutoWarning } from "./LocalComputerAutoWarning";
 import { ApprovalModeSelector } from "./ApprovalModeSelector";
-import { ModelPicker } from "./ModelPicker";
 import { approvalModeFor, type ApprovalMode } from "../../shared/approval-mode";
 import {
   appendPastedText,
@@ -785,21 +784,6 @@ export function Composer({
             else if (bot) dispatch({ type: "cancelQueued", botId: bot.id, threadId, queueId });
           }}
         />
-        {modeBot && !remoteClient && !locked && (
-          <div className="relative z-[2] mb-1 flex flex-wrap items-center gap-2 px-2" aria-label="Thread settings">
-            <ModelPicker bot={modeBot} threadId={modeBot.threadId} />
-            {approvalEngine && <ApprovalModeSelector
-              approvalMode={modeBot.approvalMode}
-              autoApprove={modeBot.autoApprove}
-              providerName={approvalEngine.displayName}
-              driverKind={approvalEngine.driverKind}
-              onSelect={setApprovalMode}
-              disabled={Boolean(modeBot.busy)}
-              trustedModesAvailable={false}
-              trustedModesNotice="Full and Custom access are managed in bot settings in the desktop app."
-            />}
-          </div>
-        )}
         <div className="relative">
           {/* App-ground from the pill midline down, full-bleed. Bubbles may
               tuck into the top half of the radius; they must not show below
@@ -865,6 +849,18 @@ export function Composer({
                   <Target size={14} aria-hidden="true" />
                   {effectiveChannelMode === "goal" ? "/goal" : t("composer.goal.chip")}
                 </button>
+              )}
+              {modeBot && approvalEngine && !remoteClient && (
+                <ApprovalModeSelector
+                  approvalMode={modeBot.approvalMode}
+                  autoApprove={modeBot.autoApprove}
+                  providerName={approvalEngine.displayName}
+                  driverKind={approvalEngine.driverKind}
+                  onSelect={setApprovalMode}
+                  disabled={Boolean(modeBot.busy)}
+                  trustedModesAvailable={false}
+                  trustedModesNotice="Full and Custom access are managed in bot settings in the desktop app."
+                />
               )}
             </div>
           )}

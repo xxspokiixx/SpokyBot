@@ -25,7 +25,8 @@ into cosmetic folders.
 
 The sidebar shows recent/active threads beneath a bot. **All threads** is the
 compact searchable picker, especially useful on smaller screens. The model
-picker stays in the composer and applies to the visible thread. There is no
+picker stays in the chat header, while Ask/Auto stays inside the composer;
+both apply to the visible thread. There is no
 second "Tasks" area for the same bot conversations.
 
 The sidebar borrows T3's compact searchable conversation hierarchy: quiet

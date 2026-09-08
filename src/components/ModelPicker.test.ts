@@ -68,7 +68,7 @@ function renderEffort(instances: InstanceInfo[], effort?: EffortLevel): string {
 }
 
 describe("EffortRow", () => {
-  it("pins composer effort changes to its thread without changing profile defaults", () => {
+  it("pins thread effort changes without changing profile defaults", () => {
     fixture.instances = [engine(["high"])];
     const row = EffortRow({ bot: bot(), threadId: "independent-thread" })!;
     const levels = Children.toArray(row.props.children).at(-1) as ReactElement<{ children: ReactNode }>;
@@ -122,7 +122,7 @@ describe("ModelPicker trigger", () => {
   const effortChip = (markup: string) =>
     markup.match(/<span data-model-effort[^>]*>(.*?)<\/span>/s)?.[1].replace(/<!--.*?-->/g, "").trim();
 
-  it("names the thread in busy composer help and the bot in profile settings", () => {
+  it("names the thread in busy header help and the bot in profile settings", () => {
     fixture.instances = [engine()];
     for (const threadId of ["independent-thread", undefined]) {
       const markup = renderToStaticMarkup(createElement(ModelPicker, { bot: { ...bot(), busy: true }, threadId }));

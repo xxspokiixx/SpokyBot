@@ -18,14 +18,14 @@ export function ModelSection({ bot }: { bot: Bot }) {
             <div>
               <div className="text-[15px] font-medium text-ink">Default model</div>
               <div className="mt-0.5 text-[13px] text-ink-secondary">
-                For new threads. Each thread keeps its own model in the composer.
+                For new threads. Existing threads keep their own model choices.
               </div>
             </div>
           }
         />
       </div>
 
-      {/* Share the composer's effort choices, but edit the profile default. */}
+      {/* Share the model picker's effort choices, but edit the profile default. */}
       <EffortRow
         bot={bot}
         className="rounded-xl bg-card p-4"

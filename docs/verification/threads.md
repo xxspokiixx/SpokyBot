@@ -27,8 +27,10 @@ switching and Stop can be exercised without a real provider or account.
 6. Expand Launch team and select its separate histories. Group collaboration
    retains the existing serialized behavior; this does not enable concurrent
    group member turns.
-7. Check the upward model menu and that selecting a thread does not scroll the
-   whole document or hide the header. Test keyboard access to row menus too.
+7. Check the model selector in the header opens downward and Ask/Auto sits
+   inside the composer beside attachments. Both menus must stay visible.
+   Selecting a thread must not scroll the whole document or hide the header.
+   Test keyboard access to row menus too.
 
 The offline CLI may report an interrupted subprocess when stopped; the checks
 here concern ownership, state and navigation, not real-provider behavior.
