@@ -2,6 +2,7 @@
 // the name-lock that keeps the serving route inside the attachments dir.
 import {
   existsSync,
+  mkdirSync,
   mkdtempSync,
   readFileSync,
   readdirSync,
@@ -26,7 +27,9 @@ const {
   ATTACHMENT_PARTIAL_MAX_AGE_MS,
   FILE_MAX_BYTES,
   IMAGE_MAX_BYTES,
+  __resetAttachmentAccountingForTests,
   cleanupStaleAttachmentPartials,
+  deleteAttachment,
   extensionForFileMime,
   extensionForMime,
   readAttachment,
@@ -36,6 +39,15 @@ const {
   saveImageUpload,
   validateAttachmentUploadId,
 } = await import("./attachments.ts");
+
+// The cache tracks committed bytes in memory; anything that mutates
+// ATTACHMENTS_DIR directly on disk (rmSync/truncateSync/writeFileSync, all
+// used below to force quota states without a real 512MiB file) must reset it
+// so the next quota check rescans instead of trusting stale counts.
+function resetDir() {
+  rmSync(ATTACHMENTS_DIR, { recursive: true, force: true });
+  __resetAttachmentAccountingForTests();
+}
 
 const UPLOAD_A = "11111111-1111-4111-8111-111111111111";
 const UPLOAD_B = "22222222-2222-4222-8222-222222222222";
@@ -62,10 +74,10 @@ describe("extensionForMime", () => {
 
 describe("saveImage", () => {
   beforeEach(() => {
-    rmSync(ATTACHMENTS_DIR, { recursive: true, force: true });
+    resetDir();
   });
   afterEach(() => {
-    rmSync(ATTACHMENTS_DIR, { recursive: true, force: true });
+    resetDir();
   });
 
   it("persists bytes under the attachments dir with a generated name", () => {
@@ -118,15 +130,16 @@ describe("saveImage", () => {
 
 describe("aggregate attachment storage", () => {
   beforeEach(() => {
-    rmSync(ATTACHMENTS_DIR, { recursive: true, force: true });
+    resetDir();
   });
   afterEach(() => {
-    rmSync(ATTACHMENTS_DIR, { recursive: true, force: true });
+    resetDir();
   });
 
   it("rejects new data at the aggregate ceiling without pruning committed attachments", () => {
     const referenced = saveImage(Buffer.from("x"), "image/png");
     truncateSync(referenced.path, ATTACHMENTS_MAX_BYTES);
+    __resetAttachmentAccountingForTests();
 
     try {
       saveImage(Buffer.from("y"), "image/png");
@@ -143,6 +156,7 @@ describe("aggregate attachment storage", () => {
   it("counts concurrent reservations so uploads cannot race past the ceiling", async () => {
     const existing = saveImage(Buffer.from("x"), "image/png");
     truncateSync(existing.path, ATTACHMENTS_MAX_BYTES - 5);
+    __resetAttachmentAccountingForTests();
 
     const first = saveFile((async function* () {
       yield Buffer.from("four");
@@ -155,6 +169,7 @@ describe("aggregate attachment storage", () => {
   it("lets an unknown-length stream use the exact space left below a reservation increment", async () => {
     const existing = saveImage(Buffer.from("x"), "image/png");
     truncateSync(existing.path, ATTACHMENTS_MAX_BYTES - 2);
+    __resetAttachmentAccountingForTests();
 
     const saved = await saveFile((async function* () {
       yield Buffer.from("a");
@@ -166,6 +181,7 @@ describe("aggregate attachment storage", () => {
   it("releases reservations and removes partials after failed uploads", async () => {
     const existing = saveImage(Buffer.from("x"), "image/png");
     truncateSync(existing.path, ATTACHMENTS_MAX_BYTES - 3);
+    __resetAttachmentAccountingForTests();
 
     await expect(saveFile((async function* () {})(), "empty.txt", "text/plain", { expectedBytes: 3 }))
       .rejects.toThrow(/empty file/);
@@ -192,15 +208,20 @@ describe("aggregate attachment storage", () => {
     expect(existsSync(`${ATTACHMENTS_DIR}/${UPLOAD_A}.png`)).toBe(true);
   });
 
-  it("counts fresh crash leftovers against quota, then reclaims them when stale", () => {
+  it("counts fresh crash leftovers against quota, then reclaims them once a cleanup sweep runs", () => {
     const existing = saveImage(Buffer.from("x"), "image/png");
     truncateSync(existing.path, ATTACHMENTS_MAX_BYTES - 2);
+    __resetAttachmentAccountingForTests();
     const orphan = `${ATTACHMENTS_DIR}/.openmaus-upload-${UPLOAD_A}-${UPLOAD_B}.partial`;
     writeFileSync(orphan, "xx");
 
     expect(() => saveImage(Buffer.from("y"), "image/png")).toThrow(/storage is full/);
     const old = new Date(Date.now() - ATTACHMENT_PARTIAL_MAX_AGE_MS - 1_000);
     utimesSync(orphan, old, old);
+    // Reservation checks no longer rescan the directory on every call (that
+    // was the PERF-03 hot loop); a stale partial is reclaimed by an explicit
+    // cleanup sweep, not automatically on the next quota check.
+    expect(cleanupStaleAttachmentPartials()).toBe(1);
     expect(() => saveImage(Buffer.from("y"), "image/png")).not.toThrow();
     expect(existsSync(orphan)).toBe(false);
   });
@@ -208,6 +229,7 @@ describe("aggregate attachment storage", () => {
   it("reclaims an inactive partial immediately when its upload ID retries", async () => {
     const existing = saveImage(Buffer.from("x"), "image/png");
     truncateSync(existing.path, ATTACHMENTS_MAX_BYTES - 3);
+    __resetAttachmentAccountingForTests();
     const orphan = `${ATTACHMENTS_DIR}/.openmaus-upload-${UPLOAD_A}-${UPLOAD_B}.partial`;
     writeFileSync(orphan, "old");
 
@@ -217,14 +239,41 @@ describe("aggregate attachment storage", () => {
     expect(saved.path.endsWith(`${UPLOAD_A}.txt`)).toBe(true);
     expect(existsSync(orphan)).toBe(false);
   });
+
+  it("frees quota after deleteAttachment, without a rescan, for a file the cache already knows about", () => {
+    const first = saveImage(Buffer.from("x"), "image/png");
+    truncateSync(first.path, ATTACHMENTS_MAX_BYTES - 2);
+    __resetAttachmentAccountingForTests();
+    expect(() => saveImage(Buffer.from("yyy"), "image/png")).toThrow(/storage is full/);
+
+    deleteAttachment(first.path);
+    expect(existsSync(first.path)).toBe(false);
+    const second = saveImage(Buffer.from("yyy"), "image/png");
+    expect(second.bytes).toBe(3);
+    expect(readdirSync(ATTACHMENTS_DIR)).toEqual([second.path.split(/[\\/]/).pop()!]);
+  });
+
+  it("initializes correctly on a fresh process against a directory that already has files", () => {
+    // No saveImage/saveFile call has happened yet in this test, so the cache
+    // is still cold (__resetAttachmentAccountingForTests in the previous
+    // test's afterEach already guaranteed that) — this mirrors a process
+    // restart that finds attachments already on disk from a prior run.
+    mkdirSync(ATTACHMENTS_DIR, { recursive: true });
+    const preexisting = join(ATTACHMENTS_DIR, "11111111-1111-4111-8111-111111111111.png");
+    writeFileSync(preexisting, "x");
+    truncateSync(preexisting, ATTACHMENTS_MAX_BYTES - 2);
+
+    expect(() => saveImage(Buffer.from("yyy"), "image/png")).toThrow(/storage is full/);
+    expect(() => saveImage(Buffer.from("y"), "image/png")).not.toThrow();
+  });
 });
 
 describe("readAttachment name lock", () => {
   beforeEach(() => {
-    rmSync(ATTACHMENTS_DIR, { recursive: true, force: true });
+    resetDir();
   });
   afterEach(() => {
-    rmSync(ATTACHMENTS_DIR, { recursive: true, force: true });
+    resetDir();
   });
 
   it("refuses traversal, dotfiles, and names the saver never writes", () => {
@@ -238,10 +287,10 @@ describe("readAttachment name lock", () => {
 
 describe("shared files", () => {
   beforeEach(() => {
-    rmSync(ATTACHMENTS_DIR, { recursive: true, force: true });
+    resetDir();
   });
   afterEach(() => {
-    rmSync(ATTACHMENTS_DIR, { recursive: true, force: true });
+    resetDir();
   });
 
   it("allows useful document mimes but not executables, archives, or active markup", () => {

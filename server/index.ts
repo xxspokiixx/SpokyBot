@@ -43,6 +43,8 @@ import { validateBotCwd } from "./bot-cwd.ts";
 import {
   ATTACHMENTS_DIR,
   attachmentExists,
+  cleanupStaleAttachmentPartials,
+  deleteAttachment,
   extensionForMime,
   FILE_MAX_BYTES,
   IMAGE_MAX_BYTES,
@@ -704,7 +706,7 @@ function purgeGeneratedImagesForThread(threadId: string): void {
     if (!key.startsWith(`${threadId}:`)) continue;
     generatedImagesByTurn.delete(key);
     for (const attachment of attachments) {
-      try { unlinkSync(attachment.path); } catch {}
+      deleteAttachment(attachment.path);
     }
   }
 }
@@ -726,7 +728,7 @@ function retireProviderTurn(turnId: string): void {
     if (!key.endsWith(`:${turnId}`)) continue;
     generatedImagesByTurn.delete(key);
     for (const attachment of attachments) {
-      try { unlinkSync(attachment.path); } catch {}
+      deleteAttachment(attachment.path);
     }
   }
 }
@@ -10199,7 +10201,7 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
       if (!bot) {
         // There are no awaits between the refreshed lookup and this patch, but
         // keep the attachment invariant explicit if the store ever changes.
-        try { unlinkSync(saved.path); } catch {}
+        deleteAttachment(saved.path);
         return json(res, 404, { error: "no such bot" });
       }
       const visible = wireBot(bot);
@@ -12929,6 +12931,16 @@ calendarCalls.start();
 // Resolve the edition before accepting requests so /api/edition is never a guess.
 console.log(describeEdition(await loadEnterpriseLayer()));
 console.log(describeBrand(loadBrand()));
+
+// Reclaim upload partials a previous run crashed out of, and warm the
+// attachment quota cache off the same scan. This used to happen implicitly on
+// every reservation, which is exactly what made uploads quadratic in
+// directory size; start-up is the one place it costs nothing.
+// ponytail: once per boot, not periodic. A partial orphaned while this
+// process is up survives until the next restart — add a timer only if that
+// shows up as real quota pressure.
+const reclaimedPartials = cleanupStaleAttachmentPartials();
+if (reclaimedPartials > 0) console.log(`reclaimed ${reclaimedPartials} abandoned upload partial(s)`);
 
 server.listen(PORT, "127.0.0.1", () => {
   console.log(`openmausbot server on http://127.0.0.1:${PORT}`);

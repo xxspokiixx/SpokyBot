@@ -43,6 +43,19 @@ const uploadLocks = new Map<string, Promise<void>>();
 let reservedAttachmentBytes = 0;
 const STREAM_RESERVATION_INCREMENT_BYTES = 1024 * 1024;
 
+/** Cached total of on-disk bytes that count against the quota: committed
+ * attachments plus any partial file this process did not itself write (a
+ * crash leftover, until it is cleaned up). `null` means "not scanned yet in
+ * this process" — the only time a full directory walk happens. Every commit
+ * and delete after that updates it in place instead of rescanning, which is
+ * what makes reservation growth O(1) rather than O(directory size).
+ *
+ * This is single-process, in-memory state: it does not see files another
+ * process adds or removes in ATTACHMENTS_DIR. That is an accepted limit
+ * (the app runs one server per data dir; uploadLocks already assumes the
+ * same), not a design gap this fix covers. */
+let committedAttachmentBytes: number | null = null;
+
 /** Mimes the endpoint accepts, mapped to the extension stored on disk.
  * Sniffing is not attempted — a lie here only changes the filename. */
 const IMAGE_MIMES: Record<string, string> = {
@@ -95,7 +108,10 @@ export function validateAttachmentUploadId(value: string | undefined): string | 
   return normalized;
 }
 
-function attachmentUsageAndCleanup(now = Date.now()): { bytes: number; removed: number } {
+/** The one full directory walk. Only ever run from cold (committedBytes()
+ * the first time in a process) or from an explicit cleanup sweep — never
+ * from the per-reservation hot path, which is what made PERF-03 quadratic. */
+function scanAttachmentUsageAndCleanup(now = Date.now()): { bytes: number; removed: number } {
   ensureAttachmentsDir();
   let bytes = 0;
   let removed = 0;
@@ -121,10 +137,61 @@ function attachmentUsageAndCleanup(now = Date.now()): { bytes: number; removed: 
   return { bytes, removed };
 }
 
-/** Remove only abandoned temporary uploads. Active partials are protected
- * even if a very slow request crosses the age threshold. */
+/** Lazily initialize (once per process) or return the cached committed-bytes
+ * total. Never read `committedAttachmentBytes` directly — always go through
+ * this, so a cold process always gets one real scan before trusting it. */
+function committedBytes(): number {
+  if (committedAttachmentBytes === null) {
+    committedAttachmentBytes = scanAttachmentUsageAndCleanup().bytes;
+  }
+  return committedAttachmentBytes;
+}
+
+/** A newly committed file (saveFile/saveImage success path only — never the
+ * idempotent-retry branches, which reuse bytes already counted) adds to the
+ * cache. Safe to call without forcing a scan first: every caller reserves
+ * quota before writing a byte, and reservation already forces committedBytes()
+ * to initialize from a scan taken before this file existed. */
+function addCommittedBytes(delta: number): void {
+  committedAttachmentBytes = committedBytes() + delta;
+}
+
+/** Remove only abandoned temporary uploads, and refresh the cached usage
+ * total from the same fresh scan. This is the only place a full directory
+ * walk still happens after start-up; nothing on the upload path calls it
+ * per byte or per chunk anymore, so callers that want stale partials
+ * reclaimed promptly should invoke it on their own schedule. */
 export function cleanupStaleAttachmentPartials(now = Date.now()): number {
-  return attachmentUsageAndCleanup(now).removed;
+  const { bytes, removed } = scanAttachmentUsageAndCleanup(now);
+  committedAttachmentBytes = bytes;
+  return removed;
+}
+
+/** Delete a committed attachment (e.g. a generated image whose owning
+ * message/turn was retired) and keep the quota cache in sync. Every caller
+ * outside this module that removes a file saveImage/saveFile created must
+ * route through here instead of a raw unlink, or the cache will overcount
+ * forever and eventually reject uploads that should fit. */
+export function deleteAttachment(path: string): void {
+  try {
+    // Only bother sizing it if the cache is already warm — if it isn't, the
+    // eventual first scan just won't see this file, which is correct.
+    const size = committedAttachmentBytes !== null ? statSync(path).size : 0;
+    unlinkSync(path);
+    if (committedAttachmentBytes !== null) {
+      committedAttachmentBytes = Math.max(0, committedAttachmentBytes - size);
+    }
+  } catch {
+    // Already gone, or never existed — nothing to reconcile.
+  }
+}
+
+/** Test-only: force the next quota check to rescan the directory instead of
+ * trusting the cache. Needed because tests mutate ATTACHMENTS_DIR directly
+ * (truncateSync, rmSync, writeFileSync) to simulate quota states, which the
+ * cache can't observe. */
+export function __resetAttachmentAccountingForTests(): void {
+  committedAttachmentBytes = null;
 }
 
 /** A retry owns the same UUID namespace as the interrupted attempt. Once it
@@ -139,7 +206,14 @@ function cleanupAttachmentPartialsForUpload(uploadId: string): void {
     const path = join(ATTACHMENTS_DIR, entry.name);
     if (activePartials.has(path)) continue;
     try {
+      // Only bother sizing it if the cache is already warm — if it isn't,
+      // the eventual first scan runs after this unlink and simply never
+      // sees the file, so there is nothing to reconcile.
+      const size = committedAttachmentBytes !== null ? statSync(path).size : 0;
       unlinkSync(path);
+      if (committedAttachmentBytes !== null) {
+        committedAttachmentBytes = Math.max(0, committedAttachmentBytes - size);
+      }
     } catch {
       // A concurrent cleanup already removed the abandoned attempt.
     }
@@ -156,7 +230,7 @@ class AttachmentReservation {
   }
 
   private reserveAtLeast(required: number, preferred: number): void {
-    const used = attachmentUsageAndCleanup().bytes;
+    const used = committedBytes();
     const available = ATTACHMENTS_MAX_BYTES - used - reservedAttachmentBytes;
     if (available < required) {
       throw statusError(
@@ -208,13 +282,31 @@ async function withUploadLock<T>(uploadId: string | undefined, operation: () => 
   }
 }
 
+/** Every committed attachment name is `${uuid}${extension}` for one of these
+ * fixed extensions — saveFile/saveImage never write any other suffix — so
+ * whether a given upload ID is already committed, and under which content
+ * type, can be answered with a handful of direct stats instead of a scan
+ * over every file in the directory. */
+const KNOWN_ATTACHMENT_EXTENSIONS = Array.from(
+  new Set([...Object.values(IMAGE_MIMES), ...Object.values(FILE_MIMES)]),
+);
+
+function statSizeIfFile(path: string): number | null {
+  try {
+    const stat = statSync(path);
+    return stat.isFile() ? stat.size : null;
+  } catch {
+    return null;
+  }
+}
+
 function committedPathForUpload(uploadId: string, extension: string): string | null {
   ensureAttachmentsDir();
-  const exact = `${uploadId}${extension}`;
-  for (const entry of readdirSync(ATTACHMENTS_DIR, { withFileTypes: true })) {
-    if (!entry.isFile() || PARTIAL_NAME.test(entry.name)) continue;
-    if (entry.name === exact) return join(ATTACHMENTS_DIR, entry.name);
-    if (entry.name.startsWith(`${uploadId}.`)) {
+  const exactPath = join(ATTACHMENTS_DIR, `${uploadId}${extension}`);
+  if (statSizeIfFile(exactPath) !== null) return exactPath;
+  for (const other of KNOWN_ATTACHMENT_EXTENSIONS) {
+    if (other === extension) continue;
+    if (statSizeIfFile(join(ATTACHMENTS_DIR, `${uploadId}${other}`)) !== null) {
       throw statusError(409, "uploadId was already used for another content type");
     }
   }
@@ -368,6 +460,7 @@ export async function saveFile(
       try {
         await link(partialPath, path);
         await unlink(partialPath);
+        addCommittedBytes(bytes);
       } catch (error) {
         if ((error as NodeJS.ErrnoException).code !== "EEXIST") throw error;
         if (statSync(path).size !== bytes || await digestFile(path) !== await digestFile(partialPath)) {
@@ -419,6 +512,7 @@ export function saveImage(bytes: Buffer, mime: string, requestedUploadId?: strin
     writeFileSync(partialPath, bytes, { mode: 0o600, flag: "wx" });
     try {
       linkSync(partialPath, path);
+      addCommittedBytes(bytes.byteLength);
     } catch (error) {
       if ((error as NodeJS.ErrnoException).code !== "EEXIST") throw error;
       const saved = readFileSync(path);
