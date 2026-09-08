@@ -5,6 +5,7 @@ import { describe, expect, it, vi } from "vitest";
 
 import {
   ChatMarkdown,
+  CodeBlock,
   chatUrlTransform,
   markdownImageName,
   markdownImageOpenUrl,
@@ -152,5 +153,80 @@ describe("ChatMarkdown attachments", () => {
     }));
     expect(html).toContain("Loading Generated preview");
     expect(html).not.toContain("src=\"/workspace/output.png\"");
+  });
+});
+
+describe("ChatMarkdown code blocks", () => {
+  it.each([
+    ["tsx", "TypeScript (TSX)"],
+    ["averylongunknownlanguageidentifier", "Averylongunknownlanguageidentifier"],
+  ])("lets the %s badge shrink without wrapping the count or controls", (lang, label) => {
+    const html = renderToStaticMarkup(createElement(CodeBlock, {
+      code: "first\nsecond", lang, streaming: false,
+    }));
+    const badge = html.match(/<span[^>]*title="[^"]*"[^>]*>/)?.[0];
+    expect(badge).toContain(`title="${label}"`);
+    expect(badge).toContain("min-w-0 truncate");
+    expect(html).toContain("flex min-w-0 flex-1 items-center gap-2");
+    expect(html).toMatch(/<span class="[^"]*shrink-0 whitespace-nowrap[^"]*">2 lines<\/span>/);
+    expect(html).toContain("flex shrink-0 items-center gap-1 whitespace-nowrap");
+    expect(html).toContain('aria-label="Copy code to clipboard"');
+    expect(html).toContain('aria-label="Wrap long lines"');
+  });
+
+  it.each([["c++", "C++"], ["c#", "C#"]])("preserves punctuation in the %s fence label", (lang, label) => {
+    const html = renderToStaticMarkup(createElement(ChatMarkdown, {
+      text: `\`\`\`${lang}\nint value = 1;\n\`\`\``,
+    }));
+    expect(html).toContain(`>${label}</span>`);
+  });
+
+  it("counts deliberate blank lines before the closing fence", () => {
+    const html = renderToStaticMarkup(createElement(ChatMarkdown, {
+      text: "```ts\nconst x = 1;\n\n```",
+    }));
+    expect(html).toContain("2 lines");
+    expect(html).toContain("const x = 1;\n</pre>");
+  });
+
+  it("renders normalized language badge, line count, and accessible buttons for fenced code", () => {
+    const html = renderToStaticMarkup(createElement(ChatMarkdown, {
+      text: "```ts\nconst x: number = 42;\nconsole.log(x);\n```",
+    }));
+
+    expect(html).toContain("TypeScript");
+    expect(html).toContain("2 lines");
+    expect(html).toContain('aria-label="Copy code to clipboard"');
+    expect(html).toContain('aria-label="Wrap long lines"');
+    expect(html).toContain('title="Copy code"');
+    expect(html).toContain('type="button"');
+  });
+
+  it("renders singular line count and handles unknown or omitted language identifiers", () => {
+    const htmlUnknown = renderToStaticMarkup(createElement(ChatMarkdown, {
+      text: "```zig\nconst std = @import(\"std\");\n```",
+    }));
+    expect(htmlUnknown).toContain("Zig");
+    expect(htmlUnknown).toContain("1 line");
+
+    const htmlOmitted = renderToStaticMarkup(createElement(ChatMarkdown, {
+      text: "```\necho plain\n```",
+    }));
+    expect(htmlOmitted).toContain("Code");
+    expect(htmlOmitted).toContain("1 line");
+  });
+
+  it("renders CodeBlock component directly with proper structure and accessibility", () => {
+    const html = renderToStaticMarkup(createElement(CodeBlock, {
+      code: "line1\nline2\nline3\n",
+      lang: "py",
+      streaming: false,
+    }));
+
+    expect(html).toContain("Python");
+    expect(html).toContain("4 lines");
+    expect(html).toContain('aria-label="Copy code to clipboard"');
+    expect(html).toContain('aria-label="Wrap long lines"');
+    expect(html).toContain("line1\nline2\nline3");
   });
 });

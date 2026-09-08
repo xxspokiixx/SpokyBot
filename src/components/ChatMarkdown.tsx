@@ -7,11 +7,12 @@
 // fence is very likely complete), then highlights and caches — so the settled
 // bubble, a fresh component instance, mounts straight from cache instead of
 // popping from plain to highlighted.
-import { memo, useEffect, useState, type ReactNode } from "react";
+import { memo, useEffect, useRef, useState, type ReactNode } from "react";
 import Markdown, { defaultUrlTransform } from "react-markdown";
 import remarkGfm from "remark-gfm";
-import { Check, Copy, Download, LoaderCircle, RotateCcw } from "lucide-react";
+import { Check, Copy, Download, LoaderCircle, RotateCcw, WrapText } from "lucide-react";
 
+import { countLines, formatLineCount, getLanguageDisplayName } from "../lib/code-block";
 import { MarkdownImagePreview, useLocalFileSave, type MessageAttachmentContext } from "./AttachmentPreview";
 
 // tiny highlight cache so revisiting a thread doesn't re-tokenize settled
@@ -98,9 +99,37 @@ function unwrapLinkedImages() {
   };
 }
 
-function CodeBlock({ code, lang, streaming }: { code: string; lang: string; streaming: boolean }) {
+/** Props for the {@link CodeBlock} component. */
+export interface CodeBlockProps {
+  /** Source code snippet to display. */
+  code: string;
+  /** Language identifier from markdown fence, e.g. "ts", "python". */
+  lang: string;
+  /** Whether the parent message is still actively receiving tokens. */
+  streaming: boolean;
+}
+
+/**
+ * Chromed code block component for rendered markdown messages.
+ * Features syntax highlighting with Shiki, language normalization badge,
+ * line count indicator, word wrap toggle, and accessible clipboard copy with status feedback.
+ *
+ * @param props - Component props containing code string, language identifier, and streaming flag.
+ * @returns Rendered code block element.
+ */
+export function CodeBlock({ code, lang, streaming }: CodeBlockProps) {
   const [html, setHtml] = useState<string | null>(null);
   const [copied, setCopied] = useState(false);
+  const [wrapLines, setWrapLines] = useState(false);
+  const copyTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  useEffect(() => {
+    return () => {
+      if (copyTimeoutRef.current !== null) {
+        clearTimeout(copyTimeoutRef.current);
+      }
+    };
+  }, []);
 
   useEffect(() => {
     const key = `${lang}:${hash(code)}`;
@@ -150,30 +179,93 @@ function CodeBlock({ code, lang, streaming }: { code: string; lang: string; stre
   }, [code, lang, streaming]);
 
   const copy = () => {
-    void navigator.clipboard?.writeText(code);
-    setCopied(true);
-    setTimeout(() => setCopied(false), 1200);
+    if (!navigator.clipboard?.writeText) return;
+    navigator.clipboard
+      .writeText(code)
+      .then(() => {
+        setCopied(true);
+        if (copyTimeoutRef.current !== null) {
+          clearTimeout(copyTimeoutRef.current);
+        }
+        copyTimeoutRef.current = setTimeout(() => setCopied(false), 1500);
+      })
+      .catch(() => {
+        // Clipboard write rejected or failed silently
+      });
   };
+
+  const displayLanguage = getLanguageDisplayName(lang);
+  const lineCount = countLines(code);
 
   return (
     <div className="my-2 overflow-hidden rounded-lg border border-hairline/40 bg-inset">
-      <div className="flex items-center justify-between border-b border-hairline/30 px-3 py-1">
-        <span className="text-[11px] uppercase tracking-wide text-ink-secondary">{lang || "code"}</span>
-        <button
-          onClick={copy}
-          className="rounded p-1 text-ink-secondary hover:bg-raised hover:text-ink"
-          title="Copy code"
-        >
-          {copied ? <Check size={13} className="text-success" /> : <Copy size={13} />}
-        </button>
+      <div className="flex items-center justify-between gap-2 border-b border-hairline/30 bg-raised/30 px-3 py-1.5 text-xs">
+        <div className="flex min-w-0 flex-1 items-center gap-2">
+          <span title={displayLanguage} className="min-w-0 truncate rounded border border-hairline/40 bg-raised px-1.5 py-0.5 text-[11px] font-medium tracking-wide text-ink select-none">
+            {displayLanguage}
+          </span>
+          {lineCount > 0 && (
+            <span className="shrink-0 whitespace-nowrap text-[11px] text-ink-secondary select-none">
+              {formatLineCount(lineCount)}
+            </span>
+          )}
+        </div>
+        <div className="flex shrink-0 items-center gap-1 whitespace-nowrap">
+          <button
+            type="button"
+            onClick={() => setWrapLines((w) => !w)}
+            className={`inline-flex items-center gap-1 rounded px-1.5 py-0.5 text-[11px] transition-colors ${
+              wrapLines
+                ? "bg-accent/15 text-accent font-medium"
+                : "text-ink-secondary hover:bg-raised hover:text-ink"
+            }`}
+            title={wrapLines ? "Disable line wrapping" : "Wrap long lines"}
+            aria-label={wrapLines ? "Disable line wrapping" : "Wrap long lines"}
+            aria-pressed={wrapLines}
+          >
+            <WrapText size={12} aria-hidden="true" />
+            <span className="hidden sm:inline">{wrapLines ? "Unwrap" : "Wrap"}</span>
+          </button>
+          <button
+            type="button"
+            onClick={copy}
+            className="inline-flex items-center gap-1 rounded px-1.5 py-0.5 text-[11px] text-ink-secondary hover:bg-raised hover:text-ink transition-colors"
+            title={copied ? "Copied to clipboard" : "Copy code"}
+            aria-label={copied ? "Code copied to clipboard" : "Copy code to clipboard"}
+          >
+            {copied ? (
+              <>
+                <Check size={12} className="text-success" aria-hidden="true" />
+                <span className="text-success font-medium">Copied!</span>
+              </>
+            ) : (
+              <>
+                <Copy size={12} aria-hidden="true" />
+                <span>Copy</span>
+              </>
+            )}
+          </button>
+        </div>
       </div>
       {html ? (
         <div
-          className="overflow-x-auto text-[13px] leading-relaxed [&_pre]:!bg-transparent [&_pre]:m-0 [&_pre]:p-3"
+          className={`text-[13px] leading-relaxed [&_pre]:!bg-transparent [&_pre]:m-0 [&_pre]:p-3 ${
+            wrapLines
+              ? "whitespace-pre-wrap break-words overflow-x-hidden [&_pre]:!whitespace-pre-wrap [&_pre]:!break-words [&_code]:!whitespace-pre-wrap [&_code]:!break-words"
+              : "overflow-x-auto"
+          }`}
           dangerouslySetInnerHTML={{ __html: html }}
         />
       ) : (
-        <pre className="overflow-x-auto p-3 text-[13px] leading-relaxed text-ink">{code}</pre>
+        <pre
+          className={`p-3 text-[13px] leading-relaxed text-ink ${
+            wrapLines
+              ? "whitespace-pre-wrap break-words overflow-x-hidden"
+              : "overflow-x-auto"
+          }`}
+        >
+          {code}
+        </pre>
       )}
     </div>
   );
@@ -307,7 +399,7 @@ function ChatMarkdownComponent({ text, streaming = false, message }: { text: str
             // fenced code arrives as <pre><code class="language-x">…</code></pre>
             const child: any = Array.isArray(children) ? children[0] : children;
             const className: string = child?.props?.className ?? "";
-            const lang = /language-([\w-]+)/.exec(className)?.[1] ?? "";
+            const lang = /language-([^\s]+)/.exec(className)?.[1] ?? "";
             // children can be a string OR an array of strings/nodes — flatten
             // strings only, so String() never comma-joins an array
             const flat = (n: any): string =>
