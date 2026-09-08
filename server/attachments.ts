@@ -52,12 +52,24 @@ const IMAGE_MIMES: Record<string, string> = {
   "image/webp": ".webp",
 };
 
-/** Useful document formats accepted by the phone share sheet.
+/** Useful document and audio formats accepted by the upload endpoint.
  * Generic archives, binaries, HTML, SVG, and executable/script mimes stay
  * out. Office/OpenDocument packages are allowed because they are documents,
  * despite using ZIP internally. The claimed mime determines the extension;
  * an attacker-controlled filename never does. */
 const FILE_MIMES: Readonly<Record<string, string>> = {
+  "audio/opus": ".opus",
+  "audio/ogg": ".ogg",
+  "audio/mpeg": ".mp3",
+  "audio/mp4": ".m4a",
+  "audio/x-m4a": ".m4a",
+  "audio/aac": ".aac",
+  "audio/wav": ".wav",
+  "audio/x-wav": ".wav",
+  "audio/wave": ".wav",
+  "audio/flac": ".flac",
+  "audio/x-flac": ".flac",
+  "audio/webm": ".webm",
   "text/plain": ".txt",
   "text/markdown": ".md",
   "text/csv": ".csv",
@@ -259,7 +271,7 @@ export function extensionForFileMime(mime: string | undefined): string | null {
  * remain visible as bad requests. */
 export function sanitizeSharedFileName(name: string, mime: string): string {
   const extension = extensionForFileMime(mime);
-  if (!extension) throw statusError(400, "content-type must be a supported document type");
+  if (!extension) throw statusError(400, "content-type must be a supported document or audio type");
 
   const normalized = name.normalize("NFKC").trim();
   if (!normalized) throw statusError(400, "name is required");
@@ -295,7 +307,7 @@ export async function saveFile(
 ): Promise<SavedFile> {
   const normalized = normalizedMime(mime);
   if (!normalized || !extensionForFileMime(normalized)) {
-    throw statusError(400, "content-type must be a supported document type");
+    throw statusError(400, "content-type must be a supported document or audio type");
   }
   const name = sanitizeSharedFileName(originalName, normalized);
   const extension = extensionForFileMime(normalized)!;

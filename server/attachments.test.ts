@@ -282,6 +282,24 @@ describe("shared files", () => {
     }
   });
 
+  it.each([
+    ["audio/opus", ".opus"], ["audio/ogg; codecs=opus", ".ogg"],
+    ["audio/mpeg", ".mp3"], ["audio/mp4", ".m4a"],
+    ["audio/x-wav", ".wav"], ["audio/aac", ".aac"],
+    ["audio/flac", ".flac"], ["audio/webm", ".webm"],
+  ])("stores %s audio privately and retries without duplicating it", async (mime, extension) => {
+    const bytes = Buffer.from([0, 255, 1, 128, 79, 103, 103, 83]);
+    const chunks = async function* () { yield bytes.subarray(0, 3); yield bytes.subarray(3); };
+    const first = await saveFile(chunks(), "Voice note.opus", mime, { uploadId: UPLOAD_A });
+    const again = await saveFile(chunks(), "Voice note.opus", mime, { uploadId: UPLOAD_A });
+    expect(again.path).toBe(first.path);
+    expect(first.path).toBe(join(ATTACHMENTS_DIR, `${UPLOAD_A}${extension}`));
+    expect(first.name).toBe(`Voice note${extension}`);
+    expect(readFileSync(first.path)).toEqual(bytes);
+    if (process.platform !== "win32") expect(statSync(first.path).mode & 0o777).toBe(0o600);
+    expect(readdirSync(ATTACHMENTS_DIR)).toEqual([`${UPLOAD_A}${extension}`]);
+  });
+
   it("rejects empty and oversized streams without leaving partial files", async () => {
     await expect(saveFile((async function* () {})(), "empty.txt", "text/plain")).rejects.toThrow(/empty file/);
     expect(readdirSync(ATTACHMENTS_DIR)).toEqual([]);
