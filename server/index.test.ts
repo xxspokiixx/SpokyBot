@@ -109,13 +109,22 @@ let managedBoxListRowsOverride: Array<Record<string, unknown>> | null = null;
 let managedBoxListStatus = 200;
 let managedBoxStopDelayMs = 0;
 let managedBoxRenameDelayMs = 0;
-type DeferredGate = { wait: Promise<void>; release: () => void };
+type DeferredGate = {
+  wait: Promise<void>;
+  release: () => void;
+  entered: Promise<void>;
+  enter: () => void;
+};
 const deferredGate = (): DeferredGate => {
+  let enter!: () => void;
+  const entered = new Promise<void>((resolve) => {
+    enter = resolve;
+  });
   let release!: () => void;
   const wait = new Promise<void>((resolve) => {
     release = resolve;
   });
-  return { wait, release };
+  return { wait, release, entered, enter };
 };
 let managedBoxListGate: DeferredGate | null = null;
 type ManagedBoxCreateMode = "refuse" | "ambiguous" | "fail-rename" | "success";
@@ -686,7 +695,10 @@ beforeAll(async () => {
       boxRouteCalls.push({ method, path });
       if (method === "GET" && requestUrl.pathname === "/boxes") {
         const listGate = managedBoxListGate;
-        if (listGate) await listGate.wait;
+        if (listGate) {
+          listGate.enter();
+          await listGate.wait;
+        }
         res.writeHead(managedBoxListStatus, { "content-type": "application/json" });
         return res.end(JSON.stringify(
           managedBoxListStatus === 200
@@ -2313,7 +2325,15 @@ describe("harness HTTP API", () => {
       managedBoxListGate = listGate;
       boxRouteCalls.length = 0;
       const deletion = api("DELETE", `/api/bots/${bot.id}`);
-      await expect.poll(() => boxRouteCalls.some(
+      // Deletion first probes local runtimes, which can outlast poll's 1s
+      // default on CI. Race only after the provider actually holds the LIST.
+      await Promise.race([
+        listGate.entered,
+        deletion.then(({ status }) => {
+          throw new Error(`bot deletion returned ${status} before reaching the Box list gate`);
+        }),
+      ]);
+      expect(boxRouteCalls.some(
         (call) => call.method === "GET" && call.path.startsWith("/boxes?limit="),
       )).toBe(true);
       const racedTurn = await api("POST", `/api/bots/${bot.id}/messages`, { text: "do not provision during deletion" });
