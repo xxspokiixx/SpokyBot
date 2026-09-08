@@ -331,6 +331,7 @@ import {
 } from "./request-auth.ts";
 import { cookieMaxAgeSeconds, formatPairingCode, SessionRegistry, type Scope } from "./sessions.ts";
 import { describeBrand, loadBrand } from "./brand.ts";
+import { deliverSseFrame } from "./sse-fanout.ts";
 import {
   PHONE_SECRET_PROTOCOL_VERSION,
   PhoneSecretBridge,
@@ -2060,6 +2061,10 @@ interface SseClient {
   /** The paired session behind this stream, when there is one: revoking or
    * expiring it must end the stream, not just future requests. */
   sessionId?: string;
+  /** Set once this client's socket has signalled it can't keep up (write()
+   * returned false); cleared implicitly once it's disconnected. See
+   * ./sse-fanout.ts for what this does to fan-out. */
+  backpressured: boolean;
 }
 const sseClients = new Set<SseClient>();
 sessions.onSessionRevoked((sessionId) => {
@@ -2124,9 +2129,9 @@ function broadcast(payload: Record<string, unknown>) {
   if (replayBuffer.length > REPLAY_MAX) replayBuffer.shift();
   for (const client of [...sseClients]) {
     if (!wants(client, kind)) continue;
-    try {
-      client.res.write(client.admin ? frame : clientFrame);
-    } catch {
+    // Screen frames are replaceable and durable events are not: see
+    // ./sse-fanout.ts for the backpressure/bound decision this makes.
+    if (deliverSseFrame(client, kind, client.admin ? frame : clientFrame) === "disconnected") {
       sseClients.delete(client);
     }
   }
@@ -8854,7 +8859,12 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
 
     // ── events stream ──
     if (method === "GET" && path === "/api/events") {
-      const client: SseClient = { res, admin: auth.scopes.includes("admin"), screens: url.searchParams.get("screens") !== "off" };
+      const client: SseClient = {
+        res,
+        admin: auth.scopes.includes("admin"),
+        screens: url.searchParams.get("screens") !== "off",
+        backpressured: false,
+      };
       if (auth.kind === "session") client.sessionId = auth.session.id;
       res.writeHead(200, {
         "content-type": "text/event-stream",
