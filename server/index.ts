@@ -326,6 +326,7 @@ import { acquireDataDirLeaseForProcess } from "./data-dir-lease.ts";
 import { describeEdition, editionStatus, loadEnterpriseLayer } from "./enterprise.ts";
 import { environmentDescriptor, loadEnvironmentId } from "./environment.ts";
 import { createCustomDomainVerifier, customDomainIpv4, normalizeCustomDomain } from "./custom-domain.ts";
+import { createEmailSignIn, parseAllowList } from "./account-signin.ts";
 import { ProviderAuthSessions } from "./provider-auth-sessions.ts";
 import {
   clearSessionCookie,
@@ -402,6 +403,14 @@ let companionMutationToken: string | undefined = DESKTOP_MANAGED ? "" : undefine
 const FALLBACK_PUBLIC_URL = process.env.OMB_PUBLIC_URL?.trim().replace(/\/+$/, "") || null;
 const cfg = loadConfig();
 const customDomainVerifier = createCustomDomainVerifier({ environmentId: ENVIRONMENT_ID });
+// "Sign in with your email" on /pair: the allow-list is read per call so a
+// Settings change or an env bootstrap applies without a restart.
+const emailSignIn = createEmailSignIn({
+  allow: () => {
+    const current = loadConfig().signIn;
+    return { admins: parseAllowList(current?.admins?.join(",")), members: parseAllowList(current?.members?.join(",")) };
+  },
+});
 let customDomainRevision = 0;
 function savedCustomDomain(): string | null {
   if (DESKTOP_MANAGED || !cfg.customDomain) return null;
@@ -7459,15 +7468,19 @@ function configStatus() {
     // show the same durable session as an agent, but config PATCH validation
     // keeps it read-only and rejects callers that try to choose it.
     browserProfiles: cfg.browserProfiles ?? [],
+    // who may sign in with an emailed code (server/account-signin.ts)
+    signIn: { admins: cfg.signIn?.admins ?? [], members: cfg.signIn?.members ?? [] },
   };
 }
 
 function configForAccess(status: ReturnType<typeof configStatus>, admin: boolean) {
   if (admin) return status;
-  // Configured-or-not is fine; an SSH alias, an email, and a browser
-  // partition id are not a client's business. Preserve the source objects.
+  // Configured-or-not is fine; an SSH alias, an email, a browser partition
+  // id, and the sign-in list are not a client's business. Preserve the
+  // source objects.
   return {
     ...status,
+    signIn: { admins: [], members: [] },
     vps: { configured: status.vps.configured, sshAlias: "" },
     profile: { name: status.profile.name, email: "" },
     browserProfiles: status.browserProfiles.map((profile) => Object.fromEntries(Object.entries(profile).filter(([key]) => key !== "partitionId"))),
@@ -7669,13 +7682,49 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
     // paired session with the right scope.
     if (method === "GET" && !path.startsWith("/api/") && !path.startsWith("/.well-known/") && serveStatic(res, path)) return;
     if (method === "GET" && path === "/.well-known/openmausbot/environment") {
-      return json(res, 200, environmentDescriptor({ environmentId: ENVIRONMENT_ID, desktopManaged: DESKTOP_MANAGED }));
+      return json(res, 200, environmentDescriptor({ environmentId: ENVIRONMENT_ID, desktopManaged: DESKTOP_MANAGED, emailSignIn: emailSignIn.enabled() }));
     }
     const domainCheck = /^\/\.well-known\/openmausbot\/domain-check\/([a-f0-9]{64})$/.exec(path);
     if (method === "GET" && domainCheck) {
       res.setHeader("cache-control", "no-store");
       const challenge = customDomainVerifier.challenge(domainCheck[1]);
       return json(res, challenge ? 200 : 404, challenge ?? { error: "No active domain check." });
+    }
+    // Sign in with an emailed code (server/account-signin.ts). Public like
+    // /api/auth/pair, JSON-only for the same reason, and counted against the
+    // same per-source lockout so a code cannot be guessed.
+    if (method === "POST" && (path === "/api/auth/email/start" || path === "/api/auth/email/verify")) {
+      if (!/^application\/json\b/i.test(String(req.headers["content-type"] ?? ""))) {
+        return json(res, 415, { error: "send the sign-in request as JSON (content-type: application/json)" });
+      }
+      if (!emailSignIn.enabled()) return json(res, 404, { error: "email sign-in is not set up on this server; use a pairing code" });
+      const source = requestSource(req);
+      const allowed = sessions.attemptAllowed(source);
+      if (!allowed.ok) return json(res, 429, { error: `too many failed sign-in attempts from your address; try again in ${Math.ceil(allowed.retryAfterMs / 1000)}s` });
+      const body = await readBody(req);
+      const email = typeof body?.email === "string" ? body.email : "";
+      if (path === "/api/auth/email/start") {
+        const started = await emailSignIn.start(email);
+        if (!started.ok) {
+          if (started.status === 403) sessions.noteFailure(source);
+          return json(res, started.status, { error: started.error });
+        }
+        return json(res, 200, { ok: true });
+      }
+      const code = typeof body?.code === "string" ? body.code : "";
+      const label = typeof body?.label === "string" ? body.label : "";
+      const verified = await emailSignIn.verify(email, code);
+      if (!verified.ok) {
+        if (verified.status === 401 || verified.status === 403) sessions.noteFailure(source);
+        console.warn(`email sign-in refused from ${source}: ${verified.error}`);
+        return json(res, verified.status, { error: verified.error });
+      }
+      sessions.clearFailures(source);
+      const issued = sessions.issue({ label: label.trim() || labelFromUserAgent(req.headers["user-agent"]), scopes: verified.scopes, userId: verified.userId, email: verified.email });
+      const environment = environmentDescriptor({ environmentId: ENVIRONMENT_ID, desktopManaged: DESKTOP_MANAGED, emailSignIn: true });
+      const secure = requestOrigin(req)?.startsWith("https://") === true;
+      res.setHeader("set-cookie", serializeSessionCookie(SESSION_COOKIE, issued.token, { secure, maxAgeSeconds: cookieMaxAgeSeconds(issued.session) }));
+      return json(res, 200, { session: issued.session, environment });
     }
     if (method === "POST" && path === "/api/auth/pair") {
       // JSON only: a cross-site HTML form cannot send this content type
@@ -7694,7 +7743,7 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
         console.warn(`pairing refused from ${requestSource(req)}: ${result.error}`);
         return json(res, result.status, { error: result.error });
       }
-      const environment = environmentDescriptor({ environmentId: ENVIRONMENT_ID, desktopManaged: DESKTOP_MANAGED });
+      const environment = environmentDescriptor({ environmentId: ENVIRONMENT_ID, desktopManaged: DESKTOP_MANAGED, emailSignIn: emailSignIn.enabled() });
       if (wantsCookie) {
         const secure = requestOrigin(req)?.startsWith("https://") === true;
         res.setHeader("set-cookie", serializeSessionCookie(SESSION_COOKIE, result.token, { secure, maxAgeSeconds: cookieMaxAgeSeconds(result.session) }));
@@ -7748,6 +7797,8 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
               expiresAt: auth.session.expiresAt,
               via: auth.via,
               environmentId: ENVIRONMENT_ID,
+              // the account behind the session, when it came from a sign-in
+              ...(auth.session.email ? { email: auth.session.email } : {}),
             },
       );
     }

@@ -238,6 +238,9 @@ const defaultModelSelectionSchema = z.object({
 const appConfigSchema = z.object({
   /** Verified by the dedicated domain endpoint, never a generic config patch. */
   customDomain: z.string().optional(),
+  /** Who may sign in with an emailed code (server/account-signin.ts):
+   * addresses or `@domain` entries; admins get every scope, members chat only. */
+  signIn: z.object({ admins: z.array(z.string().max(320)).max(500).optional(), members: z.array(z.string().max(320)).max(5000).optional() }).optional(),
   defaultModelSelection: defaultModelSelectionSchema.optional(),
   /** CLI-only launch preferences. Never enable remote access implicitly. */
   cliStartup: z.object({
@@ -288,6 +291,7 @@ const jsonObjectSchema = z.record(z.string(), z.json());
 
 export interface AppConfig {
   customDomain?: string;
+  signIn?: { admins?: string[]; members?: string[] };
   /** Preferred selection for newly created bots; existing bots keep theirs. */
   defaultModelSelection?: ModelSelection;
   cliStartup?: {
@@ -502,6 +506,14 @@ export function loadConfig(): AppConfig {
   if (process.env.OMB_TTS_KEY !== undefined) cfg.tts.key = process.env.OMB_TTS_KEY;
   cfg.imageGen = { ...cfg.imageGen };
   if (process.env.OMB_OPENAI_IMAGE_KEY !== undefined) cfg.imageGen.key = process.env.OMB_OPENAI_IMAGE_KEY;
+  // The sign-in allow-list: env is how a headless box or a container is
+  // bootstrapped before anyone can reach Settings.
+  const splitEmails = (value: string) => value.split(/[,\s]+/).map((entry) => entry.trim().toLowerCase()).filter(Boolean);
+  if (process.env.OMB_SIGNIN_EMAILS !== undefined || process.env.OMB_SIGNIN_MEMBER_EMAILS !== undefined) {
+    cfg.signIn = { ...cfg.signIn };
+    if (process.env.OMB_SIGNIN_EMAILS !== undefined) cfg.signIn.admins = splitEmails(process.env.OMB_SIGNIN_EMAILS);
+    if (process.env.OMB_SIGNIN_MEMBER_EMAILS !== undefined) cfg.signIn.members = splitEmails(process.env.OMB_SIGNIN_MEMBER_EMAILS);
+  }
   return cfg;
 }
 
@@ -616,6 +628,7 @@ export function saveConfig(patch: Partial<AppConfig>, options: { replaceInstance
   // scalar, not a section: the merge loop above only walks objects
   if (checkedPatch.language !== undefined) disk.language = checkedPatch.language;
   if (checkedPatch.customDomain !== undefined) disk.customDomain = checkedPatch.customDomain;
+  if (checkedPatch.signIn !== undefined) disk.signIn = checkedPatch.signIn;
   // A selection is replaced as one value, so changing engines also clears
   // an effort level omitted from the new selection.
   if (checkedPatch.defaultModelSelection !== undefined) {

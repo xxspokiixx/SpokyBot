@@ -326,6 +326,32 @@ ssh -L 8799:localhost:8799 you@your-server
 # then open http://localhost:8799 — loopback, so no pairing needed
 ```
 
+## Sign in with your email
+
+A pairing code is fine for the owner's own devices. For a workspace other
+people use every day, let them sign in with an emailed code instead: set an
+allow-list, and `/pair` on your server offers "Sign in with your email" first.
+
+```sh
+OMB_SIGNIN_EMAILS="her@yourcompany.com, @yourcompany.com"   # full access
+OMB_SIGNIN_MEMBER_EMAILS="freelancer@example.com"          # chat and approvals only
+```
+
+An entry is an address or `@domain` (everyone at that domain). Admins get
+the same access as a pairing code from `openmausbot serve`; members get the
+chat-only scope, the same as `openmausbot pair --client`. The same lists live
+in `config.json` under `signIn.admins` and `signIn.members` and can be changed
+through the settings API without a restart; the environment variables win
+when set, which is how a container or a service unit is bootstrapped.
+
+The code itself comes from `accounts.openmausbot.com`, the OpenMausBot
+account service, so your server needs no email credentials. Your server asks
+it to send the code, checks the answer, and then issues its own session
+cookie: the browser only ever talks to your server, and who is welcome is
+decided only by your allow-list. Wrong codes count against the same lockout
+as pairing codes. Sessions from a sign-in show the email in
+`openmausbot sessions` and can be revoked the same way.
+
 ## Putting a proxy in front
 
 Any reverse proxy works, given three things:
