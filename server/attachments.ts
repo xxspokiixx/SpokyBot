@@ -45,8 +45,8 @@ const STREAM_RESERVATION_INCREMENT_BYTES = 1024 * 1024;
 
 /** Cached total of on-disk bytes that count against the quota: committed
  * attachments plus any partial file this process did not itself write (a
- * crash leftover, until it is cleaned up). `null` means "not scanned yet in
- * this process" — the only time a full directory walk happens. Every commit
+ * crash leftover, until it is cleaned up). `null` means a fresh scan is needed
+ * after cold start or a cleanup failure. Every normal commit
  * and delete after that updates it in place instead of rescanning, which is
  * what makes reservation growth O(1) rather than O(directory size).
  *
@@ -55,6 +55,15 @@ const STREAM_RESERVATION_INCREMENT_BYTES = 1024 * 1024;
  * (the app runs one server per data dir; uploadLocks already assumes the
  * same), not a design gap this fix covers. */
 let committedAttachmentBytes: number | null = null;
+// An async link can finish while another upload invalidates or refreshes the
+// cache. Its bytes must not be added again if a scan may already include it.
+let attachmentAccountingVersion = 0;
+
+/** Force a fresh disk total and invalidate any in-flight commit's snapshot. */
+function invalidateAttachmentAccounting(): void {
+  committedAttachmentBytes = null;
+  attachmentAccountingVersion += 1;
+}
 
 /** Mimes the endpoint accepts, mapped to the extension stored on disk.
  * Sniffing is not attempted — a lie here only changes the filename. */
@@ -108,8 +117,8 @@ export function validateAttachmentUploadId(value: string | undefined): string | 
   return normalized;
 }
 
-/** The one full directory walk. Only ever run from cold (committedBytes()
- * the first time in a process) or from an explicit cleanup sweep — never
+/** The one full directory walk. Run from cold or invalidated accounting,
+ * or from an explicit cleanup sweep — never
  * from the per-reservation hot path, which is what made PERF-03 quadratic. */
 function scanAttachmentUsageAndCleanup(now = Date.now()): { bytes: number; removed: number } {
   ensureAttachmentsDir();
@@ -137,33 +146,37 @@ function scanAttachmentUsageAndCleanup(now = Date.now()): { bytes: number; remov
   return { bytes, removed };
 }
 
-/** Lazily initialize (once per process) or return the cached committed-bytes
- * total. Never read `committedAttachmentBytes` directly — always go through
- * this, so a cold process always gets one real scan before trusting it. */
+/** Return cached usage, initializing it from disk after cold start or
+ * invalidation. Reservations must use this rather than trusting a cold cache. */
 function committedBytes(): number {
   if (committedAttachmentBytes === null) {
     committedAttachmentBytes = scanAttachmentUsageAndCleanup().bytes;
+    attachmentAccountingVersion += 1;
   }
   return committedAttachmentBytes;
 }
 
 /** A newly committed file (saveFile/saveImage success path only — never the
  * idempotent-retry branches, which reuse bytes already counted) adds to the
- * cache. Safe to call without forcing a scan first: every caller reserves
- * quota before writing a byte, and reservation already forces committedBytes()
- * to initialize from a scan taken before this file existed. */
-function addCommittedBytes(delta: number): void {
-  committedAttachmentBytes = committedBytes() + delta;
+ * cache. If accounting changed during an async link, a scan may already have
+ * counted that file. Let the next reservation rescan instead of adding twice. */
+function addCommittedBytes(delta: number, version = attachmentAccountingVersion): void {
+  if (version !== attachmentAccountingVersion || committedAttachmentBytes === null) {
+    invalidateAttachmentAccounting();
+    return;
+  }
+  committedAttachmentBytes += delta;
 }
 
 /** Remove only abandoned temporary uploads, and refresh the cached usage
- * total from the same fresh scan. This is the only place a full directory
- * walk still happens after start-up; nothing on the upload path calls it
+ * total from the same fresh scan. Outside accounting recovery, this is the
+ * only full directory walk after start-up; nothing on the upload path calls it
  * per byte or per chunk anymore, so callers that want stale partials
  * reclaimed promptly should invoke it on their own schedule. */
 export function cleanupStaleAttachmentPartials(now = Date.now()): number {
   const { bytes, removed } = scanAttachmentUsageAndCleanup(now);
   committedAttachmentBytes = bytes;
+  attachmentAccountingVersion += 1;
   return removed;
 }
 
@@ -191,7 +204,7 @@ export function deleteAttachment(path: string): void {
  * (truncateSync, rmSync, writeFileSync) to simulate quota states, which the
  * cache can't observe. */
 export function __resetAttachmentAccountingForTests(): void {
-  committedAttachmentBytes = null;
+  invalidateAttachmentAccounting();
 }
 
 /** A retry owns the same UUID namespace as the interrupted attempt. Once it
@@ -463,8 +476,9 @@ export async function saveFile(
       await file.close();
       closed = true;
       try {
+        const accountingVersion = attachmentAccountingVersion;
         await link(partialPath, path);
-        addCommittedBytes(bytes);
+        addCommittedBytes(bytes, accountingVersion);
         await unlink(partialPath);
       } catch (error) {
         if ((error as NodeJS.ErrnoException).code !== "EEXIST") throw error;
@@ -482,7 +496,7 @@ export async function saveFile(
       activePartials.delete(partialPath);
       // A leftover partial was excluded from the cache while active. Rescan
       // after releasing it so a retry cannot subtract bytes never counted.
-      if (partialCleanupFailed) committedAttachmentBytes = null;
+      if (partialCleanupFailed) invalidateAttachmentAccounting();
       reservation.release();
     }
   });
@@ -540,7 +554,7 @@ export function saveImage(bytes: Buffer, mime: string, requestedUploadId?: strin
     throw error;
   } finally {
     activePartials.delete(partialPath);
-    if (partialCleanupFailed) committedAttachmentBytes = null;
+    if (partialCleanupFailed) invalidateAttachmentAccounting();
     reservation.release();
   }
 }

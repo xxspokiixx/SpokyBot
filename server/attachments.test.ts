@@ -15,21 +15,23 @@ import {
 } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { unlink } from "node:fs/promises";
+import { link, unlink } from "node:fs/promises";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 vi.mock("node:fs/promises", async (importOriginal) => {
   const fs = await importOriginal<typeof import("node:fs/promises")>();
-  return { ...fs, unlink: vi.fn(fs.unlink) };
+  return { ...fs, link: vi.fn(fs.link), unlink: vi.fn(fs.unlink) };
 });
 vi.mock("node:fs", async (importOriginal) => {
   const fs = await importOriginal<typeof import("node:fs")>();
   return { ...fs, unlinkSync: vi.fn(fs.unlinkSync) };
 });
 const realUnlink = (await vi.importActual<typeof import("node:fs/promises")>("node:fs/promises")).unlink;
+const realLink = (await vi.importActual<typeof import("node:fs/promises")>("node:fs/promises")).link;
 const realUnlinkSync = (await vi.importActual<typeof import("node:fs")>("node:fs")).unlinkSync;
 afterEach(() => {
   vi.mocked(unlink).mockReset().mockImplementation(realUnlink);
+  vi.mocked(link).mockReset().mockImplementation(realLink);
   vi.mocked(unlinkSync).mockReset().mockImplementation(realUnlinkSync);
 });
 
@@ -308,6 +310,41 @@ describe("aggregate attachment storage", () => {
     await expect(saveImageUpload(Buffer.from("xx"), "image/png", UPLOAD_A)).resolves.toMatchObject({ bytes: 2 });
     expect(readdirSync(ATTACHMENTS_DIR).some((name) => name.endsWith(".partial"))).toBe(false);
     expect(() => saveImage(Buffer.from("y"), "image/png")).not.toThrow();
+    expect(() => saveImage(Buffer.from("z"), "image/png")).toThrow(/storage is full/);
+  });
+
+  it("does not count an in-flight commit twice when cleanup failure causes a rescan", async () => {
+    const existing = saveImage(Buffer.from("x"), "image/png");
+    truncateSync(existing.path, ATTACHMENTS_MAX_BYTES - 5);
+    __resetAttachmentAccountingForTests();
+    let markLinked!: () => void;
+    let finishCommit!: () => void;
+    const linked = new Promise<void>((resolve) => { markLinked = resolve; });
+    const finishing = new Promise<void>((resolve) => { finishCommit = resolve; });
+    vi.mocked(link).mockImplementationOnce(async (...args) => {
+      await realLink(...args);
+      markLinked();
+      await finishing;
+    });
+    const pending = saveFile((async function* () { yield Buffer.from("xx"); })(), "pending.txt", "text/plain", {
+      uploadId: UPLOAD_A, expectedBytes: 2,
+    });
+    try {
+      await linked;
+      for (let attempt = 0; attempt < 2; attempt++) {
+        vi.mocked(unlinkSync).mockImplementationOnce(() => {
+          throw Object.assign(new Error("partial file is locked"), { code: "EPERM" });
+        });
+      }
+      expect(() => saveImage(Buffer.from("x"), "image/png", UPLOAD_B)).toThrow("partial file is locked");
+      // This scan sees the linked file while its commit callback is pending.
+      expect(() => saveImage(Buffer.from("y"), "image/png")).toThrow(/storage is full/);
+    } finally {
+      finishCommit();
+      await pending;
+    }
+    await saveImageUpload(Buffer.from("x"), "image/png", UPLOAD_B);
+    expect(() => saveImage(Buffer.from("yy"), "image/png")).not.toThrow();
     expect(() => saveImage(Buffer.from("z"), "image/png")).toThrow(/storage is full/);
   });
 
