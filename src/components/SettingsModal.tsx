@@ -3,7 +3,7 @@
 // is the stuff shared by every bot: who you are, your keys, and the
 // machine your bots can borrow.
 import { useEffect, useRef, useState } from "react";
-import { Coins, FlaskConical, Globe, KeyRound, Monitor, Search, TabletSmartphone, Terminal, Trash2, User, X } from "lucide-react";
+import { Coins, FlaskConical, KeyRound, Monitor, Search, TabletSmartphone, Terminal, User, X } from "lucide-react";
 import { api, useStore, type AppSettingsSection, type ConfigStatus } from "@/state/store";
 import { analyticsEnabled, setAnalyticsEnabled } from "@/lib/analytics";
 import { browserAvailable, browserUnavailableReason, builtInBrowserEnabled, showToolCallsEnabled, skillRecorderEnabled } from "@/lib/feature-flags";
@@ -15,6 +15,7 @@ import { EnginesSettings } from "./EnginesSettings";
 import { LocalComputerSection } from "./LocalComputerSection";
 import { CompanionSection } from "./CompanionSection";
 import { CustomDomainSettings } from "./CustomDomainSettings";
+import { BrowserProfilesManager } from "./BrowserProfilesManager";
 import { RemoteComputerSection } from "./RemoteComputerSection";
 import { Card, Switch } from "./SettingsPrimitives";
 import { UsageSection } from "./UsageSection";
@@ -22,10 +23,6 @@ import { SkinPicker } from "./SkinPicker";
 import { RoomTurnTimeoutSettings } from "./RoomTurnTimeoutSettings";
 import { TranscriptionSettings } from "./TranscriptionSettings";
 import { cn } from "@/lib/cn";
-import {
-  browserProfileDeletionBlockReason,
-  browserProfilesForPatch,
-} from "@/lib/browser-profiles";
 
 // `labelKey`, not a label: t() reads the active pack when it is called, so a
 // label resolved here at module scope would freeze the language the app booted
@@ -332,150 +329,13 @@ function ExperimentalFeaturesRow() {
   );
 }
 
-/** Named browser sessions: rename or delete; deleting wipes that session's
- * logins, storage and cache and sends any bot on it back to its own. */
 function BrowserProfilesRow() {
-  const { state, dispatch } = useStore();
+  const { state } = useStore();
   const profiles = state.config?.browserProfiles ?? [];
-  const [busy, setBusy] = useState<string | null>(null);
-  const [renaming, setRenaming] = useState<{ id: string; name: string } | null>(null);
-  const [error, setError] = useState("");
-  // Windows temporarily gates the live browser surface, but upgraded users
-  // must still be able to rename or permanently erase existing sessions.
-  // The packaged server can perform that private lifecycle cleanup without
-  // exposing the browser renderer bridge.
-  if (!window.ogb || (!builtInBrowserEnabled(state.config) && profiles.length === 0)) return null;
-
-  const save = async (next: typeof profiles) => {
-    try {
-      const config: ConfigStatus = await api("/api/config", {
-        method: "PATCH",
-        body: JSON.stringify({ browserProfiles: browserProfilesForPatch(next) }),
-      });
-      dispatch({ type: "configStatus", config });
-    } catch (cause) {
-      setError(cause instanceof Error ? cause.message : t("settings.profiles.saveError"));
-    } finally {
-      setBusy(null);
-      setRenaming(null);
-    }
-  };
-  const remove = async (id: string) => {
-    if (busy) return;
-    const profile = profiles.find((candidate) => candidate.id === id);
-    if (!profile) return;
-    const referencedBots = state.bots.filter((bot) => bot.browserProfile === id);
-    const blocked = browserProfileDeletionBlockReason(state.bots, id);
-    if (blocked) {
-      setError(blocked);
-      return;
-    }
-    const botSummary = referencedBots.length
-      ? referencedBots.length === 1
-        ? t("settings.profiles.confirmOneBot", { name: referencedBots[0]!.name })
-        : t("settings.profiles.confirmManyBots", { count: referencedBots.length })
-      : "";
-    if (!window.confirm(t("settings.profiles.confirm", { name: profile.name, bots: botSummary }))) {
-      return;
-    }
-    setBusy(id);
-    setError("");
-    try {
-      // The server commits the profile list and clears every bot reference as
-      // one transaction, then privately asks Electron to erase the partition.
-      // Never wipe browser data from the renderer before that commit succeeds:
-      // a rejected config save must leave the user's signed-in session intact.
-      const config: ConfigStatus = await api("/api/config", {
-        method: "PATCH",
-        body: JSON.stringify({
-          browserProfiles: browserProfilesForPatch(profiles.filter((candidate) => candidate.id !== id)),
-        }),
-      });
-      dispatch({ type: "configStatus", config });
-      // The server clears the engine's saved session state for the profile itself.
-    } catch (cause) {
-      setError(cause instanceof Error ? cause.message : t("settings.profiles.deleteError"));
-    } finally {
-      setBusy(null);
-    }
-  };
-  const rename = () => {
-    if (!renaming || busy) return;
-    const name = renaming.name.trim();
-    if (!name) return;
-    setBusy(renaming.id);
-    setError("");
-    void save(profiles.map((profile) => (profile.id === renaming.id ? { ...profile, name } : profile)));
-  };
-  const usersOf = (id: string) => state.bots.filter((bot) => !bot.hidden && bot.browserProfile === id).map((bot) => bot.name);
-
+  if (!builtInBrowserEnabled(state.config) && profiles.length === 0) return null;
   return (
-    <Card title={t("settings.profiles.title")} subtitle={t("settings.profiles.subtitle")}>
-      {profiles.length === 0 ? (
-        <div className="text-[13px] text-ink-secondary">{t("settings.profiles.empty")}</div>
-      ) : (
-        <div className="flex flex-col divide-y divide-hairline/30">
-          {profiles.map((profile) => {
-            const users = usersOf(profile.id);
-            const editing = renaming?.id === profile.id;
-            return (
-              <div key={profile.id} className="flex items-center justify-between gap-3 py-2.5">
-                <div className="flex min-w-0 items-center gap-2">
-                  <Globe size={14} className="shrink-0 text-ink-secondary" />
-                  {editing ? (
-                    <form
-                      className="flex items-center gap-2"
-                      onSubmit={(event) => {
-                        event.preventDefault();
-                        rename();
-                      }}
-                    >
-                      <input
-                        autoFocus
-                        value={renaming.name}
-                        onChange={(event) => setRenaming({ id: profile.id, name: event.target.value })}
-                        maxLength={40}
-                        className="rounded-md bg-inset px-2 py-1 text-[13px] text-ink outline-none"
-                        aria-label={t("settings.profiles.nameAria")}
-                      />
-                      <button type="submit" disabled={busy !== null} className="rounded-md bg-accent px-2.5 py-1 text-[12px] font-medium text-accent-ink disabled:opacity-50">
-                        {t("common.save")}
-                      </button>
-                      <button type="button" onClick={() => setRenaming(null)} className="text-[12px] text-ink-secondary hover:text-ink">
-                        {t("common.cancel")}
-                      </button>
-                    </form>
-                  ) : (
-                    <button
-                      type="button"
-                      onClick={() => setRenaming({ id: profile.id, name: profile.name })}
-                      className="truncate text-left text-[14px] font-medium text-ink hover:underline"
-                      title={t("settings.profiles.rename")}
-                    >
-                      {profile.name}
-                    </button>
-                  )}
-                  <span className="truncate text-[12px] text-ink-secondary">
-                    {users.length
-                      ? t("settings.profiles.usedBy", { names: users.join(", ") })
-                      : t("settings.profiles.notInUse")}
-                  </span>
-                </div>
-                <button
-                  type="button"
-                  onClick={() => void remove(profile.id)}
-                  disabled={busy !== null}
-                  className="flex shrink-0 items-center gap-1 rounded-md px-2 py-1 text-[12px] text-ink-secondary hover:bg-control hover:text-danger disabled:opacity-50"
-                  title={t("settings.profiles.deleteTitle")}
-                >
-                  <Trash2 size={13} /> {t("common.delete")}
-                </button>
-              </div>
-            );
-          })}
-        </div>
-      )}
-      {error ? <p role="alert" className="mt-2 text-[12px] text-danger">{error}</p> : null}
+    <Card title={t("settings.profiles.title")} subtitle={t("settings.profiles.sharedSubtitle")}>
+      <BrowserProfilesManager />
     </Card>
   );
 }

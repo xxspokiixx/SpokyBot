@@ -272,10 +272,13 @@ import * as vps from "./vps-computer.ts";
 import { RoutineManager, type RoutineRun, type RoutineRunOn, type RoutineRunTrigger } from "./routines.ts";
 import { CalendarCallManager, type CalendarCall } from "./calendar-calls.ts";
 import { BUILT_IN_BROWSER_SYSTEM_PROMPT } from "./browser-engine.ts";
+import { BrowserRuntime } from "./browser-runtime.ts";
+import { BrowserLive } from "./browser-live.ts";
 import {
   agentBrowserFrame,
   agentBrowserIntegration,
   browserEngineEncryptionKey,
+  prepareBrowserSessionState,
   clearBrowserSessionState,
   ensureChrome,
   installAgentBrowserBinary,
@@ -495,7 +498,7 @@ const browserCleanup: BrowserCleanupCoordinator = new BrowserCleanupCoordinator(
     const work = status.kind === "ready" && sessions.length
       ? Promise.all(sessions.map(async (session) => {
           const ok = await clearBrowserSessionState(status.binaryPath, session, { encryptionKey: browserEngineEncryptionKey() });
-          if (!ok) console.warn(`browser cleanup: could not clear the engine's saved state for session ${session}; clear it with \`agent-browser --session ${session} state clear --all\``);
+          if (!ok) console.warn(`browser cleanup: could not clear saved state for session ${session}; restart OpenMausBot to retry this profile's cleanup. Do not use state clear --all: it erases other profiles too.`);
           return ok;
         }))
       : Promise.resolve([true]);
@@ -538,11 +541,12 @@ type InternalCapability = {
   threadId: string;
   generation: string;
   depth: number;
-  kind: "agents" | "connectors" | "computer";
+  kind: "agents" | "connectors" | "computer" | "browser";
   skillAuthoring: boolean;
   createdBots: number;
   orphanExpiresAt: number;
   localVmTarget?: LocalVmTarget;
+  browserSession?: string;
 };
 // A capability lives for the exact provider-turn generation, including while
 // that turn is parked on a human approval. The long ceiling is only an orphan
@@ -804,7 +808,36 @@ function cancelDirectTurnDispatch(botId: string, expectedThreadId?: string): Dir
 /** The bot's browser for this turn: agent-browser, one isolated session per
  * browser profile or per bot (docs/plans/browser-engine.md). Null, with the
  * reason logged once, when the engine is not on this machine. */
-function browserIntegration(botId: string, profile: string | undefined) {
+const browserRuntime = new BrowserRuntime();
+const browserLive = new BrowserLive({ runtime: browserRuntime });
+// Temporary profiles last for this server run, but are never saved to disk.
+// The viewer and the agent must address the SAME temporary browser.
+const temporaryBrowserSessions = new Map<string, string>();
+function currentBrowserSession(botId: string, profile: string | undefined): string {
+  if (profile === "guest") {
+    let session = temporaryBrowserSessions.get(botId);
+    if (!session) {
+      session = browserSessionId(botId, "guest");
+      temporaryBrowserSessions.set(botId, session);
+    }
+    return session;
+  }
+  const target = profile ? browserProfilePartitionTarget(cfg, profile) : null;
+  return browserSessionId(botId, target?.partitionId ?? "");
+}
+async function forgetTemporaryBrowser(botId: string): Promise<void> {
+  const session = temporaryBrowserSessions.get(botId);
+  if (!session) return;
+  temporaryBrowserSessions.delete(botId);
+  const engine = browserEngineStatus();
+  if (engine.kind !== "ready") return;
+  const closed = await clearBrowserSessionState(engine.binaryPath, session, {
+    env: { PATH: augmentedPath() }, encryptionKey: browserEngineEncryptionKey(),
+  });
+  if (closed) await browserRuntime.close(session);
+  else console.warn(`temporary browser ${session}: could not close its session; run agent-browser --session ${session} close on this server`);
+}
+async function browserIntegration(botId: string, profile: string | undefined, turn?: { threadId: string; generation: string }) {
   const status = browserEngineStatus();
   if (status.kind !== "ready") {
     if (!engineUnavailableLogged) {
@@ -816,17 +849,28 @@ function browserIntegration(botId: string, profile: string | undefined) {
   // A profile that no longer exists falls back to the bot's own session.
   const profileTarget = profile && profile !== "guest" ? browserProfilePartitionTarget(cfg, profile) : null;
   const partitionId = profile === "guest" ? "guest" : (profileTarget?.partitionId ?? "");
-  const session = browserSessionId(botId, partitionId);
-  return {
-    profile: partitionId,
-    integration: agentBrowserIntegration({
+  const session = currentBrowserSession(botId, profile);
+  const spec = agentBrowserIntegration({
       binaryPath: status.binaryPath,
       session,
       encryptionKey: browserEngineEncryptionKey(),
       persistent: profile !== "guest",
       env: { ...process.env, PATH: augmentedPath() },
-    }),
-  };
+    });
+  await prepareBrowserSessionState(status.binaryPath, session, { env: spec.env, persistent: profile !== "guest", isCurrent: () => {
+    const current = store.bot(botId);
+    return !!current && current.browser !== false && builtInBrowserEnabled(cfg)
+      && currentBrowserSession(current.id, current.browserProfile) === session
+      && (!turn || activeInternalGenerationByThread.get(turn.threadId) === turn.generation);
+  } });
+  if (!turn) return { profile: partitionId, session, spec, integration: spec };
+  const token = mintInternalCapability({ botId, ...turn, browserSession: session,
+    kind: "browser", depth: 0, skillAuthoring: false, createdBots: 0 });
+  return { profile: partitionId, session, spec, integration: {
+    command: process.execPath, args: [SPAWNED_PROXIES.browser], env: {
+      ...AGENTS_NODE_FLAG, OMB_BROWSER_TOKEN: token, OMB_HARNESS_URL: `http://127.0.0.1:${PORT}`,
+    },
+  } };
 }
 let engineUnavailableLogged = false;
 
@@ -4396,7 +4440,7 @@ async function startTurn(
         instance.adapter.capabilities.browserMcp === true
       ) {
         const selectedProfile = liveBot.browserProfile;
-        browser = browserIntegration(bot.id, selectedProfile);
+        browser = await browserIntegration(bot.id, selectedProfile, { threadId, generation: dispatchClaimId });
         if (browser) integrations.browser = browser.integration;
         // The browser lost its frame source when the Electron surface was
         // removed: previewCapture is set by the computer branches above, and
@@ -4405,8 +4449,9 @@ async function startTurn(
         // the work was a web page, because agent-browser runs its own headless
         // Chrome on the host rather than inside that desktop.
         if (browser) {
-          const frame = { binaryPath: browser.integration.command, env: browser.integration.env };
-          browserCapture = () => agentBrowserFrame(frame);
+          const frame = { binaryPath: browser.spec.command, env: browser.spec.env };
+          const session = browser.session;
+          browserCapture = () => browserRuntime.withAgentAction(session, () => agentBrowserFrame(frame));
         }
       }
       // A cancelled adapter can be between accepting sendTurn and revealing
@@ -5410,6 +5455,11 @@ async function runGroupMemberTurn(
     return true;
   }
   store.setActivity(bot.id, "working");
+  // Claim cleanup ownership before browser preparation can yield or reject.
+  // The finally block must release exactly this setup, never a newer turn.
+  roomSpeaker = { botId: bot.id, name: bot.name, color: bot.color };
+  groupSpeakers.set(threadId, roomSpeaker);
+  store.patchGroup(readyGroup.id, { busyBotId: bot.id });
   orchestration?.onClaimed?.();
 
   // Connected-app discovery above can yield for a network round trip. A
@@ -5423,24 +5473,18 @@ async function runGroupMemberTurn(
     instance.adapter.capabilities.browserMcp === true
   ) {
     const selectedProfile = readyBot.browserProfile;
-    const browser = browserIntegration(readyBot.id, selectedProfile);
+    const browser = await browserIntegration(readyBot.id, selectedProfile, { threadId, generation: internalGeneration });
     if (browser) integrations.browser = browser.integration;
   }
-  // Stop/delete may land while Electron is registering the capability. The
-  // callback above prevents publication; this second check also unwinds the
-  // room's setup claim so no provider turn starts after Stop returned.
+  // Stop/delete may land while browser state is being prepared. Capability
+  // publication and this exact claim are both fenced; finally releases only
+  // this setup, so a replacement turn's busy state is never cleared here.
   const browserReadyBot = store.bot(readyBot.id);
-  if (isCancelled?.() || !browserReadyBot || !browserReadyBot.busy) {
-    if (browserReadyBot?.busy) {
-      store.setActivity(browserReadyBot.id, "idle");
-      retryDelegationsWaitingOn(browserReadyBot.id);
-    }
+  if (isCancelled?.() || !browserReadyBot?.busy ||
+      groupSpeakers.get(threadId) !== roomSpeaker ||
+      activeInternalGenerationByThread.get(threadId) !== internalGeneration) {
     return false;
   }
-
-  store.patchGroup(readyGroup.id, { busyBotId: bot.id }); // the store's change stream carries the frame
-  roomSpeaker = { botId: bot.id, name: bot.name, color: bot.color };
-  groupSpeakers.set(threadId, roomSpeaker);
 
   // Room and Goal turns use the speaker's desktop, never the coordinator's.
   // Claim the same lease as direct turns before asynchronous VM setup.
@@ -7780,7 +7824,9 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
       if (!internalSender) {
         return json(res, 401, { error: "unauthorized" });
       }
-      const requiredCapabilityKind = path.startsWith("/api/internal/connectors/")
+      const requiredCapabilityKind = path === "/api/internal/browser/mcp"
+        ? "browser"
+        : path.startsWith("/api/internal/connectors/")
         ? "connectors"
         : path === "/api/internal/computer-control"
           ? "computer"
@@ -7828,6 +7874,30 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
           throw Object.assign(new Error("the internal turn capability has expired"), { status: 401 });
         }
       };
+      if (method === "POST" && path === "/api/internal/browser/mcp") {
+        const body = await readInternalBody();
+        const bot = store.bot(internalCapability.botId);
+        if (!bot || bot.browser === false || !builtInBrowserEnabled(cfg)) {
+          return json(res, 403, { error: "browser tools are not enabled for this bot" });
+        }
+        const browser = await browserIntegration(bot.id, bot.browserProfile);
+        if (!browser || browser.session !== internalCapability.browserSession) {
+          return json(res, 409, { error: "this browser profile changed; start a new turn" });
+        }
+        if (body?.method !== "tools/list" && body?.method !== "tools/call") {
+          return json(res, 400, { error: "unsupported browser method" });
+        }
+        const result = await browserRuntime.agentRpc(browser.session, browser.spec, body.method, body.params, () => {
+          requireActiveInternalCapability();
+          const current = store.bot(bot.id);
+          if (!current || current.browser === false || !builtInBrowserEnabled(cfg) ||
+              currentBrowserSession(current.id, current.browserProfile) !== browser.session) {
+            throw Object.assign(new Error("Browser access changed while connecting."), { status: 409 });
+          }
+        });
+        requireActiveInternalCapability();
+        return json(res, 200, { result });
+      }
       if (method === "GET" && path === "/api/internal/agents") {
         const sender = internalSender;
         // title/description included so the caller can judge the team (who
@@ -8918,6 +8988,41 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
     }
 
     // ── events stream ──
+    // Owner-only (default-deny in request-auth). Never mix login frames into
+    // the general events feed, which is also visible to client-only devices.
+    const liveBrowserMatch = /^\/api\/bots\/([\w-]+)\/browser\/(live|action)$/.exec(path);
+    if (liveBrowserMatch) {
+      res.setHeader("cache-control", "no-store");
+      const bot = store.bot(liveBrowserMatch[1]);
+      if (!bot) return json(res, 404, { error: "no such bot" });
+      if (!builtInBrowserEnabled(cfg) || bot.browser === false) {
+        return json(res, 409, { error: "Enable this bot's browser in its profile first." });
+      }
+      const browser = await browserIntegration(bot.id, bot.browserProfile);
+      if (!browser) return json(res, 503, { error: "Install the browser engine first." });
+      const owner = auth.kind === "session" ? auth.session.id : "local-owner";
+      const isCurrent = () => {
+        const current = store.bot(bot.id);
+        return !!current && current.browser !== false && builtInBrowserEnabled(cfg)
+          && currentBrowserSession(current.id, current.browserProfile) === browser.session
+          && (auth.kind !== "session" || sessions.isLive(auth.session.id));
+      };
+      if (method === "GET" && liveBrowserMatch[2] === "live") {
+        req.socket.setTimeout(0);
+        return await browserLive.open({ botId: bot.id, session: browser.session, spec: browser.spec, owner, isCurrent, res });
+      }
+      if (method === "POST" && liveBrowserMatch[2] === "action") {
+        const body = await readBody(req, 32_768);
+        if (!isCurrent()) return json(res, 409, { error: "This browser session changed. Reopen the browser panel." });
+        if (typeof body?.viewerId !== "string") return json(res, 400, { error: "A live browser connection is required." });
+        if (body.type === "restart" && store.bots.some((candidate) => candidate.busy &&
+            currentBrowserSession(candidate.id, candidate.browserProfile) === browser.session)) {
+          return json(res, 409, { error: "Stop every bot using this profile before restarting its browser." });
+        }
+        return json(res, 200, await browserLive.action({ viewerId: body.viewerId, botId: bot.id, owner, body }));
+      }
+      return json(res, 405, { error: "method not allowed" });
+    }
     if (method === "GET" && path === "/api/events") {
       const client: SseClient = {
         res,
@@ -10374,6 +10479,8 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
       if (body.requireAvailableModel !== undefined && typeof body.requireAvailableModel !== "boolean") {
         return json(res, 400, { error: "requireAvailableModel must be true or false" });
       }
+      const beforeBrowserProfile = existingBot?.browserProfile;
+      const beforeBrowserEnabled = existingBot?.browser;
       // Neither Codex (free-form string field) nor Grok (lazy, logs-only)
       // rejects an unknown effort level at their own boundary — this is the
       // only real gate, so it stays. But it fires only when the target
@@ -10479,6 +10586,10 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
           : body.browserProfile;
         if (existingBot?.busy && requestedProfile !== existingBot.browserProfile) {
           return json(res, 409, { error: "stop this bot's turn before changing its browser profile" });
+        }
+        if (existingBot && requestedProfile !== existingBot.browserProfile &&
+            browserRuntime.heldBy(currentBrowserSession(existingBot.id, existingBot.browserProfile))) {
+          return json(res, 409, { error: "Release browser control before changing its profile." });
         }
         if (requestedProfile === undefined) patch.browserProfile = undefined;
         else if (
@@ -10689,6 +10800,12 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
         section !== undefined &&
         sectionKey(existingBot?.section) !== sectionKey(section);
       let bot: BotRecord | null;
+      const freshBrowserBot = store.bot(m[1]);
+      if (freshBrowserBot && body.browserProfile !== undefined &&
+          patch.browserProfile !== freshBrowserBot.browserProfile &&
+          (freshBrowserBot.busy || browserRuntime.heldBy(currentBrowserSession(freshBrowserBot.id, freshBrowserBot.browserProfile)))) {
+        return json(res, 409, { error: "Stop the bot and release browser control before changing its profile." });
+      }
       if (profile.patch.soul !== undefined) {
         // A mixed settings request must not turn a runtime revocation into
         // a persist-first edit. Apply runtime fields with their existing
@@ -10701,6 +10818,12 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
         bot = store.patchBot(m[1], patch);
       }
       if (!bot) return json(res, 404, { error: "no such bot" });
+      if (existingBot && (bot.browserProfile !== beforeBrowserProfile || bot.browser !== beforeBrowserEnabled)) {
+        browserLive.closeForBot(bot.id);
+        if (beforeBrowserProfile === "guest" && (bot.browserProfile !== "guest" || bot.browser === false)) {
+          void forgetTemporaryBrowser(bot.id).catch((error) => console.warn("temporary browser cleanup failed", error));
+        }
+      }
       const chiefChanges =
         body.chiefOfStaff === true || chiefMovedSections
           ? store.setChiefOfStaff(bot.id)
@@ -10899,6 +11022,8 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
           localVmIdles.get(target.key)?.cancel();
           localVmIdles.delete(target.key);
           store.deleteBot(bot.id);
+          browserLive.closeForBot(bot.id);
+          await forgetTemporaryBrowser(bot.id);
         } catch (error) {
           if (browserCleanupRequest) browserCleanup.abort(browserCleanupRequest);
           throw error;
@@ -12234,12 +12359,23 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
       const patch = parseConfigPatch(body);
       if (!Object.keys(patch).length) return json(res, 400, { error: "nothing to save" });
       if (providerConfigBusy) return json(res, 409, { error: "provider settings are already being updated" });
+      if (patch.browserProfiles !== undefined && body.expectedBrowserProfiles !== undefined) {
+        const current = (cfg.browserProfiles ?? []).map(({ id, name }) => ({ id, name }));
+        if (JSON.stringify(body.expectedBrowserProfiles) !== JSON.stringify(current)) {
+          return json(res, 409, { error: "Browser profiles changed in another window. Review the refreshed list and try again." });
+        }
+      }
       const disablingBuiltInBrowser = patch.features?.browser === false && builtInBrowserEnabled(cfg);
       const removedBrowserProfileIds = patch.browserProfiles === undefined
         ? []
         : (cfg.browserProfiles ?? [])
             .map((profile) => profile.id)
             .filter((id) => !patch.browserProfiles!.some((profile) => profile.id === id));
+      const profileControlConflict = () => removedBrowserProfileIds.some((id) => {
+        const target = browserProfilePartitionTarget(cfg, id);
+        return target && browserRuntime.heldBy(browserSessionId("", target.partitionId));
+      });
+      if (profileControlConflict()) return json(res, 409, { error: "Release browser control before deleting its profile." });
       if (patch.browserProfiles !== undefined) {
         const currentProfiles = new Map((cfg.browserProfiles ?? []).map((profile) => [profile.id, profile]));
         const nextProfiles = patch.browserProfiles.map((profile) => {
@@ -12481,6 +12617,7 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
         if (conflict) return json(res, 409, { error: conflict });
       }
       const browserCleanupRequests: BrowserCleanupRequest[] = [];
+      if (profileControlConflict()) return json(res, 409, { error: "Release browser control before deleting its profile." });
       try {
         for (const profileId of removedBrowserProfileIds) {
           const target = browserProfilePartitionTarget(cfg, profileId);
@@ -12534,6 +12671,10 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
         throw error;
       }
       let browserReferenceCleanupError: unknown = null;
+      if (disablingBuiltInBrowser) browserLive.closeAll();
+      for (const request of browserCleanupRequests) {
+        if (request.kind === "profile") browserLive.closeForSession(browserSessionId("", request.partitionId));
+      }
       if (patch.browserProfiles !== undefined) {
         const retained = new Set(patch.browserProfiles.map((profile) => profile.id));
         try {
@@ -13050,6 +13191,7 @@ const gracefulShutdown = createGracefulShutdown({
       // asynchronous shutdown jobs drain. Invalidate their turn bearers before
       // any cleanup function reaches an await.
       revokeAllInternalCapabilities();
+      browserLive.closeAll();
       for (const idle of localVmIdles.values()) idle.cancel();
       vps.closeAllVpsDesktopTunnels();
       watchdog.stop();
@@ -13059,6 +13201,10 @@ const gracefulShutdown = createGracefulShutdown({
       tunnelListener?.close();
     },
     () => registry.disposeAll(),
+    async () => {
+      await Promise.all([...temporaryBrowserSessions.keys()].map((botId) => forgetTemporaryBrowser(botId)));
+      await browserRuntime.closeAll();
+    },
     () => flushAllProfileHistory(),
   ],
   // Cleanup jobs run concurrently. Release only after they settle (or reach

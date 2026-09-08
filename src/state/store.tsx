@@ -1059,6 +1059,10 @@ export function reducer(state: AppState, action: Action): AppState {
       const patched = updateBot(next, action.bot.id, (b) => ({
         ...b,
         ...action.bot,
+        // Complete bot frames omit this optional field after switching back
+        // to Own browser (or deleting a shared profile). Do not retain the
+        // previous profile's name and selection in another window.
+        browserProfile: action.bot.browserProfile,
         // Ordinary bot patches omit messages and must preserve the current
         // transcript. A task switch is different: its full bot event carries
         // the new transcript, which must replace the previous task before the
