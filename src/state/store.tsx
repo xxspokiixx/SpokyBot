@@ -126,8 +126,9 @@ export interface Message {
   channelMode?: "chat" | "goal";
   /** activity messages: tool name + outcome. `spoken` is the server's
    * narration of the same chip ("reading a file"), used by call mode. */
-  /** `setup` marks an error fixed by installing something, not by retrying. */
-  tool?: { name: string; ok?: boolean; spoken?: string; setup?: boolean };
+  /** `setup` marks an error fixed by installing something, not by retrying.
+   * `summary` is the call's input on one redacted line (the shell command). */
+  tool?: { name: string; ok?: boolean; spoken?: string; setup?: boolean; summary?: string };
   /** user messages sent into a running turn — the model saw it mid-turn */
   steered?: boolean;
   /** a user message that arrived through the server's API, not typed here */

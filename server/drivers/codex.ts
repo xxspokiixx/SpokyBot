@@ -33,6 +33,7 @@ import { codexLocalProviderArgs } from "./local-inject.ts";
 import { augmentedPath, splitCliString } from "../env-path.ts";
 import { classifyError, computeBackoff, RETRY_MAX_ATTEMPTS } from "./retry.ts";
 import { appendNative } from "./native.ts";
+import { commandSummary } from "../tool-summary.ts";
 import { codexDeveloperInstructions, syncCodexInstructions } from "./codex-instructions.ts";
 import type { ApprovalMode } from "../../shared/approval-mode.ts";
 import { CodexDeviceAuthController } from "./codex-device-auth.ts";
@@ -817,7 +818,16 @@ export const CodexDriver: ProviderDriver<CodexConfig> = {
                     : item.type === "webSearch"
                       ? "web_search"
                       : null;
-            if (title) emit({ ...base(threadId, turnId), type: "item.started", itemType: "tool", itemId: item.id, title });
+            if (title) {
+              emit({
+                ...base(threadId, turnId),
+                type: "item.started",
+                itemType: "tool",
+                itemId: item.id,
+                title,
+                summary: item.type === "commandExecution" ? commandSummary({ command: item.command }) : undefined,
+              });
+            }
             break;
           }
           case "item/completed": {

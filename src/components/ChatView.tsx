@@ -40,13 +40,15 @@ import {
 import { EngineSetup } from "./EngineSetup";
 import { BotAvatar } from "./Avatar";
 import { TurnPresence } from "./TurnPresence";
-import { showToolCallsEnabled } from "@/lib/feature-flags";
+import { showToolCallsEnabled, skillAuthoringEnabled } from "@/lib/feature-flags";
 import { stateForBot } from "@/lib/mascot";
 import { showWorkingDots } from "@/lib/turn-tail";
 import { liveActivityLabel } from "@/lib/live-activity";
 import { ChatMarkdown } from "./ChatMarkdown";
 import { RawMarkdownView, RawToggleAction } from "./RawMarkdownToggle";
 import { ThreadChip } from "./ThreadChip";
+import { VerifyCard } from "./VerifyCard";
+import { nameIsCommand, skillPrompt, skillStaged, verifySteps as computeVerifySteps, verifySummary } from "@/lib/verify-steps";
 import { ThreadRefText } from "./ThreadRefs";
 import { OptionCard, shouldHideOnboardingCard } from "./OptionCard";
 import { ApprovalCard } from "./ApprovalCard";
@@ -596,7 +598,7 @@ function ActivityChip({ message }: { message: Message }) {
     <div className="flex justify-start">
       <div
         className={cn(
-          "flex items-center gap-2 rounded-full border border-hairline/40 bg-panel px-3 py-1.5 text-[13px]",
+          "flex max-w-[min(480px,100%)] min-w-0 items-center gap-2 rounded-full border border-hairline/40 bg-panel px-3 py-1.5 text-[13px]",
           failed ? "text-danger" : "text-ink-secondary",
         )}
       >
@@ -607,7 +609,10 @@ function ActivityChip({ message }: { message: Message }) {
         ) : (
           <Check size={13} className="text-success" />
         )}
-        <span className="max-w-[480px] truncate font-mono">{tool.name}</span>
+        <span className="shrink-0 max-w-[480px] truncate font-mono">{tool.name}</span>
+        {tool.summary && tool.summary !== tool.name && !nameIsCommand(tool.name) && (
+          <span className="min-w-0 flex-1 truncate font-mono" title={tool.summary}>{tool.summary}</span>
+        )}
       </div>
     </div>
   );
@@ -914,6 +919,21 @@ export function ChatView({ bot: profile }: { bot: Bot }) {
 
   // only the active branch is rendered; forks stay reachable via ‹ › nav
   const messages = useMemo(() => visibleMessages(bot), [bot]);
+  // The bot's control-CLI run in this thread, for the Verify card. Saving
+  // mirrors the /learn gate: the flag, an engine with the agents tools, and
+  // a bot that can take a message now — plus a run with something to keep.
+  const verifySteps = useMemo(() => computeVerifySteps(messages), [messages]);
+  const verifyCounts = verifySummary(verifySteps);
+  const engineSupportsAgents = Boolean(
+    state.instances.find((instance) => instance.instanceId === bot.modelSelection.instanceId)?.capabilities?.agentsMcp,
+  );
+  const canSaveVerify =
+    skillAuthoringEnabled(state.config) && engineSupportsAgents && verifyCounts.passed > 0 && verifyCounts.running === 0 && !bot.busy;
+  // A dismissal is pinned to the run's last step, per thread: the card comes
+  // back when the bot runs the CLI again, not merely when a step settles, and
+  // stays away across a switch to another thread and back.
+  const [verifyDismissed, setVerifyDismissed] = useState<ReadonlyMap<string, string>>(() => new Map());
+  const lastVerifyStep = verifySteps.at(-1);
 
   // Windowed transcript: only a tail of the thread mounts (screenshots make
   // full threads DOM-heavy). The boundary is anchored per bot+task; a
@@ -1406,6 +1426,29 @@ export function ChatView({ bot: profile }: { bot: Bot }) {
           selected one. ArrowUp-to-edit stays gated on busy because editing
           rewinds the thread, which a live turn forbids (the server 409s it). */}
       <div ref={composerDockRef} className="absolute inset-x-0 bottom-0 z-[2]">
+      {/* The bot's verification run as a checklist, kept as a skill on request.
+          In the dock so its height is measured with the composer's: the
+          transcript pad, the jump pill and bottom-follow all move with it. */}
+      {lastVerifyStep && verifyDismissed.get(transcriptKey) !== lastVerifyStep.id && (
+        <div className="flex justify-end px-5 pb-2">
+          <VerifyCard
+            key={transcriptKey}
+            steps={verifySteps}
+            canSave={canSaveVerify}
+            staged={skillStaged(messages, verifySteps)}
+            onDismiss={() => setVerifyDismissed((current) => new Map(current).set(transcriptKey, lastVerifyStep.id))}
+            onSave={() =>
+              dispatch({
+                type: "send",
+                botId: bot.id,
+                text: skillPrompt(verifySteps),
+                sendId: crypto.randomUUID(),
+                threadId: bot.threadId,
+              })
+            }
+          />
+        </div>
+      )}
       <Composer
         key={bot.threadId}
         bot={bot}

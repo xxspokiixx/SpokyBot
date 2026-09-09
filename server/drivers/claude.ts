@@ -33,6 +33,7 @@ import type {
 import { computerProxyEnv } from "../container-computer.ts";
 import { gateServer, resultBudget } from "../mcp-gate-config.ts";
 import { newEventId, newId } from "../contracts.ts";
+import { askInputSummary, commandSummary } from "../tool-summary.ts";
 import { classifyError, computeBackoff, interruptibleDelay, RETRY_MAX_ATTEMPTS } from "./retry.ts";
 import {
   applyClaudeInject,
@@ -442,12 +443,7 @@ function systemEndedReply(kind: Ask["kind"]): { behavior: AskBehavior; message: 
 
 /** One human-readable line for an ask — what the card subtitle shows. */
 function askSummary(ask: Ask): string {
-  const input = ask.input ?? {};
-  if (typeof input.question === "string") return input.question.slice(0, 300);
-  if (typeof input.command === "string") return input.command.slice(0, 200);
-  if (typeof input.url === "string") return input.url.slice(0, 200);
-  const text = JSON.stringify(input);
-  return text === "{}" ? (ask.tool ?? "tool") : text.slice(0, 200);
+  return askInputSummary(ask.input) ?? ask.tool ?? "tool";
 }
 
 export function permissionSocketPath(threadId: string) {
@@ -1393,7 +1389,14 @@ export const ClaudeDriver: ProviderDriver<ClaudeConfig> = {
             }
             for (const b of Array.isArray(msg.content) ? msg.content : []) {
               if (b.type === "tool_use") {
-                emit({ ...base(threadId, currentTurnId()), type: "item.started", itemType: "tool", itemId: b.id, title: b.name });
+                emit({
+                  ...base(threadId, currentTurnId()),
+                  type: "item.started",
+                  itemType: "tool",
+                  itemId: b.id,
+                  title: b.name,
+                  summary: commandSummary(b.input),
+                });
               }
             }
             if (msg.usage) {

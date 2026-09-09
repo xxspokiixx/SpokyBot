@@ -117,7 +117,15 @@ export type RuntimeEvent = RuntimeEventBase &
          * delta, a thread total, a per-step figure) and must never be summed. */
         usage?: { input: number; output: number; cachedInput?: number };
       }
-    | { type: "item.started"; itemType: "tool" | "reasoning"; title?: string }
+    | {
+        type: "item.started";
+        itemType: "tool" | "reasoning";
+        title?: string;
+        /** The shell command the call runs, on one redacted line of at most
+         * 200 characters, for the chip and the Verify card. Absent for calls
+         * that run no command (a Read, a fetch). */
+        summary?: string;
+      }
     | { type: "item.updated"; itemType: "tool" | "reasoning"; tokens?: number | null }
     | { type: "item.completed"; itemType: "tool"; ok: boolean }
     | { type: "item.completed"; itemType: "assistant_text"; text: string }
