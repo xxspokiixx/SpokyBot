@@ -177,6 +177,7 @@ import {
   onSteeredQueueChange,
   queuedSteerSnapshot,
   queuedSteeredMessage,
+  queuedThreadPosition,
   queueSteeredMessage,
 } from "./steer-queue.ts";
 import {
@@ -263,6 +264,7 @@ import {
   mentionPrompt,
   COMPOSIO_PROMPT,
   CREDENTIAL_PROMPT,
+  THREADS_PROMPT,
   LEARN_PROMPT,
   PROFILE_PROMPT,
   ROUTINE_PROMPT,
@@ -566,6 +568,9 @@ type InternalCapability = {
   kind: "agents" | "connectors" | "computer" | "browser";
   skillAuthoring: boolean;
   createdBots: number;
+  /** start_thread calls this turn has made — capped like createdBots, so a
+   * turn cannot fan out into more real turns than a person could follow. */
+  openedThreads: number;
   orphanExpiresAt: number;
   localVmTarget?: LocalVmTarget;
   browserSession?: string;
@@ -710,6 +715,7 @@ function agentsIntegration(
     kind: "agents",
     skillAuthoring,
     createdBots: 0,
+    openedThreads: 0,
   });
   return {
     command: process.execPath,
@@ -968,7 +974,7 @@ async function browserIntegration(botId: string, profile: string | undefined, tu
   } });
   if (!turn) return { profile: partitionId, session, spec, integration: spec };
   const token = mintInternalCapability({ botId, ...turn, browserSession: session,
-    kind: "browser", depth: 0, skillAuthoring: false, createdBots: 0 });
+    kind: "browser", depth: 0, skillAuthoring: false, createdBots: 0, openedThreads: 0 });
   return { profile: partitionId, session, spec, integration: {
     command: process.execPath, args: [SPAWNED_PROXIES.browser], env: {
       ...AGENTS_NODE_FLAG, OMB_BROWSER_TOKEN: token, OMB_HARNESS_URL: `http://127.0.0.1:${PORT}`,
@@ -1004,6 +1010,7 @@ function connectedAppsIntegration(botId: string, threadId: string, generation: s
     kind: "connectors",
     skillAuthoring: false,
     createdBots: 0,
+    openedThreads: 0,
   });
   return composio.mcpIntegration(cfg, {
     harnessUrl: `http://127.0.0.1:${PORT}`,
@@ -1060,6 +1067,7 @@ function controlIntegration(botId: string, threadId: string, generation: string,
       ...(localVmTarget ? { localVmTarget } : {}),
       skillAuthoring: false,
       createdBots: 0,
+      openedThreads: 0,
     }),
   };
 }
@@ -3808,13 +3816,27 @@ bus.subscribe((event: RuntimeEvent) => {
 /** How a drained delegation becomes a real turn on the target. Shared by
  * the settle-time drain and the boot-time drain of what a previous process
  * left queued. */
-const runDelegatedTurn: Parameters<typeof drainDelegations>[3] = (toBotId, text, commsDepth, sourceThreadId, channel, taskId, sourceBotId) => {
+const runDelegatedTurn: Parameters<typeof drainDelegations>[3] = (toBotId, rawText, commsDepth, sourceThreadId, channel, taskId, sourceBotId, openedThreadId) => {
     // startTurn REJECTS on an ordinary condition — busy target, deleted bot,
     // unavailable provider. Unhandled, that rejection is fatal to the
     // harness (Node's default), which in the packaged app kills the server
     // child. Every delegation failure has to land as a chip instead.
-    const targetThreadId = store.bot(toBotId)?.threadId;
+    // A fresh-thread handoff runs in the thread the opener created — the
+    // drain already dropped it if that thread is gone — never in whatever
+    // the person is looking at.
+    const targetThreadId = openedThreadId ?? store.bot(toBotId)?.threadId;
     const target = store.bot(toBotId);
+    const opener = store.bot(sourceBotId);
+    const unattended = isUnattended(sourceBotId, sourceThreadId);
+    // The first line of an opened thread is another bot's words: it carries
+    // the same provenance note every relayed peer line does, structurally
+    // (peerAsk) as well as in the text.
+    const peerAsk: Message["peerAsk"] | undefined = openedThreadId && opener
+      ? { botId: opener.id, name: opener.name, unattended: unattended || undefined }
+      : undefined;
+    const text = openedThreadId && opener
+      ? withPeerProvenance(rawText, { botName: opener.name, delivery: "start_thread", unattended })
+      : rawText;
     if (targetThreadId) {
       delegationWatch.set(targetThreadId, {
         channelId: channel?.id,
@@ -3853,7 +3875,8 @@ const runDelegatedTurn: Parameters<typeof drainDelegations>[3] = (toBotId, text,
     return startTurn(toBotId, text, {
       threadId: targetThreadId,
       commsDepth,
-      unattended: isUnattended(sourceBotId, sourceThreadId),
+      unattended,
+      peerAsk,
       // startTurn schedules provider/integration setup after marking the bot
       // busy. Those asynchronous setup failures do not emit turn.completed,
       // so clear the watch and report them through this callback too.
@@ -3883,8 +3906,15 @@ function retryDelegationsWaitingOn(botId: string): void {
     // Explicit idle releases (room/setup/reload/watchdog fallbacks) may not
     // publish turn.completed. They free a waiting source continuation too.
     drainDelegationWakes();
-    if (store.bot(botId)?.busy) return;
-    for (const waitingThread of releaseDelegationsWaitingOn(botId)) {
+    // A bot still busy in one thread has nevertheless freed a slot: the
+    // fresh-thread handoffs waiting on it can move, while the active-thread
+    // ones keep waiting for it to go idle, as they always have.
+    const stillBusy = store.bot(botId)?.busy === true;
+    if (stillBusy && botAtThreadCapacity(botId)) return;
+    const released = stillBusy
+      ? releaseDelegationsWaitingOn(botId, (item) => item.targetThreadId !== undefined)
+      : releaseDelegationsWaitingOn(botId);
+    for (const waitingThread of released) {
       drainThreadDelegations(waitingThread);
     }
   });
@@ -3924,13 +3954,15 @@ bus.subscribe((event: RuntimeEvent) => {
 });
 
 function drainQueuedSends() {
-  drainSteeredMessages(store, (botId, threadId, prompt, userMessage, excludeIds) =>
-    // A plain attended turn — no automationSource, no unattended, no comms
-    // depth: exactly what typing the same words into an idle bot would run.
+  drainSteeredMessages(store, (botId, threadId, prompt, userMessage, excludeIds, unattended) =>
+    // A plain attended turn — no automationSource, no comms depth: exactly
+    // what typing the same words into an idle bot would run. The one
+    // exception is `unattended`: a thread a bot opened on itself while
+    // nobody was watching stays unwatched through the wait for a slot.
     // Drain just appended the held lines; userMessage keeps startTurn
     // from duplicating the last one, and excludeIds drops every drained
     // line from the transcript-replay so they are not also in `prompt`.
-    startTurn(botId, prompt, { threadId, userMessage, excludeMessageIds: excludeIds }).then(() => undefined).catch((err) => {
+    startTurn(botId, prompt, { threadId, userMessage, excludeMessageIds: excludeIds, unattended }).then(() => undefined).catch((err) => {
       store.appendMessage(threadId, {
         role: "bot",
         kind: "activity",
@@ -3962,6 +3994,42 @@ async function startOrQueueDirectMessage(botId: string, threadId: string, text: 
   }
   const message = await startTurn(botId, text, { threadId, replyTo, sendId });
   return { ok: true as const, threadId, message };
+}
+
+/** How many start_thread calls one turn may make. Same spirit as the
+ * create-bot ceiling above: a handful is a plan, more is a fan-out. */
+const MAX_THREADS_OPENED_PER_TURN = 5;
+
+/** A thread a bot opened on itself gets its first turn exactly the way a
+ * person's message would: it runs now if the bot has a free slot, and
+ * otherwise waits in the same composer queue, in line behind whatever the
+ * bot already has waiting. The only inheritance is `unattended` — a bot
+ * nobody is watching does not become watched by opening a thread. */
+async function startOrQueueOpenedThread(
+  botId: string,
+  threadId: string,
+  text: string,
+  unattended: boolean,
+): Promise<{ state: "running" } | { state: "queued"; position: number } | { state: "failed"; error: string }> {
+  // A room turn holds the bot too (startTurn refuses a direct turn during
+  // one); the drain's own block check already waits for it, so the words
+  // queue here rather than bounce.
+  if (botAtThreadCapacity(botId) || activeGroupTurnForBot(botId)) {
+    queueSteeredMessage(botId, threadId, text, { reason: "capacity", unattended });
+    return { state: "queued", position: queuedThreadPosition(botId, threadId) ?? 1 };
+  }
+  try {
+    await startTurn(botId, text, { threadId, unattended });
+    return { state: "running" };
+  } catch (error) {
+    const why = error instanceof Error ? error.message : String(error);
+    store.appendMessage(threadId, {
+      role: "bot",
+      kind: "activity",
+      tool: { name: `error: this thread could not start — ${why.slice(0, 120)}`, ok: false },
+    });
+    return { state: "failed", error: why };
+  }
 }
 
 // ── live screen: poll the bot's computer while it works ───────────────
@@ -4696,7 +4764,7 @@ async function startTurn(
           // model mostly did not think to make.
           ? peerRosterSystemPrompt(sectionPeers)
           : "";
-      const credentialPrompt = integrations.agents ? CREDENTIAL_PROMPT : "";
+      const credentialPrompt = integrations.agents ? CREDENTIAL_PROMPT + THREADS_PROMPT : "";
       const routinePrompt = integrations.agents ? ROUTINE_PROMPT : "";
       const profilePrompt = integrations.agents ? PROFILE_PROMPT : "";
       const recallPrompt = integrations.agents ? SESSION_SEARCH_SYSTEM_PROMPT : "";
@@ -5081,7 +5149,7 @@ async function stopBotForEmergencyApprovalDowngrade(botId: string): Promise<void
 // Load queued handoffs before scheduler recovery can fail an interrupted
 // run. Its failure callback can then durably drop that work immediately;
 // nothing dispatches until the listener is ready below.
-const commsBus: CommsBus = { store, broadcast };
+const commsBus: CommsBus = { store, broadcast, threadSlotFree: (botId) => !botAtThreadCapacity(botId) };
 _loadPending();
 
 routines = new RoutineManager({
@@ -5878,7 +5946,7 @@ async function runGroupMemberTurn(
     readyGroup.bulletin.trim() && `Room bulletin (shared instructions for everyone):\n${readyGroup.bulletin.trim()}`,
     `Reply as yourself, briefly and conversationally. To bring a teammate in, mention them like @Name — they'll see the conversation and respond.`,
     outsideRoom.length > 0 && roomPeerRosterSystemPrompt(outsideRoom),
-    integrations.agents && CREDENTIAL_PROMPT.trim(),
+    integrations.agents && (CREDENTIAL_PROMPT + THREADS_PROMPT).trim(),
     integrations.agents && ROUTINE_PROMPT.trim(),
     integrations.agents && PROFILE_PROMPT.trim(),
     skillAuthoring && LEARN_PROMPT.trim(),
@@ -8248,6 +8316,7 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
         ...parsed.data,
         generation,
         createdBots: 0,
+        openedThreads: 0,
       });
       return json(res, 201, { token });
     }
@@ -8369,6 +8438,79 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
       // to keep trying — but it is still NAMED, with the refusal it would
       // have met. Without that the bot can only say it is in no room at
       // all, while the person is looking at it in that very room.
+      // list_threads: the caller's own threads, plus — on every peer it can
+      // reach — only the threads the caller itself opened. A peer's other
+      // threads are its own business (and the person's), so the scope is
+      // "what you started", never "what that bot is doing". State is read
+      // the way the sidebar reads it, so the bot and the person agree.
+      if (method === "GET" && path === "/api/internal/threads") {
+        const from = internalSender;
+        const fromThreadId = internalCapability.threadId;
+        if (!connectorThread(from.id, fromThreadId)) {
+          return json(res, 403, { error: "source conversation does not belong to sender" });
+        }
+        const rows: Array<{
+          threadId: string; botId: string; botName: string; title: string;
+          state: "running" | "waiting-on-you" | "queued" | "idle";
+          unread: boolean; openedAt: number; delegationId?: string; own: boolean;
+        }> = [];
+        const stateOf = (bot: BotRecord, task: TaskRecord) => {
+          if (task.activity === "waiting-on-you") return "waiting-on-you" as const;
+          if (threadBusy(bot.id, task.threadId)) return "running" as const;
+          if (queuedThreadPosition(bot.id, task.threadId) !== null) return "queued" as const;
+          return "idle" as const;
+        };
+        for (const task of store.tasks(from.id)) {
+          rows.push({
+            threadId: task.threadId, botId: from.id, botName: from.name, title: task.title,
+            state: stateOf(from, task), unread: task.unread === true, openedAt: task.openedBy?.at ?? task.createdAt,
+            delegationId: task.openedBy?.delegationId, own: true,
+          });
+        }
+        for (const peer of reachablePeers(store.bots, from)) {
+          for (const task of store.tasks(peer.id)) {
+            if (task.openedBy?.botId !== from.id) continue;
+            rows.push({
+              threadId: task.threadId, botId: peer.id, botName: peer.name, title: task.title,
+              state: stateOf(peer, task), unread: task.unread === true, openedAt: task.openedBy.at,
+              delegationId: task.openedBy.delegationId, own: false,
+            });
+          }
+        }
+        rows.sort((a, b) => b.openedAt - a.openedAt);
+        return json(res, 200, { threads: rows.slice(0, 100) });
+      }
+      // close_thread: a bot tidies a thread it opened (or one of its own)
+      // once its result has been read. Closing is the sidebar's idle state
+      // plus a chip saying who closed it — never a deletion, which stays a
+      // person's confirmed action, and never while the thread is running.
+      const closeMatch = method === "POST" ? path.match(/^\/api\/internal\/threads\/([\w-]+)\/close$/) : null;
+      if (closeMatch) {
+        const from = internalSender;
+        const fromThreadId = internalCapability.threadId;
+        if (!connectorThread(from.id, fromThreadId)) {
+          return json(res, 403, { error: "source conversation does not belong to sender" });
+        }
+        const threadId = closeMatch[1]!;
+        const owner = [from, ...reachablePeers(store.bots, from)].find((bot) => store.taskByThread(bot.id, threadId));
+        const task = owner ? store.taskByThread(owner.id, threadId) : undefined;
+        if (!owner || !task) return json(res, 404, { error: "no such thread — call list_threads for the ones you can see" });
+        if (owner.id !== from.id && task.openedBy?.botId !== from.id) {
+          return json(res, 403, { error: "that thread is not yours to close — only the bot that opened it, or its own bot, can" });
+        }
+        if (threadId === fromThreadId) return json(res, 400, { error: "you cannot close the thread you are speaking in — finish your turn instead" });
+        if (threadBusy(owner.id, threadId)) {
+          return json(res, 409, { error: `#${task.title} is still running — wait for it to finish (list_threads), or the person can stop it from the app` });
+        }
+        store.appendMessage(threadId, {
+          role: "bot",
+          kind: "activity",
+          from: { botId: from.id, name: from.name, color: from.color },
+          tool: { name: `Closed by @${from.name}`, ok: true },
+        });
+        if (task.unread) store.patchTask(owner.id, threadId, { unread: false });
+        return json(res, 200, { closed: true, threadId, title: task.title, botName: owner.name });
+      }
       if (method === "GET" && path === "/api/internal/rooms") {
         const from = internalSender;
         const fromThreadId = internalCapability.threadId;
@@ -9056,6 +9198,132 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
         if (owner.group) chip.from = { botId: poster.id, name: poster.name, color: poster.color };
         store.appendMessage(fromThreadId, chip);
         return json(res, 201, { ok: true, messageId: posted.id, roomName: room.name });
+      }
+      // start_thread: a bot opens a real thread — on itself for separate
+      // work, or on a teammate as a handoff that should run on its own.
+      // Never activates: a bot must not move what the person is looking at.
+      if (method === "POST" && path === "/api/internal/threads") {
+        const body = await readInternalBody();
+        const from = internalSender;
+        const fromThreadId = internalCapability.threadId;
+        const owner = connectorThread(from.id, fromThreadId);
+        if (!owner) return json(res, 403, { error: "source conversation does not belong to sender" });
+        if (
+          body.depth !== undefined &&
+          (!Number.isInteger(body.depth) || body.depth < 0 || body.depth !== internalCapability.depth)
+        ) {
+          return json(res, 403, { error: "the recursion depth does not match this turn" });
+        }
+        const title = String(body.title ?? "").trim();
+        const message = String(body.message ?? "").trim();
+        if (!title || !message) return json(res, 400, { error: "title and message are required" });
+        if (title.length > 80) return json(res, 400, { error: "title must be at most 80 characters" });
+        // the title is quoted into chips and the sidebar, one line each
+        if (!fitsOnOneLine(title)) return json(res, 400, { error: "title must fit on one line" });
+        if (internalCapability.openedThreads >= MAX_THREADS_OPENED_PER_TURN) {
+          return json(res, 429, { error: `you can open at most ${MAX_THREADS_OPENED_PER_TURN} threads in one turn` });
+        }
+        const toBotId = typeof body.toBotId === "string" && body.toBotId.trim() ? body.toBotId.trim() : from.id;
+        const target = store.bot(toBotId);
+        if (!target) return json(res, 404, { error: "no such bot" });
+        // A folder is the target's own organisation; a name is what the
+        // model has, an id is what the sidebar has, so accept either.
+        const folder = typeof body.folder === "string" ? body.folder.trim() : "";
+        let projectId: string | undefined;
+        if (folder) {
+          const project = (target.projects ?? []).find(
+            (candidate) => candidate.id === folder || candidate.name.trim().toLowerCase() === folder.toLowerCase(),
+          );
+          if (!project) {
+            const names = (target.projects ?? []).map((candidate) => candidate.name).join(", ");
+            return json(res, 400, { error: `@${target.name} has no folder named "${folder}"${names ? ` — the folders are: ${names}` : " — it has no folders; leave folder out"}` });
+          }
+          projectId = project.id;
+        }
+        const sourceTitle = owner.group ? owner.group.name : (store.taskByThread(from.id, fromThreadId)?.title ?? "");
+        if (target.id === from.id) {
+          const task = store.createTask(from.id, title, false, projectId, { botId: from.id, name: from.name, at: Date.now() });
+          if (!task) return json(res, 500, { error: "couldn't create that thread" });
+          internalCapability.openedThreads += 1;
+          const chip: Omit<Message, "id" | "at"> = {
+            role: "bot",
+            kind: "activity",
+            tool: { name: `Opened thread #${task.title}`, ok: true },
+            threadRef: { botId: from.id, threadId: task.threadId, title: task.title },
+          };
+          if (owner.group) chip.from = { botId: from.id, name: from.name, color: from.color };
+          store.appendMessage(fromThreadId, chip);
+          // The first line is the bot's own words. Say so where the model
+          // reads it, so a later turn in that thread never mistakes the
+          // request for the person's.
+          const opening = `[Thread you opened yourself${sourceTitle ? ` from #${sourceTitle}` : ""}. The request below is your own words, not the person's: do the work here and end with a clear result they can read.]\n\n${message}`;
+          const outcome = await startOrQueueOpenedThread(from.id, task.threadId, opening, isUnattended(from.id, fromThreadId));
+          return json(res, 201, {
+            threadId: task.threadId,
+            title: task.title,
+            botId: from.id,
+            botName: from.name,
+            self: true,
+            limit: maxConcurrentBotThreads(cfg),
+            ...outcome,
+          });
+        }
+        // A peer thread is a handoff into a fresh thread: every gate the
+        // classic handoff has applies unchanged, here at queue time and
+        // again in the drain at dispatch time.
+        const depth = internalCapability.depth;
+        if (depth >= MAX_COMMS_DEPTH) {
+          return json(res, 200, { error: "thread chains are limited to one hop — open the thread on yourself, or do this one here" });
+        }
+        if (sectionKey(from.section) !== sectionKey(target.section)) {
+          return json(res, 403, { error: "that bot belongs to a different section" });
+        }
+        if (!peerAllowed(from, target.id)) {
+          return json(res, 403, { error: "that bot is not on this bot's allowed peers — call list_bots for the ones you can reach" });
+        }
+        const task = store.createTask(target.id, title, false, projectId, { botId: from.id, name: from.name, at: Date.now() });
+        if (!task) return json(res, 500, { error: "couldn't create that thread" });
+        const queued = queueDelegation(
+          commsBus,
+          from,
+          { toBotId: target.id, message, depth, targetThreadId: task.threadId },
+          MAX_COMMS_DEPTH,
+          fromThreadId,
+        );
+        if (queued.result !== "ok" || !queued.id) {
+          // nothing will ever run there: take the row back before the person
+          // sees a thread that goes nowhere
+          store.deleteTask(target.id, task.threadId);
+          const said: Record<Exclude<QueueResult, "ok">, string> = {
+            self: "a bot cannot hand a thread to itself this way — leave bot_id out",
+            too_deep: "thread chains are limited to one hop — open the thread on yourself, or do this one here",
+            no_target: "no such bot",
+            too_many: "too many handoffs queued on this turn — finish your turn and open the rest next time",
+          };
+          return json(res, 200, { error: said[queued.result === "ok" ? "no_target" : queued.result] });
+        }
+        store.setTaskOpenedBy(target.id, task.threadId, { botId: from.id, name: from.name, delegationId: queued.id, at: task.openedBy?.at ?? Date.now() });
+        internalCapability.openedThreads += 1;
+        // An honest forecast, not a promise: the handoff starts when this
+        // turn ends, and by then the target's slots are taken by whatever is
+        // running there plus the threads this turn already opened ahead.
+        const limit = maxConcurrentBotThreads(cfg);
+        const running = store.tasks(target.id).filter((candidate) => threadBusy(target.id, candidate.threadId)).length;
+        const ahead = pendingDelegationSnapshot().filter(
+          (pending) => pending.toBotId === target.id && pending.targetThreadId !== undefined && pending.targetThreadId !== task.threadId,
+        ).length;
+        const position = running + ahead + 1;
+        return json(res, 201, {
+          threadId: task.threadId,
+          title: task.title,
+          botId: target.id,
+          botName: target.name,
+          self: false,
+          delegationId: queued.id,
+          approvalRequired: Boolean(from.approvePeerComms),
+          limit,
+          ...(position > limit ? { state: "queued", position: position - limit } : { state: "pending" }),
+        });
       }
       if (method === "POST" && path === "/api/internal/create-bot") {
         const body = await readInternalBody();
