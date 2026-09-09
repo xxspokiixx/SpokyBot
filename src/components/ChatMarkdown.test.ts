@@ -18,6 +18,41 @@ vi.mock("react", async (importOriginal) => {
   return { ...react, useEffect: vi.fn(react.useEffect) };
 });
 
+describe("mention highlighting", () => {
+  const mentionPeers = [{ name: "Atlas" }, { name: "調査担当" }];
+  it("carries bot colors into Markdown without coloring everyone as a bot", () => {
+    const html = renderToStaticMarkup(createElement(ChatMarkdown, {
+      text: "@Atlas @Juniper @everyone", everyone: true,
+      mentionPeers: [{ name: "Atlas", color: "blue" }, { name: "Juniper", color: "red" }],
+    }));
+    expect(html).toContain('style="--mention-color:#377FE6">@Atlas');
+    expect(html).toContain('style="--mention-color:#D94B52">@Juniper');
+    expect(html).toContain('<span class="mention-highlight">@everyone</span>');
+  });
+  it("highlights known mentions in prose, lists and tables", () => {
+    const html = renderToStaticMarkup(createElement(ChatMarkdown, {
+      text: "Ask @Atlas.\n\n- @調査担当 確認\n\n| Who |\n| --- |\n| @everyone |", mentionPeers, everyone: true,
+    }));
+    expect(html.match(/class="mention-highlight"/g)).toHaveLength(3);
+    expect(html).toContain('<span class="mention-highlight">@Atlas</span>');
+    expect(html).toContain("<table");
+  });
+  it("leaves code, links, emails and unknown names untouched", () => {
+    const html = renderToStaticMarkup(createElement(ChatMarkdown, {
+      text: "`@Atlas`\n\n```text\n@Atlas\n```\n\n[@Atlas](https://example.test) me@Atlas.test @Ghost", mentionPeers,
+    }));
+    expect(html).not.toContain('class="mention-highlight"');
+    expect(html).toContain('href="https://example.test"');
+  });
+  it("keeps model HTML inert even when it contains a matching name", () => {
+    const html = renderToStaticMarkup(createElement(ChatMarkdown, {
+      text: '<img src=x onerror="bad()"> @Atlas', mentionPeers,
+    }));
+    expect(html).not.toContain("<img");
+    expect(html).not.toContain('<script');
+  });
+});
+
 it("requests both code palettes for skin-aware highlighting", async () => {
   const originalUseEffect = (await vi.importActual<typeof React>("react")).useEffect;
   const effects: React.EffectCallback[] = [];

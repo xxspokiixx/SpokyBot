@@ -72,6 +72,9 @@ using the real renderer and an isolated fake-engine server.
 The [server settings recipe](server-settings.md) checks browser provider sign-in
 with an offline CLI and custom-domain validation without touching live accounts.
 
+The [mention fixture](mentions.md) checks candidate selection, composer highlighting,
+sent mentions, multiline scrolling and responsive wrapping in real chat views.
+
 The [Group and Goal Local VM recipe](group-local-vm.md) checks per-speaker
 desktop routing, cancellation, and computer authority cleanup.
 

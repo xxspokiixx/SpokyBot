@@ -19,6 +19,7 @@ import { memo, useEffect, useRef, useState, type ReactNode } from "react";
 import Markdown, { defaultUrlTransform } from "react-markdown";
 import remarkGfm from "remark-gfm";
 import { Check, Copy, Download, LoaderCircle, RotateCcw, WrapText } from "lucide-react";
+import { remarkMentions, type MentionPeer } from "@/lib/mentions";
 
 import { countLines, formatLineCount, getLanguageDisplayName } from "../lib/code-block";
 import { MarkdownImagePreview, useLocalFileSave, type MessageAttachmentContext } from "./AttachmentPreview";
@@ -447,11 +448,16 @@ function Spoiler({ children }: { children?: ReactNode }) {
   );
 }
 
-function ChatMarkdownComponent({ text, streaming = false, message }: { text: string; streaming?: boolean; message?: MessageAttachmentContext }) {
+const NO_MENTION_PEERS: readonly MentionPeer[] = [];
+
+function ChatMarkdownComponent({ text, streaming = false, message, mentionPeers = NO_MENTION_PEERS, everyone = false }: {
+  text: string; streaming?: boolean; message?: MessageAttachmentContext;
+  mentionPeers?: readonly MentionPeer[]; everyone?: boolean;
+}) {
   return (
     <div className="chat-md min-w-0 [&>*+*]:mt-2">
       <Markdown
-        remarkPlugins={[remarkGfm, unwrapLinkedImages]}
+        remarkPlugins={[remarkGfm, unwrapLinkedImages, [remarkMentions, { peers: mentionPeers, everyone }]]}
         urlTransform={chatUrlTransform}
         components={{
           pre({ children }: { children?: ReactNode }) {
@@ -568,6 +574,8 @@ function ChatMarkdownComponent({ text, streaming = false, message }: { text: str
 
 export const ChatMarkdown = memo(ChatMarkdownComponent, (previous, next) => (
   previous.text === next.text
+  && previous.mentionPeers === next.mentionPeers
+  && previous.everyone === next.everyone
   && Boolean(previous.streaming) === Boolean(next.streaming)
   && previous.message?.threadId === next.message?.threadId
   && previous.message?.messageId === next.message?.messageId
