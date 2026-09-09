@@ -28,6 +28,7 @@ import {
   getLanguageDisplayName,
   getSnippetFileName,
 } from "../lib/code-block";
+import { repairMarkdownTables } from "../lib/markdown-tables";
 import { remarkThreadRefs } from "../lib/thread-refs";
 import { MarkdownImagePreview, useLocalFileSave, type MessageAttachmentContext } from "./AttachmentPreview";
 import { ThreadLink, threadLinkFromProps, useThreadRefs } from "./ThreadRefs";
@@ -473,6 +474,10 @@ function Spoiler({ children }: { children?: ReactNode }) {
 
 const NO_MENTION_PEERS: readonly MentionPeer[] = [];
 
+// A markdown image resolves its attachment by source offset, so a message
+// holding one must reach the parser byte-for-byte as written.
+const MARKDOWN_IMAGE = "![";
+
 function ChatMarkdownComponent({ text, streaming = false, message, mentionPeers = NO_MENTION_PEERS, everyone = false }: {
   text: string; streaming?: boolean; message?: MessageAttachmentContext;
   mentionPeers?: readonly MentionPeer[]; everyone?: boolean;
@@ -480,6 +485,10 @@ function ChatMarkdownComponent({ text, streaming = false, message, mentionPeers 
   // "#Title" mentions link to the threads the person can see (ThreadRefs);
   // @mentions were already decorated by remarkMentions, which runs first.
   const { threads, currentBotId } = useThreadRefs();
+  // A near-miss table from a model renders as an unreadable run of pipes
+  // unless it is repaired before parsing. The repair moves source offsets, so
+  // a message carrying an image opts out and keeps its text verbatim.
+  const source = text.includes(MARKDOWN_IMAGE) ? text : repairMarkdownTables(text);
   return (
     <div className="chat-md min-w-0 [&>*+*]:mt-2">
       <Markdown
@@ -606,7 +615,7 @@ function ChatMarkdownComponent({ text, streaming = false, message, mentionPeers 
           },
         }}
       >
-        {text}
+        {source}
       </Markdown>
     </div>
   );
