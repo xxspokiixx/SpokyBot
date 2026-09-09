@@ -244,7 +244,7 @@
   "sidebar.new": "Neu",
   "sidebar.newOrShare": "Neu oder teilen",
   "sidebar.newBot": "Neuer Bot",
-  "sidebar.backup.hint": "Private Sicherung von Bot-Einrichtung und Gesprächstext. Dateien, Bilder, Workspace-Speicher und Verbindungen sind nicht enthalten.",
+  "sidebar.backup.hint": "Private Sicherung der Bot-Einrichtung, der Gesprächstexte und der Gedächtnisnotizen jedes Bots. Dateien, Bilder und Verbindungen sind nicht enthalten.",
   "sidebar.backup.exporting": "Exportiere…",
   "sidebar.backup.export": "Sicherung exportieren",
   "sidebar.backup.downloaded": "Sicherung geladen · {members} Bots und Gesprächstext.",

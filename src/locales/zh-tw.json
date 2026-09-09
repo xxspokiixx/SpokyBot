@@ -244,7 +244,7 @@
   "sidebar.new": "新增",
   "sidebar.newOrShare": "新增或分享",
   "sidebar.newBot": "新增機器人",
-  "sidebar.backup.hint": "機器人設定與對話文字的私人備份。不包含檔案、圖片、工作區記憶與連線。",
+  "sidebar.backup.hint": "私人備份，內容包含機器人設定、對話文字，以及各機器人的記憶筆記。不含檔案、圖片與連線。",
   "sidebar.backup.exporting": "正在匯出…",
   "sidebar.backup.export": "匯出備份",
   "sidebar.backup.downloaded": "已下載備份 · {members} 個機器人與對話文字。",

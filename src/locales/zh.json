@@ -169,7 +169,7 @@
   "sidebar.new": "新建",
   "sidebar.newOrShare": "新建或分享",
   "sidebar.newBot": "新建机器人",
-  "sidebar.backup.hint": "机器人配置与对话文本的私人备份。不包含文件、图片、工作区记忆和连接。",
+  "sidebar.backup.hint": "对机器人配置、对话文本以及各机器人的记忆笔记进行私有备份。不包含文件、图片和连接。",
   "sidebar.backup.exporting": "正在导出…",
   "sidebar.backup.export": "导出备份",
   "sidebar.backup.downloaded": "备份已下载 · {members} 个机器人及对话文本。",

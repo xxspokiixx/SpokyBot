@@ -169,7 +169,7 @@
   "sidebar.new": "新規",
   "sidebar.newOrShare": "新規または共有",
   "sidebar.newBot": "新しいボット",
-  "sidebar.backup.hint": "ボットの設定と会話テキストのプライベートなバックアップです。ファイル、画像、ワークスペースのメモリー、接続は含まれません。",
+  "sidebar.backup.hint": "ボット設定、会話テキスト、各ボットのメモリノートのプライベートバックアップです。ファイル、画像、接続は含まれません。",
   "sidebar.backup.exporting": "書き出し中…",
   "sidebar.backup.export": "バックアップを書き出す",
   "sidebar.backup.downloaded": "バックアップを保存しました · ボット {members} 件と会話テキスト。",

@@ -169,7 +169,7 @@
   "sidebar.new": "Nuevo",
   "sidebar.newOrShare": "Nuevo o compartir",
   "sidebar.newBot": "Bot nuevo",
-  "sidebar.backup.hint": "Copia privada de la configuración de los bots y del texto de las conversaciones. No incluye archivos, imágenes, la memoria del espacio de trabajo ni las conexiones.",
+  "sidebar.backup.hint": "Copia de seguridad privada de la configuración de los bots, el texto de las conversaciones y las notas de memoria de cada bot. No incluye archivos, imágenes ni conexiones.",
   "sidebar.backup.exporting": "Exportando…",
   "sidebar.backup.export": "Exportar la copia",
   "sidebar.backup.downloaded": "Copia descargada · {members} bots y el texto de las conversaciones.",
