@@ -1870,32 +1870,46 @@ final class Session: ObservableObject {
     /// already on screen. Any other bot is pushed the way a notification is,
     /// and nil comes back.
     func openThread(_ ref: ThreadRef, shownBotId: String?) async -> String? {
+        guard !Task.isCancelled else { return nil }
         guard let client else {
             actionError = "Pair this device with your computer to open that thread."
             return nil
         }
+        let generation = streamGeneration
+        let connectionID = client.connection.id
+        let requestIsCurrent = {
+            !Task.isCancelled && self.streamGeneration == generation && self.client?.connection.id == connectionID
+        }
+        actionError = nil
         do {
             var bot = state.bot(ref.botId)
             if bot == nil {
                 try await hydrate(using: client)
+                guard requestIsCurrent() else { return nil }
                 bot = state.bot(ref.botId)
             }
             guard var selected = bot else { throw APIError.status(code: 404, message: "That agent no longer exists.") }
             if selected.threadId != ref.threadId {
                 do {
                     selected = try await client.switchTask(botId: selected.id, threadId: ref.threadId)
+                    guard requestIsCurrent() else { return nil }
                     state.apply(.bot(selected))
-                } catch {
+                } catch APIError.status(code: 404, message: _) {
+                    guard requestIsCurrent() else { return nil }
                     // The thread may be gone (deleted since the chip was
                     // written). The bot's current thread, and a word about
                     // it, beats a dead tap.
                     actionError = "That thread is no longer on your computer."
                 }
             }
+            guard requestIsCurrent() else { return nil }
             if selected.id == shownBotId { return selected.threadId }
             notificationChat = .bot(selected)
         } catch is CancellationError {
-        } catch { actionError = error.localizedDescription }
+        } catch {
+            guard requestIsCurrent() else { return nil }
+            actionError = error.localizedDescription
+        }
         return nil
     }
 

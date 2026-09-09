@@ -45,6 +45,7 @@ struct ChatView: View {
     @State private var filePreview: FilePreviewItem?
     @State private var fileDownloadTask: Task<Void, Never>?
     @State private var fileDownloadRequestID: UUID?
+    @State private var threadOpenTask: Task<Void, Never>?
     @State private var acceptsNextHardwareLineBreak = false
     @FocusState private var composerFocused: Bool
     @StateObject private var dictation = SpeechDictation()
@@ -369,10 +370,15 @@ struct ChatView: View {
             // started in the previous task must not open a sheet (or surface
             // its error) in the new one when the network reply arrives late.
             resetFilePreview()
+            cancelThreadOpen()
+        }
+        .onChange(of: session.connection?.id) { _, _ in
+            cancelThreadOpen()
         }
         .onDisappear {
             dictation.stop()
             resetFilePreview()
+            cancelThreadOpen()
         }
         .onChange(of: scenePhase) { _, phase in
             if phase != .active { dictation.stop() }
@@ -935,12 +941,19 @@ struct ChatView: View {
     /// A chip that opened a thread on this bot switches this screen in
     /// place; one that opened a thread on a teammate pushes that chat.
     private func openThread(_ ref: ThreadRef) {
+        cancelThreadOpen()
         let shownBotId: String? = current.isBot ? current.id : nil
-        Task {
-            if let threadId = await session.openThread(ref, shownBotId: shownBotId) {
-                selectedThreadId = threadId
-            }
+        threadOpenTask = Task {
+            let openedThreadId = await session.openThread(ref, shownBotId: shownBotId)
+            guard !Task.isCancelled else { return }
+            threadOpenTask = nil
+            if let openedThreadId { selectedThreadId = openedThreadId }
         }
+    }
+
+    private func cancelThreadOpen() {
+        threadOpenTask?.cancel()
+        threadOpenTask = nil
     }
 
     private func openLink(_ url: URL, from message: Message) -> OpenURLAction.Result {

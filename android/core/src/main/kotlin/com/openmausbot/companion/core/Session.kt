@@ -1654,19 +1654,22 @@ class Session(
      * than nowhere.
      *
      * @return the bot pinned to the thread, or to its current thread when the
-     *   switch failed; null when the bot itself is gone or the phone is not
-     *   paired (the notice is already posted).
+     *   thread is gone; null when opening fails or the connection changes.
      */
     suspend fun openThread(ref: ThreadRef): Bot? {
+        currentCoroutineContext().ensureActive()
         val activeClient = client
         if (activeClient == null) {
             _actionError.value = "Pair this phone with your computer to open that thread."
             return null
         }
+        _actionError.value = null
         return try {
             var bot = _state.value.bot(ref.botId)
             if (bot == null) {
                 val fleet = hydrateFn(activeClient, 50)
+                currentCoroutineContext().ensureActive()
+                if (client !== activeClient) return null
                 _state.update { it.hydrate(fleet) }
                 notificationSink.setBadge(_state.value.unreadCount)
                 bot = _state.value.bot(ref.botId)
@@ -1676,9 +1679,13 @@ class Session(
             if (selected.threadId != ref.threadId) {
                 try {
                     selected = activeClient.switchTask(selected.id, ref.threadId)
+                    currentCoroutineContext().ensureActive()
+                    if (client !== activeClient) return null
                     _state.update { it.apply(Frame.Bot(selected)) }
-                } catch (error: Throwable) {
-                    if (error is kotlinx.coroutines.CancellationException) throw error
+                } catch (error: APIError.Status) {
+                    currentCoroutineContext().ensureActive()
+                    if (client !== activeClient) return null
+                    if (error.code != 404) throw error
                     // The thread may be gone (deleted since the chip was
                     // written). The bot's current thread, and a word about it,
                     // beats a dead tap.
@@ -1688,6 +1695,8 @@ class Session(
             selected.forTask(selected.threadId) ?: selected
         } catch (error: Throwable) {
             if (error is kotlinx.coroutines.CancellationException) throw error
+            currentCoroutineContext().ensureActive()
+            if (client !== activeClient) return null
             _actionError.value = error.message
             null
         }

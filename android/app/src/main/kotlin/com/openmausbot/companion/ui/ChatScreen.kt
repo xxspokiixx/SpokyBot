@@ -213,6 +213,10 @@ private fun LoadedChat(
     val chatDrafts = environment.chatDrafts
     val haptics = rememberHaptics()
     val scope = rememberCoroutineScope()
+    var threadOpenJob by remember { mutableStateOf<Job?>(null) }
+    DisposableEffect(threadId) {
+        onDispose { threadOpenJob?.cancel() }
+    }
     val lifecycleOwner = LocalLifecycleOwner.current
     // Words this computer is holding until the running turn settles.
     val queuedSends = state.pendingQueued[threadId].orEmpty()
@@ -401,7 +405,8 @@ private fun LoadedChat(
     // the way a thread row does; one that opened a thread on a teammate pushes
     // that chat.
     fun openThread(ref: ThreadRef) {
-        scope.launch {
+        threadOpenJob?.cancel()
+        threadOpenJob = scope.launch {
             val bot = session.openThread(ref) ?: return@launch
             if (bot.id == chatId) onSelectTask(ChatTarget.Bot(bot.id, bot.threadId)) else onOpenChat(Chat.BotChat(bot))
         }
