@@ -333,6 +333,9 @@ export function drainDelegations(
     taskId: string,
     sourceBotId: string,
   ) => void | Promise<void>,
+  /** Terminal failures before dispatch also need to wake the source. A
+   * launched peer reports through its provider-turn finalizer instead. */
+  onSettled?: (receipt: DelegationReceipt) => void,
 ): void {
   if (drainingThreads.has(threadId)) {
     queuedRedrains.add(threadId);
@@ -344,6 +347,9 @@ export function drainDelegations(
   drainingThreads.add(threadId);
   void (async () => {
     for (const item of snapshot) {
+      // Stop/deletion may remove queued work while another item awaits a
+      // person's approval. A stale snapshot is never authority to launch it.
+      if (!pendingDelegations.get(threadId)?.some((candidate) => candidate.id === item.id)) continue;
       // A shared channel's thread is not owned by any single bot, so each
       // queued item carries its own source bot identity.
       const from =
@@ -361,7 +367,7 @@ export function drainDelegations(
         acknowledgeDelegation(threadId, item.id);
         continue;
       }
-      let outcome: "settled" | "requeued" = "settled";
+      let outcome: "settled" | "requeued" | "dispatched" = "settled";
       try {
         outcome = await processOne(bus, approvalBus, from, threadId, item, runTarget);
       } catch (error) {
@@ -386,7 +392,16 @@ export function drainDelegations(
       } finally {
         // A requeued item (busy target, retries left) stays for the drain
         // that the target's own settling turn will trigger.
+        const stillQueued = pendingDelegations.get(threadId)?.some((candidate) => candidate.id === item.id);
         if (outcome !== "requeued") acknowledgeDelegation(threadId, item.id);
+        if (outcome === "settled" && stillQueued) {
+          const receipt = findDelegationReceipt(item.id);
+          try {
+            if (receipt) onSettled?.(receipt);
+          } catch (error) {
+            console.error("delegation settled but its source could not be resumed", error);
+          }
+        }
       }
     }
   })().finally(() => {
@@ -399,7 +414,7 @@ export function drainDelegations(
     const snapshotIds = new Set(snapshot.map((item) => item.id));
     const hasNewItems = pendingDelegations.get(threadId)?.some((item) => !snapshotIds.has(item.id)) ?? false;
     if (redrainRequested || hasNewItems) {
-      drainDelegations(bus, approvalBus, threadId, runTarget);
+      drainDelegations(bus, approvalBus, threadId, runTarget, onSettled);
     }
   });
 }
@@ -457,9 +472,22 @@ async function processOne(
     taskId: string,
     sourceBotId: string,
   ) => void | Promise<void>,
-): Promise<"settled" | "requeued"> {
+): Promise<"settled" | "requeued" | "dispatched"> {
   let sender = from;
   let target = bus.store.bot(item.toBotId);
+  // Retained approval authorizes the message, not a deleted conversation or
+  // revoked room membership. Check every retry before writing to its source.
+  if (!sourceThreadBelongsToBot(bus.store, sender.id, sourceThreadId)) {
+    recordDelegationReceipt({
+      id: item.id,
+      sourceThreadId,
+      toBotId: item.toBotId,
+      toBotName: target?.name ?? item.toBotId,
+      status: "dropped",
+      result: "the source conversation no longer belongs to the delegating bot",
+    });
+    return "settled";
+  }
   if (!target) {
     recordDelegationReceipt({
       id: item.id,
@@ -520,6 +548,22 @@ async function processOne(
       "delegate_bot",
       sourceThreadId,
     );
+    if (!pendingDelegations.get(sourceThreadId)?.some((candidate) => candidate.id === item.id)) return "settled";
+    // Approval may have waited for minutes. Revalidate before even reporting
+    // a denial, which otherwise recreates a deleted source transcript.
+    const current = bus.store.bot(item.toBotId);
+    const currentSender = bus.store.bot(from.id);
+    if (!current || !currentSender || !sourceThreadBelongsToBot(bus.store, currentSender.id, sourceThreadId)) {
+      recordDelegationReceipt({
+        id: item.id,
+        sourceThreadId,
+        toBotId: item.toBotId,
+        toBotName: target.name,
+        status: "dropped",
+        result: "the peer or source conversation no longer exists",
+      });
+      return "settled";
+    }
     if (verdict !== "allow") {
       recordDelegationReceipt({
         id: item.id,
@@ -536,13 +580,11 @@ async function processOne(
       });
       return "settled";
     }
-    // The approval could have been sitting for up to 15 minutes. Everything
-    // checked above is a stale snapshot now: re-read both bots and re-check
-    // busy, or an allow can start a second turn on a bot that is mid-turn —
-    // and mirror a "Messaged @X" chip for an exchange that never happens.
-    const current = bus.store.bot(item.toBotId);
-    const currentSender = bus.store.bot(from.id);
-    if (!current || !currentSender || !sourceThreadBelongsToBot(bus.store, currentSender.id, sourceThreadId)) return "settled";
+    // A busy-target retry must not ask for the very same approval again.
+    item.approvalAlreadyGranted = true;
+    savePending();
+    // Recheck peer access and busy state too: an approval must not start a
+    // second turn or mirror an exchange that cannot actually happen.
     if (dropIfUnreachable(bus, currentSender, current, sourceThreadId, item)) {
       return "settled";
     }
@@ -587,7 +629,7 @@ async function processOne(
   const reasonLine = item.reason ? `\n\n[Reason: ${item.reason}]` : "";
   const prefixed = `[Delegated by @${sender.name}, another bot in this OpenMausBot workspace. Do the work and reply directly.]\n\n${item.message}${reasonLine}`;
   await runTarget(item.toBotId, prefixed, item.depth + 1, sourceThreadId, channel, item.id, sender.id);
-  return "settled";
+  return "dispatched";
 }
 
 /** The source thread may be a bot's own task or a shared group where the

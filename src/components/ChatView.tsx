@@ -756,11 +756,13 @@ const MessagesList = memo(function MessagesList({
               return <OptionCard botId={bot.id} threadId={bot.threadId} message={m} />;
             case "routine.run": {
               const executionThreadId = m.routineRun?.executionThreadId;
-              const canOpen = hasRoutineExecutionTask(bot.tasks, executionThreadId);
+              const canOpen = executionThreadId && state.bots.some((candidate) =>
+                candidate.threadId === executionThreadId || hasRoutineExecutionTask(candidate.tasks, executionThreadId)
+              );
               return (
                 <RoutineRunCard
                   message={m}
-                  onOpen={canOpen
+                  onOpen={canOpen && executionThreadId
                     ? () => openNotificationTarget(
                         dispatch,
                         { botId: bot.id, threadId: executionThreadId },

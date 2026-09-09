@@ -146,6 +146,20 @@ function normalizeScheduleInput(args: Json): NormalizedSchedule {
   }
   if (!jsonRecord(raw)) return { error: `The schedule must be a JSON object. ${SUPPORTED_SCHEDULES}` };
   const type = typeof raw.type === "string" ? raw.type.trim().toLowerCase() : "";
+  const fields = type === "once"
+    ? ["type", "at"]
+    : type === "weekly" || type === "daily"
+      ? ["type", "time", "weekdays"]
+      : type === "interval"
+        ? ["type", "every_minutes", "everyMinutes", "starts_at", "anchorAt"]
+        : null;
+  // Provider conversions may send unused optional fields as null. Ignore
+  // those, but never silently discard an actual scheduling constraint (for
+  // example timezone or a misspelled starts_at) and approve different work.
+  const unsupported = fields && Object.keys(raw).find((key) => raw[key] != null && !fields.includes(key));
+  if (unsupported) {
+    return { error: `Unsupported ${type} schedule field "${unsupported}". Weekly and daily times use the computer's timezone from list_routines. ${SUPPORTED_SCHEDULES}` };
+  }
   if (type === "once") {
     if (typeof raw.at !== "string" || !raw.at.trim()) {
       return { error: `A once schedule needs "at": a future RFC3339 date-time with an explicit offset, for example 2026-09-01T09:00:00+05:30.` };
@@ -544,7 +558,31 @@ function routineAction(value: unknown): RoutineAction | null {
 
 function routineFields(args: Json): { fields: Json; error?: string } {
   const fields: Json = {};
-  if (args.clear_timeout === true && typeof args.timeout_minutes === "number") {
+  // list_routines returns the harness names. Accept those when a model
+  // copies back a definition, as we already do for interval fields.
+  if (args.run_on != null && args.runOn != null && args.run_on !== args.runOn) {
+    return { fields, error: "Choose one run_on destination; run_on and runOn disagree." };
+  }
+  if (args.timeout_minutes != null && args.timeoutMinutes != null && args.timeout_minutes !== args.timeoutMinutes) {
+    return { fields, error: "Choose one timeout_minutes limit; timeout_minutes and timeoutMinutes disagree." };
+  }
+  const runOn = args.run_on ?? args.runOn;
+  const timeoutMinutes = args.timeout_minutes ?? args.timeoutMinutes;
+  if (runOn != null && runOn !== "maus" && runOn !== "cloud") {
+    return { fields, error: 'run_on must be "maus" or "cloud".' };
+  }
+  if (timeoutMinutes != null && (
+    typeof timeoutMinutes !== "number" || !Number.isInteger(timeoutMinutes) || timeoutMinutes < 5 || timeoutMinutes > 240
+  )) {
+    return { fields, error: "timeout_minutes must be a whole number from 5 to 240. Use clear_timeout to remove a limit." };
+  }
+  if (args.continuity != null && typeof args.continuity !== "boolean") {
+    return { fields, error: "continuity must be true or false." };
+  }
+  if (args.clear_timeout != null && typeof args.clear_timeout !== "boolean") {
+    return { fields, error: "clear_timeout must be true or false." };
+  }
+  if (args.clear_timeout === true && timeoutMinutes != null) {
     return { fields, error: "Choose timeout_minutes or clear_timeout, not both." };
   }
   if (typeof args.name === "string") fields.name = args.name.trim();
@@ -554,9 +592,9 @@ function routineFields(args: Json): { fields: Json; error?: string } {
     if (normalized.error) return { fields, error: normalized.error };
     fields.schedule = normalized.schedule;
   }
-  if (typeof args.run_on === "string") fields.runOn = args.run_on;
+  if (runOn != null) fields.runOn = runOn;
   if (args.clear_timeout === true) fields.timeoutMinutes = null;
-  else if (typeof args.timeout_minutes === "number") fields.timeoutMinutes = args.timeout_minutes;
+  else if (timeoutMinutes != null) fields.timeoutMinutes = timeoutMinutes;
   if (typeof args.continuity === "boolean") fields.continuity = args.continuity;
   return { fields };
 }

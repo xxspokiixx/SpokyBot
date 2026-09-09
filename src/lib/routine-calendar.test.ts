@@ -4,6 +4,7 @@ import type { Routine, RoutineRun } from "./routines";
 import {
   atLocalTime,
   formatGmtOffset,
+  fromLocalDateAndTime,
   packCalendarCollisions,
   projectedRoutineItems,
   scheduleAt,
@@ -11,7 +12,34 @@ import {
   snapMinutes,
   startOfDay,
   startOfWeek,
+  toLocalDateInput,
+  toLocalTimeInput,
 } from "./routine-calendar";
+
+describe("routine editor timestamp precision", () => {
+  it("keeps an agent-created interval anchor intact on a title-only edit", () => {
+    const anchorAt = 1_788_912_993_163;
+    const schedule = { type: "interval", everyMinutes: 5, anchorAt };
+    const edited = { ...schedule, anchorAt: fromLocalDateAndTime(toLocalDateInput(anchorAt), toLocalTimeInput(anchorAt), anchorAt) };
+    expect(edited).toEqual(schedule);
+    expect(edited.anchorAt % 60_000).toBe(33_163);
+  });
+
+  it("preserves a one-time event's seconds and milliseconds through unchanged fields", () => {
+    const at = new Date(2026, 8, 9, 9, 15, 42, 275).getTime();
+    expect(fromLocalDateAndTime(toLocalDateInput(at), toLocalTimeInput(at), at)).toBe(at);
+  });
+
+  it("honors deliberate time and date edits instead of restoring the old timestamp", () => {
+    const at = new Date(2026, 8, 9, 9, 15, 42, 275).getTime();
+    expect(fromLocalDateAndTime(toLocalDateInput(at), "09:20", at)).toBe(new Date(2026, 8, 9, 9, 20).getTime());
+    expect(fromLocalDateAndTime("2026-09-10", toLocalTimeInput(at), at)).toBe(new Date(2026, 8, 10, 9, 15).getTime());
+  });
+
+  it("uses the selected minute for a new event with no original timestamp", () => {
+    expect(fromLocalDateAndTime("2026-09-09", "09:15")).toBe(new Date(2026, 8, 9, 9, 15).getTime());
+  });
+});
 
 describe("routine calendar geometry", () => {
   it("snaps pointer positions to 5 minute slots", () => {

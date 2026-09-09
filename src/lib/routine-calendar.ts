@@ -58,7 +58,11 @@ export function toLocalTimeInput(at: number): string {
   return date.toISOString().slice(11, 16);
 }
 
-export function fromLocalDateAndTime(date: string, time: string): number {
+export function fromLocalDateAndTime(date: string, time: string, originalAt?: number): number {
+  // Date/time inputs display minutes, but agent-created schedules can carry
+  // seconds and milliseconds. A title-only save must not move the anchor or
+  // choose a different occurrence of a repeated local time at a DST boundary.
+  if (originalAt != null && date === toLocalDateInput(originalAt) && time === toLocalTimeInput(originalAt)) return originalAt;
   return new Date(`${date}T${time}`).getTime();
 }
 

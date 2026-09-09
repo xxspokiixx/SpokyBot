@@ -779,6 +779,42 @@ describe("agents-proxy MCP surface", () => {
     expect(res.result.isError).toBeFalsy();
   });
 
+  it("preserves execution settings copied from list_routines", async () => {
+    const res = await callTool("propose_routine", {
+      name: "Cloud check",
+      instructions: "Check the queue.",
+      schedule: { type: "interval", everyMinutes: 15, anchorAt: "2026-09-01T09:00:00+05:30" },
+      runOn: "cloud",
+      timeoutMinutes: 20,
+    });
+    expect(res.result.isError).toBeFalsy();
+    expect(lastRoutineRequestBody.routine).toMatchObject({
+      runOn: "cloud",
+      timeoutMinutes: 20,
+      schedule: { type: "interval", everyMinutes: 15, anchorAt: "2026-09-01T09:00:00+05:30" },
+    });
+  });
+
+  it.each([
+    { run_on: 7 },
+    { run_on: "maus", runOn: "cloud" },
+    { timeout_minutes: "20" },
+    { timeout_minutes: 10, timeoutMinutes: 20 },
+    { clear_timeout: true, timeoutMinutes: 10 },
+    { continuity: "true" },
+    { clear_timeout: "true" },
+  ])("refuses malformed execution settings without silently dropping them: %j", async (settings) => {
+    lastRoutineRequestBody = null;
+    const res = await callTool("propose_routine", {
+      name: "Check",
+      instructions: "Check the queue.",
+      schedule: { type: "daily", time: "09:00" },
+      ...settings,
+    });
+    expect(res.result.isError).toBe(true);
+    expect(lastRoutineRequestBody).toBeNull();
+  });
+
   it("proposes a one-time routine with the explicit-offset timestamp intact", async () => {
     await callTool("propose_routine", {
       name: "Send follow-up",
@@ -890,6 +926,31 @@ describe("agents-proxy MCP surface", () => {
     expect(unknown.result.isError).toBe(true);
     expect(unknown.result.content[0].text).toContain("Unknown schedule type");
     expect(lastRoutineRequestBody).toBeNull();
+  });
+
+  it.each([
+    { type: "weekly", time: "09:00", weekdays: ["monday"], timezone: "America/New_York" },
+    { type: "interval", every_minutes: 15, start_at: "2026-09-01T09:00:00+05:30" },
+  ])("refuses scheduling constraints that would otherwise be silently discarded: %j", async (schedule) => {
+    lastRoutineRequestBody = null;
+    const res = await callTool("propose_routine", { name: "Check", instructions: "Check the queue.", schedule });
+    expect(res.result.isError).toBe(true);
+    expect(res.result.content[0].text).toContain("Unsupported");
+    expect(lastRoutineRequestBody).toBeNull();
+  });
+
+  it("ignores unused null schedule properties from provider schema conversion", async () => {
+    const res = await callTool("propose_routine", {
+      name: "Check",
+      instructions: "Check the queue.",
+      schedule: { type: "daily", time: "09:00", at: null, every_minutes: null, starts_at: null },
+      run_on: null,
+      timeout_minutes: null,
+      clear_timeout: null,
+      continuity: null,
+    });
+    expect(res.result.isError).toBeFalsy();
+    expect(lastRoutineRequestBody.routine.schedule).toMatchObject({ type: "weekly", time: "09:00" });
   });
 
   it("rejects malformed routine proposals before calling the harness", async () => {

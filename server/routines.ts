@@ -214,6 +214,9 @@ export interface RoutineManagerOptions {
   /** Projects every durable transition into the source conversation. */
   onRunChanged?: (run: RoutineRun) => void;
   onRunFailed?: (run: RoutineRun) => void;
+  /** A successful provider turn is intermediate while its peer work or
+   * queued continuation still belongs to this detached execution. */
+  hasPendingDelegations?: (threadId: string) => boolean;
 }
 
 const ALL_DAYS = [0, 1, 2, 3, 4, 5, 6];
@@ -687,6 +690,11 @@ export class RoutineManager {
     );
   }
 
+  runForThread(threadId: string): RoutineRun | null {
+    const run = this.runs.find((candidate) => candidate.threadId === threadId);
+    return run ? cloneRun(run) : null;
+  }
+
   create(input: RoutineInput, request?: RoutineRequestCommitFor<"create">): Routine {
     if (request) {
       const receipt = this.matchingRoutineRequestReceipt(request);
@@ -748,9 +756,15 @@ export class RoutineManager {
     });
     if (this.targetState(clean) === "missing") throw new Error(this.missingTargetMessage(clean.target));
     const cancelledRuns: RoutineRun[] = [];
+    const scheduleChanged = JSON.stringify(clean.schedule) !== JSON.stringify(routine.schedule);
+    const enabledChanged = clean.enabled !== routine.enabled;
     this.commitMutation(() => {
       Object.assign(routine, clean, {
-        nextRunAt: clean.enabled ? this.initialOccurrence(clean.schedule, now) : null,
+        // Renaming/editing instructions must not skip an occurrence that
+        // became due since the last tick (or erase an offline catch-up).
+        nextRunAt: !clean.enabled ? null : scheduleChanged || enabledChanged
+          ? this.initialOccurrence(clean.schedule, now)
+          : routine.nextRunAt,
         // `updatedAt` doubles as the optimistic revision on durable routine
         // confirmation cards. Keep it monotonic even for two writes in one ms.
         updatedAt: Math.max(now, routine.updatedAt + 1),
@@ -1090,7 +1104,10 @@ export class RoutineManager {
       if (changed) this.save();
       for (const missed of missedRuns) this.options.onRunFailed?.(missed);
 
-      for (const run of [...this.runs].reverse()) {
+      // Oldest queued requests have priority. New manual/webhook arrivals
+      // must not continually overtake work that has already waited. Snapshot
+      // the queue because each dispatch can asynchronously add/cancel work.
+      for (const run of this.runs.slice()) {
         if (run.status !== "queued") continue;
         // A queued interval represents the latest useful check, not a backlog
         // item. If the bot stayed busy across later occurrences, align this
@@ -1181,9 +1198,19 @@ export class RoutineManager {
     // protocol, never the routine receipt's result.
     if (
       run.target === "room-goal" &&
-      (event.type === "turn.completed" || (event.type === "item.completed" && event.itemType === "assistant_text"))
+      (
+        // These outcomes ended the goal operation. Later room traffic is
+        // not a resume of that run; only the goal lifecycle can change its
+        // receipt. In-flight provider approvals have no goalStatus and
+        // continue to resolve normally below.
+        run.goalStatus === "needs-input" || run.goalStatus === "paused" ||
+        event.type === "turn.completed" || (event.type === "item.completed" && event.itemType === "assistant_text")
+      )
     ) return null;
-    if (event.type === "request.opened") {
+    if (event.type === "turn.started") {
+      run.status = "running";
+      run.attention = undefined;
+    } else if (event.type === "request.opened") {
       run.status = "waiting";
       run.attention = redactSecretsInText(event.summary).trim().slice(0, 500) || undefined;
     } else if (event.type === "request.resolved") {
@@ -1198,16 +1225,17 @@ export class RoutineManager {
       // receipt-worthy failure, so keep the run running and stay quiet
       return null;
     } else if (event.type === "turn.completed") {
-      run.cost = event.cost;
-      run.denials = event.denials;
+      if (event.cost != null) run.cost = (run.cost ?? 0) + event.cost;
+      if (event.denials?.length) run.denials = [...new Set([...(run.denials ?? []), ...event.denials])];
       if (!event.ok) {
         this.failRun(run, event.stopReason ?? run.error ?? "The bot did not complete this run");
         queueMicrotask(() => void this.tick());
         return cloneRun(run);
       }
-      run.status = "completed";
-      run.attention = undefined;
-      run.finishedAt = this.now();
+      const pending = this.options.hasPendingDelegations?.(event.threadId) === true;
+      run.status = pending ? "waiting" : "completed";
+      run.attention = pending ? "Waiting for delegated work to finish" : undefined;
+      if (!pending) run.finishedAt = this.now();
       run.error = undefined;
     } else {
       return null;

@@ -522,6 +522,17 @@ describe("notification routing", () => {
     expect(dispatch.mock.calls.map(([action]) => action)).toEqual([{ type: "select", id: "room-1" }]);
   });
 
+  it("opens the requesting conversation when a teammate's routine reports there", () => {
+    const dispatch = vi.fn();
+    openNotificationTarget(dispatch, { botId: "runner", threadId: "detached-thread" }, {
+      bots: [...bots, { id: "runner", threadId: "runner-thread", tasks: [] }], groups,
+    });
+    expect(dispatch.mock.calls.map(([action]) => action)).toEqual([
+      { type: "select", id: "bot-1" },
+      { type: "switchTask", botId: "bot-1", threadId: "detached-thread" },
+    ]);
+  });
+
   it("opens the room and restores the exact inactive channel task", () => {
     const dispatch = vi.fn();
 
@@ -882,6 +893,25 @@ describe("cross-client bot creation", () => {
 });
 
 describe("routine receipt retention", () => {
+  it("opens a bot's logs without retaining stale filters on a later global visit", () => {
+    const focused = reducer(initialState, { type: "showRoutines", section: "logs", view: "list", botId: "echo", routineId: "routine-1" });
+    expect(focused.activeView).toBe("routines");
+    expect(focused.routinesFocus).toEqual({ section: "logs", view: "list", botId: "echo", routineId: "routine-1", nonce: 1 });
+    const all = reducer(focused, { type: "showRoutines" });
+    expect(all.routinesFocus).toEqual({ section: undefined, view: undefined, botId: undefined, routineId: undefined, nonce: 2 });
+    const failures = reducer(focused, { type: "showRoutines", section: "logs" });
+    expect(failures.routinesFocus).toEqual({ section: "logs", view: undefined, botId: undefined, routineId: undefined, nonce: 2 });
+  });
+
+  it("distinguishes a failed load from an empty schedule and recovers on hydration", () => {
+    expect(initialState.routinesLoadState).toBe("loading");
+    const failed = reducer(initialState, { type: "routinesLoadFailed" });
+    expect(failed.routinesLoadState).toBe("error");
+    const ready = reducer(failed, { type: "routinesHydrated", routines: [], runs: [] });
+    expect(ready.routinesLoadState).toBe("ready");
+    expect(ready.routines).toEqual([]);
+  });
+
   const run = (id: string, scheduledFor: number, status: RoutineRun["status"]): RoutineRun => ({
     id,
     routineId: "routine",

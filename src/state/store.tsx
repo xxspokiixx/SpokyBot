@@ -556,6 +556,8 @@ export interface AppState {
   activeView: "chat" | "team-map" | "routines" | "skill-recorder";
   routines: Routine[];
   routineRuns: RoutineRun[];
+  routinesLoadState: "loading" | "ready" | "error";
+  routinesFocus: { section?: "schedule" | "logs"; view?: "calendar" | "list"; botId?: string; routineId?: string; nonce: number };
   webhooks: WebhookTrigger[];
   webhookAttempts: WebhookAttempt[];
   webhookIngress: WebhookIngressStatus | null;
@@ -659,10 +661,11 @@ export type Action =
       groups: Group[];
       computerControl: Record<string, { held: boolean; helpReason: string | null }>;
     }
-  | { type: "showRoutines" }
+  | { type: "showRoutines"; section?: "schedule" | "logs"; view?: "calendar" | "list"; botId?: string; routineId?: string }
   | { type: "showTeamMap" }
   | { type: "showSkillRecorder" }
   | { type: "routinesHydrated"; routines: Routine[]; runs: RoutineRun[] }
+  | { type: "routinesLoadFailed" }
   | { type: "routinePatched"; routine: Routine }
   | { type: "routineDeleted"; routineId: string }
   | { type: "routineRunPatched"; run: RoutineRun }
@@ -815,8 +818,9 @@ export function openNotificationTarget(
 ) {
   // A room's approval/question notification carries the asker bot with the
   // GROUP's thread id; asking the bot to switch to that thread would 404.
-  // Open the room itself. A thread that is neither a room nor one of the
-  // bot's own lands on a plain bot select instead of an error banner.
+  // Open the room itself. Cross-bot routine receipts carry the executing
+  // bot but report into the requesting bot's thread: resolve its actual
+  // owner before selecting. An unknown/deleted thread falls back to the bot.
   const group = state.groups.find(
     (candidate) =>
       candidate.threadId === target.threadId ||
@@ -829,13 +833,15 @@ export function openNotificationTarget(
     }
     return;
   }
-  dispatch({ type: "select", id: target.botId });
-  const bot = state.bots.find((candidate) => candidate.id === target.botId);
+  const bot = state.bots.find((candidate) =>
+    candidate.threadId === target.threadId || candidate.tasks?.some((task) => task.threadId === target.threadId)
+  ) ?? state.bots.find((candidate) => candidate.id === target.botId);
+  dispatch({ type: "select", id: bot?.id ?? target.botId });
   if (!bot) return;
   const known =
     bot.threadId === target.threadId ||
     (bot.tasks ?? []).some((task) => task.threadId === target.threadId);
-  if (known) dispatch({ type: "switchTask", botId: target.botId, threadId: target.threadId });
+  if (known) dispatch({ type: "switchTask", botId: bot.id, threadId: target.threadId });
 }
 
 function updateBot(state: AppState, botId: string, fn: (b: Bot) => Bot): AppState {
@@ -932,6 +938,7 @@ export function reducer(state: AppState, action: Action): AppState {
       return {
         ...state,
         activeView: "routines",
+        routinesFocus: { section: action.section, view: action.view, botId: action.botId, routineId: action.routineId, nonce: state.routinesFocus.nonce + 1 },
         settingsOpen: false,
         computerOpen: false,
         inspectorOpen: false,
@@ -960,7 +967,9 @@ export function reducer(state: AppState, action: Action): AppState {
         pluginsOpen: false,
       };
     case "routinesHydrated":
-      return { ...state, routines: action.routines, routineRuns: trimRoutineRuns(action.runs) };
+      return { ...state, routines: action.routines, routineRuns: trimRoutineRuns(action.runs), routinesLoadState: "ready" };
+    case "routinesLoadFailed":
+      return { ...state, routinesLoadState: "error" };
     case "routinePatched": {
       const exists = state.routines.some((routine) => routine.id === action.routine.id);
       return {
@@ -1637,6 +1646,8 @@ export const initialState: AppState = {
   activeView: "chat",
   routines: [],
   routineRuns: [],
+  routinesLoadState: "loading",
+  routinesFocus: { nonce: 0 },
   webhooks: [],
   webhookAttempts: [],
   webhookIngress: null,
@@ -2599,6 +2610,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       const refresh = refreshState(part.key);
       if (refresh.timer) return;
       if (error !== undefined) {
+        if (part.key === "routines") rawDispatch({ type: "routinesLoadFailed" });
         console.warn(`snapshot: ${part.key} refresh failed; retrying`, error);
       }
       const delay = Math.min(30_000, 1_000 * 2 ** Math.min(refresh.attempt, 5));

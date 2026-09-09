@@ -168,7 +168,7 @@ import { claimRecallCrossings, recallCrossingLabel } from "./recall-disclosure.t
  * window; a computer-use turn's output can run to hundreds of KB. */
 const SESSION_READ_MAX_CHARS = 8_000;
 import { promptWithReply, transcriptText } from "./replies.ts";
-import { _loadPending, buildDelegationFailurePrompt, buildDelegationRevivalPrompt, DelegationWakeBudget, discardDelegations, drainDelegations, findDelegationReceipt, pendingDelegationInfo, pendingDelegationSnapshot, pendingThreads, queueDelegation, recordDelegationReceipt, releaseDelegationsWaitingOn, summarizeDelegatedActivity, type QueueResult } from "./delegations.ts";
+import { _loadPending, buildDelegationFailurePrompt, buildDelegationRevivalPrompt, DelegationWakeBudget, discardDelegations, drainDelegations, findDelegationReceipt, pendingDelegationInfo, pendingDelegationSnapshot, pendingThreads, queueDelegation, recordDelegationReceipt, releaseDelegationsWaitingOn, summarizeDelegatedActivity, type DelegationReceipt, type QueueResult } from "./delegations.ts";
 import {
   cancelSteeredMessage,
   drainSteeredMessages,
@@ -261,6 +261,7 @@ import {
   LEARN_PROMPT,
   PROFILE_PROMPT,
   ROUTINE_PROMPT,
+  ROUTINE_EXECUTION_PROMPT,
   WEBHOOK_PROMPT,
   type ComputerPromptKind,
 } from "./system-prompt.ts";
@@ -1866,6 +1867,10 @@ function finishGroupGoalRun(
   // A calendar-triggered team goal reuses its RoutineRun id for this card.
   // Manual goals have unrelated ids, so the manager safely ignores them.
   const routineRun = routines?.finishGoalRun(run.runId, status, safeDetail);
+  if (routineRun?.status === "cancelled") {
+    pendingDelegationWakes.delete(operation.threadId);
+    discardDelegations(commsBus, operation.threadId);
+  }
   // Member-level turn completions are intentionally private/intermediate for
   // a team goal, so the normal direct-routine notification path never fires.
   // Notify once from the correlated terminal receipt instead.
@@ -1874,24 +1879,26 @@ function finishGroupGoalRun(
   if (routineRun?.status === "waiting") {
     const coordinator = store.bot(routineRun.botId);
     if (coordinator) {
+      const notificationBot = routineSourceOwner(routineRun)?.bot ?? coordinator;
       notify(buildNotification(
         "question",
-        coordinator,
+        notificationBot,
         routineSourceThread(routineRun) ?? routineRun.threadId ?? operation.threadId,
         safeDetail || `${routineRun.routineName} needs your input`,
-        { avatarUrl: coordinator.avatarUrl },
+        { avatarUrl: notificationBot.avatarUrl },
       ));
     }
   }
   if (routineRun?.status === "completed") {
     const coordinator = store.bot(routineRun.botId);
     if (coordinator) {
+      const notificationBot = routineSourceOwner(routineRun)?.bot ?? coordinator;
       notify(buildNotification(
         "done",
-        coordinator,
+        notificationBot,
         routineSourceThread(routineRun) ?? routineRun.threadId ?? operation.threadId,
         safeDetail || routineRun.routineName,
-        { avatarUrl: coordinator.avatarUrl },
+        { avatarUrl: notificationBot.avatarUrl },
       ));
     }
   }
@@ -2458,9 +2465,17 @@ const watchdog = new TurnWatchdog({
     revokeInternalCapabilitiesForThread(turn.threadId);
     repeats.settle(turn.threadId);
     const bot = botForThread(turn.botId, turn.threadId);
-    const instance = bot ? registry.get(bot.modelSelection.instanceId) : null;
+    const routineRun = activeRoutineRunForThread(turn.threadId);
+    const instance = routineRun?.runOn === "cloud"
+      ? registry.instances().find((candidate) => candidate.driverKind === "boxAgent")
+      : bot ? registry.get(bot.modelSelection.instanceId) : null;
     void instance?.adapter.interruptTurn(turn.threadId).catch(() => {});
     const minutes = Math.round(TURN_STALL_MS / 60_000);
+    if (routineRun?.target === "bot") {
+      routines?.failThread(turn.threadId, `No activity for ${minutes} minutes — the routine was stopped`);
+      pendingDelegationWakes.delete(turn.threadId);
+      discardDelegations(commsBus, turn.threadId);
+    }
     store.appendMessage(turn.threadId, {
       role: "bot",
       kind: "activity",
@@ -3267,9 +3282,10 @@ bus.subscribe((event: RuntimeEvent) => {
         // the bot is not working now — it is waiting on a person
         if (bot) store.setTaskActivity(bot.id, event.threadId, "waiting-on-you");
         else if (asker.busy) store.setActivity(asker.id, "waiting-on-you");
+        const notificationBot = (routineRun && routineSourceOwner(routineRun)?.bot) || asker;
         notify(buildNotification(
           permission ? "approval" : "question",
-          asker,
+          notificationBot,
           (routineRun && routineSourceThread(routineRun)) || event.threadId,
           event.summary,
         ));
@@ -3428,13 +3444,14 @@ bus.subscribe((event: RuntimeEvent) => {
         // A failed peer turn stays a chip too. The bot that delegated is woken
         // with the failure and answers the person in its own thread — buzzing
         // here as well would ring twice for one piece of news.
-        if (routineRun?.status !== "failed" && !internal) {
+        if ((!routineRun || routineRun.status === "completed") && !internal) {
           // the frame carries the bot's avatar so every desktop client can
           // show the notification under that bot's own face
           const completionDetail = routineRun
             ? reply || routineRun.output || routineRun.routineName
             : reply;
-          notify(buildNotification("done", bot, routineReportThread ?? event.threadId, completionDetail, { avatarUrl: bot.avatarUrl }));
+          const notificationBot = (routineRun && routineSourceOwner(routineRun)?.bot) || bot;
+          notify(buildNotification("done", notificationBot, routineReportThread ?? event.threadId, completionDetail, { avatarUrl: notificationBot.avatarUrl }));
         }
         if (screenPollers.has(event.threadId)) {
           if (resourceOwner) settlingResourceOwners.set(resourceOwner.threadId, resourceOwner.generation);
@@ -3501,6 +3518,9 @@ const delegationWatch = new Map<string, {
   taskId?: string;
   sourceThreadId?: string;
   sourceBotId?: string;
+  /** Bind a late peer result to the run that requested it, not later user
+   * work that happens to reuse that run's execution conversation. */
+  routineRunId?: string;
   /** when the delegated turn was dispatched — elapsed time for status checks */
   startedAtMs?: number;
 }>();
@@ -3509,10 +3529,24 @@ const delegationWatch = new Map<string, {
 // fold the result in and answer the user instead of sitting idle. Mirrors
 // the cardContinuation resume pattern used for connector/credential cards.
 const delegationWakeBudget = new DelegationWakeBudget();
-const pendingDelegationWakes = new Map<string, { botId: string; targetName: string; failureReason?: string }>();
+const pendingDelegationWakes = new Map<string, { botId: string; targetName: string; failureReason?: string; routineRunId?: string; budgetAcquired?: boolean }>();
 
-function dispatchDelegationWake(botId: string, threadId: string, targetName: string, failureReason?: string): void {
+function activeRoutineRunForThread(threadId: string): RoutineRun | null {
+  const run = routines?.runForThread(threadId);
+  return run && ["running", "waiting"].includes(run.status) ? run : null;
+}
+
+function routineDelegationCanResume(threadId: string, routineRunId?: string): boolean {
+  return !routineRunId || activeRoutineRunForThread(threadId)?.id === routineRunId;
+}
+
+function dispatchDelegationWake(botId: string, threadId: string, targetName: string, failureReason?: string, routineRunId?: string, budgetAcquired = false): void {
   if (!store.taskByThread(botId, threadId)) return;
+  if (!routineDelegationCanResume(threadId, routineRunId)) return;
+  if (!budgetAcquired && !delegationWakeBudget.tryAcquire(threadId)) {
+    routines?.failThread(threadId, "Delegation follow-up limit reached; review the run before retrying");
+    return;
+  }
   const prompt = failureReason
     ? buildDelegationFailurePrompt(targetName, failureReason)
     : buildDelegationRevivalPrompt(targetName);
@@ -3526,8 +3560,9 @@ function dispatchDelegationWake(botId: string, threadId: string, targetName: str
       if (!store.taskByThread(botId, threadId)) return;
       const message = error instanceof Error ? error.message : String(error);
       // Raced with a user turn claiming the bot — retry once it settles.
+      // This is the same logical wake, so keep its original budget charge.
       if (/already working/i.test(message)) {
-        pendingDelegationWakes.set(threadId, { botId, targetName, failureReason });
+        pendingDelegationWakes.set(threadId, { botId, targetName, failureReason, routineRunId, budgetAcquired: true });
         return;
       }
       store.appendMessage(threadId, {
@@ -3538,34 +3573,41 @@ function dispatchDelegationWake(botId: string, threadId: string, targetName: str
           ok: false,
         },
       });
+      routines?.failThread(threadId, `Could not resume after delegation: ${message}`);
     });
 }
 
-function wakeDelegationSource(source: BotRecord, threadId: string, targetName: string, failureReason?: string): void {
+function wakeDelegationSource(source: BotRecord, threadId: string, targetName: string, failureReason?: string, routineRunId?: string): void {
   if (!store.taskByThread(source.id, threadId)) return;
+  if (!routineDelegationCanResume(threadId, routineRunId)) return;
   // Busy? Hold the wake until the source settles, then drain it — the
   // delegated reply is already in the thread, so nothing is lost, and the
   // source processes it the moment it is free rather than only on a later
   // user nudge.
   if (threadBusy(source.id, threadId) || activeGroupTurnForBot(source.id)) {
-    pendingDelegationWakes.set(threadId, { botId: source.id, targetName, failureReason });
+    pendingDelegationWakes.set(threadId, { botId: source.id, targetName, failureReason, routineRunId });
     return;
   }
-  if (!delegationWakeBudget.tryAcquire(threadId)) return;
-  dispatchDelegationWake(source.id, threadId, targetName, failureReason);
+  dispatchDelegationWake(source.id, threadId, targetName, failureReason, routineRunId);
 }
 
 function drainDelegationWakes(): void {
   for (const [threadId, entry] of pendingDelegationWakes) {
-    if (!store.taskByThread(entry.botId, threadId)) {
+    if (!store.taskByThread(entry.botId, threadId) || !routineDelegationCanResume(threadId, entry.routineRunId)) {
       pendingDelegationWakes.delete(threadId);
       continue;
     }
     if (threadBusy(entry.botId, threadId) || activeGroupTurnForBot(entry.botId)) continue;
     pendingDelegationWakes.delete(threadId);
-    if (!delegationWakeBudget.tryAcquire(threadId)) continue;
-    dispatchDelegationWake(entry.botId, threadId, entry.targetName, entry.failureReason);
+    dispatchDelegationWake(entry.botId, threadId, entry.targetName, entry.failureReason, entry.routineRunId, entry.budgetAcquired);
   }
+}
+
+function wakeUndispatchedDelegation(receipt: DelegationReceipt, routineRunId?: string): void {
+  const source = store.botByThread(receipt.sourceThreadId);
+  if (!source) return;
+  markTaskContextExternallyUpdated(source, receipt.sourceThreadId);
+  wakeDelegationSource(source, receipt.sourceThreadId, receipt.toBotName, receipt.result || "the handoff did not run", routineRunId);
 }
 
 // Provider-native sessions only know about messages produced inside their
@@ -3701,10 +3743,10 @@ function finalizeDelegationWatch(
       // silent" gap). Failures wake it too — the user must hear the task did
       // not finish. Idle-checked and burst-capped so a busy source or a
       // re-delegating loop cannot spin up runs.
-      if (ok && reply.trim()) {
-        wakeDelegationSource(source, watched.sourceThreadId, targetName);
+      if (ok) {
+        wakeDelegationSource(source, watched.sourceThreadId, targetName, undefined, watched.routineRunId);
       } else if (!ok) {
-        wakeDelegationSource(source, watched.sourceThreadId, targetName, failureName || "the delegated turn did not finish");
+        wakeDelegationSource(source, watched.sourceThreadId, targetName, failureName || "the delegated turn did not finish", watched.routineRunId);
       }
     }
   }
@@ -3767,6 +3809,7 @@ const runDelegatedTurn: Parameters<typeof drainDelegations>[3] = (toBotId, text,
         taskId,
         sourceThreadId,
         sourceBotId,
+        routineRunId: activeRoutineRunForThread(sourceThreadId)?.id,
         startedAtMs: Date.now(),
       });
     }
@@ -3806,6 +3849,12 @@ const runDelegatedTurn: Parameters<typeof drainDelegations>[3] = (toBotId, text,
     });
 };
 
+function drainThreadDelegations(threadId: string): void {
+  const routineRunId = activeRoutineRunForThread(threadId)?.id;
+  drainDelegations(commsBus, approvalBus, threadId, runDelegatedTurn,
+    (receipt) => wakeUndispatchedDelegation(receipt, routineRunId));
+}
+
 // Most waiting handoffs retry from a target's turn.completed event. Some
 // setup, cancellation, room, watchdog, and provider-reload paths release a
 // bot without that event, so every explicit idle release calls this same
@@ -3817,9 +3866,12 @@ function retryDelegationsWaitingOn(botId: string): void {
   delegationRetryBots.add(botId);
   queueMicrotask(() => {
     delegationRetryBots.delete(botId);
+    // Explicit idle releases (room/setup/reload/watchdog fallbacks) may not
+    // publish turn.completed. They free a waiting source continuation too.
+    drainDelegationWakes();
     if (store.bot(botId)?.busy) return;
     for (const waitingThread of releaseDelegationsWaitingOn(botId)) {
-      drainDelegations(commsBus, approvalBus, waitingThread, runDelegatedTurn);
+      drainThreadDelegations(waitingThread);
     }
   });
 }
@@ -3831,7 +3883,7 @@ bus.subscribe((event: RuntimeEvent) => {
   // firing it later: the user who hit Stop does not expect the delegations
   // that turn queued to run anyway, minutes later, on an unrelated turn.
   if (!event.ok) discardDelegations(commsBus, event.threadId);
-  else drainDelegations(commsBus, approvalBus, event.threadId, runDelegatedTurn);
+  else drainThreadDelegations(event.threadId);
   // A settling bot frees itself as a delegation TARGET too: handoffs that
   // found it busy earlier were kept queued (bounded retries) on their own
   // source threads, and this is the moment they get their retry.
@@ -4066,6 +4118,19 @@ async function startTurn(
   const profile = store.bot(botId);
   if (!profile) throw Object.assign(new Error("no such bot"), { status: 404 });
   const threadId = opts?.threadId ?? profile.threadId;
+  const continuingRoutine = opts?.cardContinuation ? activeRoutineRunForThread(threadId) : null;
+  if (continuingRoutine) {
+    const onDispatchError = opts?.onDispatchError;
+    opts = {
+      ...opts,
+      runOn: continuingRoutine.runOn,
+      automationSource: continuingRoutine.triggerSource ?? (continuingRoutine.manual ? "manual" : "schedule"),
+      onDispatchError: (message) => {
+        routines?.failThread(threadId, message);
+        onDispatchError?.(message);
+      },
+    };
+  }
   const bot = store.projectBotForTask(botId, threadId);
   if (!bot) throw Object.assign(new Error("no such task"), { status: 404 });
   if (bot.approvalGrant) {
@@ -4685,6 +4750,7 @@ async function startTurn(
         { id: "credential", label: "Credentials", text: credentialPrompt },
         { id: "recall", label: "Recall", text: recallPrompt },
         { id: "routine", label: "Routines", text: routinePrompt },
+        { id: "routine-execution", label: "Routine execution", text: opts?.automationSource === "schedule" || opts?.automationSource === "manual" ? ROUTINE_EXECUTION_PROMPT : "" },
         { id: "profile", label: "Profile changes", text: profilePrompt },
         { id: "learn", label: "Skill authoring", text: learnPrompt },
         { id: "section-context", label: "Section context", text: sectionContextSystemPrompt(bot.section) },
@@ -4826,7 +4892,14 @@ function routineSourceOwner(run: RoutineRun) {
   // reading an orphan id first would recreate a deleted conversation.
   const bot = store.bot(run.botId);
   if (!bot) return null;
-  if (store.taskByThread(bot.id, threadId)) return { bot, group: undefined, threadId };
+  // The source is stamped from the confirmed request, never calendar input.
+  // A request for a teammate runs as that teammate but reports to the bot
+  // whose conversation held the card. Recheck their section before sharing
+  // a result, since either bot may have moved since confirmation.
+  const sourceBot = store.botByThread(threadId);
+  if (sourceBot && sectionKey(sourceBot.section) === sectionKey(bot.section)) {
+    return { bot: sourceBot, group: undefined, threadId };
+  }
   const group = store.groupByThread(threadId);
   return group?.memberIds.includes(bot.id) ? { bot, group, threadId } : null;
 }
@@ -4973,8 +5046,17 @@ async function stopBotForEmergencyApprovalDowngrade(botId: string): Promise<void
   await directStop;
 }
 
+// Load queued handoffs before scheduler recovery can fail an interrupted
+// run. Its failure callback can then durably drop that work immediately;
+// nothing dispatches until the listener is ready below.
+const commsBus: CommsBus = { store, broadcast };
+_loadPending();
+
 routines = new RoutineManager({
   emit: broadcast,
+  hasPendingDelegations: (threadId) => pendingThreads().includes(threadId) ||
+    [...delegationWatch.values()].some((watch) => watch.sourceThreadId === threadId) ||
+    pendingDelegationWakes.has(threadId),
   botState: (botId) => {
     const bot = store.bot(botId);
     return !bot ? "missing" : bot.busy ? "busy" : "ready";
@@ -5013,6 +5095,8 @@ routines = new RoutineManager({
   },
   interruptTurn: async (botId, threadId, runOn) => {
     const bot = botForThread(botId, threadId);
+    pendingDelegationWakes.delete(threadId);
+    discardDelegations(commsBus, threadId);
     cancelDirectTurnDispatch(botId, threadId);
     revokeInternalCapabilitiesForThread(threadId);
     const instance = runOn === "cloud"
@@ -5029,10 +5113,15 @@ routines = new RoutineManager({
   interruptGoal: interruptRoutineGroupGoal,
   onRunChanged: syncRoutineRunToSource,
   onRunFailed: (run) => {
+    if (run.threadId) {
+      pendingDelegationWakes.delete(run.threadId);
+      discardDelegations(commsBus, run.threadId);
+    }
     const bot = store.bot(run.botId);
     if (!bot) return;
     const detail = run.error ? `${run.routineName}: ${run.error}` : run.routineName;
-    notify(buildNotification("routine-failed", bot, routineSourceThread(run) ?? run.threadId ?? bot.threadId, detail));
+    const notificationBot = routineSourceOwner(run)?.bot ?? bot;
+    notify(buildNotification("routine-failed", notificationBot, routineSourceThread(run) ?? run.threadId ?? bot.threadId, detail));
   },
 });
 // The scheduler receipt and room transcript live in separate durable stores.
@@ -5083,7 +5172,6 @@ if (recoveryOwners.length > 0) {
     ),
   );
 }
-routines.start();
 
 // Chat tools can prepare routine changes, but the harness applies them only
 // after the user confirms a durable card. Keeping this beside the scheduler
@@ -5373,11 +5461,6 @@ function serializeRoomContext(
 }
 
 
-// comms bus: passed into the visibility helpers in comms-visibility.ts so
-// they can mirror messages + chips without re-deriving SSE plumbing. Same
-// shape every comms entry point uses (ask_bot, delegate_bot).
-const commsBus: CommsBus = { store, broadcast };
-
 // What each room has already taken from its bots. Keyed by room because the
 // loop post_to_room can start is a property of the room, not of any one
 // caller — three bots posting twice each is the same runaway as one bot
@@ -5398,17 +5481,6 @@ const approvalBus: ApprovalBus = { store, broadcast, notify };
 {
   const stale = dismissStalePeerCards(approvalBus);
   if (stale) console.log(`peer approvals: dismissed ${stale} card(s) left by a previous run`);
-}
-
-// Handoffs a previous process queued but never ran: the source turn is
-// dead (no turn survives a restart) so they would otherwise wait forever.
-// Run them now, through the same drain — target and approvePeerComms are
-// re-checked there as always; a source bot that no longer exists is skipped.
-_loadPending();
-{
-  const leftover = pendingThreads();
-  if (leftover.length) console.log(`delegations: ${leftover.length} thread(s) with queued handoffs from a previous run — draining`);
-  for (const threadId of leftover) drainDelegations(commsBus, approvalBus, threadId, runDelegatedTurn);
 }
 
 async function runGroupMemberTurn(
@@ -8676,6 +8748,7 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
             taskId,
             sourceThreadId: fromThreadId,
             sourceBotId: currentFrom.id,
+            routineRunId: activeRoutineRunForThread(fromThreadId)?.id,
           });
           store.appendMessage(fromThreadId, {
             role: "bot",
@@ -13684,6 +13757,21 @@ try {
 
 server.listen(PORT, "127.0.0.1", () => {
   console.log(`openmausbot server on http://127.0.0.1:${PORT}`);
+  // Startup work uses the same turn dispatcher and local tool endpoint as
+  // ordinary chat. Start only once every registry is initialized and the
+  // endpoint is listening; earlier dispatch can hit uninitialized bindings.
+  routines!.start();
+  const leftover = pendingThreads();
+  if (leftover.length) console.log(`delegations: ${leftover.length} thread(s) with queued handoffs from a previous run — draining`);
+  for (const threadId of leftover) {
+    const run = routines!.runForThread(threadId);
+    // A person can reuse a completed run's task for unrelated work. Only
+    // discard the old run's handoffs, not a later user's persisted queue.
+    const reused = run?.finishedAt !== undefined && store.botByThread(threadId) &&
+      store.activePath(threadId).some((message) => message.role === "user" && message.at > run.finishedAt!);
+    if (run && !["running", "waiting"].includes(run.status) && !reused) discardDelegations(commsBus, threadId);
+    else drainThreadDelegations(threadId);
+  }
 });
 
 // A second listener for `openmausbot serve --tunnel` (server/tunnel.ts): the

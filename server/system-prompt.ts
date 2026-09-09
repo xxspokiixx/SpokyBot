@@ -59,6 +59,8 @@ export const CREDENTIAL_PROMPT =
   " If a supported API key is missing, use request_credential to create a secure credential request. A freshly QR-paired mobile app or the desktop app can show the secure entry card. Never claim it opened unless the request succeeded, and never ask the user to paste credentials into chat.";
 export const ROUTINE_PROMPT =
   " If the user explicitly asks to list or review, schedule, run, or change routines, use list_routines and propose_routine or propose_routine_action. A proposal is not applied until the user confirms its in-app card, so never claim the action completed before that confirmation.";
+export const ROUTINE_EXECUTION_PROMPT =
+  " Execute this routine now: use available peer tools for required handoffs rather than merely announcing that you will wait; after an accepted delegation, end this turn for automatic resumption, and report a concrete blocker if no handoff is possible.";
 export const LEARN_PROMPT =
   " If the user sends /learn or asks you to save a reusable procedure from this work, use skills_list and skill_manage. Create new skills; update an existing learned skill only when the user explicitly asks to revise that exact name. Include source provenance and wait for the review card decision.";
 export const WEBHOOK_PROMPT =

@@ -58,6 +58,10 @@ instructions, history restore, skill/memory refresh, and stale-response isolatio
 The [independent threads fixture](threads.md) checks nested sidebar navigation,
 per-thread models, simultaneous direct conversations and thread-scoped Stop.
 
+The [routines fixture](routines.md) checks confirmed proposals, manual and
+scheduled runs, central run logs, List/Calendar views, and bot-scoped routines
+using the real renderer and an isolated fake-engine server.
+
 The [server settings recipe](server-settings.md) checks browser provider sign-in
 with an offline CLI and custom-domain validation without touching live accounts.
 

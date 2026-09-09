@@ -6438,7 +6438,48 @@ describe("harness HTTP API", () => {
       expect(crossConfirmed).toMatchObject({ status: 200, body: { routineAction: "create" } });
       const crossRoutine = (await api("GET", "/api/routines")).body.routines
         .find((routine: { id: string }) => routine.id === crossConfirmed.body.resultId);
-      expect(crossRoutine).toMatchObject({ botId: teammate.id, sourceThreadId: bot.threadId });
+      expect(crossRoutine).toMatchObject({ botId: teammate.id, sourceThreadId: bot.threadId, enabled: true });
+      expect((await api("PATCH", `/api/bots/${teammate.id}`, {
+        modelSelection: { instanceId: "ghost", model: "unavailable-fixture" },
+      })).status).toBe(200);
+      expect((await api("POST", `/api/bots/${bot.id}/read`, { threadId: bot.threadId })).status).toBe(200);
+      const crossEvents = await openSse(`${BASE}/api/events`);
+      let crossRun;
+      try {
+        crossRun = await api("POST", `/api/routines/${crossRoutine.id}/run`);
+        const failedNotice = await crossEvents.until(
+          (frame) => frame.kind === "notify" && frame.notification?.kind === "routine-failed",
+          5_000,
+        );
+        expect(failedNotice.notification).toMatchObject({ botId: bot.id, threadId: bot.threadId });
+      } finally {
+        crossEvents.close();
+      }
+      expect(crossRun.status).toBe(201);
+      // Execution belongs to the teammate, but the confirmed request's
+      // reporting destination is still the proposer's conversation.
+      await expect.poll(async () => {
+        const source = (await api("GET", `/api/threads/${bot.threadId}/messages`)).body;
+        return source.messages.filter(
+          (message: { routineRun?: { runId?: string; status?: string } }) =>
+            message.routineRun?.runId === crossRun.body.run.id && message.routineRun?.status === "failed",
+        );
+      }, { timeout: 5_000 }).toHaveLength(1);
+      const crossStateAfterRun = (await api("GET", "/api/bots?messages=0")).body;
+      expect(crossStateAfterRun.bots.find((candidate: { id: string }) => candidate.id === bot.id)
+        ?.tasks.find((task: { threadId: string }) => task.threadId === bot.threadId)?.unread).toBe(true);
+
+      // Moving either bot out of the section revokes that reporting route.
+      expect((await api("PATCH", `/api/bots/${teammate.id}`, { section: "Private routine work" })).status).toBe(200);
+      const movedRun = await api("POST", `/api/routines/${crossRoutine.id}/run`);
+      expect(movedRun.status).toBe(201);
+      await expect.poll(async () => {
+        const runs = (await api("GET", "/api/routines")).body.runs;
+        return runs.find((run: { id: string }) => run.id === movedRun.body.run.id)?.status;
+      }, { timeout: 5_000 }).toBe("failed");
+      expect((await api("GET", `/api/threads/${bot.threadId}/messages`)).body.messages.some(
+        (message: { routineRun?: { runId?: string } }) => message.routineRun?.runId === movedRun.body.run.id,
+      )).toBe(false);
       await api("DELETE", `/api/bots/${teammate.id}`);
 
       // The initial fixture turn is deliberately hung. Once it is stopped,
