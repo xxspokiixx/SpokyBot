@@ -138,6 +138,15 @@ may need enabling in ChatGPT security settings or by your workspace admin; see
 Subscription limits still apply. This browser flow is currently for Codex;
 other providers retain their existing sign-in methods.
 
+Once connected, Settings shows the account email when Codex can report it.
+To switch accounts, open **Manage account and sign-in** under that line
+and choose **Sign out of ChatGPT**: OMB runs `codex logout` on the server as
+the same user and confirms with `codex login status`. New ChatGPT tasks need
+a connected account. Stop running Codex tasks before switching: sign-out does
+not cancel work already in progress. API-key logins are not removed by this
+ChatGPT-specific action. A sign-in another browser is still completing is never
+pulled away; finish or cancel it first.
+
 ## Connect a custom domain in Settings
 
 For a self-hosted server, open **Settings → Remote access → Connect your
@@ -275,7 +284,8 @@ rely on routines running unattended.
 On a hosted server, the engine CLIs sign in from Settings → Engines:
 
 - **Codex**: "Connect ChatGPT" shows a one-time code to enter on OpenAI's
-  device page.
+  device page. Once connected, Settings names the account and offers
+  **Sign out of ChatGPT** so a different person can connect their own.
 - **Claude Code**: "Sign in to Claude" opens Anthropic's own sign-in page in
   your browser; after you sign in it shows a code, which you paste back into
   Settings. The server hands that code to the unmodified `claude` CLI once and

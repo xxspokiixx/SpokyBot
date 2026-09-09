@@ -324,6 +324,7 @@ describe("resolveRequestAuth", () => {
     ["GET", "/api/instances/codex/auth/status?flowId=private-device-flow"],
     ["POST", "/api/instances/codex/auth/start"],
     ["POST", "/api/instances/codex/auth/cancel"],
+    ["POST", "/api/instances/codex/auth/sign-out"],
     ["POST", "/api/instances/antigravity/auth/complete"],
   ])("requires admin for server Settings: %s %s", (method, path) => {
     expect(requiredScope(method, path.split("?")[0]!)).toBe("admin");

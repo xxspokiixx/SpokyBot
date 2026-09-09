@@ -15,6 +15,7 @@ import { cn } from "@/lib/cn";
 import { t } from "@/lib/i18n";
 import { EngineSetup, needsCli, needsSignIn } from "./EngineSetup";
 import { AddClaudeAccount, ClaudeAccountSettings } from "./ClaudeAccountSettings";
+import { CodexAccountSettings } from "./CodexAccountSettings";
 
 interface ProbeResult {
   ok: boolean;
@@ -312,10 +313,14 @@ function EngineRow({ instance }: { instance: InstanceInfo }) {
         needsCli(instance) || needsSignIn(instance)
           ? <EngineSetup instance={instance} className="mt-3" />
           : instance.snapshot.authenticated && (
-            <p className="mt-2 flex items-center gap-1.5 text-[12px] text-success">
-              <Check size={13} />
-              {instance.authentication.method === "paste-code" ? t("engineSetup.claude.connectedAccount") : t("engineSetup.device.connectedAccount")}
-            </p>
+            instance.authentication.method === "device-code"
+              ? <CodexAccountSettings instance={instance} />
+              : (
+                <p className="mt-2 flex items-center gap-1.5 text-[12px] text-success">
+                  <Check size={13} />
+                  {t("engineSetup.claude.connectedAccount")}
+                </p>
+              )
           )
       )}
       {open && (

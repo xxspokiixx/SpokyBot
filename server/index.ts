@@ -12705,7 +12705,7 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
       const state = await providerAuthSessions.status(authStatus[1], auth.kind === "session" ? auth.session.id : "loopback", url.searchParams.get("flowId") ?? "");
       return json(res, 200, { auth: state });
     }
-    const instanceAction = /^\/api\/instances\/([\w.-]+)\/(refresh-models|install|auth\/start|auth\/complete|auth\/cancel)$/.exec(path);
+    const instanceAction = /^\/api\/instances\/([\w.-]+)\/(refresh-models|install|auth\/start|auth\/complete|auth\/cancel|auth\/sign-out)$/.exec(path);
     if (method === "POST" && instanceAction) {
       if (!String(req.headers["content-type"] ?? "").toLowerCase().startsWith("application/json")) {
         return json(res, 415, { error: "content-type must be application/json" });
@@ -12733,6 +12733,12 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
             return json(res, 401, { error: "Your session ended. Start a new sign-in." });
           }
           return json(res, 200, { auth: started });
+        }
+        if (action === "auth/sign-out") {
+          const instance = registry.get(instanceId);
+          if (!instance) return json(res, 404, { error: "unknown instance" });
+          await providerAuthSessions.signOut(instance, owner);
+          return json(res, 200, { instances: await describeInstances() });
         }
         if (action === "auth/complete") {
           const body = await readBody(req);

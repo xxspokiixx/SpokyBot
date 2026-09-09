@@ -521,7 +521,8 @@ export interface InstanceInfo {
   };
   /** `custom` agents sit below the rail divider — no subscription catalog. */
   access?: "subscription" | "custom";
-  authentication?: { method: "device-code" | "paste-code" | "browser" };
+  /** `signOut`: the browser may remove the stored sign-in to switch accounts. */
+  authentication?: { method: "device-code" | "paste-code" | "browser"; signOut?: boolean };
   install?: EngineInstall;
   /** Configured CLI path override — set ONLY when the user overrode it;
    * absent means the driver default is in effect. */

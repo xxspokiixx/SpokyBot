@@ -241,6 +241,8 @@ export class ProviderRegistry {
                   : inst.getAuthentication
                     ? "device-code" as const // a code to enter at the provider's page (Codex)
                     : "browser" as const, // a link and a callback URL (managed engines)
+                // the browser may remove the stored sign-in to switch accounts
+                signOut: inst.signOut !== undefined,
               }
             : undefined,
           cli: this.cliByInstance.get(inst.instanceId),
