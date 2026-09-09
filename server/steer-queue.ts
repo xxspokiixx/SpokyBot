@@ -35,6 +35,29 @@ interface QueueEntry {
 }
 
 const queues = new Map<string, QueueEntry>(); // threadId → waiting sends
+const listeners = new Set<() => void>();
+const changed = () => {
+  for (const listener of listeners) {
+    try { listener(); }
+    catch { console.warn("steer-queue: change listener failed"); }
+  }
+};
+
+/** Public pending chips only: never expose provider prompts or reply context. */
+export function queuedSteerSnapshot(ownsThread: (botId: string, threadId: string) => boolean):
+  Record<string, Array<{ queueId: string; text: string; reason?: "capacity" }>> {
+  return Object.fromEntries([...queues]
+    .filter(([threadId, entry]) => ownsThread(entry.botId, threadId))
+    .map(([threadId, entry]) => [threadId, entry.items.map((item) => ({
+      queueId: item.messageId, text: item.text, ...(item.reason ? { reason: item.reason } : {}),
+    }))]));
+}
+
+/** Publish changes synchronously so every client can restore/cancel the queue. */
+export function onSteeredQueueChange(listener: () => void): () => void {
+  listeners.add(listener);
+  return () => { listeners.delete(listener); };
+}
 
 export interface QueuedSteer {
   id: string;
@@ -61,6 +84,7 @@ export function queueSteeredMessage(
     reason: options.reason,
   });
   queues.set(threadId, entry);
+  changed();
   return { id };
 }
 
@@ -90,12 +114,14 @@ export function drainSteeredMessages(
     if (!bot) {
       // the bot or task was deleted while messages waited
       queues.delete(threadId);
+      changed();
       continue;
     }
     if (bot.busy || isBlocked?.(entry.botId, threadId)) continue;
     // committed to draining: the entry leaves the map before anything runs,
     // so a settle racing another settle can never fire the same queue twice
     queues.delete(threadId);
+    changed();
     const appended: Message[] = [];
     for (const item of entry.items) {
       // queueId is the pending-chip identity from the 202; append still
@@ -151,6 +177,7 @@ export function cancelSteeredMessage(botId: string, messageId: string, expectedT
     if (items.length === entry.items.length) continue;
     if (items.length === 0) queues.delete(threadId);
     else queues.set(threadId, { botId: entry.botId, items });
+    changed();
     return true;
   }
   return false;

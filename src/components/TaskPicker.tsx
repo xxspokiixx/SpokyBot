@@ -13,6 +13,8 @@ import { COMPACT_BUBBLE } from "@/lib/compact-chip";
 import { formatTaskTokens } from "@/lib/usage";
 import { nextRename } from "@/lib/rename";
 import { FolderIcon, NewThreadButton } from "./BotProjects";
+import { useShowThreads } from "@/lib/thread-preferences";
+import { sidebarBotActivityTasks } from "./SidebarBotActivity";
 
 /** Click-to-switch used to close this menu immediately, which unmounted the
  * row before a double-click (or right-click) could start a rename. Linger
@@ -385,8 +387,37 @@ function ConversationTaskPicker({
   );
 }
 
+export function BotActivityPicker({ bot }: { bot: Bot }) {
+  const { state, dispatch } = useStore();
+  const showThreads = useShowThreads();
+  if (showThreads) return null;
+  const activity = sidebarBotActivityTasks(bot, state.pendingQueued).filter((task) => task.threadId !== bot.threadId);
+  // A display preference must not strand a sibling approval or queued job,
+  // including on narrow screens where the sidebar is closed. This is an
+  // activity switcher only: idle histories and creation remain hidden.
+  if (!activity.length) return null;
+  return (
+    <div className="flex shrink-0 items-center gap-2 px-5 py-2" data-background-activity>
+      <select
+        aria-label={t("task.otherActivity", { count: activity.length })}
+        value=""
+        onChange={(event) => dispatch({ type: "switchTask", botId: bot.id, threadId: event.target.value })}
+        className="max-w-[180px] shrink-0 truncate rounded-full border border-hairline/40 bg-panel px-2.5 py-1 text-[12.5px] text-ink-secondary"
+      >
+        <option value="" disabled>{t("task.otherActivity", { count: activity.length })}</option>
+        {activity.map((task) => <option key={task.threadId} value={task.threadId}>
+          {task.title} · {task.activity === "waiting-on-you" ? t("task.waiting") : task.busy || task.activity === "working" ? t("chat.activity.working") : task.queued ? t("task.queued") : t("task.unread")}
+        </option>)}
+      </select>
+      <span className="truncate text-[12px] text-ink-secondary">{bot.tasks?.find((task) => task.threadId === bot.threadId)?.title}</span>
+    </div>
+  );
+}
+
 export function TaskPicker({ bot }: { bot: Bot }) {
   const { dispatch } = useStore();
+  const showThreads = useShowThreads();
+  if (!showThreads) return null;
   return (
     <ConversationTaskPicker
       threadId={bot.threadId}

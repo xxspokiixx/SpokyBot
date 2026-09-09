@@ -3,7 +3,7 @@
 // is the stuff shared by every bot: who you are, your keys, and the
 // machine your bots can borrow.
 import { useEffect, useRef, useState } from "react";
-import { Coins, FlaskConical, KeyRound, Monitor, Search, TabletSmartphone, Terminal, User, X } from "lucide-react";
+import { Coins, FlaskConical, KeyRound, Monitor, Palette, Search, TabletSmartphone, Terminal, User, X } from "lucide-react";
 import { api, useStore, type AppSettingsSection, type ConfigStatus } from "@/state/store";
 import { analyticsEnabled, setAnalyticsEnabled } from "@/lib/analytics";
 import { browserAvailable, browserUnavailableReason, builtInBrowserEnabled, showToolCallsEnabled, skillRecorderEnabled } from "@/lib/feature-flags";
@@ -26,6 +26,7 @@ import { RoomTurnTimeoutSettings } from "./RoomTurnTimeoutSettings";
 import { ThreadConcurrencySettings } from "./ThreadConcurrencySettings";
 import { TranscriptionSettings } from "./TranscriptionSettings";
 import { cn } from "@/lib/cn";
+import { setShowThreads, useShowThreads } from "@/lib/thread-preferences";
 
 // `labelKey`, not a label: t() reads the active pack when it is called, so a
 // label resolved here at module scope would freeze the language the app booted
@@ -37,7 +38,8 @@ const SECTIONS: Array<{
   icon: typeof User;
   keywords: string[];
 }> = [
-  { id: "general", labelKey: "settings.section.general", icon: User, keywords: ["profile", "name", "email", "skin", "theme", "appearance", "analytics", "updates", "tools", "tool calls", "threads", "parallel", "concurrency"] },
+  { id: "general", labelKey: "settings.section.general", icon: User, keywords: ["profile", "name", "email", "analytics", "updates", "threads", "parallel", "concurrency"] },
+  { id: "appearance", labelKey: "settings.section.appearance", icon: Palette, keywords: ["skin", "theme", "appearance", "tools", "tool calls", "threads", "show threads", "hide threads", "sidebar", "display"] },
   { id: "experimental", labelKey: "settings.section.experimental", icon: FlaskConical, keywords: ["early", "preview", "teach", "skill", "browser", "profiles"] },
   { id: "connections", labelKey: "settings.section.connections", icon: KeyRound, keywords: ["keys", "api", "composio", "box", "xai", "vps"] },
   { id: "engines", labelKey: "settings.section.engines", icon: Terminal, keywords: ["models", "claude", "grok", "providers", "cli"] },
@@ -217,6 +219,22 @@ function LanguageRow() {
   );
 }
 
+function ShowThreadsRow() {
+  const enabled = useShowThreads();
+  return (
+    <Card title={t("settings.threadDisplay.title")} subtitle={t("settings.threadDisplay.subtitle")}>
+      <div className="flex items-center justify-between gap-4">
+        <div className="text-[14px] font-medium text-ink">{t("settings.threadDisplay.show")}</div>
+        <Switch
+          checked={enabled}
+          aria-label={t("settings.threadDisplay.show")}
+          onClick={() => setShowThreads(!enabled)}
+        />
+      </div>
+    </Card>
+  );
+}
+
 function ToolCallsRow() {
   const { state, dispatch } = useStore();
   const enabled = showToolCallsEnabled(state.config);
@@ -392,11 +410,14 @@ export function SettingsModal() {
   const { state, dispatch } = useStore();
   const remoteActive = window.ogb?.remoteClient?.active === true;
   const section: AppSettingsSection =
-    remoteActive || state.appSettingsSection === "remote" ? "companion" : state.appSettingsSection;
+    (remoteActive && state.appSettingsSection !== "appearance") || state.appSettingsSection === "remote"
+      ? "companion"
+      : state.appSettingsSection;
   const dialogRef = useRef<HTMLDivElement>(null);
   const [query, setQuery] = useState("");
   const q = query.trim().toLowerCase();
-  const visibleSections = SECTIONS.filter((entry) => (!remoteActive || entry.id === "companion") && sectionMatches(entry, q));
+  const availableSections = SECTIONS.filter((entry) => !remoteActive || entry.id === "companion" || entry.id === "appearance");
+  const visibleSections = availableSections.filter((entry) => sectionMatches(entry, q));
   const sectionLabelKey = SECTIONS.find((entry) => entry.id === section)?.labelKey;
   const nextVisibleSection = visibleSections.some((entry) => entry.id === section) ? undefined : visibleSections[0]?.id;
 
@@ -516,7 +537,7 @@ export function SettingsModal() {
               }}
               className="min-w-0 rounded-lg bg-control px-3 py-2 text-[14px] text-ink sm:hidden"
             >
-              {SECTIONS.filter((entry) => !remoteActive || entry.id === "companion").map(({ id, labelKey }) => (
+              {availableSections.map(({ id, labelKey }) => (
                 <option key={id} value={id}>{t(labelKey)}</option>
               ))}
             </select>
@@ -538,18 +559,24 @@ export function SettingsModal() {
                 <Card title={t("settings.profile.title")} subtitle={t("settings.profile.subtitle")}>
                   <ProfileFields />
                 </Card>
-                <Card title={t("settings.skin.title")} subtitle={t("settings.skin.subtitle")}>
-                  <SkinPicker />
-                </Card>
                 <Card title={t("settings.roomTurns.title")} subtitle={t("settings.roomTurns.subtitle")}>
                   <RoomTurnTimeoutSettings />
                 </Card>
                 <ThreadConcurrencySettings />
                 <LanguageRow />
-          <ToolCallsRow />
                 <UpdatesRow />
                 <DiagnosticsRow />
                 <AnalyticsRow />
+              </>
+            )}
+
+            {section === "appearance" && (
+              <>
+                <Card title={t("settings.skin.title")} subtitle={t("settings.skin.subtitle")}>
+                  <SkinPicker />
+                </Card>
+                <ShowThreadsRow />
+                {!remoteActive && <ToolCallsRow />}
               </>
             )}
 

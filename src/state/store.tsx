@@ -537,6 +537,7 @@ export interface InstanceInfo {
 
 export type AppSettingsSection =
   | "general"
+  | "appearance"
   | "experimental"
   | "connections"
   | "engines"
@@ -655,12 +656,34 @@ function reconcileSnapshotQueues(
     if (waiting.length > 0) pendingQueued[threadId] = waiting;
   }
 
-  let consumedQueueIds = state.consumedQueueIds;
+  let consumedQueueIds: AppState["consumedQueueIds"] = {};
   // Preserve the newest receipts when a large historical snapshot contains
   // more than the bounded tombstone window.
   landed.sort((left, right) => left.at - right.at);
   for (const entry of landed) {
     consumedQueueIds = rememberConsumedQueueId(consumedQueueIds, entry.queueId);
+  }
+  // Live drain/cancel receipts are newer than loaded transcript history.
+  // Re-reading an old transcript must not evict protection for a late POST.
+  for (const queueId of Object.keys(state.consumedQueueIds)) {
+    consumedQueueIds = rememberConsumedQueueId(consumedQueueIds, queueId);
+  }
+  return { ...state, pendingQueued, consumedQueueIds };
+}
+
+/** Direct-bot queues are server-owned. Restore them on reload, keeping the
+ * separate group queue untouched. Remember removals so a late send response
+ * cannot resurrect a message another window already cancelled or drained. */
+function replaceBotQueues(state: AppState, queues: AppState["pendingQueued"]): AppState {
+  const groupThreads = new Set(state.groups.flatMap((group) => [group.threadId, ...(group.tasks ?? []).map((task) => task.threadId)]));
+  const liveIds = new Set(Object.values(queues).flatMap((entries) => entries.map((entry) => entry.queueId)));
+  const pendingQueued = { ...queues };
+  let consumedQueueIds = state.consumedQueueIds;
+  for (const [threadId, entries] of Object.entries(state.pendingQueued)) {
+    if (groupThreads.has(threadId)) pendingQueued[threadId] = entries;
+    else for (const entry of entries) {
+      if (!liveIds.has(entry.queueId)) consumedQueueIds = rememberConsumedQueueId(consumedQueueIds, entry.queueId);
+    }
   }
   return { ...state, pendingQueued, consumedQueueIds };
 }
@@ -673,7 +696,9 @@ export type Action =
       bots: Bot[];
       groups: Group[];
       computerControl: Record<string, { held: boolean; helpReason: string | null }>;
+      botQueuedMessages?: AppState["pendingQueued"];
     }
+  | { type: "botQueues"; queues: AppState["pendingQueued"] }
   | { type: "showRoutines"; section?: "schedule" | "logs"; view?: "calendar" | "list"; botId?: string; routineId?: string }
   | { type: "showTeamMap" }
   | { type: "showSkillRecorder" }
@@ -936,18 +961,21 @@ export function reducer(state: AppState, action: Action): AppState {
       const known = (id: string) => action.bots.some((b) => b.id === id) || action.groups.some((g) => g.id === id);
       const selectedId =
         state.selectedId && known(state.selectedId) ? state.selectedId : (action.bots[0]?.id ?? "");
+      const hydrated = {
+        ...state,
+        bots: action.bots,
+        groups: action.groups,
+        computerControl: action.computerControl,
+        selectedId,
+        backgroundThreadEvents: {},
+      };
       return reconcileSnapshotQueues(
-        {
-          ...state,
-          bots: action.bots,
-          groups: action.groups,
-          computerControl: action.computerControl,
-          selectedId,
-          backgroundThreadEvents: {},
-        },
+        action.botQueuedMessages ? replaceBotQueues(hydrated, action.botQueuedMessages) : hydrated,
         [...action.bots, ...action.groups],
       );
     }
+    case "botQueues":
+      return reconcileSnapshotQueues(replaceBotQueues(state, action.queues), [...state.bots, ...state.groups]);
     case "showRoutines":
       return {
         ...state,
@@ -1511,7 +1539,7 @@ export function reducer(state: AppState, action: Action): AppState {
       const pendingQueued = { ...state.pendingQueued };
       if (rest.length) pendingQueued[action.threadId] = rest;
       else delete pendingQueued[action.threadId];
-      return { ...state, pendingQueued };
+      return { ...state, pendingQueued, consumedQueueIds: rememberConsumedQueueId(state.consumedQueueIds, action.queueId) };
     }
     case "cancelQueued": {
       const bot = state.bots.find((candidate) => candidate.id === action.botId);
@@ -1519,11 +1547,10 @@ export function reducer(state: AppState, action: Action): AppState {
       const threadId = action.threadId ?? bot.threadId;
       const prev = state.pendingQueued[threadId] ?? [];
       const rest = prev.filter((entry) => entry.queueId !== action.queueId);
-      if (rest.length === prev.length) return state;
       const pendingQueued = { ...state.pendingQueued };
       if (rest.length) pendingQueued[threadId] = rest;
       else delete pendingQueued[threadId];
-      return { ...state, pendingQueued };
+      return { ...state, pendingQueued, consumedQueueIds: rememberConsumedQueueId(state.consumedQueueIds, action.queueId) };
     }
     case "cancelGroupQueued": {
       const prev = state.pendingQueued[action.threadId] ?? [];
@@ -2671,13 +2698,14 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     };
     const loadAll = async (): Promise<boolean> => {
       const chat = () =>
-        api("/api/bots").then(({ bots, groups, computerControl }) => {
+        api("/api/bots").then(({ bots, groups, computerControl, botQueuedMessages }) => {
           if (!alive) return;
           rawDispatch({
             type: "hydrate",
             bots,
             groups: groups ?? [],
             computerControl: computerControl ?? {},
+            botQueuedMessages,
           });
         });
       const peripherals = peripheralParts.map((part) => ({
@@ -2744,6 +2772,9 @@ export function StoreProvider({ children }: { children: ReactNode }) {
         bumpPeripheralVersion("webhooks");
       }
       switch (frame.kind) {
+        case "bot.queued":
+          rawDispatch({ type: "botQueues", queues: frame.queues });
+          break;
         case "message": {
           rawDispatch({ type: "messageAdded", threadId: frame.threadId, message: frame.message });
           if (frame.message?.role === "user" && typeof frame.message.queueId === "string") {

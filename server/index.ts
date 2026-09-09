@@ -174,6 +174,8 @@ import { _loadPending, buildDelegationFailurePrompt, buildDelegationRevivalPromp
 import {
   cancelSteeredMessage,
   drainSteeredMessages,
+  onSteeredQueueChange,
+  queuedSteerSnapshot,
   queuedSteeredMessage,
   queueSteeredMessage,
 } from "./steer-queue.ts";
@@ -1703,6 +1705,7 @@ const publicBot = (bot: NonNullable<ReturnType<typeof store.bot>>) => ({
   activeLeafId: store.activeLeaf(bot.threadId),
   tasks: store.tasks(bot.id).map(wireTask),
 });
+const publicBotQueuedMessages = () => queuedSteerSnapshot((botId, threadId) => Boolean(store.taskByThread(botId, threadId)));
 
 type GroupTurnOperation = {
   id: string;
@@ -2155,6 +2158,7 @@ store.onChange((change) => {
       break;
     case "thread.deleted":
       routines?.forgetRoutineRequestReceiptsForThread(change.threadId);
+      broadcast({ kind: "bot.queued", queues: publicBotQueuedMessages() });
       break;
     case "bot": {
       const bot = store.bot(change.botId);
@@ -2313,6 +2317,7 @@ function broadcast(payload: Record<string, unknown>) {
     }
   }
 }
+onSteeredQueueChange(() => broadcast({ kind: "bot.queued", queues: publicBotQueuedMessages() }));
 
 // ── server-side event folding (upstream's ingestion worker, miniature) ──
 // The canonical stream is the source of truth; the persisted transcript
@@ -9566,6 +9571,7 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
       if (limit === null) return json(res, 400, { error: "messages must be a non-negative whole number" });
       return json(res, 200, {
         bots: store.bots.map((bot) => ({ ...publicBot(bot), ...messagePage(bot.threadId, limit) })),
+        botQueuedMessages: publicBotQueuedMessages(),
         groups: store.groups.map((g) => ({ ...publicGroupState(g), ...messagePage(g.threadId, limit) })),
         computerControl: Object.fromEntries(
           store.bots.map((bot) => {

@@ -1273,6 +1273,53 @@ describe("pending queued chip", () => {
     expect(late.consumedQueueIds["q-snapshot"]).toBeUndefined();
   });
 
+  it("restores a queued sibling on reload and preserves group-local queues", () => {
+    const group: Group = { id: "team", name: "Team", threadId: "team-thread", memberIds: [], createdAt: 1,
+      defaultResponder: { kind: "everyone" }, bulletin: "", unread: false, messages: [] };
+    const state = { ...initialState, groups: [group], pendingQueued: { "team-thread": [{ queueId: "team-q", text: "team work" }] } };
+    const queues = { sibling: [{ queueId: "sibling-q", text: "waiting after refresh", reason: "capacity" as const }] };
+    const hydrated = reducer(state, { type: "hydrate", bots: [{ ...bot, messages: [] }], groups: [group], computerControl: {}, botQueuedMessages: queues });
+    expect(hydrated.pendingQueued).toEqual({ ...queues, "team-thread": state.pendingQueued["team-thread"] });
+    const cancelled = reducer(hydrated, { type: "botQueues", queues: {} });
+    expect(cancelled.pendingQueued).toEqual(state.pendingQueued);
+    const late = reducer(cancelled, { type: "pendingQueued", threadId: "sibling", queueId: "sibling-q", text: "waiting after refresh" });
+    expect(late.pendingQueued).toEqual(state.pendingQueued);
+  });
+
+  it("folds queue snapshots without duplicating a later send response or reviving drained work", () => {
+    const queues = { t1: [{ queueId: "remote-q", text: "remote send" }] };
+    const restored = reducer(reducer(initialState, { type: "botPatched", bot }), { type: "botQueues", queues });
+    const duplicate = reducer(restored, { type: "pendingQueued", threadId: "t1", queueId: "remote-q", text: "remote send" });
+    expect(duplicate.pendingQueued).toEqual(queues);
+    const drained = reducer(duplicate, { type: "messageAdded", threadId: "t1", message: {
+      id: "drained-q", at: 10, role: "user", kind: "text", queueId: "remote-q", text: "remote send",
+    } });
+    expect(reducer(drained, { type: "botQueues", queues }).pendingQueued).toEqual({});
+  });
+
+  it.each(["drain", "cancel"])("does not resurrect an offscreen queue after an early SSE receipt and %s", (operation) => {
+    const queues = { sibling: [{ queueId: "early-q", text: "waiting" }] };
+    const queued = reducer(reducer(initialState, { type: "botPatched", bot }), { type: "botQueues", queues });
+    const removed = reducer(queued, operation === "drain"
+      ? { type: "consumePendingQueued", threadId: "sibling", queueId: "early-q" }
+      : { type: "cancelQueued", botId: bot.id, threadId: "sibling", queueId: "early-q" });
+    const snapshot = reducer(removed, { type: "botQueues", queues: {} });
+    expect(reducer(snapshot, { type: "pendingQueued", threadId: "sibling", queueId: "early-q", text: "waiting" }).pendingQueued).toEqual({});
+  });
+
+  it("keeps a fresh cancellation receipt ahead of old transcript receipts", () => {
+    const messages = Array.from({ length: 65 }, (_, i): Message => ({
+      id: `old-${i}`, queueId: `old-q-${i}`, at: i, role: "user", kind: "text", text: "old queued message",
+    }));
+    const queued = reducer(reducer(initialState, { type: "botPatched", bot: { ...bot, messages } }), {
+      type: "botQueues", queues: { sibling: [{ queueId: "new-q", text: "new waiting message" }] },
+    });
+    const removed = reducer(queued, { type: "botQueues", queues: {} });
+    expect(removed.consumedQueueIds["new-q"]).toBe(true);
+    expect(Object.keys(removed.consumedQueueIds)).toHaveLength(64);
+    expect(reducer(removed, { type: "pendingQueued", threadId: "sibling", queueId: "new-q", text: "new waiting message" }).pendingQueued).toEqual({});
+  });
+
   it("bounds unmatched queue tombstones from other clients", () => {
     const withBot = reducer(initialState, { type: "botPatched", bot });
     let state = withBot;

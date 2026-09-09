@@ -19,6 +19,10 @@ describe("sidebar thread visibility", () => {
     const rows = tasks.map((task) => ({ ...task, queued: task.threadId === "9" }));
     expect(visibleSidebarThreads(rows, "0").map((task) => task.threadId)).toEqual(["0", "1", "2", "3", "4", "5", "9"]);
   });
+  it("never hides an older approval just because its busy flag is false", () => {
+    const rows = tasks.map((task) => ({ ...task, busy: false, activity: task.threadId === "9" ? "waiting-on-you" as const : "idle" as const }));
+    expect(visibleSidebarThreads(rows, "0").map((task) => task.threadId)).toEqual(["0", "1", "2", "3", "4", "5", "9"]);
+  });
   it("shows Queued only for idle threads, preserving Working and Waiting", () => {
     const render = (busy = false, activity?: "waiting-on-you") => renderToStaticMarkup(createElement(SidebarThreadRow, {
       task: { threadId: "queued", title: "Next job", queued: true, busy, activity },

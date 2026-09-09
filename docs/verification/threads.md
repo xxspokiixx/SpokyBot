@@ -47,6 +47,46 @@ switching and Stop can be exercised without a real provider or account.
     prematurely appearing in the transcript. Stop Gmail: iCloud should start
     and show its normal working animation. Raising the limit starts waiting
     work; lowering it leaves active work alone. Reload to check persistence.
+11. Click a bot's main row: it must open its last-selected conversation without
+    expanding the thread tree. Its separate chevron controls the tree. Repeat
+    in Comfortable, Compact, and the Icons view (history is in the header in
+    Icons view).
+12. In **Settings → Appearance**, turn **Show threads** off. Bot trees, folder
+    creation, the bot context menu's new-thread actions, and **All threads**
+    disappear; the selected transcript, model, queues, and running jobs remain.
+    Group/channel histories are unchanged. Background working, queued, unread,
+    and waiting conversations remain reachable through activity-only controls.
+    The header stays uncluttered; **Other activity** appears below it only when
+    there is sibling activity, including when the sidebar is closed.
+13. Stop a running job through its activity entry while a sibling is queued;
+    verify only the chosen job stops and the queued message starts normally.
+    Reload and confirm Show threads remains off. Turn it back on to recover
+    all histories/folders. Also toggle off/on without reloading and check that
+    folder disclosure state survives. Check the Appearance switch in a narrow
+    window and keyboard navigation through bot rows and activity controls.
+
+For approval verification, new fake-provider launches also write fixture-only
+`<thread-id>.launch.json` receipts inside the printed disposable data directory.
+The live broker in their `mcpConfig.mcpServers.ogb` entry can be exercised using
+the same `permission` recipe in `server/thread-capacity-api.test.ts`. Request a
+synthetic approval, switch away, and navigate back using an activity control
+with Show threads off. Answer **Allow once** and verify that broker receives
+the matching answer. This proves the app's approval routing, not a real model
+or command execution. Never publish the raw launch receipt: it contains
+short-lived fixture capabilities.
+
+### Optional-thread display walkthrough
+
+The isolated renderer was exercised with Show threads on/off, direct bot
+selection, an unread sibling, a real pending permission broker, and thread-scoped
+Stop. These screenshots show the actual offline fixture, not mockups:
+
+| Threads shown | Threads hidden |
+| --- | --- |
+| ![Threads shown](images/optional-threads/threads-shown.jpg) | ![Threads hidden](images/optional-threads/threads-hidden.jpg) |
+
+![Appearance settings](images/optional-threads/appearance.jpg)
+![Approval remains reachable with threads hidden](images/optional-threads/approval-hidden-mode.jpg)
 
 The offline CLI may report an interrupted subprocess when stopped; the checks
 here concern ownership, state and navigation, not real-provider behavior.

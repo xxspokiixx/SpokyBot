@@ -8,6 +8,7 @@ import { pathToFileURL } from "node:url";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
 import { launchVerificationServer, type VerificationServer } from "../scripts/control-omb.ts";
+import { openSse } from "./testing/sse.ts";
 
 describe("per-bot thread capacity through an isolated HTTP fixture", () => {
   let fixture: VerificationServer;
@@ -178,6 +179,50 @@ describe("per-bot thread capacity through an isolated HTTP fixture", () => {
     await expect.poll(() => busyThreads(other.botId), { timeout: 10_000 }).toEqual([]);
     expect(existsSync(threadFile(threads[11], "json"))).toBe(false);
   }, 60_000);
+
+  it("restores cancellable queued receipts from a fresh snapshot and broadcasts complete queue changes", async () => {
+    await limit(1);
+    const { botId, threads: [active, waiting, cancelled, deleted] } = await botWithThreads(4);
+    expect((await send(botId, active, "ACTIVE_DURING_RELOAD")).body.queued).toBeUndefined();
+    await dump(active);
+    const events = await openSse(`${fixture.info.url}/api/events`);
+    try {
+      const queued = await send(botId, waiting, "RESTORE_AFTER_RELOAD", "reload_queue_receipt");
+      expect(queued.body).toMatchObject({ queued: true, reason: "capacity", threadId: waiting });
+      const receipt = { queueId: queued.body.queueId, text: "RESTORE_AFTER_RELOAD", reason: "capacity" };
+      expect((await api("GET", "/api/bots?messages=0")).body.botQueuedMessages).toEqual({ [waiting]: [receipt] });
+      const enqueued = await events.until((frame) => frame.kind === "bot.queued" && frame.queues[waiting]?.[0]?.queueId === receipt.queueId);
+      expect(enqueued.queues).toEqual({ [waiting]: [receipt] });
+      const cancelReceipt = (await send(botId, cancelled, "CANCEL_AFTER_RELOAD")).body;
+      const restored = (await api("GET", "/api/bots")).body.botQueuedMessages;
+      expect(restored[cancelled]).toEqual([{ queueId: cancelReceipt.queueId, text: "CANCEL_AFTER_RELOAD", reason: "capacity" }]);
+      expect((await api("DELETE", `/api/bots/${botId}/queue/${restored[cancelled][0].queueId}`, { threadId: waiting })).status).toBe(404);
+      expect((await api("DELETE", `/api/bots/${botId}/queue/${restored[cancelled][0].queueId}`, { threadId: cancelled })).status).toBe(200);
+      const removed = await events.until((frame) => frame.kind === "bot.queued" && frame.seq > enqueued.seq + 1 && !frame.queues[cancelled]);
+      expect(removed.queues).toEqual({ [waiting]: [receipt] });
+      expect((await api("GET", "/api/bots")).body.botQueuedMessages).toEqual({ [waiting]: [receipt] });
+
+      await send(botId, deleted, "DELETE_QUEUED_TASK");
+      const beforeDelete = await events.until((frame) => frame.kind === "bot.queued" && frame.queues[deleted]?.length);
+      expect((await api("DELETE", `/api/bots/${botId}/tasks/${deleted}`)).status).toBe(200);
+      expect((await events.until((frame) => frame.kind === "bot.queued" && frame.seq > beforeDelete.seq && !frame.queues[deleted])).queues).toEqual({ [waiting]: [receipt] });
+      expect((await api("GET", "/api/bots")).body.botQueuedMessages).toEqual({ [waiting]: [receipt] });
+
+      finish(active);
+      await dump(waiting);
+      expect((await events.until((frame) => frame.kind === "bot.queued" && frame.seq > beforeDelete.seq && Object.keys(frame.queues).length === 0)).queues).toEqual({});
+      expect((await api("GET", "/api/bots")).body.botQueuedMessages).toEqual({});
+      expect((await messages(waiting)).filter((message) => message.role === "user")).toEqual([
+        expect.objectContaining({ text: receipt.text, queueId: receipt.queueId }),
+      ]);
+      expect((await messages(cancelled)).filter((message) => message.role === "user")).toEqual([]);
+      expect(existsSync(threadFile(cancelled, "json"))).toBe(false);
+      expect(existsSync(threadFile(deleted, "json"))).toBe(false);
+      finish(waiting);
+      await expect.poll(() => busyThreads(botId)).toEqual([]);
+      evidence.push({ queueEvents: events.frames.filter((frame) => frame.kind === "bot.queued") });
+    } finally { events.close(); }
+  }, 30_000);
 
   it("counts approval waits, drains FIFO when raised or a turn finishes, and preserves active work when lowered", async () => {
     await limit(1);

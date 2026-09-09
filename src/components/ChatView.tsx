@@ -55,7 +55,7 @@ import { SecretRequestCard } from "./SecretRequestCard";
 import { hasRoutineExecutionTask, RoutineRunCard } from "./RoutineRunCard";
 import { AttachedFileChips, AttachedImageGallery } from "./AttachmentPreview";
 import { RenameTitle } from "./RenameTitle";
-import { TaskPicker } from "./TaskPicker";
+import { BotActivityPicker, TaskPicker } from "./TaskPicker";
 import { ModelPicker } from "./ModelPicker";
 import { ExportTranscriptMenu } from "./ExportTranscriptMenu";
 
@@ -1225,6 +1225,7 @@ export function ChatView({ bot: profile }: { bot: Bot }) {
         </div>
       </div>
 
+      <BotActivityPicker bot={bot} />
       {findOpen && <ChatFindBar threadId={bot.threadId} onClose={() => setFindOpen(false)} />}
 
       {/* Error banner */}
