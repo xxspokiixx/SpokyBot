@@ -363,8 +363,10 @@ OMB_SIGNIN_EMAILS="her@yourcompany.com, @yourcompany.com"   # full access
 OMB_SIGNIN_MEMBER_EMAILS="freelancer@example.com"          # chat and approvals only
 ```
 
-With the npm package, the same thing from the command line, with the server
-running or not, no restart needed:
+Signed in as an admin? Settings → Remote access → **Who can sign in with an
+email** edits the same list in the browser, no command line needed. With the
+npm package, the same thing from the command line, with the server running
+or not, no restart needed:
 
 ```sh
 npx openmausbot access add her@yourcompany.com

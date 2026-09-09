@@ -1567,5 +1567,15 @@
   "engineSetup.claude.security": "Only paste a code from a sign-in you started here. It is handed to Claude Code on this server once and never stored; your password stays with Anthropic. Bots on this server share your subscription's usage limits.",
   "engineSetup.claude.connected": "Claude connected. Your models are being refreshed.",
   "engineSetup.claude.connectedAccount": "Claude connected on this server",
-  "engineSetup.claude.invalidChallenge": "Claude Code did not return a valid Anthropic sign-in link. Cancel and try again."
+  "engineSetup.claude.invalidChallenge": "Claude Code did not return a valid Anthropic sign-in link. Cancel and try again.",
+  "remote.signInAccess.title": "Who can sign in with an email",
+  "remote.signInAccess.subtitle": "People on this list sign in at /pair with a one-time code sent to their email. Full access is everything the owner can do; chat and approvals is for people who only talk to the bots.",
+  "remote.signInAccess.link": "Send them this link:",
+  "remote.signInAccess.placeholder": "name@company.com or @company.com",
+  "remote.signInAccess.add": "Add",
+  "remote.signInAccess.remove": "Remove",
+  "remote.signInAccess.empty": "Nobody yet. Add an address, or @yourcompany.com for everyone at your company.",
+  "remote.signInAccess.invalid": "Enter an email address, or @domain for everyone at that domain.",
+  "remote.signInAccess.note": "Changes apply immediately. Removing someone stops new sign-ins; their existing devices stay signed in until you sign them out above.",
+  "remote.signInAccess.error": "Could not save: {error}"
 }
