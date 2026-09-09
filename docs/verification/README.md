@@ -38,6 +38,7 @@ recipe from sending messages to the user's running app by accident.
 Use only mapped, tested commands:
 
 - [Chat turns](chat-turns.md)
+- [Chat UI, driven headlessly](chat-ui.md)
 - [Channels](channels.md)
 - [Engines and Doctor](engines.md)
 - [Claude coordination and turn-scoped tools](claude-tool-lifecycle.md)
@@ -45,10 +46,13 @@ Use only mapped, tested commands:
 - [Qwen model route selection](qwen-models.md)
 - [Team backups](team-backups.md)
 
-Renderer-only behavior—Settings, sidebar drag-and-drop, the VM modal, the
-built-in browser panel, and updater UI—is not proven by this first harness.
-Use the relevant Electron/package smoke test and state that limitation. Add a
-map entry only after the shared control surface can really drive it.
+`control-omb ui` ([Chat UI, driven headlessly](chat-ui.md)) drives the real
+renderer in a headless Chrome by accessible name, so composer sends, transcript
+rows, tool chips and server feature flags are provable from the command line.
+Other renderer-only behavior—Settings, sidebar drag-and-drop, the VM modal, the
+built-in browser panel, and updater UI—is still not proven by the harness. Use
+the relevant Electron/package smoke test and state that limitation. Add a map
+entry only after the shared control surface can really drive it.
 
 The [desktop server connection smoke](desktop-server-connection.md) mounts the
 real Settings connection component in disposable Electron windows.

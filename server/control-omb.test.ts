@@ -1,13 +1,18 @@
 import { spawnSync } from "node:child_process";
-import { existsSync, readFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it, vi } from "vitest";
 
 import {
   controlResultSucceeded,
+  HELP,
+  HELP_UI,
   launchVerificationServer,
   runControlOmb,
 } from "../scripts/control-omb.ts";
+import { installedChrome, UI_MUTATING } from "../scripts/testing/control-omb-ui.ts";
+import { removeTempDir } from "./testing/cleanup.ts";
 
 describe("control-omb command mapping", () => {
   it("treats unhealthy doctor and non-settled waits as command failures", () => {
@@ -16,6 +21,66 @@ describe("control-omb command mapping", () => {
     expect(controlResultSucceeded("wait", { status: "settled" })).toBe(true);
     for (const status of ["failed", "stalled", "timed-out", "needs-user"]) {
       expect(controlResultSucceeded("wait", { status })).toBe(false);
+    }
+    expect(controlResultSucceeded("ui", { ok: true, status: "settled" })).toBe(true);
+    expect(controlResultSucceeded("ui", { ok: false, status: "timed-out" })).toBe(false);
+  });
+
+  it("keeps every ui verb off discovery: the launch handle is required, whatever the environment says", async () => {
+    const env = { OPENMAUSBOT_URL: "http://127.0.0.1:19999", OMB_PORT: "19999" };
+    const verbs = [...UI_MUTATING, "snapshot", "screenshot", "console", "wait-settle"];
+    expect(UI_MUTATING).toEqual(new Set(["click", "type", "press", "flag", "eval"]));
+    for (const verb of verbs) {
+      await expect(runControlOmb(["ui", verb], { env })).rejects.toMatchObject({
+        message: `ui ${verb} requires --ui HANDLE`,
+        hint: expect.stringContaining("ui launch"),
+      });
+      expect(HELP_UI).toContain(`\n  ui ${verb} --ui HANDLE`);
+    }
+    expect(HELP).toContain(HELP_UI);
+    expect(await runControlOmb(["ui", "help"])).toBe(HELP_UI);
+    await expect(runControlOmb(["ui", "launch"])).rejects.toThrow("ui launch is available only from the executable CLI");
+    await expect(runControlOmb(["ui", "bogus"])).rejects.toThrow('unknown ui command "bogus"');
+    await expect(runControlOmb(["ui", "snapshot", "--ui", "/nowhere/ui.json"])).rejects.toThrow("could not read the ui handle");
+  });
+
+  it("refuses a handle whose launch has already been stopped", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "omb-ui-handle-"));
+    try {
+      const handle = join(dir, "ui.json");
+      writeFileSync(handle, JSON.stringify({
+        url: "http://127.0.0.1:19999", previewUrl: "http://127.0.0.1:5199/__threads.html", session: "omb-ui-19999",
+        binary: "/fixture/agent-browser", home: join(dir, "gone"), botId: "bot-1", logPath: "/fixture/server.log", chrome: null,
+      }));
+      await expect(runControlOmb(["ui", "snapshot", "--ui", handle])).rejects.toMatchObject({
+        message: expect.stringContaining("data directory is gone"),
+        hint: expect.stringContaining("ui launch"),
+      });
+      writeFileSync(handle, JSON.stringify({ url: "http://127.0.0.1:19999" }));
+      await expect(runControlOmb(["ui", "snapshot", "--ui", handle])).rejects.toThrow("lacks previewUrl");
+    } finally {
+      await removeTempDir(dir);
+    }
+  });
+
+  it("finds the newest Chrome for Testing that agent-browser install unpacked", () => {
+    const dir = mkdtempSync(join(tmpdir(), "omb-ui-tools-"));
+    try {
+      expect(installedChrome(dir, "linux")).toBeNull();
+      const browsers = join(dir, ".agent-browser", "browsers");
+      for (const version of ["chrome-9.0.100.1", "chrome-153.0.8010.36"]) {
+        mkdirSync(join(browsers, version), { recursive: true });
+        writeFileSync(join(browsers, version, "chrome"), "");
+      }
+      expect(installedChrome(dir, "linux")).toBe(join(browsers, "chrome-153.0.8010.36", "chrome"));
+      expect(installedChrome(dir, "darwin")).toBeNull();
+      const app = join(browsers, "chrome-153.0.8010.36", "Google Chrome for Testing.app", "Contents", "MacOS");
+      mkdirSync(app, { recursive: true });
+      writeFileSync(join(app, "Google Chrome for Testing"), "");
+      expect(installedChrome(dir, "darwin")).toBe(join(app, "Google Chrome for Testing"));
+    } finally {
+      // synchronous removal is fine here: nothing spawned inside the directory
+      void removeTempDir(dir);
     }
   });
 

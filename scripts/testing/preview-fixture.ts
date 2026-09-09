@@ -27,6 +27,9 @@ export interface PreviewOptions {
   extraRoutes?: PreviewRoute[];
   /** Content of the viewport meta tag. */
   viewport?: string;
+  /** Vite's log level. Its default prints port and dependency notes on stdout,
+   * ahead of anything the fixture prints there. */
+  logLevel?: "info" | "warn" | "error" | "silent";
 }
 
 export interface MountedPreview {
@@ -49,10 +52,11 @@ export async function mountPreview(
   fixture: { info: { url: string } },
   options: PreviewOptions,
 ): Promise<MountedPreview> {
-  const { entry, route, title, extraRoutes = [], viewport = "width=device-width, initial-scale=1" } = options;
+  const { entry, route, title, extraRoutes = [], viewport = "width=device-width, initial-scale=1", logLevel } = options;
   const page = `<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="${escapeHtml(viewport)}"><title>${escapeHtml(title)}</title></head><body><div id="root"></div><script type="module" src="${escapeHtml(entry)}"></script></body></html>`;
   const ui = await createServer({
     root: REPO_ROOT,
+    ...(logLevel ? { logLevel } : {}),
     server: { host: "127.0.0.1", port: 0, proxy: { "/api": { target: fixture.info.url } } },
     plugins: [{
       name: "isolated-preview",

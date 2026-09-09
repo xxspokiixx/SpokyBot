@@ -9,12 +9,17 @@ import { fileURLToPath, pathToFileURL } from "node:url";
 import { parseArgs, type ParseArgsOptionsConfig } from "node:util";
 
 import { handleToolCall, request, validateBaseUrl } from "./mcp-server.ts";
+import { launchUi, runControlOmbUi } from "./testing/control-omb-ui.ts";
 import { removeTempDir, waitForExit } from "../server/testing/cleanup.ts";
 import { freePortBlock } from "../server/testing/ports.ts";
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), "..");
 const FAKE_CLI = join(ROOT, "server", "testing", "fake-claude-cli.ts");
-const MUTATING = new Set(["new-bot", "new-channel", "send", "send-channel", "interrupt", "set-model", "edit"]);
+// `ui` verbs never discover anything: each takes the handle its launch printed.
+const MUTATING = new Set([
+  "new-bot", "new-channel", "send", "send-channel", "interrupt", "set-model", "edit",
+  "ui click", "ui type", "ui press", "ui flag", "ui eval",
+]);
 
 export class ControlOmbError extends Error {
   readonly hint?: string;
@@ -33,6 +38,19 @@ export interface ControlOmbDependencies {
   request?: Requester;
   env?: NodeJS.ProcessEnv;
 }
+
+export const HELP_UI = `renderer (needs a ui launch handle; every verb takes --ui HANDLE, never discovery):
+  node --experimental-strip-types scripts/control-omb.ts ui launch [--entry threads] [--tool-calls JSON] [--mode happy]
+  ui snapshot --ui HANDLE [--interactive]
+  ui click --ui HANDLE (--ref @eN | --name NAME)
+  ui type --ui HANDLE (--ref @eN | --name NAME) --text TEXT
+  ui press --ui HANDLE --keys KEYS
+  ui screenshot --ui HANDLE --out PATH.png
+  ui console --ui HANDLE
+  ui eval --ui HANDLE --js CODE
+  ui flag --ui HANDLE --set features.NAME=VALUE [--dry-run]
+  ui wait-settle --ui HANDLE [--timeout 30]
+  ui help`;
 
 export const HELP = `control-omb — verify a running OpenMausBot instance through its shared MCP core
 
@@ -56,16 +74,19 @@ mutating (an explicit --url or OPENMAUSBOT_URL/OMB_PORT is required):
   edit --bot ID --message ID --text TEXT [--task ID] [--dry-run] [--url URL]
   set-model --bot ID --instance ID --model ID [--task ID] [--effort LEVEL] [--dry-run] [--url URL]
 
+${HELP_UI}
+
 isolated fixture:
   node --experimental-strip-types scripts/control-omb.ts launch
 
-Output is JSON. launch owns a temporary fake-engine server until interrupted.`;
+Output is JSON. launch and ui launch own a temporary fake-engine server until interrupted.`;
 
 const commonOptions = {
   url: { type: "string" },
 } satisfies ParseArgsOptionsConfig;
 
-function parse(
+/** Strict flag parsing for one command; `ui` verbs parse their tail the same way. */
+export function parse(
   command: string,
   args: string[],
   options: ParseArgsOptionsConfig = {},
@@ -136,6 +157,8 @@ export async function runControlOmb(
   const [command = "help", ...args] = argv;
   if (command === "help" || command === "--help" || command === "-h") return HELP;
   if (command === "launch") throw new ControlOmbError("launch is available only from the executable CLI");
+  // The first positional after `ui` is the verb; its tail is parsed strictly per verb.
+  if (command === "ui") return runControlOmbUi(args);
 
   const env = dependencies.env ?? process.env;
   const callTool = dependencies.callTool ?? handleToolCall;
@@ -438,18 +461,29 @@ export async function launchVerificationServer(
 export function controlResultSucceeded(command: string, result: unknown): boolean {
   if (command === "doctor") return (result as { ok?: unknown })?.ok === true;
   if (command === "wait") return (result as { status?: unknown })?.status === "settled";
+  if (command === "ui") return (result as { ok?: unknown })?.ok !== false;
   return true;
+}
+
+/** pnpm swallows Ctrl-C; a launcher that owns processes must get the signal itself. */
+function requireForegroundTerminal(command: string): void {
+  if (process.env.npm_lifecycle_event === "control:omb") {
+    throw new ControlOmbError(
+      `${command} must own the terminal directly so Ctrl-C can clean up its children`,
+      `run \`node --experimental-strip-types scripts/control-omb.ts ${command}\``,
+    );
+  }
 }
 
 async function main() {
   const command = process.argv[2] ?? "help";
+  if (command === "ui" && process.argv[3] === "launch") {
+    requireForegroundTerminal("ui launch");
+    await launchUi(process.argv.slice(4));
+    return;
+  }
   if (command === "launch") {
-    if (process.env.npm_lifecycle_event === "control:omb") {
-      throw new ControlOmbError(
-        "launch must own the terminal directly so Ctrl-C can clean up its child",
-        "run `node --experimental-strip-types scripts/control-omb.ts launch`",
-      );
-    }
+    requireForegroundTerminal("launch");
     const startup = new AbortController();
     const cancelStartup = () => startup.abort();
     process.once("SIGINT", cancelStartup);
