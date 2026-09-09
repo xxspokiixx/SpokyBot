@@ -8074,6 +8074,11 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
     if (method === "GET" && path === "/api/health" && !gate.auth) {
       return json(res, 200, { app: "openmausbot" });
     }
+    // The brand is public too: the sign-in page must carry the deployment's
+    // name and icon before anyone has a session, and it holds nothing secret.
+    if (method === "GET" && path === "/api/brand" && !gate.auth) {
+      return json(res, 200, loadBrand());
+    }
     if (!gate.auth) return json(res, gate.status, { error: gate.error });
     const auth = gate.auth;
 
