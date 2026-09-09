@@ -1,5 +1,6 @@
 // Actual browser + actual BrowserPanel, always in a disposable fixture HOME.
 import { fileURLToPath } from "node:url";
+import { readFileSync } from "node:fs";
 import { createServer } from "vite";
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
@@ -22,7 +23,7 @@ try {
       server.middlewares.use((req, res, next) => {
         if (req.url === "/__browser-test-page") {
           res.setHeader("content-type", "text/html");
-          res.end('<!doctype html><title>OpenMausBot</title><style>body{font:18px system-ui;background:#faf9f6;color:#282923;padding:70px}h1{font-size:42px;letter-spacing:-2px}input,button{font:inherit;padding:12px;border:1px solid #ccc;border-radius:10px;margin:5px}button{background:#242721;color:white}p{color:#666}</style><h1>A browser for your bots.</h1><p>Isolated live-view test. No real accounts or credentials.</p><input aria-label="Test name" placeholder="Your name"><button onclick="document.querySelector(\'output\').textContent=\'Hello, \'+document.querySelector(\'input\').value">Say hello</button><p><output>Ready</output></p>');
+          res.end(readFileSync(new URL("./testing/browser-test-page.html", import.meta.url), "utf8"));
           return;
         }
         if (req.url !== "/__browser-preview.html") return next();
