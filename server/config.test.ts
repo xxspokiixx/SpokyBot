@@ -42,6 +42,20 @@ describe("configuration boundaries", () => {
       expect(() => parseConfigPatch({ threads: { maxConcurrentPerBot: value } })).toThrow("threads.maxConcurrentPerBot");
     }
   });
+
+  it("keeps avatar providers and credentials separate, normalizing a router endpoint", () => {
+    const parsed = parseConfigPatch({ imageGen: {
+      provider: "custom", key: "openai-kept", customApiKey: "router-only",
+      customUrl: "http://127.0.0.1:4000/v1/", customModel: " local/image ",
+    } });
+    expect(parsed.imageGen).toEqual({ provider: "custom", key: "openai-kept", customApiKey: "router-only", customUrl: "http://127.0.0.1:4000/v1", customModel: "local/image" });
+    expect(parseStoredConfig({ imageGen: { key: "legacy" } }).imageGen).toEqual({ key: "legacy" });
+    expect(() => parseConfigPatch({ imageGen: { provider: "unknown" } })).toThrow("provider");
+    expect(() => parseConfigPatch({ imageGen: { customUrl: "https://user:secret@router.example/v1" } })).toThrow("customUrl");
+    const childEnv = { OMB_CUSTOM_IMAGE_KEY: "must-not-reach-bot" };
+    stripWorkspaceCredentialEnv(childEnv);
+    expect(childEnv).not.toHaveProperty("OMB_CUSTOM_IMAGE_KEY");
+  });
   it("persists a custom domain but excludes it from generic config patches", () => {
     expect(parseStoredConfig({ customDomain: "https://bots.example.com" })).toEqual({ customDomain: "https://bots.example.com" });
     expect(parseConfigPatch({ customDomain: "https://unverified.example.com", language: "en" })).toEqual({ language: "en" });
