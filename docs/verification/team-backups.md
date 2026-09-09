@@ -51,6 +51,33 @@ malformed reference graphs, permission injection and rollback on failure.
 The scripted fixture does not by itself prove the native file picker or
 download UI; verify those separately in a renderer connected to a fixture.
 
+## Explicit skills in setup packages
+
+The existing package export API accepts an explicit list of imported skill names:
+`POST /api/teams/export` with
+`{"format":"package","skillIds":["source-check"]}`. It exports those names from
+visible bots only. Omitting `skillIds` or using `[]` includes no skills.
+The regular **Export backup** download is unchanged and does not include skills.
+
+Packages carry only `SKILL.md`, never supporting files, enabled state or local
+attachment paths. At most 20 skill definitions are accepted, with the existing
+256 KiB per-file limit; Markdown exports must also fit the 1 MB import limit.
+Names and frontmatter must agree, references must resolve, and conflicting
+copies of a named skill are rejected. Teams → Import lists the included names;
+imported skills stay disabled until individually reviewed and enabled in the
+bot profile. Existing scheduled routines still arrive paused.
+
+```sh
+pnpm exec vitest run server/team-package-skills.e2e.test.ts --silent=false
+```
+
+This launches and cleans its own fake-engine fixture. It verifies explicit-only
+export, disabled imports, unchanged original bots and backup behavior, and
+rollback after an induced skill-storage failure. It also checks a real copied
+bot turn does not receive disabled instructions. Its JSON output includes the
+fixture details and persistent log path. The test does not prove the import
+preview's appearance; check that separately in a fixture renderer.
+
 ## Recovering bots hidden by older imports
 
 Open **Archived bots** in the sidebar menu and restore the original bots.

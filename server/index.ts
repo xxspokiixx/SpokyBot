@@ -250,6 +250,7 @@ import {
   installSkill,
   listSkills,
   listStagedSkillWrites,
+  isSkillName,
   readSkillFile,
   rejectStagedSkillWrite,
   removeSkill,
@@ -315,7 +316,7 @@ import { flushAllProfileHistory, flushProfileHistory, readHistory, recordProfile
 import { fetchBotDirectory, matchDirectoryBots, type MatchedDirectoryBot } from "./bot-directory.ts";
 import { scoutProject, suggestTeam } from "./project-scout.ts";
 import { fetchGithubTeam, fetchLibraryTeam, fetchTeamCatalog } from "./team-library.ts";
-import { isBotPackage, packageAgentAsMember, parseBotPackage, renderBotPackageMarkdown } from "./bot-package.ts";
+import { BOT_PACKAGE_MAX_SKILLS, isBotPackage, packageAgentAsMember, parseBotPackage, renderBotPackageMarkdown } from "./bot-package.ts";
 import { createTeamManifest, importedMemberProfile, parseTeamManifest } from "./team-manifest.ts";
 import { readThreadEvents } from "./thread-events.ts";
 import { listenWebhookIngress, webhookCredential, type WebhookIngress } from "./webhook-ingress.ts";
@@ -324,7 +325,7 @@ import { WebhookManager } from "./webhooks.ts";
 import { SPAWNED_PROXIES } from "./proxy-paths.ts";
 import { loadBundledSkills, loadUserSkills, mergeSkills, renderSkillInstructions, selectBundledSkills } from "./skill-library.ts";
 import { installedPlaybookInstructions } from "./installed-playbooks.ts";
-import { createBotPackageExport } from "./package-export.ts";
+import { createBotPackageExport, type ExportablePackageSkill } from "./package-export.ts";
 import { createTeamBackup, importTeamBackup } from "./team-backup.ts";
 import { MAX_TEAM_BACKUP_BYTES } from "../shared/team-backup.ts";
 import { shouldMountLocalComputer } from "./local-routing.ts";
@@ -1206,6 +1207,55 @@ function checkedModelSelection(
     return { ok: false, status: 400, error: `effort "${selection.effort}" is not offered by this bot's engine` };
   }
   return { ok: true, selection };
+}
+
+function checkedExportSkillNames(
+  value: unknown,
+  bots: readonly BotRecord[],
+): { ok: true; names: string[] } | { ok: false; error: string } {
+  // Sharing instructions is explicit: ordinary package exports include none.
+  if (value === undefined) return { ok: true, names: [] };
+  if (!Array.isArray(value) || value.some((name) => typeof name !== "string" || !isSkillName(name))) {
+    return { ok: false, error: "skillIds must be a list of exact imported skill names" };
+  }
+  const names = [...value] as string[];
+  if (new Set(names).size !== names.length) return { ok: false, error: "skillIds must not contain duplicates" };
+  if (names.length > BOT_PACKAGE_MAX_SKILLS) return { ok: false, error: `skillIds must contain at most ${BOT_PACKAGE_MAX_SKILLS} names` };
+  const available = new Set(bots.flatMap((bot) => listSkills(bot.id).map((skill) => skill.name)));
+  const unknown = names.find((name) => !available.has(name));
+  if (unknown) return { ok: false, error: `skillIds contains unknown imported skill "${unknown}"` };
+  return { ok: true, names };
+}
+
+function collectExportSkills(
+  bots: readonly BotRecord[],
+  names: readonly string[],
+): ReadonlyMap<string, readonly ExportablePackageSkill[]> {
+  const selected = new Set(names);
+  const byBot = new Map<string, ExportablePackageSkill[]>();
+  if (!selected.size) return byBot;
+  for (const bot of bots) {
+    const assigned: ExportablePackageSkill[] = [];
+    for (const listing of listSkills(bot.id)) {
+      if (!selected.has(listing.name)) continue;
+      const instructions = readSkillFile(bot.id, listing.name);
+      if (instructions === null) {
+        throw new Error(`Skill "${listing.name}" changed or is unavailable and cannot be exported safely`);
+      }
+      const skill: ExportablePackageSkill = {
+        name: listing.name,
+        description: listing.description,
+        ...(listing.source ? { source: listing.source } : {}),
+        ...(listing.license ? { license: listing.license } : {}),
+        ...(listing.compatibility ? { compatibility: listing.compatibility } : {}),
+        instructions,
+      };
+      // The shared exporter validates duplicate bytes and metadata together.
+      assigned.push(skill);
+    }
+    if (assigned.length) byBot.set(bot.id, assigned);
+  }
+  return byBot;
 }
 
 function checkedGroupResponder(value: unknown, memberIds: string[]): GroupDefaultResponder | null {
@@ -10373,12 +10423,16 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
           return json(res, 200, createTeamBackup(store, routines!.listRoutines(), name));
         }
         if (body.format === "package") {
+          const selectedBots = store.bots.filter((bot) => !bot.hidden);
+          const skillNames = checkedExportSkillNames(body.skillIds, selectedBots);
+          if (!skillNames.ok) return json(res, 400, { error: skillNames.error });
           const document = createBotPackageExport({
             name,
             authorName: profileName,
-            bots: store.bots,
+            bots: selectedBots,
             groups: store.groups,
             routines: routines!.listRoutines(),
+            skillsByBot: collectExportSkills(selectedBots, skillNames.names),
           });
           return json(res, 200, {
             name: document.package.name,
@@ -10513,8 +10567,8 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
       const pkg = packageDocument?.package;
       const importName = pkg?.name ?? manifest!.team.name;
       const sourceMembers = pkg
-        ? pkg.agents.map((agent) => ({ member: packageAgentAsMember(agent), playbookKeys: agent.playbooks ?? [] }))
-        : manifest!.team.members.map((member) => ({ member, playbookKeys: [] as string[] }));
+        ? pkg.agents.map((agent) => ({ member: packageAgentAsMember(agent), playbookKeys: agent.playbooks ?? [], skillNames: agent.skills ?? [] }))
+        : manifest!.team.members.map((member) => ({ member, playbookKeys: [] as string[], skillNames: [] as string[] }));
 
       const importedBots: ReturnType<typeof store.createBot>[] = [];
       const createdGroups: GroupRecord[] = [];
@@ -10540,6 +10594,7 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
           }
         }
         const playbookByKey = new Map((pkg?.playbooks ?? []).map((playbook) => [playbook.key, playbook]));
+        const packageSkillByName = new Map((pkg?.skills?.entries ?? []).map((skill) => [skill.name, skill]));
         for (const source of sourceMembers) {
           const member = source.member;
           // importedMemberProfile is the authority boundary: persona fields
@@ -10576,6 +10631,16 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
                 }
               : {}),
           });
+          for (const skillName of source.skillNames) {
+            const skill = packageSkillByName.get(skillName);
+            if (!skill) throw new Error(`Package skill "${skillName}" is unavailable`);
+            const installed = installSkill(created.id, skill.source ?? `package:${pkg!.id}`, [
+              { path: "SKILL.md", content: skill.instructions },
+            ]);
+            if ("error" in installed) {
+              throw new Error(`Package skill "${skillName}" could not be imported: ${installed.error}`);
+            }
+          }
           memberIds.set(member.key, created.id);
         }
 
