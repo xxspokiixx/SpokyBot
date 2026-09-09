@@ -221,9 +221,12 @@ import {
   ensureWorkspace,
   ensureTaskWorkspace,
   updateMemory,
+  appendMemoryLog,
   listMemoryTopics,
   isMemoryTopicName,
   memorySystemPrompt,
+  memorySourceLabel,
+  searchMemoryFiles,
   SESSION_SEARCH_SYSTEM_PROMPT,
   workspaceDir,
 } from "./workspace.ts";
@@ -6052,8 +6055,10 @@ async function runGroupMemberTurn(
     { id: "section-context", label: "Section context", text: sectionContextSystemPrompt(bot.section) },
     // the room path has always put a newline before memory and trimmed
     // the block's leading space; keep that so existing prompts are
-    // byte-identical
-    { id: "memory", label: "Memory", text: workspace ? `\n${memorySystemPrompt(bot.id).trim()}` : "" },
+    // byte-identical. The write guidance follows the tools actually
+    // mounted, exactly as the 1:1 path decides it: memory_update is on the
+    // agents server, so a room turn with it must be told to use it too.
+    { id: "memory", label: "Memory", text: workspace ? `\n${memorySystemPrompt(bot.id, { managedWrites: Boolean(integrations.agents) }).trim()}` : "" },
     { id: "skills", label: "Skills index", text: workspace ? skillsSystemPrompt(bot.id) : "" },
     { id: "skill-instructions", label: "Skill instructions", text: renderSkillInstructions(selectedSkills, { includeRoot: Boolean(workspace) }) },
     { id: "playbooks", label: "Playbooks", text: installedPlaybookInstructions(text, bot.playbooks) },
@@ -8453,10 +8458,23 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
           throw Object.assign(new Error("the internal turn capability has expired"), { status: 401 });
         }
       };
+      // Where an entry came from, as the person will read it in MEMORY.md:
+      // the room or the thread title, never a bare id unless nothing else
+      // names the conversation.
+      const memorySource = (): string => memorySourceLabel({
+        room: store.groupByThread(internalCapability.threadId),
+        task: store.taskByThread(internalSender.id, internalCapability.threadId),
+        threadId: internalCapability.threadId,
+      });
       if (method === "POST" && path === "/api/internal/memory") {
         const body = await readInternalBody();
-        const result = updateMemory(internalSender.id, { action: body.action, text: body.text, oldText: body.oldText });
-        return json(res, result.ok ? 200 : result.code === "conflict" ? 409 : result.code === "too-large" ? 413 : 400, result);
+        const result = updateMemory(internalSender.id, { action: body.action, text: body.text, oldText: body.oldText }, { source: memorySource() });
+        return json(res, result.ok ? 200 : result.code === "conflict" ? 409 : result.code === "over-budget" ? 413 : 400, result);
+      }
+      if (method === "POST" && path === "/api/internal/memory/log") {
+        const body = await readInternalBody();
+        const result = appendMemoryLog(internalSender.id, body.text, { source: memorySource() });
+        return json(res, result.ok ? 200 : 400, result);
       }
       if (method === "POST" && path === "/api/internal/browser/mcp") {
         const body = await readInternalBody();
@@ -8748,6 +8766,15 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
         if (!q) return json(res, 400, { error: "q is required" });
         const rawLimit = Number(url.searchParams.get("limit"));
         const limit = Number.isFinite(rawLimit) && rawLimit > 0 ? Math.min(Math.trunc(rawLimit), 25) : 12;
+        // Memory files ride along by default: the bot's own notes are as
+        // much its notebook as its transcripts, and scoped the same way —
+        // the caller's own bot, never another's.
+        const scope = url.searchParams.get("scope") ?? "all";
+        if (scope !== "all" && scope !== "conversations" && scope !== "memory") {
+          return json(res, 400, { error: "scope must be all, conversations, or memory" });
+        }
+        const memoryHits = scope === "conversations" ? [] : searchMemoryFiles(from.id, q, limit);
+        if (scope === "memory") return json(res, 200, { hits: [], memoryHits });
         const ownThreads = [...new Set([from.threadId, ...(from.tasks ?? []).map((task) => task.threadId)])];
         // A room is the only place a recall can be a disclosure: in a 1:1 the
         // user already owns every thread the bot can reach.
@@ -8761,7 +8788,7 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
         if (inRoom) {
           discloseRecall(from, fromThreadId, hits.filter((hit) => hit.crossed).map((hit) => hit.threadId));
         }
-        return json(res, 200, { hits });
+        return json(res, 200, { hits, memoryHits });
       }
       // session_read: the whole message behind a session_search hit. Same
       // own-bot scope — a message id from another bot's thread reads as
