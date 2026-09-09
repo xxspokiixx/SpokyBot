@@ -1474,6 +1474,7 @@ export const ClaudeDriver: ProviderDriver<ClaudeConfig> = {
       getAuthentication: (flowId) => login.get(flowId),
       completeAuthentication: (flowId, code) => login.complete(flowId, code),
       cancelAuthentication: () => login.cancel(),
+      signOut: () => login.signOut(),
       adapter: {
         provider: DRIVER_KIND,
         capabilities: {
@@ -1517,9 +1518,13 @@ export const ClaudeDriver: ProviderDriver<ClaudeConfig> = {
       generateText: (prompt) => generateReview(prompt),
       reviewPermission: generateReview,
       dispose: async () => {
-        for (const { stop } of active.values()) stop();
-        for (const threadId of [...sessions.keys()]) closeSession(threadId, "dispose");
-        listeners.clear();
+        try {
+          await login.dispose();
+        } finally {
+          for (const { stop } of active.values()) stop();
+          for (const threadId of [...sessions.keys()]) closeSession(threadId, "dispose");
+          listeners.clear();
+        }
       },
     };
   },

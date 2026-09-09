@@ -292,7 +292,11 @@ On a hosted server, the engine CLIs sign in from Settings → Engines:
   never stores it; the login lands where Claude Code keeps it for the account
   that runs your bots. This is the sign-in Anthropic permits for a hosted,
   unmodified Claude Code with your own subscription; the bots then share that
-  subscription's usage limits.
+  subscription's usage limits. Once signed in, **Manage account and sign-in →
+  Sign out of Claude** runs `claude auth logout` for that account's
+  configuration directory, confirmed with `claude auth status`, so a different
+  person can sign in with their own subscription. Stop running Claude tasks
+  before switching accounts: signing out does not cancel them.
 
 ## Using it from your computer
 
