@@ -279,6 +279,17 @@ Engine CLIs read their logins from the service user's home: sign them in
 from Settings → Engines (below), or as that user in a terminal, before you
 rely on routines running unattended.
 
+## Installing the engines without a terminal
+
+Engines whose installer is an npm package (Claude Code, Codex, OpenCode,
+MiniMax, pi) can be installed and updated from **Settings → Engines** when
+npm is on the server's PATH. OMB runs `npm install -g` as its own user into
+`<data dir>/tools/npm`, so nothing needs sudo and nothing touches a global
+prefix; that folder goes ahead of everything else on the engines' PATH, so
+the copy OMB installed is the one bots run. The package name comes from the
+engine's own install descriptor, never from the browser. Engines installed
+by a `curl | bash` script still need the command on the server.
+
 ## Signing the engines in without a terminal
 
 On a hosted server, the engine CLIs sign in from Settings → Engines:
