@@ -44,6 +44,9 @@ describe("openmausbot command line", () => {
     expect(parseArgs(["access", "list"], {})).toMatchObject({ command: "access", accessAction: "list" });
     expect(parseArgs(["access"], {})).toEqual({ error: "access needs one of: list, add EMAIL [--chat-only], remove EMAIL" });
     expect(parseArgs(["access", "add"], {})).toEqual({ error: "add needs a value" });
+    expect(parseArgs(["service", "install", "--domain", "maus.example.com", "--port", "8799"], {})).toMatchObject({ command: "service", serviceAction: "install", domain: "maus.example.com", port: 8799 });
+    expect(parseArgs(["service", "uninstall"], {})).toMatchObject({ command: "service", serviceAction: "uninstall" });
+    expect(parseArgs(["service"], {})).toEqual({ error: expect.stringContaining("service needs one of") });
     expect(parseArgs(["serve", "--domain", "Maus.Example.com"], {})).toMatchObject({ command: "serve", domain: "maus.example.com" });
     expect(parseArgs(["serve", "--domain", "localhost"], {})).toEqual({ error: expect.stringContaining("bare hostname") });
     expect(parseArgs(["serve", "--domain", "maus.example.com", "--tunnel"], {})).toEqual({ error: expect.stringContaining("--domain already gives") });

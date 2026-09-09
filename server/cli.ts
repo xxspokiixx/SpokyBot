@@ -33,6 +33,7 @@ import qrcode from "qrcode-terminal";
 import { parseAllowList } from "./account-signin.ts";
 import { writeFileAtomic } from "./atomic.ts";
 import { ensureCaddy, normalizeDomainOption, startCaddy, type RunningCaddy } from "./caddy.ts";
+import { runServiceCommand } from "./service-cli.ts";
 import { explainTailscaleFailure, tailscaleServe, tailscaleServeOff, tailscaleStatus, type TailscaleStatus } from "./tailscale.ts";
 import { defaultSetupIo, SetupCancelled, type SetupIo } from "./cli-prompts.ts";
 import { normalizePhoneOrigin, phonePairingInstructions, runPhoneSetup } from "./cli-phone-setup.ts";
@@ -58,7 +59,7 @@ import {
 const HERE = dirname(fileURLToPath(import.meta.url));
 
 export interface CliOptions {
-  command: "setup" | "start" | "serve" | "pair" | "sessions" | "status" | "login" | "logout" | "access" | "browser" | "help";
+  command: "setup" | "start" | "serve" | "pair" | "sessions" | "status" | "login" | "logout" | "access" | "service" | "browser" | "help";
   port: number;
   dataDir: string;
   label?: string;
@@ -73,6 +74,8 @@ export interface CliOptions {
   /** `access list|add|remove` */
   accessAction?: "list" | "add" | "remove";
   chatOnly?: boolean;
+  /** `service install|uninstall` */
+  serviceAction?: "install" | "uninstall";
   email?: string;
   /** `browser install [--with-deps]` */
   browserAction?: "install" | "status";
@@ -86,7 +89,7 @@ export interface CliOptions {
   phone?: "ios" | "android";
 }
 
-const COMMANDS = ["setup", "start", "serve", "pair", "sessions", "status", "login", "logout", "access", "browser", "help", "--help", "-h"];
+const COMMANDS = ["setup", "start", "serve", "pair", "sessions", "status", "login", "logout", "access", "service", "browser", "help", "--help", "-h"];
 
 export function parseArgs(argv: string[], env: NodeJS.ProcessEnv = process.env): CliOptions | { error: string } {
   const implicitStart = !argv.length || (argv[0]!.startsWith("--") && argv[0] !== "--help");
@@ -137,6 +140,7 @@ export function parseArgs(argv: string[], env: NodeJS.ProcessEnv = process.env):
         options.accessAction = arg;
         if (arg !== "list") options.email = value();
       } else if (options.command === "access" && arg === "--chat-only") options.chatOnly = true;
+      else if (options.command === "service" && !options.serviceAction && (arg === "install" || arg === "uninstall")) options.serviceAction = arg;
       else if (options.command === "browser" && (arg === "install" || arg === "status")) options.browserAction = arg;
       else if (options.command === "browser" && arg === "--with-deps") options.withDeps = true;
       else return { error: `unknown argument "${arg}"` };
@@ -148,6 +152,7 @@ export function parseArgs(argv: string[], env: NodeJS.ProcessEnv = process.env):
   if (options.publicUrl && !/^https?:\/\//.test(options.publicUrl)) return { error: "--public-url must start with http:// or https://" };
   if (options.tailscale && options.tunnel) return { error: "choose one of --tailscale (your tailnet) and --tunnel (a public address)" };
   if (options.command === "access" && !options.accessAction) return { error: "access needs one of: list, add EMAIL [--chat-only], remove EMAIL" };
+  if (options.command === "service" && !options.serviceAction) return { error: "service needs one of: install [the same options as serve], uninstall" };
   if (options.domain && (options.tailscale || options.tunnel || options.publicUrl)) return { error: "--domain already gives the server its address; drop --tailscale, --tunnel and --public-url" };
   if (options.local && (options.tailscale || options.tunnel || options.publicUrl)) return { error: "--local cannot be combined with a remote-access option" };
   if (options.command === "browser" && !options.browserAction) return { error: "browser needs an action: install or status" };
@@ -167,6 +172,7 @@ export const USAGE = `openmausbot — your team of AI bots, ready in a few steps
   openmausbot login [--email you@example.com]
   openmausbot logout
   openmausbot access list | add EMAIL [--chat-only] | remove EMAIL
+  openmausbot service install [--domain HOST | --tunnel | --tailscale] [--port N] [--data-dir DIR] | uninstall
   openmausbot browser install [--with-deps] | status
 
 setup   choose AI access and optional phone access; keep existing bots and chats
@@ -181,6 +187,10 @@ logout  releases that address and signs out
 access  who may sign in with an emailed code at /pair: an address or
         @domain; --chat-only gives chat and approvals without settings.
         Takes effect at once, no restart.
+service keep the server running across reboots: writes a systemd unit
+        (Linux) or a launchd agent (macOS) for the same serve options and
+        prints the commands that install it. Install the package
+        permanently first (npm install -g openmausbot).
 browser install: the bots' browser engine (agent-browser, pinned) into the
         data dir, and Chrome for Testing into the user's browser cache.
         --with-deps also installs
@@ -988,6 +998,18 @@ export async function main(argv = process.argv.slice(2)): Promise<number> {
       return runLogin(options);
     case "access":
       return runAccess(options);
+    case "service":
+      return runServiceCommand({
+        action: options.serviceAction ?? "install",
+        dataDir: options.dataDir,
+        port: options.port,
+        domain: options.domain,
+        tunnel: options.tunnel,
+        tailscale: options.tailscale,
+        label: options.label,
+        script: process.argv[1] ?? "",
+        node: process.execPath,
+      }, { log: (line) => console.log(line), error: (line) => console.error(line) });
     case "logout":
       return runLogout(options);
     case "browser":

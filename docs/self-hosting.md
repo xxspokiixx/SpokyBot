@@ -251,28 +251,24 @@ OMB_DATA_DIR="$HOME/.openmausbot" OMB_PORT=8799 \
   node --experimental-strip-types server/index.ts
 ```
 
-For something durable, run it under systemd:
+For something durable, let the CLI write the service for you:
 
-```ini
-# /etc/systemd/system/openmausbot.service
-[Unit]
-Description=OpenMausBot harness
-After=network.target
-
-[Service]
-User=maus
-WorkingDirectory=/home/maus/OpenMausBot
-Environment=OMB_DATA_DIR=/home/maus/.openmausbot
-Environment=OMB_PORT=8799
-ExecStart=/usr/bin/node --experimental-strip-types server/index.ts
-Restart=on-failure
-
-[Install]
-WantedBy=multi-user.target
+```sh
+npx openmausbot service install --domain maus.example.com   # or --tunnel, --tailscale, or nothing
 ```
 
-Engine CLIs read their logins from the service user's home — sign in as
-that user (`sudo -u maus claude` etc.) before starting the service.
+It renders a systemd unit (Linux) or a launchd agent (macOS) that runs the
+same `openmausbot serve …` with your options, restarts it if it stops, and,
+for `--domain`, grants the unit the capability to bind ports 80 and 443
+without root. The file is written next to your data and the two commands
+that install and start it are printed (they need `sudo` on Linux).
+`openmausbot service uninstall` prints the reverse. Install the package
+permanently first (`npm install -g openmausbot`): a service must not point
+at an `npx` cache that npm may prune.
+
+Engine CLIs read their logins from the service user's home: sign them in
+from Settings → Engines (below), or as that user in a terminal, before you
+rely on routines running unattended.
 
 ## Signing the engines in without a terminal
 
