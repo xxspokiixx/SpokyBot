@@ -850,6 +850,28 @@ public struct CompanionClient: Sendable {
         return try await send(try makeRequest("GET", "/api/bots", query: query), as: Fleet.self)
     }
 
+    /// The fleet includes only each bot's selected transcript. Recover the
+    /// other threads currently awaiting a person before committing a cold
+    /// snapshot, so their approval cards do not depend on opening the chat.
+    /// Fail the whole refresh on a failed page: advancing the replay cursor
+    /// with a partial snapshot could permanently miss that request.
+    public func fleetForHydration(messages limit: Int = 50) async throws -> (
+        fleet: Fleet, waitingThreads: [String: ThreadPage]
+    ) {
+        try Task.checkCancellation()
+        let fleet = try await fleet(messages: limit)
+        var waitingThreads: [String: ThreadPage] = [:]
+        for bot in fleet.bots {
+            for task in bot.tasks ?? [] where task.activity == "waiting-on-you"
+                && task.threadId != bot.threadId && waitingThreads[task.threadId] == nil {
+                try Task.checkCancellation()
+                waitingThreads[task.threadId] = try await messages(threadId: task.threadId, limit: limit)
+            }
+        }
+        try Task.checkCancellation()
+        return (fleet, waitingThreads)
+    }
+
     /// Scrollback: the page before a message already held.
     public func messages(threadId: String, before: String? = nil, limit: Int = 50) async throws -> ThreadPage {
         var query = [URLQueryItem(name: "limit", value: String(limit))]

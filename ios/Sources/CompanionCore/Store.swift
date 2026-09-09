@@ -182,8 +182,21 @@ public struct CompanionState: Sendable {
 
     // MARK: - Hydrating
 
+    /// An HTTP snapshot may arrive after the live stream has already folded
+    /// newer messages. Reject it atomically rather than erase those events
+    /// while keeping a cursor that says they were applied.
+    public mutating func hydrate(
+        _ fleet: Fleet,
+        waitingThreads: [String: ThreadPage] = [:],
+        ifCursorMatches expectedCursor: String?
+    ) -> Bool {
+        guard cursor == expectedCursor else { return false }
+        hydrate(fleet, waitingThreads: waitingThreads)
+        return true
+    }
+
     /// Replace everything from a `GET /api/bots` response.
-    public mutating func hydrate(_ fleet: Fleet) {
+    public mutating func hydrate(_ fleet: Fleet, waitingThreads: [String: ThreadPage] = [:]) {
         bots = fleet.bots
         rooms = fleet.groups
         messages.removeAll()
@@ -197,6 +210,9 @@ public struct CompanionState: Sendable {
         for room in fleet.groups {
             messages[room.threadId] = room.messages ?? []
             hasMore[room.threadId] = room.hasMore ?? false
+        }
+        for (threadId, page) in waitingThreads where bot(forThread: threadId) != nil {
+            merge(page, intoThread: threadId)
         }
     }
 

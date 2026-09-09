@@ -223,6 +223,9 @@ public struct BotTask: Codable, Hashable, Sendable {
     public var createdAt: Double
     public var modelSelection: ModelSelection?
     public var busy: Bool?
+    /// Runtime state from newer computers; used to recover approvals in
+    /// background threads without downloading every conversation.
+    public var activity: String?
     public var unread: Bool?
     public var approvalMode: String?
     public var autoApprove: Bool?
