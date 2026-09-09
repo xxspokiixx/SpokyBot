@@ -183,6 +183,15 @@ export interface SendTurnInput {
   transcript?: Array<{ role: "user" | "assistant"; text: string }>;
   /** Bot persona (name/title/description) as a system prompt. */
   system?: string;
+  /** `system` split at the sections that legitimately change mid-conversation
+   * (memory today): `systemStable` is everything else, `systemVolatile` is
+   * those sections' text. A driver that keeps one CLI process per thread keys
+   * that process on the stable half, so a memory edit no longer respawns the
+   * session and makes the provider re-cache the entire prompt; the changed half
+   * is delivered inside the next turn instead. Drivers that rebuild their
+   * request every turn ignore both and keep reading `system`. */
+  systemStable?: string;
+  systemVolatile?: string;
   /** Per-bot integrations the driver may hand to the agent as tools. */
   integrations?: {
     /** A local stdio bridge owns the remote Composio transport. Keeping the

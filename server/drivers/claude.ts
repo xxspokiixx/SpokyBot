@@ -30,6 +30,7 @@ import type {
   SendTurnInput,
 } from "../contracts.ts";
 import { computerProxyEnv } from "../container-computer.ts";
+import { gateServer, resultBudget } from "../mcp-gate-config.ts";
 import { newEventId, newId } from "../contracts.ts";
 import { classifyError, computeBackoff, interruptibleDelay, RETRY_MAX_ATTEMPTS } from "./retry.ts";
 import {
@@ -168,6 +169,69 @@ function claudeEnvironment(
   if (!applied.injected) delete env.ANTHROPIC_API_KEY;
   return env;
 }
+
+/** Escape hatch back to the pre-isolation launch, where a bot inherited this
+ * machine's Claude Code setup: its MCP servers and connectors, skills,
+ * agents, hooks and personal CLAUDE.md. Set it only to recover a bot that
+ * genuinely depended on a user- or local-scope MCP server; the supported way
+ * to give a bot a server is the app's own `mcpServers` config or the bot
+ * project's `.mcp.json`. */
+function inheritsUserConfig(env: NodeJS.ProcessEnv): boolean {
+  return env.OMB_CLAUDE_INHERIT_USER_CONFIG === "1";
+}
+
+/** MCP servers the bot's own project declares in `<cwd>/.mcp.json`.
+ *
+ * The CLI would find this file itself, but the harness launches it with
+ * --strict-mcp-config, which makes the harness's config the only source.
+ * The project file IS part of the bot's definition (its cwd is chosen per
+ * bot), so it is forwarded verbatim — including `type: "http"`/`"sse"`
+ * entries the harness never mounts itself, because the CLI, not this code,
+ * is what has to understand them. A malformed file is ignored rather than
+ * failing the turn: an unreadable project config must not brick a bot. */
+function projectMcpServers(cwd: string): Record<string, unknown> {
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(readFileSync(join(cwd, ".mcp.json"), "utf8"));
+  } catch {
+    return {};
+  }
+  const servers = (parsed as { mcpServers?: unknown } | null)?.mcpServers;
+  if (!servers || typeof servers !== "object" || Array.isArray(servers)) return {};
+  const out: Record<string, unknown> = {};
+  for (const [name, server] of Object.entries(servers as Record<string, unknown>)) {
+    if (server && typeof server === "object" && !Array.isArray(server)) out[name] = server;
+  }
+  return out;
+}
+
+/** The CLI compacts its own session when it approaches a window. Left alone
+ * that window is the model's, so a Sonnet 5 session runs to something near a
+ * million tokens before anything happens — and every model call until then
+ * re-reads the whole thing. The measured food-ordering thread sat at 330k
+ * tokens per call and looked perfectly healthy to the CLI.
+ *
+ * So the harness picks the window instead. This delegates the actual
+ * compaction to the CLI, which owns the session and already has a summarizer
+ * for it; the harness only decides when it is worth paying for.
+ *
+ * OMB_CLAUDE_AUTOCOMPACT takes a token count, "auto" to hand the decision
+ * back to the CLI, or "off" to pass nothing at all. The CLI rejects a window
+ * outside 100k-1M as a hard argument error, so a configured value is clamped
+ * rather than passed through: a mistyped setting must not fail every turn. */
+export function autoCompactWindow(env: NodeJS.ProcessEnv): string | null {
+  const raw = (env.OMB_CLAUDE_AUTOCOMPACT ?? "").trim().toLowerCase();
+  if (raw === "off") return null;
+  if (raw === "auto") return "auto";
+  const parsed = raw ? Number(raw) : DEFAULT_AUTOCOMPACT_TOKENS;
+  if (!Number.isFinite(parsed) || parsed <= 0) return String(DEFAULT_AUTOCOMPACT_TOKENS);
+  return String(Math.min(1_000_000, Math.max(100_000, Math.floor(parsed))));
+}
+
+/** Generous for real work, and still a third of where a 1M-window session
+ * would otherwise get to. With bot tool results gated (mcp-gate.ts) most
+ * threads never reach it; this is the backstop for the ones that do. */
+const DEFAULT_AUTOCOMPACT_TOKENS = 200_000;
 
 const DRIVER_KIND = "claudeAgent";
 
@@ -602,6 +666,18 @@ type ClaudeUserMessage = {
 /** Claude's stream-json input accepts the same image source blocks as the
  * Anthropic Messages API. Keep the old string form for text-only turns so a
  * CLI update cannot disturb the overwhelmingly common path. */
+/** How a mid-session change to the volatile half of the system prompt
+ * reaches a model whose process was launched with the old copy. The CLI's
+ * own out-of-band convention inside a user turn, and it costs one short
+ * append rather than a relaunch that re-uploads the whole prompt cache. */
+function withVolatileNote(text: string, volatile: string): string {
+  const body = volatile.trim()
+    ? `This part of your instructions changed since this session started. It replaces the earlier copy:\n\n${volatile.trim()}`
+    : "The notes that were in your instructions when this session started have been cleared.";
+  const note = `<system-reminder>\n${body}\n</system-reminder>`;
+  return text ? `${note}\n\n${text}` : note;
+}
+
 function claudeUserMessage(
   text: string,
   images: readonly ClaudeImage[] | undefined,
@@ -695,6 +771,10 @@ export const ClaudeDriver: ProviderDriver<ClaudeConfig> = {
       systemPromptPath: string | null;
       /** the spawn contract — a different one means a fresh process */
       argsKey: string;
+      /** the volatile half of the system prompt this process was launched
+       * with (see SendTurnInput.systemVolatile). A later turn whose volatile
+       * text differs delivers the difference in-turn rather than relaunching. */
+      volatile: string;
       /** the CLI's session id from `init`, what --resume takes later */
       sessionId: string | null;
       /** the running turn, or null between turns */
@@ -816,6 +896,20 @@ export const ClaudeDriver: ProviderDriver<ClaudeConfig> = {
         args.push("--disallowedTools", config.disallowedTools.join(","));
       }
       const turnEnvironment = environment();
+      const isolated = !inheritsUserConfig(turnEnvironment);
+      if (isolated) {
+        // A bot gets the tools and instructions its owner gave it, not
+        // whatever this machine's Claude Code happens to be set up with.
+        // Without these the CLI silently adds, to EVERY turn of every bot:
+        // the desktop's own MCP servers and claude.ai connectors (one
+        // measured desktop mounted 407 extra tools, ~10k tokens), its skill
+        // and agent listings, its hooks, and its personal CLAUDE.md. Every
+        // model call in the session then re-reads all of it.
+        args.push("--strict-mcp-config");
+        args.push("--setting-sources", "project");
+      }
+      const compactWindow = autoCompactWindow(turnEnvironment);
+      if (compactWindow) args.push("--autocompact", compactWindow);
       const turnModel = await resolveClaudeTurnModel(turn.model, turnEnvironment);
       const injected = applyClaudeInject({ ...turnEnvironment }, turnModel);
       if (injected.model) args.push("--model", injected.model);
@@ -890,9 +984,36 @@ export const ClaudeDriver: ProviderDriver<ClaudeConfig> = {
       // routes every custom tool call through the ogb permission broker
       // into an Allow/Deny card. Reserved names were filtered upstream;
       // skip any residual collision instead of clobbering a built-in.
+      // Bot-owned servers, gated below: they are the ones that answer for a
+      // machine rather than for a context window.
+      const botOwned = new Set<string>();
       for (const [name, server] of Object.entries(turn.integrations?.custom ?? {})) {
         if (name in mcpServers) continue;
         mcpServers[name] = { ...server };
+        botOwned.add(name);
+      }
+      // --strict-mcp-config (above) makes this config the CLI's only source
+      // of MCP servers, so a server the bot's OWN project declares would
+      // otherwise vanish with the machine's. Merge it last: a project file
+      // can add servers but never shadow a harness-owned mount.
+      if (isolated && turn.cwd) {
+        for (const [name, server] of Object.entries(projectMcpServers(turn.cwd))) {
+          if (name in mcpServers) continue;
+          mcpServers[name] = server;
+          botOwned.add(name);
+        }
+      }
+      // One tool call can put more into the conversation than the whole rest
+      // of the session: a single product search measured 60-140 KB of JSON,
+      // and the CLI re-reads it on every later model call. The harness never
+      // sees these calls — the CLI runs the server itself — so the only place
+      // to stand is between the two processes. Harness-owned mounts (the
+      // permission broker, computer, browser, agents, dweb) are already
+      // bounded and are deliberately left alone.
+      const budget = resultBudget(turnEnvironment);
+      for (const name of botOwned) {
+        const gated = gateServer({ name, server: mcpServers[name], threadId, budget, nodeEnv: NODE_ENV_FLAG });
+        if (gated) mcpServers[name] = gated;
       }
       // Keep ask_user available even in Full access. Native bypass skips
       // permission prompts, not questions requiring a person's answer.
@@ -928,7 +1049,9 @@ export const ClaudeDriver: ProviderDriver<ClaudeConfig> = {
       const keyArgs = args.filter((a, i) => !privateFileFlags.has(a) && !privateFileFlags.has(args[i - 1] ?? ""));
       const argsKey = JSON.stringify({
         args: keyArgs,
-        system: turn.system ?? null,
+        // the volatile half is deliberately absent: it must not respawn a
+        // healthy session (see Session.volatile)
+        system: turn.systemStable ?? turn.system ?? null,
         mcpServers,
         cwd,
         model: injected.model ?? null,
@@ -948,7 +1071,12 @@ export const ClaudeDriver: ProviderDriver<ClaudeConfig> = {
           killCliTree(live.child);
         }, turnId, broker: live.broker });
         emit({ ...base(threadId, turnId), type: "turn.started" });
-        const written = await writeUser(live, threadId, promptMsg);
+        const volatile = turn.systemVolatile ?? "";
+        const message = volatile === live.volatile
+          ? promptMsg
+          : claudeUserMessage(withVolatileNote(turn.text, volatile), turn.images);
+        live.volatile = volatile;
+        const written = await writeUser(live, threadId, message);
         if (!written) {
           active.delete(threadId);
           live.turn = null;
@@ -1076,6 +1204,7 @@ export const ClaudeDriver: ProviderDriver<ClaudeConfig> = {
         mcpConfigPath,
         systemPromptPath,
         argsKey,
+        volatile: turn.systemVolatile ?? "",
         sessionId: sessionId ?? newSessionId,
         turn: { turnId, settled: false, sawStreamDelta: false },
         idleTimer: null,

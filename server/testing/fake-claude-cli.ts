@@ -25,7 +25,7 @@
 //                      inherited-api-key — what `auth status` reports
 //
 // Keep this file dependency-free — it runs as a bare `node` subprocess.
-import { existsSync, readFileSync, writeFileSync } from "node:fs";
+import { appendFileSync, existsSync, readFileSync, writeFileSync } from "node:fs";
 
 const mode = process.env.FAKE_CLAUDE_MODE ?? "happy";
 const scriptedReplies = (() => {
@@ -158,6 +158,10 @@ const finishIfDone = () => {
 const playTurn = (prompt: JsonValue) => {
   turnRunning = true;
   steered = [];
+  // Every prompt this process receives, one JSON object per line. FAKE_CLAUDE_DUMP
+  // records only the first, which cannot show what a REUSED session was sent on
+  // its second and later turns.
+  if (process.env.FAKE_CLAUDE_PROMPTS) appendFileSync(process.env.FAKE_CLAUDE_PROMPTS, `${JSON.stringify(prompt)}\n`);
   if (!dumped && process.env.FAKE_CLAUDE_DUMP) {
     dumped = true;
     const configPath = argAfter("--mcp-config");

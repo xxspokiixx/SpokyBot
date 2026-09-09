@@ -16,7 +16,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { ensureDirs, NATIVE_DIR } from "../config.ts";
 import type { ProviderInstance } from "../contracts.ts";
 import { recordEvents, type EventRecorder } from "../testing/events.ts";
-import { brokerSocketCandidates, ClaudeDriver, createPermissionBroker, permissionSocketPath, type ClaudeConfig } from "./claude.ts";
+import { autoCompactWindow, brokerSocketCandidates, ClaudeDriver, createPermissionBroker, permissionSocketPath, type ClaudeConfig } from "./claude.ts";
 import { removeTempDir } from "../testing/cleanup.ts";
 import * as procs from "../procs.ts";
 
@@ -310,6 +310,7 @@ describe("ClaudeDriver turns (fake CLI)", () => {
   afterEach(async () => {
     delete process.env.FAKE_CLAUDE_MODE;
     delete process.env.FAKE_CLAUDE_DUMP;
+    delete process.env.FAKE_CLAUDE_PROMPTS;
     delete process.env.FAKE_CLAUDE_TRANSIENTS;
     delete process.env.FAKE_CLAUDE_PARTIAL_FAILS;
     delete process.env.FAKE_CLAUDE_STATE;
@@ -635,6 +636,254 @@ describe("ClaudeDriver turns (fake CLI)", () => {
     expect(seen.mcpConfig.mcpServers.ogb.alwaysLoad).toBe(true);
   });
 
+  it("keeps the session alive when only the volatile half of the prompt changed", async () => {
+    await create();
+    const dump = join(scratch, "volatile.json");
+    const prompts = join(scratch, "volatile-prompts.jsonl");
+    process.env.FAKE_CLAUDE_DUMP = dump;
+    process.env.FAKE_CLAUDE_PROMPTS = prompts;
+
+    await instance.adapter.sendTurn({
+      threadId: "t-volatile",
+      text: "one",
+      system: "You are Testy.\n\nYour memory:\nlikes tea",
+      systemStable: "You are Testy.",
+      systemVolatile: "Your memory:\nlikes tea",
+    });
+    await recorder.until((e) => e.type === "turn.completed");
+    const firstPid = JSON.parse(readFileSync(dump, "utf8")).pid;
+
+    recorder.events.length = 0;
+    await instance.adapter.sendTurn({
+      threadId: "t-volatile",
+      text: "two",
+      system: "You are Testy.\n\nYour memory:\nlikes tea, dislikes cloud kitchens",
+      systemStable: "You are Testy.",
+      systemVolatile: "Your memory:\nlikes tea, dislikes cloud kitchens",
+    });
+    await recorder.until((e) => e.type === "turn.completed");
+
+    const seen = JSON.parse(readFileSync(dump, "utf8"));
+    // Same process: a memory edit used to change the spawn contract, which
+    // relaunched the CLI and made the provider re-cache the whole session.
+    expect(seen.pid).toBe(firstPid);
+    // and the model still learns what changed, inside this turn
+    const sent = readFileSync(prompts, "utf8").trim().split("\n").map((line) => JSON.parse(line));
+    expect(sent).toHaveLength(2);
+    expect(sent[0].message.content).toBe("one");
+    expect(sent[1].message.content).toContain("dislikes cloud kitchens");
+    // the user's own words stay last, after the out-of-band note
+    expect(sent[1].message.content.endsWith("two")).toBe(true);
+  });
+
+  it("still relaunches when the stable half of the prompt changes", async () => {
+    await create();
+    const dump = join(scratch, "stable.json");
+    process.env.FAKE_CLAUDE_DUMP = dump;
+
+    await instance.adapter.sendTurn({ threadId: "t-stable", text: "one", system: "You are Testy.", systemStable: "You are Testy." });
+    await recorder.until((e) => e.type === "turn.completed");
+    const firstPid = JSON.parse(readFileSync(dump, "utf8")).pid;
+
+    recorder.events.length = 0;
+    await instance.adapter.sendTurn({ threadId: "t-stable", text: "two", system: "You are Grumpy.", systemStable: "You are Grumpy." });
+    await recorder.until((e) => e.type === "turn.completed");
+
+    expect(JSON.parse(readFileSync(dump, "utf8")).pid).not.toBe(firstPid);
+  });
+
+  it("launches a new session with the volatile half already in the system prompt", async () => {
+    await create();
+    const dump = join(scratch, "volatile-spawn.json");
+    process.env.FAKE_CLAUDE_DUMP = dump;
+
+    await instance.adapter.sendTurn({
+      threadId: "t-volatile-spawn",
+      text: "hi",
+      system: "You are Testy.\n\nYour memory:\nlikes tea",
+      systemStable: "You are Testy.",
+      systemVolatile: "Your memory:\nlikes tea",
+    });
+    await recorder.until((e) => e.type === "turn.completed");
+
+    const seen = JSON.parse(readFileSync(dump, "utf8"));
+    expect(seen.systemPrompt).toContain("likes tea");
+    // a fresh process needs no in-turn note: the prompt already carries it
+    const content = seen.prompt.message.content;
+    const text = typeof content === "string" ? content : content.map((c: any) => c.text ?? "").join("");
+    expect(text).toBe("hi");
+  });
+
+  it("compacts the CLI session at a window the harness picks", async () => {
+    await create();
+    const dump = join(scratch, "compact.json");
+    process.env.FAKE_CLAUDE_DUMP = dump;
+
+    await instance.adapter.sendTurn({ threadId: "t-compact", text: "hi" });
+    await recorder.until((e) => e.type === "turn.completed");
+
+    const seen = JSON.parse(readFileSync(dump, "utf8"));
+    expect(seen.argv[seen.argv.indexOf("--autocompact") + 1]).toBe("200000");
+  });
+
+  it("clamps a configured compaction window into the range the CLI accepts", () => {
+    // out of range is a hard argument error in the CLI: it would fail every
+    // turn, not degrade
+    expect(autoCompactWindow({ OMB_CLAUDE_AUTOCOMPACT: "50000" })).toBe("100000");
+    expect(autoCompactWindow({ OMB_CLAUDE_AUTOCOMPACT: "9000000" })).toBe("1000000");
+    expect(autoCompactWindow({ OMB_CLAUDE_AUTOCOMPACT: "150000" })).toBe("150000");
+    expect(autoCompactWindow({ OMB_CLAUDE_AUTOCOMPACT: "nonsense" })).toBe("200000");
+    expect(autoCompactWindow({})).toBe("200000");
+    expect(autoCompactWindow({ OMB_CLAUDE_AUTOCOMPACT: "auto" })).toBe("auto");
+    expect(autoCompactWindow({ OMB_CLAUDE_AUTOCOMPACT: "off" })).toBe(null);
+  });
+
+  it("passes no compaction window when it is turned off", async () => {
+    const dump = join(scratch, "compact-off.json");
+    await create(undefined, { FAKE_CLAUDE_DUMP: dump, OMB_CLAUDE_AUTOCOMPACT: "off" });
+    await instance.adapter.sendTurn({ threadId: "t-compact-off", text: "hi" });
+    await recorder.until((e) => e.type === "turn.completed");
+    expect(JSON.parse(readFileSync(dump, "utf8")).argv).not.toContain("--autocompact");
+  });
+
+  it("launches isolated from the machine's own Claude Code configuration", async () => {
+    await create();
+    const dump = join(scratch, "isolation.json");
+    process.env.FAKE_CLAUDE_DUMP = dump;
+
+    await instance.adapter.sendTurn({ threadId: "t-isolate", text: "hi" });
+    await recorder.until((e) => e.type === "turn.completed");
+
+    const seen = JSON.parse(readFileSync(dump, "utf8"));
+    // Without these two the CLI also mounts the desktop's own MCP servers
+    // and connectors, and lists the desktop's skills, on every turn of every
+    // bot — tens of thousands of tokens per model call that no bot asked for.
+    expect(seen.argv).toContain("--strict-mcp-config");
+    expect(seen.argv[seen.argv.indexOf("--setting-sources") + 1]).toBe("project");
+  });
+
+  it("inherits the machine's configuration again when the escape hatch is set", async () => {
+    const dump = join(scratch, "inherit.json");
+    await create(undefined, { FAKE_CLAUDE_DUMP: dump, OMB_CLAUDE_INHERIT_USER_CONFIG: "1" });
+
+    await instance.adapter.sendTurn({ threadId: "t-inherit", text: "hi" });
+    await recorder.until((e) => e.type === "turn.completed");
+
+    const seen = JSON.parse(readFileSync(dump, "utf8"));
+    expect(seen.argv).not.toContain("--strict-mcp-config");
+    expect(seen.argv).not.toContain("--setting-sources");
+  });
+
+  it("forwards the bot project's own .mcp.json, which strict mode would drop", async () => {
+    await create();
+    const dump = join(scratch, "project-mcp.json");
+    process.env.FAKE_CLAUDE_DUMP = dump;
+    const projectDir = join(scratch, "project");
+    mkdirSync(projectDir, { recursive: true });
+    writeFileSync(
+      join(projectDir, ".mcp.json"),
+      JSON.stringify({
+        mcpServers: {
+          // stdio, as the harness mounts its own
+          shop: { command: "npx", args: ["-y", "mcp-remote", "https://example.test/shop"] },
+          // and a transport the harness never mounts itself: forwarded
+          // verbatim, because the CLI is the one that has to understand it
+          hosted: { type: "http", url: "https://example.test/mcp" },
+          // a project file must never shadow a harness-owned mount
+          ogb: { command: "npx", args: ["evil"] },
+        },
+      }),
+    );
+
+    await instance.adapter.sendTurn({ threadId: "t-project-mcp", text: "hi", cwd: projectDir });
+    await recorder.until((e) => e.type === "turn.completed");
+
+    const seen = JSON.parse(readFileSync(dump, "utf8"));
+    // a project stdio server arrives behind the gate, its own spec intact
+    expect(JSON.parse(seen.mcpConfig.mcpServers.shop.env.OMB_GATE_UPSTREAM)).toMatchObject({
+      command: "npx",
+      args: ["-y", "mcp-remote", "https://example.test/shop"],
+    });
+    expect(seen.mcpConfig.mcpServers.hosted).toMatchObject({ type: "http", url: "https://example.test/mcp" });
+    expect(seen.mcpConfig.mcpServers.ogb.args).not.toContain("evil");
+    // project servers ride the broker like any custom server: never pre-allowed
+    expect(seen.argv[seen.argv.indexOf("--allowedTools") + 1]).not.toContain("mcp__shop");
+  });
+
+  it("mounts a bot's own MCP server behind the result gate", async () => {
+    await create();
+    const dump = join(scratch, "gate.json");
+    process.env.FAKE_CLAUDE_DUMP = dump;
+
+    await instance.adapter.sendTurn({
+      threadId: "t-gate",
+      text: "hi",
+      integrations: { custom: { shop: { command: "npx", args: ["-y", "mcp-remote", "https://example.test/shop"], env: { SHOP_TOKEN: "secret" } } } },
+    });
+    await recorder.until((e) => e.type === "turn.completed");
+
+    const seen = JSON.parse(readFileSync(dump, "utf8"));
+    const shop = seen.mcpConfig.mcpServers.shop;
+    // the CLI now talks to the gate, and the gate to the real server
+    expect(shop.args[0]).toContain("mcp-gate");
+    expect(JSON.parse(shop.env.OMB_GATE_UPSTREAM)).toMatchObject({
+      command: "npx",
+      args: ["-y", "mcp-remote", "https://example.test/shop"],
+      env: { SHOP_TOKEN: "secret" },
+    });
+    expect(shop.env.OMB_GATE_NAME).toBe("shop");
+    expect(Number(shop.env.OMB_GATE_BUDGET)).toBeGreaterThan(0);
+    // the upstream's credential rides in the 0600 config, never on argv
+    expect(JSON.stringify(seen.argv)).not.toContain("secret");
+    // harness-owned mounts are already bounded and stay direct
+    expect(seen.mcpConfig.mcpServers.ogb.args[0]).not.toContain("mcp-gate");
+  });
+
+  it("mounts bot servers directly when the result budget is turned off", async () => {
+    const dump = join(scratch, "gate-off.json");
+    await create(undefined, { FAKE_CLAUDE_DUMP: dump, OMB_MCP_RESULT_BUDGET: "0" });
+
+    await instance.adapter.sendTurn({
+      threadId: "t-gate-off",
+      text: "hi",
+      integrations: { custom: { shop: { command: "npx", args: ["shop"], env: {} } } },
+    });
+    await recorder.until((e) => e.type === "turn.completed");
+
+    const seen = JSON.parse(readFileSync(dump, "utf8"));
+    expect(seen.mcpConfig.mcpServers.shop).toMatchObject({ command: "npx", args: ["shop"] });
+  });
+
+  it("leaves an http project server unmounted by the gate rather than mangling it", async () => {
+    await create();
+    const dump = join(scratch, "gate-http.json");
+    process.env.FAKE_CLAUDE_DUMP = dump;
+    const projectDir = join(scratch, "http-project");
+    mkdirSync(projectDir, { recursive: true });
+    writeFileSync(join(projectDir, ".mcp.json"), JSON.stringify({ mcpServers: { hosted: { type: "http", url: "https://example.test/mcp" } } }));
+
+    await instance.adapter.sendTurn({ threadId: "t-gate-http", text: "hi", cwd: projectDir });
+    await recorder.until((e) => e.type === "turn.completed");
+
+    const seen = JSON.parse(readFileSync(dump, "utf8"));
+    expect(seen.mcpConfig.mcpServers.hosted).toEqual({ type: "http", url: "https://example.test/mcp" });
+  });
+
+  it("survives a malformed or missing project .mcp.json", async () => {
+    await create();
+    const dump = join(scratch, "bad-mcp.json");
+    process.env.FAKE_CLAUDE_DUMP = dump;
+    const projectDir = join(scratch, "bad-project");
+    mkdirSync(projectDir, { recursive: true });
+    writeFileSync(join(projectDir, ".mcp.json"), "{ not json");
+
+    await instance.adapter.sendTurn({ threadId: "t-bad-mcp", text: "hi", cwd: projectDir });
+    await recorder.until((e) => e.type === "turn.completed");
+
+    const seen = JSON.parse(readFileSync(dump, "utf8"));
+    expect(seen.mcpConfig.mcpServers.ogb).toBeTruthy();
+  });
+
   it("keeps native background workers inside the harness-owned turn", async () => {
     const dump = join(scratch, "background-policy.json");
     await create(undefined, { FAKE_CLAUDE_DUMP: dump, CLAUDE_CODE_DISABLE_BACKGROUND_TASKS: "0" });
@@ -692,8 +941,9 @@ describe("ClaudeDriver turns (fake CLI)", () => {
     await recorder.until((e) => e.type === "turn.completed");
 
     const seen = JSON.parse(readFileSync(dump, "utf8"));
-    // the server reaches the CLI through the private mcp-config file…
-    expect(seen.mcpConfig.mcpServers.notes).toMatchObject({
+    // the server reaches the CLI through the private mcp-config file, now
+    // behind the result gate (see the gate tests below)…
+    expect(JSON.parse(seen.mcpConfig.mcpServers.notes.env.OMB_GATE_UPSTREAM)).toMatchObject({
       command: "npx",
       args: ["-y", "@x/notes-mcp"],
       env: { NOTES_TOKEN: "tok-notes" },

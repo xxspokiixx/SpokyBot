@@ -4887,6 +4887,8 @@ async function startTurn(
         resumeCursor,
         transcript,
         system: prompt.text,
+        systemStable: prompt.stable,
+        systemVolatile: prompt.volatile,
         integrations,
         cwd,
       }), () => !directTurnClaimExists(bot.id, dispatchClaimId, threadId), async () => {
@@ -6050,7 +6052,7 @@ async function runGroupMemberTurn(
     { id: "skills", label: "Skills index", text: workspace ? skillsSystemPrompt(bot.id) : "" },
     { id: "skill-instructions", label: "Skill instructions", text: renderSkillInstructions(selectedSkills, { includeRoot: Boolean(workspace) }) },
     { id: "playbooks", label: "Playbooks", text: installedPlaybookInstructions(text, bot.playbooks) },
-  ]).text;
+  ]);
 
   // run the turn and wait for it to settle, folding the reply text so a
   // chained @mention can be routed afterwards
@@ -6144,7 +6146,9 @@ async function runGroupMemberTurn(
         text,
         images: turnImages,
         approvalMode: approvalModeForTurn(readyBot, false, threadId),
-        system: roomSystem,
+        system: roomSystem.text,
+        systemStable: roomSystem.stable,
+        systemVolatile: roomSystem.volatile,
         cwd,
         integrations,
         ...memberTurnSelection(readyBot.modelSelection),
