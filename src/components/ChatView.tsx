@@ -45,7 +45,8 @@ import { stateForBot } from "@/lib/mascot";
 import { showWorkingDots } from "@/lib/turn-tail";
 import { liveActivityLabel } from "@/lib/live-activity";
 import { ChatMarkdown } from "./ChatMarkdown";
-import { MentionText } from "./MentionText";
+import { ThreadChip } from "./ThreadChip";
+import { ThreadRefText } from "./ThreadRefs";
 import { OptionCard, shouldHideOnboardingCard } from "./OptionCard";
 import { ApprovalCard } from "./ApprovalCard";
 import { Composer } from "./Composer";
@@ -444,7 +445,7 @@ function Bubble({
                 <div
                   className={cn("chat-text", collapsible && "max-h-40 overflow-hidden [mask-image:linear-gradient(to_bottom,black_60%,transparent)]")}
                 >
-                  <MentionText text={visibleText} peers={mentionPeers} />
+                  <ThreadRefText text={visibleText} peers={mentionPeers} />
                 </div>
               )}
               {message.steered && (
@@ -564,6 +565,7 @@ function ActivityChip({ message }: { message: Message }) {
   const { state, dispatch } = useStore();
   const tool = message.tool;
   if (!tool) return null;
+  if (message.threadRef) return <ThreadChip message={message} />;
   // bot⇄bot comm chip: opens the channel where the exchange lives
   const comm = message.comm;
   if (comm) {
@@ -776,7 +778,8 @@ const MessagesList = memo(function MessagesList({
             }
             case "activity": {
               // a failed turn is an error, not a tool run — render it as one.
-              // bot⇄bot comm chips stay because they link to another conversation.
+              // bot⇄bot comm chips and opened-thread chips stay because they
+              // link to another conversation.
               // plain tool runs stay out unless Settings → Tool calls is on.
               if (m.tool?.name.startsWith("error:")) {
                 return (
@@ -787,7 +790,7 @@ const MessagesList = memo(function MessagesList({
                   />
                 );
               }
-              if (!showToolCalls && !m.comm) return null;
+              if (!showToolCalls && !m.comm && !m.threadRef) return null;
               return <ActivityChip message={m} />;
             }
             case "screen":
@@ -1235,6 +1238,13 @@ export function ChatView({ bot: profile }: { bot: Bot }) {
         <div className="w-full px-5">
           <div className="mb-2 rounded-lg border border-danger/30 bg-danger/10 px-3 py-2 text-[13px] text-danger">
             {state.error}
+          </div>
+        </div>
+      )}
+      {state.notice && (
+        <div className="w-full px-5">
+          <div role="status" className="mb-2 rounded-lg border border-hairline/40 bg-panel px-3 py-2 text-[13px] text-ink-secondary">
+            {state.notice.botName ? t("thread.goneShowing", { name: state.notice.botName }) : t("thread.gone")}
           </div>
         </div>
       )}

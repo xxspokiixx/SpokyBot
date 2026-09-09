@@ -17,13 +17,14 @@ import {
   type Message,
 } from "@/state/store";
 import { BotAvatar } from "./Avatar";
+import { ThreadChip } from "./ThreadChip";
+import { ThreadRefText } from "./ThreadRefs";
 import { TurnPresence } from "./TurnPresence";
 import { showToolCallsEnabled } from "@/lib/feature-flags";
 import { roomActivityVisible } from "@/lib/room-activity";
 import { normalizeState } from "@/lib/mascot";
 import { effectiveDefaultResponder, groupResponseHint } from "@/lib/group-routing";
 import { ChatMarkdown } from "./ChatMarkdown";
-import { MentionText } from "./MentionText";
 import { Composer } from "./Composer";
 import { ChatFindBar } from "./ChatFindBar";
 import { GroupTaskPicker } from "./TaskPicker";
@@ -79,6 +80,7 @@ export function RoomToolChip({ message, roomId }: { message: Message; roomId?: s
   const { state, dispatch } = useStore();
   const tool = message.tool;
   if (!tool) return null;
+  if (message.threadRef) return <ThreadChip message={message} />;
   const comm = message.comm;
   if (comm && comm.groupId !== roomId) {
     const withBot = state.bots.find((b) => b.id === comm.withBotId);
@@ -305,7 +307,7 @@ const Transcript = memo(function Transcript({
                           className={!attachments.display ? "mb-0" : undefined}
                         />
                       )}
-                      <MentionText text={attachments?.display ?? m.text ?? ""} peers={members} everyone={!group.dm} />
+                      <ThreadRefText text={attachments?.display ?? m.text ?? ""} peers={members} everyone={!group.dm} />
                       {m.via === "api" && (
                         <div className="mt-1 text-[11px] text-ink-secondary">Sent through the API, not typed here</div>
                       )}
