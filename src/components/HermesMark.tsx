@@ -1,4 +1,6 @@
-// Official Hermes Agent mark (Nous Research).
+// Official Hermes Agent mark (Nous Research). Monochrome, so it follows
+// --color-ink rather than the near-white of the dark-UI brand asset — see
+// CursorMark.tsx.
 import { cn } from "@/lib/cn";
 
 interface IconProps {
