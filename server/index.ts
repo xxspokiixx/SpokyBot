@@ -2327,7 +2327,7 @@ function broadcast(payload: Record<string, unknown>) {
   // detection stays honest, but never retain their base64 payloads.
   replayBuffer.push({ seq, kind, frame: kind === "screen" ? null : frame, clientFrame: kind === "screen" ? null : clientFrame });
   if (replayBuffer.length > REPLAY_MAX) replayBuffer.shift();
-  for (const client of [...sseClients]) {
+  for (const client of Array.from(sseClients)) {
     if (!wants(client, kind)) continue;
     // Screen frames are replaceable and durable events are not: see
     // ./sse-fanout.ts for the backpressure/bound decision this makes.

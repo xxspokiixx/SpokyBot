@@ -510,7 +510,7 @@ export async function createPermissionBroker(opts: {
   // broker, defeating the fail-closed boundary.
   if (!server) throw new Error("claude: permission broker could not bind a local socket");
   const drain = () => {
-    for (const p of [...pending.values()]) {
+    for (const p of Array.from(pending.values())) {
       const { behavior, message } = systemEndedReply(p.ask.kind);
       p.finish(behavior, message, "system");
     }
@@ -758,7 +758,7 @@ export const ClaudeDriver: ProviderDriver<ClaudeConfig> = {
     };
 
     const emit = (event: RuntimeEvent) => {
-      for (const l of [...listeners]) l(event);
+      for (const l of Array.from(listeners)) l(event);
     };
     const base = (threadId: string, turnId: string) => ({
       eventId: newEventId(),
@@ -1508,7 +1508,7 @@ export const ClaudeDriver: ProviderDriver<ClaudeConfig> = {
         hasSession: (threadId) => active.has(threadId),
         stopAll: async () => {
           for (const { stop } of active.values()) stop();
-          for (const threadId of [...sessions.keys()]) closeSession(threadId, "stopAll");
+          for (const threadId of Array.from(sessions.keys())) closeSession(threadId, "stopAll");
         },
         onEvent: (listener) => {
           listeners.add(listener);
@@ -1522,7 +1522,7 @@ export const ClaudeDriver: ProviderDriver<ClaudeConfig> = {
           await login.dispose();
         } finally {
           for (const { stop } of active.values()) stop();
-          for (const threadId of [...sessions.keys()]) closeSession(threadId, "dispose");
+          for (const threadId of Array.from(sessions.keys())) closeSession(threadId, "dispose");
           listeners.clear();
         }
       },

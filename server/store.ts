@@ -1033,7 +1033,7 @@ export class Store {
   }
 
   private emit(change: StoreChange) {
-    for (const listener of [...this.listeners]) {
+    for (const listener of Array.from(this.listeners)) {
       try {
         listener(change);
       } catch (error) {

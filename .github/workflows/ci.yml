@@ -45,6 +45,7 @@ jobs:
         # timeout.
         run: node --input-type=commonjs -e "require('electron')"
       - run: pnpm typecheck
+      - run: pnpm lint
       - name: Run tests
         run: pnpm test
       - run: pnpm check:electron

@@ -201,6 +201,7 @@ export function stopRecorder() {
 }
 
 function cleanText(value, max = 500) {
+  // oxlint-disable-next-line no-control-regex -- strips control characters from recorded text
   return typeof value === "string" ? value.replace(/[\u0000-\u001f]+/g, " ").trim().slice(0, max) : "";
 }
 
