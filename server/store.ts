@@ -642,6 +642,10 @@ export interface BotRecord {
   /** Whether this bot gets the app's built-in browser (the Browser tab of
    * the computer panel). On unless switched off. */
   browser?: boolean;
+  /** Which of the app-wide MCP servers (config.mcpServers) this bot mounts,
+   * by name. Absent = every enabled server, the pre-existing behavior; an
+   * empty list = none. Names that no longer exist are ignored. */
+  mcpServers?: string[];
   /** Id of a named browser profile from config.browserProfiles; absent = the
    * bot's own private session. */
   browserProfile?: string;

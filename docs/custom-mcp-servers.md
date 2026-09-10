@@ -12,6 +12,21 @@ needed.
 This first version supports local stdio commands. It deliberately does not
 accept remote MCP URLs or shell command strings.
 
+### Import and choose tools per bot
+
+**Paste config** accepts an `mcpServers` JSON block, a server-name map, or a
+single named command entry. Import is all-or-nothing, refuses existing names,
+and adds servers switched off—even if the pasted config says enabled. It does
+not install or execute them. Test explicitly, then enable the servers you trust.
+
+Open a bot’s **Tools → Access → MCP servers** to narrow the enabled global
+servers offered to it. Existing bots keep all enabled global servers until you
+choose a subset; switching them all off means none. **Use every enabled server**
+restores the default, including future additions. Stop all of that bot’s running
+turns before changing this selection; the next direct or channel turn gets the
+new list. The list does not filter project-local `.mcp.json` files and is not a
+shell sandbox. Individual tool approvals depend on the engine and approval mode.
+
 ## What a Claude bot sees, and what it no longer sees
 
 A bot on the Claude engine gets the tools and instructions its owner gave it:

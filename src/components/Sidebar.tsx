@@ -1774,8 +1774,7 @@ export function Sidebar({ open, onClose }: { open: boolean; onClose: () => void 
                 <button
                   onClick={() => {
                     setPlusOpen(false);
-                    track("bot_created");
-                    dispatch({ type: "newBot" });
+                    dispatch({ type: "toggleNewBot", open: true });
                   }}
                   className="flex w-full items-center gap-3 px-3.5 py-2 text-left text-[14px] text-ink hover:bg-raised/70"
                 >

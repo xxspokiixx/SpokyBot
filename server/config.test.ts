@@ -1011,6 +1011,15 @@ describe("customMcpServers", () => {
     expect(customMcpServers({} as Parameters<typeof customMcpServers>[0])).toEqual({});
   });
 
+  it("narrows to a bot's own list when one is given, and to nothing for an empty list", () => {
+    const all = cfg({ notes: { command: "a" }, linear: { command: "b" }, off: { command: "c", enabled: false } });
+    expect(Object.keys(customMcpServers(all))).toEqual(["notes", "linear"]);
+    expect(Object.keys(customMcpServers(all, ["linear", "gone"]))).toEqual(["linear"]);
+    expect(customMcpServers(all, [])).toEqual({});
+    // a bot's list never re-enables a server the workspace switched off
+    expect(customMcpServers(all, ["off"])).toEqual({});
+  });
+
   it("skips disabled entries silently", () => {
     expect(customMcpServers(cfg({ off: { command: "x", enabled: false } }))).toEqual({});
   });

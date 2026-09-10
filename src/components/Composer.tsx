@@ -1,3 +1,4 @@
+import { ComposerTray } from "./ComposerTray";
 import { track } from "@/lib/analytics";
 import { useCallback, useEffect, useMemo, useRef, useState, type SetStateAction } from "react";
 import { ArrowUp, BookOpen, Clock, Mic, Paperclip, Square, Target, Users, X } from "lucide-react";
@@ -786,7 +787,8 @@ export function Composer({
             data-composer-backdrop
             className="pointer-events-none absolute -left-5 -right-5 -bottom-3 top-1/2 bg-app"
           />
-        <div className="relative z-[1] flex items-end gap-1 rounded-3xl bg-composer px-2 py-1.5 ring-1 ring-composer-ring">
+        <div className="relative z-[1] rounded-3xl bg-composer px-2 py-1.5 ring-1 ring-composer-ring">
+        <div className="flex items-end gap-1">
           <input
             ref={fileInput}
             type="file"
@@ -1009,6 +1011,8 @@ export function Composer({
           </button>
           )}
           </div>
+        </div>
+        {bot && !group && !remoteClient && !locked && <ComposerTray bot={bot} />}
         </div>
         </div>
       </div>

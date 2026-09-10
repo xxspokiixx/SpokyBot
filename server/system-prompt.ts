@@ -69,6 +69,13 @@ export function computerPrompt(kind: ComputerPromptKind | null): string {
 
 export const COMPOSIO_PROMPT =
   " The user's connected apps (Gmail, Calendar, Slack, Notion, and the rest) are reachable through the composio tools — find the right one with COMPOSIO_SEARCH_TOOLS, read its arguments with COMPOSIO_GET_TOOL_SCHEMAS, then run it with COMPOSIO_MULTI_EXECUTE_TOOL. Reach for them before telling the user you have no access to a service.";
+/** Names the user-added MCP servers a turn actually mounted, so the bot
+ * reaches for them instead of saying it has no such tool. Empty when none. */
+export function customMcpPrompt(names: string[]): string {
+  if (names.length === 0) return "";
+  const list = names.map((name) => `"${name}"`).join(", ");
+  return ` The user also added ${names.length === 1 ? "an MCP server" : "MCP servers"} for you: ${list}. Use their available tools under the engine's normal approval rules.`;
+}
 export const CREDENTIAL_PROMPT =
   " If a supported API key is missing, use request_credential to create a secure credential request. A freshly QR-paired mobile app or the desktop app can show the secure entry card. Never claim it opened unless the request succeeded, and never ask the user to paste credentials into chat.";
 export const THREADS_PROMPT =

@@ -150,7 +150,9 @@ import { decodeGeneratedImage } from "./generated-image.ts";
 import {
   MAX_MCP_SERVERS,
   listMcpServers,
+  mcpServerNameError,
   parseMcpServerMutation,
+  parseMcpServersImport,
   parseStoredMcpServer,
 } from "./mcp-registry.ts";
 import { probeMcpServer } from "./mcp-probe.ts";
@@ -286,6 +288,7 @@ import {
   computerPrompt,
   mentionPrompt,
   COMPOSIO_PROMPT,
+  customMcpPrompt,
   CREDENTIAL_PROMPT,
   THREADS_PROMPT,
   LEARN_PROMPT,
@@ -1429,6 +1432,7 @@ function previewSystemPrompt(bot: BotRecord) {
     },
     { id: "computer", label: "Computer", text: computerPrompt(computerPromptKind) },
     { id: "composio", label: "Connected apps", text: caps?.composioMcp && bot.composio !== false && composio.configured(cfg) ? COMPOSIO_PROMPT : "" },
+    { id: "mcp", label: "MCP servers", text: caps?.customMcp ? customMcpPrompt(Object.keys(customMcpServers(cfg, bot.mcpServers))) : "" },
     { id: "browser", label: "Browser", text: caps?.browserMcp && builtInBrowserEnabled(cfg) && bot.browser !== false && bot.computer !== "off" ? BUILT_IN_BROWSER_SYSTEM_PROMPT : "" },
     { id: "coordination", label: "Team", text: agentsMounted && coordination ? ` ${coordination}` : "" },
     { id: "credential", label: "Credentials", text: agentsMounted ? CREDENTIAL_PROMPT : "" },
@@ -4769,7 +4773,7 @@ async function startTurn(
       // composio — only to a driver that can mount them. Their tools are
       // never pre-allowed, so every call rides the normal permission flow.
       if (instance.adapter.capabilities.customMcp === true) {
-        const custom = customMcpServers(cfg);
+        const custom = customMcpServers(cfg, bot.mcpServers);
         if (Object.keys(custom).length) integrations.custom = custom;
       }
       // CLI engines work inside the bot's own workspace directory rather
@@ -5145,6 +5149,7 @@ async function startTurn(
         // gated on the integration, not the key: the hint only goes to a
         // bot whose driver actually mounted the tools
         { id: "composio", label: "Connected apps", text: integrations.composio ? COMPOSIO_PROMPT : "" },
+        { id: "mcp", label: "MCP servers", text: customMcpPrompt(Object.keys(integrations.custom ?? {})) },
         { id: "browser", label: "Browser", text: integrations.browser ? BUILT_IN_BROWSER_SYSTEM_PROMPT : "" },
         { id: "coordination", label: "Team", text: coordinationPrompt ? ` ${coordinationPrompt}` : "" },
         { id: "credential", label: "Credentials", text: credentialPrompt },
@@ -6098,7 +6103,7 @@ async function runGroupMemberTurn(
   }
   // user-configured MCP servers: same gating as the 1:1 site above.
   if (instance.adapter.capabilities.customMcp === true) {
-    const custom = customMcpServers(cfg);
+    const custom = customMcpServers(cfg, bot.mcpServers);
     if (Object.keys(custom).length) integrations.custom = custom;
   }
   // Connected-app discovery is intentionally awaited before a provider owns
@@ -6331,6 +6336,7 @@ async function runGroupMemberTurn(
     if (drift.drift !== Boolean(bot.soulDrift)) store.patchBot(bot.id, { soulDrift: drift.drift });
   }
   const roomSystem = buildSystemPrompt(system, store.bot(bot.id)?.soul ?? bot.soul ?? "", [
+    { id: "mcp", label: "MCP servers", text: customMcpPrompt(Object.keys(integrations.custom ?? {})) },
     { id: "computer", label: "Computer", text: computerPrompt(roomVmTarget ? localVmMode(cfg) === "per-bot" ? "vm-private" : "vm-shared" : null) },
     { id: "browser", label: "Browser", text: integrations.browser ? BUILT_IN_BROWSER_SYSTEM_PROMPT : "" },
     { id: "recall", label: "Recall", text: integrations.agents ? SESSION_SEARCH_SYSTEM_PROMPT : "" },
@@ -11690,6 +11696,25 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
         if (typeof body.composio !== "boolean") return json(res, 400, { error: "composio must be true or false" });
         patch.composio = body.composio;
       }
+      // Per-bot selection of app-wide MCP servers. Omitted keeps the current
+      // selection; null restores all enabled servers; [] explicitly mounts none.
+      let requestedMcpServers = existingBot?.mcpServers;
+      if (body.mcpServers !== undefined) {
+        if (auth.kind === "session" && !sessions.isLive(auth.session.id)) {
+          return json(res, 401, { error: "unauthorized: this session has expired or was revoked" });
+        }
+        if (body.mcpServers === null) {
+          requestedMcpServers = undefined;
+        } else if (!Array.isArray(body.mcpServers) || body.mcpServers.some((t: unknown) => typeof t !== "string" || mcpServerNameError(t) !== null)) {
+          return json(res, 400, { error: "mcpServers must be a list of server names, or null" });
+        } else {
+          requestedMcpServers = [...new Set(body.mcpServers as string[])];
+          if (requestedMcpServers.length > MAX_MCP_SERVERS) {
+            return json(res, 400, { error: `Select at most ${MAX_MCP_SERVERS} MCP servers.` });
+          }
+        }
+        patch.mcpServers = requestedMcpServers;
+      }
       // per-bot gate on the app's built-in browser
       if (body.browser !== undefined) {
         if (typeof body.browser !== "boolean") return json(res, 400, { error: "browser must be true or false" });
@@ -11901,6 +11926,10 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
       if (Array.isArray(patch.alwaysAllow) && patch.alwaysAllow.some((key) => !(existingBot?.alwaysAllow ?? []).includes(key))) {
         loosened.push("alwaysAllow");
       }
+      if (body.mcpServers !== undefined && Array.isArray(existingBot?.mcpServers) &&
+          (requestedMcpServers === undefined || requestedMcpServers.some((name) => !existingBot.mcpServers!.includes(name)))) {
+        loosened.push("mcpServers");
+      }
       const browserOrigin = typeof req.headers.origin === "string" && req.headers.origin.trim() !== "";
       if (loosened.length && auth.kind === "loopback" && !DESKTOP_MANAGED && !browserOrigin) {
         if (store.bots.some((candidate) => candidate.busy)) {
@@ -11929,6 +11958,23 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
         sectionKey(existingBot?.section) !== sectionKey(section);
       let bot: BotRecord | null;
       const freshBrowserBot = store.bot(m[1]);
+      // Custom servers are process configuration: a running turn cannot
+      // unmount them. Recheck after any awaited runtime revocation above.
+      if (body.mcpServers !== undefined) {
+        if (auth.kind === "session" && !sessions.isLive(auth.session.id)) {
+          return json(res, 401, { error: "unauthorized: this session has expired or was revoked" });
+        }
+        if (Array.isArray(freshBrowserBot?.mcpServers) &&
+            (requestedMcpServers === undefined || requestedMcpServers.some((name) => !freshBrowserBot.mcpServers!.includes(name))) &&
+            auth.kind === "loopback" && !DESKTOP_MANAGED && !browserOrigin && store.bots.some((candidate) => candidate.busy)) {
+          return json(res, 409, { error: "A bot is working right now, so this change has to come from the desktop app or a paired device. Try again once every bot is idle." });
+        }
+        if (freshBrowserBot &&
+            JSON.stringify(requestedMcpServers?.toSorted()) !== JSON.stringify(freshBrowserBot.mcpServers?.toSorted()) &&
+            (freshBrowserBot.busy || activeGroupTurnForBot(freshBrowserBot.id))) {
+          return json(res, 409, { error: "Stop this bot's turns before changing its MCP servers." });
+        }
+      }
       if (normalizedSelection && selectedTask) {
         const current = store.projectBotForTask(selectedTask.id, selectedTask.threadId);
         if (!current) return json(res, 404, { error: "no such task" });
@@ -13743,6 +13789,39 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
         if (!parsed.ok) return json(res, 400, { error: parsed.error });
         persistMcpServers({ ...current, [name]: parsed.server });
         return json(res, 201, mcpServerResponse());
+      } finally {
+        mcpConfigBusy = false;
+      }
+    }
+
+    // Paste-to-add: the {"mcpServers": {...}} block every other agent tool
+    // writes. Same rules as POST: disabled until explicitly enabled.
+    if (method === "POST" && path === "/api/mcp/servers/import") {
+      if (!String(req.headers["content-type"] ?? "").toLowerCase().startsWith("application/json")) {
+        return json(res, 415, { error: "content-type must be application/json" });
+      }
+      if (mcpConfigBusy) return json(res, 409, { error: "MCP servers are already being updated." });
+      mcpConfigBusy = true;
+      try {
+        const body = await readBody(req);
+        const text = typeof body?.json === "string" ? body.json : "";
+        if (auth.kind === "session" && !sessions.isLive(auth.session.id)) {
+          return json(res, 401, { error: "unauthorized: this session has expired or was revoked" });
+        }
+        if (!text.trim()) return json(res, 400, { error: "Paste the JSON block first." });
+        const parsed = parseMcpServersImport(text);
+        if (!parsed.ok) return json(res, 400, { error: parsed.error });
+        const current = cfg.mcpServers ?? {};
+        const names = Object.keys(parsed.servers);
+        const taken = names.filter((name) => Object.hasOwn(current, name));
+        if (taken.length) {
+          return json(res, 409, { error: `Already added: ${taken.join(", ")}. Remove or rename ${taken.length === 1 ? "it" : "them"} first.` });
+        }
+        if (Object.keys(current).length + names.length > MAX_MCP_SERVERS) {
+          return json(res, 400, { error: `You can add at most ${MAX_MCP_SERVERS} MCP servers.` });
+        }
+        persistMcpServers({ ...current, ...parsed.servers });
+        return json(res, 201, { ...mcpServerResponse(), added: names });
       } finally {
         mcpConfigBusy = false;
       }

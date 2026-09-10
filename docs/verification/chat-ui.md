@@ -112,6 +112,19 @@ reason otherwise; `OMB_UI_E2E=1` forces the verified download. The `ui-smoke`
 job in `.github/workflows/ci.yml` runs it on Ubuntu 24.04 and uploads the
 screenshot; it is not one of the required checks.
 
+## Bot setup and MCP access recipe
+
+`scripts/testing/bot-tools-ui.e2e.test.ts` uses the same full-app launcher and
+optional `OMB_UI_E2E=1` gate. It verifies profile-only role creation, closing
+and reopening the dialog during a slow creation without duplicate submissions, recovery
+when the preset PATCH fails after creation, the composer’s Tools shortcut,
+optional setup ideas, Paste config importing disabled servers, refreshed
+per-bot MCP switches and saved opt-outs, and modal Tab/Escape containment.
+The MCP command is an inert fixture command; no real accounts are connected.
+The advisory renderer job runs both recipes. Runtime mounting, direct/channel
+turns, busy-state rejection and revoked-session imports are separately exercised
+by `server/mcp-selection.e2e.test.ts` against disposable fake-engine servers.
+
 ## Cleanup
 
 Interrupt `ui launch` with Ctrl-C. It closes the browser session (waiting

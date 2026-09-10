@@ -1078,7 +1078,7 @@ export const ClaudeDriver: ProviderDriver<ClaudeConfig> = {
       // machine rather than for a context window.
       const botOwned = new Set<string>();
       for (const [name, server] of Object.entries(turn.integrations?.custom ?? {})) {
-        if (name in mcpServers) continue;
+        if (Object.hasOwn(mcpServers, name)) continue;
         mcpServers[name] = { ...server };
         botOwned.add(name);
       }
@@ -1088,7 +1088,7 @@ export const ClaudeDriver: ProviderDriver<ClaudeConfig> = {
       // can add servers but never shadow a harness-owned mount.
       if (isolated && turn.cwd) {
         for (const [name, server] of Object.entries(projectMcpServers(turn.cwd))) {
-          if (name in mcpServers) continue;
+          if (Object.hasOwn(mcpServers, name)) continue;
           mcpServers[name] = server;
           botOwned.add(name);
         }

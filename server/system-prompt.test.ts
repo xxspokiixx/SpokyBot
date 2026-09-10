@@ -10,6 +10,7 @@ import {
   computerPrompt,
   mentionPrompt,
   COMPOSIO_PROMPT,
+  customMcpPrompt,
   CREDENTIAL_PROMPT,
   LEARN_PROMPT,
   PROFILE_PROMPT,
@@ -102,6 +103,15 @@ describe("shared sentences", () => {
       expect(sentence.startsWith(" ")).toBe(true);
       expect(sentence.startsWith("  ")).toBe(false);
     }
+  });
+
+  it("customMcpPrompt names the mounted servers and is empty for none", () => {
+    expect(customMcpPrompt([])).toBe("");
+    const one = customMcpPrompt(["notes"]);
+    expect(one.startsWith(" The user also added an MCP server for you: \"notes\".")).toBe(true);
+    expect(one).toContain("engine's normal approval rules");
+    expect(one).not.toContain("each call asks");
+    expect(customMcpPrompt(["notes", "linear"])).toContain('MCP servers for you: "notes", "linear".');
   });
 
   it("mentionPrompt names every tagged bot with its id, and is empty for none", () => {

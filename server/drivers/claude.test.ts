@@ -1034,6 +1034,7 @@ describe("ClaudeDriver turns (fake CLI)", () => {
       integrations: {
         custom: {
           notes: { command: "npx", args: ["-y", "@x/notes-mcp"], env: { NOTES_TOKEN: "tok-notes" } },
+          constructor: { command: "fixture-constructor", args: [], env: {} },
         },
         agents: {
           command: process.execPath,
@@ -1052,11 +1053,13 @@ describe("ClaudeDriver turns (fake CLI)", () => {
       args: ["-y", "@x/notes-mcp"],
       env: { NOTES_TOKEN: "tok-notes" },
     });
+    expect(JSON.parse(seen.mcpConfig.mcpServers.constructor.env.OMB_GATE_UPSTREAM)).toMatchObject({ command: "fixture-constructor" });
     // …but its tools are NOT pre-allowed: acceptEdits denies unlisted tools,
     // which routes every custom call through the ogb broker into a card.
     const allowed = seen.argv[seen.argv.indexOf("--allowedTools") + 1];
     expect(allowed).toContain("mcp__agents");
     expect(allowed).not.toContain("mcp__notes");
+    expect(allowed).not.toContain("mcp__constructor");
     // and its credential value stays out of argv
     expect(JSON.stringify(seen.argv)).not.toContain("tok-notes");
   });

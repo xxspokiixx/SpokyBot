@@ -976,9 +976,12 @@ function skipMcpEntry(name: string, why: string): void {
 }
 
 /** The validated, normalized custom servers from config — or {}. */
-export function customMcpServers(cfg: AppConfig): Record<string, CustomMcpServer> {
+export function customMcpServers(cfg: AppConfig, only?: string[]): Record<string, CustomMcpServer> {
   const out: Record<string, CustomMcpServer> = {};
   for (const [name, raw] of Object.entries(cfg.mcpServers ?? {})) {
+    // a bot with its own list gets exactly those names; a bot without one
+    // keeps getting every enabled server, as before this field existed
+    if (only && !only.includes(name)) continue;
     if (raw && typeof raw === "object" && "url" in raw) {
       skipMcpEntry(name, 'only stdio servers ("command") are supported so far — HTTP transports are a planned follow-up');
       continue;
