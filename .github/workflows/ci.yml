@@ -149,6 +149,12 @@ jobs:
           node-version: 24
           cache: pnpm
       - run: pnpm install --frozen-lockfile
+      - name: Let Chrome build its sandbox on this runner
+        # Ubuntu 24.04's AppArmor profile blocks unprivileged user namespaces,
+        # so the downloaded Chrome for Testing dies with "No usable sandbox".
+        # This is Chrome's own documented fix for 23.10+; a developer machine
+        # needs nothing, and the sandbox itself stays on.
+        run: sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0
       - name: Drive the real renderer through control-omb ui
         env:
           OMB_UI_E2E: "1"
