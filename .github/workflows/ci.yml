@@ -52,6 +52,9 @@ jobs:
       - name: Verify native approval mode transitions
         if: matrix.os == 'macos-latest'
         run: pnpm exec electron scripts/smoke-approval-modes.cjs
+      - name: Verify app permissions and guarded display capture
+        if: matrix.os == 'macos-latest'
+        run: node scripts/smoke-app-permissions.mjs
       - name: Verify paired phone authorization against packaged harness
         if: matrix.os == 'macos-latest'
         run: pnpm build:companion && pnpm exec electron scripts/smoke-phone-relay-auth.cjs
