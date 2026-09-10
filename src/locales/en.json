@@ -380,6 +380,7 @@
   "chat.verify.expand": "Expand the verification run",
   "chat.verify.dismiss": "Dismiss the verification run",
   "chat.verify.save": "Save as skill",
+  "chat.verify.saveHint": "Adds the run to your message; add any notes, then send.",
   "chat.verify.staged": "Skill staged for your review",
   "chat.workingFolder": "Working folder: {folder}",
   "chat.usage.turnsOne": "1 turn",
@@ -724,10 +725,10 @@
   "engineSetup.needsNode": "Requires Node.js and {npm}.",
   "engineSetup.viewGuide": "View setup guide",
   "settings.experimental.title": "Experimental features",
-  "settings.experimental.subtitle": "Early features may change while we test them. They stay off unless you enable them.",
+  "settings.experimental.subtitle": "Early features may change while we test them. Each one says whether it starts on or off.",
   "settings.experimental.error": "Could not save the experimental feature setting.",
   "settings.experimental.skillAuthoring": "Bots may draft skills for your review",
-  "settings.experimental.skillAuthoringDetail": "Use /learn or ask a supported bot to run /create-verification-skill. Every change waits for your review.",
+  "settings.experimental.skillAuthoringDetail": "On by default. Save a bot's verification run as a skill from the Verify card, or ask a supported bot to run /create-verification-skill. Every change waits for your review.",
   "settings.experimental.skillAuthoringAria": "Allow bots to draft skills",
   "settings.experimental.browser": "Built-in browser",
   "settings.experimental.browserOn": "Enabled for this workspace. Each bot also has its own browser switch.",
@@ -1765,5 +1766,7 @@
   "botAccess.mcpAdd": "Add an MCP server…",
   "botAccess.mcpUseAll": "Use every enabled server",
   "botAccess.mcpBusy": "Wait until this bot finishes all active tasks before changing its MCP servers.",
-  "botAccess.connectApp": "Connect an app…"
+  "botAccess.connectApp": "Connect an app…",
+  "skills.learned.hintOn": "Save a bot's verification run as a skill from the Verify card, or import one below. Every change waits for your review.",
+  "skills.learned.hintOff": "Skill authoring is off, but skills you already enabled stay under your control here."
 }
