@@ -18,6 +18,8 @@
 //                                          handoff that runs on its own
 //   create_bot(name, role, instructions) → Chiefs can add a specialist to
 //                                          their own section
+//   create_room / manage_room            → Chiefs manage own-section rooms,
+//                                          never move bots or sections
 //   request_credential(id, reason?)       → show a secure, allowlisted key card
 //   list_routines()                       → inspect this bot's scheduled work
 //   propose_routine(...)                  → show a confirmation card for a new routine
@@ -477,6 +479,56 @@ const TOOLS = [
         instructions: { type: "string", description: "What this specialist is responsible for and how it should work." },
       },
       required: ["name", "role", "instructions"],
+    },
+  },
+  {
+    name: "create_room",
+    description:
+      "Create a room in your own section when the user asks for one (maximum four per turn). Chiefs only. Choose active peers from list_bots; you are included automatically as the default responder. This creates no turns or messages. Section moves stay with the user. If peer approval is enabled, ask the user to make the room change instead.",
+    inputSchema: {
+      type: "object",
+      additionalProperties: false,
+      properties: {
+        name: { type: "string", minLength: 1, maxLength: 100, description: "Display name for the room (e.g. \"Nalamdesk Team\")." },
+        member_bot_ids: {
+          type: "array",
+          minItems: 1,
+          maxItems: 100,
+          items: { type: "string" },
+          description: "List of bot IDs to include as members of the room.",
+        },
+        bulletin: {
+          type: "string",
+          maxLength: 12_000,
+          description: "Optional initial bulletin / goal / instructions pinned for this room.",
+        },
+      },
+      required: ["name", "member_bot_ids"],
+    },
+  },
+  {
+    name: "manage_room",
+    description:
+      "Manage a room from list_rooms: rename it, change its bulletin, or add/remove/set members. Chiefs only, within your own section and allowed peers; keep yourself as a member. Busy rooms, pending approvals and team-goal leads are protected. You cannot move rooms or bots between sections. If peer approval is enabled or the change is refused, ask the user to make the change instead.",
+    inputSchema: {
+      type: "object",
+      additionalProperties: false,
+      properties: {
+        room_id: { type: "string", description: "The ID of the group room to manage." },
+        action: {
+          type: "string",
+          enum: ["add_members", "remove_members", "set_members", "rename", "set_bulletin"],
+          description: "The action to perform on the room.",
+        },
+        member_bot_ids: {
+          type: "array",
+          items: { type: "string" },
+          description: "List of bot IDs when action is add_members, remove_members, or set_members.",
+        },
+        name: { type: "string", minLength: 1, maxLength: 100, description: "New name for the room when action is rename." },
+        bulletin: { type: "string", maxLength: 12_000, description: "New bulletin text when action is set_bulletin; an empty string clears it." },
+      },
+      required: ["room_id", "action"],
     },
   },
   {
@@ -1042,6 +1094,62 @@ async function callTool(name: string, args: Json): Promise<{ text: string; isErr
     return {
       text: `Created @${r.name ?? botName} in ${r.section ?? "General"} [id: ${r.id}]. Assign work with delegate_bot.`,
     };
+  }
+  if (name === "create_room") {
+    if (args.section !== undefined) return { text: "Room sections are fixed to your own section; ask the user to move rooms.", isError: true };
+    const roomName = String(args.name ?? "").trim();
+    const memberIds = Array.isArray(args.member_bot_ids)
+      ? args.member_bot_ids.map((id) => String(id).trim()).filter(Boolean)
+      : [];
+    const bulletin = typeof args.bulletin === "string" ? args.bulletin.trim() : undefined;
+    if (!roomName) {
+      return { text: "create_room needs a room name.", isError: true };
+    }
+    if (!memberIds.length) {
+      return { text: "create_room needs at least one bot ID in member_bot_ids.", isError: true };
+    }
+    const r = await api(`/api/internal/create-room`, {
+      method: "POST",
+      body: JSON.stringify({
+        fromBotId: BOT_ID,
+        fromThreadId: THREAD_ID,
+        name: roomName,
+        memberIds,
+        bulletin,
+      }),
+    });
+    if (r.error) return { text: `Couldn't create room: ${r.error}`, isError: true };
+    return {
+      text: `Created room “${r.name ?? roomName}” in section “${r.section ?? "General"}” [id: ${r.id}] with ${r.memberCount ?? memberIds.length} members.`,
+    };
+  }
+  if (name === "manage_room") {
+    if (args.section !== undefined || args.action === "set_section") return { text: "Moving rooms between sections is user-only.", isError: true };
+    const roomId = String(args.room_id ?? "").trim();
+    const action = String(args.action ?? "").trim();
+    if (!roomId || !action) {
+      return { text: "manage_room needs room_id and action.", isError: true };
+    }
+    const memberIds = Array.isArray(args.member_bot_ids)
+      ? args.member_bot_ids.map((id) => String(id).trim()).filter(Boolean)
+      : undefined;
+    const roomName = typeof args.name === "string" ? args.name.trim() : undefined;
+    const bulletin = typeof args.bulletin === "string" ? args.bulletin.trim() : undefined;
+    const r = await api(`/api/internal/manage-room`, {
+      method: "POST",
+      body: JSON.stringify({
+        fromBotId: BOT_ID,
+        fromThreadId: THREAD_ID,
+        roomId,
+        action,
+        memberIds,
+        name: roomName,
+        bulletin,
+      }),
+    });
+    if (r.error) return { text: `Couldn't manage room: ${r.error}`, isError: true };
+    const message = typeof r.message === "string" ? r.message : `Updated room ${roomId}.`;
+    return { text: message };
   }
   if (name === "request_credential") {
     const credentialId = args.credential_id;

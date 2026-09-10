@@ -37,6 +37,8 @@ let lastThreadBody: any = null;
 let threadCalls = 0;
 let threadResponse: unknown = { threadId: "thread-new", title: "QA: PR #1", botId: "bot-asker", botName: "Asker", self: true, state: "running", limit: 3 };
 let lastCreateBody: any = null;
+let lastCreateRoomBody: unknown = null;
+let lastManageRoomBody: unknown = null;
 let lastCredentialBody: any = null;
 let lastRoutineQuery = "";
 let routinesResponse: unknown = {
@@ -185,6 +187,26 @@ beforeAll(async () => {
       });
       return;
     }
+    if (req.method === "POST" && req.url === "/api/internal/create-room") {
+      let data = "";
+      req.on("data", (c) => (data += c));
+      req.on("end", () => {
+        lastCreateRoomBody = JSON.parse(data);
+        res.writeHead(201, { "content-type": "application/json" });
+        res.end(JSON.stringify({ id: "room-dev", name: "Dev Team", section: "Work", memberCount: 2 }));
+      });
+      return;
+    }
+    if (req.method === "POST" && req.url === "/api/internal/manage-room") {
+      let data = "";
+      req.on("data", (c) => (data += c));
+      req.on("end", () => {
+        lastManageRoomBody = JSON.parse(data);
+        res.writeHead(200, { "content-type": "application/json" });
+        res.end(JSON.stringify({ ok: true, message: "Room updated." }));
+      });
+      return;
+    }
     if (req.method === "POST" && req.url === "/api/internal/request-credential") {
       let data = "";
       req.on("data", (c) => (data += c));
@@ -326,6 +348,8 @@ describe("agents-proxy MCP surface", () => {
       "start_thread",
       "post_to_room",
       "create_bot",
+      "create_room",
+      "manage_room",
       "request_credential",
       "memory_update",
       "memory_log",
@@ -674,6 +698,48 @@ describe("agents-proxy MCP surface", () => {
       role: "Product designer",
       instructions: "Design and review the user experience.",
     });
+  });
+
+  it("lets a Chief create a group room and manage members through the harness", async () => {
+    const resCreate = await callTool("create_room", {
+      name: "Dev Team",
+      member_bot_ids: ["bot-1", "bot-2"],
+      bulletin: "Ship fast.",
+    });
+    expect(resCreate.result.content[0].text).toContain("Created room “Dev Team” in section “Work”");
+    expect(lastCreateRoomBody).toEqual({
+      fromBotId: "bot-asker",
+      fromThreadId: "thread-asker-routine",
+      name: "Dev Team",
+      memberIds: ["bot-1", "bot-2"],
+      bulletin: "Ship fast.",
+    });
+
+    const resManage = await callTool("manage_room", {
+      room_id: "room-dev",
+      action: "add_members",
+      member_bot_ids: ["bot-3"],
+    });
+    expect(resManage.result.content[0].text).toContain("Room updated.");
+    expect(lastManageRoomBody).toEqual({
+      fromBotId: "bot-asker",
+      fromThreadId: "thread-asker-routine",
+      roomId: "room-dev",
+      action: "add_members",
+      memberIds: ["bot-3"],
+    });
+
+  });
+
+  it("does not expose bot moves or silently accept room section reassignment", async () => {
+    for (const [name, args] of [
+      ["create_room", { name: "Elsewhere", member_bot_ids: ["bot-1"], section: "Foreign" }],
+      ["manage_room", { room_id: "room-dev", action: "set_section", section: "Foreign" }],
+    ] as const) {
+      const result = await callTool(name, args);
+      expect(result.result.isError).toBe(true);
+    }
+    expect((await callTool("move_bot", { bot_id: "bot-1", section: "Foreign" })).error.message).toContain("Unknown tool");
   });
 
   it("requests an allowlisted credential without putting a secret in the request", async () => {

@@ -589,6 +589,7 @@ type InternalCapability = {
   kind: "agents" | "connectors" | "computer" | "browser";
   skillAuthoring: boolean;
   createdBots: number;
+  createdRooms?: number;
   /** start_thread calls this turn has made — capped like createdBots, so a
    * turn cannot fan out into more real turns than a person could follow. */
   openedThreads: number;
@@ -1889,6 +1890,162 @@ function groupGoalCoordinatorTurnForEvent(event: RuntimeEvent): GroupGoalCoordin
 function groupIsWorking(group: GroupRecord): boolean {
   return Boolean(group.busyBotId) || Boolean(groupTurnOperations.get(group.id)?.size);
 }
+
+// The public and Chief room tools use the same synchronous validation and write.
+// Keep authorization at each ingress; no internal caller gains public admin scope.
+function createChannel(value: unknown): GroupRecord {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    throw Object.assign(new Error("channel must be a JSON object"), { status: 400 });
+  }
+  const body = value as Record<string, unknown>;
+
+  const roster = checkedMemberIds(body.memberIds);
+  if (!roster.ok) throw Object.assign(new Error(roster.error), { status: 400 });
+  const { memberIds } = roster;
+  if (body.name !== undefined && typeof body.name !== "string") {
+    throw Object.assign(new Error("channel name must be a string"), { status: 400 });
+  }
+  const name = body.name?.trim() || `${store.bot(memberIds[0])!.name} & co.`;
+  if (name.length > 100) throw Object.assign(new Error("channel name must be at most 100 characters"), { status: 400 });
+  let section: string | undefined;
+  if (body.section !== undefined && body.section !== null) {
+    if (typeof body.section !== "string") throw Object.assign(new Error("context must be a string"), { status: 400 });
+    section = body.section.trim() || undefined;
+    if (section && section.length > 60) {
+      throw Object.assign(new Error("context must be at most 60 characters"), { status: 400 });
+    }
+  }
+  let setup:
+    | { bulletin: string; defaultResponder: GroupDefaultResponder; completed: true }
+    | undefined;
+  if (body.setup !== undefined) {
+    if (!body.setup || typeof body.setup !== "object" || Array.isArray(body.setup)) {
+      throw Object.assign(new Error("setup must be an object"), { status: 400 });
+    }
+    const requested = body.setup as { bulletin?: unknown; defaultResponder?: unknown };
+    if (typeof requested.bulletin !== "string") {
+      throw Object.assign(new Error("setup.bulletin must be a string"), { status: 400 });
+    }
+    if (requested.bulletin.length > 12_000) {
+      throw Object.assign(new Error("setup.bulletin must be at most 12000 characters"), { status: 400 });
+    }
+    const responder = checkedGroupResponder(requested.defaultResponder, memberIds);
+    if (!responder) throw Object.assign(new Error("invalid setup.defaultResponder"), { status: 400 });
+    setup = { bulletin: requested.bulletin, defaultResponder: responder, completed: true };
+  }
+  return store.createGroup(name, memberIds, false, section, setup);
+}
+
+function updateChannel(groupId: string, value: unknown): GroupRecord {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    throw Object.assign(new Error("body must be a JSON object"), { status: 400 });
+  }
+  const body = value as Record<string, unknown>;
+
+  const existing = store.group(groupId);
+  if (!existing) throw Object.assign(new Error("no such room"), { status: 404 });
+  if (body.memberIds !== undefined && phoneSecretSubmissions.hasGroup(existing.id)) {
+    throw Object.assign(new Error("this channel is securely saving a credential — try again when it finishes"), { status: 409 });
+  }
+  if (
+    channelTaskBlocked(existing) &&
+    (body.memberIds !== undefined || body.defaultResponder !== undefined || body.bulletin !== undefined)
+  ) {
+    throw Object.assign(new Error("this channel is working or waiting on you — finish that turn first"), { status: 409 });
+  }
+  const patch: Record<string, unknown> = {};
+  if (body.name !== undefined) {
+    if (typeof body.name !== "string") throw Object.assign(new Error("room name must be a string"), { status: 400 });
+    const name = body.name.trim();
+    if (!name) throw Object.assign(new Error("room name must not be empty"), { status: 400 });
+    if (name.length > 100) throw Object.assign(new Error("room name must be at most 100 characters"), { status: 400 });
+    patch.name = name;
+  }
+  if (body.bulletin !== undefined) {
+    if (typeof body.bulletin !== "string") throw Object.assign(new Error("bulletin must be a string"), { status: 400 });
+    if (body.bulletin.length > 12_000) {
+      throw Object.assign(new Error("bulletin must be at most 12000 characters"), { status: 400 });
+    }
+    patch.bulletin = body.bulletin;
+  }
+  if (body.unread !== undefined) {
+    if (typeof body.unread !== "boolean") throw Object.assign(new Error("unread must be true or false"), { status: 400 });
+    patch.unread = body.unread;
+  }
+  if (body.memberIds !== undefined) {
+    // A DM is the pair it was opened for; only real rooms have a roster.
+    if (existing.dm) throw Object.assign(new Error("direct-message channels cannot change members"), { status: 400 });
+    const roster = checkedMemberIds(body.memberIds);
+    if (!roster.ok) throw Object.assign(new Error(roster.error.replace("channel", "room")), { status: 400 });
+    const removedGoalLead = routines!.listRoutines().some(
+      (routine) =>
+        routine.enabled &&
+        routine.target === "room-goal" &&
+        routine.groupId === existing.id &&
+        !roster.memberIds.includes(routine.botId),
+    ) || routines!.listRuns().some(
+      (run) =>
+        run.target === "room-goal" &&
+        run.groupId === existing.id &&
+        ["queued", "running", "waiting"].includes(run.status) &&
+        !roster.memberIds.includes(run.botId),
+    );
+    if (removedGoalLead) {
+      throw Object.assign(new Error("pause or reassign this room's team-goal routine before removing its lead"), { status: 409 });
+    }
+    patch.memberIds = roster.memberIds;
+  }
+  if (body.defaultResponder !== undefined) {
+    const memberIds = (patch.memberIds as string[] | undefined) ?? existing.memberIds;
+    const responder = checkedGroupResponder(body.defaultResponder, memberIds);
+    if (!responder) throw Object.assign(new Error("invalid default responder"), { status: 400 });
+    patch.defaultResponder = responder;
+  }
+  if (body.cwd !== undefined) {
+    if (existing.dm) throw Object.assign(new Error("direct-message channels cannot have a working folder"), { status: 400 });
+    if (existing.pinnedCwd !== undefined) {
+      throw Object.assign(new Error("the room's working folder is fixed after its first turn"), { status: 409 });
+    }
+    const checked = validateBotCwd(body.cwd);
+    if (!checked.ok) throw Object.assign(new Error(checked.error), { status: 400 });
+    patch.cwd = checked.cwd ?? undefined;
+  }
+  // one pinned message per room; null/"" clears. The id is not
+  // validated against the transcript here — a pin whose message was
+  // edited away or deleted simply resolves to nothing in the UI.
+  if (body.pinnedMessageId !== undefined) {
+    if (body.pinnedMessageId === null || body.pinnedMessageId === "") patch.pinnedMessageId = undefined;
+    else if (typeof body.pinnedMessageId === "string" && /^[\w-]+$/.test(body.pinnedMessageId)) {
+      patch.pinnedMessageId = body.pinnedMessageId;
+    } else throw Object.assign(new Error("pinnedMessageId must be a message id"), { status: 400 });
+  }
+  // same contract as a bot's sidebar section: null/"" clears, 60 chars max
+  if (body.section !== undefined) {
+    if (body.section === null) patch.section = undefined;
+    else if (typeof body.section !== "string") throw Object.assign(new Error("section must be a string"), { status: 400 });
+    else {
+      const trimmed = body.section.trim();
+      if (!trimmed) patch.section = undefined;
+      else if (trimmed.length > 60) throw Object.assign(new Error("section must be at most 60 characters"), { status: 400 });
+      else patch.section = trimmed;
+    }
+  }
+  const group = store.patchGroup(groupId, patch);
+  if (!group) throw Object.assign(new Error("no such room"), { status: 404 });
+  return group;
+}
+
+const channelTaskBlocked = (group: GroupRecord) =>
+  groupIsWorking(group) ||
+  store.groupTasks(group.id).some((task) =>
+    store.messagesFor(task.threadId).some(
+      (message) =>
+        message.kind === "options" &&
+        message.card?.requestId &&
+        !message.card.answered &&
+        !message.card.dismissed,
+    ),
+  );
 
 function publicGroupState(group: GroupRecord) {
   return { ...group, working: groupIsWorking(group) };
@@ -9588,6 +9745,79 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
           model: safeBot.modelSelection.model,
         });
       }
+      if (method === "POST" && (path === "/api/internal/create-room" || path === "/api/internal/manage-room")) {
+        const body = await readInternalBody();
+        const chief = store.bot(internalCapability.botId)!;
+        if (chief.hidden || !chief.chiefOfStaff || !connectorThread(chief.id, internalCapability.threadId)) {
+          return json(res, 403, { error: "only an active section Chief of Staff can manage rooms" });
+        }
+        if (!body || typeof body !== "object" || Array.isArray(body)) {
+          return json(res, 400, { error: "room request must be a JSON object" });
+        }
+        // ponytail: no new room-administration approval flow. Fail closed for
+        // chiefs whose peer changes need review; add a proposal card if needed.
+        if (chief.approvePeerComms) {
+          return json(res, 403, { error: "peer approval is required; ask the user to make this room change" });
+        }
+        // Section labels are a permission boundary, not bot-owned organization.
+        // A Chief may not recruit excluded peers or acquire a foreign transcript.
+        const allowedIds = new Set([chief.id, ...reachablePeers(store.bots, chief).map((bot) => bot.id)]);
+        const allowedRoster = (ids: string[]) => ids.includes(chief.id) && ids.every((id) => allowedIds.has(id));
+        if (body.section !== undefined && (typeof body.section !== "string" || sectionKey(body.section) !== sectionKey(chief.section))) {
+          return json(res, 403, { error: "rooms must stay in your own section; ask the user to move them" });
+        }
+        if (path === "/api/internal/create-room") {
+          if ((internalCapability.createdRooms ?? 0) >= 4) {
+            return json(res, 429, { error: "you can create at most 4 rooms in one turn" });
+          }
+          const parsed = z.object({
+            fromBotId: z.string().optional(), fromThreadId: z.string().optional(),
+            name: z.string().trim().min(1).max(100), memberIds: z.array(z.string()).min(1).max(100),
+            section: z.string().optional(), bulletin: z.string().max(12_000).optional(),
+          }).strict().safeParse(body);
+          if (!parsed.success) return json(res, 400, { error: "provide a room name, memberIds, and optional bulletin (at most 12000 characters)" });
+          const memberIds = [...new Set([chief.id, ...parsed.data.memberIds])];
+          if (!allowedRoster(memberIds)) {
+            return json(res, 403, { error: "include yourself and only active, allowed peers from your section" });
+          }
+          const group = createChannel({
+            name: redactSecretsInText(parsed.data.name), memberIds, section: chief.section,
+            setup: { bulletin: redactSecretsInText(parsed.data.bulletin ?? ""), defaultResponder: { kind: "member", botId: chief.id } },
+          });
+          internalCapability.createdRooms = (internalCapability.createdRooms ?? 0) + 1;
+          return json(res, 201, { id: group.id, name: group.name, section: group.section || "General", memberIds: group.memberIds, memberCount: group.memberIds.length });
+        }
+        const parsed = z.object({
+          fromBotId: z.string().optional(), fromThreadId: z.string().optional(),
+          roomId: z.string(), action: z.enum(["add_members", "remove_members", "set_members", "rename", "set_bulletin"]),
+          memberIds: z.array(z.string()).min(1).max(100).optional(),
+          name: z.string().trim().min(1).max(100).optional(), bulletin: z.string().max(12_000).optional(),
+        }).strict().safeParse(body);
+        if (!parsed.success) return json(res, 400, { error: "provide roomId and a supported room action; section moves are user-only" });
+        const room = store.group(parsed.data.roomId);
+        if (!room || room.dm || sectionKey(room.section) !== sectionKey(chief.section) || !allowedRoster(room.memberIds)) {
+          return json(res, 403, { error: "you can only manage rooms you belong to with allowed peers in your own section" });
+        }
+        const { action, memberIds, name, bulletin } = parsed.data;
+        const patch: Record<string, unknown> = {};
+        if (action === "rename") {
+          if (name === undefined) return json(res, 400, { error: "rename requires a name" });
+          patch.name = redactSecretsInText(name);
+        } else if (action === "set_bulletin") {
+          if (bulletin === undefined) return json(res, 400, { error: "set_bulletin requires bulletin text; use an empty string to clear it" });
+          patch.bulletin = redactSecretsInText(bulletin);
+        } else {
+          if (!memberIds || memberIds.some((id) => !allowedIds.has(id))) {
+            return json(res, 403, { error: "memberIds must name only yourself or active, allowed peers in your section" });
+          }
+          const next = action === "add_members" ? [...new Set([...room.memberIds, ...memberIds])]
+            : action === "remove_members" ? room.memberIds.filter((id) => !memberIds.includes(id)) : memberIds;
+          if (!allowedRoster(next)) return json(res, 403, { error: "keep yourself in the room; only the user can remove its managing Chief" });
+          patch.memberIds = next;
+        }
+        const updated = updateChannel(room.id, patch);
+        return json(res, 200, { ok: true, memberIds: updated.memberIds, memberCount: updated.memberIds.length, message: `Updated room “${updated.name}”.` });
+      }
       if (method === "POST" && path === "/api/internal/request-credential") {
         const body = await readInternalBody();
         const from = internalSender;
@@ -10417,45 +10647,7 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
 
     // ── channels (persisted internally as groups) ───────────────────────
     if (method === "POST" && path === "/api/groups") {
-      const body = await readBody(req);
-      if (!body || typeof body !== "object" || Array.isArray(body)) {
-        return json(res, 400, { error: "channel must be a JSON object" });
-      }
-      const roster = checkedMemberIds(body.memberIds);
-      if (!roster.ok) return json(res, 400, { error: roster.error });
-      const { memberIds } = roster;
-      if (body.name !== undefined && typeof body.name !== "string") {
-        return json(res, 400, { error: "channel name must be a string" });
-      }
-      const name = body.name?.trim() || `${store.bot(memberIds[0])!.name} & co.`;
-      if (name.length > 100) return json(res, 400, { error: "channel name must be at most 100 characters" });
-      let section: string | undefined;
-      if (body.section !== undefined && body.section !== null) {
-        if (typeof body.section !== "string") return json(res, 400, { error: "context must be a string" });
-        section = body.section.trim() || undefined;
-        if (section && section.length > 60) {
-          return json(res, 400, { error: "context must be at most 60 characters" });
-        }
-      }
-      let setup:
-        | { bulletin: string; defaultResponder: GroupDefaultResponder; completed: true }
-        | undefined;
-      if (body.setup !== undefined) {
-        if (!body.setup || typeof body.setup !== "object" || Array.isArray(body.setup)) {
-          return json(res, 400, { error: "setup must be an object" });
-        }
-        const requested = body.setup as { bulletin?: unknown; defaultResponder?: unknown };
-        if (typeof requested.bulletin !== "string") {
-          return json(res, 400, { error: "setup.bulletin must be a string" });
-        }
-        if (requested.bulletin.length > 12_000) {
-          return json(res, 400, { error: "setup.bulletin must be at most 12000 characters" });
-        }
-        const responder = checkedGroupResponder(requested.defaultResponder, memberIds);
-        if (!responder) return json(res, 400, { error: "invalid setup.defaultResponder" });
-        setup = { bulletin: requested.bulletin, defaultResponder: responder, completed: true };
-      }
-      const group = store.createGroup(name, memberIds, false, section, setup);
+      const group = createChannel(await readBody(req));
       return json(res, 201, { group: { ...publicGroupState(group), messages: [] } });
     }
     if (method === "POST" && path === "/api/teams/export") {
@@ -10807,17 +10999,7 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
     }
 
     // ── channel tasks: separate conversations for the same team ────────
-    const channelTaskBlocked = (group: GroupRecord) =>
-      groupIsWorking(group) ||
-      store.groupTasks(group.id).some((task) =>
-        store.messagesFor(task.threadId).some(
-          (message) =>
-            message.kind === "options" &&
-            message.card?.requestId &&
-            !message.card.answered &&
-            !message.card.dismissed,
-        ),
-      );
+
 
     // A scheduled goal starts in a detached task. Let the user open the
     // exact task that owns the live operation (or a durable approval card)
@@ -10926,101 +11108,7 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
         const field = clientGroupPatchViolation(body);
         if (field) return json(res, 403, { error: `forbidden: this session may rename or mark a room, not change "${field}" (needs the admin scope)` });
       }
-      if (!body || typeof body !== "object" || Array.isArray(body)) {
-        return json(res, 400, { error: "body must be a JSON object" });
-      }
-      const existing = store.group(m[1]);
-      if (!existing) return json(res, 404, { error: "no such room" });
-      if (body.memberIds !== undefined && phoneSecretSubmissions.hasGroup(existing.id)) {
-        return json(res, 409, { error: "this channel is securely saving a credential — try again when it finishes" });
-      }
-      if (
-        channelTaskBlocked(existing) &&
-        (body.memberIds !== undefined || body.defaultResponder !== undefined || body.bulletin !== undefined)
-      ) {
-        return json(res, 409, { error: "this channel is working or waiting on you — finish that turn first" });
-      }
-      const patch: Record<string, unknown> = {};
-      if (body.name !== undefined) {
-        if (typeof body.name !== "string") return json(res, 400, { error: "room name must be a string" });
-        const name = body.name.trim();
-        if (!name) return json(res, 400, { error: "room name must not be empty" });
-        if (name.length > 100) return json(res, 400, { error: "room name must be at most 100 characters" });
-        patch.name = name;
-      }
-      if (body.bulletin !== undefined) {
-        if (typeof body.bulletin !== "string") return json(res, 400, { error: "bulletin must be a string" });
-        if (body.bulletin.length > 12_000) {
-          return json(res, 400, { error: "bulletin must be at most 12000 characters" });
-        }
-        patch.bulletin = body.bulletin;
-      }
-      if (body.unread !== undefined) {
-        if (typeof body.unread !== "boolean") return json(res, 400, { error: "unread must be true or false" });
-        patch.unread = body.unread;
-      }
-      if (body.memberIds !== undefined) {
-        // A DM is the pair it was opened for; only real rooms have a roster.
-        if (existing.dm) return json(res, 400, { error: "direct-message channels cannot change members" });
-        const roster = checkedMemberIds(body.memberIds);
-        if (!roster.ok) return json(res, 400, { error: roster.error.replace("channel", "room") });
-        const removedGoalLead = routines!.listRoutines().some(
-          (routine) =>
-            routine.enabled &&
-            routine.target === "room-goal" &&
-            routine.groupId === existing.id &&
-            !roster.memberIds.includes(routine.botId),
-        ) || routines!.listRuns().some(
-          (run) =>
-            run.target === "room-goal" &&
-            run.groupId === existing.id &&
-            ["queued", "running", "waiting"].includes(run.status) &&
-            !roster.memberIds.includes(run.botId),
-        );
-        if (removedGoalLead) {
-          return json(res, 409, {
-            error: "pause or reassign this room's team-goal routine before removing its lead",
-          });
-        }
-        patch.memberIds = roster.memberIds;
-      }
-      if (body.defaultResponder !== undefined) {
-        const memberIds = (patch.memberIds as string[] | undefined) ?? existing.memberIds;
-        const responder = checkedGroupResponder(body.defaultResponder, memberIds);
-        if (!responder) return json(res, 400, { error: "invalid default responder" });
-        patch.defaultResponder = responder;
-      }
-      if (body.cwd !== undefined) {
-        if (existing.dm) return json(res, 400, { error: "direct-message channels cannot have a working folder" });
-        if (existing.pinnedCwd !== undefined) {
-          return json(res, 409, { error: "the room's working folder is fixed after its first turn" });
-        }
-        const checked = validateBotCwd(body.cwd);
-        if (!checked.ok) return json(res, 400, { error: checked.error });
-        patch.cwd = checked.cwd ?? undefined;
-      }
-      // one pinned message per room; null/"" clears. The id is not
-      // validated against the transcript here — a pin whose message was
-      // edited away or deleted simply resolves to nothing in the UI.
-      if (body.pinnedMessageId !== undefined) {
-        if (body.pinnedMessageId === null || body.pinnedMessageId === "") patch.pinnedMessageId = undefined;
-        else if (typeof body.pinnedMessageId === "string" && /^[\w-]+$/.test(body.pinnedMessageId)) {
-          patch.pinnedMessageId = body.pinnedMessageId;
-        } else return json(res, 400, { error: "pinnedMessageId must be a message id" });
-      }
-      // same contract as a bot's sidebar section: null/"" clears, 60 chars max
-      if (body.section !== undefined) {
-        if (body.section === null) patch.section = undefined;
-        else if (typeof body.section !== "string") return json(res, 400, { error: "section must be a string" });
-        else {
-          const trimmed = body.section.trim();
-          if (!trimmed) patch.section = undefined;
-          else if (trimmed.length > 60) return json(res, 400, { error: "section must be at most 60 characters" });
-          else patch.section = trimmed;
-        }
-      }
-      const group = store.patchGroup(m[1], patch);
-      if (!group) return json(res, 404, { error: "no such room" });
+      const group = updateChannel(m[1], body);
       return json(res, 200, { group: publicGroupState(group) });
     }
     m = path.match(/^\/api\/groups\/([\w-]+)\/read$/);
