@@ -120,6 +120,10 @@ The [provider recovery recipe](provider-recovery.md) verifies real Grok image
 transport and Claude authentication against loopback APIs, plus scoped thread
 approvals and provider safety errors in an isolated desktop UI.
 
+The [skill approval lifecycle recipe](skill-approval-lifecycle.md) checks Deny,
+missing staged records and active-thread deletion in two isolated app windows,
+including the surviving conversation and sending again without deleting the bot.
+
 The [Codex account recipe](codex-account.md) checks account switching against an
 offline Codex CLI whose identity is synthetic and whose credential directory is empty.
 

@@ -344,6 +344,9 @@ export interface Bot {
    * bot's own session (null is how a clear travels over PATCH). */
   browserProfile?: string | null;
   messages: Message[];
+  /** Renderer-only: a deleted selection moved to a thread whose full
+   * transcript has not arrived yet. Never carry the deleted chat into it. */
+  awaitingThreadSnapshot?: boolean;
   /** leaf of the visible conversation branch (see visibleMessages) */
   activeLeafId?: string | null;
 }
@@ -1043,7 +1046,7 @@ function optimisticUserMessage(
 
 export function reducer(state: AppState, action: Action): AppState {
   if (action.type === "messageAdded" || action.type === "messagePatched" || action.type === "threadActive" || action.type === "optimisticMessageRemoved") {
-    const owner = state.bots.find((bot) => bot.threadId !== action.threadId && bot.tasks?.some((task) => task.threadId === action.threadId));
+    const owner = state.bots.find((bot) => (bot.threadId !== action.threadId || bot.awaitingThreadSnapshot) && bot.tasks?.some((task) => task.threadId === action.threadId));
     if (owner) {
       // ponytail: a bounded race buffer, not a second transcript store. The
       // server supplies complete history whenever this thread is reopened.
@@ -1263,26 +1266,36 @@ export function reducer(state: AppState, action: Action): AppState {
       const switchedThread =
         typeof action.bot.threadId === "string" && action.bot.threadId !== before.threadId &&
         !action.bot.tasks?.some((task) => task.threadId === before.threadId);
-      const patched = updateBot(next, action.bot.id, (b) => ({
+      // As with explicit navigation, the snapshot already includes events
+      // buffered while its thread was in the background. Replay only races
+      // after this switch begins, not older approval patches.
+      let switching = next;
+      if (switchedThread) {
+        const { [action.bot.threadId]: _stale, ...otherThreadEvents } = next.backgroundThreadEvents;
+        switching = { ...next, backgroundThreadEvents: otherThreadEvents };
+      }
+      if ((switchedThread || (before.awaitingThreadSnapshot && action.bot.threadId === before.threadId)) &&
+          Array.isArray(action.bot.messages)) {
+        // The slim deletion broadcast can arrive before the full snapshot.
+        // Finish that switch once, replaying any events received in between.
+        // Later duplicate HTTP snapshots must not overwrite newer messages.
+        return reducer(switching, { type: "taskSwitched", bot: { ...before, ...action.bot, messages: action.bot.messages, browserProfile: action.bot.browserProfile } });
+      }
+      const patched = updateBot(switching, action.bot.id, (b) => ({
         ...b,
         ...action.bot,
         threadId: switchedThread ? action.bot.threadId : b.threadId,
-        activeLeafId: switchedThread ? action.bot.activeLeafId : b.activeLeafId,
+        activeLeafId: switchedThread ? null : b.activeLeafId,
+        awaitingThreadSnapshot: switchedThread || b.awaitingThreadSnapshot,
         // Complete bot frames omit this optional field after switching back
         // to Own browser (or deleting a shared profile). Do not retain the
         // previous profile's name and selection in another window.
         browserProfile: action.bot.browserProfile,
-        // Existing threads keep this window's selection. Only losing the
-        // current thread (deletion, or a legacy server) adopts the frame's
-        // transcript; deliberate navigation uses taskSwitched below.
-        messages:
-          switchedThread && Array.isArray(action.bot.messages)
-            ? action.bot.messages
-            : b.messages,
+        // Clear immediately on deletion: old approvals must never be sent
+        // to the replacement thread while waiting for its transcript.
+        messages: switchedThread ? [] : b.messages,
       }));
-      return switchedThread && Array.isArray(action.bot.messages)
-        ? reconcileSnapshotQueues(patched, [action.bot])
-        : patched;
+      return patched;
     }
     case "messageAdded": {
       const bot = state.bots.find((b) => b.threadId === action.threadId);
@@ -1739,6 +1752,7 @@ export function reducer(state: AppState, action: Action): AppState {
         ...bot,
         ...action.bot,
         messages: action.bot.messages ?? [],
+        awaitingThreadSnapshot: false,
       }));
       for (const frame of state.backgroundThreadEvents[action.bot.threadId] ?? []) switched = reducer(switched, frame);
       const { [action.bot.threadId]: _settled, ...backgroundThreadEvents } = switched.backgroundThreadEvents;
