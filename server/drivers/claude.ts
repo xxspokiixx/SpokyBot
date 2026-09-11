@@ -877,6 +877,8 @@ export const ClaudeDriver: ProviderDriver<ClaudeConfig> = {
       idleTimer: ReturnType<typeof setTimeout> | null;
       closing: boolean;
       stderr: string;
+      /** Root close can precede a failed group stop; retry its finalization. */
+      finishClose?: () => Promise<void>;
     }
     const sessions = new Map<string, Session>();
     const configuredIdleMinimum = Number(process.env.OMB_CLAUDE_SESSION_IDLE_MIN_MS);
@@ -885,6 +887,11 @@ export const ClaudeDriver: ProviderDriver<ClaudeConfig> = {
       : 10_000;
     const SESSION_IDLE_MS = Math.max(sessionIdleMinimum, Number(process.env.OMB_CLAUDE_SESSION_IDLE_MS) || 10 * 60_000);
 
+    const stopSession = (session: Session) => {
+      void killCliTree(session.child).then((stopped) => {
+        if (stopped) void session.finishClose?.();
+      });
+    };
     const closeSession = (threadId: string, why: string) => {
       const s = sessions.get(threadId);
       if (!s || s.closing) return;
@@ -902,7 +909,7 @@ export const ClaudeDriver: ProviderDriver<ClaudeConfig> = {
         s.child.stdin.end();
       } catch {}
       const kill = setTimeout(() => {
-        if (s.child.exitCode === null) killCliTree(s.child);
+        stopSession(s);
       }, 5_000);
       kill.unref?.();
     };
@@ -1168,7 +1175,7 @@ export const ClaudeDriver: ProviderDriver<ClaudeConfig> = {
         live.turn = { turnId, settled: false, sawStreamDelta: false };
         active.set(threadId, { stop: () => {
           closeSession(threadId, "interrupted");
-          killCliTree(live.child);
+          stopSession(live);
         }, turnId, broker: live.broker });
         emit({ ...base(threadId, turnId), type: "turn.started" });
         const volatile = turn.systemVolatile ?? "";
@@ -1364,6 +1371,7 @@ export const ClaudeDriver: ProviderDriver<ClaudeConfig> = {
       const currentTurnId = () => session.turn?.turnId ?? turnId;
 
       const handleLine = (line: string) => {
+        if (session.closing) return;
         let o: any;
         try {
           o = JSON.parse(line);
@@ -1502,7 +1510,20 @@ export const ClaudeDriver: ProviderDriver<ClaudeConfig> = {
         settle(false, "spawn_error");
       });
 
-      child.on("close", (code) => {
+      let closeFinalized = false;
+      const finalizeClose = async (code: number | null) => {
+        if (closeFinalized) return;
+        // The root can close while its MCP helpers are still running. Join
+        // an in-flight stop (or reap its remaining group) before releasing
+        // the turn so a replacement cannot overlap the old helpers.
+        if (!(await killCliTree(child, 0))) {
+          session.broker?.close();
+          session.broker = undefined;
+          emit({ ...base(threadId, currentTurnId()), type: "runtime.error", message: "Claude could not be confirmed stopped; its helper processes may still be running." });
+          return;
+        }
+        if (closeFinalized) return;
+        closeFinalized = true;
         // a turn still running when the process died is a failed turn; a
         // process that exited between turns (idle close, contract change)
         // is just a session ending
@@ -1662,6 +1683,10 @@ export const ClaudeDriver: ProviderDriver<ClaudeConfig> = {
         }
         removePrivateTempDir(session.systemPromptPath);
         if (sessions.get(threadId) === session) sessions.delete(threadId);
+      };
+      child.on("close", (code) => {
+        session.finishClose = () => finalizeClose(code);
+        void session.finishClose();
       });
 
       const stop = () => {
@@ -1670,7 +1695,7 @@ export const ClaudeDriver: ProviderDriver<ClaudeConfig> = {
         closeSession(threadId, "interrupted");
         retry.cancelled = true;
         retryAbort.abort();
-        killCliTree(child);
+        stopSession(session);
       };
       active.set(threadId, { stop, turnId, broker });
       emit({ ...base(threadId, turnId), type: "turn.started" });

@@ -663,10 +663,16 @@ export const CodexDriver: ProviderDriver<CodexConfig> = {
         });
 
       let stopping: Promise<boolean> | undefined;
-      const terminate = () => stopping ??= killCliTree(child);
-      const stop = () => {
+      const terminate = () => stopping ??= killCliTree(child).then((stopped) => {
+        if (!stopped) stopping = undefined;
+        return stopped;
+      });
+      let completeStoppedTurn: (() => void) | undefined;
+      const stop = async () => {
         stopRequested = true;
-        return terminate();
+        const stopped = await terminate();
+        if (stopped) completeStoppedTurn?.();
+        return stopped;
       };
 
       const settle = async (ok: boolean, stopReason: string | null) => {
@@ -680,12 +686,9 @@ export const CodexDriver: ProviderDriver<CodexConfig> = {
           active.delete(threadId);
           emit({ ...base(threadId, turnId), type: "turn.completed", ok, stopReason, cost: null, ...(state.usage ? { usage: state.usage } : {}) });
         };
-        if (await stop()) {
-          complete();
-        } else {
+        completeStoppedTurn = complete;
+        if (!(await stop())) {
           emit({ ...base(threadId, turnId), type: "runtime.error", message: "codex did not shut down after termination was requested" });
-          if (child.exitCode !== null || child.signalCode !== null) complete();
-          else child.once("close", complete);
         }
       };
 
@@ -1009,6 +1012,12 @@ export const CodexDriver: ProviderDriver<CodexConfig> = {
       });
       child.on("close", (code) => {
         if (abandoned) return;
+        if (state.settled) {
+          // Root exit alone cannot release a turn after an uncertain stop.
+          // Recheck its group; an explicit later Stop can also retry this.
+          void stop();
+          return;
+        }
         if (!state.settled) {
           emit({
             ...base(threadId, turnId),
