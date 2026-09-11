@@ -25,6 +25,7 @@ import {
   createPermissionBroker,
   parseClaudeCliVersion,
   permissionSocketPath,
+  readClaudeAuthSettings,
   type ClaudeConfig,
 } from "./claude.ts";
 import { removeTempDir } from "../testing/cleanup.ts";
@@ -796,6 +797,63 @@ describe("ClaudeDriver turns (fake CLI)", () => {
     const seen = JSON.parse(readFileSync(dump, "utf8"));
     expect(seen.argv).not.toContain("--strict-mcp-config");
     expect(seen.argv).not.toContain("--setting-sources");
+  });
+
+  it("preserves only the selected account's auth settings in a private file", async () => {
+    const account = join(scratch, "account");
+    mkdirSync(account);
+    const settings = { apiKeyHelper: "echo synthetic-helper-key", env: { ANTHROPIC_BASE_URL: "http://127.0.0.1:9", ANTHROPIC_AUTH_TOKEN: "synthetic-token", OMB_TTS_KEY: "must-not-leak" }, hooks: { SessionStart: [{ command: "must-not-run" }] }, permissions: { defaultMode: "bypassPermissions" } };
+    writeFileSync(join(account, "settings.json"), JSON.stringify(settings));
+    const dump = join(scratch, "account.json");
+    await create(undefined, { FAKE_CLAUDE_DUMP: dump }, { configDir: account });
+    await instance.adapter.sendTurn({ threadId: "t-auth-settings", text: "hi" });
+    await recorder.until((e) => e.type === "turn.completed");
+    const seen = JSON.parse(readFileSync(dump, "utf8"));
+    expect(seen.settings).toEqual({ apiKeyHelper: settings.apiKeyHelper, env: { ANTHROPIC_BASE_URL: settings.env.ANTHROPIC_BASE_URL, ANTHROPIC_AUTH_TOKEN: "synthetic-token" } });
+    expect(seen.argv[seen.argv.indexOf("--setting-sources") + 1]).toBe("project");
+    expect(JSON.stringify(seen.argv)).not.toContain("synthetic");
+    const settingsPath = seen.argv[seen.argv.indexOf("--settings") + 1];
+    if (process.platform !== "win32") expect(seen.settingsMode).toBe(0o600);
+    const log = readFileSync(join(NATIVE_DIR, "t-auth-settings.ndjson"), "utf8");
+    expect(log).not.toContain("synthetic-token");
+    expect(log).not.toContain(settings.apiKeyHelper);
+    await instance.dispose();
+    expect(existsSync(settingsPath)).toBe(false);
+  });
+
+  it("restarts a retained session when the selected account's auth changes", async () => {
+    const account = join(scratch, "account");
+    mkdirSync(account);
+    const path = join(account, "settings.json");
+    writeFileSync(path, JSON.stringify({ env: { ANTHROPIC_API_KEY: "synthetic-old" } }));
+    const dump = join(scratch, "rotate.json");
+    await create(undefined, { FAKE_CLAUDE_DUMP: dump }, { configDir: account });
+    const first = await instance.adapter.sendTurn({ threadId: "t-auth-rotate", text: "hi" });
+    await recorder.until((e) => e.type === "turn.completed" && e.turnId === first.turnId);
+    const before = JSON.parse(readFileSync(dump, "utf8"));
+    writeFileSync(path, JSON.stringify({ env: { ANTHROPIC_API_KEY: "synthetic-new" } }));
+    const second = await instance.adapter.sendTurn({ threadId: "t-auth-rotate", text: "again" });
+    await recorder.until((e) => e.type === "turn.completed" && e.turnId === second.turnId);
+    const after = JSON.parse(readFileSync(dump, "utf8"));
+    expect(after.pid).not.toBe(before.pid);
+    expect(after.settings.env.ANTHROPIC_API_KEY).toBe("synthetic-new");
+  });
+
+  it("does not mix a personal helper/endpoint with an explicitly configured OMB connection", async () => {
+    const account = join(scratch, "account");
+    mkdirSync(account);
+    writeFileSync(join(account, "settings.json"), JSON.stringify({ apiKeyHelper: "do-not-run", env: { ANTHROPIC_API_KEY: "personal", ANTHROPIC_BASE_URL: "https://personal.invalid" } }));
+    const dump = join(scratch, "explicit.json");
+    await create(undefined, { FAKE_CLAUDE_DUMP: dump, ANTHROPIC_API_KEY: "workspace-key" }, { configDir: account });
+    await instance.adapter.sendTurn({ threadId: "t-auth-explicit", text: "hi" });
+    await recorder.until((e) => e.type === "turn.completed");
+    const seen = JSON.parse(readFileSync(dump, "utf8"));
+    expect(seen.settings).toBe(null);
+    expect(seen.env.ANTHROPIC_API_KEY).toBe("workspace-key");
+    expect(seen.env.ANTHROPIC_BASE_URL).toBeUndefined();
+    expect(readClaudeAuthSettings({ HOME: scratch, CLAUDE_CONFIG_DIR: join(scratch, "other-account") })).toEqual({});
+    writeFileSync(join(account, "settings.json"), "malformed");
+    expect(readClaudeAuthSettings({ CLAUDE_CONFIG_DIR: account })).toEqual({});
   });
 
   it("withholds a flag from a CLI that predates it, instead of failing every turn", async () => {

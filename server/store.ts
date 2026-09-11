@@ -596,6 +596,8 @@ export interface BotRecord {
     requestId: string;
     mode: "full" | "custom";
     phase: "prepared" | "confirmed" | "activated" | "committed";
+    /** Optional existing thread receiving this already-approved bot default. */
+    threadId?: string;
   };
   /** Tools this bot may always use without asking, even outside auto mode
    * (set by "Always allow" on an approval card). */
