@@ -35,6 +35,7 @@ import { speaker } from "@/lib/tts";
 import { roleProfilePatch, type BotRole } from "@/lib/bot-roles";
 import { t } from "@/lib/i18n";
 import { createBotPatchQueue, type BotUpdatePatch } from "./bot-patch-queue";
+import type { OnboardingStatus } from "@/lib/onboarding";
 import { openLiveEvents } from "@/lib/live-events";
 
 const MAX_ROUTINE_RUNS = 2_000;
@@ -451,6 +452,9 @@ export interface ConfigStatus {
   language?: string;
   /** Opt-in flags. Absent means off. */
   features?: { skillAuthoring: boolean; showToolCalls?: boolean; browser?: boolean };
+  /** First-run progress: whether the welcome tour was finished and which
+   * one-time hints were dismissed. Server-owned so it follows the workspace. */
+  onboarding?: OnboardingStatus;
   /** Which browser this server can give bots: the desktop app's surface, the
    * agent-browser engine, or nothing yet (with the reason). */
   browserEngine?: BrowserEngineSummary;
@@ -477,7 +481,7 @@ export interface BrowserProfile {
 
 export type ConfigStatusFrame = Pick<
   ConfigStatus,
-  "xai" | "composio" | "box" | "vps" | "rooms" | "threads" | "localVm" | "opencodeGo" | "tts" | "imageGen" | "profile" | "language" | "features" | "browserEngine" | "browserProfiles"
+  "xai" | "composio" | "box" | "vps" | "rooms" | "threads" | "localVm" | "opencodeGo" | "tts" | "imageGen" | "profile" | "language" | "features" | "onboarding" | "browserEngine" | "browserProfiles"
 >;
 
 export function configStatusFromFrame(frame: ConfigStatusFrame): ConfigStatus {
@@ -495,6 +499,7 @@ export function configStatusFromFrame(frame: ConfigStatusFrame): ConfigStatus {
     profile: frame.profile,
     language: frame.language,
     features: frame.features,
+    onboarding: frame.onboarding,
     browserEngine: frame.browserEngine,
     browserProfiles: frame.browserProfiles,
   };
@@ -623,6 +628,10 @@ export interface AppState {
   appSettingsOpen: boolean;
   appSettingsSection: AppSettingsSection;
   shortcutsOpen: boolean;
+  /** the first-run welcome tour, also replayable from Settings → General */
+  welcomeOpen: boolean;
+  /** the guided tour on the live interface that follows the welcome flow */
+  tourOpen: boolean;
   botSettingsSection: BotSettingsSection;
   /** latest live frame of a bot's computer, per botId */
   screens: Record<string, { png: string; mime: string }>;
@@ -746,6 +755,7 @@ export type Action =
   | { type: "botQueues"; queues: AppState["pendingQueued"] }
   | { type: "showRoutines"; section?: "schedule" | "logs"; view?: "calendar" | "list"; botId?: string; routineId?: string }
   | { type: "showTeamMap" }
+  | { type: "showChat" }
   | { type: "routinesHydrated"; routines: Routine[]; runs: RoutineRun[] }
   | { type: "routinesLoadFailed" }
   | { type: "routinePatched"; routine: Routine }
@@ -860,6 +870,8 @@ export type Action =
   | { type: "focusMessageConsumed"; nonce: number }
   | { type: "toggleAppSettings"; open?: boolean; section?: AppSettingsSection }
   | { type: "toggleShortcuts"; open?: boolean }
+  | { type: "toggleWelcome"; open?: boolean }
+  | { type: "toggleTour"; open?: boolean }
   | {
       type: "updateBot";
       botId: string;
@@ -1069,6 +1081,8 @@ export function reducer(state: AppState, action: Action): AppState {
         appSettingsOpen: false,
         pluginsOpen: false,
       };
+    case "showChat":
+      return state.activeView === "chat" ? state : { ...state, activeView: "chat" };
     case "showTeamMap":
       return {
         ...state,
@@ -1535,6 +1549,21 @@ export function reducer(state: AppState, action: Action): AppState {
         shortcutsOpen: open,
       };
     }
+    case "toggleTour": {
+      const open = action.open ?? !state.tourOpen;
+      return { ...state, tourOpen: open, appSettingsOpen: open ? false : state.appSettingsOpen };
+    }
+    case "toggleWelcome": {
+      const open = action.open ?? !state.welcomeOpen;
+      // The tour is a full-screen surface; nothing else should stay open
+      // underneath it, and Settings closes so the replay lands on the tour.
+      return {
+        ...state,
+        welcomeOpen: open,
+        appSettingsOpen: open ? false : state.appSettingsOpen,
+        shortcutsOpen: open ? false : state.shortcutsOpen,
+      };
+    }
     case "updateBot": {
       const mascotChanged =
         Object.prototype.hasOwnProperty.call(action.patch, "color") ||
@@ -1783,6 +1812,8 @@ export const initialState: AppState = {
   appSettingsOpen: false,
   appSettingsSection: "general",
   shortcutsOpen: false,
+  welcomeOpen: false,
+  tourOpen: false,
   botSettingsSection: "overview",
   screens: {},
   provisioning: {},

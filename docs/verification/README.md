@@ -39,6 +39,7 @@ Use only mapped, tested commands:
 
 - [Chat turns](chat-turns.md)
 - [Chat UI, driven headlessly](chat-ui.md)
+- [Welcome flow and guided tour](onboarding.md)
 - [Channels](channels.md)
 - [Engines and Doctor](engines.md)
 - [Claude coordination and turn-scoped tools](claude-tool-lifecycle.md)

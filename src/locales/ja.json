@@ -566,8 +566,6 @@
   "onboarding.engines.intro": "ボットはこのコンピューターにインストールされた AI ツールで動きます。見つかったものはこちらです。",
   "onboarding.engines.ready": "利用可能",
   "onboarding.engines.needsSetup": "セットアップが必要",
-  "onboarding.engines.readyLocal": "インストール済み — ローカルモデルで使えます。",
-  "onboarding.engines.readyCloud": "インストール済み — ボットを動かせます。",
   "onboarding.perms.title": "アクセス許可",
   "onboarding.perms.intro": "任意です。その機能を使うと指示したときだけ利用します。",
   "onboarding.perms.mic": "マイクと音声",

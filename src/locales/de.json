@@ -566,8 +566,6 @@
   "onboarding.engines.intro": "Bots laufen auf KI-Werkzeugen, die auf diesem Rechner installiert sind — das haben wir gefunden.",
   "onboarding.engines.ready": "Bereit",
   "onboarding.engines.needsSetup": "Einrichtung nötig",
-  "onboarding.engines.readyLocal": "Installiert — bereit für ein lokales Modell.",
-  "onboarding.engines.readyCloud": "Installiert — bereit, Bots anzutreiben.",
   "onboarding.perms.title": "Berechtigungen",
   "onboarding.perms.intro": "Optional und nur dann genutzt, wenn du die Funktion verlangst.",
   "onboarding.perms.mic": "Mikrofon & Sprache",

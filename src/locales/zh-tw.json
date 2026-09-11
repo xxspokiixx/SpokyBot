@@ -595,8 +595,6 @@
   "onboarding.engines.intro": "機器人會透過這台電腦上已安裝的 AI 工具執行——以下是我們找到的項目。",
   "onboarding.engines.ready": "已就緒",
   "onboarding.engines.needsSetup": "需要設定",
-  "onboarding.engines.readyLocal": "已安裝——可使用本機模型。",
-  "onboarding.engines.readyCloud": "已安裝——可用來驅動機器人。",
   "onboarding.perms.title": "權限",
   "onboarding.perms.intro": "為選用項目，只有在你要求使用該功能時才會用到。",
   "onboarding.perms.mic": "麥克風與語音",

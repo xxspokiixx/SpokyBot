@@ -566,8 +566,6 @@
   "onboarding.engines.intro": "बॉट इस कंप्यूटर पर इंस्टॉल किए गए AI टूल पर चलते हैं — हमें ये मिले।",
   "onboarding.engines.ready": "तैयार",
   "onboarding.engines.needsSetup": "सेटअप चाहिए",
-  "onboarding.engines.readyLocal": "इंस्टॉल हो गया — लोकल मॉडल के लिए तैयार।",
-  "onboarding.engines.readyCloud": "इंस्टॉल हो गया — बॉट चलाने के लिए तैयार।",
   "onboarding.perms.title": "अनुमतियाँ",
   "onboarding.perms.intro": "वैकल्पिक — और सिर्फ़ तब इस्तेमाल होती हैं जब आप वह सुविधा माँगें।",
   "onboarding.perms.mic": "माइक्रोफ़ोन और स्पीच",

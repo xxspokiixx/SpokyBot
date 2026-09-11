@@ -566,8 +566,6 @@
   "onboarding.engines.intro": "Les bots s'appuient sur des outils d'IA installés sur cet ordinateur — voici ce que nous avons trouvé.",
   "onboarding.engines.ready": "Prêts",
   "onboarding.engines.needsSetup": "À configurer",
-  "onboarding.engines.readyLocal": "Installé — prêt pour un modèle local.",
-  "onboarding.engines.readyCloud": "Installé — prêt à faire tourner des bots.",
   "onboarding.perms.title": "Autorisations",
   "onboarding.perms.intro": "Facultatives, et utilisées uniquement quand vous demandez la fonctionnalité.",
   "onboarding.perms.mic": "Micro et parole",
