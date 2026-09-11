@@ -5772,6 +5772,7 @@ const webhooks = new WebhookManager({
     return !bot ? "missing" : bot.busy ? "busy" : "ready";
   },
   enqueue: (input) => routines!.enqueueWebhook(input),
+  findRun: (webhookId, deliveryId) => routines!.webhookRunReceipt(webhookId, deliveryId),
   cancelQueued: (webhookId, message) => routines!.cancelQueuedWebhook(webhookId, message),
   pendingRuns: (webhookId) => routines!.activeWebhookRunCount(webhookId),
 });
