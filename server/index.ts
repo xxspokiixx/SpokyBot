@@ -1570,6 +1570,13 @@ const approvalModeForTurn = (bot: BotRecord, peerInitiated = false): ApprovalMod
 function handleDesktopTrustedApprovalMessage(raw: unknown): boolean {
   if (!raw || typeof raw !== "object" || Array.isArray(raw)) return false;
   const message = raw as Record<string, unknown>;
+  const threadCanReceiveGrant = (bot: BotRecord): boolean => {
+    const threadId = bot.approvalGrant?.threadId;
+    if (!threadId) return true;
+    const target = store.projectBotForTask(bot.id, threadId);
+    return Boolean(target && !threadBusy(bot.id, threadId) &&
+      registry.cliTarget(target.modelSelection.instanceId)?.driverKind === registry.cliTarget(bot.modelSelection.instanceId)?.driverKind);
+  };
   if (message.type === "approval-trusted-mode-commit") {
     const requestId = typeof message.requestId === "string" && /^[A-Za-z0-9_-]{1,80}$/.test(message.requestId)
       ? message.requestId
@@ -1587,8 +1594,12 @@ function handleDesktopTrustedApprovalMessage(raw: unknown): boolean {
       bot.approvalGrant.phase === "committed" &&
       bot.approvalMode === mode &&
       !bot.busy &&
+      threadCanReceiveGrant(bot) &&
       supportsApprovalMode(registry.cliTarget(bot.modelSelection.instanceId)?.driverKind, mode)
     ) {
+      if (bot.approvalGrant.threadId) {
+        store.patchTask(botId, bot.approvalGrant.threadId, { approvalMode: mode, autoApprove: false });
+      }
       store.patchBot(botId, { approvalGrant: undefined });
     } else if (bot?.approvalGrant?.requestId === requestId) {
       store.patchBot(botId, { approvalMode: "ask", autoApprove: false, approvalGrant: undefined });
@@ -1629,7 +1640,7 @@ function handleDesktopTrustedApprovalMessage(raw: unknown): boolean {
         return true;
       }
       store.patchBot(botId, {
-        approvalGrant: { requestId, mode, phase: "confirmed" },
+        approvalGrant: { ...bot.approvalGrant, requestId, mode, phase: "confirmed" },
       });
       confirm(true);
       return true;
@@ -1679,7 +1690,7 @@ function handleDesktopTrustedApprovalMessage(raw: unknown): boolean {
       }
       // Still inert: Electron must receive this acknowledgement and request
       // finalization before the durable mode can affect any turn.
-      store.patchBot(botId, { approvalGrant: { requestId, mode, phase: "activated" } });
+      store.patchBot(botId, { approvalGrant: { ...bot.approvalGrant, requestId, mode, phase: "activated" } });
       activate(true);
       return true;
     }
@@ -1717,11 +1728,12 @@ function handleDesktopTrustedApprovalMessage(raw: unknown): boolean {
       bot.approvalGrant.phase === "activated" &&
       bot.approvalMode === mode &&
       !bot.busy &&
+      threadCanReceiveGrant(bot) &&
       supportsApprovalMode(registry.cliTarget(bot.modelSelection.instanceId)?.driverKind, mode)
     ) {
       // Durable but still inert. Electron must observe this exact ACK before
       // sending the one-way commit release that clears the journal.
-      store.patchBot(botId, { approvalGrant: { requestId, mode, phase: "committed" } });
+      store.patchBot(botId, { approvalGrant: { ...bot.approvalGrant, requestId, mode, phase: "committed" } });
       finalize(true);
       return true;
     }
@@ -1763,6 +1775,20 @@ function handleDesktopTrustedApprovalMessage(raw: unknown): boolean {
     return true;
   }
   const currentMode = approvalModeFor(existing);
+  const threadId = message.threadId;
+  if (threadId !== undefined) {
+    const target = typeof threadId === "string" && /^[\w-]{1,128}$/.test(threadId)
+      ? store.projectBotForTask(botId, threadId) : null;
+    if (!target || (mode !== "full" && mode !== "custom") || currentMode !== mode || existing.approvalGrant) {
+      respond({ ok: false, error: "Choose this bot's approval level in bot settings before applying it to an existing thread" });
+      return true;
+    }
+    if (threadBusy(botId, threadId as string) ||
+      registry.cliTarget(target.modelSelection.instanceId)?.driverKind !== registry.cliTarget(existing.modelSelection.instanceId)?.driverKind) {
+      respond({ ok: false, error: "Stop this thread and use the bot's provider before applying its approval level" });
+      return true;
+    }
+  }
   const emergencyDowngrade = existing.busy && isEmergencyApprovalDowngrade(currentMode, mode);
   const clearsPendingElevation = mode === "ask" && existing.approvalGrant !== undefined;
   if (existing.busy && !emergencyDowngrade && !clearsPendingElevation) {
@@ -1791,7 +1817,7 @@ function handleDesktopTrustedApprovalMessage(raw: unknown): boolean {
     approvalMode: mode,
     autoApprove: mode === "auto",
     approvalGrant: mode === "full" || mode === "custom"
-      ? { requestId, mode, phase: "prepared" }
+      ? { requestId, mode, phase: "prepared", ...(typeof threadId === "string" ? { threadId } : {}) }
       : undefined,
   });
   if (!updated) {
@@ -13140,7 +13166,10 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
         const mode = body.approvalMode ?? (body.autoApprove ? "auto" : "ask");
         // Elevated modes still require the trusted desktop transition. A
         // thread settings PATCH cannot manufacture that grant.
-        if (mode !== "ask" && mode !== "auto") return json(res, 403, { error: "Full and Custom access require confirmation in bot settings" });
+        if (mode !== "ask" && mode !== "auto" && mode !== "edits") return json(res, 403, { error: "Full and Custom access require trusted desktop confirmation" });
+        if (!supportsApprovalMode(registry.cliTarget(current.modelSelection.instanceId)?.driverKind, mode)) {
+          return json(res, 400, { error: "This provider does not support the selected approval level" });
+        }
         if (threadBusy(current.id, current.threadId)) return json(res, 409, { error: "stop this thread before changing its approval mode" });
         if (current.approvalGrant) return json(res, 409, { error: "the bot's approval mode is still being confirmed" });
         if (mode === "auto" && approvalModeFor(current) !== "auto" && auth.kind === "loopback" && !DESKTOP_MANAGED && !req.headers.origin && store.bots.some((bot) => bot.busy)) {

@@ -116,6 +116,10 @@ responsive layouts, theme contrast, and status refreshes without losing drafts.
 The [Claude account recipe](claude-account.md) checks sign-out, cancellation and
 retry against an offline Claude CLI confined to a disposable home.
 
+The [provider recovery recipe](provider-recovery.md) verifies real Grok image
+transport and Claude authentication against loopback APIs, plus scoped thread
+approvals and provider safety errors in an isolated desktop UI.
+
 The [Codex account recipe](codex-account.md) checks account switching against an
 offline Codex CLI whose identity is synthetic and whose credential directory is empty.
 

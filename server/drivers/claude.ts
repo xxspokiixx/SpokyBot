@@ -189,6 +189,32 @@ function inheritsUserConfig(env: NodeJS.ProcessEnv): boolean {
   return env.OMB_CLAUDE_INHERIT_USER_CONFIG === "1";
 }
 
+/** Retain the selected CLI account's authentication without importing its
+ * hooks, permissions, MCP servers or personal instructions. Explicit OMB
+ * connections/local endpoints own their entire routing + credential pair. */
+export function readClaudeAuthSettings(
+  env: NodeJS.ProcessEnv,
+  instanceEnvironment: NodeJS.ProcessEnv = {},
+): { env?: Record<string, string>; apiKeyHelper?: string } {
+  if (CLAUDE_ACCOUNT_ENV_KEYS.some((key) => instanceEnvironment[key])) return {};
+  try {
+    const settings = JSON.parse(readFileSync(join(resolveClaudeConfigDir(undefined, env), "settings.json"), "utf8"));
+    const authEnv: Record<string, string> = {};
+    for (const key of CLAUDE_ACCOUNT_ENV_KEYS) {
+      if (!key.endsWith("_FILE_DESCRIPTOR") && typeof settings?.env?.[key] === "string") {
+        authEnv[key] = settings.env[key];
+      }
+    }
+    return {
+      ...(Object.keys(authEnv).length ? { env: authEnv } : {}),
+      ...(typeof settings?.apiKeyHelper === "string" && settings.apiKeyHelper.trim()
+        ? { apiKeyHelper: settings.apiKeyHelper } : {}),
+    };
+  } catch {
+    return {};
+  }
+}
+
 /** MCP servers the bot's own project declares in `<cwd>/.mcp.json`.
  *
  * The CLI would find this file itself, but the harness launches it with
@@ -1145,6 +1171,11 @@ export const ClaudeDriver: ProviderDriver<ClaudeConfig> = {
       }
 
       const env = environment(turnModel);
+      const authSettings = isolated && !injected.injected
+        ? readClaudeAuthSettings(env, input.environment) : {};
+      const authSettingsPath = mcpConfigPath && Object.keys(authSettings).length
+        ? join(dirname(mcpConfigPath), "auth-settings.json") : null;
+      if (authSettingsPath) args.push("--settings", authSettingsPath);
       // Our approvals and browser credentials expire at the user-turn
       // boundary. Native background workers cannot outlive that boundary;
       // parallel bot work must use the harness's durable delegate_bot path.
@@ -1152,7 +1183,7 @@ export const ClaudeDriver: ProviderDriver<ClaudeConfig> = {
       const cwd = turn.cwd ?? homedir();
       // Everything that shapes the process, minus session/turn-specific temp
       // paths. Their contents are represented directly in the key instead.
-      const privateFileFlags = new Set(["--mcp-config"]);
+      const privateFileFlags = new Set(["--mcp-config", "--settings"]);
       const keyArgs = args.filter((a, i) => !privateFileFlags.has(a) && !privateFileFlags.has(args[i - 1] ?? ""));
       const argsKey = JSON.stringify({
         args: keyArgs,
@@ -1164,6 +1195,11 @@ export const ClaudeDriver: ProviderDriver<ClaudeConfig> = {
         model: injected.model ?? null,
         base: env.ANTHROPIC_BASE_URL ?? null,
         configDir: env.CLAUDE_CONFIG_DIR ?? null,
+        // Rotating an account's key/helper must not reuse the old process.
+        auth: createHash("sha256").update(JSON.stringify({
+          settings: authSettings,
+          env: Object.fromEntries(CLAUDE_ACCOUNT_ENV_KEYS.map((key) => [key, env[key]])),
+        })).digest("hex"),
       });
 
       // Reuse the live process when it is idle, unchanged, and is the session
@@ -1298,6 +1334,9 @@ export const ClaudeDriver: ProviderDriver<ClaudeConfig> = {
         // Write once, only after the broker has selected its real endpoint.
         if (mcpConfigPath) {
           writeFileSync(mcpConfigPath, JSON.stringify({ mcpServers }), { mode: 0o600 });
+        }
+        if (authSettingsPath) {
+          writeFileSync(authSettingsPath, JSON.stringify(authSettings), { mode: 0o600 });
         }
         if (sessionId) args.push("--resume", sessionId);
         else args.push("--session-id", newSessionId!);
