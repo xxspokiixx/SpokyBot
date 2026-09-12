@@ -21,12 +21,20 @@ conversation messages, archived membership, rejected nonempty deletion and
 explicit empty-team deletion. API requests and `control-omb` wait/messages
 results are kept beside the fixture log in `*.team-lifecycle.json`.
 
+A second real process restart uses legacy bot and group records needing
+migration beside a deliberately malformed team registry. Startup keeps both
+conversations readable and persists their task migrations, logs a diagnostic,
+and leaves the malformed file byte-for-byte unchanged. Later team and shared
+instruction writes still fail closed until that file is repaired.
+
 The renderer test uses `control-omb ui launch`, opens **Create team**, leaves it
 empty, moves two bots through Team map, edits shared instructions and reloads.
 A second fixture client moves the bots out; live updates retain the empty team
 and expose rename/delete. Rename preserves instructions; delete confirms that
 the team's instructions will be removed. It captures
 `.omb-scratch/verify-evidence/team-lifecycle.png` before deletion.
+New lifecycle labels use the existing string catalog; untranslated packs fall
+back to the English labels without changing or regenerating other translations.
 
 The owner API keeps the existing `/api/sidebar-sections` name for older clients:
 

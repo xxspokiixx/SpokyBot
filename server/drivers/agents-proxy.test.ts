@@ -348,6 +348,9 @@ describe("agents-proxy MCP surface", () => {
       "start_thread",
       "post_to_room",
       "create_bot",
+      "list_team_setup",
+      "propose_team_setup",
+      "propose_bot_deletion",
       "create_room",
       "manage_room",
       "request_credential",
@@ -379,6 +382,7 @@ describe("agents-proxy MCP surface", () => {
     const list = await rpc("tools/list");
     const readNames = [
       "list_bots", "list_rooms", "check_delegation", "wait_delegation", "list_threads",
+      "list_team_setup",
       "session_search", "session_read", "list_routines", "skills_list",
     ];
     expect(list.result.tools.filter((tool: any) => tool.annotations?.readOnlyHint)

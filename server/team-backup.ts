@@ -227,6 +227,9 @@ export function importTeamBackup(store: Store, routines: RoutineManager, input: 
     // every fresh ID, even a record that never reached the result arrays.
     for (const group of store.groups) if (!existingGroupIds.has(group.id)) store.deleteGroup(group.id);
     for (const bot of store.bots) if (!existingBotIds.has(bot.id)) store.deleteBot(bot.id);
+    for (const section of sections.values()) {
+      if (store.sections.includes(section)) store.changeEmptySection(section, null);
+    }
     throw error;
   }
 }

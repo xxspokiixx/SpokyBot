@@ -3,6 +3,7 @@ import { createPortal } from "react-dom";
 import { X } from "lucide-react";
 import { api, useStore, type Bot } from "@/state/store";
 import { BotPickerList } from "./BotPickerList";
+import { t } from "@/lib/i18n";
 
 /** A team may start empty; choosing bots moves their membership, never copies them. */
 export function TeamDialog({ section, rename = false, onClose }: {
@@ -23,12 +24,12 @@ export function TeamDialog({ section, rename = false, onClose }: {
     (dialog.current?.querySelector<HTMLElement>("input") ?? dialog.current?.querySelector<HTMLElement>("button"))?.focus();
     return () => { if (opener?.isConnected) opener.focus(); };
   }, []);
-  const title = rename ? "Rename empty team" : section ? `Move bots to ${section}` : "Create team";
+  const title = rename ? t("team.renameEmpty") : section ? t("team.moveTo", { name: section }) : t("team.create");
   const candidates = state.bots.filter((bot) => !bot.hidden && (!section || bot.section?.trim() !== section));
   const save = async () => {
     if (saving || !name.trim() || (section && !rename && !picked.size)) return;
     if (!section && [...(state.sections ?? []), ...state.bots.map((bot) => bot.section), ...state.groups.map((group) => group.section)].includes(name.trim())) {
-      setError("A team with that name already exists. Use Move bots on its team card.");
+      setError(t("team.duplicate"));
       return;
     }
     setSaving(true);
@@ -64,20 +65,20 @@ export function TeamDialog({ section, rename = false, onClose }: {
         }}>
         <div className="mb-3 flex items-center justify-between gap-3">
           <h2 id="team-dialog-title" className="text-[17px] font-semibold">{title}</h2>
-          <button aria-label="Close team dialog" disabled={saving} onClick={onClose} className="rounded-lg p-1.5 text-ink-secondary hover:bg-raised"><X size={18} /></button>
+          <button aria-label={t("team.closeDialog")} disabled={saving} onClick={onClose} className="rounded-lg p-1.5 text-ink-secondary hover:bg-raised"><X size={18} /></button>
         </div>
-        {(!section || rename) && <label className="mb-3 block text-[13px] text-ink-secondary">Team name
+        {(!section || rename) && <label className="mb-3 block text-[13px] text-ink-secondary">{t("team.name")}
           <input value={name} maxLength={60} disabled={saving} onChange={(event) => setName(event.target.value)}
             onKeyDown={(event) => { if (event.key === "Enter") void save(); }}
             className="mt-1 w-full rounded-lg border border-hairline/50 bg-inset px-3 py-2 text-[14px] text-ink" />
         </label>}
         {!rename && <>
           <p className="mb-3 text-[13px] leading-relaxed text-ink-secondary">
-            {section ? "Choose existing bots to move here." : "Start empty, or choose existing bots to move here."} Moving changes who they can work with and which shared instructions they read. Their chats stay with them.
+            {section ? t("team.moveIntro") : t("team.createIntro")} {t("team.moveWarning")}
           </p>
           <fieldset disabled={saving}>
-            <legend className="mb-1 text-[12px] font-medium text-ink-secondary">Existing bots</legend>
-            <BotPickerList bots={candidates} picked={picked} emptyHint="No other bots to move. You can add bots later." onToggle={(id) => setPicked((previous) => {
+            <legend className="mb-1 text-[12px] font-medium text-ink-secondary">{t("team.existingBots")}</legend>
+            <BotPickerList bots={candidates} picked={picked} emptyHint={t("team.noBots")} onToggle={(id) => setPicked((previous) => {
               const next = new Set(previous);
               if (next.has(id)) next.delete(id); else next.add(id);
               return next;
@@ -86,10 +87,10 @@ export function TeamDialog({ section, rename = false, onClose }: {
         </>}
         {error && <p role="alert" className="mt-3 text-[13px] text-danger">{error}</p>}
         <div className="mt-4 flex justify-end gap-2">
-          <button disabled={saving} onClick={onClose} className="rounded-lg px-3 py-2 text-[13px] text-ink-secondary hover:bg-raised">Cancel</button>
+          <button disabled={saving} onClick={onClose} className="rounded-lg px-3 py-2 text-[13px] text-ink-secondary hover:bg-raised">{t("common.cancel")}</button>
           <button disabled={saving || !name.trim() || Boolean(section && !rename && !picked.size)} onClick={() => void save()}
             className="rounded-lg bg-accent px-4 py-2 text-[13px] font-medium text-white disabled:opacity-40">
-            {saving ? "Saving…" : rename ? "Save name" : section ? `Move ${picked.size || "selected"} bots` : "Create team"}
+            {saving ? t("team.saving") : rename ? t("folder.saveName") : section ? picked.size ? t(picked.size === 1 ? "team.moveOne" : "team.moveMany", { count: picked.size }) : t("team.moveSelected") : t("team.create")}
           </button>
         </div>
       </div>

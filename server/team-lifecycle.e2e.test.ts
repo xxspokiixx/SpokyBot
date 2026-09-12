@@ -80,15 +80,18 @@ it("retains empty teams, moves existing bots, and keeps legacy imports additive 
       OMB_PORT: new URL(url).port, OMB_WEBHOOK_PORT: String(Number(new URL(url).port) + 1),
       PATH: dirname(process.execPath), FAKE_CLAUDE_MODE: "happy",
     });
-    const log = openSync(logPath, "a", 0o600);
-    restarted = spawn(process.execPath, ["--experimental-strip-types", fileURLToPath(new URL("./index.ts", import.meta.url))], {
-      cwd: fileURLToPath(new URL("..", import.meta.url)), env, stdio: ["ignore", log, log],
-    });
-    closeSync(log);
-    await expect.poll(async () => {
-      if (restarted?.exitCode !== null) throw new Error(readFileSync(logPath, "utf8"));
-      return fetch(url + "/api/health").then(response => response.ok).catch(() => false);
-    }, { timeout: 15_000, interval: 150 }).toBe(true);
+    const restartFixture = async () => {
+      const log = openSync(logPath, "a", 0o600);
+      restarted = spawn(process.execPath, ["--experimental-strip-types", fileURLToPath(new URL("./index.ts", import.meta.url))], {
+        cwd: fileURLToPath(new URL("..", import.meta.url)), env, stdio: ["ignore", log, log],
+      });
+      closeSync(log);
+      await expect.poll(async () => {
+        if (restarted?.exitCode !== null) throw new Error(readFileSync(logPath, "utf8"));
+        return fetch(url + "/api/health").then(response => response.ok).catch(() => false);
+      }, { timeout: 15_000, interval: 150 }).toBe(true);
+    };
+    await restartFixture();
     const state = await api("/api/bots?messages=0");
     expect(state.sections).toEqual(expect.arrayContaining(["Research", "Engineering", "Launch", "Untouched empty"]));
     expect(state.sections).not.toContain("Delivery");
@@ -99,6 +102,38 @@ it("retains empty teams, moves existing bots, and keeps legacy imports additive 
     await api("/api/sidebar-sections?section=Launch", "DELETE");
     await api("/api/section-context?section=Launch", "GET", undefined, 404);
     expect(readFileSync(logPath, "utf8")).not.toMatch(/ReferenceError|store: change listener threw/);
+
+    // The team file is independent of bot/group transcripts. A malformed
+    // registry must not abort startup, including legacy migration saves.
+    const room = (await control("new-channel", "--name", "Recovery room", "--members", a.id) as any).channel;
+    await control("send-channel", "--channel", room.id, "--text", "Keep this group conversation through recovery.");
+    expect(await control("wait", "--channel", room.id, "--timeout", "30")).toMatchObject({ status: "settled" });
+    const roomMessages = (await control("messages", "--channel", room.id, "--limit", "10") as any).messages;
+    await waitForExit(restarted, { signal: "SIGTERM" });
+    const legacyBots = JSON.parse(readFileSync(join(dataDir, "bots.json"), "utf8"));
+    const legacyGroups = JSON.parse(readFileSync(join(dataDir, "groups.json"), "utf8"));
+    const legacyBot = legacyBots.find((bot: any) => bot.id === a.id);
+    const legacyGroup = legacyGroups.find((group: any) => group.id === room.id);
+    delete legacyBot.tasks; delete legacyBot.soulHash; legacyBot.section = "Recovered bot team";
+    delete legacyGroup.tasks; delete legacyGroup.defaultResponder; legacyGroup.section = "Recovered group team";
+    writeFileSync(join(dataDir, "bots.json"), JSON.stringify(legacyBots));
+    writeFileSync(join(dataDir, "groups.json"), JSON.stringify(legacyGroups));
+    const malformed = '{"version":1,"contexts":';
+    const registryFile = join(dataDir, "section-contexts.json");
+    writeFileSync(registryFile, malformed);
+    await restartFixture();
+    const recovered = await api("/api/bots?messages=0");
+    expect(recovered.bots.find((bot: any) => bot.id === a.id)).toMatchObject({ section: "Recovered bot team", tasks: [{ threadId: a.activeTaskId }] });
+    expect(recovered.groups.find((group: any) => group.id === room.id)).toMatchObject({ section: "Recovered group team", defaultResponder: { kind: "member", botId: a.id } });
+    expect(await messages()).toEqual(transcript);
+    expect((await control("messages", "--channel", room.id, "--limit", "10") as any).messages).toEqual(roomMessages);
+    expect(JSON.parse(readFileSync(join(dataDir, "bots.json"), "utf8")).find((bot: any) => bot.id === a.id).tasks).toHaveLength(1);
+    expect(JSON.parse(readFileSync(join(dataDir, "groups.json"), "utf8")).find((group: any) => group.id === room.id).tasks).toHaveLength(1);
+    await api("/api/sidebar-sections", "POST", { name: "Must not overwrite recovery data" }, 500);
+    await api("/api/section-context?section=Recovered%20bot%20team", "PUT", { text: "Must not replace the damaged file" }, 500);
+    expect(readFileSync(registryFile, "utf8")).toBe(malformed);
+    expect(readFileSync(logPath, "utf8")).toContain("[teams] Startup could not register team names");
+    evidence.push({ malformedRegistryRestart: true, legacyBotAndGroupMigrated: true, conversationsRetained: true, laterTeamWritesRejected: true });
   } finally {
     await waitForExit(restarted, { signal: "SIGTERM" });
     await fixture.close();

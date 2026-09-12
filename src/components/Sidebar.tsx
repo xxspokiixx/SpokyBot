@@ -1773,7 +1773,7 @@ export function Sidebar({ open, onClose }: { open: boolean; onClose: () => void 
                   onClick={() => { setPlusOpen(false); setNewTeam(true); }}
                   className="flex w-full items-center gap-3 px-3.5 py-2 text-left text-[14px] text-ink hover:bg-raised/70"
                 >
-                  <FolderPlus size={16} className="text-ink-secondary" /> Create team
+                  <FolderPlus size={16} className="text-ink-secondary" /> {t("team.create")}
                 </button>}
                 {!remoteClient && <>
                 <button
@@ -1933,9 +1933,9 @@ export function Sidebar({ open, onClose }: { open: boolean; onClose: () => void 
                       />
                     ))}
                     {!remoteClient && sectionName && layoutInteractive && sectionChiefItems.length + sectionGroupItems.length + sectionBotItems.length === 0 && (
-                      <button onClick={() => setMoveToTeam(sectionName)} aria-label={`Add bots to ${sectionName}`}
+                      <button onClick={() => setMoveToTeam(sectionName)} aria-label={t("team.addBotsTo", { name: sectionName })}
                         className="mx-3 my-1 flex items-center gap-1.5 rounded-md px-2 py-1.5 text-[12px] text-ink-secondary hover:bg-raised hover:text-ink">
-                        <Plus size={13} /> Add bots
+                        <Plus size={13} /> {t("team.addBots")}
                       </button>
                     )}
                   </>

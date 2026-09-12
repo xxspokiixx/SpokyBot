@@ -17,6 +17,7 @@ import { cn } from "@/lib/cn";
 import { BotInstructionsDialog } from "./BotInstructionsDialog";
 import { TeamDialog } from "./TeamDialog";
 import { ConfirmDialog } from "./ConfirmDialog";
+import { t } from "@/lib/i18n";
 
 const statusTone = {
   success: "bg-success",
@@ -139,7 +140,7 @@ function SectionContextDialog({ section, label, onClose }: { section: string; la
 
   const requestClose = useCallback(() => {
     if (savingRef.current) return;
-    if (dirtyRef.current && !window.confirm("Discard unsaved changes to these shared instructions?")) return;
+    if (dirtyRef.current && !window.confirm(t("team.instructionsDiscard"))) return;
     onCloseRef.current();
   }, []);
 
@@ -242,17 +243,17 @@ function SectionContextDialog({ section, label, onClose }: { section: string; la
             <div className="flex items-center gap-2">
               <BookOpen size={19} className="text-accent" />
               <h2 id="section-context-title" className="text-[20px] font-semibold tracking-[-0.01em] text-ink">
-                {label} shared instructions
+                {t("team.instructionsTitle", { name: label })}
               </h2>
             </div>
             <p className="mt-1.5 max-w-[520px] text-[12.5px] leading-relaxed text-ink-secondary">
-              Shared instructions shown to every bot in this team at the start of each turn. Only you can edit them.
+              {t("team.instructionsHint")}
             </p>
           </div>
           <button
             onClick={requestClose}
             disabled={saving}
-            aria-label="Close shared instructions"
+            aria-label={t("team.instructionsClose")}
             className="flex size-9 shrink-0 items-center justify-center rounded-lg text-ink-secondary hover:bg-raised hover:text-ink disabled:opacity-40"
           >
             <X size={19} />
@@ -262,7 +263,7 @@ function SectionContextDialog({ section, label, onClose }: { section: string; la
         <div className="min-h-0 flex-1 overflow-y-auto px-6 py-5 sm:px-8">
           {loading ? (
             <div className="flex min-h-[260px] items-center justify-center text-ink-secondary">
-              <Loader2 size={20} className="animate-spin" aria-label="Loading shared instructions" />
+              <Loader2 size={20} className="animate-spin" aria-label={t("team.instructionsLoading")} />
             </div>
           ) : (
             <>
@@ -271,7 +272,7 @@ function SectionContextDialog({ section, label, onClose }: { section: string; la
                 value={text}
                 onChange={(event) => setText(event.target.value)}
                 placeholder={"Goals\n- Ship the Windows onboarding refresh\n\nDecisions\n- Keep customer data local\n\nPreferences\n- Use concise weekly updates"}
-                aria-label={`${label} shared instructions`}
+                aria-label={t("team.instructionsTitle", { name: label })}
                 className="min-h-[280px] w-full resize-y rounded-xl border border-hairline/60 bg-inset px-4 py-3 font-mono text-[12.5px] leading-relaxed text-ink outline-none placeholder:text-ink-secondary/55 focus:border-accent/50"
               />
               <div className="mt-2 flex items-start justify-between gap-4 text-[11.5px] text-ink-secondary">
@@ -298,7 +299,7 @@ function SectionContextDialog({ section, label, onClose }: { section: string; la
             className="flex items-center gap-2 rounded-lg bg-accent px-4 py-2 text-[13px] font-medium text-white hover:brightness-110 disabled:opacity-40"
           >
             {saving ? <Loader2 size={14} className="animate-spin" /> : <Save size={14} />}
-            Save shared instructions
+            {t("team.instructionsSave")}
           </button>
         </footer>
       </div>
@@ -352,11 +353,11 @@ export function TeamMapPage() {
             <h1 className="text-[18px] font-semibold">Team map</h1>
           </div>
           <p className="mt-1 text-[12.5px] text-ink-secondary">
-            Teams organize your bots and share instructions. Group chats bring bots into one conversation.
+            {t("team.organizationHint")}
           </p>
         </div>
         <div className="flex shrink-0 items-center gap-2">
-        {!remoteClient && <button onClick={() => setTeamEditor({})} className="flex items-center gap-1.5 rounded-lg bg-accent px-3 py-2 text-[13px] font-medium text-white"><Plus size={15} /> Create team</button>}
+        {!remoteClient && <button onClick={() => setTeamEditor({})} className="flex items-center gap-1.5 rounded-lg bg-accent px-3 py-2 text-[13px] font-medium text-white"><Plus size={15} /> {t("team.create")}</button>}
         <button
           onClick={() => void refresh(true)}
           disabled={refreshing}
@@ -382,23 +383,23 @@ export function TeamMapPage() {
                   <h2 className="text-[12px] font-semibold uppercase tracking-[0.08em] text-ink-secondary">{section.name}</h2>
                   <div className="flex flex-wrap items-center justify-end gap-2">
                     {!remoteClient && section.key && <button onClick={() => setTeamEditor({ section: section.key })}
-                      aria-label={`Move bots to ${section.name}`} className="flex items-center gap-1 rounded-md px-1.5 py-1 text-[10.5px] font-medium text-ink-secondary hover:bg-raised"><Users size={12} /> Move bots</button>}
+                      aria-label={t("team.moveTo", { name: section.name })} className="flex items-center gap-1 rounded-md px-1.5 py-1 text-[10.5px] font-medium text-ink-secondary hover:bg-raised"><Users size={12} /> {t("team.move")}</button>}
                     {!remoteClient && <button
                       onClick={() => setContextEditor({ section: section.key, label: section.name })}
                       className="flex items-center gap-1 rounded-md px-1.5 py-1 text-[10.5px] font-medium text-ink-secondary hover:bg-raised hover:text-ink"
-                      aria-label={`Edit ${section.name} shared instructions`}
-                      title="Shared instructions"
+                      aria-label={t("team.instructionsEdit", { name: section.name })}
+                      title={t("team.instructions")}
                     >
-                      <BookOpen size={11} /> Shared instructions
+                      <BookOpen size={11} /> {t("team.instructions")}
                     </button>}
                     {!remoteClient && empty && <>
-                      <button onClick={() => setTeamEditor({ section: section.key, rename: true })} aria-label={`Rename ${section.name} team`} title="Rename empty team" className="rounded-md p-1 text-ink-secondary hover:bg-raised"><Pencil size={12} /></button>
-                      <button onClick={() => setDeletingTeam(section.key)} aria-label={`Delete ${section.name} team`} title="Delete empty team" className="rounded-md p-1 text-ink-secondary hover:bg-raised hover:text-danger"><Trash2 size={12} /></button>
+                      <button onClick={() => setTeamEditor({ section: section.key, rename: true })} aria-label={t("team.renameAria", { name: section.name })} title={t("team.renameEmpty")} className="rounded-md p-1 text-ink-secondary hover:bg-raised"><Pencil size={12} /></button>
+                      <button onClick={() => setDeletingTeam(section.key)} aria-label={t("team.deleteAria", { name: section.name })} title={t("team.deleteEmpty")} className="rounded-md p-1 text-ink-secondary hover:bg-raised hover:text-danger"><Trash2 size={12} /></button>
                     </>}
                     <span className="text-[11px] tabular-nums text-ink-secondary">{section.chiefs.length + section.members.length}</span>
                   </div>
                 </div>
-                {section.chiefs.length + section.members.length === 0 && <p className="py-2 text-[13px] text-ink-secondary">No active bots yet. Move existing bots here when you are ready.</p>}
+                {section.chiefs.length + section.members.length === 0 && <p className="py-2 text-[13px] text-ink-secondary">{t("team.empty")}</p>}
                 <div
                   className={cn(
                     "grid gap-3",
@@ -461,9 +462,9 @@ export function TeamMapPage() {
       )}
       {instructionsBot && <BotInstructionsDialog bot={instructionsBot} onClose={() => setInstructionsBot(null)} />}
       {teamEditor && <TeamDialog {...teamEditor} onClose={() => setTeamEditor(null)} />}
-      <ConfirmDialog open={deletingTeam !== null} title={`Delete ${deletingTeam ?? ""} team?`}
-        body="This deletes the empty team and its shared instructions. This cannot be undone."
-        confirmLabel="Delete team" onCancel={() => setDeletingTeam(null)} onConfirm={() => {
+      <ConfirmDialog open={deletingTeam !== null} title={t("team.deleteTitle", { name: deletingTeam ?? "" })}
+        body={t("team.deleteDescription")}
+        confirmLabel={t("team.delete")} onCancel={() => setDeletingTeam(null)} onConfirm={() => {
           const name = deletingTeam;
           setDeletingTeam(null);
           if (!name) return;

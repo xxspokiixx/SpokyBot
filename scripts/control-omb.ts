@@ -335,6 +335,8 @@ export async function launchVerificationServer(
    * it should accept, so a recipe can prove entitled behaviour offline. */
   enterprise?: { dir: string; licenseKey: string },
   room?: { scripted: boolean },
+  /** Optional repository-owned fake providers for multi-engine setup checks. */
+  extraProviders: Array<"codex"> = [],
 ): Promise<VerificationServer> {
   if (localVm) {
     const endpoint = new URL(localVm.host);
@@ -356,6 +358,9 @@ export async function launchVerificationServer(
   const logPath = join(evidenceDir, `server-${Date.now()}-${process.pid}.log`);
   writeFileSync(join(dataDir, "config.json"), JSON.stringify({
     instances: {
+      ...(extraProviders.includes("codex") ? { codex: {
+        driver: "codex", displayName: "Verification Codex", config: { cli: fileURLToPath(new URL("../server/testing/fake-codex-app-server.ts", import.meta.url)) },
+      } } : {}),
       claude: {
         driver: "claudeAgent",
         displayName: "Verification fixture",

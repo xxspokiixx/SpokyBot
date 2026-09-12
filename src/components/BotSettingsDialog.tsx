@@ -75,6 +75,7 @@ export function BotSettingsDialog({ bot }: { bot: Bot }) {
         bot.browser,
         bot.mcpServers,
         bot.chiefOfStaff,
+        bot.managedSections,
         bot.modelSelection,
       ]),
     [
@@ -93,6 +94,7 @@ export function BotSettingsDialog({ bot }: { bot: Bot }) {
       bot.browser,
       bot.mcpServers,
       bot.chiefOfStaff,
+      bot.managedSections,
       bot.modelSelection,
     ],
   );

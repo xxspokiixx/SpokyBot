@@ -51,7 +51,9 @@ module.exports = async function verifyModelSwitch({ root, url, api, until, grant
     assert.equal(await evaluate("document.activeElement.textContent.trim()"), "Cancel");
     await click("Cancel");
     assert.equal(calls.length, 0);
-    assert.equal((await read()).tasks.find(task => task.threadId === selected.threadId).approvalMode, "custom");
+    const cancelledTask = (await read()).tasks.find(task => task.threadId === selected.threadId);
+    assert.equal(cancelledTask.approvalMode, "custom");
+    assert.equal(cancelledTask.modelSelection.instanceId, "codex");
     await openPicker();
     await selectClaude();
     window.setSize(390, 844);
@@ -59,7 +61,10 @@ module.exports = async function verifyModelSwitch({ root, url, api, until, grant
     assert.equal(await evaluate("(() => { const r = document.querySelector('[role=alertdialog]').getBoundingClientRect(); return r.left >= 0 && r.right <= innerWidth; })()"), true);
     writeFileSync(join(evidence, "thread-confirmation.png"), (await window.webContents.capturePage()).toPNG());
     await click("Switch with Ask");
-    await until(async () => (await read()).tasks.find(task => task.threadId === selected.threadId).modelSelection.instanceId === "claude");
+    await until(async () => {
+      const task = (await read()).tasks.find(task => task.threadId === selected.threadId);
+      return task.modelSelection.instanceId === "claude" && task.approvalMode === "ask";
+    });
     const threadOnly = await read();
     assert.equal(threadOnly.approvalMode, "custom");
     assert.equal(threadOnly.modelSelection.instanceId, "codex");

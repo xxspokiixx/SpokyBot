@@ -99,6 +99,7 @@ export interface OptionCardData {
   skillRequest?: SkillRequestCardData;
   /** Persisted profile proposal used by the server when the user confirms it. */
   profileRequest?: ProfileRequestCardData;
+  teamSetupRequest?: import("../../shared/team-setup").TeamSetupRequest;
   /** The model's own questions and options (Claude's AskUserQuestion), so
    * the card offers choices instead of an unanswerable Allow/Deny. */
   questionRequest?: QuestionRequestCardData;
@@ -357,6 +358,8 @@ export interface Bot {
   pinnedMessageId?: string;
   /** This sidebar section's primary coordinator. */
   chiefOfStaff?: boolean;
+  /** Additional teams the owner explicitly lets this Chief work with. */
+  managedSections?: string[];
   /** When this bot wants to talk to another bot (ask_bot/delegate_bot),
    * pause and ask the user first. Off by default. */
   approvePeerComms?: boolean;
