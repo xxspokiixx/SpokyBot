@@ -13587,7 +13587,7 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
       }
       const stagedSkillCleanups = stagedSkillCleanupsForThread(m[2]);
       const updated = store.deleteTask(m[1], m[2]);
-      if (!updated) return json(res, 400, { error: "a bot keeps at least one task" });
+      if (!updated) return json(res, 404, { error: "no such task" });
       settleDirectFollowup(directTurnGenerationByThread.get(m[2]));
       rejectDeletedThreadSkillStages(stagedSkillCleanups);
       const fresh = botWithThread(updated);

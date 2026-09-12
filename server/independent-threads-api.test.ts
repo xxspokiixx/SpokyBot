@@ -143,6 +143,42 @@ describe("independent bot tasks through the isolated control surface", () => {
     await control(["messages", "--bot", chief.id, "--limit", "15"]);
   }, 60_000);
 
+  it("replaces the final worked thread with blank context but refuses to delete it while running", async () => {
+    const created = await tool("create_bot", { name: "Last thread fixture", instance_id: "claude", model: models[0] });
+    const botId = created.bot.id;
+    const threadId = created.bot.activeTaskId;
+    await control(["send", "--bot", botId, "--task", threadId, "--text", "LAST_THREAD_WORK"]);
+    await dump(models[0]);
+    expect((await api("DELETE", `/api/bots/${botId}/tasks/${threadId}`)).status).toBe(409);
+    writeFileSync(modelFile(models[0], "gate"), "finish");
+    expect((await control(["wait", "--bot", botId, "--task", threadId, "--timeout", "15"])).status).toBe("settled");
+    const before = (await api("GET", "/api/bots")).body.bots.find((bot: any) => bot.id === botId);
+    expect(before.tasks).toHaveLength(1);
+    expect(before.messages.some((message: any) => message.role === "user" && message.text === "LAST_THREAD_WORK")).toBe(true);
+    const artifact = join(session.info.dataDir, "task-workspaces", botId, threadId, "result.txt");
+    writeFileSync(artifact, "Retain generated project files");
+
+    const deleted = await api("DELETE", `/api/bots/${botId}/tasks/${threadId}`);
+    expect(deleted.status).toBe(200);
+    const fresh = deleted.body.bot;
+    expect(fresh.tasks).toHaveLength(1);
+    expect(fresh.threadId).not.toBe(threadId);
+    expect(fresh.tasks[0]).toMatchObject({ threadId: fresh.threadId, title: "New thread", busy: false });
+    expect(fresh.messages).toEqual([]);
+    expect(fresh.modelSelection).toEqual(before.modelSelection);
+    expect(readFileSync(artifact, "utf8")).toBe("Retain generated project files");
+    expect((await api("DELETE", `/api/bots/${botId}/tasks/${threadId}`)).status).toBe(404);
+    const loaded = (await api("GET", "/api/bots")).body.bots.find((bot: any) => bot.id === botId);
+    expect(loaded.threadId).toBe(fresh.threadId);
+    expect(loaded.messages).toEqual([]);
+    await control(["send", "--bot", botId, "--task", fresh.threadId, "--text", "NEW_THREAD_WORK"]);
+    expect((await control(["wait", "--bot", botId, "--task", fresh.threadId, "--timeout", "15"])).status).toBe("settled");
+    const messages = (await api("GET", "/api/bots")).body.bots.find((bot: any) => bot.id === botId).messages;
+    expect(messages.some((message: any) => message.text === "NEW_THREAD_WORK")).toBe(true);
+    expect(messages.some((message: any) => message.text === "LAST_THREAD_WORK")).toBe(false);
+    evidence.push({ deletedThreadId: threadId, replacementThreadId: fresh.threadId, blankReplacement: true, artifactRetained: true });
+  }, 30_000);
+
   it("rejects blank memory replacements, caps new titles, and retains project files after deletion", async () => {
     const created = await tool("create_bot", { name: "Release review fixture", instance_id: "claude", model: models[0] });
     const botId = created.bot.id;

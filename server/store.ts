@@ -2147,10 +2147,10 @@ export class Store {
   }
 
   /** Delete a task and its transcript, retaining generated project files.
-   * A bot always keeps one. */
+   * When no visible tasks remain, replace it with a fresh conversation. */
   deleteTask(botId: string, threadId: string): BotRecord | null {
     const bot = this.bot(botId);
-    if (!bot || !bot.tasks || bot.tasks.length < 2) return null;
+    if (!bot?.tasks) return null;
     if (!bot.tasks.some((t) => t.threadId === threadId)) return null;
     bot.tasks = bot.tasks.filter((t) => t.threadId !== threadId);
     const visible = bot.tasks.find((task) => !task.routineRunId)

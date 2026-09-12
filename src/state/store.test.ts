@@ -182,6 +182,24 @@ describe("independent bot threads", () => {
     expect(state.bots[0]).toMatchObject({ threadId: "second", messages: [], activeLeafId: null, awaitingThreadSnapshot: false });
   });
 
+  it.each(["slim-first", "full-first"])("replaces the only worked thread with an empty task (%s)", (order) => {
+    const onlyThread = { ...bot, busy: false, activity: "idle" as const, unread: false, tasks: bot.tasks!.slice(0, 1) };
+    const otherBot = { ...bot, id: "other-bot", threadId: "other-thread", tasks: [{ threadId: "other-thread", title: "Keep this task", createdAt: 1 }] };
+    const replacement = { threadId: "fresh-thread", title: "New task", createdAt: 3, busy: false, activity: "idle" as const, unread: false };
+    const full = { ...onlyThread, threadId: replacement.threadId, tasks: [replacement], messages: [], activeLeafId: null };
+    const { messages: _messages, ...slim } = full;
+    let state: ReturnType<typeof reducer> = { ...start(), bots: [onlyThread, otherBot] };
+    state = reducer(state, { type: "botPatched", bot: order === "slim-first" ? slim : full });
+    expect(state.bots[0]).toMatchObject({ threadId: replacement.threadId, tasks: [replacement], messages: [], activeLeafId: null });
+    expect(Boolean(state.bots[0]?.awaitingThreadSnapshot)).toBe(order === "slim-first");
+    state = reducer(state, { type: "botPatched", bot: order === "slim-first" ? full : slim });
+    expect(state.bots[0]).toMatchObject({ threadId: replacement.threadId, tasks: [replacement], messages: [], activeLeafId: null, awaitingThreadSnapshot: false });
+    expect(state.selectedId).toBe(bot.id);
+    expect(state.bots[1]).toBe(otherBot);
+    // A late event for the deleted thread cannot repopulate its replacement.
+    expect(reducer(state, { type: "messageAdded", threadId: onlyThread.threadId, message: onlyThread.messages[0]! })).toBe(state);
+  });
+
   it("does not replay old background approvals over the replacement snapshot", () => {
     const stale: Message = { id: "approval", role: "bot", kind: "options", at: 2,
       card: { title: "Review", subtitle: "Old state", options: ["Enable", "Deny"], requestId: "request", tool: "stage_skill" } };
