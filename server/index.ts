@@ -4075,10 +4075,12 @@ const runDelegatedTurn: Parameters<typeof drainDelegations>[3] = (toBotId, rawTe
     const target = store.bot(toBotId);
     const opener = store.bot(sourceBotId);
     const unattended = isUnattended(sourceBotId, sourceThreadId);
-    // The first line of an opened thread is another bot's words: it carries
-    // the same provenance note every relayed peer line does, structurally
-    // (peerAsk) as well as in the text.
-    const peerAsk: Message["peerAsk"] | undefined = openedThreadId && opener
+    // The inbound line is another bot's words whichever way it arrived: an
+    // opened thread's first line carries the shared provenance note, a
+    // classic handoff the "[Delegated by @X" prefix from the drain. Both
+    // record the author structurally (peerAsk) as well as in the text, so
+    // a renderer never has to take the line for the person's own message.
+    const peerAsk: Message["peerAsk"] | undefined = opener
       ? { botId: opener.id, name: opener.name, unattended: unattended || undefined }
       : undefined;
     const text = openedThreadId && opener
