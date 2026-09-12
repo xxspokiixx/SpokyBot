@@ -1,4 +1,6 @@
 {
+  "teamImport.backupCopies": "Imported bots and sections are added as new copies; duplicate names get numbered.",
+  "teamImport.newSection": "Adds a new section for {name}. Existing sections stay unchanged; duplicate names get numbered.",
   "noEngines.title": "Install an AI engine to get started",
   "noEngines.intro": "{app} doesn't ship a model of its own — your bots run on an AI CLI installed on this computer, using your existing login. Set up any one of these and your bots come alive.",
   "engines.cloud": "Cloud",

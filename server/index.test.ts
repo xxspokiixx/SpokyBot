@@ -3577,7 +3577,8 @@ describe("harness HTTP API", () => {
 
       const created = await api("POST", `/api/teams/import?mode=project&cwd=${encodeURIComponent(folder)}`, exported.body);
       expect(created.status).toBe(201);
-      expect(created.body.group).toMatchObject({ name: "Client XY", cwd: folder });
+      expect(created.body.group).toMatchObject({ name: "Client XY", cwd: folder, section: "Client XY" });
+      expect(created.body.bots.every((bot: { section?: string }) => bot.section === "Client XY")).toBe(true);
       // the room is made of exactly the bots this import created
       expect(created.body.group.memberIds.sort()).toEqual(created.body.bots.map((bot: { id: string }) => bot.id).sort());
       // the folder is the room's WISH; the store pins it on the first turn
@@ -3587,7 +3588,8 @@ describe("harness HTTP API", () => {
 
       // an explicit name wins over the team name, and the folder is optional
       const named = await api("POST", "/api/teams/import?mode=project&room=Client%20XY%20-%20Ads", exported.body);
-      expect(named.body.group).toMatchObject({ name: "Client XY - Ads" });
+      expect(named.body.group).toMatchObject({ name: "Client XY - Ads", section: "Client XY 2" });
+      expect(named.body.bots.every((bot: { section?: string }) => bot.section === "Client XY 2")).toBe(true);
       expect(named.body.group.cwd).toBeUndefined();
 
       for (const room of [created.body.group, named.body.group]) {
@@ -3598,6 +3600,38 @@ describe("harness HTTP API", () => {
       }
     } finally {
       stream.close();
+    }
+  });
+
+  it("allocates editable template sections without colliding with rooms or archived bots", async () => {
+    const stem = "X".repeat(60);
+    const seed = await api("POST", "/api/bots", { name: "Existing section owner", color: "blue", section: `${stem.slice(0, 58)} 2` });
+    expect(seed.status).toBe(201);
+    const original = seed.body.bot;
+    const createdRoom = await api("POST", "/api/groups", { name: "Existing section room", memberIds: [original.id], section: stem.toLowerCase() });
+    expect(createdRoom.status).toBe(201);
+    const room = createdRoom.body.group;
+    expect((await api("PATCH", `/api/bots/${original.id}`, { hidden: true })).status).toBe(200);
+    const before = (await api("GET", "/api/bots")).body;
+    const copies: string[] = [];
+    try {
+      for (const suffix of [3, 4]) {
+        const imported = await api("POST", "/api/teams/import", {
+          format: "openmaus.team", version: 2,
+          team: { name: `${stem} long template name`, members: [{ key: "helper", name: "Template helper", section: "Must not choose destination", appearance: { color: "blue" } }] },
+        });
+        expect(imported.status).toBe(201);
+        copies.push(...imported.body.bots.map((bot: { id: string }) => bot.id));
+        expect(imported.body.bots[0].section).toBe(`${stem.slice(0, 58)} ${suffix}`);
+        // The normal profile API accepts the allocated section unchanged.
+        expect((await api("PATCH", `/api/bots/${copies.at(-1)}`, { section: imported.body.bots[0].section })).status).toBe(200);
+      }
+      const after = (await api("GET", "/api/bots")).body;
+      for (const bot of before.bots) expect(after.bots.find((value: { id: string }) => value.id === bot.id)).toEqual(bot);
+      expect(after.groups).toEqual(before.groups);
+    } finally {
+      await api("DELETE", `/api/groups/${room.id}`);
+      for (const id of [original.id, ...copies]) await api("DELETE", `/api/bots/${id}`);
     }
   });
 
@@ -3681,6 +3715,8 @@ describe("harness HTTP API", () => {
     expect(installed.body.bots).toHaveLength(2);
     expect(installed.body.groups).toHaveLength(1);
     expect(installed.body.routines).toHaveLength(1);
+    expect(installed.body.bots.every((bot: { section?: string }) => bot.section === packageFile.package.name)).toBe(true);
+    expect(installed.body.groups[0].section).toBe(packageFile.package.name);
 
     const scout = installed.body.bots.find((bot: { name: string }) => bot.name.startsWith("Package Scout"));
     const editor = installed.body.bots.find((bot: { name: string }) => bot.name.startsWith("Package Editor"));

@@ -342,6 +342,7 @@ import { scoutProject, suggestTeam } from "./project-scout.ts";
 import { fetchGithubTeam, fetchLibraryTeam, fetchTeamCatalog } from "./team-library.ts";
 import { BOT_PACKAGE_MAX_SKILLS, isBotPackage, packageAgentAsMember, parseBotPackage, renderBotPackageMarkdown } from "./bot-package.ts";
 import { createTeamManifest, importedMemberProfile, parseTeamManifest } from "./team-manifest.ts";
+import { takeImportName } from "../shared/import-name.ts";
 import { readThreadEvents } from "./thread-events.ts";
 import { listenWebhookIngress, webhookCredential, type WebhookIngress } from "./webhook-ingress.ts";
 import { memberTurnSelection } from "./member-turn.ts";
@@ -11272,15 +11273,12 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
         const existingSections = new Set(
           [...store.bots.map((bot) => bot.section), ...store.groups.map((candidate) => candidate.section)]
             .filter((section): section is string => Boolean(section?.trim()))
-            .map((section) => section.toLowerCase()),
+            .map((section) => section.trim().toLowerCase()),
         );
-        let packageSection = pkg?.name;
-        if (packageSection) {
-          const stem = packageSection;
-          for (let suffix = 2; existingSections.has(packageSection.toLowerCase()); suffix++) {
-            packageSection = `${stem} ${suffix}`;
-          }
-        }
+        // Every template gets its own section, including legacy teams and
+        // project imports. Never merge into an existing section (or replace
+        // its Chief). Keep the name editable through the 60-character API.
+        const importSection = takeImportName(importName, existingSections, 60);
         const playbookByKey = new Map((pkg?.playbooks ?? []).map((playbook) => [playbook.key, playbook]));
         const packageSkillByName = new Map((pkg?.skills?.entries ?? []).map((skill) => [skill.name, skill]));
         for (const source of sourceMembers) {
@@ -11296,7 +11294,7 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
             {
               ...importedMemberProfile(member, takenNames),
               modelSelection: selection,
-              ...(packageSection ? { section: packageSection } : {}),
+              section: importSection,
             },
             { seedMessages: false },
           );
@@ -11336,7 +11334,7 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
         // from package-local keys only, then normalized to fresh bot ids.
         for (const room of pkg?.rooms ?? []) {
           const ids = room.members.map((key) => memberIds.get(key)!);
-          let created = store.createGroup(room.name, ids, false, packageSection);
+          let created = store.createGroup(room.name, ids, false, importSection);
           createdGroups.push(created);
           const defaultResponder = room.defaultResponder.kind === "agent"
             ? { kind: "member" as const, botId: memberIds.get(room.defaultResponder.agent)! }
@@ -11371,7 +11369,7 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
         // there is no room pointing at them.
         if (!pkg && importMode === "project" && importedBots.length > 0) {
           const roomName = url.searchParams.get("room")?.trim() || manifest!.team.name;
-          group = store.createGroup(roomName, importedBots.map((bot) => bot.id));
+          group = store.createGroup(roomName, importedBots.map((bot) => bot.id), false, importSection);
           createdGroups.push(group);
           if (projectCwd) {
             // `cwd` is the folder the room WANTS; the store pins it on the

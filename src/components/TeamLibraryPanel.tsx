@@ -1,5 +1,6 @@
 import { track } from "@/lib/analytics";
 import { cn } from "@/lib/cn";
+import { t } from "@/lib/i18n";
 import { teamImportPreview, type PendingTeamImport } from "@/lib/team-import";
 import type { Routine } from "@/lib/routines";
 import { api, useStore, type Bot, type Group } from "@/state/store";
@@ -523,7 +524,9 @@ export function TeamLibraryPanel({
             <footer className="flex flex-col gap-3 border-t border-hairline/35 px-6 py-4 sm:flex-row sm:items-center sm:justify-between sm:px-8">
               <div className="text-[12.5px] text-ink-secondary">
                 Your {currentBotCount > 0 ? `${currentBotCount} existing ${currentBotCount === 1 ? "bot and its" : "bots and their"}` : "existing"} conversations stay unchanged.
-                Imported bots are added as new copies; duplicate names and backup sections get numbered.
+                {" "}{pending.kind === "backup"
+                  ? t("teamImport.backupCopies")
+                  : t("teamImport.newSection", { name: pending.name })}
               </div>
               <button
                 onClick={() => void importTeam()}
