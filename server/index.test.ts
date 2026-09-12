@@ -2755,7 +2755,7 @@ describe("harness HTTP API", () => {
       expect(response).toEqual({
         status: 409,
         body: {
-          error: "A section can have only one Chief of Staff. Choose one Chief or use a section without one.",
+          error: "A team can have only one Chief of Staff. Choose one Chief or use a team without one.",
         },
       });
 
@@ -2782,7 +2782,7 @@ describe("harness HTTP API", () => {
 
       for (const body of [
         { name: "S".repeat(61), botIds: [visible.id] },
-        { name: "Work", botIds: [] },
+        { name: "", botIds: [] },
         { name: "Work", botIds: ["not/an/id"] },
         { name: "Work", botIds: [visible.id], extra: true },
       ]) {

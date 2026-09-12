@@ -641,6 +641,8 @@ export type BotSettingsSection =
 export interface AppState {
   bots: Bot[];
   groups: Group[];
+  /** Persisted named teams; older servers omit this, so clients also derive labels. */
+  sections?: string[];
   instances: InstanceInfo[];
   config: ConfigStatus | null;
   /** selected chat — a bot id OR a group id */
@@ -791,10 +793,12 @@ export type Action =
       type: "hydrate";
       bots: Bot[];
       groups: Group[];
+      sections?: string[];
       computerControl: Record<string, { held: boolean; helpReason: string | null }>;
       botQueuedMessages?: AppState["pendingQueued"];
     }
   | { type: "botQueues"; queues: AppState["pendingQueued"] }
+  | { type: "sections"; sections: string[] }
   | { type: "showRoutines"; section?: "schedule" | "logs"; view?: "calendar" | "list"; botId?: string; routineId?: string }
   | { type: "showTeamMap" }
   | { type: "showChat" }
@@ -1114,6 +1118,7 @@ export function reducer(state: AppState, action: Action): AppState {
         ...state,
         bots: action.bots,
         groups: action.groups,
+        sections: action.sections ?? [],
         computerControl: action.computerControl,
         selectedId,
         backgroundThreadEvents: {},
@@ -1123,6 +1128,8 @@ export function reducer(state: AppState, action: Action): AppState {
         [...action.bots, ...action.groups],
       );
     }
+    case "sections":
+      return { ...state, sections: action.sections };
     case "botQueues":
       return reconcileSnapshotQueues(replaceBotQueues(state, action.queues), [...state.bots, ...state.groups]);
     case "showRoutines":
@@ -1199,7 +1206,11 @@ export function reducer(state: AppState, action: Action): AppState {
     case "groupPatched": {
       const exists = state.groups.some((g) => g.id === action.group.id);
       const groups = exists
-        ? state.groups.map((g) => (g.id === action.group.id ? { ...g, ...action.group, messages: action.group.messages ?? g.messages } : g))
+        ? state.groups.map((g) => (g.id === action.group.id ? {
+            ...g, ...action.group,
+            section: typeof action.group.threadId === "string" || Object.hasOwn(action.group, "section") ? action.group.section : g.section,
+            messages: action.group.messages ?? g.messages,
+          } : g))
         : [{ ...(action.group as Group), messages: action.group.messages ?? [] }, ...state.groups];
       return { ...state, groups };
     }
@@ -1332,7 +1343,7 @@ export function reducer(state: AppState, action: Action): AppState {
         // The slim deletion broadcast can arrive before the full snapshot.
         // Finish that switch once, replaying any events received in between.
         // Later duplicate HTTP snapshots must not overwrite newer messages.
-        return reducer(switching, { type: "taskSwitched", bot: { ...before, ...action.bot, messages: action.bot.messages, browserProfile: action.bot.browserProfile } });
+        return reducer(switching, { type: "taskSwitched", bot: { ...before, ...action.bot, section: action.bot.section, messages: action.bot.messages, browserProfile: action.bot.browserProfile } });
       }
       const patched = updateBot(switching, action.bot.id, (b) => ({
         ...b,
@@ -1344,6 +1355,9 @@ export function reducer(state: AppState, action: Action): AppState {
         // to Own browser (or deleting a shared profile). Do not retain the
         // previous profile's name and selection in another window.
         browserProfile: action.bot.browserProfile,
+        // A complete frame omits section after another client moves the bot
+        // into General. Retaining the old label strands an empty team in UI.
+        section: action.bot.section,
         // Clear immediately on deletion: old approvals must never be sent
         // to the replacement thread while waiting for its transcript.
         messages: switchedThread ? [] : b.messages,
@@ -1860,6 +1874,7 @@ export const initialState: AppState = {
   backgroundThreadEvents: {},
   bots: [],
   groups: [],
+  sections: [],
   instances: [],
   config: null,
   selectedId: "",
@@ -3001,12 +3016,13 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     };
     const loadAll = async (): Promise<boolean> => {
       const chat = () =>
-        api("/api/bots").then(({ bots, groups, computerControl, botQueuedMessages }) => {
+        api("/api/bots").then(({ bots, groups, sections, computerControl, botQueuedMessages }) => {
           if (!alive) return;
           rawDispatch({
             type: "hydrate",
             bots,
             groups: groups ?? [],
+            sections: sections ?? [],
             computerControl: computerControl ?? {},
             botQueuedMessages,
           });
@@ -3075,6 +3091,9 @@ export function StoreProvider({ children }: { children: ReactNode }) {
         bumpPeripheralVersion("webhooks");
       }
       switch (frame.kind) {
+        case "sections":
+          rawDispatch({ type: "sections", sections: frame.sections });
+          break;
         case "bot.queued":
           rawDispatch({ type: "botQueues", queues: frame.queues });
           break;

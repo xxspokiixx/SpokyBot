@@ -49,6 +49,7 @@ Use only mapped, tested commands:
 - [Codex helper event isolation](codex-helpers.md)
 - [Qwen model route selection](qwen-models.md)
 - [Team backups](team-backups.md)
+- [Teams and shared instructions](teams.md)
 - [Full workspace backups](workspace-backups.md)
 - [Fleet: many workspaces on one server](fleet.md)
 - [Workspaces screen and the fleet agent](workspaces.md)

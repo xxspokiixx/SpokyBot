@@ -1237,6 +1237,22 @@ describe("section Chiefs", () => {
     chiefOfStaff,
   });
 
+  it("clears previous membership when a complete bot frame moves it to General", () => {
+    const current = { ...bot("moved", "Delivery"), messages: [] };
+    const { section: _oldSection, ...announcement } = current;
+    const next = reducer({ ...initialState, bots: [current], sections: ["Delivery"] }, { type: "botPatched", bot: announcement });
+    expect(next.bots[0].section).toBeUndefined();
+    expect(next.sections).toEqual(["Delivery"]);
+  });
+
+  it("clears full group membership without treating a partial patch as a move", () => {
+    const group = { id: "group", threadId: "thread", section: "Delivery", name: "Review", memberIds: [], defaultResponder: { kind: "mentions" }, createdAt: 1, bulletin: "", messages: [], unread: false } satisfies Group;
+    const state = { ...initialState, groups: [group] };
+    expect(reducer(state, { type: "groupPatched", group: { id: group.id, unread: true } }).groups[0].section).toBe("Delivery");
+    const { section: _oldSection, ...announcement } = group;
+    expect(reducer(state, { type: "groupPatched", group: announcement }).groups[0].section).toBeUndefined();
+  });
+
   it("hands off only within the patched bot's section", () => {
     const workChief = bot("work-a", "Work", true);
     const workCandidate = bot("work-b", "Work");

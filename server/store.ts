@@ -7,6 +7,7 @@ import { existsSync, readFileSync, mkdirSync, rmSync, unlinkSync } from "node:fs
 import { join } from "node:path";
 
 import { writeFileAtomic } from "./atomic.ts";
+import { ensureSections, readSections, changeEmptySection } from "./section-context.ts";
 import { removeBotFolder, soulFile, soulHash, writeSoulMirror } from "./bot-folder.ts";
 import type { BotProfilePatch } from "./bot-profile.ts";
 import { peerAllowKey, type PeerAction } from "./peer-approval-key.ts";
@@ -553,6 +554,7 @@ export type BotActivity = "working" | "waiting-on-you" | "idle" | "no-signal" | 
 export const ACTIVITY_BUSY: ReadonlySet<BotActivity> = new Set(["working", "waiting-on-you", "no-signal"]);
 
 export type StoreChange =
+  | { type: "sections" }
   | { type: "message"; threadId: string; message: Message }
   | { type: "message.patch"; threadId: string; message: Message }
   | { type: "thread"; threadId: string; activeLeafId: string }
@@ -846,6 +848,7 @@ export class Store {
     } catch {
       this.groups = [];
     }
+    this.rememberSections([...this.bots, ...this.groups].map((record) => record.section));
     // busy never survives a restart — no turn does either. Rooms saved
     // before default responders existed adopt their first member as lead.
     let botsMigrated = false;
@@ -1069,6 +1072,7 @@ export class Store {
   }
 
   private saveBots(bots: BotRecord[] = this.bots) {
+    this.rememberSections([...this.bots, ...bots].map((bot) => bot.section));
     writeFileAtomic(BOTS_FILE, JSON.stringify(bots.map(({ busy: _busy, activity: _activity, ...bot }) => ({
       ...bot,
       tasks: bot.tasks?.map(({ busy: _taskBusy, activity: _taskActivity, ...task }) => task),
@@ -1076,7 +1080,28 @@ export class Store {
   }
 
   private saveGroups() {
+    this.rememberSections(this.groups.map((group) => group.section));
     writeFileAtomic(GROUPS_FILE, JSON.stringify(this.groups.map(({ busyBotId: _busyBotId, ...g }) => g), null, 2));
+  }
+
+  get sections(): string[] { return readSections(); }
+
+  private rememberSections(names: (string | undefined)[]) {
+    if (ensureSections(names)) this.emit({ type: "sections" });
+  }
+
+  /** Empty-only changes cannot merge teams or silently change anybody's access. */
+  changeEmptySection(name: string, nextName: string | null): string | undefined {
+    if (!this.sections.includes(name)) return "No such team";
+    if ([...this.bots, ...this.groups].some((record) => sectionKey(record.section) === name)) {
+      return "Move all bots (including archived bots) and group chats out of this team first";
+    }
+    if (nextName !== null && nextName !== name && this.sections.includes(nextName)) {
+      return "A team with that name already exists";
+    }
+    changeEmptySection(name, nextName);
+    this.emit({ type: "sections" });
+    return undefined;
   }
 
   // ── groups ────────────────────────────────────────────────────────────
@@ -1769,6 +1794,7 @@ export class Store {
       }
       for (const botId of changedIds) this.emit({ type: "bot", botId });
     }
+    this.rememberSections([targetSection]);
     return { ok: true, bots: ids.map((id) => this.bot(id)!) };
   }
 

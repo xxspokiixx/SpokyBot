@@ -65,7 +65,7 @@ describe("additive template imports in the real renderer", () => {
     })()`);
     for (const source of ["library", "file"]) {
       await click("New or share");
-      await click("Teams");
+      await click("Templates");
       if (source === "library") {
         await expect.poll(snapshot, { timeout: 10_000 }).toContain('button "Load"');
         await click("Load");
@@ -74,7 +74,7 @@ describe("additive template imports in the real renderer", () => {
         // Exercise the file input's actual change handler, not the OS picker.
         await evaluate(`(() => { const input = document.querySelector('[role=dialog] input[type=file]'); const transfer = new DataTransfer(); transfer.items.add(new File([JSON.stringify(window.templateFixture)], 'sales.mausteam.json', { type: 'application/json' })); input.files = transfer.files; input.dispatchEvent(new Event('change', { bubbles: true })); return true; })()`);
       }
-      await expect.poll(snapshot, { timeout: 10_000 }).toContain("Adds a new section for Sales crew");
+      await expect.poll(snapshot, { timeout: 10_000 }).toContain("Adds a new team for Sales crew");
       await click("Add team");
       const section = source === "library" ? "Sales crew" : "Sales crew 2";
       await expect.poll(snapshot, { timeout: 10_000 }).toContain(`button "${section}"`);

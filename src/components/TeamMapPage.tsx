@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
-import { ArrowRight, BookOpen, Crown, Loader2, Network, RefreshCw, Save, X } from "lucide-react";
+import { ArrowRight, BookOpen, Crown, Loader2, Network, Pencil, Plus, RefreshCw, Save, Trash2, Users, X } from "lucide-react";
 
 import { BotAvatar } from "./Avatar";
 import { api, formatTime, useStore, type Bot } from "@/state/store";
@@ -15,6 +15,8 @@ import {
 } from "@/lib/team-map";
 import { cn } from "@/lib/cn";
 import { BotInstructionsDialog } from "./BotInstructionsDialog";
+import { TeamDialog } from "./TeamDialog";
+import { ConfirmDialog } from "./ConfirmDialog";
 
 const statusTone = {
   success: "bg-success",
@@ -137,7 +139,7 @@ function SectionContextDialog({ section, label, onClose }: { section: string; la
 
   const requestClose = useCallback(() => {
     if (savingRef.current) return;
-    if (dirtyRef.current && !window.confirm("Discard unsaved changes to this shared context?")) return;
+    if (dirtyRef.current && !window.confirm("Discard unsaved changes to these shared instructions?")) return;
     onCloseRef.current();
   }, []);
 
@@ -240,17 +242,17 @@ function SectionContextDialog({ section, label, onClose }: { section: string; la
             <div className="flex items-center gap-2">
               <BookOpen size={19} className="text-accent" />
               <h2 id="section-context-title" className="text-[20px] font-semibold tracking-[-0.01em] text-ink">
-                {label} shared context
+                {label} shared instructions
               </h2>
             </div>
             <p className="mt-1.5 max-w-[520px] text-[12.5px] leading-relaxed text-ink-secondary">
-              A team brief shown to every bot in this section at the start of each turn. Only you can edit it.
+              Shared instructions shown to every bot in this team at the start of each turn. Only you can edit them.
             </p>
           </div>
           <button
             onClick={requestClose}
             disabled={saving}
-            aria-label="Close shared context"
+            aria-label="Close shared instructions"
             className="flex size-9 shrink-0 items-center justify-center rounded-lg text-ink-secondary hover:bg-raised hover:text-ink disabled:opacity-40"
           >
             <X size={19} />
@@ -260,7 +262,7 @@ function SectionContextDialog({ section, label, onClose }: { section: string; la
         <div className="min-h-0 flex-1 overflow-y-auto px-6 py-5 sm:px-8">
           {loading ? (
             <div className="flex min-h-[260px] items-center justify-center text-ink-secondary">
-              <Loader2 size={20} className="animate-spin" aria-label="Loading shared context" />
+              <Loader2 size={20} className="animate-spin" aria-label="Loading shared instructions" />
             </div>
           ) : (
             <>
@@ -269,7 +271,7 @@ function SectionContextDialog({ section, label, onClose }: { section: string; la
                 value={text}
                 onChange={(event) => setText(event.target.value)}
                 placeholder={"Goals\n- Ship the Windows onboarding refresh\n\nDecisions\n- Keep customer data local\n\nPreferences\n- Use concise weekly updates"}
-                aria-label={`${label} shared context`}
+                aria-label={`${label} shared instructions`}
                 className="min-h-[280px] w-full resize-y rounded-xl border border-hairline/60 bg-inset px-4 py-3 font-mono text-[12.5px] leading-relaxed text-ink outline-none placeholder:text-ink-secondary/55 focus:border-accent/50"
               />
               <div className="mt-2 flex items-start justify-between gap-4 text-[11.5px] text-ink-secondary">
@@ -296,7 +298,7 @@ function SectionContextDialog({ section, label, onClose }: { section: string; la
             className="flex items-center gap-2 rounded-lg bg-accent px-4 py-2 text-[13px] font-medium text-white hover:brightness-110 disabled:opacity-40"
           >
             {saving ? <Loader2 size={14} className="animate-spin" /> : <Save size={14} />}
-            Save context
+            Save shared instructions
           </button>
         </footer>
       </div>
@@ -306,15 +308,19 @@ function SectionContextDialog({ section, label, onClose }: { section: string; la
 }
 
 export function TeamMapPage() {
-  const { state } = useStore();
+  const { state, dispatch } = useStore();
   const remoteClient = window.ogb?.remoteClient?.active === true;
   const [snapshot, setSnapshot] = useState<TeamMapSnapshot>(EMPTY_TEAM_MAP_SNAPSHOT);
   const [refreshing, setRefreshing] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [contextEditor, setContextEditor] = useState<{ section: string; label: string } | null>(null);
   const [instructionsBot, setInstructionsBot] = useState<Bot | null>(null);
+  const [teamEditor, setTeamEditor] = useState<{ section?: string; rename?: boolean } | null>(null);
+  const [deletingTeam, setDeletingTeam] = useState<string | null>(null);
   const bots = useMemo(() => state.bots.filter((bot) => !bot.hidden), [state.bots]);
-  const sections = useMemo(() => buildTeamMapSections(bots), [bots]);
+  const sections = useMemo(() => buildTeamMapSections(bots, [
+    ...(state.sections ?? []), ...state.groups.flatMap((group) => group.section ? [group.section] : []),
+  ]), [bots, state.sections, state.groups]);
   const edges = useMemo(() => buildTeamMapEdges(bots, snapshot), [bots, snapshot]);
 
   const refresh = useCallback(async (showSpinner = false) => {
@@ -346,9 +352,11 @@ export function TeamMapPage() {
             <h1 className="text-[18px] font-semibold">Team map</h1>
           </div>
           <p className="mt-1 text-[12.5px] text-ink-secondary">
-            See every section, who is working, and where tasks are moving.
+            Teams organize your bots and share instructions. Group chats bring bots into one conversation.
           </p>
         </div>
+        <div className="flex shrink-0 items-center gap-2">
+        {!remoteClient && <button onClick={() => setTeamEditor({})} className="flex items-center gap-1.5 rounded-lg bg-accent px-3 py-2 text-[13px] font-medium text-white"><Plus size={15} /> Create team</button>}
         <button
           onClick={() => void refresh(true)}
           disabled={refreshing}
@@ -358,6 +366,7 @@ export function TeamMapPage() {
         >
           <RefreshCw size={15} className={refreshing ? "animate-spin" : ""} />
         </button>
+        </div>
       </header>
 
       <div className="min-h-0 flex-1 overflow-y-auto px-7 py-6">
@@ -366,22 +375,30 @@ export function TeamMapPage() {
         <div className="space-y-4">
           {sections.map((section) => {
             const hasHierarchy = section.chiefs.length > 0 && section.members.length > 0;
+            const empty = section.key && ![...state.bots, ...state.groups].some((record) => record.section?.trim() === section.key);
             return (
-              <section key={section.key || "__general__"} className="@container/teammap rounded-2xl border border-hairline/50 bg-panel p-4">
+              <section key={section.key} className="@container/teammap rounded-2xl border border-hairline/50 bg-panel p-4">
                 <div className="mb-3 flex items-center justify-between">
                   <h2 className="text-[12px] font-semibold uppercase tracking-[0.08em] text-ink-secondary">{section.name}</h2>
-                  <div className="flex items-center gap-2">
+                  <div className="flex flex-wrap items-center justify-end gap-2">
+                    {!remoteClient && section.key && <button onClick={() => setTeamEditor({ section: section.key })}
+                      aria-label={`Move bots to ${section.name}`} className="flex items-center gap-1 rounded-md px-1.5 py-1 text-[10.5px] font-medium text-ink-secondary hover:bg-raised"><Users size={12} /> Move bots</button>}
                     {!remoteClient && <button
                       onClick={() => setContextEditor({ section: section.key, label: section.name })}
                       className="flex items-center gap-1 rounded-md px-1.5 py-1 text-[10.5px] font-medium text-ink-secondary hover:bg-raised hover:text-ink"
-                      aria-label={`Edit ${section.name} shared context`}
-                      title="Shared context"
+                      aria-label={`Edit ${section.name} shared instructions`}
+                      title="Shared instructions"
                     >
-                      <BookOpen size={11} /> Context
+                      <BookOpen size={11} /> Shared instructions
                     </button>}
+                    {!remoteClient && empty && <>
+                      <button onClick={() => setTeamEditor({ section: section.key, rename: true })} aria-label={`Rename ${section.name} team`} title="Rename empty team" className="rounded-md p-1 text-ink-secondary hover:bg-raised"><Pencil size={12} /></button>
+                      <button onClick={() => setDeletingTeam(section.key)} aria-label={`Delete ${section.name} team`} title="Delete empty team" className="rounded-md p-1 text-ink-secondary hover:bg-raised hover:text-danger"><Trash2 size={12} /></button>
+                    </>}
                     <span className="text-[11px] tabular-nums text-ink-secondary">{section.chiefs.length + section.members.length}</span>
                   </div>
                 </div>
+                {section.chiefs.length + section.members.length === 0 && <p className="py-2 text-[13px] text-ink-secondary">No active bots yet. Move existing bots here when you are ready.</p>}
                 <div
                   className={cn(
                     "grid gap-3",
@@ -443,6 +460,17 @@ export function TeamMapPage() {
         />
       )}
       {instructionsBot && <BotInstructionsDialog bot={instructionsBot} onClose={() => setInstructionsBot(null)} />}
+      {teamEditor && <TeamDialog {...teamEditor} onClose={() => setTeamEditor(null)} />}
+      <ConfirmDialog open={deletingTeam !== null} title={`Delete ${deletingTeam ?? ""} team?`}
+        body="This deletes the empty team and its shared instructions. This cannot be undone."
+        confirmLabel="Delete team" onCancel={() => setDeletingTeam(null)} onConfirm={() => {
+          const name = deletingTeam;
+          setDeletingTeam(null);
+          if (!name) return;
+          void api(`/api/sidebar-sections?section=${encodeURIComponent(name)}`, { method: "DELETE" })
+            .then(({ sections: names }) => dispatch({ type: "sections", sections: names }))
+            .catch((cause) => setError(cause instanceof Error ? cause.message : String(cause)));
+        }} />
     </main>
   );
 }

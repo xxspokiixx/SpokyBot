@@ -130,7 +130,10 @@ export function importTeamBackup(store: Store, routines: RoutineManager, input: 
   const groupIds = new Map<string, string>();
   const takenNames = new Set(store.bots.map((bot) => bot.name.trim().toLowerCase()));
   const takenGroups = new Set(store.groups.map((group) => group.name.trim().toLowerCase()));
-  const takenSections = new Set([...store.bots, ...store.groups].map((record) => record.section?.trim().toLowerCase() ?? ""));
+  const takenSections = new Set([
+    ...store.sections.map((section) => section.toLowerCase()),
+    ...[...store.bots, ...store.groups].map((record) => record.section?.trim().toLowerCase() ?? ""),
+  ]);
   const sections = new Map<string, string>();
   const sectionFor = (section?: string) => {
     const key = section?.trim() ?? "";

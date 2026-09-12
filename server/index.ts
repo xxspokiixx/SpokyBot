@@ -744,7 +744,7 @@ const MAX_COMMS_DEPTH = 1;
 const MAX_WORKSPACE_BOTS = 100;
 const createSidebarSectionSchema = z.object({
   name: z.string(),
-  botIds: z.array(z.string().regex(/^[\w-]+$/)).min(1).max(MAX_WORKSPACE_BOTS),
+  botIds: z.array(z.string().regex(/^[\w-]+$/)).max(MAX_WORKSPACE_BOTS).default([]),
 }).strict();
 const createGroupTaskRequestSchema = z.object({ title: z.string().optional() });
 const phoneSecretEnvelopeSchema = z.object({
@@ -2632,6 +2632,9 @@ const groupWithThread = (group: GroupRecord) => ({
 // still send their richer payload on top.
 store.onChange((change) => {
   switch (change.type) {
+    case "sections":
+      broadcast({ kind: "sections", sections: store.sections });
+      break;
     case "message":
       broadcast({ kind: "message", threadId: change.threadId, message: change.message });
       break;
@@ -10766,6 +10769,7 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
           ...messagePage(bot.threadId, limit),
         })),
         botQueuedMessages: publicBotQueuedMessages(),
+        sections: store.sections,
         groups: store.groups.map((g) => ({ ...publicGroupState(g), ...messagePage(g.threadId, limit) })),
         computerControl: Object.fromEntries(
           store.bots.map((bot) => {
@@ -11322,7 +11326,7 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
       try {
         const selection = await defaultSelection();
         const existingSections = new Set(
-          [...store.bots.map((bot) => bot.section), ...store.groups.map((candidate) => candidate.section)]
+          [...store.sections, ...store.bots.map((bot) => bot.section), ...store.groups.map((candidate) => candidate.section)]
             .filter((section): section is string => Boolean(section?.trim()))
             .map((section) => section.trim().toLowerCase()),
         );
@@ -11816,28 +11820,43 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
       if (!patched) return json(res, 404, { error: "no such message" });
       return json(res, 200, { message: patched });
     }
+    if (path === "/api/sidebar-sections" && method === "GET") {
+      return json(res, 200, { sections: store.sections });
+    }
+    if (path === "/api/sidebar-sections" && (method === "PATCH" || method === "DELETE")) {
+      const section = url.searchParams.get("section")?.trim();
+      if (!section) return json(res, 400, { error: "Choose a named team" });
+      let nextName: string | null = null;
+      if (method === "PATCH") {
+        const parsed = z.object({ name: z.string().trim().min(1).max(60) }).strict().safeParse(await readBody(req));
+        if (!parsed.success) return json(res, 400, { error: "Team name must be 1 to 60 characters" });
+        nextName = parsed.data.name;
+      }
+      const error = store.changeEmptySection(section, nextName);
+      if (error) return json(res, error === "No such team" ? 404 : 409, { error });
+      return json(res, 200, { sections: store.sections });
+    }
     if (method === "POST" && path === "/api/sidebar-sections") {
       const parsed = createSidebarSectionSchema.safeParse(await readBody(req));
       if (!parsed.success) {
-        return json(res, 400, { error: "name and one to 100 valid botIds are required" });
+        return json(res, 400, { error: "Provide a team name and up to 100 valid botIds" });
       }
       const name = parsed.data.name.trim();
       if (name.length > 60) {
         return json(res, 400, { error: "name must be at most 60 characters" });
       }
       const botIds = [...new Set(parsed.data.botIds)];
+      if (!name && !botIds.length) return json(res, 400, { error: "Team name is required" });
       const result = store.setBotsSection(botIds, name);
       if (!result.ok) {
         if (result.reason === "chief-conflict") {
           return json(res, 409, {
-            error: "A section can have only one Chief of Staff. Choose one Chief or use a section without one.",
+            error: "A team can have only one Chief of Staff. Choose one Chief or use a team without one.",
           });
         }
         return json(res, 404, { error: "one or more bots are unavailable" });
       }
-      // This files bots under a derived label; it does not create a durable
-      // section resource, and an identical retry is an ordinary no-op.
-      return json(res, 200, { section: name, bots: result.bots.map(wireBot) });
+      return json(res, 200, { section: name, sections: store.sections, bots: result.bots.map(wireBot) });
     }
     if (method === "POST" && path === "/api/bots") {
       const body = await readBody(req);
@@ -12708,9 +12727,10 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
       if (section.length > 60) return json(res, 400, { error: "section must be at most 60 characters" });
       const exists =
         section === "" ||
+        store.sections.includes(section) ||
         store.bots.some((bot) => !bot.hidden && sectionKey(bot.section) === section) ||
         store.groups.some((group) => sectionKey(group.section) === section);
-      if (!exists) return json(res, 404, { error: "no such section" });
+      if (!exists) return json(res, 404, { error: "no such team" });
 
       if (method === "GET") {
         const context = readSectionContext(section);
