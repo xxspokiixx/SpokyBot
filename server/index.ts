@@ -228,6 +228,7 @@ import { TurnResources, workspaceResource, type TurnOwner } from "./turn-resourc
 import {
   ensureWorkspace,
   ensureTaskWorkspace,
+  workspaceLocationsPrompt,
   updateMemory,
   appendMemoryLog,
   isMemoryTopicName,
@@ -5109,6 +5110,7 @@ async function startTurn(
         // to a turn whose engine actually mounted them (setupMode is already
         // false when they are not — see agentsMounted above)
         { id: "setup", label: "Setup", text: setupSystemPrompt(setupMode, { skills: skillAuthoring, cwd: liveBot?.cwd ?? bot.cwd }) },
+        { id: "files", label: "File locations", text: worksInWorkspace && opts?.runOn !== "cloud" ? workspaceLocationsPrompt(bot.id, cwd, liveBot?.cwd ?? bot.cwd) : "" },
         { id: "computer", label: "Computer", text: computerPrompt(computerPromptKind) },
         { id: "plan", label: "Surface", text: plan.note },
         // gated on the integration, not the key: the hint only goes to a
@@ -6315,6 +6317,7 @@ async function runGroupMemberTurn(
     if (drift.drift !== Boolean(bot.soulDrift)) store.patchBot(bot.id, { soulDrift: drift.drift });
   }
   const roomSystem = buildSystemPrompt(system, store.bot(bot.id)?.soul ?? bot.soul ?? "", [
+    { id: "files", label: "File locations", text: workspace ? workspaceLocationsPrompt(bot.id, cwd, readyBot.cwd) : "" },
     { id: "mcp", label: "MCP servers", text: customMcpPrompt(Object.keys(integrations.custom ?? {})) },
     { id: "computer", label: "Computer", text: computerPrompt(roomVmTarget ? localVmMode(cfg) === "per-bot" ? "vm-private" : "vm-shared" : null) },
     { id: "browser", label: "Browser", text: integrations.browser ? BUILT_IN_BROWSER_SYSTEM_PROMPT : "" },
@@ -13152,12 +13155,13 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
       if (!body || typeof body !== "object" || Array.isArray(body)) return json(res, 400, { error: "body must be a JSON object" });
       const current = store.projectBotForTask(m[1], m[2]);
       if (!current) return json(res, 404, { error: "no such task" });
-      const allowed = new Set(["title", "projectId", "modelSelection", "approvalMode", "autoApprove", "requireAvailableModel", "pinnedMessageId", "acknowledgeLocalAuto"]);
+      const allowed = new Set(["title", "projectId", "modelSelection", "updateBotDefault", "approvalMode", "autoApprove", "requireAvailableModel", "pinnedMessageId", "acknowledgeLocalAuto"]);
       if (Object.keys(body).some((key) => !allowed.has(key))) return json(res, 400, { error: "unsupported thread setting" });
-      for (const key of ["requireAvailableModel", "acknowledgeLocalAuto"] as const) {
+      for (const key of ["requireAvailableModel", "acknowledgeLocalAuto", "updateBotDefault"] as const) {
         if (body[key] !== undefined && typeof body[key] !== "boolean") return json(res, 400, { error: `${key} must be a boolean` });
       }
       if (body.requireAvailableModel === true && body.modelSelection === undefined) return json(res, 400, { error: "requireAvailableModel requires modelSelection" });
+      if (body.updateBotDefault === true && body.modelSelection === undefined) return json(res, 400, { error: "updateBotDefault requires modelSelection" });
       const patch: Parameters<typeof store.patchTask>[2] = {};
       if (body.projectId !== undefined) {
         if (body.projectId === null) patch.projectId = undefined;
@@ -13204,6 +13208,23 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
         (!supportsApprovalMode(registry.cliTarget(patch.modelSelection.instanceId)?.driverKind, mode) ||
           registry.cliTarget(patch.modelSelection.instanceId)?.driverKind !== registry.cliTarget(current.modelSelection.instanceId)?.driverKind)) {
         return json(res, 400, { error: "Choose Ask for this thread before changing providers with elevated permissions" });
+      }
+      if (body.updateBotDefault === true && patch.modelSelection) {
+        const profile = store.bot(current.id)!;
+        const checked = checkedModelSelection(patch.modelSelection, {
+          selection: profile.modelSelection, busy: Boolean(activeGroupTurnForBot(current.id)),
+        });
+        if (!checked.ok) return json(res, checked.status, { error: checked.error });
+        const defaultMode = approvalModeFor(profile);
+        if ((defaultMode === "full" || defaultMode === "custom") &&
+          (!supportsApprovalMode(registry.cliTarget(patch.modelSelection.instanceId)?.driverKind, defaultMode) ||
+            registry.cliTarget(patch.modelSelection.instanceId)?.driverKind !== registry.cliTarget(profile.modelSelection.instanceId)?.driverKind)) {
+          return json(res, 400, { error: "Choose Ask in bot settings before changing its default provider with elevated permissions" });
+        }
+        // Validate both scopes before saving either. Existing sibling threads
+        // retain their selections; only this pinned thread and future/group
+        // turns adopt the new default. Do not target the currently selected tab.
+        store.patchBot(current.id, { modelSelection: patch.modelSelection });
       }
       const task = store.patchTask(m[1], m[2], patch)!;
       const fresh = botWithThread(store.bot(m[1])!);
