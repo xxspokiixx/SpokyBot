@@ -1396,6 +1396,9 @@ function refreshApplicationMenu() {
       onSwitch: (id) => switchEnvironment(id),
       onAddFromClipboard: () => void addServerFromClipboard(),
       onForget: (id) => void forgetEnvironment(id),
+      onOpenSettings: () => {
+        if (mainWindow && !mainWindow.isDestroyed()) mainWindow.webContents.send("app:open-settings");
+      },
     }),
   );
 }

@@ -20,7 +20,7 @@ describe("buildApplicationMenu", () => {
   }
 
   const environments = [{ id: "x", name: "X", origin: "http://localhost" }];
-  const build = (platform) =>
+  const build = (platform, overrides = {}) =>
     withPlatform(platform, () =>
       buildApplicationMenu({
         environments,
@@ -28,13 +28,19 @@ describe("buildApplicationMenu", () => {
         onSwitch: vi.fn(),
         onAddFromClipboard: vi.fn(),
         onForget: vi.fn(),
+        ...overrides,
       }),
     );
 
-  it("macOS app menu contains a Preferences item", () => {
-    const template = build("darwin");
-    expect(template[0].label).toBe("OpenMausBot");
-    expect(template[0].submenu.some((item) => item.role === "preferences")).toBe(true);
+  it("macOS app menu wires an explicit Preferences item to the settings callback", () => {
+    const onOpenSettings = vi.fn();
+    const template = build("darwin", { onOpenSettings });
+    const item = template[0].submenu.find((entry) => entry.label === "Preferences…");
+    expect(item).toBeDefined();
+    expect(item.accelerator).toBe("CmdOrCtrl+,");
+    expect(item.click).toBeTypeOf("function");
+    item.click();
+    expect(onOpenSettings).toHaveBeenCalledTimes(1);
   });
 
   it.each(["linux", "win32"])("does not add an app menu on %s", (platform) => {
