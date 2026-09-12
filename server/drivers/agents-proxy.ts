@@ -439,13 +439,13 @@ const TOOLS = [
   {
     name: "list_threads",
     description:
-      "See your own threads and the threads you opened on teammates, newest first: each with its bot, title, state (running, waiting on the person, queued, or idle), whether the person has unread there, and the delegation id if it was a handoff. Use it to check how the threads you started are going before reporting to the person; write a thread's title as #Title when you mention it. A teammate's other threads are never listed — only the ones you opened. This is a read: it starts nothing and changes nothing.",
+      "See your own threads and the threads you opened on teammates, newest first: each with its bot, title, state (running, waiting on the person, queued, idle, or closed), whether the person has unread there, and the delegation id if it was a handoff. Use it to check how the threads you started are going before reporting to the person; write a thread's title as #Title when you mention it. A teammate's other threads are never listed — only the ones you opened. This is a read: it starts nothing and changes nothing.",
     inputSchema: { type: "object", additionalProperties: false, properties: {} },
   },
   {
     name: "close_thread",
     description:
-      "Mark a thread you opened (or one of your own) as finished once you have read its result: it goes idle in the person's sidebar with a note saying you closed it. Nothing is deleted — deleting stays the person's decision — and a thread that is still running cannot be closed; wait for it or leave it. Use the thread id from list_threads or from the start_thread result. If a close is refused, do not retry it.",
+      "Mark a thread you opened (or one of your own) as finished once you have read its result: it leaves the person's default sidebar list (still under all threads, with a note saying you closed it) and list_threads reports it as closed. Nothing is deleted — deleting stays the person's decision — and a thread that is still running cannot be closed; wait for it or leave it. Use the thread id from list_threads or from the start_thread result. If a close is refused, do not retry it.",
     inputSchema: {
       type: "object",
       additionalProperties: false,

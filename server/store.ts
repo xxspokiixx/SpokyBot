@@ -309,6 +309,17 @@ export interface TaskOpenedBy {
   at: number;
 }
 
+/** Which bot closed a thread with close_thread. Set once the thread's result
+ * has been read; the sidebar folds a closed thread out of the default list
+ * (still reachable under "all threads", never deleted) and list_threads
+ * reports it as closed. Cleared the moment a new turn starts there, so a
+ * thread the person picks back up is simply open again. */
+export interface TaskClosedBy {
+  botId: string;
+  name: string;
+  at: number;
+}
+
 export interface TaskRecord {
   threadId: ThreadId;
   title: string;
@@ -320,6 +331,9 @@ export interface TaskRecord {
   /** Set when a bot, not a person, opened this thread. Persisted with the
    * task so the sidebar and a backup keep the attribution. */
   openedBy?: TaskOpenedBy;
+  /** Set by close_thread; absent while the thread is open. Runtime clears
+   * it on the next turn. Persisted with the task like openedBy. */
+  closedBy?: TaskClosedBy;
   /** Defaults are copied when a task is created; older records fall back
    * to the bot until migration seeds their model selection. */
   modelSelection?: ModelSelection;
@@ -2089,6 +2103,21 @@ export class Store {
     const task = this.taskByThread(botId, threadId);
     if (!bot || !task) return null;
     task.openedBy = structuredClone(openedBy);
+    this.saveBots();
+    this.emit({ type: "bot", botId });
+    return task;
+  }
+
+  /** Stamp or clear the closer record. `null` reopens: the next turn in a
+   * closed thread calls this so the row comes back to the sidebar. Never
+   * reachable from the HTTP task PATCH: closedBy is not a TASK_PATCH_FIELD. */
+  setTaskClosedBy(botId: string, threadId: string, closedBy: TaskClosedBy | null): TaskRecord | null {
+    const bot = this.bot(botId);
+    const task = this.taskByThread(botId, threadId);
+    if (!bot || !task) return null;
+    if (closedBy) task.closedBy = structuredClone(closedBy);
+    else if (!task.closedBy) return task;
+    else delete task.closedBy;
     this.saveBots();
     this.emit({ type: "bot", botId });
     return task;

@@ -4844,6 +4844,10 @@ async function startTurn(
   directTurnBots.set(threadId, bot);
   beginInternalCapabilityGeneration(threadId, dispatchClaimId);
   store.setTaskActivity(bot.id, threadId, "working");
+  // A closed thread that gets a new turn is open again: the person (or the
+  // opener) picked it back up, so its row returns to the sidebar and
+  // list_threads stops calling it closed. No-op on an open thread.
+  store.setTaskClosedBy(bot.id, threadId, null);
   // The badge is "this bot answered you, and you have not looked yet". A
   // person starting a turn has looked; a teammate's hop has not — the fold
   // never re-marks an internal turn, so clearing here would silently spend
@@ -9077,13 +9081,14 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
         }
         const rows: Array<{
           threadId: string; botId: string; botName: string; title: string;
-          state: "running" | "waiting-on-you" | "queued" | "idle";
+          state: "running" | "waiting-on-you" | "queued" | "idle" | "closed";
           unread: boolean; openedAt: number; delegationId?: string; own: boolean;
         }> = [];
         const stateOf = (bot: BotRecord, task: TaskRecord) => {
           if (task.activity === "waiting-on-you") return "waiting-on-you" as const;
           if (threadBusy(bot.id, task.threadId)) return "running" as const;
           if (queuedThreadPosition(bot.id, task.threadId) !== null) return "queued" as const;
+          if (task.closedBy) return "closed" as const;
           return "idle" as const;
         };
         for (const task of store.tasks(from.id)) {
@@ -9128,6 +9133,11 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
         if (threadBusy(owner.id, threadId)) {
           return json(res, 409, { error: `#${task.title} is still running — wait for it to finish (list_threads), or the person can stop it from the app` });
         }
+        // Closing twice is not an error and leaves no second chip: the
+        // thread is already folded away, so there is nothing more to do.
+        if (task.closedBy) {
+          return json(res, 200, { closed: true, alreadyClosed: true, threadId, title: task.title, botName: owner.name, closedBy: task.closedBy.name });
+        }
         store.appendMessage(threadId, {
           role: "bot",
           kind: "activity",
@@ -9135,6 +9145,9 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
           tool: { name: `Closed by @${from.name}`, ok: true },
         });
         if (task.unread) store.patchTask(owner.id, threadId, { unread: false });
+        // The stamp is what the sidebar folds on and what list_threads
+        // reports; the chip above is only the transcript's record of it.
+        store.setTaskClosedBy(owner.id, threadId, { botId: from.id, name: from.name, at: Date.now() });
         return json(res, 200, { closed: true, threadId, title: task.title, botName: owner.name });
       }
       if (method === "GET" && path === "/api/internal/rooms") {
