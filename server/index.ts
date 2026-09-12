@@ -1448,6 +1448,14 @@ function previewSystemPrompt(bot: BotRecord) {
   // engine actually mounts agent tools, since it names propose_profile,
   // propose_routine and request_credential.
   const agentsMounted = caps?.agentsMcp === true;
+  // The preview asks the same question a dispatch asks, through the same
+  // policy, so "what the model sees" cannot drift from what a turn sends.
+  // Spelling the browser rule out a second time here is what let Off keep a
+  // browser in one place while the preview said it had none.
+  const previewPlan = resolveSurface({
+    destination: bot.computer,
+    browserOn: caps?.browserMcp === true && builtInBrowserEnabled(cfg) && bot.browser !== false,
+  });
   const privateWorkspace = instance && !["grok", "boxAgent"].includes(instance.driverKind);
   const built = buildSystemPrompt(persona, bot.soul ?? "", [
     {
@@ -1459,9 +1467,10 @@ function previewSystemPrompt(bot: BotRecord) {
       }),
     },
     { id: "computer", label: "Computer", text: computerPrompt(computerPromptKind) },
+    { id: "plan", label: "Surface", text: previewPlan.note },
     { id: "composio", label: "Connected apps", text: caps?.composioMcp && bot.composio !== false && composio.configured(cfg) ? COMPOSIO_PROMPT : "" },
     { id: "mcp", label: "MCP servers", text: caps?.customMcp ? customMcpPrompt(Object.keys(customMcpServers(cfg, bot.mcpServers))) : "" },
-    { id: "browser", label: "Browser", text: caps?.browserMcp && builtInBrowserEnabled(cfg) && bot.browser !== false && bot.computer !== "off" ? BUILT_IN_BROWSER_SYSTEM_PROMPT : "" },
+    { id: "browser", label: "Browser", text: previewPlan.browser ? BUILT_IN_BROWSER_SYSTEM_PROMPT : "" },
     { id: "coordination", label: "Team", text: agentsMounted && coordination ? ` ${coordination}` : "" },
     { id: "credential", label: "Credentials", text: agentsMounted ? CREDENTIAL_PROMPT : "" },
     { id: "routine", label: "Routines", text: agentsMounted ? ROUTINE_PROMPT : "" },
@@ -6221,11 +6230,17 @@ async function runGroupMemberTurn(
   // window. Mint the capability only after this turn has synchronously
   // claimed the fresh bot record so a deleted profile cannot be resurrected
   // as a ghost session by an already-preparing room turn.
-  if (
-    builtInBrowserEnabled(cfg) &&
-    readyBot.browser !== false &&
-    instance.adapter.capabilities.browserMcp === true
-  ) {
+  // "Works on" decides here exactly as it decides a 1:1 turn: the same
+  // shared policy, so a room cannot become the loophole that hands a bot
+  // set to Off the browser its own settings withhold everywhere else.
+  const roomPlan = resolveSurface({
+    destination: readyBot.computer,
+    browserOn:
+      builtInBrowserEnabled(cfg) &&
+      readyBot.browser !== false &&
+      instance.adapter.capabilities.browserMcp === true,
+  });
+  if (roomPlan.browser) {
     const selectedProfile = readyBot.browserProfile;
     const browser = await browserIntegration(readyBot.id, selectedProfile, { threadId, generation: internalGeneration });
     if (browser) integrations.browser = browser.integration;
@@ -6338,6 +6353,7 @@ async function runGroupMemberTurn(
     { id: "files", label: "File locations", text: workspace ? workspaceLocationsPrompt(bot.id, cwd, readyBot.cwd) : "" },
     { id: "mcp", label: "MCP servers", text: customMcpPrompt(Object.keys(integrations.custom ?? {})) },
     { id: "computer", label: "Computer", text: computerPrompt(roomVmTarget ? localVmMode(cfg) === "per-bot" ? "vm-private" : "vm-shared" : null) },
+    { id: "plan", label: "Surface", text: roomPlan.note },
     { id: "browser", label: "Browser", text: integrations.browser ? BUILT_IN_BROWSER_SYSTEM_PROMPT : "" },
     { id: "recall", label: "Recall", text: integrations.agents ? SESSION_SEARCH_SYSTEM_PROMPT : "" },
     { id: "section-context", label: "Section context", text: sectionContextSystemPrompt(bot.section) },
@@ -8864,7 +8880,7 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
       if (method === "POST" && path === "/api/internal/browser/mcp") {
         const body = await readInternalBody();
         const bot = store.bot(internalCapability.botId);
-        if (!bot || bot.browser === false || !builtInBrowserEnabled(cfg)) {
+        if (!bot || bot.browser === false || bot.computer === "off" || !builtInBrowserEnabled(cfg)) {
           return json(res, 403, { error: "browser tools are not enabled for this bot" });
         }
         const browser = await browserIntegration(bot.id, bot.browserProfile);
@@ -8877,7 +8893,7 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
         const result = await browserRuntime.agentRpc(browser.session, browser.spec, body.method, body.params, () => {
           requireActiveInternalCapability();
           const current = store.bot(bot.id);
-          if (!current || current.browser === false || !builtInBrowserEnabled(cfg) ||
+          if (!current || current.browser === false || current.computer === "off" || !builtInBrowserEnabled(cfg) ||
               currentBrowserSession(current.id, current.browserProfile) !== browser.session) {
             throw Object.assign(new Error("Browser access changed while connecting."), { status: 409 });
           }

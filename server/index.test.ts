@@ -5504,6 +5504,49 @@ describe("harness HTTP API", () => {
     }
   });
 
+  it("Works on: Off withholds the browser and tells the model why", async () => {
+    // The report behind this: a bot set to Off reached for a browser anyway,
+    // because Off withheld only the computer. The dispatched prompt is the
+    // proof the model was told, and the settings preview must say the same.
+    const bot = (await api("POST", "/api/bots", { name: "Orbit" })).body.bot;
+    try {
+      expect((await api("PATCH", "/api/config", { features: { browser: true } })).status).toBe(200);
+      expect((await api("PATCH", `/api/bots/${bot.id}`, {
+        modelSelection: { instanceId: "claude", model: "claude-sonnet-5" },
+      })).status).toBe(200);
+
+      const previewIds = async () =>
+        (await api("GET", `/api/bots/${bot.id}/system-prompt`)).body.sections
+          .map((section: { id: string }) => section.id);
+      const previewText = async () =>
+        (await api("GET", `/api/bots/${bot.id}/system-prompt`)).body.sections
+          .map((section: { text: string }) => section.text).join("");
+
+      // Auto says nothing about Works on; the section is only there when the
+      // setting actually withholds something.
+      expect(await previewIds()).not.toContain("plan");
+
+      expect((await api("PATCH", `/api/bots/${bot.id}`, { computer: "off" })).status).toBe(200);
+      const ids = await previewIds();
+      expect(ids).toContain("plan");
+      expect(ids).not.toContain("browser");
+      const text = await previewText();
+      expect(text).toContain("\"Works on\" setting is Off");
+      expect(text).toContain("no computer and no built-in browser");
+
+      // and the same sentence reaches a real turn, not only the preview
+      rmSync(fakeClaudeDump, { force: true });
+      expect((await api("POST", `/api/bots/${bot.id}/messages`, { text: "open a browser and check my calendar" })).status).toBe(202);
+      const dispatched = (await readJsonFileWhenReady<{ systemPrompt: string }>(fakeClaudeDump, 15_000)).systemPrompt;
+      expect(dispatched).toContain("\"Works on\" setting is Off");
+      expect(dispatched).not.toContain("browser_navigate");
+    } finally {
+      await api("POST", `/api/bots/${bot.id}/interrupt`);
+      await api("DELETE", `/api/bots/${bot.id}`);
+      await api("PATCH", "/api/config", { features: { browser: false } });
+    }
+  });
+
   it("does not coach an ordinary request even when the bot profile is blank", async () => {
     const bot = (await api("POST", "/api/bots", { name: "Blank" })).body.bot;
     try {
@@ -5668,7 +5711,9 @@ describe("harness HTTP API", () => {
     expect(saved.body.features).toEqual({ browser: false, skillAuthoring: false, showToolCalls: false });
 
     const disk = JSON.parse(readFileSync(join(home, ".openmausbot", "config.json"), "utf8"));
-    expect(disk.features).toEqual({ skillAuthoring: false });
+    // Earlier browser coverage may have persisted its own toggle. Opting out
+    // of skill authoring must preserve those sibling settings, not erase them.
+    expect(disk.features).toEqual({ ...untouched.features, skillAuthoring: false });
 
     // the opt-out survives patches to sibling flags
     const tools = await api("PATCH", "/api/config", { features: { showToolCalls: true } });
