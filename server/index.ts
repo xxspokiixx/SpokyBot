@@ -13,6 +13,7 @@ import { BOT_PROFILE_LIMITS } from "../shared/bot-profile.ts";
 import {
   approvalModeFor,
   supportsApprovalMode,
+  modelSwitchNeedsAsk,
   isEmergencyApprovalDowngrade,
   isApprovalMode,
   type ApprovalMode,
@@ -1282,6 +1283,38 @@ function checkedModelSelection(
   return { ok: true, selection };
 }
 
+function checkedTaskModelSwitch(current: BotRecord, raw: unknown, updateBotDefault: boolean,
+  resetApprovalToAsk: boolean, requireAvailableModel = false, trusted = false) {
+  if (current.approvalGrant) return { ok: false as const, status: 409, error: "Wait for the approval change to finish before switching models" };
+  const checked = checkedModelSelection(raw, {
+    selection: current.modelSelection, busy: threadBusy(current.id, current.threadId),
+  }, requireAvailableModel);
+  if (!checked.ok) return checked;
+  const profile = store.bot(current.id)!;
+  if (updateBotDefault) {
+    const defaults = checkedModelSelection(checked.selection, {
+      selection: profile.modelSelection, busy: Boolean(activeGroupTurnForBot(current.id)),
+    });
+    if (!defaults.ok) return defaults;
+  }
+  for (const target of updateBotDefault ? [current, profile] : [current]) {
+    const mode = approvalModeFor(target);
+    if (resetApprovalToAsk && mode === "custom" && !trusted) {
+      return { ok: false as const, status: 403, error: "Leaving Custom approval requires confirmation in the packaged desktop app" };
+    }
+    if (!resetApprovalToAsk && modelSwitchNeedsAsk(mode,
+      registry.cliTarget(target.modelSelection.instanceId)?.driverKind,
+      registry.cliTarget(checked.selection.instanceId)?.driverKind)) {
+      return { ok: false as const, status: 400, error: "Confirm switching this model with Ask permissions first (resetApprovalToAsk)" };
+    }
+  }
+  if (resetApprovalToAsk && (threadBusy(current.id, current.threadId) ||
+    (updateBotDefault && activeGroupTurnForBot(current.id)))) {
+    return { ok: false as const, status: 409, error: "Stop work in the selected scope before switching its permissions" };
+  }
+  return checked;
+}
+
 function checkedExportSkillNames(
   value: unknown,
   bots: readonly BotRecord[],
@@ -1795,6 +1828,24 @@ function handleDesktopTrustedApprovalMessage(raw: unknown): boolean {
   }
   const currentMode = approvalModeFor(existing);
   const threadId = message.threadId;
+  if (message.modelSelection !== undefined) {
+    const target = typeof threadId === "string" ? store.projectBotForTask(botId, threadId) : null;
+    if (mode !== "ask" || !target || typeof message.updateBotDefault !== "boolean") {
+      respond({ ok: false, error: "A confirmed model switch must select a thread and Ask permissions" });
+      return true;
+    }
+    const checked = checkedTaskModelSwitch(target, message.modelSelection, message.updateBotDefault, true, false, true);
+    if (!checked.ok) { respond({ ok: false, error: checked.error }); return true; }
+    try {
+      store.switchTaskModel(botId, threadId as string, checked.selection, message.updateBotDefault, true);
+      const fresh = { ...wireBot(store.bot(botId)!), approvalMode: approvalModeFor(store.bot(botId)!) };
+      broadcast({ kind: "bot", bot: fresh });
+      respond({ ok: true, bot: fresh });
+    } catch {
+      respond({ ok: false, error: "The model switch could not be saved. No settings were changed." });
+    }
+    return true;
+  }
   if (threadId !== undefined) {
     const target = typeof threadId === "string" && /^[\w-]{1,128}$/.test(threadId)
       ? store.projectBotForTask(botId, threadId) : null;
@@ -13496,13 +13547,17 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
       if (!body || typeof body !== "object" || Array.isArray(body)) return json(res, 400, { error: "body must be a JSON object" });
       const current = store.projectBotForTask(m[1], m[2]);
       if (!current) return json(res, 404, { error: "no such task" });
-      const allowed = new Set(["title", "projectId", "modelSelection", "updateBotDefault", "approvalMode", "autoApprove", "requireAvailableModel", "pinnedMessageId", "acknowledgeLocalAuto"]);
+      const allowed = new Set(["title", "projectId", "modelSelection", "updateBotDefault", "resetApprovalToAsk", "approvalMode", "autoApprove", "requireAvailableModel", "pinnedMessageId", "acknowledgeLocalAuto"]);
       if (Object.keys(body).some((key) => !allowed.has(key))) return json(res, 400, { error: "unsupported thread setting" });
-      for (const key of ["requireAvailableModel", "acknowledgeLocalAuto", "updateBotDefault"] as const) {
+      for (const key of ["requireAvailableModel", "acknowledgeLocalAuto", "updateBotDefault", "resetApprovalToAsk"] as const) {
         if (body[key] !== undefined && typeof body[key] !== "boolean") return json(res, 400, { error: `${key} must be a boolean` });
       }
       if (body.requireAvailableModel === true && body.modelSelection === undefined) return json(res, 400, { error: "requireAvailableModel requires modelSelection" });
       if (body.updateBotDefault === true && body.modelSelection === undefined) return json(res, 400, { error: "updateBotDefault requires modelSelection" });
+      if (body.resetApprovalToAsk === true && (body.modelSelection === undefined ||
+        (body.approvalMode !== undefined && body.approvalMode !== "ask") || body.autoApprove === true)) {
+        return json(res, 400, { error: "resetApprovalToAsk requires a model selection and cannot be combined with another approval mode" });
+      }
       const patch: Parameters<typeof store.patchTask>[2] = {};
       if (body.projectId !== undefined) {
         if (body.projectId === null) patch.projectId = undefined;
@@ -13530,7 +13585,8 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
         // Elevated modes still require the trusted desktop transition. A
         // thread settings PATCH cannot manufacture that grant.
         if (mode !== "ask" && mode !== "auto" && mode !== "edits") return json(res, 403, { error: "Full and Custom access require trusted desktop confirmation" });
-        if (!supportsApprovalMode(registry.cliTarget(current.modelSelection.instanceId)?.driverKind, mode)) {
+        if (approvalModeFor(current) === "custom") return json(res, 403, { error: "Leaving Custom approval requires confirmation in the packaged desktop app" });
+        if (!supportsApprovalMode(registry.cliTarget((patch.modelSelection ?? current.modelSelection).instanceId)?.driverKind, mode)) {
           return json(res, 400, { error: "This provider does not support the selected approval level" });
         }
         if (threadBusy(current.id, current.threadId)) return json(res, 409, { error: "stop this thread before changing its approval mode" });
@@ -13544,30 +13600,15 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
         patch.approvalMode = mode;
         patch.autoApprove = mode === "auto";
       }
-      const mode = patch.approvalMode ?? approvalModeFor(current);
-      if (patch.modelSelection && (mode === "full" || mode === "custom") &&
-        (!supportsApprovalMode(registry.cliTarget(patch.modelSelection.instanceId)?.driverKind, mode) ||
-          registry.cliTarget(patch.modelSelection.instanceId)?.driverKind !== registry.cliTarget(current.modelSelection.instanceId)?.driverKind)) {
-        return json(res, 400, { error: "Choose Ask for this thread before changing providers with elevated permissions" });
-      }
-      if (body.updateBotDefault === true && patch.modelSelection) {
-        const profile = store.bot(current.id)!;
-        const checked = checkedModelSelection(patch.modelSelection, {
-          selection: profile.modelSelection, busy: Boolean(activeGroupTurnForBot(current.id)),
-        });
+      if (patch.modelSelection) {
+        const checked = checkedTaskModelSwitch({ ...current,
+          ...(patch.approvalMode ? { approvalMode: patch.approvalMode, autoApprove: patch.autoApprove } : {}),
+        }, patch.modelSelection, body.updateBotDefault === true, body.resetApprovalToAsk === true, body.requireAvailableModel === true);
         if (!checked.ok) return json(res, checked.status, { error: checked.error });
-        const defaultMode = approvalModeFor(profile);
-        if ((defaultMode === "full" || defaultMode === "custom") &&
-          (!supportsApprovalMode(registry.cliTarget(patch.modelSelection.instanceId)?.driverKind, defaultMode) ||
-            registry.cliTarget(patch.modelSelection.instanceId)?.driverKind !== registry.cliTarget(profile.modelSelection.instanceId)?.driverKind)) {
-          return json(res, 400, { error: "Choose Ask in bot settings before changing its default provider with elevated permissions" });
-        }
-        // Validate both scopes before saving either. Existing sibling threads
-        // retain their selections; only this pinned thread and future/group
-        // turns adopt the new default. Do not target the currently selected tab.
-        store.patchBot(current.id, { modelSelection: patch.modelSelection });
       }
-      const task = store.patchTask(m[1], m[2], patch)!;
+      const task = patch.modelSelection
+        ? store.switchTaskModel(m[1], m[2], patch.modelSelection, body.updateBotDefault === true, body.resetApprovalToAsk === true, patch)!
+        : store.patchTask(m[1], m[2], patch)!;
       const fresh = botWithThread(store.bot(m[1])!);
       broadcast({ kind: "bot", bot: fresh });
       return json(res, 200, { task: wireTask(task), bot: fresh });

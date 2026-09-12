@@ -2057,6 +2057,37 @@ export class Store {
     return task;
   }
 
+  /** Model/provider changes are one configuration transaction: never publish
+   * a new provider before its confirmed approval downgrade, or change the
+   * default while leaving the selected thread behind after a write failure. */
+  switchTaskModel(botId: string, threadId: string, selection: ModelSelection,
+    updateBotDefault: boolean, resetApprovalToAsk: boolean, taskPatch: TaskPatch = {}): TaskRecord | null {
+    const bot = this.bot(botId);
+    const task = this.taskByThread(botId, threadId);
+    if (!bot || !task) return null;
+    const patch = { modelSelection: structuredClone(selection),
+      ...(resetApprovalToAsk ? { approvalMode: "ask" as const, autoApprove: false, alwaysAllow: [] } : {}) };
+    const nextTask = { ...task, ...taskPatch, ...patch,
+      ...(typeof taskPatch.title === "string" ? { title: taskPatch.title.trim().slice(0, 80) || UNTITLED_THREAD } : {}) };
+    // Older threads may still inherit settings. Freeze their effective
+    // values before updating the default so "other threads unchanged" also
+    // holds for workspaces created before per-thread approval settings.
+    const nextTasks = bot.tasks!.map((candidate) => candidate === task ? nextTask : !updateBotDefault ? candidate : {
+      ...candidate,
+      modelSelection: structuredClone(candidate.modelSelection ?? bot.modelSelection),
+      approvalMode: approvalModeFor(this.projectBotForTask(botId, candidate.threadId)!),
+      autoApprove: candidate.autoApprove ?? bot.autoApprove,
+      alwaysAllow: structuredClone(candidate.alwaysAllow ?? bot.alwaysAllow ?? []),
+    });
+    const next = { ...bot, ...(updateBotDefault ? patch : {}),
+      tasks: nextTasks };
+    this.saveBots(this.bots.map((candidate) => candidate === bot ? next : candidate));
+    bot.tasks!.forEach((candidate, index) => Object.assign(candidate, nextTasks[index]));
+    if (updateBotDefault) Object.assign(bot, patch);
+    this.emit({ type: "bot", botId });
+    return task;
+  }
+
   private mirrorActiveTask(bot: BotRecord, task: TaskRecord) {
     bot.threadId = task.threadId;
     bot.resumeCursors = structuredClone(task.resumeCursors);

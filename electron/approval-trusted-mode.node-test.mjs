@@ -25,6 +25,31 @@ function fakeProcess() {
   return { messages, postMessage: (message) => messages.push(message) };
 }
 
+test("confirmed model switches use only scoped Ask requests", () => {
+  const selection = { instanceId: "claude", model: "sonnet" };
+  assert.deepEqual(trustedApprovalModeRequest(REQUEST_ID, "bot-1", "ask", false, "thread-1", selection, false), {
+    type: "approval-trusted-mode-set", requestId: REQUEST_ID, botId: "bot-1", mode: "ask",
+    threadId: "thread-1", modelSelection: selection, updateBotDefault: false,
+  });
+  for (const mode of ["full", "custom", "auto"]) {
+    assert.throws(() => trustedApprovalModeRequest(REQUEST_ID, "bot-1", mode, false, "thread-1", selection, true), /invalid confirmed model switch/);
+  }
+  assert.throws(() => trustedApprovalModeRequest(REQUEST_ID, "bot-1", "ask", false, undefined, selection, true), /invalid confirmed model switch/);
+  assert.throws(() => trustedApprovalModeRequest(REQUEST_ID, "bot-1", "ask", false, "thread-1", selection, "yes"), /invalid confirmed model switch/);
+});
+
+test("a thread-only switch verifies the thread mode without changing the bot default", async () => {
+  const proc = fakeProcess();
+  const coordinator = createTrustedApprovalModeCoordinator({ randomId: () => REQUEST_ID });
+  const pending = coordinator.request(proc, "bot-1", "ask", {
+    threadId: "thread-1", modelSelection: { instanceId: "claude", model: "sonnet" }, updateBotDefault: false,
+  });
+  const bot = { id: "bot-1", approvalMode: "custom", tasks: [{ threadId: "thread-1", approvalMode: "ask" }] };
+  coordinator.receive(proc, { type: "approval-trusted-mode-result", requestId: REQUEST_ID, ok: true, bot });
+  assert.deepEqual(await pending, bot);
+  assert.equal(proc.messages.length, 1);
+});
+
 test("builds only bounded bot-scoped approval-mode requests", () => {
   assert.equal(trustedApprovalModeRequest(REQUEST_ID, "bot-1", "full", false, "thread-1").threadId, "thread-1");
   for (const threadId of ["", "../another-thread", null, 42]) {

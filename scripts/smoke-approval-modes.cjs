@@ -116,6 +116,12 @@ app.whenReady().then(async () => {
     return;
   }
   if (process.argv.includes("--ui-only")) { await verifyUi(); return; }
+  if (process.argv.includes("--model-ui-only")) {
+    await require("./testing/model-switch-ui-smoke.cjs")({ root, url: `http://127.0.0.1:${port}`, api, until,
+      grant: (botId, mode, options) => coordinator.request(child, botId, mode, options),
+    });
+    return;
+  }
   const created = await api("/api/bots", "POST", { modelSelection: { instanceId: "claude", model: "claude-sonnet-5" } });
   assert.equal(created.status, 201);
   const id = created.body.bot.id;

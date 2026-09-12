@@ -21,6 +21,33 @@ describe("Store", () => {
     rmSync(DATA_DIR, { recursive: true, force: true });
   });
 
+  it("commits a confirmed model switch once, preserving siblings and rolling back failed writes", () => {
+    const store = new Store(selection);
+    const bot = store.createBot();
+    store.patchBot(bot.id, { approvalMode: "full", alwaysAllow: ["old-tool"] });
+    const first = store.activeTask(bot.id)!;
+    const sibling = store.createTask(bot.id)!;
+    const next = { instanceId: "codex", model: "fixture-model" };
+    const save = vi.spyOn(store as unknown as { saveBots(bots: BotRecord[]): void }, "saveBots");
+    store.switchTaskModel(bot.id, first.threadId, next, false, true);
+    expect(save).toHaveBeenCalledTimes(1);
+    expect(store.projectBotForTask(bot.id, first.threadId)).toMatchObject({ modelSelection: next, approvalMode: "ask", alwaysAllow: [] });
+    expect(bot).toMatchObject({ modelSelection: selection(), approvalMode: "full" });
+    expect(sibling).toMatchObject({ modelSelection: selection(), approvalMode: "full", alwaysAllow: ["old-tool"] });
+    delete sibling.approvalMode;
+    delete sibling.autoApprove;
+    delete sibling.alwaysAllow;
+    save.mockImplementationOnce(() => { throw new Error("disk full"); });
+    expect(() => store.switchTaskModel(bot.id, first.threadId, next, true, true)).toThrow("disk full");
+    expect(bot).toMatchObject({ modelSelection: selection(), approvalMode: "full" });
+    store.switchTaskModel(bot.id, first.threadId, next, true, true);
+    expect(bot).toMatchObject({ modelSelection: next, approvalMode: "ask", alwaysAllow: [] });
+    expect(sibling).toMatchObject({ modelSelection: selection(), approvalMode: "full", alwaysAllow: ["old-tool"] });
+    const reloaded = new Store(selection);
+    expect(reloaded.bot(bot.id)).toMatchObject({ modelSelection: next, approvalMode: "ask" });
+    expect(reloaded.taskByThread(bot.id, sibling.threadId)).toMatchObject({ modelSelection: selection(), approvalMode: "full" });
+  });
+
   it("createBot seeds a greeting without promising engine-specific tools", () => {
     const store = new Store(selection);
     const bot = store.createBot();

@@ -138,8 +138,8 @@ describe("control-omb ui drives the real renderer", () => {
     // needs no flag; the fixture's default config is what a fresh install has.
     expect(flagged.features).toMatchObject({ skillAuthoring: true });
 
-    // Model changes in the real header default to the bot (groups/new
-    // threads), with an explicit thread-only choice. No permissions change.
+    // The header defaults to the conversation. Updating the bot default is
+    // explicit, and same-provider model changes preserve permissions.
     const savedBot = async () => (await fetch(`${info.url}/api/bots`).then((response) => response.json())).bots.find((bot: any) => bot.id === info.botId);
     const originalBot = await savedBot();
     const originalModel = originalBot.modelSelection.model;
@@ -148,8 +148,9 @@ describe("control-omb ui drives the real renderer", () => {
     const originalLabel = options.find((option: any) => option.id === originalModel).label;
     const nextModel = options.find((option: any) => option.id !== originalModel);
     await ui("click", info.ui, "--name", originalLabel);
-    expect(await ui("eval", info.ui, "--js", "[...document.querySelectorAll('[aria-label=\"Apply model changes to\"] button')].find(b => b.textContent === 'This bot').getAttribute('aria-pressed')"))
+    expect(await ui("eval", info.ui, "--js", "[...document.querySelectorAll('[aria-label=\"Apply model changes to\"] button')].find(b => b.textContent === 'Only this thread').getAttribute('aria-pressed')"))
       .toMatchObject({ result: "true" });
+    await ui("click", info.ui, "--name", "Thread + bot default");
     const scopeShot = join(evidenceDir, "model-scope.png");
     mkdirSync(evidenceDir, { recursive: true });
     await ui("screenshot", info.ui, "--out", scopeShot);

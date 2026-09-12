@@ -4,12 +4,25 @@ import {
   APPROVAL_MODES,
   approvalModeFor,
   supportsApprovalMode,
+  modelSwitchNeedsAsk,
   hasNativeAutoReview,
   isEmergencyApprovalDowngrade,
   isApprovalMode,
 } from "../shared/approval-mode.ts";
 
 describe("approval modes", () => {
+  it("resets only grants that cannot safely carry to the selected provider", () => {
+    for (const driver of ["codex", "claudeAgent", "grokAgent", "antigravityAgent", "piAgent", "customAcp"]) {
+      expect(modelSwitchNeedsAsk("ask", "codex", driver)).toBe(false);
+      expect(modelSwitchNeedsAsk("auto", "codex", driver)).toBe(false);
+      expect(modelSwitchNeedsAsk("full", "codex", driver)).toBe(driver !== "codex");
+      expect(modelSwitchNeedsAsk("custom", "codex", driver)).toBe(driver !== "codex");
+    }
+    expect(modelSwitchNeedsAsk("edits", "claudeAgent", "codex")).toBe(true);
+    expect(modelSwitchNeedsAsk("edits", "claudeAgent", "grokAgent")).toBe(false);
+    expect(modelSwitchNeedsAsk("full", "claudeAgent", "claudeAgent")).toBe(false);
+    expect(modelSwitchNeedsAsk("full", "codex", undefined)).toBe(true);
+  });
   it("only exposes implemented provider capabilities", () => {
     for (const driver of ["codex", "claudeAgent", "antigravityAgent", "cursorAgent", "grokAgent", "opencodeGo"]) {
       expect(supportsApprovalMode(driver, "full")).toBe(true);

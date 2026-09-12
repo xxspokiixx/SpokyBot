@@ -413,12 +413,14 @@ export function currentTaskBot(bot: Bot, threadId = bot.threadId): Bot {
 export type TaskUpdatePatch = Partial<Pick<Task, "modelSelection" | "approvalMode" | "autoApprove" | "pinnedMessageId">> & {
   acknowledgeLocalAuto?: boolean;
   updateBotDefault?: boolean;
+  resetApprovalToAsk?: boolean;
   projectId?: string | null;
 };
 
 function taskPatchFields(patch: TaskUpdatePatch): Partial<Task> {
-  const { acknowledgeLocalAuto: _localAck, updateBotDefault: _modelDefault, projectId, ...fields } = patch;
-  return { ...fields, ...(projectId === undefined ? {} : { projectId: projectId ?? undefined }) };
+  const { acknowledgeLocalAuto: _localAck, updateBotDefault: _modelDefault, resetApprovalToAsk, projectId, ...fields } = patch;
+  return { ...fields, ...(resetApprovalToAsk ? { approvalMode: "ask", autoApprove: false, alwaysAllow: [] } : {}),
+    ...(projectId === undefined ? {} : { projectId: projectId ?? undefined }) };
 }
 
 /** The visible conversation: walk parentId links from the active leaf back
@@ -900,7 +902,7 @@ export type Action =
   | { type: "screenFrame"; botId: string; png: string; mime: string }
   | { type: "provisioning"; botId: string; on: boolean }
   | { type: "computerControl"; botId: string; held: boolean; helpReason: string | null }
-  | { type: "setModel"; botId: string; selection: ModelSelection; threadId?: string; updateBotDefault?: boolean }
+  | { type: "setModel"; botId: string; selection: ModelSelection; threadId?: string; updateBotDefault?: boolean; resetApprovalToAsk?: boolean }
   | { type: "interrupt"; botId: string; threadId?: string; onError?: () => void }
   | { type: "connected"; value: boolean }
   | { type: "error"; message: string | null }
@@ -1506,7 +1508,8 @@ export function reducer(state: AppState, action: Action): AppState {
         },
       };
     case "setModel":
-      if (action.threadId) return reducer(state, { type: "updateTask", botId: action.botId, threadId: action.threadId, patch: { modelSelection: action.selection } });
+      if (action.threadId) return reducer(state, { type: "updateTask", botId: action.botId, threadId: action.threadId,
+        patch: { modelSelection: action.selection, resetApprovalToAsk: action.resetApprovalToAsk } });
       return updateBot(state, action.botId, (b) => ({ ...b, modelSelection: action.selection }));
     case "updateTask": {
       const patch = taskPatchFields(action.patch);
@@ -2300,6 +2303,14 @@ export function StoreProvider({ children }: { children: ReactNode }) {
           if (patch.approvalMode === "full" || patch.approvalMode === "custom") {
             throw new Error("Full and Custom access must be granted in bot settings in the desktop app");
           }
+          // The private path is required for Custom; use it for every
+          // confirmed desktop switch so optimistic Ask cannot hide the
+          // original mode while a pending write waits its turn.
+          if (patch.resetApprovalToAsk && window.ogb?.approvals) {
+            return window.ogb.approvals.setMode(botId, "ask", {
+              threadId, modelSelection: patch.modelSelection, updateBotDefault: Boolean(patch.updateBotDefault),
+            });
+          }
           const result = await api(`/api/bots/${botId}/tasks/${threadId}`, {
             method: "PATCH", body: JSON.stringify(patch),
           });
@@ -2769,6 +2780,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
             persistTaskPatch(action.botId, action.threadId, {
               modelSelection: action.selection,
               ...(action.updateBotDefault ? { updateBotDefault: true } : {}),
+              ...(action.resetApprovalToAsk ? { resetApprovalToAsk: true } : {}),
             });
             break;
           }

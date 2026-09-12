@@ -3411,8 +3411,8 @@ describe("harness HTTP API", () => {
         const scoped = await isolatedApi("PATCH", `/api/bots/${seeded.id}/tasks/${seeded.threadId}`, {
           modelSelection: targetSelection, updateBotDefault: true, approvalMode: "ask",
         });
-        expect(scoped.status, seeded.approvalMode).toBe(400);
-        expect(scoped.body.error).toMatch(/Choose Ask in bot settings/i);
+        expect(scoped.status, seeded.approvalMode).toBe(seeded.approvalMode === "custom" ? 403 : 400);
+        expect(scoped.body.error).toMatch(/Custom approval|resetApprovalToAsk/i);
         const unchanged = (await isolatedApi("GET", "/api/bots?messages=0")).body.bots.find(
           (candidate: { id: string }) => candidate.id === seeded.id,
         );
@@ -3422,6 +3422,37 @@ describe("harness HTTP API", () => {
         });
         expect(unchanged.tasks.find((task: { threadId: string }) => task.threadId === seeded.threadId).modelSelection).toEqual(seeded.modelSelection);
       }
+
+      const full = trustedBots.find(candidate => candidate.approvalMode === "full")!;
+      const sibling = (await isolatedApi("POST", `/api/bots/${full.id}/tasks`, { title: "Untouched" })).body.task;
+      for (const body of [
+        { resetApprovalToAsk: true },
+        { modelSelection: targetSelection, resetApprovalToAsk: "yes" },
+        { modelSelection: targetSelection, resetApprovalToAsk: true, approvalMode: "auto" },
+        { modelSelection: targetSelection, resetApprovalToAsk: true, updateBotDefault: "yes" },
+        { modelSelection: { ...targetSelection, effort: "turbo" }, resetApprovalToAsk: true },
+      ]) {
+        expect((await isolatedApi("PATCH", `/api/bots/${full.id}/tasks/${full.threadId}`, body)).status).toBe(400);
+      }
+      const sameProvider = await isolatedApi("PATCH", `/api/bots/${full.id}/tasks/${full.threadId}`, {
+        modelSelection: { ...full.modelSelection, model: "another-model" },
+      });
+      expect(sameProvider.status).toBe(200);
+      expect(sameProvider.body.task.approvalMode ?? sameProvider.body.bot.approvalMode).toBe("full");
+      const switched = await isolatedApi("PATCH", `/api/bots/${full.id}/tasks/${full.threadId}`, {
+        modelSelection: targetSelection, updateBotDefault: true, resetApprovalToAsk: true,
+      });
+      expect(switched.status).toBe(200);
+      expect(switched.body.bot).toMatchObject({ modelSelection: targetSelection, approvalMode: "ask", autoApprove: false });
+      expect(switched.body.task).toMatchObject({ modelSelection: targetSelection, approvalMode: "ask", alwaysAllow: [] });
+      expect(switched.body.bot.tasks.find((task: { threadId: string }) => task.threadId === sibling.threadId))
+        .toMatchObject({ modelSelection: full.modelSelection, approvalMode: "full" });
+      const created = await isolatedApi("POST", `/api/bots/${full.id}/tasks`, { title: "New defaults" });
+      expect(created.body.task).toMatchObject({ modelSelection: targetSelection, approvalMode: "ask" });
+      const refusedCustom = trustedBots.find(candidate => candidate.approvalMode === "custom")!;
+      expect((await isolatedApi("PATCH", `/api/bots/${refusedCustom.id}/tasks/${refusedCustom.threadId}`, {
+        modelSelection: targetSelection, resetApprovalToAsk: true,
+      })).status).toBe(403);
 
       // A loopback-capable bot must not escape a restrictive Custom config
       // by changing another idle bot to Ask/Auto. Leaving Custom is a trusted
