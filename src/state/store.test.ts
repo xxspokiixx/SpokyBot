@@ -258,6 +258,7 @@ describe("keyboard shortcuts dialog state", () => {
   it("opens and closes without replacing bot settings navigation", () => {
     expect(initialState.shortcutsOpen).toBe(false);
     expect(initialState.botSettingsSection).toBe("overview");
+    expect(initialState.botSettingsExpandAccordion).toBe(false);
     const state = { ...initialState, botSettingsSection: "soul" as const };
     const opened = reducer(state, { type: "toggleShortcuts", open: true });
     expect(opened.shortcutsOpen).toBe(true);
@@ -1607,6 +1608,7 @@ describe("bot settings section", () => {
     });
     expect(next.settingsOpen).toBe(true);
     expect(next.botSettingsSection).toBe("identity");
+    expect(next.botSettingsExpandAccordion).toBe(true);
   });
 
   it("toggleSettings leaves the computer panel and inspector open, closes app settings", () => {
@@ -1618,17 +1620,30 @@ describe("bot settings section", () => {
     expect(next.appSettingsOpen).toBe(false);
   });
 
+  it("reopens the same section after a collapse without remounting settings", () => {
+    const opened = reducer(initialState, { type: "toggleSettings", open: true, section: "usage" });
+    const collapsed = reducer(opened, { type: "toggleSettings", open: true });
+    expect(collapsed.settingsOpen).toBe(true);
+    expect(collapsed.botSettingsExpandAccordion).toBe(false);
+    const reopened = reducer(collapsed, { type: "toggleSettings", open: true, section: "usage" });
+    expect(reopened.botSettingsSection).toBe("usage");
+    expect(reopened.botSettingsExpandAccordion).toBe(true);
+  });
+
   it("toggleSettings without a section keeps it", () => {
     const state = reducer(initialState, {
       type: "toggleSettings",
       open: true,
       section: "soul",
     });
+    expect(state.botSettingsExpandAccordion).toBe(true);
     const next = reducer(state, {
       type: "toggleSettings",
       open: true,
     });
     expect(next.botSettingsSection).toBe("soul");
+    // Bare reopen (mascot) must not auto-expand a leftover section.
+    expect(next.botSettingsExpandAccordion).toBe(false);
   });
 
   it("selecting a different bot resets botSettingsSection to overview", () => {
