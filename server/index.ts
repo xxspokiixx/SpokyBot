@@ -8658,6 +8658,12 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
     }
     if (method === "POST" && path === "/api/auth/pairing") {
       const body = await readBody(req);
+      // Authentication happened before the request body was read. A session
+      // can be revoked while a slow client is still sending that body, so do
+      // not let the captured authorization mint a replacement session.
+      if (auth.kind === "session" && !sessions.isLive(auth.session.id)) {
+        return json(res, 401, { error: "Your session ended. Sign in again before creating a pairing code." });
+      }
       const requested: unknown = body?.scopes;
       const scopes = Array.isArray(requested) ? requested.filter((v): v is Scope => v === "admin" || v === "client") : undefined;
       const opened = sessions.openPairing({ label: typeof body?.label === "string" ? body.label : undefined, scopes });
