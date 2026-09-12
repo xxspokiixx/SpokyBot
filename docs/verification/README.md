@@ -103,6 +103,9 @@ per-thread models, simultaneous direct conversations and thread-scoped Stop.
 The [iOS thread checks](ios-threads.md) cover the native thread tree, folder
 search and draft isolation using disposable simulators and an offline fixture.
 
+The [Android thread checks](android-threads.md) cover the Compose thread tree,
+local selection, draft isolation and installable preview APK.
+
 The [right-to-left fixture](bidi.md) checks per-block direction in bot replies
 and per-line direction in sent turns, with code pinned left-to-right.
 
