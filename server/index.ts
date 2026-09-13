@@ -662,6 +662,7 @@ type InternalCapability = {
   browserSession?: string;
   roomHandoffId?: string;
   roomCoordination?: boolean;
+  ownThreadCreation?: boolean;
 };
 // A capability lives for the exact provider-turn generation, including while
 // that turn is parked on a human approval. The long ceiling is only an orphan
@@ -801,6 +802,7 @@ function agentsIntegration(
   generation: string,
   roomHandoffId?: string,
   roomCoordination = false,
+  ownThreadCreation = false,
 ) {
   const token = mintInternalCapability({
     botId,
@@ -813,6 +815,7 @@ function agentsIntegration(
     openedThreads: 0,
     roomHandoffId,
     roomCoordination,
+    ownThreadCreation,
   });
   return {
     command: process.execPath,
@@ -825,6 +828,7 @@ function agentsIntegration(
       OMB_COMMS_TOKEN: token,
       OMB_TURN_DEPTH: String(depth),
       OMB_ROOM_TURN: roomCoordination ? "1" : "0",
+      OMB_OWN_THREAD_CREATION: ownThreadCreation ? "1" : "0",
       OMB_SKILL_AUTHORING_ENABLED: skillAuthoring ? "1" : "0",
       // The shared-computer tools are advertised only while the workspace
       // gate is on; the routes behind them refuse regardless.
@@ -4701,9 +4705,9 @@ function drainQueuedSends() {
   if (!followupsReady) return;
   drainSteeredMessages(store, (botId, threadId, prompt, userMessage, excludeIds, unattended) =>
     // A plain attended turn — no automationSource, no comms depth: exactly
-    // what typing the same words into an idle bot would run. The one
-    // exception is `unattended`: a thread a bot opened on itself while
-    // nobody was watching stays unwatched through the wait for a slot.
+    // what typing the same words into an idle bot would run. Self-opened
+    // work retains `unattended` and the message's bot-origin provenance
+    // through the wait for a slot.
     // Drain just appended the held lines; userMessage keeps startTurn
     // from duplicating the last one, and excludeIds drops every drained
     // line from the transcript-replay so they are not also in `prompt`.
@@ -4752,23 +4756,24 @@ const MAX_THREADS_OPENED_PER_TURN = 5;
 /** A thread a bot opened on itself gets its first turn exactly the way a
  * person's message would: it runs now if the bot has a free slot, and
  * otherwise waits in the same composer queue, in line behind whatever the
- * bot already has waiting. The only inheritance is `unattended` — a bot
- * nobody is watching does not become watched by opening a thread. */
+ * bot already has waiting. Its provenance survives the queue: this is the
+ * bot's own request, not a new human request authorizing recursive fan-out. */
 async function startOrQueueOpenedThread(
   botId: string,
   threadId: string,
   text: string,
   unattended: boolean,
 ): Promise<{ state: "running" } | { state: "queued"; position: number } | { state: "failed"; error: string }> {
+  const peerAsk = { botId, name: store.bot(botId)!.name, unattended: unattended || undefined };
   // A room turn holds the bot too (startTurn refuses a direct turn during
   // one); the drain's own block check already waits for it, so the words
   // queue here rather than bounce.
   if (botAtThreadCapacity(botId) || activeGroupTurnForBot(botId)) {
-    queueSteeredMessage(botId, threadId, text, { reason: "capacity", unattended });
+    queueSteeredMessage(botId, threadId, text, { reason: "capacity", unattended, peerAsk });
     return { state: "queued", position: queuedThreadPosition(botId, threadId) ?? 1 };
   }
   try {
-    await startTurn(botId, text, { threadId, unattended });
+    await startTurn(botId, text, { threadId, unattended, peerAsk });
     return { state: "running" };
   } catch (error) {
     const why = error instanceof Error ? error.message : String(error);
@@ -4949,7 +4954,7 @@ async function startTurn(
     automationSource?: RoutineRunTrigger;
     /** the caller was already running unattended, so this turn is too */
     unattended?: boolean;
-    /** ask_bot delivery: the bot whose words this user-role line carries,
+    /** Bot delivery (including self-opened jobs): whose words this line carries,
      * recorded on the message itself (Message.peerAsk). */
     peerAsk?: Message["peerAsk"];
     /** Resume an agent after the user completed an inline connection or credential card.
@@ -5100,7 +5105,7 @@ async function startTurn(
   // A card continuation neither starts nor ends the person's ask: it
   // resumes the turn their last message began, so that record stands.
   if (!opts?.cardContinuation) {
-    if (commsDepth === 0 && opts?.automationSource === undefined && !opts?.unattended) {
+    if (commsDepth === 0 && opts?.automationSource === undefined && !opts?.unattended && !userMessage.peerAsk) {
       personAskAt.set(threadId, userMessage.at);
       // Continuing an old run as a normal conversation makes that task
       // visible again; these new replies are not routine report updates.
@@ -5527,7 +5532,14 @@ async function startTurn(
       // that ask_bot and delegate_bot would then refuse.
       const sectionPeers = reachablePeers(store.bots, bot);
       if (agentsMounted) {
-        integrations.agents = agentsIntegration(bot.id, threadId, commsDepth, skillAuthoring, dispatchClaimId, opts?.coordination?.id, boundedCoordination);
+        // Only a direct human request can create separate self-owned jobs.
+        // Coordinated children and self-opened jobs stay inside their scope;
+        // a later real user message on the same task is a fresh request.
+        const origin = opts?.cardContinuation
+          ? store.activePath(threadId).findLast(message => message.role === "user" && message.kind === "text")
+          : userMessage;
+        const ownThreadCreation = boundedCoordination && !opts?.coordination && Boolean(origin && !origin.peerAsk);
+        integrations.agents = agentsIntegration(bot.id, threadId, commsDepth, skillAuthoring, dispatchClaimId, opts?.coordination?.id, boundedCoordination, ownThreadCreation);
       }
       // @mentions in the user's message (the composer's tagging UI) become
       // an explicit coordination nudge. The agent still chooses the matching
@@ -9778,7 +9790,7 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
       if (internalCapability.kind !== requiredCapabilityKind) {
         return json(res, 403, { error: "this internal capability cannot access that service" });
       }
-      if (internalCapability.roomCoordination && method === "POST" && ["/api/internal/ask-bot", "/api/internal/delegate-bot", "/api/internal/threads"].includes(path)) {
+      if (internalCapability.roomCoordination && method === "POST" && ["/api/internal/ask-bot", "/api/internal/delegate-bot"].includes(path)) {
         return json(res, 409, { error: "Use coordinate_bots for teamwork; it queues actual teammates and resumes you automatically." });
       }
       // Query/body sender ids remain on the wire for proxy compatibility,
@@ -9924,6 +9936,7 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
           if (task.activity === "waiting-on-you") return "waiting-on-you" as const;
           if (threadBusy(bot.id, task.threadId)) return "running" as const;
           if (queuedThreadPosition(bot.id, task.threadId) !== null) return "queued" as const;
+          if (roomHandoffs.activeDirect(task.threadId)) return "queued" as const;
           if (task.closedBy) return "closed" as const;
           return "idle" as const;
         };
@@ -9966,7 +9979,7 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
           return json(res, 403, { error: "that thread is not yours to close — only the bot that opened it, or its own bot, can" });
         }
         if (threadId === fromThreadId) return json(res, 400, { error: "you cannot close the thread you are speaking in — finish your turn instead" });
-        if (threadBusy(owner.id, threadId)) {
+        if (threadBusy(owner.id, threadId) || queuedThreadPosition(owner.id, threadId) !== null || roomHandoffs.activeDirect(threadId)) {
           return json(res, 409, { error: `#${task.title} is still running — wait for it to finish (list_threads), or the person can stop it from the app` });
         }
         // Closing twice is not an error and leaves no second chip: the
@@ -10654,7 +10667,8 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
                   .find(node => node.key === parsed.data.requestKey + ":" + target.botId);
                 if (existing) target.threadId = existing.threadId;
                 else {
-                  const task = store.createTask(target.botId, parsed.data.message, false);
+                  const task = store.createTask(target.botId, parsed.data.message, false, undefined,
+                    { botId: internalSender.id, name: internalSender.name, at: Date.now() });
                   if (!task) throw new Error("The recipient no longer exists");
                   target.threadId = createdThread = task.threadId;
                 }
@@ -10848,6 +10862,14 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
         const toBotId = typeof body.toBotId === "string" && body.toBotId.trim() ? body.toBotId.trim() : from.id;
         const target = store.bot(toBotId);
         if (!target) return json(res, 404, { error: "no such bot" });
+        if (internalCapability.roomCoordination) {
+          if (target.id !== from.id) {
+            return json(res, 409, { error: "Use coordinate_bots for teamwork; it queues actual teammates and resumes you automatically." });
+          }
+          if (!internalCapability.ownThreadCreation) {
+            return json(res, 409, { error: "Only a direct user request can open separate self-owned threads. Finish this assigned work here; use coordinate_bots for teammates." });
+          }
+        }
         // A folder is the target's own organisation; a name is what the
         // model has, an id is what the sidebar has, so accept either.
         const folder = typeof body.folder === "string" ? body.folder.trim() : "";
