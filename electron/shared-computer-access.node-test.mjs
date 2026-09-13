@@ -160,7 +160,12 @@ test("Windows terminal preserves command syntax, pipeline output and exit status
   assert.equal(declared.exitCode, 0); assert.match(declared.output, /fixture-using/);
   const pipeline = await run("@('alpha', 'beta') | ForEach-Object { $_.ToUpper() }");
   assert.equal(pipeline.exitCode, 0); assert.match(pipeline.output, /ALPHA\s+BETA/);
+  const unicode = await run('Write-Output ([int][char]("fixture’s")[7])');
+  assert.equal(unicode.exitCode, 0); assert.match(unicode.output, /8217/);
   assert.equal((await run("exit 7")).exitCode, 7);
+  assert.equal((await run("cmd.exe /c exit 7")).exitCode, 1);
+  assert.equal((await run("Write-Error 'fixture-nonterminating'")).exitCode, 1);
+  assert.equal((await run("Write-Error 'fixture-recovered'; 'after'")).exitCode, 0);
   const failed = await run("throw 'fixture-command-failed'");
   assert.notEqual(failed.exitCode, 0); assert.match(failed.output, /fixture-command-failed/);
 });

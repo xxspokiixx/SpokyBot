@@ -94,7 +94,7 @@ export function sharedCommand(command, cwd, signal) {
     // the path, preserving every existing module location. Parse the original
     // command separately so leading `param`/`using` declarations remain valid.
     const script = windows
-      ? `$env:PSModulePath = "$PSHOME\\Modules;$env:PSModulePath"; & ([scriptblock]::Create('${command.replaceAll("'", "''")}'))`
+      ? `$env:PSModulePath = "$PSHOME\\Modules;$env:PSModulePath"; & ([scriptblock]::Create([System.Text.Encoding]::Unicode.GetString([Convert]::FromBase64String('${Buffer.from(command, "utf16le").toString("base64")}'))))`
       : command;
     const child = spawn(windows ? "powershell.exe" : "/bin/sh", windows ? ["-NoProfile", "-NonInteractive", "-Command", script] : ["-c", script], {
       cwd, detached: !windows, windowsHide: true, stdio: ["ignore", "pipe", "pipe"],
