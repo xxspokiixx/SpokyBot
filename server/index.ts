@@ -14463,8 +14463,10 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
       }
       const kind = provider as ProviderKeyKind;
       const saved = kind === "anthropic" ? cfg.anthropic : kind === "openaiCompat" ? cfg.openaiCompat : cfg.xai;
-      const pasted = typeof body?.key === "string" ? body.key.trim() : "";
-      const key = pasted || saved?.key || "";
+      if (body?.key !== undefined && typeof body.key !== "string") {
+        return json(res, 400, { error: "key must be a string" });
+      }
+      const key = typeof body?.key === "string" ? body.key.trim() : saved?.key?.trim() || "";
       if (!key) return json(res, 400, { error: "No key to test. Paste one or save one first." });
       if (key.length > 512) return json(res, 400, { error: "That does not look like an API key." });
       const url = typeof body?.url === "string" && body.url.trim() ? body.url.trim() : saved?.url;

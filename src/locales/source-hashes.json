@@ -8225,7 +8225,13 @@
       "remote.signInAccess.empty": "7166fa8f2d9ef4f4fbbbe7da946c67814553260b89fa71481e6e03a533284a86",
       "remote.signInAccess.invalid": "f7571753e84241b531638ab312bb1b704d261eebae3a05d27f24c02a5ba5061e",
       "remote.signInAccess.note": "ce9c15dc3fe23bbed92cb66d4cd54b8fdf0498f52f6bd2250067134b1ac65783",
-      "remote.signInAccess.error": "71a471a7b15e8647dda8cab60737a1b41901bdcbe3be10f477a9163b723f4e1d"
+      "remote.signInAccess.error": "71a471a7b15e8647dda8cab60737a1b41901bdcbe3be10f477a9163b723f4e1d",
+      "keys.configured": "84aebc69a1bf739a343be9c66edfd3160f77220ea69789a8147dd4ae261fd188",
+      "keys.testAuthenticated": "ccbf5ccf32628e4fa775ed0cdab386e2eec95535dd68b193dc352b3dc6d605ed",
+      "keys.testCatalog": "56fbd7c4703dacd77378644aca62037e27fbf1832cf028ff182b867111bb0290",
+      "keys.testCatalogNoModels": "32a9a00166054e2a323cbeda221f3cf0bff3c123d31c80e91c20660216d56c13",
+      "keys.testDraft": "70c508af0e0d49676c68a85825785a166fe657389d17602010988eef374f844b",
+      "keys.testSaved": "0e6b094d50025c9a1c0c2b61ae0f989ca6bd261d370eb35a8fc2d3cbaf7e7b4b"
     },
     "zh": {
       "noEngines.title": "af88855a5f80377de709995229ba3907df9e8fb3b940fbf7c0d9cbe6eea54afe",
