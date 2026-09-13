@@ -1,5 +1,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
+import fs from "node:fs/promises";
+import os from "node:os";
 import { mkdtemp, mkdir, stat, realpath, writeFile, readFile, rm, symlink, link } from "node:fs/promises";
 import { tmpdir, homedir } from "node:os";
 import path from "node:path";
@@ -180,11 +182,56 @@ test("a protected directory spelled in another Unicode normalization is still re
 test("the picker refuses the home directory, anything above it, and volume roots", async t => {
   const { dir } = await fixture(t);
   const refuse = candidate => assert.rejects(validateSharedFolders([{ id: randomUUID(), path: candidate, write: true }]), /specific folders/, candidate);
-  await refuse(homedir());
+  const home = await realpath(homedir());
+  const homes = [home];
+  if (process.platform === "darwin") {
+    const alias = path.join("/System/Volumes/Data", path.resolve(homedir()));
+    try {
+      const actual = await stat(home, { bigint: true });
+      const alternate = await stat(alias, { bigint: true });
+      if (actual.dev === alternate.dev && actual.ino === alternate.ino) homes.push(await realpath(alias));
+    } catch (error) { if (error.code !== "ENOENT" && error.code !== "ENOTDIR") throw error; }
+  }
+  for (let candidate of homes) {
+    for (;;) {
+      await refuse(candidate);
+      const parent = path.dirname(candidate);
+      if (parent === candidate) break;
+      candidate = parent;
+    }
+  }
   await refuse(path.parse(dir).root);
-  for (const candidate of ["/Users", "/home", "/System/Volumes/Data", "/System/Volumes/Data/Users", "C:\\Users"]) {
-    try { if (!(await stat(candidate)).isDirectory()) continue; } catch { continue; } // absent on this platform
-    await refuse(candidate);
+  // /home may be macOS autofs, a Linux home ancestor, or an unrelated ordinary
+  // folder on a custom-home host. Only an actual mount root is always refused.
+  if (process.platform !== "win32") {
+    for (const candidate of ["/home", "/System/Volumes/Data"]) {
+      try {
+        if ((await stat(candidate, { bigint: true })).dev !== (await stat(path.dirname(candidate), { bigint: true })).dev) await refuse(candidate);
+      } catch (error) { if (error.code !== "ENOENT" && error.code !== "ENOTDIR") throw error; }
+    }
+  }
+});
+
+test("the picker fails closed when the home boundary cannot be inspected", async t => {
+  const { dir } = await fixture(t);
+  const parent = path.join(dir, "Users");
+  const home = path.join(parent, "person");
+  await mkdir(home, { recursive: true });
+  t.mock.method(os, "homedir", () => home);
+  // These errors stand in for an unavailable mounted home or a permission
+  // failure; all filesystem contents and candidates remain in the fixture.
+  for (const method of ["realpath", "stat"]) {
+    for (const inaccessible of [home, parent]) {
+      if (method === "realpath" && inaccessible === parent) continue;
+      const original = fs[method];
+      const failing = t.mock.method(fs, method, async (candidate, ...options) => {
+        if (candidate === inaccessible) throw Object.assign(new Error("fixture home boundary unavailable"), { code: "EACCES" });
+        return original(candidate, ...options);
+      });
+      try {
+        await assert.rejects(validateSharedFolders([{ id: randomUUID(), path: dir, write: true }]), /home boundary unavailable/);
+      } finally { failing.mock.restore(); }
+    }
   }
 });
 
@@ -202,6 +249,42 @@ test("a specific nested folder is still shareable, readable and writable", async
   await mkdir(path.join(nested, "deeper"));
   await run({ action: "write_file", path: "deeper/todo.md", content: "still fine" });
   assert.equal(await readFile(path.join(nested, "deeper", "todo.md"), "utf8"), "still fine");
+});
+
+test("protected roots are rechecked after first creation and lookup failures deny access", async t => {
+  const { dir, folder, grant, run } = await fixture(t);
+  const protectedRoot = path.join(dir, "later-installed");
+  grant.protectedPaths = [protectedRoot];
+  folder.write = true;
+  await run({ action: "write_file", path: "ordinary.txt", content: "allowed" });
+  await mkdir(protectedRoot);
+  await writeFile(path.join(protectedRoot, "credentials.json"), "fixture secret");
+  await assert.rejects(run({ action: "read_file", path: "later-installed/credentials.json" }), /Desktop credentials/);
+  await assert.rejects(run({ action: "write_file", path: "later-installed/new.json", content: "blocked" }), /sharing settings/);
+  await assert.rejects(stat(path.join(protectedRoot, "new.json")), { code: "ENOENT" });
+  const original = fs.stat;
+  t.mock.method(fs, "stat", async (candidate, ...options) => {
+    if (candidate === protectedRoot) throw Object.assign(new Error("fixture protected root unavailable"), { code: "EACCES" });
+    return original(candidate, ...options);
+  });
+  await assert.rejects(run({ action: "read_file", path: "ordinary.txt" }), /protected root unavailable/);
+});
+
+test("filesystem identities keep all 64 bits instead of rounding distinct inode numbers together", async t => {
+  const { dir, grant, run } = await fixture(t);
+  const protectedRoot = path.join(dir, "private");
+  const ordinary = path.join(dir, "ordinary.txt");
+  await mkdir(protectedRoot);
+  await writeFile(ordinary, "allowed");
+  grant.protectedPaths = [protectedRoot];
+  const original = fs.stat;
+  t.mock.method(fs, "stat", async (candidate, ...options) => {
+    const info = await original(candidate, ...options);
+    const inode = candidate === protectedRoot ? 9007199254740992n : candidate === ordinary ? 9007199254740993n : undefined;
+    if (inode !== undefined) info.ino = typeof info.ino === "bigint" ? inode : Number(inode);
+    return info;
+  });
+  assert.equal(payload(await run({ action: "read_file", path: "ordinary.txt" })).content, "allowed");
 });
 
 test("the harness data directory is protected through a broad share", async t => {

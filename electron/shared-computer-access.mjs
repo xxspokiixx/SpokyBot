@@ -12,7 +12,7 @@ const LIMIT = 256 * 1024;
 const PROTECTED = "Desktop credentials and sharing settings cannot be accessed through a shared folder";
 const hash = data => createHash("sha256").update(data).digest("hex");
 const absent = error => error.code === "ENOENT" || error.code === "ENOTDIR";
-const identify = async candidate => { const info = await fs.stat(candidate); return `${info.dev}:${info.ino}`; };
+const identify = async candidate => { const info = await fs.stat(candidate, { bigint: true }); return `${info.dev}:${info.ino}`; };
 
 /** Protected roots as filesystem identities. A case-insensitive volume, a
  * Unicode normalization, a macOS firmlink and a Windows 8.3 or UNC name all
@@ -185,10 +185,10 @@ export async function executeSharedOperation(grant, operation, signal, cua) {
   const flags = (write ? operation.expected_sha256 ? constants.O_RDWR : constants.O_WRONLY | constants.O_CREAT | constants.O_EXCL : constants.O_RDONLY) | (constants.O_NOFOLLOW ?? 0) | (constants.O_NONBLOCK ?? 0);
   const file = await fs.open(target, flags, 0o600);
   try {
-    const stat = await file.stat();
-    if (!stat.isFile() || stat.nlink !== 1 || stat.size > LIMIT) throw new Error("Only regular, single-link files up to 256 KiB can be shared");
+    const stat = await file.stat({ bigint: true });
+    if (!stat.isFile() || stat.nlink !== 1n || stat.size > LIMIT) throw new Error("Only regular, single-link files up to 256 KiB can be shared");
     await sharedPath(folder, operation.path);
-    const named = await fs.lstat(target);
+    const named = await fs.lstat(target, { bigint: true });
     if (named.ino !== stat.ino || named.dev !== stat.dev || named.isSymbolicLink()) throw new Error("The file changed while opening it; retry after inspecting the folder");
     // The descriptor, not the spelling, is what the rest of this call reads and
     // writes, so re-decide containment against its own identity and ancestry.

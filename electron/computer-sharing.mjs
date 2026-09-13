@@ -8,7 +8,7 @@ import { createSharedCua, executeSharedOperation, sharedComputerError } from "./
 
 const uuid = value => typeof value === "string" && /^[a-f0-9]{8}-[a-f0-9]{4}-[1-8][a-f0-9]{3}-[89ab][a-f0-9]{3}-[a-f0-9]{12}$/i.test(value);
 const DATA_VOLUME = "/System/Volumes/Data";
-const identify = async candidate => { const info = await fsp.stat(candidate); return `${info.dev}:${info.ino}`; };
+const identify = async candidate => { const info = await fsp.stat(candidate, { bigint: true }); return `${info.dev}:${info.ino}`; };
 
 /** Every path that names the home directory itself. macOS reaches one home
  * through a firmlink and again under the data volume, and those two paths have
@@ -25,13 +25,23 @@ function homeCandidates() {
  * Unicode normalization and a Windows 8.3 or UNC name; {dev, ino} does not. */
 async function enclosingHomeIdentities() {
   const identities = new Set();
-  let home;
-  try { home = await identify(await fsp.realpath(os.homedir())); } catch { return identities; }
-  for (const seed of homeCandidates()) {
-    let current;
-    try { current = await fsp.realpath(seed); if ((await identify(current)) !== home) continue; } catch { continue; }
+  const [home, ...aliases] = homeCandidates();
+  const canonicalHome = await fsp.realpath(home);
+  const homeIdentity = await identify(canonicalHome);
+  const roots = [canonicalHome];
+  for (const alias of aliases) {
+    try {
+      const canonical = await fsp.realpath(alias);
+      if ((await identify(canonical)) === homeIdentity) roots.push(canonical);
+    } catch (error) {
+      // The optional macOS data-volume spelling need not exist. Any other
+      // failure must not silently remove part of the home boundary.
+      if (error.code !== "ENOENT" && error.code !== "ENOTDIR") throw error;
+    }
+  }
+  for (let current of roots) {
     for (;;) {
-      try { identities.add(await identify(current)); } catch { /* an ancestor we cannot stat can never be matched */ }
+      identities.add(await identify(current));
       const parent = path.dirname(current);
       if (parent === current) break;
       current = parent;
@@ -45,7 +55,7 @@ async function enclosingHomeIdentities() {
 async function volumeRoot(canonical) {
   const parent = path.dirname(canonical);
   if (parent === canonical) return true;
-  try { return (await fsp.stat(parent)).dev !== (await fsp.stat(canonical)).dev; } catch { return true; }
+  try { return (await fsp.stat(parent, { bigint: true })).dev !== (await fsp.stat(canonical, { bigint: true })).dev; } catch { return true; }
 }
 
 export async function validateSharedFolders(folders) {
