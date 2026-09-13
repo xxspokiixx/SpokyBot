@@ -43,8 +43,14 @@ const storedGrant = () => JSON.parse(readFileSync(grantFile, "utf8")).records[en
 const operation = async (action: string, rest = {}) => tool("shared_computer", { computer_id: storedGrant().id, folder_id: folder.id, action, ...rest });
 const data = (result: any) => JSON.parse(result.content[0].text);
 const markedWaitCommand = (marker: string) => process.platform === "win32"
-  ? `[IO.File]::WriteAllText('${marker.replaceAll("'", "''")}', 'started'); Start-Sleep -Seconds 20`
-  : `printf started > '${marker.replaceAll("'", "'\"'\"'")}'; sleep 20`;
+  ? `[IO.File]::WriteAllText('${marker.replaceAll("'", "''")}', [string]$PID); Start-Sleep -Seconds 20`
+  : `echo $$ > '${marker.replaceAll("'", "'\"'\"'")}'; sleep 20`;
+const commandAlive = (marker: string) => {
+  const pid = Number(readFileSync(marker, "utf8").trim());
+  expect(Number.isInteger(pid) && pid > 0).toBe(true);
+  try { process.kill(pid, 0); return true; }
+  catch (error) { if ((error as NodeJS.ErrnoException).code === "ESRCH") return false; throw error; }
+};
 
 beforeAll(async () => {
   fixture = await launchVerificationServer({ FAKE_CLAUDE_MODE: "hang" });
@@ -164,9 +170,11 @@ it("disabling the local gate cancels a live job even while the remote workspace 
   const marker = join(folder.path, "local-gate-command-started");
   const pending = operation("run_command", { command: markedWaitCommand(marker) });
   await expect.poll(() => existsSync(marker), { timeout: 15_000 }).toBe(true);
+  expect(commandAlive(marker)).toBe(true);
   localSharingEnabled = false;
   await expect.poll(() => connector.state(env.id).connected, { timeout: 5000 }).toBe(false);
   expect((await pending).isError).toBe(true);
+  await expect.poll(() => commandAlive(marker), { timeout: 5000 }).toBe(false);
   expect((await api("GET", "/.well-known/openmausbot/environment")).body.capabilities.sharedComputers).toBe(true);
   await expect(connector.identity(env)).rejects.toThrow("turned off on this computer");
   expect((await operation("read_file", { path: "brief.txt" })).isError).toBe(true);
@@ -185,8 +193,10 @@ it("withdrawing the workspace flag closes pending jobs and refuses a previously 
   const marker = join(folder.path, "workspace-gate-command-started");
   const pending = operation("run_command", { command: markedWaitCommand(marker) });
   await expect.poll(() => existsSync(marker), { timeout: 15_000 }).toBe(true);
+  expect(commandAlive(marker)).toBe(true);
   expect((await api("PATCH", "/api/config", { features: { sharedComputers: false } })).status).toBe(200);
   expect((await pending).isError).toBe(true);
+  await expect.poll(() => commandAlive(marker), { timeout: 5000 }).toBe(false);
   const staleTool = await tool("list_shared_computers");
   expect(staleTool.isError).toBe(true);
   expect(staleTool.content[0].text).toContain("unknown internal endpoint");
