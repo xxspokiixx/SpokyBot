@@ -150,7 +150,7 @@ export interface Message {
    * narration of the same chip ("reading a file"), used by call mode. */
   /** `setup` marks an error fixed by installing something, not by retrying.
    * `summary` is the call's input on one redacted line (the shell command). */
-  tool?: { name: string; ok?: boolean; spoken?: string; setup?: boolean; summary?: string };
+  tool?: { name: string; ok?: boolean; spoken?: string; setup?: boolean; summary?: string; input?: string; output?: string };
   /** user messages sent into a running turn — the model saw it mid-turn */
   steered?: boolean;
   /** a user message that arrived through the server's API, not typed here */
@@ -492,7 +492,7 @@ export interface ConfigStatus {
   /** UI language override; "" (or absent) follows the system language. */
   language?: string;
   /** Opt-in flags. Absent means off. */
-  features?: { skillAuthoring: boolean; showToolCalls?: boolean; browser?: boolean };
+  features?: { skillAuthoring: boolean; showToolCalls?: boolean; browser?: boolean; sharedComputers?: boolean };
   /** First-run progress: whether the welcome tour was finished and which
    * one-time hints were dismissed. Server-owned so it follows the workspace. */
   onboarding?: OnboardingStatus;
@@ -917,7 +917,7 @@ export type Action =
   | { type: "error"; message: string | null }
   | { type: "notice"; notice: AppState["notice"] }
   | { type: "revealThread"; threadId: string }
-  | { type: "toggleSettings"; open?: boolean; section?: BotSettingsSection }
+  | { type: "toggleSettings"; open?: boolean; section?: BotSettingsSection; botId?: string }
   | { type: "togglePlugins"; open?: boolean; surface?: "apps" | "mcp" }
   | { type: "toggleNewBot"; open?: boolean }
   | { type: "toggleComputer"; open?: boolean }
@@ -1549,11 +1549,16 @@ export function reducer(state: AppState, action: Action): AppState {
       };
     // bot settings, the computer panel, and app settings share the right slot
     case "toggleSettings": {
-      const open = action.open ?? !state.settingsOpen;
+      if (action.botId !== undefined && !state.bots.some((bot) => bot.id === action.botId && !bot.hidden)) return state;
+      const selectedId = action.botId ?? state.selectedId;
+      // A targeted settings link opens that bot without navigating to chat
+      // or marking its conversations read, even when another panel is open.
+      const open = action.open ?? (action.botId !== undefined || !state.settingsOpen);
       return {
         ...state,
+        selectedId,
         settingsOpen: open,
-        botSettingsSection: action.section ?? state.botSettingsSection,
+        botSettingsSection: action.section ?? (selectedId !== state.selectedId ? "overview" : state.botSettingsSection),
         // Mascot / bare open omits `section` → accordion stays fully collapsed.
         // Deep links expand that row even when the panel is already open.
         botSettingsExpandAccordion: open ? action.section !== undefined : false,

@@ -45,7 +45,7 @@ describe("desktop capabilities", () => {
     const capabilities = desktopCapabilities({
       platform: "win32",
       packaged: true,
-      localConnection: { mode: "standalone" },
+      localConnection: { mode: "embedded" },
     });
 
     expect(capabilities).toMatchObject({
@@ -54,11 +54,11 @@ describe("desktop capabilities", () => {
     });
   });
 
-  it("keeps Windows local control closed while the driver is not connected", () => {
+  it.each(["unavailable", "standalone"])("keeps Windows local control closed for %s", (mode) => {
     const capabilities = desktopCapabilities({
       platform: "win32",
       packaged: true,
-      localConnection: { mode: "unavailable", reason: "cua-driver binary not found" },
+      localConnection: { mode, reason: "no owned driver" },
     });
 
     expect(capabilities.localComputer).toMatchObject({

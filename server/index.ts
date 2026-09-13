@@ -78,6 +78,8 @@ import { fitsOnOneLine, parseBotProfilePatch } from "./bot-profile.ts";
 import { groupTurnCwd } from "./room-cwd.ts";
 import { RoomTurnDeadline, RoomTurnStallRegistry, roomTurnTimeoutMessage } from "./room-turn-timeout.ts";
 import * as box from "./box.ts";
+import { TeamComputers, teamComputerAssignment, teamComputerCreate, teamComputerOwner, type TeamComputerRecord } from "./team-computers.ts";
+import type { TeamComputersPayload } from "../shared/team-computer.ts";
 import { boxCreateRecoverySnapshot, retireDeletedBoxCreate } from "./box-create-idempotency.ts";
 import {
   boxAccountResourceChangeError,
@@ -116,6 +118,7 @@ import {
   saveConfig,
   showToolCallsEnabled,
   skillAuthoringEnabled,
+  sharedComputersEnabled,
   builtInBrowserEnabled,
   browserProfileReplacementConflict,
   browserProfilePartitionTarget,
@@ -655,9 +658,11 @@ type InternalCapability = {
   openedThreads: number;
   orphanExpiresAt: number;
   localVmTarget?: LocalVmTarget;
+  teamComputerId?: string;
   browserSession?: string;
   roomHandoffId?: string;
   roomCoordination?: boolean;
+  ownThreadCreation?: boolean;
 };
 // A capability lives for the exact provider-turn generation, including while
 // that turn is parked on a human approval. The long ceiling is only an orphan
@@ -746,6 +751,11 @@ function authorizedInternalCapability(header: string | string[] | undefined): In
 }
 
 function internalCapabilityIsActive(capability: InternalCapability): boolean {
+  if (capability.teamComputerId) {
+    const pinned = teamComputerTurns.get(capability.threadId);
+    if (pinned?.computerId !== capability.teamComputerId || pinned.owner.generation !== capability.generation ||
+        pinned.botId !== capability.botId) return false;
+  }
   if (capability.localVmTarget) {
     const owner = localVmLeaseFor(capability.localVmTarget).current(localVmOwnerBusy);
     if (localVmThreadTargets.get(capability.threadId) !== capability.localVmTarget ||
@@ -792,6 +802,7 @@ function agentsIntegration(
   generation: string,
   roomHandoffId?: string,
   roomCoordination = false,
+  ownThreadCreation = false,
 ) {
   const token = mintInternalCapability({
     botId,
@@ -804,6 +815,7 @@ function agentsIntegration(
     openedThreads: 0,
     roomHandoffId,
     roomCoordination,
+    ownThreadCreation,
   });
   return {
     command: process.execPath,
@@ -816,7 +828,11 @@ function agentsIntegration(
       OMB_COMMS_TOKEN: token,
       OMB_TURN_DEPTH: String(depth),
       OMB_ROOM_TURN: roomCoordination ? "1" : "0",
+      OMB_OWN_THREAD_CREATION: ownThreadCreation ? "1" : "0",
       OMB_SKILL_AUTHORING_ENABLED: skillAuthoring ? "1" : "0",
+      // The shared-computer tools are advertised only while the workspace
+      // gate is on; the routes behind them refuse regardless.
+      OMB_SHARED_COMPUTERS_ENABLED: sharedComputersEnabled(cfg) ? "1" : "0",
     },
   };
 }
@@ -860,9 +876,10 @@ function settleDirectFollowup(generation: string | undefined): void {
 const directTurnBots = new Map<string, BotRecord>();
 let providerFleetReloading = false;
 const turnResources = new TurnResources();
-const sharedComputerControl = new SharedComputerControl(turnResources, () => store.bots.some(bot => computerControl.snapshot(bot.id).held));
+const sharedComputerControl = new SharedComputerControl(turnResources, () => store.bots.some(bot => botComputerControlSnapshot(bot.id).held));
 const turnResourceOwners = new Map<string, TurnOwner>();
 const turnComputerResources = new Map<string, { owner: TurnOwner; resource: string }>();
+const teamComputerTurns = new Map<string, { owner: TurnOwner; computerId: string; botId: string; remoteAgent: boolean }>();
 const settlingResourceOwners = new Map<string, string>();
 
 function claimTurnResource(owner: TurnOwner, resource: string): boolean {
@@ -877,6 +894,11 @@ function releaseTurnResources(owner: TurnOwner | undefined): void {
   turnResources.release(owner);
   if (turnResourceOwners.get(owner.threadId)?.generation === owner.generation) turnResourceOwners.delete(owner.threadId);
   if (turnComputerResources.get(owner.threadId)?.owner.generation === owner.generation) turnComputerResources.delete(owner.threadId);
+  const teamTurn = teamComputerTurns.get(owner.threadId);
+  if (teamTurn?.owner.generation === owner.generation) {
+    stopScreenPoller(teamTurn.botId, owner.threadId);
+    teamComputerTurns.delete(owner.threadId);
+  }
 }
 
 function bindTurnComputer(owner: TurnOwner, resource: string, exclusive = false): void {
@@ -1141,7 +1163,11 @@ function connectedAppsIntegration(botId: string, threadId: string, generation: s
 // they hold it, the bot's computer proxies refuse every action. The record
 // lives here; the proxies consult it over loopback with the boot token.
 const computerControlRevision = new Map<string, number>();
-const computerControl = new ComputerControl((botId, snapshot) => {
+const computerControl = new ComputerControl((key, snapshot) => {
+  const members = key.startsWith("computer_")
+    ? store.bots.filter(bot => inheritedTeamComputer(bot)?.id === key.slice("computer_".length)).map(bot => bot.id)
+    : [key];
+  for (const botId of members) {
   computerControlRevision.set(botId, (computerControlRevision.get(botId) ?? 0) + 1);
   // One-way, fail-closed mirror into the Electron process that owns the
   // native browser. Never send release: a loopback caller can influence the
@@ -1151,6 +1177,7 @@ const computerControl = new ComputerControl((botId, snapshot) => {
     postDesktopPrivateMessage({ type: "openmausbot:browser-control", botId, held: true });
   }
   broadcast({ kind: "computer-control", botId, held: snapshot.held, helpReason: snapshot.helpReason });
+  }
 });
 const controlLeaseIdSchema = z.string().min(16).max(120).regex(/^[A-Za-z0-9_-]+$/);
 const routineRequestSourceSchema = {
@@ -1181,6 +1208,7 @@ function controlIntegration(botId: string, threadId: string, generation: string,
       depth: 0,
       kind: "computer",
       ...(localVmTarget ? { localVmTarget } : {}),
+      ...(teamComputerTurns.get(threadId) ? { teamComputerId: teamComputerTurns.get(threadId)!.computerId } : {}),
       skillAuthoring: false,
       createdBots: 0,
       openedThreads: 0,
@@ -1436,6 +1464,7 @@ function checkedMemberIds(value: unknown): { ok: true; memberIds: string[] } | {
 }
 let bootSelection = { instanceId: "", model: "" };
 const store = new Store(() => bootSelection);
+const teamComputers = new TeamComputers(join(DATA_DIR, "team-computers.json"), ENVIRONMENT_ID);
 let followupsReady = false;
 const sendSequencer = new SendSequencer();
 bootSelection = await defaultSelection();
@@ -1509,12 +1538,14 @@ function previewSystemPrompt(bot: BotRecord) {
     .join(" ");
   const instance = registry.get(bot.modelSelection.instanceId);
   const caps = instance?.adapter.capabilities;
+  const teamComputer = inheritedTeamComputer(bot);
+  const previewComputer = teamComputer ? "cloud" : bot.computer;
   const computerPromptKind: ComputerPromptKind | null =
-    bot.computer === "vm"
+    previewComputer === "vm"
       ? caps?.computerMcp ? localVmMode(cfg) === "per-bot" ? "vm-private" : "vm-shared" : null
-      : bot.computer === "cloud"
+      : previewComputer === "cloud"
         ? instance?.driverKind === "boxAgent" ? "box-agent" : caps?.computerMcp ? bot.cloudBackend === "vps" ? "vps" : "box" : null
-        : bot.computer === "local"
+        : previewComputer === "local"
           ? caps?.localComputerMcp ? "local" : null
           : null;
   const peers = reachablePeers(store.bots, bot);
@@ -1532,7 +1563,7 @@ function previewSystemPrompt(bot: BotRecord) {
   // Spelling the browser rule out a second time here is what let Off keep a
   // browser in one place while the preview said it had none.
   const previewPlan = resolveSurface({
-    destination: bot.computer,
+    destination: previewComputer,
     browserOn: caps?.browserMcp === true && builtInBrowserEnabled(cfg) && bot.browser !== false,
   });
   const privateWorkspace = instance && !["grok", "boxAgent"].includes(instance.driverKind);
@@ -1546,6 +1577,7 @@ function previewSystemPrompt(bot: BotRecord) {
       }),
     },
     { id: "computer", label: "Computer", text: computerPrompt(computerPromptKind) },
+    { id: "team-computer", label: "Team computer", text: teamComputerPrompt(teamComputer) },
     { id: "plan", label: "Surface", text: previewPlan.note },
     { id: "composio", label: "Connected apps", text: caps?.composioMcp && bot.composio !== false && composio.configured(cfg) ? COMPOSIO_PROMPT : "" },
     { id: "mcp", label: "MCP servers", text: caps?.customMcp ? customMcpPrompt(Object.keys(customMcpServers(cfg, bot.mcpServers))) : "" },
@@ -3341,8 +3373,104 @@ const LOCAL_VM_IDLE_MS = 8 * 60 * 60_000;
 const LOCAL_VM_DESKTOP_WAIT_MS = 90_000;
 const localVmIdles = new Map<string, LocalVmIdleTimer>();
 
+function inheritedTeamComputer(bot: Pick<BotRecord, "section" | "computer" | "cloudBackend">): TeamComputerRecord | undefined {
+  return teamComputers.forBot(bot);
+}
+
+function teamComputerPrompt(computer: TeamComputerRecord | undefined): string {
+  return computer ? `Your team shares the Box computer ${JSON.stringify(computer.name)}. Its desktop files and desktop browser logins are shared with other Auto bots in your team; only one turn may drive it at a time. The separate built-in Browser is not this desktop and does not automatically share its logins.` : "";
+}
+
+function botComputerControlKey(bot: BotRecord): string {
+  const computer = inheritedTeamComputer(bot);
+  return computer ? teamComputerOwner(computer.id) : bot.id;
+}
+
+function botComputerControlSnapshot(botId: string, pinnedComputerId?: string) {
+  const own = computerControl.snapshot(botId);
+  const bot = store.bot(botId);
+  const key = pinnedComputerId ? teamComputerOwner(pinnedComputerId) : bot ? botComputerControlKey(bot) : botId;
+  const shared = computerControl.snapshot(key);
+  return own.held ? own : shared.held || shared.helpReason ? shared : own;
+}
+
+function teamComputerInUse(computer: TeamComputerRecord): boolean {
+  computer = teamComputers.get(computer.id) ?? computer;
+  return computerControl.snapshot(teamComputerOwner(computer.id)).held ||
+    [...teamComputerTurns.values()].some(turn => turn.computerId === computer.id) ||
+    store.bots.some(bot => computer.section !== null && sectionKey(bot.section) === computer.section && (
+      botHasActiveTurn(bot.id) || Boolean(routines?.activeRunForBot(bot.id)) || computerControl.snapshot(bot.id).held
+    ));
+}
+
+function assertTeamControlCanBeTaken(computerId: string): void {
+  if ([...teamComputerTurns.values()].some(turn => turn.computerId === computerId && turn.remoteAgent)) {
+    throw Object.assign(new Error("Stop the Computer engine's active turn before taking control of this shared desktop"), { status: 409 });
+  }
+}
+
+function claimTeamComputerLifecycle(computer: TeamComputerRecord): () => void {
+  if (computerProviderConfigTransitions.has("box")) throw Object.assign(new Error(providerTransitionMessage("box")), { status: 409 });
+  if (teamComputerInUse(computer)) throw Object.assign(new Error("This team computer is in use; stop the team's work and release computer control first"), { status: 409 });
+  return claimBotComputerLifecycle(teamComputerOwner(computer.id));
+}
+
+function assertTeamComputerChangeIdle(before: BotRecord, after: BotRecord): void {
+  const previous = inheritedTeamComputer(before);
+  const next = inheritedTeamComputer(after);
+  if (previous?.id === next?.id) return;
+  if (botHasActiveTurn(before.id) || routines?.activeRunForBot(before.id) || botComputerControlSnapshot(before.id).held ||
+      [previous, next].some(computer => computer && (teamComputerInUse(computer) || boxLifecycleBusyBots.has(teamComputerOwner(computer.id))))) {
+    throw Object.assign(new Error("Stop the affected team's work and release computer control before changing its computer access"), { status: 409 });
+  }
+}
+
+async function teamComputersPayload(): Promise<TeamComputersPayload> {
+  const entries = teamComputers.list();
+  const inventory = await box.listManagedBoxes(cfg, managedBoxOwners());
+  return {
+    configured: inventory.configured,
+    ...(inventory.problem ? { problem: inventory.problem } : {}),
+    computers: entries.map(entry => {
+      const machine = inventory.instances.find(instance => instance.ownerBotId === teamComputerOwner(entry.id));
+      return {
+        id: entry.id, name: entry.name, section: entry.section,
+        held: computerControl.snapshot(teamComputerOwner(entry.id)).held,
+        state: boxLifecycleBusyBots.has(teamComputerOwner(entry.id)) ? "working" : machine?.state ?? (inventory.available ? "missing" : "unavailable"),
+        ...(entry.problem || inventory.problem ? { problem: entry.problem || inventory.problem! } : {}),
+      };
+    }),
+  };
+}
+
+/** The same named Box identity and whole-turn lease in chats and rooms.
+ * Assignment authorizes waking, never replacing a missing paid machine. */
+async function attachTeamBox(computer: TeamComputerRecord, botId: string, owner: TurnOwner, canMount: boolean, remoteAgent: boolean) {
+  if (!canMount) throw new Error("This model engine cannot use the team's Box computer; choose an engine with computer tools or an explicit bot destination");
+  if (!box.boxConfigured(cfg)) throw new Error("The team's Box account is not configured; reconnect it in Settings");
+  const ownerId = teamComputerOwner(computer.id);
+  if (boxLifecycleBusyBots.has(ownerId)) throw new Error("The team computer is being changed; wait for it to finish");
+  if (computerControl.snapshot(ownerId).held) throw new Error("Release human control of the team computer before starting another turn");
+  bindTurnComputer(owner, `computer:box-bot:${ownerId}`, true);
+  teamComputerTurns.set(owner.threadId, { owner, computerId: computer.id, botId, remoteAgent });
+  let machine = await box.findBox(cfg, ownerId);
+  if (!machine) throw new Error("The team's Box computer is missing; explicitly create or retry it from the Team map");
+  bindTurnComputer(owner, `computer:box:${machine.id}`, true);
+  const action = box.boxTurnLifecycleAction({ explicitCloud: true, canMount: true, state: typeof machine.state === "string" ? machine.state : null });
+  if (action === "wake") machine = await box.readyBox(cfg, ownerId);
+  if (!machine || box.boxTurnLifecycleAction({ explicitCloud: true, canMount: true, state: typeof machine.state === "string" ? machine.state : null }) !== "attach") {
+    throw new Error("The team computer is not ready; check it in the Team map");
+  }
+  if (turnResourceOwners.get(owner.threadId)?.generation !== owner.generation ||
+      !turnResources.owns(`computer:box:${machine.id}`, owner)) throw new Error("This computer turn ended while its machine was starting");
+  return {
+    integration: { kind: "box" as const, boxId: machine.id, token: cfg.box!.token!, control: controlIntegration(botId, owner.threadId, owner.generation) },
+    capture: () => box.screenshotBox(cfg, ownerId, machine!.id),
+  };
+}
+
 function managedBoxOwners(): box.ManagedBoxOwner[] {
-  return store.bots.map((bot) => ({
+  return [...store.bots.map((bot) => ({
     botId: bot.id,
     name: bot.name,
     // A machine is not safe to mutate while any app-level work or human
@@ -3355,7 +3483,9 @@ function managedBoxOwners(): box.ManagedBoxOwner[] {
       Boolean(routines?.activeRunForBot(bot.id)) ||
       activeVpsThreads.has(bot.id) ||
       computerControl.snapshot(bot.id).held,
-  }));
+  })), ...teamComputers.list().map(computer => ({
+    botId: teamComputerOwner(computer.id), name: computer.name, inUse: teamComputerInUse(computer),
+  }))];
 }
 
 function botHasActiveTurn(botId: string): boolean {
@@ -3399,6 +3529,7 @@ function providerOperationConflict(provider: RemoteComputerProvider): string | n
 
 function turnProvider(bot: NonNullable<ReturnType<typeof store.bot>>, runOn?: RoutineRunOn): RemoteComputerProvider | null {
   if (runOn === "cloud" || registry.get(bot.modelSelection.instanceId)?.driverKind === "boxAgent") return "box";
+  if (inheritedTeamComputer(bot)) return "box";
   if (bot.computer !== undefined && bot.computer !== "cloud") return null;
   return bot.cloudBackend === "vps" ? "vps" : "box";
 }
@@ -3426,6 +3557,8 @@ function claimBoxInventoryRequest(boxId: string): () => void {
  * a new turn and an irreversible lifecycle action cannot pass each other. */
 function claimManagedBoxMutation(instance: box.ManagedBoxInventoryInstance): () => void {
   const ownerBotId = instance.ownerBotId;
+  const teamComputer = teamComputers.list().find(computer => teamComputerOwner(computer.id) === ownerBotId);
+  if (teamComputer) return claimTeamComputerLifecycle(teamComputer);
   if (!ownerBotId) {
     if (orphanBoxLifecycleBusyIds.has(instance.boxId)) {
       throw Object.assign(new Error("this cloud computer is being changed — wait for it to finish"), { status: 409 });
@@ -3677,7 +3810,7 @@ bus.subscribe((event: RuntimeEvent) => {
           const existing = store.messagesFor(event.threadId).find((m) => m.id === messageId)?.tool;
           toolName = existing?.name ?? "tool";
           store.patchMessage(event.threadId, messageId, {
-            tool: { name: toolName, ok: event.ok, spoken: existing?.spoken, summary: existing?.summary },
+            tool: { ...existing, name: toolName, ok: event.ok, output: event.output },
           });
           toolMessageByItem.delete(itemKey);
         }
@@ -3708,7 +3841,7 @@ bus.subscribe((event: RuntimeEvent) => {
         const message = pushMessage({
           role: "bot",
           kind: "activity",
-          tool: { name, spoken: narrateTool(name) ?? undefined, summary: event.summary },
+          tool: { name, spoken: narrateTool(name) ?? undefined, summary: event.summary, input: event.input },
         });
         if (event.itemId) toolMessageByItem.set(`${event.threadId}:${event.itemId}`, message.id);
       }
@@ -4572,9 +4705,9 @@ function drainQueuedSends() {
   if (!followupsReady) return;
   drainSteeredMessages(store, (botId, threadId, prompt, userMessage, excludeIds, unattended) =>
     // A plain attended turn — no automationSource, no comms depth: exactly
-    // what typing the same words into an idle bot would run. The one
-    // exception is `unattended`: a thread a bot opened on itself while
-    // nobody was watching stays unwatched through the wait for a slot.
+    // what typing the same words into an idle bot would run. Self-opened
+    // work retains `unattended` and the message's bot-origin provenance
+    // through the wait for a slot.
     // Drain just appended the held lines; userMessage keeps startTurn
     // from duplicating the last one, and excludeIds drops every drained
     // line from the transcript-replay so they are not also in `prompt`.
@@ -4623,23 +4756,24 @@ const MAX_THREADS_OPENED_PER_TURN = 5;
 /** A thread a bot opened on itself gets its first turn exactly the way a
  * person's message would: it runs now if the bot has a free slot, and
  * otherwise waits in the same composer queue, in line behind whatever the
- * bot already has waiting. The only inheritance is `unattended` — a bot
- * nobody is watching does not become watched by opening a thread. */
+ * bot already has waiting. Its provenance survives the queue: this is the
+ * bot's own request, not a new human request authorizing recursive fan-out. */
 async function startOrQueueOpenedThread(
   botId: string,
   threadId: string,
   text: string,
   unattended: boolean,
 ): Promise<{ state: "running" } | { state: "queued"; position: number } | { state: "failed"; error: string }> {
+  const peerAsk = { botId, name: store.bot(botId)!.name, unattended: unattended || undefined };
   // A room turn holds the bot too (startTurn refuses a direct turn during
   // one); the drain's own block check already waits for it, so the words
   // queue here rather than bounce.
   if (botAtThreadCapacity(botId) || activeGroupTurnForBot(botId)) {
-    queueSteeredMessage(botId, threadId, text, { reason: "capacity", unattended });
+    queueSteeredMessage(botId, threadId, text, { reason: "capacity", unattended, peerAsk });
     return { state: "queued", position: queuedThreadPosition(botId, threadId) ?? 1 };
   }
   try {
-    await startTurn(botId, text, { threadId, unattended });
+    await startTurn(botId, text, { threadId, unattended, peerAsk });
     return { state: "running" };
   } catch (error) {
     const why = error instanceof Error ? error.message : String(error);
@@ -4715,7 +4849,7 @@ function startScreenPoller(
       browser: guarded(captures.browser, browserSession ? `browser:${browserSession}` : undefined),
     },
     control: () => ({
-      held: computerControl.snapshot(botId).held,
+      held: botComputerControlSnapshot(botId, teamComputerTurns.get(threadId)?.computerId).held,
       revision: computerControlRevision.get(botId) ?? 0,
     }),
     onFrame: (frame) => broadcast({ kind: "screen", botId, threadId, ...frame }),
@@ -4820,7 +4954,7 @@ async function startTurn(
     automationSource?: RoutineRunTrigger;
     /** the caller was already running unattended, so this turn is too */
     unattended?: boolean;
-    /** ask_bot delivery: the bot whose words this user-role line carries,
+    /** Bot delivery (including self-opened jobs): whose words this line carries,
      * recorded on the message itself (Message.peerAsk). */
     peerAsk?: Message["peerAsk"];
     /** Resume an agent after the user completed an inline connection or credential card.
@@ -4971,7 +5105,7 @@ async function startTurn(
   // A card continuation neither starts nor ends the person's ask: it
   // resumes the turn their last message began, so that record stands.
   if (!opts?.cardContinuation) {
-    if (commsDepth === 0 && opts?.automationSource === undefined && !opts?.unattended) {
+    if (commsDepth === 0 && opts?.automationSource === undefined && !opts?.unattended && !userMessage.peerAsk) {
       personAskAt.set(threadId, userMessage.at);
       // Continuing an old run as a normal conversation makes that task
       // visible again; these new replies are not routine report updates.
@@ -5166,7 +5300,8 @@ async function startTurn(
       if (dwebUrl) integrations.dweb = { url: dwebUrl };
       // Cloud routines always use Box/BoxAgent. The per-bot backend applies
       // only to ordinary turns that mount a computer into the local agent.
-      const cloudBackend = opts?.runOn === "cloud" || bot.cloudBackend !== "vps" ? "box" : "vps";
+      const teamComputer = inheritedTeamComputer(bot);
+      const cloudBackend = teamComputer || opts?.runOn === "cloud" || bot.cloudBackend !== "vps" ? "box" : "vps";
       const mountsComputerMcp = instance.adapter.capabilities.computerMcp === true;
       const mountsCloudComputer = mountsComputerMcp || instance.driverKind === "boxAgent";
       const mountsLocalComputer = instance.adapter.capabilities.localComputerMcp === true;
@@ -5180,7 +5315,7 @@ async function startTurn(
         bot.browser !== false &&
         instance.adapter.capabilities.browserMcp === true;
       const plan = resolveSurface({
-        destination: opts?.runOn === "cloud" ? "cloud" : bot.computer, // cloud routine overrides the MAUS default
+        destination: teamComputer || opts?.runOn === "cloud" ? "cloud" : bot.computer, // cloud routine overrides the MAUS default
         browserOn,
       });
       if (bot.computer === "browser" && plan.computer === "off" && instance.driverKind === "boxAgent") {
@@ -5291,7 +5426,13 @@ async function startTurn(
 
       // Cloud is also strict when explicitly selected. Auto (unset) reuses an
       // existing cloud box, then falls back to host CUA without provisioning.
-      if ((wants === "cloud" || wants === undefined) && cloudBackend === "box" && box.boxConfigured(cfg)) {
+      if (teamComputer) {
+        const attached = await attachTeamBox(teamComputer, bot.id, resourceOwner, mountsCloudComputer, instance.driverKind === "boxAgent");
+        integrations.computer = attached.integration;
+        previewCapture = attached.capture;
+        computerKind = "box";
+      }
+      if (!teamComputer && (wants === "cloud" || wants === undefined) && cloudBackend === "box" && box.boxConfigured(cfg)) {
         // Explicit cloud turns can provision/wake the same bot's Box. Claim
         // before any network await so setup itself cannot race another turn.
         if (wants === "cloud") bindTurnComputer(resourceOwner, `computer:box-bot:${bot.id}`, true);
@@ -5391,7 +5532,14 @@ async function startTurn(
       // that ask_bot and delegate_bot would then refuse.
       const sectionPeers = reachablePeers(store.bots, bot);
       if (agentsMounted) {
-        integrations.agents = agentsIntegration(bot.id, threadId, commsDepth, skillAuthoring, dispatchClaimId, opts?.coordination?.id, boundedCoordination);
+        // Only a direct human request can create separate self-owned jobs.
+        // Coordinated children and self-opened jobs stay inside their scope;
+        // a later real user message on the same task is a fresh request.
+        const origin = opts?.cardContinuation
+          ? store.activePath(threadId).findLast(message => message.role === "user" && message.kind === "text")
+          : userMessage;
+        const ownThreadCreation = boundedCoordination && !opts?.coordination && Boolean(origin && !origin.peerAsk);
+        integrations.agents = agentsIntegration(bot.id, threadId, commsDepth, skillAuthoring, dispatchClaimId, opts?.coordination?.id, boundedCoordination, ownThreadCreation);
       }
       // @mentions in the user's message (the composer's tagging UI) become
       // an explicit coordination nudge. The agent still chooses the matching
@@ -5500,6 +5648,7 @@ async function startTurn(
         { id: "setup", label: "Setup", text: setupSystemPrompt(setupMode, { skills: skillAuthoring, cwd: liveBot?.cwd ?? bot.cwd }) },
         { id: "files", label: "File locations", text: worksInWorkspace && opts?.runOn !== "cloud" ? workspaceLocationsPrompt(bot.id, cwd, liveBot?.cwd ?? bot.cwd) : "" },
         { id: "computer", label: "Computer", text: computerPrompt(computerPromptKind) },
+        { id: "team-computer", label: "Team computer", text: teamComputerPrompt(teamComputer) },
         { id: "plan", label: "Surface", text: plan.note },
         // gated on the integration, not the key: the hint only goes to a
         // bot whose driver actually mounted the tools
@@ -6332,6 +6481,14 @@ async function resolveAndSendTeamSetup(res: ServerResponse, args: { botId: strin
   const card = store.messagesFor(args.threadId).find((item) => item.card?.requestId === args.requestId && item.card.teamSetupRequest)?.card;
   if (!card) return false;
   if (args.behavior === "allow" && !ownerReview) { json(res, 403, { error: "Approve team setup or deletion from the desktop app or a paired owner device. In a local browser, wait until every bot is idle." }); return true; }
+  if (args.behavior === "allow" && !card.answered && !card.dismissed) {
+    // Confirmed Chief setup can move bots without the ordinary PATCH route.
+    // Keep that atomic Store operation behind the same shared-machine fence.
+    for (const operation of card.teamSetupRequest!.operations) {
+      const before = store.bot(operation.botId);
+      if (before && operation.action === "update") assertTeamComputerChangeIdle(before, { ...before, ...operation.fields });
+    }
+  }
   const resumeGeneration = teamSetupResumeGenerations.get(args.threadId) ?? 0;
   const resolved = await teamSetupRequests.resolve(args);
   if (!resolved) return false;
@@ -6916,8 +7073,9 @@ async function runGroupMemberTurn(
   // "Works on" decides here exactly as it decides a 1:1 turn: the same
   // shared policy, so a room cannot become the loophole that hands a bot
   // set to Off the browser its own settings withhold everywhere else.
+  const roomTeamComputer = inheritedTeamComputer(readyBot);
   const roomPlan = resolveSurface({
-    destination: readyBot.computer,
+    destination: roomTeamComputer ? "cloud" : readyBot.computer,
     browserOn:
       builtInBrowserEnabled(cfg) &&
       readyBot.browser !== false &&
@@ -6936,6 +7094,15 @@ async function runGroupMemberTurn(
       groupSpeakers.get(threadId) !== roomSpeaker ||
       activeInternalGenerationByThread.get(threadId) !== internalGeneration) {
     return false;
+  }
+
+  if (roomTeamComputer) {
+    const attached = await attachTeamBox(roomTeamComputer, readyBot.id, resourceOwner,
+      instance.adapter.capabilities.computerMcp === true || instance.driverKind === "boxAgent", instance.driverKind === "boxAgent");
+    if (isCancelled?.() || groupSpeakers.get(threadId) !== roomSpeaker ||
+        activeInternalGenerationByThread.get(threadId) !== internalGeneration) return false;
+    integrations.computer = attached.integration;
+    startScreenPoller(readyBot.id, threadId, { computer: attached.capture }, { screenIsTheWork: instance.driverKind === "boxAgent" });
   }
 
   // Room and Goal turns use the speaker's desktop, never the coordinator's.
@@ -7036,7 +7203,8 @@ async function runGroupMemberTurn(
   const roomSystem = buildSystemPrompt(system, store.bot(bot.id)?.soul ?? bot.soul ?? "", [
     { id: "files", label: "File locations", text: workspace ? workspaceLocationsPrompt(bot.id, cwd, readyBot.cwd) : "" },
     { id: "mcp", label: "MCP servers", text: customMcpPrompt(Object.keys(integrations.custom ?? {})) },
-    { id: "computer", label: "Computer", text: computerPrompt(roomVmTarget ? localVmMode(cfg) === "per-bot" ? "vm-private" : "vm-shared" : null) },
+    { id: "computer", label: "Computer", text: computerPrompt(roomTeamComputer ? instance.driverKind === "boxAgent" ? "box-agent" : "box" : roomVmTarget ? localVmMode(cfg) === "per-bot" ? "vm-private" : "vm-shared" : null) },
+    { id: "team-computer", label: "Team computer", text: teamComputerPrompt(roomTeamComputer) },
     { id: "plan", label: "Surface", text: roomPlan.note },
     { id: "browser", label: "Browser", text: integrations.browser ? BUILT_IN_BROWSER_SYSTEM_PROMPT : "" },
     { id: "recall", label: "Recall", text: integrations.agents ? SESSION_SEARCH_SYSTEM_PROMPT : "" },
@@ -8962,6 +9130,10 @@ function configStatus() {
       skillAuthoring: skillAuthoringEnabled(cfg),
       showToolCalls: showToolCallsEnabled(cfg),
       browser: builtInBrowserEnabled(cfg),
+      // Maintainer-only escape hatch, not a Settings toggle: the desktop
+      // shell and the Settings UI read it so they offer nothing this server
+      // would refuse.
+      sharedComputers: sharedComputersEnabled(cfg),
     },
     // first-run progress — not a secret; the app decides whether to show
     // the welcome tour from this, never from browser storage
@@ -9234,13 +9406,21 @@ const workspaceBackupRoutes = createWorkspaceBackupRoutes({
     return Boolean(current?.scopes.includes("admin") && current.kind === original.kind &&
       (current.kind !== "session" || (original.kind === "session" && current.session.id === original.session.id)));
   },
-  exclusive: (work, keepLocked) => workspaceMaintenance.run(work, {
+  exclusive: (work, keepLocked) => workspaceMaintenance.run(async () => {
+    // Recheck inside the exclusive gate: the restore body can arrive slowly
+    // while another client assigns a computer after the initial route check.
+    if (keepLocked && teamComputers.list().some(computer => computer.section !== null)) {
+      throw Object.assign(new Error("Unassign team computers before restoring this workspace"), { status: 409 });
+    }
+    return work();
+  }, {
     idle: () => !providerFleetReloading && !providerAuthSessions.active && !browserEngineInstall &&
       !routines?.isTicking && !calendarCalls?.isTicking &&
       !localVmImageBusy && !localVmProvisionBusy && !localVmModeChangeBusy &&
       !localVmLifecycleBusy.size && !boxLifecycleBusyBots.size && !vpsPreviewRequests.size && !orphanBoxLifecycleBusyIds.size &&
       !computerProviderConfigTransitions.size && !checkpointRestoreLeases.size &&
-      store.bots.every((bot) => !botHasActiveTurn(bot.id) && !routines?.activeRunForBot(bot.id) && !computerControl.snapshot(bot.id).held) &&
+      teamComputers.list().every(computer => !teamComputerInUse(computer)) &&
+      store.bots.every((bot) => !botHasActiveTurn(bot.id) && !routines?.activeRunForBot(bot.id) && !botComputerControlSnapshot(bot.id).held) &&
       store.groups.every((group) => !groupIsWorking(group)),
     pause: () => { routines?.stop(); calendarCalls?.stop(); watchdog.stop(); },
     resume: () => { routines?.start(); calendarCalls?.start(); watchdog.start(); },
@@ -9295,7 +9475,7 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
     // paired session with the right scope.
     if (method === "GET" && !path.startsWith("/api/") && !path.startsWith("/.well-known/") && serveStatic(res, path)) return;
     if (method === "GET" && path === "/.well-known/openmausbot/environment") {
-      return json(res, 200, environmentDescriptor({ environmentId: ENVIRONMENT_ID, desktopManaged: DESKTOP_MANAGED, emailSignIn: !HOSTED_WORKSPACE && emailSignIn.enabled() }));
+      return json(res, 200, environmentDescriptor({ environmentId: ENVIRONMENT_ID, desktopManaged: DESKTOP_MANAGED, emailSignIn: !HOSTED_WORKSPACE && emailSignIn.enabled(), sharedComputers: sharedComputersEnabled(cfg) }));
     }
     const domainCheck = /^\/\.well-known\/openmausbot\/domain-check\/([a-f0-9]{64})$/.exec(path);
     if (method === "GET" && domainCheck) {
@@ -9334,7 +9514,7 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
       }
       sessions.clearFailures(source);
       const issued = sessions.issue({ label: label.trim() || labelFromUserAgent(req.headers["user-agent"]), scopes: verified.scopes, userId: verified.userId, email: verified.email });
-      const environment = environmentDescriptor({ environmentId: ENVIRONMENT_ID, desktopManaged: DESKTOP_MANAGED, emailSignIn: true });
+      const environment = environmentDescriptor({ environmentId: ENVIRONMENT_ID, desktopManaged: DESKTOP_MANAGED, emailSignIn: true, sharedComputers: sharedComputersEnabled(cfg) });
       const secure = requestOrigin(req)?.startsWith("https://") === true;
       res.setHeader("set-cookie", serializeSessionCookie(SESSION_COOKIE, issued.token, { secure, maxAgeSeconds: cookieMaxAgeSeconds(issued.session) }));
       return json(res, 200, { session: issued.session, environment });
@@ -9356,7 +9536,7 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
         console.warn(`pairing refused from ${requestSource(req)}: ${result.error}`);
         return json(res, result.status, { error: result.error });
       }
-      const environment = environmentDescriptor({ environmentId: ENVIRONMENT_ID, desktopManaged: DESKTOP_MANAGED, emailSignIn: emailSignIn.enabled() });
+      const environment = environmentDescriptor({ environmentId: ENVIRONMENT_ID, desktopManaged: DESKTOP_MANAGED, emailSignIn: emailSignIn.enabled(), sharedComputers: sharedComputersEnabled(cfg) });
       if (wantsCookie) {
         const secure = requestOrigin(req)?.startsWith("https://") === true;
         res.setHeader("set-cookie", serializeSessionCookie(SESSION_COOKIE, result.token, { secure, maxAgeSeconds: cookieMaxAgeSeconds(result.session) }));
@@ -9371,6 +9551,7 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
       url,
       loopbackMutationToken: desktopMutationToken,
       companionMutationToken,
+      features: { sharedComputers: sharedComputersEnabled(cfg) },
     });
     // The browser's cookie carries the term it was set with, and the
     // session's term slides on use (sessions.ts `renew`), so re-issue the
@@ -9406,6 +9587,9 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
       if (failure) return json(res, failure.status, { error: failure.error });
     }
 
+    if (method === "POST" && path === "/api/workspace-backup/restore" && teamComputers.list().some(computer => computer.section !== null)) {
+      return json(res, 409, { error: "Unassign team computers before restoring a workspace; restored team names must not gain access to existing desktops" });
+    }
     if (await workspaceBackupRoutes(req, res, path, auth)) return;
     // Count ordinary requests until their asynchronous handler returns, not
     // merely until the browser disconnects. A cancelled upload can still write.
@@ -9503,9 +9687,10 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
       const cancelled = sessions.cancelPairing(m[1]);
       return json(res, cancelled ? 200 : 404, cancelled ? { ok: true } : { error: "no such pairing code" });
     }
-    if (method === "POST" && path === "/api/desktop/shared-computer-control") {
+    if (method === "POST" && path === "/api/desktop/shared-computer-control" && sharedComputersEnabled(cfg)) {
       if (auth.kind !== "loopback") return json(res, 403, { error: "Local desktop only" });
       const body = await readBody(req, 1024);
+      if (!sharedComputersEnabled(cfg)) return json(res, 404, { error: `no route: ${method} ${path}` });
       if (!z.string().uuid().safeParse(body?.id).success || !["acquire", "release"].includes(body?.action)) return json(res, 400, { error: "Invalid computer lease" });
       if (body.action === "release") sharedComputerControl.release(body.id);
       else sharedComputerControl.acquire(body.id);
@@ -9513,10 +9698,14 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
     }
     // A paired desktop registers only its own outbound connector. A second,
     // main-process-only secret binds poll/results to that exact desktop.
-    if (method === "POST" && path.startsWith("/api/shared-computers/")) {
+    // With features.sharedComputers off the whole family falls through to the
+    // generic "no route" 404, so a probe cannot tell a disabled feature from
+    // a build that never had one.
+    if (method === "POST" && path.startsWith("/api/shared-computers/") && sharedComputersEnabled(cfg)) {
       if (auth.kind !== "session") return json(res, 403, { error: "Pair this desktop first" });
       if (!/^application\/json\b/i.test(String(req.headers["content-type"] ?? ""))) return json(res, 415, { error: "JSON required" });
       const body = await readBody(req, 4_000_000);
+      if (!sharedComputersEnabled(cfg)) return json(res, 404, { error: `no route: ${method} ${path}` });
       if (!sessions.isLive(auth.session.id)) return json(res, 401, { error: "Session ended" });
       const secret = String(req.headers["x-omb-computer-secret"] ?? "");
       if (path === "/api/shared-computers/connect") {
@@ -9603,7 +9792,7 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
       if (internalCapability.kind !== requiredCapabilityKind) {
         return json(res, 403, { error: "this internal capability cannot access that service" });
       }
-      if (internalCapability.roomCoordination && method === "POST" && ["/api/internal/ask-bot", "/api/internal/delegate-bot", "/api/internal/threads"].includes(path)) {
+      if (internalCapability.roomCoordination && method === "POST" && ["/api/internal/ask-bot", "/api/internal/delegate-bot"].includes(path)) {
         return json(res, 409, { error: "Use coordinate_bots for teamwork; it queues actual teammates and resumes you automatically." });
       }
       // Query/body sender ids remain on the wire for proxy compatibility,
@@ -9691,11 +9880,14 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
         requireActiveInternalCapability();
         return json(res, 200, { result });
       }
-      if (method === "GET" && path === "/api/internal/shared-computers") return json(res, 200, { computers: sharedComputers.list() });
-      if (method === "POST" && path === "/api/internal/shared-computers") {
+      // Off by default: both fall through to the same "unknown internal
+      // endpoint" 404 a never-implemented route returns.
+      if (method === "GET" && path === "/api/internal/shared-computers" && sharedComputersEnabled(cfg)) return json(res, 200, { computers: sharedComputers.list() });
+      if (method === "POST" && path === "/api/internal/shared-computers" && sharedComputersEnabled(cfg)) {
         const parsed = sharedComputerOperation.safeParse(await readInternalBody());
+        if (!sharedComputersEnabled(cfg)) return json(res, 404, { error: "unknown internal endpoint" });
         if (!parsed.success) return json(res, 400, { error: "Invalid shared computer operation" });
-        return json(res, 200, { result: await sharedComputers.request(parsed.data, () => internalCapabilityIsActive(internalCapability)) });
+        return json(res, 200, { result: await sharedComputers.request(parsed.data, () => sharedComputersEnabled(cfg) && internalCapabilityIsActive(internalCapability)) });
       }
       if (method === "GET" && path === "/api/internal/agents") {
         const sender = internalSender;
@@ -9747,6 +9939,7 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
           if (task.activity === "waiting-on-you") return "waiting-on-you" as const;
           if (threadBusy(bot.id, task.threadId)) return "running" as const;
           if (queuedThreadPosition(bot.id, task.threadId) !== null) return "queued" as const;
+          if (roomHandoffs.activeDirect(task.threadId)) return "queued" as const;
           if (task.closedBy) return "closed" as const;
           return "idle" as const;
         };
@@ -9789,7 +9982,7 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
           return json(res, 403, { error: "that thread is not yours to close — only the bot that opened it, or its own bot, can" });
         }
         if (threadId === fromThreadId) return json(res, 400, { error: "you cannot close the thread you are speaking in — finish your turn instead" });
-        if (threadBusy(owner.id, threadId)) {
+        if (threadBusy(owner.id, threadId) || queuedThreadPosition(owner.id, threadId) !== null || roomHandoffs.activeDirect(threadId)) {
           return json(res, 409, { error: `#${task.title} is still running — wait for it to finish (list_threads), or the person can stop it from the app` });
         }
         // Closing twice is not an error and leaves no second chip: the
@@ -10477,7 +10670,8 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
                   .find(node => node.key === parsed.data.requestKey + ":" + target.botId);
                 if (existing) target.threadId = existing.threadId;
                 else {
-                  const task = store.createTask(target.botId, parsed.data.message, false);
+                  const task = store.createTask(target.botId, parsed.data.message, false, undefined,
+                    { botId: internalSender.id, name: internalSender.name, at: Date.now() });
                   if (!task) throw new Error("The recipient no longer exists");
                   target.threadId = createdThread = task.threadId;
                 }
@@ -10671,6 +10865,14 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
         const toBotId = typeof body.toBotId === "string" && body.toBotId.trim() ? body.toBotId.trim() : from.id;
         const target = store.bot(toBotId);
         if (!target) return json(res, 404, { error: "no such bot" });
+        if (internalCapability.roomCoordination) {
+          if (target.id !== from.id) {
+            return json(res, 409, { error: "Use coordinate_bots for teamwork; it queues actual teammates and resumes you automatically." });
+          }
+          if (!internalCapability.ownThreadCreation) {
+            return json(res, 409, { error: "Only a direct user request can open separate self-owned threads. Finish this assigned work here; use coordinate_bots for teammates." });
+          }
+        }
         // A folder is the target's own organisation; a name is what the
         // model has, an id is what the sidebar has, so accept either.
         const folder = typeof body.folder === "string" ? body.folder.trim() : "";
@@ -10979,7 +11181,7 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
         const bot = store.bot(botId);
         if (!bot) return json(res, 404, { error: "no such bot" });
         if (method === "GET") {
-          const snapshot = computerControl.snapshot(botId);
+          const snapshot = botComputerControlSnapshot(botId, internalCapability.teamComputerId);
           const computer = turnComputerResources.get(internalCapability.threadId);
           if (!snapshot.held && computer && computer.owner.generation === internalCapability.generation &&
               !claimTurnResource(computer.owner, computer.resource)) {
@@ -10992,7 +11194,8 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
         }
         if (method === "POST") {
           const body = await readInternalBody();
-          const { snapshot, requestId } = computerControl.requestHelpLease(botId, body.reason);
+          const controlKey = internalCapability.teamComputerId ? teamComputerOwner(internalCapability.teamComputerId) : botId;
+          const { snapshot, requestId } = computerControl.requestHelpLease(controlKey, body.reason);
           // worth a buzz: the bot is blocked on the person's hands, which
           // is exactly the "blocked on you" rule notify.ts encodes.
           // A bot stuck mid-room is not in its 1:1 thread — the turn and the
@@ -11009,7 +11212,7 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
         }
         if (method === "DELETE") {
           const body = await readInternalBody();
-          const snapshot = computerControl.expireHelp(botId, body.requestId);
+          const snapshot = computerControl.expireHelp(internalCapability.teamComputerId ? teamComputerOwner(internalCapability.teamComputerId) : botId, body.requestId);
           return json(res, 200, { held: snapshot.held, helpOpen: snapshot.helpReason !== null });
         }
         return json(res, 405, { error: "method not allowed" });
@@ -11381,7 +11584,7 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
         groups: store.groups.map((g) => ({ ...publicGroupState(g), ...messagePage(g.threadId, limit) })),
         computerControl: Object.fromEntries(
           store.bots.map((bot) => {
-            const snapshot = computerControl.snapshot(bot.id);
+            const snapshot = botComputerControlSnapshot(bot.id);
             return [bot.id, { held: snapshot.held, helpReason: snapshot.helpReason }];
           }),
         ),
@@ -12442,6 +12645,7 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
     if (path === "/api/sidebar-sections" && (method === "PATCH" || method === "DELETE")) {
       const section = url.searchParams.get("section")?.trim();
       if (!section) return json(res, 400, { error: "Choose a named team" });
+      if (teamComputers.forSection(section)) return json(res, 409, { error: "Unassign this team's computer before renaming or deleting the team" });
       let nextName: string | null = null;
       if (method === "PATCH") {
         const parsed = z.object({ name: z.string().trim().min(1).max(60) }).strict().safeParse(await readBody(req));
@@ -12463,6 +12667,10 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
       }
       const botIds = [...new Set(parsed.data.botIds)];
       if (!name && !botIds.length) return json(res, 400, { error: "Team name is required" });
+      for (const botId of botIds) {
+        const bot = store.bot(botId);
+        if (bot) assertTeamComputerChangeIdle(bot, { ...bot, section: name || undefined });
+      }
       const result = store.setBotsSection(botIds, name);
       if (!result.ok) {
         if (result.reason === "chief-conflict") {
@@ -13083,6 +13291,7 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
         return json(res, 409, { error: "Stop the bot and release browser control before changing its profile." });
       }
       if (profile.patch.soul !== undefined) {
+        if (freshBrowserBot) assertTeamComputerChangeIdle(freshBrowserBot, { ...freshBrowserBot, ...patch } as BotRecord);
         // A mixed settings request must not turn a runtime revocation into
         // a persist-first edit. Apply runtime fields with their existing
         // fail-closed semantics; atomically commit only the profile fields.
@@ -13091,6 +13300,7 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
         if (Object.keys(runtimePatch).length) store.patchBot(m[1], runtimePatch);
         bot = store.patchBotProfile(m[1], profile.patch);
       } else {
+        if (freshBrowserBot) assertTeamComputerChangeIdle(freshBrowserBot, { ...freshBrowserBot, ...patch } as BotRecord);
         bot = store.patchBot(m[1], patch);
       }
       if (!bot) return json(res, 404, { error: "no such bot" });
@@ -14141,6 +14351,106 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
       return json(res, 200, { bot: fresh });
     }
 
+    // Named team Boxes use real independent ownership, never a hidden bot or
+    // an arbitrary provider id. These new routes remain admin-only by default.
+    if (path === "/api/team-computers" && method === "GET") {
+      res.setHeader("cache-control", "private, no-store");
+      return json(res, 200, await teamComputersPayload());
+    }
+    m = path.match(/^\/api\/team-computers(?:\/([\w-]+)(?:\/(provision|join|sleep|control))?)?$/);
+    if (m) {
+      const computerId = m[1];
+      const action = m[2];
+      let found = computerId ? teamComputers.get(computerId) : undefined;
+      if (computerId && !found) return json(res, 404, { error: "No such team computer" });
+      if (method === "GET" && action === "control" && found) {
+        return json(res, 200, computerControl.snapshot(teamComputerOwner(found.id)));
+      }
+      if (!String(req.headers["content-type"] ?? "").toLowerCase().startsWith("application/json")) return json(res, 415, { error: "content-type must be application/json" });
+      const body = await readBody(req);
+      found = computerId ? teamComputers.get(computerId) : undefined;
+      const assertCurrentOwner = () => {
+        if (auth.kind === "session" && !sessions.isLive(auth.session.id)) throw Object.assign(new Error("Your session ended; sign in again"), { status: 401 });
+        if (computerProviderConfigTransitions.has("box")) throw Object.assign(new Error(providerTransitionMessage("box")), { status: 409 });
+      };
+      assertCurrentOwner();
+      if (action === "control" && method === "POST" && found) {
+        const parsed = z.object({ action: z.enum(["take", "release"]), controlLeaseId: controlLeaseIdSchema.optional() }).strict().safeParse(body);
+        if (!parsed.success) return json(res, 400, { error: "Choose take or release with a valid optional controlLeaseId" });
+        const key = teamComputerOwner(found.id);
+        if (parsed.data.action === "take" && boxLifecycleBusyBots.has(key)) return json(res, 409, { error: "Wait for this computer's action to finish before taking control" });
+        if (parsed.data.action === "take") assertTeamControlCanBeTaken(found.id);
+        if (parsed.data.controlLeaseId) {
+          const result = parsed.data.action === "take"
+            ? computerControl.acquireLease(key, parsed.data.controlLeaseId)
+            : computerControl.releaseLease(key, parsed.data.controlLeaseId);
+          return json(res, 200, { ...result.snapshot, ...result });
+        }
+        return json(res, 200, parsed.data.action === "take" ? computerControl.take(key) : computerControl.release(key));
+      }
+      if (method === "PATCH" && found && !action) {
+        const parsed = teamComputerAssignment.safeParse(body);
+        if (!parsed.success) return json(res, 400, { error: "Confirm shared desktop access with section and acknowledgeSharedAccess: true" });
+        const section = parsed.data.section;
+        const checkAssignment = () => {
+          assertCurrentOwner();
+          if (section !== null && section !== "" && !store.sections.includes(section)) throw Object.assign(new Error("Create the team before assigning a computer"), { status: 404 });
+          if (section !== null && store.bots.some(bot => sectionKey(bot.section) === section && (
+            botHasActiveTurn(bot.id) || routines?.activeRunForBot(bot.id) || botComputerControlSnapshot(bot.id).held || boxLifecycleBusyBots.has(bot.id)
+          ))) throw Object.assign(new Error("Stop the target team's work and release computer control before assigning this computer"), { status: 409 });
+        };
+        checkAssignment();
+        const release = claimTeamComputerLifecycle(found);
+        try {
+          if (section !== null && !(await box.findBox(cfg, teamComputerOwner(found.id)))) return json(res, 409, { error: "Create or retry this computer before assigning it to a team" });
+          checkAssignment();
+          if (teamComputerInUse(found)) return json(res, 409, { error: "This team computer became busy; stop its work before assigning it" });
+          teamComputers.assign(found.id, section);
+          return json(res, 200, { ok: true });
+        } finally { release(); }
+      }
+      if (method === "POST" && !computerId) {
+        const parsed = teamComputerCreate.safeParse(body);
+        if (!parsed.success) return json(res, 400, { error: "Provide requestId (UUID), a name, and acknowledgeCost: true to create a paid Box" });
+        if (!box.boxConfigured(cfg)) return json(res, 409, { error: "Configure Box in Settings before creating a cloud computer" });
+        const computer = teamComputers.create(parsed.data.name, parsed.data.requestId);
+        const release = claimTeamComputerLifecycle(computer);
+        try {
+          await box.provisionBox(cfg, teamComputerOwner(computer.id), computer.name);
+          teamComputers.setProblem(computer.id);
+          return json(res, 201, { id: computer.id });
+        } catch (error) {
+          teamComputers.setProblem(computer.id, redactSecretsInText(error instanceof Error ? error.message : String(error)));
+          throw error;
+        } finally { release(); }
+      }
+      if (method === "POST" && found && action && action !== "control") {
+        if (action === "provision" && body?.acknowledgeCost !== true) return json(res, 400, { error: "Confirm Box creation or wake costs with acknowledgeCost: true" });
+        // A ready-only join never wakes, provisions or steals an agent's turn.
+        // The caller takes a separate explicit human-control lease first.
+        if (action === "join") {
+          const key = teamComputerOwner(found.id);
+          if (boxLifecycleBusyBots.has(key)) return json(res, 409, { error: "Wait for this computer's action to finish" });
+          if (!computerControl.snapshot(key).held) return json(res, 409, { error: "Take control before opening this shared desktop" });
+          const release = claimBotComputerLifecycle(key);
+          try { return json(res, 200, await box.joinReadyBox(cfg, key)); }
+          finally { release(); }
+        }
+        const release = claimTeamComputerLifecycle(found);
+        try {
+          const result = action === "provision"
+            ? await box.provisionBox(cfg, teamComputerOwner(found.id), found.name)
+            : await box.sleepBox(cfg, teamComputerOwner(found.id));
+          teamComputers.setProblem(found.id);
+          return json(res, 200, result);
+        } catch (error) {
+          teamComputers.setProblem(found.id, redactSecretsInText(error instanceof Error ? error.message : String(error)));
+          throw error;
+        } finally { release(); }
+      }
+      return json(res, 405, { error: "method not allowed" });
+    }
+
     // Account-wide Box inventory is a Settings surface, never a provisioning
     // path. Listing remains read-only; lifecycle changes require explicit
     // JSON actions and are revalidated against a fresh provider listing.
@@ -14463,8 +14773,10 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
       }
       const kind = provider as ProviderKeyKind;
       const saved = kind === "anthropic" ? cfg.anthropic : kind === "openaiCompat" ? cfg.openaiCompat : cfg.xai;
-      const pasted = typeof body?.key === "string" ? body.key.trim() : "";
-      const key = pasted || saved?.key || "";
+      if (body?.key !== undefined && typeof body.key !== "string") {
+        return json(res, 400, { error: "key must be a string" });
+      }
+      const key = typeof body?.key === "string" ? body.key.trim() : saved?.key?.trim() || "";
       if (!key) return json(res, 400, { error: "No key to test. Paste one or save one first." });
       if (key.length > 512) return json(res, 400, { error: "That does not look like an API key." });
       const url = typeof body?.url === "string" && body.url.trim() ? body.url.trim() : saved?.url;
@@ -15166,6 +15478,10 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
       }
       let browserReferenceCleanupError: unknown = null;
       if (patch.signIn !== undefined) sessions.revalidateEmailSessions();
+      if (!sharedComputersEnabled(cfg)) {
+        sharedComputers.close();
+        sharedComputerControl.close();
+      }
       if (disablingBuiltInBrowser) browserLive.closeAll();
       for (const request of browserCleanupRequests) {
         if (request.kind === "profile") browserLive.closeForSession(browserSessionId("", request.partitionId));
@@ -15479,6 +15795,8 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
     if (m && method === "GET") {
       const bot = store.bot(m[1]);
       if (!bot) return json(res, 404, { error: "no such bot" });
+      const teamComputer = inheritedTeamComputer(bot);
+      if (teamComputer) return json(res, 200, { backend: "box", teamComputer: { id: teamComputer.id, name: teamComputer.name }, ...(await box.boxStatus(cfg, teamComputerOwner(teamComputer.id))) });
       return bot.cloudBackend === "vps"
         ? json(res, 200, { backend: "vps", ...(await vps.vpsComputerStatus(cfg, bot.id)) })
         : json(res, 200, { backend: "box", ...(await box.boxStatus(cfg, bot.id)) });
@@ -15490,7 +15808,7 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
     if (m) {
       const bot = store.bot(m[1]);
       if (!bot) return json(res, 404, { error: "no such bot" });
-      if (method === "GET") return json(res, 200, computerControl.snapshot(bot.id));
+      if (method === "GET") return json(res, 200, botComputerControlSnapshot(bot.id));
       if (method === "POST") {
         // JSON-only for the same anti-form-POST reason as every other
         // computer mutation below.
@@ -15499,6 +15817,11 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
         }
         const body = await readBody(req);
         const action = String(body.action ?? "");
+        const currentBot = store.bot(bot.id);
+        if (!currentBot) return json(res, 404, { error: "no such bot" });
+        const controlKey = botComputerControlKey(currentBot);
+        const teamComputer = inheritedTeamComputer(currentBot);
+        if (action === "take" && teamComputer) assertTeamControlCanBeTaken(teamComputer.id);
         const leaseResult =
           body.controlLeaseId === undefined
             ? null
@@ -15507,11 +15830,11 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
           return json(res, 400, { error: "controlLeaseId is invalid" });
         }
         const controlLeaseId = leaseResult?.data;
-        if (action === "take" && boxLifecycleBusyBots.has(bot.id)) {
+        if (action === "take" && (boxLifecycleBusyBots.has(bot.id) || boxLifecycleBusyBots.has(controlKey))) {
           return json(res, 409, { error: "this bot's cloud computer is being changed — wait before taking control" });
         }
         if (action === "take" && controlLeaseId) {
-          const result = computerControl.acquireLease(bot.id, controlLeaseId);
+          const result = computerControl.acquireLease(controlKey, controlLeaseId);
           return json(res, 200, {
             ...result.snapshot,
             owned: result.owned,
@@ -15519,12 +15842,12 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
           });
         }
         if (action === "release" && controlLeaseId) {
-          const result = computerControl.releaseLease(bot.id, controlLeaseId);
+          const result = computerControl.releaseLease(controlKey, controlLeaseId);
           return json(res, 200, { ...result.snapshot, released: result.released });
         }
-        if (action === "take") return json(res, 200, computerControl.take(bot.id));
-        if (action === "release") return json(res, 200, computerControl.release(bot.id));
-        if (action === "dismiss-help") return json(res, 200, computerControl.dismissHelp(bot.id));
+        if (action === "take") return json(res, 200, computerControl.take(controlKey));
+        if (action === "release") return json(res, 200, computerControl.release(controlKey));
+        if (action === "dismiss-help") return json(res, 200, computerControl.dismissHelp(controlKey));
         return json(res, 400, { error: "action must be take, release, or dismiss-help" });
       }
       return json(res, 405, { error: "method not allowed" });
@@ -15557,6 +15880,20 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
       }
       if (boxLifecycleBusyBots.has(botId)) {
         return json(res, 409, { error: "this bot's cloud computer is being changed — wait for it to finish" });
+      }
+      const teamComputer = inheritedTeamComputer(bot);
+      if (teamComputer) {
+        const key = teamComputerOwner(teamComputer.id);
+        if (boxLifecycleBusyBots.has(key)) return json(res, 409, { error: "This team computer is being changed; wait for it to finish" });
+        if (m[2] === "provision" || m[2] === "remove") return json(res, 409, { error: "Manage this shared computer from the Team map" });
+        if (m[2] === "exec") return json(res, 409, { error: "Use the bot's scoped computer tools for this shared desktop" });
+        if (m[2] === "join" && !computerControl.snapshot(key).held) return json(res, 409, { error: "Take control before opening this shared desktop" });
+        const release = m[2] === "sleep" ? claimTeamComputerLifecycle(teamComputer) : claimBotComputerLifecycle(key);
+        try {
+          if (m[2] === "join") return json(res, 200, await box.joinReadyBox(cfg, key));
+          if (m[2] === "screenshot") return json(res, 200, await box.screenshotBox(cfg, key));
+          return json(res, 200, await box.sleepBox(cfg, key));
+        } finally { release(); }
       }
       if (bot.cloudBackend === "vps") {
         if (m[2] === "screenshot") {
