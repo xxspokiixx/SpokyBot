@@ -237,6 +237,7 @@ import {
   ensureWorkspace,
   ensureTaskWorkspace,
   workspaceLocationsPrompt,
+  supportsWorkspaceFiles,
   updateMemory,
   appendMemoryLog,
   isMemoryTopicName,
@@ -1590,7 +1591,7 @@ function previewSystemPrompt(bot: BotRecord) {
     destination: previewComputer,
     browserOn: caps?.browserMcp === true && builtInBrowserEnabled(cfg) && bot.browser !== false,
   });
-  const privateWorkspace = instance && !["grok", "boxAgent"].includes(instance.driverKind);
+  const privateWorkspace = instance && supportsWorkspaceFiles(instance.driverKind);
   const built = buildSystemPrompt(persona, bot.soul ?? "", [
     {
       id: "setup",
@@ -1611,7 +1612,7 @@ function previewSystemPrompt(bot: BotRecord) {
     { id: "routine", label: "Routines", text: agentsMounted ? ROUTINE_PROMPT : "" },
     { id: "profile", label: "Profile changes", text: agentsMounted ? PROFILE_PROMPT : "" },
     { id: "section-context", label: "Section context", text: sectionContextSystemPrompt(bot.section) },
-    { id: "memory", label: "Memory", text: privateWorkspace ? memorySystemPrompt(bot.id) : "" },
+    { id: "memory", label: "Memory", text: memorySystemPrompt(bot.id, { managedWrites: agentsMounted, fileTools: Boolean(privateWorkspace) }) },
     { id: "skills", label: "Skills index", text: privateWorkspace ? skillsSystemPrompt(bot.id) : "" },
   ]);
   const totalBytes = built.sections.reduce((n, s) => n + s.bytes, 0);
@@ -4104,7 +4105,7 @@ bus.subscribe((event: RuntimeEvent) => {
       pushMessage({
         role: "bot",
         kind: "activity",
-        tool: { name: `error: ${event.message.slice(0, 160)}`, ok: false, setup: event.setup },
+        tool: { name: `error: ${event.message.slice(0, 160)}`, ok: false, setup: event.setup, ...(event.terminal ? { terminal: true } : {}) },
       });
       // a setup error means the engine could not even start: the bot is
       // dead until something changes, not merely idle. The next successful
@@ -5321,7 +5322,7 @@ async function startTurn(
       // than the user's home: a bot with file tools and acceptEdits gets a
       // desk, not the whole house — and the workspace is where its
       // MEMORY.md lives. API/box engines have no local filesystem story.
-      const worksInWorkspace = instance.driverKind !== "grok" && instance.driverKind !== "boxAgent";
+      const worksInWorkspace = supportsWorkspaceFiles(instance.driverKind);
       if (worksInWorkspace) {
         ensureWorkspace(bot.id);
         // baseline for the journal's turn-boundary diff (see the bus hook)
@@ -5724,7 +5725,7 @@ async function startTurn(
         { id: "profile", label: "Profile changes", text: profilePrompt },
         { id: "learn", label: "Skill authoring", text: learnPrompt },
         { id: "section-context", label: "Section context", text: sectionContextSystemPrompt(bot.section) },
-        { id: "memory", label: "Memory", text: privateWorkspace ? memorySystemPrompt(bot.id, { managedWrites: Boolean(integrations.agents) }) : "" },
+        { id: "memory", label: "Memory", text: memorySystemPrompt(bot.id, { managedWrites: Boolean(integrations.agents), fileTools: worksInWorkspace }) },
         { id: "skills", label: "Skills index", text: privateWorkspace ? skillsSystemPrompt(bot.id) : "" },
         { id: "skill-instructions", label: "Skill instructions", text: skillInstructions },
         { id: "playbooks", label: "Playbooks", text: packagePlaybooks },
@@ -7258,7 +7259,7 @@ async function runGroupMemberTurn(
 
   // same workspace + memory as a 1:1 turn — the room is a different
   // conversation, not a different bot
-  const worksInWorkspace = instance.driverKind !== "grok" && instance.driverKind !== "boxAgent";
+  const worksInWorkspace = supportsWorkspaceFiles(instance.driverKind);
   const workspace = worksInWorkspace ? ensureWorkspace(bot.id) : undefined;
   // a room member's memory writes are journaled the same as a 1:1 turn's
   if (workspace) beginMemoryTurn(bot.id, threadId);
@@ -7273,6 +7274,7 @@ async function runGroupMemberTurn(
     const drift = checkSoulDrift(bot.id, bot.soul ?? "", bot.soulHash ?? "");
     if (drift.drift !== Boolean(bot.soulDrift)) store.patchBot(bot.id, { soulDrift: drift.drift });
   }
+  const roomMemory = memorySystemPrompt(bot.id, { managedWrites: Boolean(integrations.agents), fileTools: worksInWorkspace });
   const roomSystem = buildSystemPrompt(system, store.bot(bot.id)?.soul ?? bot.soul ?? "", [
     { id: "files", label: "File locations", text: workspace ? workspaceLocationsPrompt(bot.id, cwd, readyBot.cwd) : "" },
     { id: "mcp", label: "MCP servers", text: customMcpPrompt(Object.keys(integrations.custom ?? {})) },
@@ -7287,7 +7289,7 @@ async function runGroupMemberTurn(
     // byte-identical. The write guidance follows the tools actually
     // mounted, exactly as the 1:1 path decides it: memory_update is on the
     // agents server, so a room turn with it must be told to use it too.
-    { id: "memory", label: "Memory", text: workspace ? `\n${memorySystemPrompt(bot.id, { managedWrites: Boolean(integrations.agents) }).trim()}` : "" },
+    { id: "memory", label: "Memory", text: roomMemory ? `\n${roomMemory.trim()}` : "" },
     { id: "skills", label: "Skills index", text: workspace ? skillsSystemPrompt(bot.id) : "" },
     { id: "skill-instructions", label: "Skill instructions", text: renderSkillInstructions(selectedSkills, { includeRoot: Boolean(workspace) }) },
     { id: "playbooks", label: "Playbooks", text: installedPlaybookInstructions(text, bot.playbooks) },
@@ -15065,7 +15067,7 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
       }
     }
 
-    // ── per-instance CLI path override (custom builds / versioned bins) ──
+    // ── per-instance settings (CLI/account or API tool support) ──
     // PATCH /api/instances/:id {cli: "/path/to/cli" | ""} — "" reverts to the
     // driver default. Only this idle instance is replaced; siblings keep running.
     const instancePatch = /^\/api\/instances\/([\w.-]+)$/.exec(path);
@@ -15075,7 +15077,7 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
         return json(res, 415, { error: "content-type must be application/json" });
       }
       const parsed = instanceSettingsSchema.safeParse(await readBody(req, 16384));
-      if (!parsed.success) return json(res, 400, { error: "Supply a valid CLI path, account name or configuration directory." });
+      if (!parsed.success) return json(res, 400, { error: "Supply a valid CLI path, account name, configuration directory or boolean tools setting." });
       const body = parsed.data;
       const instanceId = instancePatch[1];
       if (providerConfigBusy) return json(res, 409, { error: "provider settings are already being updated" });
@@ -15091,6 +15093,12 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
         const entry = instances[instanceId];
         if ((body.displayName !== undefined || body.configDir !== undefined) && entry.driver !== "claudeAgent") {
           return json(res, 400, { error: "Account settings are currently available for Claude only." });
+        }
+        if (body.tools !== undefined) {
+          if (!["openai-compat", "grok", "minimax"].includes(entry.driver)) {
+            return json(res, 400, { error: "The tools setting is available for OpenAI-compatible, Grok API and MiniMax API instances only." });
+          }
+          entry.config = { ...entry.config as Record<string, unknown>, tools: body.tools };
         }
         if (body.displayName !== undefined) entry.displayName = body.displayName;
         if (body.configDir !== undefined) {

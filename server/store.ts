@@ -152,8 +152,9 @@ export interface Message {
   /** `setup` marks an error the user fixes by installing or configuring
    * something — the UI offers setup instead of a retry that cannot work.
    * `summary` is the call's input on one redacted line (the shell command)
-   * where the driver only names the tool in `name`. */
-  tool?: { name: string; ok?: boolean; spoken?: string; setup?: boolean; summary?: string; input?: string; output?: string };
+   * where the driver only names the tool in `name`. `terminal` marks a
+   * failure of the complete turn; later explanatory text cannot erase it. */
+  tool?: { name: string; ok?: boolean; spoken?: string; setup?: boolean; terminal?: boolean; summary?: string; input?: string; output?: string };
   /** user messages sent INTO a running turn (capabilities.queueing): the
    * model saw it mid-turn, so the transcript marks it — a reader should
    * know the reply above it may already account for this line */

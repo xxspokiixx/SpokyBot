@@ -58,13 +58,15 @@ it("saving and replacing a workspace key reaches an existing bot's next request 
     });
     const send = async (expectedReply: string) => {
       await api("POST", `/api/bots/${bot.id}/messages`, { text: "Reply briefly for the credential test." });
-      await sse.until((frame) => frame.kind === "message" && frame.threadId === bot.threadId
+      const replyFrame = await sse.until((frame) => frame.kind === "message" && frame.threadId === bot.threadId
         && frame.message?.role === "bot" && frame.message?.text === expectedReply);
       // Wait for idle after this reply before exercising the next config save.
       const { bots } = await api("GET", "/api/bots?messages=10");
       const current = bots.find((candidate: { id: string }) => candidate.id === bot.id);
+      // Bot SSE updates contain status, not messages. Tool cleanup may keep
+      // the turn busy after its reply; await a newer idle status before save.
       if (current.busy) await sse.until((frame) => frame.kind === "bot" && frame.bot?.id === bot.id && !frame.bot.busy
-        && frame.bot.messages?.some((message: { text?: string }) => message.text === expectedReply));
+        && frame.seq > replyFrame.seq);
     };
     await send("fixture reply 1");
     // The first save installed an env value and created the runtime. A second
