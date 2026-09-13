@@ -41,7 +41,35 @@ describe("desktop capabilities", () => {
     });
   });
 
-  it.each(["win32", "freebsd"])("fails closed on %s", (platform) => {
+  it("offers Windows local control once the driver is connected", () => {
+    const capabilities = desktopCapabilities({
+      platform: "win32",
+      packaged: true,
+      localConnection: { mode: "standalone" },
+    });
+
+    expect(capabilities).toMatchObject({
+      host: { platform: "win32", label: "Windows", packaged: true },
+      localComputer: { available: true, support: "supported", enabled: true, status: "ready" },
+    });
+  });
+
+  it("keeps Windows local control closed while the driver is not connected", () => {
+    const capabilities = desktopCapabilities({
+      platform: "win32",
+      packaged: true,
+      localConnection: { mode: "unavailable", reason: "cua-driver binary not found" },
+    });
+
+    expect(capabilities.localComputer).toMatchObject({
+      available: false,
+      support: "unsupported",
+      enabled: false,
+      status: "unavailable",
+    });
+  });
+
+  it.each(["freebsd"])("fails closed on %s", (platform) => {
     const capabilities = desktopCapabilities({
       platform,
       env: { DISPLAY: ":0" },
