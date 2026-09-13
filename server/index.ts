@@ -137,6 +137,7 @@ import { checkProviderKey, PROVIDER_KEY_KINDS, type ProviderKeyKind } from "./pr
 import { assertWithinBudget, noteSpend, spendState } from "./spend.ts";
 import { fleetAvailable, fleetRequest, fleetSocketPath } from "./fleet-client.ts";
 import { entitled } from "./enterprise.ts";
+import { HOSTED_CONTRACT_HEADER, HOSTED_CONTRACT_METADATA, HOSTED_CONTRACT_VERSION } from "./hosted-contract.ts";
 import { describeSpawnFailure, execCli } from "./procs.ts";
 import { blockedTarget, buildNotification, type Notification } from "./notify.ts";
 import {
@@ -369,18 +370,20 @@ import {
 } from "./turn-dispatch-guard.ts";
 import { createGracefulShutdown } from "./graceful-shutdown.ts";
 import { acquireDataDirLeaseForProcess } from "./data-dir-lease.ts";
-import { describeEdition, editionStatus, loadEnterpriseLayer } from "./enterprise.ts";
+import { createWorkspaceAccess, describeEdition, editionStatus, hostedWorkspaceConfiguration, hostedWorkspaceConfigured, loadEnterpriseLayer, type WorkspaceAccess } from "./enterprise.ts";
 import { environmentDescriptor, loadEnvironmentId, serverVersion } from "./environment.ts";
 import { WorkspaceBackupMaintenance } from "./workspace-backup-maintenance.ts";
 import { createWorkspaceBackupRoutes, isWorkspaceBackupSessionControl } from "./workspace-backup-http.ts";
 import { applyPendingWorkspaceRestore, readLastWorkspaceRestore, type WorkspaceRestoreResult } from "./workspace-backup.ts";
 import { createCustomDomainVerifier, customDomainIpv4, normalizeCustomDomain } from "./custom-domain.ts";
-import { createEmailSignIn, parseAllowList } from "./account-signin.ts";
+import { allowedScopes, createEmailSignIn, parseAllowList } from "./account-signin.ts";
 import { ProviderAuthSessions } from "./provider-auth-sessions.ts";
 import {
   clearSessionCookie,
   clientBotPatchViolation,
   clientGroupPatchViolation,
+  isLoopbackHost,
+  isProxied,
   labelFromUserAgent,
   requestOrigin,
   requestSource,
@@ -451,8 +454,21 @@ const workspaceMaintenance = new WorkspaceBackupMaintenance();
 // Remote clients (server/request-auth.ts, server/sessions.ts): a stable identity
 // for this server, the paired sessions, and the cookie the served UI uses.
 const ENVIRONMENT_ID = loadEnvironmentId(DATA_DIR);
-const sessions = new SessionRegistry({ file: join(DATA_DIR, "sessions.json") });
+function signInAllowList() {
+  const current = loadConfig().signIn;
+  return { admins: parseAllowList(current?.admins?.join(",")), members: parseAllowList(current?.members?.join(",")) };
+}
+const sessions = new SessionRegistry({
+  file: join(DATA_DIR, "sessions.json"),
+  emailScopesSnapshot: () => {
+    const membership = signInAllowList();
+    return (email) => allowedScopes(email, membership);
+  },
+  portalMembership: hostedWorkspaceConfiguration()?.portalMembership === true,
+});
 const SESSION_COOKIE = sessionCookieName(PORT, ENVIRONMENT_ID);
+const HOSTED_WORKSPACE = hostedWorkspaceConfigured();
+let workspaceAccess: WorkspaceAccess | null = null;
 const DESKTOP_MANAGED = process.env.OMB_DESKTOP_PARENT === "1";
 // Empty is deliberately a deny-all bootstrap state. Only Electron's private
 // utility-process port can replace it with the per-launch owner capability.
@@ -465,10 +481,7 @@ const customDomainVerifier = createCustomDomainVerifier({ environmentId: ENVIRON
 // "Sign in with your email" on /pair: the allow-list is read per call so a
 // Settings change or an env bootstrap applies without a restart.
 const emailSignIn = createEmailSignIn({
-  allow: () => {
-    const current = loadConfig().signIn;
-    return { admins: parseAllowList(current?.admins?.join(",")), members: parseAllowList(current?.members?.join(",")) };
-  },
+  allow: signInAllowList,
 });
 let customDomainRevision = 0;
 function savedCustomDomain(): string | null {
@@ -2815,8 +2828,8 @@ interface SseClient {
   backpressured: boolean;
 }
 const sseClients = new Set<SseClient>();
-sessions.onSessionRevoked((sessionId) => {
-  providerAuthSessions.revokeOwner(sessionId);
+function closeSessionStreams(sessionId: string): void {
+  browserLive.closeForOwner(sessionId);
   for (const client of sseClients) {
     if (client.sessionId !== sessionId) continue;
     sseClients.delete(client);
@@ -2826,6 +2839,10 @@ sessions.onSessionRevoked((sessionId) => {
       /* already gone */
     }
   }
+}
+sessions.onSessionRevoked((sessionId) => {
+  providerAuthSessions.revokeOwner(sessionId);
+  closeSessionStreams(sessionId);
 });
 
 /** Every frame is numbered, and the last few hundred are kept, so a client
@@ -2863,6 +2880,9 @@ function cursorSeq(raw: string | string[] | undefined): number | null {
 }
 
 function broadcast(payload: Record<string, unknown>) {
+  // Membership may also change through fleet/CLI config writes. Close stale
+  // email streams before any further workspace data is delivered.
+  sessions.revalidateEmailSessions();
   const seq = ++lastSeq;
   const kind = String(payload.kind ?? "");
   const frame = `id: ${STREAM_ID}:${seq}\ndata: ${JSON.stringify({ ...payload, seq })}\n\n`;
@@ -9195,13 +9215,36 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
   let m: RegExpMatchArray | null = null;
   let releaseWorkspaceRequest: (() => void) | undefined;
   try {
+    // Unlike the legacy reachability probe, this attests the running
+    // server's portal-membership capability, including live entitlement.
+    if (method === "GET" && path === "/api/health/hosted") {
+      res.setHeader("cache-control", "no-store");
+      const hosted = hostedWorkspaceConfiguration();
+      if (!hosted?.portalMembership || !workspaceAccess || !entitled("admin")) {
+        return json(res, 503, { error: "Hosted workspace readiness is unavailable." });
+      }
+      res.setHeader(HOSTED_CONTRACT_HEADER, String(HOSTED_CONTRACT_VERSION));
+      return json(res, 200, { ok: true, service: "openmausbot", membershipAuthority: "portal", workspace: hosted.workspace, ...HOSTED_CONTRACT_METADATA });
+    }
+    // Hosted workspaces have one sign-in authority. A missing optional layer
+    // must not accidentally reactivate legacy email/QR credential minting.
+    if (HOSTED_WORKSPACE) {
+      if (method === "POST" && ["/api/auth/pair", "/api/auth/pairing", "/api/auth/email/start", "/api/auth/email/verify"].includes(path)) {
+        return json(res, 403, { error: "Sign in through the workspace portal." });
+      }
+      if (workspaceAccess) {
+        if (await workspaceAccess.handlePublic(req, res, url)) return;
+      } else if (path.startsWith("/api/auth/hosted/") || path === "/pair" || (path === "/" && (!isLoopbackHost(req.headers.host) || isProxied(req)))) {
+        return json(res, 503, { error: "Workspace sign-in is unavailable." });
+      }
+    }
     // ── who is asking (server/request-auth.ts) ──────────────────────────
     // Two public routes come first: what this server is, and turning a pairing
     // code into a session. Everything else needs the loopback owner or a
     // paired session with the right scope.
     if (method === "GET" && !path.startsWith("/api/") && !path.startsWith("/.well-known/") && serveStatic(res, path)) return;
     if (method === "GET" && path === "/.well-known/openmausbot/environment") {
-      return json(res, 200, environmentDescriptor({ environmentId: ENVIRONMENT_ID, desktopManaged: DESKTOP_MANAGED, emailSignIn: emailSignIn.enabled() }));
+      return json(res, 200, environmentDescriptor({ environmentId: ENVIRONMENT_ID, desktopManaged: DESKTOP_MANAGED, emailSignIn: !HOSTED_WORKSPACE && emailSignIn.enabled() }));
     }
     const domainCheck = /^\/\.well-known\/openmausbot\/domain-check\/([a-f0-9]{64})$/.exec(path);
     if (method === "GET" && domainCheck) {
@@ -9287,7 +9330,7 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
     if (gate.auth?.kind === "session" && gate.auth.via === "cookie") {
       const presented = parseCookies(req.headers.cookie).get(SESSION_COOKIE);
       if (presented) {
-        const secure = requestOrigin(req)?.startsWith("https://") === true;
+        const secure = HOSTED_WORKSPACE || requestOrigin(req)?.startsWith("https://") === true;
         res.setHeader("set-cookie", serializeSessionCookie(SESSION_COOKIE, presented, { secure, maxAgeSeconds: cookieMaxAgeSeconds(gate.auth.session) }));
       }
     }
@@ -9305,6 +9348,12 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
     }
     if (!gate.auth) return json(res, gate.status, { error: gate.error });
     const auth = gate.auth;
+    if (HOSTED_WORKSPACE && auth.kind === "session") {
+      const failure = workspaceAccess
+        ? await workspaceAccess.authorize(req, auth)
+        : { status: 503, error: "Workspace sign-in is unavailable." };
+      if (failure) return json(res, failure.status, { error: failure.error });
+    }
 
     if (await workspaceBackupRoutes(req, res, path, auth)) return;
     // Count ordinary requests until their asynchronous handler returns, not
@@ -11104,6 +11153,15 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
       }
       const browser = await browserIntegration(bot.id, bot.browserProfile);
       if (!browser) return json(res, 503, { error: "Install the browser engine first." });
+      // Browser discovery may have awaited while the portal became unavailable
+      // and closed this owner's streams. Do not open a late replacement on
+      // the earlier authorization; once registered, exact-owner close covers it.
+      if (HOSTED_WORKSPACE && auth.kind === "session") {
+        const failure = workspaceAccess
+          ? await workspaceAccess.authorize(req, auth)
+          : { status: 503, error: "Workspace sign-in is unavailable." };
+        if (failure) return json(res, failure.status, { error: failure.error });
+      }
       const owner = auth.kind === "session" ? auth.session.id : "local-owner";
       const isCurrent = () => {
         const current = store.bot(bot.id);
@@ -15017,6 +15075,7 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
         throw error;
       }
       let browserReferenceCleanupError: unknown = null;
+      if (patch.signIn !== undefined) sessions.revalidateEmailSessions();
       if (disablingBuiltInBrowser) browserLive.closeAll();
       for (const request of browserCleanupRequests) {
         if (request.kind === "profile") browserLive.closeForSession(browserSessionId("", request.partitionId));
@@ -15504,6 +15563,13 @@ calendarCalls.start();
 
 // Resolve the edition before accepting requests so /api/edition is never a guess.
 console.log(describeEdition(await loadEnterpriseLayer()));
+workspaceAccess = createWorkspaceAccess({ sessions, cookieName: SESSION_COOKIE, closeSessionStreams });
+// Ten-second cadence plus the bridge's five-second backchannel deadline bounds
+// stale portal access on quiet event/browser streams to fifteen seconds.
+const workspaceAccessTimer = workspaceAccess ? setInterval(() => {
+  void workspaceAccess!.revalidate().catch((error) => console.warn("workspace access revalidation failed", error));
+}, 10_000) : null;
+workspaceAccessTimer?.unref();
 console.log(describeBrand(loadBrand()));
 
 // Reclaim upload partials a previous run crashed out of, and warm the
@@ -15596,6 +15662,7 @@ const gracefulShutdown = createGracefulShutdown({
   cleanup: [
     () => {
       followupsReady = false;
+      if (workspaceAccessTimer) clearInterval(workspaceAccessTimer);
       // Child MCP processes and the HTTP listener can remain alive while the
       // asynchronous shutdown jobs drain. Invalidate their turn bearers before
       // any cleanup function reaches an await.
@@ -15623,6 +15690,13 @@ const gracefulShutdown = createGracefulShutdown({
   // the shutdown deadline), immediately before the process exits, so no new
   // server can overlap with a still-mutating old one.
   exit: (code) => {
+    try { sessions.close(); }
+    catch {
+      // An uncleared marker makes saved account sessions require sign-in on
+      // the next boot; never label failed persistence a clean shutdown.
+      console.error("Session persistence failed during shutdown; account sign-in will be required again.");
+      code = 1;
+    }
     closeMessageDb();
     releaseDataDirLeaseAtExit();
     process.exit(code);
