@@ -646,6 +646,8 @@ export interface BotRecord {
     phase: "prepared" | "confirmed" | "activated" | "committed";
     /** Optional existing thread receiving this already-approved bot default. */
     threadId?: string;
+    /** Composer grant: leave the bot default and other threads unchanged. */
+    threadOnly?: true;
   };
   /** Tools this bot may always use without asking, even outside auto mode
    * (set by "Always allow" on an approval card). */
@@ -916,15 +918,24 @@ export class Store {
       // bots.json write. Revoke it before schedulers, listeners, or HTTP can
       // start any new work.
       if (b.approvalGrant !== undefined) {
+        const threadOnly = b.approvalGrant.threadOnly === true;
+        if (threadOnly) {
+          // A crash may land between saving the target and clearing its
+          // journal. Revoke that target only, never unrelated threads.
+          const target = b.tasks?.find(task => task.threadId === b.approvalGrant?.threadId);
+          if (target) { target.approvalMode = "ask"; target.autoApprove = false; }
+        }
+        if (!threadOnly) {
         b.approvalMode = "ask";
         b.autoApprove = false;
-        delete b.approvalGrant;
         for (const task of b.tasks ?? []) {
           if (task.approvalMode === "full" || task.approvalMode === "custom") {
             task.approvalMode = "ask";
             task.autoApprove = false;
           }
         }
+        }
+        delete b.approvalGrant;
         botsMigrated = true;
       }
       const avatar = botAvatarProfile(b);
@@ -2168,6 +2179,7 @@ export class Store {
     return {
       ...bot,
       threadId: task.threadId,
+      approvalGrant: bot.approvalGrant?.threadOnly && bot.approvalGrant.threadId !== threadId ? undefined : bot.approvalGrant,
       modelSelection: structuredClone(task.modelSelection ?? bot.modelSelection),
       resumeCursors: structuredClone(task.resumeCursors),
       approvalMode: task.approvalMode ?? (task.autoApprove === undefined ? bot.approvalMode : undefined),

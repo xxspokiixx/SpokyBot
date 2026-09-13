@@ -414,6 +414,7 @@ export function currentTaskBot(bot: Bot, threadId = bot.threadId): Bot {
 }
 
 export type TaskUpdatePatch = Partial<Pick<Task, "modelSelection" | "approvalMode" | "autoApprove" | "pinnedMessageId">> & {
+  confirmFullAccess?: boolean;
   acknowledgeLocalAuto?: boolean;
   updateBotDefault?: boolean;
   resetApprovalToAsk?: boolean;
@@ -421,7 +422,7 @@ export type TaskUpdatePatch = Partial<Pick<Task, "modelSelection" | "approvalMod
 };
 
 function taskPatchFields(patch: TaskUpdatePatch): Partial<Task> {
-  const { acknowledgeLocalAuto: _localAck, updateBotDefault: _modelDefault, resetApprovalToAsk, projectId, ...fields } = patch;
+  const { confirmFullAccess: _fullConsent, acknowledgeLocalAuto: _localAck, updateBotDefault: _modelDefault, resetApprovalToAsk, projectId, ...fields } = patch;
   return { ...fields, ...(resetApprovalToAsk ? { approvalMode: "ask", autoApprove: false, alwaysAllow: [] } : {}),
     ...(projectId === undefined ? {} : { projectId: projectId ?? undefined }) };
 }
@@ -1958,9 +1959,28 @@ type TrustedApprovalBridge = {
   setMode(
     botId: string,
     mode: ApprovalMode,
-    options?: { acknowledgeLocalAuto?: boolean },
+    options?: { acknowledgeLocalAuto?: boolean; threadId?: string; threadOnly?: boolean },
   ): Promise<BotAnnouncement>;
 };
+
+/** Composer changes use the same private bridge as bot settings, but never
+ * change profile defaults. Confirmation is UI state, never an HTTP credential. */
+export async function persistTaskApproval(
+  botId: string, threadId: string, patch: TaskUpdatePatch,
+  bridge: TrustedApprovalBridge | undefined,
+  request: (path: string, init?: RequestInit) => Promise<{ bot: BotAnnouncement }> = api,
+): Promise<BotAnnouncement> {
+  const { approvalMode, autoApprove, confirmFullAccess, acknowledgeLocalAuto, ...ordinary } = patch;
+  const mode = approvalMode ?? (autoApprove === undefined ? undefined : autoApprove ? "auto" : "ask");
+  if (mode === "full" && confirmFullAccess !== true) throw new Error("Confirm Full access for this thread first");
+  if ((mode === "full" || mode === "custom") && !bridge) throw new Error("This approval change requires the packaged desktop app");
+  if (mode && bridge) {
+    if (Object.keys(ordinary).length) await request(`/api/bots/${botId}/tasks/${threadId}`, { method: "PATCH", body: JSON.stringify(ordinary) });
+    return bridge.setMode(botId, mode, { threadId, threadOnly: true, acknowledgeLocalAuto: acknowledgeLocalAuto === true });
+  }
+  const result = await request(`/api/bots/${botId}/tasks/${threadId}`, { method: "PATCH", body: JSON.stringify({ ...ordinary, approvalMode, autoApprove, acknowledgeLocalAuto }) });
+  return result.bot;
+}
 
 /** Persist one coalesced bot edit without ever putting Full/Custom authority
  * on the bot-accessible HTTP surface. Entering a trusted mode writes ordinary
@@ -2314,13 +2334,10 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       const previous = taskWrites.get(threadId);
       // A quick tab switch may queue two default changes on different threads.
       // Keep their order, and don't let a group send race either pending save.
-      const defaults = patch.updateBotDefault ? [...taskWrites.values()].filter((write) => write.botId === botId && write.updatesDefault) : [];
+      const defaults = patch.updateBotDefault || patch.approvalMode !== undefined
+        ? [...taskWrites.values()].filter((write) => write.botId === botId) : [];
       const promise = Promise.all([previous?.promise, ...defaults.map((write) => write.promise)].map((save) => save?.catch(() => {})))
         .then(async () => {
-          // Full/Custom grants still belong to the private desktop bridge.
-          if (patch.approvalMode === "full" || patch.approvalMode === "custom") {
-            throw new Error("Full and Custom access must be granted in bot settings in the desktop app");
-          }
           // The private path is required for Custom; use it for every
           // confirmed desktop switch so optimistic Ask cannot hide the
           // original mode while a pending write waits its turn.
@@ -2329,10 +2346,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
               threadId, modelSelection: patch.modelSelection, updateBotDefault: Boolean(patch.updateBotDefault),
             });
           }
-          const result = await api(`/api/bots/${botId}/tasks/${threadId}`, {
-            method: "PATCH", body: JSON.stringify(patch),
-          });
-          return result.bot as BotAnnouncement;
+          return persistTaskApproval(botId, threadId, patch, window.ogb?.approvals);
         });
       // Later edits still get saved after an earlier failure, but a send
       // awaiting this batch must observe every rejected setting in it. A

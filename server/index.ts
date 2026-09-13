@@ -542,7 +542,7 @@ type DesktopPrivateMessage = BrowserCleanupWireRequest | {
   target: string;
   value: string;
 } | {
-  type: "approval-trusted-mode-result";
+  type: "approval-trusted-mode-result" | "approval-trusted-mode-commit-result";
   requestId: string;
   ok: boolean;
   bot?: ReturnType<typeof wireBot>;
@@ -1476,7 +1476,7 @@ const wireBot = (bot: NonNullable<ReturnType<typeof store.bot>>) => {
   // An elevated selection is inert until the desktop confirms its exact
   // private reply. Every ordinary client sees the effective Ask state during
   // that two-phase window, never a grant that may still roll back.
-  const visible = approvalGrant
+  const visible = approvalGrant && !approvalGrant.threadOnly
     ? { ...rest, approvalMode: "ask" as const, autoApprove: false }
     : rest;
   return { ...visible, ...(activeCoordinationForThread(bot.threadId) && !visible.busy ? { busy: true, activity: "working" as const } : {}),
@@ -1487,7 +1487,7 @@ const wireBot = (bot: NonNullable<ReturnType<typeof store.bot>>) => {
  * can validate it before sending the confirmation that makes it effective. */
 const wireTrustedApprovalBot = (bot: NonNullable<ReturnType<typeof store.bot>>) => {
   const { resumeCursors: _resumeCursors, tasks, approvalGrant: _approvalGrant, lastProfileRequestId: _lastProfileRequestId, lastTeamSetupReceipt: _lastTeamSetupReceipt, ...rest } = bot;
-  return { ...rest, avatarUrl: rest.avatarUrl ?? null, ...(tasks ? { tasks: tasks.map(wireTask) } : {}) };
+  return { ...rest, approvalMode: approvalModeFor(rest), avatarUrl: rest.avatarUrl ?? null, ...(tasks ? { tasks: tasks.map(wireTask) } : {}) };
 };
 
 /** A settings-based preview, not a receipt of a dispatched turn. No
@@ -1656,12 +1656,22 @@ const approvalModeForTurn = (bot: BotRecord, peerInitiated = false): ApprovalMod
 function handleDesktopTrustedApprovalMessage(raw: unknown): boolean {
   if (!raw || typeof raw !== "object" || Array.isArray(raw)) return false;
   const message = raw as Record<string, unknown>;
+  const grantTarget = (bot: BotRecord) => bot.approvalGrant?.threadOnly
+    ? store.projectBotForTask(bot.id, bot.approvalGrant.threadId!) : bot;
+  const grantBusy = (bot: BotRecord) => bot.approvalGrant?.threadOnly
+    ? threadBusy(bot.id, bot.approvalGrant.threadId!) : bot.busy;
+  const grantSupported = (bot: BotRecord, mode: ApprovalMode) => supportsApprovalMode(
+    registry.cliTarget(grantTarget(bot)?.modelSelection.instanceId ?? "")?.driverKind, mode);
+  const clearGrant = (bot: BotRecord) => store.patchBot(bot.id, {
+    ...(!bot.approvalGrant?.threadOnly ? { approvalMode: "ask" as const, autoApprove: false } : {}),
+    approvalGrant: undefined,
+  });
   const threadCanReceiveGrant = (bot: BotRecord): boolean => {
     const threadId = bot.approvalGrant?.threadId;
     if (!threadId) return true;
     const target = store.projectBotForTask(bot.id, threadId);
-    return Boolean(target && !threadBusy(bot.id, threadId) &&
-      registry.cliTarget(target.modelSelection.instanceId)?.driverKind === registry.cliTarget(bot.modelSelection.instanceId)?.driverKind);
+    return Boolean(target && !threadBusy(bot.id, threadId) && (bot.approvalGrant?.threadOnly ||
+      registry.cliTarget(target.modelSelection.instanceId)?.driverKind === registry.cliTarget(bot.modelSelection.instanceId)?.driverKind));
   };
   if (message.type === "approval-trusted-mode-commit") {
     const requestId = typeof message.requestId === "string" && /^[A-Za-z0-9_-]{1,80}$/.test(message.requestId)
@@ -1678,17 +1688,21 @@ function handleDesktopTrustedApprovalMessage(raw: unknown): boolean {
       bot?.approvalGrant?.requestId === requestId &&
       bot.approvalGrant.mode === mode &&
       bot.approvalGrant.phase === "committed" &&
-      bot.approvalMode === mode &&
-      !bot.busy &&
+      (bot.approvalGrant.threadOnly || bot.approvalMode === mode) &&
+      !grantBusy(bot) &&
       threadCanReceiveGrant(bot) &&
-      supportsApprovalMode(registry.cliTarget(bot.modelSelection.instanceId)?.driverKind, mode)
+      grantSupported(bot, mode)
     ) {
       if (bot.approvalGrant.threadId) {
         store.patchTask(botId, bot.approvalGrant.threadId, { approvalMode: mode, autoApprove: false });
       }
       store.patchBot(botId, { approvalGrant: undefined });
+      postDesktopPrivateMessage({ type: "approval-trusted-mode-commit-result", requestId, ok: true, bot: wireBot(store.bot(botId)!) });
     } else if (bot?.approvalGrant?.requestId === requestId) {
-      store.patchBot(botId, { approvalMode: "ask", autoApprove: false, approvalGrant: undefined });
+      clearGrant(bot);
+      postDesktopPrivateMessage({ type: "approval-trusted-mode-commit-result", requestId, ok: false });
+    } else {
+      postDesktopPrivateMessage({ type: "approval-trusted-mode-commit-result", requestId, ok: false });
     }
     return true;
   }
@@ -1718,10 +1732,10 @@ function handleDesktopTrustedApprovalMessage(raw: unknown): boolean {
       bot?.approvalGrant?.requestId === requestId &&
       bot.approvalGrant.mode === mode &&
       bot.approvalGrant.phase === "prepared" &&
-      bot.approvalMode === mode
+      (bot.approvalGrant.threadOnly || bot.approvalMode === mode)
     ) {
-      if (!supportsApprovalMode(registry.cliTarget(bot.modelSelection.instanceId)?.driverKind, mode)) {
-        store.patchBot(botId, { approvalMode: "ask", autoApprove: false, approvalGrant: undefined });
+      if (!grantSupported(bot, mode)) {
+        clearGrant(bot);
         confirm(false, "This provider does not support the selected approval level");
         return true;
       }
@@ -1734,7 +1748,7 @@ function handleDesktopTrustedApprovalMessage(raw: unknown): boolean {
     // A matching journal whose other fields no longer agree is ambiguous.
     // Revoke only that request; never clear a newer grant for the same bot.
     if (bot?.approvalGrant?.requestId === requestId) {
-      store.patchBot(botId, { approvalMode: "ask", autoApprove: false, approvalGrant: undefined });
+      clearGrant(bot);
     }
     confirm(false, "The approval confirmation no longer matches this bot");
     return true;
@@ -1765,11 +1779,11 @@ function handleDesktopTrustedApprovalMessage(raw: unknown): boolean {
       bot?.approvalGrant?.requestId === requestId &&
       bot.approvalGrant.mode === mode &&
       bot.approvalGrant.phase === "confirmed" &&
-      bot.approvalMode === mode
+      (bot.approvalGrant.threadOnly || bot.approvalMode === mode)
     ) {
-      if (bot.busy || !supportsApprovalMode(registry.cliTarget(bot.modelSelection.instanceId)?.driverKind, mode)) {
-        store.patchBot(botId, { approvalMode: "ask", autoApprove: false, approvalGrant: undefined });
-        activate(false, bot.busy
+      if (grantBusy(bot) || !grantSupported(bot, mode)) {
+        clearGrant(bot);
+        activate(false, grantBusy(bot)
           ? "Stop this bot's turn before changing its approval level"
           : "This provider does not support the selected approval level");
         return true;
@@ -1781,7 +1795,7 @@ function handleDesktopTrustedApprovalMessage(raw: unknown): boolean {
       return true;
     }
     if (bot?.approvalGrant?.requestId === requestId) {
-      store.patchBot(botId, { approvalMode: "ask", autoApprove: false, approvalGrant: undefined });
+      clearGrant(bot);
     }
     activate(false, "The approval activation no longer matches this bot");
     return true;
@@ -1812,10 +1826,10 @@ function handleDesktopTrustedApprovalMessage(raw: unknown): boolean {
       bot?.approvalGrant?.requestId === requestId &&
       bot.approvalGrant.mode === mode &&
       bot.approvalGrant.phase === "activated" &&
-      bot.approvalMode === mode &&
-      !bot.busy &&
+      (bot.approvalGrant.threadOnly || bot.approvalMode === mode) &&
+      !grantBusy(bot) &&
       threadCanReceiveGrant(bot) &&
-      supportsApprovalMode(registry.cliTarget(bot.modelSelection.instanceId)?.driverKind, mode)
+      grantSupported(bot, mode)
     ) {
       // Durable but still inert. Electron must observe this exact ACK before
       // sending the one-way commit release that clears the journal.
@@ -1824,7 +1838,7 @@ function handleDesktopTrustedApprovalMessage(raw: unknown): boolean {
       return true;
     }
     if (bot?.approvalGrant?.requestId === requestId) {
-      store.patchBot(botId, { approvalMode: "ask", autoApprove: false, approvalGrant: undefined });
+      clearGrant(bot);
     }
     finalize(false, bot?.busy
       ? "Stop this bot's turn before changing its approval level"
@@ -1836,7 +1850,7 @@ function handleDesktopTrustedApprovalMessage(raw: unknown): boolean {
     ? message.requestId
     : null;
   if (!requestId) return true;
-  const respond = (result: Omit<Extract<DesktopPrivateMessage, { type: "approval-trusted-mode-result" }>, "type" | "requestId">) => {
+  const respond = (result: { ok: boolean; bot?: ReturnType<typeof wireBot>; error?: string }) => {
     postDesktopPrivateMessage({
       type: "approval-trusted-mode-result",
       requestId,
@@ -1862,6 +1876,39 @@ function handleDesktopTrustedApprovalMessage(raw: unknown): boolean {
   }
   const currentMode = approvalModeFor(existing);
   const threadId = message.threadId;
+  if (message.threadOnly !== undefined && typeof message.threadOnly !== "boolean") {
+    respond({ ok: false, error: "Invalid thread approval scope" });
+    return true;
+  }
+  if (message.threadOnly === true) {
+    const target = typeof threadId === "string" ? store.projectBotForTask(botId, threadId) : null;
+    if (!target || message.modelSelection !== undefined || message.updateBotDefault !== undefined) {
+      respond({ ok: false, error: "Choose an existing thread for this approval change" });
+      return true;
+    }
+    // An ambiguous scoped grant may be cleared, but never a different grant.
+    const clearsOwnGrant = mode === "ask" && existing.approvalGrant?.threadOnly && existing.approvalGrant.threadId === threadId;
+    if ((existing.approvalGrant && !clearsOwnGrant) || threadBusy(botId, target.threadId)) {
+      respond({ ok: false, error: "Stop this thread and finish its pending approval change first" });
+      return true;
+    }
+    if (!supportsApprovalMode(registry.cliTarget(target.modelSelection.instanceId)?.driverKind, mode)) {
+      respond({ ok: false, error: "This thread's provider does not support that approval level" });
+      return true;
+    }
+    if (mode === "auto" && target.computer === "local" && approvalModeFor(target) !== "auto" && message.acknowledgeLocalAuto !== true) {
+      respond({ ok: false, error: "Auto mode on this computer requires confirming the warning" });
+      return true;
+    }
+    if (mode === "full" || mode === "custom") {
+      store.patchBot(botId, { approvalGrant: { requestId, mode, phase: "prepared", threadId: target.threadId, threadOnly: true } });
+    } else {
+      if (clearsOwnGrant) clearGrant(existing);
+      store.patchTask(botId, target.threadId, { approvalMode: mode, autoApprove: mode === "auto", alwaysAllow: [] });
+    }
+    respond({ ok: true, bot: wireTrustedApprovalBot(store.bot(botId)!) });
+    return true;
+  }
   if (message.modelSelection !== undefined) {
     const target = typeof threadId === "string" ? store.projectBotForTask(botId, threadId) : null;
     if (mode !== "ask" || !target || typeof message.updateBotDefault !== "boolean") {
