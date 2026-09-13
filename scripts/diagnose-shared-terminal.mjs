@@ -10,13 +10,15 @@ await mkdir(path.join(root, "AppData", "Local"), { recursive: true });
 await mkdir(path.join(root, "AppData", "Roaming"), { recursive: true });
 const baseline = Object.fromEntries(["PATH", "HOME", "USERPROFILE", "SystemRoot", "TEMP", "TMP", "LANG"].filter(key => process.env[key]).map(key => [key, process.env[key]]));
 baseline.HOME = root; baseline.USERPROFILE = root;
-const fixed = { ...baseline, APPDATA: path.join(root, "AppData", "Roaming"), LOCALAPPDATA: path.join(root, "AppData", "Local"), ProgramFiles: process.env.ProgramFiles, ProgramData: process.env.ProgramData, COMSPEC: process.env.COMSPEC };
+const systemModules = path.join(process.env.SystemRoot, "System32", "WindowsPowerShell", "v1.0", "Modules");
+const standardModules = [systemModules, path.join(root, "Documents", "WindowsPowerShell", "Modules"), path.join(process.env.ProgramFiles, "WindowsPowerShell", "Modules")].join(";");
 const command = "echo shared-desktop-ok";
 const trials = [
   { name: "baseline", env: baseline, args: ["-Command", command] },
-  { name: "appdata", env: fixed, args: ["-Command", command] },
-  { name: "text-output", env: baseline, args: ["-OutputFormat", "Text", "-Command", command] },
-  { name: "closed-pipe", env: baseline, args: ["-Command", command], pipe: true },
+  { name: "module-path-system", env: { ...baseline, PSModulePath: systemModules }, args: ["-Command", command] },
+  { name: "module-path-standard", env: { ...baseline, PSModulePath: standardModules }, args: ["-Command", command] },
+  { name: "import-builtins", env: baseline, args: ["-Command", `Import-Module '${systemModules}\\Microsoft.PowerShell.Utility'; ${command}`] },
+  { name: "qualified-output", env: baseline, args: ["-Command", "Microsoft.PowerShell.Utility\\Write-Output shared-desktop-ok"] },
   { name: "literal-output", env: baseline, args: ["-Command", "'shared-desktop-ok'"] },
 ];
 try {
