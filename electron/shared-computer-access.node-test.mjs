@@ -151,6 +151,20 @@ test("explicit terminal grant executes a harmless command and cancellation stops
   await assert.rejects(pending, /revoked|turn ended/);
 });
 
+test("Windows terminal preserves command syntax, pipeline output and exit status", { skip: process.platform !== "win32" }, async t => {
+  const { dir } = await fixture(t);
+  const run = async command => payload(await sharedCommand(command, dir, new AbortController().signal));
+  const quoted = await run('param([string]$value = "fixture \'quoted\'"); Write-Output $value');
+  assert.equal(quoted.exitCode, 0); assert.match(quoted.output, /fixture 'quoted'/);
+  const declared = await run("using namespace System.Text; [StringBuilder]::new('fixture-using').ToString()");
+  assert.equal(declared.exitCode, 0); assert.match(declared.output, /fixture-using/);
+  const pipeline = await run("@('alpha', 'beta') | ForEach-Object { $_.ToUpper() }");
+  assert.equal(pipeline.exitCode, 0); assert.match(pipeline.output, /ALPHA\s+BETA/);
+  assert.equal((await run("exit 7")).exitCode, 7);
+  const failed = await run("throw 'fixture-command-failed'");
+  assert.notEqual(failed.exitCode, 0); assert.match(failed.output, /fixture-command-failed/);
+});
+
 test("official-style MCP transport preserves session state and image content; it closes on revoke", async t => {
   const { dir } = await fixture(t);
   const script = path.join(dir, "cua-fixture.mjs");

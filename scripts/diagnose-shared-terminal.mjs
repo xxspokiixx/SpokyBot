@@ -15,6 +15,7 @@ const standardModules = [systemModules, path.join(root, "Documents", "WindowsPow
 const command = "echo shared-desktop-ok";
 const trials = [
   { name: "baseline", env: baseline, args: ["-Command", command] },
+  { name: "priority-wrapper", env: baseline, args: ["-Command", `$env:PSModulePath = "$PSHOME\\Modules;$env:PSModulePath"; & ([scriptblock]::Create('${command}'))`] },
   { name: "module-path-system", env: { ...baseline, PSModulePath: systemModules }, args: ["-Command", command] },
   { name: "module-path-standard", env: { ...baseline, PSModulePath: standardModules }, args: ["-Command", command] },
   { name: "import-builtins", env: baseline, args: ["-Command", `Import-Module '${systemModules}\\Microsoft.PowerShell.Utility'; ${command}`] },
