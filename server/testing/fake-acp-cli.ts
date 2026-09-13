@@ -258,7 +258,10 @@ function driveMcp(entry: McpEntry, calls: Array<{ name: string; args: (prev: str
           continue;
         }
         if (msg.id === undefined) continue;
-        if (strict && (msg.error || msg.result?.isError)) {
+        // Protocol failures (for example a removed tool) are never a successful
+        // empty reply. Tool-result denials remain inspectable by the legacy
+        // approval fixtures unless that caller explicitly requires success.
+        if (msg.error || (strict && msg.result?.isError)) {
           clearTimeout(timer);
           child.kill();
           reject(new Error(`Fixture MCP request failed: ${JSON.stringify(msg.error ?? msg.result)}`));
