@@ -6,6 +6,7 @@ import { mkdtemp, mkdir, stat, realpath, writeFile, readFile, rm, symlink, link 
 import { tmpdir, homedir } from "node:os";
 import path from "node:path";
 import { randomUUID } from "node:crypto";
+import { setTimeout as delay } from "node:timers/promises";
 import { executeSharedOperation, sharedCommand, createSharedCua } from "./shared-computer-access.mjs";
 import { createComputerSharing, validateSharedFolders } from "./computer-sharing.mjs";
 
@@ -176,6 +177,44 @@ test("Windows terminal preserves command syntax, pipeline output and exit status
   assert.ok(paths.output.includes(path.join(process.env.ProgramFiles, "WindowsPowerShell", "Modules")), "installed modules must remain available");
   const failed = await run("throw 'fixture-command-failed'");
   assert.notEqual(failed.exitCode, 0); assert.match(failed.output, /fixture-command-failed/);
+});
+
+test("Windows terminal cancellation stops the running inner shell", { skip: process.platform !== "win32", timeout: 35_000 }, async t => {
+  const { dir } = await fixture(t);
+  const marker = path.join(dir, "inner-shell.pid");
+  const stop = new AbortController();
+  const pending = sharedCommand(`[IO.File]::WriteAllText('${marker.replaceAll("'", "''")}', [string]$PID); [Threading.Thread]::Sleep(20000)`, dir, stop.signal);
+  // Attach a handler while waiting for the marker, before asserting rejection.
+  pending.catch(() => {});
+  let innerPid;
+  const alive = () => {
+    try { process.kill(innerPid, 0); return true; }
+    catch (error) { if (error.code === "ESRCH") return false; throw error; }
+  };
+  try {
+    const startedBy = Date.now() + 15_000;
+    while (Date.now() < startedBy) {
+      try { innerPid = Number((await readFile(marker, "utf8")).trim()); }
+      catch (error) { if (error.code !== "ENOENT") throw error; }
+      if (Number.isInteger(innerPid) && innerPid > 0) break;
+      await delay(50);
+    }
+    assert.ok(Number.isInteger(innerPid) && innerPid > 0, "inner shell must write its PID before cancellation");
+    assert.equal(alive(), true, "inner shell must still be running");
+    const stoppedBy = Date.now() + 5000;
+    stop.abort();
+    await Promise.race([
+      assert.rejects(pending, /revoked|turn ended/),
+      delay(5000, undefined, { ref: false }).then(() => assert.fail("cancellation must reject promptly")),
+    ]);
+    while (alive() && Date.now() < stoppedBy) await delay(50);
+    assert.equal(alive(), false, "cancellation must terminate the inner shell, not just its wrapper");
+  } finally {
+    stop.abort();
+    // If the assertion fails, clean up only the PID written by this fixture.
+    if (Number.isInteger(innerPid) && innerPid > 0 && alive()) process.kill(innerPid);
+    await pending.catch(() => {});
+  }
 });
 
 test("official-style MCP transport preserves session state and image content; it closes on revoke", async t => {

@@ -99,6 +99,7 @@ export function sharedCommand(command, cwd, signal) {
       : command;
     const child = spawn(windows ? "powershell.exe" : "/bin/sh", windows ? ["-NoProfile", "-NonInteractive", "-Command", script] : ["-c", script], {
       cwd, detached: !windows, windowsHide: true, stdio: ["ignore", "pipe", "pipe"],
+      // Without PATHEXT, PowerShell treats even .exe files as documents.
       env: Object.fromEntries(["PATH", "PATHEXT", "HOME", "USERPROFILE", "SystemRoot", "TEMP", "TMP", "LANG"].filter(key => process.env[key]).map(key => [key, process.env[key]])),
     });
     const chunks = []; let bytes = 0; let reason;
