@@ -184,6 +184,49 @@ describe("addressed room request tree", () => {
     hooks.busy = () => false; engine.tick(); expect(node.status).toBe("running");
     engine.cancelRoom("A"); await flush(); expect(aborted).toBe(true); expect(node.status).toBe("cancelled");
   }));
+  it("stops a conversation without aborting the teammate already working, and drops only what had not started", () => fixture(async (engine, hooks) => {
+    const source = { botId: "clive", threadId: "clive-chat" };
+    const runs: Array<{ id: string; resumed: boolean }> = [];
+    let finish!: (result: { ok: boolean; text: string }) => void;
+    let aborted = false;
+    // The second recipient is busy, so its assignment never leaves the queue.
+    hooks.busy = node => node.botId === "reviewer";
+    hooks.run = (node, resumed, signal) => {
+      runs.push({ id: node.id, resumed });
+      return new Promise(resolve => {
+        signal.addEventListener("abort", () => { aborted = true; });
+        finish = resolve;
+      });
+    };
+    const running = engine.enqueue(source, "turn", undefined, { botId: "lead", threadId: "lead-task" }, "build", "Build the CSV export").node;
+    const queued = engine.enqueue(source, "turn", undefined, { botId: "reviewer", threadId: "reviewer-task" }, "review", "Review the CSV export").node;
+    engine.sourceSettled("turn", true);
+    engine.tick(); await flush();
+    expect(running.status).toBe("running");
+    expect(queued.status).toBe("queued");
+    expect(engine.outstandingDirect("clive-chat").map(node => node.botId)).toEqual(["lead", "reviewer"]);
+
+    const left = engine.stopAwaitingDirect("clive-chat");
+    expect(left.map(node => node.id)).toEqual([running.id]);
+    // The teammate's own process is never reached into; only unstarted work goes.
+    expect(aborted).toBe(false);
+    expect(running.status).toBe("running");
+    expect(queued.status).toBe("cancelled");
+    // ...and this conversation stops being awaited.
+    expect(engine.nodes.get("turn")?.status).toBe("cancelled");
+    expect(engine.activeDirect("clive-chat")).toBe(false);
+    expect(engine.outstandingDirect("clive-chat").map(node => node.botId)).toEqual(["lead"]);
+
+    finish({ ok: true, text: "CSV export delivered" });
+    await flush();
+    for (let i = 0; i < 3; i++) { engine.tick(); await flush(); }
+    // It finishes and its result is still recorded and reported to the
+    // stopped conversation, which is never resumed.
+    expect(running.status).toBe("completed");
+    expect(running.result).toBe("CSV export delivered");
+    expect((hooks.report as ReturnType<typeof vi.fn>).mock.calls.map(call => call[0].id)).toContain(running.id);
+    expect(runs.map(run => run.id)).toEqual([running.id]);
+  }));
   it("records interruption on restart without replaying side effects and fails closed on corrupt storage", () => fixture((engine, hooks, file) => {
     const { node } = engine.enqueue(addr("A"), "turn", undefined, addr("B"), "work", "build");
     const restarted = new RoomHandoffs(file, hooks); restarted.tick();

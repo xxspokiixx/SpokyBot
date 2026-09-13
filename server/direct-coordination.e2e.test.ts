@@ -212,16 +212,94 @@ it("queues a busy recipient, preserving its existing task and resuming only the 
   expect(f.evidence().filter((turn: any) => turn.botId === f.lead.id).map((turn: any) => turn.threadId)).toEqual([f.lead.activeTaskId, f.nodes().find((node: any) => node.botId === f.lead.id).threadId]);
 }), 45_000);
 
-it("stops a waiting source and its running subtree without needing to delete any bot", () => fixture(async f => {
-  f.plan[f.lead.id] = { delayMs: 5000, reply: "Must not finish after Stop" };
+// Steering is not cancelling. A person who types while teammates work keeps
+// the work: the new turn runs now, the assignments stay out, and it is told
+// which ones — otherwise the model assumes its fan-out died and resends it.
+it("runs a message sent while a teammate works, keeps the assignment, and names it in that turn", () => fixture(async f => {
+  f.plan[f.lead.id] = { delayMs: 4000, reply: "CSV export implemented" };
+  f.plan[f.chief.id] = { turns: [
+    { steps: structuredClone(f.plan[f.chief.id].steps), reply: "Assigned to Engineering" },
+    { reply: "Noted; Engineering is still working on it" },
+    { reply: "The requested CSV export is implemented and verified" },
+  ] };
+  await f.start();
+  await expect.poll(() => f.nodes().find((node: any) => node.parentId)?.status, { timeout: 15_000 }).toBe("running");
+  const assignment = f.nodes().find((node: any) => node.parentId);
+
+  const receipt = await f.api(`/api/bots/${f.chief.id}/messages`, { text: "Also make sure the export is UTF-8.", threadId: f.chief.activeTaskId });
+  // It ran; it was not held behind the outstanding work.
+  expect(receipt.queued).toBeUndefined();
+  expect(receipt.message.text).toBe("Also make sure the export is UTF-8.");
+  await expect.poll(() => f.evidence().filter((turn: any) => turn.botId === f.chief.id).length, { timeout: 20_000 }).toBe(2);
+
+  const steered = f.evidence().filter((turn: any) => turn.botId === f.chief.id)[1];
+  expect(steered.resumed).toBe(false);
+  expect(steered.system).toContain("Assignments you already sent are still outstanding");
+  expect(steered.system).toContain(assignment.id);
+  expect(steered.system).toContain("Engineering lead");
+  // The teammate was never touched: it finishes and still returns here.
+  expect(f.nodes().find((node: any) => node.id === assignment.id).status).not.toBe("cancelled");
+  expect((await f.wait()).status).toBe("settled");
+  expect(f.nodes().every((node: any) => node.status === "completed")).toBe(true);
+  expect((await f.messages(f.chief.activeTaskId)).some((message: any) => message.tool?.name === "Engineering lead replied")).toBe(true);
+  expect((await f.messages(f.chief.activeTaskId)).some((message: any) => message.text === "The requested CSV export is implemented and verified")).toBe(true);
+}), 60_000);
+
+// An automation turn is not the person cancelling either: a delegated
+// (routine-driven) turn lands in the same conversation and leaves the
+// outstanding assignment alone.
+it("does not cancel a live coordination when an automation turn lands in the conversation", () => fixture(async f => {
+  const ops = (await f.cli("new-bot", "--name", "Ops", "--section", "Leadership")).bot;
+  f.plan[f.lead.id] = { delayMs: 6000, reply: "CSV export implemented" };
+  f.plan[f.chief.id] = { turns: [
+    { steps: structuredClone(f.plan[f.chief.id].steps), reply: "Assigned to Engineering" },
+    { reply: "The requested CSV export is implemented and verified" },
+    { reply: "Nothing further" },
+  ] };
+  f.plan[ops.id] = { turns: [
+    { steps: [{ tool: "delegate_bot", arguments: { bot_id: f.chief.id, message: "Nightly note: confirm the export owner." } }], reply: "Delegated the nightly note" },
+    { reply: "Recorded the outcome of the nightly note" },
+  ] };
+  await f.start();
+  await expect.poll(() => f.nodes().find((node: any) => node.parentId)?.status, { timeout: 15_000 }).toBe("running");
+  const assignment = f.nodes().find((node: any) => node.parentId);
+
+  const { routine } = await f.api("/api/routines", { name: "Nightly note", prompt: "Send the nightly note.", botId: ops.id,
+    enabled: false, schedule: { type: "interval", everyMinutes: 60, anchorAt: Date.now() + 3_600_000 } });
+  await f.api(`/api/routines/${routine.id}/run`, {});
+  // The delegated turn really reaches the conversation the coordination lives in.
+  await expect.poll(async () => (await f.messages(f.chief.activeTaskId)).some((message: any) => message.peerAsk?.botId === ops.id), { timeout: 25_000 }).toBe(true);
+  expect(f.nodes().find((node: any) => node.id === assignment.id).status).not.toBe("cancelled");
+
+  await expect.poll(() => f.nodes().find((node: any) => node.id === assignment.id)?.status, { timeout: 25_000 }).toBe("completed");
+  await expect.poll(async () => (await f.messages(f.chief.activeTaskId)).some((message: any) => message.tool?.name === "Engineering lead replied"), { timeout: 15_000 }).toBe(true);
+}), 60_000);
+
+// Stop belongs to the conversation it was pressed in. It stops this bot and
+// stops awaiting its teammates; a teammate already mid-turn keeps its own
+// provider process and its result is still recorded here.
+it("stops a waiting source without reaching into the teammate already working", () => fixture(async f => {
+  f.plan[f.lead.id] = { delayMs: 4000, reply: "Finished after the source was stopped" };
   await f.start();
   await expect.poll(() => f.nodes().find((node: any) => node.parentId)?.status, { timeout: 15_000 }).toBe("running");
   await f.api(`/api/bots/${f.chief.id}/interrupt`, { threadId: f.chief.activeTaskId });
-  await expect.poll(() => f.nodes().every((node: any) => node.status === "cancelled")).toBe(true);
+
+  // The source stops awaiting immediately; the teammate keeps running.
+  await expect.poll(() => f.nodes().find((node: any) => !node.parentId)?.status).toBe("cancelled");
+  expect(f.nodes().find((node: any) => node.parentId).status).toBe("running");
   expect((await f.wait()).status).toBe("settled");
+  const chip = (await f.messages(f.chief.activeTaskId)).find((message: any) => message.tool?.name?.startsWith("Stopped here"));
+  expect(chip.tool.name).toContain("Engineering lead");
+  expect(chip.threadRef).toMatchObject({ botId: f.lead.id, threadId: f.nodes().find((node: any) => node.parentId).threadId });
+
+  // Its work lands: the result is recorded and reported into the stopped chat.
+  await expect.poll(() => f.nodes().find((node: any) => node.parentId)?.status, { timeout: 20_000 }).toBe("completed");
+  expect(f.nodes().find((node: any) => node.parentId).result).toContain("Finished after the source was stopped");
+  await expect.poll(async () => (await f.messages(f.chief.activeTaskId)).some((message: any) => message.tool?.name === "Engineering lead replied")).toBe(true);
+  // ...but nothing resumes the conversation the person stopped.
   expect(f.evidence().filter((turn: any) => turn.botId === f.chief.id)).toHaveLength(1);
   expect((await f.messages(f.chief.activeTaskId)).some((message: any) => message.text === "The requested CSV export is implemented and verified")).toBe(false);
-}), 45_000);
+}), 60_000);
 
 it("deleting the waiting source cancels its tree and never recreates the deleted conversation", () => fixture(async f => {
   f.plan[f.lead.id] = { delayMs: 5000, reply: "Must not return to a deleted task" };

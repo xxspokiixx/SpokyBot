@@ -154,6 +154,35 @@ export class RoomHandoffs {
   activeDirect(threadId: string) {
     return [...this.nodes.values()].some(n => !n.groupId && n.threadId === threadId && !terminal(n));
   }
+  /** Work this conversation handed out that has not settled yet. The
+   * conversation's own node is not outstanding — only what it waits on. */
+  outstandingDirect(threadId: string): RoomHandoff[] {
+    return [...this.nodes.values()].filter(node => {
+      if (terminal(node) || !node.parentId) return false;
+      const parent = this.nodes.get(node.parentId);
+      return Boolean(parent && !parent.groupId && parent.threadId === threadId);
+    });
+  }
+  /** Stop this conversation without reaching into a teammate that is already
+   * working. Its provider process is left alone: it finishes and its result
+   * is still reported here. Work that never started is cancelled, because
+   * nothing is lost. This conversation stops being awaited either way, so no
+   * teammate result resumes a stopped chat. Returns what was left running. */
+  stopAwaitingDirect(threadId: string, reason = "Stopped by user"): RoomHandoff[] {
+    const left: RoomHandoff[] = [];
+    for (const node of this.nodes.values()) {
+      if (node.groupId || node.threadId !== threadId || terminal(node)) continue;
+      for (const child of this.children(node.id)) {
+        if (terminal(child)) continue;
+        if (child.status === "queued") this.cancelTree(child, "Stopped before it started");
+        else left.push(child);
+      }
+      node.status = "cancelled"; node.result = reason;
+      this.controllers.get(node.id)?.abort();
+      this.publish(node);
+    }
+    return left;
+  }
 
   tick() {
     if (this.loadError) return;
@@ -175,7 +204,9 @@ export class RoomHandoffs {
       if (n.status !== "queued" && n.status !== "resume") continue;
       // A newly queued child starts only after its author has settled.
       if (parent && (parent.status === "source" || parent.status === "running")) continue;
-      if (parent && terminal(parent)) { this.cancelTree(n, "Originating request has ended"); continue; }
+      // A stopped source stops waiting; only work that never started is
+      // dropped with it. A teammate mid-turn keeps its process and reports.
+      if (parent && terminal(parent) && n.status === "queued") { this.cancelTree(n, "Originating request has ended"); continue; }
       if (this.hooks.busy(n)) continue;
       const root = this.root(n);
       const executionCost = 1;

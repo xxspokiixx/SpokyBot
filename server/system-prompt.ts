@@ -12,7 +12,8 @@ export type PromptSection = PromptPart & { bytes: number };
 
 /** Sections whose text legitimately differs between two turns of one live
  * conversation: memory, because a bot writes to MEMORY.md mid-conversation,
- * and mentions, which describe the message being sent right now.
+ * mentions, which describe the message being sent right now, and outstanding
+ * teammate work, which settles while the person keeps talking.
  *
  * They are reported apart from the rest so a driver that keeps one CLI
  * process per thread can key that process on the stable half. Before this
@@ -20,7 +21,7 @@ export type PromptSection = PromptPart & { bytes: number };
  * contract, which relaunched the CLI — and the provider then re-uploaded the
  * entire conversation at the cache-write rate. Mentions did the same on any
  * turn that tagged a bot. */
-const VOLATILE_SECTIONS = new Set(["memory", "mentions"]);
+const VOLATILE_SECTIONS = new Set(["memory", "mentions", "outstanding"]);
 
 export function buildSystemPrompt(
   persona: string,
