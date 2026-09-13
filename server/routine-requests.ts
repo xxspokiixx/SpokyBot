@@ -292,6 +292,8 @@ export interface RoutineRequestServiceOptions {
   routines: RoutineManager;
   now?: () => number;
   timeZone?: () => string;
+  /** Server-owned effective mode of the source conversation, never request input. */
+  autoApply?: (botId: string, threadId: string) => boolean;
   /** Harness-owned readiness check for proposals that would execute in cloud. */
   cloudReady?: () => Promise<{ ready: boolean; reason?: string }>;
   /** Revalidates conversation ownership and capacity synchronously, directly
@@ -348,6 +350,8 @@ export type ResolveRoutineRequestResult =
       state: "applied";
       action: RoutineRequestOperation["action"];
       resultId: string;
+      settlementPending?: true;
+      message?: string;
     };
 
 export class RoutineRequestError extends Error {
@@ -1030,6 +1034,7 @@ export class RoutineRequestService {
   private readonly cloudReady?: () => Promise<{ ready: boolean; reason?: string }>;
   private readonly canPersist?: RoutineRequestServiceOptions["canPersist"];
   private readonly validateTarget?: RoutineRequestServiceOptions["validateTarget"];
+  private readonly autoApply?: RoutineRequestServiceOptions["autoApply"];
 
   constructor(options: RoutineRequestServiceOptions) {
     this.store = options.store;
@@ -1039,9 +1044,21 @@ export class RoutineRequestService {
     this.cloudReady = options.cloudReady;
     this.canPersist = options.canPersist;
     this.validateTarget = options.validateTarget;
+    this.autoApply = options.autoApply;
   }
 
   async propose(args: ProposeRoutineRequestArgs): Promise<RoutineProposalResult> {
+    return this.prepare(args);
+  }
+
+  async submit(args: ProposeRoutineRequestArgs) {
+    const proposal = await this.prepare(args, true);
+    return { ...proposal, state: proposal.result ? "applied" as const : "pending" as const };
+  }
+
+  private async prepare(args: ProposeRoutineRequestArgs, submitted = false): Promise<RoutineProposalResult & {
+    result?: Extract<ResolveRoutineRequestResult, { state: "applied" }>;
+  }> {
     const botId = text(args.botId, "botId", 128);
     const threadId = text(args.threadId, "threadId", 128);
     const at = this.now();
@@ -1095,8 +1112,14 @@ export class RoutineRequestService {
     if (args.canCommit && !args.canCommit()) {
       throw new RoutineRequestError("The requesting turn ended before this proposal could be saved", 401);
     }
+    // Resolve the current source-thread grant after the asynchronous probe.
+    const automatic = submitted && this.autoApply?.(botId, threadId) === true;
+    if (automatic) {
+      messageInput.card.options = [];
+      messageInput.card.dismissed = true;
+    }
     const message = this.store.appendMessage(threadId, messageInput);
-    return {
+    const proposal = {
       requestId,
       messageId: message.id,
       title: copy.title,
@@ -1105,6 +1128,27 @@ export class RoutineRequestService {
       nextRunAt: copy.nextRunAt,
       timeZone,
     };
+    if (!automatic) return proposal;
+    // Persist a hidden receipt first, then use the existing validated,
+    // idempotent commit path without exposing a pending confirmation.
+    let result: ResolveRoutineRequestResult;
+    try {
+      result = this.resolve({ botId, threadId, requestId, behavior: "allow" });
+    } catch (error) {
+      result = { claimed: true, state: "invalid", error: error instanceof Error ? error.message : String(error), status: error instanceof RoutineRequestError ? error.status : 400 };
+    }
+    if (result.state === "applied") return { ...proposal, result };
+    // The scheduler commit can succeed even if settling its transcript
+    // fails. Report that exact result; a retry only finishes the receipt.
+    const receipt = this.routines.routineRequestReceipt(requestId);
+    if (receipt && receipt.botId === botId && receipt.threadId === threadId && receipt.messageId === message.id &&
+      receipt.fingerprintVersion === ROUTINE_REQUEST_FINGERPRINT_VERSION && receipt.fingerprint === routineRequestFingerprint(payload, message.id)) {
+      return { ...proposal, result: {
+        claimed: true, state: "applied", action: receipt.action, resultId: receipt.resultId,
+        settlementPending: true, message: "Routine change applied. Recording the operation receipt could not finish; the change will not be applied again.",
+      } };
+    }
+    throw new RoutineRequestError(result.state === "invalid" ? result.error : "The routine change could not be applied", result.state === "invalid" ? result.status : 409);
   }
 
   private async requireCloudReadiness(operation: RoutineRequestOperation): Promise<void> {

@@ -40,6 +40,7 @@ Use only mapped, tested commands:
 - [Chat turns](chat-turns.md)
 - [Bot setup, model scope, and file continuity](bot-continuity.md)
 - [Reviewed Chief team setup and scoped deletion](team-setup.md)
+- [Full Access without duplicate approvals](full-access.md)
 - [Chat UI, driven headlessly](chat-ui.md)
 - [Welcome flow and guided tour](onboarding.md)
 - [Channels](channels.md)

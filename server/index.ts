@@ -30,7 +30,7 @@ import {
   type CredentialTargetId,
 } from "../shared/credential-request.ts";
 
-import { HELD_NOTE, approvalHeldNote, approvalHeldReason, approvalModeForOrigin, autoVerdict } from "./auto-approve.ts";
+import { approvalHeldNote, approvalHeldReason, approvalModeForOrigin, autoVerdict, deliverFullAccessApproval } from "./auto-approve.ts";
 import { updateClaudeCli } from "./claude-update.ts";
 import { configuredAccountDirectory, assertSeparateClaudeAccount, claudeAccountInfo, createClaudeAccountSchema, instanceSettingsSchema, newClaudeAccount } from "./claude-accounts.ts";
 import {
@@ -277,6 +277,7 @@ import {
 } from "./section-context.ts";
 import {
   applyStagedSkillWrite,
+  applySkillWriteWithReceipt,
   getStagedSkillWrite,
   installSkill,
   listSkills,
@@ -1685,6 +1686,20 @@ const approvalModeForTurn = (bot: BotRecord, peerInitiated = false): ApprovalMod
   return mode;
 };
 
+/** Full belongs to the requesting conversation, not whichever sibling is
+ * selected in the UI or the bot's default for future conversations. */
+function fullAccessForSource(botId: string, threadId: string): boolean {
+  const owner = connectorThread(botId, threadId);
+  if (!owner) return false;
+  const bot = store.projectBotForTask(botId, threadId) ?? owner.bot;
+  // Origin changes Custom to Auto, never Full; no live-turn state is needed.
+  return approvalModeForTurn(bot) === "full";
+}
+
+function peerReviewRequired(bot: BotRecord, threadId: string): boolean {
+  return Boolean(bot.approvePeerComms && !fullAccessForSource(bot.id, threadId));
+}
+
 /** Privileged approval-mode transitions are deliberately absent from the
  * loopback HTTP authority model: a bot with shell access can curl that
  * surface itself. Only Electron's private utility-process channel can deliver
@@ -2348,7 +2363,7 @@ function coordinationInstructions(node: RoomHandoff, resumed: boolean): string {
 
 const roomHandoffs = new RoomHandoffs(join(DATA_DIR, "room-handoffs.json"), {
   validate: (node, parent) => roomHandoffProblem(node, parent) ??
-    (parent && store.bot(parent.botId)?.approvePeerComms && !node.approvalGranted ? "Sender now requires peer approval; submit a new approved request" : undefined),
+    (parent && store.bot(parent.botId)?.approvePeerComms && !fullAccessForSource(parent.botId, parent.threadId) && !node.approvalGranted ? "Sender now requires peer approval; submit a new approved request" : undefined),
   busy: n => Boolean(store.bot(n.botId)?.busy || (n.groupId && store.group(n.groupId) && groupIsWorking(store.group(n.groupId)!))),
   changed: (groupIds, directThreadIds) => {
     for (const id of groupIds) {
@@ -3892,63 +3907,50 @@ bus.subscribe((event: RuntimeEvent) => {
           : registry.get(asker.modelSelection.instanceId);
         const requestId = event.requestId;
         const { tool, summary } = event;
+        const sourceGeneration = directTurnGenerationByThread.get(event.threadId);
+        const sourceSpeaker = groupSpeakers.get(event.threadId);
+        const isCurrent = () => !shouldIgnoreProviderEvent(event) && (
+          (sourceGeneration !== undefined && directTurnGenerationByThread.get(event.threadId) === sourceGeneration) ||
+          (sourceSpeaker !== undefined && groupSpeakers.get(event.threadId) === sourceSpeaker)
+        );
         // The chip is written only AFTER the provider takes the answer.
         // Claiming approval first and correcting later means a moment
         // where the transcript says "approved" over a request nothing
         // answered — and if the provider is gone entirely, forever.
         void (async () => {
-          try {
-            if (!instance) throw new Error("provider unavailable");
-            const outcome = await instance.adapter.respondToRequest(event.threadId, requestId, { behavior: "allow" });
-            if (outcome === "unavailable") throw new Error("the ask is no longer open");
-            pushMessage({
-              role: "bot",
-              kind: "activity",
-              tool: { name: `${settled}: ${summary.slice(0, 120)}`, ok: true },
+          const outcome = await deliverFullAccessApproval(instance?.adapter, event.threadId, requestId, event.turnId, isCurrent);
+          if (!isCurrent()) return;
+          if (outcome !== "allowed-once") {
+            watchdog.setWaitingOnHuman(event.threadId, false);
+            if (outcome !== "unavailable") pushMessage({
+              role: "bot", kind: "activity",
+              tool: { name: outcome === "rejected"
+                ? "The provider rejected this action despite Full access."
+                : "error: could not deliver Full access to the provider; retry the task after reconnecting.", ok: false },
             });
-            // logged under the same discipline as the chip: only once the
-            // provider has actually taken the answer, so the audit log
-            // never claims an approval nothing received
-            appendDecision(DATA_DIR, {
-              threadId: event.threadId,
-              requestId,
-              botId: asker.id,
-              botName: asker.name,
-              tool,
-              summary,
-              decision: "auto-approved",
-              source: verdict.source,
-            });
-          } catch {
-            // couldn't answer it for them — hand it back to the human
-            // rather than leaving the bot waiting on nobody
-            const card = pushMessage({
-              role: "bot",
-              kind: "options",
-              card: {
-                title: "Approval needed",
-                subtitle: summary,
-                options: ["Allow", "Deny"],
-                requestId,
-                tool,
-                held: HELD_NOTE["approval.held.undeliveredFull"],
-                heldCode: "approval.held.undeliveredFull",
-                approvalScope: event.approvalScope,
-              },
-            });
-            askMessageByRequest.set(`${event.threadId}:${requestId}`, card.id);
-            appendDecision(DATA_DIR, {
-              threadId: event.threadId,
-              requestId,
-              botId: asker.id,
-              botName: asker.name,
-              tool,
-              summary,
-              decision: "card-shown",
-              source: "auto-fallback",
-            });
+            return;
           }
-        })();
+          pushMessage({
+            role: "bot",
+            kind: "activity",
+            tool: { name: `${settled}: ${summary.slice(0, 120)}`, ok: true },
+          });
+          // Log only once the provider has actually taken the answer.
+          appendDecision(DATA_DIR, {
+            threadId: event.threadId,
+            requestId,
+            botId: asker.id,
+            botName: asker.name,
+            tool,
+            summary,
+            decision: "auto-approved",
+            source: verdict.source,
+          });
+        })().catch(() => {
+          // A receipt failure must neither crash the server nor manufacture
+          // a new permission request after the provider took our answer.
+          console.error("[full-access] Could not record the provider approval result.");
+        });
         break;
       }
       const heldContext = { source: verdict?.source, permission };
@@ -6176,6 +6178,7 @@ async function cloudRoutineReadiness(): Promise<{ ready: boolean; reason?: strin
 const routineRequests = new RoutineRequestService({
   store,
   routines,
+  autoApply: fullAccessForSource,
   cloudReady: cloudRoutineReadiness,
   canPersist: proposalPersistence,
   // Cross-bot routines: the confirmation card can sit open indefinitely, so
@@ -6384,6 +6387,7 @@ async function deleteBotWithLifecycle(botId: string, revalidate: () => void = ()
 
 const profileRequests = new ProfileRequestService({
   store,
+  autoApply: fullAccessForSource,
   canPersist: proposalPersistence,
   // A Chief may change a section peer; anyone else only itself. Re-checked at confirm.
   validateTarget: (proposerBotId, targetBotId) => {
@@ -6398,8 +6402,17 @@ const profileRequests = new ProfileRequestService({
 const teamSetupTeams = () => [...new Set(["", ...readSections(), ...store.bots.map((bot) => sectionKey(bot.section)), ...store.groups.map((group) => sectionKey(group.section))])];
 const teamSetupRequests = new TeamSetupRequestService({
   store, teams: teamSetupTeams, canAccessTeam, canPersist: proposalPersistence, maxBots: MAX_WORKSPACE_BOTS,
+  autoApply: fullAccessForSource,
+  validateChange: (before, fields) => assertTeamComputerChangeIdle(before, { ...before, ...fields }),
   ownsThread: (botId, threadId) => Boolean(connectorThread(botId, threadId)),
-  targetBusy: (botId) => Boolean(store.bot(botId)?.busy || hasDirectDispatch(botId) || activeGroupTurnForBot(botId) || routines?.activeRunForBot(botId)),
+  targetBusy: (botId, sourceThreadId) => {
+    if (!sourceThreadId) return Boolean(store.bot(botId)?.busy || hasDirectDispatch(botId) || activeGroupTurnForBot(botId) || routines?.activeRunForBot(botId));
+    const group = activeGroupTurnForBot(botId);
+    const run = routines?.activeRunForBot(botId);
+    return store.tasks(botId).some(task => task.threadId !== sourceThreadId && threadBusy(botId, task.threadId)) ||
+      [...directTurnDispatchClaims].some(([threadId, claim]) => threadId !== sourceThreadId && claim.botId === botId) ||
+      Boolean(group && group.threadId !== sourceThreadId) || Boolean(run && run.threadId !== sourceThreadId);
+  },
   validateModel: (selection, current) => {
     const checked = checkedModelSelection(selection, undefined, true);
     if (!checked.ok) return checked.error;
@@ -6779,7 +6792,7 @@ const ROOM_POST_MAX_CHARS = 4_000;
 // approval bus: peer-approval.ts only needs to push cards and broadcast
 // them — its pending map lives in the module so the two respond endpoints
 // can call resolvePeerComms without holding a reference back to here.
-const approvalBus: ApprovalBus = { store, broadcast, notify };
+const approvalBus: ApprovalBus = { store, broadcast, notify, autoApply: fullAccessForSource };
 
 // Approvals live only in memory, so any peer card still open on disk is one
 // whose resolver died with the previous process. Left alone it can never be
@@ -8268,6 +8281,7 @@ function proposalPersistence(botId: string, threadId: string) {
   if (!connectorThread(botId, threadId)) {
     return { ok: false as const, status: 403, error: "source conversation does not belong to sender" };
   }
+  if (fullAccessForSource(botId, threadId)) return { ok: true as const };
   // Only cards on the visible branch can be acted on from the composer.
   // Abandoned branches must not permanently consume the proposal quota.
   // Routine and profile proposals share one budget per bot per thread, so
@@ -8290,6 +8304,7 @@ function skillProposalPersistence(botId: string, threadId: string) {
   if (!connectorThread(botId, threadId)) {
     return { ok: false as const, status: 403, error: "source conversation does not belong to sender" };
   }
+  if (fullAccessForSource(botId, threadId)) return { ok: true as const };
   const openRequests = store.activePath(threadId).filter(
     (message) =>
       message.card?.skillRequest?.botId === botId &&
@@ -8350,6 +8365,7 @@ function skillCardCopy(staged: { action: "create" | "update"; name: string; gist
 function appendSkillRequestCard(args: {
   botId: string;
   threadId: string;
+  applied?: boolean;
   staged: {
     id: string;
     action: "create" | "update";
@@ -8386,7 +8402,8 @@ function appendSkillRequestCard(args: {
     card: {
       title: copy.title,
       subtitle: copy.subtitle,
-      options: [args.staged.action === "create" ? "Enable" : "Update", "Deny"],
+      options: args.applied ? [] : [args.staged.action === "create" ? "Enable" : "Update", "Deny"],
+      ...(args.applied ? { answered: "allow", title: `Skill "${args.staged.name}" ${args.staged.action === "create" ? "enabled" : "updated"}` } : {}),
       requestId,
       tool: copy.tool,
       skillRequest: payload,
@@ -10090,7 +10107,7 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
           : body.action === "update"
             ? { action: body.action, routineId: body.routineId, changes: body.changes }
             : { action: body.action, routineId: body.routineId };
-        const proposed = await routineRequests.propose({
+        const proposed = await routineRequests.submit({
           botId: from.id,
           threadId: fromThreadId,
           proposal: proposedInput,
@@ -10107,8 +10124,8 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
           // Audit what the human was actually shown, not the shorter tool
           // response returned to the model.
           summary: proposedCard?.subtitle ?? proposed.summary,
-          decision: "card-shown",
-          source: "routine",
+          decision: proposed.state === "applied" ? "auto-approved" : "card-shown",
+          source: proposed.state === "applied" ? "full-access" : "routine",
         });
         return json(res, 201, proposed);
       }
@@ -10127,7 +10144,7 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
         const owner = connectorThread(from.id, body.fromThreadId);
         if (!owner) return json(res, 403, { error: "source conversation does not belong to sender" });
         const targetBotId = body.forBotId?.trim() || from.id;
-        const proposed = profileRequests.propose({
+        const proposed = profileRequests.submit({
           botId: from.id,
           threadId: body.fromThreadId,
           targetBotId,
@@ -10137,7 +10154,8 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
         });
         appendDecision(DATA_DIR, {
           threadId: body.fromThreadId, requestId: proposed.requestId, botId: from.id, botName: from.name,
-          tool: "update_profile", summary: proposed.detail, decision: "card-shown", source: "profile",
+          tool: "update_profile", summary: proposed.detail, decision: proposed.state === "applied" ? "auto-approved" : "card-shown",
+          source: proposed.state === "applied" ? "full-access" : "profile",
         });
         return json(res, 201, proposed);
       }
@@ -10154,7 +10172,7 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
             .map((bot) => ({ id: bot.id, name: bot.name, title: bot.title, section: bot.section ?? "", modelSelection: bot.modelSelection })),
           instances: instances.map((instance) => ({ instanceId: instance.instanceId, driverKind: instance.driverKind, displayName: instance.displayName,
             state: instance.snapshot.state, models: instance.models, effortLevels: instance.capabilities?.effortLevels ?? [] })),
-          scope: "Bot model defaults apply to groups and new threads; existing threads retain their models. New teams require explicit approval of their names and this Chief's access.",
+          scope: "Bot model defaults apply to groups and new threads; existing threads retain their models. Full Access applies requested team setup immediately; other modes return a review card. Existing unauthorized teams remain outside this Chief's scope.",
         });
       }
       if (method === "POST" && path === "/api/internal/team-setup-requests") {
@@ -10163,10 +10181,12 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
         const chief = store.bot(internalCapability.botId)!;
         const owner = connectorThread(chief.id, internalCapability.threadId);
         if (!owner) return json(res, 403, { error: "Source conversation no longer belongs to the Chief" });
-        const proposed = teamSetupRequests.propose({ botId: chief.id, threadId: internalCapability.threadId, plan: parsed.data.plan,
+        const proposed = await teamSetupRequests.submit({ botId: chief.id, threadId: internalCapability.threadId, plan: parsed.data.plan,
+          canCommit: () => internalCapabilityIsActive(internalCapability),
           ...(owner.group ? { from: { botId: chief.id, name: chief.name, color: chief.color } } : {}) });
-        appendDecision(DATA_DIR, { threadId: internalCapability.threadId, requestId: proposed.requestId, botId: chief.id,
-          tool: "set_up_team", summary: proposed.detail, decision: "card-shown", source: "profile" });
+        if (proposed.state === "applied" || proposed.state === "pending") appendDecision(DATA_DIR, { threadId: internalCapability.threadId, requestId: proposed.requestId, botId: chief.id,
+          tool: "set_up_team", summary: proposed.detail, decision: proposed.state === "applied" ? "auto-approved" : "card-shown",
+          source: proposed.state === "pending" ? "profile" : "full-access" });
         return json(res, 201, proposed);
       }
       if (method === "POST" && path === "/api/internal/bot-deletion-requests") {
@@ -10175,10 +10195,12 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
         const chief = store.bot(internalCapability.botId)!;
         const owner = connectorThread(chief.id, internalCapability.threadId);
         if (!owner) return json(res, 403, { error: "Source conversation no longer belongs to the Chief" });
-        const proposed = teamSetupRequests.proposeDeletion({ botId: chief.id, threadId: internalCapability.threadId, targetBotId: parsed.data.targetBotId, reason: parsed.data.reason,
+        const proposed = await teamSetupRequests.submitDeletion({ botId: chief.id, threadId: internalCapability.threadId, targetBotId: parsed.data.targetBotId, reason: parsed.data.reason,
+          canCommit: () => internalCapabilityIsActive(internalCapability),
           ...(owner.group ? { from: { botId: chief.id, name: chief.name, color: chief.color } } : {}) });
-        appendDecision(DATA_DIR, { threadId: internalCapability.threadId, requestId: proposed.requestId, botId: chief.id,
-          tool: "delete_bot", summary: proposed.detail, decision: "card-shown", source: "profile" });
+        if (proposed.state === "applied" || proposed.state === "pending") appendDecision(DATA_DIR, { threadId: internalCapability.threadId, requestId: proposed.requestId, botId: chief.id,
+          tool: "delete_bot", summary: proposed.detail, decision: proposed.state === "applied" ? "auto-approved" : "card-shown",
+          source: proposed.state === "pending" ? "profile" : "full-access" });
         return json(res, 201, proposed);
       }
       // session_search: ranked recall over the calling bot's OWN threads,
@@ -10309,6 +10331,19 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
           source: learnSource(source),
         });
         if ("error" in staged) return json(res, 422, { error: staged.error });
+        if (fullAccessForSource(from.id, fromThreadId)) {
+          const applied = applySkillWriteWithReceipt(from.id, staged, () => {
+            const receipt = appendSkillRequestCard({ botId: from.id, threadId: fromThreadId, staged, applied: true });
+            appendDecision(DATA_DIR, { threadId: fromThreadId, requestId: receipt.requestId, botId: from.id, botName: from.name,
+              tool: "stage_skill", summary: receipt.summary, decision: "auto-approved", source: "full-access" });
+          });
+          if ("error" in applied) {
+            rejectStagedSkillWrite(from.id, staged.id);
+            return json(res, 422, { state: "failed", error: applied.error });
+          }
+          return json(res, 201, { state: "applied", stagedId: staged.id, name: staged.name, action: staged.action,
+            gist: staged.gist, warnings: staged.warnings, ...applied, summary: `Skill ${staged.name} ${staged.action === "create" ? "enabled" : "updated"}.` });
+        }
         let card: ReturnType<typeof appendSkillRequestCard>;
         try {
           card = appendSkillRequestCard({ botId: from.id, threadId: fromThreadId, staged });
@@ -10327,6 +10362,7 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
           source: "skill",
         });
         return json(res, 201, {
+          state: "pending",
           stagedId: staged.id,
           name: staged.name,
           action: staged.action,
@@ -10408,7 +10444,7 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
         // (15-min timeout → deny) before its peer turn starts. The channel
         // and the chips are created only AFTER the verdict, so a denied
         // contact leaves no trace of an exchange that never happened.
-        if (from.approvePeerComms) {
+        if (peerReviewRequired(from, fromThreadId)) {
           const verdict = await requestPeerApproval(
             approvalBus,
             from,
@@ -10611,7 +10647,7 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
         return json(res, 200, {
           queued: true,
           taskId: queued.id,
-          message: from.approvePeerComms
+          message: peerReviewRequired(from, internalCapability.threadId)
             ? `Queued for review — @${targetName} will only pick it up if the user approves after your turn finishes.`
             : `Delegation queued — @${targetName} will pick it up after your current turn finishes.`,
         });
@@ -10654,7 +10690,7 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
             if (eligibility) return json(res, 403, { error: eligibility });
           }
           let approvalGranted = false;
-          if (internalSender.approvePeerComms) {
+          if (peerReviewRequired(internalSender, address.threadId)) {
             const verdicts = await Promise.all(targets.map(target =>
               requestPeerApproval(approvalBus, internalSender, store.bot(target.botId)!, parsed.data.message, "delegate_bot", address.threadId)));
             requireActiveInternalCapability();
@@ -10780,7 +10816,7 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
           return json(res, 429, { error: preflight.message });
         }
         let poster = from;
-        if (from.approvePeerComms) {
+        if (peerReviewRequired(from, fromThreadId)) {
           // Same gate ask_bot carries, aimed at the room instead of a peer:
           // a bot the user asked to be consulted about must be consulted here
           // too, or the newest way to reach other bots is the one way round it.
@@ -10969,7 +11005,7 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
           botName: target.name,
           self: false,
           delegationId: queued.id,
-          approvalRequired: Boolean(from.approvePeerComms),
+          approvalRequired: peerReviewRequired(from, fromThreadId),
           limit,
           ...(position > limit ? { state: "queued", position: position - limit } : { state: "pending" }),
         });
@@ -11049,7 +11085,7 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
         }
         // ponytail: no new room-administration approval flow. Fail closed for
         // chiefs whose peer changes need review; add a proposal card if needed.
-        if (chief.approvePeerComms) {
+        if (peerReviewRequired(chief, internalCapability.threadId)) {
           return json(res, 403, { error: "peer approval is required; ask the user to make this room change" });
         }
         // Section labels are a permission boundary, not bot-owned organization.

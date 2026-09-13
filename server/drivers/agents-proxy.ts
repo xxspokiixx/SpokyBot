@@ -22,9 +22,9 @@
 //                                          never move bots or sections
 //   request_credential(id, reason?)       → show a secure, allowlisted key card
 //   list_routines()                       → inspect this bot's scheduled work
-//   propose_routine(...)                  → show a confirmation card for a new routine
-//   propose_routine_action(...)           → show a confirmation card for a routine change
-//   propose_profile(...)                  → show a confirmation card for a profile change
+//   propose_routine(...)                  → apply or request confirmation for a new routine
+//   propose_routine_action(...)           → apply or request confirmation for a routine change
+//   propose_profile(...)                  → apply or request confirmation for a profile change
 //
 // Speaks raw JSON-RPC 2.0 over stdio (no MCP SDK — house style, matches
 // computer-proxy / permission-proxy). All state comes from env, injected by
@@ -134,7 +134,7 @@ const ROUTINE_SCHEDULE_SCHEMA = {
     starts_at: {
       type: "string",
       description:
-        "Optional for type interval: RFC3339 date-time with an explicit timezone offset that anchors the cadence. Omit to start one interval after confirmation.",
+        "Optional for type interval: RFC3339 date-time with an explicit timezone offset that anchors the cadence. Omit to start one interval after the routine is applied (immediately with granted Full Access, otherwise after confirmation).",
     },
     window_start: {
       type: "string",
@@ -377,9 +377,11 @@ const ROUTINE_FIELDS_SCHEMA = {
   },
   continuity: {
     type: "boolean",
-    description: "Opt in to using the latest completed run's bounded report as historical context. Defaults to false; set false in an update to start fresh again. Shown on the confirmation card.",
+    description: "Opt in to using the latest completed run's bounded report as historical context. Defaults to false; set false in an update to start fresh again. Included in the applied result or pending confirmation.",
   },
 } as const;
+
+const PROPOSAL_OUTCOME = " Read the result: granted Full Access may apply the change immediately. If applied, continue the requested work without another confirmation. Only a pending result requires ending the turn and waiting for the in-app decision. Never claim success from the permission mode alone; report failed or cancelled results honestly. This does not elevate another bot's execution permissions.";
 
 const TOOLS = [
   {
@@ -544,7 +546,7 @@ const TOOLS = [
   },
   {
     name: "propose_team_setup",
-    description: "Chief of Staff only: propose all requested specialist creation, profile/model configuration, and authorized team moves in ONE combined review card. Nothing changes until the user applies it. Use exact catalog engine/model IDs from list_team_setup. Combine all fields for each bot; use the same create key or botId to coalesce repeated entries. New teams must be named explicitly in newTeams and have a specialist in this plan; the card also asks to authorize your access to just those new teams. Existing unauthorized teams cannot be included. Models change bot defaults for groups/new threads; existing threads and execution permissions stay unchanged. After proposing, end your turn. The decision and structured result automatically resume you once; do not ask again, poll, or repeat the proposal.",
+    description: "Chief of Staff only: submit all requested specialist creation, profile/model configuration, and authorized team moves in ONE combined plan. Use exact catalog engine/model IDs from list_team_setup. Combine all fields for each bot; use the same create key or botId to coalesce repeated entries. New teams must be named explicitly in newTeams and have a specialist in this plan; access is granted only to those new teams. Existing unauthorized teams cannot be included. Models change bot defaults for groups/new threads; existing threads and execution permissions stay unchanged. If review is pending, the decision and structured result automatically resume you once; do not ask again, poll, or repeat the proposal." + PROPOSAL_OUTCOME,
     inputSchema: {
       type: "object", additionalProperties: false,
       properties: {
@@ -571,7 +573,7 @@ const TOOLS = [
   },
   {
     name: "propose_bot_deletion",
-    description: "Chief of Staff only: when the user explicitly asks to delete a named teammate, create a separate confirmation card for that exact bot. Deletion removes its conversations, memory, instructions and skills; generated project files remain. Running work and owned computers can block deletion. Never delete yourself, substitute an archive, or put deletion into a setup batch. End your turn after proposing; the decision and result resume you once.",
+    description: "Chief of Staff only: when the user explicitly asks to delete a named teammate, submit a separate deletion request for that exact bot. Deletion removes its conversations, memory, instructions and skills; generated project files remain. Running work and owned computers can block deletion. Never delete yourself, substitute an archive, or put deletion into a setup batch. If review is pending, the decision and result resume you once." + PROPOSAL_OUTCOME,
     inputSchema: { type: "object", additionalProperties: false, properties: {
       bot_id: { type: "string", minLength: 1 }, reason: { type: "string", minLength: 1, maxLength: 500 },
     }, required: ["bot_id", "reason"] },
@@ -579,7 +581,7 @@ const TOOLS = [
   {
     name: "create_room",
     description:
-      "Create a room in your own section when the user asks for one (maximum four per turn). Chiefs only. Choose active peers from list_bots; you are included automatically as the default responder. This creates no turns or messages. Section moves stay with the user. If peer approval is enabled, ask the user to make the room change instead.",
+      "Create a room in your own section when the user asks for one (maximum four per turn). Chiefs only. Choose active peers from list_bots; you are included automatically as the default responder. This creates no turns or messages. Section moves stay with the user. Follow the tool result under the effective access level; if permission is refused, ask the user to make the room change instead, without trying another route.",
     inputSchema: {
       type: "object",
       additionalProperties: false,
@@ -604,7 +606,7 @@ const TOOLS = [
   {
     name: "manage_room",
     description:
-      "Manage a room from list_rooms: rename it, change its bulletin, or add/remove/set members. Chiefs only, within your own section and allowed peers; keep yourself as a member. Busy rooms, pending approvals and team-goal leads are protected. You cannot move rooms or bots between sections. If peer approval is enabled or the change is refused, ask the user to make the change instead.",
+      "Manage a room from list_rooms: rename it, change its bulletin, or add/remove/set members. Chiefs only, within your own section and allowed peers; keep yourself as a member. Busy rooms, pending approvals and team-goal leads are protected. You cannot move rooms or bots between sections. Follow the tool result under the effective access level; if the change is refused, report the blocker and ask the user to make the change instead, without trying another route.",
     inputSchema: {
       type: "object",
       additionalProperties: false,
@@ -719,7 +721,7 @@ const TOOLS = [
   {
     name: "propose_routine",
     description:
-      "Prepare a new routine after the user explicitly asks to schedule recurring or future work. Call list_routines first for relative dates or times so you use its authoritative current time and timezone. Convert calendar requests (monthly dates, last days, nth weekdays) into a validated five-field cron schedule with an explicit IANA timeZone; keep elapsed every-N-minutes work as interval. Never approximate unsupported requests with a different weekly schedule or an AI date-check routine; explain the limitation instead. This only creates a durable confirmation card; it does NOT enable the routine. Resolve ambiguous dates, times, timezone, destination, or instructions with the user first, and always give one-time schedules an explicit RFC3339 offset. After calling it, end the turn and do not claim the routine exists until the user confirms the card. If the user asks for the routine to run as ANOTHER bot in your section, call list_bots and pass that bot's id as for_bot_id.",
+      "Prepare a new routine after the user explicitly asks to schedule recurring or future work. Call list_routines first for relative dates or times so you use its authoritative current time and timezone. Convert calendar requests (monthly dates, last days, nth weekdays) into a validated five-field cron schedule with an explicit IANA timeZone; keep elapsed every-N-minutes work as interval. Never approximate unsupported requests with a different weekly schedule or an AI date-check routine; explain the limitation instead. Resolve ambiguous dates, times, timezone, destination, or instructions with the user first, and always give one-time schedules an explicit RFC3339 offset. If the user asks for the routine to run as ANOTHER bot in your section, call list_bots and pass that bot's id as for_bot_id; each run retains that bot's own permissions." + PROPOSAL_OUTCOME,
     inputSchema: {
       type: "object",
       additionalProperties: false,
@@ -737,7 +739,7 @@ const TOOLS = [
   {
     name: "propose_routine_action",
     description:
-      "Prepare a user-requested change to one of this bot's existing routines. This only creates a durable confirmation card; it does NOT apply the change. Use list_routines first to get the routine id. After calling it, end the turn and do not claim the action completed until the user confirms the card.",
+      "Prepare a user-requested change to one of this bot's existing routines. Use list_routines first to get the routine id." + PROPOSAL_OUTCOME,
     inputSchema: {
       type: "object",
       additionalProperties: false,
@@ -761,7 +763,7 @@ const TOOLS = [
   {
     name: "propose_profile",
     description:
-      "Propose changes to your own name, title, description, standing instructions (SOUL.md), or working folder (cwd). This only creates a confirmation card; nothing changes until the user approves it. After calling it, end the turn and do not claim the change is applied. Keep SOUL.md short — who you are and the rules you never break; put step-by-step procedure into a skill instead. A Chief of Staff may pass for_bot_id (from list_bots) to propose a change for another bot in its section.",
+      "Submit user-requested changes to your own name, title, description, standing instructions (SOUL.md), or working folder (cwd). Keep SOUL.md short — who you are and the rules you never break; put step-by-step procedure into a skill instead. A Chief of Staff may pass for_bot_id (from list_bots) for a requested change to another bot in its section." + PROPOSAL_OUTCOME,
     inputSchema: {
       type: "object",
       additionalProperties: false,
@@ -793,7 +795,7 @@ const TOOLS = [
   {
     name: "skill_manage",
     description:
-      "Stage a new or updated reusable SKILL.md for the user to review. Create stays inactive until approval; update leaves the current version unchanged until approval. Never update unless the user explicitly asked to revise that named skill. After calling this, end the turn and wait for the in-app decision.",
+      "Submit a new or updated reusable SKILL.md. Never update unless the user explicitly asked to revise that named skill. While review is pending, a create stays inactive and an update leaves the current version unchanged." + PROPOSAL_OUTCOME,
     inputSchema: {
       type: "object",
       additionalProperties: false,
@@ -814,7 +816,7 @@ const TOOLS = [
         },
         gist: {
           type: "string",
-          description: "Optional one-line summary shown on the user's confirmation card.",
+          description: "Optional one-line summary of the skill change, included in its applied result or pending review.",
         },
         source: {
           type: "string",
@@ -945,7 +947,25 @@ function routineFields(args: Json): { fields: Json; error?: string } {
   return { fields };
 }
 
-function confirmationResult(r: Json, fallback: string, noun = "routine"): { text: string } {
+/** Full Access is decided by the harness, not inferred from a model claim or
+ * local environment flag. Missing state preserves older pending responses. */
+function completedProposalResult(r: Json, subject: string): { text: string; isError?: boolean } | undefined {
+  const state = r.state;
+  const result = jsonRecord(r.result) ? r.result : undefined;
+  const error = typeof r.error === "string" ? r.error : typeof result?.error === "string" ? result.error : undefined;
+  const attention = error ?? (r.settlementPending && typeof r.message === "string" ? r.message : undefined);
+  if ((!state || state === "pending") && !error) return undefined;
+  const summary = typeof r.summary === "string" && r.summary.trim() ? `\n\n${r.summary.trim()}` : "";
+  const details = result ? `\n\nResult: ${JSON.stringify(result)}` : "";
+  if (state !== "applied" || (result?.state !== undefined && result.state !== "applied")) {
+    return { text: `The request for ${subject} did not complete successfully.${error ? ` ${error}` : ""}${summary}${details}\n\nDo not claim it was applied. Address the reported blocker rather than repeating the request or asking for a duplicate confirmation.`, isError: true };
+  }
+  return { text: `Applied ${subject}.${summary}${details}${attention ? `\n\nNeeds attention: ${attention}` : ""}\n\nNo additional confirmation is needed. Continue the requested work; do not wait for a review card or ask the user to approve this change again.` };
+}
+
+function confirmationResult(r: Json, fallback: string, noun = "routine"): { text: string; isError?: boolean } {
+  const completed = completedProposalResult(r, fallback);
+  if (completed) return completed;
   const summary = typeof r.summary === "string" && r.summary.trim() ? `\n\n${r.summary.trim()}` : "";
   return {
     text: `A confirmation card is now visible to the user for ${fallback}.${summary}\n\nThis change has not been applied yet. End this turn and wait for the user to confirm or deny the card; do not claim the ${noun} was created or changed before confirmation.`,
@@ -1228,6 +1248,8 @@ async function callTool(name: string, args: Json): Promise<{ text: string; isErr
         ...(deleting ? { targetBotId: args.bot_id, reason: args.reason } : { plan: args }),
       }),
     });
+    const completed = completedProposalResult(result, deleting ? "the requested bot deletion" : "the requested team setup");
+    if (completed) return completed;
     return { text: `One review card is visible: ${String(result.title)}. Nothing has been applied. End this turn; the decision and structured result resume you automatically once. Do not ask again, poll, or repeat this proposal.` };
   }
   if (name === "create_bot") {
@@ -1530,7 +1552,7 @@ async function callTool(name: string, args: Json): Promise<{ text: string; isErr
     const skills = Array.isArray(r.skills) ? r.skills : [];
     const staged = Array.isArray(r.staged) ? r.staged : [];
     if (!skills.length && !staged.length) {
-      return { text: "This bot has no imported skills and nothing staged. Use skill_manage action=\"create\" to stage one for the user to confirm." };
+      return { text: "This bot has no imported skills and nothing staged. Use skill_manage action=\"create\" for a user-requested skill, then follow its applied or pending result." };
     }
     const live = skills.length
       ? skills.map((skill) => {
@@ -1583,7 +1605,9 @@ async function callTool(name: string, args: Json): Promise<{ text: string; isErr
       }),
     });
     const nameLabel = typeof r.name === "string" ? r.name : "the skill";
-    const warningText = Array.isArray(r.warnings) && r.warnings.length ? `\n\nScan warnings (shown to the user):\n- ${r.warnings.join("\n- ")}` : "";
+    const warningText = Array.isArray(r.warnings) && r.warnings.length ? `\n\nScan warnings:\n- ${r.warnings.join("\n- ")}` : "";
+    const completed = completedProposalResult(r, args.action === "update" ? `the update to skill “${nameLabel}”` : `the new skill “${nameLabel}”`);
+    if (completed) return { ...completed, text: completed.text + warningText };
     const status = args.action === "update"
       ? "The current version remains unchanged until the user reviews and applies the update."
       : "The skill is staged and inactive until the user reviews and enables it.";
