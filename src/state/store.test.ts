@@ -1704,6 +1704,63 @@ describe("bot settings section", () => {
     expect(next.botSettingsExpandAccordion).toBe(false);
   });
 
+  it.each(["identity", "model"] as const)("opens a bot's %s settings without leaving the team map or reading its conversations", (section) => {
+    const state = {
+      ...initialState,
+      activeView: "team-map" as const,
+      selectedId: "room",
+      bots: [{ ...bot, unread: true }],
+      groups: [{ id: "room", unread: true } as Group],
+    };
+    const next = reducer(state, { type: "toggleSettings", botId: bot.id, section });
+    expect(next.selectedId).toBe(bot.id);
+    expect(next.activeView).toBe("team-map");
+    expect(next.settingsOpen).toBe(true);
+    expect(next.botSettingsSection).toBe(section);
+    expect(next.botSettingsExpandAccordion).toBe(true);
+    expect(next.bots).toBe(state.bots);
+    expect(next.groups).toBe(state.groups);
+  });
+
+  it("switches an open settings panel to another bot without toggling it closed", () => {
+    const other = { ...bot, id: "other-bot" };
+    const state = {
+      ...initialState,
+      activeView: "team-map" as const,
+      selectedId: bot.id,
+      bots: [bot, other],
+      settingsOpen: true,
+      botSettingsSection: "soul" as const,
+      botSettingsExpandAccordion: true,
+    };
+    const next = reducer(state, { type: "toggleSettings", botId: other.id });
+    expect(next.selectedId).toBe(other.id);
+    expect(next.activeView).toBe("team-map");
+    expect(next.settingsOpen).toBe(true);
+    expect(next.botSettingsSection).toBe("overview");
+    expect(next.botSettingsExpandAccordion).toBe(false);
+
+    const model = reducer(next, { type: "toggleSettings", botId: bot.id, section: "model" });
+    expect(model.settingsOpen).toBe(true);
+    expect(model.botSettingsSection).toBe("model");
+    expect(model.botSettingsExpandAccordion).toBe(true);
+    expect(reducer(model, { type: "toggleSettings", botId: bot.id }).settingsOpen).toBe(true);
+    expect(reducer(model, { type: "toggleSettings", botId: bot.id, open: false }).settingsOpen).toBe(false);
+    expect(reducer(model, { type: "toggleSettings" }).settingsOpen).toBe(false);
+  });
+
+  it.each(["missing-bot", "hidden-bot", "room"])("ignores unavailable settings target %s", (botId) => {
+    const state = {
+      ...initialState,
+      activeView: "team-map" as const,
+      selectedId: bot.id,
+      bots: [bot, { ...bot, id: "hidden-bot", hidden: true }],
+      groups: [{ id: "room" } as Group],
+      settingsOpen: true,
+    };
+    expect(reducer(state, { type: "toggleSettings", botId, section: "identity" })).toBe(state);
+  });
+
   it("selecting a different bot resets botSettingsSection to overview", () => {
     // Add bot A and select it
     let state = reducer(initialState, {
