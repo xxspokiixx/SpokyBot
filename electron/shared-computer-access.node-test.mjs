@@ -177,6 +177,17 @@ test("a protected directory spelled in another Unicode normalization is still re
   await assert.rejects(run({ action: "write_file", path: `${decomposed}/planted.json`, content: "{}" }), /sharing settings/);
 });
 
+test("the picker refuses the home directory, anything above it, and volume roots", async t => {
+  const { dir } = await fixture(t);
+  const refuse = candidate => assert.rejects(validateSharedFolders([{ id: randomUUID(), path: candidate, write: true }]), /specific folders/, candidate);
+  await refuse(homedir());
+  await refuse(path.parse(dir).root);
+  for (const candidate of ["/Users", "/home", "/System/Volumes/Data", "/System/Volumes/Data/Users", "C:\\Users"]) {
+    try { if (!(await stat(candidate)).isDirectory()) continue; } catch { continue; } // absent on this platform
+    await refuse(candidate);
+  }
+});
+
 test("a specific nested folder is still shareable, readable and writable", async t => {
   const { dir } = await fixture(t);
   const nested = path.join(dir, "Projects", "notes");
