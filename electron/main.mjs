@@ -1383,6 +1383,9 @@ async function requireSharedComputers() {
 function sharingController() {
   computerSharing ??= createComputerSharing({
     file: path.join(app.getPath("userData"), "computer-sharing.json"),
+    // The harness server's data directory holds provider API keys and
+    // sessions.json, so a broad share must never reach it either.
+    protectedPaths: [desktopDataDir()],
     fetch: (...args) => session.defaultSession.fetch(...args),
     environments: () => environmentsState.environments,
     enabled: refreshSharedComputersAllowed,
