@@ -512,7 +512,9 @@ describe("list_threads", () => {
       const mine = await api("GET", "/api/internal/threads", undefined, token);
       expect(mine.status).toBe(200);
       const titles = mine.body.threads.map((row: { title: string; botName: string; own: boolean }) => `${row.own ? "own" : row.botName}:${row.title}`);
-      expect(titles).toContain("Quinn:QA: PR #77");
+      // coordinated work lands in Parker's standing conversation with Quinn,
+      // which the sidebar and this list name after the sender, not the brief
+      expect(titles).toContain("Quinn:@Parker");
       expect(titles.some((title: string) => title.startsWith("own:"))).toBe(true);
       expect(titles).not.toContain("Quinn:Quinn's own audit");
       // and Quinn, asking for itself, sees its own rows only — never Parker's
@@ -547,7 +549,7 @@ describe("close_thread", () => {
       token = await heldTurn(pm, "Close the completed QA task.");
       const closed = await close(opened.body.threadId);
       expect(closed.status).toBe(200);
-      expect(closed.body).toMatchObject({ closed: true, title: "QA: PR #78", botName: "Quinn" });
+      expect(closed.body).toMatchObject({ closed: true, title: "@Parker", botName: "Quinn" });
       expect((await messages(opened.body.threadId)).some((message) => message.tool?.name === "Closed by @Parker")).toBe(true);
       // the close is stamped on the task — that is what the sidebar folds on — and list_threads says closed
       expect((await taskOf(qa.id, opened.body.threadId)).closedBy).toMatchObject({ botId: pm.id, name: "Parker" });

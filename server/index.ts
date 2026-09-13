@@ -2442,6 +2442,20 @@ const roomHandoffs = new RoomHandoffs(join(DATA_DIR, "room-handoffs.json"), {
       const source = store.bot(parent.botId);
       if (source) markTaskContextExternallyUpdated(source, parent.threadId);
     }
+    // A work thread exists only because the pair conversation was busy with
+    // another job. Its result is now in the sender's conversation, so it
+    // closes itself exactly as close_thread would — folded out of the
+    // sidebar, never deleted, and open again the moment anyone speaks
+    // there. A finished job tidies up after itself; a failed or withheld
+    // one stays in the sidebar where the person can see it. The pair
+    // conversation is the standing line between two bots and never
+    // auto-closes.
+    const childTask = store.taskByThread(child.botId, child.threadId);
+    if (!child.groupId && child.status === "completed" && !problem && !childTask?.closedBy
+      && childTask?.openedBy?.kind === "work" && childTask.openedBy.botId === parent.botId) {
+      store.setTaskClosedBy(child.botId, child.threadId,
+        { botId: parent.botId, name: store.bot(parent.botId)?.name ?? childTask.openedBy.name, at: Date.now() });
+    }
   },
   run: async (node, resumed, signal) => {
     const group = node.groupId ? store.group(node.groupId) : undefined;
@@ -10713,7 +10727,7 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
           })).filter(g => g.members.length);
           return json(res, 200, { currentRoom: source ? { id: source.id, name: source.name, workingFolder: source.cwd || null } : null,
             bots: reachablePeers(store.bots, internalSender).map(bot => ({ id: bot.id, name: bot.name, title: bot.title, section: bot.section, busy: bot.busy })),
-            rooms, note: "Without group_id: use this room when in a room, otherwise a new separate recipient task. Each bot uses its own environment and permissions. Files are not transferred: pass absolute paths only when accessible to the recipient, otherwise pass the content." });
+            rooms, note: "Without group_id: use this room when in a room, otherwise your standing conversation with that teammate — every assignment you send it continues the same thread, so write as if it remembers the last one. Each bot uses its own environment and permissions. Files are not transferred: pass absolute paths only when accessible to the recipient, otherwise pass the content." });
         }
         if (method === "POST" && path === "/api/internal/coordinate-bots") {
           const parsed = z.object({
@@ -10721,8 +10735,11 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
             botIds: z.array(z.string().min(1).max(128)).min(1).max(4).refine(ids => new Set(ids).size === ids.length),
             message: z.string().trim().min(1).max(4000), requestKey: z.string().regex(/^[\w-]{1,100}$/),
             rework: z.boolean().default(false),
+            // Only ever a name for a thread, so it travels under the same
+            // one-line rule as a peer thread title.
+            label: z.string().trim().min(1).max(60).refine(fitsOnOneLine).optional(),
           }).safeParse(await readInternalBody());
-          if (!parsed.success) return json(res, 400, { error: "Provide 1-4 distinct botIds, message (1-4000 characters) and a short requestKey (letters, digits, underscores or hyphens)." });
+          if (!parsed.success) return json(res, 400, { error: "Provide 1-4 distinct botIds, message (1-4000 characters), a short requestKey (letters, digits, underscores or hyphens) and an optional one-line label of at most 60 characters." });
           const groupId = parsed.data.groupId ?? source?.id;
           const destination = groupId ? store.group(groupId) : undefined;
           if (groupId && !destination) return json(res, 404, { error: "No such room; use list_room_targets." });
@@ -10748,18 +10765,29 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
             try {
               requireActiveInternalCapability();
               if (!destination) {
-                const existing = roomHandoffs.children(internalCapability.roomHandoffId ?? internalCapability.generation)
-                  .find(node => node.key === parsed.data.requestKey + ":" + target.botId);
-                if (existing) target.threadId = existing.threadId;
-                else {
-                  const task = store.createTask(target.botId, parsed.data.message, false, undefined,
-                    { botId: internalSender.id, name: internalSender.name, at: Date.now() });
-                  if (!task) throw new Error("The recipient no longer exists");
-                  target.threadId = createdThread = task.threadId;
-                }
+                // One durable conversation per pair of bots, resolved from
+                // the recipient's own threads — never from this turn, the
+                // request key, or the thread the person has selected there.
+                const resolved = store.resolvePairConversation(internalSender, target.botId, {
+                  label: parsed.data.label,
+                  // "Still working" exactly as close_thread reads it: a
+                  // running turn, a queued one, or coordinated work already
+                  // addressed at that thread.
+                  working: threadId => threadBusy(target.botId, threadId)
+                    || queuedThreadPosition(target.botId, threadId) !== null
+                    || roomHandoffs.activeDirect(threadId),
+                });
+                if (!resolved) throw new Error("The recipient no longer exists");
+                target.threadId = resolved.task.threadId;
+                if (resolved.created) createdThread = resolved.task.threadId;
               }
               const { node, duplicate } = roomHandoffs.enqueue(address, internalCapability.generation, internalCapability.roomHandoffId,
                 target, parsed.data.requestKey + ":" + target.botId, parsed.data.message, approvalGranted, parsed.data.rework, [...store.messagesFor(address.threadId)].reverse().find(m => m.role === "user" && m.kind === "text")?.text ?? "");
+              // A re-dispatched request_key is answered by the request it
+              // already made, so a thread resolved for the retry (the pair
+              // conversation was busy with that very request) goes back
+              // before anyone sees a row that leads nowhere.
+              if (duplicate && createdThread && createdThread !== node.threadId) store.deleteTask(target.botId, createdThread);
               createdThread = undefined; // The durable coordinator now owns this task.
               accepted.push({ requestId: node.id, botId: node.botId, duplicate, status: node.status });
               if (!duplicate) {

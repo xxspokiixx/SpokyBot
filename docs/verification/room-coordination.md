@@ -8,8 +8,8 @@ handoff loop inside those turns.
 
 The tools are `list_room_targets` and `coordinate_bots`. Discovery includes
 reachable bots as well as rooms. The latter addresses 1–4 existing bots in this
-room (default), another allowed room, or separate recipient tasks when used in
-ordinary direct chat without a room. A Chief can reach additional teams only
+room (default), or — in ordinary direct chat without a room — the sender's one
+standing conversation with each recipient. A Chief can reach additional teams only
 after the owner grants that access in [team settings](team-access.md).
 Recipients run sequentially per room, with their own models, permissions and
 working environments. Busy recipients queue. Once all requested results arrive,
@@ -17,6 +17,17 @@ the sender resumes in the original conversation. A lead can consult its own
 specialists; it never inherits the parent Chief's cross-team access or permissions.
 Advice is not a verification
 receipt: the lead must ask the reviewer to run the requested checks.
+
+Outside a room there is exactly one conversation per pair of bots, titled after
+the sender (“@Clive”), reused by every later assignment from that sender so the
+recipient still has the earlier context, and never closed automatically. A
+recipient still carrying one thread per assignment from an older version has its
+most recently active one adopted as that conversation rather than gaining
+another row; nothing is deleted or closed. A second assignment that arrives
+while the first is still running gets its own thread beside it, named by the
+optional `label` (otherwise “@Clive · parallel work”), and that thread closes
+itself once its result has been reported. `request_key` is only a within-turn
+idempotency token; it never selects a conversation.
 
 The chat shows an avatar and “Sent to Eli · Delivery”; clicking opens the
 receiving conversation. Same-room receipts have no unnecessary navigation.
@@ -69,10 +80,12 @@ approvals and validation. Multiple required approvals are presented together;
 no recipient starts until all are allowed. It does not claim model judgment or artifact correctness.
 The direct-chat suite exercises Clive → lead → specialist → lead → Clive with
 the real MCP proxy, no room, and no changes to unrelated conversations. It also
-checks recipient model/permission defaults, idempotency without extra tasks,
-busy queues, pinned parent selection, steering a live coordination (including
-an automation turn landing in the same conversation), conversation-scoped Stop,
-source deletion, access revocation, and fresh transcript replay after
+checks one conversation per bot pair across separate user turns, its title,
+labelled concurrent work that closes itself, recipient model/permission
+defaults, idempotency without extra tasks, busy queues, pinned parent
+selection, steering a live coordination (including an automation turn
+landing in the same conversation), conversation-scoped Stop, source
+deletion, access revocation, and fresh transcript replay after
 revocation. The UI test sends from the real
 composer and clicks the existing handoff receipt into the exact recipient task,
 with ordinary tool chips hidden. Screenshots and JSON are retained beside the

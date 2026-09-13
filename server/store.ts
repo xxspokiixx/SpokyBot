@@ -309,6 +309,15 @@ export interface TaskOpenedBy {
   /** the ledger id the opener tracks the thread's result under (peer
    * threads only — a thread a bot opens on itself has no handoff) */
   delegationId?: string;
+  /** What kind of conversation the opener made this. "pair" is the one
+   * durable conversation between those two bots — every later message
+   * from that sender lands there, and it never auto-closes. "work" is the
+   * exception it makes room for: a job that arrived while the pair
+   * conversation was still busy, which closes itself once its result has
+   * been reported. Absent on every thread opened before the distinction
+   * existed (and on a start_thread handoff), so old records parse and read
+   * exactly as they did. */
+  kind?: "pair" | "work";
   at: number;
 }
 
@@ -569,6 +578,15 @@ export type StoreChange =
 /** What a task is called before its first message names it. */
 export const UNTITLED_TASK = "New task";
 export const UNTITLED_THREAD = "New thread";
+
+/** How a thread title is stored: one trim, one cut. Every title arrives
+ * through this — the name a bot passes to createTask and the name a person
+ * types in the sidebar alike — which is what makes "is this title still
+ * the one the machine made?" a question you can answer by comparing. */
+const TASK_TITLE_MAX = 80;
+export function threadTitleFrom(title?: string): string {
+  return title?.trim().slice(0, TASK_TITLE_MAX) || UNTITLED_THREAD;
+}
 
 /** A task's name, taken from the first thing you asked it to do. */
 export function titleFromMessage(text: string): string {
@@ -2257,7 +2275,7 @@ export class Store {
     if (projectId !== undefined && !this.project(botId, projectId)) return null;
     const task: TaskRecord = {
       threadId: newId(),
-      title: title?.trim().slice(0, 80) || UNTITLED_THREAD,
+      title: threadTitleFrom(title),
       createdAt: Date.now(),
       ...(projectId ? { projectId } : {}),
       ...(openedBy ? { openedBy: structuredClone(openedBy) } : {}),
@@ -2306,6 +2324,92 @@ export class Store {
     this.saveBots();
     this.emit({ type: "bot", botId });
     return task;
+  }
+
+  /** Where a bot-to-bot send outside a room lands: the PAIR CONVERSATION
+   * for (sender, recipient) — the recipient's task stamped `openedBy` this
+   * sender with kind "pair".
+   *
+   * Its scope is global for those two bots: deliberately not per source
+   * thread and not per assignment, so a teammate you work with all day is
+   * one readable row in the recipient's sidebar that remembers what was
+   * asked last time, instead of one row per message. Nothing about the
+   * caller's current turn takes part in choosing it — no dispatch
+   * generation, no request key — and never the recipient's selected
+   * thread, which belongs to the person.
+   *
+   * Two things bend that rule, both deliberately:
+   *
+   *   adoption — a recipient still carrying threads this sender opened
+   *   before pair conversations existed (one per assignment, each titled
+   *   with a sliced brief) has its most recently active one stamped as the
+   *   pair conversation instead of gaining yet another row, so the sprawl
+   *   stops on upgrade day. Nothing is deleted or closed. A start_thread
+   *   handoff is left alone: the sender named that job itself and tracks
+   *   it by its own delegation id.
+   *
+   *   concurrency — a second assignment arriving while the pair
+   *   conversation is still working (`working`, which the caller answers
+   *   from live turn state) gets its own work thread, so two jobs never
+   *   interleave in one transcript. `label` names that thread; the caller
+   *   closes it once its result has been reported. A pair conversation
+   *   never auto-closes. */
+  resolvePairConversation(
+    sender: Pick<BotRecord, "id" | "name">,
+    recipientId: string,
+    options: { label?: string; working: (threadId: string) => boolean },
+  ): { task: TaskRecord; created: boolean } | null {
+    if (!this.bot(recipientId)) return null;
+    const title = `@${sender.name}`;
+    const opener = (kind: "pair" | "work", at = Date.now()): TaskOpenedBy => ({ botId: sender.id, name: sender.name, kind, at });
+    const fromSender = this.tasks(recipientId).filter((task) => task.openedBy?.botId === sender.id);
+    let pair = fromSender.find((task) => task.openedBy?.kind === "pair");
+    if (!pair) {
+      const lastActivity = (task: TaskRecord) =>
+        this.messagesTail(task.threadId, 1).messages.at(-1)?.at ?? task.openedBy?.at ?? task.createdAt;
+      const adopted = fromSender
+        .filter((task) => !task.openedBy?.kind && !task.openedBy?.delegationId && !task.closedBy)
+        .sort((a, b) => lastActivity(b) - lastActivity(a))[0];
+      if (adopted) {
+        // Keep the hour it was really opened: list_threads and the sidebar
+        // order by it, and adoption is not a new conversation.
+        this.setTaskOpenedBy(recipientId, adopted.threadId, opener("pair", adopted.openedBy?.at ?? adopted.createdAt));
+        // The title changes only when nobody typed it. The rule: rename it
+        // when it still equals what createTask made of the assignment that
+        // opened the thread — and that assignment is still the thread's
+        // first message, "@Recipient <brief>" — so the comparison is
+        // threadTitleFrom(that brief). Anything else is a name a person
+        // chose, and a thread with no request to read (its handoff never
+        // ran) cannot be checked, so both keep the title they have.
+        if (adopted.title === this.openingRequestTitle(recipientId, adopted.threadId)) {
+          this.renameTask(recipientId, adopted.threadId, title);
+        }
+        pair = adopted;
+      }
+    }
+    if (pair && !options.working(pair.threadId)) {
+      // A conversation the sender closed after reading a result is picked
+      // back up, never replaced: closing is only the sidebar's idle state.
+      if (pair.closedBy) this.setTaskClosedBy(recipientId, pair.threadId, null);
+      return { task: pair, created: false };
+    }
+    // The brief is never a title. An 80-character slice of an assignment
+    // is the row nobody can read, and a durable conversation outlives the
+    // one brief that opened it.
+    const task = this.createTask(recipientId, pair ? `${title} · ${options.label || "parallel work"}` : title,
+      false, undefined, opener(pair ? "work" : "pair"));
+    return task ? { task, created: true } : null;
+  }
+
+  /** The title a peer-opened thread was born with: what createTask made of
+   * the request that opened it, which is still the first message in it,
+   * addressed "@Recipient <brief>". null when there is no such message to
+   * read — an unrun handoff proves nothing about who named the row. */
+  private openingRequestTitle(recipientId: string, threadId: string): string | null {
+    const first = this.messagesFor(threadId)[0]?.text?.trim();
+    if (!first) return null;
+    const addressed = `@${this.bot(recipientId)?.name ?? ""} `;
+    return threadTitleFrom(first.startsWith(addressed) ? first.slice(addressed.length) : first);
   }
 
   switchTask(botId: string, threadId: string): BotRecord | null {

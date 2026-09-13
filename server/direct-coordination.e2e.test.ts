@@ -188,6 +188,84 @@ it("uses recipient bot defaults for its new task, never the sender's or its sele
   expect(f.evidence().filter((turn: any) => turn.botId === f.lead.id).every((turn: any) => turn.model === f.lead.modelSelection.model && turn.permissionMode === "default")).toBe(true);
 }), 45_000);
 
+it("keeps one conversation per bot pair across separate user turns, titled for the sender", () => fixture(async f => {
+  f.plan[f.lead.id] = { turns: [{ reply: "Export implemented" }, { reply: "Header row added" }, { reply: "Write-up published" }] };
+  f.plan[f.chief.id] = { turns: [
+    { steps: [{ arguments: { bot_ids: [f.lead.id], request_key: "build", message: "Implement the CSV export" } }], reply: "Assigned the build" },
+    { reply: "The export is implemented" },
+    { steps: [{ arguments: { bot_ids: [f.lead.id], request_key: "header", message: "Add the header row to that export" } }], reply: "Assigned the header row" },
+    { reply: "The header row is in" },
+    { steps: [{ arguments: { bot_ids: [f.lead.id], request_key: "docs", message: "Document the export you just built" } }], reply: "Assigned the write-up" },
+    { reply: "It is documented" },
+  ] };
+  f.save();
+  const send = async (text: string) => {
+    await f.cli("send", "--bot", f.chief.id, "--task", f.chief.activeTaskId, "--text", text);
+    expect((await f.wait()).status).toBe("settled");
+  };
+  const leadTasks = async () => (await f.api("/api/bots")).bots.find((bot: any) => bot.id === f.lead.id).tasks;
+  await send("Ask Engineering to build the CSV export.");
+  const opened = (await leadTasks()).filter((task: any) => task.threadId !== f.lead.activeTaskId);
+  expect(opened).toHaveLength(1);
+  const pair = opened[0];
+  // the sender's name, not an 80-character slice of the brief
+  expect(pair.title).toBe("@Clive");
+  expect(pair.openedBy).toMatchObject({ botId: f.chief.id, name: "Clive", kind: "pair" });
+  await send("Now ask them to add the header row.");
+  await send("Now ask them to document it.");
+  // three assignments, three user turns, one conversation
+  expect(await leadTasks()).toHaveLength(2);
+  expect(f.nodes().filter((node: any) => node.botId === f.lead.id).map((node: any) => node.threadId))
+    .toEqual([pair.threadId, pair.threadId, pair.threadId]);
+  const transcript = (await f.messages(pair.threadId)).map((message: any) => message.text).filter(Boolean).join("\n");
+  for (const brief of ["Implement the CSV export", "Add the header row to that export", "Document the export you just built"]) {
+    expect(transcript).toContain(brief);
+  }
+  // a pair conversation is the standing line between two bots: it never
+  // auto-closes, and every receipt in the sender's chat points at it
+  expect((await leadTasks()).find((task: any) => task.threadId === pair.threadId)).not.toHaveProperty("closedBy");
+  expect((await f.messages(f.chief.activeTaskId)).filter((message: any) => message.threadRef?.threadId === pair.threadId)).toHaveLength(6);
+}), 90_000);
+
+it("gives a second simultaneous assignment its own labelled thread, which closes once its result is reported", () => fixture(async f => {
+  f.plan[f.lead.id] = { turns: [{ reply: "Export implemented" }, { reply: "Benchmark finished" }] };
+  f.plan[f.chief.id] = { steps: [
+    { arguments: { bot_ids: [f.lead.id], request_key: "build", message: "Implement the CSV export" } },
+    { arguments: { bot_ids: [f.lead.id], request_key: "bench", message: "Benchmark the exporter on the large fixture", label: "Benchmark" } },
+  ], reply: "Both assignments are out", resumeReply: "Both came back" };
+  await f.start();
+  expect((await f.wait()).status).toBe("settled");
+  const tasks = (await f.api("/api/bots")).bots.find((bot: any) => bot.id === f.lead.id).tasks;
+  expect(tasks).toHaveLength(3);
+  const pair = tasks.find((task: any) => task.openedBy?.kind === "pair");
+  const work = tasks.find((task: any) => task.openedBy?.kind === "work");
+  expect(pair.title).toBe("@Clive");
+  expect(work.title).toBe("@Clive · Benchmark");
+  // the two jobs never share a transcript
+  const threads = f.nodes().filter((node: any) => node.botId === f.lead.id).map((node: any) => node.threadId);
+  expect(new Set(threads)).toEqual(new Set([pair.threadId, work.threadId]));
+  expect((await f.messages(pair.threadId)).some((message: any) => message.text?.includes("Implement the CSV export"))).toBe(true);
+  expect((await f.messages(work.threadId)).some((message: any) => message.text?.includes("Benchmark the exporter"))).toBe(true);
+  expect((await f.messages(pair.threadId)).some((message: any) => message.text?.includes("Benchmark the exporter"))).toBe(false);
+  // scaffolding tidies up after itself; the standing conversation stays
+  expect(work.closedBy).toMatchObject({ botId: f.chief.id, name: "Clive" });
+  expect(pair).not.toHaveProperty("closedBy");
+}), 60_000);
+
+it("refuses a reused request_key for different work and leaves no thread behind", () => fixture(async f => {
+  f.plan[f.lead.id] = { reply: "Export implemented" };
+  f.plan[f.chief.id] = { steps: [
+    { arguments: { bot_ids: [f.lead.id], request_key: "build", message: "Implement the CSV export" } },
+    { arguments: { bot_ids: [f.lead.id], request_key: "build", message: "Something else entirely" }, expectError: true },
+  ], reply: "One assignment is out", resumeReply: "It came back" };
+  await f.start();
+  expect((await f.wait()).status).toBe("settled");
+  const refused = f.evidence()[0].evidence.find((entry: any) => entry.step?.arguments?.message === "Something else entirely");
+  expect(JSON.stringify(refused.response)).toContain("request_key was already used for different work");
+  expect((await f.api("/api/bots")).bots.find((bot: any) => bot.id === f.lead.id).tasks).toHaveLength(2);
+  expect(f.nodes().filter((node: any) => node.botId === f.lead.id)).toHaveLength(1);
+}), 45_000);
+
 it("deduplicates a repeated direct request without creating extra recipient tasks", () => fixture(async f => {
   f.plan[f.chief.id].steps.push(structuredClone(f.plan[f.chief.id].steps[0]));
   await f.start(); expect((await f.wait()).status).toBe("settled");
