@@ -23,7 +23,7 @@ export async function validateSharedFolders(folders) {
 
 /** Outbound HTTPS only; no local listening port and no host credentials in
  * the renderer. Pairing cookies and a connector secret remain in Electron. */
-export function createComputerSharing({ file, fetch: fetchImpl, environments, cuaConnection, hostControl }) {
+export function createComputerSharing({ file, fetch: fetchImpl, environments, cuaConnection, hostControl, enabled = async () => false }) {
   let records = {};
   try {
     const parsed = JSON.parse(fs.readFileSync(file, "utf8"));
@@ -33,6 +33,16 @@ export function createComputerSharing({ file, fetch: fetchImpl, environments, cu
   const status = new Map();
   let disposed = false;
   let executing = false;
+  // The remote workspace's capability is not authority over this desktop.
+  // Recheck the local feature gate even for persisted grants and live jobs.
+  const requireEnabled = async () => {
+    const allowed = !disposed && await enabled().catch(() => false);
+    if (allowed && !disposed) return;
+    disposed = true;
+    for (const env of environments()) if (running.has(env.id) && status.get(env.id)?.connected) disconnect(env, records[env.id]);
+    for (const id of running.keys()) stop(id);
+    throw new Error("Computer sharing is turned off on this computer. Restart the desktop after enabling it.");
+  };
   const store = next => {
     fs.mkdirSync(path.dirname(file), { recursive: true });
     const temporary = `${file}.tmp`;
@@ -59,7 +69,9 @@ export function createComputerSharing({ file, fetch: fetchImpl, environments, cu
     return json;
   };
   const identity = async env => {
+    await requireEnabled();
     const [auth, descriptor] = await Promise.all([request(env, "/api/auth/session"), request(env, "/.well-known/openmausbot/environment")]);
+    await requireEnabled();
     if (auth.kind !== "session" || !uuid(auth.id) || !uuid(descriptor.environmentId)) throw new Error("Complete workspace pairing or sign-in first");
     if (descriptor.capabilities?.sharedComputers !== true) throw new Error("Update this server to enable computer sharing");
     return { sessionId: auth.id, environmentId: descriptor.environmentId };
@@ -83,6 +95,7 @@ export function createComputerSharing({ file, fetch: fetchImpl, environments, cu
           if (!matches(grant, await identity(env))) throw new Error("Workspace sign-in changed. Review computer access again in Settings.");
           await validateSharedFolders(grant.folders);
           const effectiveGrant = { ...grant, protectedPaths: [await fsp.realpath(path.dirname(file))] };
+          await requireEnabled();
           await request(env, "/api/shared-computers/connect", {
             id: grant.id, name: os.hostname().slice(0, 120), environmentId: grant.environmentId,
             folders: grant.folders.map(({ id, name, write }) => ({ id, name, write })), terminal: grant.terminal, computer: grant.computer,
@@ -90,7 +103,9 @@ export function createComputerSharing({ file, fetch: fetchImpl, environments, cu
           if (signal.aborted) break;
           status.set(env.id, { connected: true });
           while (!signal.aborted) {
+            await requireEnabled();
             const { job } = await call("poll");
+            await requireEnabled();
             if (!job) continue;
             if (!uuid(job.id) || typeof job.operation !== "object" || job.operation?.computer_id !== grant.id) throw new Error("Invalid computer request");
             if (executing) { await call("result", { jobId: job.id, result: sharedComputerError(new Error("This computer is busy with another workspace")) }); continue; }
@@ -103,6 +118,7 @@ export function createComputerSharing({ file, fetch: fetchImpl, environments, cu
               if (leasing) return;
               leasing = true;
               try {
+                await requireEnabled();
                 if (!(await call("lease", { jobId: job.id })).active) jobAbort.abort();
                 await control?.renew();
               } catch { jobAbort.abort(); }
@@ -159,6 +175,7 @@ export function createComputerSharing({ file, fetch: fetchImpl, environments, cu
       const fresh = await identity(env);
       if (!matches(info, fresh)) throw new Error("Workspace sign-in changed. Review computer access again.");
       const folders = await validateSharedFolders(input.folders);
+      await requireEnabled();
       const grant = { ...fresh, id: randomUUID(), secret: randomBytes(32).toString("hex"), enabled: true, folders, terminal: input.terminal === true, computer: input.computer === true };
       if (!folders.length && !grant.terminal && !grant.computer) throw new Error("Choose at least one folder or capability to share");
       disconnect(env, records[env.id]);

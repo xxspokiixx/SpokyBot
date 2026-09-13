@@ -20,10 +20,29 @@ const payload = result => JSON.parse(result.content[0].text);
 test("legacy insecure saved addresses never receive sharing credentials", async t => {
   const { dir } = await fixture(t);
   let calls = 0;
-  const sharing = createComputerSharing({ file: path.join(dir, "profile", "sharing.json"), environments: () => [], cuaConnection: async () => null, fetch: async () => { calls++; throw new Error("unexpected network"); } });
+  const sharing = createComputerSharing({ file: path.join(dir, "profile", "sharing.json"), environments: () => [], enabled: async () => true, cuaConnection: async () => null, fetch: async () => { calls++; throw new Error("unexpected network"); } });
   t.after(() => sharing.close());
   await assert.rejects(sharing.observe({ id: "old", origin: "http://old-server.example", name: "Legacy" }), /HTTPS/);
   assert.equal(calls, 0);
+});
+
+test("saved grants and stale consent cannot bypass a disabled or unavailable local gate", async t => {
+  const { dir, folder } = await fixture(t);
+  const env = { id: "saved", origin: "https://workspace.fixture.example", name: "Saved" };
+  const info = { sessionId: randomUUID(), environmentId: randomUUID() };
+  const file = path.join(dir, "sharing.json");
+  await writeFile(file, JSON.stringify({ version: 1, records: { [env.id]: { ...info, id: randomUUID(), secret: "a".repeat(64), enabled: true, folders: [folder], terminal: false, computer: false } } }));
+  const original = await readFile(file, "utf8");
+  for (const enabled of [undefined, async () => false, async () => { throw new Error("local server unavailable"); }]) {
+    let calls = 0;
+    const sharing = createComputerSharing({ file, environments: () => [env], enabled, cuaConnection: async () => null, fetch: async () => { calls++; throw new Error("must not contact remote"); } });
+    t.after(() => sharing.close());
+    sharing.start();
+    await assert.rejects(sharing.save(env, { folders: [folder], terminal: false, computer: false }, info), /turned off/);
+    assert.equal(calls, 0);
+    assert.equal(await readFile(file, "utf8"), original, "disabled consent cannot replace the stored grant");
+    assert.notEqual(sharing.state(env.id).connected, true);
+  }
 });
 
 test("selected folders are read-only; writes require an explicit grant and fresh hash", async t => {

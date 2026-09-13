@@ -9690,6 +9690,7 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
     if (method === "POST" && path === "/api/desktop/shared-computer-control" && sharedComputersEnabled(cfg)) {
       if (auth.kind !== "loopback") return json(res, 403, { error: "Local desktop only" });
       const body = await readBody(req, 1024);
+      if (!sharedComputersEnabled(cfg)) return json(res, 404, { error: `no route: ${method} ${path}` });
       if (!z.string().uuid().safeParse(body?.id).success || !["acquire", "release"].includes(body?.action)) return json(res, 400, { error: "Invalid computer lease" });
       if (body.action === "release") sharedComputerControl.release(body.id);
       else sharedComputerControl.acquire(body.id);
@@ -9704,6 +9705,7 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
       if (auth.kind !== "session") return json(res, 403, { error: "Pair this desktop first" });
       if (!/^application\/json\b/i.test(String(req.headers["content-type"] ?? ""))) return json(res, 415, { error: "JSON required" });
       const body = await readBody(req, 4_000_000);
+      if (!sharedComputersEnabled(cfg)) return json(res, 404, { error: `no route: ${method} ${path}` });
       if (!sessions.isLive(auth.session.id)) return json(res, 401, { error: "Session ended" });
       const secret = String(req.headers["x-omb-computer-secret"] ?? "");
       if (path === "/api/shared-computers/connect") {
@@ -9883,8 +9885,9 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
       if (method === "GET" && path === "/api/internal/shared-computers" && sharedComputersEnabled(cfg)) return json(res, 200, { computers: sharedComputers.list() });
       if (method === "POST" && path === "/api/internal/shared-computers" && sharedComputersEnabled(cfg)) {
         const parsed = sharedComputerOperation.safeParse(await readInternalBody());
+        if (!sharedComputersEnabled(cfg)) return json(res, 404, { error: "unknown internal endpoint" });
         if (!parsed.success) return json(res, 400, { error: "Invalid shared computer operation" });
-        return json(res, 200, { result: await sharedComputers.request(parsed.data, () => internalCapabilityIsActive(internalCapability)) });
+        return json(res, 200, { result: await sharedComputers.request(parsed.data, () => sharedComputersEnabled(cfg) && internalCapabilityIsActive(internalCapability)) });
       }
       if (method === "GET" && path === "/api/internal/agents") {
         const sender = internalSender;
@@ -15475,6 +15478,10 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
       }
       let browserReferenceCleanupError: unknown = null;
       if (patch.signIn !== undefined) sessions.revalidateEmailSessions();
+      if (!sharedComputersEnabled(cfg)) {
+        sharedComputers.close();
+        sharedComputerControl.close();
+      }
       if (disablingBuiltInBrowser) browserLive.closeAll();
       for (const request of browserCleanupRequests) {
         if (request.kind === "profile") browserLive.closeForSession(browserSessionId("", request.partitionId));

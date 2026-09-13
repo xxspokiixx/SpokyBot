@@ -1385,6 +1385,7 @@ function sharingController() {
     file: path.join(app.getPath("userData"), "computer-sharing.json"),
     fetch: (...args) => session.defaultSession.fetch(...args),
     environments: () => environmentsState.environments,
+    enabled: refreshSharedComputersAllowed,
     cuaConnection: () => cuaReady,
     hostControl: async (id, signal) => {
       const lease = async action => {
