@@ -41,6 +41,16 @@ describe("desktop capabilities", () => {
     });
   });
 
+  it("reports the renderer-caption window chrome on Windows", () => {
+    const capabilities = desktopCapabilities({
+      platform: "win32",
+      env: { DISPLAY: ":0" },
+      localConnection: { mode: "embedded" },
+    });
+
+    expect(capabilities.windowChrome).toBe("win-caption");
+  });
+
   it("offers Windows local control once the driver is connected", () => {
     const capabilities = desktopCapabilities({
       platform: "win32",

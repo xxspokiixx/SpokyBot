@@ -16,7 +16,7 @@ const __APP_VERSION__: string;
       session: "x11" | "wayland" | "headless" | "unknown";
       packaged: boolean;
     };
-    windowChrome: "mac-inset" | "native";
+    windowChrome: "mac-inset" | "win-caption" | "native";
     screenPreview: {
       available: boolean;
       interaction: "direct" | "portal-picker" | "none";
@@ -175,6 +175,15 @@ const __APP_VERSION__: string;
       openExternal?(url: string): Promise<boolean>;
       /** Recolor the native window chrome for a skin; absent on older builds. */
       applySkin?(skin: string): Promise<boolean>;
+      /** The renderer-drawn Windows caption buttons; absent outside the
+       * frameless Windows shell (macOS/Linux/browser keep native chrome). */
+      windowControls?: {
+        minimize(): Promise<boolean>;
+        toggleMaximize(): Promise<boolean>;
+        close(): Promise<boolean>;
+        state(): Promise<{ maximized: boolean }>;
+        onMaximizedChanged(cb: (maximized: boolean) => void): () => void;
+      };
       /** Receives a GitHub package URL opened through openmausbot://install. */
       onPackageInstall?(cb: (url: string) => void): () => void;
       /** The desktop shell's app-menu Preferences… item was activated; open

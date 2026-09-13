@@ -2071,5 +2071,9 @@
   "canvas.fitHint": "Fit teams to view (0)",
   "canvas.moving": "Moving {name}…",
   "canvas.moved": "Moved {name} to {team}.",
-  "canvas.handoffs": "Agent handoffs"
+  "canvas.handoffs": "Agent handoffs",
+  "window.minimize": "Minimize",
+  "window.maximize": "Maximize",
+  "window.restore": "Restore",
+  "window.close": "Close"
 }
