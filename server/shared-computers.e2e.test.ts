@@ -42,6 +42,11 @@ const data = (result: any) => JSON.parse(result.content[0].text);
 
 beforeAll(async () => {
   fixture = await launchVerificationServer({ FAKE_CLAUDE_MODE: "hang" });
+  // Computer sharing ships off (features.sharedComputers, config.ts). Turn it
+  // on for this fixture before anything is paired or dispatched: the routes,
+  // the advertised capability and the agent tools all read the same gate, and
+  // the agent process is handed its copy when its turn starts.
+  expect((await api("PATCH", "/api/config", { features: { sharedComputers: true } })).status).toBe(200);
   env = { id: "hosted-fixture", name: "Hosted fixture", origin: fixture.info.url };
   const local = join(fixture.info.dataDir, "shared-folder"); mkdirSync(local);
   folder = { id: randomUUID(), name: "Shared fixture", path: realpathSync(local), write: false };
