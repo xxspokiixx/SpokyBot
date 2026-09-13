@@ -23,7 +23,11 @@ export async function validateSharedFolders(folders) {
 
 /** Outbound HTTPS only; no local listening port and no host credentials in
  * the renderer. Pairing cookies and a connector secret remain in Electron. */
-export function createComputerSharing({ file, fetch: fetchImpl, environments, cuaConnection, hostControl }) {
+export function createComputerSharing({ file, fetch: fetchImpl, environments, cuaConnection, hostControl, protectedPaths = [] }) {
+  // The grant store's own directory plus whatever the desktop shell names —
+  // the server data directory holds provider API keys and sessions.json. This
+  // module never imports electron, so those roots arrive from the caller.
+  const protectedRoots = [path.dirname(file), ...protectedPaths.filter(entry => typeof entry === "string" && entry)];
   let records = {};
   try {
     const parsed = JSON.parse(fs.readFileSync(file, "utf8"));
@@ -82,7 +86,7 @@ export function createComputerSharing({ file, fetch: fetchImpl, environments, cu
         try {
           if (!matches(grant, await identity(env))) throw new Error("Workspace sign-in changed. Review computer access again in Settings.");
           await validateSharedFolders(grant.folders);
-          const effectiveGrant = { ...grant, protectedPaths: [await fsp.realpath(path.dirname(file))] };
+          const effectiveGrant = { ...grant, protectedPaths: protectedRoots };
           await request(env, "/api/shared-computers/connect", {
             id: grant.id, name: os.hostname().slice(0, 120), environmentId: grant.environmentId,
             folders: grant.folders.map(({ id, name, write }) => ({ id, name, write })), terminal: grant.terminal, computer: grant.computer,
