@@ -166,6 +166,14 @@ test("Windows terminal preserves command syntax, pipeline output and exit status
   assert.equal((await run("cmd.exe /c exit 7")).exitCode, 1);
   assert.equal((await run("Write-Error 'fixture-nonterminating'")).exitCode, 1);
   assert.equal((await run("Write-Error 'fixture-recovered'; 'after'")).exitCode, 0);
+  const blocks = await run("begin { 'fixture-begin' } end { 'fixture-end' }");
+  assert.equal(blocks.exitCode, 0); assert.match(blocks.output, /fixture-begin\s+fixture-end/);
+  const returned = await run("return 'fixture-return'; throw 'must-not-run'");
+  assert.equal(returned.exitCode, 0); assert.match(returned.output, /fixture-return/);
+  const paths = await run("[Console]::WriteLine($env:PSModulePath)");
+  assert.equal(paths.exitCode, 0);
+  assert.ok(paths.output.trim().startsWith(path.join(process.env.SystemRoot, "System32", "WindowsPowerShell", "v1.0", "Modules")), "built-in modules must be first");
+  assert.ok(paths.output.includes(path.join(process.env.ProgramFiles, "WindowsPowerShell", "Modules")), "installed modules must remain available");
   const failed = await run("throw 'fixture-command-failed'");
   assert.notEqual(failed.exitCode, 0); assert.match(failed.output, /fixture-command-failed/);
 });

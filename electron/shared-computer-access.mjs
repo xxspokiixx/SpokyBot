@@ -91,10 +91,11 @@ export function sharedCommand(command, cwd, signal) {
     // Windows PowerShell searches registered third-party modules before its
     // own cmdlets. On a cold machine even `echo` can spend the entire deadline
     // discovering Write-Output. Prioritize built-ins after startup constructs
-    // the path, preserving every existing module location. Parse the original
-    // command separately so leading `param`/`using` declarations remain valid.
+    // the path, preserving every existing module location. A child CLI executes
+    // the original text unchanged: a ScriptBlock wrapper loses native failure
+    // status. The existing process-tree cancellation covers both shells.
     const script = windows
-      ? `$env:PSModulePath = "$PSHOME\\Modules;$env:PSModulePath"; & ([scriptblock]::Create([System.Text.Encoding]::Unicode.GetString([Convert]::FromBase64String('${Buffer.from(command, "utf16le").toString("base64")}'))))`
+      ? `$env:PSModulePath = "$PSHOME\\Modules;$env:PSModulePath"; & "$PSHOME\\powershell.exe" -NoProfile -NonInteractive -OutputFormat Text -EncodedCommand ${Buffer.from(command, "utf16le").toString("base64")}; exit $LASTEXITCODE`
       : command;
     const child = spawn(windows ? "powershell.exe" : "/bin/sh", windows ? ["-NoProfile", "-NonInteractive", "-Command", script] : ["-c", script], {
       cwd, detached: !windows, windowsHide: true, stdio: ["ignore", "pipe", "pipe"],

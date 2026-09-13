@@ -156,6 +156,13 @@ pnpm exec vitest run server/shared-computers.test.ts server/shared-computers.e2e
 node --test electron/shared-computer-access.node-test.mjs
 ```
 
+The **Shared terminal smoke** workflow runs the native terminal tests and this
+real-connector test on Windows. It covers ordinary cmdlets, quoted and Unicode
+command text, leading declarations, pipelines, return/exit status and process
+revocation. Windows PowerShell prioritizes its own modules while retaining the
+rest of its resolved module search path. No new command restrictions or approval
+prompts are introduced; the existing grants, timeout and cancellation remain.
+
 The end-to-end test starts a **real isolated server**, pairs a desktop, opens
 a fake-model turn, and launches the **real agents MCP process** with that
 turn's capability. It reads/edits fixture files and runs a harmless terminal
