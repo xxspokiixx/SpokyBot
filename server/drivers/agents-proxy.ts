@@ -359,6 +359,20 @@ const ROUTINE_FIELDS_SCHEMA = {
 
 const TOOLS = [
   {
+    name: "list_shared_computers",
+    description: "List online desktop computers explicitly shared with this workspace, and their allowed folders/capabilities. These are the user's computers, not this server. An offline or unshared computer cannot be accessed. Folder paths use opaque folder IDs and relative paths.",
+    inputSchema: { type: "object", properties: {}, additionalProperties: false },
+  },
+  {
+    name: "shared_computer",
+    description: "Use a desktop explicitly shared by the user. Discover computer_id and folder_id with list_shared_computers. list_files/read_file/write_file are confined to chosen folders; paths are relative. read_file returns sha256; overwriting requires expected_sha256. Binary files support base64 encoding. run_command requires a SEPARATE unrestricted terminal grant. computer_tools lists the native computer-control tools; computer_call invokes one with arguments and needs a SEPARATE computer-control grant. Never substitute the server's filesystem when this desktop is offline. Actions are not retried automatically; inspect an uncertain outcome before retrying.",
+    inputSchema: { type: "object", additionalProperties: false, properties: {
+      computer_id: { type: "string" }, action: { type: "string", enum: ["list_files", "read_file", "write_file", "run_command", "computer_tools", "computer_call"] },
+      folder_id: { type: "string" }, path: { type: "string" }, content: { type: "string" }, encoding: { type: "string", enum: ["utf8", "base64"] }, expected_sha256: { type: "string" },
+      command: { type: "string" }, tool_name: { type: "string" }, arguments: { type: "object", additionalProperties: true },
+    }, required: ["computer_id", "action"] },
+  },
+  {
     name: "list_room_targets",
     description: "Discover actual OpenMausBot teammates and rooms in your allowed teams. Works in a normal bot conversation too; no room is required. Returns bot and room IDs, roles and working folders, never other conversations' history. Use these bots, not native coding helpers with similar names, when the user asks their team to work together.",
     inputSchema: { type: "object", properties: {}, additionalProperties: false },
@@ -1565,6 +1579,17 @@ async function handle(msg: Json) {
       const name = params.name as string;
       if (!AVAILABLE_TOOLS.some((t) => t.name === name)) return rpcErr(id, -32602, `Unknown tool: ${name}`);
       try {
+        if (name === "list_shared_computers") {
+          textResult(id, JSON.stringify(await api("/api/internal/shared-computers")));
+          return;
+        }
+        if (name === "shared_computer") {
+          const response = await api("/api/internal/shared-computers", { method: "POST", body: JSON.stringify(params.arguments ?? {}) });
+          const result = response.result as Json;
+          if (Array.isArray(result?.content)) ok(id, result);
+          else textResult(id, JSON.stringify(result));
+          return;
+        }
         const { text, isError } = await callTool(name, (params.arguments ?? {}) as Json);
         textResult(id, text, isError);
       } catch (e) {

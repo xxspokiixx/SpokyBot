@@ -337,6 +337,8 @@ describe("agents-proxy MCP surface", () => {
     expect(init.result.serverInfo.name).toContain("agents");
     const list = await rpc("tools/list");
     expect(list.result.tools.map((t: { name: string }) => t.name)).toEqual([
+      "list_shared_computers",
+      "shared_computer",
       "list_bots",
       "list_rooms",
       "ask_bot",
@@ -381,6 +383,7 @@ describe("agents-proxy MCP surface", () => {
   it("advertises read annotations only for the reviewed built-in reads", async () => {
     const list = await rpc("tools/list");
     const readNames = [
+      "list_shared_computers",
       "list_bots", "list_rooms", "check_delegation", "wait_delegation", "list_threads",
       "list_team_setup",
       "session_search", "session_read", "list_routines", "skills_list",

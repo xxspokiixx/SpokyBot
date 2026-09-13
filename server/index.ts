@@ -7,6 +7,8 @@ import { createServer, type IncomingMessage, type ServerResponse } from "node:ht
 import { extname, join } from "node:path";
 
 import { z } from "zod";
+import { SharedComputers, sharedComputerOperation, sharedComputerRegistration } from "./shared-computers.ts";
+import { SharedComputerControl } from "./shared-computer-control.ts";
 import { RoomHandoffs, type RoomHandoff } from "./room-handoffs.ts";
 import { botAvatarUrlFromStoredPath } from "../shared/bot-avatar.ts";
 import { BOT_PROFILE_LIMITS } from "../shared/bot-profile.ts";
@@ -466,6 +468,7 @@ const sessions = new SessionRegistry({
   },
   portalMembership: hostedWorkspaceConfiguration()?.portalMembership === true,
 });
+const sharedComputers = new SharedComputers(id => sessions.isLive(id));
 const SESSION_COOKIE = sessionCookieName(PORT, ENVIRONMENT_ID);
 const HOSTED_WORKSPACE = hostedWorkspaceConfigured();
 let workspaceAccess: WorkspaceAccess | null = null;
@@ -857,6 +860,7 @@ function settleDirectFollowup(generation: string | undefined): void {
 const directTurnBots = new Map<string, BotRecord>();
 let providerFleetReloading = false;
 const turnResources = new TurnResources();
+const sharedComputerControl = new SharedComputerControl(turnResources, () => store.bots.some(bot => computerControl.snapshot(bot.id).held));
 const turnResourceOwners = new Map<string, TurnOwner>();
 const turnComputerResources = new Map<string, { owner: TurnOwner; resource: string }>();
 const settlingResourceOwners = new Map<string, string>();
@@ -9405,7 +9409,7 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
     if (await workspaceBackupRoutes(req, res, path, auth)) return;
     // Count ordinary requests until their asynchronous handler returns, not
     // merely until the browser disconnects. A cancelled upload can still write.
-    if (path.startsWith("/api/") && path !== "/api/events" && path !== "/api/health" && !isWorkspaceBackupSessionControl(method, path)) {
+    if (path.startsWith("/api/") && path !== "/api/events" && path !== "/api/health" && !path.startsWith("/api/shared-computers/") && !isWorkspaceBackupSessionControl(method, path)) {
       releaseWorkspaceRequest = workspaceMaintenance.request();
     }
 
@@ -9498,6 +9502,39 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
     if (m && method === "DELETE") {
       const cancelled = sessions.cancelPairing(m[1]);
       return json(res, cancelled ? 200 : 404, cancelled ? { ok: true } : { error: "no such pairing code" });
+    }
+    if (method === "POST" && path === "/api/desktop/shared-computer-control") {
+      if (auth.kind !== "loopback") return json(res, 403, { error: "Local desktop only" });
+      const body = await readBody(req, 1024);
+      if (!z.string().uuid().safeParse(body?.id).success || !["acquire", "release"].includes(body?.action)) return json(res, 400, { error: "Invalid computer lease" });
+      if (body.action === "release") sharedComputerControl.release(body.id);
+      else sharedComputerControl.acquire(body.id);
+      return json(res, 200, { ok: true });
+    }
+    // A paired desktop registers only its own outbound connector. A second,
+    // main-process-only secret binds poll/results to that exact desktop.
+    if (method === "POST" && path.startsWith("/api/shared-computers/")) {
+      if (auth.kind !== "session") return json(res, 403, { error: "Pair this desktop first" });
+      if (!/^application\/json\b/i.test(String(req.headers["content-type"] ?? ""))) return json(res, 415, { error: "JSON required" });
+      const body = await readBody(req, 4_000_000);
+      if (!sessions.isLive(auth.session.id)) return json(res, 401, { error: "Session ended" });
+      const secret = String(req.headers["x-omb-computer-secret"] ?? "");
+      if (path === "/api/shared-computers/connect") {
+        const parsed = sharedComputerRegistration.safeParse(body);
+        if (!parsed.success) return json(res, 400, { error: "Invalid computer registration" });
+        const registration = parsed.data;
+        if (registration.environmentId !== ENVIRONMENT_ID) return json(res, 409, { error: "Workspace identity changed. Pair again before sharing this computer." });
+        sharedComputers.register(registration, auth.session.id, secret);
+        return json(res, 200, { ok: true });
+      }
+      const route = /^\/api\/shared-computers\/([\w-]+)\/(poll|lease|result|disconnect)$/.exec(path);
+      if (!route) return json(res, 404, { error: "not found" });
+      const [, id, action] = route;
+      if (action === "poll") return json(res, 200, { job: await sharedComputers.poll(id, auth.session.id, secret) });
+      if (action === "lease") return json(res, 200, { active: sharedComputers.liveJob(id, auth.session.id, secret, String(body?.jobId)) });
+      if (action === "result") sharedComputers.complete(id, auth.session.id, secret, String(body?.jobId), body?.result);
+      if (action === "disconnect") sharedComputers.disconnect(id, auth.session.id, secret);
+      return json(res, 200, { ok: true });
     }
     if (method === "GET" && path === "/api/auth/sessions") {
       return json(res, 200, { sessions: sessions.list(), current: auth.kind === "session" ? auth.session.id : null });
@@ -9653,6 +9690,12 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
         });
         requireActiveInternalCapability();
         return json(res, 200, { result });
+      }
+      if (method === "GET" && path === "/api/internal/shared-computers") return json(res, 200, { computers: sharedComputers.list() });
+      if (method === "POST" && path === "/api/internal/shared-computers") {
+        const parsed = sharedComputerOperation.safeParse(await readInternalBody());
+        if (!parsed.success) return json(res, 400, { error: "Invalid shared computer operation" });
+        return json(res, 200, { result: await sharedComputers.request(parsed.data, () => internalCapabilityIsActive(internalCapability)) });
       }
       if (method === "GET" && path === "/api/internal/agents") {
         const sender = internalSender;
@@ -15714,6 +15757,8 @@ const gracefulShutdown = createGracefulShutdown({
       // asynchronous shutdown jobs drain. Invalidate their turn bearers before
       // any cleanup function reaches an await.
       revokeAllInternalCapabilities();
+      sharedComputers.close();
+      sharedComputerControl.close();
       browserLive.closeAll();
       for (const idle of localVmIdles.values()) idle.cancel();
       vps.closeAllVpsDesktopTunnels();

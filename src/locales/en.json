@@ -113,6 +113,7 @@
   "settings.close": "Close settings",
   "settings.noMatch": "Nothing matches “{query}”",
   "settings.section.general": "General",
+  "settings.section.desktopWorkspaces": "Connected workspaces",
   "settings.section.appearance": "Appearance",
   "settings.section.experimental": "Experimental",
   "settings.section.connections": "Connections",
