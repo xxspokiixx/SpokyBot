@@ -1470,6 +1470,9 @@ function refreshApplicationMenu() {
       onAddFromClipboard: () => void addServerFromClipboard(),
       onConnect: () => void workspaceMenuAction(openWorkspaceSettings),
       onForget: (id) => void workspaceMenuAction(() => forgetEnvironment(id)),
+      onOpenSettings: () => {
+        if (mainWindow && !mainWindow.isDestroyed()) mainWindow.webContents.send("app:open-settings");
+      },
     }),
   );
 }
