@@ -95,7 +95,7 @@ export function sharedCommand(command, cwd, signal) {
     // the original text unchanged: a ScriptBlock wrapper loses native failure
     // status. The existing process-tree cancellation covers both shells.
     const script = windows
-      ? `$env:PSModulePath = "$PSHOME\\Modules;$env:PSModulePath"; & "$PSHOME\\powershell.exe" -NoProfile -NonInteractive -OutputFormat Text -EncodedCommand ${Buffer.from(command, "utf16le").toString("base64")}; exit $LASTEXITCODE`
+      ? `$env:PSModulePath = "$PSHOME\\Modules;$env:PSModulePath"; & "$PSHOME\\powershell.exe" -NoProfile -NonInteractive -OutputFormat Text -EncodedCommand '${Buffer.from(command, "utf16le").toString("base64")}' 2>&1 | ForEach-Object { $_ }; exit $LASTEXITCODE`
       : command;
     const child = spawn(windows ? "powershell.exe" : "/bin/sh", windows ? ["-NoProfile", "-NonInteractive", "-Command", script] : ["-c", script], {
       cwd, detached: !windows, windowsHide: true, stdio: ["ignore", "pipe", "pipe"],
