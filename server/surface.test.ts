@@ -30,9 +30,10 @@ describe("resolveSurface", () => {
     expect(plan.note).toMatch(/no browser and no computer/);
   });
 
-  it("a computer destination keeps the browser alongside it", () => {
+  it("a computer destination mounts only that computer: one place per turn", () => {
     for (const destination of ["cloud", "vm", "local"] as const) {
-      expect(resolveSurface({ destination, browserOn: true })).toMatchObject({ computer: destination, browser: true, pinned: null });
+      // the bot's browser switch no longer adds a second place next to a computer
+      expect(resolveSurface({ destination, browserOn: true })).toEqual({ computer: destination, browser: false, pinned: null, clearPin: false, note: "" });
       expect(resolveSurface({ destination, browserOn: false })).toMatchObject({ computer: destination, browser: false });
     }
   });
@@ -49,17 +50,37 @@ describe("resolveSurface", () => {
     expect(surfacePrompt({ computer: null, browser: false }, { note: plan.note })).toBe(plan.note);
   });
 
-  it("Off ignores a task pin, the way every explicit destination does", () => {
-    expect(resolveSurface({ destination: "off", pinnedSurface: "browser", browserOn: true, available: { browser: true } }))
+  it("Off is the one setting a conversation pin cannot override", () => {
+    expect(resolveSurface({ destination: "off", pinnedSurface: "browser", browserOn: true }))
+      .toMatchObject({ computer: "off", browser: false, pinned: null, clearPin: false });
+    expect(resolveSurface({ destination: "off", pinnedSurface: "cloud", browserOn: true }))
       .toMatchObject({ computer: "off", browser: false, pinned: null, clearPin: false });
   });
 
-  it("an explicit destination ignores the task's pin", () => {
-    expect(resolveSurface({ destination: "cloud", pinnedSurface: "browser", browserOn: true, available: { browser: true } }))
-      .toMatchObject({ computer: "cloud", browser: true, pinned: null, clearPin: false });
+  it("a conversation pin wins over the bot's default, whatever that default is", () => {
+    // pinned to the browser from the composer while the bot defaults to a computer
+    expect(resolveSurface({ destination: "cloud", pinnedSurface: "browser", browserOn: true }))
+      .toEqual({ computer: "off", browser: true, pinned: "browser", clearPin: false, note: "" });
+    // pinned to a computer while the bot is browser-only or on Auto
+    for (const destination of ["browser", undefined] as const) {
+      for (const pin of ["cloud", "vm", "local"] as const) {
+        expect(resolveSurface({ destination, pinnedSurface: pin, browserOn: true }))
+          .toEqual({ computer: pin, browser: false, pinned: pin, clearPin: false, note: "" });
+      }
+    }
   });
 
-  it("Auto without a pin resolves the way it always did", () => {
+  it("a browser pin that cannot be honoured falls back to the default and asks to be cleared", () => {
+    expect(resolveSurface({ destination: "cloud", pinnedSurface: "browser", browserOn: false }))
+      .toEqual({ computer: "cloud", browser: false, pinned: null, clearPin: true, note: "" });
+    expect(resolveSurface({ destination: undefined, pinnedSurface: "browser", browserOn: false }))
+      .toEqual({ computer: undefined, browser: false, pinned: null, clearPin: true, note: "" });
+    // a browser-only bot with no browser keeps its explanation
+    expect(resolveSurface({ destination: "browser", pinnedSurface: "browser", browserOn: false }))
+      .toMatchObject({ computer: "off", browser: false, clearPin: true, note: expect.stringMatching(/switched off/) });
+  });
+
+  it("Auto without a pin leaves the computer to the dispatch and keeps the browser as its fallback", () => {
     expect(resolveSurface({ destination: undefined, browserOn: true })).toEqual({
       computer: undefined,
       browser: true,
@@ -67,26 +88,7 @@ describe("resolveSurface", () => {
       clearPin: false,
       note: "",
     });
-  });
-
-  it("Auto follows a pinned computer and mounts only that one", () => {
-    for (const pin of ["cloud", "vm", "local"] as const) {
-      expect(resolveSurface({ destination: undefined, pinnedSurface: pin, browserOn: true, available: { [pin]: true } }))
-        .toEqual({ computer: pin, browser: false, pinned: pin, clearPin: false, note: "" });
-    }
-  });
-
-  it("Auto follows a pinned browser and mounts no computer", () => {
-    expect(resolveSurface({ destination: undefined, pinnedSurface: "browser", browserOn: true }))
-      .toEqual({ computer: "off", browser: true, pinned: "browser", clearPin: false, note: "" });
-  });
-
-  it("Auto with a pin that is no longer reachable falls back and asks to clear it", () => {
-    expect(resolveSurface({ destination: undefined, pinnedSurface: "cloud", browserOn: true, available: { cloud: false } }))
-      .toEqual({ computer: undefined, browser: true, pinned: null, clearPin: true, note: "" });
-    // absent availability is "not reachable", never "assume yes"
-    expect(resolveSurface({ destination: undefined, pinnedSurface: "vm", browserOn: false })).toMatchObject({ clearPin: true, computer: undefined });
-    expect(resolveSurface({ destination: undefined, pinnedSurface: "browser", browserOn: false })).toMatchObject({ clearPin: true, browser: false });
+    expect(resolveSurface({ destination: undefined, browserOn: false })).toMatchObject({ computer: undefined, browser: false });
   });
 });
 
@@ -104,6 +106,7 @@ describe("surfacePrompt", () => {
     const text = surfacePrompt({ computer: "vm", browser: false });
     expect(text).toMatch(/happens on the Local VM, web pages included/);
     expect(text).toMatch(/no separate built-in browser/);
+    expect(text).toMatch(/say in one short sentence where you are working/);
     expect(text).not.toMatch(/Two surfaces/);
     expect(surfacePrompt({ computer: "local", browser: false })).toMatch(/tell them it is on this computer/);
   });
@@ -113,6 +116,7 @@ describe("surfacePrompt", () => {
     expect(text).toMatch(/happens in the built-in browser tab/);
     expect(text).toMatch(/no desktop, file or shell computer/);
     expect(text).toMatch(/Browser tab of the Computer panel/);
+    expect(text).toMatch(/say in one short sentence where you are working/);
     expect(text).not.toMatch(/cloud computer/);
   });
 
