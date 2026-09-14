@@ -1088,7 +1088,17 @@ export const CodexDriver: ProviderDriver<CodexConfig> = {
         // websocket 426 logged at turn start.
         const recentStderr = stderrSinceOutput.trim();
         const hadStreamedOutput = codexTurnId !== null || state.sawStreamDelta;
-        const verdict = classifyError({ exitCode: code, stderr: recentStderr || stderr });
+        // A signal exit is terminal no matter what the stderr says:
+        // something killed the process (OOM, kill -9), and classifyError
+        // cannot see the signal — with code null, transient-looking recent
+        // stderr could still mark a killed attempt retryable.
+        // Classification also reads only stderr received after the last
+        // protocol output; the lifetime buffer's tail can name a
+        // long-past event (the websocket-426 misattribution).
+        const verdict =
+          signal !== null
+            ? { transient: false, reason: "interrupted" }
+            : classifyError({ exitCode: code, stderr: recentStderr });
         // Safe re-dispatch: relaunch only when the app-server never
         // acknowledged turn/start — no native turn began, nothing was
         // streamed, so replaying the input cannot duplicate work. After
@@ -1283,9 +1293,10 @@ export const CodexDriver: ProviderDriver<CodexConfig> = {
         const message = e instanceof Error ? e.message : String(e);
         const needsAuth = /(?:\b401\b|unauthorized|missing bearer|authentication required)/i.test(message);
         const verdict = classifyError(failure);
-        // Both guards hold: main's abandoned attempt never retries, and neither
-        // does a Company session already recovered once from canonical history.
-        if (!state.settled && !abandoned && !recoveredMissingSession && !needsAuth && verdict.transient && attempt < RETRY_MAX_ATTEMPTS - 1 && state.sawStreamDelta === false) {
+        // Three guards hold here: main's abandoned attempt never retries,
+        // neither does a Company session already recovered once from canonical
+        // history, and a Stop already asked for must not be undone by a relaunch.
+        if (!state.settled && !abandoned && !recoveredMissingSession && !stopRequested && !needsAuth && verdict.transient && attempt < RETRY_MAX_ATTEMPTS - 1 && state.sawStreamDelta === false) {
           const delayMs = computeBackoff(attempt);
           attempt++;
           emit({

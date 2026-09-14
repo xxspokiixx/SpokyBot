@@ -106,6 +106,7 @@ describe("CodexDriver turns (fake app-server)", () => {
     delete process.env.FAKE_CODEX_STATE;
     delete process.env.FAKE_CODEX_RETRY_SCALE;
     delete process.env.FAKE_CODEX_LAUNCH_CRASHES;
+    delete process.env.FAKE_CODEX_LAUNCH_KILLS;
     delete process.env.FAKE_CODEX_ACK_CRASH;
     delete process.env.FAKE_CODEX_EXIT_MID_TURN;
     delete process.env.FAKE_CODEX_VERSION;
@@ -1486,6 +1487,42 @@ describe("CodexDriver turns (fake app-server)", () => {
       expect(error?.message).not.toContain("426");
     } finally {
       delete process.env.FAKE_CODEX_EXIT_MID_TURN;
+    }
+  }, 20_000);
+  it("treats a signal-killed app-server as terminal even with transient stderr", async () => {
+    process.env.FAKE_CODEX_LAUNCH_KILLS = "1";
+    const stateFile = join(scratch, "launch-kills.json");
+    process.env.FAKE_CODEX_STATE = stateFile;
+    try {
+      await create();
+      await instance.adapter.sendTurn({ threadId: "t-codex-launch-kill", text: "hi" });
+      const done = await recorder.until((e) => e.type === "turn.completed" && e.ok === false);
+      expect(done).toMatchObject({ stopReason: "exit_before_result" });
+      expect(recorder.events.some((e) => e.type === "turn.retrying")).toBe(false);
+      const error = recorder.events.find((e) => e.type === "runtime.error");
+      expect(error?.message).toContain("signal SIGKILL");
+      expect(readFileSync(stateFile, "utf8")).toBe("1");
+    } finally {
+      delete process.env.FAKE_CODEX_LAUNCH_KILLS;
+      delete process.env.FAKE_CODEX_STATE;
+    }
+  }, 20_000);
+  it("does not announce a retry when Stop races a transient handshake failure", async () => {
+    process.env.FAKE_CODEX_TRANSIENTS = "1";
+    const stateFile = join(scratch, "stop-race.json");
+    process.env.FAKE_CODEX_STATE = stateFile;
+    process.env.FAKE_CODEX_RETRY_SCALE = "0.01";
+    try {
+      await create();
+      await instance.adapter.sendTurn({ threadId: "t-codex-stop-race", text: "hi" });
+      await recorder.until((e) => e.type === "session.started");
+      await instance.adapter.interruptTurn("t-codex-stop-race");
+      await recorder.until((e) => e.type === "turn.completed");
+      expect(recorder.events.some((e) => e.type === "turn.retrying")).toBe(false);
+    } finally {
+      delete process.env.FAKE_CODEX_TRANSIENTS;
+      delete process.env.FAKE_CODEX_STATE;
+      delete process.env.FAKE_CODEX_RETRY_SCALE;
     }
   }, 20_000);
   it("uses the explicit login command from the official Codex flow", () => {

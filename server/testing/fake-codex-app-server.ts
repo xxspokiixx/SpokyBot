@@ -10,6 +10,8 @@
 //                     logged-in-stdout | logged-out | unauthorized | late-request
 //   FAKE_CODEX_LAUNCH_CRASHES  die at initialize with transient stderr for the first N
 //                               launches (launch count kept in FAKE_CODEX_STATE)
+//   FAKE_CODEX_LAUNCH_KILLS    like LAUNCH_CRASHES but die by SIGKILL (signal exit)
+//                               for the first N launches (launch count in FAKE_CODEX_STATE)
 //   FAKE_CODEX_ACK_CRASH       exit right after acknowledging turn/start
 //   FAKE_CODEX_EXIT_MID_TURN   stale websocket-426 stderr, one reasoning delta, then SIGKILL
 //   FAKE_CODEX_DUMP   path to write {pid, argv, env, calls, decision} as JSON
@@ -256,6 +258,21 @@ process.stdin.on("data", (chunk) => {
           if (launched < crashes) {
             console.error("Error: connection reset by peer");
             process.exit(1);
+          }
+        }
+        if (process.env.FAKE_CODEX_LAUNCH_KILLS && process.env.FAKE_CODEX_STATE) {
+          let launched = 0;
+          try {
+            launched = Number(readFileSync(process.env.FAKE_CODEX_STATE, "utf8")) || 0;
+          } catch {}
+          const kills = Number(process.env.FAKE_CODEX_LAUNCH_KILLS) || 0;
+          writeFileSync(process.env.FAKE_CODEX_STATE, String(launched + 1));
+          if (launched < kills) {
+            // signal death: transient-looking stderr, then SIGKILL. The
+            // driver must treat the signal itself as terminal and never
+            // classify its way into a retry off the stderr text.
+            console.error("Error: connection reset by peer");
+            process.kill(process.pid, "SIGKILL");
           }
         }
         if (mode === "safety-rpc") {
