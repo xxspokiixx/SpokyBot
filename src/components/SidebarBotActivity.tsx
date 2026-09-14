@@ -46,8 +46,8 @@ export function AttentionThreadRows({ entries, onJump }: { entries: AttentionThr
   return <>
     {entries.map((entry) => {
       const waiting = entry.task.activity === "waiting-on-you";
-      const working = !waiting && (entry.task.busy || entry.task.activity === "working");
-      const teammateWait = !waiting && !working && entry.task.waitingOnTeammate === true;
+      const teammateWait = !waiting && entry.task.waitingOnTeammate === true;
+      const working = !waiting && !teammateWait && (entry.task.busy || entry.task.activity === "working");
       const status = waiting ? t("task.waiting") : working ? t("chat.activity.working") : teammateWait ? t("task.waitingOnTeammate") : entry.task.queued ? t("task.queued") : t("task.unread");
       const label = t("attention.item", { title: entry.task.title, name: entry.botName, status });
       const Icon = waiting ? CircleAlert : working ? Loader2 : teammateWait || entry.task.queued ? Clock3 : BellDot;
@@ -74,8 +74,8 @@ export function SidebarBotActivity({ bot, density }: { bot: Bot; density: Sideba
   return <div data-sidebar-bot-activity={bot.id} className={cn("mb-1 space-y-0.5", !iconOnly && "ml-6")}>
     {tasks.map((task) => {
       const waiting = task.activity === "waiting-on-you";
-      const working = !waiting && (task.busy || task.activity === "working");
-      const teammateWait = !waiting && !working && task.waitingOnTeammate === true;
+      const teammateWait = !waiting && task.waitingOnTeammate === true;
+      const working = !waiting && !teammateWait && (task.busy || task.activity === "working");
       const status = waiting ? t("sidebar.preview.waiting") : working ? t("chat.activity.working") : teammateWait ? t("sidebar.preview.waitingOnTeammate") : task.queued ? t("task.queued") : t("task.unread");
       const label = `${bot.name}: ${task.title} · ${status}${task.unread && (waiting || working || teammateWait || task.queued) ? ` · ${t("task.unread")}` : ""}`;
       const Icon = waiting ? CircleAlert : working ? Loader2 : teammateWait || task.queued ? Clock3 : BellDot;

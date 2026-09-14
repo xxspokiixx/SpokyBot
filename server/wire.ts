@@ -9,13 +9,13 @@ export type WiredTask = Omit<TaskRecord, "resumeCursors" | "lastInstanceId"> & {
 export type ActiveCoordination = (threadId: string) => boolean;
 
 /** Strip the harness's own session bookkeeping and surface the
- * coordination wait as data instead of a busy repaint (#1223).
+ * coordination wait as a flag on top of the busy paint (#1223).
  *
- * A thread waiting on a dispatched teammate is not working: its own turn
- * finished. The old wire repainted it busy/working, which ran the sidebar
- * spinner for the whole teammate run. The flag lets new clients show a
- * quiet wait while existing clients simply see the thread idle. */
+ * A thread waiting on a dispatched teammate is not working on its own
+ * turn, but wait clients settle when busy clears, so the paint must stay
+ * or wait_for_conversation returns on partial state. The flag says which
+ * busy is really a wait, so clients that know it show a quiet wait. */
 export const wireTaskFor =
   (isActiveCoordination: ActiveCoordination) =>
   ({ resumeCursors: _resumeCursors, lastInstanceId: _lastInstanceId, ...task }: TaskRecord): WiredTask =>
-    isActiveCoordination(task.threadId) && !task.busy ? { ...task, waitingOnTeammate: true } : task;
+    isActiveCoordination(task.threadId) && !task.busy ? { ...task, busy: true, activity: "working" as const, waitingOnTeammate: true } : task;

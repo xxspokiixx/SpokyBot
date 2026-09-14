@@ -15,11 +15,11 @@ const task = (overrides: Partial<TaskRecord> = {}): TaskRecord => ({
 
 describe("wireTaskFor", () => {
   // #1223: the parent thread's own turn is done; a teammate is still running.
-  it("reports an idle thread under active coordination as waiting, not working", () => {
+  it("keeps the handoff busy for wait clients and marks it as a teammate wait", () => {
     const wireTask = wireTaskFor(() => true);
     const wired = wireTask(task());
-    expect(wired.busy).toBe(false);
-    expect(wired.activity).toBe("idle");
+    expect(wired.busy).toBe(true);
+    expect(wired.activity).toBe("working");
     expect(wired.waitingOnTeammate).toBe(true);
   });
 

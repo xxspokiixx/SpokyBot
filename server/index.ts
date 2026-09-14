@@ -1537,7 +1537,7 @@ const wireBot = (bot: NonNullable<ReturnType<typeof store.bot>>) => {
   const visible = approvalGrant && !approvalGrant.threadOnly
     ? { ...rest, approvalMode: "ask" as const, autoApprove: false }
     : rest;
-  return { ...visible, ...(activeCoordinationForThread(bot.threadId) && !visible.busy ? { waitingOnTeammate: true as const } : {}),
+  return { ...visible, ...(activeCoordinationForThread(bot.threadId) && !visible.busy ? { busy: true, activity: "working" as const, waitingOnTeammate: true as const } : {}),
     avatarUrl: visible.avatarUrl ?? null, ...(tasks ? { tasks: tasks.map(wireTask) } : {}) };
 };
 

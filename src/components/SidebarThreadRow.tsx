@@ -36,10 +36,12 @@ export const isArchived = (task: Pick<Task, "archivedAt">): boolean => task.arch
  * all ask the same question. */
 const isWorking = (task: Pick<Task, "activity" | "busy">): boolean => task.activity === "working" || Boolean(task.busy);
 
-/** Waiting on a dispatched teammate: the thread's own turn is done and a
- * teammate has not settled. A quiet wait, never the work spinner (#1223). */
-const isWaitingOnTeammate = (task: Pick<Task, "activity" | "busy" | "waitingOnTeammate">): boolean =>
-  task.waitingOnTeammate === true && !isWorking(task);
+/** Waiting on a dispatched teammate: the wire paints the handoff busy so
+ * wait clients keep blocking, and this flag says which busy is really a
+ * wait. The flag outranks the paint, keeping the wait a quiet label
+ * instead of the work spinner (#1223). */
+const isWaitingOnTeammate = (task: Pick<Task, "waitingOnTeammate">): boolean =>
+  task.waitingOnTeammate === true;
 
 /** Whether a row must stay on screen regardless of age or closed state:
  * the person is looking at it, it needs them, or it has something new. */
@@ -66,13 +68,14 @@ export function visibleSidebarThreads<T extends ThreadRowTask>(tasks: T[], activ
 }
 
 /** Attention outranks recency within a bot: waiting-on-you needs the person
- * most, then working/busy, then a teammate wait, then queued, then unread. The thread being looked
- * at rides just above the idle tail; idle threads keep stored order. Pure and
- * shared so the tree, the collapsed escape hatch, and the pickers agree. */
+ * most, then working/busy, then a teammate wait (its busy is the wait
+ * paint), then queued, then unread. The thread being looked at rides just
+ * above the idle tail; idle threads keep stored order. Pure and shared so
+ * the tree, the collapsed escape hatch, and the pickers agree. */
 const attentionRank = (task: ThreadRowTask, activeId: string): number => {
   if (task.activity === "waiting-on-you") return 0;
-  if (task.busy || task.activity === "working") return 1;
   if (isWaitingOnTeammate(task)) return 2;
+  if (task.busy || task.activity === "working") return 1;
   if (task.queued) return 3;
   if (task.unread) return 4;
   if (task.threadId === activeId) return 5;

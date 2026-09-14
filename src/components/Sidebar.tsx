@@ -1084,9 +1084,11 @@ export function BotListItem({
   );
   const activityTasks = sidebarBotActivityTasks(bot, state.pendingQueued);
   const waiting = bot.activity === "waiting-on-you" || activityTasks.some((task) => task.activity === "waiting-on-you");
-  const working = !waiting && (Boolean(bot.busy) || activityTasks.some((task) => task.busy || task.activity === "working"));
+  // The flag outranks the busy paint the wire puts on a teammate wait, or
+  // this row would spin for the whole teammate run (#1223).
+  const teammateWait = !waiting && (Boolean(bot.waitingOnTeammate) || activityTasks.some((task) => Boolean(task.waitingOnTeammate)));
+  const working = !waiting && !teammateWait && (Boolean(bot.busy) || activityTasks.some((task) => task.busy || task.activity === "working"));
   const queued = activityTasks.some((task) => task.queued);
-  const teammateWait = !waiting && !working && (Boolean(bot.waitingOnTeammate) || activityTasks.some((task) => Boolean(task.waitingOnTeammate)));
   const unread = bot.unread || activityTasks.some((task) => task.unread);
   const body = (
     <>

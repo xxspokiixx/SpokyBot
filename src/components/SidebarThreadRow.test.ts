@@ -42,8 +42,8 @@ describe("threads waiting on a teammate", () => {
       task, current: false, onSelect: vi.fn(), onRename: vi.fn(), onDelete: vi.fn(), ...props,
     }));
   // #1223: the parent thread dispatched a teammate and its own turn is done.
-  it("shows the wait as a quiet label, never the work spinner", () => {
-    const markup = render({ threadId: "dispatch", title: "Dispatch", waitingOnTeammate: true, busy: false, activity: "idle" });
+  it("shows the wait as a quiet label over the busy paint, never the work spinner", () => {
+    const markup = render({ threadId: "dispatch", title: "Dispatch", waitingOnTeammate: true, busy: true, activity: "working" });
     expect(markup).toContain('title="Dispatch · Waiting on teammate"');
     expect(markup).toContain('aria-label="Waiting on teammate"');
     expect(markup).not.toContain("animate-spin");
@@ -156,6 +156,15 @@ describe("orderedSidebarThreads", () => {
       task("waiting", { activity: "waiting-on-you" }),
     ], "none");
     expect(ordered.map((t) => t.threadId)).toEqual(["waiting", "working", "queued", "unread"]);
+  });
+
+  it("keeps a teammate wait between working and queued even over the busy paint", () => {
+    const ordered = orderedSidebarThreads([
+      task("queued", { queued: true }),
+      task("wait", { busy: true, activity: "working", waitingOnTeammate: true }),
+      task("work", { busy: true, activity: "working" }),
+    ], "none");
+    expect(ordered.map((t) => t.threadId)).toEqual(["work", "wait", "queued"]);
   });
 
   it("keeps the thread being looked at above idle threads but below attention tiers", () => {
