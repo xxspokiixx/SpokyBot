@@ -12,6 +12,13 @@ vi.mock("react", async (original) => ({ ...await original<typeof import("react")
   useEffect: (effect: EffectCallback) => { fixture.effects.push(effect); },
 }));
 import { useSnoozeExpiry, visibleSidebarThreads } from "./SidebarThreadRow";
+import { BotThreadList } from "./Sidebar";
+import type { Bot } from "@/state/store";
+vi.mock("@/state/store", async (importOriginal) => ({
+  ...await importOriginal<typeof import("@/state/store")>(),
+  useStore: () => ({ state: { pendingQueued: {} }, dispatch: vi.fn() }),
+}));
+vi.mock("./DesktopCapabilities", () => ({ useDesktopCapabilities: () => ({}) }));
 
 type Row = { threadId: string; title: string; snoozedUntil?: number };
 type Scheduled = { at: number; fire: () => void };
@@ -59,6 +66,35 @@ describe("snooze expiry wake-up", () => {
     const html = renderProbe(tasks, "active");
     expect(html).toContain("active");
     expect(html).toContain("napping");
+    expect(vi.mocked(fetch)).not.toHaveBeenCalled();
+  });
+
+  it("schedules the wake-up from the production thread list so a snoozed row reappears at its deadline", () => {
+    const now = Date.now();
+    const bot: Bot = {
+      id: "maus", threadId: "current", name: "Maus", title: "", description: "", notifications: true,
+      color: "green", unread: false, busy: true, messages: [], modelSelection: { instanceId: "fake", model: "fake" },
+      tasks: [
+        { threadId: "current", title: "Current chat", createdAt: 1, busy: true, activity: "working" },
+        { threadId: "napping", title: "Napping", createdAt: 2, snoozedUntil: now + 60_000 },
+      ],
+    };
+    const render = () => {
+      fixture.index = 0; fixture.effects = [];
+      return renderToStaticMarkup(createElement(BotThreadList, { bot, selected: true }));
+    };
+    const hidden = render();
+    expect(hidden).toContain("Current chat");
+    expect(hidden).not.toContain("Napping");
+
+    // The production list itself must schedule the wake-up: without the
+    // useSnoozeExpiry call in BotThreadList no effect sets a timer.
+    for (const effect of fixture.effects) effect();
+    expect(scheduled?.at).toBe(now + 60_001);
+
+    vi.setSystemTime(now + 60_001);
+    scheduled?.fire();
+    expect(render()).toContain("Napping");
     expect(vi.mocked(fetch)).not.toHaveBeenCalled();
   });
 });
