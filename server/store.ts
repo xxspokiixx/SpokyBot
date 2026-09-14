@@ -347,6 +347,10 @@ export interface TaskRecord {
   /** Set by close_thread; absent while the thread is open. Runtime clears
    * it on the next turn. Persisted with the task like openedBy. */
   closedBy?: TaskClosedBy;
+  /** When the person archived this thread: it leaves the default list but
+   * stays under show-all and search, and resurfaces the moment it needs them
+   * again. Absent = unarchived; reversible, like bot-level hidden. */
+  archivedAt?: number;
   /** Defaults are copied when a task is created; older records fall back
    * to the bot until migration seeds their model selection. */
   modelSelection?: ModelSelection;
@@ -378,7 +382,7 @@ export interface TaskRecord {
 
 const TASK_PATCH_FIELDS = [
   "title", "projectId", "modelSelection", "approvalMode", "autoApprove", "alwaysAllow",
-  "unread", "rewound", "pinnedMessageId", "resumeCursors", "lastInstanceId", "cwd",
+  "unread", "rewound", "archivedAt", "pinnedMessageId", "resumeCursors", "lastInstanceId", "cwd",
   "routineRunId",
 ] as const satisfies readonly (keyof TaskRecord)[];
 export type TaskPatch = Partial<Pick<TaskRecord, typeof TASK_PATCH_FIELDS[number]>>;
