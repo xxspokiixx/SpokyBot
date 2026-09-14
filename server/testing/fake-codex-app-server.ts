@@ -8,10 +8,15 @@
 //                     mcp-elicitation | mcp-app-approval | mcp-form | permissions-approval | config-profile |
 //                     config-profile-unsupported | config-read-error | image |
 //                     logged-in-stdout | logged-out | unauthorized | late-request
-//   FAKE_CODEX_LAUNCH_CRASHES  die at initialize with transient stderr for the first N
-//                               launches (launch count kept in FAKE_CODEX_STATE)
-//   FAKE_CODEX_LAUNCH_KILLS    like LAUNCH_CRASHES but die by SIGKILL (signal exit)
-//                               for the first N launches (launch count in FAKE_CODEX_STATE)
+//   FAKE_CODEX_LAUNCH_CRASHES  die at turn/start (before ack) with transient stderr,
+//                               exit 1, for the first N launches (launch count kept in
+//                               FAKE_CODEX_STATE)
+//   FAKE_CODEX_LAUNCH_KILLS    like LAUNCH_CRASHES but die by SIGKILL (signal exit;
+//                               POSIX-shaped — win32 reports exit 1, signal null), for
+//                               the first N launches (launch count in FAKE_CODEX_STATE)
+//   FAKE_CODEX_LAUNCH_SILENT   die at turn/start (before ack) with exit 1 and no stderr
+//                               at all, for the first N launches (launch count in
+//                               FAKE_CODEX_STATE)
 //   FAKE_CODEX_ACK_CRASH       exit right after acknowledging turn/start
 //   FAKE_CODEX_EXIT_MID_TURN   stale websocket-426 stderr, one reasoning delta, then SIGKILL
 //   FAKE_CODEX_DUMP   path to write {pid, argv, env, calls, decision} as JSON
@@ -270,9 +275,27 @@ process.stdin.on("data", (chunk) => {
           if (launched < kills) {
             // signal death: transient-looking stderr, then SIGKILL. The
             // driver must treat the signal itself as terminal and never
-            // classify its way into a retry off the stderr text.
+            // classify its way into a retry off the stderr text. The kill
+            // is delayed a tick so the stderr write reaches the pipe, and
+            // turn/start is never acknowledged, keeping the death pre-ack
+            // like a real OOM or kill -9.
             console.error("Error: connection reset by peer");
-            process.kill(process.pid, "SIGKILL");
+            setTimeout(() => process.kill(process.pid, "SIGKILL"), 15);
+            break;
+          }
+        }
+        if (process.env.FAKE_CODEX_LAUNCH_SILENT && process.env.FAKE_CODEX_STATE) {
+          let launched = 0;
+          try {
+            launched = Number(readFileSync(process.env.FAKE_CODEX_STATE, "utf8")) || 0;
+          } catch {}
+          const silent = Number(process.env.FAKE_CODEX_LAUNCH_SILENT) || 0;
+          writeFileSync(process.env.FAKE_CODEX_STATE, String(launched + 1));
+          if (launched < silent) {
+            // silent death: exit 1 before ack with no stderr at all. The
+            // driver must settle from what actually happened, never by
+            // digging into the lifetime stderr buffer for a retry excuse.
+            process.exit(1);
           }
         }
         if (mode === "safety-rpc") {
@@ -345,8 +368,15 @@ process.stdin.on("data", (chunk) => {
           // at turn start, output keeps flowing, and the process is then
           // killed by a signal long after the stale line
           console.error("2026-09-14T20:24:19Z ERROR codex_api::endpoint::responses_websocket: failed to connect to websocket: HTTP error: 426 Upgrade Required, url: ws://127.0.0.1:10100/v1/responses");
-          out({ jsonrpc: "2.0", id: msg.id, result: { turn: { id: nativeTurnId } } });
-          notify("item/reasoning/textDelta", { itemId: "m1", delta: "still thinking" });
+          // Hold the stdout writes back until the stale stderr above has
+          // had time to be read. If the driver parses stdout first, the
+          // stderr chunk lands after the last parse and the stale 426 is
+          // blamed at close — the same windows pipe-ordering flake class
+          // as ACK_CRASH below.
+          setTimeout(() => {
+            out({ jsonrpc: "2.0", id: msg.id, result: { turn: { id: nativeTurnId } } });
+            notify("item/reasoning/textDelta", { itemId: "m1", delta: "still thinking" });
+          }, 15);
           setTimeout(() => process.kill(process.pid, "SIGKILL"), 50);
           break;
         }

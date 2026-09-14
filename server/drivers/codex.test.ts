@@ -107,6 +107,7 @@ describe("CodexDriver turns (fake app-server)", () => {
     delete process.env.FAKE_CODEX_RETRY_SCALE;
     delete process.env.FAKE_CODEX_LAUNCH_CRASHES;
     delete process.env.FAKE_CODEX_LAUNCH_KILLS;
+    delete process.env.FAKE_CODEX_LAUNCH_SILENT;
     delete process.env.FAKE_CODEX_ACK_CRASH;
     delete process.env.FAKE_CODEX_EXIT_MID_TURN;
     delete process.env.FAKE_CODEX_VERSION;
@@ -1480,16 +1481,23 @@ describe("CodexDriver turns (fake app-server)", () => {
       expect(done).toMatchObject({ stopReason: "exit_before_result" });
       expect(recorder.events.some((e) => e.type === "turn.retrying")).toBe(false);
       const error = recorder.events.find((e) => e.type === "runtime.error");
-      // Windows has no signals: TerminateProcess surfaces as exit code 1 with
-      // no signal name, so the honest attribution there is the bare exit.
-      expect(error?.message).toContain(process.platform === "win32" ? "codex exited 1" : "signal SIGKILL");
+      // Windows has no signals: the kill lands as TerminateProcess, so the
+      // close event carries exit code 1 and signal null. The invariants —
+      // settled exit, no retry, no stale-426 blame — hold everywhere; only
+      // the exit wording is platform-shaped.
+      const exitWording = process.platform === "win32" ? "codex exited 1 before turn/completed" : "signal SIGKILL";
+      expect(error?.message).toContain(exitWording);
       expect(error?.message).toContain("no stderr after the last app-server output");
       expect(error?.message).not.toContain("426");
     } finally {
       delete process.env.FAKE_CODEX_EXIT_MID_TURN;
     }
   }, 20_000);
-  it("treats a signal-killed app-server as terminal even with transient stderr", async () => {
+  // POSIX-only: win32 turns process.kill into TerminateProcess (exit code
+  // 1, signal null), so a signal close event cannot be produced there at
+  // all. The silent-exit test below covers the classification path win32
+  // can reach, and the mid-turn test splits its wording by platform.
+  (process.platform === "win32" ? it.skip : it)("treats a signal-killed app-server as terminal even with transient stderr", async () => {
     process.env.FAKE_CODEX_LAUNCH_KILLS = "1";
     const stateFile = join(scratch, "launch-kills.json");
     process.env.FAKE_CODEX_STATE = stateFile;
@@ -1504,6 +1512,24 @@ describe("CodexDriver turns (fake app-server)", () => {
       expect(readFileSync(stateFile, "utf8")).toBe("1");
     } finally {
       delete process.env.FAKE_CODEX_LAUNCH_KILLS;
+      delete process.env.FAKE_CODEX_STATE;
+    }
+  }, 20_000);
+  it("treats a silent pre-ack exit as terminal instead of retrying off lifetime stderr", async () => {
+    process.env.FAKE_CODEX_LAUNCH_SILENT = "1";
+    const stateFile = join(scratch, "launch-silent.json");
+    process.env.FAKE_CODEX_STATE = stateFile;
+    try {
+      await create();
+      await instance.adapter.sendTurn({ threadId: "t-codex-launch-silent", text: "hi" });
+      const done = await recorder.until((e) => e.type === "turn.completed" && e.ok === false);
+      expect(done).toMatchObject({ stopReason: "exit_before_result" });
+      expect(recorder.events.some((e) => e.type === "turn.retrying")).toBe(false);
+      const error = recorder.events.find((e) => e.type === "runtime.error");
+      expect(error?.message).toContain("codex exited 1 before turn/completed");
+      expect(readFileSync(stateFile, "utf8")).toBe("1");
+    } finally {
+      delete process.env.FAKE_CODEX_LAUNCH_SILENT;
       delete process.env.FAKE_CODEX_STATE;
     }
   }, 20_000);
