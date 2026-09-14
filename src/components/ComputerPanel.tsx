@@ -382,6 +382,7 @@ export function ComputerPanel({
     // or churn preview state while reading routine history.
     if (panelView !== "computer") return;
     let alive = true;
+    let boxRetryTimer: number | undefined;
     setResolvedComputerSelection(null);
     setTeamComputer(null);
     setPhase("checking");
@@ -627,11 +628,22 @@ export function ComputerPanel({
           setPhase("busy-box");
           return;
         }
+        // The panel's own screenshot poll holds this box's lifecycle claim
+        // while it captures, so a provision landing mid-capture is refused
+        // with a *different* 409. It is a wait too: re-resolve shortly
+        // instead of showing the fault this panel exists to stop showing.
+        if (isRemoteScreenshotContention({ status: Number((e as { status?: unknown })?.status ?? 0), message: String(e?.message ?? "") })) {
+          setError(null);
+          setPhase("checking");
+          boxRetryTimer = window.setTimeout(() => setRetry((n) => n + 1), 2000);
+          return;
+        }
         setError(e.message);
         setPhase("error");
       });
     return () => {
       alive = false;
+      if (boxRetryTimer !== undefined) window.clearTimeout(boxRetryTimer);
     };
   }, [
     bot.id,
@@ -1216,7 +1228,7 @@ export function ComputerPanel({
             />
           ) : (
             <div className="flex flex-col items-center gap-2 px-6 text-center text-ink-secondary">
-              {phase === "checking" || phase === "starting" || phase === "vm" || (phase === "local" && !isLinux) ? (
+              {phase === "checking" || phase === "starting" || phase === "busy-box" || phase === "vm" || (phase === "local" && !isLinux) ? (
                 <Loader2 size={18} className="animate-spin" />
               ) : phase === "off" ? (
                 <Power size={22} />

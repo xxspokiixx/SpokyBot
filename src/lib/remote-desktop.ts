@@ -1,3 +1,5 @@
+import { isCloudComputerBusyMessage } from "../../shared/computer-contention";
+
 /** Older hosts return only a message/status pair. Do not hide unrelated
  * 409s such as missing configuration or an incompatible desktop image. */
 export function isRemoteScreenshotContention(error: { status: number; message: string }): boolean {
@@ -17,7 +19,7 @@ export function isActiveTurnRefusal(error: unknown): boolean {
   if (!error || typeof error !== "object") return false;
   const { status, message } = error as { status?: unknown; message?: unknown };
   if (status !== undefined && status !== 409) return false;
-  return typeof message === "string" && /cloud computer is being used by an active turn/i.test(message);
+  return typeof message === "string" && isCloudComputerBusyMessage(message);
 }
 
 export function remoteScreenshotSource(raw: unknown): string | null {

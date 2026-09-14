@@ -12,6 +12,7 @@ import { SharedComputerControl } from "./shared-computer-control.ts";
 import { RoomHandoffs, type RoomHandoff } from "./room-handoffs.ts";
 import { botAvatarUrlFromStoredPath } from "../shared/bot-avatar.ts";
 import { BOT_PROFILE_LIMITS } from "../shared/bot-profile.ts";
+import { CLOUD_COMPUTER_BUSY_ERROR } from "../shared/computer-contention.ts";
 import {
   approvalModeFor,
   supportsApprovalMode,
@@ -16070,7 +16071,7 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
       const activeBoxTurn = botHasActiveTurn(botId);
       if (["provision", "sleep"].includes(m[2]) && activeBoxTurn) {
         return json(res, 409, {
-          error: "this bot's cloud computer is being used by an active turn — interrupt it first",
+          error: CLOUD_COMPUTER_BUSY_ERROR,
         });
       }
       // Input validity is independent of destination authorization. Preserve

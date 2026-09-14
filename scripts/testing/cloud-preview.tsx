@@ -5,6 +5,7 @@ import { BotSettingsDialog } from "../../src/components/BotSettingsDialog";
 import { RemoteDesktopPanel } from "../../src/components/remote-desktop-panel";
 import { StoreProvider, useStore } from "../../src/state/store";
 import { applySkin, readSkin } from "../../src/lib/skins";
+import { CLOUD_COMPUTER_BUSY_ERROR } from "../../shared/computer-contention";
 import "../../src/styles.css";
 
 // Deliberately inject a valid but blank cached SSE image before connecting.
@@ -55,7 +56,7 @@ window.fetch = async (input, init) => {
   if (/^\/api\/bots\/[\w-]+\/computer$/.test(path)) return json({ configured: true, box: { state: "idle" } });
   // The real server refuses provision/sleep while a turn owns the box.
   if (path.endsWith("/computer/provision")) {
-    if (turnActive) return json({ error: "this bot's cloud computer is being used by an active turn — interrupt it first" }, 409);
+    if (turnActive) return json({ error: CLOUD_COMPUTER_BUSY_ERROR }, 409);
     return json({ state: "idle" });
   }
   if (path.endsWith("/computer/screenshot")) {

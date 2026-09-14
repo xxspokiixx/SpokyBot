@@ -1024,12 +1024,14 @@ export async function execOnBox(cfg: AppConfig, botId: string, command: string) 
 //
 // The frame is for a person: it fills the panel and opens in the chat's
 // image viewer, so it keeps the desktop's native size up to 1080p and a
-// quality where page text stays legible. (The model's own capture is
-// sized separately in computer-proxy.ts.) Only wider displays are scaled
-// down, with -resize rather than -thumbnail so the resample is not the
-// fast-and-blurry kind meant for icons. The pointer is drawn into the
-// frame (scrot --pointer, ffmpeg -draw_mouse): watching the bot work means
-// seeing where its cursor is, and X11 captures leave it out by default.
+// quality where page text stays legible. (Sizing it is now the only say
+// OpenMausBot has over any frame off this box: the turn runs on the box's
+// own agent, so the model's own captures never pass through here.) Only
+// wider displays are scaled down, with -resize rather than -thumbnail so
+// the resample is not the fast-and-blurry kind meant for icons. The
+// pointer is drawn into the frame (scrot --pointer, ffmpeg -draw_mouse):
+// watching the bot work means seeing where its cursor is, and X11
+// captures leave it out by default.
 const PANEL_PATH = "/tmp/ogb-panel.jpg";
 export const PANEL_FRAME_WIDTH = 1920;
 export const PANEL_FRAME_QUALITY = 85;
