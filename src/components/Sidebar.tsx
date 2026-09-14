@@ -854,6 +854,9 @@ export function BotDeleteMenuItem({ deleting, onClick }: { deleting: boolean; on
   );
 }
 
+/** The thread tree under one bot row: project folders, then ungrouped rows.
+ * Visibility folds old threads away; ordering floats attention to the top so
+ * the person never hunts for a working thread below newer idle ones. */
 export function BotThreadList({ bot, selected, density = "comfortable", query = "", hidden = false }: { bot: Bot; selected: boolean; density?: SidebarDensity; query?: string; hidden?: boolean }) {
   const { state, dispatch } = useStore();
   const tasks = (bot.tasks ?? [{ threadId: bot.threadId, title: t("task.newShort"), createdAt: 0 }])

@@ -390,6 +390,8 @@ function ConversationTaskPicker({
   );
 }
 
+/** The sibling-activity dropdown shown only while the sidebar thread tree is
+ * hidden, ordered exactly like the sidebar so both surfaces agree. */
 export function BotActivityPicker({ bot }: { bot: Bot }) {
   const { state, dispatch } = useStore();
   const showThreads = useShowThreads();
