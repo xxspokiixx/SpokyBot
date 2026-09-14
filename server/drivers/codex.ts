@@ -13,9 +13,7 @@ import { existsSync } from "node:fs";
 import { homedir } from "node:os";
 
 import { stripWorkspaceCredentialEnv } from "../config.ts";
-import { computerProxyEnv } from "../container-computer.ts";
 import { describeSpawnFailure, execCli, killCliTree, spawnCli } from "../procs.ts";
-import { SPAWNED_PROXIES } from "../proxy-paths.ts";
 import { isHarnessOwnedMcpEnvName } from "../mcp-registry.ts";
 
 import type {
@@ -31,7 +29,7 @@ import { newEventId, newId } from "../contracts.ts";
 import { decodeCodexSelection, readCodexModelCatalog, STATIC_CODEX_MODELS } from "./codex-catalog.ts";
 import { codexLocalProviderArgs } from "./local-inject.ts";
 import { augmentedPath, splitCliString } from "../env-path.ts";
-import { classifyError, computeBackoff, RETRY_MAX_ATTEMPTS } from "./retry.ts";
+import { classifyError, computeBackoff, interruptibleDelay, RETRY_MAX_ATTEMPTS } from "./retry.ts";
 import { appendNative } from "./native.ts";
 import { commandSummary, toolDetailPreview } from "../tool-summary.ts";
 import { codexDeveloperInstructions, syncCodexInstructions } from "./codex-instructions.ts";
@@ -522,6 +520,9 @@ export const CodexDriver: ProviderDriver<CodexConfig> = {
       // One driver instance serves many threads. Interrupt state belongs to
       // this turn so activity elsewhere cannot cancel or revive its retry.
       let stopRequested = false;
+      // Wakes a retry backoff the moment Stop arrives, so the turn settles
+      // now rather than after the full wait.
+      const stopSignal = new AbortController();
       const { threadId } = turn;
       // Direct adapter callers predating the per-bot selector retain the
       // instance's legacy fullAuto setting. Harness turns always send an
@@ -549,22 +550,7 @@ export const CodexDriver: ProviderDriver<CodexConfig> = {
         if (turn.integrations?.agents) {
           mountMcpServer(appServerArgs, env, "agents", turn.integrations.agents);
         }
-        if (turn.integrations?.computer) {
-          const proxyEnv = computerProxyEnv(turn.integrations.computer);
-          mountMcpServer(appServerArgs, env, "computer", {
-            command: process.execPath,
-            args: [SPAWNED_PROXIES.computer],
-            env: {
-              ELECTRON_RUN_AS_NODE: "1",
-              OGB_BOX_ID: proxyEnv.OGB_BOX_ID ?? "",
-              OGB_BOX_TOKEN: proxyEnv.OGB_BOX_TOKEN ?? "",
-              // who-is-driving endpoint, so a person taking the wheel in the
-              // panel pauses this bot's hands mid-turn
-              OMB_CONTROL_URL: proxyEnv.OMB_CONTROL_URL ?? "",
-              OMB_CONTROL_TOKEN: proxyEnv.OMB_CONTROL_TOKEN ?? "",
-            },
-          });
-        } else if (turn.integrations?.localComputer) {
+        if (turn.integrations?.localComputer) {
           // The host daemon and isolated Local VM both arrive as a direct Cua
           // Driver stdio MCP server. Codex sees the same computer tool surface.
           mountMcpServer(appServerArgs, env, "computer", turn.integrations.localComputer);
@@ -671,6 +657,7 @@ export const CodexDriver: ProviderDriver<CodexConfig> = {
       let completeStoppedTurn: (() => void) | undefined;
       const stop = async () => {
         stopRequested = true;
+        stopSignal.abort();
         const stopped = await terminate();
         if (stopped) completeStoppedTurn?.();
         return stopped;
@@ -1195,10 +1182,7 @@ export const CodexDriver: ProviderDriver<CodexConfig> = {
             void settle(false, "shutdown_timeout");
             return;
           }
-          await new Promise<void>((resolve) => {
-            const timer = setTimeout(resolve, Math.max(1, Math.round(delayMs * retryScale)));
-            timer.unref?.();
-          });
+          await interruptibleDelay(Math.max(1, Math.round(delayMs * retryScale)), stopSignal.signal).promise;
           if (!stopRequested) {
             void launchAttempt(attempt).catch(() => {});
           } else {

@@ -30,7 +30,6 @@ import type {
   RuntimeEventListener,
   SendTurnInput,
 } from "../contracts.ts";
-import { computerProxyEnv } from "../container-computer.ts";
 import { gateServer, resultBudget } from "../mcp-gate-config.ts";
 import { newEventId, newId } from "../contracts.ts";
 import { askInputSummary, commandSummary, toolDetailPreview } from "../tool-summary.ts";
@@ -48,6 +47,7 @@ import {
   ASK_USER_QUESTION_TOOL,
   askQuestionSummary,
   parseAskQuestions,
+  parseChoices,
   questionChoices,
   type AskQuestion,
 } from "../../shared/ask-question.ts";
@@ -343,6 +343,33 @@ export function claudeCliUpdate(version: string | null, cli: string): ProviderSn
   };
 }
 
+/** Whether `claude --help` output lists `flag` as a supported option.
+ *
+ * A wrapper may print its own banner before the real options list, and the
+ * flag may appear only in an example or description rather than as an
+ * option. We scan for a line that begins with the flag (after optional
+ * leading whitespace), which is how the real CLI formats its `--help`.
+ */
+export function claudeCliHelpSupportsFlag(help: string | null | undefined, flag: string): boolean {
+  if (!help) return false;
+  const escaped = flag.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  return new RegExp(`^\\s*${escaped}\\b`, "m").test(help);
+}
+
+/** Whether the installed CLI supports `--autocompact`.
+ *
+ * When `snapshot()` has already probed `claude --help`, use that. If the
+ * probe has not run or `--help` failed, fall back to the version floor so
+ * the pre-snapshot behavior is preserved.
+ */
+export function claudeAutoCompactSupported(
+  version: ClaudeCliVersion | null,
+  help: string | null,
+): boolean {
+  if (help !== null) return claudeCliHelpSupportsFlag(help, "--autocompact");
+  return claudeCliSupports(version, "--autocompact");
+}
+
 const DRIVER_KIND = "claudeAgent";
 
 export interface ClaudeConfig {
@@ -433,7 +460,6 @@ export function readClaudeModelCatalog(env: Record<string, string | undefined> =
 // Resolved from the server root, never relative to this file: bundling inlines
 // this module into an entry one directory up, so a `".."` here would climb too
 // far. See server/proxy-paths.ts.
-const PROXY_PATH = SPAWNED_PROXIES.computer;
 const PERM_PROXY_PATH = SPAWNED_PROXIES.permission;
 const DWEB_PROXY_PATH = SPAWNED_PROXIES.dweb;
 // in the packaged app process.execPath is the Electron binary — this env
@@ -884,15 +910,16 @@ export const ClaudeDriver: ProviderDriver<ClaudeConfig> = {
     };
     await refreshModels();
 
-    // The installed CLI's version as snapshot() last read it, so a flag the
-    // CLI does not know is never passed to it (CLAUDE_FLAG_FLOORS). The
-    // harness snapshots every instance whenever it describes them — app
-    // load, the Engines page, and right after `claude update`, which is
-    // exactly when the answer changes — so a turn normally finds it filled.
-    // A turn before any snapshot assumes a current CLI rather than paying a
-    // CLI start-up of its own: the flags are the default, the exception is
-    // the older install, and the next snapshot corrects it.
+    // The installed CLI's version and `--help` output as snapshot() last read
+    // them, so a flag the CLI does not know is never passed to it. The harness
+    // snapshots every instance whenever it describes them — app load, the
+    // Engines page, and right after `claude update` — which is exactly when
+    // the answer changes, so a turn normally finds it filled. A turn before
+    // any snapshot falls back to the version floor for the flags that are not
+    // known yet.
     let cliVersion: ClaudeCliVersion | null = null;
+    let cliHelp: string | null = null;
+    let cliHelpVersion: string | null = null;
     const listeners = new Set<RuntimeEventListener>();
     // one active turn per thread; a second send while busy is a caller bug
     const active = new Map<string, { stop: () => void; turnId: string; broker?: Awaited<ReturnType<typeof createPermissionBroker>> }>();
@@ -1011,7 +1038,11 @@ export const ClaudeDriver: ProviderDriver<ClaudeConfig> = {
 
     const sendTurn = async (turn: SendTurnInput, logicalTurnId?: string) => {
       const { threadId, botId } = turn;
-      if (active.has(threadId)) throw new Error("a turn is already running on this thread");
+      // An internal relaunch (transient failure, rejected resume) keeps the
+      // logical turn's stop handle in `active` while it sets up, so Stop is
+      // never a silent no-op between two CLI processes of the same turn.
+      const relaunch = logicalTurnId !== undefined;
+      if (active.has(threadId) && !relaunch) throw new Error("a turn is already running on this thread");
       // A bot-level mode is authoritative for this turn. In particular, an
       // old provider instance may still be configured with
       // `bypassPermissions`; Ask/Auto must restore Claude's interactive
@@ -1035,7 +1066,9 @@ export const ClaudeDriver: ProviderDriver<ClaudeConfig> = {
       const turnId = logicalTurnId ?? newId();
       const retryAbort = new AbortController();
       const retry = retryState.get(threadId) ?? { attempt: 0, cancelled: false };
-      retry.cancelled = false;
+      // A fresh user turn starts un-cancelled. A relaunch must keep a Stop
+      // that landed while it was being scheduled.
+      if (!relaunch) retry.cancelled = false;
       retryState.set(threadId, retry);
       // a retry relaunches the whole CLI; the backoff is scaled down in tests
       // so a fake's transient failures don't stall real seconds
@@ -1073,7 +1106,7 @@ export const ClaudeDriver: ProviderDriver<ClaudeConfig> = {
         if (claudeCliSupports(cliVersion, "--setting-sources")) args.push("--setting-sources", "project");
       }
       const compactWindow = autoCompactWindow(turnEnvironment);
-      if (compactWindow && claudeCliSupports(cliVersion, "--autocompact")) {
+      if (compactWindow && claudeAutoCompactSupported(cliVersion, cliHelp)) {
         args.push("--autocompact", compactWindow);
       }
       const turnModel = await resolveClaudeTurnModel(turn.model, turnEnvironment);
@@ -1096,14 +1129,7 @@ export const ClaudeDriver: ProviderDriver<ClaudeConfig> = {
         mcpServers.composio = { ...turn.integrations.composio };
         allowed.push("mcp__composio");
       }
-      if (turn.integrations?.computer) {
-        mcpServers.computer = {
-          command: process.execPath,
-          args: [PROXY_PATH],
-          env: { ...NODE_ENV_FLAG, ...computerProxyEnv(turn.integrations.computer) },
-        };
-        allowed.push("mcp__computer");
-      } else if (turn.integrations?.localComputer) {
+      if (turn.integrations?.localComputer) {
         const local = turn.integrations.localComputer;
         mcpServers.computer = {
           command: local.command,
@@ -1343,9 +1369,7 @@ export const ClaudeDriver: ProviderDriver<ClaudeConfig> = {
                 questions: questions ?? undefined,
                 // A structured ask still offers flat labels, for the phone
                 // companions and any client that predates the question card.
-                choices: questions
-                  ? questionChoices(questions)
-                  : Array.isArray(ask.input?.choices) ? (ask.input.choices as string[]).slice(0, 5) : undefined,
+                choices: questions ? questionChoices(questions) : parseChoices(ask.input?.choices),
               });
             },
             onResolve: (resolved) => {
@@ -1384,6 +1408,16 @@ export const ClaudeDriver: ProviderDriver<ClaudeConfig> = {
       } catch (error) {
         cleanupUnownedLaunch();
         throw error;
+      }
+
+      // Stop reached the relaunch handle while this attempt was still setting
+      // up (model probe, broker). Settle the logical turn as interrupted
+      // instead of spawning a process nobody wants.
+      if (relaunch && retry.cancelled) {
+        cleanupUnownedLaunch();
+        if (active.get(threadId)?.turnId === turnId) active.delete(threadId);
+        emit({ ...base(threadId, turnId), type: "turn.completed", ok: false, stopReason: "interrupted", cost: null });
+        return { turnId };
       }
 
       let child: ReturnType<typeof spawnCli>;
@@ -1668,13 +1702,16 @@ export const ClaudeDriver: ProviderDriver<ClaudeConfig> = {
                 });
                 return;
               }
-              // hand the thread back before recursing — the relaunch's own
-              // guard would otherwise reject it as "already running"
-              active.delete(threadId);
+              // Keep Stop reachable while the relaunch sets up: there is no
+              // process yet, so this handle only records the cancellation and
+              // the relaunched sendTurn honors it before spawning.
+              retryState.set(threadId, retry);
+              active.set(threadId, { stop: () => { retry.cancelled = true; retryAbort.abort(); }, turnId });
               try {
                 const cursor = session.sessionId ?? sessionId ?? undefined;
                 await sendTurn({ ...turn, resumeCursor: cursor }, turnId);
               } catch (e) {
+                if (active.get(threadId)?.turnId === turnId) active.delete(threadId);
                 retryState.delete(threadId);
                 emit({
                   ...base(threadId, turnId),
@@ -1727,7 +1764,9 @@ export const ClaudeDriver: ProviderDriver<ClaudeConfig> = {
             }
             sessions.delete(threadId);
             session.turn = null;
-            active.delete(threadId);
+            // Same relaunch handle as the transient-retry path above.
+            retryState.set(threadId, retry);
+            active.set(threadId, { stop: () => { retry.cancelled = true; retryAbort.abort(); }, turnId });
             emit({
               ...base(threadId, turnId),
               type: "turn.retrying",
@@ -1740,6 +1779,7 @@ export const ClaudeDriver: ProviderDriver<ClaudeConfig> = {
                 // no cursor: a fresh session, carrying the rebuild
                 await sendTurn({ ...turn, resumeCursor: undefined, recoveryText: undefined, text: recovery.text }, turnId);
               } catch (e) {
+                if (active.get(threadId)?.turnId === turnId) active.delete(threadId);
                 retryState.delete(threadId);
                 emit({
                   ...base(threadId, turnId),
@@ -1817,12 +1857,30 @@ export const ClaudeDriver: ProviderDriver<ClaudeConfig> = {
       });
       if (!version) return { state: "unavailable", reason: `\`${config.cli}\` CLI not found` };
       cliVersion = parseClaudeCliVersion(version);
+
+      if (version !== cliHelpVersion) {
+        cliHelp = await new Promise<string | null>((resolve) => {
+          execCli(config.cli, ["--help"], { timeout: 8000, env }, (err, stdout) =>
+            resolve(err ? null : stdout),
+          );
+        });
+        cliHelpVersion = version;
+      }
+      const features = cliHelp !== null ? { autocompact: claudeCliHelpSupportsFlag(cliHelp, "--autocompact") } : undefined;
+
       const auth = await claudeAuthStatus(config.cli, env);
       // claudeEnvironment strips ANTHROPIC_API_KEY, so turns run on the
       // CLI's own login (Pro/Max): the cost it reports is what the call
       // WOULD bill, not a charge
       const update = claudeCliUpdate(version, config.cli);
-      return { state: "available", version, ...auth, ...(update ? { update } : {}), billing: "subscription" };
+      return {
+        state: "available",
+        version,
+        ...auth,
+        ...(update ? { update } : {}),
+        ...(features ? { features } : {}),
+        billing: "subscription",
+      };
     };
 
     /** One-shot Claude call with the prompt on stdin, never argv. Approval

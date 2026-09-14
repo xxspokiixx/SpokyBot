@@ -692,28 +692,6 @@ describe("CodexDriver turns (fake app-server)", () => {
     expect(seen.env.OMB_VM_TOKEN).toBe("vm-secret");
   });
 
-  it("mounts the remote computer proxy without placing its token in argv", async () => {
-    await create();
-    const dump = join(scratch, "remote-computer.json");
-    process.env.FAKE_CODEX_DUMP = dump;
-
-    await instance.adapter.sendTurn({
-      threadId: "t-remote-computer",
-      text: "take a screenshot",
-      integrations: {
-        computer: { boxId: "box-123", token: "remote-secret" },
-      },
-    });
-    await recorder.until((event) => event.type === "turn.completed");
-
-    const seen = JSON.parse(readFileSync(dump, "utf8"));
-    expect(seen.argv.join(" ")).toContain("mcp_servers.computer.command");
-    expect(seen.argv.join(" ")).toContain("computer-proxy");
-    expect(seen.argv.join(" ")).toContain("OGB_BOX_TOKEN");
-    expect(seen.argv.join(" ")).not.toContain("remote-secret");
-    expect(seen.env.OGB_BOX_ID).toBe("box-123");
-    expect(seen.env.OGB_BOX_TOKEN).toBe("remote-secret");
-  });
 
   it("sends the local provider when the picker id is custom-encoded", async () => {
     await create({ environment: { UNSLOTH_STUDIO_AUTH_TOKEN: "unsloth-secret" } });
@@ -1291,6 +1269,24 @@ describe("CodexDriver turns (fake app-server)", () => {
       recorder.until((e) => e.type === "turn.completed" && e.threadId === "t-codex-continue"),
     ).resolves.toMatchObject({ ok: true });
     await Promise.allSettled([first, second]);
+  }, 20_000);
+
+  it("an interrupt during the retry backoff settles the turn at once, not after the wait", async () => {
+    process.env.FAKE_CODEX_TRANSIENTS = "9";
+    process.env.FAKE_CODEX_STATE = join(scratch, "codex-launches-cancel-backoff");
+    process.env.FAKE_CODEX_RETRY_SCALE = "60"; // long backoff — we cancel inside it
+    await create();
+    const turn = instance.adapter.sendTurn({ threadId: "t-codex-cancel-backoff", text: "hi" });
+    await recorder.until((e) => e.type === "turn.retrying");
+    await instance.adapter.interruptTurn("t-codex-cancel-backoff");
+
+    const done = await Promise.race([
+      recorder.until((e) => e.type === "turn.completed"),
+      new Promise<null>((resolve) => setTimeout(() => resolve(null), 5_000)),
+    ]);
+    expect(done).toMatchObject({ ok: false, stopReason: "interrupted" });
+    expect(recorder.events.filter((e) => e.type === "turn.retrying")).toHaveLength(1);
+    await turn;
   }, 20_000);
 
   it("never retries after agent text already streamed (duplicate-text hazard)", async () => {

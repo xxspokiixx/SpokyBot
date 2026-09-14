@@ -287,17 +287,23 @@ function Shell() {
           )}
         </main>
       )}
+      {/* The panels below are siblings, so their keys must differ even
+          though each is remounted per bot. Two siblings keyed `bot.id`
+          collide in React's keyed reconciliation whenever both are open
+          (Computer panel, then the usage chip): every re-render mounts a
+          fresh settings panel and never removes the previous one, so the
+          panels pile up and Close stops working. */}
       {state.settingsOpen && bot && (
         remoteClient
           ? <RemoteAgentSettingsPanel bot={bot} />
-          : <BotSettingsDialog key={bot.id} bot={bot} />
+          : <BotSettingsDialog key={`settings:${bot.id}`} bot={bot} />
       )}
       {state.computerOpen && bot && (
         remoteClient ? (
-          <RemoteDesktopPanel key={bot.id} bot={bot} />
+          <RemoteDesktopPanel key={`computer:${bot.id}`} bot={bot} />
         ) : (
           <ComputerPanel
-            key={bot.id}
+            key={`computer:${bot.id}`}
             bot={bot}
             onOpenVmWorkspace={openLocalVmWorkspace}
           />

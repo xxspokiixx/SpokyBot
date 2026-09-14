@@ -19,6 +19,8 @@ import { recordEvents, type EventRecorder } from "../testing/events.ts";
 import {
   autoCompactWindow,
   brokerSocketCandidates,
+  claudeAutoCompactSupported,
+  claudeCliHelpSupportsFlag,
   claudeCliSupports,
   claudeCliUpdate,
   ClaudeDriver,
@@ -30,6 +32,7 @@ import {
 } from "./claude.ts";
 import { removeTempDir } from "../testing/cleanup.ts";
 import * as procs from "../procs.ts";
+import * as localInject from "./local-inject.ts";
 
 const FAKE_CLI = join(dirname(fileURLToPath(import.meta.url)), "..", "testing", "fake-claude-cli.ts");
 
@@ -509,6 +512,36 @@ describe("ClaudeDriver turns (fake CLI)", () => {
       const opened = await recorder.until((e) => e.type === "request.opened");
       expect(opened).toMatchObject({ requestType: "question" });
       expect(await instance.adapter.respondToRequest("t-full-question", (opened as { requestId: string }).requestId, { behavior: "answer", message: "Work" })).toBe("answered");
+    } finally {
+      conn.destroy();
+    }
+  });
+
+  it("flattens ask_user choices a model sends as {label, description} rows", async () => {
+    // The ask_user schema says strings, but MiniMax M3 (through the
+    // Anthropic-compatible endpoint) answers with AskUserQuestion-shaped
+    // rows. Passed through as-is they were persisted on the card and the
+    // chat view could not draw them, blanking the window on every open.
+    await create("hang");
+    await instance.adapter.sendTurn({ threadId: "t-object-choices", text: "go" });
+    const conn = await connectSocket(permissionSocketPath("t-object-choices"));
+    try {
+      conn.write(JSON.stringify({
+        t: "ask",
+        kind: "question",
+        id: "object-choices",
+        tool: "ask_user",
+        input: {
+          question: "Email the Persun COGS breakdown with PDF template now?",
+          choices: [
+            { label: "Yes, email it now", description: "Generate the PDF and send it." },
+            { label: "No, skip the email", description: "Leave it as file-only." },
+          ],
+        },
+      }) + "\n");
+      const opened = await recorder.until((e) => e.type === "request.opened") as { requestId: string; choices?: unknown };
+      expect(opened.choices).toEqual(["Yes, email it now", "No, skip the email"]);
+      expect(await instance.adapter.respondToRequest("t-object-choices", opened.requestId, { behavior: "answer", message: "No, skip the email" })).toBe("answered");
     } finally {
       conn.destroy();
     }
@@ -1032,6 +1065,45 @@ describe("ClaudeDriver turns (fake CLI)", () => {
     expect(JSON.parse(readFileSync(dump, "utf8")).argv).toContain("--autocompact");
   });
 
+  it("withholds --autocompact from a current CLI when its --help omits it", async () => {
+    // 2.1.129 ships publicly without --autocompact even though its version
+    // number is past the 2.1.122 floor. Detect from --help, not the floor,
+    // so the turn does not fail with "unknown option --autocompact".
+    const helpWithoutAutocompact = [
+      "MausBot wrapper for Claude Code 2.1.129",
+      "",
+      "Usage: claude [options]",
+      "",
+      "Options:",
+      "  --strict-mcp-config         Only use the harness MCP config",
+      "  --setting-sources <source>  Where to read settings",
+      "  -h, --help                  Display help",
+      "",
+    ].join("\n");
+    const dump = join(scratch, "current-cli-missing-autocompact.json");
+    await create(undefined, {
+      FAKE_CLAUDE_DUMP: dump,
+      FAKE_CLAUDE_VERSION: "2.1.129",
+      FAKE_CLAUDE_HELP: helpWithoutAutocompact,
+    });
+    await instance.snapshot();
+    await instance.adapter.sendTurn({ threadId: "t-129-missing", text: "hi" });
+    await recorder.until((e) => e.type === "turn.completed");
+
+    const seen = JSON.parse(readFileSync(dump, "utf8"));
+    expect(seen.argv).not.toContain("--autocompact");
+    expect(seen.argv).toContain("--strict-mcp-config");
+    expect(seen.argv).toContain("--setting-sources");
+    expect(seen.argv[seen.argv.indexOf("--setting-sources") + 1]).toBe("project");
+    const snap = await instance.snapshot();
+    expect(snap).toMatchObject({
+      state: "available",
+      version: "2.1.129 (Claude Code)",
+      features: { autocompact: false },
+    });
+    expect(snap.update).toBeUndefined();
+  });
+
   it("maps a CLI version onto the flags it accepts", () => {
     expect(parseClaudeCliVersion("2.1.232 (Claude Code)")).toEqual([2, 1, 232]);
     expect(parseClaudeCliVersion("banner\n1.0.60 (Claude Code)")).toEqual([1, 0, 60]);
@@ -1057,6 +1129,60 @@ describe("ClaudeDriver turns (fake CLI)", () => {
     });
     expect(claudeCliUpdate("1.0.100 (Claude Code)", "/opt/bin/claude")?.message).toContain("this machine's own Claude Code setup");
     expect(claudeCliUpdate("1.0.100 (Claude Code)", "/opt/bin/claude")?.command).toBe("/opt/bin/claude update");
+  });
+
+  it("detects --autocompact from claude --help fixtures", () => {
+    const withFlag = [
+      "Usage: claude [options]",
+      "",
+      "Options:",
+      "  --strict-mcp-config",
+      "  --setting-sources <source>",
+      "  --autocompact <count>     Auto-compact session",
+      "  -h, --help",
+      "",
+    ].join("\n");
+
+    const withoutFlag = [
+      "Usage: claude [options]",
+      "",
+      "Options:",
+      "  --strict-mcp-config",
+      "  --setting-sources <source>",
+      "  -h, --help",
+      "",
+    ].join("\n");
+
+    const withBanner = [
+      "MausBot wrapper for Claude Code 2.1.129",
+      "",
+      "Usage: claude [options]",
+      "",
+      "Options:",
+      "  --strict-mcp-config",
+      "  --setting-sources <source>",
+      "  -h, --help",
+      "",
+    ].join("\n");
+
+    const withDescriptionMention = [
+      "Options:",
+      "  --some-flag   Use --autocompact for compaction",
+      "  -h, --help",
+      "",
+    ].join("\n");
+
+    expect(claudeCliHelpSupportsFlag(withFlag, "--autocompact")).toBe(true);
+    expect(claudeCliHelpSupportsFlag(withoutFlag, "--autocompact")).toBe(false);
+    expect(claudeCliHelpSupportsFlag(withBanner, "--autocompact")).toBe(false);
+    expect(claudeCliHelpSupportsFlag(withDescriptionMention, "--autocompact")).toBe(false);
+
+    // Feature detection wins over the version floor.
+    expect(claudeAutoCompactSupported([2, 1, 129], withFlag)).toBe(true);
+    expect(claudeAutoCompactSupported([2, 1, 129], withoutFlag)).toBe(false);
+    // Falls back to the floor when the help probe has not run.
+    expect(claudeAutoCompactSupported([2, 1, 129], null)).toBe(true);
+    expect(claudeAutoCompactSupported([2, 1, 121], null)).toBe(false);
   });
 
   it("forwards the bot project's own .mcp.json, which strict mode would drop", async () => {
@@ -1752,6 +1878,45 @@ describe("ClaudeDriver turns (fake CLI)", () => {
     // no second launch ever happened: no further retries, no extra replies
     expect(recorder.events.filter((e) => e.type === "turn.retrying")).toHaveLength(1);
     expect(recorder.events.filter((e) => e.type === "item.completed" && e.itemType === "assistant_text")).toHaveLength(0);
+  }, 30_000);
+
+  it("an interrupt during the relaunch window (after backoff, before the new process) still stops the turn", async () => {
+    // Between two CLI processes of one turn the driver is resolving the model
+    // and creating a broker. A Stop that lands there must not be a silent
+    // no-op that leaves the bot working. A custom model id routes through the
+    // local-model probe; holding that probe open is what keeps the window
+    // wide enough to land in deterministically.
+    const probe = vi.spyOn(localInject, "probeLocalInjects").mockImplementation(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 300));
+      return [];
+    });
+    try {
+      process.env.FAKE_CLAUDE_TRANSIENTS = "1";
+      process.env.FAKE_CLAUDE_STATE = join(scratch, "launches-relaunch-window");
+      process.env.FAKE_CLAUDE_RETRY_SCALE = "0.001";
+      await create("hang"); // a relaunched CLI would run until killed
+      const threadId = "t-stop-relaunch-window";
+      await instance.adapter.sendTurn({ threadId, text: "go", model: "custom-slow-model" });
+      await recorder.until((e) => e.type === "turn.retrying");
+      // the relaunch is inside its model probe: the window is open
+      const deadline = Date.now() + 5_000;
+      while (probe.mock.calls.length < 2 && Date.now() < deadline) {
+        await new Promise((resolve) => setTimeout(resolve, 2));
+      }
+      expect(probe.mock.calls.length).toBe(2);
+      await instance.adapter.interruptTurn(threadId);
+
+      const done = await Promise.race([
+        recorder.until((e) => e.type === "turn.completed"),
+        new Promise<null>((resolve) => setTimeout(() => resolve(null), 5_000)),
+      ]);
+      expect(done).toMatchObject({ ok: false, stopReason: "interrupted" });
+      // no second process was ever started for the stopped turn
+      expect(recorder.events.filter((e) => e.type === "turn.started")).toHaveLength(1);
+      expect(instance.adapter.hasSession(threadId)).toBe(false);
+    } finally {
+      probe.mockRestore();
+    }
   }, 30_000);
 
 

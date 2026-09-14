@@ -34,6 +34,8 @@ import androidx.compose.material.icons.filled.Person
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.TextButton
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
@@ -118,6 +120,8 @@ fun RosterScreen(navigator: CompanionNavigator) {
     var showingUpdates by remember { mutableStateOf(false) }
     var showingNewGroup by remember { mutableStateOf(false) }
     var showingNewSection by remember { mutableStateOf(false) }
+    var showingNewBot by remember { mutableStateOf(false) }
+    var creatingBot by remember { mutableStateOf(false) }
     var expandedBots by rememberSaveable(stateSaver = StringSetSaver) { mutableStateOf(emptySet<String>()) }
     var collapsedFolders by rememberSaveable(stateSaver = StringSetSaver) { mutableStateOf(emptySet<String>()) }
     var creatingThreads by remember { mutableStateOf(emptySet<String>()) }
@@ -414,13 +418,9 @@ fun RosterScreen(navigator: CompanionNavigator) {
                 bar = bar.openSearch()
             },
             onCreateBot = {
-                scope.launch {
-                    session.createBot()?.let {
-                        haptics.play(TactileAction.CREATE_BOT_SUCCESS)
-                        navigator.open(Chat.BotChat(it))
-                    }
-                }
+                if (!creatingBot) showingNewBot = true
             },
+            creatingBot = creatingBot,
             onCreateSection = {
                 haptics.play(TactileAction.START_NEW_SECTION)
                 showingNewSection = true
@@ -429,6 +429,36 @@ fun RosterScreen(navigator: CompanionNavigator) {
             // be sectioned" could disagree about a hidden one.
             canCreateSection = remember(state) { SectionRules.selectable(state).isNotEmpty() },
             modifier = Modifier.align(Alignment.BottomCenter),
+        )
+    }
+
+    if (showingNewBot) {
+        AlertDialog(
+            onDismissRequest = { showingNewBot = false },
+            title = { Text("Create a new bot?") },
+            text = { Text("A new bot will be added to your roster and opened for you.") },
+            dismissButton = {
+                TextButton(onClick = { showingNewBot = false }) { Text("Cancel") }
+            },
+            confirmButton = {
+                TextButton(onClick = {
+                    if (!showingNewBot || creatingBot) return@TextButton
+                    showingNewBot = false
+                    // Claim the action before launching: two queued taps must
+                    // not start two network requests.
+                    creatingBot = true
+                    scope.launch {
+                        try {
+                            session.createBot()?.let {
+                                haptics.play(TactileAction.CREATE_BOT_SUCCESS)
+                                navigator.open(Chat.BotChat(it))
+                            }
+                        } finally {
+                            creatingBot = false
+                        }
+                    }
+                }) { Text("Create") }
+            },
         )
     }
 
@@ -854,6 +884,7 @@ private fun RosterBottomBar(
     onOpenUpdates: () -> Unit,
     onOpenSearch: () -> Unit,
     onCreateBot: () -> Unit,
+    creatingBot: Boolean,
     onCreateSection: () -> Unit,
     canCreateSection: Boolean,
     modifier: Modifier = Modifier,
@@ -955,6 +986,7 @@ private fun RosterBottomBar(
                 icon = Icons.Filled.Create,
                 contentDescription = "New bot",
                 onClick = onCreateBot,
+                enabled = !creatingBot,
                 size = MIN_TOUCH_TARGET,
             )
         }
