@@ -47,6 +47,28 @@ export function visibleSidebarThreads<T extends ThreadRowTask>(tasks: T[], activ
     : open++ < 6 || demandsAttention(task, activeId));
 }
 
+/** Attention outranks recency within a bot: waiting-on-you needs the person
+ * most, then working/busy, then queued, then unread. The thread being looked
+ * at rides just above the idle tail; idle threads keep stored order. Pure and
+ * shared so the tree, the collapsed escape hatch, and the pickers agree. */
+const attentionRank = (task: ThreadRowTask, activeId: string): number => {
+  if (task.activity === "waiting-on-you") return 0;
+  if (task.busy || task.activity === "working") return 1;
+  if (task.queued) return 2;
+  if (task.unread) return 3;
+  if (task.threadId === activeId) return 4;
+  return 5;
+};
+
+/** Order, never filter: whatever the caller passes stays visible, only the
+ * position changes. Array#sort is stable, so equal ranks keep stored order. */
+export function orderedSidebarThreads<T extends ThreadRowTask>(tasks: T[], activeId: string): T[] {
+  return tasks
+    .map((task, index) => ({ task, index, rank: attentionRank(task, activeId) }))
+    .sort((a, b) => a.rank - b.rank || a.index - b.index)
+    .map((entry) => entry.task);
+}
+
 /** One quiet row for bot and group histories. Surface denotes selection;
  * working/waiting/unread remain independent signals, never different cards. */
 export function SidebarThreadRow({ task, current, compact, folders, onSelect, onRename, onDelete, onMove }: {

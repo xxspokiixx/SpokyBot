@@ -49,7 +49,7 @@ import { BotPickerList } from "./BotPickerList";
 import { BotProjectDialog, FolderActions, FolderIcon, navigateThreadMenu, NewThreadButton } from "./BotProjects";
 import { draggedFolder, FOLDER_DRAG_TYPE, moveFolder, placeFolder } from "@/lib/folder-order";
 import { folderUnreadThreadIds, markFolderRead } from "@/lib/folder-read";
-import { SidebarThreadRow, visibleSidebarThreads } from "./SidebarThreadRow";
+import { orderedSidebarThreads, SidebarThreadRow, visibleSidebarThreads } from "./SidebarThreadRow";
 import {
   loadCollapsedSections,
   loadSectionOrder,
@@ -881,7 +881,10 @@ export function BotThreadList({ bot, selected, density = "comfortable", query = 
       return next;
     });
   }, [selected, currentProjectId]);
-  const visibleTasks = visibleSidebarThreads(tasks, bot.threadId, query, projects, showAll);
+  // Attention floats within the default list; search keeps relevance order.
+  const visibleTasks = query
+    ? visibleSidebarThreads(tasks, bot.threadId, query, projects, showAll)
+    : orderedSidebarThreads(visibleSidebarThreads(tasks, bot.threadId, "", projects, showAll), bot.threadId);
   useRevealedThreadRow(state.revealThread, selected ? bot.threadId : null);
   const renderThread = (task: (typeof tasks)[number]) => {
     const thread = currentTaskBot(bot, task.threadId);

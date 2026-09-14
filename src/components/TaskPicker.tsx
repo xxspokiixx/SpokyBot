@@ -15,7 +15,7 @@ import { nextRename } from "@/lib/rename";
 import { FolderIcon, NewThreadButton } from "./BotProjects";
 import { useShowThreads } from "@/lib/thread-preferences";
 import { sidebarBotActivityTasks } from "./SidebarBotActivity";
-import { threadByline } from "./SidebarThreadRow";
+import { orderedSidebarThreads, threadByline } from "./SidebarThreadRow";
 
 /** Click-to-switch used to close this menu immediately, which unmounted the
  * row before a double-click (or right-click) could start a rename. Linger
@@ -394,7 +394,7 @@ export function BotActivityPicker({ bot }: { bot: Bot }) {
   const { state, dispatch } = useStore();
   const showThreads = useShowThreads();
   if (showThreads) return null;
-  const activity = sidebarBotActivityTasks(bot, state.pendingQueued).filter((task) => task.threadId !== bot.threadId);
+  const activity = orderedSidebarThreads(sidebarBotActivityTasks(bot, state.pendingQueued).filter((task) => task.threadId !== bot.threadId), bot.threadId);
   // A display preference must not strand a sibling approval or queued job,
   // including on narrow screens where the sidebar is closed. This is an
   // activity switcher only: idle histories and creation remain hidden.

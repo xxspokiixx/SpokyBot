@@ -1,7 +1,7 @@
 import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it, vi } from "vitest";
-import { SidebarThreadRow, threadByline, threadOpenerLabel, visibleSidebarThreads } from "./SidebarThreadRow";
+import { orderedSidebarThreads, SidebarThreadRow, threadByline, threadOpenerLabel, visibleSidebarThreads } from "./SidebarThreadRow";
 
 describe("sidebar thread visibility", () => {
   const tasks = Array.from({ length: 10 }, (_, index) => ({ threadId: String(index), title: `Thread ${index}`, ...(index > 7 ? { projectId: "research" } : {}) }));
@@ -102,5 +102,52 @@ describe("threads a bot closed", () => {
     // a live status outranks the closed note; the selected row is not dimmed
     expect(render({ threadId: "h", title: "Helper 1", closedBy, busy: true })).toContain('title="Helper 1 · Working"');
     expect(render({ threadId: "h", title: "Helper 1", closedBy }, true)).not.toContain("text-ink-secondary/70");
+  });
+});
+
+describe("orderedSidebarThreads", () => {
+  const task = (threadId: string, over: Record<string, unknown> = {}) => ({
+    threadId,
+    title: threadId,
+    busy: false,
+    ...over,
+  });
+
+  it("floats attention tiers above idle threads and keeps idle stored order", () => {
+    const ordered = orderedSidebarThreads([
+      task("idle-a"),
+      task("unread", { unread: true }),
+      task("idle-b"),
+      task("working", { busy: true }),
+      task("idle-c"),
+    ], "none");
+    expect(ordered.map((t) => t.threadId)).toEqual(["working", "unread", "idle-a", "idle-b", "idle-c"]);
+  });
+
+  it("ranks waiting-on-you above working, and queued above unread", () => {
+    const ordered = orderedSidebarThreads([
+      task("unread", { unread: true }),
+      task("queued", { queued: true }),
+      task("working", { activity: "working" }),
+      task("waiting", { activity: "waiting-on-you" }),
+    ], "none");
+    expect(ordered.map((t) => t.threadId)).toEqual(["waiting", "working", "queued", "unread"]);
+  });
+
+  it("keeps the thread being looked at above idle threads but below attention tiers", () => {
+    const ordered = orderedSidebarThreads([
+      task("idle"),
+      task("active"),
+      task("waiting", { activity: "waiting-on-you" }),
+    ], "active");
+    expect(ordered.map((t) => t.threadId)).toEqual(["waiting", "active", "idle"]);
+  });
+
+  it("is stable within a tier", () => {
+    const ordered = orderedSidebarThreads([
+      task("unread-b", { unread: true }),
+      task("unread-a", { unread: true }),
+    ], "none");
+    expect(ordered.map((t) => t.threadId)).toEqual(["unread-b", "unread-a"]);
   });
 });

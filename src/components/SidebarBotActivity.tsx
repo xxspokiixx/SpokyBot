@@ -2,6 +2,7 @@ import { BellDot, CircleAlert, Clock3, Loader2 } from "lucide-react";
 import { useStore, type Bot, type Task } from "@/state/store";
 import { cn } from "@/lib/cn";
 import { t } from "@/lib/i18n";
+import { orderedSidebarThreads } from "./SidebarThreadRow";
 import type { SidebarDensity } from "@/lib/sidebar-preferences";
 
 /** Attention is not history browsing: idle conversations never enter this list.
@@ -19,7 +20,7 @@ export function sidebarBotActivityTasks(bot: Bot, queued: Record<string, unknown
  * These are selection-only buttons: no create, rename, move, or delete menu. */
 export function SidebarBotActivity({ bot, density }: { bot: Bot; density: SidebarDensity }) {
   const { state, dispatch } = useStore();
-  const tasks = sidebarBotActivityTasks(bot, state.pendingQueued).filter((task) => task.threadId !== bot.threadId);
+  const tasks = orderedSidebarThreads(sidebarBotActivityTasks(bot, state.pendingQueued).filter((task) => task.threadId !== bot.threadId), bot.threadId);
   if (!tasks.length) return null;
   const iconOnly = density === "icons";
   return <div data-sidebar-bot-activity={bot.id} className={cn("mb-1 space-y-0.5", !iconOnly && "ml-6")}>
