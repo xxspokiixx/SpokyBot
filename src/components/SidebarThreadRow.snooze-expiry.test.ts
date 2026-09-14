@@ -93,7 +93,13 @@ describe("snooze expiry wake-up", () => {
     expect(scheduled?.at).toBe(now + 60_001);
 
     vi.setSystemTime(now + 60_001);
+    const beforeFire = [...fixture.values];
     scheduled?.fire();
+    const changed = beforeFire
+      .map((previous, index) => [previous, fixture.values[index]] as const)
+      .filter(([previous, current]) => previous !== current);
+    expect(changed).toHaveLength(1);
+    expect(changed[0]![1]).toBe((changed[0]![0] as number) + 1);
     expect(render()).toContain("Napping");
     expect(vi.mocked(fetch)).not.toHaveBeenCalled();
   });
