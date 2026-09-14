@@ -33,10 +33,12 @@ export function threadByline(task: Pick<Task, "openedBy" | "closedBy" | "archive
  * epoch number, so a thread persisted with archivedAt: 0 is archived. */
 export const isArchived = (task: Pick<Task, "archivedAt">): boolean => task.archivedAt !== undefined;
 
-/** Snoozed means the field is present, not truthy: 0 is the "until new
- * activity" sentinel and is every bit as asleep as a timestamp. The server
- * drops expired snoozes from reads, so presence here means still snoozed. */
-export const isSnoozed = (task: Pick<Task, "snoozedUntil">): boolean => task.snoozedUntil !== undefined;
+/** Snoozed means asleep right now: 0 is the "until new activity" sentinel
+ * and sleeps until woken, while a timestamp sleeps only until it passes.
+ * The server drops expired snoozes from snapshots, but a live event stream
+ * never refreshes one, so the client checks the clock too. */
+export const isSnoozed = (task: Pick<Task, "snoozedUntil">, now = Date.now()): boolean =>
+  task.snoozedUntil !== undefined && (task.snoozedUntil === 0 || task.snoozedUntil > now);
 
 /** The next local 6 PM — "later today", rolling to tomorrow evening once
  * tonight's is already past. Local on purpose: it is the person's evening;
@@ -68,9 +70,9 @@ const demandsAttention = (task: ThreadRowTask, activeId: string) =>
  * thread that becomes busy or unread again is back in the list at once. The
  * person archiving a thread folds it away the same way, with the same
  * attention override: a working or waiting archived thread stays visible.
- * A snoozed thread folds away too — the server drops expired snoozes on
- * read, so presence here means still asleep — and the same override returns
- * it the moment it needs the person. */
+ * A snoozed thread folds away too — the sentinel sleeps until activity
+ * and a timestamp only while its clock still runs — and the same override
+ * returns it the moment it needs the person. */
 export function visibleSidebarThreads<T extends ThreadRowTask>(tasks: T[], activeId: string, query = "", folders: BotProject[] = [], showAll = false): T[] {
   const needle = query.trim().toLowerCase();
   if (needle) {
@@ -81,6 +83,28 @@ export function visibleSidebarThreads<T extends ThreadRowTask>(tasks: T[], activ
   return tasks.filter((task) => task.closedBy || isArchived(task) || isSnoozed(task)
     ? demandsAttention(task, activeId)
     : open++ < 6 || demandsAttention(task, activeId));
+}
+
+/** The soonest still-future timed snooze in a list, undefined when nothing
+ * is scheduled to wake: 0 sleeps until activity and never ticks, and a
+ * timestamp already in the past has nothing left to wait for. */
+export const nextSnoozeExpiry = (tasks: readonly Pick<Task, "snoozedUntil">[], now = Date.now()): number | undefined =>
+  tasks.reduce<number | undefined>((soonest, task) => {
+    const until = task.snoozedUntil;
+    return until !== undefined && until > 0 && until > now ? Math.min(soonest ?? Number.POSITIVE_INFINITY, until) : soonest;
+  }, undefined);
+
+/** A timed snooze ends on the wall clock, not on a server ping: rerender
+ * the list when the nearest one expires so its row folds back in without
+ * waiting for the next snapshot. */
+export function useSnoozeExpiry(tasks: readonly Pick<Task, "snoozedUntil">[]): void {
+  const [, rerender] = useState(0);
+  const next = nextSnoozeExpiry(tasks);
+  useEffect(() => {
+    if (next === undefined || next <= Date.now()) return;
+    const id = window.setTimeout(() => rerender((count) => count + 1), next - Date.now() + 1);
+    return () => window.clearTimeout(id);
+  }, [next]);
 }
 
 /** One quiet row for bot and group histories. Surface denotes selection;
@@ -109,6 +133,8 @@ export function SidebarThreadRow({ task, current, compact, folders, onSelect, on
   const closed = Boolean(task.closedBy) && !status;
   const archived = isArchived(task);
   const snoozed = isSnoozed(task);
+  /* The 190px here is only the first guess; the effect below clamps the
+   * rendered menu, snooze presets included, against its measured height. */
   const openMenu = (x: number, y: number) => setMenu({ left: Math.max(8, Math.min(x, window.innerWidth - 228)), top: Math.max(8, Math.min(y, window.innerHeight - 190)) });
   const startRename = () => { finishing.current = false; setDraft(task.title); setRenaming(true); setMenu(null); };
   const finishRename = (save: boolean) => {
@@ -126,6 +152,23 @@ export function SidebarThreadRow({ task, current, compact, folders, onSelect, on
     };
     window.addEventListener("mousedown", outside);
     return () => window.removeEventListener("mousedown", outside);
+  }, [menu]);
+  /* The snooze presets make the menu taller than the 190px first guess, and
+   * the folder picker can grow it after open: clamp the bottom edge against
+   * the rendered height so the final actions stay reachable for lower rows. */
+  useEffect(() => {
+    if (!menu || !menuRef.current) return;
+    const keepOnScreen = () => {
+      const el = menuRef.current;
+      if (!el) return;
+      const top = Math.max(8, window.innerHeight - el.offsetHeight - 8);
+      setMenu((current) => (current && current.top > top ? { ...current, top } : current));
+    };
+    keepOnScreen();
+    const observer = typeof ResizeObserver === "undefined" ? null : new ResizeObserver(keepOnScreen);
+    observer?.observe(menuRef.current);
+    window.addEventListener("resize", keepOnScreen);
+    return () => { observer?.disconnect(); window.removeEventListener("resize", keepOnScreen); };
   }, [menu]);
   return <>
     <div className={cn("group/thread relative flex min-w-0 items-center rounded-md", current ? "bg-raised" : "hover:bg-raised/50")}>
@@ -153,7 +196,7 @@ export function SidebarThreadRow({ task, current, compact, folders, onSelect, on
       </button>
     </div>
     {menu && createPortal(<div ref={menuRef} data-thread-overlay role="group" aria-label={t("task.actions", { title: task.title })} style={menu}
-      className="fixed z-50 w-[220px] rounded-lg border border-hairline/50 bg-card p-1 shadow-xl"
+      className="fixed z-50 max-h-[calc(100vh-16px)] w-[220px] overflow-y-auto rounded-lg border border-hairline/50 bg-card p-1 shadow-xl"
       onKeyDown={(event) => { if (event.key === "Escape") { event.preventDefault(); event.stopPropagation(); setMenu(null); actionRef.current?.focus(); } }}>
       <button type="button" onClick={startRename} className="flex w-full items-center gap-2 rounded px-2.5 py-2 text-left text-[12px] text-ink hover:bg-raised"><Pencil size={12} />{t("task.renameAria")}</button>
       {onMove && Boolean(folders?.length) && <label className="block rounded px-2.5 py-2 text-[12px] text-ink"><span className="mb-1 flex items-center gap-2 text-ink-secondary"><FolderInput size={12} />{t("folder.move")}</span>

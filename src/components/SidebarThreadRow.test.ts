@@ -1,7 +1,7 @@
 import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it, vi } from "vitest";
-import { SidebarThreadRow, threadByline, threadOpenerLabel, visibleSidebarThreads } from "./SidebarThreadRow";
+import { nextSnoozeExpiry, SidebarThreadRow, threadByline, threadOpenerLabel, visibleSidebarThreads } from "./SidebarThreadRow";
 
 describe("sidebar thread visibility", () => {
   const tasks = Array.from({ length: 10 }, (_, index) => ({ threadId: String(index), title: `Thread ${index}`, ...(index > 7 ? { projectId: "research" } : {}) }));
@@ -54,6 +54,18 @@ describe("snoozed threads", () => {
     expect(threadByline({ snoozedUntil: 0 })).toBe("Snoozed");
     expect(threadByline({ archivedAt: 5, snoozedUntil: 0 })).toBe("Archived");
     expect(threadByline({})).toBeNull();
+  });
+  it("wakes a timed snooze once its moment passes, without waiting for a fresh snapshot", () => {
+    const now = Date.now();
+    const expired = [{ ...rows[0], snoozedUntil: now - 1 }, ...rows.slice(1)];
+    expect(visibleSidebarThreads(expired, "8").map((task) => task.threadId)).toEqual(["0", "1", "2", "3", "4", "5", "8"]);
+    expect(threadByline({ snoozedUntil: now - 1 })).toBeNull();
+    expect(visibleSidebarThreads([{ ...rows[0], snoozedUntil: now + 3_600_000 }, ...rows.slice(1)], "8").map((task) => task.threadId)).toEqual(["1", "2", "3", "4", "5", "6", "8"]);
+  });
+  it("schedules the next wake at the soonest future timed snooze, skipping the sentinel and the past", () => {
+    const now = Date.now();
+    expect(nextSnoozeExpiry([{ snoozedUntil: 0 }, { snoozedUntil: now - 1 }, { snoozedUntil: now + 3_600_000 }, { snoozedUntil: now + 60_000 }, {}], now)).toBe(now + 60_000);
+    expect(nextSnoozeExpiry([{ snoozedUntil: 0 }, { snoozedUntil: now - 1 }], now)).toBeUndefined();
   });
 });
 
