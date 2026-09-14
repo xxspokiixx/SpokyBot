@@ -1038,7 +1038,11 @@ export const ClaudeDriver: ProviderDriver<ClaudeConfig> = {
 
     const sendTurn = async (turn: SendTurnInput, logicalTurnId?: string) => {
       const { threadId, botId } = turn;
-      if (active.has(threadId)) throw new Error("a turn is already running on this thread");
+      // An internal relaunch (transient failure, rejected resume) keeps the
+      // logical turn's stop handle in `active` while it sets up, so Stop is
+      // never a silent no-op between two CLI processes of the same turn.
+      const relaunch = logicalTurnId !== undefined;
+      if (active.has(threadId) && !relaunch) throw new Error("a turn is already running on this thread");
       // A bot-level mode is authoritative for this turn. In particular, an
       // old provider instance may still be configured with
       // `bypassPermissions`; Ask/Auto must restore Claude's interactive
@@ -1062,7 +1066,9 @@ export const ClaudeDriver: ProviderDriver<ClaudeConfig> = {
       const turnId = logicalTurnId ?? newId();
       const retryAbort = new AbortController();
       const retry = retryState.get(threadId) ?? { attempt: 0, cancelled: false };
-      retry.cancelled = false;
+      // A fresh user turn starts un-cancelled. A relaunch must keep a Stop
+      // that landed while it was being scheduled.
+      if (!relaunch) retry.cancelled = false;
       retryState.set(threadId, retry);
       // a retry relaunches the whole CLI; the backoff is scaled down in tests
       // so a fake's transient failures don't stall real seconds
@@ -1404,6 +1410,16 @@ export const ClaudeDriver: ProviderDriver<ClaudeConfig> = {
         throw error;
       }
 
+      // Stop reached the relaunch handle while this attempt was still setting
+      // up (model probe, broker). Settle the logical turn as interrupted
+      // instead of spawning a process nobody wants.
+      if (relaunch && retry.cancelled) {
+        cleanupUnownedLaunch();
+        if (active.get(threadId)?.turnId === turnId) active.delete(threadId);
+        emit({ ...base(threadId, turnId), type: "turn.completed", ok: false, stopReason: "interrupted", cost: null });
+        return { turnId };
+      }
+
       let child: ReturnType<typeof spawnCli>;
       try {
         child = spawnCli(config.cli, args, {
@@ -1686,13 +1702,16 @@ export const ClaudeDriver: ProviderDriver<ClaudeConfig> = {
                 });
                 return;
               }
-              // hand the thread back before recursing — the relaunch's own
-              // guard would otherwise reject it as "already running"
-              active.delete(threadId);
+              // Keep Stop reachable while the relaunch sets up: there is no
+              // process yet, so this handle only records the cancellation and
+              // the relaunched sendTurn honors it before spawning.
+              retryState.set(threadId, retry);
+              active.set(threadId, { stop: () => { retry.cancelled = true; retryAbort.abort(); }, turnId });
               try {
                 const cursor = session.sessionId ?? sessionId ?? undefined;
                 await sendTurn({ ...turn, resumeCursor: cursor }, turnId);
               } catch (e) {
+                if (active.get(threadId)?.turnId === turnId) active.delete(threadId);
                 retryState.delete(threadId);
                 emit({
                   ...base(threadId, turnId),
@@ -1745,7 +1764,9 @@ export const ClaudeDriver: ProviderDriver<ClaudeConfig> = {
             }
             sessions.delete(threadId);
             session.turn = null;
-            active.delete(threadId);
+            // Same relaunch handle as the transient-retry path above.
+            retryState.set(threadId, retry);
+            active.set(threadId, { stop: () => { retry.cancelled = true; retryAbort.abort(); }, turnId });
             emit({
               ...base(threadId, turnId),
               type: "turn.retrying",
@@ -1758,6 +1779,7 @@ export const ClaudeDriver: ProviderDriver<ClaudeConfig> = {
                 // no cursor: a fresh session, carrying the rebuild
                 await sendTurn({ ...turn, resumeCursor: undefined, recoveryText: undefined, text: recovery.text }, turnId);
               } catch (e) {
+                if (active.get(threadId)?.turnId === turnId) active.delete(threadId);
                 retryState.delete(threadId);
                 emit({
                   ...base(threadId, turnId),

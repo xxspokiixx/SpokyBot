@@ -1271,6 +1271,24 @@ describe("CodexDriver turns (fake app-server)", () => {
     await Promise.allSettled([first, second]);
   }, 20_000);
 
+  it("an interrupt during the retry backoff settles the turn at once, not after the wait", async () => {
+    process.env.FAKE_CODEX_TRANSIENTS = "9";
+    process.env.FAKE_CODEX_STATE = join(scratch, "codex-launches-cancel-backoff");
+    process.env.FAKE_CODEX_RETRY_SCALE = "60"; // long backoff — we cancel inside it
+    await create();
+    const turn = instance.adapter.sendTurn({ threadId: "t-codex-cancel-backoff", text: "hi" });
+    await recorder.until((e) => e.type === "turn.retrying");
+    await instance.adapter.interruptTurn("t-codex-cancel-backoff");
+
+    const done = await Promise.race([
+      recorder.until((e) => e.type === "turn.completed"),
+      new Promise<null>((resolve) => setTimeout(() => resolve(null), 5_000)),
+    ]);
+    expect(done).toMatchObject({ ok: false, stopReason: "interrupted" });
+    expect(recorder.events.filter((e) => e.type === "turn.retrying")).toHaveLength(1);
+    await turn;
+  }, 20_000);
+
   it("never retries after agent text already streamed (duplicate-text hazard)", async () => {
     process.env.FAKE_CODEX_TRANSIENTS = "1";
     process.env.FAKE_CODEX_PARTIAL_FAILS = "1";
