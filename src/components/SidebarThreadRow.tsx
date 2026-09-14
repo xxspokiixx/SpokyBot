@@ -31,10 +31,15 @@ export function threadByline(task: Pick<Task, "openedBy" | "closedBy" | "archive
  * epoch number, so a thread persisted with archivedAt: 0 is archived. */
 export const isArchived = (task: Pick<Task, "archivedAt">): boolean => task.archivedAt !== undefined;
 
+/** Working is activity or flag: the wire can carry either alone, so the
+ * visibility filter, the Working status, and the busy-disabled actions must
+ * all ask the same question. */
+const isWorking = (task: Pick<Task, "activity" | "busy">): boolean => task.activity === "working" || Boolean(task.busy);
+
 /** Whether a row must stay on screen regardless of age or closed state:
  * the person is looking at it, it needs them, or it has something new. */
 const demandsAttention = (task: ThreadRowTask, activeId: string) =>
-  task.threadId === activeId || task.activity === "waiting-on-you" || task.activity === "working" || Boolean(task.busy) || Boolean(task.queued) || Boolean(task.unread);
+  task.threadId === activeId || task.activity === "waiting-on-you" || isWorking(task) || Boolean(task.queued) || Boolean(task.unread);
 
 /** The default list is the six most recent OPEN threads plus anything that
  * demands attention. A thread a bot closed is folded away — a PM bot that
@@ -97,7 +102,7 @@ export function SidebarThreadRow({ task, current, compact, folders, onSelect, on
   const finishing = useRef(false);
   const menuRef = useRef<HTMLDivElement>(null);
   const actionRef = useRef<HTMLButtonElement>(null);
-  const status = task.activity === "waiting-on-you" ? t("task.waiting") : task.busy ? t("chat.activity.working") : task.queued ? t("task.queued") : null;
+  const status = task.activity === "waiting-on-you" ? t("task.waiting") : isWorking(task) ? t("chat.activity.working") : task.queued ? t("task.queued") : null;
   const byline = threadByline(task);
   const closed = Boolean(task.closedBy) && !status;
   const archived = isArchived(task);
