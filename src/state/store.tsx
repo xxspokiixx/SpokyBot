@@ -472,10 +472,18 @@ export interface ConfigStatus {
   threads?: { maxConcurrentPerBot: number };
   localVm: { mode: "shared" | "per-bot"; maxInstances: number };
   opencodeGo?: { configured: boolean };
-  /** Voice (ElevenLabs). `configured` = a key is saved; `ready` = a key AND
-   * a voice, which is what it takes to actually speak. The key itself is
-   * never echoed back. */
-  tts?: { configured: boolean; ready: boolean; voice: string; provider?: "elevenlabs" | "system" };
+  /** Voice. `configured` = the engine has what it needs (an ElevenLabs key,
+   * or a Chatterbox server address); `ready` = that AND a voice, which is
+   * what it takes to actually speak. The key itself is never echoed back;
+   * `baseUrl`/`model` are Chatterbox settings, not credentials. */
+  tts?: {
+    configured: boolean;
+    ready: boolean;
+    voice: string;
+    provider?: "elevenlabs" | "system" | "chatterbox";
+    baseUrl?: string;
+    model?: string;
+  };
   /** Shared write-only credential for on-demand GPT Image avatars. */
   imageGen?: {
     configured: boolean;
