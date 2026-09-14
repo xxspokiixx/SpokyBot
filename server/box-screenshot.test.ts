@@ -23,6 +23,10 @@ describe("cloud panel frame capture", () => {
   it("keeps the capture fallbacks and the success marker", () => {
     const cmd = panelShotCommand();
     expect(cmd).toMatch(/scrot .* \|\| import .* \|\| ffmpeg .*x11grab/);
+    // the previous frame is gone before capturing, so a failed capture cannot
+    // hand back yesterday's screen as "captured"
+    expect(cmd.indexOf('rm -f "$f"')).toBeGreaterThan(-1);
+    expect(cmd.indexOf('rm -f "$f"')).toBeLessThan(cmd.indexOf("scrot"));
     expect(cmd).toContain('test -s "$f" && echo captured');
     // downscale only when the display is wider than the target
     expect(panelShotCommand({ width: 1280, quality: 75 })).toContain("convert \"$f\" -resize 1280x -quality 75");

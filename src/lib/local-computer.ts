@@ -78,6 +78,11 @@ export type BoxPanelAction =
   | "auto-unavailable";
 
 const READY_BOX_STATES = new Set(["idle", "ready", "running"]);
+
+/** A Box state the panel can attach to and poll. */
+export function isReadyBoxState(state: string | null | undefined): boolean {
+  return typeof state === "string" && READY_BOX_STATES.has(state);
+}
 const SLEEPING_BOX_STATES = new Set(["archived", "stopped"]);
 
 /** Mirror the turn router's Box choice without letting a passive panel open

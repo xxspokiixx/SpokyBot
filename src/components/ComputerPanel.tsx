@@ -53,6 +53,7 @@ import {
   localComputerDisabledReason,
   localComputerSelectable,
   persistedComputerSelectionMatches,
+  isReadyBoxState,
   resolveBoxPanelAction,
   shouldPollCloudPreview,
 } from "@/lib/local-computer";
@@ -665,6 +666,31 @@ export function ComputerPanel({
     panelView,
     computerSelectionPersisted,
   ]);
+
+  // busy-box waits for the turn's own provisioning. Nothing else re-runs the
+  // resolve effect until the turn ends, so watch the box ourselves and attach
+  // as soon as it is ready — the screen should appear mid-turn, not after.
+  useEffect(() => {
+    if (phase !== "busy-box") return;
+    let alive = true;
+    const check = () => {
+      api(`/api/bots/${bot.id}/computer`)
+        .then((status) => {
+          if (!alive) return;
+          const state = typeof status.box?.state === "string" ? status.box.state : null;
+          if (isReadyBoxState(state)) {
+            setBoxState(state);
+            setPhase("ready");
+          }
+        })
+        .catch(() => { /* the next tick tries again */ });
+    };
+    const timer = window.setInterval(check, 5_000);
+    return () => {
+      alive = false;
+      window.clearInterval(timer);
+    };
+  }, [phase, bot.id]);
 
   // Only frames received during this connection may replace its preview.
   // A cached SSE frame must never mask every subsequent screenshot poll.
@@ -1500,7 +1526,8 @@ export function ComputerPanel({
             {(cloudBackend === "vps" || boxState !== "archived") && (
               <button
                 onClick={() => run("sleep")}
-                disabled={pending === "sleep"}
+                // the server refuses sleep while a turn owns the box (409)
+                disabled={pending === "sleep" || bot.busy}
                 className="flex flex-1 items-center justify-center gap-2 rounded-lg bg-control px-3 py-2 text-[13px] text-ink hover:bg-raised-hover disabled:opacity-50"
                 title={t("computer.sleepTitle")}
               >

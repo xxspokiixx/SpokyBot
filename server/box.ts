@@ -1043,6 +1043,8 @@ export function panelShotCommand({ width = PANEL_FRAME_WIDTH, quality = PANEL_FR
   return [
     "export DISPLAY=${DISPLAY:-:0}",
     `f=${PANEL_PATH}`,
+    // a stale frame must not pass `test -s` when every capture tool fails
+    'rm -f "$f"',
     'w=$(xdotool getdisplaygeometry 2>/dev/null | cut -d" " -f1)',
     'case "$w" in ""|*[!0-9]*) w=0;; esac',
     `scrot -o -p -q ${quality} "$f" 2>/dev/null || import -window root -quality ${quality} "$f" 2>/dev/null || ffmpeg -y -f x11grab -draw_mouse 1 -i "$DISPLAY" -frames:v 1 -q:v ${PANEL_FRAME_FFMPEG_Q} "$f" >/dev/null 2>&1`,
