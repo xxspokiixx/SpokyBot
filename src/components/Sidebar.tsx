@@ -891,7 +891,8 @@ export function BotThreadList({ bot, selected, density = "comfortable", query = 
       onRename={(title) => dispatch({ type: "renameTask", botId: bot.id, threadId: task.threadId, title })}
       onDelete={() => dispatch({ type: "deleteTask", botId: bot.id, threadId: task.threadId })}
       onMove={(projectId) => dispatch({ type: "updateTask", botId: bot.id, threadId: task.threadId, patch: { projectId } })}
-      onArchive={(archivedAt) => dispatch({ type: "updateTask", botId: bot.id, threadId: task.threadId, patch: { archivedAt } })} />;
+      onArchive={(archivedAt) => dispatch({ type: "updateTask", botId: bot.id, threadId: task.threadId, patch: { archivedAt } })}
+      onSnooze={(snoozedUntil) => dispatch({ type: "updateTask", botId: bot.id, threadId: task.threadId, patch: { snoozedUntil } })} />;
   };
   const ungrouped = visibleTasks.filter((task) => !projects.some((project) => project.id === task.projectId));
   // The archived disclosure holds only what the default list folds away; an

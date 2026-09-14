@@ -36,6 +36,27 @@ describe("sidebar thread visibility", () => {
   });
 });
 
+describe("snoozed threads", () => {
+  const rows = Array.from({ length: 9 }, (_, index) => ({ threadId: String(index), title: `Thread ${index}` }));
+  it("never strands an approval: a snoozed thread that is waiting on the person stays visible", () => {
+    const snoozed = [...rows, { threadId: "approval", title: "Approve deploy", snoozedUntil: 0, activity: "waiting-on-you" as const, busy: false }];
+    expect(visibleSidebarThreads(snoozed, "0").map((task) => task.threadId)).toEqual(["0", "1", "2", "3", "4", "5", "approval"]);
+  });
+  it("folds an idle snoozed thread out of the default list while show-all and search still list it", () => {
+    const withSnoozed = [{ ...rows[0], snoozedUntil: Date.now() + 3_600_000 }, ...rows.slice(1)];
+    expect(visibleSidebarThreads(withSnoozed, "8").map((task) => task.threadId)).toEqual(["1", "2", "3", "4", "5", "6", "8"]);
+    expect(visibleSidebarThreads(withSnoozed, "8", "", [], true)).toEqual(withSnoozed);
+    expect(visibleSidebarThreads(withSnoozed, "8", "thread 0").map((task) => task.threadId)).toEqual(["0"]);
+  });
+  it("treats snoozedUntil: 0 as snoozed — presence, not truthiness — and says so in the byline", () => {
+    const sentinel = [{ ...rows[0], snoozedUntil: 0 }, ...rows.slice(1)];
+    expect(visibleSidebarThreads(sentinel, "8").map((task) => task.threadId)).toEqual(["1", "2", "3", "4", "5", "6", "8"]);
+    expect(threadByline({ snoozedUntil: 0 })).toBe("Snoozed");
+    expect(threadByline({ archivedAt: 5, snoozedUntil: 0 })).toBe("Archived");
+    expect(threadByline({})).toBeNull();
+  });
+});
+
 describe("threads a bot opened", () => {
   const openedBy = { botId: "scout", name: "Scout", at: 5 };
   const render = (task: Parameters<typeof SidebarThreadRow>[0]["task"]) => renderToStaticMarkup(createElement(SidebarThreadRow, {

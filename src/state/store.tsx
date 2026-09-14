@@ -279,6 +279,10 @@ export interface Task {
    * under show-all and search, and back the moment it needs them again;
    * absent = never archived. Syncs like every other task field. */
   archivedAt?: number;
+  /** when the person snoozed this thread: 0 = until new activity (the
+   * server clears it on the first wake), a future epoch ms = until then
+   * (the server drops it from reads once past); absent = awake */
+  snoozedUntil?: number;
 }
 
 /** The bot that opened a thread on itself or a teammate. */
@@ -424,13 +428,15 @@ export type TaskUpdatePatch = Partial<Pick<Task, "modelSelection" | "approvalMod
   resetApprovalToAsk?: boolean;
   projectId?: string | null;
   archivedAt?: number | null;
+  snoozedUntil?: number | null;
 };
 
 function taskPatchFields(patch: TaskUpdatePatch): Partial<Task> {
-  const { confirmFullAccess: _fullConsent, acknowledgeLocalAuto: _localAck, updateBotDefault: _modelDefault, resetApprovalToAsk, projectId, archivedAt, ...fields } = patch;
+  const { confirmFullAccess: _fullConsent, acknowledgeLocalAuto: _localAck, updateBotDefault: _modelDefault, resetApprovalToAsk, projectId, archivedAt, snoozedUntil, ...fields } = patch;
   return { ...fields, ...(resetApprovalToAsk ? { approvalMode: "ask", autoApprove: false, alwaysAllow: [] } : {}),
     ...(projectId === undefined ? {} : { projectId: projectId ?? undefined }),
-    ...(archivedAt === undefined ? {} : { archivedAt: archivedAt ?? undefined }) };
+    ...(archivedAt === undefined ? {} : { archivedAt: archivedAt ?? undefined }),
+    ...(snoozedUntil === undefined ? {} : { snoozedUntil: snoozedUntil ?? undefined }) };
 }
 
 /** The visible conversation: walk parentId links from the active leaf back
