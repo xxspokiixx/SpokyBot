@@ -3,12 +3,15 @@ import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react
 import { createPortal } from "react-dom";
 import {
   Archive,
+  Bell,
   BellDot,
   Bot as BotIcon,
   CalendarDays,
   Check,
   ChevronRight,
+  CircleAlert,
   ClipboardCopy,
+  Clock3,
   Copy,
   Crown,
   FolderMinus,
@@ -88,7 +91,7 @@ import { DesktopWorkspaceSwitcher } from "./DesktopWorkspaceSwitcher";
 import { profileInitials, SidebarProfileMenu } from "./SidebarProfileMenu";
 import { SidebarSectionHeader } from "./SidebarSectionHeader";
 import { useShowThreads } from "@/lib/thread-preferences";
-import { SidebarBotActivity, sidebarBotActivityTasks } from "./SidebarBotActivity";
+import { AttentionThreadRows, crossBotAttentionThreads, SidebarBotActivity, sidebarBotActivityTasks } from "./SidebarBotActivity";
 import { ShortcutHint } from "./ShortcutHint";
 
 const SECTION_LABEL_KEYS: Record<string, LocaleKey> = {
@@ -1470,6 +1473,7 @@ export function Sidebar({ open, onClose }: { open: boolean; onClose: () => void 
   const [roomMenu, setRoomMenu] = useState<{ groupId: string; x: number; y: number } | null>(null);
   const [roomSectionPicker, setRoomSectionPicker] = useState<{ groupId: string; x: number; y: number } | null>(null);
   const [plusOpen, setPlusOpen] = useState(false);
+  const [attentionOpen, setAttentionOpen] = useState(false);
   const [newRoom, setNewRoom] = useState(false);
   const [newFolderBotId, setNewFolderBotId] = useState<string | null>(null);
   const [teamLibraryOpen, setTeamLibraryOpen] = useState(false);
@@ -1735,6 +1739,10 @@ export function Sidebar({ open, onClose }: { open: boolean; onClose: () => void 
     resetSectionDrag();
   };
   const archivedBots = state.bots.filter((bot) => bot.hidden);
+  // Every thread across every bot that needs the person right now — the
+  // same rule and order as the sidebar tree, so the bell can never
+  // disagree with it.
+  const attention = crossBotAttentionThreads(state.bots, state.pendingQueued);
   const pendingBotUndo = teamFeedback?.restoreBot;
 
   return (
@@ -1830,6 +1838,34 @@ export function Sidebar({ open, onClose }: { open: boolean; onClose: () => void 
               </>
             )}
           </div>
+          <button
+            type="button"
+            onClick={() => setAttentionOpen((o) => !o)}
+            aria-label={t("attention.title")}
+            title={t("attention.title")}
+            className="relative flex size-10 items-center justify-center rounded-md text-ink-secondary hover:bg-raised hover:text-ink"
+          >
+            {attention.length ? <BellDot size={20} strokeWidth={2} /> : <Bell size={20} strokeWidth={2} />}
+            {attention.length > 0 && (
+              <span className="absolute right-1 top-1 flex min-w-4 items-center justify-center rounded-full bg-accent px-0.5 text-[9.5px] font-semibold leading-4 text-ink">{attention.length > 9 ? "9+" : attention.length}</span>
+            )}
+          </button>
+          {attentionOpen && (
+            <>
+              <div className="fixed inset-0 z-30" onMouseDown={() => setAttentionOpen(false)} />
+              <div className={cn(
+                "absolute top-full z-40 mt-1 w-72 overflow-hidden rounded-xl border border-hairline/50 bg-menu py-1.5 shadow-2xl shadow-black/60",
+                density === "icons" ? "left-0" : "right-0",
+              )}>
+                <div className="px-3.5 pb-1 pt-1.5 text-[13px] font-medium text-ink">{t("attention.title")}</div>
+                {attention.length === 0 ? (
+                  <div className="px-3.5 py-2.5 text-[13px] text-ink-secondary">{t("attention.empty")}</div>
+                ) : (
+                  <AttentionThreadRows entries={attention} onJump={(entry) => { setAttentionOpen(false); dispatch({ type: "switchTask", botId: entry.botId, threadId: entry.task.threadId }); }} />
+                )}
+              </div>
+            </>
+          )}
           <button
             ref={importReturnRef}
             onClick={() => setPlusOpen((o) => !o)}
