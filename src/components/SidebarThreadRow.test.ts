@@ -36,6 +36,30 @@ describe("sidebar thread visibility", () => {
   });
 });
 
+describe("threads waiting on a teammate", () => {
+  const render = (task: Parameters<typeof SidebarThreadRow>[0]["task"], props: Partial<Parameters<typeof SidebarThreadRow>[0]> = {}) =>
+    renderToStaticMarkup(createElement(SidebarThreadRow, {
+      task, current: false, onSelect: vi.fn(), onRename: vi.fn(), onDelete: vi.fn(), ...props,
+    }));
+  // #1223: the parent thread dispatched a teammate and its own turn is done.
+  it("shows the wait as a quiet label, never the work spinner", () => {
+    const markup = render({ threadId: "dispatch", title: "Dispatch", waitingOnTeammate: true, busy: false, activity: "idle" });
+    expect(markup).toContain('title="Dispatch · Waiting on teammate"');
+    expect(markup).toContain('aria-label="Waiting on teammate"');
+    expect(markup).not.toContain("animate-spin");
+  });
+  it("keeps an older waiting thread visible past the six recent rows", () => {
+    const rows = Array.from({ length: 9 }, (_, index) => ({ threadId: String(index), title: `Thread ${index}` }));
+    const waiting = [...rows, { threadId: "dispatch", title: "Dispatch", waitingOnTeammate: true as const, busy: false }];
+    expect(visibleSidebarThreads(waiting, "0").map((task) => task.threadId)).toEqual(["0", "1", "2", "3", "4", "5", "dispatch"]);
+  });
+  it("surfaces the live activity label the chat pane derives while the row works", () => {
+    const markup = render({ threadId: "live", title: "Live work", busy: true, activity: "working" }, { activityLabel: "Reading a file" });
+    expect(markup).toContain('title="Live work · Reading a file"');
+    expect(markup).toContain('aria-label="Reading a file"');
+  });
+});
+
 describe("threads a bot opened", () => {
   const openedBy = { botId: "scout", name: "Scout", at: 5 };
   const render = (task: Parameters<typeof SidebarThreadRow>[0]["task"]) => renderToStaticMarkup(createElement(SidebarThreadRow, {
