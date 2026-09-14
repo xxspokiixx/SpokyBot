@@ -889,6 +889,11 @@ export function BotThreadList({ bot, selected, density = "comfortable", query = 
   const visibleTasks = query
     ? visibleSidebarThreads(tasks, bot.threadId, query, projects, showAll)
     : orderedSidebarThreads(visibleSidebarThreads(tasks, bot.threadId, "", projects, showAll), bot.threadId);
+  // Folders follow their best thread in that same order, so a folder holding
+  // a waiting approval outranks one holding only idle history; search keeps
+  // relevance order, and the stored order still governs move up and down.
+  const visibleProjectIndex = (projectId: string) => visibleTasks.findIndex((task) => task.projectId === projectId);
+  const orderedProjects = query ? projects : [...projects].sort((a, b) => visibleProjectIndex(b.id) - visibleProjectIndex(a.id));
   useRevealedThreadRow(state.revealThread, selected ? bot.threadId : null);
   const renderThread = (task: (typeof tasks)[number]) => {
     const thread = currentTaskBot(bot, task.threadId);
@@ -926,7 +931,8 @@ export function BotThreadList({ bot, selected, density = "comfortable", query = 
       onDragOver={(event) => { if (event.dataTransfer.types.includes(FOLDER_DRAG_TYPE)) event.stopPropagation(); }}
       onDrop={(event) => { if (event.dataTransfer.types.includes(FOLDER_DRAG_TYPE)) { event.preventDefault(); event.stopPropagation(); resetFolderDrag(); } }}>
       {!hidden && <>
-      {projects.map((project, index) => {
+      {orderedProjects.map((project) => {
+        const index = projects.indexOf(project);
         const projectTasks = tasks.filter((task) => task.projectId === project.id);
         const visible = visibleTasks.filter((task) => task.projectId === project.id);
         if (query && visible.length === 0 && !project.name.toLowerCase().includes(query.toLowerCase())) return null;

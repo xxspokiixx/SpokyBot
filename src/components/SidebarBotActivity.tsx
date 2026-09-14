@@ -13,6 +13,8 @@ export function sidebarBotActivityTasks(bot: Bot, queued: Record<string, unknown
     busy: bot.busy, activity: bot.activity, unread: bot.unread,
   }];
   return tasks.map((task) => ({ ...task, queued: Boolean(queued[task.threadId]?.length) }))
+    // Routine runs are reachable through their run receipt, never a menu.
+    .filter((task) => !task.routineRunId)
     .filter((task) => task.activity === "waiting-on-you" || task.activity === "working" || task.busy || task.queued || task.unread);
 }
 
@@ -23,10 +25,17 @@ export function sidebarBotActivityTasks(bot: Bot, queued: Record<string, unknown
 export type AttentionThread = { botId: string; botName: string; task: Task & { queued: boolean } };
 
 export function crossBotAttentionThreads(bots: Bot[], queued: Record<string, unknown[]>, exceptBotId?: string): AttentionThread[] {
-  return bots
-    .filter((bot) => bot.id !== exceptBotId)
-    .flatMap((bot) => orderedSidebarThreads(sidebarBotActivityTasks(bot, queued), bot.threadId)
-      .map((task) => ({ botId: bot.id, botName: bot.name, task })));
+  // Flatten first, then order once: sorting each bot on its own would let
+  // the unread reply of an earlier bot outrank the waiting approval of a
+  // later bot, which the sidebar tree never does. Hidden bots stay out
+  // entirely; the archived-bots panel is where they resurface.
+  return orderedSidebarThreads(
+    bots
+      .filter((bot) => bot.id !== exceptBotId && !bot.hidden)
+      .flatMap((bot) => sidebarBotActivityTasks(bot, queued)
+        .map((task) => ({ ...task, botId: bot.id, botName: bot.name }))),
+    "",
+  ).map(({ botId, botName, ...task }) => ({ botId, botName, task }));
 }
 
 /** The one row shape for attention entries: title, bot name, status, jump.

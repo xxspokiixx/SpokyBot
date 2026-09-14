@@ -221,6 +221,9 @@ function ConversationTaskPicker({
   const attentionRows = (attention ?? []).filter((entry) =>
     !attentionNeedle || entry.task.title.toLowerCase().includes(attentionNeedle) || entry.botName.toLowerCase().includes(attentionNeedle));
   const looking = query.trim();
+  // One result list for keyboard, count, and empty state: an attention row
+  // that matches the query is a real result even when no tree thread does.
+  const results = [...attentionRows.map((entry) => ({ kind: "attention" as const, entry })), ...visible.map((task) => ({ kind: "task" as const, task }))];
 
   return (
     <div className="relative" ref={ref}>
@@ -264,9 +267,10 @@ function ConversationTaskPicker({
                   }
                   if (e.key === "Enter" && !e.nativeEvent.isComposing) {
                     e.preventDefault();
-                    const first = visible[0];
+                    const first = results[0];
                     if (!first) return;
-                    if (first.threadId !== threadId) onSwitch(first.threadId);
+                    if (first.kind === "attention") onAttentionJump?.(first.entry);
+                    else if (first.task.threadId !== threadId) onSwitch(first.task.threadId);
                     closeMenu();
                   }
                 }}
@@ -276,12 +280,12 @@ function ConversationTaskPicker({
               />
             </div>
           </div>
-          <div className="max-h-[320px] overflow-y-auto" role="group" aria-label={looking ? t("task.matching", { count: visible.length }) : t("task.list")}>
+          <div className="max-h-[320px] overflow-y-auto" role="group" aria-label={looking ? t("task.matching", { count: results.length }) : t("task.list")}>
             {attentionRows.length > 0 && <div className="pb-1">
               <div className="flex items-center gap-1.5 px-3 pb-1 pt-1.5 text-[11px] font-medium text-ink-secondary"><BellDot size={12} />{t("attention.title")}</div>
               <AttentionThreadRows entries={attentionRows} onJump={(entry) => { onAttentionJump?.(entry); closeMenu(); }} />
             </div>}
-            {visible.length === 0 ? (
+            {results.length === 0 ? (
               <div className="px-3 py-6 text-center text-[13px] text-ink-secondary">
                 {t("task.noMatch", { query: looking })}
               </div>
