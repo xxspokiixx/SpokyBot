@@ -67,6 +67,8 @@ export function linuxAutoDescription(): string {
 
 export type BoxPanelAction =
   | "ensure-box"
+  | "attach-ready-box"
+  | "busy-box"
   | "team-box"
   | "show-ready-box"
   | "show-sleeping-box"
@@ -90,6 +92,7 @@ export function resolveBoxPanelAction({
   canUseCloud,
   autoLocal,
   teamComputer = false,
+  busy = false,
 }: {
   computer: Bot["computer"];
   configured: boolean;
@@ -97,6 +100,10 @@ export function resolveBoxPanelAction({
   canUseCloud: boolean;
   autoLocal: boolean;
   teamComputer?: boolean;
+  /** A turn is running on this bot: the server refuses provision/sleep
+   * with 409 while the turn owns the box, and the turn itself creates or
+   * wakes the box it needs. */
+  busy?: boolean;
 }): BoxPanelAction {
   // A team's explicit grant wins over Auto's private-Box/local fallback.
   // This panel reports it; paid lifecycle and shared access stay in Team map.
@@ -107,7 +114,13 @@ export function resolveBoxPanelAction({
     if (explicitCloud) return "unconfigured";
     return autoLocal ? "local" : "auto-unavailable";
   }
-  if (explicitCloud) return canUseCloud ? "ensure-box" : "auto-unavailable";
+  if (explicitCloud) {
+    if (!canUseCloud) return "auto-unavailable";
+    // Mid-turn the panel only watches: a ready box is shown as-is (its
+    // frames already stream in), anything else is left to the turn.
+    if (busy) return boxState && READY_BOX_STATES.has(boxState) ? "attach-ready-box" : "busy-box";
+    return "ensure-box";
+  }
   if (canUseCloud && boxState) {
     if (READY_BOX_STATES.has(boxState)) return "show-ready-box";
     if (SLEEPING_BOX_STATES.has(boxState)) return "show-sleeping-box";

@@ -34,7 +34,7 @@ import { cn } from "@/lib/cn";
 import { useCaptionChrome } from "@/components/DesktopCapabilities";
 import { usePageVisible } from "@/lib/page-visible";
 import { CloudScreenPreview } from "./CloudScreenPreview";
-import { isRemoteScreenshotContention } from "@/lib/remote-desktop";
+import { isActiveTurnRefusal, isRemoteScreenshotContention } from "@/lib/remote-desktop";
 import { CloudBackendPicker } from "./CloudBackendPicker";
 import { useDesktopCapabilities } from "./DesktopCapabilities";
 import { RoutinesSection } from "./bot-settings/RoutinesSection";
@@ -96,6 +96,7 @@ type Phase =
   | "checking"
   | "unconfigured"
   | "starting"
+  | "busy-box"
   | "ready"
   | "vm"
   | "vm-unavailable"
@@ -576,6 +577,7 @@ export function ComputerPanel({
           canUseCloud: cloudSupported,
           autoLocal,
           teamComputer: typeof status.teamComputer?.id === "string" && typeof status.teamComputer?.name === "string",
+          busy: bot.busy,
         });
         setResolvedComputerSelection({
           botId: bot.id,
@@ -588,6 +590,14 @@ export function ComputerPanel({
           setBoxState(typeof status.box?.state === "string" ? status.box.state : status.configured ? "missing" : "unavailable");
           setError(typeof status.problem === "string" ? status.problem : null);
           setPhase("team-box");
+          return;
+        }
+        if (action === "attach-ready-box") {
+          // The turn owns a ready box; provisioning would be refused (409)
+          // and is not needed. Going straight to ready lets the turn's live
+          // frames and the screenshot poll show what the bot is doing.
+          setBoxState(typeof status.box?.state === "string" ? status.box.state : null);
+          setPhase("ready");
           return;
         }
         if (action !== "ensure-box") {
@@ -611,6 +621,12 @@ export function ComputerPanel({
       })
       .catch((e) => {
         if (!alive) return;
+        // A turn that started while provision was in flight: not a fault,
+        // the panel waits for the turn (bot.busy re-runs this effect).
+        if (isActiveTurnRefusal(e)) {
+          setPhase("busy-box");
+          return;
+        }
         setError(e.message);
         setPhase("error");
       });
@@ -622,6 +638,7 @@ export function ComputerPanel({
     bot.computer,
     bot.section,
     bot.autoStartVps,
+    bot.busy,
     cloudBackend,
     retry,
     capabilitiesReady,
@@ -1015,6 +1032,7 @@ export function ComputerPanel({
   const emptyState = {
     checking: t("computer.phase.checking"),
     starting: t("computer.phase.starting"),
+    "busy-box": t("computer.phase.busyBox"),
     unconfigured: t("computer.phase.unconfigured"),
     "auto-unavailable": t("computer.phase.autoUnavailable"),
     "team-box": "This bot uses a shared team computer. Open Team map to view or manage it.",

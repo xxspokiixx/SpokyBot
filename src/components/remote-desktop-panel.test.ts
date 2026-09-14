@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { isRemoteScreenshotContention, remoteScreenshotSource } from "@/lib/remote-desktop";
+import { isActiveTurnRefusal, isRemoteScreenshotContention, remoteScreenshotSource } from "@/lib/remote-desktop";
 
 describe("remote VPS preview", () => {
   it("retries only known transient contention, not permanent 409 failures", () => {
@@ -11,6 +11,16 @@ describe("remote VPS preview", () => {
     }
     expect(isRemoteScreenshotContention({ status: 503, message: "this bot's cloud computer is being changed — wait for it to finish" })).toBe(false);
   });
+  it("recognises the active-turn refusal as a wait, not a fault", () => {
+    const message = "this bot's cloud computer is being used by an active turn — interrupt it first";
+    expect(isActiveTurnRefusal({ status: 409, message })).toBe(true);
+    // api() rejections do not always carry a status
+    expect(isActiveTurnRefusal(new Error(message))).toBe(true);
+    expect(isActiveTurnRefusal({ status: 503, message })).toBe(false);
+    expect(isActiveTurnRefusal({ status: 409, message: "this bot's cloud computer is being changed — wait for it to finish" })).toBe(false);
+    expect(isActiveTurnRefusal(null)).toBe(false);
+  });
+
   it("accepts only validated screenshot response shapes", () => {
     expect(remoteScreenshotSource({ png: "aGVsbG8=", format: "png" }))
       .toBe("data:image/png;base64,aGVsbG8=");

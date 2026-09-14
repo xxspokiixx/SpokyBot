@@ -9,6 +9,17 @@ export function isRemoteScreenshotContention(error: { status: number; message: s
   ].includes(error.message);
 }
 
+/** The server's 409 for provision/sleep while a turn owns the bot's cloud
+ * computer. A wait, not a fault: the panel keeps watching and re-resolves
+ * when the turn ends. `status` is optional because the panel's `api()`
+ * rejections do not always carry one. */
+export function isActiveTurnRefusal(error: unknown): boolean {
+  if (!error || typeof error !== "object") return false;
+  const { status, message } = error as { status?: unknown; message?: unknown };
+  if (status !== undefined && status !== 409) return false;
+  return typeof message === "string" && /cloud computer is being used by an active turn/i.test(message);
+}
+
 export function remoteScreenshotSource(raw: unknown): string | null {
   if (!raw || typeof raw !== "object") return null;
   const frame = raw as { png?: unknown; format?: unknown };
