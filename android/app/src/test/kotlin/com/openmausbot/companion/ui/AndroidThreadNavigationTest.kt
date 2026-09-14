@@ -9,6 +9,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.ui.MotionDurationScale
 import androidx.compose.ui.test.ExperimentalTestApi
 import androidx.compose.ui.test.assertIsDisplayed
+import androidx.compose.ui.test.assertIsNotEnabled
 import androidx.compose.ui.test.assertTextContains
 import androidx.compose.ui.test.assertTextEquals
 import androidx.compose.ui.test.hasSetTextAction
@@ -96,6 +97,60 @@ class AndroidThreadNavigationTest {
     fun stopServer() {
         if (::scene.isInitialized) scene.session.disconnect()
         server.shutdown()
+    }
+
+    @Test
+    fun `new bot requires confirmation and cancellation sends no request`() {
+        val navigator = CompanionNavigator()
+        mount { RosterScreen(navigator) }
+        compose.onNodeWithContentDescription("New bot").performClick()
+        compose.onNodeWithText("Create a new bot?").assertIsDisplayed()
+        assertTrue(requests.none { it.method == "POST" })
+        compose.onNodeWithText("Cancel").performClick()
+        compose.onNodeWithText("Create a new bot?").assertDoesNotExist()
+        assertTrue(requests.none { it.method == "POST" })
+        assertEquals(Destination.Roster, navigator.current)
+    }
+
+    @Test
+    fun `failed bot creation allows a newly confirmed retry`() {
+        val navigator = CompanionNavigator()
+        mount { RosterScreen(navigator) }
+        repeat(2) { attempt ->
+            compose.onNodeWithContentDescription("New bot").performClick()
+            compose.onNodeWithText("Create", substring = false).performClick()
+            compose.waitUntil(5_000) { scene.session.actionError != null }
+            compose.waitForIdle()
+            assertEquals(attempt + 1, requests.count { it.method == "POST" && it.path == "/api/bots" })
+            assertEquals(Destination.Roster, navigator.current)
+            compose.runOnIdle { scene.session.actionError = null }
+        }
+    }
+
+    @Test
+    fun `confirmed bot creation blocks duplicate taps and opens the created bot`() {
+        val release = java.util.concurrent.CountDownLatch(1)
+        val created = fixture.copy(id = "new-bot", threadId = "new-thread", tasks = emptyList())
+        answerAction = {
+            check(release.await(10, java.util.concurrent.TimeUnit.SECONDS))
+            json("""{"bot":${CompanionJson.encodeToString(Bot.serializer(), created)}}""")
+        }
+        val navigator = CompanionNavigator()
+        mount { RosterScreen(navigator) }
+        try {
+            compose.onNodeWithContentDescription("New bot").performClick()
+            compose.onNodeWithText("Create", substring = false).performClick()
+            compose.waitUntil(5_000) { requests.any { it.method == "POST" } }
+            compose.onNodeWithContentDescription("New bot").assertIsNotEnabled()
+            compose.onNodeWithContentDescription("New bot").performClick()
+            compose.onNodeWithText("Create a new bot?").assertDoesNotExist()
+            assertEquals(1, requests.count { it.method == "POST" && it.path == "/api/bots" })
+        } finally {
+            release.countDown()
+        }
+        compose.waitUntil(5_000) { (navigator.current as? Destination.Chat)?.target?.threadId == "new-thread" }
+        assertEquals("new-bot", scene.session.state.value.bot("new-bot")?.id)
+        assertEquals(1, requests.count { it.method == "POST" })
     }
 
     @Test
