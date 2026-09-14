@@ -50,7 +50,7 @@ import { BotPickerList } from "./BotPickerList";
 import { BotProjectDialog, FolderActions, FolderIcon, navigateThreadMenu, NewThreadButton } from "./BotProjects";
 import { draggedFolder, FOLDER_DRAG_TYPE, moveFolder, placeFolder } from "@/lib/folder-order";
 import { folderUnreadThreadIds, markFolderRead } from "@/lib/folder-read";
-import { orderedSidebarThreads, SidebarThreadRow, visibleSidebarThreads } from "./SidebarThreadRow";
+import { isArchived, orderedSidebarThreads, SidebarThreadRow, visibleSidebarThreads } from "./SidebarThreadRow";
 import {
   loadCollapsedSections,
   loadSectionOrder,
@@ -909,7 +909,7 @@ export function BotThreadList({ bot, selected, density = "comfortable", query = 
   // The archived disclosure holds only what the default list folds away; an
   // archived thread that demands attention already sits in the rows above.
   const archivedTasks = !query && !showAll
-    ? tasks.filter((task) => task.archivedAt && !visibleTasks.some((visible) => visible.threadId === task.threadId))
+    ? tasks.filter((task) => isArchived(task) && !visibleTasks.some((visible) => visible.threadId === task.threadId))
     : [];
   const projectToEdit = projects.find((project) => project.id === editingProject);
   const projectIds = projects.map((project) => project.id);

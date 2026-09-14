@@ -24,8 +24,12 @@ export function threadOpenerLabel(task: Pick<Task, "openedBy">): string | null {
 export function threadByline(task: Pick<Task, "openedBy" | "closedBy" | "archivedAt">): string | null {
   const closer = task.closedBy?.name.trim();
   if (closer) return t("task.closedBy", { name: closer });
-  return task.archivedAt ? t("task.archived") : threadOpenerLabel(task);
+  return isArchived(task) ? t("task.archived") : threadOpenerLabel(task);
 }
+
+/** Archived means the field is present, not truthy: the task API accepts any
+ * epoch number, so a thread persisted with archivedAt: 0 is archived. */
+export const isArchived = (task: Pick<Task, "archivedAt">): boolean => task.archivedAt !== undefined;
 
 /** Whether a row must stay on screen regardless of age or closed state:
  * the person is looking at it, it needs them, or it has something new. */
@@ -46,7 +50,7 @@ export function visibleSidebarThreads<T extends ThreadRowTask>(tasks: T[], activ
   }
   if (showAll) return tasks;
   let open = 0;
-  return tasks.filter((task) => task.closedBy || task.archivedAt
+  return tasks.filter((task) => task.closedBy || isArchived(task)
     ? demandsAttention(task, activeId)
     : open++ < 6 || demandsAttention(task, activeId));
 }
@@ -96,7 +100,7 @@ export function SidebarThreadRow({ task, current, compact, folders, onSelect, on
   const status = task.activity === "waiting-on-you" ? t("task.waiting") : task.busy ? t("chat.activity.working") : task.queued ? t("task.queued") : null;
   const byline = threadByline(task);
   const closed = Boolean(task.closedBy) && !status;
-  const archived = Boolean(task.archivedAt);
+  const archived = isArchived(task);
   const openMenu = (x: number, y: number) => setMenu({ left: Math.max(8, Math.min(x, window.innerWidth - 228)), top: Math.max(8, Math.min(y, window.innerHeight - 190)) });
   const startRename = () => { finishing.current = false; setDraft(task.title); setRenaming(true); setMenu(null); };
   const finishRename = (save: boolean) => {
@@ -150,7 +154,7 @@ export function SidebarThreadRow({ task, current, compact, folders, onSelect, on
           <option value="">{t("folder.none")}</option>{folders?.map((folder) => <option key={folder.id} value={folder.id}>{folder.emoji ? `${folder.emoji} ` : ""}{folder.name}</option>)}
         </select>
       </label>}
-      {onArchive && <button type="button" disabled={Boolean(task.busy)} onClick={() => { setMenu(null); onArchive(task.archivedAt ? null : Date.now()); }} className="flex w-full items-center gap-2 rounded px-2.5 py-2 text-left text-[12px] text-ink hover:bg-raised disabled:opacity-40">{task.archivedAt ? <ArchiveRestore size={12} /> : <Archive size={12} />}{task.archivedAt ? t("task.unarchive") : t("task.archive")}</button>}
+      {onArchive && <button type="button" disabled={Boolean(task.busy)} onClick={() => { setMenu(null); onArchive(isArchived(task) ? null : Date.now()); }} className="flex w-full items-center gap-2 rounded px-2.5 py-2 text-left text-[12px] text-ink hover:bg-raised disabled:opacity-40">{archived ? <ArchiveRestore size={12} /> : <Archive size={12} />}{archived ? t("task.unarchive") : t("task.archive")}</button>}
       <button type="button" disabled={Boolean(task.busy)} onClick={() => { setMenu(null); setDeleting(true); }} className="flex w-full items-center gap-2 rounded px-2.5 py-2 text-left text-[12px] text-danger hover:bg-raised disabled:opacity-40"><Trash2 size={12} />{t("task.deleteAria")}</button>
     </div>, document.body)}
     <ConfirmDialog open={deleting} title={t("task.deleteConfirm")} body={t("task.deleteBody", { title: task.title })} confirmLabel={t("task.deleteAria")}

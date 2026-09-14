@@ -176,4 +176,13 @@ describe("archived threads", () => {
     expect(markup).toContain("text-ink-secondary/70");
     expect(render({ threadId: "1", title: "Put away", archivedAt: 5, busy: true })).toContain('title="Put away · Working · Archived"');
   });
+  it("treats archivedAt: 0 as archived, because zero is a valid timestamp at the API boundary", () => {
+    const rows = [
+      { threadId: "0", title: "Current work" },
+      { threadId: "1", title: "Put away", archivedAt: 0 },
+    ];
+    expect(visibleSidebarThreads(rows, "0").map((task) => task.threadId)).toEqual(["0"]);
+    expect(threadByline({ archivedAt: 0 })).toBe("Archived");
+    expect(render({ threadId: "1", title: "Put away", archivedAt: 0 })).toContain("Archived");
+  });
 });
