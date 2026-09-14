@@ -10,7 +10,9 @@ describe("cloud panel frame capture", () => {
     expect(PANEL_FRAME_WIDTH).toBe(1920);
     expect(PANEL_FRAME_QUALITY).toBe(85);
     const cmd = panelShotCommand();
-    expect(cmd).toContain('scrot -o -q 85 "$f"');
+    // the pointer is part of the frame: watching the bot means seeing its cursor
+    expect(cmd).toContain('scrot -o -p -q 85 "$f"');
+    expect(cmd).toContain("x11grab -draw_mouse 1");
     expect(cmd).toContain("import -window root -quality 85");
     expect(cmd).toContain(`[ "$w" -gt 1920 ]`);
     expect(cmd).toContain("convert \"$f\" -resize 1920x -quality 85");

@@ -1027,7 +1027,9 @@ export async function execOnBox(cfg: AppConfig, botId: string, command: string) 
 // quality where page text stays legible. (The model's own capture is
 // sized separately in computer-proxy.ts.) Only wider displays are scaled
 // down, with -resize rather than -thumbnail so the resample is not the
-// fast-and-blurry kind meant for icons.
+// fast-and-blurry kind meant for icons. The pointer is drawn into the
+// frame (scrot --pointer, ffmpeg -draw_mouse): watching the bot work means
+// seeing where its cursor is, and X11 captures leave it out by default.
 const PANEL_PATH = "/tmp/ogb-panel.jpg";
 export const PANEL_FRAME_WIDTH = 1920;
 export const PANEL_FRAME_QUALITY = 85;
@@ -1041,7 +1043,7 @@ export function panelShotCommand({ width = PANEL_FRAME_WIDTH, quality = PANEL_FR
     `f=${PANEL_PATH}`,
     'w=$(xdotool getdisplaygeometry 2>/dev/null | cut -d" " -f1)',
     'case "$w" in ""|*[!0-9]*) w=0;; esac',
-    `scrot -o -q ${quality} "$f" 2>/dev/null || import -window root -quality ${quality} "$f" 2>/dev/null || ffmpeg -y -f x11grab -i "$DISPLAY" -frames:v 1 -q:v ${PANEL_FRAME_FFMPEG_Q} "$f" >/dev/null 2>&1`,
+    `scrot -o -p -q ${quality} "$f" 2>/dev/null || import -window root -quality ${quality} "$f" 2>/dev/null || ffmpeg -y -f x11grab -draw_mouse 1 -i "$DISPLAY" -frames:v 1 -q:v ${PANEL_FRAME_FFMPEG_Q} "$f" >/dev/null 2>&1`,
     `if [ "$w" -gt ${width} ] 2>/dev/null && command -v convert >/dev/null 2>&1; then convert "$f" -resize ${width}x -quality ${quality} "$f" 2>/dev/null || true; fi`,
     'test -s "$f" && echo captured',
   ].join("; ");
