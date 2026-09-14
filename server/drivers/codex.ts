@@ -984,6 +984,7 @@ export const CodexDriver: ProviderDriver<CodexConfig> = {
           } catch {
             continue;
           }
+          stderrSinceOutput = "";
           const loggedMessage = codexNativeIncomingLogMessage(msg, sensitiveResponseIds);
           appendNative(threadId, { dir: "in", source: "codex.app-server", msg: loggedMessage });
           if (msg.id !== undefined && (msg.result !== undefined || msg.error !== undefined)) {
@@ -1002,16 +1003,25 @@ export const CodexDriver: ProviderDriver<CodexConfig> = {
       });
 
       let stderr = "";
+      // Stderr that arrived after the last parsed protocol message. The
+      // full buffer accumulates for the whole process lifetime, so its
+      // tail can name a long-past event (a websocket 426 logged at turn
+      // start, echoed half an hour later when something else kills the
+      // process). Only this slice can explain an exit; older bytes are
+      // context, not cause.
+      let stderrSinceOutput = "";
       child.stderr.on("data", (c) => {
         stderr += c;
+        stderrSinceOutput += c;
         if (stderr.length > 8192) stderr = stderr.slice(-8192);
+        if (stderrSinceOutput.length > 2048) stderrSinceOutput = stderrSinceOutput.slice(-2048);
       });
       child.on("error", (e) => {
         if (abandoned) return;
         emit({ ...base(threadId, turnId), type: "runtime.error", ...describeSpawnFailure(e, config.cli) });
         void settle(false, "spawn_error");
       });
-      child.on("close", (code) => {
+      child.on("close", (code, signal) => {
         if (abandoned) return;
         if (state.settled) {
           // Root exit alone cannot release a turn after an uncertain stop.
@@ -1019,14 +1029,59 @@ export const CodexDriver: ProviderDriver<CodexConfig> = {
           void stop();
           return;
         }
-        if (!state.settled) {
+        // The child died before the turn completed. Attribute the exit
+        // honestly: name the signal when it was killed, and only quote
+        // stderr that arrived after the last protocol message. A stale
+        // tail here once misattributed a whole day of killed turns to a
+        // websocket 426 logged at turn start.
+        const recentStderr = stderrSinceOutput.trim();
+        const hadStreamedOutput = codexTurnId !== null || state.sawStreamDelta;
+        const verdict = classifyError({ exitCode: code, stderr: recentStderr || stderr });
+        // Safe re-dispatch: relaunch only when the app-server never
+        // acknowledged turn/start — no native turn began, nothing was
+        // streamed, so replaying the input cannot duplicate work. After
+        // any acknowledgement (or any buffered pre-ack event) the turn
+        // settles instead: a replay could re-run tools the user saw.
+        if (
+          !stopRequested && codexTurnId === null && earlyNotifications.length === 0 &&
+          verdict.transient && attempt < RETRY_MAX_ATTEMPTS - 1
+        ) {
+          const delayMs = computeBackoff(attempt);
+          attempt++;
           emit({
             ...base(threadId, turnId),
-            type: "runtime.error",
-            message: `codex exited ${code} before turn/completed${stderr ? `: ${stderr.trim().slice(-300)}` : ""}`,
+            type: "turn.retrying",
+            attempt,
+            delayMs,
+            reason: verdict.reason,
           });
-          void settle(false, "exit_before_result");
+          // Retire this attempt before anything async runs, so a late
+          // rpc timer rejection in the handshake catch cannot relaunch
+          // a second time on top of this one.
+          abandoned = true;
+          void (async () => {
+            const alreadyDead = child.exitCode !== null || child.signalCode !== null;
+            if (!alreadyDead && !(await terminate())) {
+              void settle(false, "shutdown_timeout");
+              return;
+            }
+            await interruptibleDelay(Math.max(1, Math.round(delayMs * retryScale)), stopSignal.signal).promise;
+            if (!stopRequested) {
+              void launchAttempt(attempt).catch(() => {});
+            } else {
+              await settle(false, "interrupted");
+            }
+          })().catch(() => {});
+          return;
         }
+        emit({
+          ...base(threadId, turnId),
+          type: "runtime.error",
+          message: `codex exited ${code}${signal ? ` (signal ${signal})` : ""} before turn/completed${
+            recentStderr ? `: ${recentStderr.slice(-300)}` : hadStreamedOutput && stderr.trim() ? "; no stderr after the last app-server output" : ""
+          }`,
+        });
+        void settle(false, "exit_before_result");
       });
 
       active.set(threadId, { stop, turnId, asks });
@@ -1165,7 +1220,7 @@ export const CodexDriver: ProviderDriver<CodexConfig> = {
         const message = e instanceof Error ? e.message : String(e);
         const needsAuth = /(?:\b401\b|unauthorized|missing bearer|authentication required)/i.test(message);
         const verdict = classifyError(failure);
-        if (!state.settled && !needsAuth && verdict.transient && attempt < RETRY_MAX_ATTEMPTS - 1 && state.sawStreamDelta === false) {
+        if (!state.settled && !abandoned && !needsAuth && verdict.transient && attempt < RETRY_MAX_ATTEMPTS - 1 && state.sawStreamDelta === false) {
           const delayMs = computeBackoff(attempt);
           attempt++;
           emit({
@@ -1190,7 +1245,9 @@ export const CodexDriver: ProviderDriver<CodexConfig> = {
           }
           return;
         }
-        if (!state.settled) {
+        // abandoned marks an attempt retired by a retry; its late rpc
+        // timeouts must neither report a spurious error nor relaunch again
+        if (!state.settled && !abandoned) {
           emit({
             ...base(threadId, turnId),
             type: "runtime.error",

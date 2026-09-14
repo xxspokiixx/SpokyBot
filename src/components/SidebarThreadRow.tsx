@@ -58,10 +58,15 @@ const tomorrowNineAm = () => {
   return when.getTime();
 };
 
+/** Working is activity or flag: the wire can carry either alone, so the
+ * visibility filter, the Working status, and the busy-disabled actions must
+ * all ask the same question. */
+const isWorking = (task: Pick<Task, "activity" | "busy">): boolean => task.activity === "working" || Boolean(task.busy);
+
 /** Whether a row must stay on screen regardless of age or closed state:
  * the person is looking at it, it needs them, or it has something new. */
 const demandsAttention = (task: ThreadRowTask, activeId: string) =>
-  task.threadId === activeId || task.activity === "waiting-on-you" || task.activity === "working" || Boolean(task.busy) || Boolean(task.queued) || Boolean(task.unread);
+  task.threadId === activeId || task.activity === "waiting-on-you" || isWorking(task) || Boolean(task.queued) || Boolean(task.unread);
 
 /** The default list is the six most recent OPEN threads plus anything that
  * demands attention. A thread a bot closed is folded away — a PM bot that
@@ -149,7 +154,7 @@ export function SidebarThreadRow({ task, current, compact, folders, onSelect, on
   const finishing = useRef(false);
   const menuRef = useRef<HTMLDivElement>(null);
   const actionRef = useRef<HTMLButtonElement>(null);
-  const status = task.activity === "waiting-on-you" ? t("task.waiting") : task.busy ? t("chat.activity.working") : task.queued ? t("task.queued") : null;
+  const status = task.activity === "waiting-on-you" ? t("task.waiting") : isWorking(task) ? t("chat.activity.working") : task.queued ? t("task.queued") : null;
   const byline = threadByline(task);
   const closed = Boolean(task.closedBy) && !status;
   const archived = isArchived(task);
@@ -207,7 +212,7 @@ export function SidebarThreadRow({ task, current, compact, folders, onSelect, on
           <span className={cn("min-w-0 truncate", task.unread && "font-semibold text-ink", (closed || archived || snoozed) && !current && "text-ink-secondary/70")}>{task.title}</span>
           {byline && <span className="min-w-0 truncate text-[10.5px] leading-tight text-ink-secondary/80">{byline}</span>}
         </span>
-        {task.activity === "waiting-on-you" ? <span className="shrink-0 text-[10px] font-medium text-warning">{t("task.waiting")}</span> : task.busy ? <Loader2 size={11} className="shrink-0 animate-spin text-success" aria-label={t("chat.activity.working")} /> : task.queued ? <span className="shrink-0 text-[10px] text-ink-secondary">{t("task.queued")}</span> : null}
+        {task.activity === "waiting-on-you" ? <span className="shrink-0 text-[10px] font-medium text-warning">{t("task.waiting")}</span> : isWorking(task) ? <Loader2 size={11} className="shrink-0 animate-spin text-success" aria-label={t("chat.activity.working")} /> : task.queued ? <span className="shrink-0 text-[10px] text-ink-secondary">{t("task.queued")}</span> : null}
         {task.unread && <span className="size-1.5 shrink-0 rounded-full bg-accent" aria-label={t("task.unread")} />}
       </button>}
       <button ref={actionRef} type="button" aria-label={t("task.actions", { title: task.title })} aria-expanded={Boolean(menu)}
@@ -226,19 +231,19 @@ export function SidebarThreadRow({ task, current, compact, folders, onSelect, on
           <option value="">{t("folder.none")}</option>{folders?.map((folder) => <option key={folder.id} value={folder.id}>{folder.emoji ? `${folder.emoji} ` : ""}{folder.name}</option>)}
         </select>
       </label>}
-      {onArchive && <button type="button" disabled={Boolean(task.busy)} onClick={() => { setMenu(null); onArchive(isArchived(task) ? null : Date.now()); }} className="flex w-full items-center gap-2 rounded px-2.5 py-2 text-left text-[12px] text-ink hover:bg-raised disabled:opacity-40">{archived ? <ArchiveRestore size={12} /> : <Archive size={12} />}{archived ? t("task.unarchive") : t("task.archive")}</button>}
+      {onArchive && <button type="button" disabled={isWorking(task)} onClick={() => { setMenu(null); onArchive(isArchived(task) ? null : Date.now()); }} className="flex w-full items-center gap-2 rounded px-2.5 py-2 text-left text-[12px] text-ink hover:bg-raised disabled:opacity-40">{archived ? <ArchiveRestore size={12} /> : <Archive size={12} />}{archived ? t("task.unarchive") : t("task.archive")}</button>}
       {onSnooze && <div className="px-2.5 pt-1">
         <span className="flex items-center gap-2 text-[11px] text-ink-secondary"><Clock size={12} />{t("task.snooze")}</span>
         <div className="mt-0.5 flex flex-col">
           {[{ label: t("task.snoozeUntilActivity"), at: 0 }, { label: t("task.snoozeTonight"), at: nextSixPm() }, { label: t("task.snoozeTomorrow"), at: tomorrowNineAm() }].map((preset) => (
-            <button key={preset.label} type="button" disabled={Boolean(task.busy)} onClick={() => { setMenu(null); onSnooze(preset.at); }} className="flex w-full items-center rounded px-2.5 py-1.5 text-left text-[12px] text-ink hover:bg-raised disabled:opacity-40">{preset.label}</button>
+            <button key={preset.label} type="button" disabled={isWorking(task)} onClick={() => { setMenu(null); onSnooze(preset.at); }} className="flex w-full items-center rounded px-2.5 py-1.5 text-left text-[12px] text-ink hover:bg-raised disabled:opacity-40">{preset.label}</button>
           ))}
         </div>
       </div>}
       {onSnooze && snoozed && <button type="button" onClick={() => { setMenu(null); onSnooze(null); }} className="flex w-full items-center gap-2 rounded px-2.5 py-2 text-left text-[12px] text-ink hover:bg-raised"><BellOff size={12} />{t("task.stopSnoozing")}</button>}
-      <button type="button" disabled={Boolean(task.busy)} onClick={() => { setMenu(null); setDeleting(true); }} className="flex w-full items-center gap-2 rounded px-2.5 py-2 text-left text-[12px] text-danger hover:bg-raised disabled:opacity-40"><Trash2 size={12} />{t("task.deleteAria")}</button>
+      <button type="button" disabled={isWorking(task)} onClick={() => { setMenu(null); setDeleting(true); }} className="flex w-full items-center gap-2 rounded px-2.5 py-2 text-left text-[12px] text-danger hover:bg-raised disabled:opacity-40"><Trash2 size={12} />{t("task.deleteAria")}</button>
     </div>, document.body)}
     <ConfirmDialog open={deleting} title={t("task.deleteConfirm")} body={t("task.deleteBody", { title: task.title })} confirmLabel={t("task.deleteAria")}
-      onCancel={() => setDeleting(false)} onConfirm={() => { if (!task.busy) onDelete(); setDeleting(false); }} returnFocusRef={actionRef} />
+      onCancel={() => setDeleting(false)} onConfirm={() => { if (!isWorking(task)) onDelete(); setDeleting(false); }} returnFocusRef={actionRef} />
   </>;
 }

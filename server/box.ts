@@ -1021,17 +1021,38 @@ export async function execOnBox(cfg: AppConfig, botId: string, command: string) 
 // Base64 over command stdout is NOT reliable for the panel's full-size
 // frames (probed 2026-08-12: an otherwise-complete payload came back with
 // a corrupted length), so the frame is always fetched over HTTP here.
+//
+// The frame is for a person: it fills the panel and opens in the chat's
+// image viewer, so it keeps the desktop's native size up to 1080p and a
+// quality where page text stays legible. (Sizing it is now the only say
+// OpenMausBot has over any frame off this box: the turn runs on the box's
+// own agent, so the model's own captures never pass through here.) Only
+// wider displays are scaled down, with -resize rather than -thumbnail so
+// the resample is not the fast-and-blurry kind meant for icons. The
+// pointer is drawn into the frame (scrot --pointer, ffmpeg -draw_mouse):
+// watching the bot work means seeing where its cursor is, and X11
+// captures leave it out by default.
 const PANEL_PATH = "/tmp/ogb-panel.jpg";
-const PANEL_WIDTH = 1024;
-const SHOT_CMD = [
-  "export DISPLAY=${DISPLAY:-:0}",
-  `f=${PANEL_PATH}`,
-  'w=$(xdotool getdisplaygeometry 2>/dev/null | cut -d" " -f1)',
-  'case "$w" in ""|*[!0-9]*) w=0;; esac',
-  'scrot -o -q 70 "$f" 2>/dev/null || import -window root -quality 70 "$f" 2>/dev/null || ffmpeg -y -f x11grab -i "$DISPLAY" -frames:v 1 -q:v 7 "$f" >/dev/null 2>&1',
-  `if [ "$w" -gt ${PANEL_WIDTH} ] 2>/dev/null && command -v convert >/dev/null 2>&1; then convert "$f" -thumbnail ${PANEL_WIDTH}x -quality 70 "$f" 2>/dev/null || true; fi`,
-  'test -s "$f" && echo captured',
-].join("; ");
+export const PANEL_FRAME_WIDTH = 1920;
+export const PANEL_FRAME_QUALITY = 85;
+// ffmpeg's -q:v runs 2 (best) to 31; 3 lands near JPEG quality 85.
+const PANEL_FRAME_FFMPEG_Q = 3;
+
+/** The shell that captures one panel frame on the box. Exported for tests. */
+export function panelShotCommand({ width = PANEL_FRAME_WIDTH, quality = PANEL_FRAME_QUALITY } = {}): string {
+  return [
+    "export DISPLAY=${DISPLAY:-:0}",
+    `f=${PANEL_PATH}`,
+    // a stale frame must not pass `test -s` when every capture tool fails
+    'rm -f "$f"',
+    'w=$(xdotool getdisplaygeometry 2>/dev/null | cut -d" " -f1)',
+    'case "$w" in ""|*[!0-9]*) w=0;; esac',
+    `scrot -o -p -q ${quality} "$f" 2>/dev/null || import -window root -quality ${quality} "$f" 2>/dev/null || ffmpeg -y -f x11grab -draw_mouse 1 -i "$DISPLAY" -frames:v 1 -q:v ${PANEL_FRAME_FFMPEG_Q} "$f" >/dev/null 2>&1`,
+    `if [ "$w" -gt ${width} ] 2>/dev/null && command -v convert >/dev/null 2>&1; then convert "$f" -resize ${width}x -quality ${quality} "$f" 2>/dev/null || true; fi`,
+    'test -s "$f" && echo captured',
+  ].join("; ");
+}
+const SHOT_CMD = panelShotCommand();
 
 /** Read a file off the box as base64 — raw artifact bytes when the API
  * supports it (33% less transfer, no JSON envelope), else the files API. */

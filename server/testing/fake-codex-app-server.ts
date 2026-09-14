@@ -8,6 +8,10 @@
 //                     mcp-elicitation | mcp-app-approval | mcp-form | permissions-approval | config-profile |
 //                     config-profile-unsupported | config-read-error | image |
 //                     logged-in-stdout | logged-out | unauthorized | late-request
+//   FAKE_CODEX_LAUNCH_CRASHES  die at initialize with transient stderr for the first N
+//                               launches (launch count kept in FAKE_CODEX_STATE)
+//   FAKE_CODEX_ACK_CRASH       exit right after acknowledging turn/start
+//   FAKE_CODEX_EXIT_MID_TURN   stale websocket-426 stderr, one reasoning delta, then SIGKILL
 //   FAKE_CODEX_DUMP   path to write {pid, argv, env, calls, decision} as JSON
 //   FAKE_CODEX_ACCOUNT_EMAIL  synthetic ChatGPT identity (default ada@example.test)
 //   FAKE_CODEX_ACCOUNT_MODE   chatgpt (default) | api-key | none | unsupported | error | hang
@@ -227,6 +231,23 @@ process.stdin.on("data", (chunk) => {
         break;
       case "turn/start": {
         nativeThreadId = msg.params?.threadId ?? nativeThreadId;
+        // crash script for close-path retry tests: die before
+        // acknowledging turn/start. The launch count lives in a state
+        // FILE for the same reason as the TRANSIENTS script below; it
+        // must count only turn launches, not the catalog spawn during
+        // create(), which is why this sits here and not on initialize.
+        if (process.env.FAKE_CODEX_LAUNCH_CRASHES && process.env.FAKE_CODEX_STATE) {
+          let launched = 0;
+          try {
+            launched = Number(readFileSync(process.env.FAKE_CODEX_STATE, "utf8")) || 0;
+          } catch {}
+          const crashes = Number(process.env.FAKE_CODEX_LAUNCH_CRASHES) || 0;
+          writeFileSync(process.env.FAKE_CODEX_STATE, String(launched + 1));
+          if (launched < crashes) {
+            console.error("Error: connection reset by peer");
+            process.exit(1);
+          }
+        }
         if (mode === "safety-rpc") {
           out({ jsonrpc: "2.0", id: msg.id, error: { code: -32603, message: "HTTP 503: This task was blocked by our safety systems." } });
           break;
@@ -279,6 +300,22 @@ process.stdin.on("data", (chunk) => {
             });
             break;
           }
+        }
+        if (process.env.FAKE_CODEX_ACK_CRASH) {
+          out({ jsonrpc: "2.0", id: msg.id, result: { turn: { id: nativeTurnId } } });
+          console.error("Error: connection reset by peer");
+          setTimeout(() => process.exit(1), 20);
+          break;
+        }
+        if (process.env.FAKE_CODEX_EXIT_MID_TURN) {
+          // replay of the 2026-09-14 incident: a websocket 426 on stderr
+          // at turn start, output keeps flowing, and the process is then
+          // killed by a signal long after the stale line
+          console.error("2026-09-14T20:24:19Z ERROR codex_api::endpoint::responses_websocket: failed to connect to websocket: HTTP error: 426 Upgrade Required, url: ws://127.0.0.1:10100/v1/responses");
+          out({ jsonrpc: "2.0", id: msg.id, result: { turn: { id: nativeTurnId } } });
+          notify("item/reasoning/textDelta", { itemId: "m1", delta: "still thinking" });
+          setTimeout(() => process.kill(process.pid, "SIGKILL"), 50);
+          break;
         }
         if (mode === "early-turn-events") finishTurn();
         out({ jsonrpc: "2.0", id: msg.id, result: { turn: { id: nativeTurnId } } });
