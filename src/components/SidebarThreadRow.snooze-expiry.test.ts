@@ -53,7 +53,9 @@ describe("snooze expiry wake-up", () => {
     expect(scheduled?.at).toBe(now + 60_001);
 
     vi.setSystemTime(now + 60_001);
+    expect(fixture.values[0]).toBe(0);
     scheduled?.fire();
+    expect(fixture.values[0]).toBe(1);
     const html = renderProbe(tasks, "active");
     expect(html).toContain("active");
     expect(html).toContain("napping");
