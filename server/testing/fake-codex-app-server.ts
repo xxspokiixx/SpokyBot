@@ -303,8 +303,14 @@ process.stdin.on("data", (chunk) => {
         }
         if (process.env.FAKE_CODEX_ACK_CRASH) {
           out({ jsonrpc: "2.0", id: msg.id, result: { turn: { id: nativeTurnId } } });
-          console.error("Error: connection reset by peer");
-          setTimeout(() => process.exit(1), 20);
+          // The driver quotes only stderr that arrived after the last protocol
+          // message. stdout and stderr are separate pipes, and on Windows the
+          // parent can read this line before the ack above; a real crash a
+          // moment after the ack is what the incident looked like anyway.
+          setTimeout(() => {
+            console.error("Error: connection reset by peer");
+            setTimeout(() => process.exit(1), 50);
+          }, 50);
           break;
         }
         if (process.env.FAKE_CODEX_EXIT_MID_TURN) {

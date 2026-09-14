@@ -1350,7 +1350,9 @@ describe("CodexDriver turns (fake app-server)", () => {
       expect(done).toMatchObject({ stopReason: "exit_before_result" });
       expect(recorder.events.some((e) => e.type === "turn.retrying")).toBe(false);
       const error = recorder.events.find((e) => e.type === "runtime.error");
-      expect(error?.message).toContain("signal SIGKILL");
+      // Windows has no signals: TerminateProcess surfaces as exit code 1 with
+      // no signal name, so the honest attribution there is the bare exit.
+      expect(error?.message).toContain(process.platform === "win32" ? "codex exited 1" : "signal SIGKILL");
       expect(error?.message).toContain("no stderr after the last app-server output");
       expect(error?.message).not.toContain("426");
     } finally {
