@@ -98,6 +98,9 @@ describe("CodexDriver turns (fake app-server)", () => {
     delete process.env.FAKE_CODEX_PARTIAL_FAILS;
     delete process.env.FAKE_CODEX_STATE;
     delete process.env.FAKE_CODEX_RETRY_SCALE;
+    delete process.env.FAKE_CODEX_LAUNCH_CRASHES;
+    delete process.env.FAKE_CODEX_ACK_CRASH;
+    delete process.env.FAKE_CODEX_EXIT_MID_TURN;
     delete process.env.FAKE_CODEX_VERSION;
     delete process.env.FAKE_CODEX_ASTRA;
     delete process.env.FAKE_CODEX_INSTRUCTIONS;
@@ -1303,6 +1306,57 @@ describe("CodexDriver turns (fake app-server)", () => {
   }, 20_000);
 
 
+  it("retries a transient app-server crash before the turn starts", async () => {
+    process.env.FAKE_CODEX_LAUNCH_CRASHES = "1";
+    process.env.FAKE_CODEX_STATE = join(scratch, "codex-launch-crash");
+    process.env.FAKE_CODEX_RETRY_SCALE = "0.001";
+    try {
+      await create();
+      await instance.adapter.sendTurn({ threadId: "t-codex-launch-crash", text: "hi" });
+      await recorder.until((e) => e.type === "turn.completed" && e.ok === true);
+      const retries = recorder.events.filter((e) => e.type === "turn.retrying");
+      expect(retries.map((e) => e.attempt)).toEqual([1]);
+      expect(recorder.events.filter((e) => e.type === "turn.started")).toHaveLength(1);
+      // exactly one settled reply across both app-server launches
+      const replies = recorder.events.filter((e) => e.type === "item.completed" && e.itemType === "assistant_text");
+      expect(replies).toHaveLength(1);
+    } finally {
+      delete process.env.FAKE_CODEX_LAUNCH_CRASHES;
+      delete process.env.FAKE_CODEX_STATE;
+      delete process.env.FAKE_CODEX_RETRY_SCALE;
+    }
+  }, 20_000);
+  it("never replays a turn after turn/start was acknowledged, even for a transient-looking exit", async () => {
+    process.env.FAKE_CODEX_ACK_CRASH = "1";
+    try {
+      await create();
+      await instance.adapter.sendTurn({ threadId: "t-codex-ack-crash", text: "hi" });
+      const done = await recorder.until((e) => e.type === "turn.completed" && e.ok === false);
+      expect(done).toMatchObject({ stopReason: "exit_before_result" });
+      expect(recorder.events.some((e) => e.type === "turn.retrying")).toBe(false);
+      const error = recorder.events.find((e) => e.type === "runtime.error");
+      expect(error?.message).toContain("connection reset");
+    } finally {
+      delete process.env.FAKE_CODEX_ACK_CRASH;
+    }
+  }, 20_000);
+  it("does not blame stale stderr when the app-server is killed mid-turn", async () => {
+    process.env.FAKE_CODEX_EXIT_MID_TURN = "1";
+    try {
+      await create();
+      await instance.adapter.sendTurn({ threadId: "t-codex-exit-mid-turn", text: "hi" });
+      await recorder.until((e) => e.type === "content.delta" && e.streamKind === "reasoning_text");
+      const done = await recorder.until((e) => e.type === "turn.completed" && e.ok === false);
+      expect(done).toMatchObject({ stopReason: "exit_before_result" });
+      expect(recorder.events.some((e) => e.type === "turn.retrying")).toBe(false);
+      const error = recorder.events.find((e) => e.type === "runtime.error");
+      expect(error?.message).toContain("signal SIGKILL");
+      expect(error?.message).toContain("no stderr after the last app-server output");
+      expect(error?.message).not.toContain("426");
+    } finally {
+      delete process.env.FAKE_CODEX_EXIT_MID_TURN;
+    }
+  }, 20_000);
   it("uses the explicit login command from the official Codex flow", () => {
     expect(CodexDriver.install?.signInCommand).toBe("codex login");
   });
