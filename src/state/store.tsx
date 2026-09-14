@@ -275,6 +275,10 @@ export interface Task {
    * it out of the default list (still under "show all", never deleted) and
    * the server clears it when a new turn starts there */
   closedBy?: ThreadCloser;
+  /** when the person archived this thread: out of the default list, still
+   * under show-all and search, and back the moment it needs them again;
+   * absent = never archived. Syncs like every other task field. */
+  archivedAt?: number;
 }
 
 /** The bot that opened a thread on itself or a teammate. */
@@ -419,12 +423,14 @@ export type TaskUpdatePatch = Partial<Pick<Task, "modelSelection" | "approvalMod
   updateBotDefault?: boolean;
   resetApprovalToAsk?: boolean;
   projectId?: string | null;
+  archivedAt?: number | null;
 };
 
 function taskPatchFields(patch: TaskUpdatePatch): Partial<Task> {
-  const { confirmFullAccess: _fullConsent, acknowledgeLocalAuto: _localAck, updateBotDefault: _modelDefault, resetApprovalToAsk, projectId, ...fields } = patch;
+  const { confirmFullAccess: _fullConsent, acknowledgeLocalAuto: _localAck, updateBotDefault: _modelDefault, resetApprovalToAsk, projectId, archivedAt, ...fields } = patch;
   return { ...fields, ...(resetApprovalToAsk ? { approvalMode: "ask", autoApprove: false, alwaysAllow: [] } : {}),
-    ...(projectId === undefined ? {} : { projectId: projectId ?? undefined }) };
+    ...(projectId === undefined ? {} : { projectId: projectId ?? undefined }),
+    ...(archivedAt === undefined ? {} : { archivedAt: archivedAt ?? undefined }) };
 }
 
 /** The visible conversation: walk parentId links from the active leaf back

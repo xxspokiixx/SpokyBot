@@ -876,6 +876,7 @@ export function BotThreadList({ bot, selected, density = "comfortable", query = 
   const [folderDrop, setFolderDrop] = useState<{ id: string; place: "before" | "after" } | null>(null);
   const draggingFolder = useRef<string | null>(null);
   const [showAll, setShowAll] = useState(false);
+  const [showArchived, setShowArchived] = useState(false);
   const currentProjectId = tasks.find((task) => task.threadId === bot.threadId)?.projectId;
   useEffect(() => {
     if (selected && currentProjectId) setCollapsed((previous) => {
@@ -901,9 +902,15 @@ export function BotThreadList({ bot, selected, density = "comfortable", query = 
       onSelect={() => { if (task.threadId !== bot.threadId) dispatch({ type: "switchTask", botId: bot.id, threadId: task.threadId }); else dispatch({ type: "select", id: bot.id }); }}
       onRename={(title) => dispatch({ type: "renameTask", botId: bot.id, threadId: task.threadId, title })}
       onDelete={() => dispatch({ type: "deleteTask", botId: bot.id, threadId: task.threadId })}
-      onMove={(projectId) => dispatch({ type: "updateTask", botId: bot.id, threadId: task.threadId, patch: { projectId } })} />;
+      onMove={(projectId) => dispatch({ type: "updateTask", botId: bot.id, threadId: task.threadId, patch: { projectId } })}
+      onArchive={(archivedAt) => dispatch({ type: "updateTask", botId: bot.id, threadId: task.threadId, patch: { archivedAt } })} />;
   };
   const ungrouped = visibleTasks.filter((task) => !projects.some((project) => project.id === task.projectId));
+  // The archived disclosure holds only what the default list folds away; an
+  // archived thread that demands attention already sits in the rows above.
+  const archivedTasks = !query && !showAll
+    ? tasks.filter((task) => task.archivedAt && !visibleTasks.some((visible) => visible.threadId === task.threadId))
+    : [];
   const projectToEdit = projects.find((project) => project.id === editingProject);
   const projectIds = projects.map((project) => project.id);
   const saveOrder = (ids: string[], onSaved?: () => void) => {
@@ -1005,6 +1012,13 @@ export function BotThreadList({ bot, selected, density = "comfortable", query = 
       {projects.length > 0 && ungrouped.length > 0 && <div className="px-3 pb-1 pt-2 text-[10.5px] text-ink-secondary/70">{t("task.list")}</div>}
       {ungrouped.map(renderThread)}
       {!query && !showAll && tasks.length > visibleTasks.length && <button type="button" onClick={() => setShowAll(true)} className="px-3 py-1.5 text-[11px] text-ink-secondary hover:text-ink">{t("task.showAll", { count: tasks.length })}</button>}
+      {archivedTasks.length > 0 && <>
+        <button type="button" aria-expanded={showArchived} onClick={() => setShowArchived((previous) => !previous)} className="flex items-center gap-1 px-3 py-1.5 text-[11px] text-ink-secondary hover:text-ink">
+          <ChevronRight aria-hidden="true" size={11} className={cn("shrink-0 transition-transform", showArchived && "rotate-90")} />
+          {t("task.archivedList", { count: archivedTasks.length })}
+        </button>
+        {showArchived && archivedTasks.map(renderThread)}
+      </>}
       <NewThreadButton bot={bot} className="mt-1 w-full rounded-md" />
       {projectToEdit && <BotProjectDialog bot={bot} project={projectToEdit} onClose={() => setEditingProject(null)} />}
       </>}

@@ -151,3 +151,29 @@ describe("orderedSidebarThreads", () => {
     expect(ordered.map((t) => t.threadId)).toEqual(["unread-b", "unread-a"]);
   });
 });
+
+describe("archived threads", () => {
+  const render = (task: Parameters<typeof SidebarThreadRow>[0]["task"]) => renderToStaticMarkup(createElement(SidebarThreadRow, {
+    task, current: false, onSelect: vi.fn(), onRename: vi.fn(), onDelete: vi.fn(),
+  }));
+  it("folds archived threads out of the default list, but never when they need the person", () => {
+    const rows = [
+      { threadId: "0", title: "Current work" },
+      { threadId: "1", title: "Put away", archivedAt: 5 },
+      { threadId: "2", title: "Needs you", archivedAt: 5, activity: "waiting-on-you" as const, busy: false },
+    ];
+    expect(visibleSidebarThreads(rows, "0").map((task) => task.threadId)).toEqual(["0", "2"]);
+    expect(visibleSidebarThreads(rows, "0", "", [], true).map((task) => task.threadId)).toEqual(["0", "1", "2"]);
+    expect(visibleSidebarThreads(rows, "0", "put away").map((task) => task.threadId)).toEqual(["1"]);
+  });
+  it("says Archived under the title and dims the row, behind any live status", () => {
+    expect(threadByline({ archivedAt: 5 })).toBe("Archived");
+    expect(threadByline({ openedBy: { botId: "scout", name: "Scout", at: 1 }, archivedAt: 5 })).toBe("Archived");
+    expect(threadByline({ openedBy: { botId: "scout", name: "Scout", at: 1 } })).toBe("opened by Scout");
+    expect(threadByline({ openedBy: { botId: "scout", name: "Scout", at: 1 }, archivedAt: 5, closedBy: { botId: "pm", name: "Parker", at: 2 } })).toBe("closed by Parker");
+    const markup = render({ threadId: "1", title: "Put away", archivedAt: 5 });
+    expect(markup).toContain("Archived");
+    expect(markup).toContain("text-ink-secondary/70");
+    expect(render({ threadId: "1", title: "Put away", archivedAt: 5, busy: true })).toContain('title="Put away · Working · Archived"');
+  });
+});
