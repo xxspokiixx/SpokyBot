@@ -16,6 +16,7 @@ const nodeSchema = z.object({
 export type RoomHandoff = z.infer<typeof nodeSchema>;
 export type RoomAddress = Pick<RoomHandoff, "groupId" | "threadId" | "botId">;
 export const ROOM_HANDOFF_LIMITS = { depth: 4, requests: 24, executions: 48, lifetimeMs: 30 * 60_000, minRunwayMs: 10 * 60_000 };
+/** Renders elapsed milliseconds as whole minutes, or seconds under one minute. */
 const duration = (ms: number) => ms >= 60_000 ? `${Math.floor(ms / 60_000)}m` : `${Math.floor(ms / 1000)}s`;
 const terminal = (n: RoomHandoff) => ["completed", "failed", "cancelled"].includes(n.status);
 
@@ -85,6 +86,15 @@ export class RoomHandoffs {
   private protectsRunner(n: RoomHandoff): boolean {
     return this.children(n.id).some(c => !terminal(c) && ((c.status === "running" && this.now() <= this.deadline(c)) || this.protectsRunner(c)));
   }
+  /** A parent still owes the follow-up execution that decides on its
+   * children's results; the ceiling defers to that execution's own runway. */
+  private owesFollowUp(n: RoomHandoff): boolean {
+    if (n.status === "resume") return true;
+    if (n.status !== "waiting") return false;
+    const children = this.children(n.id);
+    return (children.length > 0 && children.every(c => terminal(c))) || children.some(c => this.owesFollowUp(c));
+  }
+  /** Names the budget, the node's status, and the elapsed tree time. */
   private lifetimeError(n: RoomHandoff): string {
     return `Room handoff lifetime budget exhausted: node was ${n.status} after ${duration(this.now() - this.root(n).createdAt)} of the ${duration(ROOM_HANDOFF_LIMITS.lifetimeMs)} tree lifetime`;
   }
@@ -213,7 +223,7 @@ export class RoomHandoffs {
     for (const n of [...this.nodes.values()].reverse()) {
       if (terminal(n)) continue;
       const error = this.hooks.validate(n, n.parentId ? this.nodes.get(n.parentId) : undefined);
-      if (error || (this.now() > this.deadline(n) && !this.protectsRunner(n))) {
+      if (error || (this.now() > this.deadline(n) && !this.protectsRunner(n) && !this.owesFollowUp(n))) {
         this.cancelTree(n, error ?? this.lifetimeError(n), "failed");
       }
     }

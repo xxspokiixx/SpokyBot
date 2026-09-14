@@ -6,6 +6,7 @@ import { RoomHandoffs, ROOM_HANDOFF_LIMITS, type RoomHandoffHooks } from "./room
 import { removeTempDir } from "./testing/cleanup.ts";
 
 const addr = (id: string) => ({ groupId: id, threadId: `${id}-thread`, botId: `${id}-bot` });
+/** Builds an engine over a temp file, with hooks and clock the test can override. */
 async function fixture(test: (engine: RoomHandoffs, hooks: RoomHandoffHooks, file: string) => Promise<void> | void, now: () => number = Date.now) {
   const dir = mkdtempSync(join(tmpdir(), "room-handoff-unit-"));
   const hooks: RoomHandoffHooks = { validate: () => undefined, busy: () => false,
@@ -274,6 +275,40 @@ describe("room handoff lifetime budget", () => {
       expect(node.result).toContain("node was running");
     }, () => nowMs);
   });
+  it("resumes a waiting parent past the ceiling and gives the follow-up its own runway", async () => {
+    let nowMs = 0;
+    await fixture(async (engine, hooks) => {
+      const resumedAt: number[] = [];
+      const finish: Record<string, (result: { ok: boolean; text: string }) => void> = {};
+      hooks.run = (node, resumed, signal) => new Promise(resolve => {
+        if (resumed) resumedAt.push(nowMs);
+        finish[node.key] = resolve;
+        signal.addEventListener("abort", () => resolve({ ok: false, text: "aborted" }));
+      });
+      engine.enqueue(addr("A"), "turn", undefined, addr("B"), "build", "build");
+      engine.sourceSettled("turn", true);
+      nowMs = 21 * 60_000; engine.tick(); await flush();
+      expect(engine.children("turn")[0].status).toBe("running");
+      // The child finishes inside its own runway but past the tree ceiling.
+      nowMs = ROOM_HANDOFF_LIMITS.lifetimeMs + 60_000;
+      finish.build({ ok: true, text: "done" }); await flush();
+      engine.tick(); await flush();
+      const parent = engine.nodes.get("turn")!;
+      expect(parent.status).toBe("waiting");
+      engine.tick(); await flush();
+      expect(parent.status).toBe("running");
+      expect(resumedAt).toEqual([ROOM_HANDOFF_LIMITS.lifetimeMs + 60_000]);
+      expect(parent.startedAt).toBe(ROOM_HANDOFF_LIMITS.lifetimeMs + 60_000);
+      nowMs = ROOM_HANDOFF_LIMITS.lifetimeMs + 60_000 + ROOM_HANDOFF_LIMITS.minRunwayMs;
+      engine.tick(); await flush();
+      expect(parent.status).toBe("running");
+      nowMs += 1;
+      engine.tick(); await flush();
+      expect(parent.status).toBe("failed");
+      expect(parent.result).toContain("Room handoff lifetime budget exhausted");
+      expect(parent.result).toContain("node was running");
+    }, () => nowMs);
+  });
   it("refuses follow-up work when the remaining lifetime cannot serve a minimum runway", () => {
     let nowMs = 0;
     return fixture(engine => {
@@ -305,4 +340,3 @@ describe("room handoff lifetime budget", () => {
     }, () => nowMs);
   });
 });
-
