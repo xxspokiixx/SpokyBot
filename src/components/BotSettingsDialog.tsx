@@ -312,11 +312,11 @@ export function BotSettingsDialog({ bot, overlay = false }: {
           // ring would frame the whole sheet, so it is off for the container.
           "animate-panel-in absolute inset-0 z-40 flex h-full min-w-0 flex-col border-l border-hairline/40 bg-panel outline-none focus-visible:outline-none",
           overlay
-            // Below lg every panel already covers the window; from lg up
+            // Below md every panel already covers the window; from md up
             // this one hugs the right edge over the chat, shadowed so it
             // reads as a sheet on top of the panel that stays beneath it.
-            ? "lg:inset-auto lg:right-0 lg:top-0 lg:bottom-0 lg:w-[min(420px,42vw)] lg:shadow-2xl"
-            : "lg:static lg:z-auto lg:w-[min(420px,42vw)] lg:shrink-0",
+            ? "md:inset-auto md:right-0 md:top-0 md:bottom-0 md:w-[min(420px,42vw)] md:shadow-2xl"
+            : "md:static md:z-auto md:w-[min(420px,42vw)] md:shrink-0",
         )}
       >
         <div className="flex shrink-0 items-center justify-between px-4 py-3">

@@ -20,3 +20,8 @@ export function useMediaQuery(query: string, fallback = false): boolean {
  * plus the sidebar leave no usable chat column on the default 1100px
  * window; from 2xl up they fit beside a readable conversation. */
 export const TWO_SIDE_PANELS_FIT = "(min-width: 1536px)";
+
+/** The full sidebar (up to 320px), a readable chat (~400px) and one side
+ * panel (420–540px) need about this much; narrower, the sidebar folds to
+ * its avatar rail while a panel is open. */
+export const SIDEBAR_AND_PANEL_FIT = "(min-width: 1280px)";

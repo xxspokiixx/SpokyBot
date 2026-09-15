@@ -46,8 +46,13 @@ export function SidebarPopoverMenu({
   items,
   ariaLabel,
   openOnHover = false,
+  placement = "above",
   renderTrigger,
 }: {
+  /** "above" stretches over the trigger's width and opens upward (the
+   * sidebar's bottom menus); "below" hangs a fixed-width sheet under the
+   * trigger's right edge (a header icon). */
+  placement?: "above" | "below";
   /** `data-tour` id for the trigger button */
   tourId?: string;
   items: SidebarMenuItem[];
@@ -151,7 +156,10 @@ export function SidebarPopoverMenu({
           id={menuId}
           role="menu"
           aria-label={ariaLabel}
-          className="animate-pop-in absolute bottom-full left-0 right-0 z-40 mb-1 overflow-hidden rounded-xl border border-hairline/50 bg-menu py-1.5 shadow-2xl shadow-black/50"
+          className={cn(
+            "animate-pop-in absolute z-40 overflow-hidden rounded-xl border border-hairline/50 bg-menu py-1.5 shadow-2xl shadow-black/50",
+            placement === "below" ? "top-full right-0 mt-1 w-64" : "bottom-full left-0 right-0 mb-1",
+          )}
         >
           {items.map((item) => (
             <div key={item.key}>
