@@ -147,10 +147,12 @@ final class ThreadNavigationTests: XCTestCase {
         let bot = makeBot(tasks: [sentinel, timed, expired, unreadSleep, openHere])
 
         // The sentinel and a still-running clock fold away; an expired
-        // timestamp, something unread, and the thread open here do not.
+        // timestamp, something unread, and the thread open here do not, and
+        // what survives is listed in attention order: unread beats the
+        // thread open here, which beats a plain expired sleeper.
         XCTAssertEqual(
             bot.threadGroups().flatMap(\.tasks).map(\.threadId),
-            ["expired", "unread-sleep", "current"]
+            ["unread-sleep", "current", "expired"]
         )
         // Nothing is gone: the manage sheet and search still list sleepers.
         XCTAssertEqual(
