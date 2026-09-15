@@ -278,6 +278,8 @@ export interface RoutineManagerOptions {
 
 const ALL_DAYS = [0, 1, 2, 3, 4, 5, 6];
 const CATCH_UP_MS = 12 * 60 * 60_000;
+/** How long before a due routine the computer is asked to stay awake. */
+const WAKE_HORIZON_MS = 60 * 60_000;
 const MAX_DATE_MS = 8_640_000_000_000_000;
 const LOCAL_DAY_MS = 24 * 60 * 60_000;
 const INTERVAL_RESTRICTION_SEARCH_MS = 9 * LOCAL_DAY_MS;
@@ -829,6 +831,21 @@ export class RoutineManager {
 
   listRoutines(): Routine[] {
     return this.routines.map(cloneRoutine);
+  }
+
+  /** Whether this computer should stay awake for routines: a run is in
+   * flight, or an enabled routine is due within the horizon. The schedule
+   * runs inside this process — a sleeping computer runs nothing — so the
+   * desktop shell holds a power assertion while this says so, and releases
+   * it the rest of the time. */
+  wakeHold(horizonMs = WAKE_HORIZON_MS): { hold: boolean; reason?: "running" | "due"; at?: number } {
+    const now = this.now();
+    if (this.runs.some((run) => ["queued", "running", "waiting"].includes(run.status))) return { hold: true, reason: "running" };
+    const due = this.routines
+      .filter((routine) => routine.enabled && routine.nextRunAt != null && routine.nextRunAt <= now + horizonMs)
+      .map((routine) => routine.nextRunAt!)
+      .sort((a, b) => a - b)[0];
+    return due === undefined ? { hold: false } : { hold: true, reason: "due", at: due };
   }
 
   listRuns(from?: number, to?: number): RoutineRun[] {

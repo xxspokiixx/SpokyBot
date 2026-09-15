@@ -12048,6 +12048,11 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
     if (path === "/api/routines" && method === "POST") {
       return json(res, 201, { routine: routines!.create(await readBody(req)) });
     }
+    // The desktop shell polls this to decide whether to hold the computer
+    // awake: a run in flight, or a routine due within the hour.
+    if (path === "/api/routines/wake" && method === "GET") {
+      return json(res, 200, routines!.wakeHold());
+    }
     let routineMatch = path.match(/^\/api\/routines\/([\w-]+)\/run$/);
     if (routineMatch && method === "POST") {
       const run = routines!.runNow(routineMatch[1]);

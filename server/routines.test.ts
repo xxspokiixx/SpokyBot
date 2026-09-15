@@ -144,6 +144,27 @@ describe("cron routines use the existing persistent scheduler", () => {
     expect(h.manager.listRoutines()[0].nextRunAt).toBe(Date.parse("2026-11-01T09:00:00Z"));
   });
 
+  it("asks the computer to stay awake for the hour before a due routine and while a run is in flight", async () => {
+    const h = harness(start);
+    expect(h.manager.wakeHold()).toEqual({ hold: false });
+    const routine = h.manager.create(input());
+    // a month away: nothing to hold for
+    expect(h.manager.wakeHold()).toEqual({ hold: false });
+    h.setNow(routine.nextRunAt! - 61 * 60_000);
+    expect(h.manager.wakeHold()).toEqual({ hold: false });
+    h.setNow(routine.nextRunAt! - 59 * 60_000);
+    expect(h.manager.wakeHold()).toEqual({ hold: true, reason: "due", at: routine.nextRunAt });
+    // a paused routine asks for nothing
+    h.manager.update(routine.id, { enabled: false });
+    expect(h.manager.wakeHold()).toEqual({ hold: false });
+    h.manager.update(routine.id, { enabled: true });
+    // once the run is going, the hold is for the run, not the clock
+    h.setNow(h.manager.listRoutines()[0].nextRunAt!);
+    await h.manager.tick(); await h.manager.tick();
+    expect(h.manager.listRuns()[0]).toMatchObject({ status: "running" });
+    expect(h.manager.wakeHold()).toEqual({ hold: true, reason: "running" });
+  });
+
   it("catches up once within twelve hours and does not replay missed minute slots", async () => {
     const h = harness(start);
     const routine = h.manager.create(input({ ...monthly, expression: "* * * * *" }));
