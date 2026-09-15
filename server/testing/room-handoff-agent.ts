@@ -13,14 +13,18 @@ export async function runRoomHandoffAgent(argv: string[], planPath: string, prom
   if (!integration) throw new Error("The room agent did not receive its agents integration");
   const botId = integration.env.OMB_BOT_ID;
   const system = readFileSync(arg("--append-system-prompt-file"), "utf8");
-  const resumed = system.includes("Your downstream room requests have settled.");
+  // Claude snapshots the launch-time system prompt for a session. A retained
+  // process or --resume launch receives changed turn-scoped instructions in
+  // the user message, so inspect both surfaces just as the model does.
+  const turnContext = `${system}\n${JSON.stringify(prompt)}`;
+  const resumed = turnContext.includes("Your downstream room requests have settled.");
   const basePlan = JSON.parse(readFileSync(planPath, "utf8"))[botId] ?? {};
   const previous = existsSync(`${planPath}.evidence.jsonl`) ? readFileSync(`${planPath}.evidence.jsonl`, "utf8").trim().split("\n").filter(Boolean).map(line => JSON.parse(line)) : [];
   const turnIndex = previous.filter(p => p.botId === botId).length;
   const plan = basePlan.turns ? basePlan.turns[turnIndex] : basePlan;
   if (!plan) throw new Error(`Unexpected extra fixture turn ${turnIndex} for ${botId}`);
   for (const expected of plan.expectSystemIncludes ?? []) if (!system.includes(expected)) throw new Error(`Missing discussion context: ${expected}`);
-  for (const expected of plan.expectContextIncludes ?? []) if (!`${system}\n${JSON.stringify(prompt)}`.includes(expected)) throw new Error(`Missing conversation context: ${expected}`);
+  for (const expected of plan.expectContextIncludes ?? []) if (!turnContext.includes(expected)) throw new Error(`Missing conversation context: ${expected}`);
   const steps = basePlan.turns ? plan.steps ?? [] : resumed ? plan.resumeSteps ?? [] : plan.steps ?? [];
   const child = spawn(integration.command, integration.args, { env: { ...process.env, ...integration.env }, stdio: ["pipe", "pipe", "pipe"] });
   const pending = new Map<number, { resolve: (value: any) => void; reject: (error: Error) => void }>();
