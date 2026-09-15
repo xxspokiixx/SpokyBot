@@ -399,6 +399,14 @@ export interface TaskUsage {
    * written by builds before cost existed lack the field; read as null. */
   costUsd: number | null;
   turns: number;
+  /** The most recent settled turn on its own, so a chip can say what the
+   * last message cost instead of only a running total that grows by the
+   * whole thread every message. Absent on records from older builds. */
+  lastTurn?: { input: number; output: number; cachedInput?: number; costUsd: number | null };
+  /** What filled the model's window on the last model call of the last
+   * turn, and the window's size when known. This, not the total, predicts
+   * the next message's cost and says when a thread has grown long. */
+  context?: { tokens: number; window?: number };
 }
 
 /** Everything the BOT authored is scrubbed of content-shaped secrets before
@@ -2035,7 +2043,7 @@ export class Store {
   addTaskUsage(
     botId: string,
     threadId: string,
-    turn: { input?: number; output?: number; cachedInput?: number; costUsd: number | null },
+    turn: { input?: number; output?: number; cachedInput?: number; costUsd: number | null; context?: { tokens?: number; window?: number } },
   ): TaskUsage | null {
     const task = this.taskByThread(botId, threadId);
     if (!task) return null;
@@ -2052,12 +2060,24 @@ export class Store {
     const turnInput = clean(turn.input);
     const nextCachedInput = Math.min(clean(prev.cachedInput), prevInput)
       + Math.min(clean(turn.cachedInput), turnInput);
+    const contextTokens = clean(turn.context?.tokens);
+    const contextWindow = clean(turn.context?.window);
     task.usage = {
       input: prevInput + turnInput,
       output: prev.output + clean(turn.output),
       ...(cachedKnown ? { cachedInput: nextCachedInput } : {}),
       costUsd: cost === null ? prevCost : (prevCost ?? 0) + cost,
       turns: prev.turns + 1,
+      lastTurn: {
+        input: turnInput, output: clean(turn.output),
+        ...(typeof turn.cachedInput === "number" ? { cachedInput: Math.min(clean(turn.cachedInput), turnInput) } : {}),
+        costUsd: cost,
+      },
+      // a turn that reported no context keeps the previous reading rather
+      // than pretending the window emptied
+      ...(contextTokens > 0
+        ? { context: { tokens: contextTokens, ...(contextWindow > 0 ? { window: contextWindow } : {}) } }
+        : prev.context ? { context: prev.context } : {}),
     };
     this.saveBots();
     this.emit({ type: "bot", botId });

@@ -174,7 +174,13 @@ export type RuntimeEvent = RuntimeEventBase &
         source: "user" | "auto" | "timeout" | "system" | "unavailable" | "peer";
         approvalScope?: "local-computer";
       }
-    | { type: "thread.token-usage.updated"; input: number; output: number; cachedInput?: number }
+    | {
+        type: "thread.token-usage.updated"; input: number; output: number; cachedInput?: number;
+        /** What the model's window held on the most recent model call — the
+         * whole prompt, cache reads included — and the window's size when the
+         * driver knows it. The figure that predicts the next message's cost. */
+        contextTokens?: number; contextWindow?: number;
+      }
     // `setup: true` marks a failure the user fixes by installing or
     // configuring something, not by retrying — the UI offers setup instead.
     // `terminal: true` records failure of the complete turn, rather than a

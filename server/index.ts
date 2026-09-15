@@ -367,6 +367,7 @@ import { createBotPackageExport, type ExportablePackageSkill } from "./package-e
 import { createTeamBackup, importTeamBackup } from "./team-backup.ts";
 import { MAX_TEAM_BACKUP_BYTES } from "../shared/team-backup.ts";
 import { shouldMountLocalComputer } from "./local-routing.ts";
+import { modelContextWindow } from "./model-context-window.ts";
 import { resolveSurface } from "./surface.ts";
 import {
   PendingTurnCancellations,
@@ -3232,6 +3233,8 @@ const groupSpeakers = new Map<string, { botId: string; name: string; color: stri
 // Providers report cumulative-within-turn numbers; the final value is folded
 // into the task's tally when the turn settles.
 const turnUsage = new Map<string, { input: number; output: number; cachedInput?: number }>();
+/** What the window held on the latest model call of the turn in flight, banked beside the totals at turn.completed. */
+const turnContext = new Map<string, { tokens?: number; window?: number }>();
 
 // Bounded per active turn. OpenHands uses a bounded recent-event scan for
 // the same class of stuck-loop detection; retaining an unlimited set of
@@ -3290,6 +3293,7 @@ const watchdog = new TurnWatchdog({
     settleDirectFollowup(stalledGeneration);
     finalizeDelegationWatch(turn.threadId, false, "", "Delegated turn stalled and was stopped");
     turnUsage.delete(turn.threadId);
+    turnContext.delete(turn.threadId);
     roomStallCompletions.stall(turn.threadId);
     // ACP interruption settles within five seconds; other adapters settle
     // sooner. Keep ownership during that grace period so another turn cannot
@@ -4169,6 +4173,9 @@ bus.subscribe((event: RuntimeEvent) => {
       // running totals for the turn in flight; folded into the task's
       // tally at turn.completed (below) so retries never double-count
       turnUsage.set(event.threadId, { input: event.input, output: event.output, cachedInput: event.cachedInput });
+      if (event.contextTokens !== undefined || event.contextWindow !== undefined) {
+        turnContext.set(event.threadId, { tokens: event.contextTokens, window: event.contextWindow });
+      }
       break;
     case "turn.completed": {
       // A peer-started turn settles as coordination, not as news. What keeps
@@ -4208,6 +4215,7 @@ bus.subscribe((event: RuntimeEvent) => {
       lastReply.delete(event.threadId);
       const lastReported = turnUsage.get(event.threadId);
       turnUsage.delete(event.threadId);
+      turnContext.delete(event.threadId);
       // group turns run on the room's thread — the speaking bot's task
       // tally is not the right home for a shared room's spend, so only
       // 1:1 task turns are tallied for now.
@@ -4247,11 +4255,17 @@ bus.subscribe((event: RuntimeEvent) => {
         // (turn.completed.usage) is authoritative; a driver that only
         // streams the running indicator falls back to its last value.
         const tokens = event.usage ?? lastReported;
+        // the context figure: what the last model call's prompt held, with
+        // the window from the driver or, failing that, the model's family
+        const lastContext = turnContext.get(event.threadId);
+        turnContext.delete(event.threadId);
+        const contextModel = store.taskByThread(bot.id, event.threadId)?.modelSelection?.model ?? bot.modelSelection.model;
         store.addTaskUsage(bot.id, event.threadId, {
           input: tokens?.input,
           output: tokens?.output,
           cachedInput: tokens?.cachedInput,
           costUsd: event.cost ?? null,
+          context: { tokens: lastContext?.tokens, window: lastContext?.window ?? modelContextWindow(contextModel) },
         });
         // and write the same figures to the month's ledger, which outlives
         // the task and answers "what did we spend, by whom" for a period
@@ -5336,6 +5350,7 @@ async function startTurn(
   // a signal the person still owes a glance to.
   if (commsDepth === 0) store.patchTask(bot.id, threadId, { unread: false });
   turnUsage.delete(threadId);
+  turnContext.delete(threadId);
 
   void (async () => {
     try {
@@ -5864,6 +5879,7 @@ async function startTurn(
         if (activeVpsThreads.get(bot.id) === threadId) activeVpsThreads.delete(bot.id);
         watchdog.settle(threadId);
         turnUsage.delete(threadId);
+        turnContext.delete(threadId);
       }
       if (e instanceof DirectTurnSetupCancelled) {
         opts?.onDispatchError?.(e.message);

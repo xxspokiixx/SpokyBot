@@ -28,6 +28,7 @@
 //   FAKE_CODEX_ACCOUNT_MODE   chatgpt (default) | api-key | none | unsupported | error | hang
 //   FAKE_CODEX_RESUME_ERROR   JSON-RPC error object to reject thread/resume
 //   FAKE_CODEX_START_ERROR    JSON-RPC error object to reject thread/start
+//   FAKE_CODEX_RESTORED_USAGE report 100/50/10 tokens already used before turn/start, as a resumed thread can
 //
 // Keep this file dependency-free — it runs as a bare `node` subprocess.
 import { existsSync, readFileSync, writeFileSync } from "node:fs";
@@ -114,7 +115,16 @@ const finishTurn = () => {
     });
   }
   notify("item/completed", { item: { id: "m1", type: "agentMessage", text: "done from fake codex" } });
-  notify("thread/tokenUsage/updated", { tokenUsage: { total: { inputTokens: 7, cachedInputTokens: 4, outputTokens: 3 } } });
+  // `total` is the process so far, `last` the final model call. With
+  // FAKE_CODEX_RESTORED_USAGE the process already carried 100/50/10 before
+  // turn/start (a resumed thread restoring earlier usage), so the driver's
+  // per-turn figure must still come out as 7/4/3.
+  const carried = process.env.FAKE_CODEX_RESTORED_USAGE ? { inputTokens: 100, cachedInputTokens: 50, outputTokens: 10 } : { inputTokens: 0, cachedInputTokens: 0, outputTokens: 0 };
+  notify("thread/tokenUsage/updated", { tokenUsage: {
+    total: { inputTokens: carried.inputTokens + 7, cachedInputTokens: carried.cachedInputTokens + 4, outputTokens: carried.outputTokens + 3 },
+    last: { inputTokens: 7, cachedInputTokens: 4, outputTokens: 3 },
+    modelContextWindow: 272000,
+  } });
   dump();
   if (mode === "late-request") process.stdout.cork();
   notify("turn/completed", { turn: { status: "completed" } });
@@ -245,6 +255,7 @@ process.stdin.on("data", (chunk) => {
         } else if (mode === "resume" || mode === "helper-events" || mode === "instructions-unsupported" || mode === "config-profile" || mode === "config-profile-unsupported" ||
             (mode === "resume-then-missing" && !existsSync(process.env.FAKE_CODEX_STATE ?? ""))) {
           out({ jsonrpc: "2.0", id: msg.id, result: { thread: { id: msg.params?.threadId } } });
+          if (process.env.FAKE_CODEX_RESTORED_USAGE) notify("thread/tokenUsage/updated", { tokenUsage: { total: { inputTokens: 100, cachedInputTokens: 50, outputTokens: 10 } } });
         } else {
           out({ jsonrpc: "2.0", id: msg.id, error: { code: -32600, message: `no rollout found for thread id ${msg.params?.threadId}` } });
         }
@@ -265,6 +276,7 @@ process.stdin.on("data", (chunk) => {
           out({ jsonrpc: "2.0", id: msg.id, error: { code: -32602, message: "experimental API required for permissions" } });
         } else {
           out({ jsonrpc: "2.0", id: msg.id, result: { thread: { id: "codex-thread-1" }, model: "fake-codex-model" } });
+          if (process.env.FAKE_CODEX_RESTORED_USAGE) notify("thread/tokenUsage/updated", { tokenUsage: { total: { inputTokens: 100, cachedInputTokens: 50, outputTokens: 10 } } });
         }
         break;
       case "turn/start": {

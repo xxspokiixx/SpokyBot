@@ -641,9 +641,12 @@ export const CodexDriver: ProviderDriver<CodexConfig> = {
         lastError: "",
         lastText: "",
         sawStreamDelta: false,
-        // codex reports token usage as a running THREAD total; the harness
-        // wants this turn's figure, so the last report is banked on settle
+        // codex reports token usage as a running total for this app-server
+        // process. The harness wants this turn's figure: the total minus
+        // whatever the process already carried before turn/start (a resumed
+        // thread may restore earlier usage), banked on settle.
         usage: undefined as { input: number; output: number; cachedInput?: number } | undefined,
+        usageBaseline: undefined as { input: number; output: number; cachedInput: number } | undefined,
       };
 
       const asks = new Map<string, (behavior: "allow" | "deny" | "answer", message?: string, source?: "user" | "timeout" | "system") => void>();
@@ -861,6 +864,17 @@ export const CodexDriver: ProviderDriver<CodexConfig> = {
           !("threadId" in p) && !("turnId" in p);
         if (!connectionError) {
           if (!codexThreadId || p.threadId !== codexThreadId) return;
+          if (!codexTurnId && msg.method === "thread/tokenUsage/updated" && p.tokenUsage?.total) {
+            // A total reported before this turn exists is what the process
+            // carried in — a resumed thread restoring earlier usage. It is the
+            // baseline this turn's figure is measured from, never a reading to
+            // buffer and replay as if this turn produced it. (Codex names the
+            // turn before any model call, so a genuine first reading cannot
+            // land here.)
+            const t = p.tokenUsage.total;
+            state.usageBaseline = { input: t.inputTokens ?? 0, output: t.outputTokens ?? 0, cachedInput: t.cachedInputTokens ?? 0 };
+            return;
+          }
           if (!codexTurnId) {
             // Some servers stream before acknowledging turn/start. Retain a
             // bounded prefix, then filter against the authoritative response.
@@ -961,32 +975,43 @@ export const CodexDriver: ProviderDriver<CodexConfig> = {
             break;
           }
           case "thread/tokenUsage/updated": {
-            // `last` is the most recent turn when the server sends it;
-            // `total` is the thread so far — a fresh app-server per turn
-            // makes that this turn's figure too
-            const turnUsage = p.tokenUsage?.last ?? p.tokenUsage?.total;
-            // codex's inputTokens already includes cachedInputTokens; the
-            // cached share is carried alongside so the UI can say how much
-            // of a turn was context re-read rather than new text
-            if (turnUsage) {
-              state.usage = {
-                input: turnUsage.inputTokens ?? 0,
-                output: turnUsage.outputTokens ?? 0,
-                ...(typeof turnUsage.cachedInputTokens === "number"
-                  ? { cachedInput: turnUsage.cachedInputTokens }
-                  : {}),
-              };
-            }
+            // `total` is everything this app-server process has used; `last`
+            // is the most recent model call. This turn's figure is the total
+            // minus what the process carried before turn/start went out (a
+            // resumed thread can restore earlier usage), so it never grows by
+            // the whole thread per message and never counts only the final
+            // call of a multi-step turn. codex's inputTokens already includes
+            // cachedInputTokens; the cached share rides alongside so the UI
+            // can say how much was context re-read rather than new text.
             const t = p.tokenUsage?.total;
+            const last = p.tokenUsage?.last;
+            const shape = (u: { inputTokens?: number; outputTokens?: number; cachedInputTokens?: number }) => ({
+              input: u.inputTokens ?? 0, output: u.outputTokens ?? 0, cachedInput: u.cachedInputTokens ?? 0,
+            });
+            // (A total that arrived before this turn was named became the
+            // baseline upstream and never reaches this switch.)
             if (t) {
+              const b = state.usageBaseline ?? { input: 0, output: 0, cachedInput: 0 };
+              const now = shape(t);
+              state.usage = {
+                input: Math.max(0, now.input - b.input),
+                output: Math.max(0, now.output - b.output),
+                ...(typeof t.cachedInputTokens === "number" ? { cachedInput: Math.max(0, now.cachedInput - b.cachedInput) } : {}),
+              };
+            } else if (last) {
+              state.usage = { input: last.inputTokens ?? 0, output: last.outputTokens ?? 0, ...(typeof last.cachedInputTokens === "number" ? { cachedInput: last.cachedInputTokens } : {}) };
+            }
+            if (t) {
+              const window = p.tokenUsage?.modelContextWindow;
               emit({
                 ...base(threadId, turnId),
                 type: "thread.token-usage.updated",
                 input: t.inputTokens ?? 0,
                 output: t.outputTokens ?? 0,
-                ...(typeof t.cachedInputTokens === "number"
-                  ? { cachedInput: t.cachedInputTokens }
-                  : {}),
+                ...(typeof t.cachedInputTokens === "number" ? { cachedInput: t.cachedInputTokens } : {}),
+                // the last call's prompt is what fills the window
+                ...(last && typeof last.inputTokens === "number" ? { contextTokens: last.inputTokens } : {}),
+                ...(typeof window === "number" && window > 0 ? { contextWindow: window } : {}),
               });
             }
             break;
