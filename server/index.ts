@@ -6292,6 +6292,7 @@ function routineRunCard(run: RoutineRun): NonNullable<Message["routineRun"]> {
     status: run.status,
   };
   if (run.goalStatus) card.goalStatus = run.goalStatus;
+  if (run.deferredAt != null && run.status === "queued") card.deferredAt = run.deferredAt;
   if (run.threadId) card.executionThreadId = run.threadId;
   if (summary) card.summary = summary;
   if (error) card.error = error;
@@ -6321,6 +6322,8 @@ function routineRunFallbackText(card: NonNullable<Message["routineRun"]>): strin
             ? "was cancelled"
             : card.status === "missed"
               ? "was missed"
+              : card.status === "queued" && card.deferredAt != null
+                ? "deferred: target busy"
               : card.status
   );
   return `Routine “${card.routineName}” ${state}`;
@@ -6533,6 +6536,16 @@ routines = new RoutineManager({
     const detail = run.error ? `${run.routineName}: ${run.error}` : run.routineName;
     const notificationBot = routineSourceOwner(run)?.bot ?? bot;
     notify(buildNotification("routine-failed", notificationBot, routineSourceThread(run) ?? run.threadId ?? bot.threadId, detail));
+  },
+  onRunDeferred: (run) => {
+    const bot = store.bot(run.botId);
+    if (!bot) return;
+    const minutes = run.deferredAt != null && run.deferredNoticeAt != null
+      ? Math.max(1, Math.round((run.deferredNoticeAt - run.deferredAt) / 60_000))
+      : null;
+    const detail = `${redactSecretsInText(run.routineName)}: target busy${minutes != null ? ` for ${minutes} minutes` : ""}`;
+    const notificationBot = routineSourceOwner(run)?.bot ?? bot;
+    notify(buildNotification("routine-deferred", notificationBot, routineSourceThread(run) ?? bot.threadId, detail));
   },
 });
 // The scheduler receipt and room transcript live in separate durable stores.
