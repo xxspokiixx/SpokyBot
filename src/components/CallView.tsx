@@ -106,7 +106,7 @@ export function CallTargetButton({
       : !window.ogb?.speechStart
         ? "The speech service is unavailable in this app build. Restart or update OpenMausBot."
         : !configured
-          ? "Add an ElevenLabs API key — or switch to the built-in Mac voices — so the bot can speak during calls."
+          ? "Set up ElevenLabs, Fish Audio, Chatterbox, or a built-in Mac voice so the bot can speak during calls."
           : !voiceReady
             ? voices.length > 1
               ? "Give every group member a voice before starting a group call."

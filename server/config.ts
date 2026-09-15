@@ -327,13 +327,16 @@ const appConfigSchema = z.object({
   /** Optional OpenCode key; persisted write-only and passed only to its child. */
   opencodeGo: z.object({ apiKey: optionalText }).optional(),
   /** Voice settings and the selected voice id. `provider` picks the
-   * engine: "elevenlabs" (default; needs a key), "system" (the Mac's
-   * built-in voices, no key), or "chatterbox" (a local OpenAI-compatible
-   * Chatterbox server; `baseUrl` and `model` are settings, not secrets). */
+   * engine: "elevenlabs" (default; needs `key`), "fish" (needs its own
+   * `fishKey`), "system" (the Mac's built-in voices, no key), or
+   * "chatterbox" (a local OpenAI-compatible Chatterbox server; `baseUrl`
+   * and `model` are settings, not secrets). Cloud keys stay separate so
+   * switching providers never overwrites or misuses the other key. */
   tts: z.object({
     key: optionalText,
+    fishKey: optionalText,
     voice: optionalText,
-    provider: z.enum(["elevenlabs", "system", "chatterbox"]).optional(),
+    provider: z.enum(["elevenlabs", "fish", "system", "chatterbox"]).optional(),
     baseUrl: z
       .string()
       .trim()
@@ -410,7 +413,7 @@ export interface AppConfig {
   /** A named host from the user's SSH config. Authentication stays with SSH. */
   vps?: { sshAlias?: string };
   opencodeGo?: { apiKey?: string };
-  tts?: { key?: string; voice?: string; provider?: "elevenlabs" | "system" | "chatterbox"; baseUrl?: string; model?: string };
+  tts?: { key?: string; fishKey?: string; voice?: string; provider?: "elevenlabs" | "fish" | "system" | "chatterbox"; baseUrl?: string; model?: string };
   imageGen?: ImageGenerationConfig;
   profile?: { name?: string; email?: string };
   rooms?: { turnTimeoutMinutes: number };
@@ -702,6 +705,7 @@ export function loadConfig(): AppConfig {
   if (process.env.OPENCODE_API_KEY !== undefined) cfg.opencodeGo.apiKey = process.env.OPENCODE_API_KEY;
   cfg.tts = { ...cfg.tts };
   if (process.env.OMB_TTS_KEY !== undefined) cfg.tts.key = process.env.OMB_TTS_KEY;
+  if (process.env.OMB_FISH_AUDIO_API_KEY !== undefined) cfg.tts.fishKey = process.env.OMB_FISH_AUDIO_API_KEY;
   cfg.imageGen = { ...cfg.imageGen };
   if (process.env.OMB_OPENAI_IMAGE_KEY !== undefined) cfg.imageGen.key = process.env.OMB_OPENAI_IMAGE_KEY;
   if (process.env.OMB_CUSTOM_IMAGE_KEY !== undefined) cfg.imageGen.customApiKey = process.env.OMB_CUSTOM_IMAGE_KEY;
@@ -732,6 +736,7 @@ export function syncCredentialEnv(patch: Partial<AppConfig>): void {
     [patch.box?.token, "BOX_TOKEN"],
     [patch.opencodeGo?.apiKey, "OPENCODE_API_KEY"],
     [patch.tts?.key, "OMB_TTS_KEY"],
+    [patch.tts?.fishKey, "OMB_FISH_AUDIO_API_KEY"],
     [patch.imageGen?.key, "OMB_OPENAI_IMAGE_KEY"],
     [patch.imageGen?.customApiKey, "OMB_CUSTOM_IMAGE_KEY"],
   ];
@@ -769,6 +774,7 @@ export const WORKSPACE_CREDENTIAL_ENV = [
   "BOX_TOKEN",
   "OPENCODE_API_KEY",
   "OMB_TTS_KEY",
+  "OMB_FISH_AUDIO_API_KEY",
   "OMB_OPENAI_IMAGE_KEY",
   "OMB_CUSTOM_IMAGE_KEY",
   "COMPOSIO_API_KEY",

@@ -543,6 +543,7 @@
   "chat.reply.image": "[image]",
   "chat.reply.file": "[file]",
   "chat.speak.needsKey": "Add an ElevenLabs key in an agent profile to read messages aloud",
+  "chat.speak.needsSetup": "Set up a voice provider in this agent's profile to read messages aloud",
   "chat.speak.needsVoice": "Pick a voice in this agent's profile to read messages aloud",
   "chat.speak.stop": "Stop speaking",
   "chat.speak.read": "Read this aloud",

@@ -339,6 +339,7 @@ class DecodingTest {
         fun provider(json: String) = CompanionJson.decodeFromString<ConfigStatus>(json).voiceProvider
 
         assertEquals(VoiceProvider.ELEVENLABS, provider("""{"tts":{"configured":true,"provider":"elevenlabs"}}"""))
+        assertEquals(VoiceProvider.FISH, provider("""{"tts":{"configured":true,"provider":"fish"}}"""))
         assertEquals(VoiceProvider.SYSTEM, provider("""{"tts":{"configured":false,"provider":"system"}}"""))
         assertEquals(
             VoiceProvider.CHATTERBOX,

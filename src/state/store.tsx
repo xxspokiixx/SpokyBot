@@ -490,15 +490,15 @@ export interface ConfigStatus {
   threads?: { maxConcurrentPerBot: number };
   localVm: { mode: "shared" | "per-bot"; maxInstances: number };
   opencodeGo?: { configured: boolean };
-  /** Voice. `configured` = the engine has what it needs (an ElevenLabs key,
-   * or a Chatterbox server address); `ready` = that AND a voice, which is
+  /** Voice. `configured` = the engine has what it needs (an ElevenLabs or
+   * Fish Audio key, or a Chatterbox server address); `ready` = that AND a voice, which is
    * what it takes to actually speak. The key itself is never echoed back;
    * `baseUrl`/`model` are Chatterbox settings, not credentials. */
   tts?: {
     configured: boolean;
     ready: boolean;
     voice: string;
-    provider?: "elevenlabs" | "system" | "chatterbox";
+    provider?: "elevenlabs" | "fish" | "system" | "chatterbox";
     baseUrl?: string;
     model?: string;
   };

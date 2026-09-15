@@ -65,6 +65,27 @@ describe("Store", () => {
     expect(bot.modelSelection).toEqual(selection());
   });
 
+  it("clears provider-owned voice ids as one durable mutation", () => {
+    const store = new Store(selection);
+    const first = store.createBot();
+    const second = store.createBot();
+    store.patchBot(first.id, { voice: "provider-a-1" });
+    store.patchBot(second.id, { voice: "provider-a-2" });
+
+    const save = vi.spyOn(store as unknown as { saveBots(bots: BotRecord[]): void }, "saveBots");
+    save.mockImplementationOnce(() => { throw new Error("disk full"); });
+    expect(() => store.clearVoiceSelections()).toThrow("disk full");
+    expect(first.voice).toBe("provider-a-1");
+    expect(second.voice).toBe("provider-a-2");
+
+    expect(store.clearVoiceSelections().map((bot) => bot.id).sort()).toEqual([first.id, second.id].sort());
+    expect(first.voice).toBeUndefined();
+    expect(second.voice).toBeUndefined();
+    const reloaded = new Store(selection);
+    expect(reloaded.bot(first.id)?.voice).toBeUndefined();
+    expect(reloaded.bot(second.id)?.voice).toBeUndefined();
+  });
+
   it("restarts with legacy bot and group migrations despite an unreadable team registry, without permitting later team writes", () => {
     const original = new Store(selection);
     const bot = original.createBot({ name: "Legacy bot", section: "Research" });

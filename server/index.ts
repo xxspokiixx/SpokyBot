@@ -9426,6 +9426,7 @@ function cliProbeEnvironment(): NodeJS.ProcessEnv {
     "COMPOSIO_API_KEY",
     "OMB_COMPOSIO_BROKER_TOKEN",
     "OMB_TTS_KEY",
+    "OMB_FISH_AUDIO_API_KEY",
     "OMB_OPENAI_IMAGE_KEY",
     "OMB_CUSTOM_IMAGE_KEY",
     "ANTHROPIC_API_KEY",
@@ -15819,6 +15820,14 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
       const body = await readBody(req);
       const patch = parseConfigPatch(body);
       if (!Object.keys(patch).length) return json(res, 400, { error: "nothing to save" });
+      const changingVoiceProvider = patch.tts?.provider !== undefined
+        && patch.tts.provider !== tts.voiceProvider(cfg);
+      if (changingVoiceProvider && patch.tts?.voice === undefined) {
+        // Voice ids are provider-owned opaque values. Never carry a default
+        // from one catalog into another. A caller may explicitly supply a
+        // voice for the newly selected provider in this same atomic patch.
+        patch.tts = { ...patch.tts, voice: "" };
+      }
       if (providerConfigBusy) return json(res, 409, { error: "provider settings are already being updated" });
       if (patch.browserProfiles !== undefined && body.expectedBrowserProfiles !== undefined) {
         const current = (cfg.browserProfiles ?? []).map(({ id, name }) => ({ id, name }));
@@ -16046,15 +16055,16 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
         );
         if (resourceError) return json(res, 409, { error: resourceError });
       }
-      // same rule for a voice key — and check it against the provider the
-      // patch SELECTS, not the one already saved, or pasting a Cartesia key
-      // while switching from ElevenLabs validates against the wrong service
+      // Each cloud voice provider owns its own credential. Validate the field
+      // against that provider rather than whichever provider happens to be
+      // selected, so switching engines never sends one service another's key.
       const newTts = patch.tts;
-      // Chatterbox has no key at all — its credential is a local server
-      // address, and an ElevenLabs round trip would be the wrong test
-      const selectedVoiceProvider = newTts?.provider ?? cfg.tts?.provider ?? "elevenlabs";
-      if (newTts?.key?.trim() && selectedVoiceProvider !== "chatterbox") {
-        const check = await tts.verifyKey(newTts.key.trim());
+      if (newTts?.key?.trim()) {
+        const check = await tts.verifyKey("elevenlabs", newTts.key.trim());
+        if (!check.ok) return json(res, 400, { error: check.message });
+      }
+      if (newTts?.fishKey?.trim()) {
+        const check = await tts.verifyKey("fish", newTts.fishKey.trim());
         if (!check.ok) return json(res, 400, { error: check.message });
       }
       if (patch.browserProfiles !== undefined) {
@@ -16097,6 +16107,12 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
       let configWriteCommitted = false;
       const externalSecretStorage = url.searchParams.get("secretStorage") === "external";
       try {
+        // Provider-owned voice ids must be invalidated before the provider
+        // commit. If bots.json cannot be written, leave the old provider in
+        // place rather than committing a new provider with stale bot voices.
+        // A later config-write failure may leave voices cleared, which is the
+        // safe side of this cross-file mutation: no foreign id can be spoken.
+        if (changingVoiceProvider) store.clearVoiceSelections();
         if (externalSecretStorage) {
           // The packaged Electron caller commits supplied credentials to the
           // OS-encrypted store before entering this route. Persist every
@@ -16109,6 +16125,7 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
           if (persisted.box?.token !== undefined) persisted.box.token = "";
           if (persisted.opencodeGo?.apiKey !== undefined) persisted.opencodeGo.apiKey = "";
           if (persisted.tts?.key !== undefined) persisted.tts.key = "";
+          if (persisted.tts?.fishKey !== undefined) persisted.tts.fishKey = "";
           if (persisted.imageGen?.key !== undefined) persisted.imageGen.key = "";
           if (persisted.imageGen?.customApiKey !== undefined) persisted.imageGen.customApiKey = "";
           saveConfig(persisted);

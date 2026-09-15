@@ -1888,6 +1888,22 @@ export class Store {
     return bot;
   }
 
+  /** Voice ids belong to one provider's catalog. Changing the workspace
+   * provider invalidates every per-agent selection as one durable mutation,
+   * before clients are told to pick replacement voices. */
+  clearVoiceSelections(): BotRecord[] {
+    const changed = this.bots.filter((bot) => bot.voice !== undefined && bot.voice !== "");
+    if (!changed.length) return [];
+    const next = this.bots.map((bot) =>
+      bot.voice === undefined || bot.voice === "" ? bot : { ...bot, voice: undefined });
+    this.saveBots(next);
+    for (const bot of changed) {
+      delete bot.voice;
+      this.emit({ type: "bot", botId: bot.id });
+    }
+    return changed;
+  }
+
   /** Commit a validated profile change before publishing its fields. Unlike
    * runtime revocation, a failed user edit must leave the old profile intact. */
   patchBotProfile(id: string, patch: BotProfilePatch & Partial<Pick<BotRecord, "cwd" | "lastProfileRequestId">>): BotRecord | null {

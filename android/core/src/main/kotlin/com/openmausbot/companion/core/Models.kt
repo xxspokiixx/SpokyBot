@@ -690,6 +690,7 @@ data class InstanceList(val instances: List<Instance>)
  */
 enum class VoiceProvider(val wire: String) {
     ELEVENLABS("elevenlabs"),
+    FISH("fish"),
     SYSTEM("system"),
     CHATTERBOX("chatterbox");
 
@@ -739,10 +740,9 @@ data class ConfigStatus(
         isTTSConfigured && (!agentVoice.isNullOrBlank() || hasWorkspaceDefaultVoice)
 
     /**
-     * `voiceProvider(cfg)` in `server/tts/index.ts`: only the exact strings
-     * "system" and "chatterbox" select their engines. Everything else falls
-     * back to ElevenLabs through [VoiceProvider.fromWire], which is the
-     * server's own rule.
+     * `voiceProvider(cfg)` in `server/tts/index.ts`: only a known, exact wire
+     * value selects its engine. Everything else falls back to ElevenLabs
+     * through [VoiceProvider.fromWire], which is the server's own rule.
      */
     val voiceProvider: VoiceProvider
         get() = VoiceProvider.fromWire(tts?.provider)

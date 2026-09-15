@@ -38,6 +38,19 @@ import { customMcpServers,
 } from "./config.ts";
 
 describe("configuration boundaries", () => {
+  it("keeps Fish Audio and ElevenLabs voice credentials separate", () => {
+    const parsed = parseConfigPatch({
+      tts: { provider: "fish", key: "eleven-key", fishKey: "fish-key", voice: "fish-voice" },
+    });
+    expect(parsed.tts).toEqual({
+      provider: "fish",
+      key: "eleven-key",
+      fishKey: "fish-key",
+      voice: "fish-voice",
+    });
+    expect(() => parseConfigPatch({ tts: { provider: "unknown" } })).toThrow("provider");
+  });
+
   it("defaults to three parallel threads and validates a configurable maximum of ten", () => {
     expect(maxConcurrentBotThreads({})).toBe(3);
     expect(parseStoredConfig({ threads: { maxConcurrentPerBot: 10 } })).toEqual({ threads: { maxConcurrentPerBot: 10 } });
@@ -784,6 +797,7 @@ describe("credential env preference", () => {
     "BOX_TOKEN",
     "OPENCODE_API_KEY",
     "OMB_TTS_KEY",
+    "OMB_FISH_AUDIO_API_KEY",
     "OMB_OPENAI_IMAGE_KEY",
     "COMPOSIO_API_KEY",
   ] as const;
@@ -813,7 +827,7 @@ describe("credential env preference", () => {
         xai: { key: "file-xai", url: "https://api.example.test/v1" },
         box: { token: "file-box" },
         opencodeGo: { apiKey: "file-ocg" },
-        tts: { key: "file-tts", voice: "narrator" },
+        tts: { key: "file-tts", fishKey: "file-fish", voice: "narrator" },
         imageGen: { key: "file-image" },
       }),
     );
@@ -821,12 +835,13 @@ describe("credential env preference", () => {
     process.env.BOX_TOKEN = "env-box";
     process.env.OPENCODE_API_KEY = "env-ocg";
     process.env.OMB_TTS_KEY = "env-tts";
+    process.env.OMB_FISH_AUDIO_API_KEY = "env-fish";
     process.env.OMB_OPENAI_IMAGE_KEY = "env-image";
     const cfg = loadConfig();
     expect(cfg.xai).toEqual({ key: "env-xai", url: "https://api.example.test/v1" });
     expect(cfg.box).toEqual({ token: "env-box" });
     expect(cfg.opencodeGo).toEqual({ apiKey: "env-ocg" });
-    expect(cfg.tts).toEqual({ key: "env-tts", voice: "narrator" });
+    expect(cfg.tts).toEqual({ key: "env-tts", fishKey: "env-fish", voice: "narrator" });
     expect(cfg.imageGen).toEqual({ key: "env-image" });
   });
 
@@ -989,6 +1004,15 @@ describe("credential env preference", () => {
     expect(process.env.COMPOSIO_API_KEY).toBe("ak_just_saved");
     expect(process.env.BOX_TOKEN).toBeUndefined();
     expect(process.env.OMB_TTS_KEY).toBeUndefined();
+    expect(process.env.OMB_FISH_AUDIO_API_KEY).toBeUndefined();
+  });
+
+  it("syncCredentialEnv updates Fish Audio without replacing ElevenLabs", () => {
+    process.env.OMB_TTS_KEY = "eleven-kept";
+    process.env.OMB_FISH_AUDIO_API_KEY = "fish-old";
+    syncCredentialEnv({ tts: { fishKey: "fish-new" } });
+    expect(process.env.OMB_TTS_KEY).toBe("eleven-kept");
+    expect(process.env.OMB_FISH_AUDIO_API_KEY).toBe("fish-new");
   });
 
   it("syncCredentialEnv keeps model and provider env in step with a save", () => {
@@ -1037,6 +1061,7 @@ describe("workspace credential env strip", () => {
     // consumed in-process (Computer driver / voice module), never by a CLI
     expect(WORKSPACE_CREDENTIAL_ENV).toContain("BOX_TOKEN");
     expect(WORKSPACE_CREDENTIAL_ENV).toContain("OMB_TTS_KEY");
+    expect(WORKSPACE_CREDENTIAL_ENV).toContain("OMB_FISH_AUDIO_API_KEY");
     expect(WORKSPACE_CREDENTIAL_ENV).toContain("OMB_OPENAI_IMAGE_KEY");
     expect(WORKSPACE_CREDENTIAL_ENV).toContain("OMB_BROWSER_CONNECTION");
     expect(WORKSPACE_CREDENTIAL_ENV).toContain("OMB_USER_DATA");
