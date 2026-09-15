@@ -1104,8 +1104,8 @@ export function BotListItem({
           // Motion means something is happening. A resting bot holds a resting
           // pose — N idle rows bobbing at display rate was most of the app's
           // visible-idle CPU (states are keyword-derived, so "working" can be
-          // decorative; busy/unread/motion are the real signals).
-          animated={Boolean(bot.busy) || Boolean(bot.unread) || (mascotMotion?.kind ?? "none") !== "none"}
+          // decorative; working/unread/motion are the real signals).
+          animated={working || Boolean(bot.unread) || (mascotMotion?.kind ?? "none") !== "none"}
         />
         {working && (
           // presence dot: green while the bot is working, ringed in the row's
