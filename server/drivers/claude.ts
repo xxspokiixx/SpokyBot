@@ -288,6 +288,9 @@ export const CLAUDE_FLAG_FLOORS = {
   "--strict-mcp-config": [1, 0, 60],
   "--setting-sources": [1, 0, 122],
   "--autocompact": [2, 1, 122],
+  // 2.1.267 is the first CLI that accepts it; below that the recorded prompt
+  // simply is not refreshed, which is the pre-existing behaviour.
+  "--system-prompt-snapshot": [2, 1, 267],
 } as const satisfies Record<string, ClaudeCliVersion>;
 
 export type ClaudeCliVersion = readonly [number, number, number];
@@ -1091,6 +1094,14 @@ export const ClaudeDriver: ProviderDriver<ClaudeConfig> = {
       const compactWindow = autoCompactWindow(turnEnvironment);
       if (compactWindow && claudeCliSupports(cliVersion, "--autocompact")) {
         args.push("--autocompact", compactWindow);
+      }
+      // An old pair conversation can still carry its first assignment in
+      // Claude's recorded system prompt. The current brief rides in the user
+      // turn, so refresh the recorded prompt on --resume too. Gated by the
+      // version floor like every other flag the CLI may predate: an unknown
+      // flag is a hard argument error, not a graceful degrade.
+      if (turn.refreshSystemPrompt && claudeCliSupports(cliVersion, "--system-prompt-snapshot")) {
+        args.push("--system-prompt-snapshot", "off");
       }
       const turnModel = config.managed ? turn.model : await resolveClaudeTurnModel(turn.model, turnEnvironment);
       const injected = config.managed ? { model: turnModel ?? null, injected: false } : applyClaudeInject({ ...turnEnvironment }, turnModel);

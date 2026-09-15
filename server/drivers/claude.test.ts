@@ -892,6 +892,39 @@ describe("ClaudeDriver turns (fake CLI)", () => {
     expect(text).toBe("hi");
   });
 
+  it("refreshes a coordinated resumed session's prompt when the CLI supports it", async () => {
+    await create(undefined, { FAKE_CLAUDE_DUMP: join(scratch, "coordination-snapshot.json") });
+    await instance.adapter.sendTurn({
+      threadId: "t-coordinated-resume",
+      text: "Addressed teammate request 2. Add the new header row.",
+      resumeCursor: "existing-claude-session",
+      system: "Stable coordination policy, without the earlier assignment.",
+      refreshSystemPrompt: true,
+    });
+    await recorder.until((e) => e.type === "turn.completed");
+    const seen = JSON.parse(readFileSync(join(scratch, "coordination-snapshot.json"), "utf8"));
+    expect(seen.argv[seen.argv.indexOf("--system-prompt-snapshot") + 1]).toBe("off");
+    expect(seen.argv[seen.argv.indexOf("--resume") + 1]).toBe("existing-claude-session");
+    expect(seen.prompt.message.content).toContain("Add the new header row.");
+  });
+
+  it("keeps coordinated turns working on a CLI without the snapshot flag", async () => {
+    const dump = join(scratch, "coordination-no-snapshot.json");
+    await create(undefined, { FAKE_CLAUDE_DUMP: dump, FAKE_CLAUDE_VERSION: "2.1.232" });
+    await instance.snapshot();
+    await instance.adapter.sendTurn({
+      threadId: "t-coordinated-old-cli",
+      text: "Addressed teammate request 2. Add the new header row.",
+      resumeCursor: "existing-claude-session",
+      system: "Stable coordination policy, without the earlier assignment.",
+      refreshSystemPrompt: true,
+    });
+    await recorder.until((e) => e.type === "turn.completed");
+    const seen = JSON.parse(readFileSync(dump, "utf8"));
+    expect(seen.argv).not.toContain("--system-prompt-snapshot");
+    expect(seen.prompt.message.content).toContain("Add the new header row.");
+  });
+
   it("compacts the CLI session at a window the harness picks", async () => {
     await create();
     const dump = join(scratch, "compact.json");

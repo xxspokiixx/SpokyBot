@@ -91,6 +91,7 @@ export async function runRoomHandoffAgent(argv: string[], planPath: string, prom
     appendFileSync(`${planPath}.evidence.jsonl`, JSON.stringify({ botId, turnIndex, threadId: integration.env.OMB_THREAD_ID,
       model: argv.includes("--model") ? arg("--model") : undefined,
       permissionMode: argv.includes("--permission-mode") ? arg("--permission-mode") : undefined,
+      snapshotMode: argv.includes("--system-prompt-snapshot") ? arg("--system-prompt-snapshot") : undefined,
       resumed, system, prompt, evidence }) + "\n");
   }
 }
