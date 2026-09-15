@@ -219,6 +219,21 @@ class AndroidThreadNavigationTest {
     }
 
     @Test
+    fun `archiving a thread patches a timestamp and the sheet reports failure`() {
+        mount { TaskSheet(Chat.BotChat(fixture), onDismiss = {}, onSelectTask = {}) }
+        compose.onNodeWithContentDescription("Archive First thread").performClick()
+        compose.waitUntil(5_000) {
+            requests.any { it.method == "PATCH" && it.path == "/api/bots/${fixture.id}/tasks/first" }
+        }
+        val body = requests.single {
+            it.method == "PATCH" && it.path == "/api/bots/${fixture.id}/tasks/first"
+        }.body.readUtf8()
+        assertTrue(Regex("""\{"archivedAt":\d+(\.\d+)?}""").matches(body), body)
+        waitForError()
+        compose.onNodeWithText("${fixture.name}'s threads").assertIsDisplayed()
+    }
+
+    @Test
     fun `delete requires confirmation and a failed current deletion can be retried`() {
         val attempts = AtomicInteger()
         answerAction = { request ->
