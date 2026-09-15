@@ -5549,7 +5549,7 @@ async function startTurn(
           // its explicit computer turns serialized; ordinary threads still run.
           bindTurnComputer(resourceOwner, `computer:vps:${vpsSshAlias(cfg)}:${bot.id}`, true);
           activeVpsThreads.set(bot.id, threadId);
-          const remote = wants === "cloud" || bot.autoStartVps
+          const remote = vps.vpsStartsForTurn({ wants, autoStartVps: bot.autoStartVps, automationSource: opts?.automationSource })
             ? await vps.vpsComputerAction("provision", cfg, bot.id)
             : await vps.inspectVpsForAuto(cfg, bot.id);
           if (remote?.ready && remote.sshAlias) {
@@ -5639,10 +5639,15 @@ async function startTurn(
 
       // Auto-only host fallback. Electron owns cua-driver/TCC attribution;
       // the harness only reads its already-running connection descriptor.
+      // An unattended run on a bot with a VPS configured never lands on the
+      // host's own desktop instead: a scheduled job clicking on someone's
+      // laptop is worse than a scheduled job that fails and says why.
+      const unattendedVps = cloudBackend === "vps" && Boolean(opts?.automationSource);
       if (
         !integrations.computer &&
         !integrations.localComputer &&
         wants === undefined &&
+        !unattendedVps &&
         shouldMountLocalComputer({
           requested: undefined,
           hostPlatform: process.platform,
@@ -5663,9 +5668,11 @@ async function startTurn(
         !integrations.localComputer &&
         autoVpsProblem
       ) {
-        const hint = bot.autoStartVps
-          ? "Check the VPS connection in App Settings → Connections."
-          : "Open Computer and enable Start VPS automatically, or choose Cloud to start it manually.";
+        const hint = opts?.automationSource
+          ? "This scheduled run tried to start the VPS computer and could not reach it. Check the VPS connection in App Settings → Connections."
+          : bot.autoStartVps
+            ? "Check the VPS connection in App Settings → Connections."
+            : "Open Computer and enable Start VPS automatically, or choose Cloud to start it manually.";
         throw new Error(`${autoVpsProblem}. ${hint}`);
       }
       // Agent control tools include peer comms and the secure credential
