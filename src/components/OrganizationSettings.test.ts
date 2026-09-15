@@ -4,12 +4,17 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { ManagedDesktopBridge, ManagedDesktopState } from "../../electron/managed-desktop.mjs";
 import { setLocale } from "@/lib/i18n";
 
-const fixture = vi.hoisted(() => ({ values: [] as unknown[], index: 0, effects: [] as EffectCallback[] }));
+const fixture = vi.hoisted(() => ({ values: [] as unknown[], index: 0, effects: [] as EffectCallback[], updating: false }));
 vi.mock("react", async (original) => ({ ...await original<typeof import("react")>(),
   useState: (initial: unknown) => {
     const index = fixture.index++;
     if (!(index in fixture.values)) fixture.values[index] = typeof initial === "function" ? initial() : initial;
-    return [fixture.values[index], (next: unknown) => { fixture.values[index] = typeof next === "function" ? next(fixture.values[index]) : next; }];
+    return [fixture.values[index], (next: unknown) => {
+      if (fixture.updating) throw new Error("A state updater called another state setter");
+      fixture.updating = true;
+      try { fixture.values[index] = typeof next === "function" ? next(fixture.values[index]) : next; }
+      finally { fixture.updating = false; }
+    }];
   },
   useRef: (initial: unknown) => {
     const index = fixture.index++;
@@ -44,7 +49,7 @@ let bridge: ManagedDesktopBridge;
 let push: (state: ManagedDesktopState) => void;
 let unsubscribe = vi.fn<() => void>();
 beforeEach(() => {
-  fixture.values = []; fixture.index = 0; fixture.effects = [];
+  fixture.values = []; fixture.index = 0; fixture.effects = []; fixture.updating = false;
   unsubscribe = vi.fn(); push = () => {};
   bridge = {
     state: vi.fn().mockResolvedValue({ status: "signed-out" }), begin: vi.fn().mockResolvedValue(connecting),
@@ -146,6 +151,20 @@ describe("optional desktop Organisation settings", () => {
     expect(render().html).toContain("Could not complete this action");
     expect(render().html).not.toContain("token-secret");
     expect(render().html).not.toContain("organization.noModels");
+  });
+
+  it("keeps an action error across same-status heartbeats and clears it after a real status change", async () => {
+    await ready(connected);
+    vi.mocked(bridge.refresh).mockRejectedValueOnce(new Error("Fixture refresh failure"));
+    button("Refresh").props.onClick!(); await flush();
+    expect(render().html).toContain("Could not complete this action");
+
+    expect(() => push({ ...connected, providers: [] })).not.toThrow();
+    expect(render().html).toContain("Could not complete this action");
+
+    expect(() => push({ ...connected, status: "reauth-required" })).not.toThrow();
+    expect(render().html).not.toContain("Could not complete this action");
+    expect(render().html).toContain("Disconnect below, then sign in again");
   });
 
   it("can clear an unavailable saved connection instead of trapping the user behind retry", async () => {

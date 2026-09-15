@@ -16,6 +16,18 @@ export function OrganizationSettings() {
   const pending = useRef(false);
   const generation = useRef(0);
   const revision = useRef(0);
+  const status = useRef<ManagedDesktopState["status"] | undefined>(undefined);
+
+  const acceptConnection = (next: ManagedDesktopState) => {
+    const changed = status.current !== next.status;
+    status.current = next.status;
+    setConnection(next);
+    // Heartbeats republish every minute; keep an action error visible until
+    // the connection actually changes state. Keep this outside React's state
+    // updater: updaters must stay pure and can run during rendering.
+    if (changed) setError("");
+    if (next.status !== "connected" && next.status !== "reauth-required") setConfirmDisconnect(false);
+  };
 
   useEffect(() => {
     const current = ++generation.current;
@@ -23,13 +35,7 @@ export function OrganizationSettings() {
     const receive = (next: ManagedDesktopState) => {
       if (generation.current !== current) return;
       revision.current++;
-      setConnection(previous => {
-        // Heartbeats republish every minute; keep an action error visible until
-        // the connection actually changes state.
-        if (previous?.status !== next.status) setError("");
-        return next;
-      });
-      if (next.status !== "connected" && next.status !== "reauth-required") setConfirmDisconnect(false);
+      acceptConnection(next);
     };
     const unsubscribe = bridge?.onState(receive);
     void bridge?.state().then((next) => {
@@ -50,8 +56,7 @@ export function OrganizationSettings() {
     try {
       const next = await action();
       if (generation.current === current && revision.current === startedRevision) {
-        setConnection(next);
-        if (next.status !== "connected" && next.status !== "reauth-required") setConfirmDisconnect(false);
+        acceptConnection(next);
       }
     } catch {
       // IPC exceptions can contain internal paths; display only product copy.

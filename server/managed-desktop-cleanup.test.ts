@@ -17,6 +17,10 @@ const code = ts.transpileModule([
   section("function releaseTurnResources(", "function bindTurnComputer("),
   section("async function stopCompanyInstances(", "async function persistProviderInstance("),
 ].join("\n"), { compilerOptions: { target: ts.ScriptTarget.ESNext } }).outputText;
+const reloadProvidersCode = ts.transpileModule(
+  section("async function reloadProviders()", "// Config writes rebuild the whole provider registry."),
+  { compilerOptions: { target: ts.ScriptTarget.ESNext } },
+).outputText;
 
 function deferred() {
   let resolve!: () => void;
@@ -189,4 +193,34 @@ it("quitting disposes Company instances without interrupting turns or writing co
   expect(f.messages).toEqual([]);
   expect(f.detached).toEqual(["company"]);
   expect(f.tasks.get("first")?.busy).toBe(true);
+});
+
+it("reattaches rebuilt personal providers before a Company restore failure", async () => {
+  const order: string[] = [];
+  const personal = { instanceId: "personal" };
+  const context = vm.createContext({
+    providerFleetReloading: false,
+    providerAuthSessions: { clear: () => order.push("clear-auth") },
+    revokeAllInternalCapabilities: () => order.push("revoke-capabilities"),
+    store: { bots: [] },
+    groupSpeakers: new Map(),
+    bus: {
+      detachAll: () => order.push("detach"),
+      attach: (instances: Array<{ instanceId: string }>) => order.push(`attach:${instances.map(instance => instance.instanceId).join(",")}`),
+    },
+    registry: {
+      disposeAll: async () => { order.push("dispose"); },
+      load: async () => { order.push("load-personal"); },
+      instances: () => [personal],
+    },
+    instanceConfigs: () => ({ personal: { driver: "fake" } }), cfg: {},
+    managedDesktop: { restore: async () => { order.push("restore-company"); throw new Error("Fixture Company restore failure"); } },
+  });
+  vm.runInContext(reloadProvidersCode, context, { filename: "index.ts (provider reload fixture)" });
+
+  await expect(context.reloadProviders()).rejects.toThrow("Fixture Company restore failure");
+  expect(order).toEqual([
+    "clear-auth", "revoke-capabilities", "detach", "dispose", "load-personal", "attach:personal", "restore-company",
+  ]);
+  expect(context.providerFleetReloading).toBe(false);
 });
