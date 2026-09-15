@@ -2457,7 +2457,16 @@ function outstandingAssignmentsPrompt(threadId: string): string {
 const roomHandoffs = new RoomHandoffs(join(DATA_DIR, "room-handoffs.json"), {
   validate: (node, parent) => roomHandoffProblem(node, parent) ??
     (parent && store.bot(parent.botId)?.approvePeerComms && !fullAccessForSource(parent.botId, parent.threadId) && !node.approvalGranted ? "Sender now requires peer approval; submit a new approved request" : undefined),
-  busy: n => Boolean(store.bot(n.botId)?.busy || (n.groupId && store.group(n.groupId) && groupIsWorking(store.group(n.groupId)!))),
+  // A direct follow-up is owed to one conversation, so it waits for that
+  // conversation, not for the whole bot. Bot-level busy aggregates every
+  // thread — including cards still waiting on the person — so one busy
+  // sibling thread would otherwise starve the owed resume forever while the
+  // UI keeps showing this thread working. Fresh work still queues behind a
+  // busy teammate's whole bot (#1238); an owed resume only needs its own
+  // thread free and a thread slot to admit it.
+  busy: n => !n.groupId && n.status === "resume"
+    ? threadBusy(n.botId, n.threadId) || botAtThreadCapacity(n.botId)
+    : Boolean(store.bot(n.botId)?.busy || (n.groupId && store.group(n.groupId) && groupIsWorking(store.group(n.groupId)!))),
   changed: (groupIds, directThreadIds) => {
     for (const id of groupIds) {
       const group = store.group(id);
