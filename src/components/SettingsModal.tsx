@@ -708,8 +708,12 @@ export function SettingsModal() {
               <>
                 <RemoteComputerSection />
                 {!remoteActive && <CustomDomainSettings />}
-                {/* a hosted server reached from a browser: pair phones and see devices here; the desktop app has its own companion flow */}
-                {!window.ogb && <ServerPairingCard />}
+                {/* mints an admin/client session token for anything that isn't the phone companion
+                    flow (MCP clients, `openmausbot pair`, a second desktop app taking over this
+                    server) — shown whenever this instance owns the server being paired against,
+                    same condition as the settings below it; hidden only when this desktop is
+                    itself a remote client of someone else's server, since it has nothing to pair */}
+                {!remoteActive && <ServerPairingCard />}
                 {!remoteActive && <CompanionSection profileEmail={state.config?.profile?.email} />}
               </>
             )}
