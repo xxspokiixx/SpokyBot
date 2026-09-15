@@ -1187,7 +1187,9 @@ describe("agents-proxy MCP surface", () => {
   it("session_search recalls the bot's own past threads through the harness, scoped to the sender", async () => {
     const list = await rpc("tools/list");
     const tool = list.result.tools.find((t: { name: string }) => t.name === "session_search");
-    expect(tool.inputSchema.required).toEqual(["query"]);
+    // words or a time window: neither alone is required
+    expect(tool.inputSchema.required).toBeUndefined();
+    expect(Object.keys(tool.inputSchema.properties)).toEqual(["query", "since", "until", "limit", "scope"]);
     expect(tool.description).toContain("OWN earlier conversations");
 
     const res = await callTool("session_search", { query: "audit broken links", limit: 5 });
@@ -1210,6 +1212,33 @@ describe("agents-proxy MCP surface", () => {
 
     const missing = await callTool("session_search", {});
     expect(missing.result.isError).toBe(true);
+  });
+
+  it("session_search by time forwards since/until without words, and names the room a hit came from", async () => {
+    sessionSearchResponse = {
+      hits: [
+        { threadId: "room-standup", messageId: "m-room", at: Date.UTC(2026, 8, 16, 9, 5), role: "bot", snippet: "I'll take the deploy", room: "Standup", from: "Me", current: false, crossed: false },
+        { threadId: "thread-old", messageId: "m-audit", at: Date.UTC(2026, 8, 15, 17), role: "bot", snippet: "the audit found three broken links", task: "Site audit", current: false, crossed: false },
+      ],
+      memoryHits: [],
+    };
+    const res = await callTool("session_search", { since: "2d" });
+    expect(lastSessionSearchUrl).toContain("since=2d");
+    expect(lastSessionSearchUrl).not.toContain("q=");
+    const text = res.result.content[0].text as string;
+    expect(text).toContain("2 messages from your earlier conversations (newest first)");
+    expect(text).toContain('[2026-09-16 09:05 · room "Standup" ·');
+    expect(text).toContain('[2026-09-15 17:00 · task "Site audit" ·');
+
+    await callTool("session_search", { query: "deploy", since: "yesterday", until: "today" });
+    expect(lastSessionSearchUrl).toContain("q=deploy");
+    expect(lastSessionSearchUrl).toContain("since=yesterday");
+    expect(lastSessionSearchUrl).toContain("until=today");
+
+    sessionSearchResponse = { hits: [], memoryHits: [] };
+    const nothing = await callTool("session_search", { since: "1h" });
+    expect(nothing.result.content[0].text).toContain("Nothing of yours is there since 1h");
+    sessionSearchResponse = { hits: [] };
   });
 
   it("session_search lists memory-file hits by file, ahead of conversation hits, and forwards the scope", async () => {

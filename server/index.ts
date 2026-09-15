@@ -181,8 +181,9 @@ import type { GroupGoalRunCardData, GroupGoalRunStatus } from "../shared/group-g
 
 import { BUILT_IN_DRIVERS } from "./drivers/builtIn.ts";
 import { getOrCreateChannel, mirrorActivity, mirrorExchange, mirrorReply, type CommsBus } from "./comms-visibility.ts";
-import { readMessageText, recallMessages, searchMessages, closeMessageDb, chatFollowups, cancelledChatFollowup, settleChatFollowups } from "./message-db.ts";
-import { claimRecallCrossings, recallCrossingLabel } from "./recall-disclosure.ts";
+import { readMessageText, recallMessages, recentMessages, searchMessages, closeMessageDb, chatFollowups, cancelledChatFollowup, settleChatFollowups } from "./message-db.ts";
+import { briefCrossingLabel, claimRecallCrossings, recallCrossingLabel } from "./recall-disclosure.ts";
+import { parseSince, recentWork, recentWorkPrompt, turnOutcomeLine } from "./recent-work.ts";
 
 /** A session_read answer competes with the transcript for the context
  * window; a computer-use turn's output can run to hundreds of KB. */
@@ -3450,6 +3451,37 @@ bus.subscribe((event: RuntimeEvent) => {
   }
 });
 
+// One line per finished turn in the bot's daily log (server/recent-work.ts):
+// what it said last, the tools it used, whether the turn failed. What a bot
+// did in one conversation was invisible from every other; the log is where
+// session_search finds it later, and it is never loaded whole into a
+// prompt. In a room the reply names its speaker; a room turn that never
+// replied has no one to credit and leaves no line.
+bus.subscribe((event: RuntimeEvent) => {
+  if (shouldIgnoreProviderEvent(event)) return;
+  if (event.type !== "turn.completed" || !event.turnId) return;
+  try {
+    const messages = store.messagesFor(event.threadId);
+    const reply = messages.findLast((message) => message.role === "bot" && message.kind === "text" && message.turnId === event.turnId);
+    const bot = store.botByThread(event.threadId) ?? (reply?.from ? store.bot(reply.from.botId) : undefined);
+    if (!bot) return;
+    const tools = messages
+      .filter((message) => message.kind === "activity" && message.turnId === event.turnId && message.tool?.name)
+      .map((message) => message.tool!.name);
+    const line = turnOutcomeLine({ ok: event.ok, reply: reply?.text, stopReason: event.stopReason, tools });
+    if (!line) return;
+    appendMemoryLog(bot.id, line, {
+      source: memorySourceLabel({
+        room: store.groupByThread(event.threadId),
+        task: store.taskByThread(bot.id, event.threadId),
+        threadId: event.threadId,
+      }),
+    });
+  } catch {
+    // a missing note never fails a turn
+  }
+});
+
 // Bots currently working with nobody at the keyboard — a webhook turn, or a
 // turn a webhook-driven bot handed to a teammate. Auto mode is a decision
 // someone made for turns they were present for, so these don't inherit it:
@@ -6049,6 +6081,9 @@ async function startTurn(
         { id: "profile", label: "Profile changes", text: profilePrompt },
         { id: "learn", label: "Skill authoring", text: learnPrompt },
         { id: "section-context", label: "Section context", text: sectionContextSystemPrompt(bot.section) },
+        // what the bot said lately in its other conversations, so a task
+        // never redoes — or forgets — what another one already did
+        { id: "recent", label: "Recent work", text: recentWorkPrompt(recentWork(store, bot, { userName: cfg.profile?.name?.trim() || "User", currentThreadId: threadId })) },
         { id: "memory", label: "Memory", text: memorySystemPrompt(bot.id, { managedWrites: Boolean(integrations.agents), fileTools: worksInWorkspace }) },
         { id: "skills", label: "Skills index", text: privateWorkspace ? skillsSystemPrompt(bot.id) : "" },
         { id: "skill-instructions", label: "Skill instructions", text: skillInstructions },
@@ -7630,6 +7665,23 @@ async function runGroupMemberTurn(
     if (drift.drift !== Boolean(bot.soulDrift)) store.patchBot(bot.id, { soulDrift: drift.drift });
   }
   const roomMemory = memorySystemPrompt(bot.id, { managedWrites: Boolean(integrations.agents), fileTools: worksInWorkspace });
+  // The same brief a 1:1 turn gets: what this member said lately in its
+  // other conversations, so a standup is answered from what happened. A
+  // brief can carry a private chat into the room; as with session_search
+  // (#754) the room is told, once per source thread, rather than the
+  // crossing being blocked.
+  const recentLines = recentWork(store, bot, { userName, currentThreadId: threadId });
+  {
+    const crossing = claimRecallCrossings(threadId, recentLines.filter((line) => line.private).map((line) => line.threadId));
+    if (crossing.count) {
+      store.appendMessage(threadId, {
+        role: "bot",
+        kind: "activity",
+        from: { botId: bot.id, name: bot.name, color: bot.color },
+        tool: { name: briefCrossingLabel(bot.name, crossing.count), ok: true },
+      });
+    }
+  }
   const roomSystem = buildSystemPrompt(system, store.bot(bot.id)?.soul ?? bot.soul ?? "", [
     { id: "files", label: "File locations", text: workspace ? workspaceLocationsPrompt(bot.id, cwd, readyBot.cwd) : "" },
     { id: "mcp", label: "MCP servers", text: customMcpPrompt(Object.keys(integrations.custom ?? {})) },
@@ -7638,6 +7690,7 @@ async function runGroupMemberTurn(
     { id: "plan", label: "Surface", text: surfacePrompt({ computer: roomTeamComputer ? "cloud" : roomVmTarget ? "vm" : null, browser: Boolean(integrations.browser) }, { note: roomPlan.note }) },
     { id: "browser", label: "Browser", text: integrations.browser ? BUILT_IN_BROWSER_SYSTEM_PROMPT : "" },
     { id: "recall", label: "Recall", text: integrations.agents ? SESSION_SEARCH_SYSTEM_PROMPT : "" },
+    { id: "recent", label: "Recent work", text: recentWorkPrompt(recentLines) },
     { id: "section-context", label: "Section context", text: sectionContextSystemPrompt(bot.section) },
     // the room path has always put a newline before memory and trimmed
     // the block's leading space; keep that so existing prompts are
@@ -10808,28 +10861,58 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
           return json(res, 403, { error: "source conversation does not belong to sender" });
         }
         const q = String(url.searchParams.get("q") ?? "").trim();
-        if (!q) return json(res, 400, { error: "q is required" });
+        // A recall by time needs no words: "what happened since yesterday"
+        // is the standup question, and it has no keyword.
+        const now = Date.now();
+        const sinceRaw = url.searchParams.get("since");
+        const untilRaw = url.searchParams.get("until");
+        const since = sinceRaw ? parseSince(sinceRaw, now) : null;
+        const until = untilRaw ? parseSince(untilRaw, now) : null;
+        if (sinceRaw && since === null) return json(res, 400, { error: "since must be a date, or a span like 24h, 3d, today, yesterday" });
+        if (untilRaw && until === null) return json(res, 400, { error: "until must be a date, or a span like 24h, 3d, today, yesterday" });
+        if (!q && since === null) return json(res, 400, { error: "q or since is required" });
+        const range = since !== null || until !== null
+          ? { ...(since !== null ? { since } : {}), ...(until !== null ? { until } : {}) }
+          : undefined;
         const rawLimit = Number(url.searchParams.get("limit"));
         const limit = Number.isFinite(rawLimit) && rawLimit > 0 ? Math.min(Math.trunc(rawLimit), 25) : 12;
         // Memory files ride along by default: the bot's own notes are as
         // much its notebook as its transcripts, and scoped the same way —
-        // the caller's own bot, never another's.
+        // the caller's own bot, never another's. A recall by time alone
+        // has no words to match a file with.
         const scope = url.searchParams.get("scope") ?? "all";
         if (scope !== "all" && scope !== "conversations" && scope !== "memory") {
           return json(res, 400, { error: "scope must be all, conversations, or memory" });
         }
-        const memoryHits = scope === "conversations" ? [] : searchMemoryFiles(from.id, q, limit);
+        const memoryHits = scope === "conversations" || !q ? [] : searchMemoryFiles(from.id, q, limit);
         if (scope === "memory") return json(res, 200, { hits: [], memoryHits });
-        const ownThreads = [...new Set([from.threadId, ...(from.tasks ?? []).map((task) => task.threadId)])];
-        // A room is the only place a recall can be a disclosure: in a 1:1 the
-        // user already owns every thread the bot can reach.
+        // Own threads: the bot's main chat and tasks, and the rooms it is a
+        // member of with their tasks — conversations it already saw in full.
+        // Still own-bot: another bot's threads never enter this list.
+        const roomByThread = new Map<string, GroupRecord>();
+        for (const group of store.groups) {
+          if (!group.memberIds.includes(from.id)) continue;
+          roomByThread.set(group.threadId, group);
+          for (const task of group.tasks ?? []) roomByThread.set(task.threadId, group);
+        }
+        const ownThreads = [...new Set([from.threadId, ...(from.tasks ?? []).map((task) => task.threadId), ...roomByThread.keys()])];
+        // A room is the only place a recall can be a disclosure, and only a
+        // private chat is one: in a 1:1 the user already owns every thread
+        // the bot can reach, and a room's lines were said in the open.
         const inRoom = Boolean(store.groupByThread(fromThreadId));
-        const hits = recallMessages(q, ownThreads, limit).map((hit) => ({
-          ...hit,
-          task: store.taskByThread(from.id, hit.threadId)?.title,
-          current: hit.threadId === fromThreadId,
-          crossed: inRoom && hit.threadId !== fromThreadId,
-        }));
+        const found = q ? recallMessages(q, ownThreads, limit, range) : recentMessages(ownThreads, range ?? {}, limit);
+        const hits = found.map((hit) => {
+          const room = roomByThread.get(hit.threadId);
+          return {
+            ...hit,
+            task: room
+              ? (room.tasks ?? []).find((task) => task.threadId === hit.threadId)?.title
+              : store.taskByThread(from.id, hit.threadId)?.title,
+            ...(room ? { room: room.name } : {}),
+            current: hit.threadId === fromThreadId,
+            crossed: inRoom && !room && hit.threadId !== fromThreadId,
+          };
+        });
         if (inRoom) {
           discloseRecall(from, fromThreadId, hits.filter((hit) => hit.crossed).map((hit) => hit.threadId));
         }
