@@ -20,6 +20,8 @@ import {
   X,
 } from "lucide-react";
 import { WorkingDots } from "@/components/WorkingIndicator";
+import { MessageActions, messageActionClass } from "@/components/MessageActions";
+import { useSpeech } from "@/lib/tts/useSpeech";
 import { useCaptionChrome } from "@/components/DesktopCapabilities";
 import { cachedInput, cachedKnown, contextChip, contextDetail, contextShare, costCaption, formatTokens, formatUsd, freshTokens, hasFiniteCost, lastTurnDetail, usageChip, usageDetail } from "@/lib/usage";
 import {
@@ -297,6 +299,8 @@ function Bubble({
   const mentionPeers = useMemo(() => state.bots.filter((peer) => peer.id !== bot.id), [state.bots, bot.id]);
   const [expanded, setExpanded] = useState(false);
   const [viewRaw, setViewRaw] = useState(false);
+  const speech = useSpeech();
+  const speaking = speech.messageId === message.id && speech.status !== "idle";
   const text = peer ? peer.body : (message.text ?? "");
   const generatedPaths = useMemo(() => message.attachments?.map((attachment) => attachment.path) ?? [], [message.attachments]);
   const linkedFiles = useMemo(() => user ? [] : collectMessageFiles(text, generatedPaths), [user, text, generatedPaths]);
@@ -326,27 +330,27 @@ function Bubble({
     <div className={cn("group flex w-full flex-col", user ? "animate-msg-in items-end" : "items-start")}>
       {peer && <PeerLabel peer={peer} />}
       <div className={cn("flex w-full items-center gap-1.5", user ? "justify-end" : "justify-start")}>
-        {/* editing rewinds the thread, so it waits for the turn to end —
-            same rule as the version switcher below */}
-        {user && message.kind === "text" && !webhookView && !hasAttachments && !bot.busy && (
-          <button
-            onClick={onStartEdit}
-            aria-label={t("chat.editMessage")}
-            className="rounded-md p-1.5 text-ink-secondary opacity-0 transition-opacity hover:bg-raised hover:text-ink focus-visible:opacity-100 group-hover:opacity-100 group-focus-within:opacity-100"
-            title={t("chat.editMessage")}
-          >
-            <Pencil size={14} />
-          </button>
-        )}
-        {user && Boolean(visibleText.trim()) && <CopyButton text={visibleText} />}
         {user && (
-          <>
+          <MessageActions side="user">
+            {/* editing rewinds the thread, so it waits for the turn to end —
+                same rule as the version switcher below */}
+            {message.kind === "text" && !webhookView && !hasAttachments && !bot.busy && (
+              <button
+                onClick={onStartEdit}
+                aria-label={t("chat.editMessage")}
+                title={t("chat.editMessage")}
+                className={messageActionClass}
+              >
+                <Pencil size={14} />
+              </button>
+            )}
+            {Boolean(visibleText.trim()) && <CopyButton text={visibleText} className="opacity-100" />}
             <button
               type="button"
               onClick={onReply}
               aria-label={t("chat.replyToMessage")}
-              className="rounded-md p-1.5 text-ink-secondary opacity-0 transition-opacity hover:bg-raised hover:text-ink focus-visible:opacity-100 group-hover:opacity-100 group-focus-within:opacity-100"
               title={t("chat.reply")}
+              className={messageActionClass}
             >
               <MessageSquareReply size={14} />
             </button>
@@ -360,15 +364,12 @@ function Bubble({
                 })
               }
               aria-label={bot.pinnedMessageId === message.id ? t("chat.unpinMessage") : t("chat.pinMessage")}
-              className={cn(
-                "rounded-md p-1.5 text-ink-secondary opacity-0 transition-opacity hover:bg-raised hover:text-ink focus-visible:opacity-100 group-hover:opacity-100 group-focus-within:opacity-100",
-                remoteClient && "hidden",
-              )}
               title={bot.pinnedMessageId === message.id ? t("chat.unpinHint") : t("chat.pinHint")}
+              className={cn(messageActionClass, remoteClient && "hidden")}
             >
               {bot.pinnedMessageId === message.id ? <PinOff size={14} /> : <Pin size={14} />}
             </button>
-          </>
+          </MessageActions>
         )}
         <div
           className={cn(
@@ -446,30 +447,28 @@ function Bubble({
           )}
         </div>
         {!user && (
-          <>
-            <div className="flex flex-col gap-0.5 self-end pb-0.5">
-              {text && <CopyButton text={text} />}
-              {text && <RawToggleAction active={viewRaw} onToggle={() => setViewRaw((r) => !r)} />}
-              {message.kind === "text" && text && !peer && (
-                <SpeakButton text={text} botId={bot.id} messageId={message.id} voiceId={bot.voice} />
-              )}
-              {isLastBotText && !bot.busy && onRegenerate && (
-                <button
-                  onClick={onRegenerate}
-                  aria-label={t("chat.regenerate")}
-                  title={t("chat.regenerate")}
-                  className="rounded-md p-1.5 text-ink-secondary opacity-0 transition-opacity hover:bg-raised hover:text-ink focus-visible:opacity-100 group-hover:opacity-100 group-focus-within:opacity-100"
-                >
-                  <RefreshCw size={14} />
-                </button>
-              )}
-            </div>
+          <MessageActions side="bot" forceOpen={viewRaw || speaking}>
+            {text && <CopyButton text={text} className="opacity-100" />}
+            {text && <RawToggleAction active={viewRaw} onToggle={() => setViewRaw((r) => !r)} className="opacity-100" />}
+            {message.kind === "text" && text && !peer && (
+              <SpeakButton text={text} botId={bot.id} messageId={message.id} voiceId={bot.voice} className="opacity-100" />
+            )}
+            {isLastBotText && !bot.busy && onRegenerate && (
+              <button
+                onClick={onRegenerate}
+                aria-label={t("chat.regenerate")}
+                title={t("chat.regenerate")}
+                className={messageActionClass}
+              >
+                <RefreshCw size={14} />
+              </button>
+            )}
             <button
               type="button"
               onClick={onReply}
               aria-label={t("chat.replyToMessage")}
-              className="rounded-md p-1.5 text-ink-secondary opacity-0 transition-opacity hover:bg-raised hover:text-ink focus-visible:opacity-100 group-hover:opacity-100 group-focus-within:opacity-100"
               title={t("chat.reply")}
+              className={messageActionClass}
             >
               <MessageSquareReply size={14} />
             </button>
@@ -483,15 +482,12 @@ function Bubble({
                 })
               }
               aria-label={bot.pinnedMessageId === message.id ? t("chat.unpinMessage") : t("chat.pinMessage")}
-              className={cn(
-                "rounded-md p-1.5 text-ink-secondary opacity-0 transition-opacity hover:bg-raised hover:text-ink focus-visible:opacity-100 group-hover:opacity-100 group-focus-within:opacity-100",
-                remoteClient && "hidden",
-              )}
               title={bot.pinnedMessageId === message.id ? t("chat.unpinHint") : t("chat.pinHint")}
+              className={cn(messageActionClass, remoteClient && "hidden")}
             >
               {bot.pinnedMessageId === message.id ? <PinOff size={14} /> : <Pin size={14} />}
             </button>
-          </>
+          </MessageActions>
         )}
         <span
           className={cn(

@@ -463,6 +463,7 @@
   "chat.showLess": "Show less",
   "chat.generatedImage": "Generated image",
   "chat.regenerate": "Regenerate response",
+  "chat.messageActions": "Message actions",
   "chat.previousVersion": "Previous version",
   "chat.nextVersion": "Next version",
   "chat.openConversationWith": "Open the conversation with {name}",
