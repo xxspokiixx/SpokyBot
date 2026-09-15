@@ -928,6 +928,26 @@ describe("ClaudeDriver turns (fake CLI)", () => {
     expect(seen.prompt.message.content).toContain("Add the new header row.");
   });
 
+  it.each([["2.1.232", false], ["2.1.267", true]] as const)(
+    "probes Claude %s before the first coordinated turn without an Engines snapshot",
+    async (version, supportsSnapshot) => {
+      const dump = join(scratch, `coordination-first-turn-${version}.json`);
+      await create(undefined, { FAKE_CLAUDE_DUMP: dump, FAKE_CLAUDE_VERSION: version });
+      await instance.adapter.sendTurn({
+        threadId: `t-coordinated-first-turn-${version}`,
+        text: "Addressed teammate request 2. Add the new header row.",
+        resumeCursor: "existing-claude-session",
+        system: "Stable coordination policy, without the earlier assignment.",
+        refreshSystemPrompt: true,
+      });
+      await recorder.until((e) => e.type === "turn.completed");
+      const seen = JSON.parse(readFileSync(dump, "utf8"));
+      expect(seen.argv.includes("--system-prompt-snapshot")).toBe(supportsSnapshot);
+      if (supportsSnapshot) expect(seen.argv[seen.argv.indexOf("--system-prompt-snapshot") + 1]).toBe("off");
+      expect(seen.prompt.message.content).toContain("Add the new header row.");
+    },
+  );
+
   it("compacts the CLI session at a window the harness picks", async () => {
     await create();
     const dump = join(scratch, "compact.json");

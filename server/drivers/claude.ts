@@ -898,10 +898,17 @@ export const ClaudeDriver: ProviderDriver<ClaudeConfig> = {
     // harness snapshots every instance whenever it describes them — app
     // load, the Engines page, and right after `claude update`, which is
     // exactly when the answer changes — so a turn normally finds it filled.
-    // A turn before any snapshot assumes a current CLI rather than paying a
-    // CLI start-up of its own: the flags are the default, the exception is
-    // the older install, and the next snapshot corrects it.
+    // Most turns before any snapshot assume a current CLI. A coordinated
+    // turn checks first because the snapshot-refresh flag is newer than the
+    // other context controls and an unknown flag would reject that request.
     let cliVersion: ClaudeCliVersion | null = null;
+    let cliVersionChecked = false;
+    const readCliVersion = (env: NodeJS.ProcessEnv): Promise<string | null> =>
+      new Promise((resolve) => {
+        execCli(config.cli, ["--version"], { timeout: 8000, env }, (err, stdout) =>
+          resolve(err ? null : stdout.trim() || null),
+        );
+      });
     const listeners = new Set<RuntimeEventListener>();
     // one active turn per thread; a second send while busy is a caller bug
     const active = new Map<string, { stop: () => void; turnId: string; broker?: Awaited<ReturnType<typeof createPermissionBroker>> }>();
@@ -1077,6 +1084,13 @@ export const ClaudeDriver: ProviderDriver<ClaudeConfig> = {
         args.push("--disallowedTools", config.disallowedTools.join(","));
       }
       const turnEnvironment = environment();
+      if (turn.refreshSystemPrompt && !cliVersionChecked) {
+        const version = await readCliVersion(turnEnvironment);
+        if (version) {
+          cliVersion = parseClaudeCliVersion(version);
+          cliVersionChecked = true;
+        }
+      }
       const isolated = !inheritsUserConfig(turnEnvironment);
       if (isolated) {
         // A bot gets the tools and instructions its owner gave it, not
@@ -1100,7 +1114,7 @@ export const ClaudeDriver: ProviderDriver<ClaudeConfig> = {
       // turn, so refresh the recorded prompt on --resume too. Gated by the
       // version floor like every other flag the CLI may predate: an unknown
       // flag is a hard argument error, not a graceful degrade.
-      if (turn.refreshSystemPrompt && claudeCliSupports(cliVersion, "--system-prompt-snapshot")) {
+      if (turn.refreshSystemPrompt && cliVersionChecked && claudeCliSupports(cliVersion, "--system-prompt-snapshot")) {
         args.push("--system-prompt-snapshot", "off");
       }
       const turnModel = config.managed ? turn.model : await resolveClaudeTurnModel(turn.model, turnEnvironment);
@@ -1847,13 +1861,10 @@ export const ClaudeDriver: ProviderDriver<ClaudeConfig> = {
 
     const snapshot = async (): Promise<ProviderSnapshot> => {
       const env = environment();
-      const version = await new Promise<string | null>((resolve) => {
-        execCli(config.cli, ["--version"], { timeout: 8000, env }, (err, stdout) =>
-          resolve(err ? null : stdout.trim()),
-        );
-      });
+      const version = await readCliVersion(env);
       if (!version) return { state: "unavailable", reason: `\`${config.cli}\` CLI not found` };
       cliVersion = parseClaudeCliVersion(version);
+      cliVersionChecked = true;
       const auth = await claudeAuthStatus(config.cli, env);
       // claudeEnvironment strips ANTHROPIC_API_KEY, so turns run on the
       // CLI's own login (Pro/Max): the cost it reports is what the call
