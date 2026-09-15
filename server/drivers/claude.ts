@@ -298,7 +298,7 @@ export type ClaudeCliVersion = readonly [number, number, number];
 /** The newest floor above: a CLI at or past it accepts everything the
  * harness sends. Below it the engine still works, minus the flags the CLI
  * predates, and the Engines page suggests an update. */
-export const CLAUDE_CONTEXT_CONTROL_MIN_VERSION: ClaudeCliVersion = CLAUDE_FLAG_FLOORS["--autocompact"];
+export const CLAUDE_CONTEXT_CONTROL_MIN_VERSION: ClaudeCliVersion = CLAUDE_FLAG_FLOORS["--system-prompt-snapshot"];
 
 /** `claude --version` prints "2.1.232 (Claude Code)"; the first dotted triple
  * is the version. Null when nothing parses, e.g. a wrapper that prints its
@@ -326,22 +326,23 @@ export function claudeCliSupports(version: ClaudeCliVersion | null, flag: keyof 
 }
 
 /** The Engines-page notice for a CLI older than the newest floor. The engine
- * keeps working: turns run without the flags the CLI predates, which means
- * no harness-picked compaction window and, on a very old CLI, no isolation
- * from this machine's own Claude Code setup. */
+ * keeps working without the flags its CLI predates. */
 export function claudeCliUpdate(version: string | null, cli: string): ProviderSnapshot["update"] | undefined {
   const parsed = parseClaudeCliVersion(version);
   if (!parsed || versionAtLeast(parsed, CLAUDE_CONTEXT_CONTROL_MIN_VERSION)) return undefined;
   const floor = CLAUDE_CONTEXT_CONTROL_MIN_VERSION.join(".");
   const missing = (Object.keys(CLAUDE_FLAG_FLOORS) as (keyof typeof CLAUDE_FLAG_FLOORS)[])
     .filter((flag) => !claudeCliSupports(parsed, flag));
+  const effects = [
+    ...(missing.includes("--autocompact") ? ["no compaction window picked by OpenMausBot"] : []),
+    ...(missing.includes("--setting-sources") ? ["bots still see this machine's own Claude Code setup"] : []),
+    ...(missing.includes("--system-prompt-snapshot") ? ["coordinated resumed turns cannot refresh stale system prompts"] : []),
+  ];
   return {
     title: "Update Claude Code for context controls",
     message:
       `Claude Code ${parsed.join(".")} predates ${floor}, so bots run without ${missing.join(", ")}: ` +
-      "no compaction window picked by OpenMausBot" +
-      (missing.includes("--setting-sources") ? ", and bots still see this machine's own Claude Code setup" : "") +
-      ". Update it, then refresh Engines.",
+      `${effects.join("; ")}. Update it, then refresh Engines.`,
     command: cli === "claude" ? "claude update" : `${cli} update`,
   };
 }

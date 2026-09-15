@@ -1105,7 +1105,7 @@ describe("ClaudeDriver turns (fake CLI)", () => {
   });
 
   it("passes every flag to a current CLI and raises no update notice", async () => {
-    await create();
+    await create(undefined, { FAKE_CLAUDE_VERSION: "2.1.267" });
     expect((await instance.snapshot()).update).toBeUndefined();
   });
 
@@ -1136,8 +1136,12 @@ describe("ClaudeDriver turns (fake CLI)", () => {
     // from a modern CLI would silently re-open the context leak
     expect(claudeCliSupports(null, "--autocompact")).toBe(true);
 
-    expect(claudeCliUpdate("2.1.122 (Claude Code)", "claude")).toBeUndefined();
+    expect(claudeCliUpdate("2.1.267 (Claude Code)", "claude")).toBeUndefined();
     expect(claudeCliUpdate(null, "claude")).toBeUndefined();
+    const olderSnapshot = claudeCliUpdate("2.1.232 (Claude Code)", "claude");
+    expect(olderSnapshot?.message).toContain("--system-prompt-snapshot");
+    expect(olderSnapshot?.message).toContain("coordinated resumed turns cannot refresh stale system prompts");
+    expect(olderSnapshot?.message).not.toContain("no compaction window");
     expect(claudeCliUpdate("2.1.121 (Claude Code)", "claude")).toMatchObject({
       command: "claude update",
       message: expect.stringContaining("--autocompact"),
