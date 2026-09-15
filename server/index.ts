@@ -9483,8 +9483,11 @@ async function reloadProviders() {
   try {
     await registry.disposeAll();
     await registry.load(instanceConfigs(cfg));
-    await managedDesktop.restore();
+    // Personal providers are usable independently of the optional Company
+    // overlay. Subscribe them before restoring that overlay so a broken or
+    // expired Company runtime cannot leave the rebuilt personal fleet mute.
     bus.attach(registry.instances());
+    await managedDesktop.restore();
   } finally {
     // Settle every exact conversation, not whichever one is selected now.
     // Teardown can swallow terminal events; no task may remain busy forever.
