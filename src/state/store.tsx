@@ -268,6 +268,10 @@ export interface Task {
   busy?: boolean;
   unread?: boolean;
   pinnedMessageId?: string;
+  /** where this conversation works, when pinned: by the person from the
+   * composer, or by its first Auto turn to the place it reached. Wins over
+   * the bot's Works on (except Off); absent = follows the bot. */
+  surface?: "cloud" | "vm" | "local" | "browser";
   /** set when a bot (not the person) started this thread — its own or a
    * teammate's; the sidebar shows a quiet "opened by <name>" under the title */
   openedBy?: ThreadOpener;
@@ -428,13 +432,16 @@ export type TaskUpdatePatch = Partial<Pick<Task, "modelSelection" | "approvalMod
   resetApprovalToAsk?: boolean;
   projectId?: string | null;
   archivedAt?: number | null;
+  /** null = follow the bot's Works on again */
+  surface?: Task["surface"] | null;
 };
 
 function taskPatchFields(patch: TaskUpdatePatch): Partial<Task> {
-  const { confirmFullAccess: _fullConsent, acknowledgeLocalAuto: _localAck, updateBotDefault: _modelDefault, resetApprovalToAsk, projectId, archivedAt, ...fields } = patch;
+  const { confirmFullAccess: _fullConsent, acknowledgeLocalAuto: _localAck, updateBotDefault: _modelDefault, resetApprovalToAsk, projectId, archivedAt, surface, ...fields } = patch;
   return { ...fields, ...(resetApprovalToAsk ? { approvalMode: "ask", autoApprove: false, alwaysAllow: [] } : {}),
     ...(projectId === undefined ? {} : { projectId: projectId ?? undefined }),
-    ...(archivedAt === undefined ? {} : { archivedAt: archivedAt ?? undefined }) };
+    ...(archivedAt === undefined ? {} : { archivedAt: archivedAt ?? undefined }),
+    ...(surface === undefined ? {} : { surface: surface ?? undefined }) };
 }
 
 /** The visible conversation: walk parentId links from the active leaf back

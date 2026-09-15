@@ -5512,6 +5512,29 @@ describe("harness HTTP API", () => {
     }
   });
 
+  it("pins where a conversation works from the composer, validates the place, and lets it follow the bot again", async () => {
+    const created = await api("POST", "/api/bots", {
+      modelSelection: { instanceId: "claude", model: "claude-sonnet-5" },
+      requireAvailableModel: true,
+    });
+    expect(created.status).toBe(201);
+    const bot = created.body.bot;
+    const pinned = await api("PATCH", `/api/bots/${bot.id}/tasks/${bot.threadId}`, { surface: "browser" });
+    expect(pinned.status).toBe(200);
+    expect(pinned.body.task.surface).toBe("browser");
+    // the pin rides the ordinary bot snapshot, so every client sees it
+    const listed = (await api("GET", "/api/bots?messages=0")).body.bots.find((candidate: { id: string }) => candidate.id === bot.id);
+    expect(listed.tasks.find((task: { threadId: string }) => task.threadId === bot.threadId).surface).toBe("browser");
+    for (const surface of ["box", "desktop", 42, true]) {
+      const rejected = await api("PATCH", `/api/bots/${bot.id}/tasks/${bot.threadId}`, { surface });
+      expect(rejected.status, String(surface)).toBe(400);
+      expect(rejected.body.error).toMatch(/surface must be cloud, vm, local, browser, or null/);
+    }
+    const cleared = await api("PATCH", `/api/bots/${bot.id}/tasks/${bot.threadId}`, { surface: null });
+    expect(cleared.status).toBe(200);
+    expect(cleared.body.task.surface).toBeUndefined();
+  });
+
   it("excludes new Box turns, lifecycle actions, and bot deletion while a token change validates", async () => {
     let botId = "";
     try {
