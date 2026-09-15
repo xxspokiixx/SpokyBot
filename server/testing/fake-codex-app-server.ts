@@ -17,8 +17,12 @@
 //   FAKE_CODEX_LAUNCH_SILENT   die at turn/start (before ack) with exit 1 and no stderr
 //                               at all, for the first N launches (launch count in
 //                               FAKE_CODEX_STATE)
-//   FAKE_CODEX_ACK_CRASH       exit right after acknowledging turn/start
-//   FAKE_CODEX_EXIT_MID_TURN   stale websocket-426 stderr, one reasoning delta, then SIGKILL
+//   FAKE_CODEX_ACK_CRASH       gate file path: hold the post-ack crash until the
+//                              test confirms the driver parsed the ack
+//   FAKE_CODEX_EXIT_MID_TURN   gate file path: hold the ack/delta stdout until the
+//                              test confirms the stale websocket-426 stderr was read
+//   FAKE_CODEX_EXIT_MID_TURN_KILL  gate file path: hold the SIGKILL until the test
+//                              confirms the reasoning delta was parsed
 //   FAKE_CODEX_DUMP   path to write {pid, argv, env, calls, decision} as JSON
 //   FAKE_CODEX_ACCOUNT_EMAIL  synthetic ChatGPT identity (default ada@example.test)
 //   FAKE_CODEX_ACCOUNT_MODE   chatgpt (default) | api-key | none | unsupported | error | hang
@@ -29,6 +33,24 @@
 import { existsSync, readFileSync, writeFileSync } from "node:fs";
 
 const mode = process.env.FAKE_CODEX_MODE ?? "happy";
+
+// stdout and stderr are separate pipes: the writer cannot order them for
+// the reader, and a fixed sleep only pretends to. These knobs synchronize
+// on the test instead — it watches the driver consume the earlier stream
+// and creates the gate file at that moment; the fake holds the scripted
+// write until the gate appears (a later event-loop turn at the earliest,
+// so the ordering is real, not a timing guess). Resolves after a long
+// timeout so a broken gate still surfaces as a failing test, not a hang.
+const waitForGate = (path: string | undefined, timeoutMs = 15_000): Promise<void> =>
+  new Promise((resolve) => {
+    const startedAt = Date.now();
+    const timer = setInterval(() => {
+      if ((path !== undefined && existsSync(path)) || Date.now() - startedAt > timeoutMs) {
+        clearInterval(timer);
+        resolve();
+      }
+    }, 2);
+  });
 
 if (process.argv[2] === "--version") {
   process.stdout.write(`${process.env.FAKE_CODEX_VERSION ?? "codex-cli 0.147.0"}\n`);
@@ -353,14 +375,15 @@ process.stdin.on("data", (chunk) => {
         }
         if (process.env.FAKE_CODEX_ACK_CRASH) {
           out({ jsonrpc: "2.0", id: msg.id, result: { turn: { id: nativeTurnId } } });
-          // The driver quotes only stderr that arrived after the last protocol
-          // message. stdout and stderr are separate pipes, and on Windows the
-          // parent can read this line before the ack above; a real crash a
-          // moment after the ack is what the incident looked like anyway.
-          setTimeout(() => {
+          // Crash only once the test confirms the ack above was parsed
+          // (the env var is the gate file path). stderr that races ahead
+          // of the parsed ack gets reset as pre-output and the message
+          // assertion flakes (seen on windows-latest, where pipe delivery
+          // order varies).
+          void waitForGate(process.env.FAKE_CODEX_ACK_CRASH).then(() => {
             console.error("Error: connection reset by peer");
-            setTimeout(() => process.exit(1), 50);
-          }, 50);
+            process.exit(1);
+          });
           break;
         }
         if (process.env.FAKE_CODEX_EXIT_MID_TURN) {
@@ -368,16 +391,19 @@ process.stdin.on("data", (chunk) => {
           // at turn start, output keeps flowing, and the process is then
           // killed by a signal long after the stale line
           console.error("2026-09-14T20:24:19Z ERROR codex_api::endpoint::responses_websocket: failed to connect to websocket: HTTP error: 426 Upgrade Required, url: ws://127.0.0.1:10100/v1/responses");
-          // Hold the stdout writes back until the stale stderr above has
-          // had time to be read. If the driver parses stdout first, the
+          // Hold the stdout writes back until the test confirms the stale
+          // stderr above was read. If the driver parses stdout first, the
           // stderr chunk lands after the last parse and the stale 426 is
           // blamed at close — the same windows pipe-ordering flake class
-          // as ACK_CRASH below.
-          setTimeout(() => {
+          // as ACK_CRASH above. The kill waits for its own gate so the
+          // delta is parsed before the close event fires.
+          void waitForGate(process.env.FAKE_CODEX_EXIT_MID_TURN).then(() => {
             out({ jsonrpc: "2.0", id: msg.id, result: { turn: { id: nativeTurnId } } });
             notify("item/reasoning/textDelta", { itemId: "m1", delta: "still thinking" });
-          }, 15);
-          setTimeout(() => process.kill(process.pid, "SIGKILL"), 50);
+            void waitForGate(process.env.FAKE_CODEX_EXIT_MID_TURN_KILL).then(() =>
+              process.kill(process.pid, "SIGKILL"),
+            );
+          });
           break;
         }
         if (mode === "early-turn-events") finishTurn();

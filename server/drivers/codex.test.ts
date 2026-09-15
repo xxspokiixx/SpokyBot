@@ -110,6 +110,7 @@ describe("CodexDriver turns (fake app-server)", () => {
     delete process.env.FAKE_CODEX_LAUNCH_SILENT;
     delete process.env.FAKE_CODEX_ACK_CRASH;
     delete process.env.FAKE_CODEX_EXIT_MID_TURN;
+    delete process.env.FAKE_CODEX_EXIT_MID_TURN_KILL;
     delete process.env.FAKE_CODEX_VERSION;
     delete process.env.FAKE_CODEX_ASTRA;
     delete process.env.FAKE_CODEX_INSTRUCTIONS;
@@ -1458,7 +1459,24 @@ describe("CodexDriver turns (fake app-server)", () => {
     }
   }, 20_000);
   it("never replays a turn after turn/start was acknowledged, even for a transient-looking exit", async () => {
-    process.env.FAKE_CODEX_ACK_CRASH = "1";
+    const ackGate = join(scratch, "ack-crash-gate");
+    process.env.FAKE_CODEX_ACK_CRASH = ackGate;
+    // The fake holds its crash until the test confirms the driver parsed
+    // the ack. stdout and stderr are separate pipes, so only the reader
+    // can order them: this listener runs in the same synchronous dispatch
+    // as the driver's own stdout handler, and the fake polls the gate file
+    // on a later turn — the crash stderr can never overtake the parsed ack,
+    // no matter how loaded the runner is.
+    const realSpawnCli = procs.spawnCli;
+    const spawnSpy = vi.spyOn(procs, "spawnCli").mockImplementation((...args: Parameters<typeof procs.spawnCli>) => {
+      const child = realSpawnCli(...args);
+      let stdoutSeen = "";
+      child.stdout.on("data", (c: Buffer) => {
+        stdoutSeen += c.toString();
+        if (stdoutSeen.includes(`"result":{"turn":{"id":"turn-1"}}`)) writeFileSync(ackGate, "");
+      });
+      return child;
+    });
     try {
       await create();
       await instance.adapter.sendTurn({ threadId: "t-codex-ack-crash", text: "hi" });
@@ -1468,15 +1486,35 @@ describe("CodexDriver turns (fake app-server)", () => {
       const error = recorder.events.find((e) => e.type === "runtime.error");
       expect(error?.message).toContain("connection reset");
     } finally {
+      spawnSpy.mockRestore();
       delete process.env.FAKE_CODEX_ACK_CRASH;
     }
   }, 20_000);
   it("does not blame stale stderr when the app-server is killed mid-turn", async () => {
-    process.env.FAKE_CODEX_EXIT_MID_TURN = "1";
+    const stderrGate = join(scratch, "exit-mid-turn-stderr-gate");
+    const killGate = join(scratch, "exit-mid-turn-kill-gate");
+    process.env.FAKE_CODEX_EXIT_MID_TURN = stderrGate;
+    process.env.FAKE_CODEX_EXIT_MID_TURN_KILL = killGate;
+    // The fake writes the stale 426 first, then holds its stdout until this
+    // test confirms the driver read that stderr chunk, and finally holds the
+    // kill until the reasoning delta was parsed. The gate file is only
+    // visible to the fake on a later event-loop turn, by which time the
+    // driver's own stderr listener (same synchronous dispatch) has run —
+    // the stale line is consumed before any stdout parse can reset the
+    // recent-stderr window, deterministically.
+    const realSpawnCli = procs.spawnCli;
+    const spawnSpy = vi.spyOn(procs, "spawnCli").mockImplementation((...args: Parameters<typeof procs.spawnCli>) => {
+      const child = realSpawnCli(...args);
+      child.stderr.on("data", (c: Buffer) => {
+        if (c.toString().includes("426")) writeFileSync(stderrGate, "");
+      });
+      return child;
+    });
     try {
       await create();
       await instance.adapter.sendTurn({ threadId: "t-codex-exit-mid-turn", text: "hi" });
       await recorder.until((e) => e.type === "content.delta" && e.streamKind === "reasoning_text");
+      writeFileSync(killGate, "");
       const done = await recorder.until((e) => e.type === "turn.completed" && e.ok === false);
       expect(done).toMatchObject({ stopReason: "exit_before_result" });
       expect(recorder.events.some((e) => e.type === "turn.retrying")).toBe(false);
@@ -1490,7 +1528,9 @@ describe("CodexDriver turns (fake app-server)", () => {
       expect(error?.message).toContain("no stderr after the last app-server output");
       expect(error?.message).not.toContain("426");
     } finally {
+      spawnSpy.mockRestore();
       delete process.env.FAKE_CODEX_EXIT_MID_TURN;
+      delete process.env.FAKE_CODEX_EXIT_MID_TURN_KILL;
     }
   }, 20_000);
   // POSIX-only: win32 turns process.kill into TerminateProcess (exit code
