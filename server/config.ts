@@ -22,6 +22,11 @@ export const MIN_ROOM_TURN_TIMEOUT_MINUTES = 1;
 export const MAX_ROOM_TURN_TIMEOUT_MINUTES = 1_440;
 export const DEFAULT_MAX_CONCURRENT_BOT_THREADS = 3;
 export const MAX_CONCURRENT_BOT_THREADS = 10;
+/** Bounds for threads.eventLogMaxBytes: the floor keeps the kept tail large
+ * enough to still serve the event inspector's recent-line window; the
+ * ceiling just rejects absurd hand edits. */
+export const MIN_THREAD_EVENT_LOG_BYTES = 256 * 1024;
+export const MAX_THREAD_EVENT_LOG_BYTES = 4 * 1024 * 1024 * 1024;
 export const DEFAULT_LOCAL_VM_MODE = "shared" as const;
 export const DEFAULT_LOCAL_VM_MAX_INSTANCES = 2;
 export const MIN_LOCAL_VM_MAX_INSTANCES = 1;
@@ -353,7 +358,12 @@ const appConfigSchema = z.object({
    * system language. Unknown tags degrade to English in the renderer. */
   language: optionalText,
   rooms: roomConfigSchema.optional(),
-  threads: z.object({ maxConcurrentPerBot: z.number().int().min(1).max(MAX_CONCURRENT_BOT_THREADS) }).strict().optional(),
+  threads: z.object({
+    maxConcurrentPerBot: z.number().int().min(1).max(MAX_CONCURRENT_BOT_THREADS),
+    /** Cap each per-thread events/ and native/ NDJSON log at this many
+     * bytes; absent (the default) keeps today's unbounded growth (#1280). */
+    eventLogMaxBytes: z.number().int().min(MIN_THREAD_EVENT_LOG_BYTES).max(MAX_THREAD_EVENT_LOG_BYTES).optional(),
+  }).strict().optional(),
   localVm: localVmConfigSchema.optional(),
   features: featureConfigSchema.optional(),
   onboarding: onboardingConfigSchema.optional(),
@@ -397,7 +407,7 @@ export interface AppConfig {
   imageGen?: ImageGenerationConfig;
   profile?: { name?: string; email?: string };
   rooms?: { turnTimeoutMinutes: number };
-  threads?: { maxConcurrentPerBot: number };
+  threads?: { maxConcurrentPerBot: number; eventLogMaxBytes?: number };
   /** Shared preserves the historical singleton. Per-bot gives every bot a
    * separate container, durable workspace, viewer and lease. */
   localVm?: { mode?: "shared" | "per-bot"; maxInstances?: number };
@@ -524,6 +534,13 @@ export function roomTurnTimeoutMinutes(cfg: AppConfig): number {
 
 export function maxConcurrentBotThreads(cfg: AppConfig): number {
   return cfg.threads?.maxConcurrentPerBot ?? DEFAULT_MAX_CONCURRENT_BOT_THREADS;
+}
+
+/** Size cap for each per-thread events/ and native/ NDJSON log. Null (the
+ * default) means unbounded growth — rotation is strictly opt-in (#1280). */
+export function threadEventLogMaxBytes(cfg: AppConfig): number | null {
+  const cap = cfg.threads?.eventLogMaxBytes;
+  return typeof cap === "number" && Number.isFinite(cap) && cap > 0 ? cap : null;
 }
 
 export function localVmMode(cfg: AppConfig): "shared" | "per-bot" {

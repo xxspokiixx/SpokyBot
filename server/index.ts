@@ -115,7 +115,8 @@ import {
   localVmMode,
   parseConfigPatch,
   roomTurnTimeoutMinutes,
-  maxConcurrentBotThreads,
+maxConcurrentBotThreads,
+  threadEventLogMaxBytes,
   saveConfig,
   showToolCallsEnabled,
   skillAuthoringEnabled,
@@ -357,6 +358,7 @@ import { BOT_PACKAGE_MAX_SKILLS, isBotPackage, packageAgentAsMember, parseBotPac
 import { createTeamManifest, importedMemberProfile, parseTeamManifest } from "./team-manifest.ts";
 import { takeImportName } from "../shared/import-name.ts";
 import { readThreadEvents } from "./thread-events.ts";
+import { bindThreadLogCapProvider } from "./thread-log-rotation.ts";
 import { listenWebhookIngress, webhookCredential, type WebhookIngress } from "./webhook-ingress.ts";
 import { memberTurnSelection } from "./member-turn.ts";
 import { WebhookManager } from "./webhooks.ts";
@@ -488,6 +490,10 @@ let companionMutationToken: string | undefined = DESKTOP_MANAGED ? "" : undefine
 // Where remote clients reach this server (a proxy's public address); pairing URLs use it.
 const FALLBACK_PUBLIC_URL = process.env.OMB_PUBLIC_URL?.trim().replace(/\/+$/, "") || null;
 const cfg = loadConfig();
+// The per-thread event log cap is checked after every NDJSON append.
+// config.json is read once per process (a change restarts the server, like
+// every other hand-edited knob), so a binding made here never goes stale.
+bindThreadLogCapProvider(() => threadEventLogMaxBytes(cfg));
 const customDomainVerifier = createCustomDomainVerifier({ environmentId: ENVIRONMENT_ID });
 // "Sign in with your email" on /pair: the allow-list is read per call so a
 // Settings change or an env bootstrap applies without a restart.

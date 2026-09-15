@@ -19,6 +19,7 @@ import { customMcpServers,
   persistableInstanceConfigs,
   roomTurnTimeoutMinutes,
   maxConcurrentBotThreads,
+  threadEventLogMaxBytes,
   showToolCallsEnabled,
   saveConfig,
   skillAuthoringEnabled,
@@ -43,6 +44,16 @@ describe("configuration boundaries", () => {
     expect(maxConcurrentBotThreads(parseConfigPatch({ threads: { maxConcurrentPerBot: 1 } }))).toBe(1);
     for (const value of [0, -1, 11, 1.5, "10", null]) {
       expect(() => parseConfigPatch({ threads: { maxConcurrentPerBot: value } })).toThrow("threads.maxConcurrentPerBot");
+    }
+  });
+
+  it("caps per-thread event logs only when a size is configured", () => {
+    expect(threadEventLogMaxBytes({})).toBeNull();
+    expect(threadEventLogMaxBytes({ threads: { maxConcurrentPerBot: 3 } })).toBeNull();
+    const parsed = parseStoredConfig({ threads: { maxConcurrentPerBot: 3, eventLogMaxBytes: 50 * 1024 * 1024 } });
+    expect(threadEventLogMaxBytes(parsed)).toBe(50 * 1024 * 1024);
+    for (const value of [0, -1, 256 * 1024 - 1, 1.5, "1000", null]) {
+      expect(() => parseConfigPatch({ threads: { maxConcurrentPerBot: 3, eventLogMaxBytes: value } })).toThrow("threads.eventLogMaxBytes");
     }
   });
 
