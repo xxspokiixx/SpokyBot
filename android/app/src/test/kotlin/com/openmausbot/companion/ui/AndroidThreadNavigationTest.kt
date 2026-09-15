@@ -65,6 +65,7 @@ class AndroidThreadNavigationTest {
     private lateinit var scene: WiringScene
     private val requests = ConcurrentLinkedQueue<RecordedRequest>()
     private var answerAction: (RecordedRequest) -> MockResponse = { MockResponse().setResponseCode(503) }
+    private var answerHistory: () -> MockResponse = { json("""{"messages":[],"hasMore":false}""") }
     private val unavailable = "The computer answered with an error (503)."
     private val fixture = bot().copy(
         threadId = "first",
@@ -84,7 +85,7 @@ class AndroidThreadNavigationTest {
                 return when {
                     request.method != "GET" -> answerAction(request)
                     request.path == "/api/instances" -> json("""{"instances":[]}""")
-                    request.path?.startsWith("/api/threads/") == true -> json("""{"messages":[],"hasMore":false}""")
+                    request.path?.startsWith("/api/threads/") == true -> answerHistory()
                     else -> MockResponse().setResponseCode(404)
                 }
             }
@@ -134,6 +135,38 @@ class AndroidThreadNavigationTest {
         compose.onNodeWithText("Fixture Home").assertIsDisplayed()
         assertNull(scene.environment.chatDrafts.get("first"))
         assertNull(scene.environment.chatDrafts.get("second"))
+    }
+
+    @Test
+    fun `an open nonactive thread reloads its history after a full reconnect`() {
+        val reads = AtomicInteger()
+        answerHistory = {
+            val text = if (reads.incrementAndGet() == 1) "Before reconnect" else "Recovered after reconnect"
+            json("""{"messages":[{"id":"reply","role":"bot","kind":"text","at":1,"text":"$text"}],"hasMore":false}""")
+        }
+        val destination = Destination.Chat(ChatTarget.Bot(fixture.id, "second"))
+        mount {
+            ChatScreen(destination, onResolved = {}, onBack = {}, onOpenComputer = {}, onOpenOverview = {})
+        }
+        compose.waitUntil(5_000) {
+            compose.onAllNodesWithText("Before reconnect").fetchSemanticsNodes().isNotEmpty()
+        }
+        compose.onNodeWithText("Before reconnect").assertIsDisplayed()
+        compose.runOnIdle {
+            scene.session.disconnect()
+            scene.session.connect()
+        }
+        // The new Hello cannot resume: fleet hydration only contains the
+        // desktop-active first thread. Keep the second chat on screen throughout.
+        compose.waitUntil(5_000) { scene.streamStarts.get() == 2 }
+        compose.waitUntil(5_000) {
+            compose.onAllNodesWithText("Recovered after reconnect").fetchSemanticsNodes().isNotEmpty()
+        }
+        compose.onNodeWithText("Recovered after reconnect").assertIsDisplayed()
+        assertEquals(2, reads.get())
+        assertTrue(requests.filter { it.path?.startsWith("/api/threads/") == true }
+            .all { it.path?.startsWith("/api/threads/second/messages") == true })
+        assertEquals("first", scene.session.state.value.bot(fixture.id)?.threadId)
     }
 
     @Test
