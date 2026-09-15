@@ -84,6 +84,21 @@ describe("thread control placement", () => {
     expect(markup).not.toMatch(/class="[^"]*chat-text[^"\n]*bg-bubble-user/);
   });
 
+  it("wraps the header into a name line and a chip line when the column is narrow", () => {
+    // With a settings or inspector panel open beside the chat the header's
+    // chip group cannot shrink; the wrap keeps the name readable and every
+    // chip in place. The query lives on the container's child row: a
+    // container query never matches the container element itself.
+    const markup = renderToStaticMarkup(createElement(ChatView, { bot: { ...bot, busy: false } }));
+    expect(markup).toContain("@container/chathead");
+    const row = /data-chathead-row="[^"]*" class="([^"]*)"/.exec(markup)!;
+    expect(row[1].split(" ")).toContain("@max-[30rem]/chathead:flex-wrap");
+    const identity = /data-chathead-identity="[^"]*" class="([^"]*)"/.exec(markup)!;
+    expect(identity[1].split(" ")).toEqual(expect.arrayContaining(["min-w-0", "@max-[30rem]/chathead:basis-full"]));
+    const controls = /data-chathead-controls="[^"]*" class="([^"]*)"/.exec(markup)!;
+    expect(controls[1].split(" ")).toContain("@max-[30rem]/chathead:ml-auto");
+  });
+
   it("moves the editor onto its own line above the chips when the composer is narrow", () => {
     // A bot's settings open beside the chat leaves the composer a few hundred
     // pixels wide; the editor, the only shrinkable child, used to collapse to

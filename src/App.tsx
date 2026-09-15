@@ -11,6 +11,7 @@ import { Sidebar } from "@/components/Sidebar";
 import { ChatView } from "@/components/ChatView";
 import { GroupView } from "@/components/GroupView";
 import { BotSettingsDialog } from "@/components/BotSettingsDialog";
+import { TWO_SIDE_PANELS_FIT, useMediaQuery } from "@/lib/use-media-query";
 import { RemoteAgentSettingsPanel } from "@/components/RemoteAgentSettingsPanel";
 import { NewBotDialog } from "@/components/NewBotDialog";
 import { PluginsPanel, preloadConnectedApps } from "@/components/PluginsPanel";
@@ -38,6 +39,7 @@ function Shell() {
     state.bots.filter((bot) => !bot.hidden && bot.unread).length +
     state.groups.filter((group) => group.unread).length;
   const remoteClient = window.ogb?.remoteClient?.active === true;
+  const twoSidePanelsFit = useMediaQuery(TWO_SIDE_PANELS_FIT, true);
   useEffect(() => {
     if (!window.ogb?.environments) return;
     const open = (computerId?: string | null) => {
@@ -293,10 +295,15 @@ function Shell() {
           (Computer panel, then the usage chip): every re-render mounts a
           fresh settings panel and never removes the previous one, so the
           panels pile up and Close stops working. */}
+      {/* Bot settings keep the inspector or computer panel open on purpose
+          (their own controls open settings). Two static panels beside the
+          sidebar leave the default 1100px window a sliver of chat, so until
+          the window is wide enough to seat both, settings floats over the
+          chat instead and the other panel is still there when it closes. */}
       {state.settingsOpen && bot && (
         remoteClient
-          ? <RemoteAgentSettingsPanel bot={bot} />
-          : <BotSettingsDialog key={`settings:${bot.id}`} bot={bot} />
+          ? <RemoteAgentSettingsPanel bot={bot} overlay={state.computerOpen && !twoSidePanelsFit} />
+          : <BotSettingsDialog key={`settings:${bot.id}`} bot={bot} overlay={(state.inspectorOpen || state.computerOpen) && !twoSidePanelsFit} />
       )}
       {state.computerOpen && bot && (
         remoteClient ? (
