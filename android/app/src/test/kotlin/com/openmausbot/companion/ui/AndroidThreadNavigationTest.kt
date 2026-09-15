@@ -246,6 +246,7 @@ class AndroidThreadNavigationTest {
         val working = fixture.copy(tasks = fixture.tasks!!.map {
             if (it.threadId == "first") it.copy(busy = true, activity = "working") else it
         })
+        compose.waitUntil(5_000) { frames.subscriptionCount.value > 0 }
         compose.runOnIdle { frames.tryEmit(StreamFrame(Frame.Bot(working), seq = 2)) }
         compose.waitUntil(5_000) {
             compose.onAllNodesWithText("Stop this thread before snoozing it.").fetchSemanticsNodes().isNotEmpty()
