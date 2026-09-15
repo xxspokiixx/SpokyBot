@@ -196,6 +196,24 @@ function inheritsUserConfig(env: NodeJS.ProcessEnv): boolean {
   return env.OMB_CLAUDE_INHERIT_USER_CONFIG === "1";
 }
 
+/** The Engines-page warning while the escape hatch is set. The flag is a
+ * footgun: it is invisible once exported, and what it costs — every Claude
+ * bot re-reading this machine's own servers, skills, hooks and CLAUDE.md on
+ * every model call — shows up only on the bill. Naming it where the person
+ * looks when something is off is the whole point. */
+export function claudeInheritWarning(env: NodeJS.ProcessEnv): ProviderSnapshot["warning"] | undefined {
+  if (!inheritsUserConfig(env)) return undefined;
+  return {
+    title: "Bots inherit this machine's Claude Code setup",
+    message:
+      "OMB_CLAUDE_INHERIT_USER_CONFIG=1 is set on the OpenMausBot process, so every Claude bot also loads this " +
+      "computer's own MCP servers, connectors, skills, hooks and personal CLAUDE.md on every turn — often thousands " +
+      "of extra tokens per model call, and tools nobody gave the bot. Unless a bot genuinely needs a server from " +
+      "your user-scope Claude config, remove the variable and restart; add the server under Settings → MCP servers " +
+      "or the bot project's .mcp.json instead.",
+  };
+}
+
 /** Retain the selected CLI account's authentication without importing its
  * hooks, permissions, MCP servers or personal instructions. Explicit OMB
  * connections/local endpoints own their entire routing + credential pair. */
@@ -882,6 +900,11 @@ export const ClaudeDriver: ProviderDriver<ClaudeConfig> = {
     const environment = (model?: string | null) =>
       claudeEnvironment(config.managed ? undefined : model, { ...process.env, ...input.environment }, config.configDir, input.environment);
     const catalogEnv = environment();
+    // Say it once where a headless or source run reads its logs; the Engines
+    // page carries the same warning for the desktop (claudeInheritWarning).
+    if (inheritsUserConfig(catalogEnv)) {
+      console.error(`claude (${instanceId}): OMB_CLAUDE_INHERIT_USER_CONFIG=1 — bots inherit this machine's Claude Code MCP servers, skills, hooks and CLAUDE.md on every turn; remove it unless a bot needs a user-scope server`);
+    }
     let models = STATIC_CLAUDE_MODELS;
     const refreshModels = async () => {
       if (config.managed) return;
@@ -1871,7 +1894,8 @@ export const ClaudeDriver: ProviderDriver<ClaudeConfig> = {
       // CLI's own login (Pro/Max): the cost it reports is what the call
       // WOULD bill, not a charge
       const update = claudeCliUpdate(version, config.cli);
-      return { state: "available", version, ...auth, ...(update ? { update } : {}), billing: "subscription" };
+      const warning = claudeInheritWarning(env);
+      return { state: "available", version, ...auth, ...(update ? { update } : {}), ...(warning ? { warning } : {}), billing: "subscription" };
     };
 
     /** One-shot Claude call with the prompt on stdin, never argv. Approval

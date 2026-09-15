@@ -292,6 +292,9 @@ data class BotTask(
     val projectId: String? = null,
     val openedBy: ThreadOpener? = null,
     val closedBy: ThreadCloser? = null,
+    /** The person put this thread away. Present means archived — a stamp of
+     * 0 is still archived, because the task API accepts any epoch number. */
+    val archivedAt: Double? = null,
     /** Bot-only internal execution. Keep it addressable, but out of thread pickers. */
     val routineRunId: String? = null,
 )
@@ -304,13 +307,18 @@ val BotTask.openedByLabel: String?
 val BotTask.isClosed: Boolean
     get() = closedBy != null
 
+/** Archived is the presence of the stamp, not its value: archivedAt 0 counts. */
+val BotTask.isArchived: Boolean
+    get() = archivedAt != null
+
 /**
  * The one line under a title: who closed it once a bot has, otherwise who
- * opened it, otherwise nothing. Closed wins because it is the newer fact and
- * the reason the row is dimmed.
+ * opened it, otherwise nothing. Closed wins because it is the newer fact;
+ * archived wins over the opener because it explains why the row sits where
+ * it does.
  */
 val BotTask.bylineLabel: String?
-    get() = closedBy?.let { "closed by ${it.name}" } ?: openedByLabel
+    get() = closedBy?.let { "closed by ${it.name}" } ?: if (isArchived) "Archived" else openedByLabel
 
 @Serializable
 data class Bot(

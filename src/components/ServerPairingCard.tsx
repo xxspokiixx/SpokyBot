@@ -46,10 +46,13 @@ export function lastSeen(lastSeenAt: number, now = Date.now()): string {
 const button = "rounded-md bg-accent px-3 py-1.5 text-[13px] font-medium text-accent-ink disabled:opacity-50";
 const quiet = "rounded-md border border-line px-3 py-1.5 text-[13px] text-ink hover:bg-surface";
 
-/** Settings → Remote access on a hosted server: mint a one-time pairing
- * code with a QR for the phone app, and see or sign out the devices that
- * hold a session. The desktop app has its own companion flow and never
- * shows this. */
+/** Settings → Remote access: mint a one-time pairing code with a QR for
+ * the phone app (or for a non-phone client — MCP, `openmausbot pair`, a
+ * second desktop app), and see or sign out the devices that hold a
+ * session. Shown for any client that owns the server being paired
+ * against, whether that's a hosted server reached from a browser or the
+ * desktop app's own local server; hidden when this desktop is itself a
+ * remote client of someone else's server (see SettingsModal). */
 export function ServerPairingCard() {
   const [session, setSession] = useState<SessionState | null>(null);
   const [scope, setScope] = useState<"admin" | "client">("admin");

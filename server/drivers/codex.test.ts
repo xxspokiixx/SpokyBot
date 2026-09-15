@@ -43,6 +43,17 @@ describe("CodexDriver.decodeConfig", () => {
     // anything non-true is off — a truthy string must not enable full auto
     expect(CodexDriver.decodeConfig({ fullAuto: "yes" }).fullAuto).toBe(false);
   });
+
+  it("allows Company endpoints over HTTPS, and over HTTP only on loopback", () => {
+    expect(CodexDriver.decodeConfig({ managed: { url: "https://company.example/v1", models: ["m"] } }))
+      .toMatchObject({ managed: { url: "https://company.example/v1", models: ["m"] } });
+    expect(CodexDriver.decodeConfig({ managed: { url: "http://127.0.0.1:1/v1", models: ["m"] } }))
+      .toMatchObject({ managed: { url: "http://127.0.0.1:1/v1" } });
+    expect(CodexDriver.decodeConfig({ managed: { url: "http://localhost:1/v1", models: ["m"] } }))
+      .toMatchObject({ managed: { url: "http://localhost:1/v1" } });
+    expect(() => CodexDriver.decodeConfig({ managed: { url: "http://company.example/v1", models: ["m"] } }))
+      .toThrow("Invalid Company Codex endpoint.");
+  });
 });
 
 describe("Codex native diagnostic sanitization", () => {
@@ -101,6 +112,7 @@ describe("CodexDriver turns (fake app-server)", () => {
   afterEach(async () => {
     delete process.env.FAKE_CODEX_MODE;
     delete process.env.FAKE_CODEX_DUMP;
+    delete process.env.FAKE_CODEX_ASK_HOLD;
     delete process.env.FAKE_CODEX_TRANSIENTS;
     delete process.env.FAKE_CODEX_PARTIAL_FAILS;
     delete process.env.FAKE_CODEX_STATE;
@@ -794,6 +806,23 @@ describe("CodexDriver turns (fake app-server)", () => {
     expect(JSON.parse(readFileSync(dump, "utf8")).calls.map((call: { method: string }) => call.method)).not.toContain("thread/start");
   });
 
+  it("names the missing Company model prerequisites instead of one blanket refusal", async () => {
+    await create({ managed: true });
+    await expect(instance.adapter.sendTurn({ threadId: "company-no-model", text: "hi" }))
+      .rejects.toThrow("no model is selected");
+    await expect(instance.adapter.sendTurn({ threadId: "company-off-list-model", text: "hi", model: "personal-model" }))
+      .rejects.toThrow("personal-model is not approved for your organization");
+  });
+
+  it("names a missing Company API key or CODEX_HOME instead of one blanket refusal", async () => {
+    await create({ managed: true, environment: { OPENMAUSBOT_COMPANY_API_KEY: "" } });
+    await expect(instance.adapter.sendTurn({ threadId: "company-no-key", text: "hi", model: "company-codex-model" }))
+      .rejects.toThrow("OPENMAUSBOT_COMPANY_API_KEY is missing");
+    await create({ managed: true, environment: { CODEX_HOME: "" } });
+    await expect(instance.adapter.sendTurn({ threadId: "company-no-home", text: "hi", model: "company-codex-model" }))
+      .rejects.toThrow("CODEX_HOME is missing");
+  });
+
   it("rebuilds a missing Company native thread once with its approved model and canonical history", async () => {
     await create({ managed: true });
     const dump = join(scratch, "company-missing-thread.json");
@@ -1006,6 +1035,116 @@ describe("CodexDriver turns (fake app-server)", () => {
     await recorder.until((e) => e.type === "turn.completed");
     // legacy method name → legacy decision vocabulary
     expect(JSON.parse(readFileSync(dump, "utf8")).decision).toEqual({ decision: "approved" });
+  });
+
+  it("answers a single-question ask and keeps its reply scoped to that question", async () => {
+    await create({ mode: "question" });
+    const dump = join(scratch, "question-single.json");
+    process.env.FAKE_CODEX_DUMP = dump;
+
+    await instance.adapter.sendTurn({ threadId: "t-question-single", text: "ask me" });
+    const opened = await recorder.until((e) => e.type === "request.opened");
+    expect(opened).toMatchObject({
+      requestType: "question",
+      tool: "ask_user",
+      summary: "Ship today?",
+      // six options offered; the card keeps its five-row ceiling
+      choices: ["Yes", "No", "Maybe", "Later", "Soon"],
+    });
+
+    await instance.adapter.respondToRequest("t-question-single", opened.requestId!, { behavior: "answer", message: "Yes" });
+    const resolved = await recorder.until((e) => e.type === "request.resolved");
+    expect(resolved).toMatchObject({ behavior: "answer", source: "user" });
+
+    await recorder.until((e) => e.type === "turn.completed");
+    expect(JSON.parse(readFileSync(dump, "utf8")).decision).toEqual({
+      answers: { "q-ship": { answers: ["Yes"] } },
+    });
+  });
+
+  it("refuses a bundled multi-question ask instead of copying one answer into every question (#1237)", async () => {
+    await create({ mode: "multi-question" });
+    const dump = join(scratch, "question-multi.json");
+    process.env.FAKE_CODEX_DUMP = dump;
+
+    await instance.adapter.sendTurn({ threadId: "t-question-multi", text: "ask me twice" });
+    await recorder.until((e) => e.type === "turn.completed");
+
+    // no card may open: one card cannot carry two questions honestly
+    expect(recorder.events.some((e) => e.type === "request.opened")).toBe(false);
+    const decision = JSON.parse(readFileSync(dump, "utf8")).decision;
+    expect(decision.error.code).toBe(-32602);
+    expect(decision.error.message).toContain("one question");
+    expect(decision.error.message).toContain("2");
+  });
+
+  it("refuses an empty ask instead of opening a card with nothing to answer", async () => {
+    await create({ mode: "empty-question" });
+    const dump = join(scratch, "question-empty.json");
+    process.env.FAKE_CODEX_DUMP = dump;
+
+    await instance.adapter.sendTurn({ threadId: "t-question-empty", text: "ask me nothing" });
+    await recorder.until((e) => e.type === "turn.completed");
+
+    // no card may open: there is no question to answer
+    expect(recorder.events.some((e) => e.type === "request.opened")).toBe(false);
+    const decision = JSON.parse(readFileSync(dump, "utf8")).decision;
+    expect(decision.error.code).toBe(-32602);
+    expect(decision.error.message).toContain("sent none");
+  });
+
+  it("refuses a malformed ask payload instead of opening an empty card", async () => {
+    await create({ mode: "malformed-question" });
+    const dump = join(scratch, "question-malformed.json");
+    process.env.FAKE_CODEX_DUMP = dump;
+
+    await instance.adapter.sendTurn({ threadId: "t-question-malformed", text: "ask me wrongly" });
+    await recorder.until((e) => e.type === "turn.completed");
+
+    // no card may open: there is no honest question shape to answer
+    expect(recorder.events.some((e) => e.type === "request.opened")).toBe(false);
+    const decision = JSON.parse(readFileSync(dump, "utf8")).decision;
+    expect(decision.error.code).toBe(-32602);
+    expect(decision.error.message).toContain("must be an array");
+  });
+
+  it("maps a timed-out ask to the timeout note for its one question", async () => {
+    // Hold the ask reply without completing the turn: a completed turn
+    // starts the driver's child-reap loop, whose 25ms setTimeout poll would
+    // freeze on the fake clock and strand the teardown.
+    process.env.FAKE_CODEX_ASK_HOLD = "1";
+    await create({ mode: "question" });
+    const dump = join(scratch, "question-timeout.json");
+    process.env.FAKE_CODEX_DUMP = dump;
+
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+    try {
+      await instance.adapter.sendTurn({ threadId: "t-question-timeout", text: "ask me" });
+      const opened = await recorder.until((e) => e.type === "request.opened");
+      await vi.advanceTimersByTimeAsync(15 * 60_000);
+
+      const resolved = await recorder.until((e) => e.type === "request.resolved" && e.requestId === opened.requestId);
+      expect(resolved).toMatchObject({ behavior: "answer", source: "timeout" });
+    } finally {
+      vi.useRealTimers();
+    }
+
+    // The held fake records the answers it received once real time lets the
+    // child parse the reply; the turn is still open by design.
+    let decision: unknown = null;
+    for (let i = 0; i < 80 && (decision === null || decision === undefined); i++) {
+      try {
+        decision = JSON.parse(readFileSync(dump, "utf8")).decision;
+      } catch {
+        // The fake has not written the dump yet.
+      }
+      if (decision === null || decision === undefined) {
+        await new Promise((resolve) => setTimeout(resolve, 25));
+      }
+    }
+    expect(decision).toEqual({
+      answers: { "q-ship": { answers: ["No answer was given — use your best judgment."] } },
+    });
   });
 
   it("answers Codex 0.149 MCP elicitation with the MCP result shape", async () => {

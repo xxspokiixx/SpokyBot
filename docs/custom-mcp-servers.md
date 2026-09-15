@@ -42,7 +42,10 @@ If a bot genuinely depended on a user- or local-scope server, the supported
 fix is to add that server here or to the bot project's `.mcp.json`. The escape
 hatch back to the old launch is the environment variable
 `OMB_CLAUDE_INHERIT_USER_CONFIG=1` on the OpenMausBot process; it restores
-everything above, for every Claude bot, until you remove it.
+everything above, for every Claude bot, until you remove it. Because nothing
+in the chat looks different while it is set — only the token usage does —
+the Engines page shows a warning on the Claude engine and the server logs one
+line at startup for as long as the variable is present.
 
 This isolation uses the CLI flags `--strict-mcp-config` (Claude Code 1.0.60+)
 and `--setting-sources project` (1.0.122+); the harness also picks the

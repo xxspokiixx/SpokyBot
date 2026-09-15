@@ -283,6 +283,11 @@ public struct BotTask: Codable, Hashable, Sendable {
     public var projectId: String?
     public var openedBy: ThreadOpener?
     public var closedBy: ThreadCloser?
+    /// When the person put this thread away, in epoch milliseconds. The
+    /// field's presence — not its value — marks the thread archived: the
+    /// task API accepts any epoch number, so a thread persisted with
+    /// archivedAt: 0 is archived. Absent means it was never put away.
+    public var archivedAt: Double?
     /// Bot-only internal execution. Keep it addressable, but out of thread pickers.
     public var routineRunId: String?
 
@@ -294,15 +299,31 @@ public struct BotTask: Codable, Hashable, Sendable {
     /// A bot closed this thread and nothing has happened there since.
     public var isClosed: Bool { closedBy != nil }
 
-    /// The one line under a title: who closed it once a bot has, otherwise
-    /// who opened it, otherwise nothing. Closed wins because it is the newer
-    /// fact and the reason the row is dimmed.
+    /// Archived means the field is present, not nonzero: the task API
+    /// accepts any epoch number, so a thread persisted with
+    /// archivedAt: 0 is archived.
+    public var isArchived: Bool { archivedAt != nil }
+
+    /// Working is activity or flag: the wire can carry either alone, so the
+    /// archive action's busy gate and the working status ask the same
+    /// question. A run counts as work here exactly as its row already
+    /// labels it Working.
+    public var isWorking: Bool { activity == "working" || activity == "running" || busy == true }
+
+    /// The one line under a title: who closed it once a bot has, "Archived"
+    /// once the person put it away, otherwise who opened it, otherwise
+    /// nothing. Closed wins because it is the newer fact; archived wins over
+    /// the opener because it explains why the row sits where it does.
     public var bylineLabel: String? {
-        closedBy.map { "closed by \($0.name)" } ?? openedByLabel
+        if let closedBy { return "closed by \(closedBy.name)" }
+        return isArchived ? "Archived" : openedByLabel
     }
 
     /// Whether the row must stay in the list regardless of closed state:
-    /// it is running, needs the person, or has something they have not read.
+    /// it is working, needs the person, or has something they have not read.
+    /// The queued activity is parsed defensively — the wire's activity enum
+    /// never carries it, but a companion build that derives it client-side
+    /// can hand it to this same rule.
     public var demandsAttention: Bool {
         if busy == true || unread == true { return true }
         switch activity {

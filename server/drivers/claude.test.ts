@@ -1106,7 +1106,28 @@ describe("ClaudeDriver turns (fake CLI)", () => {
 
   it("passes every flag to a current CLI and raises no update notice", async () => {
     await create(undefined, { FAKE_CLAUDE_VERSION: "2.1.267" });
-    expect((await instance.snapshot()).update).toBeUndefined();
+    const snapshot = await instance.snapshot();
+    expect(snapshot.update).toBeUndefined();
+    expect(snapshot.warning).toBeUndefined();
+  });
+
+  it("warns on the Engines page while the escape hatch is set", async () => {
+    // The flag is a footgun: every Claude bot silently re-mounts this
+    // machine's own MCP servers, skills, hooks and CLAUDE.md on every turn.
+    // The snapshot is what the Engines page shows, so the warning lives there.
+    await create(undefined, { FAKE_CLAUDE_VERSION: "2.1.267", OMB_CLAUDE_INHERIT_USER_CONFIG: "1" });
+    expect(await instance.snapshot()).toMatchObject({
+      state: "available",
+      warning: {
+        title: "Bots inherit this machine's Claude Code setup",
+        message: expect.stringContaining("OMB_CLAUDE_INHERIT_USER_CONFIG"),
+      },
+    });
+  });
+
+  it("does not warn when the escape hatch is set to anything but 1", async () => {
+    await create(undefined, { FAKE_CLAUDE_VERSION: "2.1.267", OMB_CLAUDE_INHERIT_USER_CONFIG: "true" });
+    expect((await instance.snapshot()).warning).toBeUndefined();
   });
 
   it("assumes a current CLI on a turn that runs before any snapshot", async () => {
