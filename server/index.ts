@@ -149,6 +149,7 @@ import { describeSpawnFailure, execCli } from "./procs.ts";
 import { blockedTarget, buildNotification, type Notification } from "./notify.ts";
 import {
   isEffortLevel,
+  isModelVariant,
   type ModelSelection,
   type RequestOutcome,
   type RuntimeEvent,
@@ -361,7 +362,7 @@ import { takeImportName } from "../shared/import-name.ts";
 import { readThreadEvents } from "./thread-events.ts";
 import { bindThreadLogCapProvider } from "./thread-log-rotation.ts";
 import { listenWebhookIngress, webhookCredential, type WebhookIngress } from "./webhook-ingress.ts";
-import { memberTurnSelection } from "./member-turn.ts";
+import { assertModelVariantSupported, memberTurnSelection } from "./member-turn.ts";
 import { WebhookManager } from "./webhooks.ts";
 import { SPAWNED_PROXIES } from "./proxy-paths.ts";
 import { loadBundledSkills, loadUserSkills, mergeSkills, renderSkillInstructions, selectBundledSkills } from "./skill-library.ts";
@@ -1377,7 +1378,7 @@ function checkedModelSelection(
   if (!raw || typeof raw !== "object" || Array.isArray(raw)) {
     return { ok: false, status: 400, error: "modelSelection must be an object" };
   }
-  const value = raw as { instanceId?: unknown; model?: unknown; effort?: unknown };
+  const value = raw as { instanceId?: unknown; model?: unknown; effort?: unknown; variant?: unknown };
   if (typeof value.instanceId !== "string" || !value.instanceId.trim()) {
     return { ok: false, status: 400, error: "modelSelection.instanceId is required" };
   }
@@ -1394,10 +1395,20 @@ function checkedModelSelection(
     }
     selection.effort = value.effort;
   }
+  if (value.variant !== undefined) {
+    if (!isModelVariant(value.variant)) {
+      return { ok: false, status: 400, error: "variant must be a non-empty model variant ID" };
+    }
+    if (value.effort !== undefined) {
+      return { ok: false, status: 400, error: "choose either a model variant or an effort level" };
+    }
+    selection.variant = value.variant;
+  }
   const changed = current && (
     selection.instanceId !== current.selection.instanceId ||
     selection.model !== current.selection.model ||
-    selection.effort !== current.selection.effort
+    selection.effort !== current.selection.effort ||
+    selection.variant !== current.selection.variant
   );
   if (current?.busy && changed) {
     return { ok: false, status: 409, error: "the bot is working — stop it before changing models" };
@@ -1428,6 +1439,9 @@ function checkedModelSelection(
   const allowed: readonly string[] = target?.adapter.capabilities.effortLevels ?? [];
   if (target && selection.effort !== undefined && !allowed.includes(selection.effort)) {
     return { ok: false, status: 400, error: `effort "${selection.effort}" is not offered by this bot's engine` };
+  }
+  if (target && selection.variant !== undefined && !target.adapter.capabilities.modelVariants) {
+    return { ok: false, status: 400, error: "model variants are not offered by this bot's engine" };
   }
   return { ok: true, selection };
 }
@@ -5385,6 +5399,8 @@ async function startTurn(
   // a cloud routine borrows the instance default model, so it borrows no
   // per-bot effort either
   const effort = opts?.runOn === "cloud" || switchedEngine ? undefined : bot.modelSelection.effort;
+  const variant = opts?.runOn === "cloud" || switchedEngine ? undefined : bot.modelSelection.variant;
+  assertModelVariantSupported({ variant, effort }, instance.adapter.capabilities);
   // A selection can be persisted while its engine is offline. Re-check when
   // the engine returns so an old or unsupported value never reaches a CLI.
   if (effort && !instance.adapter.capabilities.effortLevels?.includes(effort)) {
@@ -6050,6 +6066,7 @@ async function startTurn(
         approvalMode: approvalModeForTurn(bot, commsDepth > 0),
         model,
         effort,
+        variant,
         // a rewound thread never resumes the abandoned branch's session
         // the active task's own session — another task's cursor would
         // resume the wrong conversation and defeat the context bubble
@@ -7277,6 +7294,7 @@ async function runGroupMemberTurn(
   // A workspace at its monthly spend limit rechecks the cap at execution time
   // for every room, goal, queued, calendar, and chained-mention turn.
   assertWithinBudget(cfg, DATA_DIR);
+  assertModelVariantSupported(preparedSelection, instance.adapter.capabilities);
   const integrations: NonNullable<Parameters<typeof instance.adapter.sendTurn>[0]["integrations"]> = {};
   const skillAuthoring =
     skillAuthoringEnabled(cfg) &&
@@ -7361,6 +7379,7 @@ async function runGroupMemberTurn(
     readyBot.modelSelection.instanceId !== preparedSelection.instanceId ||
     readyBot.modelSelection.model !== preparedSelection.model ||
     readyBot.modelSelection.effort !== preparedSelection.effort ||
+    readyBot.modelSelection.variant !== preparedSelection.variant ||
     readyBot.composio !== preparedComposio;
   if (setupChanged) {
     if (setupRetry === 0) {
@@ -7936,7 +7955,8 @@ async function runGroupMemberTurn(
   } catch (error) {
     if (providerDispatched) throw error;
     const isSpendCap = typeof error === "object" && error !== null && (error as { code?: string }).code === "spend_cap";
-    if (!roomSpeaker && !isSpendCap) throw error;
+    const isVariantError = typeof error === "object" && error !== null && (error as { code?: string }).code === "unsupported_model_variant";
+    if (!roomSpeaker && !isSpendCap && !isVariantError) throw error;
     const message = error instanceof Error ? error.message : "Local VM setup failed";
     store.appendMessage(threadId, {
       role: "bot", kind: "activity",
@@ -13398,7 +13418,7 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
       const body = await readBody(req);
       if (body && typeof body === "object" && !Array.isArray(body)) {
         const unsupported = Object.keys(body).find(
-          (key) => key !== "instanceId" && key !== "model" && key !== "effort",
+          (key) => key !== "instanceId" && key !== "model" && key !== "effort" && key !== "variant",
         );
         if (unsupported) return json(res, 400, { error: `unsupported model field: ${unsupported}` });
       }

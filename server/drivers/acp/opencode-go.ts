@@ -103,12 +103,19 @@ export function parseOpenCodeModelsOutput(stdout: string): ModelCatalog | null {
     const contextWindow = typeof limit.context === "number" && Number.isFinite(limit.context) && limit.context > 0
       ? Math.floor(limit.context)
       : undefined;
+    const variants = record.variants && typeof record.variants === "object" && !Array.isArray(record.variants)
+      ? Object.entries(record.variants).filter(([, settings]) => (
+          settings && typeof settings === "object" && !Array.isArray(settings)
+          && (settings as Record<string, unknown>).disabled !== true
+        )).map(([id]) => ({ id, label: labelForModel(id) }))
+      : undefined;
     seen.add(slug);
     options.push({
       id: slug,
       label: `${providerLabel(provider)} · ${name}`,
       ...(localModelRecord(record) ? { custom: true, loaded: true } : {}),
       ...(contextWindow ? { contextWindow } : {}),
+      ...(variants ? { variants } : {}),
     });
   };
 
@@ -365,6 +372,7 @@ const support = (loadCatalog: OpenCodeCatalogLoader): AcpSupport => ({
   spawnArgs: () => ["acp"],
   credentialEnv: ["OPENCODE_API_KEY"],
   selectModel: { configId: "model" },
+  modelVariants: true,
   resolveTurnModel: (model, env) => model
     ? ensureOpenCodeInjectModel(normalizeLegacyOpenCodeModel(model, env), env)
     : model,

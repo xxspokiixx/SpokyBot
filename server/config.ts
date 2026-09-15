@@ -8,7 +8,7 @@ import { z } from "zod";
 import { normalizeImageGenerationUrl, type ImageGenerationConfig } from "../shared/image-generation.ts";
 
 import { writeFileAtomic } from "./atomic.ts";
-import { EFFORT_LEVELS, type InstanceConfigMap, type ModelSelection } from "./contracts.ts";
+import { EFFORT_LEVELS, isModelVariant, type InstanceConfigMap, type ModelSelection } from "./contracts.ts";
 import type { McpServerSpec } from "./contracts.ts";
 import { isRemoteMcpServer, parseStoredMcpServer } from "./mcp-registry.ts";
 import { parseJson, schemaIssue, type JsonObject, type JsonValue } from "./schema.ts";
@@ -268,7 +268,9 @@ const defaultModelSelectionSchema = z.object({
   instanceId: z.string().trim().min(1),
   model: z.string().trim().min(1),
   effort: z.enum(EFFORT_LEVELS).optional(),
-});
+  variant: z.string().refine(isModelVariant, "invalid model variant").optional(),
+}).refine((selection) => selection.variant === undefined || selection.effort === undefined,
+  "choose either a model variant or an effort level");
 const appConfigSchema = z.object({
   /** Verified by the dedicated domain endpoint, never a generic config patch. */
   customDomain: z.string().optional(),

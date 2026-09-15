@@ -104,6 +104,14 @@ describe("configuration boundaries", () => {
     expect(parseConfigPatch(input)).toEqual(expected);
   });
 
+  it("round-trips an opaque model variant without converting omission to none", () => {
+    const defaultModelSelection = { instanceId: "opencodeGo", model: "provider/model", variant: "minimal" };
+    expect(parseConfigPatch({ defaultModelSelection })).toEqual({ defaultModelSelection });
+    expect(parseStoredConfig({ defaultModelSelection })).toEqual({ defaultModelSelection });
+    expect(parseConfigPatch({ defaultModelSelection: { instanceId: "opencodeGo", model: "provider/model" } }))
+      .toEqual({ defaultModelSelection: { instanceId: "opencodeGo", model: "provider/model" } });
+  });
+
   it.each<JsonValue>([
     null,
     "codex/model",
@@ -113,6 +121,9 @@ describe("configuration boundaries", () => {
     { instanceId: "codex", model: "   " },
     { instanceId: "codex", model: 42 },
     { instanceId: "codex", model: "model", effort: "turbo" },
+    { instanceId: "opencodeGo", model: "model", variant: "" },
+    { instanceId: "opencodeGo", model: "model", variant: " low " },
+    { instanceId: "opencodeGo", model: "model", variant: "low", effort: "high" },
   ])("rejects an invalid default model selection: %j", (defaultModelSelection) => {
     expect(() => parseStoredConfig({ defaultModelSelection })).toThrow("defaultModelSelection");
     expect(() => parseConfigPatch({ defaultModelSelection })).toThrow("defaultModelSelection");

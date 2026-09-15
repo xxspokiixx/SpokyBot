@@ -38,6 +38,10 @@
 //   FAKE_ACP_MODEL_STICKS  session/set_config_option succeeds but leaves the
 //                        model where it was, so the confirmation guard in
 //                        core.ts has something to catch
+//   FAKE_ACP_VARIANTS JSON map of model -> {id?, currentValue?, options} using
+//                        ACP select values/groups; never contacts a provider.
+//   FAKE_ACP_CONFIG_UPDATES JSON array of {after, sessionId?, configOptions,
+//                        replay?}, emitted after the named RPC response.
 //   FAKE_ACP_USAGE_ROOT  put the prompt result's usage at the root instead of
 //                        under _meta (what opencode 1.18.18 actually does)
 //
@@ -53,6 +57,12 @@ const ONE_PIXEL_PNG = "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42
 // identical to before.
 const models = (process.env.FAKE_ACP_MODELS ?? "").split(",").filter(Boolean);
 let currentModel: string | null = models[0] ?? null;
+const variantConfigs: Record<string, { id?: string; currentValue?: string; options: any[] }> =
+  JSON.parse(process.env.FAKE_ACP_VARIANTS ?? "{}");
+let currentVariant = variantConfigs[currentModel ?? ""]?.currentValue;
+const variantValues = (entries: any[]): string[] => entries.flatMap((entry) => (
+  typeof entry?.value === "string" ? [entry.value] : Array.isArray(entry?.options) ? variantValues(entry.options) : []
+));
 const modes = (process.env.FAKE_ACP_MODES ?? "").split(",").filter(Boolean);
 let currentMode: string | null = modes[0] ?? null;
 // task id captured from the last delegate_bot reply, for a later
@@ -85,6 +95,7 @@ function savedDelegatedTaskId(): string {
   return chiefDelegatedTaskId;
 }
 const configOptions = () => {
+  const variant = variantConfigs[currentModel ?? ""];
   const options = [
     ...(models.length ? [
         {
@@ -96,6 +107,14 @@ const configOptions = () => {
           options: models.map((value) => ({ value, name: value })),
         },
       ] : []),
+    ...(variant ? [{
+      id: variant.id ?? "effort",
+      name: "Effort",
+      category: "thought_level",
+      type: "select",
+      currentValue: currentVariant,
+      options: variant.options,
+    }] : []),
     ...(modes.length ? [{
       id: "mode",
       name: "Mode",
@@ -206,6 +225,32 @@ if (argv[0] === "models" || argv.includes("--list-models")) {
 
 const out = (obj: unknown) => process.stdout.write(JSON.stringify(obj) + "\n");
 const result = (id: unknown, res: unknown) => out({ jsonrpc: "2.0", id, result: res });
+const configUpdates = JSON.parse(process.env.FAKE_ACP_CONFIG_UPDATES ?? "[]") as Array<{
+  after: string; sessionId?: string; configOptions: unknown[]; replay?: boolean;
+}>;
+const emitConfigUpdates = (after: string, sessionId: string) => {
+  for (const update of configUpdates.filter((entry) => entry.after === after)) {
+    out({
+      jsonrpc: "2.0", method: "session/update", params: {
+        sessionId: update.sessionId ?? sessionId,
+        ...(update.replay ? { _meta: { isReplay: true } } : {}),
+        update: { sessionUpdate: "config_option_update", configOptions: update.configOptions },
+      },
+    });
+  }
+};
+// Send response and subsequent updates in one chunk to exercise wire ordering:
+// a promise continuation must not overwrite a newer notification with the ACK.
+const resultAndConfigUpdates = (id: unknown, res: unknown, after: string, sessionId: string) => {
+  const updates = configUpdates.filter((entry) => entry.after === after).map((update) => ({
+    jsonrpc: "2.0", method: "session/update", params: {
+      sessionId: update.sessionId ?? sessionId,
+      ...(update.replay ? { _meta: { isReplay: true } } : {}),
+      update: { sessionUpdate: "config_option_update", configOptions: update.configOptions },
+    },
+  }));
+  process.stdout.write([{ jsonrpc: "2.0", id, result: res }, ...updates].map((message) => JSON.stringify(message)).join("\n") + "\n");
+};
 const rpcMethods: string[] = [];
 const recordMethod = (method: string) => {
   rpcMethods.push(method);
@@ -388,11 +433,11 @@ function handle(msg: any) {
       }
       const opts = configOptions();
       const mdls = sessionModels();
-      result(msg.id, {
+      resultAndConfigUpdates(msg.id, {
         sessionId: "fake-acp-session",
         ...(opts ? { configOptions: opts } : {}),
         ...(mdls ? { models: mdls } : {}),
-      });
+      }, "session/new", "fake-acp-session");
       break;
     }
     case "session/load": {
@@ -408,7 +453,7 @@ function handle(msg: any) {
       }
       const opts = configOptions();
       const mdls = sessionModels();
-      result(msg.id, { ...(opts ? { configOptions: opts } : {}), ...(mdls ? { models: mdls } : {}) });
+      resultAndConfigUpdates(msg.id, { ...(opts ? { configOptions: opts } : {}), ...(mdls ? { models: mdls } : {}) }, "session/load", msg.params.sessionId);
       break;
     }
     case "session/resume": {
@@ -453,6 +498,16 @@ function handle(msg: any) {
     }
     case "session/set_config_option": {
       const { configId, value } = msg.params ?? {};
+      const variant = variantConfigs[currentModel ?? ""];
+      if (variant && configId === (variant.id ?? "effort") && variantValues(variant.options).includes(value)) {
+        if (!process.env.FAKE_ACP_VARIANT_STICKS) currentVariant = value;
+        configCalls.push({ method: msg.method, params: msg.params });
+        if (process.env.FAKE_ACP_DUMP) {
+          writeFileSync(`${process.env.FAKE_ACP_DUMP}.config.json`, JSON.stringify(configCalls, null, 2));
+        }
+        resultAndConfigUpdates(msg.id, process.env.FAKE_ACP_EMPTY_VARIANT_ACK ? {} : { configOptions: configOptions() }, "effort", msg.params.sessionId);
+        break;
+      }
       if (configId === "mode" && modes.includes(value)) {
         currentMode = value;
         configCalls.push({ method: msg.method, params: msg.params });
@@ -473,15 +528,24 @@ function handle(msg: any) {
       // FAKE_ACP_MODEL_STICKS: answer OK and keep the old model anyway. Nothing
       // in the protocol forbids it, and it is the shape core.ts's confirmation
       // guard exists for — an error is loud, this is silent.
-      if (!process.env.FAKE_ACP_MODEL_STICKS) currentModel = value;
+      if (!process.env.FAKE_ACP_MODEL_STICKS) {
+        currentModel = value;
+        currentVariant = variantConfigs[value]?.currentValue;
+      }
       configCalls.push({ method: msg.method, params: msg.params });
       if (process.env.FAKE_ACP_DUMP) {
         writeFileSync(`${process.env.FAKE_ACP_DUMP}.config.json`, JSON.stringify(configCalls, null, 2));
       }
-      result(msg.id, { configOptions: configOptions() });
+      resultAndConfigUpdates(msg.id, { configOptions: configOptions() }, "model", msg.params.sessionId);
       break;
     }
     case "session/prompt": {
+      emitConfigUpdates("session/prompt", msg.params.sessionId);
+      if (process.env.FAKE_ACP_DUMP && process.env.FAKE_ACP_VARIANTS) {
+        writeFileSync(`${process.env.FAKE_ACP_DUMP}.selection.json`, JSON.stringify({
+          sessionId: msg.params.sessionId, model: currentModel, variant: currentVariant,
+        }));
+      }
       if (process.env.FAKE_ACP_DUMP && process.env.FAKE_ACP_DUMP_PROMPT === "1") {
         writeFileSync(`${process.env.FAKE_ACP_DUMP}.prompt.json`, JSON.stringify(msg.params?.prompt ?? null, null, 2));
       }
