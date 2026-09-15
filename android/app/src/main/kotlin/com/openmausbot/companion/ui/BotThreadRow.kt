@@ -12,7 +12,6 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.semantics.selected
@@ -26,24 +25,30 @@ import com.openmausbot.companion.core.BotTask
 import com.openmausbot.companion.core.bylineLabel
 import com.openmausbot.companion.core.displayTitle
 import com.openmausbot.companion.core.isClosed
+import com.openmausbot.companion.core.isSnoozed
 
 /** Shared by Home and the thread picker, with status taken from this thread alone. */
 @Composable
-internal fun BotThreadRow(task: BotTask, selected: Boolean = false, modifier: Modifier = Modifier) {
+internal fun BotThreadRow(
+    task: BotTask,
+    selected: Boolean = false,
+    modifier: Modifier = Modifier,
+    now: Long = System.currentTimeMillis(),
+) {
     val runtime = when (task.activity) {
         "waiting-on-you" -> "Waiting on you"
         "queued" -> "Queued"
         "working", "running" -> "Working"
         else -> if (task.busy == true) "Working" else null
     }
-    val dimmed = task.isClosed && runtime == null && task.unread != true
-    val now = remember(task.createdAt) { System.currentTimeMillis() }
+    val snoozed = task.isSnoozed(now)
+    val dimmed = (task.isClosed || snoozed) && runtime == null && task.unread != true
     Row(
         modifier = modifier
             .fillMaxWidth()
             .semantics(mergeDescendants = true) {
                 this.selected = selected
-                if (dimmed) stateDescription = "Closed"
+                if (dimmed) stateDescription = if (task.isClosed) "Closed" else "Snoozed"
             }
             .padding(vertical = 3.dp),
         horizontalArrangement = Arrangement.spacedBy(12.dp),
@@ -84,7 +89,7 @@ internal fun BotThreadRow(task: BotTask, selected: Boolean = false, modifier: Mo
             }
             val byline = listOfNotNull(
                 RelativeStamp.list(task.createdAt, now).takeIf { it.isNotEmpty() },
-                task.bylineLabel,
+                task.bylineLabel(now),
             ).joinToString(" · ")
             if (byline.isNotEmpty()) {
                 Text(

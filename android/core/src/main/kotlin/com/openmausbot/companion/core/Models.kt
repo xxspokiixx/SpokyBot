@@ -294,6 +294,13 @@ data class BotTask(
     val closedBy: ThreadCloser? = null,
     /** Bot-only internal execution. Keep it addressable, but out of thread pickers. */
     val routineRunId: String? = null,
+    /**
+     * Asleep until: 0 is the "until new activity" sentinel and never ticks,
+     * while a future epoch-milliseconds timestamp sleeps only until it
+     * passes. The server drops expired snoozes from snapshots; the phone
+     * still checks the clock, because a live stream never refreshes one.
+     */
+    val snoozedUntil: Double? = null,
 )
 
 /** The thread list's quiet second line, worded as the desktop words it. */
@@ -305,12 +312,25 @@ val BotTask.isClosed: Boolean
     get() = closedBy != null
 
 /**
- * The one line under a title: who closed it once a bot has, otherwise who
- * opened it, otherwise nothing. Closed wins because it is the newer fact and
- * the reason the row is dimmed.
+ * Snoozed means asleep right now: 0 is the "until new activity" sentinel and
+ * sleeps until woken, while a timestamp sleeps only until it passes
+ * (`isSnoozed` in `SidebarThreadRow.tsx`).
  */
-val BotTask.bylineLabel: String?
-    get() = closedBy?.let { "closed by ${it.name}" } ?: openedByLabel
+fun BotTask.isSnoozed(now: Long = System.currentTimeMillis()): Boolean =
+    snoozedUntil != null && (snoozedUntil == 0.0 || snoozedUntil > now)
+
+/**
+ * The one line under a title: who closed it once a bot has, "Snoozed" while
+ * it sleeps, otherwise who opened it, otherwise nothing. Closed wins because
+ * it is the newer fact; snoozed wins over the opener because it explains why
+ * the row sits where it does.
+ */
+fun BotTask.bylineLabel(now: Long = System.currentTimeMillis()): String? =
+    when {
+        closedBy != null -> "closed by ${closedBy.name}"
+        isSnoozed(now) -> "Snoozed"
+        else -> openedByLabel
+    }
 
 @Serializable
 data class Bot(
