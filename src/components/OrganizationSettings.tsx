@@ -4,12 +4,13 @@ import { activeLocale, t } from "@/lib/i18n";
 import { Card } from "./SettingsPrimitives";
 
 const providerNames: Record<string, string> = { anthropic: "Anthropic", openai: "OpenAI", openrouter: "OpenRouter" };
+const DEFAULT_PORTAL_ORIGIN = "https://admin.openmausbot.com";
 
 /** Only the trusted desktop bridge can enroll this computer or hold its token. */
 export function OrganizationSettings() {
   const bridge = window.ogb?.remoteClient?.active ? undefined : window.ogb?.organization;
   const [connection, setConnection] = useState<ManagedDesktopState | null>(null);
-  const [address, setAddress] = useState("https://admin.openmausbot.com");
+  const [address, setAddress] = useState("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
   const [confirmDisconnect, setConfirmDisconnect] = useState(false);
@@ -80,25 +81,34 @@ export function OrganizationSettings() {
     <Card title={t("settings.section.organization")} subtitle={t("organization.privacy")}>
       {!connection && <p role="status" className="text-[13px] text-ink-secondary">{error || t("organization.loading")}</p>}
       {connection?.message && <p role="status" className="mb-3 text-[13px] text-ink-secondary">{connection.message}</p>}
-      {connection?.status === "signed-out" && <form className="flex flex-col gap-3" onSubmit={(event) => {
-        event.preventDefault();
-        if (address.trim()) void perform(() => bridge.begin({ portalOrigin: address.trim() }));
-      }}>
+      {connection?.status === "signed-out" && <div className="flex flex-col gap-3">
         <p className="text-[13px] text-ink-secondary">{t("organization.signInHelp")}</p>
-        <label className="flex flex-col gap-1.5 text-[12px] text-ink-secondary">{t("organization.address")}
-          <input type="url" required value={address} disabled={busy} onChange={(event) => setAddress(event.target.value)}
-            autoCapitalize="none" autoCorrect="off" autoComplete="off" spellCheck={false} maxLength={2048}
-            className="w-full rounded-lg border border-hairline/40 bg-inset px-3 py-2 text-[14px] text-ink outline-none focus:border-accent/50" />
-        </label>
-        <button type="submit" disabled={busy || !address.trim()} className="ui-button w-fit">{busy ? t("organization.working") : t("organization.signIn")}</button>
-      </form>}
+        <button type="button" disabled={busy} onClick={() => void perform(() => bridge.begin({ portalOrigin: DEFAULT_PORTAL_ORIGIN }))}
+          className="w-fit rounded-lg bg-accent px-4 py-2 text-[13px] font-medium text-white hover:brightness-110 disabled:opacity-50">{busy ? t("organization.working") : t("organization.signIn")}</button>
+        <details className="text-[12px] text-ink-secondary">
+          <summary className="w-fit cursor-pointer hover:text-ink">{t("organization.advanced")}</summary>
+          <form className="mt-2 flex flex-col gap-2" onSubmit={(event) => {
+            event.preventDefault();
+            if (address.trim()) void perform(() => bridge.begin({ portalOrigin: address.trim() }));
+          }}>
+            <p>{t("organization.advancedHelp")}</p>
+            <label className="flex flex-col gap-1.5">{t("organization.address")}
+              <input type="url" required value={address} disabled={busy} onChange={(event) => setAddress(event.target.value)}
+                placeholder={DEFAULT_PORTAL_ORIGIN} autoCapitalize="none" autoCorrect="off" autoComplete="off" spellCheck={false} maxLength={2048}
+                className="w-full rounded-lg border border-hairline/40 bg-inset px-3 py-2 text-[14px] text-ink outline-none focus:border-accent/50" />
+            </label>
+            <button type="submit" disabled={busy || !address.trim()} className="ui-button w-fit">{t("organization.customSignIn")}</button>
+          </form>
+        </details>
+      </div>}
       {connection?.status === "connecting" && <div className="flex flex-col items-start gap-3">
         <p role="status" className="text-[13px] text-ink-secondary">{t("organization.browserConsent")}</p>
-        {connection.enrollment && <>
-          <div className="text-[12px] text-ink-secondary">{t("organization.code")}</div>
-          <code dir="ltr" className="select-all rounded-lg bg-inset px-4 py-3 text-xl tracking-widest text-ink">{connection.enrollment.userCode}</code>
-          <p dir="ltr" className="break-all text-[12px] text-ink-secondary">{connection.enrollment.verificationUri}</p>
-        </>}
+        {connection.enrollment && <details className="w-full text-[12px] text-ink-secondary">
+          <summary className="w-fit cursor-pointer hover:text-ink">{t("organization.securityDetails")}</summary>
+          <p className="mt-2">{t("organization.securityDetailsHelp")}</p>
+          <div className="mt-3">{t("organization.code")}</div>
+          <code dir="ltr" className="mt-1 block w-fit select-all rounded-lg bg-inset px-3 py-2 text-base tracking-widest text-ink">{connection.enrollment.userCode}</code>
+        </details>}
         <button type="button" disabled={busy} className="ui-button" onClick={() => void perform(() => bridge.cancelEnrollment())}>{t("organization.cancel")}</button>
       </div>}
       {enrolled && <div className="flex flex-col gap-3">
