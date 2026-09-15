@@ -67,12 +67,13 @@ fun Bot.threadGroups(
             approvalMode = approvalMode, autoApprove = autoApprove, alwaysAllow = alwaysAllow,
         ))
         includingClosed || search.isNotEmpty() -> visibleTasks
-        // A snoozed thread folds away like a closed one — the sentinel sleeps
-        // until activity and a timestamp only while its clock still runs — and
-        // the same attention override returns it the moment it needs the
-        // person (`visibleSidebarThreads` in `SidebarThreadRow.tsx`).
+        // Closed, archived, and snoozed threads fold away with the same
+        // override: one that starts working, waits on the person, or turns
+        // unread is back; a snooze's sentinel sleeps only until activity and
+        // its clock only while it still runs (`visibleSidebarThreads` in
+        // `SidebarThreadRow.tsx`).
         else -> visibleTasks.filter {
-            (!it.isClosed && !it.isSnoozed(now)) || it.demandsAttention || it.threadId == threadId
+            (!it.isClosed && !it.isArchived && !it.isSnoozed(now)) || it.demandsAttention || it.threadId == threadId
         }
     }
     val ordered = if (search.isEmpty()) orderedThreads(threads, threadId) else threads

@@ -972,7 +972,7 @@ function ensureManagedDesktop() {
       },
     }),
     scope: companyBackupScope,
-    run: async (password, signal, scope) => {
+    run: async (signal, scope) => {
       if (companyBackupController || preparedCompanyRestore || companyRestoreCommitting || desktopShutdownStarted) throw companyBackupDeferred();
       const proc = serverProc;
       const status = await localBackupStatus(proc);
@@ -981,7 +981,7 @@ function ensureManagedDesktop() {
       signal.throwIfAborted();
       const current = companyBackupScope();
       if (!current || current.key !== scope.key || current.generation !== scope.generation || proc !== serverProc || preparedCompanyRestore || companyRestoreCommitting) throw companyBackupDeferred();
-      return runCompanyBackup("backup", { password, clientState }, { signal, scope });
+      return runCompanyBackup("backup", { clientState }, { signal, scope });
     },
     onState: schedule => publishCompanyBackupState({ ...companyBackupState, schedule }),
   });

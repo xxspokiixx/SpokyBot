@@ -289,6 +289,12 @@ public struct BotTask: Codable, Hashable, Sendable {
     /// so snapshots are authoritative; the sentinel wakes server-side on the
     /// first activity too.
     public var snoozedUntil: Double?
+
+    /// When the person put this thread away, in epoch milliseconds. The
+    /// field's presence — not its value — marks the thread archived: the
+    /// task API accepts any epoch number, so a thread persisted with
+    /// archivedAt: 0 is archived. Absent means it was never put away.
+    public var archivedAt: Double?
     /// Bot-only internal execution. Keep it addressable, but out of thread pickers.
     public var routineRunId: String?
 
@@ -300,13 +306,27 @@ public struct BotTask: Codable, Hashable, Sendable {
     /// A bot closed this thread and nothing has happened there since.
     public var isClosed: Bool { closedBy != nil }
 
-    /// The one line under a title: who closed it once a bot has, otherwise
-    /// a sleeping thread says so, otherwise who opened it, otherwise nothing.
-    /// Closed wins because it is the newer fact and the reason the row is
-    /// dimmed; snoozed wins over the opener for the same reason, worded as
-    /// the desktop words it.
+    /// Archived means the field is present, not nonzero: the task API
+    /// accepts any epoch number, so a thread persisted with
+    /// archivedAt: 0 is archived.
+    public var isArchived: Bool { archivedAt != nil }
+
+    /// Working is activity or flag: the wire can carry either alone, so the
+    /// archive action's busy gate and the working status ask the same
+    /// question. A run counts as work here exactly as its row already
+    /// labels it Working.
+    public var isWorking: Bool { activity == "working" || activity == "running" || busy == true }
+
+    /// The one line under a title: who closed it once a bot has, "Archived"
+    /// once the person put it away, "Snoozed" while it sleeps, otherwise who
+    /// opened it, otherwise nothing. Closed wins because it is the newer
+    /// fact; archived and snoozed win over the opener because they explain
+    /// why the row sits where it does.
     public var bylineLabel: String? {
-        closedBy.map { "closed by \($0.name)" } ?? (isSnoozed() ? "Snoozed" : nil) ?? openedByLabel
+        if let closedBy { return "closed by \(closedBy.name)" }
+        if isArchived { return "Archived" }
+        if isSnoozed() { return "Snoozed" }
+        return openedByLabel
     }
 
     /// Snoozed means asleep right now: 0 is the "until new activity"
@@ -319,7 +339,10 @@ public struct BotTask: Codable, Hashable, Sendable {
     }
 
     /// Whether the row must stay in the list regardless of closed state:
-    /// it is running, needs the person, or has something they have not read.
+    /// it is working, needs the person, or has something they have not read.
+    /// The queued activity is parsed defensively — the wire's activity enum
+    /// never carries it, but a companion build that derives it client-side
+    /// can hand it to this same rule.
     public var demandsAttention: Bool {
         if busy == true || unread == true { return true }
         switch activity {

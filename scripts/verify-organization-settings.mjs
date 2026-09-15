@@ -110,16 +110,19 @@ if (process.versions.electron && process.argv.includes(flag)) {
       await evaluate(`${button(label)}.click()`);
     };
     const fillAddress = async () => evaluate(`(() => { const el = document.querySelector('input[type=url]'); Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value').set.call(el, ${JSON.stringify(origin)}); el.dispatchEvent(new Event('input', { bubbles: true })); })()`);
+    const openAdvanced = async () => evaluate(`document.querySelector('details summary').click()`);
     await until(() => evaluate(`Boolean(${button("Sign in with your organisation")})`), "optional sign-in form");
     assert.equal(begins, 0); assert.equal(browserRequests.length, 0);
     assert.equal(await evaluate("document.body.textContent.includes('personal and local models')"), true);
-    await fillAddress(); await click("Sign in with your organisation");
-    await until(() => evaluate("document.body.textContent.includes('ABCDE-FGHJK')"), "browser verification code");
+    await openAdvanced(); await fillAddress(); await click("Sign in to custom Admin");
+    await until(() => browserRequests.length === 1, "browser sign-in request");
     assert.deepEqual(browserRequests, [`${origin}/enroll?code=ABCDE-FGHJK`]);
+    assert.equal(await evaluate("[...document.querySelectorAll('details')].some(el => el.textContent.includes('ABCDE-FGHJK') && el.open)"), false, "security code stays collapsed by default");
+    assert.equal(await evaluate("document.body.textContent.includes('connect automatically')"), true);
     await click("Cancel sign-in");
     await until(() => evaluate(`Boolean(${button("Sign in with your organisation")})`), "cancel restored form");
     assert.equal(saved, null);
-    await click("Sign in with your organisation");
+    await openAdvanced(); await click("Sign in to custom Admin");
     await until(() => browserRequests.length === 2, "second browser request"); approved = true;
     await until(() => evaluate("document.body.textContent.includes('Fixture Studio')"), "approved company connected");
     assert.equal(await evaluate("document.body.textContent.includes('Approved models: 2')"), true);
@@ -140,7 +143,7 @@ if (process.versions.electron && process.argv.includes(flag)) {
     await click("Disconnect from organization");
     await until(() => evaluate(`Boolean(${button("Sign in with your organisation")})`), "confirmed disconnect");
     assert.equal(saved, null); assert.equal(revokes, 1); assert.ok(clearsApplied > 0);
-    await click("Sign in with your organisation");
+    await openAdvanced(); await click("Sign in to custom Admin");
     await until(() => browserRequests.length === 3, "third browser request"); approved = true;
     await until(() => evaluate("document.body.textContent.includes('Fixture Studio')"), "reconnected company");
     revoked = true; await click("Refresh");
@@ -170,7 +173,7 @@ if (process.versions.electron && process.argv.includes(flag)) {
     await evaluate("new Promise(resolve => setTimeout(resolve, 180))"); // Capture settled navigation colors.
     writeFileSync(join(output, "organization-in-app.png"), (await win.webContents.capturePage()).toPNG());
     const receipt = { passed: true, renderer: "OrganizationSettings + actual app shell", preload: "electron/preload.cjs", client: "electron/managed-desktop.mjs",
-      checks: ["optional sign-in only", "browser code and cancel", "approved company and model counts", "model-only capability sent to private process", "no token or private connection method in renderer", "390px no overflow", "cancel/confirm disconnect", "revocation requires reconnect", "remote bridge absent", "normal app startup unchanged", "explicit Organisation Settings before local onboarding"],
+      checks: ["one-button default organization sign-in", "custom Admin kept under Advanced", "browser handoff and automatic connection", "security code collapsed and cancel works", "approved company and model counts", "model-only capability sent to private process", "no token or private connection method in renderer", "390px no overflow", "cancel/confirm disconnect", "revocation requires reconnect", "remote bridge absent", "normal app startup unchanged", "explicit Organisation Settings before local onboarding"],
       limitation: "Synthetic loopback Admin, in-memory credential store and fake utility-process acknowledgement; not proof of real Admin consent, OS keychain, native driver execution, private runtime synchronization, backups or public DNS/TLS." };
     writeFileSync(join(output, "receipt.json"), `${JSON.stringify(receipt, null, 2)}\n`);
     console.log(JSON.stringify(receipt));

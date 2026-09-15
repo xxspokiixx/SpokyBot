@@ -135,7 +135,10 @@ function decodeManagedCodex(raw: object): NonNullable<CodexConfig["managed"]> {
     throw new Error("Invalid Company Codex configuration.");
   }
   const url = new URL(value.url);
-  if (url.username || url.password || url.search || url.hash || !["https:", "http:"].includes(url.protocol)) throw new Error("Invalid Company Codex endpoint.");
+  // Plain HTTP leaks the Company API key; allow it only on loopback hosts,
+  // where a local proxy terminates TLS on the trusted machine instead.
+  const loopback = url.hostname === "localhost" || url.hostname === "[::1]" || /^127(?:\.\d{1,3}){3}$/.test(url.hostname);
+  if (url.username || url.password || url.search || url.hash || (url.protocol !== "https:" && !(url.protocol === "http:" && loopback))) throw new Error("Invalid Company Codex endpoint.");
   return { url: url.href.replace(/\/$/, ""), models: value.models as string[] };
 }
 
@@ -564,8 +567,21 @@ export const CodexDriver: ProviderDriver<CodexConfig> = {
     });
 
     const sendTurn = async (turn: SendTurnInput) => {
-      if (config.managed && (!turn.model || !config.managed.models.includes(turn.model) || !input.environment.OPENMAUSBOT_COMPANY_API_KEY || !input.environment.CODEX_HOME)) {
-        throw new Error("Company model access is unavailable. Reconnect your organization; personal billing will not be used.");
+      if (config.managed) {
+        // One blanket refusal hides which prerequisite broke; name it so the
+        // person can fix the actual gap instead of reconnecting blind.
+        if (!turn.model) {
+          throw new Error("Company model access is unavailable: no model is selected. Reconnect your organization; personal billing will not be used.");
+        }
+        if (!config.managed.models.includes(turn.model)) {
+          throw new Error("Company model access is unavailable: " + turn.model + " is not approved for your organization. Reconnect your organization; personal billing will not be used.");
+        }
+        if (!input.environment.OPENMAUSBOT_COMPANY_API_KEY) {
+          throw new Error("Company model access is unavailable: OPENMAUSBOT_COMPANY_API_KEY is missing. Reconnect your organization; personal billing will not be used.");
+        }
+        if (!input.environment.CODEX_HOME) {
+          throw new Error("Company model access is unavailable: CODEX_HOME is missing. Reconnect your organization; personal billing will not be used.");
+        }
       }
       // One driver instance serves many threads. Interrupt state belongs to
       // this turn so activity elsewhere cannot cancel or revive its retry.
@@ -779,6 +795,27 @@ export const CodexDriver: ProviderDriver<CodexConfig> = {
               error: { code: -32601, message: `Unsupported server request: ${method}` },
             });
           }
+          return;
+        }
+        // One ask card carries one question honestly: its choices would come
+        // from the first question alone and its one reply (including the
+        // timeout note) would be copied into every question id (#1237).
+        // Refuse the bundled call with a teaching error instead of
+        // fabricating per-question answers.
+        if (isQuestion && (!Array.isArray(params.questions) || params.questions.length !== 1)) {
+          const bundled = Array.isArray(params.questions) && params.questions.length > 1;
+          send({
+            jsonrpc: "2.0",
+            id: msg.id,
+            error: {
+              code: -32602,
+              message: bundled
+                ? `ask supports one question per call; this request bundled ${params.questions.length}. Split it into separate asks, one question each.`
+                : Array.isArray(params.questions)
+                ? "ask supports one question per call; this request sent none."
+                : "ask supports one question per call; params.questions must be an array with exactly one question.",
+            },
+          });
           return;
         }
         const mcpTool = isLegacyMcpPermission

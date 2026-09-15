@@ -37,14 +37,15 @@ extension Bot {
     /// A folder-name search keeps all of that folder's visible threads,
     /// in relevance order rather than attention tiers.
     ///
-    /// Threads a bot closed or the person snoozed are folded away by
-    /// default, the way the desktop sidebar folds them: a PM bot that opened
-    /// ten helper threads and closed them must not leave ten rows behind.
-    /// They are never gone — a search or `includingClosed` (the manage
-    /// sheet) lists them, and a folded thread that is running, unread, or
-    /// open here stays in the list. A snoozed thread folds the same way: the
-    /// sentinel sleeps until activity and a timestamp only while its clock
-    /// still runs.
+    /// Threads a bot closed, the person archived, or the person snoozed are
+    /// folded away by default, the way the desktop sidebar folds them: a PM
+    /// bot that opened ten helper threads and closed them must not leave ten
+    /// rows behind. They are never gone — a search or `includingClosed`
+    /// (the manage sheet) lists them, and a folded thread that is working,
+    /// unread, or open here stays in the list. An archived thread folds away
+    /// with the same attention override: a working or waiting archived
+    /// thread resurfaces. A snoozed thread folds the same way: the sentinel
+    /// sleeps until activity and a timestamp only while its clock still runs.
     public func threadGroups(matching query: String = "", includingClosed: Bool = false) -> [BotThreadGroup] {
         let search = query.trimmingCharacters(in: .whitespacesAndNewlines)
         let threads: [BotTask]
@@ -60,7 +61,7 @@ extension Bot {
             threads = visibleTasks
         } else {
             threads = visibleTasks.filter { task in
-                (!task.isClosed && !task.isSnoozed()) || task.demandsAttention || task.threadId == threadId
+                (!task.isClosed && !task.isArchived && !task.isSnoozed()) || task.demandsAttention || task.threadId == threadId
             }
         }
         let ordered = search.isEmpty ? threadsInAttentionOrder(threads) : threads

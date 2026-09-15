@@ -292,6 +292,9 @@ data class BotTask(
     val projectId: String? = null,
     val openedBy: ThreadOpener? = null,
     val closedBy: ThreadCloser? = null,
+    /** The person put this thread away. Present means archived — a stamp of
+     * 0 is still archived, because the task API accepts any epoch number. */
+    val archivedAt: Double? = null,
     /** Bot-only internal execution. Keep it addressable, but out of thread pickers. */
     val routineRunId: String? = null,
     /**
@@ -311,6 +314,10 @@ val BotTask.openedByLabel: String?
 val BotTask.isClosed: Boolean
     get() = closedBy != null
 
+/** Archived is the presence of the stamp, not its value: archivedAt 0 counts. */
+val BotTask.isArchived: Boolean
+    get() = archivedAt != null
+
 /**
  * Snoozed means asleep right now: 0 is the "until new activity" sentinel and
  * sleeps until woken, while a timestamp sleeps only until it passes
@@ -320,14 +327,16 @@ fun BotTask.isSnoozed(now: Long = System.currentTimeMillis()): Boolean =
     snoozedUntil != null && (snoozedUntil == 0.0 || snoozedUntil > now)
 
 /**
- * The one line under a title: who closed it once a bot has, "Snoozed" while
- * it sleeps, otherwise who opened it, otherwise nothing. Closed wins because
- * it is the newer fact; snoozed wins over the opener because it explains why
- * the row sits where it does.
+ * The one line under a title: who closed it once a bot has, "Archived" while
+ * it stays filed away, "Snoozed" while it sleeps, otherwise who opened it,
+ * otherwise nothing. Closed wins because it is the newer fact; archived and
+ * snoozed win over the opener because they explain why the row sits where
+ * it does.
  */
 fun BotTask.bylineLabel(now: Long = System.currentTimeMillis()): String? =
     when {
         closedBy != null -> "closed by ${closedBy.name}"
+        isArchived -> "Archived"
         isSnoozed(now) -> "Snoozed"
         else -> openedByLabel
     }

@@ -25,6 +25,7 @@ import com.openmausbot.companion.core.BotTask
 import com.openmausbot.companion.core.bylineLabel
 import com.openmausbot.companion.core.displayTitle
 import com.openmausbot.companion.core.isClosed
+import com.openmausbot.companion.core.isArchived
 import com.openmausbot.companion.core.isSnoozed
 
 /** Shared by Home and the thread picker, with status taken from this thread alone. */
@@ -42,13 +43,19 @@ internal fun BotThreadRow(
         else -> if (task.busy == true) "Working" else null
     }
     val snoozed = task.isSnoozed(now)
-    val dimmed = (task.isClosed || snoozed) && runtime == null && task.unread != true
+    val dimmed = (task.isClosed || task.isArchived || snoozed) && runtime == null && task.unread != true
+    val foldedState = when {
+        task.isClosed -> "Closed"
+        task.isArchived -> "Archived"
+        snoozed -> "Snoozed"
+        else -> null
+    }
     Row(
         modifier = modifier
             .fillMaxWidth()
             .semantics(mergeDescendants = true) {
                 this.selected = selected
-                if (dimmed) stateDescription = if (task.isClosed) "Closed" else "Snoozed"
+                if (dimmed) foldedState?.let { stateDescription = it }
             }
             .padding(vertical = 3.dp),
         horizontalArrangement = Arrangement.spacedBy(12.dp),
