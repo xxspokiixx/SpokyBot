@@ -22,6 +22,7 @@ import { approvalModeFor, isApprovalMode } from "../shared/approval-mode.ts";
 import type { ProfileRequestChanges } from "../shared/profile-request.ts";
 import type { TeamSetupRequest, TeamSetupResult } from "../shared/team-setup.ts";
 import type { GroupGoalRunCardData } from "../shared/group-goal-run.ts";
+import type { HandedState } from "./delta-context.ts";
 import type {
   BotActivity, GroupDefaultResponder, GroupTask as GroupTaskRecord, MausColor,
   OptionCardData, TaskClosedBy, TaskOpenedBy, TaskUsage, WireBot, WireGroup,
@@ -67,12 +68,15 @@ export interface TaskRecord extends WireTask {
    * say whether an engine's session is current, so this is what decides an
    * inline replay. Absent on tasks from before the field existed. */
   lastInstanceId?: string;
+  /** per instance: the stored messages that instance's current native
+   * session has been handed on this task (server/delta-context.ts) */
+  handedMessages?: Record<string, HandedState>;
 }
 
 /** TaskRecord fields no client may see. Everything else must be on WireTask:
  * the exactness assertion below fails to compile when either side drifts,
  * so a new server field forces a decision — wire-visible or private here. */
-export type TaskWirePrivateKeys = "resumeCursors" | "lastInstanceId";
+export type TaskWirePrivateKeys = "resumeCursors" | "lastInstanceId" | "handedMessages";
 export type TaskWireProjection = Pick<TaskRecord, Exclude<keyof TaskRecord, TaskWirePrivateKeys>>;
 type AssertExact<A, B> = [A] extends [B] ? ([B] extends [A] ? true : never) : never;
 type AssertSameKeys<A, B> = [keyof A] extends [keyof B] ? ([keyof B] extends [keyof A] ? true : never) : never;
@@ -84,7 +88,7 @@ export const taskWireProjectionIsExact: TaskWireProjectionIsExact = true;
 /** The typed wire projection for one task. Pairs with the assertion above:
  * returning WireTask means an undeclared server field cannot ride silently. */
 export function toWireTask(task: TaskRecord): WireTask {
-  const { resumeCursors: _resumeCursors, lastInstanceId: _lastInstanceId, ...wire } = task;
+  const { resumeCursors: _resumeCursors, lastInstanceId: _lastInstanceId, handedMessages: _handedMessages, ...wire } = task;
   return wire;
 }
 
@@ -1621,6 +1625,16 @@ export class Store {
     const task = this.taskByThread(botId, threadId);
     if (!task || task.lastInstanceId === instanceId) return;
     task.lastInstanceId = instanceId;
+    this.saveBots();
+  }
+
+  setHandedMessages(botId: string, threadId: string, instanceId: string, state: HandedState) {
+    const task = this.taskByThread(botId, threadId);
+    if (!task || JSON.stringify(task.handedMessages?.[instanceId]) === JSON.stringify(state)) return;
+    // Other instances keep a record only while it still describes their session.
+    const live = Object.entries(task.handedMessages ?? {})
+      .filter(([id, record]) => id !== instanceId && record.session !== undefined && record.session === task.resumeCursors[id]);
+    task.handedMessages = { ...Object.fromEntries(live), [instanceId]: state };
     this.saveBots();
   }
 
