@@ -73,15 +73,22 @@ describe("CodexDriver turns (fake app-server)", () => {
   let scratch: string;
 
   const create = async (
-    opts: { mode?: string; fullAuto?: boolean; environment?: Record<string, string> } = {},
+    opts: { mode?: string; fullAuto?: boolean; environment?: Record<string, string>; managed?: boolean } = {},
   ) => {
     if (opts.mode) process.env.FAKE_CODEX_MODE = opts.mode;
     instance = await CodexDriver.create({
       instanceId: "codex-test",
       displayName: "Codex Test",
-      environment: opts.environment ?? {},
+      environment: {
+        ...(opts.managed ? { HOME: scratch, USERPROFILE: scratch, CODEX_HOME: join(scratch, ".codex"), OPENMAUSBOT_COMPANY_API_KEY: "synthetic-company-fixture" } : {}),
+        ...opts.environment,
+      },
       enabled: true,
-      config: { cli: FAKE_CLI, fullAuto: opts.fullAuto ?? false },
+      config: {
+        cli: FAKE_CLI,
+        fullAuto: opts.fullAuto ?? false,
+        ...(opts.managed ? { managed: { url: "http://127.0.0.1:1/v1", models: ["company-codex-model"] } } : {}),
+      },
     });
     recorder = recordEvents(instance.adapter);
   };
@@ -104,6 +111,8 @@ describe("CodexDriver turns (fake app-server)", () => {
     delete process.env.FAKE_CODEX_VERSION;
     delete process.env.FAKE_CODEX_ASTRA;
     delete process.env.FAKE_CODEX_INSTRUCTIONS;
+    delete process.env.FAKE_CODEX_RESUME_ERROR;
+    delete process.env.FAKE_CODEX_START_ERROR;
     delete process.env.OPENAI_API_KEY;
     delete process.env.BOX_TOKEN;
     delete process.env.OMB_TTS_KEY;
@@ -771,9 +780,129 @@ describe("CodexDriver turns (fake app-server)", () => {
 
   it("fails a rejected resume without silently replacing native history", async () => {
     await create(); // fake rejects thread/resume outside resume mode
-    await instance.adapter.sendTurn({ threadId: "t-fallback", text: "go", resumeCursor: "gone-thread" });
+    const dump = join(scratch, "personal-missing-thread.json");
+    process.env.FAKE_CODEX_DUMP = dump;
+    await instance.adapter.sendTurn({ threadId: "t-fallback", text: "go", resumeCursor: "gone-thread", recoveryText: "Previous messages\nUser: go" });
     await expect(recorder.until((e) => e.type === "turn.completed")).resolves.toMatchObject({ ok: false });
     expect(recorder.events.some((e) => e.type === "session.started")).toBe(false);
+    expect(JSON.parse(readFileSync(dump, "utf8")).calls.map((call: { method: string }) => call.method)).not.toContain("thread/start");
+  });
+
+  it("rebuilds a missing Company native thread once with its approved model and canonical history", async () => {
+    await create({ managed: true });
+    const dump = join(scratch, "company-missing-thread.json");
+    process.env.FAKE_CODEX_DUMP = dump;
+    const recoveryText = "User: Remember ALPHA.\nAssistant: Remembered.\nUser: What did I say?";
+    const imagePath = join(scratch, "current-image.png");
+    await instance.adapter.sendTurn({
+      threadId: "company-missing-thread", text: "What did I say?", resumeCursor: "gone-company-thread",
+      recoveryText, model: "company-codex-model", system: "Keep current bot rules.", approvalMode: "full",
+      cwd: scratch, images: [{ path: imagePath, mime: "image/png", bytes: 1 }],
+    });
+    await expect(recorder.until((event) => event.type === "turn.completed")).resolves.toMatchObject({ ok: true });
+    const seen = JSON.parse(readFileSync(dump, "utf8"));
+    expect(seen.calls.map((call: { method: string }) => call.method)).toEqual([
+      "initialize", "initialized", "config/read", "thread/resume", "thread/start", "turn/start",
+    ]);
+    expect(seen.calls.find((call: { method: string }) => call.method === "thread/start").params).toMatchObject({
+      model: "company-codex-model", modelProvider: "openmaus_company", cwd: scratch,
+      developerInstructions: expect.stringContaining("Keep current bot rules."),
+      approvalPolicy: "never", sandbox: "danger-full-access", ephemeral: false,
+    });
+    expect(seen.calls.find((call: { method: string }) => call.method === "turn/start").params).toMatchObject({
+      threadId: "codex-thread-1",
+      input: [{ type: "text", text: recoveryText }, { type: "localImage", path: imagePath }],
+    });
+    expect(seen.argv).toContain('model_provider="openmaus_company"');
+    expect(JSON.stringify(seen.argv)).not.toContain("synthetic-company-fixture");
+    expect(recorder.events.filter((event) => event.type === "session.started")).toMatchObject([{ sessionId: "codex-thread-1" }]);
+  });
+
+  it("keeps successful Company resumes native without replaying the canonical transcript", async () => {
+    await create({ managed: true, mode: "resume" });
+    const dump = join(scratch, "company-resume.json");
+    process.env.FAKE_CODEX_DUMP = dump;
+    await instance.adapter.sendTurn({
+      threadId: "company-resume", text: "Continue", resumeCursor: "company-existing-thread",
+      recoveryText: "Old history must not be replayed", model: "company-codex-model",
+    });
+    await expect(recorder.until((event) => event.type === "turn.completed")).resolves.toMatchObject({ ok: true });
+    const calls = JSON.parse(readFileSync(dump, "utf8")).calls;
+    expect(calls.map((call: { method: string }) => call.method)).not.toContain("thread/start");
+    expect(calls.find((call: { method: string }) => call.method === "turn/start").params.input).toEqual([{ type: "text", text: "Continue" }]);
+  });
+
+  it.each([undefined, "", "  \n"])("does not replace missing Company native history without canonical recovery text (%j)", async (recoveryText) => {
+    await create({ managed: true });
+    const dump = join(scratch, "company-no-recovery.json");
+    process.env.FAKE_CODEX_DUMP = dump;
+    await instance.adapter.sendTurn({ threadId: "company-no-recovery", text: "Continue", resumeCursor: "gone-thread", recoveryText, model: "company-codex-model" });
+    await expect(recorder.until((event) => event.type === "turn.completed")).resolves.toMatchObject({ ok: false });
+    const calls = JSON.parse(readFileSync(dump, "utf8")).calls;
+    expect(calls.some((call: { method: string }) => ["thread/start", "turn/start"].includes(call.method))).toBe(false);
+  });
+
+  it.each([
+    { code: -32603, message: "401 Unauthorized: missing bearer" },
+    { code: -32603, message: "503: This task was blocked by our safety systems." },
+    { code: -32603, message: "network error: connection reset" },
+    { code: -32600, message: "404 endpoint not found" },
+    { code: -32600, message: "no rollout found for thread id another-thread" },
+    { code: -32603, message: "no rollout found for thread id gone-thread" },
+    { code: -32600, message: "thread not found in an unrelated provider response" },
+  ])("does not rebuild Company history on an unrelated resume rejection: $message", async (error) => {
+    await create({ managed: true });
+    const dump = join(scratch, "company-rejected-resume.json");
+    process.env.FAKE_CODEX_DUMP = dump;
+    process.env.FAKE_CODEX_RESUME_ERROR = JSON.stringify(error);
+    process.env.FAKE_CODEX_RETRY_SCALE = "0.001";
+    await instance.adapter.sendTurn({
+      threadId: "company-rejected-resume", text: "Continue", resumeCursor: "gone-thread",
+      recoveryText: "History\nUser: Continue", model: "company-codex-model",
+    });
+    await expect(recorder.until((event) => event.type === "turn.completed")).resolves.toMatchObject({ ok: false });
+    const calls = JSON.parse(readFileSync(dump, "utf8")).calls;
+    expect(calls.some((call: { method: string }) => ["thread/start", "turn/start"].includes(call.method))).toBe(false);
+    expect(recorder.events.some((event) => event.type === "session.started")).toBe(false);
+  });
+
+  it("does not repeatedly rebuild Company history when the replacement start fails", async () => {
+    await create({ managed: true });
+    const dump = join(scratch, "company-failed-recovery.json");
+    process.env.FAKE_CODEX_DUMP = dump;
+    process.env.FAKE_CODEX_START_ERROR = JSON.stringify({ code: -32603, message: "503: unavailable" });
+    process.env.FAKE_CODEX_RETRY_SCALE = "0.001";
+    await instance.adapter.sendTurn({
+      threadId: "company-failed-recovery", text: "Continue", resumeCursor: "gone-thread",
+      recoveryText: "History\nUser: Continue", model: "company-codex-model",
+    });
+    await expect(recorder.until((event) => event.type === "turn.completed")).resolves.toMatchObject({ ok: false });
+    const calls = JSON.parse(readFileSync(dump, "utf8")).calls;
+    expect(calls.filter((call: { method: string }) => call.method === "thread/start")).toHaveLength(1);
+    expect(calls.some((call: { method: string }) => call.method === "turn/start")).toBe(false);
+    expect(recorder.events.some((event) => event.type === "turn.retrying")).toBe(false);
+  });
+
+  it.each(["happy", "resume-then-missing"])("never rebuilds Company history again after user submission (%s)", async (mode) => {
+    await create({ managed: true, mode });
+    const dump = join(scratch, "company-submitted-turn.json");
+    const attempts = join(scratch, "company-submitted-attempts");
+    process.env.FAKE_CODEX_DUMP = dump;
+    process.env.FAKE_CODEX_TRANSIENTS = "1";
+    process.env.FAKE_CODEX_STATE = attempts;
+    process.env.FAKE_CODEX_RETRY_SCALE = "0.001";
+    await instance.adapter.sendTurn({
+      threadId: "company-submitted-turn", text: "Continue", resumeCursor: "gone-thread",
+      recoveryText: "History\nUser: Continue", model: "company-codex-model",
+    });
+    await expect(recorder.until((event) => event.type === "turn.completed")).resolves.toMatchObject({ ok: false });
+    expect(readFileSync(attempts, "utf8")).toBe("1");
+    const calls = JSON.parse(readFileSync(dump, "utf8")).calls;
+    // happy first rebuilds then fails at turn/start; resume-then-missing first
+    // submits against native history, so its later missing-thread error cannot
+    // justify replaying that potentially accepted prompt into a fresh session.
+    expect(calls.filter((call: { method: string }) => call.method === "thread/start")).toHaveLength(mode === "happy" ? 1 : 0);
+    expect(recorder.events.filter((event) => event.type === "turn.retrying")).toHaveLength(mode === "happy" ? 0 : 1);
   });
 
   it("fails before user submission if native instruction updates are unsupported", async () => {

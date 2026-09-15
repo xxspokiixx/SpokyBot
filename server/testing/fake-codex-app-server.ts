@@ -15,9 +15,11 @@
 //   FAKE_CODEX_DUMP   path to write {pid, argv, env, calls, decision} as JSON
 //   FAKE_CODEX_ACCOUNT_EMAIL  synthetic ChatGPT identity (default ada@example.test)
 //   FAKE_CODEX_ACCOUNT_MODE   chatgpt (default) | api-key | none | unsupported | error | hang
+//   FAKE_CODEX_RESUME_ERROR   JSON-RPC error object to reject thread/resume
+//   FAKE_CODEX_START_ERROR    JSON-RPC error object to reject thread/start
 //
 // Keep this file dependency-free — it runs as a bare `node` subprocess.
-import { readFileSync, writeFileSync } from "node:fs";
+import { existsSync, readFileSync, writeFileSync } from "node:fs";
 
 const mode = process.env.FAKE_CODEX_MODE ?? "happy";
 
@@ -206,12 +208,16 @@ process.stdin.on("data", (chunk) => {
         });
         break;
       case "thread/resume":
-        if (msg.params?.permissions && (!experimentalApi || mode === "config-profile-unsupported")) {
+        dump();
+        if (process.env.FAKE_CODEX_RESUME_ERROR) {
+          out({ jsonrpc: "2.0", id: msg.id, error: JSON.parse(process.env.FAKE_CODEX_RESUME_ERROR) });
+        } else if (msg.params?.permissions && (!experimentalApi || mode === "config-profile-unsupported")) {
           out({ jsonrpc: "2.0", id: msg.id, error: { code: -32602, message: "experimental API required for permissions" } });
-        } else if (mode === "resume" || mode === "helper-events" || mode === "instructions-unsupported" || mode === "config-profile" || mode === "config-profile-unsupported") {
+        } else if (mode === "resume" || mode === "helper-events" || mode === "instructions-unsupported" || mode === "config-profile" || mode === "config-profile-unsupported" ||
+            (mode === "resume-then-missing" && !existsSync(process.env.FAKE_CODEX_STATE ?? ""))) {
           out({ jsonrpc: "2.0", id: msg.id, result: { thread: { id: msg.params?.threadId } } });
         } else {
-          out({ jsonrpc: "2.0", id: msg.id, error: { code: -1, message: "no such thread" } });
+          out({ jsonrpc: "2.0", id: msg.id, error: { code: -32600, message: `no rollout found for thread id ${msg.params?.threadId}` } });
         }
         break;
       case "thread/inject_items":
@@ -223,13 +229,17 @@ process.stdin.on("data", (chunk) => {
         out({ jsonrpc: "2.0", id: msg.id, result: {} });
         break;
       case "thread/start":
-        if (msg.params?.permissions && (!experimentalApi || mode === "config-profile-unsupported")) {
+        dump();
+        if (process.env.FAKE_CODEX_START_ERROR) {
+          out({ jsonrpc: "2.0", id: msg.id, error: JSON.parse(process.env.FAKE_CODEX_START_ERROR) });
+        } else if (msg.params?.permissions && (!experimentalApi || mode === "config-profile-unsupported")) {
           out({ jsonrpc: "2.0", id: msg.id, error: { code: -32602, message: "experimental API required for permissions" } });
         } else {
           out({ jsonrpc: "2.0", id: msg.id, result: { thread: { id: "codex-thread-1" }, model: "fake-codex-model" } });
         }
         break;
       case "turn/start": {
+        dump();
         nativeThreadId = msg.params?.threadId ?? nativeThreadId;
         // crash script for close-path retry tests: die before
         // acknowledging turn/start. The launch count lives in a state

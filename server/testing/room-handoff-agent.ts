@@ -55,6 +55,7 @@ export async function runRoomHandoffAgent(argv: string[], planPath: string, prom
   });
   const timer = setTimeout(() => fail(new Error("Fixture MCP run timed out")), 20_000);
   let delayTimer: ReturnType<typeof setTimeout> | undefined;
+  let gateTimer: ReturnType<typeof setInterval> | undefined;
   const evidence: unknown[] = [];
   try {
     return await Promise.race([failed, (async () => {
@@ -66,13 +67,22 @@ export async function runRoomHandoffAgent(argv: string[], planPath: string, prom
         evidence.push({ step, response });
         if (Boolean(response.error || response.result?.isError) !== Boolean(step.expectError)) throw new Error(`Unexpected tool outcome: ${JSON.stringify(response)}`);
       }
+      // Let a race fixture release this exact turn after its settings mutation,
+      // independent of machine load. The run timeout also bounds this wait.
+      if (plan.gateFile && !existsSync(plan.gateFile)) await new Promise<void>(resolve => {
+        gateTimer = setInterval(() => {
+          if (!existsSync(plan.gateFile)) return;
+          clearInterval(gateTimer);
+          resolve();
+        }, 10);
+      });
       if (plan.delayMs) await new Promise(resolve => { delayTimer = setTimeout(resolve, plan.delayMs); });
       if (plan.fail && !resumed) throw new Error("Scripted addressed agent failure");
       return basePlan.turns ? plan.reply : resumed ? plan.resumeReply ?? `Summary from ${botId}` : plan.reply ?? `Result from ${botId}`;
     })()]);
   } finally {
     closing = true;
-    clearTimeout(timer); clearTimeout(delayTimer); lines.close(); child.stdin.destroy();
+    clearTimeout(timer); clearTimeout(delayTimer); clearInterval(gateTimer); lines.close(); child.stdin.destroy();
     await waitForExit(child, { signal: "SIGTERM", graceMs: 500 });
     appendFileSync(`${planPath}.evidence.jsonl`, JSON.stringify({ botId, turnIndex, threadId: integration.env.OMB_THREAD_ID,
       model: argv.includes("--model") ? arg("--model") : undefined,

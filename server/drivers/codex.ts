@@ -36,12 +36,30 @@ import { codexDeveloperInstructions, syncCodexInstructions } from "./codex-instr
 import type { ApprovalMode } from "../../shared/approval-mode.ts";
 import { CodexDeviceAuthController } from "./codex-device-auth.ts";
 import { codexAccountEmail } from "./codex-identity.ts";
+import { classifyResumeFailure, mayReplay, recoveryPromptFor } from "../resume-recovery.ts";
 
 export { decodeCodexSelection, readCodexModelCatalog, STATIC_CODEX_MODELS } from "./codex-catalog.ts";
 
 const DRIVER_KIND = "codex";
 const ASTRA_MODEL_ID = "gpt-6-astra";
 const ASTRA_MIN_CODEX_VERSION = [0, 153, 1] as const;
+
+class CodexRpcError extends Error {
+  code: unknown;
+
+  constructor(error: { code?: unknown; message?: string }) {
+    super(error.message ?? JSON.stringify(error));
+    this.code = error.code;
+  }
+}
+
+function missingNativeCodexThread(error: unknown, cursor: string): boolean {
+  // Codex's local thread/resume rejection, verified with an empty native home.
+  // A generic 404, auth error, timeout or prose mentioning a missing thread is
+  // not evidence that the native history was lost. Unknown versions fail closed.
+  return error instanceof CodexRpcError && error.code === -32600 &&
+    error.message === `no rollout found for thread id ${cursor}`;
+}
 
 /** Whether an installed Codex predates the release that exposes GPT-6 Astra
  * through app-server. Unknown version formats stay quiet: a bad guess should
@@ -98,6 +116,8 @@ function codexAstraUpdate(
 export interface CodexConfig {
   cli: string;
   fullAuto: boolean;
+  /** Ephemeral Company routing, supplied by the trusted desktop parent. */
+  managed?: { url: string; models: string[] };
 }
 
 function decodeConfig(raw: unknown): CodexConfig {
@@ -105,7 +125,33 @@ function decodeConfig(raw: unknown): CodexConfig {
   return {
     cli: typeof o.cli === "string" ? o.cli : "codex",
     fullAuto: o.fullAuto === true,
+    ...(o.managed && typeof o.managed === "object" ? { managed: decodeManagedCodex(o.managed) } : {}),
   };
+}
+
+function decodeManagedCodex(raw: object): NonNullable<CodexConfig["managed"]> {
+  const value = raw as { url?: unknown; models?: unknown };
+  if (typeof value.url !== "string" || !Array.isArray(value.models) || !value.models.length || value.models.some(model => typeof model !== "string" || !/^[\w][\w./+-]*$/.test(model))) {
+    throw new Error("Invalid Company Codex configuration.");
+  }
+  const url = new URL(value.url);
+  if (url.username || url.password || url.search || url.hash || !["https:", "http:"].includes(url.protocol)) throw new Error("Invalid Company Codex endpoint.");
+  return { url: url.href.replace(/\/$/, ""), models: value.models as string[] };
+}
+
+export function managedCodexArgs(config: NonNullable<CodexConfig["managed"]>): string[] {
+  // Credential stays in the instance environment, never argv or config.toml.
+  // https://learn.chatgpt.com/docs/config-file/config-reference
+  return [
+    "-c", 'model_provider="openmaus_company"',
+    "-c", 'model_providers.openmaus_company.name="Company"',
+    "-c", `model_providers.openmaus_company.base_url=${JSON.stringify(config.url)}`,
+    "-c", 'model_providers.openmaus_company.env_key="OPENMAUSBOT_COMPANY_API_KEY"',
+    "-c", 'model_providers.openmaus_company.wire_api="responses"',
+    "-c", "model_providers.openmaus_company.requires_openai_auth=false",
+    "-c", 'cli_auth_credentials_store="ephemeral"',
+    "-c", "shell_environment_policy.ignore_default_excludes=false",
+  ];
 }
 
 const QUESTION_TIMEOUT_NOTE = "No answer was given — use your best judgment.";
@@ -482,8 +528,9 @@ export const CodexDriver: ProviderDriver<CodexConfig> = {
       return env;
     };
     const catalogEnv = childEnv();
-    let models = STATIC_CODEX_MODELS;
+    let models = config.managed ? { default: config.managed.models[0], options: config.managed.models.map(id => ({ id, label: id })) } : STATIC_CODEX_MODELS;
     const refreshModels = async () => {
+      if (config.managed) return;
       try {
         const resolved = await readCodexModelCatalog(catalogEnv, fetch, config.cli);
         if (resolved.options.length) models = resolved;
@@ -517,9 +564,14 @@ export const CodexDriver: ProviderDriver<CodexConfig> = {
     });
 
     const sendTurn = async (turn: SendTurnInput) => {
+      if (config.managed && (!turn.model || !config.managed.models.includes(turn.model) || !input.environment.OPENMAUSBOT_COMPANY_API_KEY || !input.environment.CODEX_HOME)) {
+        throw new Error("Company model access is unavailable. Reconnect your organization; personal billing will not be used.");
+      }
       // One driver instance serves many threads. Interrupt state belongs to
       // this turn so activity elsewhere cannot cancel or revive its retry.
       let stopRequested = false;
+      let promptSubmitted = false;
+      let recoveredMissingSession = false;
       // Wakes a retry backoff the moment Stop arrives, so the turn settles
       // now rather than after the full wait.
       const stopSignal = new AbortController();
@@ -543,7 +595,7 @@ export const CodexDriver: ProviderDriver<CodexConfig> = {
 
       const launchAttempt = async (attempt: number): Promise<void> => {
         const env = childEnv();
-        const appServerArgs = ["app-server", ...codexLocalProviderArgs(env, turn.model)];
+        const appServerArgs = ["app-server", ...(config.managed ? managedCodexArgs(config.managed) : codexLocalProviderArgs(env, turn.model))];
         if (turn.integrations?.composio) {
           mountMcpServer(appServerArgs, env, "openmausbot_connectors", turn.integrations.composio);
         }
@@ -991,7 +1043,7 @@ export const CodexDriver: ProviderDriver<CodexConfig> = {
             const pend = rpcPending.get(msg.id);
             if (pend) {
               rpcPending.delete(msg.id);
-              if (msg.error) pend.reject(new Error(msg.error.message ?? JSON.stringify(msg.error)));
+              if (msg.error) pend.reject(new CodexRpcError(msg.error));
               else pend.resolve(msg.result);
             }
           } else if (msg.id !== undefined && msg.method) {
@@ -1136,33 +1188,44 @@ export const CodexDriver: ProviderDriver<CodexConfig> = {
         // Removed bot rules are cleared without dropping native configured rules.
         const cursor = typeof turn.resumeCursor === "string" ? turn.resumeCursor : null;
         let startedModel: string | null = null;
+        let resumedNativeThread = false;
+        let promptText = turn.text;
         if (cursor) {
+          const resumeThread = () => request("thread/resume", {
+            threadId: cursor,
+            developerInstructions,
+            ...approvalParams.thread,
+          });
           try {
-            const resumed = await request("thread/resume", {
-              threadId: cursor,
-              developerInstructions,
-              ...approvalParams.thread,
-            });
-            codexThreadId = resumed?.thread?.id ?? cursor;
-          } catch (error) {
-            if (approvalParams.fallback && permissionProfileUnsupported(error)) {
-              // A server can understand config/read before it understands the
-              // profile selector. Retry the same resume safely rather than
-              // losing the native thread or inheriting its previous mode.
+            let resumed;
+            try {
+              resumed = await resumeThread();
+            } catch (error) {
+              if (!approvalParams.fallback || !permissionProfileUnsupported(error)) throw error;
+              // Older servers may require the legacy permission selector, but
+              // still resume the same native thread before any user submission.
               approvalParams = approvalParams.fallback;
-              const resumed = await request("thread/resume", {
-                threadId: cursor,
-                developerInstructions,
-                ...approvalParams.thread,
-              });
-              codexThreadId = resumed?.thread?.id ?? cursor;
-            } else {
-              throw error;
+              resumed = await resumeThread();
             }
+            codexThreadId = resumed?.thread?.id ?? cursor;
+            resumedNativeThread = true;
+          } catch (error) {
+            const failure = classifyResumeFailure({
+              attempted: true,
+              rejected: error instanceof CodexRpcError,
+              promptSubmitted,
+              producedOutput: state.sawStreamDelta,
+            });
+            if (!config.managed || recoveredMissingSession || stopRequested || state.settled ||
+                !turn.recoveryText?.trim() || !missingNativeCodexThread(error, cursor) || !mayReplay(failure)) throw error;
+            // The prompt has never been submitted. Rebuild only missing Company
+            // histories, once, through the same approved model/provider below.
+            recoveredMissingSession = true;
+            promptText = recoveryPromptFor({ recoveryText: turn.recoveryText, currentText: turn.text, failure }).text;
           }
         }
         if (!codexThreadId) {
-          const selection = decodeCodexSelection(turn.model);
+          const selection = config.managed ? { model: turn.model, modelProvider: "openmaus_company" } : decodeCodexSelection(turn.model);
           const startThread = () => request("thread/start", {
               developerInstructions,
               cwd: turn.cwd ?? homedir(),
@@ -1183,14 +1246,14 @@ export const CodexDriver: ProviderDriver<CodexConfig> = {
           startedModel = started?.model ?? null;
         }
         if (!codexThreadId) throw new Error("Codex did not return a native thread id");
-        await syncCodexInstructions(threadId, codexThreadId, developerInstructions, Boolean(cursor), request);
+        await syncCodexInstructions(threadId, codexThreadId, developerInstructions, resumedNativeThread, request);
         emit({ ...base(threadId, turnId), type: "session.started", sessionId: codexThreadId, model: startedModel ?? turn.model ?? null });
-        const promptText = turn.text;
         const turnInput = [
           ...(promptText ? [{ type: "text" as const, text: promptText }] : []),
           ...(turn.images ?? []).map((image) => ({ type: "localImage" as const, path: image.path })),
         ];
         const startTurn = () => {
+          promptSubmitted = true;
           startingNativeTurn = true;
           return request("turn/start", {
             threadId: codexThreadId,
@@ -1220,7 +1283,9 @@ export const CodexDriver: ProviderDriver<CodexConfig> = {
         const message = e instanceof Error ? e.message : String(e);
         const needsAuth = /(?:\b401\b|unauthorized|missing bearer|authentication required)/i.test(message);
         const verdict = classifyError(failure);
-        if (!state.settled && !abandoned && !needsAuth && verdict.transient && attempt < RETRY_MAX_ATTEMPTS - 1 && state.sawStreamDelta === false) {
+        // Both guards hold: main's abandoned attempt never retries, and neither
+        // does a Company session already recovered once from canonical history.
+        if (!state.settled && !abandoned && !recoveredMissingSession && !needsAuth && verdict.transient && attempt < RETRY_MAX_ATTEMPTS - 1 && state.sawStreamDelta === false) {
           const delayMs = computeBackoff(attempt);
           attempt++;
           emit({
@@ -1271,6 +1336,7 @@ export const CodexDriver: ProviderDriver<CodexConfig> = {
       );
     });
     if (!version) return { state: "unavailable", reason: `\`${config.cli}\` CLI not found` };
+    if (config.managed) return { state: "available", version, authenticated: Boolean(input.environment.OPENMAUSBOT_COMPANY_API_KEY && input.environment.CODEX_HOME), billing: "metered" };
     const authenticated = await new Promise<boolean>((resolve) => {
       execCli(config.cli, ["login", "status"], { timeout: 8000, env }, (err, stdout, stderr) =>
         resolve(!err && /^logged in\b/im.test(`${stdout}\n${stderr ?? ""}`)),

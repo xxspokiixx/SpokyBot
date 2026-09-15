@@ -581,6 +581,9 @@ export interface InstanceInfo {
   instanceId: string;
   driverKind: string;
   displayName: string;
+  /** Company instances are owned by the desktop parent, never editable here. */
+  readOnly?: boolean;
+  managed?: { organizationId: string; organizationName: string };
   snapshot: {
     state: "available" | "unavailable";
     reason?: string;
@@ -631,6 +634,7 @@ export interface InstanceInfo {
 export type AppSettingsSection =
   | "general"
   | "desktopWorkspaces"
+  | "organization"
   | "appearance"
   | "experimental"
   | "connections"

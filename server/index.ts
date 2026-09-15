@@ -211,6 +211,7 @@ import {
 } from "./send-idempotency.ts";
 import { EventBus } from "./harness/bus.ts";
 import { ProviderRegistry } from "./harness/registry.ts";
+import { ManagedDesktopProviders } from "./managed-desktop.ts";
 import { selectDefaultModelSelection } from "./default-model-selection.ts";
 import { cancelPeerApprovalsFor, cancelPeerApprovalsForThread, dismissStalePeerCards, requestPeerApproval, resolvePeerComms, type ApprovalBus } from "./peer-approval.ts";
 import { peerProvenanceNote, withPeerProvenance } from "./peer-provenance.ts";
@@ -639,6 +640,32 @@ utilityParentPort?.on("message", (event) => {
 
 const bus = new EventBus();
 bus.attach(registry.instances());
+let companyRuntimeReady!: () => void;
+const companyRuntimeStarted = new Promise<void>(resolve => { companyRuntimeReady = resolve; });
+const managedDesktop = new ManagedDesktopProviders({
+  registry,
+  dataDirectory: DATA_DIR,
+  beforeReplace: stopCompanyInstances,
+  afterReplace: ids => {
+    for (const id of providerInstancesChanging) if (managedDesktop.owns(id)) providerInstancesChanging.delete(id);
+    bus.attach(ids.flatMap(id => { const instance = registry.get(id); return instance ? [instance] : []; }));
+    // Existing renderer config events refresh /api/instances as well, so
+    // Company grants and revocations appear without reloading the window.
+    broadcast({ kind: "config", ...configStatus() });
+  },
+});
+// Only Electron owns this port. There is deliberately no HTTP equivalent or
+// config patch for its organization identity, endpoint, or model capability.
+utilityParentPort?.on("message", event => {
+  const message = event.data as { type?: unknown; requestId?: unknown; connection?: unknown } | undefined;
+  if (message?.type !== "openmausbot:managed-desktop") return;
+  const requestId = typeof message.requestId === "string" && message.requestId.length <= 100 ? message.requestId : undefined;
+  void companyRuntimeStarted.then(() => managedDesktop.apply(message.connection)).then(() => {
+    utilityParentPort.postMessage({ type: "openmausbot:managed-desktop-result", requestId, ok: true });
+  }, () => {
+    utilityParentPort.postMessage({ type: "openmausbot:managed-desktop-result", requestId, ok: false, error: "Company connection could not be applied. Reconnect from desktop Settings." });
+  });
+});
 
 // ── peer-agent comms wiring ────────────────────────────────────────────
 // Every mounted proxy receives a fresh, turn-scoped capability for localhost
@@ -949,10 +976,13 @@ async function interruptDirectThread(botId: string, threadId: string): Promise<v
   // its result is still recorded here.
   noteTeammatesLeftRunning(botId, threadId, roomHandoffs.stopAwaitingDirect(threadId));
   const owner = botForThread(botId, threadId);
+  const generation = directTurnGenerationByThread.get(threadId);
   cancelDirectTurnDispatch(botId, threadId);
   revokeInternalCapabilitiesForThread(threadId);
+  // Main routes Stop to the engine that started the turn; keep this branch's
+  // generation fence so a replacement turn's approvals are never closed here.
   await (owner ? runningTurnInstance(owner, threadId) : null)?.adapter.interruptTurn(threadId);
-  closeOpenApprovals(threadId);
+  if (directTurnGenerationByThread.get(threadId) === generation) closeOpenApprovals(threadId);
 }
 
 /** Stop left teammates mid-turn: say so in the transcript, name them, and
@@ -9284,6 +9314,10 @@ function persistMcpServers(next: Record<string, unknown>): void {
 async function describeInstances() {
   const configs = instanceConfigs(cfg);
   return (await registry.describe()).map((instance) => {
+    if (managedDesktop.owns(instance.instanceId)) return {
+      ...instance, readOnly: true, managed: managedDesktop.info(instance.instanceId),
+      install: undefined, authentication: undefined, cli: undefined, cliCandidates: [],
+    };
     const entry = configs[instance.instanceId];
     if (entry?.driver !== "claudeAgent") return instance;
     try {
@@ -9295,6 +9329,61 @@ async function describeInstances() {
       return { ...instance, install: { ...instance.install, signInCommand: undefined } };
     }
   });
+}
+
+/** Set once graceful shutdown begins: quitting disposes Company instances
+ * without writing "connection changed" cards or failing routine runs. */
+let companyShutdown = false;
+/** End only Company conversations before replacing their native instances. */
+async function stopCompanyInstances(ids: string[]) {
+  if (!ids.length) return;
+  if (providerFleetReloading || companyShutdown) {
+    for (const id of ids) { providerAuthSessions.clearInstance(id); bus.detach(id); }
+    return;
+  }
+  const selected = new Set(ids);
+  for (const id of ids) providerInstancesChanging.add(id);
+  const direct = store.bots.flatMap(bot => store.tasks(bot.id)
+    .filter(task => threadBusy(bot.id, task.threadId) && selected.has(botForThread(bot.id, task.threadId)!.modelSelection.instanceId))
+    .map(task => ({ botId: bot.id, threadId: task.threadId, owner: turnResourceOwners.get(task.threadId), generation: directTurnGenerationByThread.get(task.threadId) })));
+  await Promise.all(direct.map(task => interruptDirectThread(task.botId, task.threadId)));
+  for (const { botId, threadId, owner, generation } of direct) {
+    releaseTurnResources(owner);
+    settleDirectFollowup(owner?.generation);
+    // Another member of this cancellation batch can settle slowly while a
+    // completed thread starts a personal turn. Never clear that new owner.
+    if (directTurnGenerationByThread.get(threadId) !== generation) continue;
+    stopScreenPoller(botId, threadId); releaseLocalVmThread(threadId);
+    watchdog.settle(threadId); closeOpenApprovals(threadId); directTurnBots.delete(threadId);
+    finalizeDelegationWatch(threadId, false, "", "Company connection changed");
+    routines?.failThread(threadId, "Company connection changed while this thread was running");
+    if (store.taskByThread(botId, threadId)) {
+      store.appendMessage(threadId, { role: "bot", kind: "activity", tool: { name: "Company connection changed — choose whether to reconnect or use a personal model", ok: false } });
+      store.setTaskActivity(botId, threadId, "idle");
+    }
+  }
+  // Freeze this cancellation batch across interruptTurn's asynchronous yield.
+  // oxlint-disable-next-line unicorn/no-useless-spread
+  for (const [threadId, speaker] of [...groupSpeakers]) {
+    if (groupSpeakers.get(threadId) !== speaker) continue;
+    const bot = store.bot(speaker.botId);
+    if (!bot || !selected.has(bot.modelSelection.instanceId)) continue;
+    const group = store.groupByThread(threadId);
+    const owner = turnResourceOwners.get(threadId);
+    if (group) cancelGroupTurnOperations(group.id, threadId);
+    revokeInternalCapabilitiesForThread(threadId);
+    await runningTurnInstance(bot, threadId)?.adapter.interruptTurn(threadId);
+    const stillOwned = groupSpeakers.get(threadId) === speaker &&
+      turnResourceOwners.get(threadId)?.generation === owner?.generation;
+    releaseTurnResources(owner);
+    if (!stillOwned) continue;
+    releaseLocalVmThread(threadId);
+    watchdog.settle(threadId); closeOpenApprovals(threadId);
+    groupSpeakers.delete(threadId);
+    if (group) store.patchGroup(group.id, { busyBotId: null });
+    store.setActivity(bot.id, "idle");
+  }
+  for (const id of ids) { providerAuthSessions.clearInstance(id); bus.detach(id); }
 }
 
 async function persistProviderInstance(instanceId: string, instances: NonNullable<AppConfig["instances"]>) {
@@ -9336,6 +9425,7 @@ async function reloadProviders() {
   try {
     await registry.disposeAll();
     await registry.load(instanceConfigs(cfg));
+    await managedDesktop.restore();
     bus.attach(registry.instances());
   } finally {
     // Settle every exact conversation, not whichever one is selected now.
@@ -14938,6 +15028,8 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
       resetPathCache();
       return json(res, 200, { instances: await describeInstances() });
     }
+    const companyMutation = /^\/api\/instances\/(company\.[\w.-]+)(?:\/|$)/.exec(path);
+    if (companyMutation && method !== "GET") return json(res, 403, { error: "Company accounts are read-only here. Manage this connection in desktop Settings." });
 
     if (method === "POST" && path === "/api/instances/claude-accounts") {
       if (!String(req.headers["content-type"] ?? "").toLowerCase().startsWith("application/json")) {
@@ -16190,6 +16282,7 @@ restoreSteeredMessages();
 restoreChannelMessages();
 
 server.listen(PORT, "127.0.0.1", () => {
+  companyRuntimeReady();
   console.log(`openmausbot server on http://127.0.0.1:${PORT}`);
   followupsReady = true;
   drainQueuedSends();
@@ -16234,6 +16327,7 @@ const gracefulShutdown = createGracefulShutdown({
   cleanup: [
     () => {
       followupsReady = false;
+      companyShutdown = true;
       if (workspaceAccessTimer) clearInterval(workspaceAccessTimer);
       // Child MCP processes and the HTTP listener can remain alive while the
       // asynchronous shutdown jobs drain. Invalidate their turn bearers before
@@ -16250,7 +16344,7 @@ const gracefulShutdown = createGracefulShutdown({
       webhookIngress?.server.close();
       tunnelListener?.close();
     },
-    () => registry.disposeAll(),
+    async () => { await managedDesktop.close(); await registry.disposeAll(); },
     async () => {
       await Promise.all([...temporaryBrowserSessions.keys()].map((botId) => forgetTemporaryBrowser(botId)));
       await browserRuntime.closeAll();
