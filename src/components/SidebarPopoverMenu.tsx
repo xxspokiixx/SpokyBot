@@ -26,6 +26,9 @@ export interface SidebarMenuItem {
   disabled?: boolean;
   /** draw a hairline above this item — the Grok-style trailing group */
   separatorBefore?: boolean;
+  /** a small caps label above this item, naming the group it starts (the
+   * chat menu's "Share" over the two export actions) */
+  heading?: string;
   /** rendered at the trailing edge (a spinner, a status dot) */
   trailing?: React.ReactNode;
   /** the menu normally closes on select; an item that reports progress in
@@ -158,12 +161,13 @@ export function SidebarPopoverMenu({
           aria-label={ariaLabel}
           className={cn(
             "animate-pop-in absolute z-40 overflow-hidden rounded-xl border border-hairline/50 bg-menu py-1.5 shadow-2xl shadow-black/50",
-            placement === "below" ? "top-full right-0 mt-1 w-64" : "bottom-full left-0 right-0 mb-1",
+            placement === "below" ? "top-full right-0 mt-1 w-72" : "bottom-full left-0 right-0 mb-1",
           )}
         >
           {items.map((item) => (
             <div key={item.key}>
               {item.separatorBefore && <div className="my-1.5 h-px bg-hairline/50" />}
+              {item.heading && <div className="px-3 pb-0.5 pt-1.5 text-[10px] font-semibold uppercase tracking-[0.08em] text-ink-secondary">{item.heading}</div>}
               <button
                 type="button"
                 role="menuitem"

@@ -1495,6 +1495,8 @@ function ChatHeaderMenu({ bot, messages, findOpen, onFind }: {
     },
     {
       key: "copy",
+      heading: t("chat.export.heading"),
+      separatorBefore: true,
       label: t("chat.export.copy"),
       icon: <Copy size={16} />,
       disabled: !hasMessages,
