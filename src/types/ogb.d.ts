@@ -105,9 +105,9 @@ const __APP_VERSION__: string;
       companyBackups?: {
         state(): Promise<CompanyBackupState>;
         list(): Promise<{ backups: CompanyBackupEntry[]; usedBytes: number; limits: { ownerQuotaBytes: number; retainedSnapshots: number } }>;
-        create(input: { password: string; clientState: import("../../shared/workspace-backup").WorkspaceBackupClientState }): Promise<CompanyBackupEntry>;
-        configureSchedule?(input: { enabled: false } | { enabled: true; password: string; confirmation: "BACK UP THIS WORKSPACE DAILY" }): Promise<CompanyBackupState>;
-        prepareRestore(input: { id: string; password: string }): Promise<{ id: string; summary: import("../../shared/workspace-backup").WorkspaceBackupSummary }>;
+        create(input: { clientState: import("../../shared/workspace-backup").WorkspaceBackupClientState }): Promise<CompanyBackupEntry>;
+        configureSchedule?(input: { enabled: false } | { enabled: true; confirmation: "BACK UP THIS WORKSPACE DAILY" }): Promise<CompanyBackupState>;
+        prepareRestore(input: { id: string; password?: string }): Promise<{ id: string; summary: import("../../shared/workspace-backup").WorkspaceBackupSummary }>;
         restore(input: { id: string; confirmation: "REPLACE" }): Promise<{ restoreId: string }>;
         delete(input: { id: string; confirmation: "DELETE" }): Promise<unknown>;
         cancel(): Promise<void>;
