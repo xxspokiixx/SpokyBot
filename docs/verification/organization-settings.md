@@ -15,6 +15,12 @@ Linux needs a graphical session (or `xvfb-run -a`).
 
 The smoke checks:
 
+- The optional organization logo and shared bot-icon grid arrive in the
+  authenticated native snapshot. Selecting an icon uploads a durable local
+  attachment through the real fixture runtime. Admin removal clears the logo
+  and library after Refresh without changing the bot's chosen local avatar.
+  Branding is excluded from the strict runtime model grant and credential store.
+
 - Loading Settings does not enroll or open a browser. **Sign in with your
   organisation** uses the standard OpenMaus Admin; a separate custom Admin
   address remains available under **Advanced**.
@@ -51,3 +57,10 @@ native provider execution, cloud backups, public DNS/TLS or paid model calls.
 Provider isolation, expiry and no-personal-fallback behavior are separately
 covered by `server/managed-desktop.test.ts`. Read-only Company engine settings
 and preservation of personal controls have focused renderer regressions.
+
+2026-09-16: the extended isolated Electron workflow passed, including logo
+decoding, avatar selection/retrieval and removal propagation. Evidence:
+`/var/folders/91/pdc4mdh53xs59x0r4z7_0qzc0000gn/T/omb-organization-ui-ndaRQH/`.
+The separate private Admin/native runtime integration also passed with branding
+enabled (`/tmp/omb-desktop-integration-ql2mMS/receipt.json`). Neither test used
+customer accounts or changed the operator's desktop app.
