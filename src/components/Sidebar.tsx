@@ -812,8 +812,9 @@ export function currentArchivableBot(bots: readonly Bot[], id: string): Bot | un
 
 /** Copy for the archive / delete confirmation dialogs. Archiving keeps
  * everything and is reversible from Archived bots; deleting is not — the
- * server drops every task transcript, the workspace (files + memory), and
- * staged skill state with the bot. */
+ * server drops every task transcript, the workspace (files + memory), staged
+ * skill state, and any private computer the bot owns. Shared team computers
+ * remain. */
 export function botConfirmCopy(kind: BotConfirmKind, name: string) {
   return kind === "archive"
     ? {

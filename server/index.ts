@@ -3,6 +3,7 @@
 // folds one SSE event stream; every provider process runs here.
 import { createHash, randomBytes, randomUUID, timingSafeEqual } from "node:crypto";
 import { existsSync, readFileSync, rmSync, unlinkSync } from "node:fs";
+import { rm as removeDirectory } from "node:fs/promises";
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
 import { extname, join } from "node:path";
 
@@ -82,6 +83,7 @@ import * as box from "./box.ts";
 import { TeamComputers, teamComputerAssignment, teamComputerCreate, teamComputerOwner, type TeamComputerRecord } from "./team-computers.ts";
 import type { TeamComputersPayload } from "../shared/team-computer.ts";
 import { boxCreateRecoverySnapshot, retireDeletedBoxCreate } from "./box-create-idempotency.ts";
+import { boxDeletionSnapshot } from "./box-delete-journal.ts";
 import {
   boxAccountResourceChangeError,
   cloudBackendChangeError,
@@ -3736,7 +3738,10 @@ function providerOperationConflict(provider: RemoteComputerProvider): string | n
     if (boxInventoryRequestsBusyIds.size > 0 || orphanBoxLifecycleBusyIds.size > 0) {
       return "wait for cloud computer actions to finish before changing the Box account";
     }
-    if (boxCreateRecoverySnapshot().some((entry) => !entry.resolved)) {
+    const deletingBoxIds = new Set(boxDeletionSnapshot().map((entry) => entry.boxId));
+    if (boxCreateRecoverySnapshot().some(
+      (entry) => !entry.resolved && (!entry.boxId || !deletingBoxIds.has(entry.boxId)),
+    )) {
       return "finish reconciling pending cloud computer creation before changing the Box account";
     }
   } else if (vps.vpsLifecycleBusy()) {
@@ -5829,7 +5834,15 @@ async function startTurn(
         if (!mountsCloudComputer && wants === "cloud") {
           throw new Error("this model engine cannot use computer tools — choose Claude, an ACP engine, or the Computer engine");
         }
-        let b = await box.findBox(cfg, bot.id).catch(() => null);
+        let b;
+        try {
+          b = await box.findBox(cfg, bot.id);
+        } catch (error) {
+          // Auto may fall through when an optional provider is offline, but a
+          // durable deletion fence must never be mistaken for "no computer".
+          if (wants === "cloud" || (error as { status?: number })?.status === 409) throw error;
+          b = null;
+        }
         let lifecycle = box.boxTurnLifecycleAction({
           explicitCloud: wants === "cloud",
           canMount: mountsCloudComputer,
@@ -5838,7 +5851,7 @@ async function startTurn(
         if (lifecycle === "provision") {
           broadcast({ kind: "computer", botId: bot.id, state: "provisioning" });
           await box.provisionBox(cfg, bot.id, bot.name);
-          b = await box.findBox(cfg, bot.id).catch(() => null);
+          b = await box.findBox(cfg, bot.id);
           lifecycle = box.boxTurnLifecycleAction({
             explicitCloud: true,
             canMount: mountsCloudComputer,
@@ -5851,7 +5864,7 @@ async function startTurn(
         // consent boundary for the resume (~8s, and it un-pauses billing).
         if (lifecycle === "wake") {
           broadcast({ kind: "computer", botId: bot.id, state: "waking" });
-          b = (await box.readyBox(cfg, bot.id).catch(() => null)) ?? b;
+          b = (await box.readyBox(cfg, bot.id)) ?? b;
           lifecycle = box.boxTurnLifecycleAction({
             explicitCloud: true,
             canMount: mountsCloudComputer,
@@ -6623,6 +6636,9 @@ async function deleteBotWithLifecycle(botId: string, revalidate: () => void = ()
       if (computerProviderConfigTransitions.size > 0) {
         return deletionResponse( 409, { error: "computer provider settings are being updated — wait before deleting this bot" });
       }
+      if (localVmModeChangeBusy) {
+        return deletionResponse(409, { error: "Local VM settings are being updated — wait before deleting this bot" });
+      }
       if (boxLifecycleBusyBots.has(bot.id)) {
         return deletionResponse( 409, { error: "wait for this bot's cloud computer action to finish before deleting the bot" });
       }
@@ -6645,6 +6661,7 @@ async function deleteBotWithLifecycle(botId: string, revalidate: () => void = ()
         return deletionResponse( 409, { error: "stop this bot's work before checking and deleting its cloud computer" });
       }
       const botBoxRecovery = boxCreateRecoverySnapshot().filter((entry) => entry.botId === bot.id);
+      const botBoxDeletions = boxDeletionSnapshot().filter((entry) => entry.ownerBotId === bot.id);
       if (botBoxRecovery.some((entry) => !entry.resolved)) {
         return deletionResponse( 409, {
           error: "finish reconciling this bot's pending cloud computer creation before deleting it — check ascii.dev, then retry Box setup",
@@ -6661,84 +6678,100 @@ async function deleteBotWithLifecycle(botId: string, revalidate: () => void = ()
         releaseComputerLifecycle();
         return deletionResponse( 409, { error: "this bot or one of its channels is securely saving a credential" });
       }
+      let claimedLocalVmTarget: LocalVmTarget | null = null;
       try {
+        let localVmCleanup: { target: LocalVmTarget; removeContainer: boolean } | null = null;
         if (localVmMode(cfg) === "per-bot") {
           const target = perBotLocalVmTarget(bot.id);
           if (localVmActiveThreads.has(target.key) || localVmLifecycleBusy.has(target.key)) {
             return deletionResponse( 409, { error: "stop this bot's Local VM turn or setup action before deleting the bot" });
           }
+          if (localVmLeaseFor(target).current(localVmOwnerBusy)) {
+            return deletionResponse(409, { error: "stop this bot's Local VM turn before deleting the bot" });
+          }
+          // Hold the target from preflight through deletion. A simultaneous
+          // mode change or lifecycle route must not recreate the container
+          // after we checked it and before its bot owner disappears.
+          localVmLifecycleBusy.add(target.key);
+          claimedLocalVmTarget = target;
           const vm = await containerComputerStatus(undefined, undefined, target);
           if (!vm.daemonUp && existsSync(target.workspaceDir)) {
             return deletionResponse( 409, {
-              error: "start the container runtime and delete this bot's Local VM before deleting the bot",
+              error: "start the container runtime so OpenMausBot can remove this bot's Local VM while deleting it",
             });
           }
-          if (vm.container !== "missing") {
-            return deletionResponse( 409, { error: "delete this bot's Local VM from its Computer panel before deleting the bot" });
+          if (vm.container !== "missing" && !vm.managed) {
+            return deletionResponse(409, {
+              error: `The container named ${vm.container_name} was not created by OpenMausBot. Remove it manually before deleting this bot`,
+            });
           }
+          localVmCleanup = {
+            target,
+            removeContainer: vm.container !== "missing",
+          };
         }
-        // VPS containers are also durable and may outlive a destination or
-        // backend switch. Keep the bot as the discoverable owner until the
-        // person explicitly removes that container from Settings.
+
+        // Preflight every provider before deleting any resource. Cleanup can
+        // still fail mid-flight across independent providers, but a missing
+        // credential or offline daemon should not cause avoidable partial work.
         const vpsInventory = await vps.listManagedVpsComputers(cfg, managedBoxOwners());
         if (vpsInventory.configured && !vpsInventory.available) {
           return deletionResponse( 503, {
-            error: `${vpsInventory.problem ?? "VPS computer inventory is unavailable"}. Refresh Settings → Computers before deleting this bot`,
+            error: `${vpsInventory.problem ?? "VPS computer inventory is unavailable"}. The bot was kept so its computer can be retried safely`,
           });
         }
-        if (vpsInventory.instances.some((instance) => instance.ownerBotId === bot.id)) {
-          return deletionResponse( 409, {
-            error: "remove this bot's VPS computer from Settings → Computers before deleting the bot",
+        const ownedVpsComputers = vpsInventory.instances.filter((instance) => instance.ownerBotId === bot.id);
+
+        if ((botBoxRecovery.length > 0 || botBoxDeletions.length > 0) && !box.boxConfigured(cfg)) {
+          return deletionResponse(409, {
+            error: "Reconnect the Box account that owns this bot's remembered cloud computer, then retry deletion",
           });
         }
-        // LIST is eventually consistent, and a remembered Box may also have
-        // been renamed outside OpenMausBot. The create journal is stronger
-        // ownership evidence: inspect every durable id directly before the bot
-        // record that makes it discoverable can be removed. Missing credentials
-        // or an unavailable provider must fail closed.
-        for (const recovery of botBoxRecovery) {
-          if (!recovery.boxId) {
-            return deletionResponse( 409, {
-              error: "finish reconciling this bot's pending cloud computer creation before deleting it",
-            });
-          }
-          const inspected = await box.inspectBoxIdentity(cfg, recovery.boxId);
-          if (!inspected.available) {
-            return deletionResponse( 503, {
-              error: `${inspected.problem ?? "a remembered cloud computer could not be verified"}. Restore its Box account before deleting this bot`,
-            });
-          }
-          if (inspected.identity) {
-            return deletionResponse( 409, {
-              error: "delete this bot's remembered cloud computer from Settings → Computers before deleting the bot",
-            });
-          }
-          // A direct 404/410 is authoritative even while account LIST catches
-          // up. Retire only this exact provider identity, then continue looking
-          // for any older name-based resource the journal never recorded.
-          retireDeletedBoxCreate(recovery.boxId);
-        }
-        // A Box survives destination/backend changes and contains browser
-        // sessions and files. Resolve ownership from a fresh provider listing;
-        // deleting the bot first would make that durable machine look orphaned.
         const cloudInventory = await box.listManagedBoxes(cfg, managedBoxOwners());
         if (cloudInventory.configured && !cloudInventory.available) {
           return deletionResponse( 503, {
-            error: `${cloudInventory.problem ?? "cloud computer inventory is unavailable"}. Refresh Settings → Computers before deleting this bot`,
+            error: `${cloudInventory.problem ?? "cloud computer inventory is unavailable"}. The bot was kept so its computer can be retried safely`,
           });
         }
-        if (cloudInventory.instances.some((instance) => instance.ownerBotId === bot.id)) {
-          return deletionResponse( 409, {
-            error: "delete this bot's cloud computer from Settings → Computers before deleting the bot",
-          });
-        }
-        // Establish a durable cleanup intent before any teardown. A malformed
-        // or unreadable journal therefore rejects the delete with the bot and
-        // all of its live work untouched. The intent is aborted if a later
-        // pre-delete side effect fails, and committed only after Store deletion.
+        const ownedBoxComputers = cloudInventory.instances.filter((instance) => instance.ownerBotId === bot.id);
+
+        // Revalidate a reviewed Chief-of-Staff request and establish the
+        // browser cleanup intent before the first irreversible provider
+        // mutation. A stale review or damaged journal therefore leaves every
+        // computer intact. Cross-provider rollback is impossible, so every
+        // subsequent operation is exact and retry-safe.
         revalidate();
         const browserCleanupRequest = browserCleanup.prepare("bot", bot.id);
         try {
+          // Provider-owned computers are durable, billable resources. Remove
+          // each exact, freshly revalidated identity before making its bot
+          // owner disappear. Shared team computers use a different owner id
+          // and are intentionally absent from these lists.
+          for (const instance of ownedBoxComputers) {
+            const removed = await box.deleteManagedBox(cfg, managedBoxOwners(), instance.boxId, instance.name);
+            if (removed.pending) {
+              throw Object.assign(
+                new Error("The cloud computer deletion has started but is still finishing. The bot was kept; retry in a moment"),
+                { status: 409 },
+              );
+            }
+          }
+          for (const instance of ownedVpsComputers) {
+            await vps.removeManagedVpsComputer(cfg, managedBoxOwners(), instance.name, instance.name);
+          }
+          if (localVmCleanup) {
+            if (localVmCleanup.removeContainer) {
+              await containerComputerAction("remove", undefined, undefined, localVmCleanup.target);
+            }
+            // Unlike the standalone "Delete VM" action, deleting the bot is
+            // a complete erasure: its now-ownerless desktop files and browser
+            // session must not remain hidden on disk or block the event loop.
+            await removeDirectory(localVmCleanup.target.workspaceDir, { recursive: true, force: true });
+            localVmSeen.delete(localVmCleanup.target.key);
+            localVmIdles.get(localVmCleanup.target.key)?.cancel();
+            localVmIdles.delete(localVmCleanup.target.key);
+            localVmLeases.forget(localVmCleanup.target.key);
+          }
           // a running turn dies with its bot
           // Invalidate every bot-callable bearer before the first asynchronous
           // teardown step. A request that already passed its initial header
@@ -6751,7 +6784,6 @@ async function deleteBotWithLifecycle(botId: string, revalidate: () => void = ()
             revokeInternalCapabilitiesForThread(task.threadId);
           }
           await interruptAllDirectThreads(bot.id);
-          revalidate();
           // Deletion removes the thread before a late turn.completed can fold
           // staged provider images into a message, so dispose them here.
           for (const task of store.tasks(bot.id)) {
@@ -6772,6 +6804,12 @@ async function deleteBotWithLifecycle(botId: string, revalidate: () => void = ()
           const target = perBotLocalVmTarget(bot.id);
           localVmIdles.get(target.key)?.cancel();
           localVmIdles.delete(target.key);
+          // Provider and local-computer teardown above can await for an
+          // arbitrary amount of time. A reviewed Chief deletion is bound to
+          // the exact target profile it presented; re-check that receipt at
+          // the final durable mutation boundary so a concurrent profile edit
+          // cannot be erased under a stale approval.
+          revalidate();
           store.deleteBot(bot.id, setupRequest);
           // Removing schedules is not a security revocation. Keep them intact
           // if the bot/receipt write fails, so a failed deletion is retryable.
@@ -6802,6 +6840,7 @@ async function deleteBotWithLifecycle(botId: string, revalidate: () => void = ()
         }
         return deletionResponse( 200, { ok: true });
       } finally {
+        if (claimedLocalVmTarget) localVmLifecycleBusy.delete(claimedLocalVmTarget.key);
         releaseComputerLifecycle();
         releasePhoneSecretMutation();
       }
@@ -16000,46 +16039,85 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
           if (resourceError) return json(res, 409, { error: resourceError });
         }
 
-        const boxRecovery = changingBoxToken ? boxCreateRecoverySnapshot() : [];
+        let boxRecovery = changingBoxToken ? boxCreateRecoverySnapshot() : [];
+        let boxDeletions = changingBoxToken ? boxDeletionSnapshot() : [];
+        if (changingBoxToken && boxDeletions.length > 0 && !nextBoxToken) {
+          return json(res, 409, {
+            error: "finish or retry pending cloud computer deletion before removing the Box account",
+          });
+        }
+        let replacementProvedByDeletion = false;
+        if (changingBoxToken && boxDeletions.length > 0 && nextBoxToken) {
+          try {
+            await box.verifyBoxDeletionCredential({ box: { token: nextBoxToken } });
+            replacementProvedByDeletion = true;
+            // Verification can observe a completed operation and retire both
+            // its deletion fence and matching create receipt. Never continue
+            // with the pre-verification snapshots: they would demand access
+            // to a Box whose exact operation just proved it was deleted.
+            boxRecovery = boxCreateRecoverySnapshot();
+            boxDeletions = boxDeletionSnapshot();
+          } catch (error) {
+            return json(res, (error as { status?: number })?.status ?? 503, {
+              error: error instanceof Error ? error.message : String(error),
+            });
+          }
+        }
         let currentBoxInventory: box.ManagedBoxInventory | null = null;
         let currentBoxResources: Array<{ boxId: string; name: string }> | null = null;
         const journalBoxResources: Array<{ boxId: string; name: string }> = [];
+        const deletingBoxIds = new Set(boxDeletions.map((entry) => entry.boxId));
         if (changingBoxToken && currentBoxToken) {
           currentBoxInventory = await box.listManagedBoxes(
             { box: { token: currentBoxToken } },
             managedBoxOwners(),
           );
           if (!currentBoxInventory.available) {
-            return json(res, 503, {
-              error: `${currentBoxInventory.problem ?? "cloud computer inventory is unavailable"}. Keep the current Box account and retry`,
-            });
-          }
-          const currentById = new Map(
-            currentBoxInventory.instances.map((instance) => [instance.boxId, { boxId: instance.boxId, name: instance.name }]),
-          );
-          for (const recovery of boxRecovery) {
-            if (!recovery.boxId) continue;
-            const inspected = await box.inspectBoxIdentity({ box: { token: currentBoxToken } }, recovery.boxId);
-            if (!inspected.available) {
+            if (!replacementProvedByDeletion) {
               return json(res, 503, {
-                error: `${inspected.problem ?? "a remembered cloud computer could not be verified"}. Keep the current Box account and retry`,
+                error: `${currentBoxInventory.problem ?? "cloud computer inventory is unavailable"}. Keep the current Box account and retry`,
               });
             }
-            if (!inspected.identity) {
-              // Reconcile exact stale receipts while the current credential is
-              // still available. Leaving one behind would make a later token
-              // addition demand access to a Box the provider proved is gone.
-              retireDeletedBoxCreate(recovery.boxId);
-              continue;
-            }
-            const listed = currentById.get(inspected.identity.boxId);
-            if (listed && listed.name !== inspected.identity.name) {
-              return json(res, 503, { error: "ascii.dev returned conflicting cloud computer identities; keep the current Box account and retry" });
-            }
-            currentById.set(inspected.identity.boxId, inspected.identity);
-            journalBoxResources.push(inspected.identity);
+            // The old token may be the reason this deletion is stuck. A
+            // target-bound operation/identity proved the replacement belongs
+            // to the same account, so do not deadlock credential recovery on
+            // an inventory request made with the expired token.
+            currentBoxInventory = null;
           }
-          currentBoxResources = [...currentById.values()];
+          if (currentBoxInventory) {
+            const currentById = new Map(
+              currentBoxInventory.instances.map((instance) => [instance.boxId, { boxId: instance.boxId, name: instance.name }]),
+            );
+            for (const recovery of boxRecovery) {
+              if (!recovery.boxId) continue;
+              // A failed provisioning attempt may never have reached the
+              // deterministic rename. The replacement credential already
+              // proved the exact deletion target, so its in-flight resource
+              // is governed by that stronger target-bound receipt rather
+              // than an OpenMausBot name check.
+              if (replacementProvedByDeletion && deletingBoxIds.has(recovery.boxId)) continue;
+              const inspected = await box.inspectBoxIdentity({ box: { token: currentBoxToken } }, recovery.boxId);
+              if (!inspected.available) {
+                return json(res, 503, {
+                  error: `${inspected.problem ?? "a remembered cloud computer could not be verified"}. Keep the current Box account and retry`,
+                });
+              }
+              if (!inspected.identity) {
+                // Reconcile exact stale receipts while the current credential is
+                // still available. Leaving one behind would make a later token
+                // addition demand access to a Box the provider proved is gone.
+                retireDeletedBoxCreate(recovery.boxId);
+                continue;
+              }
+              const listed = currentById.get(inspected.identity.boxId);
+              if (listed && listed.name !== inspected.identity.name) {
+                return json(res, 503, { error: "ascii.dev returned conflicting cloud computer identities; keep the current Box account and retry" });
+              }
+              currentById.set(inspected.identity.boxId, inspected.identity);
+              journalBoxResources.push(inspected.identity);
+            }
+            currentBoxResources = [...currentById.values()];
+          }
         }
 
         if (changingLocalVmMode) {
@@ -16084,7 +16162,7 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
         const check = await box.verifyToken(newBoxToken);
         if (!check.ok) return json(res, 400, { error: check.message });
       }
-      if (changingBoxToken && !currentBoxToken && boxRecovery.length > 0) {
+      if (changingBoxToken && (!currentBoxToken || replacementProvedByDeletion) && boxRecovery.length > 0) {
         if (!nextBoxToken) {
           return json(res, 409, { error: "restore the Box account that owns the remembered cloud computers before clearing it" });
         }
@@ -16092,6 +16170,7 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
           if (!recovery.boxId) {
             return json(res, 409, { error: "finish reconciling pending cloud computer creation before changing the Box account" });
           }
+          if (replacementProvedByDeletion && deletingBoxIds.has(recovery.boxId)) continue;
           const inspected = await box.inspectBoxIdentity({ box: { token: nextBoxToken } }, recovery.boxId);
           if (!inspected.available) {
             return json(res, 503, {
