@@ -893,7 +893,7 @@ describe("ClaudeDriver turns (fake CLI)", () => {
   });
 
   it("refreshes a coordinated resumed session's prompt when the CLI supports it", async () => {
-    await create(undefined, { FAKE_CLAUDE_DUMP: join(scratch, "coordination-snapshot.json") });
+    await create(undefined, { FAKE_CLAUDE_DUMP: join(scratch, "coordination-snapshot.json"), FAKE_CLAUDE_VERSION: "2.1.267" });
     await instance.adapter.sendTurn({
       threadId: "t-coordinated-resume",
       text: "Addressed teammate request 2. Add the new header row.",

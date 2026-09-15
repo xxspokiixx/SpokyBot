@@ -55,6 +55,7 @@ it("runs room-destined work in the room's own conversation, opening no thread on
   expect(after.some((task: any) => task.openedBy)).toBe(false);
   expect((await f.messages(f.destination.activeTaskId)).some((m: any) => m.text?.includes("Please build CSV"))).toBe(true);
   expect((await f.messages(f.source.activeTaskId)).some((m: any) => m.text === "Reviewed downstream outcome")).toBe(true);
+  expect(JSON.stringify(f.provider().find((turn: any) => turn.botId === f.target.id).prompt).match(/Please build CSV/g)).toHaveLength(1);
 }), 45_000);
 
 it("lets an explicitly authorized Chief coordinate another team, which can consult its own specialist", () => withRooms(async f => {
@@ -71,6 +72,8 @@ it("lets an explicitly authorized Chief coordinate another team, which can consu
   expect(f.provider().map((turn: any) => turn.botId)).toEqual([f.sender.id, f.target.id, reviewer.id, f.target.id, f.sender.id]);
   expect(f.nodes().every((n: any) => n.status === "completed")).toBe(true);
   expect((await f.messages(f.source.activeTaskId)).some((m: any) => m.text === "Reviewed downstream outcome")).toBe(true);
+  const resumedPrompt = f.provider().filter((turn: any) => turn.botId === f.target.id).at(-1).prompt;
+  expect(JSON.stringify(resumedPrompt).match(/CSV checks passed/g)).toHaveLength(1);
   const bots = (await f.api("/api/bots")).bots;
   expect(bots.find((b: any) => b.id === f.target.id).managedSections).toBeUndefined();
   expect(bots.find((b: any) => b.id === reviewer.id).managedSections).toBeUndefined();
