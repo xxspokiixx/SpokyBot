@@ -367,6 +367,7 @@ import { createBotPackageExport, type ExportablePackageSkill } from "./package-e
 import { createTeamBackup, importTeamBackup } from "./team-backup.ts";
 import { MAX_TEAM_BACKUP_BYTES } from "../shared/team-backup.ts";
 import { shouldMountLocalComputer } from "./local-routing.ts";
+import { autoLocalVmAttachable, type ContainerComputerStatus } from "./container-computer.ts";
 import { modelContextWindow } from "./model-context-window.ts";
 import { parseSurface, resolveSurface, surfaceLabel, surfaceOfComputerKind, surfacePrompt } from "./surface.ts";
 import {
@@ -3484,6 +3485,14 @@ const localVmLeases = new LocalVmLeasePool(30 * 60_000);
 const localVmLifecycleBusy = new Set<string>();
 const localVmThreadTargets = new Map<string, LocalVmTarget>();
 const localVmActiveThreads = new Map<string, string>();
+/** Local VM targets this process has seen ready or recreatable — at boot, in
+ * the inventory, or in a turn. Auto probes the container runtime for a VM
+ * only when one of these exists, so an ordinary Auto turn on a machine with
+ * no VM never pays for a docker or podman call. */
+const localVmSeen = new Set<string>();
+function noteLocalVmSeen(target: LocalVmTarget, status: ContainerComputerStatus | null | undefined): void {
+  if (status && autoLocalVmAttachable(status)) localVmSeen.add(target.key);
+}
 let localVmImageBusy = false;
 let localVmProvisionBusy = false;
 let localVmModeChangeBusy = false;
@@ -3798,6 +3807,7 @@ function releaseLocalVmThread(threadId: string): void {
 void (async () => {
   if (localVmMode(cfg) !== "per-bot") {
     const status = await containerComputerStatus(undefined, undefined, SHARED_LOCAL_VM_TARGET).catch(() => null);
+    noteLocalVmSeen(SHARED_LOCAL_VM_TARGET, status);
     if (shouldArmLocalVmIdle(status)) localVmIdleFor(SHARED_LOCAL_VM_TARGET).touch();
     return;
   }
@@ -3808,6 +3818,7 @@ void (async () => {
     containerComputerStatus(undefined, undefined, target).catch(() => null),
   ));
   existing.forEach(({ target }, index) => {
+    noteLocalVmSeen(target, statuses[index]);
     if (shouldArmLocalVmIdle(statuses[index])) localVmIdleFor(target).touch();
   });
 })().catch(() => {
@@ -3832,6 +3843,7 @@ async function localVmInventoryPayload() {
   const instances = existing.flatMap(({ bot, target }, index) => {
     const status = statuses[index];
     if (!status) return [];
+    noteLocalVmSeen(target, status);
     const inUse = localVmActiveThreads.has(target.key) ||
       localVmLeaseFor(target).current(localVmOwnerBusy) !== null;
     const entry = localVmInventoryEntry(bot, status, inUse);
@@ -5381,6 +5393,10 @@ async function startTurn(
   turnContext.delete(threadId);
 
   void (async () => {
+    // The place this turn was pinned to, if any: cleared on failure so a
+    // place that has gone away cannot fail every message until someone finds
+    // the chip. The next message resolves afresh.
+    let appliedPin: "cloud" | "vm" | "local" | "browser" | null = null;
     try {
       const integrations: NonNullable<Parameters<typeof instance.adapter.sendTurn>[0]["integrations"]> = {};
       let browser: Awaited<ReturnType<typeof browserIntegration>> = null;
@@ -5479,6 +5495,7 @@ async function startTurn(
         browserOn,
       });
       if (plan.clearPin && dispatchTask) store.patchTask(bot.id, threadId, { surface: undefined });
+      appliedPin = plan.pinned;
       if (bot.computer === "browser" && plan.computer === "off" && instance.driverKind === "boxAgent") {
         throw new Error("the Computer engine works on the cloud computer — set Works on to Cloud, or choose another engine");
       }
@@ -5490,51 +5507,74 @@ async function startTurn(
 
       // Explicit destinations are strict. In particular, Local VM must never
       // fall through to host CUA and accidentally click on the user's Mac.
-      if (wants === "vm") {
+      // The Local VM attach, shared by explicit "Local VM" and by Auto. Explicit
+      // is strict and throws with the reason. Auto only reaches a VM this bot
+      // already has — ready now, or one whose desktop image is prepared and can
+      // be recreated on demand after idling away — and never creates a first
+      // VM on its own; every failure there is a quiet "not this place".
+      const attachLocalVm = async (strict: boolean): Promise<boolean> => {
         if (!mountsComputerMcp || instance.driverKind === "boxAgent") {
+          if (!strict) return false;
           throw new Error("this model engine cannot use the Local VM — choose Claude or an ACP engine, or select another computer destination");
         }
         const localVmTarget = localVmTargetForBot(bot.id);
-        bindTurnComputer(resourceOwner, `computer:vm:${localVmTarget.key}`, true);
-        if (localVmImageBusy || localVmModeChangeBusy || localVmLifecycleBusy.has(localVmTarget.key)) {
-          throw new Error("this Local VM is being started, stopped, or replaced — wait for setup to finish");
+        if (!strict) {
+          // Nothing this process has ever seen for this target, and nobody is
+          // relying on an unattended run: do not pay for a runtime probe.
+          if (!localVmSeen.has(localVmTarget.key) && !opts?.automationSource) return false;
+          const seen = await containerComputerStatus(undefined, undefined, localVmTarget).catch(() => null);
+          if (!seen || !autoLocalVmAttachable(seen)) return false;
+          if (localVmImageBusy || localVmModeChangeBusy || localVmLifecycleBusy.has(localVmTarget.key)) return false;
         }
-        // Claim before the first await. The lifecycle route performs its
-        // matching check synchronously, so neither side can enter while the
-        // other is between inspection and mutation.
-        if (!localVmLeaseFor(localVmTarget).claim(threadId, bot.id, localVmOwnerBusy)) {
-          throw new Error("this Local VM is already being used by another turn — wait for that turn to finish");
-        }
-        localVmThreadTargets.set(threadId, localVmTarget);
-        localVmActiveThreads.set(localVmTarget.key, threadId);
-        localVmIdleFor(localVmTarget).touch();
-        const localVm = await readyLocalVmForTurn(bot.id, localVmTarget);
-        if (!localVm.ready || !localVm.runtime) {
-          throw new Error(`${localVm.problem ?? "the Local VM is not ready"} (App Settings → Computers)`);
-        }
-        integrations.localComputer = containerComputerMcp(
-          localVm.runtime,
-          controlIntegration(bot.id, threadId, dispatchClaimId),
-          localVmTarget,
-        );
-        computerKind = "vm";
-        // Same contract as the Box and VPS branches below: without this the
-        // poller never starts, so the Local VM publishes no `screen` events
-        // and every client that only has the stream (the phone) waits
-        // forever. The web panel hid the gap by polling the screenshot
-        // route itself.
-        previewCapture = () => {
-          // The shared desktop outlives the turn. Once another thread owns
-          // it, a capture still in flight would picture ITS work under this
-          // bot's name — live and in the settled transcript frame, which is
-          // taken after the lease is already released. No owner means the
-          // desktop is simply idle: that final frame is ours to keep.
-          const owner = localVmLeaseFor(localVmTarget).current(localVmOwnerBusy);
-          if (owner && owner.threadId !== threadId) {
-            throw new Error("the Local VM moved on to another turn");
+        try {
+          bindTurnComputer(resourceOwner, `computer:vm:${localVmTarget.key}`, true);
+          if (localVmImageBusy || localVmModeChangeBusy || localVmLifecycleBusy.has(localVmTarget.key)) {
+            throw new Error("this Local VM is being started, stopped, or replaced — wait for setup to finish");
           }
-          return containerComputerFrame(undefined, undefined, localVmTarget);
-        };
+          // Claim before the first await. The lifecycle route performs its
+          // matching check synchronously, so neither side can enter while the
+          // other is between inspection and mutation.
+          if (!localVmLeaseFor(localVmTarget).claim(threadId, bot.id, localVmOwnerBusy)) {
+            throw new Error("this Local VM is already being used by another turn — wait for that turn to finish");
+          }
+          localVmThreadTargets.set(threadId, localVmTarget);
+          localVmActiveThreads.set(localVmTarget.key, threadId);
+          localVmIdleFor(localVmTarget).touch();
+          const localVm = await readyLocalVmForTurn(bot.id, localVmTarget);
+          if (!localVm.ready || !localVm.runtime) {
+            throw new Error(`${localVm.problem ?? "the Local VM is not ready"} (App Settings → Computers)`);
+          }
+          integrations.localComputer = containerComputerMcp(
+            localVm.runtime,
+            controlIntegration(bot.id, threadId, dispatchClaimId),
+            localVmTarget,
+          );
+          // Same contract as the Box and VPS branches below: without this the
+          // poller never starts, so the Local VM publishes no `screen` events
+          // and every client that only has the stream (the phone) waits
+          // forever. The web panel hid the gap by polling the screenshot
+          // route itself.
+          previewCapture = () => {
+            // The shared desktop outlives the turn. Once another thread owns
+            // it, a capture still in flight would picture ITS work under this
+            // bot's name — live and in the settled transcript frame, which is
+            // taken after the lease is already released. No owner means the
+            // desktop is simply idle: that final frame is ours to keep.
+            const owner = localVmLeaseFor(localVmTarget).current(localVmOwnerBusy);
+            if (owner && owner.threadId !== threadId) {
+              throw new Error("the Local VM moved on to another turn");
+            }
+            return containerComputerFrame(undefined, undefined, localVmTarget);
+          };
+          return true;
+        } catch (error) {
+          if (strict) throw error;
+          releaseLocalVmThread(threadId);
+          return false;
+        }
+      };
+      if (wants === "vm") {
+        if (await attachLocalVm(true)) computerKind = "vm";
       } else if (wants === "local") {
         if (!shouldMountLocalComputer({
           requested: "local",
@@ -5652,6 +5692,10 @@ async function startTurn(
 
       // Auto-only host fallback. Electron owns cua-driver/TCC attribution;
       // the harness only reads its already-running connection descriptor.
+      // Auto reaches a Local VM this bot already has before it ever touches the
+      // host's own desktop: on a headless server that VM is the only desktop
+      // there is, and a person who prepared one meant it to be used.
+      if (wants === undefined && !integrations.computer && !integrations.localComputer && await attachLocalVm(false)) computerKind = "vm";
       // An unattended run on a bot with a VPS configured never lands on the
       // host's own desktop instead: a scheduled job clicking on someone's
       // laptop is worse than a scheduled job that fails and says why.
@@ -5954,7 +5998,11 @@ async function startTurn(
         return;
       }
       if (!ownsLatestGeneration) return;
-      const message = e instanceof Error ? e.message : String(e);
+      let message = e instanceof Error ? e.message : String(e);
+      if (appliedPin && store.taskByThread(bot.id, threadId)?.surface === appliedPin) {
+        store.patchTask(bot.id, threadId, { surface: undefined });
+        message += " — this conversation's place was unpinned; send again to continue wherever is available";
+      }
       store.appendMessage(threadId, {
         role: "bot",
         kind: "activity",
@@ -9258,6 +9306,7 @@ async function localVmPayload(target: LocalVmTarget) {
  */
 async function readyLocalVmForTurn(botId: string, target: LocalVmTarget, isCurrent = () => true) {
   let status = await containerComputerStatus(undefined, undefined, target);
+  noteLocalVmSeen(target, status);
   if (!isCurrent()) return status;
   if (status.ready || !localVmRecreatableOnDemand(status)) return status;
 
