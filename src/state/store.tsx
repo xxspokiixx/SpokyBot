@@ -310,6 +310,10 @@ export interface TaskUsage {
    * from builds before cost existed lack the field entirely */
   costUsd: number | null;
   turns: number;
+  /** the most recent settled turn on its own */
+  lastTurn?: { input: number; output: number; cachedInput?: number; costUsd: number | null };
+  /** what filled the model's window on the last model call, and the window's size when known */
+  context?: { tokens: number; window?: number };
 }
 
 export interface Bot {
@@ -587,6 +591,9 @@ export interface InstanceInfo {
   instanceId: string;
   driverKind: string;
   displayName: string;
+  /** Company instances are owned by the desktop parent, never editable here. */
+  readOnly?: boolean;
+  managed?: { organizationId: string; organizationName: string };
   snapshot: {
     state: "available" | "unavailable";
     reason?: string;
@@ -637,6 +644,7 @@ export interface InstanceInfo {
 export type AppSettingsSection =
   | "general"
   | "desktopWorkspaces"
+  | "organization"
   | "appearance"
   | "experimental"
   | "connections"
