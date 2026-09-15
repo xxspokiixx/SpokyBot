@@ -36,12 +36,30 @@ import { codexDeveloperInstructions, syncCodexInstructions } from "./codex-instr
 import type { ApprovalMode } from "../../shared/approval-mode.ts";
 import { CodexDeviceAuthController } from "./codex-device-auth.ts";
 import { codexAccountEmail } from "./codex-identity.ts";
+import { classifyResumeFailure, mayReplay, recoveryPromptFor } from "../resume-recovery.ts";
 
 export { decodeCodexSelection, readCodexModelCatalog, STATIC_CODEX_MODELS } from "./codex-catalog.ts";
 
 const DRIVER_KIND = "codex";
 const ASTRA_MODEL_ID = "gpt-6-astra";
 const ASTRA_MIN_CODEX_VERSION = [0, 153, 1] as const;
+
+class CodexRpcError extends Error {
+  code: unknown;
+
+  constructor(error: { code?: unknown; message?: string }) {
+    super(error.message ?? JSON.stringify(error));
+    this.code = error.code;
+  }
+}
+
+function missingNativeCodexThread(error: unknown, cursor: string): boolean {
+  // Codex's local thread/resume rejection, verified with an empty native home.
+  // A generic 404, auth error, timeout or prose mentioning a missing thread is
+  // not evidence that the native history was lost. Unknown versions fail closed.
+  return error instanceof CodexRpcError && error.code === -32600 &&
+    error.message === `no rollout found for thread id ${cursor}`;
+}
 
 /** Whether an installed Codex predates the release that exposes GPT-6 Astra
  * through app-server. Unknown version formats stay quiet: a bad guess should
@@ -98,6 +116,8 @@ function codexAstraUpdate(
 export interface CodexConfig {
   cli: string;
   fullAuto: boolean;
+  /** Ephemeral Company routing, supplied by the trusted desktop parent. */
+  managed?: { url: string; models: string[] };
 }
 
 function decodeConfig(raw: unknown): CodexConfig {
@@ -105,7 +125,33 @@ function decodeConfig(raw: unknown): CodexConfig {
   return {
     cli: typeof o.cli === "string" ? o.cli : "codex",
     fullAuto: o.fullAuto === true,
+    ...(o.managed && typeof o.managed === "object" ? { managed: decodeManagedCodex(o.managed) } : {}),
   };
+}
+
+function decodeManagedCodex(raw: object): NonNullable<CodexConfig["managed"]> {
+  const value = raw as { url?: unknown; models?: unknown };
+  if (typeof value.url !== "string" || !Array.isArray(value.models) || !value.models.length || value.models.some(model => typeof model !== "string" || !/^[\w][\w./+-]*$/.test(model))) {
+    throw new Error("Invalid Company Codex configuration.");
+  }
+  const url = new URL(value.url);
+  if (url.username || url.password || url.search || url.hash || !["https:", "http:"].includes(url.protocol)) throw new Error("Invalid Company Codex endpoint.");
+  return { url: url.href.replace(/\/$/, ""), models: value.models as string[] };
+}
+
+export function managedCodexArgs(config: NonNullable<CodexConfig["managed"]>): string[] {
+  // Credential stays in the instance environment, never argv or config.toml.
+  // https://learn.chatgpt.com/docs/config-file/config-reference
+  return [
+    "-c", 'model_provider="openmaus_company"',
+    "-c", 'model_providers.openmaus_company.name="Company"',
+    "-c", `model_providers.openmaus_company.base_url=${JSON.stringify(config.url)}`,
+    "-c", 'model_providers.openmaus_company.env_key="OPENMAUSBOT_COMPANY_API_KEY"',
+    "-c", 'model_providers.openmaus_company.wire_api="responses"',
+    "-c", "model_providers.openmaus_company.requires_openai_auth=false",
+    "-c", 'cli_auth_credentials_store="ephemeral"',
+    "-c", "shell_environment_policy.ignore_default_excludes=false",
+  ];
 }
 
 const QUESTION_TIMEOUT_NOTE = "No answer was given — use your best judgment.";
@@ -482,8 +528,9 @@ export const CodexDriver: ProviderDriver<CodexConfig> = {
       return env;
     };
     const catalogEnv = childEnv();
-    let models = STATIC_CODEX_MODELS;
+    let models = config.managed ? { default: config.managed.models[0], options: config.managed.models.map(id => ({ id, label: id })) } : STATIC_CODEX_MODELS;
     const refreshModels = async () => {
+      if (config.managed) return;
       try {
         const resolved = await readCodexModelCatalog(catalogEnv, fetch, config.cli);
         if (resolved.options.length) models = resolved;
@@ -517,9 +564,14 @@ export const CodexDriver: ProviderDriver<CodexConfig> = {
     });
 
     const sendTurn = async (turn: SendTurnInput) => {
+      if (config.managed && (!turn.model || !config.managed.models.includes(turn.model) || !input.environment.OPENMAUSBOT_COMPANY_API_KEY || !input.environment.CODEX_HOME)) {
+        throw new Error("Company model access is unavailable. Reconnect your organization; personal billing will not be used.");
+      }
       // One driver instance serves many threads. Interrupt state belongs to
       // this turn so activity elsewhere cannot cancel or revive its retry.
       let stopRequested = false;
+      let promptSubmitted = false;
+      let recoveredMissingSession = false;
       // Wakes a retry backoff the moment Stop arrives, so the turn settles
       // now rather than after the full wait.
       const stopSignal = new AbortController();
@@ -543,7 +595,7 @@ export const CodexDriver: ProviderDriver<CodexConfig> = {
 
       const launchAttempt = async (attempt: number): Promise<void> => {
         const env = childEnv();
-        const appServerArgs = ["app-server", ...codexLocalProviderArgs(env, turn.model)];
+        const appServerArgs = ["app-server", ...(config.managed ? managedCodexArgs(config.managed) : codexLocalProviderArgs(env, turn.model))];
         if (turn.integrations?.composio) {
           mountMcpServer(appServerArgs, env, "openmausbot_connectors", turn.integrations.composio);
         }
@@ -589,9 +641,12 @@ export const CodexDriver: ProviderDriver<CodexConfig> = {
         lastError: "",
         lastText: "",
         sawStreamDelta: false,
-        // codex reports token usage as a running THREAD total; the harness
-        // wants this turn's figure, so the last report is banked on settle
+        // codex reports token usage as a running total for this app-server
+        // process. The harness wants this turn's figure: the total minus
+        // whatever the process already carried before turn/start (a resumed
+        // thread may restore earlier usage), banked on settle.
         usage: undefined as { input: number; output: number; cachedInput?: number } | undefined,
+        usageBaseline: undefined as { input: number; output: number; cachedInput: number } | undefined,
       };
 
       const asks = new Map<string, (behavior: "allow" | "deny" | "answer", message?: string, source?: "user" | "timeout" | "system") => void>();
@@ -625,6 +680,16 @@ export const CodexDriver: ProviderDriver<CodexConfig> = {
           rpcPending.set(id, {
             resolve: (v) => {
               clearTimeout(timer);
+              if (method === "thread/start" || method === "thread/resume") {
+                // Notifications can follow the thread response in the same
+                // stdout chunk, before the handshake await resumes.
+                const returnedId = v?.thread?.id;
+                const requestedId = method === "thread/resume"
+                  && params && typeof params === "object" && "threadId" in params
+                  ? params.threadId : null;
+                if (typeof returnedId === "string" && returnedId) codexThreadId = returnedId;
+                else if (typeof requestedId === "string" && requestedId) codexThreadId = requestedId;
+              }
               if (method === "turn/start") {
                 if (typeof v?.turn?.id !== "string" || !v.turn.id) {
                   reject(new Error("Codex did not return a native turn id"));
@@ -809,6 +874,17 @@ export const CodexDriver: ProviderDriver<CodexConfig> = {
           !("threadId" in p) && !("turnId" in p);
         if (!connectionError) {
           if (!codexThreadId || p.threadId !== codexThreadId) return;
+          if (!codexTurnId && msg.method === "thread/tokenUsage/updated" && p.tokenUsage?.total) {
+            // A total reported before this turn exists is what the process
+            // carried in — a resumed thread restoring earlier usage. It is the
+            // baseline this turn's figure is measured from, never a reading to
+            // buffer and replay as if this turn produced it. (Codex names the
+            // turn before any model call, so a genuine first reading cannot
+            // land here.)
+            const t = p.tokenUsage.total;
+            state.usageBaseline = { input: t.inputTokens ?? 0, output: t.outputTokens ?? 0, cachedInput: t.cachedInputTokens ?? 0 };
+            return;
+          }
           if (!codexTurnId) {
             // Some servers stream before acknowledging turn/start. Retain a
             // bounded prefix, then filter against the authoritative response.
@@ -909,32 +985,43 @@ export const CodexDriver: ProviderDriver<CodexConfig> = {
             break;
           }
           case "thread/tokenUsage/updated": {
-            // `last` is the most recent turn when the server sends it;
-            // `total` is the thread so far — a fresh app-server per turn
-            // makes that this turn's figure too
-            const turnUsage = p.tokenUsage?.last ?? p.tokenUsage?.total;
-            // codex's inputTokens already includes cachedInputTokens; the
-            // cached share is carried alongside so the UI can say how much
-            // of a turn was context re-read rather than new text
-            if (turnUsage) {
-              state.usage = {
-                input: turnUsage.inputTokens ?? 0,
-                output: turnUsage.outputTokens ?? 0,
-                ...(typeof turnUsage.cachedInputTokens === "number"
-                  ? { cachedInput: turnUsage.cachedInputTokens }
-                  : {}),
-              };
-            }
+            // `total` is everything this app-server process has used; `last`
+            // is the most recent model call. This turn's figure is the total
+            // minus what the process carried before turn/start went out (a
+            // resumed thread can restore earlier usage), so it never grows by
+            // the whole thread per message and never counts only the final
+            // call of a multi-step turn. codex's inputTokens already includes
+            // cachedInputTokens; the cached share rides alongside so the UI
+            // can say how much was context re-read rather than new text.
             const t = p.tokenUsage?.total;
+            const last = p.tokenUsage?.last;
+            const shape = (u: { inputTokens?: number; outputTokens?: number; cachedInputTokens?: number }) => ({
+              input: u.inputTokens ?? 0, output: u.outputTokens ?? 0, cachedInput: u.cachedInputTokens ?? 0,
+            });
+            // (A total that arrived before this turn was named became the
+            // baseline upstream and never reaches this switch.)
             if (t) {
+              const b = state.usageBaseline ?? { input: 0, output: 0, cachedInput: 0 };
+              const now = shape(t);
+              state.usage = {
+                input: Math.max(0, now.input - b.input),
+                output: Math.max(0, now.output - b.output),
+                ...(typeof t.cachedInputTokens === "number" ? { cachedInput: Math.max(0, now.cachedInput - b.cachedInput) } : {}),
+              };
+            } else if (last) {
+              state.usage = { input: last.inputTokens ?? 0, output: last.outputTokens ?? 0, ...(typeof last.cachedInputTokens === "number" ? { cachedInput: last.cachedInputTokens } : {}) };
+            }
+            if (t) {
+              const window = p.tokenUsage?.modelContextWindow;
               emit({
                 ...base(threadId, turnId),
                 type: "thread.token-usage.updated",
                 input: t.inputTokens ?? 0,
                 output: t.outputTokens ?? 0,
-                ...(typeof t.cachedInputTokens === "number"
-                  ? { cachedInput: t.cachedInputTokens }
-                  : {}),
+                ...(typeof t.cachedInputTokens === "number" ? { cachedInput: t.cachedInputTokens } : {}),
+                // the last call's prompt is what fills the window
+                ...(last && typeof last.inputTokens === "number" ? { contextTokens: last.inputTokens } : {}),
+                ...(typeof window === "number" && window > 0 ? { contextWindow: window } : {}),
               });
             }
             break;
@@ -991,7 +1078,7 @@ export const CodexDriver: ProviderDriver<CodexConfig> = {
             const pend = rpcPending.get(msg.id);
             if (pend) {
               rpcPending.delete(msg.id);
-              if (msg.error) pend.reject(new Error(msg.error.message ?? JSON.stringify(msg.error)));
+              if (msg.error) pend.reject(new CodexRpcError(msg.error));
               else pend.resolve(msg.result);
             }
           } else if (msg.id !== undefined && msg.method) {
@@ -1036,7 +1123,17 @@ export const CodexDriver: ProviderDriver<CodexConfig> = {
         // websocket 426 logged at turn start.
         const recentStderr = stderrSinceOutput.trim();
         const hadStreamedOutput = codexTurnId !== null || state.sawStreamDelta;
-        const verdict = classifyError({ exitCode: code, stderr: recentStderr || stderr });
+        // A signal exit is terminal no matter what the stderr says:
+        // something killed the process (OOM, kill -9), and classifyError
+        // cannot see the signal — with code null, transient-looking recent
+        // stderr could still mark a killed attempt retryable.
+        // Classification also reads only stderr received after the last
+        // protocol output; the lifetime buffer's tail can name a
+        // long-past event (the websocket-426 misattribution).
+        const verdict =
+          signal !== null
+            ? { transient: false, reason: "interrupted" }
+            : classifyError({ exitCode: code, stderr: recentStderr });
         // Safe re-dispatch: relaunch only when the app-server never
         // acknowledged turn/start — no native turn began, nothing was
         // streamed, so replaying the input cannot duplicate work. After
@@ -1136,33 +1233,44 @@ export const CodexDriver: ProviderDriver<CodexConfig> = {
         // Removed bot rules are cleared without dropping native configured rules.
         const cursor = typeof turn.resumeCursor === "string" ? turn.resumeCursor : null;
         let startedModel: string | null = null;
+        let resumedNativeThread = false;
+        let promptText = turn.text;
         if (cursor) {
+          const resumeThread = () => request("thread/resume", {
+            threadId: cursor,
+            developerInstructions,
+            ...approvalParams.thread,
+          });
           try {
-            const resumed = await request("thread/resume", {
-              threadId: cursor,
-              developerInstructions,
-              ...approvalParams.thread,
-            });
-            codexThreadId = resumed?.thread?.id ?? cursor;
-          } catch (error) {
-            if (approvalParams.fallback && permissionProfileUnsupported(error)) {
-              // A server can understand config/read before it understands the
-              // profile selector. Retry the same resume safely rather than
-              // losing the native thread or inheriting its previous mode.
+            let resumed;
+            try {
+              resumed = await resumeThread();
+            } catch (error) {
+              if (!approvalParams.fallback || !permissionProfileUnsupported(error)) throw error;
+              // Older servers may require the legacy permission selector, but
+              // still resume the same native thread before any user submission.
               approvalParams = approvalParams.fallback;
-              const resumed = await request("thread/resume", {
-                threadId: cursor,
-                developerInstructions,
-                ...approvalParams.thread,
-              });
-              codexThreadId = resumed?.thread?.id ?? cursor;
-            } else {
-              throw error;
+              resumed = await resumeThread();
             }
+            codexThreadId = resumed?.thread?.id ?? cursor;
+            resumedNativeThread = true;
+          } catch (error) {
+            const failure = classifyResumeFailure({
+              attempted: true,
+              rejected: error instanceof CodexRpcError,
+              promptSubmitted,
+              producedOutput: state.sawStreamDelta,
+            });
+            if (!config.managed || recoveredMissingSession || stopRequested || state.settled ||
+                !turn.recoveryText?.trim() || !missingNativeCodexThread(error, cursor) || !mayReplay(failure)) throw error;
+            // The prompt has never been submitted. Rebuild only missing Company
+            // histories, once, through the same approved model/provider below.
+            recoveredMissingSession = true;
+            promptText = recoveryPromptFor({ recoveryText: turn.recoveryText, currentText: turn.text, failure }).text;
           }
         }
         if (!codexThreadId) {
-          const selection = decodeCodexSelection(turn.model);
+          const selection = config.managed ? { model: turn.model, modelProvider: "openmaus_company" } : decodeCodexSelection(turn.model);
           const startThread = () => request("thread/start", {
               developerInstructions,
               cwd: turn.cwd ?? homedir(),
@@ -1183,14 +1291,14 @@ export const CodexDriver: ProviderDriver<CodexConfig> = {
           startedModel = started?.model ?? null;
         }
         if (!codexThreadId) throw new Error("Codex did not return a native thread id");
-        await syncCodexInstructions(threadId, codexThreadId, developerInstructions, Boolean(cursor), request);
+        await syncCodexInstructions(threadId, codexThreadId, developerInstructions, resumedNativeThread, request);
         emit({ ...base(threadId, turnId), type: "session.started", sessionId: codexThreadId, model: startedModel ?? turn.model ?? null });
-        const promptText = turn.text;
         const turnInput = [
           ...(promptText ? [{ type: "text" as const, text: promptText }] : []),
           ...(turn.images ?? []).map((image) => ({ type: "localImage" as const, path: image.path })),
         ];
         const startTurn = () => {
+          promptSubmitted = true;
           startingNativeTurn = true;
           return request("turn/start", {
             threadId: codexThreadId,
@@ -1220,7 +1328,10 @@ export const CodexDriver: ProviderDriver<CodexConfig> = {
         const message = e instanceof Error ? e.message : String(e);
         const needsAuth = /(?:\b401\b|unauthorized|missing bearer|authentication required)/i.test(message);
         const verdict = classifyError(failure);
-        if (!state.settled && !abandoned && !needsAuth && verdict.transient && attempt < RETRY_MAX_ATTEMPTS - 1 && state.sawStreamDelta === false) {
+        // Three guards hold here: main's abandoned attempt never retries,
+        // neither does a Company session already recovered once from canonical
+        // history, and a Stop already asked for must not be undone by a relaunch.
+        if (!state.settled && !abandoned && !recoveredMissingSession && !stopRequested && !needsAuth && verdict.transient && attempt < RETRY_MAX_ATTEMPTS - 1 && state.sawStreamDelta === false) {
           const delayMs = computeBackoff(attempt);
           attempt++;
           emit({
@@ -1271,6 +1382,7 @@ export const CodexDriver: ProviderDriver<CodexConfig> = {
       );
     });
     if (!version) return { state: "unavailable", reason: `\`${config.cli}\` CLI not found` };
+    if (config.managed) return { state: "available", version, authenticated: Boolean(input.environment.OPENMAUSBOT_COMPANY_API_KEY && input.environment.CODEX_HOME), billing: "metered" };
     const authenticated = await new Promise<boolean>((resolve) => {
       execCli(config.cli, ["login", "status"], { timeout: 8000, env }, (err, stdout, stderr) =>
         resolve(!err && /^logged in\b/im.test(`${stdout}\n${stderr ?? ""}`)),
