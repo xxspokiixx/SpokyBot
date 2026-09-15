@@ -15,16 +15,33 @@ extension BotTask {
     }
 }
 
+extension [BotTask] {
+    /// The soonest still-future timed snooze in a list, nil when nothing is
+    /// scheduled to wake: 0 sleeps until activity and never ticks, and a
+    /// timestamp already in the past has nothing left to wait for. Pure, so
+    /// a list can re-render on the clock rather than waiting for a snapshot.
+    public func nextSnoozeExpiry(now: Date = Date()) -> Double? {
+        let nowMs = now.timeIntervalSince1970 * 1_000
+        return compactMap { task -> Double? in
+            guard let until = task.snoozedUntil, until > 0, until > nowMs else { return nil }
+            return until
+        }.min()
+    }
+}
+
 extension Bot {
     /// Saved folder order and server thread order are preserved. Missing
     /// folders leave their threads accessible in the unfiled group.
     /// A folder-name search keeps all of that folder's visible threads.
     ///
-    /// Threads a bot closed are folded away by default, the way the desktop
-    /// sidebar folds them: a PM bot that opened ten helper threads and closed
-    /// them must not leave ten rows behind. They are never gone — a search
-    /// or `includingClosed` (the manage sheet) lists them, and a closed
-    /// thread that is running, unread, or open here stays in the list.
+    /// Threads a bot closed or the person snoozed are folded away by
+    /// default, the way the desktop sidebar folds them: a PM bot that opened
+    /// ten helper threads and closed them must not leave ten rows behind.
+    /// They are never gone — a search or `includingClosed` (the manage
+    /// sheet) lists them, and a folded thread that is running, unread, or
+    /// open here stays in the list. A snoozed thread folds the same way: the
+    /// sentinel sleeps until activity and a timestamp only while its clock
+    /// still runs.
     public func threadGroups(matching query: String = "", includingClosed: Bool = false) -> [BotThreadGroup] {
         let search = query.trimmingCharacters(in: .whitespacesAndNewlines)
         let threads: [BotTask]
@@ -39,7 +56,9 @@ extension Bot {
         } else if includingClosed || !search.isEmpty {
             threads = visibleTasks
         } else {
-            threads = visibleTasks.filter { !$0.isClosed || $0.demandsAttention || $0.threadId == threadId }
+            threads = visibleTasks.filter { task in
+                (!task.isClosed && !task.isSnoozed()) || task.demandsAttention || task.threadId == threadId
+            }
         }
 
         var projectIDs = Set<String>()

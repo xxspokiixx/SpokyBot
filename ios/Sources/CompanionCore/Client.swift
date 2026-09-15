@@ -1480,6 +1480,16 @@ public struct CompanionClient: Sendable {
         try await send(try makeRequest("PATCH", "/api/bots/\(botId)/tasks/\(threadId)", body: ["title": title]))
     }
 
+    /// Snooze a bot thread: 0 sleeps until its next activity, a timestamp
+    /// (epoch milliseconds) until that moment, and nil wakes it now — JSON
+    /// null is how "stop snoozing" travels, not an omitted field.
+    public func snoozeTask(botId: String, threadId: String, snoozedUntil: Double?) async throws {
+        try await send(try makeRequest(
+            "PATCH", "/api/bots/\(botId)/tasks/\(threadId)",
+            body: ["snoozedUntil": snoozedUntil ?? NSNull()]
+        ))
+    }
+
     public func deleteTask(botId: String, threadId: String) async throws -> Bot {
         try await send(try makeRequest("DELETE", "/api/bots/\(botId)/tasks/\(threadId)"), as: BotResponse.self).bot
     }

@@ -283,6 +283,12 @@ public struct BotTask: Codable, Hashable, Sendable {
     public var projectId: String?
     public var openedBy: ThreadOpener?
     public var closedBy: ThreadCloser?
+    /// Asleep until: 0 is the "until new activity" sentinel and sleeps until
+    /// the thread does anything again, a timestamp sleeps until that moment,
+    /// and nil means awake. Expired time snoozes heal server-side on read,
+    /// so snapshots are authoritative; the sentinel wakes server-side on the
+    /// first activity too.
+    public var snoozedUntil: Double?
     /// Bot-only internal execution. Keep it addressable, but out of thread pickers.
     public var routineRunId: String?
 
@@ -295,10 +301,21 @@ public struct BotTask: Codable, Hashable, Sendable {
     public var isClosed: Bool { closedBy != nil }
 
     /// The one line under a title: who closed it once a bot has, otherwise
-    /// who opened it, otherwise nothing. Closed wins because it is the newer
-    /// fact and the reason the row is dimmed.
+    /// a sleeping thread says so, otherwise who opened it, otherwise nothing.
+    /// Closed wins because it is the newer fact and the reason the row is
+    /// dimmed; snoozed wins over the opener for the same reason, worded as
+    /// the desktop words it.
     public var bylineLabel: String? {
-        closedBy.map { "closed by \($0.name)" } ?? openedByLabel
+        closedBy.map { "closed by \($0.name)" } ?? (isSnoozed() ? "Snoozed" : nil) ?? openedByLabel
+    }
+
+    /// Snoozed means asleep right now: 0 is the "until new activity"
+    /// sentinel and sleeps until woken, while a timestamp sleeps only until
+    /// it passes. The server drops expired snoozes from snapshots, but a
+    /// live event never refreshes one, so the clock is checked too.
+    public func isSnoozed(now: Date = Date()) -> Bool {
+        guard let until = snoozedUntil else { return false }
+        return until == 0 || until > now.timeIntervalSince1970 * 1_000
     }
 
     /// Whether the row must stay in the list regardless of closed state:
@@ -309,6 +326,26 @@ public struct BotTask: Codable, Hashable, Sendable {
         case "waiting-on-you", "waiting", "working", "running", "queued": return true
         default: return false
         }
+    }
+}
+
+/// The snooze presets the desktop offers, computed in the person's local
+/// time on purpose: it is their evening and their morning; the server
+/// stores the absolute moment either way.
+public enum ThreadSnoozePreset {
+    /// The next local 6 PM — "later today", rolling to tomorrow evening
+    /// once tonight's is already past.
+    public static func tonight(now: Date = Date(), calendar: Calendar = .current) -> Double {
+        var when = calendar.date(bySettingHour: 18, minute: 0, second: 0, of: now) ?? now
+        if when <= now { when = calendar.date(byAdding: .day, value: 1, to: when) ?? when }
+        return when.timeIntervalSince1970 * 1_000
+    }
+
+    /// Tomorrow morning at 9 local: a clean overnight break.
+    public static func tomorrowMorning(now: Date = Date(), calendar: Calendar = .current) -> Double {
+        let tomorrow = calendar.date(byAdding: .day, value: 1, to: now) ?? now
+        let when = calendar.date(bySettingHour: 9, minute: 0, second: 0, of: tomorrow) ?? tomorrow
+        return when.timeIntervalSince1970 * 1_000
     }
 }
 
