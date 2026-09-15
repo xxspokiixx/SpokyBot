@@ -894,6 +894,9 @@ describe("ClaudeDriver turns (fake CLI)", () => {
 
   it("refreshes a coordinated resumed session's prompt when the CLI supports it", async () => {
     await create(undefined, { FAKE_CLAUDE_DUMP: join(scratch, "coordination-snapshot.json"), FAKE_CLAUDE_VERSION: "2.1.267" });
+    // Read the version first, so the floor is what admits the flag here —
+    // without this the driver sees a null version and would push it for any CLI.
+    await instance.snapshot();
     await instance.adapter.sendTurn({
       threadId: "t-coordinated-resume",
       text: "Addressed teammate request 2. Add the new header row.",
