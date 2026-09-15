@@ -105,6 +105,7 @@ let child: ChildProcess;
 let boxStub: Server;
 let boxStubPort = 0;
 const boxRouteCalls: Array<{ method: string; path: string }> = [];
+const boxPromptBodies: Array<Record<string, unknown>> = [];
 let boxSlowRequestCount = 0;
 let managedBoxRows: Array<Record<string, unknown>> = [];
 let managedBoxListRowsOverride: Array<Record<string, unknown>> | null = null;
@@ -724,6 +725,12 @@ beforeAll(async () => {
       }
       res.setHeader("content-type", "application/json");
       res.statusCode = 200;
+      if (method === "POST" && /^\/boxes\/[^/]+\/prompt$/.test(path)) {
+        let raw = "";
+        for await (const chunk of req) raw += chunk;
+        boxPromptBodies.push(JSON.parse(raw));
+        return res.end(JSON.stringify({ ok: true }));
+      }
       if (method === "POST" && path === "/boxes") {
         let raw = "";
         for await (const chunk of req) raw += chunk;
@@ -5534,6 +5541,69 @@ describe("harness HTTP API", () => {
     expect(cleared.status).toBe(200);
     expect(cleared.body.task.surface).toBeUndefined();
   });
+
+  it("dispatches the conversation's pinned computer, never advertises a phantom Auto Box, and previews that same surface", async () => {
+    const bot = (await api("POST", "/api/bots", {
+      name: "Surface routing fixture", modelSelection: { instanceId: "claude", model: "claude-sonnet-5" },
+    })).body.bot;
+    const idle = () => expect.poll(async () =>
+      (await api("GET", "/api/bots?messages=0")).body.bots.find((b: { id: string }) => b.id === bot.id)?.busy,
+    { timeout: 10_000 }).toBe(false);
+    try {
+      expect((await api("PUT", "/api/config", { box: { token: "box_route" } })).status).toBe(200);
+      await api("PATCH", `/api/bots/${bot.id}`, { browser: false, computer: null, cloudBackend: "box" });
+      managedBoxRows = [{ id: "bx_3456789a", name: managedBoxNameForFixture(bot.id), state: "idle" }];
+      boxRouteCalls.length = 0;
+      boxPromptBodies.length = 0;
+      rmSync(fakeClaudeDump, { force: true });
+      expect((await api("POST", `/api/bots/${bot.id}/messages`, { text: "Describe your available computer tools" })).status).toBe(202);
+      const local = await readJsonFileWhenReady<{ mcpConfig: { mcpServers: Record<string, unknown> }; systemPrompt: string }>(fakeClaudeDump);
+      expect(local.mcpConfig.mcpServers.computer).toBeUndefined();
+      expect(boxPromptBodies).toHaveLength(0);
+      expect(boxRouteCalls.some(call => call.method === "POST" && call.path === "/boxes")).toBe(false);
+      await api("POST", `/api/bots/${bot.id}/interrupt`, {}); await idle();
+
+      // A Local VM pin must win even when the bot default says Cloud. The
+      // fixture has no ready Local VM: fail there, never click the host/Box.
+      await api("PATCH", `/api/bots/${bot.id}`, { computer: "cloud" });
+      await api("PATCH", `/api/bots/${bot.id}/tasks/${bot.threadId}`, { surface: "vm" });
+      rmSync(fakeClaudeDump, { force: true });
+      expect((await api("POST", `/api/bots/${bot.id}/messages`, { text: "Open Chrome on the Local VM" })).status).toBe(202);
+      await idle();
+      expect(existsSync(fakeClaudeDump)).toBe(false);
+      expect(boxPromptBodies).toHaveLength(0);
+      const saved = (await api("GET", "/api/bots?messages=0")).body.bots.find((b: { id: string }) => b.id === bot.id);
+      expect(saved.tasks.find((task: { threadId: string }) => task.threadId === bot.threadId).surface).toBe("vm");
+      expect((await api("GET", `/api/bots/${bot.id}/computer?threadId=${bot.threadId}`)).body.surface).toBe("vm");
+      expect((await api("POST", `/api/bots/${bot.id}/computer/join?threadId=${bot.threadId}`, {})).status).toBe(409);
+
+      // The inverse pin dispatches the Box runner with its own model, not
+      // the local provider's model alias/effort. Preview opens the same Box.
+      await api("PATCH", `/api/bots/${bot.id}`, { computer: "vm" });
+      await api("PATCH", `/api/bots/${bot.id}/tasks/${bot.threadId}`, { surface: "cloud" });
+      expect((await api("POST", `/api/bots/${bot.id}/messages`, { text: "Open Chrome on the cloud VM" })).status).toBe(202);
+      await expect.poll(() => boxPromptBodies.length, { timeout: 10_000 }).toBe(1);
+      expect(boxPromptBodies[0]).toMatchObject({ model: "claude-fable-5", provider: "claude-code" });
+      expect(boxPromptBodies[0]!.prompt).toContain("assigned cloud computer");
+      expect(existsSync(fakeClaudeDump)).toBe(false);
+      expect((await api("GET", `/api/bots/${bot.id}/computer?threadId=${bot.threadId}`)).body.surface).toBe("cloud");
+      const joined = await api("POST", `/api/bots/${bot.id}/computer/join?threadId=${bot.threadId}`, {});
+      expect(joined).toMatchObject({ status: 200, body: { joinUrl: "https://desktop.invalid/bx_3456789a" } });
+      await api("POST", `/api/bots/${bot.id}/interrupt`, {}); await idle();
+      const before = boxRouteCalls.length;
+      expect((await api("POST", `/api/bots/${bot.id}/computer/provision?threadId=${bot.threadId}`, {})).status).toBe(409);
+      expect((await api("GET", `/api/bots/${bot.id}/computer?threadId=not-owned`)).status).toBe(404);
+      expect(boxRouteCalls).toHaveLength(before);
+    } finally {
+      await api("POST", `/api/bots/${bot.id}/interrupt`, {}).catch(() => {});
+      await idle();
+      managedBoxRows = [];
+      await api("DELETE", `/api/bots/${bot.id}`).catch(() => {});
+      await api("PUT", "/api/config", { box: { token: "" } }).catch(() => {});
+      rmSync(fakeClaudeDump, { force: true });
+      boxPromptBodies.length = 0;
+    }
+  }, 45_000);
 
   it("excludes new Box turns, lifecycle actions, and bot deletion while a token change validates", async () => {
     let botId = "";

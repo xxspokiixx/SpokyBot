@@ -251,10 +251,9 @@ export interface SendTurnInput {
      * bridge harness-controlled lets it turn connection requests into trusted
      * chat cards consistently across provider CLIs. */
     composio?: { command: string; args: string[]; env: Record<string, string> };
-    /** Cloud computer, reached through OpenMausBot's REST-to-MCP adapter.
-     * `control` is the harness's loopback who-is-driving endpoint: the
-     * adapter consults it so a person who takes the wheel in the panel
-     * pauses the bot's hands mid-turn instead of typing over them. */
+    /** Box's native agent runner input. Only the Box driver consumes this;
+     * CLI engines cannot use it as an MCP server. Other computers use the
+     * stdio descriptor below. */
     computer?: {
       kind?: "box";
       boxId: string;
@@ -306,7 +305,7 @@ export interface ProviderAdapter {
      * the harness only offers agents tooling (and prompts about it) to
      * drivers that can actually hand it to the agent. */
     agentsMcp?: boolean;
-    /** True when the driver mounts turn.integrations.computer (the box's
+    /** True when the driver mounts isolated computer MCP descriptors (the
      * screenshot/click tools). Same rule as agentsMcp: a bot must never be
      * told it has a computer whose tools its driver cannot mount — it
      * burns turns hunting for tools that aren't there. */

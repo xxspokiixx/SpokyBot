@@ -928,6 +928,25 @@ describe("ClaudeDriver turns (fake CLI)", () => {
     expect(seen.prompt.message.content).toContain("Add the new header row.");
   });
 
+  it("replaces the previous computer prompt when a normal conversation changes its place", async () => {
+    const dump = join(scratch, "surface-snapshot.json");
+    await create(undefined, { FAKE_CLAUDE_DUMP: dump, FAKE_CLAUDE_VERSION: "2.1.267" });
+    await instance.adapter.sendTurn({
+      threadId: "t-surface-resume", text: "Open the test page.",
+      resumeCursor: "previous-host-computer-session",
+      system: "Everything you do on screen happens in the built-in browser tab; no host computer tools are mounted.",
+      refreshSystemPrompt: true,
+      integrations: { browser: { command: process.execPath, args: ["fixture-browser"], env: {} } },
+    });
+    await recorder.until((event) => event.type === "turn.completed");
+    const seen = JSON.parse(readFileSync(dump, "utf8"));
+    expect(seen.argv[seen.argv.indexOf("--system-prompt-snapshot") + 1]).toBe("off");
+    expect(seen.argv[seen.argv.indexOf("--resume") + 1]).toBe("previous-host-computer-session");
+    expect(seen.systemPrompt).toContain("no host computer tools are mounted");
+    expect(seen.mcpConfig.mcpServers.browser).toBeTruthy();
+    expect(seen.mcpConfig.mcpServers.computer).toBeUndefined();
+  });
+
   it.each([["2.1.232", false], ["2.1.267", true]] as const)(
     "probes Claude %s before the first coordinated turn without an Engines snapshot",
     async (version, supportsSnapshot) => {

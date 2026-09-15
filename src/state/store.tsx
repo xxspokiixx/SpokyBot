@@ -717,7 +717,7 @@ export interface AppState {
   /** True only when the open action named a section — accordion expands that row. */
   botSettingsExpandAccordion: boolean;
   /** latest live frame of a bot's computer, per botId */
-  screens: Record<string, { png: string; mime: string }>;
+  screens: Record<string, { png: string; mime: string; threadId?: string }>;
   /** bots whose cloud computer is being provisioned */
   provisioning: Record<string, boolean>;
   /** Bot removals waiting for the server to verify that no persistent
@@ -942,7 +942,7 @@ export type Action =
   | { type: "messageAdded"; threadId: string; message: Message }
   | { type: "messagePatched"; threadId: string; message: Message }
   | { type: "optimisticMessageRemoved"; threadId: string; sendId: string }
-  | { type: "screenFrame"; botId: string; png: string; mime: string }
+  | { type: "screenFrame"; botId: string; threadId?: string; png: string; mime: string }
   | { type: "provisioning"; botId: string; on: boolean }
   | { type: "computerControl"; botId: string; held: boolean; helpReason: string | null }
   | { type: "setModel"; botId: string; selection: ModelSelection; threadId?: string; updateBotDefault?: boolean; resetApprovalToAsk?: boolean }
@@ -1382,7 +1382,7 @@ export function reducer(state: AppState, action: Action): AppState {
         // The slim deletion broadcast can arrive before the full snapshot.
         // Finish that switch once, replaying any events received in between.
         // Later duplicate HTTP snapshots must not overwrite newer messages.
-        return reducer(switching, { type: "taskSwitched", bot: { ...before, ...action.bot, section: action.bot.section, messages: action.bot.messages, browserProfile: action.bot.browserProfile } });
+        return reducer(switching, { type: "taskSwitched", bot: { ...before, ...action.bot, computer: action.bot.computer, section: action.bot.section, messages: action.bot.messages, browserProfile: action.bot.browserProfile } });
       }
       const patched = updateBot(switching, action.bot.id, (b) => ({
         ...b,
@@ -1394,6 +1394,9 @@ export function reducer(state: AppState, action: Action): AppState {
         // to Own browser (or deleting a shared profile). Do not retain the
         // previous profile's name and selection in another window.
         browserProfile: action.bot.browserProfile,
+        // Resetting Works on to Auto removes the field from the complete
+        // server frame; merging alone would keep the old target highlighted.
+        computer: action.bot.computer,
         // A complete frame omits section after another client moves the bot
         // into General. Retaining the old label strands an empty team in UI.
         section: action.bot.section,
@@ -1544,7 +1547,7 @@ export function reducer(state: AppState, action: Action): AppState {
     case "screenFrame":
       return {
         ...withMascotMotion(state, action.botId, "success"),
-        screens: { ...state.screens, [action.botId]: { png: action.png, mime: action.mime } },
+        screens: { ...state.screens, [action.botId]: { png: action.png, mime: action.mime, threadId: action.threadId } },
         provisioning: { ...state.provisioning, [action.botId]: false },
       };
     case "provisioning":
@@ -1863,6 +1866,7 @@ export function reducer(state: AppState, action: Action): AppState {
       let switched = updateBot(state, action.bot.id, (bot) => ({
         ...bot,
         ...action.bot,
+        computer: action.bot.computer,
         messages: action.bot.messages ?? [],
         awaitingThreadSnapshot: false,
       }));
@@ -3269,7 +3273,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
           break;
         }
         case "screen":
-          rawDispatch({ type: "screenFrame", botId: frame.botId, png: frame.png, mime: frame.mime ?? "image/png" });
+          rawDispatch({ type: "screenFrame", botId: frame.botId, threadId: frame.threadId, png: frame.png, mime: frame.mime ?? "image/png" });
           break;
         case "computer":
           rawDispatch({ type: "provisioning", botId: frame.botId, on: frame.state === "provisioning" });

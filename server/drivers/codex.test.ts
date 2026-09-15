@@ -695,6 +695,42 @@ describe("CodexDriver turns (fake app-server)", () => {
     expect(instance.adapter.capabilities.agentsMcp).toBe(true);
   });
 
+  it.each(["ask", "auto"] as const)("pre-allows the built-in browser while preserving the native %s reviewer", async (approvalMode) => {
+    await create();
+    const dump = join(scratch, "browser.json");
+    process.env.FAKE_CODEX_DUMP = dump;
+
+    await instance.adapter.sendTurn({
+      threadId: "t-browser",
+      text: "open the built-in browser",
+      approvalMode,
+      integrations: {
+        browser: {
+          command: process.execPath,
+          args: ["/tmp/browser-proxy.js"],
+          env: {
+            OMB_HARNESS_URL: "http://127.0.0.1:8799",
+            OMB_BROWSER_TOKEN: "browser-capability-secret",
+          },
+        },
+      },
+    });
+    await recorder.until((event) => event.type === "turn.completed");
+
+    const seen = JSON.parse(readFileSync(dump, "utf8"));
+    expect(seen.argv.join(" ")).toContain("mcp_servers.browser.command");
+    expect(seen.argv).toContain('mcp_servers.browser.default_tools_approval_mode="auto"');
+    expect(seen.argv.join(" ")).toContain("/tmp/browser-proxy.js");
+    expect(seen.argv.join(" ")).not.toContain("browser-capability-secret");
+    expect(seen.env.OMB_BROWSER_TOKEN).toBe("browser-capability-secret");
+    for (const method of ["thread/start", "turn/start"]) {
+      expect(seen.calls.find((call: { method: string }) => call.method === method)?.params).toMatchObject({
+        approvalPolicy: "on-request",
+        approvalsReviewer: approvalMode === "auto" ? "auto_review" : "user",
+      });
+    }
+  });
+
   it("mounts the Local VM computer MCP server without placing credentials in argv", async () => {
     await create();
     const dump = join(scratch, "local-computer.json");

@@ -24,6 +24,15 @@ import {
 import { openLiveEvents, type LiveEventSourceLike, type LiveEventsPlatform } from "../lib/live-events";
 import type { RoutineRun } from "../lib/routines";
 
+describe("screen frame ownership", () => {
+  it("retains the source thread so a sibling's frame cannot masquerade as the selected screen", () => {
+    const first = reducer(initialState, { type: "screenFrame", botId: "bot", threadId: "vm-thread", png: "vm", mime: "image/png" });
+    const second = reducer(first, { type: "screenFrame", botId: "bot", threadId: "browser-thread", png: "browser", mime: "image/jpeg" });
+    expect(first.screens.bot).toMatchObject({ threadId: "vm-thread", png: "vm" });
+    expect(second.screens.bot).toMatchObject({ threadId: "browser-thread", png: "browser" });
+  });
+});
+
 describe("composer thread approval persistence", () => {
   it.each(["ask", "edits", "auto", "full", "custom"] as const)("saves %s through the scoped bridge and returns its committed state", async mode => {
     const bot = { id: "bot", approvalMode: "ask", tasks: [{ threadId: "thread", approvalMode: mode }] } as BotAnnouncement;
@@ -1226,6 +1235,24 @@ describe("canonical message races", () => {
     expect(next).toBe(state);
     expect(next.bots[0]?.activeLeafId).toBe(reply.id);
     expect(next.bots[0]?.messages).toEqual([sent, reply]);
+  });
+});
+
+describe("computer destination announcements", () => {
+  it.each(["botPatched", "taskSwitched", "botPatchedSwitch"] as const)("clears the old target on Auto via %s", (kind) => {
+    const bot: Bot = {
+      id: "computer-bot", threadId: "computer-thread", name: "Ziggy", title: "", description: "",
+      notifications: true, color: "green", unread: false,
+      modelSelection: { instanceId: "codex", model: "default" }, computer: "browser",
+      messages: [{ id: "message", role: "user", kind: "text", at: 1, text: "Keep this conversation" }],
+    };
+    const { computer: _oldComputer, ...announcement } = bot;
+    const next = reducer({ ...initialState, bots: [bot] }, {
+      type: kind === "taskSwitched" ? "taskSwitched" : "botPatched",
+      bot: { ...announcement, threadId: kind === "botPatchedSwitch" ? "replacement-thread" : bot.threadId },
+    });
+    expect(next.bots[0]?.computer).toBeUndefined();
+    expect(next.bots[0]?.messages).toEqual(bot.messages);
   });
 });
 

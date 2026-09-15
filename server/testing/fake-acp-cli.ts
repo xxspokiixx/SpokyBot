@@ -397,9 +397,9 @@ function handle(msg: any) {
       }
       if (mode === "safe-agent-reads") {
         agentsMcp = (msg.params?.mcpServers ?? []).find((server: any) => server.name === "agents") ?? null;
-        if (process.env.FAKE_ACP_DUMP) {
-          writeFileSync(`${process.env.FAKE_ACP_DUMP}.mcp.json`, JSON.stringify(msg.params?.mcpServers ?? []));
-        }
+      }
+      if (process.env.FAKE_ACP_DUMP) {
+        writeFileSync(`${process.env.FAKE_ACP_DUMP}.mcp.json`, JSON.stringify(msg.params?.mcpServers ?? []));
       }
       const opts = configOptions();
       const mdls = sessionModels();

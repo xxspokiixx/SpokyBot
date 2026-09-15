@@ -480,6 +480,15 @@ const TOOLS = [
     },
   },
   {
+    name: "select_computer",
+    description:
+      "Choose where this conversation does computer work. Call with no arguments to inspect actual available choices and the current place. For a task needing computer interaction, select the requested place, or auto to choose a suitable configured computer without asking the user to use menus. OpenMausBot reuses an existing computer first; with a configured provider it can start or provision one when needed. Do not provision for ordinary chat or just to inspect availability. A pending result means end this turn immediately: OpenMausBot updates the conversation selector and resumes the original request with that computer's real tools. Do not use the old tools after requesting a switch, repeat the task, or claim the action is done. This cannot change permissions, override Off, or switch a teammate/routine/channel.",
+    inputSchema: { type: "object", additionalProperties: false, properties: {
+      surface: { type: "string", enum: ["auto", "cloud", "vm", "local", "browser"],
+        description: "auto = suitable configured computer, cloud = remote Box/VPS, vm = isolated Local VM, local = user's own desktop, browser = built-in browser. Omit to list." },
+    } },
+  },
+  {
     name: "list_threads",
     description:
       "See your own threads and the threads you opened on teammates, newest first: each with its bot, title, state (running, waiting on the person, queued, idle, or closed), whether the person has unread there, and the delegation id if it was a handoff. Use it to check how the threads you started are going before reporting to the person; write a thread's title as #Title when you mention it. A teammate's other threads are never listed — only the ones you opened. This is a read: it starts nothing and changes nothing.",
@@ -1184,6 +1193,15 @@ async function callTool(name: string, args: Json): Promise<{ text: string; isErr
       };
     }
     return { text: `Task ${taskId} ended without a reply — ${String(r.status ?? "unknown")}${r.result ? `: ${String(r.result)}` : ""}.`, isError: true };
+  }
+  if (name === "select_computer") {
+    if (args.surface !== undefined && (typeof args.surface !== "string" || !["auto", "cloud", "vm", "local", "browser"].includes(args.surface))) {
+      return { text: "Choose auto, cloud, vm, local or browser; omit surface to inspect connected choices.", isError: true };
+    }
+    const result = await api("/api/internal/computer/select", args.surface === undefined ? undefined : {
+      method: "POST", body: JSON.stringify({ surface: args.surface }),
+    });
+    return { text: JSON.stringify(result) };
   }
   if (name === "list_threads") {
     const query = new URLSearchParams({ fromBotId: BOT_ID, fromThreadId: THREAD_ID });
