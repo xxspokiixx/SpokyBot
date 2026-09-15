@@ -610,6 +610,11 @@ export interface InstanceInfo {
     };
     /** a reported cost on a subscription is notional; the UI says so */
     billing?: "metered" | "subscription";
+    /** a standing condition worth a look, with nothing to run */
+    warning?: {
+      title: string;
+      message: string;
+    };
   };
   models: { default: string; options: Array<{ id: string; label: string; custom?: boolean; loaded?: boolean; provider?: string }> };
   capabilities?: {

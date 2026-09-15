@@ -396,6 +396,13 @@ export interface ProviderSnapshot {
   /** How this instance is paid for, when the driver can tell: a reported
    * cost on a subscription is notional and the UI labels it as such. */
   billing?: "metered" | "subscription";
+  /** A standing condition worth a look but with nothing to run: the engine
+   * works, and something about how it is set up is costing the person
+   * without their asking. Shown beside the update notice on Engines. */
+  warning?: {
+    title: string;
+    message: string;
+  };
 }
 
 // ── engine install descriptor ───────────────────────────────────────────
