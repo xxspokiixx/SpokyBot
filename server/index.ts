@@ -11841,7 +11841,7 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
       if (threadId === undefined &&
         (auth.kind === "session" || req.headers["x-openmausbot-companion"] === "1") &&
         store.tasks(botId).length > 1) {
-        throw Object.assign(new Error("This bot has multiple threads. Update this client and choose a thread before sending this action."), { status: 409 });
+        throw Object.assign(new Error("This bot has more than one thread. Update the OpenMausBot app on this device, then choose a thread and try again."), { status: 409 });
       }
     };
     if (method === "GET" && path === "/api/bots") {
