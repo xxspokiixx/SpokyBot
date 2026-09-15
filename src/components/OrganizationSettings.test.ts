@@ -68,24 +68,33 @@ async function ready(state: ManagedDesktopState = { status: "signed-out" }) {
 }
 
 describe("optional desktop Organisation settings", () => {
-  it("loads state without enrolling, then begins only on explicit submit using the private bridge", async () => {
+  it("uses the default portal from one sign-in action and keeps custom setup advanced", async () => {
     await ready();
     let view = render();
     expect(view.html).toContain("https://admin.openmausbot.com");
     expect(view.html).toContain("Sign in with your organisation");
+    expect(view.html).toContain("<summary");
+    expect(view.html).toContain("Advanced");
+    expect(view.html).not.toMatch(/<details[^>]*\bopen/);
     expect(view.html).toContain("personal and local models");
     expect(view.html).toContain("does not upload your chat history");
     expect(bridge.begin).not.toHaveBeenCalled();
+    const signIn = () => view.nodes.find(node => node.type === "button" && node.props.children === "Sign in with your organisation")!.props.onClick!();
+    signIn(); signIn(); await flush();
+    expect(bridge.begin).toHaveBeenCalledExactlyOnceWith({ portalOrigin: "https://admin.openmausbot.com" });
+    expect(fetch).not.toHaveBeenCalled();
+    const progress = render().html;
+    expect(progress).toContain("Finish signing in through your browser");
+    expect(progress).toContain("connect automatically");
+    expect(progress).toMatch(/<details[^>]*><summary[^>]*>Security details<\/summary>[\s\S]*ABCDE-FGHIJ[\s\S]*<\/details>/);
+    expect(progress).not.toContain("admin.example.test/enroll");
+    expect(progress).not.toMatch(/<details[^>]*\bopen/);
+    button("Cancel sign-in").props.onClick!(); await flush();
+    expect(bridge.cancelEnrollment).toHaveBeenCalledOnce(); view = render();
     view.nodes.find(node => node.type === "input")!.props.onChange!({ target: { value: " https://admin.example.test " } });
     view = render();
-    const submit = () => view.nodes.find(node => node.type === "form")!.props.onSubmit!({ preventDefault: vi.fn() });
-    submit(); submit(); await flush();
-    expect(bridge.begin).toHaveBeenCalledExactlyOnceWith({ portalOrigin: "https://admin.example.test" });
-    expect(fetch).not.toHaveBeenCalled();
-    expect(render().html).toContain("ABCDE-FGHIJ");
-    button("Cancel sign-in").props.onClick!(); await flush();
-    expect(bridge.cancelEnrollment).toHaveBeenCalledOnce();
-    expect(render().html).toContain("Sign in with your organisation");
+    view.nodes.find(node => node.type === "form")!.props.onSubmit!({ preventDefault: vi.fn() }); await flush();
+    expect(bridge.begin).toHaveBeenNthCalledWith(2, { portalOrigin: "https://admin.example.test" });
   });
 
   it("shows company model counts, refreshes, and requires a separate disconnect confirmation", async () => {
@@ -134,7 +143,7 @@ describe("optional desktop Organisation settings", () => {
     const cleanup = await ready();
     let resolveBegin!: (state: ManagedDesktopState) => void;
     vi.mocked(bridge.begin).mockImplementation(() => new Promise(resolve => { resolveBegin = resolve; }));
-    render().nodes.find(node => node.type === "form")!.props.onSubmit!({ preventDefault: vi.fn() });
+    button("Sign in with your organisation").props.onClick!();
     if (typeof cleanup === "function") cleanup();
     push(connected); resolveBegin(connecting); await flush();
     expect(unsubscribe).toHaveBeenCalledOnce();

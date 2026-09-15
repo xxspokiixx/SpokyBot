@@ -15,10 +15,12 @@ Linux needs a graphical session (or `xvfb-run -a`).
 
 The smoke checks:
 
-- Loading Settings does not enroll or open a browser. Only **Sign in with your
-  organisation** begins the flow.
-- The production client requests a verification code, displays it through the
-  production preload, and returns to the form when cancelled.
+- Loading Settings does not enroll or open a browser. **Sign in with your
+  organisation** uses the standard OpenMaus Admin; a separate custom Admin
+  address remains available under **Advanced**.
+- The production client opens the browser and connects automatically after
+  approval. The optional verification code stays collapsed under **Security
+  details**, and cancelling returns to the signed-out view.
 - Synthetic browser approval yields the company name, employee email and
   approved model counts. No device token or private connection method reaches
   renderer JavaScript.
