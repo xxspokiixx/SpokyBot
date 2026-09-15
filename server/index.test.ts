@@ -23,6 +23,7 @@ import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { z } from "zod";
 
 import { removeTempDir, waitForExit } from "./testing/cleanup.ts";
+import { startFakeHttpMcp } from "./testing/fake-http-mcp-server.ts";
 import { freePortBlock } from "./testing/ports.ts";
 import { openSse } from "./testing/sse.ts";
 import { FILE_MAX_BYTES, IMAGE_MAX_BYTES } from "./attachments.ts";
@@ -5719,6 +5720,49 @@ describe("harness HTTP API", () => {
     expect(removed).toEqual({ status: 200, body: { servers: [] } });
     const after = await api("GET", "/api/mcp/servers");
     expect(after).toEqual({ status: 200, body: { servers: [] } });
+  });
+
+  it("manages and probes a url MCP server, and the Claude Code servers switch", async () => {
+    const secret = "Bearer mcp-header-that-must-never-render";
+    const fake = await startFakeHttpMcp({ requireHeader: { name: "Authorization", value: secret } });
+    try {
+      const created = await api("POST", "/api/mcp/servers", { name: "docs", url: fake.url, headers: { Authorization: secret } });
+      expect(created.status).toBe(201);
+      expect(created.body.servers).toEqual([{ name: "docs", type: "http", url: fake.url, headerKeys: ["Authorization"], enabled: false }]);
+      expect(JSON.stringify(created.body)).not.toContain(secret);
+
+      const tested = await api("POST", "/api/mcp/servers/docs/test");
+      expect(tested).toEqual({
+        status: 200,
+        body: { ok: true, tools: [{ name: "read_notes", description: "Read saved notes" }] },
+      });
+
+      const updated = await api("PUT", "/api/mcp/servers/docs", {
+        type: "sse",
+        url: fake.url,
+        headers: { Authorization: true, "X-Org": "acme" },
+        enabled: true,
+      });
+      expect(updated.status).toBe(200);
+      expect(updated.body.servers[0]).toMatchObject({ type: "sse", headerKeys: ["Authorization", "X-Org"], enabled: true });
+      expect(JSON.stringify(updated.body)).not.toContain(secret);
+      const disk = JSON.parse(readFileSync(join(home, ".openmausbot", "config.json"), "utf8"));
+      expect(disk.mcpServers.docs).toEqual({ type: "sse", url: fake.url, headers: { Authorization: secret, "X-Org": "acme" }, enabled: true });
+
+      const bad = await api("POST", "/api/mcp/servers", { name: "nowhere", url: "docs.example/mcp" });
+      expect(bad.status).toBe(400);
+      expect(bad.body.error).toMatch(/full address/);
+
+      // the switch that lets Claude bots also see this machine's own servers
+      const on = await api("PUT", "/api/config", { features: { claudeUserMcp: true } });
+      expect(on.status).toBe(200);
+      expect(on.body.features.claudeUserMcp).toBe(true);
+      const off = await api("PUT", "/api/config", { features: { claudeUserMcp: false } });
+      expect(off.body.features.claudeUserMcp).toBe(false);
+    } finally {
+      await fake.close();
+      await api("DELETE", "/api/mcp/servers/docs").catch(() => undefined);
+    }
   });
 
   it("round-trips the UI language and clears it back to system", async () => {

@@ -637,6 +637,39 @@ describe("CodexDriver turns (fake app-server)", () => {
     expect(argv).not.toContain('mcp_servers.notes.default_tools_approval_mode');
   });
 
+  it("mounts a url server for codex to connect to, header values off argv", async () => {
+    await create();
+    const dump = join(scratch, "remote-mcp.json");
+    process.env.FAKE_CODEX_DUMP = dump;
+
+    await instance.adapter.sendTurn({
+      threadId: "t-remote-mcp",
+      text: "go",
+      integrations: {
+        custom: {
+          docs: { type: "http", url: "https://docs.example/mcp", headers: { Authorization: "Bearer tok-docs", "X-Org": "acme" } },
+          // codex has no SSE transport; the entry stays with Claude bots
+          legacy: { type: "sse", url: "https://old.example/sse", headers: {} },
+        },
+      },
+    });
+    await recorder.until((event) => event.type === "turn.completed");
+    const seen = JSON.parse(readFileSync(dump, "utf8"));
+    const argv = seen.argv.join(" ");
+    expect(seen.argv).toContain('mcp_servers.docs.url="https://docs.example/mcp"');
+    // header values are credentials: the child env holds them under
+    // harness names, argv names only the variables — the bearer token via
+    // codex's own bearer setting, other headers via env_http_headers
+    expect(seen.argv).toContain('mcp_servers.docs.bearer_token_env_var="OMB_MCP_HEADER_DOCS_BEARER"');
+    expect(seen.argv).toContain('mcp_servers.docs.env_http_headers={ "X-Org" = "OMB_MCP_HEADER_DOCS_1" }');
+    expect(argv).not.toContain("tok-docs");
+    expect(seen.env.OMB_MCP_HEADER_DOCS_BEARER).toBe("tok-docs");
+    expect(seen.env.OMB_MCP_HEADER_DOCS_1).toBe("acme");
+    // a user server keeps codex's on-request approval policy
+    expect(argv).not.toContain("mcp_servers.docs.default_tools_approval_mode");
+    expect(argv).not.toContain("mcp_servers.legacy");
+  });
+
   it("does not let a custom MCP server capture a built-in capability variable", async () => {
     await create();
     await expect(instance.adapter.sendTurn({

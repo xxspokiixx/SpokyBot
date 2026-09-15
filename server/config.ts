@@ -9,7 +9,8 @@ import { normalizeImageGenerationUrl, type ImageGenerationConfig } from "../shar
 
 import { writeFileAtomic } from "./atomic.ts";
 import { EFFORT_LEVELS, type InstanceConfigMap, type ModelSelection } from "./contracts.ts";
-import { parseStoredMcpServer } from "./mcp-registry.ts";
+import type { McpServerSpec } from "./contracts.ts";
+import { isRemoteMcpServer, parseStoredMcpServer } from "./mcp-registry.ts";
 import { parseJson, schemaIssue, type JsonObject, type JsonValue } from "./schema.ts";
 
 const optionalText = z.string().optional();
@@ -237,6 +238,10 @@ const featureConfigSchema = z.object({
    * computer control to a workspace). Off until explicitly enabled; there is
    * no Settings toggle — see sharedComputersEnabled. */
   sharedComputers: z.boolean().optional(),
+  /** Claude bots also load the MCP servers and connectors from this
+   * machine's own Claude Code setup (Plugins → MCP servers switch). Off by
+   * default: each extra tool costs tokens on every model call. */
+  claudeUserMcp: z.boolean().optional(),
 });
 /** First-run progress. Kept in the workspace config rather than a browser so
  * it survives cleared site data and is shared by every paired client. Hint
@@ -412,7 +417,7 @@ export interface AppConfig {
    * separate container, durable workspace, viewer and lease. */
   localVm?: { mode?: "shared" | "per-bot"; maxInstances?: number };
   /** Opt-in product experiments. Every flag defaults to disabled. */
-  features?: { skillAuthoring?: boolean; showToolCalls?: boolean; browser?: boolean; sharedComputers?: boolean };
+  features?: { skillAuthoring?: boolean; showToolCalls?: boolean; browser?: boolean; sharedComputers?: boolean; claudeUserMcp?: boolean };
   /** First-run progress; see onboardingConfigSchema. */
   onboarding?: { completedAt?: string; version?: number; reelSeen?: boolean; hintsSeen?: string[] };
   /** Named browser sessions any bot can be pointed at. */
@@ -578,6 +583,15 @@ export function builtInBrowserEnabled(cfg: AppConfig): boolean {
  * (`{"features": {"sharedComputers": true}}`) and restarts the server. */
 export function sharedComputersEnabled(cfg: AppConfig): boolean {
   return cfg.features?.sharedComputers === true;
+}
+
+/** Claude bots also see the MCP servers of this machine's own Claude Code
+ * setup — the way Codex bots already read ~/.codex/config.toml. Off unless
+ * the person switched it on under Plugins → MCP servers; the Claude driver
+ * then omits --strict-mcp-config while keeping skills, hooks and the
+ * personal CLAUDE.md out. */
+export function claudeUserMcpEnabled(cfg: AppConfig): boolean {
+  return cfg.features?.claudeUserMcp === true;
 }
 
 /** Config sections no provider driver reads. A write that touches only
@@ -1045,15 +1059,13 @@ export function instanceConfigs(cfg: AppConfig): InstanceConfigMap {
 
 // ── user-configured MCP servers ─────────────────────────────────────────
 // config.json: { "mcpServers": { "notes": { "command": "npx", "args":
-// ["-y", "@x/notes-mcp"], "env": { "NOTES_TOKEN": "…" } } } }
-// stdio only for now; validate-with-skip so one bad entry never takes the
-// fleet down, and each skip is logged once with a sentence that teaches.
+// ["-y", "@x/notes-mcp"], "env": { "NOTES_TOKEN": "…" } },
+//                                "docs": { "type": "http", "url": "https://…/mcp",
+// "headers": { "Authorization": "Bearer …" } } } }
+// Validate-with-skip so one bad entry never takes the fleet down, and each
+// skip is logged once with a sentence that teaches.
 
-export interface CustomMcpServer {
-  command: string;
-  args: string[];
-  env: Record<string, string>;
-}
+export type CustomMcpServer = McpServerSpec;
 
 const reportedMcpSkips = new Set<string>();
 function skipMcpEntry(name: string, why: string): void {
@@ -1070,21 +1082,15 @@ export function customMcpServers(cfg: AppConfig, only?: string[]): Record<string
     // a bot with its own list gets exactly those names; a bot without one
     // keeps getting every enabled server, as before this field existed
     if (only && !only.includes(name)) continue;
-    if (raw && typeof raw === "object" && "url" in raw) {
-      skipMcpEntry(name, 'only stdio servers ("command") are supported so far — HTTP transports are a planned follow-up');
-      continue;
-    }
     const parsed = parseStoredMcpServer(name, raw);
     if (!parsed.ok) {
-      skipMcpEntry(name, `${parsed.error} Expected { "command": "npx", "args": [...], "env": { ... } }`);
+      skipMcpEntry(name, `${parsed.error} Expected { "command": "npx", "args": [...], "env": { ... } } or { "type": "http", "url": "https://…", "headers": { ... } }`);
       continue;
     }
     if (!parsed.server.enabled) continue;
-    out[name] = {
-      command: parsed.server.command,
-      args: parsed.server.args,
-      env: parsed.server.env,
-    };
+    out[name] = isRemoteMcpServer(parsed.server)
+      ? { type: parsed.server.type, url: parsed.server.url, headers: parsed.server.headers }
+      : { command: parsed.server.command, args: parsed.server.args, env: parsed.server.env };
   }
   return out;
 }

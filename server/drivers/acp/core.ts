@@ -384,9 +384,14 @@ export function createAcpDriver(support: AcpSupport): ProviderDriver<AcpConfig> 
       // ACP session mcpServers: stdio is the baseline every ACP agent
       // supports (mcpCapabilities.http/.sse only add EXTRA transports), so
       // an injected stdio proxy — e.g. the peer-agent comms tool — attaches
-      // fine here. env is the ACP {name,value}[] shape.
+      // fine here. A url server is listed in ACP's http/sse shape and kept
+      // for the session only when the agent advertised that transport.
+      // env and headers are the ACP {name,value}[] shape.
+      type AcpMcpServer =
+        | { name: string; command: string; args: string[]; env: Array<{ name: string; value: string }> }
+        | { type: "http" | "sse"; name: string; url: string; headers: Array<{ name: string; value: string }> };
       const acpMcpServers = (turn: SendTurnInput) => {
-        const servers: Array<{ name: string; command: string; args: string[]; env: Array<{ name: string; value: string }> }> = [];
+        const servers: AcpMcpServer[] = [];
         const acpEnv = (env: Record<string, string>) =>
           Object.entries(env).map(([name, value]) => ({ name, value: String(value) }));
         const agents = turn.integrations?.agents;
@@ -423,6 +428,10 @@ export function createAcpDriver(support: AcpSupport): ProviderDriver<AcpConfig> 
         // config boundary; this is defense in depth).
         for (const [name, server] of Object.entries(turn.integrations?.custom ?? {})) {
           if (servers.some((existing) => existing.name === name)) continue;
+          if ("url" in server) {
+            servers.push({ type: server.type, name, url: server.url, headers: acpEnv(server.headers) });
+            continue;
+          }
           servers.push({ name, command: server.command, args: server.args, env: acpEnv(server.env) });
         }
         return servers;
@@ -900,6 +909,11 @@ export function createAcpDriver(support: AcpSupport): ProviderDriver<AcpConfig> 
               );
             }
 
+            // stdio is every agent's baseline; a url server rides only with
+            // an agent that advertised its transport, so an agent without
+            // http/sse never sees an entry it would refuse the session over
+            const sessionServers = mcpServers.filter((server) =>
+              !("type" in server) || init?.agentCapabilities?.mcpCapabilities?.[server.type] === true);
             const cursor = typeof turn.resumeCursor === "string" ? turn.resumeCursor : null;
             // a fresh native session forgets what the previous one allowed
             if (!cursor) sessionAllows.delete(threadId);
@@ -908,7 +922,7 @@ export function createAcpDriver(support: AcpSupport): ProviderDriver<AcpConfig> 
               try {
                 sessionResult = await request(
                   support.resumeMethod === "resume" ? "session/resume" : "session/load",
-                  { sessionId: cursor, cwd, mcpServers },
+                  { sessionId: cursor, cwd, mcpServers: sessionServers },
                   LOAD_SESSION_TIMEOUT,
                 );
                 if (sessionResult) sessionId = cursor;
@@ -917,7 +931,7 @@ export function createAcpDriver(support: AcpSupport): ProviderDriver<AcpConfig> 
               }
             }
             if (!sessionId) {
-              sessionResult = await request("session/new", { cwd, mcpServers }, NEW_SESSION_TIMEOUT);
+              sessionResult = await request("session/new", { cwd, mcpServers: sessionServers }, NEW_SESSION_TIMEOUT);
               sessionId = typeof sessionResult?.sessionId === "string" ? sessionResult.sessionId : null;
               if (!sessionId) throw new Error("session/new returned no sessionId");
             }

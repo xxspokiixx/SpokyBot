@@ -27,6 +27,8 @@
 //                     drained turn was sent)
 //                   | safe-agent-reads (simulate a native Auto reviewer around
 //                     the real injected agents MCP; not a real classifier test)
+//   FAKE_ACP_MCP_TRANSPORTS  comma list of remote MCP transports the agent
+//                       advertises in initialize (mcpCapabilities), e.g. "http,sse"
 //   FAKE_ACP_DUMP   path to write {argv, env} as JSON, so a test can assert
 //                   argv shape (agent/stdio flags) and env hygiene
 //   FAKE_ACP_MODELS      comma-separated model ids. Enables the opencode-shaped
@@ -341,16 +343,19 @@ function handle(msg: any) {
       const authMethods = mode === "no-auth" ? [] : [{ id: process.env.FAKE_ACP_AUTH_METHOD ?? "cached_token" }];
       const agentName = process.env.FAKE_ACP_AGENT_NAME;
       const acceptsImages = process.env.FAKE_ACP_IMAGE_CAPABILITY === "1";
+      // which remote MCP transports this agent advertises, e.g. "http,sse"
+      const mcpTransports = (process.env.FAKE_ACP_MCP_TRANSPORTS ?? "").split(",").map((entry) => entry.trim()).filter(Boolean);
       result(msg.id, {
         protocolVersion: 1,
         authMethods,
         agentInfo: agentName
           ? { name: agentName, version: process.env.FAKE_ACP_AGENT_VERSION ?? "test" }
           : undefined,
-        agentCapabilities: agentName || acceptsImages
+        agentCapabilities: agentName || acceptsImages || mcpTransports.length
           ? {
               ...(agentName ? { loadSession: true, sessionCapabilities: { resume: true }, auth: { logout: true } } : {}),
               ...(acceptsImages ? { promptCapabilities: { image: true } } : {}),
+              ...(mcpTransports.length ? { mcpCapabilities: { http: mcpTransports.includes("http"), sse: mcpTransports.includes("sse") } } : {}),
             }
           : undefined,
         _meta: {

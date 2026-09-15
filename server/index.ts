@@ -119,6 +119,7 @@ maxConcurrentBotThreads,
   threadEventLogMaxBytes,
   saveConfig,
   showToolCallsEnabled,
+  claudeUserMcpEnabled,
   skillAuthoringEnabled,
   sharedComputersEnabled,
   builtInBrowserEnabled,
@@ -6059,6 +6060,7 @@ async function startTurn(
         systemStable: prompt.stable,
         systemVolatile: prompt.volatile,
         integrations,
+        mcpFromUserConfig: claudeUserMcpEnabled(cfg),
         cwd,
       }), () => !directTurnClaimExists(bot.id, dispatchClaimId, threadId), async () => {
         await instance.adapter.interruptTurn(threadId).catch(() => {});
@@ -7729,6 +7731,7 @@ async function runGroupMemberTurn(
         systemVolatile: roomSystem.volatile,
         cwd,
         integrations,
+        mcpFromUserConfig: claudeUserMcpEnabled(cfg),
         ...(instance.instanceId === readyBot.modelSelection.instanceId
           ? memberTurnSelection(readyBot.modelSelection)
           : { model: instance.models.default }),
@@ -9552,6 +9555,9 @@ function configStatus() {
       // shell and the Settings UI read it so they offer nothing this server
       // would refuse.
       sharedComputers: sharedComputersEnabled(cfg),
+      // Plugins → MCP servers switch: Claude bots also see this machine's
+      // own Claude Code MCP servers
+      claudeUserMcp: claudeUserMcpEnabled(cfg),
     },
     // first-run progress — not a secret; the app decides whether to show
     // the welcome tour from this, never from browser storage
@@ -9589,6 +9595,19 @@ function configForAccess(status: ReturnType<typeof configStatus>, admin: boolean
 
 function mcpServerResponse() {
   return { servers: listMcpServers(cfg.mcpServers) };
+}
+
+/** The fields a new server may set, in whichever shape the form sent — a
+ * command to run or a URL to reach. Absent keys stay absent, so the strict
+ * schema of one shape never sees the other shape's `undefined`s. */
+function mcpServerBody(body: unknown): Record<string, unknown> {
+  const out: Record<string, unknown> = {};
+  if (!body || typeof body !== "object") return out;
+  const record = body as Record<string, unknown>;
+  for (const key of ["command", "args", "env", "type", "url", "headers", "enabled"]) {
+    if (record[key] !== undefined) out[key] = record[key];
+  }
+  return out;
 }
 
 function persistMcpServers(next: Record<string, unknown>): void {
@@ -15649,7 +15668,7 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
       }
     }
 
-    // ── custom MCP servers (stdio, local, secrets write-only) ──
+    // ── custom MCP servers (a local command or a URL; secrets write-only) ──
     if (method === "GET" && path === "/api/mcp/servers") {
       return json(res, 200, mcpServerResponse());
     }
@@ -15691,12 +15710,7 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
         if (Object.keys(current).length >= MAX_MCP_SERVERS) {
           return json(res, 400, { error: `You can add at most ${MAX_MCP_SERVERS} MCP servers.` });
         }
-        const parsed = parseMcpServerMutation(name, {
-          command: body?.command,
-          args: body?.args,
-          env: body?.env,
-          enabled: body?.enabled,
-        });
+        const parsed = parseMcpServerMutation(name, mcpServerBody(body));
         if (!parsed.ok) return json(res, 400, { error: parsed.error });
         persistMcpServers({ ...current, [name]: parsed.server });
         return json(res, 201, mcpServerResponse());

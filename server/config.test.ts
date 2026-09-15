@@ -1091,8 +1091,8 @@ describe("customMcpServers", () => {
     expect(Object.keys(out)).toEqual(["good_name"]);
   });
 
-  it("skips url transports with a teaching message, not a crash", () => {
-    expect(customMcpServers(cfg({ api: { url: "https://x/mcp" } }))).toEqual({});
+  it("passes a url transport through as streamable HTTP", () => {
+    expect(customMcpServers(cfg({ api: { url: "https://x/mcp" } }))).toEqual({ api: { type: "http", url: "https://x/mcp", headers: {} } });
   });
 
   it("skips malformed entries without dropping the valid ones", () => {
@@ -1112,5 +1112,22 @@ describe("providerReloadKeys", () => {
     expect(providerReloadKeys({ claude: { model: "x" }, profile: { name: "me" } })).toEqual(["claude"]);
     expect(providerReloadKeys({ onboarding: { hintsSeen: ["tour.composer"] } })).toEqual([]);
     expect(providerReloadKeys({ profile: {}, language: "de", tts: {}, features: {} })).toEqual([]);
+  });
+});
+
+describe("customMcpServers with url entries", () => {
+  it("passes remote servers through in the engines' shape, next to commands", () => {
+    const cfg = {
+      mcpServers: {
+        docs: { type: "sse", url: "https://docs.example/sse", headers: { Authorization: "Bearer t" } },
+        notes: { command: "npx" },
+        // one bad address never takes the rest down
+        broken: { url: "not-an-address" },
+      },
+    } as Parameters<typeof customMcpServers>[0];
+    expect(customMcpServers(cfg)).toEqual({
+      docs: { type: "sse", url: "https://docs.example/sse", headers: { Authorization: "Bearer t" } },
+      notes: { command: "npx", args: [], env: {} },
+    });
   });
 });
