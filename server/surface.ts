@@ -55,19 +55,20 @@ const NO_BROWSER_NOTE =
 const OFF_NOTE =
   " This bot's \"Works on\" setting is Off, so no computer and no built-in browser are mounted this turn: you cannot open a page, click, or type on any screen. If the user asks for something that needs one, tell them Works on is Off in this bot's settings — never claim you are opening a browser you do not have.";
 
-/** Decide what a turn mounts from the bot's destination, the task's pin
- * and what is actually reachable. Explicit choices are strict: Off mounts
- * neither surface, a computer destination keeps whatever browser the bot
- * has (the prompt tells the model which to use), a browser destination
- * mounts only the browser. Auto follows the task's pin while the pinned
- * place still exists, and otherwise re-resolves the way it always has. */
+/** Decide what a turn mounts. One place per turn: a computer destination
+ * mounts only that computer (web work happens in its own browser), a browser
+ * destination mounts only the built-in browser, Off mounts nothing. A
+ * conversation pin — set by the person from the composer, or by the
+ * conversation's own first turn on Auto — wins over the bot's default, so a
+ * thread never changes place under someone; only Off overrides it. Auto
+ * without a pin leaves the computer choice to the dispatch, which then
+ * mounts the browser only when no computer was reached. A pin the turn
+ * cannot honour is reported for clearing instead of being swapped silently. */
 export function resolveSurface(input: {
   destination: Destination;
   pinnedSurface?: Surface | null;
   /** The built-in browser may mount: workspace flag, bot switch and engine. */
   browserOn: boolean;
-  /** Which pinned surfaces could be mounted right now (Auto only). */
-  available?: Partial<Record<Surface, boolean>>;
 }): SurfacePlan {
   const { destination, browserOn } = input;
   // Off is the whole answer: no computer and no browser. It used to withhold
@@ -80,25 +81,24 @@ export function resolveSurface(input: {
   if (destination === "off") {
     return { computer: "off", browser: false, pinned: null, clearPin: false, note: OFF_NOTE };
   }
+  const pin = input.pinnedSurface ?? null;
+  if (pin === "browser") {
+    if (browserOn) return { computer: "off", browser: true, pinned: "browser", clearPin: false, note: "" };
+    // The browser this conversation was pinned to is gone (feature or bot
+    // switch off, engine missing): fall back to the default and say the pin
+    // should go, rather than quietly moving the work somewhere else.
+    return { ...resolveSurface({ destination, browserOn }), clearPin: true };
+  }
+  if (pin) return { computer: pin, browser: false, pinned: pin, clearPin: false, note: "" };
   if (destination === "browser") {
     return browserOn
       ? { computer: "off", browser: true, pinned: null, clearPin: false, note: "" }
       : { computer: "off", browser: false, pinned: null, clearPin: false, note: NO_BROWSER_NOTE };
   }
   if (destination !== undefined) {
-    return { computer: destination, browser: browserOn, pinned: null, clearPin: false, note: "" };
+    return { computer: destination, browser: false, pinned: null, clearPin: false, note: "" };
   }
-  const pin = input.pinnedSurface ?? null;
-  if (pin === null) {
-    return { computer: undefined, browser: browserOn, pinned: null, clearPin: false, note: "" };
-  }
-  const reachable = pin === "browser" ? browserOn : input.available?.[pin] === true;
-  if (!reachable) {
-    return { computer: undefined, browser: browserOn, pinned: null, clearPin: true, note: "" };
-  }
-  return pin === "browser"
-    ? { computer: "off", browser: true, pinned: "browser", clearPin: false, note: "" }
-    : { computer: pin, browser: false, pinned: pin, clearPin: false, note: "" };
+  return { computer: undefined, browser: browserOn, pinned: null, clearPin: false, note: "" };
 }
 
 /** How the prompt and the app name a surface. Deliberately the same words
@@ -116,6 +116,11 @@ export function surfaceLabel(surface: Surface): string {
       return "the built-in browser";
   }
 }
+
+/** Said once per task, so the person hears the place before the first click
+ * lands there. Same words as the panel and the composer chip. */
+const RESTATE_SENTENCE =
+  " Before your first action on a screen or page in a task, say in one short sentence where you are working, using that same name.";
 
 /** The one paragraph that says where this turn's work happens. Assembled
  * from what was actually mounted, never from the setting, so the model is
@@ -136,6 +141,7 @@ export function surfacePrompt(
     text =
       " Everything you do on screen happens in the built-in browser tab; there is no desktop, file or shell computer this turn. If you need the user to sign in, tell them it is in the Browser tab of the Computer panel.";
   }
+  if (text) text += RESTATE_SENTENCE;
   if (opts.pinned) {
     text += ` This task has been running on ${surfaceLabel(opts.pinned)}; keep using it unless the user says otherwise.`;
   }

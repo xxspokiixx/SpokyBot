@@ -2176,5 +2176,22 @@
   "window.minimize": "Minimize",
   "window.maximize": "Maximize",
   "window.restore": "Restore",
-  "window.close": "Close"
+  "window.close": "Close",
+  "place.cloud": "Cloud computer",
+  "place.vm": "Local VM",
+  "place.local": "This computer",
+  "place.browser": "Browser",
+  "place.auto": "Auto",
+  "place.off": "Off",
+  "place.chipTitle": "Where this conversation works",
+  "place.chipAria": "Where this conversation works: {place}",
+  "place.pinnedHere": "Pinned for this conversation",
+  "place.fromBot": "From this bot's Works on setting",
+  "place.live": "In use now",
+  "place.busy": "Wait for the current turn to finish",
+  "place.offHint": "Works on is Off for this bot. Change it in the Computer panel.",
+  "place.followBot": "Follow this bot's setting",
+  "place.followBotDetail": "Currently {place}",
+  "place.unavailable": "Not available for this bot's engine or setup",
+  "place.pinnedNote": "This conversation is pinned to {place}. Change it from the composer."
 }

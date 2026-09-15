@@ -27,7 +27,8 @@ import {
   Smartphone,
   X,
 } from "lucide-react";
-import { api, ApiError, useStore, type Bot } from "@/state/store";
+import { api, ApiError, currentTaskBot, useStore, type Bot } from "@/state/store";
+import { effectivePlace, isComputerPlace, placeLabelKey } from "@/lib/place";
 import type { CloudBackend } from "../../server/contracts.ts";
 import { ApiKeyRow } from "./ApiKeys";
 import { cn } from "@/lib/cn";
@@ -185,6 +186,11 @@ export function ComputerPanel({
     }
   };
   const { state, dispatch, flushBotPatches } = useStore();
+  // Where this bot's current conversation works and whether a turn is acting
+  // there now: the tab for that place carries the live dot.
+  const liveTask = bot.tasks?.find((task) => task.threadId === bot.threadId);
+  const livePlace = effectivePlace(bot, liveTask);
+  const placeLive = Boolean(currentTaskBot(bot).busy);
   const { capabilities, ready: capabilitiesReady } = useDesktopCapabilities();
   const localAvailable = capabilities.localComputer.available;
   const isLinux = capabilities.host.platform === "linux";
@@ -1130,6 +1136,7 @@ export function ComputerPanel({
               )}
             >
               <Monitor size={13} /> {t("computer.tab.computer")}
+              {placeLive && isComputerPlace(livePlace) && <span className="size-1.5 animate-pulse rounded-full bg-success" role="img" aria-label={t("place.live")} data-testid="computer-tab-live" />}
             </button>
             <button
               type="button"
@@ -1163,6 +1170,7 @@ export function ComputerPanel({
               )}
             >
               <Globe size={13} /> {t("computer.tab.browser")}
+              {placeLive && livePlace === "browser" && <span className="size-1.5 animate-pulse rounded-full bg-success" role="img" aria-label={t("place.live")} data-testid="browser-tab-live" />}
             </button>
             )}
           </div>
@@ -1613,6 +1621,11 @@ export function ComputerPanel({
                 );
             })}
           </div>
+          {liveTask?.surface && (
+            <p className="mt-2 text-[11.5px] leading-5 text-ink-secondary" data-testid="place-pinned-note">
+              {t("place.pinnedNote", { place: t(placeLabelKey(liveTask.surface)) })}
+            </p>
+          )}
           {bot.computer === "cloud" && (
             <>
               <CloudBackendPicker

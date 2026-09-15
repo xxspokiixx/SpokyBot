@@ -368,7 +368,7 @@ import { createTeamBackup, importTeamBackup } from "./team-backup.ts";
 import { MAX_TEAM_BACKUP_BYTES } from "../shared/team-backup.ts";
 import { shouldMountLocalComputer } from "./local-routing.ts";
 import { modelContextWindow } from "./model-context-window.ts";
-import { resolveSurface } from "./surface.ts";
+import { parseSurface, resolveSurface, surfaceLabel, surfaceOfComputerKind, surfacePrompt } from "./surface.ts";
 import {
   PendingTurnCancellations,
   ProviderTurnGenerationRegistry,
@@ -1643,7 +1643,12 @@ function previewSystemPrompt(bot: BotRecord) {
     },
     { id: "computer", label: "Computer", text: computerPrompt(computerPromptKind) },
     { id: "team-computer", label: "Team computer", text: teamComputerPrompt(teamComputer) },
-    { id: "plan", label: "Surface", text: previewPlan.note },
+    // Auto cannot know its place until dispatch, so the preview stays silent
+    // there and only carries the note; explicit settings preview the paragraph.
+    { id: "plan", label: "Surface", text: surfacePrompt({
+      computer: previewPlan.computer && previewPlan.computer !== "off" && computerPromptKind ? previewPlan.computer : null,
+      browser: previewPlan.computer === undefined ? false : previewPlan.browser,
+    }, { note: previewPlan.note }) },
     { id: "composio", label: "Connected apps", text: caps?.composioMcp && bot.composio !== false && composio.configured(cfg) ? COMPOSIO_PROMPT : "" },
     { id: "mcp", label: "MCP servers", text: caps?.customMcp ? customMcpPrompt(Object.keys(customMcpServers(cfg, bot.mcpServers))) : "" },
     { id: "browser", label: "Browser", text: previewPlan.browser ? BUILT_IN_BROWSER_SYSTEM_PROMPT : "" },
@@ -5462,10 +5467,18 @@ async function startTurn(
         builtInBrowserEnabled(cfg) &&
         bot.browser !== false &&
         instance.adapter.capabilities.browserMcp === true;
+      // The conversation's own place wins over the bot default: the person
+      // pinned it from the composer, or its first Auto turn recorded where it
+      // landed. A team computer or a cloud routine is not this conversation's
+      // choice, so those ignore the pin.
+      const dispatchTask = store.taskByThread(bot.id, threadId);
+      const pinnedSurface = teamComputer || opts?.runOn === "cloud" ? null : dispatchTask?.surface ?? null;
       const plan = resolveSurface({
         destination: teamComputer || opts?.runOn === "cloud" ? "cloud" : bot.computer, // cloud routine overrides the MAUS default
+        pinnedSurface,
         browserOn,
       });
+      if (plan.clearPin && dispatchTask) store.patchTask(bot.id, threadId, { surface: undefined });
       if (bot.computer === "browser" && plan.computer === "off" && instance.driverKind === "boxAgent") {
         throw new Error("the Computer engine works on the cloud computer — set Works on to Cloud, or choose another engine");
       }
@@ -5750,9 +5763,14 @@ async function startTurn(
           description: liveBot?.description ?? bot.description,
           text: providerText,
         });
+      // One place per turn. On Auto the branches above may have reached a
+      // computer; then the built-in browser stays unmounted and web work
+      // happens in that computer's own browser, where the person can see it.
+      const mountedComputer = surfaceOfComputerKind(computerKind);
       if (
         liveBot &&
         plan.browser &&
+        !(plan.computer === undefined && mountedComputer) &&
         builtInBrowserEnabled(cfg) &&
         liveBot.browser !== false &&
         instance.adapter.capabilities.browserMcp === true
@@ -5771,6 +5789,13 @@ async function startTurn(
           const session = browser.session;
           browserCapture = () => browserRuntime.withAgentAction(session, () => agentBrowserFrame(frame));
         }
+      }
+      // An Auto conversation remembers where its first turn landed, so later
+      // turns stay there and the composer can show it. Explicit settings are
+      // not recorded: changing the bot's Works on should move its threads.
+      if (bot.computer === undefined && !teamComputer && opts?.runOn !== "cloud" && !plan.pinned) {
+        const used = mountedComputer ?? (integrations.browser ? "browser" : null);
+        if (used) store.patchTask(bot.id, threadId, { surface: used });
       }
       // A cancelled adapter can be between accepting sendTurn and revealing
       // its provider turn id. Never overlap a replacement with that ambiguous
@@ -5804,7 +5829,7 @@ async function startTurn(
         { id: "files", label: "File locations", text: worksInWorkspace && opts?.runOn !== "cloud" ? workspaceLocationsPrompt(bot.id, cwd, liveBot?.cwd ?? bot.cwd) : "" },
         { id: "computer", label: "Computer", text: computerPrompt(computerPromptKind) },
         { id: "team-computer", label: "Team computer", text: teamComputerPrompt(teamComputer) },
-        { id: "plan", label: "Surface", text: plan.note },
+        { id: "plan", label: "Surface", text: surfacePrompt({ computer: mountedComputer, browser: Boolean(integrations.browser) }, { pinned: plan.pinned, note: plan.note }) },
         // gated on the integration, not the key: the hint only goes to a
         // bot whose driver actually mounted the tools
         { id: "composio", label: "Connected apps", text: integrations.composio ? COMPOSIO_PROMPT : "" },
@@ -7253,7 +7278,9 @@ async function runGroupMemberTurn(
       readyBot.browser !== false &&
       instance.adapter.capabilities.browserMcp === true,
   });
-  if (roomPlan.browser) {
+  // One place per room turn as well: a team computer reached on Auto means
+  // no separate built-in browser.
+  if (roomPlan.browser && !(roomPlan.computer === undefined && roomTeamComputer)) {
     const selectedProfile = readyBot.browserProfile;
     const browser = await browserIntegration(readyBot.id, selectedProfile, { threadId, generation: internalGeneration });
     if (browser) integrations.browser = browser.integration;
@@ -7393,7 +7420,7 @@ async function runGroupMemberTurn(
     { id: "mcp", label: "MCP servers", text: customMcpPrompt(Object.keys(integrations.custom ?? {})) },
     { id: "computer", label: "Computer", text: computerPrompt(roomTeamComputer ? instance.driverKind === "boxAgent" ? "box-agent" : "box" : roomVmTarget ? localVmMode(cfg) === "per-bot" ? "vm-private" : "vm-shared" : null) },
     { id: "team-computer", label: "Team computer", text: teamComputerPrompt(roomTeamComputer) },
-    { id: "plan", label: "Surface", text: roomPlan.note },
+    { id: "plan", label: "Surface", text: surfacePrompt({ computer: roomTeamComputer ? "cloud" : roomVmTarget ? "vm" : null, browser: Boolean(integrations.browser) }, { note: roomPlan.note }) },
     { id: "browser", label: "Browser", text: integrations.browser ? BUILT_IN_BROWSER_SYSTEM_PROMPT : "" },
     { id: "recall", label: "Recall", text: integrations.agents ? SESSION_SEARCH_SYSTEM_PROMPT : "" },
     { id: "section-context", label: "Section context", text: sectionContextSystemPrompt(bot.section) },
@@ -11493,8 +11520,10 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
           // where the work is, and say which room it was.
           const roomTurn = activeGroupTurnForBot(bot.id);
           const target = blockedTarget({ ...bot, threadId: internalCapability.threadId }, roomTurn && { ...roomTurn.group, threadId: roomTurn.threadId });
+          const helpPlace = store.taskByThread(bot.id, internalCapability.threadId)?.surface ?? bot.computer;
+          const helpWhere = helpPlace && helpPlace !== "off" ? ` on ${surfaceLabel(helpPlace)}` : "";
           notify(
-            buildNotification("takeover", bot, target.threadId, snapshot.helpReason ?? "asked you to take over", {
+            buildNotification("takeover", bot, target.threadId, `${snapshot.helpReason ?? "asked you to take over"}${helpWhere}`, {
               group: target.group,
             }),
           );
@@ -11851,7 +11880,7 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
       if (threadId === undefined &&
         (auth.kind === "session" || req.headers["x-openmausbot-companion"] === "1") &&
         store.tasks(botId).length > 1) {
-        throw Object.assign(new Error("This bot has multiple threads. Update this client and choose a thread before sending this action."), { status: 409 });
+        throw Object.assign(new Error("This bot has more than one thread. Update the OpenMausBot app on this device, then choose a thread and try again."), { status: 409 });
       }
     };
     if (method === "GET" && path === "/api/bots") {
@@ -14557,7 +14586,7 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
       if (!body || typeof body !== "object" || Array.isArray(body)) return json(res, 400, { error: "body must be a JSON object" });
       const current = store.projectBotForTask(m[1], m[2]);
       if (!current) return json(res, 404, { error: "no such task" });
-      const allowed = new Set(["title", "projectId", "modelSelection", "updateBotDefault", "resetApprovalToAsk", "approvalMode", "autoApprove", "requireAvailableModel", "pinnedMessageId", "acknowledgeLocalAuto", "archivedAt"]);
+      const allowed = new Set(["title", "projectId", "modelSelection", "updateBotDefault", "resetApprovalToAsk", "approvalMode", "autoApprove", "requireAvailableModel", "pinnedMessageId", "acknowledgeLocalAuto", "archivedAt", "surface"]);
       if (Object.keys(body).some((key) => !allowed.has(key))) return json(res, 400, { error: "unsupported thread setting" });
       for (const key of ["requireAvailableModel", "acknowledgeLocalAuto", "updateBotDefault", "resetApprovalToAsk"] as const) {
         if (body[key] !== undefined && typeof body[key] !== "boolean") return json(res, 400, { error: `${key} must be a boolean` });
@@ -14582,6 +14611,13 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
         if (body.archivedAt === null) patch.archivedAt = undefined;
         else if (typeof body.archivedAt === "number" && Number.isFinite(body.archivedAt) && body.archivedAt >= 0) patch.archivedAt = body.archivedAt;
         else return json(res, 400, { error: "archivedAt must be a timestamp, or null to unarchive" });
+      }
+      if (body.surface !== undefined) {
+        // Where this conversation works, chosen from the composer. Null follows
+        // the bot's Works on again. Reachability is the turn's to judge.
+        if (body.surface === null) patch.surface = undefined;
+        else if (parseSurface(body.surface)) patch.surface = parseSurface(body.surface);
+        else return json(res, 400, { error: "surface must be cloud, vm, local, browser, or null to follow the bot" });
       }
       if (body.pinnedMessageId !== undefined) {
         if (body.pinnedMessageId === null || body.pinnedMessageId === "") patch.pinnedMessageId = undefined;
