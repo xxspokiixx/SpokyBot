@@ -24,6 +24,9 @@ The smoke checks:
 - Synthetic browser approval yields the company name, employee email and
   approved model counts. No device token or private connection method reaches
   renderer JavaScript.
+- Organisation sign-in leaves the native renderer local, including macOS
+  on-device speech. A true remote workspace remains classified as remote and
+  receives no local speech capability.
 - The private process receives only the separate model capability, never the
   device credential used for session and backup authority.
 - Disconnect has a separate confirmation. Cancel preserves the connection;

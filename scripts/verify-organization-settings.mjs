@@ -22,6 +22,8 @@ if (process.versions.electron && process.argv.includes(flag)) {
   app.setPath("sessionData", join(output, "user-data"));
   app.commandLine.appendSwitch("disable-background-networking");
   const localOrigin = new URL(url).origin;
+  const localOriginGuard = createRequire(import.meta.url)("../electron/local-origin.cjs");
+  localOriginGuard.setLocalOrigin(localOrigin);
   const organization = { id: "11111111-1111-4111-8111-111111111111", name: "Fixture Studio" };
   const device = { id: "22222222-2222-4222-8222-222222222222", organizationId: organization.id, email: "employee@example.test", expiresAt: Date.now() + 60_000, revokedAt: null };
   const token = `omd_${randomBytes(32).toString("base64url")}`;
@@ -76,7 +78,10 @@ if (process.versions.electron && process.argv.includes(flag)) {
   ipcMain.handle("companion:state", () => ({ running: false, enabled: false, devices: [], bind: null, publicUrl: null }));
   ipcMain.handle("perm:status", () => ({}));
   ipcMain.handle("window:state", () => ({ maximized: false, fullscreen: false }));
-  ipcMain.handle("desktop:capabilities", () => createRequire(import.meta.url)("../electron/capabilities.cjs").desktopCapabilities({ platform: process.platform }));
+  ipcMain.handle("desktop:capabilities", event => createRequire(import.meta.url)("../electron/capabilities.cjs").desktopCapabilities({
+    platform: process.platform,
+    remote: !localOriginGuard.isLocalSender(event),
+  }));
   ipcMain.handle("workspaces:state", () => createRequire(import.meta.url)("../electron/environments.cjs").workspaceSummary({ activeId: "local", environments: [] }));
   ipcMain.handle("environments:state", () => ({ activeId: "local", environments: [] }));
   ipcMain.handle("desktop-remote:state", () => ({ active: false }));
@@ -129,6 +134,7 @@ if (process.versions.electron && process.argv.includes(flag)) {
     assert.equal(await evaluate("JSON.stringify(window.ogb.organization).includes('token')"), false);
     assert.equal(await evaluate("window.ogb.organization.state().then(s => /om[dg]_/.test(JSON.stringify(s)))"), false);
     assert.equal(await evaluate("typeof window.ogb.organization.connection"), "undefined");
+    assert.equal(await evaluate("window.ogb.getCapabilities().then(value => value.dictation.available)"), process.platform === "darwin", "organisation sign-in does not turn the local renderer into a remote workspace");
     assert.ok(grantsApplied > 0);
     writeFileSync(join(output, "organization-connected.png"), (await win.webContents.capturePage()).toPNG());
     win.setSize(390, 780);
@@ -173,7 +179,7 @@ if (process.versions.electron && process.argv.includes(flag)) {
     await evaluate("new Promise(resolve => setTimeout(resolve, 180))"); // Capture settled navigation colors.
     writeFileSync(join(output, "organization-in-app.png"), (await win.webContents.capturePage()).toPNG());
     const receipt = { passed: true, renderer: "OrganizationSettings + actual app shell", preload: "electron/preload.cjs", client: "electron/managed-desktop.mjs",
-      checks: ["one-button default organization sign-in", "custom Admin kept under Advanced", "browser handoff and automatic connection", "security code collapsed and cancel works", "approved company and model counts", "model-only capability sent to private process", "no token or private connection method in renderer", "390px no overflow", "cancel/confirm disconnect", "revocation requires reconnect", "remote bridge absent", "normal app startup unchanged", "explicit Organisation Settings before local onboarding"],
+      checks: ["one-button default organization sign-in", "custom Admin kept under Advanced", "browser handoff and automatic connection", "security code collapsed and cancel works", "approved company and model counts", "model-only capability sent to private process", "no token or private connection method in renderer", "organisation sign-in preserves local desktop capabilities", "390px no overflow", "cancel/confirm disconnect", "revocation requires reconnect", "remote bridge absent", "normal app startup unchanged", "explicit Organisation Settings before local onboarding"],
       limitation: "Synthetic loopback Admin, in-memory credential store and fake utility-process acknowledgement; not proof of real Admin consent, OS keychain, native driver execution, private runtime synchronization, backups or public DNS/TLS." };
     writeFileSync(join(output, "receipt.json"), `${JSON.stringify(receipt, null, 2)}\n`);
     console.log(JSON.stringify(receipt));
