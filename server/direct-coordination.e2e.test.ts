@@ -323,6 +323,40 @@ it("runs a message sent while a teammate works, keeps the assignment, and names 
   expect((await f.messages(f.chief.activeTaskId)).some((message: any) => message.text === "The requested CSV export is implemented and verified")).toBe(true);
 }), 60_000);
 
+// The opt-in from #1194: with parking on, the same message waits in the
+// composer queue until the outstanding assignments settle — room-style
+// parking for direct chat — and only then runs as its own follow-up turn.
+it("parks a message behind outstanding teammate work when the bot opts in, then runs it after", () => fixture(async f => {
+  f.plan[f.lead.id] = { delayMs: 4000, reply: "CSV export implemented" };
+  f.plan[f.chief.id] = { turns: [
+    { steps: structuredClone(f.plan[f.chief.id].steps), reply: "Assigned to Engineering" },
+    { reply: "The requested CSV export is implemented and verified" },
+    { reply: "Noted; the export is UTF-8 too" },
+  ] };
+  await f.api(`/api/bots/${f.chief.id}`, { parkDirectMessages: true }, "PATCH");
+  await f.start();
+  await expect.poll(() => f.nodes().find((node: any) => node.parentId)?.status, { timeout: 15_000 }).toBe("running");
+  const assignment = f.nodes().find((node: any) => node.parentId);
+
+  const receipt = await f.api(`/api/bots/${f.chief.id}/messages`, { text: "Also make sure the export is UTF-8.", threadId: f.chief.activeTaskId });
+  // It parked: not run, not even on the transcript yet.
+  expect(receipt.queued).toBe(true);
+  expect(typeof receipt.queueId).toBe("string");
+  expect((await f.messages(f.chief.activeTaskId)).some((message: any) => message.text === "Also make sure the export is UTF-8.")).toBe(false);
+  expect(f.evidence().filter((turn: any) => turn.botId === f.chief.id)).toHaveLength(1);
+  expect(f.nodes().find((node: any) => node.id === assignment.id).status).not.toBe("cancelled");
+
+  // The teammate finishes, the coordination resumes and settles, and only
+  // then the parked words run as their own turn.
+  expect((await f.wait()).status).toBe("settled");
+  await expect.poll(() => f.evidence().filter((turn: any) => turn.botId === f.chief.id).length, { timeout: 20_000 }).toBe(3);
+  const parked = f.evidence().filter((turn: any) => turn.botId === f.chief.id)[2];
+  expect(parked.resumed).toBe(false);
+  expect(parked.system).not.toContain("Assignments you already sent are still outstanding");
+  expect((await f.messages(f.chief.activeTaskId)).some((message: any) => message.text === "Also make sure the export is UTF-8.")).toBe(true);
+  expect((await f.messages(f.chief.activeTaskId)).some((message: any) => message.text === "Noted; the export is UTF-8 too")).toBe(true);
+}), 60_000);
+
 // An automation turn is not the person cancelling either: a delegated
 // (routine-driven) turn lands in the same conversation and leaves the
 // outstanding assignment alone.
