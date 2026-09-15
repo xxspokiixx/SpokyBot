@@ -848,7 +848,7 @@ export type Action =
   | { type: "createRoutine"; input: RoutineInput }
   | { type: "updateRoutine"; routineId: string; patch: Partial<RoutineInput> }
   | { type: "deleteRoutine"; routineId: string }
-  | { type: "runRoutine"; routineId: string; onSettled?: () => void }
+  | { type: "runRoutine"; routineId: string; onStarted?: (run: RoutineRun) => void; onError?: (error: unknown) => void; onSettled?: () => void }
   | { type: "cancelRoutineRun"; runId: string }
   | { type: "markRoutineRunSeen"; runId: string }
   | { type: "groupPatched"; group: Partial<Group> & { id: string } }
@@ -2514,7 +2514,11 @@ export function StoreProvider({ children }: { children: ReactNode }) {
         case "runRoutine":
           void waitForExecutionSettings(executionBotsBeforeAction)
             .then(() => api(`/api/routines/${action.routineId}/run`, { method: "POST" }))
-            .catch(showError)
+            .then(({ run }) => action.onStarted?.(run))
+            .catch((error) => {
+              if (action.onError) action.onError(error);
+              else showError(error);
+            })
             .finally(() => action.onSettled?.());
           break;
         case "cancelRoutineRun":
