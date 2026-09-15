@@ -4,30 +4,6 @@ import XCTest
 /// paired computer, message sends, or server mutations are involved.
 final class ThreadNavigationUITests: XCTestCase {
     @MainActor
-    func testNewBotRequiresConfirmationAndCanBeCancelled() {
-        let app = launchPreview()
-        func openPrompt() {
-            if !app.buttons["New bot"].exists { app.buttons["Create"].tap() }
-            app.buttons["New bot"].tap()
-        }
-        openPrompt()
-        let prompt = app.alerts["Create a new bot?"]
-        XCTAssertTrue(prompt.waitForExistence(timeout: 5))
-        recordScreenshot("New bot confirmation", in: app)
-        prompt.buttons["Cancel"].tap()
-        XCTAssertFalse(prompt.exists)
-        XCTAssertTrue(app.buttons["threads-toggle.preview-pepper"].exists)
-        openPrompt()
-        XCTAssertTrue(prompt.waitForExistence(timeout: 5))
-        // No client in this fixture: confirmation safely exercises the
-        // unsuccessful creation path without writing to a real server.
-        prompt.buttons["Create"].tap()
-        openPrompt()
-        XCTAssertTrue(prompt.waitForExistence(timeout: 5))
-        prompt.buttons["Cancel"].tap()
-    }
-
-    @MainActor
     func testRosterShowsFolderThreadsAndSwitchesLocally() {
         let app = launchPreview()
         openGmail(in: app)

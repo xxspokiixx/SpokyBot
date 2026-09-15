@@ -56,7 +56,7 @@ class ThreadNavigationTest {
                 activity = when (it) { "waiting" -> "waiting-on-you"; "queued" -> "queued"; else -> "idle" })
         }
         val grouped = bot.copy(tasks = closed + task("run").copy(routineRunId = "internal"))
-        assertEquals(listOf("current", "unread", "busy", "waiting", "queued"),
+        assertEquals(listOf("waiting", "busy", "queued", "unread", "current"),
             grouped.threadGroups().single().tasks.map { it.threadId })
         assertEquals(6, grouped.threadGroups(includingClosed = true).single().tasks.size)
         assertTrue(grouped.threadGroups("run").isEmpty())
@@ -75,7 +75,7 @@ class ThreadNavigationTest {
         val grouped = bot.copy(tasks = snoozed + task("current").copy(snoozedUntil = 0.0))
         // the sentinel and a live clock both fold; the current thread and one
         // that needs the person stay, as does a timestamp already past
-        assertEquals(listOf("expired", "unread", "working", "current"),
+        assertEquals(listOf("working", "unread", "current", "expired"),
             grouped.threadGroups(now = 500L).single().tasks.map { it.threadId })
         assertEquals(6, grouped.threadGroups(includingClosed = true, now = 500L).single().tasks.size)
     }
@@ -90,6 +90,46 @@ class ThreadNavigationTest {
         )
         assertEquals(900L, nextSnoozeExpiry(tasks, now = 500L))
         assertNull(nextSnoozeExpiry(listOf(tasks[0], tasks[1]), now = 500L))
+    }
+
+    @Test
+    fun attentionFloatsLiveThreadsAboveIdleHistoryWithoutFilteringAnything() {
+        val threads = listOf(
+            task("old-1"), task("unread").copy(unread = true), task("old-2"),
+            task("queued").copy(activity = "queued"), task("working").copy(busy = true),
+            task("waiting").copy(activity = "waiting-on-you"), task("idle"),
+        )
+        val grouped = bot.copy(tasks = threads)
+
+        assertEquals(
+            listOf("waiting", "working", "queued", "unread", "old-1", "old-2", "idle"),
+            grouped.threadGroups().single().tasks.map { it.threadId },
+        )
+        assertEquals(
+            listOf("waiting", "working", "queued", "unread", "old-1", "old-2", "idle"),
+            grouped.threadGroups(includingClosed = true).single().tasks.map { it.threadId },
+        )
+    }
+
+    @Test
+    fun equalAttentionRanksKeepStoredOrderAndSearchKeepsRelevanceOrder() {
+        val threads = listOf(
+            task("idle-b"), task("busy").copy(busy = true), task("idle-a"),
+            task("current"), task("in-folder", folder = "plans"),
+        )
+        val grouped = bot.copy(
+            projects = listOf(BotProject("plans", "Plans")),
+            tasks = threads,
+        )
+
+        assertEquals(
+            listOf("busy", "current", "idle-b", "idle-a"),
+            grouped.threadGroups().single { it.id == "unfiled" }.tasks.map { it.threadId },
+        )
+        assertEquals(
+            listOf("idle-b", "idle-a"),
+            grouped.threadGroups("idle").single().tasks.map { it.threadId },
+        )
     }
 
     @Test

@@ -22,8 +22,6 @@ struct ChatListView: View {
     @State private var showingWalkie = false
     @State private var showingNewGroup = false
     @State private var showingNewSection = false
-    @State private var showingNewBot = false
-    @State private var creatingBot = false
     @State private var expandedBots = Set<String>()
     @State private var collapsedFolders = Set<String>()
     @State private var creatingThreads = Set<String>()
@@ -164,12 +162,6 @@ struct ChatListView: View {
             }
             .sheet(isPresented: $showingNewSection) {
                 NewSectionSheet()
-            }
-            .alert("Create a new bot?", isPresented: $showingNewBot) {
-                Button("Cancel", role: .cancel) {}
-                Button("Create", action: createConfirmedBot)
-            } message: {
-                Text("A new bot will be added to your roster and opened for you.")
             }
             .sheet(item: $managingThreads) { chat in
                 TaskManagerView(chat: chat) { threadId in
@@ -453,7 +445,6 @@ struct ChatListView: View {
                     Button("New section", systemImage: "folder.badge.plus", action: openNewSection)
                         .disabled(!hasVisibleBots)
                     Button("New bot", systemImage: "square.and.pencil", action: createBot)
-                        .disabled(creatingBot)
                 } label: {
                     Image(systemName: "plus")
                         .font(.system(size: 20, weight: .medium))
@@ -503,7 +494,6 @@ struct ChatListView: View {
 
     private var newBotButton: some View {
         GlassButton(systemImage: "square.and.pencil", size: 48, weight: .medium, action: createBot)
-            .disabled(creatingBot)
             .accessibilityLabel("New bot")
     }
 
@@ -517,16 +507,7 @@ struct ChatListView: View {
     }
 
     private func createBot() {
-        guard !creatingBot else { return }
-        showingNewBot = true
-    }
-
-    private func createConfirmedBot() {
-        guard !creatingBot else { return }
-        // Claim synchronously so repeated taps cannot enqueue two Tasks.
-        creatingBot = true
         Task {
-            defer { creatingBot = false }
             if let bot = await session.createBot() {
                 Haptics.success()
                 path.append(Chat.bot(bot))

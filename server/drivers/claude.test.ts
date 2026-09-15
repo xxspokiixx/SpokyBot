@@ -19,8 +19,6 @@ import { recordEvents, type EventRecorder } from "../testing/events.ts";
 import {
   autoCompactWindow,
   brokerSocketCandidates,
-  claudeAutoCompactSupported,
-  claudeCliHelpSupportsFlag,
   claudeCliSupports,
   claudeCliUpdate,
   ClaudeDriver,
@@ -894,6 +892,62 @@ describe("ClaudeDriver turns (fake CLI)", () => {
     expect(text).toBe("hi");
   });
 
+  it("refreshes a coordinated resumed session's prompt when the CLI supports it", async () => {
+    await create(undefined, { FAKE_CLAUDE_DUMP: join(scratch, "coordination-snapshot.json"), FAKE_CLAUDE_VERSION: "2.1.267" });
+    // Read the version first, so the floor is what admits the flag here —
+    // without this the driver sees a null version and would push it for any CLI.
+    await instance.snapshot();
+    await instance.adapter.sendTurn({
+      threadId: "t-coordinated-resume",
+      text: "Addressed teammate request 2. Add the new header row.",
+      resumeCursor: "existing-claude-session",
+      system: "Stable coordination policy, without the earlier assignment.",
+      refreshSystemPrompt: true,
+    });
+    await recorder.until((e) => e.type === "turn.completed");
+    const seen = JSON.parse(readFileSync(join(scratch, "coordination-snapshot.json"), "utf8"));
+    expect(seen.argv[seen.argv.indexOf("--system-prompt-snapshot") + 1]).toBe("off");
+    expect(seen.argv[seen.argv.indexOf("--resume") + 1]).toBe("existing-claude-session");
+    expect(seen.prompt.message.content).toContain("Add the new header row.");
+  });
+
+  it("keeps coordinated turns working on a CLI without the snapshot flag", async () => {
+    const dump = join(scratch, "coordination-no-snapshot.json");
+    await create(undefined, { FAKE_CLAUDE_DUMP: dump, FAKE_CLAUDE_VERSION: "2.1.232" });
+    await instance.snapshot();
+    await instance.adapter.sendTurn({
+      threadId: "t-coordinated-old-cli",
+      text: "Addressed teammate request 2. Add the new header row.",
+      resumeCursor: "existing-claude-session",
+      system: "Stable coordination policy, without the earlier assignment.",
+      refreshSystemPrompt: true,
+    });
+    await recorder.until((e) => e.type === "turn.completed");
+    const seen = JSON.parse(readFileSync(dump, "utf8"));
+    expect(seen.argv).not.toContain("--system-prompt-snapshot");
+    expect(seen.prompt.message.content).toContain("Add the new header row.");
+  });
+
+  it.each([["2.1.232", false], ["2.1.267", true]] as const)(
+    "probes Claude %s before the first coordinated turn without an Engines snapshot",
+    async (version, supportsSnapshot) => {
+      const dump = join(scratch, `coordination-first-turn-${version}.json`);
+      await create(undefined, { FAKE_CLAUDE_DUMP: dump, FAKE_CLAUDE_VERSION: version });
+      await instance.adapter.sendTurn({
+        threadId: `t-coordinated-first-turn-${version}`,
+        text: "Addressed teammate request 2. Add the new header row.",
+        resumeCursor: "existing-claude-session",
+        system: "Stable coordination policy, without the earlier assignment.",
+        refreshSystemPrompt: true,
+      });
+      await recorder.until((e) => e.type === "turn.completed");
+      const seen = JSON.parse(readFileSync(dump, "utf8"));
+      expect(seen.argv.includes("--system-prompt-snapshot")).toBe(supportsSnapshot);
+      if (supportsSnapshot) expect(seen.argv[seen.argv.indexOf("--system-prompt-snapshot") + 1]).toBe("off");
+      expect(seen.prompt.message.content).toContain("Add the new header row.");
+    },
+  );
+
   it("compacts the CLI session at a window the harness picks", async () => {
     await create();
     const dump = join(scratch, "compact.json");
@@ -1051,7 +1105,7 @@ describe("ClaudeDriver turns (fake CLI)", () => {
   });
 
   it("passes every flag to a current CLI and raises no update notice", async () => {
-    await create();
+    await create(undefined, { FAKE_CLAUDE_VERSION: "2.1.267" });
     expect((await instance.snapshot()).update).toBeUndefined();
   });
 
@@ -1063,45 +1117,6 @@ describe("ClaudeDriver turns (fake CLI)", () => {
     await instance.adapter.sendTurn({ threadId: "t-unsnapshotted", text: "hi" });
     await recorder.until((e) => e.type === "turn.completed");
     expect(JSON.parse(readFileSync(dump, "utf8")).argv).toContain("--autocompact");
-  });
-
-  it("withholds --autocompact from a current CLI when its --help omits it", async () => {
-    // 2.1.129 ships publicly without --autocompact even though its version
-    // number is past the 2.1.122 floor. Detect from --help, not the floor,
-    // so the turn does not fail with "unknown option --autocompact".
-    const helpWithoutAutocompact = [
-      "MausBot wrapper for Claude Code 2.1.129",
-      "",
-      "Usage: claude [options]",
-      "",
-      "Options:",
-      "  --strict-mcp-config         Only use the harness MCP config",
-      "  --setting-sources <source>  Where to read settings",
-      "  -h, --help                  Display help",
-      "",
-    ].join("\n");
-    const dump = join(scratch, "current-cli-missing-autocompact.json");
-    await create(undefined, {
-      FAKE_CLAUDE_DUMP: dump,
-      FAKE_CLAUDE_VERSION: "2.1.129",
-      FAKE_CLAUDE_HELP: helpWithoutAutocompact,
-    });
-    await instance.snapshot();
-    await instance.adapter.sendTurn({ threadId: "t-129-missing", text: "hi" });
-    await recorder.until((e) => e.type === "turn.completed");
-
-    const seen = JSON.parse(readFileSync(dump, "utf8"));
-    expect(seen.argv).not.toContain("--autocompact");
-    expect(seen.argv).toContain("--strict-mcp-config");
-    expect(seen.argv).toContain("--setting-sources");
-    expect(seen.argv[seen.argv.indexOf("--setting-sources") + 1]).toBe("project");
-    const snap = await instance.snapshot();
-    expect(snap).toMatchObject({
-      state: "available",
-      version: "2.1.129 (Claude Code)",
-      features: { autocompact: false },
-    });
-    expect(snap.update).toBeUndefined();
   });
 
   it("maps a CLI version onto the flags it accepts", () => {
@@ -1121,68 +1136,18 @@ describe("ClaudeDriver turns (fake CLI)", () => {
     // from a modern CLI would silently re-open the context leak
     expect(claudeCliSupports(null, "--autocompact")).toBe(true);
 
-    expect(claudeCliUpdate("2.1.122 (Claude Code)", "claude")).toBeUndefined();
+    expect(claudeCliUpdate("2.1.267 (Claude Code)", "claude")).toBeUndefined();
     expect(claudeCliUpdate(null, "claude")).toBeUndefined();
+    const olderSnapshot = claudeCliUpdate("2.1.232 (Claude Code)", "claude");
+    expect(olderSnapshot?.message).toContain("--system-prompt-snapshot");
+    expect(olderSnapshot?.message).toContain("coordinated resumed turns cannot refresh stale system prompts");
+    expect(olderSnapshot?.message).not.toContain("no compaction window");
     expect(claudeCliUpdate("2.1.121 (Claude Code)", "claude")).toMatchObject({
       command: "claude update",
       message: expect.stringContaining("--autocompact"),
     });
     expect(claudeCliUpdate("1.0.100 (Claude Code)", "/opt/bin/claude")?.message).toContain("this machine's own Claude Code setup");
     expect(claudeCliUpdate("1.0.100 (Claude Code)", "/opt/bin/claude")?.command).toBe("/opt/bin/claude update");
-  });
-
-  it("detects --autocompact from claude --help fixtures", () => {
-    const withFlag = [
-      "Usage: claude [options]",
-      "",
-      "Options:",
-      "  --strict-mcp-config",
-      "  --setting-sources <source>",
-      "  --autocompact <count>     Auto-compact session",
-      "  -h, --help",
-      "",
-    ].join("\n");
-
-    const withoutFlag = [
-      "Usage: claude [options]",
-      "",
-      "Options:",
-      "  --strict-mcp-config",
-      "  --setting-sources <source>",
-      "  -h, --help",
-      "",
-    ].join("\n");
-
-    const withBanner = [
-      "MausBot wrapper for Claude Code 2.1.129",
-      "",
-      "Usage: claude [options]",
-      "",
-      "Options:",
-      "  --strict-mcp-config",
-      "  --setting-sources <source>",
-      "  -h, --help",
-      "",
-    ].join("\n");
-
-    const withDescriptionMention = [
-      "Options:",
-      "  --some-flag   Use --autocompact for compaction",
-      "  -h, --help",
-      "",
-    ].join("\n");
-
-    expect(claudeCliHelpSupportsFlag(withFlag, "--autocompact")).toBe(true);
-    expect(claudeCliHelpSupportsFlag(withoutFlag, "--autocompact")).toBe(false);
-    expect(claudeCliHelpSupportsFlag(withBanner, "--autocompact")).toBe(false);
-    expect(claudeCliHelpSupportsFlag(withDescriptionMention, "--autocompact")).toBe(false);
-
-    // Feature detection wins over the version floor.
-    expect(claudeAutoCompactSupported([2, 1, 129], withFlag)).toBe(true);
-    expect(claudeAutoCompactSupported([2, 1, 129], withoutFlag)).toBe(false);
-    // Falls back to the floor when the help probe has not run.
-    expect(claudeAutoCompactSupported([2, 1, 129], null)).toBe(true);
-    expect(claudeAutoCompactSupported([2, 1, 121], null)).toBe(false);
   });
 
   it("forwards the bot project's own .mcp.json, which strict mode would drop", async () => {

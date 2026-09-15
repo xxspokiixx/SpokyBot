@@ -288,6 +288,9 @@ export const CLAUDE_FLAG_FLOORS = {
   "--strict-mcp-config": [1, 0, 60],
   "--setting-sources": [1, 0, 122],
   "--autocompact": [2, 1, 122],
+  // 2.1.267 is the first CLI that accepts it; below that the recorded prompt
+  // simply is not refreshed, which is the pre-existing behaviour.
+  "--system-prompt-snapshot": [2, 1, 267],
 } as const satisfies Record<string, ClaudeCliVersion>;
 
 export type ClaudeCliVersion = readonly [number, number, number];
@@ -295,7 +298,7 @@ export type ClaudeCliVersion = readonly [number, number, number];
 /** The newest floor above: a CLI at or past it accepts everything the
  * harness sends. Below it the engine still works, minus the flags the CLI
  * predates, and the Engines page suggests an update. */
-export const CLAUDE_CONTEXT_CONTROL_MIN_VERSION: ClaudeCliVersion = CLAUDE_FLAG_FLOORS["--autocompact"];
+export const CLAUDE_CONTEXT_CONTROL_MIN_VERSION: ClaudeCliVersion = CLAUDE_FLAG_FLOORS["--system-prompt-snapshot"];
 
 /** `claude --version` prints "2.1.232 (Claude Code)"; the first dotted triple
  * is the version. Null when nothing parses, e.g. a wrapper that prints its
@@ -323,51 +326,25 @@ export function claudeCliSupports(version: ClaudeCliVersion | null, flag: keyof 
 }
 
 /** The Engines-page notice for a CLI older than the newest floor. The engine
- * keeps working: turns run without the flags the CLI predates, which means
- * no harness-picked compaction window and, on a very old CLI, no isolation
- * from this machine's own Claude Code setup. */
+ * keeps working without the flags its CLI predates. */
 export function claudeCliUpdate(version: string | null, cli: string): ProviderSnapshot["update"] | undefined {
   const parsed = parseClaudeCliVersion(version);
   if (!parsed || versionAtLeast(parsed, CLAUDE_CONTEXT_CONTROL_MIN_VERSION)) return undefined;
   const floor = CLAUDE_CONTEXT_CONTROL_MIN_VERSION.join(".");
   const missing = (Object.keys(CLAUDE_FLAG_FLOORS) as (keyof typeof CLAUDE_FLAG_FLOORS)[])
     .filter((flag) => !claudeCliSupports(parsed, flag));
+  const effects = [
+    ...(missing.includes("--autocompact") ? ["no compaction window picked by OpenMausBot"] : []),
+    ...(missing.includes("--setting-sources") ? ["bots still see this machine's own Claude Code setup"] : []),
+    ...(missing.includes("--system-prompt-snapshot") ? ["coordinated resumed turns cannot refresh stale system prompts"] : []),
+  ];
   return {
     title: "Update Claude Code for context controls",
     message:
       `Claude Code ${parsed.join(".")} predates ${floor}, so bots run without ${missing.join(", ")}: ` +
-      "no compaction window picked by OpenMausBot" +
-      (missing.includes("--setting-sources") ? ", and bots still see this machine's own Claude Code setup" : "") +
-      ". Update it, then refresh Engines.",
+      `${effects.join("; ")}. Update it, then refresh Engines.`,
     command: cli === "claude" ? "claude update" : `${cli} update`,
   };
-}
-
-/** Whether `claude --help` output lists `flag` as a supported option.
- *
- * A wrapper may print its own banner before the real options list, and the
- * flag may appear only in an example or description rather than as an
- * option. We scan for a line that begins with the flag (after optional
- * leading whitespace), which is how the real CLI formats its `--help`.
- */
-export function claudeCliHelpSupportsFlag(help: string | null | undefined, flag: string): boolean {
-  if (!help) return false;
-  const escaped = flag.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-  return new RegExp(`^\\s*${escaped}\\b`, "m").test(help);
-}
-
-/** Whether the installed CLI supports `--autocompact`.
- *
- * When `snapshot()` has already probed `claude --help`, use that. If the
- * probe has not run or `--help` failed, fall back to the version floor so
- * the pre-snapshot behavior is preserved.
- */
-export function claudeAutoCompactSupported(
-  version: ClaudeCliVersion | null,
-  help: string | null,
-): boolean {
-  if (help !== null) return claudeCliHelpSupportsFlag(help, "--autocompact");
-  return claudeCliSupports(version, "--autocompact");
 }
 
 const DRIVER_KIND = "claudeAgent";
@@ -376,6 +353,8 @@ export interface ClaudeConfig {
   cli: string;
   /** Separate CLI-managed login/settings. Empty uses the normal CLI account. */
   configDir?: string;
+  /** Company routing is supplied by the private desktop parent, never local discovery. */
+  managed?: boolean;
   permissionMode: "acceptEdits" | "auto" | "bypassPermissions";
   /** Available Claude built-ins. An empty list passes `--tools ""`. */
   tools?: string[];
@@ -797,6 +776,7 @@ function decodeConfig(raw: unknown): ClaudeConfig {
   return {
     cli: typeof o.cli === "string" ? o.cli : "claude",
     ...(configDir ? { configDir } : {}),
+    ...(o.managed === true ? { managed: true } : {}),
     permissionMode: (mode as ClaudeConfig["permissionMode"]) ?? "acceptEdits",
     ...(tools !== undefined ? { tools } : {}),
     ...(disallowedTools !== undefined ? { disallowedTools } : {}),
@@ -900,10 +880,11 @@ export const ClaudeDriver: ProviderDriver<ClaudeConfig> = {
   async create(input: DriverCreateInput<ClaudeConfig>): Promise<ProviderInstance> {
     const { instanceId, config } = input;
     const environment = (model?: string | null) =>
-      claudeEnvironment(model, { ...process.env, ...input.environment }, config.configDir, input.environment);
+      claudeEnvironment(config.managed ? undefined : model, { ...process.env, ...input.environment }, config.configDir, input.environment);
     const catalogEnv = environment();
     let models = STATIC_CLAUDE_MODELS;
     const refreshModels = async () => {
+      if (config.managed) return;
       try {
         const resolved = await mergeLocalInject(readClaudeModelCatalog(catalogEnv), catalogEnv);
         if (resolved.options.length) models = resolved;
@@ -913,16 +894,22 @@ export const ClaudeDriver: ProviderDriver<ClaudeConfig> = {
     };
     await refreshModels();
 
-    // The installed CLI's version and `--help` output as snapshot() last read
-    // them, so a flag the CLI does not know is never passed to it. The harness
-    // snapshots every instance whenever it describes them — app load, the
-    // Engines page, and right after `claude update` — which is exactly when
-    // the answer changes, so a turn normally finds it filled. A turn before
-    // any snapshot falls back to the version floor for the flags that are not
-    // known yet.
+    // The installed CLI's version as snapshot() last read it, so a flag the
+    // CLI does not know is never passed to it (CLAUDE_FLAG_FLOORS). The
+    // harness snapshots every instance whenever it describes them — app
+    // load, the Engines page, and right after `claude update`, which is
+    // exactly when the answer changes — so a turn normally finds it filled.
+    // Most turns before any snapshot assume a current CLI. A coordinated
+    // turn checks first because the snapshot-refresh flag is newer than the
+    // other context controls and an unknown flag would reject that request.
     let cliVersion: ClaudeCliVersion | null = null;
-    let cliHelp: string | null = null;
-    let cliHelpVersion: string | null = null;
+    let cliVersionChecked = false;
+    const readCliVersion = (env: NodeJS.ProcessEnv): Promise<string | null> =>
+      new Promise((resolve) => {
+        execCli(config.cli, ["--version"], { timeout: 8000, env }, (err, stdout) =>
+          resolve(err ? null : stdout.trim() || null),
+        );
+      });
     const listeners = new Set<RuntimeEventListener>();
     // one active turn per thread; a second send while busy is a caller bug
     const active = new Map<string, { stop: () => void; turnId: string; broker?: Awaited<ReturnType<typeof createPermissionBroker>> }>();
@@ -1040,6 +1027,10 @@ export const ClaudeDriver: ProviderDriver<ClaudeConfig> = {
     const retryState = new Map<string, { attempt: number; cancelled: boolean }>();
 
     const sendTurn = async (turn: SendTurnInput, logicalTurnId?: string) => {
+      if (config.managed && (!turn.model || turn.model.includes("::") || !config.configDir ||
+          !input.environment.ANTHROPIC_API_KEY || !input.environment.ANTHROPIC_BASE_URL)) {
+        throw new Error("Company model access is unavailable. Reconnect your organization; personal billing will not be used.");
+      }
       const { threadId, botId } = turn;
       // An internal relaunch (transient failure, rejected resume) keeps the
       // logical turn's stop handle in `active` while it sets up, so Stop is
@@ -1094,6 +1085,13 @@ export const ClaudeDriver: ProviderDriver<ClaudeConfig> = {
         args.push("--disallowedTools", config.disallowedTools.join(","));
       }
       const turnEnvironment = environment();
+      if (turn.refreshSystemPrompt && !cliVersionChecked) {
+        const version = await readCliVersion(turnEnvironment);
+        if (version) {
+          cliVersion = parseClaudeCliVersion(version);
+          cliVersionChecked = true;
+        }
+      }
       const isolated = !inheritsUserConfig(turnEnvironment);
       if (isolated) {
         // A bot gets the tools and instructions its owner gave it, not
@@ -1109,11 +1107,19 @@ export const ClaudeDriver: ProviderDriver<ClaudeConfig> = {
         if (claudeCliSupports(cliVersion, "--setting-sources")) args.push("--setting-sources", "project");
       }
       const compactWindow = autoCompactWindow(turnEnvironment);
-      if (compactWindow && claudeAutoCompactSupported(cliVersion, cliHelp)) {
+      if (compactWindow && claudeCliSupports(cliVersion, "--autocompact")) {
         args.push("--autocompact", compactWindow);
       }
-      const turnModel = await resolveClaudeTurnModel(turn.model, turnEnvironment);
-      const injected = applyClaudeInject({ ...turnEnvironment }, turnModel);
+      // An old pair conversation can still carry its first assignment in
+      // Claude's recorded system prompt. The current brief rides in the user
+      // turn, so refresh the recorded prompt on --resume too. Gated by the
+      // version floor like every other flag the CLI may predate: an unknown
+      // flag is a hard argument error, not a graceful degrade.
+      if (turn.refreshSystemPrompt && cliVersionChecked && claudeCliSupports(cliVersion, "--system-prompt-snapshot")) {
+        args.push("--system-prompt-snapshot", "off");
+      }
+      const turnModel = config.managed ? turn.model : await resolveClaudeTurnModel(turn.model, turnEnvironment);
+      const injected = config.managed ? { model: turnModel ?? null, injected: false } : applyClaudeInject({ ...turnEnvironment }, turnModel);
       if (injected.model) args.push("--model", injected.model);
       if (turn.effort) args.push("--effort", turn.effort);
 
@@ -1565,6 +1571,9 @@ export const ClaudeDriver: ProviderDriver<ClaudeConfig> = {
                 ...(typeof msg.usage.cache_read_input_tokens === "number"
                   ? { cachedInput: msg.usage.cache_read_input_tokens }
                   : {}),
+                // one assistant message = one model call, and its prompt is
+                // everything in the window: fresh text, cache reads and writes
+                contextTokens: (msg.usage.input_tokens || 0) + (msg.usage.cache_read_input_tokens || 0) + (msg.usage.cache_creation_input_tokens || 0),
               });
             }
             break;
@@ -1853,37 +1862,16 @@ export const ClaudeDriver: ProviderDriver<ClaudeConfig> = {
 
     const snapshot = async (): Promise<ProviderSnapshot> => {
       const env = environment();
-      const version = await new Promise<string | null>((resolve) => {
-        execCli(config.cli, ["--version"], { timeout: 8000, env }, (err, stdout) =>
-          resolve(err ? null : stdout.trim()),
-        );
-      });
+      const version = await readCliVersion(env);
       if (!version) return { state: "unavailable", reason: `\`${config.cli}\` CLI not found` };
       cliVersion = parseClaudeCliVersion(version);
-
-      if (version !== cliHelpVersion) {
-        cliHelp = await new Promise<string | null>((resolve) => {
-          execCli(config.cli, ["--help"], { timeout: 8000, env }, (err, stdout) =>
-            resolve(err ? null : stdout),
-          );
-        });
-        cliHelpVersion = version;
-      }
-      const features = cliHelp !== null ? { autocompact: claudeCliHelpSupportsFlag(cliHelp, "--autocompact") } : undefined;
-
+      cliVersionChecked = true;
       const auth = await claudeAuthStatus(config.cli, env);
       // claudeEnvironment strips ANTHROPIC_API_KEY, so turns run on the
       // CLI's own login (Pro/Max): the cost it reports is what the call
       // WOULD bill, not a charge
       const update = claudeCliUpdate(version, config.cli);
-      return {
-        state: "available",
-        version,
-        ...auth,
-        ...(update ? { update } : {}),
-        ...(features ? { features } : {}),
-        billing: "subscription",
-      };
+      return { state: "available", version, ...auth, ...(update ? { update } : {}), billing: "subscription" };
     };
 
     /** One-shot Claude call with the prompt on stdin, never argv. Approval
