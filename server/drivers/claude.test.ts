@@ -892,6 +892,62 @@ describe("ClaudeDriver turns (fake CLI)", () => {
     expect(text).toBe("hi");
   });
 
+  it("refreshes a coordinated resumed session's prompt when the CLI supports it", async () => {
+    await create(undefined, { FAKE_CLAUDE_DUMP: join(scratch, "coordination-snapshot.json"), FAKE_CLAUDE_VERSION: "2.1.267" });
+    // Read the version first, so the floor is what admits the flag here —
+    // without this the driver sees a null version and would push it for any CLI.
+    await instance.snapshot();
+    await instance.adapter.sendTurn({
+      threadId: "t-coordinated-resume",
+      text: "Addressed teammate request 2. Add the new header row.",
+      resumeCursor: "existing-claude-session",
+      system: "Stable coordination policy, without the earlier assignment.",
+      refreshSystemPrompt: true,
+    });
+    await recorder.until((e) => e.type === "turn.completed");
+    const seen = JSON.parse(readFileSync(join(scratch, "coordination-snapshot.json"), "utf8"));
+    expect(seen.argv[seen.argv.indexOf("--system-prompt-snapshot") + 1]).toBe("off");
+    expect(seen.argv[seen.argv.indexOf("--resume") + 1]).toBe("existing-claude-session");
+    expect(seen.prompt.message.content).toContain("Add the new header row.");
+  });
+
+  it("keeps coordinated turns working on a CLI without the snapshot flag", async () => {
+    const dump = join(scratch, "coordination-no-snapshot.json");
+    await create(undefined, { FAKE_CLAUDE_DUMP: dump, FAKE_CLAUDE_VERSION: "2.1.232" });
+    await instance.snapshot();
+    await instance.adapter.sendTurn({
+      threadId: "t-coordinated-old-cli",
+      text: "Addressed teammate request 2. Add the new header row.",
+      resumeCursor: "existing-claude-session",
+      system: "Stable coordination policy, without the earlier assignment.",
+      refreshSystemPrompt: true,
+    });
+    await recorder.until((e) => e.type === "turn.completed");
+    const seen = JSON.parse(readFileSync(dump, "utf8"));
+    expect(seen.argv).not.toContain("--system-prompt-snapshot");
+    expect(seen.prompt.message.content).toContain("Add the new header row.");
+  });
+
+  it.each([["2.1.232", false], ["2.1.267", true]] as const)(
+    "probes Claude %s before the first coordinated turn without an Engines snapshot",
+    async (version, supportsSnapshot) => {
+      const dump = join(scratch, `coordination-first-turn-${version}.json`);
+      await create(undefined, { FAKE_CLAUDE_DUMP: dump, FAKE_CLAUDE_VERSION: version });
+      await instance.adapter.sendTurn({
+        threadId: `t-coordinated-first-turn-${version}`,
+        text: "Addressed teammate request 2. Add the new header row.",
+        resumeCursor: "existing-claude-session",
+        system: "Stable coordination policy, without the earlier assignment.",
+        refreshSystemPrompt: true,
+      });
+      await recorder.until((e) => e.type === "turn.completed");
+      const seen = JSON.parse(readFileSync(dump, "utf8"));
+      expect(seen.argv.includes("--system-prompt-snapshot")).toBe(supportsSnapshot);
+      if (supportsSnapshot) expect(seen.argv[seen.argv.indexOf("--system-prompt-snapshot") + 1]).toBe("off");
+      expect(seen.prompt.message.content).toContain("Add the new header row.");
+    },
+  );
+
   it("compacts the CLI session at a window the harness picks", async () => {
     await create();
     const dump = join(scratch, "compact.json");
@@ -1049,7 +1105,7 @@ describe("ClaudeDriver turns (fake CLI)", () => {
   });
 
   it("passes every flag to a current CLI and raises no update notice", async () => {
-    await create();
+    await create(undefined, { FAKE_CLAUDE_VERSION: "2.1.267" });
     expect((await instance.snapshot()).update).toBeUndefined();
   });
 
@@ -1080,8 +1136,12 @@ describe("ClaudeDriver turns (fake CLI)", () => {
     // from a modern CLI would silently re-open the context leak
     expect(claudeCliSupports(null, "--autocompact")).toBe(true);
 
-    expect(claudeCliUpdate("2.1.122 (Claude Code)", "claude")).toBeUndefined();
+    expect(claudeCliUpdate("2.1.267 (Claude Code)", "claude")).toBeUndefined();
     expect(claudeCliUpdate(null, "claude")).toBeUndefined();
+    const olderSnapshot = claudeCliUpdate("2.1.232 (Claude Code)", "claude");
+    expect(olderSnapshot?.message).toContain("--system-prompt-snapshot");
+    expect(olderSnapshot?.message).toContain("coordinated resumed turns cannot refresh stale system prompts");
+    expect(olderSnapshot?.message).not.toContain("no compaction window");
     expect(claudeCliUpdate("2.1.121 (Claude Code)", "claude")).toMatchObject({
       command: "claude update",
       message: expect.stringContaining("--autocompact"),

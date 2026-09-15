@@ -240,6 +240,11 @@ export interface SendTurnInput {
    * request every turn ignore both and keep reading `system`. */
   systemStable?: string;
   systemVolatile?: string;
+  /** Coordinated teammate turns may resume a Claude conversation whose
+   * earlier system prompt contained a different assignment. Refresh that
+   * prompt when the provider supports it; the current brief also arrives
+   * in this turn's text. */
+  refreshSystemPrompt?: boolean;
   /** Per-bot integrations the driver may hand to the agent as tools. */
   integrations?: {
     /** A local stdio bridge owns the remote Composio transport. Keeping the

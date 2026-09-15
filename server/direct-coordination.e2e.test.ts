@@ -221,11 +221,24 @@ it("keeps one conversation per bot pair across separate user turns, titled for t
   for (const brief of ["Implement the CSV export", "Add the header row to that export", "Document the export you just built"]) {
     expect(transcript).toContain(brief);
   }
+  // Claude snapshots the system prompt at the session's first request. The
+  // briefs must therefore travel in their user turns so they remain current
+  // whether the CLI process is retained or the session is resumed.
+  const leadTurns = f.evidence().filter((turn: any) => turn.botId === f.lead.id);
+  expect(leadTurns).toHaveLength(3);
+  expect(leadTurns[0].prompt.message.content).toContain("Implement the CSV export");
+  expect(leadTurns[1].prompt.message.content).toContain("Add the header row to that export");
+  expect(leadTurns[2].prompt.message.content).toContain("Document the export you just built");
+  expect(leadTurns.every((turn: any) => turn.system.includes("current request and returned results arrive in the user turn"))).toBe(true);
+  expect(leadTurns.every((turn: any) => turn.snapshotMode === "off")).toBe(true);
+  for (const brief of ["Implement the CSV export", "Add the header row to that export", "Document the export you just built"]) {
+    expect(leadTurns.every((turn: any) => !turn.system.includes(brief))).toBe(true);
+  }
   // a pair conversation is the standing line between two bots: it never
   // auto-closes, and every receipt in the sender's chat points at it
   expect((await leadTasks()).find((task: any) => task.threadId === pair.threadId)).not.toHaveProperty("closedBy");
   expect((await f.messages(f.chief.activeTaskId)).filter((message: any) => message.threadRef?.threadId === pair.threadId)).toHaveLength(6);
-}), 90_000);
+}, { FAKE_CLAUDE_VERSION: "2.1.270" }), 90_000);
 
 it("gives a second simultaneous assignment its own labelled thread, which closes once its result is reported", () => fixture(async f => {
   f.plan[f.lead.id] = { turns: [{ reply: "Export implemented" }, { reply: "Benchmark finished" }] };
@@ -432,7 +445,7 @@ it("withholds direct results when the owner's cross-team grant is revoked", () =
   expect((await f.wait()).status).toBe("settled");
   expect(f.nodes().find((node: any) => node.parentId).status).toBe("failed");
   const resumed = f.evidence().find((turn: any) => turn.botId === f.chief.id && turn.resumed);
-  expect(resumed.system).toContain("Result withheld");
+  expect(resumed.prompt.message.content).toContain("Result withheld");
   expect(JSON.stringify(resumed)).not.toContain("PRIVATE_ENGINEERING_RESULT");
 }), 45_000);
 
