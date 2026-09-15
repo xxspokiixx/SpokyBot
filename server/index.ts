@@ -9793,7 +9793,7 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
     // Hosted workspaces have one sign-in authority. A missing optional layer
     // must not accidentally reactivate legacy email/QR credential minting.
     if (HOSTED_WORKSPACE) {
-      if (method === "POST" && ["/api/auth/pair", "/api/auth/pairing", "/api/auth/email/start", "/api/auth/email/verify"].includes(path)) {
+      if (method === "POST" && ["/api/auth/pair", "/api/pair", "/api/auth/pairing", "/api/auth/email/start", "/api/auth/email/verify"].includes(path)) {
         return json(res, 403, { error: "Sign in through the workspace portal." });
       }
       if (workspaceAccess) {
@@ -9876,6 +9876,43 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
         return json(res, 200, { session: result.session, environment });
       }
       return json(res, 200, { token: result.token, session: result.session, environment });
+    }
+    // The route the iOS and Android companion apps already POST to. Until now
+    // only the desktop's companion sidecar answered it, so a self-hosted
+    // server had nothing for a native phone to pair against: the app could
+    // reach the server and pass its health probe, then ask for a credential
+    // the server could not issue. Same window, same lockout and the same
+    // single-use exchange as /api/auth/pair above; only the request and
+    // response shapes differ, because the apps were written against the
+    // sidecar. Public and unauthenticated for the same reason
+    // /api/auth/pair is: redeeming a one-time credential IS the sign-in.
+    if (method === "POST" && path === "/api/pair") {
+      if (!/^application\/json\b/i.test(String(req.headers["content-type"] ?? ""))) {
+        return json(res, 415, { error: "send the pairing credential as JSON (content-type: application/json)" });
+      }
+      const body = await readBody(req);
+      const credential = typeof body?.credential === "string" ? body.credential : typeof body?.code === "string" ? body.code : "";
+      const label = typeof body?.deviceName === "string" ? body.deviceName : "";
+      const attemptId = typeof body?.pairRequestId === "string" ? body.pairRequestId : undefined;
+      const paired = sessions.exchange({ code: credential, label, attemptId, source: requestSource(req), fallbackLabel: labelFromUserAgent(req.headers["user-agent"]) });
+      if (!paired.ok) {
+        console.warn(`pairing refused from ${requestSource(req)}: ${paired.error}`);
+        return json(res, paired.status, { error: paired.error });
+      }
+      // The shape the companion apps decode (android/core Models.kt,
+      // PairResponseSerializer): token, device and serverName are required;
+      // hosts and endpoints are advisory and deliberately omitted, because a
+      // harness has no sidecar endpoints to advertise.
+      return json(res, 200, {
+        token: paired.token,
+        device: {
+          id: paired.session.id,
+          name: paired.session.label,
+          createdAt: paired.session.createdAt,
+          lastSeenAt: paired.session.lastSeenAt,
+        },
+        serverName: environmentDescriptor({ environmentId: ENVIRONMENT_ID, desktopManaged: DESKTOP_MANAGED }).label,
+      });
     }
     const gate = resolveRequestAuth(req, {
       sessions,
@@ -9973,11 +10010,22 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
       const origin = requestOrigin(req);
       const base = publicUrl() ?? (auth.kind === "session" && origin ? origin : null);
       const code = formatPairingCode(opened.code);
+      // Two links for one window. `url` opens the web app and is what a
+      // browser and the iOS app already read. `inviteUrl` is the custom
+      // scheme the native companion scanners accept; it carries the
+      // credential encoding because those scanners cannot take a typed code.
+      const serverName = environmentDescriptor({ environmentId: ENVIRONMENT_ID, desktopManaged: DESKTOP_MANAGED }).label;
+      const invite = base
+        ? `openmausbot://pair?address=${encodeURIComponent(base)}&token=${encodeURIComponent(opened.credential)}&name=${encodeURIComponent(serverName)}`
+        : null;
       return json(res, 200, {
         id: opened.id,
         code,
+        credential: opened.credential,
         expiresAt: opened.expiresAt,
         url: base ? `${base}/pair#code=${code}` : null,
+        inviteUrl: invite,
+        serverName,
         hint: base
           ? null
           : "this server has no public address to put in a link: set OMB_PUBLIC_URL, or open /pair on the address you use and type the code",

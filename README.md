@@ -361,8 +361,9 @@ the server, not your saved work. Use `--no-open` to skip opening the browser.
 
 Phone access is optional and defaults to skipping. Choose an explicitly
 approved managed public HTTPS endpoint protected by pairing, an existing
-Tailscale connection, or your own HTTPS reverse proxy. Use Safari or an installed
-iOS app on iPhone/iPad; Android uses the web browser for this CLI flow. A phone
+Tailscale connection, or your own HTTPS reverse proxy. Both native apps pair from
+this flow: the QR is an app link when you are connecting an Android phone, and the
+iOS app takes either that or the web link. A browser works on either phone. A phone
 cannot use a localhost link. `--local` ignores saved remote access for one launch;
 `--no-pair` suppresses phone prompts and invitations but does not disable a saved
 remote connection.
