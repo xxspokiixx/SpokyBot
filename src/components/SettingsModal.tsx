@@ -709,11 +709,12 @@ export function SettingsModal() {
                 <RemoteComputerSection />
                 {!remoteActive && <CustomDomainSettings />}
                 {/* mints an admin/client session token for anything that isn't the phone companion
-                    flow (MCP clients, `openmausbot pair`, a second desktop app taking over this
-                    server) — shown whenever this instance owns the server being paired against,
-                    same condition as the settings below it; hidden only when this desktop is
-                    itself a remote client of someone else's server, since it has nothing to pair */}
-                {!remoteActive && <ServerPairingCard />}
+                    flow (MCP clients, `openmausbot pair`, a second desktop app), and pairs phones to a
+                    hosted server. Shown for the desktop app's own server (#950) AND when this desktop is
+                    a remote client of a hosted workspace: its requests carry that server's session, and
+                    Settings there is the only place that server's phones can be paired from (MOCA-84).
+                    The server decides who may act — an owner or an admin session — not this gate. */}
+                <ServerPairingCard />
                 {!remoteActive && <CompanionSection profileEmail={state.config?.profile?.email} />}
               </>
             )}
