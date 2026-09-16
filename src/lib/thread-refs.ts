@@ -40,6 +40,17 @@ const WORD_CHAR = /[\p{L}\p{N}_]/u;
 /** a "#" glued to one of these is not a word start: C#Title, &#39;, ##x */
 const NOT_WORD_START = /[\p{L}\p{N}_#&]/u;
 
+/** Spacing a pasted thread token needs on each side: a lead space after
+ * any char the resolver refuses as a word start — word chars, but also #
+ * and &, so a paste after them cannot glue into ##Title — and a trail
+ * space before a plain word char. */
+export function threadTokenSpacing(text: string, start: number, end: number): { lead: string; trail: string } {
+  return {
+    lead: start > 0 && NOT_WORD_START.test(text[start - 1] ?? "") ? " " : "",
+    trail: end < text.length && WORD_CHAR.test(text[end] ?? "") ? " " : "",
+  };
+}
+
 /** Only a title that is a real name can be linked: "123" would turn every
  * issue number into a thread link. */
 function linkable(title: string): boolean {
@@ -203,6 +214,9 @@ export function resolveThreadRefAddress(
   const pinned = address.botId ? candidates.filter((thread) => thread.botId === address.botId) : [];
   if (pinned.length === 1) return { ...pinned[0], title: pinned[0].title.trim(), ambiguous: false };
   if (pinned.length > 1) return pick(pinned, currentBotId);
+  // a pinned owner missing from the visible threads is a dead reference:
+  // never fall through to another bot's same-id thread
+  if (address.botId) return null;
   return pick(candidates, currentBotId);
 }
 
@@ -225,33 +239,119 @@ interface MarkdownLinkSpan {
   raw: string;
   /** a markdown link to a thread: label plus parsed address when valid */
   link?: { label: string; address: ThreadRefAddress | null };
+  /** inline or fenced code: quoted text, never rewritten */
+  code?: boolean;
 }
 
-const THREAD_LINK_MD = /\[((?:\\.|[^\\\]])*)\]\((openmausbot:\/\/thread\/[^()\s]*)\)/g;
+const MARKDOWN_LINK_LABEL = /\[((?:\\.|[^\\\]])*)\]\(/y;
+const INLINE_LINK_SPACE = " \t\n\r";
 
-/** Split text into plain runs and markdown links that point at threads.
- * Every matched link is kept verbatim by the serializer — live or dead —
- * the way markdown leaves a link's label alone. */
-function splitThreadLinkMarkdown(text: string): MarkdownLinkSpan[] {
-  if (!text.includes("](")) return [{ raw: text }];
-  const spans: MarkdownLinkSpan[] = [];
-  let last = 0;
-  for (const match of text.matchAll(THREAD_LINK_MD)) {
-    const at = match.index ?? 0;
-    if (at > last) spans.push({ raw: text.slice(last, at) });
-    spans.push({ raw: match[0], link: { label: match[1], address: parseThreadRefUrl(match[2]) } });
-    last = at + match[0].length;
+/** The CommonMark inline-link tail after "[label](": optional whitespace,
+ * an angle-bracket destination (spaces allowed) or a bare destination with
+ * balanced parentheses, optional whitespace, an optional quoted title, and
+ * the closing ")". Returns the tail length plus the bare destination for
+ * resolution, or null when no complete link closes here. */
+function inlineLinkTail(rest: string, from: number): { tail: number; destination: string } | null {
+  let at = from;
+  while (at < rest.length && INLINE_LINK_SPACE.includes(rest.charAt(at))) at += 1;
+  const destStart = at;
+  let destination = "";
+  if (rest.charAt(at) === "<") {
+    const close = rest.indexOf(">", at + 1);
+    if (close === -1) return null;
+    destination = rest.slice(at + 1, close);
+    at = close + 1;
+  } else {
+    let depth = 0;
+    while (at < rest.length) {
+      const ch = rest.charAt(at);
+      if (ch === "(") depth += 1;
+      else if (ch === ")") {
+        if (depth === 0) break;
+        depth -= 1;
+      } else if (INLINE_LINK_SPACE.includes(ch)) break;
+      at += 1;
+    }
+    if (depth !== 0) return null;
+    destination = rest.slice(destStart, at);
   }
-  if (last < text.length) spans.push({ raw: text.slice(last) });
+  while (at < rest.length && INLINE_LINK_SPACE.includes(rest.charAt(at))) at += 1;
+  const titleQuote = rest.charAt(at);
+  if (titleQuote === '"' || titleQuote === "'") {
+    const close = rest.indexOf(titleQuote, at + 1);
+    if (close === -1) return null;
+    at = close + 1;
+  } else if (titleQuote === "(") {
+    let depth = 1;
+    at += 1;
+    while (at < rest.length && depth > 0) {
+      const ch = rest.charAt(at);
+      if (ch === "(") depth += 1;
+      else if (ch === ")") depth -= 1;
+      at += 1;
+    }
+    if (depth !== 0) return null;
+  }
+  while (at < rest.length && INLINE_LINK_SPACE.includes(rest.charAt(at))) at += 1;
+  if (rest.charAt(at) !== ")") return null;
+  return { tail: at + 1 - from, destination };
+}
+
+/** Split text into plain runs and the spans resolution must never touch.
+ * Every markdown link is kept verbatim — a #Title inside a label would
+ * nest links — and so is code: inline backticks and fenced blocks quote
+ * their contents, so only plain runs carry #Title mentions. */
+function splitThreadLinkMarkdown(text: string): MarkdownLinkSpan[] {
+  if (!text.includes("](") && !text.includes("`")) return [{ raw: text }];
+  const spans: MarkdownLinkSpan[] = [];
+  let plain = "";
+  const flush = () => {
+    if (plain) spans.push({ raw: plain });
+    plain = "";
+  };
+  let at = 0;
+  while (at < text.length) {
+    const rest = text.slice(at);
+    const guarded = (end: number) => {
+      flush();
+      spans.push({ raw: text.slice(at, end), code: true });
+      at = end;
+    };
+    if (rest.startsWith("```")) {
+      const close = rest.indexOf("```", 3);
+      guarded(close === -1 ? text.length : at + close + 3);
+      continue;
+    }
+    const ticks = /^`+/.exec(rest)?.[0];
+    if (ticks) {
+      const close = rest.indexOf(ticks, ticks.length);
+      guarded(close === -1 ? text.length : at + close + ticks.length);
+      continue;
+    }
+    MARKDOWN_LINK_LABEL.lastIndex = 0;
+    const open = MARKDOWN_LINK_LABEL.exec(rest);
+    const tail = open && inlineLinkTail(rest, open[0].length);
+    if (open && tail) {
+      flush();
+      const raw = rest.slice(0, open[0].length + tail.tail);
+      spans.push({ raw, link: { label: open[1], address: parseThreadRefUrl(tail.destination) } });
+      at += raw.length;
+      continue;
+    }
+    plain += text[at];
+    at += 1;
+  }
+  flush();
   return spans.length ? spans : [{ raw: text }];
 }
+
 
 /** The text a send carries: resolvable #Title runs become canonical links;
  * existing links and unknown titles pass through untouched. */
 export function serializeThreadRefs(text: string, threads: ThreadRefCandidate[], currentBotId?: string): string {
   if (!groupTitles(threads).length) return text;
   return splitThreadLinkMarkdown(text)
-    .map((span) => span.link ? span.raw : resolveThreadRefs(span.raw, threads, currentBotId)
+    .map((span) => (span.link || span.code) ? span.raw : resolveThreadRefs(span.raw, threads, currentBotId)
       .map((run) => run.ref ? threadRefMarkdown(run.ref) : run.text)
       .join(""))
     .join("");
@@ -271,6 +371,8 @@ export function splitThreadRefsForDisplay(text: string, threads: ThreadRefCandid
     if (span.link) {
       const ref = span.link.address ? resolveThreadRefAddress(threads, span.link.address, currentBotId) : null;
       spans.push(ref ? { text: unescapeThreadLabel(span.link.label), ref } : { text: span.raw });
+    } else if (span.code) {
+      spans.push({ text: span.raw });
     } else {
       spans.push(...resolveThreadRefs(span.raw, threads, currentBotId));
     }

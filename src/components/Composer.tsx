@@ -56,7 +56,7 @@ import {
 } from "./ComposerQueuedMessages";
 import { skillAuthoringEnabled } from "@/lib/feature-flags";
 import { mentionChoicesForQuery } from "@/lib/mentions";
-import { serializeThreadRefs, threadTokenFromPaste } from "@/lib/thread-refs";
+import { serializeThreadRefs, threadTokenFromPaste, threadTokenSpacing } from "@/lib/thread-refs";
 import {
   composerSlashTrigger,
   goalTextFromComposer,
@@ -585,9 +585,7 @@ export function Composer({
       const end = e.currentTarget.selectionEnd ?? start;
       // "#Title" only links at a word boundary, so keep the token clear of
       // the words it may land between
-      const word = /[\p{L}\p{N}_]/u;
-      const lead = start > 0 && word.test(text[start - 1] ?? "") ? " " : "";
-      const trail = end < text.length && word.test(text[end] ?? "") ? " " : "";
+      const { lead, trail } = threadTokenSpacing(text, start, end);
       const token = lead + reference.token + trail;
       editText(text.slice(0, start) + token + text.slice(end));
       const at = start + token.length;

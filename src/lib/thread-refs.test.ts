@@ -9,6 +9,7 @@ import {
   splitThreadRefsForDisplay,
   threadRefUrl,
   threadTokenFromPaste,
+  threadTokenSpacing,
   type ThreadRefCandidate,
 } from "./thread-refs";
 
@@ -191,4 +192,74 @@ describe("canonical thread links", () => {
       .toMatchObject({ botId: "ada", ambiguous: false });
     expect(resolveThreadRefAddress([], { threadId: "nope" })).toBeNull();
   });
+
+  it("spaces a pasted token away from chars the resolver refuses as word starts", () => {
+    expect(threadTokenSpacing("C#", 2, 2)).toEqual({ lead: " ", trail: "" });
+    expect(threadTokenSpacing("QA &", 4, 4)).toEqual({ lead: " ", trail: "" });
+    expect(threadTokenSpacing("see ", 4, 4)).toEqual({ lead: "", trail: "" });
+    expect(threadTokenSpacing("plain", 5, 5)).toEqual({ lead: " ", trail: "" });
+    // # and & only block a word start, so they never need a trail space
+    expect(threadTokenSpacing("#QA", 1, 1)).toEqual({ lead: " ", trail: " " });
+    expect(threadTokenSpacing("QA next", 0, 0)).toEqual({ lead: "", trail: " " });
+    expect(threadTokenSpacing("x &", 3, 3)).toEqual({ lead: " ", trail: "" });
+  });
+
+  it("keeps a pinned link to an invisible owner dead even when another bot shares the id", () => {
+    const shared = [scout("qa", "QA PR 245", 9)];
+    const address = { threadId: "qa", botId: "ada" };
+    expect(resolveThreadRefAddress(shared, address, "scout")).toBeNull();
+    const link = threadRefUrl(address);
+    expect(splitThreadRefsForDisplay(`See [QA PR 245](${link})`, shared, "scout"))
+      .toEqual([{ text: "See " }, { text: `[QA PR 245](${link})` }]);
+    expect(threadTokenFromPaste(link, shared, "scout")).toBeNull();
+  });
+
+  it("protects ordinary link labels and code spans when serializing titles", () => {
+    // a #Title inside another link's label must not nest links
+    expect(serializeThreadRefs("[see #Release notes](https://example.test/a)", threads))
+      .toBe("[see #Release notes](https://example.test/a)");
+    // inline and fenced code are quotes, not prose
+    expect(serializeThreadRefs("run `#Release notes` now", threads)).toBe("run `#Release notes` now");
+    expect(serializeThreadRefs("```\n#Release notes\n```", threads)).toBe("```\n#Release notes\n```");
+    // a plain run right next to a protected span still links
+    const link = threadRefUrl({ botId: "ada", threadId: "release" });
+    expect(serializeThreadRefs("#Release notes and `#Release notes`", threads))
+      .toBe(`[Release notes](${link}) and \`#Release notes\``);
+  });
+
+  it("leaves quoted titles as text on display too", () => {
+    expect(splitThreadRefsForDisplay("run `#Release notes` now", threads))
+      .toEqual([{ text: "run " }, { text: "`#Release notes`" }, { text: " now" }]);
+  });
+
+  it("protects balanced-paren, titled, and angle-bracket link destinations", () => {
+    const forms = [
+      "[see #Release notes](https://example.test/a_(b))",
+      "[see #Release notes](https://example.test/a_(b_(c))_(d))",
+      "[see #Release notes](https://example.test/a \"Official\")",
+      "[see #Release notes](https://example.test/a (Official))",
+      "[see #Release notes](<https://example.test/a b>)",
+    ];
+    for (const form of forms) {
+      expect(serializeThreadRefs(form, threads)).toBe(form);
+      expect(splitThreadRefsForDisplay(form, threads)).toEqual([{ text: form }]);
+    }
+  });
+
+  it("treats an unterminated inline link as a plain run instead of hanging", () => {
+    // a truncated paste must fall back to plain text on both the send and
+    // display paths — vitest's 5s timeout turns a scanner hang into a failure
+    const truncated = [
+      "[a](x,",
+      "[a](",
+      "[a](<x>",
+      "[a](x \"t\"",
+      "[see this](https://en.wikipedia.org/wiki/Foo_(bar)",
+    ];
+    for (const form of truncated) {
+      expect(serializeThreadRefs(form, threads)).toBe(form);
+      expect(splitThreadRefsForDisplay(form, threads)).toEqual([{ text: form }]);
+    }
+  });
+
 });
