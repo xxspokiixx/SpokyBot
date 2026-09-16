@@ -1126,7 +1126,12 @@ export const ClaudeDriver: ProviderDriver<ClaudeConfig> = {
         // model call in the session then re-reads all of it.
         // Each flag only on a CLI that accepts it: an unknown flag is an
         // argument error that would fail every turn (CLAUDE_FLAG_FLOORS).
-        if (claudeCliSupports(cliVersion, "--strict-mcp-config")) args.push("--strict-mcp-config");
+        // The MCP half has a switch (Plugins → MCP servers → "Also use my
+        // Claude Code MCP servers"): with it on, the CLI loads the servers
+        // and connectors from the person's own Claude Code config — the way
+        // Codex reads its own config.toml — while skills, hooks and the
+        // personal CLAUDE.md stay out.
+        if (!turn.mcpFromUserConfig && claudeCliSupports(cliVersion, "--strict-mcp-config")) args.push("--strict-mcp-config");
         if (claudeCliSupports(cliVersion, "--setting-sources")) args.push("--setting-sources", "project");
       }
       const compactWindow = autoCompactWindow(turnEnvironment);
@@ -1208,6 +1213,9 @@ export const ClaudeDriver: ProviderDriver<ClaudeConfig> = {
       // routes every custom tool call through the ogb permission broker
       // into an Allow/Deny card. Reserved names were filtered upstream;
       // skip any residual collision instead of clobbering a built-in.
+      // A remote entry ({type, url, headers}) is already in the CLI's own
+      // shape and the CLI connects to it itself; header values ride in the
+      // 0600 config file like every other credential here.
       // Bot-owned servers, gated below: they are the ones that answer for a
       // machine rather than for a context window.
       const botOwned = new Set<string>();

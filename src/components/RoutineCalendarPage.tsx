@@ -78,6 +78,7 @@ import {
   type RoutineCalendarItem,
 } from "@/lib/routine-calendar";
 import { DAY_NAMES, durationLabel, intervalLabel, niceDate, niceTime, scheduleLabel } from "@/lib/schedule-label";
+import { Switch } from "./SettingsPrimitives";
 import type {
   Routine,
   RoutineContextAttachment,
@@ -696,6 +697,11 @@ function EventEditor({
                   {kind === "routine" && <><option value="monthly">Monthly</option><option value="yearly">Yearly</option><option value="cron">Custom cron (advanced)</option></>}
                 </select>
               </div>
+              {kind === "routine" && (
+                <p className="text-[11px] leading-relaxed text-ink-secondary">
+                  Runs while OpenMausBot is open on this computer — it cannot wake a sleeping Mac. A run missed by less than 12 hours still happens when the app is back; for 24/7, run OpenMausBot on a VPS.
+                </p>
+              )}
               {isCronChoice(recurrence) && kind === "routine" && cron && <CronScheduleFields choice={recurrence} value={cronDraft} onChange={(draft) => { setCronDraft(draft); setCronChanged(true); }} runs={cron.runs} error={cron.error} />}
               {recurrence === "custom" && (
                 <div className="flex flex-wrap gap-1.5">
@@ -1808,6 +1814,7 @@ export function RoutinesPage({ onBack, onOpenRoom }: { onBack: () => void; onOpe
           {section === "calendar" && scheduleView === "calendar" && state.routinesLoadState === "loading" && state.routines.length === 0 && <p role="status" className="w-full text-[11.5px] text-ink-secondary">{t("routines.loading")}</p>}
         </div>}
       </header>
+      <RoutineWakeBar />
 
       {section === "webhooks" ? <WebhooksPanel bots={visibleBots} createRequest={webhookCreateRequest} onCreateHandled={handleWebhookCreateHandled} /> : section === "logs" ? (
         <div className="min-h-0 flex-1 overflow-y-auto"><RoutineLogs runs={filteredRuns} bots={state.bots} loading={state.routinesLoadState === "loading" && filteredRuns.length === 0} error={state.routinesLoadState === "error"} routineId={routineFilter} onClearRoutine={() => setRoutineFilter(undefined)} onOpen={openRun} /></div>
@@ -1829,5 +1836,48 @@ export function RoutinesPage({ onBack, onOpenRoom }: { onBack: () => void; onOpe
       {liveSelected && <EventDetails key={`${liveSelected.kind}:${liveSelected.id}`} item={liveSelected} bots={state.bots} onClose={() => setSelected(null)} onEdit={() => { const seed: EventSeed = liveSelected.kind === "call" ? { kind: "call", at: liveSelected.at, durationMinutes: liveSelected.call.durationMinutes, botIds: liveSelected.call.botIds, call: liveSelected.call } : { kind: "routine", at: liveSelected.at, durationMinutes: liveSelected.routine?.durationMinutes ?? liveSelected.run?.durationMinutes ?? 30, botIds: [liveSelected.routine?.botId ?? liveSelected.run?.botId ?? ""].filter(Boolean), routine: liveSelected.routine ?? undefined }; setSelected(null); setEditor(seed); }} onCallChanged={(id) => { if (id) setCalls((current) => current.filter((call) => call.id !== id)); else void loadCalls(); }} onOpenRoom={onOpenRoom} />}
       {pausedOpen && <PausedList routines={paused} bots={state.bots} groups={state.groups} onClose={() => setPausedOpen(false)} onEdit={(routine) => { setPausedOpen(false); const at = routine.schedule.type === "once" ? routine.schedule.at : routine.schedule.type === "interval" ? routine.schedule.anchorAt : routine.schedule.type === "cron" ? routine.nextRunAt ?? nextHour() : atLocalTime(Date.now(), routine.schedule.time); setEditor({ kind: "routine", at, durationMinutes: routine.durationMinutes, botIds: [routine.botId], routine }); }} onOpenRoom={onOpenRoom} />}
     </main>
+  );
+}
+
+/** Desktop only: the one lever the app has against a sleeping computer.
+ * The scheduler runs inside the local server, so while the Mac sleeps no
+ * routine fires; the shell holds a power assertion for the hour before a
+ * due routine and while one runs, plugged in only, and this row shows it. */
+function RoutineWakeBar() {
+  const bridge = typeof window !== "undefined" ? window.ogb?.routines : undefined;
+  const [state, setState] = useState<DesktopRoutineWake | null>(null);
+  const [busy, setBusy] = useState(false);
+  useEffect(() => {
+    if (!bridge) return;
+    let cancelled = false;
+    const load = () => bridge.wakeState().then((next) => { if (!cancelled) setState(next); }).catch(() => {});
+    void load();
+    const timer = window.setInterval(load, 30_000);
+    return () => { cancelled = true; window.clearInterval(timer); };
+  }, [bridge]);
+  if (!bridge || !state) return null;
+  const status = !state.keepAwake
+    ? "Off — this computer may sleep through a scheduled routine."
+    : state.onBattery
+      ? "On battery, so not holding; plug in to keep it awake."
+      : state.hold
+        ? state.reason === "running" ? "Holding it awake now: a routine is running." : `Holding it awake now: a routine is due at ${state.at ? niceTime(state.at) : "the top of the hour"}.`
+        : "Holds it awake for the hour before a routine and while one runs, while plugged in. A closed lid still sleeps.";
+  return (
+    <div className="flex items-center justify-between gap-4 border-b border-hairline/35 bg-panel/60 px-4 py-2.5">
+      <div className="min-w-0 text-[12px] leading-relaxed text-ink-secondary">
+        <span className="font-medium text-ink">Keep this computer awake for routines.</span> {status}
+      </div>
+      <Switch
+        checked={state.keepAwake}
+        disabled={busy}
+        aria-label="Keep this computer awake for scheduled routines"
+        onClick={() => {
+          setBusy(true);
+          bridge.keepAwake(!state.keepAwake).then(setState).catch(() => {}).finally(() => setBusy(false));
+        }}
+        className="shrink-0 disabled:cursor-wait disabled:opacity-50"
+      />
+    </div>
   );
 }
