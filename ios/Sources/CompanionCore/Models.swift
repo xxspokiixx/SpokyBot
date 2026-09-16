@@ -715,6 +715,7 @@ public struct InstanceList: Codable, Sendable {
 /// Derived from `ConfigFlag.provider`, never decoded straight off the wire.
 public enum VoiceProvider: Hashable, Sendable {
     case elevenlabs
+    case fish
     case system
     case chatterbox
 
@@ -723,6 +724,7 @@ public enum VoiceProvider: Hashable, Sendable {
     public var wireValue: String {
         switch self {
         case .elevenlabs: "elevenlabs"
+        case .fish: "fish"
         case .system: "system"
         case .chatterbox: "chatterbox"
         }
@@ -780,17 +782,24 @@ public struct ConfigStatus: Codable, Sendable {
     }
 
     /// `voiceProvider(cfg)` in `server/tts/index.ts`: only the exact
-    /// strings `"system"` and `"chatterbox"` select those engines. A missing
+    /// strings `"fish"`, `"system"`, and `"chatterbox"` select those engines. A missing
     /// field — a computer older than the choice — and an engine this build
     /// has never heard of both fall back to ElevenLabs, which is the
     /// server's own rule and what keeps an unrecognised engine from being
     /// explained to the user with copy written for a different one.
     public var voiceProvider: VoiceProvider {
         switch tts?.provider {
+        case "fish": .fish
         case "system": .system
         case "chatterbox": .chatterbox
         default: .elevenlabs
         }
+    }
+
+    /// Walkie synthesizes directly on the phone through its own ElevenLabs
+    /// key. A voice chosen from another provider's catalog is not compatible.
+    public func walkieAgentVoice(_ voice: String?) -> String? {
+        voiceProvider == .elevenlabs ? voice : nil
     }
 }
 

@@ -31,6 +31,13 @@ export function canPairDevices(state: SessionState | null): boolean {
   return state.kind === "loopback" || (state.kind === "session" && state.scopes.includes("admin"));
 }
 
+/** A session that may see the card but not act: say why, instead of showing
+ * nothing at all. Only a paired session can be chat-only; loopback is the
+ * owner, and the unauthenticated case never reaches Settings. */
+export function pairingBlockedReason(state: SessionState | null): "chat-only" | null {
+  return state?.kind === "session" && !state.scopes.includes("admin") ? "chat-only" : null;
+}
+
 export function minutesLeft(expiresAt: number, now = Date.now()): number {
   return Math.max(0, Math.ceil((expiresAt - now) / 60_000));
 }
@@ -49,12 +56,13 @@ const quiet = "rounded-md border border-line px-3 py-1.5 text-[13px] text-ink ho
 /** Settings → Remote access: mint a one-time pairing code with a QR for
  * the phone app (or for a non-phone client — MCP, `openmausbot pair`, a
  * second desktop app), and see or sign out the devices that hold a
- * session. Shown for any client that owns the server being paired
- * against, whether that's a hosted server reached from a browser or the
- * desktop app's own local server; hidden when this desktop is itself a
- * remote client of someone else's server (see SettingsModal). */
-export function ServerPairingCard() {
-  const [session, setSession] = useState<SessionState | null>(null);
+ * session. Shown for every client of a server: a hosted server reached
+ * from a browser, the desktop app's own local server (#950), and the
+ * desktop app connected to a hosted workspace, whose requests reach that
+ * server with the paired session — the only place its phones can be
+ * paired from (MOCA-84). `canPairDevices` decides who may act. */
+export function ServerPairingCard({ initialSession = null }: { initialSession?: SessionState | null }) {
+  const [session, setSession] = useState<SessionState | null>(initialSession);
   const [scope, setScope] = useState<"admin" | "client">("admin");
   const [offer, setOffer] = useState<PairingOffer | null>(null);
   const [devices, setDevices] = useState<PairedDevice[]>([]);
@@ -87,7 +95,14 @@ export function ServerPairingCard() {
     return () => clearInterval(timer);
   }, [offer]);
 
-  if (!canPairDevices(session)) return null;
+  if (!canPairDevices(session)) {
+    if (pairingBlockedReason(session) !== "chat-only") return null;
+    return (
+      <Card title={t("remote.serverPairing.title")} subtitle={t("remote.serverPairing.subtitle")}>
+        <p data-server-pairing-chat-only className="mt-3 text-[13px] text-ink-secondary">{t("remote.serverPairing.chatOnly")}</p>
+      </Card>
+    );
+  }
   const expired = offer ? offer.expiresAt <= now : false;
 
   async function create() {

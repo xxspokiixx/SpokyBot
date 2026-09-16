@@ -637,6 +637,39 @@ describe("CodexDriver turns (fake app-server)", () => {
     expect(argv).not.toContain('mcp_servers.notes.default_tools_approval_mode');
   });
 
+  it("mounts a url server for codex to connect to, header values off argv", async () => {
+    await create();
+    const dump = join(scratch, "remote-mcp.json");
+    process.env.FAKE_CODEX_DUMP = dump;
+
+    await instance.adapter.sendTurn({
+      threadId: "t-remote-mcp",
+      text: "go",
+      integrations: {
+        custom: {
+          docs: { type: "http", url: "https://docs.example/mcp", headers: { Authorization: "Bearer tok-docs", "X-Org": "acme" } },
+          // codex has no SSE transport; the entry stays with Claude bots
+          legacy: { type: "sse", url: "https://old.example/sse", headers: {} },
+        },
+      },
+    });
+    await recorder.until((event) => event.type === "turn.completed");
+    const seen = JSON.parse(readFileSync(dump, "utf8"));
+    const argv = seen.argv.join(" ");
+    expect(seen.argv).toContain('mcp_servers.docs.url="https://docs.example/mcp"');
+    // header values are credentials: the child env holds them under
+    // harness names, argv names only the variables — the bearer token via
+    // codex's own bearer setting, other headers via env_http_headers
+    expect(seen.argv).toContain('mcp_servers.docs.bearer_token_env_var="OMB_MCP_HEADER_DOCS_BEARER"');
+    expect(seen.argv).toContain('mcp_servers.docs.env_http_headers={ "X-Org" = "OMB_MCP_HEADER_DOCS_1" }');
+    expect(argv).not.toContain("tok-docs");
+    expect(seen.env.OMB_MCP_HEADER_DOCS_BEARER).toBe("tok-docs");
+    expect(seen.env.OMB_MCP_HEADER_DOCS_1).toBe("acme");
+    // a user server keeps codex's on-request approval policy
+    expect(argv).not.toContain("mcp_servers.docs.default_tools_approval_mode");
+    expect(argv).not.toContain("mcp_servers.legacy");
+  });
+
   it("does not let a custom MCP server capture a built-in capability variable", async () => {
     await create();
     await expect(instance.adapter.sendTurn({
@@ -693,6 +726,42 @@ describe("CodexDriver turns (fake app-server)", () => {
     expect(seen.argv.join(" ")).not.toContain("peer-comms-secret");
     expect(seen.env.OMB_COMMS_TOKEN).toBe("peer-comms-secret");
     expect(instance.adapter.capabilities.agentsMcp).toBe(true);
+  });
+
+  it.each(["ask", "auto"] as const)("pre-allows the built-in browser while preserving the native %s reviewer", async (approvalMode) => {
+    await create();
+    const dump = join(scratch, "browser.json");
+    process.env.FAKE_CODEX_DUMP = dump;
+
+    await instance.adapter.sendTurn({
+      threadId: "t-browser",
+      text: "open the built-in browser",
+      approvalMode,
+      integrations: {
+        browser: {
+          command: process.execPath,
+          args: ["/tmp/browser-proxy.js"],
+          env: {
+            OMB_HARNESS_URL: "http://127.0.0.1:8799",
+            OMB_BROWSER_TOKEN: "browser-capability-secret",
+          },
+        },
+      },
+    });
+    await recorder.until((event) => event.type === "turn.completed");
+
+    const seen = JSON.parse(readFileSync(dump, "utf8"));
+    expect(seen.argv.join(" ")).toContain("mcp_servers.browser.command");
+    expect(seen.argv).toContain('mcp_servers.browser.default_tools_approval_mode="auto"');
+    expect(seen.argv.join(" ")).toContain("/tmp/browser-proxy.js");
+    expect(seen.argv.join(" ")).not.toContain("browser-capability-secret");
+    expect(seen.env.OMB_BROWSER_TOKEN).toBe("browser-capability-secret");
+    for (const method of ["thread/start", "turn/start"]) {
+      expect(seen.calls.find((call: { method: string }) => call.method === method)?.params).toMatchObject({
+        approvalPolicy: "on-request",
+        approvalsReviewer: approvalMode === "auto" ? "auto_review" : "user",
+      });
+    }
   });
 
   it("mounts the Local VM computer MCP server without placing credentials in argv", async () => {
