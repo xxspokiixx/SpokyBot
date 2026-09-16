@@ -92,7 +92,7 @@ import {
 } from "./cloud-backend.ts";
 import * as composio from "./composio.ts";
 import { chiefOfStaffSystemPrompt } from "./chief-of-staff.ts";
-import { canAccessTeam, canReachPeer, peerAllowed, peerName, peerRosterSystemPrompt, peerStatus, peerStatusWords, reachablePeers, roomPeerRosterSystemPrompt, roomRosterLine } from "./peer-roster.ts";
+import { canAccessTeam, canReachPeer, peerAllowed, peerName, peerRosterSystemPrompt, peerStatus, peerStatusWords, reachablePeers, resolveTeammate, roomPeerRosterSystemPrompt, roomRosterLine } from "./peer-roster.ts";
 import { openMausStatusSystemPrompt } from "./openmaus-status-capsule.ts";
 import {
   containerComputerAction,
@@ -11293,7 +11293,7 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
       if (method === "POST" && path === "/api/internal/ask-bot") {
         const body = await readInternalBody();
         const fromBotId = internalSender.id;
-        const toBotId = String(body.toBotId ?? "");
+        const toBotRef = String(body.toBotId ?? "");
         const message = String(body.message ?? "").trim();
         if (
           body.depth !== undefined &&
@@ -11302,9 +11302,15 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
           return json(res, 403, { error: "the recursion depth does not match this turn" });
         }
         const depth = internalCapability.depth;
-        if (!toBotId || !message) return json(res, 400, { error: "toBotId and message required" });
-        if (toBotId === fromBotId) return json(res, 400, { error: "a bot cannot message itself" });
+        if (!toBotRef || !message) return json(res, 400, { error: "toBotId and message required" });
+        if (toBotRef === fromBotId) return json(res, 400, { error: "a bot cannot message itself" });
         if (depth >= MAX_COMMS_DEPTH) return json(res, 200, { error: "message chains are limited to one hop" });
+        // A unique reachable teammate name is accepted where an id is
+        // expected; see resolveTeammate for why.
+        const resolvedTo = resolveTeammate(store.bots, internalSender, toBotRef);
+        if ("error" in resolvedTo) return json(res, 404, { error: `no such bot: ${resolvedTo.error}` });
+        if (resolvedTo.id === fromBotId) return json(res, 400, { error: "a bot cannot message itself" });
+        const toBotId = resolvedTo.id;
         const target = store.bot(toBotId);
         if (!target) return json(res, 404, { error: "no such bot" });
         // An unknown sender used to fall through: no mirroring AND no
@@ -11520,7 +11526,7 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
       }
       if (method === "POST" && path === "/api/internal/delegate-bot") {
         const body = await readInternalBody();
-        const toBotId = String(body.toBotId ?? "");
+        const toBotRef = String(body.toBotId ?? "");
         const message = String(body.message ?? "").trim();
         const reason = typeof body.reason === "string" && body.reason.trim() ? body.reason.trim() : undefined;
         if (
@@ -11530,8 +11536,11 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
           return json(res, 403, { error: "the recursion depth does not match this turn" });
         }
         const depth = internalCapability.depth;
-        if (!toBotId || !message) return json(res, 400, { error: "toBotId and message required" });
+        if (!toBotRef || !message) return json(res, 400, { error: "toBotId and message required" });
         const from = internalSender;
+        const resolvedTo = resolveTeammate(store.bots, from, toBotRef);
+        if ("error" in resolvedTo) return json(res, 404, { error: `no such bot: ${resolvedTo.error}` });
+        const toBotId = resolvedTo.id;
         const target = store.bot(toBotId);
         if (!target) return json(res, 404, { error: "no such bot" });
         if (!canAccessTeam(from, target.section) || target.hidden) {
@@ -11604,7 +11613,19 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
           const groupId = parsed.data.groupId ?? source?.id;
           const destination = groupId ? store.group(groupId) : undefined;
           if (groupId && !destination) return json(res, 404, { error: "No such room; use list_room_targets." });
-          const targets = parsed.data.botIds.map(botId => ({ groupId: destination?.id,
+          // A slot may carry a teammate's name instead of its id — the
+          // roster shows both, list_bots shows both, and a Chief reading its
+          // prompt reaches for the name. A unique reachable name resolves;
+          // anything else is refused with the id or name the caller sent
+          // and the way to the real ids (peer-roster.ts).
+          const botIds: string[] = [];
+          for (const raw of parsed.data.botIds) {
+            const resolved = resolveTeammate(store.bots, internalSender, raw);
+            if ("error" in resolved) return json(res, 403, { error: resolved.error });
+            botIds.push(resolved.id);
+          }
+          if (new Set(botIds).size !== botIds.length) return json(res, 400, { error: "bot_ids name the same teammate twice — send each teammate once" });
+          const targets = botIds.map(botId => ({ groupId: destination?.id,
             threadId: destination ? destination.id === source?.id ? address.threadId : destination.threadId : store.bot(botId)?.threadId ?? "", botId,
           }));
           for (const target of targets) {
