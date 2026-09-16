@@ -3666,6 +3666,10 @@ const localVmActiveThreads = new Map<string, string>();
 // tools/call gate can fire it. Dispatch claims eagerly today, so entries
 // exist only as a no-op handoff to the gate.
 const autoVmClaims: AutoVmClaimTable = new Map();
+/** How long the computer-control gate lets a lazy claim land before it
+ * answers held. A free, ready VM claims in the time of one container
+ * inspect; only a claim queued behind another holder outlives this. */
+const LAZY_VM_CLAIM_GRACE_MS = 5_000;
 /** Local VM targets this process has seen ready or recreatable — at boot, in
  * the inventory, or in a turn. Auto probes the container runtime for a VM
  * only when one of these exists, so an ordinary Auto turn on a machine with
@@ -5814,13 +5818,29 @@ async function startTurn(
       let browserCapture: (() => Promise<{ png: string; format: string }>) | null = null;
       let computerKind: "box" | "vps" | "vm" | "local" | null = null;
       let autoVpsProblem: string | null = null;
+      /** The Local VM frame capture for the poller and the settled transcript
+       * screenshot. The shared desktop outlives the turn: once another thread
+       * owns it, a capture still in flight would picture ITS work under this
+       * bot's name — live and in the settled frame, which is taken after the
+       * lease is already released. No owner means the desktop is simply
+       * idle: that final frame is ours to keep. */
+      const localVmPreviewFor = (localVmTarget: LocalVmTarget, claimThreadId: string) => () => {
+        const owner = localVmLeaseFor(localVmTarget).current(localVmOwnerBusy);
+        if (owner && owner.threadId !== claimThreadId) {
+          throw new Error("the Local VM moved on to another turn");
+        }
+        return containerComputerFrame(undefined, undefined, localVmTarget);
+      };
       /** The exclusive Local VM claim sequence, verbatim from the old inline
-       * attach path, shared by dispatch (eager today) and the first-screen-
-       * call gate (issue #1361). Idempotent per turn: the resource claim and
-       * the lease both re-assert the same owner, so a re-entrant call from
-       * the gate no-ops once dispatch has already claimed. */
-      const claimAutoLocalVm = async (claimThreadId: string): Promise<{ target: LocalVmTarget; runtime: Runtime }> => {
-        const localVmTarget = localVmTargetForBot(bot.id);
+       * attach path, shared by dispatch (eager) and the first-screen-call
+       * gate (issue #1361). Idempotent per turn: the resource claim and the
+       * lease both re-assert the same owner, so a re-entrant call from the
+       * gate no-ops once dispatch has already claimed. A lazy attach pins
+       * the target it mounted the tools against: the claim must lease that
+       * desktop, not whatever localVmTargetForBot resolves to by the time
+       * the first screen call arrives. */
+      const claimAutoLocalVm = async (claimThreadId: string, pinnedTarget?: LocalVmTarget): Promise<{ target: LocalVmTarget; runtime: Runtime }> => {
+        const localVmTarget = pinnedTarget ?? localVmTargetForBot(bot.id);
         await bindTurnComputer(resourceOwner, `computer:vm:${localVmTarget.key}`, true);
         if (localVmImageBusy || localVmModeChangeBusy || localVmLifecycleBusy.has(localVmTarget.key)) {
           throw new Error("this Local VM is being started, stopped, or replaced — wait for setup to finish");
@@ -5834,8 +5854,30 @@ async function startTurn(
         localVmThreadTargets.set(claimThreadId, localVmTarget);
         localVmActiveThreads.set(localVmTarget.key, claimThreadId);
         localVmIdleFor(localVmTarget).touch();
-        const localVm = await readyLocalVmForTurn(bot.id, localVmTarget);
+        // The lease is held from here. An eager attach that fails below
+        // fails the turn and settle releases it; a lazy claim's rejection is
+        // swallowed into the slot's failed flag and the turn carries on, so
+        // without this the exclusive lease would sit held for the rest of a
+        // turn that never got the VM — the very serialisation #1361 removes.
+        const dropLease = () => {
+          localVmLeaseFor(localVmTarget).release(claimThreadId);
+          if (localVmActiveThreads.get(localVmTarget.key) === claimThreadId) localVmActiveThreads.delete(localVmTarget.key);
+          localVmThreadTargets.delete(claimThreadId);
+          // bindTurnComputer above also took the turn-level resource; a
+          // later turn's exclusive bind queues behind it just the same.
+          const resource = `computer:vm:${localVmTarget.key}`;
+          turnResources.releaseOne(resource, resourceOwner);
+          if (turnComputerResources.get(resourceOwner.threadId)?.resource === resource) turnComputerResources.delete(resourceOwner.threadId);
+        };
+        let localVm: Awaited<ReturnType<typeof readyLocalVmForTurn>>;
+        try {
+          localVm = await readyLocalVmForTurn(bot.id, localVmTarget);
+        } catch (error) {
+          dropLease();
+          throw error;
+        }
         if (!localVm.ready || !localVm.runtime) {
+          dropLease();
           throw new Error(`${localVm.problem ?? "the Local VM is not ready"} (App Settings → Computers)`);
         }
         // Same contract as the Box and VPS branches below: without this the
@@ -5843,18 +5885,7 @@ async function startTurn(
         // and every client that only has the stream (the phone) waits
         // forever. The web panel hid the gap by polling the screenshot
         // route itself.
-        previewCapture = () => {
-          // The shared desktop outlives the turn. Once another thread owns
-          // it, a capture still in flight would picture ITS work under this
-          // bot's name — live and in the settled transcript frame, which is
-          // taken after the lease is already released. No owner means the
-          // desktop is simply idle: that final frame is ours to keep.
-          const owner = localVmLeaseFor(localVmTarget).current(localVmOwnerBusy);
-          if (owner && owner.threadId !== claimThreadId) {
-            throw new Error("the Local VM moved on to another turn");
-          }
-          return containerComputerFrame(undefined, undefined, localVmTarget);
-        };
+        previewCapture = localVmPreviewFor(localVmTarget, claimThreadId);
         return { target: localVmTarget, runtime: localVm.runtime };
       };
 
@@ -5871,6 +5902,7 @@ async function startTurn(
           throw new Error("this model engine cannot use the Local VM — choose Claude or an ACP engine, or select another computer destination");
         }
         const localVmTarget = localVmTargetForBot(bot.id);
+        let lazyReadyVm: { runtime: Runtime } | null = null;
         if (!strict) {
           // Nothing this process has ever seen for this target, and nobody is
           // relying on an unattended run: do not pay for a runtime probe.
@@ -5878,17 +5910,58 @@ async function startTurn(
           const seen = await containerComputerStatus(undefined, undefined, localVmTarget).catch(() => null);
           if (!seen || !autoLocalVmAttachable(seen)) return false;
           if (localVmImageBusy || localVmModeChangeBusy || localVmLifecycleBusy.has(localVmTarget.key)) return false;
+          if (seen.ready && seen.runtime) lazyReadyVm = { runtime: seen.runtime };
         }
         try {
+          if (lazyReadyVm) {
+            // Lazy exclusivity (issue #1361): a VM that is ready right now
+            // mounts without claiming — screen-less Auto turns never touch
+            // the lease, and the first screen tools/call fires the claim
+            // through the computer-control gate. A VM that must be created
+            // or recreated first keeps the eager claim below: the bridge
+            // child needs the container to exist, and readyLocalVmForTurn
+            // is what boots it.
+            integrations.localComputer = containerComputerMcp(
+              lazyReadyVm.runtime,
+              controlIntegration(bot.id, threadId, dispatchClaimId),
+              localVmTarget,
+            );
+            autoVmClaims.set(threadId, {
+              owner: resourceOwner,
+              lazy: true,
+              claim: async () => {
+                await claimAutoLocalVm(threadId, localVmTarget);
+                // The dispatch-site poller start saw a null previewCapture
+                // (this lazy mount runs before any claim exists), so this
+                // turn would publish no live `screen` events and settle no
+                // final computer frame. Restart the poller with the now-live
+                // computer capture, keeping any browser capture and whether
+                // this turn already touched its screen. Same still-running
+                // guard as dispatch: a poller started after its own
+                // turn.completed would never be torn down.
+                if (previewCapture && threadBusy(bot.id, threadId)) {
+                  const touched = screenPollers.get(threadId)?.touched ?? instance.driverKind === "boxAgent";
+                  stopScreenPoller(bot.id, threadId);
+                  startScreenPoller(
+                    bot.id,
+                    threadId,
+                    { computer: previewCapture, ...(browserCapture ? { browser: browserCapture } : {}) },
+                    { screenIsTheWork: touched },
+                  );
+                }
+              },
+            });
+            return true;
+          }
           const claimed = await claimAutoLocalVm(threadId);
           integrations.localComputer = containerComputerMcp(
             claimed.runtime,
             controlIntegration(bot.id, threadId, dispatchClaimId),
             claimed.target,
           );
-          // Hand the same claim to the first-screen-call gate. Dispatch has
-          // already claimed, so the gate's fire-once path can only re-assert
-          // the same owner — a no-op until attachLocalVm defers (issue #1361).
+          // Hand the same claim to the first-screen-call gate. This eager
+          // path has already claimed, so the gate's fire-once call can only
+          // re-assert the same owner — a no-op (issue #1361).
           autoVmClaims.set(threadId, {
             owner: resourceOwner,
             claim: async () => { await claimAutoLocalVm(threadId); },
@@ -12095,20 +12168,49 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
         if (!bot) return json(res, 404, { error: "no such bot" });
         if (method === "GET") {
           const snapshot = botComputerControlSnapshot(botId, internalCapability.teamComputerId);
-          const computer = turnComputerResources.get(internalCapability.threadId);
-          const lazyClaim = autoVmClaims.get(internalCapability.threadId);
-          if (!snapshot.held && !computer && lazyClaim && lazyClaim.owner.generation === internalCapability.generation) {
+          const slot = autoVmClaims.get(internalCapability.threadId);
+          const lazyClaim = slot && slot.owner.generation === internalCapability.generation ? slot : undefined;
+          if (!snapshot.held && lazyClaim?.lazy && !lazyClaim.begin) {
             // First screen tools/call on a lazily-attached Auto VM (issue
-            // #1361): fire the exclusive claim — once — and answer with the
-            // same contention text a dispatched claim produces until it
-            // lands. No-op today: dispatch claims eagerly, so a live VM
-            // capability always has its computer entry already.
+            // #1361): fire the exclusive claim — once — and give it a moment
+            // to land. A free, ready VM claims in the time of one container
+            // inspect, so this call then proceeds with an honest answer;
+            // only a claim still queued behind another holder answers held
+            // below, and then the contention text is true. Keyed on the
+            // slot, never on the thread's turn-computer entry: a bind this
+            // turn abandoned earlier (a VPS that turned out to be asleep)
+            // must not hide the unclaimed VM and let the call through.
             startAutoVmClaim(autoVmClaims, internalCapability.threadId, internalCapability.generation);
+            await Promise.race([
+              lazyClaim.begin ?? Promise.resolve(),
+              new Promise<void>((resolve) => setTimeout(resolve, LAZY_VM_CLAIM_GRACE_MS)),
+            ]);
+          }
+          if (!snapshot.held && lazyClaim?.failed === true) {
+            // A rejected lazy claim (gate finding F1, issue #1361): the
+            // computer MCP mounted at dispatch is still live, and the claim
+            // may even have left a turn-computer entry behind (it can reject
+            // after bindTurnComputer succeeded — lease lost to a person,
+            // lifecycle busy, boot failure). Either way this turn owns no
+            // usable VM, so keep refusing every screen call for the rest of
+            // the generation; the bridge must never forward one onto a VM
+            // this turn never claimed. Turn settle GC clears the slot. Say
+            // why, and say not to retry: the contention text would send the
+            // model into a screenshot loop against a claim that cannot land.
+            return json(res, 200, {
+              held: true, helpOpen: false,
+              blockedReason: `This turn could not claim the Local VM${lazyClaim.failure ? ` (${lazyClaim.failure})` : ""}. This call was not performed. Do not retry computer work in this turn; tell the person what you could not do.`,
+            });
+          }
+          if (!snapshot.held && lazyClaim?.lazy && lazyClaim.begin && !lazyClaim.claimed) {
+            // The claim fired and is still waiting on the exclusive bind:
+            // another turn genuinely holds this desktop right now.
             return json(res, 200, {
               held: true, helpOpen: false,
               blockedReason: "Another thread is using this computer. This call was not performed. Pause computer work until that thread finishes, then take a fresh screenshot before acting.",
             });
           }
+          const computer = turnComputerResources.get(internalCapability.threadId);
           if (!snapshot.held && computer && computer.owner.generation === internalCapability.generation &&
               !claimTurnResource(computer.owner, computer.resource)) {
             return json(res, 200, {
