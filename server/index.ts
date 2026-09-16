@@ -5801,7 +5801,11 @@ async function startTurn(
           hostPlatform: process.platform,
           providerSupportsLocal: mountsLocalComputer,
         })) {
-          throw new Error("this model engine cannot control this computer — choose Claude or an ACP engine, or select another destination");
+          // Name the condition that actually failed: a person told "choose an
+          // ACP engine" while already on one has nowhere to go.
+          throw new Error(mountsLocalComputer
+            ? `local computer control is not available on ${process.platform} — select another destination`
+            : "this model engine cannot control this computer — choose Claude or an ACP engine, or select another destination");
         }
         const cua = readCuaConnection();
         if (!cua) throw new Error("CUA Driver is not ready for this computer — check permissions and restart OpenMausBot");
