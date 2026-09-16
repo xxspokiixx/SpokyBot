@@ -52,7 +52,6 @@ struct ChatView: View {
     @State private var fileDownloadTask: Task<Void, Never>?
     @State private var fileDownloadRequestID: UUID?
     @State private var threadOpenTask: Task<Void, Never>?
-    @State private var acceptsNextHardwareLineBreak = false
     @FocusState private var composerFocused: Bool
     @StateObject private var dictation = SpeechDictation()
     /// The opening beat: the island grows with the bot's face in it, then
@@ -380,7 +379,6 @@ struct ChatView: View {
             attachments = restored.attachments
             attachmentError = restored.error
             selectedPhotos = []
-            acceptsNextHardwareLineBreak = false
             showCommandHUD = false
             showingPlus = false
             // The local task picker changed threads. A download
@@ -759,29 +757,6 @@ struct ChatView: View {
     private var canSend: Bool {
         (!draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || !attachments.isEmpty)
             && !preparingAttachments && !sendingMessage
-    }
-
-    /// A vertically growing SwiftUI TextField treats the software keyboard's
-    /// Return key as a newline even when the key is labelled “Send”. Intercept
-    /// that proposed edit before it reaches the draft. Hardware Shift-Return
-    /// opts into one real line break through `acceptsNextHardwareLineBreak`.
-    private var composerDraft: Binding<String> {
-        Binding(
-            get: { draft },
-            set: { proposed in
-                if acceptsNextHardwareLineBreak {
-                    acceptsNextHardwareLineBreak = false
-                    draft = proposed
-                } else if ComposerKeyboard.shouldSubmit(
-                    previousText: draft,
-                    proposedText: proposed
-                ) {
-                    submit()
-                } else {
-                    draft = proposed
-                }
-            }
-        )
     }
 
     private var hasPendingApproval: Bool {
@@ -1225,7 +1200,7 @@ struct ChatView: View {
 
                         TextField(
                             sendingMessage ? "Sending…" : dictation.isListening ? "Listening…" : "Ask \(current.name)",
-                            text: composerDraft,
+                            text: $draft,
                             axis: .vertical
                         )
                             .lineLimit(1...5)
@@ -1233,7 +1208,6 @@ struct ChatView: View {
                             .padding(.vertical, 11)
                             .focused($composerFocused)
                             .accessibilityIdentifier("message-input")
-                            .submitLabel(.send)
                             // Partial transcripts rebuild from a frozen base;
                             // prevent competing edits without dimming the text.
                             .allowsHitTesting(
@@ -1245,16 +1219,16 @@ struct ChatView: View {
                                     showCommandHUD = value.hasPrefix("/")
                                 }
                             }
+                            // The software keyboard's Return inserts a newline,
+                            // like Messages; only the arrow button sends. A
+                            // hardware Return still sends, Shift-Return breaks
+                            // the line. onKeyPress never sees the software
+                            // keyboard, so this cannot turn its Return into a send.
                             .onKeyPress(.return, phases: .down) { press in
-                                if press.modifiers.contains(.shift) {
-                                    acceptsNextHardwareLineBreak = true
-                                    return .ignored
-                                }
-                                acceptsNextHardwareLineBreak = false
+                                if press.modifiers.contains(.shift) { return .ignored }
                                 submit()
                                 return .handled
                             }
-                            .onSubmit { submit() }
 
                         Button {
                             composerFocused = false
