@@ -157,6 +157,7 @@ import {
   type ModelSelection,
   type RequestOutcome,
   type RuntimeEvent,
+  type SteerOutcome,
   newId,
 } from "./contracts.ts";
 import { RETRY_MAX_ATTEMPTS } from "./drivers/retry.ts";
@@ -197,19 +198,26 @@ import { _loadPending, buildDelegationFailurePrompt, buildDelegationRevivalPromp
 import {
   cancelSteeredMessage,
   drainSteeredMessages,
+  holdSteeredQueue,
   onSteeredQueueChange,
   queuedSteerSnapshot,
   queuedSteeredMessage,
   queuedThreadPosition,
   queueSteeredMessage,
+  restoreHeldSteeredQueue,
   restoreSteeredMessages,
+  settleHeldSteeredQueue,
 } from "./steer-queue.ts";
 import {
   cancelChannelMessage,
   drainChannelMessages,
+  holdChannelQueue,
   queuedChannelMessage,
   queueChannelMessage,
   restoreChannelMessages,
+  restoreHeldChannelQueue,
+  resolveHeldReplyTarget,
+  settleHeldChannelQueueHead,
 } from "./channel-queue.ts";
 import {
   acceptedSendMatch,
@@ -13443,6 +13451,110 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
       }
       return json(res, 200, { ok: true });
     }
+
+    // Steer a queued room message into the RUNNING room turn (no interrupt).
+    // Only the head steers — room queues drain one item at a time — and the
+    // engine that receives it is the thread's live speaker. A room whose
+    // running driver cannot steer keeps its queue, exactly like an incapable
+    // 1:1 engine; this never ends the running turn.
+    m = path.match(/^\/api\/groups\/([\w-]+)\/queue\/([\w-]+)\/steer$/);
+    if (m && method === "POST") {
+      const body = await readBody(req);
+      if (body !== null && (typeof body !== "object" || Array.isArray(body))) {
+        return json(res, 400, { error: "body must be a JSON object" });
+      }
+      const threadId = typeof body?.threadId === "string" ? body.threadId : undefined;
+      if (threadId !== undefined && !/^[\w-]+$/.test(threadId)) {
+        return json(res, 400, { error: "threadId must be a task id" });
+      }
+      const group = store.group(m[1]);
+      if (!group) return json(res, 404, { error: "no such room" });
+      const targetThreadId = threadId ?? group.threadId;
+      const ownsThread = group.dm
+        ? group.threadId === targetThreadId
+        : Boolean(store.groupTaskByThread(group.id, targetThreadId));
+      if (!ownsThread) {
+        return json(res, 409, { error: "the channel switched tasks before it could receive the message" });
+      }
+      noteTurnTrigger(targetThreadId, auth);
+      const current = store.group(group.id);
+      if (!current) return json(res, 404, { error: "no such room" });
+      // Which engine owns the running room turn on this thread? The same
+      // resolution the room's own Stop uses: the live speaker, else the busy
+      // bot on the channel's main thread.
+      const speakerBotId =
+        groupSpeakers.get(targetThreadId)?.botId ??
+        (targetThreadId === current.threadId ? current.busyBotId : undefined);
+      const speaker = speakerBotId ? store.bot(speakerBotId) : undefined;
+      const instance = speaker ? runningTurnInstance(speaker, targetThreadId) : undefined;
+      // Lift the queue atomically: the room settling can drain it as the
+      // next follow-up, or this request can steer its head into the live
+      // turn — never both for the same words.
+      const held = holdChannelQueue(current.id, targetThreadId, m[2]);
+      if (!held) return json(res, 404, { error: "no such queued message" });
+      if (!speaker || !instance?.adapter.capabilities.queueing || !instance.adapter.steer) {
+        restoreHeldChannelQueue(held);
+        return json(res, 200, { ok: true, queued: true, threadId: targetThreadId });
+      }
+      const [head] = held.items;
+      if (!head || head.id !== m[2]) {
+        restoreHeldChannelQueue(held);
+        return json(res, 409, { error: "only the first queued message can steer" });
+      }
+      // A reply target that cannot be resolved restores the held queue
+      // before the request fails — the room's normal drain keeps the head.
+      const replyTo = resolveHeldReplyTarget(held, resolveReplyTarget);
+      const steered = await instance.adapter
+        .steer(targetThreadId, promptWithReply(head.text, replyTo, cfg.profile?.name?.trim() || "User"))
+        .catch((): SteerOutcome => "indeterminate");
+      // The steer was awaited adapter work: re-read every ownership
+      // invariant before writing anything, exactly like the 1:1 path. A
+      // speaker change, a channel switch, or a settled room restores the
+      // queue instead of recording words the new turn never saw.
+      const after = store.group(current.id);
+      const afterSpeakerBotId = after
+        ? groupSpeakers.get(targetThreadId)?.botId ??
+          (targetThreadId === after.threadId ? after.busyBotId : undefined)
+        : undefined;
+      // "indeterminate" (timeout after delivery, lost transport, a settle
+      // race) never restores: the words may already be folded into the turn
+      // that was live when they were sent, and replaying them into a new
+      // turn would run them twice. Record them once — even under a new
+      // speaker — and settle the head.
+      const delivered = steered !== "refused";
+      if (after && delivered && (steered === "indeterminate" || afterSpeakerBotId === speakerBotId)) {
+        const message = store.appendMessage(targetThreadId, {
+          role: "user",
+          kind: "text",
+          text: head.text,
+          replyToId: head.replyToId,
+          sendId: head.sendId,
+          channelMode: head.mode,
+          queueId: head.id,
+          via: head.via,
+          steered: true,
+        });
+        settleHeldChannelQueueHead(held);
+        return json(res, 200, {
+          ok: true,
+          steered: true,
+          threadId: targetThreadId,
+          messages: [message],
+          queueIds: [head.id],
+        });
+      }
+      if (steered === "indeterminate" && !after) {
+        // The room vanished while the answer was lost: settle the head so a
+        // restart cannot replay words the dead turn may already have run.
+        settleHeldChannelQueueHead(held);
+        return json(res, 404, { error: "no such room" });
+      }
+      restoreHeldChannelQueue(held);
+      // The room may have settled while the steer was refused; a queue that
+      // is now drainable must not strand behind a missed settle.
+      if (after && !groupIsWorking(after)) drainQueuedChannelSends();
+      return json(res, 200, { ok: true, queued: true, threadId: targetThreadId });
+    }
     m = path.match(/^\/api\/groups\/([\w-]+)\/interrupt$/);
     if (m && method === "POST") {
       const group = store.group(m[1]);
@@ -14727,7 +14839,7 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
           // existing server-side queue records it atomically for the next turn.
           if (currentAtStart.busy) {
             const instance = runningTurnInstance(currentAtStart, threadId);
-            let steered = false;
+            let steered: SteerOutcome = "refused";
             // A live text steer has no image side channel. Keep an attachment
             // message intact for the next ordinary turn, where central image
             // admission can hand it to the provider natively.
@@ -14735,7 +14847,7 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
             if (!carriesImages && !computerSelectionTurns.get(threadId)?.selected && instance?.adapter.capabilities.queueing && instance.adapter.steer) {
               steered = await instance.adapter
                 .steer(threadId, promptWithReply(text, replyTo, cfg.profile?.name?.trim() || "User"))
-                .catch(() => false);
+                .catch((): SteerOutcome => "indeterminate");
             }
             // steer() is awaited adapter work. The turn can settle, the task can
             // switch, or the whole bot can be deleted before its acknowledgement
@@ -14748,13 +14860,18 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
             if (!store.taskByThread(bot.id, threadId)) {
               throw Object.assign(new Error("the target task no longer exists"), { status: 409 });
             }
-            if (steered) {
-              if (!current.busy) {
+            const delivered = steered !== "refused";
+            if (delivered) {
+              if (steered === "steered" && !current.busy) {
                 throw Object.assign(
                   new Error("the running turn ended before the steered message could be recorded"),
                   { status: 409 },
                 );
               }
+              // "indeterminate" falls through to the same record: the words
+              // may already be folded into a turn whose acknowledgement was
+              // lost, and handing them back for a resend could run them
+              // twice. Recording them once is the honest outcome.
               // A person steering a webhook turn is present, and auto mode may
               // follow them again. But this route is also reachable from the
               // bot's own shell on a headless server (loopback is the owner
@@ -14800,6 +14917,77 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
         return json(res, 404, { error: "no such queued message" });
       }
       return json(res, 200, { ok: true });
+    }
+
+    // Steer a queued message into the RUNNING turn (no interrupt). Engines
+    // without a live steer keep the queue; this never ends the current turn.
+    m = path.match(/^\/api\/bots\/([\w-]+)\/queue\/([\w-]+)\/steer$/);
+    if (m && method === "POST") {
+      const body = await readBody(req);
+      requirePinnedClientThread(m[1], body?.threadId);
+      const bot = requestedTaskBot(m[1], body?.threadId);
+      noteTurnTrigger(bot.threadId, auth);
+      // Lift the whole queue atomically: a settle racing this request can
+      // drain it as a follow-up, or this request can steer it into the live
+      // turn — never both for the same words.
+      const held = holdSteeredQueue(bot.id, bot.threadId, m[2]);
+      if (!held) return json(res, 404, { error: "no such queued message" });
+      // A live steer has no image side channel. Attachment words wait for a
+      // real turn where central admission can hand the images to the engine.
+      if (held.items.some((item) => extractTurnImages(item.text).images.length > 0)) {
+        restoreHeldSteeredQueue(held);
+        return json(res, 200, { ok: true, queued: true, threadId: bot.threadId });
+      }
+      const currentAtStart = store.projectBotForTask(bot.id, bot.threadId);
+      const instance = currentAtStart?.busy ? runningTurnInstance(currentAtStart, bot.threadId) : undefined;
+      const prompt = held.items.map((item) => item.prompt).join("\n\n");
+      let steered: SteerOutcome = "refused";
+      if (currentAtStart?.busy && instance?.adapter.capabilities.queueing && instance.adapter.steer) {
+        steered = await instance.adapter
+          .steer(bot.threadId, prompt)
+          .catch((): SteerOutcome => "indeterminate");
+      }
+      // The steer was awaited adapter work: re-read every ownership
+      // invariant before writing anything, exactly like the live-send path.
+      const current = store.projectBotForTask(bot.id, bot.threadId);
+      // "indeterminate" never restores: the words may already be folded into
+      // the turn that was live when they were sent, and replaying them into
+      // a fresh follow-up turn would run them twice. Record them whenever
+      // the destination still exists, busy or not.
+      if (
+        (steered === "steered" && current?.busy ||
+          steered === "indeterminate" && current) &&
+        store.taskByThread(bot.id, bot.threadId)
+      ) {
+        if (auth.kind === "session" || DESKTOP_MANAGED) clearUnattended(bot.threadId);
+        const messages = held.items.map((item) => store.appendMessage(bot.threadId, {
+          role: "user",
+          kind: "text",
+          text: item.text,
+          replyToId: item.replyToId,
+          sendId: item.sendId,
+          queueId: item.messageId,
+          peerAsk: item.peerAsk,
+          steered: true,
+        }));
+        const queueIds = held.items.map((item) => item.messageId);
+        settleHeldSteeredQueue(held);
+        return json(res, 200, { ok: true, steered: true, threadId: bot.threadId, messages, queueIds });
+      }
+      if (steered === "indeterminate") {
+        // No destination is left: settle so a restart cannot replay words a
+        // dead turn may already have run.
+        settleHeldSteeredQueue(held);
+        if (!store.taskByThread(bot.id, bot.threadId)) {
+          throw Object.assign(new Error("the target task no longer exists"), { status: 409 });
+        }
+        throw Object.assign(new Error("no such bot"), { status: 404 });
+      }
+      restoreHeldSteeredQueue(held);
+      // The turn may have settled while the steer was refused; a queue that
+      // is now drainable must not strand behind a missed settle.
+      if (current && !current.busy) drainQueuedSends();
+      return json(res, 200, { ok: true, queued: true, threadId: bot.threadId });
     }
 
     // edit a user message → fork the conversation there and rerun the turn.

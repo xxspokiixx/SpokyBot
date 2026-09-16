@@ -282,14 +282,25 @@ export interface ProviderAdapter {
       always?: boolean;
     },
   ): Promise<RequestOutcome>;
-  /** Deliver a user message into the RUNNING turn on this thread. Resolves
-   * false when there is no live turn to steer (the caller then sends it as
-   * a normal turn). Only drivers with `capabilities.queueing` implement it. */
-  steer?(threadId: ThreadId, text: string): Promise<boolean>;
+  /** Deliver a user message into the RUNNING turn on this thread. Only
+   * drivers with `capabilities.queueing` implement it.
+   *
+   * - "steered" — the engine accepted the input into the live turn.
+   * - "refused" — provably NOT delivered (no live turn, explicit RPC
+   *   refusal, failed stdin write): the caller may queue it for the next
+   *   turn without risk of running it twice.
+   * - "indeterminate" — delivered, but the outcome is unknown (the RPC
+   *   timed out after accept, transport failed, or the turn settled while
+   *   the answer was in flight). The caller must NOT re-queue: the words
+   *   may already be running, and replaying them would execute them twice. */
+  steer?(threadId: ThreadId, text: string): Promise<SteerOutcome>;
   hasSession(threadId: ThreadId): boolean;
   stopAll(): Promise<void>;
   onEvent(listener: RuntimeEventListener): () => void;
 }
+
+/** The tri-state result of Adapter.steer — see the contract above. */
+export type SteerOutcome = "steered" | "refused" | "indeterminate";
 
 // ── provider snapshot (upstream ServerProviderShape, reduced) ────────────
 export interface ProviderSnapshot {
