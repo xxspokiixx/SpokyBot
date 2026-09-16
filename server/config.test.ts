@@ -17,9 +17,11 @@ import { customMcpServers,
   parseConfigPatch,
   parseStoredConfig,
   persistableInstanceConfigs,
+  roomHandoffLimits,
   roomTurnTimeoutMinutes,
   maxConcurrentBotThreads,
   threadEventLogMaxBytes,
+  threadEventLogRetentionDays,
   showToolCallsEnabled,
   saveConfig,
   skillAuthoringEnabled,
@@ -67,6 +69,16 @@ describe("configuration boundaries", () => {
     expect(threadEventLogMaxBytes(parsed)).toBe(50 * 1024 * 1024);
     for (const value of [0, -1, 256 * 1024 - 1, 1.5, "1000", null]) {
       expect(() => parseConfigPatch({ threads: { maxConcurrentPerBot: 3, eventLogMaxBytes: value } })).toThrow("threads.eventLogMaxBytes");
+    }
+  });
+
+  it("keeps thread event logs forever unless a retention window is configured", () => {
+    expect(threadEventLogRetentionDays({})).toBeNull();
+    expect(threadEventLogRetentionDays(parseStoredConfig({ threads: { maxConcurrentPerBot: 2 } }))).toBeNull();
+    const configured = parseStoredConfig({ threads: { maxConcurrentPerBot: 2, eventLogRetentionDays: 30 } });
+    expect(threadEventLogRetentionDays(configured)).toBe(30);
+    for (const value of [0, -1, 1.5, "30", null, 3660]) {
+      expect(() => parseConfigPatch({ threads: { maxConcurrentPerBot: 2, eventLogRetentionDays: value } })).toThrow("threads.eventLogRetentionDays");
     }
   });
 
@@ -140,6 +152,20 @@ describe("configuration boundaries", () => {
   ])("rejects an invalid default model selection: %j", (defaultModelSelection) => {
     expect(() => parseStoredConfig({ defaultModelSelection })).toThrow("defaultModelSelection");
     expect(() => parseConfigPatch({ defaultModelSelection })).toThrow("defaultModelSelection");
+  });
+
+  it("exposes room handoff lifetime limits from config with the current defaults", () => {
+    const configured = parseStoredConfig({
+      rooms: { turnTimeoutMinutes: 20, handoffLifetimeMinutes: 60, handoffMinRunwayMinutes: 15, handoffHardCapMinutes: 360 },
+    });
+    expect(roomHandoffLimits(configured)).toEqual({
+      lifetimeMs: 60 * 60_000, minRunwayMs: 15 * 60_000, hardCapMs: 360 * 60_000,
+    });
+    expect(roomHandoffLimits(parseStoredConfig({}))).toEqual({
+      lifetimeMs: 30 * 60_000, minRunwayMs: 10 * 60_000, hardCapMs: 240 * 60_000,
+    });
+    expect(() => parseStoredConfig({ rooms: { turnTimeoutMinutes: 20, handoffMinRunwayMinutes: 10, handoffLifetimeMinutes: 5 } }))
+      .toThrow("rooms handoff bounds must satisfy handoffMinRunwayMinutes <= handoffLifetimeMinutes <= handoffHardCapMinutes");
   });
 
   it("canonicalizes legacy browser profile ids without dropping other stored settings", () => {

@@ -2,7 +2,7 @@
 // (upstream rule): the React app dispatches typed commands over HTTP and
 // folds one SSE event stream; every provider process runs here.
 import { createHash, randomBytes, randomUUID, timingSafeEqual } from "node:crypto";
-import { existsSync, readFileSync, rmSync, unlinkSync } from "node:fs";
+import { existsSync, readFileSync, rmSync } from "node:fs";
 import { rm as removeDirectory } from "node:fs/promises";
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
 import { extname, join } from "node:path";
@@ -81,6 +81,7 @@ import { groupTurnCwd } from "./room-cwd.ts";
 import { RoomTurnDeadline, RoomTurnStallRegistry, roomTurnTimeoutMessage } from "./room-turn-timeout.ts";
 import * as box from "./box.ts";
 import { TeamComputers, teamComputerAssignment, teamComputerCreate, teamComputerOwner, type TeamComputerRecord } from "./team-computers.ts";
+import { isEffortLevel, type WireBot, type WireGroup, type WireTask } from "../shared/wire.ts";
 import type { TeamComputersPayload } from "../shared/team-computer.ts";
 import { boxCreateRecoverySnapshot, retireDeletedBoxCreate } from "./box-create-idempotency.ts";
 import { boxDeletionSnapshot } from "./box-delete-journal.ts";
@@ -91,7 +92,7 @@ import {
 } from "./cloud-backend.ts";
 import * as composio from "./composio.ts";
 import { chiefOfStaffSystemPrompt } from "./chief-of-staff.ts";
-import { canAccessTeam, canReachPeer, peerAllowed, peerName, peerRosterSystemPrompt, peerStatus, peerStatusWords, reachablePeers, roomPeerRosterSystemPrompt, roomRosterLine } from "./peer-roster.ts";
+import { canAccessTeam, canReachPeer, peerAllowed, peerName, peerRosterSystemPrompt, peerStatus, peerStatusWords, reachablePeers, resolveTeammate, roomPeerRosterSystemPrompt, roomRosterLine } from "./peer-roster.ts";
 import { openMausStatusSystemPrompt } from "./openmaus-status-capsule.ts";
 import {
   containerComputerAction,
@@ -117,8 +118,9 @@ import {
   localVmMode,
   parseConfigPatch,
   roomTurnTimeoutMinutes,
-maxConcurrentBotThreads,
   threadEventLogMaxBytes,
+  maxConcurrentBotThreads,
+  threadEventLogRetentionDays,
   saveConfig,
   showToolCallsEnabled,
   claudeUserMcpEnabled,
@@ -136,7 +138,9 @@ maxConcurrentBotThreads,
   EVENTS_DIR,
   NATIVE_DIR,
   customMcpServers,
+  roomHandoffLimits,
 } from "./config.ts";
+import { sweepThreadEventLogs, type ThreadLogRetentionCandidate } from "./thread-retention.ts";
 import { ComputerControl } from "./computer-control.ts";
 import { augmentedPath, findCliCandidates, resetPathCache } from "./env-path.ts";
 import { registerEnginesBinDir } from "./engine-install.ts";
@@ -150,11 +154,11 @@ import { HOSTED_CONTRACT_HEADER, HOSTED_CONTRACT_METADATA, HOSTED_CONTRACT_VERSI
 import { describeSpawnFailure, execCli } from "./procs.ts";
 import { blockedTarget, buildNotification, type Notification } from "./notify.ts";
 import {
-  isEffortLevel,
   isModelVariant,
   type ModelSelection,
   type RequestOutcome,
   type RuntimeEvent,
+  type SteerOutcome,
   newId,
 } from "./contracts.ts";
 import { RETRY_MAX_ATTEMPTS } from "./drivers/retry.ts";
@@ -195,19 +199,26 @@ import { _loadPending, buildDelegationFailurePrompt, buildDelegationRevivalPromp
 import {
   cancelSteeredMessage,
   drainSteeredMessages,
+  holdSteeredQueue,
   onSteeredQueueChange,
   queuedSteerSnapshot,
   queuedSteeredMessage,
   queuedThreadPosition,
   queueSteeredMessage,
+  restoreHeldSteeredQueue,
   restoreSteeredMessages,
+  settleHeldSteeredQueue,
 } from "./steer-queue.ts";
 import {
   cancelChannelMessage,
   drainChannelMessages,
+  holdChannelQueue,
   queuedChannelMessage,
   queueChannelMessage,
   restoreChannelMessages,
+  restoreHeldChannelQueue,
+  resolveHeldReplyTarget,
+  settleHeldChannelQueueHead,
 } from "./channel-queue.ts";
 import {
   acceptedSendMatch,
@@ -233,10 +244,11 @@ import {
   type GroupRecord,
   type Message,
   type TaskRecord,
+  toWireTask,
 } from "./store.ts";
 import * as tts from "./tts/index.ts";
 import { narrateTool, toUtterances } from "./tts/speech-text.ts";
-import { buildRecoveryText, buildTurnContext, engineIsFresh, NATIVELY_REPLAYING_DRIVER_KINDS } from "./turn-context.ts";
+import { buildRecoveryText, buildTurnContext, engineIsFresh, NATIVELY_REPLAYING_DRIVER_KINDS, peerMessageText } from "./turn-context.ts";
 import { extractTurnImages } from "./turn-images.ts";
 import { TurnWatchdog } from "./turn-watchdog.ts";
 import { TurnResources, workspaceResource, type TurnOwner } from "./turn-resources.ts";
@@ -375,6 +387,7 @@ import { createTeamBackup, importTeamBackup } from "./team-backup.ts";
 import { MAX_TEAM_BACKUP_BYTES } from "../shared/team-backup.ts";
 import { shouldMountLocalComputer } from "./local-routing.ts";
 import { autoLocalVmAttachable, type ContainerComputerStatus } from "./container-computer.ts";
+import { startAutoVmClaim, type AutoVmClaimTable } from "./auto-vm-claims.ts";
 import { modelContextWindow } from "./model-context-window.ts";
 import { parseSurface, resolveSurface, surfaceLabel, surfaceOfComputerKind, surfacePrompt, type Surface } from "./surface.ts";
 import {
@@ -946,6 +959,7 @@ function claimTurnResource(owner: TurnOwner, resource: string): boolean {
 
 function releaseTurnResources(owner: TurnOwner | undefined): void {
   if (!owner) return;
+  if (autoVmClaims.get(owner.threadId)?.owner.generation === owner.generation) autoVmClaims.delete(owner.threadId);
   if (settlingResourceOwners.get(owner.threadId) === owner.generation) settlingResourceOwners.delete(owner.threadId);
   turnResources.release(owner);
   if (turnResourceOwners.get(owner.threadId)?.generation === owner.generation) turnResourceOwners.delete(owner.threadId);
@@ -1015,6 +1029,15 @@ function botAtThreadCapacity(botId: string): boolean {
 
 function hasDirectDispatch(botId: string): boolean {
   return [...directTurnDispatchClaims.values()].some((claim) => claim.botId === botId);
+}
+
+/** Routine and webhook dispatch shares startTurn's admission preconditions
+ * instead of waiting for whole-bot idleness: a free thread slot and no
+ * active group turn. A group turn blocks scheduled starts the same way it
+ * blocks every other turn kind; it does not consume a capacity slot. */
+function unattendedDispatchState(botId: string): "ready" | "busy" | "missing" {
+  const bot = store.bot(botId);
+  return !bot ? "missing" : botAtThreadCapacity(botId) || activeGroupTurnForBot(botId) ? "busy" : "ready";
 }
 
 function requestedTaskBot(botId: string, rawThreadId: unknown): BotRecord {
@@ -1630,10 +1653,12 @@ if (browserCleanupReferencesReconciled) browserCleanup.startPending();
  * than the desktop window did. Stripped here rather than at each call site
  * so a new broadcast cannot forget. */
 let activeCoordinationForThread = (_threadId: string): boolean => false;
-const wireTask = ({ resumeCursors: _resumeCursors, lastInstanceId: _lastInstanceId, ...task }: TaskRecord) =>
-  activeCoordinationForThread(task.threadId) && !task.busy ? { ...task, busy: true, activity: "working" as const } : task;
+const wireTask = (task: TaskRecord): WireTask =>
+  activeCoordinationForThread(task.threadId) && !task.busy
+    ? { ...toWireTask(task), busy: true, activity: "working" as const }
+    : toWireTask(task);
 
-const wireBot = (bot: NonNullable<ReturnType<typeof store.bot>>) => {
+const wireBot = (bot: BotRecord): WireBot => {
   const { resumeCursors: _resumeCursors, tasks, approvalGrant, lastProfileRequestId: _lastProfileRequestId, lastTeamSetupReceipt: _lastTeamSetupReceipt, ...rest } = bot;
   // An elevated selection is inert until the desktop confirms its exact
   // private reply. Every ordinary client sees the effective Ask state during
@@ -2693,9 +2718,9 @@ const roomHandoffs = new RoomHandoffs(join(DATA_DIR, "room-handoffs.json"), {
     await tracked;
     return { ok: result.outcome === "settled", text: result.stopReason || result.replyText || result.outcome || "The addressed agent could not run" };
   },
-});
+}, Date.now, roomHandoffLimits(cfg));
 activeCoordinationForThread = threadId => roomHandoffs.activeDirect(threadId);
-function publicGroupState(group: GroupRecord) {
+function publicGroupState(group: GroupRecord): WireGroup {
   return { ...group, working: groupIsWorking(group) || [...roomHandoffs.nodes.values()].some(n => n.groupId === group.id && !["completed", "failed", "cancelled"].includes(n.status)) };
 }
 
@@ -3636,6 +3661,15 @@ const localVmLeases = new LocalVmLeasePool(30 * 60_000);
 const localVmLifecycleBusy = new Set<string>();
 const localVmThreadTargets = new Map<string, LocalVmTarget>();
 const localVmActiveThreads = new Map<string, string>();
+// Lazy Auto-VM claims (issue #1361): a thread whose auto-resolved Local VM
+// attach deferred the exclusive claim registers here so the first screen
+// tools/call gate can fire it. Dispatch claims eagerly today, so entries
+// exist only as a no-op handoff to the gate.
+const autoVmClaims: AutoVmClaimTable = new Map();
+/** How long the computer-control gate lets a lazy claim land before it
+ * answers held. A free, ready VM claims in the time of one container
+ * inspect; only a claim queued behind another holder outlives this. */
+const LAZY_VM_CLAIM_GRACE_MS = 5_000;
 /** Local VM targets this process has seen ready or recreatable — at boot, in
  * the inventory, or in a turn. Auto probes the container runtime for a VM
  * only when one of these exists, so an ordinary Auto turn on a machine with
@@ -4060,6 +4094,10 @@ function localVmIdleFor(target: LocalVmTarget): LocalVmIdleTimer {
 }
 
 function releaseLocalVmThread(threadId: string): void {
+  // Covers lazy claims too (issue #1361): every settle path funnels through
+  // here or through releaseTurnResources, so a turn that ends before its
+  // first screen call leaves no claim slot behind.
+  autoVmClaims.delete(threadId);
   const target = localVmThreadTargets.get(threadId);
   if (!target) return;
   localVmLeaseFor(target).release(threadId);
@@ -5557,6 +5595,15 @@ async function startTurn(
   // branch only — abandoned forks never reach the model
   const skipTranscript = new Set<string>([userMessage.id, ...(opts?.excludeMessageIds ?? [])]);
   const activeMessages = store.activePath(threadId);
+  // This turn's own text carries the addressed request and, when resuming,
+  // every child result as JSON: neither is repeated from the transcript.
+  const coordinationChildren = opts?.coordination?.resumed
+    ? new Set(roomHandoffs.children(opts.coordination.id).map((child) => child.id)) : undefined;
+  for (const m of activeMessages) {
+    if (!opts?.coordination || !m.roomRequest) continue;
+    if ((m.roomRequest.phase === "request" && m.roomRequest.id === opts.coordination.id) ||
+      (m.roomRequest.phase === "result" && coordinationChildren?.has(m.roomRequest.id))) skipTranscript.add(m.id);
+  }
   // A flat reply may deliberately point across a fork in the same thread.
   // Resolve its quote from full storage, while the replay itself remains
   // strictly limited to the selected branch below.
@@ -5567,6 +5614,7 @@ async function startTurn(
     .map((m) => ({
       role: m.role === "user" ? ("user" as const) : ("assistant" as const),
       text: m.roomRequest?.phase === "result" ? teammateReportContext(m.roomRequest.id, bot.id)
+        : m.role !== "user" && m.from ? peerMessageText(m.from.name, transcriptText(m, messagesById, cfg.profile?.name?.trim() || "User"))
         : transcriptText(m, messagesById, cfg.profile?.name?.trim() || "User"),
     }));
 
@@ -5770,6 +5818,76 @@ async function startTurn(
       let browserCapture: (() => Promise<{ png: string; format: string }>) | null = null;
       let computerKind: "box" | "vps" | "vm" | "local" | null = null;
       let autoVpsProblem: string | null = null;
+      /** The Local VM frame capture for the poller and the settled transcript
+       * screenshot. The shared desktop outlives the turn: once another thread
+       * owns it, a capture still in flight would picture ITS work under this
+       * bot's name — live and in the settled frame, which is taken after the
+       * lease is already released. No owner means the desktop is simply
+       * idle: that final frame is ours to keep. */
+      const localVmPreviewFor = (localVmTarget: LocalVmTarget, claimThreadId: string) => () => {
+        const owner = localVmLeaseFor(localVmTarget).current(localVmOwnerBusy);
+        if (owner && owner.threadId !== claimThreadId) {
+          throw new Error("the Local VM moved on to another turn");
+        }
+        return containerComputerFrame(undefined, undefined, localVmTarget);
+      };
+      /** The exclusive Local VM claim sequence, verbatim from the old inline
+       * attach path, shared by dispatch (eager) and the first-screen-call
+       * gate (issue #1361). Idempotent per turn: the resource claim and the
+       * lease both re-assert the same owner, so a re-entrant call from the
+       * gate no-ops once dispatch has already claimed. A lazy attach pins
+       * the target it mounted the tools against: the claim must lease that
+       * desktop, not whatever localVmTargetForBot resolves to by the time
+       * the first screen call arrives. */
+      const claimAutoLocalVm = async (claimThreadId: string, pinnedTarget?: LocalVmTarget): Promise<{ target: LocalVmTarget; runtime: Runtime }> => {
+        const localVmTarget = pinnedTarget ?? localVmTargetForBot(bot.id);
+        await bindTurnComputer(resourceOwner, `computer:vm:${localVmTarget.key}`, true);
+        if (localVmImageBusy || localVmModeChangeBusy || localVmLifecycleBusy.has(localVmTarget.key)) {
+          throw new Error("this Local VM is being started, stopped, or replaced — wait for setup to finish");
+        }
+        // Claim before the first await. The lifecycle route performs its
+        // matching check synchronously, so neither side can enter while the
+        // other is between inspection and mutation.
+        if (!localVmLeaseFor(localVmTarget).claim(claimThreadId, bot.id, localVmOwnerBusy)) {
+          throw new Error("this Local VM is already being used by another turn — wait for that turn to finish");
+        }
+        localVmThreadTargets.set(claimThreadId, localVmTarget);
+        localVmActiveThreads.set(localVmTarget.key, claimThreadId);
+        localVmIdleFor(localVmTarget).touch();
+        // The lease is held from here. An eager attach that fails below
+        // fails the turn and settle releases it; a lazy claim's rejection is
+        // swallowed into the slot's failed flag and the turn carries on, so
+        // without this the exclusive lease would sit held for the rest of a
+        // turn that never got the VM — the very serialisation #1361 removes.
+        const dropLease = () => {
+          localVmLeaseFor(localVmTarget).release(claimThreadId);
+          if (localVmActiveThreads.get(localVmTarget.key) === claimThreadId) localVmActiveThreads.delete(localVmTarget.key);
+          localVmThreadTargets.delete(claimThreadId);
+          // bindTurnComputer above also took the turn-level resource; a
+          // later turn's exclusive bind queues behind it just the same.
+          const resource = `computer:vm:${localVmTarget.key}`;
+          turnResources.releaseOne(resource, resourceOwner);
+          if (turnComputerResources.get(resourceOwner.threadId)?.resource === resource) turnComputerResources.delete(resourceOwner.threadId);
+        };
+        let localVm: Awaited<ReturnType<typeof readyLocalVmForTurn>>;
+        try {
+          localVm = await readyLocalVmForTurn(bot.id, localVmTarget);
+        } catch (error) {
+          dropLease();
+          throw error;
+        }
+        if (!localVm.ready || !localVm.runtime) {
+          dropLease();
+          throw new Error(`${localVm.problem ?? "the Local VM is not ready"} (App Settings → Computers)`);
+        }
+        // Same contract as the Box and VPS branches below: without this the
+        // poller never starts, so the Local VM publishes no `screen` events
+        // and every client that only has the stream (the phone) waits
+        // forever. The web panel hid the gap by polling the screenshot
+        // route itself.
+        previewCapture = localVmPreviewFor(localVmTarget, claimThreadId);
+        return { target: localVmTarget, runtime: localVm.runtime };
+      };
 
       // Explicit destinations are strict. In particular, Local VM must never
       // fall through to host CUA and accidentally click on the user's Mac.
@@ -5784,6 +5902,7 @@ async function startTurn(
           throw new Error("this model engine cannot use the Local VM — choose Claude or an ACP engine, or select another computer destination");
         }
         const localVmTarget = localVmTargetForBot(bot.id);
+        let lazyReadyVm: { runtime: Runtime } | null = null;
         if (!strict) {
           // Nothing this process has ever seen for this target, and nobody is
           // relying on an unattended run: do not pay for a runtime probe.
@@ -5791,47 +5910,62 @@ async function startTurn(
           const seen = await containerComputerStatus(undefined, undefined, localVmTarget).catch(() => null);
           if (!seen || !autoLocalVmAttachable(seen)) return false;
           if (localVmImageBusy || localVmModeChangeBusy || localVmLifecycleBusy.has(localVmTarget.key)) return false;
+          if (seen.ready && seen.runtime) lazyReadyVm = { runtime: seen.runtime };
         }
         try {
-          await bindTurnComputer(resourceOwner, `computer:vm:${localVmTarget.key}`, true);
-          if (localVmImageBusy || localVmModeChangeBusy || localVmLifecycleBusy.has(localVmTarget.key)) {
-            throw new Error("this Local VM is being started, stopped, or replaced — wait for setup to finish");
+          if (lazyReadyVm) {
+            // Lazy exclusivity (issue #1361): a VM that is ready right now
+            // mounts without claiming — screen-less Auto turns never touch
+            // the lease, and the first screen tools/call fires the claim
+            // through the computer-control gate. A VM that must be created
+            // or recreated first keeps the eager claim below: the bridge
+            // child needs the container to exist, and readyLocalVmForTurn
+            // is what boots it.
+            integrations.localComputer = containerComputerMcp(
+              lazyReadyVm.runtime,
+              controlIntegration(bot.id, threadId, dispatchClaimId),
+              localVmTarget,
+            );
+            autoVmClaims.set(threadId, {
+              owner: resourceOwner,
+              lazy: true,
+              claim: async () => {
+                await claimAutoLocalVm(threadId, localVmTarget);
+                // The dispatch-site poller start saw a null previewCapture
+                // (this lazy mount runs before any claim exists), so this
+                // turn would publish no live `screen` events and settle no
+                // final computer frame. Restart the poller with the now-live
+                // computer capture, keeping any browser capture and whether
+                // this turn already touched its screen. Same still-running
+                // guard as dispatch: a poller started after its own
+                // turn.completed would never be torn down.
+                if (previewCapture && threadBusy(bot.id, threadId)) {
+                  const touched = screenPollers.get(threadId)?.touched ?? instance.driverKind === "boxAgent";
+                  stopScreenPoller(bot.id, threadId);
+                  startScreenPoller(
+                    bot.id,
+                    threadId,
+                    { computer: previewCapture, ...(browserCapture ? { browser: browserCapture } : {}) },
+                    { screenIsTheWork: touched },
+                  );
+                }
+              },
+            });
+            return true;
           }
-          // Claim before the first await. The lifecycle route performs its
-          // matching check synchronously, so neither side can enter while the
-          // other is between inspection and mutation.
-          if (!localVmLeaseFor(localVmTarget).claim(threadId, bot.id, localVmOwnerBusy)) {
-            throw new Error("this Local VM is already being used by another turn — wait for that turn to finish");
-          }
-          localVmThreadTargets.set(threadId, localVmTarget);
-          localVmActiveThreads.set(localVmTarget.key, threadId);
-          localVmIdleFor(localVmTarget).touch();
-          const localVm = await readyLocalVmForTurn(bot.id, localVmTarget);
-          if (!localVm.ready || !localVm.runtime) {
-            throw new Error(`${localVm.problem ?? "the Local VM is not ready"} (App Settings → Computers)`);
-          }
+          const claimed = await claimAutoLocalVm(threadId);
           integrations.localComputer = containerComputerMcp(
-            localVm.runtime,
+            claimed.runtime,
             controlIntegration(bot.id, threadId, dispatchClaimId),
-            localVmTarget,
+            claimed.target,
           );
-          // Same contract as the Box and VPS branches below: without this the
-          // poller never starts, so the Local VM publishes no `screen` events
-          // and every client that only has the stream (the phone) waits
-          // forever. The web panel hid the gap by polling the screenshot
-          // route itself.
-          previewCapture = () => {
-            // The shared desktop outlives the turn. Once another thread owns
-            // it, a capture still in flight would picture ITS work under this
-            // bot's name — live and in the settled transcript frame, which is
-            // taken after the lease is already released. No owner means the
-            // desktop is simply idle: that final frame is ours to keep.
-            const owner = localVmLeaseFor(localVmTarget).current(localVmOwnerBusy);
-            if (owner && owner.threadId !== threadId) {
-              throw new Error("the Local VM moved on to another turn");
-            }
-            return containerComputerFrame(undefined, undefined, localVmTarget);
-          };
+          // Hand the same claim to the first-screen-call gate. This eager
+          // path has already claimed, so the gate's fire-once call can only
+          // re-assert the same owner — a no-op (issue #1361).
+          autoVmClaims.set(threadId, {
+            owner: resourceOwner,
+            claim: async () => { await claimAutoLocalVm(threadId); },
+          });
           return true;
         } catch (error) {
           if (strict) throw error;
@@ -6532,10 +6666,7 @@ routines = new RoutineManager({
   hasPendingDelegations: (threadId) => pendingThreads().includes(threadId) ||
     [...delegationWatch.values()].some((watch) => watch.sourceThreadId === threadId) ||
     pendingDelegationWakes.has(threadId),
-  botState: (botId) => {
-    const bot = store.bot(botId);
-    return !bot ? "missing" : bot.busy ? "busy" : "ready";
-  },
+  botState: unattendedDispatchState,
   goalState: (groupId, coordinatorBotId) => {
     const group = store.group(groupId);
     const coordinator = store.bot(coordinatorBotId);
@@ -6923,11 +7054,6 @@ async function deleteBotWithLifecycle(botId: string, revalidate: () => void = ()
           const acknowledged = await browserCleanup.ensure(committedCleanup);
           requireBrowserCleanupAcknowledged(acknowledged, `Browser data for ${bot.name}`);
         }
-        for (const dir of [EVENTS_DIR, NATIVE_DIR]) {
-          try {
-            unlinkSync(join(dir, `${bot.threadId}.ndjson`));
-          } catch {}
-        }
         return deletionResponse( 200, { ok: true });
       } finally {
         if (claimedLocalVmTarget) localVmLifecycleBusy.delete(claimedLocalVmTarget.key);
@@ -7224,10 +7350,7 @@ function resolveAndSendProfile(
 // ordered behind a busy MAUS and gives webhook runs the same durable receipts.
 const webhooks = new WebhookManager({
   emit: broadcast,
-  botState: (botId) => {
-    const bot = store.bot(botId);
-    return !bot ? "missing" : bot.busy ? "busy" : "ready";
-  },
+  botState: unattendedDispatchState,
   enqueue: (input) => routines!.enqueueWebhook(input),
   findRun: (webhookId, deliveryId) => routines!.webhookRunReceipt(webhookId, deliveryId),
   cancelQueued: (webhookId, message) => routines!.cancelQueuedWebhook(webhookId, message),
@@ -7399,7 +7522,11 @@ async function runGroupMemberTurn(
   }
   revokeInternalCapabilitiesForThread(threadId);
   spoken.add(botId);
-  const preparedApprovalMode = approvalModeForTurn(bot, Boolean(orchestration?.roomHandoffId));
+  // Must be the SAME resolver the readiness re-check uses below, or a Chief's
+  // delegated Full elevation makes the two disagree by construction: every
+  // such room turn then reads as "settings changed", retries once, and
+  // settles as busy without ever dispatching.
+  const preparedApprovalMode = roomTurnApprovalMode(bot, orchestration);
   const preparedSelection = { ...bot.modelSelection };
   const preparedComposio = bot.composio;
   const instance = turnInstance(bot);
@@ -11166,7 +11293,7 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
       if (method === "POST" && path === "/api/internal/ask-bot") {
         const body = await readInternalBody();
         const fromBotId = internalSender.id;
-        const toBotId = String(body.toBotId ?? "");
+        const toBotRef = String(body.toBotId ?? "");
         const message = String(body.message ?? "").trim();
         if (
           body.depth !== undefined &&
@@ -11175,9 +11302,15 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
           return json(res, 403, { error: "the recursion depth does not match this turn" });
         }
         const depth = internalCapability.depth;
-        if (!toBotId || !message) return json(res, 400, { error: "toBotId and message required" });
-        if (toBotId === fromBotId) return json(res, 400, { error: "a bot cannot message itself" });
+        if (!toBotRef || !message) return json(res, 400, { error: "toBotId and message required" });
+        if (toBotRef === fromBotId) return json(res, 400, { error: "a bot cannot message itself" });
         if (depth >= MAX_COMMS_DEPTH) return json(res, 200, { error: "message chains are limited to one hop" });
+        // A unique reachable teammate name is accepted where an id is
+        // expected; see resolveTeammate for why.
+        const resolvedTo = resolveTeammate(store.bots, internalSender, toBotRef);
+        if ("error" in resolvedTo) return json(res, 404, { error: `no such bot: ${resolvedTo.error}` });
+        if (resolvedTo.id === fromBotId) return json(res, 400, { error: "a bot cannot message itself" });
+        const toBotId = resolvedTo.id;
         const target = store.bot(toBotId);
         if (!target) return json(res, 404, { error: "no such bot" });
         // An unknown sender used to fall through: no mirroring AND no
@@ -11393,7 +11526,7 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
       }
       if (method === "POST" && path === "/api/internal/delegate-bot") {
         const body = await readInternalBody();
-        const toBotId = String(body.toBotId ?? "");
+        const toBotRef = String(body.toBotId ?? "");
         const message = String(body.message ?? "").trim();
         const reason = typeof body.reason === "string" && body.reason.trim() ? body.reason.trim() : undefined;
         if (
@@ -11403,8 +11536,11 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
           return json(res, 403, { error: "the recursion depth does not match this turn" });
         }
         const depth = internalCapability.depth;
-        if (!toBotId || !message) return json(res, 400, { error: "toBotId and message required" });
+        if (!toBotRef || !message) return json(res, 400, { error: "toBotId and message required" });
         const from = internalSender;
+        const resolvedTo = resolveTeammate(store.bots, from, toBotRef);
+        if ("error" in resolvedTo) return json(res, 404, { error: `no such bot: ${resolvedTo.error}` });
+        const toBotId = resolvedTo.id;
         const target = store.bot(toBotId);
         if (!target) return json(res, 404, { error: "no such bot" });
         if (!canAccessTeam(from, target.section) || target.hidden) {
@@ -11477,7 +11613,19 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
           const groupId = parsed.data.groupId ?? source?.id;
           const destination = groupId ? store.group(groupId) : undefined;
           if (groupId && !destination) return json(res, 404, { error: "No such room; use list_room_targets." });
-          const targets = parsed.data.botIds.map(botId => ({ groupId: destination?.id,
+          // A slot may carry a teammate's name instead of its id — the
+          // roster shows both, list_bots shows both, and a Chief reading its
+          // prompt reaches for the name. A unique reachable name resolves;
+          // anything else is refused with the id or name the caller sent
+          // and the way to the real ids (peer-roster.ts).
+          const botIds: string[] = [];
+          for (const raw of parsed.data.botIds) {
+            const resolved = resolveTeammate(store.bots, internalSender, raw);
+            if ("error" in resolved) return json(res, 403, { error: resolved.error });
+            botIds.push(resolved.id);
+          }
+          if (new Set(botIds).size !== botIds.length) return json(res, 400, { error: "bot_ids name the same teammate twice — send each teammate once" });
+          const targets = botIds.map(botId => ({ groupId: destination?.id,
             threadId: destination ? destination.id === source?.id ? address.threadId : destination.threadId : store.bot(botId)?.threadId ?? "", botId,
           }));
           for (const target of targets) {
@@ -12041,6 +12189,48 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
         if (!bot) return json(res, 404, { error: "no such bot" });
         if (method === "GET") {
           const snapshot = botComputerControlSnapshot(botId, internalCapability.teamComputerId);
+          const slot = autoVmClaims.get(internalCapability.threadId);
+          const lazyClaim = slot && slot.owner.generation === internalCapability.generation ? slot : undefined;
+          if (!snapshot.held && lazyClaim?.lazy && !lazyClaim.begin) {
+            // First screen tools/call on a lazily-attached Auto VM (issue
+            // #1361): fire the exclusive claim — once — and give it a moment
+            // to land. A free, ready VM claims in the time of one container
+            // inspect, so this call then proceeds with an honest answer;
+            // only a claim still queued behind another holder answers held
+            // below, and then the contention text is true. Keyed on the
+            // slot, never on the thread's turn-computer entry: a bind this
+            // turn abandoned earlier (a VPS that turned out to be asleep)
+            // must not hide the unclaimed VM and let the call through.
+            startAutoVmClaim(autoVmClaims, internalCapability.threadId, internalCapability.generation);
+            await Promise.race([
+              lazyClaim.begin ?? Promise.resolve(),
+              new Promise<void>((resolve) => setTimeout(resolve, LAZY_VM_CLAIM_GRACE_MS)),
+            ]);
+          }
+          if (!snapshot.held && lazyClaim?.failed === true) {
+            // A rejected lazy claim (gate finding F1, issue #1361): the
+            // computer MCP mounted at dispatch is still live, and the claim
+            // may even have left a turn-computer entry behind (it can reject
+            // after bindTurnComputer succeeded — lease lost to a person,
+            // lifecycle busy, boot failure). Either way this turn owns no
+            // usable VM, so keep refusing every screen call for the rest of
+            // the generation; the bridge must never forward one onto a VM
+            // this turn never claimed. Turn settle GC clears the slot. Say
+            // why, and say not to retry: the contention text would send the
+            // model into a screenshot loop against a claim that cannot land.
+            return json(res, 200, {
+              held: true, helpOpen: false,
+              blockedReason: `This turn could not claim the Local VM${lazyClaim.failure ? ` (${lazyClaim.failure})` : ""}. This call was not performed. Do not retry computer work in this turn; tell the person what you could not do.`,
+            });
+          }
+          if (!snapshot.held && lazyClaim?.lazy && lazyClaim.begin && !lazyClaim.claimed) {
+            // The claim fired and is still waiting on the exclusive bind:
+            // another turn genuinely holds this desktop right now.
+            return json(res, 200, {
+              held: true, helpOpen: false,
+              blockedReason: "Another thread is using this computer. This call was not performed. Pause computer work until that thread finishes, then take a fresh screenshot before acting.",
+            });
+          }
           const computer = turnComputerResources.get(internalCapability.threadId);
           if (!snapshot.held && computer && computer.owner.generation === internalCapability.generation &&
               !claimTurnResource(computer.owner, computer.resource)) {
@@ -13317,13 +13507,6 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
       routines!.disableForGroup(group.id);
       store.deleteGroup(group.id);
       rejectDeletedThreadSkillStages(stagedSkillCleanups);
-      for (const threadId of threadIds) {
-        for (const dir of [EVENTS_DIR, NATIVE_DIR]) {
-          try {
-            unlinkSync(join(dir, `${threadId}.ndjson`));
-          } catch {}
-        }
-      }
       return json(res, 200, { ok: true });
     }
     m = path.match(/^\/api\/groups\/([\w-]+)\/messages$/);
@@ -13432,6 +13615,110 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
         return json(res, 404, { error: "no such queued message" });
       }
       return json(res, 200, { ok: true });
+    }
+
+    // Steer a queued room message into the RUNNING room turn (no interrupt).
+    // Only the head steers — room queues drain one item at a time — and the
+    // engine that receives it is the thread's live speaker. A room whose
+    // running driver cannot steer keeps its queue, exactly like an incapable
+    // 1:1 engine; this never ends the running turn.
+    m = path.match(/^\/api\/groups\/([\w-]+)\/queue\/([\w-]+)\/steer$/);
+    if (m && method === "POST") {
+      const body = await readBody(req);
+      if (body !== null && (typeof body !== "object" || Array.isArray(body))) {
+        return json(res, 400, { error: "body must be a JSON object" });
+      }
+      const threadId = typeof body?.threadId === "string" ? body.threadId : undefined;
+      if (threadId !== undefined && !/^[\w-]+$/.test(threadId)) {
+        return json(res, 400, { error: "threadId must be a task id" });
+      }
+      const group = store.group(m[1]);
+      if (!group) return json(res, 404, { error: "no such room" });
+      const targetThreadId = threadId ?? group.threadId;
+      const ownsThread = group.dm
+        ? group.threadId === targetThreadId
+        : Boolean(store.groupTaskByThread(group.id, targetThreadId));
+      if (!ownsThread) {
+        return json(res, 409, { error: "the channel switched tasks before it could receive the message" });
+      }
+      noteTurnTrigger(targetThreadId, auth);
+      const current = store.group(group.id);
+      if (!current) return json(res, 404, { error: "no such room" });
+      // Which engine owns the running room turn on this thread? The same
+      // resolution the room's own Stop uses: the live speaker, else the busy
+      // bot on the channel's main thread.
+      const speakerBotId =
+        groupSpeakers.get(targetThreadId)?.botId ??
+        (targetThreadId === current.threadId ? current.busyBotId : undefined);
+      const speaker = speakerBotId ? store.bot(speakerBotId) : undefined;
+      const instance = speaker ? runningTurnInstance(speaker, targetThreadId) : undefined;
+      // Lift the queue atomically: the room settling can drain it as the
+      // next follow-up, or this request can steer its head into the live
+      // turn — never both for the same words.
+      const held = holdChannelQueue(current.id, targetThreadId, m[2]);
+      if (!held) return json(res, 404, { error: "no such queued message" });
+      if (!speaker || !instance?.adapter.capabilities.queueing || !instance.adapter.steer) {
+        restoreHeldChannelQueue(held);
+        return json(res, 200, { ok: true, queued: true, threadId: targetThreadId });
+      }
+      const [head] = held.items;
+      if (!head || head.id !== m[2]) {
+        restoreHeldChannelQueue(held);
+        return json(res, 409, { error: "only the first queued message can steer" });
+      }
+      // A reply target that cannot be resolved restores the held queue
+      // before the request fails — the room's normal drain keeps the head.
+      const replyTo = resolveHeldReplyTarget(held, resolveReplyTarget);
+      const steered = await instance.adapter
+        .steer(targetThreadId, promptWithReply(head.text, replyTo, cfg.profile?.name?.trim() || "User"))
+        .catch((): SteerOutcome => "indeterminate");
+      // The steer was awaited adapter work: re-read every ownership
+      // invariant before writing anything, exactly like the 1:1 path. A
+      // speaker change, a channel switch, or a settled room restores the
+      // queue instead of recording words the new turn never saw.
+      const after = store.group(current.id);
+      const afterSpeakerBotId = after
+        ? groupSpeakers.get(targetThreadId)?.botId ??
+          (targetThreadId === after.threadId ? after.busyBotId : undefined)
+        : undefined;
+      // "indeterminate" (timeout after delivery, lost transport, a settle
+      // race) never restores: the words may already be folded into the turn
+      // that was live when they were sent, and replaying them into a new
+      // turn would run them twice. Record them once — even under a new
+      // speaker — and settle the head.
+      const delivered = steered !== "refused";
+      if (after && delivered && (steered === "indeterminate" || afterSpeakerBotId === speakerBotId)) {
+        const message = store.appendMessage(targetThreadId, {
+          role: "user",
+          kind: "text",
+          text: head.text,
+          replyToId: head.replyToId,
+          sendId: head.sendId,
+          channelMode: head.mode,
+          queueId: head.id,
+          via: head.via,
+          steered: true,
+        });
+        settleHeldChannelQueueHead(held);
+        return json(res, 200, {
+          ok: true,
+          steered: true,
+          threadId: targetThreadId,
+          messages: [message],
+          queueIds: [head.id],
+        });
+      }
+      if (steered === "indeterminate" && !after) {
+        // The room vanished while the answer was lost: settle the head so a
+        // restart cannot replay words the dead turn may already have run.
+        settleHeldChannelQueueHead(held);
+        return json(res, 404, { error: "no such room" });
+      }
+      restoreHeldChannelQueue(held);
+      // The room may have settled while the steer was refused; a queue that
+      // is now drainable must not strand behind a missed settle.
+      if (after && !groupIsWorking(after)) drainQueuedChannelSends();
+      return json(res, 200, { ok: true, queued: true, threadId: targetThreadId });
     }
     m = path.match(/^\/api\/groups\/([\w-]+)\/interrupt$/);
     if (m && method === "POST") {
@@ -14717,7 +15004,7 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
           // existing server-side queue records it atomically for the next turn.
           if (currentAtStart.busy) {
             const instance = runningTurnInstance(currentAtStart, threadId);
-            let steered = false;
+            let steered: SteerOutcome = "refused";
             // A live text steer has no image side channel. Keep an attachment
             // message intact for the next ordinary turn, where central image
             // admission can hand it to the provider natively.
@@ -14725,7 +15012,7 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
             if (!carriesImages && !computerSelectionTurns.get(threadId)?.selected && instance?.adapter.capabilities.queueing && instance.adapter.steer) {
               steered = await instance.adapter
                 .steer(threadId, promptWithReply(text, replyTo, cfg.profile?.name?.trim() || "User"))
-                .catch(() => false);
+                .catch((): SteerOutcome => "indeterminate");
             }
             // steer() is awaited adapter work. The turn can settle, the task can
             // switch, or the whole bot can be deleted before its acknowledgement
@@ -14738,13 +15025,18 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
             if (!store.taskByThread(bot.id, threadId)) {
               throw Object.assign(new Error("the target task no longer exists"), { status: 409 });
             }
-            if (steered) {
-              if (!current.busy) {
+            const delivered = steered !== "refused";
+            if (delivered) {
+              if (steered === "steered" && !current.busy) {
                 throw Object.assign(
                   new Error("the running turn ended before the steered message could be recorded"),
                   { status: 409 },
                 );
               }
+              // "indeterminate" falls through to the same record: the words
+              // may already be folded into a turn whose acknowledgement was
+              // lost, and handing them back for a resend could run them
+              // twice. Recording them once is the honest outcome.
               // A person steering a webhook turn is present, and auto mode may
               // follow them again. But this route is also reachable from the
               // bot's own shell on a headless server (loopback is the owner
@@ -14790,6 +15082,77 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
         return json(res, 404, { error: "no such queued message" });
       }
       return json(res, 200, { ok: true });
+    }
+
+    // Steer a queued message into the RUNNING turn (no interrupt). Engines
+    // without a live steer keep the queue; this never ends the current turn.
+    m = path.match(/^\/api\/bots\/([\w-]+)\/queue\/([\w-]+)\/steer$/);
+    if (m && method === "POST") {
+      const body = await readBody(req);
+      requirePinnedClientThread(m[1], body?.threadId);
+      const bot = requestedTaskBot(m[1], body?.threadId);
+      noteTurnTrigger(bot.threadId, auth);
+      // Lift the whole queue atomically: a settle racing this request can
+      // drain it as a follow-up, or this request can steer it into the live
+      // turn — never both for the same words.
+      const held = holdSteeredQueue(bot.id, bot.threadId, m[2]);
+      if (!held) return json(res, 404, { error: "no such queued message" });
+      // A live steer has no image side channel. Attachment words wait for a
+      // real turn where central admission can hand the images to the engine.
+      if (held.items.some((item) => extractTurnImages(item.text).images.length > 0)) {
+        restoreHeldSteeredQueue(held);
+        return json(res, 200, { ok: true, queued: true, threadId: bot.threadId });
+      }
+      const currentAtStart = store.projectBotForTask(bot.id, bot.threadId);
+      const instance = currentAtStart?.busy ? runningTurnInstance(currentAtStart, bot.threadId) : undefined;
+      const prompt = held.items.map((item) => item.prompt).join("\n\n");
+      let steered: SteerOutcome = "refused";
+      if (currentAtStart?.busy && instance?.adapter.capabilities.queueing && instance.adapter.steer) {
+        steered = await instance.adapter
+          .steer(bot.threadId, prompt)
+          .catch((): SteerOutcome => "indeterminate");
+      }
+      // The steer was awaited adapter work: re-read every ownership
+      // invariant before writing anything, exactly like the live-send path.
+      const current = store.projectBotForTask(bot.id, bot.threadId);
+      // "indeterminate" never restores: the words may already be folded into
+      // the turn that was live when they were sent, and replaying them into
+      // a fresh follow-up turn would run them twice. Record them whenever
+      // the destination still exists, busy or not.
+      if (
+        (steered === "steered" && current?.busy ||
+          steered === "indeterminate" && current) &&
+        store.taskByThread(bot.id, bot.threadId)
+      ) {
+        if (auth.kind === "session" || DESKTOP_MANAGED) clearUnattended(bot.threadId);
+        const messages = held.items.map((item) => store.appendMessage(bot.threadId, {
+          role: "user",
+          kind: "text",
+          text: item.text,
+          replyToId: item.replyToId,
+          sendId: item.sendId,
+          queueId: item.messageId,
+          peerAsk: item.peerAsk,
+          steered: true,
+        }));
+        const queueIds = held.items.map((item) => item.messageId);
+        settleHeldSteeredQueue(held);
+        return json(res, 200, { ok: true, steered: true, threadId: bot.threadId, messages, queueIds });
+      }
+      if (steered === "indeterminate") {
+        // No destination is left: settle so a restart cannot replay words a
+        // dead turn may already have run.
+        settleHeldSteeredQueue(held);
+        if (!store.taskByThread(bot.id, bot.threadId)) {
+          throw Object.assign(new Error("the target task no longer exists"), { status: 409 });
+        }
+        throw Object.assign(new Error("no such bot"), { status: 404 });
+      }
+      restoreHeldSteeredQueue(held);
+      // The turn may have settled while the steer was refused; a queue that
+      // is now drainable must not strand behind a missed settle.
+      if (current && !current.busy) drainQueuedSends();
+      return json(res, 200, { ok: true, queued: true, threadId: bot.threadId });
     }
 
     // edit a user message → fork the conversation there and rerun the turn.
@@ -16968,6 +17331,38 @@ try {
 } catch (error) {
   console.warn(`attachments: startup partial cleanup failed: ${error instanceof Error ? error.message : String(error)}`);
 }
+
+// #1280: retention for per-thread event logs. Off unless configured, and
+// even then it only removes log files — transcripts, thread records, and
+// workspace state stay untouched. A thread qualifies only when its newest
+// close or archive stamp is older than the window and it is not busy,
+// unread, or carrying an open direct handoff.
+const THREAD_LOG_RETENTION_SWEEP_MS = 24 * 60 * 60 * 1000;
+
+function sweepThreadEventLogsNow(): void {
+  const retentionDays = threadEventLogRetentionDays(cfg);
+  if (retentionDays === null) return;
+  const candidates: ThreadLogRetentionCandidate[] = store.bots.flatMap((bot) =>
+    (bot.tasks ?? []).map((task) => ({
+      threadId: task.threadId,
+      closedAt: task.closedBy?.at ?? null,
+      archivedAt: task.archivedAt ?? null,
+      unread: task.unread === true,
+      busy: threadBusy(bot.id, task.threadId),
+      openDirectHandoff: roomHandoffs.activeDirect(task.threadId),
+    })));
+  const swept = sweepThreadEventLogs(candidates, retentionDays);
+  if (swept > 0) console.log(`[retention] removed event logs for ${swept} idle thread(s) past ${retentionDays} day(s)`);
+}
+
+try {
+  sweepThreadEventLogsNow();
+} catch (error) {
+  console.warn(`thread event log retention sweep failed: ${error instanceof Error ? error.message : String(error)}`);
+}
+// A days-scale window needs no tighter cadence; unref so the timer never
+// holds the process open.
+setInterval(sweepThreadEventLogsNow, THREAD_LOG_RETENTION_SWEEP_MS).unref();
 
 // A dispatch claim is deliberately committed before transcript/provider work.
 // If we died after that point, its outcome is unknown: recover the user's words
