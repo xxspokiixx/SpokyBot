@@ -957,9 +957,34 @@ function releaseTurnResources(owner: TurnOwner | undefined): void {
   }
 }
 
-function bindTurnComputer(owner: TurnOwner, resource: string, exclusive = false): void {
-  if (exclusive && !claimTurnResource(owner, resource)) {
-    throw Object.assign(new Error("another thread is using this computer — wait for it to finish"), { status: 409, code: "computer_busy" });
+async function bindTurnComputer(owner: TurnOwner, resource: string, exclusive = false): Promise<void> {
+  const active = () => activeInternalGenerationByThread.get(owner.threadId) === owner.generation &&
+    turnResourceOwners.get(owner.threadId)?.generation === owner.generation;
+  let waitingMessage: Message | undefined;
+  const deadline = Date.now() + GROUP_GOAL_WAIT_MAX_MS;
+  try {
+    while (true) {
+      if (!active()) throw new DirectTurnSetupCancelled("Computer wait cancelled");
+      if (!exclusive || claimTurnResource(owner, resource)) break;
+      if (!waitingMessage) {
+        const blocker = turnResources.blocker(resource, owner);
+        const holderBot = blocker && store.botByThread(blocker.threadId);
+        const holderTask = holderBot && blocker && store.taskByThread(holderBot.id, blocker.threadId);
+        const holder = holderBot ? `${holderBot.name}${holderTask?.title ? ` / ${holderTask.title}` : ""}`
+          : blocker && store.groupByThread(blocker.threadId)?.name;
+        waitingMessage = store.appendMessage(owner.threadId, {
+          role: "bot", kind: "activity",
+          tool: { name: `Waiting for computer${holder ? ` — ${holder} is using it` : ""}; will continue automatically` },
+          ...(holderBot && holderTask ? { threadRef: { botId: holderBot.id, threadId: holderTask.threadId, title: holderTask.title } } : {}),
+        });
+      }
+      if (Date.now() >= deadline) throw new Error("Computer is still busy. Stop the turn using it, then retry.");
+      await new Promise<void>(resolve => setTimeout(resolve, 100));
+    }
+  } finally {
+    if (waitingMessage) store.patchMessage(owner.threadId, waitingMessage.id, {
+      tool: { name: active() && turnResources.owns(resource, owner) ? "Computer available — continuing" : "Computer wait ended", ok: true },
+    });
   }
   turnResourceOwners.set(owner.threadId, owner);
   turnComputerResources.set(owner.threadId, { owner, resource });
@@ -3395,10 +3420,12 @@ const watchdog = new TurnWatchdog({
         groupSpeakers.delete(turn.threadId);
         store.patchGroup(group.id, { busyBotId: null, unread: true });
       }
+      // A cleared UI busy flag must not strand this finished generation's
+      // computer claim. The generation checks above protect replacements.
+      releaseTurnResources(stalledResourceOwner);
       const currentBot = store.bot(turn.botId);
       if (currentBot?.busy) {
         stopScreenPoller(currentBot.id, turn.threadId);
-        releaseTurnResources(stalledResourceOwner);
         if (activeVpsThreads.get(currentBot.id) === turn.threadId) activeVpsThreads.delete(currentBot.id);
         if (store.taskByThread(currentBot.id, turn.threadId)) store.setTaskActivity(currentBot.id, turn.threadId, "idle");
         else store.setActivity(currentBot.id, "idle");
@@ -3671,11 +3698,11 @@ async function attachTeamBox(computer: TeamComputerRecord, botId: string, owner:
   const ownerId = teamComputerOwner(computer.id);
   if (boxLifecycleBusyBots.has(ownerId)) throw new Error("The team computer is being changed; wait for it to finish");
   if (computerControl.snapshot(ownerId).held) throw new Error("Release human control of the team computer before starting another turn");
-  bindTurnComputer(owner, `computer:box-bot:${ownerId}`, true);
+  await bindTurnComputer(owner, `computer:box-bot:${ownerId}`, true);
   teamComputerTurns.set(owner.threadId, { owner, computerId: computer.id, botId, remoteAgent });
   let machine = await box.findBox(cfg, ownerId);
   if (!machine) throw new Error("The team's Box computer is missing; explicitly create or retry it from the Team map");
-  bindTurnComputer(owner, `computer:box:${machine.id}`, true);
+  await bindTurnComputer(owner, `computer:box:${machine.id}`, true);
   const action = box.boxTurnLifecycleAction({ explicitCloud: true, canMount: true, state: typeof machine.state === "string" ? machine.state : null });
   if (action === "wake") machine = await box.readyBox(cfg, ownerId);
   if (!machine || box.boxTurnLifecycleAction({ explicitCloud: true, canMount: true, state: typeof machine.state === "string" ? machine.state : null }) !== "attach") {
@@ -5720,7 +5747,7 @@ async function startTurn(
           if (localVmImageBusy || localVmModeChangeBusy || localVmLifecycleBusy.has(localVmTarget.key)) return false;
         }
         try {
-          bindTurnComputer(resourceOwner, `computer:vm:${localVmTarget.key}`, true);
+          await bindTurnComputer(resourceOwner, `computer:vm:${localVmTarget.key}`, true);
           if (localVmImageBusy || localVmModeChangeBusy || localVmLifecycleBusy.has(localVmTarget.key)) {
             throw new Error("this Local VM is being started, stopped, or replaced — wait for setup to finish");
           }
@@ -5778,7 +5805,7 @@ async function startTurn(
         }
         const cua = readCuaConnection();
         if (!cua) throw new Error("CUA Driver is not ready for this computer — check permissions and restart OpenMausBot");
-        bindTurnComputer(resourceOwner, "computer:host");
+        await bindTurnComputer(resourceOwner, "computer:host");
         integrations.localComputer = gatedLocalComputer(cua, controlIntegration(bot.id, threadId, dispatchClaimId));
         computerKind = "local";
       }
@@ -5793,7 +5820,7 @@ async function startTurn(
         if (!unsupported) {
           // The remote lifecycle and container are shared by this bot. Keep
           // its explicit computer turns serialized; ordinary threads still run.
-          bindTurnComputer(resourceOwner, `computer:vps:${vpsSshAlias(cfg)}:${bot.id}`, true);
+          await bindTurnComputer(resourceOwner, `computer:vps:${vpsSshAlias(cfg)}:${bot.id}`, true);
           activeVpsThreads.set(bot.id, threadId);
           let remote;
           remote = vps.vpsStartsForTurn({ wants, autoStartVps: bot.autoStartVps, automationSource: opts?.automationSource })
@@ -5830,7 +5857,7 @@ async function startTurn(
       if (!teamComputer && mountsCloudComputer && (wants === "cloud" || wants === undefined) && cloudBackend === "box" && box.boxConfigured(cfg)) {
         // Explicit cloud turns can provision/wake the same bot's Box. Claim
         // before any network await so setup itself cannot race another turn.
-        if (wants === "cloud") bindTurnComputer(resourceOwner, `computer:box-bot:${bot.id}`, true);
+        if (wants === "cloud") await bindTurnComputer(resourceOwner, `computer:box-bot:${bot.id}`, true);
         if (!mountsCloudComputer && wants === "cloud") {
           throw new Error("this model engine cannot use computer tools — choose Claude, an ACP engine, or the Computer engine");
         }
@@ -5872,7 +5899,7 @@ async function startTurn(
           });
         }
         if (b && lifecycle === "attach") {
-          bindTurnComputer(resourceOwner, `computer:box:${b.id}`, instance.driverKind === "boxAgent");
+          await bindTurnComputer(resourceOwner, `computer:box:${b.id}`, instance.driverKind === "boxAgent");
           previewCapture = () => box.screenshotBox(cfg, bot.id, b!.id);
           if (mountsCloudComputer) {
             integrations.computer = {
@@ -5915,7 +5942,7 @@ async function startTurn(
       ) {
         const cua = readCuaConnection();
         if (cua) {
-          bindTurnComputer(resourceOwner, "computer:host");
+          await bindTurnComputer(resourceOwner, "computer:host");
           integrations.localComputer = gatedLocalComputer(cua, controlIntegration(bot.id, threadId, dispatchClaimId));
           computerKind = "local";
         }
@@ -7614,7 +7641,7 @@ async function runGroupMemberTurn(
     }
     // A distinct identity fences cleanup even in shared mode on the same room thread.
     const target = { ...localVmTargetForBot(readyBot.id) };
-    bindTurnComputer(resourceOwner, `computer:vm:${target.key}`, true);
+    await bindTurnComputer(resourceOwner, `computer:vm:${target.key}`, true);
     if (localVmImageBusy || localVmModeChangeBusy || localVmLifecycleBusy.has(target.key)) {
       throw new Error("this Local VM is being started, stopped, or replaced");
     }
@@ -8059,6 +8086,7 @@ async function runGroupMemberTurn(
   return true;
   } catch (error) {
     if (providerDispatched) throw error;
+    if (error instanceof DirectTurnSetupCancelled) return false;
     const isSpendCap = typeof error === "object" && error !== null && (error as { code?: string }).code === "spend_cap";
     const isVariantError = typeof error === "object" && error !== null && (error as { code?: string }).code === "unsupported_model_variant";
     if (!roomSpeaker && !isSpendCap && !isVariantError) throw error;
