@@ -262,6 +262,17 @@ describe("refusals", () => {
     expect(await checkpointsEnabled(bot, linkedHome)).toBe(false);
   });
 
+  // Windows folder names are case-insensitive: every spelling below is the
+  // same folder on disk. Only side-effect-free checks here — on a build that
+  // missed the refusal, a snapshot would stage the whole home folder.
+  it.runIf(process.platform === "win32")("refuses the home and protected folders in any Windows casing", async () => {
+    const { bot } = workspace();
+    expect(refusalReason(homedir().toLowerCase())).toBe("checkpoints are not taken in the home folder");
+    expect(refusalReason(homedir().toUpperCase())).toBe("checkpoints are not taken in the home folder");
+    expect(refusalReason(join(homedir(), "DOCUMENTS"))).not.toBeNull();
+    expect(await checkpointsEnabled(bot, homedir().toUpperCase())).toBe(false);
+  });
+
   it("lists nothing (and creates nothing) for a folder never snapshotted", async () => {
     const { bot, cwd } = workspace();
     expect(await listCheckpoints(bot, cwd)).toEqual([]);
