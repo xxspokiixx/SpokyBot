@@ -39,9 +39,11 @@ Use only mapped, tested commands:
 
 - [Chat turns](chat-turns.md)
 - [OpenAI-compatible structured tools](openai-tools.md)
+- [OpenCode model variants through ACP](opencode-variants.md)
 - [Bot setup, model scope, and file continuity](bot-continuity.md)
 - [Reviewed Chief team setup and scoped deletion](team-setup.md)
 - [Full Access without duplicate approvals](full-access.md)
+- [Waiting for an occupied desktop](computer-wait.md)
 - [Chat UI, driven headlessly](chat-ui.md)
 - [Welcome flow and guided tour](onboarding.md)
 - [Channels](channels.md)
