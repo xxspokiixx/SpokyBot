@@ -236,7 +236,7 @@ import {
 } from "./store.ts";
 import * as tts from "./tts/index.ts";
 import { narrateTool, toUtterances } from "./tts/speech-text.ts";
-import { buildRecoveryText, buildTurnContext, engineIsFresh } from "./turn-context.ts";
+import { buildRecoveryText, buildTurnContext, engineIsFresh, NATIVELY_REPLAYING_DRIVER_KINDS } from "./turn-context.ts";
 import { extractTurnImages } from "./turn-images.ts";
 import { TurnWatchdog } from "./turn-watchdog.ts";
 import { TurnResources, workspaceResource, type TurnOwner } from "./turn-resources.ts";
@@ -5612,7 +5612,7 @@ async function startTurn(
     rewound,
     fresh,
     externallyUpdated: Boolean(externalContextMarker),
-    replaysNatively: instance.driverKind === "grok",
+    replaysNatively: NATIVELY_REPLAYING_DRIVER_KINDS.includes(instance.driverKind),
   });
   // Snapshot the cursor alongside the context decision. An external result
   // can arrive during async computer/setup work and clear the task cursor;

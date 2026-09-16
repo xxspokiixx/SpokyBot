@@ -1,3 +1,8 @@
+import type { DriverKind } from "./contracts.ts";
+
+// All three use createOpenAIChatRuntime and get history via SendTurnInput.transcript.
+export const NATIVELY_REPLAYING_DRIVER_KINDS: readonly DriverKind[] = ["grok", "openai-compat", "minimax"];
+
 // Building the text a driver actually receives. Three situations force an
 // inline replay of the active branch: a rewind (the visible branch changed),
 // a fresh engine (this instance has no session here — the user switched the
