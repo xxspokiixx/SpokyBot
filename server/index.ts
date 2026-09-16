@@ -7402,7 +7402,11 @@ async function runGroupMemberTurn(
   }
   revokeInternalCapabilitiesForThread(threadId);
   spoken.add(botId);
-  const preparedApprovalMode = approvalModeForTurn(bot, Boolean(orchestration?.roomHandoffId));
+  // Must be the SAME resolver the readiness re-check uses below, or a Chief's
+  // delegated Full elevation makes the two disagree by construction: every
+  // such room turn then reads as "settings changed", retries once, and
+  // settles as busy without ever dispatching.
+  const preparedApprovalMode = roomTurnApprovalMode(bot, orchestration);
   const preparedSelection = { ...bot.modelSelection };
   const preparedComposio = bot.composio;
   const instance = turnInstance(bot);
