@@ -355,6 +355,18 @@ describe("Group Local VM ownership on the real isolated server", () => {
     expect((await gate(c)).status).toBe(401);
     await stop(group.id); await idle(bots[0].id); vmState();
   });
+
+  it("never trips the lazy first-screen-call claim on an eagerly claimed turn", async () => {
+    // Issue #1361 seam check: dispatch still claims, so the gate's lazy
+    // branch (no computer entry yet) must stay unreachable and the poll
+    // must answer with the plain not-held snapshot, not contention text.
+    const { bots, group } = await room();
+    await send(group.id);
+    const c = computer(await dump());
+    const body = await (await gate(c)).json();
+    expect(body).toEqual({ held: false, helpOpen: false });
+    await stop(group.id); await idle(bots[0].id);
+  });
   it.each(["timeout", "stall"])("releases %s bookkeeping after the interrupt grace period", async (failure) => {
     const { bots, group } = await room();
     vmState({ timeout: failure === "timeout" });
