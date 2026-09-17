@@ -40,7 +40,14 @@ async function until<T>(read: () => T | Promise<T>, accept: (value: T) => boolea
     await new Promise(r => setTimeout(r, 40));
   }
 }
-const dump = () => until(() => existsSync(dumpFile) ? JSON.parse(readFileSync(dumpFile, "utf8")) : null, Boolean);
+// The fake writes its dump in one go, but a poll can still land between the
+// open and the close of that write and read a truncated file — macOS CI hit
+// "Unexpected end of JSON input" here. A partial file is "not yet", not a
+// failure: parse errors fall through to the next poll.
+const dump = () => until(() => {
+  if (!existsSync(dumpFile)) return null;
+  try { return JSON.parse(readFileSync(dumpFile, "utf8")); } catch { return null; }
+}, Boolean);
 const idle = (botId: string) => until(() => api("GET", "/api/bots?messages=0"), s => !s.bots.find((b: any) => b.id === botId)?.busy);
 const computer = (d: any) => d.mcpConfig.mcpServers.computer;
 const gate = (c: any) => fetch(c.env.OMB_CONTROL_URL, { headers: { authorization: `Bearer ${c.env.OMB_CONTROL_TOKEN}` } });
