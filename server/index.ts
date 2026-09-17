@@ -388,6 +388,7 @@ import { MAX_TEAM_BACKUP_BYTES } from "../shared/team-backup.ts";
 import { shouldMountLocalComputer } from "./local-routing.ts";
 import { autoLocalVmAttachable, type ContainerComputerStatus } from "./container-computer.ts";
 import { startAutoVmClaim, type AutoVmClaimTable } from "./auto-vm-claims.ts";
+import { computerFreeText, computerStillBusyText, computerWaitEndedText, computerWaitingText, type ComputerHolder } from "./computer-wait.ts";
 import { modelContextWindow } from "./model-context-window.ts";
 import { parseSurface, resolveSurface, surfaceLabel, surfaceOfComputerKind, surfacePrompt, type Surface } from "./surface.ts";
 import {
@@ -975,6 +976,9 @@ async function bindTurnComputer(owner: TurnOwner, resource: string, exclusive = 
   const active = () => activeInternalGenerationByThread.get(owner.threadId) === owner.generation &&
     turnResourceOwners.get(owner.threadId)?.generation === owner.generation;
   let waitingMessage: Message | undefined;
+  // Who holds the desktop, as the chip and the give-up error name them: a
+  // bot running a titled thread, or a room. Read once, when the wait begins.
+  let holder: ComputerHolder | undefined;
   const deadline = Date.now() + GROUP_GOAL_WAIT_MAX_MS;
   try {
     while (true) {
@@ -984,20 +988,22 @@ async function bindTurnComputer(owner: TurnOwner, resource: string, exclusive = 
         const blocker = turnResources.blocker(resource, owner);
         const holderBot = blocker && store.botByThread(blocker.threadId);
         const holderTask = holderBot && blocker && store.taskByThread(holderBot.id, blocker.threadId);
-        const holder = holderBot ? `${holderBot.name}${holderTask?.title ? ` / ${holderTask.title}` : ""}`
-          : blocker && store.groupByThread(blocker.threadId)?.name;
+        const holderRoom = !holderBot && blocker ? store.groupByThread(blocker.threadId) : null;
+        holder = holderBot
+          ? { name: holderBot.name, ...(holderTask?.title ? { task: holderTask.title } : {}) }
+          : holderRoom ? { name: holderRoom.name } : undefined;
         waitingMessage = store.appendMessage(owner.threadId, {
           role: "bot", kind: "activity",
-          tool: { name: `Waiting for computer${holder ? ` — ${holder} is using it` : ""}; will continue automatically` },
+          tool: { name: computerWaitingText(holder) },
           ...(holderBot && holderTask ? { threadRef: { botId: holderBot.id, threadId: holderTask.threadId, title: holderTask.title } } : {}),
         });
       }
-      if (Date.now() >= deadline) throw new Error("Computer is still busy. Stop the turn using it, then retry.");
+      if (Date.now() >= deadline) throw new Error(computerStillBusyText(holder, GROUP_GOAL_WAIT_MAX_MS));
       await new Promise<void>(resolve => setTimeout(resolve, 100));
     }
   } finally {
     if (waitingMessage) store.patchMessage(owner.threadId, waitingMessage.id, {
-      tool: { name: active() && turnResources.owns(resource, owner) ? "Computer available — continuing" : "Computer wait ended", ok: true },
+      tool: { name: active() && turnResources.owns(resource, owner) ? computerFreeText() : computerWaitEndedText(), ok: true },
     });
   }
   turnResourceOwners.set(owner.threadId, owner);
@@ -3497,7 +3503,7 @@ const watchdog = new TurnWatchdog({
       const currentBot = store.bot(turn.botId);
       if (currentBot?.busy) {
         stopScreenPoller(currentBot.id, turn.threadId);
-        if (activeVpsThreads.get(currentBot.id) === turn.threadId) activeVpsThreads.delete(currentBot.id);
+        vpsThreadEnded(currentBot.id, turn.threadId);
         if (store.taskByThread(currentBot.id, turn.threadId)) store.setTaskActivity(currentBot.id, turn.threadId, "idle");
         else store.setActivity(currentBot.id, "idle");
         directTurnBots.delete(turn.threadId);
@@ -3681,7 +3687,23 @@ function noteLocalVmSeen(target: LocalVmTarget, status: ContainerComputerStatus 
 let localVmImageBusy = false;
 let localVmProvisionBusy = false;
 let localVmModeChangeBusy = false;
-const activeVpsThreads = new Map<string, string>();
+/** Threads running with a bot's VPS computer mounted, per bot. Several run
+ * at once — only the desktop lease is exclusive, and it is claimed on the
+ * first screen call (see the VPS mount in dispatch) — so the alias and
+ * backend guards ask "any thread?", and a settling thread removes only
+ * itself, never a sibling still running. */
+const activeVpsThreads = new Map<string, Set<string>>();
+function vpsThreadStarted(botId: string, threadId: string): void {
+  const threads = activeVpsThreads.get(botId) ?? new Set<string>();
+  threads.add(threadId);
+  activeVpsThreads.set(botId, threads);
+}
+function vpsThreadEnded(botId: string, threadId: string): void {
+  const threads = activeVpsThreads.get(botId);
+  if (!threads) return;
+  threads.delete(threadId);
+  if (!threads.size) activeVpsThreads.delete(botId);
+}
 const boxLifecycleBusyBots = new Set<string>();
 // A refresh is a reader, not a lifecycle change. Keep its reservation until
 // the provider settles even if the HTTP client leaves, and share it on retry.
@@ -4574,7 +4596,7 @@ bus.subscribe((event: RuntimeEvent) => {
           const ownsResources = resourceOwner &&
             turnResourceOwners.get(event.threadId)?.generation === resourceOwner.generation;
           if (ownsResources) {
-            if (activeVpsThreads.get(bot.id) === event.threadId) activeVpsThreads.delete(bot.id);
+            vpsThreadEnded(bot.id, event.threadId);
             releaseLocalVmThread(event.threadId);
           }
           releaseTurnResources(resourceOwner);
@@ -5929,6 +5951,7 @@ async function startTurn(
             autoVmClaims.set(threadId, {
               owner: resourceOwner,
               lazy: true,
+              label: "the Local VM",
               claim: async () => {
                 await claimAutoLocalVm(threadId, localVmTarget);
                 // The dispatch-site poller start saw a null previewCapture
@@ -5964,6 +5987,7 @@ async function startTurn(
           // re-assert the same owner — a no-op (issue #1361).
           autoVmClaims.set(threadId, {
             owner: resourceOwner,
+            label: "the Local VM",
             claim: async () => { await claimAutoLocalVm(threadId); },
           });
           return true;
@@ -6002,10 +6026,17 @@ async function startTurn(
         if (unsupported && wants === "cloud") throw new Error(unsupported);
         if (unsupported && wants === undefined) autoVpsProblem = unsupported;
         if (!unsupported) {
-          // The remote lifecycle and container are shared by this bot. Keep
-          // its explicit computer turns serialized; ordinary threads still run.
-          await bindTurnComputer(resourceOwner, `computer:vps:${vpsSshAlias(cfg)}:${bot.id}`, true);
-          activeVpsThreads.set(bot.id, threadId);
+          // The VPS "computer" is the desktop inside this bot's managed
+          // container, and only screen work needs that desktop to itself.
+          // So the lease is claimed on the first computer call, through the
+          // computer-control gate (the Local VM's seam, #1361), never at
+          // mount: a bot's turns that never touch the computer tools run
+          // side by side, and its 3-hourly routine no longer queues behind
+          // — or fails after 30 minutes behind — its own long-running task.
+          // Container lifecycle (provision, start) is serialized by the
+          // runner's per-container lock, not by this turn.
+          const vpsResource = `computer:vps:${vpsSshAlias(cfg)}:${bot.id}`;
+          vpsThreadStarted(bot.id, threadId);
           let remote;
           remote = vps.vpsStartsForTurn({ wants, autoStartVps: bot.autoStartVps, automationSource: opts?.automationSource })
             ? await vps.vpsComputerAction("provision", cfg, bot.id)
@@ -6019,9 +6050,32 @@ async function startTurn(
               env: { ...vpsMcp.env, OMB_CONTROL_URL: vpsControl.url, OMB_CONTROL_TOKEN: vpsControl.token },
             };
             computerKind = "vps";
-            previewCapture = () => vps.vpsComputerScreenshot(targetCfg, bot.id);
+            // Live frames only once this turn holds the desktop: a poller on
+            // a desktop another turn is driving would publish that turn's
+            // screen as this one's. The claim restarts the poller with the
+            // capture, the way the Local VM's lazy claim does.
+            const vpsCapture = () => vps.vpsComputerScreenshot(targetCfg, bot.id);
+            autoVmClaims.set(threadId, {
+              owner: resourceOwner,
+              lazy: true,
+              label: "the VPS computer",
+              claim: async () => {
+                await bindTurnComputer(resourceOwner, vpsResource, true);
+                previewCapture = vpsCapture;
+                if (threadBusy(bot.id, threadId)) {
+                  const touched = screenPollers.get(threadId)?.touched ?? false;
+                  stopScreenPoller(bot.id, threadId);
+                  startScreenPoller(
+                    bot.id,
+                    threadId,
+                    { computer: vpsCapture, ...(browserCapture ? { browser: browserCapture } : {}) },
+                    { screenIsTheWork: touched },
+                  );
+                }
+              },
+            });
           } else {
-            activeVpsThreads.delete(bot.id);
+            vpsThreadEnded(bot.id, threadId);
             if (wants === "cloud") {
               throw new Error(remote?.problem ?? "the VPS computer could not be created or reached");
             }
@@ -6398,7 +6452,7 @@ async function startTurn(
       releaseTurnResources(resourceOwner);
       if (ownsLatestGeneration) {
         releaseLocalVmThread(threadId);
-        if (activeVpsThreads.get(bot.id) === threadId) activeVpsThreads.delete(bot.id);
+        vpsThreadEnded(bot.id, threadId);
         watchdog.settle(threadId);
         turnUsage.delete(threadId);
         turnContext.delete(threadId);
@@ -10076,7 +10130,7 @@ async function reloadProviders() {
       stopScreenPoller(botId, threadId);
       releaseLocalVmThread(threadId);
       releaseTurnResources(owner);
-      if (activeVpsThreads.get(botId) === threadId) activeVpsThreads.delete(botId);
+      vpsThreadEnded(botId, threadId);
       watchdog.settle(threadId);
       closeOpenApprovals(threadId);
       directTurnBots.delete(threadId);
@@ -12220,7 +12274,7 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
             // model into a screenshot loop against a claim that cannot land.
             return json(res, 200, {
               held: true, helpOpen: false,
-              blockedReason: `This turn could not claim the Local VM${lazyClaim.failure ? ` (${lazyClaim.failure})` : ""}. This call was not performed. Do not retry computer work in this turn; tell the person what you could not do.`,
+              blockedReason: `This turn could not claim ${lazyClaim.label ?? "this computer"}${lazyClaim.failure ? ` (${lazyClaim.failure})` : ""}. This call was not performed. Do not retry computer work in this turn; tell the person what you could not do.`,
             });
           }
           if (!snapshot.held && lazyClaim?.lazy && lazyClaim.begin && !lazyClaim.claimed) {

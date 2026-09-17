@@ -400,8 +400,8 @@ describe("Group Local VM ownership on the real isolated server", () => {
       const activities = (botId: string) => (state.bots.find((b: any) => b.id === botId)?.messages ?? [])
         .filter((m: any) => m.kind === "activity")
         .map((m: any) => m.tool?.name ?? "");
-      expect(activities(auto.id).join("|")).not.toContain("Waiting for computer");
-      expect(activities(holder.id).join("|")).not.toContain("Waiting for computer");
+      expect(activities(auto.id).join("|")).not.toContain("Waiting for its turn");
+      expect(activities(holder.id).join("|")).not.toContain("Waiting for its turn");
     } finally {
       writeFileSync(finishFile, "finish");
       await api("POST", `/api/bots/${auto.id}/interrupt`, {}); await api("POST", `/api/bots/${holder.id}/interrupt`, {});
@@ -436,14 +436,14 @@ describe("Group Local VM ownership on the real isolated server", () => {
       await until(async () => {
  const state = await api("GET", "/api/bots?messages=30");
         return (state.bots.find((b: any) => b.id === auto.id)?.messages ?? [])
-          .some((m: any) => m.kind === "activity" && String(m.tool?.name ?? "").startsWith("Waiting for computer"));
+          .some((m: any) => m.kind === "activity" && String(m.tool?.name ?? "").startsWith("Waiting for its turn on this computer"));
       }, Boolean);
       // Releasing the holder lets the waiting claim land; the next poll passes.
       await api("POST", `/api/bots/${holder.id}/interrupt`, {}); await idle(holder.id);
       await until(async () => {
         const state = await api("GET", "/api/bots?messages=30");
         return (state.bots.find((b: any) => b.id === auto.id)?.messages ?? [])
-          .some((m: any) => m.kind === "activity" && String(m.tool?.name ?? "").startsWith("Computer available"));
+          .some((m: any) => m.kind === "activity" && String(m.tool?.name ?? "").startsWith("Computer free"));
       }, Boolean);
       expect(await (await gate(autoComputer)).json()).toEqual({ held: false, helpOpen: false });
     } finally {
@@ -502,7 +502,7 @@ describe("Group Local VM ownership on the real isolated server", () => {
       const state = await api("GET", "/api/bots?messages=30");
       const activities = (state.bots.find((b: any) => b.id === auto.id)?.messages ?? [])
         .filter((m: any) => m.kind === "activity").map((m: any) => m.tool?.name ?? "");
-      expect(activities.join("|")).not.toContain("Waiting for computer");
+      expect(activities.join("|")).not.toContain("Waiting for its turn");
     } finally {
       writeFileSync(finishFile, "finish");
       await api("POST", `/api/bots/${auto.id}/interrupt`, {}); await idle(auto.id);
@@ -534,7 +534,7 @@ describe("Group Local VM ownership on the real isolated server", () => {
       const state = await api("GET", "/api/bots?messages=30");
       const activities = (state.bots.find((b: any) => b.id === next.id)?.messages ?? [])
         .filter((m: any) => m.kind === "activity").map((m: any) => m.tool?.name ?? "");
-      expect(activities.join("|")).not.toContain("Waiting for computer");
+      expect(activities.join("|")).not.toContain("Waiting for its turn");
     } finally {
       writeFileSync(finishFile, "finish");
       await api("POST", `/api/bots/${auto.id}/interrupt`, {}); await api("POST", `/api/bots/${next.id}/interrupt`, {});
