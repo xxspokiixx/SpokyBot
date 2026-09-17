@@ -604,6 +604,9 @@ export interface InstanceInfo {
   instanceId: string;
   driverKind: string;
   displayName: string;
+  /** Optional presentation override belonging to this instance, independent
+   * of the driver that runs it. */
+  icon?: import("../../shared/provider-icon").ProviderIcon;
   /** Company instances are owned by the desktop parent, never editable here. */
   readOnly?: boolean;
   managed?: { organizationId: string; organizationName: string };

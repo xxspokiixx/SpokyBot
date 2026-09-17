@@ -10,6 +10,7 @@ import { normalizeImageGenerationUrl, type ImageGenerationConfig } from "../shar
 import { writeFileAtomic } from "./atomic.ts";
 import { EFFORT_LEVELS } from "../shared/wire.ts";
 import { isModelVariant, type InstanceConfigMap, type ModelSelection } from "./contracts.ts";
+import { PROVIDER_ICON_PRESETS, providerIconError } from "../shared/provider-icon.ts";
 import type { McpServerSpec } from "./contracts.ts";
 import { isRemoteMcpServer, parseStoredMcpServer } from "./mcp-registry.ts";
 import { parseJson, schemaIssue, type JsonObject, type JsonValue } from "./schema.ts";
@@ -275,6 +276,11 @@ const instanceConfigSchema = z.object({
   driver: z.string().min(1),
   displayName: optionalText,
   accentColor: optionalText,
+  icon: z.discriminatedUnion("kind", [
+    z.object({ kind: z.literal("preset"), preset: z.enum(PROVIDER_ICON_PRESETS) }).strict(),
+    z.object({ kind: z.literal("custom"), dataUrl: z.string() }).strict()
+      .refine((icon) => providerIconError(icon) === null, { message: "Invalid provider icon" }),
+  ]).optional(),
   environment: z.record(z.string(), z.string()).optional(),
   enabled: z.boolean().optional(),
   config: z.json().optional(),
