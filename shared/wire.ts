@@ -107,6 +107,9 @@ export interface WireTask {
   threadId: string;
   title: string;
   createdAt: number;
+  /** The first message already drove a title attempt for this thread, so a
+   * later one does not rename a thread the person may have retitled. */
+  titleFromFirstMessage?: true;
   /** Organizational grouping only; never a directory or provider context. */
   projectId?: string;
   /** Detached routine execution, reachable through its visible results card. */
@@ -392,6 +395,9 @@ export interface GroupTask {
   createdAt: number;
   pinnedCwd?: string | null;
   pinnedMessageId?: string;
+  /** The first message already drove a title attempt for this thread, so a
+   * later one does not rename a room the person may have retitled. */
+  titleFromFirstMessage?: true;
 }
 
 /** A room as a client may see it: the record plus the computed working
