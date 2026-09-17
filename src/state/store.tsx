@@ -1418,7 +1418,7 @@ export function reducer(state: AppState, action: Action): AppState {
         // The slim deletion broadcast can arrive before the full snapshot.
         // Finish that switch once, replaying any events received in between.
         // Later duplicate HTTP snapshots must not overwrite newer messages.
-        return reducer(switching, { type: "taskSwitched", bot: { ...before, ...action.bot, computer: action.bot.computer, section: action.bot.section, messages: action.bot.messages, browserProfile: action.bot.browserProfile } });
+        return reducer(switching, { type: "taskSwitched", bot: { ...before, ...action.bot, computer: action.bot.computer, section: action.bot.section, messages: action.bot.messages, browserProfile: action.bot.browserProfile, waitingOnTeammate: action.bot.waitingOnTeammate } });
       }
       const patched = updateBot(switching, action.bot.id, (b) => ({
         ...b,
@@ -1436,6 +1436,9 @@ export function reducer(state: AppState, action: Action): AppState {
         // A complete frame omits section after another client moves the bot
         // into General. Retaining the old label strands an empty team in UI.
         section: action.bot.section,
+        // A complete frame omits the wait once the teammate settles (#1223).
+        // Merging alone would keep the quiet wait painted forever.
+        waitingOnTeammate: action.bot.waitingOnTeammate,
         // Clear immediately on deletion: old approvals must never be sent
         // to the replacement thread while waiting for its transcript.
         messages: switchedThread ? [] : b.messages,
@@ -1931,6 +1934,8 @@ export function reducer(state: AppState, action: Action): AppState {
         ...bot,
         ...action.bot,
         computer: action.bot.computer,
+        // #1223: a complete frame omits the wait once the teammate settles.
+        waitingOnTeammate: action.bot.waitingOnTeammate,
         messages: action.bot.messages ?? [],
         awaitingThreadSnapshot: false,
       }));

@@ -9,7 +9,7 @@ export type WiredTask = WireTask & { waitingOnTeammate?: true };
  * settled yet (a live direct coordination handoff). */
 export type ActiveCoordination = (threadId: string) => boolean;
 
-/** Strip the harness own session bookkeeping and surface the
+/** Strip the harness's own session bookkeeping and surface the
  * coordination wait as a flag on top of the busy paint (#1223).
  *
  * A thread waiting on a dispatched teammate is not working on its own
