@@ -27,6 +27,17 @@ import com.openmausbot.companion.core.displayTitle
 import com.openmausbot.companion.core.isClosed
 import com.openmausbot.companion.core.isArchived
 import com.openmausbot.companion.core.isSnoozed
+import com.openmausbot.companion.core.isWaitingOnTeammate
+import com.openmausbot.companion.core.isWorking
+
+/** The quiet status under a title: waiting states are never painted as work. */
+internal fun BotTask.runtimeLabel(): String? = when {
+    activity == "waiting-on-you" -> "Waiting on you"
+    isWaitingOnTeammate -> "Waiting on teammate"
+    isWorking -> "Working"
+    activity == "queued" -> "Queued"
+    else -> null
+}
 
 /** Shared by Home and the thread picker, with status taken from this thread alone. */
 @Composable
@@ -36,12 +47,7 @@ internal fun BotThreadRow(
     modifier: Modifier = Modifier,
     now: Long = System.currentTimeMillis(),
 ) {
-    val runtime = when (task.activity) {
-        "waiting-on-you" -> "Waiting on you"
-        "queued" -> "Queued"
-        "working", "running" -> "Working"
-        else -> if (task.busy == true) "Working" else null
-    }
+    val runtime = task.runtimeLabel()
     val snoozed = task.isSnoozed(now)
     val dimmed = (task.isClosed || task.isArchived || snoozed) && runtime == null && task.unread != true
     val foldedState = when {
@@ -79,6 +85,7 @@ internal fun BotThreadRow(
                             fontWeight = FontWeight.Medium,
                             color = when (runtime) {
                                 "Waiting on you" -> MaterialTheme.colorScheme.error
+                                "Waiting on teammate" -> secondaryTint
                                 "Queued" -> secondaryTint
                                 else -> MaterialTheme.colorScheme.primary
                             },
