@@ -931,6 +931,25 @@ export function saveConfig(patch: Partial<AppConfig>, options: { replaceInstance
     }
     disk.instances = diskInstances;
   }
+  // Settings edits the workspace connection. Older fleet saves could freeze
+  // its inherited URL in the default instance, sending a replacement key to
+  // the previous endpoint. An explicit URL save reconnects that shared-key
+  // instance; custom connections and explicit instance patches stay intact.
+  if (checkedPatch.openaiCompat?.url !== undefined && checkedPatch.instances?.openaiCompat === undefined) {
+    const instances = jsonObjectSchema.safeParse(disk.instances);
+    const entry = jsonObjectSchema.safeParse(instances.success ? instances.data.openaiCompat : undefined);
+    const config = jsonObjectSchema.safeParse(entry.success ? entry.data.config : undefined);
+    const environment = jsonObjectSchema.safeParse(entry.success ? entry.data.environment : undefined);
+    if (entry.success && entry.data.driver === "openai-compat" && config.success
+      && !config.data.key
+      && (!config.data.apiKeyEnv || config.data.apiKeyEnv === "OPENAI_COMPAT_API_KEY")
+      && !(environment.success && Object.hasOwn(environment.data, "OPENAI_COMPAT_API_KEY"))) {
+      const nextConfig = { ...config.data };
+      delete nextConfig.url;
+      // Preserve raw extension fields elsewhere in this saved instance.
+      (disk.instances as JsonObject).openaiCompat = { ...entry.data, config: nextConfig };
+    }
+  }
   mkdirSync(DATA_DIR, { recursive: true });
   writeFileAtomic(p, JSON.stringify(disk, null, 2), { mode: 0o600 });
 }
@@ -972,13 +991,16 @@ export function withInstanceCli(
   return { ok: true, config: next };
 }
 
-/** Materialize defaults without copying injected workspace secrets to disk. */
+/** Materialize defaults without freezing injected workspace settings or secrets. */
 export function persistableInstanceConfigs(cfg: AppConfig): InstanceConfigMap {
   const map = instanceConfigs(cfg);
   for (const [id, entry] of Object.entries(map)) {
     const environment = cfg.instances?.[id]?.environment;
     if (environment) entry.environment = { ...environment };
     else delete entry.environment;
+    const config = cfg.instances?.[id]?.config;
+    if (config !== undefined) entry.config = structuredClone(config);
+    else delete entry.config;
   }
   return map;
 }
