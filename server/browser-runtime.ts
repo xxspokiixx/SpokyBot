@@ -167,6 +167,10 @@ interface Gate {
   agents: number;
   humans: number;
   uncertain: boolean;
+  /** The uncertainty came from losing the transport rather than from a human
+   * command or abandoned input. The browser process is dead in that case, so
+   * it resolves itself; the others still need an explicit recovery. */
+  lostTransport: boolean;
   closing: boolean;
   changed: Set<() => void>;
 }
@@ -184,7 +188,7 @@ export class BrowserRuntime {
   private gate(session: string): Gate {
     let gate = this.gates.get(session);
     if (!gate) {
-      gate = { owner: null, ready: false, releasing: false, agents: 0, humans: 0, uncertain: false, closing: false, changed: new Set() };
+      gate = { owner: null, ready: false, releasing: false, agents: 0, humans: 0, uncertain: false, lostTransport: false, closing: false, changed: new Set() };
       this.gates.set(session, gate);
     }
     return gate;
@@ -199,9 +203,28 @@ export class BrowserRuntime {
     for (const notify of gate.changed) notify();
   }
 
+  /** A lost transport already carries its own proof that nothing is still
+   * running: stopping a client SIGKILLs the child tree and removes itself
+   * from `clients`, so no accepted command survives it. Holding the session
+   * uncertain past that point wedged it permanently — every agent tool call
+   * passes through this gate, so the tools that would recover it are refused
+   * by the very state they would clear, and none of reconnecting, recreating
+   * the browser in Settings, or remounting the conversation's tools closes
+   * the session either. Only a person taking control in the browser panel
+   * could get it back. Uncertainty a human left behind (an interrupted
+   * command, an abandoned pressed key) still requires that explicit recovery:
+   * there the browser is alive and may act again. */
+  private resolveLostTransport(session: string, gate: Gate): void {
+    if (!gate.uncertain || !gate.lostTransport || this.clients.has(session)) return;
+    gate.uncertain = false;
+    gate.lostTransport = false;
+    gate.ready = false;
+  }
+
   async withAgentAction<T>(session: string, fn: () => Promise<T>): Promise<T> {
     const gate = this.gate(session);
     if (gate.owner !== null) throw new Error(BROWSER_CONTROL_REFUSAL);
+    this.resolveLostTransport(session, gate);
     if (gate.uncertain) throw new Error("A browser action was interrupted. Restart this browser before continuing.");
     if (gate.closing) throw new Error("The browser is closing. Try again shortly.");
     gate.agents++;
@@ -245,7 +268,11 @@ export class BrowserRuntime {
       catch (error) {
         // An MCP timeout cannot prove the independent daemon stopped an
         // accepted action. Recovery must close the browser, not just its pipe.
-        if (method === "tools/call" && error instanceof TransportError) this.gate(session).uncertain = true;
+        if (method === "tools/call" && error instanceof TransportError) {
+          const gate = this.gate(session);
+          gate.uncertain = true;
+          gate.lostTransport = true;
+        }
         throw error;
       }
     };
@@ -333,6 +360,7 @@ export class BrowserRuntime {
       await closeBrowser();
       await this.clients.get(session)?.client.stop();
       gate.uncertain = false;
+      gate.lostTransport = false;
       gate.owner = null;
       gate.releasing = false;
     } catch (error) {
@@ -355,6 +383,7 @@ export class BrowserRuntime {
     await this.clients.get(session)?.client.stop();
     gate.closing = false;
     gate.uncertain = false;
+    gate.lostTransport = false;
     this.changed(gate);
     if (!gate.owner && !gate.agents && !gate.humans) this.gates.delete(session);
   }
