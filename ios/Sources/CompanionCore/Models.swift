@@ -1190,6 +1190,10 @@ struct MessageResponse: Codable, Sendable {
     var message: Message
 }
 
+struct EditResponse: Decodable, Sendable {
+    var message: Message?
+}
+
 struct ActiveBranchResponse: Codable, Sendable {
     var activeLeafId: String
 }

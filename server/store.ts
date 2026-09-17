@@ -1193,8 +1193,10 @@ export class Store {
   }
 
   /** Fork the conversation: a new user message that replaces `sourceId`
-   * (same parent, new text) and becomes the active leaf. */
-  branchMessage(threadId: string, sourceId: string, text: string): Message | null {
+   * (same parent, new text) and becomes the active leaf. `sendId` is the
+   * client's identity for this edit, so its instant bubble reconciles onto
+   * the canonical message and a network retry cannot fork twice. */
+  branchMessage(threadId: string, sourceId: string, text: string, sendId?: string): Message | null {
     const t = this.thread(threadId);
     const source = t.messages.find((m) => m.id === sourceId);
     if (!source) return null;
@@ -1206,11 +1208,17 @@ export class Store {
       text,
       parentId: source.parentId ?? null,
       replyToId: source.replyToId,
+      ...(sendId ? { sendId } : {}),
     };
     t.messages.push(full);
     t.activeLeafId = full.id;
     mdb.appendMessage(threadId, full);
     this.emit({ type: "message", threadId, message: full });
+    // Clients adopt a new message as the leaf only when it chains onto the
+    // leaf they already show. A fork is a sibling of the edited message, so
+    // without this frame every client kept rendering the old question and
+    // its old answer until a later snapshot, usually after the reply ended.
+    this.emit({ type: "thread", threadId, activeLeafId: full.id });
     return full;
   }
 
