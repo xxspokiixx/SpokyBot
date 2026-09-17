@@ -182,6 +182,7 @@ expressions · screenshots of the bot's work folded into the transcript.
 
 ![Claude](https://img.shields.io/badge/Claude-d97757?logo=claude&logoColor=white)
 ![Codex](https://img.shields.io/badge/Codex-000000)
+![Grok](https://img.shields.io/badge/Grok%20CLI-000000?logo=x&logoColor=white)
 ![Electron](https://img.shields.io/badge/Electron-2B2E3A?logo=electron&logoColor=9FEAF9)
 ![React](https://img.shields.io/badge/React-20232A?logo=react&logoColor=61DAFB)
 ![Vite](https://img.shields.io/badge/Vite-646CFF?logo=vite&logoColor=white)
@@ -191,13 +192,12 @@ expressions · screenshots of the bot's work folded into the transcript.
 ![ElevenLabs](https://img.shields.io/badge/ElevenLabs-000000?logo=elevenlabs&logoColor=white)
 ![Fish Audio](https://img.shields.io/badge/Fish%20Audio-2563eb)
 ![Polar](https://img.shields.io/badge/Polar-0062ff)
-![PostHog](https://img.shields.io/badge/PostHog-1D4AFF?logo=posthog&logoColor=white)
 
 </div>
 
 | Service | Purpose |
 |---|---|
-| **Claude & Codex** | The agents behind every bot, run through their local CLIs |
+| **Claude · Codex · Grok** | The agents behind every bot, run through their local CLIs |
 | **Electron** | Desktop shells for macOS, Windows, and Ubuntu |
 | **React + Vite + Tailwind CSS** | The chat app UI and its build |
 | **Box** ([box.ascii.dev](https://box.ascii.dev)) | Each bot's cloud computer |
@@ -205,7 +205,6 @@ expressions · screenshots of the bot's work folded into the transcript.
 | **Cua Driver** | Native computer use on your own machine |
 | **ElevenLabs · Fish Audio** | Hosted voices for bots that talk back |
 | **Polar** | One-time and monthly project support |
-| **PostHog** | Product analytics |
 
 ## How it works
 
