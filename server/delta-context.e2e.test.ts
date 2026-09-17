@@ -891,7 +891,11 @@ const holdingGit = (dataDir: string, hold: string, held: string) => {
   return bin;
 };
 
-it("gives a delegated return today's fresh session and replay when the soul changes while that turn is being set up", () => fixture(async (f) => {
+// POSIX only, like every process fixture here: the holding `git` is a node
+// shebang script, and the lookup above wants a file named exactly `git` —
+// on Windows the real one is git.exe and a shebang file is not executable.
+// Without the guard this test is the one red case in a 2,600-test shard.
+it.skipIf(process.platform === "win32")("gives a delegated return today's fresh session and replay when the soul changes while that turn is being set up", () => fixture(async (f) => {
   const project = join(f.dataDir, "project");
   mkdirSync(project);
   await f.api(`/api/bots/${f.chief.id}`, { cwd: project }, "PATCH");
