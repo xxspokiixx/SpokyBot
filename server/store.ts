@@ -1211,6 +1211,13 @@ export class Store {
     t.activeLeafId = full.id;
     mdb.appendMessage(threadId, full);
     this.emit({ type: "message", threadId, message: full });
+    // The message frame alone leaves every client on the OLD branch: a
+    // client adopts a new message as its leaf only when it chains onto the
+    // current leaf, and this one is a sibling of the edited message, not a
+    // child of the reply. Say where the conversation now points, as
+    // setActiveLeaf does, or the edit shows only after the next full bot
+    // snapshot — in practice, once the reply has arrived.
+    this.emit({ type: "thread", threadId, activeLeafId: full.id });
     return full;
   }
 
