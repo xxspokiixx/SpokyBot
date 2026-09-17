@@ -435,7 +435,13 @@ export function createOpenAIChatRuntime<Config>(options: RuntimeOptions<Config>)
               if (!object(args)) throw new ChatProtocolError("tool arguments must be a JSON object");
               tools.validate(call.function.name, args);
               const inputPreview = preview(args);
-              const allowed = await approval.ask(call.function.name, inputPreview ?? "This tool has no arguments.");
+              // Full access is the person's explicit grant to answer every
+              // prompt. This runtime has no provider reviewer to hand it to,
+              // so it is honoured here: without it every single tool call on
+              // an OpenAI-compatible engine stops for a card, and a Chief's
+              // delegated Full access cannot help either.
+              const allowed = turn.approvalMode === "full"
+                || await approval.ask(call.function.name, inputPreview ?? "This tool has no arguments.");
               abort.signal.throwIfAborted();
               emit({ ...base(turn.threadId, turnId), type: "item.started", itemType: "tool", itemId: call.id,
                 title: call.function.name, ...(inputPreview ? { input: inputPreview } : {}),
@@ -527,9 +533,9 @@ export function createOpenAIChatRuntime<Config>(options: RuntimeOptions<Config>)
         return () => listeners.delete(listener);
       },
     },
-    generateText: async (prompt) => {
+    generateText: async (prompt, { signal } = {}) => {
       const model = options.generateModel?.() ?? options.models().default;
-      const { text, reasoning, toolCalls } = await complete([{ role: "user", content: prompt }], model, false);
+      const { text, reasoning, toolCalls } = await complete([{ role: "user", content: prompt }], model, false, signal);
       if (toolCalls.length) throw new ChatProtocolError("provider returned tool calls to a text-only helper");
       return text.trim() ? text : reasoning;
     },
