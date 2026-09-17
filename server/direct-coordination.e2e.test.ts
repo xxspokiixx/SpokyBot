@@ -67,6 +67,18 @@ it("announces a settled delegation and its resume in the parent thread", () => f
   try {
     await f.start();
     expect((await f.wait()).status).toBe("settled");
+    // f.wait() resolves through the control CLI poll, an independent path
+    // from the SSE reader loop; until() (which also resolves on frames
+    // already seen) is what proves both settles are stored before the
+    // assertions below count them
+    await Promise.all([
+      stream.until(frame => frame.kind === "notify"
+        && frame.notification?.kind === "delegation-settled"
+        && frame.notification.botId === f.chief.id),
+      stream.until(frame => frame.kind === "notify"
+        && frame.notification?.kind === "delegation-settled"
+        && frame.notification.botId === f.lead.id),
+    ]);
     const settles = () => stream.frames.filter(frame => frame.kind === "notify" && frame.notification?.kind === "delegation-settled");
     // the chief's resume is announced exactly once, pointing at the
     // conversation the notification opens
