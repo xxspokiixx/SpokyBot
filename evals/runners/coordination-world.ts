@@ -20,17 +20,23 @@ export class CoordinationWorld extends BaseWorld {
     this.dataDir = this.session.info.dataDir;
     this.planPath = join(this.dataDir, "room-plan.json");
     await this.initBase(this.session.info.url, this.planPath + ".evidence.jsonl", join(this.dataDir, "eval-gates"));
+    // Create every bot first, then patch: a Chief's managedSections can only
+    // name a team that already exists, and teams materialize when a member is
+    // created with --section (the same order the e2e fixtures use).
     for (const bot of scenario.bots) {
       const argv = ["new-bot", "--name", bot.name];
       if (bot.section !== undefined) argv.push("--section", bot.section);
       const created = (await runControlOmb(argv, { env: { OPENMAUSBOT_URL: this.session.info.url } })) as { bot: { id: string; activeTaskId: string } };
       this.bots.set(bot.key, { id: created.bot.id, threadId: created.bot.activeTaskId });
+    }
+    for (const bot of scenario.bots) {
       const patch: Record<string, unknown> = {};
       if (bot.chiefOfStaff !== undefined) patch.chiefOfStaff = bot.chiefOfStaff;
       if (bot.managedSections !== undefined) patch.managedSections = bot.managedSections;
       if (bot.acknowledgePeerScope !== undefined) patch.acknowledgePeerScope = bot.acknowledgePeerScope;
+      else if ((bot.managedSections ?? []).length > 0) patch.acknowledgePeerScope = true;
       if (Object.keys(patch).length > 0) {
-        const response = await this.api.patch("/api/bots/" + created.bot.id, patch);
+        const response = await this.api.patch("/api/bots/" + this.botId(bot.key), patch);
         if (response.status >= 300) throw new Error("bot patch failed: " + JSON.stringify(response.body));
       }
     }
@@ -59,6 +65,21 @@ export class CoordinationWorld extends BaseWorld {
         if (response.status !== 201) throw new Error("routine create failed: " + JSON.stringify(response.body));
         this.routines.set(step.routine, response.body.routine.id);
         return "routine " + step.routine + " created";
+      }
+      case "waitForNodeStatus": {
+        const key = step.bot.startsWith("@") ? step.bot.slice(1) : step.bot;
+        await waitUntil(
+          "handoff node " + key + " to be " + step.status,
+          async () => this.readHandoffs().find((node) => this.botKeyOf(node.botId) === key)?.status,
+          (status) => status === step.status,
+          step.timeoutMs ?? 20_000,
+        );
+        return "node " + key + " is " + step.status;
+      }
+      case "setConfig": {
+        const response = await this.api.patch("/api/config", step.config);
+        if (response.status >= 300) throw new Error("config patch failed: " + JSON.stringify(response.body));
+        return "config patched: " + JSON.stringify(step.config);
       }
       case "runRoutine": {
         const id = this.routines.get(step.routine);

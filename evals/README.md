@@ -9,7 +9,7 @@ The principle: evaluate the harness, never the models. A scripted engine replays
     pnpm eval                     # all scenarios, JSON + markdown report under evals/reports/runs/
     pnpm eval --scenario lazy-computer-claim
     pnpm typecheck && tsc -p evals/tsconfig.json   # evals are also typechecked standalone
-    npx vitest run evals          # the same scenarios as a CI gate
+    npx vitest run --config evals/vitest.config.ts   # the same scenarios as a test gate
 
 ## Layout
 

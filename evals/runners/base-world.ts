@@ -17,6 +17,11 @@ export abstract class BaseWorld {
   protected bots = new Map<string, { id: string; threadId: string }>();
   private evidencePath = "";
   private gatesDir = "";
+  /** Activity prefixes proven live by waitForActivity steps. The server
+   * patches a wait chip in place when it settles ("Waiting for its turn..."
+   * becomes "Computer free"), so a freeze-time read alone would lose the
+   * waiting half of that history. */
+  private activityFacts = new Map<string, Set<string>>();
 
   protected initBase(url: string, evidencePath: string, gatesDir: string): Promise<void> {
     this.evidencePath = evidencePath;
@@ -113,6 +118,9 @@ export abstract class BaseWorld {
           (names) => names.some((name) => name.startsWith(step.namePrefix)),
           step.timeoutMs ?? 20_000,
         );
+        const facts = this.activityFacts.get(step.bot) ?? new Set<string>();
+        facts.add(step.namePrefix);
+        this.activityFacts.set(step.bot, facts);
         return "activity seen";
       }
       case "writeGate": {
@@ -165,7 +173,7 @@ export abstract class BaseWorld {
       threads,
       sends: ctx.sends,
       observations: ctx.observations,
-      activities: (bot) => capturedActivities[bot] ?? [],
+      activities: (bot) => [...(capturedActivities[bot] ?? []), ...(this.activityFacts.get(bot) ?? [])],
       resolve: (value) => this.resolveRefs(value),
     };
   }

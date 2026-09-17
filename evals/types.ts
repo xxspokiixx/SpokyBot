@@ -51,6 +51,9 @@ export const stepSchema = z.discriminatedUnion("kind", [
   z.object({ kind: z.literal("snapshotRoutineRun"), routine: z.string(), saveAs: z.string() }),
   z.object({ kind: z.literal("waitForRoutineRun"), routine: z.string(), status: z.string(), timeoutMs: z.number().optional() }),
   z.object({ kind: z.literal("writeGate"), gate: z.string() }),
+  /** Applied before the first turn: pins admission preconditions (for
+   * example threads.maxConcurrentPerBot) the scenario's behavior needs. */
+  z.object({ kind: z.literal("setConfig"), config: z.record(z.string(), z.unknown()) }),
   z.object({ kind: z.literal("setVmState"), state: z.record(z.string(), z.unknown()) }),
   z.object({ kind: z.literal("consumeDump"), timeoutMs: z.number().optional() }),
   z.object({ kind: z.literal("captureComputer"), bot: z.string() }),
