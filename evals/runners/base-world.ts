@@ -36,9 +36,14 @@ export abstract class BaseWorld {
     return this.gatesDir === "" ? gate : this.gatesDir + "/" + gate;
   }
 
+  /** Steps may name a bot as "worker" or "@worker"; the plain key is
+   * what this.bots and evidence bot ids are recorded under. */
+  protected botKey(ref: string): string {
+    return ref.startsWith("@") ? ref.slice(1) : ref;
+  }
+
   protected botId(ref: string): string {
-    const key = ref.startsWith("@") ? ref.slice(1) : ref;
-    const bot = this.bots.get(key);
+    const bot = this.bots.get(this.botKey(ref));
     if (bot === undefined) throw new Error("unknown bot reference " + ref);
     return bot.id;
   }
@@ -85,7 +90,7 @@ export abstract class BaseWorld {
   async runStep(step: Step, ctx: WorldContext): Promise<string> {
     switch (step.kind) {
       case "send": {
-        const bot = this.bots.get(step.bot.startsWith("@") ? step.bot.slice(1) : step.bot);
+        const bot = this.bots.get(this.botKey(step.bot));
         if (bot === undefined) throw new Error("unknown bot " + step.bot);
         const response = await this.api.post("/api/bots/" + bot.id + "/messages", { text: step.text, threadId: bot.threadId });
         if (response.status >= 300) throw new Error("send failed: " + JSON.stringify(response.body));
@@ -93,7 +98,7 @@ export abstract class BaseWorld {
         return "receipt " + (response.body.queued === true ? "queued" : "immediate");
       }
       case "waitForTurns": {
-        const key = step.bot;
+        const key = this.botKey(step.bot);
         await waitUntil(
           "turns for " + key,
           async () => this.evidence().filter((turn) => this.botKeyOf(turn.botId) === key).length,

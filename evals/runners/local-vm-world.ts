@@ -64,7 +64,7 @@ export class LocalVmWorld extends BaseWorld {
       OMB_TEST_VM_STATE: this.stateFile,
       ...(process.env.SystemRoot ? { SystemRoot: process.env.SystemRoot } : {}),
     };
-    this.child = spawn(process.execPath, ["--import", hooks, join(ROOT, "server", "index.ts")], {
+    const child = this.child = spawn(process.execPath, ["--import", hooks, join(ROOT, "server", "index.ts")], {
       cwd: ROOT,
       env,
       stdio: ["ignore", "pipe", "pipe"],
@@ -74,8 +74,11 @@ export class LocalVmWorld extends BaseWorld {
     await waitUntil(
       "VM fixture server to come up",
       async () => {
-        if (this.child?.exitCode !== null && this.child?.exitCode !== undefined) {
-          throw new Error("server exited: " + this.stderr.slice(-2000));
+        // exitCode stays null for a child killed by a signal; either way
+        // the boot is over and the captured stderr says why
+        if (child.exitCode !== null || child.signalCode !== null) {
+          const how = child.signalCode !== null ? " (killed by " + child.signalCode + ")" : "";
+          throw new Error("server exited" + how + ": " + this.stderr.slice(-2000));
         }
         try {
           return (await fetch(base + "/api/health")).ok;
