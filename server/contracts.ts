@@ -10,6 +10,7 @@ import type { EffortLevel } from "../shared/wire.ts";
 import type {
   DriverKind, InstanceId, ModelVariantOption, RuntimeEventListener, ThreadId, TurnId,
 } from "../shared/runtime-events.ts";
+import type { ProviderIcon } from "../shared/provider-icon.ts";
 
 // These contract types live in shared/wire.ts now (part of the wire model);
 // re-exported here so existing server-side importers keep working.
@@ -68,6 +69,9 @@ export interface InstanceConfig {
   driver: DriverKind;
   displayName?: string;
   accentColor?: string;
+  /** Presentation override for this instance only. Driver branding stays
+   * unchanged and custom images are admitted as bounded local data URLs. */
+  icon?: ProviderIcon;
   environment?: Record<string, string>;
   enabled?: boolean;
   config?: unknown;
@@ -440,8 +444,10 @@ export interface ProviderInstance {
   readonly signOut?: () => Promise<void>;
   readonly adapter: ProviderAdapter;
   snapshot(): Promise<ProviderSnapshot>;
-  /** Cheap one-shot text call (upstream TextGeneration) — titles, summaries. */
-  generateText?(prompt: string): Promise<string>;
+  /** Cheap one-shot text call (upstream TextGeneration) — titles, summaries.
+   * The signal is a best-effort cap: drivers that can honor it abort the
+   * underlying provider call; the rest keep their own timeout. */
+  generateText?(prompt: string, options?: { signal?: AbortSignal }): Promise<string>;
   /** Isolated, tool-free permission review on this same provider. Kept
    * separate from generateText so the UI never infers a security capability
    * from a generic helper that may expose prompts in argv or lack approvals. */
