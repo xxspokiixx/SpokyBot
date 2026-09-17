@@ -190,6 +190,7 @@ import { getOrCreateChannel, mirrorActivity, mirrorExchange, mirrorReply, type C
 import { readMessageText, recallMessages, recentMessages, searchMessages, closeMessageDb, chatFollowups, cancelledChatFollowup, settleChatFollowups } from "./message-db.ts";
 import { briefCrossingLabel, claimRecallCrossings, recallCrossingLabel } from "./recall-disclosure.ts";
 import { parseSince, recentWork, recentWorkPrompt, turnOutcomeLine } from "./recent-work.ts";
+import { chiefForBot, INCIDENTS_THREAD_TITLE, IncidentLedger, incidentChip, incidentText, type Incident, type IncidentKind } from "./incidents.ts";
 
 /** A session_read answer competes with the transcript for the context
  * window; a computer-use turn's output can run to hundreds of KB. */
@@ -3468,6 +3469,10 @@ const watchdog = new TurnWatchdog({
       kind: "activity",
       tool: { name: `error: no activity for ${minutes} minutes — the turn was stopped`, ok: false },
     });
+    // a routine's stall reports through its own failure path
+    if (bot && routineRun?.target !== "bot") {
+      reportIncident({ kind: "stalled", bot, threadId: turn.threadId, detail: `no activity for ${minutes} minutes — the turn was stopped` });
+    }
     settleDirectFollowup(stalledGeneration);
     finalizeDelegationWatch(turn.threadId, false, "", "Delegated turn stalled and was stopped");
     turnUsage.delete(turn.threadId);
@@ -4581,6 +4586,12 @@ bus.subscribe((event: RuntimeEvent) => {
       if (completedTurnId) store.markTerminalAssistantMessage(event.threadId, completedTurnId);
       const reply = lastReply.get(event.threadId) ?? "";
       lastReply.delete(event.threadId);
+      // A run that broke — not one the person stopped, and not a routine's,
+      // which reports through its own failure path — is the Chief's to see.
+      if (!event.ok && event.stopReason !== "interrupted" && !routines?.runForThread(event.threadId)) {
+        const broken = bot ?? (speaker ? store.bot(speaker.botId) : undefined);
+        if (broken) reportIncident({ kind: "failed", bot: broken, threadId: event.threadId, detail: event.stopReason?.trim() || "the run ended without a result" });
+      }
       const lastReported = turnUsage.get(event.threadId);
       turnUsage.delete(event.threadId);
       turnContext.delete(event.threadId);
@@ -4833,6 +4844,93 @@ function wakeDelegationSource(source: BotRecord, threadId: string, targetName: s
     return;
   }
   dispatchDelegationWake(source.id, threadId, targetName, failureReason, routineRunId);
+}
+
+// ── incidents: a broken run reaches the Chief of Staff ──────────────────
+// A failed, stalled or unstartable run used to leave one chip in the thread
+// it died in and nothing anywhere else; the person found it hours later,
+// from a phone, by opening the desktop and reading every thread. The team
+// already has a role for this — the Chief coordinates the section — so the
+// incident becomes a turn of the Chief's, in its "Team incidents" thread,
+// with a link to the broken thread and retry_thread to act on it. The person
+// reads one place. Policy in server/incidents.ts.
+const incidentLedger = new IncidentLedger();
+
+/** What the broken thread was about: the last line the person (or the
+ * requester) sent there, and the last thing the bot said. */
+function incidentContext(threadId: string): { lastRequest: string | null; lastReply: string | null } {
+  const messages = [...store.messagesFor(threadId)].reverse();
+  return {
+    lastRequest: messages.find((message) => message.role === "user" && message.kind === "text" && message.text)?.text ?? null,
+    lastReply: messages.find((message) => message.role === "bot" && message.kind === "text" && message.text)?.text ?? null,
+  };
+}
+
+function reportIncident(input: { kind: IncidentKind; bot: BotRecord; threadId: string; detail: string }): void {
+  const { bot, threadId } = input;
+  const task = store.taskByThread(bot.id, threadId);
+  // A thread another bot opened and is watching is that bot's to handle:
+  // the delegator is woken with the failure already (wakeDelegationSource).
+  if (task?.openedBy?.delegationId || delegationWatch.has(threadId) || roomHandoffs.activeDirect(threadId)) return;
+  const group = store.groupByThread(threadId);
+  const incident: Incident = {
+    kind: input.kind,
+    bot,
+    threadId,
+    title: task?.title ?? null,
+    room: group?.name ?? null,
+    detail: redactSecretsInText(input.detail),
+    ...incidentContext(threadId),
+  };
+  const count = incidentLedger.note(threadId);
+  // a crash loop is one incident, not a storm
+  if (count.muted) return;
+  const chief = chiefForBot(store.bots, bot);
+  // A run that could not start and a failed routine have already buzzed
+  // the person (turn-failed, routine-failed) by the time they get here; a
+  // failure or stall mid-run has not. One notification per failure, never two.
+  const alreadyNotified = input.kind === "could-not-start" || input.kind === "routine-failed";
+  const tellThePerson = () => {
+    if (alreadyNotified) return;
+    notify(buildNotification("incident", bot, threadId, incidentChip(incident), {
+      avatarUrl: bot.avatarUrl,
+      ...(group ? { group: { id: group.id, name: group.name } } : {}),
+    }));
+  };
+  // no Chief on duty, or the Chief itself broke: the person is next
+  if (!chief) {
+    tellThePerson();
+    return;
+  }
+  const incidents = store.tasks(chief.id).find((candidate) => candidate.title === INCIDENTS_THREAD_TITLE && !candidate.archivedAt)
+    ?? store.createTask(chief.id, INCIDENTS_THREAD_TITLE, false, undefined, { botId: chief.id, name: chief.name, at: Date.now() });
+  if (!incidents || incidents.threadId === threadId) {
+    tellThePerson();
+    return;
+  }
+  store.appendMessage(incidents.threadId, {
+    role: "bot",
+    kind: "activity",
+    tool: { name: incidentChip(incident), ok: false },
+    threadRef: { botId: bot.id, threadId, title: task?.title ?? (group ? group.name : `${bot.name}'s conversation`) },
+  });
+  const text = incidentText(incident, count);
+  // the report carries the broken bot's name as its provenance: it is about
+  // that bot's work and nobody was at the keyboard
+  const peerAsk = { botId: bot.id, name: bot.name, unattended: true };
+  if (botAtThreadCapacity(chief.id) || activeGroupTurnForBot(chief.id)) {
+    queueSteeredMessage(chief.id, incidents.threadId, text, { reason: "capacity", unattended: true, peerAsk });
+    return;
+  }
+  void startTurn(chief.id, text, { threadId: incidents.threadId, unattended: true, peerAsk }).catch((error) => {
+    const why = error instanceof Error ? error.message : String(error);
+    store.appendMessage(incidents.threadId, {
+      role: "bot",
+      kind: "activity",
+      tool: { name: `error: the incident could not reach ${chief.name} — ${why.slice(0, 120)}`, ok: false },
+    });
+    tellThePerson();
+  });
 }
 
 function drainDelegationWakes(): void {
@@ -6585,6 +6683,7 @@ async function startTurn(
         notify(
           buildNotification("turn-failed", bot, threadId, redactSecretsInText(message), { avatarUrl: bot.avatarUrl }),
         );
+        reportIncident({ kind: "could-not-start", bot, threadId, detail: message });
       }
       store.setTaskActivity(bot.id, threadId, "idle");
       directTurnBots.delete(threadId);
@@ -6890,6 +6989,7 @@ routines = new RoutineManager({
     const detail = run.error ? `${run.routineName}: ${run.error}` : run.routineName;
     const notificationBot = routineSourceOwner(run)?.bot ?? bot;
     notify(buildNotification("routine-failed", notificationBot, routineSourceThread(run) ?? run.threadId ?? bot.threadId, detail));
+    reportIncident({ kind: "routine-failed", bot, threadId: run.threadId ?? bot.threadId, detail });
   },
   onRunDeferred: (run) => {
     const bot = store.bot(run.botId);
@@ -11669,6 +11769,47 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
           }
           await new Promise((wake) => setTimeout(wake, 500));
         }
+      }
+      // A Chief resumes a teammate's broken thread (server/incidents.ts): the
+      // same thread, its conversation and files, one more turn, with a line
+      // saying who asked and why. Chief-only, for a teammate it can reach,
+      // never a room (coordinate there) and never a thread still running.
+      if (method === "POST" && path === "/api/internal/retry-thread") {
+        const body = await readInternalBody();
+        const from = internalSender;
+        const fromThreadId = internalCapability.threadId;
+        if (!from.chiefOfStaff || from.hidden) return json(res, 403, { error: "only a Chief of Staff can retry a teammate's thread" });
+        // `toBotId`/`toThreadId`: the guard above reads bare botId/threadId as
+        // the caller's own identity, the way every internal route does.
+        const botId = typeof body.toBotId === "string" ? body.toBotId : "";
+        const threadId = typeof body.toThreadId === "string" ? body.toThreadId : "";
+        const note = typeof body.note === "string" ? body.note.trim().slice(0, 300) : "";
+        const target = store.bot(botId);
+        if (!target || target.id === from.id) return json(res, 404, { error: "no such teammate" });
+        if (target.hidden || !canAccessTeam(from, target.section) || !peerAllowed(from, target.id)) {
+          return json(res, 403, { error: "that bot is not on this Chief's team — call list_bots for the ones you can reach" });
+        }
+        if (store.groupByThread(threadId)) return json(res, 400, { error: "that is a room thread — use coordinate_bots in the room instead" });
+        const task = store.taskByThread(target.id, threadId);
+        if (!task) return json(res, 404, { error: "no such thread on that bot" });
+        if (threadBusy(target.id, threadId) || queuedThreadPosition(target.id, threadId) !== null) {
+          return json(res, 409, { error: "that thread is still running — wait for it to settle before retrying" });
+        }
+        requireActiveInternalCapability();
+        const unattended = isUnattended(from.id, fromThreadId);
+        const text = `[Retry requested by ${from.name}, your Chief of Staff, after this thread's last run stopped.${note ? ` Note from ${from.name}: ${note}` : ""} Continue the request above from where it stopped and finish it. If the same problem comes back, say exactly what is blocking and stop.]`;
+        try {
+          await startTurn(target.id, text, { threadId, unattended, peerAsk: { botId: from.id, name: from.name, ...(unattended ? { unattended: true } : {}) } });
+        } catch (error) {
+          return json(res, 409, { error: error instanceof Error ? error.message : String(error) });
+        }
+        store.appendMessage(fromThreadId, {
+          role: "bot",
+          kind: "activity",
+          tool: { name: `Retried ${target.name}'s thread #${task.title}`, ok: true },
+          threadRef: { botId: target.id, threadId, title: task.title },
+        });
+        return json(res, 200, { started: true, message: `${target.name}'s thread #${task.title} is running again. Its result stays in that thread; you are not woken for it — check later with list_threads or session_search if you need to.` });
       }
       if (method === "POST" && path === "/api/internal/delegate-bot") {
         const body = await readInternalBody();
