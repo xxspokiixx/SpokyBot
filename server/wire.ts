@@ -1,14 +1,15 @@
-import type { TaskRecord } from "./store.ts";
+import { toWireTask, type TaskRecord } from "./store.ts";
+import type { WireTask } from "../shared/wire.ts";
 
-/** Wire view of a task: the persisted record minus provider session
- * bookkeeping, plus the coordination wait flag below. */
-export type WiredTask = Omit<TaskRecord, "resumeCursors" | "lastInstanceId"> & { waitingOnTeammate?: true };
+/** Wire view of a task: the shared wire shape plus the coordination wait
+ * flag below. */
+export type WiredTask = WireTask & { waitingOnTeammate?: true };
 
 /** True while this thread has handed work to a teammate that has not
  * settled yet (a live direct coordination handoff). */
 export type ActiveCoordination = (threadId: string) => boolean;
 
-/** Strip the harness's own session bookkeeping and surface the
+/** Strip the harness own session bookkeeping and surface the
  * coordination wait as a flag on top of the busy paint (#1223).
  *
  * A thread waiting on a dispatched teammate is not working on its own
@@ -17,5 +18,5 @@ export type ActiveCoordination = (threadId: string) => boolean;
  * busy is really a wait, so clients that know it show a quiet wait. */
 export const wireTaskFor =
   (isActiveCoordination: ActiveCoordination) =>
-  ({ resumeCursors: _resumeCursors, lastInstanceId: _lastInstanceId, ...task }: TaskRecord): WiredTask =>
-    isActiveCoordination(task.threadId) && !task.busy ? { ...task, busy: true, activity: "working" as const, waitingOnTeammate: true } : task;
+  (task: TaskRecord): WiredTask =>
+    isActiveCoordination(task.threadId) && !task.busy ? { ...toWireTask(task), busy: true, activity: "working" as const, waitingOnTeammate: true } : toWireTask(task);
