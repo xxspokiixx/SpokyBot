@@ -23,8 +23,11 @@ const world: WorldSnapshot = {
   observations: {
     firstPoll: { httpStatus: 200, held: true, blockedReason: "Another thread is using this computer" },
     heldRun: { status: "queued", deferredAt: 123, executionThreadId: "t-run" },
+    revokedPoll: { httpStatus: 401 },
   },
-  activities: (bot) => (bot === "auto" ? ["Waiting for its turn on this computer — holder"] : []),
+  activities: (bot) => (bot === "auto"
+    ? ["Waiting for its turn on this computer — holder", "error: computer unavailable — the Local VM could not be claimed for this turn (boot failed)"]
+    : []),
   resolve: (value) => (typeof value === "object" && value !== null
     ? JSON.parse(JSON.stringify(value, (_key, entry) => (entry === "@lead" ? "b-lead" : entry)))
     : value === "@lead" ? "b-lead" : value),
@@ -33,6 +36,16 @@ const world: WorldSnapshot = {
 const score = (assertion: Assertion) => evaluateAssertions([assertion], world)[0];
 
 describe("evaluateAssertions", () => {
+  it("counts activities and pins a gate answer HTTP status", () => {
+    expect(score({ kind: "activityCount", bot: "auto", prefix: "error: computer unavailable", count: 1 }).pass).toBe(true);
+    expect(score({ kind: "activityCount", bot: "auto", prefix: "error: computer unavailable", count: 2 }).pass).toBe(false);
+    expect(score({ kind: "activityCount", bot: "auto", prefix: "Waiting for its turn", count: 1 }).pass).toBe(true);
+    expect(score({ kind: "activityCount", bot: "chief", prefix: "Waiting", count: 0 }).pass).toBe(true);
+    expect(score({ kind: "gateAnswer", of: "firstPoll", httpStatus: 200 }).pass).toBe(true);
+    expect(score({ kind: "gateAnswer", of: "firstPoll", httpStatus: 401 }).pass).toBe(false);
+    expect(score({ kind: "gateAnswer", of: "revokedPoll", httpStatus: 401 }).pass).toBe(true);
+  });
+
   it("flags a queued send and passes an immediate one", () => {
     expect(score({ kind: "sendNotQueued", bot: "chief" }).pass).toBe(false);
     expect(score({ kind: "sendNotQueued", bot: "lead" }).pass).toBe(false);

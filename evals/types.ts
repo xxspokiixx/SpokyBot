@@ -77,10 +77,20 @@ export const assertionSchema = z.discriminatedUnion("kind", [
     held: z.boolean().optional(),
     blockedReasonIncludes: z.string().optional(),
     blockedReasonOmits: z.string().optional(),
+    /** Pins the HTTP status a saved gate observation answered with, for
+     * answers whose failure mode is the status itself (a revoked bridge
+     * capability answers 401 with no held or blockedReason body). */
+    httpStatus: z.number().int().optional(),
   }),
   z.object({ kind: z.literal("routineRunSnapshot"), of: z.string(), status: z.string(), deferred: z.boolean() }),
   z.object({ kind: z.literal("activitySeen"), bot: z.string(), namePrefix: z.string() }),
   z.object({ kind: z.literal("noActivityPrefix"), bot: z.string(), prefix: z.string() }),
+  /** Pins how many activities with a prefix were recorded, so a terminal
+   * error can be required to land exactly once, not merely at least once.
+   * The snapshot merges proven waitForActivity prefixes into the list, so
+   * a scenario pinning an exact count must not also waitForActivity on the
+   * same prefix (order steps off another observable instead). */
+  z.object({ kind: z.literal("activityCount"), bot: z.string(), prefix: z.string(), count: z.number().int() }),
 ]);
 
 export const scenarioSchema = z.object({

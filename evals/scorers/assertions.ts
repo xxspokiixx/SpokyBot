@@ -105,10 +105,11 @@ function score(assertion: Assertion, world: WorldSnapshot): { pass: boolean; det
         : { pass: false, detail: "transcript lacked: " + assertion.text + "\n" + fmt(messages.map((message) => message.text)) };
     }
     case "gateAnswer": {
-      const answer = world.observations[assertion.of] as { held?: boolean; blockedReason?: string } | undefined;
+      const answer = world.observations[assertion.of] as { held?: boolean; blockedReason?: string; httpStatus?: number } | undefined;
       if (answer === undefined) return { pass: false, detail: "no saved gate answer \"" + assertion.of + "\"" };
       const checks = [
         assertion.held === undefined || answer.held === assertion.held,
+        assertion.httpStatus === undefined || answer.httpStatus === assertion.httpStatus,
         assertion.blockedReasonIncludes === undefined ||
           (answer.blockedReason ?? "").includes(assertion.blockedReasonIncludes),
         assertion.blockedReasonOmits === undefined || !(answer.blockedReason ?? "").includes(assertion.blockedReasonOmits),
@@ -136,6 +137,12 @@ function score(assertion: Assertion, world: WorldSnapshot): { pass: boolean; det
       return offenders.length === 0
         ? { pass: true, detail: "no activity with prefix \"" + assertion.prefix + "\"" }
         : { pass: false, detail: "unexpected activities: " + offenders.join(", ") };
+    }
+    case "activityCount": {
+      const matches = world.activities(assertion.bot).filter((name) => name.startsWith(assertion.prefix));
+      return matches.length === assertion.count
+        ? { pass: true, detail: matches.length + " activity(ies) with prefix \"" + assertion.prefix + "\"" }
+        : { pass: false, detail: "expected " + assertion.count + " activity(ies) with prefix \"" + assertion.prefix + "\", got " + matches.length + ": " + matches.join(", ") };
     }
   }
 }
