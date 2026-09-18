@@ -107,6 +107,9 @@ export interface WireTask {
   threadId: string;
   title: string;
   createdAt: number;
+  /** The first message already drove a title attempt for this thread, so a
+   * later one does not rename a thread the person may have retitled. */
+  titleFromFirstMessage?: true;
   /** Organizational grouping only; never a directory or provider context. */
   projectId?: string;
   /** Detached routine execution, reachable through its visible results card. */
@@ -129,6 +132,10 @@ export interface WireTask {
   /** Runtime-only state, reset on load and never persisted. */
   activity?: BotActivity;
   busy?: boolean;
+  /** Epoch ms when this task's current busy stretch began — the chat anchors
+   * its elapsed readout here, so the count survives thread switches. Stamped
+   * by setTaskActivity on an idle→busy transition; runtime-only like busy. */
+  turnStartedAt?: number;
   /** Where this conversation works when pinned; absent = follow the bot. */
   surface?: Surface;
   /** what this task has spent, banked once per turn */
@@ -277,6 +284,14 @@ export interface WireMessage {
   steered?: boolean;
   /** A user-role message that arrived through the server's HTTP API. */
   via?: "api";
+  /** Which person sent this user message, when the workspace has more than
+   * one. The server authenticates per person but used to attribute every
+   * user turn to the single profile name, so on a shared or paired instance
+   * every human collapsed into whoever Settings named — bots addressed the
+   * wrong person and remembered work under their name. Absent for the
+   * desktop owner's own sends and for every message written before this
+   * existed; both still read as the profile name. */
+  sender?: { name: string };
   /** Provider turn that produced this message. */
   turnId?: string;
   /** The last assistant text item from a settled provider turn. */
@@ -388,6 +403,9 @@ export interface GroupTask {
   createdAt: number;
   pinnedCwd?: string | null;
   pinnedMessageId?: string;
+  /** The first message already drove a title attempt for this thread, so a
+   * later one does not rename a room the person may have retitled. */
+  titleFromFirstMessage?: true;
 }
 
 /** A room as a client may see it: the record plus the computed working
@@ -409,6 +427,10 @@ export interface WireGroup {
   dm?: boolean;
   /** transient: the member currently running a turn. */
   busyBotId?: string | null;
+  /** transient: when the busy member's turn started, for the elapsed
+   * readout — the group-side twin of a task's turnStartedAt, stamped on
+   * every transition into a busy speaker (never persisted) */
+  turnStartedAt?: number;
   /** the room's shared desk; absent = each member's own default. */
   cwd?: string;
   /** Compatibility mirror of the active task's pinned folder. */

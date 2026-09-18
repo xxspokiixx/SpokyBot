@@ -189,6 +189,34 @@ describe("server-owned browser MCP runtime", () => {
     await value.take("s", "owner");
     expect(value.canControl("s", "owner")).toBe(true);
   });
+  it("recovers by itself after a request timeout kills the browser, without a human takeover", async () => {
+    // Reported from the field: a fill mid-MFA timed out, and from then on every
+    // call on that session answered "A browser action was interrupted", through
+    // reconnects, deleting and recreating the browser in Settings, remounting
+    // the conversation's tools, and restarting the app. Nothing an agent can
+    // call clears it, because every tool call passes the same gate.
+    const value = runtime({ requestTimeoutMs: 60 });
+    await expect(value.agentRpc("s", spec(), "tools/call", { name: "hang" })).rejects.toThrow(/timed out/);
+    // The timeout stopped the transport, which SIGKILLs the child, so nothing
+    // is left running and the next call must be allowed to start a browser.
+    await expect(value.agentRpc("s", spec(), "tools/call", { name: "echo", arguments: { text: "back" } }))
+      .resolves.toMatchObject({ content: [{ text: expect.stringContaining("back") }] });
+    // and a person can still take control afterwards
+    await value.take("s", "owner");
+    expect(value.canControl("s", "owner")).toBe(true);
+  });
+
+  it("still refuses an agent after a human's own interrupted command, browser alive", async () => {
+    // The other half of the contract: this uncertainty is NOT self-resolving,
+    // because the browser is still running and may act again.
+    const value = runtime();
+    await value.agentRpc("s", spec(), "tools/list", {});
+    await value.take("s", "owner");
+    await expect(value.withHumanAction("s", "owner", async () => { throw new Error("navigation timed out"); })).rejects.toThrow(/timed out/);
+    value.release("s", "owner");
+    await expect(value.withAgentAction("s", async () => "snapshot")).rejects.toThrow(/Restart/);
+  });
+
   it("initializes once, reuses its own session client, and supports concurrent ids", async () => {
     const value = runtime();
     const list = await value.agentRpc("one", spec(), "tools/list", {}) as { pid: number; initialized: boolean };
