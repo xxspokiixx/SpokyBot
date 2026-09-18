@@ -189,3 +189,359 @@ data class ViewportMapping(
         )
     }
 }
+
+/**
+ * The gesture state machine.
+ *
+ * Pure by construction: it holds no clock and no transport, so every behaviour
+ * it has is reachable from a test that feeds it samples and reads the intents
+ * back. A class rather than a data class — it is mutable state, and structural
+ * equality on it would be meaningless.
+ *
+ * Mirrors CompanionCore's `GestureCore` exactly; [RemoteGestureParityTest] is
+ * what keeps the two honest.
+ */
+class GestureCore(
+    var mode: GestureMode,
+    var mapping: ViewportMapping,
+) {
+    private var clickCount = 0
+    private var lastClickEnd: Double? = null
+    private var lastClickPoint: RemotePoint? = null
+    private var activeTouch: Int? = null
+    private var touchStart: RemotePoint? = null
+    private var touchStartTime = 0.0
+    private var longPressArmed = false
+    private var longPressFired = false
+    private var dragging = false
+    private var heldButton: RemoteButton? = null
+    private var lastMovePoint: RemotePoint? = null
+    private var lastMoveTime = 0.0
+    private var scrolled = false
+    private var momentumX = 0.0
+    private var momentumY = 0.0
+
+    /** Local magnification. Never sent to the remote: magnifying the received
+     * frame reaches a small target without reflowing the page under the
+     * person, which a remote zoom would do. */
+    var transform = ViewTransform.IDENTITY
+        private set
+
+    /** Where the remote pointer is believed to be, in normalised frame units.
+     *
+     * Trackpad mode owns this; direct mode leaves it alone, because there the
+     * finger *is* the pointer. The view draws it locally at frame rate and
+     * never waits for the network, which is what hides the round trip. */
+    var cursor = RemotePoint(0.5, 0.5)
+        private set
+
+    /** The take/release gate.
+     *
+     * False means watching, and no touch may reach the remote: scrolling to
+     * read a page must not become a click on it. Off by default, so a caller
+     * that forgets to set it fails safe instead of handing control away. */
+    var driving = false
+
+    companion object {
+        /** The contract acceleration curve. Continuous at the knee and capped,
+         * so a fast flick cannot throw the cursor somewhere unrecoverable. */
+        fun gain(speed: Double): Double =
+            if (!speed.isFinite() || speed <= 0.35) 1.0 else min(3.0, 1.0 + (speed - 0.35) * 2.5)
+    }
+
+    /** Release everything held and abandon momentum.
+     *
+     * Called on explicit release, on backgrounding and on connection loss. A
+     * button left down on the remote outlives the session otherwise, and
+     * nothing on the far side will ever lift it. */
+    fun flush(): List<GestureIntent> {
+        momentumX = 0.0
+        momentumY = 0.0
+        activeTouch = null
+        touchStart = null
+        lastMovePoint = null
+        longPressArmed = false
+        longPressFired = false
+        scrolled = false
+        val button = heldButton
+        if (!dragging || button == null) return emptyList()
+        dragging = false
+        heldButton = null
+        return listOf(GestureIntent.Release(button))
+    }
+
+    fun handle(sample: TouchSample): List<GestureIntent> {
+        if (!driving) return emptyList()
+        val point = mapping.remotePoint(sample.x, sample.y, activeTouch == sample.id)
+            ?: return emptyList()
+
+        if (mode == GestureMode.TRACKPAD) return handleTrackpad(sample, point)
+
+        return when (sample.phase) {
+            TouchPhase.BEGAN -> {
+                activeTouch = sample.id
+                touchStart = point
+                touchStartTime = sample.t
+                lastMovePoint = point
+                lastMoveTime = sample.t
+                longPressArmed = true
+                longPressFired = false
+                dragging = false
+                scrolled = false
+                // Touching during a flick stops it, as every scroll view does.
+                momentumX = 0.0
+                momentumY = 0.0
+                emptyList()
+            }
+
+            TouchPhase.MOVED -> {
+                val start = touchStart
+                if (activeTouch != sample.id || start == null) return emptyList()
+                val travelled = max(abs(point.x - start.x), abs(point.y - start.y))
+                if (longPressArmed && travelled > GestureConstants.LONG_PRESS_SLOP) longPressArmed = false
+
+                // Without a long press first, a one-finger drag is a scroll:
+                // the page moves with the finger, so the deltas are negated.
+                if (!longPressFired) {
+                    val previous = lastMovePoint ?: return emptyList()
+                    val dx = point.x - previous.x
+                    val dy = point.y - previous.y
+                    val interval = max(sample.t - lastMoveTime, 0.001)
+                    lastMovePoint = point
+                    lastMoveTime = sample.t
+                    if (dx == 0.0 && dy == 0.0) return emptyList()
+                    scrolled = true
+                    // Velocity as one frame's travel at 60fps, the unit tick decays.
+                    momentumX = -dx / interval * 0.016
+                    momentumY = -dy / interval * 0.016
+                    return listOf(GestureIntent.Scroll(-dx, -dy))
+                }
+
+                // The first move after a long press turns it into a drag, so
+                // the button press waits for movement rather than the hold —
+                // a hold alone is a context menu, not a selection.
+                if (!dragging && travelled > GestureConstants.DRAG_THRESHOLD) {
+                    dragging = true
+                    heldButton = RemoteButton.LEFT
+                    return listOf(
+                        GestureIntent.Press(RemoteButton.LEFT, 1),
+                        GestureIntent.Move(point.x, point.y),
+                    )
+                }
+                if (dragging) listOf(GestureIntent.Move(point.x, point.y)) else emptyList()
+            }
+
+            TouchPhase.ENDED -> {
+                // Only the touch that began the gesture can end it.
+                if (activeTouch != sample.id) return emptyList()
+                activeTouch = null
+                longPressArmed = false
+                val button = heldButton
+                if (dragging && button != null) {
+                    dragging = false
+                    heldButton = null
+                    return listOf(GestureIntent.Release(button))
+                }
+                // A fired long press already delivered its right click, and a
+                // scroll is likewise complete: a flick through a page of links
+                // must not open one on the way out.
+                if (longPressFired || scrolled) {
+                    longPressFired = false
+                    scrolled = false
+                    return emptyList()
+                }
+                val clicks = nextClickCount(point, sample.t)
+                listOf(
+                    GestureIntent.Move(point.x, point.y),
+                    GestureIntent.Press(RemoteButton.LEFT, clicks),
+                    GestureIntent.Release(RemoteButton.LEFT),
+                )
+            }
+
+            TouchPhase.CANCELLED -> {
+                activeTouch = null
+                longPressArmed = false
+                longPressFired = false
+                val button = heldButton
+                if (!dragging || button == null) return emptyList()
+                dragging = false
+                heldButton = null
+                listOf(GestureIntent.Release(button))
+            }
+        }
+    }
+
+    /** Trackpad mode: the finger is a rate control for a cursor the core owns,
+     * not a position. Where the finger is at any moment is irrelevant; only
+     * how far it moved since the last sample matters. */
+    private fun handleTrackpad(sample: TouchSample, point: RemotePoint): List<GestureIntent> =
+        when (sample.phase) {
+            TouchPhase.BEGAN -> {
+                activeTouch = sample.id
+                touchStart = point
+                touchStartTime = sample.t
+                lastMovePoint = point
+                lastMoveTime = sample.t
+                dragging = false
+                emptyList()
+            }
+
+            TouchPhase.MOVED -> {
+                val previous = lastMovePoint
+                if (activeTouch != sample.id || previous == null) {
+                    emptyList()
+                } else {
+                    val dx = point.x - previous.x
+                    val dy = point.y - previous.y
+                    // A zero interval would divide speed to infinity; clamping
+                    // it low keeps same-timestamp samples from pinning the gain.
+                    val interval = max(sample.t - lastMoveTime, 0.001)
+                    val gain = gain(sqrt(dx * dx + dy * dy) / interval)
+                    lastMovePoint = point
+                    lastMoveTime = sample.t
+                    cursor = RemotePoint(
+                        x = min(max(cursor.x + dx * gain, 0.0), 1.0),
+                        y = min(max(cursor.y + dy * gain, 0.0), 1.0),
+                    )
+                    listOf(GestureIntent.Move(cursor.x, cursor.y))
+                }
+            }
+
+            TouchPhase.ENDED -> {
+                if (activeTouch != sample.id) {
+                    emptyList()
+                } else {
+                    activeTouch = null
+                    val start = touchStart
+                    // A drag moved the cursor and is complete; only a touch
+                    // that stayed put was a click.
+                    val travelled = if (start == null) 0.0
+                    else max(abs(point.x - start.x), abs(point.y - start.y))
+                    if (travelled > GestureConstants.DRAG_THRESHOLD) {
+                        emptyList()
+                    } else {
+                        val clicks = nextClickCount(cursor, sample.t)
+                        listOf(
+                            GestureIntent.Press(RemoteButton.LEFT, clicks),
+                            GestureIntent.Release(RemoteButton.LEFT),
+                        )
+                    }
+                }
+            }
+
+            TouchPhase.CANCELLED -> {
+                activeTouch = null
+                emptyList()
+            }
+        }
+
+    /** Driven by the view's frame callback.
+     *
+     * The core cannot ask what time it is, so a hold only becomes observable
+     * when someone tells it time moved. The cost is one call per frame; the
+     * return is that a half-second gesture is testable in microseconds. */
+    fun tick(t: Double): List<GestureIntent> {
+        if (!driving) return emptyList()
+
+        val start = touchStart
+        if (longPressArmed && !longPressFired && activeTouch != null && start != null &&
+            t - touchStartTime >= GestureConstants.LONG_PRESS
+        ) {
+            longPressArmed = false
+            longPressFired = true
+            return listOf(
+                GestureIntent.Move(start.x, start.y),
+                GestureIntent.Press(RemoteButton.RIGHT, 1),
+                GestureIntent.Release(RemoteButton.RIGHT),
+            )
+        }
+
+        // A flick keeps scrolling after the finger leaves, and stops rather
+        // than trickling deltas the person can no longer see.
+        if (abs(momentumX) <= GestureConstants.MOMENTUM_CUTOFF &&
+            abs(momentumY) <= GestureConstants.MOMENTUM_CUTOFF
+        ) {
+            momentumX = 0.0
+            momentumY = 0.0
+            return emptyList()
+        }
+        val carried = GestureIntent.Scroll(momentumX, momentumY)
+        momentumX *= GestureConstants.MOMENTUM_DECAY
+        momentumY *= GestureConstants.MOMENTUM_DECAY
+        return listOf(carried)
+    }
+
+    /** Zoom about a view point, keeping whatever is under it in place.
+     *
+     * The offset correction is what stops the target sliding out from under
+     * the fingers, which is the difference between zoom that helps reach a
+     * small control and zoom that makes it harder. */
+    fun pinch(scale: Double, centreX: Double, centreY: Double) {
+        if (!scale.isFinite() || scale <= 0) return
+        val next = min(max(transform.scale * scale, GestureConstants.MIN_ZOOM), GestureConstants.MAX_ZOOM)
+        val anchor = mapping.remotePoint(centreX, centreY, true)
+        if (anchor == null) {
+            transform = transform.copy(scale = next)
+            clampPan()
+            syncMapping()
+            return
+        }
+
+        val localX = (anchor.x - transform.offsetX) * transform.scale
+        val localY = (anchor.y - transform.offsetY) * transform.scale
+        transform = ViewTransform(
+            scale = next,
+            offsetX = anchor.x - localX / next,
+            offsetY = anchor.y - localY / next,
+        )
+        clampPan()
+        syncMapping()
+    }
+
+    /** Pan by a view-space delta in pixels. */
+    fun pan(dx: Double, dy: Double) {
+        if (!dx.isFinite() || !dy.isFinite()) return
+        if (mapping.viewWidth <= 0 || mapping.viewHeight <= 0) return
+        transform = transform.copy(
+            offsetX = transform.offsetX - dx / (mapping.viewWidth * transform.scale),
+            offsetY = transform.offsetY - dy / (mapping.viewHeight * transform.scale),
+        )
+        clampPan()
+        syncMapping()
+    }
+
+    /** The visible window is `1 / scale` wide, so its top-left can never
+     * exceed what is left over. At scale 1 that leaves only zero. */
+    private fun clampPan() {
+        val limit = max(0.0, 1 - 1 / transform.scale)
+        transform = transform.copy(
+            offsetX = min(max(transform.offsetX, 0.0), limit),
+            offsetY = min(max(transform.offsetY, 0.0), limit),
+        )
+    }
+
+    private fun syncMapping() {
+        mapping = mapping.copy(transform = transform)
+    }
+
+    /** A sequence continues only while both the gap and the distance stay
+     * inside the contract, and wraps rather than growing without bound — a
+     * quadruple click means nothing to a browser. */
+    private fun nextClickCount(point: RemotePoint, t: Double): Int {
+        val last = lastClickEnd
+        val where = lastClickPoint
+        val soonEnough = last != null && t - last <= GestureConstants.MULTI_CLICK_WINDOW
+        val closeEnough = where != null &&
+            abs(where.x - point.x) <= GestureConstants.MULTI_CLICK_SLOP &&
+            abs(where.y - point.y) <= GestureConstants.MULTI_CLICK_SLOP
+
+        clickCount = if (soonEnough && closeEnough && clickCount < GestureConstants.MAX_CLICKS) {
+            clickCount + 1
+        } else {
+            1
+        }
+        lastClickEnd = t
+        lastClickPoint = point
+        return clickCount
+    }
+}
