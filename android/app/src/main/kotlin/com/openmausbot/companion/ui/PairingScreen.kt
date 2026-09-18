@@ -413,7 +413,7 @@ internal enum class PairingFailureDisposition {
     RESET_TYPED_ATTEMPT,
 }
 
-/** Route ambiguity is the only failure that may keep the same logical request alive. */
+/** Route ambiguity and retryable server refusals keep the same logical request alive. */
 internal fun pairingFailureDisposition(
     error: Throwable,
     cameFromScanner: Boolean,

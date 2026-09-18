@@ -53,9 +53,10 @@ class PairingRouteError(val attemptedRoutes: List<String>) : IOException(
         "(${attemptedRoutes.joinToString()}). Keep Phone access turned on in OpenMausBot, then try again.",
 )
 
-/** Keep the same code and request id after an uncertain server redemption. */
+/** Keep the same code and request id after an uncertain redemption or rate-limit refusal. */
 class ServerPairingRetryError(cause: IOException) : IOException(
-    "Could not finish connecting to the server. Try again with the same code.", cause,
+    if (cause is APIError.Status && cause.code == 429) cause.message
+    else "Could not finish connecting to the server. Try again with the same code.", cause,
 )
 
 internal const val SCOPED_IPV6_HTTP_HOST = "scoped-ipv6.openmausbot.invalid"
@@ -175,6 +176,7 @@ class CompanionClient(
 
     /** Read identity without sending the saved bearer to a potentially replaced server. */
     suspend fun environment(): ServerEnvironment {
+        connection.requireServerTransport()
         val publicClient = CompanionClient(connection, null, actionClient)
         return publicClient.send(
             publicClient.makeRequest("GET", "/.well-known/openmausbot/environment"),
@@ -697,6 +699,7 @@ class CompanionClient(
         rawBody: RequestBody? = null,
     ): Request {
         require(body == null || rawBody == null)
+        if (connection.pairedWithServer) connection.requireServerTransport()
         val base = endpoint?.baseUrl ?: throw APIError.BadUrl
         val url = base.newBuilder().encodedPath(path).apply {
             query.forEach { (name, value) -> addQueryParameter(name, value) }
@@ -976,6 +979,7 @@ class CompanionClient(
             attemptId: String,
             client: OkHttpClient = OkHttpClient(),
         ): ServerPairResponse {
+            connection.requireServerTransport()
             val companion = CompanionClient(connection, token = null, baseClient = client)
             val pairClient = client.newBuilder()
                 .dns(companion.endpoint?.dns ?: client.dns)

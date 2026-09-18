@@ -433,6 +433,7 @@ data class PairingInvite(val connection: Connection, val credential: String) {
             }
             val code = normalizedServerCode(values["code"] ?: return null) ?: return null
             val connection = Connection.parse("${url.scheme}://${url.rawAuthority}") ?: return null
+            if (!connection.serverTransportAllowed) return null
             return PairingInvite(connection.establishingRoutePolicyFromInvite(), code)
         }
 

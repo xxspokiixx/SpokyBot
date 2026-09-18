@@ -210,6 +210,8 @@ class Session(
         awaitRestored()
         gate.withLock {
             if (pairingInFlight) throw PairingInProgressException()
+            // An unsafe address has not submitted the code. Let the user correct it and retry.
+            if (PairingInvite.normalizedServerCode(credential) != null) connection.requireServerTransport()
             if (isQrCredential(credential) && credential in spentQrCredentials) {
                 _actionError.value = SPENT_QR_MESSAGE
                 clearInviteIfCredential(credential)
@@ -298,7 +300,7 @@ class Session(
                 descriptor = CompanionClient(invited, null, httpClient).environment()
                 paired = CompanionClient.pairWithServer(invited, serverCode, deviceName, requestId, httpClient)
             } catch (error: java.io.IOException) {
-                if (error is APIError.Status && error.code < 500) throw error
+                if (error is APIError.Status && error.code < 500 && error.code != 429) throw error
                 throw ServerPairingRetryError(error)
             }
             check(paired.environment.environmentId == descriptor.environmentId) {

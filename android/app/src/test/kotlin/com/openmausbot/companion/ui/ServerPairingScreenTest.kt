@@ -31,6 +31,7 @@ class ServerPairingScreenTest {
     private lateinit var server: MockWebServer
     private val requests = CopyOnWriteArrayList<RecordedRequest>()
     private var failFirstPair = false
+    private var failureStatus = 503
 
     @Before
     fun start() {
@@ -41,7 +42,7 @@ class ServerPairingScreenTest {
                 if (request.path == "/api/auth/pair") {
                     if (failFirstPair) {
                         failFirstPair = false
-                        return MockResponse().setResponseCode(503).setBody("{\"error\":\"temporarily unavailable\"}")
+                        return MockResponse().setResponseCode(failureStatus).setBody("{\"error\":\"temporarily unavailable\"}")
                     }
                     return MockResponse().setBody("""{"token":"omb_sess_fixture","session":{"id":"s1","label":"Pixel","scopes":["client"]},"environment":{"environmentId":"env-fixture","label":"Headless test server"}}""")
                 }
@@ -104,6 +105,41 @@ class ServerPairingScreenTest {
         compose.waitUntil(5_000) { scene.session.actionError == null && requests.any { it.path == "/api/auth/pair" } }
         compose.waitUntil(5_000) { compose.onAllNodesWithText("Could not finish connecting to the server. Try again with the same code.").fetchSemanticsNodes().isNotEmpty() }
         compose.onNodeWithText("Pair with this computer").performScrollTo().performClick()
+        awaitPairing()
+        val posts = requests.filter { it.path == "/api/auth/pair" }.map { it.body.readUtf8() }
+        assertEquals(2, posts.size)
+        assertEquals(posts[0], posts[1])
+    }
+
+    @Test
+    fun rateLimitRetainsScannedCodeAndAttemptId() {
+        failureStatus = 429
+        retryAfterRateLimit(manual = false)
+    }
+
+    @Test
+    fun rateLimitRetainsTypedCodeAndAttemptId() {
+        failureStatus = 429
+        retryAfterRateLimit(manual = true)
+    }
+
+    private fun retryAfterRateLimit(manual: Boolean) {
+        failFirstPair = true
+        val button = if (manual) {
+            compose.onNodeWithText("Other ways to connect").performClick()
+            compose.onAllNodes(hasSetTextAction())[0].performTextInput(server.url("/").toString().trimEnd('/'))
+            compose.onNodeWithText("Continue").performScrollTo().performClick()
+            compose.onNode(hasSetTextAction()).performTextInput("abcd-efgh-jklm")
+            "Connect"
+        } else {
+            acceptScan()
+            "Pair with this computer"
+        }
+        compose.onNodeWithText(button).performScrollTo().performClick()
+        compose.waitUntil(5_000) {
+            compose.onAllNodesWithText("temporarily unavailable").fetchSemanticsNodes().isNotEmpty()
+        }
+        compose.onNodeWithText(button).performScrollTo().performClick()
         awaitPairing()
         val posts = requests.filter { it.path == "/api/auth/pair" }.map { it.body.readUtf8() }
         assertEquals(2, posts.size)

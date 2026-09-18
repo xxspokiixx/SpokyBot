@@ -52,12 +52,30 @@ class ServerSessionPairingTest {
 
     @Test
     fun failedRedemptionSurfacesTheServerMessageWithoutSavingCredentials() = runBlocking<Unit> {
-        Fixture { request -> if (request.url.encodedPath == "/api/auth/pair") 429 to """{"error":"try again in 60s"}""" else null }.use { f ->
+        Fixture { request -> if (request.url.encodedPath == "/api/auth/pair") 401 to """{"error":"code expired"}""" else null }.use { f ->
             val error = assertFailsWith<APIError.Status> { f.session.pair(f.invite) }
-            assertEquals(429, error.code)
-            assertEquals("try again in 60s", error.message)
+            assertEquals(401, error.code)
+            assertEquals("code expired", error.message)
             assertNull(f.store.saved)
             assertTrue(f.tokens.values.isEmpty())
+        }
+    }
+
+    @Test
+    fun rateLimitedCodeCanBeRetriedWithTheSameAttempt() = runBlocking<Unit> {
+        var calls = 0
+        Fixture { request ->
+            if (request.url.encodedPath == "/api/auth/pair" && calls++ == 0)
+                429 to """{"error":"try again in 60s"}""" else null
+        }.use { f ->
+            val error = assertFailsWith<ServerPairingRetryError> { f.session.pair(f.invite, "retry-429") }
+            assertEquals("try again in 60s", error.message)
+            assertNull(f.store.saved)
+            f.session.pair(f.invite, "retry-429")
+            val posts = f.requests.filter { it.url.encodedPath == "/api/auth/pair" }
+            assertEquals(2, posts.size)
+            assertEquals(1, posts.map { Buffer().also { buffer -> it.body!!.writeTo(buffer) }.readUtf8() }.distinct().size)
+            assertNotNull(f.store.saved)
         }
     }
 
@@ -74,6 +92,23 @@ class ServerSessionPairingTest {
             val posts = f.requests.filter { it.url.encodedPath == "/api/auth/pair" }
             assertEquals(2, posts.size)
             assertEquals(1, posts.map { Buffer().also { buffer -> it.body!!.writeTo(buffer) }.readUtf8() }.distinct().size)
+            assertNotNull(f.store.saved)
+        }
+    }
+
+    @Test
+    fun publicHttpIsRejectedBeforeManualPairingOrSendingSavedCredentials() = runBlocking<Unit> {
+        val public = assertNotNull(Connection.parse("http://public.example:8799"))
+        Fixture().use { f ->
+            assertFailsWith<APIError.Transport> { f.session.pair(public, "ABCDEFGHJKLM") }
+            assertFailsWith<APIError.Transport> {
+                CompanionClient.pairWithServer(public, "ABCDEFGHJKLM", "Pixel", "attempt-1234", f.http)
+            }
+            val saved = public.copy(serverEnvironmentId = "env-fixture")
+            assertFailsWith<APIError.Transport> { CompanionClient(saved, "saved-bearer", f.http).fleet() }
+            assertTrue(f.requests.isEmpty(), "No identity probe, pairing code or bearer may reach public HTTP")
+            // The rejected local preflight must not spend a code that never reached the server.
+            f.session.pair(f.invite, "corrected-origin")
             assertNotNull(f.store.saved)
         }
     }
