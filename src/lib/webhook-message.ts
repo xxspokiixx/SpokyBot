@@ -7,6 +7,9 @@ export interface WebhookMessageView {
  * The stored message stays untouched, preserving the trust boundary for model
  * context and follow-up turns. */
 export function webhookMessageView(text: string): WebhookMessageView | null {
+  const eventStart = text.indexOf("[UNTRUSTED WEBHOOK EVENT DATA]\n");
+  if (eventStart < 0) return null;
+  const trustedPrefix = text.slice(0, eventStart);
   const markers = [
     "AUTHENTICATED WEBHOOK TASK",
     "USER-CONFIGURED WEBHOOK INSTRUCTIONS",
@@ -14,7 +17,7 @@ export function webhookMessageView(text: string): WebhookMessageView | null {
   ];
   let task = "";
   for (const marker of markers) {
-    const match = text.match(new RegExp(`\\[${marker}\\]\\n([\\s\\S]*?)\\n\\[\\/${marker}\\]`));
+    const match = trustedPrefix.match(new RegExp(`\\[${marker}\\]\\n([\\s\\S]*?)\\n\\[\\/${marker}\\]`));
     if (match?.[1]) {
       task = match[1].trim();
       break;

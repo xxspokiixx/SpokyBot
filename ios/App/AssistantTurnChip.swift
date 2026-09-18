@@ -34,8 +34,11 @@ struct AssistantTurnChip: View {
             .accessibilityIdentifier("assistant-turn.\(turn.turnId)")
 
             if expanded {
-                ForEach(turn.messages) { message in
-                    MessageRow(chat: chat, message: message, openLink: openLink, openThread: openThread)
+                ForEach(Array(turn.messages.enumerated()), id: \.element.id) { index, message in
+                    MessageRow(
+                        chat: chat, message: message, endsRun: index == turn.messages.count - 1,
+                        openLink: openLink, openThread: openThread
+                    )
                 }
             }
         }

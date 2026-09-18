@@ -45,3 +45,20 @@ exercise a physical iPhone, pairing, or actual webhook delivery.
 - Result bundle: `/tmp/omb-chat-presentation-ui.xcresult`. Exported screenshots
   in `/tmp/omb-chat-presentation-screenshots/` were visually inspected.
 - The disposable simulator was shut down and deleted. No user data was used.
+
+## Review regressions — 2026-09-18
+
+- Task markers inside untrusted webhook data cannot override the configured or
+  default task. Missing, blank and malformed trusted prefixes keep the raw
+  message. The regression failed before the change in Swift, Kotlin and the
+  desktop parser; all three pass after the fix.
+- All 466 Swift core tests and all three simulator presentation tests passed.
+  Expanded narration now tails only its last bubble. The expansion case was
+  rerun to capture the screenshot below.
+- Evidence: `/tmp/moca204-review-ui.xcresult`,
+  `/tmp/moca204-expanded-ui.xcresult`, and
+  `/tmp/moca204-expanded-screenshots/`. The disposable simulator was deleted.
+- The desktop renderer suite passed all 1,792 tests, including its parser
+  regression. This is not a claim that the entire server/desktop suite passed.
+
+![Expanded narration](assets/ios-transcript/narration-expanded.png)

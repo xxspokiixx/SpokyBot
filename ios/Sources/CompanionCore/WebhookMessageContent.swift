@@ -7,15 +7,17 @@ public struct WebhookMessageContent: Hashable, Sendable {
     public let payload: String?
 
     public static func parse(_ text: String) -> Self? {
-        func block(_ marker: String) -> String? {
-            guard let start = text.range(of: "[\(marker)]\n"),
-                  let end = text.range(of: "\n[/\(marker)]", range: start.upperBound..<text.endIndex) else { return nil }
-            return String(text[start.upperBound..<end.lowerBound])
+        guard let eventStart = text.range(of: "[UNTRUSTED WEBHOOK EVENT DATA]\n") else { return nil }
+        let trustedPrefix = String(text[..<eventStart.lowerBound])
+        func block(_ marker: String, in source: String) -> String? {
+            guard let start = source.range(of: "[\(marker)]\n"),
+                  let end = source.range(of: "\n[/\(marker)]", range: start.upperBound..<source.endIndex) else { return nil }
+            return String(source[start.upperBound..<end.lowerBound])
         }
         let markers = ["AUTHENTICATED WEBHOOK TASK", "USER-CONFIGURED WEBHOOK INSTRUCTIONS", "DEFAULT WEBHOOK INSTRUCTIONS"]
-        guard let task = markers.compactMap({ block($0)?.trimmingCharacters(in: .whitespacesAndNewlines) })
+        guard let task = markers.compactMap({ block($0, in: trustedPrefix)?.trimmingCharacters(in: .whitespacesAndNewlines) })
             .first(where: { !$0.isEmpty }),
-              let event = block("UNTRUSTED WEBHOOK EVENT DATA"), !event.isEmpty else { return nil }
+              let event = block("UNTRUSTED WEBHOOK EVENT DATA", in: text), !event.isEmpty else { return nil }
         let payload = event.range(of: "\n\n").map {
             String(event[$0.upperBound...]).trimmingCharacters(in: .whitespacesAndNewlines)
         }

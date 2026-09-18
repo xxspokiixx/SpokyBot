@@ -19,6 +19,7 @@ final class TranscriptPresentationUITests: XCTestCase {
         fold.tap()
         XCTAssertTrue(contains("Let me inspect the build logs.", in: app))
         XCTAssertTrue(contains("I found the failing check.", in: app))
+        screenshot("Expanded narration uses a single final bubble tail", in: app)
         fold.tap()
         XCTAssertFalse(contains("Let me inspect", in: app))
 
