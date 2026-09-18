@@ -18,8 +18,9 @@ export function webhookMessageView(text: string): WebhookMessageView | null {
   let task = "";
   for (const marker of markers) {
     const match = trustedPrefix.match(new RegExp(`\\[${marker}\\]\\n([\\s\\S]*?)\\n\\[\\/${marker}\\]`));
-    if (match?.[1]) {
-      task = match[1].trim();
+    const candidate = match?.[1]?.trim();
+    if (candidate) {
+      task = candidate;
       break;
     }
   }
