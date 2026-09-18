@@ -58,7 +58,6 @@ export function coordinatorSupervises(
   );
 }
 
-
 export type PeerStatus = "available" | "working" | "waiting-on-user" | "not-responding" | "unavailable";
 
 const PEER_STATUS_WORDS: Record<PeerStatus, string> = {

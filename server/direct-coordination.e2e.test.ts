@@ -31,6 +31,21 @@ async function fixture(test: (f: any) => Promise<void>, fakeEnv: NodeJS.ProcessE
   } finally { await session.close(); }
 }
 
+it("does not grant a specialist direct access to its supervising Chief", () => fixture(async f => {
+  f.plan[f.lead.id] = {
+    steps: [{ expectError: true, arguments: { bot_ids: [f.chief.id], request_key: "supervisor", message: "Contact the Chief without a shared room" } }],
+    reply: "The direct request was refused",
+  };
+  f.save();
+  await f.cli("send", "--bot", f.lead.id, "--task", f.lead.activeTaskId, "--text", "Check the direct peer boundary");
+  expect((await f.cli("wait", "--bot", f.lead.id, "--task", f.lead.activeTaskId, "--timeout", "30")).status).toBe("settled");
+  expect(f.nodes()).toEqual([]);
+  const response = f.evidence().find((turn: any) => turn.botId === f.lead.id).evidence.find((entry: any) => entry.step).response;
+  expect(response.result.isError).toBe(true);
+  expect(response.result.content[0].text).toContain("sender's section boundary");
+  expect((await f.api("/api/bots")).groups).toEqual([]);
+}), 45_000);
+
 it("coordinates a lead and its specialist from ordinary chat, returns to Clive, and leaves unrelated tasks untouched", () => fixture(async f => {
   const originalLead = await f.messages(f.lead.activeTaskId);
   const originalSpecialist = await f.messages(f.specialist.activeTaskId);

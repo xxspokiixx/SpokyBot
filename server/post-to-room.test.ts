@@ -570,9 +570,9 @@ describe("post_to_room", () => {
     expect(await messagesOf(mixed.threadId)).toHaveLength(0);
   }, 40_000);
 
-  it("allows a section bot to post to and list a room holding its supervising coordinator", async () => {
+  it.each(["Coordinators", ""])("allows a section bot to post to and list a room holding its supervising coordinator in section %j", async (section) => {
     const member = await makeBot("Build Member", "Build");
-    const coordinator = await makeCoordinator("Build Chief", "Coordinators", ["Build"]);
+    const coordinator = await makeCoordinator("Build Chief", section, ["Build"]);
     const room = await makeRoom("Build Room", [member.id, coordinator.id], "Build");
 
     const listed = await internal("GET", `/api/internal/rooms?fromBotId=${member.id}&fromThreadId=${member.threadId}`);
