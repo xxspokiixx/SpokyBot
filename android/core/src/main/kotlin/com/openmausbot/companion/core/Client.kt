@@ -53,6 +53,11 @@ class PairingRouteError(val attemptedRoutes: List<String>) : IOException(
         "(${attemptedRoutes.joinToString()}). Keep Phone access turned on in OpenMausBot, then try again.",
 )
 
+/** Keep the same code and request id after an uncertain server redemption. */
+class ServerPairingRetryError(cause: IOException) : IOException(
+    "Could not finish connecting to the server. Try again with the same code.", cause,
+)
+
 internal const val SCOPED_IPV6_HTTP_HOST = "scoped-ipv6.openmausbot.invalid"
 
 /**
@@ -124,6 +129,8 @@ class CompanionClient(
     private val endpoint = connection.httpEndpoint(baseClient.dns)
 
     private val actionClient = baseClient.newBuilder()
+        .followRedirects(baseClient.followRedirects && !connection.pairedWithServer)
+        .followSslRedirects(baseClient.followSslRedirects && !connection.pairedWithServer)
         .dns(endpoint?.dns ?: baseClient.dns)
         .callTimeout(ACTION_TIMEOUT_SECONDS, TimeUnit.SECONDS)
         .connectTimeout(ACTION_TIMEOUT_SECONDS, TimeUnit.SECONDS)
@@ -137,6 +144,8 @@ class CompanionClient(
      * Connect/read/write idle limits, no overall call deadline.
      */
     private val uploadClient = baseClient.newBuilder()
+        .followRedirects(baseClient.followRedirects && !connection.pairedWithServer)
+        .followSslRedirects(baseClient.followSslRedirects && !connection.pairedWithServer)
         .dns(endpoint?.dns ?: baseClient.dns)
         .callTimeout(0, TimeUnit.MILLISECONDS)
         .connectTimeout(ACTION_TIMEOUT_SECONDS, TimeUnit.SECONDS)
@@ -145,6 +154,8 @@ class CompanionClient(
         .build()
 
     private val streamingClient = baseClient.newBuilder()
+        .followRedirects(baseClient.followRedirects && !connection.pairedWithServer)
+        .followSslRedirects(baseClient.followSslRedirects && !connection.pairedWithServer)
         .dns(endpoint?.dns ?: baseClient.dns)
         .callTimeout(0, TimeUnit.MILLISECONDS)
         .connectTimeout(ACTION_TIMEOUT_SECONDS, TimeUnit.SECONDS)
@@ -153,12 +164,23 @@ class CompanionClient(
         .build()
 
     private val avatarGenerationClient = baseClient.newBuilder()
+        .followRedirects(baseClient.followRedirects && !connection.pairedWithServer)
+        .followSslRedirects(baseClient.followSslRedirects && !connection.pairedWithServer)
         .dns(endpoint?.dns ?: baseClient.dns)
         .callTimeout(AVATAR_GENERATION_TIMEOUT_SECONDS, TimeUnit.SECONDS)
         .connectTimeout(AVATAR_GENERATION_TIMEOUT_SECONDS, TimeUnit.SECONDS)
         .readTimeout(AVATAR_GENERATION_TIMEOUT_SECONDS, TimeUnit.SECONDS)
         .writeTimeout(AVATAR_GENERATION_TIMEOUT_SECONDS, TimeUnit.SECONDS)
         .build()
+
+    /** Read identity without sending the saved bearer to a potentially replaced server. */
+    suspend fun environment(): ServerEnvironment {
+        val publicClient = CompanionClient(connection, null, actionClient)
+        return publicClient.send(
+            publicClient.makeRequest("GET", "/.well-known/openmausbot/environment"),
+            publicClient.actionClient.newBuilder().followRedirects(false).followSslRedirects(false).build(),
+        )
+    }
 
     suspend fun health(): JsonObject = send(makeRequest("GET", "/api/health"))
 
@@ -729,7 +751,20 @@ class CompanionClient(
         }
     }
 
+    /** Every authenticated action, including shares to inactive saved servers, checks identity. */
     private suspend fun perform(
+        request: Request,
+        requestClient: OkHttpClient = actionClient,
+    ): RawResponse {
+        if (token != null && connection.serverEnvironmentId != null &&
+            environment().environmentId != connection.serverEnvironmentId
+        ) {
+            throw APIError.Status(401, "This address belongs to a different server. Pair again to continue.")
+        }
+        return performUnchecked(request, requestClient)
+    }
+
+    private suspend fun performUnchecked(
         request: Request,
         requestClient: OkHttpClient = actionClient,
     ): RawResponse = suspendCancellableCoroutine { continuation ->
@@ -932,6 +967,29 @@ class CompanionClient(
             put("durationMinutes", input.durationMinutes)
             if (input.timeoutMinutes != null) put("timeoutMinutes", input.timeoutMinutes)
             else if (input.clearTimeout) put("timeoutMinutes", JsonNull)
+        }
+
+        suspend fun pairWithServer(
+            connection: Connection,
+            code: String,
+            label: String,
+            attemptId: String,
+            client: OkHttpClient = OkHttpClient(),
+        ): ServerPairResponse {
+            val companion = CompanionClient(connection, token = null, baseClient = client)
+            val pairClient = client.newBuilder()
+                .dns(companion.endpoint?.dns ?: client.dns)
+                .followRedirects(false)
+                .followSslRedirects(false)
+                .callTimeout(PAIR_TIMEOUT_SECONDS, TimeUnit.SECONDS)
+                .connectTimeout(PAIR_TIMEOUT_SECONDS, TimeUnit.SECONDS)
+                .readTimeout(PAIR_TIMEOUT_SECONDS, TimeUnit.SECONDS)
+                .writeTimeout(PAIR_TIMEOUT_SECONDS, TimeUnit.SECONDS)
+                .build()
+            return companion.send(companion.makeRequest(
+                "POST", "/api/auth/pair",
+                body = jsonBody("code" to code, "label" to label, "attemptId" to attemptId),
+            ), pairClient)
         }
 
         suspend fun pair(
