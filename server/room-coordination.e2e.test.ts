@@ -4,6 +4,7 @@ import { expect, it } from "vitest";
 import { launchVerificationServer, runControlOmb } from "../scripts/control-omb.ts";
 import { handleToolCall, request } from "../scripts/mcp-server.ts";
 
+/** Exercise the real coordination proxy in disposable rooms with a scripted provider. */
 async function withRooms(test: (f: any) => Promise<void>) {
   const session = await launchVerificationServer(process.env, undefined, undefined, undefined, undefined, { scripted: true });
   const env = { OPENMAUSBOT_URL: session.info.url };
@@ -33,6 +34,7 @@ async function withRooms(test: (f: any) => Promise<void>) {
   } finally { await session.close(); }
 }
 
+/** Grant a Chief supervision of team A and seat it beside both fixture peers. */
 async function addSupervisingChief(f: any, section = "") {
   const chief = (await f.cli("new-bot", "--name", "Supervisor")).bot;
   await f.api(`/api/bots/${chief.id}`, { section, chiefOfStaff: true, managedSections: ["A"], acknowledgePeerScope: true }, "PATCH");
