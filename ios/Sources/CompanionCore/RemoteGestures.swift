@@ -192,9 +192,36 @@ public struct GestureCore: Sendable {
     /// never waits for the network, which is what hides the round trip.
     public private(set) var cursor = RemotePoint(x: 0.5, y: 0.5)
 
+    /// The take/release gate.
+    ///
+    /// False means watching, and no touch may reach the remote: scrolling to
+    /// read a page must not become a click on it. Off by default, so a caller
+    /// that forgets to set it fails safe instead of handing control away.
+    public var driving = false
+
     public init(mode: GestureMode, mapping: ViewportMapping) {
         self.mode = mode
         self.mapping = mapping
+    }
+
+    /// Release everything held and abandon momentum.
+    ///
+    /// Called on explicit release, on backgrounding and on connection loss.
+    /// A button left down on the remote outlives the session otherwise, and
+    /// nothing on the far side will ever lift it.
+    public mutating func flush() -> [GestureIntent] {
+        momentumX = 0
+        momentumY = 0
+        activeTouch = nil
+        touchStart = nil
+        lastMovePoint = nil
+        longPressArmed = false
+        longPressFired = false
+        scrolled = false
+        guard dragging, let button = heldButton else { return [] }
+        dragging = false
+        heldButton = nil
+        return [.release(button: button)]
     }
 
     /// The contract acceleration curve. Continuous at the knee and capped, so
@@ -205,6 +232,7 @@ public struct GestureCore: Sendable {
     }
 
     public mutating func handle(_ sample: TouchSample) -> [GestureIntent] {
+        guard driving else { return [] }
         guard let point = mapping.remotePoint(
             viewX: sample.x, viewY: sample.y, captured: activeTouch == sample.id
         ) else { return [] }
@@ -350,6 +378,7 @@ public struct GestureCore: Sendable {
     /// when someone tells it time moved. The cost is one call per frame; the
     /// return is that a half-second gesture is testable in microseconds.
     public mutating func tick(at t: Double) -> [GestureIntent] {
+        guard driving else { return [] }
         if longPressArmed, !longPressFired, activeTouch != nil, let start = touchStart,
            t - touchStartTime >= GestureConstants.longPress {
             longPressArmed = false

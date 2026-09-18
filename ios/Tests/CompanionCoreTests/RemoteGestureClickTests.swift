@@ -5,11 +5,13 @@ final class RemoteGestureClickTests: XCTestCase {
     /// A 1:1 view and frame, so a view point divided by 1280 is its own
     /// normalised coordinate and the expectations stay readable.
     private func core() -> GestureCore {
-        GestureCore(mode: .direct, mapping: ViewportMapping(
+        var core = GestureCore(mode: .direct, mapping: ViewportMapping(
             viewWidth: 1280, viewHeight: 720,
             frameWidth: 1280, frameHeight: 720,
             transform: .identity
         ))
+        core.driving = true
+        return core
     }
 
     private func press(in intents: [GestureIntent]) -> GestureIntent? {

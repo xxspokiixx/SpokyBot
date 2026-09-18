@@ -3,11 +3,13 @@ import XCTest
 
 final class RemoteGestureLongPressTests: XCTestCase {
     private func core() -> GestureCore {
-        GestureCore(mode: .direct, mapping: ViewportMapping(
+        var core = GestureCore(mode: .direct, mapping: ViewportMapping(
             viewWidth: 1280, viewHeight: 720,
             frameWidth: 1280, frameHeight: 720,
             transform: .identity
         ))
+        core.driving = true
+        return core
     }
 
     /// The core has no clock, so a hold is only observable when the view's

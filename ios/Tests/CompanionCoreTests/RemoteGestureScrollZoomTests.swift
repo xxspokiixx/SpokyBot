@@ -3,11 +3,13 @@ import XCTest
 
 final class RemoteGestureScrollZoomTests: XCTestCase {
     private func core(_ mode: GestureMode) -> GestureCore {
-        GestureCore(mode: mode, mapping: ViewportMapping(
+        var core = GestureCore(mode: mode, mapping: ViewportMapping(
             viewWidth: 1000, viewHeight: 1000,
             frameWidth: 1000, frameHeight: 1000,
             transform: .identity
         ))
+        core.driving = true
+        return core
     }
 
     /// Direct mode is a touchscreen: the page moves with the finger, so

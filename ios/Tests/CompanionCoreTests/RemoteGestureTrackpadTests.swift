@@ -5,11 +5,13 @@ final class RemoteGestureTrackpadTests: XCTestCase {
     /// A square 1000x1000 view over a square frame, so a view point divided
     /// by 1000 is its own normalised coordinate.
     private func core() -> GestureCore {
-        GestureCore(mode: .trackpad, mapping: ViewportMapping(
+        var core = GestureCore(mode: .trackpad, mapping: ViewportMapping(
             viewWidth: 1000, viewHeight: 1000,
             frameWidth: 1000, frameHeight: 1000,
             transform: .identity
         ))
+        core.driving = true
+        return core
     }
 
     func testCursorStartsCentred() {
