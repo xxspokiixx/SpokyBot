@@ -169,6 +169,11 @@ public struct GestureCore: Sendable {
     private var lastClickPoint: RemotePoint?
     private var activeTouch: Int?
     private var touchStart: RemotePoint?
+    private var touchStartTime: Double = 0
+    private var longPressArmed = false
+    private var longPressFired = false
+    private var dragging = false
+    private var heldButton: RemoteButton?
 
     public init(mode: GestureMode, mapping: ViewportMapping) {
         self.mode = mode
@@ -184,16 +189,45 @@ public struct GestureCore: Sendable {
         case .began:
             activeTouch = sample.id
             touchStart = point
+            touchStartTime = sample.t
+            longPressArmed = true
+            longPressFired = false
+            dragging = false
             return []
 
         case .moved:
-            return []
+            guard activeTouch == sample.id, let start = touchStart else { return [] }
+            let travelled = max(abs(point.x - start.x), abs(point.y - start.y))
+            if longPressArmed, travelled > GestureConstants.longPressSlop { longPressArmed = false }
+            guard longPressFired else { return [] }
+
+            // The first move after a long press is what turns it into a drag,
+            // so the button press waits for movement rather than firing on the
+            // hold — a hold alone is a context menu, not a selection.
+            if !dragging, travelled > GestureConstants.dragThreshold {
+                dragging = true
+                heldButton = .left
+                return [.press(button: .left, clicks: 1), .move(x: point.x, y: point.y)]
+            }
+            return dragging ? [.move(x: point.x, y: point.y)] : []
 
         case .ended:
             // A lift belonging to some other finger must not click; only the
             // touch that began the gesture can end it.
             guard activeTouch == sample.id else { return [] }
             activeTouch = nil
+            longPressArmed = false
+            if dragging, let button = heldButton {
+                dragging = false
+                heldButton = nil
+                return [.release(button: button)]
+            }
+            // A fired long press already delivered its right click, so lifting
+            // must add nothing or the touch performs two actions.
+            if longPressFired {
+                longPressFired = false
+                return []
+            }
             let clicks = nextClickCount(at: point, t: sample.t)
             return [
                 .move(x: point.x, y: point.y),
@@ -203,8 +237,31 @@ public struct GestureCore: Sendable {
 
         case .cancelled:
             activeTouch = nil
-            return []
+            longPressArmed = false
+            longPressFired = false
+            guard dragging, let button = heldButton else { return [] }
+            dragging = false
+            heldButton = nil
+            return [.release(button: button)]
         }
+    }
+
+    /// Driven by the view's frame callback.
+    ///
+    /// The core cannot ask what time it is, so a hold only becomes observable
+    /// when someone tells it time moved. The cost is one call per frame; the
+    /// return is that a half-second gesture is testable in microseconds.
+    public mutating func tick(at t: Double) -> [GestureIntent] {
+        guard longPressArmed, !longPressFired, activeTouch != nil, let start = touchStart,
+              t - touchStartTime >= GestureConstants.longPress else { return [] }
+
+        longPressArmed = false
+        longPressFired = true
+        return [
+            .move(x: start.x, y: start.y),
+            .press(button: .right, clicks: 1),
+            .release(button: .right),
+        ]
     }
 
     /// A sequence continues only while both the gap and the distance stay
