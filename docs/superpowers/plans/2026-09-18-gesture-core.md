@@ -1440,26 +1440,43 @@ Expected: FAIL — the resource is not on the classpath.
 
 - [ ] **Step 3: Write minimal implementation**
 
-Add the copy task to `android/core/build.gradle.kts`:
+**No Gradle copy task is needed — this plan was wrong about that.**
+`android/core/build.gradle.kts` already points the test source set straight at
+the iOS fixtures directory:
 
 ```kotlin
-val copyGestureParityFixture by tasks.registering(Copy::class) {
-    // One fixture, two platforms. Copied rather than duplicated so a case
-    // added on either side is immediately binding on the other.
-    from(rootProject.file("../ios/Tests/CompanionCoreTests/Fixtures/gesture-parity.json"))
-    into(layout.buildDirectory.dir("resources/test"))
+sourceSets.test {
+    resources.srcDir(rootProject.projectDir.resolve("../ios/Tests/CompanionCoreTests/Fixtures"))
 }
-tasks.named("processTestResources") { dependsOn(copyGestureParityFixture) }
 ```
 
-Add `@Serializable` data classes `ParitySuite`, `ParityCase` and `ParityStep` mirroring Task 7's schema.
+Sharing one fixture directory across both platforms is an existing convention
+in this repo, not something to invent. A file dropped in
+`ios/Tests/CompanionCoreTests/Fixtures/` is on the Kotlin test classpath with
+no build change at all.
+
+Add `@Serializable` data classes `ParitySuite`, `ParityCase`, `ParityStep` and
+`ParityIntent` mirroring Task 7's schema. Decode the expectations structurally
+— one object with exactly one of `move`/`press`/`release`/`scroll`/`text`/`key`
+set — rather than through `GestureIntent`'s polymorphic serializer, which
+would expect a discriminator the iOS coder does not write.
 
 - [ ] **Step 4: Run test to verify it passes**
 
 Run: `cd android && ./gradlew :core:test --tests '*RemoteGestureParityTest*'`
 Expected: PASS, 4 fixture cases — the same four iOS runs.
 
-Then verify parity is real: add a fifth case to the iOS fixture, confirm both suites pick it up, and that deliberately breaking one platform's constant fails only that platform.
+Then verify parity is real by breaking one platform's constant and confirming
+the gate fails. **Do this, do not skip it.** Doing it caught a hole in the
+fixture: the long-press case fed `tick 0.4` then `tick 0.5` and compared only
+the accumulated output, so a 300ms threshold produced exactly the same three
+intents as a 500ms one and the sabotage passed. A duration is only pinned by a
+case that also asserts nothing happens *below* it, which is why the fixture
+carries "direct hold short of the threshold does nothing yet".
+
+The general rule for any case added later: an expectation that accumulates
+across several steps cannot pin a threshold. Pair it with a case that stops
+short.
 
 - [ ] **Step 5: Commit**
 
