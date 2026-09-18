@@ -176,6 +176,14 @@ public struct GestureCore: Sendable {
     private var heldButton: RemoteButton?
     private var lastMovePoint: RemotePoint?
     private var lastMoveTime: Double = 0
+    private var scrolled = false
+    private var momentumX: Double = 0
+    private var momentumY: Double = 0
+
+    /// Local magnification. Never sent to the remote: magnifying the received
+    /// frame reaches a small target without reflowing the page under the
+    /// person, which a remote zoom would do.
+    public private(set) var transform = ViewTransform.identity
 
     /// Where the remote pointer is believed to be, in normalised frame units.
     ///
@@ -208,16 +216,39 @@ public struct GestureCore: Sendable {
             activeTouch = sample.id
             touchStart = point
             touchStartTime = sample.t
+            lastMovePoint = point
+            lastMoveTime = sample.t
             longPressArmed = true
             longPressFired = false
             dragging = false
+            scrolled = false
+            // Touching during a flick stops it, as every scroll view does.
+            momentumX = 0
+            momentumY = 0
             return []
 
         case .moved:
             guard activeTouch == sample.id, let start = touchStart else { return [] }
             let travelled = max(abs(point.x - start.x), abs(point.y - start.y))
             if longPressArmed, travelled > GestureConstants.longPressSlop { longPressArmed = false }
-            guard longPressFired else { return [] }
+
+            // Without a long press first, a one-finger drag is a scroll: the
+            // page moves with the finger, so the deltas are negated.
+            if !longPressFired {
+                guard let previous = lastMovePoint else { return [] }
+                let dx = point.x - previous.x
+                let dy = point.y - previous.y
+                let interval = max(sample.t - lastMoveTime, 0.001)
+                lastMovePoint = point
+                lastMoveTime = sample.t
+                guard dx != 0 || dy != 0 else { return [] }
+                scrolled = true
+                // Velocity expressed as one frame's worth of travel at 60fps,
+                // which is the unit tick() decays.
+                momentumX = -dx / interval * 0.016
+                momentumY = -dy / interval * 0.016
+                return [.scroll(dx: -dx, dy: -dy)]
+            }
 
             // The first move after a long press is what turns it into a drag,
             // so the button press waits for movement rather than firing on the
@@ -241,9 +272,12 @@ public struct GestureCore: Sendable {
                 return [.release(button: button)]
             }
             // A fired long press already delivered its right click, so lifting
-            // must add nothing or the touch performs two actions.
-            if longPressFired {
+            // must add nothing or the touch performs two actions. A scroll is
+            // likewise complete: a flick through a page of links must not
+            // open one on the way out.
+            if longPressFired || scrolled {
                 longPressFired = false
+                scrolled = false
                 return []
             }
             let clicks = nextClickCount(at: point, t: sample.t)
@@ -316,16 +350,79 @@ public struct GestureCore: Sendable {
     /// when someone tells it time moved. The cost is one call per frame; the
     /// return is that a half-second gesture is testable in microseconds.
     public mutating func tick(at t: Double) -> [GestureIntent] {
-        guard longPressArmed, !longPressFired, activeTouch != nil, let start = touchStart,
-              t - touchStartTime >= GestureConstants.longPress else { return [] }
+        if longPressArmed, !longPressFired, activeTouch != nil, let start = touchStart,
+           t - touchStartTime >= GestureConstants.longPress {
+            longPressArmed = false
+            longPressFired = true
+            return [
+                .move(x: start.x, y: start.y),
+                .press(button: .right, clicks: 1),
+                .release(button: .right),
+            ]
+        }
 
-        longPressArmed = false
-        longPressFired = true
-        return [
-            .move(x: start.x, y: start.y),
-            .press(button: .right, clicks: 1),
-            .release(button: .right),
-        ]
+        // A flick keeps scrolling after the finger leaves, and stops rather
+        // than trickling deltas the person can no longer see.
+        guard abs(momentumX) > GestureConstants.momentumCutoff
+            || abs(momentumY) > GestureConstants.momentumCutoff else {
+            momentumX = 0
+            momentumY = 0
+            return []
+        }
+        let carried = GestureIntent.scroll(dx: momentumX, dy: momentumY)
+        momentumX *= GestureConstants.momentumDecay
+        momentumY *= GestureConstants.momentumDecay
+        return [carried]
+    }
+
+    /// Zoom about a view point, keeping whatever is under it in place.
+    ///
+    /// The offset correction is what stops the target sliding out from under
+    /// the fingers, which is the difference between zoom that helps reach a
+    /// small control and zoom that makes it harder.
+    public mutating func pinch(scale: Double, centreX: Double, centreY: Double) {
+        guard scale.isFinite, scale > 0 else { return }
+        let next = min(max(transform.scale * scale, GestureConstants.minZoom), GestureConstants.maxZoom)
+        guard let anchor = mapping.remotePoint(viewX: centreX, viewY: centreY, captured: true) else {
+            transform.scale = next
+            clampPan()
+            syncMapping()
+            return
+        }
+
+        let localX = (anchor.x - transform.offsetX) * transform.scale
+        let localY = (anchor.y - transform.offsetY) * transform.scale
+        transform.scale = next
+        transform.offsetX = anchor.x - localX / next
+        transform.offsetY = anchor.y - localY / next
+        clampPan()
+        syncMapping()
+    }
+
+    /// Pan by a view-space delta in points.
+    public mutating func pan(dx: Double, dy: Double) {
+        guard dx.isFinite, dy.isFinite,
+              mapping.viewWidth > 0, mapping.viewHeight > 0 else { return }
+        transform.offsetX -= dx / (mapping.viewWidth * transform.scale)
+        transform.offsetY -= dy / (mapping.viewHeight * transform.scale)
+        clampPan()
+        syncMapping()
+    }
+
+    /// The visible window is `1 / scale` wide, so its top-left can never
+    /// exceed what is left over. At scale 1 that leaves only zero.
+    private mutating func clampPan() {
+        let limit = max(0, 1 - 1 / transform.scale)
+        transform.offsetX = min(max(transform.offsetX, 0), limit)
+        transform.offsetY = min(max(transform.offsetY, 0), limit)
+    }
+
+    private mutating func syncMapping() {
+        mapping = ViewportMapping(
+            viewWidth: mapping.viewWidth, viewHeight: mapping.viewHeight,
+            frameWidth: mapping.frameWidth, frameHeight: mapping.frameHeight,
+            transform: transform
+        )
     }
 
     /// A sequence continues only while both the gap and the distance stay

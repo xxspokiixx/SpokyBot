@@ -1041,6 +1041,13 @@ git commit -m "feat(ios): driving gate and held-input flush"
 - Create: `ios/Tests/CompanionCoreTests/Fixtures/gesture-parity.json`
 - Create: `ios/Tests/CompanionCoreTests/RemoteGestureParityTests.swift`
 
+**Learned during Task 5, binding on this task:** intents must be compared
+with a tolerance, never with `==`. Normalising a coordinate through a division
+yields `-0.09999999999999998` and a signed `-0.0`, both of which fail exact
+equality against the obvious literal. Swift and Kotlin will not round
+identically either, so the parity runner on both platforms compares numbers
+within `0.0001` and compares only the case and button by identity.
+
 **Interfaces:**
 - Consumes: the whole `GestureCore`.
 - Produces: `gesture-parity.json`, whose schema Task 12 reads from Kotlin. Schema: `{"cases":[{"name":String,"mode":"direct"|"trackpad","view":[w,h],"frame":[w,h],"driving":Bool,"steps":[{"touch":{...}}|{"tick":Double}],"expect":[Intent]}]}` where an `Intent` is `{"move":{"x":,"y":}}`, `{"press":{"button":,"clicks":}}`, `{"release":{"button":}}` or `{"scroll":{"dx":,"dy":}}`.

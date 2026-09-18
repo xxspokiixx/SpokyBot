@@ -37,6 +37,8 @@ final class RemoteGestureLongPressTests: XCTestCase {
         XCTAssertEqual(core.tick(at: 1.5), [])
     }
 
+    /// The move that cancels the hold is itself a scroll, so it seeds
+    /// momentum. What must not happen is the right click.
     func testMovingBeyondTheSlopCancelsThePendingLongPress() {
         var core = core()
 
@@ -44,7 +46,11 @@ final class RemoteGestureLongPressTests: XCTestCase {
         // The slop is 0.015 normalised, which is 19.2 points across 1280.
         _ = core.handle(TouchSample(id: 1, phase: .moved, x: 680, y: 360, t: 0.1))
 
-        XCTAssertEqual(core.tick(at: 0.6), [])
+        let afterTheThreshold = core.tick(at: 0.6)
+        XCTAssertFalse(
+            afterTheThreshold.contains { if case .press = $0 { return true } else { return false } },
+            "a cancelled hold must never click"
+        )
     }
 
     /// Once the long press has fired, keeping the finger down and dragging is
