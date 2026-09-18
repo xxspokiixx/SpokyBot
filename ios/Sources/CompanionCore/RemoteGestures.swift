@@ -71,6 +71,63 @@ public enum GestureIntent: Sendable, Equatable {
     case key(name: String, modifiers: Int)
 }
 
+/// Written by hand rather than synthesised.
+///
+/// Swift's default enum coding nests payloads under `_0`, which no Kotlin
+/// decoder would read. The parity fixture has to be one file both platforms
+/// understand, so the wire shape is stated explicitly here and mirrored in
+/// android/core: `{"move":{"x":…,"y":…}}` and its siblings.
+extension GestureIntent: Codable {
+    private enum Key: String, CodingKey {
+        case move, press, release, scroll, text, key
+    }
+
+    private struct Point: Codable { let x: Double; let y: Double }
+    private struct Delta: Codable { let dx: Double; let dy: Double }
+    private struct Press: Codable { let button: RemoteButton; let clicks: Int }
+    private struct Release: Codable { let button: RemoteButton }
+    private struct Key2: Codable { let name: String; let modifiers: Int }
+
+    public init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: Key.self)
+        if let value = try container.decodeIfPresent(Point.self, forKey: .move) {
+            self = .move(x: value.x, y: value.y)
+        } else if let value = try container.decodeIfPresent(Press.self, forKey: .press) {
+            self = .press(button: value.button, clicks: value.clicks)
+        } else if let value = try container.decodeIfPresent(Release.self, forKey: .release) {
+            self = .release(button: value.button)
+        } else if let value = try container.decodeIfPresent(Delta.self, forKey: .scroll) {
+            self = .scroll(dx: value.dx, dy: value.dy)
+        } else if let value = try container.decodeIfPresent(String.self, forKey: .text) {
+            self = .text(value)
+        } else if let value = try container.decodeIfPresent(Key2.self, forKey: .key) {
+            self = .key(name: value.name, modifiers: value.modifiers)
+        } else {
+            throw DecodingError.dataCorruptedError(
+                forKey: .move, in: container, debugDescription: "no known intent key"
+            )
+        }
+    }
+
+    public func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: Key.self)
+        switch self {
+        case let .move(x, y):
+            try container.encode(Point(x: x, y: y), forKey: .move)
+        case let .press(button, clicks):
+            try container.encode(Press(button: button, clicks: clicks), forKey: .press)
+        case let .release(button):
+            try container.encode(Release(button: button), forKey: .release)
+        case let .scroll(dx, dy):
+            try container.encode(Delta(dx: dx, dy: dy), forKey: .scroll)
+        case let .text(value):
+            try container.encode(value, forKey: .text)
+        case let .key(name, modifiers):
+            try container.encode(Key2(name: name, modifiers: modifiers), forKey: .key)
+        }
+    }
+}
+
 public enum GestureMode: String, Sendable, Codable {
     case direct, trackpad
 }
