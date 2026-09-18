@@ -174,16 +174,34 @@ public struct GestureCore: Sendable {
     private var longPressFired = false
     private var dragging = false
     private var heldButton: RemoteButton?
+    private var lastMovePoint: RemotePoint?
+    private var lastMoveTime: Double = 0
+
+    /// Where the remote pointer is believed to be, in normalised frame units.
+    ///
+    /// Trackpad mode owns this; direct mode leaves it alone, because there the
+    /// finger *is* the pointer. The view draws it locally at frame rate and
+    /// never waits for the network, which is what hides the round trip.
+    public private(set) var cursor = RemotePoint(x: 0.5, y: 0.5)
 
     public init(mode: GestureMode, mapping: ViewportMapping) {
         self.mode = mode
         self.mapping = mapping
     }
 
+    /// The contract acceleration curve. Continuous at the knee and capped, so
+    /// a fast flick cannot throw the cursor somewhere unrecoverable.
+    static func gain(forSpeed speed: Double) -> Double {
+        guard speed.isFinite, speed > 0.35 else { return 1.0 }
+        return min(3.0, 1.0 + (speed - 0.35) * 2.5)
+    }
+
     public mutating func handle(_ sample: TouchSample) -> [GestureIntent] {
         guard let point = mapping.remotePoint(
             viewX: sample.x, viewY: sample.y, captured: activeTouch == sample.id
         ) else { return [] }
+
+        if mode == .trackpad { return handleTrackpad(sample, point: point) }
 
         switch sample.phase {
         case .began:
@@ -243,6 +261,52 @@ public struct GestureCore: Sendable {
             dragging = false
             heldButton = nil
             return [.release(button: button)]
+        }
+    }
+
+    /// Trackpad mode: the finger is a rate control for a cursor the core
+    /// owns, not a position. Where the finger is at any moment is irrelevant;
+    /// only how far it moved since the last sample matters.
+    private mutating func handleTrackpad(_ sample: TouchSample, point: RemotePoint) -> [GestureIntent] {
+        switch sample.phase {
+        case .began:
+            activeTouch = sample.id
+            touchStart = point
+            touchStartTime = sample.t
+            lastMovePoint = point
+            lastMoveTime = sample.t
+            dragging = false
+            return []
+
+        case .moved:
+            guard activeTouch == sample.id, let previous = lastMovePoint else { return [] }
+            let dx = point.x - previous.x
+            let dy = point.y - previous.y
+            // A zero interval would divide speed to infinity; clamping it low
+            // keeps a burst of same-timestamp samples from pinning the gain.
+            let interval = max(sample.t - lastMoveTime, 0.001)
+            let gain = Self.gain(forSpeed: (dx * dx + dy * dy).squareRoot() / interval)
+            lastMovePoint = point
+            lastMoveTime = sample.t
+            cursor = RemotePoint(
+                x: min(max(cursor.x + dx * gain, 0), 1),
+                y: min(max(cursor.y + dy * gain, 0), 1)
+            )
+            return [.move(x: cursor.x, y: cursor.y)]
+
+        case .ended:
+            guard activeTouch == sample.id else { return [] }
+            activeTouch = nil
+            // A drag moved the cursor and is complete; only a touch that
+            // stayed put was a click.
+            let travelled = touchStart.map { max(abs(point.x - $0.x), abs(point.y - $0.y)) } ?? 0
+            guard travelled <= GestureConstants.dragThreshold else { return [] }
+            let clicks = nextClickCount(at: cursor, t: sample.t)
+            return [.press(button: .left, clicks: clicks), .release(button: .left)]
+
+        case .cancelled:
+            activeTouch = nil
+            return []
         }
     }
 
