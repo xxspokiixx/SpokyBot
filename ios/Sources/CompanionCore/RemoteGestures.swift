@@ -153,3 +153,75 @@ public struct ViewportMapping: Sendable, Equatable {
         )
     }
 }
+
+/// The gesture state machine.
+///
+/// Pure by construction: it holds no clock and no transport, so every
+/// behaviour it has is reachable from a test that feeds it samples and reads
+/// the intents back. That is the whole reason it is a value type in the
+/// shared module rather than logic inside a view.
+public struct GestureCore: Sendable {
+    public var mode: GestureMode
+    public var mapping: ViewportMapping
+
+    private var clickCount = 0
+    private var lastClickEnd: Double?
+    private var lastClickPoint: RemotePoint?
+    private var activeTouch: Int?
+    private var touchStart: RemotePoint?
+
+    public init(mode: GestureMode, mapping: ViewportMapping) {
+        self.mode = mode
+        self.mapping = mapping
+    }
+
+    public mutating func handle(_ sample: TouchSample) -> [GestureIntent] {
+        guard let point = mapping.remotePoint(
+            viewX: sample.x, viewY: sample.y, captured: activeTouch == sample.id
+        ) else { return [] }
+
+        switch sample.phase {
+        case .began:
+            activeTouch = sample.id
+            touchStart = point
+            return []
+
+        case .moved:
+            return []
+
+        case .ended:
+            // A lift belonging to some other finger must not click; only the
+            // touch that began the gesture can end it.
+            guard activeTouch == sample.id else { return [] }
+            activeTouch = nil
+            let clicks = nextClickCount(at: point, t: sample.t)
+            return [
+                .move(x: point.x, y: point.y),
+                .press(button: .left, clicks: clicks),
+                .release(button: .left),
+            ]
+
+        case .cancelled:
+            activeTouch = nil
+            return []
+        }
+    }
+
+    /// A sequence continues only while both the gap and the distance stay
+    /// inside the contract, and wraps rather than growing without bound — a
+    /// quadruple click means nothing to a browser.
+    private mutating func nextClickCount(at point: RemotePoint, t: Double) -> Int {
+        let soonEnough = lastClickEnd.map { t - $0 <= GestureConstants.multiClickWindow } ?? false
+        let closeEnough = lastClickPoint.map {
+            abs($0.x - point.x) <= GestureConstants.multiClickSlop
+                && abs($0.y - point.y) <= GestureConstants.multiClickSlop
+        } ?? false
+
+        clickCount = soonEnough && closeEnough && clickCount < GestureConstants.maxClicks
+            ? clickCount + 1
+            : 1
+        lastClickEnd = t
+        lastClickPoint = point
+        return clickCount
+    }
+}
