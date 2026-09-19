@@ -29,6 +29,12 @@ async function main(): Promise<number> {
   const outIndex = args.indexOf("--out");
   const outDir = outIndex === -1 ? DEFAULT_OUT : (args[outIndex + 1] ?? DEFAULT_OUT);
   const all = loadScenarios();
+  const available = new Set(all.map((scenario) => scenario.id));
+  const missing = [...wanted].filter((id) => !available.has(id));
+  if (missing.length > 0) {
+    console.error("unknown scenarios: " + missing.join(", "));
+    return 2;
+  }
   const selected = wanted.size === 0 ? all : all.filter((scenario) => wanted.has(scenario.id));
   if (selected.length === 0) {
     console.error("no scenarios matched " + [...wanted].join(", "));
