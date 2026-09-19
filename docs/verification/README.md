@@ -123,6 +123,9 @@ attachments and message-scoped download authorization using isolated fixtures.
 The [iOS thread checks](ios-threads.md) cover the native thread tree, folder
 search and draft isolation using disposable simulators and an offline fixture.
 
+The [Android stream recovery checks](android-stream-recovery.md) exercise early
+stream closure and fallback through disposable HTTP endpoints.
+
 The [Android thread checks](android-threads.md) cover the Compose thread tree,
 local selection, draft isolation and installable preview APK.
 
