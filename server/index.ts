@@ -641,7 +641,13 @@ function applyDesktopMutationTokenMessage(raw: unknown): boolean {
 const browserCleanup: BrowserCleanupCoordinator = new BrowserCleanupCoordinator({
   file: join(DATA_DIR, "browser-cleanups.json"),
   send: (request) => {
-    const status = browserEngineStatus();
+    // Cleanup may only run the engine OpenMausBot itself configured or
+    // downloaded. A binary the ambient PATH turned up — on a dev machine, a
+    // global wrapper that shadows the harness PATH and rewrites the session
+    // key — is not that engine: a close through it can fail and wedge the
+    // journal on retries. Without a managed engine no daemon could still
+    // autosave the session, so the erase below can acknowledge directly.
+    const status = browserEngineStatus({ managedOnly: true });
     // Guest sessions are throwaway and never saved, so only the bot's own
     // session and shared profile sessions have state to clear.
     const sessions = request.type === "openmausbot:browser-bot-deleted" && request.botId
