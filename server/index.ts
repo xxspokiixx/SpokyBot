@@ -551,6 +551,17 @@ registerEnginesBinDir();
 // still belongs to the person who wrote, and routine or peer turns are
 // told apart before this is consulted.
 const turnTriggers = new Map<string, UsageTrigger>();
+/** Who a user message is from, when that is someone other than the desktop
+ * owner. Loopback is the owner by design, so it stays unstamped and reads as
+ * the profile name; a paired or signed-in session names the person, by
+ * account email where there is one and otherwise by the device label they
+ * chose while pairing. */
+function messageSender(auth: RequestAuth): { name: string } | undefined {
+  if (auth.kind !== "session") return undefined;
+  const name = (auth.session.email ?? auth.session.label ?? "").trim();
+  return name ? { name } : undefined;
+}
+
 function noteTurnTrigger(threadId: string, auth: RequestAuth): void {
   turnTriggers.set(
     threadId,
@@ -5358,7 +5369,7 @@ function drainQueuedSends() {
 
 /** Keep a person's words off the transcript until a direct-thread slot is
  * available. Reuse the existing cancellable, idempotent composer queue. */
-async function startOrQueueDirectMessage(botId: string, threadId: string, text: string, replyTo?: Message, sendId?: string) {
+async function startOrQueueDirectMessage(botId: string, threadId: string, text: string, replyTo?: Message, sendId?: string, sender?: { name: string }) {
   const capacity = botAtThreadCapacity(botId);
   if (capacity || threadBusy(botId, threadId) || parksBehindCoordination(botId, threadId)) {
     const reason = capacity ? "capacity" as const : undefined;
@@ -5370,7 +5381,7 @@ async function startOrQueueDirectMessage(botId: string, threadId: string, text: 
     });
     return { ok: true as const, queued: true as const, queueId: queued.id, threadId, reason };
   }
-  const message = await startTurn(botId, text, { threadId, replyTo, sendId });
+  const message = await startTurn(botId, text, { threadId, replyTo, sendId, sender });
   return { ok: true as const, threadId, message };
 }
 
@@ -5604,6 +5615,8 @@ async function startTurn(
     userMessage?: Message;
     /** Admission must succeed before editing the active transcript branch. */
     editedMessageId?: string;
+    /** The person who sent this, when not the desktop owner. */
+    sender?: { name: string };
     /** Extra transcript ids to omit (every drained queued line, not just the last). */
     excludeMessageIds?: string[];
     /** Routines run in detached tasks; pin the destination for the whole turn. */
@@ -5785,6 +5798,7 @@ async function startTurn(
           replyToId: opts?.replyTo?.id,
           sendId: opts?.sendId,
           peerAsk: opts?.peerAsk,
+          sender: opts?.sender,
         });
   }
   // A card continuation neither starts nor ends the person's ask: it
@@ -7748,8 +7762,9 @@ function serializeRoomContext(
       // a bot's name is quoted on the speaker line, so it gets one line; a
       // user line that came through the API says so, since the reader would
       // otherwise take it for the person typing
+      const person = m.sender?.name ?? userName;
       const speaker = m.role === "user"
-        ? m.via === "api" ? `${userName} (sent through the local API, not typed)` : userName
+        ? m.via === "api" ? `${person} (sent through the local API, not typed)` : person
         : m.from ? peerName(m.from.name) : "Bot";
       const line = `${speaker}: ${transcriptText(rendered, messagesById, userName)}`;
       // A room reply is the room talking. A post_to_room message is another
@@ -8947,6 +8962,8 @@ type StartGroupTurnOptions = {
   /** The message came through the HTTP API with nothing to say a person
    * sent it (see Message.via). */
   via?: "api";
+  /** The person who sent it, when not the desktop owner (see Message.sender). */
+  sender?: { name: string };
 };
 
 function startGroupTurn(
@@ -8991,6 +9008,7 @@ function startGroupTurn(
     channelMode,
     queueId,
     via: options.via,
+    sender: options.sender,
   });
   const titled = group.dm ? null : store.titleGroupTaskFromFirstMessage(group.id, text, threadId);
   const snippet = titled?.title;
@@ -13363,8 +13381,9 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
       const userName = cfg.profile?.name?.trim() || "User";
       const lines: string[] = [`# ${title}`, ""];
       for (const msg of messages) {
+        const sentBy = msg.sender?.name ?? userName;
         const who = msg.role === "user"
-          ? msg.via === "api" ? `${userName} (via the local API)` : userName
+          ? msg.via === "api" ? `${sentBy} (via the local API)` : sentBy
           : (msg.from?.name ?? bot?.name ?? "Bot");
         if (msg.kind === "text" && msg.text) lines.push(`**${who}:**`, "", msg.text, "");
         else if (msg.kind === "activity" && msg.tool) lines.push(`> ${msg.tool.name}`, "");
@@ -13968,7 +13987,7 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
             });
             return { ok: true as const, queued: true as const, queueId: queued.id, threadId };
           }
-          const message = startGroupTurn(current.id, text, replyTo, sendId, channelMode, undefined, { via });
+          const message = startGroupTurn(current.id, text, replyTo, sendId, channelMode, undefined, { via, sender: messageSender(auth) });
           return { ok: true as const, threadId, message };
         },
       );
@@ -15421,13 +15440,14 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
                 replyToId: replyTo?.id,
                 sendId,
                 steered: true,
+                sender: messageSender(auth),
               });
               // Offered to the next turn again unless the person stops this one.
               handoffs.steered(threadId, steerTarget, instance?.instanceId, message.id);
               return { ok: true as const, steered: true as const, threadId, message };
             }
             if (!current.busy) {
-              return startOrQueueDirectMessage(bot.id, threadId, text, replyTo, sendId);
+              return startOrQueueDirectMessage(bot.id, threadId, text, replyTo, sendId, messageSender(auth));
             }
             const queued = queueSteeredMessage(current.id, threadId, text, {
               replyToId: replyTo?.id,
@@ -15436,7 +15456,7 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
             });
             return { ok: true as const, queued: true as const, queueId: queued.id, threadId };
           }
-          return startOrQueueDirectMessage(bot.id, threadId, text, replyTo, sendId);
+          return startOrQueueDirectMessage(bot.id, threadId, text, replyTo, sendId, messageSender(auth));
         },
       );
       return json(res, 202, receipt);
