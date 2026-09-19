@@ -149,6 +149,7 @@ describe("browser takeover gate", () => {
 const FAKE_MCP = `
 const lines = require('node:readline').createInterface({input:process.stdin});
 let initialized = false;
+let rpcTimeoutCalls = 0;
 lines.on('line', line => {
   const m = JSON.parse(line);
   if (m.method === 'notifications/initialized') { initialized = true; return; }
@@ -160,7 +161,7 @@ lines.on('line', line => {
   else if (m.params.name === 'oversized') { process.stdout.write('x'.repeat(16777217)); return; }
   else if (m.params.name === 'bulky') result = { content:[{type:'text',text:'x'.repeat(50000)},{type:'image',data:'AAAA',mimeType:'image/png'}], structuredContent:{ huge: 'y'.repeat(200000) } };
   else if (m.params.name === 'rpc-error') { process.stdout.write(JSON.stringify({jsonrpc:'2.0',id:m.id,error:{code:-1,message:'Expected refusal'}})+'\\n'); return; }
-  else if (m.params.name === 'rpc-timeout') { process.stdout.write(JSON.stringify({jsonrpc:'2.0',id:m.id,error:{code:-1,message:'request timed out'}})+'\\n'); return; }
+  else if (m.params.name === 'rpc-timeout') { rpcTimeoutCalls += 1; if (rpcTimeoutCalls === 1) { process.stdout.write(JSON.stringify({jsonrpc:'2.0',id:m.id,error:{code:-1,message:'request timed out'}})+'\\n'); return; } result = { content:[{type:'text',text:'engine answered a repeat rpc-timeout call'}] }; }
   else result = { content:[{type:'text',text:JSON.stringify(m.params)}],pid:process.pid };
   process.stdout.write(JSON.stringify({jsonrpc:'2.0',id:m.id,result})+'\\n');
 });
@@ -212,6 +213,9 @@ describe("server-owned browser MCP runtime", () => {
     // refusing rather than the plumbing failing; retrying would re-ask the
     // same wedged engine for the whole window.
     const value = runtime();
+    // The fixture times out only the first rpc-timeout call and answers any
+    // repeat distinctly, so a retry would resolve instead of reject: the
+    // rejection below is proof the first timeout stayed the final outcome.
     const failure = value.agentRpc("s", spec(), "tools/call", { name: "rpc-timeout" });
     await expect(failure).rejects.toThrow(/request timed out/);
     await expect(failure).rejects.not.toBeInstanceOf(TransportError);
