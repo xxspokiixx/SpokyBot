@@ -6645,9 +6645,21 @@ async function startTurn(
       ]);
       runningTurnEngines.set(threadId, instance);
       // The prompt carries the soul as saved now. If it changed during setup,
-      // decide again from what is actually sent.
+      // decide again from what is actually sent — except on a continuation
+      // wake inside an automation run, where a delegated result is reviving
+      // its source unattended. That turn runs
+      // as the resume it planned (the new soul reaches the session through
+      // system-prompt refresh), so its record keeps the config of the session
+      // it resumed. The next dispatch then sees that stored config differ
+      // from the soul saved now and gives the source the fresh session and
+      // replay a soul change owes it. Re-deciding here instead would start a
+      // new session whose record already carries the new soul, and the
+      // following wake would resume it — a session started under the old soul
+      // must never survive a soul change by laundering its record. A
+      // person-facing delegated return still re-decides here: that turn is
+      // the one the person watches.
       const dispatchedConfig = sessionConfig(liveBot?.soul ?? bot.soul);
-      if (strictResume && dispatchedConfig !== plannedConfig) dispatchContext = decideContext(dispatchedConfig);
+      if (strictResume && !(opts?.cardContinuation && continuingRoutine) && dispatchedConfig !== plannedConfig) dispatchContext = decideContext(dispatchedConfig);
       // Before sendTurn: an adapter may emit the whole turn before it resolves.
       handoffs.dispatching(threadId, dispatchClaimId, dispatchContext.handoff);
       const dispatch = await guardTurnDispatch(instance.adapter.sendTurn({
