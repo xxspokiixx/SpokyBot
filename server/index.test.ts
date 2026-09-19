@@ -521,10 +521,12 @@ beforeAll(async () => {
   const linkedImage = join(linkedWorkspace, "preview.png");
   const privateAttachments = join(home, ".openmausbot", "attachments");
   const userAttachment = join(privateAttachments, "shared-notes.pdf");
+  const generatedImage = join(privateAttachments, "generated.png");
   mkdirSync(linkedWorkspace, { recursive: true });
   mkdirSync(privateAttachments, { recursive: true, mode: 0o700 });
   writeFileSync(linkedFile, "# Phone-ready report\n");
   writeFileSync(linkedImage, "png preview bytes");
+  writeFileSync(generatedImage, "generated image bytes");
   writeFileSync(userAttachment, "%PDF shared from the phone\n", { mode: 0o600 });
   writeFileSync(
     join(home, ".openmausbot", "messages-test-linked-file-room-thread.json"),
@@ -567,9 +569,24 @@ beforeAll(async () => {
           text: `<attached-file path="${userAttachment}" name="Trip notes.exe" />`,
         },
         {
+          id: "generated-image-message", at: 7.1, role: "bot", kind: "text",
+          parentId: "user-attached-file-message",
+          attachments: [{ kind: "image", path: generatedImage, mime: "image/png" }],
+        },
+        {
+          id: "outside-generated-image-message", at: 7.2, role: "bot", kind: "text",
+          parentId: "generated-image-message",
+          attachments: [{ kind: "image", path: linkedImage, mime: "image/png" }],
+        },
+        {
+          id: "not-image-attachment-message", at: 7.3, role: "bot", kind: "text",
+          parentId: "outside-generated-image-message",
+          attachments: [{ kind: "image", path: userAttachment, mime: "image/png" }],
+        },
+        {
           id: "user-outside-file-message",
           at: 8,
-          parentId: "user-attached-file-message",
+          parentId: "not-image-attachment-message",
           role: "user",
           kind: "text",
           text: `<attached-file path="${linkedFile}" />`,
@@ -9800,6 +9817,25 @@ describe("message pages", () => {
       headers: { "content-type": "application/json" },
       body: JSON.stringify({ path: linkedFile }),
     })).status).toBe(404);
+  });
+
+  it("downloads a structured generated image from an image-only reply", async () => {
+    const image = join(home, ".openmausbot", "attachments", "generated.png");
+    const response = await fetch(`${BASE}/api/threads/test-linked-file-room-thread/messages/generated-image-message/file`, {
+      method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ path: image }),
+    });
+    expect(response.status).toBe(200);
+    expect(response.headers.get("content-type")).toBe("image/png");
+    expect(await response.text()).toBe("generated image bytes");
+  });
+
+  it("confines structured generated images to their message and private image files", async () => {
+    const image = join(home, ".openmausbot", "attachments", "generated.png");
+    const route = (id: string) => `/api/threads/test-linked-file-room-thread/messages/${id}/file`;
+    expect((await api("POST", route("prose-file-message"), { path: image })).status).toBe(403);
+    expect((await api("POST", route("generated-image-message"), { path: join(home, ".openmausbot", "attachments", "other.png") })).status).toBe(403);
+    expect((await api("POST", route("outside-generated-image-message"), { path: join(home, ".openmausbot", "workspaces", "test-bot-a", "preview.png") })).status).toBe(403);
+    expect((await api("POST", route("not-image-attachment-message"), { path: join(home, ".openmausbot", "attachments", "shared-notes.pdf") })).status).toBe(415);
   });
 
   it("downloads an image rendered by the exact stored bot message", async () => {
