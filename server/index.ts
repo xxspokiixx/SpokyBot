@@ -4605,7 +4605,13 @@ bus.subscribe((event: RuntimeEvent) => {
       lastReply.delete(event.threadId);
       // A run that broke — not one the person stopped, and not a routine's,
       // which reports through its own failure path — is the Chief's to see.
-      if (!event.ok && event.stopReason !== "interrupted" && !routines?.runForThread(event.threadId)) {
+      // A lazy computer-claim rejection already reported its failure and
+      // interrupted the turn; Claude settles that interrupt as
+      // exit_before_result, not "interrupted", so this generation's marker
+      // keeps the same failure from reporting a second incident.
+      const lazyClaimAlreadyReported = event.stopReason === "exit_before_result" &&
+        turnResourceOwners.get(event.threadId)?.lazyClaimFailureReported === true;
+      if (!event.ok && event.stopReason !== "interrupted" && !lazyClaimAlreadyReported && !routines?.runForThread(event.threadId)) {
         const broken = bot ?? (speaker ? store.bot(speaker.botId) : undefined);
         if (broken) reportIncident({ kind: "failed", bot: broken, threadId: event.threadId, detail: event.stopReason?.trim() || "the run ended without a result" });
       }
@@ -5964,7 +5970,7 @@ async function startTurn(
   // in the background — box provisioning can take ~90s and must never
   // hang the HTTP request
   const dispatchClaimId = randomUUID();
-  const resourceOwner = { threadId, generation: dispatchClaimId };
+  const resourceOwner: TurnOwner = { threadId, generation: dispatchClaimId };
   turnResourceOwners.set(threadId, resourceOwner);
   directTurnGenerationByThread.set(threadId, dispatchClaimId);
   if (opts?.coordination) directCoordinationSettlers.set(dispatchClaimId, opts.coordination.settle);
@@ -6182,6 +6188,9 @@ async function startTurn(
         if (opts?.automationSource === undefined && !opts?.commsDepth && !opts?.cardContinuation) {
           notify(buildNotification("turn-failed", bot, threadId, redactSecretsInText(message), { avatarUrl: bot.avatarUrl }));
           reportIncident({ kind: "failed", bot, threadId, detail: message });
+          // Claude settles the interrupt below as exit_before_result; the
+          // completion fold must not report this failure a second time.
+          resourceOwner.lazyClaimFailureReported = true;
         }
         void interruptDirectThread(bot.id, threadId).catch(() => {});
       };

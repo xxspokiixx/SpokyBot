@@ -456,6 +456,8 @@ describe("Group Local VM ownership on the real isolated server", () => {
 
   it("ends the turn with a terminal error after a rejected lazy claim (issues #1361 F1, #1369)", async () => {
     vmState(); rmSync(dumpFile, { force: true }); rmSync(finishFile, { force: true });
+    const { bot: chief } = await api("POST", "/api/bots", { name: "Rejected claim chief" });
+    await api("PATCH", `/api/bots/${chief.id}`, { chiefOfStaff: true });
     const { bot: auto } = await api("POST", "/api/bots", { name: "Rejected claim Auto" });
     try {
       await api("PATCH", `/api/bots/${auto.id}`, { browser: false });
@@ -483,6 +485,19 @@ describe("Group Local VM ownership on the real isolated server", () => {
             String(m.tool?.name ?? "").startsWith("error: computer unavailable — the Local VM could not be claimed for this turn"));
       }, Boolean);
       await idle(auto.id);
+      // One failure, one incident: the rejection was reported where it
+      // happened, and Claude settling the interrupt as exit_before_result
+      // must not file the same broken turn a second time.
+      const incidents = await until(async () => {
+        const state = await api("GET", "/api/bots?messages=0");
+        const thread = state.bots.find((b: any) => b.id === chief.id)?.tasks?.find((t: any) => t.title === "Team incidents");
+        return thread ? (await api("GET", `/api/threads/${thread.threadId}/messages?limit=100`)).messages : null;
+      }, (msgs: any) => Array.isArray(msgs) && msgs.some((m: any) =>
+        m.kind === "activity" && String(m.tool?.name ?? "").startsWith("Incident:")));
+      const chips = incidents.filter((m: any) => m.kind === "activity" && String(m.tool?.name ?? "").startsWith("Incident:"));
+      expect(chips).toHaveLength(1);
+      expect(String(chips[0]?.tool?.name)).toContain("computer unavailable — the Local VM could not be claimed for this turn");
+      expect(chips[0]?.threadRef?.botId).toBe(auto.id);
       // Fail-closed outlives the turn: the teardown revokes the bridge's
       // capability, so a late poll can never fall through to held:false
       // and forward a screen call onto a VM this turn never claimed.
@@ -491,6 +506,8 @@ describe("Group Local VM ownership on the real isolated server", () => {
       writeFileSync(finishFile, "finish");
       await api("POST", `/api/bots/${auto.id}/interrupt`, {}); await idle(auto.id);
       await api("DELETE", `/api/bots/${auto.id}`);
+      await api("POST", `/api/bots/${chief.id}/interrupt`, {}); await idle(chief.id);
+      await api("DELETE", `/api/bots/${chief.id}`);
     }
   });
 
