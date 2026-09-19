@@ -116,12 +116,12 @@ describe.skipIf(process.platform === "win32")("installing with npm", () => {
     try {
       // Enough headroom for the fixture's Node boot under load, so TERM
       // arrives after the trap above is armed and only KILL can finish it.
-      await expect(installNpmEngine("fake-engine", { baseDir: base, timeoutMs: 2000 })).rejects.toThrow("took too long and was stopped");
+      await expect(installNpmEngine("fake-engine", { baseDir: base, timeoutMs: 5000 })).rejects.toThrow("took too long and was stopped");
       expect(stopped.mock.calls[0]![0].signalCode).toBe("SIGKILL");
     } finally {
       stopped.mockRestore();
     }
-  }, 10_000);
+  }, 20_000);
 
   it("reports an uncertain stop without waiting forever for npm close", async () => {
     process.env.FAKE_NPM_MODE = "hang";

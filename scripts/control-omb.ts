@@ -415,6 +415,10 @@ export async function launchVerificationServer(
   writeFileSync(join(dataDir, "config.json"), JSON.stringify({
     ...(boxFixtureApi ? { box: { token: "box_verification_fixture" } } : {}),
     instances: {
+      // A custom instances map replaces the default fleet, and the Box
+      // fixture's computer panel needs the box-native engine in the catalog
+      // to resolve a team computer.
+      ...(boxFixtureApi ? { computer: { driver: "boxAgent" } } : {}),
       ...(extraProviders.includes("codex") ? { codex: {
         driver: "codex", displayName: "Verification Codex", config: { cli: fileURLToPath(new URL("../server/testing/fake-codex-app-server.ts", import.meta.url)) },
       } } : {}),

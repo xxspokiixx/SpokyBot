@@ -146,10 +146,15 @@ type Computer = { id: string; name: string; section: string | null; state: strin
     expect((await api("GET", "/api/bots?messages=10")).bots).toEqual(before);
     expect(JSON.parse(readFileSync(join(fixture.dataDir, "team-computers.json"), "utf8")).computers)
       .toContainEqual(expect.objectContaining({ id: machine.id, section: "Research", name: machine.name }));
+    // Each click must land on a settled view: dispatched mid-transition it
+    // can hit a node the re-render replaces, and the panel never opens.
     await click("Close computers");
+    await expect.poll(snapshot, { timeout: 10_000 }).not.toContain('complementary "Team computers"');
     await click("Open chat with Ben");
+    await expect.poll(snapshot, { timeout: 10_000 }).toContain('log "Conversation with Ben"');
     await click("Bot's computer");
-    await expect.poll(snapshot, { timeout: 10_000 }).toContain("Team default");
+    await expect.poll(snapshot, { timeout: 10_000 }).toContain("Ben's screen");
+    await expect.poll(snapshot, { timeout: 20_000, interval: 250 }).toContain("Team default");
     expect(await snapshot()).toContain("Engineering desktop");
     expect(await snapshot()).not.toContain("Choose Cloud");
     await click("Open Team map");

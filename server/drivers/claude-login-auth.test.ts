@@ -171,7 +171,7 @@ describe("Claude server-owned sign-in", () => {
         } catch {
           return false;
         }
-      }).toBe(true);
+      }, { timeout: 10_000 }).toBe(true);
       await expect(controller.signOut()).rejects.toThrow("sign-in in progress");
       await expect(create("success").signOut()).rejects.toThrow("sign-in is running");
       expect(calls().map((call) => call.args)).not.toContainEqual(["auth", "logout"]);

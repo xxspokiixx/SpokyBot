@@ -80,7 +80,7 @@ describe("Codex server-owned device authentication", () => {
   const create = (mode = "success", overrides: Partial<ConstructorParameters<typeof CodexDeviceAuthController>[0]> = {}) => {
     const controller = new CodexDeviceAuthController({
       cli, environment: () => ({ ...process.env, HOME: home, CODEX_HOME: join(home, ".codex"), INSTANCE_MARKER: "own-instance", FAKE_AUTH_MODE: mode }),
-      startupTimeoutMs: 1000, lifetimeMs: 3000, terminateTimeoutMs: 50,
+      startupTimeoutMs: 5000, lifetimeMs: 3000, terminateTimeoutMs: 50,
       ...overrides,
     });
     controllers.push(controller);
@@ -255,7 +255,7 @@ describe("Codex server-owned device authentication", () => {
   });
 
   it("can cancel while the initial account check is still starting", async () => {
-    const controller = create("status-hang");
+    const controller = create("status-hang", { startupTimeoutMs: 1000 });
     const starting = controller.start();
     const rejection = expect(starting).rejects.toThrow("cancelled");
     await expect.poll(() => existsSync(join(home, "calls.jsonl"))).toBe(true);

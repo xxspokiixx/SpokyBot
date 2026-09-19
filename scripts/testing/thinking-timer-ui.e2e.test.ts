@@ -113,6 +113,14 @@ function elapsedSeconds(text: string): number {
   return -1;
 }
 
+/** Expand a bot's thread list through its DOM chevron. A `--name` click
+ * resolves through the accessibility snapshot, which can briefly list the
+ * chevron twice while the sidebar re-renders after a mutating POST — enough
+ * for control-omb to reject the click as ambiguous. */
+function expandThreads(handle: string, name: string): Promise<Record<string, any>> {
+  return ui("eval", handle, "--js", `document.querySelector('button[aria-label="Expand ${name} threads"]')?.click(); true`);
+}
+
 /** Poll a probe until it returns a truthy value; fail with the last result. */
 async function waitUntil<T>(probe: () => Promise<T>, timeoutMs: number, what: string): Promise<T> {
   const deadline = Date.now() + timeoutMs;
@@ -152,7 +160,7 @@ describe("the thinking timer stays anchored across a thread switch", () => {
     const otherThread = (await api("POST", `/api/bots/${info.botId}/tasks`, {})).task.threadId;
     // A bot's thread list starts collapsed (the sidebar's threadsOpen state
     // defaults false), so expand Pepper's threads before any row is needed.
-    await ui("click", info.ui, "--name", "Expand Pepper threads");
+    await expandThreads(info.ui, "Pepper");
     await waitUntil(() => evaluate(`Boolean(document.querySelector('[data-sidebar-thread-row="${otherThread}"]'))`), 10_000, "the new thread's sidebar row to appear");
 
     // The composer sends; the hang-mode engine accepts the turn and holds it.
@@ -228,7 +236,7 @@ describe("the thinking timer stays anchored across a thread switch", () => {
     const groupId = group.id;
 
     // Both thread lists start collapsed behind their chevrons.
-    await ui("click", info.ui, "--name", "Expand Pepper threads");
+    await expandThreads(info.ui, "Pepper");
     await waitUntil(() => evaluate(`Boolean(document.querySelector('button[aria-label="Expand Timer group threads"]'))`), 10_000, "the group's sidebar row to appear");
     await ui("click", info.ui, "--name", "Expand Timer group threads");
     await waitUntil(() => evaluate(`Boolean(document.querySelector('[data-sidebar-thread-row="${group.threadId}"]'))`), 10_000, "the group's sidebar thread row to appear");

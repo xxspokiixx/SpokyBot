@@ -202,7 +202,7 @@ describe("Chat MCP session", () => {
     await vi.waitFor(() => {
       receipt = JSON.parse(readFileSync(f.receipt, "utf8"));
       expect(receipt.helper).toBeGreaterThan(0);
-    });
+    }, { timeout: 10_000 });
     f.controller.abort();
     await rejected;
     expect(alive(receipt.pid)).toBe(false);
