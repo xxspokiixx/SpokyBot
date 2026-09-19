@@ -505,7 +505,7 @@ it("gives a replacement session an earlier round's result that its rebuild could
   await f.send("Please have Engineering build and then test it.");
   await expect.poll(() => f.nodes().filter((node: any) => node.botId === f.lead.id).map((node: any) => node.status).join(","), { timeout: 30_000 }).toBe("completed,running");
   await expect.poll(() => f.turns().length, { timeout: 10_000 }).toBe(3);
-  expect(count(f.prompt(f.turns()[2]), "ROUND_ONE_RESULT_TOKEN")).toBe(1);
+  await expect.poll(() => count(f.prompt(f.turns()[2]), "ROUND_ONE_RESULT_TOKEN"), { timeout: 10_000 }).toBe(1);
   await expect.poll(() => f.launches(f.lead.id).length, { timeout: 15_000 }).toBe(2);
   for (let i = 0; i < chat; i++) {
     // Teammate work stays outstanding, so wait for this turn's own reply.
