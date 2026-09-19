@@ -29,8 +29,18 @@ type PromptContext = { input: TerminalInput; output: TerminalOutput; signal: Abo
 function displayText(value: string, multiline = false): string {
   const plain = stripVTControlCharacters(value);
   // Provider-supplied labels must not issue terminal control commands.
+  // stripVTControlCharacters glues a trailing BEL onto the escape sequence
+  // before it on some Node versions and leaves it bare on others, so the
+  // fallback below must be version-independent: controls that render no
+  // glyph (BEL, DEL, C1, …) are removed outright — padding them would
+  // counterfeit whitespace — while tab and carriage return collapse to one
+  // space and a newline survives only in multiline mode.
   // eslint-disable-next-line no-control-regex
-  return plain.replace(/[\u0000-\u001f\u007f-\u009f]/g, (character) => character === "\n" && multiline ? "\n" : " ");
+  return plain.replace(/[\u0000-\u001f\u007f-\u009f]/g, (character) => {
+    if (character === "\n") return multiline ? "\n" : " ";
+    if (character === "\t" || character === "\r") return " ";
+    return "";
+  });
 }
 
 /** A line-based fallback with no cursor/color output. Readline has no output
