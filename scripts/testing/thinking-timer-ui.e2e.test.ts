@@ -116,9 +116,17 @@ function elapsedSeconds(text: string): number {
 /** Expand a bot's thread list through its DOM chevron. A `--name` click
  * resolves through the accessibility snapshot, which can briefly list the
  * chevron twice while the sidebar re-renders after a mutating POST — enough
- * for control-omb to reject the click as ambiguous. */
-function expandThreads(handle: string, name: string): Promise<Record<string, any>> {
-  return ui("eval", handle, "--js", `document.querySelector('button[aria-label="Expand ${name} threads"]')?.click(); true`);
+ * for control-omb to reject the click as ambiguous. Wait for exactly one
+ * chevron so a missing (or duplicated) button fails here, with its name,
+ * instead of timing out later on a list that never expanded. */
+async function expandThreads(handle: string, name: string): Promise<Record<string, any>> {
+  const selector = `button[aria-label="Expand ${name} threads"]`;
+  await waitUntil(
+    async () => (await ui("eval", handle, "--js", `document.querySelectorAll('${selector}').length`)).result === 1,
+    10_000,
+    `exactly one ${selector} chevron to render`,
+  );
+  return ui("eval", handle, "--js", `document.querySelector('${selector}')?.click(); true`);
 }
 
 /** Poll a probe until it returns a truthy value; fail with the last result. */
