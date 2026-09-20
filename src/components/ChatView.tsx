@@ -64,6 +64,7 @@ import { SecretRequestCard } from "./SecretRequestCard";
 import { hasRoutineExecutionTask, RoutineRunCard } from "./RoutineRunCard";
 import { AttachmentGallery, collectMessageFiles } from "./AttachmentGallery";
 import { ScreenFrame } from "./ScreenFrame";
+import { CompactionChip, DigestChip } from "./DigestChip";
 import { RenameTitle } from "./RenameTitle";
 import { BotActivityPicker, TaskPicker } from "./TaskPicker";
 import { ModelPicker } from "./ModelPicker";
@@ -773,6 +774,11 @@ const MessagesList = memo(function MessagesList({
               if (!showToolCalls && !m.comm && !m.threadRef) return null;
               return <ActivityChip message={m} place={place} />;
             }
+            case "digest":
+              // the summary of the turn's tool chips: shown under the same setting
+              return showToolCalls ? <DigestChip message={m} /> : null;
+            case "compaction":
+              return <CompactionChip message={m} />;
             case "screen":
               return m.png ? <ScreenFrame png={m.png} mime={m.mime} /> : null;
             default:

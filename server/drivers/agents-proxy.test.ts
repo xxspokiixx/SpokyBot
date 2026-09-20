@@ -8,6 +8,7 @@ import { createServer, type Server } from "node:http";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { afterAll, afterEach, beforeAll, describe, expect, it } from "vitest";
+import { ToolResults } from "../tool-results.ts";
 
 const PROXY = join(dirname(fileURLToPath(import.meta.url)), "agents-proxy.ts");
 const TOKEN = "test-comms-token";
@@ -16,6 +17,10 @@ const TOKEN = "test-comms-token";
 let stub: Server;
 let stubPort = 0;
 let lastAuth: string | undefined;
+const savedToolResults = new ToolResults();
+const savedOwner = { botId: "bot-asker", threadId: "thread-asker" };
+let failSavingResult = false;
+let savedResultWrites = 0;
 let lastAskBody: any = null;
 let lastCoordinateBody: any = null;
 let coordinateResponse: unknown = { ok: true };
@@ -108,6 +113,7 @@ const DEFAULT_SKILL_RESPONSE = { name: "file-expense", action: "create", gist: "
 let skillStageResponse: unknown = DEFAULT_SKILL_RESPONSE;
 
 afterEach(() => {
+  failSavingResult = false;
   routineRequestResponse = DEFAULT_ROUTINE_RESPONSE;
   profileRequestResponse = DEFAULT_PROFILE_RESPONSE;
   teamRequestResponse = DEFAULT_TEAM_RESPONSE;
@@ -156,6 +162,27 @@ beforeAll(async () => {
     if (req.headers.authorization !== `Bearer ${TOKEN}`) {
       res.writeHead(401, { "content-type": "application/json" });
       return res.end(JSON.stringify({ error: "unauthorized" }));
+    }
+    if (req.method === "POST" && req.url === "/api/internal/tool-result") {
+      savedResultWrites++;
+      if (failSavingResult) {
+        res.writeHead(503, { "content-type": "application/json" });
+        return res.end(JSON.stringify({ error: "cache unavailable" }));
+      }
+      let raw = "";
+      req.on("data", chunk => { raw += chunk; });
+      req.on("end", () => {
+        const body = JSON.parse(raw);
+        res.writeHead(201, { "content-type": "application/json" });
+        res.end(JSON.stringify(savedToolResults.save(savedOwner, body.text, body.truncated)));
+      });
+      return;
+    }
+    if (req.method === "GET" && req.url?.startsWith("/api/internal/tool-result?")) {
+      const url = new URL(req.url, "http://fixture");
+      const result = savedToolResults.read(savedOwner, url.searchParams.get("id") ?? "", Number(url.searchParams.get("offset")));
+      res.writeHead(result ? 200 : 404, { "content-type": "application/json" });
+      return res.end(JSON.stringify(result ?? { error: "saved result unavailable" }));
     }
     if (req.method === "GET" && req.url?.startsWith("/api/internal/agents")) {
       res.writeHead(200, { "content-type": "application/json" });
@@ -487,11 +514,48 @@ describe("agents-proxy MCP surface", () => {
     expect(response.result.content[0].text).not.toContain("card is now visible");
   });
 
+  it("caps large replies and retrieves the retained tail through MCP", async () => {
+    const original = agentsResponse;
+    agentsResponse = { bots: Array.from({ length: 80 }, (_, i) => ({ id: `bot-${i}`, name: `Fixture-${i}`, title: "x".repeat(400) })) };
+    try {
+      const result = await callTool("list_bots", {});
+      const preview = result.result.content[0].text;
+      expect(result.result.isError).toBeFalsy();
+      expect(preview.length).toBeLessThan(17_000);
+      const id = /id "(r-[0-9a-f-]{36})"/.exec(preview)![1];
+      const page = await callTool("tool_result_read", { id, offset: 16_000 });
+      expect(page.result.isError).toBeFalsy();
+      expect(page.result.content[0].text).toContain("Fixture-");
+      expect(page.result.content[0].text.length).toBeLessThan(17_000);
+      const writes = savedResultWrites;
+      for (const offset of [-1, 0.5, "0"]) {
+        expect((await callTool("tool_result_read", { id, offset })).result.isError).toBe(true);
+      }
+      expect(savedResultWrites).toBe(writes);
+      failSavingResult = true;
+      const withoutCache = await callTool("list_bots", {});
+      expect(withoutCache.result.isError).toBeFalsy();
+      expect(withoutCache.result.content[0].text).toContain("could not be saved");
+      expect(savedResultWrites).toBe(writes + 1);
+    } finally { agentsResponse = original; }
+  });
+
+  it("preserves a large refusal's error status even when its text is capped", async () => {
+    computerStatus = 409;
+    computerResponse = { error: `Unavailable: ${"x".repeat(30_000)}` };
+    const result = await callTool("select_computer", {});
+    expect(result.result.isError).toBe(true);
+    expect(result.result.content[0].text.length).toBeLessThan(17_000);
+    expect(result.result.content[0].text).toContain("Unavailable:");
+    expect(computerRequests).toHaveLength(1);
+  });
+
   it("answers the MCP handshake and lists the agents tools", async () => {
     const init = await rpc("initialize", { protocolVersion: "2024-11-05" });
     expect(init.result.serverInfo.name).toContain("agents");
     const list = await rpc("tools/list");
     expect(list.result.tools.map((t: { name: string }) => t.name)).toEqual([
+      "tool_result_read",
       "list_shared_computers",
       "shared_computer",
       "list_bots",
@@ -585,6 +649,7 @@ describe("agents-proxy MCP surface", () => {
   it("advertises read annotations only for the reviewed built-in reads", async () => {
     const list = await rpc("tools/list");
     const readNames = [
+      "tool_result_read",
       "list_shared_computers",
       "list_bots", "list_rooms", "check_delegation", "wait_delegation", "list_threads",
       "list_team_setup",
@@ -1351,6 +1416,27 @@ describe("agents-proxy MCP surface", () => {
     expect(lastRoutineRequestBody.routine).not.toHaveProperty("forBotId");
     expect(lastRoutineRequestBody.routine).not.toHaveProperty("for_bot_id");
     expect(res.result.isError).toBeFalsy();
+  });
+
+  it.each(["box", "cloud"])("maps %s execution to the explicit Box runner without changing stored wire values", async (run_on) => {
+    const res = await callTool("propose_routine", {
+      name: "Box check", instructions: "Check explicitly on Box.",
+      schedule: { type: "daily", time: "09:00" }, run_on,
+    });
+    expect(res.result.isError).toBeFalsy();
+    expect(lastRoutineRequestBody.routine.runOn).toBe("cloud");
+    const update = await callTool("propose_routine_action", {
+      action: "update", routine_id: "routine-morning", changes: { run_on, runOn: "cloud" },
+    });
+    expect(update.result.isError).toBeFalsy();
+    expect(lastRoutineRequestBody.changes.runOn).toBe("cloud");
+  });
+
+  it("advertises VPS-compatible default execution separately from the Box runner", async () => {
+    const list = await rpc("tools/list");
+    const routine = list.result.tools.find((entry: { name: string }) => entry.name === "propose_routine");
+    expect(routine.inputSchema.properties.run_on.enum).toEqual(["maus", "box"]);
+    expect(routine.inputSchema.properties.run_on.description).toContain("INCLUDING a self-hosted VPS");
   });
 
   it("preserves execution settings copied from list_routines", async () => {
