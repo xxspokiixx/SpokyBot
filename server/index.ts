@@ -13,6 +13,7 @@ import { z } from "zod";
 import { selectReplay, DEFAULT_REBUILD_BYTES, MAX_SUMMARY_BYTES } from "./context-rebuild.ts";
 import { draftSummary, foldPoint } from "./compaction-summary.ts";
 import { compactBudget, contextWindowFor, shouldCompact } from "./context-budget.ts";
+import { autoCompactWindow } from "./drivers/claude.ts";
 import { SharedComputers, sharedComputerOperation, sharedComputerRegistration } from "./shared-computers.ts";
 import { SharedComputerControl } from "./shared-computer-control.ts";
 import { RoomHandoffs, type RoomHandoff } from "./room-handoffs.ts";
@@ -211,6 +212,7 @@ import { _loadPending, buildDelegationFailurePrompt, buildDelegationRevivalPromp
 import {
   cancelSteeredMessage,
   drainSteeredMessages,
+  hasQueuedSteeredMessages,
   holdSteeredQueue,
   onSteeredQueueChange,
   queuedSteerSnapshot,
@@ -4314,7 +4316,10 @@ async function selectableComputers(bot: BotRecord) {
 function continueComputerSelection(threadId: string, generation: string | undefined, succeeded: boolean): boolean {
   const selection = computerSelectionTurns.get(threadId);
   if (!selection || selection.generation !== generation) return false;
-  if (!succeeded || !selection.selected) { computerSelectionTurns.delete(threadId); return false; }
+  if (!succeeded || !selection.selected || hasQueuedSteeredMessages(selection.botId, threadId)) {
+    computerSelectionTurns.delete(threadId);
+    return false; // Let ordinary settlement drain the person's newer request.
+  }
   const surface = selection.selected;
   setImmediate(() => {
     // Stop, deletion, a new user send, or any replacement generation wins.
@@ -4323,7 +4328,7 @@ function continueComputerSelection(threadId: string, generation: string | undefi
     const bot = store.projectBotForTask(selection.botId, threadId);
     if (!bot || bot.computer === "off" || threadBusy(bot.id, threadId)) return;
     if (store.taskByThread(bot.id, threadId)?.surface !== selection.previousSurface) return;
-    if (queuedThreadPosition(bot.id, threadId) !== null) return;
+    if (hasQueuedSteeredMessages(bot.id, threadId)) { drainQueuedSends(); return; }
     if (store.activePath(threadId).findLast(message => message.role === "user" && message.kind === "text")?.id !== selection.source.id) return;
     store.patchTask(bot.id, threadId, { surface });
     const text = `The computer selection is now ${surfaceLabel(surface)}. Continue the user's original request using the tools mounted for this turn; verify the result before claiming success.\n\n${selection.text}`;
@@ -4920,6 +4925,7 @@ bus.subscribe((event: RuntimeEvent) => {
       }
       const lastReported = turnUsage.get(event.threadId);
       turnUsage.delete(event.threadId);
+      const lastContext = turnContext.get(event.threadId);
       turnContext.delete(event.threadId);
       // group turns run on the room's thread — the speaking bot's task
       // tally is not the right home for a shared room's spend, so only
@@ -4963,8 +4969,6 @@ bus.subscribe((event: RuntimeEvent) => {
         const tokens = event.usage ?? lastReported;
         // the context figure: what the last model call's prompt held, with
         // the window from the driver or, failing that, the model's family
-        const lastContext = turnContext.get(event.threadId);
-        turnContext.delete(event.threadId);
         const contextModel = store.taskByThread(bot.id, event.threadId)?.modelSelection?.model ?? bot.modelSelection.model;
         store.addTaskUsage(bot.id, event.threadId, {
           input: tokens?.input,
@@ -5193,7 +5197,7 @@ function wakeDelegationSource(source: BotRecord, threadId: string, targetName: s
   // delegated reply is already in the thread, so nothing is lost, and the
   // source processes it the moment it is free rather than only on a later
   // user nudge.
-  if (threadBusy(source.id, threadId) || activeGroupTurnForBot(source.id)) {
+  if (threadBusy(source.id, threadId) || botAtThreadCapacity(source.id) || activeGroupTurnForBot(source.id)) {
     pendingDelegationWakes.set(threadId, { botId: source.id, targetName, failureReason, routineRunId });
     return;
   }
@@ -5293,7 +5297,10 @@ function drainDelegationWakes(): void {
       pendingDelegationWakes.delete(threadId);
       continue;
     }
-    if (threadBusy(entry.botId, threadId) || activeGroupTurnForBot(entry.botId)) continue;
+    // Completion can precede asynchronous digest/resource settlement. Keep
+    // the wake parked until a slot is actually free; a rejected async start
+    // could otherwise requeue after the last idle-release drain has run.
+    if (threadBusy(entry.botId, threadId) || botAtThreadCapacity(entry.botId) || activeGroupTurnForBot(entry.botId)) continue;
     pendingDelegationWakes.delete(threadId);
     dispatchDelegationWake(entry.botId, threadId, entry.targetName, entry.failureReason, entry.routineRunId, entry.budgetAcquired);
   }
@@ -5397,8 +5404,12 @@ async function compactConversation(input: {
     floor = measurement.tokens;
     store.patchTask(bot.id, threadId, { contextFloor: floor });
   }
+  // Use the selected account's launch setting. "auto" and "off" supply no
+  // known numeric boundary; other providers do not inherit Claude's limit.
+  const nativeCompactAt = instance.driverKind === "claudeAgent"
+    ? Number(autoCompactWindow({ ...process.env, ...cfg.instances?.[instance.instanceId]?.environment })) : undefined;
   if (!manual && !shouldCompact({ contextTokens: measurement?.tokens, estimatedBytes: bytes,
-    budget: compactBudget(window, cfg.context?.compactAt), floor, window })) return;
+    budget: compactBudget(window, cfg.context?.compactAt, nativeCompactAt), floor, window, nativeCompactAt })) return;
   const fold = manual ? { folded: history, firstKeptId: "" } : foldPoint(history);
   if (!fold) return;
   const foldedThroughId = manual

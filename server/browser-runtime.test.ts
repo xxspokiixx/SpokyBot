@@ -191,16 +191,30 @@ describe("server-owned browser MCP runtime", () => {
   });
   it("does not assume an MCP timeout stopped an accepted daemon action", async () => {
     const value = runtime({ requestTimeoutMs: 60 });
-    await expect(value.agentRpc("s", spec(), "tools/call", { name: "hang" })).rejects.toThrow(/timed out/);
-    // The real daemon detaches from its MCP parent. Transport exit is not
-    // proof that a navigation or submission stopped; do not replay it.
-    await expect(value.agentRpc("s", spec(), "tools/call", { name: "echo" })).rejects.toThrow(/Restart/);
-    await expect(value.take("s", "owner")).rejects.toThrow(/Restart/);
-    await value.restart("s", "owner", async () => {});
-    await expect(value.agentRpc("s", spec(), "tools/call", { name: "echo", arguments: { text: "back" } }))
-      .resolves.toMatchObject({ content: [{ text: expect.stringContaining("back") }] });
-    await value.take("s", "owner");
-    expect(value.canControl("s", "owner")).toBe(true);
+    // Advance only the deliberately hung request's deadline. Real subprocess
+    // startup/stdio remain live, so a loaded runner cannot time out a healthy
+    // recovery echo merely because its 60 ms scheduling window elapsed.
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+    try {
+      await expect(value.agentRpc("s", spec(), "tools/list", {})).resolves.toMatchObject({ initialized: true });
+      const pending = value.agentRpc("s", spec(), "tools/call", { name: "hang" });
+      const observed = expect(pending).rejects.toThrow(/timed out/);
+      await vi.advanceTimersByTimeAsync(60);
+      await observed;
+      // The real daemon detaches from its MCP parent. Transport exit is not
+      // proof that a navigation or submission stopped; do not replay it.
+      await expect(value.agentRpc("s", spec(), "tools/call", { name: "echo" })).rejects.toThrow(/Restart/);
+      await expect(value.take("s", "owner")).rejects.toThrow(/Restart/);
+      await value.restart("s", "owner", async () => {});
+      await expect(value.agentRpc("s", spec(), "tools/call", { name: "echo", arguments: { text: "back" } }))
+        .resolves.toMatchObject({ content: [{ text: expect.stringContaining("back") }] });
+      await value.take("s", "owner");
+      expect(value.canControl("s", "owner")).toBe(true);
+    } finally {
+      // Process-tree cleanup polls real child exits with timers of its own.
+      vi.useRealTimers();
+      await value.closeAll();
+    }
   });
 
   it("still refuses an agent after a human's own interrupted command, browser alive", async () => {
