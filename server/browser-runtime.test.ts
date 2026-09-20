@@ -294,17 +294,27 @@ describe("server-owned browser MCP runtime", () => {
     // Keep the POSIX group shared so an accidental group kill still fails here.
     const fake = `
       const browser = require('node:child_process').spawn(process.execPath,
-        ['-e', 'setInterval(() => {}, 1000)'],
-        { stdio: 'ignore', detached: process.platform === 'win32', windowsHide: true });
+        ['-e', 'process.stdout.write(\"ready\"); setInterval(() => {}, 1000)'],
+        { stdio: ['ignore', 'pipe', 'ignore'], detached: process.platform === 'win32', windowsHide: true });
       browser.unref();
+      let ready = false;
+      let pending = null;
+      const flush = () => {
+        if (!ready || !pending) return;
+        const m = pending; pending = null;
+        const result = m.method === 'initialize' ? { protocolVersion: '2024-11-05' }
+          : { tools: [], browserPid: browser.pid, transportPid: process.pid };
+        process.stdout.write(JSON.stringify({ jsonrpc: '2.0', id: m.id, result }) + '\\n');
+      };
+      browser.stdout.once('data', () => { ready = true; browser.stdout.destroy(); flush(); });
+      browser.stdout.on('error', () => {});
       ${ignoresEof ? "setInterval(() => {}, 1000);" : ""}
       require('node:readline').createInterface({ input: process.stdin }).on('line', line => {
         const m = JSON.parse(line);
         if (!m.id) return;
-        const result = m.method === 'initialize' ? { protocolVersion: '2024-11-05' }
-          : { tools: [], browserPid: browser.pid, transportPid: process.pid };
-        process.stdout.write(JSON.stringify({ jsonrpc: '2.0', id: m.id, result }) + '\\n');
+        pending = m; flush();
       });
+
     `;
     const value = runtime({ idleMs: 40 });
     const launch = { command: process.execPath, args: ["-e", fake], env: {} };
