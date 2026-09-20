@@ -294,7 +294,7 @@ describe("server-owned browser MCP runtime", () => {
     // Keep the POSIX group shared so an accidental group kill still fails here.
     const fake = `
       const browser = require('node:child_process').spawn(process.execPath,
-        ['-e', 'process.stdout.write(\"ready\"); setInterval(() => {}, 1000)'],
+        ['-e', 'process.stdout.write("ready"); setInterval(() => {}, 1000)'],
         { stdio: ['ignore', 'pipe', 'ignore'], detached: process.platform === 'win32', windowsHide: true });
       browser.unref();
       let ready = false;
