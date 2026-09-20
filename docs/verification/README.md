@@ -38,6 +38,8 @@ recipe from sending messages to the user's running app by accident.
 Use only mapped, tested commands:
 
 - [Chat turns](chat-turns.md)
+- [Conversation context compaction](context-compaction.md)
+- [Work summaries and engine hooks](digests.md)
 - [OpenAI-compatible structured tools](openai-tools.md)
 - [OpenCode model variants through ACP](opencode-variants.md)
 - [Bot setup, model scope, and file continuity](bot-continuity.md)
@@ -62,6 +64,7 @@ Use only mapped, tested commands:
 - [Workspaces screen and the fleet agent](workspaces.md)
 - [Hosted workspace sign-in and revocation](hosted-workspaces.md)
 - [Usage ledger](usage-ledger.md)
+- [Bounded built-in tool results](tool-results.md)
 - [Spend cap and sell prices](spend-cap.md)
 
 `control-omb ui` ([Chat UI, driven headlessly](chat-ui.md)) drives the real

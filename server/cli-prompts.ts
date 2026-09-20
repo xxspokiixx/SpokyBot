@@ -36,11 +36,13 @@ function displayText(value: string, multiline = false): string {
   // counterfeit whitespace — while tab and carriage return collapse to one
   // space and a newline survives only in multiline mode.
   // eslint-disable-next-line no-control-regex
-  return plain.replace(/[\u0000-\u001f\u007f-\u009f]/g, (character) => {
+  const withoutControls = plain.replace(/[\u0000-\u001f\u007f-\u009f]/g, (character) => {
     if (character === "\n") return multiline ? "\n" : " ";
     if (character === "\t" || character === "\r") return " ";
     return "";
   });
+  // Log lines must not end in trailing spaces; question prompts keep spacing like "Key: ".
+  return multiline ? withoutControls.replace(/[ \t]+(?=\n|$)/g, "") : withoutControls;
 }
 
 /** A line-based fallback with no cursor/color output. Readline has no output
