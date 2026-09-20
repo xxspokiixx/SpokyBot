@@ -123,6 +123,10 @@ per-thread models, simultaneous direct conversations and thread-scoped Stop.
 The [mobile generated-image checks](mobile-generated-images.md) cover native image
 attachments and message-scoped download authorization using isolated fixtures.
 
+The [guarded external messages fixture](guarded-messages.md) checks atomic
+branch and approval preconditions, retry receipts, and refusal to queue or
+steer messages from external interfaces.
+
 The [iOS thread checks](ios-threads.md) cover the native thread tree, folder
 search and draft isolation using disposable simulators and an offline fixture.
 

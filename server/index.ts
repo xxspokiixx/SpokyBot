@@ -15867,11 +15867,23 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
       });
       return json(res, 200, { message: patched });
     }
-    m = path.match(/^\/api\/bots\/([\w-]+)\/messages$/);
+    m = path.match(/^\/api\/bots\/([\w-]+)\/messages(?:\/(guarded))?$/);
     if (m && method === "POST") {
+      const guarded = m[2] === "guarded";
       const body = await readBody(req);
       if (!body || typeof body !== "object" || Array.isArray(body)) {
         return json(res, 400, { error: "body must be a JSON object" });
+      }
+      // External interfaces must opt into a distinct route: an older server
+      // returns 404 rather than silently ignoring safety preconditions.
+      if (guarded && !z.object({
+        threadId: z.string().regex(/^[\w-]+$/),
+        sendId: z.string().regex(/^[A-Za-z0-9_-]{16,80}$/),
+        text: z.string().min(1),
+        expectedActiveLeafId: z.string().regex(/^[\w-]+$/).nullable(),
+        replyToId: z.string().optional(),
+      }).strict().safeParse(body).success) {
+        return json(res, 400, { error: "guarded sends require threadId, sendId, text and expectedActiveLeafId" });
       }
       const text = String(body.text ?? "").trim();
       if (!text) return json(res, 400, { error: "text required" });
@@ -15885,7 +15897,7 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
       // receipt after a task switch, while a genuinely new send still has to
       // target the task that is active now.
       const threadId = body.threadId ?? bot.threadId;
-      noteTurnTrigger(threadId, auth);
+      if (!guarded) noteTurnTrigger(threadId, auth);
       // The send is acknowledged before the turn starts, so a workspace at its
       // spend limit is refused here, where the person can see it.
       try {
@@ -15933,6 +15945,24 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
           if (!currentAtStart) throw Object.assign(new Error("no such bot"), { status: 404 });
           if (!store.taskByThread(currentAtStart.id, threadId)) {
             throw Object.assign(new Error("the target task no longer exists"), { status: 409 });
+          }
+
+          if (guarded) {
+            // There is no await between these checks and startTurn's
+            // synchronous transcript append / runtime reservation. In
+            // particular, never steer or enqueue under stale permissions.
+            if (approvalModeFor(currentAtStart) !== "ask" || currentAtStart.autoApprove === true || currentAtStart.alwaysAllow?.length) {
+              throw Object.assign(new Error("guarded sends require Ask mode without remembered permissions"), { status: 409, code: "guarded_permissions" });
+            }
+            if (store.activeLeaf(threadId) !== body.expectedActiveLeafId) {
+              throw Object.assign(new Error("the conversation changed before this message could start"), { status: 409, code: "guarded_branch" });
+            }
+            if (currentAtStart.busy || threadBusy(bot.id, threadId) || botAtThreadCapacity(bot.id) || parksBehindCoordination(bot.id, threadId) || activeGroupTurnForBot(bot.id)) {
+              throw Object.assign(new Error("wait for a free thread slot before retrying this message"), { status: 409, code: "guarded_busy" });
+            }
+            noteTurnTrigger(threadId, auth);
+            const message = await startTurn(bot.id, text, { threadId, replyTo, sendId, sender: messageSender(auth) });
+            return { ok: true as const, threadId, message };
           }
 
           // Claude can accept the message inside its live turn. If the write
@@ -16888,7 +16918,7 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
     // child proves it is OURS by echoing its pid (a stray dev server has
     // the same API shape but a different pid)
     if (method === "GET" && path === "/api/health") {
-      return json(res, 200, { app: "openmausbot", pid: process.pid, static: Boolean(STATIC_DIR) });
+      return json(res, 200, { app: "openmausbot", pid: process.pid, static: Boolean(STATIC_DIR), capabilities: { guardedMessages: 1 } });
     }
     // The bots' browser engine: install it on this machine (agent-browser +
     // a Chrome for Testing, a one-time download), or ask how that is going.
@@ -18320,7 +18350,10 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
     return json(res, 404, { error: `no route: ${method} ${path}` });
   } catch (e) {
     const status = (e as any)?.status ?? 500;
-    return json(res, status, { error: e instanceof Error ? e.message : String(e) });
+    const candidateCode = (e as { code?: unknown })?.code;
+    const code = typeof candidateCode === "string" && ["guarded_busy", "guarded_branch", "guarded_permissions"].includes(candidateCode)
+      ? candidateCode : undefined;
+    return json(res, status, { error: e instanceof Error ? e.message : String(e), ...(code ? { code } : {}) });
   } finally {
     releaseWorkspaceRequest?.();
   }
