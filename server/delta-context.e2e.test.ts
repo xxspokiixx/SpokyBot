@@ -51,6 +51,7 @@ async function fixture(test: (f: any) => Promise<void>, options: { env?: NodeJS.
         'try { for (const s of Object.values(JSON.parse(readFileSync(after("--mcp-config"), "utf8")).mcpServers ?? {})) botId = s?.env?.OMB_BOT_ID ?? botId; } catch {}',
         `if (after("--resume") || after("--session-id")) appendFileSync(${JSON.stringify(launchesPath)}, JSON.stringify({ botId, resume: after("--resume"), sessionId: after("--session-id"), mode: process.env.FAKE_CLAUDE_MODE ?? "happy" }) + "\\n");`,
         `else if (argv[0] === "app-server") appendFileSync(${JSON.stringify(codexLaunchesPath)}, JSON.stringify({ botId: process.env.OMB_BOT_ID ?? null }) + "\\n");`,
+        `if (botId) process.env.FAKE_CLAUDE_PROMPTS = ${JSON.stringify(join(dataDir, "consumed-"))} + botId + ".jsonl";`,
         `if (after("--resume") && modes.holdresume) { while (!existsSync(${JSON.stringify(join(dataDir, "resume-hold.gate"))})) await new Promise((r) => setTimeout(r, 20)); }`,
         `await import(${JSON.stringify(pathToFileURL(join(process.cwd(), "server", "testing", fake)).href)});`,
       ].join("\n"), { mode: 0o700 });
@@ -87,6 +88,10 @@ async function fixture(test: (f: any) => Promise<void>, options: { env?: NodeJS.
     const idle = (threadId = thread) => expect.poll(async () => (await api("/api/bots")).bots.find((b: any) => b.id === chief.id)
       .tasks.find((stored: any) => stored.threadId === threadId).busy, { timeout: 30_000 }).toBe(false);
     const launches = (botId = chief.id) => jsonl(launchesPath).filter((launch: any) => launch.botId === botId);
+    // Prompts a bot's engine has actually consumed: a launch record is
+    // written before its engine reads the prompt, so launch counts alone
+    // cannot prove the prompt arrived.
+    const consumed = (botId = chief.id) => jsonl(join(dataDir, `consumed-${botId}.jsonl`)).length;
     const codexLaunches = (botId = chief.id) => jsonl(codexLaunchesPath).filter((launch: any) => launch.botId === botId);
     // The app-server calls of the last Codex launch: thread/resume keeps the
     // native thread's model and effort, thread/start is where they are set.
@@ -120,7 +125,7 @@ async function fixture(test: (f: any) => Promise<void>, options: { env?: NodeJS.
       }, { timeout: 20_000 }).toBe(true);
     };
     await test({ session, dataDir, cli, api, chief, lead, qa, ops, plan, save, send, wait, idle, turns, prompt, messages, nodes, task, handed,
-      launches, codexLaunches, codexCalls, codexModels, selectModel, setMode, delegate, gate, open, thread, useModel, restart });
+      launches, consumed, codexLaunches, codexCalls, codexModels, selectModel, setMode, delegate, gate, open, thread, useModel, restart });
   } finally {
     if (restarted) await waitForExit(restarted, { signal: "SIGTERM" });
     await session.close();
@@ -953,10 +958,12 @@ it("gives a delegate_bot source today's fresh session and replay when its soul c
   // The first reply wakes the source; the second lands while that turn holds.
   const replies = async () => (await f.messages(threadId)).filter((m: any) => /^@(QA|Ops) replied to the delegated task/.test(m.text ?? "")).length;
   await expect.poll(replies, { timeout: 30_000 }).toBe(2);
-  // Replies can both be recorded before the first resume process starts.
-  // Change the soul only once that gated launch has received the old prompt;
+  // Replies can both be recorded before the first resume process starts, and
+  // a launch record is written before its engine reads the prompt. Change
+  // the soul only once that gated launch has consumed the old prompt;
   // otherwise a later resume legitimately reuses the already refreshed session.
   await expect.poll(() => f.launches().length, { timeout: 15_000 }).toBe(2);
+  await expect.poll(() => f.consumed(), { timeout: 15_000 }).toBe(2);
   await f.api(`/api/bots/${f.chief.id}`, { soul: "PEER_SOUL_MARK Always answer in German." }, "PATCH");
   f.open(f.gate("revival"));
   await expect.poll(() => f.turns().length, { timeout: 30_000 }).toBe(3);
