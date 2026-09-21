@@ -8,7 +8,7 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { launchVerificationServer, runControlOmb, type VerificationServer } from "../scripts/control-omb.ts";
 
 type Bot = { id: string; activeTaskId: string };
-type Message = { id: string; role: string; kind: string; text?: string; sendId?: string; steered?: boolean; turnTerminal?: boolean };
+type Message = { id: string; role: string; kind: string; text?: string; sendId?: string; steered?: boolean; turnTerminal?: boolean; tool?: { name: string; ok?: boolean } };
 type Page = { messages: Message[]; activeLeafId: string | null };
 
 describe("guarded external messages through an isolated runtime", () => {
@@ -44,6 +44,14 @@ describe("guarded external messages through an isolated runtime", () => {
       try { return Boolean(JSON.parse(readFileSync(file(threadId, "launch.json"), "utf8")).pid); }
       catch (error) { if (error instanceof SyntaxError || (error as NodeJS.ErrnoException).code === "ENOENT") return false; throw error; }
     }, { timeout: 15_000 }).toBe(true);
+  };
+  const initialOutputProcessed = async (threadId: string) => {
+    // The launch dump precedes stdout. Wait for the initial tool result to
+    // reach the runtime before snapshotting the leaf; slow mode then emits
+    // no more messages until this thread's finish gate is released.
+    await expect.poll(async () => (await page(threadId)).messages.some(message =>
+      message.kind === "activity" && message.tool?.name === "Bash" && message.tool.ok === true,
+    ), { timeout: 15_000 }).toBe(true);
   };
   const finish = async (bot: Bot, threadId = bot.activeTaskId) => {
     await launched(threadId);
@@ -149,6 +157,7 @@ describe("guarded external messages through an isolated runtime", () => {
     expect(sibling.status).toBe(201);
     await control(["send", "--bot", bot.id, "--task", bot.activeTaskId, "--text", "NORMAL_TURN_OWNS_THE_THREAD"]);
     await launched(bot.activeTaskId);
+    await initialOutputProcessed(bot.activeTaskId);
     const current = await page(bot.activeTaskId);
     const busy = await guarded(bot, payload(bot, "GUARDED_MUST_NOT_STEER", current.activeLeafId));
     expect(busy.status).toBe(409); expect(busy.body.code).toBe("guarded_busy");
@@ -188,9 +197,11 @@ describe("guarded external messages through an isolated runtime", () => {
     const accepted = await guarded(bot, input);
     expect(accepted.status).toBe(202);
     await launched(bot.activeTaskId);
+    await initialOutputProcessed(bot.activeTaskId);
     const route = `/api/bots/${bot.id}/requests/${input.sendId}`;
     const snapshot = (await api("GET", `${route}?threadId=${bot.activeTaskId}`)).body;
     expect(snapshot).toMatchObject({ messageId: accepted.body.message.id, phase: "working" });
+    expect(typeof snapshot.activeTurnId).toBe("string");
     expect(typeof snapshot.executionId).toBe("string");
     const target = { threadId: bot.activeTaskId, messageId: snapshot.messageId, expectedActiveLeafId: snapshot.activeLeafId,
       expectedTurnId: snapshot.activeTurnId, expectedExecutionId: snapshot.executionId };

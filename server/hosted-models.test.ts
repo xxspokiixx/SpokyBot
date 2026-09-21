@@ -1,4 +1,4 @@
-import { mkdtempSync, readFileSync, rmSync } from "node:fs";
+import { mkdtempSync, readFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, expect, it, vi } from "vitest";
@@ -8,12 +8,13 @@ import { ClaudeDriver } from "./drivers/claude.ts";
 import { CodexDriver } from "./drivers/codex.ts";
 import { OpenAICompatDriver } from "./drivers/openai-compat.ts";
 import { recordEvents } from "./testing/events.ts";
+import { removeTempDir } from "./testing/cleanup.ts";
 
 const directories: string[] = [], registries: ProviderRegistry[] = [];
 afterEach(async () => {
   await Promise.all(registries.splice(0).map(registry => registry.disposeAll()));
   vi.unstubAllGlobals();
-  for (const directory of directories.splice(0)) rmSync(directory, { recursive: true, force: true });
+  for (const directory of directories.splice(0)) await removeTempDir(directory);
 });
 const directory = () => { const value = mkdtempSync(join(tmpdir(), "omb-hosted-models-")); directories.push(value); return value; };
 const token = `omb_workspace_${"a".repeat(43)}`;
