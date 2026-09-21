@@ -346,6 +346,7 @@ struct ChatView: View {
         .task(id: threadId) {
             if selectedThreadWasRemoved { dismiss(); return }
             let openedChat = current
+            session.threadSelection.rememberThread(openedChat, connectionID: session.connection?.id)
             await session.loadThreadIfNeeded(openedChat.threadId)
             // opening a chat is what marks it read, exactly as on the desktop
             if openedChat.unread { await session.markRead(openedChat) }
