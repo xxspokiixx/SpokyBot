@@ -6820,7 +6820,7 @@ async function startTurn(
         });
         if (opts?.automationSource === undefined && !opts?.commsDepth && !opts?.cardContinuation) {
           notify(buildNotification("turn-failed", bot, threadId, redactSecretsInText(message), { avatarUrl: bot.avatarUrl }));
-          reportIncident({ kind: "failed", bot, threadId, detail: message });
+          reportIncident({ kind: "could-not-start", bot, threadId, detail: message });
         }
         void interruptDirectThread(bot.id, threadId).catch(() => {});
       };
