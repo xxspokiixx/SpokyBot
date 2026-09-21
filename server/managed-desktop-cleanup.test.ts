@@ -230,7 +230,7 @@ it("reattaches rebuilt personal providers before a Company restore failure", asy
       load: async () => { order.push("load-personal"); },
       instances: () => [personal],
     },
-    instanceConfigs: () => ({ personal: { driver: "fake" } }), cfg: {},
+    providerConfigs: () => ({ personal: { driver: "fake" } }), decorateHostedProvider: undefined,
     managedDesktop: { restore: async () => { order.push("restore-company"); throw new Error("Fixture Company restore failure"); } },
   });
   vm.runInContext(reloadProvidersCode, context, { filename: "index.ts (provider reload fixture)" });
