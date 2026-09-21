@@ -137,26 +137,6 @@ async function waitUntil<T>(probe: () => Promise<T>, timeoutMs: number, what: st
   }
 }
 
-/** Click the first element with this accessible name. `ui click --name`
- * fails outright when the sidebar briefly renders the same chevron twice,
- * so poll for the name the way resolveTarget does, then pin the first
- * matching ref: snapshot order follows the accessibility tree, whose
- * first match is the primary chevron. */
-async function clickFirstNamed(handle: string, name: string): Promise<void> {
-  const deadline = Date.now() + 10_000;
-  for (;;) {
-    const state = await ui("snapshot", handle);
-    const refs = (state.refs ?? {}) as Record<string, { name?: unknown }>;
-    const ref = Object.entries(refs).find(([, element]) => element?.name === name)?.[0];
-    if (ref) {
-      await ui("click", handle, "--ref", `@${ref}`);
-      return;
-    }
-    if (Date.now() > deadline) throw new Error(`no element is named ${JSON.stringify(name)} within 10000ms (snapshot had ${Object.keys(refs).length} refs)`);
-    await new Promise((done) => setTimeout(done, 250));
-  }
-}
-
 describe("the thinking timer stays anchored across a thread switch", () => {
   let launched: Launched | undefined;
 
