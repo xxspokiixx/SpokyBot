@@ -105,8 +105,8 @@ fun BrowserControlScreen(botId: String, onBack: () -> Unit) {
     var latched by remember { mutableStateOf(0) }
     var queue by remember { mutableStateOf<BrowserInputQueue?>(null) }
     var viewerId by remember { mutableStateOf<String?>(null) }
-    var surfaceWidth by remember { mutableStateOf(1) }
-    var surfaceHeight by remember { mutableStateOf(1) }
+    var surfaceWidth by remember { mutableStateOf(1.0) }
+    var surfaceHeight by remember { mutableStateOf(1.0) }
     var status by remember { mutableStateOf(BrowserStatus(false, false, 1280.0, 720.0)) }
     var failure by remember { mutableStateOf<String?>(null) }
 
@@ -172,16 +172,18 @@ fun BrowserControlScreen(botId: String, onBack: () -> Unit) {
     DisposableEffect(botId) {
         onDispose {
             val held = core.flush()
-            val pending = queue
             val id = viewerId
             val live = transport
             releaseScope.launch {
                 try {
-                    if (pending != null) {
-                        held.forEach { intent -> sink.bodies(intent).forEach { pending.enqueue(it) } }
-                        pending.drain()
-                    }
+                    // Deliberately not through `pending`: that queue was built
+                    // on the composition scope, which is cancelled in this
+                    // same disposal pass, so its pump would never run and
+                    // drain() would spin forever waiting for it.
                     if (live != null && id != null) {
+                        held.flatMap(sink::bodies).forEach { body ->
+                            runCatching { live.send(botId, id, body) }
+                        }
                         runCatching { live.action(botId, id, buildJsonObject { put("type", "release") }) }
                     }
                 } finally {
@@ -244,8 +246,8 @@ fun BrowserControlScreen(botId: String, onBack: () -> Unit) {
                 .weight(1f)
                 .fillMaxWidth()
                 .onSizeChanged {
-                    surfaceWidth = it.width
-                    surfaceHeight = it.height
+                    surfaceWidth = it.width.toDouble()
+                    surfaceHeight = it.height.toDouble()
                 },
         ) {
             val bitmap = remember(frame?.seq) {
@@ -301,11 +303,23 @@ fun BrowserControlScreen(botId: String, onBack: () -> Unit) {
             // the whole reason trackpad mode feels usable.
             if (mode == GestureMode.TRACKPAD && driving) {
                 val density = LocalDensity.current
+                // Positioned on the drawn frame, not the surface: the cursor
+                // is in frame coordinates, and on a letterboxed page the two
+                // differ by the height of the bars.
+                val frameW = frame?.deviceWidth ?: 1280.0
+                val frameH = frame?.deviceHeight ?: 720.0
+                val fit = minOf(surfaceWidth / frameW, surfaceHeight / frameH)
+                val drawnW = frameW * fit
+                val drawnH = frameH * fit
                 Box(
                     Modifier
                         .offset(
-                            x = with(density) { (cursor.x * surfaceWidth).toInt().toDp() },
-                            y = with(density) { (cursor.y * surfaceHeight).toInt().toDp() },
+                            x = with(density) {
+                                ((surfaceWidth - drawnW) / 2 + cursor.x * drawnW).toInt().toDp()
+                            },
+                            y = with(density) {
+                                ((surfaceHeight - drawnH) / 2 + cursor.y * drawnH).toInt().toDp()
+                            },
                         )
                         .size(22.dp)
                         .clip(CircleShape)

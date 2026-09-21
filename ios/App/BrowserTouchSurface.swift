@@ -21,6 +21,11 @@ struct BrowserTouchSurface: UIViewRepresentable {
     let onIntents: ([GestureIntent]) -> Void
     /// Local view state the SwiftUI side draws: zoom, pan and the cursor.
     let onViewState: (ViewTransform, RemotePoint) -> Void
+    /// Handed back on creation so the screen can release held buttons when it
+    /// leaves or the app backgrounds. Without a call site, `flush()` existed
+    /// and never ran, and a drag interrupted that way left the button down on
+    /// the remote with nothing to lift it.
+    let onReady: (Coordinator) -> Void
 
     func makeUIView(context: Context) -> TouchSurfaceView {
         let view = TouchSurfaceView()
@@ -28,6 +33,7 @@ struct BrowserTouchSurface: UIViewRepresentable {
         view.isMultipleTouchEnabled = true
         view.backgroundColor = .clear
         context.coordinator.attach(to: view)
+        onReady(context.coordinator)
         return view
     }
 

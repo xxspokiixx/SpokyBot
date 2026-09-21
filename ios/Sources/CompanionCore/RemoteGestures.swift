@@ -440,7 +440,15 @@ public struct GestureCore: Sendable {
             let travelled = touchStart.map { max(abs(point.x - $0.x), abs(point.y - $0.y)) } ?? 0
             guard travelled <= GestureConstants.dragThreshold else { return [] }
             let clicks = nextClickCount(at: cursor, t: sample.t)
-            return [.press(button: .left, clicks: clicks), .release(button: .left)]
+            // The move is not decoration. A tap that never moved the finger
+            // produced no move intent, so the sink stamped the click at
+            // whatever coordinate it last saw — (0,0) on a fresh session,
+            // nowhere near the reticle the person was aiming with.
+            return [
+                .move(x: cursor.x, y: cursor.y),
+                .press(button: .left, clicks: clicks),
+                .release(button: .left),
+            ]
 
         case .cancelled:
             activeTouch = nil

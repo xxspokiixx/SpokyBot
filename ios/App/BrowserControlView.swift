@@ -188,6 +188,7 @@ struct BrowserControlView: View {
     @FocusState private var addressFocused: Bool
     @FocusState private var keyboardFocused: Bool
     @State private var typedBuffer = ""
+    @State private var surface: BrowserTouchSurface.Coordinator?
 
     init(bot: Bot, client: BrowserLiveClient) {
         self.bot = bot
@@ -206,11 +207,14 @@ struct BrowserControlView: View {
         .navigationTitle(bot.name)
         .navigationBarTitleDisplayMode(.inline)
         .onAppear { model.start() }
-        .onDisappear { model.stop() }
+        .onDisappear {
+            releaseHeldInput()
+            model.stop()
+        }
         .onChange(of: scenePhase) { _, phase in
             // Backgrounding mid-drag must not leave a button down on the
             // remote with nothing left to lift it.
-            if phase != .active { model.flushHeldInput() }
+            if phase != .active { releaseHeldInput() }
         }
         .alert("Browser", isPresented: Binding(
             get: { model.failure != nil },
@@ -220,6 +224,15 @@ struct BrowserControlView: View {
         } message: {
             Text(model.failure ?? "")
         }
+    }
+
+    /// The core is the only thing that knows a button is held, so the
+    /// releases have to come from it before the queue is drained.
+    private func releaseHeldInput() {
+        // flush() emits its releases through the same onIntents path every
+        // other gesture takes, so they land in the queue before it drains.
+        surface?.flush()
+        model.flushHeldInput()
     }
 
     private var chrome: some View {
@@ -282,7 +295,8 @@ struct BrowserControlView: View {
                     onViewState: { transform, cursor in
                         model.transform = transform
                         model.cursor = cursor
-                    }
+                    },
+                    onReady: { surface = $0 }
                 )
 
                 // Drawn locally at frame rate so it never waits for the
@@ -348,6 +362,7 @@ struct BrowserControlView: View {
                 .buttonStyle(.bordered)
 
                 Button(role: .destructive) {
+                    releaseHeldInput()
                     Task { await model.releaseControl() }
                 } label: {
                     Label("Hand back", systemImage: "hand.raised")

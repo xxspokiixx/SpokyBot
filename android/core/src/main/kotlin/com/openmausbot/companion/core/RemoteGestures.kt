@@ -439,7 +439,13 @@ class GestureCore(
                         emptyList()
                     } else {
                         val clicks = nextClickCount(cursor, sample.t)
+                        // The move is not decoration. A tap that never moved
+                        // the finger produced no move intent, so the sink
+                        // stamped the click at whatever coordinate it last
+                        // saw — (0,0) on a fresh session, nowhere near the
+                        // reticle the person was aiming with.
                         listOf(
+                            GestureIntent.Move(cursor.x, cursor.y),
                             GestureIntent.Press(RemoteButton.LEFT, clicks),
                             GestureIntent.Release(RemoteButton.LEFT),
                         )

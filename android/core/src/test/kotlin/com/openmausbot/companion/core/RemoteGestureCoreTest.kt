@@ -260,8 +260,11 @@ class RemoteGestureCoreTest {
         core.handle(TouchSample(2, TouchPhase.BEGAN, 100.0, 100.0, 2.0))
         val intents = core.handle(TouchSample(2, TouchPhase.ENDED, 100.0, 100.0, 2.05))
 
+        // The move must come first, or the sink stamps the click at a stale
+        // coordinate while the reticle sits somewhere else entirely.
         assertEquals(
             listOf(
+                GestureIntent.Move(0.6, 0.5),
                 GestureIntent.Press(RemoteButton.LEFT, 1),
                 GestureIntent.Release(RemoteButton.LEFT),
             ),

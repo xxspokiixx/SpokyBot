@@ -131,6 +131,10 @@ public actor BrowserInputQueue {
                 if current == generation { halt(error) }
             }
         }
+        // Only a pump from the current generation may clear the slot. A stale
+        // one that does it unconditionally wipes the replacement `clear()`
+        // just started, and then two pumps drain `pending` side by side.
+        guard current == generation else { return }
         active = nil
         // Something may have arrived while the last send was in flight; the
         // queue must not park with work still in it.

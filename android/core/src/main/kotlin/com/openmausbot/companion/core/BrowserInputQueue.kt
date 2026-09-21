@@ -159,7 +159,13 @@ class BrowserInputQueue(
                 lock.withLock { if (current == generation) haltLocked(cause) }
             }
         }
-        lock.withLock { active = null }
+        // Only a pump from the current generation may clear the slot. A stale
+        // one that does it unconditionally wipes the replacement `clear()`
+        // just started, and then two pumps drain `pending` side by side.
+        val mine = lock.withLock {
+            if (current != generation) false else { active = null; true }
+        }
+        if (!mine) return
         // Something may have arrived while the last send was in flight; the
         // queue must not park with work still in it.
         if (lock.withLock { pending.isNotEmpty() }) pumpIfIdle()

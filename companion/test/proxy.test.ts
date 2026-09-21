@@ -1021,3 +1021,54 @@ describe("pairing, end to end", () => {
     }
   });
 });
+
+describe("revoking a capability mid-stream", () => {
+  it("closes a browser-live stream the device already has open", async () => {
+    // The comment on the control page promises this. Before the stream was
+    // registered, `disconnectDevice` only reached /api/events and viewer
+    // relays, so a phone kept watching a signed-in browser after the grant
+    // was taken away.
+    const upstream = createServer((_req, res) => {
+      res.writeHead(200, { "content-type": "text/event-stream" });
+      res.write("event: ready\ndata: {\"viewerId\":\"v1\"}\n\n");
+    });
+    await new Promise<void>((r) => upstream.listen(0, "127.0.0.1", r));
+    const upstreamPort = (upstream.address() as { port: number }).port;
+
+    const handler = createProxyHandler({
+      harnessPort: upstreamPort,
+      authenticate: () => ({ id: "phone-1", cloudDesktopAccess: false, browserControlAccess: true }),
+      redeem: () => null,
+      endpoints: () => [],
+    } as never);
+    const relay = createServer(handler);
+    await new Promise<void>((r) => relay.listen(0, "127.0.0.1", r));
+    const relayPort = (relay.address() as { port: number }).port;
+
+    const response = await fetch(
+      `http://127.0.0.1:${relayPort}/api/bots/b1/browser/live`,
+      { headers: { authorization: "Bearer t" } },
+    );
+    expect(response.status).toBe(200);
+
+    const reader = response.body!.getReader();
+    await reader.read();
+
+    handler.disconnectDevice?.("phone-1");
+
+    // The stream stops rather than staying open on a revoked grant. The
+    // sidecar destroys the socket, so the reader may end cleanly or throw
+    // "terminated" — either is the connection being gone, which is the point.
+    let ended = false;
+    try {
+      while (!(await reader.read()).done) { /* drain */ }
+      ended = true;
+    } catch {
+      ended = true;
+    }
+    expect(ended).toBe(true);
+
+    relay.close();
+    upstream.close();
+  });
+});

@@ -76,7 +76,10 @@ final class RemoteGestureTrackpadTests: XCTestCase {
         _ = core.handle(TouchSample(id: 2, phase: .began, x: 100, y: 100, t: 2.0))
         let intents = core.handle(TouchSample(id: 2, phase: .ended, x: 100, y: 100, t: 2.05))
 
+        // The move must come first, or the sink stamps the click at a stale
+        // coordinate while the reticle sits somewhere else entirely.
         XCTAssertEqual(intents, [
+            .move(x: 0.6, y: 0.5),
             .press(button: .left, clicks: 1),
             .release(button: .left),
         ])
