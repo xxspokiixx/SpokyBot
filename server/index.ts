@@ -17658,6 +17658,7 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
           }
         }
         let currentBoxInventory: box.ManagedBoxInventory | null = null;
+        let replacingRejectedBoxToken = false;
         let currentBoxResources: Array<{ boxId: string; name: string }> | null = null;
         const journalBoxResources: Array<{ boxId: string; name: string }> = [];
         const deletingBoxIds = new Set(boxDeletions.map((entry) => entry.boxId));
@@ -17667,15 +17668,15 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
             managedBoxOwners(),
           );
           if (!currentBoxInventory.available) {
-            if (!replacementProvedByDeletion) {
+            replacingRejectedBoxToken = currentBoxInventory.credentialRejected === true && Boolean(nextBoxToken);
+            if (!replacementProvedByDeletion && !replacingRejectedBoxToken) {
               return json(res, 503, {
                 error: `${currentBoxInventory.problem ?? "cloud computer inventory is unavailable"}. Keep the current Box account and retry`,
               });
             }
-            // The old token may be the reason this deletion is stuck. A
-            // target-bound operation/identity proved the replacement belongs
-            // to the same account, so do not deadlock credential recovery on
-            // an inventory request made with the expired token.
+            // A rejected old key cannot authorize its own rotation. Below,
+            // validate the replacement and prove access to remembered Boxes;
+            // pending deletions retain their target-bound verification.
             currentBoxInventory = null;
           }
           if (currentBoxInventory) {
@@ -17756,7 +17757,15 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
         const check = await box.verifyToken(newBoxToken);
         if (!check.ok) return json(res, 400, { error: check.message });
       }
-      if (changingBoxToken && (!currentBoxToken || replacementProvedByDeletion) && boxRecovery.length > 0) {
+      if (replacingRejectedBoxToken) {
+        // An expired credential cannot authorize its own replacement. Probe
+        // the new account without adopting or retiring any local identities.
+        const replacement = await box.listManagedBoxes(
+          { box: { token: nextBoxToken } }, managedBoxOwners(), { adoptLegacy: false },
+        );
+        if (!replacement.available) return json(res, 503, { error: replacement.problem ?? "Could not verify the replacement Box key. Your saved key and computers are unchanged." });
+      }
+      if (changingBoxToken && (!currentBoxToken || replacementProvedByDeletion || replacingRejectedBoxToken) && boxRecovery.length > 0) {
         if (!nextBoxToken) {
           return json(res, 409, { error: "restore the Box account that owns the remembered cloud computers before clearing it" });
         }
