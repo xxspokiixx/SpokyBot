@@ -1548,8 +1548,11 @@ describe("harness HTTP API", () => {
       const afterDirect = (await api("GET", "/api/bots?messages=20")).body.bots.find(
         (candidate: { id: string }) => candidate.id === bot.id,
       );
+      // Admission returns the append receipt; the hanging fake turn adds its
+      // durable pending marker to that same stored message before this read.
+      expect(direct.body.message).not.toHaveProperty("requestPending");
       expect(afterDirect.messages.find((message: { id: string }) => message.id === direct.body.message.id))
-        .toEqual(direct.body.message);
+        .toEqual({ ...direct.body.message, requestPending: true });
 
       expect((await api("POST", `/api/bots/${bot.id}/interrupt`)).status).toBe(200);
       await expect.poll(async () => {
@@ -1608,7 +1611,9 @@ describe("harness HTTP API", () => {
 
       const duplicate = await api("POST", `/api/bots/${bot.id}/messages`, request);
       expect(duplicate.status).toBe(202);
-      expect(duplicate.body).toEqual(first.body);
+      expect(first.body.message).not.toHaveProperty("requestPending");
+      const pendingReceipt = { ...first.body, message: { ...first.body.message, requestPending: true } };
+      expect(duplicate.body).toEqual(pendingReceipt);
 
       const conflict = await api("POST", `/api/bots/${bot.id}/messages`, {
         ...request,
@@ -1647,7 +1652,11 @@ describe("harness HTTP API", () => {
 
       const inactiveRetry = await api("POST", `/api/bots/${bot.id}/messages`, request);
       expect(inactiveRetry.status).toBe(202);
-      expect(inactiveRetry.body).toEqual(first.body);
+      // A retry returns the existing message with its current lifecycle
+      // metadata; it neither starts another turn nor forgets the earlier Stop.
+      expect(inactiveRetry.body).toEqual({
+        ...pendingReceipt, message: { ...pendingReceipt.message, requestCancelled: true },
+      });
       const current = (await api("GET", "/api/bots?messages=0")).body.bots.find(
         (candidate: { id: string }) => candidate.id === bot.id,
       );
