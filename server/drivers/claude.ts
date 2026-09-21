@@ -376,6 +376,8 @@ export interface ClaudeConfig {
   configDir?: string;
   /** Company routing is supplied by the private desktop parent, never local discovery. */
   managed?: boolean;
+  /** Operator-provided hosted catalog; absent for ordinary desktop accounts. */
+  managedModels?: string[];
   permissionMode: "acceptEdits" | "auto" | "bypassPermissions";
   /** Available Claude built-ins. An empty list passes `--tools ""`. */
   tools?: string[];
@@ -817,10 +819,12 @@ function decodeConfig(raw: unknown): ClaudeConfig {
   if (o.configDir !== undefined && typeof o.configDir !== "string") throw new Error("claude: configDir must be a string");
   const configDir = typeof o.configDir === "string" ? o.configDir.trim() : undefined;
   if (configDir) resolveClaudeConfigDir(configDir);
+  if (o.managedModels !== undefined && (o.managed !== true || !Array.isArray(o.managedModels) || !o.managedModels.length || o.managedModels.some(model => typeof model !== "string" || !/^[A-Za-z0-9][A-Za-z0-9._-]{0,159}$/.test(model)))) throw new Error("Invalid hosted Claude models.");
   return {
     cli: typeof o.cli === "string" ? o.cli : "claude",
     ...(configDir ? { configDir } : {}),
     ...(o.managed === true ? { managed: true } : {}),
+    ...(o.managedModels ? { managedModels: o.managedModels as string[] } : {}),
     permissionMode: (mode as ClaudeConfig["permissionMode"]) ?? "acceptEdits",
     ...(tools !== undefined ? { tools } : {}),
     ...(disallowedTools !== undefined ? { disallowedTools } : {}),
@@ -931,7 +935,7 @@ export const ClaudeDriver: ProviderDriver<ClaudeConfig> = {
     if (inheritsUserConfig(catalogEnv)) {
       console.error(`claude (${instanceId}): OMB_CLAUDE_INHERIT_USER_CONFIG=1 — bots inherit this machine's Claude Code MCP servers, skills, hooks and CLAUDE.md on every turn; remove it unless a bot needs a user-scope server`);
     }
-    let models = STATIC_CLAUDE_MODELS;
+    let models = config.managedModels ? { default: config.managedModels[0], options: config.managedModels.map(id => ({ id, label: id })) } : STATIC_CLAUDE_MODELS;
     const refreshModels = async () => {
       if (config.managed) return;
       try {
@@ -1076,6 +1080,7 @@ export const ClaudeDriver: ProviderDriver<ClaudeConfig> = {
     const retryState = new Map<string, { attempt: number; cancelled: boolean; rebuilt?: boolean }>();
 
     const sendTurn = async (turn: SendTurnInput, logicalTurnId?: string) => {
+      if (config.managedModels && (!turn.model || !config.managedModels.includes(turn.model))) throw new Error("This model is not assigned to this workspace.");
       if (config.managed && (!turn.model || turn.model.includes("::") || !config.configDir ||
           !input.environment.ANTHROPIC_API_KEY || !input.environment.ANTHROPIC_BASE_URL)) {
         throw new Error("Company model access is unavailable. Reconnect your organization; personal billing will not be used.");
@@ -1976,10 +1981,10 @@ export const ClaudeDriver: ProviderDriver<ClaudeConfig> = {
       new Promise((resolve, reject) => {
         const child = spawnCli(
           config.cli,
-          ["-p", "--model", "claude-haiku-4-5", "--output-format", "text"],
+          ["-p", "--model", config.managedModels?.[0] ?? "claude-haiku-4-5", "--output-format", "text"],
           {
             stdio: ["pipe", "pipe", "pipe"],
-            env: environment("claude-haiku-4-5"),
+            env: environment(config.managedModels?.[0] ?? "claude-haiku-4-5"),
           },
         );
         let stdout = "";
