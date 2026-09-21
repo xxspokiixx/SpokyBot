@@ -18254,8 +18254,14 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
 
     // ── connectors (Composio) ──
     if (method === "GET" && path === "/api/connectors/catalog") {
-      const { cards, source } = await composio.listToolkits(cfg);
-      return json(res, 200, { configured: composio.configured(cfg), mode: composio.connectionMode(cfg), source, cards });
+      const { cards, source, pagination } = await composio.listToolkits(cfg);
+      return json(res, 200, {
+        configured: composio.configured(cfg),
+        mode: composio.connectionMode(cfg),
+        source,
+        cards,
+        ...(pagination ? { pagination } : {}),
+      });
     }
     if (method === "GET" && path === "/api/connectors/connected") {
       const availability = composio.connectorAvailability(cfg);

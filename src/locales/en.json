@@ -1922,6 +1922,8 @@
   "connectors.section.yours": "Your connections",
   "connectors.section.results": "Search results",
   "connectors.section.available": "Available apps",
+  "connectors.marketplace.partialCount": "showing {shown} of {total} apps — the connection service returned a partial catalog",
+  "connectors.marketplace.partialStalled": "the connection service returned a partial catalog",
   "connectors.selfHostOnly": "Self-host only",
   "connectors.selfHostOnlyReason": "Twitter/X needs your own X Developer app and Composio auth config. Use self-hosted connected apps for now.",
   "connectors.finishSetup": "Finish setup in your browser",
