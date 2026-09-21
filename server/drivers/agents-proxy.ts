@@ -33,6 +33,7 @@
 //   OMB_BOT_ID       the calling bot's id (excluded from list_bots; sender)
 //   OMB_COMMS_TOKEN  shared secret for the localhost-only internal endpoints
 //   OMB_TURN_DEPTH   this turn's comms depth (the harness refuses recursion)
+//   OMB_EXTERNAL_RUNTIME  "1" for a standing process: peer tools and polling only
 import readline from "node:readline";
 
 import { CREDENTIAL_TARGETS, isCredentialTargetId } from "../../shared/credential-request.ts";
@@ -40,12 +41,16 @@ import { normalizeCronSchedule } from "../../shared/routine-schedule.ts";
 import { agentToolAnnotations } from "../agent-tool-policy.ts";
 
 import { peerName } from "../peer-roster.ts";
+import { boundedAgentResult } from "./agents-result.ts";
 
 const HARNESS = process.env.OMB_HARNESS_URL ?? "http://127.0.0.1:8799";
 const BOT_ID = process.env.OMB_BOT_ID ?? "";
 const THREAD_ID = process.env.OMB_THREAD_ID ?? "";
 const TOKEN = process.env.OMB_COMMS_TOKEN ?? "";
 const DEPTH = Number(process.env.OMB_TURN_DEPTH ?? "0") || 0;
+// Presentation only: the server still authenticates and scopes every call.
+const EXTERNAL_RUNTIME = process.env.OMB_EXTERNAL_RUNTIME === "1";
+const EXTERNAL_STATUS_GUIDANCE = "Use check_delegation or wait_delegation with this task id to retrieve the result; polling is allowed without ending this external runtime.";
 const SKILL_AUTHORING_ENABLED = process.env.OMB_SKILL_AUTHORING_ENABLED === "1";
 // Opt-in computer sharing (server features.sharedComputers). Off unless the
 // harness says "1", the same way skill authoring is gated above.
@@ -379,11 +384,28 @@ const ROUTINE_FIELDS_SCHEMA = {
     type: "boolean",
     description: "Opt in to using the latest completed run's bounded report as historical context. Defaults to false; set false in an update to start fresh again. Included in the applied result or pending confirmation.",
   },
+  overlap: {
+    type: "string",
+    enum: ["skip", "queue"],
+    description: "While this routine is still working, skip scheduled occurrences (default) or queue at most one run. Queue skips further occurrences until the pending run starts; it never builds an unlimited backlog. Manual and webhook requests are separate.",
+  },
 } as const;
 
 const PROPOSAL_OUTCOME = " Read the result: granted Full Access may apply the change immediately. If applied, continue the requested work without another confirmation. Only a pending result requires ending the turn and waiting for the in-app decision. Never claim success from the permission mode alone; report failed or cancelled results honestly. This does not elevate another bot's execution permissions.";
 
 const TOOLS = [
+  {
+    name: "tool_result_read",
+    description: "Read a missing portion of an oversized agents-tool result using the saved id and next offset from its notice. Returns at most 16,000 characters, only from this bot in this conversation. Use only when the preview is insufficient; do not load every page by default. Results expire after one hour, on app restart, or under cache pressure. This never reruns the original action.",
+    inputSchema: {
+      type: "object", additionalProperties: false,
+      properties: {
+        id: { type: "string", description: "Saved result id copied from the truncation notice." },
+        offset: { type: "integer", minimum: 0, description: "Character offset copied from the previous result's notice. Defaults to 0." },
+      },
+      required: ["id"],
+    },
+  },
   {
     name: "list_shared_computers",
     description: "List online desktop computers explicitly shared with this workspace, and their allowed folders/capabilities. These are the user's computers, not this server. An offline or unshared computer cannot be accessed. Folder paths use opaque folder IDs and relative paths.",
@@ -429,8 +451,10 @@ const TOOLS = [
   },
   {
     name: "ask_bot",
-    description:
-      "SYNCHRONOUS consultation: send a short question to another bot and stay blocked until its reply is returned inline. Use only when that reply is required to write your current response. Do not use for assigning work, background tasks, or potentially long work; use delegate_bot for those. Returns promptly with a note if that bot is busy.",
+    description: EXTERNAL_RUNTIME
+      ? "Brief synchronous consultation with a reachable teammate. Quick replies return inline; busy or slow replies become asynchronous delegations with a task id. Use check_delegation or wait_delegation to retrieve their outcome. Use delegate_bot for assigning work. Existing peer approvals still apply."
+      :
+      "Brief synchronous consultation: send a short question to another bot. Quick replies return inline; slow replies become asynchronous delegations and return automatically after you finish your turn. Use only when that reply is required to write your current response. Do not use for assigning work, background tasks, or potentially long work; use delegate_bot for those. Returns promptly with a note if that bot is busy.",
     inputSchema: {
       type: "object",
       properties: {
@@ -442,7 +466,9 @@ const TOOLS = [
   },
   {
     name: "delegate_bot",
-    description:
+    description: EXTERNAL_RUNTIME
+      ? "Hand work to a reachable teammate asynchronously. Returns a task id; the server dispatches when its source conversation and the peer are available and required approvals are granted. Use check_delegation or wait_delegation with that id; the external runtime does not need to end for polling."
+      :
       "DEFAULT FOR ASSIGNING WORK. Hand a task to another bot asynchronously: this returns immediately, your turn can end, and you remain available while the peer works. The peer starts after your current turn finishes and its outcome is delivered automatically to the originating conversation — success or failure wakes you with it. Acknowledge the assignment; do not call check_delegation or wait_delegation in this same turn.",
     inputSchema: {
       type: "object",
@@ -456,7 +482,9 @@ const TOOLS = [
   },
   {
     name: "check_delegation",
-    description:
+    description: EXTERNAL_RUNTIME
+      ? "Check one of this external runtime's delegations without waiting: queued, running, or finished with its result. Newly returned task ids can be checked immediately; the server enforces ownership and current peer access."
+      :
       "In a later turn, check what happened to a delegation without waiting: still queued, running (with elapsed time and the peer's recent activity), or finished with the result. Prefer this when a delegated bot is taking long or might be stuck — empty recent activity usually means it is stuck, not working. Do not poll it right after delegate_bot; completion is delivered to the conversation automatically.",
     inputSchema: {
       type: "object",
@@ -468,7 +496,9 @@ const TOOLS = [
   },
   {
     name: "wait_delegation",
-    description:
+    description: EXTERNAL_RUNTIME
+      ? "Wait for one of this external runtime's delegations, including a newly returned task id, for up to timeout_seconds (maximum 240). Returns its result or current queued/running status; the server enforces ownership and current peer access."
+      :
       "BLOCKING status tool for a delegation from an earlier turn. Use only when the user explicitly asks you to wait for that earlier task. Never call it in the same turn as delegate_bot: a fresh delegation cannot start until your current turn ends, and its result will arrive automatically.",
     inputSchema: {
       type: "object",
@@ -876,9 +906,12 @@ const SHAREABLE_TOOLS = SHARED_COMPUTERS_ENABLED
 // retain their independent loop and cannot start a second coordinator.
 const ROOM_ONLY_TOOLS = new Set(["list_room_targets", "coordinate_bots"]);
 const ROOM_REPLACED_TOOLS = new Set(["ask_bot", "delegate_bot", "check_delegation", "wait_delegation", "start_thread", "send_to_thread", "wait_thread"]);
-const COORDINATING = process.env.OMB_ROOM_TURN === "1";
+const COORDINATING = !EXTERNAL_RUNTIME && process.env.OMB_ROOM_TURN === "1";
 const OWN_THREAD_CREATION = process.env.OMB_OWN_THREAD_CREATION === "1";
-const AVAILABLE_TOOLS = COORDINATING
+const EXTERNAL_TOOL_NAMES = new Set(["list_bots", "ask_bot", "delegate_bot", "check_delegation", "wait_delegation"]);
+const AVAILABLE_TOOLS = EXTERNAL_RUNTIME
+  ? TOOLS.filter(tool => EXTERNAL_TOOL_NAMES.has(tool.name))
+  : COORDINATING
   ? SHAREABLE_TOOLS.filter(tool => !ROOM_REPLACED_TOOLS.has(tool.name) || (tool.name === "start_thread" && OWN_THREAD_CREATION))
     .map(tool => tool.name === "start_thread" ? {
       ...tool,
@@ -903,6 +936,14 @@ async function api(path: string, init?: RequestInit): Promise<Json> {
   if (!ok) throw new Error(String(body.error ?? `HTTP ${status}`));
   return body;
 }
+
+const capResult = (text: string) => boundedAgentResult(text, (retained, truncated) => {
+  // The standing capability cannot write/read cached tool results. Keep the
+  // normal bounded fallback without making a forbidden request or retrying.
+  if (EXTERNAL_RUNTIME) throw new Error("External runtime results are not cached");
+  return api("/api/internal/tool-result", { method: "POST", signal: AbortSignal.timeout(3_000),
+    body: JSON.stringify({ text: retained, truncated }) });
+});
 
 /** Like api, but a refusal comes back as its body instead of an Error —
  * for the tools whose refusals carry more than a sentence. */
@@ -957,6 +998,9 @@ function routineFields(args: Json): { fields: Json; error?: string } {
   if (args.continuity != null && typeof args.continuity !== "boolean") {
     return { fields, error: "continuity must be true or false." };
   }
+  if (args.overlap !== undefined && args.overlap !== "skip" && args.overlap !== "queue") {
+    return { fields, error: "overlap must be skip or queue." };
+  }
   if (args.clear_timeout != null && typeof args.clear_timeout !== "boolean") {
     return { fields, error: "clear_timeout must be true or false." };
   }
@@ -974,6 +1018,7 @@ function routineFields(args: Json): { fields: Json; error?: string } {
   if (args.clear_timeout === true) fields.timeoutMinutes = null;
   else if (timeoutMinutes != null) fields.timeoutMinutes = timeoutMinutes;
   if (typeof args.continuity === "boolean") fields.continuity = args.continuity;
+  if (args.overlap !== undefined) fields.overlap = args.overlap;
   return { fields };
 }
 
@@ -1014,6 +1059,17 @@ function recallSpeaker(hit: Json): string {
 }
 
 async function callTool(name: string, args: Json): Promise<{ text: string; isError?: boolean }> {
+  if (name === "tool_result_read") {
+    if (typeof args.id !== "string" || !/^r-[0-9a-f-]{36}$/.test(args.id) ||
+      (args.offset !== undefined && (!Number.isSafeInteger(args.offset) || Number(args.offset) < 0))) {
+      return { text: "Use the saved result id and a non-negative integer offset from its notice.", isError: true };
+    }
+    const r = await api(`/api/internal/tool-result?id=${encodeURIComponent(args.id)}&offset=${args.offset ?? 0}`, { signal: AbortSignal.timeout(3_000) });
+    const text = String(r.text ?? "");
+    return { text: `${text}\n\n[${Number(r.nextOffset) < Number(r.length)
+      ? `Read more with tool_result_read id "${args.id}" and offset ${r.nextOffset}.`
+      : `End of retained result.${r.truncated ? " The original tail exceeded the storage limit and was omitted." : ""}`}]` };
+  }
   if (name === "list_room_targets") {
     const r = await api("/api/internal/room-targets");
     return { text: JSON.stringify(r), ...(r.error ? { isError: true } : {}) };
@@ -1124,10 +1180,12 @@ async function callTool(name: string, args: Json): Promise<{ text: string; isErr
       // The peer's turn outlived the synchronous wait, so the harness
       // converted the ask into a delegation — the reply is not lost.
       const taskId = String(r.taskId ?? "").trim();
-      if (taskId) delegationTaskIdsThisTurn.add(taskId);
-      const waitedMinutes = Math.max(1, Math.round((Number(r.waitedMs) || 0) / 60_000));
+      if (taskId && !EXTERNAL_RUNTIME) delegationTaskIdsThisTurn.add(taskId);
+      const waitedSeconds = Math.max(1, Math.round((Number(r.waitedMs) || 0) / 1000));
+      const amount = waitedSeconds < 60 ? waitedSeconds : Math.round(waitedSeconds / 60);
+      const unit = waitedSeconds < 60 ? "second" : "minute";
       return {
-        text: `${r.toBotName ?? "That bot"} is still working after ${waitedMinutes} minute${waitedMinutes === 1 ? "" : "s"} — the ask was converted to a delegation so the reply is not lost. Task id: ${taskId}. Finish your turn now; the result will be delivered to this conversation automatically. Use check_delegation in a later turn only if the user asks for status.`,
+        text: `${r.toBotName ?? "That bot"} is still working after ${amount} ${unit}${amount === 1 ? "" : "s"} — the ask was converted to a delegation so the reply is not lost. Task id: ${taskId}. ${EXTERNAL_RUNTIME ? EXTERNAL_STATUS_GUIDANCE : "Finish your turn now; the result will be delivered to this conversation automatically. Use check_delegation in a later turn only if the user asks for status."}`,
       };
     }
     if (r.busy) {
@@ -1135,9 +1193,9 @@ async function callTool(name: string, args: Json): Promise<{ text: string; isErr
       // task id is the asker's claim ticket for the eventual reply.
       const taskId = String(r.taskId ?? "").trim();
       if (taskId) {
-        delegationTaskIdsThisTurn.add(taskId);
+        if (!EXTERNAL_RUNTIME) delegationTaskIdsThisTurn.add(taskId);
         return {
-          text: `${r.toBotName ?? "That bot"} is busy right now, so your message was queued as a delegation instead — it runs after your current turn ends. Task id: ${taskId}. Finish your turn now; the result will be delivered to this conversation automatically. Use check_delegation in a later turn only if the user asks for status.`,
+          text: `${r.toBotName ?? "That bot"} is busy right now, so your message was queued as a delegation instead — ${EXTERNAL_RUNTIME ? "it waits for the peer and any required approval" : "it runs after your current turn ends"}. Task id: ${taskId}. ${EXTERNAL_RUNTIME ? EXTERNAL_STATUS_GUIDANCE : "Finish your turn now; the result will be delivered to this conversation automatically. Use check_delegation in a later turn only if the user asks for status."}`,
         };
       }
       return { text: `That bot is busy right now — try again after it finishes.` };
@@ -1165,9 +1223,9 @@ async function callTool(name: string, args: Json): Promise<{ text: string; isErr
     // bot's claim ticket for the outcome.
     const note = typeof r.message === "string" ? r.message : "Delegation queued.";
     const taskId = typeof r.taskId === "string" ? r.taskId.trim() : "";
-    if (taskId) delegationTaskIdsThisTurn.add(taskId);
+    if (taskId && !EXTERNAL_RUNTIME) delegationTaskIdsThisTurn.add(taskId);
     const suffix = taskId
-      ? ` Task id: ${taskId}. Acknowledge the assignment and finish your turn; the result will be delivered to this conversation automatically. Do not check or wait for it in this turn.`
+      ? ` Task id: ${taskId}. ${EXTERNAL_RUNTIME ? EXTERNAL_STATUS_GUIDANCE : "Acknowledge the assignment and finish your turn; the result will be delivered to this conversation automatically. Do not check or wait for it in this turn."}`
       : "";
     return { text: `${note}${suffix}` };
   }
@@ -1176,7 +1234,7 @@ async function callTool(name: string, args: Json): Promise<{ text: string; isErr
     if (!/^[\w-]{4,64}$/.test(taskId)) {
       return { text: `${name} needs the "task_id" that delegate_bot returned, e.g. {"task_id":"1f0c2f4e-..."}.`, isError: true };
     }
-    if (delegationTaskIdsThisTurn.has(taskId)) {
+    if (!EXTERNAL_RUNTIME && delegationTaskIdsThisTurn.has(taskId)) {
       return {
         text: `Task ${taskId} was delegated during this turn. Finish your response now so the other bot can work; its result will be delivered to this conversation automatically. Do not check or wait for a newly delegated task until a later turn.`,
         isError: true,
@@ -1742,20 +1800,20 @@ async function handle(msg: Json) {
           return;
         }
         if (name === "list_shared_computers") {
-          textResult(id, JSON.stringify(await api("/api/internal/shared-computers")));
+          textResult(id, await capResult(JSON.stringify(await api("/api/internal/shared-computers"))));
           return;
         }
         if (name === "shared_computer") {
           const response = await api("/api/internal/shared-computers", { method: "POST", body: JSON.stringify(params.arguments ?? {}) });
           const result = response.result as Json;
           if (Array.isArray(result?.content)) ok(id, result);
-          else textResult(id, JSON.stringify(result));
+          else textResult(id, await capResult(JSON.stringify(result)));
           return;
         }
         const { text, isError } = await callTool(name, (params.arguments ?? {}) as Json);
-        textResult(id, text, isError);
+        textResult(id, name === "tool_result_read" ? text : await capResult(text), isError);
       } catch (e) {
-        textResult(id, (e as Error).message, true);
+        textResult(id, await capResult((e as Error).message), true);
       }
       return;
     }
