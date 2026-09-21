@@ -1,7 +1,25 @@
 package com.openmausbot.companion.core
 
+import java.io.IOException
+import java.util.concurrent.atomic.AtomicReference
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.channels.awaitClose
+import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.callbackFlow
+import kotlinx.coroutines.isActive
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonObject
+import kotlinx.serialization.json.buildJsonObject
+import kotlinx.serialization.json.put
+import okhttp3.HttpUrl
+import okhttp3.MediaType.Companion.toMediaType
+import okhttp3.OkHttpClient
+import okhttp3.Request
+import okhttp3.RequestBody.Companion.toRequestBody
+import okhttp3.Response
 import kotlinx.serialization.json.booleanOrNull
 import kotlinx.serialization.json.contentOrNull
 import kotlinx.serialization.json.doubleOrNull
@@ -126,3 +144,88 @@ object BrowserLiveDecoder {
  * here would end that. */
 fun BrowserFrame.bytes(): ByteArray? =
     runCatching { java.util.Base64.getDecoder().decode(data) }.getOrNull()
+
+/**
+ * The browser-live transport: one SSE stream in, one action channel out.
+ *
+ * Mirrors CompanionCore's `BrowserLiveClient`.
+ */
+class BrowserLiveTransport internal constructor(
+    private val base: HttpUrl,
+    private val token: String?,
+    private val streamClient: OkHttpClient,
+    private val actionClient: OkHttpClient,
+) {
+    private val jsonMedia = "application/json".toMediaType()
+
+    private fun request(path: String): Request.Builder =
+        Request.Builder()
+            .url(base.newBuilder().encodedPath(path).build())
+            .apply { token?.let { header("Authorization", "Bearer \$it") } }
+
+    /**
+     * The frame stream. Runs until the server ends it or the collector leaves;
+     * reconnection belongs to whatever knows if the view is still on screen,
+     * exactly as it does for the main event stream.
+     */
+    fun live(botId: String): Flow<BrowserLiveMessage> = callbackFlow {
+        val call = streamClient.newCall(request("/api/bots/$botId/browser/live").get().build())
+        val responseRef = AtomicReference<Response?>(null)
+        val reader = launch(Dispatchers.IO) {
+            try {
+                val response = call.execute()
+                responseRef.set(response)
+                if (response.code != 200) throw APIError.Status(response.code)
+                val body = response.body ?: throw APIError.Transport("The browser sent an empty stream.")
+                val source = body.source()
+                val parser = SSEParser()
+
+                while (isActive) {
+                    val line = source.readUtf8Line() ?: break
+                    val event = parser.line(line) ?: continue
+                    val message = BrowserLiveDecoder.message(event.data) ?: continue
+                    send(message)
+                }
+                parser.reset()
+                close()
+            } catch (_: CancellationException) {
+                // A collector leaving the flow deliberately tears down the call.
+            } catch (error: APIError) {
+                close(error)
+            } catch (error: IOException) {
+                close(APIError.Transport(error.message ?: "Could not reach the browser.", error))
+            } finally {
+                responseRef.getAndSet(null)?.close()
+            }
+        }
+
+        awaitClose {
+            responseRef.getAndSet(null)?.close()
+            call.cancel()
+            reader.cancel()
+        }
+    }
+
+    /**
+     * One action. The server answers only after the browser has applied it,
+     * which is what makes the queue's one-in-flight rule necessary.
+     */
+    suspend fun action(botId: String, viewerId: String, body: JsonObject) = withContext(Dispatchers.IO) {
+        val payload = buildJsonObject {
+            body.forEach { (key, value) -> put(key, value) }
+            put("viewerId", viewerId)
+        }
+        val request = request("/api/bots/$botId/browser/action")
+            .post(payload.toString().toRequestBody(jsonMedia))
+            .build()
+        actionClient.newCall(request).execute().use { response ->
+            if (response.code != 200) throw APIError.Status(response.code)
+        }
+    }
+
+    /** An input body, posted through the same channel. */
+    suspend fun send(botId: String, viewerId: String, input: BrowserInputBody) {
+        val encoded = Json.encodeToJsonElement(BrowserInputBody.serializer(), input).jsonObject
+        action(botId, viewerId, encoded)
+    }
+}
