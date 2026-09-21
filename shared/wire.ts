@@ -310,6 +310,16 @@ export interface WireMessage {
   sender?: { name: string };
   /** Provider turn that produced this message. */
   turnId?: string;
+  /** Server-proven originating user message, including supported harness
+   * continuations. Absent means external clients must not infer ownership. */
+  requestMessageId?: string;
+  /** Provider completion outcome, independent of whether it emitted text. */
+  turnSucceeded?: boolean;
+  /** An exact request was stopped; a restart must not revive an old result. */
+  requestCancelled?: boolean;
+  /** Set before execution and cleared only after the request's verified
+   * final turn and dependencies settle. A restart never clears it. */
+  requestPending?: boolean;
   /** The last assistant text item from a settled provider turn. */
   turnTerminal?: boolean;
   /** screen messages: a frame of the bot's computer (base64 image) */

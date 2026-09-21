@@ -1966,7 +1966,7 @@ export class Store {
 
   /** A fresh context on the same bot: new thread, new session, same
    * persona/tools/computer. Becomes the active task. */
-  createTask(botId: string, title?: string, activate = true, projectId?: string, openedBy?: TaskOpenedBy): TaskRecord | null {
+  createTask(botId: string, title?: string, activate = true, projectId?: string, openedBy?: TaskOpenedBy, approvalMode?: "ask" | "full"): TaskRecord | null {
     const bot = this.bot(botId);
     if (!bot) return null;
     if (projectId !== undefined && !this.project(botId, projectId)) return null;
@@ -1978,9 +1978,9 @@ export class Store {
       ...(openedBy ? { openedBy: structuredClone(openedBy) } : {}),
       resumeCursors: {},
       modelSelection: structuredClone(bot.modelSelection),
-      approvalMode: approvalModeFor(bot),
-      autoApprove: Boolean(bot.autoApprove),
-      alwaysAllow: [...(bot.alwaysAllow ?? [])],
+      approvalMode: approvalMode ?? approvalModeFor(bot),
+      autoApprove: approvalMode ? false : Boolean(bot.autoApprove),
+      alwaysAllow: approvalMode ? [] : [...(bot.alwaysAllow ?? [])],
       unread: false,
       activity: "idle",
       busy: false,

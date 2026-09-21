@@ -1,3 +1,4 @@
+import { randomUUID } from "node:crypto";
 import { existsSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -59,6 +60,123 @@ it("coordinates a lead and its specialist from ordinary chat, returns to Clive, 
   expect(bots.find((bot: any) => bot.id === f.lead.id).tasks.find((task: any) => task.threadId === receipt.threadRef.threadId).openedBy)
     .toMatchObject({ botId: f.chief.id, name: "Clive" });
   expect(turn.system).toContain("only an actual coordinate_bots result proves that teammate participated");
+}), 45_000);
+
+it.each(["resume", "stop", "failed resume", "failed root"] as const)("keeps a guarded Chief request exact through coordination and %s", action => fixture(async f => {
+  const threadId = f.chief.activeTaskId;
+  const sendId = randomUUID();
+  const route = `/api/bots/${f.chief.id}/requests/${sendId}`;
+  const gate = join(f.session.info.dataDir, "guarded-coordination.gate");
+  const evidence: unknown[] = [{ fixture: f.session.info, action }];
+  const api = async (method: string, path: string, body?: unknown, expected = 200) => {
+    const response = await fetch(f.session.info.url + path, { method,
+      headers: { "content-type": "application/json", origin: f.session.info.url },
+      ...(body === undefined ? {} : { body: JSON.stringify(body) }) });
+    const result = await response.json() as any;
+    evidence.push({ method, path, body, status: response.status, result });
+    expect(response.status, JSON.stringify(result)).toBe(expected); return result;
+  };
+  try {
+    await api("PATCH", `/api/bots/${f.chief.id}`, { parkDirectMessages: true });
+    await api("PATCH", `/api/bots/${f.chief.id}/tasks/${threadId}`, { approvalMode: "ask" });
+    f.plan[f.lead.id] = { gateFile: gate, reply: "The gated CSV export check passed" };
+    f.plan[f.chief.id].failResumed = action === "failed resume";
+    f.save();
+    const before = await api("GET", `/api/threads/${threadId}/messages`);
+    const accepted = await api("POST", `/api/bots/${f.chief.id}/messages/guarded`, {
+      threadId, sendId, text: "Coordinate the gated CSV export check and own the result.", expectedActiveLeafId: before.activeLeafId,
+    }, 202);
+    const snapshot = () => api("GET", `${route}?threadId=${threadId}`);
+    await expect.poll(async () => {
+      const current = await snapshot();
+      return current.phase === "waiting" && current.activeTurnId === null &&
+        current.messages.some((message: any) => message.text === "Assigned to Engineering" && message.turnTerminal);
+    }, { timeout: 15_000 }).toBe(true);
+    const waiting = await snapshot();
+    expect(waiting).toMatchObject({ messageId: accepted.message.id, phase: "waiting", activeTurnId: null, executionId: expect.any(String) });
+    expect(waiting.messages[0]).toMatchObject({ id: accepted.message.id, sendId, role: "user" });
+    expect(waiting.messages.at(-1).id).toBe(waiting.activeLeafId);
+    expect(waiting.messages.find((message: any) => message.text === "Assigned to Engineering").requestMessageId).toBe(accepted.message.id);
+    await expect.poll(() => f.nodes().find((node: any) => node.botId === f.lead.id)?.status, { timeout: 15_000 }).toBe("running");
+    const child = f.nodes().find((node: any) => node.botId === f.lead.id);
+    // The public busy flag includes coordination. This no-op task update also
+    // proves the Chief's raw provider busy flag and dispatch claim are clear.
+    await api("PATCH", `/api/bots/${f.chief.id}/tasks/${threadId}`, { approvalMode: "ask" });
+    const target = { threadId, messageId: waiting.messageId, expectedActiveLeafId: waiting.activeLeafId,
+      expectedTurnId: waiting.activeTurnId, expectedExecutionId: waiting.executionId };
+    if (action === "failed root") {
+      await api("PATCH", `/api/bots/${f.chief.id}`, { chiefOfStaff: false, hidden: true });
+      await expect.poll(() => f.nodes().find((node: any) => node.id === waiting.executionId)?.status, { timeout: 15_000 }).toBe("failed");
+      writeFileSync(gate, "release the isolated teammate after its root failed");
+      const finalWait = await f.wait();
+      evidence.push({ command: ["wait", "--bot", f.chief.id, "--task", threadId, "--timeout", "30"], result: finalWait });
+      expect(finalWait.status).toBe("settled");
+      const failed = await snapshot();
+      expect(failed).toMatchObject({ messageId: accepted.message.id, phase: "untracked", activeTurnId: null, executionId: waiting.executionId });
+      expect(failed.messages[0].requestPending).toBe(true);
+      expect(failed.messages[0].requestCancelled).not.toBe(true);
+      expect(failed.messages.find((message: any) => message.turnTerminal)).toMatchObject({
+        text: "Assigned to Engineering", requestMessageId: accepted.message.id, turnSucceeded: true,
+      });
+      expect(failed.messages.some((message: any) => message.text === "The requested CSV export is implemented and verified")).toBe(false);
+      expect(f.evidence().filter((turn: any) => turn.botId === f.chief.id)).toHaveLength(1);
+      evidence.push({ command: ["messages", "--bot", f.chief.id, "--task", threadId, "--limit", "30"],
+        result: await f.cli("messages", "--bot", f.chief.id, "--task", threadId, "--limit", "30") });
+      return;
+    }
+    if (action === "stop") {
+      await api("POST", `${route}/interrupt`, { ...target, expectedExecutionId: null }, 409);
+      expect(await api("POST", `${route}/interrupt`, target)).toEqual({ ok: true, outcome: "stopped" });
+      await api("POST", `${route}/interrupt`, target, 409);
+      expect(f.nodes().find((node: any) => node.botId === f.lead.id).status).toBe("running");
+    }
+    writeFileSync(gate, "finish only the isolated teammate");
+    const childWait = await f.cli("wait", "--bot", f.lead.id, "--task", child.threadId, "--timeout", "20");
+    evidence.push({ command: ["wait", "--bot", f.lead.id, "--task", child.threadId, "--timeout", "20"], result: childWait });
+    expect(childWait.status).toBe("settled");
+    await expect.poll(() => f.nodes().find((node: any) => node.botId === f.lead.id).status).toBe("completed");
+    const finalWait = await f.wait();
+    evidence.push({ command: ["wait", "--bot", f.chief.id, "--task", threadId, "--timeout", "30"], result: finalWait });
+    expect(action === "failed resume" ? ["settled", "failed"] : ["settled"]).toContain(finalWait.status);
+    if (action === "stop") {
+      // Give an erroneously queued resume time to handshake and publish a turn.
+      await new Promise(resolve => setTimeout(resolve, 350));
+      expect(f.evidence().filter((turn: any) => turn.botId === f.chief.id)).toHaveLength(1);
+      const messages = await f.messages(threadId);
+      expect(new Set(messages.filter((message: any) => message.turnId).map((message: any) => message.turnId)).size).toBe(1);
+      expect(messages.some((message: any) => message.text === "The requested CSV export is implemented and verified")).toBe(false);
+      await api("POST", `${route}/interrupt`, target, 409);
+    } else if (action === "failed resume") {
+      const failed = await snapshot();
+      expect(failed).toMatchObject({ messageId: accepted.message.id, phase: "untracked", activeTurnId: null });
+      expect(failed.executionId).not.toBe(waiting.executionId);
+      const initial = failed.messages.find((message: any) => message.turnTerminal);
+      expect(initial).toMatchObject({ text: "Assigned to Engineering", requestMessageId: accepted.message.id, turnSucceeded: true });
+      expect(failed.messages.findLast((message: any) => message.turnSucceeded !== undefined).turnSucceeded).toBe(false);
+      expect(failed.messages.some((message: any) => message.text === "The requested CSV export is implemented and verified")).toBe(false);
+      expect(f.evidence().map((turn: any) => turn.botId)).toEqual([f.chief.id, f.lead.id, f.chief.id]);
+      await api("POST", `${route}/interrupt`, target, 409);
+    } else {
+      const settled = await snapshot();
+      expect(settled).toMatchObject({ messageId: accepted.message.id, phase: "settled", activeTurnId: null, executionId: expect.any(String) });
+      expect(settled.executionId).not.toBe(waiting.executionId);
+      expect(settled.messages[0].id).toBe(accepted.message.id);
+      expect(settled.messages.at(-1).id).toBe(settled.activeLeafId);
+      for (let index = 1; index < settled.messages.length; index++) expect(settled.messages[index].parentId).toBe(settled.messages[index - 1].id);
+      const replies = settled.messages.filter((message: any) => message.role === "bot" && message.kind === "text" && message.turnTerminal);
+      expect(replies.map((message: any) => message.text)).toEqual(["Assigned to Engineering", "The requested CSV export is implemented and verified"]);
+      expect(new Set(replies.map((message: any) => message.turnId)).size).toBe(2);
+      expect(settled.messages.filter((message: any) => message.turnId).every((message: any) => message.requestMessageId === accepted.message.id)).toBe(true);
+      expect(f.evidence().map((turn: any) => turn.botId)).toEqual([f.chief.id, f.lead.id, f.chief.id]);
+      await api("POST", `${route}/interrupt`, target, 409);
+    }
+    evidence.push({ command: ["messages", "--bot", f.chief.id, "--task", threadId, "--limit", "30"],
+      result: await f.cli("messages", "--bot", f.chief.id, "--task", threadId, "--limit", "30") });
+  } finally {
+    const evidencePath = `${f.session.info.logPath}.guarded-coordination-${action.replaceAll(" ", "-")}.json`;
+    writeFileSync(evidencePath, JSON.stringify(evidence, null, 2));
+    console.info(JSON.stringify({ evidencePath, logPath: f.session.info.logPath }));
+  }
 }), 45_000);
 
 it("uses only the coordinator for teammates and lets the opener find and close the completed task", () => fixture(async f => {

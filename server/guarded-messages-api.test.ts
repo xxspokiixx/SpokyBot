@@ -181,6 +181,51 @@ describe("guarded external messages through an isolated runtime", () => {
     await noQueuedWork(bot.activeTaskId);
     await finish(bot);
   }, 30_000);
+
+  it("reports an exact request and stops only its snapshotted execution", async () => {
+    expect((await api("GET", "/api/health")).body.capabilities.guardedRequests).toBe(1);
+    const bot = await newBot(), input = payload(bot, "EXACT_REQUEST_TO_STOP");
+    const accepted = await guarded(bot, input);
+    expect(accepted.status).toBe(202);
+    await launched(bot.activeTaskId);
+    const route = `/api/bots/${bot.id}/requests/${input.sendId}`;
+    const snapshot = (await api("GET", `${route}?threadId=${bot.activeTaskId}`)).body;
+    expect(snapshot).toMatchObject({ messageId: accepted.body.message.id, phase: "working" });
+    expect(typeof snapshot.executionId).toBe("string");
+    const target = { threadId: bot.activeTaskId, messageId: snapshot.messageId, expectedActiveLeafId: snapshot.activeLeafId,
+      expectedTurnId: snapshot.activeTurnId, expectedExecutionId: snapshot.executionId };
+    // A null/old setup lease must never match a newer generation, even if a
+    // provider has not assigned its own turn id yet.
+    expect((await api("POST", `${route}/interrupt`, { ...target, expectedExecutionId: null })).status).toBe(409);
+    expect((await api("POST", `${route}/interrupt`, { ...target, expectedTurnId: "foreign-turn" })).status).toBe(409);
+    expect((await api("POST", `${route}/interrupt`, { ...target, extra: true })).status).toBe(400);
+    expect((await api("POST", `${route}/interrupt`, target, { origin: "https://untrusted.example.test" })).status).toBe(403);
+    const stopped = await api("POST", `${route}/interrupt`, target);
+    expect(stopped).toMatchObject({ status: 200, body: { ok: true, outcome: "stopped" } });
+    await expect.poll(async () => (await api("GET", "/api/bots?messages=0")).body.bots.find((entry: any) => entry.id === bot.id).busy).toBe(false);
+    expect((await api("POST", `${route}/interrupt`, target)).status).toBe(409);
+    expect(existsSync(file(bot.activeTaskId, "gate"))).toBe(false);
+  }, 30_000);
+
+  it("keeps old stop receipts from reaching a later human turn and rejects foreign threads", async () => {
+    const bot = await newBot(), input = payload(bot, "FIRST_REQUEST_COMPLETE");
+    expect((await guarded(bot, input)).status).toBe(202);
+    await finish(bot);
+    const route = `/api/bots/${bot.id}/requests/${input.sendId}`;
+    const settled = (await api("GET", `${route}?threadId=${bot.activeTaskId}`)).body;
+    expect(settled.phase).toBe("settled");
+    const final = settled.messages.find((message: any) => message.turnTerminal);
+    expect(final.requestMessageId).toBe(settled.messageId);
+    const target = { threadId: bot.activeTaskId, messageId: settled.messageId, expectedActiveLeafId: settled.activeLeafId,
+      expectedTurnId: settled.activeTurnId, expectedExecutionId: settled.executionId };
+    expect((await api("POST", `${route}/interrupt`, target)).status).toBe(409);
+    const other = await newBot();
+    expect((await api("GET", `${route}?threadId=${other.activeTaskId}`)).status).toBe(409);
+    await control(["send", "--bot", bot.id, "--task", bot.activeTaskId, "--text", "A_LATER_HUMAN_REQUEST"]);
+    expect((await api("GET", `${route}?threadId=${bot.activeTaskId}`))).toMatchObject({ status: 409, body: { code: "guarded_request_changed" } });
+    expect((await api("POST", `${route}/interrupt`, target)).status).toBe(409);
+    expect((await control(["wait", "--bot", bot.id, "--task", bot.activeTaskId, "--timeout", "15"])).status).toBe("settled");
+  }, 30_000);
 });
 
 it("refuses a parked conversation after its own provider settles while its teammate is still working", async () => {

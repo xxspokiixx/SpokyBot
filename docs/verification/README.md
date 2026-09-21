@@ -129,7 +129,9 @@ attachments and message-scoped download authorization using isolated fixtures.
 
 The [guarded external messages fixture](guarded-messages.md) checks atomic
 branch and approval preconditions, retry receipts, and refusal to queue or
-steer messages from external interfaces.
+steer messages from external interfaces. It also verifies bounded request
+lineage snapshots, Chief continuations and exact-execution Stop without
+interrupting a newer request.
 
 The [iOS thread checks](ios-threads.md) cover the native thread tree, folder
 search and draft isolation using disposable simulators and an offline fixture.

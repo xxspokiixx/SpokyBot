@@ -18,6 +18,7 @@ import { autoCompactWindow } from "./drivers/claude.ts";
 import { SharedComputers, sharedComputerOperation, sharedComputerRegistration } from "./shared-computers.ts";
 import { SharedComputerControl } from "./shared-computer-control.ts";
 import { RoomHandoffs, type RoomHandoff } from "./room-handoffs.ts";
+import { assertRequestTarget, guardedRequestPath, requestConflict, requestNeedsInput, requestSourceForCard } from "./guarded-requests.ts";
 import { botAvatarUrlFromStoredPath } from "../shared/bot-avatar.ts";
 import { BOT_PROFILE_LIMITS } from "../shared/bot-profile.ts";
 import { CLOUD_COMPUTER_BUSY_ERROR } from "../shared/computer-contention.ts";
@@ -418,7 +419,7 @@ import {
 } from "./turn-dispatch-guard.ts";
 import { createGracefulShutdown } from "./graceful-shutdown.ts";
 import { acquireDataDirLeaseForProcess } from "./data-dir-lease.ts";
-import { createWorkspaceAccess, describeEdition, editionStatus, hostedWorkspaceConfiguration, hostedWorkspaceConfigured, loadEnterpriseLayer, type WorkspaceAccess } from "./enterprise.ts";
+import { createWorkspaceAccess, describeEdition, editionStatus, hostedWorkspaceConfiguration, hostedWorkspaceConfigured, sharedWorkspaceFullAccessConfigured, loadEnterpriseLayer, type WorkspaceAccess } from "./enterprise.ts";
 import { environmentDescriptor, loadEnvironmentId, serverVersion } from "./environment.ts";
 import { WorkspaceBackupMaintenance } from "./workspace-backup-maintenance.ts";
 import { createWorkspaceBackupRoutes, isWorkspaceBackupSessionControl } from "./workspace-backup-http.ts";
@@ -519,6 +520,8 @@ const SESSION_COOKIE = sessionCookieName(PORT, ENVIRONMENT_ID);
 const HOSTED_WORKSPACE = hostedWorkspaceConfigured();
 let workspaceAccess: WorkspaceAccess | null = null;
 const DESKTOP_MANAGED = process.env.OMB_DESKTOP_PARENT === "1";
+const SHARED_WORKSPACE_FULL_ACCESS = sharedWorkspaceFullAccessConfigured();
+const sharedWorkspaceFullAccessEnabled = () => SHARED_WORKSPACE_FULL_ACCESS && Boolean(workspaceAccess) && entitled("admin");
 // Empty is deliberately a deny-all bootstrap state. Only Electron's private
 // utility-process port can replace it with the per-launch owner capability.
 let desktopMutationToken: string | undefined = DESKTOP_MANAGED ? "" : undefined;
@@ -1012,6 +1015,11 @@ type DirectTurnDispatchClaim = {
 class DirectTurnSetupCancelled extends Error {}
 const directTurnDispatchClaims = new Map<string, DirectTurnDispatchClaim>();
 const directTurnGenerationByThread = new Map<string, string>();
+// Only the latest direct request per thread is retained. A fresh user turn
+// replaces it; unknown control-plane continuations deliberately lose proof.
+const directRequestOwners = new Map<string, {
+  generation: string; messageId?: string; generations: Set<string>; turnId: string | null; stopped?: boolean;
+}>();
 // Stop revokes credentials before completion, but the receipt must retain its
 // exact provider-turn owner until that completion or explicit failure cleanup.
 type DirectTurnOutcome = { ok: boolean; text: string };
@@ -1154,6 +1162,11 @@ function requestedTaskBot(botId: string, rawThreadId: unknown): BotRecord {
 }
 
 async function interruptDirectThread(botId: string, threadId: string): Promise<void> {
+  const requestOwner = directRequestOwners.get(threadId);
+  if (requestOwner) {
+    requestOwner.stopped = true;
+    if (requestOwner.messageId) store.patchMessage(threadId, requestOwner.messageId, { requestCancelled: true });
+  }
   // Stop belongs to the conversation it was pressed in. This bot's turn ends
   // and this conversation stops awaiting its teammates, so nothing resumes
   // into a stopped chat; assignments that never started are dropped. A
@@ -1269,7 +1282,12 @@ function markDirectTurnDispatching(botId: string, claimId: string, threadId: str
 }
 
 function clearDirectTurnDispatch(threadId: string, claimId: string): void {
-  if (directTurnDispatchClaims.get(threadId)?.id === claimId) directTurnDispatchClaims.delete(threadId);
+  if (directTurnDispatchClaims.get(threadId)?.id === claimId) {
+    directTurnDispatchClaims.delete(threadId);
+    // A fast provider can settle before its dispatch ACK. Its first cleanup
+    // still saw this reservation, so releasing it must retry the final fence.
+    settleTrackedRequest(threadId);
+  }
 }
 
 const compactionControllers = new Map<string, { generation: string; controller: AbortController }>();
@@ -2710,6 +2728,7 @@ const roomHandoffs = new RoomHandoffs(join(DATA_DIR, "room-handoffs.json"), {
       if (group) broadcast({ kind: "group", group: publicGroupState(group) });
     }
     for (const threadId of directThreadIds) {
+      settleTrackedRequest(threadId);
       const bot = store.botByThread(threadId);
       if (bot) broadcast({ kind: "bot", bot: wireBot(bot) });
     }
@@ -2793,6 +2812,8 @@ const roomHandoffs = new RoomHandoffs(join(DATA_DIR, "room-handoffs.json"), {
       if (signal.aborted) { abort(); return; }
       void startTurn(bot.id, turnText, {
         threadId: node.threadId, cardContinuation: true, commsDepth: MAX_COMMS_DEPTH,
+        requestMessageId: directRequestOwners.get(node.threadId)?.generations.has(node.rootId)
+          ? directRequestOwners.get(node.threadId)?.messageId : undefined,
         unattended: isUnattended(bot.id, node.threadId),
         coordination: { id: node.id, resumed, settle: finish },
         onDispatchError: error => finish({ ok: false, text: error }),
@@ -3173,6 +3194,7 @@ store.onChange((change) => {
       broadcast({ kind: "thread", threadId: change.threadId, activeLeafId: change.activeLeafId });
       break;
     case "thread.deleted":
+      directRequestOwners.delete(change.threadId);
       routines?.forgetRoutineRequestReceiptsForThread(change.threadId);
       // A deleted destination must not strand an approval in an internal
       // task. Keep each run's snapshot and expose its execution as fallback.
@@ -3253,6 +3275,60 @@ function messagePage(threadId: string, limit: number | undefined, before?: strin
     hasMore: start > 0,
     activeLeafId: store.activeLeaf(threadId),
   };
+}
+
+function guardedRequestSnapshot(botId: string, threadId: string, sendId: string) {
+  if (!store.taskByThread(botId, threadId)) throw requestConflict("No such conversation for this bot");
+  const activeLeafId = store.activeLeaf(threadId);
+  const messages = guardedRequestPath(store.messagesFor(threadId), activeLeafId, sendId);
+  const messageId = messages[0].id;
+  const owner = directRequestOwners.get(threadId);
+  const busy = threadBusy(botId, threadId);
+  const waiting = messages.some(requestNeedsInput) || roomHandoffs.activeDirect(threadId) ||
+    [...pendingTeamSetupResumes.values()].some(entry => entry.request.threadId === threadId);
+  const latestTerminal = messages.findLast(message => message.role === "bot" && message.kind === "text" && message.turnTerminal);
+  const latestTurn = messages.findLast(message => message.turnId);
+  const latestOutcome = messages.findLast(message => message.turnSucceeded !== undefined);
+  // A restart retains proven transcript annotations, not an execution lease.
+  // Unproven output or a different live owner always requires the workspace.
+  const untracked = messages[0].requestCancelled || (owner && (owner.messageId !== messageId || owner.stopped)) ||
+    (busy && !owner) || messages.slice(1).some(message =>
+      (message.turnId || (message.role === "bot" && message.kind === "text")) && message.requestMessageId !== messageId) ||
+    (!busy && !waiting && (messages[0].requestPending !== false || !latestTerminal?.turnSucceeded || latestTurn?.turnId !== latestTerminal.turnId ||
+      latestOutcome?.turnSucceeded !== true || (owner && owner.turnId !== latestTerminal.turnId)));
+  const snapshot = {
+    messageId, activeLeafId,
+    phase: untracked ? "untracked" : waiting ? "waiting" : busy ? "working" : "settled",
+    activeTurnId: busy ? owner?.turnId ?? null : null,
+    executionId: owner?.generation ?? null,
+    messages: messages.map(slimMessage),
+  };
+  if (Buffer.byteLength(JSON.stringify(snapshot), "utf8") > 1024 * 1024) {
+    throw Object.assign(new Error("Open this request in the workspace; its transcript exceeds the response limit"), { status: 413 });
+  }
+  return snapshot;
+}
+
+/** A durable completion fence, not a replay queue. If the process dies while
+ * a Chief is awaiting results, its earlier handoff must not become a final. */
+function settleTrackedRequest(threadId: string): void {
+  const owner = directRequestOwners.get(threadId);
+  const bot = store.botByThread(threadId);
+  if (!owner?.messageId || owner.stopped || !bot || threadBusy(bot.id, threadId) || roomHandoffs.activeDirect(threadId) ||
+      [...pendingTeamSetupResumes.values()].some(entry => entry.request.threadId === threadId)) return;
+  // A failed coordination root never supplies the promised return, even if
+  // its original provider successfully said it had assigned the work.
+  if ([...roomHandoffs.nodes.values()].some(node => !node.parentId && node.threadId === threadId &&
+      owner.generations.has(node.id) && node.status !== "completed")) return;
+  const path = store.activePath(threadId);
+  const source = path.findLast(message => message.role === "user");
+  if (source?.id !== owner.messageId || source.requestCancelled || source.requestPending !== true) return;
+  const messages = path.slice(path.indexOf(source) + 1);
+  const terminal = messages.findLast(message => message.turnTerminal && message.role === "bot" && message.kind === "text");
+  if (messages.some(requestNeedsInput) || terminal?.requestMessageId !== source.id || !terminal.turnSucceeded ||
+      terminal.turnId !== owner.turnId || messages.findLast(message => message.turnId)?.turnId !== terminal.turnId ||
+      messages.findLast(message => message.turnSucceeded !== undefined)?.turnSucceeded !== true) return;
+  store.patchMessage(threadId, source.id, { requestPending: false });
 }
 
 /** A bounded page centred on a known message, used when a search result is
@@ -3785,6 +3861,7 @@ async function scheduleTurnDigest(input: {
   from?: Message["from"];
   isCurrent: () => boolean;
   usage?: { input: number; output: number; cachedInput?: number; costUsd?: number | null };
+  succeeded?: boolean;
 }): Promise<void> {
   const at = Date.now();
   const startedAt = turnStartedAt.get(input.threadId);
@@ -3814,6 +3891,8 @@ async function scheduleTurnDigest(input: {
         text: renderDigest(digest),
         digest,
         turnId: input.turnId,
+        requestMessageId: activities.find(message => message.turnId === input.turnId && message.requestMessageId)?.requestMessageId,
+        turnSucceeded: input.succeeded,
         ...(input.from ? { from: input.from } : {}),
       }, { kind: "digest.append", key: `${input.threadId}:${input.turnId}` });
     // This is derived from the native session's own work, not an unseen
@@ -4621,7 +4700,11 @@ bus.subscribe((event: RuntimeEvent) => {
   const speaker = group ? groupSpeakers.get(event.threadId) : undefined;
 
   const pushMessage = (m: Omit<Message, "id" | "at">) => {
-    const message = store.appendMessage(event.threadId, group && m.role === "bot" ? { ...m, from: speaker } : m);
+    const owner = bot ? directRequestOwners.get(event.threadId) : undefined;
+    const proven = owner?.messageId && !owner.stopped && owner.generation === directTurnGenerationByThread.get(event.threadId) &&
+      owner.turnId && (!event.turnId || event.turnId === owner.turnId);
+    const message = store.appendMessage(event.threadId, group && m.role === "bot" ? { ...m, from: speaker }
+      : proven ? { ...m, requestMessageId: owner.messageId } : m);
     return message;
   };
 
@@ -4632,6 +4715,9 @@ bus.subscribe((event: RuntimeEvent) => {
   if (bot) handoffs.onEvent(event);
 
   if (event.turnId) liveTurnByThread.set(event.threadId, event.turnId);
+  const requestOwner = bot ? directRequestOwners.get(event.threadId) : undefined;
+  if (requestOwner && event.turnId && !requestOwner.turnId && event.type === "turn.started" &&
+      directTurnDispatchClaims.get(event.threadId)?.id === requestOwner.generation) requestOwner.turnId = event.turnId;
   const liveTurnId = event.turnId ?? liveTurnByThread.get(event.threadId);
   switch (event.type) {
     case "turn.started":
@@ -4955,7 +5041,10 @@ bus.subscribe((event: RuntimeEvent) => {
           });
         }
       }
-      if (completedTurnId) store.markTerminalAssistantMessage(event.threadId, completedTurnId);
+      if (completedTurnId) {
+        const terminal = store.markTerminalAssistantMessage(event.threadId, completedTurnId);
+        if (terminal) store.patchMessage(event.threadId, terminal.id, { turnSucceeded: event.ok });
+      }
       const reply = lastReply.get(event.threadId) ?? "";
       lastReply.delete(event.threadId);
       // A run that broke — not one the person stopped, and not a routine's,
@@ -5002,6 +5091,7 @@ bus.subscribe((event: RuntimeEvent) => {
             drainTeamSetupResumes();
             drainDelegationWakes();
           }
+          settleTrackedRequest(event.threadId);
         };
         // bank what this turn spent before the bot broadcast carries the
         // task list to every window. The driver's own per-turn figure
@@ -5050,6 +5140,7 @@ bus.subscribe((event: RuntimeEvent) => {
             botName: bot.name,
             threadId: event.threadId,
             turnId: completedTurnId,
+            succeeded: event.ok,
             driverKind: registry.get(selection.instanceId)?.driverKind,
             instanceId: selection.instanceId,
             reply,
@@ -6103,6 +6194,9 @@ async function startTurn(
      * The prompt is control-plane context: it reaches the provider without
      * masquerading as another message authored by the user. */
     cardContinuation?: boolean;
+    /** Harness-only provenance: an explicitly bound continuation, never a
+     * client option and never inferred from the latest user on the thread. */
+    requestMessageId?: string;
     /** A single tool-requested surface change continues the same human ask. */
     computerSelectionContinuation?: boolean;
     /** Earlier text message this user turn is replying to. */
@@ -6292,6 +6386,18 @@ async function startTurn(
   const resourceOwner = { threadId, generation: dispatchClaimId };
   turnResourceOwners.set(threadId, resourceOwner);
   directTurnGenerationByThread.set(threadId, dispatchClaimId);
+  let requestMessageId = opts?.cardContinuation ? opts.requestMessageId : userMessage.id;
+  const previousRequest = directRequestOwners.get(threadId);
+  const requestGenerations = requestMessageId && previousRequest?.messageId === requestMessageId
+    ? previousRequest.generations : new Set<string>();
+  if (requestGenerations.size >= 500) { requestGenerations.clear(); requestMessageId = undefined; }
+  requestGenerations.add(dispatchClaimId);
+  directRequestOwners.set(threadId, { generation: dispatchClaimId, messageId: requestMessageId,
+    generations: requestGenerations, turnId: null });
+  // An unknown control-plane wake may invalidate a prior final, but it must
+  // never acquire authority by guessing the latest user as its origin.
+  const pendingSource = requestMessageId ?? store.activePath(threadId).findLast(message => message.role === "user")?.id;
+  if (pendingSource) store.patchMessage(threadId, pendingSource, { requestPending: true });
   if (opts?.coordination) directCoordinationSettlers.set(dispatchClaimId, opts.coordination.settle);
   // Ordinary sources need the same exact completion ownership as queued
   // follow-ups: any normal turn may ask teammates to coordinate work.
@@ -7105,6 +7211,11 @@ async function startTurn(
         retireProviderTurn(dispatch.value.turnId);
         throw new DirectTurnSetupCancelled("turn stopped during provider setup");
       }
+      const requestOwner = directRequestOwners.get(threadId);
+      if (requestOwner?.generation === dispatchClaimId && dispatch.value.turnId) {
+        if (requestOwner.turnId && requestOwner.turnId !== dispatch.value.turnId) requestOwner.messageId = undefined;
+        requestOwner.turnId = dispatch.value.turnId;
+      }
       bindInternalCapabilityToProviderTurn(threadId, dispatchClaimId, dispatch.value.turnId);
       handoffs.bindTurn(threadId, dispatchClaimId, dispatch.value.turnId);
       if (directFollowupSettlers.has(dispatchClaimId) && dispatch.value.turnId &&
@@ -7188,6 +7299,7 @@ async function startTurn(
       store.appendMessage(threadId, {
         role: "bot",
         kind: "activity",
+        turnSucceeded: false,
         tool: { name: `error: ${message.slice(0, 160)}`, ok: false },
       });
       // Worth a buzz for the same reason a routine failure is, and the rule
@@ -7921,7 +8033,8 @@ function dispatchTeamSetupResume(entry: TeamSetupResumeEntry): void {
     groupQueues.set(groupId, next.finally(() => finishGroupTurnOperation(groupId, operation)).catch((error) => failed(error instanceof Error ? error.message : String(error))));
     return;
   }
-  void startTurn(request.botId, prompt, { threadId: request.threadId, cardContinuation: true, onDispatchError: failed }).catch((error) => {
+  void startTurn(request.botId, prompt, { threadId: request.threadId, cardContinuation: true,
+    requestMessageId: requestSourceForCard(store.messagesFor(request.threadId), messageId), onDispatchError: failed }).catch((error) => {
     if (cancelled()) return;
     if (isTurnAdmissionBlocked(error)) pendingTeamSetupResumes.set(request.requestId, entry);
     else failed(error instanceof Error ? error.message : String(error));
@@ -15944,6 +16057,32 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
       });
       return json(res, 200, { message: patched });
     }
+    m = path.match(/^\/api\/bots\/([\w-]+)\/requests\/([A-Za-z0-9_-]{16,80})(\/interrupt)?$/);
+    if (m && ((method === "GET" && !m[3]) || (method === "POST" && m[3]))) {
+      const body = method === "GET" ? { threadId: url.searchParams.get("threadId") } : await readBody(req);
+      const id = z.string().regex(/^[\w-]+$/);
+      const parsed = (method === "GET" ? z.object({ threadId: id }).strict() : z.object({
+        threadId: id, messageId: id, expectedActiveLeafId: id.nullable(),
+        expectedTurnId: z.string().min(1).max(200).nullable(), expectedExecutionId: id.nullable(),
+      }).strict()).safeParse(body);
+      if (!parsed.success) return json(res, 400, { error: "A pinned thread and exact request snapshot are required" });
+      const threadId = parsed.data.threadId;
+      const snapshot = guardedRequestSnapshot(m[1], threadId, m[2]);
+      res.setHeader("cache-control", "private, no-store");
+      if (method === "GET") return json(res, 200, snapshot);
+      assertRequestTarget(snapshot, body);
+      const owner = directRequestOwners.get(threadId);
+      if (snapshot.phase === "untracked" || !owner || owner.messageId !== snapshot.messageId) {
+        return json(res, 409, { error: "This continuation cannot be safely stopped from this interface", code: "guarded_request_untracked" });
+      }
+      if (snapshot.phase === "settled") throw requestConflict("This request has already settled");
+      // No await between comparing the exact lease and revoking it. Retrying
+      // this body cannot bind to a later setup claim with a null provider id.
+      owner.stopped = true;
+      handoffs.stoppedByPerson(threadId);
+      await interruptDirectThread(m[1], threadId);
+      return json(res, 200, { ok: true, outcome: "stopped" });
+    }
     m = path.match(/^\/api\/bots\/([\w-]+)\/messages(?:\/(guarded))?$/);
     if (m && method === "POST") {
       const guarded = m[2] === "guarded";
@@ -15958,6 +16097,7 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
         sendId: z.string().regex(/^[A-Za-z0-9_-]{16,80}$/),
         text: z.string().min(1),
         expectedActiveLeafId: z.string().regex(/^[\w-]+$/).nullable(),
+        expectedApprovalMode: z.enum(["ask", "full"]).optional(),
         replyToId: z.string().optional(),
       }).strict().safeParse(body).success) {
         return json(res, 400, { error: "guarded sends require threadId, sendId, text and expectedActiveLeafId" });
@@ -16028,8 +16168,10 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
             // There is no await between these checks and startTurn's
             // synchronous transcript append / runtime reservation. In
             // particular, never steer or enqueue under stale permissions.
-            if (approvalModeFor(currentAtStart) !== "ask" || currentAtStart.autoApprove === true || currentAtStart.alwaysAllow?.length) {
-              throw Object.assign(new Error("guarded sends require Ask mode without remembered permissions"), { status: 409, code: "guarded_permissions" });
+            const expectedMode = body.expectedApprovalMode ?? "ask";
+            if (approvalModeFor(currentAtStart) !== expectedMode ||
+                (expectedMode === "ask" && (currentAtStart.autoApprove === true || currentAtStart.alwaysAllow?.length))) {
+              throw Object.assign(new Error("guarded sends require the exact expected approval mode; Ask cannot have remembered permissions"), { status: 409, code: "guarded_permissions" });
             }
             if (store.activeLeaf(threadId) !== body.expectedActiveLeafId) {
               throw Object.assign(new Error("the conversation changed before this message could start"), { status: 409, code: "guarded_branch" });
@@ -16528,15 +16670,28 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
     m = path.match(/^\/api\/bots\/([\w-]+)\/tasks$/);
     if (m && method === "POST") {
       const body = await readBody(req);
+      if (!body || typeof body !== "object" || Array.isArray(body)) return json(res, 400, { error: "body must be a JSON object" });
       const bot = store.bot(m[1]);
       if (!bot) return json(res, 404, { error: "no such bot" });
+      if (body.approvalMode !== undefined && body.approvalMode !== "ask" && body.approvalMode !== "full") {
+        return json(res, 400, { error: "new task approvalMode must be ask or full" });
+      }
+      if (body.approvalMode === "full") {
+        if (auth.kind !== "loopback" || !sharedWorkspaceFullAccessEnabled()) {
+          return json(res, 403, { error: "New Full tasks require the operator's dedicated shared-workspace policy" });
+        }
+        if (bot.approvalGrant) return json(res, 409, { error: "the bot's approval mode is still being confirmed" });
+        if (!supportsApprovalMode(registry.cliTarget(bot.modelSelection.instanceId)?.driverKind, "full")) {
+          return json(res, 400, { error: "This provider does not support Full access" });
+        }
+      }
       if (phoneSecretSubmissions.hasBot(bot.id)) {
         return json(res, 409, { error: "this bot is securely saving a credential — try again when it finishes" });
       }
       if (body.projectId !== undefined && (typeof body.projectId !== "string" || !store.project(bot.id, body.projectId))) {
         return json(res, 400, { error: "projectId must belong to this bot" });
       }
-      const task = store.createTask(bot.id, typeof body.title === "string" ? body.title : undefined, true, body.projectId);
+      const task = store.createTask(bot.id, typeof body.title === "string" ? body.title : undefined, true, body.projectId, undefined, body.approvalMode);
       if (!task) return json(res, 500, { error: "couldn't create that task" });
       const fresh = botWithThread(store.bot(bot.id)!);
       broadcast({ kind: "bot", bot: fresh });
@@ -16995,7 +17150,10 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
     // child proves it is OURS by echoing its pid (a stray dev server has
     // the same API shape but a different pid)
     if (method === "GET" && path === "/api/health") {
-      return json(res, 200, { app: "openmausbot", pid: process.pid, static: Boolean(STATIC_DIR), capabilities: { guardedMessages: 1 } });
+      return json(res, 200, { app: "openmausbot", pid: process.pid, static: Boolean(STATIC_DIR), capabilities: {
+        guardedMessages: 1, guardedRequests: 1, guardedFullAccess: 1,
+        ...(sharedWorkspaceFullAccessEnabled() ? { sharedWorkspaceFullAccess: 1 } : {}),
+      } });
     }
     // The bots' browser engine: install it on this machine (agent-browser +
     // a Chrome for Testing, a one-time download), or ask how that is going.
@@ -18437,7 +18595,7 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
   } catch (e) {
     const status = (e as any)?.status ?? 500;
     const candidateCode = (e as { code?: unknown })?.code;
-    const code = typeof candidateCode === "string" && ["guarded_busy", "guarded_branch", "guarded_permissions"].includes(candidateCode)
+    const code = typeof candidateCode === "string" && ["guarded_busy", "guarded_branch", "guarded_permissions", "guarded_request_changed", "guarded_request_untracked"].includes(candidateCode)
       ? candidateCode : undefined;
     return json(res, status, { error: e instanceof Error ? e.message : String(e), ...(code ? { code } : {}) });
   } finally {
