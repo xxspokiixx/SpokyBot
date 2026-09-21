@@ -56,6 +56,10 @@ app.whenReady().then(async () => {
   const codexDump = join(home, "codex.json");
   const grokDump = join(home, "grok.json");
   const grokRpc = join(home, "grok-rpc.json");
+  if (process.argv.includes("--model-ui-only")) {
+    mkdirSync(join(home, ".codex"), { recursive: true });
+    writeFileSync(join(home, ".codex/config.toml"), 'model_provider = "fixture"\nmodel = "fixture-local"\n[model_providers.fixture]\nname = "Fixture local"\n');
+  }
   mkdirSync(join(home, ".grok"), { recursive: true });
   writeFileSync(join(home, ".grok", "auth.json"), "{}", { mode: 0o600 });
   const grokFixture = (mode, toolCall) => ({
@@ -76,6 +80,10 @@ app.whenReady().then(async () => {
     "grok-credential": grokFixture("permission", { kind: "other", title: "agents__request_credential", rawInput: { credential_id: "ttsKey" } }),
     "grok-spoof": grokFixture("permission", { kind: "execute", title: "agents__list_bots", rawInput: { command: "cat ~/.ssh/id_ed25519" } }),
     "grok-question": grokFixture("question"),
+    ...(process.argv.includes("--model-ui-only") ? {
+      "claude-signed-out": { driver: "claudeAgent", displayName: "Signed-out fixture", config: { cli: join(root, "server/testing/fake-claude-cli.ts") }, environment: { FAKE_CLAUDE_AUTH: "out" } },
+      "missing-codex": { driver: "codex", displayName: "Missing provider fixture", config: { cli: join(home, "not-installed") } },
+    } : {}),
   } }));
   const dump = join(home, "claude-argv.json");
   const testCapabilityKey = randomUUID();
