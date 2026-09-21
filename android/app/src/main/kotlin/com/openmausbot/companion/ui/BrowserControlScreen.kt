@@ -66,6 +66,10 @@ import com.openmausbot.companion.core.RemotePoint
 import com.openmausbot.companion.core.ViewTransform
 import com.openmausbot.companion.core.ViewportMapping
 import com.openmausbot.companion.core.bytes
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.cancel
 import kotlinx.coroutines.launch
 import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.put
@@ -137,15 +141,20 @@ fun BrowserControlScreen(botId: String, onBack: () -> Unit) {
                         }
                     }
                     is BrowserLiveMessage.Url -> address = message.url
-                    is BrowserLiveMessage.Viewer -> {
-                        viewerId = message.id
+                    is BrowserLiveMessage.Ready -> {
+                        viewerId = message.viewerId
                         queue = BrowserInputQueue(
                             scope = scope,
-                            send = { body -> live.send(botId, message.id, body) },
+                            send = { body -> live.send(botId, message.viewerId, body) },
                             onError = { failure = it.message },
                         )
                     }
+                    // The server is the authority on who is driving: a peer
+                    // taking control must end ours rather than leave two
+                    // surfaces both believing they hold it.
+                    is BrowserLiveMessage.Control -> if (!message.controlling) driving = false
                     is BrowserLiveMessage.Error -> failure = message.message
+                    is BrowserLiveMessage.Heartbeat -> Unit
                     is BrowserLiveMessage.Tabs -> Unit
                 }
             }
@@ -154,13 +163,29 @@ fun BrowserControlScreen(botId: String, onBack: () -> Unit) {
 
     // A key or button left down on the remote outlives the session, and
     // nothing on the far side will ever lift it.
+    //
+    // Deliberately not rememberCoroutineScope: that scope is cancelled in the
+    // same disposal pass, so the release never left the phone and the server
+    // was left believing the session still held control. This one outlives
+    // the composition on purpose, and is the only place that is true.
+    val releaseScope = remember { CoroutineScope(SupervisorJob() + Dispatchers.Default) }
     DisposableEffect(botId) {
         onDispose {
             val held = core.flush()
-            scope.launch {
-                queue?.let { pending ->
-                    held.forEach { intent -> sink.bodies(intent).forEach { pending.enqueue(it) } }
-                    pending.drain()
+            val pending = queue
+            val id = viewerId
+            val live = transport
+            releaseScope.launch {
+                try {
+                    if (pending != null) {
+                        held.forEach { intent -> sink.bodies(intent).forEach { pending.enqueue(it) } }
+                        pending.drain()
+                    }
+                    if (live != null && id != null) {
+                        runCatching { live.action(botId, id, buildJsonObject { put("type", "release") }) }
+                    }
+                } finally {
+                    releaseScope.cancel()
                 }
             }
         }
@@ -190,7 +215,7 @@ fun BrowserControlScreen(botId: String, onBack: () -> Unit) {
                     val id = viewerId
                     val live = transport
                     if (id != null && live != null && address.isNotBlank()) {
-                        val target = if ("://" in address) address else "https://\$address"
+                        val target = if ("://" in address) address else "https://$address"
                         scope.launch {
                             runCatching {
                                 live.action(botId, id, buildJsonObject {
@@ -234,11 +259,19 @@ fun BrowserControlScreen(botId: String, onBack: () -> Unit) {
                     modifier = Modifier
                         .fillMaxSize()
                         .graphicsLayer {
+                            // Measured against the drawn frame, not the view.
+                            // The gesture core maps coordinates through the
+                            // same aspect fit, and on a letterboxed frame the
+                            // two differ enough that a zoomed tap lands
+                            // nowhere near the pixel touched.
+                            val frameW = frame?.deviceWidth ?: 1280.0
+                            val frameH = frame?.deviceHeight ?: 720.0
+                            val fit = minOf(size.width / frameW, size.height / frameH)
                             scaleX = transform.scale.toFloat()
                             scaleY = transform.scale.toFloat()
                             transformOrigin = TransformOrigin(0f, 0f)
-                            translationX = (-transform.offsetX * size.width * transform.scale).toFloat()
-                            translationY = (-transform.offsetY * size.height * transform.scale).toFloat()
+                            translationX = (-transform.offsetX * frameW * fit * transform.scale).toFloat()
+                            translationY = (-transform.offsetY * frameH * fit * transform.scale).toFloat()
                         },
                 )
             } else {

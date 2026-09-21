@@ -191,6 +191,21 @@ public struct ViewportMapping: Sendable, Equatable {
     /// `captured` is the difference between a stray tap on the letterbox,
     /// which means nothing and is refused, and a selection drag that wandered
     /// off the image, which must keep tracking at the edge.
+    /// The aspect-fit size the frame actually occupies, in view points.
+    ///
+    /// The letterbox bars are not part of it, which is why the render
+    /// transform and `pan` must both measure against this rather than the
+    /// view: on a portrait phone showing a 16:9 page they differ by 3.6x.
+    public var drawnWidth: Double {
+        guard viewWidth > 0, viewHeight > 0, frameWidth > 0, frameHeight > 0 else { return 0 }
+        return frameWidth * min(viewWidth / frameWidth, viewHeight / frameHeight)
+    }
+
+    public var drawnHeight: Double {
+        guard viewWidth > 0, viewHeight > 0, frameWidth > 0, frameHeight > 0 else { return 0 }
+        return frameHeight * min(viewWidth / frameWidth, viewHeight / frameHeight)
+    }
+
     public func remotePoint(viewX: Double, viewY: Double, captured: Bool) -> RemotePoint? {
         let sizes = [viewWidth, viewHeight, frameWidth, frameHeight]
         guard sizes.allSatisfy({ $0.isFinite && $0 > 0 }),
@@ -327,6 +342,10 @@ public struct GestureCore: Sendable {
                 lastMovePoint = point
                 lastMoveTime = sample.t
                 guard dx != 0 || dy != 0 else { return [] }
+                // A finger never holds perfectly still. Without a threshold a
+                // tap that wobbles a pixel scrolls by a sub-pixel and then
+                // suppresses its own click, so nothing happens at all.
+                guard travelled > GestureConstants.dragThreshold else { return [] }
                 scrolled = true
                 // Velocity expressed as one frame's worth of travel at 60fps,
                 // which is the unit tick() decays.
@@ -488,9 +507,11 @@ public struct GestureCore: Sendable {
     /// Pan by a view-space delta in points.
     public mutating func pan(dx: Double, dy: Double) {
         guard dx.isFinite, dy.isFinite,
-              mapping.viewWidth > 0, mapping.viewHeight > 0 else { return }
-        transform.offsetX -= dx / (mapping.viewWidth * transform.scale)
-        transform.offsetY -= dy / (mapping.viewHeight * transform.scale)
+              mapping.drawnWidth > 0, mapping.drawnHeight > 0 else { return }
+        // The drawn extent, not the view's: on a letterboxed frame they differ,
+        // and dividing by the view makes panning lag the finger badly.
+        transform.offsetX -= dx / (mapping.drawnWidth * transform.scale)
+        transform.offsetY -= dy / (mapping.drawnHeight * transform.scale)
         clampPan()
         syncMapping()
     }

@@ -10,7 +10,9 @@ public enum BrowserLiveMessage: Sendable, Equatable {
     case status(BrowserStatus)
     case url(String)
     case tabs([BrowserTab])
-    case viewer(id: String)
+    case ready(viewerId: String)
+    case control(controlling: Bool, held: Bool)
+    case heartbeat
     case error(String)
 }
 
@@ -71,18 +73,21 @@ public struct BrowserTab: Sendable, Equatable, Identifiable {
 /// because a message we do not understand must be dropped rather than crash a
 /// stream the person is watching.
 public enum BrowserLiveDecoder {
-    public static func message(from json: String) -> BrowserLiveMessage? {
-        guard let data = json.data(using: .utf8),
-              let object = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
-              let type = object["type"] as? String else { return nil }
+    /// The message type travels in the SSE `event:` name, not in the payload —
+    /// the server strips it (`const { type, ...data } = message`) before
+    /// writing the frame. Keying on the payload instead decoded nothing at
+    /// all, which is exactly how this was found.
+    public static func message(event: String?, data json: String) -> BrowserLiveMessage? {
+        guard let event else { return nil }
+        let object = (json.data(using: .utf8).flatMap { try? JSONSerialization.jsonObject(with: $0) }) as? [String: Any] ?? [:]
 
-        switch type {
+        switch event {
         case "frame":
             guard let seq = object["seq"] as? Int,
                   let payload = object["data"] as? String,
                   let metadata = object["metadata"] as? [String: Any],
-                  let width = metadata["deviceWidth"] as? Double ?? (metadata["deviceWidth"] as? Int).map(Double.init),
-                  let height = metadata["deviceHeight"] as? Double ?? (metadata["deviceHeight"] as? Int).map(Double.init)
+                  let width = number(metadata["deviceWidth"]),
+                  let height = number(metadata["deviceHeight"])
             else { return nil }
             return .frame(BrowserFrame(
                 seq: seq,
@@ -94,13 +99,11 @@ public enum BrowserLiveDecoder {
 
         case "status":
             guard let connected = object["connected"] as? Bool else { return nil }
-            let width = (object["viewportWidth"] as? Double) ?? Double((object["viewportWidth"] as? Int) ?? 1280)
-            let height = (object["viewportHeight"] as? Double) ?? Double((object["viewportHeight"] as? Int) ?? 720)
             return .status(BrowserStatus(
                 connected: connected,
                 screencasting: (object["screencasting"] as? Bool) ?? false,
-                viewportWidth: width,
-                viewportHeight: height
+                viewportWidth: number(object["viewportWidth"]) ?? 1280,
+                viewportHeight: number(object["viewportHeight"]) ?? 720
             ))
 
         case "url":
@@ -119,18 +122,35 @@ public enum BrowserLiveDecoder {
                 )
             })
 
-        case "viewer":
+        // The server names this `ready`, and it is the only place a viewer id
+        // ever arrives. Without it there is nothing to post an action against.
+        case "ready":
             guard let id = object["viewerId"] as? String else { return nil }
-            return .viewer(id: id)
+            return .ready(viewerId: id)
+
+        case "control":
+            return .control(
+                controlling: (object["controlling"] as? Bool) ?? false,
+                held: (object["held"] as? Bool) ?? false
+            )
+
+        case "heartbeat":
+            return .heartbeat
 
         case "error":
             return .error((object["message"] as? String) ?? "The browser stream was interrupted.")
 
         default:
-            // A type we do not know is a protocol change, not a reason to
+            // A name we do not know is a protocol change, not a reason to
             // tear down a stream the person is watching.
             return nil
         }
+    }
+
+    /// JSONSerialization hands back Int or Double depending on the literal, so
+    /// a width of `1280` and one of `1280.0` must both survive.
+    private static func number(_ value: Any?) -> Double? {
+        (value as? Double) ?? (value as? Int).map(Double.init)
     }
 }
 
@@ -189,7 +209,7 @@ public struct BrowserLiveClient: Sendable {
                             let text = String(decoding: line, as: UTF8.self)
                             line.removeAll(keepingCapacity: true)
                             if let event = parser.line(text),
-                               let message = BrowserLiveDecoder.message(from: event.data) {
+                               let message = BrowserLiveDecoder.message(event: event.event, data: event.data) {
                                 continuation.yield(message)
                             }
                         } else {

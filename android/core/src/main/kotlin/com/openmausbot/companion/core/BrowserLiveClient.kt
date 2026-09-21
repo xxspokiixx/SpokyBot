@@ -40,7 +40,9 @@ sealed interface BrowserLiveMessage {
     data class Status(val status: BrowserStatus) : BrowserLiveMessage
     data class Url(val url: String) : BrowserLiveMessage
     data class Tabs(val tabs: List<BrowserTab>) : BrowserLiveMessage
-    data class Viewer(val id: String) : BrowserLiveMessage
+    data class Ready(val viewerId: String) : BrowserLiveMessage
+    data class Control(val controlling: Boolean, val held: Boolean) : BrowserLiveMessage
+    data object Heartbeat : BrowserLiveMessage
     data class Error(val message: String) : BrowserLiveMessage
 }
 
@@ -83,9 +85,18 @@ object BrowserLiveDecoder {
     private fun JsonObject.bool(key: String) = this[key]?.jsonPrimitive?.booleanOrNull
     private fun JsonObject.number(key: String) = this[key]?.jsonPrimitive?.doubleOrNull
 
-    fun message(raw: String): BrowserLiveMessage? {
-        val root = runCatching { json.parseToJsonElement(raw).jsonObject }.getOrNull() ?: return null
-        return when (root.string("type")) {
+    /**
+     * The message type travels in the SSE `event:` name, not in the payload —
+     * the server strips it (`const { type, ...data } = message`) before
+     * writing the frame. Keying on the payload instead decoded nothing at all,
+     * which is exactly how this was found.
+     */
+    fun message(event: String?, raw: String): BrowserLiveMessage? {
+        if (event == null) return null
+        val root = runCatching { json.parseToJsonElement(raw).jsonObject }.getOrNull()
+            ?: JsonObject(emptyMap())
+
+        return when (event) {
             "frame" -> {
                 val seq = root["seq"]?.jsonPrimitive?.intOrNull ?: return null
                 val data = root.string("data") ?: return null
@@ -124,13 +135,22 @@ object BrowserLiveDecoder {
                 )
             }
 
-            "viewer" -> BrowserLiveMessage.Viewer(root.string("viewerId") ?: return null)
+            // The server names this `ready`, and it is the only place a viewer
+            // id ever arrives. Without it there is nothing to post against.
+            "ready" -> BrowserLiveMessage.Ready(root.string("viewerId") ?: return null)
+
+            "control" -> BrowserLiveMessage.Control(
+                controlling = root.bool("controlling") ?: false,
+                held = root.bool("held") ?: false,
+            )
+
+            "heartbeat" -> BrowserLiveMessage.Heartbeat
 
             "error" -> BrowserLiveMessage.Error(
                 root.string("message") ?: "The browser stream was interrupted.",
             )
 
-            // A type we do not know is a protocol change, not a reason to tear
+            // A name we do not know is a protocol change, not a reason to tear
             // down a stream the person is watching.
             else -> null
         }
@@ -161,7 +181,7 @@ class BrowserLiveTransport internal constructor(
     private fun request(path: String): Request.Builder =
         Request.Builder()
             .url(base.newBuilder().encodedPath(path).build())
-            .apply { token?.let { header("Authorization", "Bearer \$it") } }
+            .apply { token?.let { header("Authorization", "Bearer $it") } }
 
     /**
      * The frame stream. Runs until the server ends it or the collector leaves;
@@ -183,7 +203,7 @@ class BrowserLiveTransport internal constructor(
                 while (isActive) {
                     val line = source.readUtf8Line() ?: break
                     val event = parser.line(line) ?: continue
-                    val message = BrowserLiveDecoder.message(event.data) ?: continue
+                    val message = BrowserLiveDecoder.message(event.event, event.data) ?: continue
                     send(message)
                 }
                 parser.reset()

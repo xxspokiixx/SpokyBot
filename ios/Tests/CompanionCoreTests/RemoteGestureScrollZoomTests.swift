@@ -112,6 +112,43 @@ final class RemoteGestureScrollZoomTests: XCTestCase {
         XCTAssertEqual(core.transform.offsetY, 0, accuracy: 0.0001)
     }
 
+    /// A finger never holds perfectly still. Before this had a threshold, a
+    /// tap that wobbled one pixel scrolled by a sub-pixel and then suppressed
+    /// its own click, so the tap did nothing at all.
+    func testATapThatWobblesAPixelStillClicks() {
+        var core = core(.direct)
+
+        _ = core.handle(TouchSample(id: 1, phase: .began, x: 500, y: 500, t: 0))
+        let wobble = core.handle(TouchSample(id: 1, phase: .moved, x: 501, y: 500, t: 0.02))
+        let lift = core.handle(TouchSample(id: 1, phase: .ended, x: 501, y: 500, t: 0.05))
+
+        XCTAssertTrue(wobble.isEmpty, "a pixel of wobble is not a scroll")
+        XCTAssertTrue(
+            lift.contains { if case .press = $0 { return true } else { return false } },
+            "and it must not swallow the click"
+        )
+    }
+
+    /// Panning is measured against the drawn frame, not the view. On a
+    /// letterboxed frame the two differ — here by 3.6x vertically — and
+    /// dividing by the view made panning lag the finger badly.
+    func testPanUsesTheDrawnExtentNotTheViewOnALetterboxedFrame() {
+        var core = GestureCore(mode: .direct, mapping: ViewportMapping(
+            viewWidth: 400, viewHeight: 800,
+            frameWidth: 1280, frameHeight: 720,
+            transform: .identity
+        ))
+        core.driving = true
+
+        core.pinch(scale: 2, centreX: 200, centreY: 400)
+        let before = core.transform.offsetY
+        // 225 points of drag: the whole drawn height at this aspect fit.
+        core.pan(dx: 0, dy: -112.5)
+
+        // Half the drawn height at 2x is a quarter of the frame.
+        XCTAssertEqual(core.transform.offsetY - before, 0.25, accuracy: 0.001)
+    }
+
     /// Zoom changes what a view point means, so the mapping the core hands
     /// back must already carry the new transform.
     func testTheMappingTracksTheTransformAfterAPinch() {

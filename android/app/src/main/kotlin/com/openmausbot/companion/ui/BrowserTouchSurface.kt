@@ -6,6 +6,10 @@ import androidx.compose.foundation.gestures.calculatePan
 import androidx.compose.foundation.gestures.calculateZoom
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.input.pointer.PointerEventPass
@@ -44,13 +48,19 @@ fun Modifier.browserTouchSurface(
 ): Modifier {
     val intents = rememberUpdatedState(onIntents)
     val viewState = rememberUpdatedState(onViewState)
+    // One origin shared by both clocks. pointerInput restarts whenever mode or
+    // driving changes, so a per-block origin made touch time jump backwards
+    // relative to tick time — after taking control every touch looked older
+    // than the long-press threshold and fired a right click instead of a tap.
+    val epoch = remember { System.nanoTime() }
+    fun elapsed() = (System.nanoTime() - epoch) / 1_000_000_000.0
+    var surface by remember { mutableStateOf(0.0 to 0.0) }
 
     // The core has no clock; a long press only becomes observable when
     // something tells it time moved, and momentum only decays then.
     LaunchedEffect(core) {
-        val started = System.nanoTime()
         while (isActive) {
-            val now = (System.nanoTime() - started) / 1_000_000_000.0
+            val now = elapsed()
             val produced = core.tick(now)
             if (produced.isNotEmpty()) intents.value(produced)
             viewState.value(core.transform, core.cursor)
@@ -58,23 +68,31 @@ fun Modifier.browserTouchSurface(
         }
     }
 
+    // The frame size arrives from the stream and the view size from layout;
+    // either changing must rebuild the mapping, or clicks land against a
+    // viewport the remote no longer has.
+    LaunchedEffect(surface, frameWidth, frameHeight) {
+        val (width, height) = surface
+        if (width > 0 && height > 0) {
+            core.mapping = ViewportMapping(
+                viewWidth = width,
+                viewHeight = height,
+                frameWidth = maxOf(frameWidth, 1.0),
+                frameHeight = maxOf(frameHeight, 1.0),
+                transform = core.transform,
+            )
+        }
+    }
+
     return this
         .onSizeChanged { size ->
             if (size.width > 0 && size.height > 0) {
-                core.mapping = ViewportMapping(
-                    viewWidth = size.width.toDouble(),
-                    viewHeight = size.height.toDouble(),
-                    frameWidth = maxOf(frameWidth, 1.0),
-                    frameHeight = maxOf(frameHeight, 1.0),
-                    transform = core.transform,
-                )
+                surface = size.width.toDouble() to size.height.toDouble()
             }
         }
         .pointerInput(mode, driving) {
             core.mode = mode
             core.driving = driving
-            val started = System.nanoTime()
-            fun now() = (System.nanoTime() - started) / 1_000_000_000.0
 
             awaitEachGesture {
                 var tracked: Long? = null
@@ -135,7 +153,7 @@ fun Modifier.browserTouchSurface(
                                     phase = TouchPhase.ENDED,
                                     x = last.position.x.toDouble(),
                                     y = last.position.y.toDouble(),
-                                    t = now(),
+                                    t = elapsed(),
                                 ),
                             )
                             if (produced.isNotEmpty()) intents.value(produced)
@@ -163,7 +181,7 @@ fun Modifier.browserTouchSurface(
                             phase = phase,
                             x = finger.position.x.toDouble(),
                             y = finger.position.y.toDouble(),
-                            t = now(),
+                            t = elapsed(),
                         ),
                     )
                     if (produced.isNotEmpty()) intents.value(produced)

@@ -170,6 +170,19 @@ data class ViewportMapping(
      * means nothing and is refused, and a selection drag that wandered off the
      * image, which must keep tracking at the edge.
      */
+    /** The aspect-fit size the frame actually occupies, in view pixels.
+     *
+     * The letterbox bars are not part of it, which is why the render transform
+     * and [GestureCore.pan] must both measure against this rather than the
+     * view: on a portrait phone showing a 16:9 page they differ by 3.6x. */
+    val drawnWidth: Double
+        get() = if (viewWidth <= 0 || viewHeight <= 0 || frameWidth <= 0 || frameHeight <= 0) 0.0
+        else frameWidth * min(viewWidth / frameWidth, viewHeight / frameHeight)
+
+    val drawnHeight: Double
+        get() = if (viewWidth <= 0 || viewHeight <= 0 || frameWidth <= 0 || frameHeight <= 0) 0.0
+        else frameHeight * min(viewWidth / frameWidth, viewHeight / frameHeight)
+
     fun remotePoint(viewX: Double, viewY: Double, captured: Boolean): RemotePoint? {
         val sizes = listOf(viewWidth, viewHeight, frameWidth, frameHeight)
         if (sizes.any { !it.isFinite() || it <= 0 }) return null
@@ -310,6 +323,11 @@ class GestureCore(
                     lastMovePoint = point
                     lastMoveTime = sample.t
                     if (dx == 0.0 && dy == 0.0) return emptyList()
+                    // A finger never holds perfectly still. Without a
+                    // threshold a tap that wobbles a pixel scrolls by a
+                    // sub-pixel and then suppresses its own click, so nothing
+                    // happens at all.
+                    if (travelled <= GestureConstants.DRAG_THRESHOLD) return emptyList()
                     scrolled = true
                     // Velocity as one frame's travel at 60fps, the unit tick decays.
                     momentumX = -dx / interval * 0.016
@@ -501,10 +519,12 @@ class GestureCore(
     /** Pan by a view-space delta in pixels. */
     fun pan(dx: Double, dy: Double) {
         if (!dx.isFinite() || !dy.isFinite()) return
-        if (mapping.viewWidth <= 0 || mapping.viewHeight <= 0) return
+        if (mapping.drawnWidth <= 0 || mapping.drawnHeight <= 0) return
+        // The drawn extent, not the view's: on a letterboxed frame they differ,
+        // and dividing by the view makes panning lag the finger badly.
         transform = transform.copy(
-            offsetX = transform.offsetX - dx / (mapping.viewWidth * transform.scale),
-            offsetY = transform.offsetY - dy / (mapping.viewHeight * transform.scale),
+            offsetX = transform.offsetX - dx / (mapping.drawnWidth * transform.scale),
+            offsetY = transform.offsetY - dy / (mapping.drawnHeight * transform.scale),
         )
         clampPan()
         syncMapping()

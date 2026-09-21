@@ -85,9 +85,16 @@ final class BrowserControlModel: ObservableObject {
             self.url = url
         case .tabs:
             break
-        case let .viewer(id):
+        case let .ready(id):
             viewerId = id
             makeQueue(viewerId: id)
+        // The server is the authority on who is driving: a peer taking
+        // control must end ours rather than leave two surfaces both
+        // believing they hold it.
+        case let .control(controlling, _):
+            if !controlling { driving = false }
+        case .heartbeat:
+            break
         case let .error(message):
             failure = message
         }
@@ -247,13 +254,18 @@ struct BrowserControlView: View {
         GeometryReader { proxy in
             ZStack {
                 if let image = model.frame?.bytes.flatMap(UIImage.init(data:)) {
+                    // Measured against the drawn frame, not the view. The
+                    // gesture core maps coordinates through the same aspect
+                    // fit, and on a letterboxed frame the two differ enough
+                    // that a zoomed tap lands nowhere near the pixel touched.
+                    let drawn = drawnSize(in: proxy.size, frame: model.frame)
                     Image(uiImage: image)
                         .resizable()
                         .scaledToFit()
                         .scaleEffect(model.transform.scale, anchor: .topLeading)
                         .offset(
-                            x: -model.transform.offsetX * proxy.size.width * model.transform.scale,
-                            y: -model.transform.offsetY * proxy.size.height * model.transform.scale
+                            x: -model.transform.offsetX * drawn.width * model.transform.scale,
+                            y: -model.transform.offsetY * drawn.height * model.transform.scale
                         )
                         .clipped()
                         .accessibilityLabel("\(bot.name)'s browser")
@@ -302,14 +314,25 @@ struct BrowserControlView: View {
         }
     }
 
+    /// The aspect-fit size the frame occupies, matching `ViewportMapping`.
+    private func drawnSize(in view: CGSize, frame: BrowserFrame?) -> CGSize {
+        let frameWidth = frame?.deviceWidth ?? model.status.viewportWidth
+        let frameHeight = frame?.deviceHeight ?? model.status.viewportHeight
+        guard view.width > 0, view.height > 0, frameWidth > 0, frameHeight > 0 else { return view }
+        let fit = min(view.width / frameWidth, view.height / frameHeight)
+        return CGSize(width: frameWidth * fit, height: frameHeight * fit)
+    }
+
     private func cursorReticle(in size: CGSize) -> some View {
         Circle()
             .strokeBorder(Color.white, lineWidth: 2)
             .background(Circle().fill(Color.black.opacity(0.35)))
             .frame(width: 22, height: 22)
             .position(
-                x: model.cursor.x * size.width,
-                y: model.cursor.y * size.height
+                x: (size.width - drawnSize(in: size, frame: model.frame).width) / 2
+                    + model.cursor.x * drawnSize(in: size, frame: model.frame).width,
+                y: (size.height - drawnSize(in: size, frame: model.frame).height) / 2
+                    + model.cursor.y * drawnSize(in: size, frame: model.frame).height
             )
             .allowsHitTesting(false)
     }

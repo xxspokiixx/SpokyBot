@@ -370,6 +370,37 @@ class RemoteGestureCoreTest {
         close(core.transform.offsetY, 0.0)
     }
 
+    /** A finger never holds perfectly still. Before this had a threshold, a
+     * tap that wobbled one pixel scrolled by a sub-pixel and then suppressed
+     * its own click, so the tap did nothing at all. */
+    @Test
+    fun aTapThatWobblesAPixelStillClicks() {
+        val core = square(GestureMode.DIRECT)
+
+        core.handle(TouchSample(1, TouchPhase.BEGAN, 500.0, 500.0, 0.0))
+        val wobble = core.handle(TouchSample(1, TouchPhase.MOVED, 501.0, 500.0, 0.02))
+        val lift = core.handle(TouchSample(1, TouchPhase.ENDED, 501.0, 500.0, 0.05))
+
+        assertTrue(wobble.isEmpty(), "a pixel of wobble is not a scroll")
+        assertTrue(lift.any { it is GestureIntent.Press }, "and it must not swallow the click")
+    }
+
+    /** Panning is measured against the drawn frame, not the view. On a
+     * letterboxed frame the two differ — here by 3.6x vertically. */
+    @Test
+    fun panUsesTheDrawnExtentNotTheViewOnALetterboxedFrame() {
+        val core = GestureCore(
+            GestureMode.DIRECT,
+            ViewportMapping(400.0, 800.0, 1280.0, 720.0, ViewTransform.IDENTITY),
+        ).apply { driving = true }
+
+        core.pinch(2.0, 200.0, 400.0)
+        val before = core.transform.offsetY
+        core.pan(0.0, -112.5)
+
+        close(core.transform.offsetY - before, 0.25)
+    }
+
     @Test
     fun theMappingTracksTheTransformAfterAPinch() {
         val core = square(GestureMode.DIRECT)
