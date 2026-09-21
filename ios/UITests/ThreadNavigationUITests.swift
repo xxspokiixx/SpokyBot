@@ -4,6 +4,23 @@ import XCTest
 /// paired computer, message sends, or server mutations are involved.
 final class ThreadNavigationUITests: XCTestCase {
     @MainActor
+    func testReopeningBotRemembersSelectedThreadAcrossAppLaunches() {
+        let app = launchPreview()
+        openGmail(in: app)
+        selectThread("preview-icloud", title: "Triage iCloud", in: app)
+        app.buttons["Back"].tap()
+        app.buttons.containing(.staticText, identifier: "Pepper").firstMatch.tap()
+        recordScreenshot("Bot reopened after choosing iCloud", in: app)
+        assertThread("Triage iCloud", in: app)
+        app.terminate()
+        app.launch()
+        XCTAssertTrue(app.buttons["threads-toggle.preview-pepper"].waitForExistence(timeout: 10))
+        app.buttons.containing(.staticText, identifier: "Pepper").firstMatch.tap()
+        assertThread("Triage iCloud", in: app)
+        recordScreenshot("Remembered iCloud thread after relaunch", in: app)
+    }
+
+    @MainActor
     func testTopBarOpensThreadsWithIslandIntroEnabledAndSwitches() {
         let app = launchPreview(islandIntro: "always")
         openGmail(in: app)
