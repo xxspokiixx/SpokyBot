@@ -33,9 +33,10 @@ function displayText(value: string, multiline = false): string {
   // BEL as printable text (nodejs/node#64313). Strip whole OSC sequences
   // here, from the raw value while their openers are still intact; the
   // label between a link's opening and closing sequences survives, and an
-  // unterminated sequence is removed outright.
+  // unterminated sequence is removed outright. Both introducer forms
+  // match: ESC ] and the lone C1 byte, which carries no closing bracket.
   // eslint-disable-next-line no-control-regex
-  const withoutOsc = value.replace(/(?:\u001b|\u009d)\][^\u0007\u001b\u009c]*(?:\u0007|\u001b\\|\u009c)?/g, "");
+  const withoutOsc = value.replace(/(?:\u001b\]|\u009d)[^\u0007\u001b\u009c]*(?:\u0007|\u001b\\|\u009c)?/g, "");
   const plain = stripVTControlCharacters(withoutOsc);
   // Provider-supplied labels must not issue terminal control commands.
   // stripVTControlCharacters glues a trailing BEL onto the escape sequence
