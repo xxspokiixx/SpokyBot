@@ -9,6 +9,7 @@ import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { afterAll, afterEach, beforeAll, describe, expect, it } from "vitest";
 import { ToolResults } from "../tool-results.ts";
+import { waitForExit } from "../testing/cleanup.ts";
 
 const PROXY = join(dirname(fileURLToPath(import.meta.url)), "agents-proxy.ts");
 const TOKEN = "test-comms-token";
@@ -1807,6 +1808,100 @@ describe("agents-proxy MCP surface", () => {
     expect(missingTarget.result.isError).toBe(true);
     expect(missingTarget.result.content[0].text).toContain("needs skill_name");
     expect(lastSkillStageBody).toBeNull();
+  });
+});
+
+describe("standing external runtime", () => {
+  let external: ChildProcess;
+  const responses = new Map<number, (message: any) => void>();
+  let nextExternalId = 1;
+  const externalRpc = (method: string, params?: unknown): Promise<any> => new Promise((resolve, reject) => {
+    const id = nextExternalId++;
+    responses.set(id, resolve);
+    external.stdin!.write(JSON.stringify({ jsonrpc: "2.0", id, method, params }) + "\n");
+    setTimeout(() => { if (responses.delete(id)) reject(new Error(`${method} timed out`)); }, 10_000).unref?.();
+  });
+  const externalCall = (name: string, args: unknown) => externalRpc("tools/call", { name, arguments: args });
+
+  beforeAll(async () => {
+    external = spawn(process.execPath, [PROXY], {
+      env: { ...process.env, OMB_HARNESS_URL: `http://127.0.0.1:${stubPort}`, OMB_BOT_ID: "bot-asker",
+        OMB_THREAD_ID: "thread-asker-routine", OMB_COMMS_TOKEN: TOKEN, OMB_TURN_DEPTH: "0",
+        OMB_EXTERNAL_RUNTIME: "1", OMB_ROOM_TURN: "1", OMB_OWN_THREAD_CREATION: "1",
+        OMB_SKILL_AUTHORING_ENABLED: "1", OMB_SHARED_COMPUTERS_ENABLED: "1" },
+      stdio: ["pipe", "pipe", "inherit"],
+    });
+    let buffer = "";
+    external.stdout!.on("data", chunk => {
+      buffer += chunk;
+      let newline;
+      while ((newline = buffer.indexOf("\n")) !== -1) {
+        const line = buffer.slice(0, newline);
+        buffer = buffer.slice(newline + 1);
+        if (!line.trim()) continue;
+        const message = JSON.parse(line);
+        responses.get(message.id)?.(message);
+        responses.delete(message.id);
+      }
+    });
+    await externalRpc("initialize", { protocolVersion: "2024-11-05" });
+  });
+  afterAll(async () => { if (external) await waitForExit(external, { signal: "SIGTERM" }); });
+
+  it("advertises only peer communication and receipt tools even when unrelated feature flags are set", async () => {
+    const list = await externalRpc("tools/list");
+    expect(list.result.tools.map((tool: any) => tool.name)).toEqual([
+      "list_bots", "ask_bot", "delegate_bot", "check_delegation", "wait_delegation",
+    ]);
+    expect(JSON.stringify(list.result.tools)).not.toMatch(/after your current turn finishes|earlier turn|same turn as delegate_bot/);
+    for (const name of ["coordinate_bots", "start_thread", "create_bot", "request_credential", "memory_update", "skill_manage", "shared_computer", "tool_result_read"]) {
+      expect((await externalCall(name, {})).error).toMatchObject({ code: -32602, message: `Unknown tool: ${name}` });
+    }
+    const roster = (await externalCall("list_bots", {})).result.content[0].text;
+    expect(roster).toContain("Assign work with delegate_bot");
+    expect(roster).not.toContain("coordinate_bots");
+  });
+
+  it("checks and waits for a newly delegated task in the same standing process", async () => {
+    delegateResponse = { queued: true, taskId: "external-task-123", message: "Delegated — @Helper is picking it up now." };
+    try {
+      const result = await externalCall("delegate_bot", { bot_id: "bot-helper", message: "A standing assignment" });
+      expect(result.result.content[0].text).toContain("check_delegation or wait_delegation");
+      expect(result.result.content[0].text).not.toContain("finish your turn");
+      for (const name of ["check_delegation", "wait_delegation"]) {
+        lastDelegationUrl = null;
+        const status = await externalCall(name, { task_id: "external-task-123", timeout_seconds: 1 });
+        expect(status.result.isError).toBeFalsy();
+        expect(status.result.content[0].text).toContain("All done.");
+        expect(lastDelegationUrl).toContain(`/api/internal/delegations/external-task-123?`);
+        expect(lastDelegationUrl).toContain(`wait_ms=${name === "wait_delegation" ? 1000 : 0}`);
+        expect(lastAuth).toBe(`Bearer ${TOKEN}`);
+      }
+    } finally { delegateResponse = { queued: true, message: "Delegation queued." }; }
+  });
+
+  it.each(["busy", "timeout"])("can poll a %s ask converted into a delegation without ending the standing process", async outcome => {
+    askResponse = { [outcome]: true, taskId: `external-${outcome}-123`, toBotName: "Helper", waitedMs: 15_000 };
+    try {
+      const result = await externalCall("ask_bot", { bot_id: "bot-helper", message: "A short question" });
+      expect(result.result.content[0].text).toContain("check_delegation or wait_delegation");
+      expect(result.result.content[0].text).not.toMatch(/Finish your turn|after your current turn ends|later turn/);
+      const status = await externalCall("check_delegation", { task_id: `external-${outcome}-123` });
+      expect(status.result.isError).toBeFalsy();
+      expect(status.result.content[0].text).toContain("All done.");
+    } finally { askResponse = { botName: "Helper", text: "hi from helper" }; }
+  });
+
+  it("bounds large replies without calling the out-of-scope result-cache route", async () => {
+    askResponse = { botName: "Helper", text: "x".repeat(30_000) };
+    const before = savedResultWrites;
+    try {
+      const result = await externalCall("ask_bot", { bot_id: "bot-helper", message: "A short question" });
+      expect(result.result.isError).toBeFalsy();
+      expect(result.result.content[0].text.length).toBeLessThan(17_000);
+      expect(result.result.content[0].text).toContain("The original operation was not retried");
+      expect(savedResultWrites).toBe(before);
+    } finally { askResponse = { botName: "Helper", text: "hi from helper" }; }
   });
 });
 

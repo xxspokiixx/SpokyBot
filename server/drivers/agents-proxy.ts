@@ -33,6 +33,7 @@
 //   OMB_BOT_ID       the calling bot's id (excluded from list_bots; sender)
 //   OMB_COMMS_TOKEN  shared secret for the localhost-only internal endpoints
 //   OMB_TURN_DEPTH   this turn's comms depth (the harness refuses recursion)
+//   OMB_EXTERNAL_RUNTIME  "1" for a standing process: peer tools and polling only
 import readline from "node:readline";
 
 import { CREDENTIAL_TARGETS, isCredentialTargetId } from "../../shared/credential-request.ts";
@@ -47,6 +48,9 @@ const BOT_ID = process.env.OMB_BOT_ID ?? "";
 const THREAD_ID = process.env.OMB_THREAD_ID ?? "";
 const TOKEN = process.env.OMB_COMMS_TOKEN ?? "";
 const DEPTH = Number(process.env.OMB_TURN_DEPTH ?? "0") || 0;
+// Presentation only: the server still authenticates and scopes every call.
+const EXTERNAL_RUNTIME = process.env.OMB_EXTERNAL_RUNTIME === "1";
+const EXTERNAL_STATUS_GUIDANCE = "Use check_delegation or wait_delegation with this task id to retrieve the result; polling is allowed without ending this external runtime.";
 const SKILL_AUTHORING_ENABLED = process.env.OMB_SKILL_AUTHORING_ENABLED === "1";
 // Opt-in computer sharing (server features.sharedComputers). Off unless the
 // harness says "1", the same way skill authoring is gated above.
@@ -447,7 +451,9 @@ const TOOLS = [
   },
   {
     name: "ask_bot",
-    description:
+    description: EXTERNAL_RUNTIME
+      ? "Brief synchronous consultation with a reachable teammate. Quick replies return inline; busy or slow replies become asynchronous delegations with a task id. Use check_delegation or wait_delegation to retrieve their outcome. Use delegate_bot for assigning work. Existing peer approvals still apply."
+      :
       "Brief synchronous consultation: send a short question to another bot. Quick replies return inline; slow replies become asynchronous delegations and return automatically after you finish your turn. Use only when that reply is required to write your current response. Do not use for assigning work, background tasks, or potentially long work; use delegate_bot for those. Returns promptly with a note if that bot is busy.",
     inputSchema: {
       type: "object",
@@ -460,7 +466,9 @@ const TOOLS = [
   },
   {
     name: "delegate_bot",
-    description:
+    description: EXTERNAL_RUNTIME
+      ? "Hand work to a reachable teammate asynchronously. Returns a task id; the server dispatches when its source conversation and the peer are available and required approvals are granted. Use check_delegation or wait_delegation with that id; the external runtime does not need to end for polling."
+      :
       "DEFAULT FOR ASSIGNING WORK. Hand a task to another bot asynchronously: this returns immediately, your turn can end, and you remain available while the peer works. The peer starts after your current turn finishes and its outcome is delivered automatically to the originating conversation — success or failure wakes you with it. Acknowledge the assignment; do not call check_delegation or wait_delegation in this same turn.",
     inputSchema: {
       type: "object",
@@ -474,7 +482,9 @@ const TOOLS = [
   },
   {
     name: "check_delegation",
-    description:
+    description: EXTERNAL_RUNTIME
+      ? "Check one of this external runtime's delegations without waiting: queued, running, or finished with its result. Newly returned task ids can be checked immediately; the server enforces ownership and current peer access."
+      :
       "In a later turn, check what happened to a delegation without waiting: still queued, running (with elapsed time and the peer's recent activity), or finished with the result. Prefer this when a delegated bot is taking long or might be stuck — empty recent activity usually means it is stuck, not working. Do not poll it right after delegate_bot; completion is delivered to the conversation automatically.",
     inputSchema: {
       type: "object",
@@ -486,7 +496,9 @@ const TOOLS = [
   },
   {
     name: "wait_delegation",
-    description:
+    description: EXTERNAL_RUNTIME
+      ? "Wait for one of this external runtime's delegations, including a newly returned task id, for up to timeout_seconds (maximum 240). Returns its result or current queued/running status; the server enforces ownership and current peer access."
+      :
       "BLOCKING status tool for a delegation from an earlier turn. Use only when the user explicitly asks you to wait for that earlier task. Never call it in the same turn as delegate_bot: a fresh delegation cannot start until your current turn ends, and its result will arrive automatically.",
     inputSchema: {
       type: "object",
@@ -894,9 +906,12 @@ const SHAREABLE_TOOLS = SHARED_COMPUTERS_ENABLED
 // retain their independent loop and cannot start a second coordinator.
 const ROOM_ONLY_TOOLS = new Set(["list_room_targets", "coordinate_bots"]);
 const ROOM_REPLACED_TOOLS = new Set(["ask_bot", "delegate_bot", "check_delegation", "wait_delegation", "start_thread", "send_to_thread", "wait_thread"]);
-const COORDINATING = process.env.OMB_ROOM_TURN === "1";
+const COORDINATING = !EXTERNAL_RUNTIME && process.env.OMB_ROOM_TURN === "1";
 const OWN_THREAD_CREATION = process.env.OMB_OWN_THREAD_CREATION === "1";
-const AVAILABLE_TOOLS = COORDINATING
+const EXTERNAL_TOOL_NAMES = new Set(["list_bots", "ask_bot", "delegate_bot", "check_delegation", "wait_delegation"]);
+const AVAILABLE_TOOLS = EXTERNAL_RUNTIME
+  ? TOOLS.filter(tool => EXTERNAL_TOOL_NAMES.has(tool.name))
+  : COORDINATING
   ? SHAREABLE_TOOLS.filter(tool => !ROOM_REPLACED_TOOLS.has(tool.name) || (tool.name === "start_thread" && OWN_THREAD_CREATION))
     .map(tool => tool.name === "start_thread" ? {
       ...tool,
@@ -922,9 +937,13 @@ async function api(path: string, init?: RequestInit): Promise<Json> {
   return body;
 }
 
-const capResult = (text: string) => boundedAgentResult(text, (retained, truncated) =>
-  api("/api/internal/tool-result", { method: "POST", signal: AbortSignal.timeout(3_000),
-    body: JSON.stringify({ text: retained, truncated }) }));
+const capResult = (text: string) => boundedAgentResult(text, (retained, truncated) => {
+  // The standing capability cannot write/read cached tool results. Keep the
+  // normal bounded fallback without making a forbidden request or retrying.
+  if (EXTERNAL_RUNTIME) throw new Error("External runtime results are not cached");
+  return api("/api/internal/tool-result", { method: "POST", signal: AbortSignal.timeout(3_000),
+    body: JSON.stringify({ text: retained, truncated }) });
+});
 
 /** Like api, but a refusal comes back as its body instead of an Error —
  * for the tools whose refusals carry more than a sentence. */
@@ -1161,12 +1180,12 @@ async function callTool(name: string, args: Json): Promise<{ text: string; isErr
       // The peer's turn outlived the synchronous wait, so the harness
       // converted the ask into a delegation — the reply is not lost.
       const taskId = String(r.taskId ?? "").trim();
-      if (taskId) delegationTaskIdsThisTurn.add(taskId);
+      if (taskId && !EXTERNAL_RUNTIME) delegationTaskIdsThisTurn.add(taskId);
       const waitedSeconds = Math.max(1, Math.round((Number(r.waitedMs) || 0) / 1000));
       const amount = waitedSeconds < 60 ? waitedSeconds : Math.round(waitedSeconds / 60);
       const unit = waitedSeconds < 60 ? "second" : "minute";
       return {
-        text: `${r.toBotName ?? "That bot"} is still working after ${amount} ${unit}${amount === 1 ? "" : "s"} — the ask was converted to a delegation so the reply is not lost. Task id: ${taskId}. Finish your turn now; the result will be delivered to this conversation automatically. Use check_delegation in a later turn only if the user asks for status.`,
+        text: `${r.toBotName ?? "That bot"} is still working after ${amount} ${unit}${amount === 1 ? "" : "s"} — the ask was converted to a delegation so the reply is not lost. Task id: ${taskId}. ${EXTERNAL_RUNTIME ? EXTERNAL_STATUS_GUIDANCE : "Finish your turn now; the result will be delivered to this conversation automatically. Use check_delegation in a later turn only if the user asks for status."}`,
       };
     }
     if (r.busy) {
@@ -1174,9 +1193,9 @@ async function callTool(name: string, args: Json): Promise<{ text: string; isErr
       // task id is the asker's claim ticket for the eventual reply.
       const taskId = String(r.taskId ?? "").trim();
       if (taskId) {
-        delegationTaskIdsThisTurn.add(taskId);
+        if (!EXTERNAL_RUNTIME) delegationTaskIdsThisTurn.add(taskId);
         return {
-          text: `${r.toBotName ?? "That bot"} is busy right now, so your message was queued as a delegation instead — it runs after your current turn ends. Task id: ${taskId}. Finish your turn now; the result will be delivered to this conversation automatically. Use check_delegation in a later turn only if the user asks for status.`,
+          text: `${r.toBotName ?? "That bot"} is busy right now, so your message was queued as a delegation instead — ${EXTERNAL_RUNTIME ? "it waits for the peer and any required approval" : "it runs after your current turn ends"}. Task id: ${taskId}. ${EXTERNAL_RUNTIME ? EXTERNAL_STATUS_GUIDANCE : "Finish your turn now; the result will be delivered to this conversation automatically. Use check_delegation in a later turn only if the user asks for status."}`,
         };
       }
       return { text: `That bot is busy right now — try again after it finishes.` };
@@ -1204,9 +1223,9 @@ async function callTool(name: string, args: Json): Promise<{ text: string; isErr
     // bot's claim ticket for the outcome.
     const note = typeof r.message === "string" ? r.message : "Delegation queued.";
     const taskId = typeof r.taskId === "string" ? r.taskId.trim() : "";
-    if (taskId) delegationTaskIdsThisTurn.add(taskId);
+    if (taskId && !EXTERNAL_RUNTIME) delegationTaskIdsThisTurn.add(taskId);
     const suffix = taskId
-      ? ` Task id: ${taskId}. Acknowledge the assignment and finish your turn; the result will be delivered to this conversation automatically. Do not check or wait for it in this turn.`
+      ? ` Task id: ${taskId}. ${EXTERNAL_RUNTIME ? EXTERNAL_STATUS_GUIDANCE : "Acknowledge the assignment and finish your turn; the result will be delivered to this conversation automatically. Do not check or wait for it in this turn."}`
       : "";
     return { text: `${note}${suffix}` };
   }
@@ -1215,7 +1234,7 @@ async function callTool(name: string, args: Json): Promise<{ text: string; isErr
     if (!/^[\w-]{4,64}$/.test(taskId)) {
       return { text: `${name} needs the "task_id" that delegate_bot returned, e.g. {"task_id":"1f0c2f4e-..."}.`, isError: true };
     }
-    if (delegationTaskIdsThisTurn.has(taskId)) {
+    if (!EXTERNAL_RUNTIME && delegationTaskIdsThisTurn.has(taskId)) {
       return {
         text: `Task ${taskId} was delegated during this turn. Finish your response now so the other bot can work; its result will be delivered to this conversation automatically. Do not check or wait for a newly delegated task until a later turn.`,
         isError: true,

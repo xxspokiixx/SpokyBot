@@ -89,6 +89,10 @@ and proves quit cancels recovery without replaying an interrupted fixture turn.
 The [Tailscale discovery fixture](tailscale.md) checks standalone macOS CLI mode
 and HTTP tailnet endpoint refresh without touching a real Tailscale installation.
 
+The [external runtimes recipe](external-runtime.md) proves a bot's standing
+comms capability from `external-runtimes.json` against a disposable server and
+the fake engine: scope, on-demand token reads, and immediate delegation drain.
+
 The [cloud preview fixture](cloud-preview.md) mounts the real Computer panel
 against an isolated server for image decoding, loading, and recovery UI checks.
 
