@@ -206,6 +206,7 @@ describe("encrypted full workspace backups", () => {
     const target = directory();
     const authPaths = [
       "workspace-credentials.json", "browser-engine-key", "config.json.123.tmp",
+      "external-runtimes.json", "external-runtimes.json.123.tmp",
       "providers/account/auth.json", "providers/antigravity/account/acp_token.json",
       "caddy/data/private.key", "chrome-profile/Cookies", ".agent-browser/auth.json",
       "vm-home/.browser-profiles/chrome/Cookies", "vm-homes/abc/.browser-profiles/chromium/Cookies",
@@ -259,6 +260,8 @@ describe("encrypted full workspace backups", () => {
     for (const [name, content] of [
       ["team-computers.json", '{"computers":[{"id":"foreign-computer","section":"Design"}]}'],
       ["workspace-credentials.json", '{"xaiApiKey":"secret"}'],
+      ["external-runtimes.json", '{"bot-id":"external-runtime-secret"}'],
+      ["External-Runtimes.json", "external-runtime-secret"],
       ["Sessions.json", "secret"],
       ["Providers", "secret"],
       ["Caddy", "secret"],

@@ -18,6 +18,8 @@
 import { memo, useEffect, useRef, useState, type ReactNode } from "react";
 import Markdown, { defaultUrlTransform } from "react-markdown";
 import remarkGfm from "remark-gfm";
+import remarkMath from "remark-math";
+import rehypeKatex from "rehype-katex";
 import { Check, Copy, Download, LoaderCircle, RotateCcw, WrapText } from "lucide-react";
 import { remarkMentions, type MentionPeer } from "@/lib/mentions";
 
@@ -29,6 +31,7 @@ import {
   getSnippetFileName,
 } from "../lib/code-block";
 import { repairMarkdownTables } from "../lib/markdown-tables";
+import { windowsPathDestinations } from "../../shared/markdown-windows-paths";
 import { looksLikeThreadRefUrl, parseThreadRefUrl, resolveThreadRefAddress, remarkThreadRefs } from "../lib/thread-refs";
 import { MarkdownImagePreview, useLocalFileSave, type MessageAttachmentContext } from "./AttachmentPreview";
 import { ThreadLink, threadLinkFromProps, useThreadRefs } from "./ThreadRefs";
@@ -97,10 +100,22 @@ export function chatUrlTransform(value: string): string {
   // thread links render as chips below, never as external anchors; the
   // scheme must survive the allow-list so the anchor component sees it
   if (looksLikeThreadRefUrl(value)) return value;
-  if (/^file:\/\//i.test(value) || WINDOWS_PATH.test(value) || value.startsWith("\\\\")) {
-    return localFilePath(value) ? value : "";
+  // Markdown-to-HTML percent-encodes a destination's backslashes, so
+  // C:\Users\Maus\report.md arrives as C:%5CUsers%5CMaus%5Creport.md and no
+  // longer looked like a drive path: the link rendered dead and the image as
+  // unavailable. Restore the separators; other escapes stay for the server's
+  // single decode.
+  const url = /^[a-zA-Z]:%5C/i.test(value) ? value.replace(/%5C/gi, "\\") : value;
+  if (/^file:\/\//i.test(url) || WINDOWS_PATH.test(url) || url.startsWith("\\\\")) {
+    return localFilePath(url) ? url : "";
   }
   return defaultUrlTransform(value);
+}
+
+/** Parse link destinations exactly as server/message-file.ts does. */
+function remarkWindowsPathDestinations(this: { data(): object }) {
+  const data = this.data() as { fromMarkdownExtensions?: unknown[] };
+  (data.fromMarkdownExtensions ??= []).push(windowsPathDestinations);
 }
 
 function unwrapLinkedImages() {
@@ -416,7 +431,7 @@ export function markdownImageName(src: string, alt?: string): string {
   if (supplied) return supplied;
   try {
     const path = decodeURIComponent(new URL(src, "https://openmausbot.invalid").pathname);
-    const name = path.split("/").filter(Boolean).at(-1)?.trim();
+    const name = path.split(/[\\/]/).filter(Boolean).at(-1)?.trim();
     if (name) return name;
   } catch {
     // A malformed source still gets a useful accessible fallback.
@@ -481,6 +496,59 @@ const NO_MENTION_PEERS: readonly MentionPeer[] = [];
 // holding one must reach the parser byte-for-byte as written.
 const MARKDOWN_IMAGE = "![";
 
+/** Replace CommonMark fenced code blocks with opaque tokens while text is normalized. */
+function protectFencedCode(text: string, protect: (value: string) => string): string {
+  const opener =
+    /(^|\r?\n)((?: {0,3}>[ \t]?)* {0,3})(?:(`{3,})([^`\r\n]*)|(~{3,})([^\r\n]*))(?:\r?\n|$)/g;
+  let cursor = 0;
+  let tokenized = "";
+  let match: RegExpExecArray | null;
+
+  while ((match = opener.exec(text)) !== null) {
+    const fence = match[3] ?? match[5];
+    const fenceCharacter = fence[0];
+    const closer = new RegExp(
+      `(^|\\r?\\n)(?: {0,3}>[ \\t]?)* {0,3}${fenceCharacter}{${fence.length},}[ \\t]*(?=\\r?\\n|$)`,
+      "g",
+    );
+    closer.lastIndex = opener.lastIndex;
+    const closingMatch = closer.exec(text);
+    const end = closingMatch === null
+      ? text.length
+      : closingMatch.index + closingMatch[0].length;
+    tokenized += text.slice(cursor, match.index);
+    tokenized += protect(text.slice(match.index, end));
+    cursor = end;
+    opener.lastIndex = end;
+  }
+
+  return tokenized + text.slice(cursor);
+}
+
+/** Convert the TeX delimiters models commonly emit into remark-math syntax.
+ * Fenced and inline code are protected so examples such as `\\(x\\)` remain
+ * literal. Unmatched delimiters are left untouched while a response streams. */
+export function normalizeMathDelimiters(text: string): string {
+  const protectedCode: string[] = [];
+  const protect = (value: string): string => {
+    const token = `\u0000OMB_CODE_${protectedCode.length}\u0000`;
+    protectedCode.push(value);
+    return token;
+  };
+  const tokenized = protectFencedCode(text, protect)
+    .replace(/(`+)[\s\S]*?\1/g, protect);
+  let normalized = tokenized
+    .replace(/\\\[([\s\S]*?)\\\]/g, (_match, math: string) => `$$\n${math}\n$$`)
+    .replace(/\\\(([\s\S]*?)\\\)/g, (_match, math: string) => `$${math}$`)
+    // remark-math treats flow math as a block only when the fences occupy
+    // their own lines; accept the compact form models commonly produce.
+    .replace(/\$\$[ \t]*([^\n][\s\S]*?)[ \t]*\$\$/g, (_match, math: string) => `$$\n${math}\n$$`);
+  protectedCode.forEach((value, index) => {
+    normalized = normalized.split(`\u0000OMB_CODE_${index}\u0000`).join(value);
+  });
+  return normalized;
+}
+
 function ChatMarkdownComponent({ text, streaming = false, message, mentionPeers = NO_MENTION_PEERS, everyone = false }: {
   text: string; streaming?: boolean; message?: MessageAttachmentContext;
   mentionPeers?: readonly MentionPeer[]; everyone?: boolean;
@@ -489,13 +557,16 @@ function ChatMarkdownComponent({ text, streaming = false, message, mentionPeers 
   // @mentions were already decorated by remarkMentions, which runs first.
   const { threads, currentBotId } = useThreadRefs();
   // A near-miss table from a model renders as an unreadable run of pipes
-  // unless it is repaired before parsing. The repair moves source offsets, so
-  // a message carrying an image opts out and keeps its text verbatim.
-  const source = text.includes(MARKDOWN_IMAGE) ? text : repairMarkdownTables(text);
+  // unless it is repaired before parsing. Table repair moves image source
+  // offsets, so image messages skip that repair but still normalize math.
+  const source = normalizeMathDelimiters(text.includes(MARKDOWN_IMAGE)
+    ? text
+    : repairMarkdownTables(text));
   return (
     <div className="chat-md min-w-0 [&>*+*]:mt-2">
       <Markdown
-        remarkPlugins={[remarkGfm, unwrapLinkedImages, [remarkMentions, { peers: mentionPeers, everyone }], remarkThreadRefs(threads, currentBotId)]}
+        remarkPlugins={[remarkGfm, remarkMath, remarkWindowsPathDestinations, unwrapLinkedImages, [remarkMentions, { peers: mentionPeers, everyone }], remarkThreadRefs(threads, currentBotId)]}
+        rehypePlugins={[rehypeKatex]}
         urlTransform={chatUrlTransform}
         components={{
           pre({ children }: { children?: ReactNode }) {
