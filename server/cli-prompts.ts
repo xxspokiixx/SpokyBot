@@ -27,7 +27,16 @@ type TerminalOutput = Writable & { isTTY?: boolean; columns?: number; rows?: num
 type PromptContext = { input: TerminalInput; output: TerminalOutput; signal: AbortSignal };
 
 function displayText(value: string, multiline = false): string {
-  const plain = stripVTControlCharacters(value);
+  // OSC 8 hyperlinks slip past stripVTControlCharacters on supported Node
+  // versions whenever the URI carries a character RFC 3986 allows unencoded
+  // ((, ), +, and friends): the failed match strands most of the URI and its
+  // BEL as printable text (nodejs/node#64313). Strip whole OSC sequences
+  // here, from the raw value while their openers are still intact; the
+  // label between a link's opening and closing sequences survives, and an
+  // unterminated sequence is removed outright.
+  // eslint-disable-next-line no-control-regex
+  const withoutOsc = value.replace(/(?:\u001b|\u009d)\][^\u0007\u001b\u009c]*(?:\u0007|\u001b\\|\u009c)?/g, "");
+  const plain = stripVTControlCharacters(withoutOsc);
   // Provider-supplied labels must not issue terminal control commands.
   // stripVTControlCharacters glues a trailing BEL onto the escape sequence
   // before it on some Node versions and leaves it bare on others, so the
