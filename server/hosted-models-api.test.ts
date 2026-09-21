@@ -17,7 +17,7 @@ const INITIAL = {
   openrouter: ["fixture/primary", "fixture/secondary"],
 };
 type Grants = typeof INITIAL;
-type Selection = { instanceId: string; model: string; effort?: string };
+type Selection = { instanceId: string; model: string; effort?: string; variant?: string };
 type SavedTask = {
   threadId: string; title: string; modelSelection: Selection;
   resumeCursors: Record<string, unknown>; lastInstanceId?: string; rewound?: boolean;
@@ -31,6 +31,7 @@ let primary: SavedBot;
 let beforeTasks: SavedTask[];
 let history: Record<string, any>;
 const ids: Record<string, string> = {};
+const openRouterHistory: Record<string, Record<string, any>> = {};
 const evidence: unknown[] = [];
 
 async function api(method: string, path: string, body?: unknown) {
@@ -130,12 +131,16 @@ beforeAll(async () => {
   expect(settled).toMatchObject({ status: "settled" });
   history = (await api("GET", `/api/threads/${primary.threadId}/messages?limit=50`)).body;
   expect(JSON.stringify(history)).toContain("hello from fake claude");
-  for (const title of ["Keep valid selection", "Legacy OpenRouter task", "Revoked OpenAI task"]) {
+  for (const title of ["Keep valid selection", "Legacy OpenRouter task", "Revoked OpenAI task", "Raw OpenRouter variant task", "Raw OpenRouter effort task"]) {
     expect((await api("POST", `/api/bots/${primary.id}/tasks`, { title })).status).toBe(201);
   }
   await create("Valid choice", { instanceId: "codex", model: INITIAL.openai[1], effort: "high" });
   await create("Legacy OpenAI", { instanceId: "codex", model: `omb-managed-openai::${INITIAL.openai[1]}` });
   await create("Legacy OpenRouter", { instanceId: "opencode", model: `omb-managed-openrouter/${INITIAL.openrouter[1]}` });
+  for (const [name, metadata] of [["Raw OpenRouter variant", { variant: "high" }], ["Raw OpenRouter effort", { effort: "high" }]] as const) {
+    const bot = await create(name, { instanceId: "opencode", model: INITIAL.openrouter[1], ...metadata });
+    openRouterHistory[name] = (await api("GET", `/api/threads/${bot.threadId}/messages?limit=50`)).body;
+  }
   await create("Personal provider", { instanceId: "personal", model: "personal-model" });
 
   // Seed a prior release's saved selections only after the owned server exits.
@@ -152,11 +157,13 @@ beforeAll(async () => {
   stale.tasks.find((task) => task.title === "Revoked OpenAI task")!.modelSelection = { instanceId: "codex", model: "gpt-retired" };
   stale.tasks.find((task) => task.title === "Keep valid selection")!.modelSelection = { instanceId: "codex", model: INITIAL.openai[1], effort: "high" };
   stale.tasks.find((task) => task.title === "Legacy OpenRouter task")!.modelSelection = { instanceId: "opencode", model: `omb-managed-openrouter/${INITIAL.openrouter[1]}` };
+  stale.tasks.find((task) => task.title === "Raw OpenRouter variant task")!.modelSelection = { instanceId: "opencode", model: INITIAL.openrouter[1], variant: "high" };
+  stale.tasks.find((task) => task.title === "Raw OpenRouter effort task")!.modelSelection = { instanceId: "opencode", model: INITIAL.openrouter[1], effort: "high" };
   beforeTasks = structuredClone(stale.tasks);
   writeFileSync(botsPath, JSON.stringify(saved));
   const configPath = join(fixture.info.dataDir, "config.json");
   const config = JSON.parse(readFileSync(configPath, "utf8"));
-  config.defaultModelSelection = { instanceId: "personal", model: "personal-model" };
+  config.defaultModelSelection = { instanceId: "opencode", model: INITIAL.openrouter[1], variant: "high" };
   config.instances.personal = { driver: "fixture-unavailable-driver" };
   config.instances.claude.config.cli = "fixture-personal-cli-must-not-run";
   config.instances.codex.config.cli = "fixture-personal-cli-must-not-run";
@@ -195,19 +202,29 @@ describe("hosted model policy in the full runtime", () => {
       .toEqual({ instanceId: "codex", model: INITIAL.openai[1], effort: "high" });
     expect(stale.tasks.find((task) => task.title === "Legacy OpenRouter task")!.modelSelection)
       .toEqual({ instanceId: "opencode", model: INITIAL.openrouter[1] });
+    for (const title of ["Raw OpenRouter variant task", "Raw OpenRouter effort task"]) {
+      expect(stale.tasks.find((task) => task.title === title)!.modelSelection)
+        .toEqual({ instanceId: "opencode", model: INITIAL.openrouter[1] });
+    }
     for (const [name, expected] of [
       ["Valid choice", { instanceId: "codex", model: INITIAL.openai[1], effort: "high" }],
       ["Legacy OpenAI", { instanceId: "codex", model: INITIAL.openai[1] }],
       ["Legacy OpenRouter", { instanceId: "opencode", model: INITIAL.openrouter[1] }],
+      ["Raw OpenRouter variant", { instanceId: "opencode", model: INITIAL.openrouter[1] }],
+      ["Raw OpenRouter effort", { instanceId: "opencode", model: INITIAL.openrouter[1] }],
       ["Personal provider", { instanceId: "claude", model: INITIAL.anthropic[0] }],
     ] as const) {
       const bot = current.find((candidate) => candidate.id === ids[name])!;
       expect(bot.modelSelection).toEqual(expected);
       expect(bot.tasks[0].modelSelection).toEqual(expected);
+      if (openRouterHistory[name]) {
+        expect((await api("GET", `/api/threads/${bot.threadId}/messages?limit=50`)).body).toEqual(openRouterHistory[name]);
+      }
     }
     expect((await api("GET", `/api/threads/${primary.threadId}/messages?limit=50`)).body).toEqual(history);
-    expect((await create("Default hosted bot")).modelSelection).toEqual({ instanceId: "claude", model: INITIAL.anthropic[0] });
+    expect((await create("Default hosted bot")).modelSelection).toEqual({ instanceId: "opencode", model: INITIAL.openrouter[1] });
     const persisted = readFileSync(join(fixture!.info.dataDir, "config.json"), "utf8");
+    expect(JSON.parse(persisted).defaultModelSelection).toEqual({ instanceId: "opencode", model: INITIAL.openrouter[1] });
     expect(persisted).not.toContain(TOKEN);
     expect(persisted).not.toContain("/api/gateway/");
     const migrated = JSON.parse(readFileSync(join(fixture!.info.dataDir, "bots.json"), "utf8")) as SavedBot[];

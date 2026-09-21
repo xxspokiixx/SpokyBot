@@ -44,6 +44,9 @@ export function hostedModelPolicy(dataDirectory: string, env: NodeJS.ProcessEnv 
     if (["opencode", "opencodeGo"].includes(selection.instanceId) && selection.model.startsWith("omb-managed-openrouter/")) {
       return { instanceId: "opencode", model: selection.model.slice("omb-managed-openrouter/".length) };
     }
+    // This stable ID now uses the replay-based OpenAI-compatible driver,
+    // which supports neither OpenCode variants nor native effort levels.
+    if (selection.instanceId === "opencode") return { instanceId: "opencode", model: selection.model };
     return selection;
   };
   const select = (previous?: ModelSelection): ModelSelection => {

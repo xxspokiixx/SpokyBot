@@ -43,6 +43,15 @@ it("preserves allowed choices, normalizes legacy routes, and replaces only unass
   expect(empty.error()).toContain("No company models");
 });
 
+it.each([{ variant: "high" }, { effort: "high" as const }])("preserves an assigned raw OpenRouter model without unsupported OpenCode metadata: %j", metadata => {
+  const policy = hostedModelPolicy(directory(), env())!;
+  const previous = { instanceId: "opencode", model: "provider/fixture", ...metadata };
+  const selection = policy.select(previous);
+  expect(selection).toEqual({ instanceId: "opencode", model: "provider/fixture" });
+  expect(policy.allows(selection)).toBe(true);
+  expect(policy.select(selection)).toEqual(selection);
+});
+
 it("locks native and OpenRouter instances to assigned catalogs and fixed gateway routes", async () => {
   const root = directory(), policy = hostedModelPolicy(root, { ...env(),
     OMB_HOSTED_CLAUDE_CLI: join(import.meta.dirname, "testing/fake-claude-cli.ts"),
