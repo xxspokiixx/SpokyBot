@@ -9281,6 +9281,61 @@ describe("bot memory API", () => {
     }
   });
 
+  it("marks every unseen routine failure seen through one client endpoint", async () => {
+    const bot = (await api("POST", "/api/bots", {})).body.bot;
+    let missedRoutineId: string | null = null;
+    let failingRoutineId: string | null = null;
+    const mine = (snapshot: { runs: Array<{ id: string; routineId: string; status: string; seenAt?: number }> }, id: string | null) =>
+      id ? snapshot.runs.filter((run) => run.routineId === id) : [];
+    try {
+      expect((await api("PATCH", `/api/bots/${bot.id}`, {
+        modelSelection: { instanceId: "ghost", model: "unavailable-fixture" },
+      })).status).toBe(200);
+      const missed = await api("POST", "/api/routines", {
+        name: "Long-stale digest", prompt: "Summarise the week", botId: bot.id,
+        schedule: { type: "once", at: Date.now() - 13 * 3_600_000 },
+      });
+      expect(missed.status).toBe(201);
+      missedRoutineId = missed.body.routine.id as string;
+      const failing = await api("POST", "/api/routines", {
+        name: "Doomed brief", prompt: "Try the work", botId: bot.id,
+        schedule: { type: "once", at: Date.now() + 3_600_000 },
+      });
+      expect(failing.status).toBe(201);
+      failingRoutineId = failing.body.routine.id as string;
+      expect((await api("POST", `/api/routines/${failingRoutineId}/run`)).status).toBe(201);
+
+      await expect.poll(async () => {
+        const snapshot = (await api("GET", "/api/routines")).body;
+        return [mine(snapshot, missedRoutineId).some((run) => run.status === "missed"),
+          mine(snapshot, failingRoutineId).some((run) => run.status === "failed")];
+      }, { timeout: 20_000 }).toEqual([true, true]);
+
+      const sweep = await api("POST", "/api/routine-runs/seen-all");
+      expect(sweep.status).toBe(200);
+      const stampedIds = new Set<string>();
+      for (const run of sweep.body.runs as Array<{ id: string; routineId: string; seenAt?: number }>) {
+        if ([missedRoutineId, failingRoutineId].includes(run.routineId)) {
+          stampedIds.add(run.id);
+          expect(run.seenAt).toBeTypeOf("number");
+        }
+      }
+      const snapshot = (await api("GET", "/api/routines")).body;
+      const problems = [...mine(snapshot, missedRoutineId), ...mine(snapshot, failingRoutineId)]
+        .filter((run) => ["failed", "missed"].includes(run.status));
+      expect(problems).toHaveLength(2);
+      for (const run of problems) expect(stampedIds.has(run.id)).toBe(true);
+
+      const again = await api("POST", "/api/routine-runs/seen-all");
+      expect(again.status).toBe(200);
+      expect((again.body.runs as Array<{ id: string }>).filter((run) => stampedIds.has(run.id))).toEqual([]);
+    } finally {
+      if (missedRoutineId) await api("DELETE", `/api/routines/${missedRoutineId}`).catch(() => undefined);
+      if (failingRoutineId) await api("DELETE", `/api/routines/${failingRoutineId}`).catch(() => undefined);
+      await api("DELETE", `/api/bots/${bot.id}`);
+    }
+  });
+
   it("session_search by time lists the bot's recent messages, its rooms included, and only its own", async () => {
     const bot = (await api("POST", "/api/bots", {})).body.bot;
     const other = (await api("POST", "/api/bots", {})).body.bot;

@@ -13513,6 +13513,9 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
         ? json(res, 200, { ok: true })
         : json(res, 404, { error: "no such routine" });
     }
+    if (path === "/api/routine-runs/seen-all" && method === "POST") {
+      return json(res, 200, { runs: routines!.markAllSeen() });
+    }
     const runMatch = path.match(/^\/api\/routine-runs\/([\w-]+)\/(cancel|seen)$/);
     if (runMatch && method === "POST") {
       const run = runMatch[2] === "cancel"

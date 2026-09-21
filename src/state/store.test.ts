@@ -1153,6 +1153,17 @@ describe("routine receipt retention", () => {
     expect(failures.routinesFocus).toEqual({ section: "logs", view: undefined, botId: undefined, routineId: undefined, nonce: 2 });
   });
 
+  it("carries the problems filter from the errors pill and drops it on a plain visit", () => {
+    const focused = reducer(initialState, { type: "showRoutines", section: "logs", runStatus: "problems" });
+    expect(focused.routinesFocus).toEqual({ section: "logs", view: undefined, botId: undefined, routineId: undefined, runStatus: "problems", nonce: 1 });
+    const plain = reducer(focused, { type: "showRoutines", section: "logs" });
+    expect(plain.routinesFocus).toEqual({ section: "logs", view: undefined, botId: undefined, routineId: undefined, runStatus: undefined, nonce: 2 });
+  });
+
+  it("leaves the bulk-seen sweep to the server's emitted receipts", () => {
+    expect(reducer(initialState, { type: "markAllRoutineRunsSeen" })).toBe(initialState);
+  });
+
   it("distinguishes a failed load from an empty schedule and recovers on hydration", () => {
     expect(initialState.routinesLoadState).toBe("loading");
     const failed = reducer(initialState, { type: "routinesLoadFailed" });

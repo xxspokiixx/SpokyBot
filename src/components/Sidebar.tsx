@@ -39,6 +39,7 @@ import { stateForBot } from "@/lib/mascot";
 import { cn } from "@/lib/cn";
 import { lastNonReceipt } from "@/lib/receipts";
 import { t } from "@/lib/i18n";
+import { isRoutineProblemRun } from "@/lib/routines";
 import type { LocaleKey } from "@/locales";
 import { ConfirmDialog } from "./ConfirmDialog";
 import { WorkingDots } from "./WorkingIndicator";
@@ -2169,7 +2170,7 @@ export function Sidebar({ open, onClose }: { open: boolean; onClose: () => void 
           >
             <CalendarDays size={20} className={state.activeView === "routines" ? "text-accent" : "text-ink-secondary"} />
             <span className={cn("flex-1 text-[14px]", density === "icons" && "hidden")}>{t("sidebar.nav.automations")}</span>
-            {state.routineRuns.some((run) => ["failed", "missed"].includes(run.status) && !run.seenAt) && (
+            {state.routineRuns.some((run) => isRoutineProblemRun(run) && !run.seenAt) && (
               <span className="size-2 rounded-full bg-danger" />
             )}
           </button>
@@ -2208,7 +2209,7 @@ export function Sidebar({ open, onClose }: { open: boolean; onClose: () => void 
                 active: state.activeView === "routines",
                 // folded away, this dot would otherwise vanish with the row
                 attention: state.routineRuns.some(
-                  (run) => ["failed", "missed"].includes(run.status) && !run.seenAt,
+                  (run) => isRoutineProblemRun(run) && !run.seenAt,
                 ),
                 onSelect: () => dispatch({ type: "showRoutines" }),
               },
