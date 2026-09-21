@@ -150,7 +150,7 @@ export function SidebarThreadRow({ task, ownerId, current, compact, folders, onS
           {byline && (
             // the same line and size as the title, only quieter: a second
             // line per thread made the list twice as tall as it needs to be
-            <span className="min-w-0 shrink-0 truncate font-normal text-ink-secondary/80">{byline}</span>
+            <span className="min-w-0 max-w-[45%] shrink truncate font-normal text-ink-secondary/80">{byline}</span>
           )}
         </span>
         {task.activity === "waiting-on-you" ? <span className="shrink-0 text-[10px] font-medium text-warning">{t("task.waiting")}</span> : isWorking(task) ? <Loader2 size={11} className="shrink-0 animate-spin text-success" aria-label={t("chat.activity.working")} /> : task.queued ? <span className="shrink-0 text-[10px] text-ink-secondary">{t("task.queued")}</span> : null}

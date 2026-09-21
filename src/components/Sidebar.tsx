@@ -216,6 +216,9 @@ export function GroupListItem({
     <>
     <div className="group relative">
     <button
+      data-sidebar-group-row={group.id}
+      // with no thread list open, the row is the conversation being looked at
+      aria-current={selected && !expanded ? "page" : undefined}
       onClick={() => dispatch({ type: "select", id: group.id })}
       onContextMenu={(e) => {
         e.preventDefault();
@@ -1236,6 +1239,8 @@ export function BotListItem({
             : undefined
         }
         aria-busy={deleting || undefined}
+        // with no thread list open, the row is the conversation being looked at
+        aria-current={selected && !expanded && !renaming ? "page" : undefined}
         data-sidebar-bot-row={bot.id}
         onClick={onSelect}
         onKeyDown={(event) => {
