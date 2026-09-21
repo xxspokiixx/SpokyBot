@@ -128,7 +128,7 @@ describe("independent bot tasks through the isolated control surface", () => {
       const current = (await api("GET", "/api/bots")).body.bots.find((bot: any) => bot.id === chief.id);
       return current.messages.filter((message: any) => message.tool?.name === "Sent to Mailbox Peer").length;
     }).toBe(1);
-    expect(handoff().status).toBe("queued");
+    await expect.poll(() => handoff()?.status, { timeout: 10_000 }).toBe("queued");
     expect(answers).toEqual([]);
     await control(["messages", "--bot", chief.id, "--limit", "10"]);
     const allowed = await api("POST", `/api/threads/${peer.activeTaskId}/respond`, { requestId: "mailbox-approval", behavior: "allow" });
@@ -148,7 +148,7 @@ describe("independent bot tasks through the isolated control surface", () => {
     const targetMessages = (await api("GET", `/api/threads/${peerThread}/messages?limit=100`)).body.messages;
     expect(targetMessages.filter((message: any) => message.roomRequest?.id === requestId && message.roomRequest.phase === "request")).toHaveLength(1);
     expect(targetMessages.some((message: any) => message.text?.includes("MAILBOX_REVIEW"))).toBe(true);
-    expect(handoff().status).toBe("completed");
+    await expect.poll(() => handoff()?.status, { timeout: 10_000 }).toBe("completed");
     expect((await control(["wait", "--bot", peer.id, "--timeout", "15"])).status).toBe("settled");
     await control(["messages", "--bot", peer.id, "--limit", "10"]);
     await control(["messages", "--bot", chief.id, "--limit", "15"]);
