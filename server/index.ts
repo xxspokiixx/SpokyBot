@@ -459,6 +459,7 @@ import {
 // loading the table after everything above leaves module start-up order as is.
 import { json, readBody } from "./harness/http.ts";
 import { ROUTES, dispatchRoutes } from "./routes/table.ts";
+import { createHostedSlackRoutes } from "./routes/hosted-slack.ts";
 
 const PORT = Number(process.env.OMB_PORT || process.env.OGB_PORT || 8799);
 const WEBHOOK_PORT = Number(process.env.OMB_WEBHOOK_PORT || PORT + 1);
@@ -11262,6 +11263,10 @@ const workspaceBackupRoutes = createWorkspaceBackupRoutes({
     },
   }, keepLocked),
 });
+
+// Route modules (server/routes/README.md). `workspaceAccess` is assigned at
+// boot, after this line, so the dependency reads it per request.
+ROUTES.push(createHostedSlackRoutes({ bot: (id) => store.bot(id), hostedReady: () => Boolean(workspaceAccess) && entitled("admin") }));
 
 const toolResults = new ToolResults();
 const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {

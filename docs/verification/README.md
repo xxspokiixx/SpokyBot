@@ -107,6 +107,10 @@ desktop app or controlling the user's computer.
 The [bot settings fixture](bot-settings.md) checks profile saves, standing
 instructions, history restore, skill/memory refresh, and stale-response isolation.
 
+The [hosted Slack management fixture](hosted-slack-management.md) checks the
+agent settings link to Admin: hosted-only availability, the member-readable
+route module, and stale-response isolation.
+
 The [chat and settings polish fixture](chat-polish.md) exercises attachment
 galleries, opt-in video playback, persisted tool details, and responsive settings
 through the real renderer in an isolated fake-engine workspace.

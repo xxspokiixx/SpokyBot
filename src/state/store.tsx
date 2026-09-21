@@ -695,6 +695,7 @@ export type AppSettingsSection =
 export type BotSettingsSection =
   | "overview"
   | "identity"
+  | "slack"
   | "soul"
   | "skills"
   | "memory"

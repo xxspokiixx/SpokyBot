@@ -2099,6 +2099,8 @@
   "botAccess.mcpUseAll": "Use every enabled server",
   "botAccess.mcpBusy": "Wait until this bot finishes all active tasks before changing its MCP servers.",
   "botAccess.connectApp": "Connect an app…",
+  "botSlack.body": "Give this agent its own Slack app, with its own name and picture, so your team can message it directly.",
+  "botSlack.manage": "Manage in Admin",
   "skills.learned.hintOn": "Save a bot's verification run as a skill from the Verify card, or import one below. Every change waits for your review.",
   "skills.learned.hintOff": "Skill authoring is off, but skills you already enabled stay under your control here.",
   "settings.section.backups": "Backups",
