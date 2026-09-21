@@ -4,6 +4,7 @@ import { Ajv, type ValidateFunction } from "ajv";
 import { Ajv2020 } from "ajv/dist/2020.js";
 import formats from "ajv-formats";
 import type { SendTurnInput } from "../contracts.ts";
+import { augmentedPath } from "../env-path.ts";
 import { killCliTree, spawnCli } from "../procs.ts";
 
 export interface ChatToolDefinition {
@@ -48,8 +49,11 @@ class ChatMcpClient {
 
   constructor(server: Server) {
     try {
+      // The desktop shell inherits Finder's bare PATH, where `npx`-style
+      // servers cannot find `node` and exit at once. Widen it the way the
+      // Claude and Codex drivers do; a PATH the user set on the server wins.
       this.child = spawnCli(server.command, server.args, {
-        stdio: ["pipe", "pipe", "pipe"], env: { ...process.env, ...server.env },
+        stdio: ["pipe", "pipe", "pipe"], env: { ...process.env, PATH: augmentedPath(), ...server.env },
       });
     } catch { throw new Error("MCP server could not start; check its command and installation"); }
     this.child.stdout.setEncoding("utf8");
@@ -76,7 +80,9 @@ class ChatMcpClient {
     for (const entry of this.pending.values()) entry.reject(new Error("MCP session closed"));
     this.pending.clear();
     this.buffer = "";
-    this.closing = killCliTree(this.child, 500).then((stopped) => {
+    // Confirm within the codebase-default grace: Windows reaps the tree via
+    // taskkill /T, which can exceed shorter budgets on a loaded machine.
+    this.closing = killCliTree(this.child, 5_000).then((stopped) => {
       if (!stopped) throw new Error("MCP server shutdown could not be confirmed; execution outcome may be uncertain");
     });
     return this.closing;

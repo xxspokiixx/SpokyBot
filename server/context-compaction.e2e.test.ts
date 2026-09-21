@@ -7,13 +7,13 @@ import { launchVerificationServer, runControlOmb, verificationServerEnvironment 
 import { request } from "../scripts/mcp-server.ts";
 import { waitForExit } from "./testing/cleanup.ts";
 
-async function fixture(test: (f: Awaited<ReturnType<typeof setup>>) => Promise<void>, hang = false) {
-  const f = await setup(hang);
+async function fixture(test: (f: Awaited<ReturnType<typeof setup>>) => Promise<void>, hang = false, fakeEnv: NodeJS.ProcessEnv = {}) {
+  const f = await setup(hang, fakeEnv);
   try { await test(f); } finally { await f.close(); }
 }
 
-async function setup(hang: boolean) {
-  const env = { ...process.env, FAKE_CLAUDE_VERSION: "2.1.270", ...(hang ? { FAKE_CLAUDE_TEXT_HANG: "1" } : {}) };
+async function setup(hang: boolean, fakeEnv: NodeJS.ProcessEnv) {
+  const env = { ...process.env, ...fakeEnv, FAKE_CLAUDE_VERSION: "2.1.270", ...(hang ? { FAKE_CLAUDE_TEXT_HANG: "1" } : {}) };
   const session = await launchVerificationServer(env, undefined, undefined, undefined, undefined, { scripted: true });
   let ready = false;
   try {
@@ -47,8 +47,9 @@ async function setup(hang: boolean) {
     ready = true;
     return { session, api, cli, bot, thread, messages, task, idle, send, turns,
       compact: () => api(`/api/bots/${bot.id}/compact`, { threadId: thread }),
-      restart: async () => {
+      restart: async (beforeLaunch?: () => void) => {
         await waitForExit(restarted ?? session.child, { signal: "SIGTERM" });
+        beforeLaunch?.();
         const log = openSync(session.info.logPath, "a", 0o600);
         restarted = spawn(process.execPath, ["--experimental-strip-types", fileURLToPath(new URL("./index.ts", import.meta.url))], {
           cwd: process.cwd(), env: verificationServerEnvironment(env, session.info.dataDir, Number(new URL(session.info.url).port)), stdio: ["ignore", log, log],
@@ -73,6 +74,8 @@ it("compacts durably, keeps corrections and starts a fresh native session withou
   await f.send("OLDER_REQUEST use port 9000");
   await f.send("CORRECTION use port 9001 instead; cancel the earlier request");
   const before = await f.messages();
+  const previousRequest = before.findLast(message => message.role === "user");
+  expect(previousRequest.requestPending).toBe(false);
   const oldSession = f.task().resumeCursors.claude;
   const turnsBefore = f.turns().length;
   const sibling = (await f.cli("new-bot", "--name", "Separate context")).bot;
@@ -81,7 +84,10 @@ it("compacts durably, keeps corrections and starts a fresh native session withou
   await f.idle();
   const after = await f.messages();
   const record = after.at(-1);
-  expect(after.slice(0, before.length)).toEqual(before);
+  // The unbound maintenance turn invalidates the previous completion fence;
+  // every saved message otherwise remains byte-for-byte equivalent on the wire.
+  expect(after.slice(0, before.length)).toEqual(before.map(message =>
+    message.id === previousRequest.id ? { ...message, requestPending: true } : message));
   expect(record.kind).toBe("compaction");
   expect(record.compaction.summary).toContain("CORRECTION");
   expect(Buffer.byteLength(record.compaction.summary)).toBeLessThanOrEqual(6_000);
@@ -131,6 +137,8 @@ it("automatically folds old exchanges while keeping the two latest and the incom
 it("Stop cancels a stalled summary without writing a late record or starting an agent", () => fixture(async f => {
   await f.send("Keep this original chat intact");
   const before = await f.messages();
+  const previousRequest = before.findLast(message => message.role === "user");
+  expect(previousRequest.requestPending).toBe(false);
   const count = f.turns().length;
   await f.compact();
   await expect.poll(() => {
@@ -141,8 +149,45 @@ it("Stop cancels a stalled summary without writing a late record or starting an 
   await f.cli("interrupt", "--bot", f.bot.id, "--task", f.thread);
   await f.idle();
   expect((await f.messages()).filter(m => m.kind === "compaction")).toHaveLength(0);
-  expect((await f.messages()).slice(0, before.length)).toEqual(before);
+  // Stopping the summary must not restore an earlier completion fence or
+  // change the conversation beyond the maintenance turn's pending marker.
+  expect((await f.messages()).slice(0, before.length)).toEqual(before.map(message =>
+    message.id === previousRequest.id ? { ...message, requestPending: true } : message));
   expect(f.turns()).toHaveLength(count);
   await f.send("Continue without a summary");
   expect(f.turns()).toHaveLength(count + 1);
 }, true), 60_000);
+
+it.each([
+  { native: undefined, tokens: 190_000, compactions: 1 },
+  { native: "100000", tokens: 95_000, compactions: 1 },
+  { native: "off", tokens: 190_000, compactions: 0 },
+  { native: "auto", tokens: 190_000, compactions: 0 },
+])("respects the selected account's native compaction setting ($native)", ({ native, tokens, compactions }) => fixture(async f => {
+  if (native !== undefined) {
+    // Account environment is a persisted config setting, not writable through
+    // the public config patch. Change only this stopped fixture's own config.
+    await f.restart(() => {
+      const path = join(f.session.info.dataDir, "config.json");
+      const config = JSON.parse(readFileSync(path, "utf8"));
+      config.instances.claude.environment.OMB_CLAUDE_AUTOCOMPACT = native;
+      writeFileSync(path, JSON.stringify(config));
+    });
+  }
+  await f.api(`/api/bots/${f.bot.id}/tasks/${f.thread}`, {
+    modelSelection: { instanceId: "claude", model: "claude-sonnet-4-6[1m]" },
+  }, "PATCH");
+  for (const text of ["FIRST historical request", "SECOND keep recent", "THIRD correction", "INCOMING follow-up"]) await f.send(text);
+  expect(f.task().usage.context).toMatchObject({ tokens, window: 1_000_000 });
+  expect((await f.messages()).filter(m => m.kind === "compaction")).toHaveLength(compactions);
+  const launch = JSON.parse(readFileSync(f.session.fixtureDumpPath, "utf8"));
+  if (native === "off") expect(launch.argv).not.toContain("--autocompact");
+  else expect(launch.argv[launch.argv.indexOf("--autocompact") + 1]).toBe(native ?? "200000");
+  if (compactions) {
+    // Even an irreducible prompt close to the native boundary must not let
+    // the regrowth floor postpone the next harness fold beyond that boundary.
+    await f.send("NEXT keep the native headroom after the first fold");
+    expect((await f.messages()).filter(m => m.kind === "compaction")).toHaveLength(2);
+    expect(f.turns().at(-1).resumed).toBe(false);
+  }
+}, false, { FAKE_CLAUDE_CONTEXT_TOKENS: String(tokens) }), 90_000);

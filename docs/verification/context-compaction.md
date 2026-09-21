@@ -24,6 +24,8 @@ There is not yet a dedicated manual-compaction button in the app.
 Evidence covers:
 
 - Automatic compaction keeps the two latest exchanges and the incoming request.
+- A completed turn retains the driver's latest-prompt measurement, separately from summed input tokens.
+- Claude compaction leaves headroom before the selected account's numeric native threshold, including after a previous compaction; `auto` and `off` do not invent a numeric native limit.
 - Manual compaction executes no additional agent turn and retains the original messages.
 - A repeated request at the same compacted tip is a no-op.
 - Restart before the next send retains the summary and replaces the native session once.
@@ -44,6 +46,11 @@ automatic folding, `compactAt` is a fraction below 1 or a token count, and
 do not reload provider processes. The default threshold is 80% of the known
 model window; a real latest-prompt measurement wins over a transcript estimate.
 Summed input tokens across tool rounds are never treated as context size.
+For Claude, the threshold and post-compaction regrowth floor also leave 10%
+headroom below the selected account's numeric native-compaction setting.
+That account's setting takes precedence over the inherited launch environment.
+Native `auto`/`off` settings supply no known numeric bound; other engines keep
+their own model-window threshold. The native CLI setting itself is unchanged.
 
 The selected account's tool-free helper can produce a historical summary, with
 a 20-second timeout and source-labelled fallback when unavailable. Summaries

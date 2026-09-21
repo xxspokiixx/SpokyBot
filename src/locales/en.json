@@ -1,4 +1,9 @@
 {
+  "voice.grok.label": "Grok (xAI)",
+  "voice.grok.host": "Host · Grok",
+  "voice.grok.sharedKey": "Grok uses the workspace’s existing xAI key.",
+  "voice.grok.ready": "The xAI key is saved. Grok detects the spoken language from your text.",
+  "voice.grok.missingKey": "Add an xAI API key in Settings → Connections on the host to use Grok voice.",
   "toolDetail.label": "{name} · {status} · Tool details",
   "toolDetail.input": "Input",
   "toolDetail.output": "Result",
@@ -493,6 +498,8 @@
   "chat.inspectorHint": "Inspector — runtime events and raw protocol for this thread",
   "chat.conversationWith": "Conversation with {name}",
   "chat.showEarlier": "Show earlier messages ({count} more)",
+  "chat.loadEarlier": "Load earlier messages",
+  "chat.loadingEarlier": "Loading earlier messages…",
   "chat.showLater": "Show later messages ({count} more)",
   "chat.provisioning": "Setting up this bot's computer…",
   "chat.jumpToLatest": "Jump to latest",

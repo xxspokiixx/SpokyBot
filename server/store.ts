@@ -23,6 +23,7 @@ import { approvalModeFor, isApprovalMode } from "../shared/approval-mode.ts";
 import type { ProfileRequestChanges } from "../shared/profile-request.ts";
 import type { TeamSetupRequest, TeamSetupResult } from "../shared/team-setup.ts";
 import type { GroupGoalRunCardData } from "../shared/group-goal-run.ts";
+import { isMentionBoundary, isMentionNameContinuation } from "../shared/mention-boundary.ts";
 import type { HandedState } from "./delta-context.ts";
 import type {
   BotActivity, GroupDefaultResponder, GroupTask as GroupTaskRecord, MausColor,
@@ -346,6 +347,8 @@ export interface BotRecord extends Omit<WireBot, "avatarUrl" | "tasks"> {
     threadId?: string;
     /** Composer grant: leave the bot default and other threads unchanged. */
     threadOnly?: true;
+    /** Explicit bot-wide grant, including existing threads. */
+    allThreads?: true;
   };
   /** Receipt committed with a confirmed profile, for retrying card settlement. */
   lastProfileRequestId?: string;
@@ -397,13 +400,13 @@ export function mentionedBots<T extends { name: string; hidden?: boolean }>(text
   const found: T[] = [];
   let at = -1;
   while ((at = lower.indexOf("@", at + 1)) !== -1) {
-    if (at > 0 && !/\s/.test(text[at - 1])) continue; // user@host, not a tag
+    if (!isMentionBoundary(text, at)) continue; // user@host, not a tag
     const rest = lower.slice(at + 1);
     const hit = candidates.find((p) => {
       const name = p.name.toLowerCase();
       if (!rest.startsWith(name)) return false;
-      const after = rest[name.length]; // must not run into a longer word
-      return after === undefined || !/[a-z0-9]/i.test(after);
+      const after = rest.slice(name.length); // must not run into a longer word
+      return !isMentionNameContinuation(after);
     });
     if (hit && !found.includes(hit)) found.push(hit);
   }
@@ -443,7 +446,17 @@ export function roomResponders<T extends { id: string; name: string; hidden?: bo
   defaultResponder: GroupDefaultResponder,
 ): T[] {
   const available = members.filter((member) => !member.hidden);
-  if (/(?:^|\s)@everyone\b/i.test(text)) return available;
+  const everyone = "everyone";
+  for (let at = text.indexOf("@"); at !== -1; at = text.indexOf("@", at + 1)) {
+    const candidate = text.slice(at + 1, at + 1 + everyone.length);
+    if (
+      isMentionBoundary(text, at) &&
+      candidate.toLocaleLowerCase() === everyone &&
+      !isMentionNameContinuation(text.slice(at + 1 + everyone.length))
+    ) {
+      return available;
+    }
+  }
   const mentioned = mentionedBots(text, available);
   if (mentioned.length) return mentioned;
   if (defaultResponder.kind === "everyone") return available;
@@ -1957,6 +1970,20 @@ export class Store {
     return task;
   }
 
+  /** One durable write: never leave only part of a bot's threads updated. */
+  setAllThreadApprovalMode(botId: string, mode: "full" | "ask"): BotRecord | null {
+    const bot = this.bot(botId);
+    if (!bot) return null;
+    const patch = { approvalMode: mode, autoApprove: false, alwaysAllow: [] };
+    const tasks = (bot.tasks ?? []).map(task => ({ ...task, ...patch }));
+    const next = { ...bot, ...patch, approvalGrant: undefined, tasks };
+    this.saveBots(this.bots.map(candidate => candidate === bot ? next : candidate));
+    bot.tasks?.forEach((task, index) => Object.assign(task, tasks[index]));
+    Object.assign(bot, patch, { approvalGrant: undefined });
+    this.emit({ type: "bot", botId });
+    return bot;
+  }
+
   private mirrorActiveTask(bot: BotRecord, task: TaskRecord) {
     bot.threadId = task.threadId;
     bot.resumeCursors = structuredClone(task.resumeCursors);
@@ -1966,7 +1993,7 @@ export class Store {
 
   /** A fresh context on the same bot: new thread, new session, same
    * persona/tools/computer. Becomes the active task. */
-  createTask(botId: string, title?: string, activate = true, projectId?: string, openedBy?: TaskOpenedBy): TaskRecord | null {
+  createTask(botId: string, title?: string, activate = true, projectId?: string, openedBy?: TaskOpenedBy, approvalMode?: "ask" | "full"): TaskRecord | null {
     const bot = this.bot(botId);
     if (!bot) return null;
     if (projectId !== undefined && !this.project(botId, projectId)) return null;
@@ -1978,9 +2005,9 @@ export class Store {
       ...(openedBy ? { openedBy: structuredClone(openedBy) } : {}),
       resumeCursors: {},
       modelSelection: structuredClone(bot.modelSelection),
-      approvalMode: approvalModeFor(bot),
-      autoApprove: Boolean(bot.autoApprove),
-      alwaysAllow: [...(bot.alwaysAllow ?? [])],
+      approvalMode: approvalMode ?? approvalModeFor(bot),
+      autoApprove: approvalMode ? false : Boolean(bot.autoApprove),
+      alwaysAllow: approvalMode ? [] : [...(bot.alwaysAllow ?? [])],
       unread: false,
       activity: "idle",
       busy: false,
