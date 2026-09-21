@@ -89,6 +89,10 @@ and proves quit cancels recovery without replaying an interrupted fixture turn.
 The [Tailscale discovery fixture](tailscale.md) checks standalone macOS CLI mode
 and HTTP tailnet endpoint refresh without touching a real Tailscale installation.
 
+The [external runtimes recipe](external-runtime.md) proves a bot's standing
+comms capability from `external-runtimes.json` against a disposable server and
+the fake engine: scope, on-demand token reads, and immediate delegation drain.
+
 The [cloud preview fixture](cloud-preview.md) mounts the real Computer panel
 against an isolated server for image decoding, loading, and recovery UI checks.
 
@@ -122,6 +126,12 @@ per-thread models, simultaneous direct conversations and thread-scoped Stop.
 
 The [mobile generated-image checks](mobile-generated-images.md) cover native image
 attachments and message-scoped download authorization using isolated fixtures.
+
+The [guarded external messages fixture](guarded-messages.md) checks atomic
+branch and approval preconditions, retry receipts, and refusal to queue or
+steer messages from external interfaces. It also verifies bounded request
+lineage snapshots, Chief continuations and exact-execution Stop without
+interrupting a newer request.
 
 The [iOS thread checks](ios-threads.md) cover the native thread tree, folder
 search and draft isolation using disposable simulators and an offline fixture.

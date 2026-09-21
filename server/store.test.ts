@@ -302,6 +302,36 @@ describe("Store", () => {
     expect(store.messagesFor(bot.threadId)).toHaveLength(0);
   });
 
+  it("persists request provenance, failure and cancellation without altering message identity", () => {
+    const store = new Store(selection);
+    const bot = store.createBot({}, { seedMessages: false });
+    const source = store.appendMessage(bot.threadId, { role: "user", kind: "text", text: "Fixture request", sendId: "fixture-send-id-1234" });
+    const reply = store.appendMessage(bot.threadId, { role: "bot", kind: "text", text: "Earlier handoff", turnId: "initial-turn",
+      requestMessageId: source.id, turnTerminal: true, turnSucceeded: true });
+    store.appendMessage(bot.threadId, { role: "bot", kind: "activity", turnSucceeded: false, tool: { name: "error: fixture continuation failed", ok: false } });
+    store.patchMessage(bot.threadId, source.id, { requestCancelled: true, requestPending: true });
+    const saved = new Store(selection).messagesFor(bot.threadId);
+    expect(saved[0]).toMatchObject({ id: source.id, sendId: source.sendId, requestCancelled: true, requestPending: true });
+    expect(saved[1]).toMatchObject({ id: reply.id, requestMessageId: source.id, turnSucceeded: true });
+    expect(saved[2].turnSucceeded).toBe(false);
+  });
+
+  it("creates explicitly scoped tasks atomically without inheriting remembered grants or changing siblings", () => {
+    const store = new Store(selection);
+    const bot = store.createBot();
+    store.patchBot(bot.id, { approvalMode: "full", autoApprove: false, alwaysAllow: ["old-tool"] });
+    const old = store.activeTask(bot.id)!;
+    const before = structuredClone(old);
+    const save = vi.spyOn(store as unknown as { saveBots(): void }, "saveBots");
+    const ask = store.createTask(bot.id, "Explicit Ask", true, undefined, undefined, "ask")!;
+    expect(save).toHaveBeenCalledTimes(1);
+    expect(ask).toMatchObject({ approvalMode: "ask", autoApprove: false, alwaysAllow: [] });
+    const full = store.createTask(bot.id, "Authorized Full", true, undefined, undefined, "full")!;
+    expect(full).toMatchObject({ approvalMode: "full", autoApprove: false, alwaysAllow: [] });
+    expect(old).toEqual(before);
+    expect(bot).toMatchObject({ approvalMode: "full", autoApprove: false, alwaysAllow: ["old-tool"] });
+  });
+
   it("addTaskUsage accumulates settled-turn totals per task and survives a restart", () => {
     const store = new Store(selection);
     const bot = store.createBot();

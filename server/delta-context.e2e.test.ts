@@ -1003,11 +1003,7 @@ it("gives a delegate_bot source today's fresh session and replay when its soul c
   // turn holds its gate, and the soul edit below is what the third turn
   // must find stale.
   const replies = async () => (await f.messages(threadId)).filter((m: any) => /^@(QA|Ops) replied to the delegated task/.test(m.text ?? "")).length;
-  await expect.poll(replies, { timeout: 30_000 }).toBe(2);
-  // Replies can both be recorded before the first resume process starts.
-  // Change the soul only once that gated launch has received the old prompt;
-  // otherwise a later resume legitimately reuses the already refreshed session.
-  await expect.poll(() => f.launches().length, { timeout: 15_000 }).toBe(2);
+  await expect.poll(() => f.launches().length, { timeout: 30_000 }).toBe(2);
   await f.api(`/api/bots/${f.chief.id}`, { soul: "PEER_SOUL_MARK Always answer in German." }, "PATCH");
   f.open(f.gate("ops"));
   await expect.poll(replies, { timeout: 30_000 }).toBe(2);

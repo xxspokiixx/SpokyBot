@@ -129,6 +129,7 @@ export interface ManagedBoxInventory {
   configured: boolean;
   available: boolean;
   problem: string | null;
+  credentialRejected?: boolean;
   instances: ManagedBoxInventoryInstance[];
 }
 
@@ -500,7 +501,7 @@ function safeBoxState(value: unknown): string {
 
 async function listBoxPages(
   cfg: AppConfig,
-): Promise<{ ok: true; boxes: any[] } | { ok: false; problem: string }> {
+): Promise<{ ok: true; boxes: any[] } | { ok: false; problem: string; credentialRejected?: boolean }> {
   const boxes: any[] = [];
   const seenCursors = new Set<string>();
   let cursor: string | null = null;
@@ -514,7 +515,7 @@ async function listBoxPages(
       return { ok: false, problem: "Could not reach ascii.dev to list cloud computers — check your connection and refresh" };
     }
     if (!listed.ok || !Array.isArray(listed.body?.boxes)) {
-      return { ok: false, problem: boxInventoryProblem(listed.status, listed.body) };
+      return { ok: false, problem: boxInventoryProblem(listed.status, listed.body), credentialRejected: listed.status === 401 || listed.status === 403 };
     }
     boxes.push(...listed.body.boxes);
 
@@ -558,6 +559,7 @@ export async function listManagedBoxes(
       configured: true,
       available: false,
       problem: listed.problem,
+      credentialRejected: listed.credentialRejected,
       instances: [],
     };
   }

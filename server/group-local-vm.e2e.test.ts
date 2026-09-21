@@ -255,16 +255,26 @@ describe("Group Local VM ownership on the real isolated server", () => {
         await api("POST", `/api/bots/${bot.id}/interrupt`, {}); await idle(bot.id);
         await api("PATCH", `/api/bots/${bot.id}/tasks/${bot.threadId}`, { surface: "browser" });
       } else if (failure === "new-request") {
-        const queued = await api("POST", `/api/bots/${bot.id}/messages`, { text: "Forget the VM request. Just answer this new question." });
+        const text = "Forget the VM request. Just answer this new question.";
+        const queued = await api("POST", `/api/bots/${bot.id}/messages`, { text });
         expect(queued.queued).toBe(true);
         writeFileSync(finishFile, "finish");
         const next: any = await dump();
         expect(computer(next)).toBeUndefined();
+        expect(next.mcpConfig.mcpServers.agents.env.OMB_THREAD_ID).toBe(bot.threadId);
+        expect(next.prompt.message.content).toContain(text);
+        expect(next.prompt.message.content).not.toContain("The computer selection is now");
       } else await api("POST", `/api/bots/${bot.id}/interrupt`, {});
       await idle(bot.id);
       if (failure !== "new-request") expect(existsSync(dumpFile)).toBe(false);
       const state = await api("GET", "/api/bots?messages=0");
       expect(state.bots.find((b: any) => b.id === bot.id).tasks[0].surface).toBe(failure === "manual-selection" ? "browser" : undefined);
+      if (failure === "new-request") {
+        const transcript = await api("GET", `/api/threads/${bot.threadId}/messages?limit=50`);
+        expect(transcript.messages.filter((message: any) => message.role === "user" && message.kind === "text")
+          .map((message: any) => message.text)).toEqual(["Open Chrome on the VM", "Forget the VM request. Just answer this new question."]);
+        expect(state.botQueuedMessages[bot.threadId]).toBeUndefined();
+      }
     } finally {
       writeFileSync(finishFile, "finish");
       await api("POST", `/api/bots/${bot.id}/interrupt`, {}); await idle(bot.id);

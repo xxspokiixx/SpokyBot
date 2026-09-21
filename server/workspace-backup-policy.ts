@@ -23,7 +23,7 @@ export function restoredWorkspaceConfig(portable: unknown, destination: unknown)
 
 /** Exact app-owned authentication paths, not a scan of user document text. */
 export function excludedWorkspaceAuthPath(path: string): boolean {
-  return /^(?:(?:providers|caddy|chrome-profile|\.agent-browser)(?:\/|$)|workspace-credentials\.json$|browser-engine-key$)/.test(path) ||
-    /^(?:config\.json|webhooks\.json|workspace-credentials\.json|browser-engine-key|sessions\.json|tunnel-account\.json)\.\d+(?:\.[0-9a-f-]+)?\.tmp$/.test(path) ||
+  return /^(?:(?:providers|caddy|chrome-profile|\.agent-browser)(?:\/|$)|workspace-credentials\.json$|external-runtimes\.json$|browser-engine-key$)/.test(path) ||
+    /^(?:config\.json|webhooks\.json|workspace-credentials\.json|external-runtimes\.json|browser-engine-key|sessions\.json|tunnel-account\.json)\.\d+(?:\.[0-9a-f-]+)?\.tmp$/.test(path) ||
     /^(?:vm-home|vm-homes\/[^/]+)\/\.browser-profiles(?:\/|$)/.test(path);
 }
