@@ -261,6 +261,7 @@ export interface ModelSelection {
 /** One of a bot's separate contexts: its own thread, transcript and
  * provider session. The bot's threadId points at the active one. */
 export interface Task {
+  waitingForTeammates?: boolean;
   threadId: string;
   /** Internal routine execution; reachable through its run receipt, not history menus. */
   routineRunId?: string;
@@ -332,6 +333,7 @@ export interface TaskUsage {
 }
 
 export interface Bot {
+  waitingForTeammates?: boolean;
   id: string;
   threadId: string;
   /** every context this bot has, newest first */
@@ -444,6 +446,7 @@ export function currentTaskBot(bot: Bot, threadId = bot.threadId): Bot {
     unread: task.unread ?? bot.unread,
     pinnedMessageId: task.pinnedMessageId,
     turnStartedAt: task.turnStartedAt ?? null,
+    waitingForTeammates: task.waitingForTeammates ?? false,
   };
 }
 
@@ -1857,6 +1860,7 @@ export function reducer(state: AppState, action: Action): AppState {
       const {
         acknowledgeLocalAuto: _localAck,
         confirmFullAccess: _fullConfirmation,
+        applyToAllThreads: _allThreads,
         computer,
         ...rest
       } = action.patch;
@@ -2176,7 +2180,7 @@ type TrustedApprovalBridge = {
   setMode(
     botId: string,
     mode: ApprovalMode,
-    options?: { acknowledgeLocalAuto?: boolean; threadId?: string; threadOnly?: boolean },
+    options?: { acknowledgeLocalAuto?: boolean; threadId?: string; threadOnly?: boolean; allThreads?: boolean },
   ): Promise<BotAnnouncement>;
 };
 
@@ -2216,6 +2220,7 @@ export async function persistBotUpdate(
   const {
     approvalMode,
     confirmFullAccess,
+    applyToAllThreads,
     ...ordinaryPatch
   } = patch;
   const trustedMode = approvalMode === "full" || approvalMode === "custom"
@@ -2247,6 +2252,7 @@ export async function persistBotUpdate(
 
   const trustedOptions = {
     acknowledgeLocalAuto: ordinaryPatch.acknowledgeLocalAuto === true,
+    ...(applyToAllThreads ? { allThreads: true } : {}),
   };
 
   const rejectCancelledTrustedGrant = async () => {
@@ -2258,7 +2264,7 @@ export async function persistBotUpdate(
     // downgrade even if a turn happened to start in the response gap.
     if (approvalMode === "full" || approvalMode === "custom") {
       try {
-        await trustedApprovals.setMode(botId, "ask", { acknowledgeLocalAuto: false });
+        await trustedApprovals.setMode(botId, "ask", { acknowledgeLocalAuto: false, ...(applyToAllThreads ? { allThreads: true } : {}) });
       } catch (error) {
         throw new Error(
           `The cancelled ${approvalMode === "full" ? "Full access" : "Custom approval"} grant could not be revoked: ${

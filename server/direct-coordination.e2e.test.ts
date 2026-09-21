@@ -32,6 +32,31 @@ async function fixture(test: (f: any) => Promise<void>, fakeEnv: NodeJS.ProcessE
   } finally { await session.close(); }
 }
 
+it.each([false, true])("starts independent work immediately and frees the Chief while waiting (source fails: %s)", fail => fixture(async f => {
+  const sourceGate = join(f.session.info.dataDir, "source-ready");
+  const childGate = join(f.session.info.dataDir, "child-ready");
+  f.plan[f.chief.id].gateFile = sourceGate;
+  f.plan[f.chief.id].fail = fail;
+  f.plan[f.lead.id] = { gateFile: childGate, reply: "CSV export implemented and checked" };
+  await f.start();
+  await expect.poll(() => f.nodes().find((n: any) => n.botId === f.lead.id)?.status, { timeout: 15_000 }).toBe("running");
+  expect(f.nodes().find((n: any) => n.botId === f.chief.id).status).toBe("source");
+  writeFileSync(sourceGate, "finish the fixture source turn");
+  const readChief = async () => (await f.api("/api/bots?messages=0")).bots.find((b: any) => b.id === f.chief.id);
+  await expect.poll(async () => {
+    const b = await readChief();
+    return !b.busy && b.waitingForTeammates && b.tasks.find((t: any) => t.threadId === f.chief.activeTaskId)?.waitingForTeammates;
+  }, { timeout: 15_000 }).toBe(true);
+  // No provider turn is occupying the Chief; its thread controls remain usable.
+  await f.api(`/api/bots/${f.chief.id}/tasks/${f.chief.activeTaskId}`, { approvalMode: "ask" }, "PATCH");
+  expect(f.nodes().find((n: any) => n.botId === f.lead.id).status).toBe("running");
+  writeFileSync(childGate, "complete the fixture teammate");
+  await expect.poll(() => f.nodes().find((n: any) => n.botId === f.chief.id)?.status, { timeout: 15_000 }).toBe("completed");
+  expect((await f.wait()).status).toBe("settled");
+  expect((await f.messages(f.chief.activeTaskId)).filter((m: any) => m.text === f.plan[f.chief.id].resumeReply)).toHaveLength(1);
+  expect(await readChief()).toMatchObject({ busy: false, waitingForTeammates: false });
+}), 60_000);
+
 it("coordinates a lead and its specialist from ordinary chat, returns to Clive, and leaves unrelated tasks untouched", () => fixture(async f => {
   const originalLead = await f.messages(f.lead.activeTaskId);
   const originalSpecialist = await f.messages(f.specialist.activeTaskId);
@@ -99,8 +124,7 @@ it.each(["resume", "stop", "failed resume", "failed root"] as const)("keeps a gu
     expect(waiting.messages.find((message: any) => message.text === "Assigned to Engineering").requestMessageId).toBe(accepted.message.id);
     await expect.poll(() => f.nodes().find((node: any) => node.botId === f.lead.id)?.status, { timeout: 15_000 }).toBe("running");
     const child = f.nodes().find((node: any) => node.botId === f.lead.id);
-    // The public busy flag includes coordination. This no-op task update also
-    // proves the Chief's raw provider busy flag and dispatch claim are clear.
+    // Waiting for teammates does not occupy a provider turn or disable edits.
     await api("PATCH", `/api/bots/${f.chief.id}/tasks/${threadId}`, { approvalMode: "ask" });
     const target = { threadId, messageId: waiting.messageId, expectedActiveLeafId: waiting.activeLeafId,
       expectedTurnId: waiting.activeTurnId, expectedExecutionId: waiting.executionId };
@@ -434,7 +458,7 @@ it("queues a recipient at capacity, preserving its existing task and resuming on
   await f.start();
   await expect.poll(() => f.nodes().find((node: any) => node.parentId)?.status, { timeout: 10_000 }).toBe("queued");
   const chief = (await f.api("/api/bots")).bots.find((bot: any) => bot.id === f.chief.id);
-  expect(chief.busy).toBe(true);
+  expect(chief).toMatchObject({ busy: false, waitingForTeammates: true });
   const next = await f.api(`/api/bots/${f.chief.id}/tasks`, { title: "Other conversation" });
   expect((await f.wait()).status).toBe("settled");
   expect(await f.messages(next.task.threadId)).toEqual([]);

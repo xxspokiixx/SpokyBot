@@ -130,6 +130,32 @@ app.whenReady().then(async () => {
     });
     return;
   }
+  // One explicit grant covers old, archived and future threads, even if their
+  // provider differs. Use the real private bridge, not fixture state edits.
+  const whole = (await api("/api/bots", "POST", { name: "All threads fixture", modelSelection: { instanceId: "claude", model: "claude-sonnet-5" } })).body.bot;
+  const untouched = (await api("/api/bots", "POST", { name: "Unrelated bot" })).body.bot;
+  await coordinator.request(child, whole.id, "ask");
+  const threads = [];
+  for (const [instanceId, model] of [["claude", "claude-sonnet-5"], ["codex", "gpt-6-astra"], ["grok-reads", "grok-4.6"], ["agy", "gemini-3.8-flash-high"]]) {
+    const task = (await api(`/api/bots/${whole.id}/tasks`, "POST", { title: `Existing ${instanceId} conversation` })).body.task;
+    assert.equal((await api(`/api/bots/${whole.id}/tasks/${task.threadId}`, "PATCH", { modelSelection: { instanceId, model } })).status, 200);
+    threads.push(task.threadId);
+  }
+  assert.equal((await api(`/api/bots/${whole.id}/tasks/${threads[0]}`, "PATCH", { archivedAt: Date.now() })).status, 200);
+  const allGranted = await coordinator.request(child, whole.id, "full", { allThreads: true });
+  assert.equal(allGranted.approvalMode, "full");
+  assert.ok(allGranted.tasks.every(task => task.approvalMode === "full"));
+  const future = (await api(`/api/bots/${whole.id}/tasks`, "POST", { title: "Future thread" })).body.task;
+  assert.equal(future.approvalMode, "full");
+  assert.equal((await api("/api/bots?messages=0")).body.bots.find(bot => bot.id === untouched.id).approvalMode, untouched.approvalMode);
+  const persisted = JSON.parse(readFileSync(join(home, "bots.json"), "utf8")).find(bot => bot.id === whole.id);
+  assert.ok(persisted.tasks.every(task => task.approvalMode === "full"));
+  assert.equal(persisted.approvalGrant, undefined);
+  const revoked = await coordinator.request(child, whole.id, "ask", { allThreads: true });
+  assert.equal(revoked.approvalMode, "ask");
+  assert.ok(revoked.tasks.every(task => task.approvalMode === "ask"));
+  console.log(JSON.stringify({ allThreads: true, mixedProviders: true, archivedIncluded: true, futureInherits: true, unrelatedBotUnchanged: true, persisted: true }));
+  if (process.argv.includes("--all-threads-only")) { await verifyUi(); return; }
   const created = await api("/api/bots", "POST", { modelSelection: { instanceId: "claude", model: "claude-sonnet-5" } });
   assert.equal(created.status, 201);
   const id = created.body.bot.id;
@@ -207,6 +233,10 @@ app.whenReady().then(async () => {
   assert.equal((await api(`/api/bots/${parallel.id}/tasks/${working.threadId}`, "POST")).status, 200);
   assert.equal((await api(`/api/bots/${parallel.id}/messages`, "POST", { text: "Hold for fixture approval", threadId: working.threadId })).status, 202);
   const held = await until(async () => pendingCard((await api("/api/bots")).body.bots.find(bot => bot.id === parallel.id)));
+  const parallelModes = async () => (await api("/api/bots?messages=0")).body.bots.find(bot => bot.id === parallel.id).tasks.map(task => task.approvalMode);
+  const modesBefore = await parallelModes();
+  await assert.rejects(coordinator.request(child, parallel.id, "full", { allThreads: true }), /active turns/);
+  assert.deepEqual(await parallelModes(), modesBefore);
   await assert.rejects(coordinator.request(child, parallel.id, "full", { threadId: working.threadId, threadOnly: true }), /Stop this thread/);
   const separate = await coordinator.request(child, parallel.id, "full", { threadId: idle.threadId, threadOnly: true });
   assert.equal(separate.tasks.find(task => task.threadId === working.threadId).busy, true);

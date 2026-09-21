@@ -105,6 +105,8 @@ export interface TaskUsage {
  * session. Wire form: no resumeCursors or lastInstanceId — the harness's
  * own bookkeeping that no client has ever used. */
 export interface WireTask {
+  /** Outstanding handoffs, not an active provider turn. */
+  waitingForTeammates?: boolean;
   threadId: string;
   title: string;
   createdAt: number;
@@ -177,6 +179,7 @@ export interface InstalledPackageMetadata {
  * projected tasks are WireTask[] and avatarUrl is always present
  * (null when the bot has none). */
 export interface WireBot {
+  waitingForTeammates?: boolean;
   id: string;
   /** The task selected in the UI; running turns keep their own thread id. */
   threadId: string;

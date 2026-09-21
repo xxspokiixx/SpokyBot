@@ -1,5 +1,26 @@
 # In-chat team coordination
 
+Independent bot conversations now dispatch as soon as a handoff is accepted;
+speakers in the same group chat still serialize. A Chief waiting for returned
+results exposes `waitingForTeammates: true`, not a fake active `busy` turn.
+The chat header shows **Teammates working**, leaves the composer usable and
+retains Stop. Explicit command-line `wait` still waits for the whole result.
+Accepted handoffs survive a failed source provider turn; explicit Stop,
+deleted conversations and revoked routes keep their existing cancellation
+behavior. This does not add restart replay or remove task capacity limits.
+
+Regression checks (all use disposable fixtures):
+
+```sh
+pnpm exec vitest run server/room-handoffs.test.ts server/direct-coordination.e2e.test.ts server/room-coordination.e2e.test.ts
+OMB_UI_E2E=1 pnpm exec vitest run scripts/testing/direct-coordination-ui.e2e.test.ts
+```
+
+Gated fake-model turns prove a teammate starts before the Chief settles,
+the Chief becomes available while results are pending, failure of the source
+does not discard accepted work, and exactly one final answer returns to the
+original thread. These tests verify orchestration, not live-model planning.
+
 In an ordinary bot chat or group conversation, ask the lead to consult named
 teammates or have them build and review a concrete artifact. No new dashboard,
 incoming-route panel or mandatory discussion. The existing **Finish together** goal loop

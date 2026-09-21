@@ -346,6 +346,8 @@ export interface BotRecord extends Omit<WireBot, "avatarUrl" | "tasks"> {
     threadId?: string;
     /** Composer grant: leave the bot default and other threads unchanged. */
     threadOnly?: true;
+    /** Explicit bot-wide grant, including existing threads. */
+    allThreads?: true;
   };
   /** Receipt committed with a confirmed profile, for retrying card settlement. */
   lastProfileRequestId?: string;
@@ -1955,6 +1957,20 @@ export class Store {
     if (updateBotDefault) Object.assign(bot, patch);
     this.emit({ type: "bot", botId });
     return task;
+  }
+
+  /** One durable write: never leave only part of a bot's threads updated. */
+  setAllThreadApprovalMode(botId: string, mode: "full" | "ask"): BotRecord | null {
+    const bot = this.bot(botId);
+    if (!bot) return null;
+    const patch = { approvalMode: mode, autoApprove: false, alwaysAllow: [] };
+    const tasks = (bot.tasks ?? []).map(task => ({ ...task, ...patch }));
+    const next = { ...bot, ...patch, approvalGrant: undefined, tasks };
+    this.saveBots(this.bots.map(candidate => candidate === bot ? next : candidate));
+    bot.tasks?.forEach((task, index) => Object.assign(task, tasks[index]));
+    Object.assign(bot, patch, { approvalGrant: undefined });
+    this.emit({ type: "bot", botId });
+    return bot;
   }
 
   private mirrorActiveTask(bot: BotRecord, task: TaskRecord) {

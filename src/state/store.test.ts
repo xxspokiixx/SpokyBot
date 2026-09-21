@@ -362,11 +362,20 @@ describe("trusted approval-mode persistence", () => {
     expect(setMode).toHaveBeenCalledWith("bot-1", "full", { acknowledgeLocalAuto: false });
   });
 
+  it("passes all-threads scope only through the private grant", async () => {
+    const request = vi.fn(async (_path: string, _init?: RequestInit) => ({ bot: announcement("ask") }));
+    const setMode = vi.fn(async () => announcement("full"));
+    await persistBotUpdate("bot-1", { approvalMode: "full", confirmFullAccess: true, applyToAllThreads: true, title: "Chief" },
+      new AbortController().signal, request, { setMode });
+    expect(JSON.parse(String(request.mock.calls[0]?.[1]?.body))).toEqual({ title: "Chief" });
+    expect(setMode).toHaveBeenCalledWith("bot-1", "full", { acknowledgeLocalAuto: false, allThreads: true });
+  });
+
   it("never sends a Full confirmation over HTTP after a rapid switch back to Ask", async () => {
     const request = vi.fn(async (_path: string, _init?: RequestInit) => ({ bot: announcement("ask") }));
     await persistBotUpdate(
       "bot-1",
-      { approvalMode: "ask", confirmFullAccess: true },
+      { approvalMode: "ask", confirmFullAccess: true, applyToAllThreads: true },
       new AbortController().signal,
       request,
     );
