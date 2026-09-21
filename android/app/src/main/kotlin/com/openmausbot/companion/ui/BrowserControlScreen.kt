@@ -44,10 +44,12 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.draw.scale
+import androidx.compose.ui.graphics.TransformOrigin
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.unit.dp
@@ -99,6 +101,8 @@ fun BrowserControlScreen(botId: String, onBack: () -> Unit) {
     var latched by remember { mutableStateOf(0) }
     var queue by remember { mutableStateOf<BrowserInputQueue?>(null) }
     var viewerId by remember { mutableStateOf<String?>(null) }
+    var surfaceWidth by remember { mutableStateOf(1) }
+    var surfaceHeight by remember { mutableStateOf(1) }
     var status by remember { mutableStateOf(BrowserStatus(false, false, 1280.0, 720.0)) }
     var failure by remember { mutableStateOf<String?>(null) }
 
@@ -210,7 +214,15 @@ fun BrowserControlScreen(botId: String, onBack: () -> Unit) {
             )
         }
 
-        Box(Modifier.weight(1f).fillMaxWidth()) {
+        Box(
+            Modifier
+                .weight(1f)
+                .fillMaxWidth()
+                .onSizeChanged {
+                    surfaceWidth = it.width
+                    surfaceHeight = it.height
+                },
+        ) {
             val bitmap = remember(frame?.seq) {
                 frame?.bytes()?.let { BitmapFactory.decodeByteArray(it, 0, it.size) }
             }
@@ -219,7 +231,15 @@ fun BrowserControlScreen(botId: String, onBack: () -> Unit) {
                     bitmap = bitmap.asImageBitmap(),
                     contentDescription = "${bot.name}'s browser",
                     contentScale = ContentScale.Fit,
-                    modifier = Modifier.fillMaxSize().scale(transform.scale.toFloat()),
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .graphicsLayer {
+                            scaleX = transform.scale.toFloat()
+                            scaleY = transform.scale.toFloat()
+                            transformOrigin = TransformOrigin(0f, 0f)
+                            translationX = (-transform.offsetX * size.width * transform.scale).toFloat()
+                            translationY = (-transform.offsetY * size.height * transform.scale).toFloat()
+                        },
                 )
             } else {
                 Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
@@ -251,14 +271,32 @@ fun BrowserControlScreen(botId: String, onBack: () -> Unit) {
                 Box(
                     Modifier
                         .offset(
-                            x = with(density) { (cursor.x * 1000).toInt().toDp() },
-                            y = with(density) { (cursor.y * 1000).toInt().toDp() },
+                            x = with(density) { (cursor.x * surfaceWidth).toInt().toDp() },
+                            y = with(density) { (cursor.y * surfaceHeight).toInt().toDp() },
                         )
                         .size(22.dp)
                         .clip(CircleShape)
                         .background(Color.White.copy(alpha = 0.6f)),
                 )
             }
+        }
+
+        if (driving) {
+            TextField(
+                value = typed,
+                onValueChange = { value ->
+                    // Committed text leaves as `char`. Deletion cannot arrive
+                    // this way — an empty field reports no backspace — so the
+                    // bar below owns Backspace.
+                    if (value.isNotEmpty()) {
+                        send(listOf(GestureIntent.Text(value)))
+                        typed = ""
+                    }
+                },
+                singleLine = true,
+                placeholder = { Text("Type into the page") },
+                modifier = Modifier.fillMaxWidth().padding(horizontal = 12.dp),
+            )
         }
 
         // Without this bar there is no Ctrl-L, no Escape and no Tab between

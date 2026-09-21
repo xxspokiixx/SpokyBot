@@ -178,7 +178,7 @@ struct BrowserControlView: View {
     @Environment(\.scenePhase) private var scenePhase
     @StateObject private var model: BrowserControlModel
     @State private var address = ""
-    @State private var editingAddress = false
+    @FocusState private var addressFocused: Bool
     @FocusState private var keyboardFocused: Bool
     @State private var typedBuffer = ""
 
@@ -225,8 +225,11 @@ struct BrowserControlView: View {
                 .textInputAutocapitalization(.never)
                 .autocorrectionDisabled()
                 .submitLabel(.go)
+                .focused($addressFocused)
                 .onSubmit { Task { await model.navigate(address) } }
-                .onChange(of: model.url) { _, url in if !editingAddress { address = url } }
+                // The page's own navigation must not overwrite what someone
+                // is halfway through typing.
+                .onChange(of: model.url) { _, url in if !addressFocused { address = url } }
 
             Picker("", selection: $model.mode) {
                 Image(systemName: "hand.tap").tag(GestureMode.direct)
