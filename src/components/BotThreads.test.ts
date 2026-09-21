@@ -26,13 +26,16 @@ describe("sidebar bot threads", () => {
     expect(workingFolderLabel("/Users/example/Projects/Website/", "maus", "idle")).toBe("Website");
     expect(workingFolderLabel("/Users/example/task-workspaces/notes", "maus", "idle")).toBe("notes");
   });
-  it("shows indented named threads with separate presence and a usable New thread action", () => {
+  it("shows named threads flush with the bot row, with separate presence and no trailing New thread row", () => {
     const markup = renderToStaticMarkup(createElement(StoreProvider, null, createElement(BotThreadList, { bot, selected: true })));
     expect(markup).toContain('aria-label="Maus threads"');
     expect(markup).toContain('data-sidebar-thread-row="idle" aria-current="page"');
     expect(markup).toContain("Long research · Working");
     expect(markup).toContain("Needs approval · Waiting · Unread");
-    expect(markup).toContain("New thread");
+    // New thread lives on the bot row as an icon beside New folder; the list
+    // carries no indent rail and no trailing text button
+    expect(markup).not.toContain("New thread");
+    expect(markup).not.toContain("border-l");
     expect(markup).not.toContain("disabled");
     expect(markup).not.toContain("test");
   });
@@ -98,13 +101,12 @@ describe("sidebar bot threads", () => {
     expect(markup).toContain('aria-label="Launch team threads"');
     expect(markup).toContain('data-sidebar-thread-row="group-current" aria-current="page"');
     expect(markup).toContain("Previous review");
-    expect(markup).toContain("New thread");
-    expect(markup).not.toContain('disabled=""');
+    // New thread lives on the room row now, not at the end of the list
+    expect(markup).not.toContain("New thread");
     const picker = renderToStaticMarkup(createElement(StoreProvider, null, createElement(GroupTaskPicker, { group })));
     expect(picker).toContain('aria-label="All threads"');
     expect(picker).not.toContain("Tasks");
     const working = renderToStaticMarkup(createElement(StoreProvider, null, createElement(GroupThreadList, { group: { ...group, working: true }, selected: true })));
     expect(working).toContain('title="Launch plan · Working"');
-    expect(working).toContain('disabled=""');
   });
 });

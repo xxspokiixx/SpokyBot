@@ -144,10 +144,14 @@ export function SidebarThreadRow({ task, ownerId, current, compact, folders, onS
         onClick={onSelect} onDoubleClick={startRename}
         onContextMenu={(event) => { event.preventDefault(); openMenu(event.clientX, event.clientY); }}
         onKeyDown={(event) => { if (event.key === "ContextMenu" || event.shiftKey && event.key === "F10") { event.preventDefault(); const rect = event.currentTarget.getBoundingClientRect(); openMenu(rect.left, rect.bottom); } }}
-        className={cn("flex min-w-0 flex-1 items-center gap-2 rounded-md pl-3 pr-1 text-left text-[13px] font-medium outline-none focus-visible:ring-1 focus-visible:ring-accent/60", compact ? "min-h-7 py-1" : "min-h-8 py-1.5", current ? "font-semibold text-ink" : "text-ink-secondary hover:text-ink")}>
-        <span className="flex min-w-0 flex-1 flex-col">
+        className={cn("flex min-w-0 flex-1 items-center gap-2 rounded-md pl-6 pr-1 text-left text-[13px] font-medium outline-none focus-visible:ring-1 focus-visible:ring-accent/60", compact ? "min-h-7 py-1" : "min-h-8 py-1.5", current ? "font-semibold text-ink" : "text-ink-secondary hover:text-ink")}>
+        <span className="flex min-w-0 flex-1 items-baseline gap-1.5">
           <span className={cn("min-w-0 truncate", task.unread && "font-semibold text-ink", (closed || archived) && !current && "text-ink-secondary/70")}>{task.title}</span>
-          {byline && <span className="min-w-0 truncate text-[10.5px] leading-tight text-ink-secondary/80">{byline}</span>}
+          {byline && (
+            // the same line and size as the title, only quieter: a second
+            // line per thread made the list twice as tall as it needs to be
+            <span className="min-w-0 shrink-0 truncate font-normal text-ink-secondary/80">{byline}</span>
+          )}
         </span>
         {task.activity === "waiting-on-you" ? <span className="shrink-0 text-[10px] font-medium text-warning">{t("task.waiting")}</span> : isWorking(task) ? <Loader2 size={11} className="shrink-0 animate-spin text-success" aria-label={t("chat.activity.working")} /> : task.queued ? <span className="shrink-0 text-[10px] text-ink-secondary">{t("task.queued")}</span> : null}
         {task.unread && <span className="size-1.5 shrink-0 rounded-full bg-accent" aria-label={t("task.unread")} />}
