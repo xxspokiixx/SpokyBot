@@ -321,6 +321,22 @@ const defaultModelSelectionSchema = z.object({
   variant: z.string().refine(isModelVariant, "invalid model variant").optional(),
 }).refine((selection) => selection.variant === undefined || selection.effort === undefined,
   "choose either a model variant or an effort level");
+const threadsConfigSchema = z.object({
+  maxConcurrentPerBot: z.number().int().min(1).max(MAX_CONCURRENT_BOT_THREADS),
+  /** Cap each per-thread events/ and native/ NDJSON log at this many
+   * bytes; absent (the default) keeps today's unbounded growth (#1280). */
+  eventLogMaxBytes: z.number().int().min(MIN_THREAD_EVENT_LOG_BYTES).max(MAX_THREAD_EVENT_LOG_BYTES).optional(),
+  /** Days a closed or archived thread's event logs survive (#1280).
+   * Absent keeps them forever. */
+  eventLogRetentionDays: z.number().int().min(1).max(3650).optional(),
+}).strict();
+/** PATCH threads: every knob is independently patchable, and null clears an
+ * event-log knob back to its absent (off) default. */
+const threadsPatchSchema = threadsConfigSchema.extend({
+  maxConcurrentPerBot: threadsConfigSchema.shape.maxConcurrentPerBot.optional(),
+  eventLogMaxBytes: threadsConfigSchema.shape.eventLogMaxBytes.nullable(),
+  eventLogRetentionDays: threadsConfigSchema.shape.eventLogRetentionDays.nullable(),
+});
 const appConfigSchema = z.object({
   /** Verified by the dedicated domain endpoint, never a generic config patch. */
   customDomain: z.string().optional(),
@@ -424,15 +440,7 @@ const appConfigSchema = z.object({
     compactAt: z.number().positive().max(10_000_000).optional(),
     autoCompact: z.boolean().optional(),
   }).optional(),
-  threads: z.object({
-    maxConcurrentPerBot: z.number().int().min(1).max(MAX_CONCURRENT_BOT_THREADS),
-    /** Cap each per-thread events/ and native/ NDJSON log at this many
-     * bytes; absent (the default) keeps today's unbounded growth (#1280). */
-    eventLogMaxBytes: z.number().int().min(MIN_THREAD_EVENT_LOG_BYTES).max(MAX_THREAD_EVENT_LOG_BYTES).optional(),
-    /** Days a closed or archived thread's event logs survive (#1280).
-     * Absent keeps them forever. */
-    eventLogRetentionDays: z.number().int().min(1).max(3650).optional(),
-  }).strict().optional(),
+  threads: threadsConfigSchema.optional(),
   localVm: localVmConfigSchema.optional(),
   features: featureConfigSchema.optional(),
   onboarding: onboardingConfigSchema.optional(),
@@ -449,7 +457,8 @@ const appConfigSchema = z.object({
 const storedAppConfigSchema = appConfigSchema.extend({
   browserProfiles: storedBrowserProfilesSchema.optional(),
 });
-const appConfigPatchSchema = appConfigSchema.omit({ instances: true, mcpServers: true, cliStartup: true, customDomain: true });
+const appConfigPatchSchema = appConfigSchema.omit({ instances: true, mcpServers: true, cliStartup: true, customDomain: true })
+  .extend({ threads: threadsPatchSchema.optional() });
 const jsonObjectSchema = z.record(z.string(), z.json());
 
 export interface AppConfig {
@@ -633,7 +642,9 @@ export function roomHandoffLimits(cfg: AppConfig): RoomHandoffLimitsMs {
   };
 }
 
-export function maxConcurrentBotThreads(cfg: AppConfig): number {
+/** Accepts a full config or a parsed patch: the concurrency limit may be
+ * read from either, and a patch may legitimately omit it. */
+export function maxConcurrentBotThreads(cfg: { threads?: { maxConcurrentPerBot?: number } }): number {
   return cfg.threads?.maxConcurrentPerBot ?? DEFAULT_MAX_CONCURRENT_BOT_THREADS;
 }
 
@@ -835,7 +846,7 @@ export function loadConfig(): AppConfig {
  * user cleared the credential, so the var is dropped and the (now empty)
  * file value is authoritative again. Fields absent from the patch are
  * untouched. */
-export function syncCredentialEnv(patch: Partial<AppConfig>): void {
+export function syncCredentialEnv(patch: Partial<Omit<AppConfig, "threads">>): void {
   const secrets: Array<[value: string | undefined, name: string]> = [
     [patch.xai?.key, "XAI_API_KEY"],
     [patch.anthropic?.key, "OMB_ANTHROPIC_API_KEY"],
@@ -945,7 +956,10 @@ export const PROVIDER_CREDENTIAL_ENV = [
 
 /** Merge a partial config into ~/.openmausbot/config.json (secrets never
  * echoed back — callers report configured-or-not booleans only). */
-export function saveConfig(patch: Partial<AppConfig>, options: { replaceInstances?: boolean } = {}): void {
+export function saveConfig(
+  patch: Partial<Omit<AppConfig, "threads">> & { threads?: z.output<typeof threadsPatchSchema> },
+  options: { replaceInstances?: boolean } = {},
+): void {
   const p = join(DATA_DIR, "config.json");
   let disk: JsonObject = {};
   try {
@@ -954,7 +968,7 @@ export function saveConfig(patch: Partial<AppConfig>, options: { replaceInstance
   } catch {
     /* first write */
   }
-  const checkedPatch = appConfigSchema.partial().parse(patch);
+  const checkedPatch = appConfigSchema.partial().extend({ threads: threadsPatchSchema.optional() }).parse(patch);
   // A write is the durable migration point. Preserve every other raw key in
   // config.json, but never write #567's mixed-case or duplicate profile ids
   // back after we have successfully recognized the legacy list.
@@ -965,7 +979,16 @@ export function saveConfig(patch: Partial<AppConfig>, options: { replaceInstance
     if (!section) continue;
     const current = jsonObjectSchema.safeParse(disk[key]);
     const merged: JsonObject = current.success ? { ...current.data } : {};
+    // parseStoredConfig requires threads.maxConcurrentPerBot, so creating
+    // the section with only an event-log knob must still persist a valid
+    // concurrency default.
+    if (key === "threads" && !current.success) merged.maxConcurrentPerBot = DEFAULT_MAX_CONCURRENT_BOT_THREADS;
     Object.assign(merged, section);
+    // null is the patch's explicit "remove this key" marker (today only the
+    // threads event-log knobs use it); a key the patch omits keeps its value.
+    for (const [sectionKey, sectionValue] of Object.entries(section as Record<string, unknown>)) {
+      if (sectionValue === null) delete merged[sectionKey];
+    }
     disk[key] = merged;
   }
   if (checkedPatch.vps !== undefined) disk.vps = normalizeVpsConfig(checkedPatch.vps);

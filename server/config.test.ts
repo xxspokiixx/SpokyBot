@@ -81,7 +81,10 @@ describe("configuration boundaries", () => {
     expect(threadEventLogMaxBytes({ threads: { maxConcurrentPerBot: 3 } })).toBeNull();
     const parsed = parseStoredConfig({ threads: { maxConcurrentPerBot: 3, eventLogMaxBytes: 50 * 1024 * 1024 } });
     expect(threadEventLogMaxBytes(parsed)).toBe(50 * 1024 * 1024);
-    for (const value of [0, -1, 256 * 1024 - 1, 1.5, "1000", null]) {
+    // the knob patches on its own and null is the explicit clear marker
+    expect(parseConfigPatch({ threads: { eventLogMaxBytes: 50 * 1024 * 1024 } })).toEqual({ threads: { eventLogMaxBytes: 50 * 1024 * 1024 } });
+    expect(parseConfigPatch({ threads: { eventLogMaxBytes: null } })).toEqual({ threads: { eventLogMaxBytes: null } });
+    for (const value of [0, -1, 256 * 1024 - 1, 1.5, "1000"]) {
       expect(() => parseConfigPatch({ threads: { maxConcurrentPerBot: 3, eventLogMaxBytes: value } })).toThrow("threads.eventLogMaxBytes");
     }
   });
@@ -91,7 +94,10 @@ describe("configuration boundaries", () => {
     expect(threadEventLogRetentionDays(parseStoredConfig({ threads: { maxConcurrentPerBot: 2 } }))).toBeNull();
     const configured = parseStoredConfig({ threads: { maxConcurrentPerBot: 2, eventLogRetentionDays: 30 } });
     expect(threadEventLogRetentionDays(configured)).toBe(30);
-    for (const value of [0, -1, 1.5, "30", null, 3660]) {
+    // the knob patches on its own and null is the explicit clear marker
+    expect(parseConfigPatch({ threads: { eventLogRetentionDays: 30 } })).toEqual({ threads: { eventLogRetentionDays: 30 } });
+    expect(parseConfigPatch({ threads: { eventLogRetentionDays: null } })).toEqual({ threads: { eventLogRetentionDays: null } });
+    for (const value of [0, -1, 1.5, "30", 3660]) {
       expect(() => parseConfigPatch({ threads: { maxConcurrentPerBot: 2, eventLogRetentionDays: value } })).toThrow("threads.eventLogRetentionDays");
     }
   });
@@ -540,6 +546,42 @@ describe("saving the newer sections", () => {
         billing: { currency: "EUR", prices: { "gpt-5": { inputPerMillion: 3, outputPerMillion: 4 } } },
       });
       expect(disk.billing.prices.default).toBeUndefined();
+    } finally {
+      rmSync(path, { force: true });
+    }
+  });
+
+  it("clears a thread event-log knob with null while other keys survive", () => {
+    const path = join(DATA_DIR, "config.json");
+    mkdirSync(DATA_DIR, { recursive: true });
+    writeFileSync(path, JSON.stringify({}));
+    try {
+      saveConfig({ threads: { maxConcurrentPerBot: 3, eventLogRetentionDays: 30, eventLogMaxBytes: 50 * 1024 * 1024 } });
+      // clearing one knob leaves the sibling knob and the concurrency limit alone
+      saveConfig({ threads: { eventLogRetentionDays: null } });
+      let disk = JSON.parse(readFileSync(path, "utf8"));
+      expect(disk.threads).toEqual({ maxConcurrentPerBot: 3, eventLogMaxBytes: 50 * 1024 * 1024 });
+      saveConfig({ threads: { eventLogMaxBytes: null } });
+      disk = JSON.parse(readFileSync(path, "utf8"));
+      expect(disk.threads).toEqual({ maxConcurrentPerBot: 3 });
+      expect(parseStoredConfig(disk).threads).toEqual({ maxConcurrentPerBot: 3 });
+      expect(threadEventLogRetentionDays(parseStoredConfig(disk))).toBeNull();
+      expect(threadEventLogMaxBytes(parseStoredConfig(disk))).toBeNull();
+    } finally {
+      rmSync(path, { force: true });
+    }
+  });
+
+  it("seeds the concurrency default when the first threads save is an event-log knob", () => {
+    const path = join(DATA_DIR, "config.json");
+    mkdirSync(DATA_DIR, { recursive: true });
+    writeFileSync(path, JSON.stringify({}));
+    try {
+      saveConfig({ threads: { eventLogRetentionDays: 30 } });
+      const disk = JSON.parse(readFileSync(path, "utf8"));
+      expect(disk.threads).toEqual({ maxConcurrentPerBot: 3, eventLogRetentionDays: 30 });
+      // the persisted section must survive the stricter boot-time parse
+      expect(parseStoredConfig(disk).threads).toEqual({ maxConcurrentPerBot: 3, eventLogRetentionDays: 30 });
     } finally {
       rmSync(path, { force: true });
     }

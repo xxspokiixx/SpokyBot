@@ -10881,6 +10881,10 @@ async function perBotLocalVmCountForModeChange(): Promise<number | null> {
 }
 
 function configStatus() {
+  // off-by-default thread cleanup knobs stay absent so clients can tell
+  // "unset" apart from any in-range value
+  const eventLogMaxBytes = threadEventLogMaxBytes(cfg);
+  const eventLogRetentionDays = threadEventLogRetentionDays(cfg);
   return {
     xai: { configured: Boolean(cfg.xai?.key) },
     anthropic: { configured: Boolean(cfg.anthropic?.key) },
@@ -10912,7 +10916,11 @@ function configStatus() {
     // not a secret — the settings picker shows it; "" = follow the system
     language: cfg.language ?? "",
     rooms: { turnTimeoutMinutes: roomTurnTimeoutMinutes(cfg) },
-    threads: { maxConcurrentPerBot: maxConcurrentBotThreads(cfg) },
+    threads: {
+      maxConcurrentPerBot: maxConcurrentBotThreads(cfg),
+      ...(eventLogMaxBytes !== null ? { eventLogMaxBytes } : {}),
+      ...(eventLogRetentionDays !== null ? { eventLogRetentionDays } : {}),
+    },
     localVm: {
       mode: localVmMode(cfg),
       maxInstances: localVmMaxInstances(cfg),
