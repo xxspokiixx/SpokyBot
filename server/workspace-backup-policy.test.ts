@@ -28,6 +28,7 @@ describe("workspace backup data boundary", () => {
   it.each([
     "providers/account/.credentials.json", "providers/antigravity/profile/antigravity-acp/acp_token.json",
     "workspace-credentials.json", "browser-engine-key", "caddy/data/certificates/private.key",
+    "external-runtimes.json", "external-runtimes.json.123.tmp",
     "chrome-profile/Default/Cookies", ".agent-browser/auth/site.json",
     "vm-home/.browser-profiles/chrome/Cookies", "vm-homes/abc123/.browser-profiles/chromium/Local State",
     "config.json.123.tmp", "config.json.123.05a7b3e0-1234.tmp", "sessions.json.456.tmp",
@@ -36,7 +37,7 @@ describe("workspace backup data boundary", () => {
     expect(excludedWorkspaceAuthPath(path)).toBe(true);
   });
 
-  it.each(["attachments/key.txt", "workspaces/bot/notes.md", "vm-home/project/config.json", "config.json", "webhooks.json"])("does not redact arbitrary user file %s", (path) => {
+  it.each(["attachments/key.txt", "workspaces/bot/notes.md", "workspaces/bot/external-runtimes.json", "vm-home/project/config.json", "config.json", "webhooks.json"])("does not redact arbitrary user file %s", (path) => {
     expect(excludedWorkspaceAuthPath(path)).toBe(false);
   });
 });

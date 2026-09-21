@@ -19,4 +19,6 @@ export type ActiveCoordination = (threadId: string) => boolean;
 export const wireTaskFor =
   (isActiveCoordination: ActiveCoordination) =>
   (task: TaskRecord): WiredTask =>
-    isActiveCoordination(task.threadId) && !task.busy ? { ...toWireTask(task), busy: true, activity: "working" as const, waitingOnTeammate: true } : toWireTask(task);
+    isActiveCoordination(task.threadId) && !task.busy
+      ? { ...toWireTask(task), busy: true, activity: "working" as const, waitingOnTeammate: true, waitingForTeammates: true }
+      : { ...toWireTask(task), waitingForTeammates: false };

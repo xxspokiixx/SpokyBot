@@ -117,7 +117,7 @@ describe("wireTaskFor", () => {
   it("leaves a thread outside coordination untouched and strips provider bookkeeping", () => {
     const wireTask = wireTaskFor(() => false);
     const wired = wireTask(task());
-    expect(wired).toEqual({ threadId: "chief-chat", title: "Chief", createdAt: 1, activity: "idle", busy: false });
+    expect(wired).toEqual({ threadId: "chief-chat", title: "Chief", createdAt: 1, activity: "idle", busy: false, waitingForTeammates: false });
     expect(wired.waitingOnTeammate).toBeUndefined();
   });
 });
