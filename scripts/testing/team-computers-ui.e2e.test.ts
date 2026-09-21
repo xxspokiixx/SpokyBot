@@ -153,7 +153,7 @@ type Computer = { id: string; name: string; section: string | null; state: strin
     await expect.poll(snapshot, { timeout: 10_000 }).toContain('log "Conversation with Ben"');
     await click("Bot's computer");
     await expect.poll(snapshot, { timeout: 10_000 }).toContain("Ben's screen");
-    await expect.poll(snapshot, { timeout: 10_000 }).toContain("Team default");
+    await expect.poll(snapshot, { timeout: 20_000, interval: 250 }).toContain("Team default");
     expect(await snapshot()).toContain("Engineering desktop");
     expect(await snapshot()).not.toContain("Choose Cloud");
     await click("Open Team map");

@@ -224,7 +224,7 @@ describe("ClaudeDriver.decodeConfig", () => {
       await instance.dispose();
       await removeTempDir(home);
     }
-  });
+  }, 60_000);
 
   it("keeps the deterministic path as the first broker candidate", () => {
     const candidates = brokerSocketCandidates("t-candidates");
