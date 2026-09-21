@@ -264,6 +264,13 @@ export interface WireBot {
   createdAt: number;
 }
 
+/** The person a user message is from, as the server resolved it from their
+ * own session. Attribution only, never authority: nothing may be allowed or
+ * refused because of it, and no request body can supply it. */
+export interface ResolvedSender {
+  name: string;
+}
+
 /** One transcript line. Serialized as stored — the durable delivery
  * identity (roomRequest) rides the wire unchanged. */
 export interface WireMessage {
@@ -310,7 +317,7 @@ export interface WireMessage {
    * wrong person and remembered work under their name. Absent for the
    * desktop owner's own sends and for every message written before this
    * existed; both still read as the profile name. */
-  sender?: { name: string };
+  sender?: ResolvedSender;
   /** Provider turn that produced this message. */
   turnId?: string;
   /** Server-proven originating user message, including supported harness

@@ -93,7 +93,7 @@ import { groupTurnCwd } from "./room-cwd.ts";
 import { RoomTurnDeadline, RoomTurnStallRegistry, roomTurnTimeoutMessage } from "./room-turn-timeout.ts";
 import * as box from "./box.ts";
 import { TeamComputers, teamComputerAssignment, teamComputerCreate, teamComputerOwner, type TeamComputerRecord } from "./team-computers.ts";
-import { isEffortLevel, type WireBot, type WireGroup, type WireTask } from "../shared/wire.ts";
+import { isEffortLevel, type ResolvedSender, type WireBot, type WireGroup, type WireTask } from "../shared/wire.ts";
 import type { TeamComputersPayload } from "../shared/team-computer.ts";
 import { boxCreateRecoverySnapshot, retireDeletedBoxCreate } from "./box-create-idempotency.ts";
 import { boxDeletionSnapshot } from "./box-delete-journal.ts";
@@ -583,7 +583,7 @@ const turnTriggers = new Map<string, UsageTrigger>();
  * the profile name; a paired or signed-in session names the person, by
  * account email where there is one and otherwise by the device label they
  * chose while pairing. */
-function messageSender(auth: RequestAuth): { name: string } | undefined {
+function messageSender(auth: RequestAuth): ResolvedSender | undefined {
   if (auth.kind !== "session") return undefined;
   const name = (auth.session.email ?? auth.session.label ?? "").trim();
   return name ? { name } : undefined;
@@ -5969,7 +5969,7 @@ function drainQueuedSends() {
 
 /** Keep a person's words off the transcript until a direct-thread slot is
  * available. Reuse the existing cancellable, idempotent composer queue. */
-async function startOrQueueDirectMessage(botId: string, threadId: string, text: string, replyTo?: Message, sendId?: string, sender?: { name: string }) {
+async function startOrQueueDirectMessage(botId: string, threadId: string, text: string, replyTo?: Message, sendId?: string, sender?: ResolvedSender) {
   const capacity = botAtThreadCapacity(botId);
   if (capacity || threadBusy(botId, threadId) || parksBehindCoordination(botId, threadId)) {
     const reason = capacity ? "capacity" as const : undefined;
@@ -5978,6 +5978,7 @@ async function startOrQueueDirectMessage(botId: string, threadId: string, text: 
       sendId,
       reason,
       prompt: promptWithReply(text, replyTo, cfg.profile?.name?.trim() || "User"),
+      sender,
     });
     return { ok: true as const, queued: true as const, queueId: queued.id, threadId, reason };
   }
@@ -6216,7 +6217,7 @@ async function startTurn(
     /** Admission must succeed before editing the active transcript branch. */
     editedMessageId?: string;
     /** The person who sent this, when not the desktop owner. */
-    sender?: { name: string };
+    sender?: ResolvedSender;
     /** Extra transcript ids to omit (every drained queued line, not just the last). */
     excludeMessageIds?: string[];
     /** Routines run in detached tasks; pin the destination for the whole turn. */
@@ -9638,7 +9639,7 @@ type StartGroupTurnOptions = {
    * sent it (see Message.via). */
   via?: "api";
   /** The person who sent it, when not the desktop owner (see Message.sender). */
-  sender?: { name: string };
+  sender?: ResolvedSender;
 };
 
 function startGroupTurn(
@@ -9848,17 +9849,17 @@ function drainQueuedChannelSends(): void {
       const group = store.group(groupId);
       return group ? groupIsWorking(group) : false;
     },
-    ({ groupId, threadId, text, replyToId, sendId, mode, id, via }) => {
+    ({ groupId, threadId, text, replyToId, sendId, mode, id, via, sender }) => {
       const group = store.group(groupId);
       const ownsThread = group?.dm
         ? group.threadId === threadId
         : Boolean(group && store.groupTaskByThread(group.id, threadId));
       if (!group || !ownsThread) return;
       try {
-        startGroupTurn(groupId, text, resolveReplyTarget(threadId, replyToId), sendId, mode, id, { via, threadId });
+        startGroupTurn(groupId, text, resolveReplyTarget(threadId, replyToId), sendId, mode, id, { via, threadId, sender });
       } catch (error) {
         if (!store.messagesFor(threadId).some((message) => message.queueId === id && message.role === "user")) {
-          store.appendMessage(threadId, { role: "user", kind: "text", text, replyToId, sendId, channelMode: mode, queueId: id, via });
+          store.appendMessage(threadId, { role: "user", kind: "text", text, replyToId, sendId, channelMode: mode, queueId: id, via, sender });
         }
         store.appendMessage(threadId, {
           role: "bot",
@@ -14732,6 +14733,7 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
               sendId,
               mode: channelMode,
               via,
+              sender: messageSender(auth),
             });
             return { ok: true as const, queued: true as const, queueId: queued.id, threadId };
           }
@@ -14832,6 +14834,7 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
           queueId: head.id,
           via: head.via,
           steered: true,
+          sender: head.sender,
         });
         settleHeldChannelQueueHead(held);
         return json(res, 200, {
@@ -16263,6 +16266,7 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
               replyToId: replyTo?.id,
               sendId,
               prompt: promptWithReply(text, replyTo, cfg.profile?.name?.trim() || "User"),
+              sender: messageSender(auth),
             });
             return { ok: true as const, queued: true as const, queueId: queued.id, threadId };
           }
@@ -16335,6 +16339,7 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
           queueId: item.messageId,
           peerAsk: item.peerAsk,
           steered: true,
+          sender: item.sender,
         }));
         // Offered to the next turn again unless the person stops this one.
         for (const message of messages) handoffs.steered(bot.threadId, steerTarget, instance?.instanceId, message.id);
@@ -18695,7 +18700,7 @@ for (const row of chatFollowups()) {
   const messages = store.messagesFor(row.threadId);
   const recovered = messages.find((message) => message.queueId === row.id && message.role === "user") ?? store.appendMessage(row.threadId, {
     role: "user", kind: "text", text: row.payload.text, replyToId: row.payload.replyToId,
-    sendId: row.payload.sendId, queueId: row.id,
+    sendId: row.payload.sendId, queueId: row.id, sender: row.payload.sender,
     ...(row.kind === "channel" ? { channelMode: row.payload.mode, via: row.payload.via } : {}),
   });
   // Nor as a message a resumed session has not seen: count it as handed.

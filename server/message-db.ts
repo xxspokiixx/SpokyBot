@@ -16,6 +16,7 @@ import { DatabaseSync } from "node:sqlite";
 
 import { DATA_DIR } from "./config.ts";
 import { peerProvenanceAuthor } from "./peer-provenance.ts";
+import type { ResolvedSender } from "../shared/wire.ts";
 import type { Message } from "./store.ts";
 
 const DB_FILE = () => join(DATA_DIR, "messages.db");
@@ -222,6 +223,9 @@ export interface FollowupPayload {
   peerAsk?: Message["peerAsk"];
   mode?: "chat" | "goal";
   via?: "api";
+  /** Who queued these words. Absent on the owner's own sends and on every
+   * row written before this existed; both read as the profile name. */
+  sender?: ResolvedSender;
 }
 export type FollowupStatus = "pending" | "dispatching" | "interrupted" | "cancelled";
 export interface ChatFollowup {
