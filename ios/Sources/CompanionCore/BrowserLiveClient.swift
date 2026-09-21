@@ -40,6 +40,13 @@ public struct BrowserStatus: Sendable, Equatable {
     public let screencasting: Bool
     public let viewportWidth: Double
     public let viewportHeight: Double
+
+    public init(connected: Bool, screencasting: Bool, viewportWidth: Double, viewportHeight: Double) {
+        self.connected = connected
+        self.screencasting = screencasting
+        self.viewportWidth = viewportWidth
+        self.viewportHeight = viewportHeight
+    }
 }
 
 public struct BrowserTab: Sendable, Equatable, Identifiable {
@@ -47,6 +54,13 @@ public struct BrowserTab: Sendable, Equatable, Identifiable {
     public let title: String
     public let url: String
     public let active: Bool
+
+    public init(tabId: String, title: String, url: String, active: Bool) {
+        self.tabId = tabId
+        self.title = title
+        self.url = url
+        self.active = active
+    }
 
     public var id: String { tabId }
 }
