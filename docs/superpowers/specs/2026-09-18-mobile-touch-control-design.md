@@ -181,8 +181,16 @@ loopback-only control page, with revocation tearing down live sessions through
 `disconnectDevice`.
 
 Then allowlist `/api/bots/:id/browser/live` and `/api/bots/:id/browser/action`
-in `companion/src/routes.ts` behind that flag, and widen the owner-only gate at
-`server/index.ts:11570` to accept sidecar-authenticated devices carrying it.
+in `companion/src/routes.ts` behind that flag.
+
+**No change is needed at `server/index.ts:11570`, contrary to this document's
+first draft.** The harness imports the sidecar's own `denyReason`
+(`server/request-auth.ts:16`) and re-runs it on every companion request, so
+adding the two routes to `ALLOWED` opens both sides at once — defence in depth
+that already exists. A sidecar-forwarded request then resolves to
+`kind: "loopback"`, which the browser route already treats as `local-owner`.
+The per-device capability check stays in the proxy, exactly where
+`cloudDesktopAccess` enforces its own.
 
 **It is a separate flag, not a reuse of `cloudDesktopAccess`.** The two look
 alike and are not. A cloud desktop is a disposable VM; a bot's browser is

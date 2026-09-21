@@ -21,7 +21,12 @@ import {
   MAX_COMPANION_ENDPOINTS,
   type CompanionEndpoint,
 } from "./endpoints.ts";
-import { denyReason, isCloudDesktopAccess, isMessageFileDownload } from "./routes.ts";
+import {
+  denyReason,
+  isBrowserControlAccess,
+  isCloudDesktopAccess,
+  isMessageFileDownload,
+} from "./routes.ts";
 import { CompanionViewerRelay } from "./viewer-relay.ts";
 import { createSseScrubber, isJson, scrub } from "./wire.ts";
 
@@ -33,7 +38,9 @@ export interface ProxyOptions {
    * Undefined keeps standalone sidecars compatible with a plain Node harness. */
   mutationToken?: () => string | null;
   /** Does this bearer token belong to a paired device? */
-  authenticate: (token: string | undefined) => { id?: string; cloudDesktopAccess: boolean } | null;
+  authenticate: (
+    token: string | undefined,
+  ) => { id?: string; cloudDesktopAccess: boolean; browserControlAccess: boolean } | null;
   /** Redeem a pairing code. Handled here and never forwarded: the harness
    * has no such route and no idea devices exist — pairing is the sidecar's
    * own concern, and the one thing a device does before it has a token. */
@@ -289,6 +296,14 @@ export function createProxyHandler(options: ProxyOptions) {
     if (isCloudDesktopAccess(method, path) && !device?.cloudDesktopAccess) {
       return sendJson(res, 403, {
         error: "cloud desktop access is off for this device — enable it in OpenMausBot → Settings → Remote access",
+      });
+    }
+
+    // The same shape, and a deliberately separate grant: this one reaches a
+    // browser that is normally signed into the person's own accounts.
+    if (isBrowserControlAccess(method, path) && !device?.browserControlAccess) {
+      return sendJson(res, 403, {
+        error: "browser control is off for this device — enable it in OpenMausBot → Settings → Remote access",
       });
     }
 
