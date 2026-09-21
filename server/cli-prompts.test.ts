@@ -223,6 +223,8 @@ describe("Clack setup adapter", () => {
     expect(fixture.text()).toBe("Open the guide now\n");
     fixture.io.log("Alt \u001b]8;;https://example.com/(x)\u001b\\label\u001b]8;;\u001b\\ end");
     expect(fixture.text()).toContain("Alt label end\n");
+    fixture.io.log("C1 \u009d8;;https://example.com/(c1)+uri\u0007label\u009d8;;\u0007 end");
+    expect(fixture.text()).toContain("C1 label end\n");
     expect(fixture.text()).not.toContain("example.com");
   });
 
