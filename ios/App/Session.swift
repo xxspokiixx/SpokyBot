@@ -53,6 +53,7 @@ final class Session: ObservableObject {
     @Published private(set) var state = CompanionState()
     @Published private(set) var connection: Connection?
     @Published private(set) var connections: [Connection] = []
+    let threadSelection = BotThreadSelection()
     /// Whether the live pairing may administer the workspace — see
     /// `Connection.canAdminister`. Views hide owner-only controls when this
     /// is false rather than offer buttons the server would answer 403 to.
@@ -166,7 +167,7 @@ final class Session: ObservableObject {
         let arguments = ProcessInfo.processInfo.arguments
         if (arguments.contains("-store-preview") || arguments.contains("-computer-switcher-preview")),
            let url = Bundle.main.url(
-               forResource: arguments.contains("-threads-preview") ? "ThreadPreview" : "StorePreview",
+               forResource: arguments.contains("-images-preview") ? "ImagePreview" : (arguments.contains("-threads-preview") ? "ThreadPreview" : "StorePreview"),
                withExtension: "json"
            ),
            let data = try? Data(contentsOf: url),
@@ -192,6 +193,11 @@ final class Session: ObservableObject {
                 connections = registry.connections
             } else {
                 connections = [preview]
+            }
+            if arguments.contains("-images-preview") {
+                let config = URLSessionConfiguration.ephemeral
+                config.protocolClasses = [ImagePreviewProtocol.self]
+                client = CompanionClient(connection: preview, token: "image-fixture-token", session: URLSession(configuration: config))
             }
             state.hydrate(fleet)
             if arguments.contains("-threads-preview"),

@@ -189,6 +189,45 @@ describe("server-owned browser MCP runtime", () => {
     await value.take("s", "owner");
     expect(value.canControl("s", "owner")).toBe(true);
   });
+  it("does not assume an MCP timeout stopped an accepted daemon action", async () => {
+    const value = runtime({ requestTimeoutMs: 60 });
+    // Advance only the deliberately hung request's deadline. Real subprocess
+    // startup/stdio remain live, so a loaded runner cannot time out a healthy
+    // recovery echo merely because its 60 ms scheduling window elapsed.
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+    try {
+      await expect(value.agentRpc("s", spec(), "tools/list", {})).resolves.toMatchObject({ initialized: true });
+      const pending = value.agentRpc("s", spec(), "tools/call", { name: "hang" });
+      const observed = expect(pending).rejects.toThrow(/timed out/);
+      await vi.advanceTimersByTimeAsync(60);
+      await observed;
+      // The real daemon detaches from its MCP parent. Transport exit is not
+      // proof that a navigation or submission stopped; do not replay it.
+      await expect(value.agentRpc("s", spec(), "tools/call", { name: "echo" })).rejects.toThrow(/Restart/);
+      await expect(value.take("s", "owner")).rejects.toThrow(/Restart/);
+      await value.restart("s", "owner", async () => {});
+      await expect(value.agentRpc("s", spec(), "tools/call", { name: "echo", arguments: { text: "back" } }))
+        .resolves.toMatchObject({ content: [{ text: expect.stringContaining("back") }] });
+      await value.take("s", "owner");
+      expect(value.canControl("s", "owner")).toBe(true);
+    } finally {
+      // Process-tree cleanup polls real child exits with timers of its own.
+      vi.useRealTimers();
+      await value.closeAll();
+    }
+  });
+
+  it("still refuses an agent after a human's own interrupted command, browser alive", async () => {
+    // The other half of the contract: this uncertainty is NOT self-resolving,
+    // because the browser is still running and may act again.
+    const value = runtime();
+    await value.agentRpc("s", spec(), "tools/list", {});
+    await value.take("s", "owner");
+    await expect(value.withHumanAction("s", "owner", async () => { throw new Error("navigation timed out"); })).rejects.toThrow(/timed out/);
+    value.release("s", "owner");
+    await expect(value.withAgentAction("s", async () => "snapshot")).rejects.toThrow(/Restart/);
+  });
+
   it("initializes once, reuses its own session client, and supports concurrent ids", async () => {
     const value = runtime();
     const list = await value.agentRpc("one", spec(), "tools/list", {}) as { pid: number; initialized: boolean };
@@ -246,6 +285,47 @@ describe("server-owned browser MCP runtime", () => {
     expect(value.heldBy("s")).toBe("owner");
     const after = await value.agentRpc("s", spec(), "tools/list", {}) as { pid: number };
     expect(after.pid).not.toBe(before.pid);
+  });
+
+  it.each([false, true])("retires an idle MCP client without killing its browser descendant (ignores EOF: %s)", async (ignoresEof) => {
+    // Windows taskkill /T includes even a daemon with its own process group.
+    // This inert descendant models that ownership boundary on every platform.
+    // unref alone does not detach a Windows child from its parent's console.
+    // Keep the POSIX group shared so an accidental group kill still fails here.
+    const fake = `
+      const browser = require('node:child_process').spawn(process.execPath,
+        ['-e', 'process.stdout.write("ready"); setInterval(() => {}, 1000)'],
+        { stdio: ['ignore', 'pipe', 'ignore'], detached: process.platform === 'win32', windowsHide: true });
+      browser.unref();
+      let ready = false;
+      let pending = null;
+      const flush = () => {
+        if (!ready || !pending) return;
+        const m = pending; pending = null;
+        const result = m.method === 'initialize' ? { protocolVersion: '2024-11-05' }
+          : { tools: [], browserPid: browser.pid, transportPid: process.pid };
+        process.stdout.write(JSON.stringify({ jsonrpc: '2.0', id: m.id, result }) + '\\n');
+      };
+      browser.stdout.once('data', () => { ready = true; browser.stdout.destroy(); flush(); });
+      browser.stdout.on('error', () => {});
+      ${ignoresEof ? "setInterval(() => {}, 1000);" : ""}
+      require('node:readline').createInterface({ input: process.stdin }).on('line', line => {
+        const m = JSON.parse(line);
+        if (!m.id) return;
+        pending = m; flush();
+      });
+
+    `;
+    const value = runtime({ idleMs: 40 });
+    const launch = { command: process.execPath, args: ["-e", fake], env: {} };
+    const first = await value.agentRpc("idle", launch, "tools/list", {}) as { browserPid: number; transportPid: number };
+    try {
+      expect(() => process.kill(first.browserPid, 0)).not.toThrow();
+      await vi.waitFor(() => expect(() => process.kill(first.transportPid, 0)).toThrow(), { timeout: 2_000, interval: 30 });
+      expect(() => process.kill(first.browserPid, 0)).not.toThrow();
+    } finally {
+      try { process.kill(first.browserPid, "SIGKILL"); } catch { /* fixture exited */ }
+    }
   });
 });
 
