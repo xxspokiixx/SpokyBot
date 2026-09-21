@@ -6825,7 +6825,7 @@ async function startTurn(
         });
         if (opts?.automationSource === undefined && !opts?.commsDepth && !opts?.cardContinuation) {
           notify(buildNotification("turn-failed", bot, threadId, redactSecretsInText(message), { avatarUrl: bot.avatarUrl }));
-          reportIncident({ kind: "failed", bot, threadId, detail: message });
+          reportIncident({ kind: "could-not-start", bot, threadId, detail: message });
           // Claude settles the interrupt below as exit_before_result; the
           // completion fold must not report this failure a second time.
           resourceOwner.lazyClaimFailureReported = true;
