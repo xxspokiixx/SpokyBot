@@ -455,6 +455,10 @@ import {
   phoneSecretOperationId,
   type PhoneSecretContext,
 } from "./phone-secret.ts";
+// Keep these two last: a route module may import any server module, and
+// loading the table after everything above leaves module start-up order as is.
+import { json, readBody } from "./harness/http.ts";
+import { ROUTES, dispatchRoutes } from "./routes/table.ts";
 
 const PORT = Number(process.env.OMB_PORT || process.env.OGB_PORT || 8799);
 const WEBHOOK_PORT = Number(process.env.OMB_WEBHOOK_PORT || PORT + 1);
@@ -11190,12 +11194,6 @@ function serveStatic(res: ServerResponse, path: string): boolean {
   }
 }
 
-function json(res: ServerResponse, status: number, body: unknown) {
-  const data = JSON.stringify(body);
-  res.writeHead(status, { "content-type": "application/json" });
-  res.end(data);
-}
-
 /** A store refusal is a client error with a status of its own (400 path,
  * 409 conflict, 413 too large); a 409 also carries what is on disk now so
  * the editor can show the bot's version instead of guessing. Anything else
@@ -11215,43 +11213,6 @@ function journalEntryForClient(botId: string, entry: MemoryJournalEntry) {
   const { before: _before, ...visible } = entry;
   const threadTitle = entry.threadId ? store.taskByThread(botId, entry.threadId)?.title : undefined;
   return threadTitle ? { ...visible, threadTitle } : visible;
-}
-
-function readBody(req: IncomingMessage, limit = 1_000_000): Promise<any> {
-  return new Promise((resolve, reject) => {
-    let data = "";
-    let bytes = 0;
-    let done = false;
-    const fail = (status: number, msg: string) => {
-      if (done) return;
-      done = true;
-      const err = Object.assign(new Error(msg), { status });
-      reject(err);
-    };
-    req.on("data", (c) => {
-      if (done) return;
-      bytes += typeof c === "string" ? Buffer.byteLength(c) : c.length;
-      if (bytes > limit) {
-        // Keep draining the socket, but stop retaining attacker-controlled
-        // bytes. Destroying the request here prevents the caller from
-        // receiving the useful 413 response.
-        return fail(413, "body too large");
-      }
-      data += c;
-    });
-    req.on("end", () => {
-      if (done) return;
-      let body: any;
-      try {
-        body = data ? JSON.parse(data) : {};
-      } catch {
-        return fail(400, "invalid JSON body");
-      }
-      done = true;
-      resolve(body);
-    });
-    req.on("error", (e) => fail(400, e instanceof Error ? e.message : String(e)));
-  });
 }
 
 // Loopback-only enforcement: the harness runs on 127.0.0.1 but accepts
@@ -11503,6 +11464,10 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
     if (path.startsWith("/api/") && path !== "/api/events" && path !== "/api/health" && !path.startsWith("/api/shared-computers/") && !isWorkspaceBackupSessionControl(method, path)) {
       releaseWorkspaceRequest = workspaceMaintenance.request();
     }
+
+    // New routes live in modules registered in server/routes/table.ts and
+    // are tried here, behind the gate above; do not add route `if`s below.
+    if (await dispatchRoutes(ROUTES, { req, res, url, path, method, auth, json, readBody })) return;
 
     // ── sessions: who am I, tickets, pairing and revocation ─────────────
     if (method === "GET" && path === "/api/auth/session") {
