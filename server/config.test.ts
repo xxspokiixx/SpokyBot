@@ -31,6 +31,7 @@ import { customMcpServers,
   browserProfilePartitionTarget,
   browserProfileReplacementConflict,
   browserProfileRoutingConflict,
+  stripControlPlaneEnv,
   stripWorkspaceCredentialEnv,
   syncCredentialEnv,
   vpsSshAlias,
@@ -1191,6 +1192,29 @@ describe("workspace credential env strip", () => {
     };
     stripWorkspaceCredentialEnv(env);
     expect(env).toEqual({ PATH: "/usr/bin", MY_FLAG: "1" });
+  });
+
+  it("keeps a hosted tenant's control-plane secrets out of every child env, and only those", () => {
+    // What the hosting control plane and a fleet put in the server's
+    // environment. `OMB_CLOUD_FUTURE_SECRET` stands for a name added later.
+    const operator = {
+      OMB_CLOUD_READY_TOKEN: "ready", OMB_CLOUD_BOOTSTRAP: "bootstrap", OMB_CLOUD_GATEWAY_TOKEN: "gateway",
+      OMB_CLOUD_MODELS: "models", OMB_CLOUD_REVISION: "revision", OMB_CLOUD_FUTURE_SECRET: "later",
+      OMB_LICENSE_KEY: "license", OMB_INSTALLATION_CREDENTIAL: "fleet", omb_cloud_ready_token: "windows-spelling",
+    };
+    // What an engine deliberately receives (server/hosted-models.ts passes the
+    // hosted model token as the provider key), plus look-alike names.
+    const engine = {
+      PATH: "/usr/bin", ANTHROPIC_API_KEY: "hosted-token", ANTHROPIC_AUTH_TOKEN: "hosted-token",
+      ANTHROPIC_BASE_URL: "https://admin.example.test/api/gateway/w/anthropic", OPENMAUSBOT_COMPANY_API_KEY: "hosted-token",
+      OMB_MANAGED_CODEX_TOKEN: "hosted-token", CODEX_HOME: "/data/codex", OMB_HOOK_TOKEN_FILE: "/data/hook-tokens/a.token",
+      OMB_CLOUDFLARED_PATH: "/usr/local/bin/cloudflared", OMB_CLOUD: "not-prefixed", MY_OMB_CLOUD_NOTE: "user",
+    };
+    for (const strip of [stripControlPlaneEnv, stripWorkspaceCredentialEnv]) {
+      const env: Record<string, string | undefined> = { ...operator, ...engine };
+      strip(env);
+      expect(env).toEqual(engine);
+    }
   });
 
   it("covers in-process secrets and private app-state paths", () => {

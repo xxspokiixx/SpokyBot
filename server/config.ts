@@ -896,9 +896,32 @@ export const WORKSPACE_CREDENTIAL_ENV = [
   "OMB_USER_DATA",
 ] as const;
 
-/** Drop every workspace credential from a child-process env (in place). */
+/** Secrets of whoever operates this server, not of the workspace: the license
+ * key, a fleet container's installation credential, and everything a hosting
+ * control plane injects under `OMB_CLOUD_` (the readiness token, the bootstrap
+ * document and its gateway token). Only this process reads them. The prefix
+ * ends in an underscore on purpose: `OMB_CLOUDFLARED_PATH` is not one of them.
+ * What an engine is meant to receive arrives under another name through its
+ * instance environment (the hosted model token as ANTHROPIC_API_KEY or
+ * OPENMAUSBOT_COMPANY_API_KEY), so nothing here is ever an engine's input. */
+export const CONTROL_PLANE_ENV = ["OMB_LICENSE_KEY", "OMB_INSTALLATION_CREDENTIAL"] as const;
+export const CONTROL_PLANE_ENV_PREFIX = "OMB_CLOUD_";
+
+/** Drop every control-plane secret from a child-process env (in place). No
+ * driver allowlist re-admits these. Names compare case-insensitively because
+ * Windows environments do. */
+export function stripControlPlaneEnv(env: Record<string, string | undefined>): void {
+  for (const key of Object.keys(env)) {
+    const name = key.toUpperCase();
+    if (name.startsWith(CONTROL_PLANE_ENV_PREFIX) || (CONTROL_PLANE_ENV as readonly string[]).includes(name)) delete env[key];
+  }
+}
+
+/** Drop every workspace credential, and every control-plane secret, from a
+ * child-process env (in place). */
 export function stripWorkspaceCredentialEnv(env: Record<string, string | undefined>): void {
   for (const key of WORKSPACE_CREDENTIAL_ENV) delete env[key];
+  stripControlPlaneEnv(env);
 }
 
 /** Env names a provider CLI might read as its own billing identity. A spawned

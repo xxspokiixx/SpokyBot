@@ -30,7 +30,7 @@ import { lstat, mkdir, readFile, realpath, stat, writeFile } from "node:fs/promi
 import { basename, dirname, isAbsolute, relative, resolve } from "node:path";
 import { createHash } from "node:crypto";
 
-import { PROVIDER_CREDENTIAL_ENV, WORKSPACE_CREDENTIAL_ENV } from "../../config.ts";
+import { PROVIDER_CREDENTIAL_ENV, stripControlPlaneEnv, WORKSPACE_CREDENTIAL_ENV } from "../../config.ts";
 import { decodeInjectId } from "../local-inject.ts";
 import { describeSpawnFailure, execCli, killCliTree, spawnCli } from "../../procs.ts";
 
@@ -438,6 +438,8 @@ export function createAcpDriver(support: AcpSupport): ProviderDriver<AcpConfig> 
         for (const key of [...PROVIDER_CREDENTIAL_ENV, ...WORKSPACE_CREDENTIAL_ENV]) {
           if (!allowedCredentials.has(key)) delete env[key];
         }
+        // The operator's own secrets are outside any driver's allowlist.
+        stripControlPlaneEnv(env);
         support.transformEnv?.(env, activeConfig, instanceId);
         return env;
       };

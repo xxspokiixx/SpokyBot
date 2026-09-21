@@ -82,6 +82,11 @@ const ClassifiedErrorDriver = createAcpDriver({
       : undefined,
 });
 
+const CONTROL_PLANE_FIXTURE = {
+  OMB_CLOUD_READY_TOKEN: "ready-should-not-leak", OMB_CLOUD_BOOTSTRAP: "bootstrap-should-not-leak",
+  OMB_LICENSE_KEY: "license-should-not-leak", OMB_INSTALLATION_CREDENTIAL: "fleet-should-not-leak",
+};
+
 describe("skipSubscriptionAuthForLocalInject", () => {
   it("is true only for a host:: inject id", () => {
     expect(skipSubscriptionAuthForLocalInject("omlx::MiniMax-M3-4bit")).toBe(true);
@@ -229,6 +234,7 @@ describe("ACP turns (fake CLI)", () => {
     delete process.env.CURSOR_AUTH_TOKEN;
     delete process.env.BOX_TOKEN;
     delete process.env.OMB_TTS_KEY;
+    for (const name of Object.keys(CONTROL_PLANE_FIXTURE)) delete process.env[name];
     delete process.env.FAKE_ACP_MODELS;
     delete process.env.FAKE_ACP_MODEL_STICKS;
     delete process.env.FAKE_ACP_USAGE_ROOT;
@@ -460,6 +466,7 @@ describe("ACP turns (fake CLI)", () => {
     // harness (env-injected at boot by the desktop shell), used in-process
     process.env.BOX_TOKEN = "box-should-not-leak";
     process.env.OMB_TTS_KEY = "tts-should-not-leak";
+    Object.assign(process.env, CONTROL_PLANE_FIXTURE);
 
     await instance.adapter.sendTurn({ threadId: "t-hygiene", text: "go" });
     await recorder.until((e) => e.type === "turn.completed");
@@ -474,6 +481,7 @@ describe("ACP turns (fake CLI)", () => {
     expect(seen.env.CURSOR_AUTH_TOKEN).toBeUndefined();
     expect(seen.env.BOX_TOKEN).toBeUndefined();
     expect(seen.env.OMB_TTS_KEY).toBeUndefined();
+    for (const name of Object.keys(CONTROL_PLANE_FIXTURE)) expect(seen.env[name]).toBeUndefined();
   });
 
   // ACP session/new accepts stdio MCP entries, so connected apps use the

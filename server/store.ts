@@ -3,7 +3,7 @@
 // ProviderSessionDirectory, recipe step 6: persist the binding from day
 // one). messages-<threadId>.json holds the folded transcript.
 import { createHash } from "node:crypto";
-import { existsSync, readFileSync, mkdirSync, rmSync, unlinkSync } from "node:fs";
+import { chmodSync, existsSync, readFileSync, mkdirSync, rmSync, statSync, unlinkSync } from "node:fs";
 import { join } from "node:path";
 
 import { writeFileAtomic } from "./atomic.ts";
@@ -368,6 +368,20 @@ export const botWireProjectionIsExact: BotWireProjectionIsExact = true;
 
 const BOTS_FILE = join(DATA_DIR, "bots.json");
 const GROUPS_FILE = join(DATA_DIR, "groups.json");
+
+/** The registries carry souls, project paths and per-bot settings, so they are
+ * owner-only like the other data-dir stores. A file written by an older
+ * release (or loosened by hand) is tightened on load. Best effort: failing to
+ * tighten must never stop the fleet from loading, and the next save replaces
+ * the file with a 0600 one anyway. Windows has no POSIX mode bits. */
+function tightenRegistryFile(file: string): void {
+  if (process.platform === "win32") return;
+  try {
+    if ((statSync(file).mode & 0o077) !== 0) chmodSync(file, 0o600);
+  } catch {
+    /* absent, or not ours to change */
+  }
+}
 const messagesFile = (threadId: string) => join(DATA_DIR, `messages-${threadId}.json`);
 
 const COLORS: MausColor[] = [
@@ -489,6 +503,7 @@ export class Store {
   constructor(defaultSelection: () => ModelSelection) {
     this.defaultSelection = defaultSelection;
     mkdirSync(DATA_DIR, { recursive: true });
+    for (const file of [BOTS_FILE, GROUPS_FILE]) tightenRegistryFile(file);
     try {
       this.bots = JSON.parse(readFileSync(BOTS_FILE, "utf8"));
     } catch {
@@ -745,12 +760,12 @@ export class Store {
     writeFileAtomic(BOTS_FILE, JSON.stringify(bots.map(({ busy: _busy, activity: _activity, ...bot }) => ({
       ...bot,
       tasks: bot.tasks?.map(({ busy: _taskBusy, activity: _taskActivity, turnStartedAt: _taskTurnStarted, ...task }) => task),
-    })), null, 2));
+    })), null, 2), { mode: 0o600 });
   }
 
   private saveGroups() {
     this.rememberSections(this.groups.map((group) => group.section));
-    writeFileAtomic(GROUPS_FILE, JSON.stringify(this.groups.map(({ busyBotId: _busyBotId, turnStartedAt: _turnStartedAt, ...g }) => g), null, 2));
+    writeFileAtomic(GROUPS_FILE, JSON.stringify(this.groups.map(({ busyBotId: _busyBotId, turnStartedAt: _turnStartedAt, ...g }) => g), null, 2), { mode: 0o600 });
   }
 
   get sections(): string[] { return readSections(); }
