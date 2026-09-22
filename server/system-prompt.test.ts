@@ -8,6 +8,7 @@ import { soulSystemPrompt } from "./bot-folder.ts";
 import { BUILT_IN_BROWSER_SYSTEM_PROMPT } from "./browser-engine.ts";
 import {
   buildSystemPrompt,
+  userProfileSystemPrompt,
   computerPrompt,
   mentionPrompt,
   COMPOSIO_PROMPT,
@@ -22,6 +23,18 @@ import {
 } from "./system-prompt.ts";
 
 describe("buildSystemPrompt", () => {
+  it("keeps shared context stable and omits an empty user profile", () => {
+    for (const profile of [undefined, {}, { aboutMe: " \n" }]) {
+      expect(userProfileSystemPrompt(profile)).toBe("");
+    }
+    const profile = userProfileSystemPrompt({ aboutMe: " Prefer short answers. " });
+    const built = buildSystemPrompt("Identity", "", [
+      { id: "user-profile", label: "About the user", text: profile },
+      { id: "memory", label: "Memory", text: " Volatile memory" },
+    ]);
+    expect(built.stable).toContain("About the user (shared with all bots):\nPrefer short answers.\n");
+    expect(built.volatile).not.toContain("Prefer short answers.");
+  });
   it("reports the mid-conversation half apart from the stable one", () => {
     const built = buildSystemPrompt("You are Kiwi.", "", [
       { id: "recall", label: "Recall", text: " Search past sessions." },

@@ -429,8 +429,8 @@ const appConfigSchema = z.object({
       "Use a model ID without control characters",
     ).optional(),
   }).optional(),
-  /** Non-secret profile details shown in the sidebar. */
-  profile: z.object({ name: optionalText, email: optionalText }).optional(),
+  /** Non-secret profile details; aboutMe is shared with every bot. */
+  profile: z.object({ name: optionalText, email: optionalText, aboutMe: z.string().max(24_000).optional() }).optional(),
   /** UI language override (BCP-47, lowercase). Empty/absent = follow the
    * system language. Unknown tags degrade to English in the renderer. */
   language: optionalText,
@@ -485,7 +485,7 @@ export interface AppConfig {
   opencodeGo?: { apiKey?: string };
   tts?: { key?: string; fishKey?: string; voice?: string; provider?: "elevenlabs" | "fish" | "system" | "chatterbox" | "xai"; baseUrl?: string; model?: string };
   imageGen?: ImageGenerationConfig;
-  profile?: { name?: string; email?: string };
+  profile?: { name?: string; email?: string; aboutMe?: string };
   rooms?: { turnTimeoutMinutes: number; handoffLifetimeMinutes?: number; handoffMinRunwayMinutes?: number; handoffHardCapMinutes?: number };
   threads?: { maxConcurrentPerBot: number; eventLogMaxBytes?: number; eventLogRetentionDays?: number };
   context?: { rebuildBytes?: number; compactAt?: number; autoCompact?: boolean };

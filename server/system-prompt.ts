@@ -10,6 +10,11 @@ import { soulSystemPrompt } from "./bot-folder.ts";
 export type PromptPart = { id: string; label: string; text: string };
 export type PromptSection = PromptPart & { bytes: number };
 
+export function userProfileSystemPrompt(profile?: { aboutMe?: string }): string {
+  const text = profile?.aboutMe?.trim();
+  return text ? `\n\nAbout the user (shared with all bots):\n${text}\n` : "";
+}
+
 /** Sections whose text legitimately differs between two turns of one live
  * conversation: memory, because a bot writes to MEMORY.md mid-conversation,
  * mentions, which describe the message being sent right now, and outstanding
