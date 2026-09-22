@@ -5,10 +5,10 @@
 export function modelContextWindow(model: string | undefined): number | undefined {
   if (!model) return undefined;
   const id = model.toLowerCase();
-  // Opus 5.5 is 1M without a `[1m]` suffix. The digit boundary keeps
-  // `claude-opus-5-50` on the generic Claude rule. A slash or dot before the
-  // id covers a routed copy. A `host::model` inject is not this model.
-  if (/(?:^|[/.])claude-opus-5[.-]5(?:$|[^0-9])/.test(id)) return 1_000_000;
+  // Opus 5.5 is 1M without a `[1m]` suffix. Only the exact slug, or that
+  // slug after a slash or a provider dot. A longer suffix such as
+  // `claude-opus-5-5-local` stays on the generic Claude rule, as does `host::`.
+  if (/(?:^|[/.])claude-opus-5(?:-5|\.5)$/.test(id)) return 1_000_000;
   if (/claude/.test(id) || /^(opus|sonnet|haiku|fable)\b/.test(id)) return /\[1m\]|-1m\b|1m-context/.test(id) ? 1_000_000 : 200_000;
   if (/^(gpt-5|o[34]\b|codex)/.test(id)) return 272_000;
   if (id.startsWith("gpt-4.1")) return 1_000_000;
