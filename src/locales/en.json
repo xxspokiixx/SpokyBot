@@ -79,6 +79,7 @@
   "approval.status.waitingAnswer": "Waiting for your answer below",
   "question.card.named": "{name} has a question",
   "question.card.title": "Your bot has a question",
+  "question.origin.badge": "Agent-composed question",
   "question.tab.numbered": "Question {index}",
   "question.progress": "{answered} of {count} answered",
   "question.multiHint": "Choose all that apply",

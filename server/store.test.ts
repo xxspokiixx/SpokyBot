@@ -283,6 +283,48 @@ describe("Store", () => {
     expect(store.messagesFor(bot.threadId).find((m) => m.id === ask.id)?.card?.dismissed).toBeUndefined();
   });
 
+  it("persists a structured question card with its origin and answer across restart", () => {
+    const store = new Store(selection);
+    const bot = store.createBot();
+    const secret = "sk-ant-" + "b".repeat(90);
+    const ask = store.appendMessage(bot.threadId, {
+      role: "bot",
+      kind: "options",
+      card: {
+        title: "Your bot has a question",
+        subtitle: `Ship the release using ${secret}?`,
+        options: ["Ship now", "Wait"],
+        requestId: "req-q",
+        questionRequest: {
+          version: 1,
+          origin: "output",
+          questions: [{
+            question: `Ship the release using ${secret}?`,
+            header: "Release",
+            options: [{ label: "Ship now", description: `uses ${secret}` }],
+          }],
+        },
+      },
+    });
+    store.patchMessage(bot.threadId, ask.id, {
+      card: {
+        ...ask.card!,
+        answered: "answer",
+        answeredText: "The user answered your questions.\n\nQ: Ship the release?\nA: Ship now",
+      },
+    });
+
+    const reloaded = new Store(selection);
+    const restored = reloaded.messagesFor(bot.threadId).find((m) => m.id === ask.id)?.card;
+    expect(restored?.requestId).toBe("req-q");
+    expect(restored?.questionRequest?.origin).toBe("output");
+    expect(restored?.questionRequest?.questions[0]?.header).toBe("Release");
+    expect(restored?.answeredText).toContain("A: Ship now");
+    // the question payload sits behind the same redaction boundary as the
+    // subtitle: a key the model echoed into its own ask never survives disk
+    expect(JSON.stringify(restored)).not.toContain(secret);
+  });
+
   it("does not dismiss an open options card for bot-authored messages", () => {
     const store = new Store(selection);
     const bot = store.createBot();

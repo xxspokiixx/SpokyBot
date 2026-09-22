@@ -65,6 +65,10 @@ export interface DecisionRow {
   rule?: string;
   /** the turn ran with nobody at the keyboard when this was decided */
   unattended?: boolean;
+  /** how the ask reached the fold: a tool call (absent) or a block parsed
+   * out of model-authored output ("output", the BoxAgent transport).
+   * Question cards only. */
+  origin?: "output";
 }
 
 const FILE_NAME = "decisions.ndjson";
