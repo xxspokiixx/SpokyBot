@@ -3582,6 +3582,13 @@ function finishGroupTurnOperation(groupId: string, operation: GroupTurnOperation
   if (operations?.size === 0) groupTurnOperations.delete(groupId);
   const group = store.group(groupId);
   if (group) broadcast({ kind: "group", group: publicGroupState(group) });
+  // The operation can outlive the last member's turn.completed: the fold
+  // releases the speaker, but this map entry is what holds a 1:1 message
+  // queued behind the room (reason "group-turn"), and no later event fires
+  // once the run settles. Drain here, at the true end — the drain's own
+  // block check re-reads activeGroupTurnForBot, so a replacement operation
+  // begun in the interim still keeps its ground.
+  drainQueuedSends();
   // A follow-up sent while this operation was running belongs to the
   // harness, not whichever composer happened to be mounted. Hand the next
   // one to the ordinary channel runner as soon as the channel is truly idle.
@@ -6691,8 +6698,12 @@ function drainQueuedSends() {
  * available. Reuse the existing cancellable, idempotent composer queue. */
 async function startOrQueueDirectMessage(botId: string, threadId: string, text: string, replyTo?: Message, sendId?: string, sender?: ResolvedSender, trigger?: UsageTrigger) {
   const capacity = botAtThreadCapacity(botId);
-  if (capacity || threadBusy(botId, threadId) || parksBehindCoordination(botId, threadId)) {
-    const reason = capacity ? "capacity" as const : undefined;
+  // A room turn holds the bot exactly like the sibling opened-thread queue
+  // below: the drain's own block check waits it out, so the words queue
+  // here rather than bounce off startTurn's 409.
+  const groupTurn = activeGroupTurnForBot(botId);
+  if (capacity || threadBusy(botId, threadId) || groupTurn || parksBehindCoordination(botId, threadId)) {
+    const reason = capacity ? "capacity" as const : groupTurn ? "group-turn" as const : undefined;
     const queued = queueSteeredMessage(botId, threadId, text, {
       replyToId: replyTo?.id,
       sendId,

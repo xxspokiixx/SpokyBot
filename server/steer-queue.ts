@@ -19,7 +19,7 @@
 
 import { newId } from "./contracts.ts";
 import { chatFollowups, saveChatFollowup, settleChatFollowups } from "./message-db.ts";
-import type { ResolvedSender } from "../shared/wire.ts";
+import type { ResolvedSender, SteerQueueReason } from "../shared/wire.ts";
 import type { BotRecord, Message } from "./store.ts";
 import type { UsageTrigger } from "./usage-ledger.ts";
 
@@ -40,7 +40,7 @@ interface QueueEntry {
     prompt: string;
     replyToId?: string;
     sendId?: string;
-    reason?: "capacity";
+    reason?: SteerQueueReason;
     /** The words were queued by a bot already running unattended (a
      * thread it opened on itself). The drained turn must inherit that:
      * a queue is a delay, not a person sitting down at the keyboard. */
@@ -87,7 +87,7 @@ const changed = () => {
 
 /** Public pending chips only: never expose provider prompts or reply context. */
 export function queuedSteerSnapshot(ownsThread: (botId: string, threadId: string) => boolean):
-  Record<string, Array<{ queueId: string; text: string; reason?: "capacity" }>> {
+  Record<string, Array<{ queueId: string; text: string; reason?: SteerQueueReason }>> {
   return Object.fromEntries([...queues]
     .filter(([threadId, entry]) => ownsThread(entry.botId, threadId))
     .map(([threadId, entry]) => [threadId, entry.items.map((item) => ({
@@ -110,7 +110,7 @@ export function queueSteeredMessage(
   botId: string,
   threadId: string,
   text: string,
-  options: { prompt?: string; replyToId?: string; sendId?: string; reason?: "capacity"; unattended?: boolean; peerAsk?: Message["peerAsk"]; sender?: ResolvedSender; trigger?: UsageTrigger } = {},
+  options: { prompt?: string; replyToId?: string; sendId?: string; reason?: SteerQueueReason; unattended?: boolean; peerAsk?: Message["peerAsk"]; sender?: ResolvedSender; trigger?: UsageTrigger } = {},
 ): QueuedSteer {
   const id = newId();
   const entry = queues.get(threadId) ?? { botId, items: [] };
@@ -244,7 +244,7 @@ export function queuedSteeredMessage(
   botId: string,
   threadId: string,
   sendId: string,
-): { id: string; text: string; replyToId?: string; reason?: "capacity" } | null {
+): { id: string; text: string; replyToId?: string; reason?: SteerQueueReason } | null {
   const entry = queues.get(threadId);
   if (!entry || entry.botId !== botId) return null;
   const item = entry.items.find((candidate) => candidate.sendId === sendId);
