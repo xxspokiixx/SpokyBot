@@ -972,13 +972,15 @@ export const CodexDriver: ProviderDriver<CodexConfig> = {
             ? (mcpAppApproval?.summary ?? (typeof params.message === "string" ? params.message : "MCP access requested"))
             : typeof params.command === "string"
             ? params.command
+            : protocolQuestions
+              ? protocolQuestions.map(({ question }) => question.question).join(" · ")
             : Array.isArray(params.questions)
               ? params.questions.map((q: any) => q.question ?? q.header).filter(Boolean).join(" · ")
               : typeof params.reason === "string"
                 ? params.reason
                 : tool;
         const choices = isQuestion
-          ? (params.questions?.[0]?.options ?? []).map((o: any) => o.label).slice(0, 5)
+          ? (protocolQuestions?.[0]?.question.options ?? []).map((o) => o.label).slice(0, 5)
           : undefined;
         const finish = (behavior: "allow" | "deny" | "answer", message?: string, source: "user" | "timeout" | "system" = "user") => {
           if (!asks.delete(requestId)) return;
@@ -1007,7 +1009,10 @@ export const CodexDriver: ProviderDriver<CodexConfig> = {
           emit({ ...base(threadId, turnId), type: "request.resolved", requestId, behavior, source });
         };
         const timer = setTimeout(
-          () => (isQuestion ? finish("answer", undefined, "timeout") : finish("deny", DENY_TIMEOUT_NOTE, "timeout")),
+          // A timed-out question resolves as denied, not answered: the card
+          // closes with no reply (answers stay empty either way), and the
+          // resolve event must not claim an answer that never happened.
+          () => finish("deny", isQuestion ? undefined : DENY_TIMEOUT_NOTE, "timeout"),
           15 * 60_000,
         );
         timer.unref?.();

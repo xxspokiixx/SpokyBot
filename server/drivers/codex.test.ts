@@ -1254,6 +1254,34 @@ describe("CodexDriver turns (fake app-server)", () => {
     });
   });
 
+  it("builds the card from the questions that parsed, not the raw entries", async () => {
+    await create({ mode: "mixed-question" });
+    const dump = join(scratch, "question-mixed.json");
+    process.env.FAKE_CODEX_DUMP = dump;
+
+    await instance.adapter.sendTurn({ threadId: "t-question-mixed", text: "ask me" });
+    const opened = await recorder.until((e) => e.type === "request.opened");
+    // the entry with blank question text is skipped before the card is
+    // built, so summary and choices describe the question that is actually
+    // answerable, not the rejected entry
+    expect(opened).toMatchObject({
+      requestType: "question",
+      summary: "Who reviews?",
+      choices: ["Ada", "Lin"],
+      questions: [{ question: "Who reviews?", options: [{ label: "Ada" }, { label: "Lin" }] }],
+    });
+
+    await instance.adapter.respondToRequest("t-question-mixed", opened.requestId!, {
+      behavior: "answer",
+      message: "Q: Who reviews?\nA: First paragraph\n\nsecond paragraph",
+    });
+    await recorder.until((e) => e.type === "turn.completed");
+    // the multi-paragraph answer travels whole
+    expect(JSON.parse(readFileSync(dump, "utf8")).decision).toEqual({
+      answers: { "q-review": { answers: ["First paragraph\n\nsecond paragraph"] } },
+    });
+  });
+
   it("refuses an empty ask instead of opening a card with nothing to answer", async () => {
     await create({ mode: "empty-question" });
     const dump = join(scratch, "question-empty.json");
@@ -1300,7 +1328,7 @@ describe("CodexDriver turns (fake app-server)", () => {
       await vi.advanceTimersByTimeAsync(15 * 60_000);
 
       const resolved = await recorder.until((e) => e.type === "request.resolved" && e.requestId === opened.requestId);
-      expect(resolved).toMatchObject({ behavior: "answer", source: "timeout" });
+      expect(resolved).toMatchObject({ behavior: "deny", source: "timeout" });
     } finally {
       vi.useRealTimers();
     }

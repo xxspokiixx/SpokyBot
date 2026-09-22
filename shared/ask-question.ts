@@ -342,11 +342,17 @@ export interface ProtocolAskQuestion {
 export function parseProtocolAskQuestions(entries: unknown): ProtocolAskQuestion[] | null {
   if (!Array.isArray(entries)) return null;
   const parsed: ProtocolAskQuestion[] = [];
+  const seenIds = new Set<string>();
   for (const raw of entries) {
     if (!isRecord(raw)) continue;
     const question = parseQuestion(raw);
-    const id = text(raw.id, MAX_QUESTION_ID);
-    if (!question || !id) continue;
+    // The id is opaque protocol data echoed back verbatim in the answer, so
+    // an overlong id is rejected whole rather than truncated — a truncated
+    // id would answer an id the agent never sent. Duplicate ids are skipped
+    // too: two questions cannot share one answer slot.
+    const id = typeof raw.id === "string" ? raw.id.trim() : "";
+    if (!question || !id || id.length > MAX_QUESTION_ID || seenIds.has(id)) continue;
+    seenIds.add(id);
     parsed.push({ id, question });
     if (parsed.length === MAX_QUESTIONS) break;
   }
@@ -383,13 +389,18 @@ export function questionAnswersById(
     }
     idByText.set(question.question, id);
   }
-  for (const block of message.split("\n\n")) {
-    const match = /^Q: ([\s\S]+?)\nA: ([\s\S]+)$/.exec(block.trim());
-    if (!match) continue;
+  // A block runs from one Q: header to the next (blank lines inside an
+  // answer are the answer's, not block boundaries), so the reply is scanned
+  // for header-to-header spans instead of split on every blank line.
+  const blocks = message.matchAll(/(?:^|\n\n)Q: ([\s\S]+?)\nA: ([\s\S]*?)(?=\n\nQ: |$)/g);
+  for (const match of blocks) {
     const asked = match[1]!.trim();
     if (ambiguous.has(asked)) continue;
     const id = idByText.get(asked);
-    if (id) answers[id] = match[2]!.trim();
+    const answer = match[2]!.trim();
+    // A blank A: is no answer: the id stays unanswered rather than filed
+    // as an empty string.
+    if (id && answer) answers[id] = answer;
   }
   if (Object.keys(answers).length) return answers;
   const only = questions.length === 1 ? questions[0] : undefined;

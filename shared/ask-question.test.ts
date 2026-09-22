@@ -356,6 +356,22 @@ describe("parseProtocolAskQuestions", () => {
     expect(parseProtocolAskQuestions("please")).toBeNull();
     expect(parseProtocolAskQuestions([])).toBeNull();
   });
+
+  it("rejects overlong and duplicate ids whole instead of truncating them", () => {
+    const overlong = "i".repeat(201);
+    expect(
+      parseProtocolAskQuestions([
+        { id: overlong, question: "Overlong id?", options: [] },
+        { id: "q-ok", question: "Fine?", options: [] },
+      ]),
+    ).toEqual([{ id: "q-ok", question: { question: "Fine?", options: [] } }]);
+    expect(
+      parseProtocolAskQuestions([
+        { id: "q-same", question: "First?", options: [] },
+        { id: "q-same", question: "Second?", options: [] },
+      ]),
+    ).toEqual([{ id: "q-same", question: { question: "First?", options: [] } }]);
+  });
 });
 
 describe("questionAnswersById", () => {
@@ -371,6 +387,20 @@ describe("questionAnswersById", () => {
 
   it("answers only the ids a partial reply covers", () => {
     expect(questionAnswersById("Q: Ship today?\nA: Yes", questions)).toEqual({ "q-ship": "Yes" });
+  });
+
+  it("keeps blank lines inside a multi-paragraph answer", () => {
+    const reply = "Q: Ship today?\nA: First paragraph\n\nsecond paragraph\n\nQ: Who reviews?\nA: Ada, Lin";
+    expect(questionAnswersById(reply, questions)).toEqual({
+      "q-ship": "First paragraph\n\nsecond paragraph",
+      "q-review": "Ada, Lin",
+    });
+  });
+
+  it("leaves an id unanswered when its A: is blank", () => {
+    expect(questionAnswersById("Q: Ship today?\nA: \n\nQ: Who reviews?\nA: Ada, Lin", questions)).toEqual({
+      "q-review": "Ada, Lin",
+    });
   });
 
   it("files a bare reply under the single question's id", () => {
