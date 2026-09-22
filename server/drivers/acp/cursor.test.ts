@@ -292,7 +292,9 @@ describe("CursorAgentDriver", () => {
         .trim()
         .split("\n")
         .map((line) => JSON.parse(line) as { dir?: string; msg?: { id?: number; error?: { code?: number } } });
-      const reply = outbound.find((entry) => entry.dir === "out" && entry.msg?.id === 9300);
+      // The native log is append-only across runs of the whole file: the
+      // latest reply for this id is this run's, not a stale earlier one.
+      const reply = outbound.filter((entry) => entry.dir === "out" && entry.msg?.id === 9300).at(-1);
       expect(reply?.msg?.error).toMatchObject({ code: -32601 });
     } finally {
       recorder.stop();

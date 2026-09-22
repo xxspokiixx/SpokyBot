@@ -667,6 +667,25 @@ describe("PiDriver turns (fake CLI)", () => {
     }
   });
 
+  it("cancels an ask's fail-safe timer when the turn is interrupted", async () => {
+    await create("question-select");
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+    try {
+      await instance.adapter.sendTurn({ threadId: "t-ask-interrupt", text: "go" });
+      await recorder.until((e) => e.type === "request.opened");
+      await instance.adapter.interruptTurn("t-ask-interrupt");
+      await recorder.until((e) => e.type === "turn.completed");
+      // Flush the short-lived RPC waiter timers, then require that nothing
+      // is left queued: settle() cancels the ask's 15-minute fail-safe
+      // outright instead of leaving it to fire against a dead child while
+      // holding the ask closure alive.
+      await vi.advanceTimersByTimeAsync(21_000);
+      expect(vi.getTimerCount()).toBe(0);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it("respondToRequest is unavailable for an ask that is not pending", async () => {
     await create();
     await expect(instance.adapter.respondToRequest("t-none", "nope", { behavior: "allow" })).resolves.toBe("unavailable");

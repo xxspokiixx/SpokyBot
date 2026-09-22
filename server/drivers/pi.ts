@@ -515,6 +515,10 @@ export const PiDriver: ProviderDriver<PiConfig> = {
       }
       const turnId = newId();
       const pending = new Map<string, (decision: { behavior: "allow" | "deny" | "answer"; message?: string }) => void>();
+      // Ask fail-safe timers, tracked so settle() can cancel them outright:
+      // a cleared pending map alone leaves each timer holding the ask
+      // closure (send, child) alive until it fires.
+      const askTimers = new Set<ReturnType<typeof setTimeout>>();
       let settled = false;
       // pi's RPC surface accepts image content directly. Read before spawning
       // so an attachment that disappeared produces one clear dispatch error
@@ -613,7 +617,10 @@ export const PiDriver: ProviderDriver<PiConfig> = {
         if (settled) return;
         settled = true;
         // The turn is over: drop unanswered asks so their 15-minute
-        // fail-safe timers no-op instead of writing to a dead child.
+        // fail-safe timers are cancelled outright instead of no-oping on a
+        // dead child while holding the ask closure alive.
+        for (const timer of askTimers) clearTimeout(timer);
+        askTimers.clear();
         pending.clear();
         flushAssistantText();
         emit({
@@ -731,7 +738,10 @@ export const PiDriver: ProviderDriver<PiConfig> = {
               // made respondToRequest see no pending ask, return unavailable,
               // then fall back to a human card on every "Always allow" call.
               pending.set(reqId, (decision) => {
-                if (timer) clearTimeout(timer);
+                if (timer) {
+                  clearTimeout(timer);
+                  askTimers.delete(timer);
+                }
                 if (decision.behavior === "deny") send({ type: "extension_ui_response", id: reqId, cancelled: true });
                 else if (isQuestion) {
                   // Recover the picked label from a structured card's Q:/A:
@@ -749,6 +759,7 @@ export const PiDriver: ProviderDriver<PiConfig> = {
               // minutes. The pending.delete guard makes this a no-op once the
               // turn settled (settle clears pending) or a person answered.
               timer = setTimeout(() => {
+                if (timer) askTimers.delete(timer);
                 if (!pending.delete(reqId)) return;
                 send({ type: "extension_ui_response", id: reqId, cancelled: true });
                 emit({
@@ -759,6 +770,7 @@ export const PiDriver: ProviderDriver<PiConfig> = {
                   source: "timeout",
                 });
               }, 15 * 60_000);
+              askTimers.add(timer);
               timer.unref?.();
               emit({
                 ...base(threadId, turnId),
