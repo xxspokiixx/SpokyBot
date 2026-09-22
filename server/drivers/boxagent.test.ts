@@ -261,6 +261,23 @@ describe("BoxAgentDriver turns (fake API)", () => {
     expect(texts()).toEqual(["Working.", "Shipped."]);
   });
 
+  it("does not open a held ask when the turn is interrupted before settle", async () => {
+    const askText = "Working.\n\n" + askBlock([{ question: "Proceed?" }]);
+    restoreFetch = installFakeBox([
+      { events: [{ id: "e1", type: "response", text: askText }], status: { promptRun: { status: "running" } } },
+    ]);
+    await create({ askTimeoutMs: 60_000 });
+    await instance.adapter.sendTurn({ threadId: "t-ask-cancel", text: "go", integrations: { computer } });
+    // The ask block has streamed but the run has not settled: an interrupt
+    // here must end the turn promptly, not register an ask whose timeout
+    // keeps stop pending.
+    await recorder.until((e) => e.type === "content.delta");
+    await instance.adapter.interruptTurn("t-ask-cancel");
+    const done = await recorder.until((e) => e.type === "turn.completed");
+    expect(done).toMatchObject({ ok: false, stopReason: "interrupted" });
+    expect(recorder.events.some((e) => e.type === "request.opened")).toBe(false);
+  });
+
   it("resolves a held ask on its timeout and completes the turn", async () => {
     const askText = askBlock([{ question: "Proceed?" }]);
     restoreFetch = installFakeBox([

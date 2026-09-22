@@ -239,6 +239,13 @@ export const BoxAgentDriver: ProviderDriver<BoxAgentConfig> = {
          * turn; a deny or timeout ends it. */
         const finishRun = async (ok: boolean, stopReason: string | null): Promise<{ ok: boolean; stopReason: string | null }> => {
           flushAssistantText();
+          // An interrupt that lands between ask text streaming and settle
+          // finds no heldAsks entry to settle; without this check the run
+          // would register a fresh ask for a dead turn and hold stop pending
+          // for the ask timeout.
+          if (cancelled) {
+            return { ok: false, stopReason: "interrupted" };
+          }
           const questions = parseOmbAskQuestions(lastText);
           if (!questions) {
             // A fence that did not parse is a question the person never saw.
