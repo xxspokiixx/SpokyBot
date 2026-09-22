@@ -159,6 +159,7 @@ import { ComputerControl } from "./computer-control.ts";
 import { augmentedPath, findCliCandidates, resetPathCache } from "./env-path.ts";
 import { registerEnginesBinDir } from "./engine-install.ts";
 import { appendUsage, parseUsageRange, readUsage, summarizeUsage, usageCsv, USAGE_GROUPINGS, flushUsageLedger, type UsageGroupBy, type UsageTrigger } from "./usage-ledger.ts";
+import { GroupUsageReader } from "./group-thread-usage.ts";
 import type { RequestAuth } from "./request-auth.ts";
 import { checkProviderKey, PROVIDER_KEY_KINDS, type ProviderKeyKind } from "./provider-key-check.ts";
 import { assertWithinBudget, noteSpend, spendState } from "./spend.ts";
@@ -2887,8 +2888,11 @@ const roomHandoffs = new RoomHandoffs(join(DATA_DIR, "room-handoffs.json"), {
   },
 }, Date.now, roomHandoffLimits(cfg));
 activeCoordinationForThread = threadId => roomHandoffs.activeDirect(threadId);
+const groupUsageReader = new GroupUsageReader(DATA_DIR);
 function publicGroupState(group: GroupRecord): WireGroup {
-  return { ...group, working: groupIsWorking(group) || [...roomHandoffs.nodes.values()].some(n => n.groupId === group.id && !["completed", "failed", "cancelled"].includes(n.status)) };
+  let usage: WireGroup["usage"];
+  try { usage = groupUsageReader.forThread(group.threadId); } catch { /* accounting must not block chat */ }
+  return { ...group, usage: usage ?? null, working: groupIsWorking(group) || [...roomHandoffs.nodes.values()].some(n => n.groupId === group.id && !["completed", "failed", "cancelled"].includes(n.status)) };
 }
 
 function beginGroupTurnOperation(
@@ -5258,6 +5262,12 @@ bus.subscribe((event: RuntimeEvent) => {
             : turnTriggers.get(event.threadId) ?? { kind: "owner" },
         });
         noteSpend(DATA_DIR, event.cost ?? null);
+        // Appends are asynchronous. Refresh after persistence so the settled
+        // turn appears immediately, without waiting for another message.
+        void flushUsageLedger(DATA_DIR).then(() => {
+          const current = store.group(group.id);
+          if (current) broadcast({ kind: "group", group: publicGroupState(current) });
+        }).catch(() => {});
         if (completedTurnId) {
           void scheduleTurnDigest({
             botId: speaker.botId, botName: speaker.name,
