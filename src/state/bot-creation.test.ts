@@ -42,6 +42,13 @@ describe("bot presets", () => {
     expect(created.bot).toMatchObject({ id: "created", soul: role.soul, messages: [] });
   });
 
+  it("creates directly in the selected team in the first POST", async () => {
+    const request = vi.fn().mockResolvedValue({ bot: { ...bot, section: "Studio" } });
+    const created = await createBotWithRole(undefined, request, "Studio");
+    expect(request).toHaveBeenCalledExactlyOnceWith("/api/bots", { method: "POST", body: JSON.stringify({ section: "Studio" }) });
+    expect(created.bot.section).toBe("Studio");
+  });
+
   it("retains the already-created bot if its optional preset fails, without creating another", async () => {
     const request = vi.fn().mockResolvedValueOnce({ bot }).mockRejectedValueOnce(new Error("profile unavailable"));
     expect(await createBotWithRole(botRole("research"), request)).toEqual({ bot, profileError: "profile unavailable" });
