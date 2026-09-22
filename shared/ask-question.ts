@@ -240,6 +240,11 @@ export const ASK_USER_TOOL_DEFINITION = {
   },
 } as const;
 
+/** The synthetic tool string for an ask parsed out of model-authored final
+ * output (the BoxAgent turn-held transport): there is no tool call to name,
+ * but the event and the ASKS_A_PERSON backstop need one string. */
+export const OMB_ASK_TOOL = "omb-ask";
+
 /** The lead-in on a formatted answer. It exists for the model — the answer
  * is delivered on the deny channel, so it has to say what it is — and the
  * card strips it back off when it shows the person what they sent. */
