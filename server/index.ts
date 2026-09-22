@@ -757,7 +757,7 @@ type InternalCapability = {
   threadId: string;
   generation: string;
   depth: number;
-  kind: "agents" | "connectors" | "computer" | "browser" | "hooks";
+  kind: "agents" | "connectors" | "computer" | "browser" | "hooks" | "phone";
   skillAuthoring: boolean;
   createdBots: number;
   createdRooms?: number;
@@ -1410,8 +1410,26 @@ export function browserEngineSummary(): { kind: "engine" | "unavailable"; reason
     : { kind: "unavailable", reason: status.reason, installable: status.installable, ...progress };
 }
 
-function phoneIntegration() {
-  const env: Record<string, string> = { ...AGENTS_NODE_FLAG };
+function phoneIntegration(botId: string, threadId: string, generation: string) {
+  // The phone is claimed lazily, at the first tools/call the engine makes
+  // through this proxy (/api/internal/phone/claim): trigger-term matching
+  // only decides whether the tools are mounted, so a conversation that
+  // merely mentions "android" holds nothing while it runs.
+  const token = mintInternalCapability({
+    botId,
+    threadId,
+    generation,
+    depth: 0,
+    kind: "phone",
+    skillAuthoring: false,
+    createdBots: 0,
+    openedThreads: 0,
+  });
+  const env: Record<string, string> = {
+    ...AGENTS_NODE_FLAG,
+    OMB_PHONE_TOKEN: token,
+    OMB_HARNESS_URL: `http://127.0.0.1:${PORT}`,
+  };
   if (process.env.OMB_ADB_PATH) env.OMB_ADB_PATH = process.env.OMB_ADB_PATH;
   if (process.env.OMB_RESOURCES_PATH) env.OMB_RESOURCES_PATH = process.env.OMB_RESOURCES_PATH;
   if (process.env.PH_ANDROID_SERIAL) env.PH_ANDROID_SERIAL = process.env.PH_ANDROID_SERIAL;
@@ -6640,8 +6658,7 @@ async function startTurn(
         availableSkills(),
       );
       if (selectedSkills.some((skill) => skill.manifest.requiredCapabilities.includes("phoneMcp"))) {
-        if (!claimTurnResource(resourceOwner, "computer:phone")) throw new Error("another thread is using the phone — wait for it to finish");
-        integrations.phone = phoneIntegration();
+        integrations.phone = phoneIntegration(bot.id, threadId, dispatchClaimId);
       }
       // the user's connected apps, but only to a driver that can mount
       // them — a key in the config says the connections exist, not that
@@ -8582,8 +8599,7 @@ async function runGroupMemberTurn(
     ),
   );
   if (selectedSkills.some((skill) => skill.manifest.requiredCapabilities.includes("phoneMcp"))) {
-    if (!claimTurnResource(resourceOwner, "computer:phone")) throw new Error("another thread is using the phone — wait for it to finish");
-    integrations.phone = phoneIntegration();
+    integrations.phone = phoneIntegration(bot.id, threadId, internalGeneration);
   }
   try {
     if (bot.composio !== false && composio.configured(cfg) && instance.adapter.capabilities.composioMcp === true) {
@@ -11687,6 +11703,8 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
         ? "hooks"
         : path === "/api/internal/browser/mcp"
         ? "browser"
+        : path === "/api/internal/phone/claim"
+        ? "phone"
         : path.startsWith("/api/internal/connectors/")
         ? "connectors"
         : path === "/api/internal/computer-control"
@@ -11832,6 +11850,17 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
         });
         requireActiveInternalCapability();
         return json(res, 200, { result });
+      }
+      if (method === "POST" && path === "/api/internal/phone/claim") {
+        // Lazy phone exclusivity (issue #1663): the turn holds computer:phone
+        // from its first real tool call until it settles. The proxy answers a
+        // conflict as a blocked tool result, so a concurrent caller waits or
+        // does other work instead of losing the whole turn.
+        requireActiveInternalCapability();
+        if (!claimTurnResource(internalCapability, "computer:phone")) {
+          return json(res, 409, { error: "another thread is using the phone" });
+        }
+        return json(res, 200, { claimed: true });
       }
       // Off by default: both fall through to the same "unknown internal
       // endpoint" 404 a never-implemented route returns.
