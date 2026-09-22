@@ -1500,6 +1500,8 @@ export function Sidebar({ open, onClose }: { open: boolean; onClose: () => void 
   const [sectionPicker, setSectionPicker] = useState<MenuState | null>(null);
   const [newTeam, setNewTeam] = useState(false);
   const [moveToTeam, setMoveToTeam] = useState<string | null>(null);
+  const [renameTeam, setRenameTeam] = useState<string | null>(null);
+  const [teamMenu, setTeamMenu] = useState<{ name: string; x: number; y: number } | null>(null);
   const [roomMenu, setRoomMenu] = useState<{ groupId: string; x: number; y: number } | null>(null);
   const [roomSectionPicker, setRoomSectionPicker] = useState<{ groupId: string; x: number; y: number } | null>(null);
   const [plusOpen, setPlusOpen] = useState(false);
@@ -2075,6 +2077,10 @@ export function Sidebar({ open, onClose }: { open: boolean; onClose: () => void 
                 {density !== "icons" && (
                   <SidebarSectionHeader
                     name={sectionLabel(id)}
+                    onContextMenu={!remoteClient && sectionName ? (event) => {
+                      event.preventDefault();
+                      setTeamMenu({ name: sectionName, x: Math.max(8, Math.min(event.clientX, window.innerWidth - 230)), y: Math.max(8, Math.min(event.clientY, window.innerHeight - 110)) });
+                    } : undefined}
                     collapsed={collapsed}
                     attention={attention}
                     onToggle={layoutInteractive ? () => toggleSection(id) : undefined}
@@ -2277,6 +2283,20 @@ export function Sidebar({ open, onClose }: { open: boolean; onClose: () => void 
         }}
       />
       {newTeam && <TeamDialog onClose={() => setNewTeam(false)} />}
+      {renameTeam && <TeamDialog section={renameTeam} rename onClose={() => setRenameTeam(null)} />}
+      {teamMenu && createPortal(<div className="fixed inset-0 z-40" onMouseDown={() => setTeamMenu(null)}>
+        <div role="menu" aria-label={teamMenu.name} style={{ left: teamMenu.x, top: teamMenu.y }}
+          className="absolute w-[220px] rounded-xl border border-hairline/50 bg-menu p-1.5 text-ink shadow-xl"
+          onMouseDown={event => event.stopPropagation()} onKeyDown={event => {
+            if (event.key === "Escape" || event.key === "Tab") setTeamMenu(null);
+            navigateThreadMenu(event);
+          }}>
+          <button type="button" role="menuitem" autoFocus className="flex w-full items-center gap-2 rounded-lg px-3 py-2 text-left text-[13px] hover:bg-raised"
+            onClick={() => { setMoveToTeam(teamMenu.name); setTeamMenu(null); }}><Users size={14} />{t("team.addBots")}</button>
+          <button type="button" role="menuitem" className="flex w-full items-center gap-2 rounded-lg px-3 py-2 text-left text-[13px] hover:bg-raised"
+            onClick={() => { setRenameTeam(teamMenu.name); setTeamMenu(null); }}><Pencil size={14} />{t("team.rename")}</button>
+        </div>
+      </div>, document.body)}
       {moveToTeam && <TeamDialog section={moveToTeam} onClose={() => setMoveToTeam(null)} />}
       {sectionPicker && (
         <SectionPicker
