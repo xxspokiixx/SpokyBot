@@ -14,6 +14,12 @@ Use separate threads when you want fresh context or independent work without dup
 
 Groups bring several bots into one conversation. Each participant keeps its own provider state. Group timeouts prevent a participant from blocking the whole group indefinitely. Existing channels and their thread histories remain intact; the new label does not change turn-taking or delegation.
 
+## Team membership
+
+Every named team keeps an **Add bots** button in the sidebar. Once it has members, the button reads **Add or remove bots**. The dialog lists current members as checked alongside other available bots. Check a bot to move it into the team; uncheck one to move it to General, then save. Conversations stay with the bots. A move that would put two Chiefs of Staff in the same team is refused.
+
+Choose **New bot** inside this dialog to open bot creation for that team. The new bot is created directly in the selected team and appears checked when you return to the membership list. Creating it does not discard your other unsaved checkbox edits.
+
 ## Delegation
 
 Bots can hand work to other bots. Delegated runs carry explicit status back into the parent conversation, including completion, failure, and cancellation.
