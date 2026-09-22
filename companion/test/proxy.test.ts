@@ -171,7 +171,7 @@ beforeAll(async () => {
   sidecar = createServer(
     createProxyHandler({
       harnessPort: HARNESS_PORT,
-      authenticate: (t) => (t === TOKEN ? { id: "d1", cloudDesktopAccess: true } : null),
+      authenticate: (t) => (t === TOKEN ? { id: "d1", cloudDesktopAccess: true, browserControlAccess: false } : null),
       redeem: (code, deviceName) =>
         code === "424242"
           ? { token: TOKEN, device: { id: "d1", name: String(deviceName) } }
@@ -253,7 +253,7 @@ describe("the sidecar in front of an unmodified harness", () => {
     const connections = createConnectedDeviceTracker();
     const delayedProxy = createServer(createProxyHandler({
       harnessPort: delayedHarnessPort,
-      authenticate: () => valid ? { id: "phone-delayed", cloudDesktopAccess: false } : null,
+      authenticate: () => valid ? { id: "phone-delayed", cloudDesktopAccess: false, browserControlAccess: false } : null,
       redeem: () => ({ error: "not pairing" }),
       serverName: () => "Test computer",
       connected: connections.open,
@@ -471,7 +471,7 @@ describe("the sidecar in front of an unmodified harness", () => {
     const orphan = createServer(
       createProxyHandler({
         harnessPort: 1,
-        authenticate: () => ({ cloudDesktopAccess: true }),
+        authenticate: () => ({ cloudDesktopAccess: true, browserControlAccess: false }),
         redeem: () => ({ error: "no" }),
         serverName: () => "Test computer",
       }),
@@ -503,7 +503,7 @@ describe("the sidecar in front of an unmodified harness", () => {
     const stalled = createServer(
       createProxyHandler({
         harnessPort: mutePort,
-        authenticate: () => ({ cloudDesktopAccess: true }),
+        authenticate: () => ({ cloudDesktopAccess: true, browserControlAccess: false }),
         redeem: () => ({ error: "no" }),
         serverName: () => "Test computer",
         // the shipped value is 30s; the behaviour under test is the same one
@@ -554,7 +554,7 @@ describe("the sidecar in front of an unmodified harness", () => {
     const relay = createServer(
       createProxyHandler({
         harnessPort: slowPort,
-        authenticate: () => ({ cloudDesktopAccess: true }),
+        authenticate: () => ({ cloudDesktopAccess: true, browserControlAccess: false }),
         redeem: () => ({ error: "no" }),
         serverName: () => "Test computer",
       }),
@@ -616,7 +616,7 @@ describe("the sidecar in front of an unmodified harness", () => {
     const relay = createServer(
       createProxyHandler({
         harnessPort: floodPort,
-        authenticate: () => ({ cloudDesktopAccess: true }),
+        authenticate: () => ({ cloudDesktopAccess: true, browserControlAccess: false }),
         redeem: () => ({ error: "no" }),
         serverName: () => "Test computer",
       }),
@@ -655,7 +655,7 @@ describe("live companion endpoint refresh", () => {
         // A successful response with no harness on this port also proves the
         // sidecar terminated the route locally.
         harnessPort: 1,
-        authenticate: (token) => token === TOKEN ? { cloudDesktopAccess: false } : null,
+        authenticate: (token) => token === TOKEN ? { cloudDesktopAccess: false, browserControlAccess: false } : null,
         redeem: () => ({ error: "not used" }),
         serverName: () => "Test computer",
         endpoints: () => endpoints,
