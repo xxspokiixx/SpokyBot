@@ -13,6 +13,7 @@ import type { ModelSelection } from "./contracts.ts";
 import {
   buildDelegationFailurePrompt,
   buildDelegationRevivalPrompt,
+  DELEGATION_BUSY_HOLD_MAX_MS,
   DELEGATION_TTL_MS,
   DELEGATION_WAKE_MAX_PER_WINDOW,
   DELEGATION_WAKE_WINDOW_MS,
@@ -1053,6 +1054,91 @@ describe("busy waits and expiry", () => {
       });
       expect(chipCount("Delegation to @Helper expired — not picked up within 24 hours")).toBe(1);
       expect(settled).toEqual(["expired"]);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("expires a busy hold at the cap — hours, not the 24-hour TTL — and wakes the delegator", async () => {
+    vi.useFakeTimers({ toFake: ["Date"] });
+    try {
+      store.patchBot(target.id, { busy: true });
+      const queued = queueDelegation(commsBus, from, { toBotId: target.id, message: "later", depth: 0 }, 1);
+      const runTarget = vi.fn();
+      const settled: string[] = [];
+      const onSettled = (receipt: { status: string }) => void settled.push(receipt.status);
+
+      drainDelegations(commsBus, approvalBus, from.threadId, runTarget, onSettled);
+      await waitFor(() => pendingDelegationInfo(queued.id!)?.waiting === true);
+      releaseDelegationsWaitingOn(target.id);
+
+      // far short of the 24-hour delivery window, past the busy-hold cap
+      vi.setSystemTime(new Date(Date.now() + DELEGATION_BUSY_HOLD_MAX_MS));
+      drainDelegations(commsBus, approvalBus, from.threadId, runTarget, onSettled);
+      await waitFor(() => _pendingCount(from.threadId) === 0);
+
+      expect(runTarget).not.toHaveBeenCalled();
+      expect(findDelegationReceipt(queued.id!)).toMatchObject({
+        status: "expired",
+        toBotName: "Helper",
+        result: "@Helper was still busy after 2 hours",
+      });
+      expect(chipCount("Delegation to @Helper expired — still busy after 2 hours")).toBe(1);
+      expect(chipCount("Delegation to @Helper expired — not picked up within 24 hours")).toBe(0);
+      expect(settled).toEqual(["expired"]);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("keeps holding a busy handoff that has not reached the busy-hold cap", async () => {
+    vi.useFakeTimers({ toFake: ["Date"] });
+    try {
+      store.patchBot(target.id, { busy: true });
+      const queued = queueDelegation(commsBus, from, { toBotId: target.id, message: "later", depth: 0 }, 1);
+      const runTarget = vi.fn();
+      drainDelegations(commsBus, approvalBus, from.threadId, runTarget);
+      await waitFor(() => pendingDelegationInfo(queued.id!)?.waiting === true);
+      releaseDelegationsWaitingOn(target.id);
+
+      vi.setSystemTime(new Date(Date.now() + DELEGATION_BUSY_HOLD_MAX_MS - 1_000));
+      drainDelegations(commsBus, approvalBus, from.threadId, runTarget);
+      await waitFor(() => pendingDelegationInfo(queued.id!)?.waiting === true);
+
+      expect(runTarget).not.toHaveBeenCalled();
+      expect(_pendingCount(from.threadId)).toBe(1);
+      expect(findDelegationReceipt(queued.id!)).toBeNull();
+      // the pending map is module-level: clear the held item so the next
+      // test's sweep does not inherit it
+      discardDelegations(commsBus, from.threadId);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("sweeps a past-cap busy hold and keeps under-cap ones queued", () => {
+    vi.useFakeTimers({ toFake: ["Date"] });
+    try {
+      store.patchBot(target.id, { busy: true });
+      const stale = queueDelegation(commsBus, from, { toBotId: target.id, message: "stale", depth: 0 }, 1);
+      vi.setSystemTime(new Date(Date.now() + DELEGATION_BUSY_HOLD_MAX_MS));
+      const fresh = queueDelegation(commsBus, from, { toBotId: target.id, message: "fresh", depth: 0 }, 1);
+
+      const settled: string[] = [];
+      const expired = expireStaleDelegations(commsBus, Date.now(), (receipt) => void settled.push(receipt.status));
+
+      expect(expired).toBe(1);
+      expect(_pendingCount(from.threadId)).toBe(1);
+      expect(pendingDelegationInfo(fresh.id!)).not.toBeNull();
+      expect(findDelegationReceipt(stale.id!)).toMatchObject({
+        status: "expired",
+        result: "@Helper was still busy after 2 hours",
+      });
+      expect(chipCount("Delegation to @Helper expired — still busy after 2 hours")).toBe(1);
+      expect(settled).toEqual(["expired"]);
+      // the pending map is module-level: clear the kept item so the next
+      // test's sweep does not inherit it
+      discardDelegations(commsBus, from.threadId);
     } finally {
       vi.useRealTimers();
     }
