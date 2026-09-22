@@ -20,9 +20,9 @@ function nodes(value: ReactNode): Node[] {
   const node = value as Node;
   return [node, ...Children.toArray(node.props.children).flatMap(nodes)];
 }
-function render() {
+function render(props: Parameters<typeof NewBotDialog>[0] = {}) {
   let tree!: ReturnType<typeof NewBotDialog>;
-  function Capture() { tree = NewBotDialog(); return tree; }
+  function Capture() { tree = NewBotDialog(props); return tree; }
   const html = renderToStaticMarkup(createElement(Capture));
   return { html, nodes: nodes(tree) };
 }
@@ -30,6 +30,19 @@ beforeEach(() => { fixture.effects = []; fixture.dispatch.mockReset(); fixture.c
 afterEach(() => vi.unstubAllGlobals());
 
 describe("new bot role dialog", () => {
+  it("returns a newly created team member to the enclosing membership dialog", () => {
+    const onClose = vi.fn(), onCreated = vi.fn();
+    const { nodes } = render({ section: "Studio", onClose, onCreated });
+    const blank = nodes.find(node => node.type === "button" && renderToStaticMarkup(node).includes("Blank bot"))!;
+    blank.props.onClick!();
+    const action = fixture.dispatch.mock.calls[0][0];
+    expect(action).toMatchObject({ type: "newBot", section: "Studio" });
+    const bot = { id: "new", section: "Studio" };
+    action.onCreated(bot);
+    expect(onCreated).toHaveBeenCalledWith(bot);
+    expect(onClose).toHaveBeenCalledOnce();
+    expect(fixture.dispatch).toHaveBeenCalledOnce();
+  });
   it("waits for creation before closing the current dialog", () => {
     const { nodes } = render();
     const blank = nodes.find((node) => node.type === "button" && renderToStaticMarkup(node).includes("Blank bot"))!;
