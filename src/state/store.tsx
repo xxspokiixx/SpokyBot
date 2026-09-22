@@ -1039,7 +1039,7 @@ export type Action =
   | { type: "taskSwitched"; bot: Bot }
   | { type: "renameTask"; botId: string; threadId: string; title: string }
   | { type: "deleteTask"; botId: string; threadId: string }
-  | { type: "newBot"; role?: BotRole; onCreated?: () => void; onError?: (message: string) => void }
+  | { type: "newBot"; role?: BotRole; section?: string; onCreated?: (bot: Bot) => void; onError?: (message: string) => void }
   | { type: "botCreationPending"; on: boolean }
   | { type: "updateTask"; botId: string; threadId: string; patch: TaskUpdatePatch }
   | { type: "createProject"; botId: string; name: string; emoji?: string | null; onCreated?: (project: BotProject) => void; onError?: (message: string) => void }
@@ -2226,10 +2226,13 @@ export class ApiError extends Error {
 }
 
 /** Keep the created bot reachable even when applying its optional preset fails. */
-export async function createBotWithRole(role?: BotRole, request: typeof api = api): Promise<{ bot: Bot; profileError?: string }> {
+export async function createBotWithRole(role?: BotRole, request: typeof api = api, section?: string): Promise<{ bot: Bot; profileError?: string }> {
   const { bot } = await request("/api/bots", {
     method: "POST",
-    ...(role ? { body: JSON.stringify({ name: role.name, title: role.title, description: role.description }) } : {}),
+    ...(role || section !== undefined ? { body: JSON.stringify({
+      ...(role ? { name: role.name, title: role.title, description: role.description } : {}),
+      ...(section !== undefined ? { section } : {}),
+    }) } : {}),
   });
   if (!role) return { bot };
   try {
@@ -3055,10 +3058,10 @@ export function StoreProvider({ children }: { children: ReactNode }) {
           if (creatingBot) break;
           creatingBot = true;
           rawDispatch({ type: "botCreationPending", on: true });
-          void createBotWithRole(action.role)
+          void createBotWithRole(action.role, api, action.section)
             .then(({ bot, profileError }) => {
               rawDispatch({ type: "botAdded", bot });
-              action.onCreated?.();
+              action.onCreated?.(bot);
               if (profileError) {
                 showError(t("newBot.profileFailed", { error: profileError }));
                 rawDispatch({ type: "toggleSettings", open: true, section: "soul" });
