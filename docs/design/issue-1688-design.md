@@ -6,7 +6,9 @@
 
 `resolveClaudeTurnModel` は静的一覧にある id をローカル注入の探索から外す。新しい id がその一覧に入るので、追加の分岐は要らない。
 
-`modelContextWindow` は `claude-opus-5-5` だけ 1,000,000 を返す。判定は `claude-opus-5` に前方一致しない形にする。
+`modelContextWindow` は公式 id と、スラッシュまたはドットで区切った転送形（`openrouter/anthropic/claude-opus-5-5`、`anthropic.claude-opus-5-5`、ドット表記 `claude-opus-5.5`、日付付き `claude-opus-5-5-20260922`）を 1,000,000 にする。根拠は Anthropic のモデルページ（2026-09-22、id `claude-opus-5-5`、context window 1M tokens、https://platform.claude.com/docs/en/models/opus-5-5/overview ）。`claude-opus-5` と `claude-opus-5-50` は汎用の Claude 規則のまま。`host::model` のローカル注入は対象外。カタログ行にも `contextWindow: 1_000_000` を置く。`contextWindowFor` はカタログの宣言をパターン表より先に使う。
+
+同型の洗い出し: ラベルが 1M と書く行は Cursor の `claude-sonnet-5-thinking-high` が 1 件。モデルページが無いので、この PR では 200,000 のままにする。
 
 ## 影響範囲
 
