@@ -9,7 +9,7 @@ import { track } from "@/lib/analytics";
 import { BOT_ROLES, type BotRole } from "@/lib/bot-roles";
 import { cn } from "@/lib/cn";
 import { t } from "@/lib/i18n";
-import { useStore } from "@/state/store";
+import { useStore, type Bot } from "@/state/store";
 
 const APP_LABELS: Record<string, string> = {
   gmail: "Gmail",
@@ -21,13 +21,19 @@ const APP_LABELS: Record<string, string> = {
   linear: "Linear",
 };
 
-export function NewBotDialog() {
+export function NewBotDialog({ section, onClose, onCreated }: {
+  section?: string;
+  onClose?: () => void;
+  onCreated?: (bot: Bot) => void;
+} = {}) {
   const { state, dispatch } = useStore();
   const dialogRef = useRef<HTMLDivElement>(null);
   const alive = useRef(true);
   const creating = state.botCreationPending;
   const [error, setError] = useState<string | null>(null);
-  const close = () => dispatch({ type: "toggleNewBot", open: false });
+  const close = () => onClose ? onClose() : dispatch({ type: "toggleNewBot", open: false });
+  const closeRef = useRef(close);
+  closeRef.current = close;
 
   useEffect(() => {
     alive.current = true;
@@ -36,7 +42,7 @@ export function NewBotDialog() {
     const onKeyDown = (event: KeyboardEvent) => {
       if (event.key === "Escape") {
         event.preventDefault();
-        dispatch({ type: "toggleNewBot", open: false });
+        closeRef.current();
         return;
       }
       if (event.key !== "Tab") return;
@@ -68,10 +74,10 @@ export function NewBotDialog() {
   const create = (role?: BotRole) => {
     if (creating) return;
     setError(null);
-    dispatch({ type: "newBot", role,
-      onCreated: () => {
+    dispatch({ type: "newBot", role, section,
+      onCreated: (bot) => {
         track("bot_created", { role: role?.id ?? "blank" });
-        if (alive.current) close();
+        if (alive.current) { onCreated?.(bot); close(); }
       },
       onError: (message: string) => {
         if (!alive.current) return;
