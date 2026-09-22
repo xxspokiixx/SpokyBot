@@ -746,6 +746,55 @@ describe("Store", () => {
     expect(reloaded.bot(second.id)?.chiefOfStaff).toBe(false);
   });
 
+  it("adds and removes members together without replacing unrelated concurrent additions", () => {
+    const store = new Store(selection);
+    const outgoing = store.createBot({ section: "Delivery" });
+    const incoming = store.createBot({ section: "Research" });
+    const concurrent = store.createBot({ section: "Delivery" });
+    const archived = store.createBot({ section: "Delivery" });
+    store.patchBot(archived.id, { hidden: true });
+    const originalThread = outgoing.threadId;
+    const result = store.updateTeamMembers("Delivery", [incoming.id], [outgoing.id]);
+    expect(result.ok).toBe(true);
+    expect(store.bot(outgoing.id)).toMatchObject({ threadId: originalThread, section: undefined });
+    expect(store.bot(incoming.id)?.section).toBe("Delivery");
+    expect(store.bot(concurrent.id)?.section).toBe("Delivery");
+    expect(store.bot(archived.id)?.section).toBe("Delivery");
+    const restored = new Store(selection);
+    expect(restored.bot(outgoing.id)?.section).toBeUndefined();
+    expect(restored.bot(incoming.id)?.section).toBe("Delivery");
+    expect(restored.sections).toContain("Delivery");
+  });
+
+  it("rejects stale removals and Chief conflicts without applying the additions", () => {
+    const store = new Store(selection);
+    const chief = store.createBot({ section: "Delivery" });
+    const generalChief = store.createBot();
+    const incoming = store.createBot({ section: "Research" });
+    store.setChiefOfStaff(chief.id);
+    store.setChiefOfStaff(generalChief.id);
+    expect(store.updateTeamMembers("Delivery", [incoming.id], [chief.id])).toEqual({ ok: false, reason: "chief-conflict" });
+    expect(store.bot(incoming.id)?.section).toBe("Research");
+    expect(store.updateTeamMembers("Delivery", [], [incoming.id])).toEqual({ ok: false, reason: "membership-changed" });
+    expect(store.updateTeamMembers("Delivery", ["missing"], [])).toEqual({ ok: false, reason: "unavailable" });
+    expect(store.updateTeamMembers("Delivery", [chief.id], [chief.id])).toEqual({ ok: false, reason: "membership-changed" });
+    store.setChiefOfStaff(null, "");
+    expect(store.updateTeamMembers("Delivery", [incoming.id], [chief.id]).ok).toBe(true);
+    expect(store.bot(chief.id)).toMatchObject({ section: undefined, chiefOfStaff: true });
+  });
+
+  it("keeps membership unchanged if the shared write fails", () => {
+    const store = new Store(selection);
+    const outgoing = store.createBot({ section: "Delivery" });
+    const incoming = store.createBot({ section: "Research" });
+    const write = vi.spyOn(store as any, "saveBots").mockImplementationOnce(() => { throw new Error("disk unavailable"); });
+    expect(() => store.updateTeamMembers("Delivery", [incoming.id], [outgoing.id])).toThrow("disk unavailable");
+    write.mockRestore();
+    expect(store.bot(outgoing.id)?.section).toBe("Delivery");
+    expect(store.bot(incoming.id)?.section).toBe("Research");
+    expect(new Store(selection).bot(outgoing.id)?.section).toBe("Delivery");
+  });
+
   it("files visible bots atomically without changing Chief roles", () => {
     const store = new Store(selection);
     const incumbent = store.createBot({ section: "Launch" });
