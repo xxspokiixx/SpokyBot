@@ -326,6 +326,11 @@ describe("questionAnswersByQuestion", () => {
     expect(questionAnswersByQuestion(forged, questions)).toEqual({ "Which model?": "Opus" });
   });
 
+  it("keeps a __proto__ question text as a real answer key", () => {
+    const odd = parseAskQuestions({ questions: [{ question: "__proto__", options: [] }] })!;
+    expect(Object.entries(questionAnswersByQuestion("Q: __proto__\nA: yes", odd))).toEqual([["__proto__", "yes"]]);
+  });
+
   it("takes a bare reply as the answer when exactly one question was asked", () => {
     // the flat path: a phone answering a single-question card with one of the
     // option labels the harness also sends
@@ -409,6 +414,11 @@ describe("questionAnswersById", () => {
 
   it("does not fall back to the flat reply when a block matched but answered nothing", () => {
     expect(questionAnswersById("Q: Ship today?\nA: ", questions.slice(0, 1))).toEqual({});
+  });
+
+  it("keeps an opaque __proto__ id as a real answer key", () => {
+    const proto = parseProtocolAskQuestions([{ id: "__proto__", question: "Odd id?", options: [] }])!;
+    expect(Object.entries(questionAnswersById("Q: Odd id?\nA: yes", proto))).toEqual([["__proto__", "yes"]]);
   });
 
   it("files a bare reply under the single question's id", () => {

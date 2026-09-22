@@ -998,7 +998,9 @@ export const CodexDriver: ProviderDriver<CodexConfig> = {
               behavior === "answer" && source === "user" && typeof message === "string"
                 ? questionAnswersById(message, protocolQuestions ?? [])
                 : {};
-            const answers: Record<string, { answers: string[] }> = {};
+            // Null prototype so an opaque id like __proto__ becomes a real
+            // answer key instead of hitting the inherited setter.
+            const answers: Record<string, { answers: string[] }> = Object.create(null);
             for (const [id, answer] of Object.entries(mapped)) answers[id] = { answers: [answer] };
             send({ jsonrpc: "2.0", id: msg.id, result: { answers } });
           } else {

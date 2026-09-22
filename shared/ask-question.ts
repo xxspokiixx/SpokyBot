@@ -306,7 +306,10 @@ export function questionAnswersByQuestion(
   message: string,
   questions: readonly AskQuestion[],
 ): Record<string, string> {
-  const answers: Record<string, string> = {};
+  // Null prototype: a question text or protocol id can be an opaque string
+  // like __proto__, which a plain object would swallow through its
+  // inherited setter instead of recording an own enumerable answer.
+  const answers: Record<string, string> = Object.create(null);
   const known = new Map(questions.map((entry) => [entry.question, entry.question]));
   for (const block of message.split("\n\n")) {
     const match = /^Q: ([\s\S]+?)\nA: ([\s\S]+)$/.exec(block.trim());
@@ -380,7 +383,7 @@ export function questionAnswersById(
   message: string,
   questions: readonly ProtocolAskQuestion[],
 ): Record<string, string> {
-  const answers: Record<string, string> = {};
+  const answers: Record<string, string> = Object.create(null);
   const idByText = new Map<string, string>();
   const ambiguous = new Set<string>();
   for (const { id, question } of questions) {
