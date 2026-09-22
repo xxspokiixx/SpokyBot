@@ -61,10 +61,13 @@ const OFF_NOTE =
  * destination mounts only the built-in browser, Off mounts nothing. A
  * conversation pin — set by the person from the composer, or by the
  * conversation's own first turn on Auto — wins over the bot's default, so a
- * thread never changes place under someone; only Off overrides it. Auto
- * without a pin leaves the computer choice to the dispatch, which then
- * mounts the browser only when no computer was reached. A pin the turn
- * cannot honour is retained and reported instead of being swapped silently. */
+ * thread never changes place under someone; only Off overrides it. An
+ * Auto-recorded pin is the machine's memory, not a person's choice: it yields
+ * when the bot's Works on later changes and no longer matches, while a
+ * person's pin keeps winning until they clear it. Auto without a pin leaves
+ * the computer choice to the dispatch, which then mounts the browser only
+ * when no computer was reached. A pin the turn cannot honour is retained and
+ * reported instead of being swapped silently. */
 export function resolveSurface(input: {
   destination: Destination;
   pinnedSurface?: Surface | null;

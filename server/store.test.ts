@@ -44,6 +44,48 @@ describe("Store", () => {
     for (const field of Object.keys(patch)) expect(wire).not.toHaveProperty(field);
   });
 
+  it("keeps surface pin provenance server-private and round-trips it through bots.json", () => {
+    const store = new Store(selection);
+    const bot = store.createBot({}, { seedMessages: false });
+    store.patchTask(bot.id, bot.threadId, { surface: "local", surfaceSource: "user" });
+    const reloaded = new Store(selection);
+    expect(reloaded.taskByThread(bot.id, bot.threadId)).toMatchObject({ surface: "local", surfaceSource: "user" });
+    expect(toWireTask(reloaded.taskByThread(bot.id, bot.threadId)!)).not.toHaveProperty("surfaceSource");
+    const saved = JSON.parse(readFileSync(join(DATA_DIR, "bots.json"), "utf8")) as any[];
+    expect(saved[0].tasks[0]).toMatchObject({ surface: "local", surfaceSource: "user" });
+  });
+
+  it("clears only auto surface pins that conflict with a Works on change", () => {
+    const store = new Store(selection);
+    const bot = store.createBot({}, { seedMessages: false });
+    const autoMismatch = store.createTask(bot.id, "Auto mismatch", false)!;
+    const personMismatch = store.createTask(bot.id, "Person mismatch", false)!;
+    const autoMatch = store.createTask(bot.id, "Auto match", false)!;
+    store.patchTask(bot.id, autoMismatch.threadId, { surface: "local" });
+    store.patchTask(bot.id, personMismatch.threadId, { surface: "local", surfaceSource: "user" });
+    store.patchTask(bot.id, autoMatch.threadId, { surface: "vm" });
+    const changes = vi.fn();
+    store.onChange(changes);
+    expect(store.clearAutoSurfacePins(bot.id, "vm")).toBe(1);
+    const cleared = store.taskByThread(bot.id, autoMismatch.threadId)!;
+    expect(cleared.surface).toBeUndefined();
+    expect(cleared.surfaceSource).toBeUndefined();
+    expect(store.taskByThread(bot.id, personMismatch.threadId)).toMatchObject({ surface: "local", surfaceSource: "user" });
+    expect(store.taskByThread(bot.id, autoMatch.threadId)).toMatchObject({ surface: "vm" });
+    expect(changes).toHaveBeenCalledTimes(1);
+    // A cleared pin leaves no residue in the durable record…
+    const saved = JSON.parse(readFileSync(join(DATA_DIR, "bots.json"), "utf8")) as any[];
+    const savedCleared = saved[0].tasks.find((task: any) => task.threadId === autoMismatch.threadId);
+    expect(savedCleared).not.toHaveProperty("surface");
+    expect(savedCleared).not.toHaveProperty("surfaceSource");
+    // …and a sweep with nothing conflicting is a no-op.
+    expect(store.clearAutoSurfacePins(bot.id, "vm")).toBe(0);
+    const reloaded = new Store(selection);
+    expect(reloaded.taskByThread(bot.id, personMismatch.threadId)).toMatchObject({ surface: "local", surfaceSource: "user" });
+    expect(reloaded.taskByThread(bot.id, autoMatch.threadId)).toMatchObject({ surface: "vm" });
+    expect(reloaded.taskByThread(bot.id, autoMismatch.threadId)!.surface).toBeUndefined();
+  });
+
   it.skipIf(process.platform === "win32")("writes the bot and group registries owner-only and tightens loose ones on load", () => {
     const mode = (name: string) => statSync(join(DATA_DIR, name)).mode & 0o777;
     const store = new Store(selection);

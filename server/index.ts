@@ -4493,7 +4493,7 @@ function continueComputerSelection(threadId: string, generation: string | undefi
     if (store.taskByThread(bot.id, threadId)?.surface !== selection.previousSurface) return;
     if (hasQueuedSteeredMessages(bot.id, threadId)) { drainQueuedSends(); return; }
     if (store.activePath(threadId).findLast(message => message.role === "user" && message.kind === "text")?.id !== selection.source.id) return;
-    store.patchTask(bot.id, threadId, { surface });
+    store.patchTask(bot.id, threadId, { surface, surfaceSource: "user" });
     const text = `The computer selection is now ${surfaceLabel(surface)}. Continue the user's original request using the tools mounted for this turn; verify the result before claiming success.\n\n${selection.text}`;
     void startTurn(bot.id, text, { threadId, userMessage: selection.source, computerSelectionContinuation: true }).catch(error => {
       if (store.taskByThread(bot.id, threadId)) store.appendMessage(threadId, { role: "bot", kind: "activity",
@@ -7141,7 +7141,8 @@ async function startTurn(
       }
       // An Auto conversation remembers where its first turn landed, so later
       // turns stay there and the composer can show it. Explicit settings are
-      // not recorded: changing the bot's Works on should move its threads.
+      // not recorded: an auto pin yields to a later Works on change (which
+      // sweeps it — store.clearAutoSurfacePins); a person's pin does not.
       if (bot.computer === undefined && !teamComputer && opts?.runOn !== "cloud" && !plan.pinned) {
         const used = mountedComputer ?? (integrations.browser ? "browser" : null);
         if (used) store.patchTask(bot.id, threadId, { surface: used });
@@ -15640,6 +15641,11 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
         bot = store.patchBot(m[1], patch);
       }
       if (!bot) return json(res, 404, { error: "no such bot" });
+      // A defined Works on is the newest explicit choice: this bot's
+      // auto-recorded pins that now point elsewhere give way immediately, so
+      // the next turn on each thread follows the new setting. Person-set pins
+      // and pins that already match stay; returning to Auto sweeps nothing.
+      if (computerSpecified && requestedComputer !== undefined) store.clearAutoSurfacePins(m[1], requestedComputer);
       if (normalizedSelection && selectedTask) store.patchTask(bot.id, selectedTask.threadId, { modelSelection: normalizedSelection,
         ...hostedModels?.resetTask(selectedTask.modelSelection, normalizedSelection) });
       if (existingBot && (bot.browserProfile !== beforeBrowserProfile || bot.browser !== beforeBrowserEnabled)) {
@@ -16816,11 +16822,16 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
       }
       if (body.surface !== undefined) {
         if (threadBusy(current.id, current.threadId)) return json(res, 409, { error: "Stop this thread before changing its computer destination." });
-        // Where this conversation works, chosen from the composer. Null follows
-        // the bot's Works on again. Reachability is the turn's to judge.
-        if (body.surface === null) patch.surface = undefined;
-        else if (parseSurface(body.surface)) patch.surface = parseSurface(body.surface);
-        else return json(res, 400, { error: "surface must be cloud, vm, local, browser, or null to follow the bot" });
+        // Where this conversation works, chosen by the person and recorded as
+        // theirs, so a later Works on change never sweeps it. Null follows the
+        // bot's Works on again. Reachability is the turn's to judge.
+        if (body.surface === null) {
+          patch.surface = undefined;
+          patch.surfaceSource = undefined;
+        } else if (parseSurface(body.surface)) {
+          patch.surface = parseSurface(body.surface);
+          patch.surfaceSource = "user";
+        } else return json(res, 400, { error: "surface must be cloud, vm, local, browser, or null to follow the bot" });
       }
       if (body.pinnedMessageId !== undefined) {
         if (body.pinnedMessageId === null || body.pinnedMessageId === "") patch.pinnedMessageId = undefined;
@@ -18769,6 +18780,18 @@ for (const row of chatFollowups()) {
 }
 restoreSteeredMessages();
 restoreChannelMessages();
+
+// A Works on change now moves the bot's auto-pinned threads, but pins
+// recorded before that rule existed still point theirs at the old place.
+// Repair them once here, ahead of the listen below, so no turn can dispatch
+// on a stale pin; person-set pins are kept and the sweep is idempotent.
+{
+  let movedAutoPins = 0;
+  for (const bot of store.bots) {
+    if (bot.computer !== undefined) movedAutoPins += store.clearAutoSurfacePins(bot.id, bot.computer);
+  }
+  if (movedAutoPins) console.log(`Works on: moved ${movedAutoPins} auto-pinned thread(s) to their bot's current Works on`);
+}
 
 server.listen(PORT, "127.0.0.1", () => {
   companyRuntimeReady();
