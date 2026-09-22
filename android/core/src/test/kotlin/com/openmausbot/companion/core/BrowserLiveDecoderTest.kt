@@ -121,3 +121,21 @@ class BrowserLiveDecoderTest {
         assertEquals("hello", frame.bytes()?.decodeToString())
     }
 }
+
+/** Mirrors CompanionCore's BrowserLiveErrorTextTests. */
+class BrowserErrorTextTest {
+    /** The server's own sentence must reach the person. Before this, every
+     * 403 read as "browser control is off", whatever the server said. */
+    @Test
+    fun readsTheServersRefusal() {
+        assertEquals(
+            "Enable this bot's browser in its profile first.",
+            browserErrorText("""{"error":"Enable this bot's browser in its profile first."}"""),
+        )
+    }
+
+    @Test
+    fun aNonJsonBodyYieldsNothingRatherThanGarbage() {
+        assertNull(browserErrorText("<html>"))
+    }
+}

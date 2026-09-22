@@ -196,7 +196,15 @@ public struct BrowserLiveClient: Sendable {
                     request.timeoutInterval = .infinity
                     let (bytes, response) = try await session.bytes(for: request)
                     if let http = response as? HTTPURLResponse, http.statusCode != 200 {
-                        throw APIError.status(code: http.statusCode, message: nil)
+                        // Read the refusal rather than discard it. Throwing a
+                        // bare status made every 403 read as "browser control
+                        // is off", whatever the server actually said.
+                        var body = Data()
+                        for try await byte in bytes {
+                            body.append(byte)
+                            if body.count >= 4096 { break }
+                        }
+                        throw APIError.status(code: http.statusCode, message: BrowserLiveClient.errorText(body))
                     }
 
                     var parser = SSEParser()
@@ -241,6 +249,12 @@ public struct BrowserLiveClient: Sendable {
             throw APIError.status(code: http.statusCode, message: object?["error"] as? String)
         }
         return object ?? [:]
+    }
+
+    /// The `error` field of a JSON refusal, which is how both the sidecar and
+    /// the harness explain themselves.
+    static func errorText(_ data: Data) -> String? {
+        (try? JSONSerialization.jsonObject(with: data) as? [String: Any])?["error"] as? String
     }
 
     /// An input body, posted through the same channel.

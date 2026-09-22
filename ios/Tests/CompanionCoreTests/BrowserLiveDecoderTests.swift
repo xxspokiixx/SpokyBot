@@ -104,3 +104,17 @@ final class BrowserLiveDecoderTests: XCTestCase {
         XCTAssertEqual(frame.bytes.flatMap { String(data: $0, encoding: .utf8) }, "hello")
     }
 }
+
+final class BrowserLiveErrorTextTests: XCTestCase {
+    /// The server's own sentence must reach the person. Before this, the
+    /// stream threw a bare status and every 403 read as "browser control is
+    /// off", whatever the server actually said.
+    func testReadsTheServersRefusal() {
+        let body = Data(#"{"error":"Enable this bot's browser in its profile first."}"#.utf8)
+        XCTAssertEqual(BrowserLiveClient.errorText(body), "Enable this bot's browser in its profile first.")
+    }
+
+    func testANonJSONBodyYieldsNothingRatherThanGarbage() {
+        XCTAssertNil(BrowserLiveClient.errorText(Data("<html>".utf8)))
+    }
+}

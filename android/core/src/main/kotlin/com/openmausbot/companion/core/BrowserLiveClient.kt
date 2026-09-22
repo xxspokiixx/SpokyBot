@@ -195,7 +195,12 @@ class BrowserLiveTransport internal constructor(
             try {
                 val response = call.execute()
                 responseRef.set(response)
-                if (response.code != 200) throw APIError.Status(response.code)
+                // Read the refusal rather than discard it. Throwing a bare
+                // status made every 403 read as "browser control is off",
+                // whatever the server actually said.
+                if (response.code != 200) {
+                    throw APIError.Status(response.code, browserErrorText(response.peekBody(4096).string()))
+                }
                 val body = response.body ?: throw APIError.Transport("The browser sent an empty stream.")
                 val source = body.source()
                 val parser = SSEParser()
@@ -239,7 +244,9 @@ class BrowserLiveTransport internal constructor(
             .post(payload.toString().toRequestBody(jsonMedia))
             .build()
         actionClient.newCall(request).execute().use { response ->
-            if (response.code != 200) throw APIError.Status(response.code)
+            if (response.code != 200) {
+                throw APIError.Status(response.code, browserErrorText(response.peekBody(4096).string()))
+            }
         }
     }
 
@@ -249,3 +256,9 @@ class BrowserLiveTransport internal constructor(
         action(botId, viewerId, encoded)
     }
 }
+
+/** The `error` field of a JSON refusal, which is how both the sidecar and the
+ * harness explain themselves. Null for anything else. */
+fun browserErrorText(body: String): String? = runCatching {
+    Json.parseToJsonElement(body).jsonObject["error"]?.jsonPrimitive?.contentOrNull
+}.getOrNull()

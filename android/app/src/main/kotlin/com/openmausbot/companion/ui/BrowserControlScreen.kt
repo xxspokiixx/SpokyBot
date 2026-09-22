@@ -111,12 +111,21 @@ fun BrowserControlScreen(botId: String, onBack: () -> Unit) {
     var failure by remember { mutableStateOf<String?>(null) }
 
     val transport = remember(botId) { session.browserLive() }
+    // Bumped by Try again. The stream never restarts on its own, so without
+    // this a failure left the screen dead until the person backed out.
+    var attempt by remember { mutableStateOf(0) }
+    var streamEnded by remember { mutableStateOf(false) }
 
     // One stream for as long as the screen is up. Reconnection is not handled
     // here for the same reason it is not in the main event stream: only
     // something that knows whether the view is on screen can decide.
-    LaunchedEffect(transport, botId) {
+    LaunchedEffect(transport, botId, attempt) {
         val live = transport ?: return@LaunchedEffect
+        streamEnded = false
+        failure = null
+        viewerId = null
+        queue = null
+        driving = false
         runCatching {
             live.live(botId).collect { message ->
                 when (message) {
@@ -158,7 +167,12 @@ fun BrowserControlScreen(botId: String, onBack: () -> Unit) {
                     is BrowserLiveMessage.Tabs -> Unit
                 }
             }
-        }.onFailure { failure = explainBrowserFailure(it) }
+        }.onFailure {
+            if (it is kotlinx.coroutines.CancellationException) throw it
+            failure = explainBrowserFailure(it)
+        }
+        streamEnded = true
+        driving = false
     }
 
     // A key or button left down on the remote outlives the session, and
@@ -393,6 +407,10 @@ fun BrowserControlScreen(botId: String, onBack: () -> Unit) {
                     },
                     modifier = Modifier.weight(1f),
                 ) { Text("Hand back") }
+            } else if (streamEnded) {
+                Button(onClick = { attempt++ }, modifier = Modifier.weight(1f)) {
+                    Text(failure?.let { "Try again — $it" } ?: "Try again")
+                }
             } else {
                 Button(
                     onClick = {
@@ -421,7 +439,7 @@ private fun explainBrowserFailure(error: Throwable): String = when {
     error is APIError.Status && error.code == 429 ->
         "This browser is already open on your computer. Close it there, then try again."
     error is APIError.Status && error.code == 403 ->
-        "Browser control is off for this device. Enable it on your computer."
+        error.serverMessage ?: "Browser control is off for this device. Enable it on your computer."
     else -> error.message ?: "The browser stream stopped."
 }
 

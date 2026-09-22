@@ -19,6 +19,10 @@ final class BrowserControlModel: ObservableObject {
     @Published var cursor = RemotePoint(x: 0.5, y: 0.5)
     @Published var failure: String?
     @Published var latchedModifiers = 0
+    /// The stream is gone and nothing will restart it on its own. The screen
+    /// shows Try again rather than a spinner that never resolves — the
+    /// failure the first hands-on test hit after the grant was switched on.
+    @Published var streamEnded = false
 
     private let botId: String
     private let client: BrowserLiveClient
@@ -34,6 +38,12 @@ final class BrowserControlModel: ObservableObject {
 
     func start() {
         guard stream == nil else { return }
+        streamEnded = false
+        failure = nil
+        // A new stream is a new viewer; nothing from the old one carries over.
+        viewerId = nil
+        queue = nil
+        driving = false
         stream = Task { [weak self] in
             guard let self else { return }
             do {
@@ -41,10 +51,23 @@ final class BrowserControlModel: ObservableObject {
                     await self.apply(message)
                 }
                 await MainActor.run { self.failure = self.failure ?? "The browser stream ended." }
+            } catch is CancellationError {
+                return
             } catch {
                 await MainActor.run { self.failure = Self.explain(error) }
             }
+            await MainActor.run {
+                self.stream = nil
+                self.streamEnded = true
+                self.driving = false
+            }
         }
+    }
+
+    func retry() {
+        stream?.cancel()
+        stream = nil
+        start()
     }
 
     func stop() {
@@ -368,6 +391,14 @@ struct BrowserControlView: View {
                     Label("Hand back", systemImage: "hand.raised")
                 }
                 .buttonStyle(.borderedProminent)
+            } else if model.streamEnded {
+                Button {
+                    model.retry()
+                } label: {
+                    Label("Try again", systemImage: "arrow.clockwise")
+                        .frame(maxWidth: .infinity)
+                }
+                .buttonStyle(.borderedProminent)
             } else {
                 Button {
                     Task { await model.takeControl() }
@@ -421,7 +452,8 @@ struct BrowserControlView: View {
     private var waiting: some View {
         VStack(spacing: 12) {
             ProgressView().tint(.white)
-            Text(model.status.connected ? "Waiting for a frame…" : "Connecting to the browser…")
+            Text(model.streamEnded ? (model.failure ?? "The browser stream ended.")
+                 : model.status.connected ? "Waiting for a frame…" : "Connecting to the browser…")
                 .font(.system(size: 15))
                 .foregroundStyle(Color.white.opacity(0.7))
         }
