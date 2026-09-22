@@ -14,6 +14,12 @@ Use separate threads when you want fresh context or independent work without dup
 
 Groups bring several bots into one conversation. Each participant keeps its own provider state. Group timeouts prevent a participant from blocking the whole group indefinitely. Existing channels and their thread histories remain intact; the new label does not change turn-taking or delegation.
 
+### Group token usage
+
+After a group participant finishes a turn, the group header shows the current thread's reported cost, or input tokens when no cost is reported. Hover over the compact badge for uncached input, cached input, and output, plus the latest participant's turn. Switching threads switches these figures too; other group threads and private chats are excluded.
+
+The figures come from the existing usage ledger and survive restarting the app. A missing cache figure is shown as an unknown split, not zero cached input. If some turns omit cost, the dollar amount sums only reported costs.
+
 ## Delegation
 
 Bots can hand work to other bots. Delegated runs carry explicit status back into the parent conversation, including completion, failure, and cancellation.
