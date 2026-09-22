@@ -293,7 +293,16 @@ export const BoxAgentDriver: ProviderDriver<BoxAgentConfig> = {
             "",
             "The person answered the omb-ask questions above (Q:/A:). Continue the task with their answers; end with another omb-ask block only if you truly need more.",
           ].join("\n");
-          return await settleRun(await postPrompt(continuation));
+          const nextPromptId = await postPrompt(continuation);
+          // Stop can land while the continuation POST is in flight: the
+          // interrupt inside cancel() then hits a box with no active run,
+          // and the continuation would start after it. Interrupt the run
+          // that just started before ending the turn.
+          if (cancelled) {
+            void api(`/boxes/${boxId}/interrupt`, { method: "POST" }).catch(() => {});
+            return { ok: false, stopReason: "interrupted" };
+          }
+          return await settleRun(nextPromptId);
         };
 
         /** Poll one box run to its settle. */

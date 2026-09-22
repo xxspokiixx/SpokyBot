@@ -278,6 +278,66 @@ describe("BoxAgentDriver turns (fake API)", () => {
     expect(recorder.events.some((e) => e.type === "request.opened")).toBe(false);
   });
 
+  it("interrupts a continuation whose POST was in flight when Stop landed", async () => {
+    const askText = "Working.\n\n" + askBlock([{ question: "Proceed?" }]);
+    const calls: string[] = [];
+    let markStarted: () => void = () => {};
+    const continuationStarted = new Promise<void>((resolve) => (markStarted = resolve));
+    let release: () => void = () => {};
+    const gate = new Promise<void>((resolve) => (release = resolve));
+    let poll = 0;
+    const previous = globalThis.fetch;
+    globalThis.fetch = (async (input: string | URL, init?: RequestInit) => {
+      const url = String(input);
+      const method = String(init?.method ?? "GET").toUpperCase();
+      if (url.endsWith("/me")) return json({ ok: true });
+      if (method === "POST" && url.includes("/interrupt")) {
+        calls.push("interrupt");
+        return json({ ok: true });
+      }
+      if (method === "POST" && /\/boxes\/[^/]+\/prompt$/.test(url)) {
+        const nth = calls.push("prompt");
+        if (nth === 2) {
+          // the continuation POST hangs until the test releases it, holding
+          // the exact window where Stop lands on an idle box
+          markStarted();
+          await gate;
+          calls.push("gate-open");
+        }
+        return json({ promptRun: { id: PROMPT } });
+      }
+      if (url.includes("/events")) {
+        poll += 1;
+        return json({ events: [{ id: "e1", type: "response", text: askText }] });
+      }
+      if (url.includes(`/prompts/${PROMPT}`)) {
+        return json(poll >= 2 ? { promptRun: { status: "finished", result: askText } } : { promptRun: { status: "running" } });
+      }
+      return json({ error: `unexpected ${method} ${url}` }, 404);
+    }) as typeof fetch;
+    restoreFetch = () => {
+      globalThis.fetch = previous;
+    };
+    await create();
+    await instance.adapter.sendTurn({ threadId: "t-cont-cancel", text: "go", integrations: { computer } });
+    const opened = (await recorder.until((e) => e.type === "request.opened")) as Extract<RuntimeEvent, { type: "request.opened" }>;
+    await instance.adapter.respondToRequest("t-cont-cancel", opened.requestId!, {
+      behavior: "answer",
+      message: "Q: Proceed?\nA: yes",
+    });
+    await continuationStarted;
+    await instance.adapter.interruptTurn("t-cont-cancel");
+    release();
+    const done = await recorder.until((e) => e.type === "turn.completed");
+    expect(done).toMatchObject({ ok: false, stopReason: "interrupted" });
+    // the guard interrupted the run that started after Stop, not just the
+    // pre-continuation box
+    // the guard interrupted the run that started after Stop: the final call
+    // is an interrupt that landed after the continuation POST resolved
+    expect(calls[calls.length - 1]).toBe("interrupt");
+    expect(calls.lastIndexOf("interrupt")).toBeGreaterThan(calls.lastIndexOf("gate-open"));
+  });
+
   it("resolves a held ask on its timeout and completes the turn", async () => {
     const askText = askBlock([{ question: "Proceed?" }]);
     restoreFetch = installFakeBox([
