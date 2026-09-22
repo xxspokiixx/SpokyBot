@@ -347,11 +347,14 @@ export function parseProtocolAskQuestions(entries: unknown): ProtocolAskQuestion
     if (!isRecord(raw)) continue;
     const question = parseQuestion(raw);
     // The id is opaque protocol data echoed back verbatim in the answer, so
-    // an overlong id is rejected whole rather than truncated — a truncated
-    // id would answer an id the agent never sent. Duplicate ids are skipped
-    // too: two questions cannot share one answer slot.
-    const id = typeof raw.id === "string" ? raw.id.trim() : "";
-    if (!question || !id || id.length > MAX_QUESTION_ID || seenIds.has(id)) continue;
+    // it is preserved exactly as sent — trimmed only to reject an
+    // all-whitespace id — and an overlong id is rejected whole rather than
+    // truncated. A duplicate id fails the whole request: two questions
+    // cannot share one answer slot, and silently dropping one would ask
+    // the person a question whose answer could never be delivered.
+    const id = raw.id;
+    if (!question || typeof id !== "string" || !id.trim() || id.length > MAX_QUESTION_ID) continue;
+    if (seenIds.has(id)) return null;
     seenIds.add(id);
     parsed.push({ id, question });
     if (parsed.length === MAX_QUESTIONS) break;
@@ -393,7 +396,9 @@ export function questionAnswersById(
   // answer are the answer's, not block boundaries), so the reply is scanned
   // for header-to-header spans instead of split on every blank line.
   const blocks = message.matchAll(/(?:^|\n\n)Q: ([\s\S]+?)\nA: ([\s\S]*?)(?=\n\nQ: |$)/g);
+  let sawBlock = false;
   for (const match of blocks) {
+    sawBlock = true;
     const asked = match[1]!.trim();
     if (ambiguous.has(asked)) continue;
     const id = idByText.get(asked);
@@ -403,6 +408,10 @@ export function questionAnswersById(
     if (id && answer) answers[id] = answer;
   }
   if (Object.keys(answers).length) return answers;
+  // A structured reply that matched a block is authoritative even when it
+  // answered nothing: falling through to the flat fallback would file the
+  // literal Q:/A: text as the person's answer.
+  if (sawBlock) return {};
   const only = questions.length === 1 ? questions[0] : undefined;
   const flat = message.trim();
   return only && flat ? { [only.id]: flat } : {};

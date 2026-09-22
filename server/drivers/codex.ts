@@ -41,7 +41,7 @@ import { CodexDeviceAuthController } from "./codex-device-auth.ts";
 import { codexAccountEmail } from "./codex-identity.ts";
 import { classifyResumeFailure, mayReplay, recoveryPromptFor } from "../resume-recovery.ts";
 import { extractMcpImages } from "../mcp-tool-images.ts";
-import { parseProtocolAskQuestions, questionAnswersById } from "../../shared/ask-question.ts";
+import { parseProtocolAskQuestions, questionAnswersById, questionChoices } from "../../shared/ask-question.ts";
 
 export { decodeCodexSelection, readCodexModelCatalog, STATIC_CODEX_MODELS } from "./codex-catalog.ts";
 
@@ -979,9 +979,11 @@ export const CodexDriver: ProviderDriver<CodexConfig> = {
               : typeof params.reason === "string"
                 ? params.reason
                 : tool;
-        const choices = isQuestion
-          ? (protocolQuestions?.[0]?.question.options ?? []).map((o) => o.label).slice(0, 5)
-          : undefined;
+        // Flat choices only when one non-multiselect question can actually
+        // be answered by a bare reply; a bundle's first-question buttons
+        // would be an unusable lie for flat clients.
+        const choices =
+          isQuestion && protocolQuestions ? questionChoices(protocolQuestions.map(({ question }) => question)) : undefined;
         const finish = (behavior: "allow" | "deny" | "answer", message?: string, source: "user" | "timeout" | "system" = "user") => {
           if (!asks.delete(requestId)) return;
           clearTimeout(timer);

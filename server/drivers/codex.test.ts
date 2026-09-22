@@ -12,7 +12,7 @@ import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-import type { ProviderInstance } from "../contracts.ts";
+import type { ProviderInstance, RuntimeEvent } from "../contracts.ts";
 import { NATIVE_DIR } from "../config.ts";
 import { recordEvents, type EventRecorder } from "../testing/events.ts";
 import {
@@ -1163,7 +1163,10 @@ describe("CodexDriver turns (fake app-server)", () => {
     process.env.FAKE_CODEX_DUMP = dump;
 
     await instance.adapter.sendTurn({ threadId: "t-approve", text: "clean up" });
-    const opened = await recorder.until((e) => e.type === "request.opened");
+    const opened = (await recorder.until((e) => e.type === "request.opened")) as Extract<
+      RuntimeEvent,
+      { type: "request.opened" }
+    >;
     expect(opened).toMatchObject({ requestType: "permission", tool: "shell", summary: "rm -rf scratch" });
 
     await instance.adapter.respondToRequest("t-approve", opened.requestId!, { behavior: "allow" });
@@ -1187,7 +1190,7 @@ describe("CodexDriver turns (fake app-server)", () => {
       tool: "ask_user",
       summary: "Ship today?",
       // six options offered; the card keeps its five-row ceiling
-      choices: ["Yes", "No", "Maybe", "Later", "Soon"],
+      choices: ["Yes", "No", "Maybe", "Later", "Soon", "Never"],
       // the structured question rides the card beside the flat choices
       questions: [{ question: "Ship today?", options: ["Yes", "No", "Maybe", "Later", "Soon", "Never"].map((label) => ({ label })) }],
     });
@@ -1208,18 +1211,22 @@ describe("CodexDriver turns (fake app-server)", () => {
     process.env.FAKE_CODEX_DUMP = dump;
 
     await instance.adapter.sendTurn({ threadId: "t-question-multi", text: "ask me twice" });
-    const opened = await recorder.until((e) => e.type === "request.opened");
+    const opened = (await recorder.until((e) => e.type === "request.opened")) as Extract<
+      RuntimeEvent,
+      { type: "request.opened" }
+    >;
     expect(opened).toMatchObject({
       requestType: "question",
       tool: "ask_user",
       summary: "Ship today? · Who reviews?",
-      // flat choices still come from the first question, for flat clients
-      choices: ["Yes", "No"],
       questions: [
         { question: "Ship today?", options: [{ label: "Yes" }, { label: "No" }] },
         { question: "Who reviews?", options: [{ label: "Ada" }, { label: "Lin" }] },
       ],
     });
+    // a bundle exposes no flat choices: a bare reply cannot say which
+    // question it answers
+    expect(opened.choices).toBeUndefined();
     expect(recorder.events.filter((e) => e.type === "request.opened")).toHaveLength(1);
 
     await instance.adapter.respondToRequest("t-question-multi", opened.requestId!, {

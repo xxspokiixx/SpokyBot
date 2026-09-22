@@ -357,7 +357,7 @@ describe("parseProtocolAskQuestions", () => {
     expect(parseProtocolAskQuestions([])).toBeNull();
   });
 
-  it("rejects overlong and duplicate ids whole instead of truncating them", () => {
+  it("rejects overlong ids, preserves ids verbatim, and fails duplicate ids whole", () => {
     const overlong = "i".repeat(201);
     expect(
       parseProtocolAskQuestions([
@@ -370,7 +370,11 @@ describe("parseProtocolAskQuestions", () => {
         { id: "q-same", question: "First?", options: [] },
         { id: "q-same", question: "Second?", options: [] },
       ]),
-    ).toEqual([{ id: "q-same", question: { question: "First?", options: [] } }]);
+    ).toBeNull();
+    expect(parseProtocolAskQuestions([{ id: " q-review ", question: "Padded?", options: [] }])).toEqual([
+      { id: " q-review ", question: { question: "Padded?", options: [] } },
+    ]);
+    expect(parseProtocolAskQuestions([{ id: "   ", question: "Blank id?", options: [] }])).toBeNull();
   });
 });
 
@@ -401,6 +405,10 @@ describe("questionAnswersById", () => {
     expect(questionAnswersById("Q: Ship today?\nA: \n\nQ: Who reviews?\nA: Ada, Lin", questions)).toEqual({
       "q-review": "Ada, Lin",
     });
+  });
+
+  it("does not fall back to the flat reply when a block matched but answered nothing", () => {
+    expect(questionAnswersById("Q: Ship today?\nA: ", questions.slice(0, 1))).toEqual({});
   });
 
   it("files a bare reply under the single question's id", () => {
