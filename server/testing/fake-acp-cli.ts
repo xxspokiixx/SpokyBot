@@ -7,7 +7,13 @@
 //
 //   FAKE_ACP_LOAD_NULL  return null for session/load so the resume cursor is
 //                       ignored and the driver falls through to session/new
-//   FAKE_ACP_MODE   happy (default) | image | empty-reply | exit-early | fail-after-text | hang | hang-initialize | no-auth | auth-required | permission | question
+//   FAKE_ACP_REJECT_LIVE_LOAD_FILE  while this file exists, session/load and
+//                       session/resume answer an error when the requested
+//                       session is already live in THIS process — the
+//                       real-agent shape that forces the driver's one-shot
+//                       re-spawn fallback. A fresh process holds no live
+//                       session, so its load succeeds.
+//   FAKE_ACP_MODE   happy (default) | image | empty-reply | reasoning-only | exit-early | fail-after-text | hang | hang-initialize | stall-after-text | no-auth | auth-required | permission | question
 //                   | interleave (message → tool → message → tool → message)
 //                   | no-session-config (reject session/set_mode + set_model
 //                     with -32601, i.e. an agent predating those methods)
@@ -27,10 +33,23 @@
 //                     drained turn was sent)
 //                   | safe-agent-reads (simulate a native Auto reviewer around
 //                     the real injected agents MCP; not a real classifier test)
+//                   | stall-after-text (stream one message chunk, then go
+//                     fully silent forever — a wedged agent mid-answer; the
+//                     driver's prompt idle guard must fail the turn on its own)
 //   FAKE_ACP_MCP_TRANSPORTS  comma list of remote MCP transports the agent
 //                       advertises in initialize (mcpCapabilities), e.g. "http,sse"
 //   FAKE_ACP_DUMP   path to write {argv, env} as JSON, so a test can assert
 //                   argv shape (agent/stdio flags) and env hygiene
+//   FAKE_ACP_LAUNCH_COUNT_FILE  read-increment-write a process counter at
+//                       startup, so a test can tell a reused pooled session
+//                       (one launch) from a fresh child per turn (many)
+//   FAKE_ACP_RPC_DUMP   rewrite, after every request, this process's full
+//                       method list as a JSON array — per process, so a
+//                       pooled child keeps one dump and a replacement child
+//                       starts its own
+//   FAKE_ACP_RPC_APPEND_FILE  append one {"pid","method"} JSON line per
+//                       request, so a test can count RPCs across a pooled
+//                       child and its replacement together
 //   FAKE_ACP_MODELS      comma-separated model ids. Enables the opencode-shaped
 //                        surface: session/new and session/load return
 //                        configOptions, and session/set_config_option switches
@@ -70,6 +89,7 @@ let currentMode: string | null = modes[0] ?? null;
 // through a file (same state-passing pattern as FAKE_ACP_GATE_FILE).
 const taskIdFile = process.env.FAKE_ACP_TASKID_FILE ?? "";
 const logFile = process.env.FAKE_ACP_LOG_FILE ?? "";
+const rejectLiveLoadFile = process.env.FAKE_ACP_REJECT_LIVE_LOAD_FILE ?? "";
 function fakeLog(line: string): void {
   if (!logFile) return;
   try {
@@ -161,6 +181,10 @@ const dumpEnv = Object.fromEntries(
     "BOX_TOKEN",
     "OMB_TTS_KEY",
     "OMB_FISH_AUDIO_API_KEY",
+    "OMB_CLOUD_READY_TOKEN",
+    "OMB_CLOUD_BOOTSTRAP",
+    "OMB_LICENSE_KEY",
+    "OMB_INSTALLATION_CREDENTIAL",
     "FACTORY_API_KEY",
     "UNSLOTH_STUDIO_AUTH_TOKEN",
     "CURSOR_API_KEY",
@@ -177,9 +201,22 @@ const dumpEnv = Object.fromEntries(
     "ANTIGRAVITY_HARNESS_PATH",
   ].flatMap((key) => (process.env[key] === undefined ? [] : [[key, process.env[key]]] as const)),
 );
-const dumpState: Record<string, unknown> = { argv, env: dumpEnv };
+// pid rides along so a test can tell a respawned process (new pid, fresh
+// dump) from a pooled one whose dump was never rewritten
+const dumpState: Record<string, unknown> = { argv, env: dumpEnv, pid: process.pid };
 if (process.env.FAKE_ACP_DUMP) {
-  writeFileSync(process.env.FAKE_ACP_DUMP, JSON.stringify({ argv, env: dumpEnv }, null, 2));
+  writeFileSync(process.env.FAKE_ACP_DUMP, JSON.stringify(dumpState, null, 2));
+}
+if (process.env.FAKE_ACP_LAUNCH_COUNT_FILE) {
+  // count launched processes: read-increment-write, so a test can assert
+  // how many children the driver spawned (a pooled session launches once)
+  let launches = 0;
+  try {
+    launches = Number.parseInt(readFileSync(process.env.FAKE_ACP_LAUNCH_COUNT_FILE, "utf8").trim(), 10) || 0;
+  } catch {}
+  try {
+    writeFileSync(process.env.FAKE_ACP_LAUNCH_COUNT_FILE, String(launches + 1));
+  } catch {}
 }
 if (argv.includes("--version")) {
   console.log("fake-acp 1.0.0");
@@ -257,6 +294,11 @@ const rpcMethods: string[] = [];
 const recordMethod = (method: string) => {
   rpcMethods.push(method);
   if (process.env.FAKE_ACP_RPC_DUMP) writeFileSync(process.env.FAKE_ACP_RPC_DUMP, JSON.stringify(rpcMethods));
+  if (process.env.FAKE_ACP_RPC_APPEND_FILE) {
+    try {
+      appendFileSync(process.env.FAKE_ACP_RPC_APPEND_FILE, JSON.stringify({ pid: process.pid, method }) + "\n");
+    } catch {}
+  }
 };
 
 // session/set_mode + session/set_model calls seen this run
@@ -266,9 +308,17 @@ const configCalls: Array<{ method: string; params: unknown }> = [];
 let pendingPermissionId: number | null = null;
 let onPermissionAnswered: ((allowed: boolean) => void) | null = null;
 
+// hang mode: the prompt we are holding open and its keep-alive timer —
+// session/cancel resolves it cancelled (the ACP spec's cancel contract)
+// and drops the keep-alive
+let hangingPromptId: unknown = null;
+let hangKeepAlive: ReturnType<typeof setInterval> | null = null;
+
 // ask-peer mode: the "agents" MCP server entry from session/new's mcpServers
 type McpEntry = { command: string; args?: string[]; env?: Array<{ name: string; value: string }> };
 let agentsMcp: McpEntry | null = null;
+// the session this process established, for FAKE_ACP_REJECT_LIVE_LOAD_FILE
+let liveSession: string | null = null;
 
 /** Minimal one-shot MCP stdio client: initialize, call each tool in
  * sequence, return the text of the last result. Dependency-free. */
@@ -344,6 +394,14 @@ function playInterleaveTurn() {
   out({ jsonrpc: "2.0", method: "session/update", params: { update: { sessionUpdate: "tool_call", toolCallId: "tc-2", title: "run" } } });
   out({ jsonrpc: "2.0", method: "session/update", params: { update: { sessionUpdate: "tool_call_update", toolCallId: "tc-2", status: "completed" } } });
   out({ jsonrpc: "2.0", method: "session/update", params: { update: { sessionUpdate: "agent_message_chunk", content: { text: "after" } } } });
+}
+
+/** Scripted reasoning-only turn: thought chunks and nothing else — the shape
+ * of a provider that never leaves its thinking stream yet still answers
+ * end_turn, which the driver must report as a lost turn, not a success. */
+function playReasoningTurn() {
+  out({ jsonrpc: "2.0", method: "session/update", params: { update: { sessionUpdate: "agent_thought_chunk", content: { text: "considering the request at length" } } } });
+  out({ jsonrpc: "2.0", method: "session/update", params: { update: { sessionUpdate: "agent_thought_chunk", content: { text: " without ever producing an answer" } } } });
 }
 
 let buf = "";
@@ -435,6 +493,7 @@ function handle(msg: any) {
       }
       const opts = configOptions();
       const mdls = sessionModels();
+      liveSession = "fake-acp-session";
       resultAndConfigUpdates(msg.id, {
         sessionId: "fake-acp-session",
         ...(opts ? { configOptions: opts } : {}),
@@ -447,6 +506,14 @@ function handle(msg: any) {
         result(msg.id, null);
         break;
       }
+      if (rejectLiveLoadFile && existsSync(rejectLiveLoadFile) && liveSession === msg.params?.sessionId) {
+        out({
+          jsonrpc: "2.0",
+          id: msg.id,
+          error: { code: -32000, message: "session already active in this agent" },
+        });
+        break;
+      }
       if (mode === "safe-agent-reads") {
         agentsMcp = (msg.params?.mcpServers ?? []).find((server: any) => server.name === "agents") ?? null;
       }
@@ -455,15 +522,25 @@ function handle(msg: any) {
       }
       const opts = configOptions();
       const mdls = sessionModels();
+      liveSession = typeof msg.params?.sessionId === "string" ? msg.params.sessionId : liveSession;
       resultAndConfigUpdates(msg.id, { ...(opts ? { configOptions: opts } : {}), ...(mdls ? { models: mdls } : {}) }, "session/load", msg.params.sessionId);
       break;
     }
     case "session/resume": {
+      if (rejectLiveLoadFile && existsSync(rejectLiveLoadFile) && liveSession === msg.params?.sessionId) {
+        out({
+          jsonrpc: "2.0",
+          id: msg.id,
+          error: { code: -32000, message: "session already active in this agent" },
+        });
+        break;
+      }
       if (process.env.FAKE_ACP_DUMP) {
         writeFileSync(`${process.env.FAKE_ACP_DUMP}.mcp.json`, JSON.stringify(msg.params?.mcpServers ?? []));
       }
       const opts = configOptions();
       const mdls = sessionModels();
+      liveSession = typeof msg.params?.sessionId === "string" ? msg.params.sessionId : liveSession;
       result(msg.id, { ...(opts ? { configOptions: opts } : {}), ...(mdls ? { models: mdls } : {}) });
       break;
     }
@@ -552,8 +629,19 @@ function handle(msg: any) {
         writeFileSync(`${process.env.FAKE_ACP_DUMP}.prompt.json`, JSON.stringify(msg.params?.prompt ?? null, null, 2));
       }
       if (mode === "hang") {
-        // never resolve the prompt — lets tests exercise interrupt
-        setInterval(() => {}, 1_000);
+        // never resolve the prompt on our own — lets tests exercise interrupt
+        hangingPromptId = msg.id;
+        hangKeepAlive = setInterval(() => {}, 1_000);
+        return;
+      }
+      if (mode === "stall-after-text") {
+        // Stream a chunk, then go fully silent forever: no updates, no result,
+        // no exit. This is the shape of a wedged OpenCode agent that stopped
+        // mid-answer — the driver's prompt idle guard must fail the turn on
+        // its own, because nothing else will ever arrive.
+        out({ jsonrpc: "2.0", method: "session/update", params: { update: { sessionUpdate: "agent_message_chunk", content: { text: "half an answer, then silence" } } } });
+        hangingPromptId = msg.id;
+        hangKeepAlive = setInterval(() => {}, 1_000);
         return;
       }
       if (mode === "fail-after-text") {
@@ -741,6 +829,11 @@ function handle(msg: any) {
           complete();
         };
         const gate = process.env.FAKE_ACP_GATE_FILE;
+        // FAKE_ACP_STARTED_FILE: written the moment the prompt arrives, so a
+        // test can act "during the turn" (after the harness's pre-turn
+        // checkpoint) without racing the busy flag, which flips at claim.
+        const started = process.env.FAKE_ACP_STARTED_FILE;
+        if (started) writeFileSync(started, String(Date.now()));
         if (gate && !existsSync(gate)) {
           const poll = setInterval(() => {
             if (!existsSync(gate)) return;
@@ -790,6 +883,7 @@ function handle(msg: any) {
           },
         });
       } else if (mode === "interleave") playInterleaveTurn();
+      else if (mode === "reasoning-only") playReasoningTurn();
       else if (mode !== "empty-reply") playTurn();
       if (mode === "safe-agent-reads" && agentsMcp) {
         const entry = agentsMcp;
@@ -819,9 +913,14 @@ function handle(msg: any) {
         return;
       }
       if (mode === "permission") {
-        // ask the client to approve a tool, then complete once answered
+        // ask the client to approve a tool, then — like a real agent once its
+        // card is answered — close the turn with a visible reply instead of
+        // ending bare (a bare end_turn is the lost-turn failure, not a success)
         pendingPermissionId = 9001;
-        onPermissionAnswered = complete;
+        onPermissionAnswered = () => {
+          out({ jsonrpc: "2.0", method: "session/update", params: { update: { sessionUpdate: "agent_message_chunk", content: { text: "handled the permission decision" } } } });
+          complete();
+        };
         out({
           jsonrpc: "2.0",
           id: pendingPermissionId,
@@ -843,7 +942,10 @@ function handle(msg: any) {
       }
       if (mode === "question") {
         pendingPermissionId = 9002;
-        onPermissionAnswered = complete;
+        onPermissionAnswered = () => {
+          out({ jsonrpc: "2.0", method: "session/update", params: { update: { sessionUpdate: "agent_message_chunk", content: { text: "answered the question" } } } });
+          complete();
+        };
         out({
           jsonrpc: "2.0",
           id: pendingPermissionId,
@@ -867,6 +969,12 @@ function handle(msg: any) {
     }
     case "session/cancel":
       // the interrupted prompt resolves as cancelled
+      if (hangingPromptId !== null) {
+        result(hangingPromptId, { stopReason: "cancelled", _meta: {} });
+        if (hangKeepAlive) clearInterval(hangKeepAlive);
+        hangingPromptId = null;
+        hangKeepAlive = null;
+      }
       break;
     default:
       if (msg.id !== undefined) out({ jsonrpc: "2.0", id: msg.id, error: { code: -32601, message: "method not found" } });
