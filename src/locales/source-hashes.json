@@ -1380,7 +1380,14 @@
       "engines.icon.formatError": "cac21e64a1b0dc3a421bd88e8d23ce185c76a2c4c78f465873f0f3cbcf928500",
       "engines.icon.sizeError": "4ad3162859ca86617999a6ee558f3095de4bb527dd28cb1b837032010a67d5db",
       "engines.icon.invalidError": "57ce920ff252ec0e89155c21acbb2d755994b17dc776dee89e61e31137876b9b",
-      "engines.icon.dimensionError": "d437467fed2405ebedf3d892c484ec1f2d024d7def8b953fd7d561c1ca3f324b"
+      "engines.icon.dimensionError": "d437467fed2405ebedf3d892c484ec1f2d024d7def8b953fd7d561c1ca3f324b",
+      "chat.usage.uncachedInput": "5dd3f55488454819c9d7a153a5c373ed2afe154f8bd4bdf6e4329f5eed2736ac",
+      "chat.usage.cachedInput": "519cb4e96ef70314c70325efc0c39efd4aeb75de41a558c5d96df83f58d59aab",
+      "chat.usage.totalInput": "b83732a61e177878be473b44a2c44104cc44464b2ddb24ed153280633aabbd52",
+      "chat.usage.output": "65b2a1660c2efb922455502ddb797671020beb17d4715716a4eafa80c1adaae8",
+      "chat.usage.lastTurnSplit": "55929d7adebc56e083a4319656fbbb1aacda1efe1ed93d557fdb1e346fd3be71",
+      "chat.usage.uncachedShort": "7a73055733db064c72db1586ab766e2cf2f85906303bdfebee57c2450d161205",
+      "chat.usage.inputShort": "f395b71f2dcf7bffbabca8569ee189fa33cffecc0305ef826c4434cc14cec058"
     },
     "es": {
       "noEngines.title": "af88855a5f80377de709995229ba3907df9e8fb3b940fbf7c0d9cbe6eea54afe",
@@ -8292,7 +8299,14 @@
       "engines.icon.formatError": "cac21e64a1b0dc3a421bd88e8d23ce185c76a2c4c78f465873f0f3cbcf928500",
       "engines.icon.sizeError": "4ad3162859ca86617999a6ee558f3095de4bb527dd28cb1b837032010a67d5db",
       "engines.icon.invalidError": "57ce920ff252ec0e89155c21acbb2d755994b17dc776dee89e61e31137876b9b",
-      "engines.icon.dimensionError": "d437467fed2405ebedf3d892c484ec1f2d024d7def8b953fd7d561c1ca3f324b"
+      "engines.icon.dimensionError": "d437467fed2405ebedf3d892c484ec1f2d024d7def8b953fd7d561c1ca3f324b",
+      "chat.usage.uncachedInput": "5dd3f55488454819c9d7a153a5c373ed2afe154f8bd4bdf6e4329f5eed2736ac",
+      "chat.usage.cachedInput": "519cb4e96ef70314c70325efc0c39efd4aeb75de41a558c5d96df83f58d59aab",
+      "chat.usage.totalInput": "b83732a61e177878be473b44a2c44104cc44464b2ddb24ed153280633aabbd52",
+      "chat.usage.output": "65b2a1660c2efb922455502ddb797671020beb17d4715716a4eafa80c1adaae8",
+      "chat.usage.lastTurnSplit": "55929d7adebc56e083a4319656fbbb1aacda1efe1ed93d557fdb1e346fd3be71",
+      "chat.usage.uncachedShort": "7a73055733db064c72db1586ab766e2cf2f85906303bdfebee57c2450d161205",
+      "chat.usage.inputShort": "f395b71f2dcf7bffbabca8569ee189fa33cffecc0305ef826c4434cc14cec058"
     },
     "zh": {
       "noEngines.title": "af88855a5f80377de709995229ba3907df9e8fb3b940fbf7c0d9cbe6eea54afe",
