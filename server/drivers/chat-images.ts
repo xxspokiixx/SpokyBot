@@ -34,6 +34,12 @@ export function chatImage(item: { mimeType?: unknown; data?: unknown }): ChatIma
       !/^[A-Za-z0-9+/]*={0,2}$/.test(data)) {
     throw new Error("Invalid or oversized MCP image");
   }
+  const bytes = Buffer.from(data, "base64");
+  const matches = mimeType === "image/png" ? bytes.length >= 33 && bytes.subarray(0, 8).equals(Buffer.from("89504e470d0a1a0a", "hex")) && bytes.toString("ascii", 12, 16) === "IHDR"
+    : mimeType === "image/jpeg" ? bytes.length >= 4 && bytes[0] === 0xff && bytes[1] === 0xd8 && bytes[2] === 0xff
+    : mimeType === "image/gif" ? bytes.length >= 13 && ["GIF87a", "GIF89a"].includes(bytes.toString("ascii", 0, 6))
+    : bytes.length >= 16 && bytes.toString("ascii", 0, 4) === "RIFF" && bytes.toString("ascii", 8, 12) === "WEBP";
+  if (bytes.length > IMAGE_BYTES || bytes.toString("base64") !== data || !matches) throw new Error("Image bytes do not match the declared MIME type");
   return { type: "image_url", image_url: { url: `data:${mimeType};base64,${data}` } };
 }
 
