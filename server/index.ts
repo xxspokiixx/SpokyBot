@@ -2889,6 +2889,7 @@ const roomHandoffs = new RoomHandoffs(join(DATA_DIR, "room-handoffs.json"), {
 }, Date.now, roomHandoffLimits(cfg));
 activeCoordinationForThread = threadId => roomHandoffs.activeDirect(threadId);
 const groupUsageReader = new GroupUsageReader(DATA_DIR);
+try { groupUsageReader.refresh(); } catch { /* accounting must not block startup */ }
 function publicGroupState(group: GroupRecord): WireGroup {
   let usage: WireGroup["usage"];
   try { usage = groupUsageReader.forThread(group.threadId); } catch { /* accounting must not block chat */ }
@@ -5265,6 +5266,7 @@ bus.subscribe((event: RuntimeEvent) => {
         // Appends are asynchronous. Refresh after persistence so the settled
         // turn appears immediately, without waiting for another message.
         void flushUsageLedger(DATA_DIR).then(() => {
+          groupUsageReader.refresh();
           const current = store.group(group.id);
           if (current) broadcast({ kind: "group", group: publicGroupState(current) });
         }).catch(() => {});
@@ -13752,6 +13754,7 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
       }
     };
     if (method === "GET" && path === "/api/bots") {
+      try { groupUsageReader.refresh(); } catch { /* accounting must not block a snapshot */ }
       const limit = pageSize(url.searchParams.get("messages"));
       if (limit === null) return json(res, 400, { error: "messages must be a non-negative whole number" });
       // wireBot(), not publicBot(): publicBot() pulls the whole transcript via
