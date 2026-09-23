@@ -985,7 +985,7 @@ export class Store {
     );
   }
 
-  patchGroup(id: string, patch: Partial<Pick<GroupRecord, "name" | "memberIds" | "defaultResponder" | "bulletin" | "unread" | "busyBotId" | "cwd" | "pinnedMessageId" | "section" | "setupCompletedAt" | "setupSkippedAt">>): GroupRecord | null {
+  patchGroup(id: string, patch: Partial<Pick<GroupRecord, "name" | "memberIds" | "defaultResponder" | "bulletin" | "unread" | "busyBotId" | "cwd" | "pinnedMessageId" | "section" | "setupCompletedAt" | "setupSkippedAt" | "audienceFloor">>): GroupRecord | null {
     const group = this.group(id);
     if (!group) return null;
     if (Object.prototype.hasOwnProperty.call(patch, "section")) {
@@ -1480,7 +1480,7 @@ export class Store {
     profile: Partial<
       Pick<
         BotRecord,
-        "name" | "title" | "description" | "soul" | "color" | "mascotExpression" | "mascotBody" | "modelSelection" | "section"
+        "name" | "title" | "description" | "soul" | "color" | "mascotExpression" | "mascotBody" | "modelSelection" | "section" | "visibility"
       >
     > = {},
     opts: {
@@ -1504,6 +1504,8 @@ export class Store {
       color: profile.color ?? COLORS[this.bots.length % COLORS.length],
       ...(profile.mascotExpression ? { mascotExpression: profile.mascotExpression } : {}),
       ...(profile.mascotBody ? { mascotBody: profile.mascotBody } : {}),
+      // Restricted from its first frame: no one else is ever told it exists.
+      ...(profile.visibility && profile.visibility !== "everyone" ? { visibility: structuredClone(profile.visibility) } : {}),
       unread: false,
       modelSelection: profile.modelSelection ?? this.defaultSelection(),
       resumeCursors: {},
@@ -1566,6 +1568,9 @@ export class Store {
           title: "", description: "", soul: "", notifications: true, color: COLORS[nextBots.length % COLORS.length], unread: false,
           modelSelection: operation.fields.modelSelection, resumeCursors: {}, createdAt, ...operation.fields,
           approvalMode: "ask", autoApprove: false, composio: false, approvePeerComms: false,
+          // A Chief's new teammate is seen by exactly the Chief's audience:
+          // a restricted Chief never creates a bot everyone sees.
+          ...(chief.visibility && chief.visibility !== "everyone" ? { visibility: structuredClone(chief.visibility) } : {}),
           tasks: [{ threadId: operation.threadId, title: UNTITLED_THREAD, createdAt, updatedAt: createdAt, resumeCursors: {},
             modelSelection: structuredClone(operation.fields.modelSelection), approvalMode: "ask", autoApprove: false,
             unread: false, activity: "idle", busy: false }],
@@ -1826,6 +1831,42 @@ export class Store {
     if (changed.length) this.saveBots();
     for (const bot of changed) this.emit({ type: "bot", botId: bot.id });
     return changed;
+  }
+
+  /** Company instance ids became stable across re-enrolment. Moves every
+   * saved reference to an old id onto its replacement in one save: model
+   * choices, native resume cursors and handed-message records. An entry that
+   * already exists under the new id wins over the old one. */
+  renameInstances(ids: ReadonlyMap<string, string>): number {
+    const touches = (record?: Record<string, unknown>) => Boolean(record && Object.keys(record).some(key => ids.has(key)));
+    const rename = <T>(record: Record<string, T>): Record<string, T> => {
+      const next: Record<string, T> = {};
+      for (const [key, value] of Object.entries(record)) {
+        const target = ids.get(key);
+        if (!target) next[key] = value;
+        else if (!Object.prototype.hasOwnProperty.call(record, target)) next[target] = value;
+      }
+      return next;
+    };
+    const changed: BotRecord[] = [];
+    for (const bot of this.bots) {
+      let dirty = false;
+      const selected = ids.get(bot.modelSelection.instanceId);
+      if (selected) { bot.modelSelection = { ...bot.modelSelection, instanceId: selected }; dirty = true; }
+      if (touches(bot.resumeCursors)) { bot.resumeCursors = rename(bot.resumeCursors); dirty = true; }
+      for (const task of bot.tasks ?? []) {
+        const taskSelected = task.modelSelection && ids.get(task.modelSelection.instanceId);
+        if (task.modelSelection && taskSelected) { task.modelSelection = { ...task.modelSelection, instanceId: taskSelected }; dirty = true; }
+        if (touches(task.resumeCursors)) { task.resumeCursors = rename(task.resumeCursors); dirty = true; }
+        if (task.handedMessages && touches(task.handedMessages)) { task.handedMessages = rename(task.handedMessages); dirty = true; }
+        const last = task.lastInstanceId && ids.get(task.lastInstanceId);
+        if (last) { task.lastInstanceId = last; dirty = true; }
+      }
+      if (dirty) changed.push(bot);
+    }
+    if (changed.length) this.saveBots();
+    for (const bot of changed) this.emit({ type: "bot", botId: bot.id });
+    return changed.length;
   }
 
   setResumeCursor(botId: string, instanceId: string, cursor: unknown, threadId?: string) {

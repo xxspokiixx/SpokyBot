@@ -510,6 +510,10 @@ export interface WireGroup {
   /** New user-created rooms start with setup pending. */
   setupCompletedAt?: number | null;
   setupSkippedAt?: number | null;
+  /** The narrowest audience this room has ever had (see
+   * server/bot-visibility.ts): a bot leaving never widens who may see the
+   * transcript. Sent to admins only. */
+  audienceFloor?: BotVisibility;
   /** True while any member (or hand-off) is mid-turn. Computed at
    * projection time, never persisted. */
   working: boolean;

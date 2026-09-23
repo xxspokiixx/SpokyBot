@@ -965,6 +965,16 @@ export const PROVIDER_CREDENTIAL_ENV = [
   "CURSOR_AUTH_TOKEN",
 ] as const;
 
+const configSaveListeners = new Set<(before: JsonObject, after: JsonObject) => void>();
+
+/** Told, synchronously, what each saveConfig wrote: the file before and
+ * after. The admin activity log (server/admin-activity.ts) records the
+ * change for whoever's request made it. A listener must not throw. */
+export function onConfigSaved(listener: (before: JsonObject, after: JsonObject) => void): () => void {
+  configSaveListeners.add(listener);
+  return () => { configSaveListeners.delete(listener); };
+}
+
 /** Merge a partial config into ~/.openmausbot/config.json (secrets never
  * echoed back — callers report configured-or-not booleans only). */
 export function saveConfig(
@@ -980,6 +990,7 @@ export function saveConfig(
     /* first write */
   }
   const checkedPatch = appConfigSchema.partial().extend({ threads: threadsPatchSchema.optional() }).parse(patch);
+  const before = configSaveListeners.size ? structuredClone(disk) : disk;
   // A write is the durable migration point. Preserve every other raw key in
   // config.json, but never write #567's mixed-case or duplicate profile ids
   // back after we have successfully recognized the legacy list.
@@ -1076,6 +1087,13 @@ export function saveConfig(
   }
   mkdirSync(DATA_DIR, { recursive: true });
   writeFileAtomic(p, JSON.stringify(disk, null, 2), { mode: 0o600 });
+  for (const listener of configSaveListeners) {
+    try {
+      listener(before, disk);
+    } catch (error) {
+      console.warn(`config: a save listener failed: ${error instanceof Error ? error.message : String(error)}`);
+    }
+  }
 }
 
 /** Set one instance's `config.cli` ("" clears the override back to the

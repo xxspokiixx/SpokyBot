@@ -1959,6 +1959,25 @@ describe("soul", () => {
     save.mockRestore();
   });
 
+  it("gives a teammate a restricted Chief's reviewed setup creates the Chief's own audience", () => {
+    const store = new Store(selection);
+    const chief = store.createBot({ name: "Board", section: "People", visibility: { people: ["hr@example.test"] } });
+    store.patchBot(chief.id, { chiefOfStaff: true });
+    const request: TeamSetupRequest = { version: 1, requestId: "setup-restricted", botId: chief.id, threadId: chief.threadId,
+      reason: "Requested", createdAt: 1, requesterRevision: "fixture", newTeams: [], operations: [
+        { action: "create", botId: "created-by-chief", threadId: "created-by-chief-thread", fields: { name: "Layoff Modeler", section: "People", modelSelection: selection() } },
+      ] };
+    store.applyTeamSetup(request);
+    expect(new Store(selection).bot("created-by-chief")?.visibility).toEqual({ people: ["hr@example.test"] });
+    const open = new Store(selection);
+    const everyoneChief = open.createBot({ name: "Ops", section: "Ops" });
+    open.patchBot(everyoneChief.id, { chiefOfStaff: true });
+    open.applyTeamSetup({ ...request, requestId: "setup-open", botId: everyoneChief.id, threadId: everyoneChief.threadId, operations: [
+      { action: "create", botId: "created-open", threadId: "created-open-thread", fields: { name: "Helper", section: "Ops", modelSelection: selection() } },
+    ] });
+    expect(open.bot("created-open")?.visibility).toBeUndefined();
+  });
+
   it("deleteBot removes the bot folder with the workspace", () => {
     const store = new Store(selection);
     const bot = store.createBot();

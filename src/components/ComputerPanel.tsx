@@ -1688,12 +1688,16 @@ export function ComputerPanel({
               ["off", "vm.dest.off", "computer.dest.offDesc", Power],
             ] as const).map(([mode, labelKey, descriptionKey, Icon]) => {
                 const selected = mode === null ? !profileBot.computer : profileBot.computer === mode;
-                const disabled =
+                // A place the enrolled organisation disallows is not offered.
+                const managedPolicy = state.config?.managedPolicy;
+                const managedKind = mode === "local" ? "thisComputer" : mode === "vm" ? "localVm" : mode === "cloud" ? (profileBot.cloudBackend === "vps" ? "vps" : "box") : null;
+                const managedBy = managedPolicy && managedKind && !managedPolicy.computers[managedKind] ? t("policy.managedBy", { organization: managedPolicy.organizationName }) : undefined;
+                const disabled = Boolean(managedBy) ||
                   (mode === "cloud" && !cloudSupported) ||
                   (mode === "vm" && !vmSupported) ||
                   (mode === "local" && !localSelectable) ||
                   (mode === "browser" && !browserSelectable);
-                const unavailableTitle =
+                const unavailableTitle = managedBy ?? (
                   mode === "vm" && !vmSupported
                     ? t("computer.unavailableVm")
                     : mode === "cloud" && !cloudSupported
@@ -1702,7 +1706,7 @@ export function ComputerPanel({
                         ? localDisabledReason ?? t("computer.unavailableLocal")
                         : mode === "browser"
                           ? browserSelectable ? t("computer.browserOnlyTitle") : browserDisabledReason
-                          : undefined;
+                          : undefined);
                 return (
               <button
                 key={mode ?? "auto"}
@@ -1735,7 +1739,7 @@ export function ComputerPanel({
                   <span>{t(labelKey)}</span>
                 </span>
                 <span className="mt-1.5 block text-[11px] leading-4 text-ink-secondary">
-                  {disabled ? t("computer.unavailableHere") : t(descriptionKey)}
+                  {managedBy ?? (disabled ? t("computer.unavailableHere") : t(descriptionKey))}
                 </span>
               </button>
                 );
