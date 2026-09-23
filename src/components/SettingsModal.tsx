@@ -32,6 +32,7 @@ import { LicenseExpiryBanner } from "./LicenseExpiryBanner";
 import { WorkspacesSection, workspacesAvailable } from "./WorkspacesSection";
 import { SkinPicker } from "./SkinPicker";
 import { RoomTurnTimeoutSettings } from "./RoomTurnTimeoutSettings";
+import { AboutMeSettings } from "./AboutMeSettings";
 import { ThreadConcurrencySettings } from "./ThreadConcurrencySettings";
 import { ThreadCleanupSettings } from "./ThreadCleanupSettings";
 import { WorkspaceBackupSettings } from "./WorkspaceBackupSettings";
@@ -70,7 +71,7 @@ function sectionMatches(section: (typeof SECTIONS)[number], query: string): bool
   return [t(section.labelKey), ...section.keywords].some((part) => part.toLowerCase().includes(query));
 }
 
-/** Name + email, persisted to /api/config {profile} on blur. */
+/** Name and email save on blur; shared context has its own autosave. */
 function ProfileFields() {
   const { state, dispatch } = useStore();
   const [name, setName] = useState(state.config?.profile?.name ?? "");
@@ -86,8 +87,10 @@ function ProfileFields() {
       headers: { "content-type": "application/json" },
       body: JSON.stringify({ profile: { name: name.trim(), email: email.trim().toLowerCase() } }),
     })
-      .then((r) => r.json())
-      .then((config) => dispatch({ type: "configStatus", config }))
+      .then((r) => { if (!r.ok) throw new Error("Profile save failed"); return r.json(); })
+      .then((config: ConfigStatus) => {
+        if (config.profile) dispatch({ type: "profileSaved", profile: { name: config.profile.name, email: config.profile.email } });
+      })
       .catch(() => {});
   };
 
@@ -105,6 +108,7 @@ function ProfileFields() {
         placeholder="you@example.com"
         className={inputClass}
       />
+      <AboutMeSettings />
     </div>
   );
 }
@@ -639,7 +643,7 @@ export function SettingsModal() {
             {section === "organization" && window.ogb?.organization && !remoteActive && <OrganizationSettings />}
             {section === "general" && (
               <>
-                <Card title={t("settings.profile.title")} subtitle={t("settings.profile.subtitle")}>
+                <Card title={t("settings.profile.title")} subtitle={t("settings.profile.sharedSubtitle")}>
                   <ProfileFields />
                 </Card>
                 <div>

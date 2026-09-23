@@ -42,6 +42,14 @@ import { customMcpServers,
 } from "./config.ts";
 
 describe("configuration boundaries", () => {
+  it("accepts shared user context, including clearing, without reloading providers", () => {
+    const profile = { aboutMe: "I prefer short answers.\nMy time zone is Europe/Berlin." };
+    expect(parseConfigPatch({ profile })).toEqual({ profile });
+    expect(parseStoredConfig({ profile })).toEqual({ profile });
+    expect(parseConfigPatch({ profile: { aboutMe: "" } })).toEqual({ profile: { aboutMe: "" } });
+    expect(providerReloadKeys({ profile })).toEqual([]);
+    expect(() => parseConfigPatch({ profile: { aboutMe: "x".repeat(24_001) } })).toThrow();
+  });
   it("validates context budgets and keeps changes independent of provider reload", () => {
     const context = { autoCompact: false, compactAt: 0.7, rebuildBytes: 32_000 };
     expect(parseStoredConfig({ context })).toEqual({ context });

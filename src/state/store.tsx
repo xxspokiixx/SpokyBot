@@ -601,7 +601,7 @@ export interface ConfigStatus {
     customKeyConfigured?: boolean;
   };
   /** who's using the app — collected in onboarding, shown in the sidebar */
-  profile?: { name: string; email: string };
+  profile?: { name: string; email: string; aboutMe?: string };
   /** UI language override; "" (or absent) follows the system language. */
   language?: string;
   /** Opt-in flags. Absent means off. */
@@ -1025,6 +1025,7 @@ export type Action =
   | { type: "interruptGroup"; groupId: string; threadId?: string; onError?: () => void }
   | { type: "instances"; instances: InstanceInfo[] }
   | { type: "configStatus"; config: ConfigStatus }
+  | { type: "profileSaved"; profile: Partial<NonNullable<ConfigStatus["profile"]>> }
   | { type: "select"; id: string }
   | {
       type: "send";
@@ -1486,6 +1487,11 @@ export function reducer(state: AppState, action: Action): AppState {
       return { ...state, instances: action.instances };
     case "configStatus":
       return { ...state, config: action.config };
+    case "profileSaved":
+      return state.config ? {
+        ...state,
+        config: { ...state.config, profile: { name: "", email: "", ...state.config.profile, ...action.profile } },
+      } : state;
     case "select": {
       if (state.groups.some((g) => g.id === action.id)) {
         return {

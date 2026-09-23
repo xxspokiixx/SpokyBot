@@ -26,6 +26,19 @@ import { openLiveEvents, type LiveEventSourceLike, type LiveEventsPlatform } fro
 import type { ModelVariantState, RuntimeEvent } from "../../shared/runtime-events";
 import type { RoutineRun } from "../lib/routines";
 
+describe("partial profile save responses", () => {
+  it.each([true, false])("preserves independently saved fields with about-me response first: %s", aboutFirst => {
+    const config = { ...initialState.config, profile: { name: "Old", email: "old@example.invalid", aboutMe: "Old biography" } } as NonNullable<AppState["config"]>;
+    const about: Action = { type: "profileSaved", profile: { aboutMe: "New biography" } };
+    const identity: Action = { type: "profileSaved", profile: { name: "New", email: "new@example.invalid" } };
+    const first = reducer({ ...initialState, config }, aboutFirst ? about : identity);
+    const last = reducer(first, aboutFirst ? identity : about);
+    expect(last.config?.profile).toEqual({ name: "New", email: "new@example.invalid", aboutMe: "New biography" });
+    expect(reducer(last, { type: "profileSaved", profile: { aboutMe: "" } }).config?.profile)
+      .toEqual({ name: "New", email: "new@example.invalid", aboutMe: "" });
+  });
+});
+
 describe("screen frame ownership", () => {
   it("retains the source thread so a sibling's frame cannot masquerade as the selected screen", () => {
     const first = reducer(initialState, { type: "screenFrame", botId: "bot", threadId: "vm-thread", png: "vm", mime: "image/png" });
