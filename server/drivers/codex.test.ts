@@ -133,6 +133,7 @@ describe("CodexDriver turns (fake app-server)", () => {
     delete process.env.FAKE_CODEX_INSTRUCTIONS;
     delete process.env.FAKE_CODEX_RESUME_ERROR;
     delete process.env.FAKE_CODEX_START_ERROR;
+    delete process.env.FAKE_CODEX_RESOLVED_SANDBOX;
     delete process.env.FAKE_CODEX_STEER_ERROR;
     delete process.env.FAKE_CODEX_STEER_ERROR_FILE;
     delete process.env.FAKE_CODEX_STEER_HANG;
@@ -323,6 +324,40 @@ describe("CodexDriver turns (fake app-server)", () => {
       });
     },
   );
+
+  it.each([false, true])("preserves the complete resolved sandbox (resumed=%s)", async (resumed) => {
+    await create({ mode: "resume" });
+    const dump = join(scratch, "resolved-sandbox.json");
+    process.env.FAKE_CODEX_DUMP = dump;
+    const sandbox = {
+      type: "workspaceWrite", networkAccess: true,
+      writableRoots: [join(scratch, "extra-root")],
+      excludeTmpdirEnvVar: true, excludeSlashTmp: true,
+    };
+    process.env.FAKE_CODEX_RESOLVED_SANDBOX = JSON.stringify(sandbox);
+    await instance.adapter.sendTurn({ threadId: "t-resolved", text: "continue", approvalMode: "ask",
+      ...(resumed ? { resumeCursor: "codex-thread-1" } : {}) });
+    await recorder.until((event) => event.type === "turn.completed");
+    expect(recorder.events.at(-1)).toMatchObject({ ok: true });
+    const calls = JSON.parse(readFileSync(dump, "utf8")).calls;
+    expect(calls.find((call: { method: string }) => call.method === "turn/start").params.sandboxPolicy).toEqual(sandbox);
+  });
+
+  it.each([false, true].flatMap(resumed => [null, {}, { type: "dangerFullAccess" }].map(sandbox => ({ resumed, sandbox }))))("refuses an absent or mismatched resolved sandbox: %j", async ({ resumed, sandbox }) => {
+    await create({ mode: "resume" });
+    const dump = join(scratch, "invalid-sandbox.json");
+    process.env.FAKE_CODEX_DUMP = dump;
+    process.env.FAKE_CODEX_RESOLVED_SANDBOX = JSON.stringify(sandbox);
+    await instance.adapter.sendTurn({ threadId: "t-invalid-sandbox", text: "continue", approvalMode: "ask",
+      ...(resumed ? { resumeCursor: "codex-thread-1" } : {}) });
+    await recorder.until((event) => event.type === "turn.completed");
+    expect(recorder.events.at(-1)).toMatchObject({ ok: false });
+    if (!sandbox || !("type" in sandbox)) {
+      expect(recorder.events.some(event => event.type === "runtime.error" && event.message.includes("Update Codex"))).toBe(true);
+    }
+    const calls = JSON.parse(readFileSync(dump, "utf8")).calls;
+    expect(calls.some((call: { method: string }) => call.method === "turn/start")).toBe(false);
+  });
 
   it.each(["gpt-5.6-sol", "gpt-5.4"])(
     "reapplies Full, Auto, and Ask across thread start and resume for %s",
