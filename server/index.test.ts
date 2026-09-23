@@ -4176,6 +4176,35 @@ describe("harness HTTP API", () => {
     }
   });
 
+  it("starts new bots with the workspace's new-bot effort unless they choose their own", async () => {
+    const instances = (await api("GET", "/api/instances")).body.instances;
+    const claude = instances.find((instance: { instanceId: string }) => instance.instanceId === "claude");
+    expect(claude.capabilities.effortLevels).toEqual(expect.arrayContaining(["low", "high"]));
+    const selection = { instanceId: claude.instanceId, model: claude.models.default };
+    const created: string[] = [];
+    try {
+      const saved = await api("PATCH", "/api/config", { newBots: { effort: "high" } });
+      expect(saved.status).toBe(200);
+      expect(saved.body.newBots).toEqual({ effort: "high" });
+      expect((await api("GET", "/api/config")).body.newBots).toEqual({ effort: "high" });
+      const defaulted = (await api("POST", "/api/bots", { modelSelection: selection })).body.bot;
+      const chosen = (await api("POST", "/api/bots", { modelSelection: { ...selection, effort: "low" } })).body.bot;
+      created.push(defaulted.id, chosen.id);
+      expect(defaulted.modelSelection).toEqual({ ...selection, effort: "high" });
+      expect(chosen.modelSelection).toEqual({ ...selection, effort: "low" });
+      const thread = await api("POST", `/api/bots/${defaulted.id}/tasks`, { title: "Next" });
+      expect(thread.body.task.modelSelection).toEqual({ ...selection, effort: "high" });
+
+      expect((await api("PATCH", "/api/config", { newBots: { effort: null } })).body.newBots).toEqual({});
+      const plain = (await api("POST", "/api/bots", { modelSelection: selection })).body.bot;
+      created.push(plain.id);
+      expect(plain.modelSelection).toEqual(selection);
+    } finally {
+      await api("PATCH", "/api/config", { newBots: { effort: null } });
+      for (const id of created) await api("DELETE", `/api/bots/${id}`);
+    }
+  });
+
   it("updates a paired bot's model, persists it, broadcasts it, and clears effort", async () => {
     const instances = (await api("GET", "/api/instances")).body.instances;
     const claude = instances.find((instance: { instanceId: string }) => instance.instanceId === "claude");
@@ -4269,7 +4298,7 @@ describe("harness HTTP API", () => {
         (candidate: { id: string }) => candidate.id === bot.id,
       );
       expect(after.modelSelection).toEqual(selection);
-      expect(after.autoApprove).toBeUndefined();
+      expect(after.autoApprove).toBe(bot.autoApprove);
     } finally {
       await api("DELETE", `/api/bots/${bot.id}`);
     }
@@ -6018,8 +6047,8 @@ describe("harness HTTP API", () => {
         (candidate: { id: string }) => candidate.id === bot.id,
       );
       expect(stored.busy).toBe(true);
-      expect(stored).not.toHaveProperty("approvalMode");
-      expect(stored).not.toHaveProperty("autoApprove");
+      expect(stored.approvalMode).toBe(bot.approvalMode);
+      expect(stored.autoApprove).toBe(bot.autoApprove);
     } finally {
       await api("POST", `/api/bots/${bot.id}/interrupt`, {}).catch(() => undefined);
       await expect.poll(async () => {

@@ -8,6 +8,7 @@ import { join } from "node:path";
 
 import { writeFileAtomic } from "./atomic.ts";
 import { ensureSections, readSections, changeEmptySection } from "./section-context.ts";
+import type { TeamComputers } from "./team-computers.ts";
 import { removeBotFolder, soulFile, soulHash, writeSoulMirror } from "./bot-folder.ts";
 import type { BotProfilePatch } from "./bot-profile.ts";
 import { peerAllowKey, type PeerAction } from "./peer-approval-key.ts";
@@ -507,6 +508,7 @@ export class Store {
   groups: GroupRecord[] = [];
   private threads = new Map<string, ThreadState>();
   private defaultSelection: () => ModelSelection;
+  private completeNewBotSelection: (selection: ModelSelection) => ModelSelection;
   private listeners = new Set<(change: StoreChange) => void>();
   /** A broken team registry must not prevent loading independent chat data. */
   private registeringInitialSections = true;
@@ -514,8 +516,14 @@ export class Store {
    * that slot must not clear a concurrently running independent task. */
   private legacyActivities = new Map<string, BotActivity>();
 
-  constructor(defaultSelection: () => ModelSelection) {
+  constructor(
+    defaultSelection: () => ModelSelection,
+    /** Workspace-wide new-bot defaults (config newBots), applied to every
+     * new bot's selection whichever path created it. */
+    completeNewBotSelection: (selection: ModelSelection) => ModelSelection = (selection) => selection,
+  ) {
     this.defaultSelection = defaultSelection;
+    this.completeNewBotSelection = completeNewBotSelection;
     mkdirSync(DATA_DIR, { recursive: true });
     for (const file of [BOTS_FILE, GROUPS_FILE]) tightenRegistryFile(file);
     try {
@@ -864,17 +872,17 @@ export class Store {
     if (botsDirty) this.saveBots();
   }
 
-  private saveBots(bots: BotRecord[] = this.bots) {
-    this.rememberSections([...this.bots, ...bots].map((bot) => bot.section));
+  private saveBots(bots: BotRecord[] = this.bots, registerSections = true) {
+    if (registerSections) this.rememberSections([...this.bots, ...bots].map((bot) => bot.section));
     writeFileAtomic(BOTS_FILE, JSON.stringify(bots.map(({ busy: _busy, activity: _activity, ...bot }) => ({
       ...bot,
       tasks: bot.tasks?.map(({ busy: _taskBusy, activity: _taskActivity, turnStartedAt: _taskTurnStarted, ...task }) => persistedPin(task)),
     })), null, 2), { mode: 0o600 });
   }
 
-  private saveGroups() {
-    this.rememberSections(this.groups.map((group) => group.section));
-    writeFileAtomic(GROUPS_FILE, JSON.stringify(this.groups.map(({ busyBotId: _busyBotId, turnStartedAt: _turnStartedAt, ...g }) => ({
+  private saveGroups(groups: GroupRecord[] = this.groups, registerSections = true) {
+    if (registerSections) this.rememberSections(groups.map((group) => group.section));
+    writeFileAtomic(GROUPS_FILE, JSON.stringify(groups.map(({ busyBotId: _busyBotId, turnStartedAt: _turnStartedAt, ...g }) => ({
       ...g,
       ...(g.tasks ? { tasks: g.tasks.map((task) => persistedPin(task)) } : {}),
     })), null, 2), { mode: 0o600 });
@@ -889,6 +897,50 @@ export class Store {
       if (!this.registeringInitialSections) throw error;
       console.warn(`[teams] Startup could not register team names; saved teams and shared instructions were left unchanged: ${(error as Error).message}`);
     }
+  }
+
+  /** Rename the same team, preserving its members and existing access grants. */
+  renameSection(name: string, nextName: string, computers?: TeamComputers): string | undefined {
+    if (!name || !this.sections.includes(name)) return "No such team";
+    nextName = nextName.trim();
+    if (!nextName || nextName.length > 60 || [...nextName].some(char => char.charCodeAt(0) < 32 || char.charCodeAt(0) === 127)) return "Team name must be 1 to 60 characters without control characters";
+    if (name === nextName) return undefined;
+    if (this.sections.includes(nextName) || computers?.forSection(nextName)) return "A team with that name already exists";
+    const members = this.bots.filter(bot => sectionKey(bot.section) === name);
+    const rooms = this.groups.filter(group => sectionKey(group.section) === name);
+    const affected = this.bots.filter(bot => members.includes(bot) || bot.managedSections?.some(section => sectionKey(section) === name));
+    if (affected.some(bot => bot.busy || bot.tasks?.some(task => task.busy)) || rooms.some(group => group.busyBotId)) {
+      return "Stop this team's active work before renaming the team";
+    }
+    // Keep the established empty-team lifecycle: old grants are revoked when
+    // an empty identity is removed, so recreating it cannot restore access.
+    if (!members.length && !rooms.length && !computers?.forSection(name)) return this.changeEmptySection(name, nextName);
+    const nextBots = this.bots.map(bot => ({ ...bot,
+      ...(members.includes(bot) ? { section: nextName } : {}),
+      ...(bot.managedSections ? { managedSections: [...new Set(bot.managedSections.map(section => sectionKey(section) === name ? nextName : section))] } : {}),
+    }));
+    const nextGroups = this.groups.map(group => rooms.includes(group) ? { ...group, section: nextName } : group);
+    let computerChanged = false;
+    try {
+      // Register the new name only after saving the records; otherwise the
+      // registry's duplicate-name check would reject this same rename.
+      this.saveBots(nextBots, false);
+      this.saveGroups(nextGroups, false);
+      computerChanged = computers?.renameSection(name, nextName) ?? false;
+      changeEmptySection(name, nextName);
+    } catch (error) {
+      this.saveBots(this.bots, false);
+      this.saveGroups(this.groups, false);
+      if (computerChanged) computers!.renameSection(nextName, name);
+      throw error;
+    }
+    // Preserve identities held by the schedulers and other store consumers.
+    for (let i = 0; i < nextBots.length; i++) Object.assign(this.bots[i], nextBots[i]);
+    for (let i = 0; i < nextGroups.length; i++) Object.assign(this.groups[i], nextGroups[i]);
+    for (const bot of affected) this.emit({ type: "bot", botId: bot.id });
+    for (const room of rooms) this.emit({ type: "group", groupId: room.id });
+    this.emit({ type: "sections" });
+    return undefined;
   }
 
   /** Empty-only changes cannot merge teams or silently change anybody's access. */
@@ -912,6 +964,39 @@ export class Store {
       for (const bot of revoked) this.emit({ type: "bot", botId: bot.id });
     }
     changeEmptySection(name, nextName);
+    this.emit({ type: "sections" });
+    return undefined;
+  }
+
+  /** Remove the team, keeping its bots, rooms and conversations in General. */
+  deleteSection(name: string): string | undefined {
+    if (!name || !this.sections.includes(name)) return "No such team";
+    const members = this.bots.filter(bot => sectionKey(bot.section) === name);
+    const rooms = this.groups.filter(group => sectionKey(group.section) === name);
+    if (members.some(bot => bot.busy || bot.tasks?.some(task => task.busy)) || rooms.some(group => group.busyBotId)) {
+      return "Stop this team's active work before deleting the team";
+    }
+    if (this.bots.filter(bot => bot.chiefOfStaff && (!sectionKey(bot.section) || sectionKey(bot.section) === name)).length > 1) {
+      return "General already has a Chief of Staff. Move or change this team's Chief before deleting the team";
+    }
+    const nextBots = this.bots.map(bot => ({ ...bot,
+      ...(sectionKey(bot.section) === name ? { section: undefined } : {}),
+      ...(bot.managedSections ? { managedSections: bot.managedSections.filter(section => sectionKey(section) !== name) } : {}),
+    }));
+    const nextGroups = this.groups.map(group => sectionKey(group.section) === name ? { ...group, section: undefined } : group);
+    try {
+      this.saveBots(nextBots);
+      this.saveGroups(nextGroups);
+      changeEmptySection(name, null);
+    } catch (error) {
+      this.saveBots();
+      this.saveGroups();
+      throw error;
+    }
+    for (let i = 0; i < nextBots.length; i++) Object.assign(this.bots[i], nextBots[i]);
+    for (let i = 0; i < nextGroups.length; i++) Object.assign(this.groups[i], nextGroups[i]);
+    for (const bot of this.bots) this.emit({ type: "bot", botId: bot.id });
+    for (const group of rooms) this.emit({ type: "group", groupId: group.id });
     this.emit({ type: "sections" });
     return undefined;
   }
@@ -1482,6 +1567,12 @@ export class Store {
     return this.bots.find((b) => b.threadId === threadId || b.tasks?.some((t) => t.threadId === threadId)) ?? null;
   }
 
+  /** The one place a new bot's selection is decided: the caller's choice, or
+   * the workspace default, completed with the workspace's new-bot defaults. */
+  private newBotSelection(requested?: ModelSelection): ModelSelection {
+    return this.completeNewBotSelection(requested ?? this.defaultSelection());
+  }
+
   createBot(
     profile: Partial<
       Pick<
@@ -1513,7 +1604,7 @@ export class Store {
       // Restricted from its first frame: no one else is ever told it exists.
       ...(profile.visibility && profile.visibility !== "everyone" ? { visibility: structuredClone(profile.visibility) } : {}),
       unread: false,
-      modelSelection: profile.modelSelection ?? this.defaultSelection(),
+      modelSelection: this.newBotSelection(profile.modelSelection),
       resumeCursors: {},
       createdAt: Date.now(),
     };
@@ -1570,15 +1661,16 @@ export class Store {
       if (operation.action === "create") {
         if (at >= 0 || !operation.threadId || !operation.fields.name || !operation.fields.modelSelection) throw new Error("Invalid new bot in team setup");
         const createdAt = Date.now();
+        const modelSelection = this.newBotSelection(operation.fields.modelSelection);
         next = { id: operation.botId, threadId: operation.threadId, name: operation.fields.name,
           title: "", description: "", soul: "", notifications: true, color: COLORS[nextBots.length % COLORS.length], unread: false,
-          modelSelection: operation.fields.modelSelection, resumeCursors: {}, createdAt, ...operation.fields,
+          resumeCursors: {}, createdAt, ...operation.fields, modelSelection,
           approvalMode: "ask", autoApprove: false, composio: false, approvePeerComms: false,
           // A Chief's new teammate is seen by exactly the Chief's audience:
           // a restricted Chief never creates a bot everyone sees.
           ...(chief.visibility && chief.visibility !== "everyone" ? { visibility: structuredClone(chief.visibility) } : {}),
           tasks: [{ threadId: operation.threadId, title: UNTITLED_THREAD, createdAt, updatedAt: createdAt, resumeCursors: {},
-            modelSelection: structuredClone(operation.fields.modelSelection), approvalMode: "ask", autoApprove: false,
+            modelSelection: structuredClone(modelSelection), approvalMode: "ask", autoApprove: false,
             unread: false, activity: "idle", busy: false }],
         };
         nextBots.unshift(next);
@@ -1595,19 +1687,20 @@ export class Store {
         }));
         nextBots[at] = next;
       }
+      if (operation.fields.chiefOfStaff === false) delete next.managedSections;
       next.section = sectionKey(next.section) || undefined;
       if (operation.fields.soul !== undefined) { next.soulHash = soulHash(operation.fields.soul); next.soulDrift = false; }
       changed.push(next);
     }
     const result: TeamSetupResult = { state: "applied", newTeams: request.newTeams, bots: changed.map((bot, index) => ({
-      id: bot.id, name: bot.name, section: bot.section, modelSelection: structuredClone(bot.modelSelection),
+      id: bot.id, name: bot.name, section: bot.section, modelSelection: structuredClone(bot.modelSelection), chiefOfStaff: Boolean(bot.chiefOfStaff),
       action: request.operations[index].action === "create" ? "created" : "updated",
     })) };
     const chiefAt = nextBots.findIndex((bot) => bot.id === chief.id);
     const nextChief = { ...nextBots[chiefAt], lastTeamSetupReceipt: { requestId: request.requestId, result } };
     // Only the newly-created teams explicitly named in the human review may
     // extend this Chief's reach. Existing teams require owner settings.
-    if (request.newTeams.length) {
+    if (request.newTeams.length && nextChief.chiefOfStaff) {
       nextChief.managedSections = managedSections;
     }
     nextBots[chiefAt] = nextChief;
@@ -1775,6 +1868,34 @@ export class Store {
     }
     this.rememberSections([targetSection]);
     return { ok: true, bots: ids.map((id) => this.bot(id)!) };
+  }
+
+  /** Apply only the membership edits the user made, in one bots-file write. */
+  updateTeamMembers(section: string, addIds: string[], removeIds: string[]):
+    { ok: true; bots: BotRecord[] } | { ok: false; reason: "unavailable" | "chief-conflict" | "membership-changed" } {
+    const key = sectionKey(section);
+    if (!key || !this.sections.includes(key)) return { ok: false, reason: "unavailable" };
+    const adds = new Set(addIds), removes = new Set(removeIds);
+    const ids = new Set([...adds, ...removes]);
+    for (const id of ids) {
+      const bot = this.bot(id);
+      if (!bot || bot.hidden) return { ok: false, reason: "unavailable" };
+      if (adds.has(id) && removes.has(id)) return { ok: false, reason: "membership-changed" };
+      if (removes.has(id) && sectionKey(bot.section) !== key) return { ok: false, reason: "membership-changed" };
+    }
+    const next = this.bots.map(bot => ids.has(bot.id)
+      ? { ...bot, section: adds.has(bot.id) ? key : undefined } : bot);
+    for (const destination of [key, ""]) {
+      if (next.filter(bot => bot.chiefOfStaff && sectionKey(bot.section) === destination).length > 1) {
+        return { ok: false, reason: "chief-conflict" };
+      }
+    }
+    if (ids.size) {
+      this.saveBots(next);
+      for (let i = 0; i < next.length; i++) if (ids.has(next[i].id)) Object.assign(this.bots[i], next[i]);
+      for (const botId of ids) this.emit({ type: "bot", botId });
+    }
+    return { ok: true, bots: this.bots.filter(bot => ids.has(bot.id)) };
   }
 
   /** Legacy bot/room activity occupies its own slot; direct conversations

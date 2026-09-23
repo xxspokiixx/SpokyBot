@@ -1325,6 +1325,19 @@ describe("section Chiefs", () => {
     chiefOfStaff,
   });
 
+  it("atomically removes a deleted team and its assignments before SSE arrives", () => {
+    const member = { ...bot("member", "Delivery"), messages: [] };
+    const other = { ...bot("other", "Personal"), messages: [] };
+    const group = { id: "group", threadId: "thread", section: "Delivery", name: "Review", memberIds: [], defaultResponder: { kind: "mentions" }, createdAt: 1, bulletin: "", messages: [], unread: false } satisfies Group;
+    const next = reducer({ ...initialState, bots: [member, other], groups: [group], sections: ["Delivery", "Personal"] },
+      { type: "sectionDeleted", section: "Delivery", sections: ["Personal"] });
+    expect(next.sections).toEqual(["Personal"]);
+    expect(next.bots[0].section).toBeUndefined();
+    expect(next.groups[0].section).toBeUndefined();
+    expect(next.bots[0].messages).toBe(member.messages);
+    expect(next.bots[1]).toBe(other);
+  });
+
   it("clears previous membership when a complete bot frame moves it to General", () => {
     const current = { ...bot("moved", "Delivery"), messages: [] };
     const { section: _oldSection, ...announcement } = current;
