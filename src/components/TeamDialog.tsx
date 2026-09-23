@@ -58,7 +58,7 @@ export function TeamDialog({ section, rename = false, onClose }: {
       setSaving(false);
     }
   };
-  if (creating) return createPortal(<NewBotDialog section={section} onClose={() => setCreating(false)} onCreated={(bot) => {
+  if (creating) return createPortal(<NewBotDialog section={section} preserveSelection onClose={() => setCreating(false)} onCreated={(bot) => {
     initialMembers.current.add(bot.id);
     setPicked(previous => new Set([...previous, bot.id]));
   }} />, document.body);

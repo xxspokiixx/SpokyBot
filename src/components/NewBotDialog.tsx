@@ -21,10 +21,11 @@ const APP_LABELS: Record<string, string> = {
   linear: "Linear",
 };
 
-export function NewBotDialog({ section, onClose, onCreated }: {
+export function NewBotDialog({ section, onClose, onCreated, preserveSelection = false }: {
   section?: string;
   onClose?: () => void;
   onCreated?: (bot: Bot) => void;
+  preserveSelection?: boolean;
 } = {}) {
   const { state, dispatch } = useStore();
   const dialogRef = useRef<HTMLDivElement>(null);
@@ -74,10 +75,11 @@ export function NewBotDialog({ section, onClose, onCreated }: {
   const create = (role?: BotRole) => {
     if (creating) return;
     setError(null);
-    dispatch({ type: "newBot", role, section,
+    dispatch({ type: "newBot", role, section, preserveSelection,
       onCreated: (bot) => {
         track("bot_created", { role: role?.id ?? "blank" });
-        if (alive.current) { onCreated?.(bot); close(); }
+        onCreated?.(bot);
+        if (alive.current) close();
       },
       onError: (message: string) => {
         if (!alive.current) return;

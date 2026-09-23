@@ -83,8 +83,41 @@ if (!enabled) console.log("skipping team lifecycle UI e2e: set OMB_UI_E2E=1 to i
     await click("Move bots to Delivery");
     await click("Researcher");
     await click("Engineer");
-    await click("Move 2 bots");
+    await click("Save");
     await expect.poll(async () => (await api("/api/bots?messages=0")).bots.filter((bot: any) => bot.section === "Delivery").length).toBe(2);
+    await manage("Delivery");
+    await click("Move bots to Delivery");
+    await click("Researcher");
+    // Hold only the creation response: persistence and SSE remain real. The
+    // user can dismiss the nested dialog while that request is in flight.
+    await ui("eval", "--js", `(() => {
+      const original = window.fetch.bind(window);
+      window.fetch = async (input, init) => {
+        if (String(input) !== '/api/bots' || init?.method !== 'POST') return original(input, init);
+        const response = await original(input, init);
+        window.createdTeamMember = (await response.clone().json()).bot;
+        await new Promise(resolve => { window.releaseTeamMember = resolve; });
+        window.fetch = original;
+        return response;
+      };
+      return true;
+    })()`);
+    await click("New Bot");
+    await click("Blank bot No preset instructions. Send it /setup to shape its role.");
+    let created: { id: string; name: string };
+    await expect.poll(async () => {
+      created = (await ui("eval", "--js", "window.createdTeamMember ?? null")).result;
+      return Boolean(created?.id);
+    }, { timeout: 10_000 }).toBe(true);
+    await click("Close");
+    await ui("eval", "--js", "window.releaseTeamMember(); true");
+    const checked = async (name: string) => (await ui("eval", "--js",
+      `document.querySelector(${JSON.stringify(`[role="checkbox"][aria-label=${JSON.stringify(name)}]`)})?.getAttribute('aria-checked')`)).result;
+    await expect.poll(() => checked(created!.name), { timeout: 10_000 }).toBe("true");
+    expect(await checked("Researcher")).toBe("false");
+    await click("Save");
+    await expect.poll(async () => (await api("/api/bots?messages=0")).bots.find((bot: any) => bot.id === a.id)?.section).toBeUndefined();
+    expect((await api("/api/bots?messages=0")).bots.find((bot: any) => bot.id === created!.id)?.section).toBe("Delivery");
     await manage("Delivery");
     await click("Edit Delivery shared instructions");
     await type("Delivery shared instructions", "Research first, then build and review.");
@@ -99,7 +132,7 @@ if (!enabled) console.log("skipping team lifecycle UI e2e: set OMB_UI_E2E=1 to i
     expect(await snapshot()).toContain("Edit Delivery shared instructions");
     // A second fixture client moves the bots out. SSE must keep the empty
     // team visible and make rename/delete available without a reload.
-    await api("/api/sidebar-sections", "POST", { name: "", botIds: [a.id, b.id] });
+    await api("/api/sidebar-sections", "POST", { name: "", botIds: [a.id, b.id, created!.id] });
     await expect.poll(snapshot, { timeout: 10_000 }).toContain("Rename Delivery team");
     await click("Rename Delivery team");
     await type("Team name", "Launch");
@@ -115,7 +148,7 @@ if (!enabled) console.log("skipping team lifecycle UI e2e: set OMB_UI_E2E=1 to i
     await expect.poll(async () => (await api("/api/bots?messages=0")).sections.includes("Launch")).toBe(false);
     const consoleResult = await ui("console");
     expect(JSON.stringify(consoleResult)).not.toMatch(/Uncaught|ReferenceError/);
-    console.info(JSON.stringify({ fixture: info!, screenshot, emptyTeam: true, multiBotMove: true, reload: true, renameAndDelete: true }));
+    console.info(JSON.stringify({ fixture: info!, screenshot, emptyTeam: true, multiBotMove: true, delayedMemberCreation: true, reload: true, renameAndDelete: true }));
     succeeded = true;
   } finally {
     if (!succeeded && fixtureHandle && fixtureLog) {

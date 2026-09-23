@@ -1039,14 +1039,14 @@ export type Action =
   | { type: "taskSwitched"; bot: Bot }
   | { type: "renameTask"; botId: string; threadId: string; title: string }
   | { type: "deleteTask"; botId: string; threadId: string }
-  | { type: "newBot"; role?: BotRole; section?: string; onCreated?: (bot: Bot) => void; onError?: (message: string) => void }
+  | { type: "newBot"; role?: BotRole; section?: string; preserveSelection?: boolean; onCreated?: (bot: Bot) => void; onError?: (message: string) => void }
   | { type: "botCreationPending"; on: boolean }
   | { type: "updateTask"; botId: string; threadId: string; patch: TaskUpdatePatch }
   | { type: "createProject"; botId: string; name: string; emoji?: string | null; onCreated?: (project: BotProject) => void; onError?: (message: string) => void }
   | { type: "updateProject"; botId: string; projectId: string; patch: ProjectUpdatePatch; onSaved?: () => void; onError?: (message: string) => void }
   | { type: "deleteProject"; botId: string; projectId: string; onDeleted?: () => void; onError?: (message: string) => void }
   | { type: "reorderProjects"; botId: string; projectIds: string[]; onSaved?: () => void; onError?: (message: string) => void }
-  | { type: "botAdded"; bot: Bot }
+  | { type: "botAdded"; bot: Bot; preserveSelection?: boolean }
   | { type: "deleteBot"; botId: string }
   | { type: "botDeletionPending"; botId: string; on: boolean }
   | { type: "duplicateBot"; botId: string }
@@ -1502,8 +1502,7 @@ export function reducer(state: AppState, action: Action): AppState {
         // An HTTP create/import response and its SSE broadcast can race. Fold
         // both paths without ever showing the same bot twice.
         bots: [action.bot, ...state.bots.filter((bot) => bot.id !== action.bot.id)],
-        activeView: "chat",
-        selectedId: action.bot.id,
+        ...(action.preserveSelection ? {} : { activeView: "chat" as const, selectedId: action.bot.id }),
       }, action.bot.id, "arrive");
     case "deleteBot": {
       const bots = state.bots.filter((b) => b.id !== action.botId);
@@ -3060,7 +3059,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
           rawDispatch({ type: "botCreationPending", on: true });
           void createBotWithRole(action.role, api, action.section)
             .then(({ bot, profileError }) => {
-              rawDispatch({ type: "botAdded", bot });
+              rawDispatch({ type: "botAdded", bot, preserveSelection: action.preserveSelection });
               action.onCreated?.(bot);
               if (profileError) {
                 showError(t("newBot.profileFailed", { error: profileError }));
