@@ -794,6 +794,11 @@ describe("CodexDriver turns (fake app-server)", () => {
 
     const seen = JSON.parse(readFileSync(dump, "utf8"));
     expect(seen.argv.join(" ")).toContain("mcp_servers.browser.command");
+    expect(seen.argv).toContain("features.browser_use=false");
+    expect(seen.argv).toContain("features.browser_use_external=false");
+    expect(seen.argv).toContain("features.computer_use=false");
+    expect(seen.argv.some((arg: string) => arg.startsWith("web_search="))).toBe(false);
+    expect(seen.argv).toContain('plugins={ "browser@openai-bundled" = { enabled = false }, "computer-use@openai-bundled" = { enabled = false }, "unified-computer-use@openai-bundled" = { enabled = false } }');
     expect(seen.argv).toContain('mcp_servers.browser.default_tools_approval_mode="auto"');
     expect(seen.argv.join(" ")).toContain("/tmp/browser-proxy.js");
     expect(seen.argv.join(" ")).not.toContain("browser-capability-secret");

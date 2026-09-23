@@ -38,6 +38,19 @@ The model picker groups models by provider and marks defaults. Supported engines
 
 <ProductScreenshot name="docs-model-picker" alt="The OpenMausBot model picker with several cloud and local engines" caption="Every bot can use a different engine and model." />
 
+## Codex browser tools
+
+Codex bots use the browser and computer selected in OpenMausBot. Desktop-only Codex
+browser/computer features and their bundled plugins are disabled for those bot
+processes, so bots do not select a native desktop connection that is unavailable
+inside the CLI. This does not uninstall plugins or change the standalone Codex app.
+Native web search keeps its configured mode.
+
+After built-in browser navigation, OpenMausBot collects a snapshot in the same
+browser session. A sign-in page or redirect is evidence of where navigation landed,
+not confirmation that the requested task finished. Connection failures retain the
+selected computer/account and do not automatically replay uncertain actions.
+
 ## Multiple Claude accounts
 
 Open **Settings → Engines → Add Claude account** and give the account a name, such as **Work** or **Personal**. OpenMausBot creates a separate configuration-directory setting for it; it does not copy your existing login. Under **Manage account and sign-in**, copy the sign-in command and run it on the computer hosting OpenMausBot, then choose **Check account**. On Windows, use PowerShell. Claude handles the browser sign-in and stores its own credentials.
