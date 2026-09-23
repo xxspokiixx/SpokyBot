@@ -687,6 +687,7 @@ export function SettingsModal() {
                   <ApiKeyRow section="openaiCompat" testProvider="openaiCompat" />
                   <OpenAiCompatUrl />
                   <ApiKeyRow section="xai" testProvider="xai" />
+                  <ApiKeyRow section="mistral" testProvider="mistral" />
                   <div className="pt-2 text-[11.5px] font-medium uppercase tracking-wide text-ink-secondary">{t("keys.integrations.title")}</div>
                   <ApiKeyRow section="box" />
                   <VpsConnection />
