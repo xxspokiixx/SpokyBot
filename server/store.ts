@@ -1830,6 +1830,42 @@ export class Store {
     return changed;
   }
 
+  /** Company instance ids became stable across re-enrolment. Moves every
+   * saved reference to an old id onto its replacement in one save: model
+   * choices, native resume cursors and handed-message records. An entry that
+   * already exists under the new id wins over the old one. */
+  renameInstances(ids: ReadonlyMap<string, string>): number {
+    const touches = (record?: Record<string, unknown>) => Boolean(record && Object.keys(record).some(key => ids.has(key)));
+    const rename = <T>(record: Record<string, T>): Record<string, T> => {
+      const next: Record<string, T> = {};
+      for (const [key, value] of Object.entries(record)) {
+        const target = ids.get(key);
+        if (!target) next[key] = value;
+        else if (!Object.prototype.hasOwnProperty.call(record, target)) next[target] = value;
+      }
+      return next;
+    };
+    const changed: BotRecord[] = [];
+    for (const bot of this.bots) {
+      let dirty = false;
+      const selected = ids.get(bot.modelSelection.instanceId);
+      if (selected) { bot.modelSelection = { ...bot.modelSelection, instanceId: selected }; dirty = true; }
+      if (touches(bot.resumeCursors)) { bot.resumeCursors = rename(bot.resumeCursors); dirty = true; }
+      for (const task of bot.tasks ?? []) {
+        const taskSelected = task.modelSelection && ids.get(task.modelSelection.instanceId);
+        if (task.modelSelection && taskSelected) { task.modelSelection = { ...task.modelSelection, instanceId: taskSelected }; dirty = true; }
+        if (touches(task.resumeCursors)) { task.resumeCursors = rename(task.resumeCursors); dirty = true; }
+        if (task.handedMessages && touches(task.handedMessages)) { task.handedMessages = rename(task.handedMessages); dirty = true; }
+        const last = task.lastInstanceId && ids.get(task.lastInstanceId);
+        if (last) { task.lastInstanceId = last; dirty = true; }
+      }
+      if (dirty) changed.push(bot);
+    }
+    if (changed.length) this.saveBots();
+    for (const bot of changed) this.emit({ type: "bot", botId: bot.id });
+    return changed.length;
+  }
+
   setResumeCursor(botId: string, instanceId: string, cursor: unknown, threadId?: string) {
     const bot = this.bot(botId);
     if (!bot) return;

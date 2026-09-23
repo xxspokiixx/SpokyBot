@@ -160,15 +160,17 @@ import { sweepThreadEventLogs, type ThreadLogRetentionCandidate } from "./thread
 import { ComputerControl } from "./computer-control.ts";
 import { augmentedPath, findCliCandidates, resetPathCache } from "./env-path.ts";
 import { registerEnginesBinDir } from "./engine-install.ts";
-import { appendUsage, parseUsageRange, readUsage, summarizeUsage, usageCsv, USAGE_GROUPINGS, flushUsageLedger, type UsageGroupBy, type UsageTrigger } from "./usage-ledger.ts";
+import { appendUsage, parseUsageRange, readUsage, summarizeUsage, usageCsv, USAGE_GROUPINGS, flushUsageLedger, type UsageGroupBy, type UsageRow, type UsageTrigger } from "./usage-ledger.ts";
+import { ledgerCost } from "./model-prices.ts";
+import type { PriceList } from "./prices.ts";
 import type { RequestAuth } from "./request-auth.ts";
 import { checkProviderKey, PROVIDER_KEY_KINDS, type ProviderKeyKind } from "./provider-key-check.ts";
-import { assertWithinBudget, noteSpend, spendState } from "./spend.ts";
+import { assertWithinBudget, noteSpend, spendAlertText, spendState, takeSpendAlert } from "./spend.ts";
 import { fleetAvailable, fleetRequest, fleetSocketPath } from "./fleet-client.ts";
 import { entitled } from "./enterprise.ts";
 import { HOSTED_CONTRACT_HEADER, HOSTED_CONTRACT_METADATA, HOSTED_CONTRACT_VERSION } from "./hosted-contract.ts";
 import { describeSpawnFailure, execCli } from "./procs.ts";
-import { blockedTarget, buildNotification, type Notification } from "./notify.ts";
+import { blockedTarget, buildNotification, buildSpendNotification, type Notification } from "./notify.ts";
 import {
   isModelVariant,
   type ModelSelection,
@@ -247,6 +249,7 @@ import {
 import { EventBus } from "./harness/bus.ts";
 import { ProviderRegistry } from "./harness/registry.ts";
 import { ManagedDesktopProviders } from "./managed-desktop.ts";
+import { computerKindForResource, ManagedDesktopPolicy } from "./managed-policy.ts";
 import { hostedModelPolicy, HOSTED_MODEL_POLICY_HEADER, HOSTED_PROVIDER_SETTINGS_ERROR } from "./hosted-models.ts";
 import type { ProviderInstance } from "./contracts.ts";
 import { selectDefaultModelSelection } from "./default-model-selection.ts";
@@ -424,7 +427,7 @@ import {
 } from "./turn-dispatch-guard.ts";
 import { createGracefulShutdown } from "./graceful-shutdown.ts";
 import { acquireDataDirLeaseForProcess } from "./data-dir-lease.ts";
-import { createWorkspaceAccess, describeEdition, editionStatus, hostedWorkspaceConfiguration, hostedWorkspaceConfigured, sharedWorkspaceFullAccessConfigured, loadEnterpriseLayer, workspaceMembership, type WorkspaceAccess } from "./enterprise.ts";
+import { createWorkspaceAccess, describeEdition, editionStatus, hostedWorkspaceConfiguration, hostedWorkspaceConfigured, editionForMembers, LICENSE_WARN_DAYS, licenseWarning, sharedWorkspaceFullAccessConfigured, loadEnterpriseLayer, workspaceMembership, type EditionStatus, type WorkspaceAccess } from "./enterprise.ts";
 import { environmentDescriptor, loadEnvironmentId, serverVersion } from "./environment.ts";
 import { WorkspaceBackupMaintenance } from "./workspace-backup-maintenance.ts";
 import { createWorkspaceBackupRoutes, isWorkspaceBackupSessionControl } from "./workspace-backup-http.ts";
@@ -640,11 +643,15 @@ const registry = new ProviderRegistry(BUILT_IN_DRIVERS);
 // any other copy on PATH.
 registerEnginesBinDir();
 
-// Who asked for the next turn on a thread, noted where a message comes in
-// and read by the usage ledger when the turn settles. The last note stands
-// until the next message: a resumed connector or a drained queued send
-// still belongs to the person who wrote, and routine or peer turns are
-// told apart before this is consulted.
+// Who asked for the turn running (or last run) on each thread, read by the
+// usage ledger when it settles. It is set when a turn is ADMITTED, from the
+// message that started it — never when a message merely queues behind a
+// running turn or is steered into one, so a second person's words cannot
+// re-book the first person's turn. A queued message carries its sender's
+// trigger until it drains and starts its own turn. Continuations (a resumed
+// connector, a delegation wake) set nothing and stay with the person whose
+// ask they continue; routine and peer turns are told apart before this is
+// consulted.
 const turnTriggers = new Map<string, UsageTrigger>();
 /** Who a user message is from, when that is someone other than the desktop
  * owner. Loopback is the owner by design, so it stays unstamped and reads as
@@ -1067,13 +1074,61 @@ function adminAuditRows(
   return rows;
 }
 
-function noteTurnTrigger(threadId: string, auth: RequestAuth): void {
-  turnTriggers.set(
-    threadId,
-    auth.kind === "session"
-      ? { kind: "user", ...(auth.session.email ? { email: auth.session.email } : {}), label: auth.session.label }
-      : { kind: "owner" },
-  );
+
+/** The guarded send contract external interfaces (the Slack worker) opt into.
+ * `onBehalfOf` is additive and advertised by /api/health
+ * (capabilities.guardedOnBehalfOf): it names the person a relay acts for, so
+ * the turn is booked to them rather than to this machine. Only this
+ * admin-scoped route reads it; every other send is booked to its own
+ * session. */
+const guardedSendSchema = z.object({
+  threadId: z.string().regex(/^[\w-]+$/),
+  sendId: z.string().regex(/^[A-Za-z0-9_-]{16,80}$/),
+  text: z.string().min(1),
+  expectedActiveLeafId: z.string().regex(/^[\w-]+$/).nullable(),
+  expectedApprovalMode: z.enum(["ask", "full"]).optional(),
+  replyToId: z.string().optional(),
+  onBehalfOf: z.object({
+    email: z.string().trim().toLowerCase().max(254).pipe(z.email()).optional(),
+    name: z.string().trim().min(1).max(120).optional(),
+  }).strict().refine((who) => Boolean(who.email || who.name)).optional(),
+}).strict();
+
+/** Who a request is, for the usage ledger: a paired or signed-in person, or
+ * this machine. Captured when the message is accepted and carried with it. */
+function usageTriggerFor(auth: RequestAuth): UsageTrigger {
+  return auth.kind === "session"
+    ? { kind: "user", ...(auth.session.email ? { email: auth.session.email } : {}), label: auth.session.label }
+    : { kind: "owner" };
+}
+
+/** The operator's price list, when the server may read it (`billing`). */
+function operatorPrices(): PriceList | null {
+  return entitled("billing") && cfg.billing?.prices && Object.keys(cfg.billing.prices).length ? cfg.billing.prices : null;
+}
+
+/** Write one settled turn to the ledger, estimating its cost when the
+ * engine reported tokens but no price, and let the spend cap see it at once.
+ * The first booking that takes the month past the warning threshold, or to
+ * the cap, notifies admins (once per month each; server/spend.ts). */
+function bookTurnUsage(row: Omit<UsageRow, "at" | "costSource">): void {
+  const booked = { ...row, ...ledgerCost(row, operatorPrices()), at: new Date().toISOString() };
+  // The append lands asynchronously; the cap counts the row from memory
+  // until it does, so the check below (and the next turn start) sees it.
+  noteSpend(DATA_DIR, booked, appendUsage(DATA_DIR, booked));
+  const state = spendState(cfg, DATA_DIR);
+  const alert = takeSpendAlert(DATA_DIR, state);
+  if (alert && state) {
+    broadcast({ kind: "notify", notification: buildSpendNotification({ id: row.botId, name: row.botName }, row.threadId, spendAlertText(alert, state)) }, { adminOnly: true });
+  }
+}
+
+/** A queued line from before triggers were stored with it: its sender, else
+ * the owner; a bot's own queued words set nothing. */
+function queuedTurnTrigger(item: { trigger?: UsageTrigger; sender?: ResolvedSender; peerAsk?: unknown }): UsageTrigger | undefined {
+  if (item.trigger) return item.trigger;
+  if (item.peerAsk) return undefined;
+  return item.sender ? { kind: "user", label: item.sender.name } : { kind: "owner" };
 }
 const providerAuthSessions = new ProviderAuthSessions();
 await registry.load(providerConfigs(), decorateHostedProvider);
@@ -1198,10 +1253,21 @@ const bus = new EventBus();
 bus.attach(registry.instances());
 let companyRuntimeReady!: () => void;
 const companyRuntimeStarted = new Promise<void>(resolve => { companyRuntimeReady = resolve; });
+/** The enrolled organisation's desktop policy: in memory only, read-only, and
+ * inert (null) unless Electron's enrolled parent sends one. */
+const managedPolicy = new ManagedDesktopPolicy({ onChange: () => broadcast({ kind: "config", ...configStatus() }) });
+/** Why the organisation refuses this instance for bots, or undefined. */
+function policyModelRefusal(instance: { instanceId: string; driverKind: string }): string | undefined {
+  const engine = BUILT_IN_DRIVERS.find(driver => driver.driverKind === instance.driverKind)?.metadata.displayName;
+  return managedPolicy.modelRefusal({ driverKind: instance.driverKind, displayName: engine }, managedDesktop.owns(instance.instanceId));
+}
 const managedDesktop = new ManagedDesktopProviders({
   registry,
   dataDirectory: DATA_DIR,
   beforeReplace: stopCompanyInstances,
+  // Ids became stable across re-enrolment; carry old references forward once.
+  migrate: aliases => { store.renameInstances(new Map(aliases.map(({ from, to }) => [from, to]))); },
+  onAvailability: () => broadcast({ kind: "config", ...configStatus() }),
   afterReplace: ids => {
     for (const id of providerInstancesChanging) if (managedDesktop.owns(id)) providerInstancesChanging.delete(id);
     bus.attach(ids.flatMap(id => { const instance = registry.get(id); return instance ? [instance] : []; }));
@@ -1209,6 +1275,22 @@ const managedDesktop = new ManagedDesktopProviders({
     // Company grants and revocations appear without reloading the window.
     broadcast({ kind: "config", ...configStatus() });
   },
+});
+utilityParentPort?.on("message", event => {
+  const message = event.data as { type?: unknown; requestId?: unknown; identity?: unknown } | undefined;
+  if (message?.type !== "openmausbot:managed-desktop-identity") return;
+  const requestId = typeof message.requestId === "string" && message.requestId.length <= 100 ? message.requestId : undefined;
+  void companyRuntimeStarted.then(() => managedDesktop.migrateIdentity(message.identity)).then(() => true, () => false).then(ok => {
+    utilityParentPort.postMessage({ type: "openmausbot:managed-desktop-result", requestId, ok });
+  });
+});
+utilityParentPort?.on("message", event => {
+  const message = event.data as { type?: unknown; requestId?: unknown; policy?: unknown } | undefined;
+  if (message?.type !== "openmausbot:managed-desktop-policy") return;
+  const requestId = typeof message.requestId === "string" && message.requestId.length <= 100 ? message.requestId : undefined;
+  let ok = true;
+  try { managedPolicy.apply(message.policy); } catch { ok = false; }
+  utilityParentPort.postMessage({ type: "openmausbot:managed-desktop-result", requestId, ok });
 });
 // Only Electron owns this port. There is deliberately no HTTP equivalent or
 // config patch for its organization identity, endpoint, or model capability.
@@ -1568,6 +1650,10 @@ function releaseTurnResources(owner: TurnOwner | undefined): void {
 }
 
 async function bindTurnComputer(owner: TurnOwner, resource: string, exclusive = false): Promise<void> {
+  // Every computer claim passes here: a kind the organisation disallows is
+  // refused at claim time, whichever path selected it.
+  const kind = computerKindForResource(resource), refusal = kind && managedPolicy.computerRefusal(kind);
+  if (refusal) throw Object.assign(new Error(refusal), { code: "managed_policy" });
   const active = () => activeInternalGenerationByThread.get(owner.threadId) === owner.generation &&
     turnResourceOwners.get(owner.threadId)?.generation === owner.generation;
   let waitingMessage: Message | undefined;
@@ -2050,9 +2136,14 @@ function askBotAndWait(targetBotId: string, message: string, depth: number, from
 }
 
 // New bots honor setup's saved choice; unconfigured workspaces prefer Claude.
+// While enrolled, a Company model that can run beats a signed-out personal
+// engine, and the organisation's policy is respected; otherwise inert.
 async function defaultSelection() {
   if (hostedModels) return hostedModels.select(cfg.defaultModelSelection);
-  return selectDefaultModelSelection(await registry.describe(), cfg.defaultModelSelection);
+  return selectDefaultModelSelection(await registry.describe(), cfg.defaultModelSelection, {
+    company: (instanceId) => managedDesktop.owns(instanceId),
+    refusal: (instance) => policyModelRefusal(instance),
+  });
 }
 
 function checkedModelSelection(
@@ -2373,7 +2464,7 @@ function previewSystemPrompt(bot: BotRecord) {
       browser: previewPlan.computer === undefined ? false : previewPlan.browser,
     }, { note: previewPlan.note }) },
     { id: "composio", label: "Connected apps", text: caps?.composioMcp && bot.composio !== false && composio.configured(cfg) ? COMPOSIO_PROMPT : "" },
-    { id: "mcp", label: "MCP servers", text: caps?.customMcp ? customMcpPrompt(Object.keys(customMcpServers(cfg, bot.mcpServers))) : "" },
+    { id: "mcp", label: "MCP servers", text: caps?.customMcp ? customMcpPrompt(Object.keys(engineMcpServers(bot))) : "" },
     { id: "browser", label: "Browser", text: previewPlan.browser ? BUILT_IN_BROWSER_SYSTEM_PROMPT : "" },
     { id: "coordination", label: "Team", text: agentsMounted && coordination ? ` ${coordination}` : "" },
     { id: "credential", label: "Credentials", text: agentsMounted ? CREDENTIAL_PROMPT : "" },
@@ -3997,7 +4088,9 @@ function cursorSeq(raw: string | string[] | undefined): number | null {
   return Number.isSafeInteger(parsed) && parsed >= 0 ? parsed : null;
 }
 
-function broadcast(payload: Record<string, unknown>) {
+/** `adminOnly` frames (a workspace spend notice) reach admin streams and
+ * are withheld from client sessions, live and on replay. */
+function broadcast(payload: Record<string, unknown>, options: { adminOnly?: boolean } = {}) {
   // Membership may also change through fleet/CLI config writes. Close stale
   // email streams before any further workspace data is delivered.
   sessions.revalidateEmailSessions();
@@ -4006,9 +4099,11 @@ function broadcast(payload: Record<string, unknown>) {
   const frame = `id: ${STREAM_ID}:${seq}\ndata: ${JSON.stringify({ ...payload, seq })}\n\n`;
   // Store both projections as immutable frames: live and reconnecting clients
   // must receive the same filtered config without changing the admin event.
-  const clientFrame = kind === "config"
-    ? `id: ${STREAM_ID}:${seq}\ndata: ${JSON.stringify({ ...configForAccess(payload as ReturnType<typeof configStatus>, false), seq })}\n\n`
-    : frame;
+  const clientFrame = options.adminOnly
+    ? null
+    : kind === "config"
+      ? `id: ${STREAM_ID}:${seq}\ndata: ${JSON.stringify({ ...configForAccess(payload as ReturnType<typeof configStatus>, false), seq })}\n\n`
+      : frame;
   // Live desktop captures can each be hundreds of kilobytes and become stale
   // as soon as the next one arrives. Keep their sequence slots so resume-gap
   // detection stays honest, but never retain their base64 payloads.
@@ -4016,7 +4111,8 @@ function broadcast(payload: Record<string, unknown>) {
   if (replayBuffer.length > REPLAY_MAX) replayBuffer.shift();
   for (const client of Array.from(sseClients)) {
     if (!wants(client, kind)) continue;
-    const out = client.admin ? frame : memberFrame(client, seq, payload, clientFrame);
+    // Admin-only frames (clientFrame null) never reach members, and a member never falls back to the admin frame.
+    const out = client.admin ? frame : clientFrame === null ? null : memberFrame(client, seq, payload, clientFrame);
     if (out === null) continue;
     // Screen frames are replaceable and durable events are not: see
     // ./sse-fanout.ts for the backpressure/bound decision this makes.
@@ -5032,6 +5128,10 @@ async function selectableComputers(bot: BotRecord) {
         reason = "The built-in browser is disabled, not installed, or unsupported by this model engine.";
       }
     } catch (error) { reason = error instanceof Error ? error.message : String(error); }
+    // Not offered at all when the organisation disallows it.
+    const kind = surface === "local" ? "thisComputer" : surface === "vm" ? "localVm" : surface === "cloud" ? (bot.cloudBackend === "vps" ? "vps" : "box") : undefined;
+    const managed = kind && managedPolicy.computerRefusal(kind);
+    if (managed) return { surface, label: surfaceLabel(surface), available: false, ready: false, canStart: false, canCreate: false, reason: managed };
     const available = ready || canStart || canCreate;
     return { surface, label: surfaceLabel(surface), available, ready, canStart, canCreate, ...(!available ? { reason } : {}) };
   }));
@@ -5721,7 +5821,7 @@ bus.subscribe((event: RuntimeEvent) => {
         const measuredSelection = directTurnBots.get(event.threadId)?.modelSelection ?? selection;
         store.patchTask(bot.id, event.threadId, { lastContextModel: Number.isFinite(lastContext?.tokens) && (lastContext?.tokens ?? 0) > 0
           ? `${measuredSelection.instanceId}:${measuredSelection.model}` : undefined });
-        appendUsage(DATA_DIR, {
+        bookTurnUsage({
           botId: bot.id,
           botName: bot.name,
           threadId: event.threadId,
@@ -5738,7 +5838,6 @@ bus.subscribe((event: RuntimeEvent) => {
               ? { kind: "bot", ...(settledTask?.openedBy?.botId ? { botId: settledTask.openedBy.botId } : {}) }
               : turnTriggers.get(event.threadId) ?? { kind: "owner" },
         });
-        noteSpend(DATA_DIR, event.cost ?? null);
         const digestSettled = completedTurnId ? scheduleTurnDigest({
             botId: bot.id,
             botName: bot.name,
@@ -5803,7 +5902,7 @@ bus.subscribe((event: RuntimeEvent) => {
         const tokens = event.usage ?? lastReported;
         const speakingBot = store.bot(speaker.botId);
         const selection = speakingBot?.modelSelection;
-        appendUsage(DATA_DIR, {
+        bookTurnUsage({
           botId: speaker.botId,
           botName: speaker.name,
           threadId: event.threadId,
@@ -5818,7 +5917,6 @@ bus.subscribe((event: RuntimeEvent) => {
             ? { kind: "routine", routineId: routineRun.routineId, label: routineRun.routineName }
             : turnTriggers.get(event.threadId) ?? { kind: "owner" },
         });
-        noteSpend(DATA_DIR, event.cost ?? null);
         if (completedTurnId) {
           void scheduleTurnDigest({
             botId: speaker.botId, botName: speaker.name,
@@ -6498,7 +6596,7 @@ bus.subscribe((event: RuntimeEvent) => {
 
 function drainQueuedSends() {
   if (!followupsReady) return;
-  drainSteeredMessages(store, (botId, threadId, prompt, userMessage, excludeIds, unattended) =>
+  drainSteeredMessages(store, (botId, threadId, prompt, userMessage, excludeIds, unattended, head) =>
     // A plain attended turn — no automationSource, no comms depth: exactly
     // what typing the same words into an idle bot would run. Self-opened
     // work retains `unattended` and the message's bot-origin provenance
@@ -6507,8 +6605,10 @@ function drainQueuedSends() {
     // from duplicating the last one, and excludeIds drops every drained
     // line from the transcript-replay so they are not also in `prompt`.
     new Promise<void>((resolve, reject) => {
+      // The drained turn is booked to whoever sent the first waiting line.
       void startTurn(botId, prompt, {
         threadId, userMessage, excludeMessageIds: excludeIds, unattended, onTurnSettled: resolve,
+        trigger: queuedTurnTrigger(head),
       }).catch((err) => {
         store.appendMessage(threadId, {
           role: "bot", kind: "activity",
@@ -6529,7 +6629,7 @@ function drainQueuedSends() {
 
 /** Keep a person's words off the transcript until a direct-thread slot is
  * available. Reuse the existing cancellable, idempotent composer queue. */
-async function startOrQueueDirectMessage(botId: string, threadId: string, text: string, replyTo?: Message, sendId?: string, sender?: ResolvedSender) {
+async function startOrQueueDirectMessage(botId: string, threadId: string, text: string, replyTo?: Message, sendId?: string, sender?: ResolvedSender, trigger?: UsageTrigger) {
   const capacity = botAtThreadCapacity(botId);
   if (capacity || threadBusy(botId, threadId) || parksBehindCoordination(botId, threadId)) {
     const reason = capacity ? "capacity" as const : undefined;
@@ -6539,10 +6639,11 @@ async function startOrQueueDirectMessage(botId: string, threadId: string, text: 
       reason,
       prompt: promptWithReply(text, replyTo, cfg.profile?.name?.trim() || "User"),
       sender,
+      trigger,
     });
     return { ok: true as const, queued: true as const, queueId: queued.id, threadId, reason };
   }
-  const message = await startTurn(botId, text, { threadId, replyTo, sendId, sender });
+  const message = await startTurn(botId, text, { threadId, replyTo, sendId, sender, trigger });
   return { ok: true as const, threadId, message };
 }
 
@@ -6778,6 +6879,10 @@ async function startTurn(
     editedMessageId?: string;
     /** The person who sent this, when not the desktop owner. */
     sender?: ResolvedSender;
+    /** Who the usage ledger books this turn to: the sender of the message
+     * that starts it, captured when that message was accepted. Absent on
+     * continuations, which stay with the ask they continue. */
+    trigger?: UsageTrigger;
     /** Extra transcript ids to omit (every drained queued line, not just the last). */
     excludeMessageIds?: string[];
     /** Routines run in detached tasks; pin the destination for the whole turn. */
@@ -6893,6 +6998,8 @@ async function startTurn(
       { status: 409 },
     );
   }
+  const policyRefusal = policyModelRefusal(instance);
+  if (policyRefusal) throw Object.assign(new Error(policyRefusal), { status: 409, code: "managed_policy" });
   // Resolve only transport tags from this newly submitted text. The original
   // string remains the durable message. Native-image providers get a
   // path-free prompt and bounded inputs instead of needing a Read tool;
@@ -6968,6 +7075,9 @@ async function startTurn(
           sender: opts?.sender,
         });
   }
+  // Admitted: every refusal above has passed and no other turn runs on this
+  // thread, so this is the one moment the ledger's "who asked" may change.
+  if (opts?.trigger) turnTriggers.set(threadId, opts.trigger);
   // A card continuation neither starts nor ends the person's ask: it
   // resumes the turn their last message began, so that record stands.
   if (!opts?.cardContinuation) {
@@ -7214,7 +7324,7 @@ async function startTurn(
       // composio — only to a driver that can mount them. Their tools are
       // never pre-allowed, so every call rides the normal permission flow.
       if (instance.adapter.capabilities.customMcp === true) {
-        const custom = customMcpServers(cfg, bot.mcpServers);
+        const custom = engineMcpServers(bot);
         if (Object.keys(custom).length) integrations.custom = custom;
       }
       // CLI engines work inside the bot's own workspace directory rather
@@ -7281,6 +7391,12 @@ async function startTurn(
         throw new Error("the Computer engine works on the cloud computer — set Works on to Cloud, or choose another engine");
       }
       const wants = plan.computer;
+      // A place the organisation disallows is refused before anything is
+      // prepared; Auto below simply skips disallowed places.
+      const wantedKind = teamComputer ? "box" : wants === "local" ? "thisComputer" : wants === "vm" ? "localVm"
+        : wants === "cloud" ? (cloudBackend === "vps" ? "vps" : "box") : undefined;
+      const placeRefusal = wantedKind && managedPolicy.computerRefusal(wantedKind);
+      if (placeRefusal) throw Object.assign(new Error(placeRefusal), { status: 409, code: "managed_policy" });
       let previewCapture: (() => Promise<{ png: string; format: string }>) | null = null;
       let browserCapture: (() => Promise<{ png: string; format: string }>) | null = null;
       let computerKind: "box" | "vps" | "vm" | "local" | null = null;
@@ -7461,7 +7577,7 @@ async function startTurn(
       // A VPS is a local-agent computer mount, never a remote agent runner.
       // Explicit Cloud may prepare/start it. Auto remains read-only unless
       // the person explicitly opted this bot into remote lifecycle actions.
-      if ((wants === "cloud" || wants === undefined) && cloudBackend === "vps") {
+      if ((wants === "cloud" || (wants === undefined && managedPolicy.computerAllowed("vps"))) && cloudBackend === "vps") {
         const unsupported = vps.vpsDriverError(instance.driverKind, mountsComputerMcp);
         if (unsupported && wants === "cloud") throw new Error(unsupported);
         if (unsupported && wants === undefined) autoVpsProblem = unsupported;
@@ -7541,7 +7657,7 @@ async function startTurn(
       // Auto reaches a Local VM this bot already has before it ever touches the
       // host's own desktop: on a headless server that VM is the only desktop
       // there is, and a person who prepared one meant it to be used.
-      if (wants === undefined && !integrations.computer && !integrations.localComputer && await attachLocalVm(false)) computerKind = "vm";
+      if (wants === undefined && !integrations.computer && !integrations.localComputer && managedPolicy.computerAllowed("localVm") && await attachLocalVm(false)) computerKind = "vm";
       // An unattended run on a bot with a VPS configured never lands on the
       // host's own desktop instead: a scheduled job clicking on someone's
       // laptop is worse than a scheduled job that fails and says why.
@@ -7551,6 +7667,7 @@ async function startTurn(
         !integrations.localComputer &&
         wants === undefined &&
         !unattendedVps &&
+        managedPolicy.computerAllowed("thisComputer") &&
         shouldMountLocalComputer({
           requested: undefined,
           hostPlatform: process.platform,
@@ -7806,7 +7923,7 @@ async function startTurn(
         systemStable: prompt.stable,
         systemVolatile: prompt.volatile,
         integrations,
-        mcpFromUserConfig: claudeUserMcpEnabled(cfg),
+        mcpFromUserConfig: claudeUserMcpEnabled(cfg) && !managedPolicy.restrictsMcp(),
         cwd,
       }), () => !directTurnClaimExists(bot.id, dispatchClaimId, threadId), async () => {
         await instance.adapter.interruptTurn(threadId).catch(() => {});
@@ -9038,8 +9155,9 @@ async function runGroupMemberTurn(
     onDispatchError?.(`${bot.name}'s provider account is being updated — try again shortly`);
     return true;
   }
-  if (!instance) {
-    const message = `${bot.name}'s model is unavailable`;
+  const roomPolicyRefusal = instance ? policyModelRefusal(instance) : undefined;
+  if (!instance || roomPolicyRefusal) {
+    const message = roomPolicyRefusal ?? `${bot.name}'s model is unavailable`;
     store.appendMessage(threadId, {
       role: "bot",
       kind: "activity",
@@ -9166,7 +9284,7 @@ async function runGroupMemberTurn(
   }
   // user-configured MCP servers: same gating as the 1:1 site above.
   if (instance.adapter.capabilities.customMcp === true) {
-    const custom = customMcpServers(cfg, bot.mcpServers);
+    const custom = engineMcpServers(bot);
     if (Object.keys(custom).length) integrations.custom = custom;
   }
   // Connected-app discovery is intentionally awaited before a provider owns
@@ -9297,6 +9415,12 @@ async function runGroupMemberTurn(
       readyBot.browser !== false &&
       instance.adapter.capabilities.browserMcp === true,
   });
+  // A place the organisation disallows is refused before anything is
+  // provisioned or started, exactly as a bot thread refuses it.
+  const roomKind = roomTeamComputer ? "box" : roomPlan.computer === "local" ? "thisComputer" : readyBot.computer === "vm" ? "localVm"
+    : roomPlan.computer === "cloud" ? (turnProvider(readyBot) === "vps" ? "vps" : "box") : undefined;
+  const roomPlaceRefusal = roomKind && managedPolicy.computerRefusal(roomKind);
+  if (roomPlaceRefusal) throw Object.assign(new Error(roomPlaceRefusal), { code: "managed_policy" });
   // The Computer engine runs on the Box; this computer has no tools it can
   // reach, exactly as a bot thread refuses it.
   if (roomPlan.computer === "local" && instance.driverKind === "boxAgent") {
@@ -9621,7 +9745,7 @@ async function runGroupMemberTurn(
         systemVolatile: roomSystem.volatile,
         cwd,
         integrations,
-        mcpFromUserConfig: claudeUserMcpEnabled(cfg),
+        mcpFromUserConfig: claudeUserMcpEnabled(cfg) && !managedPolicy.restrictsMcp(),
         ...(instance.instanceId === readyBot.modelSelection.instanceId
           ? memberTurnSelection(readyBot.modelSelection)
           : { model: instance.models.default }),
@@ -10204,6 +10328,8 @@ type StartGroupTurnOptions = {
   via?: "api";
   /** The person who sent it, when not the desktop owner (see Message.sender). */
   sender?: ResolvedSender;
+  /** Who the ledger books this room turn's speakers to (see startTurn's `trigger`). */
+  trigger?: UsageTrigger;
 };
 
 function startGroupTurn(
@@ -10250,6 +10376,8 @@ function startGroupTurn(
     via: options.via,
     sender: options.sender,
   });
+  // Admitted (see startTurn): the room's speakers are booked to this sender.
+  if (options.trigger) turnTriggers.set(threadId, options.trigger);
   const titled = group.dm ? null : store.titleGroupTaskFromFirstMessage(group.id, text, threadId);
   const snippet = titled?.title;
 
@@ -10306,7 +10434,8 @@ function startGroupTurn(
   const titleBot = goalCoordinator ?? responders[0]!;
   const titleInstance = registry.get(titleBot.modelSelection.instanceId);
   const titleText = extractTurnImages(text).text;
-  if (titled && snippet && titleText.trim() && llmThreadTitlesEnabled(cfg) && titleInstance?.generateText) {
+  // An engine the organisation disallows never receives the text, even for a title.
+  if (titled && snippet && titleText.trim() && llmThreadTitlesEnabled(cfg) && titleInstance?.generateText && !policyModelRefusal(titleInstance)) {
     void generateThreadTitle(titleInstance, titleText)
       .then((title) => {
         if (title) store.retitleGroupTask(group.id, threadId, snippet, title);
@@ -10413,14 +10542,14 @@ function drainQueuedChannelSends(): void {
       const group = store.group(groupId);
       return group ? groupIsWorking(group) : false;
     },
-    ({ groupId, threadId, text, replyToId, sendId, mode, id, via, sender }) => {
+    ({ groupId, threadId, text, replyToId, sendId, mode, id, via, sender, trigger }) => {
       const group = store.group(groupId);
       const ownsThread = group?.dm
         ? group.threadId === threadId
         : Boolean(group && store.groupTaskByThread(group.id, threadId));
       if (!group || !ownsThread) return;
       try {
-        startGroupTurn(groupId, text, resolveReplyTarget(threadId, replyToId), sendId, mode, id, { via, threadId, sender });
+        startGroupTurn(groupId, text, resolveReplyTarget(threadId, replyToId), sendId, mode, id, { via, threadId, sender, trigger: queuedTurnTrigger({ trigger, sender }) });
       } catch (error) {
         if (!store.messagesFor(threadId).some((message) => message.queueId === id && message.role === "user")) {
           store.appendMessage(threadId, { role: "user", kind: "text", text, replyToId, sendId, channelMode: mode, queueId: id, via, sender });
@@ -11441,6 +11570,19 @@ async function perBotLocalVmCountForModeChange(): Promise<number | null> {
   return existingPerBotLocalVmCount(runtime.runtime);
 }
 
+/** What Settings needs about the edition: the features, and, once the key
+ * is inside its warning window or grace period, when it lapses. The dates
+ * reach admins only (configForAccess strips them for client sessions). */
+function editionForSettings(status: EditionStatus) {
+  const expiring = status.edition === "enterprise" && status.expiresAt && status.expiresInDays !== undefined &&
+    (status.graceEndsAt !== undefined || status.expiresInDays <= LICENSE_WARN_DAYS);
+  return {
+    edition: status.edition,
+    features: status.features,
+    ...(expiring ? { license: { expiresAt: status.expiresAt!, expiresInDays: status.expiresInDays!, ...(status.graceEndsAt ? { graceEndsAt: status.graceEndsAt } : {}) } } : {}),
+  };
+}
+
 function configStatus() {
   // off-by-default thread cleanup knobs stay absent so clients can tell
   // "unset" apart from any in-range value
@@ -11452,7 +11594,7 @@ function configStatus() {
     // a fleet agent on this server means Settings → Workspaces has something to drive
     fleet: { available: fleetAvailable(fleetSocketPath()) },
     // what this build is entitled to, so Settings shows only what works here
-    edition: (({ edition, features }) => ({ edition, features }))(editionStatus()),
+    edition: editionForSettings(editionStatus()),
     // settings, not secrets: the cap and the operator's own price list
     budgets: {
       ...(cfg.budgets?.monthlyUsd !== undefined ? { monthlyUsd: cfg.budgets.monthlyUsd } : {}),
@@ -11476,6 +11618,8 @@ function configStatus() {
     imageGen: avatarImageStatus(cfg),
     // not a secret — the sidebar shows it
     profile: { name: cfg.profile?.name ?? "", email: cfg.profile?.email ?? "" },
+    // the enrolled organisation's read-only desktop policy; null when not enrolled
+    managedPolicy: managedPolicy.summary(),
     // not a secret — the settings picker shows it; "" = follow the system
     language: cfg.language ?? "",
     rooms: { turnTimeoutMinutes: roomTurnTimeoutMinutes(cfg) },
@@ -11529,6 +11673,7 @@ function configForAccess(status: ReturnType<typeof configStatus>, admin: boolean
   // source objects.
   return {
     ...status,
+    edition: { edition: status.edition.edition, features: status.edition.features },
     signIn: { admins: [], members: [] },
     vps: { configured: status.vps.configured, sshAlias: "" },
     profile: { name: status.profile.name, email: "" },
@@ -11537,7 +11682,16 @@ function configForAccess(status: ReturnType<typeof configStatus>, admin: boolean
 }
 
 function mcpServerResponse() {
-  return { servers: listMcpServers(cfg.mcpServers) };
+  // While enrolled with custom servers off, say which servers stay configured
+  // but never reach bots, and why. Nothing here is written to config.json.
+  const policy = managedPolicy.current();
+  const servers = listMcpServers(cfg.mcpServers).map(server =>
+    managedPolicy.mcpAllowed(server.name, "url" in server ? server.url : undefined) ? server : { ...server, managedBy: policy!.organizationName });
+  return { servers, ...(policy && !policy.mcp.allowCustom ? { managed: { organizationName: policy.organizationName, allowlist: policy.mcp.allowlist } } : {}) };
+}
+/** Adding or editing a server the organisation has not approved is refused. */
+function mcpPolicyRefusal(name: string, server: object): string | undefined {
+  return managedPolicy.mcpRefusal(name, "url" in server && typeof server.url === "string" ? server.url : undefined);
 }
 
 /** The fields a new server may set, in whichever shape the form sent — a
@@ -11551,6 +11705,12 @@ function mcpServerBody(body: unknown): Record<string, unknown> {
     if (record[key] !== undefined) out[key] = record[key];
   }
   return out;
+}
+
+/** Configured MCP servers that may reach this bot's engine. While enrolled,
+ * the organisation's allow-list filters them; config.json is never changed. */
+function engineMcpServers(bot: BotRecord) {
+  return managedPolicy.filterMcp(customMcpServers(cfg, bot.mcpServers));
 }
 
 function persistMcpServers(next: Record<string, unknown>): void {
@@ -11570,18 +11730,20 @@ async function describeInstances() {
     if (hostedModels) return { ...described, readOnly: true,
       install: undefined, authentication: undefined, cli: undefined, cliCandidates: [],
     };
+    const policyReason = policyModelRefusal(instance);
+    const policy = policyReason ? { policy: { organizationName: managedPolicy.current()!.organizationName, reason: policyReason } } : {};
     if (managedDesktop.owns(instance.instanceId)) return {
-      ...described, readOnly: true, managed: managedDesktop.info(instance.instanceId),
+      ...described, ...policy, readOnly: true, managed: managedDesktop.info(instance.instanceId),
       install: undefined, authentication: undefined, cli: undefined, cliCandidates: [],
     };
-    if (entry?.driver !== "claudeAgent") return described;
+    if (entry?.driver !== "claudeAgent") return { ...described, ...policy };
     try {
       const claudeAccount = claudeAccountInfo(instance.instanceId, entry, instance.cli ?? instance.cliDefault ?? "claude");
-      return { ...described, claudeAccount, install: { ...instance.install, signInCommand: claudeAccount.signInCommand } };
+      return { ...described, ...policy, claudeAccount, install: { ...instance.install, signInCommand: claudeAccount.signInCommand } };
     } catch {
       // A malformed saved config remains a repairable shadow, never takes
       // the model picker down or offers a login for the wrong directory.
-      return { ...described, install: { ...instance.install, signInCommand: undefined } };
+      return { ...described, ...policy, install: { ...instance.install, signInCommand: undefined } };
     }
   });
 }
@@ -11879,6 +12041,12 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
         return json(res, 503, { error: "Workspace sign-in is unavailable." });
       }
     }
+    // An enrolled organisation that turns remote access off refuses new pairing
+    // codes and new remote sessions. Existing sessions and this app are unchanged.
+    if (method === "POST" && ["/api/auth/pair", "/api/pair", "/api/auth/pairing", "/api/auth/email/start", "/api/auth/email/verify"].includes(path)) {
+      const refusal = managedPolicy.remoteAccessRefusal();
+      if (refusal) return json(res, 403, { error: refusal, code: "managed_policy" });
+    }
     // ── who is asking (server/request-auth.ts) ──────────────────────────
     // Two public routes come first: what this server is, and turning a pairing
     // code into a session. Everything else needs the loopback owner or a
@@ -12080,6 +12248,9 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
               environmentId: ENVIRONMENT_ID,
               // the account behind the session, when it came from a sign-in
               ...(auth.session.email ? { email: auth.session.email } : {}),
+              // a hosted team workspace: the web UI's first run skips the
+              // desktop-only beats there. Absent everywhere else.
+              ...(HOSTED_WORKSPACE ? { hosted: true } : {}),
             },
       );
     }
@@ -12171,7 +12342,13 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
       if (!z.string().uuid().safeParse(body?.id).success || !["acquire", "release", "renew"].includes(body?.action)) return json(res, 400, { error: "Invalid computer lease" });
       if (body.action === "release") sharedComputerControl.release(body.id);
       else if (body.action === "renew") sharedComputerControl.renew(body.id);
-      else sharedComputerControl.acquire(body.id);
+      else {
+        // The desktop's own screen, lent to another computer: the organisation's
+        // "this computer" setting applies here as it does to bot turns.
+        const refusal = managedPolicy.computerRefusal("thisComputer");
+        if (refusal) return json(res, 403, { error: refusal, code: "managed_policy" });
+        sharedComputerControl.acquire(body.id);
+      }
       return json(res, 200, { ok: true });
     }
     // A paired desktop registers only its own outbound connector. A second,
@@ -15351,7 +15528,7 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
         return json(res, 400, { error: "threadId must be a task id" });
       }
       const threadId = body.threadId ?? group.threadId;
-      noteTurnTrigger(threadId, auth);
+      const trigger = usageTriggerFor(auth);
       try {
         assertWithinBudget(cfg, DATA_DIR);
       } catch (error) {
@@ -15420,10 +15597,11 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
               mode: channelMode,
               via,
               sender: messageSender(auth),
+              trigger,
             });
             return { ok: true as const, queued: true as const, queueId: queued.id, threadId };
           }
-          const message = startGroupTurn(current.id, text, replyTo, sendId, channelMode, undefined, { via, sender: messageSender(auth) });
+          const message = startGroupTurn(current.id, text, replyTo, sendId, channelMode, undefined, { via, sender: messageSender(auth), trigger });
           return { ok: true as const, threadId, message };
         },
       );
@@ -15463,7 +15641,8 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
       if (!ownsThread) {
         return json(res, 409, { error: "the channel switched tasks before it could receive the message" });
       }
-      noteTurnTrigger(targetThreadId, auth);
+      // Steering folds words into the running room turn; who pressed Steer
+      // does not re-book that turn (its sender was captured when it started).
       const current = store.group(group.id);
       if (!current) return json(res, 404, { error: "no such room" });
       // Which engine owns the running room turn on this thread? The same
@@ -16820,15 +16999,12 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
       }
       // External interfaces must opt into a distinct route: an older server
       // returns 404 rather than silently ignoring safety preconditions.
-      if (guarded && !z.object({
-        threadId: z.string().regex(/^[\w-]+$/),
-        sendId: z.string().regex(/^[A-Za-z0-9_-]{16,80}$/),
-        text: z.string().min(1),
-        expectedActiveLeafId: z.string().regex(/^[\w-]+$/).nullable(),
-        expectedApprovalMode: z.enum(["ask", "full"]).optional(),
-        replyToId: z.string().optional(),
-      }).strict().safeParse(body).success) {
-        return json(res, 400, { error: "guarded sends require threadId, sendId, text and expectedActiveLeafId" });
+      const guardedBody = guarded ? guardedSendSchema.safeParse(body) : null;
+      if (guardedBody && !guardedBody.success) {
+        const onBehalfOfInvalid = guardedBody.error.issues.some((issue) => issue.path[0] === "onBehalfOf");
+        return json(res, 400, { error: onBehalfOfInvalid
+          ? "onBehalfOf must name the person with an email address, a name, or both"
+          : "guarded sends require threadId, sendId, text and expectedActiveLeafId" });
       }
       const text = String(body.text ?? "").trim();
       if (!text) return json(res, 400, { error: "text required" });
@@ -16842,7 +17018,16 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
       // receipt after a task switch, while a genuinely new send still has to
       // target the task that is active now.
       const threadId = body.threadId ?? bot.threadId;
-      if (!guarded) noteTurnTrigger(threadId, auth);
+      // Who this message is from, for the ledger. It is captured here and
+      // travels with the message: into the turn it starts, or into the queue
+      // until it drains. A message steered into someone else's running turn
+      // books nothing — that turn stays with whoever started it. A guarded
+      // relay (the Slack worker, which already holds admin scope to reach
+      // this route) names the person it acts for.
+      const onBehalfOf = guardedBody?.data?.onBehalfOf;
+      const trigger: UsageTrigger = onBehalfOf
+        ? { kind: "user", ...(onBehalfOf.email ? { email: onBehalfOf.email } : {}), ...(onBehalfOf.name ? { label: onBehalfOf.name } : {}) }
+        : usageTriggerFor(auth);
       // The send is acknowledged before the turn starts, so a workspace at its
       // spend limit is refused here, where the person can see it.
       try {
@@ -16907,8 +17092,7 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
             if (currentAtStart.busy || threadBusy(bot.id, threadId) || botAtThreadCapacity(bot.id) || parksBehindCoordination(bot.id, threadId) || activeGroupTurnForBot(bot.id)) {
               throw Object.assign(new Error("wait for a free thread slot before retrying this message"), { status: 409, code: "guarded_busy" });
             }
-            noteTurnTrigger(threadId, auth);
-            const message = await startTurn(bot.id, text, { threadId, replyTo, sendId, sender: messageSender(auth) });
+            const message = await startTurn(bot.id, text, { threadId, replyTo, sendId, sender: messageSender(auth), trigger });
             return { ok: true as const, threadId, message };
           }
 
@@ -16974,17 +17158,18 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
               return { ok: true as const, steered: true as const, threadId, message };
             }
             if (!current.busy) {
-              return startOrQueueDirectMessage(bot.id, threadId, text, replyTo, sendId, messageSender(auth));
+              return startOrQueueDirectMessage(bot.id, threadId, text, replyTo, sendId, messageSender(auth), trigger);
             }
             const queued = queueSteeredMessage(current.id, threadId, text, {
               replyToId: replyTo?.id,
               sendId,
               prompt: promptWithReply(text, replyTo, cfg.profile?.name?.trim() || "User"),
               sender: messageSender(auth),
+              trigger,
             });
             return { ok: true as const, queued: true as const, queueId: queued.id, threadId };
           }
-          return startOrQueueDirectMessage(bot.id, threadId, text, replyTo, sendId, messageSender(auth));
+          return startOrQueueDirectMessage(bot.id, threadId, text, replyTo, sendId, messageSender(auth), trigger);
         },
       );
       return json(res, 202, receipt);
@@ -17009,7 +17194,9 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
       const body = await readBody(req);
       requirePinnedClientThread(m[1], body?.threadId);
       const bot = requestedTaskBot(m[1], body?.threadId);
-      noteTurnTrigger(bot.threadId, auth);
+      // Pressing Steer folds the queued words into the running turn. It does
+      // not re-book that turn to whoever pressed it, and the words keep the
+      // sender they were queued with.
       // Lift the whole queue atomically: a settle racing this request can
       // drain it as a follow-up, or this request can steer it into the live
       // turn — never both for the same words.
@@ -17084,9 +17271,8 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
       const body = await readBody(req);
       requirePinnedClientThread(m[1], body?.threadId);
       const bot = requestedTaskBot(m[1], body?.threadId);
-      noteTurnTrigger(bot.threadId, auth);
       await startTurn(bot.id, "Summarize conversation context", {
-        threadId: bot.threadId, compactOnly: true, cardContinuation: true,
+        threadId: bot.threadId, compactOnly: true, cardContinuation: true, trigger: usageTriggerFor(auth),
       });
       return json(res, 202, { ok: true, threadId: bot.threadId });
     }
@@ -17119,10 +17305,13 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
           error: `provider instance "${bot.modelSelection.instanceId}" is unavailable — pick another model in settings`,
         });
       }
+      const rerunInstance = registry.get(bot.modelSelection.instanceId)!;
+      const rerunRefusal = policyModelRefusal(rerunInstance);
+      if (rerunRefusal) return json(res, 409, { error: rerunRefusal });
       // startTurn admits the rerun before branching. A shared-resource or
       // concurrency-limit refusal must leave the original transcript intact.
       const replyTo = source.replyToId ? resolveReplyTarget(bot.threadId, source.replyToId) : undefined;
-      const message = await startTurn(bot.id, text, { threadId: bot.threadId, editedMessageId: messageId, replyTo });
+      const message = await startTurn(bot.id, text, { threadId: bot.threadId, editedMessageId: messageId, replyTo, trigger: usageTriggerFor(auth) });
       return json(res, 202, { ok: true, message });
     }
 
@@ -17896,7 +18085,7 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
     // the same API shape but a different pid)
     if (method === "GET" && path === "/api/health") {
       return json(res, 200, { app: "openmausbot", pid: process.pid, static: Boolean(STATIC_DIR), capabilities: {
-        guardedMessages: 1, guardedRequests: 1, guardedFullAccess: 1,
+        guardedMessages: 1, guardedRequests: 1, guardedFullAccess: 1, guardedOnBehalfOf: 1,
         ...(sharedWorkspaceFullAccessEnabled() ? { sharedWorkspaceFullAccess: 1 } : {}),
       } });
     }
@@ -17949,7 +18138,9 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
 
     // Which edition this server runs and why (see server/enterprise.ts). Read-only.
     if (method === "GET" && path === "/api/edition") {
-      return json(res, 200, editionStatus());
+      // A member learns what is entitled; when the key lapses is for admins.
+      const status = editionStatus();
+      return json(res, 200, auth.scopes.includes("admin") ? status : editionForMembers(status));
     }
     // The brand for this deployment (server/brand.ts): read per request so edits show on reload.
     if (method === "GET" && path === "/api/brand") {
@@ -17987,7 +18178,7 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
       if (!range) return json(res, 400, { error: "from and to must be YYYY-MM-DD, from no later than to, at most a year apart" });
       const rows = readUsage(DATA_DIR, range);
       // The operator's price list is applied only with the billing entitlement.
-      const prices = entitled("billing") && cfg.billing?.prices && Object.keys(cfg.billing.prices).length ? cfg.billing.prices : null;
+      const prices = operatorPrices();
       if (path === "/api/usage.csv") {
         const stamp = (date: Date) => date.toISOString().slice(0, 10);
         res.writeHead(200, {
@@ -18406,6 +18597,8 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
         }
         const parsed = parseMcpServerMutation(name, mcpServerBody(body));
         if (!parsed.ok) return json(res, 400, { error: parsed.error });
+        const refusal = mcpPolicyRefusal(name, parsed.server);
+        if (refusal) return json(res, 403, { error: refusal, code: "managed_policy" });
         persistMcpServers({ ...current, [name]: parsed.server });
         return json(res, 201, mcpServerResponse());
       } finally {
@@ -18439,6 +18632,8 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
         if (Object.keys(current).length + names.length > MAX_MCP_SERVERS) {
           return json(res, 400, { error: `You can add at most ${MAX_MCP_SERVERS} MCP servers.` });
         }
+        const refused = names.filter(name => mcpPolicyRefusal(name, parsed.servers[name] as object));
+        if (refused.length) return json(res, 403, { error: `${mcpPolicyRefusal(refused[0]!, parsed.servers[refused[0]!] as object)} Not approved: ${refused.join(", ")}.`, code: "managed_policy" });
         persistMcpServers({ ...current, ...parsed.servers });
         return json(res, 201, { ...mcpServerResponse(), added: names });
       } finally {
@@ -18478,6 +18673,8 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
 
         const parsed = parseMcpServerMutation(name, body, existing.server);
         if (!parsed.ok) return json(res, 400, { error: parsed.error });
+        const refusal = mcpPolicyRefusal(name, parsed.server);
+        if (refusal) return json(res, 403, { error: refusal, code: "managed_policy" });
         persistMcpServers({ ...current, [name]: parsed.server });
         return json(res, 200, mcpServerResponse());
       } finally {
@@ -19414,6 +19611,10 @@ calendarCalls.start();
 
 // Resolve the edition before accepting requests so /api/edition is never a guess.
 console.log(describeEdition(await loadEnterpriseLayer()));
+// A key inside its last 30 days, or already in its grace period, says so
+// where an operator reads first.
+const startupLicenseWarning = licenseWarning(editionStatus());
+if (startupLicenseWarning) console.warn(startupLicenseWarning);
 console.log(LOOPBACK.trust === "service"
   ? `local requests: service trust (${LOOPBACK.reason}); without a session, loopback may use only health, the Slack worker's guarded routes and bot capability routes`
   : `local requests: owner trust (${LOOPBACK.reason})`);

@@ -815,17 +815,30 @@ which keeps its own activity log.
 ## Spend limits and sell prices (enterprise)
 
 With the `budgets` entitlement, **Settings → Usage → Monthly spend limit**
-caps the workspace: once the month's reported cost reaches it, no bot starts
-a turn, whether a person wrote, a routine fired, a peer asked or a webhook
-arrived, until an admin raises it. The figure is what engines report to the
-ledger: real on your keys, an equivalent on personal subscriptions. A warning
-shows at a configurable percentage.
+caps the workspace: once the month's cost reaches it, no bot starts a turn,
+whether a person wrote, a routine fired, a peer asked or a webhook arrived,
+until an admin raises it. A warning shows at a configurable percentage, and
+admins get one in-app notification the first time each month crosses the
+warning and one when it reaches the limit (a new month or a new limit starts
+over).
+
+The figure is every cost in the usage ledger. Claude reports its own cost
+(real on your keys, an equivalent on personal subscriptions). Codex, the
+OpenAI-compatible/OpenRouter engine, Grok, MiniMax and the ACP engines report
+tokens but no price, so the server books an **estimate** from a built-in list
+of vendor list prices (`server/model-prices.ts`, each entry with its source
+and the date it was read) and marks the row `costSource: "estimated"`. A model
+that is not in the list is unpriced and not counted; Usage says how many
+turns that was. Estimates use each vendor's standard short-context rate, so
+long prompts, cache writes and priority tiers cost more than estimated.
 
 With the `billing` entitlement, **Sell prices** takes your own price per
 million tokens by model id, `driver/model`, or `default`, and History and the
-CSV export gain a **billable** column next to the provider's cost. Both are
-plain settings in `config.json` (`budgets`, `billing`) and through
-`PUT /api/config`.
+CSV export gain a **billable** column next to the provider's cost. For an
+engine that reports no cost, a price you set for that exact model also
+replaces the list price in its estimate; `default` is used only for models
+the list does not know. Both are plain settings in `config.json` (`budgets`,
+`billing`) and through `PUT /api/config`.
 
 ## A bot that also runs outside the server
 
