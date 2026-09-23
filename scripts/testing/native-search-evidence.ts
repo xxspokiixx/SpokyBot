@@ -23,7 +23,7 @@ export function verifiedNativeSearch(status: string | undefined, items: SearchIt
   // Require a citation in the final answer, not a URL in a progress message
   // or an explicit failed-verification disclaimer. This verifies evidence
   // linkage, not the factual correctness of the answer's interpretation.
-  if (/\b(cannot|can't|could not|couldn't|unable|unverified|not verified|did not|didn't|failed to)\b/i.test(answer.text)) return false;
+  if (/\b(?:unverified|not verified)\b|\b(?:cannot|can't|could not|couldn't|unable to|did not|didn't|failed to)\s+(?:(?:independently|successfully|fully)\s+)?(?:verify|confirm|check|cite|open|access|retrieve)\b/i.test(answer.text)) return false;
   return answer.text.split("\n").some(line => {
     return [...line.matchAll(/\[([^\]\n]+)\]\((https:\/\/[^\s<>()[\]]+)\)/g)].some(match => {
       const url = officialUrl(match[2]);
