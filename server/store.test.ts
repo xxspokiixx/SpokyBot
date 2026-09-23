@@ -33,7 +33,9 @@ describe("Store", () => {
     const archived = store.createBot({ section: "Delivery" });
     store.patchBot(archived.id, { hidden: true });
     const manager = store.createBot({ section: "Office" });
+    store.setChiefOfStaff(manager.id);
     store.patchBot(manager.id, { managedSections: ["Delivery", " Delivery ", "Other"] });
+    expect(canAccessTeam(manager, "Delivery")).toBe(true);
     const room = store.createGroup("Room", [chief.id], false, "Delivery");
     const message = store.appendMessage(chief.threadId, { role: "user", kind: "text", text: "Keep this conversation" });
     writeSectionContext("Delivery", "Shared team instructions");
@@ -45,12 +47,14 @@ describe("Store", () => {
     expect(chief).toMatchObject({ section: "Launch", chiefOfStaff: true });
     expect(archived).toMatchObject({ section: "Launch", hidden: true });
     expect(manager.managedSections).toEqual(["Launch", "Other"]);
+    expect(canAccessTeam(manager, "Launch")).toBe(true);
     expect(room.section).toBe("Launch");
     expect(readSectionContext("Launch")?.text).toBe("Shared team instructions");
     expect(readSectionContext("Delivery")).toBeNull();
     expect(computers.forSection("Launch")?.id).toBe(computer.id);
     const restored = new Store(selection);
     expect(restored.bot(chief.id)?.section).toBe("Launch");
+    expect(canAccessTeam(restored.bot(manager.id)!, "Launch")).toBe(true);
     expect(restored.group(room.id)?.section).toBe("Launch");
     expect(restored.messagesFor(chief.threadId)).toContainEqual(message);
     expect(restored.sections).not.toContain("Delivery");
