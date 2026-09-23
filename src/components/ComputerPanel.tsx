@@ -451,13 +451,13 @@ export function ComputerPanel({
   const vpsSupported = Boolean(computerToolSupported && selectedInstance?.driverKind !== "boxAgent");
   const cloudSupported = cloudBackend === "vps"
     ? vpsSupported
-    : state.instances.some((instance) => instance.driverKind === "boxAgent");
+    : state.instances.some((instance) => instance.driverKind === "boxAgent" || instance.capabilities?.cloudComputerMcp);
   const botRoutines = state.routines
     .filter((routine) => routine.botId === bot.id)
     .sort((a, b) => Number(b.enabled) - Number(a.enabled) || (a.nextRunAt ?? Infinity) - (b.nextRunAt ?? Infinity));
   const cloudRoutineReady = Boolean(
     state.config?.box.configured &&
-      state.instances.some((instance) => instance.driverKind === "boxAgent" && instance.snapshot.state === "available"),
+      state.instances.some((instance) => (instance.driverKind === "boxAgent" || instance.capabilities?.cloudComputerMcp) && instance.snapshot.state === "available"),
   );
   const activeRoutineRun = state.routineRuns.find(
     (run) => run.botId === bot.id && ["queued", "running", "waiting"].includes(run.status),
