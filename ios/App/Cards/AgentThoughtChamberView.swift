@@ -2,6 +2,20 @@ import SwiftUI
 import CompanionCore
 
 public struct AgentThoughtChamberView: View {
+    /// One numbered step on screen. Identity is the absolute number, so a
+    /// row keeps it while streaming and the list never re-numbers under the
+    /// reader.
+    private struct Step: Identifiable {
+        let number: Int
+        let text: String
+        var id: Int { number }
+    }
+
+    /// The newest whole steps rendered at once. Bounds the cost of a long
+    /// think; numbering stays absolute, so a step keeps its number for its
+    /// whole life even after older steps have left the window.
+    private static let windowCharacterLimit = 2_000
+
     public let reasoning: String
     public let botName: String
     public let mascotColor: Color
@@ -22,8 +36,19 @@ public struct AgentThoughtChamberView: View {
         self.isStreaming = isStreaming
     }
     
-    private var steps: [String] {
-        reasoning.components(separatedBy: "\n").filter { !$0.trimmingCharacters(in: .whitespaces).isEmpty }
+    /// The steps on screen: absolute number plus text, oldest first. A step
+    /// is never cut in half by the window, and its number is its position in
+    /// the whole reasoning, so rows keep a stable identity while streaming.
+    private var windowedSteps: [Step] {
+        let all = reasoning.components(separatedBy: "\n").filter { !$0.trimmingCharacters(in: .whitespaces).isEmpty }
+        var window: [Step] = []
+        var used = 0
+        for (index, step) in all.enumerated().reversed() {
+            used += step.count
+            if used > Self.windowCharacterLimit, !window.isEmpty { break }
+            window.append(Step(number: index + 1, text: step))
+        }
+        return window.reversed()
     }
     
     public var body: some View {
@@ -85,7 +110,7 @@ public struct AgentThoughtChamberView: View {
                 
                 Spacer()
                 
-                Text("\(steps.count) \(steps.count == 1 ? "step" : "steps")")
+                Text("\(windowedSteps.last?.number ?? 0) \(windowedSteps.count == 1 ? "step" : "steps")")
                     .font(.system(size: 9.5, weight: .medium, design: .monospaced))
                     .foregroundColor(isDark ? Color(hex: "#94A3B8") : Color(hex: "#64748B"))
                 
@@ -104,14 +129,24 @@ public struct AgentThoughtChamberView: View {
     @ViewBuilder
     private func expandedContent(isDark: Bool) -> some View {
         VStack(alignment: .leading, spacing: 6) {
-            ScrollView {
-                VStack(alignment: .leading, spacing: 4) {
-                    ForEach(Array(steps.enumerated()), id: \.offset) { idx, step in
-                        stepRow(index: idx, step: step, isDark: isDark)
+            ScrollViewReader { proxy in
+                ScrollView {
+                    VStack(alignment: .leading, spacing: 4) {
+                        ForEach(windowedSteps, id: \.number) { step in
+                            stepRow(number: step.number, step: step.text, isDark: isDark)
+                        }
                     }
                 }
+                .frame(maxHeight: 160)
+                // While the bot thinks, the newest step is the news: start at
+                // the bottom and keep following as steps arrive, the way the
+                // reply bubble follows its own text.
+                .defaultScrollAnchor(.bottom)
+                .onChange(of: reasoning) { _, _ in
+                    guard isStreaming, let newest = windowedSteps.last else { return }
+                    withAnimation { proxy.scrollTo(newest.number, anchor: .bottom) }
+                }
             }
-            .frame(maxHeight: 160)
         }
         .padding(10)
         .background(isDark ? Color.black.opacity(0.35) : Color.white.opacity(0.85))
@@ -124,9 +159,9 @@ public struct AgentThoughtChamberView: View {
     }
     
     @ViewBuilder
-    private func stepRow(index: Int, step: String, isDark: Bool) -> some View {
+    private func stepRow(number: Int, step: String, isDark: Bool) -> some View {
         HStack(alignment: .top, spacing: 6) {
-            Text(String(index + 1) + ".")
+            Text(String(number) + ".")
                 .font(.system(size: 10, weight: .bold, design: .monospaced))
                 .foregroundColor(mascotColor)
             
