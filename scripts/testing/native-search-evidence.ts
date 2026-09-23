@@ -18,9 +18,16 @@ export function verifiedNativeSearch(status: string | undefined, items: SearchIt
   if (status !== "settled" || !items.some(item => item.action?.type === "search" && results(item).length)) return false;
   const opened = new Set(items.filter(item => item.action?.type === "openPage").flatMap(results)
     .map(result => officialUrl(result.url!)).filter((url): url is string => url !== null));
-  return messages.some(message => message.role === "bot" && message.kind === "text" &&
-    [...(message.text ?? "").matchAll(/https:\/\/[^\s<>[\]()]+/g)].some(match => {
-      const url = officialUrl(match[0].replace(/[.,;!]+$/, ""));
+  const answer = messages.findLast(message => message.role === "bot" && message.kind === "text");
+  if (!answer?.text) return false;
+  // Require a citation in the final answer, not a URL in a progress message
+  // or an explicit failed-verification disclaimer. This verifies evidence
+  // linkage, not the factual correctness of the answer's interpretation.
+  return answer.text.split("\n").some(line => {
+    if (/\b(cannot|can't|could not|couldn't|unable|unverified|not verified|did not|didn't|failed to)\b/i.test(line)) return false;
+    return [...line.matchAll(/\[([^\]\n]+)\]\((https:\/\/[^\s<>()[\]]+)\)/g)].some(match => {
+      const url = officialUrl(match[2]);
       return url !== null && opened.has(url);
-    }));
+    });
+  });
 }
