@@ -1445,6 +1445,9 @@ struct MessageRow: View {
             ActivityChip(tool: message.tool, threadRef: message.threadRef, openThread: openThread)
         case .screen:
             ScreenShot(threadId: chat.threadId, message: message)
+        case .digest:
+            // Filtered out of the transcript rows; never drawn.
+            EmptyView()
         case .unknown:
             // A message kind from a newer computer. Almost everything the
             // harness sends carries `text`, so showing it is usually the
