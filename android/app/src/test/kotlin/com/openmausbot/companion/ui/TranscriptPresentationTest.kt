@@ -17,6 +17,7 @@ import androidx.lifecycle.lifecycleScope
 import com.openmausbot.companion.core.ActivityDetail
 import com.openmausbot.companion.core.Chat
 import com.openmausbot.companion.core.CompanionJson
+import com.openmausbot.companion.core.Compaction
 import com.openmausbot.companion.core.Connection
 import com.openmausbot.companion.core.Fleet
 import com.openmausbot.companion.core.Frame
@@ -108,6 +109,24 @@ class TranscriptPresentationTest {
         screenshot("transcript-payload-expanded")
         compose.onNodeWithText("Event payload").performClick()
         compose.onNodeWithText("checkout", substring = true).assertDoesNotExist()
+    }
+
+    @Test
+    fun compactionExpandsItsSummaryAndDigestRemainsHidden() {
+        val summary = "Earlier context preserved for the next turn."
+        val compact = Message("compact", Message.Role.BOT, Message.Kind.COMPACTION, 6000.0,
+            compaction = Compaction(summary, 12345))
+        val digest = Message("digest", Message.Role.BOT, Message.Kind.DIGEST, 7000.0,
+            text = "Digest must stay hidden")
+        mount(ActivityDetail.FULL, transcript = messages + compact + digest)
+        compose.onNodeWithText("Digest must stay hidden").assertDoesNotExist()
+        compose.onNodeWithText(summary).assertDoesNotExist()
+        compose.onNodeWithText(compact.compaction!!.chipText).performClick()
+        compose.onNodeWithText(summary).assertIsDisplayed()
+        assertEquals(summary, MessageActions.copyableText(compact))
+        compose.runOnIdle { scene.environment.chatPreferences.setActivityDetail(ActivityDetail.HIDDEN) }
+        compose.onNodeWithText(compact.compaction!!.chipText).assertDoesNotExist()
+        compose.onNodeWithText(summary).assertDoesNotExist()
     }
 
     @Test
