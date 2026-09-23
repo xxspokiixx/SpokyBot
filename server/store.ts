@@ -1720,6 +1720,34 @@ export class Store {
     return { ok: true, bots: ids.map((id) => this.bot(id)!) };
   }
 
+  /** Apply only the membership edits the user made, in one bots-file write. */
+  updateTeamMembers(section: string, addIds: string[], removeIds: string[]):
+    { ok: true; bots: BotRecord[] } | { ok: false; reason: "unavailable" | "chief-conflict" | "membership-changed" } {
+    const key = sectionKey(section);
+    if (!key || !this.sections.includes(key)) return { ok: false, reason: "unavailable" };
+    const adds = new Set(addIds), removes = new Set(removeIds);
+    const ids = new Set([...adds, ...removes]);
+    for (const id of ids) {
+      const bot = this.bot(id);
+      if (!bot || bot.hidden) return { ok: false, reason: "unavailable" };
+      if (adds.has(id) && removes.has(id)) return { ok: false, reason: "membership-changed" };
+      if (removes.has(id) && sectionKey(bot.section) !== key) return { ok: false, reason: "membership-changed" };
+    }
+    const next = this.bots.map(bot => ids.has(bot.id)
+      ? { ...bot, section: adds.has(bot.id) ? key : undefined } : bot);
+    for (const destination of [key, ""]) {
+      if (next.filter(bot => bot.chiefOfStaff && sectionKey(bot.section) === destination).length > 1) {
+        return { ok: false, reason: "chief-conflict" };
+      }
+    }
+    if (ids.size) {
+      this.saveBots(next);
+      for (let i = 0; i < next.length; i++) if (ids.has(next[i].id)) Object.assign(this.bots[i], next[i]);
+      for (const botId of ids) this.emit({ type: "bot", botId });
+    }
+    return { ok: true, bots: this.bots.filter(bot => ids.has(bot.id)) };
+  }
+
   /** Legacy bot/room activity occupies its own slot; direct conversations
    * use setTaskActivity so settling one thread cannot clear another. */
   setActivity(botId: string, activity: BotActivity): BotRecord | null {
