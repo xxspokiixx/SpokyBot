@@ -47,8 +47,8 @@ function fixture(body = "", toolSchema: Record<string, unknown> = schema) {
   return {
     dir, receipt, controller, server,
     read: () => JSON.parse(readFileSync(receipt, "utf8")) as { pid: number; path: string; omb: Record<string, string>; calls: Array<{ method: string; params?: { name?: string; arguments?: unknown } }> },
-    async mount(computerUse = false) {
-      const session = await mountChatTools({ custom: { audit: server } }, controller.signal, computerUse);
+    async mount(computerUse = false, localComputer = false) {
+      const session = await mountChatTools(localComputer ? { localComputer: server } : { custom: { audit: server } }, controller.signal, computerUse);
       sessions.push(session);
       return session;
     },
@@ -258,9 +258,15 @@ describe("Chat MCP schema validation", () => {
   it("carries a screenshot larger than the text-only frame limit", async () => {
     const data = Buffer.alloc(2 * 1024 * 1024, 17).toString("base64");
     const f = fixture('if(message.method === "tools/call") { reply(message,{content:[{type:"image",mimeType:"image/png",data:Buffer.alloc(2*1024*1024,17).toString("base64")}]}); continue; }');
-    const session = await f.mount(true);
-    const result = await session.execute("audit_write", { value: "screenshot" }, f.controller.signal);
+    const session = await f.mount(true, true);
+    const result = await session.execute("computer_write", { value: "screenshot" }, f.controller.signal);
     expect(result).toEqual({ ok: true, text: "Screenshot captured.", images: [{ type: "image_url", image_url: { url: `data:image/png;base64,${data}` } }] });
+  });
+
+  it("keeps the ordinary custom MCP frame limit in computer-enabled sessions", async () => {
+    const f = fixture('if(message.method === "tools/call") { reply(message,{content:[{type:"text",text:"x".repeat(3*1024*1024)}]}); continue; }');
+    const session = await f.mount(true);
+    await expect(session.execute("audit_write", { value: "large" }, f.controller.signal)).rejects.toThrow(/frame|limit/i);
   });
 
   it("rejects malformed image results without claiming execution success", async () => {
