@@ -3,6 +3,7 @@ import { join } from "node:path";
 import { expect, it } from "vitest";
 import { launchVerificationServer, runControlOmb } from "../scripts/control-omb.ts";
 import { handleToolCall, request } from "../scripts/mcp-server.ts";
+import { PEER_ACCESS_HELP } from "./peer-roster.ts";
 
 /** Exercise the real coordination proxy in disposable rooms with a scripted provider. */
 async function withRooms(test: (f: any) => Promise<void>) {
@@ -419,7 +420,7 @@ it.each([
     .evidence.find((entry: any) => entry.step).response.result.content[0].text;
   expect(refused).toBe(hidden
     ? `The bot with id "${botId}" is no longer available — call list_bots for the ones you can reach`
-    : `No bot with id or name "${botId}" — call list_bots and copy the exact id from the result`);
+    : `No bot with id or name "${botId}" — call list_bots and copy the exact id from the result. ${PEER_ACCESS_HELP}`);
 }), 45_000);
 
 // The Chief's roster names teammates, so a Chief reaches for the name it can
