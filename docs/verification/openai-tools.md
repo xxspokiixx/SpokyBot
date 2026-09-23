@@ -59,6 +59,33 @@ path. It does not establish that every third-party model supports tools, or
 that live Grok and MiniMax services accept a particular schema. Model support
 and service-specific limits remain separate from the implemented protocol.
 
+## Computer and browser screenshots
+
+The OpenAI-compatible driver opts into structured image input and mounts the
+harness-provided `localComputer` and `browser` stdio descriptors. It does not
+discover or grant a desktop itself. Host, VM, VPS and room routing continue to
+use the harness's existing ownership and permission gates. Box-hosted turns
+still use the separate native Box runner.
+
+MCP images become bounded inline image parts. Tool results retain their call IDs;
+only after the full tool-result batch is appended does a separate image message
+carry labelled screenshots. Image data is not copied into text tool previews.
+Computer-enabled MCP transports accept frames up to 32 MiB for screenshots;
+ordinary text-only transports retain their 2 MiB limit. Each image is bounded to
+20 MiB. PNG, JPEG, WebP and GIF are accepted; invalid base64/MIME results fail
+instead of being reported as successful screenshots.
+
+Native unsigned-number formats and root composition constraints are validated
+locally. For computer-enabled requests, root composition constraints appear in
+the description rather than the outgoing parameter root, preserving the full
+original validator before execution.
+
+The driver contract tests exercise real loopback HTTP and stdio MCP processes:
+input-image encoding, computer/browser screenshot delivery, call-ID ordering,
+approval denial with no side effect, malformed images and a screenshot larger
+than the ordinary text frame limit. They do not use real desktop access or paid
+inference, and do not establish vision/tool support for every provider model.
+
 ## Text-only model connections
 
 Tool support is enabled by default for these three API drivers. For a model
