@@ -2,6 +2,7 @@ import { createServer, type Server } from "node:http";
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import type { SendTurnInput } from "../contracts.ts";
 
+const jpeg = "/9j/4AAQSkZJRgABAQEAYABgAAD/2wBDAAMCAgMCAgMDAwMEAwMEBQgFBQQEBQoHBwYIDAoMDAsKCwsNDhIQDQ4RDgsLEBYQERMUFRUVDA8XGBYUGBIUFRT/2wBDAQMEBAUEBQkFBQkUDQsNFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBT/wAARCAABAAEDASIAAhEBAxEB/8QAHwAAAQUBAQEBAQEAAAAAAAAAAAECAwQFBgcICQoL/8QAtRAAAgEDAwIEAwUFBAQAAAF9AQIDAAQRBRIhMUEGE1FhByJxFDKBkaEII0KxwRVS0fAkM2JyggkKFhcYGRolJicoKSo0NTY3ODk6Q0RFRkdISUpTVFVWV1hZWmNkZWZnaGlqc3R1dnd4eXqDhIWGh4iJipKTlJWWl5iZmqKjpKWmp6ipqrKztLW2t7i5usLDxMXGx8jJytLT1NXW19jZ2uHi4+Tl5ufo6erx8vP09fb3+Pn6/8QAHwEAAwEBAQEBAQEBAQAAAAAAAAECAwQFBgcICQoL/8QAtREAAgECBAQDBAcFBAQAAQJ3AAECAxEEBSExBhJBUQdhcRMiMoEIFEKRobHBCSMzUvAVYnLRChYkNOEl8RcYGRomJygpKjU2Nzg5OkNERUZHSElKU1RVVldYWVpjZGVmZ2hpanN0dXZ3eHl6goOEhYaHiImKkpOUlZaXmJmaoqOkpaanqKmqsrO0tba3uLm6wsPExcbHyMnK0tPU1dbX2Nna4uPk5ebn6Onq8vP09fb3+Pn6/9oADAMBAAIRAxEAPwD8qqKKKAP/2Q==";
 let server: Server;
 let origin: string;
 let mount: typeof import("./chat-mcp-tools.ts").mountChatTools;
@@ -24,7 +25,7 @@ beforeAll(async () => {
       if (!holdCommand) res.end(JSON.stringify({ exitCode: 0, stdout: "captured", stderr: "" }));
       return;
     }
-    if (path.includes("/artifacts?")) { res.end(Buffer.from("synthetic-frame")); return; }
+    if (path.includes("/artifacts?")) { res.end(Buffer.from(jpeg, "base64")); return; }
     res.writeHead(404); res.end();
   });
   await new Promise<void>(resolve => server.listen(0, "127.0.0.1", resolve));
@@ -62,7 +63,9 @@ describe("chat Box bridge", () => {
     const signal = new AbortController().signal;
     const session = await mount(integrations, signal, true);
     try {
-      expect((await session.execute("computer_" + name, args, signal)).ok).toBe(true);
+      const result = await session.execute("computer_" + name, args, signal);
+      expect(result.ok).toBe(true);
+      if (name === "open_url") expect(result.text).toContain("Page loading is not confirmed");
       expect(calls.map(call => call.path)).toEqual(["/control", "/boxes/bx_23456789/commands"]);
       expect(calls[0].authorization).toBe("Bearer synthetic-control-key");
       expect(calls[1].authorization).toBe("Bearer synthetic-box-key");
@@ -77,7 +80,7 @@ describe("chat Box bridge", () => {
     const session = await mount(integrations, signal, true);
     try {
       const result = await session.execute("computer_screenshot", {}, signal);
-      expect(result.images).toEqual([{ type: "image_url", image_url: { url: "data:image/jpeg;base64," + Buffer.from("synthetic-frame").toString("base64") } }]);
+      expect(result.images).toEqual([{ type: "image_url", image_url: { url: "data:image/jpeg;base64," + Buffer.from(jpeg, "base64").toString("base64") } }]);
       expect(calls[1].body.command).toContain("ogb-panel.jpg.model.jpg");
       expect(calls[1].body.command).not.toContain("-resize");
       expect(calls[2].path).toContain("ogb-panel.jpg.model.jpg");
