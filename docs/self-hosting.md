@@ -4,12 +4,14 @@ Run the harness server on an always-on Linux box (a VPS, a home server, a
 Mac mini in a closet) and pair browsers, the desktop app, or phones with it.
 The npm CLI supports a managed public tunnel, Tailscale, or your own proxy.
 
-> **Security first:** the server deliberately trusts only loopback — any
-> process that can reach `127.0.0.1:8799` has full control, including the
-> shell your bots can use. **Never expose that port directly and never bind
-> it to a public interface.** Reach it through an SSH tunnel, a private
-> network you trust, or an authenticated remote path below. Requests through
-> the managed tunnel or a correctly configured proxy require a paired session.
+> **Security first:** by default a self-hosted server trusts loopback as its
+> owner — any process that can reach `127.0.0.1:8799` has full control,
+> including the shell your bots can use. **Never expose that port directly
+> and never bind it to a public interface.** Reach it through an SSH tunnel, a
+> private network you trust, or an authenticated remote path below. Requests
+> through the managed tunnel or a correctly configured proxy require a paired
+> session. If several people use one server, read
+> [Loopback trust](#loopback-trust-owner-or-service) below.
 
 Step by step, for a server you do not have yet: [Deploy OpenMausBot on a
 VPS](deploy-vps.md) walks through the three ways in (public address, own
@@ -456,6 +458,58 @@ ssh -L 8799:localhost:8799 you@your-server
 # then open http://localhost:8799 — loopback, so no pairing needed
 ```
 
+(With `OMB_LOOPBACK_TRUST=service`, below, a tunnel is loopback without a
+session, so sign in or pair first; it no longer makes you the owner.)
+
+### Loopback trust: owner or service
+
+Every bot's shell runs on the server as the same user, so every bot is a
+loopback caller too. On a server one person uses that is fine: the bots are
+theirs. On a workspace several people share it is not: a member could ask a
+bot to `curl` the local API and change settings, keys, MCP servers or
+webhooks as the owner. The server therefore decides at start-up how far a
+loopback request **without a session** is trusted, and logs it:
+
+```
+local requests: owner trust (self-hosted default)
+local requests: service trust (hosted workspace); without a session, loopback may use only health, the Slack worker's guarded routes and bot capability routes
+```
+
+| Trust | Default for | A session-less loopback request may |
+|---|---|---|
+| `owner` | a self-hosted server, the desktop app | do everything, as today |
+| `service` | a hosted workspace (`OMB_ADMIN_URL`/`OMB_ADMIN_WORKSPACE`/`OMB_ADMIN_MEMBERSHIP` set), or `OMB_SHARED_WORKSPACE_FULL_ACCESS=1` | read health, who-am-I, the bot list, a thread's messages and a bot's picture; open a thread; send through the guarded route; watch and stop its exact request; withdraw a queued line; **decline** a card; use the bots' own capability routes (`/api/internal/*`, which check their own per-turn token) |
+
+Under `service`, everything else from loopback needs a real session and
+answers 403: settings and keys (`/api/config`), instances, MCP servers,
+webhooks, sessions and pairing, people and sign-in lists, usage, budgets,
+the decision log, fleet, workspace backups, creating or loosening bots, and
+approving or answering any card. The Slack worker (the only session-less
+local caller a hosted workspace has) needs nothing more and keeps working
+unchanged. Sessions — a portal sign-in, an email sign-in or a pairing — work
+exactly as before, with their own scopes.
+
+Set `OMB_LOOPBACK_TRUST=service` on a self-hosted server people share (with
+an email sign-in list, say), or `OMB_LOOPBACK_TRUST=owner` to opt a hosted
+workspace back into the old behaviour (the log then warns). Any other value
+means `service`. The desktop app ignores the setting: its local changes
+already need the app's own per-launch capability.
+
+With `service`, the CLI commands that talk to the running server as its
+owner — `openmausbot pair` and `openmausbot sessions` — are refused like
+any other admin change; pair from Settings while signed in as an admin, or
+use `openmausbot access`, which edits the sign-in list on disk. The MCP
+server script works with `OPENMAUSBOT_TOKEN` set to a paired session.
+
+**What remains, by design.** A bot can still do what the Slack worker does:
+post into any bot's thread through the guarded route (booked to the
+workspace, not to a person), open threads — including Full-access threads
+when the operator turned shared Full access on for Slack — stop a request,
+and decline a card. It cannot approve anything or change who may do what.
+Files the server's user owns (`config.json`, the engine's environment) are
+still readable from a bot's shell; that is a separate boundary (a second
+user for engines), not this one.
+
 ## Sign in with your email
 
 A pairing code is fine for the owner's own devices. For a workspace other
@@ -501,6 +555,24 @@ seen, and what each person spent this month. **Invite** adds an address (or
 `https://your.host/pair?email=name%40company.com`: it opens the sign-in page
 with the address filled in, and the one-time code still goes to that address.
 Roles change with one click; removing someone stops new sign-ins.
+
+On a hosted workspace whose members your organisation's Admin manages
+(`OMB_ADMIN_MEMBERSHIP=portal`), this list decides nothing, so Settings →
+People shows, read-only, who has signed in and what they spent, with a
+**Manage people in Admin** link to that workspace in Admin → People. Remote
+access there lists signed-in devices and offers no pairing codes, since a
+hosted workspace refuses them.
+
+### Who may answer a card
+
+Approval cards are the provider's own (see the approval modes); OpenMausBot
+adds none. On a workspace several people share — portal membership, or an
+email sign-in list that names members — it narrows only whose answer counts:
+a member may answer a card on a thread they started, or for a request they
+sent; admins and the owner may answer any card; a session-less local caller
+under `service` trust may only decline. Anywhere else, anyone who can chat
+may answer, as before. Each answered card records who answered it
+(`card.answeredBy`), and so does its row in the decision log.
 
 On the Workspaces screen, creating a client workspace shows the same kind of
 link for that workspace's admin, so a client gets one address, one workspace
@@ -586,6 +658,29 @@ curl -H "Authorization: Bearer $TOKEN" -o usage.csv \
 
 Dates are inclusive, UTC, at most a year apart; without them you get the
 current month to date.
+
+### The decision log
+
+Every approval decision — a rule that let a tool call through, a card that
+was shown, and a person's answer, with who gave it (the session's email or
+device label, `loopback` for the owner, `worker` for a session-less local
+service) — is appended to `<data dir>/decisions/YYYY-MM.ndjson` (0600,
+credentials redacted). Month files are kept for at least 180 days; set
+`decisions.retentionDays` in `config.json` (or through `PUT /api/config`),
+or `OMB_DECISION_RETENTION_DAYS`, to keep them longer or shorter (1–3650
+days; the environment wins). A month is deleted only once all of it is older
+than the window. An older server's `decisions.ndjson` and `.1` are still read
+and age out the same way. Admins can read it back:
+
+```sh
+curl -H "Authorization: Bearer $TOKEN" "https://maus.example.com/api/decisions?limit=200"
+curl -H "Authorization: Bearer $TOKEN" -o decisions.csv \
+  "https://maus.example.com/api/decisions.csv?from=2026-09-01&to=2026-09-30"
+```
+
+The CSV has one line per decision (time, decision, source, bot, tool,
+summary, rule, unattended, answered by, thread, request); cells that would
+start a spreadsheet formula are prefixed with `'`.
 
 ## Spend limits and sell prices (enterprise)
 

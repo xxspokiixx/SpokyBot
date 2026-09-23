@@ -12,7 +12,11 @@ response as soon as possible, normally within a few days.
   public mutations require either the desktop's private per-launch capability or a paired session;
   built-in agent integrations use narrower per-turn capabilities. Anything that makes it reachable
   from off-machine without a paired session, lets one bot reuse another turn's capability, or lets
-  a local *unprivileged other user* drive it is a vulnerability.
+  a local *unprivileged other user* drive it is a vulnerability. On a hosted or shared workspace
+  (service loopback trust, see `docs/self-hosting.md`) a session-less loopback caller — which
+  includes every bot's shell — may use only the routes in `SERVICE_ALLOW`
+  (`server/request-auth.ts`); reaching an admin route or approving a card that way is a
+  vulnerability. The guarded worker routes it keeps are a documented residual risk.
 - API keys live in `~/.openmausbot/config.json` and are write-only through the API (`configured`
   booleans out, never values). Any path that echoes a stored secret back — API response, SSE event,
   log line, argv visible in `ps` — is a vulnerability.

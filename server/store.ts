@@ -76,12 +76,16 @@ export interface TaskRecord extends WireTask {
   appliedCompactionId?: string;
   contextFloor?: number;
   lastContextModel?: string;
+  /** Opaque key (shared/wire.ts ResolvedSender.id) of the signed-in person
+   * who opened this thread; decides only who may answer its cards on a
+   * shared workspace. Server-private: never on the wire, never patchable. */
+  startedBy?: string;
 }
 
 /** TaskRecord fields no client may see. Everything else must be on WireTask:
  * the exactness assertion below fails to compile when either side drifts,
  * so a new server field forces a decision — wire-visible or private here. */
-export type TaskWirePrivateKeys = "resumeCursors" | "lastInstanceId" | "handedMessages" | "appliedCompactionId" | "contextFloor" | "lastContextModel";
+export type TaskWirePrivateKeys = "resumeCursors" | "lastInstanceId" | "handedMessages" | "appliedCompactionId" | "contextFloor" | "lastContextModel" | "startedBy";
 export type TaskWireProjection = Pick<TaskRecord, Exclude<keyof TaskRecord, TaskWirePrivateKeys>>;
 type AssertExact<A, B> = [A] extends [B] ? ([B] extends [A] ? true : never) : never;
 type AssertSameKeys<A, B> = [keyof A] extends [keyof B] ? ([keyof B] extends [keyof A] ? true : never) : never;
@@ -94,7 +98,7 @@ export const taskWireProjectionIsExact: TaskWireProjectionIsExact = true;
  * returning WireTask means an undeclared server field cannot ride silently. */
 export function toWireTask(task: TaskRecord): WireTask {
   const { resumeCursors: _resumeCursors, lastInstanceId: _lastInstanceId, handedMessages: _handedMessages,
-    appliedCompactionId: _appliedCompactionId, contextFloor: _contextFloor, lastContextModel: _lastContextModel, ...wire } = task;
+    appliedCompactionId: _appliedCompactionId, contextFloor: _contextFloor, lastContextModel: _lastContextModel, startedBy: _startedBy, ...wire } = task;
   return wire;
 }
 
@@ -2161,6 +2165,31 @@ export class Store {
     this.saveBots();
     this.emit({ type: "bot", botId });
     return task;
+  }
+
+  /** Record which signed-in person opened a thread (a bot task or a room
+   * thread). Never reachable from an HTTP PATCH. False when no such thread. */
+  setThreadStartedBy(threadId: string, person: string): boolean {
+    const bot = this.botByThread(threadId);
+    const task = bot ? this.taskByThread(bot.id, threadId) : undefined;
+    if (bot && task) {
+      task.startedBy = person;
+      this.saveBots();
+      return true;
+    }
+    const group = this.groupByThread(threadId);
+    const groupTask = group ? this.groupTaskByThread(group.id, threadId) : undefined;
+    if (!group || !groupTask) return false;
+    groupTask.startedBy = person;
+    this.saveGroups();
+    return true;
+  }
+
+  threadStartedBy(threadId: string): string | undefined {
+    const bot = this.botByThread(threadId);
+    if (bot) return this.taskByThread(bot.id, threadId)?.startedBy;
+    const group = this.groupByThread(threadId);
+    return group ? this.groupTaskByThread(group.id, threadId)?.startedBy : undefined;
   }
 
   /** Attach (or complete) the opener record after the thread exists — the

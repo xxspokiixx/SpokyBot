@@ -55,7 +55,7 @@ import {
 import * as checkpoints from "./checkpoints.ts";
 import { commandReceipt } from "./commands.ts";
 import { buildTurnDigest, coverageForDriver, digestPromptLine, renderDigest, toolEvidence } from "./digest.ts";
-import { appendDecision, readDecisions, flushDecisionLog } from "./decision-log.ts";
+import { appendDecision, bindDecisionRetention, decisionRetentionDays, decisionsCsv, flushDecisionLog, pruneDecisions, readDecisionRange, readDecisions, withDecisionActor, type DecisionActor } from "./decision-log.ts";
 import { validateBotCwd } from "./bot-cwd.ts";
 import {
   ATTACHMENTS_DIR,
@@ -93,7 +93,7 @@ import { groupTurnCwd } from "./room-cwd.ts";
 import { RoomTurnDeadline, RoomTurnStallRegistry, roomTurnTimeoutMessage } from "./room-turn-timeout.ts";
 import * as box from "./box.ts";
 import { TeamComputers, teamComputerAssignment, teamComputerCreate, teamComputerOwner, type TeamComputerRecord } from "./team-computers.ts";
-import { isEffortLevel, type ResolvedSender, type WireBot, type WireGroup, type WireTask } from "../shared/wire.ts";
+import { isEffortLevel, type CardAnswerer, type ResolvedSender, type WireBot, type WireGroup, type WireTask } from "../shared/wire.ts";
 import type { TeamComputersPayload } from "../shared/team-computer.ts";
 import { boxCreateRecoverySnapshot, retireDeletedBoxCreate } from "./box-create-idempotency.ts";
 import { boxDeletionSnapshot } from "./box-delete-journal.ts";
@@ -421,7 +421,7 @@ import {
 } from "./turn-dispatch-guard.ts";
 import { createGracefulShutdown } from "./graceful-shutdown.ts";
 import { acquireDataDirLeaseForProcess } from "./data-dir-lease.ts";
-import { createWorkspaceAccess, describeEdition, editionStatus, hostedWorkspaceConfiguration, hostedWorkspaceConfigured, sharedWorkspaceFullAccessConfigured, loadEnterpriseLayer, type WorkspaceAccess } from "./enterprise.ts";
+import { createWorkspaceAccess, describeEdition, editionStatus, hostedWorkspaceConfiguration, hostedWorkspaceConfigured, sharedWorkspaceFullAccessConfigured, loadEnterpriseLayer, workspaceMembership, type WorkspaceAccess } from "./enterprise.ts";
 import { environmentDescriptor, loadEnvironmentId, serverVersion } from "./environment.ts";
 import { WorkspaceBackupMaintenance } from "./workspace-backup-maintenance.ts";
 import { createWorkspaceBackupRoutes, isWorkspaceBackupSessionControl } from "./workspace-backup-http.ts";
@@ -438,12 +438,13 @@ import {
   labelFromUserAgent,
   requestOrigin,
   requestSource,
+  resolveLoopbackTrust,
   resolveRequestAuth,
   parseCookies,
   serializeSessionCookie,
   sessionCookieName,
 } from "./request-auth.ts";
-import { cookieMaxAgeSeconds, formatPairingCode, SessionRegistry, type Scope } from "./sessions.ts";
+import { cookieMaxAgeSeconds, formatPairingCode, SessionRegistry, type Scope, type SessionRecord } from "./sessions.ts";
 import { describeBrand, loadBrand } from "./brand.ts";
 import { deliverSseFrame } from "./sse-fanout.ts";
 import {
@@ -529,6 +530,14 @@ let workspaceAccess: WorkspaceAccess | null = null;
 const DESKTOP_MANAGED = process.env.OMB_DESKTOP_PARENT === "1";
 const SHARED_WORKSPACE_FULL_ACCESS = sharedWorkspaceFullAccessConfigured();
 const sharedWorkspaceFullAccessEnabled = () => SHARED_WORKSPACE_FULL_ACCESS && Boolean(workspaceAccess) && entitled("admin");
+// Who a loopback request without a session is (server/request-auth.ts
+// LoopbackTrust): the owner on a desktop or a one-person server; a service on
+// a shared workspace, where every bot's shell is a loopback caller too.
+const LOOPBACK = resolveLoopbackTrust({
+  desktopManaged: DESKTOP_MANAGED,
+  hostedWorkspace: HOSTED_WORKSPACE,
+  sharedWorkspaceFullAccess: SHARED_WORKSPACE_FULL_ACCESS,
+});
 // Empty is deliberately a deny-all bootstrap state. Only Electron's private
 // utility-process port can replace it with the per-launch owner capability.
 let desktopMutationToken: string | undefined = DESKTOP_MANAGED ? "" : undefined;
@@ -548,6 +557,9 @@ if (hostedModels) {
 // config.json is read once per process (a change restarts the server, like
 // every other hand-edited knob), so a binding made here never goes stale.
 bindThreadLogCapProvider(() => threadEventLogMaxBytes(cfg));
+// The decision log keeps month files for at least this many days. Read per
+// prune, so a Settings change applies at the next one without a restart.
+bindDecisionRetention(() => decisionRetentionDays(cfg.decisions?.retentionDays));
 const customDomainVerifier = createCustomDomainVerifier({ environmentId: ENVIRONMENT_ID });
 // "Sign in with your email" on /pair: the allow-list is read per call so a
 // Settings change or an env bootstrap applies without a restart.
@@ -587,7 +599,91 @@ const turnTriggers = new Map<string, UsageTrigger>();
 function messageSender(auth: RequestAuth): ResolvedSender | undefined {
   if (auth.kind !== "session") return undefined;
   const name = (auth.session.email ?? auth.session.label ?? "").trim();
-  return name ? { name } : undefined;
+  return name ? { name, id: personKey(auth.session) } : undefined;
+}
+
+/** An opaque, stable key for the person behind a session: their account
+ * email when they signed in with one (a new device is still them), else the
+ * paired session itself. Hashed, so a message or a thread can carry it
+ * without handing other members a session id. */
+function personKey(session: SessionRecord): string {
+  const basis = session.email ? `email:${session.email.trim().toLowerCase()}` : `session:${session.id}`;
+  return `p_${createHash("sha256").update(basis).digest("base64url").slice(0, 22)}`;
+}
+
+/** More than one person uses this workspace: portal membership, or an email
+ * sign-in list that names members. Only then does who-may-answer narrow. */
+function sharedMembership(): boolean {
+  return hostedWorkspaceConfiguration()?.portalMembership === true || signInAllowList().members.length > 0;
+}
+
+/** The opaque key of whoever sent the request a card belongs to: the
+ * message the harness proved started the turn, else the last person's line
+ * before the card. Undefined for the owner, a service, a bot or a routine. */
+function cardRequesterKey(threadId: string, requestId: string): string | undefined {
+  const thread = store.messagesFor(threadId);
+  const index = thread.findIndex((message) => message.card?.requestId === requestId);
+  if (index < 0) return undefined;
+  const card = thread[index]!;
+  const source = card.requestMessageId
+    ? thread.find((message) => message.id === card.requestMessageId)
+    : thread.slice(0, index).findLast((message) => message.role === "user");
+  return source?.role === "user" && !source.peerAsk ? source.sender?.id : undefined;
+}
+
+/** Whose session may answer a card: the provider CLI's own approval modes and
+ * the harness's proposals stay exactly as they are; this adds no card or
+ * prompt, it only decides who may answer the ones that exist.
+ * - the owner on this machine, and admins: any card;
+ * - a session-less caller on a shared server (service trust): decline only;
+ * - a member, where several people share the workspace: only on a thread
+ *   they started, or for a request they sent;
+ * - anyone else (one person, or nobody listed as a member): any card. */
+function cardAnswerRefusal(auth: RequestAuth, threadId: string, requestId: string, behavior: string): string | null {
+  if (auth.kind === "loopback") {
+    return auth.trust === "service" && behavior !== "deny"
+      ? "A local service can only decline this request. Approve or answer it in OpenMausBot while signed in."
+      : null;
+  }
+  if (auth.scopes.includes("admin") || !sharedMembership()) return null;
+  const person = personKey(auth.session);
+  if (store.threadStartedBy(threadId) === person || cardRequesterKey(threadId, requestId) === person) return null;
+  return "Only the person who started this conversation or sent this request, or a workspace admin, can answer this card.";
+}
+
+function decisionActorFor(auth: RequestAuth): DecisionActor {
+  if (auth.kind === "loopback") return auth.trust === "service" ? { kind: "worker" } : { kind: "loopback" };
+  const session = auth.session;
+  return {
+    kind: "session", sessionId: session.id, label: session.label,
+    ...(session.email ? { email: session.email } : {}),
+    // A portal session's id is its membership grant: never written down.
+    ...(session.userId && !session.userId.startsWith("portal:") ? { userId: session.userId } : {}),
+  };
+}
+
+function cardAnswererFor(auth: RequestAuth): CardAnswerer {
+  if (auth.kind === "loopback") return auth.trust === "service" ? { kind: "worker" } : { kind: "loopback" };
+  return { kind: "session", name: (auth.session.email ?? auth.session.label ?? "").trim() || "Signed-in user" };
+}
+
+/** Answer a card as `auth`: the decision rows written meanwhile name the
+ * answerer, and a card this answer settled records who settled it. A card
+ * that was already settled keeps whatever it said. */
+async function answeringCardAs(auth: RequestAuth, threadId: string, requestId: string, work: () => Promise<unknown>): Promise<void> {
+  const open = (() => {
+    const card = store.messagesFor(threadId).find((message) => message.card?.requestId === requestId)?.card;
+    return Boolean(card && !card.answered && !card.dismissed);
+  })();
+  try {
+    await withDecisionActor(decisionActorFor(auth), work);
+  } finally {
+    const message = open ? store.messagesFor(threadId).find((candidate) => candidate.card?.requestId === requestId) : undefined;
+    const card = message?.card;
+    if (message && card && !card.answeredBy && card.answered !== "unavailable" && (card.answered || card.dismissed)) {
+      store.patchMessage(threadId, message.id, { card: { ...card, answeredBy: cardAnswererFor(auth) } });
+    }
+  }
 }
 
 function noteTurnTrigger(threadId: string, auth: RequestAuth): void {
@@ -10933,6 +11029,8 @@ function configStatus() {
       ...(cfg.budgets?.warnAtPercent !== undefined ? { warnAtPercent: cfg.budgets.warnAtPercent } : {}),
     },
     billing: { currency: cfg.billing?.currency ?? "USD", prices: cfg.billing?.prices ?? {} },
+    // how long the approval decision log is kept, after env and default
+    decisions: { retentionDays: decisionRetentionDays(cfg.decisions?.retentionDays) },
     // the base URL is a setting, not a secret; the key stays write-only
     openaiCompat: { configured: Boolean(cfg.openaiCompat?.key), url: cfg.openaiCompat?.url ?? "" },
     composio: {
@@ -10989,6 +11087,8 @@ function configStatus() {
     browserProfiles: cfg.browserProfiles ?? [],
     // who may sign in with an emailed code (server/account-signin.ts)
     signIn: { admins: cfg.signIn?.admins ?? [], members: cfg.signIn?.members ?? [] },
+    // whether that list decides anything here, or the organisation's Admin does
+    membership: workspaceMembership(),
   };
 }
 
@@ -11275,7 +11375,7 @@ const workspaceBackupRoutes = createWorkspaceBackupRoutes({
     const current = resolveRequestAuth(req, {
       sessions, cookieName: SESSION_COOKIE, streamPath: "/api/events",
       url: new URL(req.url ?? "/", `http://localhost:${PORT}`),
-      loopbackMutationToken: desktopMutationToken, companionMutationToken,
+      loopbackMutationToken: desktopMutationToken, companionMutationToken, loopbackTrust: LOOPBACK.trust,
     }).auth;
     return Boolean(current?.scopes.includes("admin") && current.kind === original.kind &&
       (current.kind !== "session" || (original.kind === "session" && current.session.id === original.session.id)));
@@ -11469,6 +11569,7 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
       loopbackMutationToken: desktopMutationToken,
       companionMutationToken,
       features: { sharedComputers: sharedComputersEnabled(cfg) },
+      loopbackTrust: LOOPBACK.trust,
     });
     // The browser's cookie carries the term it was set with, and the
     // session's term slides on use (sessions.ts `renew`), so re-issue the
@@ -11524,7 +11625,7 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
         res,
         200,
         auth.kind === "loopback"
-          ? { kind: "loopback", scopes: auth.scopes, environmentId: ENVIRONMENT_ID }
+          ? { kind: "loopback", scopes: auth.scopes, environmentId: ENVIRONMENT_ID, ...(auth.trust ? { trust: auth.trust } : {}) }
           : {
               kind: "session",
               id: auth.session.id,
@@ -14573,6 +14674,8 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
       if (!request.success) return json(res, 400, { error: "title must be text" });
       const task = store.createGroupTask(group.id, request.data.title);
       if (!task) return json(res, 500, { error: "couldn't create that task" });
+      // Who opened it decides who may answer its cards on a shared workspace.
+      if (auth.kind === "session") store.setThreadStartedBy(task.threadId, personKey(auth.session));
       const fresh = groupWithThread(store.group(group.id)!);
       broadcast({ kind: "group", group: fresh });
       return json(res, 201, { group: fresh, task });
@@ -15207,7 +15310,7 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
       const allowKey = typeof body.allowKey === "string" ? body.allowKey : "";
       const bot = requestedTaskBot(m[1], body.threadId);
       if (!allowKey) return json(res, 400, { error: "allowKey required" });
-      const pending = store.messagesFor(bot.threadId).some((message) =>
+      const pending = store.messagesFor(bot.threadId).find((message) =>
         message.card?.requestId &&
         !message.card.answered &&
         message.card.dismissed !== true &&
@@ -15216,6 +15319,10 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
       if (!pending) {
         return json(res, 409, { error: "that grant is not on a pending approval for this bot" });
       }
+      // A standing grant is an approval: the same people who may approve
+      // the card it came from may remember it.
+      const refusal = cardAnswerRefusal(auth, bot.threadId, pending.card!.requestId!, "allow");
+      if (refusal) return json(res, 403, { error: refusal });
       store.patchTask(bot.id, bot.threadId, {
         alwaysAllow: [...new Set([...(bot.alwaysAllow ?? []), allowKey])].slice(0, 200),
       });
@@ -16509,40 +16616,44 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
       const behavior = requestBehavior(body.behavior);
       const reviewedSha256 = typeof body.reviewedSha256 === "string" ? body.reviewedSha256 : undefined;
       if (!behavior) return json(res, 400, { error: "behavior must be allow, deny, or answer" });
-      if (await resolveAndSendTeamSetup(res, {
-        botId: bot.id, threadId: bot.threadId, requestId: String(body.requestId), behavior,
-      }, auth.kind === "loopback" ? DESKTOP_MANAGED || Boolean(req.headers.origin) && !store.bots.some((bot) => bot.busy || activeGroupTurnForBot(bot.id)) : auth.scopes.includes("admin"))) return;
-      if (resolveAndSendRoutine(res, {
-        botId: bot.id,
-        botName: bot.name,
-        threadId: bot.threadId,
-        requestId: String(body.requestId),
-        behavior,
-      })) return;
-      if (resolveAndSendProfile(res, {
-        botId: bot.id,
-        botName: bot.name,
-        threadId: bot.threadId,
-        requestId: String(body.requestId),
-        behavior,
-      })) return;
-      if (sendSkillResolution(res, resolveSkillRequest({
-        botId: bot.id,
-        botName: bot.name,
-        threadId: bot.threadId,
-        requestId: String(body.requestId),
-        behavior,
-        reviewedSha256,
-      }))) return;
-      // peer-approval intercept: harness-native cards carry a requestId
-      // that lives in peer-approval's pending map. Resolve them here so
-      // the provider adapter never sees a request it didn't raise.
-      if (store.messagesFor(bot.threadId).some((message) => message.card?.requestId === String(body.requestId)) &&
-        resolvePeerComms(approvalBus, String(body.requestId), behavior)) {
-        return json(res, 200, { ok: true, outcome: behavior === "allow" ? "allowed-once" : "rejected" });
-      }
-      const outcome = await answerRequest(bot.threadId, bot.modelSelection.instanceId, String(body.requestId), behavior, body.message, { id: bot.id, name: bot.name }, body.always === true);
-      return json(res, 200, { ok: true, outcome });
+      const refusal = cardAnswerRefusal(auth, bot.threadId, String(body.requestId), behavior);
+      if (refusal) return json(res, 403, { error: refusal });
+      return await answeringCardAs(auth, bot.threadId, String(body.requestId), async () => {
+        if (await resolveAndSendTeamSetup(res, {
+          botId: bot.id, threadId: bot.threadId, requestId: String(body.requestId), behavior,
+        }, auth.kind === "loopback" ? DESKTOP_MANAGED || Boolean(req.headers.origin) && !store.bots.some((bot) => bot.busy || activeGroupTurnForBot(bot.id)) : auth.scopes.includes("admin"))) return;
+        if (resolveAndSendRoutine(res, {
+          botId: bot.id,
+          botName: bot.name,
+          threadId: bot.threadId,
+          requestId: String(body.requestId),
+          behavior,
+        })) return;
+        if (resolveAndSendProfile(res, {
+          botId: bot.id,
+          botName: bot.name,
+          threadId: bot.threadId,
+          requestId: String(body.requestId),
+          behavior,
+        })) return;
+        if (sendSkillResolution(res, resolveSkillRequest({
+          botId: bot.id,
+          botName: bot.name,
+          threadId: bot.threadId,
+          requestId: String(body.requestId),
+          behavior,
+          reviewedSha256,
+        }))) return;
+        // peer-approval intercept: harness-native cards carry a requestId
+        // that lives in peer-approval's pending map. Resolve them here so
+        // the provider adapter never sees a request it didn't raise.
+        if (store.messagesFor(bot.threadId).some((message) => message.card?.requestId === String(body.requestId)) &&
+          resolvePeerComms(approvalBus, String(body.requestId), behavior)) {
+          return json(res, 200, { ok: true, outcome: behavior === "allow" ? "allowed-once" : "rejected" });
+        }
+        const outcome = await answerRequest(bot.threadId, bot.modelSelection.instanceId, String(body.requestId), behavior, body.message, { id: bot.id, name: bot.name }, body.always === true);
+        return json(res, 200, { ok: true, outcome });
+      });
     }
     // Answer by THREAD, so a request raised inside a room can be answered
     // too: a member's turn runs on the room's thread, and the bot that
@@ -16555,84 +16666,88 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
       const reviewedSha256 = typeof body.reviewedSha256 === "string" ? body.reviewedSha256 : undefined;
       if (!behavior) return json(res, 400, { error: "behavior must be allow, deny, or answer" });
       const requestId = String(body.requestId);
-      const skillCard = store.messagesFor(threadId).find(
-        (message) => message.card?.requestId === requestId && message.card.skillRequest,
-      );
-      if (skillCard?.card?.skillRequest) {
-        const skillBotId = skillCard.from?.botId ?? store.botByThread(threadId)?.id;
-        if (!skillBotId) return json(res, 400, { error: "this skill request has no valid owner" });
-        const skillOwner = store.bot(skillBotId);
-        if (sendSkillResolution(res, resolveSkillRequest({
-          botId: skillBotId,
-          botName: skillOwner?.name,
-          threadId,
-          requestId,
-          behavior,
-          reviewedSha256,
-        }))) return;
-      }
-      const routineCard = store.messagesFor(threadId).find(
-        (message) => message.card?.requestId === requestId && message.card.routineRequest,
-      );
-      if (routineCard?.card?.routineRequest) {
-        // Derive the owner from the conversation, not from the executable
-        // payload being authorized. Room cards carry their trusted sender;
-        // one-to-one tasks resolve through the store's thread ownership.
-        const routineBotId = routineCard.from?.botId ?? store.botByThread(threadId)?.id;
-        if (!routineBotId) return json(res, 400, { error: "this routine request has no valid owner" });
-        const routineOwner = store.bot(routineBotId);
-        if (resolveAndSendRoutine(res, {
-          botId: routineBotId,
-          botName: routineOwner?.name,
-          threadId,
-          requestId,
-          behavior,
-        })) return;
-      }
-      const setupCard = store.messagesFor(threadId).find((message) => message.card?.requestId === requestId && message.card.teamSetupRequest);
-      if (setupCard) {
-        const setupBotId = setupCard.from?.botId ?? store.botByThread(threadId)?.id;
-        if (!setupBotId) return json(res, 400, { error: "This team setup has no valid owner" });
-        if (await resolveAndSendTeamSetup(res, { botId: setupBotId, threadId, requestId, behavior },
-          auth.kind === "loopback" ? DESKTOP_MANAGED || Boolean(req.headers.origin) && !store.bots.some((bot) => bot.busy || activeGroupTurnForBot(bot.id)) : auth.scopes.includes("admin"))) return;
-      }
-      const profileCard = store.messagesFor(threadId).find(
-        (message) => message.card?.requestId === requestId && message.card.profileRequest,
-      );
-      if (profileCard?.card?.profileRequest) {
-        const profileBotId = profileCard.from?.botId ?? store.botByThread(threadId)?.id;
-        if (!profileBotId) return json(res, 400, { error: "this profile request has no valid owner" });
-        const profileOwner = store.bot(profileBotId);
-        if (resolveAndSendProfile(res, {
-          botId: profileBotId,
-          botName: profileOwner?.name,
-          threadId,
-          requestId,
-          behavior,
-        })) return;
-      }
-      // peer-approval intercept (see /api/bots/:id/respond above). A peer card
-      // belongs to the bus rather than to a speaker, so resolve it before we go
-      // looking for one — a room between turns has no speaker to find.
-      if (store.messagesFor(threadId).some((message) => message.card?.requestId === requestId) &&
-        resolvePeerComms(approvalBus, requestId, behavior)) {
-        return json(res, 200, { ok: true, outcome: behavior === "allow" ? "allowed-once" : "rejected" });
-      }
-      const group = store.groupByThread(threadId);
-      // busyBotId is in-memory only, so an approval that outlives its turn — or
-      // the process — leaves a durable card with no speaker behind it. Fall back
-      // to the member that raised it, and answer even when that member is gone:
-      // answerRequest closes an unreachable card, and a pending approval owns
-      // the composer, so a dead end here locks the room for good.
-      const pending = store.messagesFor(threadId).find((message) => message.card?.requestId === requestId);
-      const owner = group
-        ? (group.busyBotId ? store.bot(group.busyBotId) : undefined) ??
-          (pending?.from ? store.bot(pending.from.botId) : undefined)
-        : store.botByThread(threadId);
-      if (!owner && !pending) return json(res, 404, { error: "nothing is waiting on an answer in this conversation" });
-      const requestOwner = owner ? botForThread(owner.id, threadId) : null;
-      const outcome = await answerRequest(threadId, requestOwner?.modelSelection.instanceId ?? "", requestId, behavior, body.message, owner ? { id: owner.id, name: owner.name } : undefined, body.always === true);
-      return json(res, 200, { ok: true, outcome });
+      const refusal = cardAnswerRefusal(auth, threadId, requestId, behavior);
+      if (refusal) return json(res, 403, { error: refusal });
+      return await answeringCardAs(auth, threadId, requestId, async () => {
+        const skillCard = store.messagesFor(threadId).find(
+          (message) => message.card?.requestId === requestId && message.card.skillRequest,
+        );
+        if (skillCard?.card?.skillRequest) {
+          const skillBotId = skillCard.from?.botId ?? store.botByThread(threadId)?.id;
+          if (!skillBotId) return json(res, 400, { error: "this skill request has no valid owner" });
+          const skillOwner = store.bot(skillBotId);
+          if (sendSkillResolution(res, resolveSkillRequest({
+            botId: skillBotId,
+            botName: skillOwner?.name,
+            threadId,
+            requestId,
+            behavior,
+            reviewedSha256,
+          }))) return;
+        }
+        const routineCard = store.messagesFor(threadId).find(
+          (message) => message.card?.requestId === requestId && message.card.routineRequest,
+        );
+        if (routineCard?.card?.routineRequest) {
+          // Derive the owner from the conversation, not from the executable
+          // payload being authorized. Room cards carry their trusted sender;
+          // one-to-one tasks resolve through the store's thread ownership.
+          const routineBotId = routineCard.from?.botId ?? store.botByThread(threadId)?.id;
+          if (!routineBotId) return json(res, 400, { error: "this routine request has no valid owner" });
+          const routineOwner = store.bot(routineBotId);
+          if (resolveAndSendRoutine(res, {
+            botId: routineBotId,
+            botName: routineOwner?.name,
+            threadId,
+            requestId,
+            behavior,
+          })) return;
+        }
+        const setupCard = store.messagesFor(threadId).find((message) => message.card?.requestId === requestId && message.card.teamSetupRequest);
+        if (setupCard) {
+          const setupBotId = setupCard.from?.botId ?? store.botByThread(threadId)?.id;
+          if (!setupBotId) return json(res, 400, { error: "This team setup has no valid owner" });
+          if (await resolveAndSendTeamSetup(res, { botId: setupBotId, threadId, requestId, behavior },
+            auth.kind === "loopback" ? DESKTOP_MANAGED || Boolean(req.headers.origin) && !store.bots.some((bot) => bot.busy || activeGroupTurnForBot(bot.id)) : auth.scopes.includes("admin"))) return;
+        }
+        const profileCard = store.messagesFor(threadId).find(
+          (message) => message.card?.requestId === requestId && message.card.profileRequest,
+        );
+        if (profileCard?.card?.profileRequest) {
+          const profileBotId = profileCard.from?.botId ?? store.botByThread(threadId)?.id;
+          if (!profileBotId) return json(res, 400, { error: "this profile request has no valid owner" });
+          const profileOwner = store.bot(profileBotId);
+          if (resolveAndSendProfile(res, {
+            botId: profileBotId,
+            botName: profileOwner?.name,
+            threadId,
+            requestId,
+            behavior,
+          })) return;
+        }
+        // peer-approval intercept (see /api/bots/:id/respond above). A peer card
+        // belongs to the bus rather than to a speaker, so resolve it before we go
+        // looking for one — a room between turns has no speaker to find.
+        if (store.messagesFor(threadId).some((message) => message.card?.requestId === requestId) &&
+          resolvePeerComms(approvalBus, requestId, behavior)) {
+          return json(res, 200, { ok: true, outcome: behavior === "allow" ? "allowed-once" : "rejected" });
+        }
+        const group = store.groupByThread(threadId);
+        // busyBotId is in-memory only, so an approval that outlives its turn — or
+        // the process — leaves a durable card with no speaker behind it. Fall back
+        // to the member that raised it, and answer even when that member is gone:
+        // answerRequest closes an unreachable card, and a pending approval owns
+        // the composer, so a dead end here locks the room for good.
+        const pending = store.messagesFor(threadId).find((message) => message.card?.requestId === requestId);
+        const owner = group
+          ? (group.busyBotId ? store.bot(group.busyBotId) : undefined) ??
+            (pending?.from ? store.bot(pending.from.botId) : undefined)
+          : store.botByThread(threadId);
+        if (!owner && !pending) return json(res, 404, { error: "nothing is waiting on an answer in this conversation" });
+        const requestOwner = owner ? botForThread(owner.id, threadId) : null;
+        const outcome = await answerRequest(threadId, requestOwner?.modelSelection.instanceId ?? "", requestId, behavior, body.message, owner ? { id: owner.id, name: owner.name } : undefined, body.always === true);
+        return json(res, 200, { ok: true, outcome });
+      });
     }
     m = path.match(/^\/api\/bots\/([\w-]+)\/interrupt$/);
     if (m && method === "POST") {
@@ -16782,6 +16897,8 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
       }
       const task = store.createTask(bot.id, typeof body.title === "string" ? body.title : undefined, true, body.projectId, undefined, body.approvalMode);
       if (!task) return json(res, 500, { error: "couldn't create that task" });
+      // Who opened it decides who may answer its cards on a shared workspace.
+      if (auth.kind === "session") store.setThreadStartedBy(task.threadId, personKey(auth.session));
       const fresh = botWithThread(store.bot(bot.id)!);
       broadcast({ kind: "bot", bot: fresh });
       return json(res, 201, { bot: fresh, task: wireTask(task) });
@@ -17392,6 +17509,20 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
         return json(res, 400, { error: "limit must be a positive whole number" });
       }
       return json(res, 200, { decisions: readDecisions(DATA_DIR, parsedLimit ?? 200) });
+    }
+    // The same rows for an auditor's spreadsheet, over a date range. Admin
+    // scope by default (not in CLIENT_ALLOW, not a service route).
+    if (method === "GET" && path === "/api/decisions.csv") {
+      const range = parseUsageRange(url.searchParams.get("from"), url.searchParams.get("to"));
+      if (!range) return json(res, 400, { error: "from and to must be YYYY-MM-DD, from no later than to, at most a year apart" });
+      const stamp = (date: Date) => date.toISOString().slice(0, 10);
+      res.writeHead(200, {
+        "content-type": "text/csv; charset=utf-8",
+        "content-disposition": `attachment; filename="decisions-${stamp(range.from)}-${stamp(range.to)}.csv"`,
+        "cache-control": "no-store",
+      });
+      res.end(decisionsCsv(readDecisionRange(DATA_DIR, range)));
+      return;
     }
 
     // ── provider instances (model picker) ──
@@ -18715,6 +18846,14 @@ calendarCalls.start();
 
 // Resolve the edition before accepting requests so /api/edition is never a guess.
 console.log(describeEdition(await loadEnterpriseLayer()));
+console.log(LOOPBACK.trust === "service"
+  ? `local requests: service trust (${LOOPBACK.reason}); without a session, loopback may use only health, the Slack worker's guarded routes and bot capability routes`
+  : `local requests: owner trust (${LOOPBACK.reason})`);
+if (LOOPBACK.warning) console.warn(`local requests: ${LOOPBACK.warning}`);
+// The decision log also prunes as it writes; this covers a quiet server.
+const pruneDecisionLog = () => void pruneDecisions(DATA_DIR, decisionRetentionDays(cfg.decisions?.retentionDays));
+pruneDecisionLog();
+setInterval(pruneDecisionLog, 6 * 60 * 60_000).unref();
 workspaceAccess = createWorkspaceAccess({ sessions, cookieName: SESSION_COOKIE, closeSessionStreams });
 // Ten-second cadence plus the bridge's five-second backchannel deadline bounds
 // stale portal access on quiet event/browser streams to fifteen seconds.

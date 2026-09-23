@@ -11,7 +11,8 @@ export interface EnvironmentDescriptor {
 }
 
 export type SessionState =
-  | { kind: "loopback" }
+  // `service`: a shared server that does not treat this machine as its owner
+  | { kind: "loopback"; trust?: "service" }
   | { kind: "session"; id: string; label: string; scopes: string[]; expiresAt: number }
   | { kind: "unauthenticated"; error: string }
   | { kind: "unreachable"; error: string };
@@ -40,7 +41,13 @@ export async function readSessionState(fetchImpl: typeof fetch = fetch): Promise
       expiresAt: typeof record.expiresAt === "number" ? record.expiresAt : 0,
     };
   }
-  return { kind: "loopback" };
+  return record.trust === "service" ? { kind: "loopback", trust: "service" } : { kind: "loopback" };
+}
+
+/** The owner on this machine or an admin session: who may manage the server. */
+export function isOwnerOrAdmin(state: SessionState | null): boolean {
+  if (!state) return false;
+  return state.kind === "loopback" ? state.trust !== "service" : state.kind === "session" && state.scopes.includes("admin");
 }
 
 /** Pull `#code=…` off the URL and out of history, the way a pairing link is meant to be consumed. */
