@@ -1,3 +1,4 @@
+import { codexToolSurfaceArgs } from "./codex-tool-surface.ts";
 // Codex driver — upstream CodexDriver skeleton over agentcal's
 // drivers/codex.js runtime: the official `codex` CLI headless over its
 // app-server JSON-RPC protocol (newline-delimited JSON on stdio).
@@ -666,7 +667,7 @@ export const CodexDriver: ProviderDriver<CodexConfig> = {
 
       const launchAttempt = async (attempt: number): Promise<void> => {
         const env = childEnv();
-        const appServerArgs = ["app-server", ...(config.managed ? managedCodexArgs(config.managed) : codexLocalProviderArgs(env, turn.model))];
+        const appServerArgs = ["app-server", ...(config.managed ? managedCodexArgs(config.managed) : codexLocalProviderArgs(env, turn.model)), ...codexToolSurfaceArgs()];
         if (turn.integrations?.composio) {
           mountMcpServer(appServerArgs, env, "openmausbot_connectors", turn.integrations.composio);
         }
