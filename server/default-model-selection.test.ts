@@ -140,7 +140,8 @@ describe("new bot default model selection while enrolled in an organisation", ()
 // The server's own wiring, not a copy: run index.ts's actual defaultSelection
 // and policyModelRefusal against a synthetic registry, enrolment and policy.
 describe("new bot default model selection wiring in index.ts", () => {
-  const source = readFileSync(new URL("./index.ts", import.meta.url), "utf8");
+  // Windows checkouts may use CRLF; match on normalised line endings.
+  const source = readFileSync(new URL("./index.ts", import.meta.url), "utf8").replace(/\r\n/g, "\n");
   const extract = (signature: string) => {
     const start = source.indexOf(`\n${signature}`), end = source.indexOf("\n}\n", start);
     expect(start).toBeGreaterThan(0); expect(end).toBeGreaterThan(start);
