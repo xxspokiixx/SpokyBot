@@ -118,7 +118,10 @@ try {
 } catch (error) {
   report.error = String(error); save(); throw error;
 } finally {
-  save();
-  try { unlinkSync(join(fixture.info.dataDir, ".codex", "auth.json")); } catch { /* fixture cleanup remains authoritative */ }
-  await fixture.close();
+  try {
+    save();
+  } finally {
+    try { unlinkSync(join(fixture.info.dataDir, ".codex", "auth.json")); } catch { /* fixture cleanup remains authoritative */ }
+    await fixture.close();
+  }
 }
