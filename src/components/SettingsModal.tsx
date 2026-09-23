@@ -31,6 +31,7 @@ import { SkinPicker } from "./SkinPicker";
 import { RoomTurnTimeoutSettings } from "./RoomTurnTimeoutSettings";
 import { ThreadConcurrencySettings } from "./ThreadConcurrencySettings";
 import { ThreadCleanupSettings } from "./ThreadCleanupSettings";
+import { DefaultBotSettings } from "./NewBotDialog";
 import { WorkspaceBackupSettings } from "./WorkspaceBackupSettings";
 import { CompanyBackupSettings } from "./CompanyBackupSettings";
 import { cn } from "@/lib/cn";
@@ -637,6 +638,7 @@ export function SettingsModal() {
                 <div>
                   <LanguageRow />
                   <AnalyticsRow />
+                  <DefaultBotSettings />
                 </div>
                 <Card title={t("settings.roomTurns.title")} subtitle={t("settings.roomTurns.subtitle")}>
                   <RoomTurnTimeoutSettings />
