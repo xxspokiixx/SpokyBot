@@ -293,15 +293,18 @@ export class BrowserRuntime {
           beforeDispatch?.();
           const navigation = result as { content?: unknown[] };
           const page = observation as { content?: unknown[]; isError?: boolean } | null;
+          const observed = page?.isError !== true && Array.isArray(page?.content) && page.content.some((item) =>
+            item && typeof item === "object" && (item as { type?: unknown }).type === "text" &&
+            typeof (item as { text?: unknown }).text === "string" && (item as { text: string }).text.trim().length > 0);
           result = {
             content: [
               ...(Array.isArray(navigation.content) ? navigation.content : []),
-              { type: "text", text: page?.isError
+              { type: "text", text: !observed
                 ? "Navigation returned, but page verification failed. Do not claim the requested page loaded and do not blindly repeat navigation."
                 : "Page observed after navigation. Check this result for redirects, sign-in requirements or page errors before reporting task success:" },
               ...(Array.isArray(page?.content) ? page.content : []),
             ],
-            ...(page?.isError ? { isError: true } : {}),
+            ...(!observed ? { isError: true } : {}),
           };
         }
         return shapeBrowserToolResult(result, { toolName, budget: this.options.resultBudget });
