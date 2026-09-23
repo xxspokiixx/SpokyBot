@@ -14980,7 +14980,7 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
         if (!parsed.success) return json(res, 400, { error: "Team name must be 1 to 60 characters" });
         nextName = parsed.data.name;
       }
-      const error = store.changeEmptySection(section, nextName);
+      const error = method === "DELETE" ? store.deleteSection(section) : store.changeEmptySection(section, nextName);
       if (error) return json(res, error === "No such team" ? 404 : 409, { error });
       return json(res, 200, { sections: store.sections });
     }
