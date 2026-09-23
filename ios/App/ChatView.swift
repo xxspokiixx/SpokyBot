@@ -27,6 +27,7 @@ struct ChatView: View {
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @Environment(\.scenePhase) private var scenePhase
     @State private var draft = ""
+    @State private var revealedMessageId: String?
     @State private var showingTasks = false
     @State private var showingComputer = false
     @State private var showingPlus = false
@@ -198,6 +199,12 @@ struct ChatView: View {
                                     )
                                 case let .activityRun(items):
                                     ActivityRunChip(items: items, openThread: openThread)
+                                case let .assistantTurn(turn):
+                                    AssistantTurnChip(
+                                        turn: turn, chat: current, openLink: openLink, openThread: openThread,
+                                        revealedMessageId: revealedMessageId,
+                                        scrollToMessage: { proxy.scrollTo($0, anchor: .center) }
+                                    )
                                 }
                             }
                             .id(row.id)
@@ -211,7 +218,8 @@ struct ChatView: View {
                         if let live = session.state.streaming[threadId], !live.isEmpty {
                             StreamingBubble(text: live, reasoning: nil, color: current.color)
                                 .id(Self.liveBubbleId)
-                        } else if let thinking = session.state.reasoning[threadId], !thinking.isEmpty {
+                        } else if activityDetail != ActivityDetail.hidden.rawValue,
+                                  let thinking = session.state.reasoning[threadId], !thinking.isEmpty {
                             // Only while there is no answer yet. Once tokens
                             // of the reply exist, the reasoning is behind us
                             // and showing both is just noise.
@@ -315,18 +323,20 @@ struct ChatView: View {
                     guard length > 0 else { return }
                     proxy.scrollTo(Self.liveBubbleId, anchor: .bottom)
                 }
-                .onChange(of: session.focusedMessageId) { _, messageId in
-                    guard let messageId,
-                          messages.contains(where: { $0.id == messageId })
-                    else { return }
-                    withAnimation { proxy.scrollTo(messageId, anchor: .center) }
-                    session.consumeFocus(messageId)
-                }
-                .task {
+                .task(id: session.focusedMessageId) {
                     guard let messageId = session.focusedMessageId,
                           messages.contains(where: { $0.id == messageId })
                     else { return }
-                    proxy.scrollTo(messageId, anchor: .center)
+                    revealedMessageId = messageId
+                    // Materialize the lazy folded row first. Its target bubble
+                    // scrolls itself into view once expansion has laid it out.
+                    let folded = transcript.first { row in
+                        if case let .assistantTurn(turn) = row {
+                            return turn.messages.contains { $0.id == messageId }
+                        }
+                        return false
+                    }
+                    proxy.scrollTo(folded?.id ?? messageId, anchor: .center)
                     session.consumeFocus(messageId)
                 }
             }
@@ -1376,7 +1386,7 @@ struct MessageRow: View {
                     Task { await session.react(to: message, in: chat.threadId, emoji: emoji) }
                 }
             }
-            let visibleText = attachedContent.text
+            let visibleText = message.webhookContent?.task ?? attachedContent.text
             if !visibleText.isEmpty {
                 Divider()
                 Button("Copy", systemImage: "doc.on.doc") {
@@ -1395,6 +1405,7 @@ struct MessageRow: View {
             // sending its computer-local transport path back as prose.
             if message.role == .user,
                message.kind == .text,
+               message.webhookContent == nil,
                attachedContent.attachments.isEmpty,
                case let .bot(bot) = chat {
                 Divider()
@@ -1548,6 +1559,8 @@ struct TextBubble: View {
                 // you did: a message about `**` should show the asterisks.
                 if let diff = parsedDiff {
                     GitPRDiffCardView(filename: diff.filename, diffText: diff.diff)
+                } else if let webhook = message.webhookContent {
+                    WebhookMessageBody(content: webhook)
                 } else if mine {
                     let shared = attachedContent
                     ForEach(Array(shared.attachments.enumerated()), id: \.offset) { _, attachment in

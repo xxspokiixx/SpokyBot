@@ -88,6 +88,7 @@ import com.openmausbot.companion.core.ThreadRef
 import com.openmausbot.companion.core.ToolActivity
 import com.openmausbot.companion.core.TranscriptCard
 import com.openmausbot.companion.core.TranscriptCards
+import com.openmausbot.companion.core.webhookContent
 import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
@@ -443,6 +444,7 @@ private fun TextBubble(
     // Shared attachments are protocol tags in stored user text. They are not
     // prose, and a server-controlled path must never be presented as a link.
     val attached = remember(message.id, message.text) { AttachedMessageContent.parse(message.text.orEmpty()) }
+    val webhook = remember(message) { message.webhookContent }
     // A card brings its own surface, so it drops the bubble — and with it the
     // tail, which is a bubble's chin and not a card's.
     val bubble = card == null
@@ -500,7 +502,9 @@ private fun TextBubble(
             when (card) {
                 is TranscriptCard.Diff -> DiffCard(card)
                 is TranscriptCard.Table -> DataTableCard(card)
-                null -> if (mine) {
+                null -> if (webhook != null) {
+                    WebhookMessageBody(webhook)
+                } else if (mine) {
                     Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                         attached.attachments.forEach { attachment ->
                             SharedAttachmentView(
