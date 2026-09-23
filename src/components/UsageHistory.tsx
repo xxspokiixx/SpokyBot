@@ -22,7 +22,11 @@ export interface UsageGroup {
   input: number;
   output: number;
   cachedInput: number;
+  /** reported and estimated cost together; null when nothing had a price */
   costUsd: number | null;
+  /** the part of costUsd that is an estimate (absent from older servers) */
+  estimatedUsd?: number | null;
+  /** turns on a model with no known price */
   unpriced: number;
   /** the operator's own price, when a list is set and the server is entitled */
   billableUsd?: number | null;
@@ -70,6 +74,20 @@ const GROUP_LABEL_KEYS: Record<UsageGroupBy, "usage.history.byBot" | "usage.hist
   engine: "usage.history.byEngine",
 };
 
+/** A cost cell: "~" in front when part of it is an estimate, a dash when
+ * nothing in the group had a price. */
+function CostCell({ group, strong = false }: { group: UsageGroup; strong?: boolean }) {
+  if (!hasFiniteCost(group.costUsd)) return <span className={cn("text-right tabular-nums", strong ? "" : "text-ink-secondary")}>—</span>;
+  const estimated = hasFiniteCost(group.estimatedUsd) && group.estimatedUsd > 0;
+  return (
+    <span className={cn("text-right tabular-nums", strong ? "" : "text-ink")} title={estimated ? t("usage.history.estimatedPart", { amount: formatUsd(group.estimatedUsd!) }) : undefined}>
+      {estimated && <span className="text-ink-secondary">~</span>}
+      {formatUsd(group.costUsd)}
+      {group.unpriced > 0 && <span className="text-ink-secondary">*</span>}
+    </span>
+  );
+}
+
 /** The table alone, so it renders the same from a fetch or a fixture. */
 export function UsageHistoryTable({ summary }: { summary: UsageSummary }) {
   if (summary.groups.length === 0) {
@@ -94,10 +112,7 @@ export function UsageHistoryTable({ summary }: { summary: UsageSummary }) {
           <span className="text-right tabular-nums text-ink" title={t("usage.history.tokenSplit", { input: formatTokens(group.input), output: formatTokens(group.output), cached: formatTokens(group.cachedInput) })}>
             {formatTokens(headlineTokens(group))}
           </span>
-          <span className="text-right tabular-nums text-ink">
-            {hasFiniteCost(group.costUsd) ? formatUsd(group.costUsd) : <span className="text-ink-secondary">—</span>}
-            {group.unpriced > 0 && hasFiniteCost(group.costUsd) && <span className="text-ink-secondary">*</span>}
-          </span>
+          <CostCell group={group} />
           {billable && <span className="text-right tabular-nums text-ink">{money(group.billableUsd)}</span>}
         </div>
       ))}
@@ -105,9 +120,12 @@ export function UsageHistoryTable({ summary }: { summary: UsageSummary }) {
         <span>{t("usage.history.total")}</span>
         <span className="text-right tabular-nums">{summary.total.turns}</span>
         <span className="text-right tabular-nums">{formatTokens(headlineTokens(summary.total))}</span>
-        <span className="text-right tabular-nums">{hasFiniteCost(summary.total.costUsd) ? formatUsd(summary.total.costUsd) : "—"}</span>
+        <CostCell group={summary.total} strong />
         {billable && <span className="text-right tabular-nums">{money(summary.total.billableUsd)}</span>}
       </div>
+      {hasFiniteCost(summary.total.estimatedUsd) && summary.total.estimatedUsd > 0 && (
+        <div className="mt-3 text-[12px] leading-relaxed text-ink-secondary">{t("usage.history.estimated", { amount: formatUsd(summary.total.estimatedUsd) })}</div>
+      )}
       {summary.total.unpriced > 0 && (
         <div className="mt-3 text-[12px] leading-relaxed text-ink-secondary">{t("usage.history.unpriced", { count: String(summary.total.unpriced) })}</div>
       )}
