@@ -9,8 +9,7 @@ final class TranscriptPresentationUITests: XCTestCase {
         XCTAssertTrue(chip.waitForExistence(timeout: 5))
         XCTAssertFalse(contains("Digest must stay hidden", in: app))
         chip.tap()
-        XCTAssertTrue(app.textViews.firstMatch.waitForExistence(timeout: 3))
-        XCTAssertTrue(String(describing: app.textViews.firstMatch.value).contains("Earlier context preserved"))
+        XCTAssertTrue(app.staticTexts["Earlier context preserved for the next turn."].waitForExistence(timeout: 3))
         screenshot("Compaction summary opened", in: app)
     }
 
