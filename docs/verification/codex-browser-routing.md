@@ -5,7 +5,7 @@ Codex bot processes use OpenMausBot's selected browser/desktop bridge. Process-l
 ## Regression checks
 
 ```sh
-pnpm exec vitest run server/browser-runtime.test.ts server/browser-proxy.test.ts server/surface.test.ts server/drivers/codex.test.ts
+pnpm exec vitest run server/browser-runtime.test.ts server/browser-proxy.test.ts server/surface.test.ts server/drivers/codex.test.ts scripts/testing/native-search-evidence.test.ts
 pnpm exec tsc --noEmit -p tsconfig.server.json
 ```
 
@@ -27,6 +27,6 @@ node --experimental-strip-types scripts/verify-codex-browser-acceptance.ts
 node --experimental-strip-types scripts/verify-codex-search-acceptance.ts
 ```
 
-The browser check gives goal-only prompts to open Google Calendar and read the public project page. It independently observes the active browser URL and saves screenshots. Calendar's public landing page or sign-in page proves navigation only, not authenticated calendar access. It approves only the fixture's navigation/observation tools; shell, login and unrelated requests remain blocked. The search check requires native search activity and a cited official source.
+The browser check gives goal-only prompts to open Google Calendar and read the public project page. It independently observes the active browser URL and saves screenshots. Calendar's public landing page or sign-in page proves navigation only, not authenticated calendar access. It approves only the fixture's navigation/observation tools; shell, login and unrelated requests remain blocked. The search check requires successful native search and openPage records, and the answer must cite the same official URL returned by that page fetch. Missing actions, other actions, failed fetches, and unrelated citations do not pass. Report-writing failures still run fixture cleanup.
 
 Inspect `acceptance.json` including failures and final responses. Website redirects, network errors and model variability remain possible; do not replace a failed run's evidence with a later success.
