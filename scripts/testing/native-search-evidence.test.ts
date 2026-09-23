@@ -29,3 +29,12 @@ it("rejects final-answer disclaimers separated from citations by line or paragra
     }
   }
 });
+
+it("accepts ordinary negative wording while rejecting failed evidence checks", () => {
+  for (const text of ["The documentation did not mention this feature.", "The API cannot process that format.", "The operation failed to save the file."]) {
+    expect(verifiedNativeSearch("settled", [search, opened], [{ ...reply[0], text: `${text} [source](${url})` }]), text).toBe(true);
+  }
+  for (const text of ["I did not verify the source.", "I didn't independently confirm the answer.", "I was unable to open the page."]) {
+    expect(verifiedNativeSearch("settled", [search, opened], [{ ...reply[0], text: `${text}\n[source](${url})` }]), text).toBe(false);
+  }
+});
