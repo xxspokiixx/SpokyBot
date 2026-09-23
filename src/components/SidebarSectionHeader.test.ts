@@ -26,18 +26,21 @@ describe("SidebarSectionHeader", () => {
     expect(html).not.toContain("uppercase");
   });
 
-  it.each([false, true])("exposes a separate delete control when provided, collapsed=%s", (collapsed) => {
-    const html = renderToStaticMarkup(
-      createElement(SidebarSectionHeader, {
-        name: "Work",
-        collapsed,
-        onToggle: () => {},
-        onDelete: () => {},
-        reorderable: true,
-        dragging: false,
-      }),
-    );
+  it.each([false, true])("keeps delete separate from collapse and the context menu, collapsed=%s", (collapsed) => {
+    const onContextMenu = () => {};
+    const element = SidebarSectionHeader({
+      name: "Work",
+      collapsed,
+      onToggle: () => {},
+      onDelete: () => {},
+      onContextMenu,
+      reorderable: true,
+      dragging: false,
+    });
+    const html = renderToStaticMarkup(element);
 
+    expect(element.props.onContextMenu).toBe(onContextMenu);
+    expect(html).toContain('tabindex="-1"');
     expect(html).toContain('aria-label="Delete Work section"');
     expect(html).toContain(`aria-expanded="${!collapsed}"`);
     expect(html.match(/<button\b/g)).toHaveLength(2);

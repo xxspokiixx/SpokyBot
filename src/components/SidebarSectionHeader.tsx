@@ -1,5 +1,5 @@
 import { ChevronDown, ChevronRight, GripVertical, Trash2 } from "lucide-react";
-import type { DragEvent, KeyboardEvent } from "react";
+import type { DragEvent, KeyboardEvent, MouseEvent } from "react";
 
 import { cn } from "@/lib/cn";
 import { t } from "@/lib/i18n";
@@ -19,6 +19,7 @@ export function SidebarSectionHeader({
   onDragEnd,
   onMove,
   onDelete,
+  onContextMenu,
 }: {
   name: string;
   collapsed: boolean;
@@ -30,6 +31,7 @@ export function SidebarSectionHeader({
   onDragEnd?: () => void;
   onMove?: (direction: -1 | 1) => void;
   onDelete?: () => void;
+  onContextMenu?: (event: MouseEvent<HTMLDivElement>) => void;
 }) {
   const Chevron = collapsed ? ChevronRight : ChevronDown;
   const attentionLabel = attention ? sidebarAttentionLabel(attention) : "";
@@ -45,7 +47,7 @@ export function SidebarSectionHeader({
   };
 
   return (
-    <div className="flex items-center gap-1 px-2 pb-1" data-section={name}>
+    <div className="flex items-center gap-1 px-2 pb-1" data-section={name} tabIndex={onContextMenu ? -1 : undefined} onContextMenu={onContextMenu}>
       {onToggle ? (
         <button
           type="button"

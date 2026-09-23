@@ -35,11 +35,16 @@ checks deletion directly from a sidebar section header:
 - Escape and Cancel preserve the section and its shared instructions, and return
   focus to its delete button.
 - Confirming deletion removes an empty section and its shared instructions.
-- Active, pinned and archived bots all prevent deletion, even if the section has
-  no visible bot rows. A group-only section is protected too.
-- Occupied sections explain the restriction and offer Team map without deleting
-  their bots or group chats.
+- Populated, pinned-only and archived-only sections can be deleted; their bots
+  move to General with their conversations, pinned state and archived state intact.
+- Deleting a group-only section keeps the group chat and its conversation in
+  General. The confirmation explains that members and conversations are retained.
+- The existing context menu still renames sections while preserving their saved
+  order and collapsed state, and its delete action retains pending/retry guards.
 
 The fixture reports its log path and keeps a snapshot and screenshot on failure.
 `src/components/SidebarSectionHeader.test.ts` separately checks that the optional
-delete control does not replace or nest inside the collapse button.
+delete control coexists with the context menu and does not replace or nest inside
+the collapse button. Server safeguards still reject deletion during active work,
+with an assigned team computer, or when moving the Chief would conflict with
+General's Chief; see [Teams](teams.md) for those lifecycle checks.
