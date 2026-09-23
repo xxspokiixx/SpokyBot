@@ -14,6 +14,15 @@ final class WalkieTests: XCTestCase {
         return message
     }
 
+    /// What the harness appends after every settled turn: a work receipt,
+    /// decoded from the wire exactly as it arrives.
+    private func digest(_ id: String, at: Double = 0) -> Message {
+        let json = """
+        {"id":"\(id)","role":"bot","kind":"digest","at":\(at),"text":"[digest] · tools: /bin/bash -lc 'composio search' ×1 · reply: Done."}
+        """
+        return try! JSONDecoder().decode(Message.self, from: Data(json.utf8))
+    }
+
     // MARK: - settledReply
 
     func testNothingNewMeansNoReply() {
@@ -101,5 +110,15 @@ final class WalkieTests: XCTestCase {
         XCTAssertTrue(spoken.hasSuffix("The rest is in the chat."), spoken)
         XCTAssertLessThanOrEqual(spoken.count, 120 + " The rest is in the chat.".count)
         XCTAssertTrue(spoken.hasPrefix("This sentence is here to make the reply long."))
+    }
+
+    // MARK: - Digests
+
+    func testADigestIsNeverReadAloud() {
+        let transcript = [text("a", "Old"), text("b", "Canvas one passed."), digest("c")]
+        XCTAssertEqual(
+            Walkie.settledReply(transcript: transcript, baseline: ["a"], busy: false),
+            "Canvas one passed."
+        )
     }
 }
