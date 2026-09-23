@@ -24,6 +24,7 @@ import {
   hasQueuedSteeredMessages,
   holdSteeredQueue,
   onSteeredQueueChange,
+  queuedThreadPosition,
   queuedSteerSnapshot,
   queuedSteeredMessage,
   queueSteeredMessage,
@@ -89,6 +90,19 @@ describe("steer-queue module", () => {
     expect(hasQueuedSteeredMessages(botId, "other-thread")).toBe(false);
     expect(cancelSteeredMessage(botId, queued.id, threadId)).toBe(true);
     expect(hasQueuedSteeredMessages(botId, threadId)).toBe(false);
+  });
+
+  it("places a thread in line whether it waits on a slot or a room turn, not on its own turn", () => {
+    const botId = "bot-position-reasons";
+    queueSteeredMessage(botId, "thread-slot", "waiting for a slot", { reason: "capacity" });
+    queueSteeredMessage(botId, "thread-room", "waiting for the room", { reason: "group-turn" });
+    expect(queuedThreadPosition(botId, "thread-slot")).toBe(1);
+    expect(queuedThreadPosition(botId, "thread-room")).toBe(2);
+    // a correction held only by its own thread's turn is not in the bot-wide
+    // line: the thread is busy, not queued behind a sibling
+    queueSteeredMessage(botId, "thread-own", "waiting on its own turn");
+    expect(queuedThreadPosition(botId, "thread-own")).toBeNull();
+    expect(queuedThreadPosition("other-bot", "thread-slot")).toBeNull();
   });
 
   it("preserves self-opened request provenance through persistence and a capacity wait", () => {

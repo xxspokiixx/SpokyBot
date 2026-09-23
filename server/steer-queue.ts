@@ -136,14 +136,15 @@ export function queueSteeredMessage(
   return { id };
 }
 
-/** Where a thread stands among this bot's threads waiting for a free slot:
+/** Where a thread stands among this bot's threads waiting for the bot to
+ * become available (a full slot list or an active room turn):
  * 1 for the next to start. The drain visits queues in insertion order, so
  * insertion order is the line. Null when nothing of this bot's is waiting
  * on that thread. */
 export function queuedThreadPosition(botId: string, threadId: string): number | null {
   let position = 0;
   for (const [candidate, entry] of queues) {
-    if (entry.botId !== botId || !entry.items.some((item) => item.reason === "capacity")) continue;
+    if (entry.botId !== botId || !entry.items.some((item) => item.reason === "capacity" || item.reason === "group-turn")) continue;
     position += 1;
     if (candidate === threadId) return position;
   }

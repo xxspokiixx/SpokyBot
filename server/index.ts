@@ -6737,8 +6737,14 @@ async function startOrQueueOpenedThread(
   // A room turn holds the bot too (startTurn refuses a direct turn during
   // one); the drain's own block check already waits for it, so the words
   // queue here rather than bounce.
-  if (botAtThreadCapacity(botId) || activeGroupTurnForBot(botId)) {
-    queueSteeredMessage(botId, threadId, text, { reason: "capacity", unattended, peerAsk });
+  const capacity = botAtThreadCapacity(botId);
+  const groupTurn = activeGroupTurnForBot(botId);
+  if (capacity || groupTurn) {
+    queueSteeredMessage(botId, threadId, text, {
+      reason: capacity ? "capacity" : "group-turn",
+      unattended,
+      peerAsk,
+    });
     return { state: "queued", position: queuedThreadPosition(botId, threadId) ?? 1 };
   }
   try {
