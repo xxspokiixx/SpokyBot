@@ -32,13 +32,16 @@ if (!enabled) console.log("skipping draft visibility UI: set OMB_UI_E2E=1 to ins
     const before = await bots();
     await ui("press", "--keys", "Control+n");
     await expect.poll(snapshot).toContain("Who can see it");
-    // Select through the real browser, using the same control a person uses.
+    // The dialog appears before its defaults request completes. Never click
+    // the disabled Create button while the fixture is still loading its draft.
+    await expect.poll(async () => (await ui("eval", "--js", "[...document.querySelectorAll('[role=dialog] button')].find(button => button.textContent.trim() === 'Create bot')?.disabled")).result).toBe(false);
+    // Native select popups do not accept routed keys consistently in headless
+    // macOS. Exercise the real select's change handler without the OS popup;
+    // creation and its resulting audience still run through the real UI/API.
     const state = await ui("snapshot");
     const audience = Object.entries(state.refs as Record<string, { name: string; role: string }>).find(([, item]) => item.role === "combobox" && item.name === "Who can see it");
     expect(audience).toBeDefined();
-    await ui("click", "--ref", `@${audience![0]}`);
-    await ui("press", "--keys", "ArrowDown");
-    await ui("press", "--keys", "Enter");
+    await ui("eval", "--js", "(() => { const select = document.querySelector('[data-new-bot-visibility] select'); select.value = 'admins'; select.dispatchEvent(new Event('change', { bubbles: true })); return true; })()");
     await expect.poll(async () => (await ui("eval", "--js", "document.querySelector('[data-new-bot-visibility] select')?.value")).result).toBe("admins");
     await ui("click", "--name", "Create bot");
     await expect.poll(async () => (await bots()).length, { timeout: 15_000 }).toBe(before.length + 1);

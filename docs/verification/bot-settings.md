@@ -126,6 +126,8 @@ The full creation dialog retains upstream's **Who can see it** selection for
 browser admins. `scripts/testing/bot-draft-visibility-ui.e2e.test.ts` selects
 **Admins only**, creates a bot, and verifies its stored audience. The initial
 POST carries that audience; it is not widened temporarily during later setup.
+The fixture injects the native select's change event for cross-platform
+headless reliability; it does not verify the operating system's select popup.
 Desktop, companion, and default-template editors do not expose that control.
 
 In the defaults editor:
