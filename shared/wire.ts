@@ -273,14 +273,34 @@ export interface WireBot {
   /** What the bot is doing right now; transient like busy. */
   activity?: BotActivity;
   createdAt: number;
+  /** Who may see this bot on a workspace several people share. Absent means
+   * everyone. Sent to admins only; a member's copy of a bot never carries it. */
+  visibility?: BotVisibility;
 }
 
+/** Who may see a bot: every signed-in person, admins only, or the listed
+ * addresses (and `@domain` entries) plus admins. See server/bot-visibility.ts. */
+export type BotVisibility = "everyone" | "admins" | { people: string[] };
+
 /** The person a user message is from, as the server resolved it from their
- * own session. Attribution only, never authority: nothing may be allowed or
- * refused because of it, and no request body can supply it. */
+ * own session. No request body can supply it. `name` is attribution only:
+ * nothing may be allowed or refused because of it. `id` is an opaque key the
+ * server derives from the authenticated session (the account email when
+ * there is one, else the paired session), and decides one thing only: on a
+ * workspace shared by several people, whose session may answer the card
+ * this request raised. */
 export interface ResolvedSender {
   name: string;
+  id?: string;
 }
+
+/** Who answered a card: a signed-in person (named as their messages are), the
+ * owner on this machine, or a session-less local caller on a shared server
+ * (`worker`: the Slack worker, or any other process on that machine). */
+export type CardAnswerer =
+  | { kind: "session"; name: string }
+  | { kind: "loopback" }
+  | { kind: "worker" };
 
 /** One transcript line. Serialized as stored — the durable delivery
  * identity (roomRequest) rides the wire unchanged. */
@@ -383,6 +403,8 @@ export interface OptionCardData {
    * verdict. */
   answeredText?: string;
   dismissed?: boolean;
+  /** Who settled the card, when a person or service answered it. */
+  answeredBy?: CardAnswerer;
   /** Present when this card is a live provider ask (approval/question). */
   requestId?: string;
   /** permission cards: the tool being requested. */
