@@ -73,7 +73,8 @@ export function LocalNewBotDialog({ defaultsMode = false, onClose, section, onCr
   const [draft, setDraft] = useState(() => new BotCreationDraft(EMPTY_BOT_DEFAULTS, () => render(value => value + 1)));
   const [active, setActive] = useState<Section>("Identity");
   const [ready, setReady] = useState(false);
-  const [saving, setSaving] = useState(false);
+  const [localSaving, setSaving] = useState(false);
+  const saving = localSaving || parent.state.botCreationPending;
   const savingRef = useRef(false);
   const alive = useRef(true);
   const [error, setError] = useState("");
@@ -85,7 +86,6 @@ export function LocalNewBotDialog({ defaultsMode = false, onClose, section, onCr
   const dialog = useRef<HTMLDivElement>(null);
   const closeRef = useRef(() => {});
   closeRef.current = () => {
-    if (savingRef.current) return;
     if (onClose) onClose();
     else parent.dispatch({ type: "toggleNewBot", open: false });
   };
@@ -105,6 +105,9 @@ export function LocalNewBotDialog({ defaultsMode = false, onClose, section, onCr
   }, [defaultsMode, section]);
   useEffect(() => { alive.current = true; return () => { alive.current = false; }; }, []);
   useEffect(() => () => draft.dispose(), [draft]);
+  // Disabling the focused Create button drops focus to the page in Chromium.
+  // Keep keyboard dismissal and focus trapping inside the pending dialog.
+  useEffect(() => { if (saving) dialog.current?.focus(); }, [saving]);
   useEffect(() => {
     const previous = document.activeElement instanceof HTMLElement ? document.activeElement : null;
     dialog.current?.focus();
@@ -126,12 +129,13 @@ export function LocalNewBotDialog({ defaultsMode = false, onClose, section, onCr
     return () => { window.removeEventListener("keydown", onKey); if (previous?.isConnected) previous.focus(); };
   }, []);
   const save = async () => {
-    if (!ready || savingRef.current) return;
+    if (!ready || savingRef.current || parent.state.botCreationPending) return;
     if (!defaultsMode && draft.bot.approvalMode === "full" && !draft.consent.confirmFullAccess) { setWarning("full"); return; }
     if (!defaultsMode && draft.bot.approvalMode === "auto" && draft.bot.computer === "local" && !draft.consent.acknowledgeLocalAuto) { setWarning("local"); return; }
     const visibility = choosesVisibility ? visibilityFromForm(audience, people) : null;
     if (visibility && !visibility.ok) { setError(t("botSettings.visibility.needPeople")); return; }
     savingRef.current = true; setSaving(true); setError("");
+    parent.dispatch({ type: "botCreationPending", on: true });
     try {
       if (defaultsMode) await api("/api/config", { method: "PATCH", body: JSON.stringify({ newBotDefaults: await preparedBotTemplate(draft) }) });
       else {
@@ -143,7 +147,11 @@ export function LocalNewBotDialog({ defaultsMode = false, onClose, section, onCr
       }
       savingRef.current = false; if (alive.current) closeRef.current();
     } catch (cause) { if (alive.current) setError(cause instanceof Error ? cause.message : String(cause)); }
-    finally { savingRef.current = false; if (alive.current) setSaving(false); }
+    finally {
+      savingRef.current = false;
+      parent.dispatch({ type: "botCreationPending", on: false });
+      if (alive.current) setSaving(false);
+    }
   };
   const bot = draft.bot;
   const scopedStore: ReturnType<typeof useStore> = {
@@ -166,7 +174,7 @@ export function LocalNewBotDialog({ defaultsMode = false, onClose, section, onCr
       className="flex h-[min(760px,94dvh)] w-full max-w-[900px] flex-col overflow-hidden rounded-2xl border border-hairline/50 bg-panel shadow-2xl outline-none">
       <div className="flex shrink-0 items-center justify-between border-b border-hairline/40 px-5 py-4">
         <h2 className="text-[17px] font-semibold text-ink">{title}</h2>
-        <button type="button" disabled={saving} onClick={() => closeRef.current()} aria-label={t("common.close")}
+        <button type="button" onClick={() => closeRef.current()} aria-label={t("common.close")}
           className="flex size-8 shrink-0 items-center justify-center rounded-lg text-ink-secondary hover:bg-control hover:text-ink disabled:opacity-40"><X size={18} className="pointer-events-none" /></button>
       </div>
         {choosesVisibility && (
@@ -212,7 +220,7 @@ export function LocalNewBotDialog({ defaultsMode = false, onClose, section, onCr
       </div>
       {error && <p role="alert" className="max-h-24 overflow-y-auto border-t border-hairline/40 px-5 py-3 text-[13px] text-danger">{error}</p>}
       <div className="flex shrink-0 justify-end gap-2 border-t border-hairline/40 px-5 py-3">
-        <button type="button" disabled={saving} onClick={() => closeRef.current()} className="rounded-lg px-4 py-2 text-[13px] text-ink-secondary hover:bg-control">{t("common.cancel")}</button>
+        <button type="button" onClick={() => closeRef.current()} className="rounded-lg px-4 py-2 text-[13px] text-ink-secondary hover:bg-control">{t("common.cancel")}</button>
         <button type="button" disabled={!ready || saving || (!defaultsMode && !bot.name.trim())} onClick={() => void save()}
           className="flex items-center gap-2 rounded-lg bg-accent px-5 py-2 text-[13px] font-medium text-white hover:brightness-110 disabled:opacity-40">
           {saving && <Loader2 size={15} className="animate-spin" />}{t(defaultsMode ? "newBot.saveDefaults" : "newBot.create")}
