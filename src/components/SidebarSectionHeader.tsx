@@ -45,7 +45,7 @@ export function SidebarSectionHeader({
   };
 
   return (
-    <div className="flex items-center gap-1 px-2 pb-1" data-section={name} onContextMenu={onContextMenu}>
+    <div className="flex items-center gap-1 px-2 pb-1" data-section={name} tabIndex={onContextMenu ? -1 : undefined} onContextMenu={onContextMenu}>
       {onToggle ? (
         <button
           type="button"
