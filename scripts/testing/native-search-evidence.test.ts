@@ -21,3 +21,11 @@ it("rejects earlier citations and disclaimed or bare URLs in the final answer", 
   }
   expect(verifiedNativeSearch("settled", [search, opened], [{ ...reply[0], text: "Searching…" }, ...reply])).toBe(true);
 });
+
+it("rejects final-answer disclaimers separated from citations by line or paragraph", () => {
+  for (const separator of ["\n", "\r\n", "\n\n"]) {
+    for (const text of [`I could not verify this answer.${separator}[source](${url})`, `[source](${url})${separator}I could not verify this answer.`]) {
+      expect(verifiedNativeSearch("settled", [search, opened], [{ ...reply[0], text }]), text).toBe(false);
+    }
+  }
+});
