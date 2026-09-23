@@ -1057,6 +1057,8 @@ it("gives a Codex return today's fresh thread when explicit effort is cleared wh
   await leadRunning(f);
   await expect.poll(async () => (await f.messages()).some((m: any) => m.role === "bot" && m.text === "Assigned"), { timeout: 15_000 }).toBe(true);
   // An effort the driver does not send leaves the native thread's last value.
+  await expect.poll(async () => (await f.api("/api/bots")).bots.find((bot: any) => bot.id === f.chief.id)
+    .tasks.find((task: any) => task.threadId === f.thread).waitingForTeammates, { timeout: 15_000 }).toBe(true);
   await f.selectModel(model);
   f.open(f.gate("lead"));
   await f.wait();
