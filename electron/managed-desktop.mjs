@@ -413,13 +413,23 @@ export function createManagedDesktopClient({ store, applyConnection, applyPolicy
         if (!/^[A-Za-z0-9_-]{43}$/.test(result.deviceCode) || !/^[A-HJ-NP-Z2-9]{5}-[A-HJ-NP-Z2-9]{5}$/.test(result.userCode) ||
             result.verificationUriComplete !== `${portalOrigin}/enroll?code=${result.userCode}` || !Number.isSafeInteger(result.expiresIn) || result.expiresIn < 1 || result.expiresIn > 600 ||
             !Number.isSafeInteger(result.interval) || result.interval < 5 || result.interval > 60) throw new Error("Invalid company enrollment response.");
-        pending = { portalOrigin, deviceCode: result.deviceCode, expiresAt: now() + result.expiresIn * 1000, interval: result.interval * 1000 };
+        pending = { portalOrigin, deviceCode: result.deviceCode, expiresAt: now() + result.expiresIn * 1000, interval: result.interval * 1000,
+          verificationUri: result.verificationUriComplete };
         publish({ status: "connecting", enrollment: { userCode: result.userCode, verificationUri: result.verificationUriComplete, expiresAt: pending.expiresAt } });
         await openBrowser(result.verificationUriComplete);
         if (current(stamp)) schedule(poll, pending.interval);
       } catch (error) {
         if (current(stamp)) { pending = null; publish(licenseExpired(error) ? { status: "signed-out", notice: "license-expired" } : { status: "signed-out", message: "Could not start company sign-in. Check the Admin portal address and your connection." }); }
       }
+      return snapshot();
+    },
+    /** Opens this attempt's own validated sign-in page again, for a closed
+     * browser tab. It takes nothing from the renderer, so it can never open
+     * another address, and does nothing once the attempt ends or expires. */
+    async reopen() {
+      const attempt = pending, stamp = generation;
+      if (!attempt?.verificationUri || !current(stamp) || state.status !== "connecting" || attempt.expiresAt <= now()) return snapshot();
+      await openBrowser(attempt.verificationUri);
       return snapshot();
     },
     async cancelEnrollment() {

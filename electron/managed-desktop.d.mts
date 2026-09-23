@@ -18,6 +18,8 @@ export interface ManagedDesktopBridge {
   settingsOpened?(): Promise<boolean>;
   state(): Promise<ManagedDesktopState>;
   begin(input: { portalOrigin: string }): Promise<ManagedDesktopState>;
+  /** Reopens the pending sign-in page; takes no address from the renderer. */
+  reopen?(): Promise<ManagedDesktopState>;
   cancelEnrollment(): Promise<ManagedDesktopState>;
   refresh(): Promise<ManagedDesktopState>;
   disconnect(): Promise<ManagedDesktopState>;

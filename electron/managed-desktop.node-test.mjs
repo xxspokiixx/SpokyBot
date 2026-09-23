@@ -125,6 +125,36 @@ test("a malicious verification link never opens another origin", async t => {
   await f.client.begin({ portalOrigin: origin });
   assert.equal(f.client.state().status, "signed-out"); assert.deepEqual(f.opened, []);
 });
+test("reopen opens only the pending attempt's own sign-in page, never a renderer address", async t => {
+  const f = fixture(t), page = `${origin}/enroll?code=ABCDE-FGHJK`;
+  await f.client.start();
+  await f.client.reopen();
+  assert.deepEqual(f.opened, [], "nothing is pending before sign-in starts");
+  await f.client.begin({ portalOrigin: origin });
+  assert.deepEqual(f.opened, [page]);
+  const before = f.requests.length;
+  const state = await f.client.reopen("https://attacker.example.test", { verificationUri: "https://attacker.example.test" });
+  assert.deepEqual(f.opened, [page, page]);
+  assert.equal(state.status, "connecting");
+  assert.equal(f.requests.length, before, "reopening makes no portal request and starts no new attempt");
+  f.approve(); await f.tick(5000);
+  assert.equal(f.client.state().status, "connected");
+  await f.client.reopen();
+  assert.deepEqual(f.opened, [page, page], "a finished attempt is never reopened");
+});
+test("reopen does nothing after the attempt is cancelled or has expired", async t => {
+  let clock = Date.now();
+  const cancelled = fixture(t);
+  await cancelled.client.begin({ portalOrigin: origin });
+  await cancelled.client.cancelEnrollment();
+  await cancelled.client.reopen();
+  assert.deepEqual(cancelled.opened, [`${origin}/enroll?code=ABCDE-FGHJK`]);
+  const expired = fixture(t, { now: () => clock });
+  await expired.client.begin({ portalOrigin: origin });
+  clock += 601_000;
+  await expired.client.reopen();
+  assert.deepEqual(expired.opened, [`${origin}/enroll?code=ABCDE-FGHJK`]);
+});
 test("cancel prevents a late enrollment response opening a browser", async t => {
   let release;
   const f = fixture(t, { handler: url => url.endsWith("/enrollment") ? new Promise(resolve => { release = resolve; }) : null });

@@ -158,3 +158,49 @@ titles skip a disallowed engine. Turning the companion on is refused inside
 `startDesktopCompanion` itself (switch, Tailscale "Turn on and check" and
 launch auto-start); that Electron main path is checked by inspection only.
 
+
+## 2026-09-23 Company models used after sign-in
+
+Unit, component and node tests only. The Electron smoke above was **not**
+re-run for this change, and no installed app, keychain, production Admin,
+engine account or paid model call was used.
+
+- `pnpm vitest run server/default-model-selection.test.ts`: with no saved
+  default, an enrolled desktop picks an instance that can run now: a
+  signed-in personal engine first (Claude first), then a Company model (Claude
+  first), then today's choice. An installed but signed-out personal Claude
+  therefore no longer wins over a working Company model. Without an enrolment
+  the result is identical to before, including a signed-out Claude beating a
+  signed-in Codex. An engine the organisation's policy refuses (company models
+  only, or an engine allow-list) is never picked, and a refused saved default
+  sends new bots to setup.
+- `pnpm vitest run server/managed-desktop.test.ts`: against the real provider
+  registry with fake engines, new bots land on Company Claude while enrolled
+  and on the personal engine again after disconnect; disconnecting leaves a
+  personal bot's selection untouched and keeps a Company bot's stable id for
+  the next sign-in.
+- `pnpm vitest run src/lib/company-models.test.ts
+  src/components/CompanyModels.test.ts
+  src/components/OrganizationSettings.test.ts`: the connected panel shows each
+  Company engine as ready, blocked by policy, or needing its CLI installed
+  (reusing the engine's own install action, without a personal sign-in). The
+  inline **Use {Company model} for N bots that can't run** button counts only
+  bots whose engine is missing, unavailable, signed out or refused by policy,
+  names them, dispatches nothing until pressed, and then sends the model chip's
+  own `PATCH /api/bots/:id`. Bots on working personal engines (including a
+  signed-out CLI's custom models, and a bot whose selected thread still runs)
+  are never counted; bots with elevated permissions on another engine are
+  listed for their own model chip instead. Disconnecting dispatches nothing.
+- `node --test electron/managed-desktop.node-test.mjs
+  electron/organization-reopen.node-test.mjs`: **Open the sign-in page again**
+  reopens only the pending attempt's validated `/enroll?code=` page, makes no
+  portal request, ignores any renderer argument at the preload, IPC and client
+  layers, answers only the local main window's main frame, and does nothing
+  after approval, cancellation or expiry.
+- Mutation checks (each failed its test, then was restored): no enrolled
+  branch; no policy filter; enrolled rules applied without an enrolment;
+  returning a refused saved default; Company before a working personal engine;
+  ignoring the selected thread; ignoring policy in the switch; ignoring
+  elevated permissions; counting working bots; dispatching at render; opening
+  a renderer-supplied address; reopening after expiry; forwarding IPC
+  arguments; dropping the local-window guard; forwarding preload arguments.

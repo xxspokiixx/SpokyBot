@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import type { ManagedDesktopState } from "../../electron/managed-desktop.mjs";
 import { activeLocale, t } from "@/lib/i18n";
 import { Card } from "./SettingsPrimitives";
+import { CompanyModels } from "./CompanyModels";
 
 const providerNames: Record<string, string> = { anthropic: "Anthropic", openai: "OpenAI", openrouter: "OpenRouter" };
 const DEFAULT_PORTAL_ORIGIN = "https://admin.openmausbot.com";
@@ -116,7 +117,11 @@ export function OrganizationSettings() {
           <div className="mt-3">{t("organization.code")}</div>
           <code dir="ltr" className="mt-1 block w-fit select-all rounded-lg bg-inset px-3 py-2 text-base tracking-widest text-ink">{connection.enrollment.userCode}</code>
         </details>}
-        <button type="button" disabled={busy} className="ui-button" onClick={() => void perform(() => bridge.cancelEnrollment())}>{t("organization.cancel")}</button>
+        <div className="flex flex-wrap gap-2">
+          {/* A closed browser tab: reopen this attempt's own page, nothing else. */}
+          {connection.enrollment && bridge.reopen && <button type="button" disabled={busy} className="ui-button" onClick={() => void perform(() => bridge.reopen!())}>{t("organization.reopen")}</button>}
+          <button type="button" disabled={busy} className="ui-button" onClick={() => void perform(() => bridge.cancelEnrollment())}>{t("organization.cancel")}</button>
+        </div>
       </div>}
       {enrolled && <div className="flex flex-col gap-3">
         <div>{connection.branding?.logo && <img src={connection.branding.logo} alt="Organization logo" className="mb-2 size-12 rounded-lg object-contain" />}<div className="break-words text-[15px] font-medium text-ink">{connection.organization?.name}</div>
@@ -129,10 +134,7 @@ export function OrganizationSettings() {
         </> : connection.status === "connected" ? <>
           <p className="text-[13px] text-ink-secondary">{t("organization.modelHelp")}</p>
           {connection.providers?.some((provider) => provider.configured && provider.models.length > 0) ?
-            <ul className="divide-y divide-hairline/40">{connection.providers.map((provider) => <li key={provider.id} className="flex flex-wrap justify-between gap-2 py-2 text-[13px]">
-              <span className="text-ink">{providerNames[provider.id] ?? provider.id}</span>
-              <span className="text-ink-secondary">{provider.configured ? t("organization.modelCount", { count: provider.models.length }) : t("organization.notConfigured")}</span>
-            </li>)}</ul> : <p className="text-[13px] text-ink-secondary">{t("organization.noModels")}</p>}
+            <CompanyModels providers={connection.providers} /> : <p className="text-[13px] text-ink-secondary">{t("organization.noModels")}</p>}
         </> : null}
         {confirmDisconnect ? <div role="group" aria-label={t("organization.disconnectTitle")} className="rounded-lg border border-hairline/40 p-3">
           <p className="text-[13px] text-ink">{t("organization.disconnectWarning")}</p>
