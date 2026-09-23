@@ -2,6 +2,8 @@ const DAY = 24 * 60 * 60_000;
 const RETRY = 60 * 60_000;
 const validTime = value => Number.isSafeInteger(value) && value >= 0;
 const sameScope = (left, right) => Boolean(left && right && left.key === right.key && left.generation === right.generation);
+/** A schedule saved under an older key form for this same authority. */
+const legacyScope = (record, authority) => Boolean(record && authority && record.scope !== authority.key && authority.legacyKeys?.includes(record.scope));
 
 /** One opt-in schedule for this desktop workspace. The encrypted store and
  * transfer are injected so this never owns a second credential or upload path. */
@@ -40,9 +42,16 @@ export function createCompanyBackupSchedule({ store, scope, run, onState = () =>
     }
     return snapshot();
   }
+  /** Rewrites a legacy key in place; never turns the schedule off. */
+  async function adopt(authority) {
+    const stamp = revision, adopted = { ...record, scope: authority.key };
+    await store.write(adopted);
+    if (current(stamp) && record && legacyScope(record, authority)) record = adopted;
+  }
   async function tick() {
     if (closed || !started || !record || operation) return;
     const currentScope = scope(), authority = currentScope ? { ...currentScope } : null;
+    if (legacyScope(record, authority)) { try { await adopt(authority); } catch { publish("error", "Daily backups could not be updated. Unlock your system keychain; they will retry in an hour."); arm(); return; } }
     if (authority && authority.key !== record.scope) { await forget(); return; }
     if (!authority) { publish("paused", "Daily backups will resume when this local workspace and company connection are available."); arm(); return; }
     if (record.nextBackupAt > now()) { publish("waiting"); arm(); return; }
@@ -131,6 +140,7 @@ export function createCompanyBackupSchedule({ store, scope, run, onState = () =>
     reconcile() {
       const authority = scope();
       if (!authority) controller?.abort();
+      if (legacyScope(record, authority)) { void adopt(authority).then(() => arm(), () => arm()); return; }
       if (record && authority && record.scope !== authority.key) { void forget().catch(() => {}); return; }
       // Repeated connection refreshes cannot bring a persisted retry forward.
       arm();

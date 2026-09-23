@@ -150,6 +150,24 @@ describe("optional desktop Organisation settings", () => {
     expect(render().html).toContain("Sign in with your organisation");
   });
 
+  it("explains a lapsed Admin licence without a sign-in loop and shows Company models unavailable", async () => {
+    await ready({ ...connected, status: "license-expired" });
+    const html = render().html;
+    expect(html).toContain("Your organisation&#x27;s OpenMaus Admin licence has expired. Contact your admin.");
+    expect(html).not.toContain("Disconnect below, then sign in again");
+    expect(html).not.toContain("Sign in with your organisation");
+    expect(html).toContain("Unavailable until the licence is renewed");
+    expect(html).not.toContain("Approved models:");
+    expect(button("Refresh")).toBeDefined(); expect(button("Disconnect…")).toBeDefined();
+  });
+
+  it("says so when a sign-in finds the Admin licence expired", async () => {
+    await ready({ status: "signed-out", notice: "license-expired" });
+    const html = render().html;
+    expect(html).toContain("licence has expired. Contact your admin.");
+    expect(html).toContain("Sign in with your organisation");
+  });
+
   it("keeps newer broadcast state when an initial snapshot or action resolves late", async () => {
     let resolveInitial!: (state: ManagedDesktopState) => void;
     vi.mocked(bridge.state).mockImplementation(() => new Promise(resolve => { resolveInitial = resolve; }));

@@ -606,6 +606,19 @@ export interface ConfigStatus {
   browserEngine?: BrowserEngineSummary;
   /** Named browser sessions any bot can be pointed at. */
   browserProfiles?: BrowserProfile[];
+  /** The enrolled organisation's read-only desktop policy; null when this
+   * desktop is not enrolled or its Admin sends no policy. */
+  managedPolicy?: ManagedPolicySummary | null;
+}
+
+export interface ManagedPolicySummary {
+  organizationName: string;
+  version: number;
+  companyModelsOnly: boolean;
+  allowedEngines: "all" | string[];
+  mcp: { allowCustom: boolean; allowlist: string[] };
+  computers: { thisComputer: boolean; localVm: boolean; box: boolean; vps: boolean };
+  remoteAccess: boolean;
 }
 
 export interface BrowserEngineSummary {
@@ -627,7 +640,7 @@ export interface BrowserProfile {
 
 export type ConfigStatusFrame = Pick<
   ConfigStatus,
-  "xai" | "composio" | "box" | "vps" | "rooms" | "threads" | "localVm" | "opencodeGo" | "tts" | "imageGen" | "profile" | "language" | "features" | "onboarding" | "browserEngine" | "browserProfiles" | "edition" | "budgets" | "billing"
+  "xai" | "composio" | "box" | "vps" | "rooms" | "threads" | "localVm" | "opencodeGo" | "tts" | "imageGen" | "profile" | "language" | "features" | "onboarding" | "browserEngine" | "browserProfiles" | "edition" | "budgets" | "billing" | "managedPolicy"
 >;
 
 export function configStatusFromFrame(frame: ConfigStatusFrame): ConfigStatus {
@@ -651,6 +664,7 @@ export function configStatusFromFrame(frame: ConfigStatusFrame): ConfigStatus {
     edition: frame.edition,
     budgets: frame.budgets,
     billing: frame.billing,
+    managedPolicy: frame.managedPolicy,
   };
 }
 
@@ -678,6 +692,9 @@ export interface InstanceInfo {
   /** Company instances are owned by the desktop parent, never editable here. */
   readOnly?: boolean;
   managed?: { organizationId: string; organizationName: string };
+  /** The enrolled organisation's desktop policy does not allow bots to run on
+   * this instance: shown, but disabled, with the server's reason. */
+  policy?: { organizationName: string; reason: string };
   snapshot: {
     state: "available" | "unavailable";
     reason?: string;

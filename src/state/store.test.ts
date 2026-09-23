@@ -2000,6 +2000,13 @@ describe("live config frames", () => {
     expect(status.billing).toEqual(frame.billing);
   });
 
+  it("carries the organisation's read-only desktop policy through a config frame", () => {
+    const managedPolicy = { organizationName: "Fixture Agency", version: 2, companyModelsOnly: true, allowedEngines: ["codex"],
+      mcp: { allowCustom: false, allowlist: ["github"] }, computers: { thisComputer: false, localVm: true, box: true, vps: true }, remoteAccess: false };
+    expect(configStatusFromFrame({ ...baseFrame, managedPolicy }).managedPolicy).toEqual(managedPolicy);
+    expect(configStatusFromFrame({ ...baseFrame, managedPolicy: null }).managedPolicy).toBeNull();
+  });
+
   it("keeps edition, budgets and billing in state.config after a config SSE frame lands", () => {
     const frame: ConfigStatusFrame = {
       ...baseFrame,

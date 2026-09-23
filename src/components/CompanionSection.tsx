@@ -23,6 +23,7 @@ import { companionPairingMode } from "../lib/phone-setup";
 import { ConnectionDetail } from "./ConnectionDetail";
 import { Card, Switch } from "./SettingsPrimitives";
 import { brand } from "../lib/brand";
+import { useStore } from "@/state/store";
 
 export {
   companionAccountActionError,
@@ -137,6 +138,10 @@ export function CompanionSection({ profileEmail = "" }: { profileEmail?: string 
   const c = usePhoneSetupController(profileEmail);
   const state = c.state;
   const pairingFlow = useRef<HTMLDivElement>(null);
+  // An enrolled organisation can turn remote access off; the desktop refuses
+  // new pairing and turning the companion on. Existing devices are listed as before.
+  const managedPolicy = useStore().state.config?.managedPolicy;
+  const remoteBlocked = managedPolicy?.remoteAccess === false ? t("policy.remoteBlocked", { organization: managedPolicy.organizationName }) : null;
 
   if (!companionBridge()) {
     return (
@@ -177,6 +182,7 @@ export function CompanionSection({ profileEmail = "" }: { profileEmail?: string 
 
   return (
     <div className="flex flex-col gap-4">
+      {remoteBlocked && <p role="status" className="text-[13px] leading-relaxed text-ink-secondary">{remoteBlocked}</p>}
       <div ref={pairingFlow} tabIndex={-1} className="scroll-mt-4 focus:outline-none">
         <Card title={pairingCopy.title} subtitle={pairingCopy.subtitle}>
           {(panelStatus || (pairedCount > 0 && c.hostedReady)) && (
@@ -311,7 +317,7 @@ export function CompanionSection({ profileEmail = "" }: { profileEmail?: string 
             <Switch
               checked={state.enabled}
               aria-label={t("remote.title")}
-              disabled={c.busy}
+              disabled={c.busy || (Boolean(remoteBlocked) && !state.enabled)}
               onClick={() => void c.act((companion) => (state.enabled ? companion.stop() : companion.start()))}
             />
           </div>

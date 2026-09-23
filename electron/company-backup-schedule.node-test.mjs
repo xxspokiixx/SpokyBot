@@ -172,3 +172,33 @@ test("clock rollback never causes an early snapshot or an unbounded timer", asyn
   assert.equal(f.calls.length, 0);
   assert([...f.timers.values()].every(timer => timer.delay <= DAY && timer.delay >= 1000));
 });
+
+test("a schedule saved under the device-scoped key survives the upgrade and re-enrolment instead of turning off", async () => {
+  const legacy = "fixture-portal:org:email:device-1:workspace", stable = "fixture-portal:org:email:workspace";
+  const f = fixture({ version: 2, scope: legacy, nextBackupAt: 1_800_000_000_000 + HOUR });
+  f.scope = { key: stable, legacyKeys: [legacy], generation: 1 };
+  const state = await f.scheduler.start();
+  assert.equal(state.enabled, true); assert.equal(state.status, "waiting");
+  assert.equal(f.saved.scope, stable, "the saved key is rewritten, not forgotten");
+  // Re-enrolment: a new deviceId, the same person, organisation and folder.
+  f.scope = { key: stable, legacyKeys: ["fixture-portal:org:email:device-2:workspace"], generation: 2 };
+  f.scheduler.reconcile(); await turn(); await turn();
+  assert.equal(f.saved?.scope, stable); assert.equal(f.scheduler.state().enabled, true);
+  // Losing the connection only pauses it.
+  f.scope = null; f.scheduler.reconcile();
+  assert.equal(f.scheduler.state().enabled, true);
+  // A different organisation or account still clears it.
+  f.scope = { key: "fixture-portal:other-org:email:workspace", legacyKeys: [], generation: 3 };
+  f.scheduler.reconcile(); await turn(); await turn();
+  assert.equal(f.saved, null); assert.equal(f.scheduler.state().enabled, false);
+});
+
+test("reconcile adopts a legacy key through the write queue", async () => {
+  const legacy = "fixture-portal:org:email:device-1:workspace", stable = "fixture-portal:org:email:workspace";
+  const f = fixture(); f.scope = { key: legacy, generation: 1 };
+  await f.scheduler.start(); await f.scheduler.configure(ENABLE);
+  assert.equal(f.saved.scope, legacy);
+  f.scope = { key: stable, legacyKeys: [legacy], generation: 2 };
+  f.scheduler.reconcile(); await turn(); await turn();
+  assert.equal(f.saved.scope, stable); assert.equal(f.scheduler.state().enabled, true);
+});
