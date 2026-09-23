@@ -15,6 +15,7 @@ import { DATA_DIR, EVENTS_DIR, NATIVE_DIR, loadBrowserProfileIdAliases } from ".
 import * as mdb from "./message-db.ts";
 import { runCommand, type Command } from "./commands.ts";
 import { workspaceDir } from "./workspace.ts";
+import type { Destination } from "./surface.ts";
 import { newId, type ModelSelection } from "./contracts.ts";
 import { pickBotName } from "./names.ts";
 import { redactSecretsInText } from "./redact.ts";
@@ -76,12 +77,17 @@ export interface TaskRecord extends WireTask {
   appliedCompactionId?: string;
   contextFloor?: number;
   lastContextModel?: string;
+  /** Who pinned this conversation's surface: "user" when a person chose it
+   * (composer chip or thread setting), "auto" when a turn recorded where
+   * it landed. Absent means legacy/unknown: it may be a person's choice,
+   * so only positively identified auto pins yield to Works on changes. */
+  surfaceSource?: "user" | "auto";
 }
 
 /** TaskRecord fields no client may see. Everything else must be on WireTask:
  * the exactness assertion below fails to compile when either side drifts,
  * so a new server field forces a decision — wire-visible or private here. */
-export type TaskWirePrivateKeys = "resumeCursors" | "lastInstanceId" | "handedMessages" | "appliedCompactionId" | "contextFloor" | "lastContextModel";
+export type TaskWirePrivateKeys = "resumeCursors" | "lastInstanceId" | "handedMessages" | "appliedCompactionId" | "contextFloor" | "lastContextModel" | "surfaceSource";
 export type TaskWireProjection = Pick<TaskRecord, Exclude<keyof TaskRecord, TaskWirePrivateKeys>>;
 type AssertExact<A, B> = [A] extends [B] ? ([B] extends [A] ? true : never) : never;
 type AssertSameKeys<A, B> = [keyof A] extends [keyof B] ? ([keyof B] extends [keyof A] ? true : never) : never;
@@ -94,14 +100,15 @@ export const taskWireProjectionIsExact: TaskWireProjectionIsExact = true;
  * returning WireTask means an undeclared server field cannot ride silently. */
 export function toWireTask(task: TaskRecord): WireTask {
   const { resumeCursors: _resumeCursors, lastInstanceId: _lastInstanceId, handedMessages: _handedMessages,
-    appliedCompactionId: _appliedCompactionId, contextFloor: _contextFloor, lastContextModel: _lastContextModel, ...wire } = task;
+    appliedCompactionId: _appliedCompactionId, contextFloor: _contextFloor, lastContextModel: _lastContextModel,
+    surfaceSource: _surfaceSource, ...wire } = task;
   return wire;
 }
 
 const TASK_PATCH_FIELDS = [
   "title", "projectId", "modelSelection", "approvalMode", "autoApprove", "alwaysAllow",
   "unread", "rewound", "archivedAt", "pinned", "pinnedMessageId", "resumeCursors", "lastInstanceId", "cwd",
-  "routineRunId", "surface", "appliedCompactionId", "contextFloor", "lastContextModel",
+  "routineRunId", "surface", "surfaceSource", "appliedCompactionId", "contextFloor", "lastContextModel",
 ] as const satisfies readonly (keyof TaskRecord)[];
 export type TaskPatch = Partial<Pick<TaskRecord, typeof TASK_PATCH_FIELDS[number]>>;
 
@@ -985,7 +992,7 @@ export class Store {
     );
   }
 
-  patchGroup(id: string, patch: Partial<Pick<GroupRecord, "name" | "memberIds" | "defaultResponder" | "bulletin" | "unread" | "busyBotId" | "cwd" | "pinnedMessageId" | "section" | "setupCompletedAt" | "setupSkippedAt">>): GroupRecord | null {
+  patchGroup(id: string, patch: Partial<Pick<GroupRecord, "name" | "memberIds" | "defaultResponder" | "bulletin" | "unread" | "busyBotId" | "cwd" | "pinnedMessageId" | "section" | "setupCompletedAt" | "setupSkippedAt" | "audienceFloor">>): GroupRecord | null {
     const group = this.group(id);
     if (!group) return null;
     if (Object.prototype.hasOwnProperty.call(patch, "section")) {
@@ -1480,7 +1487,7 @@ export class Store {
     profile: Partial<
       Pick<
         BotRecord,
-        "name" | "title" | "description" | "soul" | "color" | "mascotExpression" | "mascotBody" | "modelSelection" | "section"
+        "name" | "title" | "description" | "soul" | "color" | "mascotExpression" | "mascotBody" | "modelSelection" | "section" | "visibility"
       >
     > = {},
     opts: {
@@ -1504,6 +1511,8 @@ export class Store {
       color: profile.color ?? COLORS[this.bots.length % COLORS.length],
       ...(profile.mascotExpression ? { mascotExpression: profile.mascotExpression } : {}),
       ...(profile.mascotBody ? { mascotBody: profile.mascotBody } : {}),
+      // Restricted from its first frame: no one else is ever told it exists.
+      ...(profile.visibility && profile.visibility !== "everyone" ? { visibility: structuredClone(profile.visibility) } : {}),
       unread: false,
       modelSelection: profile.modelSelection ?? this.defaultSelection(),
       resumeCursors: {},
@@ -1566,6 +1575,9 @@ export class Store {
           title: "", description: "", soul: "", notifications: true, color: COLORS[nextBots.length % COLORS.length], unread: false,
           modelSelection: operation.fields.modelSelection, resumeCursors: {}, createdAt, ...operation.fields,
           approvalMode: "ask", autoApprove: false, composio: false, approvePeerComms: false,
+          // A Chief's new teammate is seen by exactly the Chief's audience:
+          // a restricted Chief never creates a bot everyone sees.
+          ...(chief.visibility && chief.visibility !== "everyone" ? { visibility: structuredClone(chief.visibility) } : {}),
           tasks: [{ threadId: operation.threadId, title: UNTITLED_THREAD, createdAt, updatedAt: createdAt, resumeCursors: {},
             modelSelection: structuredClone(operation.fields.modelSelection), approvalMode: "ask", autoApprove: false,
             unread: false, activity: "idle", busy: false }],
@@ -1828,6 +1840,42 @@ export class Store {
     return changed;
   }
 
+  /** Company instance ids became stable across re-enrolment. Moves every
+   * saved reference to an old id onto its replacement in one save: model
+   * choices, native resume cursors and handed-message records. An entry that
+   * already exists under the new id wins over the old one. */
+  renameInstances(ids: ReadonlyMap<string, string>): number {
+    const touches = (record?: Record<string, unknown>) => Boolean(record && Object.keys(record).some(key => ids.has(key)));
+    const rename = <T>(record: Record<string, T>): Record<string, T> => {
+      const next: Record<string, T> = {};
+      for (const [key, value] of Object.entries(record)) {
+        const target = ids.get(key);
+        if (!target) next[key] = value;
+        else if (!Object.prototype.hasOwnProperty.call(record, target)) next[target] = value;
+      }
+      return next;
+    };
+    const changed: BotRecord[] = [];
+    for (const bot of this.bots) {
+      let dirty = false;
+      const selected = ids.get(bot.modelSelection.instanceId);
+      if (selected) { bot.modelSelection = { ...bot.modelSelection, instanceId: selected }; dirty = true; }
+      if (touches(bot.resumeCursors)) { bot.resumeCursors = rename(bot.resumeCursors); dirty = true; }
+      for (const task of bot.tasks ?? []) {
+        const taskSelected = task.modelSelection && ids.get(task.modelSelection.instanceId);
+        if (task.modelSelection && taskSelected) { task.modelSelection = { ...task.modelSelection, instanceId: taskSelected }; dirty = true; }
+        if (touches(task.resumeCursors)) { task.resumeCursors = rename(task.resumeCursors); dirty = true; }
+        if (task.handedMessages && touches(task.handedMessages)) { task.handedMessages = rename(task.handedMessages); dirty = true; }
+        const last = task.lastInstanceId && ids.get(task.lastInstanceId);
+        if (last) { task.lastInstanceId = last; dirty = true; }
+      }
+      if (dirty) changed.push(bot);
+    }
+    if (changed.length) this.saveBots();
+    for (const bot of changed) this.emit({ type: "bot", botId: bot.id });
+    return changed.length;
+  }
+
   setResumeCursor(botId: string, instanceId: string, cursor: unknown, threadId?: string) {
     const bot = this.bot(botId);
     if (!bot) return;
@@ -2077,6 +2125,26 @@ export class Store {
     this.saveBots();
     this.emit({ type: "bot", botId });
     return task;
+  }
+
+  /** A Works on change is the newest explicit choice, so this bot's
+   * machine-recorded pins that now point somewhere else give way. A pin a
+   * person set, a legacy pin with unknown provenance, and a pin that already
+   * matches the new destination survive. Returns how many pins were cleared. */
+  clearAutoSurfacePins(botId: string, destination: Destination): number {
+    const bot = this.bot(botId);
+    if (!bot?.tasks) return 0;
+    let cleared = 0;
+    for (const task of bot.tasks) {
+      if (task.surface === undefined || task.surfaceSource !== "auto" || task.surface === destination) continue;
+      task.surface = undefined;
+      task.surfaceSource = undefined;
+      cleared++;
+    }
+    if (!cleared) return 0;
+    this.saveBots();
+    this.emit({ type: "bot", botId });
+    return cleared;
   }
 
   /** Model/provider changes are one configuration transaction: never publish

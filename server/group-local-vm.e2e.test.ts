@@ -225,6 +225,12 @@ describe("Group Local VM ownership on the real isolated server", () => {
       const state = await api("GET", "/api/bots?messages=30");
       const saved = state.bots.find((b: any) => b.id === bot.id);
       expect(saved.tasks.find((task: any) => task.threadId === bot.threadId).surface).toBe("vm");
+      // the model picked the VM: the pin is the machine's record, not the
+      // person's, so a Works on change sweeps it rather than the thread
+      // staying stuck on the machine's choice
+      await api("PATCH", `/api/bots/${bot.id}`, { computer: "local" });
+      const swept = (await api("GET", "/api/bots?messages=0")).bots.find((b: any) => b.id === bot.id);
+      expect(swept.tasks.find((task: any) => task.threadId === bot.threadId).surface).toBeUndefined();
       expect(saved.messages.filter((message: any) => message.role === "user" && message.kind === "text")).toHaveLength(1);
       expect((await call("GET")).status).toBe(401);
     } finally {
