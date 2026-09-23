@@ -320,6 +320,8 @@ import {
   applySkillWriteWithReceipt,
   getStagedSkillWrite,
   installSkill,
+  parseSkillMd,
+  scanSkillText,
   listSkills,
   listStagedSkillWrites,
   isSkillName,
@@ -331,6 +333,8 @@ import {
   stageSkillWrite,
 } from "./skills.ts";
 import { fetchSkillFromSource } from "./skill-fetch.ts";
+import { pickBotName } from "./names.ts";
+import { botSkillTemplateSchema, newBotDefaultsSchema, resolveBotCreationDefaults } from "./new-bot-defaults.ts";
 import { expandLearnTurnText, learnSource } from "./skill-learn.ts";
 import { expandSetupTurnText, setupModeActive, setupSystemPrompt } from "./setup-mode.ts";
 import type { SkillRequestCardData } from "../shared/skill-request.ts";
@@ -15010,11 +15014,82 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
       }
       return json(res, 200, { section: name, sections: store.sections, bots: result.bots.map(wireBot) });
     }
-    if (method === "POST" && path === "/api/bots") {
+    if (method === "GET" && path === "/api/bot-defaults") {
+      return json(res, 200, {
+        defaults: structuredClone(cfg.newBotDefaults ?? newBotDefaultsSchema.parse({})),
+        modelSelection: await defaultSelection(),
+        suggestedName: pickBotName(store.bots.map(bot => bot.name)),
+      });
+    }
+    if (method === "POST" && path === "/api/bot-defaults/skills/preview") {
+      const input = z.object({ source: z.string().min(1).max(2000) }).strict().parse(await readBody(req));
+      const fetched = await fetchSkillFromSource(input.source);
+      if ("error" in fetched) return json(res, 422, { error: fetched.error });
+      const skills = [];
+      for (const skill of fetched.skills) {
+        const file = skill.files.find(file => file.path === "SKILL.md" || file.path.endsWith("/SKILL.md"));
+        if (!file) continue;
+        const parsed = parseSkillMd(file.content);
+        if ("error" in parsed) return json(res, 422, { error: parsed.error });
+        const skippedWarnings = skill.files.filter(candidate => candidate !== file)
+          .map(candidate => `skipped supporting file "${candidate.path}" — v1 imports only SKILL.md`);
+        skills.push(botSkillTemplateSchema.parse({ name: parsed.name, description: parsed.description, source: skill.source, text: file.content,
+          enabled: false, warnings: [...scanSkillText(file.content), ...skippedWarnings] }));
+      }
+      return json(res, 200, { skills });
+    }
+    if (method === "POST" && path === "/api/bot-defaults/avatar") {
       const body = await readBody(req);
+      const profile = parseBotProfilePatch(body.profile, true);
+      if (!profile.ok) return json(res, 400, { error: profile.error });
+      const { prompt } = avatarGenerationRequestSchema.parse({ prompt: body.prompt });
+      const generated = await generateAvatarImage(cfg, {
+        name: profile.patch.name ?? "", title: profile.patch.title ?? "", description: profile.patch.description ?? "",
+      }, prompt);
+      // A preview belongs to the draft. Upload it through the existing image
+      // endpoint only when the user commits the new bot or its defaults.
+      return json(res, 200, { dataUrl: `data:${generated.mime};base64,${generated.bytes.toString("base64")}` });
+    }
+    if (method === "POST" && path === "/api/bots") {
+      let body = await readBody(req);
       if (!body || typeof body !== "object" || Array.isArray(body)) {
         return json(res, 400, { error: "bot must be a JSON object" });
       }
+      const template = resolveBotCreationDefaults(cfg.newBotDefaults, body);
+      const settings = template.profile;
+      if (auth.kind === "session" && !auth.scopes.includes("admin")) {
+        const field = clientBotPatchViolation(settings);
+        if (field || template.skills.length || template.routines.length || Object.keys(template.memory).length) {
+          return json(res, 403, { error: "Creating a bot with these defaults needs the admin scope" });
+        }
+      }
+      body = { ...body, ...settings, name: settings.name };
+      if (settings.approvalMode === "full" || settings.approvalMode === "custom") {
+        return json(res, 403, { error: "This approval level requires the desktop permission flow. Use the bot creation dialog or explicitly choose Ask/Auto for API creation." });
+      }
+      if (settings.computer === "local" && settings.approvalMode === "auto" && body.acknowledgeLocalAuto !== true) {
+        return json(res, 400, { error: "Auto mode on this computer requires confirming the warning first (acknowledgeLocalAuto)" });
+      }
+      if (settings.avatarUrl && !storedAvatarExists(settings.avatarUrl)) {
+        return json(res, 400, { error: "avatarUrl must reference an existing stored image" });
+      }
+      if (settings.browserProfile && settings.browserProfile !== "guest" && !(cfg.browserProfiles ?? []).some(profile => profile.id === settings.browserProfile)) {
+        return json(res, 400, { error: "browserProfile must name an existing browser profile" });
+      }
+      if (settings.mcpServers?.some(name => mcpServerNameError(name) !== null) || (settings.mcpServers?.length ?? 0) > MAX_MCP_SERVERS) {
+        return json(res, 400, { error: "Invalid MCP server selection" });
+      }
+      if (settings.managedSections?.length) {
+        if (!settings.chiefOfStaff || settings.managedSections.some(name => name !== "" && !store.sections.includes(name))) {
+          return json(res, 400, { error: "Only a Chief may manage existing additional teams" });
+        }
+        if (body.acknowledgePeerScope !== true) return json(res, 400, { error: "Confirm additional team access (acknowledgePeerScope)" });
+        if (auth.kind === "loopback" && !DESKTOP_MANAGED && store.bots.some(bot => bot.busy)) {
+          return json(res, 409, { error: "Stop running bots before granting access to another team" });
+        }
+      }
+      const checkedCwd = validateBotCwd(settings.cwd ?? null);
+      if (!checkedCwd.ok) return json(res, 400, { error: checkedCwd.error });
       if (body.requireAvailableModel !== undefined && typeof body.requireAvailableModel !== "boolean") {
         return json(res, 400, { error: "requireAvailableModel must be true or false" });
       }
@@ -15050,8 +15125,58 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
       if (store.bots.length >= MAX_WORKSPACE_BOTS) {
         return json(res, 409, { error: `this workspace is limited to ${MAX_WORKSPACE_BOTS} bots` });
       }
-      const bot = store.createBot({ ...profile.patch, section, modelSelection: selection });
+      const bot = store.createBot({ ...profile.patch, soul: settings.soul, section, modelSelection: selection });
+      const createdRoutines: Array<{ id: string; enabled: boolean }> = [];
+      try {
+        const { chiefOfStaff: _chief, managedSections: _managed, ...ordinary } = settings;
+        store.patchBot(bot.id, {
+          ...ordinary, name: bot.name, section, modelSelection: selection,
+          mascotExpression: ordinary.mascotExpression ?? undefined,
+          avatarUrl: ordinary.avatarUrl || undefined,
+          computer: ordinary.computer ?? undefined, cwd: checkedCwd.cwd ?? undefined,
+          peers: ordinary.peers ?? undefined, mcpServers: ordinary.mcpServers ?? undefined,
+          browserProfile: ordinary.browserProfile || undefined,
+          autoApprove: ordinary.approvalMode === "auto",
+        });
+        for (const [file, text] of Object.entries(template.memory)) {
+          journalMemoryWrite(bot.id, file, text, { actor: "person", via: "api" });
+        }
+        for (const skill of template.skills) {
+          const parsed = parseSkillMd(skill.text);
+          if ("error" in parsed || parsed.name !== skill.name) throw Object.assign(new Error("Skill name does not match its contents"), { status: 400 });
+          const installed = installSkill(bot.id, skill.source, [{ path: "SKILL.md", content: skill.text }]);
+          if ("error" in installed) throw Object.assign(new Error(installed.error), { status: 422 });
+          if (skill.enabled) {
+            const enabled = setSkillEnabled(bot.id, skill.name, true);
+            if ("error" in enabled) throw Object.assign(new Error(enabled.error), { status: 422 });
+          }
+        }
+        for (const routine of template.routines) {
+          const created = routines!.create({ ...routine, botId: bot.id, enabled: false });
+          createdRoutines.push({ id: created.id, enabled: routine.enabled !== false });
+        }
+      } catch (error) {
+        for (const routine of createdRoutines) routines!.remove(routine.id);
+        store.deleteBot(bot.id);
+        throw error;
+      }
+      // Creation is complete. Activation errors must not invite a duplicate
+      // creation retry or delete a bot whose routine may already have run.
+      const warnings: string[] = [];
+      if (settings.chiefOfStaff) {
+        try {
+          store.patchBot(bot.id, { managedSections: settings.managedSections ?? [] });
+          store.setChiefOfStaff(bot.id);
+        } catch {
+          warnings.push("Bot created; review its Chief of Staff setting before delegating work.");
+        }
+      }
+      for (const routine of createdRoutines) if (routine.enabled) {
+        try { routines!.update(routine.id, { enabled: true }); }
+        catch { warnings.push(`Bot created; routine ${routine.id} could not be activated.`); }
+      }
       return json(res, 201, {
+        ...(warnings.length ? { warnings } : {}),
         bot: {
           ...wireBot(bot),
           messages: store.messagesFor(bot.threadId),
@@ -15697,6 +15822,20 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
     // ── bot skills: imported Agent Skills (SKILL.md) ────────────────────
     // Import lands DISABLED; the UI shows SKILL.md + scan warnings and a
     // person enables after reading. See server/skills.ts for the policy.
+    m = path.match(/^\/api\/bots\/([\w-]+)\/skill-template$/);
+    if (m && method === "POST") {
+      if (!store.bot(m[1])) return json(res, 404, { error: "no such bot" });
+      const input = botSkillTemplateSchema.parse(await readBody(req));
+      const parsed = parseSkillMd(input.text);
+      if ("error" in parsed || parsed.name !== input.name) return json(res, 400, { error: "Skill name does not match its contents" });
+      const installed = installSkill(m[1], input.source, [{ path: "SKILL.md", content: input.text }]);
+      if ("error" in installed) return json(res, 422, { error: installed.error });
+      if (input.enabled) {
+        const enabled = setSkillEnabled(m[1], input.name, true);
+        if ("error" in enabled) return json(res, 422, { error: enabled.error });
+      }
+      return json(res, 201, { installed });
+    }
     m = path.match(/^\/api\/bots\/([\w-]+)\/skills$/);
     if (m && method === "GET") {
       if (!store.bot(m[1])) return json(res, 404, { error: "no such bot" });
@@ -17759,6 +17898,17 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
       const body = await readBody(req);
       if (hostedModels && ["instances", "anthropic", "openaiCompat", "xai", "opencodeGo"].some(key => Object.hasOwn(body, key))) return json(res, 403, { error: HOSTED_PROVIDER_SETTINGS_ERROR });
       const patch = parseConfigPatch(body);
+      if (patch.newBotDefaults) {
+        if (patch.newBotDefaults.profile.modelSelection) {
+          const checked = checkedModelSelection(patch.newBotDefaults.profile.modelSelection);
+          if (!checked.ok) return json(res, checked.status, { error: checked.error });
+          patch.newBotDefaults.profile.modelSelection = checked.selection;
+        }
+        for (const skill of patch.newBotDefaults.skills) {
+          const parsed = parseSkillMd(skill.text);
+          if ("error" in parsed || parsed.name !== skill.name) return json(res, 400, { error: "Skill name does not match its contents" });
+        }
+      }
       if (hostedModels && patch.defaultModelSelection) {
         const checked = checkedModelSelection(patch.defaultModelSelection);
         if (!checked.ok) return json(res, checked.status, { error: checked.error });
