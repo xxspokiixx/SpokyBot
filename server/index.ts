@@ -15022,7 +15022,9 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
       });
     }
     if (method === "POST" && path === "/api/bot-defaults/skills/preview") {
-      const input = z.object({ source: z.string().min(1).max(2000) }).strict().parse(await readBody(req));
+      const checked = z.object({ source: z.string().min(1).max(2000) }).strict().safeParse(await readBody(req));
+      if (!checked.success) return json(res, 400, { error: checked.error.message });
+      const input = checked.data;
       const fetched = await fetchSkillFromSource(input.source);
       if ("error" in fetched) return json(res, 422, { error: fetched.error });
       const skills = [];
@@ -15033,16 +15035,21 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
         if ("error" in parsed) return json(res, 422, { error: parsed.error });
         const skippedWarnings = skill.files.filter(candidate => candidate !== file)
           .map(candidate => `skipped supporting file "${candidate.path}" — v1 imports only SKILL.md`);
-        skills.push(botSkillTemplateSchema.parse({ name: parsed.name, description: parsed.description, source: skill.source, text: file.content,
-          enabled: false, warnings: [...scanSkillText(file.content), ...skippedWarnings] }));
+        const template = botSkillTemplateSchema.safeParse({ name: parsed.name, description: parsed.description, source: skill.source, text: file.content,
+          enabled: false, warnings: [...scanSkillText(file.content), ...skippedWarnings] });
+        if (!template.success) return json(res, 422, { error: template.error.message });
+        skills.push(template.data);
       }
       return json(res, 200, { skills });
     }
     if (method === "POST" && path === "/api/bot-defaults/avatar") {
       const body = await readBody(req);
+      if (!body || typeof body !== "object" || Array.isArray(body)) return json(res, 400, { error: "avatar preview must be a JSON object" });
       const profile = parseBotProfilePatch(body.profile, true);
       if (!profile.ok) return json(res, 400, { error: profile.error });
-      const { prompt } = avatarGenerationRequestSchema.parse({ prompt: body.prompt });
+      const checked = avatarGenerationRequestSchema.safeParse({ prompt: body.prompt });
+      if (!checked.success) return json(res, 400, { error: checked.error.message });
+      const { prompt } = checked.data;
       const generated = await generateAvatarImage(cfg, {
         name: profile.patch.name ?? "", title: profile.patch.title ?? "", description: profile.patch.description ?? "",
       }, prompt);
@@ -15825,7 +15832,9 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
     m = path.match(/^\/api\/bots\/([\w-]+)\/skill-template$/);
     if (m && method === "POST") {
       if (!store.bot(m[1])) return json(res, 404, { error: "no such bot" });
-      const input = botSkillTemplateSchema.parse(await readBody(req));
+      const checked = botSkillTemplateSchema.safeParse(await readBody(req));
+      if (!checked.success) return json(res, 400, { error: checked.error.message });
+      const input = checked.data;
       const parsed = parseSkillMd(input.text);
       if ("error" in parsed || parsed.name !== input.name) return json(res, 400, { error: "Skill name does not match its contents" });
       const installed = installSkill(m[1], input.source, [{ path: "SKILL.md", content: input.text }]);
