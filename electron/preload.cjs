@@ -287,6 +287,7 @@ const bridge = {
     settingsOpened: () => ipcRenderer.invoke("organization:settings-opened"),
     state: () => ipcRenderer.invoke("organization:state"),
     begin: input => ipcRenderer.invoke("organization:begin", input),
+    reopen: () => ipcRenderer.invoke("organization:reopen"),
     cancelEnrollment: () => ipcRenderer.invoke("organization:cancel"),
     refresh: () => ipcRenderer.invoke("organization:refresh"),
     disconnect: () => ipcRenderer.invoke("organization:disconnect"),
