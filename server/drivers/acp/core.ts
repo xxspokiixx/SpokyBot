@@ -64,6 +64,34 @@ import { supportsApprovalMode } from "../../../shared/approval-mode.ts";
 import { appendNative } from "../native.ts";
 import { commandSummary, toolDetailPreview } from "../../tool-summary.ts";
 import { extractMcpImages } from "../../mcp-tool-images.ts";
+import { redactSecretsInText } from "../../redact.ts";
+import { recoveryPromptFor } from "../../resume-recovery.ts";
+
+/** ACP vendors put the actionable cause in error.data while keeping the
+ * JSON-RPC message generic. Only surface known text fields, never a response
+ * body/config dump, and redact before bounding the displayed diagnostic. */
+function acpRpcError(value: any, method: string): Error {
+  const message = typeof value?.message === "string" ? value.message : "ACP request failed";
+  const data = value?.data;
+  const detail = typeof data === "string" ? data
+    : typeof data?.details === "string" ? data.details
+    : typeof data?.message === "string" ? data.message
+    : typeof data?.error?.message === "string" ? data.error.message
+    : "";
+  const context = [
+    method,
+    typeof data?.service === "string" ? `service: ${data.service}` : "",
+    typeof data?.errorName === "string" ? data.errorName : "",
+  ].filter(Boolean).join(", ");
+  const diagnostic = `${detail && detail !== message ? `${message}: ${detail}` : message} (${context})`;
+  const error = new Error(redactSecretsInText(diagnostic).slice(0, 1500));
+  return Object.assign(error, { code: value?.code, data,
+    // -32603 is JSON-RPC's internal error. Invalid params, unsupported
+    // methods and auth refusals are user/configuration issues, not evidence
+    // of a broken process. Preserve their session instead of retrying them.
+    acpSessionFailure: value?.code === -32603,
+  });
+}
 
 export interface AcpConfig {
   cli: string;
@@ -402,6 +430,17 @@ function sessionOperationKey(toolCall: any): string | null {
   }));
 }
 
+/** The banner an ACP CLI prints for `--version`. Hermes writes its whole banner
+ *  to stderr with an empty stdout, so an stdout-only read reports a perfectly
+ *  good install as "CLI not found". Prefer stdout; fall back to the first
+ *  stderr line; null when both are empty. */
+export function versionFromProbe(stdout: string | undefined, stderr: string | undefined): string | null {
+  const out = (stdout ?? "").trim();
+  if (out) return out;
+  const err = (stderr ?? "").trim().split(/\r\n|\n|\r/, 1)[0]?.trim() ?? "";
+  return err || null;
+}
+
 export function createAcpDriver(support: AcpSupport): ProviderDriver<AcpConfig> {
   const DRIVER_KIND = support.driverKind;
   const SOURCE = support.nativeSource;
@@ -679,6 +718,7 @@ export function createAcpDriver(support: AcpSupport): ProviderDriver<AcpConfig> 
         const rpcPending = new Map<
           number,
           {
+            method: string;
             resolve: (v: any) => void;
             reject: (e: Error) => void;
             timer: ReturnType<typeof setTimeout> | null;
@@ -712,7 +752,7 @@ export function createAcpDriver(support: AcpSupport): ProviderDriver<AcpConfig> 
             if (timeoutMs) {
               timer = setTimeout(() => {
                 rpcPending.delete(id);
-                reject(new Error(`${method} timed out`));
+                reject(Object.assign(new Error(`${method} timed out`), { acpSessionFailure: true }));
               }, timeoutMs);
               timer.unref?.();
             }
@@ -736,6 +776,7 @@ export function createAcpDriver(support: AcpSupport): ProviderDriver<AcpConfig> 
             };
             armIdle();
             rpcPending.set(id, {
+              method,
               // Consume configuration in wire order: an update following this
               // response may arrive before the awaiting continuation resumes.
               resolve: (result) => { receive?.(result); resolve(result); },
@@ -1065,9 +1106,7 @@ export function createAcpDriver(support: AcpSupport): ProviderDriver<AcpConfig> 
                 if (pend.timer) clearTimeout(pend.timer);
                 if (pend.idleTimer) clearTimeout(pend.idleTimer);
                 if (msg.error) {
-                  const error = new Error(msg.error.message ?? JSON.stringify(msg.error));
-                  Object.assign(error, { code: msg.error.code, data: msg.error.data });
-                  pend.reject(error);
+                  pend.reject(acpRpcError(msg.error, pend.method));
                 } else {
                   pend.resolve(msg.result);
                 }
@@ -1197,6 +1236,10 @@ export function createAcpDriver(support: AcpSupport): ProviderDriver<AcpConfig> 
         const contractKey = JSON.stringify([launch.command, launch.args ?? [], spawnArgs, cwd, turnConfig.fullAuto === true, envFingerprint]);
         const sessionKey = JSON.stringify(mcpServers);
 
+        if (turn.sessionReset) {
+          closeSession(threadId, "reset");
+          sessionAllows.delete(threadId);
+        }
         const pooled = sessions.get(threadId);
         let session: AcpSession;
         if (pooled && !pooled.dead && !pooled.closing && pooled.contractKey === contractKey) {
@@ -1356,8 +1399,10 @@ export function createAcpDriver(support: AcpSupport): ProviderDriver<AcpConfig> 
             let runtimeAcceptsImages = await handshake();
             let init = session.initResult;
 
-            const cursor = typeof turn.resumeCursor === "string" ? turn.resumeCursor : null;
+            const cursor = !turn.sessionReset && typeof turn.resumeCursor === "string" ? turn.resumeCursor : null;
             let sessionResult: any = null;
+            let promptTurn = turn;
+            let rebuiltFromReplay = false;
             for (;;) {
               const liveSessionId = session.sessionId;
               if (liveSessionId !== null && session.sessionKey === sessionKey && (cursor === null || cursor === liveSessionId)) {
@@ -1388,7 +1433,16 @@ export function createAcpDriver(support: AcpSupport): ProviderDriver<AcpConfig> 
                       }
                     },
                   );
-                } catch {
+                } catch (error) {
+                  const classification = support.classifyError?.(error);
+                  // OpenCode encodes ACPSessionNotFoundError as invalidParams
+                  // with just the rejected sessionId. Other invalidParams
+                  // responses (model/config errors) must not erase history.
+                  const data = (error as any)?.data;
+                  const missingSession = data && typeof data === "object" && !Array.isArray(data)
+                    && data.sessionId === cursor && Object.keys(data).length === 1;
+                  if (classification === "invalid_credentials" || classification === "inactive_subscription"
+                      || ((error as any)?.code === -32602 && !missingSession)) throw error;
                   /* session gone, load unsupported, or too slow — the
                    * fallbacks below choose between one fresh process and a
                    * genuinely new session */
@@ -1414,7 +1468,16 @@ export function createAcpDriver(support: AcpSupport): ProviderDriver<AcpConfig> 
               }
               // a genuinely fresh native session forgets what the previous
               // one allowed
-              if (!cursor) sessionAllows.delete(threadId);
+              sessionAllows.delete(threadId);
+              if (cursor) {
+                const recovery = recoveryPromptFor({
+                  recoveryText: turn.recoveryText,
+                  currentText: turn.text,
+                  failure: "before-accept",
+                });
+                promptTurn = { ...turn, text: recovery.text };
+                rebuiltFromReplay = recovery.replayed;
+              }
               sessionResult = await request("session/new", { cwd, mcpServers: sessionServers }, NEW_SESSION_TIMEOUT, (result) => {
                 session.sessionId = typeof result?.sessionId === "string" ? result.sessionId : null;
                 session.sessionKey = sessionKey;
@@ -1435,6 +1498,7 @@ export function createAcpDriver(support: AcpSupport): ProviderDriver<AcpConfig> 
                 type: "session.started",
                 sessionId,
                 model: selectedModel ?? init?._meta?.modelState?.currentModelId ?? cliTurn.model ?? null,
+                ...(rebuiltFromReplay ? { rebuilt: true } : {}),
               });
             };
 
@@ -1496,10 +1560,10 @@ export function createAcpDriver(support: AcpSupport): ProviderDriver<AcpConfig> 
             }
             emitSessionStarted();
             const text = support.buildPromptText
-              ? support.buildPromptText(turn)
-              : turn.system
-                ? `${turn.system}\n\n${turn.text}`
-                : turn.text;
+              ? support.buildPromptText(promptTurn)
+              : promptTurn.system
+                ? `${promptTurn.system}\n\n${promptTurn.text}`
+                : promptTurn.text;
             const imageBlocks = support.images === true && runtimeAcceptsImages
               ? await readAcpImageBlocks(turn.images ?? [])
               : [];
@@ -1562,11 +1626,14 @@ export function createAcpDriver(support: AcpSupport): ProviderDriver<AcpConfig> 
                 message,
                 ...(needsAuth ? { setup: true } : {}),
               });
-              // A prompt that went idle has a wedged child under the RPC — it
-              // will never answer the next prompt either. Do not leave it
-              // pooled: close it so the next turn spawns a fresh agent.
-              if ((e as any)?.acpPromptStall === true && session.child.exitCode === null && !session.closing) {
-                closeSession(threadId, "prompt-stall");
+              // Internal RPC failures can leave a live child poisoned just
+              // like a silent prompt. Evict before completion listeners can
+              // start the next turn. Never replay this accepted prompt: it
+              // may already have executed tools. The next explicit turn can
+              // resume the recorded session on a fresh process.
+              if (!needsAuth && ((e as any)?.acpPromptStall === true || (e as any)?.acpSessionFailure === true
+                  || code === "upstream_outage") && session.child.exitCode === null && !session.closing) {
+                closeSession(threadId, (e as any)?.acpPromptStall === true ? "prompt-stall" : "rpc-failure");
               }
               settle(threadId, session, false, needsAuth ? "auth_required" : "rpc_error");
             }
@@ -1580,8 +1647,8 @@ export function createAcpDriver(support: AcpSupport): ProviderDriver<AcpConfig> 
         const env = childEnv();
         if (support.snapshot) return support.snapshot(env, config, instanceId);
         const version = await new Promise<string | null>((resolve) => {
-          execCli(config.cli, ["--version"], { timeout: 8000, env }, (err, stdout) =>
-            resolve(err ? null : stdout.trim()),
+          execCli(config.cli, ["--version"], { timeout: 8000, env }, (err, stdout, stderr) =>
+            resolve(err ? null : versionFromProbe(stdout, stderr)),
           );
         });
         if (!version) return { state: "unavailable", reason: `\`${config.cli}\` CLI not found` };
