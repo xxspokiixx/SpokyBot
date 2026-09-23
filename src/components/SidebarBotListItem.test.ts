@@ -133,6 +133,20 @@ describe("BotListItem", () => {
     expect(renderRow(bot({ busy: true, activity: "waiting-on-you" }))).not.toContain('data-testid="working-dot"');
   });
 
+  it("marks an idle bot waiting on a teammate with a quiet dot, never the work signals", () => {
+    const markup = renderRow(bot({ waitingForTeammates: true, busy: false, activity: "idle" }));
+    expect(markup).toContain('data-testid="teammate-wait-dot"');
+    expect(markup).not.toContain('data-testid="working-dot"');
+    expect(markup).not.toContain("animate-status-pulse");
+    expect(markup).toContain("Waiting on a teammate…");
+  });
+
+  it("keeps real sibling work visible while another thread waits for a teammate", () => {
+    const markup = renderRow(bot({ waitingForTeammates: true, busy: true, activity: "working" }));
+    expect(markup).toContain('data-testid="working-dot"');
+    expect(markup).not.toContain('data-testid="teammate-wait-dot"');
+  });
+
   it("keeps Archive in the Actions menu and reveals quiet row controls on focus as well as hover", () => {
     const markup = renderRow(bot());
     expect(markup).not.toContain('aria-label="Archive Atlas"');
