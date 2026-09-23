@@ -287,6 +287,7 @@
   "team.addBots": "Add bots",
   "team.addBotsTo": "Add bots to {name}",
   "team.renameEmpty": "Rename empty team",
+  "team.rename": "Rename team",
   "team.renameAria": "Rename {name} team",
   "team.deleteEmpty": "Delete empty team",
   "team.deleteAria": "Delete {name} team",

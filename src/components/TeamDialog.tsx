@@ -6,9 +6,10 @@ import { BotPickerList } from "./BotPickerList";
 import { t } from "@/lib/i18n";
 
 /** A team may start empty; choosing bots moves their membership, never copies them. */
-export function TeamDialog({ section, rename = false, onClose }: {
+export function TeamDialog({ section, rename = false, onClose, onRenamed }: {
   section?: string;
   rename?: boolean;
+  onRenamed?: (oldName: string, newName: string) => void;
   onClose: () => void;
 }) {
   const { state, dispatch } = useStore();
@@ -25,7 +26,7 @@ export function TeamDialog({ section, rename = false, onClose }: {
     return () => { if (opener?.isConnected) opener.focus(); };
   }, []);
   const moving = section !== undefined && !rename;
-  const title = rename ? t("team.renameEmpty") : moving ? t("team.moveTo", { name: section || "General" }) : t("team.create");
+  const title = rename ? t("team.rename") : moving ? t("team.moveTo", { name: section || "General" }) : t("team.create");
   const candidates = state.bots.filter((bot) => !bot.hidden && (!moving || (bot.section?.trim() ?? "") !== section));
   const save = async () => {
     if (saving || (!moving && !name.trim()) || (moving && !picked.size)) return;
@@ -42,6 +43,7 @@ export function TeamDialog({ section, rename = false, onClose }: {
       );
       dispatch({ type: "sections", sections: result.sections });
       for (const bot of result.bots ?? []) dispatch({ type: "botPatched", bot });
+      if (rename && section !== undefined) onRenamed?.(section, name.trim());
       onCloseRef.current();
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : String(cause));

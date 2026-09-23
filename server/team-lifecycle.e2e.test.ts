@@ -39,7 +39,12 @@ it("retains empty teams, moves existing bots, and keeps legacy imports additive 
     expect(moved.bots.map((bot: any) => bot.id)).toEqual([a.id, b.id]);
     expect(moved.bots.every((bot: any) => bot.section === "Delivery")).toBe(true);
     expect(await messages()).toEqual(transcript);
-    await api("/api/sidebar-sections?section=Delivery", "PATCH", { name: "Renamed" }, 409);
+    await api("/api/sidebar-sections?section=Delivery", "PATCH", { name: "Renamed" });
+    const renamed = await api("/api/bots?messages=0");
+    expect(renamed.bots.filter((bot: any) => [a.id, b.id].includes(bot.id)).every((bot: any) => bot.section === "Renamed")).toBe(true);
+    expect((await api("/api/section-context?section=Renamed")).text).toBe("Finish research before engineering.");
+    expect(await messages()).toEqual(transcript);
+    await api("/api/sidebar-sections?section=Renamed", "PATCH", { name: "Delivery" });
     await api("/api/sidebar-sections?section=Delivery", "DELETE", undefined, 409);
     await api("/api/sidebar-sections", "POST", { name: "", botIds: [a.id, b.id] });
     expect((await api("/api/sidebar-sections")).sections).toContain("Delivery");

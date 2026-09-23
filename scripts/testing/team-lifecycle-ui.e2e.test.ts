@@ -77,6 +77,35 @@ if (!enabled) console.log("skipping team lifecycle UI e2e: set OMB_UI_E2E=1 to i
     await click("Create team");
     await expect.poll(snapshot, { timeout: 10_000 }).toContain('button "Delivery"');
     expect((await api("/api/bots?messages=0")).sections).toContain("Delivery");
+    const teamMenu = async (name: string) => ui("eval", "--js", `(() => {
+      const header = [...document.querySelectorAll('[data-section]')].find(node => node.dataset.section === ${JSON.stringify(name)});
+      if (!header) throw new Error('Missing team header');
+      header.dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, clientX: 120, clientY: 250 })); return true;
+    })()`);
+    await ui("eval", "--js", `localStorage.setItem('openmausbot.sidebarCollapsedSections.v1', JSON.stringify(['section:Delivery'])); localStorage.setItem('openmausbot.sidebarSectionOrder.v1', JSON.stringify(['section:Research','section:Delivery','section:Engineering'])); location.reload(); true`);
+    await expect.poll(snapshot, { timeout: 15_000 }).toContain('button "Delivery"');
+    await teamMenu("Delivery");
+    await ui("press", "--keys", "Escape");
+    expect((await ui("eval", "--js", "document.activeElement.closest('[data-section]')?.dataset.section")).result).toBe("Delivery");
+    await teamMenu("Delivery");
+    await click("Rename team");
+    await click("Cancel");
+    expect((await ui("eval", "--js", "document.activeElement.closest('[data-section]')?.dataset.section")).result).toBe("Delivery");
+    await teamMenu("Delivery");
+    await click("Rename team");
+    await type("Team name", "Dispatch");
+    await click("Save name");
+    await expect.poll(snapshot).toContain('button "Dispatch"');
+    expect((await ui("eval", "--js", "document.querySelector('[data-section=Dispatch] button')?.getAttribute('aria-expanded')")).result).toBe("false");
+    expect((await ui("eval", "--js", "JSON.parse(localStorage.getItem('openmausbot.sidebarCollapsedSections.v1'))")).result).toContain("section:Dispatch");
+    expect((await ui("eval", "--js", "JSON.parse(localStorage.getItem('openmausbot.sidebarSectionOrder.v1'))")).result).toEqual(["section:Research", "section:Dispatch", "section:Engineering"]);
+    await ui("eval", "--js", "location.reload(); true");
+    await expect.poll(snapshot, { timeout: 15_000 }).toContain('button "Dispatch"');
+    await teamMenu("Dispatch");
+    await click("Rename team");
+    await type("Team name", "Delivery");
+    await click("Save name");
+    await expect.poll(snapshot).toContain('button "Delivery"');
     await click("Tools");
     await click("Team map");
     await manage("Delivery");
@@ -128,4 +157,4 @@ if (!enabled) console.log("skipping team lifecycle UI e2e: set OMB_UI_E2E=1 to i
     }
     await waitForExit(child, { signal: "SIGINT", graceMs: 30_000 });
   }
-}, binary ? 180_000 : 720_000);
+}, binary ? 360_000 : 720_000);

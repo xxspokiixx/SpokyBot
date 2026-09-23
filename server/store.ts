@@ -8,6 +8,7 @@ import { join } from "node:path";
 
 import { writeFileAtomic } from "./atomic.ts";
 import { ensureSections, readSections, changeEmptySection } from "./section-context.ts";
+import type { TeamComputers } from "./team-computers.ts";
 import { removeBotFolder, soulFile, soulHash, writeSoulMirror } from "./bot-folder.ts";
 import type { BotProfilePatch } from "./bot-profile.ts";
 import { peerAllowKey, type PeerAction } from "./peer-approval-key.ts";
@@ -865,17 +866,17 @@ export class Store {
     if (botsDirty) this.saveBots();
   }
 
-  private saveBots(bots: BotRecord[] = this.bots) {
-    this.rememberSections([...this.bots, ...bots].map((bot) => bot.section));
+  private saveBots(bots: BotRecord[] = this.bots, registerSections = true) {
+    if (registerSections) this.rememberSections([...this.bots, ...bots].map((bot) => bot.section));
     writeFileAtomic(BOTS_FILE, JSON.stringify(bots.map(({ busy: _busy, activity: _activity, ...bot }) => ({
       ...bot,
       tasks: bot.tasks?.map(({ busy: _taskBusy, activity: _taskActivity, turnStartedAt: _taskTurnStarted, ...task }) => persistedPin(task)),
     })), null, 2), { mode: 0o600 });
   }
 
-  private saveGroups() {
-    this.rememberSections(this.groups.map((group) => group.section));
-    writeFileAtomic(GROUPS_FILE, JSON.stringify(this.groups.map(({ busyBotId: _busyBotId, turnStartedAt: _turnStartedAt, ...g }) => ({
+  private saveGroups(groups: GroupRecord[] = this.groups, registerSections = true) {
+    if (registerSections) this.rememberSections(groups.map((group) => group.section));
+    writeFileAtomic(GROUPS_FILE, JSON.stringify(groups.map(({ busyBotId: _busyBotId, turnStartedAt: _turnStartedAt, ...g }) => ({
       ...g,
       ...(g.tasks ? { tasks: g.tasks.map((task) => persistedPin(task)) } : {}),
     })), null, 2), { mode: 0o600 });
@@ -890,6 +891,50 @@ export class Store {
       if (!this.registeringInitialSections) throw error;
       console.warn(`[teams] Startup could not register team names; saved teams and shared instructions were left unchanged: ${(error as Error).message}`);
     }
+  }
+
+  /** Rename the same team, preserving its members and existing access grants. */
+  renameSection(name: string, nextName: string, computers?: TeamComputers): string | undefined {
+    if (!name || !this.sections.includes(name)) return "No such team";
+    nextName = nextName.trim();
+    if (!nextName || nextName.length > 60 || [...nextName].some(char => char.charCodeAt(0) < 32 || char.charCodeAt(0) === 127)) return "Team name must be 1 to 60 characters without control characters";
+    if (name === nextName) return undefined;
+    if (this.sections.includes(nextName) || computers?.forSection(nextName)) return "A team with that name already exists";
+    const members = this.bots.filter(bot => sectionKey(bot.section) === name);
+    const rooms = this.groups.filter(group => sectionKey(group.section) === name);
+    const affected = this.bots.filter(bot => members.includes(bot) || bot.managedSections?.some(section => sectionKey(section) === name));
+    if (affected.some(bot => bot.busy || bot.tasks?.some(task => task.busy)) || rooms.some(group => group.busyBotId)) {
+      return "Stop this team's active work before renaming the team";
+    }
+    // Keep the established empty-team lifecycle: old grants are revoked when
+    // an empty identity is removed, so recreating it cannot restore access.
+    if (!members.length && !rooms.length && !computers?.forSection(name)) return this.changeEmptySection(name, nextName);
+    const nextBots = this.bots.map(bot => ({ ...bot,
+      ...(members.includes(bot) ? { section: nextName } : {}),
+      ...(bot.managedSections ? { managedSections: [...new Set(bot.managedSections.map(section => sectionKey(section) === name ? nextName : section))] } : {}),
+    }));
+    const nextGroups = this.groups.map(group => rooms.includes(group) ? { ...group, section: nextName } : group);
+    let computerChanged = false;
+    try {
+      // Register the new name only after saving the records; otherwise the
+      // registry's duplicate-name check would reject this same rename.
+      this.saveBots(nextBots, false);
+      this.saveGroups(nextGroups, false);
+      computerChanged = computers?.renameSection(name, nextName) ?? false;
+      changeEmptySection(name, nextName);
+    } catch (error) {
+      this.saveBots(this.bots, false);
+      this.saveGroups(this.groups, false);
+      if (computerChanged) computers!.renameSection(nextName, name);
+      throw error;
+    }
+    // Preserve identities held by the schedulers and other store consumers.
+    for (let i = 0; i < nextBots.length; i++) Object.assign(this.bots[i], nextBots[i]);
+    for (let i = 0; i < nextGroups.length; i++) Object.assign(this.groups[i], nextGroups[i]);
+    for (const bot of affected) this.emit({ type: "bot", botId: bot.id });
+    for (const room of rooms) this.emit({ type: "group", groupId: room.id });
+    this.emit({ type: "sections" });
+    return undefined;
   }
 
   /** Empty-only changes cannot merge teams or silently change anybody's access. */
