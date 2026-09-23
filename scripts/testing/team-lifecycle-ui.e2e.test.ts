@@ -154,6 +154,7 @@ if (!enabled) console.log("skipping team lifecycle UI e2e: set OMB_UI_E2E=1 to i
     })()`);
     await expect.poll(async () => (await ui("eval", "--js", "document.querySelector('[role=alertdialog]')?.getAttribute('aria-busy')")).result).toBe("true");
     expect((await ui("eval", "--js", "window.teamDeleteRequests")).result).toBe(1);
+    expect((await ui("eval", "--js", "document.activeElement.getAttribute('role')")).result).toBe("alertdialog");
     expect((await ui("eval", "--js", "[...document.querySelectorAll('[role=alertdialog] button')].every(button => button.disabled)")).result).toBe(true);
     await ui("press", "--keys", "Escape");
     expect(await snapshot()).toContain('alertdialog "Delete Launch team?"');
