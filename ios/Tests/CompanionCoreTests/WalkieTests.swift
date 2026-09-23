@@ -77,6 +77,42 @@ final class WalkieTests: XCTestCase {
         )
     }
 
+    func testSpeaksTableRowsAndSkipsTheDelimiter() {
+        let spoken = Walkie.speakable("""
+        | Name | Status |
+        | --- | --- |
+        | Ada | ok |
+        | x | stays |
+
+        - [x] shipped
+        - [ ] waiting
+        - [X] closed
+        """)
+        XCTAssertEqual(spoken, "Name, Status. Ada, ok. x, stays. shipped. waiting. closed.")
+    }
+
+    func testSpeaksAWeldedTableAndDropsDelimiterParagraphs() {
+        let spoken = Walkie.speakable("""
+        | A | B | |---|---| | 1 | 2 |
+
+        | :--- | ---: |
+
+        | - | - |
+
+        --- | ---
+
+        * [x] star
+        + [X] plus
+        1. [ ] first
+          - [x] nested
+        The separator |---|---| is what GFM calls a delimiter row.
+        """)
+        XCTAssertEqual(
+            spoken,
+            "A, B. 1, 2. star. plus. first. nested. The separator, ---, ---, is what GFM calls a delimiter row."
+        )
+    }
+
     func testSkipsCodeBlocksButKeepsInlineCode() {
         let spoken = Walkie.speakable("Run `pnpm test` first.\n```sh\npnpm test\n```\nThen ship.")
         XCTAssertEqual(spoken, "Run pnpm test first. Code omitted. Then ship.")
