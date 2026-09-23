@@ -63,9 +63,12 @@ Use only mapped, tested commands:
 - [Fleet: many workspaces on one server](fleet.md)
 - [Workspaces screen and the fleet agent](workspaces.md)
 - [Hosted workspace sign-in and revocation](hosted-workspaces.md)
+- [Shared-workspace trust: loopback, card answerers, decision log](shared-workspace-trust.md)
+- [Shared-workspace governance: bot visibility and admin activity](shared-workspace-governance.md)
 - [Usage ledger](usage-ledger.md)
 - [Bounded built-in tool results](tool-results.md)
 - [Spend cap and sell prices](spend-cap.md)
+- [Enterprise layer loading and license expiry](enterprise-license.md)
 
 `control-omb ui` ([Chat UI, driven headlessly](chat-ui.md)) drives the real
 renderer in a headless Chrome by accessible name, so composer sends, transcript
@@ -121,6 +124,11 @@ service. It does not drive the People settings UI through `control-omb`.
 
 The [sidebar fixture](sidebar.md) checks archive and delete confirmations, their
 default focus, keyboard wrapping and focus return against two disposable bots.
+
+The [sidebar attention geometry fixture](sidebar-attention.md) measures the
+Active Threads popover's width and inset at each expanded sidebar density in a
+headless Electron window, including the compact-density case where the menu
+used to cross the window's left edge and lose its title.
 
 The [avatar provider fixture](avatar-providers.md) checks image-provider settings,
 keyless local generation, saved-key handling, and safe errors with a local fake API.
