@@ -272,6 +272,10 @@ it.each(["allow", "deny"])("presents all peer approvals together and dispatches 
   else expect(f.nodes().filter((n: any) => n.parentId)).toMatchObject([
     { status: "completed", approvalGranted: true }, { status: "completed", approvalGranted: true },
   ]);
+  const posted = (await f.messages(f.destination.activeTaskId)).filter((m: any) => m.roomRequest?.phase === "request");
+  expect(posted).toHaveLength(behavior === "deny" ? 0 : 1);
+  if (behavior === "allow") expect(posted[0].text).toBe("@Engineer @Reviewer Please build CSV");
+
 }), 45_000);
 
 it("pins a busy destination's task even when its active task changes", () => withRooms(async f => {
@@ -298,6 +302,13 @@ it("consults multiple existing members and returns once, with no discussion prer
   const source = await f.messages(f.source.activeTaskId);
   expect(source.filter((m: any) => m.comm).map((m: any) => m.comm.withBotId)).toEqual([f.target.id, reviewer.id]);
   expect(source.filter((m: any) => m.text === "Reviewed downstream outcome")).toHaveLength(1);
+  const requests = source.filter((m: any) => m.roomRequest?.phase === "request");
+  expect(requests).toHaveLength(1);
+  expect(requests[0].text).toBe("@Engineer @Reviewer Give one risk from your role");
+  for (const id of [f.target.id, reviewer.id]) {
+    expect(JSON.stringify(f.provider().find((turn: any) => turn.botId === id).prompt).match(/Give one risk from your role/g)).toHaveLength(1);
+  }
+
   const tools = f.provider()[0].evidence[0].result.tools.map((t: any) => t.name);
   expect(tools).toContain("coordinate_bots");
   expect(tools).toContain("request_credential");
@@ -378,3 +389,30 @@ it("resolves a unique teammate name in a bot_ids slot, and refuses an ambiguous 
     .evidence.find((entry: any) => entry.step).response.result.content[0].text;
   expect(refused).toBe(`2 reachable teammates are named "${f.target.name}" — call list_bots and use the id of the one you mean`);
 }), 60_000);
+
+
+it("does not repeat a shared brief or rerun recipients on an identical tool retry", () => withRooms(async f => {
+  const reviewer = (await f.cli("new-bot", "--name", "Reviewer", "--section", "A")).bot;
+  await f.tool("update_channel", { channel_id: f.source.id, member_ids: [f.sender.id, f.target.id, reviewer.id] });
+  const args = { bot_ids: [f.target.id, reviewer.id], message: "Review the release checklist", request_key: "release" };
+  f.plan[f.sender.id].steps = [{ arguments: args }, { arguments: args }];
+  f.plan[reviewer.id] = { reply: "Release checklist reviewed" };
+  await f.start(); expect((await f.wait()).status).toBe("settled");
+  const requests = (await f.messages(f.source.activeTaskId)).filter((m: any) => m.roomRequest?.phase === "request");
+  expect(requests).toHaveLength(1);
+  expect(requests[0].text).toBe("@Engineer @Reviewer Review the release checklist");
+  expect(f.provider().map((turn: any) => turn.botId)).toEqual([f.sender.id, f.target.id, reviewer.id, f.sender.id]);
+}), 45_000);
+
+it("keeps genuinely different room briefs separate", () => withRooms(async f => {
+  const reviewer = (await f.cli("new-bot", "--name", "Reviewer", "--section", "A")).bot;
+  await f.tool("update_channel", { channel_id: f.source.id, member_ids: [f.sender.id, f.target.id, reviewer.id] });
+  f.plan[f.sender.id].steps = [
+    { arguments: { bot_ids: [f.target.id], message: "Check the migration", request_key: "migration" } },
+    { arguments: { bot_ids: [reviewer.id], message: "Check the documentation", request_key: "docs" } },
+  ];
+  f.plan[reviewer.id] = { reply: "Documentation reviewed" };
+  await f.start(); expect((await f.wait()).status).toBe("settled");
+  const requests = (await f.messages(f.source.activeTaskId)).filter((m: any) => m.roomRequest?.phase === "request");
+  expect(requests.map((m: any) => m.text)).toEqual(["@Engineer Check the migration", "@Reviewer Check the documentation"]);
+}), 45_000);

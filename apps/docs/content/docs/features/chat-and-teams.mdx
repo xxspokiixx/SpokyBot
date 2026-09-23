@@ -14,6 +14,8 @@ Use separate threads when you want fresh context or independent work without dup
 
 Groups bring several bots into one conversation. Each participant keeps its own provider state. Group timeouts prevent a participant from blocking the whole group indefinitely. Existing channels and their thread histories remain intact; the new label does not change turn-taking or delegation.
 
+When a bot sends the same request to several group members, the group shows one shared message addressed to those members. Each member runs with its own model and permissions and can reply in that conversation. Different assignments remain separate.
+
 ## Delegation
 
 Bots can hand work to other bots. Delegated runs carry explicit status back into the parent conversation, including completion, failure, and cancellation.

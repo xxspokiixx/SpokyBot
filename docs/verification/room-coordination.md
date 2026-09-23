@@ -32,6 +32,11 @@ reachable bots as well as rooms. The latter addresses 1–4 existing bots in thi
 room (default), or — in ordinary direct chat without a room — the sender's one
 standing conversation with each recipient. A Chief can reach additional teams only
 after the owner grants that access in [team settings](team-access.md).
+A multi-recipient room request posts its brief once, addressed to all accepted
+recipients. Each recipient still has a separate execution and result. An
+identical retry does not post again; different briefs remain separate. Requests
+in direct conversations keep their individual messages.
+
 Recipients run sequentially per room, with their own models, permissions and
 working environments. Busy recipients queue. Once all requested results arrive,
 the sender resumes in the original conversation. A lead can consult its own
