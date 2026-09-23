@@ -14,3 +14,10 @@ it("requires a successful opened page matching the answer citation", () => {
   expect(verifiedNativeSearch("settled", [search, opened], [{ ...reply[0], text: "No citation" }])).toBe(false);
   expect(verifiedNativeSearch("failed", [search, opened], reply)).toBe(false);
 });
+
+it("rejects earlier citations and disclaimed or bare URLs in the final answer", () => {
+  for (const text of ["I could not verify the answer.", `I cannot cite this page: ${url}`, `I cannot verify [this page](${url}).`, `Unverified: [source](${url}).`, `Source: ${url}`]) {
+    expect(verifiedNativeSearch("settled", [search, opened], [...reply, { ...reply[0], text }]), text).toBe(false);
+  }
+  expect(verifiedNativeSearch("settled", [search, opened], [{ ...reply[0], text: "Searching…" }, ...reply])).toBe(true);
+});
