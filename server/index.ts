@@ -475,6 +475,9 @@ import {
   memberBot,
   noteSeen,
   notFoundFor,
+  audienceEquals,
+  memberGroup,
+  narrowestAudience,
   parseVisibility,
   pathSubject,
   roomFeeds,
@@ -856,10 +859,27 @@ function hiddenRoutineTarget(body: unknown, visible: VisibleSet): string | null 
 /** Whether a room may feed this bot's recall and recent-work brief: only
  * when everyone who can see the bot can see every bot in the room. */
 function roomFeedsBot(group: GroupRecord, bot: Pick<BotRecord, "visibility">): boolean {
-  return roomFeeds(group.memberIds.flatMap((id) => {
+  return roomFeeds([...roomMemberAudiences(group), group.audienceFloor], bot.visibility);
+}
+
+function roomMemberAudiences(group: GroupRecord): unknown[] {
+  return group.memberIds.flatMap((id) => {
     const member = store.bot(id);
     return member ? [member.visibility] : [];
-  }), bot.visibility);
+  });
+}
+
+/** Keep a room's floor at the narrowest audience it has ever had. Called
+ * whenever a member bot or the room changes (and for every room at start),
+ * so the floor is set before a restricted bot can leave: its departure, or
+ * its deletion, then never opens the transcript to more people. Only an
+ * admin's explicit reset (PATCH /api/groups/:id {resetAudience: true})
+ * widens it again, to what its current bots allow. */
+function settleRoomFloor(group: GroupRecord): void {
+  if (group.dm) return;
+  const next = narrowestAudience([group.audienceFloor, ...roomMemberAudiences(group)]);
+  if (audienceEquals(next, group.audienceFloor)) return;
+  store.patchGroup(group.id, { audienceFloor: next === "everyone" ? undefined : next });
 }
 
 /** The conversations a bot's recent-work brief may draw on: its own, and the
@@ -889,6 +909,13 @@ function roomAudienceConflict(memberIds: readonly string[], existing: readonly s
   return null;
 }
 
+/** A scheduled call with several bots opens a room, so its bots keep one audience too. */
+function calendarAudienceConflict(body: unknown): string | null {
+  const botIds = body && typeof body === "object" ? (body as { botIds?: unknown }).botIds : undefined;
+  if (!Array.isArray(botIds) || botIds.length < 2 || botIds.some((id) => typeof id !== "string")) return null;
+  return roomAudienceConflict(botIds as string[]);
+}
+
 /** What a member's live stream needs to narrow a frame. */
 function memberFrameContext(visible: VisibleSet): FrameContext {
   return {
@@ -913,7 +940,9 @@ function memberFrameContext(visible: VisibleSet): FrameContext {
 function adminActivityRecording(): boolean {
   if (DESKTOP_MANAGED) return false;
   if (HOSTED_WORKSPACE) return true;
-  return sharedSignIn(signInAllowList()) || sessions.list().some((session) => !session.scopes.includes("admin"));
+  const chatOnly = (scopes: readonly string[]) => !scopes.includes("admin");
+  return sharedSignIn(signInAllowList()) || sessions.list().some((session) => chatOnly(session.scopes)) ||
+    sessions.openPairings().some((pairing) => chatOnly(pairing.scopes));
 }
 
 /** Who made an admin change: as the decision log names who answered, plus
@@ -927,13 +956,14 @@ function adminActorFor(auth: RequestAuth, req: IncomingMessage): AdminActor {
 /** The admin whose request is running, for config saves made while it runs.
  * Each save records exactly what it wrote, so a slow request never takes
  * the blame (or the credit) for another admin's change made meanwhile. */
-const adminActorScope = new AsyncLocalStorage<AdminActor | null>();
+const adminActorScope = new AsyncLocalStorage<{ actor: AdminActor; sharedAtStart: boolean } | null>();
 onConfigSaved((before, after) => {
-  const actor = adminActorScope.getStore();
-  if (!actor || DESKTOP_MANAGED) return;
-  // The save that first makes a server shared (or stops it being) is kept.
-  if (!adminActivityRecording() && !sharedSignIn(signInListsOf(before)) && !sharedSignIn(signInListsOf(after))) return;
-  for (const row of configChangeRows(before, after)) appendAdminAction(DATA_DIR, { ...row, actor });
+  const scope = adminActorScope.getStore();
+  if (!scope || DESKTOP_MANAGED) return;
+  // Shared when the request began, or now: the change that makes a server
+  // shared, or stops it being, is kept.
+  if (!scope.sharedAtStart && !adminActivityRecording() && !sharedSignIn(signInListsOf(before)) && !sharedSignIn(signInListsOf(after))) return;
+  for (const row of configChangeRows(before, after)) appendAdminAction(DATA_DIR, { ...row, actor: scope.actor });
 });
 
 interface AuditPlan {
@@ -949,6 +979,8 @@ interface AuditPlan {
   sessionId?: string;
   pairing: boolean;
   engineAction?: { id: string; action: string };
+  /** A room whose audience an admin may reset (PATCH {resetAudience}). */
+  roomId?: string;
 }
 
 function adminAuditPlan(method: string, path: string): AuditPlan | null {
@@ -967,10 +999,12 @@ function adminAuditPlan(method: string, path: string): AuditPlan | null {
   if (m && ((m[2] && method === "POST") || (!m[2] && (method === "PATCH" || method === "DELETE")))) plan.webhookId = m[1];
   m = /^\/api\/auth\/sessions\/([\w-]+)$/.exec(path);
   if (m && method === "DELETE") plan.sessionId = m[1];
+  m = /^\/api\/groups\/([\w-]+)$/.exec(path);
+  if (m && method === "PATCH") plan.roomId = m[1];
   m = /^\/api\/instances\/([\w.-]+)\/(install|auth\/complete|auth\/sign-out|claude-update)$/.exec(path);
   if (m && method === "POST") plan.engineAction = { id: m[1]!, action: m[2]!.replace("/", "-") };
   if (method === "POST" && path === "/api/instances/claude-accounts") plan.engineAction = { id: "claude", action: "account-add" };
-  return plan.config || plan.botId || plan.createsBots || plan.deletesBot || plan.createsWebhook || plan.webhookId || plan.sessionId || plan.pairing || plan.engineAction ? plan : null;
+  return plan.config || plan.botId || plan.createsBots || plan.deletesBot || plan.createsWebhook || plan.webhookId || plan.sessionId || plan.pairing || plan.engineAction || plan.roomId ? plan : null;
 }
 
 const WEBHOOK_AUDIT_FIELDS = ["name", "prompt", "botId", "runOn", "enabled", "eventTypes"] as const;
@@ -998,19 +1032,23 @@ function requestedBotFields(req: IncomingMessage, path: string): string[] {
 function beginAdminAudit(req: IncomingMessage, res: ServerResponse, method: string, path: string, auth: RequestAuth): void {
   const plan = DESKTOP_MANAGED ? null : adminAuditPlan(method, path);
   const actor = plan ? adminActorFor(auth, req) : null;
+  // Whether several people share the workspace as the request begins: a
+  // change that ends sharing (the last chat-only phone signed out) is kept.
+  const sharedAtStart = plan ? adminActivityRecording() : false;
   // Set for every request, so a kept-alive connection never inherits one.
-  adminActorScope.enterWith(plan?.config ? actor : null);
+  adminActorScope.enterWith(plan?.config && actor ? { actor, sharedAtStart } : null);
   if (!plan || !actor) return;
   const before = {
     bot: auditBot(plan.botId ?? plan.deletesBot),
     botName: store.bot(plan.botId ?? plan.deletesBot ?? "")?.name,
     hook: auditHook(plan.webhookId),
     session: plan.sessionId ? sessions.list().find((session) => session.id === plan.sessionId) : undefined,
+    roomFloor: plan.roomId ? store.group(plan.roomId)?.audienceFloor ?? "everyone" : undefined,
   };
   let answered: unknown;
   if (plan.createsBots || plan.createsWebhook || plan.pairing) onJsonBody(res, (body) => (answered = body));
   res.once("finish", () => {
-    if (res.statusCode >= 400 || !adminActivityRecording()) return;
+    if (res.statusCode >= 400 || (!sharedAtStart && !adminActivityRecording())) return;
     try {
       for (const row of adminAuditRows(plan, req, path, before, answered)) appendAdminAction(DATA_DIR, { ...row, actor });
     } catch (error) {
@@ -1023,7 +1061,7 @@ function adminAuditRows(
   plan: AuditPlan,
   req: IncomingMessage,
   path: string,
-  before: { bot: Record<string, unknown> | null; botName?: string; hook?: WebhookTrigger; session?: ReturnType<typeof sessions.list>[number] },
+  before: { bot: Record<string, unknown> | null; botName?: string; hook?: WebhookTrigger; session?: ReturnType<typeof sessions.list>[number]; roomFloor?: unknown },
   answered: unknown,
 ): Array<Omit<AdminActionRow, "at" | "actor">> {
   const rows: Array<Omit<AdminActionRow, "at" | "actor">> = [];
@@ -1071,6 +1109,12 @@ function adminAuditRows(
     if (pairing) rows.push({ category: "session", action: "pairing.create", target: { kind: "pairing", name: pairing.label }, after: { label: pairing.label, scopes: pairing.scopes } });
   }
   if (plan.engineAction) rows.push({ category: "engine", action: `engine.${plan.engineAction.action}`, target: { kind: "engine", id: plan.engineAction.id } });
+  const roomBody = plan.roomId ? parsedBodyOf(req) : undefined;
+  const room = plan.roomId ? store.group(plan.roomId) : undefined;
+  if (room && roomBody && typeof roomBody === "object" && (roomBody as { resetAudience?: unknown }).resetAudience === true) {
+    rows.push({ category: "visibility", action: "room.audience-reset", target: { kind: "room", id: room.id, name: room.name },
+      changed: ["audienceFloor"], before: { audienceFloor: before.roomFloor ?? "everyone" }, after: { audienceFloor: room.audienceFloor ?? "everyone" } });
+  }
   return rows;
 }
 
@@ -3266,7 +3310,16 @@ function updateChannel(groupId: string, value: unknown): GroupRecord {
       else patch.section = trimmed;
     }
   }
+  // An admin's explicit "show this room to everyone its current bots allow":
+  // the only way a room's floor widens (settleRoomFloor). Admin-only: a
+  // member's PATCH is limited to display fields, and a Chief's never has it.
+  const resetAudience = body.resetAudience !== undefined;
+  if (resetAudience) {
+    if (body.resetAudience !== true) throw Object.assign(new Error("resetAudience must be true"), { status: 400 });
+    patch.audienceFloor = undefined;
+  }
   const group = store.patchGroup(groupId, patch);
+  if (resetAudience) audienceChanged();
   if (!group) throw Object.assign(new Error("no such room"), { status: 404 });
   return group;
 }
@@ -3860,6 +3913,8 @@ store.onChange((change) => {
     case "bot": {
       const bot = store.bot(change.botId);
       if (bot) broadcast({ kind: "bot", bot: wireBot(bot) });
+      // A new audience narrows the rooms this bot is in, for good.
+      if (bot) for (const group of store.groups.filter((candidate) => candidate.memberIds.includes(bot.id))) settleRoomFloor(group);
       break;
     }
     case "bot.deleted":
@@ -3868,6 +3923,7 @@ store.onChange((change) => {
     case "group": {
       const group = store.group(change.groupId);
       if (group) broadcast({ kind: "group", group: publicGroupState(group) });
+      if (group) settleRoomFloor(group);
       break;
     }
     case "group.deleted":
@@ -4459,9 +4515,13 @@ bus.subscribe((event: RuntimeEvent) => {
       .map((message) => message.tool!.name);
     const line = turnOutcomeLine({ ok: event.ok, reply: reply?.text, stopReason: event.stopReason, tools });
     if (!line) return;
+    // A room fewer people can see than this bot leaves no line in its log:
+    // session_search would hand it back in a chat anyone who sees the bot has.
+    const room = store.groupByThread(event.threadId);
+    if (room && !roomFeedsBot(room, bot)) return;
     appendMemoryLog(bot.id, line, {
       source: memorySourceLabel({
-        room: store.groupByThread(event.threadId),
+        room,
         task: store.taskByThread(bot.id, event.threadId),
         threadId: event.threadId,
       }),
@@ -10582,6 +10642,9 @@ function ensureCalendarCallRoom(call: CalendarCall): GroupRecord {
   let group = linked && sameCalendarRoster(linked, call.botIds) && !roomSetupPending(linked)
     ? linked
     : undefined;
+  // A call's room is a room like any other: one audience.
+  const conflict = group ? null : roomAudienceConflict(call.botIds);
+  if (conflict) throw Object.assign(new Error(conflict), { status: 400 });
   group ??= store.createGroup(call.name, call.botIds, false, undefined, {
     bulletin: "",
     defaultResponder: { kind: "everyone" },
@@ -10595,7 +10658,13 @@ function deliverCalendarCall(call: CalendarCall, scheduledFor: number): void {
   // A one-bot calendar entry remains a reminder that opens that bot's chat.
   // Multi-bot entries are rooms and begin with the shared event prompt.
   if (call.botIds.length < 2) return;
-  const group = ensureCalendarCallRoom(call);
+  let group: GroupRecord;
+  try {
+    group = ensureCalendarCallRoom(call);
+  } catch (error) {
+    console.warn(`calendar call "${call.name}" did not start: ${error instanceof Error ? error.message : String(error)}`);
+    return;
+  }
   const text = [
     `@everyone ${call.description.trim() || call.name}`,
     ...call.attachments.map((attachment) =>
@@ -12553,6 +12622,14 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
         const result = toolResults.read(internalCapability, id, offset);
         return result ? json(res, 200, result) : json(res, 404, { error: "Saved result unavailable in this bot's conversation, expired, or offset out of range. Do not repeat an action to retrieve its output." });
       }
+      // Notes written from a room fewer people can see than this bot would
+      // carry that room's words to everyone who can see the bot.
+      if ((path === "/api/internal/memory" || path === "/api/internal/memory/log") && method === "POST") {
+        const room = store.groupByThread(internalCapability.threadId);
+        if (room && !roomFeedsBot(room, internalSender)) {
+          return json(res, 403, { error: "This room is visible to fewer people than you are, so notes from it can't go into your memory. Keep them in the room." });
+        }
+      }
       if (method === "POST" && path === "/api/internal/memory") {
         const body = await readInternalBody();
         const result = updateMemory(internalSender.id, { action: body.action, text: body.text, oldText: body.oldText }, { source: memorySource() });
@@ -13910,6 +13987,8 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
             description: instructions,
             modelSelection: { ...chief.modelSelection },
             section: chief.section,
+            // exactly the Chief's audience: a restricted Chief never makes a bot everyone sees
+            ...(chief.visibility ? { visibility: chief.visibility } : {}),
           },
           { seedMessages: false },
         );
@@ -14311,7 +14390,10 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
     }
     if (path === "/api/calendar-calls" && method === "POST") {
       try {
-        return json(res, 201, { call: calendarCalls!.create(await readBody(req)) });
+        const body = await readBody(req);
+        const conflict = calendarAudienceConflict(body);
+        if (conflict) return json(res, 400, { error: conflict });
+        return json(res, 201, { call: calendarCalls!.create(body) });
       } catch (error) {
         throw Object.assign(error instanceof Error ? error : new Error(String(error)), { status: 400 });
       }
@@ -14330,7 +14412,10 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
     if (calendarCallMatch && method === "PATCH") {
       if (!calendarCalls!.get(calendarCallMatch[1])) return json(res, 404, { error: "no such scheduled call" });
       try {
-        return json(res, 200, { call: calendarCalls!.update(calendarCallMatch[1], await readBody(req)) });
+        const body = await readBody(req);
+        const conflict = calendarAudienceConflict(body);
+        if (conflict) return json(res, 400, { error: conflict });
+        return json(res, 200, { call: calendarCalls!.update(calendarCallMatch[1], body) });
       } catch (error) {
         throw Object.assign(error instanceof Error ? error : new Error(String(error)), { status: 400 });
       }
@@ -14554,7 +14639,10 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
         }, visible)),
         botQueuedMessages: visible.everything ? queued : Object.fromEntries(Object.entries(queued).filter(([threadId]) => visible.thread(threadId))),
         sections: visible.sections(store.sections),
-        groups: store.groups.filter((g) => visible.group(g.id)).map((g) => ({ ...publicGroupState(g), ...messagePage(g.threadId, limit) })),
+        groups: store.groups.filter((g) => visible.group(g.id)).map((g) => {
+          const room = { ...publicGroupState(g), ...messagePage(g.threadId, limit) };
+          return visible.everything ? room : memberGroup(room);
+        }),
         computerControl: Object.fromEntries(
           shownBots.map((bot) => {
             const snapshot = botComputerControlSnapshot(bot.id);
@@ -19620,6 +19708,9 @@ console.log(LOOPBACK.trust === "service"
   : `local requests: owner trust (${LOOPBACK.reason})`);
 if (LOOPBACK.warning) console.warn(`local requests: ${LOOPBACK.warning}`);
 // The decision log also prunes as it writes; this covers a quiet server.
+// Every room's floor, once, before any request: a room that was already
+// mixed when this server started keeps its narrowest audience from here on.
+for (const group of store.groups) settleRoomFloor(group);
 const pruneDecisionLog = () => {
   void pruneDecisions(DATA_DIR, decisionRetentionDays(cfg.decisions?.retentionDays));
   // The admin activity log keeps its months for the same window.

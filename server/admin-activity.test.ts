@@ -81,6 +81,20 @@ describe("what a row records", () => {
     } });
     const values = JSON.stringify(auditValues(rows[0]!.after!));
     for (const secret of ["acme_live_9f8e7d6c5b4a3f2e1d0c", "tok_live_123456", "abc123def456ghi", "xyz987"]) expect(values).not.toContain(secret);
+    const more = JSON.stringify(auditValues({
+      short: ["-k", "acme_live_9f8e7d6c5b4a3f2e1d0c", "-p", "8080"],
+      path: "https://mcp.zapier.com/api/mcp/s/acme_live_9f8e7d6c5b4a3f2e1d0c/sse",
+      remote: "https://acme_live_9f8e7d6c5b4a3f2e1d0c@mcp.example.com/sse",
+      slug: "https://example.com/docs/getting-started-guide-2024",
+      uuid: "https://api.example.com/items/4575b1f7-c16c-4afa-82ce-bcc2fdc70374",
+    }));
+    expect(more).not.toContain("acme_live");
+    expect(more).toContain('["-k","[hidden]","-p","8080"]');
+    expect(more).toContain("https://mcp.zapier.com/api/mcp/s/[hidden]/sse");
+    expect(more).toContain("https://[hidden]@mcp.example.com/sse");
+    // readable names and ids stay readable
+    expect(more).toContain("getting-started-guide-2024");
+    expect(more).toContain("4575b1f7-c16c-4afa-82ce-bcc2fdc70374");
     expect(values).toContain('"--api-key","[hidden]","--token=[hidden]","--verbose","--port","8080"');
     expect(values).toContain("?key=[hidden]&mode=fast&access_token=[hidden]");
   });

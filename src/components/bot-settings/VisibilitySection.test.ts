@@ -29,12 +29,15 @@ describe("bot visibility form", () => {
       { id: "b3", visibility: { people: ["ada@example.test"] } },
     ] as Array<Pick<Bot, "id" | "visibility">>;
     const groups = [
-      { name: "Pay questions", memberIds: ["b1", "b2"] },
-      { name: "HR desk", memberIds: ["b1", "b3"] },
-      { name: "b1 ⇄ b2", memberIds: ["b1", "b2"], dm: true },
+      { id: "g1", name: "Pay questions", memberIds: ["b1", "b2"] },
+      { id: "g2", name: "HR desk", memberIds: ["b1", "b3"] },
+      { id: "g3", name: "b1 ⇄ b2", memberIds: ["b1", "b2"], dm: true },
+      // once narrower, still narrower: its floor outlived the bot that set it
+      { id: "g4", name: "Old severance room", memberIds: ["b2"], audienceFloor: "admins" as const },
     ];
-    expect(mixedRooms(bots[0]!, groups, bots)).toEqual(["Pay questions"]);
+    expect(mixedRooms(bots[0]!, groups, bots)).toEqual([{ id: "g1", name: "Pay questions" }]);
     expect(mixedRooms(bots[2]!, groups, bots)).toEqual([]);
+    expect(mixedRooms(bots[1]!, groups, bots).map((room) => room.id)).toEqual(["g1", "g4"]);
   });
 
   it("renders the stored choice, with the list when it names people", () => {

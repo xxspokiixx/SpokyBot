@@ -255,17 +255,34 @@ posixOnly("admin activity log", () => {
     ].sort());
   });
 
-  it("stops recording once only one person uses the workspace", async () => {
+  it("records only while the workspace is shared, including the change that ends or starts sharing", async () => {
     // Ada leaves: the change that ends sharing is still recorded…
     expect((await api("PUT", "/api/config", { signIn: { admins: [BOSS], members: [] } }, BOSS)).status).toBe(200);
     expect((await activity("?what=people"))[0]).toMatchObject({ who: BOSS, changed: ["signIn.members"] });
+    // (an unused chat-only pairing code from earlier also counts as sharing)
+    for (const pairing of (await api("GET", "/api/auth/pairing", undefined, BOSS)).body.pairings ?? []) {
+      expect((await api("DELETE", `/api/auth/pairing/${pairing.id}`, undefined, BOSS)).status).toBe(200);
+    }
     // …and after it, a one-person server keeps no admin log.
     expect((await api("PUT", "/api/config", { profile: { name: "Solo desk" } }, BOSS)).status).toBe(200);
-    const bot = await api("POST", "/api/bots", { name: "Solo Wren" }, BOSS);
-    expect(bot.status).toBe(201);
-    const rows = await activity("?what=all");
+    expect((await api("POST", "/api/bots", { name: "Solo Wren" }, BOSS)).status).toBe(201);
+    let rows = await activity("?what=all");
     expect(JSON.stringify(rows)).not.toContain("Solo desk");
     expect(JSON.stringify(rows)).not.toContain("Solo Wren");
     expect((await api("GET", "/api/admin-activity", undefined, BOSS)).body.recording).toBe(false);
+
+    // A chat-only phone makes it shared again: its pairing code is recorded,
+    // and so is signing it out, though that leaves one person again.
+    const opened = await api("POST", "/api/auth/pairing", { label: "Front desk phone", scopes: ["client"] }, BOSS);
+    expect(opened.status).toBe(200);
+    const paired = await api("POST", "/api/auth/pair", { code: opened.body.code, label: "Front desk phone" });
+    expect(paired.status, JSON.stringify(paired.body)).toBe(200);
+    const phone = paired.body.session.id as string;
+    expect((await api("GET", "/api/admin-activity", undefined, BOSS)).body.recording).toBe(true);
+    expect((await api("DELETE", `/api/auth/sessions/${phone}`, undefined, BOSS)).status).toBe(200);
+    expect((await api("GET", "/api/admin-activity", undefined, BOSS)).body.recording).toBe(false);
+    rows = await activity("?what=session");
+    expect(rows.map((entry) => entry.action)).toEqual(expect.arrayContaining(["pairing.create", "session.revoke"]));
+    expect(rows.find((entry) => entry.action === "session.revoke")).toMatchObject({ who: BOSS, target: { id: phone, name: "Front desk phone" } });
   });
 });

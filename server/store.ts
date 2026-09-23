@@ -985,7 +985,7 @@ export class Store {
     );
   }
 
-  patchGroup(id: string, patch: Partial<Pick<GroupRecord, "name" | "memberIds" | "defaultResponder" | "bulletin" | "unread" | "busyBotId" | "cwd" | "pinnedMessageId" | "section" | "setupCompletedAt" | "setupSkippedAt">>): GroupRecord | null {
+  patchGroup(id: string, patch: Partial<Pick<GroupRecord, "name" | "memberIds" | "defaultResponder" | "bulletin" | "unread" | "busyBotId" | "cwd" | "pinnedMessageId" | "section" | "setupCompletedAt" | "setupSkippedAt" | "audienceFloor">>): GroupRecord | null {
     const group = this.group(id);
     if (!group) return null;
     if (Object.prototype.hasOwnProperty.call(patch, "section")) {
@@ -1568,6 +1568,9 @@ export class Store {
           title: "", description: "", soul: "", notifications: true, color: COLORS[nextBots.length % COLORS.length], unread: false,
           modelSelection: operation.fields.modelSelection, resumeCursors: {}, createdAt, ...operation.fields,
           approvalMode: "ask", autoApprove: false, composio: false, approvePeerComms: false,
+          // A Chief's new teammate is seen by exactly the Chief's audience:
+          // a restricted Chief never creates a bot everyone sees.
+          ...(chief.visibility && chief.visibility !== "everyone" ? { visibility: structuredClone(chief.visibility) } : {}),
           tasks: [{ threadId: operation.threadId, title: UNTITLED_THREAD, createdAt, updatedAt: createdAt, resumeCursors: {},
             modelSelection: structuredClone(operation.fields.modelSelection), approvalMode: "ask", autoApprove: false,
             unread: false, activity: "idle", busy: false }],

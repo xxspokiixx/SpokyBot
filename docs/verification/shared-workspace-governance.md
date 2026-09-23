@@ -168,3 +168,29 @@ saves credited to the latest request rather than their own; recording on a
 one-person server. The admin-only frame guard (item 8) waits for #1709's
 frames to exist and was not mutation-checked. Same fixtures and limits as
 above; not production qualification.
+
+## Second review round — 2026-09-23
+
+- **Daily memory log.** A room turn in a room fewer people can see than the
+  bot writes no line to its `memory/log`, and the bot cannot add notes from
+  such a room (`/api/internal/memory*` answers 403). The e2e recall test now
+  uses `session_search`'s default scope and counts the log's lines around a
+  post-restriction room turn.
+- **Chief-made bots.** `/api/internal/create-bot` and reviewed team setup
+  give the new bot the Chief's audience ("gives a bot a restricted Chief
+  creates the Chief's own audience").
+- **Room floors.** Each room keeps `audienceFloor`, the narrowest audience it
+  has had (settled at start, and on every bot or room change); a member
+  needs to pass it too, and it feeds the recall rule. Only
+  `PATCH /api/groups/:id {resetAudience: true}` (admin) widens it, recorded
+  as `room.audience-reset` ("never widens a room because a restricted bot
+  left it; only an admin's reset does").
+- **Calendar calls** refuse mixed audiences on create, update and when their
+  room opens.
+- **Recording** is decided on the state before or after the request
+  (revoking the last chat-only phone is kept); an open chat-only pairing
+  code counts as shared.
+- **Redaction** also covers `-k`, `https://TOKEN@host` and key-like path
+  segments, and leaves readable slugs and UUIDs alone.
+
+Same fixtures and limits as above; not production qualification.

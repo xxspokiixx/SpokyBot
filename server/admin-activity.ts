@@ -118,15 +118,31 @@ function isSecretName(name: string): boolean {
 /** A command-line flag or URL parameter that names a credential:
  * `--api-key`, `--token=…`, `?key=`, `&access_token=`, `?sig=`. */
 function isSecretParameter(name: string): boolean {
+  // `-k` is the usual short form of --key (curl-style CLIs and many MCP servers).
+  if (name === "-k" || name === "-K") return true;
   const bare = name.replace(/^-+/, "");
   return isSecretName(bare) || /^(?:auth|sig|signature|pass|pwd|code)$/i.test(bare);
 }
 
-/** Query values and a URL's password, when they name a credential. */
+/** A path segment that looks like a key rather than a name: it holds a run
+ * of 16 or more letters and digits, mixed (Zapier-style `/s/<key>/sse`, a
+ * Slack hook's last part) — a readable slug like `getting-started-2024` or a
+ * UUID does not. */
+function keyLikeSegment(segment: string): boolean {
+  return (segment.match(/[A-Za-z0-9]{16,}/g) ?? []).some((run) => /\d/.test(run) && /[A-Za-z]/.test(run));
+}
+
+/** In a URL: credentials before the host (`user:pass@`, or a bare token
+ * `TOKEN@`), key-like path segments, and query or fragment values whose
+ * names mark a credential. */
 function maskUrlSecrets(text: string): string {
-  return text
-    .replace(/(\b[a-z][\w+.-]*:\/\/[^\s/:@]+:)[^\s@/]+@/gi, `$1${HIDDEN}@`)
-    .replace(/([?&;])([^=&#\s]+)=([^&#\s]+)/g, (all, separator: string, name: string) => (isSecretParameter(name) ? `${separator}${name}=${HIDDEN}` : all));
+  return text.replace(/\b([a-z][\w+.-]*:\/\/)([^\s/?#]*)([^\s?#]*)([^\s]*)/gi, (_all, scheme: string, authority: string, path: string, rest: string) => {
+    const at = authority.lastIndexOf("@");
+    const host = at >= 0 ? `${HIDDEN}@${authority.slice(at + 1)}` : authority;
+    const maskedPath = path.split("/").map((segment) => (keyLikeSegment(segment) ? HIDDEN : segment)).join("/");
+    const maskedRest = rest.replace(/([?&;#])([^=&#\s]+)=([^&#\s]+)/g, (all, separator: string, name: string) => (isSecretParameter(name) ? `${separator}${name}=${HIDDEN}` : all));
+    return `${scheme}${host}${maskedPath}${maskedRest}`;
+  });
 }
 
 /** An argument list: the value after a credential flag, or after its `=`. */

@@ -14,7 +14,7 @@
 // This is access control, not an approval gate: no card, prompt or dialog
 // is involved anywhere.
 import { spawn, type ChildProcess } from "node:child_process";
-import { chmodSync, mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
+import { chmodSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -358,7 +358,9 @@ posixOnly("per-bot visibility on a shared workspace", () => {
       admin.close();
       bob = openStream(BOB, bob.state.cursor);
       expect((await bob.ready())?.resumed).toBe(false);
-      expect((await api("GET", "/api/bots?messages=5", undefined, BOB)).body.groups.map((g: any) => g.id)).toContain(ids.roomMixed);
+      // Payroll's room kept its floor (Ada only): widening a bot does not
+      // widen a room it was restricted in; only an admin's room reset does.
+      expect((await api("GET", "/api/bots?messages=5", undefined, BOB)).body.groups.map((g: any) => g.id)).not.toContain(ids.roomMixed);
 
       // Boss makes Payroll admins-only. A member who was away when it happened
       // resumes from an older cursor and still gets a fresh snapshot, not a
@@ -470,16 +472,53 @@ posixOnly("per-bot visibility on a shared workspace", () => {
       body: JSON.stringify({ botId: ids.pub, threadId: ids.pubThread }),
     });
     const { token } = await minted.json() as { token: string };
-    const search = await fetch(`${BASE}/api/internal/session-search?fromBotId=${ids.pub}&q=SECRET-ROOM-42&scope=conversations`, { headers: { authorization: `Bearer ${token}` } });
-    const found = await search.json() as { hits: Array<{ threadId: string }> };
+    const search = await fetch(`${BASE}/api/internal/session-search?fromBotId=${ids.pub}&q=SECRET-ROOM-42`, { headers: { authorization: `Bearer ${token}` } });
+    const found = await search.json() as { hits: Array<{ threadId: string }>; memoryHits: unknown[] };
     expect(search.status, JSON.stringify(found)).toBe(200);
     expect(found.hits.map((hit) => hit.threadId)).not.toContain(ids.roomMixedThread);
-    // Payroll itself, which fewer people see, still recalls its own room.
+
+    // A room turn after Payroll was restricted leaves no line in the
+    // helpdesk's daily log, where its default-scope search would find it…
+    const logLines = () => {
+      const dir = join(home, ".openmausbot", "workspaces", ids.pub, "memory", "log");
+      let text = "";
+      try {
+        for (const file of readdirSync(dir)) text += readFileSync(join(dir, file), "utf8");
+      } catch {
+        /* no log yet */
+      }
+      return text.split("\n").filter((line) => line.includes('from room "Pay questions"')).length;
+    };
+    const linesBefore = logLines();
+    expect((await api("POST", `/api/groups/${ids.roomMixed}/messages`, { text: "SECRET-AFTER-77 severance list" }, BOSS)).status).toBe(202);
+    expect(await waitFor(async () => {
+      const { body } = await api("GET", `/api/threads/${ids.roomMixedThread}/messages`, undefined, BOSS);
+      const messages = body.messages ?? [];
+      const asked = messages.findIndex((m: any) => m.text?.includes("SECRET-AFTER-77"));
+      return asked >= 0 && messages.slice(asked + 1).some((m: any) => m.role === "bot" && m.from?.botId === ids.pub && m.text);
+    })).toBe(true);
+    await new Promise((r) => setTimeout(r, 500));
+    expect(logLines()).toBe(linesBefore);
+    // …and the helpdesk cannot write notes from that room into its memory.
+    const roomToken = await fetch(`${BASE}/api/testing/internal-capability`, {
+      method: "POST", headers: { "content-type": "application/json", "x-openmausbot-test-capability": CAPABILITY_KEY },
+      body: JSON.stringify({ botId: ids.pub, threadId: ids.roomMixedThread }),
+    });
+    const note = await fetch(`${BASE}/api/internal/memory/log`, {
+      method: "POST", headers: { "content-type": "application/json", authorization: `Bearer ${(await roomToken.json() as { token: string }).token}` },
+      body: JSON.stringify({ text: "SECRET-AFTER-77 noted" }),
+    });
+    expect(note.status).toBe(403);
+    expect(((await note.json()) as { error: string }).error).toMatch(/visible to fewer people than you are/);
+    // Payroll itself, which fewer people see, still recalls its own room —
+    // once the room's floor is back to what its bots allow (it went down to
+    // admins only while Payroll was admins-only, and floors never widen alone).
+    expect((await api("PATCH", `/api/groups/${ids.roomMixed}`, { resetAudience: true }, BOSS)).status).toBe(200);
     const hrMinted = await fetch(`${BASE}/api/testing/internal-capability`, {
       method: "POST", headers: { "content-type": "application/json", "x-openmausbot-test-capability": CAPABILITY_KEY },
       body: JSON.stringify({ botId: ids.hr, threadId: ids.hrThread }),
     });
-    const hrSearch = await fetch(`${BASE}/api/internal/session-search?fromBotId=${ids.hr}&q=SECRET-ROOM-42&scope=conversations`, {
+    const hrSearch = await fetch(`${BASE}/api/internal/session-search?fromBotId=${ids.hr}&q=SECRET-ROOM-42`, {
       headers: { authorization: `Bearer ${(await hrMinted.json() as { token: string }).token}` },
     });
     expect(((await hrSearch.json()) as { hits: Array<{ threadId: string }> }).hits.map((hit) => hit.threadId)).toContain(ids.roomMixedThread);
@@ -491,7 +530,46 @@ posixOnly("per-bot visibility on a shared workspace", () => {
     const added = await api("PATCH", `/api/groups/${ids.roomPub}`, { memberIds: [ids.pub, ids.board] }, BOSS);
     expect(added.status).toBe(400);
     expect(added.body.error).toMatch(/Bots in one room must be visible to the same people/);
+    // So do the rooms scheduled calls open.
+    const later = Date.now() + 86_400_000;
+    const call = await api("POST", "/api/calendar-calls", { name: "Comp committee", botIds: [ids.pub, ids.hr], schedule: { type: "once", at: later }, durationMinutes: 10 }, BOSS);
+    expect(call.status).toBe(400);
+    expect(call.body.error).toMatch(/Bots in one room must be visible to the same people/);
+    const solo = await api("POST", "/api/calendar-calls", { name: "Helpdesk standup", botIds: [ids.pub], schedule: { type: "once", at: later }, durationMinutes: 10 }, BOSS);
+    expect(solo.status, JSON.stringify(solo.body)).toBe(201);
+    const moved = await api("PATCH", `/api/calendar-calls/${solo.body.call.id}`, { botIds: [ids.pub, ids.hr] }, BOSS);
+    expect(moved.status).toBe(400);
+    await api("DELETE", `/api/calendar-calls/${solo.body.call.id}`, undefined, BOSS);
   }, 90_000);
+
+  it("gives a bot a restricted Chief creates the Chief's own audience", async () => {
+    expect((await api("PATCH", `/api/bots/${ids.board}`, { chiefOfStaff: true }, BOSS)).status).toBe(200);
+    const bob = openStream(BOB);
+    try {
+      expect(await bob.ready()).toBeTruthy();
+      const minted = await fetch(`${BASE}/api/testing/internal-capability`, {
+        method: "POST", headers: { "content-type": "application/json", "x-openmausbot-test-capability": CAPABILITY_KEY },
+        body: JSON.stringify({ botId: ids.board, threadId: (await api("GET", "/api/bots?messages=0", undefined, BOSS)).body.bots.find((b: any) => b.id === ids.board).threadId }),
+      });
+      const { token } = await minted.json() as { token: string };
+      const created = await fetch(`${BASE}/api/internal/create-bot`, {
+        method: "POST", headers: { "content-type": "application/json", authorization: `Bearer ${token}` },
+        body: JSON.stringify({ name: "Layoff Modeler", role: "Models RIF scenarios", instructions: "SECRET-INSTR model the reduction" }),
+      });
+      const made = await created.json() as { id: string };
+      expect(created.status, JSON.stringify(made)).toBe(201);
+      const admin = (await api("GET", "/api/bots?messages=0", undefined, BOSS)).body.bots.find((b: any) => b.id === made.id);
+      expect(admin.visibility).toBe("admins");
+      await new Promise((r) => setTimeout(r, 500));
+      const list = (await api("GET", "/api/bots?messages=0", undefined, BOB)).body;
+      expect(list.bots.map((b: any) => b.id)).not.toContain(made.id);
+      for (const hidden of [made.id, "Layoff Modeler", "SECRET-INSTR"]) expect(JSON.stringify(bob.frames)).not.toContain(hidden);
+      await api("DELETE", `/api/bots/${made.id}`, undefined, BOSS);
+    } finally {
+      bob.close();
+      await api("PATCH", `/api/bots/${ids.board}`, { chiefOfStaff: false }, BOSS);
+    }
+  }, 60_000);
 
   it("keeps bots with different audiences from reaching each other", async () => {
     // Payroll (Ada), Benefits (Ada) and Board (admins) share a team. Only the
@@ -507,5 +585,32 @@ posixOnly("per-bot visibility on a shared workspace", () => {
     expect((await api("PATCH", `/api/bots/${ids.board}`, { visibility: "everyone" }, BOSS)).status).toBe(200);
     expect(await roster(ids.hr)).not.toContain("Board Heron");
     expect((await api("PATCH", `/api/bots/${ids.board}`, { visibility: "admins" }, BOSS)).status).toBe(200);
+  });
+
+  it("never widens a room because a restricted bot left it; only an admin's reset does", async () => {
+    // Payroll leaves the room it shared with the helpdesk (everyone sees the helpdesk).
+    expect((await api("PATCH", `/api/groups/${ids.roomMixed}`, { memberIds: [ids.pub] }, BOSS)).status).toBe(200);
+    expect(await status("GET", `/api/threads/${ids.roomMixedThread}/messages`, BOB)).toBe(404);
+    expect((await api("GET", "/api/bots?messages=0", undefined, BOB)).body.groups.map((g: any) => g.id)).not.toContain(ids.roomMixed);
+    const floor = (await api("GET", "/api/bots?messages=0", undefined, BOSS)).body.groups.find((g: any) => g.id === ids.roomMixed).audienceFloor;
+    expect(floor).toEqual({ people: [ADA] });
+    // Ada, inside the floor, still reads it; members never see the floor itself.
+    expect(await status("GET", `/api/threads/${ids.roomMixedThread}/messages`, ADA)).toBe(200);
+    expect(JSON.stringify((await api("GET", "/api/bots?messages=0", undefined, ADA)).body.groups)).not.toContain("audienceFloor");
+    // It stays out of the helpdesk's recall too.
+    const minted = await fetch(`${BASE}/api/testing/internal-capability`, {
+      method: "POST", headers: { "content-type": "application/json", "x-openmausbot-test-capability": CAPABILITY_KEY },
+      body: JSON.stringify({ botId: ids.pub, threadId: ids.pubThread }),
+    });
+    const search = await fetch(`${BASE}/api/internal/session-search?fromBotId=${ids.pub}&q=SECRET-ROOM-42`, {
+      headers: { authorization: `Bearer ${(await minted.json() as { token: string }).token}` },
+    });
+    expect(((await search.json()) as { hits: Array<{ threadId: string }> }).hits.map((hit) => hit.threadId)).not.toContain(ids.roomMixedThread);
+    // A member cannot widen it; an admin can, explicitly.
+    expect((await api("PATCH", `/api/groups/${ids.roomMixed}`, { resetAudience: true }, ADA)).status).toBe(403);
+    expect((await api("PATCH", `/api/groups/${ids.roomMixed}`, { resetAudience: true }, BOSS)).status).toBe(200);
+    expect(await status("GET", `/api/threads/${ids.roomMixedThread}/messages`, BOB)).toBe(200);
+    const reset = (await api("GET", "/api/admin-activity?what=visibility", undefined, BOSS)).body.entries.find((entry: any) => entry.action === "room.audience-reset");
+    expect(reset).toMatchObject({ who: BOSS, target: { id: ids.roomMixed }, before: { audienceFloor: { people: [ADA] } }, after: { audienceFloor: "everyone" } });
   });
 });

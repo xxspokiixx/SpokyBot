@@ -2,6 +2,8 @@ import { describe, expect, it } from "vitest";
 
 import {
   audienceWithin,
+  intersectAudience,
+  narrowestAudience,
   frameForMember,
   memberBody,
   memberBot,
@@ -83,6 +85,26 @@ describe("visibility values", () => {
     expect(roomFeeds([undefined, { people: ["ada@example.test"] }], undefined)).toBe(false);
     expect(roomFeeds([undefined, { people: ["ada@example.test"] }], { people: ["ada@example.test"] })).toBe(true);
     expect(roomFeeds([undefined, undefined], undefined)).toBe(true);
+  });
+
+  it("finds the people two audiences share", () => {
+    expect(intersectAudience(undefined, "admins")).toBe("admins");
+    expect(intersectAudience(undefined, undefined)).toBe("everyone");
+    expect(intersectAudience({ people: ["ada@example.test"] }, undefined)).toEqual({ people: ["ada@example.test"] });
+    expect(intersectAudience({ people: ["ada@example.test", "bob@example.test"] }, { people: ["bob@example.test", "cy@example.test"] })).toEqual({ people: ["bob@example.test"] });
+    expect(intersectAudience({ people: ["@example.test"] }, { people: ["ada@example.test", "eve@other.test"] })).toEqual({ people: ["ada@example.test"] });
+    expect(intersectAudience({ people: ["ada@example.test"] }, { people: ["bob@example.test"] })).toBe("admins");
+    expect(narrowestAudience([undefined, { people: ["ada@example.test", "bob@example.test"] }, { people: ["ada@example.test"] }])).toEqual({ people: ["ada@example.test"] });
+  });
+
+  it("keeps a room at its floor after the bot that set it is gone", () => {
+    const open = bots.map(({ visibility: _v, ...bot }) => bot);
+    const floored = [{ id: "room-old", threadId: "t-room-old", memberIds: ["pub"], audienceFloor: { people: ["ada@example.test"] } }];
+    const bob = new VisibleSet(open, floored, BOB);
+    expect(bob.everything).toBe(false);
+    expect([bob.group("room-old"), bob.thread("t-room-old"), bob.bot("pub")]).toEqual([false, false, true]);
+    expect(new VisibleSet(open, floored, ADA).group("room-old")).toBe(true);
+    expect(roomFeeds([undefined, floored[0]!.audienceFloor], undefined)).toBe(false);
   });
 
   it("compares audiences exactly", () => {
