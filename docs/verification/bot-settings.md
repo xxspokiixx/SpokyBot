@@ -133,6 +133,14 @@ Open **Identity → View full**. Three successive Escape presses must close only
 the instruction preview, then the defaults editor, then Settings. Tab navigation
 must remain inside the active editor.
 
+`scripts/testing/bot-tools-ui.e2e.test.ts` holds the creation request in the
+isolated renderer, verifies that choosing a role alone creates nothing, then
+closes and reopens the dialog while saving. Escape and Close remain usable;
+the shared pending state prevents a second creation. Completion must not close
+a newer dialog. A rejected profile save must roll back the partial bot, retain
+the draft, and permit one successful retry. The launcher uses a test-only IPC
+stop request so Windows executes the same orderly cleanup as other platforms.
+
 ## Earlier settings verification
 
 The isolated browser run on 2026-09-06 confirmed immediate Identity/Soul
