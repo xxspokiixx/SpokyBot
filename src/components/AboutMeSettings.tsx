@@ -25,7 +25,7 @@ export function AboutMeSettings() {
       while (dirty.current) {
         const sent = draft.current;
         const config = await api<ConfigStatus>("/api/config", {
-          method: "PUT", body: JSON.stringify({ profile: { aboutMe: sent } }),
+          method: "PUT", body: JSON.stringify({ profile: { aboutMe: sent } }), timeoutMs: 10_000,
         });
         dirty.current = draft.current !== sent;
         dispatch({ type: "configStatus", config });
