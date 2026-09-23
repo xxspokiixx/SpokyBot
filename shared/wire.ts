@@ -134,6 +134,11 @@ export interface WireTask {
   /** Epoch ms of the newest message, or createdAt when the thread has none.
    * Server-derived. Clients must not write it. */
   updatedAt?: number;
+  /** When the person snoozed this thread. 0 means "until new activity" and
+   * the store clears it the moment the thread wakes; a future epoch ms means
+   * "until then" and reads treat an expired value as absent, so no timer or
+   * migration is ever needed. Absent = not snoozed. */
+  snoozedUntil?: number;
   /** Defaults are copied when a task is created. */
   modelSelection?: ModelSelection;
   approvalMode?: ApprovalMode;
