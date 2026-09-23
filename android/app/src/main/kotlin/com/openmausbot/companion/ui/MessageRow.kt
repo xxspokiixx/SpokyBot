@@ -79,6 +79,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.openmausbot.companion.core.Chat
 import com.openmausbot.companion.core.AttachedMessageContent
+import com.openmausbot.companion.core.generatedImages
 import com.openmausbot.companion.core.DisplayedMessageAttachment
 import com.openmausbot.companion.core.DownloadedFile
 import com.openmausbot.companion.core.Message
@@ -407,6 +408,9 @@ private fun MessageContent(
         }
         Message.Kind.ACTIVITY -> ActivityChip(message.tool, message.threadRef, openThread)
         Message.Kind.SCREEN -> ScreenShot(chat.threadId, message)
+        // Turn-audit chip (tool list + reply preview). Desktop shows it only
+        // behind a "show tool calls" setting Android doesn't have; hide it.
+        Message.Kind.DIGEST -> {}
         // A message kind from a newer computer. Almost everything the harness
         // sends carries `text`, so showing it is usually the whole message and
         // always better than a gap in the transcript. When there is nothing to
@@ -479,6 +483,9 @@ private fun TextBubble(
                         color = Color(MausPalette.argb(it.color)),
                     )
                 }
+            }
+            message.generatedImages.forEach { attachment ->
+                SharedAttachmentView(threadId, message, attachment, openAttachment)
             }
             // Bots get markdown, you do not — the same split the desktop makes.
             // Markdown you did not intend is worse than markdown you did: a
@@ -575,6 +582,7 @@ private fun SharedImageAttachment(
     attachment: DisplayedMessageAttachment,
     onOpen: ((DisplayedMessageAttachment, Message, DownloadedFile?) -> Unit)?,
 ) {
+    val foreground = if (message.role == Message.Role.USER) BubbleColor.mineText else MaterialTheme.colorScheme.onSurface
     val session = LocalCompanion.current.session
     var attempt by remember(message.id, attachment.path) { mutableStateOf(0) }
     var state by remember(message.id, attachment.path) {
@@ -607,7 +615,7 @@ private fun SharedImageAttachment(
         modifier = Modifier
             .widthIn(max = 360.dp)
             .clip(RoundedCornerShape(16.dp))
-            .background(BubbleColor.mineText.copy(alpha = 0.10f))
+            .background(foreground.copy(alpha = 0.10f))
             .clickable(enabled = ready != null && onOpen != null, role = Role.Button) {
                 ready?.let { onOpen?.invoke(attachment, message, it.file) }
             }
@@ -624,6 +632,7 @@ private fun SharedImageAttachment(
                     CircularProgressIndicator(modifier = Modifier.size(20.dp), strokeWidth = 2.dp)
                 AttachmentThumbnailState.Failed -> AttachmentLoadFailure(
                     label = "Image unavailable",
+                    foreground = foreground,
                     onRetry = { attempt += 1 },
                 )
                 is AttachmentThumbnailState.Ready -> Image(
@@ -638,7 +647,7 @@ private fun SharedImageAttachment(
             attachment.name,
             fontSize = 13.sp,
             fontWeight = FontWeight.Medium,
-            color = BubbleColor.mineText,
+            color = foreground,
             maxLines = 1,
             overflow = TextOverflow.Ellipsis,
             modifier = Modifier.fillMaxWidth().padding(horizontal = 10.dp, vertical = 8.dp),
@@ -647,15 +656,15 @@ private fun SharedImageAttachment(
 }
 
 @Composable
-private fun AttachmentLoadFailure(label: String, onRetry: () -> Unit) {
+private fun AttachmentLoadFailure(label: String, foreground: Color = BubbleColor.mineText, onRetry: () -> Unit) {
     Column(horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(2.dp)) {
         Icon(
             imageVector = Icons.Filled.Warning,
             contentDescription = null,
-            tint = BubbleColor.mineText.copy(alpha = 0.70f),
+            tint = foreground.copy(alpha = 0.70f),
             modifier = Modifier.size(20.dp),
         )
-        Text(label, fontSize = 13.sp, color = BubbleColor.mineText.copy(alpha = 0.80f))
+        Text(label, fontSize = 13.sp, color = foreground.copy(alpha = 0.80f))
         TextButton(onClick = onRetry) { Text("Retry") }
     }
 }

@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { BrowserRuntime, browserRuntimeEnv, type BrowserSpawnSpec } from "./browser-runtime.ts";
+import { BrowserRuntime, TransportError, browserRuntimeEnv, type BrowserSpawnSpec } from "./browser-runtime.ts";
 
 const runtimes: BrowserRuntime[] = [];
 function runtime(options: ConstructorParameters<typeof BrowserRuntime>[0] = {}) {
@@ -149,6 +149,7 @@ describe("browser takeover gate", () => {
 const FAKE_MCP = `
 const lines = require('node:readline').createInterface({input:process.stdin});
 let initialized = false;
+let rpcTimeoutCalls = 0;
 lines.on('line', line => {
   const m = JSON.parse(line);
   if (m.method === 'notifications/initialized') { initialized = true; return; }
@@ -160,6 +161,7 @@ lines.on('line', line => {
   else if (m.params.name === 'oversized') { process.stdout.write('x'.repeat(16777217)); return; }
   else if (m.params.name === 'bulky') result = { content:[{type:'text',text:'x'.repeat(50000)},{type:'image',data:'AAAA',mimeType:'image/png'}], structuredContent:{ huge: 'y'.repeat(200000) } };
   else if (m.params.name === 'rpc-error') { process.stdout.write(JSON.stringify({jsonrpc:'2.0',id:m.id,error:{code:-1,message:'Expected refusal'}})+'\\n'); return; }
+  else if (m.params.name === 'rpc-timeout') { rpcTimeoutCalls += 1; if (rpcTimeoutCalls === 1) { process.stdout.write(JSON.stringify({jsonrpc:'2.0',id:m.id,error:{code:-1,message:'request timed out'}})+'\\n'); return; } result = { content:[{type:'text',text:'engine answered a repeat rpc-timeout call'}] }; }
   else result = { content:[{type:'text',text:JSON.stringify(m.params)}],pid:process.pid };
   process.stdout.write(JSON.stringify({jsonrpc:'2.0',id:m.id,result})+'\\n');
 });
@@ -189,21 +191,47 @@ describe("server-owned browser MCP runtime", () => {
     await value.take("s", "owner");
     expect(value.canControl("s", "owner")).toBe(true);
   });
-  it("recovers by itself after a request timeout kills the browser, without a human takeover", async () => {
-    // Reported from the field: a fill mid-MFA timed out, and from then on every
-    // call on that session answered "A browser action was interrupted", through
-    // reconnects, deleting and recreating the browser in Settings, remounting
-    // the conversation's tools, and restarting the app. Nothing an agent can
-    // call clears it, because every tool call passes the same gate.
+  it("does not assume an MCP timeout stopped an accepted daemon action", async () => {
     const value = runtime({ requestTimeoutMs: 60 });
-    await expect(value.agentRpc("s", spec(), "tools/call", { name: "hang" })).rejects.toThrow(/timed out/);
-    // The timeout stopped the transport, which SIGKILLs the child, so nothing
-    // is left running and the next call must be allowed to start a browser.
-    await expect(value.agentRpc("s", spec(), "tools/call", { name: "echo", arguments: { text: "back" } }))
-      .resolves.toMatchObject({ content: [{ text: expect.stringContaining("back") }] });
-    // and a person can still take control afterwards
-    await value.take("s", "owner");
-    expect(value.canControl("s", "owner")).toBe(true);
+    // Advance only the deliberately hung request's deadline. Real subprocess
+    // startup/stdio remain live, so a loaded runner cannot time out a healthy
+    // recovery echo merely because its 60 ms scheduling window elapsed.
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+    try {
+      await expect(value.agentRpc("s", spec(), "tools/list", {})).resolves.toMatchObject({ initialized: true });
+      const pending = value.agentRpc("s", spec(), "tools/call", { name: "hang" });
+      const observed = expect(pending).rejects.toThrow(/timed out/);
+      await vi.advanceTimersByTimeAsync(60);
+      await observed;
+      // The real daemon detaches from its MCP parent. Transport exit is not
+      // proof that a navigation or submission stopped; do not replay it.
+      await expect(value.agentRpc("s", spec(), "tools/call", { name: "echo" })).rejects.toThrow(/Restart/);
+      await expect(value.take("s", "owner")).rejects.toThrow(/Restart/);
+      await value.restart("s", "owner", async () => {});
+      await expect(value.agentRpc("s", spec(), "tools/call", { name: "echo", arguments: { text: "back" } }))
+        .resolves.toMatchObject({ content: [{ text: expect.stringContaining("back") }] });
+      await value.take("s", "owner");
+      expect(value.canControl("s", "owner")).toBe(true);
+    } finally {
+      // Process-tree cleanup polls real child exits with timers of its own.
+      vi.useRealTimers();
+      await value.closeAll();
+    }
+  });
+
+  it("surfaces an engine-reported JSON-RPC timeout instead of retrying it", async () => {
+    // Only a TransportError timeout may be retried: its timer already killed
+    // that child, so the next attempt starts a fresh transport. This engine
+    // answers "request timed out" over a live transport, which is the engine
+    // refusing rather than the plumbing failing; retrying would re-ask the
+    // same wedged engine for the whole window.
+    const value = runtime();
+    // The fixture times out only the first rpc-timeout call and answers any
+    // repeat distinctly, so a retry would resolve instead of reject: the
+    // rejection below is proof the first timeout stayed the final outcome.
+    const failure = value.agentRpc("s", spec(), "tools/call", { name: "rpc-timeout" });
+    await expect(failure).rejects.toThrow(/request timed out/);
+    await expect(failure).rejects.not.toBeInstanceOf(TransportError);
   });
 
   it("still refuses an agent after a human's own interrupted command, browser alive", async () => {
@@ -274,6 +302,47 @@ describe("server-owned browser MCP runtime", () => {
     expect(value.heldBy("s")).toBe("owner");
     const after = await value.agentRpc("s", spec(), "tools/list", {}) as { pid: number };
     expect(after.pid).not.toBe(before.pid);
+  });
+
+  it.each([false, true])("retires an idle MCP client without killing its browser descendant (ignores EOF: %s)", async (ignoresEof) => {
+    // Windows taskkill /T includes even a daemon with its own process group.
+    // This inert descendant models that ownership boundary on every platform.
+    // unref alone does not detach a Windows child from its parent's console.
+    // Keep the POSIX group shared so an accidental group kill still fails here.
+    const fake = `
+      const browser = require('node:child_process').spawn(process.execPath,
+        ['-e', 'process.stdout.write("ready"); setInterval(() => {}, 1000)'],
+        { stdio: ['ignore', 'pipe', 'ignore'], detached: process.platform === 'win32', windowsHide: true });
+      browser.unref();
+      let ready = false;
+      let pending = null;
+      const flush = () => {
+        if (!ready || !pending) return;
+        const m = pending; pending = null;
+        const result = m.method === 'initialize' ? { protocolVersion: '2024-11-05' }
+          : { tools: [], browserPid: browser.pid, transportPid: process.pid };
+        process.stdout.write(JSON.stringify({ jsonrpc: '2.0', id: m.id, result }) + '\\n');
+      };
+      browser.stdout.once('data', () => { ready = true; browser.stdout.destroy(); flush(); });
+      browser.stdout.on('error', () => {});
+      ${ignoresEof ? "setInterval(() => {}, 1000);" : ""}
+      require('node:readline').createInterface({ input: process.stdin }).on('line', line => {
+        const m = JSON.parse(line);
+        if (!m.id) return;
+        pending = m; flush();
+      });
+
+    `;
+    const value = runtime({ idleMs: 40 });
+    const launch = { command: process.execPath, args: ["-e", fake], env: {} };
+    const first = await value.agentRpc("idle", launch, "tools/list", {}) as { browserPid: number; transportPid: number };
+    try {
+      expect(() => process.kill(first.browserPid, 0)).not.toThrow();
+      await vi.waitFor(() => expect(() => process.kill(first.transportPid, 0)).toThrow(), { timeout: 2_000, interval: 30 });
+      expect(() => process.kill(first.browserPid, 0)).not.toThrow();
+    } finally {
+      try { process.kill(first.browserPid, "SIGKILL"); } catch { /* fixture exited */ }
+    }
   });
 });
 
