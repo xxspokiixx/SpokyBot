@@ -8,6 +8,7 @@ import type { SendTurnInput } from "../contracts.ts";
 import { augmentedPath } from "../env-path.ts";
 import { killCliTree, spawnCli } from "../procs.ts";
 import { chatImage, type ChatImagePart } from "./chat-images.ts";
+import { ChatBoxClient } from "./chat-box-tools.ts";
 
 export interface ChatToolDefinition {
   type: "function";
@@ -25,6 +26,7 @@ export interface ChatToolSession {
 }
 
 type Server = { command: string; args: string[]; env: Record<string, string> };
+type BoxDescriptor = NonNullable<NonNullable<SendTurnInput["integrations"]>["computer"]>;
 const STARTUP_MS = 8_000;
 const CALL_MS = 10 * 60_000;
 const FRAME_BYTES = 2 * 1024 * 1024;
@@ -237,7 +239,8 @@ function boundedText(value: string): string {
 }
 
 export async function mountChatTools(integrations: SendTurnInput["integrations"], signal: AbortSignal, computerUse = false): Promise<ChatToolSession> {
-  const servers: Array<[string, Server]> = [];
+  const servers: Array<[string, Server | BoxDescriptor]> = [];
+  if (computerUse && integrations?.computer) servers.push(["computer", integrations.computer]);
   if (computerUse && integrations?.localComputer) servers.push(["computer", integrations.localComputer]);
   if (computerUse && integrations?.browser) servers.push(["browser", integrations.browser]);
   if (integrations?.agents) servers.push(["agents", integrations.agents]);
@@ -248,7 +251,7 @@ export async function mountChatTools(integrations: SendTurnInput["integrations"]
     if ("command" in server) servers.push([name, server]);
   }
   if (servers.length > 32) throw new Error("MCP server count exceeds the 32-server limit");
-  const clients: ChatMcpClient[] = [];
+  const clients: Array<ChatMcpClient | ChatBoxClient> = [];
   let closed = false;
   let closing: Promise<void> | undefined;
   const close = (): Promise<void> => {
@@ -263,14 +266,14 @@ export async function mountChatTools(integrations: SendTurnInput["integrations"]
   const cancel = () => { void close().catch(() => {}); };
   signal.addEventListener("abort", cancel, { once: true });
   const definitions: ChatToolDefinition[] = [];
-  const registered = new Map<string, { client: ChatMcpClient; name: string; schema: ValidateFunction }>();
+  const registered = new Map<string, { client: ChatMcpClient | ChatBoxClient; name: string; schema: ValidateFunction }>();
   try {
     if (signal.aborted) throw aborted();
     // Start independent servers concurrently; consume results in config order
     // so names and collision suffixes remain stable across startup timings.
     const mounts = await Promise.allSettled(servers.map(async ([name, descriptor]) => {
       if (signal.aborted || closed) throw aborted();
-      const client = new ChatMcpClient(descriptor, computerUse);
+      const client = "boxId" in descriptor ? new ChatBoxClient(descriptor) : new ChatMcpClient(descriptor, computerUse);
       clients.push(client);
       return { name, client, tools: await client.tools(signal) };
     }));
