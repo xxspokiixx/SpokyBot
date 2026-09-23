@@ -1,7 +1,7 @@
 import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { formatUpdatedAt, orderedSidebarThreads, orderedThreadList, SidebarThreadRow, threadByline, threadOpenerLabel, visibleSidebarThreads } from "./SidebarThreadRow";
+import { formatUpdatedAt, nextSnoozeExpiry, orderedSidebarThreads, orderedThreadList, SidebarThreadRow, threadByline, threadOpenerLabel, visibleSidebarThreads } from "./SidebarThreadRow";
 
 // The More menu lives behind component state and a portal, which a static
 // render never reaches. SidebarThreadRow uses exactly useState, useRef and
@@ -94,6 +94,69 @@ describe("threads waiting on a teammate", () => {
     const markup = render({ threadId: "live", title: "Live work", busy: true, activity: "working" }, { activityLabel: "Reading a file" });
     expect(markup).toContain('title="Live work · Reading a file"');
     expect(markup).toContain('aria-label="Reading a file"');
+  });
+});
+
+describe("threads a bot opened", () => {
+  const openedBy = { botId: "scout", name: "Scout", at: 5 };
+  const render = (task: Parameters<typeof SidebarThreadRow>[0]["task"]) => renderToStaticMarkup(createElement(SidebarThreadRow, {
+    task, ownerId: "scout", current: false, onSelect: vi.fn(), onRename: vi.fn(), onDelete: vi.fn(),
+  }));
+  it("says who opened the thread in plain words, and nothing for the person's own", () => {
+    expect(threadOpenerLabel({ openedBy })).toBe("opened by Scout");
+    expect(threadOpenerLabel({})).toBeNull();
+    expect(threadOpenerLabel({ openedBy: { ...openedBy, name: "  " } })).toBeNull();
+  });
+  it("shows the opener quietly under the title without changing the row's name or status", () => {
+    const markup = render({ threadId: "qa", title: "QA PR 245", openedBy, activity: "waiting-on-you" });
+    expect(markup).toContain("opened by Scout");
+    expect(markup).toContain('title="QA PR 245 · Waiting"');
+    expect(markup.indexOf("QA PR 245")).toBeLessThan(markup.indexOf("opened by Scout"));
+    expect(render({ threadId: "own", title: "Quick question" })).not.toContain("opened by");
+  });
+  it("gives a bot-opened thread the same waiting and unread signals as any other", () => {
+    const waiting = render({ threadId: "qa", title: "QA PR 245", openedBy, activity: "waiting-on-you", unread: true });
+    expect(waiting).toContain('title="QA PR 245 · Waiting · Unread"');
+    expect(waiting).toContain(">Waiting</span>");
+    expect(waiting).toContain('aria-label="Unread"');
+    expect(waiting).toContain("opened by Scout");
+    // and it stays on screen past the six recent rows, exactly like a thread the person opened
+    const rows = Array.from({ length: 9 }, (_, index) => ({ threadId: String(index), title: `Thread ${index}` }));
+    const opened = [...rows, { threadId: "qa", title: "QA PR 245", openedBy, activity: "waiting-on-you" as const, busy: false }];
+    expect(visibleSidebarThreads(opened, "0").map((task) => task.threadId)).toEqual(["0", "1", "2", "3", "4", "5", "qa"]);
+  });
+});
+
+describe("snoozed threads", () => {
+  const rows = Array.from({ length: 9 }, (_, index) => ({ threadId: String(index), title: `Thread ${index}` }));
+  it("never strands an approval: a snoozed thread that is waiting on the person stays visible", () => {
+    const snoozed = [...rows, { threadId: "approval", title: "Approve deploy", snoozedUntil: 0, activity: "waiting-on-you" as const, busy: false }];
+    expect(visibleSidebarThreads(snoozed, "0").map((task) => task.threadId)).toEqual(["0", "1", "2", "3", "4", "5", "approval"]);
+  });
+  it("folds an idle snoozed thread out of the default list while show-all and search still list it", () => {
+    const withSnoozed = [{ ...rows[0], snoozedUntil: Date.now() + 3_600_000 }, ...rows.slice(1)];
+    expect(visibleSidebarThreads(withSnoozed, "8").map((task) => task.threadId)).toEqual(["1", "2", "3", "4", "5", "6", "8"]);
+    expect(visibleSidebarThreads(withSnoozed, "8", "", [], true)).toEqual(withSnoozed);
+    expect(visibleSidebarThreads(withSnoozed, "8", "thread 0").map((task) => task.threadId)).toEqual(["0"]);
+  });
+  it("treats snoozedUntil: 0 as snoozed — presence, not truthiness — and says so in the byline", () => {
+    const sentinel = [{ ...rows[0], snoozedUntil: 0 }, ...rows.slice(1)];
+    expect(visibleSidebarThreads(sentinel, "8").map((task) => task.threadId)).toEqual(["1", "2", "3", "4", "5", "6", "8"]);
+    expect(threadByline({ snoozedUntil: 0 })).toBe("Snoozed");
+    expect(threadByline({ archivedAt: 5, snoozedUntil: 0 })).toBe("Archived");
+    expect(threadByline({})).toBeNull();
+  });
+  it("wakes a timed snooze once its moment passes, without waiting for a fresh snapshot", () => {
+    const now = Date.now();
+    const expired = [{ ...rows[0], snoozedUntil: now - 1 }, ...rows.slice(1)];
+    expect(visibleSidebarThreads(expired, "8").map((task) => task.threadId)).toEqual(["0", "1", "2", "3", "4", "5", "8"]);
+    expect(threadByline({ snoozedUntil: now - 1 })).toBeNull();
+    expect(visibleSidebarThreads([{ ...rows[0], snoozedUntil: now + 3_600_000 }, ...rows.slice(1)], "8").map((task) => task.threadId)).toEqual(["1", "2", "3", "4", "5", "6", "8"]);
+  });
+  it("schedules the next wake at the soonest future timed snooze, skipping the sentinel and the past", () => {
+    const now = Date.now();
+    expect(nextSnoozeExpiry([{ snoozedUntil: 0 }, { snoozedUntil: now - 1 }, { snoozedUntil: now + 3_600_000 }, { snoozedUntil: now + 60_000 }, {}], now)).toBe(now + 60_000);
+    expect(nextSnoozeExpiry([{ snoozedUntil: 0 }, { snoozedUntil: now - 1 }], now)).toBeUndefined();
   });
 });
 

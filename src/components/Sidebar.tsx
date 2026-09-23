@@ -54,7 +54,7 @@ import { BotPickerList } from "./BotPickerList";
 import { BotProjectDialog, FolderActions, FolderIcon, navigateThreadMenu, NewThreadButton } from "./BotProjects";
 import { draggedFolder, FOLDER_DRAG_TYPE, moveFolder, placeFolder } from "@/lib/folder-order";
 import { folderUnreadThreadIds, markFolderRead } from "@/lib/folder-read";
-import { isArchived, orderedThreadList, SidebarThreadRow, visibleSidebarThreads } from "./SidebarThreadRow";
+import { isArchived, orderedThreadList, SidebarThreadRow, useSnoozeExpiry, visibleSidebarThreads } from "./SidebarThreadRow";
 import {
   loadCollapsedSections,
   loadSectionOrder,
@@ -897,6 +897,7 @@ export function BotThreadList({ bot, selected, density = "comfortable", query = 
       return next;
     });
   }, [selected, currentProjectId]);
+  useSnoozeExpiry(tasks);
   // Pin, then newest update. Search keeps the same order among matches.
   const visibleTasks = orderedThreadList(visibleSidebarThreads(tasks, bot.threadId, query, projects, showAll));
   // A folder rises with the thread of its that sits highest in that order.
@@ -920,7 +921,8 @@ export function BotThreadList({ bot, selected, density = "comfortable", query = 
       onDelete={() => dispatch({ type: "deleteTask", botId: bot.id, threadId: task.threadId })}
       onMove={(projectId) => dispatch({ type: "updateTask", botId: bot.id, threadId: task.threadId, patch: { projectId } })}
       onArchive={(archivedAt) => dispatch({ type: "updateTask", botId: bot.id, threadId: task.threadId, patch: { archivedAt } })}
-      onPin={(pinned) => dispatch({ type: "updateTask", botId: bot.id, threadId: task.threadId, patch: { pinned } })} />;
+      onPin={(pinned) => dispatch({ type: "updateTask", botId: bot.id, threadId: task.threadId, patch: { pinned } })}
+      onSnooze={(snoozedUntil) => dispatch({ type: "updateTask", botId: bot.id, threadId: task.threadId, patch: { snoozedUntil } })} />;
   };
   const ungrouped = visibleTasks.filter((task) => !projects.some((project) => project.id === task.projectId));
   // The archived disclosure holds only what the default list folds away; an
