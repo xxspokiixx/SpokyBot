@@ -777,6 +777,10 @@ async function startManagedCompanionConnection({ waitForVerification = true } = 
 }
 
 async function startDesktopCompanion({ waitForHosted = true, remember = true } = {}) {
+  // Every way of turning the companion on (the switch, Tailscale's "Turn on
+  // and check", launch auto-start) passes here.
+  const refusal = managedRemoteAccessRefusal();
+  if (refusal) throw new Error(refusal);
   companionDesiredThisLaunch = true;
   companionLaunchGeneration += 1;
   // Direct LAN comes up first. The hosted endpoint is added in place only
@@ -975,13 +979,23 @@ function ensureManagedDesktop() {
   managedDesktop = createManagedDesktopClient({
     store, platform: process.platform, deviceName: os.hostname().slice(0, 100) || "My computer",
     applyConnection: connection => managedDesktopRelay.send(serverProc, connection),
+    // The organisation's read-only policy overlay; the runtime keeps it in memory.
+    applyPolicy: policy => managedDesktopRelay.sendPolicy(serverProc, policy),
+    migrateIdentity: identity => managedDesktopRelay.sendIdentity(serverProc, identity),
+    appVersion: app.getVersion(),
     openBrowser: url => shell.openExternal(url),
     onState: state => {
-      if (["signed-out", "reauth-required"].includes(state.status) || (state.status === "connected" && !state.cloudBackups)) {
+      // Losing company access (sign-out, expiry, revocation, a lapsed licence)
+      // pauses daily backups; the schedule clears itself only when a different
+      // organisation or account connects. An Admin without backup storage ends it.
+      // license-expired repeats every heartbeat; an upload in flight stops, nothing else changes.
+      if (state.status === "license-expired") companyBackupController?.abort();
+      const lost = ["signed-out", "reauth-required"].includes(state.status), withoutStorage = state.status === "connected" && !state.cloudBackups;
+      if (lost || withoutStorage) {
         companyBackupConfigurationRevision++;
         companyBackupController?.abort();
         preparedCompanyRestore = null;
-        void companyBackupSchedule?.forget().catch(() => {});
+        if (withoutStorage) void companyBackupSchedule?.forget().catch(() => {});
         publishCompanyBackupState({ busy: Boolean(companyBackupController) });
       }
       companyBackupSchedule?.reconcile();
@@ -1024,7 +1038,20 @@ function companyBackupScope() {
   if (desktopShutdownStarted || desktopRemoteAccess || !serverReady || !serverProc || activeEnvironment(environmentsState)) return null;
   const client = managedDesktop, connection = client?.connection(), state = client?.state();
   if (!connection || state?.status !== "connected" || !state.cloudBackups || connection.expiresAt <= Date.now()) return null;
-  return { key: JSON.stringify([connection.portalOrigin, connection.organizationId, connection.email, connection.deviceId, path.resolve(desktopDataDir())]),
+  // One person, one organisation, one data folder: re-enrolling this computer
+  // (a new deviceId) keeps the same daily schedule, and a schedule saved by an
+  // earlier version (whose key included a deviceId) is adopted, not forgotten.
+  const dataDir = path.resolve(desktopDataDir());
+  return { key: JSON.stringify([connection.portalOrigin, connection.organizationId, connection.email, dataDir]),
+    // Any enrollment of this same person, organisation and folder, whatever its
+    // deviceId: a credential that expired before the upgrade still carries over.
+    adopts: saved => {
+      try {
+        const value = JSON.parse(saved);
+        return Array.isArray(value) && value.length === 5 && typeof value[3] === "string" && value[0] === connection.portalOrigin &&
+          value[1] === connection.organizationId && value[2] === connection.email && value[4] === dataDir;
+      } catch { return false; }
+    },
     generation: client.backupGeneration() };
 }
 
@@ -2421,6 +2448,13 @@ ipcMain.handle("speech:finish", localOnly("speech:finish", () => {
 // on and off, look at it, open or cancel a pairing window, and remove a
 // device. It cannot reach the sidecar's control port itself.
 ipcMain.handle("companion:state", localOnly("companion:state", () => desktopCompanionState()));
+/** An enrolled organisation can turn remote access off. That refuses turning
+ * the companion on and opening new pairings; it adds no prompt, and phones
+ * that are already paired keep working until someone revokes them. */
+function managedRemoteAccessRefusal() {
+  const policy = managedDesktop?.policy?.();
+  return policy?.remoteAccess === false ? `${policy.organizationName} does not allow remote access to this computer.` : null;
+}
 ipcMain.handle("companion:start", localOnly("companion:start", () => startDesktopCompanion()));
 ipcMain.handle("companion:stop", localOnly("companion:stop", () => stopDesktopCompanion()));
 ipcMain.handle("companion:keep-awake", localOnly("companion:keep-awake", async (_event, enabled) => {
@@ -2436,9 +2470,11 @@ ipcMain.handle("routines:keep-awake", localOnly("routines:keep-awake", async (_e
   return routineWake.poll();
 }));
 ipcMain.handle("companion:refresh-tailscale", localOnly("companion:refresh-tailscale", () => refreshDesktopCompanionTailscale()));
-ipcMain.handle("companion:pairing", localOnly("companion:pairing", (_event, open, expectedToken) =>
-  companionPairing(Boolean(open), expectedToken).then(decorateDesktopCompanionState),
-));
+ipcMain.handle("companion:pairing", localOnly("companion:pairing", (_event, open, expectedToken) => {
+  const refusal = open ? managedRemoteAccessRefusal() : null;
+  if (refusal) throw new Error(refusal);
+  return companionPairing(Boolean(open), expectedToken).then(decorateDesktopCompanionState);
+}));
 ipcMain.handle("companion:cloud-desktop", localOnly("companion:cloud-desktop", (_event, deviceId, allowed) =>
   companionCloudDesktopAccess(deviceId, Boolean(allowed)).then(() => desktopCompanionState()),
 ));
@@ -2515,18 +2551,18 @@ const localWorkspaceOnly = (channel, handler) => localOnly(channel, workspaceOnl
 ipcMain.handle("organization:settings-opened", localWorkspaceOnly("organization:settings-opened", () => organizationEntry.settingsOpened()));
 ipcMain.handle("organization:state", localWorkspaceOnly("organization:state", () => ensureManagedDesktop().state()));
 ipcMain.handle("organization:begin", localWorkspaceOnly("organization:begin", (_event, input) => ensureManagedDesktop().begin(input)));
+// Reopens only the pending attempt's own sign-in page: no renderer input.
+ipcMain.handle("organization:reopen", localWorkspaceOnly("organization:reopen", () => ensureManagedDesktop().reopen()));
 ipcMain.handle("organization:cancel", localWorkspaceOnly("organization:cancel", () => ensureManagedDesktop().cancelEnrollment()));
 ipcMain.handle("organization:refresh", localWorkspaceOnly("organization:refresh", () => ensureManagedDesktop().refresh()));
 ipcMain.handle("organization:disconnect", localWorkspaceOnly("organization:disconnect", () => {
   companyBackupConfigurationRevision++;
   companyBackupController?.abort(); preparedCompanyRestore = null;
   const client = ensureManagedDesktop();
-  // The schedule reports its own failure to forget the stored secret; a file
-  // error there must not present a completed disconnect as failed.
-  return Promise.allSettled([companyBackupSchedule.forget(), client.disconnect()]).then(([, disconnect]) => {
-    if (disconnect.status === "rejected") throw disconnect.reason;
-    return disconnect.value;
-  });
+  // Disconnecting pauses the daily schedule instead of deleting it, so
+  // reconnecting the same organisation as the same person resumes it. Turning
+  // daily backups off in Settings → Backups is what ends it.
+  return client.disconnect();
 }));
 ipcMain.on("company-backups:client-state", receiveCompanyBackupClientState);
 ipcMain.handle("company-backups:configure-schedule", localWorkspaceOnly("company-backups:configure-schedule", async (_event, input) => {
@@ -2884,7 +2920,10 @@ app.whenReady().then(async () => {
   // (the panel shows the error) rather than retrying; and it never delays
   // the window.
   if (!desktopRemoteAccess && serverReady && companionEnabledAtRest()) {
-    void startDesktopCompanion({ waitForHosted: false, remember: false });
+    // Wait until a saved organisation policy is known: it may turn remote access off.
+    void (managedDesktop?.whenRestored() ?? Promise.resolve())
+      .then(() => startDesktopCompanion({ waitForHosted: false, remember: false }))
+      .catch(error => slog(`companion auto-start skipped: ${error?.message ?? error}`));
   }
   setLocalOrigin(rendererOrigin());
   // Device permissions (microphone, notifications, clipboard) are for the
