@@ -14,19 +14,23 @@ import { BotProfileAvatarCard } from "../BotProfileAvatarCard";
 import { BotInstructionsDialog } from "../BotInstructionsDialog";
 import { Field, inputCls } from "./field";
 import type { BotPatch } from "./useBotSettingsDerived";
+import { useBotEditor } from "./BotEditorContext";
 
 export function IdentitySection({
   bot,
   patch,
   activeState,
   mascotMotion,
+  namePlaceholder,
 }: {
   bot: Bot;
   patch: (patch: BotPatch) => void;
   activeState: MausState;
   mascotMotion: { kind: Exclude<MausMotion, "none">; nonce: number } | null;
+  namePlaceholder?: string;
 }) {
   const [instructionsOpen, setInstructionsOpen] = useState(false);
+  const { draft } = useBotEditor();
 
   return (
     <div className="flex flex-col gap-4">
@@ -37,6 +41,7 @@ export function IdentitySection({
           className={inputCls}
           maxLength={BOT_PROFILE_LIMITS.name}
           value={bot.name}
+          placeholder={namePlaceholder}
           onChange={(e) => patch({ name: e.target.value })}
         />
       </Field>
@@ -83,7 +88,7 @@ export function IdentitySection({
         </div>
       </div>
 
-      {instructionsOpen && <BotInstructionsDialog bot={bot} onClose={() => setInstructionsOpen(false)} />}
+      {instructionsOpen && <BotInstructionsDialog bot={bot} inline={draft} onClose={() => setInstructionsOpen(false)} />}
     </div>
   );
 }
