@@ -146,6 +146,7 @@ if (!enabled) console.log("skipping team lifecycle UI e2e: set OMB_UI_E2E=1 to i
       window.fetch = async (url, init) => {
         if (String(url).includes('/api/sidebar-sections') && init?.method === 'DELETE') {
           window.teamDeleteRequests++; await new Promise(resolve => { window.releaseTeamDelete = resolve; });
+          if (window.teamDeleteRequests === 1) return new Response(JSON.stringify({ error: "Fixture deletion failure" }), { status: 500, headers: { "Content-Type": "application/json" } });
         }
         return original(url, init);
       };
@@ -160,6 +161,12 @@ if (!enabled) console.log("skipping team lifecycle UI e2e: set OMB_UI_E2E=1 to i
     expect(await snapshot()).toContain('alertdialog "Delete Launch team?"');
     await ui("press", "--keys", "Tab");
     expect((await ui("eval", "--js", "document.activeElement.getAttribute('role')")).result).toBe("alertdialog");
+    await ui("eval", "--js", "window.releaseTeamDelete(); true");
+    await expect.poll(async () => (await ui("eval", "--js", "document.activeElement.textContent")).result).toBe("Cancel");
+    await ui("press", "--keys", "Shift+Tab");
+    expect((await ui("eval", "--js", "document.activeElement.textContent")).result).toBe("Delete team");
+    await click("Delete team");
+    await expect.poll(async () => (await ui("eval", "--js", "window.teamDeleteRequests")).result).toBe(2);
     await ui("eval", "--js", "window.releaseTeamDelete(); true");
     await expect.poll(async () => (await api("/api/bots?messages=0")).sections.includes("Launch")).toBe(false);
     const consoleResult = await ui("console");
