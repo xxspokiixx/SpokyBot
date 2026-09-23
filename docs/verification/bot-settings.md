@@ -77,7 +77,36 @@ checks Slack → Manage in Admin: the row exists only on a hosted workspace,
 admins and members read the same link, and switching agents during a pending
 load never shows another agent's link.
 
-## Last exercised
+## Creation drafts and defaults
+
+The same isolated fixture also exposes **Configure new bot** and **New bot
+defaults → Edit**. Check that both open immediately, keep a fixed size while
+switching sections, and retain edits between sections. Identity → View full
+must appear above the creation dialog; Escape closes only that inner layer.
+
+Save defaults containing a title, model, memory topic, skill, and paused
+routine. Read the fixture API to confirm no bot or live routine was created.
+Open a creation draft, confirm inheritance, clear selected values, and cancel:
+the server's bots and defaults must remain unchanged. Reopen and create;
+confirm only the explicitly retained settings and files were applied. Edit
+the existing bot afterward to verify that its settings still save normally.
+Use only the fixture's harmless skills and routines.
+
+Automated coverage:
+
+```sh
+pnpm exec vitest run server/new-bot-defaults.test.ts server/new-bot-defaults.e2e.test.ts src/lib/bot-creation-draft.test.ts src/lib/create-configured-bot.test.ts src/components/NewBotDialog.test.ts
+node --test electron/approval-trusted-mode.node-test.mjs
+```
+
+The HTTP tests launch a fresh temporary server. They cover defaults persistence,
+explicit empty overrides, opt-out, strict validation, and rejected untrusted
+privileged creation. The client tests cover Ask/Auto/Full/Custom creation,
+native permission rejection, cleanup, and post-creation activation warnings.
+Browser fixtures do not prove packaged operating-system grants or real model
+execution; those require the native approval verification separately.
+
+## Earlier settings verification
 
 The isolated browser run on 2026-09-06 confirmed immediate Identity/Soul
 saves on section changes, SOUL duplication, memory draft retention and
