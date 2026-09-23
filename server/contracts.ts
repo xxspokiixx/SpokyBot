@@ -471,8 +471,9 @@ export interface ProviderInstance {
 
 /** How an engine is presented in the picker rail.
  *  `subscription` — first-party cloud catalog; Custom is extra.
- *  `custom` — no subscription catalog; Custom is the product. */
-export type EngineAccess = "subscription" | "custom";
+ *  `custom` — no subscription catalog; Custom is the product.
+ *  `api` — a cloud model catalog billed through an API key. */
+export type EngineAccess = "subscription" | "custom" | "api";
 
 export interface ProviderDriver<Config = unknown> {
   readonly driverKind: DriverKind;
