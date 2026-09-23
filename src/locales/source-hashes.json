@@ -1389,7 +1389,9 @@
       "newBot.customSettings": "4229eea49bd9ea3a8927c12ac696e16a43ff2f3a2ccb020a00f8f2c91b53ba28",
       "newBot.randomName": "f34ba9fc922c5020df9669b51d955d501ce9a0f0914045839795bfa96715bb4e",
       "newBot.edit": "464c4ffd019e1e9691dcf0537c797353ef2b1c1d4833d3d463e5b74ae4547344",
-      "newBot.loading": "e71a13459ccdcc885ea1f141d67fe1a6a6fd78e70d584abdf05324561b2b4309"
+      "newBot.loading": "e71a13459ccdcc885ea1f141d67fe1a6a6fd78e70d584abdf05324561b2b4309",
+      "newBot.randomFemaleName": "2b67fc9d54f33b8cd239035188c2f9b65f4523dc11e5d90bf284d8821bb0750c",
+      "newBot.randomMaleName": "752337a9d91f9b876d0ac8dea4a413fc72906ed34aed7b3b4f562ce23a972379"
     },
     "es": {
       "noEngines.title": "af88855a5f80377de709995229ba3907df9e8fb3b940fbf7c0d9cbe6eea54afe",
