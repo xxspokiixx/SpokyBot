@@ -3,7 +3,7 @@
 // is the stuff shared by every bot: who you are, your keys, and the
 // machine your bots can borrow.
 import { useEffect, useRef, useState } from "react";
-import { Archive, Coins, FlaskConical, KeyRound, Monitor, Palette, Search, TabletSmartphone, Terminal, User, Users, X, Building2 } from "lucide-react";
+import { Archive, Coins, FlaskConical, KeyRound, Monitor, Palette, ScrollText, Search, TabletSmartphone, Terminal, User, Users, X, Building2 } from "lucide-react";
 import { api, useStore, type AppSettingsSection, type ConfigStatus } from "@/state/store";
 import { analyticsEnabled, setAnalyticsEnabled } from "@/lib/analytics";
 import { browserAvailable, browserUnavailableReason, builtInBrowserEnabled, showToolCallsEnabled, skillAuthoringEnabled } from "@/lib/feature-flags";
@@ -18,6 +18,8 @@ import { LocalComputerSection } from "./LocalComputerSection";
 import { CompanionSection } from "./CompanionSection";
 import { ServerPairingCard } from "./ServerPairingCard";
 import { PeopleSection } from "./PeopleSection";
+import { ActivitySection } from "./ActivitySection";
+import { useOwnerOrAdmin } from "@/lib/use-owner-or-admin";
 import { CustomDomainSettings } from "./CustomDomainSettings";
 import { BrowserProfilesManager } from "./BrowserProfilesManager";
 import { RemoteComputerSection } from "./RemoteComputerSection";
@@ -26,6 +28,7 @@ import { OrganizationSettings } from "./OrganizationSettings";
 import { Card, SettingRow, Switch } from "./SettingsPrimitives";
 import { shortcutLabel } from "./ShortcutHint";
 import { UsageSection } from "./UsageSection";
+import { LicenseExpiryBanner } from "./LicenseExpiryBanner";
 import { WorkspacesSection, workspacesAvailable } from "./WorkspacesSection";
 import { SkinPicker } from "./SkinPicker";
 import { RoomTurnTimeoutSettings } from "./RoomTurnTimeoutSettings";
@@ -57,6 +60,7 @@ const SECTIONS: Array<{
   { id: "computer", labelKey: "settings.section.computer", icon: Monitor, keywords: ["vm", "virtual", "desktop"] },
   { id: "usage", labelKey: "settings.section.usage", icon: Coins, keywords: ["tokens", "cost", "billing"] },
   { id: "people", labelKey: "settings.section.people", icon: Users, keywords: ["people", "users", "invite", "sign in", "members", "admins", "access"] },
+  { id: "activity", labelKey: "settings.section.activity", icon: ScrollText, keywords: ["activity", "audit", "log", "history", "who changed", "approvals", "decisions", "admin"] },
   { id: "backups", labelKey: "settings.section.backups", icon: Archive, keywords: ["export", "import", "restore", "full backup", "password", "recovery"] },
   { id: "workspaces", labelKey: "settings.section.workspaces", icon: Building2, keywords: ["clients", "tenants", "fleet", "workspaces"] },
 ];
@@ -479,13 +483,16 @@ export function SettingsModal() {
   useEffect(() => window.ogb?.environments?.onOpenSettings?.(() => setQuery("")), []);
   useEffect(() => window.ogb?.onOpenAppSettings?.(() => setQuery("")), []);
   const q = query.trim().toLowerCase();
+  const ownerOrAdmin = useOwnerOrAdmin();
   const availableSections = SECTIONS.filter((entry) => !remoteActive || entry.id === "companion" || entry.id === "appearance" || entry.id === "desktopWorkspaces")
     .filter((entry) => entry.id !== "desktopWorkspaces" || Boolean(window.ogb?.environments))
     .filter((entry) => entry.id !== "organization" || Boolean(window.ogb?.organization))
     // the operator's screen for other workspaces exists only where a fleet agent does
     .filter((entry) => entry.id !== "workspaces" || workspacesAvailable(state.config))
     // sign-in by email is a hosted server's; the desktop app pairs devices under Remote access
-    .filter((entry) => entry.id !== "people" || !window.ogb);
+    .filter((entry) => entry.id !== "people" || !window.ogb)
+    // the activity log belongs to a workspace served to a browser, and to its admins
+    .filter((entry) => entry.id !== "activity" || (!window.ogb && ownerOrAdmin === true));
   const visibleSections = availableSections.filter((entry) => sectionMatches(entry, q));
   const sectionLabelKey = SECTIONS.find((entry) => entry.id === section)?.labelKey;
   const nextVisibleSection = visibleSections.some((entry) => entry.id === section) ? undefined : visibleSections[0]?.id;
@@ -627,6 +634,7 @@ export function SettingsModal() {
           </div>
 
           <div className="flex flex-1 flex-col gap-4 overflow-y-auto px-3 py-4 sm:px-5 sm:pb-5">
+            <LicenseExpiryBanner config={state.config} />
             {section === "desktopWorkspaces" && <ConnectedWorkspacesSettings />}
             {section === "organization" && window.ogb?.organization && !remoteActive && <OrganizationSettings />}
             {section === "general" && (
@@ -726,6 +734,7 @@ export function SettingsModal() {
 
             {section === "usage" && <UsageSection />}
             {section === "people" && <PeopleSection />}
+            {section === "activity" && <ActivitySection />}
             {section === "workspaces" && <WorkspacesSection />}
           </div>
         </div>

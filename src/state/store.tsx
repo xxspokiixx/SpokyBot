@@ -13,7 +13,7 @@ import {
   useState,
   type ReactNode,
 } from "react";
-import type { CloudBackend, EffortLevel, ServerFrame } from "../../shared/wire";
+import type { BotVisibility, CloudBackend, EffortLevel, ServerFrame } from "../../shared/wire";
 import type { TurnDigest } from "../../shared/digest";
 import type { ModelVariantOption, RuntimeEvent } from "../../shared/runtime-events";
 import type { MausColor, MausMotion } from "@/lib/mascot";
@@ -418,6 +418,8 @@ export interface Bot {
   /** Named browser profile id (config.browserProfiles); absent/null = the
    * bot's own session (null is how a clear travels over PATCH). */
   browserProfile?: string | null;
+  /** Who may see this bot on a shared workspace; only admins receive it. */
+  visibility?: BotVisibility;
   messages: Message[];
   /** The server answered a bounded page and older messages remain in storage.
    * Absent on an unpaged response, which always carries the whole thread. */
@@ -556,8 +558,14 @@ export interface ConfigStatus {
   xai?: { configured: boolean };
   anthropic?: { configured: boolean };
   openaiCompat?: { configured: boolean; url?: string };
-  /** what this server is entitled to; Settings shows only what works here */
-  edition?: { edition: "oss" | "enterprise"; features: string[] };
+  /** what this server is entitled to; Settings shows only what works here.
+   * `license` reaches admins only, and only while the key is inside its
+   * warning window or grace period. */
+  edition?: {
+    edition: "oss" | "enterprise";
+    features: string[];
+    license?: { expiresAt: string; expiresInDays: number; graceEndsAt?: string };
+  };
   /** a fleet agent exists on this server (Settings → Workspaces) */
   fleet?: { available: boolean };
   budgets?: { monthlyUsd?: number; warnAtPercent?: number };
@@ -638,14 +646,21 @@ export interface BrowserProfile {
   partitionId?: string;
 }
 
+// Every section the server's config frame carries. A section left out here
+// is wiped from state.config whenever a live frame lands, so whichever of a
+// save's own response and its broadcast frame arrives last decides what
+// Settings shows (a saved key's Test button used to vanish that way).
 export type ConfigStatusFrame = Pick<
   ConfigStatus,
-  "xai" | "composio" | "box" | "vps" | "rooms" | "threads" | "localVm" | "opencodeGo" | "tts" | "imageGen" | "profile" | "language" | "features" | "onboarding" | "browserEngine" | "browserProfiles" | "edition" | "budgets" | "billing" | "managedPolicy"
+  "xai" | "anthropic" | "openaiCompat" | "fleet" | "composio" | "box" | "vps" | "rooms" | "threads" | "localVm" | "opencodeGo" | "tts" | "imageGen" | "profile" | "language" | "features" | "onboarding" | "browserEngine" | "browserProfiles" | "edition" | "budgets" | "billing" | "managedPolicy"
 >;
 
 export function configStatusFromFrame(frame: ConfigStatusFrame): ConfigStatus {
   return {
     xai: frame.xai,
+    anthropic: frame.anthropic,
+    openaiCompat: frame.openaiCompat,
+    fleet: frame.fleet,
     composio: frame.composio,
     box: frame.box,
     vps: frame.vps,
@@ -761,6 +776,7 @@ export type AppSettingsSection =
   | "computer"
   | "usage"
   | "people"
+  | "activity"
   | "backups"
   | "workspaces";
 
@@ -776,6 +792,7 @@ export type BotSettingsSection =
   | "model"
   | "permissions"
   | "voice"
+  | "visibility"
   | "history"
   | "usage";
 
