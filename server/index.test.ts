@@ -2082,10 +2082,15 @@ describe("harness HTTP API", () => {
       expect(await readRoom()).toMatchObject({ bulletin: "Updated brief ✓", memberIds: [chief.id, peer.id] });
     } finally {
       for (const id of roomIds) {
-        await api("POST", `/api/groups/${id}/interrupt`, {});
-        await api("DELETE", `/api/groups/${id}`);
+        expect((await api("POST", `/api/groups/${id}/interrupt`, {})).status).toBe(200);
+        // Interruption is asynchronous; deletion while the turn is retiring
+        // returns 409 and would leak the room and its Chief into later tests.
+        await expect.poll(async () =>
+          (await api("GET", "/api/bots?messages=0")).body.groups.find((group: { id: string }) => group.id === id)?.working === true,
+        { timeout: 15_000 }).toBe(false);
+        expect((await api("DELETE", `/api/groups/${id}`)).status).toBe(200);
       }
-      for (const bot of bots) await api("DELETE", `/api/bots/${bot.id}`);
+      for (const bot of bots) expect((await api("DELETE", `/api/bots/${bot.id}`)).status).toBe(200);
     }
   });
 
@@ -4099,7 +4104,7 @@ describe("harness HTTP API", () => {
         (candidate: { id: string }) => candidate.id === bot.id,
       );
       expect(after.modelSelection).toEqual(selection);
-      expect(after.autoApprove).toBeUndefined();
+      expect(after.autoApprove).toBe(bot.autoApprove);
     } finally {
       await api("DELETE", `/api/bots/${bot.id}`);
     }
@@ -5848,8 +5853,8 @@ describe("harness HTTP API", () => {
         (candidate: { id: string }) => candidate.id === bot.id,
       );
       expect(stored.busy).toBe(true);
-      expect(stored).not.toHaveProperty("approvalMode");
-      expect(stored).not.toHaveProperty("autoApprove");
+      expect(stored.approvalMode).toBe(bot.approvalMode);
+      expect(stored.autoApprove).toBe(bot.autoApprove);
     } finally {
       await api("POST", `/api/bots/${bot.id}/interrupt`, {}).catch(() => undefined);
       await expect.poll(async () => {
