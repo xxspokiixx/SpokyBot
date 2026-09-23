@@ -7,6 +7,7 @@ import type {
   SendTurnInput,
 } from "../contracts.ts";
 import { newEventId, newId } from "../contracts.ts";
+import { ASK_USER_TOOL, ASK_USER_TOOL_DEFINITION, askQuestionSummary, parseAskQuestions, questionChoices } from "../../shared/ask-question.ts";
 import { redactSecretsInText } from "../redact.ts";
 import { toolDetailPreview } from "../tool-summary.ts";
 import { ChatToolSessionError, mountChatTools, type ChatToolDefinition, type ChatToolSession, type ChatToolResult } from "./chat-mcp-tools.ts";
@@ -345,6 +346,18 @@ export function createOpenAIChatRuntime<Config>(options: RuntimeOptions<Config>)
         ...base(turn.threadId, turnId), type: "request.resolved", requestId: ask.id,
         behavior: allowed ? "allow" : "deny", source,
       }),
+      openQuestion: (ask, questions) => {
+        const choices = questionChoices(questions);
+        emit({
+          ...base(turn.threadId, turnId), type: "request.opened", requestType: "question",
+          requestId: ask.id, tool: ask.tool, summary: ask.summary,
+          questions, ...(choices ? { choices } : {}),
+        });
+      },
+      resolvedQuestion: (ask, answered, source) => emit({
+        ...base(turn.threadId, turnId), type: "request.resolved", requestId: ask.id,
+        behavior: answered ? "answer" : "deny", source,
+      }),
     });
     let resolveDone!: () => void;
     const done = new Promise<void>((resolve) => { resolveDone = resolve; });
@@ -364,6 +377,14 @@ export function createOpenAIChatRuntime<Config>(options: RuntimeOptions<Config>)
       const seenCalls = new Set<string>();
       try {
         tools = await mountChatTools(options.tools === false ? undefined : turn.integrations, abort.signal, options.computerUse);
+        // The runtime's one built-in tool rides the same list: ask_user is
+        // how a chat-completions engine reaches a person. An MCP server that
+        // squats the name cannot shadow it — dispatch intercepts the name
+        // before validate — but the definition is then skipped so the list
+        // never advertises two.
+        if (options.tools !== false && !tools.definitions.some((definition) => definition.function.name === ASK_USER_TOOL)) {
+          tools.definitions.push(ASK_USER_TOOL_DEFINITION);
+        }
         for (let round = 0; round < 16; round++) {
           abort.signal.throwIfAborted();
           native("out", options.nativeLog.outgoing(turn, messages, model));
@@ -454,33 +475,61 @@ export function createOpenAIChatRuntime<Config>(options: RuntimeOptions<Config>)
               try { args = JSON.parse(call.function.arguments); }
               catch { throw new ChatProtocolError("tool arguments are not complete JSON"); }
               if (!object(args)) throw new ChatProtocolError("tool arguments must be a JSON object");
-              tools.validate(call.function.name, args);
               const inputPreview = preview(args);
-              // Full access is the person's explicit grant to answer every
-              // prompt. This runtime has no provider reviewer to hand it to,
-              // so it is honoured here: without it every single tool call on
-              // an OpenAI-compatible engine stops for a card, and a Chief's
-              // delegated Full access cannot help either.
-              const allowed = turn.approvalMode === "full"
-                || await approval.ask(call.function.name, inputPreview ?? "This tool has no arguments.");
-              abort.signal.throwIfAborted();
-              emit({ ...base(turn.threadId, turnId), type: "item.started", itemType: "tool", itemId: call.id,
-                title: call.function.name, ...(inputPreview ? { input: inputPreview } : {}),
-              });
-              started = true;
-              if (allowed) {
-                result = await tools.execute(call.function.name, args as Record<string, unknown>, abort.signal);
-                if (result.images?.length) {
-                  try {
-                    assertImageTransport(options.apiUrl);
-                    retainImages(result.images);
-                  } catch (error) {
-                    throw new ChatToolSessionError(asError(error).message);
+              if (call.function.name === ASK_USER_TOOL) {
+                // A question is the person's card, not a permission, so it is
+                // handled before the gate below: under Full access that gate
+                // would auto-run an unanswered ask, and under Ask it would
+                // render Allow/Deny over a question nobody can answer that way.
+                const questions = parseAskQuestions(args);
+                abort.signal.throwIfAborted();
+                emit({ ...base(turn.threadId, turnId), type: "item.started", itemType: "tool", itemId: call.id,
+                  title: call.function.name, ...(inputPreview ? { input: inputPreview } : {}),
+                });
+                started = true;
+                if (!questions) {
+                  denials.push(ASK_USER_TOOL);
+                  result = { ok: false, text: "The ask_user arguments are malformed: pass a JSON object with a questions array of one to six questions, each with a question string and at most twelve options carrying a label. Ask again with valid arguments." };
+                } else {
+                  // The tool result is the card's Q:/A: reply verbatim — never
+                  // a summary, and never words the person did not send.
+                  const answer = await approval.question(ASK_USER_TOOL, askQuestionSummary(questions), questions);
+                  abort.signal.throwIfAborted();
+                  if (answer === null) {
+                    denials.push(ASK_USER_TOOL);
+                    result = { ok: false, text: "The person did not answer this question. Do not guess an answer; ask again later or proceed without it." };
+                  } else {
+                    result = { ok: true, text: answer };
                   }
                 }
               } else {
-                denials.push(call.function.name);
-                result = { ok: false, text: "Permission denied or expired; the tool was not executed." };
+                tools.validate(call.function.name, args);
+                // Full access is the person's explicit grant to answer every
+                // prompt. This runtime has no provider reviewer to hand it to,
+                // so it is honoured here: without it every single tool call on
+                // an OpenAI-compatible engine stops for a card, and a Chief's
+                // delegated Full access cannot help either.
+                const allowed = turn.approvalMode === "full"
+                  || await approval.ask(call.function.name, inputPreview ?? "This tool has no arguments.");
+                abort.signal.throwIfAborted();
+                emit({ ...base(turn.threadId, turnId), type: "item.started", itemType: "tool", itemId: call.id,
+                  title: call.function.name, ...(inputPreview ? { input: inputPreview } : {}),
+                });
+                started = true;
+                if (allowed) {
+                  result = await tools.execute(call.function.name, args as Record<string, unknown>, abort.signal);
+                  if (result.images?.length) {
+                    try {
+                      assertImageTransport(options.apiUrl);
+                      retainImages(result.images);
+                    } catch (error) {
+                      throw new ChatToolSessionError(asError(error).message);
+                    }
+                  }
+                } else {
+                  denials.push(call.function.name);
+                  result = { ok: false, text: "Permission denied or expired; the tool was not executed." };
+                }
               }
             } catch (error) {
               if (error instanceof ChatToolSessionError) fatal = error;
@@ -554,7 +603,7 @@ export function createOpenAIChatRuntime<Config>(options: RuntimeOptions<Config>)
         await turn.done;
       },
       respondToRequest: async (threadId, requestId, decision) =>
-        active.get(threadId)?.approval.answer(requestId, decision.behavior) ?? "unavailable",
+        active.get(threadId)?.approval.answer(requestId, decision.behavior, decision.message) ?? "unavailable",
       hasSession: (threadId) => active.has(threadId),
       stopAll: async () => {
         const turns = [...active.values()];

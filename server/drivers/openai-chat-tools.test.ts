@@ -284,13 +284,86 @@ describe.each<Provider>(["openai-compat", "grok", "minimax"])("%s structured too
     await f.start({ integrations: undefined, system: "Fixture persona", transcript: [{ role: "user", text: "Earlier question" }, { role: "assistant", text: "Earlier answer" }] });
     expect(await f.completed()).toMatchObject({ ok: true });
     expect(f.requests).toHaveLength(1);
-    expect(f.requests[0].tools).toBeUndefined();
+    // ask_user is the runtime's built-in, so it is offered even with no MCP
+    // server mounted — and nothing else is.
+    expect(f.requests[0].tools?.map((tool) => tool.function.name)).toEqual(["ask_user"]);
     expect(f.requests[0].messages.map((message) => message.role)).toEqual(["system", "user", "assistant", "user"]);
     expect(f.recorder.events).toContainEqual(expect.objectContaining({ type: "item.completed", itemType: "assistant_text", text: imitation }));
     expect(f.recorder.events.some((event) => event.type === "request.opened" || event.type === "item.started")).toBe(false);
     expect(f.effects()).toEqual([]);
     expect(existsSync(join(f.directory, "pid"))).toBe(false);
   });
+
+  it("offers ask_user beside mounted tools and returns the card reply verbatim for many questions", async () => {
+    const questions = [
+      { question: "Which receipt?", options: [{ label: "Original" }, { label: "Copy" }] },
+      { question: "Notify accounting?", options: [{ label: "Yes" }, { label: "No" }] },
+    ];
+    const reply = "The user answered your questions.\n\nQ: Which receipt?\nA: Original\n\nQ: Notify accounting?\nA: No";
+    const f = await fixture((_body, response, round) => {
+      if (round === 1) sse(response, [chunk({ content: null, tool_calls: [toolCall("ask_user", JSON.stringify({ questions }), "call_ask")] }, "tool_calls")]);
+      else answer(response, "Both answers recorded.");
+    }, provider);
+    await f.start();
+    const opened = await f.recorder.until((event) => event.type === "request.opened");
+    if (opened.type !== "request.opened") throw new Error("expected a question card");
+    expect(opened).toMatchObject({ requestType: "question", tool: "ask_user", questions });
+    // A multi-question card cannot flatten to one choice list without
+    // losing which question an answer belongs to.
+    expect(opened.choices).toBeUndefined();
+    expect(f.requests[0].tools).toContainEqual({
+      type: "function",
+      function: expect.objectContaining({ name: "ask_user" }),
+    });
+    expect(await f.instance.adapter.respondToRequest(f.threadId, opened.requestId!, { behavior: "answer", message: reply })).toBe("answered");
+    expect(await f.completed()).toMatchObject({ ok: true });
+    expect(f.requests[1].messages.at(-1)).toMatchObject({ role: "tool", tool_call_id: "call_ask" });
+    expect(JSON.parse(String(f.requests[1].messages.at(-1)?.content))).toEqual({ ok: true, result: reply });
+    expect(f.effects()).toEqual([]);
+  }, 20_000);
+
+  it("returns an unanswered ask_user as a denial the model must not paper over", async () => {
+    const f = await fixture((_body, response, round) => {
+      if (round === 1) sse(response, [chunk({ content: null, tool_calls: [toolCall("ask_user", JSON.stringify({ questions: [{ question: "Ship it?" }] }), "call_ask")] }, "tool_calls")]);
+      else answer(response, "I went ahead and shipped it.");
+    }, provider);
+    await f.start();
+    const opened = await f.recorder.until((event) => event.type === "request.opened");
+    expect(await f.instance.adapter.respondToRequest(f.threadId, opened.requestId!, { behavior: "deny" })).toBe("rejected");
+    expect(await f.completed()).toMatchObject({ ok: false, denials: ["ask_user"] });
+    expect(f.requests[1].messages.at(-1)).toMatchObject({ role: "tool", tool_call_id: "call_ask" });
+    expect(JSON.parse(String(f.requests[1].messages.at(-1)?.content))).toMatchObject({
+      ok: false,
+      result: expect.stringContaining("did not answer"),
+    });
+  }, 20_000);
+
+  it("cancels a pending ask with the turn and resolves its card as unanswered", async () => {
+    const f = await fixture((_body, response) => sse(response, [
+      chunk({ content: null, tool_calls: [toolCall("ask_user", JSON.stringify({ questions: [{ question: "Ship it?" }] }), "call_ask")] }, "tool_calls"),
+    ]), provider);
+    const { turnId } = await f.start();
+    const opened = await f.recorder.until((event) => event.type === "request.opened");
+    await f.instance.adapter.interruptTurn(f.threadId, turnId);
+    expect(await f.completed()).toMatchObject({ ok: false, stopReason: "interrupted" });
+    expect(f.recorder.events).toContainEqual(expect.objectContaining({ type: "request.resolved", behavior: "deny", source: "system" }));
+    expect(await f.instance.adapter.respondToRequest(f.threadId, opened.requestId!, { behavior: "answer", message: "late" })).toBe("unavailable");
+  }, 20_000);
+
+  it("denies a malformed ask_user call with teaching text instead of opening a card", async () => {
+    const f = await fixture((_body, response, round) => {
+      if (round === 1) sse(response, [chunk({ content: null, tool_calls: [toolCall("ask_user", '{"questions":[]}', "call_ask")] }, "tool_calls")]);
+      else answer(response, "The question was not asked.");
+    }, provider);
+    await f.start();
+    expect(await f.completed()).toMatchObject({ ok: false, denials: ["ask_user"] });
+    expect(f.recorder.events.some((event) => event.type === "request.opened")).toBe(false);
+    expect(JSON.parse(String(f.requests[1].messages.at(-1)?.content))).toMatchObject({
+      ok: false,
+      result: expect.stringMatching(/questions array/i),
+    });
+    expect(f.effects()).toEqual([]);
+  }, 20_000);
 });
 
 describe("structured tool execution boundaries", () => {
@@ -368,7 +441,7 @@ describe("structured tool execution boundaries", () => {
     expect(await f.completed()).toMatchObject({ ok: true, usage: { input: 12, output: 4 } });
     expect(f.recorder.events).toContainEqual(expect.objectContaining({ type: "item.completed", itemType: "assistant_text", text: "Hello from the fixture." }));
     expect(f.recorder.events.some((event) => event.type === "runtime.error" || event.type === "request.opened")).toBe(false);
-    expect(f.requests[0].tools).toBeUndefined();
+    expect(f.requests[0].tools?.map((tool) => tool.function.name)).toEqual(["ask_user"]);
     expect(f.effects()).toEqual([]);
   });
 
