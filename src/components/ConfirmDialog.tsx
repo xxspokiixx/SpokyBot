@@ -33,7 +33,9 @@ export function ConfirmDialog(props: ConfirmDialogProps) {
   const cancelAction = useRef(onCancel);
   cancelAction.current = onCancel;
   useEffect(() => {
-    if (open && props.pending) dialogRef.current?.focus();
+    if (!open) return;
+    if (props.pending) dialogRef.current?.focus();
+    else cancelRef.current?.focus();
   }, [open, props.pending]);
 
   useEffect(() => {
