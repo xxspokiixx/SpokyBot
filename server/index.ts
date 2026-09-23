@@ -7629,9 +7629,13 @@ routines = new RoutineManager({
       handoffs.forget(threadId);
     }
   },
-  startTurn: (botId, threadId, prompt, runOn, triggerSource, onDispatchError) =>
-    startTurn(botId, prompt, { threadId, runOn, automationSource: triggerSource, onDispatchError })
-      .then(() => undefined),
+  startTurn: async (botId, threadId, prompt, runOn, triggerSource, onDispatchError) => {
+    if (runOn === "cloud") {
+      const readiness = await cloudRoutineReadiness(botId, threadId);
+      if (!readiness.ready) throw new Error(readiness.reason ?? "The cloud computer is not ready");
+    }
+    await startTurn(botId, prompt, { threadId, runOn, automationSource: triggerSource, onDispatchError });
+  },
   startGoal: async (groupId, threadId, prompt, coordinatorBotId, runId, _onDispatchError) => {
     startGroupTurn(groupId, prompt, undefined, undefined, "goal", undefined, {
       threadId,
@@ -7731,26 +7735,34 @@ if (recoveryOwners.length > 0) {
 // Chat tools can prepare routine changes, but the harness applies them only
 // after the user confirms a durable card. Keeping this beside the scheduler
 // makes the card resolvable after an app restart without involving the model.
-async function cloudRoutineReadiness(): Promise<{ ready: boolean; reason?: string }> {
+async function cloudRoutineReadiness(botId: string, threadId?: string): Promise<{ ready: boolean; reason?: string }> {
+  const bot = threadId ? store.projectBotForTask(botId, threadId) : store.bot(botId);
+  if (!bot || bot.hidden) return { ready: false, reason: "The routine's target bot no longer exists." };
   if (!box.boxConfigured(cfg)) {
     return {
       ready: false,
       reason: 'The Box cloud computer needs a working Box API key. For the bot’s configured computer, including a self-hosted VPS, set run_on="maus" instead.',
     };
   }
-  const candidates = registry.instances().filter(candidate => candidate.driverKind === "boxAgent" || candidate.adapter.capabilities.cloudComputerMcp);
-  if (!candidates.length) {
-    return { ready: false, reason: "The Cloud VM runner is unavailable. Restart OpenMausBot and try again." };
-  }
+  const instance = turnInstance(bot, "cloud", threadId);
+  if (!instance) return { ready: false, reason: "The Cloud VM runner is unavailable. Restart OpenMausBot and try again." };
   try {
-    const snapshots = await Promise.all(candidates.map(candidate => candidate.snapshot().catch(() => null)));
-    return snapshots.some(snapshot => snapshot?.state === "available")
-      ? { ready: true }
-      : { ready: false, reason: "No configured model engine is ready to use the Box cloud computer." };
+    if ((await instance.snapshot()).state !== "available") {
+      return { ready: false, reason: "The target bot's model engine is not ready to use the Box cloud computer." };
+    }
+    const teamComputer = inheritedTeamComputer(bot);
+    const ownerId = teamComputer ? teamComputerOwner(teamComputer.id) : bot.id;
+    const machine = await box.findBox(cfg, ownerId);
+    if (teamComputer && !machine) {
+      return { ready: false, reason: "The team's Box computer is missing; explicitly create or retry it from the Team map." };
+    }
+    // Explicit Cloud may provision or wake the bot's own Box at dispatch.
+    // This probe only checks its identity/account, without starting billing.
+    return { ready: true };
   } catch (error) {
     return {
       ready: false,
-      reason: `The Cloud VM runner could not be checked: ${error instanceof Error ? error.message : String(error)}`,
+      reason: `The target bot's cloud computer could not be checked: ${redactSecretsInText(error instanceof Error ? error.message : String(error))}`,
     };
   }
 }
