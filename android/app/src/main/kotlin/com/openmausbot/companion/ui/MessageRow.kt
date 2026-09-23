@@ -407,6 +407,10 @@ private fun MessageContent(
             CardView(chat, message, haptics)
         }
         Message.Kind.ACTIVITY -> ActivityChip(message.tool, message.threadRef, openThread)
+        Message.Kind.COMPACTION -> ReceiptChip(
+            label = message.compaction?.chipText ?: message.text.orEmpty(),
+            detail = message.compaction?.summary ?: message.text.orEmpty(),
+        )
         Message.Kind.SCREEN -> ScreenShot(chat.threadId, message)
         // Turn-audit chip (tool list + reply preview). Desktop shows it only
         // behind a "show tool calls" setting Android doesn't have; hide it.
@@ -748,6 +752,44 @@ private fun ActivityChip(
                 maxLines = 1,
                 color = tint,
             )
+        }
+    }
+}
+
+/**
+ * A quiet chip under a reply for the harness's receipts (the work digest, a
+ * compaction record): one line, and the full text on tap. Port of
+ * `ReceiptChip` in `ios/App/ChatView.swift`.
+ */
+@Composable
+private fun ReceiptChip(label: String, detail: String) {
+    if (label.isEmpty()) return
+    var expanded by remember(label) { mutableStateOf(false) }
+    val haptics = rememberHaptics()
+    Column(
+        modifier = Modifier
+            .padding(start = 4.dp)
+            .heightIn(min = MIN_TOUCH_TARGET)
+            .clickable(role = Role.Button) {
+                haptics.play(TactileAction.TOGGLE_ACTIVITY_RUN)
+                expanded = !expanded
+            }
+            .semantics(mergeDescendants = true) { contentDescription = label },
+        verticalArrangement = Arrangement.spacedBy(4.dp),
+    ) {
+        Row(
+            horizontalArrangement = Arrangement.spacedBy(6.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Box(
+                modifier = Modifier
+                    .size(ACTIVITY_DOT)
+                    .background(secondaryTint, CircleShape),
+            )
+            Text(text = label, fontSize = 13.sp, maxLines = 1, color = secondaryTint)
+        }
+        if (expanded && detail.isNotEmpty() && detail != label) {
+            Text(text = detail, fontSize = 12.sp, color = secondaryTint)
         }
     }
 }
