@@ -15,8 +15,12 @@ export interface ComputerHolder {
   task?: string;
 }
 
-/** Whole minutes, or seconds under one minute, for the give-up notice. */
-const minutes = (ms: number): string => ms >= 60_000 ? `${Math.round(ms / 60_000)} minutes` : `${Math.round(ms / 1000)} seconds`;
+/** Whole minutes, or seconds under one minute, singular at exactly one. */
+const minutes = (ms: number): string => {
+  const value = ms >= 60_000 ? Math.round(ms / 60_000) : Math.round(ms / 1000);
+  const unit = ms >= 60_000 ? "minute" : "second";
+  return `${value} ${unit}${value === 1 ? "" : "s"}`;
+};
 
 /** How long a wait lasted, for the resolution line: waits under a second
  * are honest about being over in a blink instead of claiming "0 seconds". */

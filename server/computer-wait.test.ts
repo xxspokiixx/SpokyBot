@@ -25,7 +25,7 @@ describe("computer wait wording", () => {
 
   it("resolves with a history line beside the untouched waiting chip", () => {
     expect(computerFreeAfterText({ name: "TCPR operator", task: "TCPR 3 hour capacity refill" }, 65_000)).toBe(
-      "Computer free — continuing after waiting 1 minutes (TCPR operator · TCPR 3 hour capacity refill held it)",
+      "Computer free — continuing after waiting 1 minute (TCPR operator · TCPR 3 hour capacity refill held it)",
     );
     expect(computerFreeAfterText({ name: "Engineering Room" }, 90_000)).toBe(
       "Computer free — continuing after waiting 2 minutes (Engineering Room held it)",
@@ -40,7 +40,7 @@ describe("computer wait wording", () => {
   it("phrases a wait duration honestly at every scale", () => {
     expect(computerWaitDuration(0)).toBe("under a second");
     expect(computerWaitDuration(999)).toBe("under a second");
-    expect(computerWaitDuration(1_000)).toBe("1 seconds");
+    expect(computerWaitDuration(1_000)).toBe("1 second");
     expect(computerWaitDuration(59_499)).toBe("59 seconds");
     expect(computerWaitDuration(90_000)).toBe("2 minutes");
   });

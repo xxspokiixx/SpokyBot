@@ -39,6 +39,10 @@ describe("summarizeRuntime", () => {
       summary: "computer wait gave up after 120s",
       tone: "error",
     });
+    expect(summarizeRuntime({ ...base, type: "turn.wait_ended", resource: "computer:host", waitedMs: 800, outcome: "acquired" })).toEqual({
+      summary: "computer acquired after under a second",
+      tone: "boundary",
+    });
   });
 
   it("clips long assistant text to one line", () => {
