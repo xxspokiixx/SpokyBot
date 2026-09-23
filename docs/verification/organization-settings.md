@@ -101,3 +101,60 @@ decoding, avatar selection/retrieval and removal propagation. Evidence:
 The separate private Admin/native runtime integration also passed with branding
 enabled (`/tmp/omb-desktop-integration-ql2mMS/receipt.json`). Neither test used
 customer accounts or changed the operator's desktop app.
+
+## 2026-09-23 renewal, licence lapse and organisation policy
+
+Unit and node tests only; the Electron smoke above was **not** re-run for this
+change, and no installed app, keychain, production Admin or customer data was
+used.
+
+- `node --test electron/managed-desktop.node-test.mjs`: renewal on start and
+  when fewer than seven days remain, only when Admin advertises
+  `capabilities.deviceRenewal`; same `deviceId`; a rotated token is written to
+  the encrypted record before use; a later session expiry is adopted and an
+  earlier one ends access; an Admin without renewal or policies sees exactly
+  today's requests; 503 `admin_license_expired` becomes `license-expired`
+  (Company instances kept but suspended, no DELETE, no sign-in prompt, keeps
+  polling, recovers); sign-in against an expired Admin says so; the policy is
+  sent to the runtime separately from the model grant, persisted with the
+  encrypted grant, re-applied before any network call after an offline
+  restart, kept when a later policy is malformed, reported back to Admin, and
+  lifted on disconnect, revocation or expiry.
+- `node --test electron/company-backup-schedule.node-test.mjs`: a schedule
+  saved under the old device-scoped key is adopted (not turned off) on upgrade
+  and on re-enrolment; losing the connection pauses it; another organisation
+  or account still clears it.
+- `pnpm vitest run server/managed-policy.test.ts server/managed-desktop.test.ts
+  server/store-rename-instances.test.ts`: refusal sentences, MCP name/address
+  matching, computer-kind mapping, the real `bindTurnComputer` guard from
+  `index.ts`, expiry of the last policy; renewal and licence suspension applied
+  without restarting Company instances; stable Company ids across re-enrolment
+  with the old id's native home and saved selections, cursors and handed
+  records moved once.
+- Mutation checks (each failed its test, then was restored): strict expiry
+  equality on the session response; treating the licence 503 as offline;
+  not restoring the saved policy on start; removing the `bindTurnComputer`
+  guard; replacing instances on a renewal; skipping the legacy-id rename;
+  forgetting instead of adopting a legacy backup key.
+- Against the Admin itself (in the openmaus-cloud `feat/desktop-lifecycle`
+  worktree, disposable fixtures): this client enrolled, reported its version
+  and policy, renewed a week later to now + 30 days with the same device,
+  stayed connected past the original 30 days and showed `license-expired`
+  after the grace period; against the current Admin `main` it made no renewal
+  call, received no policy and kept today's behaviour.
+
+Review fixes (same day, same limits): MCP address entries are parsed as HTTPS
+URLs and matched by whole host labels and path, with tests for the path,
+suffix, credential, scheme, port and bare-wildcard bypasses; an enrollment
+that expired or is being cleared sends its identity (never its token) so its
+old ids and backup key still migrate after a later re-enrolment, and the
+backup key match ignores the deviceId; migration is best effort and logged;
+a disconnected computer still shows a paused daily schedule with its off
+switch, and an overdue backup waits 15 minutes after the connection returns;
+the saved policy is re-sent before any network call; a rotated token is
+adopted only once stored; room turns refuse a disallowed place before
+provisioning, the shared-computer lease honours "this computer", and room LLM
+titles skip a disallowed engine. Turning the companion on is refused inside
+`startDesktopCompanion` itself (switch, Tailscale "Turn on and check" and
+launch auto-start); that Electron main path is checked by inspection only.
+

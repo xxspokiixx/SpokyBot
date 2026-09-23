@@ -1120,8 +1120,11 @@ describe("harness HTTP API", () => {
     const bots = (await api("GET", "/api/bots?messages=30")).body.bots;
     const theirMessages = bots.find((b: any) => b.id === bot.id)?.messages ?? [];
     const myMessages = bots.find((b: any) => b.id === second.body.bot.id)?.messages ?? [];
-    expect(theirMessages.find((m: any) => m.text === "from the paired person")?.sender).toEqual({ name: "Safari on Mac" });
-    expect(theirMessages.find((m: any) => m.text === "and one more")?.sender).toEqual({ name: "Safari on Mac" });
+    // The opaque person key is the same for both lines: one session, one person.
+    const personKey = theirMessages.find((m: any) => m.text === "from the paired person")?.sender?.id;
+    expect(personKey).toMatch(/^p_[\w-]{22}$/);
+    expect(theirMessages.find((m: any) => m.text === "from the paired person")?.sender).toEqual({ name: "Safari on Mac", id: personKey });
+    expect(theirMessages.find((m: any) => m.text === "and one more")?.sender).toEqual({ name: "Safari on Mac", id: personKey });
     expect(myMessages.find((m: any) => m.text === "from the owner")?.sender).toBeUndefined();
     } finally {
       // Stop the fixture turns and take the bots and the paired session back
