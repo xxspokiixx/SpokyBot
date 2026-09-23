@@ -127,3 +127,14 @@ Set `tools` back to `true` to enable discovery and execution. This affects all
 bots using the instance; use separate configured instances for models with
 different tool support. A model response or HTTP error never silently disables
 tools. No fallback replays a requested operation without its tools.
+
+Cloud routine readiness uses the executing bot’s selected runner (including a
+thread’s model override at dispatch), rather than any available cloud engine.
+The probe checks the bot-owned or inherited team Box without provisioning or
+waking it. Dispatch repeats the check so a removed key or unavailable Box fails
+the run before model execution. Explicit Cloud still permits creating/waking
+the bot’s own Box; a missing assigned team computer requires explicit repair.
+
+Run `pnpm exec vitest run server/routine-requests.test.ts server/openai-box.e2e.test.ts`
+for target selection and the isolated direct/group/scheduled bridge fixture,
+including credentials removed after scheduling and a Box outage at dispatch.
