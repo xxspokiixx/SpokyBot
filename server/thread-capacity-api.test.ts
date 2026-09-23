@@ -287,6 +287,99 @@ describe("per-bot thread capacity through an isolated HTTP fixture", () => {
     }
   }, 120_000);
 
+  it("dispatches delegated handoffs into the standing thread without waiting for whole-bot idle", async () => {
+    await limit(2);
+    const target = await botWithThreads(2);
+    const source = await botWithThreads(1);
+    const created = await api("POST", "/api/routines", {
+      name: "Delegated slot probe",
+      prompt: "Hold the delegator turn.",
+      target: "bot",
+      botId: source.botId,
+      runOn: "maus",
+      enabled: true,
+      schedule: { type: "daily", time: "23:00" },
+    });
+    expect(created.status).toBe(201);
+    const routineId = created.body.routine.id;
+    const runState = async (id: string) => (await api("GET", "/api/routines")).body.runs.find((run: any) => run.id === id);
+    // A routine turn is today's classic delegate_bot caller — a plain chat
+    // turn is steered to coordinate_bots — and its held turn supplies the
+    // internal comms capability that caller holds.
+    const delegatorTurn = async () => {
+      const run = (await api("POST", `/api/routines/${routineId}/run`)).body.run;
+      await expect.poll(async () => (await runState(run.id))?.status, { timeout: 15_000 }).toBe("running");
+      const started = await runState(run.id);
+      const launched = await dump(started.threadId);
+      return { runId: run.id as string, threadId: started.threadId as string, token: launched.mcpConfig.mcpServers.agents.env.OMB_COMMS_TOKEN as string };
+    };
+    const delegate = async (turn: { threadId: string; token: string }) => {
+      const response = await fetch(`${fixture.info.url}/api/internal/delegate-bot`, {
+        method: "POST",
+        headers: {
+          authorization: `Bearer ${turn.token}`,
+          "content-type": "application/json",
+        },
+        body: JSON.stringify({ toBotId: target.botId, message: "Delegated slot probe" }),
+      });
+      const result = { status: response.status, body: await response.json() as any };
+      // The evidence records the authorization result, never the bearer.
+      evidence.push({ authority: "existing provider capability", path: "/api/internal/delegate-bot", threadId: turn.threadId, result });
+      return result;
+    };
+    try {
+      // One busy thread, one free slot: when the delegator's turn settles
+      // and the handoff drains, it must land in the target's standing
+      // thread — its newest task thread — instead of waiting for the whole
+      // bot to go idle. Every turn here, including the agentless delegated
+      // one, runs from its thread's task folder, so the fixture's shared
+      // cwd-keyed gates cover them all.
+      expect((await send(target.botId, target.threads[0], "HOLD_ONE_SLOT")).body.queued).toBeUndefined();
+      await dump(target.threads[0]);
+      expect(await busyThreads(target.botId)).toEqual([target.threads[0]]);
+      expect((await botState(target.botId)).busy).toBe(true);
+
+      const first = await delegatorTurn();
+      const queued = await delegate(first);
+      expect(queued.status).toBe(200);
+      expect(queued.body).toMatchObject({ queued: true, taskId: expect.any(String) });
+      finish(first.threadId);
+      await dump(target.threads[1]);
+      // The busy list orders by recent activity, not thread creation.
+      expect((await busyThreads(target.botId)).sort()).toEqual([...target.threads].sort());
+      expect((await botState(target.botId)).busy).toBe(true);
+
+      // Standing thread busy and capacity full: the next handoff holds with
+      // a visible wait instead of dispatching.
+      const second = await delegatorTurn();
+      const held = await delegate(second);
+      expect(held.body).toMatchObject({ queued: true, taskId: expect.any(String) });
+      finish(second.threadId);
+      await expect.poll(async () => (await runState(second.runId))?.status, { timeout: 15_000 }).toBe("waiting");
+      expect((await messages(second.threadId)).some((message) => message.kind === "activity" && message.tool?.name?.includes("waiting — they're busy"))).toBe(true);
+      expect((await busyThreads(target.botId)).sort()).toEqual([...target.threads].sort());
+
+      // The standing thread frees while the other stays busy: the held
+      // handoff re-tests its own admission and moves — the whole-bot busy
+      // flag is never the gate. Its turn lands in the just-freed thread,
+      // whose gate is already down, so it settles and wakes the delegator.
+      finish(target.threads[1]);
+      await expect.poll(async () => (await runState(second.runId))?.status, { timeout: 20_000 }).toBe("completed");
+      expect(await busyThreads(target.botId)).toEqual([target.threads[0]]);
+      expect((await runState(second.runId)).output).toContain("[A delegated task just completed]");
+      await expect.poll(async () => (await runState(first.runId))?.status, { timeout: 15_000 }).toBe("completed");
+      expect((await runState(first.runId)).output).toContain("[A delegated task just completed]");
+    } finally {
+      for (const bot of [target, source]) {
+        for (const threadId of await busyThreads(bot.botId)) finish(threadId);
+      }
+      await expect.poll(async () => (await busyThreads(target.botId)).length + (await busyThreads(source.botId)).length, { timeout: 15_000 }).toBe(0);
+      await api("DELETE", `/api/routines/${routineId}`).catch(() => undefined);
+      await api("DELETE", `/api/bots/${target.botId}`).catch(() => undefined);
+      await api("DELETE", `/api/bots/${source.botId}`).catch(() => undefined);
+    }
+  }, 150_000);
+
   it("restores cancellable queued receipts from a fresh snapshot and broadcasts complete queue changes", async () => {
     await limit(1);
     const { botId, threads: [active, waiting, cancelled, deleted] } = await botWithThreads(4);
