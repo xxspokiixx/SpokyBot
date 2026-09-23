@@ -29,6 +29,13 @@ describe("configured bot creation", () => {
     return { draft, events, bodies, request, approvals };
   }
 
+  it("sets the chosen audience in the first creation request", async () => {
+    const f = fixture("ask");
+    await createConfiguredBot(f.draft, f.request, persistBotUpdate, f.approvals, "admins");
+    expect(f.events[0]).toBe("POST /api/bots");
+    expect(f.bodies[0]).toMatchObject({ visibility: "admins", useDefaults: false });
+  });
+
   for (const mode of ["ask", "auto", "full", "custom"] as const) {
     it(`commits ${mode} settings without reapplying the template`, async () => {
       const f = fixture(mode);
