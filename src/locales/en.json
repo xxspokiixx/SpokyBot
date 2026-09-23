@@ -2395,5 +2395,13 @@
   "engines.icon.formatError": "Upload a PNG, JPEG, or WebP image.",
   "engines.icon.sizeError": "Provider icons must be 128 KB or smaller.",
   "engines.icon.invalidError": "Upload a complete PNG, JPEG, or WebP image up to 128 KB and {dimension} × {dimension} pixels.",
-  "engines.icon.dimensionError": "Provider icons must be at most {dimension} × {dimension} pixels."
+  "engines.icon.dimensionError": "Provider icons must be at most {dimension} × {dimension} pixels.",
+  "room.usage.uncached": "{tokens} uncached input",
+  "room.usage.cached": "{tokens} cached input",
+  "room.usage.output": "{tokens} output",
+  "room.usage.input": "{tokens} input",
+  "room.usage.inputUnknown": "{tokens} input (cache split unknown)",
+  "room.usage.total": "This thread: {details}",
+  "room.usage.last": "Last turn · {name}: {details}",
+  "room.usage.cost": "Reported costs: {cost}"
 }

@@ -43,12 +43,11 @@ export type { InstalledPlaybook, InstalledPackageMetadata, MausColor, MausExpres
 /** One transcript line, serialized as stored — the shared wire shape. */
 export type Message = WireMessage;
 
-/** A room record: the shared wire shape minus the computed working flag,
- * which publicGroupState adds at projection time. */
-export type GroupRecord = Omit<WireGroup, "working">;
-/** Groups keep no private fields; the only projection work is the
- * transient `working` flag publicGroupState computes at broadcast time. */
-export type GroupWireProjection = GroupRecord & { working: boolean };
+/** A room record excludes working state and ledger usage, both computed by
+ * publicGroupState at projection time. */
+export type GroupRecord = Omit<WireGroup, "working" | "usage">;
+/** Groups keep no private fields; projection adds computed display fields. */
+export type GroupWireProjection = GroupRecord & Pick<WireGroup, "usage"> & { working: boolean };
 export type GroupWireProjectionIsExact = AssertExact<WireGroup, GroupWireProjection> & AssertSameKeys<WireGroup, GroupWireProjection>;
 export const groupWireProjectionIsExact: GroupWireProjectionIsExact = true;
 

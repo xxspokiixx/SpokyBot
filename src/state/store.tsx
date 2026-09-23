@@ -13,7 +13,7 @@ import {
   useState,
   type ReactNode,
 } from "react";
-import type { BotVisibility, CloudBackend, EffortLevel, ServerFrame } from "../../shared/wire";
+import type { BotVisibility, CloudBackend, EffortLevel, ServerFrame, GroupThreadUsage } from "../../shared/wire";
 import type { TurnDigest } from "../../shared/digest";
 import type { ModelVariantOption, RuntimeEvent } from "../../shared/runtime-events";
 import type { MausColor, MausMotion } from "@/lib/mascot";
@@ -203,6 +203,7 @@ export type GroupDefaultResponder =
 
 /** A room: several bots + you in one shared thread. */
 export interface Group {
+  usage?: GroupThreadUsage | null;
   id: string;
   threadId: string;
   name: string;
