@@ -1161,6 +1161,16 @@ function hasDirectDispatch(botId: string): boolean {
   return [...directTurnDispatchClaims.values()].some((claim) => claim.botId === botId);
 }
 
+/** Exactly what startTurn admits for a direct thread: the landing thread
+ * itself free, a free capacity slot, and no live group turn. Never the
+ * whole-bot busy flag — that is true whenever ANY thread is working,
+ * waiting on a person, or has no signal. Delegations and the resume drains
+ * share this test so peer and room work waits for a real slot, not total
+ * bot idleness. */
+function canAdmitDirectTurn(botId: string, threadId: string): boolean {
+  return !threadBusy(botId, threadId) && !botAtThreadCapacity(botId) && !activeGroupTurnForBot(botId);
+}
+
 /** Routine and webhook dispatch shares startTurn's admission preconditions
  * instead of waiting for whole-bot idleness: a free thread slot and no
  * active group turn. A group turn blocks scheduled starts the same way it
@@ -5914,14 +5924,12 @@ function retryDelegationsWaitingOn(botId: string): void {
     // Explicit idle releases (room/setup/reload/watchdog fallbacks) may not
     // publish turn.completed. They free a waiting source continuation too.
     drainDelegationWakes();
-    // A bot still busy in one thread has nevertheless freed a slot: the
-    // fresh-thread handoffs waiting on it can move, while the active-thread
-    // ones keep waiting for it to go idle, as they always have.
-    const stillBusy = store.bot(botId)?.busy === true;
-    if (stillBusy && botAtThreadCapacity(botId)) return;
-    const released = stillBusy
-      ? releaseDelegationsWaitingOn(botId, (item) => item.targetThreadId !== undefined)
-      : releaseDelegationsWaitingOn(botId);
+    // A bot still busy in one thread has nevertheless freed a slot: every
+    // handoff waiting on it re-tests its own admission — a fresh-thread
+    // handoff asks for any free slot, a classic one the standing thread's
+    // startTurn admission — so neither waits for whole-bot idleness.
+    if (store.bot(botId)?.busy === true && botAtThreadCapacity(botId)) return;
+    const released = releaseDelegationsWaitingOn(botId);
     for (const waitingThread of released) {
       drainThreadDelegations(waitingThread);
     }
@@ -7605,7 +7613,12 @@ async function stopBotForEmergencyApprovalDowngrade(botId: string): Promise<void
 // Load queued handoffs before scheduler recovery can fail an interrupted
 // run. Its failure callback can then durably drop that work immediately;
 // nothing dispatches until the listener is ready below.
-const commsBus: CommsBus = { store, broadcast, threadSlotFree: (botId) => !botAtThreadCapacity(botId) };
+const commsBus: CommsBus = {
+  store,
+  broadcast,
+  threadSlotFree: (botId) => !botAtThreadCapacity(botId),
+  canAdmitDirectTurn,
+};
 _loadPending();
 
 routines = new RoutineManager({
@@ -8078,7 +8091,7 @@ function dispatchTeamSetupResume(entry: TeamSetupResumeEntry): void {
   const owner = connectorThread(request.botId, request.threadId);
   const message = store.messagesFor(request.threadId).find((item) => item.id === messageId);
   if (!owner || !message?.card?.teamSetupRequest?.result) return;
-  if (owner.group ? owner.bot.busy : threadBusy(request.botId, request.threadId) || activeGroupTurnForBot(request.botId)) {
+  if (!canAdmitDirectTurn(request.botId, request.threadId)) {
     pendingTeamSetupResumes.set(request.requestId, entry);
     return;
   }
@@ -8112,8 +8125,7 @@ function dispatchTeamSetupResume(entry: TeamSetupResumeEntry): void {
 }
 function drainTeamSetupResumes(): void {
   for (const [key, entry] of pendingTeamSetupResumes) {
-    const owner = connectorThread(entry.request.botId, entry.request.threadId);
-    if (owner?.group ? owner.bot.busy : threadBusy(entry.request.botId, entry.request.threadId) || activeGroupTurnForBot(entry.request.botId)) continue;
+    if (!canAdmitDirectTurn(entry.request.botId, entry.request.threadId)) continue;
     pendingTeamSetupResumes.delete(key);
     dispatchTeamSetupResume(entry);
   }
@@ -10392,7 +10404,7 @@ function dispatchConnectorResume(entry: { botId: string; threadId: string; resum
   if (!owner) return;
   const names = entry.labels.join(", ");
   const prompt = `OpenMausBot connection update: the user securely connected ${names}. Continue the task that paused for this connection. Do not ask them to connect it again.`;
-  if (owner.group ? owner.bot.busy : threadBusy(entry.botId, entry.threadId) || activeGroupTurnForBot(entry.botId)) {
+  if (!canAdmitDirectTurn(entry.botId, entry.threadId)) {
     pendingConnectorResumes.set(`${entry.threadId}:${entry.resumeKey}`, entry);
     return;
   }
@@ -10455,8 +10467,7 @@ function maybeResumeConnectors(botId: string, threadId: string, resumeKey: strin
 
 function drainConnectorResumes() {
   for (const [key, entry] of pendingConnectorResumes) {
-    const owner = connectorThread(entry.botId, entry.threadId);
-    if (owner?.group ? owner.bot.busy : threadBusy(entry.botId, entry.threadId) || activeGroupTurnForBot(entry.botId)) continue;
+    if (!canAdmitDirectTurn(entry.botId, entry.threadId)) continue;
     pendingConnectorResumes.delete(key);
     dispatchConnectorResume(entry);
   }
@@ -10537,7 +10548,7 @@ function dispatchSecretResume(entry: SecretResumeEntry) {
     entry.outcome === "provided"
       ? `OpenMausBot credential update: the user securely provided ${entry.label}. Continue the task that paused for it. You do not receive the secret and must not ask them to paste it into chat.`
       : `OpenMausBot credential update: the user declined to provide ${entry.label}. Continue without it if possible, or briefly explain the limitation. Do not ask them to paste it into chat.`;
-  if (owner.group ? owner.bot.busy : threadBusy(entry.botId, entry.threadId) || activeGroupTurnForBot(entry.botId)) {
+  if (!canAdmitDirectTurn(entry.botId, entry.threadId)) {
     pendingSecretResumes.set(`${entry.threadId}:${entry.messageId}`, entry);
     return;
   }
@@ -10708,8 +10719,7 @@ async function provideSecretFromPhone(
 
 function drainSecretResumes() {
   for (const [key, entry] of pendingSecretResumes) {
-    const owner = connectorThread(entry.botId, entry.threadId);
-    if (owner?.group ? owner.bot.busy : threadBusy(entry.botId, entry.threadId) || activeGroupTurnForBot(entry.botId)) continue;
+    if (!canAdmitDirectTurn(entry.botId, entry.threadId)) continue;
     pendingSecretResumes.delete(key);
     dispatchSecretResume(entry);
   }

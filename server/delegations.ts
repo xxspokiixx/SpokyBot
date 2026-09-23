@@ -746,17 +746,19 @@ async function processOne(
   return "dispatched";
 }
 
-/** "Is the target free to take this handoff right now?" What "busy" means
- * depends on where the turn will run: a classic delegation lands in the
- * target's active thread, so it needs the bot to be idle; a fresh-thread
- * handoff needs only a free slot. This is the single free/busy test shared
- * by the expiry decision in `processOne` and the hold decision below, so
- * the two can never disagree about whether a handoff could have been
- * delivered right now. */
+/** "Is the target free to take this handoff right now?" Both shapes ask for
+ * a free capacity slot, never whole-bot idleness: a classic delegation lands
+ * in the target's standing thread and applies the same admission startTurn
+ * uses for a direct turn there, while a fresh-thread handoff needs any free
+ * slot. This is the single free/busy test shared by the expiry decision in
+ * `processOne` and the hold decision below, so the two can never disagree
+ * about whether a handoff could have been delivered right now. */
 function targetCanTakeTurn(bus: CommsBus, target: BotRecord, item: PendingDelegationItem): boolean {
   return item.targetThreadId
     ? (bus.threadSlotFree ? bus.threadSlotFree(target.id) : !target.busy)
-    : !target.busy;
+    : bus.canAdmitDirectTurn
+      ? bus.canAdmitDirectTurn(target.id, target.threadId)
+      : !target.busy;
 }
 
 /** A busy target holds the handoff. Neither counts busy periods — the only
