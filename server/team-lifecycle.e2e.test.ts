@@ -45,7 +45,12 @@ it("retains empty teams, moves existing bots, and keeps legacy imports additive 
     expect((await api("/api/section-context?section=Renamed")).text).toBe("Finish research before engineering.");
     expect(await messages()).toEqual(transcript);
     await api("/api/sidebar-sections?section=Renamed", "PATCH", { name: "Delivery" });
-    await api("/api/sidebar-sections?section=Delivery", "DELETE", undefined, 409);
+    const edited = await api("/api/sidebar-sections?section=Delivery", "PUT", { addBotIds: [], removeBotIds: [b.id] });
+    expect(edited.bots.find((bot: any) => bot.id === b.id).section).toBeUndefined();
+    await api("/api/sidebar-sections?section=Delivery", "PUT", { addBotIds: [a.id], removeBotIds: [b.id] }, 409);
+    await api("/api/sidebar-sections?section=Delivery", "PUT", { addBotIds: ["missing"], removeBotIds: [a.id] }, 404);
+    await api("/api/sidebar-sections?section=Delivery", "PUT", { addBotIds: [b.id], removeBotIds: [] });
+    expect(await messages()).toEqual(transcript);
     await api("/api/sidebar-sections", "POST", { name: "", botIds: [a.id, b.id] });
     expect((await api("/api/sidebar-sections")).sections).toContain("Delivery");
     await api("/api/sidebar-sections?section=Delivery", "PATCH", { name: "Launch" });
@@ -63,12 +68,12 @@ it("retains empty teams, moves existing bots, and keeps legacy imports additive 
     expect((await api("/api/section-context?section=Launch")).text).toBe("Finish research before engineering.");
     expect(await messages()).toEqual(transcript);
 
-    // Archived membership still prevents deleting an occupied team.
+    // Removing a populated team keeps archived bots and their conversations.
     await api(`/api/bots/${imported.bots[0].id}`, "PATCH", { hidden: true });
-    await api("/api/sidebar-sections?section=Launch%202", "DELETE", undefined, 409);
-    await api(`/api/bots/${imported.bots[0].id}`, "DELETE");
-    expect((await api("/api/sidebar-sections")).sections).toContain("Launch 2");
     await api("/api/sidebar-sections?section=Launch%202", "DELETE");
+    expect((await api("/api/bots?messages=0")).bots.find((bot: any) => bot.id === imported.bots[0].id)).toMatchObject({ hidden: true });
+    expect((await api("/api/bots?messages=0")).bots.find((bot: any) => bot.id === imported.bots[0].id).section).toBeUndefined();
+    expect(await messages()).toEqual(transcript);
     await api("/api/sidebar-sections?section=missing", "DELETE", undefined, 404);
 
     await waitForExit(fixture.child, { signal: "SIGTERM" });

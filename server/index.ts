@@ -105,7 +105,7 @@ import {
 } from "./cloud-backend.ts";
 import * as composio from "./composio.ts";
 import { chiefOfStaffSystemPrompt } from "./chief-of-staff.ts";
-import { canAccessTeam, canReachPeer, peerAllowed, peerName, peerRosterSystemPrompt, peerStatus, peerStatusWords, reachablePeers, resolveTeammate, roomPeerRosterSystemPrompt, roomRosterLine, PEER_ACCESS_HELP } from "./peer-roster.ts";
+import { canAccessTeam, canReachPeer, coordinatorSupervises, peerAllowed, peerName, peerRosterSystemPrompt, peerStatus, peerStatusWords, reachablePeers, resolveTeammate, roomPeerRosterSystemPrompt, roomRosterLine, PEER_ACCESS_HELP } from "./peer-roster.ts";
 import { openMausStatusSystemPrompt } from "./openmaus-status-capsule.ts";
 import {
   containerComputerAction,
@@ -161,6 +161,7 @@ import { ComputerControl } from "./computer-control.ts";
 import { augmentedPath, findCliCandidates, resetPathCache } from "./env-path.ts";
 import { registerEnginesBinDir } from "./engine-install.ts";
 import { appendUsage, parseUsageRange, readUsage, summarizeUsage, usageCsv, USAGE_GROUPINGS, flushUsageLedger, type UsageGroupBy, type UsageRow, type UsageTrigger } from "./usage-ledger.ts";
+import { GroupUsageReader } from "./group-thread-usage.ts";
 import { ledgerCost } from "./model-prices.ts";
 import type { PriceList } from "./prices.ts";
 import type { RequestAuth } from "./request-auth.ts";
@@ -252,8 +253,8 @@ import { ManagedDesktopProviders } from "./managed-desktop.ts";
 import { computerKindForResource, ManagedDesktopPolicy } from "./managed-policy.ts";
 import { hostedModelPolicy, HOSTED_MODEL_POLICY_HEADER, HOSTED_PROVIDER_SETTINGS_ERROR } from "./hosted-models.ts";
 import type { ProviderInstance } from "./contracts.ts";
-import { selectDefaultModelSelection } from "./default-model-selection.ts";
-import { cancelPeerApprovalsFor, cancelPeerApprovalsForThread, dismissStalePeerCards, requestPeerApproval, resolvePeerComms, type ApprovalBus } from "./peer-approval.ts";
+import { selectDefaultModelSelection, withNewBotEffort } from "./default-model-selection.ts";
+import { cancelPeerApprovalsFor, cancelPeerApprovalsForThread, dismissStalePeerCards, peerApprovalFailure, requestPeerApproval, resolvePeerComms, type ApprovalBus } from "./peer-approval.ts";
 import { peerProvenanceNote, withPeerProvenance } from "./peer-provenance.ts";
 import { decideRoomPost, emptyRoomPostBudget, type RoomPostAttempt, type RoomPostBudget } from "./room-post-budget.ts";
 import {
@@ -325,6 +326,8 @@ import {
   applySkillWriteWithReceipt,
   getStagedSkillWrite,
   installSkill,
+  parseSkillMd,
+  scanSkillText,
   listSkills,
   listStagedSkillWrites,
   isSkillName,
@@ -336,12 +339,15 @@ import {
   stageSkillWrite,
 } from "./skills.ts";
 import { fetchSkillFromSource } from "./skill-fetch.ts";
+import { pickBotName } from "./names.ts";
+import { botSkillTemplateSchema, newBotDefaultsSchema, resolveBotCreationDefaults } from "./new-bot-defaults.ts";
 import { expandLearnTurnText, learnSource } from "./skill-learn.ts";
 import { expandSetupTurnText, setupModeActive, setupSystemPrompt } from "./setup-mode.ts";
 import type { SkillRequestCardData } from "../shared/skill-request.ts";
 import { checkSoulDrift, readSoulDrift, soulFile, writeSoulMirror } from "./bot-folder.ts";
 import {
   buildSystemPrompt,
+  userProfileSystemPrompt,
   computerPrompt,
   COMPOSIO_PROMPT,
   customMcpPrompt,
@@ -355,7 +361,7 @@ import {
   WEBHOOK_PROMPT,
   type ComputerPromptKind,
 } from "./system-prompt.ts";
-import { readCuaConnection, gatedLocalComputer } from "./local-computer.ts";
+import { readCuaConnection, readCuaUnavailableReason, gatedLocalComputer } from "./local-computer.ts";
 import {
   discoverExistingPerBotLocalVms,
   localVmInventoryEntry,
@@ -414,7 +420,7 @@ import { MAX_TEAM_BACKUP_BYTES } from "../shared/team-backup.ts";
 import { shouldMountLocalComputer } from "./local-routing.ts";
 import { autoLocalVmAttachable, type ContainerComputerStatus } from "./container-computer.ts";
 import { startAutoVmClaim, type AutoVmClaimTable } from "./auto-vm-claims.ts";
-import { computerFreeText, computerStillBusyText, computerWaitEndedText, computerWaitingText, type ComputerHolder } from "./computer-wait.ts";
+import { computerFreeAfterText, computerStillBusyText, computerStoppedWaitingText, computerWaitingText, type ComputerHolder } from "./computer-wait.ts";
 import { modelContextWindow } from "./model-context-window.ts";
 import { parseSurface, resolveSurface, surfaceLabel, surfaceOfComputerKind, surfacePrompt, type Surface } from "./surface.ts";
 import {
@@ -1360,7 +1366,7 @@ type InternalCapability = {
   threadId: string;
   generation: string;
   depth: number;
-  kind: "agents" | "connectors" | "computer" | "browser" | "hooks";
+  kind: "agents" | "connectors" | "computer" | "browser" | "hooks" | "phone";
   skillAuthoring: boolean;
   createdBots: number;
   createdRooms?: number;
@@ -1631,6 +1637,7 @@ type DirectTurnDispatchClaim = {
   phase: "setup" | "dispatching";
 };
 class DirectTurnSetupCancelled extends Error {}
+class ComputerWaitGaveUp extends Error {}
 const directTurnDispatchClaims = new Map<string, DirectTurnDispatchClaim>();
 const directTurnGenerationByThread = new Map<string, string>();
 // Only the latest direct request per thread is retained. A fresh user turn
@@ -1704,7 +1711,48 @@ async function bindTurnComputer(owner: TurnOwner, resource: string, exclusive = 
   // Who holds the desktop, as the chip and the give-up error name them: a
   // bot running a titled thread, or a room. Read once, when the wait begins.
   let holder: ComputerHolder | undefined;
+  let holderThreadRef: { botId: string; threadId: string; title: string } | undefined;
   const deadline = Date.now() + GROUP_GOAL_WAIT_MAX_MS;
+  // The wait is history the transcript keeps (#1647): the waiting chip stays
+  // exactly as written, a resolution line is appended beside it, and the
+  // turn.wait_* events carry the same facts for the inspector log.
+  let waitedSince: number | undefined;
+  let waitEnded = false;
+  const waitEventBase = () => {
+    const selection = store.botByThread(owner.threadId)?.modelSelection;
+    const instance = selection ? registry.get(selection.instanceId) : null;
+    return {
+      eventId: newId(),
+      provider: instance?.driverKind ?? "harness",
+      ...(instance && selection ? { providerInstanceId: selection.instanceId } : {}),
+      threadId: owner.threadId,
+      createdAt: new Date().toISOString(),
+    };
+  };
+  const endWait = (outcome: "acquired" | "gave_up" | "stopped") => {
+    if (!waitingMessage || waitEnded) return;
+    waitEnded = true;
+    const waitedMs = waitedSince === undefined ? 0 : Date.now() - waitedSince;
+    const text = outcome === "acquired"
+      ? computerFreeAfterText(holder, waitedMs)
+      : outcome === "gave_up"
+        ? computerStillBusyText(holder, waitedMs)
+        : computerStoppedWaitingText(holder, waitedMs);
+    store.appendMessage(owner.threadId, {
+      role: "bot", kind: "activity",
+      ...(outcome === "gave_up" ? { turnSucceeded: false } : {}),
+      tool: { name: text, ok: outcome !== "gave_up" },
+      ...(holderThreadRef ? { threadRef: holderThreadRef } : {}),
+    });
+    bus.publish({
+      ...waitEventBase(),
+      type: "turn.wait_ended",
+      resource,
+      ...(holder ? { holder } : {}),
+      waitedMs,
+      outcome,
+    });
+  };
   try {
     while (true) {
       if (!active()) throw new DirectTurnSetupCancelled("Computer wait cancelled");
@@ -1717,19 +1765,32 @@ async function bindTurnComputer(owner: TurnOwner, resource: string, exclusive = 
         holder = holderBot
           ? { name: holderBot.name, ...(holderTask?.title ? { task: holderTask.title } : {}) }
           : holderRoom ? { name: holderRoom.name } : undefined;
+        holderThreadRef = holderBot && holderTask?.title
+          ? { botId: holderBot.id, threadId: holderTask.threadId, title: holderTask.title }
+          : undefined;
         waitingMessage = store.appendMessage(owner.threadId, {
           role: "bot", kind: "activity",
           tool: { name: computerWaitingText(holder) },
-          ...(holderBot && holderTask ? { threadRef: { botId: holderBot.id, threadId: holderTask.threadId, title: holderTask.title } } : {}),
+          ...(holderThreadRef ? { threadRef: holderThreadRef } : {}),
+        });
+        waitedSince = Date.now();
+        bus.publish({
+          ...waitEventBase(),
+          type: "turn.wait_started",
+          resource,
+          ...(holder ? { holder } : {}),
         });
       }
-      if (Date.now() >= deadline) throw new Error(computerStillBusyText(holder, GROUP_GOAL_WAIT_MAX_MS));
+      if (Date.now() >= deadline) {
+        endWait("gave_up");
+        throw new ComputerWaitGaveUp(computerStillBusyText(holder, GROUP_GOAL_WAIT_MAX_MS));
+      }
       await new Promise<void>(resolve => setTimeout(resolve, 100));
     }
   } finally {
-    if (waitingMessage) store.patchMessage(owner.threadId, waitingMessage.id, {
-      tool: { name: active() && turnResources.owns(resource, owner) ? computerFreeText() : computerWaitEndedText(), ok: true },
-    });
+    // Never patch the waiting chip over: the queue position this turn held
+    // stays visible beside what the wait came to.
+    endWait(active() && turnResources.owns(resource, owner) ? "acquired" : "stopped");
   }
   turnResourceOwners.set(owner.threadId, owner);
   turnComputerResources.set(owner.threadId, { owner, resource });
@@ -2033,8 +2094,26 @@ export function browserEngineSummary(): { kind: "engine" | "unavailable"; reason
     : { kind: "unavailable", reason: status.reason, installable: status.installable, ...progress };
 }
 
-function phoneIntegration() {
-  const env: Record<string, string> = { ...AGENTS_NODE_FLAG };
+function phoneIntegration(botId: string, threadId: string, generation: string) {
+  // The phone is claimed lazily, at the first tools/call the engine makes
+  // through this proxy (/api/internal/phone/claim): trigger-term matching
+  // only decides whether the tools are mounted, so a conversation that
+  // merely mentions "android" holds nothing while it runs.
+  const token = mintInternalCapability({
+    botId,
+    threadId,
+    generation,
+    depth: 0,
+    kind: "phone",
+    skillAuthoring: false,
+    createdBots: 0,
+    openedThreads: 0,
+  });
+  const env: Record<string, string> = {
+    ...AGENTS_NODE_FLAG,
+    OMB_PHONE_TOKEN: token,
+    OMB_HARNESS_URL: `http://127.0.0.1:${PORT}`,
+  };
   if (process.env.OMB_ADB_PATH) env.OMB_ADB_PATH = process.env.OMB_ADB_PATH;
   if (process.env.OMB_RESOURCES_PATH) env.OMB_RESOURCES_PATH = process.env.OMB_RESOURCES_PATH;
   if (process.env.PH_ANDROID_SERIAL) env.PH_ANDROID_SERIAL = process.env.PH_ANDROID_SERIAL;
@@ -2385,7 +2464,10 @@ function checkedMemberIds(value: unknown): { ok: true; memberIds: string[] } | {
   return { ok: true, memberIds };
 }
 let bootSelection = { instanceId: "", model: "" };
-const store = new Store(() => bootSelection);
+const store = new Store(
+  () => bootSelection,
+  (selection) => withNewBotEffort(selection, cfg.newBots?.effort, registry.get(selection.instanceId)?.adapter.capabilities.effortLevels),
+);
 const teamComputers = new TeamComputers(join(DATA_DIR, "team-computers.json"), ENVIRONMENT_ID);
 let followupsReady = false;
 const sendSequencer = new SendSequencer();
@@ -2491,6 +2573,7 @@ function previewSystemPrompt(bot: BotRecord) {
   });
   const privateWorkspace = instance && supportsWorkspaceFiles(instance.driverKind);
   const built = buildSystemPrompt(persona, bot.soul ?? "", [
+    { id: "user-profile", label: "About the user", text: userProfileSystemPrompt(cfg.profile) },
     {
       id: "setup",
       label: "Setup",
@@ -3351,7 +3434,7 @@ function roomHandoffProblem(node: Pick<RoomHandoff, "groupId" | "threadId" | "bo
   // cannot silently give a specialist access to another team's transcript.
   const outsideSection = (room: GroupRecord, speaker: BotRecord) => room.memberIds.some(id => {
     const member = store.bot(id);
-    return member && !canAccessTeam(speaker, member.section);
+    return member && !canAccessTeam(speaker, member.section) && !coordinatorSupervises(member, speaker);
   });
   if (group && outsideSection(group, bot)) return "Destination room includes a member outside the agent's section";
   if (group && roomSetupPending(group)) return "Destination room setup is unfinished";
@@ -3359,7 +3442,10 @@ function roomHandoffProblem(node: Pick<RoomHandoff, "groupId" | "threadId" | "bo
     const from = store.bot(parent.botId);
     const source = parent.groupId ? store.group(parent.groupId) : undefined;
     if (!from || from.hidden || (parent.groupId ? !source || !source.memberIds.includes(from.id) || !store.groupTaskByThread(source.id, parent.threadId) : !store.taskByThread(from.id, parent.threadId))) return "Source membership or task was removed";
-    if (!canAccessTeam(from, bot.section) || (source && outsideSection(source, from))) return "Room work cannot cross the sender's section boundary";
+    // A specialist may address its supervisor in their shared conversation;
+    // supervision alone never grants a direct chat or another room's access.
+    const sharedSupervisor = source && group && source.id === group.id && parent.threadId === node.threadId && coordinatorSupervises(bot, from);
+    if ((!canAccessTeam(from, bot.section) && !sharedSupervisor) || (source && outsideSection(source, from))) return "Room work cannot cross the sender's section boundary";
     if (source && group && source.id === group.id && parent.threadId !== node.threadId) return "Same-room work must stay in the originating conversation";
     if (!peerAllowed(from, bot)) return "The recipient is not an allowed peer of the sender";
   }
@@ -3477,11 +3563,12 @@ const roomHandoffs = new RoomHandoffs(join(DATA_DIR, "room-handoffs.json"), {
     const result: GroupTurnOrchestration["result"] = {};
     const turnText = coordinationTurnText(node, resumed);
     const systemInstructions = coordinationSystemInstructions();
-    if (!resumed && !store.messagesFor(node.threadId).some(m => m.roomRequest?.id === node.id && m.roomRequest.phase === "request")) {
+    const request = roomHandoffs.sharedRequest(node);
+    if (!resumed && !store.messagesFor(node.threadId).some(m => m.roomRequest?.id === request.id && m.roomRequest.phase === "request")) {
       store.appendMessage(node.threadId, { role: "bot", kind: "text",
-        roomRequest: { id: node.id, phase: "request" },
+        roomRequest: { id: request.id, phase: "request" },
         from: sender ? { botId: sender.id, name: sender.name, color: sender.color } : undefined,
-        text: `@${bot.name} ${node.text}`,
+        text: `${request.botIds.map(id => `@${store.bot(id)?.name ?? "Teammate"}`).join(" ")} ${node.text}`,
       });
     }
     markInternalTurn(node.threadId);
@@ -3547,8 +3634,12 @@ const roomHandoffs = new RoomHandoffs(join(DATA_DIR, "room-handoffs.json"), {
   },
 }, Date.now, roomHandoffLimits(cfg));
 activeCoordinationForThread = threadId => roomHandoffs.activeDirect(threadId);
+const groupUsageReader = new GroupUsageReader(DATA_DIR);
+try { groupUsageReader.refresh(); } catch { /* accounting must not block startup */ }
 function publicGroupState(group: GroupRecord): WireGroup {
-  return { ...group, working: groupIsWorking(group) || [...roomHandoffs.nodes.values()].some(n => n.groupId === group.id && !["completed", "failed", "cancelled"].includes(n.status)) };
+  let usage: WireGroup["usage"];
+  try { usage = groupUsageReader.forThread(group.threadId); } catch { /* accounting must not block chat */ }
+  return { ...group, usage: usage ?? null, working: groupIsWorking(group) || [...roomHandoffs.nodes.values()].some(n => n.groupId === group.id && !["completed", "failed", "cancelled"].includes(n.status)) };
 }
 
 function beginGroupTurnOperation(
@@ -4930,7 +5021,12 @@ async function mountHostComputer(owner: TurnOwner, botId: string, providerSuppor
       : "this model engine cannot control this computer — choose Claude or an ACP engine, or select another destination");
   }
   const cua = readCuaConnection();
-  if (!cua) throw new Error("CUA Driver is not ready for this computer — check permissions and restart OpenMausBot");
+  if (!cua) {
+    const reason = readCuaUnavailableReason();
+    throw new Error(reason
+      ? `CUA Driver is not ready for this computer — ${reason}${process.platform === "darwin" && /(?:Screen Recording|Accessibility).*required/i.test(reason) ? ". Relaunch OpenMausBot after granting the missing macOS permission." : ""}`
+      : "CUA Driver is not ready for this computer — check permissions and restart OpenMausBot");
+  }
   await bindTurnComputer(owner, "computer:host");
   return gatedLocalComputer(cua, controlIntegration(botId, owner.threadId, owner.generation));
 }
@@ -4944,7 +5040,7 @@ async function mountHostComputer(owner: TurnOwner, botId: string, providerSuppor
 async function mountBotVps(
   bot: BotRecord,
   owner: TurnOwner,
-  opts: { start: boolean; onClaimed: (capture: () => Promise<{ png: string; format: string }>) => void },
+  opts: { start: boolean; onClaimed: (capture: () => Promise<{ png: string; format: string }>) => void; onRejected?: (failure: string) => void },
 ) {
   const vpsResource = `computer:vps:${vpsSshAlias(cfg)}:${bot.id}`;
   const remote = opts.start
@@ -4961,6 +5057,7 @@ async function mountBotVps(
     owner,
     lazy: true,
     label: "the VPS computer",
+    onRejected: opts.onRejected,
     claim: async () => {
       await bindTurnComputer(owner, vpsResource, true);
       opts.onClaimed(vpsCapture);
@@ -5816,7 +5913,13 @@ bus.subscribe((event: RuntimeEvent) => {
       lastReply.delete(event.threadId);
       // A run that broke — not one the person stopped, and not a routine's,
       // which reports through its own failure path — is the Chief's to see.
-      if (!event.ok && event.stopReason !== "interrupted" && !routines?.runForThread(event.threadId)) {
+      // A lazy computer-claim rejection already reported its failure and
+      // interrupted the turn; Claude settles that interrupt as
+      // exit_before_result, not "interrupted", so this generation's marker
+      // keeps the same failure from reporting a second incident.
+      const lazyClaimAlreadyReported = event.stopReason === "exit_before_result" &&
+        turnResourceOwners.get(event.threadId)?.lazyClaimFailureReported === true;
+      if (!event.ok && event.stopReason !== "interrupted" && !lazyClaimAlreadyReported && !routines?.runForThread(event.threadId)) {
         const broken = bot ?? (speaker ? store.bot(speaker.botId) : undefined);
         if (broken) reportIncident({ kind: "failed", bot: broken, threadId: event.threadId, detail: event.stopReason?.trim() || "the run ended without a result" });
       }
@@ -5980,6 +6083,13 @@ bus.subscribe((event: RuntimeEvent) => {
             ? { kind: "routine", routineId: routineRun.routineId, label: routineRun.routineName }
             : turnTriggers.get(event.threadId) ?? { kind: "owner" },
         });
+        // Appends are asynchronous. Refresh after persistence so the settled
+        // turn appears immediately, without waiting for another message.
+        void flushUsageLedger(DATA_DIR).then(() => {
+          groupUsageReader.refresh();
+          const current = store.group(group.id);
+          if (current) broadcast({ kind: "group", group: publicGroupState(current) });
+        }).catch(() => {});
         if (completedTurnId) {
           void scheduleTurnDigest({
             botId: speaker.botId, botName: speaker.name,
@@ -7161,7 +7271,7 @@ async function startTurn(
   // in the background — box provisioning can take ~90s and must never
   // hang the HTTP request
   const dispatchClaimId = randomUUID();
-  const resourceOwner = { threadId, generation: dispatchClaimId };
+  const resourceOwner: TurnOwner = { threadId, generation: dispatchClaimId };
   turnResourceOwners.set(threadId, resourceOwner);
   directTurnGenerationByThread.set(threadId, dispatchClaimId);
   let requestMessageId = opts?.cardContinuation ? opts.requestMessageId : userMessage.id;
@@ -7373,8 +7483,7 @@ async function startTurn(
         availableSkills(),
       );
       if (selectedSkills.some((skill) => skill.manifest.requiredCapabilities.includes("phoneMcp"))) {
-        if (!claimTurnResource(resourceOwner, "computer:phone")) throw new Error("another thread is using the phone — wait for it to finish");
-        integrations.phone = phoneIntegration();
+        integrations.phone = phoneIntegration(bot.id, threadId, dispatchClaimId);
       }
       // the user's connected apps, but only to a driver that can mount
       // them — a key in the config says the connections exist, not that
@@ -7543,6 +7652,32 @@ async function startTurn(
         return { target: localVmTarget, runtime: localVm.runtime };
       };
 
+      // Issue #1369: a lazy claim that rejects must not leave its turn busy
+      // behind a gate that can only refuse. Surface the terminal
+      // computer-unavailable error, then end the turn. Fenced to this
+      // dispatch generation and a still-busy thread, so a rejection landing
+      // after settle — or after a newer turn owns the thread — never touches
+      // the newer turn. The gate's refusals stay fail-closed for any screen
+      // call racing this teardown; the turn-failed buzz and incident follow
+      // the dispatch-failure rules (person-started turns only).
+      const surfaceLazyClaimRejection = (label: string) => (failure: string) => {
+        if (activeInternalGenerationByThread.get(threadId) !== resourceOwner.generation || !threadBusy(bot.id, threadId)) return;
+        const message = `computer unavailable — ${label} could not be claimed for this turn (${failure})`;
+        store.appendMessage(threadId, {
+          role: "bot",
+          kind: "activity",
+          tool: { name: `error: ${message.slice(0, 160)}`, ok: false },
+        });
+        if (opts?.automationSource === undefined && !opts?.commsDepth && !opts?.cardContinuation) {
+          notify(buildNotification("turn-failed", bot, threadId, redactSecretsInText(message), { avatarUrl: bot.avatarUrl }));
+          reportIncident({ kind: "could-not-start", bot, threadId, detail: message });
+          // Claude settles the interrupt below as exit_before_result; the
+          // completion fold must not report this failure a second time.
+          resourceOwner.lazyClaimFailureReported = true;
+        }
+        void interruptDirectThread(bot.id, threadId).catch(() => {});
+      };
+
       // Explicit destinations are strict. In particular, Local VM must never
       // fall through to host CUA and accidentally click on the user's Mac.
       // The Local VM attach, shared by explicit "Local VM" and by Auto. Explicit
@@ -7584,6 +7719,7 @@ async function startTurn(
               owner: resourceOwner,
               lazy: true,
               label: "the Local VM",
+              onRejected: surfaceLazyClaimRejection("the Local VM"),
               claim: async () => {
                 await claimAutoLocalVm(threadId, localVmTarget);
                 // The dispatch-site poller start saw a null previewCapture
@@ -7671,6 +7807,7 @@ async function startTurn(
                 );
               }
             },
+            onRejected: surfaceLazyClaimRejection("the VPS computer"),
           });
           if ("integration" in mounted) {
             integrations.localComputer = mounted.integration;
@@ -7912,6 +8049,7 @@ async function startTurn(
         throw new DirectTurnSetupCancelled("Coordination access changed before dispatch");
       }
       const prompt = buildSystemPrompt(persona, liveBot?.soul ?? bot.soul ?? "", [
+        { id: "user-profile", label: "About the user", text: userProfileSystemPrompt(cfg.profile) },
         // first after the soul: the block names agent tools, so it only goes
         // to a turn whose engine actually mounted them (setupMode is already
         // false when they are not — see agentsMounted above)
@@ -8080,7 +8218,9 @@ async function startTurn(
       }
       if (!ownsLatestGeneration) return;
       const message = e instanceof Error ? e.message : String(e);
-      store.appendMessage(threadId, {
+      // The wait already wrote its failure resolution; keep all dispatch
+      // failure bookkeeping below without adding the same error twice.
+      if (!(e instanceof ComputerWaitGaveUp)) store.appendMessage(threadId, {
         role: "bot",
         kind: "activity",
         turnSucceeded: false,
@@ -8565,7 +8705,7 @@ async function deleteBotWithLifecycle(botId: string, revalidate: () => void = ()
       const botBoxDeletions = boxDeletionSnapshot().filter((entry) => entry.ownerBotId === bot.id);
       if (botBoxRecovery.some((entry) => !entry.resolved)) {
         return deletionResponse( 409, {
-          error: "finish reconciling this bot's pending cloud computer creation before deleting it — check ascii.dev, then retry Box setup",
+          error: "finish reconciling this bot's pending cloud computer creation before deleting it — check boat.dev, then retry Box setup",
         });
       }
       // Bot deletion awaits VM/browser/provider cleanup. Claim the bot and
@@ -9338,8 +9478,7 @@ async function runGroupMemberTurn(
     ),
   );
   if (selectedSkills.some((skill) => skill.manifest.requiredCapabilities.includes("phoneMcp"))) {
-    if (!claimTurnResource(resourceOwner, "computer:phone")) throw new Error("another thread is using the phone — wait for it to finish");
-    integrations.phone = phoneIntegration();
+    integrations.phone = phoneIntegration(bot.id, threadId, internalGeneration);
   }
   try {
     if (bot.composio !== false && composio.configured(cfg) && instance.adapter.capabilities.composioMcp === true) {
@@ -9701,6 +9840,7 @@ async function runGroupMemberTurn(
     }
   }
   const roomSystem = buildSystemPrompt(system, store.bot(bot.id)?.soul ?? bot.soul ?? "", [
+    { id: "user-profile", label: "About the user", text: userProfileSystemPrompt(cfg.profile) },
     { id: "files", label: "File locations", text: workspace ? workspaceLocationsPrompt(bot.id, cwd, readyBot.cwd) : "" },
     { id: "mcp", label: "MCP servers", text: customMcpPrompt(Object.keys(integrations.custom ?? {})) },
     { id: "computer", label: "Computer", text: computerPrompt(roomTeamComputer || roomComputerKind === "box" ? instance.driverKind === "boxAgent" ? "box-agent" : instance.adapter.capabilities.cloudComputerMcp ? "box-chat" : "box" : roomVmTarget ? localVmMode(cfg) === "per-bot" ? "vm-private" : "vm-shared" : roomComputerKind) },
@@ -10030,7 +10170,7 @@ async function runGroupMemberTurn(
     const isVariantError = typeof error === "object" && error !== null && (error as { code?: string }).code === "unsupported_model_variant";
     if (!roomSpeaker && !isSpendCap && !isVariantError) throw error;
     const message = error instanceof Error ? error.message : "Local VM setup failed";
-    store.appendMessage(threadId, {
+    if (!(error instanceof ComputerWaitGaveUp)) store.appendMessage(threadId, {
       role: "bot", kind: "activity",
       from: { botId: bot.id, name: bot.name, color: bot.color },
       tool: { name: `error: ${message}`, ok: false },
@@ -10786,7 +10926,7 @@ function roomPostEligibility(
   }
   const outsider = group.memberIds
     .map((id) => store.bot(id))
-    .find((member) => member && !canAccessTeam(bot, member.section));
+    .find((member) => member && !canAccessTeam(bot, member.section) && !coordinatorSupervises(member, bot));
   if (outsider) {
     return {
       ok: false,
@@ -11675,6 +11815,7 @@ function configStatus() {
   const eventLogRetentionDays = threadEventLogRetentionDays(cfg);
   return {
     xai: { configured: Boolean(cfg.xai?.key) },
+    mistral: { configured: Boolean(cfg.mistral?.key) },
     anthropic: { configured: Boolean(cfg.anthropic?.key) },
     // a fleet agent on this server means Settings → Workspaces has something to drive
     fleet: { available: fleetAvailable(fleetSocketPath()) },
@@ -11702,12 +11843,14 @@ function configStatus() {
     tts: tts.describeVoice(cfg),
     imageGen: avatarImageStatus(cfg),
     // not a secret — the sidebar shows it
-    profile: { name: cfg.profile?.name ?? "", email: cfg.profile?.email ?? "" },
+    profile: { name: cfg.profile?.name ?? "", email: cfg.profile?.email ?? "", aboutMe: cfg.profile?.aboutMe ?? "" },
     // the enrolled organisation's read-only desktop policy; null when not enrolled
     managedPolicy: managedPolicy.summary(),
     // not a secret — the settings picker shows it; "" = follow the system
     language: cfg.language ?? "",
     rooms: { turnTimeoutMinutes: roomTurnTimeoutMinutes(cfg) },
+    // absent effort = no level is sent, so clients can tell it from any level
+    newBots: cfg.newBots?.effort ? { effort: cfg.newBots.effort } : {},
     threads: {
       maxConcurrentPerBot: maxConcurrentBotThreads(cfg),
       ...(eventLogMaxBytes !== null ? { eventLogMaxBytes } : {}),
@@ -12529,6 +12672,8 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
         ? "hooks"
         : path === "/api/internal/browser/mcp"
         ? "browser"
+        : path === "/api/internal/phone/claim"
+        ? "phone"
         : path.startsWith("/api/internal/connectors/")
         ? "connectors"
         : path === "/api/internal/computer-control"
@@ -12682,6 +12827,17 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
         });
         requireActiveInternalCapability();
         return json(res, 200, { result });
+      }
+      if (method === "POST" && path === "/api/internal/phone/claim") {
+        // Lazy phone exclusivity (issue #1663): the turn holds computer:phone
+        // from its first real tool call until it settles. The proxy answers a
+        // conflict as a blocked tool result, so a concurrent caller waits or
+        // does other work instead of losing the whole turn.
+        requireActiveInternalCapability();
+        if (!claimTurnResource(internalCapability, "computer:phone")) {
+          return json(res, 409, { error: "another thread is using the phone" });
+        }
+        return json(res, 200, { claimed: true });
       }
       // Off by default: both fall through to the same "unknown internal
       // endpoint" 404 a never-implemented route returns.
@@ -12953,7 +13109,7 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
         return json(res, 200, {
           teams: teamSetupTeams().filter((name) => canAccessTeam(chief, name)),
           bots: store.bots.filter((bot) => !bot.hidden && canAccessTeam(chief, bot.section) && (bot.id === chief.id || peerAllowed(chief, bot)))
-            .map((bot) => ({ id: bot.id, name: bot.name, title: bot.title, section: bot.section ?? "", modelSelection: bot.modelSelection })),
+            .map((bot) => ({ id: bot.id, name: bot.name, title: bot.title, section: bot.section ?? "", modelSelection: bot.modelSelection, chiefOfStaff: Boolean(bot.chiefOfStaff) })),
           instances: instances.map((instance) => ({ instanceId: instance.instanceId, driverKind: instance.driverKind, displayName: instance.displayName,
             state: instance.snapshot.state, models: instance.models, effortLevels: instance.capabilities?.effortLevels ?? [] })),
           scope: "Bot model defaults apply to groups and new threads; existing threads retain their models. Full Access applies requested team setup immediately; other modes return a review card. Existing unauthorized teams remain outside this Chief's scope.",
@@ -13269,7 +13425,7 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
         //
         // per-bot approval gate: a chief-of-staff bot without this on is
         // free to coordinate; one with it on must wait for a human card
-        // (15-min timeout → deny) before its peer turn starts. The channel
+        // (15-min timeout → expired) before its peer turn starts. The channel
         // and the chips are created only AFTER the verdict, so a denied
         // contact leaves no trace of an exchange that never happened.
         if (peerReviewRequired(from, fromThreadId)) {
@@ -13282,7 +13438,7 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
             fromThreadId,
           );
           requireActiveInternalCapability();
-          if (verdict !== "allow") return json(res, 200, { error: "denied by user" });
+          if (verdict !== "allow") return json(res, 200, peerApprovalFailure(verdict));
           // The card may have been open for minutes. Re-read both records so
           // deleted bots cannot recreate transcripts through stale objects.
           const freshFrom = store.bot(fromBotId);
@@ -13394,7 +13550,12 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
             if (!sender || (target && !canReachPeer(sender, target))) {
               return json(res, 403, { error: "Result withheld: team access changed while the teammate was working" });
             }
-            return json(res, 200, { status: receipt.status, toBotName: receipt.toBotName, result: receipt.result ?? "" });
+            return json(res, 200, {
+              status: receipt.status, toBotName: receipt.toBotName, result: receipt.result ?? "",
+              ...(receipt.approvalOutcome ? {
+                approvalOutcome: receipt.approvalOutcome, approvalSource: receipt.approvalSource,
+              } : {}),
+            });
           }
           const stillQueued = pendingDelegationInfo(taskId);
           const runningEntry = [...delegationWatch.entries()].find(([, watch]) => watch.taskId === taskId);
@@ -13618,7 +13779,14 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
             const verdicts = await Promise.all(targets.map(target =>
               requestPeerApproval(approvalBus, internalSender, store.bot(target.botId)!, parsed.data.message, "delegate_bot", address.threadId)));
             requireActiveInternalCapability();
-            if (verdicts.some(verdict => verdict !== "allow")) return json(res, 403, { error: "Denied by user; no work sent." });
+            const blocked = verdicts.flatMap((verdict, index) => verdict === "allow" ? []
+              : [{ botId: targets[index]!.botId, ...peerApprovalFailure(verdict) }]);
+            if (blocked.length) return json(res, 403, {
+              error: blocked.every(failure => failure.approvalOutcome === "deny")
+                ? "Denied by user; no work sent."
+                : `${blocked.map(failure => failure.error).join("; ")}; no work sent.`,
+              approvals: blocked,
+            });
             approvalGranted = true;
           }
           const accepted: { requestId: string; botId: string; duplicate: boolean; status: string }[] = [];
@@ -13652,7 +13820,8 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
                 }
               }
               const { node, duplicate } = roomHandoffs.enqueue(address, internalCapability.generation, internalCapability.roomHandoffId,
-                target, parsed.data.requestKey + ":" + target.botId, parsed.data.message, approvalGranted, parsed.data.rework, [...store.messagesFor(address.threadId)].reverse().find(m => m.role === "user" && m.kind === "text")?.text ?? "");
+                target, parsed.data.requestKey + ":" + target.botId, parsed.data.message, approvalGranted, parsed.data.rework, [...store.messagesFor(address.threadId)].reverse().find(m => m.role === "user" && m.kind === "text")?.text ?? "",
+                destination ? parsed.data.requestKey : undefined);
               // A re-dispatched request_key is answered by the request it
               // already made, so a thread resolved for the retry (the pair
               // conversation was busy with that very request) goes back
@@ -13771,7 +13940,7 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
             fromThreadId,
           );
           requireActiveInternalCapability();
-          if (verdict !== "allow") return json(res, 200, { error: "denied by user" });
+          if (verdict !== "allow") return json(res, 200, peerApprovalFailure(verdict));
           // The card may have been open for minutes. Re-read both records so a
           // roster change, a section move, or a deletion during that window
           // cannot be posted through on a stale decision.
@@ -14651,6 +14820,7 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
       }
     };
     if (method === "GET" && path === "/api/bots") {
+      try { groupUsageReader.refresh(); } catch { /* accounting must not block a snapshot */ }
       const limit = pageSize(url.searchParams.get("messages"));
       if (limit === null) return json(res, 400, { error: "messages must be a non-negative whole number" });
       // wireBot(), not publicBot(): publicBot() pulls the whole transcript via
@@ -15927,9 +16097,28 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
         if (!parsed.success) return json(res, 400, { error: "Team name must be 1 to 60 characters" });
         nextName = parsed.data.name;
       }
-      const error = nextName === null ? store.changeEmptySection(section, null) : store.renameSection(section, nextName, teamComputers);
+      const error = nextName === null ? store.deleteSection(section) : store.renameSection(section, nextName, teamComputers);
       if (error) return json(res, error === "No such team" ? 404 : 409, { error });
       return json(res, 200, { sections: store.sections });
+    }
+    if (method === "PUT" && path === "/api/sidebar-sections") {
+      const section = url.searchParams.get("section")?.trim();
+      if (!section || !store.sections.includes(section)) return json(res, 404, { error: "No such team" });
+      const ids = z.array(z.string().regex(/^[\w-]+$/)).max(MAX_WORKSPACE_BOTS);
+      const parsed = z.object({ addBotIds: ids, removeBotIds: ids }).strict().safeParse(await readBody(req));
+      if (!parsed.success) return json(res, 400, { error: "Provide addBotIds and removeBotIds" });
+      for (const [botIds, destination] of [[parsed.data.addBotIds, section], [parsed.data.removeBotIds, undefined]] as const) {
+        for (const id of botIds) {
+          const bot = store.bot(id);
+          if (bot) assertTeamComputerChangeIdle(bot, { ...bot, section: destination });
+        }
+      }
+      const result = store.updateTeamMembers(section, parsed.data.addBotIds, parsed.data.removeBotIds);
+      if (!result.ok) return json(res, result.reason === "unavailable" ? 404 : 409, { error:
+        result.reason === "chief-conflict" ? "A team can have only one Chief of Staff. Change the Chief before moving this bot."
+          : result.reason === "membership-changed" ? "Team membership changed. Reopen the dialog and try again."
+          : "One or more bots are unavailable" });
+      return json(res, 200, { sections: store.sections, bots: result.bots.map(wireBot) });
     }
     if (method === "POST" && path === "/api/sidebar-sections") {
       const parsed = createSidebarSectionSchema.safeParse(await readBody(req));
@@ -15957,11 +16146,89 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
       }
       return json(res, 200, { section: name, sections: store.sections, bots: result.bots.map(wireBot) });
     }
-    if (method === "POST" && path === "/api/bots") {
+    if (method === "GET" && path === "/api/bot-defaults") {
+      return json(res, 200, {
+        defaults: structuredClone(cfg.newBotDefaults ?? newBotDefaultsSchema.parse({})),
+        modelSelection: await defaultSelection(),
+        suggestedName: pickBotName(store.bots.map(bot => bot.name)),
+      });
+    }
+    if (method === "POST" && path === "/api/bot-defaults/skills/preview") {
+      const checked = z.object({ source: z.string().min(1).max(2000) }).strict().safeParse(await readBody(req));
+      if (!checked.success) return json(res, 400, { error: checked.error.message });
+      const input = checked.data;
+      const fetched = await fetchSkillFromSource(input.source);
+      if ("error" in fetched) return json(res, 422, { error: fetched.error });
+      const skills = [];
+      for (const skill of fetched.skills) {
+        const file = skill.files.find(file => file.path === "SKILL.md" || file.path.endsWith("/SKILL.md"));
+        if (!file) continue;
+        const parsed = parseSkillMd(file.content);
+        if ("error" in parsed) return json(res, 422, { error: parsed.error });
+        const skippedWarnings = skill.files.filter(candidate => candidate !== file)
+          .map(candidate => `skipped supporting file "${candidate.path}" — v1 imports only SKILL.md`);
+        const template = botSkillTemplateSchema.safeParse({ name: parsed.name, description: parsed.description, source: skill.source, text: file.content,
+          enabled: false, warnings: [...scanSkillText(file.content), ...skippedWarnings] });
+        if (!template.success) return json(res, 422, { error: template.error.message });
+        skills.push(template.data);
+      }
+      return json(res, 200, { skills });
+    }
+    if (method === "POST" && path === "/api/bot-defaults/avatar") {
       const body = await readBody(req);
+      if (!body || typeof body !== "object" || Array.isArray(body)) return json(res, 400, { error: "avatar preview must be a JSON object" });
+      const profile = parseBotProfilePatch(body.profile, true);
+      if (!profile.ok) return json(res, 400, { error: profile.error });
+      const checked = avatarGenerationRequestSchema.safeParse({ prompt: body.prompt });
+      if (!checked.success) return json(res, 400, { error: checked.error.message });
+      const { prompt } = checked.data;
+      const generated = await generateAvatarImage(cfg, {
+        name: profile.patch.name ?? "", title: profile.patch.title ?? "", description: profile.patch.description ?? "",
+      }, prompt);
+      // A preview belongs to the draft. Upload it through the existing image
+      // endpoint only when the user commits the new bot or its defaults.
+      return json(res, 200, { dataUrl: `data:${generated.mime};base64,${generated.bytes.toString("base64")}` });
+    }
+    if (method === "POST" && path === "/api/bots") {
+      let body = await readBody(req);
       if (!body || typeof body !== "object" || Array.isArray(body)) {
         return json(res, 400, { error: "bot must be a JSON object" });
       }
+      const template = resolveBotCreationDefaults(cfg.newBotDefaults, body);
+      const settings = template.profile;
+      if (auth.kind === "session" && !auth.scopes.includes("admin")) {
+        const field = clientBotPatchViolation(settings);
+        if (field || template.skills.length || template.routines.length || Object.keys(template.memory).length) {
+          return json(res, 403, { error: "Creating a bot with these defaults needs the admin scope" });
+        }
+      }
+      body = { ...body, ...settings, name: settings.name };
+      if (settings.approvalMode === "full" || settings.approvalMode === "custom") {
+        return json(res, 403, { error: "This approval level requires the desktop permission flow. Use the bot creation dialog or explicitly choose Ask/Auto for API creation." });
+      }
+      if (settings.computer === "local" && settings.approvalMode === "auto" && body.acknowledgeLocalAuto !== true) {
+        return json(res, 400, { error: "Auto mode on this computer requires confirming the warning first (acknowledgeLocalAuto)" });
+      }
+      if (settings.avatarUrl && !storedAvatarExists(settings.avatarUrl)) {
+        return json(res, 400, { error: "avatarUrl must reference an existing stored image" });
+      }
+      if (settings.browserProfile && settings.browserProfile !== "guest" && !(cfg.browserProfiles ?? []).some(profile => profile.id === settings.browserProfile)) {
+        return json(res, 400, { error: "browserProfile must name an existing browser profile" });
+      }
+      if (settings.mcpServers?.some(name => mcpServerNameError(name) !== null) || (settings.mcpServers?.length ?? 0) > MAX_MCP_SERVERS) {
+        return json(res, 400, { error: "Invalid MCP server selection" });
+      }
+      if (settings.managedSections?.length) {
+        if (!settings.chiefOfStaff || settings.managedSections.some(name => name !== "" && !store.sections.includes(name))) {
+          return json(res, 400, { error: "Only a Chief may manage existing additional teams" });
+        }
+        if (body.acknowledgePeerScope !== true) return json(res, 400, { error: "Confirm additional team access (acknowledgePeerScope)" });
+        if (auth.kind === "loopback" && !DESKTOP_MANAGED && store.bots.some(bot => bot.busy)) {
+          return json(res, 409, { error: "Stop running bots before granting access to another team" });
+        }
+      }
+      const checkedCwd = validateBotCwd(settings.cwd ?? null);
+      if (!checkedCwd.ok) return json(res, 400, { error: checkedCwd.error });
       if (body.requireAvailableModel !== undefined && typeof body.requireAvailableModel !== "boolean") {
         return json(res, 400, { error: "requireAvailableModel must be true or false" });
       }
@@ -15997,13 +16264,64 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
       if (store.bots.length >= MAX_WORKSPACE_BOTS) {
         return json(res, 409, { error: `this workspace is limited to ${MAX_WORKSPACE_BOTS} bots` });
       }
-      // Who may see it, from the first moment (admin route: members cannot
-      // create bots). A bot named for a sensitive job must never be
-      // announced to everyone before it is restricted.
+      // Apply the audience before creation can announce the bot to members.
       const created = body.visibility === undefined ? null : parseVisibility(body.visibility);
       if (created && !created.ok) return json(res, 400, { error: created.error });
-      const bot = store.createBot({ ...profile.patch, section, modelSelection: selection, ...(created?.ok ? { visibility: created.visibility } : {}) });
+      const bot = store.createBot({ ...profile.patch, soul: settings.soul, section, modelSelection: selection,
+        ...(created?.ok ? { visibility: created.visibility } : {}) });
+      const createdRoutines: Array<{ id: string; enabled: boolean }> = [];
+      try {
+        const { chiefOfStaff: _chief, managedSections: _managed, ...ordinary } = settings;
+        store.patchBot(bot.id, {
+          // Store creation completes workspace defaults (including effort).
+          // Applying the rest of the template must not undo that selection.
+          ...ordinary, name: bot.name, section, modelSelection: bot.modelSelection,
+          mascotExpression: ordinary.mascotExpression ?? undefined,
+          avatarUrl: ordinary.avatarUrl || undefined,
+          computer: ordinary.computer ?? undefined, cwd: checkedCwd.cwd ?? undefined,
+          peers: ordinary.peers ?? undefined, mcpServers: ordinary.mcpServers ?? undefined,
+          browserProfile: ordinary.browserProfile || undefined,
+          autoApprove: ordinary.approvalMode === "auto",
+        });
+        for (const [file, text] of Object.entries(template.memory)) {
+          journalMemoryWrite(bot.id, file, text, { actor: "person", via: "api" });
+        }
+        for (const skill of template.skills) {
+          const parsed = parseSkillMd(skill.text);
+          if ("error" in parsed || parsed.name !== skill.name) throw Object.assign(new Error("Skill name does not match its contents"), { status: 400 });
+          const installed = installSkill(bot.id, skill.source, [{ path: "SKILL.md", content: skill.text }]);
+          if ("error" in installed) throw Object.assign(new Error(installed.error), { status: 422 });
+          if (skill.enabled) {
+            const enabled = setSkillEnabled(bot.id, skill.name, true);
+            if ("error" in enabled) throw Object.assign(new Error(enabled.error), { status: 422 });
+          }
+        }
+        for (const routine of template.routines) {
+          const created = routines!.create({ ...routine, botId: bot.id, enabled: false });
+          createdRoutines.push({ id: created.id, enabled: routine.enabled !== false });
+        }
+      } catch (error) {
+        for (const routine of createdRoutines) routines!.remove(routine.id);
+        store.deleteBot(bot.id);
+        throw error;
+      }
+      // Creation is complete. Activation errors must not invite a duplicate
+      // creation retry or delete a bot whose routine may already have run.
+      const warnings: string[] = [];
+      if (settings.chiefOfStaff) {
+        try {
+          store.patchBot(bot.id, { managedSections: settings.managedSections ?? [] });
+          store.setChiefOfStaff(bot.id);
+        } catch {
+          warnings.push("Bot created; review its Chief of Staff setting before delegating work.");
+        }
+      }
+      for (const routine of createdRoutines) if (routine.enabled) {
+        try { routines!.update(routine.id, { enabled: true }); }
+        catch { warnings.push(`Bot created; routine ${routine.id} could not be activated.`); }
+      }
       return json(res, 201, {
+        ...(warnings.length ? { warnings } : {}),
         bot: {
           ...wireBot(bot),
           messages: store.messagesFor(bot.threadId),
@@ -16677,6 +16995,22 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
     // ── bot skills: imported Agent Skills (SKILL.md) ────────────────────
     // Import lands DISABLED; the UI shows SKILL.md + scan warnings and a
     // person enables after reading. See server/skills.ts for the policy.
+    m = path.match(/^\/api\/bots\/([\w-]+)\/skill-template$/);
+    if (m && method === "POST") {
+      if (!store.bot(m[1])) return json(res, 404, { error: "no such bot" });
+      const checked = botSkillTemplateSchema.safeParse(await readBody(req));
+      if (!checked.success) return json(res, 400, { error: checked.error.message });
+      const input = checked.data;
+      const parsed = parseSkillMd(input.text);
+      if ("error" in parsed || parsed.name !== input.name) return json(res, 400, { error: "Skill name does not match its contents" });
+      const installed = installSkill(m[1], input.source, [{ path: "SKILL.md", content: input.text }]);
+      if ("error" in installed) return json(res, 422, { error: installed.error });
+      if (input.enabled) {
+        const enabled = setSkillEnabled(m[1], input.name, true);
+        if ("error" in enabled) return json(res, 422, { error: enabled.error });
+      }
+      return json(res, 201, { installed });
+    }
     m = path.match(/^\/api\/bots\/([\w-]+)\/skills$/);
     if (m && method === "GET") {
       if (!store.bot(m[1])) return json(res, 404, { error: "no such bot" });
@@ -18345,14 +18679,14 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
         return json(res, 400, { error: `provider must be one of ${PROVIDER_KEY_KINDS.join(", ")}` });
       }
       const kind = provider as ProviderKeyKind;
-      const saved = kind === "anthropic" ? cfg.anthropic : kind === "openaiCompat" ? cfg.openaiCompat : cfg.xai;
+      const saved = kind === "anthropic" ? cfg.anthropic : kind === "openaiCompat" ? cfg.openaiCompat : kind === "mistral" ? cfg.mistral : cfg.xai;
       if (body?.key !== undefined && typeof body.key !== "string") {
         return json(res, 400, { error: "key must be a string" });
       }
       const key = typeof body?.key === "string" ? body.key.trim() : saved?.key?.trim() || "";
       if (!key) return json(res, 400, { error: "No key to test. Paste one or save one first." });
       if (key.length > 512) return json(res, 400, { error: "That does not look like an API key." });
-      const url = typeof body?.url === "string" && body.url.trim() ? body.url.trim() : saved?.url;
+      const url = typeof body?.url === "string" && body.url.trim() ? body.url.trim() : (saved && "url" in saved ? saved.url : undefined);
       res.setHeader("cache-control", "no-store");
       return json(res, 200, await checkProviderKey({ provider: kind, key, url }));
     }
@@ -18633,8 +18967,8 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
           return json(res, 400, { error: "Account settings are currently available for Claude only." });
         }
         if (body.tools !== undefined) {
-          if (!["openai-compat", "grok", "minimax"].includes(entry.driver)) {
-            return json(res, 400, { error: "The tools setting is available for OpenAI-compatible, Grok API and MiniMax API instances only." });
+          if (!["openai-compat", "grok", "minimax", "mistral"].includes(entry.driver)) {
+            return json(res, 400, { error: "The tools setting is available for OpenAI-compatible, Grok API, MiniMax API and Mistral API instances only." });
           }
           entry.config = { ...entry.config as Record<string, unknown>, tools: body.tools };
         }
@@ -18818,8 +19152,19 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
     }
     if ((method === "PUT" || method === "PATCH") && path === "/api/config") {
       const body = await readBody(req);
-      if (hostedModels && ["instances", "anthropic", "openaiCompat", "xai", "opencodeGo"].some(key => Object.hasOwn(body, key))) return json(res, 403, { error: HOSTED_PROVIDER_SETTINGS_ERROR });
+      if (hostedModels && ["instances", "anthropic", "openaiCompat", "xai", "mistral", "opencodeGo"].some(key => Object.hasOwn(body, key))) return json(res, 403, { error: HOSTED_PROVIDER_SETTINGS_ERROR });
       const patch = parseConfigPatch(body);
+      if (patch.newBotDefaults) {
+        if (patch.newBotDefaults.profile.modelSelection) {
+          const checked = checkedModelSelection(patch.newBotDefaults.profile.modelSelection);
+          if (!checked.ok) return json(res, checked.status, { error: checked.error });
+          patch.newBotDefaults.profile.modelSelection = checked.selection;
+        }
+        for (const skill of patch.newBotDefaults.skills) {
+          const parsed = parseSkillMd(skill.text);
+          if ("error" in parsed || parsed.name !== skill.name) return json(res, 400, { error: "Skill name does not match its contents" });
+        }
+      }
       if (hostedModels && patch.defaultModelSelection) {
         const checked = checkedModelSelection(patch.defaultModelSelection);
         if (!checked.ok) return json(res, checked.status, { error: checked.error });
@@ -18990,7 +19335,7 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
               }
               const listed = currentById.get(inspected.identity.boxId);
               if (listed && listed.name !== inspected.identity.name) {
-                return json(res, 503, { error: "ascii.dev returned conflicting cloud computer identities; keep the current Box account and retry" });
+                return json(res, 503, { error: "boat.dev returned conflicting cloud computer identities; keep the current Box account and retry" });
               }
               currentById.set(inspected.identity.boxId, inspected.identity);
               journalBoxResources.push(inspected.identity);
