@@ -514,12 +514,11 @@ describe("loopback trust: owner on one person's machine, service on a shared wor
       .toEqual({ kind: "loopback", scopes: ["admin", "client"] });
   });
 
-  it("defaults to service on a hosted or shared-Full workspace, owner elsewhere, and lets the operator choose", () => {
-    const pick = (env: NodeJS.ProcessEnv, flags: { desktopManaged?: boolean; hostedWorkspace?: boolean; sharedWorkspaceFullAccess?: boolean } = {}) =>
-      resolveLoopbackTrust({ env, desktopManaged: false, hostedWorkspace: false, sharedWorkspaceFullAccess: false, ...flags });
+  it("defaults to service on a hosted workspace, owner elsewhere, and lets the operator choose", () => {
+    const pick = (env: NodeJS.ProcessEnv, flags: { desktopManaged?: boolean; hostedWorkspace?: boolean } = {}) =>
+      resolveLoopbackTrust({ env, desktopManaged: false, hostedWorkspace: false, ...flags });
     expect(pick({})).toEqual({ trust: "owner", reason: "self-hosted default" });
     expect(pick({}, { hostedWorkspace: true })).toEqual({ trust: "service", reason: "hosted workspace" });
-    expect(pick({}, { sharedWorkspaceFullAccess: true })).toEqual({ trust: "service", reason: "shared-workspace Full access" });
     expect(pick({ OMB_LOOPBACK_TRUST: "service" })).toEqual({ trust: "service", reason: "OMB_LOOPBACK_TRUST" });
     expect(pick({ OMB_LOOPBACK_TRUST: " Service " }).trust).toBe("service");
     const forced = pick({ OMB_LOOPBACK_TRUST: "owner" }, { hostedWorkspace: true });
@@ -533,5 +532,23 @@ describe("loopback trust: owner on one person's machine, service on a shared wor
     const desktop = pick({ OMB_LOOPBACK_TRUST: "service" }, { desktopManaged: true, hostedWorkspace: true });
     expect(desktop.trust).toBe("owner");
     expect(desktop.warning).toMatch(/ignored in the desktop app/);
+  });
+
+  it("lets only the CLI that started the server, holding its secret, mint a pairing code under service trust", () => {
+    const secret = "c".repeat(43);
+    const as = (method: string, path: string, header?: string, token: string | null = secret) =>
+      resolveRequestAuth(request({ ...local, ...(header ? { "x-openmausbot-cli-owner": header } : {}) }, method), {
+        sessions, cookieName, streamPath: "/api/events", url: new URL(path, "http://x"), loopbackTrust: "service", cliOwnerToken: token ?? undefined,
+      });
+    expect(as("POST", "/api/auth/pairing", secret).auth).toEqual({ kind: "loopback", scopes: ["admin", "client"] });
+    expect(as("GET", "/api/auth/pairing", secret).auth?.kind).toBe("loopback");
+    // nothing else opens with it, and nothing opens without it
+    for (const [method, path] of [["PUT", "/api/config"], ["GET", "/api/auth/sessions"], ["DELETE", "/api/auth/pairing"], ["POST", "/api/bots"]] as const) {
+      expect(as(method, path, secret).auth, `${method} ${path}`).toBeNull();
+    }
+    expect(as("POST", "/api/auth/pairing").auth).toBeNull();
+    expect(as("POST", "/api/auth/pairing", "d".repeat(43)).auth).toBeNull();
+    expect(as("POST", "/api/auth/pairing", "", null).auth).toBeNull();
+    expect(as("POST", "/api/auth/pairing", secret, null).auth).toBeNull();
   });
 });

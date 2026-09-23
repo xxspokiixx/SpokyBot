@@ -23,6 +23,7 @@
 // This module only exports; openmausbot.ts is the entry that runs main(), so
 // bundling this file into other entries (pair-cli.ts) never runs it twice.
 import { spawn, type ChildProcess } from "node:child_process";
+import { randomBytes } from "node:crypto";
 import { closeSync, existsSync, mkdirSync, openSync, readFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { dirname, join, resolve } from "node:path";
@@ -31,6 +32,8 @@ import { fileURLToPath } from "node:url";
 import qrcode from "qrcode-terminal";
 
 import { parseAllowList } from "./account-signin.ts";
+import { hostedWorkspaceConfigured } from "./enterprise.ts";
+import { resolveLoopbackTrust } from "./request-auth.ts";
 import { writeFileAtomic } from "./atomic.ts";
 import { ensureCaddy, normalizeDomainOption, startCaddy, type RunningCaddy } from "./caddy.ts";
 import { runServiceCommand } from "./service-cli.ts";
@@ -319,10 +322,23 @@ export function serverVersion(here = HERE): string {
 const message = (error: unknown) => (error instanceof Error ? error.message : String(error));
 
 // ── talking to a running server (loopback = owner) ────────────────────
+/** Set only inside `openmausbot serve` on a service-trust server: the secret
+ * it handed the server it started, which opens that server's pairing route. */
+let serveOwnerToken: string | undefined;
+
 async function api(port: number, path: string, init: { method?: string; body?: string } = {}): Promise<{ status: number; body: any }> {
-  const res = await fetch(`http://127.0.0.1:${port}${path}`, { method: init.method, body: init.body, headers: { "content-type": "application/json" }, signal: AbortSignal.timeout(3000) });
+  const headers: Record<string, string> = { "content-type": "application/json", ...(serveOwnerToken ? { "x-openmausbot-cli-owner": serveOwnerToken } : {}) };
+  const res = await fetch(`http://127.0.0.1:${port}${path}`, { method: init.method, body: init.body, headers, signal: AbortSignal.timeout(3000) });
   const body: unknown = await res.json().catch(() => ({}));
   return { status: res.status, body };
+}
+
+/** What to do when a server treats this command as a local service rather
+ * than its owner (OMB_LOOPBACK_TRUST=service, or a hosted workspace). */
+export const SERVICE_TRUST_HELP = "This server does not treat commands on this computer as its owner (OMB_LOOPBACK_TRUST=service, or a hosted workspace), so it will not pair devices or list sessions for them. Sign in as an admin and use Settings → Remote access, let people sign in with their email (openmausbot access add you@example.com), or restart the server with OMB_LOOPBACK_TRUST=owner.";
+
+function refusedAsService(status: number, body: any): boolean {
+  return status === 403 && typeof body?.error === "string" && /shared server|Sign in through the workspace portal/.test(body.error);
 }
 
 async function serverUp(port: number, pid?: number): Promise<boolean> {
@@ -491,6 +507,7 @@ async function mintPairing(port: number, options: { label?: string; client?: boo
   if (options.label) request.label = options.label;
   if (options.client) request.scopes = ["client"];
   const { status, body } = await api(port, "/api/auth/pairing", { method: "POST", body: JSON.stringify(request) });
+  if (refusedAsService(status, body)) throw new Error(SERVICE_TRUST_HELP);
   if (status !== 200) throw new Error(`server refused to mint a pairing code: ${typeof body?.error === "string" ? body.error : status}`);
   const url = options.publicUrl ? `${options.publicUrl}/pair#code=${body.code}` : typeof body.url === "string" ? body.url : null;
   // A server too old to mint a credential simply has no invite: the web link
@@ -561,6 +578,10 @@ export async function runSessions(options: CliOptions): Promise<number> {
   }
   if (options.revoke) {
     const { status, body } = await api(options.port, `/api/auth/sessions/${encodeURIComponent(options.revoke)}`, { method: "DELETE" });
+    if (refusedAsService(status, body)) {
+      console.error(SERVICE_TRUST_HELP);
+      return 1;
+    }
     if (status !== 200) {
       console.error(`could not revoke: ${typeof body?.error === "string" ? body.error : status}`);
       return 1;
@@ -568,7 +589,15 @@ export async function runSessions(options: CliOptions): Promise<number> {
     console.log(`revoked ${options.revoke}: that device is signed out and its stream is closed`);
     return 0;
   }
-  const { body } = await api(options.port, "/api/auth/sessions");
+  const { status, body } = await api(options.port, "/api/auth/sessions");
+  if (refusedAsService(status, body)) {
+    console.error(SERVICE_TRUST_HELP);
+    return 1;
+  }
+  if (status !== 200) {
+    console.error(`could not list sessions: ${typeof body?.error === "string" ? body.error : status}`);
+    return 1;
+  }
   const sessions: Array<{ id: string; label: string; scopes: string[]; lastSeenAt: number; expiresAt: number }> = Array.isArray(body?.sessions) ? body.sessions : [];
   if (options.json) {
     console.log(JSON.stringify(sessions, null, 2));
@@ -881,6 +910,14 @@ export async function runServe(options: CliOptions, log: (line: string) => void 
     OMB_WEBHOOK_PORT: process.env.OMB_WEBHOOK_PORT || String(options.port + 1),
   };
   if (options.local) delete env.OMB_PUBLIC_URL;
+  // A service-trust server refuses session-less local admin requests, this
+  // CLI's included. Hand the server we start a per-launch secret over its
+  // stdin (not its environment, which every engine it starts inherits) so
+  // this process alone can still print the pairing code.
+  const serviceTrust = resolveLoopbackTrust({ env, desktopManaged: false, hostedWorkspace: hostedWorkspaceConfigured(env) }).trust === "service";
+  const ownerToken = serviceTrust ? randomBytes(32).toString("base64url") : undefined;
+  if (ownerToken) env.OMB_CLI_OWNER_STDIN = "1";
+  else delete env.OMB_CLI_OWNER_STDIN;
   if (entry.staticDir) env.OMB_STATIC_DIR = entry.staticDir;
   if (entry.skillsDir && !process.env.OMB_SKILLS_DIR) env.OMB_SKILLS_DIR = entry.skillsDir;
   if (options.label && !process.env.OMB_ENVIRONMENT_LABEL) env.OMB_ENVIRONMENT_LABEL = options.label;
@@ -915,7 +952,12 @@ export async function runServe(options: CliOptions, log: (line: string) => void 
     }
     if (startupCancelled) throw new SetupCancelled();
     if (publicUrl) env.OMB_PUBLIC_URL = publicUrl;
-    child = spawn(entry.command, entry.args, { env, stdio: ["ignore", logFd ?? "inherit", logFd ?? "inherit"] });
+    child = spawn(entry.command, entry.args, { env, stdio: [ownerToken ? "pipe" : "ignore", logFd ?? "inherit", logFd ?? "inherit"] });
+    if (ownerToken) {
+      child.stdin?.on("error", () => { /* the server exited first; startup reports it */ });
+      child.stdin?.end(`${ownerToken}\n`);
+      serveOwnerToken = ownerToken;
+    }
   } catch (error) {
     if ((tailscaleServing || (startupCancelled && tailscaleAttempted)) && tailscale) await tailscaleServeOff(tailscale).catch(() => undefined);
     if (plan) cleanupTunnelOrigin(plan.origin);
@@ -1020,17 +1062,24 @@ export async function runServe(options: CliOptions, log: (line: string) => void 
           new Promise((done) => { timer = setTimeout(done, 15_000); })]);
         if (timer) clearTimeout(timer);
       }
-      if (!stopping && exited === null) await showPhonePairing(options, publicUrl, log);
+      if (!stopping && exited === null) await showPhonePairing(options, publicUrl, log).catch((error: unknown) => log(`no pairing code: ${message(error)}`));
     } else if (options.pair && !options.guided) {
       log("");
-      log(await mintPairing(options.port, { label: options.label ? `${options.label} owner` : undefined, client: options.client, publicUrl: publicUrl ?? undefined }));
-      log("");
-      log("another device later:  openmausbot pair --label \"Kitchen iPad\"");
+      // A refused code is no reason to stop a server that is running fine.
+      try {
+        log(await mintPairing(options.port, { label: options.label ? `${options.label} owner` : undefined, client: options.client, publicUrl: publicUrl ?? undefined }));
+        log("");
+        log("another device later:  openmausbot pair --label \"Kitchen iPad\"");
+      } catch (error) {
+        log(`no pairing code: ${message(error)}`);
+        log("start without one next time:  openmausbot serve --no-pair");
+      }
     }
     log(options.guided ? "\nKeep this terminal open while using your bots. Ctrl+C stops the server, not your saved work." : "stop with Ctrl+C");
     if (options.guided) log("Next time: openmausbot · Change AI or phone setup: openmausbot setup · Pair another phone: openmausbot pair");
     return await childExit;
   } finally {
+    serveOwnerToken = undefined;
     await stop();
     process.removeListener("SIGINT", onSignal);
     process.removeListener("SIGTERM", onSignal);

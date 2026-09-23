@@ -445,6 +445,7 @@ import {
   sessionCookieName,
 } from "./request-auth.ts";
 import { cookieMaxAgeSeconds, formatPairingCode, SessionRegistry, type Scope, type SessionRecord } from "./sessions.ts";
+import { ThreadStarters } from "./thread-starters.ts";
 import { describeBrand, loadBrand } from "./brand.ts";
 import { deliverSseFrame } from "./sse-fanout.ts";
 import {
@@ -524,6 +525,8 @@ const sessions = new SessionRegistry({
   portalMembership: hostedWorkspaceConfiguration()?.portalMembership === true,
 });
 const sharedComputers = new SharedComputers(id => sessions.isLive(id));
+// Who each thread is for, when a signed-in person can be named (server-private).
+const threadStarters = new ThreadStarters(join(DATA_DIR, "thread-starters.json"));
 const SESSION_COOKIE = sessionCookieName(PORT, ENVIRONMENT_ID);
 const HOSTED_WORKSPACE = hostedWorkspaceConfigured();
 let workspaceAccess: WorkspaceAccess | null = null;
@@ -533,11 +536,24 @@ const sharedWorkspaceFullAccessEnabled = () => SHARED_WORKSPACE_FULL_ACCESS && B
 // Who a loopback request without a session is (server/request-auth.ts
 // LoopbackTrust): the owner on a desktop or a one-person server; a service on
 // a shared workspace, where every bot's shell is a loopback caller too.
-const LOOPBACK = resolveLoopbackTrust({
-  desktopManaged: DESKTOP_MANAGED,
-  hostedWorkspace: HOSTED_WORKSPACE,
-  sharedWorkspaceFullAccess: SHARED_WORKSPACE_FULL_ACCESS,
-});
+const LOOPBACK = resolveLoopbackTrust({ desktopManaged: DESKTOP_MANAGED, hostedWorkspace: HOSTED_WORKSPACE });
+// `openmausbot serve` on a service-trust server hands the server it starts a
+// per-launch secret on stdin, then closes it (server/cli.ts). It opens only
+// the pairing route, for that CLI. Never an environment variable: every
+// engine this server starts inherits its environment.
+let cliOwnerToken: string | undefined;
+if (process.env.OMB_CLI_OWNER_STDIN === "1" && LOOPBACK.trust === "service" && process.stdin) {
+  let received = "";
+  process.stdin.setEncoding("utf8");
+  process.stdin.on("error", () => { /* the CLI went away; no pairing through it */ });
+  process.stdin.on("data", (chunk: string) => {
+    if (cliOwnerToken !== undefined || received.length > 256) return;
+    received += chunk;
+    const line = received.split("\n", 1)[0]!;
+    if (received.includes("\n") && /^[A-Za-z0-9_-]{43}$/.test(line)) cliOwnerToken = line;
+  });
+}
+delete process.env.OMB_CLI_OWNER_STDIN;
 // Empty is deliberately a deny-all bootstrap state. Only Electron's private
 // utility-process port can replace it with the per-launch owner capability.
 let desktopMutationToken: string | undefined = DESKTOP_MANAGED ? "" : undefined;
@@ -617,28 +633,48 @@ function sharedMembership(): boolean {
   return hostedWorkspaceConfiguration()?.portalMembership === true || signInAllowList().members.length > 0;
 }
 
+/** The person a user line came from, when a session sent it. A bot's line
+ * (peerAsk), the owner, a service, a routine or a webhook names nobody. */
+function linePersonKey(message: Message | undefined): string | undefined {
+  return message?.role === "user" && !message.peerAsk ? message.sender?.id : undefined;
+}
+
 /** The opaque key of whoever sent the request a card belongs to: the
- * message the harness proved started the turn, else the last person's line
- * before the card. Undefined for the owner, a service, a bot or a routine. */
+ * message the harness proved started the turn, else the last user line
+ * before the card. */
 function cardRequesterKey(threadId: string, requestId: string): string | undefined {
   const thread = store.messagesFor(threadId);
   const index = thread.findIndex((message) => message.card?.requestId === requestId);
   if (index < 0) return undefined;
   const card = thread[index]!;
-  const source = card.requestMessageId
+  return linePersonKey(card.requestMessageId
     ? thread.find((message) => message.id === card.requestMessageId)
-    : thread.slice(0, index).findLast((message) => message.role === "user");
-  return source?.role === "user" && !source.peerAsk ? source.sender?.id : undefined;
+    : thread.slice(0, index).findLast((message) => message.role === "user"));
 }
 
-/** Whose session may answer a card: the provider CLI's own approval modes and
- * the harness's proposals stay exactly as they are; this adds no card or
- * prompt, it only decides who may answer the ones that exist.
+/** The signed-in person a thread's current work is for: whoever sent its
+ * current (else latest) request from a session, else whoever the thread was
+ * opened for. A bot opening a thread while working records this for the new
+ * thread, so delegated work leads back to the person who asked. */
+function threadPersonKey(threadId: string): string | undefined {
+  const thread = store.messagesFor(threadId);
+  const owner = directRequestOwners.get(threadId);
+  const request = owner?.messageId
+    ? thread.find((message) => message.id === owner.messageId)
+    : thread.findLast((message) => message.role === "user");
+  return linePersonKey(request) ?? threadStarters.get(threadId);
+}
+
+/** Whose session may answer a card. The provider CLI's own approval modes and
+ * the harness's proposals stay exactly as they are; this adds no card, gate
+ * or prompt, it only decides whose answer to an existing card counts.
  * - the owner on this machine, and admins: any card;
  * - a session-less caller on a shared server (service trust): decline only;
- * - a member, where several people share the workspace: only on a thread
- *   they started, or for a request they sent;
- * - anyone else (one person, or nobody listed as a member): any card. */
+ * - where several people share the workspace and the card can be traced to
+ *   a person (who sent its request, who the thread was opened for, followed
+ *   back through threads bots opened for them): those people;
+ * - otherwise (one person; or a routine, webhook, Slack, owner-sent or older
+ *   thread that names nobody): anyone who may chat, as before. */
 function cardAnswerRefusal(auth: RequestAuth, threadId: string, requestId: string, behavior: string): string | null {
   if (auth.kind === "loopback") {
     return auth.trust === "service" && behavior !== "deny"
@@ -646,8 +682,8 @@ function cardAnswerRefusal(auth: RequestAuth, threadId: string, requestId: strin
       : null;
   }
   if (auth.scopes.includes("admin") || !sharedMembership()) return null;
-  const person = personKey(auth.session);
-  if (store.threadStartedBy(threadId) === person || cardRequesterKey(threadId, requestId) === person) return null;
+  const known = [threadStarters.get(threadId), cardRequesterKey(threadId, requestId)].filter((person): person is string => Boolean(person));
+  if (!known.length || known.includes(personKey(auth.session))) return null;
   return "Only the person who started this conversation or sent this request, or a workspace admin, can answer this card.";
 }
 
@@ -11375,7 +11411,7 @@ const workspaceBackupRoutes = createWorkspaceBackupRoutes({
     const current = resolveRequestAuth(req, {
       sessions, cookieName: SESSION_COOKIE, streamPath: "/api/events",
       url: new URL(req.url ?? "/", `http://localhost:${PORT}`),
-      loopbackMutationToken: desktopMutationToken, companionMutationToken, loopbackTrust: LOOPBACK.trust,
+      loopbackMutationToken: desktopMutationToken, companionMutationToken, loopbackTrust: LOOPBACK.trust, cliOwnerToken,
     }).auth;
     return Boolean(current?.scopes.includes("admin") && current.kind === original.kind &&
       (current.kind !== "session" || (original.kind === "session" && current.session.id === original.session.id)));
@@ -11570,6 +11606,7 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
       companionMutationToken,
       features: { sharedComputers: sharedComputersEnabled(cfg) },
       loopbackTrust: LOOPBACK.trust,
+      cliOwnerToken,
     });
     // The browser's cookie carries the term it was set with, and the
     // session's term slides on use (sessions.ts `renew`), so re-issue the
@@ -12927,6 +12964,10 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
                 if (!resolved) throw new Error("The recipient no longer exists");
                 target.threadId = resolved.task.threadId;
                 if (resolved.created) createdThread = resolved.task.threadId;
+                // A work thread carries one assignment: it is for the person
+                // this coordination serves. The durable pair conversation is
+                // shared by every assignment between two bots, so it names nobody.
+                if (resolved.created && resolved.task.openedBy?.kind === "work") threadStarters.set(resolved.task.threadId, threadPersonKey(address.threadId));
                 if (delegatedFullAccess(internalSender, internalCapability.threadId, store.bot(target.botId)!)) {
                   grantDelegatedFullAccess(internalSender, store.bot(target.botId)!, target.threadId);
                 }
@@ -13151,6 +13192,7 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
         if (target.id === from.id) {
           const task = store.createTask(from.id, title, false, projectId, { botId: from.id, name: from.name, at: Date.now() });
           if (!task) return json(res, 500, { error: "couldn't create that thread" });
+          threadStarters.set(task.threadId, threadPersonKey(fromThreadId));
           internalCapability.openedThreads += 1;
           const chip: Omit<Message, "id" | "at"> = {
             role: "bot",
@@ -13190,6 +13232,8 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
         }
         const task = store.createTask(target.id, title, false, projectId, { botId: from.id, name: from.name, at: Date.now() });
         if (!task) return json(res, 500, { error: "couldn't create that thread" });
+        // The work is still for the person whose request the opener is on.
+        threadStarters.set(task.threadId, threadPersonKey(fromThreadId));
         if (delegatedFullAccess(from, fromThreadId, target)) grantDelegatedFullAccess(from, target, task.threadId);
         const queued = queueDelegation(
           commsBus,
@@ -14675,7 +14719,7 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
       const task = store.createGroupTask(group.id, request.data.title);
       if (!task) return json(res, 500, { error: "couldn't create that task" });
       // Who opened it decides who may answer its cards on a shared workspace.
-      if (auth.kind === "session") store.setThreadStartedBy(task.threadId, personKey(auth.session));
+      if (auth.kind === "session") threadStarters.set(task.threadId, personKey(auth.session));
       const fresh = groupWithThread(store.group(group.id)!);
       broadcast({ kind: "group", group: fresh });
       return json(res, 201, { group: fresh, task });
@@ -16898,7 +16942,7 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
       const task = store.createTask(bot.id, typeof body.title === "string" ? body.title : undefined, true, body.projectId, undefined, body.approvalMode);
       if (!task) return json(res, 500, { error: "couldn't create that task" });
       // Who opened it decides who may answer its cards on a shared workspace.
-      if (auth.kind === "session") store.setThreadStartedBy(task.threadId, personKey(auth.session));
+      if (auth.kind === "session") threadStarters.set(task.threadId, personKey(auth.session));
       const fresh = botWithThread(store.bot(bot.id)!);
       broadcast({ kind: "bot", bot: fresh });
       return json(res, 201, { bot: fresh, task: wireTask(task) });

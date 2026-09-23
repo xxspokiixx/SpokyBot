@@ -459,7 +459,8 @@ ssh -L 8799:localhost:8799 you@your-server
 ```
 
 (With `OMB_LOOPBACK_TRUST=service`, below, a tunnel is loopback without a
-session, so sign in or pair first; it no longer makes you the owner.)
+session: the page asks you to sign in or pair first, because it no longer
+makes you the owner.)
 
 ### Loopback trust: owner or service
 
@@ -478,7 +479,7 @@ local requests: service trust (hosted workspace); without a session, loopback ma
 | Trust | Default for | A session-less loopback request may |
 |---|---|---|
 | `owner` | a self-hosted server, the desktop app | do everything, as today |
-| `service` | a hosted workspace (`OMB_ADMIN_URL`/`OMB_ADMIN_WORKSPACE`/`OMB_ADMIN_MEMBERSHIP` set), or `OMB_SHARED_WORKSPACE_FULL_ACCESS=1` | read health, who-am-I, the bot list, a thread's messages and a bot's picture; open a thread; send through the guarded route; watch and stop its exact request; withdraw a queued line; **decline** a card; use the bots' own capability routes (`/api/internal/*`, which check their own per-turn token) |
+| `service` | a hosted workspace: any of `OMB_ADMIN_URL`, `OMB_ADMIN_WORKSPACE` or `OMB_ADMIN_MEMBERSHIP` set (shared-workspace Full access only works there, so it is covered too) | read health, who-am-I, the bot list, a thread's messages and a bot's picture; open a thread; send through the guarded route; watch and stop its exact request; withdraw a queued line; **decline** a card; use the bots' own capability routes (`/api/internal/*`, which check their own per-turn token) |
 
 Under `service`, everything else from loopback needs a real session and
 answers 403: settings and keys (`/api/config`), instances, MCP servers,
@@ -495,20 +496,35 @@ workspace back into the old behaviour (the log then warns). Any other value
 means `service`. The desktop app ignores the setting: its local changes
 already need the app's own per-launch capability.
 
-With `service`, the CLI commands that talk to the running server as its
-owner — `openmausbot pair` and `openmausbot sessions` — are refused like
-any other admin change; pair from Settings while signed in as an admin, or
-use `openmausbot access`, which edits the sign-in list on disk. The MCP
-server script works with `OPENMAUSBOT_TOKEN` set to a paired session.
+With `service` on a self-hosted server:
 
-**What remains, by design.** A bot can still do what the Slack worker does:
-post into any bot's thread through the guarded route (booked to the
-workspace, not to a person), open threads — including Full-access threads
-when the operator turned shared Full access on for Slack — stop a request,
-and decline a card. It cannot approve anything or change who may do what.
-Files the server's user owns (`config.json`, the engine's environment) are
-still readable from a bot's shell; that is a separate boundary (a second
-user for engines), not this one.
+- `openmausbot serve` still prints the first pairing code. It hands the
+  server it starts a one-off secret over the server's stdin (never its
+  environment, which every engine inherits), and that secret opens the
+  pairing route for that CLI alone. Pass `--no-pair` to skip the code; if
+  the server refuses one anyway, `serve` says why and keeps running.
+- `openmausbot pair` and `openmausbot sessions`, run later from another
+  terminal, are refused like any other admin change and say so. Pair from
+  Settings → Remote access while signed in as an admin, or let people sign
+  in with their email (`openmausbot access add you@example.com`, which edits
+  the sign-in list on disk).
+- A browser on an SSH tunnel gets the sign-in page instead of the app.
+- The MCP server script works with `OPENMAUSBOT_TOKEN` set to a paired session.
+
+**What `service` does not close yet.** Any bot's shell can still do
+everything the Slack worker does, and on a shared workspace that is a real
+gap: it can post into any bot's thread through the guarded route, including
+an existing Full-access thread (`expectedApprovalMode: "full"`), and while
+shared Full access is on it can open new Full-access threads. Either way the
+work runs with Full access and no card, so a member who can talk to a bot
+can get Full access through it. It can also stop a request and decline a
+card. It cannot approve a card, change settings, keys, people or sessions,
+or loosen a bot's permissions. The planned fix is a relay token that only
+the Slack worker holds, so these routes stop answering session-less loopback
+at all; until then, turn shared Full access on only where every member may
+have Full access. Files the server's user owns (`config.json`, the engine's
+environment) are also still readable from a bot's shell; that needs a
+second user for engines, a separate change.
 
 ## Sign in with your email
 
@@ -567,12 +583,24 @@ hosted workspace refuses them.
 
 Approval cards are the provider's own (see the approval modes); OpenMausBot
 adds none. On a workspace several people share — portal membership, or an
-email sign-in list that names members — it narrows only whose answer counts:
-a member may answer a card on a thread they started, or for a request they
-sent; admins and the owner may answer any card; a session-less local caller
-under `service` trust may only decline. Anywhere else, anyone who can chat
-may answer, as before. Each answered card records who answered it
-(`card.answeredBy`), and so does its row in the decision log.
+email sign-in list that names members — it narrows only whose answer counts,
+and only when the card can be traced to a person:
+
+- a card for a request a member sent, or in a thread a member opened, is
+  theirs to answer (admins and the owner may answer any card);
+- a thread a bot opened while working on someone's request (a delegated or
+  coordinated job) is traced back to that person, so the cards of work done
+  for them are theirs too;
+- a card that names nobody — sent by the owner on this machine, by a
+  routine or webhook, from Slack (until Slack passes the asker through), or
+  in a thread from before this existed — may be answered by any member, as
+  before;
+- a session-less local caller under `service` trust may only decline.
+
+On a workspace with one person, anyone who can chat may answer, as before.
+Each answered card records who answered it (`card.answeredBy`), and so does
+its row in the decision log. Who a thread was opened for is kept in a
+server-private file (`<data dir>/thread-starters.json`), never sent to clients.
 
 On the Workspaces screen, creating a client workspace shows the same kind of
 link for that workspace's admin, so a client gets one address, one workspace

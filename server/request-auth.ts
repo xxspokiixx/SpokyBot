@@ -53,13 +53,17 @@ const SERVICE_SCOPES: readonly Scope[] = ["client"];
  *   authorization (checked in the handler), and the test-only capability
  *   mint that exists only when its private key is set.
  *
- * Residual risk, by design: a bot's shell is a loopback caller too, so a bot
- * can still do what the worker does — post into any bot's thread through the
- * guarded route (booked to the workspace, not a person), open threads
- * (including Full-access threads when the operator enabled that for Slack),
- * stop a request, and decline a card. It can no longer change settings,
- * keys, instances, MCP servers, webhooks, sessions, people, budgets or fleet,
- * loosen a bot's permissions, or approve anything. */
+ * Residual risk, not closed here: a bot's shell is a loopback caller too, so
+ * it can do everything the worker does. It can post into any bot's thread
+ * through the guarded route, including an existing Full-access thread
+ * (`expectedApprovalMode: "full"`), and while the operator's shared Full
+ * access is on it can open new Full-access threads; either way work runs with
+ * Full access and no card, whoever asked the bot. It can also stop a request
+ * and decline a card. It can no longer change settings, keys, instances, MCP
+ * servers, webhooks, sessions, people, budgets or fleet, loosen a bot's
+ * permissions, or approve anything. The planned fix is a relay token that only
+ * the Slack worker holds, so these routes stop answering session-less
+ * loopback at all. */
 export const SERVICE_ALLOW: ReadonlyArray<{ methods: readonly string[]; path: RegExp }> = [
   { methods: ["GET"], path: /^\/api\/health$/ },
   { methods: ["GET"], path: /^\/api\/auth\/session$/ },
@@ -88,14 +92,14 @@ export function serviceAllowed(method: string, path: string): boolean {
  * A packaged desktop keeps `owner`: its mutations already need Electron's
  * per-launch capability, and only its owner uses the machine. Elsewhere the
  * operator may set OMB_LOOPBACK_TRUST=owner|service. Without it a hosted
- * workspace (any OMB_ADMIN_* setting, even an incomplete one) or a server
- * with shared-workspace Full access defaults to `service`, and a headless
- * self-hosted server keeps `owner`. A value that is neither fails closed. */
+ * workspace (any OMB_ADMIN_* setting, even an incomplete one) defaults to
+ * `service` — shared-workspace Full access is only honoured there, so it needs
+ * no rule of its own — and a headless self-hosted server keeps `owner`. A
+ * value that is neither fails closed. */
 export function resolveLoopbackTrust(input: {
   env?: NodeJS.ProcessEnv;
   desktopManaged: boolean;
   hostedWorkspace: boolean;
-  sharedWorkspaceFullAccess: boolean;
 }): { trust: LoopbackTrust; reason: string; warning?: string } {
   const raw = (input.env ?? process.env).OMB_LOOPBACK_TRUST;
   const requested = raw?.trim().toLowerCase();
@@ -103,11 +107,10 @@ export function resolveLoopbackTrust(input: {
     return { trust: "owner", reason: "desktop app", ...(raw !== undefined ? { warning: "OMB_LOOPBACK_TRUST is ignored in the desktop app" } : {}) };
   }
   if (requested === "owner" || requested === "service") {
-    const shared = input.hostedWorkspace || input.sharedWorkspaceFullAccess;
     return {
       trust: requested,
       reason: "OMB_LOOPBACK_TRUST",
-      ...(requested === "owner" && shared
+      ...(requested === "owner" && input.hostedWorkspace
         ? { warning: "OMB_LOOPBACK_TRUST=owner on a shared workspace: every bot's shell can change settings and approve cards as the owner" }
         : {}),
     };
@@ -116,7 +119,6 @@ export function resolveLoopbackTrust(input: {
     return { trust: "service", reason: "OMB_LOOPBACK_TRUST", warning: `OMB_LOOPBACK_TRUST="${raw.replace(/[^\w.-]/g, "").slice(0, 40)}" is not owner or service; using service` };
   }
   if (input.hostedWorkspace) return { trust: "service", reason: "hosted workspace" };
-  if (input.sharedWorkspaceFullAccess) return { trust: "service", reason: "shared-workspace Full access" };
   return { trust: "owner", reason: "self-hosted default" };
 }
 
@@ -394,7 +396,16 @@ export interface ResolveOptions {
   /** See LoopbackTrust. Absent is `owner`, the historical behaviour. Ignored
    * while a desktop capability is in force (loopbackMutationToken). */
   loopbackTrust?: LoopbackTrust;
+  /** Under `service`: a per-launch secret the `openmausbot serve` process
+   * that started this server handed it over the child's stdin (never the
+   * environment, which the server's other children could read). It lets that
+   * CLI, and nothing else, mint and list pairing codes. */
+  cliOwnerToken?: string;
 }
+
+const CLI_OWNER_HEADER = "x-openmausbot-cli-owner";
+/** The only routes the serving CLI's secret opens: its pairing code. */
+const CLI_OWNER_ROUTE = /^\/api\/auth\/pairing$/;
 
 const DESKTOP_OWNER_HEADER = "x-openmausbot-desktop-owner";
 
@@ -490,6 +501,13 @@ export function resolveRequestAuth(req: IncomingMessage, options: ResolveOptions
       return deny(403, "forbidden: this change must come from the desktop app or a paired device");
     }
     if (options.loopbackMutationToken === undefined && options.loopbackTrust === "service") {
+      // The CLI that started this server may still print a pairing code.
+      if (
+        options.cliOwnerToken && CLI_OWNER_ROUTE.test(path) && ["GET", "POST"].includes(method.toUpperCase()) &&
+        secureTokenMatch(headerValue(req.headers[CLI_OWNER_HEADER]), options.cliOwnerToken)
+      ) {
+        return { auth: { kind: "loopback", scopes: LOOPBACK_SCOPES }, status: 401, error: "" };
+      }
       // On a shared server "local" includes every bot's shell. Default deny:
       // only the service routes, never an admin change, without a session.
       if (!serviceAllowed(method, path)) {

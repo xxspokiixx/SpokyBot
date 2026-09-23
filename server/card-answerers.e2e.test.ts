@@ -6,9 +6,13 @@
 //   1. a member may answer a card for a request they sent; another member
 //      may not, on either respond route
 //   2. a member may answer any card on a thread they started
-//   3. an admin, and the owner on this machine, may answer any card
-//   4. the decision row and the card both name who answered
-//   5. with service loopback trust, a session-less local caller (the Slack
+//   3. a thread a bot opened while working on a member's request leads back
+//      to that member: the delegated work's cards are theirs to answer
+//   4. a card that names nobody (owner-sent, a Slack-style guarded send, a
+//      routine) may be answered by any member, exactly as before
+//   5. an admin, and the owner on this machine, may answer any card
+//   6. the decision row and the card both name who answered
+//   7. with service loopback trust, a session-less local caller (the Slack
 //      worker) may decline a card but never approve one
 //
 // No new card, prompt or gate appears anywhere: the provider's own approval
@@ -32,6 +36,7 @@ const posixOnly = describe.skipIf(process.platform === "win32");
 const BOSS = "boss@example.test";
 const ADA = "ada@example.test";
 const BOB = "bob@example.test";
+const CAPABILITY_KEY = "card-answerers-fixture-capability";
 
 let child: ChildProcess;
 let home: string;
@@ -57,7 +62,8 @@ async function start(env: NodeJS.ProcessEnv = {}) {
     env: {
       ...(process.env.PATH ? { PATH: process.env.PATH } : {}),
       ...(process.env.SystemRoot ? { SystemRoot: process.env.SystemRoot } : {}),
-      HOME: home, USERPROFILE: home, OMB_PORT: String(PORT), OMB_WEBHOOK_PORT: String(PORT + 1), ...env,
+      HOME: home, USERPROFILE: home, OMB_PORT: String(PORT), OMB_WEBHOOK_PORT: String(PORT + 1),
+      OMB_TEST_INTERNAL_CAPABILITY_KEY: CAPABILITY_KEY, ...env,
     },
     stdio: ["ignore", "pipe", "pipe"],
   });
@@ -170,12 +176,57 @@ posixOnly("who may answer a card on a shared workspace", () => {
     const task = await api("POST", `/api/bots/${bot.id}/tasks`, { title: "Bob's thread" }, BOB);
     expect(task.status).toBe(201);
     const threadId = task.body.task.threadId as string;
-    expect(task.body.task.startedBy).toBeUndefined(); // server-private
+    // Who a thread was opened for is server-private: not on a task or a room thread.
+    expect(JSON.stringify(task.body)).not.toContain("startedBy");
+    const room = await api("POST", "/api/groups", { memberIds: [bot.id], name: "Bob's room" }, BOB);
+    expect(room.status, JSON.stringify(room.body)).toBe(201);
+    const roomTask = await api("POST", `/api/groups/${room.body.group.id}/tasks`, { title: "Bob's room thread" }, BOB);
+    expect(roomTask.status, JSON.stringify(roomTask.body)).toBe(201);
+    expect(JSON.stringify(roomTask.body)).not.toContain("startedBy");
+    expect(JSON.stringify((await api("GET", "/api/bots?messages=0", undefined, BOB)).body)).not.toContain("startedBy");
     const requestId = await cardFrom(bot, threadId, ADA);
     // Ada sent it, Bob started the thread: both may answer; here Bob declines.
     const answered = await api("POST", `/api/bots/${bot.id}/respond`, { requestId, behavior: "deny", threadId }, BOB);
     expect(answered.status, JSON.stringify(answered.body)).toBe(200);
     expect((await decision(requestId, "user-denied"))?.actor).toMatchObject({ kind: "session", email: BOB });
+  }, 90_000);
+
+  it("follows a thread a bot opened for a member back to that member", async () => {
+    const opener = await makeBot("Opener");
+    const helper = await makeBot("Helper");
+    const source = await cardFrom(opener, opener.threadId, ADA);
+    // The opener, mid-way through Ada's request, hands work to a teammate in a fresh thread.
+    const minted = await fetch(`${BASE}/api/testing/internal-capability`, {
+      method: "POST", headers: { "content-type": "application/json", "x-openmausbot-test-capability": CAPABILITY_KEY },
+      body: JSON.stringify({ botId: opener.id, threadId: opener.threadId }),
+    });
+    expect(minted.status).toBe(201);
+    const { token } = await minted.json() as { token: string };
+    const opened = await fetch(`${BASE}/api/internal/threads`, {
+      method: "POST", headers: { "content-type": "application/json", authorization: `Bearer ${token}` },
+      body: JSON.stringify({ toBotId: helper.id, title: "Helper job", message: "run it" }),
+    });
+    const openedBody = await opened.json() as { threadId: string };
+    expect(opened.status, JSON.stringify(openedBody)).toBe(201);
+    // Ada approves her own request; the opener's turn ends and the handoff runs.
+    expect((await api("POST", `/api/threads/${opener.threadId}/respond`, { requestId: source, behavior: "allow" }, ADA)).status).toBe(200);
+    const delegated = await openCard(openedBody.threadId);
+    expect(delegated, `the handoff never asked:\n${log.slice(-2_000)}`).not.toBeNull();
+    const requestId = delegated.card.requestId as string;
+    const refused = await api("POST", `/api/threads/${openedBody.threadId}/respond`, { requestId, behavior: "allow" }, BOB);
+    expect(refused.status).toBe(403);
+    expect(refused.body.error).toMatch(refusal);
+    expect((await api("POST", `/api/threads/${openedBody.threadId}/respond`, { requestId, behavior: "allow" }, ADA)).status).toBe(200);
+    expect((await decision(requestId, "user-approved"))?.actor).toMatchObject({ kind: "session", email: ADA });
+  }, 90_000);
+
+  it("lets any member answer a card that names nobody, as before", async () => {
+    const bot = await makeBot("Unnamed");
+    // Sent by the owner on this machine: no session, no thread starter.
+    const requestId = await cardFrom(bot, bot.threadId);
+    const answered = await api("POST", `/api/threads/${bot.threadId}/respond`, { requestId, behavior: "allow" }, BOB);
+    expect(answered.status, JSON.stringify(answered.body)).toBe(200);
+    expect((await decision(requestId, "user-approved"))?.actor).toMatchObject({ kind: "session", email: BOB });
   }, 90_000);
 
   it("lets an admin and the owner on this machine answer anyone's card", async () => {
@@ -210,5 +261,21 @@ posixOnly("who may answer a card on a shared workspace", () => {
     expect(decline.status, JSON.stringify(decline.body)).toBe(200);
     expect((await decision(requestId, "user-denied"))?.actor).toEqual({ kind: "worker" });
     expect((await settledCard(bot.threadId, requestId))?.card.answeredBy).toEqual({ kind: "worker" });
+
+    // A Slack-shaped request: the worker opens the thread and sends through
+    // the guarded route, so no person can be named. Any member may approve it
+    // in OpenMausBot, as before; nothing waits on an admin.
+    const task = await api("POST", `/api/bots/${bot.id}/tasks`, { title: "Slack · C1 · 1.0" });
+    expect(task.status, JSON.stringify(task.body)).toBe(201);
+    const threadId = task.body.task.threadId as string;
+    const page = await api("GET", `/api/threads/${threadId}/messages?limit=0`);
+    const guarded = await api("POST", `/api/bots/${bot.id}/messages/guarded`, {
+      threadId, text: "run it", sendId: "slackjob_card_answerers_1", expectedActiveLeafId: page.body.activeLeafId ?? null,
+    });
+    expect(guarded.status, JSON.stringify(guarded.body)).toBe(202);
+    const slackCard = await openCard(threadId);
+    expect(slackCard).not.toBeNull();
+    const approved = await api("POST", `/api/threads/${threadId}/respond`, { requestId: slackCard.card.requestId, behavior: "allow" }, ADA);
+    expect(approved.status, JSON.stringify(approved.body)).toBe(200);
   }, 90_000);
 });

@@ -467,9 +467,6 @@ export interface GroupTask {
   /** The first message already drove a title attempt for this thread, so a
    * later one does not rename a room the person may have retitled. */
   titleFromFirstMessage?: true;
-  /** Opaque key (see ResolvedSender.id) of the signed-in person who opened
-   * this thread. Decides only who may answer its cards on a shared workspace. */
-  startedBy?: string;
 }
 
 /** A room as a client may see it: the record plus the computed working

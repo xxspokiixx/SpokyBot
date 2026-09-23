@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 
-import { isOwnerOrAdmin, readSessionState, reasonWorthShowing, takeInvitedEmailFromLocation } from "./session";
+import { isConnected, isOwnerOrAdmin, readSessionState, reasonWorthShowing, SERVICE_TRUST_REASON, takeInvitedEmailFromLocation } from "./session";
 
 describe("what the pair page says about why it was shown", () => {
   it("stays quiet for the ordinary no-session case and repeats anything else", () => {
@@ -39,5 +39,16 @@ describe("who the served UI is on its own machine", () => {
     expect(isOwnerOrAdmin({ kind: "session", id: "s", label: "l", scopes: ["client"], expiresAt: 1 })).toBe(false);
     expect(isOwnerOrAdmin({ kind: "session", id: "s", label: "l", scopes: ["admin", "client"], expiresAt: 1 })).toBe(true);
     expect(isOwnerOrAdmin(null)).toBe(false);
+  });
+});
+
+describe("an SSH tunnel to a server that treats local requests as a service", () => {
+  it("is not connected, so the app sends it to sign in, and says why", () => {
+    expect(isConnected({ kind: "loopback" })).toBe(true);
+    expect(isConnected({ kind: "loopback", trust: "service" })).toBe(false);
+    expect(isConnected({ kind: "session", id: "s", label: "l", scopes: ["client"], expiresAt: 1 })).toBe(true);
+    expect(isConnected({ kind: "unauthenticated", error: "pair" })).toBe(false);
+    expect(isConnected(null)).toBe(false);
+    expect(reasonWorthShowing(SERVICE_TRUST_REASON)).toBe(SERVICE_TRUST_REASON);
   });
 });
