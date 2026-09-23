@@ -1595,9 +1595,14 @@ function askBotAndWait(targetBotId: string, message: string, depth: number, from
 }
 
 // New bots honor setup's saved choice; unconfigured workspaces prefer Claude.
+// While enrolled, a Company model that can run beats a signed-out personal
+// engine, and the organisation's policy is respected; otherwise inert.
 async function defaultSelection() {
   if (hostedModels) return hostedModels.select(cfg.defaultModelSelection);
-  return selectDefaultModelSelection(await registry.describe(), cfg.defaultModelSelection);
+  return selectDefaultModelSelection(await registry.describe(), cfg.defaultModelSelection, {
+    company: (instanceId) => managedDesktop.owns(instanceId),
+    refusal: (instance) => policyModelRefusal(instance),
+  });
 }
 
 function checkedModelSelection(

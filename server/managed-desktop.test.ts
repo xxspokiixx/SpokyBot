@@ -12,6 +12,8 @@ import { recordEvents } from "./testing/events.ts";
 import { redactSecretsInText } from "./redact.ts";
 import { excludedWorkspaceAuthPath } from "./workspace-backup-policy.ts";
 import type { ProviderInstance } from "./contracts.ts";
+import { selectDefaultModelSelection } from "./default-model-selection.ts";
+import { Store } from "./store.ts";
 
 const managers: ManagedDesktopProviders[] = [], registries: ProviderRegistry[] = [];
 afterEach(async () => { await Promise.all(managers.splice(0).map(manager => manager.close())); await Promise.all(registries.splice(0).map(registry => registry.disposeAll())); vi.restoreAllMocks(); vi.unstubAllGlobals(); });
@@ -326,4 +328,29 @@ it("keeps Company models available when moving old references fails", async () =
   await manager.apply(value);
   expect(registry.get(companyInstanceId(value, "anthropic"))).not.toBeNull();
   expect(warn).toHaveBeenCalledWith(expect.stringContaining("could not move saved Company model references"));
+});
+
+it("sends new bots to a Company model that can run while enrolled, and disconnecting leaves personal selections untouched", async () => {
+  const store = new Store(() => ({ instanceId: "personal", model: "fake-default" }));
+  const { registry, manager } = await setup({ migrate: aliases => { store.renameInstances(new Map(aliases.map(({ from, to }) => [from, to]))); } });
+  const value = connection(), companyClaude = companyInstanceId(value, "anthropic");
+  const company = (instanceId: string) => manager.owns(instanceId);
+  // The personal Claude CLI is installed but signed out, and the local model server is not running.
+  const described = async (signedIn = false) => (await registry.describe()).map(instance =>
+    instance.instanceId === "personal" && !signedIn ? { ...instance, snapshot: { ...instance.snapshot, authenticated: false } }
+      : instance.instanceId === "local" ? { ...instance, snapshot: { state: "unavailable" as const, reason: "fixture server stopped" } } : instance);
+  const before = selectDefaultModelSelection(await described(), undefined, { company });
+  expect(before.instanceId).toBe("personal");
+  await manager.apply(value);
+  expect(selectDefaultModelSelection(await described(), undefined, { company })).toEqual({ instanceId: companyClaude, model: "claude-fixture" });
+  expect(selectDefaultModelSelection(await described(true), undefined, { company }).instanceId).toBe("personal");
+  const personalBot = store.createBot({ modelSelection: { instanceId: "personal", model: "fake-default" } }, { seedMessages: false });
+  const companyBot = store.createBot({ modelSelection: { instanceId: companyClaude, model: "claude-fixture" } }, { seedMessages: false });
+  await manager.migrateIdentity({ portalOrigin: value.portalOrigin, organizationId: value.organizationId, email: value.email, deviceId: value.deviceId });
+  await manager.apply(null);
+  expect(registry.get(companyClaude)).toBeNull();
+  expect(store.bot(personalBot.id)!.modelSelection).toEqual({ instanceId: "personal", model: "fake-default" });
+  // The Company choice waits for the same person to reconnect; it never falls back to personal billing.
+  expect(store.bot(companyBot.id)!.modelSelection).toEqual({ instanceId: companyClaude, model: "claude-fixture" });
+  expect(selectDefaultModelSelection(await described(), undefined, { company })).toEqual(before);
 });

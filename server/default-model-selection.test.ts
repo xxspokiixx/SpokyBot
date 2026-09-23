@@ -74,3 +74,62 @@ describe("new bot default model selection", () => {
     expect(selectDefaultModelSelection([])).toEqual({ instanceId: "", model: "" });
   });
 });
+
+describe("new bot default model selection while enrolled in an organisation", () => {
+  const signedOut = { ...claude, instanceId: "personal-claude", snapshot: { state: "available", authenticated: false } satisfies ProviderSnapshot };
+  const companyClaude = { ...claude, instanceId: "company.fixture.anthropic", models: { default: "company-claude", options: [{ id: "company-claude", label: "Company" }] } };
+  const companyRouter = {
+    instanceId: "company.fixture.openrouter", driverKind: "openai-compat",
+    snapshot: { state: "available", authenticated: true } satisfies ProviderSnapshot,
+    models: { default: "company/router", options: [{ id: "company/router", label: "Router" }] },
+  };
+  const company = (instanceId: string) => instanceId.startsWith("company.");
+
+  it("picks a Company model that can run over an installed but signed-out personal Claude", () => {
+    expect(selectDefaultModelSelection([signedOut, companyClaude], undefined, { company }))
+      .toEqual({ instanceId: "company.fixture.anthropic", model: "company-claude" });
+    // Claude first among Company models, whatever order they are listed in.
+    expect(selectDefaultModelSelection([signedOut, companyRouter, companyClaude], undefined, { company }))
+      .toEqual({ instanceId: "company.fixture.anthropic", model: "company-claude" });
+    expect(selectDefaultModelSelection([signedOut, companyRouter], undefined, { company }))
+      .toEqual({ instanceId: "company.fixture.openrouter", model: "company/router" });
+  });
+
+  it("keeps a signed-in personal engine, so billing stays the person's choice", () => {
+    expect(selectDefaultModelSelection([companyClaude, claude], undefined, { company }))
+      .toEqual({ instanceId: "claude", model: "claude-default" });
+    expect(selectDefaultModelSelection([signedOut, companyClaude, codex], undefined, { company }))
+      .toEqual({ instanceId: "codex", model: "codex-default" });
+  });
+
+  it("falls back to today's choice when nothing can run yet", () => {
+    const companyMissingCli = { ...companyClaude, snapshot: { state: "unavailable", reason: "claude CLI not found" } satisfies ProviderSnapshot };
+    expect(selectDefaultModelSelection([signedOut, companyMissingCli], undefined, { company }))
+      .toEqual({ instanceId: "personal-claude", model: "claude-default" });
+  });
+
+  it("is exactly today's choice without an enrolment", () => {
+    for (const instances of [[signedOut, codex], [codex, signedOut], [codex], [signedOut], []]) {
+      expect(selectDefaultModelSelection(instances, undefined, {})).toEqual(selectDefaultModelSelection(instances));
+      expect(selectDefaultModelSelection(instances, undefined, { company, refusal: () => undefined })).toEqual(selectDefaultModelSelection(instances));
+    }
+    // Today a signed-out Claude still wins over a signed-in Codex.
+    expect(selectDefaultModelSelection([codex, signedOut], undefined, { company })).toEqual({ instanceId: "personal-claude", model: "claude-default" });
+  });
+
+  it("never picks an engine the organisation's policy refuses", () => {
+    // companyModelsOnly: every personal instance is refused.
+    const companyOnly = (instance: { instanceId: string }) => company(instance.instanceId) ? undefined : "Fixture Company allows only company models on this computer.";
+    expect(selectDefaultModelSelection([claude, codex, companyRouter], undefined, { company, refusal: companyOnly }))
+      .toEqual({ instanceId: "company.fixture.openrouter", model: "company/router" });
+    expect(selectDefaultModelSelection([claude, codex], undefined, { company, refusal: companyOnly }))
+      .toEqual({ instanceId: "", model: "" });
+    // An allow-list without Claude skips Claude, personal or Company.
+    const noClaude = (instance: { driverKind: string }) => instance.driverKind === "claudeAgent" ? "Fixture Company does not allow the Claude engine on this computer." : undefined;
+    expect(selectDefaultModelSelection([claude, companyClaude, companyRouter], undefined, { company, refusal: noClaude }))
+      .toEqual({ instanceId: "company.fixture.openrouter", model: "company/router" });
+    // A saved choice the organisation refuses sends new bots to setup, never elsewhere.
+    expect(selectDefaultModelSelection([claude, companyRouter], { instanceId: "claude", model: "claude-default" }, { company, refusal: companyOnly }))
+      .toEqual({ instanceId: "", model: "" });
+  });
+});
