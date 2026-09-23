@@ -53,10 +53,15 @@ export function createStartupScreen({
     if (channel === "startup-screen:close" && !disposed) splash.close();
   });
   splash.once("ready-to-show", () => {
-    if (!disposed && !isQuitting()) { splash.show(); resolveReady(); }
+    if (!disposed && !isQuitting()) { clearTimeout(fallback); splash.show(); resolveReady(); }
   });
   splash.on("show", () => onShow?.(splash));
   splash.once("closed", resolveReady);
+  // Server startup waits on ready. A failed loading renderer must not keep
+  // it from ever reaching the main window's own bounded recovery path.
+  splash.webContents.once("render-process-gone", dispose);
+  fallback = setTimeout(dispose, 10_000);
+  fallback.unref?.();
   void splash.loadURL("data:text/html;charset=utf-8," + encodeURIComponent(startupScreenHtml(iconPath)))
     .catch(dispose);
   const attach = (win, { maximized = false } = {}) => {

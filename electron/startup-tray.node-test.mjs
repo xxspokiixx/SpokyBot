@@ -51,6 +51,34 @@ function fixture(options = {}) {
 }
 const flush = async () => { await Promise.resolve(); await Promise.resolve(); };
 
+class UnreadyWindow extends Window {
+  loadURL() { return Promise.resolve(); }
+}
+
+test("a loading screen that never becomes ready cannot block server startup", async t => {
+  t.mock.timers.enable({ apis: ["setTimeout"] });
+  const { splash, calls } = fixture({ BrowserWindow: UnreadyWindow });
+  let ready = false;
+  void splash.ready.then(() => { ready = true; });
+  t.mock.timers.tick(9999); await flush();
+  assert.equal(ready, false);
+  t.mock.timers.tick(1); await flush();
+  assert.equal(ready, true);
+  assert.equal(splash.window.destroyed, true);
+  assert.deepEqual(calls, ["finished"]);
+});
+
+test("a loading renderer crash unblocks startup before ready-to-show", async () => {
+  const { splash, calls } = fixture({ BrowserWindow: UnreadyWindow });
+  let ready = false;
+  void splash.ready.then(() => { ready = true; });
+  splash.window.webContents.emit("render-process-gone");
+  await flush();
+  assert.equal(ready, true);
+  assert.equal(splash.window.destroyed, true);
+  assert.deepEqual(calls, ["finished"]);
+});
+
 test("loading screen waits for mounted content before revealing the restored workspace", async () => {
   const { splash, win, calls } = fixture();
   await splash.ready;
