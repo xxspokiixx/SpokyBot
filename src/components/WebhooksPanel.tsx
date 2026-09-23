@@ -91,7 +91,7 @@ function WebhookEditor({ webhook, bots, onClose, onCredential }: { webhook?: Web
   const dialogRef = useRef<HTMLDivElement>(null);
   const onCloseRef = useRef(onClose);
   onCloseRef.current = onClose;
-  const cloudInstance = state.instances.find((instance) => instance.driverKind === "boxAgent");
+  const cloudInstance = state.instances.find((instance) => (instance.driverKind === "boxAgent" || instance.capabilities?.cloudComputerMcp) && instance.snapshot.state === "available");
   const cloudReady = Boolean(state.config?.box.configured && cloudInstance?.snapshot.state === "available");
 
   useEffect(() => {
