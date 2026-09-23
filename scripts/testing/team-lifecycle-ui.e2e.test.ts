@@ -58,6 +58,8 @@ if (!enabled) console.log("skipping team lifecycle UI e2e: set OMB_UI_E2E=1 to i
       return ui("type", "--ref", ref, "--text", text);
     };
     const snapshot = async () => (await ui("snapshot")).snapshot as string;
+    const evaluate = async (source: string) => (await ui("eval", "--js", source)).result;
+    const focused = () => evaluate("document.activeElement?.getAttribute('aria-label') || document.activeElement?.textContent?.trim()");
     const manage = async (name: string) => {
       // Native summary nodes have no refs in the pinned browser snapshot.
       const selector = `[data-team-key=${JSON.stringify(name)}] summary`;
@@ -113,9 +115,72 @@ if (!enabled) console.log("skipping team lifecycle UI e2e: set OMB_UI_E2E=1 to i
     await expect.poll(snapshot, { timeout: 10_000 }).toContain('alertdialog "Delete Launch team?"');
     await click("Delete team");
     await expect.poll(async () => (await api("/api/bots?messages=0")).sections.includes("Launch")).toBe(false);
+
+    // Section management is available where the section lives, without
+    // requiring the team map. Cancel and Escape must leave its brief intact.
+    await api("/api/sidebar-sections", "POST", { name: "Sidebar empty" });
+    await api("/api/section-context?section=Sidebar%20empty", "PUT", { text: "Keep this until deletion is confirmed." });
+    await click("Delete Sidebar empty section");
+    await expect.poll(snapshot).toContain('alertdialog "Delete Sidebar empty team?"');
+    expect(await focused()).toBe("Cancel");
+    await ui("press", "--keys", "Shift+Tab");
+    expect(await focused()).toBe("Delete team");
+    await ui("press", "--keys", "Tab");
+    expect(await focused()).toBe("Cancel");
+    await ui("press", "--keys", "Escape");
+    await expect.poll(focused).toBe("Delete Sidebar empty section");
+    expect((await api("/api/sidebar-sections")).sections).toContain("Sidebar empty");
+    expect((await api("/api/section-context?section=Sidebar%20empty")).text).toBe("Keep this until deletion is confirmed.");
+    await click("Delete Sidebar empty section");
+    await click("Cancel");
+    await expect.poll(focused).toBe("Delete Sidebar empty section");
+    expect((await api("/api/sidebar-sections")).sections).toContain("Sidebar empty");
+    await click("Delete Sidebar empty section");
+    await click("Delete team");
+    await expect.poll(async () => (await api("/api/sidebar-sections")).sections.includes("Sidebar empty")).toBe(false);
+    await expect.poll(() => evaluate('Boolean(document.querySelector("[data-sidebar-section-id=\\"section:Sidebar empty\\"]"))')).toBe(false);
+    expect((await fetch(`${info.url}/api/section-context?section=Sidebar%20empty`)).status).toBe(404);
+
+    // The visible rows are not membership: pinned and archived bots still
+    // occupy their team, and a group can occupy a section without any bots.
+    const assertOccupiedSection = async (navigate = false) => {
+      await click("Delete Sidebar guarded section");
+      await expect.poll(snapshot).toContain('alertdialog "Delete Sidebar guarded team?"');
+      expect(await focused()).toBe("Cancel");
+      expect(await evaluate("document.querySelector('[role=alertdialog]')?.textContent")).toContain(
+        "Move all bots (including archived bots) and group chats to another team first. No conversations will be deleted.",
+      );
+      expect(await evaluate("[...document.querySelectorAll('[role=alertdialog] button')].map(button => button.textContent.trim())"))
+        .toEqual(["Cancel", "Team map"]);
+      await click(navigate ? "Team map" : "Cancel");
+      if (navigate) await expect.poll(() => evaluate("Boolean(document.querySelector('[data-team-canvas]'))")).toBe(true);
+      else await expect.poll(focused).toBe("Delete Sidebar guarded section");
+      expect((await api("/api/sidebar-sections")).sections).toContain("Sidebar guarded");
+    };
+    await api("/api/sidebar-sections", "POST", { name: "Sidebar guarded", botIds: [a.id] });
+    await expect.poll(() => evaluate(`Boolean(document.querySelector('[data-sidebar-section-id="section:Sidebar guarded"] [data-sidebar-bot-row="${a.id}"]'))`)).toBe(true);
+    await assertOccupiedSection();
+    await api(`/api/bots/${a.id}`, "PATCH", { pinned: true });
+    await expect.poll(() => evaluate(`Boolean(document.querySelector('[data-sidebar-section-id="builtin:pinned"] [data-sidebar-bot-row="${a.id}"]'))`)).toBe(true);
+    expect(await evaluate('document.querySelectorAll("[data-sidebar-section-id=\\"section:Sidebar guarded\\"] [data-sidebar-bot-row]").length')).toBe(0);
+    await assertOccupiedSection();
+    await api(`/api/bots/${a.id}`, "PATCH", { hidden: true, pinned: false });
+    await expect.poll(() => evaluate(`Boolean(document.querySelector('[data-sidebar-bot-row="${a.id}"]'))`)).toBe(false);
+    await assertOccupiedSection();
+    await api(`/api/bots/${a.id}`, "PATCH", { hidden: false, section: "" });
+    const group = (await api("/api/groups", "POST", { name: "Sidebar guarded room", memberIds: [a.id, b.id], section: "Sidebar guarded" })).group;
+    await expect.poll(snapshot).toContain("Sidebar guarded room");
+    expect((await api("/api/bots?messages=0")).bots.some((bot: any) => bot.section === "Sidebar guarded")).toBe(false);
+    await evaluate(`document.querySelector('[data-sidebar-bot-row="${a.id}"]').click(); true`);
+    await expect.poll(() => evaluate("Boolean(document.querySelector('[data-team-canvas]'))")).toBe(false);
+    await assertOccupiedSection(true);
+    const guardedState = await api("/api/bots?messages=0");
+    expect(guardedState.bots.map((bot: any) => bot.id)).toEqual(expect.arrayContaining([a.id, b.id]));
+    expect(guardedState.groups.find((room: any) => room.id === group.id)).toMatchObject({ section: "Sidebar guarded", memberIds: [a.id, b.id] });
     const consoleResult = await ui("console");
     expect(JSON.stringify(consoleResult)).not.toMatch(/Uncaught|ReferenceError/);
-    console.info(JSON.stringify({ fixture: info!, screenshot, emptyTeam: true, multiBotMove: true, reload: true, renameAndDelete: true }));
+    console.info(JSON.stringify({ fixture: info!, screenshot, emptyTeam: true, multiBotMove: true, reload: true, renameAndDelete: true,
+      sidebarDelete: true, sidebarCancelAndFocus: true, occupiedSidebarGuards: ["active", "pinned", "archived", "group"] }));
     succeeded = true;
   } finally {
     if (!succeeded && fixtureHandle && fixtureLog) {
@@ -128,4 +193,4 @@ if (!enabled) console.log("skipping team lifecycle UI e2e: set OMB_UI_E2E=1 to i
     }
     await waitForExit(child, { signal: "SIGINT", graceMs: 30_000 });
   }
-}, binary ? 180_000 : 720_000);
+}, binary ? 300_000 : 840_000);

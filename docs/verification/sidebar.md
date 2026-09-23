@@ -23,3 +23,23 @@ above are manual browser verification, not assertions made by those unit tests.
 This fixture covers the sidebar confirmation and bot-row result only; it does
 not exercise Settings > Computers deletion or provider completion polling.
 Those paths are covered by the computer-section and server Box inventory tests.
+
+## Section deletion
+
+Run `OMB_UI_E2E=1 pnpm exec vitest run scripts/testing/team-lifecycle-ui.e2e.test.ts --maxWorkers=1`.
+The test launches its own isolated server and real renderer; never point it at
+the user's live workspace. It retains the Team map lifecycle checks and also
+checks deletion directly from a sidebar section header:
+
+- Cancel gets initial focus; Tab and Shift-Tab wrap within the confirmation.
+- Escape and Cancel preserve the section and its shared instructions, and return
+  focus to its delete button.
+- Confirming deletion removes an empty section and its shared instructions.
+- Active, pinned and archived bots all prevent deletion, even if the section has
+  no visible bot rows. A group-only section is protected too.
+- Occupied sections explain the restriction and offer Team map without deleting
+  their bots or group chats.
+
+The fixture reports its log path and keeps a snapshot and screenshot on failure.
+`src/components/SidebarSectionHeader.test.ts` separately checks that the optional
+delete control does not replace or nest inside the collapse button.

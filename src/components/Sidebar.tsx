@@ -1500,6 +1500,11 @@ export function Sidebar({ open, onClose }: { open: boolean; onClose: () => void 
   const [sectionPicker, setSectionPicker] = useState<MenuState | null>(null);
   const [newTeam, setNewTeam] = useState(false);
   const [moveToTeam, setMoveToTeam] = useState<string | null>(null);
+  const [deletingTeam, setDeletingTeam] = useState<string | null>(null);
+  const cancelDeleteTeam = useCallback(() => setDeletingTeam(null), []);
+  // Pinned, archived and search-filtered members still belong to the team.
+  const deletingTeamOccupied = deletingTeam !== null && [...state.bots, ...state.groups]
+    .some((record) => record.section?.trim() === deletingTeam);
   const [roomMenu, setRoomMenu] = useState<{ groupId: string; x: number; y: number } | null>(null);
   const [roomSectionPicker, setRoomSectionPicker] = useState<{ groupId: string; x: number; y: number } | null>(null);
   const [plusOpen, setPlusOpen] = useState(false);
@@ -2092,6 +2097,7 @@ export function Sidebar({ open, onClose }: { open: boolean; onClose: () => void 
                     }}
                     onDragEnd={resetSectionDrag}
                     onMove={(direction) => moveSidebarSection(id, direction)}
+                    onDelete={!remoteClient && sectionName ? () => setDeletingTeam(sectionName) : undefined}
                   />
                 )}
                 {collapsed && queued.length > 0 && <button type="button" onClick={() => toggleSection(id)}
@@ -2280,6 +2286,27 @@ export function Sidebar({ open, onClose }: { open: boolean; onClose: () => void 
         }}
       />
       {newTeam && <TeamDialog onClose={() => setNewTeam(false)} />}
+      <ConfirmDialog
+        open={deletingTeam !== null}
+        title={t("team.deleteTitle", { name: deletingTeam ?? "" })}
+        body={t(deletingTeamOccupied ? "sidebar.section.moveBeforeDelete" : "team.deleteDescription")}
+        confirmLabel={t(deletingTeamOccupied ? "sidebar.nav.teamMap" : "team.delete")}
+        tone={deletingTeamOccupied ? "neutral" : "danger"}
+        onCancel={cancelDeleteTeam}
+        returnFocusRef={sidebarRef}
+        onConfirm={() => {
+          const name = deletingTeam;
+          setDeletingTeam(null);
+          if (!name) return;
+          if (deletingTeamOccupied) {
+            dispatch({ type: "showTeamMap" });
+            return;
+          }
+          void api(`/api/sidebar-sections?section=${encodeURIComponent(name)}`, { method: "DELETE" })
+            .then(({ sections }) => dispatch({ type: "sections", sections }))
+            .catch((cause) => setTeamFeedback({ error: true, text: cause instanceof Error ? cause.message : String(cause) }));
+        }}
+      />
       {moveToTeam && <TeamDialog section={moveToTeam} onClose={() => setMoveToTeam(null)} />}
       {sectionPicker && (
         <SectionPicker

@@ -412,6 +412,8 @@
   "sidebar.section.expandReorder": "Expand {name}. Alt+Up/Down reorders it.",
   "sidebar.section.collapseReorder": "Collapse {name}. Alt+Up/Down reorders it.",
   "sidebar.section.dragToReorder": "Drag to reorder",
+  "sidebar.section.deleteAria": "Delete {name} section",
+  "sidebar.section.moveBeforeDelete": "Move all bots (including archived bots) and group chats to another team first. No conversations will be deleted.",
   "sidebar.profile.you": "You",
   "sidebar.menu.yourPhone": "Your phone",
   "sidebar.menu.getIos": "Get OpenMausBot for iOS",

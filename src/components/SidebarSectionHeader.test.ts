@@ -21,8 +21,27 @@ describe("SidebarSectionHeader", () => {
     expect(html).toContain('aria-keyshortcuts="Alt+ArrowUp Alt+ArrowDown"');
     expect(html).toContain('aria-hidden="true"');
     expect(html).not.toContain('role="button"');
+    expect(html).not.toContain("Delete Work section");
     expect(html.indexOf(">Work</span>")).toBeLessThan(html.indexOf("lucide-chevron-down"));
     expect(html).not.toContain("uppercase");
+  });
+
+  it.each([false, true])("exposes a separate delete control when provided, collapsed=%s", (collapsed) => {
+    const html = renderToStaticMarkup(
+      createElement(SidebarSectionHeader, {
+        name: "Work",
+        collapsed,
+        onToggle: () => {},
+        onDelete: () => {},
+        reorderable: true,
+        dragging: false,
+      }),
+    );
+
+    expect(html).toContain('aria-label="Delete Work section"');
+    expect(html).toContain(`aria-expanded="${!collapsed}"`);
+    expect(html.match(/<button\b/g)).toHaveLength(2);
+    expect(html.indexOf("</button>")).toBeLessThan(html.indexOf('aria-label="Delete Work section"'));
   });
 
   it("renders collapsed attention signals in the heading", () => {
