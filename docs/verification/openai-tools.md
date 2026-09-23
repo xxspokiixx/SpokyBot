@@ -64,8 +64,9 @@ and service-specific limits remain separate from the implemented protocol.
 The OpenAI-compatible driver opts into structured image input and mounts the
 harness-provided `localComputer` and `browser` stdio descriptors. It does not
 discover or grant a desktop itself. Host, VM, VPS and room routing continue to
-use the harness's existing ownership and permission gates. Box-hosted turns
-still use the separate native Box runner.
+use the harness's existing ownership and permission gates. The driver's Box
+bridge consumes the separately leased cloud descriptor and keeps the selected
+API model; other engines retain their native Box runner.
 
 MCP images become bounded inline image parts. Tool results retain their call IDs;
 only after the full tool-result batch is appended does a separate image message
@@ -85,6 +86,20 @@ input-image encoding, computer/browser screenshot delivery, call-ID ordering,
 approval denial with no side effect, malformed images and a screenshot larger
 than the ordinary text frame limit. They do not use real desktop access or paid
 inference, and do not establish vision/tool support for every provider model.
+
+### Box bridge
+
+`pnpm exec vitest run server/drivers/chat-box-tools.test.ts server/openai-box.e2e.test.ts`
+tests an owned loopback Box/API fixture. It covers direct chats, group member
+turns and cloud routines retaining the selected model, screenshots arriving as
+image parts, and human control blocking an approved action. Bridge tests cover
+each advertised action, invalid arguments, expired control capabilities,
+changed ownership and in-flight cancellation without replay.
+
+Model screenshots use native resolution and a separate file from panel frames.
+Every action rechecks the harness control gate. Commands run with an isolated
+environment; Box and control credentials do not enter model messages. Tests
+use synthetic image bytes, not a paid Box account or real desktop input.
 
 ## Text-only model connections
 
