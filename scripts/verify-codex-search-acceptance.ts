@@ -4,6 +4,7 @@ import { copyFileSync, mkdirSync, writeFileSync, readFileSync, existsSync } from
 import { join } from "node:path";
 import { launchVerificationServer, runControlOmb } from "./control-omb.ts";
 import { fixtureApi } from "./testing/preview-fixture.ts";
+import { verifiedNativeSearch } from "./testing/native-search-evidence.ts";
 
 const cli = process.env.OMB_VERIFY_CODEX_CLI;
 const auth = process.env.OMB_VERIFY_CODEX_AUTH;
@@ -29,7 +30,7 @@ try {
       name: `Search test ${model}`, description: "A helpful assistant.",
       modelSelection: { instanceId: "codex", model },
     });
-    const prompt = "Check the current official OpenAI documentation: is the built-in browser available in Codex CLI? Give the answer and a source link.";
+    const prompt = "Check the current official OpenAI documentation: is the built-in browser available in Codex CLI? After searching, open the source URL in a separate call, read it, and cite that exact URL in your answer.";
     const entry: any = { model, prompt, botId: bot.id };
     report.cases.push(entry); save();
     entry.sent = await runControlOmb(["send", "--bot", bot.id, "--text", prompt, "--url", fixture.info.url]);
@@ -52,9 +53,7 @@ try {
     entry.failedSearchCalls = entry.searches.filter((item: any) => !hasResults(item));
     // A failed page fetch may be recovered. Require actual search results AND
     // a fetched source page; preserve intermediate failures in the report.
-    entry.verified = entry.wait?.status === "settled" && entry.searches.some((item: any) => item.action?.type === "search" && hasResults(item))
-      && entry.searches.some((item: any) => item.action?.type !== "search" && hasResults(item))
-      && entry.messages.messages.some((message: any) => message.role === "bot" && message.kind === "text" && /https:\/\/(?:learn\.chatgpt\.com|developers\.openai\.com)\//.test(message.text));
+    entry.verified = verifiedNativeSearch(entry.wait?.status, entry.searches, entry.messages.messages);
     save();
     console.log(JSON.stringify({ model, status: entry.wait?.status, verified: entry.verified, searches: entry.searches }));
   }
@@ -62,7 +61,10 @@ try {
 } catch (error) {
   report.error = String(error); save(); throw error;
 } finally {
-  if (existsSync(fixture.info.logPath)) writeFileSync(join(output, "server.log"), readFileSync(fixture.info.logPath));
-  save();
-  await fixture.close();
+  try {
+    if (existsSync(fixture.info.logPath)) writeFileSync(join(output, "server.log"), readFileSync(fixture.info.logPath));
+    save();
+  } finally {
+    await fixture.close();
+  }
 }
