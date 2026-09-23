@@ -1006,10 +1006,10 @@ export function saveConfig(
     disk.defaultModelSelection = checkedPatch.defaultModelSelection;
     if (disk.newBotDefaults) {
       const previousDefaults = newBotDefaultsSchema.parse(disk.newBotDefaults);
-      disk.newBotDefaults = {
+      disk.newBotDefaults = newBotDefaultsSchema.parse({
         ...previousDefaults,
         profile: { ...previousDefaults.profile, modelSelection: checkedPatch.defaultModelSelection },
-      };
+      });
     }
   }
   // Replace the complete template so clearing a field, file or routine
