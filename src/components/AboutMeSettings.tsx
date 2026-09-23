@@ -1,56 +1,28 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useEffect, useSyncExternalStore } from "react";
 import { CircleHelp } from "lucide-react";
 import { api, useStore, type ConfigStatus } from "@/state/store";
 import { t } from "@/lib/i18n";
+import { createAboutMeDraft } from "./about-me-draft";
+
+const drafts = new WeakMap<object, ReturnType<typeof createAboutMeDraft>>();
 
 export function AboutMeSettings() {
   const { state, dispatch } = useStore();
   const confirmed = state.config?.profile?.aboutMe ?? "";
-  const [value, setValue] = useState(confirmed);
-  const [status, setStatus] = useState<"idle" | "saving" | "saved" | "error">("idle");
-  const draft = useRef(confirmed);
-  const dirty = useRef(false);
-  const running = useRef(false);
-  const mounted = useRef(true);
-  const timer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
-
-  const flush = useCallback(async () => {
-    clearTimeout(timer.current);
-    if (running.current || !dirty.current) return;
-    running.current = true;
-    if (mounted.current) setStatus("saving");
-    try {
-      // Serialize writes. Edits made during a save must follow that save,
-      // and its response must never replace the newer draft.
-      while (dirty.current) {
-        const sent = draft.current;
-        const config = await api<ConfigStatus>("/api/config", {
-          method: "PUT", body: JSON.stringify({ profile: { aboutMe: sent } }), timeoutMs: 10_000,
-        });
-        dirty.current = draft.current !== sent;
-        dispatch({ type: "profileSaved", profile: { aboutMe: config.profile?.aboutMe ?? sent } });
-      }
-      if (mounted.current) setStatus("saved");
-    } catch {
-      if (mounted.current) setStatus("error");
-    } finally {
-      running.current = false;
-    }
-  }, [dispatch]);
-
-  useEffect(() => {
-    if (!dirty.current && !running.current) {
-      draft.current = confirmed;
-      setValue(confirmed);
-    }
-  }, [confirmed]);
-  useEffect(() => {
-    mounted.current = true;
-    return () => {
-      mounted.current = false;
-      void flush();
-    };
-  }, [flush]);
+  let controller = drafts.get(dispatch);
+  if (!controller) {
+    controller = createAboutMeDraft(confirmed, async (sent) => {
+      const config = await api<ConfigStatus>("/api/config", {
+        method: "PUT", body: JSON.stringify({ profile: { aboutMe: sent } }), timeoutMs: 10_000,
+      });
+      dispatch({ type: "profileSaved", profile: { aboutMe: config.profile?.aboutMe ?? sent } });
+    });
+    drafts.set(dispatch, controller);
+  }
+  const { value, status } = useSyncExternalStore(controller.subscribe, controller.getSnapshot, controller.getSnapshot);
+  const { flush } = controller;
+  useEffect(() => { controller.confirm(confirmed); }, [controller, confirmed]);
+  useEffect(() => () => { void flush(); }, [flush]);
 
   return (
     <div className="flex flex-col gap-2">
@@ -67,15 +39,7 @@ export function AboutMeSettings() {
         </details>
       </div>
       <textarea id="profile-about-me" value={value} rows={5} maxLength={24_000}
-        onChange={(event) => {
-          const next = event.target.value;
-          draft.current = next;
-          dirty.current = true;
-          setValue(next);
-          setStatus("idle");
-          clearTimeout(timer.current);
-          timer.current = setTimeout(() => void flush(), 600);
-        }}
+        onChange={(event) => controller.edit(event.target.value)}
         onBlur={() => void flush()}
         className="min-h-[120px] w-full resize-y rounded-lg border border-hairline/40 bg-inset px-3 py-2 text-[14px] text-ink focus:border-hairline focus:outline-none"
       />
