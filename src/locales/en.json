@@ -2279,5 +2279,7 @@
   "newBot.customSettings": "Custom settings",
   "newBot.randomName": "Random name",
   "newBot.edit": "Edit",
-  "newBot.loading": "Loading settings…"
+  "newBot.loading": "Loading settings…",
+  "newBot.randomFemaleName": "Random female name",
+  "newBot.randomMaleName": "Random male name"
 }
