@@ -1030,6 +1030,17 @@ describe("credential env preference", () => {
     expect(loadConfig().instances).toEqual(existing.instances);
   });
 
+  it("rejects oversized default model changes before writing the template", () => {
+    saveConfig({ newBotDefaults: { profile: { modelSelection: { instanceId: "codex", model: "valid" } }, memory: {}, skills: [], routines: [] } });
+    const path = join(DATA_DIR, "config.json");
+    const before = readFileSync(path, "utf8");
+    for (const selection of [{ instanceId: "x".repeat(201), model: "valid" }, { instanceId: "codex", model: "x".repeat(501) }]) {
+      expect(() => saveConfig({ defaultModelSelection: selection })).toThrow();
+      expect(readFileSync(path, "utf8")).toBe(before);
+      expect(loadConfig().newBotDefaults?.profile.modelSelection?.model).toBe("valid");
+    }
+  });
+
   it("replaces instance membership and known settings while preserving retained extension fields", () => {
     const path = join(DATA_DIR, "config.json");
     writeFileSync(path, JSON.stringify({
