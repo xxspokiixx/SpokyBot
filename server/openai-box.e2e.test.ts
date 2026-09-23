@@ -7,6 +7,7 @@ it("keeps the selected API model for direct, group and scheduled Box turns and p
   const requests: any[] = [];
   const commands: string[] = [];
   let nativePrompts = 0;
+  let boxOffline = false;
   const upstream = createServer(async (req, res) => {
     const path = new URL(req.url ?? "/", "http://fixture").pathname;
     let raw = ""; for await (const part of req) raw += part;
@@ -22,6 +23,7 @@ it("keeps the selected API model for direct, group and scheduled Box turns and p
         : { role: "assistant", content: null, tool_calls: [{ id: "capture", type: "function", function: { name: tool?.function.name ?? "missing_computer", arguments: "{}" } }] },
       finish_reason: completed ? "stop" : "tool_calls" }] }));
     }
+    if (boxOffline && path.startsWith("/boxes")) { res.statusCode = 503; return res.end(JSON.stringify({ error: "Fixture Box unavailable" })); }
     if (path === "/boxes" && req.method === "POST") {
       const row = { id: rows.length ? "bx_3456789a" : "bx_23456789", name: body.name, state: "idle" }; rows.push(row);
       return res.end(JSON.stringify({ box: row }));
@@ -106,6 +108,23 @@ it("keeps the selected API model for direct, group and scheduled Box turns and p
     expect(requests.slice(beforeRoutine).every(request => request.model === "chosen-vision-model")).toBe(true);
     expect(nativePrompts).toBe(0);
     expect(commands.some(command => command.includes(".model.jpg"))).toBe(true);
+    // Readiness is checked again at dispatch, after the routine was created.
+    // An available native Box runner must not mask the selected engine's missing key.
+    const expectBlockedRun = async (reason: RegExp) => {
+      const before = requests.length;
+      const { run: blocked } = await api("POST", `/api/routines/${routine.id}/run`, {});
+      await expect.poll(async () => {
+        const latest = (await api("GET", "/api/routines")).runs.find((entry: any) => entry.id === blocked.id);
+        return latest?.status === "failed" ? latest.error : "";
+      }, { timeout: 15_000 }).toMatch(reason);
+      expect(requests).toHaveLength(before);
+      expect(nativePrompts).toBe(0);
+    };
+    await api("PATCH", "/api/config", { openaiCompat: { key: "", url: origin + "/v1", model: "other-default" } });
+    await expectBlockedRun(/target bot's model engine is not ready/i);
+    await api("PATCH", "/api/config", { openaiCompat: { key: "synthetic-model-key", url: origin + "/v1", model: "other-default" } });
+    boxOffline = true;
+    await expectBlockedRun(/cloud computer could not be checked/i);
   } finally {
     await fixture.close(); upstream.closeAllConnections();
     await new Promise<void>(resolve => upstream.close(() => resolve()));
