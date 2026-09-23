@@ -26,7 +26,9 @@ final class ThreadNavigationUITests: XCTestCase {
         openGmail(in: app)
 
         let topBarThreads = app.buttons["header-threads"]
-        XCTAssertTrue(topBarThreads.waitForExistence(timeout: 5))
+        // The chat header settles late on a loaded CI runner. 5s timed out
+        // here while the thread open itself was correct, same as assertThread.
+        XCTAssertTrue(topBarThreads.waitForExistence(timeout: 10))
         topBarThreads.tap()
         let iCloud = app.buttons["thread-preview-icloud"]
         XCTAssertTrue(iCloud.waitForExistence(timeout: 5))
@@ -276,7 +278,9 @@ final class ThreadNavigationUITests: XCTestCase {
         let header = app.buttons["thread-switcher"]
         let expected = NSPredicate(format: "label == %@", "Switch thread: \(title)")
         let appeared = XCTNSPredicateExpectation(predicate: expected, object: header)
-        XCTAssertEqual(XCTWaiter.wait(for: [appeared], timeout: 5), .completed)
+        // Thread headers settle late on a loaded CI runner; 5s timed out on
+        // PRs 1576 and 1615 while the switch itself was correct.
+        XCTAssertEqual(XCTWaiter.wait(for: [appeared], timeout: 10), .completed)
     }
 
     @MainActor

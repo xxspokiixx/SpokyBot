@@ -123,9 +123,10 @@ export abstract class BaseWorld {
           (names) => names.some((name) => name.startsWith(step.namePrefix)),
           step.timeoutMs ?? 20_000,
         );
-        const facts = this.activityFacts.get(step.bot) ?? new Set<string>();
+        const key = this.botKey(step.bot);
+        const facts = this.activityFacts.get(key) ?? new Set<string>();
         facts.add(step.namePrefix);
-        this.activityFacts.set(step.bot, facts);
+        this.activityFacts.set(key, facts);
         return "activity seen";
       }
       case "writeGate": {

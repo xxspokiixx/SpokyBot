@@ -551,16 +551,18 @@ it("gives a replacement session an earlier round's result that its rebuild could
   expect(count(f.prompt(f.turns()[2]), "ROUND_ONE_RESULT_TOKEN")).toBe(1);
   await expect.poll(() => f.launches(f.lead.id).length, { timeout: 15_000 }).toBe(2);
   for (let i = 0; i < chat; i++) {
-    // Teammate work stays outstanding, so wait for this turn's own reply.
+    // Teammate work stays outstanding, so wait for this turn's own reply —
+    // and for the turn to end, or the next send steers into it.
     expect((await f.send(`chat ${i}`)).steered).toBeUndefined();
     await expect.poll(() => f.turns().length, { timeout: 20_000 }).toBe(4 + i);
-    await expect.poll(async () => (await f.messages()).some((m: any) => m.text === `chat reply ${i}`), { timeout: 10_000 }).toBe(true);
+    await expect.poll(async () => (await f.messages()).some((m: any) => m.text === `chat reply ${i}` && m.turnTerminal), { timeout: 10_000 }).toBe(true);
   }
   const history = async () => (await f.api(`/api/threads/${f.thread}/messages?limit=200`)).messages.map((m: any) => m.id);
   // round one's result: the first result on the branch
   const resultMessage = (await f.api(`/api/threads/${f.thread}/messages?limit=200`)).messages.find((m: any) => m.roomRequest?.phase === "result");
   const original = cursor(f);
   f.setMode("resume=dead-session");
+  await expect.poll(async () => (await f.messages()).some((m: any) => m.text === `chat reply ${chat - 1}` && m.turnTerminal), { timeout: 10_000 }).toBe(true);
   expect((await f.send("One more question.")).steered).toBeUndefined();
   await expect.poll(() => f.turns().length, { timeout: 20_000 }).toBe(4 + chat);
   await expect.poll(async () => (await f.messages()).some((m: any) => m.text === "recovered reply"), { timeout: 10_000 }).toBe(true);

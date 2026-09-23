@@ -3,7 +3,7 @@
 // except `busy`, which never does (no turn survives one either).
 import { createHash } from "node:crypto";
 import { DatabaseSync } from "node:sqlite";
-import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { chmodSync, existsSync, mkdirSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -42,6 +42,27 @@ describe("Store", () => {
     expect(JSON.stringify(reloaded.messagesFor(bot.threadId))).not.toContain(key);
     const wire = toWireTask(reloaded.taskByThread(bot.id, bot.threadId)!);
     for (const field of Object.keys(patch)) expect(wire).not.toHaveProperty(field);
+  });
+
+  it.skipIf(process.platform === "win32")("writes the bot and group registries owner-only and tightens loose ones on load", () => {
+    const mode = (name: string) => statSync(join(DATA_DIR, name)).mode & 0o777;
+    const store = new Store(selection);
+    const bot = store.createBot({}, { seedMessages: false });
+    store.createGroup("Team", [bot.id]);
+    expect(mode("bots.json")).toBe(0o600);
+    expect(mode("groups.json")).toBe(0o600);
+    // A registry left behind by an older release (or loosened by hand) is
+    // tightened before anything else happens, not only on the next save.
+    for (const name of ["bots.json", "groups.json"]) chmodSync(join(DATA_DIR, name), 0o644);
+    const reloaded = new Store(selection);
+    expect(mode("bots.json")).toBe(0o600);
+    expect(mode("groups.json")).toBe(0o600);
+    expect(reloaded.bots.map((record) => record.id)).toContain(bot.id);
+    // ...and a save after that keeps them owner-only.
+    reloaded.createGroup("Second team", [bot.id]);
+    reloaded.createBot({}, { seedMessages: false });
+    expect(mode("bots.json")).toBe(0o600);
+    expect(mode("groups.json")).toBe(0o600);
   });
 
   it("commits receipt-backed transcript changes before publishing and replays without duplicates", () => {

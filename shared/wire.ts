@@ -123,6 +123,12 @@ export interface WireTask {
   closedBy?: TaskClosedBy;
   /** When the person archived this thread. Absent = unarchived. */
   archivedAt?: number;
+  /** The person pinned this thread above the update-ordered list. Only true
+   * is stored; absence means unpinned. */
+  pinned?: boolean;
+  /** Epoch ms of the newest message, or createdAt when the thread has none.
+   * Server-derived. Clients must not write it. */
+  updatedAt?: number;
   /** Defaults are copied when a task is created. */
   modelSelection?: ModelSelection;
   approvalMode?: ApprovalMode;
@@ -264,6 +270,13 @@ export interface WireBot {
   createdAt: number;
 }
 
+/** The person a user message is from, as the server resolved it from their
+ * own session. Attribution only, never authority: nothing may be allowed or
+ * refused because of it, and no request body can supply it. */
+export interface ResolvedSender {
+  name: string;
+}
+
 /** One transcript line. Serialized as stored — the durable delivery
  * identity (roomRequest) rides the wire unchanged. */
 export interface WireMessage {
@@ -310,7 +323,7 @@ export interface WireMessage {
    * wrong person and remembered work under their name. Absent for the
    * desktop owner's own sends and for every message written before this
    * existed; both still read as the profile name. */
-  sender?: { name: string };
+  sender?: ResolvedSender;
   /** Provider turn that produced this message. */
   turnId?: string;
   /** Server-proven originating user message, including supported harness
@@ -432,6 +445,10 @@ export interface GroupTask {
   createdAt: number;
   pinnedCwd?: string | null;
   pinnedMessageId?: string;
+  /** The person pinned this channel thread above the update-ordered list. */
+  pinned?: boolean;
+  /** Epoch ms of the newest message, or createdAt when the thread has none. */
+  updatedAt?: number;
   /** The first message already drove a title attempt for this thread, so a
    * later one does not rename a room the person may have retitled. */
   titleFromFirstMessage?: true;
