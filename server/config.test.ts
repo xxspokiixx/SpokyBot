@@ -149,6 +149,14 @@ describe("configuration boundaries", () => {
     expect(parseConfigPatch(input)).toEqual(expected);
   });
 
+  it("accepts a new-bot effort default and clears it with null", () => {
+    expect(parseStoredConfig({ newBots: { effort: "medium" } })).toEqual({ newBots: { effort: "medium" } });
+    expect(parseConfigPatch({ newBots: { effort: "medium" } })).toEqual({ newBots: { effort: "medium" } });
+    expect(parseConfigPatch({ newBots: { effort: null } })).toEqual({ newBots: { effort: null } });
+    expect(() => parseConfigPatch({ newBots: { effort: "turbo" } })).toThrow("newBots");
+    expect(() => parseConfigPatch({ newBots: { approvalMode: "full" } })).toThrow("newBots");
+  });
+
   it("round-trips an opaque model variant without converting omission to none", () => {
     const defaultModelSelection = { instanceId: "opencodeGo", model: "provider/model", variant: "minimal" };
     expect(parseConfigPatch({ defaultModelSelection })).toEqual({ defaultModelSelection });
