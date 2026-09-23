@@ -21,6 +21,11 @@ const claude = {
 };
 
 describe("new bot default model selection", () => {
+  it("accepts a configured API-key provider", () => {
+    const instance = { ...codex, instanceId: "mistral", driverKind: "mistral", access: "api" as const };
+    const preferred = { instanceId: "mistral", model: "selected-model" };
+    expect(selectDefaultModelSelection([instance], preferred)).toEqual(preferred);
+  });
   it("preserves an intentional variant for ACP validation, including variants absent from the preview catalog", () => {
     const preferred = { instanceId: "codex", model: "selected-model", variant: "default" };
     expect(selectDefaultModelSelection([{ ...codex, capabilities: { modelVariants: true } }], preferred))
