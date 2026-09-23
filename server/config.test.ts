@@ -597,6 +597,17 @@ describe("saving the newer sections", () => {
 });
 
 describe("default fleet", () => {
+  it("adds Mistral to product fleets and scopes its saved credential to Mistral", () => {
+    const map = instanceConfigs({ mistral: { key: "mistral-fixture" }, instances: { codex: { driver: "codex" } } });
+    expect(map.mistral).toEqual({ driver: "mistral", environment: { MISTRAL_API_KEY: "mistral-fixture" } });
+    expect(map.codex.environment).toEqual({});
+    expect(instanceConfigs({ instances: { standalone: { driver: "fake" } } })).not.toHaveProperty("mistral");
+    expect(parseConfigPatch({ mistral: { key: "" } })).toEqual({ mistral: { key: "" } });
+    const env = { MISTRAL_API_KEY: "mistral-fixture", KEEP: "yes" };
+    stripWorkspaceCredentialEnv(env);
+    expect(env).toEqual({ KEEP: "yes" });
+  });
+
   it("ships Qwen and Hermes as custom-only engines", () => {
     const map = instanceConfigs({});
     expect(map.qwen).toEqual({ driver: "qwenAgent", environment: {} });

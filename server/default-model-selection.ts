@@ -1,4 +1,4 @@
-import type { EffortLevel, ModelCatalog, ModelSelection, ProviderSnapshot } from "./contracts.ts";
+import type { EffortLevel, EngineAccess, ModelCatalog, ModelSelection, ProviderSnapshot } from "./contracts.ts";
 
 interface SelectableInstance {
   instanceId: string;
@@ -6,7 +6,7 @@ interface SelectableInstance {
   snapshot: ProviderSnapshot;
   models: ModelCatalog;
   capabilities?: { effortLevels?: readonly EffortLevel[]; modelVariants?: boolean };
-  access?: "subscription" | "custom";
+  access?: EngineAccess;
 }
 
 /** What an enrolled organisation adds to the choice. Both are omitted (or

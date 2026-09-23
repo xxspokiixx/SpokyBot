@@ -87,6 +87,7 @@ interface RuntimeOptions<Config> {
   refreshModels?: () => Promise<void>;
   generateModel?: () => string;
   reasoning?: boolean;
+  contentText?: (content: unknown) => string;
   billing?: "metered";
   includeUsageInCompleted?: boolean;
   noBodyError?: string;
@@ -184,7 +185,7 @@ export function createOpenAIChatRuntime<Config>(options: RuntimeOptions<Config>)
         const finishReason = json.choices?.[0]?.finish_reason ?? null;
         activeSignal.throwIfAborted();
         return {
-          text: typeof message?.content === "string" ? message.content : "",
+          text: options.contentText ? options.contentText(message?.content) : typeof message?.content === "string" ? message.content : "",
           reasoning: options.reasoning && typeof reasoning === "string"
             ? reasoning
             : "",
@@ -242,7 +243,7 @@ export function createOpenAIChatRuntime<Config>(options: RuntimeOptions<Config>)
         const reasoningDelta = options.reasoning && typeof reasoningPart === "string"
           ? reasoningPart
           : "";
-        const contentDelta = typeof delta?.content === "string" ? delta.content : "";
+        const contentDelta = options.contentText ? options.contentText(delta?.content) : typeof delta?.content === "string" ? delta.content : "";
         if (reasoningDelta) {
           reasoning += reasoningDelta;
           onDelta?.(reasoningDelta, "reasoning_text");
