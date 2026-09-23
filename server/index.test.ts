@@ -4667,7 +4667,9 @@ describe("harness HTTP API", () => {
       composio: true,
       computer: "off",
     });
-    const groupsBefore = (await api("GET", "/api/bots")).body.groups.length;
+    const beforeImport = (await api("GET", "/api/bots")).body;
+    const groupsBefore = beforeImport.groups.length;
+    const chiefsBefore = beforeImport.bots.filter((bot: { chiefOfStaff?: boolean }) => bot.chiefOfStaff).map((bot: { id: string }) => bot.id).sort();
     const room = (await api("POST", "/api/groups", { memberIds: [trusted.id], name: "War Room" })).body.group;
 
     const smuggled = {
@@ -4733,10 +4735,8 @@ describe("harness HTTP API", () => {
       composio: true,
       computer: "off",
     });
-    // the single-Chief invariant survives the manifest's chiefOfStaff claim
-    expect(after.bots.filter((bot: { chiefOfStaff?: boolean }) => bot.chiefOfStaff).map((bot: { id: string }) => bot.id)).toEqual([
-      trusted.id,
-    ]);
+    // Import must not create or replace any Chief, including Chiefs of other teams.
+    expect(after.bots.filter((bot: { chiefOfStaff?: boolean }) => bot.chiefOfStaff).map((bot: { id: string }) => bot.id).sort()).toEqual(chiefsBefore);
 
     // a legacy v1 file carries a room block; import ignores it entirely —
     // it neither creates a room nor touches the existing one sharing its name
