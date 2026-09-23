@@ -1386,5 +1386,7 @@
   "newBot.customSettings": "Eigene Einstellungen",
   "newBot.randomName": "Zufälliger Name",
   "newBot.edit": "Bearbeiten",
-  "newBot.loading": "Einstellungen werden geladen…"
+  "newBot.loading": "Einstellungen werden geladen…",
+  "newBot.randomFemaleName": "Zufälliger weiblicher Name",
+  "newBot.randomMaleName": "Zufälliger männlicher Name"
 }
