@@ -341,7 +341,7 @@ function withResolvedSandbox(params: CodexApprovalParams, session: unknown): Cod
   if (!requested) return params;
   const sandbox = plainRecord(plainRecord(session)?.sandbox);
   if (!sandbox || typeof sandbox.type !== "string") {
-    throw new Error("Codex did not return its resolved sandbox policy; cannot safely start the turn.");
+    throw new Error("Codex did not return its resolved sandbox policy. Update Codex, then retry; the turn was not started because its permissions could not be verified.");
   }
   if (sandbox.type !== requested.type) {
     throw new Error("Codex did not apply the requested sandbox mode; cannot safely start the turn.");
