@@ -40,6 +40,7 @@ import {
 } from "lucide-react";
 
 import { BotAvatar } from "@/components/Avatar";
+import { useBotEditor } from "./bot-settings/BotEditorContext";
 import { pathForFile } from "@/components/ComposerAttachments";
 import { CalendarSidebar } from "@/components/routines/CalendarSidebar";
 import { RoutineList } from "@/components/routines/RoutineList";
@@ -345,6 +346,7 @@ function EventEditor({
 }) {
   const { state, dispatch } = useStore();
   const existingRoutine = seed.routine;
+  const { request: editorRequest } = useBotEditor();
   const existingCall = seed.call;
   const [kind, setKind] = useState<EventKind>(routinesOnly ? "routine" : seed.kind);
   const [editorOpenedAt] = useState(() => Date.now());
@@ -546,7 +548,7 @@ function EventEditor({
           attachments: routineTarget === "room-goal" ? [] : attachments as RoutineContextAttachment[],
           ...(routineTarget === "bot" ? { resultsThreadId } : {}),
         };
-        const response = await api(existingRoutine ? `/api/routines/${existingRoutine.id}` : "/api/routines", {
+        const response = await editorRequest(existingRoutine ? `/api/routines/${existingRoutine.id}` : "/api/routines", {
           method: existingRoutine ? "PATCH" : "POST",
           body: JSON.stringify(input),
         });
