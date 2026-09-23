@@ -2832,11 +2832,12 @@ const roomHandoffs = new RoomHandoffs(join(DATA_DIR, "room-handoffs.json"), {
     const result: GroupTurnOrchestration["result"] = {};
     const turnText = coordinationTurnText(node, resumed);
     const systemInstructions = coordinationSystemInstructions();
-    if (!resumed && !store.messagesFor(node.threadId).some(m => m.roomRequest?.id === node.id && m.roomRequest.phase === "request")) {
+    const request = roomHandoffs.sharedRequest(node);
+    if (!resumed && !store.messagesFor(node.threadId).some(m => m.roomRequest?.id === request.id && m.roomRequest.phase === "request")) {
       store.appendMessage(node.threadId, { role: "bot", kind: "text",
-        roomRequest: { id: node.id, phase: "request" },
+        roomRequest: { id: request.id, phase: "request" },
         from: sender ? { botId: sender.id, name: sender.name, color: sender.color } : undefined,
-        text: `@${bot.name} ${node.text}`,
+        text: `${request.botIds.map(id => `@${store.bot(id)?.name ?? "Teammate"}`).join(" ")} ${node.text}`,
       });
     }
     markInternalTurn(node.threadId);
@@ -12796,7 +12797,8 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
                 }
               }
               const { node, duplicate } = roomHandoffs.enqueue(address, internalCapability.generation, internalCapability.roomHandoffId,
-                target, parsed.data.requestKey + ":" + target.botId, parsed.data.message, approvalGranted, parsed.data.rework, [...store.messagesFor(address.threadId)].reverse().find(m => m.role === "user" && m.kind === "text")?.text ?? "");
+                target, parsed.data.requestKey + ":" + target.botId, parsed.data.message, approvalGranted, parsed.data.rework, [...store.messagesFor(address.threadId)].reverse().find(m => m.role === "user" && m.kind === "text")?.text ?? "",
+                destination ? parsed.data.requestKey : undefined);
               // A re-dispatched request_key is answered by the request it
               // already made, so a thread resolved for the retry (the pair
               // conversation was busy with that very request) goes back
