@@ -2,7 +2,7 @@ import { Children, createElement, isValidElement, type EffectCallback, type Reac
 import { renderToStaticMarkup } from "react-dom/server";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-const fixture = vi.hoisted(() => ({ effects: [] as EffectCallback[], dispatch: vi.fn(), creating: false, error: null as string | null }));
+const fixture = vi.hoisted(() => ({ effects: [] as EffectCallback[], dispatch: vi.fn(), creating: false, error: null as string | null, admin: null as boolean | null }));
 vi.mock("react", async (importOriginal) => {
   const react = await importOriginal<typeof import("react")>();
   return { ...react,
@@ -12,6 +12,7 @@ vi.mock("react", async (importOriginal) => {
 });
 vi.mock("@/state/store", () => ({ useStore: () => ({ state: { botCreationPending: fixture.creating }, dispatch: fixture.dispatch }) }));
 vi.mock("@/lib/analytics", () => ({ track: vi.fn() }));
+vi.mock("@/lib/use-owner-or-admin", () => ({ useOwnerOrAdmin: () => fixture.admin }));
 import { NewBotDialog } from "./NewBotDialog";
 
 type Node = ReactElement<{ children?: ReactNode; role?: string; "aria-label"?: string; onClick?: () => void; ref?: RefObject<HTMLDivElement | null>; disabled?: boolean }>;
@@ -26,7 +27,7 @@ function render(props: Parameters<typeof NewBotDialog>[0] = {}) {
   const html = renderToStaticMarkup(createElement(Capture));
   return { html, nodes: nodes(tree) };
 }
-beforeEach(() => { fixture.effects = []; fixture.dispatch.mockReset(); fixture.creating = false; fixture.error = null; });
+beforeEach(() => { fixture.effects = []; fixture.dispatch.mockReset(); fixture.creating = false; fixture.error = null; fixture.admin = null; });
 afterEach(() => vi.unstubAllGlobals());
 
 describe("new bot role dialog", () => {
@@ -77,6 +78,20 @@ describe("new bot role dialog", () => {
     fixture.creating = false;
     fixture.error = "Creation failed";
     expect(render().html).toContain('role="alert"');
+  });
+
+  it("lets an admin in a browser choose who can see the bot before it exists", () => {
+    vi.stubGlobal("window", {});
+    expect(render().html).not.toContain("Who can see it");
+    fixture.admin = true;
+    const { html, nodes } = render();
+    expect(html).toContain("Who can see it");
+    expect(html).toContain("Admins only");
+    nodes.find((node) => node.type === "button" && renderToStaticMarkup(node).includes("Blank bot"))!.props.onClick!();
+    expect(fixture.dispatch.mock.calls[0][0]).toMatchObject({ type: "newBot", visibility: "everyone" });
+    // never in the desktop app, where nobody else signs in
+    vi.stubGlobal("window", { ogb: {} });
+    expect(render().html).not.toContain("Who can see it");
   });
 
   it("restores focus after dismissal but still reports an asynchronously created team member", async () => {

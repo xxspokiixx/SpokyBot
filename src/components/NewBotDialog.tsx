@@ -10,6 +10,8 @@ import { BOT_ROLES, type BotRole } from "@/lib/bot-roles";
 import { cn } from "@/lib/cn";
 import { t } from "@/lib/i18n";
 import { useStore, type Bot } from "@/state/store";
+import { useOwnerOrAdmin } from "@/lib/use-owner-or-admin";
+import { visibilityFromForm, type VisibilityMode } from "./bot-settings/VisibilitySection";
 
 const APP_LABELS: Record<string, string> = {
   gmail: "Gmail",
@@ -32,6 +34,8 @@ export function NewBotDialog({ section, onClose, onCreated, preserveSelection = 
   const alive = useRef(true);
   const creating = state.botCreationPending;
   const [error, setError] = useState<string | null>(null);
+  const [audience, setAudience] = useState<VisibilityMode>("everyone");
+  const [people, setPeople] = useState("");
   const close = () => onClose ? onClose() : dispatch({ type: "toggleNewBot", open: false });
   const closeRef = useRef(close);
   closeRef.current = close;
@@ -48,7 +52,7 @@ export function NewBotDialog({ section, onClose, onCreated, preserveSelection = 
       }
       if (event.key !== "Tab") return;
       const dialog = dialogRef.current;
-      const controls = dialog?.querySelectorAll<HTMLButtonElement>("button:not([disabled])");
+      const controls = dialog?.querySelectorAll<HTMLElement>("button:not([disabled]), select:not([disabled]), input:not([disabled])");
       if (!controls?.length) {
         event.preventDefault();
         dialog?.focus();
@@ -72,10 +76,20 @@ export function NewBotDialog({ section, onClose, onCreated, preserveSelection = 
     };
   }, [dispatch]);
 
+  // Who can see the new bot, chosen before it exists, so a bot for a
+  // sensitive job is never shown to everyone first. Admins, in a browser.
+  const ownerOrAdmin = useOwnerOrAdmin();
+  const choosesVisibility = typeof window !== "undefined" && !window.ogb && ownerOrAdmin === true;
+
   const create = (role?: BotRole) => {
     if (creating) return;
     setError(null);
-    dispatch({ type: "newBot", role, section, preserveSelection,
+    const visibility = choosesVisibility ? visibilityFromForm(audience, people) : null;
+    if (visibility && !visibility.ok) {
+      setError(t("botSettings.visibility.needPeople"));
+      return;
+    }
+    dispatch({ type: "newBot", role, section, preserveSelection, ...(visibility?.ok ? { visibility: visibility.visibility } : {}),
       onCreated: (bot) => {
         track("bot_created", { role: role?.id ?? "blank" });
         onCreated?.(bot);
@@ -110,6 +124,33 @@ export function NewBotDialog({ section, onClose, onCreated, preserveSelection = 
             <X size={16} />
           </button>
         </div>
+        {choosesVisibility && (
+          <div className="flex flex-wrap items-center gap-2 px-5 pt-3 text-[13px] text-ink-secondary" data-new-bot-visibility>
+            <label className="flex items-center gap-2">
+              {t("botSettings.visibility.title")}
+              <select
+                value={audience}
+                disabled={creating}
+                onChange={(event) => setAudience(event.target.value as VisibilityMode)}
+                className="rounded-lg border border-hairline/40 bg-inset px-2 py-1.5 text-[13px] text-ink focus:border-hairline focus:outline-none"
+              >
+                <option value="everyone">{t("botSettings.visibility.everyone")}</option>
+                <option value="admins">{t("botSettings.visibility.admins")}</option>
+                <option value="people">{t("botSettings.visibility.people")}</option>
+              </select>
+            </label>
+            {audience === "people" && (
+              <input
+                value={people}
+                disabled={creating}
+                onChange={(event) => setPeople(event.target.value)}
+                placeholder={t("botSettings.visibility.peoplePlaceholder")}
+                aria-label={t("botSettings.visibility.peopleLabel")}
+                className="min-w-[16rem] flex-1 rounded-lg border border-hairline/40 bg-inset px-3 py-1.5 text-[13px] text-ink placeholder:text-ink-secondary focus:border-hairline focus:outline-none"
+              />
+            )}
+          </div>
+        )}
         {error && <p role="alert" className="px-5 pt-3 text-[13px] text-danger">{error}</p>}
         <div className="grid grid-cols-1 gap-2.5 overflow-y-auto p-5 sm:grid-cols-2">
           <button

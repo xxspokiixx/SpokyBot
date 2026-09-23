@@ -44,7 +44,7 @@ describe("bot presets", () => {
 
   it("creates directly in the selected team in the first POST", async () => {
     const request = vi.fn().mockResolvedValue({ bot: { ...bot, section: "Studio" } });
-    const created = await createBotWithRole(undefined, request, "Studio");
+    const created = await createBotWithRole(undefined, request, undefined, "Studio");
     expect(request).toHaveBeenCalledExactlyOnceWith("/api/bots", { method: "POST", body: JSON.stringify({ section: "Studio" }) });
     expect(created.bot.section).toBe("Studio");
   });
@@ -53,6 +53,20 @@ describe("bot presets", () => {
     const request = vi.fn().mockResolvedValueOnce({ bot }).mockRejectedValueOnce(new Error("profile unavailable"));
     expect(await createBotWithRole(botRole("research"), request)).toEqual({ bot, profileError: "profile unavailable" });
     expect(request).toHaveBeenCalledTimes(2);
+  });
+
+  it("creates a restricted bot already restricted, in the one create request", async () => {
+    const request = vi.fn().mockResolvedValue({ bot });
+    await createBotWithRole(undefined, request, "admins");
+    expect(request).toHaveBeenCalledExactlyOnceWith("/api/bots", { method: "POST", body: JSON.stringify({ visibility: "admins" }) });
+    const role = botRole("research")!;
+    const withRole = vi.fn().mockResolvedValueOnce({ bot }).mockResolvedValueOnce({ bot: { ...roleProfilePatch(role) } });
+    await createBotWithRole(role, withRole, { people: ["ada@example.test"] });
+    expect(JSON.parse(withRole.mock.calls[0]![1].body)).toEqual({ name: role.name, title: role.title, description: role.description, visibility: { people: ["ada@example.test"] } });
+    // "everyone" is the default: nothing extra is sent
+    const open = vi.fn().mockResolvedValue({ bot });
+    await createBotWithRole(undefined, open, "everyone");
+    expect(open).toHaveBeenCalledExactlyOnceWith("/api/bots", { method: "POST" });
   });
 
   it("does not apply a profile after failed creation", async () => {
