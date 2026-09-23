@@ -273,8 +273,9 @@ export async function mountChatTools(integrations: SendTurnInput["integrations"]
     // so names and collision suffixes remain stable across startup timings.
     const mounts = await Promise.allSettled(servers.map(async ([name, descriptor]) => {
       if (signal.aborted || closed) throw aborted();
-      const client = "boxId" in descriptor ? new ChatBoxClient(descriptor) : new ChatMcpClient(descriptor,
-        computerUse && (descriptor === integrations?.localComputer || descriptor === integrations?.browser));
+      // Every mounted MCP server can return images when the caller enables
+      // image delivery, including custom servers. Text stays bounded below.
+      const client = "boxId" in descriptor ? new ChatBoxClient(descriptor) : new ChatMcpClient(descriptor, computerUse);
       clients.push(client);
       return { name, client, tools: await client.tools(signal) };
     }));
