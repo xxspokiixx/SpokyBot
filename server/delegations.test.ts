@@ -963,6 +963,49 @@ describe("busy waits and expiry", () => {
     expect(_pendingCount(from.threadId)).toBe(0);
   });
 
+  it("dispatches a classic handoff while another thread keeps the bot busy, when the standing thread and a slot are free", async () => {
+    // One working thread no longer blocks a classic handoff: admission is
+    // the same test startTurn applies to a direct turn on the standing
+    // thread — the thread free, a slot free, no group turn — never
+    // whole-bot idleness.
+    const asked: Array<[string, string]> = [];
+    const admitBus: CommsBus = {
+      ...commsBus,
+      canAdmitDirectTurn: (botId, threadId) => {
+        asked.push([botId, threadId]);
+        return true;
+      },
+    };
+    store.patchBot(target.id, { busy: true });
+    const queued = queueDelegation(admitBus, from, { toBotId: target.id, message: "now please", depth: 0 }, 1);
+    const runTarget = vi.fn();
+    drainDelegations(admitBus, approvalBus, from.threadId, runTarget);
+    await waitFor(() => runTarget.mock.calls.length === 1 && _pendingCount(from.threadId) === 0);
+
+    expect(asked).toContainEqual([target.id, target.threadId]);
+    expect(runTarget.mock.calls[0][0]).toBe(target.id);
+    expect(chipCount("waiting")).toBe(0);
+    expect(findDelegationReceipt(queued.id!)).toBeNull();
+  });
+
+  it("holds a classic handoff while admission refuses the standing thread, then delivers when it frees", async () => {
+    // The refusal covers every reason startTurn refuses a direct turn: the
+    // standing thread busy, the bot at capacity, or a live group turn.
+    let admit = false;
+    const holdBus: CommsBus = { ...commsBus, canAdmitDirectTurn: () => admit };
+    store.patchBot(target.id, { busy: true });
+    queueDelegation(holdBus, from, { toBotId: target.id, message: "when you can", depth: 0 }, 1);
+    const runTarget = vi.fn();
+    drainDelegations(holdBus, approvalBus, from.threadId, runTarget);
+    await waitFor(() => chipCount("waiting — they're busy;") === 1);
+    expect(runTarget).not.toHaveBeenCalled();
+
+    admit = true;
+    drainDelegations(holdBus, approvalBus, from.threadId, runTarget);
+    await waitFor(() => runTarget.mock.calls.length === 1 && _pendingCount(from.threadId) === 0);
+    expect(chipCount("waiting — they're busy;")).toBe(1);
+  });
+
   it("posts one waiting chip per handoff, however many drains run while the target is busy", async () => {
     store.patchBot(target.id, { busy: true });
     const queued = queueDelegation(commsBus, from, { toBotId: target.id, message: "later", depth: 0 }, 1);
