@@ -425,12 +425,12 @@ export async function boxNameMatchesBot(botId: string, name: string): Promise<bo
   return name === await boxNameFor(botId) || name === legacyBoxNameFor(botId);
 }
 
-export async function runCommand(cfg: AppConfig, boxId: string, command: string, { timeoutMs = 120_000 } = {}) {
+export async function runCommand(cfg: AppConfig, boxId: string, command: string, { timeoutMs = 120_000, signal }: { timeoutMs?: number; signal?: AbortSignal } = {}) {
   assertBoxNotDeleting(boxId);
   const res = await boxFetch(cfg, `/boxes/${boxId}/commands`, {
     method: "POST",
     body: JSON.stringify({ command }),
-    signal: AbortSignal.timeout(timeoutMs),
+    signal: signal ? AbortSignal.any([signal, AbortSignal.timeout(timeoutMs)]) : AbortSignal.timeout(timeoutMs),
   });
   const body: any = await res.json().catch(() => null);
   return {
@@ -1366,16 +1366,16 @@ export const PANEL_FRAME_QUALITY = 85;
 const PANEL_FRAME_FFMPEG_Q = 3;
 
 /** The shell that captures one panel frame on the box. Exported for tests. */
-export function panelShotCommand({ width = PANEL_FRAME_WIDTH, quality = PANEL_FRAME_QUALITY } = {}): string {
+export function panelShotCommand({ width = PANEL_FRAME_WIDTH, quality = PANEL_FRAME_QUALITY, framePath = PANEL_PATH, nativeSize = false } = {}): string {
   return [
     "export DISPLAY=${DISPLAY:-:0}",
-    `f=${PANEL_PATH}`,
+    `f=${shellQuote(framePath)}`,
     // a stale frame must not pass `test -s` when every capture tool fails
     'rm -f "$f"',
     'w=$(xdotool getdisplaygeometry 2>/dev/null | cut -d" " -f1)',
     'case "$w" in ""|*[!0-9]*) w=0;; esac',
     `scrot -o -p -q ${quality} "$f" 2>/dev/null || import -window root -quality ${quality} "$f" 2>/dev/null || ffmpeg -y -f x11grab -draw_mouse 1 -i "$DISPLAY" -frames:v 1 -q:v ${PANEL_FRAME_FFMPEG_Q} "$f" >/dev/null 2>&1`,
-    `if [ "$w" -gt ${width} ] 2>/dev/null && command -v convert >/dev/null 2>&1; then convert "$f" -resize ${width}x -quality ${quality} "$f" 2>/dev/null || true; fi`,
+    ...(nativeSize ? [] : [`if [ "$w" -gt ${width} ] 2>/dev/null && command -v convert >/dev/null 2>&1; then convert "$f" -resize ${width}x -quality ${quality} "$f" 2>/dev/null || true; fi`]),
     'test -s "$f" && echo captured',
   ].join("; ");
 }
@@ -1389,11 +1389,11 @@ const FRAME_TOO_LARGE = "the box frame exceeds the 8 MB limit";
 
 /** Read a file off the box as base64 — raw artifact bytes when the API
  * supports it (33% less transfer, no JSON envelope), else the files API. */
-async function readFileBase64(cfg: AppConfig, boxId: string, path: string): Promise<string | null> {
+async function readFileBase64(cfg: AppConfig, boxId: string, path: string, signal?: AbortSignal): Promise<string | null> {
   let bytes: Buffer | null = null;
   let tooLarge = false;
   try {
-    const res = await boxFetch(cfg, `/boxes/${boxId}/artifacts?path=${encodeURIComponent(path)}`);
+    const res = await boxFetch(cfg, `/boxes/${boxId}/artifacts?path=${encodeURIComponent(path)}`, { signal });
     if (res.ok) {
       const declaredLength = res.headers.get("content-length");
       if (declaredLength !== null && Number(declaredLength) > MAX_FRAME_BYTES) tooLarge = true;
@@ -1406,7 +1406,8 @@ async function readFileBase64(cfg: AppConfig, boxId: string, path: string): Prom
     throw new Error(FRAME_TOO_LARGE);
   }
   if (bytes?.length) return bytes.toString("base64");
-  const { ok, body } = await boxJson(cfg, `/boxes/${boxId}/files?path=${encodeURIComponent(path)}&encoding=base64`);
+  signal?.throwIfAborted();
+  const { ok, body } = await boxJson(cfg, `/boxes/${boxId}/files?path=${encodeURIComponent(path)}&encoding=base64`, { signal });
   const content = body?.content;
   if (ok && typeof content === "string" && content) {
     if (Buffer.byteLength(content, "base64") > MAX_FRAME_BYTES) throw new Error(FRAME_TOO_LARGE);
@@ -1417,7 +1418,7 @@ async function readFileBase64(cfg: AppConfig, boxId: string, path: string): Prom
 
 /** `knownBoxId` skips box resolution entirely — the screen poller holds
  * the id for the whole turn and must not re-resolve it every frame. */
-export async function screenshotBox(cfg: AppConfig, botId: string, knownBoxId?: string) {
+export async function screenshotBox(cfg: AppConfig, botId: string, knownBoxId?: string, options?: { signal?: AbortSignal; nativeSize?: boolean }) {
   cfg = snapshotBoxConfig(cfg);
   let boxId = knownBoxId;
   if (!boxId) {
@@ -1426,11 +1427,13 @@ export async function screenshotBox(cfg: AppConfig, botId: string, knownBoxId?: 
     if (!READY.has(box.state)) throw new Error(`box is ${box.state}`);
     boxId = box.id as string;
   }
-  const out = await runCommand(cfg, boxId, SHOT_CMD, { timeoutMs: 60_000 });
+  const framePath = options?.nativeSize ? PANEL_PATH + ".model.jpg" : PANEL_PATH;
+  const out = await runCommand(cfg, boxId, options?.nativeSize ? panelShotCommand({ framePath, nativeSize: true }) : SHOT_CMD,
+    { timeoutMs: 60_000, signal: options?.signal });
   if (!/captured/.test(out.stdout)) {
     throw new Error(out.stderr.slice(0, 200) || "screen capture failed on the box");
   }
-  const data = await readFileBase64(cfg, boxId, PANEL_PATH);
+  const data = await readFileBase64(cfg, boxId, framePath, options?.signal);
   if (!data) throw new Error("could not read the frame back from the box");
   return { png: data, format: "jpeg" };
 }

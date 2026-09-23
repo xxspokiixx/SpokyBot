@@ -2467,7 +2467,7 @@ function previewSystemPrompt(bot: BotRecord) {
     previewComputer === "vm"
       ? caps?.computerMcp ? localVmMode(cfg) === "per-bot" ? "vm-private" : "vm-shared" : null
       : previewComputer === "cloud"
-        ? instance?.driverKind === "boxAgent" ? "box-agent" : caps?.computerMcp ? bot.cloudBackend === "vps" ? "vps" : "box" : null
+        ? instance?.driverKind === "boxAgent" ? "box-agent" : caps?.computerMcp ? bot.cloudBackend === "vps" ? "vps" : caps.cloudComputerMcp ? "box-chat" : "box" : null
         : previewComputer === "local"
           ? caps?.localComputerMcp ? "local" : null
           : null;
@@ -5104,11 +5104,11 @@ function turnProvider(bot: BotRecord, runOn?: RoutineRunOn, threadId?: string): 
   return bot.cloudBackend === "vps" ? "vps" : wants === "cloud" ? "box" : null;
 }
 
-/** A turn on the cloud computer runs ON the cloud computer: the Box runs the
- * bot's own harness there with the computer tools built in, so nothing on this
- * machine relays clicks and screenshots. Every start/interrupt of a turn asks
- * here which engine owns it. */
+/** A driver with a Box bridge keeps the selected model. Other engines use
+ * Box's native runner. Start and interrupt must resolve the same owner. */
 function turnInstance(bot: BotRecord, runOn?: RoutineRunOn, threadId?: string): ReturnType<typeof registry.get> {
+  const selected = registry.get(bot.modelSelection.instanceId);
+  if (selected?.adapter.capabilities.cloudComputerMcp) return selected;
   const onBox = turnProvider(bot, runOn, threadId) === "box";
   return onBox
     ? registry.instances().find((candidate) => candidate.driverKind === "boxAgent") ?? null
@@ -5166,7 +5166,7 @@ async function selectableComputers(bot: BotRecord) {
             status.image && status.imageMatches && status.network === "private" && status.mounts === "none" && status.security === "hardened");
           canCreate = Boolean(status?.configured && status.daemonUp && status.container === "missing");
           reason = status?.problem ?? reason;
-        } else if (box.boxConfigured(cfg) && registry.instances().some(instance => instance.driverKind === "boxAgent")) {
+        } else if (box.boxConfigured(cfg) && (caps?.cloudComputerMcp || registry.instances().some(instance => instance.driverKind === "boxAgent"))) {
           const status = await box.boxStatus(cfg, bot.id);
           const lifecycle = box.boxTurnLifecycleAction({ explicitCloud: true, canMount: true, state: status.box?.state ?? null });
           ready = lifecycle === "attach";
@@ -5214,7 +5214,10 @@ function continueComputerSelection(threadId: string, generation: string | undefi
     if (store.taskByThread(bot.id, threadId)?.surface !== selection.previousSurface) return;
     if (hasQueuedSteeredMessages(bot.id, threadId)) { drainQueuedSends(); return; }
     if (store.activePath(threadId).findLast(message => message.role === "user" && message.kind === "text")?.id !== selection.source.id) return;
-    store.patchTask(bot.id, threadId, { surface });
+    // The model picked this surface through select_computer; the person
+    // never chose it in the composer or thread settings. It is the
+    // machine's record, so a later Works on change may sweep it.
+    store.patchTask(bot.id, threadId, { surface, surfaceSource: "auto" });
     const text = `The computer selection is now ${surfaceLabel(surface)}. Continue the user's original request using the tools mounted for this turn; verify the result before claiming success.\n\n${selection.text}`;
     void startTurn(bot.id, text, { threadId, userMessage: selection.source, computerSelectionContinuation: true }).catch(error => {
       if (store.taskByThread(bot.id, threadId)) store.appendMessage(threadId, { role: "bot", kind: "activity",
@@ -6947,8 +6950,8 @@ async function startTurn(
     excludeMessageIds?: string[];
     /** Routines run in detached tasks; pin the destination for the whole turn. */
     threadId?: string;
-    /** Cloud routines run the whole agent inside the bot's Box VM instead
-     * of merely mounting that VM's computer tools on the MAUS's provider. */
+    /** Cloud routines use the bot's Box VM. Capable API drivers bridge its
+     * tools; other engines delegate the turn to the native Box runner. */
     runOn?: RoutineRunOn;
     /** Lets the system prompt put externally supplied payloads behind an
      * explicit untrusted-data boundary without changing ordinary chat. */
@@ -7099,11 +7102,12 @@ async function startTurn(
     throw Object.assign(new Error("this provider account is being updated — try again shortly"), { status: 409 });
   }
   const switchedEngine = instance.instanceId !== bot.modelSelection.instanceId;
-  const model = opts?.runOn === "cloud" || switchedEngine ? instance.models.default : bot.modelSelection.model;
-  // a cloud routine borrows the instance default model, so it borrows no
-  // per-bot effort either
-  const effort = opts?.runOn === "cloud" || switchedEngine ? undefined : bot.modelSelection.effort;
-  const variant = opts?.runOn === "cloud" || switchedEngine ? undefined : bot.modelSelection.variant;
+  const useInstanceDefaults = switchedEngine || (opts?.runOn === "cloud" && !instance.adapter.capabilities.cloudComputerMcp);
+  const model = useInstanceDefaults ? instance.models.default : bot.modelSelection.model;
+  // A native cloud runner borrows its instance defaults; a Box bridge keeps
+  // the bot's selected model, effort and variant.
+  const effort = useInstanceDefaults ? undefined : bot.modelSelection.effort;
+  const variant = useInstanceDefaults ? undefined : bot.modelSelection.variant;
   assertModelVariantSupported({ variant, effort }, instance.adapter.capabilities);
   // A selection can be persisted while its engine is offline. Re-check when
   // the engine returns so an old or unsupported value never reaches a CLI.
@@ -7432,9 +7436,7 @@ async function startTurn(
       const teamComputer = inheritedTeamComputer(bot);
       const cloudBackend = teamComputer || opts?.runOn === "cloud" || bot.cloudBackend !== "vps" ? "box" : "vps";
       const mountsComputerMcp = instance.adapter.capabilities.computerMcp === true;
-      // Box's native runner owns its computer tools. Local drivers mount
-      // Local VM/VPS tools, but have no Box relay to execute this descriptor.
-      const mountsCloudComputer = instance.driverKind === "boxAgent";
+      const mountsCloudComputer = instance.driverKind === "boxAgent" || instance.adapter.capabilities.cloudComputerMcp === true;
       const mountsLocalComputer = instance.adapter.capabilities.localComputerMcp === true;
       // Where this turn's hands may land. The bot's "Works on" choice is
       // strict; a browser-only bot gets no computer at all, and a bot whose
@@ -7683,8 +7685,8 @@ async function startTurn(
         }
       }
 
-      // Cloud is strict when selected. Only the native Box engine can reuse
-      // a Box on Auto; local engines have no relay for its desktop tools.
+      // Cloud is strict when selected. Native Box and drivers with a Box
+      // bridge may also reuse an already-ready Box on Auto.
       if (teamComputer) {
         const attached = await attachTeamBox(teamComputer, bot.id, resourceOwner, mountsCloudComputer, instance.driverKind === "boxAgent");
         integrations.computer = attached.integration;
@@ -7877,10 +7879,11 @@ async function startTurn(
       }
       // An Auto conversation remembers where its first turn landed, so later
       // turns stay there and the composer can show it. Explicit settings are
-      // not recorded: changing the bot's Works on should move its threads.
+      // not recorded: an auto pin yields to a later Works on change (which
+      // sweeps it — store.clearAutoSurfacePins); a person's pin does not.
       if (bot.computer === undefined && !teamComputer && opts?.runOn !== "cloud" && !plan.pinned) {
         const used = mountedComputer ?? (integrations.browser ? "browser" : null);
-        if (used) store.patchTask(bot.id, threadId, { surface: used });
+        if (used) store.patchTask(bot.id, threadId, { surface: used, surfaceSource: "auto" });
       }
       const computerSelection = computerSelectionTurns.get(threadId);
       if (computerSelection) computerSelection.mounted = mountedComputer ?? (integrations.browser ? "browser" : undefined);
@@ -7897,7 +7900,7 @@ async function startTurn(
         computerKind === "vm"
           ? localVmMode(cfg) === "per-bot" ? "vm-private" : "vm-shared"
           : computerKind === "box"
-            ? instance.driverKind === "boxAgent" ? "box-agent" : "box"
+            ? instance.driverKind === "boxAgent" ? "box-agent" : instance.adapter.capabilities.cloudComputerMcp ? "box-chat" : "box"
             : computerKind === "vps"
               ? "vps"
               : computerKind === "local"
@@ -8371,9 +8374,13 @@ routines = new RoutineManager({
       handoffs.forget(threadId);
     }
   },
-  startTurn: (botId, threadId, prompt, runOn, triggerSource, onDispatchError) =>
-    startTurn(botId, prompt, { threadId, runOn, automationSource: triggerSource, onDispatchError })
-      .then(() => undefined),
+  startTurn: async (botId, threadId, prompt, runOn, triggerSource, onDispatchError) => {
+    if (runOn === "cloud") {
+      const readiness = await cloudRoutineReadiness(botId, threadId);
+      if (!readiness.ready) throw new Error(readiness.reason ?? "The cloud computer is not ready");
+    }
+    await startTurn(botId, prompt, { threadId, runOn, automationSource: triggerSource, onDispatchError });
+  },
   startGoal: async (groupId, threadId, prompt, coordinatorBotId, runId, _onDispatchError) => {
     startGroupTurn(groupId, prompt, undefined, undefined, "goal", undefined, {
       threadId,
@@ -8473,26 +8480,34 @@ if (recoveryOwners.length > 0) {
 // Chat tools can prepare routine changes, but the harness applies them only
 // after the user confirms a durable card. Keeping this beside the scheduler
 // makes the card resolvable after an app restart without involving the model.
-async function cloudRoutineReadiness(): Promise<{ ready: boolean; reason?: string }> {
+async function cloudRoutineReadiness(botId: string, threadId?: string): Promise<{ ready: boolean; reason?: string }> {
+  const bot = threadId ? store.projectBotForTask(botId, threadId) : store.bot(botId);
+  if (!bot || bot.hidden) return { ready: false, reason: "The routine's target bot no longer exists." };
   if (!box.boxConfigured(cfg)) {
     return {
       ready: false,
-      reason: 'The Box-hosted agent needs a working Box API key. For the bot’s existing model and configured computer, including a self-hosted VPS, set run_on="maus" instead. Do not request a Box key unless the user actually wants the Box-hosted agent.',
+      reason: 'The Box cloud computer needs a working Box API key. For the bot’s configured computer, including a self-hosted VPS, set run_on="maus" instead.',
     };
   }
-  const instance = registry.instances().find((candidate) => candidate.driverKind === "boxAgent");
-  if (!instance) {
-    return { ready: false, reason: "The Cloud VM runner is unavailable. Restart OpenMausBot and try again." };
-  }
+  const instance = turnInstance(bot, "cloud", threadId);
+  if (!instance) return { ready: false, reason: "The Cloud VM runner is unavailable. Restart OpenMausBot and try again." };
   try {
-    const snapshot = await instance.snapshot();
-    return snapshot.state === "available"
-      ? { ready: true }
-      : { ready: false, reason: snapshot.reason || "The Cloud VM runner is not ready." };
+    if ((await instance.snapshot()).state !== "available") {
+      return { ready: false, reason: "The target bot's model engine is not ready to use the Box cloud computer." };
+    }
+    const teamComputer = inheritedTeamComputer(bot);
+    const ownerId = teamComputer ? teamComputerOwner(teamComputer.id) : bot.id;
+    const machine = await box.findBox(cfg, ownerId);
+    if (teamComputer && !machine) {
+      return { ready: false, reason: "The team's Box computer is missing; explicitly create or retry it from the Team map." };
+    }
+    // Explicit Cloud may provision or wake the bot's own Box at dispatch.
+    // This probe only checks its identity/account, without starting billing.
+    return { ready: true };
   } catch (error) {
     return {
       ready: false,
-      reason: `The Cloud VM runner could not be checked: ${error instanceof Error ? error.message : String(error)}`,
+      reason: `The target bot's cloud computer could not be checked: ${redactSecretsInText(error instanceof Error ? error.message : String(error))}`,
     };
   }
 }
@@ -9505,7 +9520,7 @@ async function runGroupMemberTurn(
 
   if (roomTeamComputer) {
     const attached = await attachTeamBox(roomTeamComputer, readyBot.id, resourceOwner,
-      instance.driverKind === "boxAgent", instance.driverKind === "boxAgent");
+      instance.driverKind === "boxAgent" || instance.adapter.capabilities.cloudComputerMcp === true, instance.driverKind === "boxAgent");
     if (isCancelled?.() || groupSpeakers.get(threadId) !== roomSpeaker ||
         activeInternalGenerationByThread.get(threadId) !== internalGeneration) return false;
     integrations.computer = attached.integration;
@@ -9546,7 +9561,8 @@ async function runGroupMemberTurn(
     } else {
       if (!box.boxConfigured(cfg)) throw new Error("Cloud box is not configured — add a Box API key or choose Local VM");
       const remoteAgent = instance.driverKind === "boxAgent";
-      const attached = await attachBotBox(readyBot, resourceOwner, { explicitCloud: true, canMount: remoteAgent, remoteAgent });
+      const attached = await attachBotBox(readyBot, resourceOwner, { explicitCloud: true,
+        canMount: remoteAgent || instance.adapter.capabilities.cloudComputerMcp === true, remoteAgent });
       if (!roomSetupIsCurrent()) return false;
       if (!attached?.integration) throw new Error("the cloud computer could not be created or reached");
       integrations.computer = attached.integration;
@@ -9687,7 +9703,7 @@ async function runGroupMemberTurn(
   const roomSystem = buildSystemPrompt(system, store.bot(bot.id)?.soul ?? bot.soul ?? "", [
     { id: "files", label: "File locations", text: workspace ? workspaceLocationsPrompt(bot.id, cwd, readyBot.cwd) : "" },
     { id: "mcp", label: "MCP servers", text: customMcpPrompt(Object.keys(integrations.custom ?? {})) },
-    { id: "computer", label: "Computer", text: computerPrompt(roomTeamComputer || roomComputerKind === "box" ? instance.driverKind === "boxAgent" ? "box-agent" : "box" : roomVmTarget ? localVmMode(cfg) === "per-bot" ? "vm-private" : "vm-shared" : roomComputerKind) },
+    { id: "computer", label: "Computer", text: computerPrompt(roomTeamComputer || roomComputerKind === "box" ? instance.driverKind === "boxAgent" ? "box-agent" : instance.adapter.capabilities.cloudComputerMcp ? "box-chat" : "box" : roomVmTarget ? localVmMode(cfg) === "per-bot" ? "vm-private" : "vm-shared" : roomComputerKind) },
     { id: "team-computer", label: "Team computer", text: teamComputerPrompt(roomTeamComputer) },
     { id: "plan", label: "Surface", text: surfacePrompt({ computer: roomTeamComputer ? "cloud" : roomVmTarget ? "vm" : surfaceOfComputerKind(roomComputerKind), browser: Boolean(integrations.browser) }, { note: roomPlan.note }) },
     { id: "browser", label: "Browser", text: integrations.browser ? BUILT_IN_BROWSER_SYSTEM_PROMPT : "" },
@@ -13971,6 +13987,21 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
         if (instructions.length > 1_000) {
           return json(res, 400, { error: "instructions must be at most 1000 characters" });
         }
+        let selection: ModelSelection;
+        if (body.modelSelection === undefined) {
+          selection = await defaultSelection();
+        } else {
+          const checked = checkedModelSelection(body.modelSelection, undefined, true);
+          if (!checked.ok) return json(res, checked.status, { error: checked.error });
+          selection = checked.selection;
+        }
+        if (hostedModels && !hostedModels.allows(selection)) return json(res, 400, { error: hostedModels.error() });
+        // Discovery can yield; check current authority and capacity again before writing.
+        if (store.bot(chief.id) !== chief || chief.hidden || !chief.chiefOfStaff || !connectorThread(chief.id, fromThreadId)) {
+          return json(res, 403, { error: "only an active Chief of Staff can create operator bots" });
+        }
+        if (internalCapability.createdBots >= 4) return json(res, 429, { error: "you can create at most 4 bots in one turn" });
+        if (store.bots.length >= MAX_WORKSPACE_BOTS) return json(res, 409, { error: `this workspace is limited to ${MAX_WORKSPACE_BOTS} bots` });
         const duplicate = store.bots.find(
           (candidate) =>
             !candidate.hidden &&
@@ -13985,7 +14016,7 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
             name,
             title: role,
             description: instructions,
-            modelSelection: { ...chief.modelSelection },
+            modelSelection: selection,
             section: chief.section,
             // exactly the Chief's audience: a restricted Chief never makes a bot everyone sees
             ...(chief.visibility ? { visibility: chief.visibility } : {}),
@@ -14004,6 +14035,7 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
           title: safeBot.title,
           section: safeBot.section || "General",
           model: safeBot.modelSelection.model,
+          modelSelection: safeBot.modelSelection,
         });
       }
       if (method === "POST" && (path === "/api/internal/create-room" || path === "/api/internal/manage-room")) {
@@ -16574,6 +16606,11 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
         bot = store.patchBot(m[1], patch);
       }
       if (!bot) return json(res, 404, { error: "no such bot" });
+      // A defined Works on is the newest explicit choice: this bot's
+      // auto-recorded pins that now point elsewhere give way immediately, so
+      // the next turn on each thread follows the new setting. Person-set pins
+      // and pins that already match stay; returning to Auto sweeps nothing.
+      if (computerSpecified && requestedComputer !== undefined) store.clearAutoSurfacePins(m[1], requestedComputer);
       if (normalizedSelection && selectedTask) store.patchTask(bot.id, selectedTask.threadId, { modelSelection: normalizedSelection,
         ...hostedModels?.resetTask(selectedTask.modelSelection, normalizedSelection) });
       if (existingBot && (bot.browserProfile !== beforeBrowserProfile || bot.browser !== beforeBrowserEnabled)) {
@@ -17779,11 +17816,16 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
       }
       if (body.surface !== undefined) {
         if (threadBusy(current.id, current.threadId)) return json(res, 409, { error: "Stop this thread before changing its computer destination." });
-        // Where this conversation works, chosen from the composer. Null follows
-        // the bot's Works on again. Reachability is the turn's to judge.
-        if (body.surface === null) patch.surface = undefined;
-        else if (parseSurface(body.surface)) patch.surface = parseSurface(body.surface);
-        else return json(res, 400, { error: "surface must be cloud, vm, local, browser, or null to follow the bot" });
+        // Where this conversation works, chosen by the person and recorded as
+        // theirs, so a later Works on change never sweeps it. Null follows the
+        // bot's Works on again. Reachability is the turn's to judge.
+        if (body.surface === null) {
+          patch.surface = undefined;
+          patch.surfaceSource = undefined;
+        } else if (parseSurface(body.surface)) {
+          patch.surface = parseSurface(body.surface);
+          patch.surfaceSource = "user";
+        } else return json(res, 400, { error: "surface must be cloud, vm, local, browser, or null to follow the bot" });
       }
       if (body.pinnedMessageId !== undefined) {
         if (body.pinnedMessageId === null || body.pinnedMessageId === "") patch.pinnedMessageId = undefined;
@@ -19807,6 +19849,17 @@ for (const row of chatFollowups()) {
 }
 restoreSteeredMessages();
 restoreChannelMessages();
+
+// Repair known auto pins that conflict with Works on before dispatch starts.
+// Legacy pins have no provenance and may be deliberate person selections:
+// preserve them rather than guessing. The sweep is idempotent.
+{
+  let movedAutoPins = 0;
+  for (const bot of store.bots) {
+    if (bot.computer !== undefined) movedAutoPins += store.clearAutoSurfacePins(bot.id, bot.computer);
+  }
+  if (movedAutoPins) console.log(`Works on: moved ${movedAutoPins} auto-pinned thread(s) to their bot's current Works on`);
+}
 
 server.listen(PORT, "127.0.0.1", () => {
   companyRuntimeReady();

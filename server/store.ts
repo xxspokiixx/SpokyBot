@@ -15,6 +15,7 @@ import { DATA_DIR, EVENTS_DIR, NATIVE_DIR, loadBrowserProfileIdAliases } from ".
 import * as mdb from "./message-db.ts";
 import { runCommand, type Command } from "./commands.ts";
 import { workspaceDir } from "./workspace.ts";
+import type { Destination } from "./surface.ts";
 import { newId, type ModelSelection } from "./contracts.ts";
 import { pickBotName } from "./names.ts";
 import { redactSecretsInText } from "./redact.ts";
@@ -76,12 +77,17 @@ export interface TaskRecord extends WireTask {
   appliedCompactionId?: string;
   contextFloor?: number;
   lastContextModel?: string;
+  /** Who pinned this conversation's surface: "user" when a person chose it
+   * (composer chip or thread setting), "auto" when a turn recorded where
+   * it landed. Absent means legacy/unknown: it may be a person's choice,
+   * so only positively identified auto pins yield to Works on changes. */
+  surfaceSource?: "user" | "auto";
 }
 
 /** TaskRecord fields no client may see. Everything else must be on WireTask:
  * the exactness assertion below fails to compile when either side drifts,
  * so a new server field forces a decision — wire-visible or private here. */
-export type TaskWirePrivateKeys = "resumeCursors" | "lastInstanceId" | "handedMessages" | "appliedCompactionId" | "contextFloor" | "lastContextModel";
+export type TaskWirePrivateKeys = "resumeCursors" | "lastInstanceId" | "handedMessages" | "appliedCompactionId" | "contextFloor" | "lastContextModel" | "surfaceSource";
 export type TaskWireProjection = Pick<TaskRecord, Exclude<keyof TaskRecord, TaskWirePrivateKeys>>;
 type AssertExact<A, B> = [A] extends [B] ? ([B] extends [A] ? true : never) : never;
 type AssertSameKeys<A, B> = [keyof A] extends [keyof B] ? ([keyof B] extends [keyof A] ? true : never) : never;
@@ -94,14 +100,15 @@ export const taskWireProjectionIsExact: TaskWireProjectionIsExact = true;
  * returning WireTask means an undeclared server field cannot ride silently. */
 export function toWireTask(task: TaskRecord): WireTask {
   const { resumeCursors: _resumeCursors, lastInstanceId: _lastInstanceId, handedMessages: _handedMessages,
-    appliedCompactionId: _appliedCompactionId, contextFloor: _contextFloor, lastContextModel: _lastContextModel, ...wire } = task;
+    appliedCompactionId: _appliedCompactionId, contextFloor: _contextFloor, lastContextModel: _lastContextModel,
+    surfaceSource: _surfaceSource, ...wire } = task;
   return wire;
 }
 
 const TASK_PATCH_FIELDS = [
   "title", "projectId", "modelSelection", "approvalMode", "autoApprove", "alwaysAllow",
   "unread", "rewound", "archivedAt", "pinned", "pinnedMessageId", "resumeCursors", "lastInstanceId", "cwd",
-  "routineRunId", "surface", "appliedCompactionId", "contextFloor", "lastContextModel",
+  "routineRunId", "surface", "surfaceSource", "appliedCompactionId", "contextFloor", "lastContextModel",
 ] as const satisfies readonly (keyof TaskRecord)[];
 export type TaskPatch = Partial<Pick<TaskRecord, typeof TASK_PATCH_FIELDS[number]>>;
 
@@ -2118,6 +2125,26 @@ export class Store {
     this.saveBots();
     this.emit({ type: "bot", botId });
     return task;
+  }
+
+  /** A Works on change is the newest explicit choice, so this bot's
+   * machine-recorded pins that now point somewhere else give way. A pin a
+   * person set, a legacy pin with unknown provenance, and a pin that already
+   * matches the new destination survive. Returns how many pins were cleared. */
+  clearAutoSurfacePins(botId: string, destination: Destination): number {
+    const bot = this.bot(botId);
+    if (!bot?.tasks) return 0;
+    let cleared = 0;
+    for (const task of bot.tasks) {
+      if (task.surface === undefined || task.surfaceSource !== "auto" || task.surface === destination) continue;
+      task.surface = undefined;
+      task.surfaceSource = undefined;
+      cleared++;
+    }
+    if (!cleared) return 0;
+    this.saveBots();
+    this.emit({ type: "bot", botId });
+    return cleared;
   }
 
   /** Model/provider changes are one configuration transaction: never publish
