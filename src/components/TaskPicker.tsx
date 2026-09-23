@@ -14,7 +14,7 @@ import { formatTaskTokens, headlineTokens, usageDetail } from "@/lib/usage";
 import { nextRename } from "@/lib/rename";
 import { FolderIcon, NewThreadButton } from "./BotProjects";
 import { useShowThreads } from "@/lib/thread-preferences";
-import { AttentionThreadRows, crossBotAttentionThreads, threadsWhenTreeHidden, type AttentionThread } from "./SidebarBotActivity";
+import { attentionJumpAction, attentionOwnerName, AttentionThreadRows, crossBotAttentionThreads, threadsWhenTreeHidden, type AttentionThread } from "./SidebarBotActivity";
 import { formatUpdatedAt, orderedThreadList, threadByline, threadRecency } from "./SidebarThreadRow";
 
 /** Click-to-switch used to close this menu immediately, which unmounted the
@@ -219,7 +219,7 @@ function ConversationTaskPicker({
   // a query narrows it by thread title or bot name rather than hiding it.
   const attentionNeedle = query.trim().toLowerCase();
   const attentionRows = (attention ?? []).filter((entry) =>
-    !attentionNeedle || entry.task.title.toLowerCase().includes(attentionNeedle) || entry.botName.toLowerCase().includes(attentionNeedle));
+    !attentionNeedle || entry.task.title.toLowerCase().includes(attentionNeedle) || attentionOwnerName(entry).toLowerCase().includes(attentionNeedle));
   const looking = query.trim();
   // One result list for keyboard, count, and empty state: an attention row
   // that matches the query is a real result even when no tree thread does.
@@ -457,14 +457,14 @@ export function TaskPicker({ bot }: { bot: Bot }) {
       tasks={orderedThreadList((bot.tasks ?? []).filter((task) => !task.routineRunId))}
       busy={false}
       bot={bot}
-      attention={crossBotAttentionThreads(state.bots, state.pendingQueued, bot.id)}
+      attention={crossBotAttentionThreads(state.bots, state.pendingQueued, bot.id, state.groups)}
       onNew={() => dispatch({ type: "newTask", botId: bot.id })}
       onSwitch={(threadId) => dispatch({ type: "switchTask", botId: bot.id, threadId })}
       onRename={(threadId, title) => dispatch({ type: "renameTask", botId: bot.id, threadId, title })}
       onDelete={(threadId) => dispatch({ type: "deleteTask", botId: bot.id, threadId })}
       onMove={(threadId, projectId) => dispatch({ type: "updateTask", botId: bot.id, threadId, patch: { projectId } })}
       onPin={(threadId, pinned) => dispatch({ type: "updateTask", botId: bot.id, threadId, patch: { pinned } })}
-      onAttentionJump={(entry) => dispatch({ type: "switchTask", botId: entry.botId, threadId: entry.task.threadId })}
+      onAttentionJump={(entry) => dispatch(attentionJumpAction(entry))}
     />
   );
 }

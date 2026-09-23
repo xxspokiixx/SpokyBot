@@ -94,7 +94,7 @@ import { DesktopWorkspaceSwitcher } from "./DesktopWorkspaceSwitcher";
 import { profileInitials, SidebarProfileMenu } from "./SidebarProfileMenu";
 import { SidebarSectionHeader } from "./SidebarSectionHeader";
 import { useShowThreads } from "@/lib/thread-preferences";
-import { AttentionThreadRows, crossBotAttentionThreads, SidebarBotActivity, sidebarBotActivityTasks } from "./SidebarBotActivity";
+import { attentionJumpAction, AttentionThreadRows, crossBotAttentionThreads, SidebarBotActivity, sidebarBotActivityTasks } from "./SidebarBotActivity";
 import { SidebarAttentionPanel } from "./SidebarAttentionPanel";
 import { ShortcutHint } from "./ShortcutHint";
 
@@ -1797,7 +1797,7 @@ export function Sidebar({ open, onClose }: { open: boolean; onClose: () => void 
   // Every thread across every bot that needs the person right now — the
   // same rule and order as the sidebar tree, so the bell can never
   // disagree with it.
-  const attention = crossBotAttentionThreads(state.bots, state.pendingQueued);
+  const attention = crossBotAttentionThreads(state.bots, state.pendingQueued, undefined, state.groups);
   const pendingBotUndo = teamFeedback?.restoreBot;
 
   return (
@@ -1929,7 +1929,7 @@ export function Sidebar({ open, onClose }: { open: boolean; onClose: () => void 
                   {attention.length === 0 ? (
                     <div className="px-3.5 py-2.5 text-[13px] text-ink-secondary">{t("attention.empty")}</div>
                   ) : (
-                    <AttentionThreadRows entries={attention} onJump={(entry) => { setAttentionOpen(false); dispatch({ type: "switchTask", botId: entry.botId, threadId: entry.task.threadId }); }} />
+                    <AttentionThreadRows entries={attention} onJump={(entry) => { setAttentionOpen(false); dispatch(attentionJumpAction(entry)); }} />
                   )}
                 </div>
               </>
@@ -2031,7 +2031,7 @@ export function Sidebar({ open, onClose }: { open: boolean; onClose: () => void 
           entries={attention}
           density={density}
           onUnpin={() => setAttentionPinned(false)}
-          onJump={(entry) => dispatch({ type: "switchTask", botId: entry.botId, threadId: entry.task.threadId })}
+          onJump={(entry) => dispatch(attentionJumpAction(entry))}
         />
       )}
 
