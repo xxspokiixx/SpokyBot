@@ -43,10 +43,12 @@ registerHooks({
       // wedgeClear parks a room turn inside waitForClear, the pre-id
       // quarantine a prior turn's cancelled handshake can hold open while
       // its TTL runs — the real delayed-setup window where a stall used to
-      // find no completion handler.
-      return { ...result, source: `import { readFileSync as readVmClear } from 'node:fs';\n` +
+      // find no completion handler. The clearwait marker lets a test prove
+      // the turn reached that park before it flips the stall on; entry into
+      // containerComputerStatus alone only proves readiness started.
+      return { ...result, source: `import { readFileSync as readVmClear, writeFileSync as writeVmClear } from 'node:fs';\n` +
         String(result.source).replace('async waitForClear(threadId: string): Promise<void> {',
-          `async waitForClear(threadId: string): Promise<void> {\n      while (JSON.parse(readVmClear(${JSON.stringify(state)}, 'utf8')).wedgeClear) await new Promise((resolve) => setTimeout(resolve, 20));`) };
+          `async waitForClear(threadId: string): Promise<void> {\n      writeVmClear(${JSON.stringify(state)} + '.clearwait', '1');\n      while (JSON.parse(readVmClear(${JSON.stringify(state)}, 'utf8')).wedgeClear) await new Promise((resolve) => setTimeout(resolve, 20));`) };
     }
     if (url.endsWith('/room-turn-timeout.ts')) {
       return { ...result, source: `import { readFileSync as readVmDeadline } from 'node:fs';\n` +

@@ -405,9 +405,13 @@ describe("Group Local VM ownership on the real isolated server", () => {
     // Park setup in the pre-id quarantine wait — a prior turn's cancelled
     // handshake can hold a room thread there while its TTL runs — then
     // stall the turn while it is parked between claim and provider dispatch.
-    vmState({ wedgeClear: true }); rmSync(stateFile + ".entered", { force: true });
+    vmState({ wedgeClear: true }); rmSync(stateFile + ".entered", { force: true }); rmSync(stateFile + ".clearwait", { force: true });
     await send(group.id);
     await until(() => existsSync(stateFile + ".entered"), Boolean);
+    // entry into readiness is not the quarantine: wait until the turn is
+    // actually parked in waitForClear, so the stall below fires inside the
+    // window that used to find no completion handler
+    await until(() => existsSync(stateFile + ".clearwait"), Boolean);
     vmState({ wedgeClear: true, stall: true });
     await until(() => api("GET", "/api/bots?messages=30"), r => JSON.stringify(r).includes("the turn was stopped"));
     vmState();
