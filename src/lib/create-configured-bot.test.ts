@@ -6,10 +6,11 @@ import { createConfiguredBot } from "./create-configured-bot";
 afterEach(() => vi.unstubAllGlobals());
 
 describe("configured bot creation", () => {
-  function fixture(mode: "ask" | "auto" | "full" | "custom", fail = 0) {
+  function fixture(mode: "ask" | "auto" | "full" | "custom", fail = 0, selection?: Bot["modelSelection"]) {
     const draft = new BotCreationDraft(EMPTY_BOT_DEFAULTS, vi.fn());
     draft.patch({ name: "Fixture", approvalMode: mode, notifications: false, confirmFullAccess: true });
     let bot = { ...draft.bot, id: "created", threadId: "initial", approvalMode: "ask" } as Bot;
+    if (selection) bot.modelSelection = selection;
     const events: string[] = [];
     const bodies: unknown[] = [];
     const request = vi.fn(async (path: string, init?: RequestInit) => {
@@ -34,6 +35,16 @@ describe("configured bot creation", () => {
     await createConfiguredBot(f.draft, f.request, persistBotUpdate, f.approvals, "admins");
     expect(f.events[0]).toBe("POST /api/bots");
     expect(f.bodies[0]).toMatchObject({ visibility: "admins", useDefaults: false });
+  });
+
+  it("keeps the server-completed workspace effort when applying draft settings", async () => {
+    const selection = { instanceId: "claude", model: "sonnet", effort: "high" as const };
+    const f = fixture("ask", 0, selection);
+    f.draft.setModel({ instanceId: selection.instanceId, model: selection.model });
+    const result = await createConfiguredBot(f.draft, f.request, persistBotUpdate, f.approvals);
+    expect(f.bodies[0]).toMatchObject({ modelSelection: { instanceId: "claude", model: "sonnet" } });
+    expect(f.bodies[1]).toMatchObject({ modelSelection: selection });
+    expect(result.bot.modelSelection).toEqual(selection);
   });
 
   for (const mode of ["ask", "auto", "full", "custom"] as const) {

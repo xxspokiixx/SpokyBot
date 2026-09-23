@@ -38,7 +38,9 @@ export async function createConfiguredBot(
   const routines: Array<{ id: string; enabled: boolean }> = [];
   const warnings: string[] = [];
   try {
-    const patched = await update(bot.id, { ...profile, ...draft.consent }, new AbortController().signal,
+    // The create endpoint already validated the chosen model and completed
+    // workspace effort defaults. Do not overwrite those with the raw draft.
+    const patched = await update(bot.id, { ...profile, modelSelection: bot.modelSelection, ...draft.consent }, new AbortController().signal,
       request, approvals, bot);
     bot = { ...bot, ...patched };
     if (profile.approvalMode === "full" || profile.approvalMode === "custom") {

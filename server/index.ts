@@ -16112,7 +16112,9 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
       try {
         const { chiefOfStaff: _chief, managedSections: _managed, ...ordinary } = settings;
         store.patchBot(bot.id, {
-          ...ordinary, name: bot.name, section, modelSelection: selection,
+          // Store creation completes workspace defaults (including effort).
+          // Applying the rest of the template must not undo that selection.
+          ...ordinary, name: bot.name, section, modelSelection: bot.modelSelection,
           mascotExpression: ordinary.mascotExpression ?? undefined,
           avatarUrl: ordinary.avatarUrl || undefined,
           computer: ordinary.computer ?? undefined, cwd: checkedCwd.cwd ?? undefined,

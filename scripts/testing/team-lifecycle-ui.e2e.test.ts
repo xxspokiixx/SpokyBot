@@ -134,7 +134,8 @@ if (!enabled) console.log("skipping team lifecycle UI e2e: set OMB_UI_E2E=1 to i
       return true;
     })()`);
     await click("New Bot");
-    await click("Blank bot No preset instructions. Send it /setup to shape its role.");
+    await expect.poll(async () => (await ui("eval", "--js", "[...document.querySelectorAll('[role=dialog] button')].find(button => button.textContent.trim() === 'Create bot')?.disabled")).result).toBe(false);
+    await click("Create bot");
     let created: { id: string; name: string };
     await expect.poll(async () => {
       created = (await ui("eval", "--js", "window.createdTeamMember ?? null")).result;
