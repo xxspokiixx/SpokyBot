@@ -334,6 +334,21 @@ function namedApprovalParams(mode: Exclude<ApprovalMode, "custom">): CodexApprov
   };
 }
 
+/** Keep the turn on the complete sandbox resolved by native start/resume. */
+function withResolvedSandbox(params: CodexApprovalParams, session: unknown): CodexApprovalParams {
+  const requested = plainRecord(params.turn.sandboxPolicy);
+  // Named permission profiles own their policy; do not mix both selectors.
+  if (!requested) return params;
+  const sandbox = plainRecord(plainRecord(session)?.sandbox);
+  if (!sandbox || typeof sandbox.type !== "string") {
+    throw new Error("Codex did not return its resolved sandbox policy; cannot safely start the turn.");
+  }
+  if (sandbox.type !== requested.type) {
+    throw new Error("Codex did not apply the requested sandbox mode; cannot safely start the turn.");
+  }
+  return { ...params, turn: { ...params.turn, sandboxPolicy: sandbox } };
+}
+
 function effectiveApprovalPolicy(value: unknown): unknown {
   if (value === "untrusted" || value === "on-request" || value === "never") return value;
   const granular = plainRecord(plainRecord(value)?.granular);
@@ -1426,6 +1441,7 @@ export const CodexDriver: ProviderDriver<CodexConfig> = {
               approvalParams = approvalParams.fallback;
               resumed = await resumeThread();
             }
+            approvalParams = withResolvedSandbox(approvalParams, resumed);
             codexThreadId = resumed?.thread?.id ?? cursor;
             resumedNativeThread = true;
           } catch (error) {
@@ -1467,6 +1483,7 @@ export const CodexDriver: ProviderDriver<CodexConfig> = {
             approvalParams = approvalParams.fallback;
             started = await startThread();
           }
+          approvalParams = withResolvedSandbox(approvalParams, started);
           codexThreadId = started?.thread?.id ?? null;
           startedModel = started?.model ?? null;
         }
