@@ -53,6 +53,7 @@ export function gatedLocalComputer(
 
 type LegacyConnectionDescriptor = {
   mode?: string;
+  socketPath?: unknown;
   mcpCommand?: unknown;
   mcpArgs?: unknown;
   mcpEnv?: unknown;
@@ -108,19 +109,17 @@ function decodeLegacyDescriptor(
   platform: NodeJS.Platform,
 ): LocalComputerConnection | null {
   const supportedPlatform = legacyPlatform(platform);
-  if (!supportedPlatform || !value || value.mode === "unavailable" || typeof value.mcpCommand !== "string") {
+  if (!supportedPlatform || !value ||
+      !(value.mode === "embedded" || (supportedPlatform === "darwin" && value.mode === "standalone")) ||
+      typeof value.socketPath !== "string" || !value.socketPath ||
+      typeof value.mcpCommand !== "string" || !value.mcpCommand.trim()) {
     return null;
   }
-  if (value.mcpArgs !== undefined && !Array.isArray(value.mcpArgs)) return null;
-  if (
-    value.mcpEnv !== undefined &&
-    (!value.mcpEnv || typeof value.mcpEnv !== "object" || Array.isArray(value.mcpEnv))
-  ) {
-    return null;
-  }
-  const args = value.mcpArgs ?? ["mcp"];
+  if (!Array.isArray(value.mcpArgs) || value.mcpArgs[0] !== "mcp") return null;
+  if (!value.mcpEnv || typeof value.mcpEnv !== "object" || Array.isArray(value.mcpEnv)) return null;
+  const args = value.mcpArgs;
   if (!args.every((arg) => typeof arg === "string")) return null;
-  const env = value.mcpEnv ?? {};
+  const env = value.mcpEnv;
   if (!Object.values(env).every((entry) => typeof entry === "string")) return null;
   return {
     command: value.mcpCommand,
@@ -388,6 +387,41 @@ export function readCuaConnection({
       }
     } catch {
       // Missing, invalid, tampered, or stale descriptors are unavailable.
+    }
+  }
+  return null;
+}
+
+/** An unavailable descriptor is diagnostic only. It never becomes a connection
+ * and only a private, well-formed macOS/Windows descriptor may supply text. */
+export function readCuaUnavailableReason({
+  platform = process.platform,
+  userData = process.env.OMB_USER_DATA,
+  home = homedir(),
+}: {
+  platform?: NodeJS.Platform;
+  userData?: string;
+  home?: string;
+} = {}): string | null {
+  if (!legacyPlatform(platform)) return null;
+  const candidates = userData ? [join(userData, "cua-connection.json")] : [];
+  if (platform === "darwin") {
+    for (const directory of ["OpenMausBot", "openmausbot", "OpenGrokBot", "opengrokbot"]) {
+      candidates.push(join(home, "Library", "Application Support", directory, "cua-connection.json"));
+    }
+  }
+  for (const file of new Set(candidates)) {
+    try {
+      if (!validateLegacyDescriptorRuntime(file, platform)) continue;
+      const raw: unknown = JSON.parse(readFileSync(file, "utf8"));
+      if (raw && typeof raw === "object" && !Array.isArray(raw) &&
+          Object.keys(raw).length === 2 &&
+          (raw as Record<string, unknown>).mode === "unavailable") {
+        const reason = (raw as Record<string, unknown>).reason;
+        if (typeof reason === "string" && reason.trim() && reason.length <= 2_000) return reason.trim();
+      }
+    } catch {
+      // No usable diagnostic; the caller still refuses computer control.
     }
   }
   return null;

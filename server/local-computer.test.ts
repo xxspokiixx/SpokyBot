@@ -20,6 +20,7 @@ import {
   decodeLinuxDescriptor,
   gatedLocalComputer,
   readCuaConnection,
+  readCuaUnavailableReason,
   validateLinuxDescriptorRuntime,
 } from "./local-computer.ts";
 import { SPAWNED_PROXIES } from "./proxy-paths.ts";
@@ -128,6 +129,19 @@ afterEach(() => {
 });
 
 describe("local computer descriptor", () => {
+  it("reports a private unavailable reason without making that descriptor mountable", () => {
+    const userData = privateUserData("mac-unavailable");
+    const file = join(userData, "cua-connection.json");
+    const reason = "embedded host failed: Screen Recording required; grant access in System Settings and restart OpenMausBot";
+    writeFileSync(file, JSON.stringify({ mode: "unavailable", reason }), { mode: 0o600 });
+    expect(readCuaConnection({ platform: "darwin", userData })).toBeNull();
+    expect(readCuaUnavailableReason({ platform: "darwin", userData })).toBe(reason);
+    writeFileSync(file, JSON.stringify({ mode: "unavailable", reason: { message: reason } }));
+    expect(readCuaUnavailableReason({ platform: "darwin", userData })).toBeNull();
+    writeFileSync(file, JSON.stringify({ mode: "unavailable", reason, mcpCommand: "/fixture/driver" }));
+    expect(readCuaUnavailableReason({ platform: "darwin", userData })).toBeNull();
+  });
+
   it("accepts only the exact certified Linux X11 descriptor", () => {
     const userData = privateUserData("linux-user-data");
     const descriptor = linuxDescriptor(userData);
@@ -280,6 +294,7 @@ describe("local computer descriptor", () => {
       join(userData, "cua-connection.json"),
       JSON.stringify({
         mode: "embedded",
+        socketPath: "\\\\.\\pipe\\cua-driver",
         mcpCommand: "C:\\cua-driver.exe",
         mcpArgs: ["mcp"],
         mcpEnv: { CUA_DRIVER_EMBEDDED: "1" },
@@ -300,6 +315,8 @@ describe("local computer descriptor", () => {
       join(userData, "cua-connection.json"),
       JSON.stringify({ mode: "embedded", mcpCommand: "cua-driver", mcpArgs: "mcp" }),
     );
+    expect(readCuaConnection({ platform: "win32", userData })).toBeNull();
+    writeFileSync(join(userData, "cua-connection.json"), JSON.stringify({ mode: "unknown", mcpCommand: "cua-driver", mcpArgs: ["mcp"] }));
     expect(readCuaConnection({ platform: "win32", userData })).toBeNull();
   });
 });

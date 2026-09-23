@@ -9,6 +9,9 @@ const {
   localComputerReady,
   nativeDesktopActions,
 } = require("./capabilities.cjs");
+const readyConnection = (mode = "embedded") => ({
+  mode, socketPath: "/fixture/cua.sock", mcpCommand: "/fixture/cua-driver", mcpArgs: ["mcp"], mcpEnv: {},
+});
 
 describe("desktop capabilities", () => {
   it("keeps Apple permissions, Settings, and speech actions unreachable on Linux", () => {
@@ -29,7 +32,7 @@ describe("desktop capabilities", () => {
     const capabilities = desktopCapabilities({
       platform: "darwin",
       packaged: true,
-      localConnection: { mode: "embedded" },
+      localConnection: readyConnection(),
     });
 
     expect(capabilities).toMatchObject({
@@ -41,11 +44,23 @@ describe("desktop capabilities", () => {
     });
   });
 
+  it("exposes the recorded macOS failure to the local renderer without claiming readiness or leaking it remotely", () => {
+    const localConnection = { mode: "unavailable", reason: "Screen Recording required; restart OpenMausBot" };
+    const local = desktopCapabilities({ platform: "darwin", localConnection });
+    expect(local.localComputer).toMatchObject({
+      available: false, enabled: false, status: "unavailable", message: localConnection.reason,
+    });
+    const remote = desktopCapabilities({ platform: "darwin", localConnection, remote: true });
+    expect(remote.localComputer.available).toBe(false);
+    expect(remote.localComputer.message).toBe("");
+    expect(desktopCapabilities({ platform: "darwin", localConnection: { mode: "unavailable", reason: {} } }).localComputer.message).toBeUndefined();
+  });
+
   it("reports the renderer-caption window chrome on Windows", () => {
     const capabilities = desktopCapabilities({
       platform: "win32",
       env: { DISPLAY: ":0" },
-      localConnection: { mode: "embedded" },
+      localConnection: readyConnection(),
     });
 
     expect(capabilities.windowChrome).toBe("win-caption");
@@ -55,7 +70,7 @@ describe("desktop capabilities", () => {
     const capabilities = desktopCapabilities({
       platform: "win32",
       packaged: true,
-      localConnection: { mode: "embedded" },
+      localConnection: readyConnection(),
     });
 
     expect(capabilities).toMatchObject({
@@ -159,7 +174,10 @@ describe("desktop capabilities", () => {
   it("never treats an embedded-looking Linux connection as local control", () => {
     expect(localComputerReady("linux", { mode: "embedded" })).toBe(false);
     expect(localComputerReady("darwin", { mode: "unavailable" })).toBe(false);
-    expect(localComputerReady("darwin", { mode: "standalone" })).toBe(true);
+    expect(localComputerReady("darwin", readyConnection("standalone"))).toBe(true);
+    expect(localComputerReady("darwin", { mode: "embedded" })).toBe(false);
+    expect(localComputerReady("darwin", { ...readyConnection(), mcpArgs: [] })).toBe(false);
+    expect(localComputerReady("darwin", { ...readyConnection(), mcpArgs: ["other"] })).toBe(false);
   });
 
   it("enables limited Linux control only for the complete supervised X11 contract", () => {
