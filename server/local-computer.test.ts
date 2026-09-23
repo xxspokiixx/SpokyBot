@@ -191,8 +191,8 @@ describe("local computer descriptor", () => {
       mode: "embedded", socketPath: "/fixture/stale.sock", mcpCommand: "/fixture/stale-driver",
       mcpArgs: ["mcp"], mcpEnv: {},
     }), { mode: 0o600 });
-    expect(readCuaConnection({ platform: "darwin", home: root, userData: undefined })).toBeNull();
-    expect(readCuaUnavailableReason({ platform: "darwin", home: root, userData: undefined })).toBe(reason);
+    expect(readCuaConnection({ platform: "darwin", home: root, userData: "" })).toBeNull();
+    expect(readCuaUnavailableReason({ platform: "darwin", home: root, userData: "" })).toBe(reason);
   });
 
   it("accepts only the exact certified Linux X11 descriptor", () => {

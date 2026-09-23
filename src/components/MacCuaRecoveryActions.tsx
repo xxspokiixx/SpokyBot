@@ -11,8 +11,10 @@ const paneName: Record<MacCuaPermission, "computer.mac.permission.screenSettings
 export function MacCuaRecoveryActions({ reason }: { reason: string }) {
   const { capabilities, ready } = useDesktopCapabilities();
   const permissions = missingMacCuaPermissions(reason);
+  const currentPermissions = missingMacCuaPermissions(capabilities.localComputer.message);
   const [error, setError] = useState<string | null>(null);
-  if (!permissions.length || !ready || capabilities.host.platform !== "darwin" ||
+  if (!permissions.length || permissions.join(",") !== currentPermissions.join(",") ||
+      !ready || capabilities.host.platform !== "darwin" ||
       capabilities.localComputer.available !== false || capabilities.localComputer.reasonCode === "remote-server" ||
       typeof window.ogb?.permOpenSettings !== "function") return null;
 
