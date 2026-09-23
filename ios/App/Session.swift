@@ -206,7 +206,9 @@ final class Session: ObservableObject {
                 if let index = messages.firstIndex(where: { $0.id == "progress2" }) {
                     var parent = "progress"
                     let narration = (1...12).map { number -> Message in
-                        var step = Message(id: "preview-long-\(number)", role: .bot, kind: .text, at: 1789088401000 + Double(number))
+                        var step = messages[index]
+                        step.id = "preview-long-\(number)"
+                        step.at = 1789088401000 + Double(number)
                         step.text = String(repeating: "Inspecting the dependency graph for step \(number). ", count: 8)
                         step.turnId = "preview-turn"
                         step.parentId = parent
@@ -219,12 +221,21 @@ final class Session: ObservableObject {
                 }
                 focusedMessageId = "progress2"
             }
-            if arguments.contains("-chat-compaction-preview") {
-                var receipt = Message(id: "preview-compaction", role: .bot, kind: .compaction, at: 1789088405000)
+            if arguments.contains("-chat-compaction-preview"),
+               var receipt = state.messages["preview-gmail"]?.last {
+                receipt.id = "preview-compaction"
+                receipt.kind = .compaction
+                receipt.at = 1789088405000
+                receipt.turnId = nil
+                receipt.turnTerminal = nil
                 receipt.parentId = "answer"
                 receipt.compaction = Compaction(summary: "Earlier context preserved for the next turn.", tokensBefore: 12345)
                 state.apply(.message(threadId: "preview-gmail", message: receipt))
-                var digest = Message(id: "preview-digest", role: .bot, kind: .digest, at: 1789088406000)
+                var digest = receipt
+                digest.id = "preview-digest"
+                digest.kind = .digest
+                digest.compaction = nil
+                digest.at = 1789088406000
                 digest.parentId = receipt.id
                 digest.text = "Digest must stay hidden"
                 state.apply(.message(threadId: "preview-gmail", message: digest))
