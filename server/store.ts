@@ -766,6 +766,9 @@ export class Store {
     // After legacy transcripts are in SQLite, so the first boot sees their
     // newest message instead of stamping createdAt and jumping next launch.
     this.repairThreadUpdatedAts();
+    // After the roster is loaded, so identity resolution sees which opener
+    // ids are still live.
+    this.repairDuplicatePairConversations();
     this.registeringInitialSections = false;
   }
 
@@ -810,6 +813,49 @@ export class Store {
     for (const task of groupTasks) if (repair(task)) groupsDirty = true;
     if (botsDirty) this.saveBots();
     if (groupsDirty) this.saveGroups();
+  }
+
+  /** At most one live pair row per (recipient, sender identity). Servers
+   * before identity-stable matching minted a second live pair row for a
+   * deleted-and-recreated sender while the predecessor's row dangled live
+   * forever; collapse those on load by keeping the row the resolver favors
+   * (first in the task list — the newest, actively used one) and demoting
+   * the rest to closed plain threads. History is kept, never deleted, and
+   * a demoted row is never re-adopted: adoption skips closed rows. Runs on
+   * every load and touches nothing in a store that already holds the
+   * invariant. */
+  private repairDuplicatePairConversations(): void {
+    let botsDirty = false;
+    type SweepTask = { openedBy?: TaskOpenedBy; closedBy?: TaskClosedBy };
+    const sweep = (tasks: SweepTask[] | undefined, repaired: () => void) => {
+      const pairs = new Map<string, SweepTask[]>();
+      for (const task of tasks ?? []) {
+        const by = task.openedBy;
+        if (by?.kind !== "pair" || task.closedBy) continue;
+        const identity = this.openerIdentity(by);
+        pairs.set(identity, [...(pairs.get(identity) ?? []), task]);
+      }
+      for (const rows of pairs.values()) {
+        // rows are in task-list order, the same order the resolver's
+        // find() favors: the first is the one it keeps using.
+        for (const duplicate of rows.slice(1)) {
+          const by = duplicate.openedBy!;
+          const identity = this.openerIdentity(by);
+          const { kind: _kind, ...opened } = by;
+          duplicate.openedBy = opened;
+          duplicate.closedBy = {
+            botId: identity,
+            name: this.bot(identity)?.name ?? by.name,
+            at: Date.now(),
+          };
+          repaired();
+        }
+      }
+    };
+    // Pair rows only ever live on bots: the resolver requires a bot
+    // recipient, and group tasks carry no peer stamps.
+    for (const bot of this.bots) sweep(bot.tasks, () => { botsDirty = true; });
+    if (botsDirty) this.saveBots();
   }
 
   private saveBots(bots: BotRecord[] = this.bots) {
@@ -2202,6 +2248,18 @@ export class Store {
    *   interleave in one transcript. `label` names that thread; the caller
    *   closes it once its result has been reported. A pair conversation
    *   never auto-closes. */
+
+  /** The identity a peer-opened row belongs to: its opener's id while that
+   * bot lives, else the one live bot the stamp's name still points at —
+   * what a deleted-and-recreated same-name bot inherits — else the dead id
+   * itself. A name two live bots share resolves to nobody's twin:
+   * ambiguous means unmatched, never a wrong merge. */
+  private openerIdentity(openedBy: TaskOpenedBy): string {
+    if (this.bot(openedBy.botId)) return openedBy.botId;
+    const named = this.bots.filter((bot) => bot.name === openedBy.name);
+    return named.length === 1 ? named[0].id : openedBy.botId;
+  }
+
   resolvePairConversation(
     sender: Pick<BotRecord, "id" | "name">,
     recipientId: string,
@@ -2210,7 +2268,13 @@ export class Store {
     if (!this.bot(recipientId)) return null;
     const title = `@${sender.name}`;
     const opener = (kind: "pair" | "work", at = Date.now()): TaskOpenedBy => ({ botId: sender.id, name: sender.name, kind, at });
-    const fromSender = this.tasks(recipientId).filter((task) => task.openedBy?.botId === sender.id);
+    // Identity-stable: the sender's own rows, plus ones a deleted
+    // predecessor opened when the stamp's name still points at exactly
+    // this bot — a same-name recreation inherits the conversation instead
+    // of minting a twin while the old row dangles live. A name two live
+    // bots share matches nobody's inheritance: refusing the fallback can
+    // cost a new row, never merge two bots' histories.
+    const fromSender = this.tasks(recipientId).filter((task) => task.openedBy && this.openerIdentity(task.openedBy) === sender.id);
     let pair = fromSender.find((task) => task.openedBy?.kind === "pair");
     if (!pair) {
       const lastActivity = (task: TaskRecord) =>
@@ -2239,6 +2303,14 @@ export class Store {
       // A conversation the sender closed after reading a result is picked
       // back up, never replaced: closing is only the sidebar's idle state.
       if (pair.closedBy) this.setTaskClosedBy(recipientId, pair.threadId, null);
+      // An inherited row carries the predecessor's id; rebind it to the
+      // live bot so the name fallback is needed only once — a namesake
+      // appearing later cannot claim the row. The hour it was opened
+      // stays: inheritance is not a new conversation.
+      const inherited = pair.openedBy;
+      if (inherited && inherited.botId !== sender.id) {
+        this.setTaskOpenedBy(recipientId, pair.threadId, { ...inherited, botId: sender.id, name: sender.name });
+      }
       return { task: pair, created: false };
     }
     // The brief is never a title. An 80-character slice of an assignment
