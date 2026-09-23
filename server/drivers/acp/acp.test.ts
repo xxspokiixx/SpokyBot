@@ -718,6 +718,56 @@ describe("ACP turns (fake CLI)", () => {
     expect(done).toMatchObject({ ok: true });
   });
 
+  it("emits a structured question beside the flat choices", async () => {
+    await create(GrokAgentDriver, "question");
+    await instance.adapter.sendTurn({ threadId: "t-question-shape", text: "go" });
+    const opened = await recorder.until((e) => e.type === "request.opened");
+    expect(opened).toMatchObject({
+      requestType: "question",
+      summary: "Which color?",
+      choices: ["Blue", "Green"],
+      questions: [{ question: "Which color?", options: [{ label: "Blue" }, { label: "Green" }] }],
+    });
+  });
+
+  it("answers a structured card reply by recovering the picked option", async () => {
+    const answer = join(scratch, "question-answer.txt");
+    process.env.FAKE_ACP_PERMISSION_ANSWER = answer;
+    await create(GrokAgentDriver, "question");
+    await instance.adapter.sendTurn({ threadId: "t-question-answer", text: "go" });
+    const opened = await recorder.until((e) => e.type === "request.opened");
+    // Exactly what the tabbed QuestionCard submits: one Q:/A: block for the
+    // single question, not a bare option label.
+    const outcome = await instance.adapter.respondToRequest("t-question-answer", (opened as { requestId: string }).requestId, {
+      behavior: "answer",
+      message: "The user answered your questions.\n\nQ: Which color?\nA: Green",
+    });
+    expect(outcome).toBe("answered");
+    const resolved = await recorder.until((e) => e.type === "request.resolved");
+    expect(resolved).toMatchObject({ behavior: "answer", source: "user" });
+    await recorder.until((e) => e.type === "turn.completed");
+    expect(readFileSync(answer, "utf8")).toBe("green-id");
+  });
+
+  it("cancels a question whose answer matches no offered option", async () => {
+    const answer = join(scratch, "question-cancel.txt");
+    process.env.FAKE_ACP_PERMISSION_ANSWER = answer;
+    await create(GrokAgentDriver, "question");
+    await instance.adapter.sendTurn({ threadId: "t-question-cancel", text: "go" });
+    const opened = await recorder.until((e) => e.type === "request.opened");
+    await instance.adapter.respondToRequest("t-question-cancel", (opened as { requestId: string }).requestId, {
+      behavior: "answer",
+      message: "Purple",
+    });
+    const resolved = await recorder.until((e) => e.type === "request.resolved");
+    expect(resolved).toMatchObject({ behavior: "deny", source: "system" });
+    expect(recorder.events.find((e) => e.type === "runtime.error")).toMatchObject({
+      message: expect.stringContaining("matching answer"),
+    });
+    await recorder.until((e) => e.type === "turn.completed");
+    expect(readFileSync(answer, "utf8")).toBe("cancelled");
+  });
+
   it("per-bot Ask surfaces permissions from a legacy full-auto instance", async () => {
     process.env.FAKE_ACP_MODE = "permission";
     const dump = join(scratch, "ask-permission-overrides-full-auto.json");
