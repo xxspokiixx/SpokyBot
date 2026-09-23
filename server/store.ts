@@ -501,6 +501,7 @@ export class Store {
   groups: GroupRecord[] = [];
   private threads = new Map<string, ThreadState>();
   private defaultSelection: () => ModelSelection;
+  private completeNewBotSelection: (selection: ModelSelection) => ModelSelection;
   private listeners = new Set<(change: StoreChange) => void>();
   /** A broken team registry must not prevent loading independent chat data. */
   private registeringInitialSections = true;
@@ -508,8 +509,14 @@ export class Store {
    * that slot must not clear a concurrently running independent task. */
   private legacyActivities = new Map<string, BotActivity>();
 
-  constructor(defaultSelection: () => ModelSelection) {
+  constructor(
+    defaultSelection: () => ModelSelection,
+    /** Workspace-wide new-bot defaults (config newBots), applied to every
+     * new bot's selection whichever path created it. */
+    completeNewBotSelection: (selection: ModelSelection) => ModelSelection = (selection) => selection,
+  ) {
     this.defaultSelection = defaultSelection;
+    this.completeNewBotSelection = completeNewBotSelection;
     mkdirSync(DATA_DIR, { recursive: true });
     for (const file of [BOTS_FILE, GROUPS_FILE]) tightenRegistryFile(file);
     try {
@@ -1476,6 +1483,12 @@ export class Store {
     return this.bots.find((b) => b.threadId === threadId || b.tasks?.some((t) => t.threadId === threadId)) ?? null;
   }
 
+  /** The one place a new bot's selection is decided: the caller's choice, or
+   * the workspace default, completed with the workspace's new-bot defaults. */
+  private newBotSelection(requested?: ModelSelection): ModelSelection {
+    return this.completeNewBotSelection(requested ?? this.defaultSelection());
+  }
+
   createBot(
     profile: Partial<
       Pick<
@@ -1507,7 +1520,7 @@ export class Store {
       // Restricted from its first frame: no one else is ever told it exists.
       ...(profile.visibility && profile.visibility !== "everyone" ? { visibility: structuredClone(profile.visibility) } : {}),
       unread: false,
-      modelSelection: profile.modelSelection ?? this.defaultSelection(),
+      modelSelection: this.newBotSelection(profile.modelSelection),
       resumeCursors: {},
       createdAt: Date.now(),
     };
@@ -1564,15 +1577,16 @@ export class Store {
       if (operation.action === "create") {
         if (at >= 0 || !operation.threadId || !operation.fields.name || !operation.fields.modelSelection) throw new Error("Invalid new bot in team setup");
         const createdAt = Date.now();
+        const modelSelection = this.newBotSelection(operation.fields.modelSelection);
         next = { id: operation.botId, threadId: operation.threadId, name: operation.fields.name,
           title: "", description: "", soul: "", notifications: true, color: COLORS[nextBots.length % COLORS.length], unread: false,
-          modelSelection: operation.fields.modelSelection, resumeCursors: {}, createdAt, ...operation.fields,
+          resumeCursors: {}, createdAt, ...operation.fields, modelSelection,
           approvalMode: "ask", autoApprove: false, composio: false, approvePeerComms: false,
           // A Chief's new teammate is seen by exactly the Chief's audience:
           // a restricted Chief never creates a bot everyone sees.
           ...(chief.visibility && chief.visibility !== "everyone" ? { visibility: structuredClone(chief.visibility) } : {}),
           tasks: [{ threadId: operation.threadId, title: UNTITLED_THREAD, createdAt, updatedAt: createdAt, resumeCursors: {},
-            modelSelection: structuredClone(operation.fields.modelSelection), approvalMode: "ask", autoApprove: false,
+            modelSelection: structuredClone(modelSelection), approvalMode: "ask", autoApprove: false,
             unread: false, activity: "idle", busy: false }],
         };
         nextBots.unshift(next);

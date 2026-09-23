@@ -705,6 +705,23 @@ describe("Store", () => {
     expect(reloaded.bot(bot.id)?.modelSelection.effort).toBe("high");
   });
 
+  it("completes every new bot's selection with the workspace defaults, whichever path creates it", () => {
+    const store = new Store(selection, (chosen) => ({ ...chosen, effort: "medium" }));
+    const defaulted = store.createBot();
+    const explicit = store.createBot({ modelSelection: { instanceId: "codex", model: "chosen" } });
+    const chief = store.createBot({ name: "Chief", section: "Ops" });
+    store.patchBot(chief.id, { chiefOfStaff: true });
+    store.applyTeamSetup({ version: 1, requestId: "setup-effort", botId: chief.id, threadId: chief.threadId,
+      reason: "Requested", createdAt: 1, requesterRevision: "fixture", newTeams: [], operations: [
+        { action: "create", botId: "set-up", threadId: "set-up-thread", fields: { name: "Analyst", section: "Ops", modelSelection: selection() } },
+      ] });
+    expect(explicit.modelSelection).toEqual({ instanceId: "codex", model: "chosen", effort: "medium" });
+    for (const bot of [defaulted, explicit, new Store(selection).bot("set-up")!]) {
+      expect(bot.modelSelection.effort).toBe("medium");
+      expect(bot.tasks?.[0].modelSelection).toEqual(bot.modelSelection);
+    }
+  });
+
   it("stores variants independently and seeds future conversations from the bot default", () => {
     const store = new Store(selection);
     const bot = store.createBot();
