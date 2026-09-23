@@ -110,9 +110,12 @@ public struct SkillExecutionReceiptView: View {
                 .font(.system(size: 11, weight: .bold))
                 .foregroundStyle(.red)
         default:
-            Image(systemName: "circle.dotted")
-                .font(.system(size: 11))
-                .foregroundStyle(.orange)
+            // an indeterminate spinner reads as activity the way the web
+            // transcript's does; a static dotted circle reads as settled
+            ProgressView()
+                .controlSize(.mini)
+                .tint(.orange)
+                .frame(width: 12, height: 12)
         }
     }
 
