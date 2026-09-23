@@ -76,6 +76,21 @@ export function hostedWorkspaceConfiguration(env: NodeJS.ProcessEnv = process.en
   } catch { return null; }
 }
 
+/** Who decides who may use this workspace, for Settings → People and
+ * Remote access. On a portal-membership workspace the organisation's Admin
+ * does, and `peopleUrl` opens its People page for this workspace (identifiers
+ * only; Admin authorizes its own visitor). A hosted workspace never issues
+ * pairing codes or email sign-in: people come in through the portal. */
+export function workspaceMembership(env: NodeJS.ProcessEnv = process.env):
+  { authority: "local" | "portal"; pairingCodes: boolean; peopleUrl?: string } {
+  const hosted = hostedWorkspaceConfiguration(env);
+  const pairingCodes = !hostedWorkspaceConfigured(env);
+  if (!hosted?.portalMembership) return { authority: "local", pairingCodes };
+  const people = new URL("/people", hosted.admin);
+  people.search = new URLSearchParams({ workspace: hosted.workspace }).toString();
+  return { authority: "portal", pairingCodes, peopleUrl: people.href };
+}
+
 /** An operator may authorize new Full tasks only on a dedicated,
  * portal-managed server. This is not an HTTP setting or a desktop grant. */
 export function sharedWorkspaceFullAccessConfigured(env: NodeJS.ProcessEnv = process.env): boolean {
