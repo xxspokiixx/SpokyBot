@@ -309,7 +309,7 @@ export function createOpenAIChatRuntime<Config>(options: RuntimeOptions<Config>)
     const abort = new AbortController();
     const messages = messagesFor(turn);
     const model = turn.model || options.models().default;
-    const secrets = [options.apiKey];
+    const secrets = [options.apiKey, turn.integrations?.computer?.token, turn.integrations?.computer?.control?.token].filter((value): value is string => Boolean(value));
     for (const integration of Object.values(turn.integrations ?? {})) {
       const entries = object(integration);
       const specs = entries && "command" in entries ? [entries] : Object.values(entries ?? {}).map(object);
@@ -530,7 +530,7 @@ export function createOpenAIChatRuntime<Config>(options: RuntimeOptions<Config>)
       : { state: "unavailable", reason: options.unavailableReason },
     adapter: {
       provider: options.driverKind,
-      capabilities: { ...(options.computerUse ? { computerMcp: options.tools !== false, localComputerMcp: options.tools !== false,
+      capabilities: { ...(options.computerUse ? { computerMcp: options.tools !== false, cloudComputerMcp: options.tools !== false, localComputerMcp: options.tools !== false,
         browserMcp: options.tools !== false, nativeImageInput: true, images: true } : {}),
         sessionModelSwitch: "in-session", customMcp: options.tools !== false, agentsMcp: options.tools !== false, composioMcp: options.tools !== false },
       sendTurn,
