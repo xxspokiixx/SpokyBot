@@ -3,6 +3,7 @@
 import { Ajv, type ValidateFunction } from "ajv";
 import { Ajv2020 } from "ajv/dist/2020.js";
 import formats from "ajv-formats";
+import { stripControlPlaneEnv } from "../config.ts";
 import type { SendTurnInput } from "../contracts.ts";
 import { augmentedPath } from "../env-path.ts";
 import { killCliTree, spawnCli } from "../procs.ts";
@@ -38,6 +39,15 @@ function object(value: unknown): value is Record<string, unknown> {
 }
 function aborted(): Error { return new Error("MCP operation cancelled"); }
 
+/** These servers are a chat-runtime bot's tools, the counterpart of an engine
+ * CLI's children: the operator's control-plane secrets never ride along. What
+ * the server entry itself names is a deliberate grant and is applied last. */
+export function chatMcpEnvironment(serverEnv: Record<string, string>, source: NodeJS.ProcessEnv = process.env): NodeJS.ProcessEnv {
+  const env: NodeJS.ProcessEnv = { ...source, PATH: augmentedPath() };
+  stripControlPlaneEnv(env);
+  return { ...env, ...serverEnv };
+}
+
 class ChatMcpClient {
   private child: ReturnType<typeof spawnCli>;
   private buffer = "";
@@ -53,7 +63,7 @@ class ChatMcpClient {
       // servers cannot find `node` and exit at once. Widen it the way the
       // Claude and Codex drivers do; a PATH the user set on the server wins.
       this.child = spawnCli(server.command, server.args, {
-        stdio: ["pipe", "pipe", "pipe"], env: { ...process.env, PATH: augmentedPath(), ...server.env },
+        stdio: ["pipe", "pipe", "pipe"], env: chatMcpEnvironment(server.env),
       });
     } catch { throw new Error("MCP server could not start; check its command and installation"); }
     this.child.stdout.setEncoding("utf8");
