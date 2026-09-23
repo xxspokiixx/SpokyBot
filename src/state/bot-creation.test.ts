@@ -2,7 +2,7 @@ import { createElement, type Dispatch } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { botRole, roleProfilePatch } from "@/lib/bot-roles";
-import { createBotWithRole, initialState, reducer, StoreProvider, useStore, type Action } from "./store";
+import { createBotWithRole, initialState, reducer, StoreProvider, useStore, type Action, type Bot } from "./store";
 
 const response = (body: unknown, status = 200) => new Response(JSON.stringify(body), { status });
 const deferred = () => {
@@ -103,6 +103,16 @@ describe("shared bot creation guard", () => {
 });
 
 describe("setup navigation", () => {
+  it.each([false, true])("preserves the current selection only for nested team creation (%s)", preserveSelection => {
+    const bot = { id: "created", name: "Scout", messages: [] } as unknown as Bot;
+    const state = { ...initialState, activeView: "team-map" as const, selectedId: "existing" };
+    const next = reducer(state, { type: "botAdded", bot, preserveSelection });
+    expect(next.bots).toContain(bot);
+    expect(next.activeView).toBe(preserveSelection ? "team-map" : "chat");
+    expect(next.selectedId).toBe(preserveSelection ? "existing" : "created");
+    expect(reducer(state, { type: "botAdded", bot })).toMatchObject({ activeView: "chat", selectedId: "created" });
+  });
+
   it("keeps creation pending through close/reopen until the request settles", () => {
     const pending = reducer(initialState, { type: "botCreationPending", on: true });
     const closed = reducer(pending, { type: "toggleNewBot", open: false });
