@@ -163,6 +163,8 @@ lines.on('line', line => {
   else if (m.params.name === 'rpc-error') { process.stdout.write(JSON.stringify({jsonrpc:'2.0',id:m.id,error:{code:-1,message:'Expected refusal'}})+'\\n'); return; }
   else if (m.params.name === 'rpc-timeout') { rpcTimeoutCalls += 1; if (rpcTimeoutCalls === 1) { process.stdout.write(JSON.stringify({jsonrpc:'2.0',id:m.id,error:{code:-1,message:'request timed out'}})+'\\n'); return; } result = { content:[{type:'text',text:'engine answered a repeat rpc-timeout call'}] }; }
   else if (m.params.name === 'agent_browser_open' && m.params.arguments.url === 'https://refused.test') result = { isError:true, content:[{type:'text',text:'Navigation refused'}] };
+  else if (m.params.name === 'agent_browser_snapshot' && process.env.REJECT_VERIFICATION === '1') { process.stdout.write(JSON.stringify({jsonrpc:'2.0',id:m.id,error:{code:-1,message:'Snapshot refused'}})+'\\n'); return; }
+  else if (m.params.name === 'agent_browser_snapshot' && process.env.HANG_VERIFICATION === '1') return;
   else if (m.params.name === 'agent_browser_snapshot' && process.env.EMPTY_VERIFICATION === '1') result = { content:[] };
   else if (m.params.name === 'agent_browser_snapshot' && process.env.FAIL_VERIFICATION === '1') result = { isError:true, content:[{type:'text',text:'Snapshot unavailable'}] };
   else result = { content:[{type:'text',text:JSON.stringify(m.params)}],pid:process.pid };
@@ -185,6 +187,25 @@ describe("server-owned browser MCP runtime", () => {
     expect(result.isError).toBe(true);
     expect(result.content[1].text).toContain("verification failed");
     expect(result.content[2].text).toBe("Snapshot unavailable");
+  });
+  it("preserves navigation when its observation rejects at the RPC level", async () => {
+    const value = runtime(), failing = spec();
+    failing.env.REJECT_VERIFICATION = "1";
+    const result = await value.agentRpc("rejected-snapshot", failing, "tools/call", {
+      name: "agent_browser_open", arguments: { url: "https://example.com" },
+    }) as { isError: boolean; content: Array<{ text: string }> };
+    expect(result.isError).toBe(true);
+    expect(JSON.parse(result.content[0].text).name).toBe("agent_browser_open");
+    expect(result.content[1].text).toContain("verification failed");
+    await expect(value.withAgentAction("rejected-snapshot", async () => "available")).resolves.toBe("available");
+  });
+  it("keeps transport uncertainty when post-navigation observation times out", async () => {
+    const value = runtime({ requestTimeoutMs: 1_000 }), failing = spec();
+    failing.env.HANG_VERIFICATION = "1";
+    await expect(value.agentRpc("hung-snapshot", failing, "tools/call", {
+      name: "agent_browser_open", arguments: { url: "https://example.com" },
+    })).rejects.toBeInstanceOf(TransportError);
+    await expect(value.withAgentAction("hung-snapshot", async () => "no")).rejects.toThrow(/Restart/);
   });
   it("does not claim page verification when the snapshot is empty", async () => {
     const empty = spec();
