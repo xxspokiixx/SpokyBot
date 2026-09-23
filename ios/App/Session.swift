@@ -200,6 +200,9 @@ final class Session: ObservableObject {
                 client = CompanionClient(connection: preview, token: "image-fixture-token", session: URLSession(configuration: config))
             }
             state.hydrate(fleet)
+            if arguments.contains("-chat-focus-preview") {
+                focusedMessageId = "progress2"
+            }
             if arguments.contains("-chat-reasoning-preview"),
                let frameURL = Bundle.main.url(forResource: "ChatReasoningPreview", withExtension: "json"),
                let frameData = try? Data(contentsOf: frameURL),

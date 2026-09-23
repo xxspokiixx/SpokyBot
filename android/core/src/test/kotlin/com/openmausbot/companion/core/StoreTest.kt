@@ -258,6 +258,24 @@ class StoreTest {
     }
 
     @Test
+    fun lateEditDoesNotUndoBranchSelectionOrNewerEdit() {
+        val (base, threadId) = editableConversation()
+        val pending = PendingEdit("q1", "second try", baseLeafId = "a1")
+        val fork = message("q2", 4.0, "second try").copy(parentId = "root")
+        val switched = base.copy(pendingEdits = mapOf(threadId to pending))
+            .apply(Frame.Thread(threadId, "root"))
+            .adoptEdit(fork, threadId, pending)
+        assertEquals("root", switched.activeLeafIds[threadId])
+        assertTrue(switched.transcript(threadId).any { it.id == "q2" })
+        val newer = PendingEdit("q1", "newer try", baseLeafId = "a1")
+        val superseded = base.copy(pendingEdits = mapOf(threadId to newer)).adoptEdit(fork, threadId, pending)
+        assertEquals("a1", superseded.activeLeafIds[threadId])
+        assertEquals("newer try", superseded.visibleTranscript(threadId).last().text)
+        val accepted = base.copy(pendingEdits = mapOf(threadId to pending)).adoptEdit(fork, threadId, pending)
+        assertEquals("q2", accepted.visibleTranscript(threadId).last().id)
+    }
+
+    @Test
     fun versionsAreUserMessagesWithTheSameParent() {
         val root = message("root")
         val first = message("first", 2.0).copy(parentId = root.id)

@@ -61,12 +61,6 @@ final class ChatPreferencesTests: XCTestCase {
         XCTAssertEqual(rows[1].kind, .compaction)
     }
 
-    private func digest(_ id: String, at: Double = 1) -> Message {
-        var message = Message(id: id, role: .bot, kind: .digest, at: at)
-        message.text = "[digest] Bash ×2"
-        return message
-    }
-
     private func compaction(_ id: String, at: Double = 1) -> Message {
         var message = Message(id: id, role: .bot, kind: .compaction, at: at)
         message.text = "[compaction] summary"

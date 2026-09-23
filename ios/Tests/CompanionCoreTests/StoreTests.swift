@@ -371,6 +371,34 @@ final class StoreTests: XCTestCase {
         XCTAssertEqual(state.visibleTranscript(forThread: threadId).map(\.id), ["root", "q2", "a2"])
     }
 
+    func testLateEditResponseDoesNotUndoBranchSelectionOrANewerEdit() throws {
+        var (state, threadId) = try editableConversation()
+        let pending = PendingEdit(sourceId: "q1", text: "second try", baseLeafId: "a1")
+        state.pendingEdits[threadId] = pending
+        var fork = message("q2", at: 4, text: "second try")
+        fork.parentId = "root"
+        state.apply(.thread(threadId: threadId, activeLeafId: "root"))
+        state.adoptEdit(fork, inThread: threadId, expectedPending: pending)
+        XCTAssertEqual(state.activeLeafIds[threadId], "root")
+        XCTAssertTrue(state.transcript(forThread: threadId).contains { $0.id == "q2" })
+
+        state.apply(.thread(threadId: threadId, activeLeafId: "a1"))
+        state.pendingEdits[threadId] = PendingEdit(sourceId: "q1", text: "newer try", baseLeafId: "a1")
+        state.adoptEdit(fork, inThread: threadId, expectedPending: pending)
+        XCTAssertEqual(state.activeLeafIds[threadId], "a1")
+        XCTAssertEqual(state.visibleTranscript(forThread: threadId).last?.text, "newer try")
+    }
+
+    func testMatchingEditResponseCanSelectTheFork() throws {
+        var (state, threadId) = try editableConversation()
+        let pending = PendingEdit(sourceId: "q1", text: "second try", baseLeafId: "a1")
+        state.pendingEdits[threadId] = pending
+        var fork = message("q2", at: 4, text: "second try")
+        fork.parentId = "root"
+        state.adoptEdit(fork, inThread: threadId, expectedPending: pending)
+        XCTAssertEqual(state.visibleTranscript(forThread: threadId).last?.id, "q2")
+    }
+
     func testRoutineExecutionsAreHiddenOnlyFromTheThreadPicker() throws {
         var bot = try XCTUnwrap(try fleet().bots.first)
         bot.threadId = "results"

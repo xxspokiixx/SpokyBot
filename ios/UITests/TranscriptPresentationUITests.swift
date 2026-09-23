@@ -3,6 +3,15 @@ import XCTest
 /// Bundled offline fleet only; no API client or paired user data.
 final class TranscriptPresentationUITests: XCTestCase {
     @MainActor
+    func testSearchTargetRevealsIntermediateReply() {
+        let app = launchPreview(detail: "hidden", focused: true)
+        let target = app.staticTexts.matching(NSPredicate(format: "label CONTAINS %@", "I found the failing check.")).firstMatch
+        XCTAssertTrue(target.waitForExistence(timeout: 5))
+        XCTAssertTrue(target.isHittable)
+        screenshot("Focused search result expands narration", in: app)
+    }
+
+    @MainActor
     func testHiddenFoldsNarrationAndWebhookPayloadCanBeExpanded() {
         let app = launchPreview(detail: "hidden")
         let fold = app.buttons["assistant-turn.preview-turn"]
@@ -45,7 +54,7 @@ final class TranscriptPresentationUITests: XCTestCase {
     }
 
     @MainActor
-    private func launchPreview(detail: String, reasoning: Bool = false) -> XCUIApplication {
+    private func launchPreview(detail: String, reasoning: Bool = false, focused: Bool = false) -> XCUIApplication {
         continueAfterFailure = false
         let app = XCUIApplication()
         app.launchArguments = [
@@ -57,6 +66,7 @@ final class TranscriptPresentationUITests: XCTestCase {
             "-companion.onboarding.notificationsSeen", "YES"
         ]
         if reasoning { app.launchArguments.append("-chat-reasoning-preview") }
+        if focused { app.launchArguments.append("-chat-focus-preview") }
         app.launch()
         let threads = app.buttons["threads-toggle.preview-pepper"]
         XCTAssertTrue(threads.waitForExistence(timeout: 10))
