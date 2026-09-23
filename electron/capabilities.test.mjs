@@ -64,6 +64,14 @@ describe("desktop capabilities", () => {
     expect(localComputer).toMatchObject({ available: false, enabled: false, status: "unavailable" });
   });
 
+  it.each(["unavailable", null, {}])("rejects a complete connection with contradictory status %s", (status) => {
+    const localComputer = desktopCapabilities({
+      platform: "darwin",
+      localConnection: { ...readyConnection(), status },
+    }).localComputer;
+    expect(localComputer).toMatchObject({ available: false, enabled: false, status: "unavailable" });
+  });
+
   it("reports the renderer-caption window chrome on Windows", () => {
     const capabilities = desktopCapabilities({
       platform: "win32",

@@ -57,6 +57,7 @@ type LegacyConnectionDescriptor = {
   mcpCommand?: unknown;
   mcpArgs?: unknown;
   mcpEnv?: unknown;
+  status?: unknown;
 };
 
 type LinuxConnectionDescriptor = Record<string, unknown>;
@@ -111,6 +112,7 @@ function decodeLegacyDescriptor(
   const supportedPlatform = legacyPlatform(platform);
   if (!supportedPlatform || !value ||
       !(value.mode === "embedded" || (supportedPlatform === "darwin" && value.mode === "standalone")) ||
+      (Object.hasOwn(value, "status") && value.status !== "ready") ||
       typeof value.socketPath !== "string" || !value.socketPath ||
       typeof value.mcpCommand !== "string" || !value.mcpCommand.trim()) {
     return null;

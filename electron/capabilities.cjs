@@ -59,6 +59,7 @@ function linuxLocalControlSupport(platform, env) {
 
 function localComputerReady(platform, connection) {
   const validLegacyConnection = connection &&
+    (!Object.hasOwn(connection, "status") || connection.status === "ready") &&
     typeof connection.socketPath === "string" && connection.socketPath.length > 0 &&
     typeof connection.mcpCommand === "string" && connection.mcpCommand.trim().length > 0 &&
     Array.isArray(connection.mcpArgs) && connection.mcpArgs[0] === "mcp" &&

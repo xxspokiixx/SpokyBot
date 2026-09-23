@@ -142,6 +142,20 @@ describe("local computer descriptor", () => {
     expect(readCuaUnavailableReason({ platform: "darwin", userData })).toBeNull();
   });
 
+  it("rejects an explicitly unavailable or malformed status on an otherwise complete connection", () => {
+    const userData = privateUserData("contradictory-status");
+    const file = join(userData, "cua-connection.json");
+    const connection = {
+      mode: "embedded", socketPath: "/fixture/cua.sock", mcpCommand: "/fixture/cua-driver",
+      mcpArgs: ["mcp"], mcpEnv: {},
+    };
+    for (const status of ["unavailable", null, {}]) {
+      writeFileSync(file, JSON.stringify({ ...connection, status }), { mode: 0o600 });
+      expect(readCuaConnection({ platform: "darwin", userData })).toBeNull();
+      expect(readCuaConnection({ platform: "win32", userData })).toBeNull();
+    }
+  });
+
   it.skipIf(process.platform === "win32")("never substitutes a stale legacy descriptor for the packaged app's exact status", () => {
     const userData = privateUserData("exact-mac-user-data");
     const home = join(userData, "fixture-home");
