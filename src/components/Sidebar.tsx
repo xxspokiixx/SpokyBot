@@ -1502,6 +1502,7 @@ export function Sidebar({ open, onClose }: { open: boolean; onClose: () => void 
   const [teamMenu, setTeamMenu] = useState<{ name: string; x: number; y: number } | null>(null);
   const [deletingTeam, setDeletingTeam] = useState<string | null>(null);
   const [moveToTeam, setMoveToTeam] = useState<string | null>(null);
+  const [renameTeam, setRenameTeam] = useState<string | null>(null);
   const [roomMenu, setRoomMenu] = useState<{ groupId: string; x: number; y: number } | null>(null);
   const [roomSectionPicker, setRoomSectionPicker] = useState<{ groupId: string; x: number; y: number } | null>(null);
   const [plusOpen, setPlusOpen] = useState(false);
@@ -1875,45 +1876,48 @@ export function Sidebar({ open, onClose }: { open: boolean; onClose: () => void 
               </>
             )}
           </div>
-          <button
-            type="button"
-            onClick={() => setAttentionOpen((o) => !o)}
-            aria-label={t("attention.title")}
-            title={t("attention.title")}
-            className="relative flex size-10 items-center justify-center rounded-md text-ink-secondary hover:bg-raised hover:text-ink"
-          >
-            <Activity size={20} strokeWidth={2} />
-            {attention.length > 0 && (
-              <span className="absolute right-1 top-1 flex min-w-4 items-center justify-center rounded-full bg-accent px-0.5 text-[9.5px] font-semibold leading-4 text-ink">{attention.length > 9 ? "9+" : attention.length}</span>
-            )}
-          </button>
-          {attentionOpen && (
-            <>
-              <div className="fixed inset-0 z-30" onMouseDown={() => setAttentionOpen(false)} />
-              <div className={cn(
-                "absolute top-full z-40 mt-1 w-72 overflow-hidden rounded-xl border border-hairline/50 bg-menu py-1.5 shadow-2xl shadow-black/60",
-                density === "icons" ? "left-0" : "right-0",
-              )}>
-                <div className="flex items-center gap-1 pb-1 pl-3.5 pr-2 pt-1.5">
-                  <span className="flex-1 text-[13px] font-medium text-ink">{t("attention.title")}</span>
-                  <button
-                    type="button"
-                    onClick={() => setAttentionPinned(!attentionPinned)}
-                    aria-label={t(attentionPinned ? "attention.unpin" : "attention.pin")}
-                    title={t(attentionPinned ? "attention.unpin" : "attention.pin")}
-                    className="flex size-6 items-center justify-center rounded text-ink-secondary hover:bg-raised hover:text-ink"
-                  >
-                    {attentionPinned ? <PinOff size={14} /> : <Pin size={14} />}
-                  </button>
+          <div className={density === "icons" ? "relative" : "contents"}>
+            <button
+              type="button"
+              onClick={() => setAttentionOpen((o) => !o)}
+              aria-label={t("attention.title")}
+              title={t("attention.title")}
+              className="relative flex size-10 items-center justify-center rounded-md text-ink-secondary hover:bg-raised hover:text-ink"
+            >
+              <Activity size={20} strokeWidth={2} />
+              {attention.length > 0 && (
+                <span className="absolute right-1 top-1 flex min-w-4 items-center justify-center rounded-full bg-accent px-0.5 text-[9.5px] font-semibold leading-4 text-ink">{attention.length > 9 ? "9+" : attention.length}</span>
+              )}
+            </button>
+            {attentionOpen && (
+              <>
+                <div className="fixed inset-0 z-30" onMouseDown={() => setAttentionOpen(false)} />
+                <div className={cn(
+                  "absolute top-full z-40 mt-1 overflow-hidden rounded-xl border border-hairline/50 bg-menu py-1.5 shadow-2xl shadow-black/60",
+                  density === "icons" ? "left-0" : "right-0",
+                  density === "compact" ? "w-60" : "w-72",
+                )}>
+                  <div className="flex items-center gap-1 pb-1 pl-3.5 pr-2 pt-1.5">
+                    <span className="flex-1 text-[13px] font-medium text-ink">{t("attention.title")}</span>
+                    <button
+                      type="button"
+                      onClick={() => setAttentionPinned(!attentionPinned)}
+                      aria-label={t(attentionPinned ? "attention.unpin" : "attention.pin")}
+                      title={t(attentionPinned ? "attention.unpin" : "attention.pin")}
+                      className="flex size-6 items-center justify-center rounded text-ink-secondary hover:bg-raised hover:text-ink"
+                    >
+                      {attentionPinned ? <PinOff size={14} /> : <Pin size={14} />}
+                    </button>
+                  </div>
+                  {attention.length === 0 ? (
+                    <div className="px-3.5 py-2.5 text-[13px] text-ink-secondary">{t("attention.empty")}</div>
+                  ) : (
+                    <AttentionThreadRows entries={attention} onJump={(entry) => { setAttentionOpen(false); dispatch({ type: "switchTask", botId: entry.botId, threadId: entry.task.threadId }); }} />
+                  )}
                 </div>
-                {attention.length === 0 ? (
-                  <div className="px-3.5 py-2.5 text-[13px] text-ink-secondary">{t("attention.empty")}</div>
-                ) : (
-                  <AttentionThreadRows entries={attention} onJump={(entry) => { setAttentionOpen(false); dispatch({ type: "switchTask", botId: entry.botId, threadId: entry.task.threadId }); }} />
-                )}
-              </div>
-            </>
-          )}
+              </>
+            )}
+          </div>
           <button
             ref={importReturnRef}
             onClick={() => setPlusOpen((o) => !o)}
@@ -2077,9 +2081,9 @@ export function Sidebar({ open, onClose }: { open: boolean; onClose: () => void 
                 {density !== "icons" && (
                   <SidebarSectionHeader
                     name={sectionLabel(id)}
-                    onContextMenu={sectionName && layoutInteractive && !remoteClient ? event => {
+                    onContextMenu={!remoteClient && layoutInteractive && sectionName ? (event) => {
                       event.preventDefault();
-                      setTeamMenu({ name: sectionName, x: Math.min(event.clientX, window.innerWidth - 230), y: Math.min(event.clientY, window.innerHeight - 110) });
+                      setTeamMenu({ name: sectionName, x: Math.max(8, Math.min(event.clientX, window.innerWidth - 230)), y: Math.max(8, Math.min(event.clientY, window.innerHeight - 110)) });
                     } : undefined}
                     collapsed={collapsed}
                     attention={attention}
@@ -2283,6 +2287,7 @@ export function Sidebar({ open, onClose }: { open: boolean; onClose: () => void 
         }}
       />
       {newTeam && <TeamDialog onClose={() => setNewTeam(false)} />}
+      {renameTeam && <TeamDialog section={renameTeam} rename onClose={() => setRenameTeam(null)} />}
       {teamMenu && createPortal(<div className="fixed inset-0 z-40" onMouseDown={() => setTeamMenu(null)}>
         <div role="menu" aria-label={teamMenu.name} style={{ left: teamMenu.x, top: teamMenu.y }}
           className="absolute w-[220px] rounded-xl border border-hairline/50 bg-menu p-1.5 text-ink shadow-xl"
@@ -2292,6 +2297,8 @@ export function Sidebar({ open, onClose }: { open: boolean; onClose: () => void 
           }}>
           <button type="button" role="menuitem" autoFocus className="flex w-full items-center gap-2 rounded-lg px-3 py-2 text-left text-[13px] hover:bg-raised"
             onClick={() => { setMoveToTeam(teamMenu.name); setTeamMenu(null); }}><Users size={14} />{t("team.addBots")}</button>
+          <button type="button" role="menuitem" className="flex w-full items-center gap-2 rounded-lg px-3 py-2 text-left text-[13px] hover:bg-raised"
+            onClick={() => { setRenameTeam(teamMenu.name); setTeamMenu(null); }}><Pencil size={14} />{t("team.rename")}</button>
           <button type="button" role="menuitem" className="flex w-full items-center gap-2 rounded-lg px-3 py-2 text-left text-[13px] text-danger hover:bg-raised"
             onClick={() => { setDeletingTeam(teamMenu.name); setTeamMenu(null); }}><Trash2 size={14} />{t("team.delete")}</button>
         </div>

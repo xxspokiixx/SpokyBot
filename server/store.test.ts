@@ -17,12 +17,76 @@ import { canAccessTeam } from "./peer-roster.ts";
 import { Store, toWireTask, type BotRecord } from "./store.ts";
 import type { TeamSetupRequest } from "../shared/team-setup.ts";
 import { SECTION_CONTEXTS_FILE, readSectionContext, writeSectionContext } from "./section-context.ts";
+import { TeamComputers } from "./team-computers.ts";
 
 const selection = (): ModelSelection => ({ instanceId: "claude", model: "claude-sonnet-5" });
 
 describe("Store", () => {
   beforeEach(() => {
     rmSync(DATA_DIR, { recursive: true, force: true });
+  });
+
+  it("renames populated teams without changing members, conversations, grants or computer identity", () => {
+    const store = new Store(selection);
+    const chief = store.createBot({ section: "Delivery" });
+    store.setChiefOfStaff(chief.id);
+    const archived = store.createBot({ section: "Delivery" });
+    store.patchBot(archived.id, { hidden: true });
+    const manager = store.createBot({ section: "Office" });
+    store.setChiefOfStaff(manager.id);
+    store.patchBot(manager.id, { managedSections: ["Delivery", " Delivery ", "Other"] });
+    expect(canAccessTeam(manager, "Delivery")).toBe(true);
+    const room = store.createGroup("Room", [chief.id], false, "Delivery");
+    const message = store.appendMessage(chief.threadId, { role: "user", kind: "text", text: "Keep this conversation" });
+    writeSectionContext("Delivery", "Shared team instructions");
+    const computers = new TeamComputers(join(DATA_DIR, "team-computers.json"), "5c57ceec-f5aa-4d79-a9c7-0e1f93875e70");
+    const computer = computers.create("Shared desktop");
+    computers.assign(computer.id, "Delivery");
+    expect(store.renameSection("Delivery", "Launch", computers)).toBeUndefined();
+    expect(store.bot(chief.id)).toBe(chief);
+    expect(chief).toMatchObject({ section: "Launch", chiefOfStaff: true });
+    expect(archived).toMatchObject({ section: "Launch", hidden: true });
+    expect(manager.managedSections).toEqual(["Launch", "Other"]);
+    expect(canAccessTeam(manager, "Launch")).toBe(true);
+    expect(room.section).toBe("Launch");
+    expect(readSectionContext("Launch")?.text).toBe("Shared team instructions");
+    expect(readSectionContext("Delivery")).toBeNull();
+    expect(computers.forSection("Launch")?.id).toBe(computer.id);
+    const restored = new Store(selection);
+    expect(restored.bot(chief.id)?.section).toBe("Launch");
+    expect(canAccessTeam(restored.bot(manager.id)!, "Launch")).toBe(true);
+    expect(restored.group(room.id)?.section).toBe("Launch");
+    expect(restored.messagesFor(chief.threadId)).toContainEqual(message);
+    expect(restored.sections).not.toContain("Delivery");
+    store.setBotsSection([], "Delivery");
+    expect(canAccessTeam(manager, "Delivery")).toBe(false);
+  });
+
+  it("rejects rename conflicts and active work without changing teams", () => {
+    const store = new Store(selection);
+    const bot = store.createBot({ section: "Delivery" });
+    store.setBotsSection([], "Existing");
+    expect(store.renameSection("Delivery", "Existing")).toContain("already exists");
+    expect(store.renameSection("Delivery", "bad\nname")).toContain("control characters");
+    bot.busy = true;
+    expect(store.renameSection("Delivery", "Launch")).toContain("active work");
+    expect(bot.section).toBe("Delivery");
+    expect(store.sections).not.toContain("Launch");
+  });
+
+  it("restores membership files when a rename cannot save the group registry", () => {
+    const store = new Store(selection);
+    const bot = store.createBot({ section: "Delivery" });
+    const room = store.createGroup("Room", [bot.id], false, "Delivery");
+    store.patchBot(bot.id, { title: "General assistant" });
+    const disk = () => ["bots.json", "groups.json", "section-contexts.json"].map(name => readFileSync(join(DATA_DIR, name), "utf8"));
+    const before = disk();
+    const internals = store as unknown as { saveGroups: (...args: unknown[]) => void };
+    vi.spyOn(internals, "saveGroups").mockImplementationOnce(() => { throw new Error("disk unavailable"); });
+    expect(() => store.renameSection("Delivery", "Launch")).toThrow("disk unavailable");
+    expect(disk()).toEqual(before);
+    expect(bot.section).toBe("Delivery");
+    expect(room.section).toBe("Delivery");
   });
 
   it("deletes a populated team while preserving bots, archived members and room history across restart", () => {
@@ -1399,6 +1463,85 @@ describe("Store change stream", () => {
     expect(store.resolvePairConversation(sender, recipient.id, idle)!.task.threadId).toBe(pair.threadId);
     expect(store.tasks(recipient.id).filter((task) => task.openedBy?.kind === "pair")).toHaveLength(1);
     expect(store.tasks(recipient.id).filter((task) => task.openedBy?.kind === "work")).toHaveLength(2);
+  });
+
+  it("a sender deleted and recreated under the same name inherits its pair conversation", () => {
+    const store = new Store(selection);
+    const recipient = store.createBot({ name: "Scout" });
+    const sender = store.createBot({ name: "Clive" });
+    const idle = { working: () => false };
+    const pair = store.resolvePairConversation(sender, recipient.id, idle)!;
+    const openedAt = pair.task.openedBy!.at;
+    store.appendMessage(pair.task.threadId, { role: "bot", kind: "text", text: "the standing history", at: 1_000 });
+    // deleted and recreated: a new id under the same name, while the
+    // recipient's row still carries only the predecessor's stamp
+    store.deleteBot(sender.id);
+    const recreated = store.createBot({ name: "Clive" });
+    expect(recreated.id).not.toBe(sender.id);
+    const inherited = store.resolvePairConversation(recreated, recipient.id, idle)!;
+    expect(inherited.created).toBe(false);
+    expect(inherited.task.threadId).toBe(pair.task.threadId);
+    // no twin was minted, and the history stayed in the one row
+    expect(store.tasks(recipient.id)).toHaveLength(2);
+    expect(store.messagesFor(pair.task.threadId).at(-1)?.text).toBe("the standing history");
+    // the stamp now names the live bot, and the hour it was opened did not move
+    expect(inherited.task.openedBy).toEqual({ botId: recreated.id, name: "Clive", kind: "pair", at: openedAt });
+    // a reload keeps answering with the same row
+    expect(new Store(selection).resolvePairConversation(recreated, recipient.id, idle)!.task.threadId).toBe(pair.task.threadId);
+  });
+
+  it("a name two live bots share never inherits a deleted bot's pair conversation", () => {
+    const store = new Store(selection);
+    const recipient = store.createBot({ name: "Scout" });
+    const sender = store.createBot({ name: "Clive" });
+    const idle = { working: () => false };
+    const dangling = store.resolvePairConversation(sender, recipient.id, idle)!.task;
+    store.deleteBot(sender.id);
+    const recreated = store.createBot({ name: "Clive" });
+    const namesake = store.createBot({ name: "Clive" });
+    // the name is ambiguous now: each live Clive mints its own row rather
+    // than either one claiming the dead bot's history
+    const own = store.resolvePairConversation(recreated, recipient.id, idle)!;
+    expect(own.created).toBe(true);
+    expect(own.task.threadId).not.toBe(dangling.threadId);
+    const elsewhere = store.resolvePairConversation(namesake, recipient.id, idle)!;
+    expect(elsewhere.task.threadId).not.toBe(dangling.threadId);
+    expect(elsewhere.task.threadId).not.toBe(own.task.threadId);
+    // the dangling row is untouched: still its dead opener's, still live,
+    // because no live bot can prove it is theirs
+    expect(store.taskByThread(recipient.id, dangling.threadId)!.openedBy).toMatchObject({ botId: sender.id, kind: "pair" });
+    // three identities, one live row each
+    expect(store.tasks(recipient.id).filter((task) => task.openedBy?.kind === "pair")).toHaveLength(3);
+  });
+
+  it("loading collapses the duplicate live pair rows an older server minted, and a second load changes nothing", () => {
+    const store = new Store(selection);
+    const recipient = store.createBot({ name: "Scout" });
+    const sender = store.createBot({ name: "Clive" });
+    const idle = { working: () => false };
+    const older = store.resolvePairConversation(sender, recipient.id, idle)!.task;
+    const olderAt = older.openedBy!.at;
+    store.appendMessage(older.threadId, { role: "bot", kind: "text", text: "the predecessor's job", at: 1_000 });
+    store.deleteBot(sender.id);
+    const recreated = store.createBot({ name: "Clive" });
+    // what a pre-fix server left behind: a second live pair row for the
+    // new id while the predecessor's dangles live beside it
+    const newer = store.createTask(recipient.id, "@Clive", false, undefined, { botId: recreated.id, name: "Clive", kind: "pair", at: 2_000 })!;
+    const reloaded = new Store(selection);
+    const kept = reloaded.resolvePairConversation(recreated, recipient.id, idle)!;
+    // the row the resolver favors survives; the twin is demoted to a
+    // closed plain thread — history kept, never deleted, never re-adopted
+    expect(kept.task.threadId).toBe(newer.threadId);
+    const demoted = reloaded.taskByThread(recipient.id, older.threadId)!;
+    expect(demoted.openedBy).toEqual({ botId: sender.id, name: "Clive", at: olderAt });
+    expect(demoted.closedBy).toMatchObject({ botId: recreated.id, name: "Clive" });
+    expect(reloaded.messagesFor(older.threadId).at(-1)?.text).toBe("the predecessor's job");
+    expect(reloaded.tasks(recipient.id).filter((task) => task.openedBy?.kind === "pair")).toHaveLength(1);
+    // idempotent: with the invariant restored, a second load touches nothing
+    const again = new Store(selection);
+    expect(again.taskByThread(recipient.id, older.threadId)).toEqual(demoted);
+    expect(again.taskByThread(recipient.id, newer.threadId)!.openedBy).toEqual({ botId: recreated.id, name: "Clive", kind: "pair", at: 2_000 });
+    expect(again.tasks(recipient.id).filter((task) => task.openedBy?.kind === "pair")).toHaveLength(1);
   });
 
   it("setTaskClosedBy stamps who closed a thread, survives a reload, and null reopens it", () => {

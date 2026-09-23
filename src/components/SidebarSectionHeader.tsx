@@ -29,7 +29,7 @@ export function SidebarSectionHeader({
   onDragStart?: (event: DragEvent<HTMLSpanElement>) => void;
   onDragEnd?: () => void;
   onMove?: (direction: -1 | 1) => void;
-  onContextMenu?: (event: MouseEvent) => void;
+  onContextMenu?: (event: MouseEvent<HTMLDivElement>) => void;
 }) {
   const Chevron = collapsed ? ChevronRight : ChevronDown;
   const attentionLabel = attention ? sidebarAttentionLabel(attention) : "";
