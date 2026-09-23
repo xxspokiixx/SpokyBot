@@ -122,6 +122,13 @@ check that a caller's synchronous exception or rejected promise after creation
 is reported without leaving a retryable creation dialog open.
 
 In the renderer fixture, open **App settings → General → Defaults for new bots → Edit**.
+The full creation dialog retains upstream's **Who can see it** selection for
+browser admins. `scripts/testing/bot-draft-visibility-ui.e2e.test.ts` selects
+**Admins only**, creates a bot, and verifies its stored audience. The initial
+POST carries that audience; it is not widened temporarily during later setup.
+Desktop, companion, and default-template editors do not expose that control.
+
+In the defaults editor:
 Open **Identity → View full**. Three successive Escape presses must close only
 the instruction preview, then the defaults editor, then Settings. Tab navigation
 must remain inside the active editor.
