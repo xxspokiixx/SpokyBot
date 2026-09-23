@@ -13,7 +13,7 @@ import {
   useState,
   type ReactNode,
 } from "react";
-import type { CloudBackend, EffortLevel, ServerFrame } from "../../shared/wire";
+import type { BotVisibility, CloudBackend, EffortLevel, ServerFrame } from "../../shared/wire";
 import type { TurnDigest } from "../../shared/digest";
 import type { ModelVariantOption, RuntimeEvent } from "../../shared/runtime-events";
 import type { MausColor, MausMotion } from "@/lib/mascot";
@@ -418,6 +418,8 @@ export interface Bot {
   /** Named browser profile id (config.browserProfiles); absent/null = the
    * bot's own session (null is how a clear travels over PATCH). */
   browserProfile?: string | null;
+  /** Who may see this bot on a shared workspace; only admins receive it. */
+  visibility?: BotVisibility;
   messages: Message[];
   /** The server answered a bounded page and older messages remain in storage.
    * Absent on an unpaged response, which always carries the whole thread. */
@@ -556,8 +558,14 @@ export interface ConfigStatus {
   xai?: { configured: boolean };
   anthropic?: { configured: boolean };
   openaiCompat?: { configured: boolean; url?: string };
-  /** what this server is entitled to; Settings shows only what works here */
-  edition?: { edition: "oss" | "enterprise"; features: string[] };
+  /** what this server is entitled to; Settings shows only what works here.
+   * `license` reaches admins only, and only while the key is inside its
+   * warning window or grace period. */
+  edition?: {
+    edition: "oss" | "enterprise";
+    features: string[];
+    license?: { expiresAt: string; expiresInDays: number; graceEndsAt?: string };
+  };
   /** a fleet agent exists on this server (Settings → Workspaces) */
   fleet?: { available: boolean };
   budgets?: { monthlyUsd?: number; warnAtPercent?: number };
@@ -606,6 +614,19 @@ export interface ConfigStatus {
   browserEngine?: BrowserEngineSummary;
   /** Named browser sessions any bot can be pointed at. */
   browserProfiles?: BrowserProfile[];
+  /** The enrolled organisation's read-only desktop policy; null when this
+   * desktop is not enrolled or its Admin sends no policy. */
+  managedPolicy?: ManagedPolicySummary | null;
+}
+
+export interface ManagedPolicySummary {
+  organizationName: string;
+  version: number;
+  companyModelsOnly: boolean;
+  allowedEngines: "all" | string[];
+  mcp: { allowCustom: boolean; allowlist: string[] };
+  computers: { thisComputer: boolean; localVm: boolean; box: boolean; vps: boolean };
+  remoteAccess: boolean;
 }
 
 export interface BrowserEngineSummary {
@@ -625,14 +646,21 @@ export interface BrowserProfile {
   partitionId?: string;
 }
 
+// Every section the server's config frame carries. A section left out here
+// is wiped from state.config whenever a live frame lands, so whichever of a
+// save's own response and its broadcast frame arrives last decides what
+// Settings shows (a saved key's Test button used to vanish that way).
 export type ConfigStatusFrame = Pick<
   ConfigStatus,
-  "xai" | "composio" | "box" | "vps" | "rooms" | "threads" | "localVm" | "opencodeGo" | "tts" | "imageGen" | "profile" | "language" | "features" | "onboarding" | "browserEngine" | "browserProfiles" | "edition" | "budgets" | "billing"
+  "xai" | "anthropic" | "openaiCompat" | "fleet" | "composio" | "box" | "vps" | "rooms" | "threads" | "localVm" | "opencodeGo" | "tts" | "imageGen" | "profile" | "language" | "features" | "onboarding" | "browserEngine" | "browserProfiles" | "edition" | "budgets" | "billing" | "managedPolicy"
 >;
 
 export function configStatusFromFrame(frame: ConfigStatusFrame): ConfigStatus {
   return {
     xai: frame.xai,
+    anthropic: frame.anthropic,
+    openaiCompat: frame.openaiCompat,
+    fleet: frame.fleet,
     composio: frame.composio,
     box: frame.box,
     vps: frame.vps,
@@ -651,6 +679,7 @@ export function configStatusFromFrame(frame: ConfigStatusFrame): ConfigStatus {
     edition: frame.edition,
     budgets: frame.budgets,
     billing: frame.billing,
+    managedPolicy: frame.managedPolicy,
   };
 }
 
@@ -678,6 +707,9 @@ export interface InstanceInfo {
   /** Company instances are owned by the desktop parent, never editable here. */
   readOnly?: boolean;
   managed?: { organizationId: string; organizationName: string };
+  /** The enrolled organisation's desktop policy does not allow bots to run on
+   * this instance: shown, but disabled, with the server's reason. */
+  policy?: { organizationName: string; reason: string };
   snapshot: {
     state: "available" | "unavailable";
     reason?: string;
@@ -744,6 +776,7 @@ export type AppSettingsSection =
   | "computer"
   | "usage"
   | "people"
+  | "activity"
   | "backups"
   | "workspaces";
 
@@ -759,6 +792,7 @@ export type BotSettingsSection =
   | "model"
   | "permissions"
   | "voice"
+  | "visibility"
   | "history"
   | "usage";
 
@@ -1039,7 +1073,7 @@ export type Action =
   | { type: "taskSwitched"; bot: Bot }
   | { type: "renameTask"; botId: string; threadId: string; title: string }
   | { type: "deleteTask"; botId: string; threadId: string }
-  | { type: "newBot"; role?: BotRole; onCreated?: () => void; onError?: (message: string) => void }
+  | { type: "newBot"; role?: BotRole; visibility?: BotVisibility; onCreated?: () => void; onError?: (message: string) => void }
   | { type: "botCreationPending"; on: boolean }
   | { type: "updateTask"; botId: string; threadId: string; patch: TaskUpdatePatch }
   | { type: "createProject"; botId: string; name: string; emoji?: string | null; onCreated?: (project: BotProject) => void; onError?: (message: string) => void }
@@ -2225,11 +2259,15 @@ export class ApiError extends Error {
   }
 }
 
-/** Keep the created bot reachable even when applying its optional preset fails. */
-export async function createBotWithRole(role?: BotRole, request: typeof api = api): Promise<{ bot: Bot; profileError?: string }> {
+/** Keep the created bot reachable even when applying its optional preset fails.
+ * A restricted `visibility` rides the create itself, so the bot is never
+ * announced to people who should not see it. */
+export async function createBotWithRole(role?: BotRole, request: typeof api = api, visibility?: BotVisibility): Promise<{ bot: Bot; profileError?: string }> {
+  const restricted = visibility && visibility !== "everyone" ? { visibility } : {};
+  const fields = { ...(role ? { name: role.name, title: role.title, description: role.description } : {}), ...restricted };
   const { bot } = await request("/api/bots", {
     method: "POST",
-    ...(role ? { body: JSON.stringify({ name: role.name, title: role.title, description: role.description }) } : {}),
+    ...(Object.keys(fields).length ? { body: JSON.stringify(fields) } : {}),
   });
   if (!role) return { bot };
   try {
@@ -3055,7 +3093,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
           if (creatingBot) break;
           creatingBot = true;
           rawDispatch({ type: "botCreationPending", on: true });
-          void createBotWithRole(action.role)
+          void createBotWithRole(action.role, api, action.visibility)
             .then(({ bot, profileError }) => {
               rawDispatch({ type: "botAdded", bot });
               action.onCreated?.();
@@ -3090,7 +3128,11 @@ export function StoreProvider({ children }: { children: ReactNode }) {
             avatarUrl: source.avatarUrl,
             avatarCrop: source.avatarCrop,
           };
-          api("/api/bots", { method: "POST" })
+          // A copy of a restricted bot is restricted from its first moment.
+          api("/api/bots", {
+            method: "POST",
+            ...(source.visibility && source.visibility !== "everyone" ? { body: JSON.stringify({ visibility: source.visibility }) } : {}),
+          })
             .then(({ bot }) =>
               api(`/api/bots/${bot.id}`, {
                 method: "PATCH",
