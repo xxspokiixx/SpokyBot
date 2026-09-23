@@ -2954,6 +2954,34 @@ describe("harness HTTP API", () => {
         outcome: "gave_up",
       });
       expect(waitEvents.find((event) => event.type === "turn.wait_ended").waitedMs).toBeGreaterThanOrEqual(0);
+      await expect.poll(async () => (await isolatedApi("GET", "/api/bots?messages=0")).body.bots
+        .find((entry: any) => entry.id === botId)?.tasks.find((task: any) => task.threadId === sibling.threadId)?.busy,
+      { timeout: 5_000 }).toBe(false);
+      const settledMessages = (await isolatedApi("GET", `/api/threads/${sibling.threadId}/messages`)).body.messages;
+      const failures = settledMessages.filter((message: any) => message.tool?.ok === false && /Computer is still busy after/.test(message.tool.name));
+      expect(failures).toHaveLength(1);
+      expect(failures[0].turnSucceeded).toBe(false);
+
+      // A room speaker hits the same deadline and keeps the same single
+      // resolution, while still settling the room's failed dispatch.
+      const roomBot = (await isolatedApi("POST", "/api/bots", {
+        name: "Give-up room speaker", section,
+        modelSelection: { instanceId: "claude", model: "claude-sonnet-5" },
+      })).body.bot;
+      const room = (await isolatedApi("POST", "/api/groups", {
+        name: "Give-up room", memberIds: [roomBot.id],
+        setup: { bulletin: "", defaultResponder: { kind: "member", botId: roomBot.id } },
+      })).body.group;
+      expect((await isolatedApi("POST", `/api/groups/${room.id}/messages`, { text: "wait for the same occupied desktop" })).status).toBe(202);
+      await expect.poll(async () => JSON.stringify((await isolatedApi("GET", `/api/threads/${room.threadId}/messages`)).body),
+        { timeout: 8_000 }).toMatch(/Computer is still busy after /);
+      await expect.poll(async () => (await isolatedApi("GET", "/api/bots?messages=0")).body.groups
+        .find((group: any) => group.id === room.id)?.working, { timeout: 5_000 }).toBe(false);
+      const roomMessages = (await isolatedApi("GET", `/api/threads/${room.threadId}/messages`)).body.messages;
+      expect(roomMessages.filter((message: any) => message.tool?.ok === false && /Computer is still busy after/.test(message.tool.name))).toHaveLength(1);
+      const roomEvents = (await isolatedApi("GET", `/api/threads/${room.threadId}/events`)).body.entries;
+      expect(roomEvents.filter((entry: any) => entry.kind === "runtime" && entry.data.type === "turn.wait_ended"))
+        .toMatchObject([{ data: { outcome: "gave_up" } }]);
     } finally {
       await isolatedApi("POST", `/api/bots/${botId}/interrupt`, {}).catch(() => undefined);
       await isolatedApi("DELETE", `/api/bots/${botId}`).catch(() => undefined);

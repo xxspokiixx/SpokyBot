@@ -1028,6 +1028,7 @@ type DirectTurnDispatchClaim = {
   phase: "setup" | "dispatching";
 };
 class DirectTurnSetupCancelled extends Error {}
+class ComputerWaitGaveUp extends Error {}
 const directTurnDispatchClaims = new Map<string, DirectTurnDispatchClaim>();
 const directTurnGenerationByThread = new Map<string, string>();
 // Only the latest direct request per thread is retained. A fresh user turn
@@ -1126,6 +1127,7 @@ async function bindTurnComputer(owner: TurnOwner, resource: string, exclusive = 
         : computerStoppedWaitingText(holder, waitedMs);
     store.appendMessage(owner.threadId, {
       role: "bot", kind: "activity",
+      ...(outcome === "gave_up" ? { turnSucceeded: false } : {}),
       tool: { name: text, ok: outcome !== "gave_up" },
       ...(holderThreadRef ? { threadRef: holderThreadRef } : {}),
     });
@@ -1168,7 +1170,7 @@ async function bindTurnComputer(owner: TurnOwner, resource: string, exclusive = 
       }
       if (Date.now() >= deadline) {
         endWait("gave_up");
-        throw new Error(computerStillBusyText(holder, GROUP_GOAL_WAIT_MAX_MS));
+        throw new ComputerWaitGaveUp(computerStillBusyText(holder, GROUP_GOAL_WAIT_MAX_MS));
       }
       await new Promise<void>(resolve => setTimeout(resolve, 100));
     }
@@ -7394,7 +7396,9 @@ async function startTurn(
       }
       if (!ownsLatestGeneration) return;
       const message = e instanceof Error ? e.message : String(e);
-      store.appendMessage(threadId, {
+      // The wait already wrote its failure resolution; keep all dispatch
+      // failure bookkeeping below without adding the same error twice.
+      if (!(e instanceof ComputerWaitGaveUp)) store.appendMessage(threadId, {
         role: "bot",
         kind: "activity",
         turnSucceeded: false,
@@ -9320,7 +9324,7 @@ async function runGroupMemberTurn(
     const isVariantError = typeof error === "object" && error !== null && (error as { code?: string }).code === "unsupported_model_variant";
     if (!roomSpeaker && !isSpendCap && !isVariantError) throw error;
     const message = error instanceof Error ? error.message : "Local VM setup failed";
-    store.appendMessage(threadId, {
+    if (!(error instanceof ComputerWaitGaveUp)) store.appendMessage(threadId, {
       role: "bot", kind: "activity",
       from: { botId: bot.id, name: bot.name, color: bot.color },
       tool: { name: `error: ${message}`, ok: false },
