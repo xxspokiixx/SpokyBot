@@ -78,10 +78,10 @@ export interface TaskRecord extends WireTask {
   contextFloor?: number;
   lastContextModel?: string;
   /** Who pinned this conversation's surface: "user" when a person chose it
-   * (composer chip or thread setting), absent when an Auto turn recorded
-   * where it landed. An auto pin yields to a later Works on change; a
-   * person's pin does not. */
-  surfaceSource?: "user";
+   * (composer chip or thread setting), "auto" when a turn recorded where
+   * it landed. Absent means legacy/unknown: it may be a person's choice,
+   * so only positively identified auto pins yield to Works on changes. */
+  surfaceSource?: "user" | "auto";
 }
 
 /** TaskRecord fields no client may see. Everything else must be on WireTask:
@@ -2042,14 +2042,14 @@ export class Store {
 
   /** A Works on change is the newest explicit choice, so this bot's
    * machine-recorded pins that now point somewhere else give way. A pin a
-   * person set (surfaceSource "user") and a pin that already matches the
-   * new destination survive. Returns how many pins were cleared. */
+   * person set, a legacy pin with unknown provenance, and a pin that already
+   * matches the new destination survive. Returns how many pins were cleared. */
   clearAutoSurfacePins(botId: string, destination: Destination): number {
     const bot = this.bot(botId);
     if (!bot?.tasks) return 0;
     let cleared = 0;
     for (const task of bot.tasks) {
-      if (task.surface === undefined || task.surfaceSource === "user" || task.surface === destination) continue;
+      if (task.surface === undefined || task.surfaceSource !== "auto" || task.surface === destination) continue;
       task.surface = undefined;
       task.surfaceSource = undefined;
       cleared++;

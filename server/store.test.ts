@@ -60,10 +60,12 @@ describe("Store", () => {
     const bot = store.createBot({}, { seedMessages: false });
     const autoMismatch = store.createTask(bot.id, "Auto mismatch", false)!;
     const personMismatch = store.createTask(bot.id, "Person mismatch", false)!;
+    const legacyMismatch = store.createTask(bot.id, "Legacy person mismatch", false)!;
     const autoMatch = store.createTask(bot.id, "Auto match", false)!;
-    store.patchTask(bot.id, autoMismatch.threadId, { surface: "local" });
+    store.patchTask(bot.id, autoMismatch.threadId, { surface: "local", surfaceSource: "auto" });
     store.patchTask(bot.id, personMismatch.threadId, { surface: "local", surfaceSource: "user" });
-    store.patchTask(bot.id, autoMatch.threadId, { surface: "vm" });
+    store.patchTask(bot.id, legacyMismatch.threadId, { surface: "local" });
+    store.patchTask(bot.id, autoMatch.threadId, { surface: "vm", surfaceSource: "auto" });
     const changes = vi.fn();
     store.onChange(changes);
     expect(store.clearAutoSurfacePins(bot.id, "vm")).toBe(1);
@@ -71,6 +73,7 @@ describe("Store", () => {
     expect(cleared.surface).toBeUndefined();
     expect(cleared.surfaceSource).toBeUndefined();
     expect(store.taskByThread(bot.id, personMismatch.threadId)).toMatchObject({ surface: "local", surfaceSource: "user" });
+    expect(store.taskByThread(bot.id, legacyMismatch.threadId)).toMatchObject({ surface: "local" });
     expect(store.taskByThread(bot.id, autoMatch.threadId)).toMatchObject({ surface: "vm" });
     expect(changes).toHaveBeenCalledTimes(1);
     // A cleared pin leaves no residue in the durable record…
@@ -82,6 +85,8 @@ describe("Store", () => {
     expect(store.clearAutoSurfacePins(bot.id, "vm")).toBe(0);
     const reloaded = new Store(selection);
     expect(reloaded.taskByThread(bot.id, personMismatch.threadId)).toMatchObject({ surface: "local", surfaceSource: "user" });
+    expect(reloaded.taskByThread(bot.id, legacyMismatch.threadId)).toMatchObject({ surface: "local" });
+    expect(reloaded.taskByThread(bot.id, legacyMismatch.threadId)?.surfaceSource).toBeUndefined();
     expect(reloaded.taskByThread(bot.id, autoMatch.threadId)).toMatchObject({ surface: "vm" });
     expect(reloaded.taskByThread(bot.id, autoMismatch.threadId)!.surface).toBeUndefined();
   });

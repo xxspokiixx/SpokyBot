@@ -64,7 +64,8 @@ const OFF_NOTE =
  * thread never changes place under someone; only Off overrides it. An
  * Auto-recorded pin is the machine's memory, not a person's choice: it yields
  * when the bot's Works on later changes and no longer matches, while a
- * person's pin keeps winning until they clear it. Auto without a pin leaves
+ * person's pin (including legacy pins of unknown origin) keeps winning until
+ * they clear it. Auto without a pin leaves
  * the computer choice to the dispatch, which then mounts the browser only
  * when no computer was reached. A pin the turn cannot honour is retained and
  * reported instead of being swapped silently. */

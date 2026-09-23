@@ -7145,7 +7145,7 @@ async function startTurn(
       // sweeps it — store.clearAutoSurfacePins); a person's pin does not.
       if (bot.computer === undefined && !teamComputer && opts?.runOn !== "cloud" && !plan.pinned) {
         const used = mountedComputer ?? (integrations.browser ? "browser" : null);
-        if (used) store.patchTask(bot.id, threadId, { surface: used });
+        if (used) store.patchTask(bot.id, threadId, { surface: used, surfaceSource: "auto" });
       }
       const computerSelection = computerSelectionTurns.get(threadId);
       if (computerSelection) computerSelection.mounted = mountedComputer ?? (integrations.browser ? "browser" : undefined);
@@ -18781,10 +18781,9 @@ for (const row of chatFollowups()) {
 restoreSteeredMessages();
 restoreChannelMessages();
 
-// A Works on change now moves the bot's auto-pinned threads, but pins
-// recorded before that rule existed still point theirs at the old place.
-// Repair them once here, ahead of the listen below, so no turn can dispatch
-// on a stale pin; person-set pins are kept and the sweep is idempotent.
+// Repair known auto pins that conflict with Works on before dispatch starts.
+// Legacy pins have no provenance and may be deliberate person selections:
+// preserve them rather than guessing. The sweep is idempotent.
 {
   let movedAutoPins = 0;
   for (const bot of store.bots) {
