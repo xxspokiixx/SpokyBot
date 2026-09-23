@@ -2312,7 +2312,7 @@ struct StreamingBubble: View {
             VStack(alignment: .leading, spacing: 4) {
                 if let reasoning, !reasoning.isEmpty, text?.isEmpty != false {
                     AgentThoughtChamberView(
-                        reasoning: String(reasoning.suffix(2_000)),
+                        reasoning: reasoning,
                         botName: "Bot",
                         mascotColor: MausPalette.color(color),
                         isStreaming: true
