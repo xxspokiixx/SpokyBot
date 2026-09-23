@@ -400,6 +400,30 @@ describe("Group Local VM ownership on the real isolated server", () => {
     expect(computer(await dump())).toBeTruthy();
     await stop(group.id); await idle(bots[0].id);
   });
+  it("does not dispatch after a stall during delayed room setup and the room can run again", async () => {
+    const { bots, group } = await room();
+    // Park setup in the pre-id quarantine wait — a prior turn's cancelled
+    // handshake can hold a room thread there while its TTL runs — then
+    // stall the turn while it is parked between claim and provider dispatch.
+    vmState({ wedgeClear: true }); rmSync(stateFile + ".entered", { force: true });
+    await send(group.id);
+    await until(() => existsSync(stateFile + ".entered"), Boolean);
+    vmState({ wedgeClear: true, stall: true });
+    await until(() => api("GET", "/api/bots?messages=30"), r => JSON.stringify(r).includes("the turn was stopped"));
+    vmState();
+    await idle(bots[0].id);
+    // The quarantine released and setup resumed, but the latched stall
+    // completed the turn before the provider dispatch: no CLI was launched.
+    expect(existsSync(dumpFile)).toBe(false);
+    // The claim was released. Wait out the stall's VM-lease grace so a
+    // later turn on the same room can take the VM and run.
+    await new Promise(r => setTimeout(r, 6_500));
+    await send(group.id);
+    expect(computer(await dump())).toBeTruthy();
+    writeFileSync(finishFile, "finish");
+    await idle(bots[0].id);
+    await stop(group.id); await idle(bots[0].id);
+  });
   it("revokes the previous member and rejects cross-bot control after a shared desktop handoff", async () => {
     const { bots, group } = await room();
     await send(group.id);

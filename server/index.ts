@@ -8521,6 +8521,8 @@ async function runGroupMemberTurn(
   let retainRoomVmLease = false;
   let roomSpeaker: { botId: string; name: string; color: string } | undefined;
   let providerDispatched = false;
+  let setupStalled = false;
+  let unregisterSetupStall = () => {};
   // The speaker's own This computer / Cloud mount, and what it must give back.
   let roomComputerKind: "local" | "vps" | "box" | null = null;
   let roomVpsBotId: string | null = null;
@@ -8723,6 +8725,16 @@ async function runGroupMemberTurn(
   groupSpeakers.set(threadId, roomSpeaker);
   store.patchGroup(readyGroup.id, { busyBotId: bot.id });
   orchestration?.onClaimed?.();
+  // The stall completion handler only exists once the provider turn runs
+  // (registered at dispatch below), but this watch is armed at claim. Latch
+  // a stall that fires during setup — browser, box, and VM mounts can all
+  // wedge — so the dispatch site completes the turn instead of launching a
+  // provider turn the person was already told was stopped. The finally
+  // below unregisters the latch on every other exit.
+  setupStalled = false;
+  unregisterSetupStall = roomStallCompletions.register(threadId, () => {
+    setupStalled = true;
+  });
   // Watch from claim, not provider dispatch: room setup (connected-app
   // discovery, browser, box, and VM mounts) can wedge before any provider
   // event exists. The exits between here and dispatch either throw into the
@@ -9051,6 +9063,20 @@ async function runGroupMemberTurn(
       else if (e.type === "request.resolved") deadline.setWaitingOnHuman(false);
     });
     deadline.start();
+    // Swap the setup latch for the real completion handler. The swap is
+    // synchronous with the dispatch below, so no stall can fall between
+    // them. A stall latched during setup completes the turn here without a
+    // provider turn: the stopped message is already on the thread, and the
+    // watchdog's bounded cleanup owns releasing the claim.
+    unregisterSetupStall();
+    if (setupStalled) {
+      // No provider turn was launched, so there is no ambiguous event
+      // window to quarantine: marking a cancelled handshake here would
+      // strand the next turn behind its TTL for no benefit. The readiness
+      // stop path above skips the mark for the same reason.
+      finish("stalled");
+      return;
+    }
     unregisterStall = roomStallCompletions.register(threadId, () => {
       abandonProviderTurn();
       finish("stalled");
@@ -9296,6 +9322,7 @@ async function runGroupMemberTurn(
   } finally {
     // Covers connector/setup failures, cancellation before dispatch, and all
     // other early returns that never produce a provider terminal event.
+    unregisterSetupStall();
     revokeInternalCapabilityGeneration(threadId, internalGeneration);
     roomHandoffs.sourceSettled(internalGeneration, roomHandoffSourceSucceeded);
     if (!retainRoomVmLease) releaseRoomVmLease();
