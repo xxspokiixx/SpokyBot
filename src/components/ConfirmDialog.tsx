@@ -30,6 +30,11 @@ export function ConfirmDialog(props: ConfirmDialogProps) {
   const { open, onCancel, returnFocusRef } = props;
   const dialogRef = useRef<HTMLDivElement>(null);
   const cancelRef = useRef<HTMLButtonElement>(null);
+  const cancelAction = useRef(onCancel);
+  cancelAction.current = onCancel;
+  useEffect(() => {
+    if (open && props.pending) dialogRef.current?.focus();
+  }, [open, props.pending]);
 
   useEffect(() => {
     if (!open) return;
@@ -38,7 +43,7 @@ export function ConfirmDialog(props: ConfirmDialogProps) {
     const onKey = (event: KeyboardEvent) => {
       if (event.key === "Escape") {
         event.preventDefault();
-        onCancel();
+        cancelAction.current();
         return;
       }
       if (event.key === "Tab") {
@@ -61,7 +66,7 @@ export function ConfirmDialog(props: ConfirmDialogProps) {
       const target = opener?.isConnected && opener !== document.body ? opener : returnFocusRef?.current;
       target?.focus();
     };
-  }, [open, onCancel, returnFocusRef]);
+  }, [open, returnFocusRef]);
 
   if (!open) return null;
 
