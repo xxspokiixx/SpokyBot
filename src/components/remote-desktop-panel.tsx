@@ -79,7 +79,7 @@ export function RemoteDesktopPanel({ bot }: { bot: Bot }) {
   const cloudRoutineReady = Boolean(
     state.config?.box.configured &&
       state.instances.some(
-        (instance) => instance.driverKind === "boxAgent" && instance.snapshot.state === "available",
+        (instance) => (instance.driverKind === "boxAgent" || instance.capabilities?.cloudComputerMcp) && instance.snapshot.state === "available",
       ),
   );
 
