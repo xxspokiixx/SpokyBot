@@ -2254,6 +2254,32 @@ describe("soul", () => {
     expect(reloaded.bot(chief.id)?.managedSections).toHaveLength(100);
   });
 
+  it("persists reviewed Chief replacement atomically and revokes the outgoing Chief's grants", () => {
+    const store = new Store(selection);
+    const chief = store.createBot({ name: "Outgoing", section: "Operations" });
+    const successor = store.createBot({ name: "Successor", section: "Operations" });
+    store.patchBot(chief.id, { chiefOfStaff: true, managedSections: ["Engineering"] });
+    const request: TeamSetupRequest = { version: 1, requestId: "leadership-reload", botId: chief.id, threadId: chief.threadId,
+      reason: "Requested succession", createdAt: 1, requesterRevision: "fixture", newTeams: [], operations: [
+        { action: "update", botId: successor.id, fields: { chiefOfStaff: true } },
+        { action: "update", botId: chief.id, fields: { chiefOfStaff: false } },
+      ] };
+    const before = structuredClone(store.bots);
+    const save = vi.spyOn(store as unknown as { saveBots(bots: BotRecord[]): void }, "saveBots")
+      .mockImplementationOnce(() => { throw new Error("disk full"); });
+    expect(() => store.applyTeamSetup(request)).toThrow("disk full");
+    expect(store.bots).toEqual(before); save.mockRestore();
+    const result = store.applyTeamSetup(request);
+    expect(result.bots.map(bot => bot.chiefOfStaff)).toEqual([true, false]);
+    const reloaded = new Store(selection);
+    expect(reloaded.bot(chief.id)?.chiefOfStaff).toBe(false);
+    expect(reloaded.bot(chief.id)?.managedSections).toBeUndefined();
+    expect(reloaded.bot(successor.id)?.chiefOfStaff).toBe(true);
+    expect(reloaded.bot(successor.id)?.managedSections).toBeUndefined();
+    expect(reloaded.bot(successor.id)?.tasks).toEqual(successor.tasks);
+    expect(reloaded.applyTeamSetup(request)).toEqual(result);
+  });
+
   it("reviewed deletion saves its receipt with removal before deleting any bot files", () => {
     const store = new Store(selection); const chief = store.createBot(); const bot = store.createBot();
     const request: TeamSetupRequest = { version: 1, requestId: "delete-reload", botId: chief.id, threadId: chief.threadId,
