@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import { createRoot } from "react-dom/client";
+import { SettingsModal } from "../components/SettingsModal";
 import { BotSettingsDialog } from "../components/BotSettingsDialog";
 import { DefaultBotSettings, NewBotDialog } from "../components/NewBotDialog";
 import { StoreProvider, api, useStore, type Bot } from "../state/store";
@@ -72,6 +73,8 @@ function Fixture() {
       <button className="rounded bg-control px-3 py-2" onClick={() => void readSaved()}>Read saved profiles</button>
     </div>}
     <p className="my-3">Selected: {bot?.name ?? "Loading…"}</p>
+    <button onClick={() => dispatch({ type: "toggleAppSettings", open: true, section: "general" })}>Open app settings</button>
+    {state.appSettingsOpen && <SettingsModal />}
     <DefaultBotSettings />
     <button className="rounded bg-control px-3 py-2" onClick={() => dispatch({ type: "toggleNewBot", open: true })}>Configure new bot</button>
     {state.newBotOpen && <NewBotDialog />}
