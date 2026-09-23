@@ -92,6 +92,17 @@ Nothing is written to `config.json`; disconnecting the organisation restores
 the list as you configured it. With no organisation connection, none of this
 applies.
 
+Address entries are HTTPS only. The host is compared label by label, where
+`*` stands for one or more whole labels (`https://*.example.com/mcp` matches
+`https://a.example.com/mcp`, never `https://evil.test/x.example.com/mcp`),
+and the path separately, where `*` matches anything.
+
+Limits: a personal **Codex** engine also loads MCP servers from your own
+`~/.codex/config.toml`, which OpenMausBot does not filter. An organisation that
+must block those can allow only company models, or leave personal Codex off
+its engine list. Company Codex uses its own separate home, without your
+`config.toml`.
+
 ## Advanced: edit the file
 
 The same registry lives in `~/.openmausbot/config.json`:

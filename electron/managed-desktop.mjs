@@ -57,6 +57,10 @@ export function createManagedDesktopRelay({ timeoutMs = 15_000 } = {}) {
     sendPolicy(proc, policy) {
       return proc ? post(proc, { type: "openmausbot:managed-desktop-policy", policy }) : Promise.resolve();
     },
+    /** A saved enrollment's identity (no token) so its old ids can migrate. */
+    sendIdentity(proc, identity) {
+      return proc ? post(proc, { type: "openmausbot:managed-desktop-identity", identity }) : Promise.resolve();
+    },
     receive(proc, raw) {
       const message = raw?.data ?? raw;
       if (message?.type !== "openmausbot:managed-desktop-result") return false;
@@ -118,8 +122,11 @@ export function createManagedDesktopStore({ file, encryption }) {
   };
 }
 
-export function createManagedDesktopClient({ store, applyConnection, applyPolicy = async () => {}, openBrowser, platform, deviceName, appVersion,
+export function createManagedDesktopClient({ store, applyConnection, applyPolicy = async () => {}, migrateIdentity = async () => {}, openBrowser, platform, deviceName, appVersion,
   fetch: fetcher = globalThis.fetch, now = Date.now, onState = () => {} }) {
+  // Resolves once the saved enrollment (and its policy) has been read.
+  let markRestored;
+  const restored = new Promise(resolve => { markRestored = resolve; });
   let grant = null, connection = null, pending = null, state = { status: "signed-out" };
   // Renewal is additive: only an Admin advertising deviceRenewal is asked.
   let renewalCheckedFor = null, lastRenewAttempt = 0, renewalSupported = false, reportedPolicyVersion = null;
@@ -180,11 +187,18 @@ export function createManagedDesktopClient({ store, applyConnection, applyPolicy
   const policyMessage = value => value?.policy && value.expiresAt > now()
     ? { ...value.policy, organizationId: value.organizationId, expiresAt: value.expiresAt } : null;
   const sendPolicy = value => Promise.resolve().then(() => applyPolicy(policyMessage(value))).catch(() => {});
+  /** Lets the runtime move references to this enrollment's old device-scoped
+   * ids before the grant is cleared or after it expired. Never the token. */
+  const sendIdentity = value => value ? Promise.resolve().then(() => migrateIdentity({ portalOrigin: value.portalOrigin, organizationId: value.organizationId, email: value.email, deviceId: value.deviceId })).catch(() => {}) : Promise.resolve();
   const report = () => ({ platform, ...(typeof appVersion === "string" && APP_VERSION.test(appVersion) ? { appVersion } : {}),
     ...(grant?.policy ? { policyVersion: grant.policy.version } : {}) });
-  /** Persist a newer grant (renewal, adopted expiry, new policy) before using it. */
+  /** Persist a newer grant (renewal, adopted expiry, new policy) before using
+   * it. A rotated token is adopted only once it is safely stored: otherwise a
+   * restart would come back with a token the portal may no longer accept. */
   const replaceGrant = async (stamp, previous, next) => {
-    try { await store.write(next); } catch { /* keep the saved record; the portal still honours it */ }
+    let persisted = true;
+    try { await store.write(next); } catch { persisted = false; }
+    if (!persisted && next.token !== previous.token) return;
     if (current(stamp) && grant === previous) grant = next;
   };
   const revokeGrant = async previous => {
@@ -201,6 +215,7 @@ export function createManagedDesktopClient({ store, applyConnection, applyPolicy
     grant = null; issuedGrant = null; connection = null;
     cleanupGrant = previous; cleanupNeeded = true;
     const operation = (async () => {
+      await sendIdentity(previous);
       // These are independent cleanup obligations. A stopped/unresponsive
       // runtime must not prevent durable sign-out or portal revocation.
       const [runtime, persisted, revoked] = await Promise.allSettled([
@@ -223,6 +238,7 @@ export function createManagedDesktopClient({ store, applyConnection, applyPolicy
   }
   async function endAccess(stamp, message) {
     connection = null; policyLifted = true;
+    await sendIdentity(grant);
     await Promise.resolve().then(() => applyPolicy(null)).catch(() => {});
     try { await applyConnection(null); }
     catch { message += " Quit and reopen OpenMausBot to confirm Company tasks have stopped."; }
@@ -254,6 +270,10 @@ export function createManagedDesktopClient({ store, applyConnection, applyPolicy
     if (grant.expiresAt <= now()) {
       return endAccess(stamp, "Your company sign-in expired. Reconnect to continue using company models and backups.");
     }
+    // A restarted runtime has no policy: restore the saved one before any
+    // network call, which can take a while.
+    if (grant.policy && !policyLifted) await sendPolicy(grant);
+    if (!current(stamp)) return snapshot();
     try {
       await renew(stamp);
       if (!grant || !current(stamp)) return snapshot();
@@ -367,10 +387,13 @@ export function createManagedDesktopClient({ store, applyConnection, applyPolicy
     state: snapshot,
     async start() {
       const stamp = generation;
-      try { const saved = await store.read(); if (!current(stamp)) return snapshot(); grant = saved ? validateGrant(saved) : null; }
-      catch { return current(stamp) ? publish({ status: "unavailable", message: "Company sign-in could not be restored. Unlock your system keychain and restart OpenMausBot." }) : snapshot(); }
-      // Restore the organisation's last policy before any network call.
-      if (grant?.policy) await sendPolicy(grant);
+      try { const saved = await store.read(); if (!current(stamp)) { markRestored(); return snapshot(); } grant = saved ? validateGrant(saved) : null; }
+      catch { markRestored(); return current(stamp) ? publish({ status: "unavailable", message: "Company sign-in could not be restored. Unlock your system keychain and restart OpenMausBot." }) : snapshot(); }
+      // Restore the organisation's last policy before any network call, and
+      // move references to this enrollment's old device-scoped ids.
+      if (grant?.policy && grant.expiresAt > now()) await sendPolicy(grant);
+      markRestored();
+      await sendIdentity(grant);
       return refresh();
     },
     async begin(input) {
@@ -406,6 +429,8 @@ export function createManagedDesktopClient({ store, applyConnection, applyPolicy
     disconnect: clearConnection,
     /** Main-process only. Never expose this method through the renderer bridge. */
     connection: () => connection ? structuredClone(connection) : null,
+    /** Resolves after start() has read the saved enrollment. */
+    whenRestored: () => restored,
     /** The organisation's applied policy while the credential lasts, else null. */
     policy: () => !policyLifted && grant?.policy && grant.expiresAt > now() ? structuredClone(grant.policy) : null,
     backupGeneration: () => generation,

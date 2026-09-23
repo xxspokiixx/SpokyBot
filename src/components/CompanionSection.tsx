@@ -142,6 +142,7 @@ export function CompanionSection({ profileEmail = "" }: { profileEmail?: string 
   // new pairing and turning the companion on. Existing devices are listed as before.
   const managedPolicy = useStore().state.config?.managedPolicy;
   const remoteBlocked = managedPolicy?.remoteAccess === false ? t("policy.remoteBlocked", { organization: managedPolicy.organizationName }) : null;
+  const managedBy = managedPolicy?.remoteAccess === false ? t("policy.managedBy", { organization: managedPolicy.organizationName }) : null;
 
   if (!companionBridge()) {
     return (
@@ -228,7 +229,8 @@ export function CompanionSection({ profileEmail = "" }: { profileEmail?: string 
         </div>
         {tailscaleStatus.kind === "ready" ? (
           <button
-            disabled={c.busy || c.accountBusy}
+            disabled={c.busy || c.accountBusy || Boolean(managedBy)}
+            title={managedBy ?? undefined}
             onClick={() => {
               c.useTailscale();
               window.requestAnimationFrame(() => {
@@ -242,11 +244,12 @@ export function CompanionSection({ profileEmail = "" }: { profileEmail?: string 
           </button>
         ) : (
           <button
-            disabled={c.busy || c.accountBusy}
+            disabled={c.busy || c.accountBusy || (Boolean(managedBy) && !state.enabled)}
+            title={managedBy ?? undefined}
             onClick={c.refreshTailscale}
             className="mt-3 rounded-lg border border-hairline/40 px-3 py-1.5 text-[12px] text-ink hover:bg-control disabled:opacity-40"
           >
-            {c.busy ? t("common.checking") : state.enabled ? t("remote.checkAgain") : t("remote.turnOnAndCheck")}
+            {c.busy ? t("common.checking") : managedBy && !state.enabled ? managedBy : state.enabled ? t("remote.checkAgain") : t("remote.turnOnAndCheck")}
           </button>
         )}
       </Card>

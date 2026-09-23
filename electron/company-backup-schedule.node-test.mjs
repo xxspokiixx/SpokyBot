@@ -173,32 +173,43 @@ test("clock rollback never causes an early snapshot or an unbounded timer", asyn
   assert([...f.timers.values()].every(timer => timer.delay <= DAY && timer.delay >= 1000));
 });
 
-test("a schedule saved under the device-scoped key survives the upgrade and re-enrolment instead of turning off", async () => {
-  const legacy = "fixture-portal:org:email:device-1:workspace", stable = "fixture-portal:org:email:workspace";
-  const f = fixture({ version: 2, scope: legacy, nextBackupAt: 1_800_000_000_000 + HOUR });
-  f.scope = { key: stable, legacyKeys: [legacy], generation: 1 };
+// Mirrors electron/main.mjs companyBackupScope: any deviceId, same person, organisation and folder.
+const scopeFor = (org = "org", generation = 1) => ({ key: JSON.stringify(["portal", org, "email", "workspace"]), generation,
+  adopts: saved => { try { const v = JSON.parse(saved); return Array.isArray(v) && v.length === 5 && v[0] === "portal" && v[1] === org && v[2] === "email" && v[4] === "workspace"; } catch { return false; } } });
+const legacyKey = device => JSON.stringify(["portal", "org", "email", device, "workspace"]);
+
+test("a schedule saved under an old device-scoped key survives the upgrade, even for an enrollment that has since expired", async () => {
+  // Saved by v0.1.85 for device D1; D1 then expired and this computer re-enrolled as D2.
+  const f = fixture({ version: 2, scope: legacyKey("device-1"), nextBackupAt: 1_800_000_000_000 + HOUR });
+  f.scope = scopeFor();
   const state = await f.scheduler.start();
   assert.equal(state.enabled, true); assert.equal(state.status, "waiting");
-  assert.equal(f.saved.scope, stable, "the saved key is rewritten, not forgotten");
-  // Re-enrolment: a new deviceId, the same person, organisation and folder.
-  f.scope = { key: stable, legacyKeys: ["fixture-portal:org:email:device-2:workspace"], generation: 2 };
-  f.scheduler.reconcile(); await turn(); await turn();
-  assert.equal(f.saved?.scope, stable); assert.equal(f.scheduler.state().enabled, true);
+  assert.equal(f.saved.scope, scopeFor().key, "the saved key is rewritten, not forgotten");
   // Losing the connection only pauses it.
   f.scope = null; f.scheduler.reconcile();
   assert.equal(f.scheduler.state().enabled, true);
   // A different organisation or account still clears it.
-  f.scope = { key: "fixture-portal:other-org:email:workspace", legacyKeys: [], generation: 3 };
+  f.scope = scopeFor("other-org", 3);
   f.scheduler.reconcile(); await turn(); await turn();
   assert.equal(f.saved, null); assert.equal(f.scheduler.state().enabled, false);
 });
 
-test("reconcile adopts a legacy key through the write queue", async () => {
-  const legacy = "fixture-portal:org:email:device-1:workspace", stable = "fixture-portal:org:email:workspace";
-  const f = fixture(); f.scope = { key: legacy, generation: 1 };
+test("reconcile adopts an old key of the same person through the write queue", async () => {
+  const f = fixture(); f.scope = { key: legacyKey("device-1"), generation: 1 };
   await f.scheduler.start(); await f.scheduler.configure(ENABLE);
-  assert.equal(f.saved.scope, legacy);
-  f.scope = { key: stable, legacyKeys: [legacy], generation: 2 };
+  assert.equal(f.saved.scope, legacyKey("device-1"));
+  f.scope = scopeFor("org", 2);
   f.scheduler.reconcile(); await turn(); await turn();
-  assert.equal(f.saved.scope, stable); assert.equal(f.scheduler.state().enabled, true);
+  assert.equal(f.saved.scope, scopeFor().key); assert.equal(f.scheduler.state().enabled, true);
+});
+
+test("an overdue backup waits after the company connection returns instead of uploading at once", async () => {
+  const f = fixture({ version: 2, scope: scopeFor().key, nextBackupAt: 1_800_000_000_000 - DAY });
+  f.scope = null;
+  await f.scheduler.start();
+  assert.equal(f.scheduler.state().status, "paused");
+  f.scope = scopeFor(); f.scheduler.reconcile();
+  const [, timer] = [...f.timers][0];
+  assert.ok(timer.delay >= 15 * 60_000, `delay ${timer.delay}`);
+  assert.equal(f.calls.length, 0);
 });

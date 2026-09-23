@@ -2179,6 +2179,7 @@
   "companyBackup.scheduleFailed": "The daily backup setting could not be saved. Unlock your system keychain and check your company connection, then try again.",
   "companyBackup.nextBackup": "Next attempt: {date}",
   "companyBackup.lastScheduledBackup": "Last scheduled backup: {date}",
+  "companyBackup.savedSchedule": "Daily company backups are paused until this computer reconnects to the same organisation with the same account. Turn them off here to stop them.",
   "companyBackup.scheduleStatus.off": "Off — no scheduled uploads.",
   "companyBackup.scheduleStatus.waiting": "On — waiting for the next backup.",
   "companyBackup.scheduleStatus.running": "Creating today’s encrypted backup…",

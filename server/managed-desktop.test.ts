@@ -300,3 +300,30 @@ it("moves a pre-upgrade device-scoped id, its native home and saved references o
   expect(existsSync(join(dataDirectory, "providers", "company", legacy))).toBe(false);
   expect(registry.get(stable)).not.toBeNull(); expect(registry.get(legacy)).toBeNull();
 });
+
+it("migrates an expired or cleared enrollment by its identity alone, so a later re-enrolment finds its bots", async () => {
+  const dataDirectory = join(DATA_DIR, `company-identity-${randomUUID()}`), expired = connection();
+  const legacy = legacyCompanyInstanceId(expired, "anthropic"), stable = companyInstanceId(expired, "anthropic");
+  const legacyHome = join(dataDirectory, "providers", "company", legacy, "claude");
+  mkdirSync(legacyHome, { recursive: true }); writeFileSync(join(legacyHome, "session.json"), "native-resume");
+  const migrate = vi.fn();
+  const { manager, registry } = await setup({ dataDirectory, migrate });
+  // No live grant: the enrollment expired before this version was installed.
+  await manager.migrateIdentity({ portalOrigin: expired.portalOrigin, organizationId: expired.organizationId, email: "Employee@Example.test", deviceId: expired.deviceId });
+  expect(migrate).toHaveBeenCalledWith(expect.arrayContaining([{ from: legacy, to: stable }]));
+  expect(readFileSync(join(dataDirectory, "providers", "company", stable, "claude", "session.json"), "utf8")).toBe("native-resume");
+  // Re-enrolment as a new device resolves to the same stable id.
+  const reenrolled = { ...expired, deviceId: "55555555-5555-4555-8555-555555555555" };
+  await manager.apply(reenrolled);
+  expect(registry.get(stable)).not.toBeNull();
+  await expect(manager.migrateIdentity({ portalOrigin: "https://admin.example.test", organizationId: expired.organizationId, email: expired.email, deviceId: expired.deviceId, token: "omd_x" })).rejects.toThrow();
+  await expect(manager.migrateIdentity({ portalOrigin: "http://admin.example.test", organizationId: expired.organizationId, email: expired.email, deviceId: expired.deviceId })).rejects.toThrow("HTTPS");
+});
+
+it("keeps Company models available when moving old references fails", async () => {
+  const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+  const { manager, registry } = await setup({ migrate: () => { throw new Error("bots.json is read-only"); } }), value = connection();
+  await manager.apply(value);
+  expect(registry.get(companyInstanceId(value, "anthropic"))).not.toBeNull();
+  expect(warn).toHaveBeenCalledWith(expect.stringContaining("could not move saved Company model references"));
+});

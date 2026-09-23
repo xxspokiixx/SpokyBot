@@ -60,6 +60,28 @@ describe("organisation desktop policy overlay", () => {
     expect(managed.filterMcp(servers)).toEqual({});
   });
 
+  it.each([
+    ["https://evil.test/x.example.com/mcp", "a wildcard never spans into the path"],
+    ["https://a.example.com.evil.test/mcp", "the pattern's host must end the target's host"],
+    ["https://a.example.com@evil.test/mcp", "credentials in the target are refused"],
+    ["http://a.example.com/mcp", "only https matches"],
+    ["https://a.example.com:8443/mcp", "the port must match"],
+    ["https://example.com/mcp", "* stands for at least one label"],
+    ["https://a.example.com/mcp/extra", "the path is literal outside *"],
+    ["not a url", "an unparsable address never matches"],
+  ])("refuses the bypass %s: %s", target => {
+    expect(mcpEntryMatches("https://*.example.com/mcp", "x", target)).toBe(false);
+  });
+
+  it("matches whole host labels and wildcard paths", () => {
+    expect(mcpEntryMatches("https://*.example.com/mcp", "x", "https://a.example.com/mcp")).toBe(true);
+    expect(mcpEntryMatches("https://*.example.com/mcp", "x", "https://a.b.example.com/mcp?session=1")).toBe(true);
+    expect(mcpEntryMatches("https://mcp*.example.com/mcp", "x", "https://mcp1.example.com/mcp")).toBe(false);
+    expect(mcpEntryMatches("https://*/mcp", "x", "https://intranet/mcp")).toBe(false);
+    expect(mcpEntryMatches("https://user:secret@mcp.example.com/*", "x", "https://mcp.example.com/a")).toBe(false);
+    expect(mcpEntryMatches("http://mcp.example.com/*", "http", "http://mcp.example.com/a")).toBe(false);
+  });
+
   it("matches address patterns literally except for the wildcard", () => {
     expect(mcpEntryMatches("https://mcp.example.com/*", "x", "https://mcp.example.com/a/b")).toBe(true);
     expect(mcpEntryMatches("https://mcp.example.com/*", "x", "https://mcpXexample.com/a")).toBe(false);

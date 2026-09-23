@@ -6,7 +6,7 @@ export interface CompanyBackupScheduleState {
   lastBackupAt?: number;
   message?: string;
 }
-export interface CompanyBackupScheduleScope { key: string; generation: number; /** Older key forms of this same scope; adopted, never forgotten. */ legacyKeys?: string[]; }
+export interface CompanyBackupScheduleScope { key: string; generation: number; /** True for an older saved key form of this same scope; adopted, never forgotten. */ adopts?(savedKey: string): boolean; }
 export function createCompanyBackupSchedule(options: {
   store: { read(): Promise<unknown>; write(value: unknown): Promise<void> };
   scope(): CompanyBackupScheduleScope | null;

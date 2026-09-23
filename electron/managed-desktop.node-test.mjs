@@ -30,7 +30,7 @@ test("branding refreshes with the granted organization and disappears on disconn
 function fixture(t, { saved = null, handler, apply, write, now, appVersion } = {}) {
   // A second client in the same test (a restart) shares the mocked clock.
   try { t.mock.timers.enable({ apis: ["setTimeout"] }); } catch (error) { if (error?.code !== "ERR_INVALID_STATE") throw error; }
-  const applied = [], policies = [], requests = [], opened = [], states = [], record = { value: saved };
+  const applied = [], policies = [], identities = [], requests = [], opened = [], states = [], record = { value: saved };
   let writes = Promise.resolve();
   let approved = false;
   const client = createManagedDesktopClient({ platform: "linux", deviceName: "Fixture laptop", store: {
@@ -39,7 +39,7 @@ function fixture(t, { saved = null, handler, apply, write, now, appVersion } = {
       const operation = writes.catch(() => {}).then(async () => { await write?.(value); record.value = structuredClone(value); });
       writes = operation; return operation;
     },
-  }, applyConnection: async connection => { applied.push(connection); await apply?.(connection); }, applyPolicy: async policy => { policies.push(policy); },
+  }, applyConnection: async connection => { applied.push(connection); await apply?.(connection); }, applyPolicy: async policy => { policies.push(policy); }, migrateIdentity: async identity => { identities.push({ identity, saved: structuredClone(record.value) }); },
   ...(now ? { now } : {}), ...(appVersion ? { appVersion } : {}), openBrowser: async url => { opened.push(url); },
   onState: state => states.push(state), fetch: async (url, options) => {
     requests.push({ url, options });
@@ -55,7 +55,7 @@ function fixture(t, { saved = null, handler, apply, write, now, appVersion } = {
     throw new Error("Unexpected fixture route");
   } });
   t.after(() => client.close());
-  return { client, record, applied, policies, requests, opened, states, approve: () => { approved = true; }, tick: async ms => { t.mock.timers.tick(ms); await settle(); } };
+  return { client, record, applied, policies, identities, requests, opened, states, approve: () => { approved = true; }, tick: async ms => { t.mock.timers.tick(ms); await settle(); } };
 }
 
 test("accepts exact HTTPS origins and loopback fixtures, never URL credentials, paths or cleartext network hosts", () => {
@@ -395,8 +395,8 @@ test("applies the organisation policy read-only, keeps it with the encrypted gra
   offline = fixture(t, { saved: f.record.value, handler: () => { appliedBeforeNetwork ??= structuredClone(offline.policies); throw new Error("offline"); } });
   await offline.client.start();
   assert.equal(offline.client.state().status, "unavailable");
-  assert.equal(appliedBeforeNetwork.length, 1, "applied before the first request");
-  assert.equal(appliedBeforeNetwork[0].remoteAccess, false); assert.equal(appliedBeforeNetwork[0].version, 2);
+  assert.ok(appliedBeforeNetwork.length >= 1, "applied before the first request");
+  assert.ok(appliedBeforeNetwork.every(sent => sent.remoteAccess === false && sent.version === 2));
   assert.equal(offline.policies.at(-1).remoteAccess, false, "still applied after the failed heartbeat");
 
   await f.client.disconnect();
@@ -411,4 +411,63 @@ test("revocation and expiry lift the policy with company access", async t => {
   revoked = true; await f.client.refresh();
   assert.equal(f.client.state().status, "reauth-required"); assert.equal(f.policies.at(-1), null);
   assert.equal(f.client.policy(), null, "Electron main stops enforcing it too");
+});
+
+test("sends the saved enrollment's identity, never its token, on start, on expiry and before disconnect clears it", async t => {
+  const expired = { ...grant(), expiresAt: Date.now() - 1 };
+  const f = fixture(t, { saved: expired });
+  await f.client.start();
+  assert.equal(f.client.state().status, "reauth-required");
+  assert.ok(f.identities.length >= 1);
+  assert.deepEqual(f.identities[0].identity, { portalOrigin: origin, organizationId, deviceId, email: expired.email });
+  assert(!JSON.stringify(f.identities.map(row => row.identity)).includes(token));
+  const before = f.identities.length;
+  await f.client.disconnect();
+  const sent = f.identities.slice(before);
+  assert.equal(sent.length, 1); assert.equal(sent[0].identity.deviceId, deviceId);
+  assert.ok(sent[0].saved, "sent while the saved enrollment still existed");
+  assert.equal(f.record.value, null);
+});
+
+test("never adopts a rotated token it could not store", async t => {
+  const rotated = `omd_${"z".repeat(43)}`, saved = grant();
+  let failWrites = true;
+  const f = fixture(t, { saved, write: () => { if (failWrites) throw new Error("keychain locked"); }, handler: (url, options) => {
+    if (url.endsWith("/api/public/config")) return renewalConfig();
+    if (url.endsWith("/api/desktop/session/renew")) return Response.json({ renewed: true, accessToken: rotated, expiresAt: saved.expiresAt + DAY, device: { id: deviceId, organizationId, email: saved.email } });
+    if (url.endsWith("/api/desktop/session") && options.method !== "DELETE") return Response.json(session(saved));
+    return null;
+  } });
+  await f.client.start();
+  const heartbeat = f.requests.findLast(row => row.url.endsWith("/api/desktop/session") && row.options.method === "GET");
+  assert.equal(heartbeat.options.headers.authorization, `Bearer ${token}`);
+  assert.equal(f.record.value.token, token);
+  failWrites = false;
+});
+
+test("re-sends the saved policy before any network call when the runtime restarts", async t => {
+  let release;
+  const f = fixture(t, { saved: grant(), handler: (url, options) => url.endsWith("/api/desktop/session") && options.method !== "DELETE" ? Response.json({ ...session(grant()), policy: policy() }) : null });
+  await f.client.start(); await settle();
+  // The runtime restarted and lost its overlay; the heartbeat is slow.
+  const before = f.policies.length;
+  const slow = fixture(t, { saved: f.record.value, handler: (url, options) => url.endsWith("/api/desktop/session") && options.method !== "DELETE" ? new Promise(resolve => { release = resolve; }) : null });
+  const starting = slow.client.start(); await settle();
+  assert.equal(slow.policies.at(-1).version, 2, "applied while the network call is still pending");
+  // A later refresh (the runtime's ready hook) also re-sends it first.
+  const count = slow.policies.length;
+  release(Response.json({ ...session(grant()), policy: policy() })); await starting;
+  const refreshing = slow.client.refresh(); await settle();
+  assert.ok(slow.policies.length > count + 1, "sent again before the next heartbeat answered");
+  release(Response.json({ ...session(grant()), policy: policy() })); await refreshing;
+  assert.ok(f.policies.length >= before);
+});
+
+test("reports when the saved enrollment has been read", async t => {
+  const f = fixture(t, { saved: { ...grant(), policy: { ...policy(), organizationName: "Example company" } } });
+  let restored = false;
+  void f.client.whenRestored().then(() => { restored = true; });
+  await settle(); assert.equal(restored, false);
+  await f.client.start(); await settle();
+  assert.equal(restored, true); assert.equal(f.policies[0].remoteAccess, false, "the saved policy applied before the Admin answered");
 });

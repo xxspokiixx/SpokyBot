@@ -746,6 +746,14 @@ const managedDesktop = new ManagedDesktopProviders({
   },
 });
 utilityParentPort?.on("message", event => {
+  const message = event.data as { type?: unknown; requestId?: unknown; identity?: unknown } | undefined;
+  if (message?.type !== "openmausbot:managed-desktop-identity") return;
+  const requestId = typeof message.requestId === "string" && message.requestId.length <= 100 ? message.requestId : undefined;
+  void companyRuntimeStarted.then(() => managedDesktop.migrateIdentity(message.identity)).then(() => true, () => false).then(ok => {
+    utilityParentPort.postMessage({ type: "openmausbot:managed-desktop-result", requestId, ok });
+  });
+});
+utilityParentPort?.on("message", event => {
   const message = event.data as { type?: unknown; requestId?: unknown; policy?: unknown } | undefined;
   if (message?.type !== "openmausbot:managed-desktop-policy") return;
   const requestId = typeof message.requestId === "string" && message.requestId.length <= 100 ? message.requestId : undefined;
@@ -8797,6 +8805,12 @@ async function runGroupMemberTurn(
       readyBot.browser !== false &&
       instance.adapter.capabilities.browserMcp === true,
   });
+  // A place the organisation disallows is refused before anything is
+  // provisioned or started, exactly as a bot thread refuses it.
+  const roomKind = roomTeamComputer ? "box" : roomPlan.computer === "local" ? "thisComputer" : readyBot.computer === "vm" ? "localVm"
+    : roomPlan.computer === "cloud" ? (turnProvider(readyBot) === "vps" ? "vps" : "box") : undefined;
+  const roomPlaceRefusal = roomKind && managedPolicy.computerRefusal(roomKind);
+  if (roomPlaceRefusal) throw Object.assign(new Error(roomPlaceRefusal), { code: "managed_policy" });
   // The Computer engine runs on the Box; this computer has no tools it can
   // reach, exactly as a bot thread refuses it.
   if (roomPlan.computer === "local" && instance.driverKind === "boxAgent") {
@@ -9806,7 +9820,8 @@ function startGroupTurn(
   const titleBot = goalCoordinator ?? responders[0]!;
   const titleInstance = registry.get(titleBot.modelSelection.instanceId);
   const titleText = extractTurnImages(text).text;
-  if (titled && snippet && titleText.trim() && llmThreadTitlesEnabled(cfg) && titleInstance?.generateText) {
+  // An engine the organisation disallows never receives the text, even for a title.
+  if (titled && snippet && titleText.trim() && llmThreadTitlesEnabled(cfg) && titleInstance?.generateText && !policyModelRefusal(titleInstance)) {
     void generateThreadTitle(titleInstance, titleText)
       .then((title) => {
         if (title) store.retitleGroupTask(group.id, threadId, snippet, title);
@@ -11679,7 +11694,13 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
       if (!z.string().uuid().safeParse(body?.id).success || !["acquire", "release", "renew"].includes(body?.action)) return json(res, 400, { error: "Invalid computer lease" });
       if (body.action === "release") sharedComputerControl.release(body.id);
       else if (body.action === "renew") sharedComputerControl.renew(body.id);
-      else sharedComputerControl.acquire(body.id);
+      else {
+        // The desktop's own screen, lent to another computer: the organisation's
+        // "this computer" setting applies here as it does to bot turns.
+        const refusal = managedPolicy.computerRefusal("thisComputer");
+        if (refusal) return json(res, 403, { error: refusal, code: "managed_policy" });
+        sharedComputerControl.acquire(body.id);
+      }
       return json(res, 200, { ok: true });
     }
     // A paired desktop registers only its own outbound connector. A second,

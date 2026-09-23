@@ -17,6 +17,11 @@ const connectionSchema = z.object({
   suspended: z.literal("license-expired").optional(),
 }).strict();
 export type ManagedDesktopConnection = z.infer<typeof connectionSchema>;
+/** The saved enrollment's identity (never its token), sent before it is
+ * cleared or when it has already expired, so references to its old
+ * device-scoped ids still move to the stable ids. */
+const identitySchema = z.object({ portalOrigin: z.string().max(2048), organizationId: uuid, email: z.string().email().max(320), deviceId: uuid }).strict();
+const PROVIDER_IDS = ["anthropic", "openai", "openrouter"] as const;
 export interface ManagedDesktopInfo { organizationId: string; organizationName: string }
 interface ManagedDesktopOptions {
   registry: ProviderRegistry; dataDirectory: string; now?: () => number;
@@ -138,7 +143,7 @@ export class ManagedDesktopProviders {
       // workspace backups. Device-scoped ids prevent a new enrollment from
       // inheriting another account's native conversation or credentials.
       const directory = this.ensureDirectory(["providers", "company"]);
-      await this.migrateLegacyIds(connection, directory);
+      await this.migrateLegacyIds(connection);
       const configs = companyInstanceConfigs(connection, directory);
       for (const [id, entry] of Object.entries(configs)) {
         if (this.options.registry.entries().some(existing => existing.instanceId === id)) throw new Error("Company instance conflicts with an existing account.");
@@ -221,17 +226,35 @@ export class ManagedDesktopProviders {
     }, Math.min(2_147_483_647, Math.max(1, expiresAt - this.now())));
     this.timer.unref?.();
   }
-  /** Moves this enrollment's old device-scoped ids to the stable ids once:
-   * native homes are renamed only when the stable one does not exist yet. */
-  private async migrateLegacyIds(connection: ManagedDesktopConnection, directory: string) {
-    const aliases = connection.providers.map(provider => ({ from: legacyCompanyInstanceId(connection, provider.id), to: companyInstanceId(connection, provider.id) }));
-    for (const { from, to } of aliases) {
-      const legacy = join(directory, from), stable = join(directory, to);
-      if (!existsSync(legacy) || existsSync(stable)) continue;
-      const stat = lstatSync(legacy);
-      if (stat.isDirectory() && !stat.isSymbolicLink()) renameSync(legacy, stable);
+  /** Moves an enrollment's old device-scoped ids to the stable ids: native
+   * homes are renamed only when the stable one does not exist yet, then saved
+   * references follow. Best effort: a failure is logged and never keeps
+   * Company models down. */
+  private async migrateLegacyIds(identity: Pick<ManagedDesktopConnection, "portalOrigin" | "organizationId" | "email" | "deviceId">) {
+    try {
+      const directory = this.ensureDirectory(["providers", "company"]);
+      const aliases = PROVIDER_IDS.map(provider => ({ from: legacyCompanyInstanceId(identity, provider), to: companyInstanceId(identity, provider) }));
+      for (const { from, to } of aliases) {
+        const legacy = join(directory, from), stable = join(directory, to);
+        if (!existsSync(legacy) || existsSync(stable)) continue;
+        const stat = lstatSync(legacy);
+        if (stat.isDirectory() && !stat.isSymbolicLink()) renameSync(legacy, stable);
+      }
+      await this.options.migrate?.(aliases);
+    } catch (error) {
+      console.warn(`[company] could not move saved Company model references to their stable ids: ${error instanceof Error ? error.message : String(error)}`);
     }
-    await this.options.migrate?.(aliases);
+  }
+  /** Migrates a saved enrollment that is being cleared or has expired. */
+  async migrateIdentity(raw: unknown): Promise<void> {
+    const parsed = identitySchema.parse(raw), url = new URL(parsed.portalOrigin);
+    if (url.origin !== parsed.portalOrigin || (url.protocol !== "https:" && !(url.protocol === "http:" && ["127.0.0.1", "localhost", "[::1]"].includes(url.hostname)))) {
+      throw new Error("Company identity must use an HTTPS origin or loopback fixture.");
+    }
+    const identity = { ...parsed, email: parsed.email.toLowerCase() };
+    const migration = this.tail.catch(() => {}).then(() => this.migrateLegacyIds(identity));
+    this.tail = migration;
+    return migration;
   }
   async close() {
     await this.apply(null, true);

@@ -26,13 +26,33 @@ export function parseManagedPolicy(raw: unknown, now = Date.now()): ManagedPolic
   return parsed.data.expiresAt > now ? parsed.data : null;
 }
 
-/** A name entry matches the configured server name; an address entry
- * (http:// or https://) matches a remote server's URL, with * as a wildcard. */
+/** `*` in a host pattern stands for one or more whole labels, never part of
+ * one, so `*.example.com` cannot match `evil.test/x.example.com`. */
+function hostMatches(pattern: string[], host: string[]): boolean {
+  if (!pattern.length) return !host.length;
+  if (pattern[0] === "*") {
+    for (let taken = 1; taken <= host.length - (pattern.length - 1); taken++) if (hostMatches(pattern.slice(1), host.slice(taken))) return true;
+    return false;
+  }
+  return host.length > 0 && pattern[0] === host[0] && hostMatches(pattern.slice(1), host.slice(1));
+}
+
+/** A name entry matches the configured server name. An address entry
+ * (https:// only) is parsed like the server's URL: no credentials, the same
+ * port, the host compared label by label, and the path separately (`*` there
+ * matches any characters). Anything that does not parse never matches. */
 export function mcpEntryMatches(entry: string, name: string, url?: string): boolean {
-  if (!/^https?:\/\//i.test(entry)) return entry.toLowerCase() === name.toLowerCase();
+  if (!/^[a-z][a-z0-9+.-]*:\/\//i.test(entry)) return entry.toLowerCase() === name.toLowerCase();
   if (!url) return false;
-  const pattern = entry.split("*").map(part => part.replace(/[.+?^${}()|[\]\\]/g, "\\$&")).join(".*");
-  return new RegExp(`^${pattern}$`, "i").test(url);
+  let pattern: URL, target: URL;
+  try { pattern = new URL(entry); target = new URL(url); } catch { return false; }
+  if (pattern.protocol !== "https:" || target.protocol !== "https:" || pattern.username || pattern.password || target.username || target.password ||
+      pattern.search || pattern.hash || pattern.port !== target.port) return false;
+  const labels = pattern.hostname.split(".");
+  if (labels.some(label => !label || (label !== "*" && label.includes("*"))) || labels.every(label => label === "*")) return false;
+  if (!hostMatches(labels, target.hostname.split("."))) return false;
+  const path = pattern.pathname.split("*").map(part => part.replace(/[.+?^${}()|[\]\\]/g, "\\$&")).join(".*");
+  return new RegExp(`^${path}$`).test(target.pathname);
 }
 
 /** A resource key claimed by bindTurnComputer, mapped to the policy's kind. */
