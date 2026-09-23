@@ -130,7 +130,8 @@ const streamPermissionTurn = () => {
 const streamQuestionSelectTurn = () => {
   send({ type: "agent_start" });
   send({ type: "turn_start" });
-  send({ type: "extension_ui_request", id: "ask-select", method: "select", title: "Which color?", options: ["Blue", "Green"] });
+  send({ type: "extension_ui_request", id: "ask-select", method: "select", title: "Which color?",
+    options: process.env.FAKE_PI_QUESTION_OPTIONS ? JSON.parse(process.env.FAKE_PI_QUESTION_OPTIONS) : ["Blue", "Green"] });
   // wait for the answer before finishing
 };
 

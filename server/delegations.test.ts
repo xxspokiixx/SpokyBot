@@ -873,6 +873,33 @@ describe("delegations survive a restart", () => {
     expect(loaded.queuedAt).toBeGreaterThanOrEqual(before);
   });
 
+  it("renews an elapsed busy window on restart without extending a still-valid one", async () => {
+    vi.useFakeTimers({ toFake: ["Date"] });
+    try {
+      store.patchBot(target.id, { busy: true });
+      queueDelegation(buses.commsBus, from, { toBotId: target.id, message: "held", depth: 0 }, 1);
+      drainDelegations(buses.commsBus, buses.approvalBus, from.threadId, vi.fn());
+      await new Promise<void>((resolve) => setImmediate(resolve));
+      const heldAt = Date.now();
+      const readBusySince = (): number => JSON.parse(readFileSync(file(), "utf8"))[from.threadId][0].busySince;
+      expect(readBusySince()).toBe(heldAt);
+
+      vi.setSystemTime(heldAt + DELEGATION_BUSY_HOLD_MAX_MS);
+      _loadPending();
+      const renewedAt = Date.now();
+      expect(readBusySince()).toBe(renewedAt);
+      expect(expireStaleDelegations(buses.commsBus, Date.now())).toBe(0);
+
+      vi.setSystemTime(renewedAt + 60_000);
+      _loadPending();
+      expect(readBusySince()).toBe(renewedAt);
+      vi.setSystemTime(renewedAt + DELEGATION_BUSY_HOLD_MAX_MS);
+      expect(expireStaleDelegations(buses.commsBus, Date.now())).toBe(1);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it("clamps a future queuedAt (clock moved back, hand-edited file) to now instead of making it un-expirable", () => {
     const { mkdirSync, writeFileSync } = require("node:fs") as typeof import("node:fs");
     mkdirSync(DATA_DIR, { recursive: true });
@@ -947,6 +974,7 @@ describe("busy waits and expiry", () => {
 
   beforeEach(() => {
     rmSync(DATA_DIR, { recursive: true, force: true });
+    _resetPending();
     store = new Store(selection);
     from = store.createBot();
     target = store.createBot();
@@ -1123,7 +1151,6 @@ describe("busy waits and expiry", () => {
 
       drainDelegations(commsBus, approvalBus, from.threadId, runTarget, onSettled);
       await waitFor(() => pendingDelegationInfo(queued.id!)?.waiting === true);
-      releaseDelegationsWaitingOn(target.id);
 
       vi.setSystemTime(new Date(Date.now() + DELEGATION_TTL_MS));
       drainDelegations(commsBus, approvalBus, from.threadId, runTarget, onSettled);
@@ -1153,7 +1180,6 @@ describe("busy waits and expiry", () => {
 
       drainDelegations(commsBus, approvalBus, from.threadId, runTarget, onSettled);
       await waitFor(() => pendingDelegationInfo(queued.id!)?.waiting === true);
-      releaseDelegationsWaitingOn(target.id);
 
       // far short of the 24-hour delivery window, past the busy-hold cap
       vi.setSystemTime(new Date(Date.now() + DELEGATION_BUSY_HOLD_MAX_MS));
@@ -1182,7 +1208,6 @@ describe("busy waits and expiry", () => {
       const runTarget = vi.fn();
       drainDelegations(commsBus, approvalBus, from.threadId, runTarget);
       await waitFor(() => pendingDelegationInfo(queued.id!)?.waiting === true);
-      releaseDelegationsWaitingOn(target.id);
 
       vi.setSystemTime(new Date(Date.now() + DELEGATION_BUSY_HOLD_MAX_MS - 1_000));
       drainDelegations(commsBus, approvalBus, from.threadId, runTarget);
@@ -1199,11 +1224,16 @@ describe("busy waits and expiry", () => {
     }
   });
 
-  it("sweeps a past-cap busy hold and keeps under-cap ones queued", () => {
+  it("sweeps a past-cap busy hold and keeps under-cap ones queued", async () => {
     vi.useFakeTimers({ toFake: ["Date"] });
     try {
       store.patchBot(target.id, { busy: true });
       const stale = queueDelegation(commsBus, from, { toBotId: target.id, message: "stale", depth: 0 }, 1);
+      drainDelegations(commsBus, approvalBus, from.threadId, vi.fn());
+      await waitFor(() => pendingDelegationInfo(stale.id!)?.waiting === true);
+      // The marker is set synchronously, before the fire-and-forget drain's
+      // finally releases ownership. A sweep must run after that release.
+      await new Promise<void>((resolve) => setImmediate(resolve));
       vi.setSystemTime(new Date(Date.now() + DELEGATION_BUSY_HOLD_MAX_MS));
       const fresh = queueDelegation(commsBus, from, { toBotId: target.id, message: "fresh", depth: 0 }, 1);
 
@@ -1223,6 +1253,30 @@ describe("busy waits and expiry", () => {
       // test's sweep does not inherit it
       discardDelegations(commsBus, from.threadId);
     } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("does not count source work or a previous busy period toward a fresh busy hold", async () => {
+    vi.useFakeTimers({ toFake: ["Date"] });
+    try {
+      const queued = queueDelegation(commsBus, from, { toBotId: target.id, message: "later", depth: 0 }, 1);
+      vi.setSystemTime(Date.now() + DELEGATION_BUSY_HOLD_MAX_MS);
+      store.patchBot(target.id, { busy: true });
+      const runTarget = vi.fn();
+      drainDelegations(commsBus, approvalBus, from.threadId, runTarget);
+      await waitFor(() => pendingDelegationInfo(queued.id!)?.waiting === true);
+      expect(findDelegationReceipt(queued.id!)).toBeNull();
+      vi.setSystemTime(Date.now() + DELEGATION_BUSY_HOLD_MAX_MS - 1000);
+      releaseDelegationsWaitingOn(target.id);
+      drainDelegations(commsBus, approvalBus, from.threadId, runTarget);
+      await waitFor(() => pendingDelegationInfo(queued.id!)?.waiting === true);
+      vi.setSystemTime(Date.now() + 2000);
+      expect(expireStaleDelegations(commsBus, Date.now())).toBe(0);
+      expect(findDelegationReceipt(queued.id!)).toBeNull();
+      expect(runTarget).not.toHaveBeenCalled();
+    } finally {
+      discardDelegations(commsBus, from.threadId);
       vi.useRealTimers();
     }
   });

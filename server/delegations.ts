@@ -63,6 +63,9 @@ interface PendingDelegationItem extends DelegationItem {
    * transition (releaseDelegationsWaitingOn) clears it and re-drains the
    * source thread; nothing else counts or retries. */
   waitingOnBusy?: boolean;
+  /** Start of the target's observed busy hold, excluding source work and
+   * human approval time. Cleared when the target frees up. */
+  busySince?: number;
 }
 
 /** `busy_gave_up` is only read back from receipts written before handoffs
@@ -202,6 +205,7 @@ export function releaseDelegationsWaitingOn(toBotId: string, only?: (item: Deleg
     for (const item of items) {
       if (item.toBotId !== toBotId || item.waitingOnBusy !== true || (only && !only(item))) continue;
       delete item.waitingOnBusy;
+      delete item.busySince;
       any = true;
     }
     if (any) released.push(threadId);
@@ -258,7 +262,13 @@ export function _loadPending(): void {
           queuedAt: hasUsableQueuedAt ? Math.min(item.queuedAt!, now) : now,
         };
         if (item.approvalAlreadyGranted === true) loaded.approvalAlreadyGranted = true;
-        if (item.waitingOnBusy === true) loaded.waitingOnBusy = true;
+        if (item.waitingOnBusy === true) {
+          loaded.waitingOnBusy = true;
+          const currentHold = Number.isFinite(item.busySince) && item.busySince! <= now &&
+            now - item.busySince! < DELEGATION_BUSY_HOLD_MAX_MS;
+          loaded.busySince = currentHold ? item.busySince : now;
+          if (!currentHold) backfilled = true;
+        }
         if (item.waitAnnounced === true || legacyAlreadyAnnounced) loaded.waitAnnounced = true;
         if (typeof item.originatingGroupId === "string" && item.originatingGroupId) {
           loaded.originatingGroupId = item.originatingGroupId;
@@ -514,7 +524,8 @@ const isExpired = (item: PendingDelegationItem, now: number): boolean => now - i
 
 /** Past the busy-hold cap — the tighter bound that fires while its target is
  * still busy, long before the 24-hour window. */
-const busyHoldExpired = (item: PendingDelegationItem, now: number): boolean => now - item.queuedAt >= DELEGATION_BUSY_HOLD_MAX_MS;
+const busyHoldExpired = (item: PendingDelegationItem, now: number): boolean =>
+  item.busySince !== undefined && now - item.busySince >= DELEGATION_BUSY_HOLD_MAX_MS;
 
 /** The busy-hold cap in chip-ready words ("2 hours", "90 minutes"). */
 function busyHoldCapText(): string {
@@ -706,6 +717,7 @@ async function processOne(
   if (held) return held;
   if (item.waitingOnBusy) {
     delete item.waitingOnBusy;
+    delete item.busySince;
     savePending();
   }
   if (sender.approvePeerComms && !item.approvalAlreadyGranted) {
@@ -827,6 +839,7 @@ function holdWhileTargetBusy(
   if (canTakeTurn) return null;
   if (item.waitingOnBusy) return "requeued";
   item.waitingOnBusy = true;
+  item.busySince = Date.now();
   if (!item.waitAnnounced) {
     item.waitAnnounced = true;
     bus.store.appendMessage(sourceThreadId, {

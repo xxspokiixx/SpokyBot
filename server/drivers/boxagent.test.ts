@@ -338,6 +338,20 @@ describe("BoxAgentDriver turns (fake API)", () => {
     expect(calls.lastIndexOf("interrupt")).toBeGreaterThan(calls.lastIndexOf("gate-open"));
   });
 
+  it("does not reopen a question after the remote run was cancelled", async () => {
+    const askText = askBlock([{ question: "Proceed?" }]);
+    const prompts: string[] = [];
+    restoreFetch = installFakeBox([
+      { events: [{ id: "e1", type: "response", text: askText }], status: { promptRun: { status: "cancelled" } } },
+    ], prompts);
+    await create({ askTimeoutMs: 50 });
+    await instance.adapter.sendTurn({ threadId: "t-remote-cancel", text: "go", integrations: { computer } });
+    const done = await recorder.until((event) => event.type === "turn.completed");
+    expect(done).toMatchObject({ ok: false, stopReason: "cancelled" });
+    expect(recorder.events.some(event => event.type === "request.opened")).toBe(false);
+    expect(prompts).toHaveLength(1);
+  });
+
   it("resolves a held ask on its timeout and completes the turn", async () => {
     const askText = askBlock([{ question: "Proceed?" }]);
     restoreFetch = installFakeBox([

@@ -44,7 +44,7 @@ import type {
 } from "../contracts.ts";
 import { EFFORT_LEVELS } from "../../shared/wire.ts";
 import { newEventId, newId } from "../contracts.ts";
-import { parseAskQuestions, questionAnswersByQuestion } from "../../shared/ask-question.ts";
+import { parseAskQuestions, parseChoices, questionAnswersByQuestion } from "../../shared/ask-question.ts";
 import {
   decodeInjectId,
   encodeInjectId,
@@ -721,6 +721,8 @@ export const PiDriver: ProviderDriver<PiConfig> = {
               const reqId = evt.id ?? newId();
               const isSelect = evt.method === "select";
               const isQuestion = isSelect || evt.method === "input";
+              const selectOptions: string[] = isSelect && Array.isArray(evt.options)
+                ? evt.options.filter((option): option is string => typeof option === "string") : [];
               const summary = String(evt.title ?? (isQuestion ? "pi has a question" : "pi wants confirmation")).slice(0, 200);
               // A select is a question with named options; the structured
               // card renders from it while the flat choices keep older
@@ -728,7 +730,7 @@ export const PiDriver: ProviderDriver<PiConfig> = {
               // stays the free-text question it always was.
               const question = isSelect
                 ? (parseAskQuestions({
-                    questions: [{ question: summary, options: Array.isArray(evt.options) ? evt.options : [] }],
+                    questions: [{ question: summary, options: selectOptions }],
                   }) ?? [])[0]
                 : undefined;
               const choices = question?.options.length ? question.options.map((option) => option.label) : undefined;
@@ -751,7 +753,12 @@ export const PiDriver: ProviderDriver<PiConfig> = {
                   const value = question
                     ? questionAnswersByQuestion(decision.message ?? "", [question])[question.question] ?? decision.message ?? ""
                     : decision.message ?? "";
-                  send({ type: "extension_ui_response", id: reqId, value });
+                  // Display labels are capped/trimmed; pi expects the
+                  // original option. Never guess if two normalize alike.
+                  const matched = selectOptions.filter(option => parseChoices([option], 1)?.[0] === value);
+                  send(matched.length > 1
+                    ? { type: "extension_ui_response", id: reqId, cancelled: true }
+                    : { type: "extension_ui_response", id: reqId, value: matched[0] ?? value });
                 }
                 else send({ type: "extension_ui_response", id: reqId, confirmed: true });
               });

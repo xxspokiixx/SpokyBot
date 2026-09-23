@@ -4330,7 +4330,9 @@ async function answerRequest(
     ? thread.find((m) => m.id === cardMessageId)
     : thread.find((m) => m.card?.requestId === requestId);
   const card = cardMessage?.card;
-  const instance = registry.get(instanceId);
+  // Cloud routing and a model change can differ from the bot's current
+  // settings. The live turn owns this question, just as it owns Stop/steer.
+  const instance = runningTurnEngines.get(threadId) ?? registry.get(instanceId);
   let outcome: RequestOutcome = "unavailable";
   if (instance) {
     try {
@@ -4558,6 +4560,8 @@ bus.subscribe((event: RuntimeEvent) => {
   if (shouldIgnoreProviderEvent(event)) return;
   if (event.type === "request.opened") watchdog.setWaitingOnHuman(event.threadId, true);
   else if (event.type === "request.resolved") watchdog.setWaitingOnHuman(event.threadId, false);
+  else if (event.type === "turn.wait_started") watchdog.setWaitingOnComputer(event.threadId, true);
+  else if (event.type === "turn.wait_ended") watchdog.setWaitingOnComputer(event.threadId, false);
   else if (event.type === "turn.completed") {
     watchdog.settle(event.threadId);
     revokeInternalCapabilityForProviderEvent(event);

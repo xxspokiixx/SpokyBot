@@ -625,6 +625,23 @@ describe("PiDriver turns (fake CLI)", () => {
     expect(rows.find((row) => row.uiResponse)?.uiResponse).toMatchObject({ id: "ask-input", value: "  Toronto  " });
   });
 
+  it.each([false, true])("returns original capped options, refusing ambiguous display labels (%s)", async collision => {
+    const dir = mkdtempSync(join(tmpdir(), "omb-pi-capped-question-"));
+    const dump = join(dir, "dump.jsonl");
+    const label = "  Green ".repeat(30);
+    await create("question-select", { FAKE_PI_DUMP: dump,
+      FAKE_PI_QUESTION_OPTIONS: JSON.stringify([label, collision ? label + "other" : "Blue"]) });
+    await instance.adapter.sendTurn({ threadId: "t-pi-capped", text: "go" });
+    const opened = await recorder.until(e => e.type === "request.opened");
+    await instance.adapter.respondToRequest("t-pi-capped", (opened as { requestId: string }).requestId, {
+      behavior: "answer", message: `The user answered your questions.\n\nQ: Which color?\nA: ${label.trim().slice(0, 120)}`,
+    });
+    await recorder.until(e => e.type === "turn.completed");
+    const rows = readFileSync(dump, "utf8").split("\n").filter(Boolean).map(line => JSON.parse(line));
+    expect(rows.find(row => row.uiResponse)?.uiResponse).toMatchObject(collision
+      ? { id: "ask-select", cancelled: true } : { id: "ask-select", value: label });
+  });
+
   it("denies an ask by cancelling the protocol request", async () => {
     const dir = mkdtempSync(join(tmpdir(), "omb-pi-deny-"));
     const dump = join(dir, "dump.jsonl");

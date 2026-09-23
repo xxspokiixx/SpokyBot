@@ -341,6 +341,14 @@ describe("questionAnswersByQuestion", () => {
     expect(questionAnswersByQuestion("Opus", questions)).toEqual({});
     expect(questionAnswersByQuestion("   ", questions.slice(0, 1))).toEqual({});
   });
+
+  it("preserves paragraphs and does not fabricate answers from empty or unknown blocks", () => {
+    expect(questionAnswersByQuestion("Q: Which model?\nA: first paragraph\n\nsecond paragraph", questions))
+      .toEqual({ "Which model?": "first paragraph\n\nsecond paragraph" });
+    expect(questionAnswersByQuestion("Q: Which model?\nA: ", questions.slice(0, 1))).toEqual({});
+    expect(questionAnswersByQuestion("Q: Unasked question?\nA: yes", questions.slice(0, 1))).toEqual({});
+    expect(questionAnswersByQuestion("Q: Which model?\nA: Opus", [questions[0]!, questions[0]!])).toEqual({});
+  });
 });
 
 describe("parseProtocolAskQuestions", () => {

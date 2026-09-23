@@ -60,7 +60,7 @@ import type {
 import { newEventId, newId } from "../../contracts.ts";
 import { augmentedPath } from "../../env-path.ts";
 import { supportsApprovalMode } from "../../../shared/approval-mode.ts";
-import { parseAskQuestions, questionAnswersByQuestion } from "../../../shared/ask-question.ts";
+import { parseAskQuestions, parseChoices, questionAnswersByQuestion } from "../../../shared/ask-question.ts";
 
 import { appendNative } from "../native.ts";
 import { commandSummary, toolDetailPreview } from "../../tool-summary.ts";
@@ -953,7 +953,7 @@ export function createAcpDriver(support: AcpSupport): ProviderDriver<AcpConfig> 
               ? questionAnswersByQuestion(message ?? "", askQuestions)[askQuestions[0]!.question] ?? message
               : message;
             const named = isQuestion && behavior === "answer"
-              ? options.filter((option) => option.optionId === picked || option.name?.trim() === picked)
+              ? options.filter((option) => option.optionId === picked || parseChoices([option.name], 1)?.[0] === picked)
               : [];
             const optionId = behavior === "cancel"
               ? null
@@ -997,7 +997,7 @@ export function createAcpDriver(support: AcpSupport): ProviderDriver<AcpConfig> 
             requestType: isQuestion ? "question" : "permission",
             tool,
             summary,
-            choices: isQuestion ? questionChoices : undefined,
+            choices: askQuestions?.[0]?.options.map(option => option.label) ?? (isQuestion ? questionChoices : undefined),
             ...(askQuestions ? { questions: askQuestions } : {}),
             approvalScope: current.controlsHost ? "local-computer" : undefined,
             // the driver can honor a session-wide allow either way

@@ -246,6 +246,9 @@ export const BoxAgentDriver: ProviderDriver<BoxAgentConfig> = {
           if (cancelled) {
             return { ok: false, stopReason: "interrupted" };
           }
+          // A remotely interrupted or failed run must stay stopped, even
+          // if its partial output already contains a complete question.
+          if (!ok) return { ok, stopReason };
           const questions = parseOmbAskQuestions(lastText);
           if (!questions) {
             // A fence that did not parse is a question the person never saw.

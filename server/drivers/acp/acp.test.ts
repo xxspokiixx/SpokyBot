@@ -232,6 +232,7 @@ describe("ACP turns (fake CLI)", () => {
     delete process.env.FAKE_ACP_LOAD_ERROR;
     delete process.env.FAKE_ACP_ALLOW_ALWAYS;
     delete process.env.FAKE_ACP_PERMISSION_ANSWER;
+    delete process.env.FAKE_ACP_QUESTION_OPTIONS;
     delete process.env.XAI_API_KEY;
     delete process.env.OPENCODE_API_KEY;
     delete process.env.CURSOR_API_KEY;
@@ -766,6 +767,26 @@ describe("ACP turns (fake CLI)", () => {
     });
     await recorder.until((e) => e.type === "turn.completed");
     expect(readFileSync(answer, "utf8")).toBe("cancelled");
+  });
+
+  it.each([false, true])("maps capped labels back to their option id, refusing collisions (%s)", async collision => {
+    const label = "Green ".repeat(30);
+    const answer = join(scratch, "long-question-answer.txt");
+    process.env.FAKE_ACP_PERMISSION_ANSWER = answer;
+    process.env.FAKE_ACP_QUESTION_OPTIONS = JSON.stringify([
+      { optionId: "green-id", kind: "allow_once", name: label },
+      { optionId: "other-id", kind: "allow_once", name: collision ? label + "other" : "Blue" },
+    ]);
+    await create(GrokAgentDriver, "question");
+    await instance.adapter.sendTurn({ threadId: "t-long-question", text: "go" });
+    const opened = await recorder.until(e => e.type === "request.opened");
+    expect(opened).toMatchObject({ choices: expect.arrayContaining([label.trim().slice(0, 120).trim()]) });
+    await instance.adapter.respondToRequest("t-long-question", (opened as { requestId: string }).requestId, {
+      behavior: "answer",
+      message: `The user answered your questions.\n\nQ: Which color?\nA: ${label.trim().slice(0, 120)}`,
+    });
+    await recorder.until(e => e.type === "turn.completed");
+    expect(readFileSync(answer, "utf8")).toBe(collision ? "cancelled" : "green-id");
   });
 
   it("per-bot Ask surfaces permissions from a legacy full-auto instance", async () => {

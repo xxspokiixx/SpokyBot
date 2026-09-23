@@ -989,7 +989,7 @@ function handle(msg: any) {
           method: "session/request_permission",
           params: {
             toolCall: { toolCallId: "interaction_color", kind: "other", title: "Which color?" },
-            options: [
+            options: process.env.FAKE_ACP_QUESTION_OPTIONS ? JSON.parse(process.env.FAKE_ACP_QUESTION_OPTIONS) : [
               { optionId: "blue-id", kind: "allow_once", name: "Blue" },
               {
                 optionId: "green-id",

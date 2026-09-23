@@ -57,7 +57,7 @@ export interface QuestionRequestCardData {
 function text(value: unknown, limit: number): string | undefined {
   if (typeof value !== "string") return undefined;
   const trimmed = value.trim();
-  return trimmed ? trimmed.slice(0, limit) : undefined;
+  return trimmed ? trimmed.slice(0, limit).trim() : undefined;
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -317,23 +317,7 @@ export function questionAnswersByQuestion(
   message: string,
   questions: readonly AskQuestion[],
 ): Record<string, string> {
-  // Null prototype: a question text or protocol id can be an opaque string
-  // like __proto__, which a plain object would swallow through its
-  // inherited setter instead of recording an own enumerable answer.
-  const answers: Record<string, string> = Object.create(null);
-  const known = new Map(questions.map((entry) => [entry.question, entry.question]));
-  for (const block of message.split("\n\n")) {
-    const match = /^Q: ([\s\S]+?)\nA: ([\s\S]+)$/.exec(block.trim());
-    if (!match) continue;
-    // Only a question this ask actually posed. An unrecognized block is
-    // dropped rather than filed under a key the tool never asked about.
-    const question = known.get(match[1]!.trim());
-    if (question) answers[question] = match[2]!.trim();
-  }
-  if (Object.keys(answers).length) return answers;
-  const only = questions.length === 1 ? questions[0] : undefined;
-  const flat = message.trim();
-  return only && flat ? { [only.question]: flat } : {};
+  return questionAnswersById(message, questions.map(question => ({ id: question.question, question })));
 }
 
 /** Longest protocol id accepted. Ids are harness-internal keys, never shown
