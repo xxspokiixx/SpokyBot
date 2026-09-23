@@ -7,6 +7,8 @@ import {
   EMPTY_ONBOARDING,
   engineSummary,
   hintSeen,
+  hostedMember,
+  spotlightsQuiet,
   hintSeenPatch,
   LOCAL_VIEWER,
   nextBeat,
@@ -77,6 +79,20 @@ describe("welcomeViewer", () => {
     expect(welcomeViewer({})).toEqual(LOCAL_VIEWER);
     expect(welcomeViewer(null)).toEqual(LOCAL_VIEWER);
     expect(welcomeViewer({ scopes: ["admin"], hosted: "yes" })).toEqual({ hosted: false, canSave: true });
+  });
+
+  it("calls only a hosted session without admin scope a hosted member", () => {
+    expect(hostedMember({ hosted: true, canSave: false })).toBe(true);
+    expect(hostedMember({ hosted: true, canSave: true })).toBe(false);
+    // the owner's own paired browser on a personal server is not a team member
+    expect(hostedMember({ hosted: false, canSave: false })).toBe(false);
+    expect(hostedMember(LOCAL_VIEWER)).toBe(false);
+    expect(hostedMember(null)).toBe(false);
+    // spotlights wait for the answer, then stay as before except for hosted members
+    expect(spotlightsQuiet(null)).toBe(true);
+    expect(spotlightsQuiet({ hosted: true, canSave: false })).toBe(true);
+    expect(spotlightsQuiet({ hosted: false, canSave: false })).toBe(false);
+    expect(spotlightsQuiet(LOCAL_VIEWER)).toBe(false);
   });
 });
 

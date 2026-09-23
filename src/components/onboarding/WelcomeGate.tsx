@@ -1,24 +1,33 @@
 // Decides what first run looks like for whoever opened the app. The desktop
 // app's own window is the owner of its own server and gets the welcome flow
-// exactly as before, without waiting on anything new. A browser asks its
-// server who it is first: a hosted workspace's admin gets the hosted beats,
-// and anyone who cannot save the workspace config (a member) gets a quiet
-// note instead of a tour they could never finish.
+// exactly as before, without waiting on anything new. Any other page (a
+// browser, or a hosted workspace the desktop app opened with its reduced
+// bridge) asks its server who it is first. A hosted workspace's admin gets
+// the hosted beats and a hosted member a quiet note. A session that cannot
+// save the workspace config is never shown a tour it could not finish.
 import { useEffect, useState } from "react";
 import { emailGateDone } from "@/lib/analytics";
-import { LOCAL_VIEWER, welcomeDue, welcomeViewer, type BeatId, type WelcomeViewer } from "@/lib/onboarding";
+import { hostedMember, LOCAL_VIEWER, welcomeDue, welcomeViewer, type BeatId, type WelcomeViewer } from "@/lib/onboarding";
 import { api, useStore } from "@/state/store";
 import { SharedWorkspaceHint } from "./SharedWorkspaceHint";
 import { WelcomeFlow } from "./WelcomeFlow";
 
-/** Null while a browser's answer is on its way. A desktop window knows at
+/** Only the desktop app's own pages get the full bridge; `remoteClient` is
+ * part of it. A remote page the desktop app loads (Server → Connect hosted
+ * workspace…) gets a reduced, still truthy `window.ogb` without it, and is
+ * no more the owner than a browser is. */
+export function localDesktopPage(): boolean {
+  return window.ogb?.remoteClient !== undefined;
+}
+
+/** Null while the answer is on its way. The desktop app's own page knows at
  * once: its own server's owner, or a remote client, which never gets a
  * first-run surface anyway. A failed answer keeps the old behaviour. */
 export function useWelcomeViewer(): WelcomeViewer | null {
-  const desktop = Boolean(window.ogb);
-  const [viewer, setViewer] = useState<WelcomeViewer | null>(desktop ? LOCAL_VIEWER : null);
+  const local = localDesktopPage();
+  const [viewer, setViewer] = useState<WelcomeViewer | null>(local ? LOCAL_VIEWER : null);
   useEffect(() => {
-    if (desktop) return;
+    if (local) return;
     let active = true;
     void api("/api/auth/session", { timeoutMs: 10_000 })
       .then((session) => {
@@ -30,7 +39,7 @@ export function useWelcomeViewer(): WelcomeViewer | null {
     return () => {
       active = false;
     };
-  }, [desktop]);
+  }, [local]);
   return viewer;
 }
 
@@ -45,7 +54,10 @@ export function WelcomeGate({ viewer }: { viewer: WelcomeViewer | null }) {
   const [resumeAt, setResumeAt] = useState<BeatId | undefined>(undefined);
   const remoteClient = window.ogb?.remoteClient?.active === true;
   if (!viewer) return null;
-  if (!viewer.canSave) {
+  // Only a hosted workspace is a team's by definition. Elsewhere a session
+  // without admin scope is often the owner's own phone or browser, so it
+  // gets no new note: the tour it cannot save simply does not open itself.
+  if (hostedMember(viewer)) {
     return remoteClient ? null : (
       <SharedWorkspaceHint
         replay={state.welcomeOpen}
@@ -81,6 +93,7 @@ export function WelcomeGate({ viewer }: { viewer: WelcomeViewer | null }) {
       }}
       onDone={() => {
         setDismissed(true);
+        setResumeAt(undefined);
         dispatch({ type: "toggleWelcome", open: false });
         // the first real finish hands over to the guided tour; a replay does not
         if (!replay) dispatch({ type: "toggleTour", open: true });

@@ -1,4 +1,4 @@
-// What a member of a shared workspace sees on first open instead of the
+// What a member of a hosted team workspace sees on first open instead of the
 // welcome flow. The workspace config belongs to its admins, so a member
 // could neither save the tour nor stop it coming back. One quiet note below
 // the header, clear of the composer, says where they are. It is not a

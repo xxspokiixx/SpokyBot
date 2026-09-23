@@ -38,6 +38,20 @@ export interface WelcomeViewer {
  * always the owner. Known without asking, so its first run never waits. */
 export const LOCAL_VIEWER: WelcomeViewer = { hosted: false, canSave: true };
 
+/** A hosted workspace's member. The workspace config is its admins', so no
+ * first-run surface that writes it (the flow, the spotlights) is offered;
+ * the member gets a note instead. Anywhere else a session without admin
+ * scope is often the owner's own paired browser, and nothing is added. */
+export function hostedMember(viewer: WelcomeViewer | null): boolean {
+  return Boolean(viewer?.hosted && !viewer.canSave);
+}
+
+/** First-conversation spotlights wait for the viewer to be known, and never
+ * show to a hosted member, who could not dismiss them for good. */
+export function spotlightsQuiet(viewer: WelcomeViewer | null): boolean {
+  return viewer === null || hostedMember(viewer);
+}
+
 /** Read `GET /api/auth/session` defensively. A server that sends no scopes
  * reads as today (the owner); one that predates `hosted` reads as not
  * hosted, which is also what it always was to the welcome flow. */

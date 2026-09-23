@@ -34,10 +34,12 @@ What each first-run surface depends on, and how it was checked:
 
 | Who opens the app | What they get | Checked by |
 |---|---|---|
-| Desktop app, own server | The same flow as before, decided without a new request | `src/components/onboarding/WelcomeGate.test.ts`; `HelloBeat`/`EnginesBeat` HTML compared byte for byte with main (no bridge) |
+| Desktop app, own server (full bridge, `remoteClient` present) | The same flow as before, decided without a new request | `src/components/onboarding/WelcomeGate.test.ts`; `HelloBeat`/`EnginesBeat` HTML compared byte for byte with main (no bridge) |
+| Hosted workspace opened inside the desktop app (reduced bridge, no `remoteClient`) | Treated like a browser: the server is asked | `WelcomeGate.test.ts` |
 | Packaged desktop with the organisation bridge | An optional "Using OpenMausBot at work?" row on the engines beat; a signed-in Company engine counts as ready | `beats/OrganisationRow.test.ts`, `beats/EnginesBeat.test.ts` (fake bridge) |
 | Browser, admin of a hosted workspace | Greeting (no inputs) and the bot beat only | `WelcomeGate.test.ts`, `beats/HelloBeat.test.ts`, `src/lib/onboarding.test.ts` |
-| Browser, member (no admin scope, hosted or not) | No welcome flow; one dismissible note kept in browser storage; no first-conversation spotlights | `WelcomeGate.test.ts`, `FirstConversationTour.test.ts` |
+| Browser, hosted member (no admin scope) | No welcome flow; one dismissible note kept in browser storage; no first-conversation spotlights | `WelcomeGate.test.ts`, `FirstConversationTour.test.ts` |
+| Browser, client-scope session on a server that is not hosted | Nothing new: the flow does not open itself (it could not be saved); Settings replay and spotlights as before | `WelcomeGate.test.ts`, `src/lib/onboarding.test.ts` |
 
 `GET /api/auth/session` adds `hosted: true` for a session on a hosted
 workspace and is otherwise unchanged (`server/hosted-access.test.ts`,
@@ -45,9 +47,11 @@ workspace and is otherwise unchanged (`server/hosted-access.test.ts`,
 
 On a fresh `ui launch` fixture, the recipe above still passed end to end
 through the new session check. In the same fixture browser, a client-scope
-paired session with the server's onboarding record reset got the note and no
-welcome flow. "Got it" made no `/api/config` write, and the note stayed away
-after a reload. The engines beat was mounted from the Vite preview with a fake
+paired session with the server's onboarding record reset got no welcome flow.
+That run also showed the member note, which review then limited to hosted
+workspaces (the fixture is not hosted). The hosted-only rule is covered by the
+tests above, not by a rerun. In that run, "Got it" made no `/api/config`
+write, and the note stayed away after a reload. The engines beat was mounted from the Vite preview with a fake
 `window.ogb.organization` injected before mount; it showed the row signed out,
 then connecting with the code, then connected. `begin` ran once, with the
 default Admin. Screenshots are in `.omb-scratch/verify-evidence/onboarding/`.

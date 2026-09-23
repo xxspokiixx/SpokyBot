@@ -55,6 +55,11 @@ function storage() {
 }
 
 const fresh = { onboarding: EMPTY_ONBOARDING };
+// The desktop app's own page: the full bridge, remoteClient included.
+const LOCAL_PAGE = { ogb: { platform: "darwin", remoteClient: { active: false }, workspaces: {} } };
+// A hosted workspace the desktop app opened (Server → Connect hosted
+// workspace…): preload exposes only its remote-safe subset, still truthy.
+const REMOTE_PAGE = { ogb: { platform: "darwin", workspaces: {}, getCapabilities: () => ({}) } };
 beforeEach(() => {
   fixture.values = [];
   fixture.index = 0;
@@ -73,7 +78,7 @@ afterEach(() => {
 
 describe("who gets the welcome flow", () => {
   it("opens the desktop flow for the desktop app's own window, exactly as before", () => {
-    vi.stubGlobal("window", { ogb: { platform: "darwin" } });
+    vi.stubGlobal("window", LOCAL_PAGE);
     const { tree } = gate(LOCAL_VIEWER);
     expect(tree?.type).toBe(WelcomeFlow);
     expect(tree?.props).toMatchObject({ hosted: false, initialBeat: undefined, replay: false });
@@ -114,15 +119,35 @@ describe("who gets the welcome flow", () => {
     expect(render(() => SharedWorkspaceHint({ replay: false, onClose: vi.fn() })).html).toContain("shared workspace");
   });
 
-  it("never opens the flow for a member, even when the admin has not finished it", () => {
+  it("never opens the flow for a hosted member, even when the admin has not finished it", () => {
     store.state = { ...store.state, config: {} };
-    expect(gate({ hosted: false, canSave: false }).tree?.type).toBe(SharedWorkspaceHint);
+    expect(gate({ hosted: true, canSave: false }).tree?.type).toBe(SharedWorkspaceHint);
     store.state = { ...store.state, welcomeOpen: true };
     const replay = gate({ hosted: true, canSave: false }).tree!;
     expect(replay.type).toBe(SharedWorkspaceHint);
     expect(replay.props.replay).toBe(true);
     replay.props.onClose!();
     expect(store.dispatch).toHaveBeenCalledWith({ type: "toggleWelcome", open: false });
+  });
+
+  it("adds nothing for a member of a server that is not hosted, such as the owner's own paired browser", () => {
+    // no note: the team copy would be false there, and it would be new UI
+    const { tree, html } = gate({ hosted: false, canSave: false });
+    expect(tree).toBeNull();
+    expect(html).toBe("");
+    // an explicit Settings replay still opens the ordinary flow, as before
+    store.state = { ...store.state, welcomeOpen: true };
+    const replay = gate({ hosted: false, canSave: false }).tree!;
+    expect(replay.type).toBe(WelcomeFlow);
+    expect(replay.props).toMatchObject({ hosted: false, replay: true });
+  });
+
+  it("treats a hosted workspace opened inside the desktop app like a browser", () => {
+    vi.stubGlobal("window", REMOTE_PAGE);
+    expect(gate({ hosted: true, canSave: false }).tree?.type).toBe(SharedWorkspaceHint);
+    const admin = gate({ hosted: true, canSave: true }).tree!;
+    expect(admin.type).toBe(WelcomeFlow);
+    expect(admin.props.hosted).toBe(true);
   });
 
   it("shows nothing to a remote client member or while a browser's session is unknown", () => {
@@ -139,14 +164,19 @@ describe("who gets the welcome flow", () => {
   });
 
   it("resumes on the engines beat after the organisation row opens Settings", () => {
-    vi.stubGlobal("window", { ogb: { platform: "darwin" } });
+    vi.stubGlobal("window", LOCAL_PAGE);
     const first = gate(LOCAL_VIEWER).tree!;
     first.props.onOpenOrganisation!();
     expect(store.dispatch).toHaveBeenCalledWith({ type: "toggleAppSettings", open: true, section: "organization" });
     store.state = { ...store.state, appSettingsOpen: true, appSettingsSection: "organization" };
     expect(gate(LOCAL_VIEWER).tree).toBeNull();
     store.state = { ...store.state, appSettingsOpen: false };
-    expect(gate(LOCAL_VIEWER).tree?.props.initialBeat).toBe("engines");
+    const resumed = gate(LOCAL_VIEWER).tree!;
+    expect(resumed.props.initialBeat).toBe("engines");
+    // finishing forgets it: a later Settings replay starts at the greeting
+    (resumed.props.onDone as () => void)();
+    store.state = { ...store.state, welcomeOpen: true };
+    expect(gate(LOCAL_VIEWER).tree?.props.initialBeat).toBeUndefined();
   });
 });
 
@@ -161,10 +191,20 @@ describe("useWelcomeViewer", () => {
   };
 
   it("knows the desktop app's own window without asking", () => {
-    vi.stubGlobal("window", { ogb: { platform: "darwin" } });
+    vi.stubGlobal("window", LOCAL_PAGE);
     expect(viewer()).toEqual(LOCAL_VIEWER);
     for (const effect of fixture.effects) effect();
     expect(store.api).not.toHaveBeenCalled();
+  });
+
+  it("asks the server from a hosted page the desktop app opened, whose bridge is reduced", async () => {
+    vi.stubGlobal("window", REMOTE_PAGE);
+    store.api.mockResolvedValueOnce({ kind: "session", scopes: ["client"], hosted: true });
+    expect(viewer()).toBeNull();
+    for (const effect of fixture.effects) effect();
+    await flush();
+    expect(store.api).toHaveBeenCalledExactlyOnceWith("/api/auth/session", { timeoutMs: 10_000 });
+    expect(viewer()).toEqual({ hosted: true, canSave: false });
   });
 
   it("asks a browser's server once and reads hosted and scope from the answer", async () => {

@@ -34,12 +34,12 @@ vi.mock("./Spotlight", () => ({ Spotlight: () => null }));
 import { FirstConversationTour } from "./FirstConversationTour";
 import { Spotlight } from "./Spotlight";
 
-function render(canSave: boolean) {
+function render(quiet: boolean) {
   fixture.index = 0;
   fixture.effects = [];
   let tree: ReactNode = null;
   function Capture() {
-    tree = FirstConversationTour({ canSave });
+    tree = FirstConversationTour({ quiet });
     return tree;
   }
   renderToStaticMarkup(createElement(Capture));
@@ -61,16 +61,16 @@ beforeEach(() => {
 });
 
 describe("first-conversation spotlights", () => {
-  it("explain the approval card to someone who can save the hint list", () => {
-    render(true);
-    for (const effect of fixture.effects) effect();
-    expect(render(true)?.type).toBe(Spotlight);
-  });
-
-  it("stay away from a member, who could never dismiss them for good", () => {
+  it("explain the approval card as before", () => {
     render(false);
     for (const effect of fixture.effects) effect();
-    expect(render(false)).toBeNull();
+    expect(render(false)?.type).toBe(Spotlight);
+  });
+
+  it("stay away from a hosted member, who could never dismiss them for good", () => {
+    render(true);
+    for (const effect of fixture.effects) effect();
+    expect(render(true)).toBeNull();
     expect(store.api).not.toHaveBeenCalled();
   });
 });
