@@ -505,6 +505,9 @@ export function SettingsModal() {
     else dialog?.focus();
 
     const onKey = (event: KeyboardEvent) => {
+      // A child editor owns Escape and its focus trap, including while saving.
+      if (event.defaultPrevented || (dialog && [...dialog.querySelectorAll<HTMLElement>('[role="dialog"], [role="alertdialog"]')]
+        .some(child => child.getClientRects().length))) return;
       if (event.key === "Escape") {
         event.preventDefault();
         dispatch({ type: "toggleAppSettings", open: false });
