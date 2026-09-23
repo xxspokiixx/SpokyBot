@@ -419,6 +419,17 @@ class DecodingTest {
     }
 
     @Test
+    fun aCompactionMessageDecodesItsRecord() {
+        val message = CompanionJson.decodeFromString<Message>(
+            """{"id":"c1","role":"bot","kind":"compaction","at":1,"text":"[compaction] Earlier: …",
+               "compaction":{"summary":"Earlier: the user asked for X.","firstKeptId":"c1","tokensBefore":12345,"by":"person"}}""",
+        )
+        assertEquals(Message.Kind.COMPACTION, message.kind)
+        assertEquals("Earlier: the user asked for X.", message.compaction?.summary)
+        assertEquals("Context compacted · 12,345 tokens summarised", message.compaction?.chipText)
+    }
+
+    @Test
     fun unknownRoleIsNotAttributedToTheUser() {
         val message = CompanionJson.decodeFromString<Message>(
             """{"id":"m1","role":"system","kind":"text","at":1,"text":"hello"}""",

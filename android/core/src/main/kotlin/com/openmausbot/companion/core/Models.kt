@@ -143,6 +143,19 @@ data class ToolActivity(
 )
 
 /**
+ * A compaction record: from this message on, rebuilds of the thread's
+ * context carry [summary] instead of the earlier messages.
+ */
+@Serializable
+data class Compaction(
+    val summary: String,
+    val tokensBefore: Int,
+) {
+    val chipText: String
+        get() = "Context compacted · ${"%,d".format(tokensBefore)} tokens summarised"
+}
+
+/**
  * The thread an activity chip opened — "Opened thread #Title on Scout" — so
  * the phone can go there. Newer computers only; a chip without one is just a
  * receipt.
@@ -182,6 +195,8 @@ data class Message(
     val card: OptionCard? = null,
     val tool: ToolActivity? = null,
     val threadRef: ThreadRef? = null,
+    /** `kind == COMPACTION`: the record itself. */
+    val compaction: Compaction? = null,
     val parentId: String? = null,
     val from: Sender? = null,
     val reactions: List<Reaction>? = null,
@@ -202,9 +217,12 @@ data class Message(
      * finally lands.
      */
     val queueId: String? = null,
+    /** Completed provider turns can fold narration without guessing which reply is final. */
+    val turnId: String? = null,
+    val turnTerminal: Boolean? = null,
 ) {
     @Serializable(with = MessageKindSerializer::class)
-    enum class Kind { TEXT, OPTIONS, ACTIVITY, SCREEN, DIGEST, UNKNOWN }
+    enum class Kind { TEXT, OPTIONS, ACTIVITY, SCREEN, DIGEST, COMPACTION, UNKNOWN }
 
     @Serializable(with = MessageRoleSerializer::class)
     enum class Role { BOT, USER }
@@ -219,6 +237,7 @@ object MessageKindSerializer : KSerializer<Message.Kind> {
         "activity" -> Message.Kind.ACTIVITY
         "screen" -> Message.Kind.SCREEN
         "digest" -> Message.Kind.DIGEST
+        "compaction" -> Message.Kind.COMPACTION
         else -> Message.Kind.UNKNOWN
     }
 
@@ -1152,6 +1171,9 @@ internal data class SearchResponse(val hits: List<SearchHit>)
 
 @Serializable
 internal data class MessageResponse(val message: Message)
+
+@Serializable
+internal data class EditResponse(val message: Message? = null)
 
 @Serializable
 internal data class ActiveBranchResponse(val activeLeafId: String)

@@ -121,6 +121,22 @@ public struct ToolActivity: Codable, Hashable, Sendable {
     public var setup: Bool?
 }
 
+/// A compaction record: from this message on, rebuilds of the thread's
+/// context carry `summary` instead of the earlier messages.
+public struct Compaction: Codable, Hashable, Sendable {
+    public var summary: String
+    public var tokensBefore: Int
+    public init(summary: String, tokensBefore: Int) {
+        self.summary = summary
+        self.tokensBefore = tokensBefore
+    }
+
+    public var chipText: String {
+        let tokens = NumberFormatter.localizedString(from: NSNumber(value: tokensBefore), number: .decimal)
+        return "Context compacted · \(tokens) tokens summarised"
+    }
+}
+
 /// The thread an activity chip opened — "Opened thread #Title on Scout" —
 /// so the phone can go there. Newer computers only; a chip without one is
 /// just a receipt.
@@ -176,6 +192,7 @@ public struct Message: Codable, Hashable, Identifiable, Sendable {
         /// previews, or speaks it. Named so it cannot fall into `unknown`,
         /// which draws whatever text a message carries.
         case digest
+        case compaction
         /// A kind this build has never heard of.
         ///
         /// Not decorative. `kind` is not optional, so without this a single
@@ -211,10 +228,16 @@ public struct Message: Codable, Hashable, Identifiable, Sendable {
     public var kind: Kind
     public var at: Double
     public var text: String?
+    /// Provider turn markers let clients fold settled narration while keeping
+    /// the final answer visible. Older servers may omit both fields.
+    public var turnId: String?
+    public var turnTerminal: Bool?
     public var card: OptionCard?
     public var secret: SecretRequestCardData?
     public var tool: ToolActivity?
     public var threadRef: ThreadRef?
+    /// `kind == .compaction`: the record itself.
+    public var compaction: Compaction?
     /// The message this one follows; nil at the thread root. Two messages
     /// sharing a parent are a fork.
     public var parentId: String?
@@ -1240,6 +1263,10 @@ struct SearchResponse: Codable, Sendable {
 
 struct MessageResponse: Codable, Sendable {
     var message: Message
+}
+
+struct EditResponse: Decodable, Sendable {
+    var message: Message?
 }
 
 struct ActiveBranchResponse: Codable, Sendable {
