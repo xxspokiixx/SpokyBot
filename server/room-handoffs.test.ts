@@ -516,17 +516,25 @@ describe("room handoff lifetime budget", () => {
 
 
 describe("shared room request display", () => {
-  it("shares one identity across recipients, retries and persisted records", () => fixture((engine, hooks, file) => {
+  it("shares one identity across recipients and rejects late additions after real dispatch and restart", () => fixture(async (engine, hooks, file) => {
     const source = addr("A");
     const one = engine.enqueue(source, "turn", undefined, addr("B"), "work:b", "Review", false, false, "", "work").node;
     const two = engine.enqueue(source, "turn", undefined, { ...addr("B"), botId: "c" }, "work:c", "Review", false, false, "", "work").node;
     expect(engine.sharedRequest(one)).toEqual({ id: one.id, botIds: [one.botId, two.botId] });
     expect(engine.sharedRequest(two)).toEqual(engine.sharedRequest(one));
-    one.executions = 1;
+    engine.tick();
+    expect(one.status).toBe("running");
+    expect(one.startedAt).toBeDefined();
+    expect(() => engine.enqueue(source, "turn", undefined, { ...addr("B"), botId: "late" }, "work:late", "Review", false, false, "", "work")).toThrow("already started");
+    await flush();
+    expect(one.status).toBe("completed");
+    expect(one.executions).toBe(0); // The root, not this child, owns the execution counter.
     expect(engine.enqueue(source, "turn", undefined, addr("B"), "work:b", "Review", false, false, "", "work").duplicate).toBe(true);
     expect(() => engine.enqueue(source, "turn", undefined, { ...addr("B"), botId: "late" }, "work:late", "Review", false, false, "", "work")).toThrow("already started");
     const restarted = new RoomHandoffs(file, hooks);
     expect(restarted.sharedRequest(restarted.nodes.get(two.id)!)).toEqual(engine.sharedRequest(two));
+    expect(() => restarted.enqueue(source, "turn", undefined, { ...addr("B"), botId: "late" }, "work:late", "Review", false, false, "", "work")).toThrow("already started");
+    expect(restarted.sharedRequest(restarted.nodes.get(one.id)!)).toEqual({ id: one.id, botIds: [one.botId, two.botId] });
   }));
   it("does not merge different requests, conversations, senders or direct assignments", () => fixture(engine => {
     const a = engine.enqueue(addr("A"), "turn", undefined, addr("B"), "one:b", "Review", false, false, "", "one").node;
