@@ -201,7 +201,33 @@ final class Session: ObservableObject {
             }
             state.hydrate(fleet)
             if arguments.contains("-chat-focus-preview") {
+                // Put the requested reply several screens inside the fold.
+                var messages = state.messages["preview-gmail"] ?? []
+                if let index = messages.firstIndex(where: { $0.id == "progress2" }) {
+                    var parent = "progress"
+                    let narration = (1...12).map { number -> Message in
+                        var step = Message(id: "preview-long-\(number)", role: .bot, kind: .text, at: 1789088401000 + Double(number))
+                        step.text = String(repeating: "Inspecting the dependency graph for step \(number). ", count: 8)
+                        step.turnId = "preview-turn"
+                        step.parentId = parent
+                        parent = step.id
+                        return step
+                    }
+                    messages[index].parentId = parent
+                    messages.insert(contentsOf: narration, at: index)
+                    state.messages["preview-gmail"] = messages
+                }
                 focusedMessageId = "progress2"
+            }
+            if arguments.contains("-chat-compaction-preview") {
+                var receipt = Message(id: "preview-compaction", role: .bot, kind: .compaction, at: 1789088405000)
+                receipt.parentId = "answer"
+                receipt.compaction = Compaction(summary: "Earlier context preserved for the next turn.", tokensBefore: 12345)
+                state.apply(.message(threadId: "preview-gmail", message: receipt))
+                var digest = Message(id: "preview-digest", role: .bot, kind: .digest, at: 1789088406000)
+                digest.parentId = receipt.id
+                digest.text = "Digest must stay hidden"
+                state.apply(.message(threadId: "preview-gmail", message: digest))
             }
             if arguments.contains("-chat-reasoning-preview"),
                let frameURL = Bundle.main.url(forResource: "ChatReasoningPreview", withExtension: "json"),

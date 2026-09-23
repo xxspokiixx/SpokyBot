@@ -3,6 +3,18 @@ import XCTest
 /// Bundled offline fleet only; no API client or paired user data.
 final class TranscriptPresentationUITests: XCTestCase {
     @MainActor
+    func testCompactionOpensItsSummaryWithoutShowingDigest() {
+        let app = launchPreview(detail: "full", receipts: true)
+        let chip = app.buttons.matching(NSPredicate(format: "label BEGINSWITH %@", "Context compacted")).firstMatch
+        XCTAssertTrue(chip.waitForExistence(timeout: 5))
+        XCTAssertFalse(contains("Digest must stay hidden", in: app))
+        chip.tap()
+        XCTAssertTrue(app.textViews.firstMatch.waitForExistence(timeout: 3))
+        XCTAssertTrue(String(describing: app.textViews.firstMatch.value).contains("Earlier context preserved"))
+        screenshot("Compaction summary opened", in: app)
+    }
+
+    @MainActor
     func testSearchTargetRevealsIntermediateReply() {
         let app = launchPreview(detail: "hidden", focused: true)
         let target = app.staticTexts.matching(NSPredicate(format: "label CONTAINS %@", "I found the failing check.")).firstMatch
@@ -54,7 +66,7 @@ final class TranscriptPresentationUITests: XCTestCase {
     }
 
     @MainActor
-    private func launchPreview(detail: String, reasoning: Bool = false, focused: Bool = false) -> XCUIApplication {
+    private func launchPreview(detail: String, reasoning: Bool = false, focused: Bool = false, receipts: Bool = false) -> XCUIApplication {
         continueAfterFailure = false
         let app = XCUIApplication()
         app.launchArguments = [
@@ -67,6 +79,7 @@ final class TranscriptPresentationUITests: XCTestCase {
         ]
         if reasoning { app.launchArguments.append("-chat-reasoning-preview") }
         if focused { app.launchArguments.append("-chat-focus-preview") }
+        if receipts { app.launchArguments.append("-chat-compaction-preview") }
         app.launch()
         let threads = app.buttons["threads-toggle.preview-pepper"]
         XCTAssertTrue(threads.waitForExistence(timeout: 10))
