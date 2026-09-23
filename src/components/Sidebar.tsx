@@ -2330,7 +2330,7 @@ export function Sidebar({ open, onClose }: { open: boolean; onClose: () => void 
           teamDeleteRunning.current = true;
           setTeamDeletePending(true);
           void api(`/api/sidebar-sections?section=${encodeURIComponent(name)}`, { method: "DELETE" })
-            .then(({ sections }) => { dispatch({ type: "sections", sections }); setDeletingTeam(null); })
+            .then(({ sections }) => { dispatch({ type: "sectionDeleted", section: name, sections }); setDeletingTeam(null); })
             .catch(cause => setTeamFeedback({ error: true, text: cause instanceof Error ? cause.message : String(cause) }))
             .finally(() => { teamDeleteRunning.current = false; setTeamDeletePending(false); });
         }} />
