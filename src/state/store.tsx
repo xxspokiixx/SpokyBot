@@ -701,6 +701,7 @@ export interface InstanceInfo {
   };
   models: { default: string; options: Array<{ id: string; label: string; custom?: boolean; loaded?: boolean; provider?: string; variants?: ModelVariantOption[] }> };
   capabilities?: {
+    cloudComputerMcp?: boolean;
     computerMcp?: boolean;
     agentsMcp?: boolean;
     composioMcp?: boolean;
