@@ -287,9 +287,17 @@ export class BrowserRuntime {
           // Observe in the same scoped session, without replaying the action.
           beforeDispatch?.();
           if (this.gate(session).owner !== null) throw new Error(BROWSER_CONTROL_REFUSAL);
-          const observation = await entry.client.rpc("tools/call", {
-            name: "agent_browser_snapshot", arguments: { compact: true },
-          });
+          let observation: unknown;
+          try {
+            observation = await entry.client.rpc("tools/call", {
+              name: "agent_browser_snapshot", arguments: { compact: true },
+            });
+          } catch (error) {
+            // A tool-level refusal does not undo the completed navigation.
+            // Transport failures still engage the uncertainty/recovery gate.
+            if (error instanceof TransportError) throw error;
+            observation = { isError: true, content: [] };
+          }
           beforeDispatch?.();
           const navigation = result as { content?: unknown[] };
           const page = observation as { content?: unknown[]; isError?: boolean } | null;
