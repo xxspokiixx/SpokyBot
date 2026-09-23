@@ -189,7 +189,7 @@ export class RoomHandoffs {
     if (requestBatchKey && target.groupId) {
       const batch = this.children(parent.id).filter(n => n.requestBatchKey === requestBatchKey && n.groupId === target.groupId);
       if (batch.some(n => n.text !== text || n.threadId !== target.threadId)) throw new Error("request_key was already used for different room work");
-      if (batch.some(n => n.executions > 0)) throw new Error("This shared room request has already started; use a new request_key for additional recipients");
+      if (batch.some(n => n.startedAt !== undefined)) throw new Error("This shared room request has already started; use a new request_key for additional recipients");
     }
     if (!rework && this.children(parent.id).some(n => n.kind === kind &&
       n.groupId === target.groupId && n.botId === target.botId && n.status === "completed")) {
