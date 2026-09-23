@@ -68,6 +68,7 @@ Use only mapped, tested commands:
 - [Usage ledger](usage-ledger.md)
 - [Bounded built-in tool results](tool-results.md)
 - [Spend cap and sell prices](spend-cap.md)
+- [Enterprise layer loading and license expiry](enterprise-license.md)
 
 `control-omb ui` ([Chat UI, driven headlessly](chat-ui.md)) drives the real
 renderer in a headless Chrome by accessible name, so composer sends, transcript
