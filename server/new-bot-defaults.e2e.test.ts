@@ -44,6 +44,11 @@ it("applies independent creation templates through the real isolated HTTP routes
     const optOut = (await api("POST", "/api/bots", { useDefaults: false, name: "Resolved draft" }, 201)).bot;
     expect(optOut.title).toBe("");
     expect((await api("GET", `/api/bots/${optOut.id}/skills`)).skills).toHaveLength(0);
+    const restricted = (await api("POST", "/api/bots", { useDefaults: false, name: "Restricted draft", visibility: "admins" }, 201)).bot;
+    expect(restricted.visibility).toBe("admins");
+    const beforeInvalid = (await api("GET", "/api/bots")).bots.length;
+    await api("POST", "/api/bots", { name: "Invalid audience", visibility: { people: 42 } }, 400);
+    expect((await api("GET", "/api/bots")).bots.length).toBe(beforeInvalid);
     await api("POST", "/api/bots", { useDefaults: "false" }, 400);
     await api("POST", "/api/bots", { name: 42 }, 400);
     await api("POST", "/api/bots", { settings: null }, 400);
