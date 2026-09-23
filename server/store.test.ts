@@ -1405,6 +1405,85 @@ describe("Store change stream", () => {
     expect(store.tasks(recipient.id).filter((task) => task.openedBy?.kind === "work")).toHaveLength(2);
   });
 
+  it("a sender deleted and recreated under the same name inherits its pair conversation", () => {
+    const store = new Store(selection);
+    const recipient = store.createBot({ name: "Scout" });
+    const sender = store.createBot({ name: "Clive" });
+    const idle = { working: () => false };
+    const pair = store.resolvePairConversation(sender, recipient.id, idle)!;
+    const openedAt = pair.task.openedBy!.at;
+    store.appendMessage(pair.task.threadId, { role: "bot", kind: "text", text: "the standing history", at: 1_000 });
+    // deleted and recreated: a new id under the same name, while the
+    // recipient's row still carries only the predecessor's stamp
+    store.deleteBot(sender.id);
+    const recreated = store.createBot({ name: "Clive" });
+    expect(recreated.id).not.toBe(sender.id);
+    const inherited = store.resolvePairConversation(recreated, recipient.id, idle)!;
+    expect(inherited.created).toBe(false);
+    expect(inherited.task.threadId).toBe(pair.task.threadId);
+    // no twin was minted, and the history stayed in the one row
+    expect(store.tasks(recipient.id)).toHaveLength(2);
+    expect(store.messagesFor(pair.task.threadId).at(-1)?.text).toBe("the standing history");
+    // the stamp now names the live bot, and the hour it was opened did not move
+    expect(inherited.task.openedBy).toEqual({ botId: recreated.id, name: "Clive", kind: "pair", at: openedAt });
+    // a reload keeps answering with the same row
+    expect(new Store(selection).resolvePairConversation(recreated, recipient.id, idle)!.task.threadId).toBe(pair.task.threadId);
+  });
+
+  it("a name two live bots share never inherits a deleted bot's pair conversation", () => {
+    const store = new Store(selection);
+    const recipient = store.createBot({ name: "Scout" });
+    const sender = store.createBot({ name: "Clive" });
+    const idle = { working: () => false };
+    const dangling = store.resolvePairConversation(sender, recipient.id, idle)!.task;
+    store.deleteBot(sender.id);
+    const recreated = store.createBot({ name: "Clive" });
+    const namesake = store.createBot({ name: "Clive" });
+    // the name is ambiguous now: each live Clive mints its own row rather
+    // than either one claiming the dead bot's history
+    const own = store.resolvePairConversation(recreated, recipient.id, idle)!;
+    expect(own.created).toBe(true);
+    expect(own.task.threadId).not.toBe(dangling.threadId);
+    const elsewhere = store.resolvePairConversation(namesake, recipient.id, idle)!;
+    expect(elsewhere.task.threadId).not.toBe(dangling.threadId);
+    expect(elsewhere.task.threadId).not.toBe(own.task.threadId);
+    // the dangling row is untouched: still its dead opener's, still live,
+    // because no live bot can prove it is theirs
+    expect(store.taskByThread(recipient.id, dangling.threadId)!.openedBy).toMatchObject({ botId: sender.id, kind: "pair" });
+    // three identities, one live row each
+    expect(store.tasks(recipient.id).filter((task) => task.openedBy?.kind === "pair")).toHaveLength(3);
+  });
+
+  it("loading collapses the duplicate live pair rows an older server minted, and a second load changes nothing", () => {
+    const store = new Store(selection);
+    const recipient = store.createBot({ name: "Scout" });
+    const sender = store.createBot({ name: "Clive" });
+    const idle = { working: () => false };
+    const older = store.resolvePairConversation(sender, recipient.id, idle)!.task;
+    const olderAt = older.openedBy!.at;
+    store.appendMessage(older.threadId, { role: "bot", kind: "text", text: "the predecessor's job", at: 1_000 });
+    store.deleteBot(sender.id);
+    const recreated = store.createBot({ name: "Clive" });
+    // what a pre-fix server left behind: a second live pair row for the
+    // new id while the predecessor's dangles live beside it
+    const newer = store.createTask(recipient.id, "@Clive", false, undefined, { botId: recreated.id, name: "Clive", kind: "pair", at: 2_000 })!;
+    const reloaded = new Store(selection);
+    const kept = reloaded.resolvePairConversation(recreated, recipient.id, idle)!;
+    // the row the resolver favors survives; the twin is demoted to a
+    // closed plain thread — history kept, never deleted, never re-adopted
+    expect(kept.task.threadId).toBe(newer.threadId);
+    const demoted = reloaded.taskByThread(recipient.id, older.threadId)!;
+    expect(demoted.openedBy).toEqual({ botId: sender.id, name: "Clive", at: olderAt });
+    expect(demoted.closedBy).toMatchObject({ botId: recreated.id, name: "Clive" });
+    expect(reloaded.messagesFor(older.threadId).at(-1)?.text).toBe("the predecessor's job");
+    expect(reloaded.tasks(recipient.id).filter((task) => task.openedBy?.kind === "pair")).toHaveLength(1);
+    // idempotent: with the invariant restored, a second load touches nothing
+    const again = new Store(selection);
+    expect(again.taskByThread(recipient.id, older.threadId)).toEqual(demoted);
+    expect(again.taskByThread(recipient.id, newer.threadId)!.openedBy).toEqual({ botId: recreated.id, name: "Clive", kind: "pair", at: 2_000 });
+    expect(again.tasks(recipient.id).filter((task) => task.openedBy?.kind === "pair")).toHaveLength(1);
+  });
+
   it("setTaskClosedBy stamps who closed a thread, survives a reload, and null reopens it", () => {
     const store = new Store(selection);
     const bot = store.createBot();
