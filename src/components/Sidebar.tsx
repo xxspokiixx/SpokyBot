@@ -1499,6 +1499,8 @@ export function Sidebar({ open, onClose }: { open: boolean; onClose: () => void 
   const [menu, setMenu] = useState<MenuState | null>(null);
   const [sectionPicker, setSectionPicker] = useState<MenuState | null>(null);
   const [newTeam, setNewTeam] = useState(false);
+  const [teamMenu, setTeamMenu] = useState<{ name: string; x: number; y: number } | null>(null);
+  const [deletingTeam, setDeletingTeam] = useState<string | null>(null);
   const [moveToTeam, setMoveToTeam] = useState<string | null>(null);
   const [roomMenu, setRoomMenu] = useState<{ groupId: string; x: number; y: number } | null>(null);
   const [roomSectionPicker, setRoomSectionPicker] = useState<{ groupId: string; x: number; y: number } | null>(null);
@@ -2075,6 +2077,10 @@ export function Sidebar({ open, onClose }: { open: boolean; onClose: () => void 
                 {density !== "icons" && (
                   <SidebarSectionHeader
                     name={sectionLabel(id)}
+                    onContextMenu={sectionName && layoutInteractive && !remoteClient ? event => {
+                      event.preventDefault();
+                      setTeamMenu({ name: sectionName, x: Math.min(event.clientX, window.innerWidth - 230), y: Math.min(event.clientY, window.innerHeight - 110) });
+                    } : undefined}
                     collapsed={collapsed}
                     attention={attention}
                     onToggle={layoutInteractive ? () => toggleSection(id) : undefined}
@@ -2277,6 +2283,29 @@ export function Sidebar({ open, onClose }: { open: boolean; onClose: () => void 
         }}
       />
       {newTeam && <TeamDialog onClose={() => setNewTeam(false)} />}
+      {teamMenu && createPortal(<div className="fixed inset-0 z-40" onMouseDown={() => setTeamMenu(null)}>
+        <div role="menu" aria-label={teamMenu.name} style={{ left: teamMenu.x, top: teamMenu.y }}
+          className="absolute w-[220px] rounded-xl border border-hairline/50 bg-menu p-1.5 text-ink shadow-xl"
+          onMouseDown={event => event.stopPropagation()} onKeyDown={event => {
+            if (event.key === "Escape" || event.key === "Tab") setTeamMenu(null);
+            navigateThreadMenu(event);
+          }}>
+          <button type="button" role="menuitem" autoFocus className="flex w-full items-center gap-2 rounded-lg px-3 py-2 text-left text-[13px] hover:bg-raised"
+            onClick={() => { setMoveToTeam(teamMenu.name); setTeamMenu(null); }}><Users size={14} />{t("team.addBots")}</button>
+          <button type="button" role="menuitem" className="flex w-full items-center gap-2 rounded-lg px-3 py-2 text-left text-[13px] text-danger hover:bg-raised"
+            onClick={() => { setDeletingTeam(teamMenu.name); setTeamMenu(null); }}><Trash2 size={14} />{t("team.delete")}</button>
+        </div>
+      </div>, document.body)}
+      <ConfirmDialog open={deletingTeam !== null} title={t("team.deleteTitle", { name: deletingTeam ?? "" })}
+        body={t("team.deleteKeepBotsDescription")} confirmLabel={t("team.delete")} returnFocusRef={sidebarRef}
+        onCancel={() => setDeletingTeam(null)} onConfirm={() => {
+          const name = deletingTeam;
+          setDeletingTeam(null);
+          if (!name) return;
+          void api(`/api/sidebar-sections?section=${encodeURIComponent(name)}`, { method: "DELETE" })
+            .then(({ sections }) => dispatch({ type: "sections", sections }))
+            .catch(cause => setTeamFeedback({ error: true, text: cause instanceof Error ? cause.message : String(cause) }));
+        }} />
       {moveToTeam && <TeamDialog section={moveToTeam} onClose={() => setMoveToTeam(null)} />}
       {sectionPicker && (
         <SectionPicker
