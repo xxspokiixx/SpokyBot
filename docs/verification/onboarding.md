@@ -27,3 +27,32 @@ each workflow. Actual provider authentication and native Electron permissions
 remain covered by their separate platform recipes, not this browser fixture.
 
 Stop the launcher with Ctrl-C; it owns and removes only its disposable home.
+
+## Organisation row, hosted beats and member note (Sep 23 2026)
+
+What each first-run surface depends on, and how it was checked:
+
+| Who opens the app | What they get | Checked by |
+|---|---|---|
+| Desktop app, own server | The same flow as before, decided without a new request | `src/components/onboarding/WelcomeGate.test.ts`; `HelloBeat`/`EnginesBeat` HTML compared byte for byte with main (no bridge) |
+| Packaged desktop with the organisation bridge | An optional "Using OpenMausBot at work?" row on the engines beat; a signed-in Company engine counts as ready | `beats/OrganisationRow.test.ts`, `beats/EnginesBeat.test.ts` (fake bridge) |
+| Browser, admin of a hosted workspace | Greeting (no inputs) and the bot beat only | `WelcomeGate.test.ts`, `beats/HelloBeat.test.ts`, `src/lib/onboarding.test.ts` |
+| Browser, member (no admin scope, hosted or not) | No welcome flow; one dismissible note kept in browser storage; no first-conversation spotlights | `WelcomeGate.test.ts`, `FirstConversationTour.test.ts` |
+
+`GET /api/auth/session` adds `hosted: true` for a session on a hosted
+workspace and is otherwise unchanged (`server/hosted-access.test.ts`,
+`server/email-signin.test.ts`).
+
+On a fresh `ui launch` fixture, the recipe above still passed end to end
+through the new session check. In the same fixture browser, a client-scope
+paired session with the server's onboarding record reset got the note and no
+welcome flow. "Got it" made no `/api/config` write, and the note stayed away
+after a reload. The engines beat was mounted from the Vite preview with a fake
+`window.ogb.organization` injected before mount; it showed the row signed out,
+then connecting with the code, then connected. `begin` ran once, with the
+default Admin. Screenshots are in `.omb-scratch/verify-evidence/onboarding/`.
+
+Not covered here: the real Electron preload bridge and a real Admin enrolment
+(see [organisation connection](organization-settings.md), not rerun for this
+change), and a real hosted tenant's browser. The hosted beat set was rendered
+from a temporary preview entry, not reached through a hosted sign-in.

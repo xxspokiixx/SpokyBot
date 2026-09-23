@@ -162,7 +162,7 @@ describe("hosted bridge in the full server", () => {
   });
   it("accepts a portal session, enforces outages/demotion, and issues only current permissions on reauthentication", async () => {
     const cookie = await login();
-    expect((await call("/api/auth/session", { cookie })).body.scopes).toEqual(["admin", "client"]);
+    expect((await call("/api/auth/session", { cookie })).body).toMatchObject({ scopes: ["admin", "client"], hosted: true });
     expect((await call("/", { cookie })).body).toContain("Fixture workspace");
     state("admin", true);
     expect((await call("/api/auth/session", { cookie })).status).toBe(503);
@@ -171,7 +171,7 @@ describe("hosted bridge in the full server", () => {
     state("member");
     expect((await call("/api/auth/session", { cookie })).status).toBe(401);
     const memberCookie = await login();
-    expect((await call("/api/auth/session", { cookie: memberCookie })).body.scopes).toEqual(["client"]);
+    expect((await call("/api/auth/session", { cookie: memberCookie })).body).toMatchObject({ scopes: ["client"], hosted: true });
     expect((await call("/api/auth/sessions", { cookie: memberCookie })).status).toBe(403);
   });
   it("closes an existing quiet event stream within fifteen seconds of remote revocation", async () => {

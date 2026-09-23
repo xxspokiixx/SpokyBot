@@ -11525,6 +11525,9 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
               environmentId: ENVIRONMENT_ID,
               // the account behind the session, when it came from a sign-in
               ...(auth.session.email ? { email: auth.session.email } : {}),
+              // a hosted team workspace: the web UI's first run skips the
+              // desktop-only beats there. Absent everywhere else.
+              ...(HOSTED_WORKSPACE ? { hosted: true } : {}),
             },
       );
     }
