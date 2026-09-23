@@ -609,3 +609,61 @@ describe("mention roster comparison", () => {
     expect(samePeers(roster, [roster[0]!])).toBe(false);
   });
 });
+describe("mermaid diagrams", () => {
+  it("routes mermaid fences to the diagram frame instead of the code chrome", () => {
+    const html = renderToStaticMarkup(createElement(ChatMarkdown, {
+      text: "```mermaid\nflowchart LR\n  Ship-->Sea\n```",
+    }));
+    expect(html).toContain('title="Mermaid diagram"');
+    expect(html).toContain("flowchart LR");
+    expect(html).not.toContain('aria-label="Wrap long lines"');
+  });
+
+  it("matches the fence tag case-insensitively", () => {
+    const html = renderToStaticMarkup(createElement(ChatMarkdown, {
+      text: "```Mermaid\nflowchart LR\n  Ship-->Sea\n```",
+    }));
+    expect(html).toContain('title="Mermaid diagram"');
+  });
+
+  it("keeps ordinary fenced code on the highlighter path", () => {
+    const html = renderToStaticMarkup(createElement(ChatMarkdown, {
+      text: "```ts\nconst sea = true;\n```",
+    }));
+    expect(html).not.toContain("Mermaid diagram");
+    expect(html).toContain('aria-label="Copy code to clipboard"');
+  });
+});
+
+it("renders mermaid strictly and serves repeat views from cache", async () => {
+  const originalUseEffect = (await vi.importActual<typeof React>("react")).useEffect;
+  const effects: React.EffectCallback[] = [];
+  const effect = vi.mocked(React.useEffect).mockImplementation((callback) => { effects.push(callback); });
+  const initialize = vi.fn();
+  const render = vi.fn().mockResolvedValue({ svg: "<svg>sea lanes</svg>" });
+  vi.doMock("mermaid", () => ({ default: { initialize, render } }));
+  const cleanup: ReturnType<React.EffectCallback>[] = [];
+  const fence = "```mermaid\nflowchart LR\n  Ship-->Sea\n```";
+  try {
+    renderToStaticMarkup(createElement(ChatMarkdown, { text: fence }));
+    for (const callback of effects.splice(0)) cleanup.push(callback());
+    await vi.waitFor(() => expect(render).toHaveBeenCalledTimes(1));
+    expect(initialize).toHaveBeenCalledWith(expect.objectContaining({
+      startOnLoad: false,
+      securityLevel: "strict",
+      suppressErrorRendering: true,
+    }));
+    expect(render).toHaveBeenCalledWith(expect.any(String), "flowchart LR\n  Ship-->Sea");
+
+    // a settled remount (revisiting the thread, a skin flip) re-renders from
+    // cache: still exactly one real mermaid render for this source
+    renderToStaticMarkup(createElement(ChatMarkdown, { text: fence }));
+    for (const callback of effects.splice(0)) cleanup.push(callback());
+    await Promise.resolve();
+    expect(render).toHaveBeenCalledTimes(1);
+  } finally {
+    for (const close of cleanup) if (typeof close === "function") close();
+    effect.mockImplementation(originalUseEffect);
+    vi.doUnmock("mermaid");
+  }
+});

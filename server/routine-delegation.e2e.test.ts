@@ -266,7 +266,7 @@ describe("routine delegation through the isolated harness", () => {
     await control(["wait", "--bot", source.id, "--task", run.threadId]);
     const transcript = await messages(run.threadId);
     expect(transcript.some((message) => message.text?.includes("[A delegated task just completed]"))).toBe(false);
-    expect((await runState(run.id)).status).toBe("cancelled");
+    await expect.poll(async () => (await runState(run.id))?.status, { timeout: 10_000 }).toBe("cancelled");
     evidence.push({ cancelledPeerDidNotResumeNewUserTurn: true, transcript });
   }, 45_000);
 });

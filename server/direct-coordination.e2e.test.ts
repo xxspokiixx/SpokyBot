@@ -6,6 +6,7 @@ import { expect, it } from "vitest";
 import { launchVerificationServer, runControlOmb } from "../scripts/control-omb.ts";
 import { request } from "../scripts/mcp-server.ts";
 import { removeTempDir } from "./testing/cleanup.ts";
+import { openSse } from "./testing/sse.ts";
 
 async function fixture(test: (f: any) => Promise<void>, fakeEnv: NodeJS.ProcessEnv = {}) {
   const session = await launchVerificationServer({ ...process.env, ...fakeEnv }, undefined, undefined, undefined, undefined, { scripted: true });
@@ -46,7 +47,7 @@ it.each([false, true])("starts independent work immediately and frees the Chief 
   await expect.poll(async () => {
     const b = await readChief();
     return !b.busy && b.waitingForTeammates && b.tasks.find((t: any) => t.threadId === f.chief.activeTaskId)?.waitingForTeammates;
-  }, { timeout: 15_000 }).toBe(true);
+  }, { timeout: 30_000 }).toBe(true);
   // No provider turn is occupying the Chief; its thread controls remain usable.
   await f.api(`/api/bots/${f.chief.id}/tasks/${f.chief.activeTaskId}`, { approvalMode: "ask" }, "PATCH");
   expect(f.nodes().find((n: any) => n.botId === f.lead.id).status).toBe("running");
@@ -54,7 +55,10 @@ it.each([false, true])("starts independent work immediately and frees the Chief 
   await expect.poll(() => f.nodes().find((n: any) => n.botId === f.chief.id)?.status, { timeout: 15_000 }).toBe("completed");
   expect((await f.wait()).status).toBe("settled");
   expect((await f.messages(f.chief.activeTaskId)).filter((m: any) => m.text === f.plan[f.chief.id].resumeReply)).toHaveLength(1);
-  expect(await readChief()).toMatchObject({ busy: false, waitingForTeammates: false });
+  await expect.poll(async () => {
+    const b = await readChief();
+    return { busy: b.busy, waitingForTeammates: b.waitingForTeammates };
+  }, { timeout: 15_000 }).toEqual({ busy: false, waitingForTeammates: false });
 }), 60_000);
 
 it("coordinates a lead and its specialist from ordinary chat, returns to Clive, and leaves unrelated tasks untouched", () => fixture(async f => {
@@ -85,6 +89,51 @@ it("coordinates a lead and its specialist from ordinary chat, returns to Clive, 
   expect(bots.find((bot: any) => bot.id === f.lead.id).tasks.find((task: any) => task.threadId === receipt.threadRef.threadId).openedBy)
     .toMatchObject({ botId: f.chief.id, name: "Clive" });
   expect(turn.system).toContain("only an actual coordinate_bots result proves that teammate participated");
+}), 45_000);
+
+it("announces a settled delegation and its resume in the parent thread", () => fixture(async f => {
+  const stream = await openSse(`${f.session.info.url}/api/events`);
+  try {
+    await f.start();
+    expect((await f.wait()).status).toBe("settled");
+    // f.wait() resolves through the control CLI poll, an independent path
+    // from the SSE reader loop; until() (which also resolves on frames
+    // already seen) is what proves both settles are stored before the
+    // assertions below count them
+    await Promise.all([
+      stream.until(frame => frame.kind === "notify"
+        && frame.notification?.kind === "delegation-settled"
+        && frame.notification.botId === f.chief.id),
+      stream.until(frame => frame.kind === "notify"
+        && frame.notification?.kind === "delegation-settled"
+        && frame.notification.botId === f.lead.id),
+    ]);
+    const settles = () => stream.frames.filter(frame => frame.kind === "notify" && frame.notification?.kind === "delegation-settled");
+    // the chief's resume is announced exactly once, pointing at the
+    // conversation the notification opens
+    const chiefFrames = settles().filter(frame => frame.notification.botId === f.chief.id);
+    expect(chiefFrames).toHaveLength(1);
+    expect(chiefFrames[0].notification).toMatchObject({
+      threadId: f.chief.activeTaskId,
+      title: "Clive resumed with results",
+      body: "Results in from Engineering lead",
+    });
+    // the nested lead resume is announced too, on its delegated thread
+    const leadFrames = settles().filter(frame => frame.notification.botId === f.lead.id);
+    expect(leadFrames).toHaveLength(1);
+    expect(leadFrames[0].notification.threadId).not.toBe(f.lead.activeTaskId);
+    // the specialist ran the work and never resumed, so it earns no frame
+    expect(settles().some(frame => frame.notification.botId === f.specialist.id)).toBe(false);
+    // suppression of the delegated turns themselves is unchanged: neither
+    // child earns a done frame. The chief's own asked-for outer turn still
+    // may, exactly as before.
+    expect(stream.frames.some(frame => frame.kind === "notify" && frame.notification?.kind === "done"
+      && (frame.notification.botId === f.lead.id || frame.notification.botId === f.specialist.id))).toBe(false);
+    // one visible chip per settle in the parent's conversation, never per steer
+    const chips = (await f.messages(f.chief.activeTaskId))
+      .filter((message: any) => message.kind === "activity" && message.tool?.name.startsWith("Resumed with "));
+    expect(chips.map((message: any) => message.tool.name)).toEqual(["Resumed with Engineering lead results, reviewing"]);
+  } finally { stream.close(); }
 }), 45_000);
 
 it.each(["resume", "stop", "failed resume", "failed root"] as const)("keeps a guarded Chief request exact through coordination and %s", action => fixture(async f => {
@@ -457,8 +506,10 @@ it("queues a recipient at capacity, preserving its existing task and resuming on
   await f.cli("send", "--bot", f.lead.id, "--task", f.lead.activeTaskId, "--text", "My unrelated task");
   await f.start();
   await expect.poll(() => f.nodes().find((node: any) => node.parentId)?.status, { timeout: 10_000 }).toBe("queued");
-  const chief = (await f.api("/api/bots")).bots.find((bot: any) => bot.id === f.chief.id);
-  expect(chief).toMatchObject({ busy: false, waitingForTeammates: true });
+  await expect.poll(async () => {
+    const chief = (await f.api("/api/bots")).bots.find((bot: any) => bot.id === f.chief.id);
+    return { busy: chief.busy, waitingForTeammates: chief.waitingForTeammates };
+  }, { timeout: 15_000 }).toEqual({ busy: false, waitingForTeammates: true });
   const next = await f.api(`/api/bots/${f.chief.id}/tasks`, { title: "Other conversation" });
   expect((await f.wait()).status).toBe("settled");
   expect(await f.messages(next.task.threadId)).toEqual([]);

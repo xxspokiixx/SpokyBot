@@ -312,4 +312,36 @@ describe("hosted bridge in the full server", () => {
     await policyHealth(false);
     await refuseFullTask();
   }, 25_000);
+  it("offers the Slack management link for real agents to hosted admins and members, without sharing credentials", async () => {
+    state();
+    await restart({ OMB_ADMIN_MEMBERSHIP: "portal" });
+    const botId = await policyBot();
+    const path = `/api/bots/${botId}/slack-management`;
+    const cookie = await login();
+    const management = await call(path, { cookie });
+    expect(management.status).toBe(200);
+    expect(management.body).toEqual({ available: true,
+      managementUrl: `https://admin.example.test/slack?workspace=acme&bot=${botId}` });
+    expect((await call("/api/bots/missing-agent/slack-management", { cookie })).status).toBe(404);
+    expect((await call(`/api/bots/${botId}`, { local: true, method: "PATCH", body: { hidden: true } })).status).toBe(200);
+    expect((await call(path, { cookie })).status).toBe(404);
+    expect((await call(`/api/bots/${botId}`, { local: true, method: "PATCH", body: { hidden: false } })).status).toBe(200);
+    state("member");
+    expect((await call(path, { cookie })).status).toBe(401);
+    // A member reads Bot Settings too: same link, and Admin decides what its visitor may do.
+    const memberCookie = await login();
+    expect((await call("/api/auth/session", { cookie: memberCookie })).body.scopes).toEqual(["client"]);
+    const asMember = await call(path, { cookie: memberCookie });
+    expect(asMember.status).toBe(200);
+    expect(asMember.body).toEqual(management.body);
+    expect((await call(path, { cookie: memberCookie, method: "POST", body: {} })).status).toBe(403);
+    // No credential at all: the gate refuses a remote stranger before the route table runs.
+    const stranger = await call(path);
+    expect(stranger.status).toBe(403);
+    expect(JSON.stringify(stranger.body)).not.toContain("admin.example.test");
+    state();
+    await restart({ OMB_ADMIN_MEMBERSHIP: "local" });
+    expect((await call(path, { local: true })).body).toEqual({ available: false });
+    policyEvidence.push({ slackManagement: management.body, memberStatus: asMember.status, localMembershipAvailable: false });
+  }, 30_000);
 });

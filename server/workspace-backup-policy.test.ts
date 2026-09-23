@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { excludedWorkspaceAuthPath, portableWorkspaceConfig, restoredWorkspaceConfig } from "./workspace-backup-policy.ts";
+import { ephemeralWorkspaceTokenPath, excludedWorkspaceAuthPath, portableWorkspaceConfig, restoredWorkspaceConfig } from "./workspace-backup-policy.ts";
 
 describe("workspace backup data boundary", () => {
   it("exports ordinary settings only and retains destination connection sections unchanged", () => {
@@ -35,6 +35,11 @@ describe("workspace backup data boundary", () => {
     "webhooks.json.123.05a7b3e0-1234.tmp", "browser-engine-key.12.05a7b3e0-1234.tmp",
   ])("excludes known owned authentication path %s", (path) => {
     expect(excludedWorkspaceAuthPath(path)).toBe(true);
+  });
+
+  it("never exports the per-turn hook token directory, and only that directory", () => {
+    for (const path of ["hook-tokens", "hook-tokens/0123456789abcdef01234567.token"]) expect(ephemeralWorkspaceTokenPath(path)).toBe(true);
+    for (const path of ["hook-tokens.md", "workspaces/bot/hook-tokens/notes.md", "attachments/api.token"]) expect(ephemeralWorkspaceTokenPath(path)).toBe(false);
   });
 
   it.each(["attachments/key.txt", "workspaces/bot/notes.md", "workspaces/bot/external-runtimes.json", "vm-home/project/config.json", "config.json", "webhooks.json"])("does not redact arbitrary user file %s", (path) => {

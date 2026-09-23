@@ -2508,6 +2508,107 @@ describe("RoutineManager", () => {
     expect(h.failed).toHaveLength(1);
   });
 
+  it("marks every unseen failed or missed run seen in one sweep", async () => {
+    const h = harness();
+    const broken = h.manager.create({
+      name: "Broken report",
+      prompt: "Write the report",
+      botId: "maus-1",
+      schedule: { type: "once", at: new Date(2026, 7, 17, 8, 1).getTime() },
+    });
+    h.manager.create({
+      name: "Stale check",
+      prompt: "Do the stale thing",
+      botId: "maus-2",
+      schedule: { type: "once", at: new Date(2026, 7, 16, 6, 0).getTime() },
+    });
+    const fine = h.manager.create({
+      name: "Fine brief",
+      prompt: "Write the brief",
+      botId: "maus-3",
+      schedule: { type: "once", at: new Date(2026, 7, 17, 8, 3).getTime() },
+    });
+    const acknowledged = h.manager.create({
+      name: "Old failure",
+      prompt: "Try the work",
+      botId: "maus-4",
+      schedule: { type: "once", at: new Date(2026, 7, 17, 8, 4).getTime() },
+    });
+
+    await h.manager.tick(); // the long-past once routine is recorded as missed
+    h.setNow(broken.nextRunAt!);
+    await h.manager.tick();
+    h.manager.handleRuntimeEvent({
+      eventId: "broken", provider: "fake", threadId: "thread-1",
+      createdAt: new Date().toISOString(), type: "turn.completed", ok: false, stopReason: "provider crashed",
+    });
+    h.setNow(fine.nextRunAt!);
+    await h.manager.tick();
+    h.manager.handleRuntimeEvent({
+      eventId: "fine", provider: "fake", threadId: "thread-2",
+      createdAt: new Date().toISOString(), type: "turn.completed", ok: true,
+    });
+    h.setNow(acknowledged.nextRunAt!);
+    await h.manager.tick();
+    h.manager.handleRuntimeEvent({
+      eventId: "acknowledged", provider: "fake", threadId: "thread-3",
+      createdAt: new Date().toISOString(), type: "turn.completed", ok: false, stopReason: "crashed earlier",
+    });
+    const runsByName = () => new Map(h.manager.listRuns().map((run) => [run.routineName, run]));
+    h.manager.markSeen(runsByName().get("Old failure")!.id);
+
+    h.emitted.length = 0;
+    const stampAt = new Date(2026, 7, 18, 8, 0).getTime();
+    h.setNow(stampAt);
+    const stamped = h.manager.markAllSeen();
+    expect([...stamped].sort((a, b) => a.routineName.localeCompare(b.routineName))).toMatchObject([
+      { routineName: "Broken report", seenAt: stampAt },
+      { routineName: "Stale check", seenAt: stampAt },
+    ]);
+    const after = runsByName();
+    expect(after.get("Fine brief")).toMatchObject({ status: "completed" });
+    expect(after.get("Fine brief")!.seenAt).toBeUndefined();
+    expect(after.get("Old failure")!.seenAt).toBeLessThan(stampAt);
+    const frames = h.emitted.filter((frame) => frame.kind === "routine.run");
+    expect(frames).toHaveLength(2);
+    expect(frames.map((frame) => frame.run.seenAt)).toEqual([stampAt, stampAt]);
+
+    expect(h.manager.markAllSeen()).toEqual([]);
+    const reloadedByName = new Map(new RoutineManager(h.options).listRuns().map((run) => [run.routineName, run]));
+    expect(reloadedByName.get("Broken report")!.seenAt).toBe(stampAt);
+    expect(reloadedByName.get("Stale check")!.seenAt).toBe(stampAt);
+  });
+
+  it("rolls the mark-all sweep back when its save fails", async () => {
+    const h = harness();
+    const routine = h.manager.create({
+      name: "Broken report",
+      prompt: "Write the report",
+      botId: "maus-1",
+      schedule: { type: "once", at: new Date(2026, 7, 17, 8, 1).getTime() },
+    });
+    h.setNow(routine.nextRunAt!);
+    await h.manager.tick();
+    h.manager.handleRuntimeEvent({
+      eventId: "broken", provider: "fake", threadId: "thread-1",
+      createdAt: new Date().toISOString(), type: "turn.completed", ok: false, stopReason: "provider crashed",
+    });
+    expect(h.manager.listRuns()[0]).toMatchObject({ status: "failed" });
+
+    h.emitted.length = 0;
+    const save = vi.spyOn(h.manager as unknown as { save(): void }, "save").mockImplementationOnce(() => { throw new Error("fixture disk full"); });
+    expect(() => h.manager.markAllSeen()).toThrow("fixture disk full");
+    expect(h.manager.listRuns()[0].seenAt).toBeUndefined();
+    expect(h.emitted).toHaveLength(0);
+    const persisted = new RoutineManager(h.options).listRuns().find((run) => run.routineName === routine.name);
+    expect(persisted!.seenAt).toBeUndefined();
+
+    save.mockRestore();
+    const stampAt = new Date(2026, 7, 18, 8, 0).getTime();
+    h.setNow(stampAt);
+    expect(h.manager.markAllSeen()).toMatchObject([{ routineName: routine.name, seenAt: stampAt }]);
+  });
+
   it("keeps recurring history while advancing the definition", async () => {
     const h = harness();
     const routine = h.manager.create({

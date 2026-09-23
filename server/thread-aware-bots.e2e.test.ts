@@ -373,12 +373,15 @@ describe("coordinate_bots on a teammate", () => {
       }
       const before = await botState(qa.id);
       expect(before.threadId).toBe(qa.threadId);
-      for (const thread of opened) {
+      for (const [index, thread] of opened.entries()) {
         expect(thread.status).toBe("queued");
         expect(before.tasks.find((task: any) => task.threadId === thread.threadId)).toMatchObject({
           openedBy: { botId: pm.id, name: "Pam" },
         });
-        expect(dumpOf(thread.threadId)).toBeUndefined();
+        // A thread within capacity can be dispatched at any moment after its
+        // handoff is accepted; only threads beyond it are guaranteed to stay
+        // queued — and so without a dump — while the source turn is held.
+        if (index >= capacity) expect(dumpOf(thread.threadId)).toBeUndefined();
       }
       const chips = (await messages(pm.threadId)).filter((message) => message.threadRef);
       expect(chips.map((chip) => [chip.tool.name, chip.threadRef.botId, chip.threadRef.threadId])).toEqual(

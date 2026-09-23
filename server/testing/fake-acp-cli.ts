@@ -13,7 +13,7 @@
 //                       real-agent shape that forces the driver's one-shot
 //                       re-spawn fallback. A fresh process holds no live
 //                       session, so its load succeeds.
-//   FAKE_ACP_MODE   happy (default) | image | empty-reply | exit-early | fail-after-text | hang | hang-initialize | stall-after-text | no-auth | auth-required | permission | question
+//   FAKE_ACP_MODE   happy (default) | image | empty-reply | reasoning-only | exit-early | fail-after-text | hang | hang-initialize | stall-after-text | no-auth | auth-required | permission | question
 //                   | interleave (message → tool → message → tool → message)
 //                   | no-session-config (reject session/set_mode + set_model
 //                     with -32601, i.e. an agent predating those methods)
@@ -50,6 +50,12 @@
 //   FAKE_ACP_RPC_APPEND_FILE  append one {"pid","method"} JSON line per
 //                       request, so a test can count RPCs across a pooled
 //                       child and its replacement together
+//   FAKE_ACP_RPC_FAILURE_FILE  read a JSON-RPC error object on session/prompt;
+//                       once read this process stays poisoned even if the
+//                       file is removed. A replacement process can recover.
+//   FAKE_ACP_RPC_FAILURE_METHOD  session/new or session/prompt (default).
+//   FAKE_ACP_RPC_FAILURE_AFTER_OUTPUT  emit text + a tool result before failing.
+//   FAKE_ACP_LOAD_ERROR  JSON-RPC error object returned by session/load.
 //   FAKE_ACP_MODELS      comma-separated model ids. Enables the opencode-shaped
 //                        surface: session/new and session/load return
 //                        configOptions, and session/set_config_option switches
@@ -181,6 +187,10 @@ const dumpEnv = Object.fromEntries(
     "BOX_TOKEN",
     "OMB_TTS_KEY",
     "OMB_FISH_AUDIO_API_KEY",
+    "OMB_CLOUD_READY_TOKEN",
+    "OMB_CLOUD_BOOTSTRAP",
+    "OMB_LICENSE_KEY",
+    "OMB_INSTALLATION_CREDENTIAL",
     "FACTORY_API_KEY",
     "UNSLOTH_STUDIO_AUTH_TOKEN",
     "CURSOR_API_KEY",
@@ -315,6 +325,17 @@ type McpEntry = { command: string; args?: string[]; env?: Array<{ name: string; 
 let agentsMcp: McpEntry | null = null;
 // the session this process established, for FAKE_ACP_REJECT_LIVE_LOAD_FILE
 let liveSession: string | null = null;
+let rpcFailure: unknown = null;
+function failRpc(msg: { method: string; id: unknown }): boolean {
+  if (msg.method !== (process.env.FAKE_ACP_RPC_FAILURE_METHOD ?? "session/prompt")) return false;
+  const failureFile = process.env.FAKE_ACP_RPC_FAILURE_FILE;
+  if (failureFile && existsSync(failureFile)) rpcFailure = JSON.parse(readFileSync(failureFile, "utf8"));
+  if (!rpcFailure) return false;
+  if (msg.method === "session/prompt" && process.env.FAKE_ACP_RPC_FAILURE_AFTER_OUTPUT === "1") playTurn();
+  recordMethod(`${msg.method}.error`);
+  out({ jsonrpc: "2.0", id: msg.id, error: rpcFailure });
+  return true;
+}
 
 /** Minimal one-shot MCP stdio client: initialize, call each tool in
  * sequence, return the text of the last result. Dependency-free. */
@@ -392,6 +413,14 @@ function playInterleaveTurn() {
   out({ jsonrpc: "2.0", method: "session/update", params: { update: { sessionUpdate: "agent_message_chunk", content: { text: "after" } } } });
 }
 
+/** Scripted reasoning-only turn: thought chunks and nothing else — the shape
+ * of a provider that never leaves its thinking stream yet still answers
+ * end_turn, which the driver must report as a lost turn, not a success. */
+function playReasoningTurn() {
+  out({ jsonrpc: "2.0", method: "session/update", params: { update: { sessionUpdate: "agent_thought_chunk", content: { text: "considering the request at length" } } } });
+  out({ jsonrpc: "2.0", method: "session/update", params: { update: { sessionUpdate: "agent_thought_chunk", content: { text: " without ever producing an answer" } } } });
+}
+
 let buf = "";
 process.stdin.on("data", (c) => {
   buf += c;
@@ -462,6 +491,7 @@ function handle(msg: any) {
       result(msg.id, {});
       break;
     case "session/new": {
+      if (failRpc(msg)) break;
       if (mode === "auth-required") {
         out({
           jsonrpc: "2.0",
@@ -490,6 +520,10 @@ function handle(msg: any) {
       break;
     }
     case "session/load": {
+      if (process.env.FAKE_ACP_LOAD_ERROR) {
+        out({ jsonrpc: "2.0", id: msg.id, error: JSON.parse(process.env.FAKE_ACP_LOAD_ERROR) });
+        break;
+      }
       if (process.env.FAKE_ACP_LOAD_NULL) {
         result(msg.id, null);
         break;
@@ -616,6 +650,7 @@ function handle(msg: any) {
       if (process.env.FAKE_ACP_DUMP && process.env.FAKE_ACP_DUMP_PROMPT === "1") {
         writeFileSync(`${process.env.FAKE_ACP_DUMP}.prompt.json`, JSON.stringify(msg.params?.prompt ?? null, null, 2));
       }
+      if (failRpc(msg)) return;
       if (mode === "hang") {
         // never resolve the prompt on our own — lets tests exercise interrupt
         hangingPromptId = msg.id;
@@ -871,6 +906,7 @@ function handle(msg: any) {
           },
         });
       } else if (mode === "interleave") playInterleaveTurn();
+      else if (mode === "reasoning-only") playReasoningTurn();
       else if (mode !== "empty-reply") playTurn();
       if (mode === "safe-agent-reads" && agentsMcp) {
         const entry = agentsMcp;
@@ -900,9 +936,14 @@ function handle(msg: any) {
         return;
       }
       if (mode === "permission") {
-        // ask the client to approve a tool, then complete once answered
+        // ask the client to approve a tool, then — like a real agent once its
+        // card is answered — close the turn with a visible reply instead of
+        // ending bare (a bare end_turn is the lost-turn failure, not a success)
         pendingPermissionId = 9001;
-        onPermissionAnswered = complete;
+        onPermissionAnswered = () => {
+          out({ jsonrpc: "2.0", method: "session/update", params: { update: { sessionUpdate: "agent_message_chunk", content: { text: "handled the permission decision" } } } });
+          complete();
+        };
         out({
           jsonrpc: "2.0",
           id: pendingPermissionId,
@@ -924,7 +965,10 @@ function handle(msg: any) {
       }
       if (mode === "question") {
         pendingPermissionId = 9002;
-        onPermissionAnswered = complete;
+        onPermissionAnswered = () => {
+          out({ jsonrpc: "2.0", method: "session/update", params: { update: { sessionUpdate: "agent_message_chunk", content: { text: "answered the question" } } } });
+          complete();
+        };
         out({
           jsonrpc: "2.0",
           id: pendingPermissionId,
