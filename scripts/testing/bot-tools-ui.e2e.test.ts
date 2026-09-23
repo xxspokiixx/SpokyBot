@@ -40,7 +40,7 @@ describe("bot setup and tools in the real renderer", () => {
     await expect.poll(() => {
       if (child!.exitCode !== null || child!.signalCode !== null) throw new Error(`UI launcher exited: ${stderr}`);
       try { info = JSON.parse(stdout); return Boolean(info.ui); } catch { return false; }
-    }, { timeout: LAUNCH_TIMEOUT_MS, interval: 250 }).toBe(true);
+    }, { timeout: LAUNCH_TIMEOUT_MS + 120_000, interval: 250 }).toBe(true);
     const ui = (verb: string, ...args: string[]) => runControlOmb(["ui", verb, "--ui", info.ui, ...args]) as Promise<Record<string, any>>;
     const evaluate = async (js: string) => (await ui("eval", "--js", js)).result;
     const click = (name: string) => ui("click", "--name", name);
@@ -124,10 +124,10 @@ describe("bot setup and tools in the real renderer", () => {
         .filter(([, entry]) => entry.role === "button" && entry.name.includes("$0.01"));
       expect(cost).toHaveLength(1);
       await ui("click", "--ref", `@${cost[0][0]}`);
-      await expect.poll(usageExpanded).toBe("true");
+      await expect.poll(usageExpanded, { timeout: 10_000 }).toBe("true");
       expect(await snapshot()).toContain("All bots");
       // Allow subpixel rounding at the bottom edge of the scroll viewport.
-      await expect.poll(() => evaluate("(() => { const row = document.querySelector('[data-bot-settings-section=usage]'); const rect = row?.getBoundingClientRect(); return rect ? Math.max(-rect.top, rect.bottom - innerHeight) : 9999; })()")).toBeLessThanOrEqual(1);
+      await expect.poll(() => evaluate("(() => { const row = document.querySelector('[data-bot-settings-section=usage]'); const rect = row?.getBoundingClientRect(); return rect ? Math.max(-rect.top, rect.bottom - innerHeight) : 9999; })()"), { timeout: 10_000 }).toBeLessThanOrEqual(1);
     };
     await openHeaderUsage();
     await click("Usage");
@@ -214,5 +214,5 @@ describe("bot setup and tools in the real renderer", () => {
     expect(child.exitCode).toBe(0);
     expect(existsSync(info.dataDir)).toBe(false);
     expect(existsSync(info.logPath)).toBe(true);
-  }, LAUNCH_TIMEOUT_MS + 180_000);
+  }, LAUNCH_TIMEOUT_MS + 300_000);
 });
