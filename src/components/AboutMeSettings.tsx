@@ -28,7 +28,7 @@ export function AboutMeSettings() {
           method: "PUT", body: JSON.stringify({ profile: { aboutMe: sent } }), timeoutMs: 10_000,
         });
         dirty.current = draft.current !== sent;
-        dispatch({ type: "configStatus", config });
+        dispatch({ type: "profileSaved", profile: { aboutMe: config.profile?.aboutMe ?? sent } });
       }
       if (mounted.current) setStatus("saved");
     } catch {
