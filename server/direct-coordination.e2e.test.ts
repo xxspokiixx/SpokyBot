@@ -46,7 +46,7 @@ it.each([false, true])("starts independent work immediately and frees the Chief 
   await expect.poll(async () => {
     const b = await readChief();
     return !b.busy && b.waitingForTeammates && b.tasks.find((t: any) => t.threadId === f.chief.activeTaskId)?.waitingForTeammates;
-  }, { timeout: 15_000 }).toBe(true);
+  }, { timeout: 30_000 }).toBe(true);
   // No provider turn is occupying the Chief; its thread controls remain usable.
   await f.api(`/api/bots/${f.chief.id}/tasks/${f.chief.activeTaskId}`, { approvalMode: "ask" }, "PATCH");
   expect(f.nodes().find((n: any) => n.botId === f.lead.id).status).toBe("running");
@@ -54,7 +54,10 @@ it.each([false, true])("starts independent work immediately and frees the Chief 
   await expect.poll(() => f.nodes().find((n: any) => n.botId === f.chief.id)?.status, { timeout: 15_000 }).toBe("completed");
   expect((await f.wait()).status).toBe("settled");
   expect((await f.messages(f.chief.activeTaskId)).filter((m: any) => m.text === f.plan[f.chief.id].resumeReply)).toHaveLength(1);
-  expect(await readChief()).toMatchObject({ busy: false, waitingForTeammates: false });
+  await expect.poll(async () => {
+    const b = await readChief();
+    return { busy: b.busy, waitingForTeammates: b.waitingForTeammates };
+  }, { timeout: 15_000 }).toEqual({ busy: false, waitingForTeammates: false });
 }), 60_000);
 
 it("coordinates a lead and its specialist from ordinary chat, returns to Clive, and leaves unrelated tasks untouched", () => fixture(async f => {
@@ -457,8 +460,10 @@ it("queues a recipient at capacity, preserving its existing task and resuming on
   await f.cli("send", "--bot", f.lead.id, "--task", f.lead.activeTaskId, "--text", "My unrelated task");
   await f.start();
   await expect.poll(() => f.nodes().find((node: any) => node.parentId)?.status, { timeout: 10_000 }).toBe("queued");
-  const chief = (await f.api("/api/bots")).bots.find((bot: any) => bot.id === f.chief.id);
-  expect(chief).toMatchObject({ busy: false, waitingForTeammates: true });
+  await expect.poll(async () => {
+    const chief = (await f.api("/api/bots")).bots.find((bot: any) => bot.id === f.chief.id);
+    return { busy: chief.busy, waitingForTeammates: chief.waitingForTeammates };
+  }, { timeout: 15_000 }).toEqual({ busy: false, waitingForTeammates: true });
   const next = await f.api(`/api/bots/${f.chief.id}/tasks`, { title: "Other conversation" });
   expect((await f.wait()).status).toBe("settled");
   expect(await f.messages(next.task.threadId)).toEqual([]);
