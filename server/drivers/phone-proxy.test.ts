@@ -55,13 +55,24 @@ describe("phone MCP lazy claim gate", () => {
     expect(calls).toHaveLength(0);
   });
 
-  it("claims once per proxy life and caches the win", async () => {
+  it("claims lazily and revalidates ownership on every call", async () => {
     const { calls, fetchImpl } = stub(async () => ({ ok: true, status: 200 }));
     const ensure = createPhoneClaim(harnessEnv, fetchImpl);
+    expect(calls).toHaveLength(0);
     await expect(ensure()).resolves.toEqual({ ok: true });
     await expect(ensure()).resolves.toEqual({ ok: true });
-    expect(calls).toHaveLength(1);
+    expect(calls).toHaveLength(2);
     expect(calls[0].headers.get("authorization")).toBe("Bearer tok");
+  });
+
+  it.each([401, 403, 409])("rejects a previously successful caller after ownership is lost (%s)", async (status) => {
+    let active = true;
+    const { calls, fetchImpl } = stub(async () => active ? { ok: true, status: 200 } : { ok: false, status });
+    const ensure = createPhoneClaim(harnessEnv, fetchImpl);
+    await expect(ensure()).resolves.toEqual({ ok: true });
+    active = false;
+    await expect(ensure()).resolves.toMatchObject({ ok: false });
+    expect(calls).toHaveLength(2);
   });
 
   it("returns the blocked text on conflict and retries on a later call", async () => {

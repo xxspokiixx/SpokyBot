@@ -251,9 +251,10 @@ const textResult = (text: string, isError = false): ToolResult => ({ content: [{
 
 // The harness reserves the physical phone for one turn at a time, but only
 // from the first real tool call (issue #1663): trigger-term matching decides
-// whether these tools are mounted, never who holds the device. A won claim is
-// cached for the proxy's life (the turn already owns the phone); a lost one
-// is not, so a later call can win once the holding turn settles.
+// whether these tools are mounted, never who holds the device. Revalidate
+// every call: retained MCP processes can outlive their turn, whose claim and
+// capability are released at settlement. Reclaiming for the same live owner
+// is idempotent; a blocked caller can retry once the holding turn settles.
 export function createPhoneClaim(
   env: NodeJS.ProcessEnv = process.env,
   fetchImpl: typeof fetch = fetch,
@@ -265,9 +266,7 @@ export function createPhoneClaim(
     // exclusivity to enforce, exactly the behavior this proxy always had.
     return async () => ({ ok: true });
   }
-  let claimed = false;
   return async () => {
-    if (claimed) return { ok: true };
     try {
       const response = await fetchImpl(new URL("/api/internal/phone/claim", url), {
         method: "POST",
@@ -276,10 +275,7 @@ export function createPhoneClaim(
         body: "{}",
         signal: AbortSignal.timeout(10_000),
       });
-      if (response.ok) {
-        claimed = true;
-        return { ok: true };
-      }
+      if (response.ok) return { ok: true };
       if (response.status === 409) return { ok: false, message: PHONE_BUSY_TEXT };
       if (response.status === 401 || response.status === 403) {
         return { ok: false, message: "This turn no longer has phone access. Start a new turn to use the phone." };

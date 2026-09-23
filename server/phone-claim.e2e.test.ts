@@ -68,7 +68,11 @@ const noPhoneConflict = async (...botIds: string[]) => {
 // Speak enough MCP to one spawned phone proxy for these tests: initialize,
 // then tools/call frames, collecting responses by id.
 async function withPhoneProxy<T>(spec: any, run: (call: (name: string) => Promise<any>) => Promise<T>): Promise<T> {
-  const proxy = spawn(spec.command, spec.args, { env: { ...process.env, ...spec.env }, stdio: ["pipe", "pipe", "ignore"] });
+  // Node acts as an inert cross-platform ADB: `node devices -l` runs the
+  // synthetic script below. Never discover or contact a real attached phone.
+  const proxy = spawn(spec.command, spec.args, { cwd: fixtureHome,
+    env: { ...process.env, ...spec.env, HOME: fixtureHome, USERPROFILE: fixtureHome, OMB_ADB_PATH: process.execPath },
+    stdio: ["pipe", "pipe", "ignore"] });
   try {
     const responses = new Map<number, any>();
     const wakes: Array<() => void> = [];
@@ -111,6 +115,7 @@ async function withPhoneProxy<T>(spec: any, run: (call: (name: string) => Promis
 
 beforeAll(async () => {
   fixtureHome = mkdtempSync(join(tmpdir(), "omb-phone-claim-"));
+  writeFileSync(join(fixtureHome, "devices"), 'process.stdout.write("List of devices attached\\n");');
   dumpFile = join(fixtureHome, "dump.json");
   finishFile = join(fixtureHome, "finish");
   const data = join(fixtureHome, "data");
@@ -168,6 +173,28 @@ const makeRoom = async (name: string, botId: string) => {
 const roomIdle = (groupId: string) => until(() => api("GET", "/api/bots?messages=0"), s => s.groups.find((g: any) => g.id === groupId)?.working !== true);
 
 describe("Lazy phone claim on the real server", () => {
+  it("rejects a retained proxy after its turn settles, before and after a new owner claims", async () => {
+    rmSync(finishFile, { force: true });
+    const holder = await makeBot("Old retained phone caller");
+    const spec = await holdDirectTurn(holder.id, "read my phone");
+    await withPhoneProxy(spec, async (oldCall) => {
+      expect((await oldCall("status")).result.isError).toBeUndefined();
+      writeFileSync(finishFile, "finish");
+      await idle(holder.id);
+      const afterSettlement = await oldCall("status");
+      expect(afterSettlement.result.isError).toBe(true);
+      expect(afterSettlement.result.content[0].text).toContain("no longer has phone access");
+      rmSync(finishFile, { force: true });
+      const next = await makeBot("New phone caller");
+      const nextSpec = await holdDirectTurn(next.id, "read my phone");
+      await withPhoneProxy(nextSpec, async (newCall) => {
+        expect((await newCall("status")).result.isError).toBeUndefined();
+        const response = await oldCall("status");
+        expect(response.result.isError, JSON.stringify(response)).toBe(true);
+        expect(response.result.content[0].text).toContain("no longer has phone access");
+      });
+    });
+  });
   it("mounts the phone for trigger words on both turn paths without claiming it", async () => {
     rmSync(finishFile, { force: true });
     const holder = await makeBot("Android words holder");
