@@ -46,6 +46,12 @@ export interface AskQuestion {
 export interface QuestionRequestCardData {
   version: 1;
   questions: AskQuestion[];
+  /** Where the ask came from: a real tool call ("tool", also the meaning
+   * of absent on cards saved before this field existed) or a block OMB
+   * parsed out of model-authored output ("output" — the BoxAgent
+   * transport). Only drives the agent-composed badge; it never changes
+   * how a card is answered. */
+  origin?: "tool" | "output";
 }
 
 function text(value: unknown, limit: number): string | undefined {

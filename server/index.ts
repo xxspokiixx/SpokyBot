@@ -5777,7 +5777,9 @@ bus.subscribe((event: RuntimeEvent) => {
           options: event.choices?.length ? event.choices : permission ? ["Allow", "Deny"] : [],
           requestId: event.requestId,
           tool: permission ? event.tool : undefined,
-          questionRequest: questions ? { version: 1, questions } : undefined,
+          questionRequest: questions
+            ? { version: 1, questions, ...(event.origin === "output" ? { origin: "output" as const } : {}) }
+            : undefined,
           // the provider can keep an allow for its session; the app keeps
           // no grant of its own for a provider's tool
           allowSession: permission && event.allowSession && !event.requiresExplicitApproval ? true : undefined,
@@ -5803,6 +5805,7 @@ bus.subscribe((event: RuntimeEvent) => {
         summary: event.summary,
         decision: "card-shown",
         source: !permission ? "question" : verdict ? verdict.source : "no-grant",
+        origin: !permission && event.origin === "output" ? "output" : undefined,
         unattended: unattended || undefined,
       });
       // Notify from HERE, not from a separate subscriber on request.opened:
