@@ -354,6 +354,20 @@ function validateLegacyDescriptorRuntime(
   }
 }
 
+/** An older fallback cannot override a present but unavailable, malformed, or
+ * unreadable descriptor at a more specific location. */
+function firstPresentCuaDescriptor(candidates: string[]): string | null {
+  for (const file of new Set(candidates)) {
+    try {
+      lstatSync(file);
+      return file;
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code !== "ENOENT") return file;
+    }
+  }
+  return null;
+}
+
 export function readCuaConnection({
   platform = process.platform,
   userData = process.env.OMB_USER_DATA,
@@ -368,26 +382,26 @@ export function readCuaConnection({
   validateLegacyRuntime?: (file: string, platform: NodeJS.Platform) => boolean;
 } = {}): LocalComputerConnection | null {
   const candidates = userData ? [join(userData, "cua-connection.json")] : [];
-  if (platform === "darwin") {
-    // Legacy/dev fallback. Packaged Electron passes its exact userData path.
+  if (platform === "darwin" && !userData) {
+    // Legacy/dev fallback only when Electron did not provide its exact path.
     for (const directory of ["OpenMausBot", "openmausbot", "OpenGrokBot", "opengrokbot"]) {
       candidates.push(join(home, "Library", "Application Support", directory, "cua-connection.json"));
     }
   }
 
-  for (const file of new Set(candidates)) {
-    try {
-      const raw = JSON.parse(readFileSync(file, "utf8"));
-      if (platform === "linux") {
-        const decoded = decodeLinuxDescriptor(raw);
-        if (decoded && validateLinuxRuntime(file, raw)) return decoded;
-      } else {
-        const decoded = decodeLegacyDescriptor(raw, platform);
-        if (decoded && validateLegacyRuntime(file, platform)) return decoded;
-      }
-    } catch {
-      // Missing, invalid, tampered, or stale descriptors are unavailable.
+  const file = firstPresentCuaDescriptor(candidates);
+  if (!file) return null;
+  try {
+    const raw = JSON.parse(readFileSync(file, "utf8"));
+    if (platform === "linux") {
+      const decoded = decodeLinuxDescriptor(raw);
+      if (decoded && validateLinuxRuntime(file, raw)) return decoded;
+    } else {
+      const decoded = decodeLegacyDescriptor(raw, platform);
+      if (decoded && validateLegacyRuntime(file, platform)) return decoded;
     }
+  } catch {
+    // Missing, invalid, tampered, or stale descriptors are unavailable.
   }
   return null;
 }
@@ -405,14 +419,15 @@ export function readCuaUnavailableReason({
 } = {}): string | null {
   if (!legacyPlatform(platform)) return null;
   const candidates = userData ? [join(userData, "cua-connection.json")] : [];
-  if (platform === "darwin") {
+  if (platform === "darwin" && !userData) {
     for (const directory of ["OpenMausBot", "openmausbot", "OpenGrokBot", "opengrokbot"]) {
       candidates.push(join(home, "Library", "Application Support", directory, "cua-connection.json"));
     }
   }
-  for (const file of new Set(candidates)) {
-    try {
-      if (!validateLegacyDescriptorRuntime(file, platform)) continue;
+  const file = firstPresentCuaDescriptor(candidates);
+  if (!file) return null;
+  try {
+    if (validateLegacyDescriptorRuntime(file, platform)) {
       const raw: unknown = JSON.parse(readFileSync(file, "utf8"));
       if (raw && typeof raw === "object" && !Array.isArray(raw) &&
           Object.keys(raw).length === 2 &&
@@ -420,9 +435,9 @@ export function readCuaUnavailableReason({
         const reason = (raw as Record<string, unknown>).reason;
         if (typeof reason === "string" && reason.trim() && reason.length <= 2_000) return reason.trim();
       }
-    } catch {
-      // No usable diagnostic; the caller still refuses computer control.
     }
+  } catch {
+    // No usable diagnostic; the caller still refuses computer control.
   }
   return null;
 }

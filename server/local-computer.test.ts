@@ -129,7 +129,7 @@ afterEach(() => {
 });
 
 describe("local computer descriptor", () => {
-  it("reports a private unavailable reason without making that descriptor mountable", () => {
+  it.skipIf(process.platform === "win32")("reports a private unavailable reason without making that descriptor mountable", () => {
     const userData = privateUserData("mac-unavailable");
     const file = join(userData, "cua-connection.json");
     const reason = "embedded host failed: Screen Recording required; grant access in System Settings and restart OpenMausBot";
@@ -140,6 +140,45 @@ describe("local computer descriptor", () => {
     expect(readCuaUnavailableReason({ platform: "darwin", userData })).toBeNull();
     writeFileSync(file, JSON.stringify({ mode: "unavailable", reason, mcpCommand: "/fixture/driver" }));
     expect(readCuaUnavailableReason({ platform: "darwin", userData })).toBeNull();
+  });
+
+  it.skipIf(process.platform === "win32")("never substitutes a stale legacy descriptor for the packaged app's exact status", () => {
+    const userData = privateUserData("exact-mac-user-data");
+    const home = join(userData, "fixture-home");
+    const legacy = join(home, "Library", "Application Support", "OpenMausBot");
+    mkdirSync(legacy, { recursive: true, mode: 0o700 });
+    const legacyFile = join(legacy, "cua-connection.json");
+    writeFileSync(legacyFile, JSON.stringify({
+      mode: "embedded", socketPath: "/fixture/stale.sock", mcpCommand: "/fixture/stale-driver",
+      mcpArgs: ["mcp"], mcpEnv: {},
+    }), { mode: 0o600 });
+
+    const exactFile = join(userData, "cua-connection.json");
+    const reason = "Screen Recording required; grant access in System Settings and restart OpenMausBot";
+    writeFileSync(exactFile, JSON.stringify({ mode: "unavailable", reason }), { mode: 0o600 });
+    expect(readCuaConnection({ platform: "darwin", userData, home })).toBeNull();
+    expect(readCuaUnavailableReason({ platform: "darwin", userData, home })).toBe(reason);
+
+    writeFileSync(legacyFile, JSON.stringify({ mode: "unavailable", reason: "stale legacy failure" }));
+    writeFileSync(exactFile, JSON.stringify({ mode: "embedded" }));
+    expect(readCuaConnection({ platform: "darwin", userData, home })).toBeNull();
+    expect(readCuaUnavailableReason({ platform: "darwin", userData, home })).toBeNull();
+  });
+
+  it.skipIf(process.platform === "win32")("treats the first present legacy descriptor as authoritative", () => {
+    const root = privateUserData("legacy-mac-home");
+    const first = join(root, "Library", "Application Support", "OpenMausBot");
+    const stale = join(root, "Library", "Application Support", "OpenGrokBot");
+    mkdirSync(first, { recursive: true, mode: 0o700 });
+    mkdirSync(stale, { recursive: true, mode: 0o700 });
+    const reason = "Accessibility required; grant access in System Settings and restart OpenMausBot";
+    writeFileSync(join(first, "cua-connection.json"), JSON.stringify({ mode: "unavailable", reason }), { mode: 0o600 });
+    writeFileSync(join(stale, "cua-connection.json"), JSON.stringify({
+      mode: "embedded", socketPath: "/fixture/stale.sock", mcpCommand: "/fixture/stale-driver",
+      mcpArgs: ["mcp"], mcpEnv: {},
+    }), { mode: 0o600 });
+    expect(readCuaConnection({ platform: "darwin", home: root, userData: undefined })).toBeNull();
+    expect(readCuaUnavailableReason({ platform: "darwin", home: root, userData: undefined })).toBe(reason);
   });
 
   it("accepts only the exact certified Linux X11 descriptor", () => {

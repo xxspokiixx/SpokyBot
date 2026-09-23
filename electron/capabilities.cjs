@@ -3,6 +3,7 @@
 // is deterministic and unit-testable.
 
 const DESKTOP_PLATFORMS = new Set(["darwin", "linux", "win32"]);
+const UNAVAILABLE_LOCAL_STATUSES = new Set(["disabled", "checking", "starting", "error", "stopped", "unavailable"]);
 
 function normalizedPlatform(platform) {
   return DESKTOP_PLATFORMS.has(platform) ? platform : "other";
@@ -101,6 +102,8 @@ function desktopCapabilities({
   const hostSession = linuxSession(hostPlatform, env);
   const linuxPreview = hostPlatform === "linux" && hostSession !== "headless";
   const localAvailable = localComputerReady(hostPlatform, localConnection);
+  const localStatus = localAvailable ? "ready" :
+    UNAVAILABLE_LOCAL_STATUSES.has(localConnection?.status) ? localConnection.status : "unavailable";
   const screenPreview = {
     available: isMac || linuxPreview,
     interaction:
@@ -129,7 +132,7 @@ function desktopCapabilities({
           ? "supported"
           : "unsupported",
     enabled: connectionEnabled(hostPlatform, localConnection),
-    status: localAvailable ? "ready" : localConnection?.status ?? "unavailable",
+    status: localStatus,
   };
   // These fields expose local-machine detail (installed driver, seat,
   // diagnostics), so populate them only when no remote override replaces

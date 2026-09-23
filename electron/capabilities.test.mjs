@@ -56,6 +56,14 @@ describe("desktop capabilities", () => {
     expect(desktopCapabilities({ platform: "darwin", localConnection: { mode: "unavailable", reason: {} } }).localComputer.message).toBeUndefined();
   });
 
+  it("does not label an incomplete connection ready even when its status claims ready", () => {
+    const localComputer = desktopCapabilities({
+      platform: "darwin",
+      localConnection: { mode: "embedded", status: "ready", enabled: true },
+    }).localComputer;
+    expect(localComputer).toMatchObject({ available: false, enabled: false, status: "unavailable" });
+  });
+
   it("reports the renderer-caption window chrome on Windows", () => {
     const capabilities = desktopCapabilities({
       platform: "win32",
