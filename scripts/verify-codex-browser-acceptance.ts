@@ -105,7 +105,7 @@ try {
       } while (Date.now() < deadline);
       entry.messages = await runControlOmb(["messages", "--bot", bot.id, "--limit", "15", "--url", fixture.info.url]);
       entry.browser = await observe(bot.id, `${model}-${index}`);
-      const tabs = entry.browser.observations.flatMap((item: any) => item.tabs ?? []);
+      const tabs = entry.browser.observations.filter((item: any) => item.kind === "tabs").at(-1)?.tabs ?? [];
       entry.verified = entry.wait?.status === "settled" && tabs.some((tab: any) => tab.active && (index === 0
         ? /^https:\/\/(?:calendar\.google\.com\/|accounts\.google\.com\/.*calendar\.google\.com|workspace\.google\.com\/(?:intl\/[a-z-]+\/)?products\/calendar\/)/.test(tab.url)
         : tab.url === "https://github.com/milind-soni/OpenMausBot"));
