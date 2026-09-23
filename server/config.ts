@@ -442,6 +442,9 @@ const appConfigSchema = z.object({
     autoCompact: z.boolean().optional(),
   }).optional(),
   threads: threadsConfigSchema.optional(),
+  /** The authorization decision log (server/decision-log.ts): days of month
+   * files kept, at least; OMB_DECISION_RETENTION_DAYS wins when set. */
+  decisions: z.object({ retentionDays: z.number().int().min(1).max(3650).optional() }).strict().optional(),
   localVm: localVmConfigSchema.optional(),
   features: featureConfigSchema.optional(),
   onboarding: onboardingConfigSchema.optional(),
@@ -478,6 +481,7 @@ export interface AppConfig {
   mistral?: { key?: string };
   anthropic?: { key?: string; url?: string };
   budgets?: { monthlyUsd?: number; warnAtPercent?: number };
+  decisions?: { retentionDays?: number };
   billing?: { currency?: string; prices?: Record<string, { inputPerMillion: number; outputPerMillion: number; cachedInputPerMillion?: number }> };
   openaiCompat?: { key?: string; url?: string; model?: string; provider?: string };
   composio?: { apiKey?: string; userId?: string; sessionId?: string };
@@ -981,7 +985,7 @@ export function saveConfig(
   // back after we have successfully recognized the legacy list.
   const storedProfiles = storedBrowserProfilesSchema.safeParse(disk.browserProfiles);
   if (storedProfiles.success) disk.browserProfiles = storedProfiles.data;
-  for (const key of ["xai", "anthropic", "mistral", "openaiCompat", "composio", "box", "opencodeGo", "tts", "imageGen", "profile", "rooms", "threads", "context", "localVm", "features", "budgets", "billing", "onboarding", "browserEngine"] as const) {
+  for (const key of ["xai", "anthropic", "mistral", "openaiCompat", "composio", "box", "opencodeGo", "tts", "imageGen", "profile", "rooms", "threads", "context", "localVm", "features", "budgets", "billing", "decisions", "onboarding", "browserEngine"] as const) {
     const section = checkedPatch[key];
     if (!section) continue;
     const current = jsonObjectSchema.safeParse(disk[key]);
