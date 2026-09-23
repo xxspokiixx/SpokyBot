@@ -108,11 +108,17 @@ node --test electron/approval-trusted-mode.node-test.mjs
 ```
 
 The HTTP tests launch a fresh temporary server. They cover defaults persistence,
-explicit empty overrides, opt-out, strict validation, and rejected untrusted
+explicit empty overrides, opt-out, malformed preview requests returning 400,
+removed browser-profile references, strict validation, and rejected untrusted
 privileged creation. The client tests cover Ask/Auto/Full/Custom creation,
 native permission rejection, cleanup, and post-creation activation warnings.
 Browser fixtures do not prove packaged operating-system grants or real model
 execution; those require the native approval verification separately.
+
+In the renderer fixture, open **App settings → General → Defaults for new bots → Edit**.
+Open **Identity → View full**. Three successive Escape presses must close only
+the instruction preview, then the defaults editor, then Settings. Tab navigation
+must remain inside the active editor.
 
 ## Earlier settings verification
 
