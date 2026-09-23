@@ -820,9 +820,9 @@ export class Store {
     })), null, 2), { mode: 0o600 });
   }
 
-  private saveGroups() {
-    this.rememberSections(this.groups.map((group) => group.section));
-    writeFileAtomic(GROUPS_FILE, JSON.stringify(this.groups.map(({ busyBotId: _busyBotId, turnStartedAt: _turnStartedAt, ...g }) => ({
+  private saveGroups(groups = this.groups) {
+    this.rememberSections(groups.map((group) => group.section));
+    writeFileAtomic(GROUPS_FILE, JSON.stringify(groups.map(({ busyBotId: _busyBotId, turnStartedAt: _turnStartedAt, ...g }) => ({
       ...g,
       ...(g.tasks ? { tasks: g.tasks.map((task) => persistedPin(task)) } : {}),
     })), null, 2), { mode: 0o600 });
@@ -860,6 +860,39 @@ export class Store {
       for (const bot of revoked) this.emit({ type: "bot", botId: bot.id });
     }
     changeEmptySection(name, nextName);
+    this.emit({ type: "sections" });
+    return undefined;
+  }
+
+  /** Remove the team, keeping its bots, rooms and conversations in General. */
+  deleteSection(name: string): string | undefined {
+    if (!name || !this.sections.includes(name)) return "No such team";
+    const members = this.bots.filter(bot => sectionKey(bot.section) === name);
+    const rooms = this.groups.filter(group => sectionKey(group.section) === name);
+    if (members.some(bot => bot.busy || bot.tasks?.some(task => task.busy)) || rooms.some(group => group.busyBotId)) {
+      return "Stop this team's active work before deleting the team";
+    }
+    if (this.bots.filter(bot => bot.chiefOfStaff && (!sectionKey(bot.section) || sectionKey(bot.section) === name)).length > 1) {
+      return "General already has a Chief of Staff. Move or change this team's Chief before deleting the team";
+    }
+    const nextBots = this.bots.map(bot => ({ ...bot,
+      ...(sectionKey(bot.section) === name ? { section: undefined } : {}),
+      ...(bot.managedSections ? { managedSections: bot.managedSections.filter(section => sectionKey(section) !== name) } : {}),
+    }));
+    const nextGroups = this.groups.map(group => sectionKey(group.section) === name ? { ...group, section: undefined } : group);
+    try {
+      this.saveBots(nextBots);
+      this.saveGroups(nextGroups);
+      changeEmptySection(name, null);
+    } catch (error) {
+      this.saveBots();
+      this.saveGroups();
+      throw error;
+    }
+    for (let i = 0; i < nextBots.length; i++) Object.assign(this.bots[i], nextBots[i]);
+    for (let i = 0; i < nextGroups.length; i++) Object.assign(this.groups[i], nextGroups[i]);
+    for (const bot of this.bots) this.emit({ type: "bot", botId: bot.id });
+    for (const group of rooms) this.emit({ type: "group", groupId: group.id });
     this.emit({ type: "sections" });
     return undefined;
   }
