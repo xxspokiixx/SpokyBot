@@ -1,9 +1,9 @@
-import { mkdtempSync } from "node:fs";
+import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { billableFor, priceFor, type PriceList } from "./prices.ts";
-import { assertWithinBudget, monthToDateSpend, noteSpend, resetSpendCacheForTests, spendState } from "./spend.ts";
+import { assertWithinBudget, monthToDateSpend, noteSpend, resetSpendAlertsForTests, resetSpendCacheForTests, spendAlertText, spendState, takeSpendAlert, type SpendState } from "./spend.ts";
 import { removeTempDir } from "./testing/cleanup.ts";
 import { appendUsage, flushUsageLedger } from "./usage-ledger.ts";
 
@@ -33,7 +33,7 @@ describe("prices", () => {
 describe("spend against a monthly cap", () => {
   let dataDir: string;
   const now = new Date("2026-09-15T12:00:00Z");
-  beforeEach(() => { dataDir = mkdtempSync(join(tmpdir(), "omb-spend-")); resetSpendCacheForTests(); });
+  beforeEach(() => { dataDir = mkdtempSync(join(tmpdir(), "omb-spend-")); resetSpendCacheForTests(); resetSpendAlertsForTests(); });
   afterEach(async () => { await removeTempDir(dataDir); });
 
   const row = (at: string, costUsd: number | null) => ({
@@ -58,6 +58,14 @@ describe("spend against a monthly cap", () => {
     expect(monthToDateSpend(dataDir, new Date("2026-10-01T00:00:01Z"))).toBe(0);
   });
 
+  it("counts estimated costs against the cap exactly like reported ones", async () => {
+    appendUsage(dataDir, row("2026-09-02T00:00:00.000Z", 3));
+    appendUsage(dataDir, { ...row("2026-09-03T00:00:00.000Z", 6), driverKind: "codex", model: "gpt-5.5", costSource: "estimated" });
+    await flushUsageLedger(dataDir);
+    expect(spendState({ budgets: { monthlyUsd: 10 } }, dataDir, now, yes)).toMatchObject({ spentUsd: 9, percent: 90, warn: true, exceeded: false });
+    expect(() => assertWithinBudget({ budgets: { monthlyUsd: 9 } }, dataDir, now, yes)).toThrow(expect.objectContaining({ code: "spend_cap" }));
+  });
+
   it("is inert without the entitlement or a cap, warns at the threshold, and refuses at the cap", async () => {
     appendUsage(dataDir, row("2026-09-02T00:00:00.000Z", 8));
     await flushUsageLedger(dataDir);
@@ -73,5 +81,54 @@ describe("spend against a monthly cap", () => {
       expect.objectContaining({ status: 409, code: "spend_cap", message: expect.stringContaining("$8.00") }),
     );
     expect(() => assertWithinBudget({ budgets: { monthlyUsd: 8 } }, dataDir, now, no)).not.toThrow();
+  });
+});
+
+describe("spend notices", () => {
+  let dataDir: string;
+  beforeEach(() => { dataDir = mkdtempSync(join(tmpdir(), "omb-spend-alerts-")); resetSpendAlertsForTests(); });
+  afterEach(async () => { await removeTempDir(dataDir); });
+
+  const state = (over: Partial<SpendState>): SpendState => ({
+    month: "2026-09", monthlyUsd: 100, spentUsd: 50, percent: 50, warnAtPercent: 80, warn: false, exceeded: false, ...over,
+  });
+
+  it("warns once when the month crosses the threshold, and once more when it reaches the cap", () => {
+    expect(takeSpendAlert(dataDir, null)).toBeNull();
+    expect(takeSpendAlert(dataDir, state({}))).toBeNull();
+    expect(takeSpendAlert(dataDir, state({ spentUsd: 81, percent: 81, warn: true }))).toBe("warn");
+    expect(takeSpendAlert(dataDir, state({ spentUsd: 85, percent: 85, warn: true }))).toBeNull();
+    expect(takeSpendAlert(dataDir, state({ spentUsd: 100, percent: 100, warn: true, exceeded: true }))).toBe("cap");
+    expect(takeSpendAlert(dataDir, state({ spentUsd: 120, percent: 120, warn: true, exceeded: true }))).toBeNull();
+  });
+
+  it("sends only the cap notice when one turn jumps straight past both lines", () => {
+    expect(takeSpendAlert(dataDir, state({ spentUsd: 130, percent: 130, warn: true, exceeded: true }))).toBe("cap");
+    expect(takeSpendAlert(dataDir, state({ spentUsd: 131, percent: 131, warn: true, exceeded: true }))).toBeNull();
+  });
+
+  it("remembers across a restart, and starts over for a new month or a new cap", () => {
+    expect(takeSpendAlert(dataDir, state({ warn: true, percent: 90 }))).toBe("warn");
+    resetSpendAlertsForTests(); // a restart: only the file remains
+    expect(takeSpendAlert(dataDir, state({ warn: true, percent: 91 }))).toBeNull();
+    expect(takeSpendAlert(dataDir, state({ month: "2026-10", warn: true, percent: 90 }))).toBe("warn");
+    expect(takeSpendAlert(dataDir, state({ month: "2026-10", monthlyUsd: 200, spentUsd: 170, warn: true, percent: 85 }))).toBe("warn");
+  });
+
+  it("still notifies once per run when the marks cannot be written", () => {
+    rmSync(dataDir, { recursive: true, force: true });
+    writeFileSync(dataDir, "a file where the data directory should be");
+    expect(takeSpendAlert(dataDir, state({ warn: true, percent: 90 }))).toBe("warn");
+    expect(takeSpendAlert(dataDir, state({ warn: true, percent: 95 }))).toBeNull();
+    rmSync(dataDir, { force: true });
+  });
+
+  it("words the notice plainly", () => {
+    expect(spendAlertText("warn", state({ spentUsd: 81.5, percent: 81, warn: true }))).toEqual({
+      title: "Spend is at 81% of the monthly limit",
+      body: "$81.50 of $100.00 spent this month (2026-09). New turns stop when the limit is reached.",
+    });
+    expect(spendAlertText("cap", state({ spentUsd: 100.004, percent: 100, exceeded: true })).body)
+      .toBe("$100.00 of $100.00 spent this month (2026-09). New turns are refused until an admin raises the limit under Settings → Usage.");
   });
 });

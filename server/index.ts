@@ -158,15 +158,17 @@ import { sweepThreadEventLogs, type ThreadLogRetentionCandidate } from "./thread
 import { ComputerControl } from "./computer-control.ts";
 import { augmentedPath, findCliCandidates, resetPathCache } from "./env-path.ts";
 import { registerEnginesBinDir } from "./engine-install.ts";
-import { appendUsage, parseUsageRange, readUsage, summarizeUsage, usageCsv, USAGE_GROUPINGS, flushUsageLedger, type UsageGroupBy, type UsageTrigger } from "./usage-ledger.ts";
+import { appendUsage, parseUsageRange, readUsage, summarizeUsage, usageCsv, USAGE_GROUPINGS, flushUsageLedger, type UsageGroupBy, type UsageRow, type UsageTrigger } from "./usage-ledger.ts";
+import { ledgerCost } from "./model-prices.ts";
+import type { PriceList } from "./prices.ts";
 import type { RequestAuth } from "./request-auth.ts";
 import { checkProviderKey, PROVIDER_KEY_KINDS, type ProviderKeyKind } from "./provider-key-check.ts";
-import { assertWithinBudget, noteSpend, spendState } from "./spend.ts";
+import { assertWithinBudget, noteSpend, spendAlertText, spendState, takeSpendAlert } from "./spend.ts";
 import { fleetAvailable, fleetRequest, fleetSocketPath } from "./fleet-client.ts";
 import { entitled } from "./enterprise.ts";
 import { HOSTED_CONTRACT_HEADER, HOSTED_CONTRACT_METADATA, HOSTED_CONTRACT_VERSION } from "./hosted-contract.ts";
 import { describeSpawnFailure, execCli } from "./procs.ts";
-import { blockedTarget, buildNotification, type Notification } from "./notify.ts";
+import { blockedTarget, buildNotification, buildSpendNotification, type Notification } from "./notify.ts";
 import {
   isModelVariant,
   type ModelSelection,
@@ -421,7 +423,7 @@ import {
 } from "./turn-dispatch-guard.ts";
 import { createGracefulShutdown } from "./graceful-shutdown.ts";
 import { acquireDataDirLeaseForProcess } from "./data-dir-lease.ts";
-import { createWorkspaceAccess, describeEdition, editionStatus, hostedWorkspaceConfiguration, hostedWorkspaceConfigured, sharedWorkspaceFullAccessConfigured, loadEnterpriseLayer, type WorkspaceAccess } from "./enterprise.ts";
+import { createWorkspaceAccess, describeEdition, editionStatus, hostedWorkspaceConfiguration, hostedWorkspaceConfigured, LICENSE_WARN_DAYS, licenseWarning, sharedWorkspaceFullAccessConfigured, loadEnterpriseLayer, type EditionStatus, type WorkspaceAccess } from "./enterprise.ts";
 import { environmentDescriptor, loadEnvironmentId, serverVersion } from "./environment.ts";
 import { WorkspaceBackupMaintenance } from "./workspace-backup-maintenance.ts";
 import { createWorkspaceBackupRoutes, isWorkspaceBackupSessionControl } from "./workspace-backup-http.ts";
@@ -573,11 +575,15 @@ const registry = new ProviderRegistry(BUILT_IN_DRIVERS);
 // any other copy on PATH.
 registerEnginesBinDir();
 
-// Who asked for the next turn on a thread, noted where a message comes in
-// and read by the usage ledger when the turn settles. The last note stands
-// until the next message: a resumed connector or a drained queued send
-// still belongs to the person who wrote, and routine or peer turns are
-// told apart before this is consulted.
+// Who asked for the turn running (or last run) on each thread, read by the
+// usage ledger when it settles. It is set when a turn is ADMITTED, from the
+// message that started it — never when a message merely queues behind a
+// running turn or is steered into one, so a second person's words cannot
+// re-book the first person's turn. A queued message carries its sender's
+// trigger until it drains and starts its own turn. Continuations (a resumed
+// connector, a delegation wake) set nothing and stay with the person whose
+// ask they continue; routine and peer turns are told apart before this is
+// consulted.
 const turnTriggers = new Map<string, UsageTrigger>();
 /** Who a user message is from, when that is someone other than the desktop
  * owner. Loopback is the owner by design, so it stays unstamped and reads as
@@ -590,13 +596,59 @@ function messageSender(auth: RequestAuth): ResolvedSender | undefined {
   return name ? { name } : undefined;
 }
 
-function noteTurnTrigger(threadId: string, auth: RequestAuth): void {
-  turnTriggers.set(
-    threadId,
-    auth.kind === "session"
-      ? { kind: "user", ...(auth.session.email ? { email: auth.session.email } : {}), label: auth.session.label }
-      : { kind: "owner" },
-  );
+/** The guarded send contract external interfaces (the Slack worker) opt into.
+ * `onBehalfOf` is additive and advertised by /api/health
+ * (capabilities.guardedOnBehalfOf): it names the person a relay acts for, so
+ * the turn is booked to them rather than to this machine. Only this
+ * admin-scoped route reads it; every other send is booked to its own
+ * session. */
+const guardedSendSchema = z.object({
+  threadId: z.string().regex(/^[\w-]+$/),
+  sendId: z.string().regex(/^[A-Za-z0-9_-]{16,80}$/),
+  text: z.string().min(1),
+  expectedActiveLeafId: z.string().regex(/^[\w-]+$/).nullable(),
+  expectedApprovalMode: z.enum(["ask", "full"]).optional(),
+  replyToId: z.string().optional(),
+  onBehalfOf: z.object({
+    email: z.string().trim().toLowerCase().max(254).pipe(z.email()).optional(),
+    name: z.string().trim().min(1).max(120).optional(),
+  }).strict().refine((who) => Boolean(who.email || who.name)).optional(),
+}).strict();
+
+/** Who a request is, for the usage ledger: a paired or signed-in person, or
+ * this machine. Captured when the message is accepted and carried with it. */
+function usageTriggerFor(auth: RequestAuth): UsageTrigger {
+  return auth.kind === "session"
+    ? { kind: "user", ...(auth.session.email ? { email: auth.session.email } : {}), label: auth.session.label }
+    : { kind: "owner" };
+}
+
+/** The operator's price list, when the server may read it (`billing`). */
+function operatorPrices(): PriceList | null {
+  return entitled("billing") && cfg.billing?.prices && Object.keys(cfg.billing.prices).length ? cfg.billing.prices : null;
+}
+
+/** Write one settled turn to the ledger, estimating its cost when the
+ * engine reported tokens but no price, and let the spend cap see it at once.
+ * The first booking that takes the month past the warning threshold, or to
+ * the cap, notifies admins (once per month each; server/spend.ts). */
+function bookTurnUsage(row: Omit<UsageRow, "at" | "costSource">): void {
+  const cost = ledgerCost(row, operatorPrices());
+  appendUsage(DATA_DIR, { ...row, ...cost });
+  noteSpend(DATA_DIR, cost.costUsd);
+  const state = spendState(cfg, DATA_DIR);
+  const alert = takeSpendAlert(DATA_DIR, state);
+  if (alert && state) {
+    broadcast({ kind: "notify", notification: buildSpendNotification({ id: row.botId, name: row.botName }, row.threadId, spendAlertText(alert, state)) }, { adminOnly: true });
+  }
+}
+
+/** A queued line from before triggers were stored with it: its sender, else
+ * the owner; a bot's own queued words set nothing. */
+function queuedTurnTrigger(item: { trigger?: UsageTrigger; sender?: ResolvedSender; peerAsk?: unknown }): UsageTrigger | undefined {
+  if (item.trigger) return item.trigger;
+  if (item.peerAsk) return undefined;
+  return item.sender ? { kind: "user", label: item.sender.name } : { kind: "owner" };
 }
 const providerAuthSessions = new ProviderAuthSessions();
 await registry.load(providerConfigs(), decorateHostedProvider);
@@ -3480,7 +3532,9 @@ function cursorSeq(raw: string | string[] | undefined): number | null {
   return Number.isSafeInteger(parsed) && parsed >= 0 ? parsed : null;
 }
 
-function broadcast(payload: Record<string, unknown>) {
+/** `adminOnly` frames (a workspace spend notice) reach admin streams and
+ * are withheld from client sessions, live and on replay. */
+function broadcast(payload: Record<string, unknown>, options: { adminOnly?: boolean } = {}) {
   // Membership may also change through fleet/CLI config writes. Close stale
   // email streams before any further workspace data is delivered.
   sessions.revalidateEmailSessions();
@@ -3489,9 +3543,11 @@ function broadcast(payload: Record<string, unknown>) {
   const frame = `id: ${STREAM_ID}:${seq}\ndata: ${JSON.stringify({ ...payload, seq })}\n\n`;
   // Store both projections as immutable frames: live and reconnecting clients
   // must receive the same filtered config without changing the admin event.
-  const clientFrame = kind === "config"
-    ? `id: ${STREAM_ID}:${seq}\ndata: ${JSON.stringify({ ...configForAccess(payload as ReturnType<typeof configStatus>, false), seq })}\n\n`
-    : frame;
+  const clientFrame = options.adminOnly
+    ? null
+    : kind === "config"
+      ? `id: ${STREAM_ID}:${seq}\ndata: ${JSON.stringify({ ...configForAccess(payload as ReturnType<typeof configStatus>, false), seq })}\n\n`
+      : frame;
   // Live desktop captures can each be hundreds of kilobytes and become stale
   // as soon as the next one arrives. Keep their sequence slots so resume-gap
   // detection stays honest, but never retain their base64 payloads.
@@ -3501,7 +3557,9 @@ function broadcast(payload: Record<string, unknown>) {
     if (!wants(client, kind)) continue;
     // Screen frames are replaceable and durable events are not: see
     // ./sse-fanout.ts for the backpressure/bound decision this makes.
-    if (deliverSseFrame(client, kind, client.admin ? frame : clientFrame) === "disconnected") {
+    const delivered = client.admin ? frame : clientFrame;
+    if (delivered === null) continue;
+    if (deliverSseFrame(client, kind, delivered) === "disconnected") {
       sseClients.delete(client);
     }
   }
@@ -5185,7 +5243,7 @@ bus.subscribe((event: RuntimeEvent) => {
         const measuredSelection = directTurnBots.get(event.threadId)?.modelSelection ?? selection;
         store.patchTask(bot.id, event.threadId, { lastContextModel: Number.isFinite(lastContext?.tokens) && (lastContext?.tokens ?? 0) > 0
           ? `${measuredSelection.instanceId}:${measuredSelection.model}` : undefined });
-        appendUsage(DATA_DIR, {
+        bookTurnUsage({
           botId: bot.id,
           botName: bot.name,
           threadId: event.threadId,
@@ -5202,7 +5260,6 @@ bus.subscribe((event: RuntimeEvent) => {
               ? { kind: "bot", ...(settledTask?.openedBy?.botId ? { botId: settledTask.openedBy.botId } : {}) }
               : turnTriggers.get(event.threadId) ?? { kind: "owner" },
         });
-        noteSpend(DATA_DIR, event.cost ?? null);
         const digestSettled = completedTurnId ? scheduleTurnDigest({
             botId: bot.id,
             botName: bot.name,
@@ -5267,7 +5324,7 @@ bus.subscribe((event: RuntimeEvent) => {
         const tokens = event.usage ?? lastReported;
         const speakingBot = store.bot(speaker.botId);
         const selection = speakingBot?.modelSelection;
-        appendUsage(DATA_DIR, {
+        bookTurnUsage({
           botId: speaker.botId,
           botName: speaker.name,
           threadId: event.threadId,
@@ -5282,7 +5339,6 @@ bus.subscribe((event: RuntimeEvent) => {
             ? { kind: "routine", routineId: routineRun.routineId, label: routineRun.routineName }
             : turnTriggers.get(event.threadId) ?? { kind: "owner" },
         });
-        noteSpend(DATA_DIR, event.cost ?? null);
         if (completedTurnId) {
           void scheduleTurnDigest({
             botId: speaker.botId, botName: speaker.name,
@@ -5964,7 +6020,7 @@ bus.subscribe((event: RuntimeEvent) => {
 
 function drainQueuedSends() {
   if (!followupsReady) return;
-  drainSteeredMessages(store, (botId, threadId, prompt, userMessage, excludeIds, unattended) =>
+  drainSteeredMessages(store, (botId, threadId, prompt, userMessage, excludeIds, unattended, head) =>
     // A plain attended turn — no automationSource, no comms depth: exactly
     // what typing the same words into an idle bot would run. Self-opened
     // work retains `unattended` and the message's bot-origin provenance
@@ -5973,8 +6029,10 @@ function drainQueuedSends() {
     // from duplicating the last one, and excludeIds drops every drained
     // line from the transcript-replay so they are not also in `prompt`.
     new Promise<void>((resolve, reject) => {
+      // The drained turn is booked to whoever sent the first waiting line.
       void startTurn(botId, prompt, {
         threadId, userMessage, excludeMessageIds: excludeIds, unattended, onTurnSettled: resolve,
+        trigger: queuedTurnTrigger(head),
       }).catch((err) => {
         store.appendMessage(threadId, {
           role: "bot", kind: "activity",
@@ -5995,7 +6053,7 @@ function drainQueuedSends() {
 
 /** Keep a person's words off the transcript until a direct-thread slot is
  * available. Reuse the existing cancellable, idempotent composer queue. */
-async function startOrQueueDirectMessage(botId: string, threadId: string, text: string, replyTo?: Message, sendId?: string, sender?: ResolvedSender) {
+async function startOrQueueDirectMessage(botId: string, threadId: string, text: string, replyTo?: Message, sendId?: string, sender?: ResolvedSender, trigger?: UsageTrigger) {
   const capacity = botAtThreadCapacity(botId);
   if (capacity || threadBusy(botId, threadId) || parksBehindCoordination(botId, threadId)) {
     const reason = capacity ? "capacity" as const : undefined;
@@ -6005,10 +6063,11 @@ async function startOrQueueDirectMessage(botId: string, threadId: string, text: 
       reason,
       prompt: promptWithReply(text, replyTo, cfg.profile?.name?.trim() || "User"),
       sender,
+      trigger,
     });
     return { ok: true as const, queued: true as const, queueId: queued.id, threadId, reason };
   }
-  const message = await startTurn(botId, text, { threadId, replyTo, sendId, sender });
+  const message = await startTurn(botId, text, { threadId, replyTo, sendId, sender, trigger });
   return { ok: true as const, threadId, message };
 }
 
@@ -6244,6 +6303,10 @@ async function startTurn(
     editedMessageId?: string;
     /** The person who sent this, when not the desktop owner. */
     sender?: ResolvedSender;
+    /** Who the usage ledger books this turn to: the sender of the message
+     * that starts it, captured when that message was accepted. Absent on
+     * continuations, which stay with the ask they continue. */
+    trigger?: UsageTrigger;
     /** Extra transcript ids to omit (every drained queued line, not just the last). */
     excludeMessageIds?: string[];
     /** Routines run in detached tasks; pin the destination for the whole turn. */
@@ -6434,6 +6497,9 @@ async function startTurn(
           sender: opts?.sender,
         });
   }
+  // Admitted: every refusal above has passed and no other turn runs on this
+  // thread, so this is the one moment the ledger's "who asked" may change.
+  if (opts?.trigger) turnTriggers.set(threadId, opts.trigger);
   // A card continuation neither starts nor ends the person's ask: it
   // resumes the turn their last message began, so that record stands.
   if (!opts?.cardContinuation) {
@@ -9666,6 +9732,8 @@ type StartGroupTurnOptions = {
   via?: "api";
   /** The person who sent it, when not the desktop owner (see Message.sender). */
   sender?: ResolvedSender;
+  /** Who the ledger books this room turn's speakers to (see startTurn's `trigger`). */
+  trigger?: UsageTrigger;
 };
 
 function startGroupTurn(
@@ -9712,6 +9780,8 @@ function startGroupTurn(
     via: options.via,
     sender: options.sender,
   });
+  // Admitted (see startTurn): the room's speakers are booked to this sender.
+  if (options.trigger) turnTriggers.set(threadId, options.trigger);
   const titled = group.dm ? null : store.titleGroupTaskFromFirstMessage(group.id, text, threadId);
   const snippet = titled?.title;
 
@@ -9875,14 +9945,14 @@ function drainQueuedChannelSends(): void {
       const group = store.group(groupId);
       return group ? groupIsWorking(group) : false;
     },
-    ({ groupId, threadId, text, replyToId, sendId, mode, id, via, sender }) => {
+    ({ groupId, threadId, text, replyToId, sendId, mode, id, via, sender, trigger }) => {
       const group = store.group(groupId);
       const ownsThread = group?.dm
         ? group.threadId === threadId
         : Boolean(group && store.groupTaskByThread(group.id, threadId));
       if (!group || !ownsThread) return;
       try {
-        startGroupTurn(groupId, text, resolveReplyTarget(threadId, replyToId), sendId, mode, id, { via, threadId, sender });
+        startGroupTurn(groupId, text, resolveReplyTarget(threadId, replyToId), sendId, mode, id, { via, threadId, sender, trigger: queuedTurnTrigger({ trigger, sender }) });
       } catch (error) {
         if (!store.messagesFor(threadId).some((message) => message.queueId === id && message.role === "user")) {
           store.appendMessage(threadId, { role: "user", kind: "text", text, replyToId, sendId, channelMode: mode, queueId: id, via, sender });
@@ -10905,6 +10975,19 @@ async function perBotLocalVmCountForModeChange(): Promise<number | null> {
   return existingPerBotLocalVmCount(runtime.runtime);
 }
 
+/** What Settings needs about the edition: the features, and, once the key
+ * is inside its warning window or grace period, when it lapses. The dates
+ * reach admins only (configForAccess strips them for client sessions). */
+function editionForSettings(status: EditionStatus) {
+  const expiring = status.edition === "enterprise" && status.expiresAt && status.expiresInDays !== undefined &&
+    (status.graceEndsAt !== undefined || status.expiresInDays <= LICENSE_WARN_DAYS);
+  return {
+    edition: status.edition,
+    features: status.features,
+    ...(expiring ? { license: { expiresAt: status.expiresAt!, expiresInDays: status.expiresInDays!, ...(status.graceEndsAt ? { graceEndsAt: status.graceEndsAt } : {}) } } : {}),
+  };
+}
+
 function configStatus() {
   // off-by-default thread cleanup knobs stay absent so clients can tell
   // "unset" apart from any in-range value
@@ -10916,7 +10999,7 @@ function configStatus() {
     // a fleet agent on this server means Settings → Workspaces has something to drive
     fleet: { available: fleetAvailable(fleetSocketPath()) },
     // what this build is entitled to, so Settings shows only what works here
-    edition: (({ edition, features }) => ({ edition, features }))(editionStatus()),
+    edition: editionForSettings(editionStatus()),
     // settings, not secrets: the cap and the operator's own price list
     budgets: {
       ...(cfg.budgets?.monthlyUsd !== undefined ? { monthlyUsd: cfg.budgets.monthlyUsd } : {}),
@@ -10989,6 +11072,7 @@ function configForAccess(status: ReturnType<typeof configStatus>, admin: boolean
   // source objects.
   return {
     ...status,
+    edition: { edition: status.edition.edition, features: status.edition.features },
     signIn: { admins: [], members: [] },
     vps: { configured: status.vps.configured, sshAlias: "" },
     profile: { name: status.profile.name, email: "" },
@@ -14728,7 +14812,7 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
         return json(res, 400, { error: "threadId must be a task id" });
       }
       const threadId = body.threadId ?? group.threadId;
-      noteTurnTrigger(threadId, auth);
+      const trigger = usageTriggerFor(auth);
       try {
         assertWithinBudget(cfg, DATA_DIR);
       } catch (error) {
@@ -14797,10 +14881,11 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
               mode: channelMode,
               via,
               sender: messageSender(auth),
+              trigger,
             });
             return { ok: true as const, queued: true as const, queueId: queued.id, threadId };
           }
-          const message = startGroupTurn(current.id, text, replyTo, sendId, channelMode, undefined, { via, sender: messageSender(auth) });
+          const message = startGroupTurn(current.id, text, replyTo, sendId, channelMode, undefined, { via, sender: messageSender(auth), trigger });
           return { ok: true as const, threadId, message };
         },
       );
@@ -14840,7 +14925,8 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
       if (!ownsThread) {
         return json(res, 409, { error: "the channel switched tasks before it could receive the message" });
       }
-      noteTurnTrigger(targetThreadId, auth);
+      // Steering folds words into the running room turn; who pressed Steer
+      // does not re-book that turn (its sender was captured when it started).
       const current = store.group(group.id);
       if (!current) return json(res, 404, { error: "no such room" });
       // Which engine owns the running room turn on this thread? The same
@@ -16169,15 +16255,12 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
       }
       // External interfaces must opt into a distinct route: an older server
       // returns 404 rather than silently ignoring safety preconditions.
-      if (guarded && !z.object({
-        threadId: z.string().regex(/^[\w-]+$/),
-        sendId: z.string().regex(/^[A-Za-z0-9_-]{16,80}$/),
-        text: z.string().min(1),
-        expectedActiveLeafId: z.string().regex(/^[\w-]+$/).nullable(),
-        expectedApprovalMode: z.enum(["ask", "full"]).optional(),
-        replyToId: z.string().optional(),
-      }).strict().safeParse(body).success) {
-        return json(res, 400, { error: "guarded sends require threadId, sendId, text and expectedActiveLeafId" });
+      const guardedBody = guarded ? guardedSendSchema.safeParse(body) : null;
+      if (guardedBody && !guardedBody.success) {
+        const onBehalfOfInvalid = guardedBody.error.issues.some((issue) => issue.path[0] === "onBehalfOf");
+        return json(res, 400, { error: onBehalfOfInvalid
+          ? "onBehalfOf must name the person with an email address, a name, or both"
+          : "guarded sends require threadId, sendId, text and expectedActiveLeafId" });
       }
       const text = String(body.text ?? "").trim();
       if (!text) return json(res, 400, { error: "text required" });
@@ -16191,7 +16274,16 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
       // receipt after a task switch, while a genuinely new send still has to
       // target the task that is active now.
       const threadId = body.threadId ?? bot.threadId;
-      if (!guarded) noteTurnTrigger(threadId, auth);
+      // Who this message is from, for the ledger. It is captured here and
+      // travels with the message: into the turn it starts, or into the queue
+      // until it drains. A message steered into someone else's running turn
+      // books nothing — that turn stays with whoever started it. A guarded
+      // relay (the Slack worker, which already holds admin scope to reach
+      // this route) names the person it acts for.
+      const onBehalfOf = guardedBody?.data?.onBehalfOf;
+      const trigger: UsageTrigger = onBehalfOf
+        ? { kind: "user", ...(onBehalfOf.email ? { email: onBehalfOf.email } : {}), ...(onBehalfOf.name ? { label: onBehalfOf.name } : {}) }
+        : usageTriggerFor(auth);
       // The send is acknowledged before the turn starts, so a workspace at its
       // spend limit is refused here, where the person can see it.
       try {
@@ -16256,8 +16348,7 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
             if (currentAtStart.busy || threadBusy(bot.id, threadId) || botAtThreadCapacity(bot.id) || parksBehindCoordination(bot.id, threadId) || activeGroupTurnForBot(bot.id)) {
               throw Object.assign(new Error("wait for a free thread slot before retrying this message"), { status: 409, code: "guarded_busy" });
             }
-            noteTurnTrigger(threadId, auth);
-            const message = await startTurn(bot.id, text, { threadId, replyTo, sendId, sender: messageSender(auth) });
+            const message = await startTurn(bot.id, text, { threadId, replyTo, sendId, sender: messageSender(auth), trigger });
             return { ok: true as const, threadId, message };
           }
 
@@ -16323,17 +16414,18 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
               return { ok: true as const, steered: true as const, threadId, message };
             }
             if (!current.busy) {
-              return startOrQueueDirectMessage(bot.id, threadId, text, replyTo, sendId, messageSender(auth));
+              return startOrQueueDirectMessage(bot.id, threadId, text, replyTo, sendId, messageSender(auth), trigger);
             }
             const queued = queueSteeredMessage(current.id, threadId, text, {
               replyToId: replyTo?.id,
               sendId,
               prompt: promptWithReply(text, replyTo, cfg.profile?.name?.trim() || "User"),
               sender: messageSender(auth),
+              trigger,
             });
             return { ok: true as const, queued: true as const, queueId: queued.id, threadId };
           }
-          return startOrQueueDirectMessage(bot.id, threadId, text, replyTo, sendId, messageSender(auth));
+          return startOrQueueDirectMessage(bot.id, threadId, text, replyTo, sendId, messageSender(auth), trigger);
         },
       );
       return json(res, 202, receipt);
@@ -16358,7 +16450,9 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
       const body = await readBody(req);
       requirePinnedClientThread(m[1], body?.threadId);
       const bot = requestedTaskBot(m[1], body?.threadId);
-      noteTurnTrigger(bot.threadId, auth);
+      // Pressing Steer folds the queued words into the running turn. It does
+      // not re-book that turn to whoever pressed it, and the words keep the
+      // sender they were queued with.
       // Lift the whole queue atomically: a settle racing this request can
       // drain it as a follow-up, or this request can steer it into the live
       // turn — never both for the same words.
@@ -16433,9 +16527,8 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
       const body = await readBody(req);
       requirePinnedClientThread(m[1], body?.threadId);
       const bot = requestedTaskBot(m[1], body?.threadId);
-      noteTurnTrigger(bot.threadId, auth);
       await startTurn(bot.id, "Summarize conversation context", {
-        threadId: bot.threadId, compactOnly: true, cardContinuation: true,
+        threadId: bot.threadId, compactOnly: true, cardContinuation: true, trigger: usageTriggerFor(auth),
       });
       return json(res, 202, { ok: true, threadId: bot.threadId });
     }
@@ -16471,7 +16564,7 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
       // startTurn admits the rerun before branching. A shared-resource or
       // concurrency-limit refusal must leave the original transcript intact.
       const replyTo = source.replyToId ? resolveReplyTarget(bot.threadId, source.replyToId) : undefined;
-      const message = await startTurn(bot.id, text, { threadId: bot.threadId, editedMessageId: messageId, replyTo });
+      const message = await startTurn(bot.id, text, { threadId: bot.threadId, editedMessageId: messageId, replyTo, trigger: usageTriggerFor(auth) });
       return json(res, 202, { ok: true, message });
     }
 
@@ -17235,7 +17328,7 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
     // the same API shape but a different pid)
     if (method === "GET" && path === "/api/health") {
       return json(res, 200, { app: "openmausbot", pid: process.pid, static: Boolean(STATIC_DIR), capabilities: {
-        guardedMessages: 1, guardedRequests: 1, guardedFullAccess: 1,
+        guardedMessages: 1, guardedRequests: 1, guardedFullAccess: 1, guardedOnBehalfOf: 1,
         ...(sharedWorkspaceFullAccessEnabled() ? { sharedWorkspaceFullAccess: 1 } : {}),
       } });
     }
@@ -17326,7 +17419,7 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
       if (!range) return json(res, 400, { error: "from and to must be YYYY-MM-DD, from no later than to, at most a year apart" });
       const rows = readUsage(DATA_DIR, range);
       // The operator's price list is applied only with the billing entitlement.
-      const prices = entitled("billing") && cfg.billing?.prices && Object.keys(cfg.billing.prices).length ? cfg.billing.prices : null;
+      const prices = operatorPrices();
       if (path === "/api/usage.csv") {
         const stamp = (date: Date) => date.toISOString().slice(0, 10);
         res.writeHead(200, {
@@ -18705,6 +18798,10 @@ calendarCalls.start();
 
 // Resolve the edition before accepting requests so /api/edition is never a guess.
 console.log(describeEdition(await loadEnterpriseLayer()));
+// A key inside its last 30 days, or already in its grace period, says so
+// where an operator reads first.
+const startupLicenseWarning = licenseWarning(editionStatus());
+if (startupLicenseWarning) console.warn(startupLicenseWarning);
 workspaceAccess = createWorkspaceAccess({ sessions, cookieName: SESSION_COOKIE, closeSessionStreams });
 // Ten-second cadence plus the bridge's five-second backchannel deadline bounds
 // stale portal access on quiet event/browser streams to fifteen seconds.

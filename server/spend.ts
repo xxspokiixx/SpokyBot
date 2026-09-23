@@ -1,9 +1,14 @@
 // Spend limits over the usage ledger: what this workspace has spent this
-// month against its cap, and the refusal a turn gets once the cap is
-// reached. The figure is the cost engines reported to the ledger, so on a
-// workspace of personal subscriptions it counts their equivalents too; on
-// keys it is what the operator actually pays. Enforced only with the
-// `budgets` entitlement; without it the setting is inert.
+// month against its cap, the refusal a turn gets once the cap is reached,
+// and the one-per-month notices when the month crosses the warning
+// threshold and the cap. The figure is every cost in the ledger: what
+// engines reported (on a workspace of personal subscriptions, their
+// equivalents too) plus the estimates booked for engines that report tokens
+// but no price (server/model-prices.ts). A turn on an unpriced model counts
+// nothing. Enforced only with the `budgets` entitlement; without it the
+// setting is inert.
+import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { join } from "node:path";
 import type { AppConfig } from "./config.ts";
 import { entitled } from "./enterprise.ts";
 import { readUsage } from "./usage-ledger.ts";
@@ -27,7 +32,7 @@ function monthOf(now: Date): string {
   return now.toISOString().slice(0, 7);
 }
 
-/** Reported cost this month so far, from the ledger, cached briefly. */
+/** Reported and estimated cost this month so far, from the ledger, cached briefly. */
 export function monthToDateSpend(dataDir: string, now = new Date()): number {
   const month = monthOf(now);
   const hit = cache.get(dataDir);
@@ -96,4 +101,65 @@ export function assertWithinBudget(
     new Error(`this workspace has reached its monthly spend limit of $${usd(state.monthlyUsd)} — an admin can raise it under Settings → Usage`),
     { status: 409, code: "spend_cap" },
   );
+}
+
+export type SpendAlert = "warn" | "cap";
+
+interface AlertMarks {
+  month: string;
+  monthlyUsd: number;
+  warn?: true;
+  cap?: true;
+}
+
+const ALERTS_FILE = "alerts.json";
+
+function readMarks(dataDir: string): AlertMarks | null {
+  try {
+    const value: unknown = JSON.parse(readFileSync(join(dataDir, "usage", ALERTS_FILE), "utf8"));
+    if (typeof value !== "object" || value === null) return null;
+    const marks = value as AlertMarks;
+    return typeof marks.month === "string" && typeof marks.monthlyUsd === "number" ? marks : null;
+  } catch {
+    return null;
+  }
+}
+
+/** The notice this booking should raise, if any: the cap the first time the
+ * month reaches it, the warning the first time it crosses the threshold, and
+ * nothing again for either that month. A new month, or a different cap, is a
+ * new budget and starts over. Marks live beside the ledger so a restart does
+ * not repeat them; if they cannot be written the notice is still sent once
+ * for this run. */
+export function takeSpendAlert(dataDir: string, state: SpendState | null): SpendAlert | null {
+  if (!state || (!state.warn && !state.exceeded)) return null;
+  const saved = readMarks(dataDir) ?? memoryMarks.get(dataDir) ?? null;
+  const marks: AlertMarks = saved && saved.month === state.month && saved.monthlyUsd === state.monthlyUsd
+    ? saved
+    : { month: state.month, monthlyUsd: state.monthlyUsd };
+  const alert: SpendAlert | null = state.exceeded && !marks.cap ? "cap" : state.warn && !marks.warn && !marks.cap ? "warn" : null;
+  if (!alert) return null;
+  // Reaching the cap also answers the warning: one notice, the stronger one.
+  const next: AlertMarks = { ...marks, warn: true, ...(alert === "cap" ? { cap: true as const } : {}) };
+  memoryMarks.set(dataDir, next);
+  try {
+    mkdirSync(join(dataDir, "usage"), { recursive: true, mode: 0o700 });
+    writeFileSync(join(dataDir, "usage", ALERTS_FILE), JSON.stringify(next), { mode: 0o600 });
+  } catch {
+    /* bookkeeping must never take down the turn */
+  }
+  return alert;
+}
+const memoryMarks = new Map<string, AlertMarks>();
+
+export function resetSpendAlertsForTests(): void {
+  memoryMarks.clear();
+}
+
+/** The notice's words. English like the server's other notification titles. */
+export function spendAlertText(alert: SpendAlert, state: SpendState): { title: string; body: string } {
+  const spent = `$${state.spentUsd.toFixed(2)} of $${usd(state.monthlyUsd)} spent this month (${state.month})`;
+  return alert === "cap"
+    ? { title: "Monthly spend limit reached", body: `${spent}. New turns are refused until an admin raises the limit under Settings → Usage.` }
+    : { title: `Spend is at ${state.percent}% of the monthly limit`, body: `${spent}. New turns stop when the limit is reached.` };
 }

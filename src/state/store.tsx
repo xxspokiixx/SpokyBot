@@ -556,8 +556,14 @@ export interface ConfigStatus {
   xai?: { configured: boolean };
   anthropic?: { configured: boolean };
   openaiCompat?: { configured: boolean; url?: string };
-  /** what this server is entitled to; Settings shows only what works here */
-  edition?: { edition: "oss" | "enterprise"; features: string[] };
+  /** what this server is entitled to; Settings shows only what works here.
+   * `license` reaches admins only, and only while the key is inside its
+   * warning window or grace period. */
+  edition?: {
+    edition: "oss" | "enterprise";
+    features: string[];
+    license?: { expiresAt: string; expiresInDays: number; graceEndsAt?: string };
+  };
   /** a fleet agent exists on this server (Settings → Workspaces) */
   fleet?: { available: boolean };
   budgets?: { monthlyUsd?: number; warnAtPercent?: number };
