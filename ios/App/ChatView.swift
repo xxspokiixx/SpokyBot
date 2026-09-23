@@ -243,7 +243,6 @@ struct ChatView: View {
                     // edge: it sits in the island while that is open and
                     // glides into its header slot when the island lets go.
                     let topInset = IslandGeometry.topInset
-                    let hasIsland = IslandGeometry.hasIsland(topInset: topInset)
                     let islandSide: CGFloat = 220
                     // centred in the part of the square the hardware island does not cover
                     let islandFaceCentre = IslandGeometry.top + IslandGeometry.size.height + (islandSide - IslandGeometry.size.height) / 2
@@ -252,7 +251,7 @@ struct ChatView: View {
                     let faceCentre = headerFaceCentre + (islandFaceCentre - headerFaceCentre) * facePhase
                     ZStack(alignment: .top) {
                         if islandVisible {
-                            IslandShell(expanded: islandExpanded, hasIsland: hasIsland, expandedSize: CGSize(width: islandSide, height: islandSide)) {
+                            IslandShell(expanded: islandExpanded, expandedSize: CGSize(width: islandSide, height: islandSide)) {
                                 Color.clear
                             }
                         }
