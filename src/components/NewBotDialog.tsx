@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { Loader2, Plus, Trash2, X } from "lucide-react";
-import { api, BotEditorStore, useStore, type ModelSelection } from "@/state/store";
+import { api, BotEditorStore, useStore, type Bot, type ModelSelection } from "@/state/store";
 import { BotCreationDraft, EMPTY_BOT_DEFAULTS } from "@/lib/bot-creation-draft";
 import { createConfiguredBot, preparedBotTemplate } from "@/lib/create-configured-bot";
 import { BOT_ROLES, roleProfilePatch } from "@/lib/bot-roles";
@@ -25,8 +25,8 @@ import { LocalComputerAutoWarning } from "./LocalComputerAutoWarning";
 const SECTIONS = ["Identity", "Soul", "Skills", "Memory", "Routines", "Access", "Model", "Permissions", "Voice & alerts"] as const;
 type Section = typeof SECTIONS[number];
 
-export function NewBotDialog({ defaultsMode = false, onClose, section, onCreated }: {
-  defaultsMode?: boolean; onClose?: () => void; section?: string; onCreated?: (botId: string) => void;
+export function NewBotDialog({ defaultsMode = false, onClose, section, onCreated, preserveSelection = false }: {
+  defaultsMode?: boolean; onClose?: () => void; section?: string; onCreated?: (bot: Bot) => void; preserveSelection?: boolean;
 } = {}) {
   const parent = useStore();
   const [, render] = useState(0);
@@ -35,6 +35,7 @@ export function NewBotDialog({ defaultsMode = false, onClose, section, onCreated
   const [ready, setReady] = useState(false);
   const [saving, setSaving] = useState(false);
   const savingRef = useRef(false);
+  const alive = useRef(true);
   const [error, setError] = useState("");
   const [warning, setWarning] = useState<"full" | "local" | null>(null);
   const dialog = useRef<HTMLDivElement>(null);
@@ -58,6 +59,7 @@ export function NewBotDialog({ defaultsMode = false, onClose, section, onCreated
       }).catch(cause => { if (!cancelled) setError(String(cause)); });
     return () => { cancelled = true; };
   }, [defaultsMode, section]);
+  useEffect(() => { alive.current = true; return () => { alive.current = false; }; }, []);
   useEffect(() => () => draft.dispose(), [draft]);
   useEffect(() => {
     const previous = document.activeElement instanceof HTMLElement ? document.activeElement : null;
@@ -88,13 +90,13 @@ export function NewBotDialog({ defaultsMode = false, onClose, section, onCreated
       if (defaultsMode) await api("/api/config", { method: "PATCH", body: JSON.stringify({ newBotDefaults: await preparedBotTemplate(draft) }) });
       else {
         const { bot, warnings } = await createConfiguredBot(draft);
-        parent.dispatch({ type: "botAdded", bot });
+        parent.dispatch({ type: "botAdded", bot, preserveSelection });
         if (warnings.length) parent.dispatch({ type: "error", message: warnings.join("\n") });
-        onCreated?.(bot.id);
+        onCreated?.(bot);
       }
-      savingRef.current = false; closeRef.current();
-    } catch (cause) { setError(cause instanceof Error ? cause.message : String(cause)); }
-    finally { savingRef.current = false; setSaving(false); }
+      savingRef.current = false; if (alive.current) closeRef.current();
+    } catch (cause) { if (alive.current) setError(cause instanceof Error ? cause.message : String(cause)); }
+    finally { savingRef.current = false; if (alive.current) setSaving(false); }
   };
   const bot = draft.bot;
   const scopedStore: ReturnType<typeof useStore> = {
