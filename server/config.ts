@@ -316,8 +316,8 @@ const instanceConfigSchema = z.object({
 });
 const instanceConfigMapSchema = z.record(z.string(), instanceConfigSchema);
 const defaultModelSelectionSchema = z.object({
-  instanceId: z.string().trim().min(1),
-  model: z.string().trim().min(1),
+  instanceId: z.string().trim().min(1).max(200),
+  model: z.string().trim().min(1).max(500),
   effort: z.enum(EFFORT_LEVELS).optional(),
   variant: z.string().refine(isModelVariant, "invalid model variant").optional(),
 }).refine((selection) => selection.variant === undefined || selection.effort === undefined,
@@ -1047,6 +1047,14 @@ export function saveConfig(
     );
     if (routingConflict) throw Object.assign(new Error(routingConflict), { status: 409 });
     disk.browserProfiles = nextProfiles;
+    if (disk.newBotDefaults) {
+      const defaults = newBotDefaultsSchema.parse(disk.newBotDefaults);
+      const profileId = defaults.profile.browserProfile;
+      if (profileId && profileId !== "guest" && !nextProfiles.some(profile => profile.id === profileId)) {
+        delete defaults.profile.browserProfile;
+        disk.newBotDefaults = defaults;
+      }
+    }
   }
   if (checkedPatch.instances) {
     const currentInstances = jsonObjectSchema.safeParse(disk.instances);
