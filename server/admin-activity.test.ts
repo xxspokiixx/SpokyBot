@@ -15,7 +15,10 @@ import {
   configChangeRows,
   flushAdminActivity,
   parseActivityWhat,
+  pruneAdminActivity,
   readAdminActivityRange,
+  sharedSignIn,
+  signInListsOf,
   type AdminActionRow,
 } from "./admin-activity.ts";
 import { bindDecisionRetention, DEFAULT_DECISION_RETENTION_DAYS, type DecisionRow } from "./decision-log.ts";
@@ -71,6 +74,34 @@ describe("what a row records", () => {
       .toEqual({ "instances.grok.environment": { KEY: "[hidden]" }, "box.token": "[hidden]", "rooms.maxTokens": 9 });
   });
 
+  it("hides a credential passed as a flag or in a URL", () => {
+    const rows = configChangeRows({ mcpServers: {} }, { mcpServers: {
+      stripe: { command: "npx", args: ["-y", "@acme/mcp", "--api-key", "acme_live_9f8e7d6c5b4a3f2e1d0c", "--token=tok_live_123456", "--verbose", "--port", "8080"] },
+      remote: { url: "https://mcp.example.test/sse?key=abc123def456ghi&mode=fast&access_token=xyz987" },
+    } });
+    const values = JSON.stringify(auditValues(rows[0]!.after!));
+    for (const secret of ["acme_live_9f8e7d6c5b4a3f2e1d0c", "tok_live_123456", "abc123def456ghi", "xyz987"]) expect(values).not.toContain(secret);
+    expect(values).toContain('"--api-key","[hidden]","--token=[hidden]","--verbose","--port","8080"');
+    expect(values).toContain("?key=[hidden]&mode=fast&access_token=[hidden]");
+  });
+
+  it("compares only the fields a request named", () => {
+    const before = botAuditSnapshot({ approvalMode: "ask", composio: true });
+    const after = botAuditSnapshot({ approvalMode: "auto", composio: false });
+    expect(botChangeRows({ id: "b" }, before, after, ["composio"]).map((row) => row.changed)).toEqual([["composio"]]);
+    expect(botChangeRows({ id: "b" }, before, after).map((row) => row.changed)).toEqual([["approvalMode", "composio"]]);
+  });
+
+  it("knows when more than one person signs in", () => {
+    expect(sharedSignIn({ admins: ["boss@example.test"], members: [] })).toBe(false);
+    expect(sharedSignIn({ admins: [], members: [] })).toBe(false);
+    expect(sharedSignIn({ admins: ["boss@example.test"], members: ["ada@example.test"] })).toBe(true);
+    expect(sharedSignIn({ admins: ["boss@example.test", "cto@example.test"], members: [] })).toBe(true);
+    expect(sharedSignIn({ admins: ["@example.test"], members: [] })).toBe(true);
+    expect(signInListsOf({ signIn: { admins: ["a@x.test", 3], members: "nope" } })).toEqual({ admins: ["a@x.test"], members: [] });
+    expect(signInListsOf(null)).toEqual({ admins: [], members: [] });
+  });
+
   it("splits a bot's audience from its other permissions and ignores display fields", () => {
     const before = botAuditSnapshot({ id: "b", color: "red", approvalMode: "ask", peers: ["x"] });
     const after = botAuditSnapshot({ id: "b", color: "blue", approvalMode: "ask", peers: [], visibility: { people: ["ada@example.test"] } });
@@ -100,6 +131,15 @@ describe("the monthly file", () => {
     const rows = readAdminActivityRange(dir, { from: new Date(recent.getTime() - 60_000), to: new Date(recent.getTime() + 60_000) });
     expect(rows).toHaveLength(1);
     expect(rows[0]).toMatchObject({ category: "people", actor: BOSS });
+  });
+
+  it("prunes a quiet log on the server's timer, by the same window", async () => {
+    const dir = tempDir();
+    const old = new Date(Date.UTC(2024, 0, 15));
+    mkdirSync(join(dir, "admin-activity"), { recursive: true });
+    writeFileSync(adminActivityFileFor(dir, old), JSON.stringify({ at: old.toISOString(), category: "bot", action: "bot.create", actor: { kind: "cli" } }) + "\n");
+    expect(await pruneAdminActivity(dir, 3650)).toEqual([]);
+    expect(await pruneAdminActivity(dir, 180)).toEqual(["2024-01.ndjson"]);
   });
 
   it("keeps an old month while the configured window still covers it", async () => {

@@ -118,3 +118,53 @@ the log; the command line not named; the activity routes readable by
 members. Every server, session and engine was a local fixture. This is not
 production qualification: no hosted tenant, portal, Slack worker, cloud
 Admin or real email was involved.
+
+## Review follow-ups — 2026-09-23
+
+A review of #1717 reproduced eight problems; each is now covered.
+
+- **Room recall.** A bot everyone sees repeated, in a member's 1:1, what a
+  restricted bot said in a room they shared (the recent-work brief and
+  `session_search`). Rooms whose bots have a narrower audience than the
+  recalling bot are now left out (`roomFeeds` in `server/bot-visibility.ts`),
+  and creating a room or adding a member with a different audience is
+  refused. `server/bot-visibility.e2e.test.ts` ("keeps a room fewer people
+  can see out of a visible bot's recall…") checks Bob's real reply and the
+  real `/api/internal/session-search`.
+- **Restricted at creation.** `POST /api/bots` and `POST /api/teams/import`
+  take `visibility`; the new-bot screen and "Duplicate" pass it; the first
+  frame is already restricted ("never shows a member a bot created, copied
+  or imported already restricted").
+- **Every response narrowed.** A response hook (`onJsonBody` in
+  `server/harness/http.ts`) passes every JSON answer a member receives
+  through `memberBody` ("sends a member every bot without its audience list
+  or hidden teammates, whichever route answers": read, display edit,
+  profile, task create and switch, list).
+- **Streams after an audience change.** Member streams end at the change and
+  any member cursor at or before it resumes with a fresh snapshot
+  (`resumed:false`), including a member who was away; admin streams stay up.
+- **Redaction.** Flag values after `--api-key`/`--token` and credential URL
+  parameters are hidden (`server/admin-activity.test.ts`).
+- **Attribution.** Config rows come from each `saveConfig` in the request's
+  own async context; bot and webhook rows compare only the fields the
+  request named; creations come from the request's own answer
+  ("puts each concurrent change down to the admin who made it").
+- **When to record.** Only on shared workspaces; a prune timer and a
+  shutdown flush match the decision log's ("stops recording once only one
+  person uses the workspace"; the CLI's `access` rows follow the same rule).
+- **Admin-only frames.** A member stream never falls back to the admin copy
+  of a frame kept from clients (`memberFrame` returns nothing for a withheld
+  frame).
+
+Observed on a disposable worktree on OpenMausBot main `3eb90469`:
+`pnpm typecheck`, `pnpm lint`, `pnpm i18n:check`, the files above and their
+neighbours (`server/index.test.ts`, card answerers, CLI, recent work, room
+and team suites) passed on macOS. Mutation checks, each restored afterwards,
+turned a named test red: recent-work or `session_search` reading every room;
+mixed rooms allowed; creation ignoring `visibility`; the member response hook
+off; member streams left open; an older member cursor resumed; flag values or
+URL parameters left unmasked; bot changes compared on every field; config
+saves credited to the latest request rather than their own; recording on a
+one-person server. The admin-only frame guard (item 8) waits for #1709's
+frames to exist and was not mutation-checked. Same fixtures and limits as
+above; not production qualification.

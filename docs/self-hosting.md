@@ -605,8 +605,10 @@ server-private file (`<data dir>/thread-starters.json`), never sent to clients.
 ### Who can see a bot
 
 On a workspace several people share, an admin can limit who sees a bot:
-**Bot settings → Who can see it** (in the browser, for admins) or
-`PATCH /api/bots/:id` with `visibility`:
+**Bot settings → Who can see it** (in the browser, for admins), or when
+creating it — **New bot** offers the same choice, and `POST /api/bots` and
+`POST /api/teams/import?visibility=…` take it — so a bot for a sensitive job
+is never shown to everyone first. Over the API it is `visibility`:
 
 - `"everyone"` — every signed-in person, the default and today's behaviour;
 - `"admins"` — admin sessions only;
@@ -618,15 +620,24 @@ member who may not see a bot, the server answers the bot, its threads and
 their messages, images, exports, reactions, cards, sends, routines, runs and
 attachments exactly as it answers an id that does not exist (404), and leaves
 the bot out of the bot list, search results, routines, webhooks, the team map
-and the live event stream. When an admin changes a bot's audience, the
-members who lose it get it withdrawn from their open app (a `bot.deleted`
-frame), and those who gain it receive it whole.
+and the live event stream. Every bot a member is sent, by any route, comes
+without its audience list or the ids of teammates they cannot see. When an
+admin changes a bot's audience, every member's open app reconnects and
+reloads exactly what that person may now see (a member who was away and
+resumes from an older point gets the same fresh load); admins' apps are left
+alone.
 
-- **Rooms.** A member sees a room only if it has at least one bot and they
-  can see every bot in it. A room is one shared transcript, so a restricted
-  bot's words there would otherwise reach people who cannot see the bot.
-  Putting a restricted bot in a room therefore narrows that room too. A
-  member cannot create a room with a bot they cannot see.
+- **Rooms.** A room is one shared transcript, so its bots must be visible
+  to the same people: creating a room, or adding a bot to one, with bots
+  other people can see is refused with a plain sentence (for admins too). A
+  member sees a room only if it has at least one bot and they can see every
+  bot in it. If an admin later restricts a bot that is already in a room,
+  the change is allowed, the room narrows to people who can see all its
+  bots, Bot settings names the rooms whose bots now differ, and such a room
+  stays out of the recall and recent-work brief of any bot more people can
+  see — so a bot everyone sees cannot repeat, in a chat with anyone, what a
+  restricted bot said there. Give the bots the same visibility, or take one
+  out, to settle it.
 - **Teams.** A team (sidebar section) is listed to a member only when it
   holds a bot or room they can see.
 - **Bots working together.** A bot reaches a teammate (asks, delegations,
@@ -642,7 +653,9 @@ frame), and those who gain it receive it whole.
   a message in a thread, a bot's picture — is hidden from that member. A
   file nothing uses yet (someone's own upload) is served; its name is random.
 - **Not covered.** Words already quoted into a conversation a member can
-  see (an earlier delegation, a message copied by hand) stay there. A bot's
+  see (an earlier delegation, a message copied by hand, or something a bot
+  wrote into its own memory while it shared a room with a restricted bot)
+  stay there. A bot's
   shell can still read files on the server, as it always could. Slack is
   decided in your organisation's Admin: whoever may message a bot's Slack
   app reaches that bot there.
@@ -760,19 +773,26 @@ start a spreadsheet formula are prefixed with `'`.
 
 ### Admin activity
 
-Every admin change is recorded beside the decision log, in
-`<data dir>/admin-activity/YYYY-MM.ndjson` (0600), and kept for the same
-window (`decisions.retentionDays` / `OMB_DECISION_RETENTION_DAYS`): settings
+On a workspace several people share — a hosted workspace, an email sign-in
+list that names more than one person or a whole `@domain`, or a device paired
+with chat-only access — every admin change is recorded beside the decision
+log, in `<data dir>/admin-activity/YYYY-MM.ndjson` (0600), and kept for the
+same window (`decisions.retentionDays` / `OMB_DECISION_RETENTION_DAYS`; a
+quiet server prunes on a timer, and pending rows are written out at
+shutdown): settings
 (which keys changed), sign-in lists and people, pairing codes and revoked
 sessions, webhooks, MCP servers, engines and keys, bots created, deleted or
 given different permissions, spend limits and prices, and who can see a bot.
 Each row names who acted — the session's email or device label, `This
 computer` for the owner, `Command line` for `openmausbot` commands such as
 `openmausbot access add` — and the values before and after. Values are
-redacted: anything under a key that names a credential, and every value in a
-headers or environment map, is written as `[hidden]`, so a key change shows
-that the key changed and never the key. The desktop app, which one person
-uses, keeps no such log.
+redacted: anything under a key that names a credential, every value in a
+headers or environment map, the value after a flag such as `--api-key`, and
+URL parameters such as `?key=` are written as `[hidden]`, so a key change
+shows that the key changed and never the key. Each row covers only what that
+request named or saved, so two admins changing things at the same moment are
+each credited with their own change. The desktop app, and a server one person
+uses, keep no such log.
 
 **Settings → Activity** (admins, in the browser) shows these rows together
 with the cards people answered, filtered by who, what and when, and exports

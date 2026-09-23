@@ -101,6 +101,25 @@ export function sameAudience(a: unknown, b: unknown): boolean {
   return right.people.every((entry) => set.has(entry));
 }
 
+/** True when everyone who can see `inner` can also see `outer`. Admins see
+ * every bot, so an admins-only audience is inside any other. */
+export function audienceWithin(inner: unknown, outer: unknown): boolean {
+  const small = storedVisibility(inner);
+  const large = storedVisibility(outer);
+  if (large === "everyone" || small === "admins") return true;
+  if (small === "everyone" || large === "admins") return false;
+  return small.people.every((entry) =>
+    large.people.includes(entry) || (!entry.startsWith("@") && large.people.some((other) => other.startsWith("@") && entryMatches(other, entry))));
+}
+
+/** Whether a room's conversation may feed a bot's recall and its brief of
+ * recent work: only when everyone who can see the bot can see every bot in
+ * the room. Otherwise a member chatting with a bot everyone sees would get
+ * back what a restricted bot said in a room they cannot open. */
+export function roomFeeds(memberVisibilities: readonly unknown[], botVisibility: unknown): boolean {
+  return memberVisibilities.every((visibility) => audienceWithin(botVisibility, visibility));
+}
+
 export interface VisibilityBot {
   id: string;
   threadId: string;
@@ -293,6 +312,27 @@ export function memberBot<T extends object>(bot: T, visible: VisibleSet): T {
   const { visibility: _visibility, ...rest } = bot as T & { visibility?: unknown; peers?: unknown };
   const peers = Array.isArray(rest.peers) ? (rest.peers as unknown[]).filter((id): id is string => typeof id === "string" && visible.bot(id)) : undefined;
   return { ...rest, ...(peers ? { peers } : {}) } as T;
+}
+
+/** A JSON response as a member receives it: every bot it carries (under
+ * `bot`, or in `bots`, at the top or one level down) through memberBot. */
+export function memberBody(body: unknown, visible: VisibleSet): unknown {
+  if (visible.everything || !body || typeof body !== "object" || Array.isArray(body)) return body;
+  const narrow = (value: unknown, depth: number): unknown => {
+    if (!value || typeof value !== "object" || Array.isArray(value)) return value;
+    const record = value as Record<string, unknown>;
+    let out: Record<string, unknown> | null = null;
+    for (const [key, child] of Object.entries(record)) {
+      let next = child;
+      if (key === "bot" && child && typeof child === "object" && !Array.isArray(child)) next = memberBot(child, visible);
+      else if (key === "bots" && Array.isArray(child)) {
+        next = child.map((bot) => (bot && typeof bot === "object" ? memberBot(bot as object, visible) : bot));
+      } else if (depth > 0 && key !== "messages" && child && typeof child === "object" && !Array.isArray(child)) next = narrow(child, depth - 1);
+      if (next !== child) (out ??= { ...record })[key] = next;
+    }
+    return out ?? record;
+  };
+  return narrow(body, 1);
 }
 
 /** `undefined`: send nothing. Otherwise the payload to send, which is the

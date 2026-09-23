@@ -1228,6 +1228,7 @@
   "botSettings.visibility.saving": "Saving…",
   "botSettings.visibility.saved": "Saved. It applies at once.",
   "botSettings.visibility.needPeople": "Add at least one email address, or choose Admins only.",
+  "botSettings.visibility.mixedRooms": "In {rooms}, the other bots are visible to different people. Those rooms show only to people who can see every bot in them, and they stay out of these bots' recall. Give them the same visibility, or take this bot out of those rooms.",
   "workspaces.title": "Client workspaces",
   "workspaces.subtitle": "Each workspace on this server is its own account, service, data and sign-in list at its own address. Create one, manage who may sign in, pause or remove it, and upgrade them all in one go.",
   "workspaces.empty": "No workspaces on {domain} yet.",

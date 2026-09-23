@@ -7,7 +7,7 @@
 import { useEffect, useState } from "react";
 import { Check, Loader2 } from "lucide-react";
 
-import { api, type Bot } from "@/state/store";
+import { api, useStore, type Bot } from "@/state/store";
 import { cn } from "@/lib/cn";
 import { t } from "@/lib/i18n";
 import type { BotVisibility } from "../../../shared/wire";
@@ -27,6 +27,23 @@ export function visibilityFromForm(mode: VisibilityMode, people: string): { ok: 
   return entries.length ? { ok: true, visibility: { people: entries } } : { ok: false };
 }
 
+/** One audience, however it was written: absent is everyone, lists compare as sets. */
+export function audienceKey(visibility: BotVisibility | undefined): string {
+  if (!visibility || visibility === "everyone" || visibility === "admins") return visibility ?? "everyone";
+  return JSON.stringify([...new Set(visibility.people.map((entry) => entry.trim().toLowerCase()))].sort());
+}
+
+/** Rooms this bot shares with a bot other people can see. */
+export function mixedRooms(bot: Pick<Bot, "id" | "visibility">, groups: ReadonlyArray<{ name: string; memberIds: string[]; dm?: boolean }>, bots: ReadonlyArray<Pick<Bot, "id" | "visibility">>): string[] {
+  const mine = audienceKey(bot.visibility);
+  return groups
+    .filter((group) => !group.dm && group.memberIds.includes(bot.id) && group.memberIds.some((id) => {
+      const other = bots.find((candidate) => candidate.id === id);
+      return other !== undefined && other.id !== bot.id && audienceKey(other.visibility) !== mine;
+    }))
+    .map((group) => group.name);
+}
+
 const OPTIONS: Array<{ mode: VisibilityMode; key: "botSettings.visibility.everyone" | "botSettings.visibility.admins" | "botSettings.visibility.people" }> = [
   { mode: "everyone", key: "botSettings.visibility.everyone" },
   { mode: "admins", key: "botSettings.visibility.admins" },
@@ -34,6 +51,8 @@ const OPTIONS: Array<{ mode: VisibilityMode; key: "botSettings.visibility.everyo
 ];
 
 export function VisibilitySection({ bot }: { bot: Bot }) {
+  const { state } = useStore();
+  const mixed = mixedRooms(bot, state.groups, state.bots);
   const saved = formFromVisibility(bot.visibility);
   const [mode, setMode] = useState<VisibilityMode>(saved.mode);
   const [people, setPeople] = useState(saved.people);
@@ -102,6 +121,11 @@ export function VisibilitySection({ bot }: { bot: Bot }) {
         </label>
       )}
       <p className="text-[11.5px] leading-relaxed text-ink-secondary">{t("botSettings.visibility.rooms")}</p>
+      {mixed.length > 0 && (
+        <p className="rounded-lg border border-warning/25 bg-warning/5 px-3 py-2 text-[12px] leading-relaxed text-ink-secondary" data-visibility-mixed-rooms>
+          {t("botSettings.visibility.mixedRooms", { rooms: mixed.map((name) => JSON.stringify(name)).join(", ") })}
+        </p>
+      )}
       <div className="flex items-center gap-3">
         <button
           type="button"
