@@ -178,6 +178,67 @@ final class MarkdownTableTests: XCTestCase {
         XCTAssertEqual(Markdown.blocks("- [  ] no"), [.bullet(indent: 0, text: "[  ] no")])
     }
 
+    func testAListItemOrTabIsNotADelimiter() {
+        XCTAssertEqual(Markdown.blocks("| A | B |\n- | --- | --- |\n| 1 | 2 |"), [
+            .paragraph("| A | B |"),
+            .bullet(indent: 0, text: "| --- | --- |"),
+            .paragraph("| 1 | 2 |"),
+        ])
+        XCTAssertEqual(Markdown.blocks("| A | B |\n\t| --- | --- |\n| 1 | 2 |"), [
+            .paragraph("| A | B | | --- | --- | | 1 | 2 |"),
+        ])
+        XCTAssertEqual(Markdown.blocks("- intro\n  > note\n  | A | B |\n  | --- | --- |"), [
+            .bullet(indent: 0, text: "intro"),
+            .quote("note"),
+            .paragraph("| A | B | | --- | --- |"),
+        ])
+    }
+
+    func testShortWeldedDelimiterIsPadded() {
+        XCTAssertEqual(Markdown.blocks("| A | B | |---| | 1 | 2 |"), [
+            .table(MarkdownTable(headers: ["A", "B"], alignments: [.leading, .leading], rows: [["1", "2"]])),
+        ])
+    }
+
+    func testBracketSpaceIsNotACheckboxAndAQuotedTaskStaysAQuote() {
+        XCTAssertEqual(Markdown.blocks("- [ x ] no"), [.bullet(indent: 0, text: "[ x ] no")])
+        XCTAssertEqual(Markdown.blocks("> - [x] done"), [.quote("- [x] done")])
+    }
+
+    func testTokensSurviveEveryPrefix() {
+        let sources = [
+            "Lead-in prose\n| A | B |\n| --- | --- |\n| 1 | 2 |\n\nAfter": ["Lead-in prose", "After", "1", "2"],
+            "| -5% | 12:30 | $3 | x |\n| --- | --- | --- | --- |\n| a | b | c | d |": ["-5%", "12:30", "$3", "x", "a"],
+            "- [x] next": ["next"],
+        ]
+        for (source, tokens) in sources {
+            for length in 1...source.count {
+                let partial = String(source.prefix(length))
+                let shown = Markdown.blocks(partial).map(MarkdownTableTests.payload).joined(separator: "\n")
+                for token in tokens where partial.contains(token) {
+                    XCTAssertTrue(shown.contains(token), "lost \(token) from \(partial.debugDescription)")
+                }
+            }
+        }
+    }
+
+    private static func payload(_ block: MarkdownBlock) -> String {
+        switch block {
+        case let .paragraph(text), let .bullet(_, text), let .quote(text), let .heading(_, text):
+            return text
+        case let .ordered(_, number, text):
+            return "\(number). \(text)"
+        case let .task(_, number, _, text):
+            return (number.map { "\($0). " } ?? "") + text
+        case let .code(_, text):
+            return text
+        case .rule:
+            return ""
+        case let .table(table):
+            return (table.headers + table.rows.flatMap { $0 }).joined(separator: "\n")
+        }
+    }
+
     func testOneToThreeSpaceIndentIsATable() {
         let blocks = Markdown.blocks("  | A | B |\n  | --- | --- |\n  | 1 | 2 |")
         XCTAssertEqual(blocks, [

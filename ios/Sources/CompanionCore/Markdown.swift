@@ -68,7 +68,7 @@ public enum Markdown {
 
             if trimmed.hasPrefix("```") || trimmed.hasPrefix("~~~") {
                 flushParagraph()
-                listIndents.removeAll()
+                closeLists(line, indents: &listIndents)
                 let marker = String(trimmed.prefix(3))
                 let language = String(trimmed.dropFirst(3)).trimmingCharacters(in: .whitespaces)
                 var body: [String] = []
@@ -90,21 +90,21 @@ public enum Markdown {
             if trimmed.count >= 3, "-*_".contains(trimmed.first!),
                trimmed.allSatisfy({ $0 == trimmed.first! }) {
                 flushParagraph()
-                listIndents.removeAll()
+                closeLists(line, indents: &listIndents)
                 blocks.append(.rule)
                 continue
             }
 
             if let heading = heading(trimmed) {
                 flushParagraph()
-                listIndents.removeAll()
+                closeLists(line, indents: &listIndents)
                 blocks.append(heading)
                 continue
             }
 
             if trimmed.hasPrefix(">") {
                 flushParagraph()
-                listIndents.removeAll()
+                closeLists(line, indents: &listIndents)
                 blocks.append(.quote(String(trimmed.dropFirst()).trimmingCharacters(in: .whitespaces)))
                 continue
             }
@@ -145,6 +145,15 @@ public enum Markdown {
 
     private static func leadingCount(_ line: String) -> Int {
         line.prefix(while: { $0 == " " || $0 == "\t" }).count
+    }
+
+    /// Pop list markers this line is not inside. A blank line clears the stack
+    /// on its own. A nested quote or fence must not.
+    private static func closeLists(_ line: String, indents: inout [Int]) {
+        let leading = leadingCount(line)
+        while let inner = indents.last, leading <= inner {
+            indents.removeLast()
+        }
     }
 
     private static func heading(_ trimmed: String) -> MarkdownBlock? {
@@ -245,7 +254,7 @@ public enum Markdown {
     }
 
     private static func isDelimiterRow(_ line: String) -> Bool {
-        guard isRowCandidate(line) || (line.contains("|") && leadingCount(line) <= 3) else { return false }
+        guard isRowCandidate(line) else { return false }
         let parts = cells(line)
         guard !parts.isEmpty else { return false }
         return parts.allSatisfy(isDelimiterCell)
@@ -307,7 +316,7 @@ public enum Markdown {
         let trimmedBody = body.trimmingCharacters(in: .whitespaces)
         guard trimmedBody.isEmpty || trimmedBody.hasPrefix("|") else { return nil }
         let delimiter = cells(run)
-        guard delimiter.count >= 2, delimiter.allSatisfy(isDelimiterCell) else { return nil }
+        guard delimiter.count >= 1, delimiter.allSatisfy(isDelimiterCell) else { return nil }
 
         var table = MarkdownTable(
             headers: headers,

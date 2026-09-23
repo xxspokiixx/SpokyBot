@@ -101,17 +101,21 @@ final class ThreadNavigationUITests: XCTestCase {
             "message-preview-gmail-grid-scroll-cell-1-0",
             "message-preview-gmail-grid-scroll-cell-1-1",
         ]
-        let identified = cellIds.map { app.descendants(matching: .any)[$0] }
+        let identified = cellIds.map { grid.descendants(matching: .any)[$0] }
         for (element, label) in zip(identified, labels) {
             XCTAssertTrue(element.waitForExistence(timeout: 5))
             XCTAssertEqual(element.label, label)
         }
         let order = identified.map(\.label)
         XCTAssertEqual(order, labels)
-        XCTAssertFalse(grid.staticTexts.matching(NSPredicate(format: "label CONTAINS %@", "DATA TABLE")).firstMatch.exists)
-        XCTAssertFalse(grid.staticTexts.matching(NSPredicate(format: "label CONTAINS %@", "Copy CSV")).firstMatch.exists)
-        XCTAssertFalse(grid.staticTexts.matching(NSPredicate(format: "label CONTAINS %@", "rows")).firstMatch.exists)
-        XCTAssertFalse(grid.staticTexts.matching(NSPredicate(format: "label CONTAINS %@", "| --- | --- |")).firstMatch.exists)
+        func absent(_ label: String, in element: XCUIElement) {
+            let match = element.descendants(matching: .any).matching(NSPredicate(format: "label CONTAINS %@", label)).firstMatch
+            XCTAssertFalse(match.exists, label)
+        }
+        absent("DATA TABLE", in: grid)
+        absent("Copy CSV", in: grid)
+        absent("rows", in: grid)
+        absent("| --- | --- |", in: grid)
 
         let scroll = app.descendants(matching: .any)["message-preview-gmail-grid-scroll"]
         XCTAssertTrue(scroll.waitForExistence(timeout: 5))
@@ -121,7 +125,7 @@ final class ThreadNavigationUITests: XCTestCase {
 
         let tasks = app.descendants(matching: .any)["message-preview-gmail-tasks"]
         XCTAssertTrue(tasks.waitForExistence(timeout: 5))
-        XCTAssertTrue(tasks.staticTexts["Quant baskets"].exists)
+        XCTAssertTrue(tasks.descendants(matching: .any)["Quant baskets"].waitForExistence(timeout: 5))
         XCTAssertTrue(tasks.staticTexts["1."].exists)
         XCTAssertTrue(tasks.descendants(matching: .any)["completed, Ship the notes"].exists)
         XCTAssertFalse(tasks.buttons["completed, Ship the notes"].exists)

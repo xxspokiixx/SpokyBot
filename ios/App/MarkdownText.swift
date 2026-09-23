@@ -212,7 +212,7 @@ struct MarkdownText: View {
         identifier: String?
     ) -> some View {
         Color.clear
-            .frame(width: width, height: 22)
+            .frame(width: tail ? width + caretWidth : width, height: 22)
             .overlay(alignment: frameAlignment(alignment)) {
                 inline(text, tail: tail)
                     .font(.system(size: 15, weight: weight))
@@ -232,8 +232,9 @@ struct MarkdownText: View {
         }
     }
 
-    /// Column width is the widest single-line cell, so header and body share
-    /// one frame even when the words differ.
+    /// Column width is the widest single-line cell, measured on the words
+    /// that are actually drawn. A code span is also measured in monospace,
+    /// which is wider than the proportional font.
     private func columnWidths(_ table: MarkdownTable) -> [CGFloat] {
         let headerFont = UIFont.systemFont(ofSize: 15, weight: .semibold)
         let bodyFont = UIFont.systemFont(ofSize: 15, weight: .regular)
@@ -246,8 +247,18 @@ struct MarkdownText: View {
         }
     }
 
+    private var caretWidth: CGFloat {
+        textWidth("\u{2007}▍", font: UIFont.systemFont(ofSize: 15))
+    }
+
     private func textWidth(_ text: String, font: UIFont) -> CGFloat {
-        ceil((text as NSString).size(withAttributes: [.font: font]).width)
+        let plain = renderedInline(text)
+        var width = ceil((plain as NSString).size(withAttributes: [.font: font]).width)
+        if text.contains("`") {
+            let mono = UIFont.monospacedSystemFont(ofSize: font.pointSize, weight: .regular)
+            width = max(width, ceil((plain as NSString).size(withAttributes: [.font: mono]).width))
+        }
+        return width
     }
 
     /// The words VoiceOver should hear, with inline markers removed. The
