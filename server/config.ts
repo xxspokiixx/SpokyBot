@@ -441,6 +441,9 @@ const appConfigSchema = z.object({
     autoCompact: z.boolean().optional(),
   }).optional(),
   threads: threadsConfigSchema.optional(),
+  /** The authorization decision log (server/decision-log.ts): days of month
+   * files kept, at least; OMB_DECISION_RETENTION_DAYS wins when set. */
+  decisions: z.object({ retentionDays: z.number().int().min(1).max(3650).optional() }).strict().optional(),
   localVm: localVmConfigSchema.optional(),
   features: featureConfigSchema.optional(),
   onboarding: onboardingConfigSchema.optional(),
@@ -476,6 +479,7 @@ export interface AppConfig {
   xai?: { key?: string; url?: string };
   anthropic?: { key?: string; url?: string };
   budgets?: { monthlyUsd?: number; warnAtPercent?: number };
+  decisions?: { retentionDays?: number };
   billing?: { currency?: string; prices?: Record<string, { inputPerMillion: number; outputPerMillion: number; cachedInputPerMillion?: number }> };
   openaiCompat?: { key?: string; url?: string; model?: string; provider?: string };
   composio?: { apiKey?: string; userId?: string; sessionId?: string };
@@ -954,6 +958,16 @@ export const PROVIDER_CREDENTIAL_ENV = [
   "CURSOR_AUTH_TOKEN",
 ] as const;
 
+const configSaveListeners = new Set<(before: JsonObject, after: JsonObject) => void>();
+
+/** Told, synchronously, what each saveConfig wrote: the file before and
+ * after. The admin activity log (server/admin-activity.ts) records the
+ * change for whoever's request made it. A listener must not throw. */
+export function onConfigSaved(listener: (before: JsonObject, after: JsonObject) => void): () => void {
+  configSaveListeners.add(listener);
+  return () => { configSaveListeners.delete(listener); };
+}
+
 /** Merge a partial config into ~/.openmausbot/config.json (secrets never
  * echoed back — callers report configured-or-not booleans only). */
 export function saveConfig(
@@ -969,12 +983,13 @@ export function saveConfig(
     /* first write */
   }
   const checkedPatch = appConfigSchema.partial().extend({ threads: threadsPatchSchema.optional() }).parse(patch);
+  const before = configSaveListeners.size ? structuredClone(disk) : disk;
   // A write is the durable migration point. Preserve every other raw key in
   // config.json, but never write #567's mixed-case or duplicate profile ids
   // back after we have successfully recognized the legacy list.
   const storedProfiles = storedBrowserProfilesSchema.safeParse(disk.browserProfiles);
   if (storedProfiles.success) disk.browserProfiles = storedProfiles.data;
-  for (const key of ["xai", "anthropic", "openaiCompat", "composio", "box", "opencodeGo", "tts", "imageGen", "profile", "rooms", "threads", "context", "localVm", "features", "budgets", "billing", "onboarding", "browserEngine"] as const) {
+  for (const key of ["xai", "anthropic", "openaiCompat", "composio", "box", "opencodeGo", "tts", "imageGen", "profile", "rooms", "threads", "context", "localVm", "features", "budgets", "billing", "decisions", "onboarding", "browserEngine"] as const) {
     const section = checkedPatch[key];
     if (!section) continue;
     const current = jsonObjectSchema.safeParse(disk[key]);
@@ -1065,6 +1080,13 @@ export function saveConfig(
   }
   mkdirSync(DATA_DIR, { recursive: true });
   writeFileAtomic(p, JSON.stringify(disk, null, 2), { mode: 0o600 });
+  for (const listener of configSaveListeners) {
+    try {
+      listener(before, disk);
+    } catch (error) {
+      console.warn(`config: a save listener failed: ${error instanceof Error ? error.message : String(error)}`);
+    }
+  }
 }
 
 /** Set one instance's `config.cli` ("" clears the override back to the
