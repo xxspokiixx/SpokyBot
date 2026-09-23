@@ -36,7 +36,7 @@ export function providerModelsUrl(provider: ProviderKeyKind, base?: string | nul
 
 function modelIds(body: unknown): string[] {
   const record = body && typeof body === "object" ? (body as { data?: unknown; models?: unknown }) : null;
-  const list = Array.isArray(record?.data) ? record.data : Array.isArray(record?.models) ? record.models : [];
+  const list = Array.isArray(body) ? body : Array.isArray(record?.data) ? record.data : Array.isArray(record?.models) ? record.models : [];
   const ids: string[] = [];
   for (const entry of list) {
     const item = entry && typeof entry === "object" ? (entry as { id?: unknown; name?: unknown }) : null;
