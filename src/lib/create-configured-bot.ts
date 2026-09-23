@@ -2,6 +2,7 @@ import { api, persistBotUpdate, type Bot } from "@/state/store";
 import type { Routine } from "./routines";
 import type { BotCreationDraft } from "./bot-creation-draft";
 import { imageAttachmentFromFile } from "./composer-attachments";
+import type { BotVisibility } from "../../shared/wire";
 import { botAvatarUrlFromStoredPath } from "../../shared/bot-avatar";
 
 export async function preparedBotTemplate(draft: BotCreationDraft) {
@@ -23,6 +24,7 @@ export async function createConfiguredBot(
   request: typeof api = api,
   update: typeof persistBotUpdate = persistBotUpdate,
   approvals = typeof window === "undefined" ? undefined : window.ogb?.approvals,
+  visibility?: BotVisibility,
 ): Promise<{ bot: Bot; warnings: string[] }> {
   const template = await preparedBotTemplate(draft);
   const { chiefOfStaff, managedSections, ...profile } = template.profile;
@@ -30,7 +32,7 @@ export async function createConfiguredBot(
   const response = await request<{ bot: Bot }>("/api/bots", {
     method: "POST", body: JSON.stringify({ name: profile.name, title: profile.title,
       description: profile.description, modelSelection: profile.modelSelection, section: profile.section,
-      requireAvailableModel: true, useDefaults: false }),
+      requireAvailableModel: true, useDefaults: false, ...(visibility !== undefined ? { visibility } : {}) }),
   });
   let bot = response.bot;
   const routines: Array<{ id: string; enabled: boolean }> = [];
