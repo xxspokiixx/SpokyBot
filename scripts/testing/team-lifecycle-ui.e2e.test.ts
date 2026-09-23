@@ -7,6 +7,7 @@ import { resolveAgentBrowserBinary } from "../../server/browser-engine.ts";
 import { waitForExit } from "../../server/testing/cleanup.ts";
 import { runControlOmb } from "../control-omb.ts";
 import { request } from "../mcp-server.ts";
+import { mountPreview, type MountedPreview } from "./preview-fixture.ts";
 import { UI_TOOLS_DIR } from "./control-omb-ui.ts";
 
 const ROOT = fileURLToPath(new URL("../..", import.meta.url));
@@ -16,6 +17,7 @@ if (!enabled) console.log("skipping team lifecycle UI e2e: set OMB_UI_E2E=1 to i
 
 (enabled ? it : it.skip)("creates an empty team, moves bots, and manages shared instructions in the renderer", async () => {
   let child: ChildProcess | undefined;
+  let preview: MountedPreview | undefined;
   let fixtureHandle: string | undefined;
   let fixtureLog: string | undefined;
   let succeeded = false;
@@ -172,6 +174,17 @@ if (!enabled) console.log("skipping team lifecycle UI e2e: set OMB_UI_E2E=1 to i
     const consoleResult = await ui("console");
     expect(JSON.stringify(consoleResult)).not.toMatch(/Uncaught|ReferenceError/);
     console.info(JSON.stringify({ fixture: info!, screenshot, emptyTeam: true, multiBotMove: true, reload: true, renameAndDelete: true }));
+    preview = await mountPreview({ info: { url: info!.url } }, {
+      entry: "/scripts/testing/confirm-dialog-preview.tsx", route: "/__confirm-focus.html", title: "Confirmation focus regression", logLevel: "silent",
+    });
+    await ui("eval", "--js", `location.href = ${JSON.stringify(preview.previewUrl)}; true`);
+    for (const action of ["Cancel", "Escape", "Confirm"]) {
+      await click("Open confirmation");
+      await expect.poll(async () => (await ui("eval", "--js", "document.activeElement.textContent")).result).toBe("Cancel");
+      if (action === "Escape") await ui("press", "--keys", "Escape");
+      else await click(action);
+      await expect.poll(async () => (await ui("eval", "--js", "document.activeElement.textContent")).result).toBe("Open confirmation");
+    }
     succeeded = true;
   } finally {
     if (!succeeded && fixtureHandle && fixtureLog) {
@@ -183,5 +196,6 @@ if (!enabled) console.log("skipping team lifecycle UI e2e: set OMB_UI_E2E=1 to i
       } catch { /* The original failure remains authoritative if the browser stopped. */ }
     }
     await waitForExit(child, { signal: "SIGINT", graceMs: 30_000 });
+    await preview?.close();
   }
 }, binary ? 360_000 : 720_000);
