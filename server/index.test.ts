@@ -6170,7 +6170,7 @@ describe("harness HTTP API", () => {
       managedBoxCreateName = managedBoxNameForFixture(bot.id);
       expect((await api("POST", `/api/bots/${bot.id}/computer/provision`, {})).status).toBe(200);
 
-      // The person removed it in ascii.dev. LIST and direct GET now both prove
+      // The person removed it in boat.dev. LIST and direct GET now both prove
       // absence while the owning credential is still active.
       managedBoxRows = [];
       managedBoxCreatedIds.delete(managedBoxCreateId);
