@@ -145,6 +145,14 @@ describe("bot-first sidebar", () => {
     expect(disabled).toContain("Move to team");
   });
 
+  it("reveals a matching sole thread when searching a bot", () => {
+    const single = { ...bot, projects: [], tasks: [bot.tasks![0]], unread: false };
+    const markup = renderToStaticMarkup(createElement(BotListItem, {
+      bot: single, density: "comfortable", query: "last selected", onMenu: vi.fn(),
+    }));
+    expect(markup).toContain('data-sidebar-thread-row="last-selected"');
+  });
+
   it("does not change group collaboration histories or creation", () => {
     fixture.showThreads = false;
     const group: Group = {
@@ -163,6 +171,10 @@ describe("bot-first sidebar", () => {
     const single = renderToStaticMarkup(createElement(GroupListItem, { group: { ...group, tasks: [group.tasks![0]] }, density: "comfortable", onMenu: vi.fn() }));
     expect(single).not.toContain("Planning threads");
     expect(single).not.toContain('data-sidebar-thread-row=');
+    const searched = renderToStaticMarkup(createElement(GroupListItem, {
+      group: { ...group, tasks: [group.tasks![0]] }, density: "comfortable", query: "conversation", onMenu: vi.fn(),
+    }));
+    expect(searched).toContain('data-sidebar-thread-row="group-thread"');
   });
 });
 

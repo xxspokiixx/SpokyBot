@@ -59,7 +59,12 @@ function subscribe(listener: () => void): () => void {
 export function setNotificationSounds(enabled: boolean): void {
   sessionChoice = enabled;
   try {
-    storage()?.setItem(NOTIFICATION_SOUNDS_KEY, enabled ? "1" : "0");
+    const local = storage();
+    const value = enabled ? "1" : "0";
+    local?.setItem(NOTIFICATION_SOUNDS_KEY, value);
+    // Notifications also read this outside mounted Settings. Prefer storage
+    // when it works, so another window's change cannot leave a stale override.
+    if (local?.getItem(NOTIFICATION_SOUNDS_KEY) === value) sessionChoice = undefined;
   } catch {
     // The visible setting still changes for this session when storage is full.
   }

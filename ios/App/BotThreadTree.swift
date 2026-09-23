@@ -100,10 +100,12 @@ struct BotThreadTree: View {
             .padding(.leading, 88)
             .padding(.trailing, 18)
             .padding(.bottom, isExpanded ? 12 : 0)
-            .task(id: nextSnoozeExpiry) {
+            .task(id: "\(nextSnoozeExpiry ?? 0):\(snoozeTick)") {
                 guard let nextSnoozeExpiry else { return }
                 let seconds = max(0, (nextSnoozeExpiry - Date().timeIntervalSince1970 * 1_000) / 1_000) + 0.05
-                try? await Task.sleep(for: .seconds(seconds))
+                // Remote deadlines can be arbitrarily distant. Bound the
+                // duration conversion and re-arm with the tick until due.
+                try? await Task.sleep(for: .seconds(min(86_400, seconds)))
                 guard !Task.isCancelled else { return }
                 snoozeTick += 1
             }

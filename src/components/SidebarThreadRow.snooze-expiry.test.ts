@@ -69,6 +69,34 @@ describe("snooze expiry wake-up", () => {
     expect(vi.mocked(fetch)).not.toHaveBeenCalled();
   });
 
+  it("bounds distant deadlines and re-arms after the first timer chunk", () => {
+    const now = Date.now();
+    const limit = 2_147_483_647;
+    const tasks = [{ threadId: "later", title: "Later", snoozedUntil: now + limit + 60_000 }];
+    expect(renderProbe(tasks, "other")).not.toContain("later");
+    fixture.effects[0]!();
+    expect(scheduled?.at).toBe(now + limit);
+    vi.setSystemTime(now + limit);
+    scheduled?.fire();
+    expect(renderProbe(tasks, "other")).not.toContain("later");
+    fixture.effects[0]!();
+    expect(scheduled?.at).toBe(now + limit + 60_001);
+    vi.setSystemTime(now + limit + 60_001);
+    scheduled?.fire();
+    expect(renderProbe(tasks, "other")).toContain("later");
+  });
+
+  it("still re-renders when the deadline passes between render and effect", () => {
+    const now = Date.now();
+    const tasks = [{ threadId: "later", title: "Later", snoozedUntil: now + 10 }];
+    expect(renderProbe(tasks, "other")).not.toContain("later");
+    vi.setSystemTime(now + 20);
+    fixture.effects[0]!();
+    expect(scheduled?.at).toBe(now + 21);
+    scheduled?.fire();
+    expect(renderProbe(tasks, "other")).toContain("later");
+  });
+
   it("schedules the wake-up from the production thread list so a snoozed row reappears at its deadline", () => {
     const now = Date.now();
     const bot: Bot = {

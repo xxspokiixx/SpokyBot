@@ -262,6 +262,7 @@ describe("bot deletion feedback", () => {
     it("keeps the status line while something is happening", () => {
       expect(renderRow(bot({ busy: true }), true)).toContain('class="sr-only">Working…');
       expect(renderRow(bot({ activity: "waiting-on-you" }), true)).toContain("Waiting for you…");
+      expect(renderRow(bot({ waitingForTeammates: true, busy: false }), true)).toContain("Waiting on a teammate…");
     });
 
     it("keeps the unread dot in the name line when the preview line is gone", () => {
