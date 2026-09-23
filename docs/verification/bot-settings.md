@@ -84,6 +84,14 @@ defaults → Edit**. Check that both open immediately, keep a fixed size while
 switching sections, and retain edits between sections. Identity → View full
 must appear above the creation dialog; Escape closes only that inner layer.
 
+In a creation draft, click both random-name buttons repeatedly. Each suggestion
+must replace the editable name, avoid an immediate repeat and existing names,
+and survive switching away from Identity and back. Type a custom name, then
+randomize again. Cancelling must leave the server unchanged. These buttons
+also appear in defaults but not in an existing bot's profile. Dataset provenance
+and licenses are in `src/data/given-names/`; `src/lib/random-bot-name.test.ts`
+checks the pools and selection behavior without a network or model request.
+
 Save defaults containing a title, model, memory topic, skill, and paused
 routine. Read the fixture API to confirm no bot or live routine was created.
 Open a creation draft, confirm inheritance, clear selected values, and cancel:
