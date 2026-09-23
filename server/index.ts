@@ -8636,7 +8636,7 @@ async function deleteBotWithLifecycle(botId: string, revalidate: () => void = ()
       const botBoxDeletions = boxDeletionSnapshot().filter((entry) => entry.ownerBotId === bot.id);
       if (botBoxRecovery.some((entry) => !entry.resolved)) {
         return deletionResponse( 409, {
-          error: "finish reconciling this bot's pending cloud computer creation before deleting it — check ascii.dev, then retry Box setup",
+          error: "finish reconciling this bot's pending cloud computer creation before deleting it — check boat.dev, then retry Box setup",
         });
       }
       // Bot deletion awaits VM/browser/provider cleanup. Claim the bot and
@@ -19088,7 +19088,7 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
               }
               const listed = currentById.get(inspected.identity.boxId);
               if (listed && listed.name !== inspected.identity.name) {
-                return json(res, 503, { error: "ascii.dev returned conflicting cloud computer identities; keep the current Box account and retry" });
+                return json(res, 503, { error: "boat.dev returned conflicting cloud computer identities; keep the current Box account and retry" });
               }
               currentById.set(inspected.identity.boxId, inspected.identity);
               journalBoxResources.push(inspected.identity);

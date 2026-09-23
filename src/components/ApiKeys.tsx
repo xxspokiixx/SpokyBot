@@ -61,7 +61,7 @@ const CREDENTIALS: Record<
     labelKey: "keys.box.label",
     placeholderKey: "keys.box.placeholder",
     descriptionKey: "keys.box.desc",
-    href: "https://docs.ascii.dev/box/api-keys",
+    href: "https://docs.boat.dev/api-keys",
     linkLabelKey: "keys.box.link",
     optional: true,
     warningKey: "keys.box.warning",

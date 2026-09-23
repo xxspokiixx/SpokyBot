@@ -3367,7 +3367,7 @@ describe("harness HTTP API", () => {
       expect(ambiguousCreate.body.error).toMatch(/provider outcome is unknown/i);
       const ambiguousDelete = await api("DELETE", `/api/bots/${ambiguousBot.id}`);
       expect(ambiguousDelete.status).toBe(409);
-      expect(ambiguousDelete.body.error).toMatch(/pending cloud computer creation.*ascii\.dev/i);
+      expect(ambiguousDelete.body.error).toMatch(/pending cloud computer creation.*boat\.dev/i);
 
       // Recover with the original key, finish the deterministic rename, then
       // remove the durable Box before deleting its bot.
@@ -3393,7 +3393,7 @@ describe("harness HTTP API", () => {
       expect(rememberedCreate.body.error).toMatch(/rename unavailable/i);
       const rememberedDelete = await api("DELETE", `/api/bots/${rememberedBot.id}`);
       expect(rememberedDelete.status).toBe(409);
-      expect(rememberedDelete.body.error).toMatch(/pending cloud computer creation.*ascii\.dev/i);
+      expect(rememberedDelete.body.error).toMatch(/pending cloud computer creation.*boat\.dev/i);
 
       // The Box created successfully even though deterministic naming failed.
       // If the original credential expires, the target-bound deletion fence
@@ -6170,7 +6170,7 @@ describe("harness HTTP API", () => {
       managedBoxCreateName = managedBoxNameForFixture(bot.id);
       expect((await api("POST", `/api/bots/${bot.id}/computer/provision`, {})).status).toBe(200);
 
-      // The person removed it in ascii.dev. LIST and direct GET now both prove
+      // The person removed it in boat.dev. LIST and direct GET now both prove
       // absence while the owning credential is still active.
       managedBoxRows = [];
       managedBoxCreatedIds.delete(managedBoxCreateId);
