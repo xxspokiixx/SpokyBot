@@ -5,7 +5,7 @@ import type { ManagedDesktopBridge, ManagedDesktopState } from "../../electron/m
 import { setLocale } from "@/lib/i18n";
 
 const fixture = vi.hoisted(() => ({ values: [] as unknown[], index: 0, effects: [] as EffectCallback[], updating: false,
-  store: { bots: [] as unknown[], instances: [] as unknown[], dispatch: (() => {}) as (action: unknown) => void } }));
+  store: { bots: [] as unknown[], instances: [] as unknown[], dispatch: (() => {}) as (action: unknown) => void, flushBotPatches: (async () => null) as (botId: string) => Promise<unknown> } }));
 vi.mock("react", async (original) => ({ ...await original<typeof import("react")>(),
   useState: (initial: unknown) => {
     const index = fixture.index++;
@@ -26,7 +26,7 @@ vi.mock("react", async (original) => ({ ...await original<typeof import("react")
 }));
 // The connected panel reads bots and engines for its Company models section.
 vi.mock("@/state/store", async (original) => ({ ...await original<typeof import("@/state/store")>(),
-  useStore: () => ({ state: { bots: fixture.store.bots, instances: fixture.store.instances }, dispatch: fixture.store.dispatch }),
+  useStore: () => ({ state: { bots: fixture.store.bots, instances: fixture.store.instances }, dispatch: fixture.store.dispatch, flushBotPatches: fixture.store.flushBotPatches }),
 }));
 import { OrganizationSettings } from "./OrganizationSettings";
 import { CompanyModels } from "./CompanyModels";
@@ -58,7 +58,7 @@ let push: (state: ManagedDesktopState) => void;
 let unsubscribe = vi.fn<() => void>();
 beforeEach(() => {
   fixture.values = []; fixture.index = 0; fixture.effects = []; fixture.updating = false;
-  fixture.store = { bots: [], instances: [], dispatch: vi.fn() };
+  fixture.store = { bots: [], instances: [], dispatch: vi.fn(), flushBotPatches: vi.fn(async () => null) };
   unsubscribe = vi.fn(); push = () => {};
   bridge = {
     settingsOpened: vi.fn().mockResolvedValue(true),
@@ -184,12 +184,13 @@ describe("optional desktop Organisation settings", () => {
     fixture.store.bots = [bot("personal-bot", "personal"), bot("stuck-bot", "missing")];
     await ready(connected);
     expect(fixture.store.dispatch).not.toHaveBeenCalled();
-    button("Use Company · Fixture Company · Claude for 1 bot that can’t run").props.onClick!();
+    button("Use Company · Fixture Company · Claude for 1 bot that can’t run").props.onClick!(); await flush();
     expect(fixture.store.dispatch).toHaveBeenCalledExactlyOnceWith({ type: "setModel", botId: "stuck-bot", selection: { instanceId: "company.fixture.anthropic", model: "model-a" } });
     button("Disconnect…").props.onClick!(); button("Disconnect from organization").props.onClick!(); await flush();
     expect(bridge.disconnect).toHaveBeenCalledOnce();
+    // Disconnecting changes no bot: the only model change is the one clicked above.
     expect(fixture.store.dispatch).toHaveBeenCalledOnce();
-    expect(fixture.store.bots[0]).toEqual(bot("personal-bot", "personal"));
+    expect(fixture.store.dispatch).not.toHaveBeenCalledWith(expect.objectContaining({ botId: "personal-bot" }));
   });
 
   it("explains a lapsed Admin licence without a sign-in loop and shows Company models unavailable", async () => {

@@ -204,3 +204,13 @@ engine account or paid model call was used.
   elevated permissions; counting working bots; dispatching at render; opening
   a renderer-supplied address; reopening after expiry; forwarding IPC
   arguments; dropping the local-window guard; forwarding preload arguments.
+
+Review fixes (same day, same limits): archived bots are never counted or
+switched; the "Now using …" status names only bots the server kept on the
+Company model after their PATCH settled (none when every PATCH was refused);
+the note now says bots not allowed by the organisation change too; and
+`server/default-model-selection.test.ts` runs `index.ts`'s actual
+`defaultSelection` and `policyModelRefusal` against a synthetic registry,
+enrolment and policy. Mutation checks: counting archived bots, naming every
+requested bot, and dropping the whole context, the enrolment or the policy
+from `index.ts` each failed a test, then was restored.

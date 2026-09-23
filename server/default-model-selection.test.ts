@@ -1,7 +1,10 @@
+import { readFileSync } from "node:fs";
+import ts from "typescript";
 import { describe, expect, it } from "vitest";
 
-import type { ModelCatalog, ProviderSnapshot } from "./contracts.ts";
+import type { ModelCatalog, ModelSelection, ProviderSnapshot } from "./contracts.ts";
 import { selectDefaultModelSelection } from "./default-model-selection.ts";
+import { ManagedDesktopPolicy } from "./managed-policy.ts";
 
 const codex = {
   instanceId: "codex",
@@ -131,5 +134,51 @@ describe("new bot default model selection while enrolled in an organisation", ()
     // A saved choice the organisation refuses sends new bots to setup, never elsewhere.
     expect(selectDefaultModelSelection([claude, companyRouter], { instanceId: "claude", model: "claude-default" }, { company, refusal: companyOnly }))
       .toEqual({ instanceId: "", model: "" });
+  });
+});
+
+// The server's own wiring, not a copy: run index.ts's actual defaultSelection
+// and policyModelRefusal against a synthetic registry, enrolment and policy.
+describe("new bot default model selection wiring in index.ts", () => {
+  const source = readFileSync(new URL("./index.ts", import.meta.url), "utf8");
+  const extract = (signature: string) => {
+    const start = source.indexOf(`\n${signature}`), end = source.indexOf("\n}\n", start);
+    expect(start).toBeGreaterThan(0); expect(end).toBeGreaterThan(start);
+    return source.slice(start + 1, end + 2);
+  };
+  const code = ts.transpileModule(`${extract("function policyModelRefusal(")}\n${extract("async function defaultSelection(")}`,
+    { compilerOptions: { target: ts.ScriptTarget.ESNext } }).outputText;
+  const companyRouter = {
+    instanceId: "company.fixture.openrouter", driverKind: "openai-compat",
+    snapshot: { state: "available", authenticated: true } satisfies ProviderSnapshot,
+    models: { default: "company/router", options: [{ id: "company/router", label: "Router" }] },
+  };
+  const companyClaude = { ...claude, instanceId: "company.fixture.anthropic", models: { default: "company-claude", options: [{ id: "company-claude", label: "Company" }] } };
+  const signedOut = { ...claude, snapshot: { state: "available", authenticated: false } satisfies ProviderSnapshot };
+  function server(instances: unknown[], { enrolled = false, companyModelsOnly = false, saved }: { enrolled?: boolean; companyModelsOnly?: boolean; saved?: ModelSelection } = {}) {
+    const managedPolicy = new ManagedDesktopPolicy();
+    if (companyModelsOnly) managedPolicy.apply({ organizationId: "11111111-1111-4111-8111-111111111111", organizationName: "Fixture Company", expiresAt: Date.now() + 60_000,
+      version: 1, companyModelsOnly: true, allowedEngines: "all", mcp: { allowCustom: true, allowlist: [] },
+      computers: { thisComputer: true, localVm: true, box: true, vps: true }, remoteAccess: true });
+    const managedDesktop = { owns: (instanceId: string) => enrolled && instanceId.startsWith("company.") };
+    const defaultSelection = new Function("hostedModels", "cfg", "registry", "managedDesktop", "managedPolicy", "BUILT_IN_DRIVERS", "selectDefaultModelSelection",
+      `${code}; return defaultSelection;`)(undefined, { defaultModelSelection: saved }, { describe: async () => instances }, managedDesktop, managedPolicy,
+      [{ driverKind: "claudeAgent", metadata: { displayName: "Claude" } }], selectDefaultModelSelection) as () => Promise<ModelSelection>;
+    return { defaultSelection, close: () => managedPolicy.close() };
+  }
+
+  it("passes the enrolment into the choice, and is today's choice without one", async () => {
+    const notEnrolled = server([signedOut, companyClaude]);
+    await expect(notEnrolled.defaultSelection()).resolves.toEqual({ instanceId: "claude", model: "claude-default" });
+    const enrolled = server([signedOut, companyClaude], { enrolled: true });
+    await expect(enrolled.defaultSelection()).resolves.toEqual({ instanceId: "company.fixture.anthropic", model: "company-claude" });
+  });
+
+  it("passes the organisation's policy into the choice", async () => {
+    const policy = server([claude, companyRouter], { enrolled: true, companyModelsOnly: true });
+    await expect(policy.defaultSelection()).resolves.toEqual({ instanceId: "company.fixture.openrouter", model: "company/router" });
+    const saved = server([claude, companyRouter], { enrolled: true, companyModelsOnly: true, saved: { instanceId: "claude", model: "claude-default" } });
+    await expect(saved.defaultSelection()).resolves.toEqual({ instanceId: "", model: "" });
+    policy.close(); saved.close();
   });
 });

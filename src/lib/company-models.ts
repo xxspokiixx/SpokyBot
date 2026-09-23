@@ -50,6 +50,8 @@ export function planCompanySwitch(bots: readonly Bot[], instances: readonly Inst
   const plan: CompanySwitchPlan = { target, bots: [], needsAsk: [] };
   const driverOf = (instanceId: string) => instances.find((instance) => instance.instanceId === instanceId)?.driverKind;
   for (const bot of bots) {
+    // Archived bots stay exactly as they were archived.
+    if (bot.hidden) continue;
     // The bot PATCH moves the bot's default and its selected thread together;
     // if either can still run, the bot is working and stays as it is.
     const thread = currentTaskBot(bot);

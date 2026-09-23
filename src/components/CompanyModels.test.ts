@@ -4,7 +4,9 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { Bot, InstanceInfo } from "@/state/store";
 import { setLocale } from "@/lib/i18n";
 
-const fixture = vi.hoisted(() => ({ values: [] as unknown[], index: 0, bots: [] as unknown[], instances: [] as unknown[], dispatch: vi.fn() }));
+const fixture = vi.hoisted(() => ({ values: [] as unknown[], index: 0, bots: [] as unknown[], instances: [] as unknown[], dispatch: vi.fn(),
+  // Bot ids whose PATCH the server keeps; any other switch is refused and rolled back.
+  kept: new Set<string>(), flushBotPatches: vi.fn() }));
 vi.mock("react", async (original) => ({ ...await original<typeof import("react")>(),
   useState: (initial: unknown) => {
     const index = fixture.index++;
@@ -14,7 +16,7 @@ vi.mock("react", async (original) => ({ ...await original<typeof import("react")
   useEffect: () => {},
 }));
 vi.mock("@/state/store", async (original) => ({ ...await original<typeof import("@/state/store")>(),
-  useStore: () => ({ state: { bots: fixture.bots, instances: fixture.instances }, dispatch: fixture.dispatch, refreshInstances: vi.fn(), refreshModels: vi.fn() }),
+  useStore: () => ({ state: { bots: fixture.bots, instances: fixture.instances }, dispatch: fixture.dispatch, flushBotPatches: fixture.flushBotPatches, refreshInstances: vi.fn(), refreshModels: vi.fn() }),
 }));
 import { CompanyModels } from "./CompanyModels";
 
@@ -37,6 +39,7 @@ function render() {
   return { html, nodes: nodes(tree) };
 }
 const buttons = () => render().nodes.filter((node) => node.type === "button");
+const flush = async () => { for (let i = 0; i < 20; i++) await Promise.resolve(); };
 
 const managed = { organizationId: "fixture-org", organizationName: "Fixture Company" };
 const companyClaude: InstanceInfo = { instanceId: "company.fixture.anthropic", driverKind: "claudeAgent", displayName: "Company · Fixture Company · Claude",
@@ -56,6 +59,9 @@ function bot(id: string, name: string, instanceId: string): Bot {
 
 beforeEach(() => {
   fixture.values = []; fixture.index = 0; fixture.dispatch = vi.fn();
+  fixture.kept = new Set(["b1", "b2", "b3"]);
+  fixture.flushBotPatches = vi.fn(async (botId: string) => ({ id: botId,
+    modelSelection: fixture.kept.has(botId) ? { instanceId: "company.fixture.anthropic", model: "company-claude" } : { instanceId: "claude", model: "saved-model" } }));
   fixture.instances = [personalClaude, personalCodex, workingGrok, companyClaude, companyCodex];
   fixture.bots = [bot("b1", "Scout", "claude"), bot("b2", "Writer", "grok"), bot("b3", "Maus", "removed-instance")];
   vi.stubGlobal("window", { ogb: { platform: "darwin" } });
@@ -75,7 +81,7 @@ describe("Company models in the connected Organisation panel", () => {
     expect(html).toContain("Not configured");
   });
 
-  it("counts only bots that cannot run, names them, and changes nothing until clicked", () => {
+  it("counts only bots that cannot run, names them, and changes nothing until clicked", async () => {
     const view = render();
     expect(view.html).toContain("Can’t run now: Scout, Maus");
     expect(view.html).not.toContain("Writer");
@@ -83,12 +89,26 @@ describe("Company models in the connected Organisation panel", () => {
     expect(action).toBeDefined();
     expect(view.html).not.toMatch(/role="dialog"/);
     expect(fixture.dispatch).not.toHaveBeenCalled();
-    action!.props.onClick!();
+    action!.props.onClick!(); await flush();
     expect(fixture.dispatch.mock.calls).toEqual([
       [{ type: "setModel", botId: "b1", selection: { instanceId: "company.fixture.anthropic", model: "company-claude" } }],
       [{ type: "setModel", botId: "b3", selection: { instanceId: "company.fixture.anthropic", model: "company-claude" } }],
     ]);
     expect(render().html).toContain("Now using Company · Fixture Company · Claude: Scout, Maus");
+  });
+
+  it("names only bots the server kept on the Company model", async () => {
+    fixture.kept = new Set(["b3"]);
+    const use = () => render().nodes.find((node) => node.type === "button" && String(node.props.children).startsWith("Use "))!;
+    use().props.onClick!(); await flush();
+    expect(fixture.flushBotPatches.mock.calls).toEqual([["b1"], ["b3"]]);
+    const html = render().html;
+    expect(html).toContain("Now using Company · Fixture Company · Claude: Maus");
+    expect(html).not.toContain("Now using Company · Fixture Company · Claude: Scout");
+    fixture.values = []; fixture.kept = new Set(); fixture.flushBotPatches.mockClear();
+    use().props.onClick!(); await flush();
+    expect(fixture.flushBotPatches).toHaveBeenCalledTimes(2);
+    expect(render().html).not.toContain("Now using");
   });
 
   it("offers nothing when every bot already runs", () => {
@@ -98,7 +118,7 @@ describe("Company models in the connected Organisation panel", () => {
     expect(fixture.dispatch).not.toHaveBeenCalled();
   });
 
-  it("follows a company-models-only policy: personal bots count and the target is never a refused engine", () => {
+  it("follows a company-models-only policy: personal bots count and the target is never a refused engine", async () => {
     const refused = { organizationName: "Fixture Company", reason: "Fixture Company allows only company models on this computer. Choose a Company model for this bot." };
     const router: InstanceInfo = { ...companyClaude, instanceId: "company.fixture.openrouter", driverKind: "openai-compat", displayName: "Company · Fixture Company · OpenRouter", models: { default: "fixture/router", options: [] } };
     fixture.instances = [{ ...workingGrok, policy: refused }, { ...companyClaude, policy: { ...refused, reason: "Fixture Company does not allow the Claude engine on this computer." } }, router];
@@ -106,7 +126,7 @@ describe("Company models in the connected Organisation panel", () => {
     const view = render();
     expect(view.html).toContain("does not allow the Claude engine");
     const action = view.nodes.find((node) => node.type === "button" && node.props.children === "Use Company · Fixture Company · OpenRouter for 1 bot that can’t run");
-    action!.props.onClick!();
+    action!.props.onClick!(); await flush();
     expect(fixture.dispatch).toHaveBeenCalledExactlyOnceWith({ type: "setModel", botId: "b2", selection: { instanceId: "company.fixture.openrouter", model: "fixture/router" } });
   });
 });

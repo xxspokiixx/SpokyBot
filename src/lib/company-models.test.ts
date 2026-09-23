@@ -27,12 +27,12 @@ describe("Company switch planning", () => {
     expect(companyInstanceFor([workingCodex], "anthropic")).toBeUndefined();
   });
 
-  it("counts only bots whose engine is missing, unavailable, signed out or refused, and never a working one", () => {
+  it("counts only bots whose engine is missing, unavailable, signed out or refused, never a working or archived one", () => {
     const instances = [signedOutClaude, workingCodex, missingCli, companyRouter, companyClaude];
     const bots = [
       bot("signed-out", "claude"), bot("working", "codex"), bot("missing", "deleted-instance"), bot("setup", ""),
       bot("unavailable", "grok"), bot("custom-model", "claude", { modelSelection: { instanceId: "claude", model: "local/qwen" } }),
-      bot("already-company", companyRouter.instanceId),
+      bot("already-company", companyRouter.instanceId), bot("archived", "deleted-instance", { hidden: true }),
     ];
     const plan = planCompanySwitch(bots, instances);
     expect(plan.target).toBe(companyClaude);

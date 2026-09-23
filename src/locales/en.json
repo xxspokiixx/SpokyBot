@@ -194,7 +194,7 @@
   "organization.useCompanyOne": "Use {name} for 1 bot that can’t run",
   "organization.useCompanyMany": "Use {name} for {count} bots that can’t run",
   "organization.useCompanyBots": "Can’t run now: {names}",
-  "organization.useCompanyNote": "Only bots whose engine is missing, unavailable or signed out change. Bots that work on a personal engine stay as they are. To undo, use the bot’s model chip.",
+  "organization.useCompanyNote": "Only bots whose engine is missing, unavailable, signed out or not allowed by your organisation change. Archived bots and bots that work on a personal engine your organisation allows stay as they are. To undo, use the bot’s model chip.",
   "organization.useCompanyElevated": "Switch these from their model chip, because they use elevated permissions: {names}",
   "organization.useCompanyDone": "Now using {name}: {names}. To undo, use the bot’s model chip.",
   "settings.section.appearance": "Appearance",
