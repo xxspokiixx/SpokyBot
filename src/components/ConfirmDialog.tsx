@@ -34,12 +34,6 @@ export function ConfirmDialog(props: ConfirmDialogProps) {
   cancelAction.current = onCancel;
   useEffect(() => {
     if (!open) return;
-    if (props.pending) dialogRef.current?.focus();
-    else cancelRef.current?.focus();
-  }, [open, props.pending]);
-
-  useEffect(() => {
-    if (!open) return;
     const opener = document.activeElement instanceof HTMLElement ? document.activeElement : null;
     cancelRef.current?.focus();
     const onKey = (event: KeyboardEvent) => {
@@ -69,6 +63,13 @@ export function ConfirmDialog(props: ConfirmDialogProps) {
       target?.focus();
     };
   }, [open, returnFocusRef]);
+
+  // Capture the opener above before moving focus on open or pending changes.
+  useEffect(() => {
+    if (!open) return;
+    if (props.pending) dialogRef.current?.focus();
+    else cancelRef.current?.focus();
+  }, [open, props.pending]);
 
   if (!open) return null;
 
