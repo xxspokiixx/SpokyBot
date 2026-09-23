@@ -49,6 +49,7 @@ describe("provider key check", () => {
     expect(providerModelsUrl("openaiCompat")).toBe("https://openrouter.ai/api/v1/models");
     expect(providerModelsUrl("openaiCompat", "https://api.openai.com/v1")).toBe("https://api.openai.com/v1/models");
     expect(providerModelsUrl("xai", "")).toBe("https://api.x.ai/v1/models");
+    expect(providerModelsUrl("mistral")).toBe("https://api.mistral.ai/v1/models");
   });
 
   it("sends the provider's own header shape and returns a few model ids on success", async () => {
