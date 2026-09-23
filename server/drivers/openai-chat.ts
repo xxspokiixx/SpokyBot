@@ -10,7 +10,7 @@ import { newEventId, newId } from "../contracts.ts";
 import { redactSecretsInText } from "../redact.ts";
 import { toolDetailPreview } from "../tool-summary.ts";
 import { ChatToolSessionError, mountChatTools, type ChatToolDefinition, type ChatToolSession, type ChatToolResult } from "./chat-mcp-tools.ts";
-import { chatToolImages, chatUserContent, type ChatContentPart } from "./chat-images.ts";
+import { assertImageTransport, chatImageBudget, chatToolImages, chatUserContent, type ChatContentPart } from "./chat-images.ts";
 import { createChatToolApproval } from "./chat-tool-approval.ts";
 import { ChatProtocolError, ChatReasoningDetails, ChatToolCalls, MAX_CHAT_TOOL_CALLS, object, type ChatToolCall } from "./openai-chat-protocol.ts";
 import { appendNative } from "./native.ts";
@@ -154,6 +154,7 @@ export function createOpenAIChatRuntime<Config>(options: RuntimeOptions<Config>)
 
       const response = await fetch(`${options.apiUrl}/chat/completions`, {
         method: "POST",
+        ...(messages.some(message => Array.isArray(message.content) && message.content.some(part => part.type === "image_url")) ? { redirect: "error" as const } : {}),
         headers: { authorization: `Bearer ${options.apiKey}`, "content-type": "application/json" },
         body: JSON.stringify({
           ...options.requestBody(model, messages, stream),
@@ -304,10 +305,13 @@ export function createOpenAIChatRuntime<Config>(options: RuntimeOptions<Config>)
   const sendTurn = async (turn: SendTurnInput) => {
     if (!options.apiKey) throw new Error(options.missingKeyError);
     if (active.has(turn.threadId)) throw new Error("a turn is already running on this thread");
+    if (options.computerUse && (turn.images?.length || turn.integrations?.computer || turn.integrations?.localComputer || turn.integrations?.browser)) assertImageTransport(options.apiUrl);
 
     const turnId = newId();
     const abort = new AbortController();
     const messages = messagesFor(turn);
+    const retainImages = chatImageBudget();
+    for (const message of messages) retainImages(message.content);
     const model = turn.model || options.models().default;
     const secrets = [options.apiKey, turn.integrations?.computer?.token, turn.integrations?.computer?.control?.token].filter((value): value is string => Boolean(value));
     for (const integration of Object.values(turn.integrations ?? {})) {
@@ -465,6 +469,14 @@ export function createOpenAIChatRuntime<Config>(options: RuntimeOptions<Config>)
               started = true;
               if (allowed) {
                 result = await tools.execute(call.function.name, args as Record<string, unknown>, abort.signal);
+                if (result.images?.length) {
+                  try {
+                    assertImageTransport(options.apiUrl);
+                    retainImages(result.images);
+                  } catch (error) {
+                    throw new ChatToolSessionError(asError(error).message);
+                  }
+                }
               } else {
                 denials.push(call.function.name);
                 result = { ok: false, text: "Permission denied or expired; the tool was not executed." };
