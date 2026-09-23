@@ -948,6 +948,7 @@ export type Action =
     }
   | { type: "botQueues"; queues: AppState["pendingQueued"] }
   | { type: "sections"; sections: string[] }
+  | { type: "sectionDeleted"; section: string; sections: string[] }
   | { type: "showRoutines"; section?: "schedule" | "logs"; view?: "calendar" | "list"; botId?: string; routineId?: string; runStatus?: RoutineRunStatusFilter }
   | { type: "showTeamMap" }
   | { type: "showChat" }
@@ -1352,6 +1353,12 @@ export function reducer(state: AppState, action: Action): AppState {
         groups: state.groups.map((group) => (group.threadId === action.threadId ? prepend(group) : group)),
       };
     }
+    case "sectionDeleted":
+      return {
+        ...state, sections: action.sections,
+        bots: state.bots.map(bot => bot.section === action.section ? { ...bot, section: undefined } : bot),
+        groups: state.groups.map(group => group.section === action.section ? { ...group, section: undefined } : group),
+      };
     case "sections":
       return { ...state, sections: action.sections };
     case "botQueues":

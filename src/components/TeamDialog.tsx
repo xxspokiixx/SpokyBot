@@ -7,9 +7,10 @@ import { NewBotDialog } from "./NewBotDialog";
 import { t } from "@/lib/i18n";
 
 /** A team may start empty; choosing bots moves their membership, never copies them. */
-export function TeamDialog({ section, rename = false, onClose }: {
+export function TeamDialog({ section, rename = false, onClose, onRenamed }: {
   section?: string;
   rename?: boolean;
+  onRenamed?: (oldName: string, newName: string) => void;
   onClose: () => void;
 }) {
   const { state, dispatch } = useStore();
@@ -32,7 +33,7 @@ export function TeamDialog({ section, rename = false, onClose }: {
     if (!creating) (dialog.current?.querySelector<HTMLElement>("input") ?? dialog.current?.querySelector<HTMLElement>("button"))?.focus();
   }, [creating]);
   const moving = section !== undefined && !rename;
-  const title = rename ? t("team.renameEmpty") : managing ? t(initialMembers.current.size ? "team.manageBots" : "team.addBots") : moving ? t("team.moveTo", { name: section || "General" }) : t("team.create");
+  const title = rename ? t("team.rename") : managing ? t(initialMembers.current.size ? "team.manageBots" : "team.addBots") : moving ? t("team.moveTo", { name: section || "General" }) : t("team.create");
   const candidates = state.bots.filter((bot) => !bot.hidden && (managing || !moving || (bot.section?.trim() ?? "") !== section));
   const addBotIds = [...picked].filter(id => !initialMembers.current.has(id));
   const removeBotIds = [...initialMembers.current].filter(id => !picked.has(id));
@@ -52,6 +53,7 @@ export function TeamDialog({ section, rename = false, onClose }: {
       );
       dispatch({ type: "sections", sections: result.sections });
       for (const bot of result.bots ?? []) dispatch({ type: "botPatched", bot });
+      if (rename && section !== undefined) onRenamed?.(section, name.trim());
       onCloseRef.current();
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : String(cause));

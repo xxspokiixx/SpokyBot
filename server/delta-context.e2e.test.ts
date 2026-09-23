@@ -665,7 +665,7 @@ it("does not offer a message or steer the person stopped before any reply again"
   await f.send("Warm up.");
   await f.wait();
   await f.send("STOPPED_ASK please drop the staging database");
-  await expect.poll(() => f.launches().length, { timeout: 15_000 }).toBe(2);
+  await expect.poll(() => f.consumed(), { timeout: 15_000 }).toBe(2);
   expect((await f.send("STOPPED_STEER and the backups")).steered).toBe(true);
   await f.api(`/api/bots/${f.chief.id}/interrupt`, { threadId: f.thread });
   await f.idle();
