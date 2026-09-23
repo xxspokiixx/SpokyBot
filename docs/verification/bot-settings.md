@@ -115,6 +115,12 @@ native permission rejection, cleanup, and post-creation activation warnings.
 Browser fixtures do not prove packaged operating-system grants or real model
 execution; those require the native approval verification separately.
 
+Companion connections retain the single-request Create bot flow: they cannot
+read host defaults or patch host settings. `companion/test/proxy.test.ts` checks
+creation succeeds while those routes remain blocked. The dialog tests also
+check that a caller's synchronous exception or rejected promise after creation
+is reported without leaving a retryable creation dialog open.
+
 In the renderer fixture, open **App settings → General → Defaults for new bots → Edit**.
 Open **Identity → View full**. Three successive Escape presses must close only
 the instruction preview, then the defaults editor, then Settings. Tab navigation
