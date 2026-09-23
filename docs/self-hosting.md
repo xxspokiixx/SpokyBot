@@ -602,6 +602,54 @@ Each answered card records who answered it (`card.answeredBy`), and so does
 its row in the decision log. Who a thread was opened for is kept in a
 server-private file (`<data dir>/thread-starters.json`), never sent to clients.
 
+### Who can see a bot
+
+On a workspace several people share, an admin can limit who sees a bot:
+**Bot settings → Who can see it** (in the browser, for admins) or
+`PATCH /api/bots/:id` with `visibility`:
+
+- `"everyone"` — every signed-in person, the default and today's behaviour;
+- `"admins"` — admin sessions only;
+- `{ "people": ["ada@company.com", "@hr.company.com"] }` — the listed
+  addresses and `@domain` entries, plus admins.
+
+It is access control, not an approval step, and it applies at once. For a
+member who may not see a bot, the server answers the bot, its threads and
+their messages, images, exports, reactions, cards, sends, routines, runs and
+attachments exactly as it answers an id that does not exist (404), and leaves
+the bot out of the bot list, search results, routines, webhooks, the team map
+and the live event stream. When an admin changes a bot's audience, the
+members who lose it get it withdrawn from their open app (a `bot.deleted`
+frame), and those who gain it receive it whole.
+
+- **Rooms.** A member sees a room only if it has at least one bot and they
+  can see every bot in it. A room is one shared transcript, so a restricted
+  bot's words there would otherwise reach people who cannot see the bot.
+  Putting a restricted bot in a room therefore narrows that room too. A
+  member cannot create a room with a bot they cannot see.
+- **Teams.** A team (sidebar section) is listed to a member only when it
+  holds a bot or room they can see.
+- **Bots working together.** A bot reaches a teammate (asks, delegations,
+  its roster and `list_bots`, @mentions, a Chief's team) only when exactly
+  the same people can see both: otherwise one bot's thread could carry the
+  other's answers to people who cannot see it. Bots nobody restricted all
+  share "everyone", so nothing changes until an admin restricts one.
+- **Who sees everything.** Admin sessions, the owner on this machine, and a
+  session-less local service (the Slack worker under `service` trust) see
+  every bot. A pairing-code device with no email sees only bots everyone
+  can see. Members never receive a bot's audience list.
+- **Files.** An attachment is refused only when everything that uses it —
+  a message in a thread, a bot's picture — is hidden from that member. A
+  file nothing uses yet (someone's own upload) is served; its name is random.
+- **Not covered.** Words already quoted into a conversation a member can
+  see (an earlier delegation, a message copied by hand) stay there. A bot's
+  shell can still read files on the server, as it always could. Slack is
+  decided in your organisation's Admin: whoever may message a bot's Slack
+  app reaches that bot there.
+
+The desktop app has no member sessions and does not show this setting;
+nothing there changes.
+
 On the Workspaces screen, creating a client workspace shows the same kind of
 link for that workspace's admin, so a client gets one address, one workspace
 and one link.
@@ -709,6 +757,40 @@ curl -H "Authorization: Bearer $TOKEN" -o decisions.csv \
 The CSV has one line per decision (time, decision, source, bot, tool,
 summary, rule, unattended, answered by, thread, request); cells that would
 start a spreadsheet formula are prefixed with `'`.
+
+### Admin activity
+
+Every admin change is recorded beside the decision log, in
+`<data dir>/admin-activity/YYYY-MM.ndjson` (0600), and kept for the same
+window (`decisions.retentionDays` / `OMB_DECISION_RETENTION_DAYS`): settings
+(which keys changed), sign-in lists and people, pairing codes and revoked
+sessions, webhooks, MCP servers, engines and keys, bots created, deleted or
+given different permissions, spend limits and prices, and who can see a bot.
+Each row names who acted — the session's email or device label, `This
+computer` for the owner, `Command line` for `openmausbot` commands such as
+`openmausbot access add` — and the values before and after. Values are
+redacted: anything under a key that names a credential, and every value in a
+headers or environment map, is written as `[hidden]`, so a key change shows
+that the key changed and never the key. The desktop app, which one person
+uses, keeps no such log.
+
+**Settings → Activity** (admins, in the browser) shows these rows together
+with the cards people answered, filtered by who, what and when, and exports
+them as CSV. The same over the API:
+
+```sh
+curl -H "Authorization: Bearer $TOKEN" \
+  "https://maus.example.com/api/admin-activity?from=2026-09-01&to=2026-09-30&what=visibility"
+curl -H "Authorization: Bearer $TOKEN" -o activity.csv \
+  "https://maus.example.com/api/admin-activity.csv?who=ada@company.com"
+```
+
+`what` is `all` (admin changes and answered cards, the default), `approvals`,
+`decisions` (every decision, automatic ones too), or one of `config`,
+`people`, `session`, `webhook`, `mcp`, `engine`, `bot`, `budget`,
+`visibility`; `who` matches part of a name or email; without `from` the list
+starts 30 days ago. Nothing here is sent to your organisation's cloud Admin,
+which keeps its own activity log.
 
 ## Spend limits and sell prices (enterprise)
 

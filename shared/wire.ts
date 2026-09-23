@@ -268,7 +268,14 @@ export interface WireBot {
   /** What the bot is doing right now; transient like busy. */
   activity?: BotActivity;
   createdAt: number;
+  /** Who may see this bot on a workspace several people share. Absent means
+   * everyone. Sent to admins only; a member's copy of a bot never carries it. */
+  visibility?: BotVisibility;
 }
+
+/** Who may see a bot: every signed-in person, admins only, or the listed
+ * addresses (and `@domain` entries) plus admins. See server/bot-visibility.ts. */
+export type BotVisibility = "everyone" | "admins" | { people: string[] };
 
 /** The person a user message is from, as the server resolved it from their
  * own session. No request body can supply it. `name` is attribution only:

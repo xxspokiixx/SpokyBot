@@ -105,6 +105,12 @@ export function bindDecisionRetention(provider: () => number): void {
   retentionDays = provider;
 }
 
+/** The window in force now. The admin activity log (admin-activity.ts)
+ * keeps its months for the same time, so one setting covers both. */
+export function boundRetentionDays(): number {
+  return retentionDays();
+}
+
 /** The retention window in days: OMB_DECISION_RETENTION_DAYS when it is a
  * whole number in range, else the configured value, else 180. */
 export function decisionRetentionDays(configured: number | undefined, env: NodeJS.ProcessEnv = process.env): number {
@@ -174,23 +180,7 @@ export async function flushDecisionLog(dataDir: string): Promise<void> {
  * its last write is. Returns the names removed. Never throws. */
 export async function pruneDecisions(dataDir: string, days: number, now = new Date()): Promise<string[]> {
   const cutoff = now.getTime() - days * DAY_MS;
-  const removed: string[] = [];
-  let names: string[] = [];
-  try {
-    names = await readdir(join(dataDir, DIR));
-  } catch {
-    /* nothing written in the new layout yet */
-  }
-  for (const name of names) {
-    const match = MONTH_FILE.exec(name);
-    if (!match || Date.UTC(Number(match[1]), Number(match[2]), 1) > cutoff) continue;
-    try {
-      await unlink(join(dataDir, DIR, name));
-      removed.push(name);
-    } catch {
-      /* already gone, or not ours to remove */
-    }
-  }
+  const removed = await pruneMonthFiles(join(dataDir, DIR), days, now);
   for (const name of [`${LEGACY_FILE}.1`, LEGACY_FILE]) {
     try {
       if ((await stat(join(dataDir, name))).mtimeMs > cutoff) continue;
@@ -198,6 +188,31 @@ export async function pruneDecisions(dataDir: string, days: number, now = new Da
       removed.push(name);
     } catch {
       /* absent */
+    }
+  }
+  return removed;
+}
+
+/** Delete the `YYYY-MM.ndjson` files in `dir` whose whole month is at or
+ * before `now - days`. Returns the names removed. Never throws. Shared with
+ * the admin activity log. */
+export async function pruneMonthFiles(dir: string, days: number, now = new Date()): Promise<string[]> {
+  const cutoff = now.getTime() - days * DAY_MS;
+  const removed: string[] = [];
+  let names: string[] = [];
+  try {
+    names = await readdir(dir);
+  } catch {
+    /* nothing written in the new layout yet */
+  }
+  for (const name of names) {
+    const match = MONTH_FILE.exec(name);
+    if (!match || Date.UTC(Number(match[1]), Number(match[2]), 1) > cutoff) continue;
+    try {
+      await unlink(join(dir, name));
+      removed.push(name);
+    } catch {
+      /* already gone, or not ours to remove */
     }
   }
   return removed;
@@ -277,7 +292,7 @@ export function readDecisionRange(dataDir: string, range: { from: Date; to: Date
   return rows;
 }
 
-function actorLabel(actor: DecisionActor | undefined): string {
+export function actorLabel(actor: DecisionActor | undefined): string {
   if (!actor) return "";
   if (actor.kind === "loopback") return "This computer";
   if (actor.kind === "worker") return "Local service";

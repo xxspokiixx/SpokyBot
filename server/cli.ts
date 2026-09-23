@@ -32,6 +32,8 @@ import { fileURLToPath } from "node:url";
 import qrcode from "qrcode-terminal";
 
 import { parseAllowList } from "./account-signin.ts";
+import { appendAdminAction, flushAdminActivity } from "./admin-activity.ts";
+import { bindDecisionRetention, decisionRetentionDays } from "./decision-log.ts";
 import { hostedWorkspaceConfigured } from "./enterprise.ts";
 import { resolveLoopbackTrust } from "./request-auth.ts";
 import { writeFileAtomic } from "./atomic.ts";
@@ -327,7 +329,9 @@ const message = (error: unknown) => (error instanceof Error ? error.message : St
 let serveOwnerToken: string | undefined;
 
 async function api(port: number, path: string, init: { method?: string; body?: string } = {}): Promise<{ status: number; body: any }> {
-  const headers: Record<string, string> = { "content-type": "application/json", ...(serveOwnerToken ? { "x-openmausbot-cli-owner": serveOwnerToken } : {}) };
+  // x-openmausbot-cli names the tool in the admin activity log; on loopback
+  // it is the owner either way, so it grants nothing.
+  const headers: Record<string, string> = { "content-type": "application/json", "x-openmausbot-cli": "1", ...(serveOwnerToken ? { "x-openmausbot-cli-owner": serveOwnerToken } : {}) };
   const res = await fetch(`http://127.0.0.1:${port}${path}`, { method: init.method, body: init.body, headers, signal: AbortSignal.timeout(3000) });
   const body: unknown = await res.json().catch(() => ({}));
   return { status: res.status, body };
@@ -664,9 +668,21 @@ export async function runAccess(options: CliOptions, io: CliIo = defaultIo()): P
   const admins = list(Reflect.get(current, "admins"));
   const members = list(Reflect.get(current, "members"));
   const overridden = process.env.OMB_SIGNIN_EMAILS !== undefined || process.env.OMB_SIGNIN_MEMBER_EMAILS !== undefined;
-  const write = (next: { admins: string[]; members: string[] }) => {
+  const write = async (next: { admins: string[]; members: string[] }) => {
     mkdirSync(options.dataDir, { recursive: true, mode: 0o700 });
     writeFileAtomic(file, `${JSON.stringify({ ...raw, signIn: next }, null, 2)}\n`, { mode: 0o600 });
+    // The same row Settings → People writes, named for the command line,
+    // pruned by the same window the server would use.
+    const decisions = raw.decisions && typeof raw.decisions === "object" ? (raw.decisions as { retentionDays?: unknown }).retentionDays : undefined;
+    bindDecisionRetention(() => decisionRetentionDays(typeof decisions === "number" ? decisions : undefined));
+    const changed = (["admins", "members"] as const).filter((key) => next[key].join(",") !== (key === "admins" ? admins : members).join(","));
+    appendAdminAction(options.dataDir, {
+      category: "people", action: "people.update", target: { kind: "settings" }, actor: { kind: "cli" },
+      changed: changed.map((key) => `signIn.${key}`),
+      before: Object.fromEntries(changed.map((key) => [`signIn.${key}`, key === "admins" ? admins : members])),
+      after: Object.fromEntries(changed.map((key) => [`signIn.${key}`, next[key]])),
+    });
+    await flushAdminActivity(options.dataDir);
   };
   if (options.accessAction === "list") {
     if (!admins.length && !members.length) {
@@ -689,11 +705,11 @@ export async function runAccess(options: CliOptions, io: CliIo = defaultIo()): P
       io.error(`${entry} is not on the list`);
       return 1;
     }
-    write({ admins: without(admins), members: without(members) });
+    await write({ admins: without(admins), members: without(members) });
     io.log(`${entry} can no longer sign in (existing sessions stay until they expire or are revoked with \`openmausbot sessions revoke\`)`);
     return 0;
   }
-  write(options.chatOnly ? { admins: without(admins), members: [...without(members), entry] } : { admins: [...without(admins), entry], members: without(members) });
+  await write(options.chatOnly ? { admins: without(admins), members: [...without(members), entry] } : { admins: [...without(admins), entry], members: without(members) });
   io.log(`${entry} can sign in at /pair with an emailed code (${options.chatOnly ? "chat and approvals" : "full access"})`);
   if (overridden) io.log("note: OMB_SIGNIN_EMAILS / OMB_SIGNIN_MEMBER_EMAILS are set in the environment and win over this list while the server runs");
   return 0;

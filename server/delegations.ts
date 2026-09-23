@@ -848,7 +848,7 @@ function dropIfUnreachable(
   item: PendingDelegationItem,
 ): boolean {
   const sectionsDiffer = !canAccessTeam(sender, target.section);
-  if (!sectionsDiffer && !target.hidden && peerAllowed(sender, target.id)) return false;
+  if (!sectionsDiffer && !target.hidden && peerAllowed(sender, target)) return false;
   const reason = sectionsDiffer
     ? "bots now belong to different sections"
     : `@${target.name} is no longer an allowed peer`;
