@@ -109,6 +109,10 @@ public struct SkillExecutionReceiptView: View {
             Image(systemName: "xmark")
                 .font(.system(size: 11, weight: .bold))
                 .foregroundStyle(.red)
+        case "running":
+            ProgressView()
+                .controlSize(.mini)
+                .tint(.orange)
         default:
             Image(systemName: "circle.dotted")
                 .font(.system(size: 11))
