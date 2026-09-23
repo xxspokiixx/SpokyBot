@@ -4104,7 +4104,7 @@ describe("harness HTTP API", () => {
         (candidate: { id: string }) => candidate.id === bot.id,
       );
       expect(after.modelSelection).toEqual(selection);
-      expect(after.autoApprove).toBeUndefined();
+      expect(after.autoApprove).toBe(bot.autoApprove);
     } finally {
       await api("DELETE", `/api/bots/${bot.id}`);
     }
@@ -5853,8 +5853,8 @@ describe("harness HTTP API", () => {
         (candidate: { id: string }) => candidate.id === bot.id,
       );
       expect(stored.busy).toBe(true);
-      expect(stored).not.toHaveProperty("approvalMode");
-      expect(stored).not.toHaveProperty("autoApprove");
+      expect(stored.approvalMode).toBe(bot.approvalMode);
+      expect(stored.autoApprove).toBe(bot.autoApprove);
     } finally {
       await api("POST", `/api/bots/${bot.id}/interrupt`, {}).catch(() => undefined);
       await expect.poll(async () => {

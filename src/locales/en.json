@@ -2393,5 +2393,16 @@
   "engines.icon.formatError": "Upload a PNG, JPEG, or WebP image.",
   "engines.icon.sizeError": "Provider icons must be 128 KB or smaller.",
   "engines.icon.invalidError": "Upload a complete PNG, JPEG, or WebP image up to 128 KB and {dimension} × {dimension} pixels.",
-  "engines.icon.dimensionError": "Provider icons must be at most {dimension} × {dimension} pixels."
+  "engines.icon.dimensionError": "Provider icons must be at most {dimension} × {dimension} pixels.",
+  "newBot.defaults": "Defaults for new bots",
+  "newBot.sections": "Bot settings",
+  "newBot.saveDefaults": "Save defaults",
+  "newBot.create": "Create bot",
+  "newBot.startingRole": "Starting role",
+  "newBot.customSettings": "Custom settings",
+  "newBot.randomName": "Random name",
+  "newBot.edit": "Edit",
+  "newBot.loading": "Loading settings…",
+  "newBot.randomFemaleName": "Random female name",
+  "newBot.randomMaleName": "Random male name"
 }

@@ -1030,6 +1030,30 @@ describe("credential env preference", () => {
     expect(loadConfig().instances).toEqual(existing.instances);
   });
 
+  it("rejects oversized default model changes before writing the template", () => {
+    saveConfig({ newBotDefaults: { profile: { modelSelection: { instanceId: "codex", model: "valid" } }, memory: {}, skills: [], routines: [] } });
+    const path = join(DATA_DIR, "config.json");
+    const before = readFileSync(path, "utf8");
+    for (const selection of [{ instanceId: "x".repeat(201), model: "valid" }, { instanceId: "codex", model: "x".repeat(501) }]) {
+      expect(() => saveConfig({ defaultModelSelection: selection })).toThrow();
+      expect(readFileSync(path, "utf8")).toBe(before);
+      expect(loadConfig().newBotDefaults?.profile.modelSelection?.model).toBe("valid");
+    }
+  });
+
+  it("rejects a valid model selection that would overflow the complete defaults template", () => {
+    const defaults = { profile: { modelSelection: { instanceId: "codex", model: "valid" } },
+      memory: { "memory/a.md": "a".repeat(225_000), "memory/b.md": "b".repeat(225_000),
+        "memory/c.md": "c".repeat(225_000), "memory/d.md": "" }, skills: [], routines: [] };
+    defaults.memory["memory/d.md"] = "d".repeat(899_990 - Buffer.byteLength(JSON.stringify(defaults), "utf8"));
+    saveConfig({ newBotDefaults: defaults });
+    const path = join(DATA_DIR, "config.json");
+    const before = readFileSync(path, "utf8");
+    expect(() => saveConfig({ defaultModelSelection: { instanceId: "codex", model: "m".repeat(500) } })).toThrow("900 KB");
+    expect(readFileSync(path, "utf8")).toBe(before);
+    expect(loadConfig().newBotDefaults).toEqual(defaults);
+  });
+
   it("replaces instance membership and known settings while preserving retained extension fields", () => {
     const path = join(DATA_DIR, "config.json");
     writeFileSync(path, JSON.stringify({

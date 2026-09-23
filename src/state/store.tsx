@@ -3810,6 +3810,11 @@ export function useStore() {
   return ctx;
 }
 
+/** Scoped state for an unsaved editor. The parent workspace remains intact. */
+export function BotEditorStore({ value, children }: { value: ReturnType<typeof useStore>; children: ReactNode }) {
+  return <StoreContext.Provider value={value}>{children}</StoreContext.Provider>;
+}
+
 export function formatTime(at: number) {
   return new Date(at).toLocaleTimeString([], {
     hour: "numeric",

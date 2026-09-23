@@ -8,6 +8,7 @@ import { z } from "zod";
 import { normalizeImageGenerationUrl, type ImageGenerationConfig } from "../shared/image-generation.ts";
 
 import { writeFileAtomic } from "./atomic.ts";
+import { newBotDefaultsSchema, type NewBotDefaults } from "./new-bot-defaults.ts";
 import { EFFORT_LEVELS } from "../shared/wire.ts";
 import { isModelVariant, type InstanceConfigMap, type ModelSelection } from "./contracts.ts";
 import { PROVIDER_ICON_PRESETS, providerIconError } from "../shared/provider-icon.ts";
@@ -315,8 +316,8 @@ const instanceConfigSchema = z.object({
 });
 const instanceConfigMapSchema = z.record(z.string(), instanceConfigSchema);
 const defaultModelSelectionSchema = z.object({
-  instanceId: z.string().trim().min(1),
-  model: z.string().trim().min(1),
+  instanceId: z.string().trim().min(1).max(200),
+  model: z.string().trim().min(1).max(500),
   effort: z.enum(EFFORT_LEVELS).optional(),
   variant: z.string().refine(isModelVariant, "invalid model variant").optional(),
 }).refine((selection) => selection.variant === undefined || selection.effort === undefined,
@@ -344,6 +345,7 @@ const appConfigSchema = z.object({
    * addresses or `@domain` entries; admins get every scope, members chat only. */
   signIn: z.object({ admins: z.array(z.string().max(320)).max(500).optional(), members: z.array(z.string().max(320)).max(5000).optional() }).optional(),
   defaultModelSelection: defaultModelSelectionSchema.optional(),
+  newBotDefaults: newBotDefaultsSchema.optional(),
   /** CLI-only launch preferences. Never enable remote access implicitly. */
   cliStartup: z.object({
     access: z.enum(["local", "tunnel", "tailscale", "public-url"]),
@@ -469,6 +471,8 @@ export interface AppConfig {
   signIn?: { admins?: string[]; members?: string[] };
   /** Preferred selection for newly created bots; existing bots keep theirs. */
   defaultModelSelection?: ModelSelection;
+  /** UI creation template. Saving it never mutates a bot or grants access. */
+  newBotDefaults?: NewBotDefaults;
   cliStartup?: {
     access: "local" | "tunnel" | "tailscale" | "public-url";
     publicUrl?: string;
@@ -1015,6 +1019,23 @@ export function saveConfig(
   // an effort level omitted from the new selection.
   if (checkedPatch.defaultModelSelection !== undefined) {
     disk.defaultModelSelection = checkedPatch.defaultModelSelection;
+    if (disk.newBotDefaults) {
+      const previousDefaults = newBotDefaultsSchema.parse(disk.newBotDefaults);
+      disk.newBotDefaults = newBotDefaultsSchema.parse({
+        ...previousDefaults,
+        profile: { ...previousDefaults.profile, modelSelection: checkedPatch.defaultModelSelection },
+      });
+    }
+  }
+  // Replace the complete template so clearing a field, file or routine
+  // cannot revive an old value through the general section merge above.
+  if (checkedPatch.newBotDefaults !== undefined) {
+    disk.newBotDefaults = checkedPatch.newBotDefaults;
+    if (checkedPatch.newBotDefaults.profile.modelSelection) {
+      disk.defaultModelSelection = checkedPatch.newBotDefaults.profile.modelSelection;
+    } else {
+      delete disk.defaultModelSelection;
+    }
   }
   if (checkedPatch.cliStartup !== undefined) disk.cliStartup = checkedPatch.cliStartup;
   // Custom MCP mutations go through their own dedicated local API, but
@@ -1041,6 +1062,14 @@ export function saveConfig(
     );
     if (routingConflict) throw Object.assign(new Error(routingConflict), { status: 409 });
     disk.browserProfiles = nextProfiles;
+    if (disk.newBotDefaults) {
+      const defaults = newBotDefaultsSchema.parse(disk.newBotDefaults);
+      const profileId = defaults.profile.browserProfile;
+      if (profileId && profileId !== "guest" && !nextProfiles.some(profile => profile.id === profileId)) {
+        delete defaults.profile.browserProfile;
+        disk.newBotDefaults = defaults;
+      }
+    }
   }
   if (checkedPatch.instances) {
     const currentInstances = jsonObjectSchema.safeParse(disk.instances);
