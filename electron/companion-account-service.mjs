@@ -434,9 +434,10 @@ export function createCompanionAccountService({
       await updateCredentials((document) => withInstallationCredentials(document, installation));
     } catch (error) {
       // Do not leave a newly discovered installation consuming account quota
-      // when its recovery credential cannot be saved. An already-known
-      // installation can still serve an existing route and must stay intact.
-      if (previous?.installationId !== installation.installation.id) {
+      // when its recovery credential cannot be saved. Keep an established
+      // installation only when its saved credential is still usable.
+      if (previous?.installationId !== installation.installation.id ||
+          previous?.installationCredential !== installation.credential) {
         await client.revokeInstallation(accountToken, installation.installation.id).catch(() => {});
       }
       throw error;

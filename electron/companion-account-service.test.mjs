@@ -435,6 +435,21 @@ describe("Companion account service", () => {
     expect(store.read()).toEqual(initial);
   });
 
+  it("revokes a recovered installation when its rotated credential cannot be saved", async () => {
+    const initial = signedCredentials();
+    const client = readyClient();
+    const recovered = await client.ensureInstallation();
+    client.ensureInstallation.mockResolvedValue({ ...recovered, credential: `${INSTALLATION_CREDENTIAL}-rotated` });
+    const { service, store } = serviceFixture({ initial, client });
+    store.update.mockRejectedValueOnce(new Error("save failed"));
+
+    await service.retry();
+
+    expect(client.ensureEndpoint).not.toHaveBeenCalled();
+    expect(client.revokeInstallation).toHaveBeenCalledWith(ACCOUNT_TOKEN, INSTALLATION_ID);
+    expect(store.read()).toEqual(initial);
+  });
+
   it("cleans up provisioned resources if saving the endpoint fails", async () => {
     const activatePersistedEndpoint = vi.fn();
     const { client, service, store } = serviceFixture({ activatePersistedEndpoint });
