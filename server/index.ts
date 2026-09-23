@@ -253,7 +253,7 @@ import { computerKindForResource, ManagedDesktopPolicy } from "./managed-policy.
 import { hostedModelPolicy, HOSTED_MODEL_POLICY_HEADER, HOSTED_PROVIDER_SETTINGS_ERROR } from "./hosted-models.ts";
 import type { ProviderInstance } from "./contracts.ts";
 import { selectDefaultModelSelection } from "./default-model-selection.ts";
-import { cancelPeerApprovalsFor, cancelPeerApprovalsForThread, dismissStalePeerCards, requestPeerApproval, resolvePeerComms, type ApprovalBus } from "./peer-approval.ts";
+import { cancelPeerApprovalsFor, cancelPeerApprovalsForThread, dismissStalePeerCards, peerApprovalFailure, requestPeerApproval, resolvePeerComms, type ApprovalBus } from "./peer-approval.ts";
 import { peerProvenanceNote, withPeerProvenance } from "./peer-provenance.ts";
 import { decideRoomPost, emptyRoomPostBudget, type RoomPostAttempt, type RoomPostBudget } from "./room-post-budget.ts";
 import {
@@ -13334,7 +13334,7 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
         //
         // per-bot approval gate: a chief-of-staff bot without this on is
         // free to coordinate; one with it on must wait for a human card
-        // (15-min timeout → deny) before its peer turn starts. The channel
+        // (15-min timeout → expired) before its peer turn starts. The channel
         // and the chips are created only AFTER the verdict, so a denied
         // contact leaves no trace of an exchange that never happened.
         if (peerReviewRequired(from, fromThreadId)) {
@@ -13347,7 +13347,7 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
             fromThreadId,
           );
           requireActiveInternalCapability();
-          if (verdict !== "allow") return json(res, 200, { error: "denied by user" });
+          if (verdict !== "allow") return json(res, 200, peerApprovalFailure(verdict));
           // The card may have been open for minutes. Re-read both records so
           // deleted bots cannot recreate transcripts through stale objects.
           const freshFrom = store.bot(fromBotId);
@@ -13459,7 +13459,12 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
             if (!sender || (target && !canReachPeer(sender, target))) {
               return json(res, 403, { error: "Result withheld: team access changed while the teammate was working" });
             }
-            return json(res, 200, { status: receipt.status, toBotName: receipt.toBotName, result: receipt.result ?? "" });
+            return json(res, 200, {
+              status: receipt.status, toBotName: receipt.toBotName, result: receipt.result ?? "",
+              ...(receipt.approvalOutcome ? {
+                approvalOutcome: receipt.approvalOutcome, approvalSource: receipt.approvalSource,
+              } : {}),
+            });
           }
           const stillQueued = pendingDelegationInfo(taskId);
           const runningEntry = [...delegationWatch.entries()].find(([, watch]) => watch.taskId === taskId);
@@ -13683,7 +13688,14 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
             const verdicts = await Promise.all(targets.map(target =>
               requestPeerApproval(approvalBus, internalSender, store.bot(target.botId)!, parsed.data.message, "delegate_bot", address.threadId)));
             requireActiveInternalCapability();
-            if (verdicts.some(verdict => verdict !== "allow")) return json(res, 403, { error: "Denied by user; no work sent." });
+            const blocked = verdicts.flatMap((verdict, index) => verdict === "allow" ? []
+              : [{ botId: targets[index]!.botId, ...peerApprovalFailure(verdict) }]);
+            if (blocked.length) return json(res, 403, {
+              error: blocked.every(failure => failure.approvalOutcome === "deny")
+                ? "Denied by user; no work sent."
+                : `${blocked.map(failure => failure.error).join("; ")}; no work sent.`,
+              approvals: blocked,
+            });
             approvalGranted = true;
           }
           const accepted: { requestId: string; botId: string; duplicate: boolean; status: string }[] = [];
@@ -13837,7 +13849,7 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
             fromThreadId,
           );
           requireActiveInternalCapability();
-          if (verdict !== "allow") return json(res, 200, { error: "denied by user" });
+          if (verdict !== "allow") return json(res, 200, peerApprovalFailure(verdict));
           // The card may have been open for minutes. Re-read both records so a
           // roster change, a section move, or a deletion during that window
           // cannot be posted through on a stale decision.
