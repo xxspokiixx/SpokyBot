@@ -4,10 +4,10 @@
 
 Please **do not open a public issue** for security problems.
 
-- **Preferred:** report it privately through GitHub's private vulnerability reporting:
+- **Email** **soni.mil2001@gmail.com** with the details.
+- **Or, if it is enabled on this repository,** use GitHub's private vulnerability reporting:
   <https://github.com/milind-soni/OpenMausBot/security/advisories/new>. The report stays visible
   only to you and the maintainers until a fix is published.
-- **If you cannot use GitHub:** email **soni.mil2001@gmail.com** with the details.
 
 You'll get a response as soon as possible, normally within a few days.
 

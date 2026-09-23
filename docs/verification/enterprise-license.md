@@ -8,8 +8,9 @@
   carry `dist-server/` alone (`dist-server/enterprise/`). `OMB_ENTERPRISE_DIR`,
   when set, is the only place looked at.
 - From 30 days before a key expires: `expiresInDays` on `/api/edition`, a
-  warning in the startup log, and a banner in Settings for admins (the dates
-  reach admin sessions only).
+  warning in the startup log, and a banner in Settings for admins. The dates
+  reach admin sessions only: a member's `/api/edition` and config leave out
+  `expiresInDays`, `graceEndsAt` and the notice.
 - For 7 days after it expires the entitlements keep working, with a notice,
   `graceEndsAt` on `/api/edition`, and a banner saying until when. Then they
   stop, without a restart. The key format and signature check are unchanged.

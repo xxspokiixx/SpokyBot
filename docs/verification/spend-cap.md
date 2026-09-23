@@ -10,7 +10,8 @@
   once when it reaches the cap (`notify` frames of kind `spend`, withheld from
   client sessions), remembered across restarts in `<data>/usage/alerts.json`.
 - Count a turn the moment it settles, not when the ledger's append lands or a
-  cache expires.
+  cache expires, however long the turn ran: a booked turn counts from memory
+  until its row lands, and never twice once it has.
 - Price turns from the operator's list (`driver/model`, then model, then
   `default`) into a billable column in `/api/usage` and its CSV.
 - Do nothing at all without the `budgets` / `billing` entitlements.

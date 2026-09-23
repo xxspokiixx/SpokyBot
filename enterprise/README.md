@@ -32,7 +32,9 @@ every customer, because the key decides the feature set rather than the code.
 { "edition": "oss", "features": [], "notice": "enterprise layer disabled: OMB_LICENSE_KEY expired on 2027-09-02; renew it to keep enterprise features" }
 ```
 
-`expiresInDays` is present whenever the key has an expiry. From 30 days
+`expiresInDays` is present whenever the key has an expiry; a non-admin
+session's `/api/edition` leaves out `expiresInDays`, `graceEndsAt` and the
+notice. From 30 days
 before it, the server logs a warning at startup and admins see a banner in
 Settings. After the expiry date the features keep working for a 7-day grace
 period, with the notice above and a banner saying until when; then they stop,

@@ -88,8 +88,17 @@ export function usageFileFor(dataDir: string, at: Date): string {
   return join(dataDir, DIR, `${monthKey(at)}.jsonl`);
 }
 
-/** Append one settled turn. Fire-and-forget; see the module comment. */
-export function appendUsage(dataDir: string, row: Omit<UsageRow, "at"> & { at?: string }): void {
+/** Identifies one row: a thread runs one turn at a time, so a bot cannot
+ * settle two turns on the same thread in the same millisecond. Lets the
+ * spend cap tell a booked row it already counted from memory apart from the
+ * same row read back from the file. */
+export function usageRowKey(row: Pick<UsageRow, "at" | "threadId" | "botId">): string {
+  return `${row.at}|${row.threadId}|${row.botId}`;
+}
+
+/** Append one settled turn. Fire-and-forget (see the module comment): the
+ * returned promise never rejects, and says whether the row reached disk. */
+export function appendUsage(dataDir: string, row: Omit<UsageRow, "at"> & { at?: string }): Promise<boolean> {
   const record: UsageRow = {
     ...row,
     at: row.at ?? new Date().toISOString(),
@@ -102,15 +111,18 @@ export function appendUsage(dataDir: string, row: Omit<UsageRow, "at"> & { at?: 
   if (record.costUsd === null) delete record.costSource;
   else record.costSource = row.costSource === "estimated" ? "estimated" : "reported";
   const previous = writeQueues.get(dataDir) ?? Promise.resolve();
-  const queued = previous
-    .then(() => write(dataDir, record))
-    .catch(() => {
+  const attempt = previous.then(() => write(dataDir, record));
+  const queued = attempt.then(
+    () => undefined,
+    () => {
       /* bookkeeping must never take down the turn */
-    });
+    },
+  );
   writeQueues.set(dataDir, queued);
   void queued.finally(() => {
     if (writeQueues.get(dataDir) === queued) writeQueues.delete(dataDir);
   });
+  return attempt.then(() => true, () => false);
 }
 
 async function write(dataDir: string, record: UsageRow): Promise<void> {

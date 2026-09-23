@@ -197,6 +197,13 @@ export function editionStatus(now: number = Date.now()): EditionStatus {
   };
 }
 
+/** The edition as a non-admin session sees it: what is entitled, without
+ * the license's countdown, grace date or operator notice. */
+export function editionForMembers(status: EditionStatus): EditionStatus {
+  const { expiresInDays: _days, graceEndsAt: _grace, notice: _notice, ...shared } = status;
+  return shared;
+}
+
 /** Feature gates in core ask this and nothing else. Unknown ids are simply not
  * granted, and the open-source edition always carries an empty feature list. */
 export function entitled(feature: string, now: number = Date.now()): boolean {
