@@ -298,7 +298,7 @@ export function summarizeUsage(rows: UsageRow[], groupBy: UsageGroupBy, prices: 
   return { groups: ordered, total };
 }
 
-function csvCell(value: string | number | null): string {
+export function csvCell(value: string | number | null): string {
   if (value === null) return "";
   const text = String(value);
   // A leading formula character is neutralised so a spreadsheet never

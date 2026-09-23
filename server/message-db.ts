@@ -514,6 +514,15 @@ export interface SearchHit {
   from?: string;
 }
 
+/** Every thread whose stored messages mention `fragment` anywhere (an
+ * attachment's file name, say). A scan, like search; used only to decide
+ * whether a member on a workspace with a restricted bot may fetch a file. */
+export function threadsReferencing(fragment: string): string[] {
+  if (!fragment) return [];
+  const rows = db().prepare("SELECT DISTINCT thread_id FROM messages WHERE instr(json, ?) > 0").all(fragment) as Array<{ thread_id: string }>;
+  return rows.map((row) => row.thread_id);
+}
+
 /** Case-insensitive substring search over text messages, newest first.
  * A LIKE scan, deliberately: local transcripts are megabytes at most, a
  * scan is milliseconds, and it needs no FTS extension to exist. */

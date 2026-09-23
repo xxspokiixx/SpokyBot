@@ -305,3 +305,25 @@ describe("renderRoster status wording", () => {
     expect(prompt).toContain("- Ghost — Archivist (unavailable — needs setup)");
   });
 });
+
+describe("bot visibility between teammates", () => {
+  const hr: RosterMember = { id: "hr", name: "Payroll", section: "Work", visibility: { people: ["ada@example.test"] } };
+  const hr2: RosterMember = { id: "hr2", name: "Benefits", section: "Work", visibility: { people: ["ada@example.test"] } };
+  const admins: RosterMember = { id: "adm", name: "Board", section: "Work", visibility: "admins" };
+
+  it("reaches only teammates exactly the same people can see", () => {
+    // A bot everyone sees must not carry a restricted bot's answers back to everyone …
+    expect(canReachPeer(self, hr)).toBe(false);
+    expect(peerAllowed(self, hr)).toBe(false);
+    // … nor a restricted bot hand its words to a bot everyone sees.
+    expect(canReachPeer(hr, self)).toBe(false);
+    expect(canReachPeer(hr, admins)).toBe(false);
+    expect(canReachPeer(hr, hr2)).toBe(true);
+    expect(reachablePeers([...fleet, hr, hr2, admins], self).map((bot) => bot.id)).toEqual(["writer", "coder"]);
+    expect(reachablePeers([...fleet, hr, hr2, admins], hr).map((bot) => bot.id)).toEqual(["hr2"]);
+    // a name never resolves to a teammate the audience rule hides
+    expect(resolveTeammate([...fleet, hr], self, "Payroll")).toMatchObject({ error: expect.stringContaining("No bot with id or name") });
+    // an id alone (no record) keeps the list-only rule, as before
+    expect(peerAllowed(self, "hr")).toBe(true);
+  });
+});

@@ -58,6 +58,9 @@ fixture log in a `.log.guarded-coordination.json` receipt.
 
 `capabilities.guardedRequests: 1` advertises two additional loopback/admin
 routes. They do not grant a new paired-client permission or weaken Ask mode.
+On a hosted workspace, where session-less loopback is only a service, these
+and the guarded send are among the few routes it keeps
+([shared-workspace trust](shared-workspace-trust.md)).
 
 - `GET /api/bots/:botId/requests/:sendId?threadId=...` returns
   `messageId`, `activeLeafId`, `phase`, `activeTurnId`, `executionId`, and
