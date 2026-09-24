@@ -58,8 +58,8 @@ sole thread must still appear during search even when its normal tree is hidden.
 
 In Settings → Appearance, **Notification sounds** controls the operating
 system alert sound on this computer only; it does not disable notification
-banners or the bot's own notification setting. `notification-preferences.test.ts`
-and `notify.test.ts` cover persisted preferences, blocked storage, cross-window
+banners or the bot's own notification setting. `src/lib/notification-preferences.test.ts`
+and `src/lib/notify.test.ts` cover persisted preferences, blocked storage, cross-window
 reads after Settings unmounts, and the silent flag sent to the desktop bridge.
 Actual operating-system sound delivery requires a native Electron smoke test;
 the isolated browser cannot prove it.
