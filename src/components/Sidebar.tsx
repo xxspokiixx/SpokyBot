@@ -1077,7 +1077,7 @@ export function BotListItem({
   const hasThreadList = (bot.tasks?.filter((task) => !task.routineRunId).length ?? 1) > 1 || (bot.projects?.length ?? 0) > 0 || Boolean(query);
   const mascotMotion = selected && state.mascotMotion?.botId === bot.id ? state.mascotMotion : null;
   const iconOnly = density === "icons";
-  const expanded = showThreads && !iconOnly && threadsOpen;
+  const expanded = showThreads && !iconOnly && threadsOpen && hasThreadList;
   useEffect(() => {
     if (iconOnly) setRenaming(false);
   }, [iconOnly]);
