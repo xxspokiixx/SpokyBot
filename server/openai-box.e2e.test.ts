@@ -10,8 +10,9 @@ it("keeps the selected API model for direct, group and scheduled Box turns and p
   let boxOffline = false;
   let boxReadsGate: { entered: boolean; resumed: Promise<void>; release: () => void } | undefined;
   const pauseBoxReads = () => {
-    const { promise, resolve } = Promise.withResolvers<void>();
-    const gate = { entered: false, resumed: promise, release: resolve };
+    let release!: () => void;
+    const resumed = new Promise<void>(resolve => { release = resolve; });
+    const gate = { entered: false, resumed, release };
     boxReadsGate = gate;
     return gate;
   };
