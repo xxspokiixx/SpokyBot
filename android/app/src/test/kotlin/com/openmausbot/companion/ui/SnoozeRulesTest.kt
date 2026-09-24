@@ -14,7 +14,7 @@ class SnoozeRulesTest {
 
     @Test
     fun presetsLeadWithActivityAndTravelTheSentinelAsZero() {
-        val presets = SnoozeRules.presets(at(Calendar.SEPTEMBER, 14, 12))
+        val presets = SnoozeRules.presets
         assertEquals(
             listOf(
                 SnoozeRules.UNTIL_NEW_ACTIVITY,
@@ -23,7 +23,14 @@ class SnoozeRulesTest {
             ),
             presets.map { it.label },
         )
-        assertEquals(0L, presets[0].until)
+        assertEquals(0L, presets[0].until(at(Calendar.SEPTEMBER, 14, 12)))
+    }
+
+    @Test
+    fun retainedPresetsResolveAgainstTheSelectionTimeAfterMidnight() {
+        val tomorrow = SnoozeRules.Preset.NINE_AM_TOMORROW
+        assertEquals(at(Calendar.SEPTEMBER, 15, 9), tomorrow.until(at(Calendar.SEPTEMBER, 14, 23)))
+        assertEquals(at(Calendar.SEPTEMBER, 16, 9), tomorrow.until(at(Calendar.SEPTEMBER, 15, 0)))
     }
 
     @Test

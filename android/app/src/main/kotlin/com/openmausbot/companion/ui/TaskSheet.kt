@@ -62,7 +62,13 @@ import com.openmausbot.companion.core.isArchived
  */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun TaskSheet(chat: Chat, onDismiss: () -> Unit, onSelectTask: (ChatTarget) -> Unit, onDeletedCurrent: () -> Unit = {}) {
+fun TaskSheet(
+    chat: Chat,
+    onDismiss: () -> Unit,
+    onSelectTask: (ChatTarget) -> Unit,
+    onDeletedCurrent: () -> Unit = {},
+    nowMillis: () -> Long = System::currentTimeMillis,
+) {
     val session = LocalCompanion.current.session
     val scope = rememberCoroutineScope()
     val state by session.state.collectAsState()
@@ -384,9 +390,7 @@ fun TaskSheet(chat: Chat, onDismiss: () -> Unit, onSelectTask: (ChatTarget) -> U
                     if (working) {
                         Text("Stop this thread before snoozing it.", color = secondaryTint)
                     } else {
-                        // The wall clock, not the snooze-expiry tick: a sheet
-                        // left open across 6 PM must stop offering tonight's.
-                        SnoozeRules.presets(System.currentTimeMillis()).forEach { preset ->
+                        SnoozeRules.presets.forEach { preset ->
                             TextButton(
                                 enabled = !saving,
                                 onClick = {
@@ -398,8 +402,9 @@ fun TaskSheet(chat: Chat, onDismiss: () -> Unit, onSelectTask: (ChatTarget) -> U
                                     if (TaskRules.isWorking(live)) return@TextButton
                                     saving = true
                                     error = null
+                                    val until = preset.until(nowMillis())
                                     scope.launch {
-                                        val snoozed = session.snoozeTask(live, bot, preset.until)
+                                        val snoozed = session.snoozeTask(live, bot, until)
                                         saving = false
                                         if (snoozed) pendingSnooze = null else failed()
                                     }

@@ -29,6 +29,7 @@ import com.openmausbot.companion.core.Fleet
 import com.openmausbot.companion.core.Frame
 import com.openmausbot.companion.core.StreamFrame
 import com.openmausbot.companion.core.target
+import java.util.Calendar
 import java.util.concurrent.ConcurrentLinkedQueue
 import java.util.concurrent.atomic.AtomicInteger
 import kotlin.test.assertEquals
@@ -295,6 +296,28 @@ class AndroidThreadNavigationTest {
         assertNull(selected, "deleting the open bot conversation should leave it, not select a sibling")
         assertEquals(listOf("second"), scene.session.state.value.bot(fixture.id)?.tasks?.map { it.threadId })
         assertEquals(2, requests.count { it.method == "DELETE" && it.path == "/api/bots/${fixture.id}/tasks/first" })
+    }
+
+    @Test
+    fun `snooze deadline uses the click time when its menu stays open across six pm`() {
+        fun at(day: Int, hour: Int, minute: Int = 0) = Calendar.getInstance().apply {
+            clear()
+            set(2026, Calendar.SEPTEMBER, day, hour, minute, 0)
+        }.timeInMillis
+        var clock = at(14, 17, 59)
+        mount {
+            TaskSheet(Chat.BotChat(fixture), onDismiss = {}, onSelectTask = {}, nowMillis = { clock })
+        }
+        compose.onNodeWithContentDescription("Snooze First thread").performClick()
+        compose.onNodeWithText(SnoozeRules.UNTIL_SIX_PM).assertIsDisplayed()
+        // This is deliberately not Compose state: time passes without a
+        // server event or recomposition while the dialog remains open.
+        compose.runOnIdle { clock = at(14, 18, 1) }
+        compose.onNodeWithText(SnoozeRules.UNTIL_SIX_PM).performClick()
+        waitForError()
+        val request = requests.single { it.method == "PATCH" }
+        assertEquals("/api/bots/${fixture.id}/tasks/first", request.path)
+        assertEquals("""{"snoozedUntil":${at(15, 18)}}""", request.body.readUtf8())
     }
 
     @Test

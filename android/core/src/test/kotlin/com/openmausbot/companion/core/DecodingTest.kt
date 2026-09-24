@@ -426,7 +426,7 @@ class DecodingTest {
         )
         assertEquals(Message.Kind.COMPACTION, message.kind)
         assertEquals("Earlier: the user asked for X.", message.compaction?.summary)
-        assertEquals("Context compacted · 12,345 tokens summarised", message.compaction?.chipText)
+        assertEquals(12345, message.compaction?.tokensBefore)
     }
 
     @Test

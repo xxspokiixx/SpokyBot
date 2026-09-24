@@ -21,17 +21,24 @@ object SnoozeRules {
     const val UNTIL_NINE_AM_TOMORROW = "Until 9 AM tomorrow"
     const val STOP_SNOOZING = "Stop snoozing"
 
-    data class Preset(val label: String, val until: Long?)
+    enum class Preset(val label: String) {
+        NEW_ACTIVITY(UNTIL_NEW_ACTIVITY),
+        SIX_PM(UNTIL_SIX_PM),
+        NINE_AM_TOMORROW(UNTIL_NINE_AM_TOMORROW);
+
+        /** Resolve at selection time, even if the menu has been open overnight. */
+        fun until(now: Long): Long = when (this) {
+            NEW_ACTIVITY -> 0L
+            SIX_PM -> sixPm(now)
+            NINE_AM_TOMORROW -> nineAmTomorrow(now)
+        }
+    }
 
     /**
      * The presets, in the desktop's order: activity first, then time. The
      * sentinel travels as 0; the times are epoch milliseconds.
      */
-    fun presets(now: Long): List<Preset> = listOf(
-        Preset(UNTIL_NEW_ACTIVITY, 0L),
-        Preset(UNTIL_SIX_PM, sixPm(now)),
-        Preset(UNTIL_NINE_AM_TOMORROW, nineAmTomorrow(now)),
-    )
+    val presets: List<Preset> = Preset.entries
 
     /** Tonight's 6 PM, or tomorrow's once tonight's has already passed. */
     fun sixPm(now: Long): Long = atHour(now, daysAhead = 0, hour = 18, rollPastNow = true)
