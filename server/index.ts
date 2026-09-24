@@ -104,6 +104,7 @@ import {
   vpsAliasResourceChangeError,
 } from "./cloud-backend.ts";
 import * as composio from "./composio.ts";
+import { connectorCallFromFrame, connectorRefusalText, connectorUnrecognizedText, evaluateConnectorTools } from "./connector-verdict.ts";
 import { chiefOfStaffSystemPrompt } from "./chief-of-staff.ts";
 import { canAccessTeam, canReachPeer, coordinatorSupervises, peerAllowed, peerName, peerRosterSystemPrompt, peerStatus, peerStatusWords, reachablePeers, resolveTeammate, roomPeerRosterSystemPrompt, roomRosterLine, PEER_ACCESS_HELP } from "./peer-roster.ts";
 import { openMausStatusSystemPrompt } from "./openmaus-status-capsule.ts";
@@ -14423,6 +14424,72 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
         const currentSender = store.bot(internalCapability.botId);
         if (!currentSender || currentSender.composio === false || !composio.configured(cfg)) {
           return json(res, 403, { error: "connected apps are not enabled for this bot" });
+        }
+        // Per-bot tool grants (issue #1736): verdict every tools/call frame
+        // against the calling bot's connectorTools before it reaches
+        // Composio. A bot with no grants record keeps the legacy all-tools
+        // behavior; a grants record makes every unrecognized shape a deny.
+        // Rows are fire-and-forget: a log failure must never take the call
+        // (or its refusal) down with it.
+        const call = connectorCallFromFrame(body);
+        if (call.kind === "unrecognized") {
+          appendDecision(DATA_DIR, {
+            threadId: internalCapability.threadId,
+            botId: currentSender.id,
+            botName: currentSender.name,
+            tool: call.invoked,
+            summary: call.reason,
+            decision: "user-denied",
+            source: "connector-scope",
+            rule: "connectorTools",
+          });
+          const refusal = connectorUnrecognizedText(call.invoked, call.reason);
+          res.writeHead(200, { "content-type": "application/json", "cache-control": "no-store" });
+          return res.end(JSON.stringify({
+            jsonrpc: "2.0",
+            id: (body as { id?: unknown }).id ?? null,
+            result: { content: [{ type: "text", text: refusal }], isError: true },
+          }));
+        }
+        if (call.kind === "tools") {
+          const verdict = evaluateConnectorTools(call.names, currentSender.connectorTools);
+          if (!verdict.allowed) {
+            for (const denial of verdict.denials) {
+              appendDecision(DATA_DIR, {
+                threadId: internalCapability.threadId,
+                botId: currentSender.id,
+                botName: currentSender.name,
+                tool: denial.tool,
+                summary: denial.service === null
+                  ? "tool name does not name a service"
+                  : denial.onGrantedService
+                    ? "tool is not in this service's grant"
+                    : "service is not granted",
+                decision: "user-denied",
+                source: "connector-scope",
+                rule: denial.service ? "connectorTools." + denial.service : "connectorTools",
+              });
+            }
+            const refusal = connectorRefusalText(verdict.denials);
+            res.writeHead(200, { "content-type": "application/json", "cache-control": "no-store" });
+            return res.end(JSON.stringify({
+              jsonrpc: "2.0",
+              id: (body as { id?: unknown }).id ?? null,
+              result: { content: [{ type: "text", text: refusal }], isError: true },
+            }));
+          }
+          // One row per allowed call, naming the first target: the audit
+          // trail reads "which bot ran what", not one row per tool.
+          appendDecision(DATA_DIR, {
+            threadId: internalCapability.threadId,
+            botId: currentSender.id,
+            botName: currentSender.name,
+            tool: call.names[0],
+            summary: ("allowed " + call.names.join(", ")).slice(0, 240),
+            decision: "user-approved",
+            source: "connector-scope",
+            rule: verdict.rule,
+          });
         }
         const upstream = await composio.relayMcp(
           cfg,
