@@ -67,6 +67,7 @@ import {
   FILE_MAX_BYTES,
   IMAGE_MAX_BYTES,
   readAttachment,
+  saveAudio,
   saveFile,
   saveImage,
   saveImageUpload,
@@ -1610,6 +1611,9 @@ function agentsIntegration(
       // The shared-computer tools are advertised only while the workspace
       // gate is on; the routes behind them refuse regardless.
       OMB_SHARED_COMPUTERS_ENABLED: sharedComputersEnabled(cfg) ? "1" : "0",
+      // Same capability rule for voice: the tool is offered only when this
+      // bot can actually speak, and the route re-checks on every call.
+      OMB_VOICE_NOTES: tts.voiceReady(cfg, (botForThread(botId, threadId) ?? store.bot(botId))?.voice) ? "1" : "0",
     },
   };
 }
@@ -1917,19 +1921,22 @@ async function interruptAllDirectThreads(botId: string): Promise<void> {
 }
 const retiredProviderTurns = new RetiredTurnRegistry();
 const pendingCancelledProviderHandshakes = new PendingTurnCancellations();
-const generatedImagesByTurn = new Map<
-  string,
-  Array<NonNullable<Message["attachments"]>[number]>
->();
+// One parking lot for provider output staged mid-turn and attached when the
+// turn settles: generated images since the beginning, voice notes since #1742.
+// Audio entries carry their transcript until the message they land on; the
+// wire attachment itself has no text field.
+type ParkedTurnAttachment = NonNullable<Message["attachments"]>[number] & { text?: string };
 
-function generatedImageTurnKey(threadId: string, turnId?: string): string {
+const turnAttachmentsByTurn = new Map<string, Array<ParkedTurnAttachment>>();
+
+function turnAttachmentKey(threadId: string, turnId?: string): string {
   return `${threadId}:${turnId ?? "active"}`;
 }
 
-function purgeGeneratedImagesForThread(threadId: string): void {
-  for (const [key, attachments] of generatedImagesByTurn) {
+function purgeTurnAttachmentsForThread(threadId: string): void {
+  for (const [key, attachments] of turnAttachmentsByTurn) {
     if (!key.startsWith(`${threadId}:`)) continue;
-    generatedImagesByTurn.delete(key);
+    turnAttachmentsByTurn.delete(key);
     for (const attachment of attachments) {
       deleteAttachment(attachment.path);
     }
@@ -1946,12 +1953,12 @@ function clearCancelledProviderHandshake(threadId: string, ownerId: string): voi
 
 function retireProviderTurn(turnId: string): void {
   retiredProviderTurns.retire(turnId);
-  // A stopped/replaced turn is never folded again. Delete only image files
-  // that were staged for that exact provider turn so unattached output does
-  // not accumulate invisibly on disk.
-  for (const [key, attachments] of generatedImagesByTurn) {
+  // A stopped/replaced turn is never folded again. Delete only staged files
+  // (images, voice notes) that were parked for that exact provider turn so
+  // unattached output does not accumulate invisibly on disk.
+  for (const [key, attachments] of turnAttachmentsByTurn) {
     if (!key.endsWith(`:${turnId}`)) continue;
-    generatedImagesByTurn.delete(key);
+    turnAttachmentsByTurn.delete(key);
     for (const attachment of attachments) {
       deleteAttachment(attachment.path);
     }
@@ -5628,10 +5635,10 @@ bus.subscribe((event: RuntimeEvent) => {
         try {
           const decoded = decodeGeneratedImage(event.data);
           const saved = saveImage(decoded.bytes, decoded.mime);
-          const key = generatedImageTurnKey(event.threadId, event.turnId);
-          const current = generatedImagesByTurn.get(key) ?? [];
+          const key = turnAttachmentKey(event.threadId, event.turnId);
+          const current = turnAttachmentsByTurn.get(key) ?? [];
           current.push({ kind: "image", path: saved.path, mime: saved.mime });
-          generatedImagesByTurn.set(key, current);
+          turnAttachmentsByTurn.set(key, current);
         } catch (error) {
           pushMessage({
             role: "bot",
@@ -5906,28 +5913,58 @@ bus.subscribe((event: RuntimeEvent) => {
       // thread nobody types in again (a deleted bot's) is not held forever.
       const internal = isInternalTurn(event.threadId);
       clearInternalTurn(event.threadId);
-      const generatedKey = generatedImageTurnKey(event.threadId, event.turnId);
-      const generated = generatedImagesByTurn.get(generatedKey) ?? [];
-      generatedImagesByTurn.delete(generatedKey);
-      if (generated.length) {
+      const generatedKey = turnAttachmentKey(event.threadId, event.turnId);
+      const generated = turnAttachmentsByTurn.get(generatedKey) ?? [];
+      turnAttachmentsByTurn.delete(generatedKey);
+      // A turn that never completed never lands its half-said note: parked
+      // audio is deleted when the settle is not ok (person stop, provider
+      // failure) rather than posted as if the turn finished (#1742).
+      // Generated images keep their long-standing settle-anyway behavior.
+      for (const attachment of generated) {
+        if (event.ok || attachment.kind !== "audio") continue;
+        deleteAttachment(attachment.path);
+      }
+      const settled = event.ok || !generated.length
+        ? generated
+        : generated.filter((attachment) => attachment.kind !== "audio");
+      if (settled.length) {
         const response = [...store.messagesFor(event.threadId)].reverse().find(
           (message) =>
             message.role === "bot" &&
             message.kind === "text" &&
             message.turnId === completedTurnId,
         );
+        // A voice note's text is its transcript: the visible caption search,
+        // compaction and notifications read (#1740 decision 3).
+        const transcript = settled
+          .filter((attachment) => attachment.kind === "audio" && attachment.text)
+          .map((attachment) => attachment.text!.trim())
+          .filter(Boolean)
+          .join("\n\n");
+        const staged = settled.map((attachment) =>
+          attachment.kind === "audio"
+            ? { kind: "audio" as const, path: attachment.path, mime: attachment.mime }
+            : attachment,
+        );
         if (response) {
           store.patchMessage(event.threadId, response.id, {
-            attachments: [...(response.attachments ?? []), ...generated],
+            attachments: [...(response.attachments ?? []), ...staged],
+            // A voice-note-only turn produced no words of its own: the note's
+            // text becomes the caption rather than an empty bubble. A real
+            // epilogue stands as written.
+            ...(transcript && !response.text?.trim()
+              ? { text: redactSecretsInText(transcript) }
+              : {}),
           });
         } else {
-          // Some image turns have no textual epilogue. Keep the image as the
-          // terminal assistant response instead of inventing model words.
+          // Some turns have no textual epilogue. Keep the attachment as the
+          // terminal assistant response instead of inventing model words; a
+          // voice note's own text is the visible transcript there.
           pushMessage({
             role: "bot",
             kind: "text",
-            text: "",
-            attachments: generated,
+            text: transcript,
+            attachments: staged,
             turnId: completedTurnId,
           });
         }
@@ -8886,7 +8923,7 @@ async function deleteBotWithLifecycle(botId: string, revalidate: () => void = ()
           // Deletion removes the thread before a late turn.completed can fold
           // staged provider images into a message, so dispose them here.
           for (const task of store.tasks(bot.id)) {
-            purgeGeneratedImagesForThread(task.threadId);
+            purgeTurnAttachmentsForThread(task.threadId);
             clearTurnDigestState(task.threadId);
             settleDirectFollowup(directTurnGenerationByThread.get(task.threadId));
             directTurnGenerationByThread.delete(task.threadId);
@@ -14415,6 +14452,34 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
           },
         });
         return json(res, 201, { messageId: message.id, label: target.label });
+      }
+      if (method === "POST" && path === "/api/internal/voice-note") {
+        const body = await readInternalBody();
+        const text = typeof body.text === "string" ? body.text.trim() : "";
+        if (!text) return json(res, 400, { error: "text required" });
+        if (text.length > 1000) return json(res, 413, { error: "voice notes are limited to 1000 characters" });
+        // Advertisement is presentation only; the capability is re-checked
+        // here so a call that reaches an unconfigured workspace answers with
+        // the setup guidance instead of a provider failure.
+        const voiceBot = botForThread(internalSender.id, internalCapability.threadId) ?? internalSender;
+        try {
+          const audio = await tts.speak(cfg, text, voiceBot.voice);
+          const saved = saveAudio(Buffer.from(audio.bytes), audio.mime);
+          const key = turnAttachmentKey(internalCapability.threadId, liveTurnByThread.get(internalCapability.threadId));
+          const current = turnAttachmentsByTurn.get(key) ?? [];
+          current.push({ kind: "audio", path: saved.path, mime: saved.mime, text });
+          turnAttachmentsByTurn.set(key, current);
+          return json(res, 201, { attached: true });
+        } catch (error) {
+          // "no voice configured" is a setup state, not a provider failure —
+          // 409 with the hint, exactly like /api/tts/speak.
+          if (error instanceof tts.NoVoiceConfigured) return json(res, 409, { error: error.message });
+          const status = (error as { status?: number }).status;
+          if (typeof status === "number" && status >= 400 && status < 500) {
+            return json(res, status, { error: error instanceof Error ? error.message : "voice note failed" });
+          }
+          throw error;
+        }
       }
       if (method === "POST" && path === "/api/internal/connectors/mcp") {
         const body = await readInternalBody();
