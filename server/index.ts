@@ -5949,11 +5949,16 @@ bus.subscribe((event: RuntimeEvent) => {
         if (response) {
           store.patchMessage(event.threadId, response.id, {
             attachments: [...(response.attachments ?? []), ...staged],
-            // A voice-note-only turn produced no words of its own: the note's
-            // text becomes the caption rather than an empty bubble. A real
-            // epilogue stands as written.
-            ...(transcript && !response.text?.trim()
-              ? { text: redactSecretsInText(transcript) }
+            // The note's text is its transcript and stays visible beside a
+            // written epilogue: the wire audio carries no text, so letting
+            // the epilogue replace it would erase what was said (#1740
+            // decision 3).
+            ...(transcript
+              ? {
+                  text: [response.text?.trim(), redactSecretsInText(transcript)]
+                    .filter(Boolean)
+                    .join("\n\n"),
+                }
               : {}),
           });
         } else {
@@ -14464,8 +14469,17 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
         const voiceBot = botForThread(internalSender.id, internalCapability.threadId) ?? internalSender;
         try {
           const audio = await tts.speak(cfg, text, voiceBot.voice);
+          // Synthesis can outlive its turn: a stop or settle during the await
+          // revokes the capability and clears the live turn. Re-check both
+          // before saving so the clip cannot park under the :active fallback
+          // or onto a later turn's key (#1742).
+          requireActiveInternalCapability();
+          const turnId = liveTurnByThread.get(internalCapability.threadId);
+          if (!turnId) {
+            return json(res, 409, { error: "this turn has not started yet or already ended" });
+          }
           const saved = saveAudio(Buffer.from(audio.bytes), audio.mime);
-          const key = turnAttachmentKey(internalCapability.threadId, liveTurnByThread.get(internalCapability.threadId));
+          const key = turnAttachmentKey(internalCapability.threadId, turnId);
           const current = turnAttachmentsByTurn.get(key) ?? [];
           current.push({ kind: "audio", path: saved.path, mime: saved.mime, text });
           turnAttachmentsByTurn.set(key, current);
