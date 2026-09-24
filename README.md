@@ -166,10 +166,12 @@ conversations, permissions, memory, or computer access. Browse the
 
 Right-click a team and choose **Share team…** (or use **Templates → Share**) to save the whole team as one
 file: its bots with their instructions, pictures and skills, group chats, routines, shared instructions,
-Chief of Staff, connection slots and, unless you switch them off, each bot's starter notes. The dialog
+Chief of Staff, connection slots and each bot's starter notes (untick them to leave them out). The dialog
 shows exactly what the file holds before you save it. Chat history, keys and passwords, model choices and
 computers never go in, and anything that looks like a secret is removed from the text. Whoever imports it
 gets new bots on Ask, skills switched off and routines paused. See [docs/team-sharing.md](docs/team-sharing.md).
+Desktops connected to an organization also get **Templates → From {Organization}**: the packages its Admin shares,
+added with one click, skills switched on. See [docs/org-library.md](docs/org-library.md).
 
 ### 🎧 Bots that talk back
 

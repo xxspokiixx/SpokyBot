@@ -1,9 +1,10 @@
 import { describe, expect, it } from "vitest";
 
-import { createBotPackageExport, createTeamPackageExport, TEAM_TOO_LARGE_MESSAGE } from "./package-export.ts";
+import { createBotPackageExport, createTeamPackageExport, shareableAddress, TEAM_TOO_LARGE_MESSAGE, TeamExportError } from "./package-export.ts";
 import { parseBotPackage, renderBotPackageMarkdown } from "./bot-package.ts";
 import type { Routine } from "./routines.ts";
 import type { BotRecord, GroupRecord } from "./store.ts";
+import { includedSkills, requestedSkills, startingTicks } from "../src/lib/team-share-skills.ts";
 
 describe("package export", () => {
   it("preserves the exact cron and timezone through export and import", () => {
@@ -394,5 +395,151 @@ describe("whole-team export (package v2)", () => {
       ...skill(`big-${index}`), instructions: `---\nname: big-${index}\ndescription: big-${index} description\n---\n${"a".repeat(250_000)}`,
     }))]]);
     expect(() => createTeamPackageExport(huge)).toThrow(TEAM_TOO_LARGE_MESSAGE);
+  });
+
+  // The Share dialog's first look asks for "all". A team that cannot put
+  // every skill in one file must still get a preview (and its skill boxes),
+  // so "all" shares what fits and lists the rest instead of refusing.
+  describe("skills that do not all fit", () => {
+    const many = (prefix: string, count: number, extra: { enabled?: boolean } = {}) =>
+      Array.from({ length: count }, (_, index) => ({ ...skill(`${prefix}-${String(index + 1).padStart(2, "0")}`), ...extra }));
+    const conflicting = { ...skill("pricing"), instructions: "---\nname: pricing\ndescription: pricing description\n---\n\n# Another pricing\n" };
+
+    it("keeps 30 per bot, switched-on skills first, and lists the rest", () => {
+      const input = { ...fixture(), skillSelection: "all" as const,
+        skillsByBot: new Map([["lead", [{ ...skill("a-off"), enabled: false }, ...many("s", 30, { enabled: true })]]]) };
+      const result = createTeamPackageExport(input);
+      const lead = result.document.package.agents.find((agent) => agent.key === "morgan")!;
+      expect(lead.skills).toHaveLength(30);
+      expect(lead.skills).not.toContain("a-off");
+      expect(result.document.package.skills?.entries.map((entry) => entry.name)).not.toContain("a-off");
+      expect(JSON.stringify(result.document)).not.toContain('"enabled"');
+      expect(result.skipped).toContainEqual({ part: "agents[morgan].skills[a-off]", reason: "bot_skill_limit" });
+    });
+
+    it("leaves out a name two bots hold with different content, whole", () => {
+      const result = createTeamPackageExport({ ...fixture(), skillSelection: "all",
+        skillsByBot: new Map([["lead", [skill("pricing")]], ["scout", [conflicting, skill("research")]]]) });
+      expect(result.document.package.skills?.entries.map((entry) => entry.name)).toEqual(["research"]);
+      expect(result.document.package.agents.map((agent) => agent.skills)).toEqual([undefined, ["research"]]);
+      expect(result.skipped).toContainEqual({ part: "skills[pricing]", reason: "skill_conflict" });
+    });
+
+    it("keeps 60 per team and lists the rest", () => {
+      const input = fixture();
+      input.bots.push(bot("third", "Third"));
+      const result = createTeamPackageExport({ ...input, skillSelection: "all",
+        skillsByBot: new Map([["lead", many("a", 30)], ["scout", many("b", 30)], ["third", many("c", 2)]]) });
+      expect(result.document.package.skills?.entries).toHaveLength(60);
+      expect(result.skipped.filter((skip) => skip.reason === "team_skill_limit")).toEqual([
+        { part: "skills[c-01]", reason: "team_skill_limit" }, { part: "skills[c-02]", reason: "team_skill_limit" },
+      ]);
+      expect(result.document.package.agents.find((agent) => agent.key === "third")?.skills).toBeUndefined();
+    });
+
+    it("keeps switched-on skills first when the team has more than 60, even one that sorts later by name", () => {
+      const input = fixture();
+      input.bots.push(bot("third", "Third"));
+      // 61 names: "a-off" sorts first by name but is switched off on the only
+      // bot that has it; "b-01" is off on Third but on for Morgan, so it counts as on.
+      const result = createTeamPackageExport({ ...input, skillSelection: "all",
+        skillsByBot: new Map([["lead", many("b", 30, { enabled: true })], ["scout", many("c", 30, { enabled: true })],
+          ["third", [{ ...skill("a-off"), enabled: false }, { ...skill("b-01"), enabled: false }]]]) });
+      const kept = result.document.package.skills?.entries.map((entry) => entry.name);
+      expect(kept).toHaveLength(60);
+      expect(kept).not.toContain("a-off");
+      expect(kept).toContain("c-30");
+      expect(result.skipped.filter((skip) => skip.reason === "team_skill_limit")).toEqual([{ part: "skills[a-off]", reason: "team_skill_limit" }]);
+      expect(result.document.package.agents.find((agent) => agent.key === "third")?.skills).toEqual(["b-01"]);
+    });
+
+    it("starts the dialog's boxes on a choice that fits, so unticking any one box still fits", () => {
+      // Morgan holds s-01…s-31; Scout holds the same s-31 plus z-only. "all"
+      // puts all 32 names in the file (s-31 for Scout only).
+      const shared = many("s", 31);
+      const skillsByBot = new Map([["lead", shared], ["scout", [shared[30]!, skill("z-only")]]]);
+      const all = createTeamPackageExport({ ...fixture(), skillSelection: "all", skillsByBot });
+      expect(includedSkills(all.document)).toHaveLength(32);
+      const exactly = (names: readonly string[]) => createTeamPackageExport({ ...fixture(),
+        skillsByBot: new Map([...skillsByBot].map(([id, list]) => [id, list.filter((entry) => names.includes(entry.name))])) });
+      // Ticking what the file holds would refuse after unticking z-only.
+      expect(() => exactly(includedSkills(all.document).filter((name) => name !== "z-only"))).toThrow("Morgan has more than 30 skills");
+      const ticks = startingTicks(all);
+      expect(ticks).not.toContain("s-31");
+      expect(() => exactly(ticks)).not.toThrow();
+      for (const unticked of ticks) {
+        const choice = requestedSkills(new Set(ticks.filter((name) => name !== unticked)), [...shared.map((entry) => entry.name), "z-only"]);
+        expect(() => exactly(choice as string[])).not.toThrow();
+      }
+    });
+
+    it("refuses an exact choice that cannot fit, in a sentence the dialog shows", () => {
+      const refusal = (skillsByBot: Map<string, ReturnType<typeof skill>[]>) => {
+        try {
+          createTeamPackageExport({ ...fixture(), skillsByBot });
+        } catch (error) {
+          return error;
+        }
+        throw new Error("expected a refusal");
+      };
+      const crowded = refusal(new Map([["lead", many("s", 31)]]));
+      expect(crowded).toBeInstanceOf(TeamExportError);
+      expect((crowded as Error).message).toBe("Morgan has more than 30 skills. Choose fewer skills and try again.");
+      const conflict = refusal(new Map([["lead", [skill("pricing")]], ["scout", [conflicting]]]));
+      expect(conflict).toBeInstanceOf(TeamExportError);
+      expect((conflict as Error).message).toBe('Two bots in this team have different skills named "pricing". Leave that skill out and try again.');
+    });
+  });
+
+  describe("connection addresses", () => {
+    it.each([
+      ["a Zapier token segment", "https://mcp.zapier.com/api/mcp/s/NjQ5YjM0ZDgtN2E4Mi00ZDM0LWI1ZjYtOTU2ZGUxYjM3ZTQ5OjE2YjQ3M2Q4==/mcp",
+        "https://mcp.zapier.com/api/mcp/s/redacted/mcp"],
+      ["query values and the fragment", "https://host.example/sse?key=abcd1234efgh5678&profile=default#frag", "https://host.example/sse?key=&profile="],
+      ["a server UUID", "https://mcp.composio.dev/composio/server/3fa85f64-5717-4562-b3fc-2c963f66afa6/mcp",
+        "https://mcp.composio.dev/composio/server/redacted/mcp"],
+      ["a sign-in part", "https://user:pass1234@host.example/mcp", "https://host.example/mcp"],
+      ["a key in the subdomain", "https://a1b2c3d4e5f6g7h8i9j0k1l2.mcp.example.com/mcp", "https://redacted.mcp.example.com/mcp"],
+      ["a short hex key", "https://host.example/s/a1b2c3d4e5f6a7b8/", "https://host.example/s/redacted/"],
+      ["a short key after key=", "https://host.example/key=abcdef12345678/", "https://host.example/key=/"],
+      ["24 letters in a row", "https://host.example/s/abcdefghijklmnopqrstuvwxyz/mcp", "https://host.example/s/redacted/mcp"],
+      ["24 digits in a row", "https://host.example/s/123456789012345678901234/mcp", "https://host.example/s/redacted/mcp"],
+      ...[":", "@", "!", "$", "'", "(", ")", "*", ","].map((mark) => [`a key after "${mark}" in a segment`,
+        `https://host.example/s/abc${mark}def1234567890123456789/`, "https://host.example/s/redacted/"]),
+      ["a matrix parameter value", "https://host.example/mcp;key=abcdef1234567890abcdef", "https://host.example/mcp;key="],
+      ["a key-shaped matrix parameter name", "https://host.example/mcp;sk_live_abcdef1234567890abcdef", "https://host.example/redacted"],
+      ["a key used as a query name", "https://host.example/mcp?sk_live_abcdef1234567890abcdef", "https://host.example/mcp?redacted="],
+      ["a key escaped character by character", `https://host.example/s/${[..."abcdef1234567890"].map((c) => `%${c.charCodeAt(0).toString(16)}`).join("")}/mcp`,
+        "https://host.example/s/redacted/mcp"],
+    ])("never carries %s", (_case, address, shared) => {
+      expect(shareableAddress(address)).toEqual({ url: shared, changed: true });
+    });
+
+    it.each([
+      "https://mcp.example.com/crm",
+      "https://mcp.example.com",
+      "https://api.example.com/v1/github-mcp-server/sse?",
+      "https://api.example.com/github-mcp-server-2024/sse",
+      "https://api.example.com/acme-corp-2025-sales/mcp",
+      "https://api.example.com/docs/path%20with%20spaces/mcp",
+      "https://api.example.com/reports/quarterly%20sales%20by%20region%202025/mcp",
+      "https://acme-corp-2025-sales.mcp.example.com/sse",
+      "https://mcp.a1b2c3d4e5f6g7h8i9j0.com/mcp",
+      "https://server.smithery.ai/@smithery-ai/github/mcp?profile",
+      "https://api.example.com/v2/oauth2/mcp_server_v2/sse",
+      "http://127.0.0.1:3000/sse",
+      "http://localhost:8080/mcp",
+    ])("keeps a plain address exactly: %s", (plain) => {
+      expect(shareableAddress(plain)).toEqual({ url: plain, changed: false });
+    });
+
+    it("reports a changed address as redacted and exports it without the key", () => {
+      const input = fixture();
+      input.mcpServers.crm = { ...input.mcpServers.crm, url: "https://mcp.zapier.com/api/mcp/s/ZTJmNDk1YjMtNjQ0Yi00ZjU2/mcp?token=abcdef" };
+      const result = createTeamPackageExport(input);
+      expect(result.document.package.connections?.[0]?.mcp.url).toBe("https://mcp.zapier.com/api/mcp/s/redacted/mcp?token=");
+      expect(result.redacted).toEqual(["connections[crm].mcp.url"]);
+      expect(JSON.stringify(result.document)).not.toMatch(/ZTJmNDk1YjMtNjQ0Yi00ZjU2|abcdef/);
+    });
   });
 });

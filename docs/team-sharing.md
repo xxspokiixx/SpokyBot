@@ -2,7 +2,8 @@
 
 **Share team…** saves one team as a single file (`<team>-<version>.openmaus.json`).
 Someone else adds it in **Templates → Import**, or an organization uploads it
-in Admin → Packages. Open it from the team's menu in the sidebar (right-click
+in Admin → Packages and its desktops add it from **Templates → From
+{Organization}** ([org-library.md](org-library.md)). Open it from the team's menu in the sidebar (right-click
 the team name), or from **Templates → Share**.
 
 ## What goes in the file
@@ -11,16 +12,37 @@ the team name), or from **Templates → Share**.
   its colour and mascot, and its picture (downscaled to at most 256 × 256 and
   64 KB; the dialog stops adding pictures after about 2 MB of them).
 - **Skills.** All skills on the team's bots by default, or the ones you tick.
-  Only the `SKILL.md` text travels, never scripts or other files.
+  Only the `SKILL.md` text travels, never scripts or other files. A file
+  holds at most 30 skills per bot and 60 per team, and one skill per name.
+  When you have not chosen, the dialog puts in what fits (switched-on skills
+  first) and lists the rest under **Left out**, including a name two bots
+  hold with different content. The skill boxes then start ticked on what
+  went in, less any skill a bot had to leave out over its 30 (even when
+  another bot's copy went in), so unticking any box is always a choice that
+  fits. When you tick more than fits, it says why and keeps every skill box
+  so you can change the choice.
 - **Playbooks**, **group chats** (members and who answers by default) and the
   team's **shared instructions**.
 - **Routines**, including group chat goals. They always arrive paused.
 - **The Chief of Staff.**
 - **Connections.** For each remote MCP server a bot uses: its address and the
   names of the values it needs (for example `Authorization`). The values
-  themselves never travel.
-- **Starter notes.** Each bot's `MEMORY.md` and topic notes. The dialog
-  includes them unless you switch them off; daily logs never go in.
+  themselves never travel. Hosted servers often keep their key in the address
+  itself, so an address loses any sign-in part and `#fragment`, and keeps its
+  query and `;matrix` parameter names with the values emptied (`?key=`,
+  `;key=`, and `key=` inside a path segment). Any path segment, parameter
+  name or subdomain label (anything left of the last two host labels) that
+  looks like a key is replaced with `redacted`. A part looks like a key when,
+  after `%XX` escapes are decoded, it holds a run of 16 or more letters,
+  digits, `-` or `_` that mixes letters and digits, or 24 or more letters or
+  digits in a row, such as a token, a hex key or a server id. Words joined by
+  hyphens with a short number, such as `github-mcp-server-2024`, stay as
+  they are. The rule is deliberately broad, so the dialog lists each
+  connection's full address before you save and names any address it
+  changed.
+- **Starter notes.** Each bot's `MEMORY.md` and topic notes. **Include
+  starter notes** is ticked, because a team is shared whole; untick it if the
+  notes hold private details about you. Daily logs never go in.
 - **Connector requirements** (which connected apps the team expects), as
   labels only.
 
@@ -69,7 +91,8 @@ you already have.
 - Starter notes are written once, through the normal memory writer.
 - Preset bots in a file are listed but not added yet.
 - A package with no bots (skills and presets only) is refused with a pointer
-  to the organization shelf, which arrives in a later version.
+  to the organization shelf (**Templates → From {Organization}**, see
+  [org-library.md](org-library.md)).
 
 If any step fails, everything the import created is removed again.
 
@@ -87,5 +110,9 @@ The HTTP route is `POST /api/teams/export` with
 fields: `name`, `tagline`, `summary`, `release`, `notes`, `skills` (`"all"` or
 names), `includeMemory` (default `false` over the API), `avatars` (data URLs
 by bot id) and `dryRun` (count without recording keys). The response is
-`{document, filename, redacted, skipped, summary, choices}`. A body without
+`{document, filename, redacted, skipped, summary, choices}`. With
+`skills: "all"` the export puts in the skills that fit and lists the rest in
+`skipped`; a list of names is shared exactly or refused. Every `400` from a
+version 2 body also carries `choices: {skills}` (every skill name on the
+team's bots), so a client can offer a different choice. A body without
 `version: 2` keeps the original whole-installation Markdown export.

@@ -5,6 +5,10 @@
 import { t, tFromServer } from "@/lib/i18n";
 import type { LocaleKey } from "@/locales";
 import type { PackageDocument, PackageSummary } from "../../shared/package-format";
+import { skillChoicesFrom, startingTicks } from "./team-share-skills";
+
+// The skill choices are pure and shared with the server's export tests.
+export { includedSkills, requestedSkills, skillChoicesFrom, startingTicks, tickedSkills } from "./team-share-skills";
 
 /** Pictures are downscaled to fit this square before they are shared. */
 export const PICTURE_EDGE = 256;
@@ -15,7 +19,8 @@ export const PICTURES_BASE64_BUDGET = 2 * 1024 * 1024;
 
 export type ShareSkipReason =
   | "picture_too_large" | "picture_invalid" | "pictures_budget" | "stdio_server" | "insecure_address"
-  | "files_not_shared" | "lead_not_in_group_chat" | "notes_too_large" | "skill_changed";
+  | "files_not_shared" | "lead_not_in_group_chat" | "notes_too_large" | "skill_changed"
+  | "skill_conflict" | "bot_skill_limit" | "team_skill_limit";
 
 export interface ShareSkip { part: string; reason: ShareSkipReason | string }
 
@@ -40,6 +45,50 @@ export interface ShareResponse {
   skipped: ShareSkip[];
   summary: PackageSummary;
   choices: { skills: string[] };
+}
+
+// ── the dialog's state ──────────────────────────────────────────────────────
+
+/** What the Share dialog starts with. Owner decision: a team is shared whole,
+ * everything but chat history, so pictures and starter notes start ticked and
+ * the line under the notes box says so. (The API default for notes stays
+ * off: callers opt in.) */
+export const SHARE_DIALOG_DEFAULTS = { includePictures: true, includeMemory: true } as const;
+
+/** The line under the starter-notes box. */
+export function notesLine(includeMemory: boolean): string {
+  return includeMemory ? t("teamShare.notesIncluded") : t("teamShare.notesExcluded");
+}
+
+/** What the dialog shows from the server's dry runs. */
+export interface ShareView {
+  /** The dry run of the current choice; null while it is refused (no counts, no Save). */
+  preview: ShareResponse | null;
+  /** Every skill name on the team's bots, one box each; null until the server first answers. */
+  available: string[] | null;
+  /** The boxes ticked until the person changes one (startingTicks). */
+  included: string[] | null;
+  error: string;
+}
+
+export const SHARE_VIEW_START: ShareView = { preview: null, available: null, included: null, error: "" };
+
+/** A dry run answered. `all`: it asked for "all" (no box changed yet). */
+export function shareAnswered(view: ShareView, result: ShareResponse, all: boolean): ShareView {
+  return { preview: result, available: result.choices.skills, included: all ? startingTicks(result) : view.included, error: "" };
+}
+
+/** A dry run was refused. This choice cannot be saved: no counts and no Save
+ * until it changes. The skill boxes stay, redrawn from the refusal when it
+ * names the team's skills, so the choice can always be changed. */
+export function shareRefused(view: ShareView, cause: unknown): ShareView {
+  const body = cause && typeof cause === "object" && "body" in cause ? (cause as { body?: unknown }).body : undefined;
+  return {
+    ...view,
+    preview: null,
+    available: skillChoicesFrom(body) ?? view.available,
+    error: cause instanceof Error ? cause.message : String(cause),
+  };
 }
 
 /** POST /api/teams/export body (package format v2). */
@@ -152,6 +201,7 @@ const FIELD_WORDS: Record<string, LocaleKey> = {
   bulletin: "teamShare.field.bulletin",
   prompt: "teamShare.field.prompt",
   instructions: "teamShare.field.skill",
+  skills: "teamShare.field.skill",
   mcp: "teamShare.field.address",
   appearance: "teamShare.field.picture",
 };
@@ -160,9 +210,9 @@ const FIELD_WORDS: Record<string, LocaleKey> = {
  * stay as their path (still readable, never a value). */
 export function describePart(part: string, document?: PackageDocument): string {
   const pkg = document?.package;
-  const match = /^(agents|rooms|routines|skills|connections|presets|playbooks)\[([^\]]+)\](?:\.([a-zA-Z]+))?/.exec(part);
+  const match = /^(agents|rooms|routines|skills|connections|presets|playbooks)\[([^\]]+)\](?:\.([a-zA-Z]+)(?:\[([^\]]+)\])?)?/.exec(part);
   if (match) {
-    const [, list, key, field] = match;
+    const [, list, key, field, item] = match;
     const named = list === "agents" ? pkg?.agents.find((agent) => agent.key === key)?.name
       : list === "rooms" ? pkg?.rooms?.find((room) => room.key === key)?.name
       : list === "routines" ? pkg?.routines?.find((routine) => routine.key === key)?.name
@@ -172,7 +222,7 @@ export function describePart(part: string, document?: PackageDocument): string {
     const words = field
       ? (FIELD_WORDS[field] ? t(FIELD_WORDS[field]) : field)
       : list === "connections" ? t("teamShare.field.connection") : list === "skills" ? t("teamShare.field.skill") : undefined;
-    const topic = /\.seed\.memory\["([^"]+)"\]/.exec(part)?.[1];
+    const topic = /\.seed\.memory\["([^"]+)"\]/.exec(part)?.[1] ?? item;
     return [who, words, topic].filter(Boolean).join(" · ");
   }
   if (part === "team.brief") return t("teamShare.field.brief");
