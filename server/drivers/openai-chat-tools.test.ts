@@ -153,6 +153,105 @@ async function fixture(script: Script, provider: Provider = "openai-compat", api
   };
 }
 
+describe("optional built-in question compatibility", () => {
+  const unsupported = { error: { message: "This model does not support tools." } };
+  it.each([
+    [400, unsupported],
+    [422, { error: { code: "unsupported_parameter", param: "tools", message: "Unsupported request parameter." } }],
+    [400, { error: "tools are not supported by this model" }],
+    [400, { error: { message: "Unrecognized parameter: 'tools'" } }],
+  ])("retries a plain turn once without optional questions after explicit HTTP %s rejection", async (status, error) => {
+    const f = await fixture((_body, response, round) => {
+      if (round === 1) {
+        response.writeHead(status as number, { "content-type": "application/json" });
+        response.end(JSON.stringify(error));
+      } else answer(response, "Plain reply.");
+    });
+    await f.start({ integrations: undefined });
+    expect(await f.completed()).toMatchObject({ ok: true });
+    expect(f.requests).toHaveLength(2);
+    expect(f.requests[0].tools?.map(tool => tool.function.name)).toEqual(["ask_user"]);
+    expect(f.requests[1]).not.toHaveProperty("tools");
+    expect(f.requests[1].messages).toEqual(f.requests[0].messages);
+    expect(f.effects()).toEqual([]);
+    // A rejection for this turn is not a persisted provider setting.
+    f.recorder.events.length = 0;
+    await f.start({ integrations: undefined });
+    expect(await f.completed()).toMatchObject({ ok: true });
+    expect(f.requests[2].tools?.map(tool => tool.function.name)).toEqual(["ask_user"]);
+  });
+
+  it.each([
+    [401, unsupported], [403, unsupported], [429, unsupported], [500, unsupported],
+    [400, { error: { message: "Invalid API key; tools are not supported." } }],
+    [400, { error: { message: "Invalid schema for tools[0].function.parameters." } }],
+    [400, { error: { message: "Unsupported parameter: tools[0].function.parameters." } }],
+    [400, { error: { code: "unsupported_parameter", param: "temperature", message: "Unsupported parameter: temperature" } }],
+    [400, { error: { message: "Invalid request body." } }],
+    [404, { error: { message: "Unknown model." } }],
+    [200, unsupported],
+  ])("does not downgrade tools for unrelated HTTP %s error %j", async (status, error) => {
+    const f = await fixture((_body, response) => {
+      response.writeHead(status as number, { "content-type": "application/json" });
+      response.end(JSON.stringify(error));
+    });
+    await f.start({ integrations: undefined });
+    expect(await f.completed()).toMatchObject({ ok: false });
+    expect(f.requests).toHaveLength(1);
+    expect(f.requests[0].tools?.map(tool => tool.function.name)).toEqual(["ask_user"]);
+  });
+
+  it("does not retry network failures or strip tools mounted by the person", async () => {
+    for (const network of [false, true]) {
+      const f = await fixture((_body, response) => {
+        if (network) return response.destroy(new Error("tools are not supported"));
+        response.writeHead(400, { "content-type": "application/json" });
+        response.end(JSON.stringify(unsupported));
+      });
+      await f.start(network ? { integrations: undefined } : {});
+      expect(await f.completed()).toMatchObject({ ok: false });
+      expect(f.requests).toHaveLength(1);
+      if (!network) expect(f.requests[0].tools?.some(tool => tool.function.name === "audit_write")).toBe(true);
+      expect(f.effects()).toEqual([]);
+    }
+  });
+
+  it("does not repeat an unsupported-tools rejection after its one plain retry", async () => {
+    const f = await fixture((_body, response) => {
+      response.writeHead(400, { "content-type": "application/json" });
+      response.end(JSON.stringify(unsupported));
+    });
+    await f.start({ integrations: undefined });
+    expect(await f.completed()).toMatchObject({ ok: false });
+    expect(f.requests).toHaveLength(2);
+    expect(f.requests[1]).not.toHaveProperty("tools");
+  });
+
+  it("does not retry a streamed error after partial output", async () => {
+    const f = await fixture((_body, response) => {
+      sse(response, [chunk({ content: "Already started." }), unsupported]);
+    });
+    await f.start({ integrations: undefined });
+    expect(await f.completed()).toMatchObject({ ok: false });
+    expect(f.requests).toHaveLength(1);
+    expect(f.recorder.events.some(event => event.type === "content.delta")).toBe(true);
+  });
+
+  it("does not replay after a question has been answered", async () => {
+    const f = await fixture((_body, response, round) => {
+      if (round === 1) return sse(response, [chunk({ tool_calls: [toolCall("ask_user", JSON.stringify({ questions: [{ question: "Ship it?" }] }), "ask")] }, "tool_calls")]);
+      response.writeHead(400, { "content-type": "application/json" });
+      response.end(JSON.stringify(unsupported));
+    });
+    await f.start({ integrations: undefined });
+    const question = await f.recorder.until(event => event.type === "request.opened");
+    await f.instance.adapter.respondToRequest(f.threadId, question.requestId!, { behavior: "answer", message: "Yes" });
+    expect(await f.completed()).toMatchObject({ ok: false });
+    expect(f.requests).toHaveLength(2);
+    expect(f.requests[1].tools).toEqual(f.requests[0].tools);
+  });
+});
+
 describe("OpenAI-compatible computer images", () => {
   const png = "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+jBv0AAAAASUVORK5CYII=";
   it.each(["localComputer", "browser"] as const)("delivers %s screenshots after tool results and preserves approval", async (source) => {

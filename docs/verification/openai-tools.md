@@ -125,8 +125,12 @@ setting for OpenAI-compatible, Grok API, and MiniMax API instances, refuses
 changes while the instance is busy, and stores `config.tools` on that instance.
 Set `tools` back to `true` to enable discovery and execution. This affects all
 bots using the instance; use separate configured instances for models with
-different tool support. A model response or HTTP error never silently disables
-tools. No fallback replays a requested operation without its tools.
+different tool support. Configured MCP tools are never silently disabled.
+An otherwise plain turn initially offers the built-in question tool; only an
+explicit unsupported-tools HTTP 400/422 rejection permits one retry without
+that optional tool. Authentication, schema and network failures do not trigger
+this downgrade, nor does a response after any tool call. The next turn offers
+questions again. No fallback replays a requested operation without its tools.
 
 Cloud routine readiness uses the executing bot’s selected runner (including a
 thread’s model override at dispatch), rather than any available cloud engine.

@@ -528,9 +528,11 @@ const busyHoldExpired = (item: PendingDelegationItem, now: number): boolean =>
   item.busySince !== undefined && now - item.busySince >= DELEGATION_BUSY_HOLD_MAX_MS;
 
 /** The busy-hold cap in chip-ready words ("2 hours", "90 minutes"). */
-function busyHoldCapText(): string {
-  const minutes = Math.max(1, Math.round(DELEGATION_BUSY_HOLD_MAX_MS / 60_000));
-  return minutes % 60 === 0 ? `${minutes / 60} hours` : `${minutes} minutes`;
+export function busyHoldCapText(maxMs = DELEGATION_BUSY_HOLD_MAX_MS): string {
+  const minutes = Math.max(1, Math.round(maxMs / 60_000));
+  const amount = minutes % 60 === 0 ? minutes / 60 : minutes;
+  const unit = minutes % 60 === 0 ? "hour" : "minute";
+  return `${amount} ${unit}${amount === 1 ? "" : "s"}`;
 }
 
 /** Record an expired handoff. The chip goes into the source thread only

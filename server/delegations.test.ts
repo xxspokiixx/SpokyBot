@@ -13,6 +13,7 @@ import type { ModelSelection } from "./contracts.ts";
 import {
   buildDelegationFailurePrompt,
   buildDelegationRevivalPrompt,
+  busyHoldCapText,
   DELEGATION_BUSY_HOLD_MAX_MS,
   DELEGATION_TTL_MS,
   DELEGATION_WAKE_MAX_PER_WINDOW,
@@ -75,6 +76,13 @@ async function waitFor<T>(predicate: () => T | undefined | false, timeout = 2_00
     await new Promise((r) => setTimeout(r, 25));
   }
 }
+
+it.each([
+  [1_000, "1 minute"], [60_000, "1 minute"], [120_000, "2 minutes"],
+  [3_600_000, "1 hour"], [5_400_000, "90 minutes"], [7_200_000, "2 hours"],
+])("formats the configured busy-hold cap %s as %s", (duration, label) => {
+  expect(busyHoldCapText(duration as number)).toBe(label);
+});
 
 describe("queueDelegation", () => {
   let store: Store;

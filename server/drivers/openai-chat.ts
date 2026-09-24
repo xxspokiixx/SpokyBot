@@ -107,6 +107,22 @@ const usageFrom = (usage: CompletionJson["usage"]): Usage | null =>
 const asError = (value: unknown): Error =>
   value instanceof Error ? value : new Error(String(value));
 
+class UnsupportedChatToolsError extends Error {}
+
+function rejectsToolsParameter(status: number, body: string): boolean {
+  if (status !== 400 && status !== 422) return false;
+  let envelope: Record<string, unknown> | undefined;
+  try { envelope = object(JSON.parse(body)); } catch { return false; }
+  const error = object(envelope?.error);
+  if (error?.param === "tools" && error.code === "unsupported_parameter") return true;
+  const message = error?.message ?? envelope?.error;
+  return typeof message === "string" && (
+    /\bdoes not support (?:tools|tool calling|function calling)(?:[.!]?$|[.!]?\s)/i.test(message) ||
+    /\b(?:tools|tool calling|function calling) (?:is|are) not supported\b/i.test(message) ||
+    /^(?:unsupported|unknown|unrecognized) (?:parameter|field):?\s*['"]?tools['"]?[.!]?$/i.test(message.trim())
+  );
+}
+
 /** Shared runtime for the three providers that speak OpenAI chat completions. */
 export function createOpenAIChatRuntime<Config>(options: RuntimeOptions<Config>): ProviderInstance {
   const { input } = options;
@@ -166,7 +182,9 @@ export function createOpenAIChatRuntime<Config>(options: RuntimeOptions<Config>)
       });
       if (!response.ok) {
         const body = await response.text().catch(() => "");
-        throw new Error(`${options.httpErrorLabel} HTTP ${response.status}${body ? `: ${body.slice(0, 200)}` : ""}`);
+        const message = `${options.httpErrorLabel} HTTP ${response.status}${body ? `: ${body.slice(0, 200)}` : ""}`;
+        if (rejectsToolsParameter(response.status, body)) throw new UnsupportedChatToolsError(message);
+        throw new Error(message);
       }
 
       if (!stream || response.headers.get("content-type")?.includes("application/json")) {
@@ -377,6 +395,7 @@ export function createOpenAIChatRuntime<Config>(options: RuntimeOptions<Config>)
       const seenCalls = new Set<string>();
       try {
         tools = await mountChatTools(options.tools === false ? undefined : turn.integrations, abort.signal, options.computerUse);
+        let optionalQuestionOnly = options.tools !== false && tools.definitions.length === 0;
         // The runtime's one built-in tool rides the same list: ask_user is
         // how a chat-completions engine reaches a person. An MCP server that
         // squats the name cannot shadow it — dispatch intercepts the name
@@ -421,6 +440,15 @@ export function createOpenAIChatRuntime<Config>(options: RuntimeOptions<Config>)
             } catch (value) {
               const error = asError(value);
               const verdict = classifyError(error);
+              // Only our optional question changed a previously plain request.
+              // A structured parameter rejection has executed nothing; never
+              // downgrade mounted tools, streamed output or a handled call.
+              if (optionalQuestionOnly && round === 0 && !streamed && !seenCalls.size && !abort.signal.aborted &&
+                  error instanceof UnsupportedChatToolsError && verdict.reason === "invalid_request") {
+                optionalQuestionOnly = false;
+                tools.definitions.length = 0;
+                continue;
+              }
               // Once a call has been handled, never replay it through a turn retry.
               if (options.retryScale === undefined || abort.signal.aborted || streamed || seenCalls.size ||
                   error instanceof ChatProtocolError || !verdict.transient || attempt >= RETRY_MAX_ATTEMPTS - 1) throw error;
