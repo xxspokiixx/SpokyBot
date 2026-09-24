@@ -189,6 +189,17 @@ export interface InstalledPackageMetadata {
   requiredApps: Array<{ slug: string; label: string; reason: string; optional?: boolean }>;
 }
 
+/** One service's connector tool grant: `"*"` widens to every tool on the
+ * service, an explicit list names exact tools. */
+export interface ConnectorToolGrant {
+  tools: "*" | string[];
+}
+
+/** Lowercased Composio service slug, e.g. `gmail`. */
+export const CONNECTOR_SLUG_PATTERN = /^[a-z0-9][a-z0-9_-]{0,80}$/;
+/** Composio tool names are upper-snake, e.g. `GMAIL_SEND_EMAIL`. */
+export const CONNECTOR_TOOL_NAME_PATTERN = /^[A-Z][A-Z0-9_]{0,127}$/;
+
 /** A bot as a client may see it. Wire form: no provider session
  * bookkeeping (resumeCursors), no elevation journal (approvalGrant), no
  * settlement receipts (lastProfileRequestId, lastTeamSetupReceipt); the
@@ -263,6 +274,11 @@ export interface WireBot {
   peers?: string[];
   /** Whether this bot may use the workspace's connected apps. */
   composio?: boolean;
+  /** Which connected-app tools this bot may call, by service slug. Absent
+   * defers to the legacy `composio` boolean above (unset/true = every tool,
+   * false = none); an explicit `{}` grants no tools. Grants never travel in
+   * shareable exports and imported bots always land with none. */
+  connectorTools?: Record<string, ConnectorToolGrant>;
   /** Whether this bot gets the app's built-in browser. */
   browser?: boolean;
   /** Which of the app-wide MCP servers this bot mounts, by name. */
