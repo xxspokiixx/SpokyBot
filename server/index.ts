@@ -7350,6 +7350,15 @@ async function startTurn(
 
   void (async () => {
     try {
+      // Readiness can wait on the network. Admit the task first so its busy
+      // state, Stop action and watchdog own that wait just like VM setup.
+      if (opts?.runOn === "cloud") {
+        const readiness = await cloudRoutineReadiness(botId, threadId);
+        if (!directTurnClaimIsCurrent(bot.id, dispatchClaimId, threadId)) {
+          throw new DirectTurnSetupCancelled("turn stopped during cloud readiness");
+        }
+        if (!readiness.ready) throw new Error(readiness.reason ?? "The cloud computer is not ready");
+      }
       await compactConversation({ bot, threadId, generation: dispatchClaimId, instance, model,
         excludedIds: new Set([userMessage.id, ...(opts?.excludeMessageIds ?? [])]), manual: opts?.compactOnly === true });
       if (!directTurnClaimIsCurrent(bot.id, dispatchClaimId, threadId)) throw new DirectTurnSetupCancelled("turn stopped during context setup");
@@ -8552,10 +8561,6 @@ routines = new RoutineManager({
     }
   },
   startTurn: async (botId, threadId, prompt, runOn, triggerSource, onDispatchError) => {
-    if (runOn === "cloud") {
-      const readiness = await cloudRoutineReadiness(botId, threadId);
-      if (!readiness.ready) throw new Error(readiness.reason ?? "The cloud computer is not ready");
-    }
     await startTurn(botId, prompt, { threadId, runOn, automationSource: triggerSource, onDispatchError });
   },
   startGoal: async (groupId, threadId, prompt, coordinatorBotId, runId, _onDispatchError) => {

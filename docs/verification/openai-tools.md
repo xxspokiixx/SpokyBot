@@ -138,3 +138,7 @@ the bot’s own Box; a missing assigned team computer requires explicit repair.
 Run `pnpm exec vitest run server/routine-requests.test.ts server/openai-box.e2e.test.ts`
 for target selection and the isolated direct/group/scheduled bridge fixture,
 including credentials removed after scheduling and a Box outage at dispatch.
+The fixture also holds the Box readiness response: the execution stays busy,
+`wait` cannot report it settled, and Stop prevents dispatch when the response
+arrives. Readiness is part of generation-owned setup, not an untracked wait
+before turn admission.
