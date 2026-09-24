@@ -2506,8 +2506,15 @@ if (browserCleanupReferencesReconciled) browserCleanup.startPending();
  * than the desktop window did. Stripped here rather than at each call site
  * so a new broadcast cannot forget. */
 let activeCoordinationForThread = (_threadId: string): boolean => false;
-const wireTask = (task: TaskRecord): WireTask =>
-  ({ ...toWireTask(task), waitingForTeammates: activeCoordinationForThread(task.threadId) && !task.busy });
+const wireTask = (task: TaskRecord): WireTask => {
+  // Time-based snoozes heal on read against the server clock — no client
+  // timer, no device skew. The 0 sentinel ("until new activity") is not a
+  // time and survives reads; only a wake event in the store clears it.
+  const { snoozedUntil, ...base } = toWireTask(task);
+  const coordinated = { ...base, waitingForTeammates: activeCoordinationForThread(task.threadId) && !task.busy };
+  const asleep = snoozedUntil === 0 || (snoozedUntil !== undefined && snoozedUntil > Date.now());
+  return asleep ? { ...coordinated, snoozedUntil } : coordinated;
+};
 
 const wireBot = (bot: BotRecord): WireBot => {
   const { resumeCursors: _resumeCursors, tasks, approvalGrant, lastProfileRequestId: _lastProfileRequestId, lastTeamSetupReceipt: _lastTeamSetupReceipt, ...rest } = bot;
@@ -3673,6 +3680,13 @@ function finishGroupTurnOperation(groupId: string, operation: GroupTurnOperation
   if (operations?.size === 0) groupTurnOperations.delete(groupId);
   const group = store.group(groupId);
   if (group) broadcast({ kind: "group", group: publicGroupState(group) });
+  // The operation can outlive the last member's turn.completed: the fold
+  // releases the speaker, but this map entry is what holds a 1:1 message
+  // queued behind the room (reason "group-turn"), and no later event fires
+  // once the run settles. Drain here, at the true end — the drain's own
+  // block check re-reads activeGroupTurnForBot, so a replacement operation
+  // begun in the interim still keeps its ground.
+  drainQueuedSends();
   // A follow-up sent while this operation was running belongs to the
   // harness, not whichever composer happened to be mounted. Hand the next
   // one to the ordinary channel runner as soon as the channel is truly idle.
@@ -4323,7 +4337,9 @@ async function answerRequest(
     ? thread.find((m) => m.id === cardMessageId)
     : thread.find((m) => m.card?.requestId === requestId);
   const card = cardMessage?.card;
-  const instance = registry.get(instanceId);
+  // Cloud routing and a model change can differ from the bot's current
+  // settings. The live turn owns this question, just as it owns Stop/steer.
+  const instance = runningTurnEngines.get(threadId) ?? registry.get(instanceId);
   let outcome: RequestOutcome = "unavailable";
   if (instance) {
     try {
@@ -4551,6 +4567,8 @@ bus.subscribe((event: RuntimeEvent) => {
   if (shouldIgnoreProviderEvent(event)) return;
   if (event.type === "request.opened") watchdog.setWaitingOnHuman(event.threadId, true);
   else if (event.type === "request.resolved") watchdog.setWaitingOnHuman(event.threadId, false);
+  else if (event.type === "turn.wait_started") watchdog.setWaitingOnComputer(event.threadId, true);
+  else if (event.type === "turn.wait_ended") watchdog.setWaitingOnComputer(event.threadId, false);
   else if (event.type === "turn.completed") {
     watchdog.settle(event.threadId);
     revokeInternalCapabilityForProviderEvent(event);
@@ -5777,7 +5795,9 @@ bus.subscribe((event: RuntimeEvent) => {
           options: event.choices?.length ? event.choices : permission ? ["Allow", "Deny"] : [],
           requestId: event.requestId,
           tool: permission ? event.tool : undefined,
-          questionRequest: questions ? { version: 1, questions } : undefined,
+          questionRequest: questions
+            ? { version: 1, questions, ...(event.origin === "output" ? { origin: "output" as const } : {}) }
+            : undefined,
           // the provider can keep an allow for its session; the app keeps
           // no grant of its own for a provider's tool
           allowSession: permission && event.allowSession && !event.requiresExplicitApproval ? true : undefined,
@@ -5803,6 +5823,7 @@ bus.subscribe((event: RuntimeEvent) => {
         summary: event.summary,
         decision: "card-shown",
         source: !permission ? "question" : verdict ? verdict.source : "no-grant",
+        origin: !permission && event.origin === "output" ? "output" : undefined,
         unattended: unattended || undefined,
       });
       // Notify from HERE, not from a separate subscriber on request.opened:
@@ -6804,8 +6825,12 @@ function drainQueuedSends() {
  * available. Reuse the existing cancellable, idempotent composer queue. */
 async function startOrQueueDirectMessage(botId: string, threadId: string, text: string, replyTo?: Message, sendId?: string, sender?: ResolvedSender, trigger?: UsageTrigger) {
   const capacity = botAtThreadCapacity(botId);
-  if (capacity || threadBusy(botId, threadId) || parksBehindCoordination(botId, threadId)) {
-    const reason = capacity ? "capacity" as const : undefined;
+  // A room turn holds the bot exactly like the sibling opened-thread queue
+  // below: the drain's own block check waits it out, so the words queue
+  // here rather than bounce off startTurn's 409.
+  const groupTurn = activeGroupTurnForBot(botId);
+  if (capacity || threadBusy(botId, threadId) || groupTurn || parksBehindCoordination(botId, threadId)) {
+    const reason = capacity ? "capacity" as const : groupTurn ? "group-turn" as const : undefined;
     const queued = queueSteeredMessage(botId, threadId, text, {
       replyToId: replyTo?.id,
       sendId,
@@ -6839,8 +6864,14 @@ async function startOrQueueOpenedThread(
   // A room turn holds the bot too (startTurn refuses a direct turn during
   // one); the drain's own block check already waits for it, so the words
   // queue here rather than bounce.
-  if (botAtThreadCapacity(botId) || activeGroupTurnForBot(botId)) {
-    queueSteeredMessage(botId, threadId, text, { reason: "capacity", unattended, peerAsk });
+  const capacity = botAtThreadCapacity(botId);
+  const groupTurn = activeGroupTurnForBot(botId);
+  if (capacity || groupTurn) {
+    queueSteeredMessage(botId, threadId, text, {
+      reason: capacity ? "capacity" : "group-turn",
+      unattended,
+      peerAsk,
+    });
     return { state: "queued", position: queuedThreadPosition(botId, threadId) ?? 1 };
   }
   try {
@@ -7231,7 +7262,7 @@ async function startTurn(
   // an edit hands us its already-branched user message; a plain send appends
   let userMessage = opts?.userMessage;
   if (opts?.editedMessageId) {
-    const edited = store.branchMessage(threadId, opts.editedMessageId, text);
+    const edited = store.branchMessage(threadId, opts.editedMessageId, text, opts.sendId);
     if (!edited) throw Object.assign(new Error("only a user text message can be edited"), { status: 400 });
     store.patchTask(bot.id, threadId, { rewound: true });
     userMessage = edited;
@@ -7299,6 +7330,12 @@ async function startTurn(
     if (source) computerSelectionTurns.set(threadId, { generation: dispatchClaimId, botId: bot.id, source, text });
   }
   store.setTaskActivity(bot.id, threadId, "working");
+  // Watch from admission, not dispatch: a turn can wedge in setup — context
+  // compaction that never returns, a hung browser or VM mount — long before
+  // any provider event exists, and a watch armed only at dispatch never saw
+  // those. Every setup exit below settles or throws into the catch, which
+  // settles under the same generation ownership it already enforces.
+  watchdog.watch(threadId, bot.id);
   // A closed thread that gets a new turn is open again: the person (or the
   // opener) picked it back up, so its row returns to the sidebar and
   // list_threads stops calling it closed. No-op on an open thread.
@@ -7313,6 +7350,15 @@ async function startTurn(
 
   void (async () => {
     try {
+      // Readiness can wait on the network. Admit the task first so its busy
+      // state, Stop action and watchdog own that wait just like VM setup.
+      if (opts?.runOn === "cloud") {
+        const readiness = await cloudRoutineReadiness(botId, threadId);
+        if (!directTurnClaimIsCurrent(bot.id, dispatchClaimId, threadId)) {
+          throw new DirectTurnSetupCancelled("turn stopped during cloud readiness");
+        }
+        if (!readiness.ready) throw new Error(readiness.reason ?? "The cloud computer is not ready");
+      }
       await compactConversation({ bot, threadId, generation: dispatchClaimId, instance, model,
         excludedIds: new Set([userMessage.id, ...(opts?.excludeMessageIds ?? [])]), manual: opts?.compactOnly === true });
       if (!directTurnClaimIsCurrent(bot.id, dispatchClaimId, threadId)) throw new DirectTurnSetupCancelled("turn stopped during context setup");
@@ -7322,6 +7368,7 @@ async function startTurn(
         settleDirectFollowup(dispatchClaimId);
         releaseTurnResources(resourceOwner);
         store.setTaskActivity(bot.id, threadId, "idle");
+        watchdog.settle(threadId);
         directTurnBots.delete(threadId);
         retryDelegationsWaitingOn(bot.id);
         drainQueuedSends();
@@ -8032,7 +8079,6 @@ async function startTurn(
       if (!markDirectTurnDispatching(bot.id, dispatchClaimId, threadId)) {
         throw new DirectTurnSetupCancelled("turn stopped before dispatch");
       }
-      watchdog.watch(threadId, bot.id);
       const computerPromptKind: ComputerPromptKind | null =
         computerKind === "vm"
           ? localVmMode(cfg) === "per-bot" ? "vm-private" : "vm-shared"
@@ -8515,10 +8561,6 @@ routines = new RoutineManager({
     }
   },
   startTurn: async (botId, threadId, prompt, runOn, triggerSource, onDispatchError) => {
-    if (runOn === "cloud") {
-      const readiness = await cloudRoutineReadiness(botId, threadId);
-      if (!readiness.ready) throw new Error(readiness.reason ?? "The cloud computer is not ready");
-    }
     await startTurn(botId, prompt, { threadId, runOn, automationSource: triggerSource, onDispatchError });
   },
   startGoal: async (groupId, threadId, prompt, coordinatorBotId, runId, _onDispatchError) => {
@@ -9411,6 +9453,8 @@ async function runGroupMemberTurn(
   let retainRoomVmLease = false;
   let roomSpeaker: { botId: string; name: string; color: string } | undefined;
   let providerDispatched = false;
+  let setupStalled = false;
+  let unregisterSetupStall = () => {};
   // The speaker's own This computer / Cloud mount, and what it must give back.
   let roomComputerKind: "local" | "vps" | "box" | null = null;
   let roomVpsBotId: string | null = null;
@@ -9612,6 +9656,22 @@ async function runGroupMemberTurn(
   groupSpeakers.set(threadId, roomSpeaker);
   store.patchGroup(readyGroup.id, { busyBotId: bot.id });
   orchestration?.onClaimed?.();
+  // The stall completion handler only exists once the provider turn runs
+  // (registered at dispatch below), but this watch is armed at claim. Latch
+  // a stall that fires during setup — browser, box, and VM mounts can all
+  // wedge — so the dispatch site completes the turn instead of launching a
+  // provider turn the person was already told was stopped. The finally
+  // below unregisters the latch on every other exit.
+  setupStalled = false;
+  unregisterSetupStall = roomStallCompletions.register(threadId, () => {
+    setupStalled = true;
+  });
+  // Watch from claim, not provider dispatch: room setup (connected-app
+  // discovery, browser, box, and VM mounts) can wedge before any provider
+  // event exists. The exits between here and dispatch either throw into the
+  // finally's guarded cleanup or return through the revalidation block,
+  // both of which settle the watch.
+  watchdog.watch(threadId, bot.id);
 
   // Connected-app discovery above can yield for a network round trip. A
   // profile may be removed, or the browser feature switched off, during that
@@ -9884,6 +9944,7 @@ async function runGroupMemberTurn(
       store.setActivity(bot.id, "idle");
       retryDelegationsWaitingOn(bot.id);
     }
+    watchdog.settle(threadId);
     return false;
   }
   let replyText = "";
@@ -9941,11 +10002,24 @@ async function runGroupMemberTurn(
       else if (e.type === "request.resolved") deadline.setWaitingOnHuman(false);
     });
     deadline.start();
+    // Swap the setup latch for the real completion handler. The swap is
+    // synchronous with the dispatch below, so no stall can fall between
+    // them. A stall latched during setup completes the turn here without a
+    // provider turn: the stopped message is already on the thread, and the
+    // watchdog's bounded cleanup owns releasing the claim.
+    unregisterSetupStall();
+    if (setupStalled) {
+      // No provider turn was launched, so there is no ambiguous event
+      // window to quarantine: marking a cancelled handshake here would
+      // strand the next turn behind its TTL for no benefit. The readiness
+      // stop path above skips the mark for the same reason.
+      finish("stalled");
+      return;
+    }
     unregisterStall = roomStallCompletions.register(threadId, () => {
       abandonProviderTurn();
       finish("stalled");
     });
-    watchdog.watch(threadId, bot.id);
     onProviderHandshakeStarted?.();
     providerDispatched = true;
     runningTurnEngines.set(threadId, instance);
@@ -10187,11 +10261,13 @@ async function runGroupMemberTurn(
   } finally {
     // Covers connector/setup failures, cancellation before dispatch, and all
     // other early returns that never produce a provider terminal event.
+    unregisterSetupStall();
     revokeInternalCapabilityGeneration(threadId, internalGeneration);
     roomHandoffs.sourceSettled(internalGeneration, roomHandoffSourceSucceeded);
     if (!retainRoomVmLease) releaseRoomVmLease();
     if (!providerDispatched && roomSpeaker && groupSpeakers.get(threadId) === roomSpeaker) {
       groupSpeakers.delete(threadId);
+      watchdog.settle(threadId);
       if (store.group(group.id)?.busyBotId === bot.id) store.patchGroup(group.id, { busyBotId: null });
       if (store.bot(bot.id)?.busy) {
         store.setActivity(bot.id, "idle");
@@ -17748,16 +17824,28 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
       const bot = requestedTaskBot(m[1], body.threadId);
       const text = String(body.text ?? "").trim();
       if (!text) return json(res, 400, { error: "text required" });
+      const threadMessages = store.messagesFor(bot.threadId);
+      const source = threadMessages.find((msg) => msg.id === messageId);
+      if (!source || source.role !== "user" || source.kind !== "text") {
+        return json(res, 404, { error: "only user messages can be edited" });
+      }
+      // The client's id for this edit. A retry of an edit the server already
+      // forked answers with that fork instead of forking (and rerunning) again.
+      // Checked before the busy guard: that fork's own turn is what is busy.
+      const sendId = parseSendId(body.sendId);
+      if (sendId) {
+        const accepted = acceptedSendMatch(threadMessages, sendId, text, source.replyToId);
+        if (accepted.kind === "conflict" || (accepted.kind === "match" && (accepted.message.parentId ?? null) !== (source.parentId ?? null))) {
+          return json(res, 409, { error: "sendId already belongs to another message" });
+        }
+        if (accepted.kind === "match") return json(res, 202, { ok: true, message: accepted.message });
+      }
       // everything from here down is synchronous, so two racing edits can
       // never both get past this check: startTurn flips busy before the
       // next request is handled
       if (threadBusy(bot.id, bot.threadId)) return json(res, 409, { error: "the thread is working — stop it before editing" });
       if (phoneSecretSubmissions.hasThread(bot.threadId)) {
         return json(res, 409, { error: "this task is securely saving a credential — try again when it finishes" });
-      }
-      const source = store.messagesFor(bot.threadId).find((msg) => msg.id === messageId);
-      if (!source || source.role !== "user" || source.kind !== "text") {
-        return json(res, 404, { error: "only user messages can be edited" });
       }
       if (!registry.get(bot.modelSelection.instanceId)) {
         return json(res, 409, {
@@ -17770,7 +17858,7 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
       // startTurn admits the rerun before branching. A shared-resource or
       // concurrency-limit refusal must leave the original transcript intact.
       const replyTo = source.replyToId ? resolveReplyTarget(bot.threadId, source.replyToId) : undefined;
-      const message = await startTurn(bot.id, text, { threadId: bot.threadId, editedMessageId: messageId, replyTo, trigger: usageTriggerFor(auth) });
+      const message = await startTurn(bot.id, text, { threadId: bot.threadId, editedMessageId: messageId, replyTo, sendId, trigger: usageTriggerFor(auth) });
       return json(res, 202, { ok: true, message });
     }
 
@@ -18118,7 +18206,7 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
       if (!body || typeof body !== "object" || Array.isArray(body)) return json(res, 400, { error: "body must be a JSON object" });
       const current = store.projectBotForTask(m[1], m[2]);
       if (!current) return json(res, 404, { error: "no such task" });
-      const allowed = new Set(["title", "projectId", "modelSelection", "updateBotDefault", "resetApprovalToAsk", "approvalMode", "autoApprove", "requireAvailableModel", "pinnedMessageId", "acknowledgeLocalAuto", "archivedAt", "pinned", "surface"]);
+      const allowed = new Set(["title", "projectId", "modelSelection", "updateBotDefault", "resetApprovalToAsk", "approvalMode", "autoApprove", "requireAvailableModel", "pinnedMessageId", "acknowledgeLocalAuto", "archivedAt", "pinned", "snoozedUntil", "surface"]);
       if (Object.keys(body).some((key) => !allowed.has(key))) return json(res, 400, { error: "unsupported thread setting" });
       for (const key of ["requireAvailableModel", "acknowledgeLocalAuto", "updateBotDefault", "resetApprovalToAsk"] as const) {
         if (body[key] !== undefined && typeof body[key] !== "boolean") return json(res, 400, { error: `${key} must be a boolean` });
@@ -18147,6 +18235,11 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
       if (body.pinned !== undefined) {
         if (typeof body.pinned !== "boolean") return json(res, 400, { error: "pinned must be a boolean" });
         patch.pinned = body.pinned ? true : undefined;
+      }
+      if (body.snoozedUntil !== undefined) {
+        if (body.snoozedUntil === null) patch.snoozedUntil = undefined;
+        else if (typeof body.snoozedUntil === "number" && Number.isFinite(body.snoozedUntil) && body.snoozedUntil >= 0) patch.snoozedUntil = body.snoozedUntil;
+        else return json(res, 400, { error: "snoozedUntil must be a timestamp, 0 to snooze until activity, or null to wake now" });
       }
       if (body.surface !== undefined) {
         if (threadBusy(current.id, current.threadId)) return json(res, 409, { error: "Stop this thread before changing its computer destination." });
