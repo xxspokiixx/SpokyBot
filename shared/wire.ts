@@ -325,7 +325,10 @@ export interface WireMessage {
   };
   /** Durable provider output stored by the harness; renderers receive only
    * the allowlisted /api/attachments URL. */
-  attachments?: Array<{ kind: "image"; path: string; mime: string }>;
+  attachments?: Array<
+    | { kind: "image"; path: string; mime: string }
+    | { kind: "audio"; path: string; mime: string; durationMs?: number }
+  >;
   card?: OptionCardData;
   connector?: ConnectorCardData;
   secret?: SecretRequestCardData;
