@@ -113,6 +113,7 @@ public struct SkillExecutionReceiptView: View {
             ProgressView()
                 .controlSize(.mini)
                 .tint(.orange)
+                .frame(width: 12, height: 12)
         default:
             Image(systemName: "circle.dotted")
                 .font(.system(size: 11))
