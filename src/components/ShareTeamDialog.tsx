@@ -21,6 +21,7 @@ import {
   type ShareView,
 } from "@/lib/team-share";
 import { api, useStore } from "@/state/store";
+import type { NewBotDefaults } from "../../shared/new-bot-defaults";
 
 /** What the file will hold, counted from the server's own dry run, so the
  * numbers are exactly what Save file writes. Pure, for tests. */
@@ -46,6 +47,7 @@ export function ShareTeamContents({ preview, includeMemory, localSkips }: {
     [t("teamShare.part.connections"), String(counts.connections)],
     [t("teamShare.part.pictures"), String(pictures)],
     [t("teamShare.part.notes"), includeMemory ? String(notes) : t("teamShare.none")],
+    ...(counts.presets ? [[t("teamShare.part.presets"), `${counts.presets} · ${preview.summary.presetNames.join(", ")}`] as [string, string]] : []),
   ];
   const skipped = [...localSkips, ...preview.skipped.map((skip) => describeSkip(skip, preview.document))];
   return (
@@ -139,6 +141,10 @@ export function ShareTeamDialog({ team, onClose }: { team: string; onClose: () =
   // Pictures and starter notes start ticked (SHARE_DIALOG_DEFAULTS).
   const [includePictures, setIncludePictures] = useState<boolean>(SHARE_DIALOG_DEFAULTS.includePictures);
   const [includeMemory, setIncludeMemory] = useState<boolean>(SHARE_DIALOG_DEFAULTS.includeMemory);
+  // New bot defaults are personal until shared: off unless ticked.
+  const [includePreset, setIncludePreset] = useState(false);
+  // The defaults' picture, prepared the first time the box is ticked.
+  const [presetPicture, setPresetPicture] = useState<{ dataUrl?: string } | null>(null);
   // null = "all": whatever fits, as the server decides; a Set = exactly these.
   const [skillChoice, setSkillChoice] = useState<Set<string> | null>(null);
   const [pictures, setPictures] = useState<{ avatars: Record<string, string>; skipped: string[] } | null>(null);
@@ -167,6 +173,16 @@ export function ShareTeamDialog({ team, onClose }: { team: string; onClose: () =
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
+  useEffect(() => {
+    if (!includePreset || presetPicture) return;
+    let cancelled = false;
+    void api<{ defaults: NewBotDefaults }>("/api/bot-defaults")
+      .then(({ defaults }) => preparePictures([{ id: "defaults", avatarUrl: defaults.profile.avatarUrl, avatarCrop: defaults.profile.avatarCrop }]))
+      .then((prepared) => { if (!cancelled) setPresetPicture({ dataUrl: prepared.avatars.defaults }); })
+      .catch(() => { if (!cancelled) setPresetPicture({}); });
+    return () => { cancelled = true; };
+  }, [includePreset, presetPicture]);
+
   const choices = useCallback((dryRun: boolean): ShareChoices => ({
     team,
     name,
@@ -177,12 +193,15 @@ export function ShareTeamDialog({ team, onClose }: { team: string; onClose: () =
     skills: requestedSkills(skillChoice, available),
     includeMemory,
     ...(includePictures && pictures ? { avatars: pictures.avatars } : {}),
+    ...(includePreset ? { includeDefaultsPreset: true, ...(includePictures && presetPicture?.dataUrl ? { presetAvatar: presetPicture.dataUrl } : {}) } : {}),
     dryRun,
-  }), [team, name, tagline, summary, release, notes, skillChoice, available, includeMemory, includePictures, pictures]);
+  }), [team, name, tagline, summary, release, notes, skillChoice, available, includeMemory, includePictures, pictures, includePreset, presetPicture]);
 
   // Live counts: re-run the server's dry run whenever what goes in changes.
   useEffect(() => {
     if (!pictures) return;
+    // No counts (and no Save) until the preset's picture is ready to go in.
+    if (includePreset && !presetPicture) { setView((current) => ({ ...current, preview: null })); return; }
     const id = ++request.current;
     const all = skillChoice === null;
     const timer = window.setTimeout(() => {
@@ -200,7 +219,7 @@ export function ShareTeamDialog({ team, onClose }: { team: string; onClose: () =
     return () => window.clearTimeout(timer);
     // Text fields do not change the counts; only what goes in does.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [pictures, skillChoice, includeMemory, includePictures]);
+  }, [pictures, skillChoice, includeMemory, includePictures, includePreset, presetPicture]);
 
   const save = async () => {
     if (saving) return;
@@ -281,6 +300,11 @@ export function ShareTeamDialog({ team, onClose }: { team: string; onClose: () =
               </label>
               <p className="pl-6 text-[12px] leading-relaxed text-ink-secondary">{notesLine(includeMemory)}</p>
               <ShareSkillChoices available={available ?? []} ticked={ticked} counted={available !== null} onToggle={toggleSkill} />
+              <label className="flex items-center gap-2 pt-1">
+                <input type="checkbox" className="size-4 accent-accent" checked={includePreset} onChange={(event) => setIncludePreset(event.target.checked)} />
+                {t("teamShare.includePreset")}
+              </label>
+              {includePreset && <p className="pl-6 text-[12px] leading-relaxed text-ink-secondary">{t("teamShare.presetHint")}</p>}
             </fieldset>
 
             <div className="mt-4 grid gap-3 sm:grid-cols-2">

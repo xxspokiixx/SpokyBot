@@ -56,8 +56,10 @@ their copies stay.
 ## Withdrawn releases
 
 When the catalog lists an added release under `withdrawnReleases`, its
-skills are switched off, its routines are paused, the install is marked
-**withdrawn**, and the bot's provenance line adds "Withdrawn by <publisher>".
+skills are switched off (on its own bots, where an offered skill was added,
+and on bots someone made from its presets), its routines are paused, its
+presets leave New bot, the install is marked **withdrawn**, and the bot's
+provenance line adds "Withdrawn by <publisher>".
 This happens once, on the change. If you switch something back on
 afterwards, it stays on. A package that disappears from the catalog changes
 nothing: copies stay.
@@ -122,7 +124,14 @@ contains names, paths or error text.
 | `state.json` | runtime | The index of what was added (contract §3.4), plus `kind` and `name` per install. Mode 0600. |
 | `blobs/<sha256>.json` | Electron | Release bytes, checked on every read. |
 | `catalog.json` | Electron | The last applied catalog body. The runtime does not read it. |
-| `presets.json` | presets work (W2-4) | Preset bots. |
+| `presets.json` | runtime (`server/presets.ts`) | Preset bots, from files and from installs here ([presets.md](presets.md)). An install's presets are listed under `presets` in `state.json`. |
+
+Preset rows in `presets.json` carry their install id too. They are how a
+package of presets and skills (no bots) is recognized again if its
+`state.json` entry is lost, and they give an adopted install its `presets`
+back. They never keep a team added, and neither does a bot someone made from
+one of its presets, so a team the person deleted can be added again; its
+presets are then refreshed in place, never duplicated.
 
 The records are the source of truth. `state.json` is rebuilt from them in
 these cases:
@@ -164,8 +173,9 @@ These arrive in v1.1 with no format change:
 - honouring `offAction: "remove"`;
 - the Admin Withdraw button.
 
-Preset bots from a package are listed and not added yet, because they
-belong to the presets work.
+Preset bots from a package go to **New bot** under **From {Organization}**,
+and a bot made from one gets their skills switched on. A preset from a
+withdrawn release is no longer offered. See [presets.md](presets.md).
 
 See [verification/org-library.md](verification/org-library.md) for how this
 is tested.

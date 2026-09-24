@@ -25,6 +25,7 @@ import {
   ROOM_PARTS, roomReleaseValues, ROUTINE_PARTS, routineReleaseValues, scheduleValue, sha256Hex, TEAM_PARTS,
   type AgentPart, type PartPair, type TeamPart,
 } from "./package-parts.ts";
+import type { PresetRegistry } from "./presets.ts";
 import type { Routine, RoutineInput, RoutineManager } from "./routines.ts";
 import type { SkillListing, SkillPackageStamp } from "./skills.ts";
 import type { BotRecord, GroupRecord, InstalledPackageMetadata, Store } from "./store.ts";
@@ -34,6 +35,8 @@ import { decodeBase64, type PackageAgent, type PackageDocument, type PackageTrus
 import type { BotVisibility, ModelSelection } from "../shared/wire.ts";
 
 export const NO_BOTS_MESSAGE = "This package has no bots. Add it from your organization's shelf, or update OpenMausBot.";
+/** A file with skills only: a file never adds a skill without a bot or a preset to hold it. */
+export const NO_PRESETS_MESSAGE = "This file has no bots or preset bots to add. Its skills can be added from your organization's shelf.";
 
 export type PackageImportErrorCode = "no_bots" | "invalid_package";
 
@@ -54,7 +57,8 @@ export type ImportSkipReason =
   | "connection_refused_by_policy"
   | "too_many_connections"
   | "connection_invalid"
-  | "run_limit_adjusted";
+  | "run_limit_adjusted"
+  | "too_many_presets";
 
 export interface ImportSkip { part: string; reason: ImportSkipReason }
 
@@ -86,6 +90,9 @@ export interface PackageImportDeps {
   broadcast?: (event: { kind: "bot"; bot: BotRecord } | { kind: "group"; group: GroupRecord }) => void;
   /** The installation's default model: packages never carry one. */
   defaultSelection: () => ModelSelection;
+  /** Preset bots (presets.ts). Absent, presets are listed as skipped and a
+   * package without bots is refused, as before presets existed. */
+  presets?: PresetRegistry;
 }
 
 export interface OrgImportContext {
@@ -143,6 +150,8 @@ export interface PackageImportResult {
   brief: boolean;
   /** Starter note files written. */
   notes: number;
+  /** Preset bots now offered in New bot (new, or already here from the same file). */
+  presets?: Array<{ id: string; key: string; name: string }>;
 }
 
 export type ImportResult = PackageImportResult | { alreadyAdded: true; installId: string };
@@ -192,7 +201,8 @@ export function importPackageDocument(
 ): ImportResult {
   const pkg = document.package;
   const library = !pkg.agents.length || !pkg.team;
-  if (library && options.trust !== "org") throw new PackageImportError("no_bots", NO_BOTS_MESSAGE);
+  // A library package (skills and presets, no bots) from a file needs the preset store.
+  if (library && options.trust !== "org" && !deps.presets) throw new PackageImportError("no_bots", NO_BOTS_MESSAGE);
   if (options.trust === "org") {
     const org = options.org;
     if (!org) throw new PackageImportError("invalid_package", "This package is missing its organization details.");
@@ -208,24 +218,46 @@ export function importPackageDocument(
     if (!deps.skills.installOrg || !deps.routines.stampInstalledPackage) {
       throw new PackageImportError("invalid_package", "This installation cannot add packages from an organization.");
     }
-    if (deps.store.bots.some((bot) => bot.installedPackage?.installId === org.installId) ||
+    // A bot someone made from one of the install's presets carries its
+    // install id too, but it is theirs, not one of the package's records;
+    // preset rows are not records either. Re-adding a removed team, or
+    // retrying after a crash, re-registers its presets in place (presets.ts).
+    if (deps.store.bots.some((bot) => bot.installedPackage?.installId === org.installId && !bot.installedPackage.presetKey) ||
         deps.store.groups.some((group) => group.installedPackage?.installId === org.installId)) {
       return { alreadyAdded: true, installId: org.installId };
     }
-    // A library package (skills and presets, no team) creates no records:
-    // its skills are offered under Bot → Skills, and the organization
-    // library keeps the index of what it offers.
+    // A library package (skills and presets, no team) creates no bots:
+    // its skills are offered under Bot → Skills, its presets go to New bot,
+    // and the organization library keeps the index of what it offers.
     if (library) {
+      const registered = deps.presets?.register(document, { source: "org", installId: org.installId, org });
       return {
         alreadyAdded: false, installId: org.installId, name: pkg.name, section: "", bots: [], groups: [], routines: [],
         offeredSkills: (pkg.skills?.entries ?? []).map((skill) => skill.name), connections: [],
-        skipped: (pkg.presets ?? []).map((preset) => ({ part: `presets[${preset.key}]`, reason: "presets_not_supported_yet" as const })),
+        skipped: registered?.skipped ?? (pkg.presets ?? []).map((preset) => ({ part: `presets[${preset.key}]`, reason: "presets_not_supported_yet" as const })),
         brief: false, notes: 0,
+        ...(registered ? { presets: [...registered.added, ...registered.existing] } : {}),
         org: { kind: "library", section: "", team: { parts: {} }, bots: {}, rooms: {}, routines: {}, connections: {} },
       };
     }
   }
+  if (library) return importLibraryFile(document, deps.presets!);
   return runImport({ kind: "package", document }, options, deps);
+}
+
+/** A preset file (skills and presets, no team): the presets go to New bot,
+ * and the skills are offered (a file never installs a skill without a bot or
+ * a preset to hold it). */
+function importLibraryFile(document: PackageDocument, presets: PresetRegistry): PackageImportResult {
+  const pkg = document.package;
+  if (!pkg.presets?.length) throw new PackageImportError("no_bots", NO_PRESETS_MESSAGE);
+  const installId = randomUUID();
+  const registered = presets.register(document, { source: "file", installId });
+  return {
+    alreadyAdded: false, installId, name: pkg.name, section: "", bots: [], groups: [], routines: [],
+    offeredSkills: (pkg.skills?.entries ?? []).map((skill) => skill.name), connections: [],
+    skipped: registered.skipped, brief: false, notes: 0, presets: [...registered.added, ...registered.existing],
+  };
 }
 
 /** Add a legacy `openmaus.team` file: people only (plus a project room when
@@ -253,6 +285,7 @@ function runImport(source: ImportSource, options: PackageImportOptions, deps: Pa
   const createdGroups: GroupRecord[] = [];
   const createdRoutines: Routine[] = [];
   const createdServers: string[] = [];
+  const createdPresets: string[] = [];
   const skipped: ImportSkip[] = [];
   const orgIndex: OrgInstallIndex = { kind: "team", section: "", team: { parts: {} }, bots: {}, rooms: {}, routines: {}, connections: {} };
   // Names already in use, hidden bots included: an archived bot can be
@@ -483,7 +516,15 @@ function runImport(source: ImportSource, options: PackageImportOptions, deps: Pa
         name: section, brief: brief ? pkg.team.brief! : "", leader: pkg.team.leader ? botIds.get(pkg.team.leader)! : null,
       });
     }
-    for (const preset of pkg?.presets ?? []) skipped.push({ part: `presets[${preset.key}]`, reason: "presets_not_supported_yet" });
+    let presets: PackageImportResult["presets"];
+    // An organization install always registers, so a release re-added without
+    // presets also drops the rows an earlier one left (presets.ts).
+    if (source.kind === "package" && deps.presets && (pkg?.presets?.length || org)) {
+      const registered = deps.presets.register(source.document, { source: org ? "org" : "file", installId: installId!, ...(org ? { org } : {}) });
+      createdPresets.push(...registered.added.map((preset) => preset.id));
+      skipped.push(...registered.skipped);
+      presets = [...registered.added, ...registered.existing];
+    } else for (const preset of pkg?.presets ?? []) skipped.push({ part: `presets[${preset.key}]`, reason: "presets_not_supported_yet" });
 
     // The legacy project room is created last, so a failure anywhere above
     // leaves no half-built project behind.
@@ -517,6 +558,7 @@ function runImport(source: ImportSource, options: PackageImportOptions, deps: Pa
       skipped,
       brief,
       notes,
+      ...(presets ? { presets } : {}),
     };
   } catch (error) {
     // A room of deleted members must not survive either — patchGroup can
@@ -524,6 +566,7 @@ function runImport(source: ImportSource, options: PackageImportOptions, deps: Pa
     for (const routine of createdRoutines) deps.routines.remove(routine.id);
     for (const created of createdGroups) store.deleteGroup(created.id);
     for (const bot of importedBots) store.deleteBot(bot.id);
+    deps.presets?.remove(createdPresets);
     if (createdServers.length) {
       const next: Record<string, unknown> = { ...deps.mcp.servers() };
       for (const serverName of createdServers) delete next[serverName];
