@@ -78,10 +78,20 @@ class ThreadNavigationTest {
         }
         val grouped = bot.copy(tasks = snoozed + task("current").copy(snoozedUntil = 0.0))
         // the sentinel and a live clock both fold; the current thread and one
-        // that needs the person stay, as does a timestamp already past
-        assertEquals(listOf("working", "unread", "current", "expired"),
+        // that needs the person stay, as does a timestamp already past.
+        // Equal update stamps keep stored order, not attention order.
+        assertEquals(listOf("expired", "unread", "working", "current"),
             grouped.threadGroups(now = 500L).single().tasks.map { it.threadId })
         assertEquals(6, grouped.threadGroups(includingClosed = true, now = 500L).single().tasks.size)
+        val pinned = grouped.copy(tasks = grouped.tasks!!.map {
+            when (it.threadId) {
+                "asleep" -> it.copy(pinned = true)
+                "unread" -> it.copy(updatedAt = 100.0)
+                else -> it
+            }
+        })
+        assertEquals(listOf("asleep", "unread", "expired", "working", "current"),
+            pinned.threadGroups(now = 500L).single().tasks.map { it.threadId })
     }
 
     @Test

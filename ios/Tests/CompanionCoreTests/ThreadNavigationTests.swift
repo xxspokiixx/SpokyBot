@@ -205,15 +205,15 @@ final class ThreadNavigationTests: XCTestCase {
         unreadSleep.unread = true
         var openHere = task("current")
         openHere.snoozedUntil = 0
-        let bot = makeBot(tasks: [sentinel, timed, expired, unreadSleep, openHere])
+        var bot = makeBot(tasks: [sentinel, timed, expired, unreadSleep, openHere])
 
         // The sentinel and a still-running clock fold away; an expired
         // timestamp, something unread, and the thread open here do not, and
-        // what survives is listed in attention order: unread beats the
-        // thread open here, which beats a plain expired sleeper.
+        // equal update stamps retain stored order. Attention controls
+        // visibility here, not position in the thread list.
         XCTAssertEqual(
             bot.threadGroups().flatMap(\.tasks).map(\.threadId),
-            ["unread-sleep", "current", "expired"]
+            ["expired", "unread-sleep", "current"]
         )
         // Nothing is gone: the manage sheet and search still list sleepers.
         XCTAssertEqual(
@@ -221,6 +221,12 @@ final class ThreadNavigationTests: XCTestCase {
             ["sentinel", "timed", "expired", "unread-sleep", "current"]
         )
         XCTAssertEqual(bot.threadGroups(matching: "timed").first?.tasks.map(\.threadId), ["timed"])
+
+        // Snoozing must not undo the main list's pin-then-newest order.
+        bot.tasks?[0].pinned = true
+        bot.tasks?[3].updatedAt = 100
+        XCTAssertEqual(bot.threadGroups().flatMap(\.tasks).map(\.threadId),
+                       ["sentinel", "unread-sleep", "expired", "current"])
     }
 
     func testSnoozedThreadsSaySoInTheBylineOnlyWhileAsleep() {
