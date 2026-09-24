@@ -43,8 +43,9 @@ Compared with a file:
   same install on every reconnect. A second Add answers `200
   {alreadyAdded: true}`.
 
-A bot added from a package shows where it came from in **Bot settings →
-Identity**: "From Sales desk 1.3.0 · Acme Partners". This version never
+A bot added from the organization's library shows where it came from in
+**Bot settings → Identity**: "From Sales desk 1.3.0 · Acme Partners". A bot
+imported from a file shows no such line, as before. This version never
 changes something it already added. When the catalog names a newer release,
 the card says "Version X available. Updates arrive automatically in an
 upcoming OpenMausBot update."
@@ -61,8 +62,9 @@ and on bots someone made from its presets), its routines are paused, its
 presets leave New bot, the install is marked **withdrawn**, and the bot's
 provenance line adds "Withdrawn by <publisher>".
 This happens once, on the change. If you switch something back on
-afterwards, it stays on. A package that disappears from the catalog changes
-nothing: copies stay.
+afterwards, it stays on. A team you already removed stays removed, but an
+offered skill it left on another bot is switched off the same way, once. A
+package that disappears from the catalog changes nothing: copies stay.
 
 ## How the catalog arrives
 
@@ -121,7 +123,7 @@ contains names, paths or error text.
 
 | File | Written by | What |
 |---|---|---|
-| `state.json` | runtime | The index of what was added (contract §3.4), plus `kind` and `name` per install. Mode 0600. |
+| `state.json` | runtime | The index of what was added (contract §3.4), plus `kind`, `name` and `withdrawnHandled` per install, and `adding`: team Adds that have started and not finished. Mode 0600. |
 | `blobs/<sha256>.json` | Electron | Release bytes, checked on every read. |
 | `catalog.json` | Electron | The last applied catalog body. The runtime does not read it. |
 | `presets.json` | runtime (`server/presets.ts`) | Preset bots, from files and from installs here ([presets.md](presets.md)). An install's presets are listed under `presets` in `state.json`. |
@@ -142,10 +144,53 @@ these cases:
 - whenever a bot or group chat is deleted, or a team is renamed.
 
 A team's section is read from where its bots are now, so renaming the team
-needs no hook. If the app stops after the records are written but before
-the index is, the records are adopted once the catalog names their package,
-and a second Add is still a no-op. An adopted install has no team-part
-hashes, so a later update treats those parts as edited and keeps them.
+needs no hook. A team counts as added while any of its bots, group chats or
+routines is left. An offered skill someone put on another bot is a copy: it
+stays, but it does not keep the team added, so once the team's own records
+are gone the install is `removed` and **Add** brings the whole team back.
+
+Each install's `removedLocally` (contract §3.4) lists the parts of an added
+team the person deleted: `agent:<key>` for a bot, `room:<key>` for a group
+chat and `routine:<key>` for a routine. The automatic update (v1.1) reads it
+to tell a part the person deleted from a part a new release adds, and never
+brings a deleted part back. It is kept like this:
+
+- **When it is noted.** Each time the index is rebuilt, a key the index held
+  that no longer has a record is added to the list once. Rebuilding again,
+  or restarting, adds nothing. A routine stops counting when its bot is
+  deleted, so deleting a bot notes its routines too. Deleting a routine is
+  not a store change, so it is noted at the next rebuild (the next catalog,
+  Add or start).
+- **A team deleted whole** becomes `removed`, and every one of its parts is
+  noted too. The list then reads the same whether the person deleted the
+  team at once or one bot at a time.
+- **A part that has a record again** (records restored from a backup) is
+  taken off the list, so it never names a part that is there.
+- **Add after a removal** brings the whole team back, so it starts a new,
+  empty list.
+
+If the app stops after the records are written but before the index is, the
+records are adopted once the catalog names their package, and a second Add
+is still a no-op. An adopted install has no team-part hashes, so a later
+update treats those parts as edited and keeps them. Its `removedLocally`
+starts empty: the remaining records can't show what the person deleted
+before `state.json` was lost, so a later update could bring those parts
+back. The same holds when `state.json` could not be read.
+
+If the app stops in the middle of adding a team, the next start finds its
+entry under `adding` (written before the first record) and looks at what
+was written. The importer writes each bot's part hashes after its skills and
+starter notes, the brief before the group chats and routines, and the leader
+last. So:
+
+- **Every bot, group chat and routine is there and the leader is set:** the
+  team is indexed as added, like the crash above.
+- **Anything is missing:** the partly added bots, group chats, routines and
+  their new team are removed again, and the report says `failed` with
+  `import_failed`. **Add** then brings the whole team. Two things may stay
+  behind: its connection slots (switched off, with no values, under their
+  MCP server names), and its bots' picture files, which a failed import
+  leaves too.
 
 ## Routes
 
