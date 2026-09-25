@@ -372,6 +372,11 @@ const toolDefinitions = (externalRuntime: boolean) => [
           instanceId: { type: "string" }, model: { type: "string" },
           effort: { type: "string" }, variant: { type: "string" },
         }, required: ["instanceId", "model"] },
+        cwd: {
+          type: "string",
+          maxLength: 1024,
+          description: "Absolute path of the folder this specialist's tools read and write in (for example /Users/me/Projects/site). It must already exist. Leave it out for the specialist's private workspace.",
+        },
       },
       required: ["name", "role", "instructions"],
     },
@@ -399,9 +404,10 @@ const toolDefinitions = (externalRuntime: boolean) => [
               name: { type: "string", maxLength: 100 }, title: { type: "string", maxLength: 200 },
               chiefOfStaff: { type: "boolean", description: "Appoint or remove this team's Chief. At most one Chief per team: explicitly demote the current Chief in the same plan when replacing them. Does not grant access to other teams or change execution permissions." },
               description: { type: "string", maxLength: 4000 }, soul: { type: "string", description: "Standing instructions; required with name/title/modelSelection for every new bot." },
+              cwd: { type: "string", maxLength: 1024, description: "Create only: absolute path of the folder the new bot's tools read and write in. It must already exist. Leave it out for a private workspace." },
               section: { type: "string", maxLength: 60, description: "Exact authorized existing team, or a team explicitly named in newTeams. Empty string means General." },
               modelSelection: { type: "object", additionalProperties: false, properties: {
-                instanceId: { type: "string" }, model: { type: "string" }, effort: { type: "string" },
+                instanceId: { type: "string" }, model: { type: "string" }, effort: { type: "string" }, variant: { type: "string" },
               }, required: ["instanceId", "model"] },
             } },
           }, required: ["action", "fields"],

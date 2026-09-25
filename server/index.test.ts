@@ -2202,6 +2202,37 @@ describe("harness HTTP API", () => {
     }
   });
 
+  it("lands a created operator in a requested working folder or refuses it with the profile copy", async () => {
+    const chief = (await api("POST", "/api/bots")).body.bot;
+    let createdId: string | undefined;
+    try {
+      expect((await api("PATCH", `/api/bots/${chief.id}`, { chiefOfStaff: true })).status).toBe(200);
+      const token = await mintTestCapability(BASE, chief.id, chief.threadId);
+      const create = async (name: string, cwd: unknown) => {
+        const response = await fetch(`${BASE}/api/internal/create-bot`, {
+          method: "POST",
+          headers: { authorization: `Bearer ${token}`, "content-type": "application/json" },
+          body: JSON.stringify({ fromBotId: chief.id, fromThreadId: chief.threadId, name, role: "Ops", instructions: "Work.", cwd }),
+        });
+        return { status: response.status, body: await response.json() as { id?: string; error?: string } };
+      };
+      const folder = mkdtempSync(join(tmpdir(), "omb-create-cwd-"));
+      const landed = await create(`Folder operator ${chief.id}`, folder);
+      expect(landed.status).toBe(201);
+      createdId = landed.body.id;
+      const state = (await api("GET", "/api/bots?messages=0")).body;
+      expect(state.bots.find((bot: { id?: string }) => bot.id === createdId)?.cwd).toBe(folder);
+      const relative = await create(`Relative operator ${chief.id}`, "relative/path");
+      expect(relative).toMatchObject({ status: 400, body: { error: "working folder must be an absolute path" } });
+      const missing = await create(`Missing operator ${chief.id}`, join(folder, "missing"));
+      expect(missing.status).toBe(400);
+      expect(missing.body.error).toBe(`that folder doesn't exist: ${join(folder, "missing")}`);
+    } finally {
+      if (createdId) await api("DELETE", `/api/bots/${createdId}`);
+      await api("DELETE", `/api/bots/${chief.id}`);
+    }
+  });
+
   it("rejects null and array task, channel, and bot mutation bodies", async () => {
     const bot = (await api("POST", "/api/bots")).body.bot;
     const room = (await api("POST", "/api/groups", { name: "Object bodies", memberIds: [bot.id] })).body.group;

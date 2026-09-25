@@ -14540,6 +14540,14 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
           selection = checked.selection;
         }
         if (hostedModels && !hostedModels.allows(selection)) return json(res, 400, { error: hostedModels.error() });
+        // The same check the profile path runs: absolute, exists, is a
+        // folder. Creation names where the specialist works; nothing looser.
+        let cwd: string | undefined;
+        if (body.cwd !== undefined) {
+          const checkedCwd = validateBotCwd(body.cwd);
+          if (!checkedCwd.ok) return json(res, 400, { error: checkedCwd.error });
+          cwd = checkedCwd.cwd ?? undefined;
+        }
         // Discovery can yield; check current authority and capacity again before writing.
         if (store.bot(chief.id) !== chief || chief.hidden || !chief.chiefOfStaff || !connectorThread(chief.id, fromThreadId)) {
           return json(res, 403, { error: "only an active Chief of Staff can create operator bots" });
@@ -14562,6 +14570,7 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
             description: instructions,
             modelSelection: selection,
             section: chief.section,
+            ...(cwd !== undefined ? { cwd } : {}),
             // exactly the Chief's audience: a restricted Chief never makes a bot everyone sees
             ...(chief.visibility ? { visibility: chief.visibility } : {}),
           },
