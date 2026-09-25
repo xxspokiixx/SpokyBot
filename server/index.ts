@@ -356,7 +356,7 @@ import {
   buildSystemPrompt,
   userProfileSystemPrompt,
   computerPrompt,
-  COMPOSIO_PROMPT,
+  composioSystemPrompt,
   customMcpPrompt,
   CREDENTIAL_PROMPT,
   mentionPrompt,
@@ -2185,9 +2185,9 @@ function phoneIntegration(botId: string, threadId: string, generation: string) {
   return { command: process.execPath, args: [phoneProxyPath], env };
 }
 
-function connectedAppsIntegration(botId: string, threadId: string, generation: string) {
+function connectedAppsIntegration(bot: Pick<BotRecord, "id" | "connectorTools">, threadId: string, generation: string) {
   const token = mintInternalCapability({
-    botId,
+    botId: bot.id,
     threadId,
     generation,
     depth: 0,
@@ -2199,8 +2199,12 @@ function connectedAppsIntegration(botId: string, threadId: string, generation: s
   return composio.mcpIntegration(cfg, {
     harnessUrl: `http://127.0.0.1:${PORT}`,
     commsToken: token,
-    botId,
+    botId: bot.id,
     threadId,
+    // Connector grants 3/5: the record (or its absence) rides along so
+    // the bridge can filter tools/list; the verdict on the relay endpoint
+    // stays the authority for every call.
+    connectorTools: bot.connectorTools,
   });
 }
 
@@ -2768,7 +2772,7 @@ function previewSystemPrompt(bot: BotRecord) {
       computer: previewPlan.computer && previewPlan.computer !== "off" && computerPromptKind ? previewPlan.computer : null,
       browser: previewPlan.computer === undefined ? false : previewPlan.browser,
     }, { note: previewPlan.note }) },
-    { id: "composio", label: "Connected apps", text: caps?.composioMcp && bot.composio !== false && composio.configured(cfg) ? COMPOSIO_PROMPT : "" },
+    { id: "composio", label: "Connected apps", text: caps?.composioMcp && bot.composio !== false && composio.configured(cfg) ? composioSystemPrompt(bot.connectorTools) : "" },
     { id: "mcp", label: "MCP servers", text: caps?.customMcp ? customMcpPrompt(Object.keys(engineMcpServers(bot))) : "" },
     { id: "browser", label: "Browser", text: previewPlan.browser ? BUILT_IN_BROWSER_SYSTEM_PROMPT : "" },
     { id: "coordination", label: "Team", text: agentsMounted && coordination ? ` ${coordination}` : "" },
@@ -7793,7 +7797,7 @@ async function startTurn(
       // this engine can reach them — and only to a bot the user has not
       // switched off: the key is workspace-wide, the grant is per bot.
       if (bot.composio !== false && composio.configured(cfg) && instance.adapter.capabilities.composioMcp === true) {
-        const connection = await connectedAppsIntegration(bot.id, threadId, dispatchClaimId);
+        const connection = await connectedAppsIntegration(bot, threadId, dispatchClaimId);
         if (connection) integrations.composio = connection;
       }
       // user-configured MCP servers (config.json mcpServers): same rule as
@@ -8362,7 +8366,7 @@ async function startTurn(
         { id: "plan", label: "Surface", text: surfacePrompt({ computer: mountedComputer, browser: Boolean(integrations.browser) }, { pinned: plan.pinned, note: plan.note, canSelect: computerSelectionTurns.has(threadId) }) },
         // gated on the integration, not the key: the hint only goes to a
         // bot whose driver actually mounted the tools
-        { id: "composio", label: "Connected apps", text: integrations.composio ? COMPOSIO_PROMPT : "" },
+        { id: "composio", label: "Connected apps", text: integrations.composio ? composioSystemPrompt(liveBot?.connectorTools ?? bot.connectorTools) : "" },
         { id: "mcp", label: "MCP servers", text: customMcpPrompt(Object.keys(integrations.custom ?? {})) },
         { id: "browser", label: "Browser", text: integrations.browser ? BUILT_IN_BROWSER_SYSTEM_PROMPT : "" },
         { id: "coordination", label: "Team", text: coordinationPrompt ? ` ${coordinationPrompt}` : "" },
@@ -9806,7 +9810,7 @@ async function runGroupMemberTurn(
   }
   try {
     if (bot.composio !== false && composio.configured(cfg) && instance.adapter.capabilities.composioMcp === true) {
-      const connection = await connectedAppsIntegration(bot.id, threadId, internalGeneration);
+      const connection = await connectedAppsIntegration(bot, threadId, internalGeneration);
       if (connection) integrations.composio = connection;
     }
   } catch (error) {
@@ -14797,7 +14801,12 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
           }));
         }
         if (call.kind === "tools") {
-          const verdict = evaluateConnectorTools(call.names, currentSender.connectorTools);
+          // The resolver needs the real connected-service slugs, so an
+          // underscored service (bland_ai) keeps its own tools instead of
+          // a plain-prefix grant (bland) capturing them; an unreachable
+          // catalog reads as empty and the plain split stands.
+          const serviceSlugs = await composio.connectedServiceSlugs(cfg);
+          const verdict = evaluateConnectorTools(call.names, currentSender.connectorTools, serviceSlugs);
           if (!verdict.allowed) {
             for (const denial of verdict.denials) {
               appendDecision(DATA_DIR, {
@@ -17160,6 +17169,12 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
         } else {
           const parsed = parseConnectorTools(body.connectorTools);
           if (!parsed.ok) return json(res, 400, { error: parsed.error });
+          // Connector grants 3/5: past the shape checks, slugs must name
+          // connected services and tool names must carry their service
+          // prefix. Unreachable backends never block the patch — the
+          // call-time verdict from slice 2 stays the authority.
+          const semantic = await composio.validateConnectorGrants(cfg, parsed.grants);
+          if (semantic) return json(res, 400, { error: semantic });
           patch.connectorTools = parsed.grants;
         }
       }
@@ -20317,6 +20332,21 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
         });
       }
       return json(res, 200, { configured: true, credentialStore: "ok", services: await composio.connectedServices(cfg) });
+    }
+    if (method === "GET" && path === "/api/connectors/tools") {
+      // The grant editor's inventory: every grantable tool name grouped by
+      // service, read from the same MCP endpoint a mounted bot relays
+      // through. Failure is a read-only editor, never a blocked save — the
+      // exact-name model does not depend on the listing being reachable.
+      const availability = composio.connectorAvailability(cfg);
+      if (availability !== "configured") {
+        return json(res, 200, { configured: false, services: {} });
+      }
+      try {
+        return json(res, 200, { configured: true, services: await composio.listConnectorTools(cfg) });
+      } catch (e) {
+        return json(res, 502, { configured: true, services: {}, error: e instanceof Error ? e.message : String(e) });
+      }
     }
     if (method === "GET" && path === "/api/connectors") {
       const services = (url.searchParams.get("services") ?? "").split(",").filter(Boolean);
