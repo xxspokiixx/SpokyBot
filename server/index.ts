@@ -15684,10 +15684,13 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
     if (m && method === "GET") {
       const attachment = readAttachment(m[1]!);
       if (!attachment) return json(res, 404, { error: "no such attachment" });
+      // Who may see an attachment is decided per request — the dispatcher
+      // 404s hidden ones above — so the browser must never reuse one
+      // member's copy after a switch to another identity in the same profile.
       res.writeHead(200, {
         "content-type": attachment.mime,
         "content-length": String(attachment.bytes.byteLength),
-        "cache-control": "private, max-age=31536000, immutable",
+        "cache-control": "private, no-store",
         "x-content-type-options": "nosniff",
       });
       return res.end(attachment.bytes);
