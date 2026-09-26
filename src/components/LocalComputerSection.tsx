@@ -1340,7 +1340,7 @@ export function LocalComputerSection() {
               onChange={(event) => void savePolicy(status?.mode ?? "shared", Number(event.target.value))}
               className="rounded-lg border border-hairline/40 bg-control px-2.5 py-1.5 text-[13px] text-ink disabled:opacity-50"
             >
-              {[1, 2, 3, 4].map((value) => <option key={value} value={value}>{value}</option>)}
+              {[1, 2, 3, 4, 5, 6, 7, 8].map((value) => <option key={value} value={value}>{value}</option>)}
             </select>
           </div>
         )}

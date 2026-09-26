@@ -37,7 +37,7 @@ export const MAX_THREAD_EVENT_LOG_BYTES = 4 * 1024 * 1024 * 1024;
 export const DEFAULT_LOCAL_VM_MODE = "shared" as const;
 export const DEFAULT_LOCAL_VM_MAX_INSTANCES = 2;
 export const MIN_LOCAL_VM_MAX_INSTANCES = 1;
-export const MAX_LOCAL_VM_MAX_INSTANCES = 4;
+export const MAX_LOCAL_VM_MAX_INSTANCES = 8;
 
 export function isValidSshAlias(value: unknown): value is string {
   return typeof value === "string" && SSH_ALIAS.test(value);

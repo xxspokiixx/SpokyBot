@@ -7976,17 +7976,17 @@ describe("harness HTTP API", () => {
     expect(shared.body).toMatchObject({ mode: "shared", target_key: "shared" });
 
     const saved = await api("PATCH", "/api/config", {
-      localVm: { mode: "per-bot", maxInstances: 3 },
+      localVm: { mode: "per-bot", maxInstances: 5 },
     });
     expect(saved.status).toBe(200);
-    expect(saved.body.localVm).toEqual({ mode: "per-bot", maxInstances: 3 });
+    expect(saved.body.localVm).toEqual({ mode: "per-bot", maxInstances: 5 });
 
     const [firstStatus, secondStatus] = await Promise.all([
       api("GET", `/api/bots/${first.id}/local-computer`),
       api("GET", `/api/bots/${second.id}/local-computer`),
     ]);
-    expect(firstStatus.body).toMatchObject({ mode: "per-bot", max_instances: 3 });
-    expect(secondStatus.body).toMatchObject({ mode: "per-bot", max_instances: 3 });
+    expect(firstStatus.body).toMatchObject({ mode: "per-bot", max_instances: 5 });
+    expect(secondStatus.body).toMatchObject({ mode: "per-bot", max_instances: 5 });
     expect(firstStatus.body.target_key).not.toBe(secondStatus.body.target_key);
     expect(firstStatus.body.container_name).not.toBe(secondStatus.body.container_name);
     expect(firstStatus.body.workspace_path).not.toBe(secondStatus.body.workspace_path);
@@ -7996,7 +7996,7 @@ describe("harness HTTP API", () => {
     expect(inventory.headers.get("cache-control")).toBe("private, no-store");
     const inventoryBody = await inventory.json() as any;
     expect(inventoryBody).toMatchObject({
-      maxInstances: 3,
+      maxInstances: 5,
       instances: expect.any(Array),
       available: expect.any(Boolean),
     });
@@ -8014,12 +8014,12 @@ describe("harness HTTP API", () => {
     }
     expect(JSON.stringify(inventoryBody)).not.toMatch(/viewer_url|workspace_path|container_name|target_key/);
 
-    const invalid = await api("PATCH", "/api/config", { localVm: { maxInstances: 5 } });
+    const invalid = await api("PATCH", "/api/config", { localVm: { maxInstances: 9 } });
     expect(invalid.status).toBe(400);
     expect(invalid.body.error).toContain("localVm.maxInstances");
 
     const disk = JSON.parse(readFileSync(join(home, ".openmausbot", "config.json"), "utf8"));
-    expect(disk.localVm).toEqual({ mode: "per-bot", maxInstances: 3 });
+    expect(disk.localVm).toEqual({ mode: "per-bot", maxInstances: 5 });
     await api("PATCH", "/api/config", { localVm: { mode: "shared", maxInstances: 2 } });
   });
 
