@@ -13,6 +13,8 @@
 //                       real-agent shape that forces the driver's one-shot
 //                       re-spawn fallback. A fresh process holds no live
 //                       session, so its load succeeds.
+//   FAKE_ACP_CACHED_LIVE_LOAD  acknowledge session/load of a live session but
+//                       keep its original MCP credentials, matching Qwen.
 //   FAKE_ACP_MODE   happy (default) | image | empty-reply | reasoning-only | exit-early | fail-after-text | hang | hang-initialize | stall-after-text | no-auth | auth-required | permission | question
 //                   | ask-question-unsupported (send a cursor/ask_question server→client
 //                     request mid-prompt; the driver must answer -32601 method
@@ -551,7 +553,8 @@ function handle(msg: any) {
         });
         break;
       }
-      if (mode === "safe-agent-reads") {
+      const cachedLiveLoad = process.env.FAKE_ACP_CACHED_LIVE_LOAD === "1" && liveSession === msg.params?.sessionId;
+      if (mode === "safe-agent-reads" && !cachedLiveLoad) {
         agentsMcp = (msg.params?.mcpServers ?? []).find((server: any) => server.name === "agents") ?? null;
       }
       if (process.env.FAKE_ACP_DUMP) {
@@ -929,7 +932,7 @@ function handle(msg: any) {
         // two exact calls in the reported regression, repeated in one turn.
         void (async () => {
           for (const name of ["list_bots", "session_search", "list_bots"]) {
-            const nativeAuto = argv[argv.indexOf("--permission-mode") + 1] === "auto";
+            const nativeAuto = ["--permission-mode", "--approval-mode"].some((flag) => argv.includes(flag) && argv[argv.indexOf(flag) + 1] === "auto");
             if (!nativeAuto) {
               const allowed = await new Promise<boolean>((resolve) => {
                 pendingPermissionId = 9100;

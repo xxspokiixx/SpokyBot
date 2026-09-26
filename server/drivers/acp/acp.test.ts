@@ -11,7 +11,7 @@ import { chmodSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, unlinkSy
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { ensureDirs, NATIVE_DIR } from "../../config.ts";
 import type { ProviderInstance } from "../../contracts.ts";
@@ -22,7 +22,9 @@ import { GeminiAgentDriver } from "./gemini.ts";
 import { KimiAgentDriver } from "./kimi.ts";
 import { DroidAgentDriver } from "./droid.ts";
 import { CursorAgentDriver } from "./cursor.ts";
+import { QwenAgentDriver } from "./qwen.ts";
 import { removeTempDir } from "../../testing/cleanup.ts";
+import * as procs from "../../procs.ts";
 
 const FAKE_CLI = join(dirname(fileURLToPath(import.meta.url)), "..", "..", "testing", "fake-acp-cli.ts");
 
@@ -257,6 +259,7 @@ describe("ACP turns (fake CLI)", () => {
     delete process.env.FAKE_ACP_LAUNCH_COUNT_FILE;
     recorder?.stop();
     await instance?.dispose();
+    vi.restoreAllMocks();
     await removeTempDir(scratch);
   });
 
@@ -1659,15 +1662,22 @@ describe("ACP turns (fake CLI)", () => {
       expect(launches()).toBe(2);
     });
 
-    it("rotating integration credentials re-establishes the session on the same process", async () => {
+    it.each([
+      { driver: GrokAgentDriver, expectedLaunches: 1 },
+      { driver: QwenAgentDriver, expectedLaunches: 2 },
+    ])("rotating credentials refreshes $driver.driverKind with $expectedLaunches process(es)", async ({ driver, expectedLaunches }) => {
       countFile = join(scratch, "launches");
-      rpcFile = join(scratch, "rpc.json");
+      const appendFile = join(scratch, "rpc-all.jsonl");
       process.env.FAKE_ACP_LAUNCH_COUNT_FILE = countFile;
-      process.env.FAKE_ACP_RPC_DUMP = rpcFile;
-      await create();
-      // The harness mints a fresh bearer token in the agents proxy env every
-      // turn. That is session establishment input (it rides session/new and
-      // session/load), never a reason to pay the process handshake again.
+      process.env.FAKE_ACP_RPC_APPEND_FILE = appendFile;
+      instance = await driver.create({
+        instanceId: "acp-test", displayName: "ACP Test", enabled: true,
+        environment: { HOME: scratch, USERPROFILE: scratch },
+        config: { cli: FAKE_CLI, fullAuto: false },
+      });
+      recorder = recordEvents(instance.adapter);
+      // Qwen caches MCP clients on live load; other agents apply the new
+      // credentials without a process restart. Both preserve the cursor.
       const integration = (token: string) => ({
         command: process.execPath,
         args: [FAKE_CLI],
@@ -1690,11 +1700,61 @@ describe("ACP turns (fake CLI)", () => {
       const secondDone = await recorder.until((e) => e.type === "turn.completed" && e.turnId === second.turnId);
       expect(secondDone).toMatchObject({ ok: true });
 
-      expect(launches()).toBe(1);
-      expect(rpc().filter((m) => m === "initialize")).toHaveLength(1);
-      expect(rpc().filter((m) => m === "session/new")).toHaveLength(1);
-      expect(rpc().filter((m) => m === "session/load")).toHaveLength(1);
-      expect(rpc().filter((m) => m === "session/prompt")).toHaveLength(2);
+      const third = await instance.adapter.sendTurn({
+        threadId: "t-pool-token", text: "unchanged MCP inputs",
+        resumeCursor: "fake-acp-session",
+        integrations: { agents: integration("token-two") },
+      });
+      expect(await recorder.until((e) => e.type === "turn.completed" && e.turnId === third.turnId)).toMatchObject({ ok: true });
+      expect(launches()).toBe(expectedLaunches);
+      const calls = readFileSync(appendFile, "utf8").trim().split("\n").map((line) => JSON.parse(line).method);
+      expect(calls.filter((m) => m === "initialize")).toHaveLength(expectedLaunches);
+      expect(calls.filter((m) => m === "session/new")).toHaveLength(1);
+      expect(calls.filter((m) => m === "session/load")).toHaveLength(1);
+      expect(calls.filter((m) => m === "session/prompt")).toHaveLength(3);
+      expect(recorder.events.filter((e) => e.type === "session.started").map((e) => e.sessionId)).toEqual([
+        "fake-acp-session", "fake-acp-session", "fake-acp-session",
+      ]);
+    });
+
+    it("does not load or prompt Qwen after Stop during old-process cleanup", async () => {
+      const appendFile = join(scratch, "rpc-all.jsonl");
+      process.env.FAKE_ACP_RPC_APPEND_FILE = appendFile;
+      instance = await QwenAgentDriver.create({
+        instanceId: "qwen-stop", displayName: "Qwen Stop", enabled: true,
+        environment: { HOME: scratch, USERPROFILE: scratch },
+        config: { cli: FAKE_CLI, fullAuto: false },
+      });
+      recorder = recordEvents(instance.adapter);
+      const integration = (token: string) => ({ command: process.execPath, args: [FAKE_CLI], env: { OMB_COMMS_TOKEN: token } });
+      const first = await instance.adapter.sendTurn({ threadId: "qwen-stop", text: "one", integrations: { agents: integration("one") } });
+      await recorder.until((e) => e.type === "turn.completed" && e.turnId === first.turnId);
+
+      let stopped!: () => void;
+      let release!: () => void;
+      const stopping = new Promise<void>((resolve) => { stopped = resolve; });
+      const gate = new Promise<void>((resolve) => { release = resolve; });
+      const kill = procs.killCliTree;
+      vi.spyOn(procs, "killCliTree").mockImplementationOnce(async (child) => {
+        stopped();
+        await gate;
+        return kill(child);
+      });
+      try {
+        const second = await instance.adapter.sendTurn({
+          threadId: "qwen-stop", text: "two", resumeCursor: "fake-acp-session",
+          integrations: { agents: integration("two") },
+        });
+        await stopping;
+        await instance.adapter.interruptTurn("qwen-stop");
+        release();
+        expect(await recorder.until((e) => e.type === "turn.completed" && e.turnId === second.turnId)).toMatchObject({ ok: false });
+        const calls = readFileSync(appendFile, "utf8").trim().split("\n").map((line) => JSON.parse(line).method);
+        expect(calls.filter((method) => method === "initialize")).toHaveLength(1);
+        expect(calls.filter((method) => method === "session/load")).toHaveLength(0);
+        expect(calls.filter((method) => method === "session/prompt")).toHaveLength(1);
+        expect(instance.adapter.hasSession("qwen-stop")).toBe(false);
+      } finally { release(); }
     });
 
     it("an agent that refuses to re-load its live session gets one fresh process, then resumes", async () => {
