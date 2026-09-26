@@ -219,6 +219,7 @@ import { chiefForBot, INCIDENTS_THREAD_TITLE, IncidentLedger, incidentChip, inci
  * window; a computer-use turn's output can run to hundreds of KB. */
 const SESSION_READ_MAX_CHARS = 8_000;
 import { promptWithReply, transcriptText } from "./replies.ts";
+import { admit } from "./admission.ts";
 import { _loadPending, buildDelegationFailurePrompt, buildDelegationRevivalPrompt, DELEGATION_TTL_MS, DelegationWakeBudget, discardDelegations, drainDelegations, expireStaleDelegations, findDelegationReceipt, pendingDelegationInfo, pendingDelegationSnapshot, pendingThreads, queueDelegation, recordDelegationReceipt, releaseDelegationsWaitingOn, summarizeDelegatedActivity, type DelegationReceipt, type QueueResult } from "./delegations.ts";
 import {
   cancelSteeredMessage,
@@ -1898,7 +1899,11 @@ function hasDirectDispatch(botId: string): boolean {
  * share this test so peer and room work waits for a real slot, not total
  * bot idleness. */
 function canAdmitDirectTurn(botId: string, threadId: string): boolean {
-  return !threadBusy(botId, threadId) && !botAtThreadCapacity(botId) && !activeGroupTurnForBot(botId);
+  return admit("peer", {}, {
+    threadBusy: threadBusy(botId, threadId),
+    atCapacity: botAtThreadCapacity(botId),
+    groupTurn: Boolean(activeGroupTurnForBot(botId)),
+  }).action === "start";
 }
 
 /** Routine and webhook dispatch shares startTurn's admission preconditions
@@ -1907,7 +1912,12 @@ function canAdmitDirectTurn(botId: string, threadId: string): boolean {
  * blocks every other turn kind; it does not consume a capacity slot. */
 function unattendedDispatchState(botId: string): "ready" | "busy" | "missing" {
   const bot = store.bot(botId);
-  return !bot ? "missing" : botAtThreadCapacity(botId) || activeGroupTurnForBot(botId) ? "busy" : "ready";
+  const decision = admit("unattended", {}, {
+    botPresent: Boolean(bot),
+    atCapacity: Boolean(bot) && botAtThreadCapacity(botId),
+    groupTurn: Boolean(bot) && Boolean(activeGroupTurnForBot(botId)),
+  });
+  return decision.action !== "refuse" ? "ready" : decision.code === "missing" ? "missing" : "busy";
 }
 
 function requestedTaskBot(botId: string, rawThreadId: unknown): BotRecord {
@@ -7115,22 +7125,25 @@ function drainQueuedSends() {
 /** Keep a person's words off the transcript until a direct-thread slot is
  * available. Reuse the existing cancellable, idempotent composer queue. */
 async function startOrQueueDirectMessage(botId: string, threadId: string, text: string, replyTo?: Message, sendId?: string, sender?: ResolvedSender, trigger?: UsageTrigger) {
-  const capacity = botAtThreadCapacity(botId);
-  // A room turn holds the bot exactly like the sibling opened-thread queue
-  // below: the drain's own block check waits it out, so the words queue
-  // here rather than bounce off startTurn's 409.
-  const groupTurn = activeGroupTurnForBot(botId);
-  if (capacity || threadBusy(botId, threadId) || groupTurn || parksBehindCoordination(botId, threadId)) {
-    const reason = capacity ? "capacity" as const : groupTurn ? "group-turn" as const : undefined;
+  const decision = admit("direct", {}, {
+    // A room turn holds the bot exactly like the sibling opened-thread queue
+    // below: the drain's own block check waits it out, so the words queue
+    // here rather than bounce off startTurn's 409.
+    atCapacity: botAtThreadCapacity(botId),
+    threadBusy: threadBusy(botId, threadId),
+    groupTurn: Boolean(activeGroupTurnForBot(botId)),
+    parksBehindCoordination: parksBehindCoordination(botId, threadId),
+  });
+  if (decision.action === "queue") {
     const queued = queueSteeredMessage(botId, threadId, text, {
       replyToId: replyTo?.id,
       sendId,
-      reason,
+      reason: decision.reason,
       prompt: promptWithReply(text, replyTo, cfg.profile?.name?.trim() || "User"),
       sender,
       trigger,
     });
-    return { ok: true as const, queued: true as const, queueId: queued.id, threadId, reason };
+    return { ok: true as const, queued: true as const, queueId: queued.id, threadId, reason: decision.reason };
   }
   const message = await startTurn(botId, text, { threadId, replyTo, sendId, sender, trigger });
   return { ok: true as const, threadId, message };
@@ -7152,14 +7165,16 @@ async function startOrQueueOpenedThread(
   unattended: boolean,
 ): Promise<{ state: "running" } | { state: "queued"; position: number } | { state: "failed"; error: string }> {
   const peerAsk = { botId, name: store.bot(botId)!.name, unattended: unattended || undefined };
-  // A room turn holds the bot too (startTurn refuses a direct turn during
-  // one); the drain's own block check already waits for it, so the words
-  // queue here rather than bounce.
-  const capacity = botAtThreadCapacity(botId);
-  const groupTurn = activeGroupTurnForBot(botId);
-  if (capacity || groupTurn) {
+  const decision = admit("opened-thread", {}, {
+    // A room turn holds the bot too (startTurn refuses a direct turn during
+    // one); the drain's own block check already waits for it, so the words
+    // queue here rather than bounce.
+    atCapacity: botAtThreadCapacity(botId),
+    groupTurn: Boolean(activeGroupTurnForBot(botId)),
+  });
+  if (decision.action === "queue") {
     queueSteeredMessage(botId, threadId, text, {
-      reason: capacity ? "capacity" : "group-turn",
+      reason: decision.reason,
       unattended,
       peerAsk,
     });
@@ -16462,7 +16477,8 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
               status: 409,
             });
           }
-          if (groupIsWorking(current)) {
+          const decision = admit("room", {}, { roomWorking: groupIsWorking(current) });
+          if (decision.action === "queue") {
             const queued = queueChannelMessage(current.id, threadId, text, {
               replyToId: replyTo?.id,
               sendId,
@@ -16530,21 +16546,30 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
       // turn — never both for the same words.
       const held = holdChannelQueue(current.id, targetThreadId, m[2]);
       if (!held) return json(res, 404, { error: "no such queued message" });
-      if (!speaker || !instance?.adapter.capabilities.queueing || !instance.adapter.steer) {
-        restoreHeldChannelQueue(held);
-        return json(res, 200, { ok: true, queued: true, threadId: targetThreadId });
-      }
       const [head] = held.items;
-      if (!head || head.id !== m[2]) {
+      const decision = admit("room-steer", {
+        speakerPresent: Boolean(speaker),
+        engineCanSteer: Boolean(instance?.adapter.capabilities.queueing && instance.adapter.steer),
+        isQueueHead: Boolean(head && head.id === m[2]),
+      });
+      if (decision.action === "refuse") {
         restoreHeldChannelQueue(held);
         return json(res, 409, { error: "only the first queued message can steer" });
+      }
+      if (decision.action === "queue") {
+        restoreHeldChannelQueue(held);
+        return json(res, 200, { ok: true, queued: true, threadId: targetThreadId });
       }
       // A reply target that cannot be resolved restores the held queue
       // before the request fails — the room's normal drain keeps the head.
       const replyTo = resolveHeldReplyTarget(held, resolveReplyTarget);
-      const steered = await instance.adapter
-        .steer(targetThreadId, promptWithReply(head.text, replyTo, cfg.profile?.name?.trim() || "User"))
-        .catch((): SteerOutcome => "indeterminate");
+      // steer was offered only when a live speaker instance could take it;
+      // the check carries that invariant to the type system.
+      const steered: SteerOutcome = instance?.adapter.steer
+        ? await instance.adapter
+            .steer(targetThreadId, promptWithReply(head.text, replyTo, cfg.profile?.name?.trim() || "User"))
+            .catch((): SteerOutcome => "indeterminate")
+        : "refused";
       // The steer was awaited adapter work: re-read every ownership
       // invariant before writing anything, exactly like the 1:1 path. A
       // speaker change, a channel switch, or a settled room restores the
@@ -18190,7 +18215,14 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
             if (store.activeLeaf(threadId) !== body.expectedActiveLeafId) {
               throw Object.assign(new Error("the conversation changed before this message could start"), { status: 409, code: "guarded_branch" });
             }
-            if (currentAtStart.busy || threadBusy(bot.id, threadId) || botAtThreadCapacity(bot.id) || parksBehindCoordination(bot.id, threadId) || activeGroupTurnForBot(bot.id)) {
+            const guardedAdmission = admit("guarded", {}, {
+              botBusy: currentAtStart.busy,
+              threadBusy: threadBusy(bot.id, threadId),
+              atCapacity: botAtThreadCapacity(bot.id),
+              parksBehindCoordination: parksBehindCoordination(bot.id, threadId),
+              groupTurn: Boolean(activeGroupTurnForBot(bot.id)),
+            });
+            if (guardedAdmission.action === "refuse") {
               throw Object.assign(new Error("wait for a free thread slot before retrying this message"), { status: 409, code: "guarded_busy" });
             }
             const message = await startTurn(bot.id, text, { threadId, replyTo, sendId, sender: messageSender(auth), trigger });
@@ -18208,7 +18240,14 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
             // admission can hand it to the provider natively.
             const carriesImages = extractTurnImages(text).images.length > 0;
             const steerTarget = handoffs.current(threadId);
-            if (!carriesImages && !computerSelectionTurns.get(threadId)?.selected && instance?.adapter.capabilities.queueing && instance.adapter.steer) {
+            const busyAdmission = admit("direct-busy", {
+              carriesImages,
+              pendingComputerSelection: Boolean(computerSelectionTurns.get(threadId)?.selected),
+              engineCanSteer: Boolean(instance?.adapter.capabilities.queueing && instance.adapter.steer),
+            });
+            // steer was offered only when a live instance could take it;
+            // the second check carries that fact to the type system.
+            if (busyAdmission.action === "steer" && instance?.adapter.steer) {
               steered = await instance.adapter
                 .steer(threadId, promptWithReply(text, replyTo, cfg.profile?.name?.trim() || "User"))
                 .catch((): SteerOutcome => "indeterminate");
