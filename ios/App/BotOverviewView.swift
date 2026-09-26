@@ -48,6 +48,26 @@ struct BotOverviewView: View {
                     }
                 }
 
+                if let grants = overview.grants {
+                    Section("App tools") {
+                        if grants.isEmpty {
+                            // The record exists but grants nothing: stronger
+                            // than "no apps connected", and worth its own line.
+                            Text("No tools granted on any connected app.")
+                                .foregroundStyle(.secondary)
+                        } else {
+                            ForEach(grants, id: \.slug) { grant in
+                                HStack {
+                                    Text(grant.slug)
+                                    Spacer()
+                                    Text(toolsLabel(grant))
+                                        .foregroundStyle(.secondary)
+                                }
+                            }
+                        }
+                    }
+                }
+
                 Section("Won't") {
                     ForEach(Array(overview.wont.enumerated()), id: \.offset) { _, line in
                         Label(line, systemImage: "hand.raised")
@@ -98,6 +118,17 @@ struct BotOverviewView: View {
             failed = false
         } else {
             failed = true
+        }
+    }
+
+    /// The same three summaries the desktop grant editor shows: every tool,
+    /// an exact list, or none. Read-only here — grants are assigned on the
+    /// computer, never from a paired phone.
+    private func toolsLabel(_ grant: BotOverviewGrant) -> String {
+        switch grant.level {
+        case .all: "All tools"
+        case .partial: grant.toolCount == 1 ? "1 tool" : "\(grant.toolCount) tools"
+        case .none: "No tools"
         }
     }
 }

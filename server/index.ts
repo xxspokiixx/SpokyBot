@@ -2842,6 +2842,7 @@ async function botOverview(bot: BotRecord): Promise<BotOverview> {
       approvePeerComms: bot.approvePeerComms,
       peers: bot.peers,
       composio: bot.composio,
+      connectorTools: bot.connectorTools,
       browser: bot.browser,
       chiefOfStaff: bot.chiefOfStaff,
       managedSections: bot.managedSections,
