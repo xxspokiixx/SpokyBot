@@ -1018,6 +1018,33 @@ export async function callTool(name: string, args: Json, context: ToolCallContex
     });
     return confirmationResult(r, "the profile change", "profile");
   }
+  if (name === "propose_model") {
+    const raw = args.model_selection;
+    const fields = typeof raw === "object" && raw !== null && !Array.isArray(raw) ? raw as Record<string, unknown> : null;
+    if (!fields || typeof fields.instanceId !== "string" || !fields.instanceId.trim() || typeof fields.model !== "string" || !fields.model.trim()) {
+      return { text: "propose_model needs model_selection with instanceId and model.", isError: true };
+    }
+    if ((fields.effort !== undefined && (typeof fields.effort !== "string" || !fields.effort.trim()))
+      || (fields.variant !== undefined && (typeof fields.variant !== "string" || !fields.variant.trim()))) {
+      return { text: "propose_model effort and variant must be non-empty strings when supplied.", isError: true };
+    }
+    const selection: Json = { instanceId: fields.instanceId.trim(), model: fields.model.trim() };
+    if (typeof fields.effort === "string" && fields.effort.trim()) selection.effort = fields.effort.trim();
+    if (typeof fields.variant === "string" && fields.variant.trim()) selection.variant = fields.variant.trim();
+    const forBotId = String(args.for_bot_id ?? "").trim();
+    const r = await api("/api/internal/model-requests", {
+      method: "POST",
+      body: JSON.stringify({
+        fromBotId: BOT_ID,
+        fromThreadId: THREAD_ID,
+        modelSelection: selection,
+        reason: args.reason,
+        // JSON.stringify drops the key entirely when no target was named
+        forBotId: forBotId || undefined,
+      }),
+    });
+    return confirmationResult(r, "the default model change", "model");
+  }
   if (name === "memory_update") {
     if (!["append", "replace", "remove", "supersede"].includes(String(args.action))
       || (args.action !== "remove" && (typeof args.text !== "string" || !args.text.trim()))

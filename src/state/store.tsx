@@ -22,6 +22,7 @@ import { approvalModeFor, type ApprovalMode } from "../../shared/approval-mode";
 import type { MascotBodyId } from "../../shared/mascot-bodies";
 import type { QuestionRequestCardData } from "../../shared/ask-question";
 import type { ProfileRequestCardData } from "../../shared/profile-request";
+import type { ModelRequestCardData } from "../../shared/model-request";
 import type { RoutineRequestCardData } from "../../shared/routine-request";
 import type { RoutineRunCardData } from "../../shared/routine-run";
 import type { GroupGoalRunCardData } from "../../shared/group-goal-run";
@@ -107,6 +108,8 @@ export interface OptionCardData {
   skillRequest?: SkillRequestCardData;
   /** Persisted profile proposal used by the server when the user confirms it. */
   profileRequest?: ProfileRequestCardData;
+  /** Persisted default-model proposal used by the server when the user confirms it. */
+  modelRequest?: ModelRequestCardData;
   teamSetupRequest?: import("../../shared/team-setup").TeamSetupRequest;
   /** The model's own questions and options (Claude's AskUserQuestion), so
    * the card offers choices instead of an unanswerable Allow/Deny. */

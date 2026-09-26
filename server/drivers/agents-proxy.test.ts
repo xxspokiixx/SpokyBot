@@ -75,6 +75,9 @@ let routineRequestResponse: unknown = DEFAULT_ROUTINE_RESPONSE;
 let lastProfileRequestBody: any = null;
 const DEFAULT_PROFILE_RESPONSE = { requestId: "profile-request-1", summary: "Name → Kiwi" };
 let profileRequestResponse: unknown = DEFAULT_PROFILE_RESPONSE;
+let lastModelRequestBody: any = null;
+const DEFAULT_MODEL_RESPONSE = { requestId: "model-request-1", summary: "Default engine/model → codex gpt-5" };
+let modelRequestResponse: unknown = DEFAULT_MODEL_RESPONSE;
 const DEFAULT_TEAM_RESPONSE = { requestId: "team-request-1", title: "Requested team change" };
 let teamRequestResponse: unknown = DEFAULT_TEAM_RESPONSE;
 let lastTeamRequestBody: any = null;
@@ -119,6 +122,7 @@ afterEach(() => {
   failSavingResult = false;
   routineRequestResponse = DEFAULT_ROUTINE_RESPONSE;
   profileRequestResponse = DEFAULT_PROFILE_RESPONSE;
+  modelRequestResponse = DEFAULT_MODEL_RESPONSE;
   teamRequestResponse = DEFAULT_TEAM_RESPONSE;
   skillStageResponse = DEFAULT_SKILL_RESPONSE;
   computerRequests = [];
@@ -128,6 +132,7 @@ afterEach(() => {
 
 function setProposalResponse(tool: string, response: unknown) {
   if (tool === "propose_profile") profileRequestResponse = response;
+  else if (tool === "propose_model") modelRequestResponse = response;
   else if (tool === "propose_team_setup" || tool === "propose_bot_deletion") teamRequestResponse = response;
   else if (tool === "skill_manage") skillStageResponse = response;
   else routineRequestResponse = response;
@@ -328,6 +333,16 @@ beforeAll(async () => {
         lastProfileRequestBody = JSON.parse(data);
         res.writeHead(201, { "content-type": "application/json" });
         res.end(JSON.stringify(profileRequestResponse));
+      });
+      return;
+    }
+    if (req.method === "POST" && req.url === "/api/internal/model-requests") {
+      let data = "";
+      req.on("data", (c) => (data += c));
+      req.on("end", () => {
+        lastModelRequestBody = JSON.parse(data);
+        res.writeHead(201, { "content-type": "application/json" });
+        res.end(JSON.stringify(modelRequestResponse));
       });
       return;
     }
@@ -597,6 +612,7 @@ describe("agents-proxy MCP surface", () => {
       "propose_routine",
       "propose_routine_action",
       "propose_profile",
+      "propose_model",
       "skills_list",
       "skill_manage",
     ]);
@@ -1842,6 +1858,52 @@ describe("agents-proxy MCP surface", () => {
     expect(res.result.isError).toBe(true);
     expect(res.result.content[0].text).toContain("needs at least one of name, title, description, soul, cwd, notifications, or speakReplies");
     expect(lastProfileRequestBody).toBeNull();
+  });
+
+  it("propose_model posts the trimmed selection and reason to the internal route", async () => {
+    lastModelRequestBody = null;
+    const res = await callTool("propose_model", {
+      model_selection: { instanceId: " codex ", model: " gpt-5 ", effort: " high " },
+      reason: "asked",
+    });
+    expect(lastModelRequestBody).toEqual({
+      fromBotId: "bot-asker",
+      fromThreadId: "thread-asker-routine",
+      modelSelection: { instanceId: "codex", model: "gpt-5", effort: "high" },
+      reason: "asked",
+    });
+    expect(res.result.content[0].text).toContain("confirmation card is now visible");
+    expect(res.result.content[0].text).toContain("do not claim the model was created or changed");
+    expect(res.result.isError).toBeFalsy();
+  });
+
+  it("propose_model forwards for_bot_id when proposing for another bot", async () => {
+    lastModelRequestBody = null;
+    await callTool("propose_model", {
+      model_selection: { instanceId: "codex", model: "gpt-5" },
+      reason: "asked",
+      for_bot_id: "bot-helper",
+    });
+    expect(lastModelRequestBody).toMatchObject({ forBotId: "bot-helper" });
+  });
+
+  it("propose_model refuses a missing selection without calling the harness", async () => {
+    lastModelRequestBody = null;
+    const res = await callTool("propose_model", { model_selection: { instanceId: "codex" }, reason: "asked" });
+    expect(res.result.isError).toBe(true);
+    expect(res.result.content[0].text).toContain("needs model_selection with instanceId and model");
+    expect(lastModelRequestBody).toBeNull();
+  });
+
+  it("propose_model refuses wrong-typed effort or variant without calling the harness", async () => {
+    lastModelRequestBody = null;
+    const res = await callTool("propose_model", {
+      model_selection: { instanceId: "codex", model: "gpt-5", effort: 123, variant: "   " },
+      reason: "asked",
+    });
+    expect(res.result.isError).toBe(true);
+    expect(res.result.content[0].text).toContain("effort and variant must be non-empty strings");
+    expect(lastModelRequestBody).toBeNull();
   });
 
   it("rejects unknown tools with -32602", async () => {

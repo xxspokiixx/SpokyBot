@@ -412,6 +412,7 @@ import { RoutineRequestService } from "./routine-requests.ts";
 import { createOptionsCard } from "./options-card.ts";
 import { buildBotOverview, type BotOverview, connectedAppsFacts } from "./bot-overview.ts";
 import { ProfileRequestService } from "./profile-requests.ts";
+import { ModelRequestService } from "./model-requests.ts";
 import { TighteningRequestService } from "./tightening-requests.ts";
 import { TeamSetupError, TeamSetupRequestService } from "./team-setup-requests.ts";
 import type { TeamSetupRequest } from "../shared/team-setup.ts";
@@ -9329,19 +9330,54 @@ async function deleteBotWithLifecycle(botId: string, revalidate: () => void = ()
       }
 }
 
+/** Per-driver capability facts behind engine-switch warnings on proposal
+ * cards. A live registry instance decides; a shadow or unknown instance
+ * warns nothing rather than guessing from a stale catalog. */
+const driverCapabilitiesFor = (instanceId: string) => {
+  const instance = registry.get(instanceId);
+  return instance ? { driverKind: instance.driverKind, agentsMcp: instance.adapter.capabilities.agentsMcp === true } : undefined;
+};
+/** A Chief may target one section peer; anyone else only itself. Shared by
+ * profile and default-model proposals, and re-checked at confirm. */
+const chiefPeerTargetRule = (noun: string) => (proposerBotId: string, targetBotId: string): string | null => {
+  const proposer = store.bot(proposerBotId);
+  const target = store.bot(targetBotId);
+  if (!target) return "that bot no longer exists";
+  if (!proposer?.chiefOfStaff) return "only a section's Chief of Staff can change another bot's " + noun;
+  if (!canReachPeer(proposer, target)) return "that bot is not in a team this Chief is allowed to manage";
+  return null;
+};
+/** Shared model validation for team-setup cards and propose_model: the
+ * selection must resolve, and the destination driver must still support the
+ * bot's existing approval setup. */
+const validateModelProposal = (selection: ModelSelection, current?: BotRecord): string | null => {
+  const checked = checkedModelSelection(selection, undefined, true);
+  if (!checked.ok) return checked.error;
+  if (current?.approvalGrant) return "Wait for the approval-level confirmation before changing this bot's model";
+  if (current) {
+    const mode = approvalModeFor(current);
+    const driver = registry.cliTarget(selection.instanceId)?.driverKind;
+    if (!supportsApprovalMode(driver, mode) || ((mode === "full" || mode === "custom") && driver !== registry.cliTarget(current.modelSelection.instanceId)?.driverKind)) {
+      return `@${current.name}'s existing permissions are incompatible with that provider. Change its permissions in bot settings, then propose the model change again.`;
+    }
+  }
+  return null;
+};
 const profileRequests = new ProfileRequestService({
   store,
   autoApply: fullAccessForSource,
   canPersist: proposalPersistence,
   // A Chief may change a section peer; anyone else only itself. Re-checked at confirm.
-  validateTarget: (proposerBotId, targetBotId) => {
-    const proposer = store.bot(proposerBotId);
-    const target = store.bot(targetBotId);
-    if (!target) return "that bot no longer exists";
-    if (!proposer?.chiefOfStaff) return "only a section's Chief of Staff can change another bot's profile";
-    if (!canReachPeer(proposer, target)) return "that bot is not in a team this Chief is allowed to manage";
-    return null;
-  },
+  validateTarget: chiefPeerTargetRule("profile"),
+});
+const modelRequests = new ModelRequestService({
+  store,
+  autoApply: fullAccessForSource,
+  canPersist: proposalPersistence,
+  // Same authority rule as profile proposals: a Chief may name one section peer.
+  validateTarget: chiefPeerTargetRule("default model"),
+  validateModel: validateModelProposal,
+  driverCapabilities: driverCapabilitiesFor,
 });
 const tighteningRequests = new TighteningRequestService({
   store,
@@ -9384,19 +9420,10 @@ const teamSetupRequests = new TeamSetupRequestService({
       [...directTurnDispatchClaims].some(([threadId, claim]) => threadId !== sourceThreadId && claim.botId === botId) ||
       Boolean(group && group.threadId !== sourceThreadId) || Boolean(run && run.threadId !== sourceThreadId);
   },
-  validateModel: (selection, current) => {
-    const checked = checkedModelSelection(selection, undefined, true);
-    if (!checked.ok) return checked.error;
-    if (current?.approvalGrant) return "Wait for the approval-level confirmation before changing this bot's model";
-    if (current) {
-      const mode = approvalModeFor(current);
-      const driver = registry.cliTarget(selection.instanceId)?.driverKind;
-      if (!supportsApprovalMode(driver, mode) || ((mode === "full" || mode === "custom") && driver !== registry.cliTarget(current.modelSelection.instanceId)?.driverKind)) {
-        return `@${current.name}'s existing permissions are incompatible with that provider. Change its permissions in bot settings, then propose the model change again.`;
-      }
-    }
-    return null;
-  },
+  validateModel: validateModelProposal,
+  // Engine-switch capability warnings come from the live registry, so a
+  // card built while an instance was down never guesses.
+  driverCapabilities: driverCapabilitiesFor,
   deleteBot: async (botId, revalidate, request) => {
     const result = await deleteBotWithLifecycle(botId, revalidate, request);
     if (result.status >= 400) throw new TeamSetupError(result.body.error ?? "The bot could not be deleted", result.status);
@@ -9630,6 +9657,41 @@ function resolveAndSendProfile(
     if (target) broadcast({ kind: "bot", bot: wireBot(target) });
     json(res, 200, {
       ok: true, outcome: "allowed-once", profileFields: result.fields,
+      ...(result.settlementPending ? { settlementPending: true, message: result.message } : {}),
+    });
+    return true;
+  }
+  if (result.state === "invalid") { json(res, result.status, { error: result.error }); return true; }
+  if (result.state === "already_settled") {
+    json(res, 200, { ok: true, outcome: result.behavior === "allow" ? "allowed-once" : "rejected", alreadySettled: true });
+    return true;
+  }
+  json(res, 200, { ok: true, outcome: "rejected" });
+  return true;
+}
+
+function resolveAndSendModel(
+  res: ServerResponse,
+  args: { botId: string; botName?: string; threadId: string; requestId: string; behavior: string },
+): boolean {
+  const card = store.messagesFor(args.threadId).find(
+    (message) => message.card?.requestId === args.requestId && message.card.modelRequest,
+  )?.card;
+  if (!card) return false;
+  const result = modelRequests.resolve(args);
+  if (!result.claimed) return false;
+  if (result.state === "applied" || result.state === "denied") {
+    appendDecision(DATA_DIR, {
+      threadId: args.threadId, requestId: args.requestId, botId: args.botId, botName: args.botName,
+      tool: "update_model", summary: card.subtitle,
+      decision: result.state === "applied" ? "user-approved" : "user-denied", source: "user",
+    });
+  }
+  if (result.state === "applied") {
+    const target = store.bot(result.targetBotId);
+    if (target) broadcast({ kind: "bot", bot: wireBot(target) });
+    json(res, 200, {
+      ok: true, outcome: "allowed-once",
       ...(result.settlementPending ? { settlementPending: true, message: result.message } : {}),
     });
     return true;
@@ -11514,11 +11576,11 @@ function proposalPersistence(botId: string, threadId: string) {
   if (fullAccessForSource(botId, threadId)) return { ok: true as const };
   // Only cards on the visible branch can be acted on from the composer.
   // Abandoned branches must not permanently consume the proposal quota.
-  // Routine, profile, tightening, and team-setup proposals share one budget
-  // per bot per thread, so one thread cannot pile up 8 of each.
+  // Routine, profile, default-model, tightening and team-setup proposals
+  // share one budget per bot per thread, so one thread cannot pile up 8 of each.
   const openRequests = store.activePath(threadId).filter(
     (message) =>
-      (message.card?.routineRequest?.botId === botId || message.card?.profileRequest?.botId === botId || message.card?.tighteningRequest?.botId === botId || message.card?.teamSetupRequest?.botId === botId) &&
+      (message.card?.routineRequest?.botId === botId || message.card?.profileRequest?.botId === botId || message.card?.modelRequest?.botId === botId || message.card?.tighteningRequest?.botId === botId || message.card?.teamSetupRequest?.botId === botId) &&
       !message.card.answered &&
       !message.card.dismissed && !message.card.expired,
   ).length;
@@ -13700,6 +13762,35 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
           threadId: body.fromThreadId, requestId: proposed.requestId, botId: from.id, botName: from.name,
           tool: "update_profile", summary: proposed.detail, decision: proposed.state === "applied" ? "auto-approved" : "card-shown",
           source: proposed.state === "applied" ? "full-access" : "profile",
+        });
+        return json(res, 201, proposed);
+      }
+      if (method === "POST" && path === "/api/internal/model-requests") {
+        const parsed = z.object({
+          fromBotId: z.string().min(1).max(128),
+          fromThreadId: z.string().min(1).max(128),
+          forBotId: z.string().max(128).optional(),
+          modelSelection: z.unknown(),
+          reason: z.unknown(),
+        }).strict().safeParse(await readInternalBody());
+        if (!parsed.success) return json(res, 400, { error: "invalid model proposal" });
+        const body = parsed.data;
+        const from = store.bot(body.fromBotId);
+        if (!from) return json(res, 403, { error: "unknown sender" });
+        const owner = connectorThread(from.id, body.fromThreadId);
+        if (!owner) return json(res, 403, { error: "source conversation does not belong to sender" });
+        const proposed = modelRequests.submit({
+          botId: from.id,
+          threadId: body.fromThreadId,
+          targetBotId: body.forBotId?.trim() || from.id,
+          selection: body.modelSelection,
+          reason: body.reason,
+          from: owner.group ? { botId: from.id, name: from.name, color: from.color } : undefined,
+        });
+        appendDecision(DATA_DIR, {
+          threadId: body.fromThreadId, requestId: proposed.requestId, botId: from.id, botName: from.name,
+          tool: "update_model", summary: proposed.detail, decision: proposed.state === "applied" ? "auto-approved" : "card-shown",
+          source: proposed.state === "applied" ? "full-access" : "model",
         });
         return json(res, 201, proposed);
       }
@@ -18918,6 +19009,13 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
           requestId: String(body.requestId),
           behavior,
         })) return;
+        if (resolveAndSendModel(res, {
+          botId: bot.id,
+          botName: bot.name,
+          threadId: bot.threadId,
+          requestId: String(body.requestId),
+          behavior,
+        })) return;
         if (resolveAndSendTightening(res, {
           botId: bot.id,
           botName: bot.name,
@@ -19013,6 +19111,21 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
           if (resolveAndSendProfile(res, {
             botId: profileBotId,
             botName: profileOwner?.name,
+            threadId,
+            requestId,
+            behavior,
+          })) return;
+        }
+        const modelCard = store.messagesFor(threadId).find(
+          (message) => message.card?.requestId === requestId && message.card.modelRequest,
+        );
+        if (modelCard?.card?.modelRequest) {
+          const modelBotId = modelCard.from?.botId ?? store.botByThread(threadId)?.id;
+          if (!modelBotId) return json(res, 400, { error: "this model request has no valid owner" });
+          const modelOwner = store.bot(modelBotId);
+          if (resolveAndSendModel(res, {
+            botId: modelBotId,
+            botName: modelOwner?.name,
             threadId,
             requestId,
             behavior,

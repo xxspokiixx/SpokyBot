@@ -699,6 +699,35 @@ const toolDefinitions = (externalRuntime: boolean) => [
     },
   },
   {
+    name: "propose_model",
+    description:
+      "Submit a user-requested switch of this bot's default engine and model. Use the exact instance and model ids the person named, or for a Chief the ids from the team-setup catalog. The card warns about capabilities the switch gains or loses; existing threads keep their current models." + PROPOSAL_OUTCOME,
+    inputSchema: {
+      type: "object",
+      additionalProperties: false,
+      properties: {
+        model_selection: {
+          type: "object",
+          additionalProperties: false,
+          properties: {
+            instanceId: { type: "string", minLength: 1, description: "Engine instance id, for example codex or claude." },
+            model: { type: "string", minLength: 1, description: "Exact model id on that instance." },
+            effort: { type: "string", description: "Optional effort level the instance offers; omit for the engine default." },
+            variant: { type: "string", description: "Optional explicit model variant; choose this or effort, not both." },
+          },
+          required: ["instanceId", "model"],
+          description: "The new default selection.",
+        },
+        reason: { type: "string", minLength: 1, maxLength: 500, description: "One sentence the user will see explaining why." },
+        for_bot_id: {
+          type: "string",
+          description: "Chief of Staff only: the id of another bot in your section whose default model this changes. Omit to change your own.",
+        },
+      },
+      required: ["model_selection", "reason"],
+    },
+  },
+  {
     name: "skills_list",
     description:
       "List this bot's imported skills (enabled and disabled) and any staged skill writes waiting for the user to confirm. Use this before skill_manage to avoid duplicate names. Listing does not enable anything.",
