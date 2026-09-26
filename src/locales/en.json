@@ -1844,6 +1844,7 @@
   "vm.setup.recreate": "Delete and recreate",
   "vm.setup.prepareFirst": "Prepare the pinned Cua desktop above before replacing this VM.",
   "vm.setup.start": "Start Local VM",
+  "vm.setup.idleHint": "Choose Local VM for a bot to start it automatically. Idle desktops are recycled after 8 hours; files in the durable folder are kept.",
   "vm.setup.waiting": "Waiting for the desktop…",
   "vm.setup.create": "Create Local VM",
   "vm.setup.showCommand": "Show command",

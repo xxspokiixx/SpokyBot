@@ -12,6 +12,7 @@ import { removeTempDir, waitForExit } from "./testing/cleanup.ts";
 
 const ROOT = fileURLToPath(new URL("..", import.meta.url));
 let child: ChildProcess;
+let startServer: () => Promise<void>;
 let fixtureHome = "";
 let base = "";
 let stateFile = "";
@@ -103,23 +104,26 @@ beforeAll(async () => {
   }, computer: { driver: "boxAgent", config: { pollMs: 10 } } } }));
   const port = await freePortBlock([0, 1]);
   base = `http://127.0.0.1:${port}`;
-  child = spawn(process.execPath, ["--import", pathToFileURL(join(ROOT, "server/testing/group-local-vm-hooks.mjs")).href, join(ROOT, "server/index.ts")], {
-    cwd: ROOT, env: {
-      PATH: dirname(process.execPath), ...(process.env.SystemRoot ? { SystemRoot: process.env.SystemRoot } : {}),
-      HOME: fixtureHome, USERPROFILE: fixtureHome, OMB_DATA_DIR: data,
-      APPDATA: join(fixtureHome, "appdata"), LOCALAPPDATA: join(fixtureHome, "localappdata"),
-      TEMP: fixtureHome, TMP: fixtureHome, TMPDIR: fixtureHome,
-      OMB_PORT: String(port), OMB_WEBHOOK_PORT: String(port + 1), OMB_STATIC_DIR: ui, OMB_TEST_VM_STATE: stateFile,
-      OMB_BOX_API: `http://127.0.0.1:${boxPort}`,
-      OMB_USER_DATA: join(fixtureHome, "user-data"),
-    }, stdio: ["ignore", "pipe", "pipe"],
-  });
-  child.stdout!.on("data", () => {});
-  child.stderr!.on("data", c => { stderr += c; });
-  await until(async () => {
-    if (child.exitCode !== null) throw new Error(stderr);
-    try { return (await fetch(base + "/api/health")).ok; } catch { return false; }
-  }, Boolean);
+  startServer = async () => {
+    child = spawn(process.execPath, ["--import", pathToFileURL(join(ROOT, "server/testing/group-local-vm-hooks.mjs")).href, join(ROOT, "server/index.ts")], {
+      cwd: ROOT, env: {
+        PATH: dirname(process.execPath), ...(process.env.SystemRoot ? { SystemRoot: process.env.SystemRoot } : {}),
+        HOME: fixtureHome, USERPROFILE: fixtureHome, OMB_DATA_DIR: data,
+        APPDATA: join(fixtureHome, "appdata"), LOCALAPPDATA: join(fixtureHome, "localappdata"),
+        TEMP: fixtureHome, TMP: fixtureHome, TMPDIR: fixtureHome,
+        OMB_PORT: String(port), OMB_WEBHOOK_PORT: String(port + 1), OMB_STATIC_DIR: ui, OMB_TEST_VM_STATE: stateFile,
+        OMB_BOX_API: `http://127.0.0.1:${boxPort}`,
+        OMB_USER_DATA: join(fixtureHome, "user-data"),
+      }, stdio: ["ignore", "pipe", "pipe"],
+    });
+    child.stdout!.on("data", () => {});
+    child.stderr!.on("data", c => { stderr += c; });
+    await until(async () => {
+      if (child.exitCode !== null) throw new Error(stderr);
+      try { return (await fetch(base + "/api/health")).ok; } catch { return false; }
+    }, Boolean);
+  };
+  await startServer();
 });
 afterAll(async () => {
   if (stateFile) vmState();
@@ -151,6 +155,64 @@ const send = (id: string) => api("POST", `/api/groups/${id}/messages`, { text: "
 const stop = (id: string) => api("POST", `/api/groups/${id}/interrupt`, {});
 
 describe("Group Local VM ownership on the real isolated server", () => {
+  it("recovers only previously provisioned Auto VMs after idle removal and server restart, within the instance cap", async () => {
+    vmState({ containers: [] });
+    await api("PATCH", "/api/config", { localVm: { mode: "per-bot", maxInstances: 1 } });
+    const bots: any[] = [];
+    try {
+      for (const name of ["Returning VM", "Never had a VM", "Capacity holder"]) {
+        const { bot } = await api("POST", "/api/bots", { name });
+        await api("PATCH", `/api/bots/${bot.id}`, { browser: false });
+        bots.push(bot);
+      }
+      const [returning, fresh, holder] = bots;
+      const created = await api("POST", `/api/bots/${returning.id}/local-computer/run`, {});
+      expect(created.workspace_path.startsWith(fixtureHome)).toBe(true);
+      const saved = join(created.workspace_path, "saved.txt");
+      writeFileSync(saved, "survives idle removal");
+      // Idle cleanup removes only this container; its workspace survives.
+      await api("POST", `/api/bots/${returning.id}/local-computer/remove`, {});
+      await api("POST", `/api/bots/${holder.id}/local-computer/run`, {});
+      await waitForExit(child, { signal: "SIGTERM" });
+      await startServer();
+
+      const turn = async (bot: any) => {
+        rmSync(dumpFile, { force: true });
+        rmSync(finishFile, { force: true });
+        await api("POST", `/api/bots/${bot.id}/messages`, { text: "Use the available computer." });
+        const mounted = computer(await dump());
+        writeFileSync(finishFile, "finish");
+        await idle(bot.id);
+        return mounted;
+      };
+      expect(await turn(returning)).toBeUndefined(); // Capacity is still occupied.
+      const before = JSON.parse(readFileSync(stateFile, "utf8")).actions.length;
+      await api("POST", `/api/bots/${holder.id}/local-computer/remove`, {});
+      rmSync(stateFile + ".entered", { force: true });
+      expect(await turn(fresh)).toBeUndefined(); // Free capacity does not authorize its first VM.
+      expect(existsSync(stateFile + ".entered")).toBe(false);
+      const recovered = await turn(returning);
+      expect(recovered).toBeTruthy();
+      expect(JSON.stringify(recovered)).toContain(created.container_name);
+      expect(readFileSync(saved, "utf8")).toBe("survives idle removal");
+      expect(JSON.parse(readFileSync(stateFile, "utf8")).actions.slice(before)).toEqual([
+        { action: "remove", target: `bot:${createHash("sha256").update(holder.id).digest("hex")}` },
+        { action: "run", target: created.target_key },
+      ]);
+    } finally {
+      writeFileSync(finishFile, "finish");
+      for (const bot of bots) {
+        await api("POST", `/api/bots/${bot.id}/interrupt`, {});
+        await idle(bot.id);
+        await api("DELETE", `/api/bots/${bot.id}`);
+      }
+      await api("PATCH", "/api/config", { localVm: { mode: "shared", maxInstances: 2 } });
+      vmState();
+      await waitForExit(child, { signal: "SIGTERM" });
+      await startServer();
+    }
+  });
+
   it("executes and attaches only for the current VM owner, respecting takeover and expiry", async () => {
     const { bots, group } = await room();
     await send(group.id);

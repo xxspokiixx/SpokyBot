@@ -122,6 +122,7 @@ import {
   containerExec,
   containerRuntimeStatus,
   localVmRecreatableOnDemand,
+  localVmWorkspaceExists,
   perBotLocalVmTarget,
   SHARED_LOCAL_VM_TARGET,
   setupCommands,
@@ -5151,8 +5152,8 @@ const autoVmClaims: AutoVmClaimTable = new Map();
  * answers held. A free, ready VM claims in the time of one container
  * inspect; only a claim queued behind another holder outlives this. */
 const LAZY_VM_CLAIM_GRACE_MS = 5_000;
-/** Local VM targets this process has seen ready or recreatable — at boot, in
- * the inventory, or in a turn. Auto probes the container runtime for a VM
+/** Local VM targets with a durable workspace or seen ready/recreatable — at
+ * boot, in the inventory, or in a turn. Auto probes the container runtime for a VM
  * only when one of these exists, so an ordinary Auto turn on a machine with
  * no VM never pays for a docker or podman call. */
 const localVmSeen = new Set<string>();
@@ -5790,6 +5791,12 @@ void (async () => {
     noteLocalVmSeen(SHARED_LOCAL_VM_TARGET, status);
     if (shouldArmLocalVmIdle(status)) localVmIdleFor(SHARED_LOCAL_VM_TARGET).touch();
     return;
+  }
+  // Idle cleanup removes the container, not its provisioned workspace. Restore
+  // Auto eligibility before runtime discovery, including when it is offline.
+  for (const bot of store.bots) {
+    const target = perBotLocalVmTarget(bot.id);
+    if (localVmWorkspaceExists(target)) localVmSeen.add(target.key);
   }
   const runtime = await containerRuntimeStatus().catch(() => null);
   if (!runtime?.runtime || !runtime.daemonUp) return;
