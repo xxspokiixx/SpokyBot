@@ -1040,6 +1040,7 @@
   "model.loadedNow": "Loaded now",
   "model.noLocal": "No local models found",
   "model.noLocalHint": "Start oMLX, Ollama, Unsloth, LM Studio, or EXO, then reopen this picker.",
+  "model.lookingLocal": "Looking for local models…",
   "model.available": "{count} available",
   "model.noProviders": "No model providers are available.",
   "model.noMatch": "Nothing matches “{query}”",
