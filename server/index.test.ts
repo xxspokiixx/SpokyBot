@@ -8720,6 +8720,108 @@ describe("harness HTTP API", () => {
     }
   });
 
+  it("keeps a proposed tightening inert until confirmed, fails closed when loosened, and never leaks the receipt", async () => {
+    const bot = (await api("POST", "/api/bots", { name: "Scout" })).body.bot;
+    try {
+      // Start from Auto with one standing grant, so tightening to Edits is a
+      // real reduction and the loosened-since path stays reachable.
+      await api("PATCH", `/api/bots/${bot.id}`, { approvalMode: "auto", alwaysAllow: ["Bash"] });
+      const token = await mintTestCapability(BASE, bot.id, bot.threadId);
+      const internalHeaders = {
+        authorization: `Bearer ${token}`,
+        "content-type": "application/json",
+      };
+
+      // Escalation is refused before any card exists.
+      const escalation = await fetch(`${BASE}/api/internal/tightening-requests`, {
+        method: "POST",
+        headers: internalHeaders,
+        body: JSON.stringify({ fromBotId: bot.id, fromThreadId: bot.threadId, intents: { approvalMode: "full" }, reason: "not allowed" }),
+      });
+      expect(escalation.status).toBe(400);
+
+      const proposal = await fetch(`${BASE}/api/internal/tightening-requests`, {
+        method: "POST",
+        headers: internalHeaders,
+        body: JSON.stringify({ fromBotId: bot.id, fromThreadId: bot.threadId, intents: { alwaysAllow: ["Bash"] }, reason: "incident lockdown" }),
+      });
+      expect(proposal.status).toBe(201);
+      const proposed = z.object({ requestId: z.string() }).passthrough().parse(await proposal.json());
+      const state = (await api("GET", "/api/bots")).body;
+      const wireScout = state.bots.find((candidate: { id: string }) => candidate.id === bot.id);
+      const card = wireScout
+        ?.messages.find((message: { card?: { requestId?: string } }) => message.card?.requestId === proposed.requestId);
+      expect(card?.card).toMatchObject({
+        tool: "tighten_permissions",
+        tighteningRequest: { botId: bot.id, targetBotId: bot.id, intents: { alwaysAllow: ["Bash"] } },
+      });
+      expect(wireScout?.approvalMode).toBe("auto");
+      expect(wireScout?.alwaysAllow).toEqual(["Bash"]);
+
+      // A human adds a new standing grant while the card sits open: the
+      // confirmation must fail closed rather than apply the stale card.
+      await api("PATCH", `/api/bots/${bot.id}`, { alwaysAllow: ["Bash", "WebSearch"] });
+      const stale = await api("POST", `/api/threads/${bot.threadId}/respond`, { requestId: proposed.requestId, behavior: "allow" });
+      expect(stale.status).toBe(409);
+
+      // A fresh card against the live state applies on confirm.
+      const againResponse = await fetch(`${BASE}/api/internal/tightening-requests`, {
+        method: "POST",
+        headers: internalHeaders,
+        body: JSON.stringify({ fromBotId: bot.id, fromThreadId: bot.threadId, intents: { approvalMode: "edits" }, reason: "incident lockdown" }),
+      });
+      const again = z.object({ requestId: z.string() }).passthrough().parse(await againResponse.json());
+      const ok = await api("POST", `/api/threads/${bot.threadId}/respond`, { requestId: again.requestId, behavior: "allow" });
+      expect(ok.body).toMatchObject({ ok: true, outcome: "allowed-once", tighteningFields: ["approvalMode"] });
+      const after = (await api("GET", "/api/bots")).body.bots.find((candidate: { id: string }) => candidate.id === bot.id);
+      expect(after.approvalMode).toBe("edits");
+      expect(after.autoApprove).toBe(false);
+      // The durable receipt exists server-side but never crosses the wire.
+      expect(after).not.toHaveProperty("lastTighteningRequestId");
+
+      // decisions audit
+      await expect.poll(async () => {
+        const decisions = (await api("GET", "/api/decisions")).body.decisions;
+        return decisions.filter((d: any) => d.requestId === again.requestId).map((d: any) => `${d.decision}:${d.source}`).sort();
+      }).toEqual(["card-shown:tightening", "user-approved:user"]);
+    } finally {
+      await api("POST", `/api/bots/${bot.id}/interrupt`);
+      await api("DELETE", `/api/bots/${bot.id}`);
+    }
+  });
+
+  it("counts tightening cards against the shared proposal budget", async () => {
+    const bot = (await api("POST", "/api/bots", { name: "Scout" })).body.bot;
+    try {
+      // A standing grant keeps every tightening proposal a real reduction,
+      // so eight cards can pile up without touching live authority.
+      await api("PATCH", `/api/bots/${bot.id}`, { approvalMode: "auto", alwaysAllow: ["Bash"] });
+      const token = await mintTestCapability(BASE, bot.id, bot.threadId);
+      const internalHeaders = {
+        authorization: `Bearer ${token}`,
+        "content-type": "application/json",
+      };
+      const proposeTightening = () =>
+        fetch(`${BASE}/api/internal/tightening-requests`, {
+          method: "POST",
+          headers: internalHeaders,
+          body: JSON.stringify({ fromBotId: bot.id, fromThreadId: bot.threadId, intents: { alwaysAllow: ["Bash"] }, reason: "incident lockdown" }),
+        });
+
+      // Tightening cards consume the same per-thread budget as the other
+      // proposal kinds; eight open cards fill it.
+      for (let index = 0; index < 8; index += 1) {
+        expect((await proposeTightening()).status).toBe(201);
+      }
+      const ninth = await proposeTightening();
+      expect(ninth.status).toBe(429);
+      expect(await ninth.json()).toMatchObject({ error: "confirm or cancel an existing proposal first" });
+    } finally {
+      await api("POST", `/api/bots/${bot.id}/interrupt`);
+      await api("DELETE", `/api/bots/${bot.id}`);
+    }
+  });
+
   it("only lets a section's Chief of Staff propose (and hold) a change to another bot's profile", async () => {
     const a = (await api("POST", "/api/bots", { name: "Ari" })).body.bot;
     const b = (await api("POST", "/api/bots", { name: "Bo" })).body.bot;

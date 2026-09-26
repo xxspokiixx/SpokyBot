@@ -17,6 +17,7 @@ import type { CredentialTargetId } from "./credential-request.ts";
 import type { TeamSetupRequest } from "./team-setup.ts";
 import type { RoutineRequestCardData } from "./routine-request.ts";
 import type { ProfileRequestCardData } from "./profile-request.ts";
+import type { TighteningRequestCardData } from "./tightening-request.ts";
 import type { SkillRequestCardData } from "./skill-request.ts";
 import type { QuestionRequestCardData } from "./ask-question.ts";
 import type { RoutineRunCardData } from "./routine-run.ts";
@@ -470,6 +471,8 @@ export interface OptionCardData {
   routineRequest?: RoutineRequestCardData;
   /** A durable profile-change proposal (propose_profile). */
   profileRequest?: ProfileRequestCardData;
+  /** A durable authority-tightening proposal (propose_tightening). */
+  tighteningRequest?: TighteningRequestCardData;
   teamSetupRequest?: TeamSetupRequest;
   /** A durable learned-skill proposal. */
   skillRequest?: SkillRequestCardData;

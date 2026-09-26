@@ -405,6 +405,7 @@ import { RoutineRequestService } from "./routine-requests.ts";
 import { createOptionsCard } from "./options-card.ts";
 import { buildBotOverview, type BotOverview, connectedAppsFacts } from "./bot-overview.ts";
 import { ProfileRequestService } from "./profile-requests.ts";
+import { TighteningRequestService } from "./tightening-requests.ts";
 import { TeamSetupError, TeamSetupRequestService } from "./team-setup-requests.ts";
 import type { TeamSetupRequest } from "../shared/team-setup.ts";
 import { profileRevision, profileSnapshot } from "./profile-revision.ts";
@@ -2706,7 +2707,7 @@ const wireTask = (task: TaskRecord): WireTask => {
 };
 
 const wireBot = (bot: BotRecord): WireBot => {
-  const { resumeCursors: _resumeCursors, tasks, approvalGrant, lastProfileRequestId: _lastProfileRequestId, lastTeamSetupReceipt: _lastTeamSetupReceipt, packageBase: _packageBase, ...rest } = bot;
+  const { resumeCursors: _resumeCursors, tasks, approvalGrant, lastProfileRequestId: _lastProfileRequestId, lastTighteningRequestId: _lastTighteningRequestId, lastTeamSetupReceipt: _lastTeamSetupReceipt, packageBase: _packageBase, ...rest } = bot;
   // An elevated selection is inert until the desktop confirms its exact
   // private reply. Every ordinary client sees the effective Ask state during
   // that two-phase window, never a grant that may still roll back.
@@ -2720,7 +2721,7 @@ const wireBot = (bot: BotRecord): WireBot => {
 /** The correlated private response carries the requested value so Electron
  * can validate it before sending the confirmation that makes it effective. */
 const wireTrustedApprovalBot = (bot: NonNullable<ReturnType<typeof store.bot>>) => {
-  const { resumeCursors: _resumeCursors, tasks, approvalGrant: _approvalGrant, lastProfileRequestId: _lastProfileRequestId, lastTeamSetupReceipt: _lastTeamSetupReceipt, packageBase: _packageBase, ...rest } = bot;
+  const { resumeCursors: _resumeCursors, tasks, approvalGrant: _approvalGrant, lastProfileRequestId: _lastProfileRequestId, lastTighteningRequestId: _lastTighteningRequestId, lastTeamSetupReceipt: _lastTeamSetupReceipt, packageBase: _packageBase, ...rest } = bot;
   return { ...rest, approvalMode: approvalModeFor(rest), avatarUrl: rest.avatarUrl ?? null, ...(tasks ? { tasks: tasks.map(wireTask) } : {}) };
 };
 
@@ -9273,6 +9274,33 @@ const profileRequests = new ProfileRequestService({
     return null;
   },
 });
+const tighteningRequests = new TighteningRequestService({
+  store,
+  autoApply: fullAccessForSource,
+  canPersist: proposalPersistence,
+  // Same reach as a profile change: a Chief may tighten a section peer;
+  // anyone else only itself. Re-checked at confirm.
+  validateTarget: (proposerBotId, targetBotId) => {
+    const proposer = store.bot(proposerBotId);
+    const target = store.bot(targetBotId);
+    if (!target) return "that bot no longer exists";
+    if (!proposer?.chiefOfStaff) return "only a section's Chief of Staff can change another bot's permissions";
+    if (!canReachPeer(proposer, target)) return "that bot is not in a team this Chief is allowed to manage";
+    return null;
+  },
+  // The card judges the effective mounts, so the snapshot resolves the same
+  // way the engine does: through the config-aware custom-server filter.
+  mountedMcpServers: (bot) => Object.keys(engineMcpServers(bot)),
+  enabledSkills: (botId) => listSkills(botId).filter((skill) => skill.enabled).map((skill) => skill.name),
+  disableSkill: (botId, name) => {
+    const disabled = setSkillEnabled(botId, name, false);
+    return typeof disabled === "object" && "error" in disabled ? { ok: false, error: disabled.error } : { ok: true };
+  },
+  // The owner's own routes stop a busy bot before touching its approval
+  // level or MCP mounts; the card asks for the same, except an emergency
+  // full/custom → ask downgrade, which applies first and stops after.
+  targetBusy: (botId) => Boolean(store.bot(botId)?.busy || activeGroupTurnForBot(botId)),
+});
 const teamSetupTeams = () => [...new Set(["", ...readSections(), ...store.bots.map((bot) => sectionKey(bot.section)), ...store.groups.map((group) => sectionKey(group.section))])];
 const teamSetupRequests = new TeamSetupRequestService({
   store, teams: teamSetupTeams, canAccessTeam, canPersist: proposalPersistence, maxBots: MAX_WORKSPACE_BOTS,
@@ -9535,6 +9563,50 @@ function resolveAndSendProfile(
       ok: true, outcome: "allowed-once", profileFields: result.fields,
       ...(result.settlementPending ? { settlementPending: true, message: result.message } : {}),
     });
+    return true;
+  }
+  if (result.state === "invalid") { json(res, result.status, { error: result.error }); return true; }
+  if (result.state === "already_settled") {
+    json(res, 200, { ok: true, outcome: result.behavior === "allow" ? "allowed-once" : "rejected", alreadySettled: true });
+    return true;
+  }
+  json(res, 200, { ok: true, outcome: "rejected" });
+  return true;
+}
+
+function resolveAndSendTightening(
+  res: ServerResponse,
+  args: { botId: string; botName?: string; threadId: string; requestId: string; behavior: string },
+): boolean {
+  const card = store.messagesFor(args.threadId).find(
+    (message) => message.card?.requestId === args.requestId && message.card.tighteningRequest,
+  )?.card;
+  if (!card) return false;
+  const result = tighteningRequests.resolve(args);
+  if (!result.claimed) return false;
+  if (result.state === "applied" || result.state === "denied") {
+    appendDecision(DATA_DIR, {
+      threadId: args.threadId, requestId: args.requestId, botId: args.botId, botName: args.botName,
+      tool: "tighten_permissions", summary: card.subtitle,
+      decision: result.state === "applied" ? "user-approved" : "user-denied", source: "user",
+    });
+  }
+  if (result.state === "applied") {
+    const target = store.bot(result.targetBotId);
+    if (target) broadcast({ kind: "bot", bot: wireBot(target) });
+    if (result.emergencyStop) {
+      // Mirror the owner's own route: the fail-closed Ask is already
+      // persisted, then the exact turn still holding the elevated
+      // per-turn snapshot is stopped. The response never waits on it.
+      void stopBotForEmergencyApprovalDowngrade(result.targetBotId).catch((error) => {
+        console.warn(
+          `[tightening] emergency stop failed for bot ${result.targetBotId}: ${
+            error instanceof Error ? error.message : String(error)
+          }. The fail-closed Ask is persisted, but the in-flight turn keeps its elevated access until it ends.`,
+        );
+      });
+    }
+    json(res, 200, { ok: true, outcome: "allowed-once", tighteningFields: result.fields });
     return true;
   }
   if (result.state === "invalid") { json(res, result.status, { error: result.error }); return true; }
@@ -11373,11 +11445,11 @@ function proposalPersistence(botId: string, threadId: string) {
   if (fullAccessForSource(botId, threadId)) return { ok: true as const };
   // Only cards on the visible branch can be acted on from the composer.
   // Abandoned branches must not permanently consume the proposal quota.
-  // Routine and profile proposals share one budget per bot per thread, so
-  // one thread cannot pile up 8 of each.
+  // Routine, profile, tightening, and team-setup proposals share one budget
+  // per bot per thread, so one thread cannot pile up 8 of each.
   const openRequests = store.activePath(threadId).filter(
     (message) =>
-      (message.card?.routineRequest?.botId === botId || message.card?.profileRequest?.botId === botId || message.card?.teamSetupRequest?.botId === botId) &&
+      (message.card?.routineRequest?.botId === botId || message.card?.profileRequest?.botId === botId || message.card?.tighteningRequest?.botId === botId || message.card?.teamSetupRequest?.botId === botId) &&
       !message.card.answered &&
       !message.card.dismissed,
   ).length;
@@ -13551,6 +13623,36 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
           threadId: body.fromThreadId, requestId: proposed.requestId, botId: from.id, botName: from.name,
           tool: "update_profile", summary: proposed.detail, decision: proposed.state === "applied" ? "auto-approved" : "card-shown",
           source: proposed.state === "applied" ? "full-access" : "profile",
+        });
+        return json(res, 201, proposed);
+      }
+      if (method === "POST" && path === "/api/internal/tightening-requests") {
+        const parsed = z.object({
+          fromBotId: z.string().min(1).max(128),
+          fromThreadId: z.string().min(1).max(128),
+          forBotId: z.string().max(128).optional(),
+          intents: z.unknown(),
+          reason: z.unknown(),
+        }).strict().safeParse(await readInternalBody());
+        if (!parsed.success) return json(res, 400, { error: "invalid tightening proposal" });
+        const body = parsed.data;
+        const from = store.bot(body.fromBotId);
+        if (!from) return json(res, 403, { error: "unknown sender" });
+        const owner = connectorThread(from.id, body.fromThreadId);
+        if (!owner) return json(res, 403, { error: "source conversation does not belong to sender" });
+        const targetBotId = body.forBotId?.trim() || from.id;
+        const proposed = tighteningRequests.submit({
+          botId: from.id,
+          threadId: body.fromThreadId,
+          targetBotId,
+          intents: body.intents,
+          reason: body.reason,
+          from: owner.group ? { botId: from.id, name: from.name, color: from.color } : undefined,
+        });
+        appendDecision(DATA_DIR, {
+          threadId: body.fromThreadId, requestId: proposed.requestId, botId: from.id, botName: from.name,
+          tool: "tighten_permissions", summary: proposed.detail, decision: proposed.state === "applied" ? "auto-approved" : "card-shown",
+          source: proposed.state === "applied" ? "full-access" : "tightening",
         });
         return json(res, 201, proposed);
       }
@@ -18591,6 +18693,13 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
           requestId: String(body.requestId),
           behavior,
         })) return;
+        if (resolveAndSendTightening(res, {
+          botId: bot.id,
+          botName: bot.name,
+          threadId: bot.threadId,
+          requestId: String(body.requestId),
+          behavior,
+        })) return;
         if (sendSkillResolution(res, resolveSkillRequest({
           botId: bot.id,
           botName: bot.name,
@@ -18679,6 +18788,21 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
           if (resolveAndSendProfile(res, {
             botId: profileBotId,
             botName: profileOwner?.name,
+            threadId,
+            requestId,
+            behavior,
+          })) return;
+        }
+        const tighteningCard = store.messagesFor(threadId).find(
+          (message) => message.card?.requestId === requestId && message.card.tighteningRequest,
+        );
+        if (tighteningCard?.card?.tighteningRequest) {
+          const tighteningBotId = tighteningCard.from?.botId ?? store.botByThread(threadId)?.id;
+          if (!tighteningBotId) return json(res, 400, { error: "this tightening request has no valid owner" });
+          const tighteningOwner = store.bot(tighteningBotId);
+          if (resolveAndSendTightening(res, {
+            botId: tighteningBotId,
+            botName: tighteningOwner?.name,
             threadId,
             requestId,
             behavior,

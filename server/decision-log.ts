@@ -59,6 +59,7 @@ export type DecisionSource =
   | "routine"
   | "skill"
   | "profile"
+  | "tightening"
   | "user"
   | "connector-scope"
   | "auto-review"
