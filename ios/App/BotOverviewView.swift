@@ -91,7 +91,7 @@ struct BotOverviewView: View {
                 }
             } else if failed {
                 Section {
-                    ContentUnavailableView("Couldn't load", systemImage: "wifi.exclamationmark")
+                    EmptyStateView("Couldn't load", systemImage: "wifi.exclamationmark")
                 }
             }
         }
