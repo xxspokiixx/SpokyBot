@@ -235,11 +235,21 @@ export interface FollowupPayload {
   /** Who the usage ledger books the turn these words start to. Absent on
    * rows written before this existed. */
   trigger?: UsageTrigger;
+  /** Aside-lane rows (kind "aside"): the peer whose words these are. The
+   * prompt carries the non-steering envelope; text stays the raw words. */
+  aside?: {
+    fromBotId: string;
+    fromBotName: string;
+    unattended?: boolean;
+    /** Comms depth captured when the aside was queued, so a degraded
+     * follow-up turn inherits the same one-hop chain limit. */
+    commsDepth: number;
+  };
 }
 export type FollowupStatus = "pending" | "dispatching" | "interrupted" | "cancelled";
 export interface ChatFollowup {
   id: string;
-  kind: "bot" | "channel";
+  kind: "bot" | "channel" | "aside";
   ownerId: string;
   threadId: string;
   status: FollowupStatus;

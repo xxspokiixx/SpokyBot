@@ -2,7 +2,7 @@
 // Fake of the pi coding agent's `--mode rpc --no-session` stdio surface, for
 // driver contract tests of server/drivers/pi.ts. Speaks pi's JSON-RPC-over-
 // stdio protocol: answers get_available_models / new_session / switch_session
-// / set_model, and streams a scripted turn in response to `prompt`. Failure
+// / set_model / steer, and streams a scripted turn in response to `prompt`. Failure
 // modes mirror how the real CLI misbehaves:
 //
 //   FAKE_PI_MODE   happy (default) | tooluse | permission | interleave | question-select | question-input
@@ -10,6 +10,9 @@
 //   FAKE_PI_MODELS comma-separated provider/model pairs (default "ollama-cloud/glm-5.2,openai/gpt-4o")
 //   FAKE_PI_DUMP   path to append {argv, env} JSON, so a test can assert argv shape
 //                  and env hygiene (no leaked secrets into the pi child).
+//   FAKE_PI_STEER_REFUSE script an explicit success:false steer refusal
+//   FAKE_PI_STEER_OUT_OF_ORDER hold the first steer's refusal until a second
+//                  frame arrives, then answer refusal-for-first / success-for-second
 
 import { appendFileSync, readFileSync } from "node:fs";
 
@@ -73,6 +76,9 @@ if (mode === "exit-early") {
 const send = (obj: any) => process.stdout.write(JSON.stringify(obj) + "\n");
 let sessionCounter = 0;
 let currentSessionFile: string | null = null;
+// FAKE_PI_STEER_OUT_OF_ORDER parks the first steer frame until a second one
+// arrives, so a test can force both waiters to exist before any response.
+const heldSteerFrames: any[] = [];
 
 // A faithful happy turn: a couple of text deltas then a terminal turn_end.
 const streamTurn = () => {
@@ -257,6 +263,43 @@ function handle(cmd: any) {
       else if (mode === "turn-error") streamErrorTurn();
       else streamTurn();
       return;
+    case "steer": {
+      // Mid-turn input frame: ack like the real runtime (success only after
+      // session.steer accepted it), echoing the frame's correlation id the
+      // way the real RPC runtime does. FAKE_PI_STEER_REFUSE scripts an
+      // explicit success:false refusal so the driver's tri-state mapping is
+      // testable.
+      if (process.env.FAKE_PI_DUMP) {
+        try {
+          appendFileSync(process.env.FAKE_PI_DUMP, JSON.stringify({ steer: { id: cmd.id, message: cmd.message } }) + "\n");
+        } catch {
+          /* never let dumping break a run */
+        }
+      }
+      const steerAck = (frame: any, success: boolean) =>
+        send({
+          type: "response",
+          command: "steer",
+          ...(frame.id !== undefined ? { id: frame.id } : {}),
+          ...(success ? { success: true } : { success: false, error: "fake pi: nothing to steer" }),
+        });
+      if (process.env.FAKE_PI_STEER_OUT_OF_ORDER) {
+        if (heldSteerFrames.length === 0) {
+          heldSteerFrames.push(cmd);
+          return;
+        }
+        // Both frames are now in flight: answer the FIRST with an explicit
+        // refusal and the SECOND with success, in that order, so a driver
+        // that keys waiters by command name alone hands the refusal to the
+        // wrong caller.
+        steerAck(heldSteerFrames[0], false);
+        steerAck(cmd, true);
+        heldSteerFrames.length = 0;
+        return;
+      }
+      steerAck(cmd, !process.env.FAKE_PI_STEER_REFUSE);
+      return;
+    }
     case "extension_ui_response":
       if (process.env.FAKE_PI_DUMP) {
         try {

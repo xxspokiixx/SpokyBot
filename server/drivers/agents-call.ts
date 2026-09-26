@@ -598,6 +598,21 @@ export async function callTool(name: string, args: Json, context: ToolCallContex
       };
     }
     if (r.busy) {
+      // Aside lane: the teammate was mid-turn on a seam-capable engine, so
+      // the harness folded the message into their running work as peer
+      // context. No new turn started and no reply is coming back through
+      // this call — the receipt says whether the words are already in the
+      // live turn or waiting for it to settle.
+      if (r.aside === "injected") {
+        return {
+          text: `${r.toBotName ?? "That bot"} is mid-turn; your message was handed to them as an aside — peer context folded into their current work, not a request that interrupts or replies. Finish your turn and treat their eventual output as possibly informed by it.`,
+        };
+      }
+      if (r.aside === "queued") {
+        return {
+          text: `${r.toBotName ?? "That bot"} is mid-turn; your aside is queued and will reach them as context when the turn settles. No reply is expected — finish your turn.`,
+        };
+      }
       // The harness queues the message as a delegation when it can; the
       // task id is the asker's claim ticket for the eventual reply.
       const taskId = String(r.taskId ?? "").trim();

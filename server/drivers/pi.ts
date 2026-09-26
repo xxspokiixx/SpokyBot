@@ -40,6 +40,7 @@ import type {
   RuntimeEvent,
   RuntimeEventListener,
   SendTurnInput,
+  SteerOutcome,
   TurnImageInput,
 } from "../contracts.ts";
 import { EFFORT_LEVELS } from "../../shared/wire.ts";
@@ -58,6 +59,12 @@ const DRIVER_KIND = "piAgent";
 const PI_ARGS = ["--mode", "rpc", "--no-session"];
 const PI_MODEL_UPDATE_ARGS = ["update", "--models", "--no-approve"];
 const NODE_ENV_FLAG = { ELECTRON_RUN_AS_NODE: "1" };
+
+/** pi answered a command with success:false — an explicit refusal from a
+ * live runtime, not a transport failure. Only steer branches on the
+ * difference today ("refused": provably not delivered, safe to re-queue);
+ * the handshake commands keep their catch-all ignore. */
+class PiRpcRefusalError extends Error {}
 
 type PiPromptImage = {
   type: "image";
@@ -486,6 +493,7 @@ export const PiDriver: ProviderDriver<PiConfig> = {
       turnId: string;
       pending: Map<string, (decision: { behavior: "allow" | "deny" | "answer"; message?: string }) => void>;
       child?: { stdin: { write: (s: string) => void } };
+      steer?: (text: string) => Promise<SteerOutcome>;
     }>();
 
     const emit = (event: RuntimeEvent) => {
@@ -583,6 +591,12 @@ export const PiDriver: ProviderDriver<PiConfig> = {
       let assistantText = "";
       // resolve one-shot RPC responses (new_session / switch_session / set_model)
       const responseWaiters = new Map<string, { resolve: (data: unknown) => void; reject: (err: Error) => void; timer: NodeJS.Timeout }>();
+      // Steer frames correlate by a unique per-request id, not the shared
+      // "steer" command name: two concurrent steers would otherwise overwrite
+      // each other's waiter, and a refusal response could reject the wrong
+      // caller — requeueing words pi already accepted. Every other command
+      // keeps its command-name key.
+      let steerSeq = 0;
       const rejectWaiters = (err: Error) => {
         for (const waiter of responseWaiters.values()) {
           clearTimeout(waiter.timer);
@@ -590,14 +604,14 @@ export const PiDriver: ProviderDriver<PiConfig> = {
         }
         responseWaiters.clear();
       };
-      const awaitResponse = (command: string, timeoutMs = 20_000) =>
+      const awaitResponse = (command: string, timeoutMs = 20_000, key = command) =>
         new Promise<unknown>((resolve, reject) => {
           const timer = setTimeout(() => {
-            responseWaiters.delete(command);
+            responseWaiters.delete(key);
             reject(new Error(`pi ${command} timed out`));
           }, timeoutMs);
           timer.unref?.();
-          responseWaiters.set(command, { resolve, reject, timer });
+          responseWaiters.set(key, { resolve, reject, timer });
         });
       child.stdin.on("error", () => rejectWaiters(new Error("pi stdin closed")));
       const send = (obj: Record<string, unknown>) => {
@@ -663,18 +677,50 @@ export const PiDriver: ProviderDriver<PiConfig> = {
         }
         settle(true, "cancelled");
       };
-      active.set(threadId, { stop, turnId, pending, child });
+
+      // Mid-turn input rides pi's native steer frame — the runtime queues
+      // it into the running agent without aborting the in-flight step, and
+      // answers success only after session.steer() accepted it. A success:
+      // false response is an explicit refusal (nothing consumed the words:
+      // safe to re-queue), while a death or timeout after the frame was
+      // written leaves the outcome unknowable — those are "indeterminate"
+      // so the caller can never run the words twice. Each frame carries a
+      // unique id that pi echoes on its response, so concurrent steers on
+      // the same turn never share or overwrite a waiter.
+      const steerActiveTurn = async (text: string): Promise<SteerOutcome> => {
+        if (settled || child.exitCode !== null || child.signalCode !== null) return "refused";
+        let ack: Promise<unknown>;
+        try {
+          const id = `steer:${++steerSeq}`;
+          ack = awaitResponse("steer", 20_000, id);
+          send({ type: "steer", id, message: text });
+        } catch {
+          // stdin closed before the frame was written: provably undelivered.
+          return "refused";
+        }
+        try {
+          await ack;
+          return "steered";
+        } catch (error) {
+          return error instanceof PiRpcRefusalError ? "refused" : "indeterminate";
+        }
+      };
+      active.set(threadId, { stop, turnId, pending, child, steer: steerActiveTurn });
 
       const onEvent = (evt: PiEvent) => {
         appendNative(threadId, { dir: "in", source: "pi.rpc", msg: evt });
         switch (evt.type) {
           case "response": {
-            if (evt.command && responseWaiters.has(evt.command)) {
-              const waiter = responseWaiters.get(evt.command)!;
-              responseWaiters.delete(evt.command);
+            // Resolve the echoed request id first (unique per steer);
+            // fall back to the command name for the handshake-style call
+            // sites, whose responses carry no id.
+            const key = typeof evt.id === "string" && responseWaiters.has(evt.id) ? evt.id : evt.command;
+            if (key && responseWaiters.has(key)) {
+              const waiter = responseWaiters.get(key)!;
+              responseWaiters.delete(key);
               clearTimeout(waiter.timer);
               if (evt.success) waiter.resolve(evt.data);
-              else waiter.reject(new Error(`pi ${evt.command} failed`));
+              else waiter.reject(new PiRpcRefusalError(`pi ${evt.command} failed`));
             }
             return;
           }
@@ -975,6 +1021,9 @@ export const PiDriver: ProviderDriver<PiConfig> = {
           // xhigh/max only land on models that expose them; pi rejects an
           // unsupported level and the turn keeps the engine default.
           effortLevels: EFFORT_LEVELS,
+          // pi's RPC mode takes a mid-turn steer frame the runtime queues
+          // into the running agent without aborting the current step.
+          queueing: true,
         },
         sendTurn,
         interruptTurn: async (threadId) => active.get(threadId)?.stop(),
@@ -992,6 +1041,10 @@ export const PiDriver: ProviderDriver<PiConfig> = {
             source: "user",
           });
           return decision.behavior === "allow" ? "allowed-once" : decision.behavior === "answer" ? "answered" : "rejected";
+        },
+        steer: async (threadId, text) => {
+          const entry = active.get(threadId);
+          return entry?.steer ? await entry.steer(text) : "refused";
         },
         hasSession: (threadId) => active.has(threadId),
         stopAll: async () => {

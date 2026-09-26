@@ -219,6 +219,12 @@ import { chiefForBot, INCIDENTS_THREAD_TITLE, IncidentLedger, incidentChip, inci
 /** A session_read answer competes with the transcript for the context
  * window; a computer-use turn's output can run to hundreds of KB. */
 const SESSION_READ_MAX_CHARS = 8_000;
+import {
+  attemptAsideInjection,
+  drainAsideMessages,
+  queueAsideMessage,
+  restoreAsideMessages,
+} from "./aside-queue.ts";
 import { promptWithReply, transcriptText } from "./replies.ts";
 import { admit } from "./admission.ts";
 import { _loadPending, buildDelegationFailurePrompt, buildDelegationRevivalPrompt, DELEGATION_TTL_MS, DelegationWakeBudget, discardDelegations, drainDelegations, expireStaleDelegations, findDelegationReceipt, pendingDelegationInfo, pendingDelegationSnapshot, pendingThreads, queueDelegation, recordDelegationReceipt, releaseDelegationsWaitingOn, summarizeDelegatedActivity, type DelegationReceipt, type QueueResult } from "./delegations.ts";
@@ -7133,6 +7139,61 @@ function drainQueuedSends() {
     (botId, threadId) => threadBusy(botId, threadId) || botAtThreadCapacity(botId) || Boolean(activeGroupTurnForBot(botId))
       || parksBehindCoordination(botId, threadId),
   );
+  // Asides always drain after person follow-ups (see drainAsideLane): the
+  // steer drain above can make a thread busy again, deferring its asides
+  // to the next boundary. Every path that clears a thread's send queue
+  // reaches this point, so the aside lane drains on all of them — not
+  // just turn.completed.
+  drainAsideLane();
+}
+
+/** The aside lane's boundary pass. Invoked at the end of drainQueuedSends, i.e. AFTER the steer drain on purpose:
+ * a thread with both waiting starts its person follow-up first, and that
+ * turn makes the thread busy again, so its asides defer to the next
+ * boundary — the person's correction always lands ahead of peer context.
+ * A thread already running a seam-capable turn gets its asides folded in
+ * mid-turn instead (one batched call); an idle thread degrades them to a
+ * single enveloped follow-up turn, exactly the shape the steer-queue
+ * gives queued person messages. */
+function drainAsideLane() {
+  if (!followupsReady) return;
+  void drainAsideMessages({
+    store,
+    inject: async (botId, threadId, prompt) => {
+      const bot = store.projectBotForTask(botId, threadId) ?? store.bot(botId);
+      if (!bot?.busy) return "refused";
+      const instance = runningTurnInstance(bot, threadId);
+      if (!instance?.adapter.capabilities.queueing || !instance.adapter.steer) return "refused";
+      return instance.adapter.steer(threadId, prompt).catch((): SteerOutcome => "indeterminate");
+    },
+    run: (botId, threadId, prompt, userMessage, excludeIds, head) =>
+      new Promise<void>((resolve, reject) => {
+        void startTurn(botId, prompt, {
+          threadId,
+          userMessage,
+          excludeMessageIds: excludeIds,
+          commsDepth: head.aside.commsDepth + 1,
+          unattended: head.aside.unattended === true,
+          peerAsk: {
+            botId: head.aside.fromBotId,
+            name: head.aside.fromBotName,
+            ...(head.aside.unattended ? { unattended: true } : {}),
+          },
+          onTurnSettled: resolve,
+        }).catch((err) => {
+          store.appendMessage(threadId, {
+            role: "bot", kind: "activity",
+            tool: {
+              name: `error: queued aside could not start — ${(err instanceof Error ? err.message : String(err)).slice(0, 120)}`,
+              ok: false,
+            },
+          });
+          resolve();
+        }).catch(reject);
+      }),
+    isBlocked: (botId, threadId) => threadBusy(botId, threadId) || botAtThreadCapacity(botId) || Boolean(activeGroupTurnForBot(botId))
+      || parksBehindCoordination(botId, threadId),
+  }).catch((error) => console.warn("aside-queue: drain failed", error));
 }
 
 /** Keep a person's words off the transcript until a direct-thread slot is
@@ -13994,7 +14055,51 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
             detail: "the teammate was busy; the ask was queued as a delegation instead",
           }) });
         };
-        if (target.busy) return queueBusyFallback();
+        // The aside lane: this ask was addressed to the conversation
+        // target.threadId holds, and that conversation is mid-turn. When
+        // the engine running it exposes a mid-turn seam, the words fold
+        // into the live turn as enveloped peer context — no interruption,
+        // no new turn, and the sender learns exactly how the send landed.
+        // A mid-turn injection is delivery, so it never routes through the
+        // peer-review card: review gates turns a peer would start, and a
+        // bot whose comms need approval keeps the delegation queue below.
+        const tryAsideDelivery = async (): Promise<Record<string, unknown> | null> => {
+          if (peerReviewRequired(from, fromThreadId)) return null;
+          // Busy elsewhere (room turn, sibling thread): the thread this ask
+          // targets is not the running one, so there is nothing to fold
+          // into here — the queue lane keeps it.
+          if (!threadBusy(toBotId, target.threadId)) return null;
+          const instance = runningTurnInstance(target, target.threadId);
+          if (!instance?.adapter.capabilities.queueing || !instance.adapter.steer) return null;
+          const steer = instance.adapter.steer;
+          queueAsideMessage(toBotId, target.threadId, message, {
+            fromBotId: from.id,
+            fromBotName: from.name,
+            unattended: isUnattended(from.id, fromThreadId),
+            commsDepth: depth,
+          });
+          const attempt = await attemptAsideInjection(store, toBotId, target.threadId, (_botId, threadId, prompt) =>
+            steer(threadId, prompt).catch((): SteerOutcome => "indeterminate"));
+          if (!attempt) return null;
+          return attempt.delivered
+            ? {
+                busy: true,
+                aside: "injected" as const,
+                toBotName: target.name,
+                message: `@${target.name} is mid-turn; your message was handed to them as an aside — peer context folded into their current work. It is not a request for a reply: continue your plan and treat their next output as possibly informed by it.`,
+              }
+            : {
+                busy: true,
+                aside: "queued" as const,
+                toBotName: target.name,
+                message: `@${target.name} is mid-turn and the aside could not be folded in yet; it is queued and will reach them as context when the turn settles. No reply is expected.`,
+              };
+        };
+        if (target.busy) {
+          const asideReceipt = await tryAsideDelivery();
+          if (asideReceipt) return json(res, 200, asideReceipt);
+          return queueBusyFallback();
+        }
         let currentFrom = from;
         let currentTarget = target;
 
@@ -21209,19 +21314,27 @@ setInterval(sweepThreadEventLogsNow, THREAD_LOG_RETENTION_SWEEP_MS).unref();
 // and a review notice, never hand them to a model for a second execution.
 for (const row of chatFollowups()) {
   if (row.status !== "dispatching" && row.status !== "interrupted") continue;
-  const owned = row.kind === "bot"
-    ? Boolean(store.taskByThread(row.ownerId, row.threadId))
-    : Boolean(store.groupByThread(row.threadId)?.id === row.ownerId);
+  const owned = row.kind === "channel"
+    ? Boolean(store.groupByThread(row.threadId)?.id === row.ownerId)
+    : Boolean(store.taskByThread(row.ownerId, row.threadId));
   if (!owned) { settleChatFollowups([row.id], "cancelled"); continue; }
   settleChatFollowups([row.id], "interrupted");
   const messages = store.messagesFor(row.threadId);
   const recovered = messages.find((message) => message.queueId === row.id && message.role === "user") ?? store.appendMessage(row.threadId, {
-    role: "user", kind: "text", text: row.payload.text, replyToId: row.payload.replyToId,
+    // Aside rows recover enveloped: the words may already have run mid-turn,
+    // and the recovered line must keep saying whose context it was.
+    role: "user", kind: "text", text: row.kind === "aside" ? row.payload.prompt ?? row.payload.text : row.payload.text, replyToId: row.payload.replyToId,
     sendId: row.payload.sendId, queueId: row.id, sender: row.payload.sender,
     ...(row.kind === "channel" ? { channelMode: row.payload.mode, via: row.payload.via } : {}),
+    ...(row.kind === "aside" ? {
+      aside: true,
+      peerAsk: row.payload.aside
+        ? { botId: row.payload.aside.fromBotId, name: row.payload.aside.fromBotName, ...(row.payload.aside.unattended ? { unattended: true } : {}) }
+        : undefined,
+    } : {}),
   });
   // Nor as a message a resumed session has not seen: count it as handed.
-  const recoveredTask = row.kind === "bot" ? store.taskByThread(row.ownerId, row.threadId) : undefined;
+  const recoveredTask = row.kind !== "channel" ? store.taskByThread(row.ownerId, row.threadId) : undefined;
   const order = store.activePath(row.threadId).filter(isContextMessage).map((m) => m.id);
   for (const [instanceId, state] of Object.entries(recoveredTask?.handedMessages ?? {})) {
     if (state.session !== undefined) store.setHandedMessages(row.ownerId, row.threadId, instanceId, recordHanded(state, order, [recovered.id]));
@@ -21237,6 +21350,7 @@ for (const row of chatFollowups()) {
   settleChatFollowups([row.id], null);
 }
 restoreSteeredMessages();
+restoreAsideMessages(store);
 restoreChannelMessages();
 
 // Repair known auto pins that conflict with Works on before dispatch starts.

@@ -388,6 +388,11 @@ export interface WireMessage {
   };
   /** user messages sent INTO a running turn (capabilities.queueing). */
   steered?: boolean;
+  /** user messages a peer bot handed to this thread's RUNNING turn through
+   * the non-interrupting aside lane: peer context folded in mid-turn, never
+   * a new request. The text is stored enveloped exactly as injected, so any
+   * later reader sees the sender and the not-steering framing. */
+  aside?: boolean;
   /** A user-role message that arrived through the server's HTTP API. */
   via?: "api";
   /** Which person sent this user message, when the workspace has more than
