@@ -8,6 +8,7 @@ import { createServer, type Server } from "node:http";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { afterAll, afterEach, beforeAll, describe, expect, it } from "vitest";
+import { childEnv } from "../testing/omb-env.ts";
 import { ToolResults } from "../tool-results.ts";
 import { waitForExit } from "../testing/cleanup.ts";
 import type { PeerDeliveryReceipt } from "../peer-delivery.ts";
@@ -403,7 +404,7 @@ beforeAll(async () => {
 
   child = spawn(process.execPath, [PROXY], {
     env: {
-      ...process.env,
+      ...childEnv(),
       // Recalled lines are dated on the machine's own clock, so the proxy runs
       // in a fixed zone here — otherwise every expectation below would depend
       // on where the test happens to run. +05:30 also keeps the half-hour
@@ -1922,7 +1923,7 @@ describe("standing external runtime", () => {
 
   beforeAll(async () => {
     external = spawn(process.execPath, [PROXY], {
-      env: { ...process.env, OMB_HARNESS_URL: `http://127.0.0.1:${stubPort}`, OMB_BOT_ID: "bot-asker",
+      env: { ...childEnv(), OMB_HARNESS_URL: `http://127.0.0.1:${stubPort}`, OMB_BOT_ID: "bot-asker",
         OMB_THREAD_ID: "thread-asker-routine", OMB_COMMS_TOKEN: TOKEN, OMB_TURN_DEPTH: "0",
         OMB_EXTERNAL_RUNTIME: "1", OMB_ROOM_TURN: "1", OMB_OWN_THREAD_CREATION: "1",
         OMB_SKILL_AUTHORING_ENABLED: "1", OMB_SHARED_COMPUTERS_ENABLED: "1" },
@@ -2021,7 +2022,7 @@ describe("with computer sharing off (the default)", () => {
   beforeAll(async () => {
     gated = spawn(process.execPath, [PROXY], {
       env: {
-        ...process.env,
+        ...childEnv(),
         OMB_HARNESS_URL: `http://127.0.0.1:${stubPort}`,
         OMB_BOT_ID: "bot-asker",
         OMB_THREAD_ID: "thread-asker-routine",
@@ -2089,7 +2090,7 @@ describe("coordinate_bots arguments (room turn)", () => {
   beforeAll(async () => {
     room = spawn(process.execPath, [PROXY], {
       env: {
-        ...process.env,
+        ...childEnv(),
         OMB_HARNESS_URL: `http://127.0.0.1:${stubPort}`,
         OMB_BOT_ID: "bot-asker",
         OMB_THREAD_ID: "thread-asker-routine",
