@@ -2011,6 +2011,7 @@
   "routines.logsFor": "Run logs for {name}",
   "routines.logsHint": "Recent saved runs across your bots. Open a run for its result, error, and execution thread.",
   "routines.markAllSeen": "Mark all as read",
+  "routines.unread": "Unseen failure",
   "routines.activeSchedule": "Active",
   "routines.pausedSchedule": "Paused",
   "routines.finishedSchedule": "Finished schedule",
