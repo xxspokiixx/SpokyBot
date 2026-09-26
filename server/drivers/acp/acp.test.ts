@@ -377,6 +377,34 @@ describe("ACP turns (fake CLI)", () => {
     expect(await send("fifth", "")).toBe("fifth");
   });
 
+  it("re-anchors the full prompt after eight bare turns on one native session", async () => {
+    const dump = join(scratch, "acp-prompt-reanchor.json");
+    process.env.FAKE_ACP_DUMP = dump;
+    process.env.FAKE_ACP_DUMP_PROMPT = "1";
+    await create();
+    const threadId = "t-acp-prompt-reanchor-" + randomUUID();
+    const promptOf = () =>
+      (JSON.parse(readFileSync(dump + ".prompt.json", "utf8")) as Array<{ type: string; text: string }>)[0]?.text;
+    const messages: string[] = [];
+    for (let i = 0; i < 10; i++) {
+      const { turnId } = await instance.adapter.sendTurn({
+        threadId,
+        text: "turn " + i,
+        system: "Standing rules.\n\nMemory: likes quiet hours.",
+        systemStable: "Standing rules.",
+        systemVolatile: "Memory: likes quiet hours.",
+      });
+      await recorder.until((event) => event.type === "turn.completed" && event.turnId === turnId);
+      messages.push(promptOf()!);
+    }
+    // Agents can compact their own history away between turns; the re-anchor
+    // backstop returns the standing instructions within a bounded window.
+    const full = "Standing rules.\n\nMemory: likes quiet hours.";
+    expect(messages[0]).toBe(full + "\n\nturn 0");
+    for (let i = 1; i <= 8; i++) expect(messages[i]).toBe("turn " + i);
+    expect(messages[9]).toBe(full + "\n\nturn 9");
+  });
+
   it("fails clearly when an image-capable adapter meets an older ACP runtime", async () => {
     const imagePath = join(scratch, "tiny.png");
     writeFileSync(imagePath, "not-read-before-capability-check");

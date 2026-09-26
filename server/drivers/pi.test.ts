@@ -330,7 +330,7 @@ describe("PiDriver turns (fake CLI)", () => {
     expect(secondSession?.sessionId).toBe(firstSession?.sessionId);
   });
 
-  it("delivers the full prompt on every turn so compaction cannot strand the session", async () => {
+  it("delivers the full prompt once per session and rides volatile changes as notes", async () => {
     const dir = mkdtempSync(join(tmpdir(), "omb-pi-split-"));
     const dump = join(dir, "dump.jsonl");
     await create(undefined, { FAKE_PI_DUMP: dump });
@@ -355,13 +355,187 @@ describe("PiDriver turns (fake CLI)", () => {
       return { message: prompts().at(-1)!, cursor: session.sessionId };
     };
 
-    // pi summarizes older user messages when it compacts, and the prompt
-    // rides a user message: every turn re-delivers it in full so a
-    // compacted session never loses its standing instructions.
+    // The establishing turn carries the full prompt, exactly as before.
     const first = await send("first", "Memory: likes quiet hours.");
     expect(first.message).toBe("Standing rules.\n\nMemory: likes quiet hours.\n\nfirst");
-    const second = await send("second", "Memory: moved to Toronto.", first.cursor);
-    expect(second.message).toBe("Standing rules.\n\nMemory: moved to Toronto.\n\nsecond");
+    // The resumed session already carries it: later turns go through bare.
+    const second = await send("second", "Memory: likes quiet hours.", first.cursor);
+    expect(second.message).toBe("second");
+    // A changed volatile half rides the next prompt as a labelled note.
+    const third = await send("third", "Memory: moved to Toronto.", first.cursor);
+    expect(third.message)
+      .toBe("Context from OpenMausBot updated since this conversation started; it replaces any earlier copy:\n\nMemory: moved to Toronto.\n\nthird");
+  });
+
+  it("re-establishes the full prompt after pi compaction summarizes the session", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "omb-pi-compaction-"));
+    const dump = join(dir, "dump.jsonl");
+    await create("compaction", { FAKE_PI_DUMP: dump });
+    // The receipt store is keyed by thread and session file, so a unique
+    // thread keeps the run hermetic against earlier suite executions.
+    const threadId = "t-pi-compaction-" + randomUUID();
+    const prompts = () =>
+      readFileSync(dump, "utf8").split("\n").filter(Boolean)
+        .map((line) => JSON.parse(line) as { prompt?: { message?: string } })
+        .filter((row) => row.prompt).map((row) => row.prompt!.message!);
+    const send = async (text: string, cursor?: string) => {
+      const { turnId } = await instance.adapter.sendTurn({
+        threadId,
+        text,
+        system: "Standing rules.\n\nMemory: likes quiet hours.",
+        systemStable: "Standing rules.",
+        systemVolatile: "Memory: likes quiet hours.",
+        ...(cursor ? { resumeCursor: cursor } : {}),
+      });
+      await recorder.until((e) => e.type === "turn.completed" && e.turnId === turnId);
+      const session = recorder.events.find((e) => e.type === "session.started" && e.turnId === turnId) as { sessionId: string };
+      return { message: prompts().at(-1)!, cursor: session.sessionId };
+    };
+
+    // The establishing turn carries the full prompt; the fake then compacts
+    // mid-turn, and the compaction events must drop the just-written receipt.
+    const first = await send("first");
+    expect(first.message).toBe("Standing rules.\n\nMemory: likes quiet hours.\n\nfirst");
+    // Compaction summarized the delivery away: the next turn re-establishes
+    // the standing prompt instead of running bare against a stale receipt.
+    const second = await send("second", first.cursor);
+    expect(second.message).toBe("Standing rules.\n\nMemory: likes quiet hours.\n\nsecond");
+  });
+
+  it("keeps pi alive through post-run compaction recovery and re-establishes the full prompt", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "omb-pi-compaction-recovery-"));
+    const dump = join(dir, "dump.jsonl");
+    await create("compaction-recovery", { FAKE_PI_DUMP: dump });
+    const threadId = "t-pi-compaction-recovery-" + randomUUID();
+    const prompts = () =>
+      readFileSync(dump, "utf8").split("\n").filter(Boolean)
+        .map((line) => JSON.parse(line) as { prompt?: { message?: string } })
+        .filter((row) => row.prompt).map((row) => row.prompt!.message!);
+    const send = async (text: string, cursor?: string) => {
+      const { turnId } = await instance.adapter.sendTurn({
+        threadId,
+        text,
+        system: "Standing rules.\n\nMemory: likes quiet hours.",
+        systemStable: "Standing rules.",
+        systemVolatile: "Memory: likes quiet hours.",
+        ...(cursor ? { resumeCursor: cursor } : {}),
+      });
+      await recorder.until((e) => e.type === "turn.completed" && e.turnId === turnId);
+      const session = recorder.events.find((e) => e.type === "session.started" && e.turnId === turnId) as { sessionId: string };
+      return { message: prompts().at(-1)!, cursor: session.sessionId };
+    };
+
+    // The establishing turn ends, pi schedules overflow-recovery compaction
+    // after a non-terminal agent_end, and only then resumes for the final
+    // turn and the terminal agent_end. Settling at turn_end would kill the
+    // child before the late compaction events could drop the receipt.
+    const first = await send("first");
+    expect(first.message).toBe("Standing rules.\n\nMemory: likes quiet hours.\n\nfirst");
+    // The recovery compaction summarized the delivery away: the next turn
+    // re-establishes the standing prompt instead of running bare against a
+    // receipt the missed events should have invalidated.
+    const second = await send("second", first.cursor);
+    expect(second.message).toBe("Standing rules.\n\nMemory: likes quiet hours.\n\nsecond");
+  });
+
+  it("honors upstream willRetry agent_end frames through post-run compaction recovery", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "omb-pi-compaction-recovery-upstream-"));
+    const dump = join(dir, "dump.jsonl");
+    await create("compaction-recovery-upstream", { FAKE_PI_DUMP: dump });
+    const threadId = "t-pi-compaction-recovery-upstream-" + randomUUID();
+    const prompts = () =>
+      readFileSync(dump, "utf8").split("\n").filter(Boolean)
+        .map((line) => JSON.parse(line) as { prompt?: { message?: string } })
+        .filter((row) => row.prompt).map((row) => row.prompt!.message!);
+    const send = async (text: string, cursor?: string) => {
+      const { turnId } = await instance.adapter.sendTurn({
+        threadId,
+        text,
+        system: "Standing rules.\n\nMemory: likes quiet hours.",
+        systemStable: "Standing rules.",
+        systemVolatile: "Memory: likes quiet hours.",
+        ...(cursor ? { resumeCursor: cursor } : {}),
+      });
+      await recorder.until((e) => e.type === "turn.completed" && e.turnId === turnId);
+      const session = recorder.events.find((e) => e.type === "session.started" && e.turnId === turnId) as { sessionId: string };
+      return { message: prompts().at(-1)!, cursor: session.sessionId };
+    };
+
+    // Upstream pi marks the pre-recovery agent_end with willRetry: true and
+    // closes the run with agent_settled; settling on the unmarked frame the
+    // way older drivers treated turn_end would kill the child before the
+    // overflow-recovery compaction could invalidate the receipt.
+    const first = await send("first");
+    expect(first.message).toBe("Standing rules.\n\nMemory: likes quiet hours.\n\nfirst");
+    const second = await send("second", first.cursor);
+    expect(second.message).toBe("Standing rules.\n\nMemory: likes quiet hours.\n\nsecond");
+  });
+
+  it("re-anchors the full prompt after eight bare turns on one session", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "omb-pi-reanchor-"));
+    const dump = join(dir, "dump.jsonl");
+    await create(undefined, { FAKE_PI_DUMP: dump });
+    const threadId = "t-pi-reanchor-" + randomUUID();
+    const messages: string[] = [];
+    let cursor: string | undefined;
+    for (let i = 0; i < 10; i++) {
+      const { turnId } = await instance.adapter.sendTurn({
+        threadId,
+        text: "turn " + i,
+        system: "Standing rules.\n\nMemory: likes quiet hours.",
+        systemStable: "Standing rules.",
+        systemVolatile: "Memory: likes quiet hours.",
+        ...(cursor ? { resumeCursor: cursor } : {}),
+      });
+      await recorder.until((e) => e.type === "turn.completed" && e.turnId === turnId);
+      const session = recorder.events.find((e) => e.type === "session.started" && e.turnId === turnId) as { sessionId: string };
+      cursor ??= session.sessionId;
+      const row = readFileSync(dump, "utf8").split("\n").filter(Boolean)
+        .map((line) => JSON.parse(line) as { prompt?: { message?: string } })
+        .filter((r) => r.prompt).at(-1);
+      messages.push(row!.prompt!.message!);
+    }
+    const full = "Standing rules.\n\nMemory: likes quiet hours.";
+    expect(messages[0]).toBe(full + "\n\nturn 0");
+    for (let i = 1; i <= 8; i++) expect(messages[i]).toBe("turn " + i);
+    expect(messages[9]).toBe(full + "\n\nturn 9");
+  });
+
+  it("fails the turn and writes no receipt when pi rejects the prompt", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "omb-pi-prompt-reject-"));
+    const dump = join(dir, "dump.jsonl");
+    await create("prompt-reject", { FAKE_PI_DUMP: dump });
+    const threadId = "t-pi-prompt-reject-" + randomUUID();
+    const { turnId } = await instance.adapter.sendTurn({
+      threadId,
+      text: "first",
+      system: "Standing rules.\n\nMemory: likes quiet hours.",
+      systemStable: "Standing rules.",
+      systemVolatile: "Memory: likes quiet hours.",
+    });
+    const done = await recorder.until((e) => e.type === "turn.completed" && e.turnId === turnId);
+    expect(done).toMatchObject({ ok: false, stopReason: "failed" });
+    expect(recorder.events.find((e) => e.type === "runtime.error")).toMatchObject({
+      message: "pi prompt failed",
+    });
+    // A healthy pi resuming the same session: the rejected prompt left no
+    // receipt, so the full prompt rides again instead of a bare turn.
+    recorder.stop();
+    await instance.dispose();
+    await create(undefined, { FAKE_PI_DUMP: dump });
+    const second = await instance.adapter.sendTurn({
+      threadId,
+      text: "second",
+      system: "Standing rules.\n\nMemory: likes quiet hours.",
+      systemStable: "Standing rules.",
+      systemVolatile: "Memory: likes quiet hours.",
+      resumeCursor: "/fake/pi-session-1.json",
+    });
+    await recorder.until((e) => e.type === "turn.completed" && e.turnId === second.turnId);
+    const row = readFileSync(dump, "utf8").split("\n").filter(Boolean)
+      .map((line) => JSON.parse(line) as { prompt?: { message?: string } })
+      .filter((r) => r.prompt).at(-1);
+    expect(row?.prompt?.message).toBe("Standing rules.\n\nMemory: likes quiet hours.\n\nsecond");
   });
 
   it("keeps the full prompt when no session could be established", async () => {
@@ -379,7 +553,8 @@ describe("PiDriver turns (fake CLI)", () => {
     const message = readFileSync(dump, "utf8").split("\n").filter(Boolean)
       .map((line) => JSON.parse(line) as { prompt?: { message?: string } })
       .find((row) => row.prompt)?.prompt?.message;
-    // Without a session the prompt is the model's only context.
+    // Without a session the prompt is the model's only context: the turn
+    // keeps the full block and writes no receipt.
     expect(message).toBe("Standing rules.\n\nMemory: likes quiet hours.\n\nbare");
   });
 

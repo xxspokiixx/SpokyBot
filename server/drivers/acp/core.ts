@@ -316,6 +316,9 @@ const INIT_TIMEOUT = envOr("OPENMAUS_ACP_INIT_TIMEOUT_MS", 300_000);
 const SESSION_CONFIG_TIMEOUT = envOr("OPENMAUS_ACP_SESSION_CONFIG_TIMEOUT_MS", 300_000); // configureSession's per-request default
 const NEW_SESSION_TIMEOUT = envOr("OPENMAUS_ACP_NEW_SESSION_TIMEOUT_MS", 300_000);
 const LOAD_SESSION_TIMEOUT = envOr("OPENMAUS_ACP_LOAD_SESSION_TIMEOUT_MS", 120_000); // history replay on a long thread is slow
+/** ACP agents may compact their own history without telling the client;
+ * re-send the full prompt after this many bare turns as a backstop. */
+const ACP_PROMPT_RE_ANCHOR_TURNS = 8;
 // Read lazily (not at import) so a test can shorten the window. Unlike the
 // setup calls above, session/prompt legitimately streams for minutes, so a
 // wall-clock deadline would false-positive: this guard only trips when the
@@ -1626,6 +1629,7 @@ export function createAcpDriver(support: AcpSupport): ProviderDriver<AcpConfig> 
                 promptTurn.system,
                 promptTurn.text,
                 Boolean(turn.mentionTurn),
+                ACP_PROMPT_RE_ANCHOR_TURNS,
               );
               promptInput = { ...promptTurn, system: "", text: composed.text };
               pendingSplitReceipt = { key: receiptKey, receipt: composed.receipt };

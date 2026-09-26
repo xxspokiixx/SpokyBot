@@ -27,6 +27,14 @@ import { join } from "node:path";
 import { PROVIDER_CREDENTIAL_ENV, stripWorkspaceCredentialEnv } from "../config.ts";
 import { augmentedPath } from "../env-path.ts";
 import { describeSpawnFailure, execCli, killCliTree, spawnCli } from "../procs.ts";
+import {
+  deletePromptSplitReceipt,
+  promptHalves,
+  readPromptSplitReceipt,
+  splitSessionPrompt,
+  writePromptSplitReceipt,
+} from "./prompt-split.ts";
+import type { PromptSplitReceipt } from "./prompt-split.ts";
 import { SPAWNED_PROXIES } from "../proxy-paths.ts";
 import { commandSummary, toolDetailPreview } from "../tool-summary.ts";
 
@@ -59,6 +67,15 @@ const DRIVER_KIND = "piAgent";
 const PI_ARGS = ["--mode", "rpc", "--no-session"];
 const PI_MODEL_UPDATE_ARGS = ["update", "--models", "--no-approve"];
 const NODE_ENV_FLAG = { ELECTRON_RUN_AS_NODE: "1" };
+/** After this many bare turns on one pi session the full prompt rides
+ * again even without a compaction event: any history rewrite the events
+ * miss (an older pi, a missed line) still loses at most this many turns
+ * of standing instructions instead of the rest of the session. */
+const PI_PROMPT_RE_ANCHOR_TURNS = 8;
+/** How long the driver keeps listening after a finished turn_end for the
+ * run's terminal agent_end before settling anyway: a runtime that never
+ * emits agent_end still completes, while one that does cancels the wait. */
+const PI_AGENT_END_GRACE_MS = 60_000;
 
 /** pi answered a command with success:false — an explicit refusal from a
  * live runtime, not a transport failure. Only steer branches on the
@@ -424,6 +441,9 @@ interface PiEvent {
   // turn_end / message_end
   message?: { stopReason?: string; errorMessage?: string; usage?: { input?: number; output?: number } };
   usage?: { input?: number; output?: number };
+  // agent_end / agent_settled
+  isTerminal?: boolean;
+  willRetry?: boolean;
   // extension_ui_request
   id?: string;
   method?: string;
@@ -528,6 +548,13 @@ export const PiDriver: ProviderDriver<PiConfig> = {
       // closure (send, child) alive until it fires.
       const askTimers = new Set<ReturnType<typeof setTimeout>>();
       let settled = false;
+      // the last turn_end's outcome, replayed when the run's terminal
+      // agent_end (or the grace fallback) settles the turn
+      let endStopReason: string | undefined;
+      let endUsage: { input?: number; output?: number } | undefined;
+      let endErrorMessage: string | undefined;
+      // hang insurance for runtimes with no agent_end frame at all
+      let agentEndTimer: ReturnType<typeof setTimeout> | null = null;
       // pi's RPC surface accepts image content directly. Read before spawning
       // so an attachment that disappeared produces one clear dispatch error
       // instead of starting a child that can never receive its prompt.
@@ -589,6 +616,9 @@ export const PiDriver: ProviderDriver<PiConfig> = {
       })();
       let buf = "";
       let assistantText = "";
+      // set when a compaction event arrives this turn; gates the receipt
+      // write below so a compacted-around delivery is never claimed
+      let compactionObserved = false;
       // resolve one-shot RPC responses (new_session / switch_session / set_model)
       const responseWaiters = new Map<string, { resolve: (data: unknown) => void; reject: (err: Error) => void; timer: NodeJS.Timeout }>();
       // Steer frames correlate by a unique per-request id, not the shared
@@ -630,6 +660,10 @@ export const PiDriver: ProviderDriver<PiConfig> = {
       const settle = (ok: boolean, stopReason?: string | null, usage?: { input?: number; output?: number }) => {
         if (settled) return;
         settled = true;
+        if (agentEndTimer) {
+          clearTimeout(agentEndTimer);
+          agentEndTimer = null;
+        }
         // The turn is over: drop unanswered asks so their 15-minute
         // fail-safe timers are cancelled outright instead of no-oping on a
         // dead child while holding the ask closure alive.
@@ -662,6 +696,24 @@ export const PiDriver: ProviderDriver<PiConfig> = {
           }
         }
         active.delete(threadId);
+      };
+
+      /** Settle from the last turn_end's recorded outcome. Errors surface
+       * here, at run completion, so a failed run reports exactly once and
+       * only after any scheduled maintenance events had their chance to
+       * arrive. */
+      const finishRun = () => {
+        const sr = endStopReason;
+        if (sr === "error" || sr === "failed") {
+          emit({
+            ...base(threadId, turnId),
+            type: "runtime.error",
+            message: String(endErrorMessage ?? "pi turn failed").slice(0, 2_000),
+          });
+          settle(false, "failed", endUsage);
+          return;
+        }
+        settle(true, sr === "cancelled" || sr === "aborted" ? "cancelled" : "end_turn", endUsage);
       };
 
       const stop = () => {
@@ -838,23 +890,77 @@ export const PiDriver: ProviderDriver<PiConfig> = {
             }
             return;
           }
+          case "compaction_start":
+          case "compaction_end":
+          case "auto_compaction_start":
+          case "auto_compaction_end": {
+            // pi compaction (manual or automatic) summarizes older
+            // messages, which can absorb the turn that carried this
+            // session's standing prompt. Both events ride the RPC surface
+            // for every compaction kind, so the moment either arrives the
+            // receipt is dropped and the next turn re-establishes the full
+            // prompt. The rest of the compacting turn may still answer
+            // without its standing instructions; that single turn is the
+            // unavoidable cost of summarizing history mid-session.
+            if (sessionReady && sessionFile) {
+              compactionObserved = true;
+              deletePromptSplitReceipt("pi", JSON.stringify([threadId, sessionFile]));
+            }
+            return;
+          }
           case "turn_end":
-          case "agent_end": {
+          {
+            // a killed child can still flush one buffered frame after the
+            // turn settled (the abort path's cancelled turn_end is the
+            // common one); arming the grace timer then would leak it past
+            // a turn that is already complete.
+            if (settled) return;
             const sr = evt.message?.stopReason;
             // toolUse means pi ran a tool and auto-continues next turn to
-            // answer — settling now would drop the final reply.
+            // answer — the run is not over, and the next turn_end carries
+            // the real outcome.
             if (sr === "toolUse" || sr === "tool_use" || sr === "tool_calls") return;
-            const usage = evt.usage ?? evt.message?.usage;
-            if (sr === "error" || sr === "failed") {
-              emit({
-                ...base(threadId, turnId),
-                type: "runtime.error",
-                message: String(evt.message?.errorMessage ?? "pi turn failed").slice(0, 2_000),
-              });
-              settle(false, "failed", usage);
-              return;
+            endStopReason = sr;
+            endUsage = evt.usage ?? evt.message?.usage;
+            endErrorMessage = evt.message?.errorMessage;
+            // agent_end, not turn_end, closes the run: pi can schedule
+            // post-run maintenance (overflow-recovery compaction) after
+            // the final turn_end, and only the terminal agent_end proves
+            // the session is done rewriting itself. The grace timer
+            // settles a runtime that never sends agent_end at all.
+            if (agentEndTimer) clearTimeout(agentEndTimer);
+            agentEndTimer = setTimeout(finishRun, PI_AGENT_END_GRACE_MS);
+            agentEndTimer.unref?.();
+            return;
+          }
+          case "agent_end": {
+            // Two dialects mark a non-terminal agent_end: upstream pi sets
+            // willRetry: true when an automatic retry follows (overflow
+            // recovery runs compaction and retries as a fresh run), and the
+            // omp fork sets isTerminal: false while maintenance or async
+            // delivery has more work scheduled. Either marker means the
+            // session may still rewrite the turn that carried this
+            // session's standing prompt — keep listening so those events
+            // can drop the prompt-split receipt.
+            if (evt.isTerminal === false || evt.willRetry === true) return;
+            if (agentEndTimer) {
+              clearTimeout(agentEndTimer);
+              agentEndTimer = null;
             }
-            settle(true, sr === "cancelled" || sr === "aborted" ? "cancelled" : "end_turn", usage);
+            finishRun();
+            return;
+          }
+          case "agent_settled": {
+            // upstream pi's explicit fully-settled guarantee: no automatic
+            // retry, compaction retry, or queued continuation remains.
+            // Usually settles one frame after the final agent_end already
+            // did; kept as its own terminal signal so the driver never
+            // depends on which dialect the configured cli speaks.
+            if (agentEndTimer) {
+              clearTimeout(agentEndTimer);
+              agentEndTimer = null;
+            }
+            finishRun();
             return;
           }
           default:
@@ -897,12 +1003,14 @@ export const PiDriver: ProviderDriver<PiConfig> = {
       // sessionFile, which switch_session expects as `sessionPath`.
       const sessionPath = typeof turn.resumeCursor === "string" ? turn.resumeCursor : null;
       let sessionFile = sessionPath;
+      let sessionReady = false;
       try {
         const command = sessionPath ? "switch_session" : "new_session";
         const hsPromise = awaitResponse(command);
         send(sessionPath ? { type: "switch_session", sessionPath } : { type: "new_session" });
         const hs = (await hsPromise) as { sessionFile?: string; sessionId?: string } | undefined;
         if (hs?.sessionFile) sessionFile = hs.sessionFile;
+        sessionReady = true;
         emit({
           ...base(threadId, turnId),
           type: "session.started",
@@ -938,16 +1046,77 @@ export const PiDriver: ProviderDriver<PiConfig> = {
         }
       }
 
-      // pi compacts long sessions by summarizing older user messages, and
-      // this driver delivers the prompt as the leading user message: a
-      // receipt-based split would let a compacted session keep running
-      // bare, without its standing instructions. Re-deliver the full prompt
-      // every turn until pi exposes a compaction signal the harness can
-      // watch (its extension API has session_before_compact).
-      const message = turn.system ? `${turn.system}\n\n${turn.text}` : turn.text;
+      // The stable/volatile split: the full prompt rides only the turn that
+      // establishes - or re-instructs, after a soul edit - this pi session,
+      // which previously re-sent the whole system prompt on every turn and
+      // let it accumulate in the session file once per turn. pi compacts
+      // long sessions by summarizing older messages, which can absorb the
+      // turn that carried the prompt, so the driver watches pi's
+      // compaction events and drops the receipt the moment one arrives,
+      // and re-anchors the full prompt every PI_PROMPT_RE_ANCHOR_TURNS
+      // bare turns as a backstop for anything the events miss. Receipts
+      // are durable because the session file outlives both the per-turn
+      // child and this process. Without a session the prompt is the
+      // model's only context, so that turn keeps the full block and writes
+      // no receipt.
+      const halves = promptHalves(turn);
+      let message: string;
+      let pendingReceipt: { key: string; receipt: PromptSplitReceipt } | null = null;
+      if (halves.stable !== null && sessionReady && sessionFile) {
+        const receiptKey = JSON.stringify([threadId, sessionFile]);
+        const composed = splitSessionPrompt(
+          halves.stable,
+          halves.volatile,
+          readPromptSplitReceipt("pi", receiptKey),
+          turn.system,
+          turn.text,
+          Boolean(turn.mentionTurn),
+          PI_PROMPT_RE_ANCHOR_TURNS,
+        );
+        message = composed.text;
+        pendingReceipt = { key: receiptKey, receipt: composed.receipt };
+      } else {
+        message = turn.system ? `${turn.system}\n\n${turn.text}` : turn.text;
+      }
+      // events cannot interleave with this synchronous stretch, so any
+      // compaction recorded above already invalidated what compose read
       try {
+        // pi answers the prompt with an authoritative response only after
+        // preflight accepts it - and rejects it outright while a
+        // compaction runs - so the receipt commits only after that
+        // acceptance: a rejected or compacted-around send redelivers on
+        // the next turn. The wait is long enough to survive a compaction
+        // queue; a dead child rejects it immediately.
+        // sendTurn still resolves once the prompt is written: a child that
+        // dies before replying settles the turn through the close handler,
+        // whose waiter sweep can precede this registration.
+        const accepted = awaitResponse("prompt", 120_000);
         send({ type: "prompt", message, ...(images.length ? { images } : {}) });
-      } catch {
+        void accepted.then(
+          () => {
+            if (!pendingReceipt || compactionObserved) return;
+            try {
+              writePromptSplitReceipt("pi", pendingReceipt.key, pendingReceipt.receipt);
+            } catch {
+              /* an unwritten receipt only re-delivers the full prompt next turn */
+            }
+          },
+          (err: Error) => {
+            if (settled) return;
+            emit({
+              ...base(threadId, turnId),
+              type: "runtime.error",
+              message: String(err?.message ?? err).slice(0, 2_000),
+            });
+            settle(false);
+          },
+        );
+      } catch (err) {
+        emit({
+          ...base(threadId, turnId),
+          type: "runtime.error",
+          message: String((err as Error)?.message ?? err).slice(0, 2_000),
+        });
         settle(false);
       }
 
