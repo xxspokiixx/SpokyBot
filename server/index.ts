@@ -68,6 +68,7 @@ import {
   extensionForMime,
   FILE_MAX_BYTES,
   IMAGE_MAX_BYTES,
+  parseAudioRange,
   readAttachment,
   saveAudio,
   saveFile,
@@ -1666,7 +1667,10 @@ function agentsIntegration(
       OMB_SHARED_COMPUTERS_ENABLED: sharedComputersEnabled(cfg) ? "1" : "0",
       // Same capability rule for voice: the tool is offered only when this
       // bot can actually speak, and the route re-checks on every call.
-      OMB_VOICE_NOTES: tts.voiceReady(cfg, (botForThread(botId, threadId) ?? store.bot(botId))?.voice) ? "1" : "0",
+      OMB_VOICE_NOTES: (() => {
+        const speaking = botForThread(botId, threadId) ?? store.bot(botId);
+        return tts.voiceReady(cfg, speaking?.voice) && speaking?.voiceNotes !== false ? "1" : "0";
+      })(),
     },
   };
 }
@@ -14322,6 +14326,10 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
         if (!owner) return json(res, 403, { error: "source conversation does not belong to sender" });
         const groupId = String(body.groupId ?? "").trim();
         const message = String(body.message ?? "").trim();
+        const attachVoiceNote = body.attachVoiceNote === true;
+        if (body.attachVoiceNote !== undefined && typeof body.attachVoiceNote !== "boolean") {
+          return json(res, 400, { error: "attachVoiceNote must be true or false" });
+        }
         if (!groupId || !message) {
           return json(res, 400, { error: "post_to_room needs group_id (from list_rooms) and message" });
         }
@@ -14414,13 +14422,50 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
         // here is also what keeps its window alive through a turn that only
         // posts — an aged-out mark would hand the next hop to auto-approve.
         const unattended = isUnattended(poster.id, internalCapability.threadId);
+        // A room post is the one send path that bypasses the settling reply,
+        // so an explicit attach flag — never a silent default — moves this
+        // turn's parked voice note onto the posted message. The removal
+        // matters twice over: the clip is delivered exactly once (the
+        // settling reply no longer finds it parked), and it survives a turn
+        // that dies after the post, because it is no longer parked cleanup's
+        // to delete. The post text stands as the caption.
+        let attachedVoiceNote = false;
+        let stagedAttachments: NonNullable<Message["attachments"]> = [];
+        let detachParkedAudio: (() => void) | undefined;
+        if (attachVoiceNote) {
+          const parkedKey = turnAttachmentKey(fromThreadId, liveTurnByThread.get(fromThreadId));
+          const parked = turnAttachmentsByTurn.get(parkedKey) ?? [];
+          const audio = parked.filter((attachment) => attachment.kind === "audio");
+          if (!audio.length) {
+            return json(res, 400, { error: "no voice note to attach — call send_voice_note in this turn first" });
+          }
+          stagedAttachments = audio.map((attachment) => ({
+            kind: "audio" as const,
+            path: attachment.path,
+            mime: attachment.mime,
+          }));
+          attachedVoiceNote = true;
+          // The parked set is mutated only after the append below lands.
+          // Everything between is synchronous, so nothing can interleave,
+          // and a persistence failure must leave the clip parked: the post
+          // can then be retried, whereas a premature removal strands the
+          // clip on disk attached to nothing — and the catalog already told
+          // the model never to retry a refused post.
+          detachParkedAudio = () =>
+            turnAttachmentsByTurn.set(
+              parkedKey,
+              parked.filter((attachment) => attachment.kind !== "audio"),
+            );
+        }
         const posted = store.appendMessage(room.threadId, {
           role: "bot",
           kind: "text",
           text: message,
           from: { botId: poster.id, name: poster.name, color: poster.color },
           peerPost: unattended ? { unattended: true } : {},
+          ...(attachedVoiceNote ? { attachments: stagedAttachments } : {}),
         });
+        detachParkedAudio?.();
         store.patchGroup(room.id, { unread: true });
         // The same visibility contract the peer tools keep: whatever a bot
         // does elsewhere shows up in the conversation it is actually in.
@@ -14436,7 +14481,7 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
         };
         if (owner.group) chip.from = { botId: poster.id, name: poster.name, color: poster.color };
         store.appendMessage(fromThreadId, chip);
-        return json(res, 201, { ok: true, messageId: posted.id, roomName: room.name });
+        return json(res, 201, { ok: true, messageId: posted.id, roomName: room.name, attachedVoiceNote });
       }
       // start_thread: a bot opens a real thread — on itself for separate
       // work, or on a teammate as a handoff that should run on its own.
@@ -14792,6 +14837,9 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
         // here so a call that reaches an unconfigured workspace answers with
         // the setup guidance instead of a provider failure.
         const voiceBot = botForThread(internalSender.id, internalCapability.threadId) ?? internalSender;
+        if (voiceBot.voiceNotes === false) {
+          return json(res, 403, { error: "voice notes are turned off for this bot" });
+        }
         try {
           const audio = await tts.speak(cfg, text, voiceBot.voice);
           // Synthesis can outlive its turn: a stop or settle during the await
@@ -15699,15 +15747,36 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
     if (m && method === "GET") {
       const attachment = readAttachment(m[1]!);
       if (!attachment) return json(res, 404, { error: "no such attachment" });
+      const size = attachment.bytes.byteLength;
       // Who may see an attachment is decided per request — the dispatcher
       // 404s hidden ones above — so the browser must never reuse one
       // member's copy after a switch to another identity in the same profile.
-      res.writeHead(200, {
+      const headers = {
         "content-type": attachment.mime,
-        "content-length": String(attachment.bytes.byteLength),
         "cache-control": "private, no-store",
         "x-content-type-options": "nosniff",
-      });
+      };
+      // Range serving is audio-only (#1745): a player scrubbing a voice note
+      // asks for byte windows, and images/documents keep the full response
+      // the app has always relied on. A header we do not understand reads
+      // as absent — the full 200 is always a correct answer to a GET.
+      if (attachment.mime.startsWith("audio/")) {
+        const rawRange = Array.isArray(req.headers.range) ? req.headers.range[0] : req.headers.range;
+        const range = parseAudioRange(rawRange, size);
+        if (range.kind === "unsatisfiable") {
+          res.writeHead(416, { ...headers, "content-range": `bytes */${size}` });
+          return res.end();
+        }
+        if (range.kind === "range") {
+          res.writeHead(206, {
+            ...headers,
+            "content-length": String(range.end - range.start + 1),
+            "content-range": `bytes ${range.start}-${range.end}/${size}`,
+          });
+          return res.end(attachment.bytes.subarray(range.start, range.end + 1));
+        }
+      }
+      res.writeHead(200, { ...headers, "content-length": String(size) });
       return res.end(attachment.bytes);
     }
 
@@ -17227,6 +17296,13 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
       if (body.composio !== undefined) {
         if (typeof body.composio !== "boolean") return json(res, 400, { error: "composio must be true or false" });
         patch.composio = body.composio;
+      }
+      // per-bot gate on sending voice notes: the toggle is about what this
+      // bot may do (an admin decision), not how it looks, so it lives here
+      // rather than the client-writable profile surface.
+      if (body.voiceNotes !== undefined) {
+        if (typeof body.voiceNotes !== "boolean") return json(res, 400, { error: "voiceNotes must be true or false" });
+        patch.voiceNotes = body.voiceNotes;
       }
       // which of those apps' tools this bot may call (connector grants 1/5:
       // data model only — enforcement lands with slice 2). null returns the

@@ -272,6 +272,9 @@ export interface WireBot {
   speakReplies?: boolean;
   /** This bot's own voice id, so a room of bots doesn't sound like one person. */
   voice?: string;
+  /** Whether this bot may send voice notes. Absent/true = allowed; false
+   * hides the tool and refuses the route even with a voice configured. */
+  voiceNotes?: boolean;
   /** Queue direct-chat messages behind outstanding delegated work. */
   parkDirectMessages?: boolean;
   /** true after an edit/branch-switch rewound the visible conversation. */

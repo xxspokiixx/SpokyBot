@@ -809,6 +809,7 @@ describe("agents-proxy MCP surface", () => {
       fromThreadId: "thread-asker-routine",
       groupId: "room-launch",
       message: "shipping at 4",
+      attachVoiceNote: false,
     });
   });
 
