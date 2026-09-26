@@ -367,6 +367,34 @@ const toolDefinitions = (externalRuntime: boolean) => [
     },
   },
   {
+    name: "vm_exec",
+    description:
+      "Run a shell command inside your own Local VM (as the desktop user, starting in /home/cua/workspace) and get its exit code, stdout and stderr back as text. Use this for all command-line work in the VM: pip install --user, running a script, generating or converting a file, checking that a file exists. Do not type commands into a terminal window and read screenshots: that is slow and unreliable. GUI programs you start appear on the VM desktop. For a long job raise timeout_seconds (default 60, at most 300). Only available while you have a Local VM desktop.",
+    inputSchema: {
+      type: "object",
+      additionalProperties: false,
+      properties: {
+        command: { type: "string", description: "The shell command to run, for example: python3 make_report.py && ls -l report.pdf" },
+        timeout_seconds: { type: "integer", minimum: 1, maximum: 300, description: "How long it may run before it is stopped. Default 60." },
+      },
+      required: ["command"],
+    },
+  },
+  {
+    name: "attach_file",
+    description:
+      "Attach a finished file to the chat so the user can preview and download it: an image, video, audio clip, PDF, spreadsheet, slide deck or other document you made. Pass its path: a path inside your computer's /home/cua/workspace (for example /home/cua/workspace/report.pdf), or a file in your working folder. Do this instead of pasting a VM path as a link; a path inside a VM cannot be opened from chat. Supported: images (png, jpg, gif, webp), video (mp4, webm, mov), audio (mp3, m4a, aac, wav, ogg, opus, flac), pdf, Word/Excel/PowerPoint and OpenDocument files, and csv, tsv, txt, md, json, rtf. Up to 25 MB (images 10 MB). Finish writing the file first, then call this directly: it reports an error if the file is missing, so you do not need to list or open the folder to check.",
+    inputSchema: {
+      type: "object",
+      additionalProperties: false,
+      properties: {
+        path: { type: "string", description: "The file's path, for example /home/cua/workspace/report.pdf." },
+        name: { type: "string", description: "Optional file name to show the user. Defaults to the file's own name." },
+      },
+      required: ["path"],
+    },
+  },
+  {
     name: "post_to_room",
     description:
       "Put one message into a shared room you belong to, for example when the user asks you to tell the team something. Get group_id from list_rooms. This posts and returns: no room member's turn starts, nobody replies, and nothing comes back except confirmation — so never use it to ask a question or hand out work (use ask_bot or delegate_bot for those). Post once, say it in full, and tell the user what you posted. Set attach_voice_note true to attach this turn's voice note. If a post is refused, do not retry it: say what you wanted to post in your reply instead.",

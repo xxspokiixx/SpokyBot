@@ -152,8 +152,8 @@ export interface Message {
   /** digest messages: what the turn did, rendered in `text` and structured here. */
   digest?: TurnDigest;
   compaction?: import("../../shared/wire").WireMessage["compaction"];
-  /** Provider-generated files attached to this assistant response. Kinds the
-   * renderer cannot display yet decode without breaking; only images render. */
+  /** Files attached to this assistant response: provider-generated images, and
+   * voice notes, documents, audio and video a bot attached with attach_file. */
   attachments?: import("../../shared/wire").WireMessage["attachments"];
   card?: OptionCardData;
   connector?: ConnectorCardData;

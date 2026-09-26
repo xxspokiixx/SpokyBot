@@ -18,6 +18,10 @@ registerHooks({
       const file = ${JSON.stringify(state)};
       const read = () => JSON.parse(readFileSync(file, 'utf8'));
       export async function containerRuntimeStatus() { return { runtime: 'podman', daemonUp: true }; }
+      export async function containerExec(target, command) {
+        writeFileSync(file + '.exec', JSON.stringify({ target, command }));
+        return { exitCode: 0, stdout: 'fixture command completed', stderr: '', timedOut: false };
+      }
       export async function containerComputerExists() { return !read().noContainers; }
       export async function containerComputerStatus(_run, _platform, target = SHARED_LOCAL_VM_TARGET) {
         writeFileSync(file + '.entered', target.key);

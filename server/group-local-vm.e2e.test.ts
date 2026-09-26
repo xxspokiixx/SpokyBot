@@ -151,6 +151,70 @@ const send = (id: string) => api("POST", `/api/groups/${id}/messages`, { text: "
 const stop = (id: string) => api("POST", `/api/groups/${id}/interrupt`, {});
 
 describe("Group Local VM ownership on the real isolated server", () => {
+  it("executes and attaches only for the current VM owner, respecting takeover and expiry", async () => {
+    const { bots, group } = await room();
+    await send(group.id);
+    const mounted: any = await dump();
+    const token = mounted.mcpConfig.mcpServers.agents.env.OMB_COMMS_TOKEN;
+    const call = (path: string, body: unknown) => fetch(base + path, {
+      method: "POST", headers: { authorization: `Bearer ${token}`, "content-type": "application/json" },
+      body: JSON.stringify(body),
+    });
+    const exec = () => call("/api/internal/vm-exec", { command: "printf fixture" });
+    expect((await exec()).status).toBe(200);
+    const invocation = JSON.parse(readFileSync(stateFile + ".exec", "utf8"));
+    expect(invocation.command).toBe("printf fixture");
+    expect(invocation.target.workspaceDir.startsWith(fixtureHome)).toBe(true);
+    mkdirSync(invocation.target.workspaceDir, { recursive: true });
+    writeFileSync(join(invocation.target.workspaceDir, "report.pdf"), "%PDF-fixture");
+    const attach = () => call("/api/internal/attach-file", { path: "/home/cua/workspace/report.pdf" });
+    expect((await attach()).status).toBe(200);
+    const transcript = await api("GET", `/api/threads/${group.threadId}/messages?limit=50`);
+    const message = transcript.messages.find((m: any) => m.attachments?.some((a: any) => a.name === "report.pdf"));
+    expect(message.from.botId).toBe(bots[0].id);
+    const downloaded = await fetch(base + `/api/threads/${group.threadId}/messages/${message.id}/file`, {
+      method: "POST", headers: { "content-type": "application/json" },
+      body: JSON.stringify({ path: message.attachments[0].path }),
+    });
+    expect(downloaded.status).toBe(200);
+    expect(await downloaded.text()).toBe("%PDF-fixture");
+    rmSync(stateFile + ".exec");
+    await api("POST", `/api/bots/${bots[0].id}/computer/control`, { action: "take" });
+    expect((await exec()).status).toBe(409);
+    expect((await attach()).status).toBe(409);
+    expect(existsSync(stateFile + ".exec")).toBe(false);
+    await api("POST", `/api/bots/${bots[0].id}/computer/control`, { action: "release" });
+    vmState({ clockOffset: 31 * 60_000 });
+    expect((await exec()).status).toBe(409);
+    expect((await attach()).status).toBe(409);
+    expect(existsSync(stateFile + ".exec")).toBe(false);
+    await stop(group.id); await idle(bots[0].id); vmState();
+    expect((await exec()).status).toBe(401);
+  });
+
+  it("claims an Auto VM on its first shell command without needing a screenshot", async () => {
+    vmState(); rmSync(dumpFile, { force: true }); rmSync(finishFile, { force: true });
+    const { bot } = await api("POST", "/api/bots", { name: "Auto VM shell" });
+    try {
+      await api("PATCH", `/api/bots/${bot.id}`, { browser: false });
+      // Inventory discovery marks the disposable VM as available to Auto.
+      await api("GET", "/api/local-computer");
+      await api("POST", `/api/bots/${bot.id}/messages`, { text: "Run a command on the VM" });
+      const mounted: any = await dump();
+      expect(computer(mounted)).toBeTruthy();
+      const token = mounted.mcpConfig.mcpServers.agents.env.OMB_COMMS_TOKEN;
+      const response = await fetch(base + "/api/internal/vm-exec", {
+        method: "POST", headers: { authorization: `Bearer ${token}`, "content-type": "application/json" },
+        body: JSON.stringify({ command: "printf auto" }),
+      });
+      expect(response.status, await response.text()).toBe(200);
+      expect(JSON.parse(readFileSync(stateFile + ".exec", "utf8")).command).toBe("printf auto");
+    } finally {
+      await api("POST", `/api/bots/${bot.id}/interrupt`, {}); await idle(bot.id);
+      await api("DELETE", `/api/bots/${bot.id}`);
+    }
+  });
+
   it("holds a cloud turn for a marked output question and resumes after the person's reply", async () => {
     const { bot } = await api("POST", "/api/bots", { name: "Cloud question fixture" });
     try {
