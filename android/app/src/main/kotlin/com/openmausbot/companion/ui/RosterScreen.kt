@@ -62,7 +62,10 @@ import androidx.compose.ui.graphics.PathEffect
 import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.vector.rememberVectorPainter
+import androidx.compose.ui.layout.onSizeChanged
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalFocusManager
+import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.text.font.FontWeight
@@ -92,7 +95,9 @@ import kotlinx.coroutines.launch
  * colour at the left edge, and a bar floating at the bottom. The bar's pill is
  * Updates — only the bots that need you, are working, or have something you have
  * not read — beside round search and new-bot buttons. Everything scrolls under
- * the bar, which is why the list leaves [BAR_CLEARANCE] below its last row.
+ * the bar, which is why the list's end is inset by the bar's measured height
+ * plus [LIST_END_MARGIN]: the bar grows with the text size, and a fixed guess
+ * at it let the last row sit under the bar at the largest sizes.
  *
  * Ordering is not decided here. `chatSummaries` (`:core`) folds pinned → unread →
  * last activity and hides hidden bots; [RosterLayout] decides which of those are
@@ -126,6 +131,10 @@ fun RosterScreen(navigator: CompanionNavigator) {
     // would race two bots into existence.
     var creatingBot by remember { mutableStateOf(false) }
     var managingThreads by remember { mutableStateOf<Chat?>(null) }
+    // What the floating bar measures, so the list's end clears it exactly.
+    // Zero until the first layout, when the list is at its top anyway.
+    val density = LocalDensity.current
+    var barHeight by remember { mutableStateOf(0.dp) }
 
     val query = bar.query
 
@@ -266,8 +275,10 @@ fun RosterScreen(navigator: CompanionNavigator) {
                 }
 
                 LazyColumn(
-                    modifier = Modifier.fillMaxSize(),
-                    contentPadding = PaddingValues(bottom = BAR_CLEARANCE),
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .testTag("roster-list"),
+                    contentPadding = PaddingValues(bottom = barHeight + LIST_END_MARGIN),
                 ) {
                     if (RosterLayout.showsGroups(query)) {
                         if (attention.isNotEmpty()) {
@@ -457,7 +468,10 @@ fun RosterScreen(navigator: CompanionNavigator) {
             // The same rule the sheet picks from: two copies of "which bots can
             // be sectioned" could disagree about a hidden one.
             canCreateSection = remember(state) { SectionRules.selectable(state).isNotEmpty() },
-            modifier = Modifier.align(Alignment.BottomCenter),
+            modifier = Modifier
+                .align(Alignment.BottomCenter)
+                .testTag("roster-bottom-bar")
+                .onSizeChanged { barHeight = with(density) { it.height.toDp() } },
         )
     }
 
@@ -497,8 +511,8 @@ fun RosterScreen(navigator: CompanionNavigator) {
     }
 }
 
-/** Room for the floating bar, so the last row can scroll clear of it. */
-private val BAR_CLEARANCE = 96.dp
+/** Clear space between the last row and the floating bar, once scrolled to the end. */
+private val LIST_END_MARGIN = 16.dp
 
 /** Two flags and a string: enough to survive a rotation with the search still up. */
 private val RosterBarSaver = listSaver<RosterBar, Any>(
@@ -521,6 +535,7 @@ private fun RosterHeader(name: String?, status: Session.Status, onSettings: () -
     Row(
         modifier = Modifier
             .fillMaxWidth()
+            .testTag("roster-header")
             .padding(start = 16.dp, end = 16.dp, top = 4.dp, bottom = 12.dp),
         horizontalArrangement = Arrangement.spacedBy(8.dp),
         verticalAlignment = Alignment.CenterVertically,
