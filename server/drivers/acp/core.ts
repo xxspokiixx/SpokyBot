@@ -60,7 +60,7 @@ import type {
   RequestOutcome,
   TurnImageInput,
 } from "../../contracts.ts";
-import { newEventId, newId } from "../../contracts.ts";
+import { newEventId, newId, TurnNotStartedError } from "../../contracts.ts";
 import { augmentedPath } from "../../env-path.ts";
 import { supportsApprovalMode } from "../../../shared/approval-mode.ts";
 import { parseAskQuestions, parseChoices, questionAnswersByQuestion } from "../../../shared/ask-question.ts";
@@ -72,6 +72,7 @@ import { extractMcpImages } from "../../mcp-tool-images.ts";
 import { redactSecretsInText } from "../../redact.ts";
 import { recoveryPromptFor } from "../../resume-recovery.ts";
 import { sessionIdlePolicy } from "../session-idle.ts";
+import { classifyError } from "../retry.ts";
 
 /** ACP vendors put the actionable cause in error.data while keeping the
  * JSON-RPC message generic. Only surface known text fields, never a response
@@ -124,7 +125,8 @@ interface AcpTurn {
   turn: SendTurnInput;
   turnConfig: AcpConfig;
   controlsHost: boolean;
-  state: { settled: boolean; promptSent: boolean; text: string; producedItem: boolean };
+  state: { settled: boolean; promptSent: boolean; text: string; producedItem: boolean; startupActivity: boolean; stopped: boolean };
+  acknowledge: () => void;
   asks: Map<string, AcpAskFinish>;
   /** Tool calls the agent started and has not yet reported finished. A tool
    * such as `sleep` or a quiet build sends nothing while it runs, so the
@@ -723,6 +725,7 @@ export function createAcpDriver(support: AcpSupport): ProviderDriver<AcpConfig> 
         const current = session.current;
         if (!current || current.state.settled) return;
         current.state.settled = true;
+        current.acknowledge();
         if (current.interruptTimer) clearTimeout(current.interruptTimer);
         for (const finish of current.asks.values()) finish("cancel", "system");
         session.acp.failAll(new Error("turn settled"));
@@ -941,6 +944,7 @@ export function createAcpDriver(support: AcpSupport): ProviderDriver<AcpConfig> 
         // server→client permission request → canonical request.opened,
         // answered fail-closed for the running turn
         const handleServerRequest = (msg: any, current: AcpTurn) => {
+          current.state.startupActivity = true;
           if (msg.method === "fs/read_text_file" || msg.method === "fs/write_text_file") {
             void handleClientFileRequest(msg);
             return;
@@ -1084,6 +1088,9 @@ export function createAcpDriver(support: AcpSupport): ProviderDriver<AcpConfig> 
           if (support.modelVariants && p.update?.sessionUpdate === "config_option_update") {
             if (current && !current.state.settled && session.sessionId && p.sessionId === session.sessionId) current.receiveModelVariants(p.update);
             return;
+          }
+          if (current && ["agent_message_chunk", "agent_thought_chunk", "tool_call", "tool_call_update"].includes(p.update?.sessionUpdate)) {
+            current.state.startupActivity = true;
           }
           if (!current || !current.state.promptSent) return;
           const u = p.update ?? {};
@@ -1359,7 +1366,13 @@ export function createAcpDriver(support: AcpSupport): ProviderDriver<AcpConfig> 
         ): Promise<any> =>
           session.acp.request(method, params, timeoutMs, receive, idleMs, idleMessage);
 
-        const state = { settled: false, promptSent: false, text: "", producedItem: false };
+        const state = { settled: false, promptSent: false, text: "", producedItem: false, startupActivity: false, stopped: false };
+        let acknowledge = () => {};
+        let rejectStartup = (_error: TurnNotStartedError) => {};
+        const startupAck = turn.startupRecovery ? new Promise<{ turnId: string }>((resolve, reject) => {
+          acknowledge = () => resolve({ turnId });
+          rejectStartup = reject;
+        }) : null;
         const asks = new Map<string, AcpAskFinish>();
         const modelOf = (result: any): string | null => {
           const option = (Array.isArray(result?.configOptions) ? result.configOptions : []).find(
@@ -1406,6 +1419,7 @@ export function createAcpDriver(support: AcpSupport): ProviderDriver<AcpConfig> 
           turnConfig,
           controlsHost,
           state,
+          acknowledge,
           asks,
           runningTools: new Set(),
           interruptTimer: null,
@@ -1414,6 +1428,7 @@ export function createAcpDriver(support: AcpSupport): ProviderDriver<AcpConfig> 
         };
 
         const interrupt = () => {
+          state.stopped = true;
           if (session.sessionId) {
             session.acp.send({ jsonrpc: "2.0", method: "session/cancel", params: { sessionId: session.sessionId } });
             if (current.interruptTimer) clearTimeout(current.interruptTimer);
@@ -1428,7 +1443,7 @@ export function createAcpDriver(support: AcpSupport): ProviderDriver<AcpConfig> 
             closeSession(threadId, "stop");
           }
         };
-        active.set(threadId, { stop: () => closeSession(threadId, "stop"), interrupt, turnId, asks });
+        active.set(threadId, { stop: () => { state.stopped = true; closeSession(threadId, "stop"); }, interrupt, turnId, asks });
         emit({ ...base(threadId, turnId), type: "turn.started" });
         session.current = current;
 
@@ -1699,7 +1714,9 @@ export function createAcpDriver(support: AcpSupport): ProviderDriver<AcpConfig> 
             if (turn.variant !== undefined && requestedVariantOption().currentValue !== turn.variant) {
               throw new Error(`${support.displayName} changed variant before the prompt`);
             }
+            if (state.settled || state.stopped || session.closing) throw new Error("turn stopped");
             state.promptSent = true;
+            acknowledge();
             const promptIdleMs = promptIdleTimeoutMs();
             const result = await request(
               "session/prompt",
@@ -1752,6 +1769,32 @@ export function createAcpDriver(support: AcpSupport): ProviderDriver<AcpConfig> 
               // fallback for existing ACP supports.
               const needsAuth = code === "invalid_credentials" || code === "inactive_subscription"
                 || message === support.loginNote;
+              const failure = classifyError({ text: message });
+              const transientStartup = failure.transient || (failure.reason === "unknown" && code === "upstream_outage");
+              const denied = /\b(?:(?:permission|access) denied|(?:approval|permission) (?:required|denied|rejected)|requires? (?:approval|permission)|policy (?:restriction|violation)|(?:blocked|denied|restricted) by (?:the )?policy)\b/i.test(message);
+              if (turn.startupRecovery && transientStartup && !needsAuth && !denied && (!code || code === "upstream_outage")
+                  && ![-32700, -32600, -32601, -32602].includes((e as any)?.code)
+                  && !state.promptSent && !state.startupActivity && !state.producedItem && !state.text
+                  && !state.stopped && !session.closing && !asks.size && !current.runningTools.size) {
+                // Quiesce before killing: the child's close event must not
+                // publish a terminal completion before the harness can recover.
+                state.settled = true;
+                session.current = null;
+                if (current.interruptTimer) clearTimeout(current.interruptTimer);
+                closeSession(threadId, "startup-recovery");
+                const stopped = await killCliTree(session.child).catch(() => false);
+                if (current.interruptTimer) clearTimeout(current.interruptTimer);
+                active.delete(threadId);
+                if (stopped && !state.stopped) {
+                  rejectStartup(new TurnNotStartedError(turnId, message));
+                  return;
+                }
+                acknowledge();
+                if (!state.stopped) emit({ ...base(threadId, turnId), type: "runtime.error", message });
+                emit({ ...base(threadId, turnId), type: "turn.completed", ok: state.stopped,
+                  stopReason: state.stopped ? "cancelled" : "rpc_error", cost: null });
+                return;
+              }
               emit({
                 ...base(threadId, turnId),
                 type: "runtime.error",
@@ -1772,7 +1815,7 @@ export function createAcpDriver(support: AcpSupport): ProviderDriver<AcpConfig> 
           }
         })();
 
-        return { turnId };
+        return startupAck ?? { turnId };
       };
 
       const snapshot = async (): Promise<ProviderSnapshot> => {

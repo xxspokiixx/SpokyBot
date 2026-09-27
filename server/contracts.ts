@@ -41,6 +41,18 @@ export class ProviderError extends Error {
   }
 }
 
+/** The driver proved this attempt never reached a prompt or client-side action,
+ * and its owned process has stopped. The harness may safely recover it. */
+export class TurnNotStartedError extends Error {
+  readonly turnId: TurnId;
+
+  constructor(turnId: TurnId, message: string) {
+    super(message);
+    this.name = "TurnNotStartedError";
+    this.turnId = turnId;
+  }
+}
+
 
 /** Variants are opaque provider IDs, not the cross-engine effort enum. */
 export function isModelVariant(value: unknown): value is string {
@@ -116,6 +128,9 @@ export interface SendTurnInput {
    * process. Takes precedence over resumeCursor. The runtime supplies the
    * active conversation in text/transcript when rebuilding a session. */
   sessionReset?: boolean;
+  /** Hold the startup ACK until prompt dispatch; a safely retired transient
+   * setup failure may reject with TurnNotStartedError instead of completing. */
+  startupRecovery?: boolean;
   /** The turn with the conversation so far replayed inline, attached only
    * alongside resumeCursor. A cursor-resuming driver sends it once, on a
    * fresh session, when the provider refuses the cursor before reading the

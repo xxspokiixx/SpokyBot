@@ -200,6 +200,10 @@ The [provider recovery recipe](provider-recovery.md) verifies real Grok image
 transport and Claude authentication against loopback APIs, plus scoped thread
 approvals and provider safety errors in an isolated desktop UI.
 
+The [automatic recovery fixture](automatic-recovery.md) checks opt-in, one-shot
+backup model dispatch after proven pre-prompt ACP failures, preserving the
+conversation, approval level and Stop/new-message precedence.
+
 The [skill approval lifecycle recipe](skill-approval-lifecycle.md) checks Deny,
 missing staged records and active-thread deletion in two isolated app windows,
 including the surviving conversation and sending again without deleting the bot.

@@ -183,6 +183,7 @@ import { describeSpawnFailure, execCli } from "./procs.ts";
 import { blockedTarget, buildNotification, buildSpendNotification, type Notification } from "./notify.ts";
 import {
   isModelVariant,
+  TurnNotStartedError,
   type ModelSelection,
   type RequestOutcome,
   type RuntimeEvent,
@@ -190,6 +191,7 @@ import {
   newId,
 } from "./contracts.ts";
 import { RETRY_MAX_ATTEMPTS } from "./drivers/retry.ts";
+import { recoveryCapabilityError } from "./automatic-recovery.ts";
 import { decodeGeneratedImage } from "./generated-image.ts";
 import {
   MAX_MCP_SERVERS,
@@ -7572,6 +7574,8 @@ async function startTurn(
     onDispatchError?: (message: string) => void;
     /** Summarize this conversation without asking the agent to do more work. */
     compactOnly?: boolean;
+    /** Harness-only: never follow a backup failure with another attempt. */
+    automaticRecoveryAttempted?: boolean;
     /** Queue receipts outlive the dispatch acknowledgment until this exact turn settles. */
     onTurnSettled?: () => void;
     coordination?: { id: string; resumed: boolean; settle: (outcome: { ok: boolean; text: string }) => void };
@@ -7733,6 +7737,9 @@ async function startTurn(
           sender: opts?.sender,
         });
   }
+  const recoveryUserMessageId = opts?.coordination
+    ? store.activePath(threadId).findLast(m => m.role === "user" && m.kind === "text")?.id
+    : userMessage.id;
   // Admitted: every refusal above has passed and no other turn runs on this
   // thread, so this is the one moment the ledger's "who asked" may change.
   if (opts?.trigger) turnTriggers.set(threadId, opts.trigger);
@@ -8602,6 +8609,7 @@ async function startTurn(
       const dispatch = await guardTurnDispatch(instance.adapter.sendTurn({
         threadId,
         botId: bot.id,
+        startupRecovery: cfg.automaticRecovery?.enabled === true && !opts?.automaticRecoveryAttempted,
         text: dispatchContext.turnText,
         refreshSystemPrompt: true,
         images: turnImages,
@@ -8683,7 +8691,16 @@ async function startTurn(
         drainTeamSetupResumes();
         drainDelegationWakes();
       }
-    } catch (e) {
+    } catch (cause) {
+      let e = cause;
+      // Only the driver can prove that a task was never submitted and its
+      // old process is gone. A timeout/error string alone is not that proof.
+      const mayRecover = e instanceof TurnNotStartedError &&
+        directTurnClaimIsCurrent(bot.id, dispatchClaimId, threadId);
+      if (e instanceof TurnNotStartedError) {
+        retireProviderTurn(e.turnId);
+        if (!mayRecover) e = new DirectTurnSetupCancelled("turn stopped during provider setup");
+      }
       handoffs.abandon(threadId, dispatchClaimId);
       if (computerSelectionTurns.get(threadId)?.generation === dispatchClaimId) computerSelectionTurns.delete(threadId);
       clearCancelledProviderHandshake(threadId, `direct:${dispatchClaimId}`);
@@ -8692,6 +8709,8 @@ async function startTurn(
       const ownsLatestGeneration = directTurnGenerationByThread.get(threadId) === dispatchClaimId;
       releaseTurnResources(resourceOwner);
       if (ownsLatestGeneration) {
+        runningTurnEngines.delete(threadId);
+        endMemoryTurn(threadId);
         clearTurnDigestState(threadId);
         releaseLocalVmThread(threadId);
         vpsThreadEnded(bot.id, threadId);
@@ -8720,8 +8739,47 @@ async function startTurn(
         settleDirectFollowup(dispatchClaimId);
         return;
       }
-      const message = e instanceof Error ? e.message : String(e);
-settleDirectFollowup(dispatchClaimId, { ok: false, text: message });
+      let message = e instanceof Error ? e.message : String(e);
+      const backup = cfg.automaticRecovery?.enabled ? cfg.automaticRecovery.backup : undefined;
+      const current = store.projectBotForTask(bot.id, threadId);
+      if (mayRecover && backup && current && !opts?.automaticRecoveryAttempted && (!opts?.cardContinuation || opts.coordination) &&
+          !directRequestOwners.get(threadId)?.stopped && !hasQueuedSteeredMessages(bot.id, threadId) &&
+          JSON.stringify(current.modelSelection) === JSON.stringify(bot.modelSelection) &&
+          (backup.instanceId !== instanceId || backup.model !== model) &&
+          store.activePath(threadId).findLast(m => m.role === "user" && m.kind === "text")?.id === recoveryUserMessageId) {
+        // No await between releasing the failed attempt and admitting its
+        // replacement: a newer send or Stop must never lose to a stale retry.
+        store.setTaskActivity(bot.id, threadId, "idle");
+        directTurnBots.delete(threadId);
+        const checked = checkedTaskModelSwitch(current, backup, false, false, true);
+        const target = checked.ok ? registry.get(checked.selection.instanceId) : null;
+        const refusal = !checked.ok ? checked.error : !target || !target.enabled ? "The backup engine is unavailable."
+          : !store.taskByThread(bot.id, threadId)?.cwd ? "This older thread has no pinned working folder. Choose its backup manually."
+          : policyModelRefusal(target) ?? recoveryCapabilityError(
+            { driverKind: instance.driverKind, capabilities: instance.adapter.capabilities },
+            { driverKind: target.driverKind, capabilities: target.adapter.capabilities });
+        if (!refusal && checked.ok && target) {
+          try {
+            assertWithinBudget(cfg, DATA_DIR);
+            store.switchTaskModel(bot.id, threadId, checked.selection, false, false, {
+              ...hostedModels?.resetTask(current.modelSelection, checked.selection), rewound: true,
+            });
+            store.appendMessage(threadId, { role: "bot", kind: "activity", tool: {
+              name: `recovery: Automatic recovery: ${instance.displayName || instance.driverKind} could not start. Trying ${target.displayName || target.driverKind} · ${checked.selection.model} once in this thread.`, ok: true,
+            } });
+            await startTurn(bot.id, text, { ...opts, threadId, userMessage, editedMessageId: undefined,
+              automaticRecoveryAttempted: true });
+            // The backup now owns these callbacks; don't publish a failed
+            // routine/peer result or release a queued receipt in between.
+            directFollowupSettlers.delete(dispatchClaimId);
+            directCoordinationSettlers.delete(dispatchClaimId);
+            return;
+          } catch (failure) {
+            message += ` Backup could not start: ${failure instanceof Error ? failure.message : String(failure)}`;
+          }
+        } else if (refusal) message = `Automatic recovery unavailable: ${refusal} Original error: ${message}`;
+      }
+      settleDirectFollowup(dispatchClaimId, { ok: false, text: message });
       // The wait already wrote its failure resolution; keep all dispatch
       // failure bookkeeping below without adding the same error twice.
       if (!(e instanceof ComputerWaitGaveUp)) store.appendMessage(threadId, {
@@ -12590,6 +12648,7 @@ function configStatus() {
     // not a secret — the settings picker shows it; "" = follow the system
     language: cfg.language ?? "",
     rooms: { turnTimeoutMinutes: roomTurnTimeoutMinutes(cfg) },
+    automaticRecovery: cfg.automaticRecovery ?? { enabled: false },
     // absent effort = no level is sent, so clients can tell it from any level
     newBots: cfg.newBots?.effort ? { effort: cfg.newBots.effort } : {},
     threads: {
@@ -20546,6 +20605,15 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
       if (hostedModels && patch.defaultModelSelection) {
         const checked = checkedModelSelection(patch.defaultModelSelection);
         if (!checked.ok) return json(res, checked.status, { error: checked.error });
+      }
+      if (patch.automaticRecovery?.enabled) {
+        const checked = checkedModelSelection(patch.automaticRecovery.backup, undefined, true);
+        if (!checked.ok) return json(res, checked.status, { error: checked.error });
+        const target = registry.get(checked.selection.instanceId)!;
+        if (!target.enabled) return json(res, 400, { error: "Enable the backup engine before selecting it for recovery." });
+        const refusal = policyModelRefusal(target);
+        if (refusal) return json(res, 403, { error: refusal, code: "managed_policy" });
+        patch.automaticRecovery.backup = checked.selection;
       }
       if (!Object.keys(patch).length) return json(res, 400, { error: "nothing to save" });
       const changingVoiceProvider = patch.tts?.provider !== undefined

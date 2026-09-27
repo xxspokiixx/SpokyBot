@@ -606,6 +606,7 @@ export interface ConfigStatus {
   /** Workspace defaults for new bots; absent effort = no level is sent. */
   newBots?: { effort?: EffortLevel };
   threads?: { maxConcurrentPerBot: number; eventLogMaxBytes?: number; eventLogRetentionDays?: number };
+  automaticRecovery?: { enabled: boolean; backup?: ModelSelection };
   localVm: { mode: "shared" | "per-bot"; maxInstances: number };
   opencodeGo?: { configured: boolean };
   /** Voice. `configured` = the engine has what it needs (an ElevenLabs or
@@ -683,7 +684,7 @@ export interface BrowserProfile {
 // Settings shows (a saved key's Test button used to vanish that way).
 export type ConfigStatusFrame = Pick<
   ConfigStatus,
-  "xai" | "mistral" | "anthropic" | "openaiCompat" | "fleet" | "composio" | "box" | "vps" | "rooms" | "threads" | "localVm" | "opencodeGo" | "tts" | "imageGen" | "profile" | "language" | "features" | "onboarding" | "browserEngine" | "browserProfiles" | "edition" | "budgets" | "billing" | "managedPolicy"
+  "xai" | "mistral" | "anthropic" | "openaiCompat" | "fleet" | "composio" | "box" | "vps" | "rooms" | "threads" | "automaticRecovery" | "localVm" | "opencodeGo" | "tts" | "imageGen" | "profile" | "language" | "features" | "onboarding" | "browserEngine" | "browserProfiles" | "edition" | "budgets" | "billing" | "managedPolicy"
 >;
 
 export function configStatusFromFrame(frame: ConfigStatusFrame): ConfigStatus {
@@ -698,6 +699,7 @@ export function configStatusFromFrame(frame: ConfigStatusFrame): ConfigStatus {
     vps: frame.vps,
     rooms: frame.rooms,
     threads: frame.threads,
+    automaticRecovery: frame.automaticRecovery,
     localVm: frame.localVm,
     opencodeGo: frame.opencodeGo,
     tts: frame.tts,

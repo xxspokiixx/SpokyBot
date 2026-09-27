@@ -66,7 +66,8 @@
 //   FAKE_ACP_RPC_FAILURE_FILE  read a JSON-RPC error object on session/prompt;
 //                       once read this process stays poisoned even if the
 //                       file is removed. A replacement process can recover.
-//   FAKE_ACP_RPC_FAILURE_METHOD  session/new or session/prompt (default).
+//   FAKE_ACP_RPC_FAILURE_METHOD  initialize, session/new or session/prompt (default).
+//   FAKE_ACP_RPC_FAILURE_GATE  hold the error until this file exists.
 //   FAKE_ACP_RPC_FAILURE_AFTER_OUTPUT  emit text + a tool result before failing.
 //   FAKE_ACP_LOAD_ERROR  JSON-RPC error object returned by session/load.
 //   FAKE_ACP_MODELS      comma-separated model ids. Enables the opencode-shaped
@@ -349,8 +350,18 @@ function failRpc(msg: { method: string; id: unknown }): boolean {
   if (failureFile && existsSync(failureFile)) rpcFailure = JSON.parse(readFileSync(failureFile, "utf8"));
   if (!rpcFailure) return false;
   if (msg.method === "session/prompt" && process.env.FAKE_ACP_RPC_FAILURE_AFTER_OUTPUT === "1") playTurn();
-  recordMethod(`${msg.method}.error`);
-  out({ jsonrpc: "2.0", id: msg.id, error: rpcFailure });
+  const fail = () => {
+    recordMethod(`${msg.method}.error`);
+    out({ jsonrpc: "2.0", id: msg.id, error: rpcFailure });
+  };
+  const gate = process.env.FAKE_ACP_RPC_FAILURE_GATE;
+  if (gate && !existsSync(gate)) {
+    const timer = setInterval(() => {
+      if (!existsSync(gate)) return;
+      clearInterval(timer);
+      fail();
+    }, 20);
+  } else fail();
   return true;
 }
 
@@ -477,6 +488,7 @@ function handle(msg: any) {
 
   switch (msg.method) {
     case "initialize": {
+      if (failRpc(msg)) break;
       if (mode === "hang-initialize") {
         setInterval(() => {}, 1_000);
         return;

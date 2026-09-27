@@ -322,6 +322,11 @@ const defaultModelSelectionSchema = z.object({
   variant: z.string().refine(isModelVariant, "invalid model variant").optional(),
 }).refine((selection) => selection.variant === undefined || selection.effort === undefined,
   "choose either a model variant or an effort level");
+const automaticRecoverySchema = z.object({
+  enabled: z.boolean(),
+  backup: defaultModelSelectionSchema.optional(),
+}).strict().refine((recovery) => !recovery.enabled || recovery.backup !== undefined,
+  { message: "Choose a backup model before enabling automatic recovery", path: ["backup"] });
 const threadsConfigSchema = z.object({
   maxConcurrentPerBot: z.number().int().min(1).max(MAX_CONCURRENT_BOT_THREADS),
   /** Cap each per-thread events/ and native/ NDJSON log at this many
@@ -354,6 +359,7 @@ const appConfigSchema = z.object({
    * addresses or `@domain` entries; admins get every scope, members chat only. */
   signIn: z.object({ admins: z.array(z.string().max(320)).max(500).optional(), members: z.array(z.string().max(320)).max(5000).optional() }).optional(),
   defaultModelSelection: defaultModelSelectionSchema.optional(),
+  automaticRecovery: automaticRecoverySchema.optional(),
   newBotDefaults: newBotDefaultsSchema.optional(),
   newBots: newBotsConfigSchema.optional(),
   /** CLI-only launch preferences. Never enable remote access implicitly. */
@@ -482,6 +488,8 @@ export interface AppConfig {
   signIn?: { admins?: string[]; members?: string[] };
   /** Preferred selection for newly created bots; existing bots keep theirs. */
   defaultModelSelection?: ModelSelection;
+  /** Off by default; one backup attempt only before any work starts. */
+  automaticRecovery?: { enabled: boolean; backup?: ModelSelection };
   /** UI creation template. Saving it never mutates a bot or grants access. */
   newBotDefaults?: NewBotDefaults;
   /** Defaults for newly created bots that no model selection carries. */
@@ -752,6 +760,7 @@ export const FLEET_NEUTRAL_KEYS: ReadonlySet<string> = new Set([
   "vps",
   "rooms",
   "threads",
+  "automaticRecovery",
   "context",
   "localVm",
   "features",
@@ -1059,6 +1068,8 @@ export function saveConfig(
   if (checkedPatch.language !== undefined) disk.language = checkedPatch.language;
   if (checkedPatch.customDomain !== undefined) disk.customDomain = checkedPatch.customDomain;
   if (checkedPatch.signIn !== undefined) disk.signIn = checkedPatch.signIn;
+  // Replace the section so clearing a backup cannot revive the old selection.
+  if (checkedPatch.automaticRecovery !== undefined) disk.automaticRecovery = checkedPatch.automaticRecovery;
   // A selection is replaced as one value, so changing engines also clears
   // an effort level omitted from the new selection.
   if (checkedPatch.defaultModelSelection !== undefined) {
