@@ -27,7 +27,7 @@ import { startFakeHttpMcp } from "./testing/fake-http-mcp-server.ts";
 import { freePortBlock } from "./testing/ports.ts";
 import { openSse } from "./testing/sse.ts";
 import { FILE_MAX_BYTES, IMAGE_MAX_BYTES } from "./attachments.ts";
-import { SIGN_IN_PROMPT } from "./system-prompt.ts";
+import { computerPrompt, SIGN_IN_PROMPT } from "./system-prompt.ts";
 import {
   PHONE_SECRET_INFO,
   phoneSecretAAD,
@@ -7746,6 +7746,103 @@ describe("harness HTTP API", () => {
       await api("PATCH", "/api/config", { features: { browser: false }, browserProfiles: [] }).catch(() => undefined);
       if (room) await api("DELETE", `/api/groups/${room.id}`).catch(() => undefined);
       await api("DELETE", `/api/bots/${bot.id}`).catch(() => undefined);
+    }
+  }, 60_000);
+
+  it.each(["direct", "room"] as const)("resolves the same computer paragraph in the settings preview and %s turns", async (target) => {
+    // The paragraph a plan earns is decided once, by the shared resolver:
+    // what the preview shows and what a dispatched turn says cannot drift.
+    // The fleet mounts every capability for its dispatchable engines, so
+    // these cells pin the mountable span; the capability-gated cells live
+    // in the unit grid (no dispatchable engine lacks the capability, and
+    // the mounts refuse those plans before any prompt exists).
+    const bot = (await api("POST", "/api/bots", { name: "Cadence" })).body.bot;
+    let boxBot: any;
+    let room: any;
+    const idle = (id: string) => expect.poll(async () =>
+      (await api("GET", "/api/bots?messages=0")).body.bots.find((b: { id: string }) => b.id === id)?.busy,
+    { timeout: 10_000 }).toBe(false);
+    const computerSection = async (id: string) =>
+      (await api("GET", `/api/bots/${id}/system-prompt`)).body.sections
+        .find((section: { id: string }) => section.id === "computer");
+    const turnPrompt = async (path: string) => {
+      rmSync(fakeClaudeDump, { force: true });
+      expect((await api("POST", path, { text: "describe your computer tools" })).status).toBe(202);
+      return (await readJsonFileWhenReady<{ systemPrompt: string }>(fakeClaudeDump, 15_000)).systemPrompt;
+    };
+    try {
+      expect((await api("PATCH", `/api/bots/${bot.id}`, {
+        modelSelection: { instanceId: "claude", model: "claude-sonnet-5" },
+      })).status).toBe(200);
+      if (target === "room") {
+        room = (await api("POST", "/api/groups", { name: "Computer paragraph", memberIds: [bot.id] })).body.group;
+        expect((await api("PATCH", `/api/groups/${room.id}/setup`, { action: "skip" })).status).toBe(200);
+      }
+      const messagesPath = room ? `/api/groups/${room.id}/messages` : `/api/bots/${bot.id}/messages`;
+
+      // Off earns no paragraph anywhere: no section in the preview, none in
+      // the dispatched prompt.
+      expect((await api("PATCH", `/api/bots/${bot.id}`, { computer: "off" })).status).toBe(200);
+      expect(await computerSection(bot.id)).toBeUndefined();
+      const off = await turnPrompt(messagesPath);
+      for (const paragraph of ["isolated Cua sandbox", "your own cloud computer", "This is a VPS", "user's computer"]) {
+        expect(off).not.toContain(paragraph);
+      }
+      await api("POST", `/api/bots/${bot.id}/interrupt`, {});
+      await idle(bot.id);
+
+      // A Local VM plan previews exactly the paragraph the resolver gives
+      // it, by configured mode. The CI fleet has no VM runtime, so a real
+      // VM turn cannot be dispatched here; the settings-level text is the
+      // same wiring a dispatched VM turn uses.
+      expect((await api("PATCH", `/api/bots/${bot.id}`, { computer: "vm" })).status).toBe(200);
+      expect((await computerSection(bot.id)).text).toBe(computerPrompt("vm-shared"));
+      expect((await api("PATCH", "/api/config", { localVm: { mode: "per-bot", maxInstances: 1 } })).status).toBe(200);
+      expect((await computerSection(bot.id)).text).toBe(computerPrompt("vm-private"));
+      expect((await api("PATCH", "/api/config", { localVm: { mode: "shared", maxInstances: 2 } })).status).toBe(200);
+      expect((await computerSection(bot.id)).text).toBe(computerPrompt("vm-shared"));
+
+      // Cloud on the Box backend swaps the engine to the box agent, so the
+      // paragraph is agent-shaped: the preview carries only the sign-in
+      // policy, and the dispatched runner prompt carries that same policy
+      // and no desktop paragraph. Direct only: the room leg mounts through
+      // the identical attachBotBox seam, and a second full box-runner turn
+      // would only re-prove the driver, not the resolver.
+      if (target === "direct") {
+        expect((await api("PUT", "/api/config", { box: { token: "box_route" } })).status).toBe(200);
+        boxBot = (await api("POST", "/api/bots", { name: "Beacon" })).body.bot;
+        expect((await api("PATCH", `/api/bots/${boxBot.id}`, {
+          computer: "cloud", cloudBackend: "box",
+          modelSelection: { instanceId: "claude", model: "claude-sonnet-5" },
+        })).status).toBe(200);
+        managedBoxRows = [{ id: "bx_8765432a", name: managedBoxNameForFixture(boxBot.id), state: "idle" }];
+        boxPromptBodies.length = 0;
+        expect((await computerSection(boxBot.id)).text).toBe(computerPrompt("box-agent"));
+        expect((await computerSection(boxBot.id)).text).toBe(SIGN_IN_PROMPT);
+        expect((await api("POST", `/api/bots/${boxBot.id}/messages`, { text: "describe your computer tools" })).status).toBe(202);
+        await expect.poll(() => boxPromptBodies.length, { timeout: 10_000 }).toBe(1);
+        const runnerPrompt = String(boxPromptBodies[0]!.prompt);
+        expect(runnerPrompt).toContain(SIGN_IN_PROMPT);
+        for (const paragraph of ["isolated Cua sandbox", "your own cloud computer", "This is a VPS", "user's computer"]) {
+          expect(runnerPrompt).not.toContain(paragraph);
+        }
+        await api("POST", `/api/bots/${boxBot.id}/interrupt`, {});
+        await idle(boxBot.id);
+      }
+    } finally {
+      if (room) await api("POST", `/api/groups/${room.id}/interrupt`, {}).catch(() => undefined);
+      await api("POST", `/api/bots/${bot.id}/interrupt`, {}).catch(() => undefined);
+      if (boxBot) {
+        await api("POST", `/api/bots/${boxBot.id}/interrupt`, {}).catch(() => undefined);
+        await api("DELETE", `/api/bots/${boxBot.id}`).catch(() => undefined);
+      }
+      managedBoxRows = [];
+      boxPromptBodies.length = 0;
+      await api("PATCH", "/api/config", { localVm: { mode: "shared", maxInstances: 2 } }).catch(() => undefined);
+      await api("PUT", "/api/config", { box: { token: "" } }).catch(() => undefined);
+      if (room) await api("DELETE", `/api/groups/${room.id}`).catch(() => undefined);
+      await api("DELETE", `/api/bots/${bot.id}`).catch(() => undefined);
+      rmSync(fakeClaudeDump, { force: true });
     }
   }, 60_000);
   it("reconciles a committed crash-stale bot reference before ACK and profile-id reuse", async () => {

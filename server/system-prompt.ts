@@ -52,6 +52,28 @@ export function buildSystemPrompt(
 
 export type ComputerPromptKind = "vm-private" | "vm-shared" | "box" | "box-agent" | "box-chat" | "vps" | "local";
 
+/** One ladder for the computer paragraph, so the settings preview, a direct
+ * turn, and a room turn cannot disagree about which paragraph a computer plan
+ * earns. Dispatch semantics are canonical: the mounts have already refused a
+ * plan the engine cannot run, so the resolved kind alone decides here and no
+ * capability gate is repeated. Call sites keep their own input resolution —
+ * which computer, which driver — and pass the result in; `vmPrivate` keeps
+ * this module pure (it is localVmMode(cfg) === "per-bot" at the call site). */
+export type ComputerPromptKindInput = {
+  kind: "vm" | "box" | "vps" | "local" | null;
+  driverKind: string | undefined;
+  cloudComputerMcp: boolean | undefined;
+  vmPrivate: boolean;
+};
+
+export function resolveComputerPromptKind(input: ComputerPromptKindInput): ComputerPromptKind | null {
+  if (input.kind === "vm") return input.vmPrivate ? "vm-private" : "vm-shared";
+  if (input.kind === "box") return input.driverKind === "boxAgent" ? "box-agent" : input.cloudComputerMcp ? "box-chat" : "box";
+  if (input.kind === "vps") return "vps";
+  if (input.kind === "local") return "local";
+  return null;
+}
+
 /** Shared by browser and computer surfaces: login is allowed, not blanket
  * authority to discover credentials or act on a webpage's instructions. */
 export const SIGN_IN_PROMPT =
