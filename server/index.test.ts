@@ -6408,6 +6408,51 @@ describe("harness HTTP API", () => {
     }
   });
 
+  it("pins provider approval support at the thread settings gate", async () => {
+    const codex = (await api("POST", "/api/bots", {
+      modelSelection: { instanceId: "codex", model: "fixture-codex-model" },
+    })).body.bot;
+    try {
+      // Codex has no auto-accept-edits mode, so the thread-level PATCH must
+      // refuse Edits before any store write.
+      const refused = await api("PATCH", `/api/bots/${codex.id}/tasks/${codex.threadId}`, { approvalMode: "edits" });
+      expect(refused.status).toBe(400);
+      expect(refused.body.error).toMatch(/This provider does not support the selected approval level/);
+    } finally {
+      await api("DELETE", `/api/bots/${codex.id}`);
+    }
+    const claude = (await api("POST", "/api/bots", {
+      modelSelection: { instanceId: "claude", model: "fixture-claude-model" },
+    })).body.bot;
+    try {
+      // Claude's engine implements acceptEdits, so the same PATCH applies.
+      const applied = await api("PATCH", `/api/bots/${claude.id}/tasks/${claude.threadId}`, { approvalMode: "edits" });
+      expect(applied.status).toBe(200);
+      expect(applied.body.task).toMatchObject({ approvalMode: "edits", autoApprove: false });
+    } finally {
+      await api("DELETE", `/api/bots/${claude.id}`);
+    }
+  });
+
+  it("pins provider approval support at the bot settings gate", async () => {
+    const bot = (await api("POST", "/api/bots", {
+      modelSelection: { instanceId: "computer", model: "claude-fable-5" },
+    })).body.bot;
+    try {
+      // The Box-native agent has no Full mapping, so the bot-level PATCH
+      // must refuse Full before the trusted-desktop transition.
+      const refused = await api("PATCH", `/api/bots/${bot.id}`, { approvalMode: "full" });
+      expect(refused.status).toBe(400);
+      expect(refused.body.error).toMatch(/does not support the selected approval level, or changing providers requires choosing Ask first/);
+      const stored = (await api("GET", "/api/bots")).body.bots.find(
+        (candidate: { id: string }) => candidate.id === bot.id,
+      );
+      expect(stored.approvalMode).toBeUndefined();
+    } finally {
+      await api("DELETE", `/api/bots/${bot.id}`);
+    }
+  });
+
   it("maps legacy autoApprove PATCHes to safe Auto or Ask", async () => {
     const bot = (await api("POST", "/api/bots")).body.bot;
     const auto = await api("PATCH", `/api/bots/${bot.id}`, { autoApprove: true });
