@@ -42,6 +42,12 @@
 //                   | stall-after-text (stream one message chunk, then go
 //                     fully silent forever — a wedged agent mid-answer; the
 //                     driver's prompt idle guard must fail the turn on its own)
+//                   | slow-tool (start a tool call and send nothing while it
+//                     "runs" for FAKE_ACP_TOOL_MS, default 600 — a quiet
+//                     `sleep` or build — then finish it and answer)
+//                   | stall-after-tool (finish a tool call, then go fully
+//                     silent forever: the guard must still fire once no tool
+//                     is running)
 //   FAKE_ACP_MCP_TRANSPORTS  comma list of remote MCP transports the agent
 //                       advertises in initialize (mcpCapabilities), e.g. "http,sse"
 //   FAKE_ACP_PERMISSION_OPTIONS JSON options override in permission mode
@@ -706,6 +712,26 @@ function handle(msg: any) {
             : { stopReason: "end_turn", _meta: { inputTokens: 10, outputTokens: 5 } },
         );
       };
+      if (mode === "slow-tool" || mode === "stall-after-tool") {
+        const tool = (update: Record<string, unknown>) =>
+          out({ jsonrpc: "2.0", method: "session/update", params: { update: { toolCallId: "tc-slow", ...update } } });
+        // ACP's default status is pending: this tool_call carries none.
+        tool({ sessionUpdate: "tool_call", title: "sleep", rawInput: { command: "sleep 45 && echo done" } });
+        tool({ sessionUpdate: "tool_call_update", status: "in_progress" });
+        const finish = () => tool({ sessionUpdate: "tool_call_update", status: "completed", rawOutput: { output: "done" } });
+        if (mode === "stall-after-tool") {
+          finish();
+          hangingPromptId = msg.id;
+          hangKeepAlive = setInterval(() => {}, 1_000);
+          return;
+        }
+        setTimeout(() => {
+          finish();
+          out({ jsonrpc: "2.0", method: "session/update", params: { update: { sessionUpdate: "agent_message_chunk", content: { text: "done" } } } });
+          complete();
+        }, Number(process.env.FAKE_ACP_TOOL_MS ?? 600));
+        return;
+      }
       const promptText = String(msg.params?.prompt?.[0]?.text ?? "");
       // A delegated reply woke this bot (control-plane continuation): the
       // harness revived it to fold the result in. Synthesize instead of

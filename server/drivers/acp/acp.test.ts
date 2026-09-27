@@ -252,6 +252,7 @@ describe("ACP turns (fake CLI)", () => {
     delete process.env.FAKE_ACP_REJECT_LIVE_LOAD_FILE;
     delete process.env.FAKE_ACP_IMAGE_CAPABILITY;
     delete process.env.FAKE_ACP_GROK_VERSION;
+    delete process.env.FAKE_ACP_TOOL_MS;
     delete process.env.FAKE_ACP_DUMP_PROMPT;
     delete process.env.OPENMAUS_ACP_PROMPT_IDLE_TIMEOUT_MS;
     delete process.env.OMB_ACP_SESSION_IDLE_MS;
@@ -1177,6 +1178,27 @@ describe("ACP turns (fake CLI)", () => {
     expect(recorder.events.some(e => e.type === "runtime.error")).toBe(false);
   });
 
+  // MOCA-260: a quiet `sleep` or build sends nothing while it runs, and the
+  // guard used to stop the turn as if the agent had hung.
+  it("does not expire an agent while a tool it started is still running", async () => {
+    process.env.OPENMAUS_ACP_PROMPT_IDLE_TIMEOUT_MS = "150";
+    process.env.FAKE_ACP_TOOL_MS = "600";
+    await create(GrokAgentDriver, "slow-tool");
+    await instance.adapter.sendTurn({ threadId: "t-slow-tool", text: "go" });
+    expect(await recorder.until(e => e.type === "turn.completed")).toMatchObject({ ok: true });
+    expect(recorder.events.some(e => e.type === "runtime.error")).toBe(false);
+    expect(recorder.events.find(e => e.type === "item.completed" && e.itemType === "tool")).toMatchObject({ ok: true });
+  });
+
+  it("still fails an agent that goes silent once its tool has finished", async () => {
+    process.env.OPENMAUS_ACP_PROMPT_IDLE_TIMEOUT_MS = "150";
+    await create(GrokAgentDriver, "stall-after-tool");
+    await instance.adapter.sendTurn({ threadId: "t-stall-tool", text: "go" });
+    expect(await recorder.until(e => e.type === "turn.completed")).toMatchObject({ ok: false, stopReason: "rpc_error" });
+    expect(recorder.events.find(e => e.type === "runtime.error")?.message).toMatch(/no tool running/i);
+    expect(instance.adapter.hasSession("t-stall-tool")).toBe(false);
+  });
+
   it("an agent that goes silent mid-answer is failed and closed by the prompt idle guard", async () => {
     process.env.OPENMAUS_ACP_PROMPT_IDLE_TIMEOUT_MS = "150";
     await create(GrokAgentDriver, "stall-after-text");
@@ -1185,7 +1207,7 @@ describe("ACP turns (fake CLI)", () => {
     const done = await recorder.until((e) => e.type === "turn.completed");
     expect(done).toMatchObject({ type: "turn.completed", ok: false, stopReason: "rpc_error" });
     const err = recorder.events.find((e) => e.type === "runtime.error");
-    expect(err?.message).toMatch(/went fully silent/i);
+    expect(err?.message).toMatch(/no tool running/i);
     expect(err?.message).toContain("OPENMAUS_ACP_PROMPT_IDLE_TIMEOUT_MS");
     // the streamed chunk reached the UI before the child went silent
     expect(recorder.events.some((e) => e.type === "content.delta")).toBe(true);

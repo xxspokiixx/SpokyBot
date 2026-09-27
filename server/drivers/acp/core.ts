@@ -126,6 +126,10 @@ interface AcpTurn {
   controlsHost: boolean;
   state: { settled: boolean; promptSent: boolean; text: string; producedItem: boolean };
   asks: Map<string, AcpAskFinish>;
+  /** Tool calls the agent started and has not yet reported finished. A tool
+   * such as `sleep` or a quiet build sends nothing while it runs, so the
+   * prompt's silence watchdog waits for these as it does for asks. */
+  runningTools: Set<string>;
   interruptTimer: ReturnType<typeof setTimeout> | null;
   flushAssistantText: () => void;
   /** fold a session config snapshot into sessionConfigResult + the picker */
@@ -334,6 +338,17 @@ const promptIdleTimeoutMs = (): number => {
   const ms = Number(raw);
   return Number.isFinite(ms) && ms > 0 ? ms : 0;
 };
+/** Keep a turn's set of running tool calls in step with the agent's
+ * `tool_call` / `tool_call_update` notifications: a call is running from
+ * the first update that is not terminal until one that is. A `tool_call`
+ * without a status is pending (ACP's default); a `tool_call_update` without
+ * one leaves the call as it was. */
+function trackRunningTool(current: AcpTurn, update: { toolCallId?: unknown; status?: unknown }, defaultStatus?: "pending"): void {
+  if (typeof update.toolCallId !== "string" || !update.toolCallId) return;
+  const status = update.status ?? defaultStatus;
+  if (status === "completed" || status === "failed") current.runningTools.delete(update.toolCallId);
+  else if (status === "pending" || status === "in_progress") current.runningTools.add(update.toolCallId);
+}
 const CLIENT_FILE_MAX_BYTES = 8 * 1024 * 1024;
 
 function acpVariantOption(result: any): { configId: string; options: ModelVariantOption[]; currentValue?: string } | undefined {
@@ -798,8 +813,9 @@ export function createAcpDriver(support: AcpSupport): ProviderDriver<AcpConfig> 
               if (!(idleMs && idleMs > 0)) return;
               if (idleTimer) clearTimeout(idleTimer);
               idleTimer = setTimeout(() => {
-                // Waiting for a person is not an unresponsive agent.
-                if (session.current?.asks.size) { armIdle(); return; }
+                // Waiting for a person, or for a tool the agent is running,
+                // is not an unresponsive agent.
+                if (session.current?.asks.size || session.current?.runningTools.size) { armIdle(); return; }
                 rpcPending.delete(id);
                 const error = new Error(idleMessage ?? `${method} stopped responding`);
                 Object.assign(error, { acpPromptStall: true });
@@ -1085,6 +1101,7 @@ export function createAcpDriver(support: AcpSupport): ProviderDriver<AcpConfig> 
             }
             case "tool_call": {
               current.flushAssistantText();
+              trackRunningTool(current, u, "pending");
               emit({
                 ...base(threadId, current.turnId),
                 type: "item.started",
@@ -1097,6 +1114,7 @@ export function createAcpDriver(support: AcpSupport): ProviderDriver<AcpConfig> 
               break;
             }
             case "tool_call_update": {
+              trackRunningTool(current, u);
               if (u.status === "completed" || u.status === "failed") {
                 current.state.producedItem = true;
                 emit({
@@ -1381,6 +1399,7 @@ export function createAcpDriver(support: AcpSupport): ProviderDriver<AcpConfig> 
           controlsHost,
           state,
           asks,
+          runningTools: new Set(),
           interruptTimer: null,
           flushAssistantText,
           receiveModelVariants,
@@ -1686,8 +1705,8 @@ export function createAcpDriver(support: AcpSupport): ProviderDriver<AcpConfig> 
               undefined,
               undefined,
               promptIdleMs,
-              `${DRIVER_KIND} went fully silent ${Math.round(promptIdleMs / 1000)} s after the message and the turn was stopped. ` +
-                "Raise OPENMAUS_ACP_PROMPT_IDLE_TIMEOUT_MS if this model legitimately takes longer to answer.",
+              `${DRIVER_KIND} sent nothing for ${Math.round(promptIdleMs / 1000)} s with no tool running, so the turn was stopped as stuck. ` +
+                "Send the message again to retry. On a self-hosted server, OPENMAUS_ACP_PROMPT_IDLE_TIMEOUT_MS sets this limit (0 turns it off).",
               );
             if (pendingSplitReceipt) {
               // session/prompt resolving is the acceptance boundary: a
