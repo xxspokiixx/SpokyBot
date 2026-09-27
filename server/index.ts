@@ -25,12 +25,12 @@ import { BOT_PROFILE_LIMITS } from "../shared/bot-profile.ts";
 import { CLOUD_COMPUTER_BUSY_ERROR } from "../shared/computer-contention.ts";
 import {
   approvalModeFor,
-  supportsApprovalMode,
   modelSwitchNeedsAsk,
   isEmergencyApprovalDowngrade,
   isApprovalMode,
   type ApprovalMode,
 } from "../shared/approval-mode.ts";
+import { createApprovalModeSupport } from "./harness-capabilities.ts";
 import { escapeAttribute } from "../src/lib/composer-attachments.ts";
 import {
   CREDENTIAL_TARGETS,
@@ -679,6 +679,10 @@ function customDomainStatus() {
   };
 }
 const registry = new ProviderRegistry(BUILT_IN_DRIVERS);
+// The approval gates below hand this their model selection — or a driver
+// view they already hold — and let the registry resolve the driver, instead
+// of each site unwrapping registry.cliTarget(...)?.driverKind itself.
+const supportsApprovalMode = createApprovalModeSupport(registry);
 // Engines installed from Settings live under the data directory and win over
 // any other copy on PATH.
 registerEnginesBinDir();
@@ -2905,7 +2909,7 @@ async function botOverview(bot: BotRecord): Promise<BotOverview> {
  * person gave the Chief covers the work the Chief hands out. */
 const approvalModeForTurn = (bot: BotRecord, peerInitiated = false): ApprovalMode => {
   const mode = approvalModeForOrigin(approvalModeFor(bot), { peerInitiated });
-  if (!supportsApprovalMode(registry.cliTarget(bot.modelSelection.instanceId)?.driverKind, mode)) {
+  if (!supportsApprovalMode(bot.modelSelection, mode)) {
     return "ask";
   }
   return mode;
@@ -2981,9 +2985,9 @@ function handleDesktopTrustedApprovalMessage(raw: unknown): boolean {
     ? threadBusy(bot.id, bot.approvalGrant.threadId!) : bot.busy ||
       Boolean(bot.approvalGrant?.allThreads && store.tasks(bot.id).some(task => threadBusy(bot.id, task.threadId)));
   const grantSupported = (bot: BotRecord, mode: ApprovalMode) => supportsApprovalMode(
-    registry.cliTarget(grantTarget(bot)?.modelSelection.instanceId ?? "")?.driverKind, mode) &&
+    grantTarget(bot)?.modelSelection, mode) &&
     (!bot.approvalGrant?.allThreads || store.tasks(bot.id).every(task => supportsApprovalMode(
-      registry.cliTarget((task.modelSelection ?? bot.modelSelection).instanceId)?.driverKind, mode)));
+      task.modelSelection ?? bot.modelSelection, mode)));
   const clearGrant = (bot: BotRecord) => store.patchBot(bot.id, {
     ...(!bot.approvalGrant?.threadOnly ? { approvalMode: "ask" as const, autoApprove: false } : {}),
     approvalGrant: undefined,
@@ -3216,8 +3220,8 @@ function handleDesktopTrustedApprovalMessage(raw: unknown): boolean {
     return true;
   }
   if (message.allThreads === true && (existing.approvalGrant || store.tasks(botId).some(task =>
-    threadBusy(botId, task.threadId) || !supportsApprovalMode(
-      registry.cliTarget((task.modelSelection ?? existing.modelSelection).instanceId)?.driverKind, mode)))) {
+      threadBusy(botId, task.threadId) || !supportsApprovalMode(
+        task.modelSelection ?? existing.modelSelection, mode)))) {
     respond({ ok: false, error: "Finish this bot's active turns and approval changes first. Every thread's provider must support Full access." });
     return true;
   }
@@ -3237,7 +3241,7 @@ function handleDesktopTrustedApprovalMessage(raw: unknown): boolean {
       respond({ ok: false, error: "Stop this thread and finish its pending approval change first" });
       return true;
     }
-    if (!supportsApprovalMode(registry.cliTarget(target.modelSelection.instanceId)?.driverKind, mode)) {
+    if (!supportsApprovalMode(target.modelSelection, mode)) {
       respond({ ok: false, error: "This thread's provider does not support that approval level" });
       return true;
     }
@@ -3292,7 +3296,7 @@ function handleDesktopTrustedApprovalMessage(raw: unknown): boolean {
     respond({ ok: false, error: "Stop this bot's turn before changing its approval level" });
     return true;
   }
-  if (!supportsApprovalMode(registry.cliTarget(existing.modelSelection.instanceId)?.driverKind, mode)) {
+  if (!supportsApprovalMode(existing.modelSelection, mode)) {
     respond({
       ok: false,
       error: mode === "full"
@@ -9422,7 +9426,7 @@ const validateModelProposal = (selection: ModelSelection, current?: BotRecord): 
   if (current) {
     const mode = approvalModeFor(current);
     const driver = registry.cliTarget(selection.instanceId)?.driverKind;
-    if (!supportsApprovalMode(driver, mode) || ((mode === "full" || mode === "custom") && driver !== registry.cliTarget(current.modelSelection.instanceId)?.driverKind)) {
+    if (!supportsApprovalMode(selection, mode) || ((mode === "full" || mode === "custom") && driver !== registry.cliTarget(current.modelSelection.instanceId)?.driverKind)) {
       return `@${current.name}'s existing permissions are incompatible with that provider. Change its permissions in bot settings, then propose the model change again.`;
     }
   }
@@ -17654,7 +17658,7 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
       if ([existing, selected].some((owner) => {
         const mode = approvalModeFor(owner);
         return (mode === "full" || mode === "custom") &&
-          (!supportsApprovalMode(registry.cliTarget(checked.selection.instanceId)?.driverKind, mode) ||
+          (!supportsApprovalMode(checked.selection, mode) ||
             registry.cliTarget(checked.selection.instanceId)?.driverKind !== registry.cliTarget(owner.modelSelection.instanceId)?.driverKind);
       })) {
         return json(res, 400, {
@@ -17984,7 +17988,7 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
       if (normalizedSelection && selectedTask) {
         const mode = approvalModeFor(selectedTask);
         if ((mode === "full" || mode === "custom") &&
-          (!supportsApprovalMode(registry.cliTarget(normalizedSelection.instanceId)?.driverKind, mode) ||
+          (!supportsApprovalMode(normalizedSelection, mode) ||
             registry.cliTarget(normalizedSelection.instanceId)?.driverKind !== registry.cliTarget(selectedTask.modelSelection.instanceId)?.driverKind)) {
           return json(res, 400, { error: "Choose Ask for the selected thread before changing providers with elevated permissions" });
         }
@@ -17992,7 +17996,7 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
       if (
         (requestedApprovalMode === "full" || requestedApprovalMode === "custom") &&
         (body.approvalMode !== undefined || normalizedSelection !== undefined) &&
-        (!targetSelection || !supportsApprovalMode(registry.cliTarget(targetSelection.instanceId)?.driverKind, requestedApprovalMode) ||
+        (!targetSelection || !supportsApprovalMode(targetSelection, requestedApprovalMode) ||
           (existingBot && normalizedSelection && registry.cliTarget(normalizedSelection.instanceId)?.driverKind !== registry.cliTarget(existingBot.modelSelection.instanceId)?.driverKind))
       ) {
         return json(res, 400, {
@@ -19436,7 +19440,7 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
           return json(res, 403, { error: "New Full tasks require the operator's dedicated shared-workspace policy" });
         }
         if (bot.approvalGrant) return json(res, 409, { error: "the bot's approval mode is still being confirmed" });
-        if (!supportsApprovalMode(registry.cliTarget(bot.modelSelection.instanceId)?.driverKind, "full")) {
+        if (!supportsApprovalMode(bot.modelSelection, "full")) {
           return json(res, 400, { error: "This provider does not support Full access" });
         }
       }
@@ -19553,7 +19557,7 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
         // thread settings PATCH cannot manufacture that grant.
         if (mode !== "ask" && mode !== "auto" && mode !== "edits") return json(res, 403, { error: "Full and Custom access require trusted desktop confirmation" });
         if (approvalModeFor(current) === "custom") return json(res, 403, { error: "Leaving Custom approval requires confirmation in the packaged desktop app" });
-        if (!supportsApprovalMode(registry.cliTarget((patch.modelSelection ?? current.modelSelection).instanceId)?.driverKind, mode)) {
+        if (!supportsApprovalMode(patch.modelSelection ?? current.modelSelection, mode)) {
           return json(res, 400, { error: "This provider does not support the selected approval level" });
         }
         if (threadBusy(current.id, current.threadId)) return json(res, 409, { error: "stop this thread before changing its approval mode" });
