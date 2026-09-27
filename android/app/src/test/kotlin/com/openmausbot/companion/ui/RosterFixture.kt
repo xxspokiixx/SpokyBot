@@ -4,16 +4,17 @@ import com.openmausbot.companion.core.CompanionJson
 import com.openmausbot.companion.core.Fleet
 
 /**
- * A synthetic fleet with every state the home list draws — the Android copy of
- * `ios/App/RosterPreview.json`, decoded through the same serializer a real
- * fleet takes.
+ * A synthetic fleet with every state the home list draws — the counterpart of
+ * the iPhone companion's roster preview fleet, decoded through the same
+ * serializer a real fleet takes.
  *
  * An unsectioned Chief of Staff with one thread, a pinned unread bot, a bot
- * with three threads (a folder, a queued send and a hidden routine run), one
- * waiting on you, one working, a long name with a long role, groups, a
- * bot-to-bot chat, and named sections with their own Chief. It is long enough
- * to scroll on a phone, and it holds no pending card, so the rows' waiting
- * marks come from the threads themselves.
+ * with three threads (a folder, a pinned unfiled thread with a queued send,
+ * and a hidden routine run), one waiting on you, one working, a long name with
+ * a long role, a two-word name for large-text wrapping, groups (one busy, one
+ * waiting on an unanswered card), a bot-to-bot chat, and named sections with
+ * their own Chief. It is long enough to scroll on a phone. The one pending
+ * card sits in a group, so every bot's waiting mark comes from its threads.
  *
  * Times are relative to [fleet]'s `now`, so the list reads like a real day
  * whenever it runs; nothing asserts on the stamps themselves.
@@ -25,9 +26,13 @@ internal object RosterFixture {
     const val WAITING = "roster-scout"
     const val TWO_THREADS = "roster-quill"
     const val LONG_NAME = "roster-maximilian"
+    const val TWO_WORDS = "roster-bo"
     const val SECTION_CHIEF = "roster-juno"
     const val WORKING = "roster-forge"
     const val GROUP = "roster-general"
+    /** Waits on an unanswered card. */
+    const val WAITING_GROUP = "roster-design-crit"
+    /** A section's group, mid-turn. */
     const val SECTION_GROUP = "roster-release-room"
     const val BOT_CHAT = "roster-scout-forge"
 
@@ -35,6 +40,8 @@ internal object RosterFixture {
     const val LAST_ROW = "roster-sage"
 
     const val LONG_NAME_TEXT = "Maximilian Vandermeer-Oppenheimer"
+    const val LONG_ROLE_TEXT = "Long-term records retention and archival compliance"
+    const val TWO_WORDS_TEXT = "Bo Christoffersen"
 
     val PEPPER_THREADS = listOf("roster-pepper-gmail", "roster-pepper-icloud", "roster-pepper-weekend")
 
@@ -84,7 +91,7 @@ internal object RosterFixture {
               "tasks": [
                 {"threadId": "roster-pepper-gmail", "title": "Triage Gmail", "createdAt": ${ago(3 * DAY)}, "updatedAt": ${ago(5 * MINUTE)}, $model, "projectId": "email", "busy": true, "activity": "working", "unread": false},
                 {"threadId": "roster-pepper-icloud", "title": "Triage iCloud", "createdAt": ${ago(3 * DAY)}, "updatedAt": ${ago(HOUR)}, $model, "projectId": "email", "busy": false, "activity": "idle", "unread": true},
-                {"threadId": "roster-pepper-weekend", "title": "Plan weekend", "createdAt": ${ago(4 * DAY)}, "updatedAt": ${ago(DAY + 2 * HOUR)}, $model, "busy": false, "activity": "queued", "unread": false},
+                {"threadId": "roster-pepper-weekend", "title": "Plan weekend", "createdAt": ${ago(4 * DAY)}, "updatedAt": ${ago(DAY + 2 * HOUR)}, $model, "busy": false, "activity": "queued", "unread": false, "pinned": true},
                 {"threadId": "roster-pepper-routine", "title": "Internal routine execution", "createdAt": ${ago(4 * DAY)}, "updatedAt": ${ago(4 * DAY)}, $model, "projectId": "email", "routineRunId": "roster-routine-run"}
               ],
               "messages": [
@@ -119,13 +126,24 @@ internal object RosterFixture {
             },
             {
               "id": "roster-maximilian", "threadId": "roster-maximilian-audit", "name": "Maximilian Vandermeer-Oppenheimer",
-              "title": "Long-term records retention and archival compliance", "description": "", "notifications": true, "color": "yellow",
+              "title": "$LONG_ROLE_TEXT", "description": "", "notifications": true, "color": "yellow",
               "unread": false, $model, "createdAt": $created,
               "tasks": [
                 {"threadId": "roster-maximilian-audit", "title": "Archive audit", "createdAt": ${ago(10 * DAY)}, "updatedAt": ${ago(8 * DAY)}, $model}
               ],
               "messages": [
                 {"id": "max-1", "role": "bot", "kind": "text", "at": ${ago(8 * DAY)}, "text": "The archive audit is complete."}
+              ]
+            },
+            {
+              "id": "roster-bo", "threadId": "roster-bo-renewals", "name": "$TWO_WORDS_TEXT",
+              "title": "Account manager", "description": "", "notifications": true, "color": "green",
+              "unread": false, $model, "createdAt": $created,
+              "tasks": [
+                {"threadId": "roster-bo-renewals", "title": "Renewal reminders", "createdAt": ${ago(9 * DAY)}, "updatedAt": ${ago(9 * DAY)}, $model}
+              ],
+              "messages": [
+                {"id": "bo-1", "role": "bot", "kind": "text", "at": ${ago(9 * DAY)}, "text": "Renewal reminders are scheduled."}
               ]
             },
             {
@@ -212,14 +230,15 @@ internal object RosterFixture {
               "defaultResponder": {"kind": "mentions"}, "bulletin": "", "unread": false, "createdAt": $created,
               "tasks": [{"threadId": "roster-design-crit-thread", "title": "Design crit", "createdAt": $created}],
               "messages": [
-                {"id": "crit-1", "role": "bot", "kind": "text", "at": ${ago(DAY + 3 * HOUR)}, "text": "Copy and layout are aligned."}
+                {"id": "crit-1", "role": "bot", "kind": "text", "at": ${ago(DAY + 3 * HOUR)}, "text": "Copy and layout are aligned."},
+                {"id": "crit-2", "role": "bot", "kind": "options", "at": ${ago(DAY + 2 * HOUR)}, "card": {"title": "Publish the new store copy?", "subtitle": "Pixel and Quill agreed on the wording.", "options": ["Allow", "Deny"], "requestId": "crit-request"}}
               ]
             },
             {
               "id": "roster-release-room", "threadId": "roster-release-room-thread", "name": "Release room",
               "memberIds": ["roster-forge", "roster-echo", "roster-juno"],
               "defaultResponder": {"kind": "mentions"}, "bulletin": "", "unread": false, "createdAt": $created,
-              "section": "Engineering",
+              "section": "Engineering", "busyBotId": "roster-forge",
               "tasks": [{"threadId": "roster-release-room-thread", "title": "Release room", "createdAt": $created}],
               "messages": [
                 {"id": "release-1", "role": "bot", "kind": "text", "at": ${ago(2 * DAY)}, "text": "Release checklist is green."}

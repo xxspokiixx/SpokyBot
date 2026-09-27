@@ -258,6 +258,7 @@ fun RosterScreen(navigator: CompanionNavigator) {
                     onCreate = { createThread(chat.bot) },
                     onManage = { managingThreads = Chat.BotChat(chat.bot) },
                     onOpen = navigator::open,
+                    onCollapse = { expandedBots = expandedBots - chat.bot.id },
                 )
                 is Chat.RoomChat -> compactRoom(chat.room)
             }
@@ -314,10 +315,10 @@ fun RosterScreen(navigator: CompanionNavigator) {
                     .fillMaxWidth()
                     .weight(1f),
             ) {
-                // Unsearched, the empty state is about bots: channels are tiles
-                // in the strip, not rows.
+                // Unsearched, "No bots yet" waits until there is no group either:
+                // drawn over group rows, it would sit on top of them.
                 val nothingToList =
-                    if (query.isEmpty()) !RosterLayout.listsAnyBot(summaries) else rows.isEmpty()
+                    if (query.isEmpty()) !RosterLayout.listsAnyChat(summaries) else rows.isEmpty()
                 if (nothingToList && hits.isEmpty()) {
                     EmptyState(
                         title = if (query.isEmpty()) "No bots yet" else "Nothing matches",
@@ -351,7 +352,12 @@ fun RosterScreen(navigator: CompanionNavigator) {
                         state.unsectionedChief?.let { chief ->
                             summariesById[chief.id]?.let { summary ->
                                 item(key = "chief-${chief.id}") {
-                                    entry(summary, true)
+                                    // A one-line row right under Needs attention
+                                    // would read as one more of its rows.
+                                    val apart = compact && attention.isNotEmpty()
+                                    Column(modifier = Modifier.padding(top = if (apart) sectionSpacing else 0.dp)) {
+                                        entry(summary, true)
+                                    }
                                 }
                             }
                         }

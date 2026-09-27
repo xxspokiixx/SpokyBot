@@ -15,6 +15,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.widthIn
+import androidx.compose.foundation.layout.wrapContentHeight
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.KeyboardArrowRight
@@ -29,6 +30,7 @@ import androidx.compose.material3.LocalTextStyle
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -47,6 +49,7 @@ import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.clearAndSetSemantics
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.customActions
+import androidx.compose.ui.semantics.heading
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.semantics.stateDescription
 import androidx.compose.ui.text.TextStyle
@@ -72,13 +75,14 @@ import com.openmausbot.companion.core.forTask
 import com.openmausbot.companion.core.isArchived
 import com.openmausbot.companion.core.isClosed
 import com.openmausbot.companion.core.isSnoozed
+import com.openmausbot.companion.core.labelsUnfiledThreads
 import com.openmausbot.companion.core.listStamp
 import com.openmausbot.companion.core.threadGroups
 import java.util.Locale
 
 /**
- * The compact home list: one line per bot and per group — the port of
- * `ios/App/CompactRoster.swift`.
+ * The compact home list: one line per bot and per group. It mirrors the iPhone
+ * companion's compact list.
  *
  * The phone's version of the desktop sidebar's compact density: name, role and
  * status on one line, a crown after a Chief of Staff's name, and a thread list
@@ -126,14 +130,22 @@ private fun stackedRows(): Boolean =
     LocalDensity.current.fontScale >= CompactRosterMetrics.STACKED_FONT_SCALE
 
 /**
- * How a name or title wraps once it has lines to spare: between words and at
- * the hyphen of a double name, balanced over its lines the way a heading is.
- * Android breaks at an existing hyphen only while hyphenation is on, and a
- * single word longer than the line is hyphenated rather than cut.
+ * How a name or title wraps once it has lines to spare: between words,
+ * balanced over its lines the way a heading is. Automatic hyphenation stays
+ * off — on a phone it may cut "Christoffersen" into "Christof-" and "fersen" to
+ * balance the lines.
  */
 @Composable
 private fun wrapsBetweenWords(): TextStyle =
-    LocalTextStyle.current.copy(lineBreak = LineBreak.Heading, hyphens = Hyphens.Auto)
+    LocalTextStyle.current.copy(lineBreak = LineBreak.Heading, hyphens = Hyphens.None)
+
+/**
+ * The text to draw when it may wrap, with a zero-width break after each hyphen.
+ * Without hyphenation Android's line breakers do not all treat a hyphen as a
+ * place to break, and would cut a long double name mid-word instead of at its
+ * own hyphen. The break has no width and screen readers skip it.
+ */
+private fun String.breakableAtHyphens(): String = replace("-", "-\u200B")
 
 /** A glyph that sits in a line of text grows with that text. */
 @Composable
@@ -161,12 +173,18 @@ internal fun CompactBotEntry(
     onManage: () -> Unit,
     /** An exact thread. */
     onOpen: (Chat) -> Unit,
+    /** Forget that this bot's list was opened. */
+    onCollapse: () -> Unit,
 ) {
     val searching = query.isNotBlank()
     // Wakes the list when a timed snooze ends, so the count and the list fold
     // that thread back in without waiting for a snapshot.
     val now = rememberSnoozeNow(bot.tasks.orEmpty())
     val row = RosterBotRow(bot, hasPendingCard, queuedThreadIds, now)
+    // A list whose control went away is forgotten, not kept for a later
+    // second thread to reopen by itself.
+    val drops = row.dropsExpansion(expanded)
+    LaunchedEffect(drops) { if (drops) onCollapse() }
     Column(modifier = Modifier.fillMaxWidth()) {
         CompactBotLine(
             bot = bot,
@@ -175,6 +193,8 @@ internal fun CompactBotEntry(
             face = face,
             listed = searching || expanded,
             searching = searching,
+            // The New thread line shows its own progress; otherwise the row does.
+            creatingHere = creating && !row.endsWithNewThread(expanded, searching),
             creating = creating,
             onOpenRow = onOpenRow,
             onToggle = onToggle,
@@ -208,6 +228,8 @@ private fun CompactBotLine(
     face: MausState,
     listed: Boolean,
     searching: Boolean,
+    /** A thread is being made from this row's menu or TalkBack action: the spinner says so. */
+    creatingHere: Boolean,
     creating: Boolean,
     onOpenRow: () -> Unit,
     onToggle: () -> Unit,
@@ -217,7 +239,11 @@ private fun CompactBotLine(
     val faceSize = compactFace()
     val stacked = stackedRows()
     val now = remember(lastActivity) { System.currentTimeMillis() }
-    val stamp = if (row.showsTime) RelativeStamp.list(lastActivity, now, locale = Locale.getDefault()) else ""
+    val stamp = if (row.showsTime && !creatingHere) {
+        RelativeStamp.list(lastActivity, now, locale = Locale.getDefault())
+    } else {
+        ""
+    }
     var menuOpen by remember { mutableStateOf(false) }
 
     Row(modifier = Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
@@ -259,7 +285,13 @@ private fun CompactBotLine(
                 BotAvatar(bot = bot, size = faceSize, state = face, animated = false)
                 Spacer(modifier = Modifier.width(CompactRosterMetrics.faceSpacing))
                 val status: @Composable () -> Unit = {
-                    RowStatus(waiting = row.showsWaiting, working = row.showsSpinner, stamp = stamp, color = bot.color)
+                    RowStatus(
+                        waiting = row.showsWaiting,
+                        working = row.showsSpinner || creatingHere,
+                        stamp = stamp,
+                        color = bot.color,
+                        workingLabel = if (row.showsSpinner) WORKING else CREATING_THREAD,
+                    )
                 }
                 if (stacked) {
                     // One line cannot hold a name and a time at these sizes: the
@@ -326,13 +358,15 @@ private fun BotName(bot: Bot, row: RosterBotRow, maxLines: Int) {
         verticalAlignment = Alignment.CenterVertically,
     ) {
         Text(
-            text = bot.name,
+            text = if (maxLines > 1) bot.name.breakableAtHyphens() else bot.name,
             fontSize = 17.sp,
             fontWeight = FontWeight.SemiBold,
             maxLines = maxLines,
             overflow = TextOverflow.Ellipsis,
             style = if (maxLines > 1) wrapsBetweenWords() else LocalTextStyle.current,
-            modifier = Modifier.weight(1f, fill = false),
+            modifier = Modifier
+                .weight(1f, fill = false)
+                .testTag("bot-name.${bot.id}"),
         )
         if (row.showsChiefBadge) ChiefBadge()
     }
@@ -410,11 +444,14 @@ private fun ThreadControl(bot: Bot, count: Int, listed: Boolean, enabled: Boolea
     Row(
         modifier = Modifier
             .testTag("threads-toggle.${bot.id}")
-            .semantics(mergeDescendants = true) {
+            .clickable(enabled = enabled, role = Role.Button, onClick = onToggle)
+            // One label and one state, as a single control: merged, the drawn
+            // count would be read out a second time before them. After the
+            // clickable, so its button role and enabled state stay.
+            .clearAndSetSemantics {
                 contentDescription = "${bot.name}'s threads"
                 stateDescription = "${if (listed) "Expanded" else "Collapsed"}, $count threads"
             }
-            .clickable(enabled = enabled, role = Role.Button, onClick = onToggle)
             .heightIn(min = MIN_TOUCH_TARGET)
             .widthIn(min = MIN_TOUCH_TARGET)
             // its own padding lands the count on the edge other rows' times end on
@@ -459,6 +496,8 @@ private fun CompactThreadList(
         now = now,
         queuedThreadIds = queuedThreadIds,
     )
+    // Beneath a folder, unfiled threads would read as that folder's.
+    val labelled = labelsUnfiledThreads(groups)
     Column(
         modifier = Modifier
             .fillMaxWidth()
@@ -471,6 +510,7 @@ private fun CompactThreadList(
         groups.forEach { group ->
             val folder = group.project
             if (folder == null) {
+                if (labelled) UnfiledLabel(bot)
                 CompactThreadLines(group.tasks, bot, now, queuedThreadIds, onOpen)
             } else {
                 val key = "${bot.id}:${folder.id}"
@@ -523,16 +563,31 @@ private fun CompactThreadLine(task: BotTask, now: Long, queued: Boolean, color: 
     val stampNow = remember(task.listStamp) { System.currentTimeMillis() }
     val stamp = RelativeStamp.list(task.listStamp, stampNow, locale = Locale.getDefault())
     val title: @Composable (Modifier, Int) -> Unit = { titleModifier, lines ->
-        Text(
-            text = task.displayTitle,
-            fontSize = 15.sp,
-            fontWeight = if (task.unread == true) FontWeight.SemiBold else FontWeight.Normal,
-            color = if (dimmed) secondaryTint else MaterialTheme.colorScheme.onSurface,
-            maxLines = lines,
-            overflow = TextOverflow.Ellipsis,
-            style = if (lines > 1) wrapsBetweenWords() else LocalTextStyle.current,
+        Row(
             modifier = titleModifier,
-        )
+            horizontalArrangement = Arrangement.spacedBy(4.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Text(
+                text = if (lines > 1) task.displayTitle.breakableAtHyphens() else task.displayTitle,
+                fontSize = 15.sp,
+                fontWeight = if (task.unread == true) FontWeight.SemiBold else FontWeight.Normal,
+                color = if (dimmed) secondaryTint else MaterialTheme.colorScheme.onSurface,
+                maxLines = lines,
+                overflow = TextOverflow.Ellipsis,
+                style = if (lines > 1) wrapsBetweenWords() else LocalTextStyle.current,
+                modifier = Modifier.weight(1f, fill = false),
+            )
+            // why it sits first in its list, as the comfortable byline says
+            if (task.pinned == true) {
+                Icon(
+                    painter = painterResource(R.drawable.ic_push_pin),
+                    contentDescription = PINNED,
+                    tint = secondaryTint,
+                    modifier = Modifier.size(glyph(12.sp)),
+                )
+            }
+        }
     }
     val described = modifier
         .fillMaxWidth()
@@ -630,6 +685,28 @@ private fun FolderLine(folder: BotProject, key: String, open: Boolean, enabled: 
     }
 }
 
+/**
+ * A quiet heading over a bot's unfiled threads when a folder sits above them —
+ * the desktop's "Threads" label. Not a control: nothing to open or close.
+ */
+@Composable
+private fun UnfiledLabel(bot: Bot) {
+    Text(
+        text = UNFILED_THREADS,
+        fontSize = 13.sp,
+        fontWeight = FontWeight.Medium,
+        color = secondaryTint,
+        maxLines = 1,
+        overflow = TextOverflow.Ellipsis,
+        modifier = Modifier
+            .fillMaxWidth()
+            .testTag("unfiled-label.${bot.id}")
+            .semantics { heading() }
+            .heightIn(min = UNFILED_LABEL_HEIGHT)
+            .wrapContentHeight(Alignment.CenterVertically),
+    )
+}
+
 /** The end of an opened list: where a new thread with this bot starts. */
 @Composable
 private fun NewThreadLine(bot: Bot, creating: Boolean, onCreate: () -> Unit) {
@@ -680,7 +757,7 @@ internal fun CompactRoomRow(
         Spacer(modifier = Modifier.width(CompactRosterMetrics.faceSpacing))
         val name: @Composable (Modifier, Int) -> Unit = { nameModifier, lines ->
             Text(
-                text = room.name,
+                text = if (lines > 1) room.name.breakableAtHyphens() else room.name,
                 fontSize = 17.sp,
                 fontWeight = FontWeight.SemiBold,
                 maxLines = lines,
@@ -756,7 +833,14 @@ private fun UnreadDot(visible: Boolean, color: String) {
  * person, and a spinner in place of the time while it works.
  */
 @Composable
-private fun RowStatus(waiting: Boolean, working: Boolean, stamp: String, color: String) {
+private fun RowStatus(
+    waiting: Boolean,
+    working: Boolean,
+    stamp: String,
+    color: String,
+    /** What the spinner says to TalkBack: work, or a thread being made. */
+    workingLabel: String = WORKING,
+) {
     val size = glyph(15.sp)
     Row(
         horizontalArrangement = Arrangement.spacedBy(6.dp),
@@ -771,7 +855,7 @@ private fun RowStatus(waiting: Boolean, working: Boolean, stamp: String, color: 
             )
         }
         if (working) {
-            Spinner(size)
+            Spinner(size, workingLabel)
         } else if (stamp.isNotEmpty()) {
             Text(text = stamp, fontSize = 15.sp, color = secondaryTint, maxLines = 1)
         }
@@ -783,8 +867,8 @@ private fun RowStatus(waiting: Boolean, working: Boolean, stamp: String, color: 
  * visit on its own; this reads as one word of the row it sits in instead.
  */
 @Composable
-private fun Spinner(size: Dp) {
-    Box(modifier = Modifier.clearAndSetSemantics { contentDescription = WORKING }) {
+private fun Spinner(size: Dp, label: String = WORKING) {
+    Box(modifier = Modifier.clearAndSetSemantics { contentDescription = label }) {
         CircularProgressIndicator(modifier = Modifier.size(size), strokeWidth = 2.dp)
     }
 }
@@ -807,7 +891,15 @@ private const val MANAGE_THREADS = "Manage threads"
 private const val THREAD_ACTIONS = "Show thread actions"
 private const val WAITING_ON_YOU = "Waiting on you"
 private const val WORKING = "Working"
+private const val CREATING_THREAD = "Creating a thread"
 private const val UNREAD = "Unread"
+private const val PINNED = "Pinned"
+
+/** The desktop's `task.list` label over unfiled threads. */
+private const val UNFILED_THREADS = "Threads"
+
+/** A quiet label, not a control: shorter than a 48 dp touch target. */
+private val UNFILED_LABEL_HEIGHT = 36.dp
 
 /** Rooms have no colour of their own; `Chat.RoomChat.color` is always this. */
 private const val ROOM_COLOR = "blue"
