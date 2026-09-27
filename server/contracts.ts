@@ -249,6 +249,17 @@ export interface ProviderAdapter {
     computerMcp?: boolean;
     /** Consumes the leased Box descriptor without switching to Box's model. */
     cloudComputerMcp?: boolean;
+    /** True when the whole turn executes on the cloud computer (the Box native
+     * agent — POST /boxes/{id}/prompt) instead of in the host harness. Such a
+     * driver claims the box exclusively, cannot use host or Local VM surfaces,
+     * and every tool call acts on that machine's screen (screen pollers start
+     * with screenIsTheWork). Implies a cloud-computer turn even though the
+     * driver mounts no computer descriptor — cloudComputerMcp stays false. */
+    remoteAgent?: boolean;
+    /** True when this driver's turn can run against a cloud computer — natively
+     * (remoteAgent) or by mounting the leased Box descriptor (cloudComputerMcp).
+     * Gates every cloud attach path (attachBotBox / attachTeamBox canMount). */
+    usesCloudComputer?: boolean;
     /** True when the driver mounts turn.integrations.composio (the user's
      * connected apps). Same rule again: a key in the config says the user
      * HAS those connections, not that this driver can reach them. */
