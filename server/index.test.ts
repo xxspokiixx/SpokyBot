@@ -2697,6 +2697,79 @@ describe("harness HTTP API", () => {
     }
   });
 
+  it("refuses a Works-on This Computer turn for the box-native engine", async () => {
+    let botId: string | undefined;
+    try {
+      // The Computer engine executes on its cloud machine, so an explicit
+      // host-desktop destination is refused before anything is mounted.
+      const bot = (await api("POST", "/api/bots", {
+        name: "Local refusal",
+        modelSelection: { instanceId: "computer", model: "claude-fable-5" },
+      })).body.bot;
+      botId = bot.id;
+      expect((await api("PATCH", `/api/bots/${bot.id}`, { computer: "local" })).status).toBe(200);
+      expect((await api("POST", `/api/bots/${bot.id}/messages`, { text: "work on this desktop" })).status).toBe(202);
+      await expect.poll(async () => JSON.stringify((await api("GET", "/api/bots?messages=20")).body.bots.find(
+        (candidate: { id: string }) => candidate.id === bot.id,
+      )), { timeout: 5_000 }).toMatch(/the Computer engine works on the cloud computer/);
+    } finally {
+      if (botId) await api("POST", `/api/bots/${botId}/interrupt`, {}).catch(() => undefined);
+      if (botId) await api("DELETE", `/api/bots/${botId}`).catch(() => undefined);
+    }
+  });
+
+  it("refuses a room Works-on This Computer turn for the box-native engine", async () => {
+    let roomId: string | undefined;
+    let botId: string | undefined;
+    try {
+      const member = (await api("POST", "/api/bots", {
+        name: "Room local refusal",
+        modelSelection: { instanceId: "computer", model: "claude-fable-5" },
+      })).body.bot;
+      botId = member.id;
+      expect((await api("PATCH", `/api/bots/${member.id}`, { computer: "local" })).status).toBe(200);
+      const room = (await api("POST", "/api/groups", {
+        name: "Box-native host refusal",
+        memberIds: [member.id],
+        setup: { bulletin: "", defaultResponder: { kind: "member", botId: member.id } },
+      })).body.group;
+      roomId = room.id;
+      expect((await api("POST", `/api/groups/${room.id}/messages`, { text: "work on this desktop" })).status).toBe(202);
+      await expect.poll(async () => JSON.stringify((await api("GET", `/api/threads/${room.threadId}/messages`)).body),
+        { timeout: 5_000 }).toMatch(/the Computer engine works on the cloud computer/);
+    } finally {
+      if (roomId) await api("POST", `/api/groups/${roomId}/interrupt`, {}).catch(() => undefined);
+      if (roomId) await api("DELETE", `/api/groups/${roomId}`).catch(() => undefined);
+      if (botId) await api("DELETE", `/api/bots/${botId}`).catch(() => undefined);
+    }
+  });
+
+  it("refuses a room Works-on Local VM turn for the box-native engine", async () => {
+    let roomId: string | undefined;
+    let botId: string | undefined;
+    try {
+      const member = (await api("POST", "/api/bots", {
+        name: "Room VM refusal",
+        modelSelection: { instanceId: "computer", model: "claude-fable-5" },
+      })).body.bot;
+      botId = member.id;
+      expect((await api("PATCH", `/api/bots/${member.id}`, { computer: "vm" })).status).toBe(200);
+      const room = (await api("POST", "/api/groups", {
+        name: "Box-native VM refusal",
+        memberIds: [member.id],
+        setup: { bulletin: "", defaultResponder: { kind: "member", botId: member.id } },
+      })).body.group;
+      roomId = room.id;
+      expect((await api("POST", `/api/groups/${room.id}/messages`, { text: "work in the virtual machine" })).status).toBe(202);
+      await expect.poll(async () => JSON.stringify((await api("GET", `/api/threads/${room.threadId}/messages`)).body),
+        { timeout: 5_000 }).toMatch(/this model engine cannot use the Local VM/);
+    } finally {
+      if (roomId) await api("POST", `/api/groups/${roomId}/interrupt`, {}).catch(() => undefined);
+      if (roomId) await api("DELETE", `/api/groups/${roomId}`).catch(() => undefined);
+      if (botId) await api("DELETE", `/api/bots/${botId}`).catch(() => undefined);
+    }
+  });
+
   it("creates team computers only with consent, retains failed creates, and assigns safely", async () => {
     const requestId = randomUUID();
     const section = `Computer fixture ${requestId.slice(0, 8)}`;

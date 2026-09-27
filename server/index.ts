@@ -5536,7 +5536,7 @@ function turnProvider(bot: BotRecord, runOn?: RoutineRunOn, threadId?: string): 
   if (runOn === "cloud" || inheritedTeamComputer(bot)) return "box";
   const wants = turnSurfacePlan(bot, runOn, threadId).computer;
   if (wants !== undefined && wants !== "cloud") return null;
-  if (registry.get(bot.modelSelection.instanceId)?.driverKind === "boxAgent") return "box";
+  if (registry.get(bot.modelSelection.instanceId)?.adapter.capabilities.remoteAgent === true) return "box";
   return bot.cloudBackend === "vps" ? "vps" : wants === "cloud" ? "box" : null;
 }
 
@@ -5565,7 +5565,7 @@ async function computerPreviewSurface(bot: BotRecord, threadId?: string) {
   const plan = turnSurfacePlan(bot, undefined, threadId);
   if (plan.computer !== undefined) return plan.computer === "off" && plan.browser ? "browser" : plan.computer;
   const instance = registry.get(bot.modelSelection.instanceId);
-  if (instance?.driverKind === "boxAgent") return "cloud";
+  if (instance?.adapter.capabilities.remoteAgent === true) return "cloud";
   if (bot.cloudBackend === "vps") {
     const remote = await vps.vpsComputerStatus(cfg, bot.id);
     if (remote.ready) return "cloud";
@@ -5586,7 +5586,7 @@ async function computerPreviewSurface(bot: BotRecord, threadId?: string) {
 async function selectableComputers(bot: BotRecord) {
   const caps = registry.get(bot.modelSelection.instanceId)?.adapter.capabilities;
   const off = bot.computer === "off";
-  const localEngine = registry.get(bot.modelSelection.instanceId)?.driverKind !== "boxAgent";
+  const localEngine = caps?.remoteAgent !== true;
   return Promise.all((["cloud", "vm", "local", "browser"] as const).map(async surface => {
     let ready = false;
     let canStart = false;
@@ -5602,7 +5602,7 @@ async function selectableComputers(bot: BotRecord) {
             status.image && status.imageMatches && status.network === "private" && status.mounts === "none" && status.security === "hardened");
           canCreate = Boolean(status?.configured && status.daemonUp && status.container === "missing");
           reason = status?.problem ?? reason;
-        } else if (box.boxConfigured(cfg) && (caps?.cloudComputerMcp || registry.instances().some(instance => instance.driverKind === "boxAgent"))) {
+        } else if (box.boxConfigured(cfg) && (caps?.usesCloudComputer === true || registry.instances().some(instance => instance.driverKind === "boxAgent"))) {
           const status = await box.boxStatus(cfg, bot.id);
           const lifecycle = box.boxTurnLifecycleAction({ explicitCloud: true, canMount: true, state: status.box?.state ?? null });
           ready = lifecycle === "attach";
@@ -8041,7 +8041,6 @@ async function startTurn(
       const teamComputer = inheritedTeamComputer(bot);
       const cloudBackend = teamComputer || opts?.runOn === "cloud" || bot.cloudBackend !== "vps" ? "box" : "vps";
       const mountsComputerMcp = instance.adapter.capabilities.computerMcp === true;
-      const mountsCloudComputer = instance.driverKind === "boxAgent" || instance.adapter.capabilities.cloudComputerMcp === true;
       const mountsLocalComputer = instance.adapter.capabilities.localComputerMcp === true;
       // Where this turn's hands may land. The bot's "Works on" choice is
       // strict; a browser-only bot gets no computer at all, and a bot whose
@@ -8054,7 +8053,7 @@ async function startTurn(
       // choice, so those ignore the pin.
       const dispatchTask = store.taskByThread(bot.id, threadId);
       if (plan.clearPin && dispatchTask) store.patchTask(bot.id, threadId, { surface: undefined });
-      if (plan.computer !== undefined && plan.computer !== "cloud" && instance.driverKind === "boxAgent") {
+      if (plan.computer !== undefined && plan.computer !== "cloud" && instance.adapter.capabilities.remoteAgent === true) {
         throw new Error("the Computer engine works on the cloud computer — set Works on to Cloud, or choose another engine");
       }
       const wants = plan.computer;
@@ -8182,7 +8181,7 @@ async function startTurn(
       // be recreated on demand after idling away — and never creates a first
       // VM on its own; every failure there is a quiet "not this place".
       const attachLocalVm = async (strict: boolean): Promise<boolean> => {
-        if (!mountsComputerMcp || instance.driverKind === "boxAgent") {
+        if (!mountsComputerMcp || instance.adapter.capabilities.remoteAgent === true) {
           if (!strict) return false;
           throw new Error("this model engine cannot use the Local VM — choose Claude or an ACP engine, or select another computer destination");
         }
@@ -8228,7 +8227,7 @@ async function startTurn(
                 // guard as dispatch: a poller started after its own
                 // turn.completed would never be torn down.
                 if (previewCapture && threadBusy(bot.id, threadId)) {
-                  const touched = screenPollers.get(threadId)?.touched ?? instance.driverKind === "boxAgent";
+                  const touched = screenPollers.get(threadId)?.touched ?? instance.adapter.capabilities.remoteAgent === true;
                   stopScreenPoller(bot.id, threadId);
                   startScreenPoller(
                     bot.id,
@@ -8322,16 +8321,17 @@ async function startTurn(
       // Cloud is strict when selected. Native Box and drivers with a Box
       // bridge may also reuse an already-ready Box on Auto.
       if (teamComputer) {
-        const attached = await attachTeamBox(teamComputer, bot.id, resourceOwner, mountsCloudComputer, instance.driverKind === "boxAgent");
+        const attached = await attachTeamBox(teamComputer, bot.id, resourceOwner,
+          instance.adapter.capabilities.usesCloudComputer === true, instance.adapter.capabilities.remoteAgent === true);
         integrations.computer = attached.integration;
         previewCapture = attached.capture;
         computerKind = "box";
       }
-      if (!teamComputer && mountsCloudComputer && (wants === "cloud" || wants === undefined) && cloudBackend === "box" && box.boxConfigured(cfg)) {
+      if (!teamComputer && instance.adapter.capabilities.usesCloudComputer === true && (wants === "cloud" || wants === undefined) && cloudBackend === "box" && box.boxConfigured(cfg)) {
         const attached = await attachBotBox(bot, resourceOwner, {
           explicitCloud: wants === "cloud",
-          canMount: mountsCloudComputer,
-          remoteAgent: instance.driverKind === "boxAgent",
+          canMount: instance.adapter.capabilities.usesCloudComputer === true,
+          remoteAgent: instance.adapter.capabilities.remoteAgent === true,
         });
         if (attached) {
           previewCapture = attached.capture;
@@ -8663,7 +8663,7 @@ async function startTurn(
           bot.id,
           threadId,
           { ...(previewCapture ? { computer: previewCapture } : {}), ...(browserCapture ? { browser: browserCapture } : {}) },
-          { screenIsTheWork: instance.driverKind === "boxAgent" },
+          { screenIsTheWork: instance.adapter.capabilities.remoteAgent === true },
         );
       }
       // An adapter may publish completion synchronously just before its
@@ -10304,7 +10304,7 @@ async function runGroupMemberTurn(
   if (roomPlaceRefusal) throw Object.assign(new Error(roomPlaceRefusal), { code: "managed_policy" });
   // The Computer engine runs on the Box; this computer has no tools it can
   // reach, exactly as a bot thread refuses it.
-  if (roomPlan.computer === "local" && instance.driverKind === "boxAgent") {
+  if (roomPlan.computer === "local" && instance.adapter.capabilities.remoteAgent === true) {
     throw new Error("the Computer engine works on the cloud computer — set Works on to Cloud, or choose another engine");
   }
   // One place per room turn as well: a team computer reached on Auto means
@@ -10326,11 +10326,11 @@ async function runGroupMemberTurn(
 
   if (roomTeamComputer) {
     const attached = await attachTeamBox(roomTeamComputer, readyBot.id, resourceOwner,
-      instance.driverKind === "boxAgent" || instance.adapter.capabilities.cloudComputerMcp === true, instance.driverKind === "boxAgent");
+      instance.adapter.capabilities.usesCloudComputer === true, instance.adapter.capabilities.remoteAgent === true);
     if (isCancelled?.() || groupSpeakers.get(threadId) !== roomSpeaker ||
         activeInternalGenerationByThread.get(threadId) !== internalGeneration) return false;
     integrations.computer = attached.integration;
-    startScreenPoller(readyBot.id, threadId, { computer: attached.capture }, { screenIsTheWork: instance.driverKind === "boxAgent" });
+    startScreenPoller(readyBot.id, threadId, { computer: attached.capture }, { screenIsTheWork: instance.adapter.capabilities.remoteAgent === true });
   }
 
   // The speaker's own explicit place, mounted exactly as its bot thread
@@ -10366,9 +10366,9 @@ async function runGroupMemberTurn(
       roomComputerKind = "vps";
     } else {
       if (!box.boxConfigured(cfg)) throw new Error("Cloud box is not configured — add a Box API key or choose Local VM");
-      const remoteAgent = instance.driverKind === "boxAgent";
+      const remoteAgent = instance.adapter.capabilities.remoteAgent === true;
       const attached = await attachBotBox(readyBot, resourceOwner, { explicitCloud: true,
-        canMount: remoteAgent || instance.adapter.capabilities.cloudComputerMcp === true, remoteAgent });
+        canMount: instance.adapter.capabilities.usesCloudComputer === true, remoteAgent });
       if (!roomSetupIsCurrent()) return false;
       if (!attached?.integration) throw new Error("the cloud computer could not be created or reached");
       integrations.computer = attached.integration;
@@ -10381,7 +10381,7 @@ async function runGroupMemberTurn(
   // Room and Goal turns use the speaker's desktop, never the coordinator's.
   // Claim the same lease as direct turns before asynchronous VM setup.
   if (readyBot.computer === "vm") {
-    if (instance.adapter.capabilities.computerMcp !== true || instance.driverKind === "boxAgent") {
+    if (instance.adapter.capabilities.computerMcp !== true || instance.adapter.capabilities.remoteAgent === true) {
       throw new Error("this model engine cannot use the Local VM");
     }
     // A distinct identity fences cleanup even in shared mode on the same room thread.
