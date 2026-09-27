@@ -21,7 +21,7 @@ vi.mock("./DesktopCapabilities", () => ({ useDesktopCapabilities: () => ({ capab
 vi.mock("@/state/store", async (importOriginal) => ({
   ...await importOriginal<typeof import("@/state/store")>(),
   api: fixture.api,
-  useStore: () => ({ state: { appSettingsSection: fixture.section }, dispatch: fixture.dispatch }),
+  useStore: () => ({ state: { appSettingsSection: fixture.section, instances: [] }, dispatch: fixture.dispatch }),
 }));
 vi.mock("@/lib/thread-preferences", () => ({
   useShowThreads: () => fixture.showThreads,
@@ -105,6 +105,7 @@ describe("Settings → Appearance", () => {
     expect(html).toContain("Profile");
     expect(html).toContain("Maximum turn length");
     expect(html).toContain("Maximum running threads per bot");
+    expect(html).toContain("Automatic recovery");
     expect(html).toContain('aria-label="App language"');
     expect(html).toContain("Diagnostics");
     expect(html).not.toContain('aria-label="Show threads"');
