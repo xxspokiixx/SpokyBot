@@ -67,7 +67,6 @@ import com.openmausbot.companion.core.BotTask
 import com.openmausbot.companion.core.Chat
 import com.openmausbot.companion.core.Room
 import com.openmausbot.companion.core.RosterBotRow
-import com.openmausbot.companion.core.RosterDensity
 import com.openmausbot.companion.core.displayTitle
 import com.openmausbot.companion.core.forTask
 import com.openmausbot.companion.core.isArchived
@@ -167,7 +166,7 @@ internal fun CompactBotEntry(
     // Wakes the list when a timed snooze ends, so the count and the list fold
     // that thread back in without waiting for a snapshot.
     val now = rememberSnoozeNow(bot.tasks.orEmpty())
-    val row = RosterBotRow(bot, RosterDensity.COMPACT, hasPendingCard, queuedThreadIds, now)
+    val row = RosterBotRow(bot, hasPendingCard, queuedThreadIds, now)
     Column(modifier = Modifier.fillMaxWidth()) {
         CompactBotLine(
             bot = bot,

@@ -1,17 +1,18 @@
 package com.openmausbot.companion.core
 
 /**
- * How much each row on the home list says — the port of
- * `ios/Sources/CompanionCore/RosterDensity.swift`.
+ * How much each row on the home list says, and what a compact row shows. The
+ * rules mirror the iPhone companion's compact list.
  *
  * The phone follows the desktop sidebar's density setting
  * (`src/lib/sidebar-preferences.ts`) without its avatars-only mode, which a
  * phone has no room to need. Comfortable is the original two-line row with a
- * "Threads" disclosure beneath every bot; compact is one line per bot, status
- * as small marks, and a thread list only where there is one to open.
+ * "Threads" disclosure beneath every bot, and it keeps the logic it shipped
+ * with in its own composables; compact is one line per bot, status as small
+ * marks, and a thread list only where there is one to open.
  *
- * The decisions live here, away from Compose, so both densities read the same
- * facts and the rules can be tested without a screen.
+ * The compact decisions live here, away from Compose, so they can be tested
+ * without a screen.
  */
 enum class RosterDensity(val wireValue: String, val label: String, val caption: String) {
     COMFORTABLE(
@@ -22,7 +23,7 @@ enum class RosterDensity(val wireValue: String, val label: String, val caption: 
     COMPACT(
         "compact",
         "Compact",
-        "One line per bot. Bots with more than one thread show how many; tap the number to list them.",
+        "One line per bot. Bots with more than one active thread show how many; tap the number to list them.",
     ),
     ;
 
@@ -31,8 +32,9 @@ enum class RosterDensity(val wireValue: String, val label: String, val caption: 
         val DEFAULT: RosterDensity = COMPACT
 
         /**
-         * A stored choice, read defensively: anything unreadable — including
-         * the desktop's "icons" — lands on the default rather than a surprise.
+         * A stored choice, read defensively: anything this build cannot read —
+         * a typo, a later build's choice — lands on the default rather than a
+         * surprise.
          */
         fun fromWire(value: String?): RosterDensity =
             entries.firstOrNull { it.wireValue == value } ?: DEFAULT
@@ -68,12 +70,23 @@ fun Bot.rosterThreadCount(
  * Read from every visible thread, not just the one open on the desktop, so a
  * bot working in the background still shows it.
  *
+ * The bot's own `activity` belongs to its current thread: it stands in when
+ * that thread's task carries none, as it does when the chat opens
+ * ([Bot.forTask]), and an older computer's bot without a task list is its own
+ * one thread, as in the tree.
+ *
  * @param hasPendingCard an unanswered approval or question sits in one of
  * this bot's threads. Cards live in transcripts, which the bot record does
  * not carry.
  */
 fun Bot.rosterStatus(hasPendingCard: Boolean): RosterRowStatus {
-    val threads = visibleTasks
+    val threads = if (tasks == null) {
+        listOf(legacyTask)
+    } else {
+        visibleTasks.map { task ->
+            if (task.threadId == threadId && task.activity == null) task.copy(activity = activity) else task
+        }
+    }
     if (hasPendingCard || threads.any { it.activity == "waiting-on-you" }) {
         return RosterRowStatus.WAITING_ON_YOU
     }
@@ -86,69 +99,75 @@ fun Bot.rosterStatus(hasPendingCard: Boolean): RosterRowStatus {
     return RosterRowStatus.IDLE
 }
 
-/** Everything one bot's row decides, as data. */
+/**
+ * Whether an opened thread list gives its unfiled threads a quiet "Threads"
+ * label: only when a folder header sits above them, or they would read as that
+ * folder's threads (the desktop's `task.list` label does the same).
+ */
+fun labelsUnfiledThreads(groups: List<BotThreadGroup>): Boolean =
+    groups.any { it.project != null } && groups.any { it.project == null }
+
+/** Everything one compact bot row decides, as data. */
 data class RosterBotRow(
-    val density: RosterDensity,
     val status: RosterRowStatus,
-    /** Threads behind the compact "› N" control. */
+    /** Threads behind the "› N" control. */
     val threadCount: Int,
     val isChief: Boolean,
     val unread: Boolean,
+    /** The bot's own busy flag — the one the comfortable row's dot has always read. */
+    val busy: Boolean,
 ) {
     constructor(
         bot: Bot,
-        density: RosterDensity,
         hasPendingCard: Boolean,
         queuedThreadIds: Set<String> = emptySet(),
         now: Long = System.currentTimeMillis(),
     ) : this(
-        density = density,
         status = bot.rosterStatus(hasPendingCard),
         threadCount = bot.rosterThreadCount(queuedThreadIds, now),
         isChief = bot.chiefOfStaff == true,
         unread = bot.unread,
+        busy = bot.busy == true,
     )
 
-    /** Compact is one line: no last-message preview. */
-    val showsPreview: Boolean get() = density == RosterDensity.COMFORTABLE
-
-    /** Comfortable keeps its "Threads N" disclosure beneath every bot. */
-    val showsThreadsRow: Boolean get() = density == RosterDensity.COMFORTABLE
-
     /**
-     * Compact gives the "› N" control only to a bot with a list to open. One
-     * thread is the bot itself: tapping the row already opens it.
+     * The "› N" control only for a bot with a list to open. One thread is the
+     * bot itself: tapping the row already opens it.
      */
-    val showsThreadControl: Boolean get() = density == RosterDensity.COMPACT && threadCount >= 2
+    val showsThreadControl: Boolean get() = threadCount >= 2
 
-    /** The Chief of Staff crown after the name. Comfortable keeps the look it shipped with. */
-    val showsChiefBadge: Boolean get() = density == RosterDensity.COMPACT && isChief
+    /** The Chief of Staff crown after the name. */
+    val showsChiefBadge: Boolean get() = isChief
 
-    /** Compact rows put the spinner where the time was. */
-    val showsTime: Boolean get() = !(density == RosterDensity.COMPACT && status == RosterRowStatus.WORKING)
+    /** The spinner stands where the time was. */
+    val showsTime: Boolean get() = status != RosterRowStatus.WORKING
 
     val showsSpinner: Boolean get() = status == RosterRowStatus.WORKING
 
     val showsWaiting: Boolean get() = status == RosterRowStatus.WAITING_ON_YOU
 
-    /** As it always was: the dot steps aside while the bot works. */
-    val showsUnreadDot: Boolean get() = unread && status != RosterRowStatus.WORKING
+    /** The dot as it has always been: unread, and hidden while the bot itself is busy. */
+    val showsUnreadDot: Boolean get() = unread && !busy
 
     /**
      * Whether the bot's threads are listed beneath its row. A search lists
-     * what matched under every bot, as the desktop does; otherwise compact
-     * lists only a bot the person opened with its "› N" control.
+     * what matched under every bot, as the desktop does; otherwise only a bot
+     * the person opened with its "› N" control.
      */
-    fun listsThreads(expanded: Boolean, searching: Boolean): Boolean = when (density) {
-        RosterDensity.COMFORTABLE -> searching || expanded
-        RosterDensity.COMPACT -> searching || (expanded && showsThreadControl)
-    }
+    fun listsThreads(expanded: Boolean, searching: Boolean): Boolean =
+        searching || (expanded && showsThreadControl)
 
     /**
-     * A compact list the person opened ends with "+ New thread". Search
-     * results are not a place to create one, and comfortable keeps its "+" on
-     * the "Threads" row.
+     * An opened list ends with "+ New thread". Search results are not a place
+     * to create one.
      */
     fun endsWithNewThread(expanded: Boolean, searching: Boolean): Boolean =
-        density == RosterDensity.COMPACT && !searching && expanded && showsThreadControl
+        !searching && expanded && showsThreadControl
+
+    /**
+     * An opened list whose control has gone — its threads closed or deleted
+     * down to one — is dropped, so that a later second thread does not reopen
+     * it by itself.
+     */
+    fun dropsExpansion(expanded: Boolean): Boolean = expanded && !showsThreadControl
 }

@@ -6,13 +6,13 @@ import kotlin.test.assertFalse
 import kotlin.test.assertTrue
 
 /**
- * What a home-list row shows at each density, without a screen — the port of
- * `ios/Tests/CompanionCoreTests/RosterDensityTests.swift`.
+ * The List density setting and what a compact home-list row shows, without a
+ * screen. The rules mirror the iPhone companion's compact list, case for case
+ * where the two models agree.
  *
- * Compact is one line per bot: no preview, a "› N" control only where there
- * is a list to open, and status as small marks. Comfortable is the original
- * two-line row with its "Threads" disclosure beneath every bot. Both read the
- * same facts, so switching density never changes what a bot is doing.
+ * Compact is one line per bot: a "› N" control only where there is a list to
+ * open, and status as small marks. Comfortable keeps the logic it shipped with
+ * in its own composables, so nothing here decides a comfortable row.
  */
 class RosterDensityTest {
     // The setting
@@ -32,8 +32,8 @@ class RosterDensityTest {
         assertEquals(listOf("comfortable", "compact"), RosterDensity.entries.map { it.wireValue })
     }
 
-    /** The desktop also stores "icons"; a phone has no avatars-only mode, and
-     * a value it cannot read must land on the default, not on comfortable. */
+    /** A value this build cannot read — a typo, a newer build's choice — must
+     * land on the default, not on comfortable. */
     @Test
     fun unreadableStoredValuesFallBackToCompact() {
         assertEquals(RosterDensity.COMPACT, RosterDensity.fromWire("icons"))
@@ -46,6 +46,8 @@ class RosterDensityTest {
     fun settingsNamesBothChoicesAndSaysWhatEachDoes() {
         assertEquals(listOf("Comfortable", "Compact"), RosterDensity.entries.map { it.label })
         RosterDensity.entries.forEach { assertTrue(it.caption.isNotBlank()) }
+        // the count leaves put-away threads out, so the caption says "active"
+        assertTrue("more than one active thread" in RosterDensity.COMPACT.caption)
     }
 
     // Thread count behind "› N"
@@ -139,18 +141,40 @@ class RosterDensityTest {
         assertEquals(RosterRowStatus.IDLE, bot(listOf(task("a"), run)).rosterStatus(hasPendingCard = false))
     }
 
-    // Compact row
-
+    /**
+     * The bot's own activity is its current thread's when that thread's task
+     * carries none — the fallback `Bot.forTask` makes when a chat opens.
+     */
     @Test
-    fun compactRowIsOneLineWithoutAPreview() {
-        val row = RosterBotRow(bot(listOf(task("a"))), RosterDensity.COMPACT, hasPendingCard = false)
-        assertFalse(row.showsPreview)
-        assertFalse(row.showsThreadsRow)
+    fun theCurrentThreadFallsBackToTheBotsActivity() {
+        val bot = bot(listOf(task("a"), task("b"))).copy(activity = "waiting-on-you", busy = true)
+        assertEquals(RosterRowStatus.WAITING_ON_YOU, bot.rosterStatus(hasPendingCard = false))
     }
+
+    /** A thread's own activity wins, and no other thread borrows the bot's. */
+    @Test
+    fun onlyTheCurrentThreadWithoutItsOwnActivityBorrowsTheBots() {
+        val current = task("a").copy(activity = "idle")
+        val other = task("b")
+        val bot = bot(listOf(current, other)).copy(activity = "waiting-on-you")
+        assertEquals(RosterRowStatus.IDLE, bot.rosterStatus(hasPendingCard = false))
+    }
+
+    /** Older computers send no task list: the bot's own fields are its one thread, as in the tree. */
+    @Test
+    fun aLegacyBotWaitingOnYouShowsTheHandNotTheSpinner() {
+        val legacy = bot(emptyList()).copy(tasks = null, activity = "waiting-on-you", busy = true)
+        assertEquals(RosterRowStatus.WAITING_ON_YOU, legacy.rosterStatus(hasPendingCard = false))
+        val working = bot(emptyList()).copy(tasks = null, activity = "working")
+        assertEquals(RosterRowStatus.WORKING, working.rosterStatus(hasPendingCard = false))
+        assertEquals(RosterRowStatus.IDLE, bot(emptyList()).copy(tasks = null).rosterStatus(hasPendingCard = false))
+    }
+
+    // The compact row
 
     @Test
     fun singleThreadBotHasNoThreadControl() {
-        val row = RosterBotRow(bot(listOf(task("a"))), RosterDensity.COMPACT, hasPendingCard = false)
+        val row = RosterBotRow(bot(listOf(task("a"))), hasPendingCard = false)
         assertEquals(1, row.threadCount)
         assertFalse(row.showsThreadControl)
         assertFalse(row.listsThreads(expanded = true, searching = false))
@@ -159,7 +183,7 @@ class RosterDensityTest {
 
     @Test
     fun multiThreadBotOpensItsListWithNewThreadAtTheEnd() {
-        val row = RosterBotRow(bot(listOf(task("a"), task("b"))), RosterDensity.COMPACT, hasPendingCard = false)
+        val row = RosterBotRow(bot(listOf(task("a"), task("b"))), hasPendingCard = false)
         assertTrue(row.showsThreadControl)
         assertEquals(2, row.threadCount)
         assertFalse(row.listsThreads(expanded = false, searching = false))
@@ -172,18 +196,29 @@ class RosterDensityTest {
      * results are not a place to create a thread. */
     @Test
     fun searchListsMatchesWithoutNewThread() {
-        val single = RosterBotRow(bot(listOf(task("a"))), RosterDensity.COMPACT, hasPendingCard = false)
+        val single = RosterBotRow(bot(listOf(task("a"))), hasPendingCard = false)
         assertTrue(single.listsThreads(expanded = false, searching = true))
         assertFalse(single.endsWithNewThread(expanded = false, searching = true))
 
-        val multi = RosterBotRow(bot(listOf(task("a"), task("b"))), RosterDensity.COMPACT, hasPendingCard = false)
+        val multi = RosterBotRow(bot(listOf(task("a"), task("b"))), hasPendingCard = false)
         assertTrue(multi.listsThreads(expanded = true, searching = true))
         assertFalse(multi.endsWithNewThread(expanded = true, searching = true))
     }
 
+    /** An opened list whose control went away — threads closed or deleted —
+     * is dropped, so a later second thread does not reopen it by itself. */
+    @Test
+    fun anOpenListIsDroppedOnceItsControlGoes() {
+        val single = RosterBotRow(bot(listOf(task("a"))), hasPendingCard = false)
+        assertTrue(single.dropsExpansion(expanded = true))
+        assertFalse(single.dropsExpansion(expanded = false))
+        val multi = RosterBotRow(bot(listOf(task("a"), task("b"))), hasPendingCard = false)
+        assertFalse(multi.dropsExpansion(expanded = true))
+    }
+
     @Test
     fun compactWorkingRowSwapsTheTimeForASpinner() {
-        val row = RosterBotRow(bot(listOf(task("a"))).copy(busy = true), RosterDensity.COMPACT, hasPendingCard = false)
+        val row = RosterBotRow(bot(listOf(task("a"))).copy(busy = true), hasPendingCard = false)
         assertTrue(row.showsSpinner)
         assertFalse(row.showsTime)
     }
@@ -191,39 +226,72 @@ class RosterDensityTest {
     @Test
     fun compactWaitingRowKeepsItsTimeAndShowsTheHand() {
         val waiting = task("a").copy(activity = "waiting-on-you")
-        val row = RosterBotRow(bot(listOf(waiting)).copy(busy = true), RosterDensity.COMPACT, hasPendingCard = false)
+        val row = RosterBotRow(bot(listOf(waiting)).copy(busy = true), hasPendingCard = false)
         assertTrue(row.showsWaiting)
         assertFalse(row.showsSpinner)
         assertTrue(row.showsTime)
     }
 
     @Test
-    fun chiefOfStaffIsMarkedInCompactOnly() {
+    fun chiefOfStaffWearsTheCrown() {
         val chief = bot(listOf(task("a"))).copy(chiefOfStaff = true)
-        assertTrue(RosterBotRow(chief, RosterDensity.COMPACT, hasPendingCard = false).showsChiefBadge)
-        assertFalse(RosterBotRow(chief, RosterDensity.COMFORTABLE, hasPendingCard = false).showsChiefBadge)
-        assertFalse(RosterBotRow(bot(listOf(task("a"))), RosterDensity.COMPACT, hasPendingCard = false).showsChiefBadge)
+        assertTrue(RosterBotRow(chief, hasPendingCard = false).showsChiefBadge)
+        assertFalse(RosterBotRow(bot(listOf(task("a"))), hasPendingCard = false).showsChiefBadge)
     }
 
-    /** The dot stays as it was: hidden while the bot works. */
+    // The unread dot: the rule the comfortable row has always used — shown
+    // while the bot is unread, hidden while the bot itself is busy.
+
     @Test
-    fun unreadDotHidesWhileWorking() {
+    fun unreadDotHidesWhileTheBotIsBusy() {
         val unread = bot(listOf(task("a"))).copy(unread = true)
-        assertTrue(RosterBotRow(unread, RosterDensity.COMPACT, hasPendingCard = false).showsUnreadDot)
-        assertFalse(RosterBotRow(unread.copy(busy = true), RosterDensity.COMPACT, hasPendingCard = false).showsUnreadDot)
+        assertTrue(RosterBotRow(unread, hasPendingCard = false).showsUnreadDot)
+        assertFalse(RosterBotRow(unread.copy(busy = true), hasPendingCard = false).showsUnreadDot)
     }
 
-    // Comfortable row keeps what shipped
-
+    /** The harness paints a wait on the person busy, so the hand stands alone. */
     @Test
-    fun comfortableKeepsPreviewTimeAndThreadsRow() {
-        val row = RosterBotRow(bot(listOf(task("a"))).copy(busy = true), RosterDensity.COMFORTABLE, hasPendingCard = false)
-        assertTrue(row.showsPreview)
-        assertTrue(row.showsThreadsRow)
-        assertTrue(row.showsTime)
+    fun unreadDotHidesWhileWaitingOnYou() {
+        val waiting = task("a").copy(activity = "waiting-on-you", busy = true)
+        val row = RosterBotRow(bot(listOf(waiting)).copy(unread = true, busy = true), hasPendingCard = false)
+        assertTrue(row.showsWaiting)
+        assertFalse(row.showsUnreadDot)
+    }
+
+    /** A teammate wait is painted busy too: no dot, and no spinner either. */
+    @Test
+    fun unreadDotHidesDuringATeammateWait() {
+        val waiting = task("a").copy(busy = true, waitingOnTeammate = true)
+        val bot = bot(listOf(waiting)).copy(unread = true, busy = true, waitingOnTeammate = true)
+        val row = RosterBotRow(bot, hasPendingCard = false)
+        assertFalse(row.showsUnreadDot)
+        assertFalse(row.showsSpinner)
+    }
+
+    /** Busy is the bot's own flag: work in another thread spins without hiding the dot. */
+    @Test
+    fun unreadDotStaysWhileAnotherThreadWorks() {
+        val background = task("b").copy(activity = "working")
+        val row = RosterBotRow(bot(listOf(task("a"), background)).copy(unread = true), hasPendingCard = false)
         assertTrue(row.showsSpinner)
-        assertFalse(row.showsThreadControl)
-        assertFalse(row.endsWithNewThread(expanded = true, searching = false))
+        assertTrue(row.showsUnreadDot)
+    }
+
+    // The label over unfiled threads
+
+    /** Beneath a folder, unfiled threads would read as that folder's: they get a "Threads" label. */
+    @Test
+    fun unfiledThreadsAreLabelledOnlyBeneathAFolder() {
+        val folder = BotProject(id = "email", name = "Email")
+        val filed = task("filed").copy(projectId = "email")
+        val both = bot(listOf(filed, task("loose"))).copy(projects = listOf(folder)).threadGroups()
+        assertTrue(labelsUnfiledThreads(both))
+
+        val onlyUnfiled = bot(listOf(task("a"), task("b"))).threadGroups()
+        assertFalse(labelsUnfiledThreads(onlyUnfiled))
+        val onlyFiled = bot(listOf(filed)).copy(projects = listOf(folder)).threadGroups()
+        assertFalse(labelsUnfiledThreads(onlyFiled))
+        assertFalse(labelsUnfiledThreads(emptyList()))
     }
 
     // Helpers
