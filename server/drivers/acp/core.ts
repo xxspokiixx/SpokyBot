@@ -555,9 +555,21 @@ export function createAcpDriver(support: AcpSupport): ProviderDriver<AcpConfig> 
       // contract prompts the live session instead of paying the handshake
       // again. An idle session closes after SESSION_IDLE_MS of quiet.
       const sessions = new Map<string, AcpSession>();
-      // A provider that could not be stopped is never safe to resume beside.
-      // Keep its child until a later explicit turn proves it gone.
-      const retiring = new Map<string, ReturnType<typeof spawnCli>>();
+      // Closing removes a session from the pool, not its native writer lease.
+      // Retain every closing Qwen child until its process tree is gone, even
+      // when Stop or a failed turn lets another turn start during cleanup.
+      const retiring = new Map<string, Set<ReturnType<typeof spawnCli>>>();
+      const retireChild = async (threadId: string, child: ReturnType<typeof spawnCli>): Promise<boolean> => {
+        let children = retiring.get(threadId);
+        if (!children) retiring.set(threadId, children = new Set());
+        children.add(child);
+        const stopped = await killCliTree(child);
+        if (stopped) {
+          children.delete(child);
+          if (!children.size && retiring.get(threadId) === children) retiring.delete(threadId);
+        }
+        return stopped;
+      };
       const { idleMs: SESSION_IDLE_MS } = sessionIdlePolicy("ACP");
 
       const closeSession = (threadId: string, why: string) => {
@@ -569,15 +581,18 @@ export function createAcpDriver(support: AcpSupport): ProviderDriver<AcpConfig> 
         // a new turn must never adopt a closing session
         sessions.delete(threadId);
         session.acp.close();
-        // stdin EOF asks the agent to exit; EOF is not a guaranteed exit
-        // signal for ACP agents, so insist after a grace period
+        // EOF is not a guaranteed exit signal. Qwen must be tracked before
+        // another turn can resume its history; other agents keep their grace.
         try {
           session.child.stdin.end();
         } catch {}
-        const kill = setTimeout(() => {
-          void killCliTree(session.child);
-        }, 5_000);
-        kill.unref?.();
+        if (support.restartOnMcpChange) void retireChild(threadId, session.child);
+        else {
+          const kill = setTimeout(() => {
+            void killCliTree(session.child);
+          }, 5_000);
+          kill.unref?.();
+        }
       };
       const armIdle = (threadId: string) => {
         const session = sessions.get(threadId);
@@ -1315,9 +1330,6 @@ export function createAcpDriver(support: AcpSupport): ProviderDriver<AcpConfig> 
         }
         const pooled = sessions.get(threadId);
         let session: AcpSession;
-        let replacedChild: ReturnType<typeof spawnCli> | undefined = support.restartOnMcpChange
-          ? retiring.get(threadId)
-          : undefined;
         if (pooled && !pooled.dead && !pooled.closing && pooled.contractKey === contractKey
             && (!support.restartOnMcpChange || pooled.sessionKey === sessionKey)) {
           // adoption cancels the idle countdown — a running turn is not quiet
@@ -1329,11 +1341,7 @@ export function createAcpDriver(support: AcpSupport): ProviderDriver<AcpConfig> 
             // a dead child already exited — just drop the record; a live one
             // gets the full close (contract changed)
             if (pooled.dead) sessions.delete(threadId);
-            else {
-              closeSession(threadId, "contract");
-              if (!replacedChild) replacedChild = pooled.child;
-              else void killCliTree(pooled.child);
-            }
+            else closeSession(threadId, "contract");
           }
           session = openSession(threadId, launch, [...(launch.args ?? []), ...spawnArgs], spawnEnv, cwd, contractKey);
           sessions.set(threadId, session);
@@ -1426,29 +1434,23 @@ export function createAcpDriver(support: AcpSupport): ProviderDriver<AcpConfig> 
 
         (async () => {
           try {
-            if (support.restartOnMcpChange && replacedChild) {
-              // Qwen may hold a native-session writer lease until exit. Keep
-              // Stop wired to the new child, but do not load until its old
-              // owner (and its credential-bearing helpers) has gone away.
-              const stopped = await killCliTree(replacedChild);
-              if (stopped) retiring.delete(threadId);
-              if (state.settled || session.closing) {
-                if (!stopped) retiring.set(threadId, replacedChild);
-                return;
-              }
-              if (!stopped) {
-                closeSession(threadId, "replace-failed");
-                // A retry must still retire the old writer before loading.
-                retiring.set(threadId, replacedChild);
-                throw new Error(`${support.displayName} could not close its previous tool session. Try again.`);
-              }
-            }
             // The handshake is paid once per process, not once per turn. It
             // is a function so the establishment retry below can pay it
             // again on a replacement child.
             // Returns whether this runtime accepts image prompts, for the
             // prompt phase below.
             const handshake = async (): Promise<boolean> => {
+              // Also covers timeout/reset/re-establishment, not just rotated
+              // MCP credentials. Stop remains wired while cleanup is pending.
+              for (const child of retiring.get(threadId) ?? []) {
+                const stopped = await retireChild(threadId, child);
+                if (state.settled || session.closing) throw new Error("session closed");
+                if (!stopped) {
+                  closeSession(threadId, "replace-failed");
+                  throw new Error(`${support.displayName} could not close its previous tool session. Try again.`);
+                }
+              }
+              if (state.settled || session.closing) throw new Error("session closed");
               if (!session.initResult) {
                 session.initResult = await request(
                   "initialize",
@@ -1826,8 +1828,9 @@ export function createAcpDriver(support: AcpSupport): ProviderDriver<AcpConfig> 
             for (const { stop } of active.values()) stop();
             // idle pooled sessions have no running turn — close them too
             for (const threadId of Array.from(sessions.keys())) closeSession(threadId, "stopAll");
-            for (const child of retiring.values()) void killCliTree(child);
-            retiring.clear();
+            for (const [threadId, children] of retiring) {
+              for (const child of children) void retireChild(threadId, child);
+            }
           },
           onEvent: (listener) => {
             listeners.add(listener);
@@ -1837,8 +1840,9 @@ export function createAcpDriver(support: AcpSupport): ProviderDriver<AcpConfig> 
         dispose: async () => {
           for (const { stop } of active.values()) stop();
           for (const threadId of Array.from(sessions.keys())) closeSession(threadId, "dispose");
-          for (const child of retiring.values()) void killCliTree(child);
-          retiring.clear();
+          for (const [threadId, children] of retiring) {
+            for (const child of children) void retireChild(threadId, child);
+          }
           listeners.clear();
         },
       };

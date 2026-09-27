@@ -1180,19 +1180,19 @@ describe("ACP turns (fake CLI)", () => {
 
   // MOCA-260: a quiet `sleep` or build sends nothing while it runs, and the
   // guard used to stop the turn as if the agent had hung.
-  it("does not expire an agent while a tool it started is still running", async () => {
+  it.each([GrokAgentDriver, QwenAgentDriver])("does not expire $driverKind while a tool it started is still running", async (driver) => {
     process.env.OPENMAUS_ACP_PROMPT_IDLE_TIMEOUT_MS = "150";
     process.env.FAKE_ACP_TOOL_MS = "600";
-    await create(GrokAgentDriver, "slow-tool");
+    await create(driver, "slow-tool");
     await instance.adapter.sendTurn({ threadId: "t-slow-tool", text: "go" });
     expect(await recorder.until(e => e.type === "turn.completed")).toMatchObject({ ok: true });
     expect(recorder.events.some(e => e.type === "runtime.error")).toBe(false);
     expect(recorder.events.find(e => e.type === "item.completed" && e.itemType === "tool")).toMatchObject({ ok: true });
   });
 
-  it("still fails an agent that goes silent once its tool has finished", async () => {
+  it.each([GrokAgentDriver, QwenAgentDriver])("still fails $driverKind when it goes silent once its tool has finished", async (driver) => {
     process.env.OPENMAUS_ACP_PROMPT_IDLE_TIMEOUT_MS = "150";
-    await create(GrokAgentDriver, "stall-after-tool");
+    await create(driver, "stall-after-tool");
     await instance.adapter.sendTurn({ threadId: "t-stall-tool", text: "go" });
     expect(await recorder.until(e => e.type === "turn.completed")).toMatchObject({ ok: false, stopReason: "rpc_error" });
     expect(recorder.events.find(e => e.type === "runtime.error")?.message).toMatch(/no tool running/i);
@@ -1777,6 +1777,82 @@ describe("ACP turns (fake CLI)", () => {
         expect(calls.filter((method) => method === "session/prompt")).toHaveLength(1);
         expect(instance.adapter.hasSession("qwen-stop")).toBe(false);
       } finally { release(); }
+    });
+
+    it.each(["Stop", "prompt stall", "failed cleanup"])("waits for Qwen cleanup before an immediate retry after %s", async (reason) => {
+      const children: ReturnType<typeof procs.spawnCli>[] = [];
+      const spawn = procs.spawnCli;
+      vi.spyOn(procs, "spawnCli").mockImplementation((...args) => {
+        const child = spawn(...args);
+        vi.spyOn(child.stdin, "write");
+        children.push(child);
+        return child;
+      });
+      const calls = () => children.flatMap((child) => vi.mocked(child.stdin.write).mock.calls
+        .map(([chunk]) => JSON.parse(String(chunk)) as { method: string; params: { sessionId?: string } }));
+      let release!: () => void;
+      let stopping!: () => void;
+      const gate = new Promise<void>((resolve) => { release = resolve; });
+      const startedStopping = new Promise<void>((resolve) => { stopping = resolve; });
+      const kill = procs.killCliTree;
+      let rejectCleanup = reason === "failed cleanup";
+      vi.spyOn(procs, "killCliTree").mockImplementation(async (child, timeout) => {
+        // Hold only the original writer: Stop must still close its uninitialized replacement.
+        if (child === children[0]) {
+          stopping();
+          await gate;
+          if (rejectCleanup) return false;
+        }
+        return kill(child, timeout);
+      });
+      if (reason === "prompt stall") {
+        process.env.OPENMAUS_ACP_PROMPT_IDLE_TIMEOUT_MS = "100";
+        process.env.FAKE_ACP_MODE = "stall-after-text";
+      }
+      instance = await QwenAgentDriver.create({
+        instanceId: "qwen-retry", displayName: "Qwen Retry", enabled: true,
+        environment: { HOME: scratch, USERPROFILE: scratch },
+        config: { cli: FAKE_CLI, fullAuto: false },
+      });
+      recorder = recordEvents(instance.adapter);
+      const integration = (token: string) => ({ agents: { command: process.execPath, args: [FAKE_CLI], env: { OMB_COMMS_TOKEN: token } } });
+      try {
+        const first = await instance.adapter.sendTurn({ threadId: "qwen-retry", text: "one", integrations: integration("one") });
+        expect(await recorder.until((e) => e.type === "turn.completed" && e.turnId === first.turnId))
+          .toMatchObject({ ok: reason !== "prompt stall" });
+        if (reason !== "prompt stall") {
+          const second = await instance.adapter.sendTurn({
+            threadId: "qwen-retry", text: "two", resumeCursor: "fake-acp-session", integrations: integration("two"),
+          });
+          await startedStopping;
+          if (reason === "Stop") await instance.adapter.interruptTurn("qwen-retry");
+          else release();
+          expect(await recorder.until((e) => e.type === "turn.completed" && e.turnId === second.turnId)).toMatchObject({ ok: false });
+          if (rejectCleanup) {
+            expect(recorder.events.find((e) => e.type === "runtime.error" && e.turnId === second.turnId))
+              .toMatchObject({ message: expect.stringMatching(/could not close its previous tool session/) });
+            rejectCleanup = false;
+          }
+        }
+        process.env.FAKE_ACP_MODE = "happy";
+        const retry = await instance.adapter.sendTurn({
+          threadId: "qwen-retry", text: "retry", resumeCursor: "fake-acp-session", integrations: integration("three"),
+        });
+        // Observe writes directly: the retry must not even initialize while cleanup is unconfirmed.
+        expect(calls().filter((call) => call.method === "initialize")).toHaveLength(1);
+        expect(calls().filter((call) => call.method === "session/load")).toHaveLength(0);
+        release();
+        expect(await recorder.until((e) => e.type === "turn.completed" && e.turnId === retry.turnId)).toMatchObject({ ok: true });
+        expect(calls().filter((call) => call.method === "session/new")).toHaveLength(1);
+        expect(calls().filter((call) => call.method === "session/load")).toEqual([
+          expect.objectContaining({ params: expect.objectContaining({ sessionId: "fake-acp-session" }) }),
+        ]);
+        expect(calls().filter((call) => call.method === "session/prompt")).toHaveLength(2);
+      } finally {
+        release();
+        await instance.dispose();
+        await Promise.all(children.map((child) => kill(child, 0)));
+      }
     });
 
     it("an agent that refuses to re-load its live session gets one fresh process, then resumes", async () => {
