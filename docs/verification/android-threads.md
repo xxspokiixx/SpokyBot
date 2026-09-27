@@ -52,6 +52,34 @@ pnpm exec vitest run server/paired-thread-targets-api.test.ts server/independent
 These launch isolated fake-provider fixtures. No server routes or pairing
 protocol changes are needed for the Android UI.
 
+## Compact home list
+
+The home list has two densities, chosen per device in **Settings → Threads
+list → List density**. Compact is the default: one line per bot and group, a
+crown after a Chief of Staff, a hand while a bot waits on you and a spinner in
+place of the time while it works. Only a bot with two or more threads shows
+**› N**, which lists them under the bot's name and ends with **New thread**;
+a long press on any bot offers **New thread** and **Manage threads**.
+Comfortable is the earlier layout. The rules behind each row are ported from
+the iPhone's `RosterDensity` and tested in `:core`:
+
+```sh
+./gradlew :core:test --tests '*RosterDensityTest' \
+  :app:testDebugUnitTest --tests '*RosterScreenTest' --tests '*ChatPreferencesTest'
+```
+
+`RosterScreenTest` mounts the real roster and Settings over a real Session,
+`RosterFixture` (a synthetic fleet with every state the list draws, the
+counterpart of the iPhone's `RosterPreview.json`) and a loopback server, with
+native graphics so text is measured for real. It checks that compact is the
+default; that a single-thread bot has no thread row but its long press creates
+a thread; that **› 3** lists Pepper's threads in line with its name, without
+the routine run, and ends with **New thread**; search, groups and the **+**
+that makes one; that the setting switches back to comfortable and is saved;
+that at twice the text size a long name wraps between words; and, in both
+densities at twice the text size, that the first title starts under the header
+and the last row scrolls fully clear of the floating bottom bar.
+
 ## Installable preview
 
 The output is `android/app/build/outputs/apk/preview/app-preview.apk`. This is
@@ -68,7 +96,8 @@ For manual testing, launch the disposable fixture from
 [threads.md](threads.md), enable Phone only on that fixture, and pair only a
 test emulator/device to it. Check:
 
-1. Home → expand Pepper → Email → open each named conversation.
+1. Home → Pepper's **› 3** (compact) or its Threads row (comfortable) → Email →
+   open each named conversation.
 2. Search a folder or thread name, then clear it; disclosure state survives.
 3. Type in one thread, switch through its header, type in another and return.
    Text and attachments must not move between conversations.
@@ -102,3 +131,17 @@ without any task-switch POST or change to the server-selected thread.
 - Preview APK assembled and its v2 signature verified.
 - Fixtures remained synthetic and confined to disposable loopback HTTP;
   no real pairing, device installation, or live-provider test was performed.
+
+## Compact home list — 2026-09-27
+
+- The 24 `RosterDensityTest` cases did not compile before the rules existed.
+  On the unfixed layout at twice the text size, the clearance check failed:
+  the last row ended at 818 dp, under the bottom bar's top at 804 dp. It passes
+  with the measured inset. Ten of the twelve `RosterScreenTest` checks failed
+  on the roster before the compact list existed.
+- 621 core tests and 971 app tests passed (`cleanTest :core:test
+  :app:testDebugUnitTest`), with no failures or skips. `:app:assembleDebug` and
+  `:app:assemblePreview` succeeded; the preview APK's v2 signature and its
+  `com.openmausbot.companion.preview` application ID were verified.
+- Fixtures were synthetic and confined to a loopback server. No emulator,
+  device installation, pairing or live-provider test was performed.
