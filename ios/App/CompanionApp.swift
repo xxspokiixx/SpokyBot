@@ -45,7 +45,7 @@ struct CompanionApp: App {
                     liveActivities.attach(to: session)
                     widgetSync.attach(to: session)
                 }
-                .onOpenURL { session.receivePairingURL($0) }
+                .onOpenURL { session.receiveURL($0) }
                 .onValueChange(of: scenePhase) { phase in
                     switch phase {
                     case .active:
