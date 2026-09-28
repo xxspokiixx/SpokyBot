@@ -33,6 +33,9 @@ const EXCLUDED = new Set([
   ".openmausbot-server-child", "environment-id", "sessions.json", "tunnel-account.json",
   "team-computers.json",
   "openmausbot-server.lease", "box-create-requests.lock", "messages.db-wal", "messages.db-shm",
+  // This machine's decision-model log (server/decider/log.ts): local
+  // measurement of what the classifier picked, not workspace data.
+  "decider-log",
 ]);
 const EXCLUSION_NOTES = [
   "Device pairing, server identity, live leases and runtime files (existing destination identities are preserved).",

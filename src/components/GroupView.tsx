@@ -25,7 +25,7 @@ import { showToolCallsEnabled } from "@/lib/feature-flags";
 import { CompactionChip, DigestChip } from "./DigestChip";
 import { roomActivityVisible } from "@/lib/room-activity";
 import { normalizeState } from "@/lib/mascot";
-import { effectiveDefaultResponder, groupResponseHint } from "@/lib/group-routing";
+import { defaultResponderName, effectiveDefaultResponder, groupResponseHint, jevRoomRoutingOn } from "@/lib/group-routing";
 import { ChatMarkdown } from "./ChatMarkdown";
 import { Composer } from "./Composer";
 import { ChatFindBar } from "./ChatFindBar";
@@ -167,7 +167,7 @@ function PinToggle({ group, message }: { group: Group; message: Message }) {
   );
 }
 
-const Transcript = memo(function Transcript({
+export const Transcript = memo(function Transcript({
   group,
   members,
   messages,
@@ -366,6 +366,7 @@ const Transcript = memo(function Transcript({
                   {formatTime(m.at)}
                 </span>
               </div>
+              {!user && m.routedBy && <RoutedByLine routedBy={m.routedBy} />}
             </div>
           ) : null;
         if (!row) return null;
@@ -387,8 +388,19 @@ const Transcript = memo(function Transcript({
   );
 });
 
-function DefaultResponderSelect({ group, members }: { group: Group; members: Bot[] }) {
-  const { dispatch } = useStore();
+/** Under a reply in an Auto room: the decision model chose this speaker. */
+export function RoutedByLine({ routedBy }: { routedBy: NonNullable<Message["routedBy"]> }) {
+  const percent = Math.round(Math.min(1, Math.max(0, routedBy.probability)) * 100);
+  return (
+    <div data-testid="routed-by" className="mt-1 px-1 text-[11px] text-ink-secondary/80">
+      {t("room.routedBy", { percent: String(percent) })}
+    </div>
+  );
+}
+
+export function DefaultResponderSelect({ group, members }: { group: Group; members: Bot[] }) {
+  const { state, dispatch } = useStore();
+  const jevOn = jevRoomRoutingOn(state.config);
   const responder = effectiveDefaultResponder(group, members);
   const value = responder.kind === "member" ? `member:${responder.botId}` : responder.kind;
   const lead = responder.kind === "member" ? members.find((member) => member.id === responder.botId) : undefined;
@@ -397,12 +409,18 @@ function DefaultResponderSelect({ group, members }: { group: Group; members: Bot
       ? t("room.responder.everyone")
       : responder.kind === "mentions"
         ? t("room.responder.mentions")
-        : t("room.responder.lead", { name: lead?.name ?? t("room.responder.leadFallback") });
+        : responder.kind === "auto"
+          ? jevOn
+            ? t("room.responder.auto")
+            : t("room.responder.autoOff", { name: defaultResponderName(group, members) ?? t("room.responder.leadFallback") })
+          : t("room.responder.lead", { name: lead?.name ?? t("room.responder.leadFallback") });
 
   const change = (nextValue: string) => {
     let next: GroupDefaultResponder;
     if (nextValue === "everyone") next = { kind: "everyone" };
     else if (nextValue === "mentions") next = { kind: "mentions" };
+    // The lead a room had stays on as Auto's fallback.
+    else if (nextValue === "auto") next = responder.kind === "member" ? { kind: "auto", fallbackBotId: responder.botId } : { kind: "auto" };
     else next = { kind: "member", botId: nextValue.slice("member:".length) };
     dispatch({ type: "patchGroup", groupId: group.id, patch: { defaultResponder: next } });
   };
@@ -423,6 +441,7 @@ function DefaultResponderSelect({ group, members }: { group: Group; members: Bot
           ))}
         </optgroup>
         <optgroup label={t("room.responder.groupBehavior")}>
+          <option value="auto">{jevOn ? t("room.responder.autoOption") : t("room.responder.autoOptionOff")}</option>
           <option value="everyone">{t("room.responder.everyoneOption")}</option>
           <option value="mentions">{t("room.responder.mentionsOption")}</option>
         </optgroup>
@@ -561,7 +580,7 @@ type RoomSetupFields = {
   setupSkippedAt?: number | string | null;
 };
 
-type RoomResponderMode = "lead" | "everyone" | "mentions";
+type RoomResponderMode = "lead" | "everyone" | "mentions" | "auto";
 
 function setupResponderMode(responder: GroupDefaultResponder): RoomResponderMode {
   return responder.kind === "member" ? "lead" : responder.kind;
@@ -590,11 +609,14 @@ function roomNeedsSetup(group: Group): boolean {
 }
 
 function RoomSetup({ group, members }: { group: Group; members: Bot[] }) {
-  const { dispatch } = useStore();
+  const { state, dispatch } = useStore();
+  const jevOn = jevRoomRoutingOn(state.config);
   const [folder, setFolder] = useState(group.cwd ?? "");
   const [behavior, setBehavior] = useState<RoomResponderMode>(setupResponderMode(group.defaultResponder));
   const [leadId, setLeadId] = useState(
-    group.defaultResponder.kind === "member" ? group.defaultResponder.botId : members[0]?.id ?? "",
+    group.defaultResponder.kind === "member" ? group.defaultResponder.botId
+      : group.defaultResponder.kind === "auto" && group.defaultResponder.fallbackBotId ? group.defaultResponder.fallbackBotId
+        : members[0]?.id ?? "",
   );
   const [instructions, setInstructions] = useState(group.bulletin);
   const [saving, setSaving] = useState(false);
@@ -622,6 +644,8 @@ function RoomSetup({ group, members }: { group: Group; members: Bot[] }) {
   const responder = (): GroupDefaultResponder => {
     if (behavior === "everyone") return { kind: "everyone" };
     if (behavior === "mentions") return { kind: "mentions" };
+    // The lead picked above stays on as Auto's fallback.
+    if (behavior === "auto") return members.some((member) => member.id === leadId) ? { kind: "auto", fallbackBotId: leadId } : { kind: "auto" };
     return members.some((member) => member.id === leadId)
       ? { kind: "member", botId: leadId }
       : group.defaultResponder;
@@ -715,7 +739,39 @@ function RoomSetup({ group, members }: { group: Group; members: Bot[] }) {
         <fieldset className="block">
           <legend className="text-[13px] font-semibold text-ink">{t("room.responder.aria")}</legend>
           <p className="mt-1 text-[12px] text-ink-secondary">{t("room.setup.responderDetail")}</p>
-          <div role="radiogroup" aria-label={t("room.responder.aria")} className="mt-2 grid gap-2 sm:grid-cols-3">
+          <div role="radiogroup" aria-label={t("room.responder.aria")} className="mt-2 grid gap-2 sm:grid-cols-2">
+            <button
+              type="button"
+              role="radio"
+              aria-checked={behavior === "auto"}
+              onClick={() => {
+                setBehavior("auto");
+                setLeadPickerOpen(false);
+              }}
+              disabled={saving}
+              className={cn(
+                "flex min-h-[72px] w-full cursor-pointer flex-col items-start justify-between rounded-2xl border px-3 py-3 text-left transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/40 disabled:cursor-not-allowed disabled:opacity-50",
+                behavior === "auto"
+                  ? "border-accent bg-accent/10 text-ink ring-1 ring-accent/30"
+                  : "border-hairline/50 bg-inset text-ink-secondary hover:border-hairline hover:bg-raised",
+              )}
+            >
+              <span className="flex items-center gap-2 text-[13px] font-semibold">
+                <span
+                  className={cn(
+                    "flex size-4 shrink-0 items-center justify-center rounded-full border",
+                    behavior === "auto" ? "border-accent bg-accent" : "border-ink-secondary/60",
+                  )}
+                >
+                  {behavior === "auto" && <span className="size-1.5 rounded-full bg-white" />}
+                </span>
+                {jevOn ? t("room.responder.autoOption") : t("room.responder.autoOptionOff")}
+              </span>
+              <span className="ml-6 mt-2 text-[11.5px] text-ink-secondary">
+                {jevOn ? t("room.setup.autoDetail") : t("room.setup.autoDetailOff")}
+              </span>
+            </button>
+
             <div ref={leadPickerRef} className="relative min-w-0">
               <button
                 type="button"
@@ -1220,6 +1276,22 @@ export function GroupView({ group }: { group: Group }) {
 
       {findOpen && <ChatFindBar threadId={group.threadId} onClose={() => setFindOpen(false)} />}
 
+      {/* An Auto room answers like lead mode while the decision model is off: say so, once. */}
+      {!setupPending && !group.dm && !remoteClient && state.config && group.defaultResponder.kind === "auto" && !jevRoomRoutingOn(state.config) && (
+        <div className="w-full px-5">
+          <p data-testid="room-jev-off" className="mb-1 px-2 text-[12px] text-ink-secondary">
+            {t("room.responder.jevOffHint", { name: defaultResponderName(group, members) ?? t("room.responder.leadFallback") })}{" "}
+            <button
+              type="button"
+              onClick={() => dispatch({ type: "toggleAppSettings", open: true, section: "decisionModel" })}
+              className="cursor-pointer text-accent hover:underline"
+            >
+              {t("room.responder.jevOffOpen")}
+            </button>
+          </p>
+        </div>
+      )}
+
       {/* Bulletin: one pinned line; click to edit */}
       {!setupPending && <div className="w-full px-5">
         {bulletinOpen ? (
@@ -1354,7 +1426,7 @@ export function GroupView({ group }: { group: Group }) {
               </div>
               <div className="text-[17px] font-semibold text-ink">{group.name}</div>
               <div className="max-w-[380px] text-[14px] text-ink-secondary">
-                {groupResponseHint(group, members)}
+                {groupResponseHint(group, members, { jevOn: jevRoomRoutingOn(state.config) })}
               </div>
             </div>
           )}
