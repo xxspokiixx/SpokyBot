@@ -93,7 +93,8 @@ const roomConfigSchema = z.object({
     .min(MIN_ROOM_TURN_TIMEOUT_MINUTES)
     .max(MAX_ROOM_TURN_TIMEOUT_MINUTES),
   /** Room handoff tree lifetime. Active execution pauses this clock; the
-   * hard cap is wall-clock and bounds trees that never stop executing. */
+   * hard cap is the maximum stall window, measured wall-clock from the
+   * tree's last durable progress. */
   handoffLifetimeMinutes: z.number().int().min(1).max(MAX_ROOM_TURN_TIMEOUT_MINUTES).optional(),
   handoffMinRunwayMinutes: z.number().int().min(1).max(MAX_ROOM_TURN_TIMEOUT_MINUTES).optional(),
   handoffHardCapMinutes: z.number().int().min(1).max(7 * MAX_ROOM_TURN_TIMEOUT_MINUTES).optional(),
@@ -662,8 +663,9 @@ export interface RoomHandoffLimitsMs {
 }
 
 /** Room handoff tree budgets in milliseconds. The tree lifetime pauses
- * while a node is actively executing; the hard cap is wall-clock and bounds
- * trees that never stop. Read when the server starts. */
+ * while a node is actively executing; the hard cap is the maximum stall
+ * window, measured wall-clock from the tree's last durable progress. Read
+ * when the server starts. */
 export function roomHandoffLimits(cfg: AppConfig): RoomHandoffLimitsMs {
   return {
     lifetimeMs: (cfg.rooms?.handoffLifetimeMinutes ?? DEFAULT_ROOM_HANDOFF_LIFETIME_MINUTES) * 60_000,
