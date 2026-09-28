@@ -503,6 +503,19 @@ export interface DriverCreateInput<Config> {
   config: Config;
 }
 
+export interface TextGenerationUsage {
+  model: string;
+  input?: number;
+  output?: number;
+  cachedInput?: number;
+  costUsd?: number;
+}
+
+export interface TextGenerationOptions {
+  signal?: AbortSignal;
+  onUsage?: (usage: TextGenerationUsage) => void;
+}
+
 export interface ProviderInstance {
   readonly instanceId: InstanceId;
   readonly driverKind: DriverKind;
@@ -525,7 +538,7 @@ export interface ProviderInstance {
   /** Cheap one-shot text call (upstream TextGeneration) — titles, summaries.
    * The signal is a best-effort cap: drivers that can honor it abort the
    * underlying provider call; the rest keep their own timeout. */
-  generateText?(prompt: string, options?: { signal?: AbortSignal }): Promise<string>;
+  generateText?(prompt: string, options?: TextGenerationOptions): Promise<string>;
   /** Isolated, tool-free permission review on this same provider. Kept
    * separate from generateText so the UI never infers a security capability
    * from a generic helper that may expose prompts in argv or lack approvals. */
