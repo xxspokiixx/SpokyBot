@@ -64,6 +64,9 @@ import {
   tailWindowStart,
 } from "@/lib/transcript-window";
 import { useReplyDraft } from "@/lib/drafts";
+import { latestReply, type TranscriptSnapshot } from "@/lib/transcript-announcer";
+import { pendingApprovals } from "./PendingApproval";
+import { TranscriptAnnouncer } from "./TranscriptAnnouncer";
 
 function dayLabel(at: number): string {
   const d = new Date(at);
@@ -994,6 +997,16 @@ export function GroupView({ group }: { group: Group }) {
     lastGroupMessage?.from?.botId,
   ]);
   const presenceVisible = waiting || popping !== null;
+  const announcement = useMemo((): TranscriptSnapshot => {
+    const approval = pendingApprovals(group.messages)[0];
+    return {
+      busy: Boolean(group.working || group.busyBotId),
+      reply: latestReply(group.messages, (m) => m.from?.name ?? group.name),
+      approval: approval
+        ? { id: approval.requestId, name: approval.message.from?.name ?? speaker?.name ?? group.name }
+        : undefined,
+    };
+  }, [group.messages, group.working, group.busyBotId, group.name, speaker?.name]);
   const presenceSpeaker =
     speaker ?? awaited ?? members.find((member) => member.id === popping?.botId) ?? members[0];
 
@@ -1334,7 +1347,8 @@ export function GroupView({ group }: { group: Group }) {
           className="flex w-full flex-col gap-3"
           style={{ paddingBottom: composerDock.pad }}
           role="log"
-          aria-live="polite"
+          // off, as in ChatView: TranscriptAnnouncer speaks once per reply
+          aria-live="off"
           aria-label={t("room.aria", { name: group.name })}
         >
           {group.messages.length === 0 && (
@@ -1419,6 +1433,8 @@ export function GroupView({ group }: { group: Group }) {
         </div>
         )}
       </div>
+
+      <TranscriptAnnouncer threadKey={transcriptKey} snapshot={announcement} />
 
       {!follow && (
         <button

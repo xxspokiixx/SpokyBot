@@ -186,3 +186,27 @@ describe("thread control placement", () => {
     delete window.ogb;
   });
 });
+
+// A polite live region on the whole transcript re-reads every change: the
+// ticking "Thinking 3s", each activity label, every chip. The log stays a
+// landmark people can browse, and one quiet status line speaks when a
+// reply is done or an approval is waiting.
+describe("screen reader announcements", () => {
+  it("keeps the transcript log out of live announcements", () => {
+    const markup = renderToStaticMarkup(createElement(ChatView, { bot }));
+    expect(markup).toMatch(/role="log" aria-live="off" aria-label="Conversation with Pepper"/);
+  });
+
+  it("does not make the working label a second live region", async () => {
+    const { TurnPresence } = await import("./TurnPresence");
+    const markup = renderToStaticMarkup(createElement(TurnPresence, { avatar: null, visible: true, label: "Running a command", since: 1 }));
+    expect(markup).toContain("Running a command");
+    expect(markup).not.toMatch(/thinking-shimmer[^"]*" aria-live/);
+  });
+
+  it("renders one visually hidden status line for finished replies", () => {
+    const markup = renderToStaticMarkup(createElement(ChatView, { bot }));
+    expect(markup.match(/data-testid="transcript-announcer"/g)).toHaveLength(1);
+    expect(markup).toMatch(/<p role="status" aria-live="polite" aria-atomic="true" class="sr-only" data-testid="transcript-announcer">/);
+  });
+});
