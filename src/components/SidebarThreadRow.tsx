@@ -328,7 +328,7 @@ export function SidebarThreadRow({ task, ownerId, current, compact, folders, onS
       </button>}
       <button ref={actionRef} type="button" aria-label={t("task.actions", { title: task.title })} aria-expanded={Boolean(menu)}
         onClick={(event) => { if (menu) { setMenu(null); return; } const rect = event.currentTarget.getBoundingClientRect(); openMenu(rect.left, rect.bottom); }}
-        className="mr-0.5 flex size-6 shrink-0 items-center justify-center rounded text-ink-secondary opacity-0 hover:bg-raised hover:text-ink focus-visible:opacity-100 group-hover/thread:opacity-100 max-md:opacity-70">
+        className="mr-0.5 flex size-6 shrink-0 items-center justify-center rounded text-ink-secondary opacity-0 hover:bg-raised hover:text-ink focus-visible:opacity-100 group-hover/thread:opacity-100 max-md:opacity-70 touch:opacity-70">
         <MoreHorizontal size={13} />
       </button>
     </div>

@@ -135,7 +135,7 @@ function CopyButton({ text, className }: { text: string; className?: string }) {
       aria-label={t("chat.copyMessage")}
       title={t("chat.copyMessage")}
       className={cn(
-        "rounded-md p-1.5 text-ink-secondary opacity-0 transition-opacity hover:bg-raised hover:text-ink focus-visible:opacity-100 group-hover:opacity-100 group-focus-within:opacity-100",
+        "rounded-md p-1.5 text-ink-secondary opacity-0 transition-opacity hover:bg-raised hover:text-ink focus-visible:opacity-100 group-hover:opacity-100 group-focus-within:opacity-100 touch:opacity-100",
         className,
       )}
     >
