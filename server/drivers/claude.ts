@@ -7,7 +7,7 @@
 // Integrations become MCP servers on the CLI:
 //   - Composio Sessions (connected apps → tools) over streamable HTTP
 //   - the bot's cloud computer (boat.dev) via server/computer-proxy.ts
-//     — screenshot/exec/open_url, the CUA-on-the-box bridge
+//     — screenshot/exec/open_url, the CUA-on-the-boat bridge
 import { createHash, randomBytes } from "node:crypto";
 import { chmodSync, mkdirSync, mkdtempSync, readFileSync, rmSync, unlinkSync, writeFileSync } from "node:fs";
 import { createServer as createNetServer } from "node:net";
@@ -1296,7 +1296,7 @@ export const ClaudeDriver: ProviderDriver<ClaudeConfig> = {
       mcpServers.ogb = { command: process.execPath, args: [PERM_PROXY_PATH, socketPath], env: { ...NODE_ENV_FLAG }, alwaysLoad: true };
       allowed.push("mcp__ogb");
       // The MCP config carries credentials — a Composio consumer key in a
-      // header, the box token in the computer proxy's env, the comms token in
+      // header, the boat token in the computer proxy's env, the comms token in
       // the agents proxy's env. On argv every one of those is world-readable
       // through `ps` for the life of the turn, to any local process. The CLI
       // accepts a FILE for this flag, so the secrets go in a 0600 file that

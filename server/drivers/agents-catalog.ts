@@ -158,8 +158,9 @@ const ROUTINE_FIELDS_SCHEMA = {
   schedule: ROUTINE_SCHEDULE_SCHEMA,
   run_on: {
     type: "string",
+    // "box" is Boat's historical run_on destination id (agents wire contract).
     enum: ["maus", "box"],
-    description: "Default maus keeps the bot's selected model and configured computer, INCLUDING a self-hosted VPS. Omit this field for normal schedules. box explicitly switches the agent to the Box-hosted runner; it requires Box setup and is not the generic cloud/VPS option. Legacy cloud values from list_routines mean box, not VPS.",
+    description: "Default maus keeps the bot's selected model and configured computer, INCLUDING a self-hosted VPS. Omit this field for normal schedules. box explicitly switches the agent to the Boat-hosted runner; it requires Boat setup and is not the generic cloud/VPS option. Legacy cloud values from list_routines mean box, not VPS.",
   },
   timeout_minutes: {
     type: "integer",
@@ -330,7 +331,7 @@ const toolDefinitions = (externalRuntime: boolean) => [
       "Choose where this conversation does computer work. Call with no arguments to inspect actual available choices and the current place. For a task needing computer interaction, select the requested place, or auto to choose a suitable configured computer without asking the user to use menus. OpenMausBot reuses an existing computer first; with a configured provider it can start or provision one when needed. Do not provision for ordinary chat or just to inspect availability. A pending result means end this turn immediately: OpenMausBot updates the conversation selector and resumes the original request with that computer's real tools. Do not use the old tools after requesting a switch, repeat the task, or claim the action is done. This cannot change permissions, override Off, or switch a teammate/routine/channel.",
     inputSchema: { type: "object", additionalProperties: false, properties: {
       surface: { type: "string", enum: ["auto", "cloud", "vm", "local", "browser"],
-        description: "auto = suitable configured computer, cloud = remote Box/VPS, vm = isolated Local VM, local = user's own desktop, browser = built-in browser. Omit to list." },
+        description: "auto = suitable configured computer, cloud = remote Boat/VPS, vm = isolated Local VM, local = user's own desktop, browser = built-in browser. Omit to list." },
     } },
   },
   {

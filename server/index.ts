@@ -96,14 +96,14 @@ import {
 import { fitsOnOneLine, parseBotProfilePatch } from "./bot-profile.ts";
 import { groupTurnCwd } from "./room-cwd.ts";
 import { RoomTurnDeadline, RoomTurnStallRegistry, roomTurnTimeoutMessage } from "./room-turn-timeout.ts";
-import * as box from "./box.ts";
+import * as boat from "./boat.ts";
 import { TeamComputers, teamComputerAssignment, teamComputerCreate, teamComputerOwner, type TeamComputerRecord } from "./team-computers.ts";
 import { isEffortLevel, type BotVisibility, type CardAnswerer, type ResolvedSender, type WireBot, type WireGroup, type WireTask } from "../shared/wire.ts";
 import type { TeamComputersPayload } from "../shared/team-computer.ts";
-import { boxCreateRecoverySnapshot, retireDeletedBoxCreate } from "./box-create-idempotency.ts";
-import { boxDeletionSnapshot } from "./box-delete-journal.ts";
+import { boatCreateRecoverySnapshot, retireDeletedBoatCreate } from "./boat-create-idempotency.ts";
+import { boatDeletionSnapshot } from "./boat-delete-journal.ts";
 import {
-  boxAccountResourceChangeError,
+  boatAccountResourceChangeError,
   cloudBackendChangeError,
   vpsAliasResourceChangeError,
 } from "./cloud-backend.ts";
@@ -5366,12 +5366,12 @@ function vpsThreadEnded(botId: string, threadId: string): void {
   threads.delete(threadId);
   if (!threads.size) activeVpsThreads.delete(botId);
 }
-const boxLifecycleBusyBots = new Set<string>();
+const boatLifecycleBusyBots = new Set<string>();
 // A refresh is a reader, not a lifecycle change. Keep its reservation until
 // the provider settles even if the HTTP client leaves, and share it on retry.
 const vpsPreviewRequests = new Map<string, ReturnType<typeof vps.vpsComputerScreenshot>>();
-const orphanBoxLifecycleBusyIds = new Set<string>();
-const boxInventoryRequestsBusyIds = new Set<string>();
+const orphanBoatLifecycleBusyIds = new Set<string>();
+const boatInventoryRequestsBusyIds = new Set<string>();
 type RemoteComputerProvider = "box" | "vps";
 const computerProviderConfigTransitions = new Set<RemoteComputerProvider>();
 // A restore mutates and cleans a project work tree. Claim the bot across the
@@ -5389,7 +5389,7 @@ function inheritedTeamComputer(bot: Pick<BotRecord, "section" | "computer" | "cl
 }
 
 function teamComputerPrompt(computer: TeamComputerRecord | undefined): string {
-  return computer ? `Your team shares the Box computer ${JSON.stringify(computer.name)}. Its desktop files and desktop browser logins are shared with other Auto bots in your team; only one turn may drive it at a time. The separate built-in Browser is not this desktop and does not automatically share its logins.` : "";
+  return computer ? `Your team shares the Boat computer ${JSON.stringify(computer.name)}. Its desktop files and desktop browser logins are shared with other Auto bots in your team; only one turn may drive it at a time. The separate built-in Browser is not this desktop and does not automatically share its logins.` : "";
 }
 
 function botComputerControlKey(bot: BotRecord): string {
@@ -5491,14 +5491,14 @@ function assertTeamComputerChangeIdle(before: BotRecord, after: BotRecord): void
   const next = inheritedTeamComputer(after);
   if (previous?.id === next?.id) return;
   if (botHasActiveTurn(before.id) || routines?.activeRunForBot(before.id) || botComputerControlSnapshot(before.id).held ||
-      [previous, next].some(computer => computer && (teamComputerInUse(computer) || boxLifecycleBusyBots.has(teamComputerOwner(computer.id))))) {
+      [previous, next].some(computer => computer && (teamComputerInUse(computer) || boatLifecycleBusyBots.has(teamComputerOwner(computer.id))))) {
     throw Object.assign(new Error("Stop the affected team's work and release computer control before changing its computer access"), { status: 409 });
   }
 }
 
 async function teamComputersPayload(): Promise<TeamComputersPayload> {
   const entries = teamComputers.list();
-  const inventory = await box.listManagedBoxes(cfg, managedBoxOwners());
+  const inventory = await boat.listManagedBoats(cfg, managedBoatOwners());
   return {
     configured: inventory.configured,
     ...(inventory.problem ? { problem: inventory.problem } : {}),
@@ -5507,36 +5507,36 @@ async function teamComputersPayload(): Promise<TeamComputersPayload> {
       return {
         id: entry.id, name: entry.name, section: entry.section,
         held: computerControl.snapshot(teamComputerOwner(entry.id)).held,
-        state: boxLifecycleBusyBots.has(teamComputerOwner(entry.id)) ? "working" : machine?.state ?? (inventory.available ? "missing" : "unavailable"),
+        state: boatLifecycleBusyBots.has(teamComputerOwner(entry.id)) ? "working" : machine?.state ?? (inventory.available ? "missing" : "unavailable"),
         ...(entry.problem || inventory.problem ? { problem: entry.problem || inventory.problem! } : {}),
       };
     }),
   };
 }
 
-/** The same named Box identity and whole-turn lease in chats and rooms.
+/** The same named Boat identity and whole-turn lease in chats and rooms.
  * Assignment authorizes waking, never replacing a missing paid machine. */
-async function attachTeamBox(computer: TeamComputerRecord, botId: string, owner: TurnOwner, canMount: boolean, remoteAgent: boolean) {
-  if (!canMount) throw new Error("This model engine cannot use the team's Box computer; choose an engine with computer tools or an explicit bot destination");
-  if (!box.boxConfigured(cfg)) throw new Error("The team's Box account is not configured; reconnect it in Settings");
+async function attachTeamBoat(computer: TeamComputerRecord, botId: string, owner: TurnOwner, canMount: boolean, remoteAgent: boolean) {
+  if (!canMount) throw new Error("This model engine cannot use the team's Boat computer; choose an engine with computer tools or an explicit bot destination");
+  if (!boat.boatConfigured(cfg)) throw new Error("The team's Boat account is not configured; reconnect it in Settings");
   const ownerId = teamComputerOwner(computer.id);
-  if (boxLifecycleBusyBots.has(ownerId)) throw new Error("The team computer is being changed; wait for it to finish");
+  if (boatLifecycleBusyBots.has(ownerId)) throw new Error("The team computer is being changed; wait for it to finish");
   if (computerControl.snapshot(ownerId).held) throw new Error("Release human control of the team computer before starting another turn");
   await bindTurnComputer(owner, `computer:box-bot:${ownerId}`, true);
   teamComputerTurns.set(owner.threadId, { owner, computerId: computer.id, botId, remoteAgent });
-  let machine = await box.findBox(cfg, ownerId);
-  if (!machine) throw new Error("The team's Box computer is missing; explicitly create or retry it from the Team map");
+  let machine = await boat.findBoat(cfg, ownerId);
+  if (!machine) throw new Error("The team's Boat computer is missing; explicitly create or retry it from the Team map");
   await bindTurnComputer(owner, `computer:box:${machine.id}`, true);
-  const action = box.boxTurnLifecycleAction({ explicitCloud: true, canMount: true, state: typeof machine.state === "string" ? machine.state : null });
-  if (action === "wake") machine = await box.readyBox(cfg, ownerId);
-  if (!machine || box.boxTurnLifecycleAction({ explicitCloud: true, canMount: true, state: typeof machine.state === "string" ? machine.state : null }) !== "attach") {
+  const action = boat.boatTurnLifecycleAction({ explicitCloud: true, canMount: true, state: typeof machine.state === "string" ? machine.state : null });
+  if (action === "wake") machine = await boat.readyBoat(cfg, ownerId);
+  if (!machine || boat.boatTurnLifecycleAction({ explicitCloud: true, canMount: true, state: typeof machine.state === "string" ? machine.state : null }) !== "attach") {
     throw new Error("The team computer is not ready; check it in the Team map");
   }
   if (turnResourceOwners.get(owner.threadId)?.generation !== owner.generation ||
       !turnResources.owns(`computer:box:${machine.id}`, owner)) throw new Error("This computer turn ended while its machine was starting");
   return {
     integration: { kind: "box" as const, boxId: machine.id, token: cfg.box!.token!, control: controlIntegration(botId, owner.threadId, owner.generation) },
-    capture: () => box.screenshotBox(cfg, ownerId, machine!.id),
+    capture: () => boat.screenshotBoat(cfg, ownerId, machine!.id),
   };
 }
 
@@ -5601,27 +5601,27 @@ async function mountBotVps(
   };
 }
 
-/** The bot's own Box. Explicit Cloud is the consent boundary: it may create a
+/** The bot's own Boat. Explicit Cloud is the consent boundary: it may create a
  * missing machine and wake an archived one (~8s, and it un-pauses billing);
  * Auto only attaches a machine that is already running. */
-async function attachBotBox(
+async function attachBotBoat(
   bot: BotRecord,
   owner: TurnOwner,
   opts: { explicitCloud: boolean; canMount: boolean; remoteAgent: boolean },
 ) {
-  // Explicit cloud turns can provision/wake the same bot's Box. Claim before
+  // Explicit cloud turns can provision/wake the same bot's Boat. Claim before
   // any network await so setup itself cannot race another turn.
   if (opts.explicitCloud) await bindTurnComputer(owner, `computer:box-bot:${bot.id}`, true);
-  let b: Awaited<ReturnType<typeof box.findBox>> | null;
+  let b: Awaited<ReturnType<typeof boat.findBoat>> | null;
   try {
-    b = await box.findBox(cfg, bot.id);
+    b = await boat.findBoat(cfg, bot.id);
   } catch (error) {
     // Auto may fall through when an optional provider is offline, but a
     // durable deletion fence must never be mistaken for "no computer".
     if (opts.explicitCloud || (error as { status?: number })?.status === 409) throw error;
     b = null;
   }
-  const lifecycleOf = (explicitCloud: boolean) => box.boxTurnLifecycleAction({
+  const lifecycleOf = (explicitCloud: boolean) => boat.boatTurnLifecycleAction({
     explicitCloud,
     canMount: opts.canMount,
     state: typeof b?.state === "string" ? b.state : null,
@@ -5629,36 +5629,36 @@ async function attachBotBox(
   let lifecycle = lifecycleOf(opts.explicitCloud);
   if (lifecycle === "provision") {
     broadcast({ kind: "computer", botId: bot.id, state: "provisioning" });
-    await box.provisionBox(cfg, bot.id, bot.name);
-    b = await box.findBox(cfg, bot.id);
+    await boat.provisionBoat(cfg, bot.id, bot.name);
+    b = await boat.findBoat(cfg, bot.id);
     lifecycle = lifecycleOf(true);
   }
-  // an archived box answers every action with an error until it resumes —
+  // an archived boat answers every action with an error until it resumes —
   // wake it here, once, instead of letting the agent discover it one failed
   // tool call at a time.
   if (lifecycle === "wake") {
     broadcast({ kind: "computer", botId: bot.id, state: "waking" });
-    b = (await box.readyBox(cfg, bot.id)) ?? b;
+    b = (await boat.readyBoat(cfg, bot.id)) ?? b;
     lifecycle = lifecycleOf(true);
   }
   if (!b || lifecycle !== "attach") return null;
   const machine = b;
   await bindTurnComputer(owner, `computer:box:${machine.id}`, opts.remoteAgent);
   return {
-    capture: () => box.screenshotBox(cfg, bot.id, machine.id),
+    capture: () => boat.screenshotBoat(cfg, bot.id, machine.id),
     integration: opts.canMount
       ? { kind: "box" as const, boxId: machine.id, token: cfg.box!.token!, control: controlIntegration(bot.id, owner.threadId, owner.generation) }
       : null,
   };
 }
 
-function managedBoxOwners(): box.ManagedBoxOwner[] {
+function managedBoatOwners(): boat.ManagedBoatOwner[] {
   return [...store.bots.map((bot) => ({
     botId: bot.id,
     name: bot.name,
     // A machine is not safe to mutate while any app-level work or human
     // control lease still names its owner. This is deliberately conservative
-    // across destination changes: an old Box may still contain valuable state.
+    // across destination changes: an old Boat may still contain valuable state.
     inUse:
       bot.busy === true ||
       hasDirectDispatch(bot.id) ||
@@ -5680,7 +5680,7 @@ function botHasActiveTurn(botId: string): boolean {
 
 function providerTransitionMessage(provider: RemoteComputerProvider): string {
   return provider === "box"
-    ? "Box account settings are being updated — wait for them to finish"
+    ? "Boat account settings are being updated — wait for them to finish"
     : "VPS connection settings are being updated — wait for them to finish";
 }
 
@@ -5691,21 +5691,21 @@ function providerOperationConflict(provider: RemoteComputerProvider): string | n
   if (provider === "vps" && activeVpsThreads.size > 0) {
     return "stop the active VPS turn before changing the SSH config alias";
   }
-  if (managedBoxOwners().some((owner) => owner.inUse)) {
-    return `stop active bot work and computer control before changing ${provider === "box" ? "the Box account" : "the VPS connection"}`;
+  if (managedBoatOwners().some((owner) => owner.inUse)) {
+    return `stop active bot work and computer control before changing ${provider === "box" ? "the Boat account" : "the VPS connection"}`;
   }
-  if (boxLifecycleBusyBots.size > 0 || vpsPreviewRequests.size > 0) {
+  if (boatLifecycleBusyBots.size > 0 || vpsPreviewRequests.size > 0) {
     return "wait for cloud computer actions to finish before changing provider settings";
   }
   if (provider === "box") {
-    if (boxInventoryRequestsBusyIds.size > 0 || orphanBoxLifecycleBusyIds.size > 0) {
-      return "wait for cloud computer actions to finish before changing the Box account";
+    if (boatInventoryRequestsBusyIds.size > 0 || orphanBoatLifecycleBusyIds.size > 0) {
+      return "wait for cloud computer actions to finish before changing the Boat account";
     }
-    const deletingBoxIds = new Set(boxDeletionSnapshot().map((entry) => entry.boxId));
-    if (boxCreateRecoverySnapshot().some(
-      (entry) => !entry.resolved && (!entry.boxId || !deletingBoxIds.has(entry.boxId)),
+    const deletingBoatIds = new Set(boatDeletionSnapshot().map((entry) => entry.boxId));
+    if (boatCreateRecoverySnapshot().some(
+      (entry) => !entry.resolved && (!entry.boxId || !deletingBoatIds.has(entry.boxId)),
     )) {
-      return "finish reconciling pending cloud computer creation before changing the Box account";
+      return "finish reconciling pending cloud computer creation before changing the Boat account";
     }
   } else if (vps.vpsLifecycleBusy()) {
     return "wait for VPS computer actions to finish before changing the SSH config alias";
@@ -5715,10 +5715,10 @@ function providerOperationConflict(provider: RemoteComputerProvider): string | n
 
 function turnSurfacePlan(bot: BotRecord, runOn?: RoutineRunOn, threadId?: string) {
   const instance = registry.get(bot.modelSelection.instanceId);
-  const forcedBox = runOn === "cloud" || Boolean(inheritedTeamComputer(bot));
+  const forcedBoat = runOn === "cloud" || Boolean(inheritedTeamComputer(bot));
   return resolveSurface({
-    destination: forcedBox ? "cloud" : bot.computer,
-    pinnedSurface: forcedBox || !threadId ? null : store.taskByThread(bot.id, threadId)?.surface,
+    destination: forcedBoat ? "cloud" : bot.computer,
+    pinnedSurface: forcedBoat || !threadId ? null : store.taskByThread(bot.id, threadId)?.surface,
     browserOn: builtInBrowserEnabled(cfg) && bot.browser !== false && instance?.adapter.capabilities.browserMcp === true,
   });
 }
@@ -5731,13 +5731,13 @@ function turnProvider(bot: BotRecord, runOn?: RoutineRunOn, threadId?: string): 
   return bot.cloudBackend === "vps" ? "vps" : wants === "cloud" ? "box" : null;
 }
 
-/** A driver with a Box bridge keeps the selected model. Other engines use
- * Box's native runner. Start and interrupt must resolve the same owner. */
+/** A driver with a Boat bridge keeps the selected model. Other engines use
+ * Boat's native runner. Start and interrupt must resolve the same owner. */
 function turnInstance(bot: BotRecord, runOn?: RoutineRunOn, threadId?: string): ReturnType<typeof registry.get> {
   const selected = registry.get(bot.modelSelection.instanceId);
   if (selected?.adapter.capabilities.cloudComputerMcp) return selected;
-  const onBox = turnProvider(bot, runOn, threadId) === "box";
-  return onBox
+  const onBoat = turnProvider(bot, runOn, threadId) === "box";
+  return onBoat
     ? registry.instances().find((candidate) => candidate.driverKind === "boxAgent") ?? null
     : registry.get(bot.modelSelection.instanceId);
 }
@@ -5793,9 +5793,9 @@ async function selectableComputers(bot: BotRecord) {
             status.image && status.imageMatches && status.network === "private" && status.mounts === "none" && status.security === "hardened");
           canCreate = Boolean(status?.configured && status.daemonUp && status.container === "missing");
           reason = status?.problem ?? reason;
-        } else if (box.boxConfigured(cfg) && (caps?.usesCloudComputer === true || registry.instances().some(instance => instance.driverKind === "boxAgent"))) {
-          const status = await box.boxStatus(cfg, bot.id);
-          const lifecycle = box.boxTurnLifecycleAction({ explicitCloud: true, canMount: true, state: status.box?.state ?? null });
+        } else if (boat.boatConfigured(cfg) && (caps?.usesCloudComputer === true || registry.instances().some(instance => instance.driverKind === "boxAgent"))) {
+          const status = await boat.boatStatus(cfg, bot.id);
+          const lifecycle = boat.boatTurnLifecycleAction({ explicitCloud: true, canMount: true, state: status.box?.state ?? null });
           ready = lifecycle === "attach";
           canStart = lifecycle === "wake";
           canCreate = lifecycle === "provision";
@@ -5872,29 +5872,29 @@ function providerTransitionForTurn(
     : null;
 }
 
-function claimBoxInventoryRequest(boxId: string): () => void {
-  if (boxInventoryRequestsBusyIds.has(boxId)) {
+function claimBoatInventoryRequest(boxId: string): () => void {
+  if (boatInventoryRequestsBusyIds.has(boxId)) {
     throw Object.assign(new Error("this cloud computer is being changed — wait for it to finish"), { status: 409 });
   }
-  boxInventoryRequestsBusyIds.add(boxId);
-  return () => boxInventoryRequestsBusyIds.delete(boxId);
+  boatInventoryRequestsBusyIds.add(boxId);
+  return () => boatInventoryRequestsBusyIds.delete(boxId);
 }
 
-/** Claim the owning bot synchronously after Box revalidation and before the
+/** Claim the owning bot synchronously after Boat revalidation and before the
  * provider mutation. startTurn checks the same set before doing any work, so
  * a new turn and an irreversible lifecycle action cannot pass each other. */
-function claimManagedBoxMutation(instance: box.ManagedBoxInventoryInstance): () => void {
+function claimManagedBoatMutation(instance: boat.ManagedBoatInventoryInstance): () => void {
   const ownerBotId = instance.ownerBotId;
   const teamComputer = teamComputers.list().find(computer => teamComputerOwner(computer.id) === ownerBotId);
   if (teamComputer) return claimTeamComputerLifecycle(teamComputer);
   if (!ownerBotId) {
-    if (orphanBoxLifecycleBusyIds.has(instance.boxId)) {
+    if (orphanBoatLifecycleBusyIds.has(instance.boxId)) {
       throw Object.assign(new Error("this cloud computer is being changed — wait for it to finish"), { status: 409 });
     }
-    orphanBoxLifecycleBusyIds.add(instance.boxId);
-    return () => orphanBoxLifecycleBusyIds.delete(instance.boxId);
+    orphanBoatLifecycleBusyIds.add(instance.boxId);
+    return () => orphanBoatLifecycleBusyIds.delete(instance.boxId);
   }
-  const owner = managedBoxOwners().find((candidate) => candidate.botId === ownerBotId);
+  const owner = managedBoatOwners().find((candidate) => candidate.botId === ownerBotId);
   if (owner?.inUse) {
     throw Object.assign(new Error("this cloud computer is in use — stop its bot's work first"), { status: 409 });
   }
@@ -5906,20 +5906,20 @@ function claimManagedBoxMutation(instance: box.ManagedBoxInventoryInstance): () 
  * other instead of relying on a stale check made before a provider await.
  * Only opening an existing VPS viewer may coexist with its pending preview. */
 function claimBotComputerLifecycle(botId: string, allowPreview = false): () => void {
-  if (boxLifecycleBusyBots.has(botId)) {
+  if (boatLifecycleBusyBots.has(botId)) {
     throw Object.assign(new Error("this bot's cloud computer is being changed — wait for it to finish"), { status: 409 });
   }
   if (!allowPreview && vpsPreviewRequests.has(botId)) {
     throw Object.assign(new Error("a screen preview is still refreshing — wait before changing this computer"), { status: 409 });
   }
-  boxLifecycleBusyBots.add(botId);
-  return () => boxLifecycleBusyBots.delete(botId);
+  boatLifecycleBusyBots.add(botId);
+  return () => boatLifecycleBusyBots.delete(botId);
 }
 
 function claimManagedVpsMutation(containerName: string): () => void {
   const owner = store.bots.find((candidate) => vps.vpsContainerName(candidate.id) === containerName);
   if (!owner) return () => {};
-  const ownerState = managedBoxOwners().find((candidate) => candidate.botId === owner.id);
+  const ownerState = managedBoatOwners().find((candidate) => candidate.botId === owner.id);
   if (ownerState?.inUse) {
     throw Object.assign(new Error("this VPS computer is in use — stop its bot's work first"), { status: 409 });
   }
@@ -6175,7 +6175,7 @@ bus.subscribe((event: RuntimeEvent) => {
         }
         // the bot just acted ON ITS SCREEN — refresh the preview now. Only
         // computer tools can change the screen, and each capture competes
-        // with the agent for the box's command endpoint, so a bot grinding
+        // with the agent for the boat's command endpoint, so a bot grinding
         // through file edits must not trigger one per tool. The refresh is
         // deliberately broad (a computer_exec may well have launched a
         // window); whether the turn has EARNED a settled screenshot is the
@@ -7567,7 +7567,7 @@ const screenPollers = new Map<
   }
 >();
 
-/** The preview shares the box's single command endpoint with the agent's
+/** The preview shares the boat's single command endpoint with the agent's
  * own actions, so every frame we take is latency stolen from the work the
  * user is waiting on. Hence: a slow interval, a floor between captures,
  * and never two in flight. */
@@ -7576,7 +7576,7 @@ const SCREEN_MIN_GAP_MS = 3000;
 const SCREEN_SETTLE_TIMEOUT_MS = 10_000;
 
 /** `screenIsTheWork` starts the turn already counting as screen usage: a
- * boxAgent's whole session runs ON the box, so every tool it calls acts on
+ * boxAgent's whole session runs ON the boat, so every tool it calls acts on
  * that screen even though none of them is named like a computer tool. Its
  * shell-only turns are kept honest by the settle-time hash gate instead. */
 function startScreenPoller(
@@ -7670,7 +7670,7 @@ function shownScreenHash(threadId: string): string | undefined {
  * in-flight poke first) so the settled screenshot shows the screen's actual
  * end state, not the previous action's. A turn that never touched the
  * screen settles nothing — and skips the capture, which is one less
- * command on the box's single endpoint. A frame the reader can already see
+ * command on the boat's single endpoint. A frame the reader can already see
  * settles nothing either: the boxAgent pre-touch counts every turn as
  * screen work, so without this its shell-only replies would all end in the
  * same idle desktop. Either way the poller is torn down here, so no
@@ -7747,8 +7747,8 @@ async function startTurn(
     excludeMessageIds?: string[];
     /** Routines run in detached tasks; pin the destination for the whole turn. */
     threadId?: string;
-    /** Cloud routines use the bot's Box VM. Capable API drivers bridge its
-     * tools; other engines delegate the turn to the native Box runner. */
+    /** Cloud routines use the bot's Boat VM. Capable API drivers bridge its
+     * tools; other engines delegate the turn to the native Boat runner. */
     runOn?: RoutineRunOn;
     /** Lets the system prompt put externally supplied payloads behind an
      * explicit untrusted-data boundary without changing ordinary chat. */
@@ -7819,7 +7819,7 @@ async function startTurn(
       status: 409,
     });
   }
-  if (boxLifecycleBusyBots.has(botId)) {
+  if (boatLifecycleBusyBots.has(botId)) {
     throw Object.assign(new Error("this bot's cloud computer is being changed — wait for it to finish"), { status: 409 });
   }
   if (threadBusy(botId, threadId)) throw Object.assign(new Error("this thread is already working — interrupt it first"), { status: 409, code: "thread_busy" });
@@ -7854,7 +7854,7 @@ async function startTurn(
     throw Object.assign(
       new Error(
         turnProvider(bot, opts?.runOn, threadId) === "box"
-          ? "the Cloud VM runner is unavailable — configure Box in App Settings"
+          ? "the Cloud VM runner is unavailable — configure Boat in App Settings"
           : `provider instance "${bot.modelSelection.instanceId}" is unavailable — pick another model in settings`,
       ),
       { status: 409 },
@@ -7903,7 +7903,7 @@ async function startTurn(
   const switchedEngine = instance.instanceId !== bot.modelSelection.instanceId;
   const useInstanceDefaults = switchedEngine || (opts?.runOn === "cloud" && !instance.adapter.capabilities.cloudComputerMcp);
   const model = useInstanceDefaults ? instance.models.default : bot.modelSelection.model;
-  // A native cloud runner borrows its instance defaults; a Box bridge keeps
+  // A native cloud runner borrows its instance defaults; a Boat bridge keeps
   // the bot's selected model, effort and variant.
   const effort = useInstanceDefaults ? undefined : bot.modelSelection.effort;
   const variant = useInstanceDefaults ? undefined : bot.modelSelection.variant;
@@ -7960,7 +7960,7 @@ async function startTurn(
   const agentsMounted = (commsDepth < MAX_COMMS_DEPTH || Boolean(opts?.coordination)) && instance.adapter.capabilities.agentsMcp === true;
 
   // busy flips immediately so the composer locks; the dispatch itself runs
-  // in the background — box provisioning can take ~90s and must never
+  // in the background — boat provisioning can take ~90s and must never
   // hang the HTTP request
   const dispatchClaimId = randomUUID();
   const resourceOwner: TurnOwner = { threadId, generation: dispatchClaimId };
@@ -8227,7 +8227,7 @@ async function startTurn(
       // the private bot workspace. A legacy task with an existing provider
       // session deliberately pins to null (the old home-folder behavior),
       // because moving a live session would break resume.
-      // A cloud run happens on the box, where a host folder means nothing:
+      // A cloud run happens on the boat, where a host folder means nothing:
       // pin the task to the default so the header chip never shows the
       // bot's folder for a task that runs elsewhere.
       if (opts?.runOn === "cloud") store.pinTaskCwd(bot.id, threadId, undefined, { none: true });
@@ -8248,7 +8248,7 @@ async function startTurn(
       // tools that would fail on every call or spawn an unnecessary proxy.
       const dwebUrl = process.env.DWEB_URL?.trim();
       if (dwebUrl) integrations.dweb = { url: dwebUrl };
-      // Cloud routines always use Box/BoxAgent. The per-bot backend applies
+      // Cloud routines always use Boat/BoatAgent. The per-bot backend applies
       // only to ordinary turns that mount a computer into the local agent.
       const teamComputer = inheritedTeamComputer(bot);
       const cloudBackend = teamComputer || opts?.runOn === "cloud" || bot.cloudBackend !== "vps" ? "box" : "vps";
@@ -8350,7 +8350,7 @@ async function startTurn(
           dropLease();
           throw new Error("the Local VM lease expired while preparing the turn");
         }
-        // Same contract as the Box and VPS branches below: without this the
+        // Same contract as the Boat and VPS branches below: without this the
         // poller never starts, so the Local VM publishes no `screen` events
         // and every client that only has the stream (the phone) waits
         // forever. The web panel hid the gap by polling the screenshot
@@ -8530,17 +8530,17 @@ async function startTurn(
         }
       }
 
-      // Cloud is strict when selected. Native Box and drivers with a Box
-      // bridge may also reuse an already-ready Box on Auto.
+      // Cloud is strict when selected. Native Boat and drivers with a Boat
+      // bridge may also reuse an already-ready Boat on Auto.
       if (teamComputer) {
-        const attached = await attachTeamBox(teamComputer, bot.id, resourceOwner,
+        const attached = await attachTeamBoat(teamComputer, bot.id, resourceOwner,
           instance.adapter.capabilities.usesCloudComputer === true, instance.adapter.capabilities.remoteAgent === true);
         integrations.computer = attached.integration;
         previewCapture = attached.capture;
         computerKind = "box";
       }
-      if (!teamComputer && instance.adapter.capabilities.usesCloudComputer === true && (wants === "cloud" || wants === undefined) && cloudBackend === "box" && box.boxConfigured(cfg)) {
-        const attached = await attachBotBox(bot, resourceOwner, {
+      if (!teamComputer && instance.adapter.capabilities.usesCloudComputer === true && (wants === "cloud" || wants === undefined) && cloudBackend === "box" && boat.boatConfigured(cfg)) {
+        const attached = await attachBotBoat(bot, resourceOwner, {
           explicitCloud: wants === "cloud",
           canMount: instance.adapter.capabilities.usesCloudComputer === true,
           remoteAgent: instance.adapter.capabilities.remoteAgent === true,
@@ -8553,8 +8553,8 @@ async function startTurn(
           }
         }
       }
-      if (wants === "cloud" && cloudBackend === "box" && !box.boxConfigured(cfg)) {
-        throw new Error("Cloud box is not configured — add a Box API key or choose Local VM");
+      if (wants === "cloud" && cloudBackend === "box" && !boat.boatConfigured(cfg)) {
+        throw new Error("Cloud Boat is not configured — add a Boat API key or choose Local VM");
       }
       if (wants === "cloud" && cloudBackend === "box" && !integrations.computer) {
         throw new Error("the cloud computer could not be created or reached");
@@ -8869,7 +8869,7 @@ async function startTurn(
       }
       // a turn can settle before dispatch returns, and a poller started
       // after its own turn.completed would never be torn down — it would
-      // keep polling the box forever, carrying dead per-turn state. busy
+      // keep polling the boat forever, carrying dead per-turn state. busy
       // is flipped false in the fold, so it is the honest "still running".
       if ((previewCapture || browserCapture) && threadBusy(bot.id, threadId)) {
         startScreenPoller(
@@ -9398,25 +9398,25 @@ if (recoveryOwners.length > 0) {
 async function cloudRoutineReadiness(botId: string, threadId?: string): Promise<{ ready: boolean; reason?: string }> {
   const bot = threadId ? store.projectBotForTask(botId, threadId) : store.bot(botId);
   if (!bot || bot.hidden) return { ready: false, reason: "The routine's target bot no longer exists." };
-  if (!box.boxConfigured(cfg)) {
+  if (!boat.boatConfigured(cfg)) {
     return {
       ready: false,
-      reason: 'The Box cloud computer needs a working Box API key. For the bot’s configured computer, including a self-hosted VPS, set run_on="maus" instead.',
+      reason: 'The Boat cloud computer needs a working Boat API key. For the bot’s configured computer, including a self-hosted VPS, set run_on="maus" instead.',
     };
   }
   const instance = turnInstance(bot, "cloud", threadId);
   if (!instance) return { ready: false, reason: "The Cloud VM runner is unavailable. Restart OpenMausBot and try again." };
   try {
     if ((await instance.snapshot()).state !== "available") {
-      return { ready: false, reason: "The target bot's model engine is not ready to use the Box cloud computer." };
+      return { ready: false, reason: "The target bot's model engine is not ready to use the Boat cloud computer." };
     }
     const teamComputer = inheritedTeamComputer(bot);
     const ownerId = teamComputer ? teamComputerOwner(teamComputer.id) : bot.id;
-    const machine = await box.findBox(cfg, ownerId);
+    const machine = await boat.findBoat(cfg, ownerId);
     if (teamComputer && !machine) {
-      return { ready: false, reason: "The team's Box computer is missing; explicitly create or retry it from the Team map." };
+      return { ready: false, reason: "The team's Boat computer is missing; explicitly create or retry it from the Team map." };
     }
-    // Explicit Cloud may provision or wake the bot's own Box at dispatch.
+    // Explicit Cloud may provision or wake the bot's own Boat at dispatch.
     // This probe only checks its identity/account, without starting billing.
     return { ready: true };
   } catch (error) {
@@ -9455,7 +9455,7 @@ async function deleteBotWithLifecycle(botId: string, revalidate: () => void = ()
       if (localVmModeChangeBusy) {
         return deletionResponse(409, { error: "Local VM settings are being updated — wait before deleting this bot" });
       }
-      if (boxLifecycleBusyBots.has(bot.id)) {
+      if (boatLifecycleBusyBots.has(bot.id)) {
         return deletionResponse( 409, { error: "wait for this bot's cloud computer action to finish before deleting the bot" });
       }
       const activeRoutine = routines!.activeRunForBot(bot.id);
@@ -9470,17 +9470,17 @@ async function deleteBotWithLifecycle(botId: string, revalidate: () => void = ()
           error: `stop this bot's work in channel ${activeGroup.group.name} before deleting the bot`,
         });
       }
-      // A direct turn that has already claimed the bot can provision a Box in
-      // its background setup. Do not let deletion race that work while a Box
+      // A direct turn that has already claimed the bot can provision a Boat in
+      // its background setup. Do not let deletion race that work while a Boat
       // account is configured; the person can stop the turn and retry.
-      if ((box.boxConfigured(cfg) || vpsSshAlias(cfg)) && (bot.busy || hasDirectDispatch(bot.id))) {
+      if ((boat.boatConfigured(cfg) || vpsSshAlias(cfg)) && (bot.busy || hasDirectDispatch(bot.id))) {
         return deletionResponse( 409, { error: "stop this bot's work before checking and deleting its cloud computer" });
       }
-      const botBoxRecovery = boxCreateRecoverySnapshot().filter((entry) => entry.botId === bot.id);
-      const botBoxDeletions = boxDeletionSnapshot().filter((entry) => entry.ownerBotId === bot.id);
-      if (botBoxRecovery.some((entry) => !entry.resolved)) {
+      const botBoatRecovery = boatCreateRecoverySnapshot().filter((entry) => entry.botId === bot.id);
+      const botBoatDeletions = boatDeletionSnapshot().filter((entry) => entry.ownerBotId === bot.id);
+      if (botBoatRecovery.some((entry) => !entry.resolved)) {
         return deletionResponse( 409, {
-          error: "finish reconciling this bot's pending cloud computer creation before deleting it — check boat.dev, then retry Box setup",
+          error: "finish reconciling this bot's pending cloud computer creation before deleting it — check boat.dev, then retry Boat setup",
         });
       }
       // Bot deletion awaits VM/browser/provider cleanup. Claim the bot and
@@ -9530,7 +9530,7 @@ async function deleteBotWithLifecycle(botId: string, revalidate: () => void = ()
         // Preflight every provider before deleting any resource. Cleanup can
         // still fail mid-flight across independent providers, but a missing
         // credential or offline daemon should not cause avoidable partial work.
-        const vpsInventory = await vps.listManagedVpsComputers(cfg, managedBoxOwners());
+        const vpsInventory = await vps.listManagedVpsComputers(cfg, managedBoatOwners());
         if (vpsInventory.configured && !vpsInventory.available) {
           return deletionResponse( 503, {
             error: `${vpsInventory.problem ?? "VPS computer inventory is unavailable"}. The bot was kept so its computer can be retried safely`,
@@ -9538,18 +9538,18 @@ async function deleteBotWithLifecycle(botId: string, revalidate: () => void = ()
         }
         const ownedVpsComputers = vpsInventory.instances.filter((instance) => instance.ownerBotId === bot.id);
 
-        if ((botBoxRecovery.length > 0 || botBoxDeletions.length > 0) && !box.boxConfigured(cfg)) {
+        if ((botBoatRecovery.length > 0 || botBoatDeletions.length > 0) && !boat.boatConfigured(cfg)) {
           return deletionResponse(409, {
-            error: "Reconnect the Box account that owns this bot's remembered cloud computer, then retry deletion",
+            error: "Reconnect the Boat account that owns this bot's remembered cloud computer, then retry deletion",
           });
         }
-        const cloudInventory = await box.listManagedBoxes(cfg, managedBoxOwners());
+        const cloudInventory = await boat.listManagedBoats(cfg, managedBoatOwners());
         if (cloudInventory.configured && !cloudInventory.available) {
           return deletionResponse( 503, {
             error: `${cloudInventory.problem ?? "cloud computer inventory is unavailable"}. The bot was kept so its computer can be retried safely`,
           });
         }
-        const ownedBoxComputers = cloudInventory.instances.filter((instance) => instance.ownerBotId === bot.id);
+        const ownedBoatComputers = cloudInventory.instances.filter((instance) => instance.ownerBotId === bot.id);
 
         // Revalidate a reviewed Chief-of-Staff request and establish the
         // browser cleanup intent before the first irreversible provider
@@ -9563,8 +9563,8 @@ async function deleteBotWithLifecycle(botId: string, revalidate: () => void = ()
           // each exact, freshly revalidated identity before making its bot
           // owner disappear. Shared team computers use a different owner id
           // and are intentionally absent from these lists.
-          for (const instance of ownedBoxComputers) {
-            const removed = await box.deleteManagedBox(cfg, managedBoxOwners(), instance.boxId, instance.name);
+          for (const instance of ownedBoatComputers) {
+            const removed = await boat.deleteManagedBoat(cfg, managedBoatOwners(), instance.boxId, instance.name);
             if (removed.pending) {
               throw Object.assign(
                 new Error("The cloud computer deletion has started but is still finishing. The bot was kept; retry in a moment"),
@@ -9573,7 +9573,7 @@ async function deleteBotWithLifecycle(botId: string, revalidate: () => void = ()
             }
           }
           for (const instance of ownedVpsComputers) {
-            await vps.removeManagedVpsComputer(cfg, managedBoxOwners(), instance.name, instance.name);
+            await vps.removeManagedVpsComputer(cfg, managedBoatOwners(), instance.name, instance.name);
           }
           if (localVmCleanup) {
             if (localVmCleanup.removeContainer) {
@@ -10486,7 +10486,7 @@ async function runGroupMemberTurn(
     onDispatchError?.(message);
     return true;
   }
-  if (boxLifecycleBusyBots.has(readyBot.id)) {
+  if (boatLifecycleBusyBots.has(readyBot.id)) {
     if (orchestration) {
       orchestration.result.outcome = "busy";
       return true;
@@ -10528,7 +10528,7 @@ async function runGroupMemberTurn(
   orchestration?.onClaimed?.();
   // The stall completion handler only exists once the provider turn runs
   // (registered at dispatch below), but this watch is armed at claim. Latch
-  // a stall that fires during setup — browser, box, and VM mounts can all
+  // a stall that fires during setup — browser, boat, and VM mounts can all
   // wedge — so the dispatch site completes the turn instead of launching a
   // provider turn the person was already told was stopped. The finally
   // below unregisters the latch on every other exit.
@@ -10537,7 +10537,7 @@ async function runGroupMemberTurn(
     setupStalled = true;
   });
   // Watch from claim, not provider dispatch: room setup (connected-app
-  // discovery, browser, box, and VM mounts) can wedge before any provider
+  // discovery, browser, boat, and VM mounts) can wedge before any provider
   // event exists. The exits between here and dispatch either throw into the
   // finally's guarded cleanup or return through the revalidation block,
   // both of which settle the watch.
@@ -10565,7 +10565,7 @@ async function runGroupMemberTurn(
     : roomPlan.computer === "cloud" ? (turnProvider(readyBot) === "vps" ? "vps" : "box") : undefined;
   const roomPlaceRefusal = roomKind && managedPolicy.computerRefusal(roomKind);
   if (roomPlaceRefusal) throw Object.assign(new Error(roomPlaceRefusal), { code: "managed_policy" });
-  // The Computer engine runs on the Box; this computer has no tools it can
+  // The Computer engine runs on the Boat; this computer has no tools it can
   // reach, exactly as a bot thread refuses it.
   if (roomPlan.computer === "local" && instance.adapter.capabilities.remoteAgent === true) {
     throw new Error("the Computer engine works on the cloud computer — set Works on to Cloud, or choose another engine");
@@ -10588,7 +10588,7 @@ async function runGroupMemberTurn(
   }
 
   if (roomTeamComputer) {
-    const attached = await attachTeamBox(roomTeamComputer, readyBot.id, resourceOwner,
+    const attached = await attachTeamBoat(roomTeamComputer, readyBot.id, resourceOwner,
       instance.adapter.capabilities.usesCloudComputer === true, instance.adapter.capabilities.remoteAgent === true);
     if (isCancelled?.() || groupSpeakers.get(threadId) !== roomSpeaker ||
         activeInternalGenerationByThread.get(threadId) !== internalGeneration) return false;
@@ -10628,9 +10628,9 @@ async function runGroupMemberTurn(
       integrations.localComputer = mounted.integration;
       roomComputerKind = "vps";
     } else {
-      if (!box.boxConfigured(cfg)) throw new Error("Cloud box is not configured — add a Box API key or choose Local VM");
+      if (!boat.boatConfigured(cfg)) throw new Error("Cloud Boat is not configured — add a Boat API key or choose Local VM");
       const remoteAgent = instance.adapter.capabilities.remoteAgent === true;
-      const attached = await attachBotBox(readyBot, resourceOwner, { explicitCloud: true,
+      const attached = await attachBotBoat(readyBot, resourceOwner, { explicitCloud: true,
         canMount: instance.adapter.capabilities.usesCloudComputer === true, remoteAgent });
       if (!roomSetupIsCurrent()) return false;
       if (!attached?.integration) throw new Error("the cloud computer could not be created or reached");
@@ -12708,7 +12708,7 @@ async function localVmPayload(target: LocalVmTarget) {
  * app itself deleted eight hours earlier. Someone who steps away overnight
  * comes back to an error on their first message.
  *
- * The cloud branch below already does the opposite: an absent box is
+ * The cloud branch below already does the opposite: an absent boat is
  * provisioned on first use behind a `provisioning` broadcast. This gives the
  * Local VM the same lifecycle for the same reason.
  *
@@ -13212,7 +13212,7 @@ const workspaceBackupRoutes = createWorkspaceBackupRoutes({
     idle: () => !providerFleetReloading && !providerAuthSessions.active && !browserEngineInstall &&
       !routines?.isTicking && !calendarCalls?.isTicking &&
       !localVmImageBusy && !localVmProvisionBusy && !localVmModeChangeBusy &&
-      !localVmLifecycleBusy.size && !boxLifecycleBusyBots.size && !vpsPreviewRequests.size && !orphanBoxLifecycleBusyIds.size &&
+      !localVmLifecycleBusy.size && !boatLifecycleBusyBots.size && !vpsPreviewRequests.size && !orphanBoatLifecycleBusyIds.size &&
       !computerProviderConfigTransitions.size && !checkpointRestoreLeases.size &&
       teamComputers.list().every(computer => !teamComputerInUse(computer)) &&
       store.bots.every((bot) => !botHasActiveTurn(bot.id) && !routines?.activeRunForBot(bot.id) && !botComputerControlSnapshot(bot.id).held) &&
@@ -19906,7 +19906,7 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
       return json(res, 200, { bot: fresh });
     }
 
-    // Named team Boxes use real independent ownership, never a hidden bot or
+    // Named team Boats use real independent ownership, never a hidden bot or
     // an arbitrary provider id. These new routes remain admin-only by default.
     if (path === "/api/team-computers" && method === "GET") {
       res.setHeader("cache-control", "private, no-store");
@@ -19938,7 +19938,7 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
         const parsed = z.object({ action: z.enum(["take", "release"]), controlLeaseId: controlLeaseIdSchema.optional() }).strict().safeParse(body);
         if (!parsed.success) return json(res, 400, { error: "Choose take or release with a valid optional controlLeaseId" });
         const key = teamComputerOwner(found.id);
-        if (parsed.data.action === "take" && boxLifecycleBusyBots.has(key)) return json(res, 409, { error: "Wait for this computer's action to finish before taking control" });
+        if (parsed.data.action === "take" && boatLifecycleBusyBots.has(key)) return json(res, 409, { error: "Wait for this computer's action to finish before taking control" });
         if (parsed.data.action === "take") assertTeamControlCanBeTaken(found.id);
         if (parsed.data.controlLeaseId) {
           const result = parsed.data.action === "take"
@@ -19956,13 +19956,13 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
           assertCurrentOwner();
           if (section !== null && section !== "" && !store.sections.includes(section)) throw Object.assign(new Error("Create the team before assigning a computer"), { status: 404 });
           if (section !== null && store.bots.some(bot => sectionKey(bot.section) === section && (
-            botHasActiveTurn(bot.id) || routines?.activeRunForBot(bot.id) || botComputerControlSnapshot(bot.id).held || boxLifecycleBusyBots.has(bot.id)
+            botHasActiveTurn(bot.id) || routines?.activeRunForBot(bot.id) || botComputerControlSnapshot(bot.id).held || boatLifecycleBusyBots.has(bot.id)
           ))) throw Object.assign(new Error("Stop the target team's work and release computer control before assigning this computer"), { status: 409 });
         };
         checkAssignment();
         const release = claimTeamComputerLifecycle(found);
         try {
-          if (section !== null && !(await box.findBox(cfg, teamComputerOwner(found.id)))) return json(res, 409, { error: "Create or retry this computer before assigning it to a team" });
+          if (section !== null && !(await boat.findBoat(cfg, teamComputerOwner(found.id)))) return json(res, 409, { error: "Create or retry this computer before assigning it to a team" });
           checkAssignment();
           if (teamComputerInUse(found)) return json(res, 409, { error: "This team computer became busy; stop its work before assigning it" });
           teamComputers.assign(found.id, section);
@@ -19971,12 +19971,12 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
       }
       if (method === "POST" && !computerId) {
         const parsed = teamComputerCreate.safeParse(body);
-        if (!parsed.success) return json(res, 400, { error: "Provide requestId (UUID), a name, and acknowledgeCost: true to create a paid Box" });
-        if (!box.boxConfigured(cfg)) return json(res, 409, { error: "Configure Box in Settings before creating a cloud computer" });
+        if (!parsed.success) return json(res, 400, { error: "Provide requestId (UUID), a name, and acknowledgeCost: true to create a paid Boat" });
+        if (!boat.boatConfigured(cfg)) return json(res, 409, { error: "Configure Boat in Settings before creating a cloud computer" });
         const computer = teamComputers.create(parsed.data.name, parsed.data.requestId);
         const release = claimTeamComputerLifecycle(computer);
         try {
-          await box.provisionBox(cfg, teamComputerOwner(computer.id), computer.name);
+          await boat.provisionBoat(cfg, teamComputerOwner(computer.id), computer.name);
           teamComputers.setProblem(computer.id);
           return json(res, 201, { id: computer.id });
         } catch (error) {
@@ -19985,22 +19985,22 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
         } finally { release(); }
       }
       if (method === "POST" && found && action && action !== "control") {
-        if (action === "provision" && body?.acknowledgeCost !== true) return json(res, 400, { error: "Confirm Box creation or wake costs with acknowledgeCost: true" });
+        if (action === "provision" && body?.acknowledgeCost !== true) return json(res, 400, { error: "Confirm Boat creation or wake costs with acknowledgeCost: true" });
         // A ready-only join never wakes, provisions or steals an agent's turn.
         // The caller takes a separate explicit human-control lease first.
         if (action === "join") {
           const key = teamComputerOwner(found.id);
-          if (boxLifecycleBusyBots.has(key)) return json(res, 409, { error: "Wait for this computer's action to finish" });
+          if (boatLifecycleBusyBots.has(key)) return json(res, 409, { error: "Wait for this computer's action to finish" });
           if (!computerControl.snapshot(key).held) return json(res, 409, { error: "Take control before opening this shared desktop" });
           const release = claimBotComputerLifecycle(key);
-          try { return json(res, 200, await box.joinReadyBox(cfg, key)); }
+          try { return json(res, 200, await boat.joinReadyBoat(cfg, key)); }
           finally { release(); }
         }
         const release = claimTeamComputerLifecycle(found);
         try {
           const result = action === "provision"
-            ? await box.provisionBox(cfg, teamComputerOwner(found.id), found.name)
-            : await box.sleepBox(cfg, teamComputerOwner(found.id));
+            ? await boat.provisionBoat(cfg, teamComputerOwner(found.id), found.name)
+            : await boat.sleepBoat(cfg, teamComputerOwner(found.id));
           teamComputers.setProblem(found.id);
           return json(res, 200, result);
         } catch (error) {
@@ -20011,12 +20011,13 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
       return json(res, 405, { error: "method not allowed" });
     }
 
-    // Account-wide Box inventory is a Settings surface, never a provisioning
+    // Account-wide Boat inventory is a Settings surface, never a provisioning
     // path. Listing remains read-only; lifecycle changes require explicit
     // JSON actions and are revalidated against a fresh provider listing.
+    // The REST path keeps its historical /boxes segment.
     if (method === "GET" && path === "/api/computers/boxes") {
       res.setHeader("cache-control", "private, no-store");
-      return json(res, 200, await box.listManagedBoxes(cfg, managedBoxOwners()));
+      return json(res, 200, await boat.listManagedBoats(cfg, managedBoatOwners()));
     }
     m = path.match(/^\/api\/computers\/boxes\/([\w-]+)\/(sleep|delete)$/);
     if (m && method === "POST") {
@@ -20027,21 +20028,21 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
       if (computerProviderConfigTransitions.has("box")) {
         return json(res, 409, { error: providerTransitionMessage("box") });
       }
-      const releaseInventoryRequest = claimBoxInventoryRequest(m[1]);
+      const releaseInventoryRequest = claimBoatInventoryRequest(m[1]);
       try {
-        const owners = managedBoxOwners();
+        const owners = managedBoatOwners();
         if (m[2] === "sleep") {
-          return json(res, 200, await box.sleepManagedBox(cfg, owners, m[1], claimManagedBoxMutation));
+          return json(res, 200, await boat.sleepManagedBoat(cfg, owners, m[1], claimManagedBoatMutation));
         }
         if (typeof body?.confirmName !== "string" || body.confirmName.length > 100) {
           return json(res, 400, { error: "confirmName must be the cloud computer name shown in Settings" });
         }
-        return json(res, 202, await box.deleteManagedBox(
+        return json(res, 202, await boat.deleteManagedBoat(
           cfg,
           owners,
           m[1],
           body.confirmName,
-          claimManagedBoxMutation,
+          claimManagedBoatMutation,
         ));
       } finally {
         releaseInventoryRequest();
@@ -20049,7 +20050,7 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
     }
     if (method === "GET" && path === "/api/computers/vps") {
       res.setHeader("cache-control", "private, no-store");
-      return json(res, 200, await vps.listManagedVpsComputers(cfg, managedBoxOwners()));
+      return json(res, 200, await vps.listManagedVpsComputers(cfg, managedBoatOwners()));
     }
     m = path.match(/^\/api\/computers\/vps\/([\w-]+)\/remove$/);
     if (m && method === "POST") {
@@ -20067,7 +20068,7 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
       try {
         return json(res, 200, await vps.removeManagedVpsComputer(
           cfg,
-          managedBoxOwners(),
+          managedBoatOwners(),
           m[1],
           body.confirmName,
         ));
@@ -20150,7 +20151,7 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
       }
       const bot = store.bot(m[1]);
       if (!bot) return json(res, 404, { error: "no such bot" });
-      if (boxLifecycleBusyBots.has(bot.id)) {
+      if (boatLifecycleBusyBots.has(bot.id)) {
         return json(res, 409, { error: "this bot's computer is being changed or deleted — wait for it to finish" });
       }
       const action = z.enum(["run", "stop", "remove"]).parse(m[2]);
@@ -20909,16 +20910,16 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
         }
       }
       if (patch.box?.token !== undefined) patch.box.token = patch.box.token.trim();
-      const currentBoxToken = cfg.box?.token?.trim() ?? "";
-      const nextBoxToken = patch.box?.token === undefined ? currentBoxToken : patch.box.token;
-      const changingBoxToken = patch.box?.token !== undefined && nextBoxToken !== currentBoxToken;
+      const currentBoatToken = cfg.box?.token?.trim() ?? "";
+      const nextBoatToken = patch.box?.token === undefined ? currentBoatToken : patch.box.token;
+      const changingBoatToken = patch.box?.token !== undefined && nextBoatToken !== currentBoatToken;
       const currentVpsAlias = vpsSshAlias(cfg);
       const nextVpsAlias = patch.vps === undefined
         ? currentVpsAlias
         : vpsSshAlias({ ...cfg, vps: patch.vps });
       const changingVpsAlias = patch.vps !== undefined && nextVpsAlias !== currentVpsAlias;
       const transitioningProviders: RemoteComputerProvider[] = [
-        ...(changingBoxToken ? ["box" as const] : []),
+        ...(changingBoatToken ? ["box" as const] : []),
         ...(changingVpsAlias ? ["vps" as const] : []),
       ];
       providerConfigBusy = true;
@@ -20934,7 +20935,7 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
         if (changingVpsAlias && currentVpsAlias) {
           const inventory = await vps.listManagedVpsComputers(
             { vps: { sshAlias: currentVpsAlias } },
-            managedBoxOwners(),
+            managedBoatOwners(),
           );
           if (!inventory.available) {
             return json(res, 503, {
@@ -20945,85 +20946,85 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
           if (resourceError) return json(res, 409, { error: resourceError });
         }
 
-        let boxRecovery = changingBoxToken ? boxCreateRecoverySnapshot() : [];
-        let boxDeletions = changingBoxToken ? boxDeletionSnapshot() : [];
-        if (changingBoxToken && boxDeletions.length > 0 && !nextBoxToken) {
+        let boatRecovery = changingBoatToken ? boatCreateRecoverySnapshot() : [];
+        let boatDeletions = changingBoatToken ? boatDeletionSnapshot() : [];
+        if (changingBoatToken && boatDeletions.length > 0 && !nextBoatToken) {
           return json(res, 409, {
-            error: "finish or retry pending cloud computer deletion before removing the Box account",
+            error: "finish or retry pending cloud computer deletion before removing the Boat account",
           });
         }
         let replacementProvedByDeletion = false;
-        if (changingBoxToken && boxDeletions.length > 0 && nextBoxToken) {
+        if (changingBoatToken && boatDeletions.length > 0 && nextBoatToken) {
           try {
-            await box.verifyBoxDeletionCredential({ box: { token: nextBoxToken } });
+            await boat.verifyBoatDeletionCredential({ box: { token: nextBoatToken } });
             replacementProvedByDeletion = true;
             // Verification can observe a completed operation and retire both
             // its deletion fence and matching create receipt. Never continue
             // with the pre-verification snapshots: they would demand access
-            // to a Box whose exact operation just proved it was deleted.
-            boxRecovery = boxCreateRecoverySnapshot();
-            boxDeletions = boxDeletionSnapshot();
+            // to a Boat whose exact operation just proved it was deleted.
+            boatRecovery = boatCreateRecoverySnapshot();
+            boatDeletions = boatDeletionSnapshot();
           } catch (error) {
             return json(res, (error as { status?: number })?.status ?? 503, {
               error: error instanceof Error ? error.message : String(error),
             });
           }
         }
-        let currentBoxInventory: box.ManagedBoxInventory | null = null;
-        let replacingRejectedBoxToken = false;
-        let currentBoxResources: Array<{ boxId: string; name: string }> | null = null;
-        const journalBoxResources: Array<{ boxId: string; name: string }> = [];
-        const deletingBoxIds = new Set(boxDeletions.map((entry) => entry.boxId));
-        if (changingBoxToken && currentBoxToken) {
-          currentBoxInventory = await box.listManagedBoxes(
-            { box: { token: currentBoxToken } },
-            managedBoxOwners(),
+        let currentBoatInventory: boat.ManagedBoatInventory | null = null;
+        let replacingRejectedBoatToken = false;
+        let currentBoatResources: Array<{ boxId: string; name: string }> | null = null;
+        const journalBoatResources: Array<{ boxId: string; name: string }> = [];
+        const deletingBoatIds = new Set(boatDeletions.map((entry) => entry.boxId));
+        if (changingBoatToken && currentBoatToken) {
+          currentBoatInventory = await boat.listManagedBoats(
+            { box: { token: currentBoatToken } },
+            managedBoatOwners(),
           );
-          if (!currentBoxInventory.available) {
-            replacingRejectedBoxToken = currentBoxInventory.credentialRejected === true && Boolean(nextBoxToken);
-            if (!replacementProvedByDeletion && !replacingRejectedBoxToken) {
+          if (!currentBoatInventory.available) {
+            replacingRejectedBoatToken = currentBoatInventory.credentialRejected === true && Boolean(nextBoatToken);
+            if (!replacementProvedByDeletion && !replacingRejectedBoatToken) {
               return json(res, 503, {
-                error: `${currentBoxInventory.problem ?? "cloud computer inventory is unavailable"}. Keep the current Box account and retry`,
+                error: `${currentBoatInventory.problem ?? "cloud computer inventory is unavailable"}. Keep the current Boat account and retry`,
               });
             }
             // A rejected old key cannot authorize its own rotation. Below,
-            // validate the replacement and prove access to remembered Boxes;
+            // validate the replacement and prove access to remembered Boats;
             // pending deletions retain their target-bound verification.
-            currentBoxInventory = null;
+            currentBoatInventory = null;
           }
-          if (currentBoxInventory) {
+          if (currentBoatInventory) {
             const currentById = new Map(
-              currentBoxInventory.instances.map((instance) => [instance.boxId, { boxId: instance.boxId, name: instance.name }]),
+              currentBoatInventory.instances.map((instance) => [instance.boxId, { boxId: instance.boxId, name: instance.name }]),
             );
-            for (const recovery of boxRecovery) {
+            for (const recovery of boatRecovery) {
               if (!recovery.boxId) continue;
               // A failed provisioning attempt may never have reached the
               // deterministic rename. The replacement credential already
               // proved the exact deletion target, so its in-flight resource
               // is governed by that stronger target-bound receipt rather
               // than an OpenMausBot name check.
-              if (replacementProvedByDeletion && deletingBoxIds.has(recovery.boxId)) continue;
-              const inspected = await box.inspectBoxIdentity({ box: { token: currentBoxToken } }, recovery.boxId);
+              if (replacementProvedByDeletion && deletingBoatIds.has(recovery.boxId)) continue;
+              const inspected = await boat.inspectBoatIdentity({ box: { token: currentBoatToken } }, recovery.boxId);
               if (!inspected.available) {
                 return json(res, 503, {
-                  error: `${inspected.problem ?? "a remembered cloud computer could not be verified"}. Keep the current Box account and retry`,
+                  error: `${inspected.problem ?? "a remembered cloud computer could not be verified"}. Keep the current Boat account and retry`,
                 });
               }
               if (!inspected.identity) {
                 // Reconcile exact stale receipts while the current credential is
                 // still available. Leaving one behind would make a later token
-                // addition demand access to a Box the provider proved is gone.
-                retireDeletedBoxCreate(recovery.boxId);
+                // addition demand access to a Boat the provider proved is gone.
+                retireDeletedBoatCreate(recovery.boxId);
                 continue;
               }
               const listed = currentById.get(inspected.identity.boxId);
               if (listed && listed.name !== inspected.identity.name) {
-                return json(res, 503, { error: "boat.dev returned conflicting cloud computer identities; keep the current Box account and retry" });
+                return json(res, 503, { error: "boat.dev returned conflicting cloud computer identities; keep the current Boat account and retry" });
               }
               currentById.set(inspected.identity.boxId, inspected.identity);
-              journalBoxResources.push(inspected.identity);
+              journalBoatResources.push(inspected.identity);
             }
-            currentBoxResources = [...currentById.values()];
+            currentBoatResources = [...currentById.values()];
           }
         }
 
@@ -21061,53 +21062,53 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
           patch.composio = { ...patch.composio, apiKey: "", sessionId: "" };
         }
       }
-      // check a box token against the provider before storing it: a
+      // check a boat token against the provider before storing it: a
       // rejected token used to save happily and only surface as a 401 in
       // another panel later, with nothing the user could act on
-      const newBoxToken = patch.box?.token;
-      if (newBoxToken?.trim()) {
-        const check = await box.verifyToken(newBoxToken);
+      const newBoatToken = patch.box?.token;
+      if (newBoatToken?.trim()) {
+        const check = await boat.verifyToken(newBoatToken);
         if (!check.ok) return json(res, 400, { error: check.message });
       }
-      if (replacingRejectedBoxToken) {
+      if (replacingRejectedBoatToken) {
         // An expired credential cannot authorize its own replacement. Probe
         // the new account without adopting or retiring any local identities.
-        const replacement = await box.listManagedBoxes(
-          { box: { token: nextBoxToken } }, managedBoxOwners(), { adoptLegacy: false },
+        const replacement = await boat.listManagedBoats(
+          { box: { token: nextBoatToken } }, managedBoatOwners(), { adoptLegacy: false },
         );
-        if (!replacement.available) return json(res, 503, { error: replacement.problem ?? "Could not verify the replacement Box key. Your saved key and computers are unchanged." });
+        if (!replacement.available) return json(res, 503, { error: replacement.problem ?? "Could not verify the replacement Boat key. Your saved key and computers are unchanged." });
       }
-      if (changingBoxToken && (!currentBoxToken || replacementProvedByDeletion || replacingRejectedBoxToken) && boxRecovery.length > 0) {
-        if (!nextBoxToken) {
-          return json(res, 409, { error: "restore the Box account that owns the remembered cloud computers before clearing it" });
+      if (changingBoatToken && (!currentBoatToken || replacementProvedByDeletion || replacingRejectedBoatToken) && boatRecovery.length > 0) {
+        if (!nextBoatToken) {
+          return json(res, 409, { error: "restore the Boat account that owns the remembered cloud computers before clearing it" });
         }
-        for (const recovery of boxRecovery) {
+        for (const recovery of boatRecovery) {
           if (!recovery.boxId) {
-            return json(res, 409, { error: "finish reconciling pending cloud computer creation before changing the Box account" });
+            return json(res, 409, { error: "finish reconciling pending cloud computer creation before changing the Boat account" });
           }
-          if (replacementProvedByDeletion && deletingBoxIds.has(recovery.boxId)) continue;
-          const inspected = await box.inspectBoxIdentity({ box: { token: nextBoxToken } }, recovery.boxId);
+          if (replacementProvedByDeletion && deletingBoatIds.has(recovery.boxId)) continue;
+          const inspected = await boat.inspectBoatIdentity({ box: { token: nextBoatToken } }, recovery.boxId);
           if (!inspected.available) {
             return json(res, 503, {
-              error: `${inspected.problem ?? "a remembered cloud computer could not be verified"}. Retry with the Box account that created it`,
+              error: `${inspected.problem ?? "a remembered cloud computer could not be verified"}. Retry with the Boat account that created it`,
             });
           }
-          if (!inspected.identity || !(await box.boxNameMatchesBot(recovery.botId, inspected.identity.name))) {
-            return json(res, 409, { error: "that Box token cannot access the remembered cloud computers from this installation" });
+          if (!inspected.identity || !(await boat.boatNameMatchesBot(recovery.botId, inspected.identity.name))) {
+            return json(res, 409, { error: "that Boat token cannot access the remembered cloud computers from this installation" });
           }
         }
       }
-      if (changingBoxToken && currentBoxInventory && currentBoxResources) {
+      if (changingBoatToken && currentBoatInventory && currentBoatResources) {
         let replacementResources: Array<{ boxId: string; name: string }> | null = null;
-        if (nextBoxToken) {
-          const replacementInventory = await box.listManagedBoxes(
-            { box: { token: nextBoxToken } },
-            managedBoxOwners(),
+        if (nextBoatToken) {
+          const replacementInventory = await boat.listManagedBoats(
+            { box: { token: nextBoatToken } },
+            managedBoatOwners(),
             { adoptLegacy: false },
           );
           if (!replacementInventory.available) {
             return json(res, 503, {
-              error: `${replacementInventory.problem ?? "cloud computer inventory is unavailable"}. Keep the current Box account and retry`,
+              error: `${replacementInventory.problem ?? "cloud computer inventory is unavailable"}. Keep the current Boat account and retry`,
             });
           }
           replacementResources = replacementInventory.instances.map((instance) => ({
@@ -21117,22 +21118,22 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
           const replacementById = new Map(
             replacementResources.map((instance) => [instance.boxId, { boxId: instance.boxId, name: instance.name }]),
           );
-          for (const identity of journalBoxResources) {
-            const inspected = await box.inspectBoxIdentity({ box: { token: nextBoxToken } }, identity.boxId);
+          for (const identity of journalBoatResources) {
+            const inspected = await boat.inspectBoatIdentity({ box: { token: nextBoatToken } }, identity.boxId);
             if (!inspected.available) {
               return json(res, 503, {
-                error: `${inspected.problem ?? "a remembered cloud computer could not be verified"}. Keep the current Box account and retry`,
+                error: `${inspected.problem ?? "a remembered cloud computer could not be verified"}. Keep the current Boat account and retry`,
               });
             }
             if (!inspected.identity || inspected.identity.name !== identity.name) {
-              return json(res, 409, { error: "the replacement Box token does not access the same cloud computers" });
+              return json(res, 409, { error: "the replacement Boat token does not access the same cloud computers" });
             }
             replacementById.set(inspected.identity.boxId, inspected.identity);
           }
           replacementResources = [...replacementById.values()];
         }
-        const resourceError = boxAccountResourceChangeError(
-          currentBoxResources,
+        const resourceError = boatAccountResourceChangeError(
+          currentBoatResources,
           replacementResources,
         );
         if (resourceError) return json(res, 409, { error: resourceError });
@@ -21572,7 +21573,7 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
       return json(res, 405, { error: "method not allowed" });
     }
 
-    // ── the bot's cloud computer (Box) ──
+    // ── the bot's cloud computer (Boat) ──
     m = path.match(/^\/api\/bots\/([\w-]+)\/computer$/);
     if (m && method === "GET") {
       const bot = computerPreviewBot(m[1], url);
@@ -21580,10 +21581,10 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
       const surface = url.searchParams.has("threadId") ? await computerPreviewSurface(bot, bot.threadId) : "cloud";
       if (surface !== "cloud") return json(res, 200, { surface, configured: false, backend: bot.cloudBackend === "vps" ? "vps" : "box" });
       const teamComputer = inheritedTeamComputer(bot);
-      if (teamComputer) return json(res, 200, { surface, backend: "box", teamComputer: { id: teamComputer.id, name: teamComputer.name }, ...(await box.boxStatus(cfg, teamComputerOwner(teamComputer.id))) });
+      if (teamComputer) return json(res, 200, { surface, backend: "box", teamComputer: { id: teamComputer.id, name: teamComputer.name }, ...(await boat.boatStatus(cfg, teamComputerOwner(teamComputer.id))) });
       return bot.cloudBackend === "vps"
         ? json(res, 200, { surface, backend: "vps", ...(await vps.vpsComputerStatus(cfg, bot.id)) })
-        : json(res, 200, { surface, backend: "box", ...(await box.boxStatus(cfg, bot.id)) });
+        : json(res, 200, { surface, backend: "box", ...(await boat.boatStatus(cfg, bot.id)) });
     }
     // Who is driving this bot's computer. GET is the panel's initial read;
     // POST take/release/dismiss-help are the person's three moves. The bot
@@ -21614,7 +21615,7 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
           return json(res, 400, { error: "controlLeaseId is invalid" });
         }
         const controlLeaseId = leaseResult?.data;
-        if (action === "take" && (boxLifecycleBusyBots.has(bot.id) || boxLifecycleBusyBots.has(controlKey))) {
+        if (action === "take" && (boatLifecycleBusyBots.has(bot.id) || boatLifecycleBusyBots.has(controlKey))) {
           return json(res, 409, { error: "this bot's cloud computer is being changed — wait before taking control" });
         }
         if (action === "take" && controlLeaseId) {
@@ -21659,7 +21660,7 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
       // request (same reasoning as the Local VM lifecycle routes above): a
       // hostile page cannot submit it with a form, and its cross-origin JSON
       // request dies in the preflight this server never answers. Applied to
-      // both backends — the Box branch runs commands too.
+      // both backends — the Boat branch runs commands too.
       if (!String(req.headers["content-type"] ?? "").toLowerCase().startsWith("application/json")) {
         return json(res, 415, { error: "content-type must be application/json" });
       }
@@ -21667,24 +21668,24 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
       if (computerProviderConfigTransitions.has(remoteProvider)) {
         return json(res, 409, { error: providerTransitionMessage(remoteProvider) });
       }
-      if (boxLifecycleBusyBots.has(botId)) {
+      if (boatLifecycleBusyBots.has(botId)) {
         return json(res, 409, { error: "this bot's cloud computer is being changed — wait for it to finish" });
       }
       const teamComputer = inheritedTeamComputer(bot);
       if (teamComputer) {
         const key = teamComputerOwner(teamComputer.id);
-        if (boxLifecycleBusyBots.has(key)) return json(res, 409, { error: "This team computer is being changed; wait for it to finish" });
+        if (boatLifecycleBusyBots.has(key)) return json(res, 409, { error: "This team computer is being changed; wait for it to finish" });
         if (m[2] === "provision" || m[2] === "remove") return json(res, 409, { error: "Manage this shared computer from the Team map" });
         if (m[2] === "exec") return json(res, 409, { error: "Use the bot's scoped computer tools for this shared desktop" });
         if (m[2] === "join" && !computerControl.snapshot(key).held) return json(res, 409, { error: "Take control before opening this shared desktop" });
         const release = m[2] === "sleep" ? claimTeamComputerLifecycle(teamComputer) : claimBotComputerLifecycle(key);
         try {
-          if (m[2] === "join") return json(res, 200, await box.joinReadyBox(cfg, key));
+          if (m[2] === "join") return json(res, 200, await boat.joinReadyBoat(cfg, key));
           if (m[2] === "screenshot") {
             res.setHeader("cache-control", "private, no-store");
-            return json(res, 200, await box.screenshotBox(cfg, key));
+            return json(res, 200, await boat.screenshotBoat(cfg, key));
           }
-          return json(res, 200, await box.sleepBox(cfg, key));
+          return json(res, 200, await boat.sleepBoat(cfg, key));
         } finally { release(); }
       }
       if (bot.cloudBackend === "vps") {
@@ -21721,8 +21722,8 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
           releaseComputerLifecycle();
         }
       }
-      const activeBoxTurn = botHasActiveTurn(botId);
-      if (["provision", "sleep"].includes(m[2]) && activeBoxTurn) {
+      const activeBoatTurn = botHasActiveTurn(botId);
+      if (["provision", "sleep"].includes(m[2]) && activeBoatTurn) {
         return json(res, 409, {
           error: CLOUD_COMPUTER_BUSY_ERROR,
         });
@@ -21730,39 +21731,39 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
       // Input validity is independent of destination authorization. Preserve
       // the stable 400 contract for oversized commands without contacting the
       // provider; a valid Auto request still reaches the 409 gate below.
-      let boxCommand: string | undefined;
+      let boatCommand: string | undefined;
       if (m[2] === "exec") {
         const body = await readBody(req);
-        boxCommand = String(body?.command ?? "");
-        if (boxCommand.length > box.MAX_REMOTE_COMMAND_LENGTH) {
+        boatCommand = String(body?.command ?? "");
+        if (boatCommand.length > boat.MAX_REMOTE_COMMAND_LENGTH) {
           return json(res, 400, {
-            error: `command is too long (maximum ${box.MAX_REMOTE_COMMAND_LENGTH} characters)`,
+            error: `command is too long (maximum ${boat.MAX_REMOTE_COMMAND_LENGTH} characters)`,
           });
         }
       }
       if (bot.computer !== "cloud" && !threadPreview) {
         return json(res, 409, {
-          error: "Choose Cloud before changing or opening this Box. Auto only checks existing computer state.",
+          error: "Choose Cloud before changing or opening this Boat. Auto only checks existing computer state.",
         });
       }
       if (m[2] === "remove") {
-        // Boxes sleep and wake; only the VPS backend has a container to remove.
-        return json(res, 409, { error: "the cloud Box backend has no container to remove — use sleep instead" });
+        // Boats sleep and wake; only the VPS backend has a container to remove.
+        return json(res, 409, { error: "the cloud Boat backend has no container to remove — use sleep instead" });
       }
       const releaseComputerLifecycle = claimBotComputerLifecycle(botId);
       try {
         switch (m[2]) {
           case "provision":
-            return json(res, 200, await box.provisionBox(cfg, botId, bot.name));
+            return json(res, 200, await boat.provisionBoat(cfg, botId, bot.name));
           case "join":
-            return json(res, 200, await (activeBoxTurn || threadPreview ? box.joinReadyBox(cfg, botId) : box.joinBox(cfg, botId)));
+            return json(res, 200, await (activeBoatTurn || threadPreview ? boat.joinReadyBoat(cfg, botId) : boat.joinBoat(cfg, botId)));
           case "sleep":
-            return json(res, 200, await box.sleepBox(cfg, botId));
+            return json(res, 200, await boat.sleepBoat(cfg, botId));
           case "exec":
-            return json(res, 200, await box.execOnBox(cfg, botId, boxCommand ?? ""));
+            return json(res, 200, await boat.execOnBoat(cfg, botId, boatCommand ?? ""));
           case "screenshot":
             res.setHeader("cache-control", "private, no-store");
-            return json(res, 200, await box.screenshotBox(cfg, botId));
+            return json(res, 200, await boat.screenshotBoat(cfg, botId));
         }
       } finally {
         releaseComputerLifecycle();

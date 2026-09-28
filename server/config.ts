@@ -420,6 +420,8 @@ const appConfigSchema = z.object({
   /** Project key used for Sessions, catalog and agent tools. userId/sessionId
    * are non-secret local identifiers used to reuse one Composio Session. */
   composio: z.object({ apiKey: optionalText, userId: optionalText, sessionId: optionalText }).optional(),
+  /** Historical config section name "box" (the persisted config.json key); the
+   * provider is Boat now and the key is kept for compatibility. */
   box: z.object({ token: optionalText }).optional(),
   vps: vpsConfigSchema.optional(),
   /** Optional OpenCode key; persisted write-only and passed only to its child. */
@@ -531,6 +533,7 @@ export interface AppConfig {
   billing?: { currency?: string; prices?: Record<string, { inputPerMillion: number; outputPerMillion: number; cachedInputPerMillion?: number }> };
   openaiCompat?: { key?: string; url?: string; model?: string; provider?: string };
   composio?: { apiKey?: string; userId?: string; sessionId?: string };
+  /** Persisted under the historical config key "box" (ascii.dev renamed Box to Boat). */
   box?: { token?: string };
   /** A named host from the user's SSH config. Authentication stays with SSH. */
   vps?: { sshAlias?: string };
@@ -941,6 +944,7 @@ export function loadConfig(): AppConfig {
   if (process.env.OPENAI_COMPAT_PROVIDER !== undefined) cfg.openaiCompat.provider = process.env.OPENAI_COMPAT_PROVIDER;
   cfg.composio = { ...cfg.composio };
   if (process.env.COMPOSIO_API_KEY !== undefined) cfg.composio.apiKey = process.env.COMPOSIO_API_KEY;
+  // BOX_TOKEN keeps its historical name; the provider is Boat.
   cfg.box = { ...cfg.box };
   if (process.env.BOX_TOKEN !== undefined) cfg.box.token = process.env.BOX_TOKEN;
   cfg.opencodeGo = { ...cfg.opencodeGo };
@@ -1317,6 +1321,7 @@ function injectedEnvironment(cfg: AppConfig, driver: string): Map<string, string
     environment.set("OPENAI_COMPAT_API_KEY", cfg.openaiCompat.key);
   if (driver === "openai-compat" && cfg.openaiCompat?.url)
     environment.set("OPENAI_COMPAT_URL", cfg.openaiCompat.url);
+  // driverKind "boxAgent" and env BOX_TOKEN keep their historical names.
   if (driver === "boxAgent" && cfg.box?.token) environment.set("BOX_TOKEN", cfg.box.token);
   if (driver === "opencodeGo" && cfg.opencodeGo?.apiKey) environment.set("OPENCODE_API_KEY", cfg.opencodeGo.apiKey);
   return environment;

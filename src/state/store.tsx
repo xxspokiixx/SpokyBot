@@ -396,9 +396,9 @@ export interface Bot {
   turnStartedAt?: number | null;
   modelSelection: ModelSelection;
   /** Where this bot works: a computer, only the built-in browser tab, or
-   * nowhere; unset = auto (cloud box if one exists, else local). */
+   * nowhere; unset = auto (cloud boat if one exists, else local). */
   computer?: "cloud" | "vm" | "local" | "browser" | "off";
-  /** Which cloud computer backs `computer: "cloud"`; absent means Box. */
+  /** Which cloud computer backs `computer: "cloud"`; absent means Boat. */
   cloudBackend?: CloudBackend;
   /** Allow Auto to prepare/start the managed VPS container. Off by default. */
   autoStartVps?: boolean;

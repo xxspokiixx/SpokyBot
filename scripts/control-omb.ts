@@ -392,15 +392,15 @@ export async function launchVerificationServer(
   room?: { scripted: boolean },
   /** Optional repository-owned fake providers for multi-engine setup checks. */
   extraProviders: Array<"codex"> = [],
-  /** Programmatic tests only: an owned loopback Box provider, never a live account. */
-  boxFixtureApi?: string,
+  /** Programmatic tests only: an owned loopback Boat provider, never a live account. */
+  boatFixtureApi?: string,
 ): Promise<VerificationServer> {
-  if (boxFixtureApi) {
-    if (!/^http:\/\/127\.0\.0\.1:[1-9]\d{0,4}$/.test(boxFixtureApi)) {
-      throw new ControlOmbError("Box verification requires an explicit loopback HTTP provider");
+  if (boatFixtureApi) {
+    if (!/^http:\/\/127\.0\.0\.1:[1-9]\d{0,4}$/.test(boatFixtureApi)) {
+      throw new ControlOmbError("Boat verification requires an explicit loopback HTTP provider");
     }
-    try { new URL(boxFixtureApi); }
-    catch { throw new ControlOmbError("Box verification requires a valid loopback port"); }
+    try { new URL(boatFixtureApi); }
+    catch { throw new ControlOmbError("Boat verification requires a valid loopback port"); }
   }
   if (localVm) {
     const endpoint = new URL(localVm.host);
@@ -421,11 +421,11 @@ export async function launchVerificationServer(
   mkdirSync(evidenceDir, { recursive: true });
   const logPath = join(evidenceDir, `server-${Date.now()}-${process.pid}.log`);
   writeFileSync(join(dataDir, "config.json"), JSON.stringify({
-    ...(boxFixtureApi ? { box: { token: "box_verification_fixture" } } : {}),
+    ...(boatFixtureApi ? { box: { token: "box_verification_fixture" } } : {}),
     instances: {
       // The synthetic map omits the default computer engine. Register it
-      // only when an owned Box provider backs this fixture's cloud panel.
-      ...(boxFixtureApi ? { computer: { driver: "boxAgent" } } : {}),
+      // only when an owned Boat provider backs this fixture's cloud panel.
+      ...(boatFixtureApi ? { computer: { driver: "boxAgent" } } : {}),
       ...(extraProviders.includes("codex") ? { codex: {
         driver: "codex", displayName: "Verification Codex", config: { cli: fileURLToPath(new URL("../server/testing/fake-codex-app-server.ts", import.meta.url)) },
       } } : {}),
@@ -453,7 +453,7 @@ export async function launchVerificationServer(
     OMB_AGENT_BROWSER_PATH: browser.binaryPath,
     AGENT_BROWSER_EXECUTABLE_PATH: browser.executablePath,
   });
-  if (boxFixtureApi) childEnv.OMB_BOX_API = boxFixtureApi;
+  if (boatFixtureApi) childEnv.OMB_BOX_API = boatFixtureApi;
   const serverArgs = ["--experimental-strip-types"];
   if (childEnv.OMB_TEST_FAIL_AUDIO_APPEND_ONCE === "1") {
     serverArgs.push("--import", pathToFileURL(join(ROOT, "server", "testing", "fail-audio-append-once.mjs")).href);

@@ -832,7 +832,7 @@ function cardCopy(
   const nextRunAt = nextForOperation(operation, manager, now);
   const scheduleTimeZone = definition.schedule.type === "cron" ? definition.schedule.timeZone : timeZone;
   const when = operation.action === "run_now" ? "Now" : scheduleText(definition.schedule, timeZone);
-  const destination = definition.runOn === "cloud" ? "Box-hosted agent" : "Bot’s current model and configured computer";
+  const destination = definition.runOn === "cloud" ? "Boat-hosted agent" : "Bot’s current model and configured computer";
   const current = operation.action === "create"
     ? null
     : manager.listRoutines().find((routine) => routine.id === operation.routineId) ?? null;
