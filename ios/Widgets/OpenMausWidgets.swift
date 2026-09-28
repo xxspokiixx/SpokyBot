@@ -12,6 +12,7 @@ struct OpenMausWidgets: WidgetBundle {
     var body: some Widget {
         BotActivityWidget()
         NeedsYouWidget()
+        UpdatesDigestWidget()
     }
 }
 

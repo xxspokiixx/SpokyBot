@@ -146,4 +146,17 @@ extension View {
             self
         }
     }
+
+    /// The background a lock-screen accessory draws: nothing of its own, so
+    /// the system's accessory material shows through. Accessories opt in
+    /// explicitly on iOS 17 for the same reason home-screen widgets do —
+    /// below it the system already draws one.
+    @ViewBuilder
+    func widgetAccessoryBackground() -> some View {
+        if #available(iOS 17.0, *) {
+            containerBackground(for: .widget) { Color.clear }
+        } else {
+            self
+        }
+    }
 }

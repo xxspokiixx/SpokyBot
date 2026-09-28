@@ -143,7 +143,7 @@ private struct NeedsYouView: View {
     }
 }
 
-private struct Placeholder: View {
+struct Placeholder: View {
     let icon: String
     let message: LocalizedStringKey
 

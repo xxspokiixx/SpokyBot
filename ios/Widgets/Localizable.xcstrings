@@ -1,6 +1,9 @@
 {
   "sourceLanguage" : "en",
   "strings" : {
+    "%lld active" : {
+      "extractionState" : "manual"
+    },
     "All quiet" : {
       "extractionState" : "manual"
     },
@@ -11,6 +14,9 @@
       "extractionState" : "manual"
     },
     "Bots waiting on your answer, replyable right from the home screen." : {
+      "extractionState" : "manual"
+    },
+    "Everything the Updates pill shows, with the chats that need you first." : {
       "extractionState" : "manual"
     },
     "Needs You" : {
@@ -28,7 +34,16 @@
     "This request has changed. Open the chat to review it." : {
       "extractionState" : "manual"
     },
+    "To review" : {
+      "extractionState" : "manual"
+    },
     "Unlock iPhone, then answer again." : {
+      "extractionState" : "manual"
+    },
+    "Updates" : {
+      "extractionState" : "manual"
+    },
+    "Working" : {
       "extractionState" : "manual"
     }
   },
