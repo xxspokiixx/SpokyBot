@@ -2073,7 +2073,7 @@ export function Sidebar({ open, onClose }: { open: boolean; onClose: () => void 
       <OrganizationIdentity compact={density === "icons"} />
       {/* Search */}
       <div className={cn("pt-1 pb-3", density === "icons" ? "hidden" : "px-3")}>
-        <div className="flex items-center gap-2 rounded-md border border-hairline/40 bg-inset/40 px-2.5 py-1.5 focus-within:border-accent/50">
+        <div className="flex items-center gap-2 rounded-md border border-hairline/40 bg-inset/40 px-2.5 py-1.5 focus-within:border-focus">
           <Search size={14} className="text-ink-secondary" />
           <input
             value={query}

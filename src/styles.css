@@ -655,11 +655,20 @@ body {
 /* Text fields already sit in a bordered card (the composer pill especially).
    Chromium treats a pointer click as :focus-visible on inputs, so the
    global ring above becomes a sharp blue rectangle inside the rounded
-   chrome. Fields keep their own focus:border-*; buttons still use the
-   :focus-visible ring. */
+   chrome. Buttons still use the :focus-visible ring. */
 :is(input, textarea, select):focus,
 :is(input, textarea, select):focus-visible {
   outline: none;
+}
+
+/* In its place a field shows focus on its own border, in the ring's colour.
+   Unlayered, so it wins over the resting `border-hairline/40` every field
+   carries as well as over a faint per-file `focus:border-*`. --color-focus
+   clears 3:1 on every field surface (pnpm check:contrast). A borderless
+   field, such as the composer or a find bar, has no border to paint and is
+   left as it was; its rounded wrapper takes `focus-within:border-focus`. */
+:is(input, textarea, select):focus-visible {
+  border-color: var(--color-focus);
 }
 
 ::selection {
