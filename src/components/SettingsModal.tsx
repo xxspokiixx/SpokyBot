@@ -46,6 +46,7 @@ import { CompanyBackupSettings } from "./CompanyBackupSettings";
 import { cn } from "@/lib/cn";
 import { setNotificationSounds, useNotificationSounds } from "@/lib/notification-preferences";
 import { setShowThreads, useShowThreads } from "@/lib/thread-preferences";
+import { effectiveLanguage, setLanguageChoice, useLanguageChoice } from "@/lib/language-preference";
 
 // `labelKey`, not a label: t() reads the active pack when it is called, so a
 // label resolved here at module scope would freeze the language the app booted
@@ -309,39 +310,21 @@ function ReplayTourRow() {
 }
 
 function LanguageRow() {
-  const { state, dispatch } = useStore();
-  const current = state.config?.language ?? "";
-  const [saving, setSaving] = useState(false);
-  const [error, setError] = useState("");
-
-  const save = async (language: string) => {
-    if (saving) return;
-    setSaving(true);
-    setError("");
-    try {
-      const config: ConfigStatus = await api("/api/config", {
-        method: "PATCH",
-        body: JSON.stringify({ language }),
-      });
-      dispatch({ type: "configStatus", config });
-    } catch (cause) {
-      setError(cause instanceof Error ? cause.message : t("settings.language.error"));
-    } finally {
-      setSaving(false);
-    }
-  };
+  const { state } = useStore();
+  // Saved on this device only: anyone can switch, including a chat-only
+  // teammate, and nobody changes another person's screen. The server's
+  // language is the default until this device picks one.
+  const current = effectiveLanguage(useLanguageChoice(), state.config?.language);
 
   return (
     <SettingRow
       title={t("settings.language.title")}
       subtitle={t("settings.language.subtitle")}
-      message={error ? <p role="alert" className="text-danger">{error}</p> : null}
     >
       <select
         value={current}
-        disabled={saving}
         aria-label={t("settings.language.aria")}
-        onChange={(event) => void save(event.target.value)}
+        onChange={(event) => setLanguageChoice(event.target.value)}
         className="min-h-8 w-full max-w-[240px] rounded-lg border border-hairline/40 bg-inset px-2.5 py-1.5 text-[13px] text-ink focus:border-focus disabled:cursor-wait disabled:opacity-50"
       >
         <option value="">{t("settings.language.system")}</option>
