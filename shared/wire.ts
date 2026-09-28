@@ -252,6 +252,12 @@ export interface WireBot {
   avatarUrl: string | null;
   /** Mascot, or the crop applied to avatarUrl. */
   avatarCrop?: BotAvatarCrop;
+  /** Zoom of a custom image. Absent means 1, the unzoomed cover crop. */
+  avatarZoom?: number;
+  /** Horizontal point of the image kept in the crop, 0–1. Absent means center. */
+  avatarFocusX?: number;
+  /** Vertical point of the image kept in the crop, 0–1. Absent means center. */
+  avatarFocusY?: number;
   /** True when any task has unread output. */
   unread: boolean;
   /** Default for new tasks; navigating tasks never changes this value. */
