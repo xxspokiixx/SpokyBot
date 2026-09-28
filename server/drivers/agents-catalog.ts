@@ -573,6 +573,7 @@ const toolDefinitions = (externalRuntime: boolean) => [
         action: { type: "string", enum: ["append", "replace", "remove", "supersede"] },
         text: { type: "string", minLength: 1, description: "Non-blank new text for append, replace, or supersede: the fact itself, without a date or bullet. Omit for remove; use remove to delete a passage." },
         old_text: { type: "string", minLength: 1, description: "Exact unique existing passage for replace, supersede, or remove. Omit for append." },
+        until: { type: "string", pattern: "^\\d{4}-\\d{2}-\\d{2}$", description: "Optional, for append or supersede: YYYY-MM-DD, the last day a temporary fact holds (an exam this weekend, a trip next week). After that day the entry is hidden from your memory." },
       },
       required: ["action"],
     },

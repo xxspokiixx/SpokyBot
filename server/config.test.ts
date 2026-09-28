@@ -23,6 +23,7 @@ import { customMcpServers,
   threadEventLogMaxBytes,
   threadEventLogRetentionDays,
   showToolCallsEnabled,
+  routinesInConversationEnabled,
   saveConfig,
   skillAuthoringEnabled,
   sharedComputersEnabled,
@@ -496,6 +497,15 @@ describe("configuration boundaries", () => {
     expect(localVmMaxInstances({ localVm: { maxInstances: 3 } })).toBe(3);
   });
 
+  it("accepts pool mode with the same bounded seat count", () => {
+    expect(parseConfigPatch({ localVm: { mode: "pool", maxInstances: 4 } })).toEqual({
+      localVm: { mode: "pool", maxInstances: 4 },
+    });
+    expect(localVmMode({ localVm: { mode: "pool" } })).toBe("pool");
+    // The default must stay shared: pool ships config-gated (ADR-2).
+    expect(localVmMode({})).toBe("shared");
+  });
+
   it("keeps skill authoring on by default with an explicit opt-out, and the browser off by default", () => {
     expect(skillAuthoringEnabled({})).toBe(true);
     expect(skillAuthoringEnabled({ features: {} })).toBe(true);
@@ -545,6 +555,14 @@ describe("configuration boundaries", () => {
     expect(() => parseConfigPatch({ features: { sharedComputers: "yes" } })).toThrow(
       "features.sharedComputers",
     );
+  });
+
+  it("keeps routine runs in a hidden thread unless the conversation option is on", () => {
+    expect(routinesInConversationEnabled({})).toBe(false);
+    expect(parseConfigPatch({ features: { routinesInConversation: true } })).toEqual({
+      features: { routinesInConversation: true },
+    });
+    expect(routinesInConversationEnabled({ features: { routinesInConversation: true } })).toBe(true);
   });
 
   it("keeps tool-call chips off by default and accepts an explicit opt-in", () => {

@@ -107,8 +107,14 @@ const roomConfigSchema = z.object({
       (rooms.handoffHardCapMinutes ?? DEFAULT_ROOM_HANDOFF_HARD_CAP_MINUTES),
   { message: "rooms handoff bounds must satisfy handoffMinRunwayMinutes <= handoffLifetimeMinutes <= handoffHardCapMinutes" },
 );
+/** Isolation for bot desktops. Migration note (issue #1654): switching
+ * modes changes lease keys and vm-home directories, so desktops cold-start
+ * under the new mode — a pool seat lives in vm-homes/pool-N — while the old
+ * mode's workspaces stay on disk until removed. maxInstances caps per-bot
+ * desktops in per-bot mode, or the pool's seat count in pool mode; it is
+ * not a total across modes. Default stays "shared". */
 const localVmConfigSchema = z.object({
-  mode: z.enum(["shared", "per-bot"]).optional(),
+  mode: z.enum(["shared", "per-bot", "pool"]).optional(),
   maxInstances: z
     .number()
     .int()
@@ -275,6 +281,10 @@ const featureConfigSchema = z.object({
   skillAuthoring: z.boolean().optional(),
   /** Show each tool run in the transcript. Off unless explicitly enabled. */
   showToolCalls: z.boolean().optional(),
+  /** Run a routine inside the conversation it reports to, instead of a hidden
+   * thread. Off unless explicitly enabled. The run still starts from its own
+   * instructions, but the messages stay in that chat. */
+  routinesInConversation: z.boolean().optional(),
   /** Experimental built-in browser. Off until explicitly enabled; each bot
    * also has its own switch. */
   browser: z.boolean().optional(),
@@ -290,6 +300,10 @@ const featureConfigSchema = z.object({
    * enabled; a one-shot that fails or answers junk leaves the first-message
   * snippet in place — see llmThreadTitlesEnabled. */
   llmThreadTitles: z.boolean().optional(),
+  /** Before each turn, passages from the bot's own memory files and earlier
+   * conversations that share words with the message ride into the turn.
+   * Read-only; on unless explicitly switched off — see autoRecallEnabled. */
+  autoRecall: z.boolean().optional(),
   /** Idle release for computer claims (#1653): a desktop seat that stays
    * screen-quiet for 90 seconds is released to waiting turns while its
    * holder's turn still lives; the previous holder re-claims directly
@@ -474,6 +488,13 @@ const appConfigSchema = z.object({
     compactAt: z.number().positive().max(10_000_000).optional(),
     autoCompact: z.boolean().optional(),
   }).optional(),
+  /** Memory upkeep timing, for bots with Memory upkeep switched on. */
+  memory: z.object({
+    /** Quiet time after a turn before its facts are captured (ms). */
+    captureQuietMs: z.number().int().min(1_000).max(24 * 60 * 60_000).optional(),
+    /** Local hour (0-23) after which the nightly tidy-up runs. */
+    tidyHour: z.number().int().min(0).max(23).optional(),
+  }).strict().optional(),
   threads: threadsConfigSchema.optional(),
   /** The authorization decision log (server/decision-log.ts): days of month
    * files kept, at least; OMB_DECISION_RETENTION_DAYS wins when set. */
@@ -544,11 +565,13 @@ export interface AppConfig {
   rooms?: { turnTimeoutMinutes: number; handoffLifetimeMinutes?: number; handoffMinRunwayMinutes?: number; handoffHardCapMinutes?: number };
   threads?: { maxConcurrentPerBot: number; eventLogMaxBytes?: number; eventLogRetentionDays?: number };
   context?: { rebuildBytes?: number; compactAt?: number; autoCompact?: boolean };
+  memory?: { captureQuietMs?: number; tidyHour?: number };
   /** Shared preserves the historical singleton. Per-bot gives every bot a
-   * separate container, durable workspace, viewer and lease. */
-  localVm?: { mode?: "shared" | "per-bot"; maxInstances?: number };
+   * separate container, durable workspace, viewer and lease. Pool runs N
+   * seats shared by all conversations, with per-thread affinity (#1654). */
+  localVm?: { mode?: "shared" | "per-bot" | "pool"; maxInstances?: number };
   /** Opt-in product experiments. Every flag defaults to disabled. */
-  features?: { skillAuthoring?: boolean; showToolCalls?: boolean; browser?: boolean; sharedComputers?: boolean; claudeUserMcp?: boolean; llmThreadTitles?: boolean; computerClaimIdleRelease?: boolean; cloudOverflow?: boolean };
+  features?: { skillAuthoring?: boolean; showToolCalls?: boolean; browser?: boolean; sharedComputers?: boolean; claudeUserMcp?: boolean; llmThreadTitles?: boolean; autoRecall?: boolean; computerClaimIdleRelease?: boolean; cloudOverflow?: boolean; routinesInConversation?: boolean };
   /** #1655: consented cloud overflow for local computer waits. The cost is
    * the operator's own per-second rate; unset keeps the feature inert. */
   cloudOverflow?: { perSecondCostUsd?: number; idleStopMs?: number; allowlistedThreads?: string[] };
@@ -721,7 +744,7 @@ export function threadEventLogRetentionDays(cfg: AppConfig): number | null {
   return cfg.threads?.eventLogRetentionDays ?? null;
 }
 
-export function localVmMode(cfg: AppConfig): "shared" | "per-bot" {
+export function localVmMode(cfg: AppConfig): "shared" | "per-bot" | "pool" {
   return cfg.localVm?.mode ?? DEFAULT_LOCAL_VM_MODE;
 }
 
@@ -735,8 +758,30 @@ export function skillAuthoringEnabled(cfg: AppConfig): boolean {
   return cfg.features?.skillAuthoring !== false;
 }
 
+/** Automatic recall is read-only, so it is on unless switched off. */
+export function autoRecallEnabled(cfg: AppConfig): boolean {
+  return cfg.features?.autoRecall !== false;
+}
+
+export const DEFAULT_CAPTURE_QUIET_MS = 2 * 60_000;
+export const DEFAULT_TIDY_HOUR = 3;
+
+export function captureQuietMs(cfg: AppConfig): number {
+  return cfg.memory?.captureQuietMs ?? DEFAULT_CAPTURE_QUIET_MS;
+}
+
+export function tidyHour(cfg: AppConfig): number {
+  return cfg.memory?.tidyHour ?? DEFAULT_TIDY_HOUR;
+}
+
 export function showToolCallsEnabled(cfg: AppConfig): boolean {
   return cfg.features?.showToolCalls === true;
+}
+
+/** A routine's turns are posted in the conversation that receives its card.
+ * Off by default, so scheduled work stays in a hidden thread. */
+export function routinesInConversationEnabled(cfg: AppConfig): boolean {
+  return cfg.features?.routinesInConversation === true;
 }
 
 /** Workspace-level gate for the experimental built-in browser. A bot's own
@@ -833,6 +878,7 @@ export const FLEET_NEUTRAL_KEYS: ReadonlySet<string> = new Set([
   "threads",
   "automaticRecovery",
   "context",
+  "memory",
   "localVm",
   "features",
   "cloudOverflow",
@@ -1118,7 +1164,7 @@ export function saveConfig(
   // back after we have successfully recognized the legacy list.
   const storedProfiles = storedBrowserProfilesSchema.safeParse(disk.browserProfiles);
   if (storedProfiles.success) disk.browserProfiles = storedProfiles.data;
-  for (const key of ["xai", "anthropic", "mistral", "openaiCompat", "composio", "box", "opencodeGo", "tts", "imageGen", "profile", "rooms", "threads", "context", "localVm", "features", "cloudOverflow", "budgets", "billing", "decisions", "onboarding", "browserEngine", "newBots"] as const) {
+  for (const key of ["xai", "anthropic", "mistral", "openaiCompat", "composio", "box", "opencodeGo", "tts", "imageGen", "profile", "rooms", "threads", "context", "memory", "localVm", "features", "cloudOverflow", "budgets", "billing", "decisions", "onboarding", "browserEngine", "newBots"] as const) {
     const section = checkedPatch[key];
     if (!section) continue;
     const current = jsonObjectSchema.safeParse(disk[key]);
