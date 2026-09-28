@@ -82,6 +82,31 @@ final class FailoverTests: XCTestCase {
         }
     }
 
+    func testConsumedWriteReplaysOnlyWhenDeliveryIsProvenImpossible() {
+        // Dial and handshake failures never sent a byte.
+        XCTAssertTrue(ConnectionAdvice.provablyUndeliveredRequest(URLError(.cannotFindHost)))
+        XCTAssertTrue(ConnectionAdvice.provablyUndeliveredRequest(URLError(.cannotConnectToHost)))
+        XCTAssertTrue(ConnectionAdvice.provablyUndeliveredRequest(URLError(.secureConnectionFailed)))
+
+        // A timeout may have landed the write and lost only its response;
+        // replaying it would read "unavailable" after an accepted answer.
+        XCTAssertFalse(ConnectionAdvice.provablyUndeliveredRequest(URLError(.timedOut)))
+        XCTAssertFalse(ConnectionAdvice.provablyUndeliveredRequest(URLError(.networkConnectionLost)))
+
+        // Gateways that never reached an origin are safe to leave; an
+        // origin timeout (504/524) is as ambiguous as a client timeout.
+        for code in [502, 503, 521, 522, 523] {
+            XCTAssertTrue(ConnectionAdvice.provablyUndeliveredRequest(
+                APIError.status(code: code, message: nil)
+            ), "expected HTTP \(code) to allow replaying a consumed write")
+        }
+        for code in [504, 520, 524, 525, 526, 530, 500, 401] {
+            XCTAssertFalse(ConnectionAdvice.provablyUndeliveredRequest(
+                APIError.status(code: code, message: nil)
+            ), "expected HTTP \(code) to keep a consumed write on its route")
+        }
+    }
+
     func testTunnelGatewayFailureNeverAdvancesFromHostedToLAN() throws {
         let hosted = try XCTUnwrap(CompanionEndpoint(
             url: "https://mac.companion.example",
