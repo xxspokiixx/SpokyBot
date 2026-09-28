@@ -285,6 +285,7 @@ import { ProviderRegistry } from "./harness/registry.ts";
 import { ManagedDesktopProviders } from "./managed-desktop.ts";
 import { computerKindForResource, ManagedDesktopPolicy } from "./managed-policy.ts";
 import { hostedModelPolicy, HOSTED_MODEL_POLICY_HEADER, HOSTED_PROVIDER_SETTINGS_ERROR } from "./hosted-models.ts";
+import { CLOUD_IGNORED_KEYS, CLOUD_PAIRING_PATH, cloudHomeConfiguration, createCloudPairing, readSignedBody } from "./cloud-home.ts";
 import type { ProviderInstance } from "./contracts.ts";
 import { selectDefaultModelSelection, withNewBotEffort } from "./default-model-selection.ts";
 import { cancelPeerApprovalsFor, cancelPeerApprovalsForThread, dismissStalePeerCards, peerApprovalFailure, requestPeerApproval, resolvePeerComms, type ApprovalBus } from "./peer-approval.ts";
@@ -615,6 +616,19 @@ const sessions = new SessionRegistry({
   portalMembership: hostedWorkspaceConfiguration()?.portalMembership === true,
 });
 const sharedComputers = new SharedComputers(id => sessions.isLive(id));
+// OMB Cloud Pro home machine (server/cloud-home.ts, docs/cloud-pro.md). A
+// partial or invalid boot contract stops the server here, before it serves.
+const CLOUD_HOME = cloudHomeConfiguration();
+const cloudPairing = CLOUD_HOME ? createCloudPairing({ secret: CLOUD_HOME.bootstrapSecret, sessions }) : null;
+if (CLOUD_HOME) {
+  // The signing secret is held in memory from here on, and a platform
+  // gateway's settings are dropped: no engine or tool this server starts
+  // inherits either. The person's own engines are the only way to a model.
+  delete process.env.OMB_CLOUD_BOOTSTRAP_SECRET;
+  for (const key of CLOUD_IGNORED_KEYS) delete process.env[key];
+  console.log(`cloud home ${CLOUD_HOME.machineId}: bots run on the engines the person signs in to here`);
+  for (const warning of CLOUD_HOME.warnings) console.warn(`cloud home: ${warning}`);
+}
 // Who each thread is for, when a signed-in person can be named (server-private).
 const threadStarters = new ThreadStarters(join(DATA_DIR, "thread-starters.json"));
 const commandAllowlist = new CommandAllowlistStore(join(DATA_DIR, "command-allowlist.json"));
@@ -13685,6 +13699,24 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
       res.setHeader("set-cookie", serializeSessionCookie(SESSION_COOKIE, issued.token, { secure, maxAgeSeconds: cookieMaxAgeSeconds(issued.session) }));
       return json(res, 200, { session: issued.session, environment });
     }
+    // The Admin's signed request for one pairing window on a Cloud home
+    // machine. Public like /api/auth/pair, JSON only, and bad signatures
+    // count against the same lockout. Never log its headers, body or code.
+    if (cloudPairing && path === CLOUD_PAIRING_PATH) {
+      res.setHeader("cache-control", "no-store");
+      if (method !== "POST") return json(res, 405, { error: "method_not_allowed" });
+      if (!/^application\/json\b/i.test(String(req.headers["content-type"] ?? ""))) {
+        return json(res, 415, { error: "send the pairing request as JSON (content-type: application/json)" });
+      }
+      const source = requestSource(req);
+      const header = (name: string) => { const value = req.headers[name]; return typeof value === "string" ? value : undefined; };
+      const result = cloudPairing.handle({
+        timestamp: header("x-omb-cloud-timestamp"), nonce: header("x-omb-cloud-nonce"), signature: header("x-omb-cloud-signature"),
+        body: await readSignedBody(req), source,
+      });
+      if (result.status !== 200) console.warn(`cloud pairing refused from ${source}: ${String(result.body.error)}`);
+      return json(res, result.status, result.body);
+    }
     if (method === "POST" && path === "/api/auth/pair") {
       // JSON only: a cross-site HTML form cannot send this content type
       // without a preflight, so a stray unused code cannot be planted as a
@@ -13839,6 +13871,9 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
               // a hosted team workspace: the web UI's first run skips the
               // desktop-only beats there. Absent everywhere else.
               ...(HOSTED_WORKSPACE ? { hosted: true } : {}),
+              // an OMB Cloud home: the web UI's first run is its engine
+              // sign-in (docs/cloud-pro.md). Absent everywhere else.
+              ...(CLOUD_HOME ? { cloudHome: true } : {}),
             },
       );
     }
