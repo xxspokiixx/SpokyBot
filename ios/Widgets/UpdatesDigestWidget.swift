@@ -298,7 +298,7 @@ struct UpdatesDigestView: View {
                     Image(systemName: "hand.raised.fill")
                         .font(.system(size: 13, weight: .bold))
                         .foregroundStyle(MausPalette.color(ask.chat.color))
-                    Text("\(asks.count) active")
+                    Text("\(asks.count) need you")
                 }
             } else {
                 HStack(spacing: 4) {

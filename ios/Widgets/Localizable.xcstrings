@@ -4,6 +4,9 @@
     "%lld active" : {
       "extractionState" : "manual"
     },
+    "%lld need you" : {
+      "extractionState" : "manual"
+    },
     "All quiet" : {
       "extractionState" : "manual"
     },

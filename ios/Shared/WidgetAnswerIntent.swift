@@ -69,25 +69,34 @@ struct WidgetAnswerIntent: AppIntent {
             // reviewedSha256 stays nil on purpose: that field is the
             // skill-request review receipt, and a widget may never answer
             // one — answerableCard already refused every skill card.
-            try await WidgetRouteRequest.perform(connection: connection, token: token) { client in
+            let outcome = try await WidgetRouteRequest.perform(connection: connection, token: token) { client in
                 try await client.respond(
                     threadId: threadId,
                     requestId: requestId,
                     behavior: card.responseBehavior(for: choice)
                 )
             }
+
+            // `unavailable` is the server saying the action never ran — the
+            // turn ended or the ask timed out — so the pill must not claim
+            // the answer landed. The row still leaves either way: the
+            // snapshot vouched for a live ask whose card is now closed, and
+            // a second tap must not re-ask it.
+            let dialog: IntentDialog = outcome == "unavailable"
+                ? "This request is no longer available. Open the chat to review it."
+                : "Answered"
+
+            // The answered row leaves the home screen immediately — even
+            // when the refresh behind it cannot reach the computer — so a
+            // second tap cannot double-answer from a stale picture.
+            if let store {
+                try? store.write(snapshot.removingRow(answeredInThread: threadId))
+            }
+            WidgetCenter.shared.reloadAllTimelines()
+            await WidgetSnapshotRefresh.refresh(connection: connection, token: token, store: store)
+            return .result(dialog: dialog)
         } catch {
             return .result(dialog: "Open MausBot to answer.")
         }
-
-        // The answered row leaves the home screen immediately — even when
-        // the refresh behind it cannot reach the computer — so a second
-        // tap cannot double-answer from a stale picture.
-        if let store {
-            try? store.write(snapshot.removingRow(answeredInThread: threadId))
-        }
-        WidgetCenter.shared.reloadAllTimelines()
-        await WidgetSnapshotRefresh.refresh(connection: connection, token: token, store: store)
-        return .result(dialog: "Answered")
     }
 }
