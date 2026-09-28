@@ -666,8 +666,10 @@ body {
    carries as well as over a faint per-file `focus:border-*`. --color-focus
    clears 3:1 on every field surface (pnpm check:contrast). A borderless
    field, such as the composer or a find bar, has no border to paint and is
-   left as it was; its rounded wrapper takes `focus-within:border-focus`. */
-:is(input, textarea, select):focus-visible {
+   left as it was; its rounded wrapper takes `focus-within:border-focus`.
+   A field reporting an error (aria-invalid) keeps its danger border, so the
+   red does not vanish while the user is fixing it. */
+:is(input, textarea, select):focus-visible:not([aria-invalid="true"]) {
   border-color: var(--color-focus);
 }
 
