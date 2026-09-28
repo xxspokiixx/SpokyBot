@@ -48,7 +48,8 @@ function sources(dir: string): string[] {
 
 describe("text field focus", () => {
   it("still keeps the browser outline off text fields", () => {
-    expect(css).toMatch(/:is\(input, textarea, select\):focus-visible\s*\{\s*outline:\s*none;/);
+    // non-text inputs (checkbox, radio, ...) are excluded so they keep the ring
+    expect(css).toMatch(/:is\(input(?::not\([^)]*\))?, textarea, select\):focus-visible\s*\{\s*outline:\s*none;/);
   });
 
   it("paints a focused field's own border in the focus colour, above every utility", () => {
