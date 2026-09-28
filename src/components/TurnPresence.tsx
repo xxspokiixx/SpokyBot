@@ -56,7 +56,7 @@ export function TurnPresence({
         {avatar}
         {showWorking ? (
           <span className="flex items-baseline gap-2 leading-none">
-            <span className="thinking-shimmer animate-shimmer text-[13px]" aria-live="polite">
+            <span className="thinking-shimmer animate-shimmer text-[13px]">
               {label}
             </span>
             {since !== null && (
