@@ -139,11 +139,13 @@ public enum ConnectionAdvice {
     /// Which failures prove a request never reached this computer, so a
     /// write the server consumes on first delivery — an answer — may move
     /// to another route without double-claiming it. Dial and handshake
-    /// failures never sent a byte, and 521–523 are the gateway reporting
-    /// the origin refused or never picked up. Everything ambiguous stays
-    /// put: a timeout, 504, or 524 may have landed the write and lost only
-    /// its response, and so may 502/503 — a gateway can emit either after
-    /// forwarding the request — so a replay could read as "unavailable"
+    /// failures never sent a byte, and 521/523 are the gateway reporting
+    /// the origin refused the connection or was unreachable. Everything
+    /// ambiguous stays put: a timeout, 504, or 524 may have landed the
+    /// write and lost only its response, and so may 502/503 — a gateway
+    /// can emit either after forwarding the request — and 522 means the
+    /// origin took the connection but never answered, so the write may
+    /// have landed; replaying any of these could read as "unavailable"
     /// even though the answer was accepted.
     public static func provablyUndeliveredRequest(_ error: Error) -> Bool {
         if let urlError = error as? URLError {
@@ -160,7 +162,7 @@ public enum ConnectionAdvice {
         guard let apiError = error as? APIError,
               case let .status(code, _) = apiError
         else { return false }
-        return (521...523).contains(code)
+        return code == 521 || code == 523
     }
 
     /// The offline banner as advice rather than an NSURLError string.
