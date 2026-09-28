@@ -31,6 +31,7 @@ import type {
   RuntimeEventListener,
   SendTurnInput,
   SteerOutcome,
+  TextGenerationOptions,
 } from "../contracts.ts";
 import { gateServer, resultBudget } from "../mcp-gate-config.ts";
 import { newEventId, newId } from "../contracts.ts";
@@ -2148,14 +2149,15 @@ export const ClaudeDriver: ProviderDriver<ClaudeConfig> = {
      * summaries can contain paths, commands, or secrets, so the generic
      * `claude -p "prompt"` shape is not safe for review. No tools or MCP
      * servers are mounted in this isolated process. */
-    const generateReview = (prompt: string, signal?: AbortSignal): Promise<string> =>
+    const generateReview = (prompt: string, signal?: AbortSignal, onUsage?: TextGenerationOptions["onUsage"]): Promise<string> =>
       new Promise((resolve, reject) => {
+        const model = config.managedModels?.[0] ?? "claude-haiku-4-5";
         const child = spawnCli(
           config.cli,
-          ["-p", "--model", config.managedModels?.[0] ?? "claude-haiku-4-5", "--output-format", "text"],
+          ["-p", "--model", model, "--output-format", onUsage ? "json" : "text"],
           {
             stdio: ["pipe", "pipe", "pipe"],
-            env: environment(config.managedModels?.[0] ?? "claude-haiku-4-5"),
+            env: environment(model),
           },
         );
         let stdout = "";
@@ -2192,6 +2194,32 @@ export const ClaudeDriver: ProviderDriver<ClaudeConfig> = {
         });
         child.on("error", (error) => finish(error));
         child.on("close", (code) => {
+          if (settled) return;
+          if (onUsage) {
+            try {
+              const result = JSON.parse(stdout);
+              if (!result || result.type !== "result") throw new Error("Claude text generation returned no result");
+              const count = (value: unknown) => typeof value === "number" && Number.isFinite(value) && value >= 0 ? value : undefined;
+              const cachedInput = count(result.usage?.cache_read_input_tokens);
+              const inputs = [count(result.usage?.input_tokens), cachedInput, count(result.usage?.cache_creation_input_tokens)]
+                .filter((value): value is number => value !== undefined);
+              const models = result.modelUsage && typeof result.modelUsage === "object" && !Array.isArray(result.modelUsage)
+                ? Object.keys(result.modelUsage) : [];
+              onUsage({
+                model: models.length === 1 ? models[0]! : models.find(candidate => candidate === model || candidate.startsWith(`${model}-`)) ?? model,
+                input: inputs.length ? inputs.reduce((sum, value) => sum + value, 0) : undefined,
+                output: count(result.usage?.output_tokens),
+                cachedInput,
+                costUsd: count(result.total_cost_usd),
+              });
+              if (result.is_error === true) throw new Error(typeof result.result === "string" && result.result.trim() ? result.result : stderr.trim() || "Claude text generation failed");
+              if (typeof result.result !== "string") throw new Error("Claude text generation returned no text");
+              stdout = result.result;
+            } catch (error) {
+              finish(error instanceof Error ? error : new Error(String(error)));
+              return;
+            }
+          }
           if (code === 0) finish();
           else finish(new Error(stderr.trim() || `Claude review exited ${code}`));
         });
@@ -2267,7 +2295,7 @@ export const ClaudeDriver: ProviderDriver<ClaudeConfig> = {
           return () => listeners.delete(listener);
         },
       },
-      generateText: (prompt, options) => generateReview(prompt, options?.signal),
+      generateText: (prompt, options) => generateReview(prompt, options?.signal, options?.onUsage),
       reviewPermission: generateReview,
       dispose: async () => {
         try {

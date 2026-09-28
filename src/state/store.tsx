@@ -441,6 +441,9 @@ export interface Bot {
   connectorTools?: Record<string, ConnectorToolGrant>;
   /** Whether this bot gets the app's built-in browser (Browser tab). On unless switched off. */
   browser?: boolean;
+  /** Memory upkeep (Bot settings → Memory): background capture and the
+   * nightly tidy-up. On unless explicitly false. */
+  memoryUpkeep?: boolean;
   /** Which app-wide MCP servers (Plugins → MCP servers) this bot mounts, by
    * name. Absent = every enabled server; [] = none (null clears over PATCH). */
   mcpServers?: string[] | null;
