@@ -225,6 +225,9 @@ targets:
       - path: AppShared
       - path: App/MausAvatar.swift
       - path: App/MausFaceData.swift
+      # MascotState resolves the face for the post-answer refresh a widget
+      # performs; it is self-contained above Core, so it rides along.
+      - path: App/MascotState.swift
     dependencies:
       # MausAvatar draws whichever body a bot wears, and the body catalog and
       # its path parser live in CompanionCore. The extension shares the

@@ -1,0 +1,36 @@
+{
+  "sourceLanguage" : "en",
+  "strings" : {
+    "All quiet" : {
+      "extractionState" : "manual"
+    },
+    "Answered" : {
+      "extractionState" : "manual"
+    },
+    "As of %@" : {
+      "extractionState" : "manual"
+    },
+    "Bots waiting on your answer, replyable right from the home screen." : {
+      "extractionState" : "manual"
+    },
+    "Needs You" : {
+      "extractionState" : "manual"
+    },
+    "Needs you" : {
+      "extractionState" : "manual"
+    },
+    "Open MausBot to answer" : {
+      "extractionState" : "manual"
+    },
+    "Open MausBot to pair" : {
+      "extractionState" : "manual"
+    },
+    "This request has changed. Open the chat to review it." : {
+      "extractionState" : "manual"
+    },
+    "Unlock iPhone, then answer again." : {
+      "extractionState" : "manual"
+    }
+  },
+  "version" : "1.0"
+}

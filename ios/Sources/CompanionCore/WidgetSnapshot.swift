@@ -39,6 +39,53 @@ public struct WidgetSnapshot: Codable, Equatable, Sendable {
     public let rows: [Row]
 }
 
+extension WidgetSnapshot {
+    /// The ask a widget answer button may still answer, or nil when the
+    /// rendered pill has gone stale. A widget renders one frozen moment;
+    /// the request it offered to answer may since have been answered,
+    /// dismissed, or superseded. The guard mirrors the Live Activity
+    /// `canAnswer` — same thread, same request, an offered option, the
+    /// same card kind — and adds what only a snapshot knows: the ask must
+    /// still be live, must not be a SKILL.md request (compact surfaces
+    /// never grow pills for those), and the write must be recent enough to
+    /// trust — ten minutes, after which the only safe answer is the one
+    /// given in the chat.
+    public func answerableCard(
+        threadId: String,
+        requestId: String,
+        choice: String,
+        isPermission: Bool,
+        at now: Date = Date(),
+        maximumAge: TimeInterval = 600
+    ) -> OptionCard? {
+        guard now.timeIntervalSince(writtenAt) <= maximumAge else { return nil }
+        guard let row = rows.first(where: { $0.chat.threadId == threadId }),
+              row.kind == .needsYou,
+              let card = row.card,
+              card.isPending,
+              card.skillRequest == nil,
+              card.requestId == requestId,
+              card.options.contains(choice),
+              card.isPermission == isPermission
+        else { return nil }
+        return card
+    }
+
+    /// The snapshot with one answered ask gone, for the moment a widget
+    /// answer lands: the row leaves the home screen immediately, even
+    /// when the network refresh behind it cannot reach the computer.
+    /// Everything else is kept exactly as written — including
+    /// `writtenAt`, so the widget keeps telling the truth about how old
+    /// the rest of its data is.
+    public func removingRow(answeredInThread threadId: String) -> WidgetSnapshot {
+        WidgetSnapshot(
+            writtenAt: writtenAt,
+            connectionID: connectionID,
+            rows: rows.filter { $0.chat.threadId != threadId }
+        )
+    }
+}
+
 extension CompanionState {
     /// Freezes the current `updates` for the widget extension, one row per
     /// update. `face` resolves each chat's mascot at write time — a closure
