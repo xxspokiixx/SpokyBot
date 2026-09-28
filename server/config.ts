@@ -281,6 +281,10 @@ const featureConfigSchema = z.object({
   skillAuthoring: z.boolean().optional(),
   /** Show each tool run in the transcript. Off unless explicitly enabled. */
   showToolCalls: z.boolean().optional(),
+  /** Run a routine inside the conversation it reports to, instead of a hidden
+   * thread. Off unless explicitly enabled. The run still starts from its own
+   * instructions, but the messages stay in that chat. */
+  routinesInConversation: z.boolean().optional(),
   /** Experimental built-in browser. Off until explicitly enabled; each bot
    * also has its own switch. */
   browser: z.boolean().optional(),
@@ -555,7 +559,7 @@ export interface AppConfig {
    * seats shared by all conversations, with per-thread affinity (#1654). */
   localVm?: { mode?: "shared" | "per-bot" | "pool"; maxInstances?: number };
   /** Opt-in product experiments. Every flag defaults to disabled. */
-  features?: { skillAuthoring?: boolean; showToolCalls?: boolean; browser?: boolean; sharedComputers?: boolean; claudeUserMcp?: boolean; llmThreadTitles?: boolean; computerClaimIdleRelease?: boolean; cloudOverflow?: boolean };
+  features?: { skillAuthoring?: boolean; showToolCalls?: boolean; browser?: boolean; sharedComputers?: boolean; claudeUserMcp?: boolean; llmThreadTitles?: boolean; computerClaimIdleRelease?: boolean; cloudOverflow?: boolean; routinesInConversation?: boolean };
   /** #1655: consented cloud overflow for local computer waits. The cost is
    * the operator's own per-second rate; unset keeps the feature inert. */
   cloudOverflow?: { perSecondCostUsd?: number; idleStopMs?: number; allowlistedThreads?: string[] };
@@ -744,6 +748,12 @@ export function skillAuthoringEnabled(cfg: AppConfig): boolean {
 
 export function showToolCallsEnabled(cfg: AppConfig): boolean {
   return cfg.features?.showToolCalls === true;
+}
+
+/** A routine's turns are posted in the conversation that receives its card.
+ * Off by default, so scheduled work stays in a hidden thread. */
+export function routinesInConversationEnabled(cfg: AppConfig): boolean {
+  return cfg.features?.routinesInConversation === true;
 }
 
 /** Workspace-level gate for the experimental built-in browser. A bot's own

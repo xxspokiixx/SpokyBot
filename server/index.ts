@@ -146,6 +146,7 @@ import {
   threadEventLogRetentionDays,
   saveConfig,
   showToolCallsEnabled,
+  routinesInConversationEnabled,
   claudeUserMcpEnabled,
   skillAuthoringEnabled,
   sharedComputersEnabled,
@@ -9378,6 +9379,14 @@ routines = new RoutineManager({
     if (task && bot) broadcast({ kind: "bot", bot: publicBot(bot) });
     return task;
   },
+  joinConversation: (run) => {
+    if (!routinesInConversationEnabled(cfg) || run.target !== "bot") return null;
+    const source = routineSourceOwner(run);
+    // Only this bot's own visible chat. A room, or a teammate's thread, keeps
+    // the detached run so one bot cannot write its work into the wrong place.
+    if (!source || source.group || source.bot.id !== run.botId) return null;
+    return source.threadId;
+  },
   createGoalTask: (groupId, title) => store.createGroupTask(groupId, title, false),
   isResultsThread: (botId, threadId) => {
     const bot = store.bot(botId);
@@ -13073,6 +13082,7 @@ function configStatus() {
     features: {
       skillAuthoring: skillAuthoringEnabled(cfg),
       showToolCalls: showToolCallsEnabled(cfg),
+      routinesInConversation: routinesInConversationEnabled(cfg),
       browser: builtInBrowserEnabled(cfg),
       // Maintainer-only escape hatch, not a Settings toggle: the desktop
       // shell and the Settings UI read it so they offer nothing this server

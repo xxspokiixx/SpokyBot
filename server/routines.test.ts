@@ -631,6 +631,17 @@ describe("persistent routine results destinations", () => {
     expect(h.manager.listRoutines()[0]?.resultsThreadId).toBe("results-1");
   });
 
+  it("runs a bot routine inside the conversation it reports to when asked", async () => {
+    const h = resultsHarness();
+    h.options.joinConversation = (run) => run.resultsThreadId === "chosen" ? "chosen" : null;
+    const routine = h.manager.create({ ...input(), resultsThreadId: "chosen" });
+    h.manager.runNow(routine.id);
+    await h.manager.tick();
+    expect(h.taskActivations).toEqual([]);
+    expect(h.started).toEqual([expect.objectContaining({ botId: "maus-1", threadId: "chosen" })]);
+    expect(h.manager.listRuns()[0]).toMatchObject({ status: "running", threadId: "chosen" });
+  });
+
   it("does not route webhook or room-goal executions through bot results tasks", async () => {
     const h = resultsHarness();
     h.manager.enqueueWebhook({ webhookId: "hook", webhookName: "Hook", prompt: "Incoming", botId: "maus-1", runOn: "maus", deliveryId: "delivery", receivedAt: Date.now() });

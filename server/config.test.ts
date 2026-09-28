@@ -23,6 +23,7 @@ import { customMcpServers,
   threadEventLogMaxBytes,
   threadEventLogRetentionDays,
   showToolCallsEnabled,
+  routinesInConversationEnabled,
   saveConfig,
   skillAuthoringEnabled,
   sharedComputersEnabled,
@@ -554,6 +555,14 @@ describe("configuration boundaries", () => {
     expect(() => parseConfigPatch({ features: { sharedComputers: "yes" } })).toThrow(
       "features.sharedComputers",
     );
+  });
+
+  it("keeps routine runs in a hidden thread unless the conversation option is on", () => {
+    expect(routinesInConversationEnabled({})).toBe(false);
+    expect(parseConfigPatch({ features: { routinesInConversation: true } })).toEqual({
+      features: { routinesInConversation: true },
+    });
+    expect(routinesInConversationEnabled({ features: { routinesInConversation: true } })).toBe(true);
   });
 
   it("keeps tool-call chips off by default and accepts an explicit opt-in", () => {
