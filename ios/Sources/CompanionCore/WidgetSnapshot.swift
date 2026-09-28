@@ -40,6 +40,12 @@ public struct WidgetSnapshot: Codable, Equatable, Sendable {
 }
 
 extension WidgetSnapshot {
+    /// How long after `writtenAt` a rendered pill may still be tapped:
+    /// the ten-minute trust window `answerableCard` enforces at tap time.
+    /// The widget timeline and pill view share it so the buttons
+    /// disappear at the same moment taps stop working.
+    public static let answerMaximumAge: TimeInterval = 600
+
     /// The ask a widget answer button may still answer, or nil when the
     /// rendered pill has gone stale. A widget renders one frozen moment;
     /// the request it offered to answer may since have been answered,
@@ -56,7 +62,7 @@ extension WidgetSnapshot {
         choice: String,
         isPermission: Bool,
         at now: Date = Date(),
-        maximumAge: TimeInterval = 600
+        maximumAge: TimeInterval = answerMaximumAge
     ) -> OptionCard? {
         guard now.timeIntervalSince(writtenAt) <= maximumAge else { return nil }
         guard let row = rows.first(where: { $0.chat.threadId == threadId }),

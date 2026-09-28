@@ -91,6 +91,13 @@ struct UpdatesSnapshotProvider: TimelineProvider {
         let state = current(now: now)
         var entries = [UpdatesSnapshotEntry(date: now, state: state)]
         if case let .fresh(snapshot) = state {
+            // Pills stop answering at the trust window's end; schedule
+            // that moment so the buttons leave when taps stop working,
+            // not five minutes later at the stale flip.
+            let answersExpireAt = snapshot.writtenAt.addingTimeInterval(WidgetSnapshot.answerMaximumAge)
+            if answersExpireAt > now {
+                entries.append(UpdatesSnapshotEntry(date: answersExpireAt, state: .fresh(snapshot)))
+            }
             entries.append(
                 UpdatesSnapshotEntry(
                     date: snapshot.writtenAt.addingTimeInterval(WidgetSnapshotState.freshnessInterval),

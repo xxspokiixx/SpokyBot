@@ -36,6 +36,16 @@ private struct NeedsYouView: View {
         return false
     }
 
+    /// Pills answer only inside `answerableCard`'s trust window; past it
+    /// every tap would fail with "This request has changed", so the
+    /// buttons leave with the window. `entry.date` is the moment this
+    /// render stands for — the timeline schedules an entry exactly at
+    /// the window's end.
+    private var pillsAnswerable: Bool {
+        guard let snapshot = entry.state.snapshot else { return false }
+        return entry.date.timeIntervalSince(snapshot.writtenAt) < WidgetSnapshot.answerMaximumAge
+    }
+
     var body: some View {
         Group {
             switch entry.state {
@@ -78,7 +88,7 @@ private struct NeedsYouView: View {
                 .font(.system(size: 13))
                 .foregroundStyle(.secondary)
                 .lineLimit(2)
-            AnswerPills(row: row, compact: false)
+            AnswerPills(row: row, compact: false, answerable: pillsAnswerable)
             asOf
             Spacer(minLength: 0)
         }
@@ -112,7 +122,7 @@ private struct NeedsYouView: View {
                             .lineLimit(1)
                     }
                     Spacer(minLength: 4)
-                    AnswerPills(row: row, compact: true)
+                    AnswerPills(row: row, compact: true, answerable: pillsAnswerable)
                 }
                 .opacity(isStale ? 0.7 : 1)
             }
@@ -157,6 +167,7 @@ private struct Placeholder: View {
 private struct AnswerPills: View {
     let row: WidgetSnapshot.Row
     let compact: Bool
+    let answerable: Bool
 
     var body: some View {
         // Answering from the home screen is an interactive-widget
@@ -176,7 +187,7 @@ private struct AnswerPills: View {
     @available(iOS 17.0, *)
     private var pills: some View {
         HStack(spacing: 6) {
-            if let card = row.card {
+            if let card = row.card, answerable {
                 ForEach(Array(row.answerOptions.prefix(3)), id: \.self) { option in
                     Button(intent: WidgetAnswerIntent(
                         threadId: row.chat.threadId,

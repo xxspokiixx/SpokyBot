@@ -164,13 +164,13 @@ final class WidgetSnapshotTests: XCTestCase {
         XCTAssertNotNil(
             snapshot.answerableCard(
                 threadId: "t-ask-new", requestId: "req-new", choice: "Ship it",
-                isPermission: false, at: written.addingTimeInterval(600)
+                isPermission: false, at: written.addingTimeInterval(WidgetSnapshot.answerMaximumAge)
             )
         )
         XCTAssertNil(
             snapshot.answerableCard(
                 threadId: "t-ask-new", requestId: "req-new", choice: "Ship it",
-                isPermission: false, at: written.addingTimeInterval(600.1)
+                isPermission: false, at: written.addingTimeInterval(WidgetSnapshot.answerMaximumAge + 0.1)
             )
         )
     }
