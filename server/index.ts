@@ -1816,7 +1816,7 @@ function cloudOverflowSituation(owner: TurnOwner, resource: string, started: boo
     featureEnabled: cloudOverflowEnabled(cfg),
     // An organisation that refuses the Box kind has nothing to offer, and
     // the decision must fail closed before any card is written.
-    cloudConfigured: box.boxConfigured(cfg) && managedPolicy.computerRefusal("box") === undefined,
+    cloudConfigured: boat.boatConfigured(cfg) && managedPolicy.computerRefusal("box") === undefined,
     perSecondCostUsd,
     // Consent answers the priced card (#1655): a grant counts only at the
     // rate its card showed, so a config change re-offers instead of
@@ -1847,7 +1847,7 @@ async function startCloudSeat(owner: TurnOwner): Promise<boolean> {
   if (!claimTurnResource(owner, boxBotResource)) return false;
   try {
     broadcast({ kind: "computer", botId: bot.id, state: "waking" });
-    const machine = await box.readyBox(cfg, bot.id);
+    const machine = await boat.readyBoat(cfg, bot.id);
     if (!machine) throw new Error("the cloud computer did not wake");
     // Consent can be revoked while the Box wakes (#1655): a seat nobody
     // consented to must not bill. It is released and put straight back to
@@ -1856,7 +1856,7 @@ async function startCloudSeat(owner: TurnOwner): Promise<boolean> {
     if (!cloudOverflowConsent.consented(owner.threadId, cloudOverflowAllowlistedThreads(cfg), perSecondCostUsd)) {
       turnResources.releaseOne(boxBotResource, owner);
       const idleStopMs = cloudOverflowIdleStopMs(cfg);
-      void box.sleepBox(cfg, bot.id).catch(() => {
+      void boat.sleepBoat(cfg, bot.id).catch(() => {
         cloudSeatLeases.set(bot.id, new CloudSeatLease({ botId: bot.id, threadId: owner.threadId, generation: owner.generation, now: Date.now() - idleStopMs - 1, idleStopMs }));
         ensureCloudSeatSweep();
       });
@@ -1911,7 +1911,7 @@ function stopCloudSeat(botId: string, lease: CloudSeatLease, stoppedName: string
   if (cloudSeatStopsInFlight.has(botId)) return;
   if (cloudSeatLeases.get(botId) !== lease) return;
   cloudSeatStopsInFlight.add(botId);
-  void box.sleepBox(cfg, botId)
+  void boat.sleepBoat(cfg, botId)
     .then(() => {
       if (cloudSeatLeases.get(botId) === lease) cloudSeatLeases.delete(botId);
       // The stopped seat's Box claim goes with it, so a still-waiting
@@ -2463,9 +2463,10 @@ const routineRequestEnvelopeSchema = z.discriminatedUnion("action", [
     action: z.literal("update"),
     routineId: z.unknown(),
     changes: z.unknown(),
+    forBotId: z.unknown().optional(),
   }).strict(),
   ...(["pause", "resume", "run_now", "delete"] as const).map((action) =>
-    z.object({ ...routineRequestSourceSchema, action: z.literal(action), routineId: z.unknown() }).strict()
+    z.object({ ...routineRequestSourceSchema, action: z.literal(action), routineId: z.unknown(), forBotId: z.unknown().optional() }).strict()
   ),
 ]);
 
@@ -9495,9 +9496,9 @@ const routineRequests = new RoutineRequestService({
   validateTarget: (proposerBotId, target) => {
     const proposer = store.bot(proposerBotId);
     const targetBot = store.bot(target.botId);
-    if (!targetBot) return `@${target.name} no longer exists, so this routine cannot be scheduled for it`;
+    if (!targetBot) return `@${target.name} no longer exists, so this routine request cannot be confirmed for it`;
     if (!proposer || !canReachPeer(proposer, targetBot)) {
-      return `@${target.name} is no longer in this section, so this routine cannot be scheduled for it`;
+      return `@${target.name} is no longer in this section, so this routine request cannot be confirmed for it`;
     }
     return null;
   },
@@ -14279,11 +14280,12 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
         const fromThreadId = internalCapability.threadId;
         const owner = connectorThread(from.id, fromThreadId);
         if (!owner) return json(res, 403, { error: "source conversation does not belong to sender" });
-        // "Make a routine for @B": resolve the target up front so the model
-        // gets a teaching error now, not a mis-bound routine later. Omitted
-        // (or the sender's own id) keeps the schedule-for-self path unchanged.
+        // "Make a routine for @B" / "pause @B's routine": resolve the target
+        // up front so the model gets a teaching error now, not a mis-bound
+        // routine later. Omitted (or the sender's own id) keeps the
+        // own-routine path unchanged.
         let forBot: { botId: string; name: string } | undefined;
-        if (body.action === "create" && body.forBotId !== undefined) {
+        if (body.forBotId !== undefined) {
           const parsedForBotId = z.string().max(128).safeParse(body.forBotId);
           const forBotId = parsedForBotId.success ? parsedForBotId.data.trim() : "";
           if (!forBotId) {
@@ -14307,8 +14309,8 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
         const proposedInput = body.action === "create"
           ? { action: body.action, routine: body.routine, forBot }
           : body.action === "update"
-            ? { action: body.action, routineId: body.routineId, changes: body.changes }
-            : { action: body.action, routineId: body.routineId };
+            ? { action: body.action, routineId: body.routineId, changes: body.changes, forBot }
+            : { action: body.action, routineId: body.routineId, forBot };
         const proposed = await routineRequests.submit({
           botId: from.id,
           threadId: fromThreadId,
