@@ -155,6 +155,78 @@ const send = (id: string) => api("POST", `/api/groups/${id}/messages`, { text: "
 const stop = (id: string) => api("POST", `/api/groups/${id}/interrupt`, {});
 
 describe("Group Local VM ownership on the real isolated server", () => {
+  it.each([false, true])("provisions concurrent cold pool seats (existing per-bot desktops: %s)", async (existingPerBot) => {
+    vmState({ containers: [] });
+    rmSync(dumpFile, { force: true }); rmSync(finishFile, { force: true });
+    const bots: any[] = [];
+    const readState = () => JSON.parse(readFileSync(stateFile, "utf8"));
+    try {
+      await api("PATCH", "/api/config", { localVm: { mode: "per-bot", maxInstances: 2 } });
+      for (const name of ["Pool first", "Pool second", "Pool waiter"]) {
+        const { bot } = await api("POST", "/api/bots", { name });
+        await api("PATCH", `/api/bots/${bot.id}`, { computer: "vm", browser: false });
+        bots.push(bot);
+      }
+      if (existingPerBot) {
+        for (const bot of bots.slice(0, 2)) await api("POST", `/api/bots/${bot.id}/local-computer/run`, {});
+        const capped = await fetch(base + `/api/bots/${bots[2].id}/local-computer/run`, {
+          method: "POST", headers: { "content-type": "application/json" }, body: "{}",
+        });
+        expect(capped.status).toBe(409); // The existing per-bot limit still holds.
+      }
+      await api("PATCH", "/api/config", { localVm: { mode: "pool", maxInstances: 2 } });
+      vmState({ ...readState(), blockedTarget: "pool:0" });
+      rmSync(stateFile + ".entered", { force: true });
+      await api("POST", `/api/bots/${bots[0].id}/messages`, { text: "Hold the first seat." });
+      await until(() => existsSync(stateFile + ".entered") && readFileSync(stateFile + ".entered", "utf8") === "pool:0", Boolean);
+      // The first seat owns its lease and is still inspecting. The other
+      // seat must provision and dispatch without waiting for that inspection.
+      await api("POST", `/api/bots/${bots[1].id}/messages`, { text: "Hold the second seat." });
+      const secondComputer = computer(await dump());
+      const secondStatus = await api("GET", `/api/bots/${bots[1].id}/local-computer`);
+      expect(secondStatus).toMatchObject({ ready: true, target_key: "pool:1" });
+      expect(JSON.stringify(secondComputer)).toContain(secondStatus.container_name);
+      expect(readState().blockedTarget).toBe("pool:0");
+      expect((await gate(secondComputer)).status).toBe(200);
+
+      rmSync(dumpFile, { force: true });
+      vmState({ ...readState(), blockedTarget: undefined });
+      const firstComputer = computer(await dump());
+      const firstStatus = await api("GET", `/api/bots/${bots[0].id}/local-computer`);
+      expect(firstStatus).toMatchObject({ ready: true, target_key: "pool:0" });
+      expect(JSON.stringify(firstComputer)).toContain(firstStatus.container_name);
+      expect((await gate(firstComputer)).status).toBe(200);
+      expect(readState().actions.filter((action: any) => action.target.startsWith("pool:"))).toEqual([
+        { action: "run", target: "pool:1" }, { action: "run", target: "pool:0" },
+      ]);
+
+      rmSync(dumpFile, { force: true });
+      await api("POST", `/api/bots/${bots[2].id}/messages`, { text: "Wait for an available seat." });
+      await until(async () => {
+        const state = await api("GET", "/api/bots?messages=30");
+        return state.bots.find((bot: any) => bot.id === bots[2].id)?.messages
+          .some((message: any) => String(message.tool?.name ?? "").startsWith("Waiting for its turn on this computer"));
+      }, Boolean);
+      expect(existsSync(dumpFile)).toBe(false);
+      const waitingStatus = await api("GET", `/api/bots/${bots[2].id}/local-computer`);
+      const holder = waitingStatus.target_key === "pool:0" ? bots[0] : bots[1];
+      await api("POST", `/api/bots/${holder.id}/interrupt`, {}); await idle(holder.id);
+      expect(JSON.stringify(computer(await dump()))).toContain(waitingStatus.container_name);
+      expect(readState().containers.filter((key: string) => key.startsWith("pool:")).sort()).toEqual(["pool:0", "pool:1"]);
+    } finally {
+      vmState({ ...readState(), blockedTarget: undefined });
+      writeFileSync(finishFile, "finish");
+      for (const bot of bots) {
+        await api("POST", `/api/bots/${bot.id}/interrupt`, {}); await idle(bot.id);
+        await api("DELETE", `/api/bots/${bot.id}`);
+      }
+      await api("PATCH", "/api/config", { localVm: { mode: "shared", maxInstances: 2 } });
+      vmState();
+      await waitForExit(child, { signal: "SIGTERM" });
+      await startServer();
+    }
+  }, 45_000);
+
   it("recovers only previously provisioned Auto VMs after idle removal and server restart, within the instance cap", async () => {
     vmState({ containers: [] });
     await api("PATCH", "/api/config", { localVm: { mode: "per-bot", maxInstances: 1 } });

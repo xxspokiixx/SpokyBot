@@ -118,7 +118,7 @@ type Phase =
   | "error";
 
 interface LocalVmStatus {
-  mode: "shared" | "per-bot";
+  mode: "shared" | "per-bot" | "pool";
   max_instances: number;
   image: boolean;
   create_supported: boolean;

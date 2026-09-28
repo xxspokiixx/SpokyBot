@@ -532,7 +532,7 @@ function askQuestions(ask: Ask): AskQuestion[] | null {
 /** One human-readable line for an ask — what the card subtitle shows. */
 function askSummary(ask: Ask): string {
   const questions = askQuestions(ask);
-  if (questions) return askQuestionSummary(questions).slice(0, 300);
+  if (questions) return askQuestionSummary(questions);
   return askInputSummary(ask.input) ?? ask.tool ?? "tool";
 }
 

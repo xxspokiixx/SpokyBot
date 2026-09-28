@@ -6,7 +6,7 @@ import { useEffect, useRef, useState } from "react";
 import { Archive, Coins, FlaskConical, KeyRound, Monitor, Palette, ScrollText, Search, TabletSmartphone, Terminal, User, Users, X, Building2, Zap } from "lucide-react";
 import { api, useStore, type AppSettingsSection, type ConfigStatus } from "@/state/store";
 import { analyticsEnabled, setAnalyticsEnabled } from "@/lib/analytics";
-import { browserAvailable, browserUnavailableReason, builtInBrowserEnabled, showToolCallsEnabled, skillAuthoringEnabled } from "@/lib/feature-flags";
+import { browserAvailable, browserUnavailableReason, builtInBrowserEnabled, routinesInConversationEnabled, showToolCallsEnabled, skillAuthoringEnabled } from "@/lib/feature-flags";
 import { localeChoices, type LocaleKey } from "@/locales";
 import { t } from "@/lib/i18n";
 import { withTourReset } from "@/lib/guided-tour";
@@ -59,7 +59,7 @@ export const SECTIONS: Array<{
   icon: typeof User;
   keywords: string[];
 }> = [
-  { id: "general", labelKey: "settings.section.general", icon: User, keywords: ["profile", "name", "email", "analytics", "updates", "effort", "new bots", "reasoning", "threads", "parallel", "concurrency", "cleanup", "retention", "event log", "event-log", "log size", "automatic recovery", "backup model", "fallback"] },
+  { id: "general", labelKey: "settings.section.general", icon: User, keywords: ["profile", "name", "email", "analytics", "updates", "effort", "new bots", "reasoning", "threads", "parallel", "concurrency", "cleanup", "retention", "event log", "event-log", "log size", "automatic recovery", "backup model", "fallback", "routines", "conversation", "schedule"] },
   { id: "desktopWorkspaces", labelKey: "settings.section.desktopWorkspaces", icon: Building2, keywords: ["workspace", "cloud", "hosted", "vps", "server", "servers", "connect", "pair", "switch", "local"] },
   { id: "organization", labelKey: "settings.section.organization", icon: Building2, keywords: ["company", "organization", "organisation", "sign in", "enroll", "managed", "models", "disconnect"] },
   { id: "cloudAccount", labelKey: "settings.section.cloudAccount", icon: User, keywords: ["cloud", "account", "personal", "sign in", "pro", "subscription", "billing"] },
@@ -384,6 +384,46 @@ function ShowThreadsRow() {
         checked={enabled}
         aria-label={t("settings.threadDisplay.show")}
         onClick={() => setShowThreads(!enabled)}
+      />
+    </SettingRow>
+  );
+}
+
+function RoutinesInConversationRow() {
+  const { state, dispatch } = useStore();
+  const enabled = routinesInConversationEnabled(state.config);
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState("");
+
+  const toggle = async () => {
+    if (saving) return;
+    setSaving(true);
+    setError("");
+    try {
+      const config: ConfigStatus = await api("/api/config", {
+        method: "PATCH",
+        body: JSON.stringify({ features: { routinesInConversation: !enabled } }),
+      });
+      dispatch({ type: "configStatus", config });
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : t("settings.routinesInConversation.error"));
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  return (
+    <SettingRow
+      title={t("settings.routinesInConversation.title")}
+      subtitle={t("settings.routinesInConversation.subtitle")}
+      message={error ? <p role="alert" className="text-danger">{error}</p> : null}
+    >
+      <Switch
+        checked={enabled}
+        aria-label={t("settings.routinesInConversation.aria")}
+        disabled={saving}
+        onClick={() => void toggle()}
+        className="disabled:cursor-wait disabled:opacity-50"
       />
     </SettingRow>
   );
@@ -739,6 +779,7 @@ export function SettingsModal() {
                   <RoomTurnTimeoutSettings />
                 </Card>
                 <ThreadConcurrencySettings />
+                {!remoteActive && <RoutinesInConversationRow />}
                 <AutomaticRecoverySettings />
                 <ThreadCleanupSettings />
                 <div>

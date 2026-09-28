@@ -612,7 +612,7 @@ export interface ConfigStatus {
   newBots?: { effort?: EffortLevel };
   threads?: { maxConcurrentPerBot: number; eventLogMaxBytes?: number; eventLogRetentionDays?: number };
   automaticRecovery?: { enabled: boolean; backup?: ModelSelection };
-  localVm: { mode: "shared" | "per-bot"; maxInstances: number };
+  localVm: { mode: "shared" | "per-bot" | "pool"; maxInstances: number };
   opencodeGo?: { configured: boolean };
   /** Voice. `configured` = the engine has what it needs (an ElevenLabs or
    * Fish Audio key, or a Chatterbox server address); `ready` = that AND a voice, which is
