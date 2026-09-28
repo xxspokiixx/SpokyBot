@@ -1168,17 +1168,28 @@ export function GroupView({ group }: { group: Group }) {
       <div
         style={headerDragStyle}
         className={cn(
-          "flex items-center justify-between px-5 py-3",
+          // @container so the header can wrap in a narrow column. A container
+          // query never matches the container itself, so the row that has to
+          // wrap is the child below, not this element.
+          "@container/roomhead px-5 py-3",
           // Room for the drawer button, which overlays this corner below md.
           "pl-11 md:pl-5",
         )}
       >
-        <div className="flex min-w-0 items-center gap-2" style={headerNoDragStyle}>
+        {/* The control row cannot shrink below its content, so in a narrow
+            column (a phone, or the sidebar open in a small window) the room
+            name truncated to nothing and the thread picker slid under the
+            controls. Narrow, the header wraps like the 1:1 chat header: name
+            line on top, controls underneath on the right. The room's controls
+            do not fold to icons, so it wraps below 48rem rather than 30rem. */}
+        <div data-roomhead-row className="flex items-center justify-between @max-3xl/roomhead:flex-wrap @max-3xl/roomhead:gap-y-1">
+        <div data-roomhead-identity className="flex min-w-0 items-center gap-2 @max-3xl/roomhead:basis-full" style={headerNoDragStyle}>
           <span className="truncate text-[15px] font-semibold text-ink">{group.name}</span>
           {!setupPending && !group.dm && <GroupTaskPicker group={group} />}
         </div>
         <div
-          className="flex items-center gap-1.5"
+          data-roomhead-controls
+          className="flex items-center gap-1.5 @max-3xl/roomhead:ml-auto @max-3xl/roomhead:flex-wrap @max-3xl/roomhead:justify-end"
           // The caption buttons sit over the header's right end; drop this
           // control row 16px (visual only) below the 26px overlay.
           style={controlsShiftStyle}
@@ -1228,6 +1239,7 @@ export function GroupView({ group }: { group: Group }) {
               </span>
             </button>
           )}
+        </div>
         </div>
       </div>
 
