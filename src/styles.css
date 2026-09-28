@@ -74,10 +74,6 @@
   /* onboarding: a spotlight card or a first-sight hint scaling in from its
      anchor. Never from zero; nothing appears from nothing. */
   --animate-spot-in: spot-in 0.24s cubic-bezier(0.22, 1, 0.36, 1) both;
-  /* onboarding: a badge circling a centre. --angle (deg), --radius (px)
-     and --duration are set per element. Linear, because it is constant
-     motion, and GPU-only. */
-  --animate-orbit: orbit var(--duration, 24s) linear infinite;
   /* onboarding: a surface reacting once to an event (a routine firing) */
   --animate-ripple: ripple 0.9s cubic-bezier(0.22, 1, 0.36, 1) both;
   /* onboarding: a bolt travelling from a webhook address to the bot */
@@ -748,15 +744,11 @@ body {
   from { transform: translateY(10px); opacity: 0; }
   to { transform: none; opacity: 1; }
 }
-@keyframes orbit {
-  from {
-    transform: translate(-50%, -50%) rotate(calc(var(--angle) * 1deg)) translateY(calc(var(--radius) * 1px)) rotate(calc(var(--angle) * -1deg));
-  }
-  to {
-    transform: translate(-50%, -50%) rotate(calc(var(--angle) * 1deg + 360deg)) translateY(calc(var(--radius) * 1px)) rotate(calc(var(--angle) * -1deg - 360deg));
-  }
+/* thinking dots in the onboarding chat scenes */
+@keyframes dot-bob {
+  0%, 60%, 100% { transform: none; opacity: 0.5; }
+  30% { transform: translateY(-3px); opacity: 1; }
 }
-/* thinking dots in the onboarding chat scene */
 @keyframes ripple {
   from { box-shadow: 0 0 0 0 color-mix(in oklab, var(--color-accent) 55%, transparent); }
   to { box-shadow: 0 0 0 14px color-mix(in oklab, var(--color-accent) 0%, transparent); }
@@ -823,8 +815,6 @@ body {
   .thinking-shimmer { background: none; color: var(--color-ink-secondary); }
   .turn-mascot-in, .turn-mascot-out, .turn-answer { animation: none; }
   .animate-rise, .animate-spot-in { animation: none; }
-  /* orbiting badges hold at their starting angle; the scene places them */
-  .animate-orbit { animation: none; }
   .animate-ripple, .animate-bolt { animation: none; }
   /* The drawer still moves, it just arrives instantly. */
   aside { transition: none; }

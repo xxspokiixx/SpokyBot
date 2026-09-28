@@ -711,8 +711,6 @@
   "onboarding.reel.agents.body": "側邊欄中的每個機器人都在你自己的機器上運作，擁有自己的模型、記憶與個性。像與聯絡人交談一樣和它們對話。",
   "onboarding.reel.hands.title": "它們有手",
   "onboarding.reel.hands.body": "每個機器人都能擁有電腦、已連接的應用程式與語音。開啟「電腦」面板觀看它工作，或接手操作。",
-  "onboarding.reel.apps.title": "已連接的應用程式",
-  "onboarding.reel.apps.body": "Gmail、Slack、GitHub、Notion，還有數百個其他服務。登入一次，每個機器人就能把它們當工具使用。如果機器人需要你尚未連接的服務，會直接在對話中詢問。",
   "onboarding.reel.channels.title": "把機器人放進群組",
   "onboarding.reel.channels.body": "一個群組可以容納多個機器人與你。用 @ 提及其中一個來決定由誰回應。讓工作、個人與各個專案彼此分開。",
   "onboarding.reel.automations.title": "設定好就放著不管",
