@@ -1,5 +1,6 @@
 import { track } from "@/lib/analytics";
 import { OrganizationIdentity } from "./OrganizationIdentity";
+import { approvalCardOutcome } from "./ApprovalCard";
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import {
@@ -124,7 +125,11 @@ function preview(bot: Bot): string {
   // the harness's receipts (digest, compaction) to the reply a person reads
   const last = lastNonReceipt(visibleMessages(bot));
   if (!last) return "";
-  if (last.kind === "options" && last.card) return last.card.title;
+  // a settled approval card says what happened, as the card itself does;
+  // its title is the question it asked, which nobody is waiting on now
+  if (last.kind === "options" && last.card) {
+    return (last.card.requestId && last.card.tool && !last.card.questionRequest && approvalCardOutcome(last.card)) || last.card.title;
+  }
   if (last.kind === "activity" && last.tool) return last.tool.name;
   if (last.kind === "screen") return t("sidebar.preview.screenFrame");
   const peer = peerLine(last);
