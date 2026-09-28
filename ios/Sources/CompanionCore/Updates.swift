@@ -12,7 +12,7 @@
 import Foundation
 
 public struct ChatUpdate: Identifiable, Hashable, Codable {
-    public enum Kind: Int, Comparable, Codable {
+    public enum Kind: Int, Comparable, Codable, Sendable {
         case needsYou = 0, working, toReview
         public static func < (a: Kind, b: Kind) -> Bool { a.rawValue < b.rawValue }
     }

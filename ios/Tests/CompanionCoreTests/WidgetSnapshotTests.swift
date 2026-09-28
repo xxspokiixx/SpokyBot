@@ -109,6 +109,199 @@ final class WidgetSnapshotTests: XCTestCase {
         XCTAssertTrue(ChatUpdate(chat: chat, kind: .needsYou, line: "", card: nil).answerOptions.isEmpty)
     }
 
+    func testSinceClosureStampsEachRowAndDefaultsToUnknown() throws {
+        let state = try hydrated
+        let began = Date(timeIntervalSince1970: 1_700_000_100)
+        var stamped = false
+        let snapshot = state.widgetSnapshot(connectionID: "computer-1", now: began) { _ in "idle" } since: { _ in
+            stamped = true
+            return began
+        }
+        // The stamp is exactly what the closure said, once per row; a
+        // writer that knows nothing passes nothing and the rows say so.
+        XCTAssertEqual(snapshot.rows.map(\.since), snapshot.rows.map { _ in began })
+        XCTAssertTrue(stamped)
+
+        let unstamped = state.widgetSnapshot(connectionID: "computer-1") { _ in "idle" }
+        XCTAssertEqual(unstamped.rows.map(\.since), snapshot.rows.map { _ in nil })
+    }
+
+    func testSinceClockHoldsWhileKindHoldsAndRestartsOnKindChange() throws {
+        let state = try hydrated
+        let chat = try XCTUnwrap(state.chat(forThread: "t-ask-new"))
+        var clock = WidgetSinceClock()
+        let first = Date(timeIntervalSince1970: 1_700_000_000)
+        let later = first.addingTimeInterval(600)
+
+        // The first sighting starts the clock; the same kind keeps it.
+        XCTAssertEqual(clock.stamp(for: chat, kind: .needsYou, at: first), first)
+        XCTAssertEqual(clock.stamp(for: chat, kind: .needsYou, at: later), first)
+        // A new kind is a new beginning — the island restarts the same way.
+        XCTAssertEqual(clock.stamp(for: chat, kind: .working, at: later), later)
+        XCTAssertEqual(clock.stamp(for: chat, kind: .working, at: later.addingTimeInterval(60)), later)
+    }
+
+    func testSinceClockForgetsDepartedChatsAndSeedsFromTheLastSnapshot() throws {
+        let state = try hydrated
+        let askChat = try XCTUnwrap(state.chat(forThread: "t-ask-new"))
+        let otherChat = try XCTUnwrap(state.chat(forThread: "t-ask-old"))
+        let began = Date(timeIntervalSince1970: 1_700_000_000)
+        var clock = WidgetSinceClock()
+        _ = clock.stamp(for: askChat, kind: .needsYou, at: began)
+        _ = clock.stamp(for: otherChat, kind: .working, at: began)
+
+        // A chat leaving the updates forgets its stamp, so a return
+        // restarts instead of resurrecting a clock from another era —
+        // while the chat that stayed keeps its clock running.
+        clock.forget(absentFrom: [askChat])
+        let returned = Date(timeIntervalSince1970: 1_700_006_000)
+        XCTAssertEqual(clock.stamp(for: askChat, kind: .needsYou, at: returned), began)
+        XCTAssertEqual(clock.stamp(for: otherChat, kind: .working, at: returned), returned)
+
+        // Seeding from the last snapshot carries elapsed time across a
+        // relaunch — and ignores rows that never had a stamp.
+        let snapshot = state.widgetSnapshot(connectionID: "computer-1", now: began) { _ in "idle" }
+        var seeded = WidgetSinceClock(seed: snapshot)
+        XCTAssertEqual(seeded.stamp(for: askChat, kind: .needsYou, at: returned), returned)
+
+        var reseeded = WidgetSinceClock(seed: try hydrated.widgetSnapshot(
+            connectionID: "computer-1",
+            now: began
+        ) { _ in "idle" } since: { update in
+            update.chat.threadId == "t-ask-new" ? began : nil
+        })
+        XCTAssertEqual(reseeded.stamp(for: askChat, kind: .needsYou, at: returned), began)
+        XCTAssertEqual(reseeded.stamp(for: otherChat, kind: .needsYou, at: returned), returned)
+    }
+
+    // MARK: - Answering
+
+    func testAnswerableCardMatchesTheRenderedPill() throws {
+        let state = try hydrated
+        let now = Date(timeIntervalSince1970: 1_700_000_000)
+        let snapshot = state.widgetSnapshot(connectionID: "computer-1", now: now) { _ in "idle" }
+
+        // The exact pill a widget rendered: same thread, same request,
+        // an offered option, the same card kind.
+        let card = try XCTUnwrap(
+            snapshot.answerableCard(
+                threadId: "t-ask-new",
+                requestId: "req-new",
+                choice: "Ship it",
+                isPermission: false,
+                at: now
+            )
+        )
+        XCTAssertEqual(card.options, ["Ship it", "Hold"])
+        XCTAssertEqual(card.requestId, "req-new")
+    }
+
+    func testAnswerableCardRejectsEveryMismatchWithTheRenderedPill() throws {
+        let state = try hydrated
+        let snapshot = state.widgetSnapshot(connectionID: "computer-1") { _ in "idle" }
+
+        // Wrong thread: a working chat has no ask to answer.
+        XCTAssertNil(
+            snapshot.answerableCard(threadId: "t-busy", requestId: "req-new", choice: "Ship it", isPermission: false)
+        )
+        // Wrong request: the pill belonged to an earlier ask.
+        XCTAssertNil(
+            snapshot.answerableCard(threadId: "t-ask-new", requestId: "req-old", choice: "Ship it", isPermission: false)
+        )
+        // A choice the pill never offered.
+        XCTAssertNil(
+            snapshot.answerableCard(threadId: "t-ask-new", requestId: "req-new", choice: "Restart everything", isPermission: false)
+        )
+        // The wrong card kind: permission asks answer through a
+        // different endpoint contract than questions.
+        XCTAssertNil(
+            snapshot.answerableCard(threadId: "t-ask-new", requestId: "req-new", choice: "Ship it", isPermission: true)
+        )
+    }
+
+    func testAnswerableCardExpiresSoAStalePillCannotAnswer() throws {
+        let state = try hydrated
+        let written = Date(timeIntervalSince1970: 1_700_000_000)
+        let snapshot = state.widgetSnapshot(connectionID: "computer-1", now: written) { _ in "idle" }
+
+        // Ten minutes is still the snapshot's moment; ten minutes and a
+        // tick is history the chat may already have moved past.
+        XCTAssertNotNil(
+            snapshot.answerableCard(
+                threadId: "t-ask-new", requestId: "req-new", choice: "Ship it",
+                isPermission: false, at: written.addingTimeInterval(WidgetSnapshot.answerMaximumAge)
+            )
+        )
+        XCTAssertNil(
+            snapshot.answerableCard(
+                threadId: "t-ask-new", requestId: "req-new", choice: "Ship it",
+                isPermission: false, at: written.addingTimeInterval(WidgetSnapshot.answerMaximumAge + 0.1)
+            )
+        )
+    }
+
+    func testAnswerableCardRefusesAnsweredDismissedAndSkillRequests() throws {
+        var state = try hydrated
+        func snapshot() -> WidgetSnapshot {
+            state.widgetSnapshot(connectionID: "computer-1") { _ in "idle" }
+        }
+        let index = try XCTUnwrap(
+            state.messages["t-ask-new"]?.firstIndex { $0.card?.requestId == "req-new" }
+        )
+
+        // Already answered in the chat.
+        state.messages["t-ask-new"]?[index].card?.answered = "Ship it"
+        XCTAssertNil(
+            snapshot().answerableCard(threadId: "t-ask-new", requestId: "req-new", choice: "Ship it", isPermission: false)
+        )
+
+        // Dismissed in the chat.
+        state.messages["t-ask-new"]?[index].card?.answered = nil
+        state.messages["t-ask-new"]?[index].card?.dismissed = true
+        XCTAssertNil(
+            snapshot().answerableCard(threadId: "t-ask-new", requestId: "req-new", choice: "Ship it", isPermission: false)
+        )
+
+        // A SKILL.md request: compact surfaces never grow pills for
+        // those, so none may answer one either.
+        state.messages["t-ask-new"]?[index].card?.dismissed = false
+        state.messages["t-ask-new"]?[index].card?.skillRequest = SkillRequestCardData(
+            version: 1,
+            requestId: "req-new",
+            botId: "bot-ask-new",
+            threadId: "t-ask-new",
+            stagedId: "stage-1",
+            action: "learn",
+            name: "deploy-helper",
+            gist: "Deploys the app",
+            source: nil,
+            preview: nil,
+            sha256: nil,
+            warnings: [],
+            createdAt: 20
+        )
+        XCTAssertNil(
+            snapshot().answerableCard(threadId: "t-ask-new", requestId: "req-new", choice: "Ship it", isPermission: false)
+        )
+    }
+
+    func testRemovingRowDropsTheAnsweredAskAndKeepsTheRestAsWritten() throws {
+        let state = try hydrated
+        let now = Date(timeIntervalSince1970: 1_700_000_000)
+        let snapshot = state.widgetSnapshot(connectionID: "computer-1", now: now) { _ in "idle" }
+
+        let after = snapshot.removingRow(answeredInThread: "t-ask-new")
+        XCTAssertFalse(after.rows.contains { $0.chat.threadId == "t-ask-new" })
+        XCTAssertEqual(
+            after.rows.map(\.chat.threadId),
+            snapshot.rows.map(\.chat.threadId).filter { $0 != "t-ask-new" }
+        )
+        // The write is not new information: the survivor rows keep the
+        // timestamp and connection they were written with.
+        XCTAssertEqual(after.writtenAt, now)
+        XCTAssertEqual(after.connectionID, "computer-1")
+    }
+
     // MARK: - Store
 
     func testStoreRoundTripsReplacesAndRemoves() throws {

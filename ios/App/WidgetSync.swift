@@ -18,6 +18,9 @@ final class WidgetSyncBridge {
     /// The last snapshot this bridge wrote; an equal payload is neither
     /// rewritten nor allowed to cost the widget a reload.
     private var lastWritten: WidgetSnapshot?
+    /// The per-chat elapsed clock, seeded from the last snapshot so work
+    /// that began before this launch keeps its true start.
+    private var sinceClock = WidgetSinceClock()
     /// Whether the unpaired state is already what is on disk. Starts false —
     /// at launch nothing is known about the file — so an app that comes up
     /// unpaired still clears whatever the last session left behind, once.
@@ -25,6 +28,7 @@ final class WidgetSyncBridge {
 
     init(store: WidgetSnapshotStore?) {
         self.store = store
+        sinceClock = WidgetSinceClock(seed: store?.read())
     }
 
     /// The bridge over the App Group container the widget extension reads.
@@ -64,6 +68,10 @@ final class WidgetSyncBridge {
             guard !publishedUnpaired else { return }
             store.remove()
             lastWritten = nil
+            // The clock dies with the session it measured: a re-paired
+            // computer's work starts when it starts, not when the last
+            // one did.
+            sinceClock = WidgetSinceClock()
             publishedUnpaired = true
             WidgetCenter.shared.reloadAllTimelines()
             return
@@ -71,7 +79,10 @@ final class WidgetSyncBridge {
         publishedUnpaired = false
         let snapshot = state.widgetSnapshot(connectionID: connectionID) { chat in
             MausState.forChat(chat, in: state).rawValue
+        } since: { update in
+            sinceClock.stamp(for: update.chat, kind: update.kind)
         }
+        sinceClock.forget(absentFrom: state.updates.map(\.chat))
         guard snapshot != lastWritten else { return }
         do {
             try store.write(snapshot)
