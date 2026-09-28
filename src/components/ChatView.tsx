@@ -1241,13 +1241,20 @@ export function ChatView({ bot: profile }: { bot: Bot }) {
         style={headerDragStyle}
         className={cn(
           // @container so the chips on the right can fold to icon bubbles
-          // when the column is narrow (side panel open, small window)
-          "@container/chathead flex items-center justify-between px-5 py-3",
+          // when the column is narrow (side panel open, small window). A
+          // container query never matches the container itself, so the row
+          // that has to wrap is the child below, not this element.
+          "@container/chathead px-5 py-3",
           // Room for the drawer button, which overlays this corner below md.
           "pl-11 md:pl-5",
         )}
       >
-        <div className="flex min-w-0 items-center gap-2.5 rounded-lg px-1.5 py-1" style={headerNoDragStyle}>
+        {/* The chip group does not shrink, so in a narrow column (a phone,
+            or a panel beside the chat) the name truncated to nothing and the
+            rename pencil landed under the export button. Below 30rem the
+            header wraps: name line on top, chips underneath on the right. */}
+        <div data-chathead-row className="flex items-center justify-between @max-[30rem]/chathead:flex-wrap @max-[30rem]/chathead:gap-y-1">
+        <div data-chathead-identity className="flex min-w-0 items-center gap-2.5 rounded-lg px-1.5 py-1 @max-[30rem]/chathead:basis-full" style={headerNoDragStyle}>
           <button
             onClick={() => dispatch({ type: "toggleSettings", open: true })}
             className="flex size-10 shrink-0 items-center justify-center rounded-lg hover:bg-raised/50"
@@ -1279,15 +1286,19 @@ export function ChatView({ bot: profile }: { bot: Bot }) {
             inputClassName="max-w-[220px] rounded bg-inset px-1.5 py-0.5 text-[15px] font-semibold"
           />
           {bot.chiefOfStaff && (
-            <span className="flex items-center gap-1 rounded-full bg-accent/12 px-2 py-0.5 text-[11px] font-medium text-accent">
-              <Crown size={11} /> {t("chat.chiefOfStaff")}
+            // One line, never shrinking with the name (it wrapped "Chief / of /
+            // Staff", #1871); folds to the crown like the chips beside it do,
+            // so the name keeps the room.
+            <span title={t("chat.chiefOfStaff")} className="flex shrink-0 items-center gap-1 whitespace-nowrap rounded-full bg-accent/12 px-2 py-0.5 text-[11px] font-medium text-accent @max-4xl/chathead:px-1.5">
+              <Crown size={11} aria-hidden="true" /> <span className="@max-4xl/chathead:sr-only">{t("chat.chiefOfStaff")}</span>
             </span>
           )}
           {bot.busy && <WorkingDots className="text-ink-secondary" />}
           {!bot.busy && bot.waitingForTeammates && <span className="truncate text-[12px] text-ink-secondary" role="status">Teammates working</span>}
         </div>
         <div
-          className="flex shrink-0 items-center gap-2"
+          data-chathead-controls
+          className="flex shrink-0 items-center gap-2 @max-[30rem]/chathead:ml-auto @max-[30rem]/chathead:flex-wrap @max-[30rem]/chathead:justify-end"
           // The caption buttons sit over the header's right end; drop this
           // icon row 16px (visual only — the header keeps its height) so the
           // buttons clear the 26px overlay while the rest of the layout stays.
@@ -1350,6 +1361,7 @@ export function ChatView({ bot: profile }: { bot: Bot }) {
           >
             <Bug size={18} />
           </button>}
+        </div>
         </div>
       </div>
 
