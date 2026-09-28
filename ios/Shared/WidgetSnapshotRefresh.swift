@@ -95,8 +95,13 @@ enum WidgetSnapshotRefresh {
         else { return }
         var state = CompanionState()
         state.hydrate(pulled.fleet, waitingThreads: pulled.waitingThreads)
+        // Seed the elapsed clock from the snapshot being replaced, so a
+        // refresh never resets a working bot's timer to now.
+        var sinceClock = WidgetSinceClock(seed: store.read())
         let snapshot = state.widgetSnapshot(connectionID: connection.id) { chat in
             MausState.forChat(chat, in: state).rawValue
+        } since: { update in
+            sinceClock.stamp(for: update.chat, kind: update.kind)
         }
         try? store.write(snapshot)
         WidgetCenter.shared.reloadAllTimelines()

@@ -433,6 +433,7 @@ describe("ClaudeDriver turns (fake CLI)", () => {
     delete process.env.FAKE_CLAUDE_PARTIAL_FAILS;
     delete process.env.FAKE_CLAUDE_STATE;
     delete process.env.FAKE_CLAUDE_RETRY_SCALE;
+    delete process.env.FAKE_CLAUDE_TEXT_HANG;
     delete process.env.ANTHROPIC_API_KEY;
     delete process.env.XAI_API_KEY;
     delete process.env.COMPOSIO_API_KEY;
@@ -2789,27 +2790,82 @@ describe("ClaudeDriver turns (fake CLI)", () => {
     const names = ["XAI_API_KEY", "COMPOSIO_API_KEY", "BOX_TOKEN", "OPENCODE_API_KEY", "OMB_TTS_KEY"] as const;
     for (const name of names) process.env[name] = `${name}-must-not-leak`;
 
-    await instance.generateText?.("summarize safely");
+    await expect(instance.generateText?.("summarize safely")).resolves.toBe("fake generated text");
 
     const seen = JSON.parse(readFileSync(dump, "utf8"));
     expect(seen.prompt).toBe("summarize safely");
     expect(seen.argv).not.toContain("summarize safely");
+    expect(seen.argv[seen.argv.indexOf("--output-format") + 1]).toBe("text");
     expect(seen.env.CLAUDE_CONFIG_DIR).toBe(instanceConfigDir);
     for (const name of names) expect(seen.env[name]).toBeUndefined();
   });
 
   it("declares safe same-provider permission review", async () => {
     await create();
+    const dump = join(scratch, "permission-review.json");
+    process.env.FAKE_CLAUDE_DUMP = dump;
     await expect(instance.reviewPermission?.("review this request")).resolves.toBe("fake generated text");
+    const seen = JSON.parse(readFileSync(dump, "utf8"));
+    expect(seen.argv[seen.argv.indexOf("--output-format") + 1]).toBe("text");
+  });
+
+  it("reports the actual one-shot model, total input, cached input and cost once", async () => {
+    await create(undefined, { FAKE_CLAUDE_TEXT_RESULT: JSON.stringify({
+      type: "result", result: "  captured memory  ", is_error: false,
+      usage: { input_tokens: 10, cache_read_input_tokens: 20, cache_creation_input_tokens: 3, output_tokens: 5 },
+      total_cost_usd: 0.004,
+      modelUsage: { "claude-haiku-4-5-20251001": { costUSD: 0.004 } },
+    }) });
+    const dump = join(scratch, "text-usage.json");
+    process.env.FAKE_CLAUDE_DUMP = dump;
+    const onUsage = vi.fn();
+    await expect(instance.generateText!("capture memory", { onUsage })).resolves.toBe("captured memory");
+    expect(onUsage.mock.calls).toEqual([[{ model: "claude-haiku-4-5-20251001", input: 33, output: 5, cachedInput: 20, costUsd: 0.004 }]]);
+    const seen = JSON.parse(readFileSync(dump, "utf8"));
+    expect(seen.argv[seen.argv.indexOf("--output-format") + 1]).toBe("json");
+    expect(seen.argv[seen.argv.indexOf("--model") + 1]).toBe("claude-haiku-4-5");
+    expect(recorder.events).toEqual([]);
+  });
+
+  it.each([
+    [{}, undefined],
+    [{ usage: { input_tokens: "12", output_tokens: -1 }, total_cost_usd: null }, undefined],
+    [{ usage: { input_tokens: 0, output_tokens: 0, cache_read_input_tokens: 0 }, total_cost_usd: 0 }, 0],
+  ])("keeps missing usage unknown and preserves explicit zeroes (%j)", async (metadata, expected) => {
+    await create(undefined, { FAKE_CLAUDE_TEXT_RESULT: JSON.stringify({ type: "result", result: "done", ...metadata }) }, { managedModels: ["managed-helper"] });
+    const onUsage = vi.fn();
+    await expect(instance.generateText!("summarize", { onUsage })).resolves.toBe("done");
+    expect(onUsage.mock.calls).toEqual([[{ model: "managed-helper", input: expected, output: expected, cachedInput: expected, costUsd: expected }]]);
+  });
+
+  it.each([false, true])("reports usage before rejecting an error result (nonzero exit: %s)", async nonzeroExit => {
+    const failureFile = join(scratch, "failure.txt");
+    writeFileSync(failureFile, "__FAIL__");
+    await create(undefined, {
+      ...(nonzeroExit ? { FAKE_CLAUDE_TEXT_FILE: failureFile } : {}),
+      FAKE_CLAUDE_TEXT_RESULT: JSON.stringify({ type: "result", is_error: true, result: "synthetic billed failure", total_cost_usd: 0.01 }),
+    });
+    const onUsage = vi.fn();
+    await expect(instance.generateText!("summarize", { onUsage })).rejects.toThrow("synthetic billed failure");
+    expect(onUsage.mock.calls).toEqual([[{ model: "claude-haiku-4-5", input: undefined, output: undefined, cachedInput: undefined, costUsd: 0.01 }]]);
+  });
+
+  it.each(["not JSON", '{"type":"assistant"}'])("rejects malformed one-shot output without invented usage (%s)", async result => {
+    await create(undefined, { FAKE_CLAUDE_TEXT_RESULT: result });
+    const onUsage = vi.fn();
+    await expect(instance.generateText!("summarize", { onUsage })).rejects.toThrow();
+    expect(onUsage).not.toHaveBeenCalled();
   });
 
   it("stops the one-shot text call when its caller aborts mid-flight", async () => {
     await create();
     process.env.FAKE_CLAUDE_TEXT_HANG = "1";
     const controller = new AbortController();
+    const onUsage = vi.fn();
     setTimeout(() => controller.abort(), 100);
-    await expect(instance.generateText?.("summarize safely", { signal: controller.signal }))
+    await expect(instance.generateText?.("summarize safely", { signal: controller.signal, onUsage }))
       .rejects.toThrow(/aborted/);
+    expect(onUsage).not.toHaveBeenCalled();
   });
 
   it("stops permission review when its caller gives up", async () => {

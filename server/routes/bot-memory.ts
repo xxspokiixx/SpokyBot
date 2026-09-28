@@ -30,13 +30,18 @@ import {
   type MemoryJournalEntry,
 } from "../memory-journal.ts";
 import { isMemoryTopicName, readMemoryTopic } from "../workspace.ts";
+import { upkeepEnabled, type MemoryUpkeep } from "../memory-upkeep.ts";
+import { listLearnedFacts, removeLearned } from "../profile-learned.ts";
 import { PASS, type RouteHandler } from "./table.ts";
 
 export interface BotMemoryRouteDeps {
   /** The bot record for an id, or nothing when there is none. */
-  bot(id: string): unknown;
+  bot(id: string): { id: string; memoryUpkeep?: boolean } | null | undefined;
   /** The task a thread belongs to; its title names the chat in a journal row. */
   taskByThread(botId: string, threadId: string): { title?: string } | undefined;
+  upkeep: Pick<MemoryUpkeep, "status" | "tidy">;
+  aboutMe(): string;
+  saveAboutMe(text: string): void;
 }
 
 export function createBotMemoryRoutes(deps: BotMemoryRouteDeps): RouteHandler {
@@ -145,6 +150,31 @@ export function createBotMemoryRoutes(deps: BotMemoryRouteDeps): RouteHandler {
       const result = revertMemoryChange(m[1], m[2]);
       if (!result.ok) return json(res, result.status, { error: result.error });
       return json(res, 200, { ok: true, ...result.doc, entry: result.entry ? journalEntryForClient(m[1], result.entry) : null, overview: memoryOverview(m[1]) });
+    }
+    // What upkeep learned about the person is shared through About me.
+    if (method === "GET" && path === "/api/profile/learned") {
+      return json(res, 200, { learned: listLearnedFacts() });
+    }
+    m = path.match(/^\/api\/profile\/learned\/([\w-]+)\/remove$/);
+    if (m && method === "POST") {
+      const removed = removeLearned(m[1], deps.aboutMe(), deps.saveAboutMe);
+      if (!removed) return json(res, 404, { error: "That fact was already removed." });
+      return json(res, 200, { ok: true, aboutMe: deps.aboutMe(), learned: listLearnedFacts() });
+    }
+    m = path.match(/^\/api\/bots\/([\w-]+)\/memory\/upkeep$/);
+    if (m && method === "GET") {
+      const bot = deps.bot(m[1]);
+      if (!bot) return json(res, 404, { error: "no such bot" });
+      return json(res, 200, { enabled: upkeepEnabled(bot), ...deps.upkeep.status(bot.id) });
+    }
+    m = path.match(/^\/api\/bots\/([\w-]+)\/memory\/tidy$/);
+    if (m && method === "POST") {
+      const bot = deps.bot(m[1]);
+      if (!bot) return json(res, 404, { error: "no such bot" });
+      if (!upkeepEnabled(bot)) return json(res, 409, { error: "Switch on Memory upkeep for this bot first." });
+      const report = await deps.upkeep.tidy(bot.id);
+      await flushMemoryJournal(bot.id);
+      return json(res, 200, { report, overview: memoryOverview(bot.id) });
     }
     m = path.match(/^\/api\/bots\/([\w-]+)\/memory\/open$/);
     if (m && method === "POST") {

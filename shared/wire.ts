@@ -310,6 +310,11 @@ export interface WireBot {
   connectorTools?: Record<string, ConnectorToolGrant>;
   /** Whether this bot gets the app's built-in browser. */
   browser?: boolean;
+  /** Memory upkeep: the harness captures facts from finished chats into
+   * MEMORY.md and topic files, adds facts about the person to About me and
+   * tidies nightly. On unless explicitly false; every change is journaled
+   * and can be undone. */
+  memoryUpkeep?: boolean;
   /** Which of the app-wide MCP servers this bot mounts, by name. */
   mcpServers?: string[];
   /** Id of a named browser profile; absent = the bot's own private session. */

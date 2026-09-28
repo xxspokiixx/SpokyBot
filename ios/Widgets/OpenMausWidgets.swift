@@ -13,6 +13,10 @@ struct OpenMausWidgets: WidgetBundle {
         BotActivityWidget()
         NeedsYouWidget()
         UpdatesDigestWidget()
+        WorkingMonitorWidget()
+        if #available(iOS 17.0, *) {
+            BotWidget()
+        }
     }
 }
 

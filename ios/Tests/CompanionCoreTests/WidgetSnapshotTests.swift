@@ -109,6 +109,71 @@ final class WidgetSnapshotTests: XCTestCase {
         XCTAssertTrue(ChatUpdate(chat: chat, kind: .needsYou, line: "", card: nil).answerOptions.isEmpty)
     }
 
+    func testSinceClosureStampsEachRowAndDefaultsToUnknown() throws {
+        let state = try hydrated
+        let began = Date(timeIntervalSince1970: 1_700_000_100)
+        var stamped = false
+        let snapshot = state.widgetSnapshot(connectionID: "computer-1", now: began) { _ in "idle" } since: { _ in
+            stamped = true
+            return began
+        }
+        // The stamp is exactly what the closure said, once per row; a
+        // writer that knows nothing passes nothing and the rows say so.
+        XCTAssertEqual(snapshot.rows.map(\.since), snapshot.rows.map { _ in began })
+        XCTAssertTrue(stamped)
+
+        let unstamped = state.widgetSnapshot(connectionID: "computer-1") { _ in "idle" }
+        XCTAssertEqual(unstamped.rows.map(\.since), snapshot.rows.map { _ in nil })
+    }
+
+    func testSinceClockHoldsWhileKindHoldsAndRestartsOnKindChange() throws {
+        let state = try hydrated
+        let chat = try XCTUnwrap(state.chat(forThread: "t-ask-new"))
+        var clock = WidgetSinceClock()
+        let first = Date(timeIntervalSince1970: 1_700_000_000)
+        let later = first.addingTimeInterval(600)
+
+        // The first sighting starts the clock; the same kind keeps it.
+        XCTAssertEqual(clock.stamp(for: chat, kind: .needsYou, at: first), first)
+        XCTAssertEqual(clock.stamp(for: chat, kind: .needsYou, at: later), first)
+        // A new kind is a new beginning — the island restarts the same way.
+        XCTAssertEqual(clock.stamp(for: chat, kind: .working, at: later), later)
+        XCTAssertEqual(clock.stamp(for: chat, kind: .working, at: later.addingTimeInterval(60)), later)
+    }
+
+    func testSinceClockForgetsDepartedChatsAndSeedsFromTheLastSnapshot() throws {
+        let state = try hydrated
+        let askChat = try XCTUnwrap(state.chat(forThread: "t-ask-new"))
+        let otherChat = try XCTUnwrap(state.chat(forThread: "t-ask-old"))
+        let began = Date(timeIntervalSince1970: 1_700_000_000)
+        var clock = WidgetSinceClock()
+        _ = clock.stamp(for: askChat, kind: .needsYou, at: began)
+        _ = clock.stamp(for: otherChat, kind: .working, at: began)
+
+        // A chat leaving the updates forgets its stamp, so a return
+        // restarts instead of resurrecting a clock from another era —
+        // while the chat that stayed keeps its clock running.
+        clock.forget(absentFrom: [askChat])
+        let returned = Date(timeIntervalSince1970: 1_700_006_000)
+        XCTAssertEqual(clock.stamp(for: askChat, kind: .needsYou, at: returned), began)
+        XCTAssertEqual(clock.stamp(for: otherChat, kind: .working, at: returned), returned)
+
+        // Seeding from the last snapshot carries elapsed time across a
+        // relaunch — and ignores rows that never had a stamp.
+        let snapshot = state.widgetSnapshot(connectionID: "computer-1", now: began) { _ in "idle" }
+        var seeded = WidgetSinceClock(seed: snapshot)
+        XCTAssertEqual(seeded.stamp(for: askChat, kind: .needsYou, at: returned), returned)
+
+        var reseeded = WidgetSinceClock(seed: try hydrated.widgetSnapshot(
+            connectionID: "computer-1",
+            now: began
+        ) { _ in "idle" } since: { update in
+            update.chat.threadId == "t-ask-new" ? began : nil
+        })
+        XCTAssertEqual(reseeded.stamp(for: askChat, kind: .needsYou, at: returned), began)
+        XCTAssertEqual(reseeded.stamp(for: otherChat, kind: .needsYou, at: returned), returned)
+    }
+
     // MARK: - Answering
 
     func testAnswerableCardMatchesTheRenderedPill() throws {

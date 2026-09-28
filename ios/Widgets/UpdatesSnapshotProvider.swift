@@ -20,8 +20,11 @@ enum WidgetSnapshotState {
     /// Nothing on disk: the app has never published, or it came up
     /// unpaired and cleared what the last session left.
     case unpaired
-    /// A published snapshot with nothing in it — genuinely all quiet.
-    case quiet
+    /// A published snapshot with nothing in it — genuinely all quiet,
+    /// carried rather than summarized so the timeline can age it: an
+    /// empty write crosses the same fresh-to-stale line a full one does,
+    /// and a quiet widget past that line owes the same age disclaimer.
+    case quiet(WidgetSnapshot)
     case fresh(WidgetSnapshot)
     case stale(WidgetSnapshot)
 
@@ -32,17 +35,17 @@ enum WidgetSnapshotState {
 
     var snapshot: WidgetSnapshot? {
         switch self {
-        case .unpaired, .quiet: return nil
+        case .unpaired: return nil
         case let .fresh(snapshot), let .stale(snapshot): return snapshot
+        case let .quiet(snapshot): return snapshot
         }
     }
 
     static func classify(_ snapshot: WidgetSnapshot?, now: Date) -> WidgetSnapshotState {
         guard let snapshot else { return .unpaired }
-        guard !snapshot.rows.isEmpty else { return .quiet }
-        return now.timeIntervalSince(snapshot.writtenAt) < freshnessInterval
-            ? .fresh(snapshot)
-            : .stale(snapshot)
+        let isFresh = now.timeIntervalSince(snapshot.writtenAt) < freshnessInterval
+        guard !snapshot.rows.isEmpty else { return isFresh ? .quiet(snapshot) : .stale(snapshot) }
+        return isFresh ? .fresh(snapshot) : .stale(snapshot)
     }
 }
 
@@ -79,7 +82,7 @@ struct UpdatesSnapshotEntry: TimelineEntry {
 /// the cadence, and the app republishes on every real change.
 struct UpdatesSnapshotProvider: TimelineProvider {
     func placeholder(in context: Context) -> UpdatesSnapshotEntry {
-        UpdatesSnapshotEntry(date: Date(), state: .quiet)
+        UpdatesSnapshotEntry(date: Date(), state: .quiet(WidgetSnapshot.empty()))
     }
 
     func getSnapshot(in context: Context, completion: @escaping (UpdatesSnapshotEntry) -> Void) {
@@ -90,7 +93,8 @@ struct UpdatesSnapshotProvider: TimelineProvider {
         let now = Date()
         let state = current(now: now)
         var entries = [UpdatesSnapshotEntry(date: now, state: state)]
-        if case let .fresh(snapshot) = state {
+        switch state {
+        case let .fresh(snapshot):
             // Pills stop answering at the trust window's end; schedule
             // that moment so the buttons leave when taps stop working,
             // not five minutes later at the stale flip.
@@ -98,12 +102,20 @@ struct UpdatesSnapshotProvider: TimelineProvider {
             if answersExpireAt > now {
                 entries.append(UpdatesSnapshotEntry(date: answersExpireAt, state: .fresh(snapshot)))
             }
+            fallthrough
+        case let .quiet(snapshot):
+            // The one flip the widget can perform on its own — fresh to
+            // stale at the fifteen-minute mark — includes empty writes:
+            // a quiet widget stops claiming an unqualified all-clear
+            // once the picture behind it has aged.
             entries.append(
                 UpdatesSnapshotEntry(
                     date: snapshot.writtenAt.addingTimeInterval(WidgetSnapshotState.freshnessInterval),
                     state: .stale(snapshot)
                 )
             )
+        default:
+            break
         }
         completion(Timeline(entries: entries, policy: .after(now.addingTimeInterval(30 * 60))))
     }

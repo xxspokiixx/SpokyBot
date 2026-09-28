@@ -56,9 +56,12 @@ private struct NeedsYouView: View {
             case .fresh, .stale:
                 // A published snapshot may hold only working or review
                 // rows; for a widget named Needs You that is still all
-                // quiet.
+                // quiet — aged honestly when the write has gone stale.
                 if asks.isEmpty {
-                    Placeholder(icon: "checkmark.circle", message: "All quiet")
+                    VStack(spacing: 6) {
+                        Placeholder(icon: "checkmark.circle", message: "All quiet")
+                        asOf
+                    }
                 } else if family == .systemSmall {
                     smallRow(asks[0])
                 } else {
@@ -164,7 +167,7 @@ struct Placeholder: View {
 /// The ask's options, as one-tap answers — the same options the Updates
 /// sheet's pills offer. A refusal renders as a quiet capsule rather than
 /// the bot's colour: "Stop" is not a brand moment.
-private struct AnswerPills: View {
+struct AnswerPills: View {
     let row: WidgetSnapshot.Row
     let compact: Bool
     let answerable: Bool

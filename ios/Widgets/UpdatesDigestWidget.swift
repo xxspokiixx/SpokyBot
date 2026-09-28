@@ -76,23 +76,33 @@ struct UpdatesDigestView: View {
         case .quiet:
             Placeholder(icon: "checkmark.circle", message: "All quiet")
         case .fresh, .stale:
-            VStack(alignment: .leading, spacing: 8) {
-                HStack(alignment: .firstTextBaseline) {
-                    Text("Updates")
-                        .font(.system(size: 12, weight: .bold))
-                        .foregroundStyle(.secondary)
-                    Spacer()
+            if rows.isEmpty {
+                // An empty write that has aged past honesty keeps the
+                // quiet presentation — the digest never flips to an
+                // empty "0 active" layout — and gains the age line.
+                VStack(spacing: 6) {
+                    Placeholder(icon: "checkmark.circle", message: "All quiet")
                     asOf
-                    Text("\(rows.count) active")
-                        .font(.system(size: 11))
-                        .foregroundStyle(.tertiary)
                 }
-                if family == .systemLarge {
-                    largeSections
-                } else {
-                    mediumRows
+            } else {
+                VStack(alignment: .leading, spacing: 8) {
+                    HStack(alignment: .firstTextBaseline) {
+                        Text("Updates")
+                            .font(.system(size: 12, weight: .bold))
+                            .foregroundStyle(.secondary)
+                        Spacer()
+                        asOf
+                        Text("\(rows.count) active")
+                            .font(.system(size: 11))
+                            .foregroundStyle(.tertiary)
+                    }
+                    if family == .systemLarge {
+                        largeSections
+                    } else {
+                        mediumRows
+                    }
+                    Spacer(minLength: 0)
                 }
-                Spacer(minLength: 0)
             }
         }
     }
@@ -275,7 +285,10 @@ struct UpdatesDigestView: View {
                 }
                 .opacity(isStale ? 0.7 : 1)
             } else {
-                Placeholder(icon: "checkmark.circle", message: "All quiet")
+                VStack(spacing: 6) {
+                    Placeholder(icon: "checkmark.circle", message: "All quiet")
+                    asOf
+                }
             }
         }
     }
@@ -300,6 +313,13 @@ struct UpdatesDigestView: View {
                         .foregroundStyle(MausPalette.color(ask.chat.color))
                     Text("\(asks.count) need you")
                 }
+            } else if rows.isEmpty {
+                HStack(spacing: 4) {
+                    Image(systemName: "checkmark.circle")
+                        .font(.system(size: 13, weight: .semibold))
+                        .foregroundStyle(.secondary)
+                    Text(quietHeadline)
+                }
             } else {
                 HStack(spacing: 4) {
                     Image(systemName: "circle.dotted")
@@ -309,6 +329,15 @@ struct UpdatesDigestView: View {
                 }
             }
         }
+    }
+
+    /// The inline quiet line, aged when the write has gone stale — the
+    /// one-line version of the disclaimer every other empty state prints.
+    private var quietHeadline: String {
+        if isStale, let snapshot = entry.state.snapshot {
+            return "All quiet · \(snapshot.writtenAt.formatted(date: .omitted, time: .shortened))"
+        }
+        return "All quiet"
     }
 
     /// How old the picture is, owed only when it is stale — the same

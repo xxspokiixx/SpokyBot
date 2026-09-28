@@ -1091,6 +1091,7 @@ export async function callTool(name: string, args: Json, context: ToolCallContex
         action: args.action,
         text: args.text,
         oldText: args.old_text,
+        ...(typeof args.until === "string" && args.until.trim() ? { until: args.until.trim() } : {}),
       }),
     });
     if (r.error || r.ok !== true) {

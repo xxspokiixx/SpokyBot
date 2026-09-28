@@ -22,6 +22,13 @@ public struct WidgetSnapshot: Codable, Equatable, Sendable {
         /// The mascot face the app had resolved for this chat, as its raw
         /// name — precomputed so the widget needs no live state to draw.
         public let face: String
+        /// When this chat's current kind began, when the writer knew — the
+        /// elapsed clock a per-chat widget renders. The derivation stamps it
+        /// through a closure so the timing rule can live where the timing
+        /// actually happens (`WidgetSinceClock`); nil means "not known", and
+        /// a snapshot written before the field existed decodes as exactly
+        /// that rather than failing to read.
+        public let since: Date?
 
         /// The options a compact surface may offer as one-tap answers —
         /// the same rule the Updates sheet's pills follow.
@@ -40,6 +47,13 @@ public struct WidgetSnapshot: Codable, Equatable, Sendable {
 }
 
 extension WidgetSnapshot {
+    /// An empty write from "now" — what a placeholder renders, so a
+    /// preview crosses the same fresh-to-stale line a real quiet
+    /// snapshot does instead of occupying a state nothing produces.
+    public static func empty(connectionID: String = "", now: Date = Date()) -> WidgetSnapshot {
+        WidgetSnapshot(writtenAt: now, connectionID: connectionID, rows: [])
+    }
+
     /// How long after `writtenAt` a rendered pill may still be tapped:
     /// the ten-minute trust window `answerableCard` enforces at tap time.
     /// The widget timeline and pill view share it so the buttons
@@ -97,7 +111,12 @@ extension CompanionState {
     /// update. `face` resolves each chat's mascot at write time — a closure
     /// because the mascot tables live in the app target, above Core; the
     /// widget only ever sees the resulting string.
-    public func widgetSnapshot(connectionID: String, now: Date = Date(), face: (Chat) -> String) -> WidgetSnapshot {
+    public func widgetSnapshot(
+        connectionID: String,
+        now: Date = Date(),
+        face: (Chat) -> String,
+        since: (ChatUpdate) -> Date? = { _ in nil }
+    ) -> WidgetSnapshot {
         WidgetSnapshot(
             writtenAt: now,
             connectionID: connectionID,
@@ -107,10 +126,56 @@ extension CompanionState {
                     kind: update.kind,
                     line: update.line,
                     card: update.card,
-                    face: face(update.chat)
+                    face: face(update.chat),
+                    since: since(update)
                 )
             }
         )
+    }
+}
+
+/// The elapsed clock a home-screen widget keeps per chat — the same rule
+/// the Live Activity coordinator runs: the clock starts when a chat's kind
+/// changes and keeps running while the kind holds; a chat leaving the
+/// updates forgets its stamp entirely, so its return restarts the clock.
+/// Where the island's clock is coordinator-local, a widget's must survive
+/// the app relaunching and the widget process refreshing the snapshot
+/// itself, so the clock seeds from the last snapshot on disk.
+public struct WidgetSinceClock: Equatable, Sendable {
+    private struct Stamp: Equatable, Sendable {
+        var kind: ChatUpdate.Kind
+        var at: Date
+    }
+
+    private var stamps: [Chat: Stamp] = [:]
+
+    public init() {}
+
+    /// A clock that carries forward the stamps the last snapshot wrote, so
+    /// work that began before a relaunch keeps its true start. Rows with
+    /// no stamp of their own seed nothing — "unknown" never becomes a
+    /// guess.
+    public init(seed: WidgetSnapshot?) {
+        for row in seed?.rows ?? [] {
+            guard let at = row.since else { continue }
+            stamps[row.chat] = Stamp(kind: row.kind, at: at)
+        }
+    }
+
+    /// The elapsed clock's start for a chat as it appears now. Same kind
+    /// keeps the running stamp; a new kind starts a new clock.
+    public mutating func stamp(for chat: Chat, kind: ChatUpdate.Kind, at now: Date = Date()) -> Date {
+        if let held = stamps[chat], held.kind == kind { return held.at }
+        stamps[chat] = Stamp(kind: kind, at: now)
+        return now
+    }
+
+    /// Forgets the chats not in the current updates, the way the island
+    /// drops its clock when an activity ends: a chat that returns has
+    /// genuinely begun something new.
+    public mutating func forget(absentFrom chats: [Chat]) {
+        let live = Set(chats)
+        stamps = stamps.filter { live.contains($0.key) }
     }
 }
 
