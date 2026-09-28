@@ -63,7 +63,7 @@ import type {
 import { newEventId, newId, TurnNotStartedError } from "../../contracts.ts";
 import { augmentedPath } from "../../env-path.ts";
 import { supportsApprovalMode } from "../../../shared/approval-mode.ts";
-import { parseAskQuestions, parseChoices, questionAnswersByQuestion } from "../../../shared/ask-question.ts";
+import { MAX_QUESTION_TEXT, parseAskQuestions, parseChoices, questionAnswersByQuestion } from "../../../shared/ask-question.ts";
 
 import { appendNative } from "../native.ts";
 import { acpPermissionCommand, permissionLaunchCwd } from "../permission-command.ts";
@@ -991,7 +991,8 @@ export function createAcpDriver(support: AcpSupport): ProviderDriver<AcpConfig> 
           }
           const tool = kind === "execute" ? "shell" : kind === "edit" ? "edit" : kind || "tool";
           const isShellCommand = !isQuestion && kind === "execute" && !/^mcp(?:__|[.:])/i.test(String(toolCall.title ?? ""));
-          const summary = String(toolCall.rawInput?.command ?? toolCall.title ?? tool).slice(0, 200);
+          const rawSummary = String(toolCall.rawInput?.command ?? toolCall.title ?? tool);
+          const summary = rawSummary.slice(0, isQuestion ? MAX_QUESTION_TEXT : 200);
           // One structured question beside the flat choices: the richer card
           // renders from it while older clients keep answering through
           // `choices`. Built once here so the emit and the answer path can
