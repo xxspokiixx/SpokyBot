@@ -1038,7 +1038,7 @@ export function BotThreadList({ bot, selected, density = "comfortable", query = 
           </div>
           {open && <div role="group" aria-label={t("task.namedList", { name: project.name })}>
             {visible.map(renderThread)}
-            {projectTasks.length === 0 && <p className="px-2.5 py-1 text-[11px] text-ink-secondary/70">{t("task.empty")}</p>}
+            {projectTasks.length === 0 && <p className="px-2.5 py-1 text-[11px] text-ink-tertiary">{t("task.empty")}</p>}
           </div>}
         </div>;
       })}
@@ -1046,7 +1046,7 @@ export function BotThreadList({ bot, selected, density = "comfortable", query = 
       <span role="status" className="sr-only">{reorderStatus}</span>
       {readError && <p role="alert" className="px-2.5 py-1 text-[12px] text-danger">{readError}</p>}
       <span role="status" className="sr-only">{readStatus}</span>
-      {projects.length > 0 && ungrouped.length > 0 && <div className="pl-6 pr-3 pb-1 pt-2 text-[10.5px] text-ink-secondary/70">{t("task.list")}</div>}
+      {projects.length > 0 && ungrouped.length > 0 && <div className="pl-6 pr-3 pb-1 pt-2 text-[10.5px] text-ink-tertiary">{t("task.list")}</div>}
       {ungrouped.map(renderThread)}
       {!query && !showAll && tasks.length > visibleTasks.length && <button type="button" onClick={() => setShowAll(true)} className="pl-6 pr-3 py-1.5 text-[11px] text-ink-secondary hover:text-ink">{t("task.showAll", { count: tasks.length })}</button>}
       {projectToEdit && <BotProjectDialog bot={bot} project={projectToEdit} onClose={() => setEditingProject(null)} />}

@@ -314,11 +314,11 @@ export function SidebarThreadRow({ task, ownerId, current, compact, folders, onS
         onKeyDown={(event) => { if (event.key === "ContextMenu" || event.shiftKey && event.key === "F10") { event.preventDefault(); const rect = event.currentTarget.getBoundingClientRect(); openMenu(rect.left, rect.bottom); } }}
         className={cn("flex min-w-0 flex-1 items-center gap-2 rounded-md pl-6 pr-1 text-left text-[13px] font-medium outline-none focus-visible:ring-1 focus-visible:ring-accent/60", compact ? "min-h-7 py-1" : "min-h-8 py-1.5", current ? "font-semibold text-ink" : "text-ink-secondary hover:text-ink")}>
         <span className="flex min-w-0 flex-1 items-baseline gap-1.5">
-          <span className={cn("min-w-0 truncate", task.unread && "font-semibold text-ink", (closed || archived || snoozed) && !current && "text-ink-secondary/70")}>{task.title}</span>
+          <span className={cn("min-w-0 truncate", task.unread && "font-semibold text-ink", (closed || archived || snoozed) && !current && "text-ink-tertiary")}>{task.title}</span>
           {byline && (
             // the same line and size as the title, only quieter: a second
             // line per thread made the list twice as tall as it needs to be
-            <span className="min-w-0 max-w-[45%] shrink truncate font-normal text-ink-secondary/80">{byline}</span>
+            <span className="min-w-0 max-w-[45%] shrink truncate font-normal text-ink-tertiary">{byline}</span>
           )}
         </span>
         {updatedLabel && <time dateTime={new Date(updatedAt).toISOString()} className="shrink-0 tabular-nums text-[10px] text-ink-secondary">{updatedLabel}</time>}

@@ -60,7 +60,7 @@ export function TurnPresence({
               {label}
             </span>
             {since !== null && (
-              <WorkingTimer since={since} className="text-[11.5px] text-ink-secondary/70" />
+              <WorkingTimer since={since} className="text-[11.5px] text-ink-tertiary" />
             )}
           </span>
         ) : null}

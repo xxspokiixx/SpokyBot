@@ -755,7 +755,7 @@ export function ModelPicker({
                         {t("engines.account.signInHint")}
                       </p>
                     )}
-                    <p className="mt-2 text-center text-[11.5px] text-ink-secondary/70">
+                    <p className="mt-2 text-center text-[11.5px] text-ink-tertiary">
                       {pane === "main" && official.length > 0
                         ? official.length === 1
                           ? t("model.afterSetupOne")

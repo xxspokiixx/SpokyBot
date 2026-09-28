@@ -125,7 +125,7 @@ export function KeyboardShortcutsModal({ open, onClose }: KeyboardShortcutsModal
           ) : (
             groups.map((group) => (
               <div key={group.category} className="space-y-1">
-                <div className="text-[11px] font-semibold uppercase tracking-wider text-ink-secondary/70">
+                <div className="text-[11px] font-semibold uppercase tracking-wider text-ink-tertiary">
                   {group.category}
                 </div>
                 <div className="divide-y divide-hairline/20 rounded-xl bg-card/40 px-3 py-1 border border-hairline/30">

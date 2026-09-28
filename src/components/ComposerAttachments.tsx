@@ -144,7 +144,7 @@ export function ComposerAttachments({
                   </pre>
                   <div className="pointer-events-none absolute inset-x-0 bottom-0 h-8 bg-gradient-to-b from-transparent to-raised" />
                 </div>
-                <div className="mt-1 text-[10.5px] text-ink-secondary/70">{pasteSummary(a)}</div>
+                <div className="mt-1 text-[10.5px] text-ink-tertiary">{pasteSummary(a)}</div>
                 <button
                   type="button"
                   onClick={() => onDisplayInChatBox(a)}
@@ -183,7 +183,7 @@ export function ComposerAttachments({
                     </span>
                   )}
                 </button>
-                <div className="mt-1 truncate text-[10.5px] text-ink-secondary/70">
+                <div className="mt-1 truncate text-[10.5px] text-ink-tertiary">
                   {a.uploading ? "Uploading…" : formatSize(a.size)}
                 </div>
               </Chip>
@@ -193,7 +193,7 @@ export function ComposerAttachments({
                   <FileIcon size={16} className="shrink-0 text-ink-secondary" />
                   <div className="min-w-0">
                     <div className="truncate text-[12px] text-ink">{a.name}</div>
-                    <div className="text-[10.5px] text-ink-secondary/70">{formatSize(a.size)}</div>
+                    <div className="text-[10.5px] text-ink-tertiary">{formatSize(a.size)}</div>
                   </div>
                 </div>
               </Chip>
@@ -228,7 +228,7 @@ function Chip({
     >
       {children}
       <div className="mt-1 flex items-center gap-1">
-        <Icon size={11} className="text-ink-secondary/70" />
+        <Icon size={11} className="text-ink-tertiary" />
         <span className="rounded border border-hairline/60 px-1 py-px text-[9.5px] font-medium tracking-wide text-ink-secondary">
           {label}
         </span>
