@@ -277,7 +277,7 @@ function ModelSearch({
 }) {
   return (
     <div className="shrink-0 px-2 pb-2">
-      <div className="flex items-center gap-2 rounded-lg border border-hairline/40 bg-inset px-2.5 py-1.5 focus-within:border-accent/60">
+      <div className="flex items-center gap-2 rounded-lg border border-hairline/40 bg-inset px-2.5 py-1.5 focus-within:border-focus">
         <Search size={13} className="shrink-0 text-ink-secondary" />
         <input
           value={value}

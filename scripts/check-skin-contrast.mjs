@@ -120,6 +120,12 @@ const PAIRS = [
   ["--color-focus", "--color-app", 3],
   ["--color-focus", "--color-panel", 3],
   ["--color-focus", "--color-card", 3],
+  // A focused text field paints its own border in the ring colour (the
+  // browser outline is off for fields), so the ring also has to clear the
+  // fills the fields themselves use.
+  ["--color-focus", "--color-inset", 3],
+  ["--color-focus", "--color-raised", 3],
+  ["--color-focus", "--color-control", 3],
   // Surface against surface. Text contrast alone will not catch a skin that
   // gives two surfaces the same value: Atelier and Lagoon both defined
   // `raised` as the pure white they use for a card, so every chip, hover fill
