@@ -93,14 +93,17 @@ final class FailoverTests: XCTestCase {
         XCTAssertFalse(ConnectionAdvice.provablyUndeliveredRequest(URLError(.timedOut)))
         XCTAssertFalse(ConnectionAdvice.provablyUndeliveredRequest(URLError(.networkConnectionLost)))
 
-        // Gateways that never reached an origin are safe to leave; an
-        // origin timeout (504/524) is as ambiguous as a client timeout.
-        for code in [502, 503, 521, 522, 523] {
+        // Only connect-level gateway failures are safe to leave: the
+        // origin refused (521), never picked up (522), or was
+        // unreachable (523). 502/503 can arrive after the gateway
+        // forwarded the request, and an origin timeout (504/524) is as
+        // ambiguous as a client timeout.
+        for code in [521, 522, 523] {
             XCTAssertTrue(ConnectionAdvice.provablyUndeliveredRequest(
                 APIError.status(code: code, message: nil)
             ), "expected HTTP \(code) to allow replaying a consumed write")
         }
-        for code in [504, 520, 524, 525, 526, 530, 500, 401] {
+        for code in [502, 503, 504, 520, 524, 525, 526, 530, 500, 401] {
             XCTAssertFalse(ConnectionAdvice.provablyUndeliveredRequest(
                 APIError.status(code: code, message: nil)
             ), "expected HTTP \(code) to keep a consumed write on its route")
