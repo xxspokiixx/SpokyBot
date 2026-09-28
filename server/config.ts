@@ -107,8 +107,14 @@ const roomConfigSchema = z.object({
       (rooms.handoffHardCapMinutes ?? DEFAULT_ROOM_HANDOFF_HARD_CAP_MINUTES),
   { message: "rooms handoff bounds must satisfy handoffMinRunwayMinutes <= handoffLifetimeMinutes <= handoffHardCapMinutes" },
 );
+/** Isolation for bot desktops. Migration note (issue #1654): switching
+ * modes changes lease keys and vm-home directories, so desktops cold-start
+ * under the new mode — a pool seat lives in vm-homes/pool-N — while the old
+ * mode's workspaces stay on disk until removed. maxInstances caps per-bot
+ * desktops in per-bot mode, or the pool's seat count in pool mode; it is
+ * not a total across modes. Default stays "shared". */
 const localVmConfigSchema = z.object({
-  mode: z.enum(["shared", "per-bot"]).optional(),
+  mode: z.enum(["shared", "per-bot", "pool"]).optional(),
   maxInstances: z
     .number()
     .int()
@@ -545,8 +551,9 @@ export interface AppConfig {
   threads?: { maxConcurrentPerBot: number; eventLogMaxBytes?: number; eventLogRetentionDays?: number };
   context?: { rebuildBytes?: number; compactAt?: number; autoCompact?: boolean };
   /** Shared preserves the historical singleton. Per-bot gives every bot a
-   * separate container, durable workspace, viewer and lease. */
-  localVm?: { mode?: "shared" | "per-bot"; maxInstances?: number };
+   * separate container, durable workspace, viewer and lease. Pool runs N
+   * seats shared by all conversations, with per-thread affinity (#1654). */
+  localVm?: { mode?: "shared" | "per-bot" | "pool"; maxInstances?: number };
   /** Opt-in product experiments. Every flag defaults to disabled. */
   features?: { skillAuthoring?: boolean; showToolCalls?: boolean; browser?: boolean; sharedComputers?: boolean; claudeUserMcp?: boolean; llmThreadTitles?: boolean; computerClaimIdleRelease?: boolean; cloudOverflow?: boolean };
   /** #1655: consented cloud overflow for local computer waits. The cost is
@@ -721,7 +728,7 @@ export function threadEventLogRetentionDays(cfg: AppConfig): number | null {
   return cfg.threads?.eventLogRetentionDays ?? null;
 }
 
-export function localVmMode(cfg: AppConfig): "shared" | "per-bot" {
+export function localVmMode(cfg: AppConfig): "shared" | "per-bot" | "pool" {
   return cfg.localVm?.mode ?? DEFAULT_LOCAL_VM_MODE;
 }
 

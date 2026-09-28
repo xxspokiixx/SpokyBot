@@ -45,7 +45,7 @@ interface Status {
   workspace_guest_path: string;
   viewer_url: string;
   idle_timeout_ms: number;
-  mode: "shared" | "per-bot";
+  mode: "shared" | "per-bot" | "pool";
   max_instances: number;
   commands: {
     install: string | null;

@@ -124,6 +124,7 @@ import {
   localVmRecreatableOnDemand,
   localVmWorkspaceExists,
   perBotLocalVmTarget,
+  poolLocalVmTarget,
   SHARED_LOCAL_VM_TARGET,
   setupCommands,
   VM_WORKSPACE_GUEST,
@@ -381,11 +382,13 @@ import {
 import { readCuaConnection, readCuaUnavailableReason, gatedLocalComputer } from "./local-computer.ts";
 import {
   discoverExistingPerBotLocalVms,
+  discoverExistingPoolLocalVms,
   localVmInventoryEntry,
   shouldArmLocalVmIdle,
 } from "./local-vm-inventory.ts";
 import { LocalVmIdleTimer } from "./local-vm-idle.ts";
 import { LocalVmLease, LocalVmLeasePool } from "./local-vm-lease.ts";
+import { LocalVmSeatPool, type LocalVmSeatHolder } from "./local-vm-seat-pool.ts";
 import { RepeatDetector, callKey } from "./repeat-detector.ts";
 import { redactSecretsInText } from "./redact.ts";
 import * as vps from "./vps-computer.ts";
@@ -5321,6 +5324,11 @@ let routines: RoutineManager | null = null;
 let calendarCalls: CalendarCallManager | null = null;
 const localVmOwnerBusy = (botId: string) => store.bot(botId)?.busy === true;
 const localVmLeases = new LocalVmLeasePool(30 * 60_000);
+// Pool mode (issue #1654) keeps the lease pool as the ownership fence and
+// uses this table only to decide WHICH seat a conversation addresses: a
+// TTL-bounded affinity returns each thread to the desktop holding its login
+// state, and hands the seat back once the conversation has been idle.
+const localVmSeatPool = new LocalVmSeatPool(() => localVmMaxInstances(cfg));
 const localVmLifecycleBusy = new Set<string>();
 const localVmThreadTargets = new Map<string, LocalVmTarget>();
 const localVmActiveThreads = new Map<string, string>();
@@ -5756,7 +5764,7 @@ async function computerPreviewSurface(bot: BotRecord, threadId?: string) {
     const remote = await vps.vpsComputerStatus(cfg, bot.id);
     if (remote.ready) return "cloud";
   }
-  const target = localVmTargetForBot(bot.id);
+  const target = localVmTargetForStatus(bot.id, threadId);
   if (instance?.adapter.capabilities.computerMcp && localVmSeen.has(target.key)) {
     const vm = await containerComputerStatus(undefined, undefined, target).catch(() => null);
     if (vm && autoLocalVmAttachable(vm)) return "vm";
@@ -5796,7 +5804,7 @@ async function selectableComputers(bot: BotRecord) {
           canCreate = lifecycle === "provision";
         }
       } else if (surface === "vm" && localEngine && caps?.computerMcp) {
-        const target = localVmTargetForBot(bot.id);
+        const target = localVmTargetForStatus(bot.id);
         const status = await containerComputerStatus(undefined, undefined, target);
         ready = status.ready;
         canCreate = !ready && autoLocalVmAttachable(status);
@@ -5925,6 +5933,30 @@ function localVmTargetForBot(botId: string): LocalVmTarget {
   return localVmMode(cfg) === "per-bot" ? perBotLocalVmTarget(botId) : SHARED_LOCAL_VM_TARGET;
 }
 
+function localVmPoolSeatHolder(seat: number): LocalVmSeatHolder | null {
+  return localVmLeases.forTarget(poolLocalVmTarget(seat).key).current(localVmOwnerBusy);
+}
+
+/** The Local VM a conversation's turn addresses. In pool mode each thread
+ * draws a seat with TTL-bounded affinity so it reuses the desktop that
+ * holds its login state; other modes are unchanged. */
+function localVmTargetForThread(botId: string, threadId: string): LocalVmTarget {
+  if (localVmMode(cfg) !== "pool") return localVmTargetForBot(botId);
+  return poolLocalVmTarget(localVmSeatPool.assign(threadId, localVmPoolSeatHolder));
+}
+
+/** Best-effort seat for read-only surfaces (Computer panel previews,
+ * screenshots, status payloads). Records no affinity: a status probe must
+ * not steer a later turn onto a desktop its claim would not choose. */
+function localVmTargetForStatus(botId: string, threadId?: string): LocalVmTarget {
+  if (localVmMode(cfg) !== "pool") return localVmTargetForBot(botId);
+  // An in-flight turn keeps its claimed seat even after its affinity TTL
+  // decays: prefer the live target so a preview cannot land on another seat.
+  const activeTarget = threadId ? localVmThreadTargets.get(threadId) : undefined;
+  if (activeTarget) return activeTarget;
+  return poolLocalVmTarget((threadId ? localVmSeatPool.affinitySeat(threadId) : null) ?? 0);
+}
+
 function localVmLeaseFor(target: LocalVmTarget): LocalVmLease {
   return localVmLeases.forTarget(target.key);
 }
@@ -5961,6 +5993,17 @@ function releaseLocalVmThread(threadId: string): void {
   autoVmClaims.delete(threadId);
   const target = localVmThreadTargets.get(threadId);
   if (!target) return;
+  // Renew affinity at settlement so a turn that consumed part of the TTL
+  // still leaves the full window after it ends; failed claims never reach
+  // here (no target), so only settled turns renew. A turn longer than the
+  // TTL finds its entry expired — touch() alone would drop it — so renew
+  // with the seat the turn actually ran on. A target recorded before a
+  // mid-turn mode change is not a pool seat; touch still covers that.
+  if (localVmMode(cfg) === "pool") {
+    const pooled = /^pool:(\d+)$/.exec(target.key);
+    if (pooled) localVmSeatPool.renew(threadId, Number(pooled[1]));
+    else localVmSeatPool.touch(threadId);
+  }
   localVmLeaseFor(target).release(threadId);
   if (localVmActiveThreads.get(target.key) === threadId) localVmActiveThreads.delete(target.key);
   localVmThreadTargets.delete(threadId);
@@ -5971,6 +6014,26 @@ function releaseLocalVmThread(threadId: string): void {
 // bot's current destination is intentionally ignored: moving a bot to Cloud,
 // Browser, This computer, Auto, or Off does not delete its old Local VM.
 void (async () => {
+  if (localVmMode(cfg) === "pool") {
+    // Same restore rule as per-bot: idle cleanup removes the container, not
+    // its provisioned workspace, so every surviving seat stays Auto-eligible.
+    const seats = localVmMaxInstances(cfg);
+    for (let seat = 0; seat < seats; seat += 1) {
+      const target = poolLocalVmTarget(seat);
+      if (localVmWorkspaceExists(target)) localVmSeen.add(target.key);
+    }
+    const runtime = await containerRuntimeStatus().catch(() => null);
+    if (!runtime?.runtime || !runtime.daemonUp) return;
+    const existing = await discoverExistingPoolLocalVms(seats, runtime.runtime).catch(() => []);
+    const statuses = await Promise.all(existing.map((target) =>
+      containerComputerStatus(undefined, undefined, target).catch(() => null),
+    ));
+    existing.forEach((target, index) => {
+      noteLocalVmSeen(target, statuses[index]);
+      if (shouldArmLocalVmIdle(statuses[index])) localVmIdleFor(target).touch();
+    });
+    return;
+  }
   if (localVmMode(cfg) !== "per-bot") {
     const status = await containerComputerStatus(undefined, undefined, SHARED_LOCAL_VM_TARGET).catch(() => null);
     noteLocalVmSeen(SHARED_LOCAL_VM_TARGET, status);
@@ -8318,7 +8381,7 @@ async function startTurn(
        * desktop, not whatever localVmTargetForBot resolves to by the time
        * the first screen call arrives. */
       const claimAutoLocalVm = async (claimThreadId: string, pinnedTarget?: LocalVmTarget): Promise<{ target: LocalVmTarget; runtime: Runtime }> => {
-        const localVmTarget = pinnedTarget ?? localVmTargetForBot(bot.id);
+        const localVmTarget = pinnedTarget ?? localVmTargetForThread(bot.id, claimThreadId);
         await bindTurnComputer(resourceOwner, `computer:vm:${localVmTarget.key}`, true);
         if (localVmImageBusy || localVmModeChangeBusy || localVmLifecycleBusy.has(localVmTarget.key)) {
           throw new Error("this Local VM is being started, stopped, or replaced — wait for setup to finish");
@@ -8329,6 +8392,9 @@ async function startTurn(
         if (!localVmLeaseFor(localVmTarget).claim(claimThreadId, bot.id, localVmOwnerBusy)) {
           throw new Error("this Local VM is already being used by another turn — wait for that turn to finish");
         }
+        // Only a turn that wins its lease extends pool affinity; a thread
+        // retrying behind a stranger lets the TTL lapse and migrates.
+        if (localVmMode(cfg) === "pool") localVmSeatPool.touch(claimThreadId);
         localVmThreadTargets.set(claimThreadId, localVmTarget);
         localVmActiveThreads.set(localVmTarget.key, claimThreadId);
         localVmIdleFor(localVmTarget).touch();
@@ -8419,7 +8485,15 @@ async function startTurn(
           if (!strict) return false;
           throw new Error("this model engine cannot use the Local VM — choose Claude or an ACP engine, or select another computer destination");
         }
-        const localVmTarget = localVmTargetForBot(bot.id);
+        if (!strict && localVmMode(cfg) === "pool") {
+          // localVmTargetForThread records pool affinity, so a turn the
+          // fast path is about to skip must not reserve or refresh a seat.
+          // Gate on the side-effect-free candidate assign() would pick —
+          // the automationSource bypass below stays authoritative.
+          const poolCandidate = poolLocalVmTarget(localVmSeatPool.candidate(threadId, localVmPoolSeatHolder));
+          if (!localVmSeen.has(poolCandidate.key) && !opts?.automationSource) return false;
+        }
+        const localVmTarget = localVmTargetForThread(bot.id, threadId);
         let lazyReadyVm: { runtime: Runtime } | null = null;
         if (!strict) {
           // Nothing this process has ever seen for this target, and nobody is
@@ -10723,7 +10797,7 @@ async function runGroupMemberTurn(
       throw new Error("this model engine cannot use the Local VM");
     }
     // A distinct identity fences cleanup even in shared mode on the same room thread.
-    const target = { ...localVmTargetForBot(readyBot.id) };
+    const target = { ...localVmTargetForThread(readyBot.id, threadId) };
     await bindTurnComputer(resourceOwner, `computer:vm:${target.key}`, true);
     if (localVmImageBusy || localVmModeChangeBusy || localVmLifecycleBusy.has(target.key)) {
       throw new Error("this Local VM is being started, stopped, or replaced");
@@ -10731,6 +10805,7 @@ async function runGroupMemberTurn(
     if (!localVmLeaseFor(target).claim(threadId, readyBot.id, localVmOwnerBusy)) {
       throw new Error("this Local VM is already being used by another turn");
     }
+    if (localVmMode(cfg) === "pool") localVmSeatPool.touch(threadId);
     roomVmTarget = target;
     localVmThreadTargets.set(threadId, target);
     localVmActiveThreads.set(target.key, threadId);
@@ -12858,7 +12933,11 @@ async function readyLocalVmForTurn(botId: string, target: LocalVmTarget, isCurre
   // before the first await — the same synchronous-fence-then-count shape
   // the panel route uses — so two concurrent turns cannot both pass the
   // per-bot limit between count and create.
-  const ownsProvision = !localVmProvisionBusy;
+  // Pool capacity is bounded by its seat indices. Each seat already has
+  // its own lease/lifecycle fence, so independent cold seats can start
+  // together without competing for the per-bot inventory's capacity gate.
+  const pooled = target.key.startsWith("pool:");
+  const ownsProvision = !pooled && !localVmProvisionBusy;
   if (ownsProvision) localVmProvisionBusy = true;
   let status: ContainerComputerStatus;
   try {
@@ -12869,9 +12948,9 @@ async function readyLocalVmForTurn(botId: string, target: LocalVmTarget, isCurre
     // Another creation is already mid-flight and its container is not yet
     // visible to a count, so the safe answer is the inspected status —
     // exactly what the over-cap path below returns.
-    if (!ownsProvision) return status;
+    if (!pooled && !ownsProvision) return status;
 
-    if (target.key !== SHARED_LOCAL_VM_TARGET.key) {
+    if (target.key.startsWith("bot:")) {
       const count = await existingPerBotLocalVmCount(status.runtime);
       if (!isCurrent() || count >= localVmMaxInstances(cfg)) return status;
     }
@@ -20127,6 +20206,9 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
       if (localVmMode(cfg) === "per-bot" && action === "run") {
         return json(res, 409, { error: "Per-bot mode creates each desktop from that bot's Computer panel" });
       }
+      if (localVmMode(cfg) === "pool" && action === "run") {
+        return json(res, 409, { error: "Pool mode creates its desktops automatically from conversation turns" });
+      }
       const vmOwner = localVmLeaseFor(SHARED_LOCAL_VM_TARGET).current(localVmOwnerBusy);
       if (vmOwner && (action === "stop" || action === "remove" || action === "run")) {
         return json(res, 409, { error: "the Local VM is being used by a bot — stop that turn first" });
@@ -20167,7 +20249,7 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
     if (m && method === "GET") {
       const bot = computerPreviewBot(m[1], url);
       if (!bot) return json(res, 404, { error: "no such bot" });
-      return json(res, 200, await localVmPayload(localVmTargetForBot(bot.id)));
+      return json(res, 200, await localVmPayload(localVmTargetForStatus(bot.id, bot.threadId)));
     }
     m = path.match(/^\/api\/bots\/([\w-]+)\/local-computer\/(run|stop|remove)$/);
     if (m && method === "POST") {
@@ -20236,7 +20318,7 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
       if (url.searchParams.has("threadId") && await computerPreviewSurface(bot, bot.threadId) !== "vm") {
         return json(res, 409, { error: "This conversation is not using the Local VM" });
       }
-      const target = localVmTargetForBot(bot.id);
+      const target = localVmTargetForStatus(bot.id, url.searchParams.has("threadId") ? bot.threadId : undefined);
       localVmIdleFor(target).touch();
       res.setHeader("cache-control", "private, no-store");
       return json(res, 200, {
