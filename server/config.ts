@@ -997,6 +997,10 @@ export function loadConfig(): AppConfig {
   if (process.env.OPENCODE_API_KEY !== undefined) cfg.opencodeGo.apiKey = process.env.OPENCODE_API_KEY;
   cfg.tts = { ...cfg.tts };
   if (process.env.OMB_TTS_KEY !== undefined) cfg.tts.key = process.env.OMB_TTS_KEY;
+  // A preset ElevenLabs voice (Cloud Pro sets one) is only a default: a voice or
+  // another speech provider the person picked in Settings always wins.
+  const presetVoice = process.env.OMB_TTS_DEFAULT_VOICE?.trim();
+  if (presetVoice && !cfg.tts.voice?.trim() && (cfg.tts.provider ?? "elevenlabs") === "elevenlabs") cfg.tts.voice = presetVoice;
   if (process.env.OMB_FISH_AUDIO_API_KEY !== undefined) cfg.tts.fishKey = process.env.OMB_FISH_AUDIO_API_KEY;
   cfg.imageGen = { ...cfg.imageGen };
   if (process.env.OMB_OPENAI_IMAGE_KEY !== undefined) cfg.imageGen.key = process.env.OMB_OPENAI_IMAGE_KEY;
