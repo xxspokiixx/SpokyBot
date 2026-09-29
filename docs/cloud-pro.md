@@ -147,17 +147,37 @@ When the Admin has both services configured, it also sets:
 
 | Variable | Fly | Value |
 | --- | --- | --- |
-| `OMB_BOX_API` | env | `https://cloud.openmausbot.com/api/cloud/services/boat/api/box/v1`, the Admin's Boat relay. It keeps Boat's own `/api/box/v1` ending, so the Computer engine's model catalog (`<root>/api/provider-models`) resolves through the relay too. |
-| `BOX_TOKEN` | secret | This machine's Boat relay token. It is not a Boat key and works only through the relay. |
-| `OMB_ELEVENLABS_API` | env | `https://cloud.openmausbot.com/api/cloud/services/voice/v1`, the Admin's voice relay. |
-| `OMB_TTS_KEY` | secret | This machine's voice relay token. |
+| `OMB_CLOUD_BOAT_URL` | env | `https://cloud.openmausbot.com/api/cloud/services/boat/api/box/v1`, the Admin's Boat relay. It keeps Boat's own `/api/box/v1` ending, so the Computer engine's model catalog (`<root>/api/provider-models`) resolves through the relay too. |
+| `OMB_CLOUD_BOAT_TOKEN` | secret | This machine's Boat relay token (`box_omb_…`). It is not a Boat key and works only through the relay. |
+| `OMB_CLOUD_VOICE_URL` | env | `https://cloud.openmausbot.com/api/cloud/services/voice/v1`, the Admin's voice relay. |
+| `OMB_CLOUD_VOICE_TOKEN` | secret | This machine's voice relay token (`omb_voice_…`). |
 | `OMB_TTS_DEFAULT_VOICE` | env | An ElevenLabs voice id, used until the person picks a voice or another speech provider in Settings. |
 
-These are settings the app already reads, so the image needs nothing else.
-The real Boat and ElevenLabs keys stay on the Admin, which checks the
-subscription, the monthly caps and which computers belong to this machine on
-every request. `BOX_TOKEN` and `OMB_TTS_KEY` are on the credential list, so no
-engine or tool the server starts inherits them.
+A service is included only when both its URL and its token are set
+(`server/included-services.ts`). The real Boat and ElevenLabs keys stay on the
+Admin, which checks the subscription, the monthly caps and which computers
+belong to this machine on every request.
+
+- **The person's own key always wins.** An included token is a fallback, used
+  only while the person has no key of their own: none saved in Settings
+  (`box.token`, `tts.key`) and no `BOX_TOKEN` or `OMB_TTS_KEY` in the
+  environment. Adding a key switches to it at once; removing it falls back to
+  the included service again. The choice is made on every request.
+- **Each credential goes to one place.** The relays know only the Admin's
+  accounts, so an own key goes only to the provider (`OMB_BOX_API` or
+  `OMB_ELEVENLABS_API` when set, for development and tests, else Boat's and
+  ElevenLabs' own APIs) and an included token only to its relay.
+- **An included token is never the person's key.** It is never written to
+  `config.json`, never sent to a client (Settings sees `configured` and
+  `included: true`, and says "Included with Cloud Pro"), and Settings never
+  verifies, rotates or clears it. Boat's account-change rules still apply:
+  adding an own Boat key while included cloud computers exist is refused until
+  they are deleted, because the new account cannot reach them.
+- **Nothing the server starts inherits it.** The server reads both tokens at
+  startup, keeps them in memory and removes them from its environment, like
+  the bootstrap secret; they are also on the credential list.
+- A refusal from the relay (for example, the month's cloud computer hours are
+  used up) is shown as the relay's own message.
 
 ## Pairing: the Admin's signed request
 

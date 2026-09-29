@@ -14,6 +14,7 @@ import { createHash } from "node:crypto";
 
 import { DATA_DIR, type AppConfig } from "./config.ts";
 import { loadEnvironmentId } from "./environment.ts";
+import { boatCredential, boatProviderApi, type ServiceCredential } from "./included-services.ts";
 import {
   adoptResolvedBoat,
   beginBoatCreate,
@@ -57,10 +58,11 @@ export function isolatedRemoteCommand(command: string): string {
   ].join(" ");
 }
 
-// overridable so tests can point at a stub instead of the live provider.
-// Boat's provider surface keeps its historical Box-era names: env OMB_BOX_API,
-// base path /api/box/v1, REST paths /boxes/*, and the box_ token prefix.
-const BOAT_API = process.env.OMB_BOX_API || "https://ascii.dev/api/box/v1";
+// The base URL follows the credential in use (included-services.ts): an own
+// token goes to Boat (OMB_BOX_API overrides it so tests can point at a stub),
+// Cloud Pro's included token only to its relay. Boat's provider surface keeps
+// its historical Box-era names: env OMB_BOX_API, base path /api/box/v1, REST
+// paths /boxes/*, and the box_ token prefix.
 const READY = new Set(["idle", "ready", "running"]);
 const SLEEPING = new Set(["archived", "archiving", "stopped", "stopping"]);
 const DEFAULT_BOAT_TTL_SECONDS = 8 * 60 * 60;
@@ -173,10 +175,11 @@ function snapshotBoatConfig(cfg: AppConfig): AppConfig {
 }
 
 function boatFetch(cfg: AppConfig, path: string, opts: RequestInit = {}) {
-  return fetch(`${BOAT_API}${path}`, {
+  const account = boatAccount(cfg);
+  return fetch(`${account?.api ?? boatProviderApi()}${path}`, {
     ...opts,
     headers: {
-      authorization: `Bearer ${cfg.box?.token}`,
+      authorization: `Bearer ${account?.token}`,
       "content-type": "application/json",
       ...opts.headers,
     },
@@ -472,8 +475,15 @@ async function waitReady(cfg: AppConfig, boxId: string, budgetMs = 90_000) {
     const state = body?.box?.state;
     if (READY.has(state)) return body.box;
     if (state === "error") return null;
-    // an archiving boat can't resume until the snapshot lands — nudge after
-    if (state === "archived") await boatJson(cfg, `/boxes/${boxId}/resume`, { method: "POST" });
+    // an archiving boat can't resume until the snapshot lands — nudge after.
+    // A refusal (a plan limit, say) is final: report it instead of waiting
+    // out the budget. 409 is a state race with a wake already under way.
+    if (state === "archived") {
+      const resumed = await boatJson(cfg, `/boxes/${boxId}/resume`, { method: "POST" });
+      if (!resumed.ok && resumed.status !== 409) {
+        throw new Error(boatErrorMessage(resumed.status, "waking the cloud computer", resumed.body));
+      }
+    }
     await new Promise((r) => setTimeout(r, 2500));
   }
   return null;
@@ -993,16 +1003,30 @@ export async function readyBoat(cfg: AppConfig, botId: string, budgetMs = 60_000
   return waitReady(cfg, boat.id, budgetMs);
 }
 
+/** The Boat credential a request uses: the person's own token, else Cloud
+ * Pro's included one. Settings' own-key flows read cfg.box.token instead. */
+export function boatAccount(cfg: AppConfig): ServiceCredential | null {
+  return boatCredential(cfg.box?.token);
+}
+
 export function boatConfigured(cfg: AppConfig) {
-  return Boolean(cfg.box?.token);
+  return Boolean(boatAccount(cfg));
+}
+
+/** What Settings shows: configured-or-not, and whether that is Cloud Pro's
+ * included account rather than a saved key. Never the token. */
+export function describeBoatAccount(cfg: AppConfig): { configured: boolean; included?: true } {
+  const account = boatAccount(cfg);
+  return { configured: Boolean(account), ...(account?.included ? { included: true as const } : {}) };
 }
 
 /** Ask the provider whether a token is real, before we let someone save
  * it. Without this the paste "succeeds", and the first sign of trouble is
- * a 401 in a different panel minutes later, with nothing to act on. */
+ * a 401 in a different panel minutes later, with nothing to act on. Only
+ * ever an own token, so only ever Boat itself. */
 export async function verifyToken(token: string): Promise<{ ok: true } | { ok: false; message: string }> {
   try {
-    const res = await fetch(`${BOAT_API}/boxes`, {
+    const res = await fetch(`${boatProviderApi()}/boxes`, {
       headers: { authorization: `Bearer ${token}` },
       signal: AbortSignal.timeout(20_000),
     });

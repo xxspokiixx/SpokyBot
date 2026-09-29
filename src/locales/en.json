@@ -1347,6 +1347,7 @@
   "keys.helpAria": "{label} help",
   "keys.optional": "Optional",
   "keys.configured": "Configured",
+  "keys.includedWithCloudPro": "Included with Cloud Pro",
   "keys.testAuthenticated": "API key authenticated. Chat not tested.",
   "keys.testCatalog": "Model catalog reachable: {models}. Authentication and chat not verified.",
   "keys.testCatalogNoModels": "Model catalog reachable. Authentication and chat not verified.",
