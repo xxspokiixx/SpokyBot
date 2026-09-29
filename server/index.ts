@@ -818,13 +818,17 @@ function sharedComputerPrincipal(capability: Pick<InternalCapability, "botId" | 
       generation: capability.generation,
       thread: store.messagesFor(capability.threadId),
       ownerPerson: cloudOwnerPerson,
+      cardAnswerer: cloudCardAnswerer,
       routineRun: () => {
         const run = activeRoutineRunForThread(capability.threadId);
         if (!run || run.threadId !== capability.threadId || store.taskByThread(capability.botId, capability.threadId)?.routineRunId !== run.id) return null;
         return {
           triggerSource: run.triggerSource ?? (run.manual ? "manual" : "schedule"),
           ownerStarted: ownerStartedRoutineRuns.has(run.id),
-          ownerAuthored: cloudRoutineAuthors?.authored(run.routineId, run) === true,
+          // What the run snapshotted, on the schedule its routine has now.
+          ownerAuthored: ((routine) => Boolean(routine) && cloudRoutineAuthors?.authored(run.routineId, {
+            ...routine!, prompt: run.prompt, target: run.target, botId: run.botId, groupId: run.groupId, attachments: run.attachments, runOn: run.runOn,
+          }) === true)(routines?.listRoutines().find((candidate) => candidate.id === run.routineId)),
         };
       },
     }) ? CLOUD_HOME_LENDER : null;
@@ -856,6 +860,12 @@ function cloudOwnerPerson(person: string | undefined): boolean {
   return Boolean(person) && sessions.list().some((session) => session.scopes.includes("admin") && personKey(session) === person);
 }
 
+/** On a Cloud home, a session that is not one of the owner's own devices may
+ * not answer a card of any kind. */
+function cloudCardRefusal(auth: RequestAuth & { kind: "session" }): string | null {
+  return auth.scopes.includes("admin") ? null : "Only the owner of this Cloud can answer this card.";
+}
+
 /** Whose session may answer a card. The provider CLI's own approval modes and
  * the harness's proposals stay exactly as they are; this adds no card, gate
  * or prompt, it only decides whose answer to an existing card counts.
@@ -872,6 +882,10 @@ function cardAnswerRefusal(auth: RequestAuth, threadId: string, requestId: strin
       ? "A local service can only decline this request. Approve or answer it in OpenMausBot while signed in."
       : null;
   }
+  // A Cloud home is one person's: a device paired with chat-only access (a
+  // guest) may read along but never answer, or its words would reach the
+  // owner's turn, and through it a lent Mac (docs/cloud-pro.md).
+  if (CLOUD_HOME) return cloudCardRefusal(auth);
   if (auth.scopes.includes("admin") || !sharedMembership()) return null;
   const known = [threadStarters.get(threadId), cardRequesterKey(threadId, requestId)].filter((person): person is string => Boolean(person));
   if (!known.length || known.includes(personKey(auth.session))) return null;
@@ -915,7 +929,20 @@ function decisionActorFor(auth: RequestAuth): DecisionActor {
 
 function cardAnswererFor(auth: RequestAuth): CardAnswerer {
   if (auth.kind === "loopback") return auth.trust === "service" ? { kind: "worker" } : { kind: "loopback" };
-  return { kind: "session", name: (auth.session.email ?? auth.session.label ?? "").trim() || "Signed-in user" };
+  return { kind: "session", name: (auth.session.email ?? auth.session.label ?? "").trim() || "Signed-in user",
+    ...(CLOUD_HOME ? { person: personKey(auth.session) } : {}) };
+}
+
+/** On a Cloud home, who is answering a card right now, by request id: the
+ * answer reaches the turn before `answeredBy` is written, and a lending turn
+ * must know whose words it just received (server/cloud-lending.ts). */
+const cloudCardAnswersInFlight = new Map<string, string | undefined>();
+
+/** The person who answered a card, as far as lending on a Cloud home is
+ * concerned: the recorded answerer, else whoever is answering it now. */
+function cloudCardAnswerer(card: { requestId?: string; answeredBy?: { kind: string; person?: string } }): string | undefined {
+  if (card.answeredBy) return card.answeredBy.kind === "session" ? card.answeredBy.person : undefined;
+  return card.requestId ? cloudCardAnswersInFlight.get(card.requestId) : undefined;
 }
 
 /** Answer a card as `auth`: the decision rows written meanwhile name the
@@ -926,6 +953,7 @@ async function answeringCardAs(auth: RequestAuth, threadId: string, requestId: s
     const card = store.messagesFor(threadId).find((message) => message.card?.requestId === requestId)?.card;
     return Boolean(card && !card.answered && !card.dismissed && !card.expired);
   })();
+  if (CLOUD_HOME && open) cloudCardAnswersInFlight.set(requestId, auth.kind === "session" ? personKey(auth.session) : undefined);
   try {
     await withDecisionActor(decisionActorFor(auth), work);
   } finally {
@@ -934,6 +962,7 @@ async function answeringCardAs(auth: RequestAuth, threadId: string, requestId: s
     if (message && card && !card.answeredBy && card.answered !== "unavailable" && (card.answered || card.dismissed)) {
       store.patchMessage(threadId, message.id, { card: { ...card, answeredBy: cardAnswererFor(auth) } });
     }
+    if (CLOUD_HOME && open) cloudCardAnswersInFlight.delete(requestId);
   }
 }
 
@@ -16600,10 +16629,12 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
       const wasOwners = Boolean(before && cloudRoutineAuthors?.authored(before.id, before));
       const routine = routines!.update(routineMatch[1], body);
       // The owner's own edit keeps (or, when it rewrites the instructions,
-      // makes) the routine theirs. Anyone else's edit changes what it does,
-      // so the recorded fingerprint no longer matches and it stops lending.
-      if (routine && cloudRoutineAuthors && cloudOwnerSession(auth) && (wasOwners || (body && typeof body === "object" && "prompt" in body))) {
-        cloudRoutineAuthors.record(routine.id, routine);
+      // makes) the routine theirs. Anyone else's edit, of any field (its
+      // schedule, where its results go, whether it is on), makes it no longer
+      // the owner's: it stops lending until the owner rewrites it.
+      if (routine && cloudRoutineAuthors) {
+        if (!cloudOwnerSession(auth)) cloudRoutineAuthors.forget(routine.id);
+        else if (wasOwners || (body && typeof body === "object" && "prompt" in body)) cloudRoutineAuthors.record(routine.id, routine);
       }
       return routine ? json(res, 200, { routine }) : json(res, 404, { error: "no such routine" });
     }
@@ -19520,6 +19551,11 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
       if (existing.card.requestId) {
         return json(res, 409, { error: "request cards must be answered through the approval endpoint" });
       }
+      // On a Cloud home only the owner answers cards (cardAnswerRefusal).
+      // This route only keeps how an options card looks; the answer itself
+      // reaches the bot as a chat line, which lending already checks.
+      const cloudRefusal = CLOUD_HOME && body.answered !== undefined && auth.kind === "session" ? cloudCardRefusal(auth) : null;
+      if (cloudRefusal) return json(res, 403, { error: cloudRefusal });
       if (Object.keys(body).some((key) => key !== "answered" && key !== "dismissed" && key !== "threadId")) {
         return json(res, 400, { error: "only answered and dismissed may be changed" });
       }
@@ -19534,6 +19570,7 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
           ...existing.card,
           ...(body.answered !== undefined ? { answered: body.answered } : {}),
           ...(body.dismissed !== undefined ? { dismissed: body.dismissed } : {}),
+          ...(CLOUD_HOME && body.answered !== undefined ? { answeredBy: cardAnswererFor(auth) } : {}),
         },
       });
       return json(res, 200, { message: patched });

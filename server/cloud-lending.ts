@@ -18,7 +18,8 @@ import { z } from "zod";
 import { writeFileAtomic } from "./atomic.ts";
 import type { RoutineRunTrigger } from "./routines.ts";
 
-type Line = { id: string; role: string; peerAsk?: unknown; sender?: { id?: string } };
+type Card = { requestId?: string; answered?: string; answeredText?: string; dismissed?: boolean; answeredBy?: { kind: string; person?: string } };
+type Line = { id: string; role: string; peerAsk?: unknown; sender?: { id?: string }; card?: Card };
 
 export interface CloudLendingTurn {
   /** The harness's record of the request that started this turn. */
@@ -27,6 +28,9 @@ export interface CloudLendingTurn {
   thread: readonly Line[];
   /** Whether a person key is one of the owner's own devices right now. */
   ownerPerson: (person: string | undefined) => boolean;
+  /** Who answered a card (the recorded answerer, or whoever is answering it
+   * right now); undefined when that is not a known person. */
+  cardAnswerer: (card: Card) => string | undefined;
   /** The routine run executing on this turn's thread, when there is one. */
   routineRun: () => { triggerSource: RoutineRunTrigger; ownerStarted: boolean; ownerAuthored: boolean } | null;
 }
@@ -47,15 +51,37 @@ export function cloudHomeTurnMayLend(turn: CloudLendingTurn): boolean {
       run!.ownerAuthored && (run!.triggerSource !== "manual" || run!.ownerStarted);
   }
   // Nothing anyone else wrote (a guest, a teammate bot, a local process) may
-  // have been steered, queued or handed into this turn since it started.
-  return owner && turn.thread.slice(index + 1).every(line => line.role !== "user" || turn.ownerPerson(personOf(line)));
+  // have been steered, queued or handed into this turn since it started, as a
+  // line or as the answer to a card (a question or an approval) it asked.
+  return owner && turn.thread.slice(index + 1).every(line =>
+    (line.role !== "user" || turn.ownerPerson(personOf(line))) &&
+    (!answeredByPerson(line.card) || turn.ownerPerson(turn.cardAnswerer(line.card!))));
 }
 
-/** What a routine run does, reduced to what its author decides. A run
- * snapshots these from its routine, so an edit by anyone else changes it. */
-export function routineFingerprint(routine: { prompt?: string; target?: unknown; botId?: string; groupId?: string; attachments?: { id: string; path: string }[] }): string {
+/** A card someone answered: a person's verdict or words. The harness's own
+ * settlements (automatic approvals, a turn that ended) are marked dismissed
+ * or unavailable and carry nobody's words. */
+function answeredByPerson(card: Card | undefined): boolean {
+  if (!card) return false;
+  return (Boolean(card.answered) && card.answered !== "unavailable" && card.dismissed !== true) || Boolean(card.answeredText);
+}
+
+type RoutineShape = {
+  prompt?: string; target?: unknown; botId?: string; groupId?: string; attachments?: { id: string; path: string }[];
+  schedule?: unknown; runOn?: string;
+};
+
+/** What a routine run does and when, reduced to what its author decides:
+ * the instructions, where and on what it runs, and its schedule. The
+ * scheduler never rewrites these (it does rewrite a routine's results thread
+ * on each run, so that is guarded by who edits the routine instead: see the
+ * routines PATCH route). An edit by anyone else changes the fingerprint. */
+export function routineFingerprint(routine: RoutineShape): string {
   const attachments = (routine.attachments ?? []).map(attachment => [attachment.id, attachment.path]);
-  return createHash("sha256").update(JSON.stringify([routine.prompt ?? "", routine.target ?? null, routine.botId ?? "", routine.groupId ?? null, attachments])).digest("hex");
+  return createHash("sha256").update(JSON.stringify([
+    routine.prompt ?? "", routine.target ?? null, routine.botId ?? "", routine.groupId ?? null, attachments,
+    routine.schedule ?? null, routine.runOn ?? null,
+  ])).digest("hex");
 }
 
 const authorsFile = z.object({ version: z.literal(1), routines: z.record(z.string().max(128), z.string().regex(/^[a-f0-9]{64}$/)) }).strict();
@@ -74,10 +100,10 @@ export function createCloudRoutineAuthors(file: string) {
   const save = () => writeFileAtomic(file, JSON.stringify({ version: 1, routines }), { mode: 0o600 });
   return {
     /** The owner wrote this routine as it stands now. */
-    record(id: string, routine: Parameters<typeof routineFingerprint>[0]) { routines = { ...routines, [id]: routineFingerprint(routine) }; save(); },
+    record(id: string, routine: RoutineShape) { routines = { ...routines, [id]: routineFingerprint(routine) }; save(); },
     forget(id: string) { if (Object.hasOwn(routines, id)) { const next = { ...routines }; delete next[id]; routines = next; save(); } },
     /** Whether this routine, as it stands (or as a run snapshotted it), is
      * exactly what the owner wrote. */
-    authored(id: string, routine: Parameters<typeof routineFingerprint>[0]) { return Object.hasOwn(routines, id) && routines[id] === routineFingerprint(routine); },
+    authored(id: string, routine: RoutineShape) { return Object.hasOwn(routines, id) && routines[id] === routineFingerprint(routine); },
   };
 }
