@@ -154,7 +154,7 @@ export function DecisionModelSettings() {
             aria-label={t("decider.key.label")}
             autoComplete="off"
             spellCheck={false}
-            className="w-full rounded-lg border border-hairline/40 bg-inset px-3 py-2 text-[13px] text-ink placeholder:text-ink-secondary focus:border-hairline focus:outline-none"
+            className="w-full rounded-lg border border-hairline/40 bg-inset px-3 py-2 text-[13px] text-ink placeholder:text-ink-secondary focus:outline-none"
           />
           <button
             type="button"
