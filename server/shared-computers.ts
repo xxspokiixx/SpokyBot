@@ -21,6 +21,10 @@ type Operation = z.infer<typeof sharedComputerOperation>;
  * poll, answer and disconnect) and the person behind that session (only that
  * person's bot turns may see or use it). */
 export type SharedComputerOwner = { session: string; person: string };
+export type SharedComputerStatus = {
+  id: string; name: string; online: boolean; busy: boolean; lastSeenAt: number;
+  scopes: { folders: { id: string; name: string; write: boolean }[]; terminal: boolean; screen: boolean };
+};
 type Job = { id: string; operation: Operation; active: () => boolean; sent: boolean; resolve: (result: unknown) => void; reject: (error: Error) => void; timer: NodeJS.Timeout };
 type Computer = { registration: Registration; owner: SharedComputerOwner; secret: string; seen: number; jobs: Map<string, Job>; wake?: () => void };
 const failure = (message: string, status = 409) => Object.assign(new Error(message), { status });
@@ -114,6 +118,22 @@ export class SharedComputers {
   list(principal: string | null) {
     if (!principal) return [];
     return [...this.computers.values()].filter(entry => entry.owner.person === principal && this.online(entry)).map(entry => entry.registration);
+  }
+  /** What one person has lent, online or not: the documented status a
+   * reader (the Cloud UI, the next step's placement) uses to tell "your Mac
+   * is lent and awake" from "lent but asleep" and "not lent". No secret, no
+   * session. Resets when this server restarts; a lending desktop registers
+   * again within seconds of being online. */
+  status(principal: string | null): SharedComputerStatus[] {
+    if (!principal) return [];
+    this.reap();
+    return [...this.computers.values()].filter(entry => entry.owner.person === principal).map(entry => ({
+      id: entry.registration.id, name: entry.registration.name, online: this.online(entry), busy: entry.jobs.size > 0, lastSeenAt: entry.seen,
+      scopes: {
+        folders: entry.registration.folders.map(({ id, name, write }) => ({ id, name, write })),
+        terminal: entry.registration.terminal, screen: entry.registration.computer,
+      },
+    }));
   }
   async poll(id: string, session: string, secret: string) {
     const entry = this.authorize(id, session, secret);
