@@ -609,7 +609,8 @@ export interface ConfigStatus {
   budgets?: { monthlyUsd?: number; warnAtPercent?: number };
   billing?: { currency?: string; prices?: Record<string, { inputPerMillion: number; outputPerMillion: number; cachedInputPerMillion?: number }> };
   composio: { configured: boolean; mode?: "managed" | "self-hosted" | "unavailable" };
-  box: { configured: boolean };
+  /** `included`: cloud computers come with Cloud Pro, no key is saved. */
+  box: { configured: boolean; included?: boolean };
   vps: { configured: boolean; sshAlias: string };
   rooms: { turnTimeoutMinutes: number };
   /** Workspace defaults for new bots; absent effort = no level is sent. */
@@ -629,6 +630,8 @@ export interface ConfigStatus {
     provider?: "elevenlabs" | "fish" | "system" | "chatterbox" | "xai";
     baseUrl?: string;
     model?: string;
+    /** ElevenLabs voice comes with Cloud Pro; no key is saved. */
+    included?: boolean;
   };
   /** Shared write-only credential for on-demand GPT Image avatars. */
   imageGen?: {

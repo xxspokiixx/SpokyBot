@@ -190,17 +190,50 @@ When the Admin has both services configured, it also sets:
 
 | Variable | Fly | Value |
 | --- | --- | --- |
-| `OMB_BOX_API` | env | `https://cloud.openmausbot.com/api/cloud/services/boat/api/box/v1`, the Admin's Boat relay. It keeps Boat's own `/api/box/v1` ending, so the Computer engine's model catalog (`<root>/api/provider-models`) resolves through the relay too. |
-| `BOX_TOKEN` | secret | This machine's Boat relay token. It is not a Boat key and works only through the relay. |
-| `OMB_ELEVENLABS_API` | env | `https://cloud.openmausbot.com/api/cloud/services/voice/v1`, the Admin's voice relay. |
-| `OMB_TTS_KEY` | secret | This machine's voice relay token. |
+| `OMB_CLOUD_BOAT_URL` | env | `https://cloud.openmausbot.com/api/cloud/services/boat/api/box/v1`, the Admin's Boat relay. It keeps Boat's own `/api/box/v1` ending, so the Computer engine's model catalog (`<root>/api/provider-models`) resolves through the relay too. |
+| `OMB_CLOUD_BOAT_TOKEN` | secret | This machine's Boat relay token (`box_omb_…`). It is not a Boat key and works only through the relay. |
+| `OMB_CLOUD_VOICE_URL` | env | `https://cloud.openmausbot.com/api/cloud/services/voice/v1`, the Admin's voice relay. |
+| `OMB_CLOUD_VOICE_TOKEN` | secret | This machine's voice relay token (`omb_voice_…`). |
 | `OMB_TTS_DEFAULT_VOICE` | env | An ElevenLabs voice id, used until the person picks a voice or another speech provider in Settings. |
 
-These are settings the app already reads, so the image needs nothing else.
-The real Boat and ElevenLabs keys stay on the Admin, which checks the
-subscription, the monthly caps and which computers belong to this machine on
-every request. `BOX_TOKEN` and `OMB_TTS_KEY` are on the credential list, so no
-engine or tool the server starts inherits them.
+A service is included only when both its URL and its token are set
+(`server/included-services.ts`). The real Boat and ElevenLabs keys stay on the
+Admin, which checks the subscription, the monthly caps and which computers
+belong to this machine on every request.
+
+- **The person's own key always wins.** An included token is a fallback, used
+  only while the person has no key of their own: none saved in Settings
+  (`box.token`, `tts.key`) and no `BOX_TOKEN` or `OMB_TTS_KEY` in the
+  environment. Adding a key switches to it at once; removing it falls back to
+  the included service again (for Boat, once that key's cloud computers are
+  deleted: removing a Boat key that still has computers is refused). The
+  choice is made on every request.
+- **Each credential goes to one place.** The relays know only the Admin's
+  accounts, so an own key goes only to the provider (`OMB_BOX_API` or
+  `OMB_ELEVENLABS_API` when set, for development and tests, else Boat's and
+  ElevenLabs' own APIs) and an included token only to its relay.
+- **An included token is never the person's key.** It is never written to
+  `config.json`, never sent to a client (Settings sees `configured` and
+  `included: true`, and says "Included with Cloud Pro"), and Settings never
+  verifies, rotates or clears it. Boat's account-change rules still apply:
+  adding an own Boat key while included cloud computers exist is refused until
+  they are deleted, because the new account cannot reach them.
+- **What holding the tokens does and does not do.** The server reads both
+  tokens at startup, keeps them in memory and removes them from its
+  environment, like the bootstrap secret, and they are on the credential list.
+  So no process the server starts inherits them, including tools that copy
+  its environment as it is (the browser, docker, ssh, MCP bridges). It does
+  not make them unreadable: the launcher starts the server with them, so the
+  server's `/proc/<pid>/environ` keeps its startup environment, and an engine
+  running as the same user (a bot with a shell) can read a relay token there.
+  That is accepted because a relay token is only this customer's own Cloud Pro
+  allowance: it works only through the Admin, only on this machine's cloud
+  computers and voice, and only up to the monthly caps. Whoever holds it can
+  at worst use up this month's included hours or voice characters; it opens
+  no other customer's data and none of the Admin's provider keys.
+- A refusal from the relay (for example, the month's cloud computer hours are
+  used up) is shown as the relay's own message. A resume that fails with a
+  server error is retried on the next poll, as Boat asks.
 
 ## Pairing: the Admin's signed request
 
