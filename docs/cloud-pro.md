@@ -194,13 +194,22 @@ On the Mac (the authority; `electron/computer-sharing.mjs`,
   that run code (`~/Library/LaunchAgents`, git and shell configuration,
   `~/.local/bin`), decided by filesystem identity rather than spelling. Writes
   inside any `.git` directory are refused.
-- **Screen tools are an allow-list** of observation and input. The local
-  driver's tools that work outside the screen (uploading a file by path,
-  recording or replaying to a path, configuration, installing, DevTools,
-  killing a process) are refused and hidden.
+- **Screen tools and their arguments are an allow-list**
+  (`electron/lent-screen-tools.mjs`), derived from the local driver's own
+  schemas: observation and input only. The driver's tools that work outside
+  the screen (uploading a file by path, recording or replaying to a path,
+  configuration, installing, DevTools, killing a process, raising permission
+  prompts) are refused and hidden, and so is every argument that names a path,
+  a command line or a port: screenshots come back inline (never
+  `screenshot_out_file` or `debug_image_out`), `launch_app` takes no extra
+  arguments or inspector port and opens only `http`/`https` addresses, and a
+  cursor image cannot be read from a path. Any other argument is refused, and
+  the tool list the Cloud sees shows only what is accepted.
 - **Activity log**: `lending-activity.jsonl` in the app's data folder, owner
-  only, last 500 entries: time, action, folder and relative path or tool name,
-  and whether it ran. Never contents, output or typed text.
+  only: time, action, folder and relative path or tool name, and whether it
+  ran. Never contents, output or typed text. The app only ever appends to it
+  (never through a link); a full file of 500 entries is moved to
+  `lending-activity.jsonl.1` intact. No folder or screen argument reaches it.
 
 On the Cloud home (`server/shared-computers.ts`, `server/index.ts`):
 
@@ -210,18 +219,40 @@ On the Cloud home (`server/shared-computers.ts`, `server/index.ts`):
 - The server refuses operations outside the scopes the Mac registered before
   queuing them, never retries an operation with an unknown outcome, and never
   substitutes its own files for an offline Mac.
-- A Cloud home is one person's server, so every turn on it acts for that
-  person: a conversation, a routine or a webhook can use the lent Mac within
-  its scopes. Anyone the owner pairs to their Cloud can direct its bots, and so
-  reach what is lent; pair only your own devices. A bot whose **Computer**
-  setting is off cannot use lent apps and screen.
+- Only turns that provably act for the owner may use the lent Mac
+  (`server/cloud-lending.ts`): a conversation the owner started from one of
+  their own devices (a live session with admin scope), a scheduled run of a
+  routine the owner wrote or last rewrote from one of those devices, or a run
+  of it the owner started by hand. Never a webhook-started run (its payload
+  comes from outside), a guest's conversation or routine (a device paired
+  with chat-only access), a routine someone else rewrote, a room, a bot's
+  delegated or peer turn, a local process on the Cloud, or anything the
+  harness cannot trace. A conversation qualifies only while it holds nobody
+  else's words, anywhere in it, before or during the turn: one line from a
+  guest, a teammate bot or a local process (sent, queued, steered or handed
+  in, or history imported with a move), or one card answer from someone else,
+  takes that conversation out of lending for good, because a resumed session
+  carries everything said in it. The bot is told "Someone else wrote in this
+  conversation, so it can't use your Mac. Start a new conversation to use it."
+  and the lending switch says the same. The owner's own edits count as theirs,
+  and the harness's own automatic card settlements do not count. A
+  routine stops being the owner's once anyone else edits it in any way (its
+  instructions, schedule, results destination or whether it is on); the
+  owner rewriting its instructions makes it theirs again. A bot whose
+  **Computer** setting is off cannot use lent apps and screen.
+- On a Cloud home only the owner's own devices (admin sessions) can answer a
+  card or remember an approval; a guest can read along but never answer.
+- What this does not cover: a bot's own memory. Notes a bot keeps while
+  talking with a guest load into that bot's later conversations, the owner's
+  included. Pairing a guest to your Cloud lets them talk to your bots; lend
+  your Mac only while you trust everyone paired there.
 
 ### What the Cloud can see: `GET /api/shared-computers`
 
 For the Cloud UI and the next step (placing a step on the Mac, "Waiting for
-your Mac"). Client scope; on a Cloud home every session sees the person's lent
-computers, elsewhere a session sees only its own person's. No secrets, no
-local paths.
+your Mac"). Client scope; on a Cloud home only the owner's own devices (admin
+sessions) see the lent Mac and a guest sees an empty list; elsewhere a session
+sees only its own person's. No secrets, no local paths.
 
 ```json
 { "computers": [ {

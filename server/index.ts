@@ -17,6 +17,7 @@ import { draftSummary, foldPoint } from "./compaction-summary.ts";
 import { compactBudget, contextWindowFor, shouldCompact } from "./context-budget.ts";
 import { autoCompactWindow } from "./drivers/claude.ts";
 import { provenRequestPerson, SharedComputers, sharedComputerOperation, sharedComputerRegistration } from "./shared-computers.ts";
+import { cloudHomeLendingRefusal, createCloudRoutineAuthors, type CloudLendingTurn } from "./cloud-lending.ts";
 import { SharedComputerControl } from "./shared-computer-control.ts";
 import { RoomHandoffs, type RoomHandoff } from "./room-handoffs.ts";
 import { assertRequestTarget, guardedRequestPath, requestConflict, requestNeedsInput, requestSourceForCard } from "./guarded-requests.ts";
@@ -637,6 +638,10 @@ const CLOUD_HOME = cloudHomeConfiguration();
 const lendingEnabled = () => sharedComputersEnabled(cfg) || CLOUD_HOME !== null;
 /** On a Cloud home every lent computer and every turn belong to one person. */
 const CLOUD_HOME_LENDER = "cloud-home";
+/** Routines whose instructions the Cloud home's owner wrote, and manual runs
+ * the owner started: the only routine turns that may use a lent Mac. */
+const cloudRoutineAuthors = CLOUD_HOME ? createCloudRoutineAuthors(join(DATA_DIR, "lending-routines.json")) : null;
+const ownerStartedRoutineRuns = new Set<string>();
 const cloudPairing = CLOUD_HOME ? createCloudPairing({ secret: CLOUD_HOME.bootstrapSecret, sessions }) : null;
 if (CLOUD_HOME) {
   // The signing secret is held in memory from here on, and a platform
@@ -759,7 +764,7 @@ function messageSender(auth: RequestAuth): ResolvedSender | undefined {
  * email when they signed in with one (a new device is still them), else the
  * paired session itself. Hashed, so a message or a thread can carry it
  * without handing other members a session id. */
-function personKey(session: SessionRecord): string {
+function personKey(session: Pick<SessionRecord, "id" | "email">): string {
   const basis = session.email ? `email:${session.email.trim().toLowerCase()}` : `session:${session.id}`;
   return `p_${createHash("sha256").update(basis).digest("base64url").slice(0, 22)}`;
 }
@@ -809,19 +814,70 @@ function threadPersonKey(threadId: string): string | undefined {
  * this machine (who lends nothing to itself) and anything unprovable act for
  * nobody here. Deliberately not the usage ledger's trigger, which defaults to
  * the owner. */
-function sharedComputerPrincipal(capability: Pick<InternalCapability, "threadId" | "generation">): string | null {
-  // A Cloud home is one person's server: every turn on it acts for them, and
-  // only their own admin devices may lend (see the connect route).
-  if (CLOUD_HOME) return CLOUD_HOME_LENDER;
+function sharedComputerPrincipal(capability: Pick<InternalCapability, "botId" | "threadId" | "generation">): string | null {
+  // A Cloud home lends the owner's Mac only to turns that provably act for
+  // the owner (server/cloud-lending.ts): their own conversation from one of
+  // their devices, or a routine they wrote. Never a guest, a webhook, a room
+  // or a line someone else slipped in.
+  if (CLOUD_HOME) return cloudHomeLendingRefusal(cloudLendingTurn(capability)) === null ? CLOUD_HOME_LENDER : null;
   return provenRequestPerson(directRequestOwners.get(capability.threadId), capability.generation,
     (messageId) => linePersonKey(store.messagesFor(capability.threadId).find((message) => message.id === messageId)));
 }
 
-/** Whose lent computers a status reader may see: the Cloud home's one person
- * on a Cloud home, else the person behind the asking session. */
+/** What the lending rule needs to know about one bot turn on a Cloud home. */
+function cloudLendingTurn(capability: Pick<InternalCapability, "botId" | "threadId" | "generation">): CloudLendingTurn {
+  return {
+    request: directRequestOwners.get(capability.threadId),
+    generation: capability.generation,
+    thread: store.messagesFor(capability.threadId),
+    ownerPerson: cloudOwnerPerson,
+    cardAnswerer: cloudCardAnswerer,
+    routineRun: () => {
+      const run = activeRoutineRunForThread(capability.threadId);
+      if (!run || run.threadId !== capability.threadId || store.taskByThread(capability.botId, capability.threadId)?.routineRunId !== run.id) return null;
+      return {
+        triggerSource: run.triggerSource ?? (run.manual ? "manual" : "schedule"),
+        ownerStarted: ownerStartedRoutineRuns.has(run.id),
+        // What the run snapshotted, on the schedule its routine has now.
+        ownerAuthored: ((routine) => Boolean(routine) && cloudRoutineAuthors?.authored(run.routineId, {
+          ...routine!, prompt: run.prompt, target: run.target, botId: run.botId, groupId: run.groupId, attachments: run.attachments, runOn: run.runOn,
+        }) === true)(routines?.listRoutines().find((candidate) => candidate.id === run.routineId)),
+      };
+    },
+  };
+}
+
+/** What a bot on a Cloud home is told when its conversation cannot use the
+ * owner's lent Mac because someone else wrote in it. The bot relays it. */
+const LENDING_SOMEONE_ELSE = "Someone else wrote in this conversation, so it can't use your Mac. Start a new conversation to use it.";
+
+/** Whose lent computers a status reader may see: on a Cloud home, only the
+ * owner's own devices (admin sessions) see the lent Mac, never a guest or a
+ * local process; elsewhere, the person behind the asking session. */
 function sessionLendingPrincipal(auth: RequestAuth): string | null {
-  if (CLOUD_HOME) return CLOUD_HOME_LENDER;
+  if (CLOUD_HOME) return cloudOwnerSession(auth) ? CLOUD_HOME_LENDER : null;
   return auth.kind === "session" ? personKey(auth.session) : null;
+}
+
+/** On a Cloud home: a request from one of the owner's own devices. The
+ * Admin's signed pairing gives the desktop an admin session; a guest the
+ * owner pairs with chat-only access has client scope. Loopback is not the
+ * owner here: nothing the person does reaches a Cloud home that way, only
+ * processes on the machine (a bot's shell) do. */
+function cloudOwnerSession(auth: RequestAuth): boolean {
+  return auth.kind === "session" && auth.scopes.includes("admin");
+}
+
+/** On a Cloud home: whether a message's person key is one of the owner's own
+ * devices right now (a live admin session with that key). */
+function cloudOwnerPerson(person: string | undefined): boolean {
+  return Boolean(person) && sessions.list().some((session) => session.scopes.includes("admin") && personKey(session) === person);
+}
+
+/** On a Cloud home, a session that is not one of the owner's own devices may
+ * not answer a card of any kind. */
+function cloudCardRefusal(auth: RequestAuth & { kind: "session" }): string | null {
+  return auth.scopes.includes("admin") ? null : "Only the owner of this Cloud can answer this card.";
 }
 
 /** Whose session may answer a card. The provider CLI's own approval modes and
@@ -840,6 +896,10 @@ function cardAnswerRefusal(auth: RequestAuth, threadId: string, requestId: strin
       ? "A local service can only decline this request. Approve or answer it in OpenMausBot while signed in."
       : null;
   }
+  // A Cloud home is one person's: a device paired with chat-only access (a
+  // guest) may read along but never answer, or its words would reach the
+  // owner's turn, and through it a lent Mac (docs/cloud-pro.md).
+  if (CLOUD_HOME) return cloudCardRefusal(auth);
   if (auth.scopes.includes("admin") || !sharedMembership()) return null;
   const known = [threadStarters.get(threadId), cardRequesterKey(threadId, requestId)].filter((person): person is string => Boolean(person));
   if (!known.length || known.includes(personKey(auth.session))) return null;
@@ -883,7 +943,20 @@ function decisionActorFor(auth: RequestAuth): DecisionActor {
 
 function cardAnswererFor(auth: RequestAuth): CardAnswerer {
   if (auth.kind === "loopback") return auth.trust === "service" ? { kind: "worker" } : { kind: "loopback" };
-  return { kind: "session", name: (auth.session.email ?? auth.session.label ?? "").trim() || "Signed-in user" };
+  return { kind: "session", name: (auth.session.email ?? auth.session.label ?? "").trim() || "Signed-in user",
+    ...(CLOUD_HOME ? { person: personKey(auth.session) } : {}) };
+}
+
+/** On a Cloud home, who is answering a card right now, by request id: the
+ * answer reaches the turn before `answeredBy` is written, and a lending turn
+ * must know whose words it just received (server/cloud-lending.ts). */
+const cloudCardAnswersInFlight = new Map<string, string | undefined>();
+
+/** The person who answered a card, as far as lending on a Cloud home is
+ * concerned: the recorded answerer, else whoever is answering it now. */
+function cloudCardAnswerer(card: { requestId?: string; answeredBy?: { kind: string; person?: string } }): string | undefined {
+  if (card.answeredBy) return card.answeredBy.kind === "session" ? card.answeredBy.person : undefined;
+  return card.requestId ? cloudCardAnswersInFlight.get(card.requestId) : undefined;
 }
 
 /** Answer a card as `auth`: the decision rows written meanwhile name the
@@ -894,6 +967,7 @@ async function answeringCardAs(auth: RequestAuth, threadId: string, requestId: s
     const card = store.messagesFor(threadId).find((message) => message.card?.requestId === requestId)?.card;
     return Boolean(card && !card.answered && !card.dismissed && !card.expired);
   })();
+  if (CLOUD_HOME && open) cloudCardAnswersInFlight.set(requestId, auth.kind === "session" ? personKey(auth.session) : undefined);
   try {
     await withDecisionActor(decisionActorFor(auth), work);
   } finally {
@@ -902,6 +976,7 @@ async function answeringCardAs(auth: RequestAuth, threadId: string, requestId: s
     if (message && card && !card.answeredBy && card.answered !== "unavailable" && (card.answered || card.dismissed)) {
       store.patchMessage(threadId, message.id, { card: { ...card, answeredBy: cardAnswererFor(auth) } });
     }
+    if (CLOUD_HOME && open) cloudCardAnswersInFlight.delete(requestId);
   }
 }
 
@@ -1857,6 +1932,9 @@ const directTurnGenerationByThread = new Map<string, string>();
 // replaces it; unknown control-plane continuations deliberately lose proof.
 const directRequestOwners = new Map<string, {
   generation: string; messageId?: string; generations: Set<string>; turnId: string | null; stopped?: boolean;
+  /** Set when a routine run or a webhook started this request (lending
+   * provenance on a Cloud home: server/cloud-lending.ts). */
+  automation?: RoutineRunTrigger;
 }>();
 // Stop revokes credentials before completion, but the receipt must retain its
 // exact provider-turn owner until that completion or explicit failure cleanup.
@@ -8214,7 +8292,7 @@ async function startTurn(
   // an edit hands us its already-branched user message; a plain send appends
   let userMessage = opts?.userMessage;
   if (opts?.editedMessageId) {
-    const edited = store.branchMessage(threadId, opts.editedMessageId, text, opts.sendId);
+    const edited = store.branchMessage(threadId, opts.editedMessageId, text, opts.sendId, opts.sender);
     if (!edited) throw Object.assign(new Error("only a user text message can be edited"), { status: 400 });
     store.patchTask(bot.id, threadId, { rewound: true });
     userMessage = edited;
@@ -8267,7 +8345,7 @@ async function startTurn(
   if (requestGenerations.size >= 500) { requestGenerations.clear(); requestMessageId = undefined; }
   requestGenerations.add(dispatchClaimId);
   directRequestOwners.set(threadId, { generation: dispatchClaimId, messageId: requestMessageId,
-    generations: requestGenerations, turnId: null });
+    generations: requestGenerations, turnId: null, ...(opts?.automationSource ? { automation: opts.automationSource } : {}) });
   // An unknown control-plane wake may invalidate a prior final, but it must
   // never acquire authority by guessing the latest user as its origin.
   const pendingSource = requestMessageId ?? store.activePath(threadId).findLast(message => message.role === "user")?.id;
@@ -14473,7 +14551,11 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
       // Owner-scoped: a turn sees and uses only the computers of the person it
       // provably acts for (sharedComputerPrincipal), never anyone else's.
       if (method === "GET" && path === "/api/internal/shared-computers" && lendingEnabled()) {
-        return json(res, 200, { computers: sharedComputers.list(sharedComputerPrincipal(internalCapability)) });
+        const principal = sharedComputerPrincipal(internalCapability);
+        // Say why an owner's own conversation sees no Mac, so the bot can tell them.
+        const notice = CLOUD_HOME && !principal && sharedComputers.status(CLOUD_HOME_LENDER).length > 0 &&
+          cloudHomeLendingRefusal(cloudLendingTurn(internalCapability)) === "someone-else" ? { unavailable: LENDING_SOMEONE_ELSE } : {};
+        return json(res, 200, { computers: sharedComputers.list(principal), ...notice });
       }
       if (method === "POST" && path === "/api/internal/shared-computers" && lendingEnabled()) {
         const parsed = sharedComputerOperation.safeParse(await readInternalBody());
@@ -14483,7 +14565,11 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
         if (["computer_tools", "computer_call"].includes(parsed.data.action) && store.bot(internalCapability.botId)?.computer === "off") {
           return json(res, 403, { error: "This bot has no computer. Change its Computer setting to use a shared computer's apps and screen." });
         }
-        return json(res, 200, { result: await sharedComputers.request(parsed.data, sharedComputerPrincipal(internalCapability), () => lendingEnabled() && internalCapabilityIsActive(internalCapability)) });
+        const principal = sharedComputerPrincipal(internalCapability);
+        if (CLOUD_HOME && !principal && cloudHomeLendingRefusal(cloudLendingTurn(internalCapability)) === "someone-else") {
+          return json(res, 403, { error: LENDING_SOMEONE_ELSE });
+        }
+        return json(res, 200, { result: await sharedComputers.request(parsed.data, principal, () => lendingEnabled() && internalCapabilityIsActive(internalCapability)) });
       }
       if (method === "GET" && path === "/api/internal/agents") {
         const sender = internalSender;
@@ -16578,7 +16664,11 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
       const body = await readBody(req);
       const hidden = hiddenRoutineTarget(body, visible);
       if (hidden) return json(res, 404, { error: hidden });
-      return json(res, 201, { routine: routines!.create(body) });
+      const routine = routines!.create(body);
+      // On a Cloud home, a routine the owner writes from their own device may
+      // use their lent Mac when it runs (server/cloud-lending.ts).
+      if (cloudRoutineAuthors && cloudOwnerSession(auth)) cloudRoutineAuthors.record(routine.id, routine);
+      return json(res, 201, { routine });
     }
     // The desktop shell polls this to decide whether to hold the computer
     // awake: a run in flight, or a routine due within the hour.
@@ -16588,6 +16678,7 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
     let routineMatch = path.match(/^\/api\/routines\/([\w-]+)\/run$/);
     if (routineMatch && method === "POST") {
       const run = routines!.runNow(routineMatch[1]);
+      if (run && CLOUD_HOME && cloudOwnerSession(auth)) ownerStartedRoutineRuns.add(run.id);
       return run ? json(res, 201, { run }) : json(res, 404, { error: "no such routine" });
     }
     routineMatch = path.match(/^\/api\/routines\/([\w-]+)$/);
@@ -16595,11 +16686,23 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
       const body = await readBody(req);
       const hidden = hiddenRoutineTarget(body, visible);
       if (hidden) return json(res, 404, { error: hidden });
+      const before = cloudRoutineAuthors ? routines!.listRoutines().find((candidate) => candidate.id === routineMatch![1]) : undefined;
+      const wasOwners = Boolean(before && cloudRoutineAuthors?.authored(before.id, before));
       const routine = routines!.update(routineMatch[1], body);
+      // The owner's own edit keeps (or, when it rewrites the instructions,
+      // makes) the routine theirs. Anyone else's edit, of any field (its
+      // schedule, where its results go, whether it is on), makes it no longer
+      // the owner's: it stops lending until the owner rewrites it.
+      if (routine && cloudRoutineAuthors) {
+        if (!cloudOwnerSession(auth)) cloudRoutineAuthors.forget(routine.id);
+        else if (wasOwners || (body && typeof body === "object" && "prompt" in body)) cloudRoutineAuthors.record(routine.id, routine);
+      }
       return routine ? json(res, 200, { routine }) : json(res, 404, { error: "no such routine" });
     }
     if (routineMatch && method === "DELETE") {
-      return routines!.remove(routineMatch[1])
+      const removed = routines!.remove(routineMatch[1]);
+      if (removed) cloudRoutineAuthors?.forget(routineMatch[1]);
+      return removed
         ? json(res, 200, { ok: true })
         : json(res, 404, { error: "no such routine" });
     }
@@ -19509,6 +19612,11 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
       if (existing.card.requestId) {
         return json(res, 409, { error: "request cards must be answered through the approval endpoint" });
       }
+      // On a Cloud home only the owner answers cards (cardAnswerRefusal).
+      // This route only keeps how an options card looks; the answer itself
+      // reaches the bot as a chat line, which lending already checks.
+      const cloudRefusal = CLOUD_HOME && body.answered !== undefined && auth.kind === "session" ? cloudCardRefusal(auth) : null;
+      if (cloudRefusal) return json(res, 403, { error: cloudRefusal });
       if (Object.keys(body).some((key) => key !== "answered" && key !== "dismissed" && key !== "threadId")) {
         return json(res, 400, { error: "only answered and dismissed may be changed" });
       }
@@ -19523,6 +19631,7 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
           ...existing.card,
           ...(body.answered !== undefined ? { answered: body.answered } : {}),
           ...(body.dismissed !== undefined ? { dismissed: body.dismissed } : {}),
+          ...(CLOUD_HOME && body.answered !== undefined ? { answeredBy: cardAnswererFor(auth) } : {}),
         },
       });
       return json(res, 200, { message: patched });
@@ -19900,7 +20009,10 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
       // startTurn admits the rerun before branching. A shared-resource or
       // concurrency-limit refusal must leave the original transcript intact.
       const replyTo = source.replyToId ? resolveReplyTarget(bot.threadId, source.replyToId) : undefined;
-      const message = await startTurn(bot.id, text, { threadId: bot.threadId, editedMessageId: messageId, replyTo, sendId, trigger: usageTriggerFor(auth) });
+      // On a Cloud home an edit is its author's line, so the owner's own edit
+      // keeps their conversation theirs for lending (server/cloud-lending.ts).
+      const message = await startTurn(bot.id, text, { threadId: bot.threadId, editedMessageId: messageId, replyTo, sendId, trigger: usageTriggerFor(auth),
+        ...(CLOUD_HOME ? { sender: messageSender(auth) } : {}) });
       return json(res, 202, { ok: true, message });
     }
 

@@ -1609,7 +1609,7 @@ export class Store {
    * (same parent, new text) and becomes the active leaf. `sendId` is the
    * client's identity for this edit, so its instant bubble reconciles onto
    * the canonical message and a network retry cannot fork twice. */
-  branchMessage(threadId: string, sourceId: string, text: string, sendId?: string): Message | null {
+  branchMessage(threadId: string, sourceId: string, text: string, sendId?: string, sender?: Message["sender"]): Message | null {
     const t = this.thread(threadId);
     const source = t.messages.find((m) => m.id === sourceId);
     if (!source) return null;
@@ -1622,6 +1622,7 @@ export class Store {
       parentId: source.parentId ?? null,
       replyToId: source.replyToId,
       ...(sendId ? { sendId } : {}),
+      ...(sender ? { sender } : {}),
     };
     t.messages.push(full);
     t.activeLeafId = full.id;
