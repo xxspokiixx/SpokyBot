@@ -571,6 +571,11 @@ export function roomResponders<T extends { id: string; name: string; hidden?: bo
   return [];
 }
 
+/** A hidden routine execution is not a conversation the person can open. */
+function taskCountsAsBotUnread(task: { unread?: boolean; routineRunId?: string }): boolean {
+  return Boolean(task.unread) && !task.routineRunId;
+}
+
 /** Messages form a tree (forks appear when a message is edited); the
  * visible conversation is the path from the root to activeLeafId. */
 interface ThreadState {
@@ -839,6 +844,13 @@ export class Store {
           task.unread = task === active && b.unread;
           botsMigrated = true;
         }
+        // Older builds left a failed hidden run unread, which kept the bot
+        // dot on after every visible chat was read. Clear it before the
+        // recompute below so the saved roster heals.
+        if (task.routineRunId && task.unread) {
+          task.unread = false;
+          botsMigrated = true;
+        }
         if (task === active) {
           if (task.rewound === undefined && b.rewound !== undefined) {
             task.rewound = b.rewound;
@@ -859,7 +871,7 @@ export class Store {
         task.turnStartedAt = undefined;
       }
       this.mirrorActiveTask(b, active);
-      b.unread = b.tasks.some((task) => task.unread);
+      b.unread = b.tasks.some(taskCountsAsBotUnread);
     }
     if (botsMigrated) this.saveBots();
     // Search reads SQLite directly, so migrate every known legacy transcript
@@ -1903,7 +1915,7 @@ export class Store {
           Object.assign(task, { [key]: structuredClone(patch[key]) });
         }
       }
-      bot.unread = bot.tasks!.some((candidate) => candidate.unread);
+      bot.unread = bot.tasks!.some(taskCountsAsBotUnread);
     }
     this.saveBots();
     this.emit({ type: "bot", botId: id });
@@ -2386,8 +2398,11 @@ export class Store {
     if (task.snoozedUntil === 0 && patch.unread === true) task.snoozedUntil = undefined;
     if (typeof patch.title === "string") task.title = patch.title.trim().slice(0, 80) || UNTITLED_THREAD;
     if (Object.prototype.hasOwnProperty.call(patch, "pinned") && task.pinned !== true) delete task.pinned;
+    // Still hidden: attention belongs on the source conversation. A same-call
+    // clear of routineRunId (no-source promotion) may keep unread.
+    if (task.routineRunId) task.unread = false;
     if (bot.threadId === threadId) this.mirrorActiveTask(bot, task);
-    bot.unread = bot.tasks!.some((candidate) => candidate.unread);
+    bot.unread = bot.tasks!.some(taskCountsAsBotUnread);
     this.saveBots();
     this.emit({ type: "bot", botId });
     return task;
@@ -2688,7 +2703,7 @@ export class Store {
       this.mirrorActiveTask(bot, visible);
     }
     this.deleteThreadRecord(threadId);
-    bot.unread = bot.tasks.some((task) => task.unread);
+    bot.unread = bot.tasks.some(taskCountsAsBotUnread);
     this.refreshBotActivity(bot);
     this.saveBots();
     this.emit({ type: "bot", botId });

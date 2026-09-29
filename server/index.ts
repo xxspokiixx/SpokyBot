@@ -9424,8 +9424,12 @@ function syncRoutineRunToSource(run: RoutineRun): string | null {
     const execution = store.taskByThread(run.botId, run.threadId);
     const freshExecution = execution && run.status === "running" && !execution.routineRunId &&
       store.messagesFor(run.threadId).length === 0;
-    if (execution && (freshExecution || (execution.routineRunId === run.id && execution.unread))) {
+    if (execution && freshExecution) {
       store.patchTask(run.botId, run.threadId, { routineRunId: run.id, unread: false });
+    } else if (execution?.routineRunId === run.id && execution.unread) {
+      // Already this run. Clear the dot without rewriting the tag, so a
+      // promoted thread (tag cleared, transcript present) stays visible.
+      store.patchTask(run.botId, run.threadId, { unread: false });
     }
   }
 
