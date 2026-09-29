@@ -34,7 +34,9 @@ ipcRenderer.on("app:open-settings", (_event, section) => {
 // helpers here. Main enforces the same rule on the sensitive channels.
 const localOrigin = process.argv.find((arg) => arg.startsWith("--omb-local-origin="))?.slice("--omb-local-origin=".length) ?? null;
 const isLocalPage = !localOrigin || location.origin === localOrigin;
-const REMOTE_SAFE = new Set(["platform", "getCapabilities", "onCapabilitiesChanged", "applySkin", "setUnreadCount", "permStatus", "workspaces"]);
+// cloudMove: main answers it on a remote page only when that page is the
+// person's own verified Cloud in this window (Move to Cloud's suggestion card).
+const REMOTE_SAFE = new Set(["platform", "getCapabilities", "onCapabilitiesChanged", "applySkin", "setUnreadCount", "permStatus", "workspaces", "cloudMove"]);
 
 // Sandboxed preload cannot import TS or sibling modules. Keep this list in
 // parity with shared/workspace-backup-client.ts (covered by the preload test).
@@ -301,6 +303,22 @@ const bridge = {
       const handler = (_event, state) => cb(state);
       ipcRenderer.on("cloud-account:state-changed", handler);
       return () => ipcRenderer.removeListener("cloud-account:state-changed", handler);
+    },
+  } : undefined,
+  /** Move to Cloud: this computer's workspace to the person's Cloud home.
+   * No arguments reach main. A remote page may start a move only from the
+   * person's own click. */
+  cloudMove: process.argv.includes("--omb-company-desktop=1") ? {
+    state: () => ipcRenderer.invoke("cloud-move:state"),
+    start: () => isLocalPage || navigator.userActivation?.isActive === true
+      ? ipcRenderer.invoke("cloud-move:start") : Promise.reject(new Error("Choose Move to start moving.")),
+    cancel: () => ipcRenderer.invoke("cloud-move:cancel"),
+    restorePrevious: () => ipcRenderer.invoke("cloud-move:restore-previous"),
+    dismiss: () => ipcRenderer.invoke("cloud-move:dismiss"),
+    onState: cb => {
+      const handler = (_event, state) => cb(state);
+      ipcRenderer.on("cloud-move:state-changed", handler);
+      return () => ipcRenderer.removeListener("cloud-move:state-changed", handler);
     },
   } : undefined,
   organization: process.argv.includes("--omb-company-desktop=1") ? {

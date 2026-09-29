@@ -3,6 +3,7 @@ import type { CloudAccountState } from "../../electron/cloud-account.mjs";
 import type { CloudMachine } from "../../electron/cloud-home.mjs";
 import { t } from "@/lib/i18n";
 import { Card } from "./SettingsPrimitives";
+import { CloudMoveSettings } from "./CloudMove";
 
 const MACHINE_TEXT = {
   provisioning: "cloudHome.provisioning",
@@ -127,5 +128,6 @@ export function CloudAccountSettings({ linkRequest = 0 }: { linkRequest?: number
       {!account && <button type="button" disabled={busy} className="ui-button mt-3" onClick={() => void perform(() => bridge.state())}>{t("organization.refresh")}</button>}
     </Card>
     {account?.status === "connected" && account.machine && cloudHomeCard({ machine: account.machine, busy, failed: homeFailed, onConnect: connectHome })}
+    {account?.status === "connected" && account.machine?.status === "ready" && <CloudMoveSettings />}
   </>;
 }

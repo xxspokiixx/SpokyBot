@@ -6,12 +6,13 @@
 // webhook receiver on :8800) and the Caddy edge on 0.0.0.0:8080. The edge is
 // the only listener the network can reach, and it always forwards with
 // X-Forwarded-*, so request-auth.ts never grants a remote request loopback
-// trust. If either child exits, both stop and the machine restarts.
+// trust. If either child exits, both stop and the machine restarts; the one
+// exception is the server asking to be started again after a restore.
 import { spawn, type ChildProcess } from "node:child_process";
 import { chownSync, readFileSync, statSync } from "node:fs";
 import { dirname, join, posix, resolve } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
-import { cloudHomeConfiguration, cloudHomeHost, prepareCloudHomeVolume, withoutIgnoredCloudKeys, type CloudHomeConfig } from "./cloud-home.ts";
+import { CLOUD_HOME_RESTART_EXIT_CODE, cloudHomeConfiguration, cloudHomeHost, prepareCloudHomeVolume, withoutIgnoredCloudKeys, type CloudHomeConfig } from "./cloud-home.ts";
 
 const SERVICE_USER = "maus";
 
@@ -40,6 +41,12 @@ export function cloudHomeChildEnvironments(config: CloudHomeConfig, env: NodeJS.
     OMB_CLOUD_PUBLIC_HOST: cloudHomeHost(config),
   };
   return { server, edge };
+}
+
+/** What the launcher does when the server child exits: start it again only
+ * when it asked to (a committed restore), and only a few times in a row. */
+export function serverExitAction(code: number | null, stopping: boolean, restarts: number): "restart" | "stop" {
+  return !stopping && code === CLOUD_HOME_RESTART_EXIT_CODE && restarts < 5 ? "restart" : "stop";
 }
 
 export function startCloudHome(env: NodeJS.ProcessEnv = process.env) {
@@ -74,13 +81,23 @@ export function startCloudHome(env: NodeJS.ProcessEnv = process.env) {
     const force = setTimeout(() => { for (const child of children) if (child.exitCode === null) child.kill("SIGKILL"); }, 20_000);
     force.unref();
   };
-  const run = (command: string, args: string[], childEnv: NodeJS.ProcessEnv) => {
+  const run = (command: string, args: string[], childEnv: NodeJS.ProcessEnv, again?: (code: number | null) => boolean) => {
     const child = spawn(command, args, { env: childEnv, stdio: "inherit" });
     children.push(child);
     child.once("error", () => stop(true));
-    child.once("exit", () => stop(true));
+    child.once("exit", (code) => {
+      children.splice(children.indexOf(child), 1);
+      if (!again?.(code)) stop(true);
+    });
   };
-  run(process.execPath, [join(here, "index.js")], server);
+  let restarts = 0;
+  const runServer = () => run(process.execPath, [join(here, "index.js")], server, (code) => {
+    if (serverExitAction(code, stopping, restarts) !== "restart") return false;
+    restarts++;
+    runServer();
+    return true;
+  });
+  runServer();
   run(env.OMB_CLOUD_EDGE_BIN || "/usr/local/bin/caddy", ["run", "--config", env.OMB_CLOUD_EDGE_CONFIG || "/app/cloud/Caddyfile", "--adapter", "caddyfile"], edge);
   process.once("SIGTERM", () => stop(false));
   process.once("SIGINT", () => stop(false));

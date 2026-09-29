@@ -120,7 +120,9 @@ mount point to the `maus` user, drops privileges for good, binds the volume to
 this machine (`/data/.omb-cloud-home.json`; another machine's volume, or an
 unmarked volume with data on it, is refused), and runs two children: the
 server on `127.0.0.1:8799` (webhooks on `127.0.0.1:8800`) and Caddy on
-`:8080`. If either exits, both stop and Fly restarts the machine.
+`:8080`. If either exits, both stop and Fly restarts the machine. The one
+exception: after a restore commits (Move to Cloud, below), the server exits
+with code 75 and the launcher starts only the server again.
 
 `HOME=/data`, so `~/.claude`, `~/.codex` and OpenMausBot's own data
 (`/data/.openmausbot`) persist on the volume.
@@ -304,6 +306,120 @@ origin, with `expiresAt` at most ten minutes away. It then adds or selects the
 pairing-link flow as Connect to a server. The code stays in main-process
 memory for that one navigation: never on disk, never in a renderer. A
 malformed session summary or grant is treated as none.
+
+## Move to Cloud
+
+One action copies everything from the person's own computer to their Cloud:
+bots, chats and their messages, attachments, memory, routines, skills, rooms
+and teams, and the settings a workspace backup carries. It is a copy; nothing
+on the computer changes. Chat history travels between machines here, and only
+here, because the person asked for it. Secrets never travel.
+
+### Where it is
+
+- **Settings → OMB Cloud**, under Your Cloud once it is Ready: **Move to
+  Cloud** (`src/components/CloudMove.tsx`). Before anything starts it shows the
+  size and the counts (`GET /api/cloud-move/estimate` on the computer's own
+  server), and says that API keys and sign-ins stay on the computer and that
+  the person signs in to Claude or ChatGPT on the Cloud (the Cloud's first-run
+  engine sign-in above).
+- When the Cloud already has bots or chats, the button reads **Replace my
+  Cloud with this computer's workspace**, and the card says that what the
+  Cloud holds is replaced, backed up first, and put back by **Restore previous
+  Cloud**. There is no confirmation dialog. Without a session on the Cloud yet
+  (never connected), it says the same thing conditionally.
+- The first time the app shows an empty Cloud (its starter bot at most, no
+  rooms, nobody has chatted) and the computer has work of its own, the Cloud's
+  page shows a card: **Bring your bots and chats from this Mac** ("this
+  computer" elsewhere), with **Move** and **Not now**. Not now hides it for that
+  Cloud for good; it never blocks anything. Only the desktop app shows it, and
+  main answers the Cloud page only when it is the verified Cloud (the origin the
+  Cloud session reports) open as the window's active server. That page can
+  start a move only from the person's own click (`navigator.userActivation`)
+  and cannot restore the previous Cloud.
+
+### What moves, and what stays
+
+Exactly what a workspace backup carries (`server/workspace-backup.ts`,
+`server/workspace-backup-policy.ts`). Never: API keys, provider and MCP
+connections, engine sign-ins (`~/.claude`, `~/.codex`, the server's
+`providers/`), saved credentials, pairing, paired devices and sessions (the
+session registry's open marker included), the server's identity, caches,
+downloaded tools and runtime files. Never this app's Cloud sign-in or the
+computers it lends: both live in the desktop app's own storage, not in the
+workspace. Unsent drafts and window preferences stay on the computer.
+
+The Cloud keeps its own: every connection section of its config (engine and
+API keys, the included Boat and voice relays, sign-in allow-lists), its
+sessions and pairing, its engine sign-ins, its computer-sharing switch
+(`features.sharedComputers` always stays with the machine a backup is restored
+on), and its boot contract (the environment, and the volume marker outside the
+data folder). As with any restore, routines, webhooks and scheduled calls
+arrive paused and nothing queued runs; the person turns routines on in the
+Cloud when they want them to run there instead.
+
+### How it moves (`electron/cloud-move.mjs`, `server/cloud-move-http.ts`)
+
+1. Main opens a session of its own on the Cloud. The Admin opens a single-use
+   pairing window for the signed-in owner (`POST /api/cloud/desktop/pairing`),
+   and main redeems it at `/api/auth/pair` for a bearer token held only in
+   memory. That session is labelled "Move to Cloud" and signed out when the
+   move ends.
+2. The computer's server exports its encrypted backup with a random password,
+   under the usual rule that bots finish their turns first, and main copies it
+   to a private temporary file, hashing it.
+3. `POST /api/cloud-move/upload {sha256, bytes, files}`. The Cloud refuses more
+   than 10 GB of data or 100,000 files (`413`), and checks its free space: the
+   upload three times over (the upload, its decrypted copy and its staged
+   files), plus twice its own workspace when it will back that up, plus 256 MB.
+   Cloud volumes have a fixed size (the Admin's `OMB_CLOUD_VOLUME_GB`, 10 by
+   default). Not enough room is `507` with `freeBytes` and `neededBytes`, and
+   the app shows both. Nothing has been moved at that point.
+4. Parts of 16 MB (at most 64): `PUT /api/cloud-move/upload/<sha256>?offset=n`.
+   A part already stored is accepted again without being written; any other
+   offset answers `409` with `received`; a part that fails is cut back off.
+   Main retries with backoff and continues from where the Cloud stands. An
+   upload that keeps failing keeps its archive for 30 minutes, so moving again
+   continues it rather than starting over.
+5. `POST /api/cloud-move/preview {sha256, password}`: the Cloud checks the
+   SHA-256 and stages the file as an ordinary backup, which authenticates the
+   whole file before parsing anything. Anything that is not a valid backup is
+   refused and the upload discarded.
+6. `POST /api/cloud-move/restore {id}`, inside the maintenance gate: a Cloud
+   with work is backed up first (below), then the restore is committed and the
+   server exits with code 75. The launcher (`server/cloud-home-start.ts`)
+   starts only the server again, and startup installs the restore before
+   anything else loads. Preview, restore and undo can take minutes, so each
+   answers `202` and runs as a job the app follows in `GET /api/cloud-move`.
+7. Main waits until the Cloud reports that restore installed
+   (`lastRestoreId`), signs its session out, and opens My Cloud in the window.
+
+### Restore previous Cloud
+
+Before a Cloud with work is replaced, its workspace is backed up to
+`.backups/cloud-previous` on its own volume, which no backup includes and no
+restore replaces. Its random password is kept beside it: the same volume holds
+the same data unencrypted anyway. **Restore previous Cloud**
+(`POST /api/cloud-move/undo`) restores it the same way, and it is offered
+until that restore is installed. The archive stays until the next move
+replaces it. Every restore also keeps its usual safety copy of the replaced
+files (`.backups/safety-<id>`).
+
+### Move security
+
+- Every Cloud route needs a paired session with admin scope: never the
+  machine's loopback (a bot's shell there) and never a client-scope device. Only
+  a Cloud home receives a workspace; any other server answers `404`, except
+  for sizing its own (`/api/cloud-move/estimate`).
+- The upload is bounded by its declared size, the per-part limit and the
+  backup's own limits on size and file count.
+- The bundle is the workspace backup: credentials are left out by path and by
+  a config allowlist, and checked again at staging (a config with connection
+  settings or webhook secrets is refused). `server/cloud-move.e2e.test.ts`
+  gives the desktop keys, a driver environment, workspace credentials and a
+  provider login, moves it to a real Cloud home, and scans every file on the
+  Cloud's volume, the staged bundle included, for them.
+- Nothing logs a request body, the password, a file name or bundle contents.
 
 ## Security summary
 

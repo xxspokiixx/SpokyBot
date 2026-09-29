@@ -921,3 +921,10 @@ export function removeWorkspaceBackupJob(dataDir: string, id: string): void {
   if (!lstatSync(path).isDirectory() || lstatSync(path).isSymbolicLink()) throw new Error("Unsafe workspace backup cleanup target.");
   rmSync(path, { recursive: true, force: true });
 }
+
+/** Whether a snapshot leaves out this workspace-relative path, by the same
+ * rules as the export walk (cloud-move.ts sizes a move with it). Symbolic
+ * links are the caller's to skip. */
+export function omittedFromWorkspaceBackup(path: string): boolean {
+  return excluded(path.split("/")[0]) || excludedWorkspaceAuthPath(path) || ephemeralWorkspaceTokenPath(path) || redownloadedOrgLibraryPath(path);
+}

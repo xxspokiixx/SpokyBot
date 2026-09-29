@@ -115,6 +115,8 @@ const __APP_VERSION__: string;
       platform: NodeJS.Platform;
       organization?: import("../../electron/managed-desktop.mjs").ManagedDesktopBridge;
       cloudAccount?: import("../../electron/cloud-account.mjs").CloudAccountBridge;
+      /** Move to Cloud; on a remote page, only the person's own Cloud is answered. */
+      cloudMove?: import("../../electron/cloud-move.mjs").CloudMoveBridge;
       companyBackups?: {
         state(): Promise<CompanyBackupState>;
         list(): Promise<{ backups: CompanyBackupEntry[]; usedBytes: number; limits: { ownerQuotaBytes: number; retainedSnapshots: number } }>;

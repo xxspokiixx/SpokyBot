@@ -285,7 +285,8 @@ import { ProviderRegistry } from "./harness/registry.ts";
 import { ManagedDesktopProviders } from "./managed-desktop.ts";
 import { computerKindForResource, ManagedDesktopPolicy } from "./managed-policy.ts";
 import { hostedModelPolicy, HOSTED_MODEL_POLICY_HEADER, HOSTED_PROVIDER_SETTINGS_ERROR } from "./hosted-models.ts";
-import { CLOUD_IGNORED_KEYS, CLOUD_PAIRING_PATH, cloudHomeConfiguration, createCloudPairing, readSignedBody } from "./cloud-home.ts";
+import { CLOUD_HOME_RESTART_EXIT_CODE, CLOUD_IGNORED_KEYS, CLOUD_PAIRING_PATH, cloudHomeConfiguration, createCloudPairing, readSignedBody } from "./cloud-home.ts";
+import { createCloudMoveRoutes } from "./cloud-move-http.ts";
 import { holdIncludedServices } from "./included-services.ts";
 import type { ProviderInstance } from "./contracts.ts";
 import { selectDefaultModelSelection, withNewBotEffort } from "./default-model-selection.ts";
@@ -13655,13 +13656,8 @@ function serveStatic(res: ServerResponse, path: string): boolean {
 // onto it. Reject non-loopback Hosts outright (defeats rebinding) and
 // origins outside loopback (blocks remote-web CSRF).
 
-const workspaceBackupRoutes = createWorkspaceBackupRoutes({
-  dataDir: DATA_DIR,
-  appVersion: serverVersion(),
-  readBody,
-  restored: workspaceRestore,
-  status: () => ({ busy: workspaceMaintenance.active, pendingRestore: workspaceMaintenance.pendingRestore }),
-  authorized: (req, original) => {
+const workspaceBackupAccess = {
+  authorized: (req: IncomingMessage, original: RequestAuth) => {
     const current = resolveRequestAuth(req, {
       sessions, cookieName: SESSION_COOKIE, streamPath: "/api/events",
       url: new URL(req.url ?? "/", `http://localhost:${PORT}`),
@@ -13670,7 +13666,7 @@ const workspaceBackupRoutes = createWorkspaceBackupRoutes({
     return Boolean(current?.scopes.includes("admin") && current.kind === original.kind &&
       (current.kind !== "session" || (original.kind === "session" && current.session.id === original.session.id)));
   },
-  exclusive: (work, keepLocked) => workspaceMaintenance.run(async () => {
+  exclusive: <T>(work: () => Promise<T>, keepLocked?: boolean) => workspaceMaintenance.run(async () => {
     // Recheck inside the exclusive gate: the restore body can arrive slowly
     // while another client assigns a computer after the initial route check.
     if (keepLocked && teamComputers.list().some(computer => computer.section !== null)) {
@@ -13696,6 +13692,27 @@ const workspaceBackupRoutes = createWorkspaceBackupRoutes({
       closeMessageDb();
     },
   }, keepLocked),
+  status: () => ({ busy: workspaceMaintenance.active, pendingRestore: workspaceMaintenance.pendingRestore }),
+};
+const workspaceBackupRoutes = createWorkspaceBackupRoutes({
+  dataDir: DATA_DIR,
+  appVersion: serverVersion(),
+  readBody,
+  restored: workspaceRestore,
+  ...workspaceBackupAccess,
+});
+// Move to Cloud (server/cloud-move-http.ts): every server sizes its own
+// workspace for the desktop; only a Cloud home receives one. After its
+// restore commits, the Cloud home restarts so startup installs it.
+let cloudHomeRestartRequested = false;
+const cloudMoveRoutes = createCloudMoveRoutes({
+  dataDir: DATA_DIR,
+  appVersion: serverVersion(),
+  cloudHome: Boolean(CLOUD_HOME),
+  readBody,
+  restored: workspaceRestore,
+  ...workspaceBackupAccess,
+  restart: () => { cloudHomeRestartRequested = true; gracefulShutdown(); },
 });
 
 // Route modules (server/routes/README.md). `workspaceAccess` is assigned at
@@ -13956,6 +13973,7 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
       return json(res, 409, { error: "Unassign team computers before restoring a workspace; restored team names must not gain access to existing desktops" });
     }
     if (await workspaceBackupRoutes(req, res, path, auth)) return;
+    if (await cloudMoveRoutes(req, res, path, auth)) return;
     // Count ordinary requests until their asynchronous handler returns, not
     // merely until the browser disconnects. A cancelled upload can still write.
     if (path.startsWith("/api/") && path !== "/api/events" && path !== "/api/health" && !path.startsWith("/api/shared-computers/") && !isWorkspaceBackupSessionControl(method, path)) {
@@ -22446,7 +22464,8 @@ const gracefulShutdown = createGracefulShutdown({
     }
     closeMessageDb();
     releaseDataDirLeaseAtExit();
-    process.exit(code);
+    // A Cloud home's launcher starts the server again on this code only.
+    process.exit(cloudHomeRestartRequested && code === 0 ? CLOUD_HOME_RESTART_EXIT_CODE : code);
   },
 });
 
