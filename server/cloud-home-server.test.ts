@@ -5,15 +5,18 @@
 // signing secret) to an engine, and tells the app it pairs that its first run
 // is the engine sign-in. It also carries Pro's included Boat computers, voice
 // and decision model: offered with no key, their relay tokens never shown,
-// saved or passed on. Disposable home; no network; a synthetic Claude CLI.
+// saved or passed on. Its bots get the built-in browser and cloud computers,
+// never "this computer" or a Local VM. Disposable home; no network; a synthetic
+// Claude CLI.
 import { randomBytes } from "node:crypto";
 import { spawn, type ChildProcess } from "node:child_process";
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { afterAll, beforeAll, expect, it } from "vitest";
-import { CLOUD_IGNORED_KEYS, cloudPairingSignature } from "./cloud-home.ts";
+import { CLOUD_IGNORED_KEYS, cloudHomePlaceRefusal, cloudPairingSignature } from "./cloud-home.ts";
+import { cloudHomePrompt } from "./system-prompt.ts";
 import { removeTempDir, waitForExit } from "./testing/cleanup.ts";
 import { freePortBlock } from "./testing/ports.ts";
 
@@ -61,13 +64,18 @@ beforeAll(async () => {
   const dataDir = join(home, ".openmausbot");
   mkdirSync(dataDir, { recursive: true });
   // A signed-in Claude Code whose turns record the environment they were given.
+  // While the hang marker exists, a new turn records itself elsewhere and
+  // stays running, so its tool token stays live.
   const cli = join(home, "fixture-claude.mjs");
   writeFileSync(cli, `#!/usr/bin/env node
+import { existsSync } from "node:fs";
 if (process.argv[2] === "auth") {
   console.log(JSON.stringify({ loggedIn: true, email: "person@example.test" }));
   process.exit(0);
 }
-if (process.argv[2] !== "--version") process.env.FAKE_CLAUDE_DUMP = ${JSON.stringify(join(home, "spawn.json"))};
+const hang = existsSync(${JSON.stringify(join(home, "hang"))});
+if (hang) process.env.FAKE_CLAUDE_MODE = "hang";
+if (process.argv[2] !== "--version") process.env.FAKE_CLAUDE_DUMP = ${JSON.stringify(join(home, "spawn"))} + (hang ? "-hang.json" : ".json");
 await import(${JSON.stringify(pathToFileURL(join(SERVER_DIR, "testing", "fake-claude-cli.ts")).href)});
 `, { mode: 0o755 });
   writeFileSync(join(dataDir, "config.json"), JSON.stringify({
@@ -150,10 +158,11 @@ it("pairs the app on a signed request and tells it its first run is the engine s
   expect(JSON.stringify(instances)).not.toContain("cloud.example.test");
 });
 
-it("drops the included tokens from its own environment, so a tool started with it raw never sees them", async () => {
+it("never hands the included tokens or the signing secret to a CLI it probes", async () => {
   // POST /api/cli-test runs `<cli> --version` with a copy of the server's own
-  // environment (a fixed list removed): one of the paths that relies on the
-  // server no longer holding the tokens, like agent-browser, docker and ssh.
+  // environment, less every credential on the shared lists (config.ts). That
+  // the server drops the included tokens from its own environment at startup
+  // is holdIncludedServices (included-services.test.ts).
   const dump = join(home, "cli-env.json");
   const cli = join(home, "dump-env.mjs");
   writeFileSync(cli, `#!/usr/bin/env node
@@ -165,7 +174,7 @@ console.log("dump-env 1.0.0");
   expect(probe.body, JSON.stringify(probe.body)).toMatchObject({ ok: true, version: "dump-env 1.0.0" });
   const env = JSON.parse(readFileSync(dump, "utf8"));
   // Proves the dump is the server's environment, not an empty one.
-  expect(env.OMB_CLOUD_BOAT_URL).toBe(included.OMB_CLOUD_BOAT_URL);
+  expect(env.OMB_TTS_DEFAULT_VOICE).toBe(included.OMB_TTS_DEFAULT_VOICE);
   for (const key of ["OMB_CLOUD_BOAT_TOKEN", "OMB_CLOUD_VOICE_TOKEN", "OMB_CLOUD_DECIDER_TOKEN", "OMB_CLOUD_BOOTSTRAP_SECRET"]) expect(env).not.toHaveProperty(key);
   for (const value of [...includedTokens, secret]) expect(JSON.stringify(env)).not.toContain(value);
 });
@@ -184,4 +193,66 @@ it("never hands a gateway's settings or the signing secret to an engine", async 
   expect(JSON.stringify(env)).not.toContain(token);
   expect(JSON.stringify(env)).not.toContain(secret);
   for (const includedToken of includedTokens) expect(JSON.stringify(env)).not.toContain(includedToken);
+});
+
+it("offers its bots the browser and cloud computers only, and tells them they cannot see the person's computer", async () => {
+  // The browser is on with no welcome to turn it on; the app is told this is
+  // a Cloud home, so it lists no this computer and no Local VM either.
+  const status = await api("GET", "/api/config");
+  expect(status.body).toMatchObject({ cloudHome: true, features: { browser: true } });
+  writeFileSync(join(home, "hang"), "");
+  const created = await api("POST", "/api/bots", { body: {
+    name: "Desk fixture", modelSelection: { instanceId: "claude", model: "claude-sonnet-5" }, requireAvailableModel: true,
+  } });
+  expect(created.status, JSON.stringify(created.body)).toBe(201);
+  const botId = created.body.bot.id;
+  try {
+    expect((await api("POST", `/api/bots/${botId}/messages`, { body: { text: "list the files on my desktop" } })).status).toBe(202);
+    const dump = join(home, "spawn-hang.json");
+    await expect.poll(() => existsSync(dump), { timeout: 15_000 }).toBe(true);
+    const { systemPrompt, mcpConfig } = JSON.parse(readFileSync(dump, "utf8"));
+    // Its engine mounts the team tools, and a Cloud home always offers lending,
+    // so the bot is told how to reach a lent Mac, and what to say without one.
+    expect(systemPrompt).toContain(cloudHomePrompt(true));
+    expect(systemPrompt).toContain("check list_shared_computers");
+    expect(systemPrompt).not.toMatch(/Local VM is an isolated desktop|user's host|host desktop|select an available Local VM/);
+    const agents = mcpConfig.mcpServers.agents;
+    expect(agents.env.OMB_CLOUD_HOME).toBe("1");
+    const preview = (await api("GET", `/api/bots/${botId}/system-prompt`)).body.sections as Array<{ id: string; text: string }>;
+    expect(preview.find((section) => section.id === "cloud-home")?.text).toBe(cloudHomePrompt(true));
+    const select = (surface?: string) => fetch(`${base}/api/internal/computer/select`, {
+      method: surface === undefined ? "GET" : "POST",
+      headers: { authorization: `Bearer ${agents.env.OMB_COMMS_TOKEN}`, ...(surface === undefined ? {} : { "content-type": "application/json" }) },
+      ...(surface === undefined ? {} : { body: JSON.stringify({ surface }) }),
+    });
+    const listed = await (await select()).json() as { canSelect: boolean; options: Array<{ surface: string }> };
+    expect(listed.canSelect).toBe(true);
+    expect(listed.options.map((option) => option.surface)).toEqual(["cloud", "browser"]);
+    expect(JSON.stringify(listed)).not.toMatch(/this computer|Local VM|container runtime/i);
+    for (const surface of ["local", "vm"] as const) {
+      const refused = await select(surface);
+      expect(refused.status).toBe(409);
+      expect(((await refused.json()) as { error: string }).error).toBe(cloudHomePlaceRefusal(surface));
+    }
+  } finally {
+    rmSync(join(home, "hang"), { force: true });
+    await api("POST", `/api/bots/${botId}/interrupt`, { body: {} });
+  }
+});
+
+it("refuses a bot still set to this computer or a Local VM, saying what is true on a Cloud home", async () => {
+  for (const computer of ["local", "vm"] as const) {
+    const created = await api("POST", "/api/bots", { body: {
+      name: `Earlier ${computer} fixture`, modelSelection: { instanceId: "claude", model: "claude-sonnet-5" }, requireAvailableModel: true,
+    } });
+    expect(created.status, JSON.stringify(created.body)).toBe(201);
+    const botId = created.body.bot.id;
+    expect((await api("PATCH", `/api/bots/${botId}`, { body: { computer } })).status).toBe(200);
+    expect((await api("POST", `/api/bots/${botId}/messages`, { body: { text: "list the files on my desktop" } })).status).toBe(202);
+    const failure = async () => {
+      const { bots } = (await api("GET", "/api/bots?messages=10")).body as { bots: Array<{ id: string; messages: Array<{ kind: string; tool?: { name: string; ok: boolean } }> }> };
+      return bots.find((bot) => bot.id === botId)?.messages.find((message) => message.kind === "activity" && message.tool?.ok === false)?.tool?.name;
+    };
+    await expect.poll(failure, { timeout: 15_000 }).toBe(`error: ${cloudHomePlaceRefusal(computer)}`);
+  }
 });

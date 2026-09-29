@@ -264,8 +264,10 @@ console.log("dump-env 1.0.0");
     const probe = await api("POST", "/api/cli-test", { cli });
     expect(probe.body, probe.text).toMatchObject({ ok: true, version: "dump-env 1.0.0" });
     const raw = JSON.parse(readFileSync(dump, "utf8"));
-    // Proves the dump is the server's environment, not an empty one.
-    expect(raw.OMB_CLOUD_DECIDER_URL).toBe(relayUrl);
+    // Proves the dump is the server's environment, not an empty one. Every
+    // OMB_CLOUD_* value, the relay URL included, is stripped from a probed CLI.
+    expect(raw.HOME).toBe(home);
+    expect(raw).not.toHaveProperty("OMB_CLOUD_DECIDER_URL");
     expect(raw).not.toHaveProperty("OMB_CLOUD_DECIDER_TOKEN");
     expect(JSON.stringify(raw)).not.toContain(INCLUDED);
   });
