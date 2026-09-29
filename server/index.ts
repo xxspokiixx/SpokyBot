@@ -166,6 +166,8 @@ import {
   browserProfileReplacementConflict,
   browserProfilePartitionTarget,
   syncCredentialEnv,
+  stripWorkspaceCredentialEnv,
+  PROVIDER_CREDENTIAL_ENV,
   withInstanceCli,
   persistableInstanceConfigs,
   type AppConfig,
@@ -13202,24 +13204,14 @@ async function testCliBinary(
 }
 
 /** A pre-save probe only needs PATH. Never hand credentials inherited by the
- * desktop/server process to an arbitrary wrapper selected through Settings. */
+ * desktop/server process to an arbitrary wrapper selected through Settings.
+ * The shared lists (config.ts) cover every workspace, control-plane and
+ * provider credential, including ones added later; the probe and `claude
+ * update` keep everything else (HOME, proxy settings, CA bundles). */
 function cliProbeEnvironment(): NodeJS.ProcessEnv {
   const env: NodeJS.ProcessEnv = { ...process.env, PATH: augmentedPath() };
-  for (const key of [
-    "XAI_API_KEY",
-    "BOX_TOKEN",
-    "OPENCODE_API_KEY",
-    "COMPOSIO_API_KEY",
-    "OMB_COMPOSIO_BROKER_TOKEN",
-    "OMB_TTS_KEY",
-    "OMB_FISH_AUDIO_API_KEY",
-    "OMB_OPENAI_IMAGE_KEY",
-    "OMB_CUSTOM_IMAGE_KEY",
-    "ANTHROPIC_API_KEY",
-    "OPENAI_API_KEY",
-  ]) {
-    delete env[key];
-  }
+  stripWorkspaceCredentialEnv(env);
+  for (const key of PROVIDER_CREDENTIAL_ENV) delete env[key];
   return env;
 }
 

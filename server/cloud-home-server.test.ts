@@ -154,10 +154,11 @@ it("pairs the app on a signed request and tells it its first run is the engine s
   expect(JSON.stringify(instances)).not.toContain("cloud.example.test");
 });
 
-it("drops the included tokens from its own environment, so a tool started with it raw never sees them", async () => {
+it("never hands the included tokens or the signing secret to a CLI it probes", async () => {
   // POST /api/cli-test runs `<cli> --version` with a copy of the server's own
-  // environment (a fixed list removed): one of the paths that relies on the
-  // server no longer holding the tokens, like agent-browser, docker and ssh.
+  // environment, less every credential on the shared lists (config.ts). That
+  // the server drops the included tokens from its own environment at startup
+  // is holdIncludedServices (included-services.test.ts).
   const dump = join(home, "cli-env.json");
   const cli = join(home, "dump-env.mjs");
   writeFileSync(cli, `#!/usr/bin/env node
@@ -169,7 +170,7 @@ console.log("dump-env 1.0.0");
   expect(probe.body, JSON.stringify(probe.body)).toMatchObject({ ok: true, version: "dump-env 1.0.0" });
   const env = JSON.parse(readFileSync(dump, "utf8"));
   // Proves the dump is the server's environment, not an empty one.
-  expect(env.OMB_CLOUD_BOAT_URL).toBe(included.OMB_CLOUD_BOAT_URL);
+  expect(env.OMB_TTS_DEFAULT_VOICE).toBe(included.OMB_TTS_DEFAULT_VOICE);
   for (const key of ["OMB_CLOUD_BOAT_TOKEN", "OMB_CLOUD_VOICE_TOKEN", "OMB_CLOUD_BOOTSTRAP_SECRET"]) expect(env).not.toHaveProperty(key);
   for (const value of [...includedTokens, secret]) expect(JSON.stringify(env)).not.toContain(value);
 });
