@@ -27,6 +27,7 @@ import { RemoteComputerSection } from "./RemoteComputerSection";
 import { ConnectedWorkspacesSettings } from "./ConnectedWorkspacesSettings";
 import { OrganizationSettings } from "./OrganizationSettings";
 import { CloudAccountSettings } from "./CloudAccountSettings";
+import { ProSettingsCard } from "./ProIntroduction";
 import { Card, SettingRow, Switch } from "./SettingsPrimitives";
 import { effortLabel } from "./ModelPicker";
 import { EFFORT_LEVELS, isEffortLevel } from "../../shared/wire";
@@ -106,7 +107,7 @@ function ProfileFields() {
   };
 
   const inputClass =
-    "w-full rounded-lg border border-hairline/40 bg-inset px-3 py-2 text-[14px] text-ink placeholder:text-ink-secondary focus:border-hairline focus:outline-none";
+    "w-full rounded-lg border border-hairline/40 bg-inset px-3 py-2 text-[14px] text-ink placeholder:text-ink-secondary focus:outline-none";
   return (
     <div className="flex flex-col gap-3">
       <input aria-label={t("settings.profile.name")} value={name} onChange={(e) => setName(e.target.value)} onBlur={save} placeholder={t("settings.profile.name")} className={inputClass} />
@@ -763,9 +764,10 @@ export function SettingsModal() {
             <LicenseExpiryBanner config={state.config} />
             {section === "desktopWorkspaces" && <ConnectedWorkspacesSettings />}
             {section === "organization" && window.ogb?.organization && !remoteActive && <OrganizationSettings />}
-            {section === "cloudAccount" && window.ogb?.cloudAccount && !remoteActive && <CloudAccountSettings />}
+            {section === "cloudAccount" && window.ogb?.cloudAccount && !remoteActive && <CloudAccountSettings linkRequest={state.appSettingsCloudLink} />}
             {section === "general" && (
               <>
+                <ProSettingsCard />
                 <Card title={t("settings.profile.title")} subtitle={t("settings.profile.sharedSubtitle")}>
                   <ProfileFields />
                 </Card>

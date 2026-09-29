@@ -1,8 +1,8 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { Loader2, Menu } from "lucide-react";
-import { StoreProvider, useStore } from "@/state/store";
+import { CLOUD_LINK_SETTINGS, StoreProvider, useStore } from "@/state/store";
 import { useWelcomeViewer, WelcomeGate } from "@/components/onboarding/WelcomeGate";
-import { spotlightsQuiet } from "@/lib/onboarding";
+import { cloudSignInDue, spotlightsQuiet, type WelcomeViewer } from "@/lib/onboarding";
 import { FirstConversationTour } from "@/components/onboarding/FirstConversationTour";
 import { GuidedTour } from "@/components/onboarding/GuidedTour";
 import { ThreadRefsProvider } from "@/components/ThreadRefs";
@@ -20,10 +20,13 @@ import { InspectorPanel } from "@/components/InspectorPanel";
 import { SettingsModal } from "@/components/SettingsModal";
 import { WorkspaceBackupRecovery } from "@/components/WorkspaceBackupSettings";
 import { UpdateBanner } from "@/components/UpdateBanner";
+import { ProIntroduction } from "@/components/ProIntroduction";
 import { DesktopCapabilitiesProvider, useDesktopCapabilities } from "@/components/DesktopCapabilities";
 import { WindowCaptionButtons } from "@/components/WindowCaptionButtons";
 import { RoutinesPage } from "@/components/RoutinesPage";
 import { NoEngines } from "@/components/NoEngines";
+import { CloudEngineSignIn } from "@/components/CloudEngineSignIn";
+import { engineReady } from "@/components/EngineLibrary";
 import { CommandPalette } from "@/components/CommandPalette";
 import { KeyboardShortcutsModal } from "@/components/KeyboardShortcutsModal";
 import { LocalVmWorkspace } from "@/components/LocalVmWorkspace";
@@ -32,7 +35,7 @@ import { setLocale } from "@/lib/i18n";
 import { shouldOpenKeyboardShortcuts } from "@/lib/keyboard-shortcuts";
 import { effectiveLanguage, useLanguageChoice } from "@/lib/language-preference";
 
-function Shell() {
+function Shell({ viewer }: { viewer: WelcomeViewer | null }) {
   const { state, dispatch } = useStore();
   const { capabilities } = useDesktopCapabilities();
   const unreadCount =
@@ -51,10 +54,12 @@ function Shell() {
     };
     const url = new URL(window.location.href);
     const requestedSettings = url.searchParams.get("desktop-settings");
-    if (requestedSettings === "workspaces" || (requestedSettings === "organization" && window.ogb.organization && !remoteClient)) {
+    if (requestedSettings === "workspaces" || (requestedSettings === "organization" && window.ogb.organization && !remoteClient) ||
+      (requestedSettings === "cloud" && window.ogb.cloudAccount && !remoteClient)) {
       url.searchParams.delete("desktop-settings");
       window.history.replaceState(null, "", `${url.pathname}${url.search}${url.hash}`);
       if (requestedSettings === "organization") dispatch({ type: "toggleAppSettings", open: true, section: "organization" });
+      else if (requestedSettings === "cloud") dispatch(CLOUD_LINK_SETTINGS);
       else open();
     }
     return window.ogb.environments.onOpenSettings?.(open);
@@ -93,6 +98,9 @@ function Shell() {
     state.connected &&
     state.instances.length > 0 &&
     !state.instances.some((i) => i.snapshot.state === "available");
+  // An OMB Cloud home with none of the person's own engines signed in yet:
+  // its first run, and every bot until then, is the engine sign-in.
+  const cloudSignIn = cloudSignInDue(viewer, state, engineReady);
 
   // App-wide shortcuts: ⌘N new bot · ⌘1–9 jump to bot · ⌘⇧[ / ⌘⇧] prev/next · ⌘/ or ? shortcuts cheat sheet.
   // Kept deliberately small; every panel already closes on Esc.
@@ -203,9 +211,12 @@ function Shell() {
   // shell signals the request over the bridge (Cmd+, accelerates the item).
   // Local-shell only: remote server pages never receive the channel, and ogb
   // is absent in the browser.
+  // "cloud" is openmausbot://cloud (the Cloud page's "Open in the app"):
+  // OMB Cloud, marked as opened by the link so that view signs in or connects.
   useEffect(() => {
-    return window.ogb?.onOpenAppSettings?.(section => dispatch({ type: "toggleAppSettings", open: true,
-      ...(section === "organization" && window.ogb?.organization && !remoteClient ? { section } : {}) }));
+    return window.ogb?.onOpenAppSettings?.(section => dispatch(section === "cloud" && window.ogb?.cloudAccount && !remoteClient
+      ? CLOUD_LINK_SETTINGS
+      : { type: "toggleAppSettings", open: true, ...(section === "organization" && window.ogb?.organization && !remoteClient ? { section } : {}) }));
   }, [dispatch]);
 
   // The viewer outlives ComputerPanel and can target any bot, so release control
@@ -236,6 +247,7 @@ function Shell() {
     <div className="flex h-full flex-col">
       {/* fixed-position popup, bottom-left — outside the layout flow */}
       <UpdateBanner />
+      <ProIntroduction quiet={paletteOpen || drawerOpen || Boolean(localVmWorkspaceBotId)} />
       <div className="relative flex min-h-0 flex-1">
       {!calendarFocus && <button
         type="button"
@@ -272,6 +284,8 @@ function Shell() {
           onClose={() => setLocalVmWorkspaceBotId(null)}
           onOpenComputer={openComputerFromWorkspace}
         />
+      ) : cloudSignIn ? (
+        <CloudEngineSignIn />
       ) : noEngines ? (
         <NoEngines />
       ) : group ? (
@@ -350,7 +364,7 @@ function Application() {
     <DesktopCapabilitiesProvider>
       <StoreProvider>
         <ThreadRefsProvider>
-          <Shell />
+          <Shell viewer={viewer} />
         </ThreadRefsProvider>
         <WelcomeGate viewer={viewer} />
         <GuidedTour />
