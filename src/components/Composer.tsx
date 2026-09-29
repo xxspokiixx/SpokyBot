@@ -743,12 +743,18 @@ export function Composer({
         editText(base ? `${base} ${line.text}` : line.text);
       }
     });
-    const offEnd = bridge.onSpeechEnd(({ code }) => {
+    const offEnd = bridge.onSpeechEnd(({ code, reason }) => {
       setRecording(false);
       if (code === 2) {
         setSpeechError(t("composer.dictation.macOnly"));
       } else if (code === 1) {
-        setSpeechError(t("composer.dictation.permission"));
+        setSpeechError(t(
+          reason === "dictation-disabled"
+            ? "composer.dictation.disabled"
+            : reason === "speech-not-authorized"
+              ? "composer.dictation.permission"
+              : "composer.dictation.failed",
+        ));
       }
     });
     void bridge.speechStart();
