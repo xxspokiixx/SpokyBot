@@ -92,6 +92,6 @@ describe("Computer panel Works on", () => {
   it("lists neither on an OMB Cloud home, and says why", () => {
     const markup = computerTab({ cloudHome: true });
     expect(places(markup)).toEqual(["Auto", "Cloud", "Browser", "Off"]);
-    expect(markup).toContain("so they can&#x27;t use your own computer yet.");
+    expect(markup).toContain("Bots on your OMB Cloud work in the cloud; to let them use your Mac, turn on Let my Cloud use this Mac");
   });
 });

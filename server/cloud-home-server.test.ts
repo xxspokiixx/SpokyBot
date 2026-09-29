@@ -15,7 +15,7 @@ import { dirname, join } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { afterAll, beforeAll, expect, it } from "vitest";
 import { CLOUD_IGNORED_KEYS, cloudHomePlaceRefusal, cloudPairingSignature } from "./cloud-home.ts";
-import { CLOUD_HOME_PROMPT } from "./system-prompt.ts";
+import { cloudHomePrompt } from "./system-prompt.ts";
 import { removeTempDir, waitForExit } from "./testing/cleanup.ts";
 import { freePortBlock } from "./testing/ports.ts";
 
@@ -206,12 +206,15 @@ it("offers its bots the browser and cloud computers only, and tells them they ca
     const dump = join(home, "spawn-hang.json");
     await expect.poll(() => existsSync(dump), { timeout: 15_000 }).toBe(true);
     const { systemPrompt, mcpConfig } = JSON.parse(readFileSync(dump, "utf8"));
-    expect(systemPrompt).toContain(CLOUD_HOME_PROMPT);
+    // Its engine mounts the team tools, and a Cloud home always offers lending,
+    // so the bot is told how to reach a lent Mac, and what to say without one.
+    expect(systemPrompt).toContain(cloudHomePrompt(true));
+    expect(systemPrompt).toContain("check list_shared_computers");
     expect(systemPrompt).not.toMatch(/Local VM is an isolated desktop|user's host|host desktop|select an available Local VM/);
     const agents = mcpConfig.mcpServers.agents;
     expect(agents.env.OMB_CLOUD_HOME).toBe("1");
     const preview = (await api("GET", `/api/bots/${botId}/system-prompt`)).body.sections as Array<{ id: string; text: string }>;
-    expect(preview.find((section) => section.id === "cloud-home")?.text).toBe(CLOUD_HOME_PROMPT);
+    expect(preview.find((section) => section.id === "cloud-home")?.text).toBe(cloudHomePrompt(true));
     const select = (surface?: string) => fetch(`${base}/api/internal/computer/select`, {
       method: surface === undefined ? "GET" : "POST",
       headers: { authorization: `Bearer ${agents.env.OMB_COMMS_TOKEN}`, ...(surface === undefined ? {} : { "content-type": "application/json" }) },

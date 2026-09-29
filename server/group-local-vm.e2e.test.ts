@@ -7,7 +7,7 @@ import { dirname, join } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { afterAll, afterEach, beforeAll, describe, expect, it } from "vitest";
 import { writeFileAtomic } from "./atomic.ts";
-import { CLOUD_HOME_PROMPT } from "./system-prompt.ts";
+import { cloudHomePrompt } from "./system-prompt.ts";
 import { freePortBlock } from "./testing/ports.ts";
 import { removeTempDir, waitForExit } from "./testing/cleanup.ts";
 
@@ -509,7 +509,8 @@ describe("Group Local VM ownership on the real isolated server", () => {
       // Not a Cloud home: every place is listed, and no bot is told it runs in the cloud.
       expect(available.options.map((option: any) => option.surface)).toEqual(["cloud", "vm", "local", "browser"]);
       expect(before.mcpConfig.mcpServers.agents.env.OMB_CLOUD_HOME).toBe("0");
-      expect(before.systemPrompt).not.toContain(CLOUD_HOME_PROMPT);
+      expect(before.systemPrompt).not.toContain(cloudHomePrompt(true));
+      expect(before.systemPrompt).not.toContain("You run on the user's OMB Cloud");
       expect(available.options).toContainEqual(expect.objectContaining({ surface: "vm", available: true }));
       expect(available.options).toContainEqual(expect.objectContaining({ surface: "cloud", ready: false, canCreate: true }));
       expect(await (await call("POST", { surface: "auto" })).json()).toMatchObject({ status: "pending", surface: "vm" });

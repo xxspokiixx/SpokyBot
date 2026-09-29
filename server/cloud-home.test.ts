@@ -103,9 +103,13 @@ it("offers the built-in browser and cloud computers, never this computer or a Lo
 
 it("refuses the places it never offers with what is true there, not a setup step", () => {
   const local = cloudHomePlaceRefusal("local")!, vm = cloudHomePlaceRefusal("vm")!;
-  expect(local).toBe("Bots on your OMB Cloud can't use your own computer yet: they run in the cloud. Set Works on to Auto, Cloud or Browser.");
+  expect(local).toBe("This computer isn't a place on your OMB Cloud: its bots run in the cloud. Set Works on to Auto, Cloud or Browser, or lend your Mac under Settings → OMB Cloud.");
   expect(vm).toBe("Bots on your OMB Cloud can't use a Local VM: the cloud machine has no container runtime. Set Works on to Auto, Cloud or Browser.");
-  for (const text of [local, vm]) expect(text).not.toMatch(/configure|Computer panel|install|set (?:it|one) up/i);
+  for (const text of [local, vm]) {
+    expect(text).not.toMatch(/configure|Computer panel|install|set (?:it|one) up/i);
+    // A failed turn shows the first 160 characters of its error.
+    expect(text.length).toBeLessThanOrEqual(160);
+  }
 });
 
 it("suggests the browser, not a Local VM, when Cloud has no Boat account on a Cloud home", () => {
