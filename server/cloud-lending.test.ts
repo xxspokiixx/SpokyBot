@@ -2,7 +2,7 @@ import { mkdtempSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
-import { cloudHomeTurnMayLend, createCloudRoutineAuthors, routineFingerprint, type CloudLendingTurn } from "./cloud-lending.ts";
+import { cloudHomeLendingRefusal, cloudHomeTurnMayLend, createCloudRoutineAuthors, routineFingerprint, type CloudLendingTurn } from "./cloud-lending.ts";
 
 const OWNER = "p_owner", GUEST = "p_guest";
 const ownerPerson = (person: string | undefined) => person === OWNER;
@@ -45,8 +45,30 @@ describe("who may use a Mac lent to a Cloud home (review: guests, webhooks)", ()
     // The harness's own settlements carry nobody's words.
     expect(cloudHomeTurnMayLend(turn({ thread: [said("m1", OWNER), card(undefined, { answered: "allow", answeredText: undefined, dismissed: true })] }))).toBe(true);
     expect(cloudHomeTurnMayLend(turn({ thread: [said("m1", OWNER), card(undefined, { answered: "unavailable", answeredText: undefined, dismissed: true })] }))).toBe(true);
-    // A card answered before this turn's request is not part of this turn.
-    expect(cloudHomeTurnMayLend(turn({ thread: [card({ kind: "session", name: "Guest", person: GUEST }), said("m1", OWNER)] }))).toBe(true);
+    // A card a guest answered earlier in the conversation is still in the resumed session.
+    expect(cloudHomeTurnMayLend(turn({ thread: [card({ kind: "session", name: "Guest", person: GUEST }), said("m1", OWNER)] }))).toBe(false);
+  });
+  it("anyone else's words anywhere in the conversation, before the request too, take it out of lending (review: earlier lines)", () => {
+    // The reviewer's direct case: [guest line, owner line].
+    const poisoned = turn({ thread: [said("g1", GUEST), reply("r0"), said("m1", OWNER)] });
+    expect(cloudHomeTurnMayLend(poisoned)).toBe(false);
+    expect(cloudHomeLendingRefusal(poisoned)).toBe("someone-else");
+    // A teammate's line, a steer, a sender-less line (a local process or imported history) earlier on.
+    expect(cloudHomeTurnMayLend(turn({ thread: [said("p1", undefined, { peerAsk: { botId: "b" } }), said("m1", OWNER)] }))).toBe(false);
+    expect(cloudHomeTurnMayLend(turn({ thread: [said("s1", GUEST, { steered: true }), said("m1", OWNER)] }))).toBe(false);
+    expect(cloudHomeTurnMayLend(turn({ thread: [said("h1"), said("m1", OWNER)] }))).toBe(false);
+    // The owner alone, however long the conversation, keeps it.
+    expect(cloudHomeTurnMayLend(turn({ thread: [said("o1", OWNER), reply("r1"), said("o2", OWNER), reply("r2"), said("m1", OWNER)] }))).toBe(true);
+    // A routine's own prompt line names nobody; any other such line does.
+    const routineThread = [said("m1"), reply("r1")];
+    expect(cloudHomeTurnMayLend(turn({ request: request("m1", { automation: "schedule" }), thread: routineThread, routineRun: run() }))).toBe(true);
+    expect(cloudHomeTurnMayLend(turn({ request: request("m1", { automation: "schedule" }), thread: [said("x0"), ...routineThread], routineRun: run() }))).toBe(false);
+  });
+  it("says why: unproven, not the owner's, or someone else wrote here", () => {
+    expect(cloudHomeLendingRefusal(turn({ request: undefined }))).toBe("unproven");
+    expect(cloudHomeLendingRefusal(turn({ thread: [said("m1", GUEST)] }))).toBe("not-owner");
+    expect(cloudHomeLendingRefusal(turn({ thread: [said("m1", OWNER), said("g1", GUEST)] }))).toBe("someone-else");
+    expect(cloudHomeLendingRefusal(turn({}))).toBeNull();
   });
   it("a turn from another generation, a stopped request or an unproven one may not", () => {
     expect(cloudHomeTurnMayLend(turn({ generation: "g-other" }))).toBe(false);

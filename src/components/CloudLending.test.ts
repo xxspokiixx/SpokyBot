@@ -57,6 +57,7 @@ it("is a switch, off by default; turning it on shows the choices and lends nothi
   await flush();
   view = render();
   expect(view.html).toContain("Choose what your Cloud can use.");
+  expect(view.html).toContain("If someone else writes in a conversation, it can no longer use your Mac.");
   expect(view.html).toContain("Apps and screen");
   expect(bridge.save).not.toHaveBeenCalled();
   // Adding a folder lends it at once, read-only, with no confirmation.

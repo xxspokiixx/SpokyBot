@@ -199,9 +199,15 @@ On the Cloud home (`server/shared-computers.ts`, `server/index.ts`):
   comes from outside), a guest's conversation or routine (a device paired
   with chat-only access), a routine someone else rewrote, a room, a bot's
   delegated or peer turn, a local process on the Cloud, or anything the
-  harness cannot trace. A turn stops qualifying as soon as anyone else's words
-  are added to it, as a line or as the answer to a card it asked (a question
-  or an approval); the harness's own automatic settlements do not count. A
+  harness cannot trace. A conversation qualifies only while it holds nobody
+  else's words, anywhere in it, before or during the turn: one line from a
+  guest, a teammate bot or a local process (sent, queued, steered or handed
+  in, or history imported with a move), or one card answer from someone else,
+  takes that conversation out of lending for good, because a resumed session
+  carries everything said in it. The bot is told "Someone else wrote in this
+  conversation, so it can't use your Mac. Start a new conversation to use it."
+  and the lending switch says the same. The owner's own edits count as theirs,
+  and the harness's own automatic card settlements do not count. A
   routine stops being the owner's once anyone else edits it in any way (its
   instructions, schedule, results destination or whether it is on); the
   owner rewriting its instructions makes it theirs again. A bot whose

@@ -247,6 +247,7 @@
   "lending.action.other": "Other request",
   "lending.title": "Let my Cloud use this Mac",
   "lending.explain": "Bots on your Cloud can use the folders and apps you choose here, in your own conversations and routines, whenever lending is on and this Mac is awake with this app open. Turn it off at any time, here or from the menu bar.",
+  "lending.ownConversations": "If someone else writes in a conversation, it can no longer use your Mac. Start a new one to use it.",
   "lending.folders": "Folders",
   "lending.foldersHelp": "Bots can read these folders. Turn on Can edit to let them save files there too. Keys, passwords, app sign-ins and git settings stay out of reach.",
   "lending.canEdit": "Can edit",

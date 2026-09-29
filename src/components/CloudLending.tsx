@@ -110,6 +110,7 @@ export function CloudLending({ bridge }: { bridge: CloudLendingBridge }) {
         </label>
         {!snapshot.screenAvailable && <p className="ms-6 text-[12px] text-ink-secondary">{t("lending.screenUnavailable")}</p>}
       </fieldset>
+      <p className="text-[12px] text-ink-secondary">{t("lending.ownConversations")}</p>
       <p className="text-[12px] text-ink-secondary">{t("lending.stopHelp")}</p>
     </>}
     {failed && <p role="alert" className="text-[13px] text-danger">{t("lending.failed")}</p>}

@@ -9,8 +9,12 @@
 //   session with admin scope), or
 // - a scheduled run of a routine whose instructions the owner wrote (created
 //   or edited from one of those devices), or a run the owner started by hand;
-// and nobody else's words have been added to it since. Webhook runs, guests,
-// rooms, a bot's delegated or peer turn, and anything unprovable never can.
+// and the conversation holds nobody else's words, ever: a resumed session
+// carries everything said in it, so one line (or card answer) from a guest,
+// a teammate bot or a local process, before or during the turn, takes that
+// conversation out of lending. The owner starts a new one to lend again.
+// Webhook runs, guests, rooms, a bot's delegated or peer turn, and anything
+// unprovable never can.
 // Everything here is pure; server/index.ts supplies the records.
 import { createHash } from "node:crypto";
 import { existsSync, lstatSync, readFileSync } from "node:fs";
@@ -37,11 +41,18 @@ export interface CloudLendingTurn {
 
 const personOf = (line: Line | undefined) => line?.role === "user" && !line.peerAsk ? line.sender?.id : undefined;
 
+/** Why a turn may not use the lent Mac, or null when it may. */
+export type CloudLendingRefusal = "unproven" | "not-owner" | "someone-else";
+
 export function cloudHomeTurnMayLend(turn: CloudLendingTurn): boolean {
+  return cloudHomeLendingRefusal(turn) === null;
+}
+
+export function cloudHomeLendingRefusal(turn: CloudLendingTurn): CloudLendingRefusal | null {
   const { request } = turn;
-  if (!request?.messageId || request.stopped || !request.generations.has(turn.generation)) return false;
+  if (!request?.messageId || request.stopped || !request.generations.has(turn.generation)) return "unproven";
   const index = turn.thread.findIndex(line => line.id === request.messageId);
-  if (index < 0) return false;
+  if (index < 0) return "unproven";
   let owner: boolean;
   if (request.automation === undefined) {
     owner = turn.ownerPerson(personOf(turn.thread[index]));
@@ -50,12 +61,15 @@ export function cloudHomeTurnMayLend(turn: CloudLendingTurn): boolean {
     owner = request.automation !== "webhook" && Boolean(run) && run!.triggerSource !== "webhook" &&
       run!.ownerAuthored && (run!.triggerSource !== "manual" || run!.ownerStarted);
   }
+  if (!owner) return "not-owner";
   // Nothing anyone else wrote (a guest, a teammate bot, a local process) may
-  // have been steered, queued or handed into this turn since it started, as a
-  // line or as the answer to a card (a question or an approval) it asked.
-  return owner && turn.thread.slice(index + 1).every(line =>
-    (line.role !== "user" || turn.ownerPerson(personOf(line))) &&
+  // be anywhere in this conversation, before or after the request, as a line
+  // (sent, queued, steered or handed in) or as the answer to a card. A
+  // routine's own prompt line names nobody; its provenance was proven above.
+  const clean = turn.thread.every((line, at) =>
+    (line.role !== "user" || (at === index && request.automation !== undefined) || turn.ownerPerson(personOf(line))) &&
     (!answeredByPerson(line.card) || turn.ownerPerson(turn.cardAnswerer(line.card!))));
+  return clean ? null : "someone-else";
 }
 
 /** A card someone answered: a person's verdict or words. The harness's own

@@ -17,7 +17,7 @@ import { draftSummary, foldPoint } from "./compaction-summary.ts";
 import { compactBudget, contextWindowFor, shouldCompact } from "./context-budget.ts";
 import { autoCompactWindow } from "./drivers/claude.ts";
 import { provenRequestPerson, SharedComputers, sharedComputerOperation, sharedComputerRegistration } from "./shared-computers.ts";
-import { cloudHomeTurnMayLend, createCloudRoutineAuthors } from "./cloud-lending.ts";
+import { cloudHomeLendingRefusal, createCloudRoutineAuthors, type CloudLendingTurn } from "./cloud-lending.ts";
 import { SharedComputerControl } from "./shared-computer-control.ts";
 import { RoomHandoffs, type RoomHandoff } from "./room-handoffs.ts";
 import { assertRequestTarget, guardedRequestPath, requestConflict, requestNeedsInput, requestSourceForCard } from "./guarded-requests.ts";
@@ -812,30 +812,37 @@ function sharedComputerPrincipal(capability: Pick<InternalCapability, "botId" | 
   // the owner (server/cloud-lending.ts): their own conversation from one of
   // their devices, or a routine they wrote. Never a guest, a webhook, a room
   // or a line someone else slipped in.
-  if (CLOUD_HOME) {
-    return cloudHomeTurnMayLend({
-      request: directRequestOwners.get(capability.threadId),
-      generation: capability.generation,
-      thread: store.messagesFor(capability.threadId),
-      ownerPerson: cloudOwnerPerson,
-      cardAnswerer: cloudCardAnswerer,
-      routineRun: () => {
-        const run = activeRoutineRunForThread(capability.threadId);
-        if (!run || run.threadId !== capability.threadId || store.taskByThread(capability.botId, capability.threadId)?.routineRunId !== run.id) return null;
-        return {
-          triggerSource: run.triggerSource ?? (run.manual ? "manual" : "schedule"),
-          ownerStarted: ownerStartedRoutineRuns.has(run.id),
-          // What the run snapshotted, on the schedule its routine has now.
-          ownerAuthored: ((routine) => Boolean(routine) && cloudRoutineAuthors?.authored(run.routineId, {
-            ...routine!, prompt: run.prompt, target: run.target, botId: run.botId, groupId: run.groupId, attachments: run.attachments, runOn: run.runOn,
-          }) === true)(routines?.listRoutines().find((candidate) => candidate.id === run.routineId)),
-        };
-      },
-    }) ? CLOUD_HOME_LENDER : null;
-  }
+  if (CLOUD_HOME) return cloudHomeLendingRefusal(cloudLendingTurn(capability)) === null ? CLOUD_HOME_LENDER : null;
   return provenRequestPerson(directRequestOwners.get(capability.threadId), capability.generation,
     (messageId) => linePersonKey(store.messagesFor(capability.threadId).find((message) => message.id === messageId)));
 }
+
+/** What the lending rule needs to know about one bot turn on a Cloud home. */
+function cloudLendingTurn(capability: Pick<InternalCapability, "botId" | "threadId" | "generation">): CloudLendingTurn {
+  return {
+    request: directRequestOwners.get(capability.threadId),
+    generation: capability.generation,
+    thread: store.messagesFor(capability.threadId),
+    ownerPerson: cloudOwnerPerson,
+    cardAnswerer: cloudCardAnswerer,
+    routineRun: () => {
+      const run = activeRoutineRunForThread(capability.threadId);
+      if (!run || run.threadId !== capability.threadId || store.taskByThread(capability.botId, capability.threadId)?.routineRunId !== run.id) return null;
+      return {
+        triggerSource: run.triggerSource ?? (run.manual ? "manual" : "schedule"),
+        ownerStarted: ownerStartedRoutineRuns.has(run.id),
+        // What the run snapshotted, on the schedule its routine has now.
+        ownerAuthored: ((routine) => Boolean(routine) && cloudRoutineAuthors?.authored(run.routineId, {
+          ...routine!, prompt: run.prompt, target: run.target, botId: run.botId, groupId: run.groupId, attachments: run.attachments, runOn: run.runOn,
+        }) === true)(routines?.listRoutines().find((candidate) => candidate.id === run.routineId)),
+      };
+    },
+  };
+}
+
+/** What a bot on a Cloud home is told when its conversation cannot use the
+ * owner's lent Mac because someone else wrote in it. The bot relays it. */
+const LENDING_SOMEONE_ELSE = "Someone else wrote in this conversation, so it can't use your Mac. Start a new conversation to use it.";
 
 /** Whose lent computers a status reader may see: on a Cloud home, only the
  * owner's own devices (admin sessions) see the lent Mac, never a guest or a
@@ -8254,7 +8261,7 @@ async function startTurn(
   // an edit hands us its already-branched user message; a plain send appends
   let userMessage = opts?.userMessage;
   if (opts?.editedMessageId) {
-    const edited = store.branchMessage(threadId, opts.editedMessageId, text, opts.sendId);
+    const edited = store.branchMessage(threadId, opts.editedMessageId, text, opts.sendId, opts.sender);
     if (!edited) throw Object.assign(new Error("only a user text message can be edited"), { status: 400 });
     store.patchTask(bot.id, threadId, { rewound: true });
     userMessage = edited;
@@ -14498,7 +14505,11 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
       // Owner-scoped: a turn sees and uses only the computers of the person it
       // provably acts for (sharedComputerPrincipal), never anyone else's.
       if (method === "GET" && path === "/api/internal/shared-computers" && lendingEnabled()) {
-        return json(res, 200, { computers: sharedComputers.list(sharedComputerPrincipal(internalCapability)) });
+        const principal = sharedComputerPrincipal(internalCapability);
+        // Say why an owner's own conversation sees no Mac, so the bot can tell them.
+        const notice = CLOUD_HOME && !principal && sharedComputers.status(CLOUD_HOME_LENDER).length > 0 &&
+          cloudHomeLendingRefusal(cloudLendingTurn(internalCapability)) === "someone-else" ? { unavailable: LENDING_SOMEONE_ELSE } : {};
+        return json(res, 200, { computers: sharedComputers.list(principal), ...notice });
       }
       if (method === "POST" && path === "/api/internal/shared-computers" && lendingEnabled()) {
         const parsed = sharedComputerOperation.safeParse(await readInternalBody());
@@ -14508,7 +14519,11 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
         if (["computer_tools", "computer_call"].includes(parsed.data.action) && store.bot(internalCapability.botId)?.computer === "off") {
           return json(res, 403, { error: "This bot has no computer. Change its Computer setting to use a shared computer's apps and screen." });
         }
-        return json(res, 200, { result: await sharedComputers.request(parsed.data, sharedComputerPrincipal(internalCapability), () => lendingEnabled() && internalCapabilityIsActive(internalCapability)) });
+        const principal = sharedComputerPrincipal(internalCapability);
+        if (CLOUD_HOME && !principal && cloudHomeLendingRefusal(cloudLendingTurn(internalCapability)) === "someone-else") {
+          return json(res, 403, { error: LENDING_SOMEONE_ELSE });
+        }
+        return json(res, 200, { result: await sharedComputers.request(parsed.data, principal, () => lendingEnabled() && internalCapabilityIsActive(internalCapability)) });
       }
       if (method === "GET" && path === "/api/internal/agents") {
         const sender = internalSender;
@@ -19948,7 +19963,10 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
       // startTurn admits the rerun before branching. A shared-resource or
       // concurrency-limit refusal must leave the original transcript intact.
       const replyTo = source.replyToId ? resolveReplyTarget(bot.threadId, source.replyToId) : undefined;
-      const message = await startTurn(bot.id, text, { threadId: bot.threadId, editedMessageId: messageId, replyTo, sendId, trigger: usageTriggerFor(auth) });
+      // On a Cloud home an edit is its author's line, so the owner's own edit
+      // keeps their conversation theirs for lending (server/cloud-lending.ts).
+      const message = await startTurn(bot.id, text, { threadId: bot.threadId, editedMessageId: messageId, replyTo, sendId, trigger: usageTriggerFor(auth),
+        ...(CLOUD_HOME ? { sender: messageSender(auth) } : {}) });
       return json(res, 202, { ok: true, message });
     }
 
