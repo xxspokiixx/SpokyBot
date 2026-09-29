@@ -9,7 +9,17 @@ export interface SharingState {
 }
 interface Workspace { id: string; name: string; origin: string }
 interface Identity { sessionId: string; environmentId: string }
+export interface LendingActivityEntry {
+  at: number;
+  server: string;
+  origin: string;
+  action: string;
+  detail: string;
+  ok: boolean;
+  error?: string;
+}
 export function validateSharedFolders(folders: unknown): Promise<SharedFolder[]>;
+export function validSharedOperation(operation: unknown, computerId: string): boolean;
 export function createComputerSharing(options: {
   file: string;
   fetch: (url: string, init: RequestInit) => Promise<Response>;
@@ -18,8 +28,12 @@ export function createComputerSharing(options: {
   protectedPaths?: string[];
   cuaConnection: () => Promise<{ mcpCommand: string; mcpArgs: string[]; mcpEnv?: Record<string, string> } | null>;
   hostControl?: (id: string, signal: AbortSignal) => Promise<{ renew(): Promise<unknown>; release(): Promise<unknown> }>;
+  /** Home directory whose credential and autostart locations are protected. */
+  home?: string;
+  activityFile?: string;
 }): {
   state(id: string): SharingState;
+  activity(id?: string, limit?: number): LendingActivityEntry[];
   identity(env: Workspace): Promise<Identity>;
   observe(env: Workspace): Promise<Identity | null>;
   decline(env: Workspace, identity: Identity): void;

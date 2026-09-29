@@ -2764,6 +2764,11 @@ ipcMain.handle("sharing:revoke", localWorkspaceOnly("sharing:revoke", async (_ev
   await requireSharedComputers();
   return sharingController().revoke(savedWorkspace(id));
 }));
+// What that server's bots did here: the local log, never a server's claim.
+ipcMain.handle("sharing:activity", localWorkspaceOnly("sharing:activity", async (_event, id) => {
+  await requireSharedComputers();
+  return sharingController().activity(savedWorkspace(id).id, 50);
+}));
 ipcMain.handle("sharing:save", localWorkspaceOnly("sharing:save", async (_event, id, input) => {
   await requireSharedComputers();
   const env = savedWorkspace(id);

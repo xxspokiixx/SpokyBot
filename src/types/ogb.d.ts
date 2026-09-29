@@ -24,6 +24,7 @@ const __APP_VERSION__: string;
 
   type DesktopSharedFolder = import("../../electron/computer-sharing.mjs").SharedFolder;
   type DesktopComputerSharing = import("../../electron/computer-sharing.mjs").SharingState;
+  type DesktopLendingActivity = import("../../electron/computer-sharing.mjs").LendingActivityEntry;
 
   type DesktopCapabilities = {
     host: {
@@ -150,6 +151,8 @@ const __APP_VERSION__: string;
         chooseFolder(): Promise<DesktopSharedFolder | null>;
         save(id: string, grant: Pick<DesktopComputerSharing, "folders" | "terminal" | "computer">): Promise<DesktopComputerSharing | null>;
         revoke(id: string): Promise<DesktopComputerSharing>;
+        /** This computer's own record of what that server's bots did here, newest first. */
+        activity(id: string): Promise<DesktopLendingActivity[]>;
       };
       confirm(message: string): Promise<boolean>;
       getCapabilities(): Promise<DesktopCapabilities>;

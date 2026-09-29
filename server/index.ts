@@ -16,7 +16,7 @@ import { selectReplay, DEFAULT_REBUILD_BYTES, MAX_SUMMARY_BYTES } from "./contex
 import { draftSummary, foldPoint } from "./compaction-summary.ts";
 import { compactBudget, contextWindowFor, shouldCompact } from "./context-budget.ts";
 import { autoCompactWindow } from "./drivers/claude.ts";
-import { SharedComputers, sharedComputerOperation, sharedComputerRegistration } from "./shared-computers.ts";
+import { provenRequestPerson, SharedComputers, sharedComputerOperation, sharedComputerRegistration } from "./shared-computers.ts";
 import { SharedComputerControl } from "./shared-computer-control.ts";
 import { RoomHandoffs, type RoomHandoff } from "./room-handoffs.ts";
 import { assertRequestTarget, guardedRequestPath, requestConflict, requestNeedsInput, requestSourceForCard } from "./guarded-requests.ts";
@@ -786,6 +786,18 @@ function threadPersonKey(threadId: string): string | undefined {
     ? thread.find((message) => message.id === owner.messageId)
     : thread.findLast((message) => message.role === "user");
   return linePersonKey(request) ?? threadStarters.get(threadId);
+}
+
+/** The person whose lent computers this bot turn may use, or null.
+ * Fail closed: only the person whose own message the harness proved started
+ * this exact turn generation (continuations of that same request keep it).
+ * A routine, a webhook, a room, a bot's delegated or peer turn, the owner on
+ * this machine (who lends nothing to itself) and anything unprovable act for
+ * nobody here. Deliberately not the usage ledger's trigger, which defaults to
+ * the owner. */
+function sharedComputerPrincipal(capability: Pick<InternalCapability, "threadId" | "generation">): string | null {
+  return provenRequestPerson(directRequestOwners.get(capability.threadId), capability.generation,
+    (messageId) => linePersonKey(store.messagesFor(capability.threadId).find((message) => message.id === messageId)));
 }
 
 /** Whose session may answer a card. The provider CLI's own approval modes and
@@ -14106,7 +14118,7 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
         if (!parsed.success) return json(res, 400, { error: "Invalid computer registration" });
         const registration = parsed.data;
         if (registration.environmentId !== ENVIRONMENT_ID) return json(res, 409, { error: "Workspace identity changed. Pair again before sharing this computer." });
-        sharedComputers.register(registration, auth.session.id, secret);
+        sharedComputers.register(registration, { session: auth.session.id, person: personKey(auth.session) }, secret);
         return json(res, 200, { ok: true });
       }
       const route = /^\/api\/shared-computers\/([\w-]+)\/(poll|lease|result|disconnect)$/.exec(path);
@@ -14382,12 +14394,20 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
       }
       // Off by default: both fall through to the same "unknown internal
       // endpoint" 404 a never-implemented route returns.
-      if (method === "GET" && path === "/api/internal/shared-computers" && sharedComputersEnabled(cfg)) return json(res, 200, { computers: sharedComputers.list() });
+      // Owner-scoped: a turn sees and uses only the computers of the person it
+      // provably acts for (sharedComputerPrincipal), never anyone else's.
+      if (method === "GET" && path === "/api/internal/shared-computers" && sharedComputersEnabled(cfg)) {
+        return json(res, 200, { computers: sharedComputers.list(sharedComputerPrincipal(internalCapability)) });
+      }
       if (method === "POST" && path === "/api/internal/shared-computers" && sharedComputersEnabled(cfg)) {
         const parsed = sharedComputerOperation.safeParse(await readInternalBody());
         if (!sharedComputersEnabled(cfg)) return json(res, 404, { error: "unknown internal endpoint" });
         if (!parsed.success) return json(res, 400, { error: "Invalid shared computer operation" });
-        return json(res, 200, { result: await sharedComputers.request(parsed.data, () => sharedComputersEnabled(cfg) && internalCapabilityIsActive(internalCapability)) });
+        // The bot's own "no computer" setting holds on a lent screen too.
+        if (["computer_tools", "computer_call"].includes(parsed.data.action) && store.bot(internalCapability.botId)?.computer === "off") {
+          return json(res, 403, { error: "This bot has no computer. Change its Computer setting to use a shared computer's apps and screen." });
+        }
+        return json(res, 200, { result: await sharedComputers.request(parsed.data, sharedComputerPrincipal(internalCapability), () => sharedComputersEnabled(cfg) && internalCapabilityIsActive(internalCapability)) });
       }
       if (method === "GET" && path === "/api/internal/agents") {
         const sender = internalSender;

@@ -4,7 +4,8 @@ import path from "node:path";
 import os from "node:os";
 import { randomBytes, randomUUID } from "node:crypto";
 import { setTimeout as delay } from "node:timers/promises";
-import { createSharedCua, executeSharedOperation, sharedComputerError } from "./shared-computer-access.mjs";
+import { createSharedCua, executeSharedOperation, personalSecretPaths, sharedComputerError } from "./shared-computer-access.mjs";
+import { createLendingActivity, describeSharedOperation } from "./lending-activity.mjs";
 
 const uuid = value => typeof value === "string" && /^[a-f0-9]{8}-[a-f0-9]{4}-[1-8][a-f0-9]{3}-[89ab][a-f0-9]{3}-[a-f0-9]{12}$/i.test(value);
 const DATA_VOLUME = "/System/Volumes/Data";
@@ -73,13 +74,33 @@ export async function validateSharedFolders(folders) {
   return result;
 }
 
+const JOB_KEYS = new Set(["computer_id", "action", "folder_id", "path", "content", "encoding", "expected_sha256", "command", "tool_name", "arguments"]);
+const JOB_ACTIONS = new Set(["list_files", "read_file", "write_file", "run_command", "computer_tools", "computer_call"]);
+const optionalText = (value, max) => value === undefined || (typeof value === "string" && value.length <= max);
+/** The server's job, checked against the same shape the server accepts
+ * before anything on this computer looks at it. The grant still decides
+ * whether the operation is allowed; this only refuses malformed input. */
+export function validSharedOperation(operation, computerId) {
+  return Boolean(operation) && typeof operation === "object" && !Array.isArray(operation) &&
+    Object.keys(operation).every(key => JOB_KEYS.has(key)) &&
+    operation.computer_id === computerId && JOB_ACTIONS.has(operation.action) &&
+    (operation.folder_id === undefined || uuid(operation.folder_id)) &&
+    optionalText(operation.path, 2048) && optionalText(operation.content, 350_000) &&
+    (operation.encoding === undefined || operation.encoding === "utf8" || operation.encoding === "base64") &&
+    (operation.expected_sha256 === undefined || (typeof operation.expected_sha256 === "string" && /^[a-f0-9]{64}$/.test(operation.expected_sha256))) &&
+    optionalText(operation.command, 8000) && optionalText(operation.tool_name, 100) &&
+    (operation.arguments === undefined || (Boolean(operation.arguments) && typeof operation.arguments === "object" && !Array.isArray(operation.arguments)));
+}
+
 /** Outbound HTTPS only; no local listening port and no host credentials in
  * the renderer. Pairing cookies and a connector secret remain in Electron. */
-export function createComputerSharing({ file, fetch: fetchImpl, environments, cuaConnection, hostControl, protectedPaths = [], enabled = async () => false }) {
+export function createComputerSharing({ file, fetch: fetchImpl, environments, cuaConnection, hostControl, protectedPaths = [], enabled = async () => false, home = os.homedir(), activityFile }) {
   // The grant store's own directory plus whatever the desktop shell names —
-  // the server data directory holds provider API keys and sessions.json. This
-  // module never imports electron, so those roots arrive from the caller.
-  const protectedRoots = [path.dirname(file), ...protectedPaths.filter(entry => typeof entry === "string" && entry)];
+  // the server data directory holds provider API keys and sessions.json —
+  // plus the person's own credential and autostart locations. This module
+  // never imports electron, so those roots arrive from the caller.
+  const protectedRoots = [path.dirname(file), ...protectedPaths.filter(entry => typeof entry === "string" && entry), ...personalSecretPaths(home)];
+  const activity = createLendingActivity(activityFile ?? path.join(path.dirname(file), "lending-activity.jsonl"));
   let records = {};
   try {
     const parsed = JSON.parse(fs.readFileSync(file, "utf8"));
@@ -163,7 +184,12 @@ export function createComputerSharing({ file, fetch: fetchImpl, environments, cu
             const { job } = await call("poll");
             await requireEnabled();
             if (!job) continue;
-            if (!uuid(job.id) || typeof job.operation !== "object" || job.operation?.computer_id !== grant.id) throw new Error("Invalid computer request");
+            if (!uuid(job.id)) throw new Error("Invalid computer request");
+            if (!validSharedOperation(job.operation, grant.id)) {
+              activity.record({ env, action: "invalid", detail: "", ok: false, error: "Refused a malformed request" });
+              await call("result", { jobId: job.id, result: sharedComputerError(new Error("Invalid computer request")) });
+              continue;
+            }
             if (executing) { await call("result", { jobId: job.id, result: sharedComputerError(new Error("This computer is busy with another server")) }); continue; }
             executing = true;
             const jobAbort = new AbortController();
@@ -200,6 +226,10 @@ export function createComputerSharing({ file, fetch: fetchImpl, environments, cu
               });
             } catch (error) { result = sharedComputerError(error); live.cua?.close(); live.cua = null; }
             finally { clearInterval(heartbeat); await control?.release().catch(() => {}); executing = false; }
+            activity.record({
+              env, action: job.operation.action, detail: describeSharedOperation(grant, job.operation), ok: result?.isError !== true,
+              error: result?.isError === true ? result?.content?.[0]?.text : undefined,
+            });
             // Never retry an action if the result delivery fails.
             await call("result", { jobId: job.id, result });
           }
@@ -220,6 +250,12 @@ export function createComputerSharing({ file, fetch: fetchImpl, environments, cu
   };
   return {
     state, identity,
+    /** What servers' bots did here, newest first (optionally one server's). */
+    activity(id, limit) {
+      const env = id === undefined ? null : environments().find(entry => entry.id === id);
+      const entries = activity.list(env ? 500 : limit);
+      return (env ? entries.filter(entry => entry.origin === env.origin) : entries).slice(0, limit ?? 100);
+    },
     async observe(env) {
       const info = await identity(env);
       if (matches(records[env.id], info)) return null;
