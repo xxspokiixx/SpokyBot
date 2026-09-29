@@ -56,6 +56,49 @@ problem**, **Could not be set up yet**. Only Ready can be connected to.
 Signed out of Cloud, the app makes no Cloud request and nothing on this page
 runs.
 
+### Open in the app: `openmausbot://cloud`
+
+The Cloud page (`https://cloud.openmausbot.com/cloud`) can offer **Open in the
+app** as a link to exactly `openmausbot://cloud`. The app accepts that string
+and nothing else: no path, query, fragment or trailing slash, and it ignores
+any other form. Like `openmausbot://organization`, it is an action, not a
+router. It never carries an address, a pairing code or a credential; the app
+decides everything from its own verified state (`electron/cloud-entry.mjs`).
+
+1. The link starts the app, or brings it forward if it is already running
+   (launch argument, a second instance, or macOS `open-url`, including one
+   that arrives before the app is ready). If the window already shows
+   **My Cloud**, coming forward is all it does.
+2. Otherwise the window returns to this computer (a hosted server that was
+   showing stays saved under **Servers**) and opens **Settings → OMB Cloud**.
+   Before that view acts, the app gives a saved Cloud sign-in up to five
+   seconds to finish restoring, so it is never mistaken for signed out.
+3. Opened this way, the view acts on its own, with no confirmation:
+   - signed out: it starts the existing device sign-in at once, which opens
+     the browser approval page with the code filled in
+     (`/cloud/desktop?code=…`);
+   - signed in and the Cloud is **Ready**: it connects to **My Cloud**,
+     exactly like **Connect to my Cloud**;
+   - after that sign-in completes, or when the Cloud becomes **Ready** while
+     the view is still open, it connects then;
+   - anything else: the card shows the status and the person decides.
+
+It starts at most one sign-in (only when signed out on arrival; a later
+sign-out in that view starts nothing) and one automatic connection per link.
+A failed connection shows the card's error; clicking the link again retries.
+Closing Settings or choosing another section ends it. While it is open, the
+first-run welcome waits, as it does for Organization settings. A normal visit
+to **Settings → OMB Cloud** never signs in or connects by itself.
+
+The link does nothing in development builds, and in companion client mode it
+explains that the app must be disconnected from the other computer first.
+The `openmausbot` scheme belongs to the installed app: on macOS through the
+app bundle, on Linux through the `.deb`'s desktop entry, and on Windows (and
+for an AppImage) once the installed app has started at least once, since it
+registers itself at startup. Before that, or if the app is not installed, the
+browser has nothing to open (it shows nothing or an error), so the Cloud page
+should keep a download link next to the button.
+
 ## The image
 
 `deploy/fly/Dockerfile` builds on the published server image
