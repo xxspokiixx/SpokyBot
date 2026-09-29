@@ -104,6 +104,12 @@ export function computerPrompt(kind: ComputerPromptKind | null): string {
   return COMPUTER_PARAGRAPH[kind] + SIGN_IN_PROMPT;
 }
 
+/** Every turn on a Cloud home (server/cloud-home.ts). The bot runs in the
+ * cloud, so asked about the person's own computer it says so plainly instead
+ * of sending them to set up places that cannot exist there. */
+export const CLOUD_HOME_PROMPT =
+  " You run on the user's OMB Cloud, a server in the cloud, not on their own computer. You cannot see or use their Mac or PC, its screen or its files yet. If they ask for something on their own computer, say that in one sentence and offer what works here: the built-in browser and cloud computers. Never ask them to set up this computer or a Local VM; neither exists here.";
+
 export const COMPOSIO_PROMPT =
   " The user's connected apps (Gmail, Calendar, Slack, Notion, and the rest) are reachable through the composio tools — find the right one with COMPOSIO_SEARCH_TOOLS, read its arguments with COMPOSIO_GET_TOOL_SCHEMAS, then run it with COMPOSIO_MULTI_EXECUTE_TOOL. Reach for them before telling the user you have no access to a service.";
 

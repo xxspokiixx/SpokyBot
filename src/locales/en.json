@@ -2229,6 +2229,7 @@
   "computer.sleepTitle": "Put the computer to sleep",
   "computer.worksOn": "Works on",
   "computer.worksOnHint": "Choose where this bot can use a computer.",
+  "computer.worksOnHintCloudHome": "Choose where this bot can use a computer. Bots on your OMB Cloud work in the cloud, so they can't use your own computer yet.",
   "computer.destinationAria": "Computer destination",
   "computer.dest.autoDesc": "Choose automatically",
   "computer.dest.cloudDesc": "Hosted desktop",

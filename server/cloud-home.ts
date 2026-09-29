@@ -1,5 +1,5 @@
-// OMB Cloud Pro home machine: the boot contract, the Admin's signed pairing
-// request, and the volume the machine lives on. docs/cloud-pro.md is the
+// OMB Cloud Pro home machine: the boot contract, the places it offers, the
+// Admin's signed pairing request, and the volume the machine lives on. docs/cloud-pro.md is the
 // contract of record (and openmaus-cloud docs/consumer-cloud.md its Admin
 // half); keep them in step.
 //
@@ -21,6 +21,7 @@ import { createHash, createHmac, timingSafeEqual } from "node:crypto";
 import { existsSync, lstatSync, mkdirSync, readFileSync, readdirSync } from "node:fs";
 import type { IncomingMessage } from "node:http";
 import { join } from "node:path";
+import type { Surface } from "../shared/wire.ts";
 import { writeFileAtomic } from "./atomic.ts";
 import { hostedWorkspaceConfigured } from "./enterprise.ts";
 import { formatPairingCode, type SessionRegistry } from "./sessions.ts";
@@ -95,6 +96,26 @@ export function withoutIgnoredCloudKeys(env: NodeJS.ProcessEnv): NodeJS.ProcessE
   const kept = { ...env };
   for (const key of CLOUD_IGNORED_KEYS) delete kept[key];
   return kept;
+}
+
+// The places a Cloud home offers live in shared/cloud-home.ts, so the app
+// lists exactly what the server accepts.
+export { cloudHomeOffersPlace } from "../shared/cloud-home.ts";
+
+/** Why a Cloud home refuses a place it never offers (no "this computer" of
+ * the person's, no Local VM), in the words the person reads; undefined for a
+ * place it offers. */
+export function cloudHomePlaceRefusal(place: Surface): string | undefined {
+  if (place === "local") return "Bots on your OMB Cloud can't use your own computer yet: they run in the cloud. Set Works on to Auto, Cloud or Browser.";
+  if (place === "vm") return "Bots on your OMB Cloud can't use a Local VM: the cloud machine has no container runtime. Set Works on to Auto, Cloud or Browser.";
+  return undefined;
+}
+
+/** What a turn is told when Cloud is chosen but no Boat account is set up (no
+ * key of the person's and no included Boat). A Cloud home has no Local VM to
+ * suggest instead. */
+export function boatNotConfiguredMessage(cloudHome: boolean): string {
+  return `Cloud Boat is not configured — add a Boat API key or choose ${cloudHome ? "Browser" : "Local VM"}`;
 }
 
 /** The Admin's side of the signature (openmaus-cloud cloudPairingSignature). */
