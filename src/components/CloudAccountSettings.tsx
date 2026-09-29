@@ -1,9 +1,9 @@
 import { useEffect, useRef, useState } from "react";
 import type { CloudAccountState } from "../../electron/cloud-account.mjs";
 import type { CloudMachine } from "../../electron/cloud-home.mjs";
+import { CloudMoveSettings } from "./CloudMove";
 import { t } from "@/lib/i18n";
 import { Card } from "./SettingsPrimitives";
-import { CloudMoveSettings } from "./CloudMove";
 
 const MACHINE_TEXT = {
   provisioning: "cloudHome.provisioning",

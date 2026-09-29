@@ -138,7 +138,7 @@ it("keeps the previous Cloud until a restore of it is installed, never showing i
 // ── the routes ──────────────────────────────────────────────────────────
 let server: Server | undefined;
 afterEach(async () => { await new Promise<void>((done) => server ? server.close(() => done()) : done()); server = undefined; });
-async function routes(options: { cloudHome?: boolean; freeBytes?: number } = {}) {
+async function routes(options: { cloudHome?: boolean; freeBytes?: number; exclusive?: <T>(work: () => Promise<T>) => Promise<T> } = {}) {
   const sessions = new SessionRegistry({ file: join(dataDir, "sessions.json") });
   const owner = sessions.issue({ label: "Owner's app", scopes: ["admin", "client"] });
   const phone = sessions.issue({ label: "Phone", scopes: ["client"] });
@@ -147,9 +147,9 @@ async function routes(options: { cloudHome?: boolean; freeBytes?: number } = {})
   const restarts: number[] = [];
   const handle = createCloudMoveRoutes({
     dataDir, appVersion: "0.1.90", cloudHome: options.cloudHome ?? true, readBody, restored: {},
-    exclusive: (work) => work(), authorized: (req, auth) => authenticate(req).auth?.kind === auth.kind,
+    exclusive: options.exclusive ?? ((work) => work()), authorized: (req, auth) => authenticate(req).auth?.kind === auth.kind,
     status: () => ({ busy: false, pendingRestore: false }), restart: () => restarts.push(Date.now()),
-    freeBytes: () => options.freeBytes ?? 1024 ** 4,
+    freeBytes: () => options.freeBytes ?? 1024 ** 4, gateRetryMs: 0, restartDelayMs: 0,
   });
   server = createServer(async (req, res) => {
     const gate = authenticate(req);
@@ -229,3 +229,18 @@ it("refuses a session without admin scope even if a gate in front let it through
   const owner = { ...client, scopes: ["admin", "client"] } as RequestAuth;
   expect(await answer(owner, "GET", "/api/cloud-move")).toBe(200);
 });
+
+it("Restore previous Cloud waits out a moment of activity, then commits and restarts", async () => {
+  writeFileSync(join(dataDir, "bots.json"), JSON.stringify([{ id: "one" }, { id: "two" }]));
+  await savePreviousCloud(dataDir, (password) => createWorkspaceBackupSnapshot(dataDir, { password, appVersion: "0.1.90" }));
+  let refusals = 2;
+  const cloud = await routes({ exclusive: async (work) => {
+    if (refusals-- > 0) throw Object.assign(new Error("Wait for bot turns to finish."), { status: 409 });
+    return work();
+  } });
+  expect((await cloud.call("POST", "/api/cloud-move/undo", cloud.owner, {})).status).toBe(202);
+  await expect.poll(async () => (await cloud.call("GET", "/api/cloud-move", cloud.owner)).body.job?.state, { timeout: 30_000 }).toBe("done");
+  expect(refusals).toBe(-1);
+  await expect.poll(() => cloud.restarts.length).toBe(1);
+  expect(existsSync(join(dataDir, ".backups", "pending-restore.json"))).toBe(true);
+}, 60_000);

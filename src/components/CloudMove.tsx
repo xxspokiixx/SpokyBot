@@ -20,6 +20,7 @@ const ERROR: Record<string, LocaleKey> = {
   local_full: "cloudMove.error.localFull", upload_failed: "cloudMove.error.network", network: "cloudMove.error.network",
   access_changed: "cloudMove.error.accessChanged", cloud_unavailable: "cloudMove.error.cloudUnavailable",
   cancelled: "cloudMove.error.cancelled", restart_timeout: "cloudMove.error.restartTimeout", no_previous: "cloudMove.error.noPrevious",
+  cloud_outdated: "cloudMove.error.cloudOutdated",
 };
 
 export const formatMoveBytes = (value: number) => {

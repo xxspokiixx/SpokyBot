@@ -52,6 +52,7 @@ export function createCloudMoveRoutes(options: {
   restart: () => void;
   freeBytes?: (path: string) => number;
   restartDelayMs?: number;
+  gateRetryMs?: number;
 }) {
   const freeBytes = options.freeBytes ?? freeVolumeBytes;
   // Staged here by a preview; restore accepts nothing else.
@@ -82,6 +83,16 @@ export function createCloudMoveRoutes(options: {
       if (job === current) job = { kind, state: "failed", error: error instanceof Error ? error.message : "The move could not finish." };
     });
   }
+  // A person's own page can hold the workspace gate for a moment (an ordinary
+  // request in flight); try the gate a few times before giving up.
+  const quietly = async <T>(work: () => Promise<T>): Promise<T> => {
+    for (let attempt = 0; ; attempt++) {
+      try { return await options.exclusive(work, true); } catch (error) {
+        if (attempt >= 4 || (error as { status?: number }).status !== 409) throw error;
+        await new Promise((resolve) => setTimeout(resolve, options.gateRetryMs ?? 2_000));
+      }
+    }
+  };
   // The answer that the restore is ready goes out first; then the launcher
   // starts the server again, and startup installs the restore before anything else loads.
   const restartSoon = () => { setTimeout(() => options.restart(), options.restartDelayMs ?? 1_500).unref?.(); };
@@ -163,7 +174,7 @@ export function createCloudMoveRoutes(options: {
         const body = z.object({ id: z.string().uuid() }).parse(await options.readBody(req, 4096));
         ready();
         if (!staged.has(body.id)) throw failure("This move is no longer ready on your Cloud. Start it again.", 404);
-        start("restore", () => options.exclusive(async () => {
+        start("restore", () => quietly(async () => {
           check(req, auth);
           // Anything the Cloud already has is backed up first so it can be
           // put back; the restore also keeps its usual safety copy.
@@ -173,7 +184,7 @@ export function createCloudMoveRoutes(options: {
           const committed = commitPendingWorkspaceRestore(options.dataDir, body.id);
           staged.delete(body.id);
           return { kind: "restore", state: "done", id: committed.id, previous } as CloudMoveJob;
-        }, true), restartSoon);
+        }), restartSoon);
         json(res, 202, { job });
         return true;
       }
@@ -183,12 +194,12 @@ export function createCloudMoveRoutes(options: {
         start("undo", async () => {
           const prepared = await stagePreviousCloud(options.dataDir, options.appVersion);
           try {
-            return await options.exclusive(async () => {
+            return await quietly(async () => {
               check(req, auth);
               const committed = commitPendingWorkspaceRestore(options.dataDir, prepared.id);
               markPreviousCloudRestoring(options.dataDir, committed.id);
               return { kind: "undo", state: "done", id: committed.id } as CloudMoveJob;
-            }, true);
+            });
           } catch (error) {
             try { removeWorkspaceBackupJob(options.dataDir, prepared.id); } catch { /* kept for recovery */ }
             throw error;

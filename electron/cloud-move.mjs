@@ -98,6 +98,13 @@ export function createCloudMove({ localRequest, pairHome, fetchImpl = fetch, tem
   let value = { phase: "idle" }, running = false, controller = null, committing = false, prepared = null;
   const state = () => structuredClone(value);
   const publish = next => { value = next; try { onState(state()); } catch { /* a closed view must not stop the move */ } return state(); };
+  // Byte counts at most four times a second; every step change at once.
+  let progressAt = 0;
+  const progress = (phase, bytesTransferred, totalBytes) => {
+    if (value.phase === phase && bytesTransferred < totalBytes && now() - progressAt < 250) return;
+    progressAt = now();
+    publish({ phase, action: "move", progress: { bytesTransferred, totalBytes } });
+  };
 
   async function localJson(route, init, signal) {
     if (!LOCAL_ROUTES.test(route)) fail("invalid_request", "Unsupported local request.");
@@ -144,6 +151,7 @@ export function createCloudMove({ localRequest, pairHome, fetchImpl = fetch, tem
     if (status === 507) fail("cloud_full", "Your Cloud does not have enough free space for this move.", { freeBytes: count(body?.freeBytes) ? body.freeBytes : undefined, neededBytes: count(body?.neededBytes) ? body.neededBytes : undefined });
     if (status === 413) fail("too_large", "This workspace is larger than a move can carry.");
     if (status === 409) fail("cloud_busy", message ?? "Your Cloud is busy. Try again in a minute.");
+    if (status === 404) fail("not_found", message ?? "Your Cloud does not know this move. Start it again.");
     if (status >= 500 || status === 429 || status === 408) fail("network", "Your Cloud did not answer. Try again; the move continues where it stopped.");
     fail("cloud_refused", message ?? "Your Cloud refused the move.");
   }
@@ -156,7 +164,12 @@ export function createCloudMove({ localRequest, pairHome, fetchImpl = fetch, tem
     return result;
   }
   async function cloudStatus(session, signal) {
-    const status = parseCloudMoveStatus(await cloudJson(session, "GET", "/api/cloud-move", undefined, signal));
+    // A Cloud from before Move to Cloud has no such route.
+    const answer = await cloudJson(session, "GET", "/api/cloud-move", undefined, signal).catch(error => {
+      if (error?.code === "not_found") fail("cloud_outdated", "Your Cloud has not updated to a version that can receive a move yet.");
+      throw error;
+    });
+    const status = parseCloudMoveStatus(answer);
     if (!status) fail("invalid_response", "Your Cloud gave an answer this app does not understand. Update the app and try again.");
     return status;
   }
@@ -194,7 +207,7 @@ export function createCloudMove({ localRequest, pairHome, fetchImpl = fetch, tem
           if (bytes + chunk.length > exported.bytes) fail("export_failed", "This computer's workspace changed size while it was prepared.");
           if (bytes < header.length) chunk.copy(header, bytes, 0, Math.min(chunk.length, header.length - bytes));
           bytes += chunk.length; hash.update(chunk);
-          publish({ phase: "exporting", action: "move", progress: { bytesTransferred: bytes, totalBytes: exported.bytes } });
+          progress("exporting", bytes, exported.bytes);
           yield chunk;
         }
       }, createWriteStream(file, { flags: "wx", mode: 0o600 }), { signal });
@@ -237,7 +250,7 @@ export function createCloudMove({ localRequest, pairHome, fetchImpl = fetch, tem
     if (!count(begun.received) || begun.received > archived.bytes) fail("invalid_response", "Your Cloud gave an answer this app does not understand.");
     const partBytes = Number.isSafeInteger(begun.partBytes) && begun.partBytes > 0 && begun.partBytes <= MAX_PART_BYTES ? begun.partBytes : PART_BYTES;
     let offset = begun.received, stalls = 0;
-    publish({ phase: "uploading", action: "move", progress: { bytesTransferred: offset, totalBytes: archived.bytes } });
+    progress("uploading", offset, archived.bytes);
     const handle = await open(archived.file, "r");
     try {
       while (offset < archived.bytes) {
@@ -253,7 +266,7 @@ export function createCloudMove({ localRequest, pairHome, fetchImpl = fetch, tem
         stalls = received > offset ? 0 : stalls + 1;
         if (stalls > retryDelaysMs.length) fail("upload_failed", "The upload to your Cloud kept failing. Check your connection and try again; it continues where it stopped.");
         offset = received;
-        publish({ phase: "uploading", action: "move", progress: { bytesTransferred: offset, totalBytes: archived.bytes } });
+        progress("uploading", offset, archived.bytes);
       }
     } finally { await handle.close(); }
   }
@@ -274,7 +287,10 @@ export function createCloudMove({ localRequest, pairHome, fetchImpl = fetch, tem
     }
   }
   async function waitForRestart(session, kind, target, signal) {
-    const deadline = now() + restartTimeoutMs;
+    // The Cloud's own job may take long on a large workspace; once it is
+    // done (or the Cloud stops answering), the restart gets its own limit.
+    let deadline = now() + jobTimeoutMs, restarting = false;
+    const restartBegins = () => { if (!restarting) { restarting = true; deadline = Math.min(deadline, now() + restartTimeoutMs); publish({ ...value, phase: "restarting" }); } };
     let id = target.id, sawJob = false;
     for (;;) {
       await sleep(pollMs, signal);
@@ -284,7 +300,7 @@ export function createCloudMove({ localRequest, pairHome, fetchImpl = fetch, tem
         const job = status.job;
         if (job?.kind === kind) sawJob = true;
         if (job?.kind === kind && job.state === "failed") fail("restore_failed", typeof job.error === "string" ? job.error.slice(0, 300) : "Your Cloud could not restore the workspace.");
-        if (job?.kind === kind && job.state === "done" && typeof job.id === "string") { id = job.id; publish({ ...value, phase: "restarting" }); }
+        if (job?.kind === kind && job.state === "done" && typeof job.id === "string") { id = job.id; restartBegins(); }
         const restored = id ? status.lastRestoreId === id : status.lastRestoreId !== null && status.lastRestoreId !== target.lastRestoreId;
         const rolledBack = id ? status.rolledBackId === id : status.rolledBackId !== null && status.rolledBackId !== target.rolledBackId;
         if (rolledBack) fail("restore_failed", "Your Cloud could not install the workspace and kept what it had.");
@@ -294,7 +310,7 @@ export function createCloudMove({ localRequest, pairHome, fetchImpl = fetch, tem
         if (!restored && !status.pendingRestore && job?.kind !== kind) {
           fail(sawJob ? "restore_failed" : "network", sawJob ? "Your Cloud restarted without installing the workspace. Try again." : "Your Cloud did not start replacing its workspace. Try again.");
         }
-      } else if (value.phase !== "restarting") publish({ ...value, phase: "restarting" });
+      } else restartBegins();
       if (now() > deadline) fail("restart_timeout", "Your Cloud is taking longer than usual to restart. Check it again in a few minutes.");
     }
   }
@@ -345,7 +361,7 @@ export function createCloudMove({ localRequest, pairHome, fetchImpl = fetch, tem
       committing = true;
       publish({ phase: "replacing", action: "move", replacing: !cloud.empty });
       // A dropped answer is settled by the Cloud's own status below.
-      await cloudJson(session, "POST", "/api/cloud-move/restore", { id: preview.id }, signal).catch(error => { if (error?.code !== "network" && !(error instanceof TypeError)) throw error; });
+      await cloudJson(session, "POST", "/api/cloud-move/restore", { id: preview.id }, signal).catch(error => { if (error?.code !== "network" && !(error instanceof TypeError) && error?.name !== "TimeoutError") throw error; });
       await disposeArchive();
       const after = await waitForRestart(session, "restore", { id: preview.id }, signal);
       return publish({ phase: "done", action: "move", moved: after.contents, previous: Boolean(after.previous) });

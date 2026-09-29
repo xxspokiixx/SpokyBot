@@ -195,6 +195,21 @@ test("a busy computer, a missing Cloud and a stop all end before the Cloud repla
   } finally { stopped.done(); }
 });
 
+test("says a Cloud from before Move to Cloud has to update first", async () => {
+  const f = harness();
+  const fetchImpl = f.cloud.fetchImpl;
+  const outdated = createCloudMove({
+    localRequest: f.local.request, tempRoot: join(f.temp, "move"), availableBytes: async () => 1024 ** 4, sleep: async () => {}, pollMs: 0,
+    pairHome: async () => ({ origin: ORIGIN, code: "ABCD-EFGH-JKLM", expiresAt: Date.now() + 60_000 }),
+    fetchImpl: (url, init) => new URL(url).pathname === "/api/cloud-move" ? Promise.resolve(json(404, { error: "not found" })) : fetchImpl(url, init),
+  });
+  try {
+    const result = await outdated.move();
+    assert.equal(result.error.code, "cloud_outdated");
+    assert.equal(f.local.calls.some(([, route]) => route === "/api/workspace-backup/export"), false);
+  } finally { f.done(); }
+});
+
 test("reports a replaced Cloud's backup", async () => {
   const f = harness({ cloud: { empty: false } });
   try {

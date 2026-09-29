@@ -356,7 +356,11 @@ sessions and pairing, its engine sign-ins, its computer-sharing switch
 on), and its boot contract (the environment, and the volume marker outside the
 data folder). As with any restore, routines, webhooks and scheduled calls
 arrive paused and nothing queued runs; the person turns routines on in the
-Cloud when they want them to run there instead.
+Cloud when they want them to run there instead. A bot that used an engine or
+API key the Cloud does not have asks for one there, and a bot pointed at a
+project folder outside the workspace keeps that path, which the Cloud does not
+have: the files inside the workspace move, folders elsewhere on the computer
+do not.
 
 ### How it moves (`electron/cloud-move.mjs`, `server/cloud-move-http.ts`)
 

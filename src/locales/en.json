@@ -260,6 +260,7 @@
   "cloudMove.error.cancelled": "The move was stopped. Nothing on your Cloud was replaced.",
   "cloudMove.error.restartTimeout": "Your Cloud is taking longer than usual to restart. Check it again in a few minutes.",
   "cloudMove.error.noPrevious": "There is no previous Cloud to restore.",
+  "cloudMove.error.cloudOutdated": "Your Cloud has not updated to a version that can receive a move yet. Try again once it has.",
   "cloudMove.error.other": "The move did not finish: {detail}",
   "cloudMove.suggest.title": "Bring your bots and chats from this computer",
   "cloudMove.suggest.titleMac": "Bring your bots and chats from this Mac",
