@@ -11,6 +11,7 @@ import { api, useStore, type InstanceInfo } from "@/state/store";
 import { EngineCard, EngineSections, RefreshEngines, engineReady } from "./EngineLibrary";
 import { ProviderIconPicker } from "./ProviderIconPicker";
 import { cn } from "@/lib/cn";
+import { useMenuMotion } from "./MenuMotion";
 import { t } from "@/lib/i18n";
 import { EngineSetup, EngineUpdateNotice, EngineWarningNotice } from "./EngineSetup";
 import { AddClaudeAccount, ClaudeAccountSettings } from "./ClaudeAccountSettings";
@@ -201,6 +202,7 @@ function CustomPicker({ instance, cliDefault, onClose, onSaved }: {
 function EngineRow({ instance }: { instance: InstanceInfo }) {
   const { refreshInstances } = useStore();
   const [open, setOpen] = useState(false);
+  const cliMotion = useMenuMotion(open);
   const [switching, setSwitching] = useState(false);
   const [updating, setUpdating] = useState(false);
   const [updatedVersion, setUpdatedVersion] = useState<string | null>(null);
@@ -329,13 +331,15 @@ function EngineRow({ instance }: { instance: InstanceInfo }) {
           <div role="status" className="mt-1 text-[12px] text-success">{t("engines.claudeUpdated", { version: updatedVersion })}</div>
         )}
         {error && <div role="alert" className="mt-1 text-[12px] text-danger">{error}</div>}
-        {open && (
-          <CustomPicker
-            instance={instance}
-            cliDefault={instance.cliDefault}
-            onClose={() => setOpen(false)}
-            onSaved={refreshInstances}
-          />
+        {cliMotion.shown && (
+          <div className={cliMotion.className}>
+            <CustomPicker
+              instance={instance}
+              cliDefault={instance.cliDefault}
+              onClose={() => setOpen(false)}
+              onSaved={refreshInstances}
+            />
+          </div>
         )}
       </details>
     </EngineCard>
