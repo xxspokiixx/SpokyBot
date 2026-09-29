@@ -286,6 +286,7 @@ import { ManagedDesktopProviders } from "./managed-desktop.ts";
 import { computerKindForResource, ManagedDesktopPolicy } from "./managed-policy.ts";
 import { hostedModelPolicy, HOSTED_MODEL_POLICY_HEADER, HOSTED_PROVIDER_SETTINGS_ERROR } from "./hosted-models.ts";
 import { CLOUD_IGNORED_KEYS, CLOUD_PAIRING_PATH, cloudHomeConfiguration, createCloudPairing, readSignedBody } from "./cloud-home.ts";
+import { holdIncludedServices } from "./included-services.ts";
 import type { ProviderInstance } from "./contracts.ts";
 import { selectDefaultModelSelection, withNewBotEffort } from "./default-model-selection.ts";
 import { cancelPeerApprovalsFor, cancelPeerApprovalsForThread, dismissStalePeerCards, peerApprovalFailure, requestPeerApproval, resolvePeerComms, type ApprovalBus } from "./peer-approval.ts";
@@ -308,6 +309,8 @@ import {
   toWireTask,
 } from "./store.ts";
 import * as tts from "./tts/index.ts";
+import { createDecider, deciderReady, deciderSavePatch, describeDecider } from "./decider/index.ts";
+import { decideRoomResponder, type RoomRoutingInput } from "./decider/room-routing.ts";
 import { narrateTool, toUtterances } from "./tts/speech-text.ts";
 import { buildRecoveryText, buildTurnContext, engineIsFresh, NATIVELY_REPLAYING_DRIVER_KINDS, peerMessageText } from "./turn-context.ts";
 import { Handoffs, handedStateUsable, recordHanded, renderUnseen, sessionStart, unseenMessages, withUnseenMessages, type ContextMessage } from "./delta-context.ts";
@@ -553,6 +556,7 @@ import { ROUTES, dispatchRoutes } from "./routes/table.ts";
 import { createHostedSlackRoutes } from "./routes/hosted-slack.ts";
 import { createBotPresetRoutes } from "./routes/bot-presets.ts";
 import { createBotMemoryRoutes } from "./routes/bot-memory.ts";
+import { createDeciderRoutes } from "./routes/decider.ts";
 
 const PORT = Number(process.env.OMB_PORT || process.env.OGB_PORT || 8799);
 const WEBHOOK_PORT = Number(process.env.OMB_WEBHOOK_PORT || PORT + 1);
@@ -629,6 +633,9 @@ if (CLOUD_HOME) {
   console.log(`cloud home ${CLOUD_HOME.machineId}: bots run on the engines the person signs in to here`);
   for (const warning of CLOUD_HOME.warnings) console.warn(`cloud home: ${warning}`);
 }
+// Cloud Pro's included Boat and voice relay tokens, when the Admin set them:
+// held in memory from here on, like the signing secret.
+holdIncludedServices();
 // Who each thread is for, when a signed-in person can be named (server-private).
 const threadStarters = new ThreadStarters(join(DATA_DIR, "thread-starters.json"));
 const commandAllowlist = new CommandAllowlistStore(join(DATA_DIR, "command-allowlist.json"));
@@ -681,6 +688,9 @@ bindThreadLogCapProvider(() => threadEventLogMaxBytes(cfg));
 // The decision log keeps month files for at least this many days. Read per
 // prune, so a Settings change applies at the next one without a restart.
 bindDecisionRetention(() => decisionRetentionDays(cfg.decisions?.retentionDays));
+// The decision model (server/decider): reads cfg per call, so a Settings
+// save applies to the next decision. It never throws into a turn.
+const decider = createDecider({ config: () => cfg, dataDir: DATA_DIR });
 const customDomainVerifier = createCustomDomainVerifier({ environmentId: ENVIRONMENT_ID });
 // "Sign in with your email" on /pair: the allow-list is read per call so a
 // Settings change or an env bootstrap applies without a restart.
@@ -2884,9 +2894,15 @@ function defaultsPresetFor(body: Record<string, unknown>, includeNotes: boolean)
 
 function checkedGroupResponder(value: unknown, memberIds: string[]): GroupDefaultResponder | null {
   if (!value || typeof value !== "object" || Array.isArray(value)) return null;
-  const responder = value as { kind?: unknown; botId?: unknown };
+  const responder = value as { kind?: unknown; botId?: unknown; fallbackBotId?: unknown };
   if (responder.kind === "everyone") return { kind: "everyone" };
   if (responder.kind === "mentions") return { kind: "mentions" };
+  if (responder.kind === "auto") {
+    if (responder.fallbackBotId === undefined || responder.fallbackBotId === null) return { kind: "auto" };
+    return typeof responder.fallbackBotId === "string" && memberIds.includes(responder.fallbackBotId)
+      ? { kind: "auto", fallbackBotId: responder.fallbackBotId }
+      : null;
+  }
   if (
     responder.kind === "member" &&
     typeof responder.botId === "string" &&
@@ -3762,7 +3778,9 @@ function createChannel(value: unknown): GroupRecord {
     if (!responder) throw Object.assign(new Error("invalid setup.defaultResponder"), { status: 400 });
     setup = { bulletin: requested.bulletin, defaultResponder: responder, completed: true };
   }
-  return store.createGroup(name, memberIds, false, section, setup);
+  // A new room with no routing of its own starts on Auto while the decision
+  // model is on for rooms; otherwise it gets today's default (first member).
+  return store.createGroup(name, memberIds, false, section, setup ?? (deciderReady(cfg, "roomRouting") ? { defaultResponder: { kind: "auto" } } : undefined));
 }
 
 function updateChannel(groupId: string, value: unknown): GroupRecord {
@@ -4963,6 +4981,12 @@ function notify(notification: Notification | null) {
 // records the active member here before dispatching its turn.
 const groupSpeakers = new Map<string, { botId: string; name: string; color: string }>();
 
+type RoutedBy = NonNullable<Message["routedBy"]>;
+/** Auto-room rounds the decision model routed, by thread: the named
+ * speaker's next reply line carries `routedBy` (stamped in the runtime fold
+ * below), so the room can say "Picked by Jev". Only a routed round sets it. */
+const routedRoomReplies = new Map<string, { botId: string; routedBy: RoutedBy }>();
+
 // The latest running token totals for the turn in flight on each thread.
 // Providers report cumulative-within-turn numbers; the final value is folded
 // into the task's tally when the turn settles.
@@ -5683,7 +5707,7 @@ async function attachTeamBoat(computer: TeamComputerRecord, botId: string, owner
   if (turnResourceOwners.get(owner.threadId)?.generation !== owner.generation ||
       !turnResources.owns(`computer:box:${machine.id}`, owner)) throw new Error("This computer turn ended while its machine was starting");
   return {
-    integration: { kind: "box" as const, boxId: machine.id, token: cfg.box!.token!, control: controlIntegration(botId, owner.threadId, owner.generation) },
+    integration: { kind: "box" as const, boxId: machine.id, token: boat.boatAccount(cfg)?.token ?? "", control: controlIntegration(botId, owner.threadId, owner.generation) },
     capture: () => boat.screenshotBoat(cfg, ownerId, machine!.id),
   };
 }
@@ -5795,7 +5819,7 @@ async function attachBotBoat(
   return {
     capture: () => boat.screenshotBoat(cfg, bot.id, machine.id),
     integration: opts.canMount
-      ? { kind: "box" as const, boxId: machine.id, token: cfg.box!.token!, control: controlIntegration(bot.id, owner.threadId, owner.generation) }
+      ? { kind: "box" as const, boxId: machine.id, token: boat.boatAccount(cfg)?.token ?? "", control: controlIntegration(bot.id, owner.threadId, owner.generation) }
       : null,
   };
 }
@@ -6311,7 +6335,11 @@ bus.subscribe((event: RuntimeEvent) => {
     const owner = bot ? directRequestOwners.get(event.threadId) : undefined;
     const proven = owner?.messageId && !owner.stopped && owner.generation === directTurnGenerationByThread.get(event.threadId) &&
       owner.turnId && (!event.turnId || event.turnId === owner.turnId);
-    const message = store.appendMessage(event.threadId, group && m.role === "bot" ? { ...m, from: speaker }
+    // One line per routed reply: the routed speaker's first text of its turn.
+    const routed = group && m.role === "bot" && m.kind === "text" ? routedRoomReplies.get(event.threadId) : undefined;
+    const routedBy = routed && speaker && routed.botId === speaker.botId ? routed.routedBy : undefined;
+    if (routedBy) routedRoomReplies.delete(event.threadId);
+    const message = store.appendMessage(event.threadId, group && m.role === "bot" ? { ...m, from: speaker, ...(routedBy ? { routedBy } : {}) }
       : proven ? { ...m, requestMessageId: owner.messageId } : m);
     return message;
   };
@@ -10491,6 +10519,39 @@ function serializeRoomContext(
 }
 
 
+/** The decision model's view of a room message: the room, its people, the
+ * last room lines before this one, and the message. Text is scrubbed of
+ * secrets and attachment markup before it leaves this machine. */
+function roomRoutingInput(
+  roomName: string,
+  text: string,
+  members: readonly BotRecord[],
+  history: readonly Message[],
+  sender?: ResolvedSender,
+): RoomRoutingInput {
+  const userName = cfg.profile?.name?.trim() || "User";
+  const clean = (value: string) => redactSecretsInText(extractTurnImages(value).text);
+  const humans = new Set<string>([userName]);
+  const recent = history.flatMap((m) => {
+    if (m.kind !== "text" || !m.text) return [];
+    if (m.role === "user") {
+      const person = m.sender?.name ?? userName;
+      humans.add(person);
+      return [{ from: person, text: clean(m.text) }];
+    }
+    return [{ from: `${m.from?.name ?? "A bot"} (bot)`, text: clean(m.text) }];
+  });
+  const from = sender?.name ?? userName;
+  humans.add(from);
+  return {
+    room: roomName,
+    humans: [...humans],
+    members: members.map((member) => ({ id: member.id, name: member.name, title: member.title, description: member.description })),
+    recent,
+    message: { from, text: clean(text) },
+  };
+}
+
 // What each room has already taken from its bots. Keyed by room because the
 // loop post_to_room can start is a property of the room, not of any one
 // caller — three bots posting twice each is the same runaway as one bot
@@ -11857,6 +11918,13 @@ function startGroupTurn(
   if (options.goalCoordinatorBotId && (channelMode !== "goal" || !requestedGoalCoordinator)) {
     throw Object.assign(new Error("the selected goal coordinator is not an active room member"), { status: 409 });
   }
+  // An Auto room may ask the decision model who answers. It reads the room
+  // as it stood before this message, which is appended just below.
+  const autoCandidate = !group.dm && channelMode === "chat" && group.defaultResponder.kind === "auto" &&
+    deciderReady(cfg, "roomRouting");
+  const historyBeforeSend = autoCandidate
+    ? store.messagesFor(threadId).filter((m) => m.kind === "text" && m.text).slice(-GROUP_CONTEXT_MESSAGES)
+    : [];
   // A coalesced drain appends every queued line under its own queueId (the
   // chips and sendId receipts stay per-item); the LAST line is the turn's
   // user message, exactly like the 1:1 drain's userMessage.
@@ -11949,29 +12017,46 @@ function startGroupTurn(
     return message;
   }
 
+  // Auto with nobody addressed: the responders above are only the fallback
+  // until the decision model answers, in the async round below. The append
+  // and this function's return stay synchronous either way.
+  const autoRoute = autoCandidate && !goalCoordinator && availableMembers.length > 1 &&
+    roomResponders(text, availableMembers, { kind: "mentions" }).length === 0;
+
   // The snippet is only the fallback name here too. The member about to
   // answer supplies the same cheap one-shot the bot path uses, and the
   // swap lands only while the row still carries the snippet — a rename by
   // the person always wins. Channel tasks carry no peer provenance (no
   // assignment opens them), and a member whose engine offers no text
   // one-shot simply keeps the snippet.
-  const titleBot = goalCoordinator ?? responders[0]!;
-  const titleInstance = registry.get(titleBot.modelSelection.instanceId);
   const titleText = extractTurnImages(text).text;
-  // An engine the organisation disallows never receives the text, even for a title.
-  if (titled && snippet && titleText.trim() && llmThreadTitlesEnabled(cfg) && titleInstance?.generateText && !policyModelRefusal(titleInstance)) {
-    void generateThreadTitle(titleInstance, titleText)
-      .then((title) => {
-        if (title) store.retitleGroupTask(group.id, threadId, snippet, title);
-      })
-      .catch(() => undefined);
-  }
+  const startTitle = (titleBot: (typeof members)[number]) => {
+    const titleInstance = registry.get(titleBot.modelSelection.instanceId);
+    // An engine the organisation disallows never receives the text, even for a title.
+    if (titled && snippet && titleText.trim() && llmThreadTitlesEnabled(cfg) && titleInstance?.generateText && !policyModelRefusal(titleInstance)) {
+      void generateThreadTitle(titleInstance, titleText)
+        .then((title) => {
+          if (title) store.retitleGroupTask(group.id, threadId, snippet, title);
+        })
+        .catch(() => undefined);
+    }
+  };
+  // An Auto round titles with whoever the decision picks, once it has.
+  if (!autoRoute) startTitle(goalCoordinator ?? responders[0]!);
 
   const operation = beginGroupTurnOperation(
     groupId,
     threadId,
-    goalCoordinator ? [] : responders.map((responder) => responder.id),
+    goalCoordinator || autoRoute ? [] : responders.map((responder) => responder.id),
   );
+  // Asked now, in parallel with any earlier room work still queued: the
+  // answer is waited for only when this round's turn comes up. It never
+  // rejects; a Stop aborts it through the operation's signal.
+  const routing = autoRoute
+    ? decideRoomResponder(decider, roomRoutingInput(group.name, text, availableMembers, historyBeforeSend, options.sender), {
+        signal: operation.cancellation.signal,
+      })
+    : null;
   if (queuedGroup && queuedGroup.length > 0) {
     // member turns use these stable ids to carry every burst line's words
     // and attachments through the turn that swallowed the burst
@@ -12026,9 +12111,25 @@ function startGroupTurn(
     if (goalCoordinator) {
       await runGroupGoalOperation({ groupId, threadId, coordinator: goalCoordinator, members, operation });
     } else {
+      let round = responders;
+      let routedBy: RoutedBy | undefined;
+      if (routing) {
+        const route = await routing;
+        if (operation.cancelled) return;
+        const picked = route.kind === "member" ? availableMembers.filter((member) => member.id === route.botId)
+          : route.kind === "everyone" ? availableMembers
+            : [];
+        if (picked.length && route.kind !== "fallback") {
+          round = picked;
+          routedBy = { provider: "jev", probability: Math.round(route.probability * 100) / 100 };
+        }
+        // What a routed round holds from the start, like any other round.
+        for (const responder of round) operation.botIds.add(responder.id);
+        startTitle(round[0]!);
+      }
       const spoken = new Set<string>();
       const skillAuthoringClaim = { claimed: false };
-      for (const responder of responders) {
+      for (const responder of round) {
         if (operation.cancelled) break;
         if (spoken.has(responder.id)) continue;
         // A responder busy in another conversation takes its turn when it
@@ -12041,21 +12142,30 @@ function startGroupTurn(
           spoken.add(responder.id);
           continue;
         }
-        if (!(await runGroupMemberTurn(
-          groupId,
-          threadId,
-          responder.id,
-          0,
-          spoken,
-          undefined,
-          undefined,
-          () => operation.cancelled,
-          () => groupProviderHandshakeStarted(operation),
-          () => groupProviderHandshakeSettled(operation),
-          skillAuthoringClaim,
-          undefined,
-          operation,
-        ))) break;
+        // This speaker's first reply line says the decision model chose it.
+        const stamp = routedBy ? { botId: responder.id, routedBy } : undefined;
+        if (stamp) routedRoomReplies.set(threadId, stamp);
+        let proceed: boolean;
+        try {
+          proceed = await runGroupMemberTurn(
+            groupId,
+            threadId,
+            responder.id,
+            0,
+            spoken,
+            undefined,
+            undefined,
+            () => operation.cancelled,
+            () => groupProviderHandshakeStarted(operation),
+            () => groupProviderHandshakeSettled(operation),
+            skillAuthoringClaim,
+            undefined,
+            operation,
+          );
+        } finally {
+          if (stamp && routedRoomReplies.get(threadId) === stamp) routedRoomReplies.delete(threadId);
+        }
+        if (!proceed) break;
       }
     }
   });
@@ -13209,12 +13319,16 @@ function configStatus() {
       configured: composio.configured(cfg),
       mode: composio.connectionMode(cfg),
     },
-    box: { configured: Boolean(cfg.box?.token) },
+    // configured = cloud computers work here; included = through Cloud Pro,
+    // not a saved key
+    box: boat.describeBoatAccount(cfg),
     vps: { configured: Boolean(vpsSshAlias(cfg)), sshAlias: vpsSshAlias(cfg) ?? "" },
     opencodeGo: { configured: Boolean(cfg.opencodeGo?.apiKey) },
     // the chosen voice is a setting, not a secret; the key is reported the
     // same configured-or-not way as every other credential
     tts: tts.describeVoice(cfg),
+    // the decision model: switches and configured-or-not, never the key
+    decider: describeDecider(cfg),
     imageGen: avatarImageStatus(cfg),
     // not a secret — the sidebar shows it
     profile: { name: cfg.profile?.name ?? "", email: cfg.profile?.email ?? "", aboutMe: cfg.profile?.aboutMe ?? "" },
@@ -13604,6 +13718,7 @@ ROUTES.push(createBotMemoryRoutes({
     broadcast({ kind: "config", ...configStatus() });
   },
 }));
+ROUTES.push(createDeciderRoutes({ decider }));
 
 const toolResults = new ToolResults();
 const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
@@ -15996,7 +16111,11 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
           }
           const group = createChannel({
             name: redactSecretsInText(parsed.data.name), memberIds, section: chief.section,
-            setup: { bulletin: redactSecretsInText(parsed.data.bulletin ?? ""), defaultResponder: { kind: "member", botId: chief.id } },
+            setup: {
+              bulletin: redactSecretsInText(parsed.data.bulletin ?? ""),
+              // The Chief leads; on Auto it is the fallback when the decision model is unsure.
+              defaultResponder: deciderReady(cfg, "roomRouting") ? { kind: "auto", fallbackBotId: chief.id } : { kind: "member", botId: chief.id },
+            },
           });
           internalCapability.createdRooms = (internalCapability.createdRooms ?? 0) + 1;
           return json(res, 201, { id: group.id, name: group.name, section: group.section || "General", memberIds: group.memberIds, memberCount: group.memberIds.length });
@@ -17493,13 +17612,7 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
         if (!checked.ok) return json(res, 400, { error: checked.error });
         if (typeof body.bulletin !== "string") return json(res, 400, { error: "bulletin must be a string" });
         if (body.bulletin.length > 12_000) return json(res, 400, { error: "bulletin must be at most 12000 characters" });
-        const value = body.defaultResponder as { kind?: unknown; botId?: unknown } | null;
-        let responder: GroupDefaultResponder | null = null;
-        if (value?.kind === "everyone") responder = { kind: "everyone" };
-        else if (value?.kind === "mentions") responder = { kind: "mentions" };
-        else if (value?.kind === "member" && typeof value.botId === "string" && group.memberIds.includes(value.botId)) {
-          responder = { kind: "member", botId: value.botId };
-        }
+        const responder = checkedGroupResponder(body.defaultResponder, group.memberIds);
         if (!responder) return json(res, 400, { error: "invalid default responder" });
         patch.cwd = checked.cwd ?? undefined;
         patch.defaultResponder = responder;
@@ -21161,6 +21274,12 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
         patch.automaticRecovery.backup = checked.selection;
       }
       if (!Object.keys(patch).length) return json(res, 400, { error: "nothing to save" });
+      if (patch.decider) {
+        // Saving a key is the "turn it on"; clearing it turns it off.
+        const planned = deciderSavePatch(patch.decider, cfg.decider);
+        if (!planned.ok) return json(res, 400, { error: planned.error });
+        patch.decider = planned.patch;
+      }
       const changingVoiceProvider = patch.tts?.provider !== undefined
         && patch.tts.provider !== tts.voiceProvider(cfg);
       if (changingVoiceProvider && patch.tts?.voice === undefined) {
@@ -21457,6 +21576,15 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
         const check = await tts.verifyKey("fish", newTts.fishKey.trim());
         if (!check.ok) return json(res, 400, { error: check.message });
       }
+      // A pasted decision-model key is tried once (one tiny yes/no call).
+      // Only a refusal blocks the save: an offline or overloaded service must
+      // not stop a person saving a key that may well be fine.
+      if (patch.decider?.key) {
+        const check = await decider.testKey({ key: patch.decider.key });
+        if (!check.ok && check.reason === "rejected") {
+          return json(res, 400, { error: "Jev rejected this key. Check it at typesafe.ai and paste it again.", code: "decider_rejected" });
+        }
+      }
       if (patch.browserProfiles !== undefined) {
         // Provider/credential validation above may await the network. A turn
         // can start during that window and claim a profile which looked idle
@@ -21516,6 +21644,7 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
           if (persisted.opencodeGo?.apiKey !== undefined) persisted.opencodeGo.apiKey = "";
           if (persisted.tts?.key !== undefined) persisted.tts.key = "";
           if (persisted.tts?.fishKey !== undefined) persisted.tts.fishKey = "";
+          if (persisted.decider?.key !== undefined) persisted.decider.key = "";
           if (persisted.imageGen?.key !== undefined) persisted.imageGen.key = "";
           if (persisted.imageGen?.customApiKey !== undefined) persisted.imageGen.customApiKey = "";
           saveConfig(persisted);
