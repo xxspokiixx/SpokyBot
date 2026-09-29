@@ -220,6 +220,7 @@ it("keeps every window single use and short lived, capping what the Admin asks f
 it("opens a browser sign-in only a browser redeems, by credential alone, for at most two minutes", () => {
   const f = fixture();
   const granted = f.mint(f.sign(JSON.stringify({ label: "Web browser (Cloud page)", ttlSeconds: 120, purpose: "browser", owner: "ada@example.test" })));
+  expect(f.mint(f.sign(JSON.stringify({ purpose: "browser", owner: "ada.o'neil+cloud@example-mail.test" }))).status).toBe(200);
   expect(granted.status).toBe(200);
   // No code to type, and `purpose` said back so the Admin knows this machine made one.
   expect(Object.keys(granted.body).sort()).toEqual(["credential", "expiresAt", "purpose"]);
@@ -250,7 +251,9 @@ it("refuses a body that is not the expected JSON", () => {
     JSON.stringify({ ttlSeconds: 0 }), JSON.stringify({ ttlSeconds: 1.5 }), JSON.stringify({ ttlSeconds: "300" }),
     JSON.stringify({ purpose: "app" }), JSON.stringify({ purpose: true }),
     // A browser sign-in must name its owner, as one plain address.
-    ...[undefined, "", "ada", "ada@", 7, "ada@example.test\u202Eevil", "ada@exa mple.test", "a\nb@example.test", `${"a".repeat(250)}@example.test`]
+    ...[undefined, "", "ada", "ada@", 7, "ada@example.test\u202Eevil", "ada@exa mple.test", "a\nb@example.test", `${"a".repeat(250)}@example.test`,
+      // Printable ASCII only, one @, no angle brackets: what the Admin's email schemas accept.
+      "adé@example.test", "ada@exämple.test", "<ada@example.test", "ada@example.test>", "ada@team@example.test", "ada\t@example.test", "ada@example.test\u00a0"]
       .map((owner) => JSON.stringify({ purpose: "browser", owner })),
     JSON.stringify({ owner: "not an address" })]) {
     expect(f.mint(f.sign(body)).status).toBe(400);

@@ -207,6 +207,14 @@ it("signs a browser in from the Cloud page's \"Use in your browser\" into an own
   // Its cookie's value is not a bearer token.
   const token = cookie.split(";")[0].split("=").slice(1).join("=");
   expect((await api("GET", "/api/auth/session", { remote: true, headers: { authorization: `Bearer ${token}` } })).status).toBe(401);
+  // Its changes need the browser's word that they come from this Cloud's own page: the cookie alone is refused.
+  const change = (headers: Record<string, string>) => api("POST", "/api/auth/stream-ticket", { remote: true, headers: { cookie: cookie.split(";")[0], ...headers } });
+  expect((await change({})).status).toBe(403);
+  expect((await change({ "sec-fetch-site": "cross-site" })).status).toBe(403);
+  // (fetch sends its own Host here, so this Cloud's origin is the proxied scheme plus the fixture's address)
+  expect((await change({ origin: base.replace("http:", "https:") })).status).toBe(200);
+  expect((await change({ origin: `https://evil.example`, "sec-fetch-site": "same-origin" })).status).toBe(403);
+  expect((await change({ "sec-fetch-site": "same-origin" })).status).toBe(200);
   // A replay, or looking at a spent one, gets nothing.
   expect((await signIn()).status).toBe(401);
   expect((await browserRequest({ code: credential, browser: true, preview: true })).status).toBe(401);
@@ -231,7 +239,9 @@ it("replaces a browser's own session when it signs in again, and a lost answer l
   const lostId = ((await lost.json()) as any).session.id as string;
   const orphan = (await api("GET", "/api/auth/sessions", { remote: true, headers: { cookie: secondCookie } })).body.sessions.find((s: any) => s.id === lostId);
   expect(orphan).toMatchObject({ label: "Firefox on Chromebook", scopes: ["admin", "client"], owner: "ada@example.test" });
-  const revoke = await fetch(`${base}/api/auth/sessions/${lostId}`, { method: "DELETE", headers: { host: HOST, "x-forwarded-for": "203.0.113.9", "x-forwarded-proto": "https", cookie: secondCookie } });
+  // (as the Cloud's own page sends it: a browser marks the change same-origin)
+  const revoke = await fetch(`${base}/api/auth/sessions/${lostId}`, { method: "DELETE", headers: { host: HOST, "x-forwarded-for": "203.0.113.9", "x-forwarded-proto": "https",
+    "sec-fetch-site": "same-origin", cookie: secondCookie } });
   expect(revoke.status).toBe(200);
   expect((await api("GET", "/api/auth/session", { remote: true, headers: { cookie: cookieOf(lost) } })).status).toBe(401);
 });

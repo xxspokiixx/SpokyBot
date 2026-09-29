@@ -39,6 +39,8 @@ export const CLOUD_IGNORED_KEYS = ["OMB_HOSTED_MODEL_URL", "OMB_HOSTED_MODEL_TOK
 export const CLOUD_PAIRING_PATH = "/api/cloud/pairing";
 export const CLOUD_PAIRING_DEFAULT_TTL_S = 300;
 export const CLOUD_PAIRING_MAX_TTL_S = 600;
+/** A browser sign-in's owner: printable ASCII with no space, `<` or `>`, and exactly one `@`. */
+const OWNER_EMAIL = /^[!-;=?A-~]{1,64}@[!-;=?A-~]{1,189}$/;
 /** A browser sign-in is redeemed the moment its tab loads. */
 export const CLOUD_BROWSER_SIGN_IN_MAX_TTL_S = 120;
 /** How far a signed request's timestamp may be from this machine's clock. */
@@ -195,8 +197,8 @@ export function createCloudPairing(options: {
       if (purpose !== undefined && purpose !== "browser") return { status: 400, body: { error: "invalid_purpose" } };
       const browser = purpose === "browser";
       // A browser sign-in names its Cloud's owner (the account's email), which the sign-in page shows before the
-      // person continues: plain text, one address, no control or formatting characters.
-      if ((browser || owner !== undefined) && (typeof owner !== "string" || owner.length > 254 || !/^[^\s@\p{C}]{1,64}@[^\s@\p{C}]{1,189}$/u.test(owner))) {
+      // person continues: one address in printable ASCII, as the Admin's email schemas allow, with no `<` or `>`.
+      if ((browser || owner !== undefined) && (typeof owner !== "string" || owner.length > 254 || !OWNER_EMAIL.test(owner))) {
         return { status: 400, body: { error: "invalid_owner" } };
       }
       const ttl = Math.min((ttlSeconds as number | undefined) ?? CLOUD_PAIRING_DEFAULT_TTL_S, browser ? CLOUD_BROWSER_SIGN_IN_MAX_TTL_S : CLOUD_PAIRING_MAX_TTL_S);

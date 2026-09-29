@@ -187,9 +187,10 @@ a new tab, signed in after one **Continue**, with nothing to copy.
    `src/lib/session.ts`). It asks the machine whose Cloud this is
    (`POST /api/auth/pair` with `{code, browser: true, preview: true}`, which
    redeems nothing and counts toward no lockout) and shows **Signing in to
-   <owner>'s Cloud** with one **Continue** (`src/pair/BrowserSignInPage.tsx`).
-   Nothing is redeemed until the person continues, so a link someone else sent
-   never signs a browser in to their Cloud unseen.
+   <owner>'s Cloud** with one **Continue** and a quiet *Not your email? Close
+   this tab.* (`src/pair/BrowserSignInPage.tsx`). Nothing is redeemed until the
+   person continues, so a link someone else sent never signs a browser in to
+   their Cloud unseen.
 5. **Continue** posts `{code, label, cookie: true, browser: true, attemptId}`
    to `POST /api/auth/pair`, always, whether or not this browser is already
    connected. The server redeems it into a session and sets this browser's
@@ -208,9 +209,18 @@ answer never arrived is listed and revocable the same way. The sidebar's
 **My Cloud · always on** adds *<owner>'s Cloud* under it (`GET
 /api/auth/session` answers `owner`).
 
-The session is **cookie-only**: its token is accepted as this browser's cookie
-(same-origin, never readable by scripts) and refused as
-`Authorization: Bearer`. A browser sign-in window is never redeemed by
+What keeps the credential safe is where it travels and that it works once: it
+is only ever in the URL fragment (never sent to a server, a proxy log or a
+`Referer`, and removed from the address bar before the page renders), it is
+single use, and it lives at most two minutes. The session's own rules are
+defence in depth on top of that, not the protection itself. It is
+**cookie-only**: its token is accepted as this browser's cookie (never readable
+by scripts) and refused as `Authorization: Bearer`. Its changes (any request
+other than `GET`, `HEAD` or `OPTIONS`) must also say they come from this
+Cloud's own page, with an `Origin` equal to the Cloud's origin or
+`Sec-Fetch-Site: same-origin`, which every current browser (and the desktop
+app's Chromium) sends; a request with neither is a `403`. Anyone holding the
+token can still set those headers themselves. A browser sign-in window is never redeemed by
 `/api/pair`, by an app, or by `/api/auth/pair` without `browser: true`; a
 browser sign-in never redeems an ordinary pairing window or a typed code. So an
 ordinary pairing link is still one click on the pair page.
@@ -633,7 +643,7 @@ not open the browser.
 | `401` | `{"error":"stale_request"}` | Timestamp more than 300 s from the machine's clock. |
 | `401` | `{"error":"replayed_request"}` | Nonce already used in the last 10 minutes. |
 | `429` | `{"error":"rate_limited","retryAfterSeconds":n}` | Too many bad signatures from this source. |
-| `400` | `invalid_body`, `invalid_label`, `invalid_ttl`, `invalid_purpose`, `invalid_owner` | Not a JSON object; label not plain text of 80 characters or fewer; TTL not a positive integer; `purpose` present and not `"browser"`; `owner` missing on a browser sign-in, or not one plain email address of 254 characters or fewer. |
+| `400` | `invalid_body`, `invalid_label`, `invalid_ttl`, `invalid_purpose`, `invalid_owner` | Not a JSON object; label not plain text of 80 characters or fewer; TTL not a positive integer; `purpose` present and not `"browser"`; `owner` missing on a browser sign-in, or not one email address of 254 characters or fewer in printable ASCII with exactly one `@` and no `<` or `>`. |
 | `405`, `415` | | Not a POST; not JSON. |
 
 Rules the machine enforces: the signature is checked first, in constant time;
@@ -826,9 +836,10 @@ Backups keeps its safety copy as before.
 - Pairing windows are opened only for a request signed with the machine's
   secret, fresh and never replayed; each window is single use and short lived.
   A browser sign-in window lives at most two minutes, shows whose Cloud it is
-  and is redeemed only on **Continue**, only into a browser's cookie (a
-  cookie-only session), and travels only in a URL fragment the web UI removes
-  from the address bar before it renders.
+  and is redeemed only on **Continue**, and travels only in a URL fragment the
+  web UI removes from the address bar before it renders. Its session is
+  cookie-only and makes changes only from requests its browser marks as
+  same-origin: defence in depth, not the protection itself.
 - The web UI's pages cannot be framed and send no `Referer`.
 - Device names are stored without control or bidirectional-formatting
   characters.

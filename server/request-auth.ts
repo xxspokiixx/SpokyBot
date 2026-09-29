@@ -197,6 +197,14 @@ export function isSameOrigin(req: IncomingMessage): boolean {
   return own !== null && origin.trim().toLowerCase() === own;
 }
 
+/** A browser says this request came from this origin's own page: an
+ * `Origin` equal to this request's origin, or `Sec-Fetch-Site: same-origin`.
+ * Unlike isSameOrigin, a request that carries neither does not pass. */
+export function provesSameOrigin(req: IncomingMessage): boolean {
+  if (headerValue(req.headers.origin)) return isSameOrigin(req);
+  return headerValue(req.headers["sec-fetch-site"])?.trim().toLowerCase() === "same-origin";
+}
+
 /** Who to count a pairing attempt against. The server binds loopback, so a
  * remote client always arrives through a proxy or tunnel on this machine;
  * that proxy's X-Forwarded-For (Caddy overwrites any the client sent) names
@@ -464,8 +472,12 @@ export function resolveRequestAuth(req: IncomingMessage, options: ResolveOptions
 
   if (session && via) {
     if (via === "cookie" && !isSameOrigin(req)) return deny(403, "forbidden: cross-origin request");
-    // A browser sign-in's session is its browser's cookie, never a bearer token.
+    // A browser sign-in's session is its browser's cookie, never a bearer token, and
+    // its changes come from this origin's own page, which a browser says so.
     if (via === "bearer" && session.cookieOnly) return deny(401, "unauthorized: this session belongs to a browser; sign in with a pairing code");
+    if (via === "cookie" && session.cookieOnly && !["GET", "HEAD", "OPTIONS"].includes(method) && !provesSameOrigin(req)) {
+      return deny(403, "forbidden: this browser's session makes changes only from its own page");
+    }
     const needed = requiredScope(method, path, options.features ?? {});
     if (!session.scopes.includes(needed)) {
       return deny(403, `forbidden: this session lacks the ${needed} scope`);
