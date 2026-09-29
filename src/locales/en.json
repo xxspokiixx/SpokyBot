@@ -656,6 +656,7 @@
   "common.delete": "Delete",
   "common.undo": "Undo",
   "sidebar.aria": "Bots and navigation",
+  "sidebar.cloudOwner": "{email}’s Cloud",
   "sidebar.search": "Search",
   "sidebar.searchAria": "Search bots and messages",
   "sidebar.noMatch": "Nothing matches “{query}”",

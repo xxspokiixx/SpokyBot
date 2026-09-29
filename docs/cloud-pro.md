@@ -165,6 +165,69 @@ registers itself at startup. Before that, or if the app is not installed, the
 browser has nothing to open (it shows nothing or an error), so the Cloud page
 should keep a download link next to the button.
 
+### Use in your browser: `/pair#signin=…`
+
+For people without the desktop app, or on another computer, a Chromebook or an
+iPad, the Cloud page's **Use in your browser** opens the Cloud's own web UI in
+a new tab, signed in after one **Continue**, with nothing to copy.
+
+1. The Cloud page opens a blank tab from the click itself (so no pop-up blocker
+   stops it) and cuts it off from the page (`opener` set to null).
+2. The Admin sends the machine a signed pairing request with
+   `"purpose":"browser"` and `"owner":"<the account's email>"` (below). The
+   machine opens a **browser sign-in** window: single use, admin and client
+   scopes, at most two minutes, redeemable only by its 256-bit credential
+   through a browser sign-in, and recording its owner. The answer has no
+   typeable code and says `"purpose":"browser"` back.
+3. The tab goes to `https://<app>.fly.dev/pair#signin=omb_pair_…`. The
+   credential is only in the fragment, which never reaches a server, a proxy
+   log or a `Referer`.
+4. Before anything renders, the web UI takes the fragment off the address bar
+   and replaces the tab's history entry (`takeBrowserSignInFromLocation`,
+   `src/lib/session.ts`). It asks the machine whose Cloud this is
+   (`POST /api/auth/pair` with `{code, browser: true, preview: true}`, which
+   redeems nothing and counts toward no lockout) and shows **Signing in to
+   <owner>'s Cloud** with one **Continue** (`src/pair/BrowserSignInPage.tsx`).
+   Nothing is redeemed until the person continues, so a link someone else sent
+   never signs a browser in to their Cloud unseen.
+5. **Continue** posts `{code, label, cookie: true, browser: true, attemptId}`
+   to `POST /api/auth/pair`, always, whether or not this browser is already
+   connected. The server redeems it into a session and sets this browser's
+   `HttpOnly`, `SameSite=Lax`, `Secure` session cookie, replacing (and
+   revoking) any session this browser already had here. The tab then goes to
+   `/`. A retry after a lost answer reuses the page's attempt id and gets the
+   same session. `browser` without `cookie: true` is a `400`.
+6. A spent, expired or unknown sign-in shows the pair page with *This sign-in
+   link has expired or was already used* and never shows the credential.
+
+**Scope:** the session has admin and client scopes, the same as the desktop
+app gets from its own Cloud pairing: the owner, who can sign engines in and
+manage the Cloud. It is labelled with the browser (for example "Safari on
+iPad") in the Cloud's paired devices, where it can be revoked; a session whose
+answer never arrived is listed and revocable the same way. The sidebar's
+**My Cloud · always on** adds *<owner>'s Cloud* under it (`GET
+/api/auth/session` answers `owner`).
+
+The session is **cookie-only**: its token is accepted as this browser's cookie
+(same-origin, never readable by scripts) and refused as
+`Authorization: Bearer`. A browser sign-in window is never redeemed by
+`/api/pair`, by an app, or by `/api/auth/pair` without `browser: true`; a
+browser sign-in never redeems an ordinary pairing window or a typed code. So an
+ordinary pairing link is still one click on the pair page.
+
+Anyone with a Cloud can make a sign-in link for their own Cloud and send it to
+someone else. The page says whose Cloud it is before anything happens, and
+nothing is redeemed without **Continue**.
+
+The fragment leaves the tab's address bar and its history entry, but the
+browser's global history may still list the address it opened. By then the
+credential is spent (single use) or expires within two minutes.
+
+The web UI's pages are sent with `Content-Security-Policy: frame-ancestors
+'none'`, `X-Frame-Options: DENY` and `Referrer-Policy: no-referrer`
+(`serveStatic`, `server/index.ts`): no other page can frame them. Nothing
+frames the web UI: the desktop app shows it in its own window.
+
 ## Let my Cloud use this Mac
 
 The Cloud is home: bots and chats live there. The person's Mac is a computer
@@ -508,13 +571,27 @@ v1\n<timestamp>\n<nonce>\nPOST\n/api/cloud/pairing\n<base64url SHA-256 of the ra
 (`server/sessions.ts`): single use, admin and client scopes, redeemed at the
 machine's existing `POST /api/auth/pair`.
 
+With `"purpose":"browser"` and `"owner":"<the account's email>"` in the body
+(the Cloud page's **Use in your browser**, above), the machine opens a browser
+sign-in window for that owner instead and answers
+
+```json
+{ "credential": "omb_pair_…", "expiresAt": 1790000120000, "purpose": "browser" }
+```
+
+`ttlSeconds` then defaults to and is capped at 120. Only
+`POST /api/auth/pair` with `browser: true` and `cookie: true` redeems it, and
+only by `credential`. A machine from before this ignores `purpose` and answers
+with an ordinary window and no `purpose`; the Admin then discards it and does
+not open the browser.
+
 | Status | Body | Meaning |
 | --- | --- | --- |
 | `401` | `{"error":"invalid_signature"}` | Wrong key, tampered request, or malformed headers. Counts toward the per-source pairing lockout. |
 | `401` | `{"error":"stale_request"}` | Timestamp more than 300 s from the machine's clock. |
 | `401` | `{"error":"replayed_request"}` | Nonce already used in the last 10 minutes. |
 | `429` | `{"error":"rate_limited","retryAfterSeconds":n}` | Too many bad signatures from this source. |
-| `400` | `invalid_body`, `invalid_label`, `invalid_ttl` | Not a JSON object; label not plain text of 80 characters or fewer; TTL not a positive integer. |
+| `400` | `invalid_body`, `invalid_label`, `invalid_ttl`, `invalid_purpose`, `invalid_owner` | Not a JSON object; label not plain text of 80 characters or fewer; TTL not a positive integer; `purpose` present and not `"browser"`; `owner` missing on a browser sign-in, or not one plain email address of 254 characters or fewer. |
 | `405`, `415` | | Not a POST; not JSON. |
 
 Rules the machine enforces: the signature is checked first, in constant time;
@@ -706,6 +783,13 @@ Backups keeps its safety copy as before.
   forwards is the loopback owner.
 - Pairing windows are opened only for a request signed with the machine's
   secret, fresh and never replayed; each window is single use and short lived.
+  A browser sign-in window lives at most two minutes, shows whose Cloud it is
+  and is redeemed only on **Continue**, only into a browser's cookie (a
+  cookie-only session), and travels only in a URL fragment the web UI removes
+  from the address bar before it renders.
+- The web UI's pages cannot be framed and send no `Referer`.
+- Device names are stored without control or bidirectional-formatting
+  characters.
 - The signing secret is removed from the server's environment at startup and
   is never passed to engines or to Caddy.
 - There is no platform model gateway: stray `OMB_HOSTED_*` settings are

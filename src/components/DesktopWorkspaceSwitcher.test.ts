@@ -43,3 +43,15 @@ it("says My Cloud · always on while a Cloud home is showing, in a browser too, 
   expect(elsewhere).not.toContain("always on");
   expect(elsewhere).not.toContain("data-cloud-home-indicator");
 });
+
+it("names whose Cloud a browser signed in to under My Cloud · always on, quietly", () => {
+  vi.stubGlobal("window", {});
+  const browser = renderToStaticMarkup(createElement(DesktopWorkspaceSwitcher, { cloudHome: true, owner: "ada@example.test" }));
+  expect(visibleText(browser)).toBe("My Cloud · always onada@example.test’s Cloud");
+  expect(browser).toContain('title="My Cloud · always on · ada@example.test’s Cloud"');
+  expect(browser).toContain('<span class="block truncate text-[11.5px] font-normal text-ink-secondary">ada@example.test’s Cloud</span>');
+  const compact = renderToStaticMarkup(createElement(DesktopWorkspaceSwitcher, { cloudHome: true, owner: "ada@example.test", compact: true }));
+  expect(compact).toContain('<span class="sr-only">My Cloud · always on · ada@example.test’s Cloud</span>');
+  // Not on a server that is not a Cloud home.
+  expect(renderToStaticMarkup(createElement(DesktopWorkspaceSwitcher, { owner: "ada@example.test" }))).toBe("");
+});

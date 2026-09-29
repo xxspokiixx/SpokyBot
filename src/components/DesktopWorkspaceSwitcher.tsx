@@ -11,8 +11,9 @@ function AlwaysOn() {
 
 /** The dropdown is native: a remote workspace cannot choose a destination
  * itself or read the other workspaces saved on this computer. Outside the
- * desktop app there is nothing to switch; a Cloud home still says what it is. */
-export function DesktopWorkspaceSwitcher({ compact = false, cloudHome = false }: { compact?: boolean; cloudHome?: boolean }) {
+ * desktop app there is nothing to switch; a Cloud home still says what it is,
+ * and whose it is when this browser signed in from the Cloud page (`owner`). */
+export function DesktopWorkspaceSwitcher({ compact = false, cloudHome = false, owner = null }: { compact?: boolean; cloudHome?: boolean; owner?: string | null }) {
   const bridge = window.ogb?.workspaces;
   const [current, setCurrent] = useState<{ local: boolean; name: string; origin?: string } | null>(null);
   const [open, setOpen] = useState(false);
@@ -24,11 +25,13 @@ export function DesktopWorkspaceSwitcher({ compact = false, cloudHome = false }:
   }, [bridge]);
   if (!bridge) {
     if (!cloudHome) return null;
-    const label = `${t("cloudSetup.myCloud")} · ${t("cloudSetup.alwaysOn")}`;
+    const whose = owner ? t("sidebar.cloudOwner", { email: owner }) : "";
+    const label = `${t("cloudSetup.myCloud")} · ${t("cloudSetup.alwaysOn")}${whose ? ` · ${whose}` : ""}`;
     return <div data-cloud-home-indicator className={cn("py-1.5", compact ? "px-2" : "px-3")}>
       <div title={label} className={cn("flex items-center gap-2 py-2 text-[13px] font-medium text-ink", compact ? "justify-center px-1" : "px-2")}>
         <Cloud size={16} aria-hidden="true" className="shrink-0 text-ink-secondary" />
-        {compact ? <span className="sr-only">{label}</span> : <span className="min-w-0 flex-1 truncate">{t("cloudSetup.myCloud")}<AlwaysOn /></span>}
+        {compact ? <span className="sr-only">{label}</span> : <span className="min-w-0 flex-1 truncate">{t("cloudSetup.myCloud")}<AlwaysOn />
+          {whose && <span className="block truncate text-[11.5px] font-normal text-ink-secondary">{whose}</span>}</span>}
       </div>
     </div>;
   }

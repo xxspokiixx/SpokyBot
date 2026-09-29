@@ -13778,6 +13778,11 @@ let mcpProbesInFlight = 0;
 const claudeUpdatesInFlight = new Set<string>();
 
 // ── HTTP plumbing ─────────────────────────────────────────────────────
+/** The web UI's pages: never framed by another page (a hidden frame could
+ * otherwise act on a pair or sign-in page unseen), and they send no Referer.
+ * Nothing frames the web UI: the desktop app shows it in its own window. */
+const PAGE_HEADERS = { "content-security-policy": "frame-ancestors 'none'", "x-frame-options": "DENY", "referrer-policy": "no-referrer" } as const;
+
 /** The built UI, when this process serves it (OMB_STATIC_DIR: set by the
  * desktop app and by the container image). Public by design: it is the same
  * bundle anyone can download, holds no secrets, and a remote browser must be
@@ -13789,14 +13794,15 @@ function serveStatic(res: ServerResponse, path: string): boolean {
   const file = join(STATIC_DIR, safe);
   try {
     const data = readFileSync(file);
-    res.writeHead(200, { "content-type": MIME[extname(file)] ?? "application/octet-stream" });
+    const type = MIME[extname(file)] ?? "application/octet-stream";
+    res.writeHead(200, { "content-type": type, ...(type === "text/html" ? PAGE_HEADERS : {}) });
     res.end(data);
     return true;
   } catch {
     // SPA fallback
     try {
       const data = readFileSync(join(STATIC_DIR, "index.html"));
-      res.writeHead(200, { "content-type": "text/html" });
+      res.writeHead(200, { "content-type": "text/html", ...PAGE_HEADERS });
       res.end(data);
       return true;
     } catch {
@@ -14015,13 +14021,25 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
       const wantsCookie = body?.cookie === true;
       const label = typeof body?.label === "string" ? body.label : "";
       const attemptId = typeof body?.attemptId === "string" ? body.attemptId : undefined;
-      const result = sessions.exchange({ code, label, attemptId, source: requestSource(req), fallbackLabel: labelFromUserAgent(req.headers["user-agent"]) });
+      // A browser sign-in (the OMB Cloud page's "Use in your browser", docs/cloud-pro.md)
+      // redeems only a window opened for one, and only into this browser's cookie.
+      const browser = body?.browser === true;
+      if (browser && body?.preview === true) {
+        // Whose Cloud it signs in to, shown before the person continues. Redeems nothing.
+        const preview = sessions.previewBrowserSignIn(code);
+        return preview ? json(res, 200, preview) : json(res, 401, { error: "this sign-in link has expired or was already used" });
+      }
+      if (browser && !wantsCookie) return json(res, 400, { error: "a browser sign-in sets this browser's cookie; send cookie: true" });
+      const result = sessions.exchange({ code, label, attemptId, browser, source: requestSource(req), fallbackLabel: labelFromUserAgent(req.headers["user-agent"]) });
       if (!result.ok) {
         console.warn(`pairing refused from ${requestSource(req)}: ${result.error}`);
         return json(res, result.status, { error: result.error });
       }
       const environment = environmentDescriptor({ environmentId: ENVIRONMENT_ID, desktopManaged: DESKTOP_MANAGED, emailSignIn: emailSignIn.enabled(), sharedComputers: lendingEnabled() });
       if (wantsCookie) {
+        // A browser sign-in replaces this browser's own session here, if it had one, rather than leaving it behind.
+        const previous = browser ? sessions.authenticate(parseCookies(req.headers.cookie).get(SESSION_COOKIE)) : null;
+        if (previous && previous.id !== result.session.id) sessions.revoke(previous.id);
         const secure = requestOrigin(req)?.startsWith("https://") === true;
         res.setHeader("set-cookie", serializeSessionCookie(SESSION_COOKIE, result.token, { secure, maxAgeSeconds: cookieMaxAgeSeconds(result.session) }));
         return json(res, 200, { session: result.session, environment });
@@ -14155,6 +14173,8 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
               environmentId: ENVIRONMENT_ID,
               // the account behind the session, when it came from a sign-in
               ...(auth.session.email ? { email: auth.session.email } : {}),
+              // whose OMB Cloud a browser sign-in signed in to
+              ...(auth.session.owner ? { owner: auth.session.owner } : {}),
               // a hosted team workspace: the web UI's first run skips the
               // desktop-only beats there. Absent everywhere else.
               ...(HOSTED_WORKSPACE ? { hosted: true } : {}),
