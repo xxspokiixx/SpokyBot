@@ -653,6 +653,12 @@ describe("saving the newer sections", () => {
 });
 
 describe("default fleet", () => {
+  it("adds a separate ChatGPT plan account without copying Codex credentials", () => {
+    const cfg: AppConfig = { instances: { codex: { driver: "codex", config: { cli: "/fixture/codex" }, environment: { CODEX_HOME: "/other-account", OPENAI_API_KEY: "not-for-plan" } } } };
+    expect(instanceConfigs(cfg).chatgpt).toMatchObject({ driver: "codex", displayName: "ChatGPT plan", config: { cli: "/fixture/codex", authMode: "chatgpt-plan" }, environment: {} });
+    expect(cfg.instances).not.toHaveProperty("chatgpt");
+    expect(instanceConfigs({ instances: { standalone: { driver: "fake" } } })).not.toHaveProperty("chatgpt");
+  });
   it("adds Mistral to product fleets and scopes its saved credential to Mistral", () => {
     const map = instanceConfigs({ mistral: { key: "mistral-fixture" }, instances: { codex: { driver: "codex" } } });
     expect(map.mistral).toEqual({ driver: "mistral", environment: { MISTRAL_API_KEY: "mistral-fixture" } });
