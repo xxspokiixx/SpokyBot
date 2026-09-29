@@ -519,7 +519,8 @@ export function mentionedBots<T extends { name: string; hidden?: boolean }>(text
 
 /** Normalize persisted or API-provided routing. Old rooms did not have this
  * field; giving them their first member as lead fixes the old silent-send
- * behavior without making every prompt fan out to every model. */
+ * behavior without making every prompt fan out to every model. A kind this
+ * build does not know degrades the same way. */
 export function normalizeGroupDefaultResponder(
   value: unknown,
   memberIds: string[],
@@ -527,9 +528,15 @@ export function normalizeGroupDefaultResponder(
 ): GroupDefaultResponder {
   if (dm) return { kind: "mentions" };
   if (value && typeof value === "object") {
-    const candidate = value as { kind?: unknown; botId?: unknown };
+    const candidate = value as { kind?: unknown; botId?: unknown; fallbackBotId?: unknown };
     if (candidate.kind === "everyone") return { kind: "everyone" };
     if (candidate.kind === "mentions") return { kind: "mentions" };
+    if (candidate.kind === "auto") {
+      // A fallback who left the room reverts to "the first member".
+      return typeof candidate.fallbackBotId === "string" && memberIds.includes(candidate.fallbackBotId)
+        ? { kind: "auto", fallbackBotId: candidate.fallbackBotId }
+        : { kind: "auto" };
+    }
     if (
       candidate.kind === "member" &&
       typeof candidate.botId === "string" &&
@@ -567,6 +574,13 @@ export function roomResponders<T extends { id: string; name: string; hidden?: bo
   if (defaultResponder.kind === "member") {
     const lead = available.find((member) => member.id === defaultResponder.botId);
     return lead ? [lead] : [];
+  }
+  // Auto without a decision (the decision model off, unsure or failing) is
+  // lead mode: its fallback member, else the first active member. The
+  // decision itself is asked asynchronously by the room turn.
+  if (defaultResponder.kind === "auto") {
+    const fallback = available.find((member) => member.id === defaultResponder.fallbackBotId) ?? available[0];
+    return fallback ? [fallback] : [];
   }
   return [];
 }

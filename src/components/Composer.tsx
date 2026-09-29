@@ -51,7 +51,7 @@ import {
   type PasteAttachment,
 } from "@/lib/composer-attachments";
 import { normalizeState } from "@/lib/mascot";
-import { goalCoordinatorForComposer, groupComposerHint, roomRespondersForComposer } from "@/lib/group-routing";
+import { goalCoordinatorForComposer, groupComposerHint, jevRoomRoutingOn, roomRespondersForComposer } from "@/lib/group-routing";
 import { PendingApprovalActions, PendingApprovalPanel, pendingApprovals } from "./PendingApproval";
 import { useDesktopCapabilities } from "./DesktopCapabilities";
 import { ReplyQuote } from "./ReplyQuote";
@@ -1135,7 +1135,7 @@ export function Composer({
                     ? t("composer.placeholder.goal", { name: group.name })
                     : t("composer.placeholder.group", {
                         name: group.name,
-                        hint: groupComposerHint(group, members ?? []),
+                        hint: groupComposerHint(group, members ?? [], { jevOn: jevRoomRoutingOn(state.config) }),
                       })
                   : t("composer.placeholder.bot", { name: bot?.name ?? "" })
           }

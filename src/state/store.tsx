@@ -207,12 +207,11 @@ export interface Message {
   /** steer-queue entry this drained user line came from. Pending chips
    * match on this id, not on equal text. Absent on ordinary sends. */
   queueId?: string;
+  /** Auto rooms: the decision model picked this reply's speaker. */
+  routedBy?: import("../../shared/wire").WireMessage["routedBy"];
 }
 
-export type GroupDefaultResponder =
-  | { kind: "member"; botId: string }
-  | { kind: "everyone" }
-  | { kind: "mentions" };
+export type GroupDefaultResponder = import("../../shared/wire").GroupDefaultResponder;
 
 /** A room: several bots + you in one shared thread. */
 export interface Group {
@@ -633,6 +632,15 @@ export interface ConfigStatus {
     /** ElevenLabs voice comes with Cloud Pro; no key is saved. */
     included?: boolean;
   };
+  /** The decision model: switches and whether a key is on file. The key
+   * itself never comes back. `enabled` is the switch as it takes effect
+   * (off while no key is saved). */
+  decider?: {
+    provider: "jev";
+    configured: boolean;
+    enabled: boolean;
+    jobs: { roomRouting: boolean };
+  };
   /** Shared write-only credential for on-demand GPT Image avatars. */
   imageGen?: {
     configured: boolean;
@@ -696,7 +704,7 @@ export interface BrowserProfile {
 // Settings shows (a saved key's Test button used to vanish that way).
 export type ConfigStatusFrame = Pick<
   ConfigStatus,
-  "xai" | "mistral" | "anthropic" | "openaiCompat" | "fleet" | "composio" | "box" | "vps" | "rooms" | "threads" | "automaticRecovery" | "localVm" | "opencodeGo" | "tts" | "imageGen" | "profile" | "language" | "features" | "onboarding" | "browserEngine" | "browserProfiles" | "edition" | "budgets" | "billing" | "managedPolicy"
+  "xai" | "mistral" | "anthropic" | "openaiCompat" | "fleet" | "composio" | "box" | "vps" | "rooms" | "threads" | "automaticRecovery" | "localVm" | "opencodeGo" | "tts" | "decider" | "imageGen" | "profile" | "language" | "features" | "onboarding" | "browserEngine" | "browserProfiles" | "edition" | "budgets" | "billing" | "managedPolicy"
 >;
 
 export function configStatusFromFrame(frame: ConfigStatusFrame): ConfigStatus {
@@ -715,6 +723,7 @@ export function configStatusFromFrame(frame: ConfigStatusFrame): ConfigStatus {
     localVm: frame.localVm,
     opencodeGo: frame.opencodeGo,
     tts: frame.tts,
+    decider: frame.decider,
     imageGen: frame.imageGen,
     profile: frame.profile,
     language: frame.language,
@@ -818,6 +827,7 @@ export type AppSettingsSection =
   | "appearance"
   | "experimental"
   | "connections"
+  | "decisionModel"
   | "engines"
   | "companion"
   | "remote"
