@@ -26,6 +26,7 @@ import { WindowCaptionButtons } from "@/components/WindowCaptionButtons";
 import { RoutinesPage } from "@/components/RoutinesPage";
 import { NoEngines } from "@/components/NoEngines";
 import { CloudEngineSignIn } from "@/components/CloudEngineSignIn";
+import { CloudMoveSuggestion } from "@/components/CloudMove";
 import { engineReady } from "@/components/EngineLibrary";
 import { CommandPalette } from "@/components/CommandPalette";
 import { KeyboardShortcutsModal } from "@/components/KeyboardShortcutsModal";
@@ -333,6 +334,8 @@ function Shell({ viewer }: { viewer: WelcomeViewer | null }) {
       )}
       {!remoteClient && state.inspectorOpen && bot && <InspectorPanel key={bot.threadId} bot={bot} />}
       {state.appSettingsOpen && <SettingsModal />}
+      {/* Move to Cloud's one-time card on the person's empty Cloud (desktop app only). */}
+      {viewer?.cloudHome && viewer.canSave && <CloudMoveSuggestion />}
       {state.pluginsOpen && <PluginsPanel />}
       {state.newBotOpen && <NewBotDialog />}
       {state.shortcutsOpen && (

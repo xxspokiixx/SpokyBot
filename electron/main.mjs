@@ -83,6 +83,7 @@ import { createManagedDesktopClient, createManagedDesktopRelay, createManagedDes
 import { createCloudAccountClient, createCloudAccountStore } from "./cloud-account.mjs";
 import { cloudHomeConnectUrl, withCloudHome } from "./cloud-home.mjs";
 import { createCloudEntry } from "./cloud-entry.mjs";
+import { cloudPageSenderAllowed, createCloudMove, parseCloudMoveStatus } from "./cloud-move.mjs";
 import { createOrgLibrary } from "./org-library.mjs";
 import { createCompanyBackups } from "./company-backups.mjs";
 import { createCompanyBackupSchedule } from "./company-backup-schedule.mjs";
@@ -2802,6 +2803,92 @@ ipcMain.handle("company-backups:restore", localWorkspaceOnly("company-backups:re
   } finally { companyRestoreCommitting = false; }
 }));
 
+// ── Move to Cloud (electron/cloud-move.mjs, docs/cloud-pro.md) ─────────
+// This computer's workspace to the person's Cloud home, when they choose it
+// in Settings → OMB Cloud or on their empty Cloud's own page. Where it goes
+// and how main signs in there come only from the verified Cloud session:
+// these handlers take no arguments.
+let cloudMove = null;
+const CLOUD_MOVE_LOCAL_ROUTES = /^\/api\/(?:workspace-backup\/(?:status|export|download\/[a-f\d-]{36})|cloud-move\/estimate)$/;
+
+function ensureCloudMove() {
+  if (cloudMove) return cloudMove;
+  if (!app.isPackaged || desktopRemoteAccess) throw new Error("Move to Cloud needs the local desktop app on this computer.");
+  cloudMove = createCloudMove({
+    localRequest: (route, init) => {
+      if (!serverProc || !serverReady || !CLOUD_MOVE_LOCAL_ROUTES.test(route)) throw new Error("This installation changed. Start the move again.");
+      return fetch(`http://127.0.0.1:${SERVER_PORT}${route}`, { ...init, redirect: "error", credentials: "omit",
+        headers: { ...Object.fromEntries(new Headers(init.headers)), [DESKTOP_MUTATION_HEADER]: desktopMutationToken } });
+    },
+    pairHome: () => ensureCloudAccount().pairHome(),
+    tempRoot: path.join(app.getPath("temp"), "openmaus-cloud-move"),
+    availableBytes: async directory => { const disk = await fs.promises.statfs(directory); return disk.bavail * disk.bsize; },
+    onState: publishCloudMoveState,
+  });
+  return cloudMove;
+}
+
+/** The local renderer, or the person's own Cloud open in this window. */
+function publishCloudMoveState(state) {
+  const contents = mainWindow && !mainWindow.isDestroyed() ? mainWindow.webContents : null;
+  if (!contents || desktopRemoteAccess) return;
+  const frame = { sender: contents, senderFrame: contents.mainFrame };
+  const home = cloudAccount?.homeTarget()?.origin, active = activeEnvironment(environmentsState)?.origin;
+  if ((!active && contents.mainFrame.url.startsWith(`${rendererOrigin()}/`)) || cloudPageSenderAllowed(frame, { contents, homeOrigin: home, activeOrigin: active })) {
+    contents.send("cloud-move:state-changed", state);
+  }
+}
+
+/** What the Cloud holds, asked with this app's own session there (none yet: null). */
+async function peekCloudMove(origin) {
+  try {
+    const response = await session.defaultSession.fetch(`${origin}/api/cloud-move`, { credentials: "include", cache: "no-store", redirect: "error", signal: AbortSignal.timeout(5_000) });
+    if (!response.ok) { await response.body?.cancel().catch(() => {}); return null; }
+    const status = parseCloudMoveStatus(await response.json());
+    return status && { contents: status.contents, empty: status.empty, freeBytes: status.freeBytes, previous: status.previous, heldBytes: status.heldBytes };
+  } catch { return null; }
+}
+
+const cloudMoveChoicesFile = () => path.join(app.getPath("userData"), "cloud-move.json");
+function cloudMoveDismissed(origin) {
+  try { return JSON.parse(fs.readFileSync(cloudMoveChoicesFile(), "utf8"))?.dismissed?.includes(origin) === true; } catch { return false; }
+}
+function dismissCloudMove() {
+  const origin = cloudAccount?.homeTarget()?.origin;
+  if (!origin || cloudMoveDismissed(origin)) return;
+  let dismissed = [];
+  try { dismissed = JSON.parse(fs.readFileSync(cloudMoveChoicesFile(), "utf8"))?.dismissed ?? []; } catch {}
+  fs.writeFileSync(cloudMoveChoicesFile(), JSON.stringify({ dismissed: [...dismissed.filter(entry => typeof entry === "string"), origin].slice(-20) }), { mode: 0o600 });
+}
+
+async function cloudMoveOverview(onCloudPage) {
+  const move = ensureCloudMove(), target = ensureCloudAccount().homeTarget();
+  const [local, cloud] = await Promise.all([move.estimate().catch(() => null), target ? peekCloudMove(target.origin) : null]);
+  // The card on an empty Cloud, once: only when this computer has work to bring.
+  const hasWork = Boolean(local && (local.bots > 1 || local.rooms > 0 || local.chats > 0));
+  const suggest = Boolean(onCloudPage && target && cloud?.empty && hasWork && move.state().phase === "idle" && !cloudMoveDismissed(target.origin));
+  return { ...move.state(), local, cloud, suggest };
+}
+
+/** Local Settings, and (for the card) the verified Cloud page in the main window. */
+const cloudMoveSender = (channel, handler, { cloudPage = false } = {}) => (event) => {
+  const contents = mainWindow && !mainWindow.isDestroyed() ? mainWindow.webContents : null;
+  if (senderIsLocal(event) && workspaceSenderAllowed(event, contents, environmentsState, rendererOrigin())) return handler(false);
+  if (cloudPage && !desktopRemoteAccess && cloudPageSenderAllowed(event, { contents, homeOrigin: cloudAccount?.homeTarget()?.origin, activeOrigin: activeEnvironment(environmentsState)?.origin })) return handler(true);
+  throw new Error(`${channel} is only available in this app's window`);
+};
+// Finished: show the Cloud, with what was moved, in this window.
+const afterCloudMove = async result => {
+  if (result.phase === "done") await connectCloudHome().catch(error => slog(`cloud move: could not open the Cloud (${error?.message ?? error})`));
+  return result;
+};
+ipcMain.handle("cloud-move:state", cloudMoveSender("cloud-move:state", onCloudPage => cloudMoveOverview(onCloudPage), { cloudPage: true }));
+ipcMain.handle("cloud-move:start", cloudMoveSender("cloud-move:start", () => ensureCloudMove().move().then(afterCloudMove), { cloudPage: true }));
+ipcMain.handle("cloud-move:cancel", cloudMoveSender("cloud-move:cancel", () => ensureCloudMove().cancel(), { cloudPage: true }));
+ipcMain.handle("cloud-move:dismiss", cloudMoveSender("cloud-move:dismiss", onCloudPage => { dismissCloudMove(); return cloudMoveOverview(onCloudPage); }, { cloudPage: true }));
+ipcMain.handle("cloud-move:restore-previous", cloudMoveSender("cloud-move:restore-previous", () => ensureCloudMove().restorePrevious().then(afterCloudMove)));
+// ── end Move to Cloud ──
+
 const savedWorkspace = id => {
   const env = environmentsState.environments.find(entry => entry.id === id);
   if (!env) throw new Error("This server is no longer connected");
@@ -3311,6 +3398,7 @@ app.on("before-quit", (e) => {
   orgLibrary?.close();
   managedDesktop?.close();
   cloudAccount?.close();
+  void cloudMove?.close();
   companyBackupController?.abort();
   computerSharing?.close();
   lendingTray?.destroy();
