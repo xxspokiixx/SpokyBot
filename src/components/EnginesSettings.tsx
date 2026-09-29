@@ -15,7 +15,7 @@ import { useMenuMotion } from "./MenuMotion";
 import { t } from "@/lib/i18n";
 import { EngineSetup, EngineUpdateNotice, EngineWarningNotice } from "./EngineSetup";
 import { AddClaudeAccount, ClaudeAccountSettings } from "./ClaudeAccountSettings";
-import { CodexAccountSettings } from "./CodexAccountSettings";
+import { AddChatGptAccount, CodexAccountSettings } from "./CodexAccountSettings";
 
 interface ProbeResult {
   ok: boolean;
@@ -270,7 +270,7 @@ function EngineRow({ instance }: { instance: InstanceInfo }) {
       {instance.snapshot.warning && <EngineWarningNotice warning={instance.snapshot.warning} className="mt-3" />}
       {instance.claudeAccount && <ClaudeAccountSettings instance={instance} />}
       {engineReady(instance) && instance.snapshot.authenticated === true && (
-        instance.authentication?.method === "device-code"
+        instance.authentication?.method === "device-code" || instance.authentication?.method === "browser-pkce"
           ? <CodexAccountSettings instance={instance} />
           : instance.authentication?.method === "paste-code" && !instance.claudeAccount && (
             <p className="flex items-center gap-1.5 text-[12px] text-success"><Check size={13} />{t("engineSetup.claude.connectedAccount")}</p>
@@ -363,7 +363,10 @@ export function EnginesSettings() {
         <RefreshEngines />
       </div>
       <EngineSections instances={rows} renderEngine={(instance) => <EngineRow instance={instance} />} />
-      <div className="border-t border-hairline/40 pt-4"><AddClaudeAccount /></div>
+      <div className="space-y-3 border-t border-hairline/40 pt-4">
+        <AddClaudeAccount />
+        {state.instances.some((instance) => instance.snapshot.chatgptPlan && !instance.readOnly && !instance.snapshot.authenticationUnavailableReason) && <AddChatGptAccount />}
+      </div>
     </div>
   );
 }

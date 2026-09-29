@@ -1258,6 +1258,7 @@ function adminAuditPlan(method: string, path: string): AuditPlan | null {
   m = /^\/api\/instances\/([\w.-]+)\/(install|auth\/complete|auth\/sign-out|claude-update)$/.exec(path);
   if (m && method === "POST") plan.engineAction = { id: m[1]!, action: m[2]!.replace("/", "-") };
   if (method === "POST" && path === "/api/instances/claude-accounts") plan.engineAction = { id: "claude", action: "account-add" };
+  if (method === "POST" && path === "/api/instances/chatgpt-accounts") plan.engineAction = { id: "chatgpt", action: "account-add" };
   return plan.config || plan.botId || plan.createsBots || plan.deletesBot || plan.createsWebhook || plan.webhookId || plan.sessionId || plan.pairing || plan.engineAction || plan.roomId ? plan : null;
 }
 
@@ -8465,9 +8466,9 @@ async function startTurn(
       const externalUpdate = Boolean(opts?.coordination?.resumed || unseen?.some((m) => m.keep));
       // What a resumed session keeps from its launch: the standing instructions
       // (tools, servers and — for Claude — the model are passed on every launch),
-      // plus whatever this engine can only set when a session starts. Codex's
-      // thread/resume sends no model selection, and an effort it is not sent stays
-      // at the thread's last value, so both belong to the session there. An
+      // plus settings that a live turn cannot change. Codex now reasserts its
+      // model/provider on resume, but an in-flight turn and an omitted effort
+      // retain the prior selection, so both still belong to the session here. An
       // external update that finds any of it changed since the session started
       // gets the fresh session and replay it always got, rather than a resume.
       const persistentConfig = [bot.name, bot.title, bot.description, sectionContextSystemPrompt(bot.section),
@@ -21090,6 +21091,25 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
       } finally { providerConfigBusy = false; }
     }
 
+    if (method === "POST" && path === "/api/instances/chatgpt-accounts") {
+      if (!String(req.headers["content-type"] ?? "").toLowerCase().startsWith("application/json")) return json(res, 415, { error: "content-type must be application/json" });
+      const parsed = createClaudeAccountSchema.pick({ displayName: true }).safeParse(await readBody(req, 8192));
+      if (!parsed.success) return json(res, 400, { error: "Enter an account name (up to 80 characters)." });
+      if (providerConfigBusy) return json(res, 409, { error: "provider settings are already being updated" });
+      providerConfigBusy = true;
+      try {
+        const instances = persistableInstanceConfigs(cfg);
+        const instanceId = `chatgpt-${randomUUID()}`;
+        // Reuse the selected executable, never another account's environment.
+        const cli = (instances.chatgpt?.config as { cli?: unknown } | undefined)?.cli
+          ?? (instances.codex?.config as { cli?: unknown } | undefined)?.cli;
+        instances[instanceId] = { driver: "codex", displayName: parsed.data.displayName,
+          config: { authMode: "chatgpt-plan", ...(typeof cli === "string" && cli ? { cli } : {}) } };
+        await persistProviderInstance(instanceId, instances);
+        return json(res, 201, { instanceId, instances: await describeInstances() });
+      } finally { providerConfigBusy = false; }
+    }
+
     if (method === "POST" && path === "/api/instances/claude-accounts") {
       if (!String(req.headers["content-type"] ?? "").toLowerCase().startsWith("application/json")) {
         return json(res, 415, { error: "content-type must be application/json" });
@@ -21132,6 +21152,11 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
         if (action === "auth/start") {
           const instance = registry.get(instanceId);
           if (!instance) return json(res, 404, { error: "unknown instance" });
+          // The official local OAuth callback terminates on this machine,
+          // not a phone or the browser visiting a remotely hosted workspace.
+          if (instance.authenticationMethod === "browser-pkce" && (isProxied(req) || !isLoopbackHost(req.socket.remoteAddress))) {
+            return json(res, 403, { error: "Continue with ChatGPT on the computer running OpenMausBot. Hosted Pro sign-in requires OpenAI's hosted-app approval." });
+          }
           const started = await providerAuthSessions.start(instance, owner);
           // Revocation can arrive while the CLI is obtaining a device code.
           if (auth.kind === "session" && !sessions.isLive(auth.session.id)) {

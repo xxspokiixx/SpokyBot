@@ -17,6 +17,7 @@ import { InstanceProviderMark } from "./ProviderIcons";
 import { EngineSetup, EngineUpdateNotice, needsCli, needsSignIn } from "./EngineSetup";
 import { EngineGroupLabel } from "./EngineGroupLabel";
 import { ConfirmDialog } from "./ConfirmDialog";
+import { ChatGptPlanStatus } from "./ChatGptPlanStatus";
 import { approvalModeFor, modelSwitchNeedsAsk } from "../../shared/approval-mode";
 import { cn } from "@/lib/cn";
 import { useMenuMotion } from "./MenuMotion";
@@ -449,13 +450,15 @@ export function ModelPicker({
   );
   const claudeAccounts = pickerInstances.filter((instance) => instance.driverKind === "claudeAgent");
   const multipleClaudeAccounts = state.instances.filter((instance) => instance.driverKind === "claudeAgent").length > 1;
-  const showActiveAccount = multipleClaudeAccounts && active?.driverKind === "claudeAgent";
+  const showActiveAccount = (multipleClaudeAccounts && active?.driverKind === "claudeAgent") || Boolean(active?.snapshot.chatgptPlan);
   const claudeRailInstance = claudeAccounts.find((instance) => instance.instanceId === lastClaudeIdRef.current)
     ?? claudeAccounts.find((instance) => instance.instanceId === selection.instanceId) ?? claudeAccounts[0];
   const railInstance =
     pickerInstances.find((instance) => instance.instanceId === (railId ?? selection.instanceId)) ?? pickerInstances[0];
   const displayedInstanceId = railInstance?.instanceId;
-  const hasOfficialModels = Boolean(railInstance?.models.options.some((option) => !option.custom));
+  // A plan account discovers its allowed models only after sign-in. An empty
+  // catalog must still lead to cloud sign-in, never local-model injection.
+  const hasOfficialModels = Boolean(railInstance?.snapshot.chatgptPlan || railInstance?.models.options.some((option) => !option.custom));
   const customOnly = isCustomOnly(railInstance);
   useEffect(() => {
     if (railId !== null && railId !== displayedInstanceId) {
@@ -537,7 +540,7 @@ export function ModelPicker({
     const selectedIsCustom = instance?.models.options.some(
       (option) => option.id === selection.model && option.custom,
     );
-    setPane(selectedIsCustom || isCustomOnly(instance) || official.length === 0 ? "custom" : "main");
+    setPane(selectedIsCustom || isCustomOnly(instance) || (official.length === 0 && !instance?.snapshot.chatgptPlan) ? "custom" : "main");
     resetList();
   };
 
@@ -554,7 +557,7 @@ export function ModelPicker({
     if (instance.driverKind === "claudeAgent") lastClaudeIdRef.current = instance.instanceId;
     setRailId(instance.instanceId);
     const official = instance.models.options.filter((option) => !option.custom);
-    setPane(isCustomOnly(instance) || official.length === 0 ? "custom" : "main");
+    setPane(isCustomOnly(instance) || (official.length === 0 && !instance.snapshot.chatgptPlan) ? "custom" : "main");
     resetList();
   };
 
@@ -653,12 +656,12 @@ export function ModelPicker({
       }
     >
       {active && <InstanceProviderMark instance={active} size={14} />}
-      {!contained && showActiveAccount && (
+      {!contained && active && showActiveAccount && (
         <span data-model-account-compact className="hidden max-w-20 truncate @max-4xl/chathead:inline">{active.displayName}</span>
       )}
       <span className={cn("flex min-w-0 items-center gap-1", !contained && active && "@max-4xl/chathead:hidden")}>
         <span className="max-w-[160px] truncate">
-          {showActiveAccount && (
+          {active && showActiveAccount && (
             <span data-model-account className="text-ink-secondary">{active.displayName} · </span>
           )}
           {modelLabel(active, selection.model)}
@@ -773,6 +776,9 @@ export function ModelPicker({
                       {[railInstance.snapshot.account.email, railInstance.snapshot.account.organization].filter(Boolean).join(" · ")}
                     </p>
                   )}
+                  {railInstance.snapshot.chatgptPlan && railInstance.snapshot.authenticated && (
+                    <ChatGptPlanStatus key={railInstance.instanceId} instanceId={railInstance.instanceId} />
+                  )}
                   {pane === "custom" && <div className="mt-0.5 text-[11.5px] text-ink-secondary">{t("model.localHint")}</div>}
                 </div>
 
@@ -805,7 +811,7 @@ export function ModelPicker({
                       </p>
                     )}
                     <p className="mt-2 text-center text-[11.5px] text-ink-tertiary">
-                      {pane === "main" && official.length > 0
+                      {railInstance.snapshot.chatgptPlan ? t("engineSetup.chatgpt.modelsAfterSignIn") : pane === "main" && official.length > 0
                         ? official.length === 1
                           ? t("model.afterSetupOne")
                           : t("model.afterSetupMany", { count: official.length })

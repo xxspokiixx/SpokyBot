@@ -70,6 +70,12 @@ describe("thread control placement", () => {
     expect(markup).not.toContain("<button");
     expect(renderToStaticMarkup(createElement(ErrorRow, { message: "Network timeout", onRetry: () => {} }))).toContain("<button");
   });
+  it("directs ChatGPT plan limits to usage settings rather than repeatedly retrying", () => {
+    const markup = renderToStaticMarkup(createElement(ErrorRow, { message: "ChatGPT plan usage limit reached (subscription_sharing_usage_limit_exceeded)", onRetry: () => {} }));
+    expect(markup).toContain("Manage usage");
+    expect(markup).toContain("https://chatgpt.com/settings/usage");
+    expect(markup).not.toContain(">Retry<");
+  });
   it("offers to update Claude Code for a too-old install, or hands over the command", () => {
     const claude = { instanceId: "claude", driverKind: "claudeAgent", displayName: "Claude", snapshot: { state: "available", authenticated: true } } as InstanceInfo;
     const markup = renderToStaticMarkup(createElement(ErrorRow, {
