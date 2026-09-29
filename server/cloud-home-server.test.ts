@@ -3,9 +3,9 @@
 // sent (OMB_HOSTED_*). Cloud Pro includes no AI: the machine boots, says once
 // that it ignores them, serves no gateway models, never hands them (or its
 // signing secret) to an engine, and tells the app it pairs that its first run
-// is the engine sign-in. It also carries Pro's included Boat computers and
-// voice: offered with no key, their relay tokens never shown, saved or passed
-// on. Disposable home; no network; a synthetic Claude CLI.
+// is the engine sign-in. It also carries Pro's included Boat computers, voice
+// and decision model: offered with no key, their relay tokens never shown,
+// saved or passed on. Disposable home; no network; a synthetic Claude CLI.
 import { randomBytes } from "node:crypto";
 import { spawn, type ChildProcess } from "node:child_process";
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
@@ -26,15 +26,17 @@ const gateway = {
   OMB_HOSTED_MODEL_TOKEN: token,
   OMB_HOSTED_MODELS: JSON.stringify({ anthropic: [], openai: ["gpt-fixture"], openrouter: ["anthropic/claude-fixture"] }),
 };
-// Cloud Pro's included Boat computers and voice (included-services.ts).
+// Cloud Pro's included Boat computers, voice and decisions (included-services.ts).
 const included = {
   OMB_CLOUD_BOAT_URL: "https://cloud.example.test/api/cloud/services/boat/api/box/v1",
   OMB_CLOUD_BOAT_TOKEN: `box_omb_${randomBytes(24).toString("base64url")}`,
   OMB_CLOUD_VOICE_URL: "https://cloud.example.test/api/cloud/services/voice/v1",
   OMB_CLOUD_VOICE_TOKEN: `omb_voice_${randomBytes(24).toString("base64url")}`,
   OMB_TTS_DEFAULT_VOICE: "preset0voice0id",
+  OMB_CLOUD_DECIDER_URL: "https://cloud.example.test/api/cloud/services/decider",
+  OMB_CLOUD_DECIDER_TOKEN: `omb_decide_${randomBytes(32).toString("base64url")}`,
 };
-const includedTokens = [included.OMB_CLOUD_BOAT_TOKEN, included.OMB_CLOUD_VOICE_TOKEN];
+const includedTokens = [included.OMB_CLOUD_BOAT_TOKEN, included.OMB_CLOUD_VOICE_TOKEN, included.OMB_CLOUD_DECIDER_TOKEN];
 let home: string;
 let base: string;
 let child: ChildProcess;
@@ -115,11 +117,12 @@ it("boots with a gateway's settings, says once that it ignores them, and never l
   for (const includedToken of includedTokens) expect(log).not.toContain(includedToken);
 });
 
-it("offers the included computers and voice with no key, and never shows or saves their tokens", async () => {
+it("offers the included computers, voice and decisions with no key, and never shows or saves their tokens", async () => {
   const status = await api("GET", "/api/config");
   expect(status.status).toBe(200);
   expect(status.body.box).toEqual({ configured: true, included: true });
   expect(status.body.tts).toMatchObject({ configured: true, ready: true, provider: "elevenlabs", voice: "preset0voice0id", included: true });
+  expect(status.body.decider).toEqual({ provider: "jev", configured: true, included: true, enabled: true, jobs: { roomRouting: true } });
   const saved = readFileSync(join(home, ".openmausbot", "config.json"), "utf8");
   for (const includedToken of includedTokens) {
     expect(JSON.stringify(status.body)).not.toContain(includedToken);
@@ -163,7 +166,7 @@ console.log("dump-env 1.0.0");
   const env = JSON.parse(readFileSync(dump, "utf8"));
   // Proves the dump is the server's environment, not an empty one.
   expect(env.OMB_CLOUD_BOAT_URL).toBe(included.OMB_CLOUD_BOAT_URL);
-  for (const key of ["OMB_CLOUD_BOAT_TOKEN", "OMB_CLOUD_VOICE_TOKEN", "OMB_CLOUD_BOOTSTRAP_SECRET"]) expect(env).not.toHaveProperty(key);
+  for (const key of ["OMB_CLOUD_BOAT_TOKEN", "OMB_CLOUD_VOICE_TOKEN", "OMB_CLOUD_DECIDER_TOKEN", "OMB_CLOUD_BOOTSTRAP_SECRET"]) expect(env).not.toHaveProperty(key);
   for (const value of [...includedTokens, secret]) expect(JSON.stringify(env)).not.toContain(value);
 });
 
@@ -177,7 +180,7 @@ it("never hands a gateway's settings or the signing secret to an engine", async 
   await expect.poll(() => existsSync(dump), { timeout: 15_000 }).toBe(true);
   const { env } = JSON.parse(readFileSync(dump, "utf8"));
   expect(env.HOME).toBe(home);
-  for (const key of [...CLOUD_IGNORED_KEYS, "OMB_CLOUD_BOOTSTRAP_SECRET", "OMB_CLOUD_BOAT_TOKEN", "OMB_CLOUD_VOICE_TOKEN"]) expect(env).not.toHaveProperty(key);
+  for (const key of [...CLOUD_IGNORED_KEYS, "OMB_CLOUD_BOOTSTRAP_SECRET", "OMB_CLOUD_BOAT_TOKEN", "OMB_CLOUD_VOICE_TOKEN", "OMB_CLOUD_DECIDER_TOKEN"]) expect(env).not.toHaveProperty(key);
   expect(JSON.stringify(env)).not.toContain(token);
   expect(JSON.stringify(env)).not.toContain(secret);
   for (const includedToken of includedTokens) expect(JSON.stringify(env)).not.toContain(includedToken);

@@ -309,7 +309,7 @@ import {
   toWireTask,
 } from "./store.ts";
 import * as tts from "./tts/index.ts";
-import { createDecider, deciderReady, deciderSavePatch, describeDecider } from "./decider/index.ts";
+import { createDecider, deciderIncludedHere, deciderReady, deciderSavePatch, describeDecider } from "./decider/index.ts";
 import { decideRoomResponder, type RoomRoutingInput } from "./decider/room-routing.ts";
 import { narrateTool, toUtterances } from "./tts/speech-text.ts";
 import { buildRecoveryText, buildTurnContext, engineIsFresh, NATIVELY_REPLAYING_DRIVER_KINDS, peerMessageText } from "./turn-context.ts";
@@ -633,8 +633,8 @@ if (CLOUD_HOME) {
   console.log(`cloud home ${CLOUD_HOME.machineId}: bots run on the engines the person signs in to here`);
   for (const warning of CLOUD_HOME.warnings) console.warn(`cloud home: ${warning}`);
 }
-// Cloud Pro's included Boat and voice relay tokens, when the Admin set them:
-// held in memory from here on, like the signing secret.
+// Cloud Pro's included Boat, voice and decision relay tokens, when the Admin
+// set them: held in memory from here on, like the signing secret.
 holdIncludedServices();
 // Who each thread is for, when a signed-in person can be named (server-private).
 const threadStarters = new ThreadStarters(join(DATA_DIR, "thread-starters.json"));
@@ -21275,8 +21275,9 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
       }
       if (!Object.keys(patch).length) return json(res, 400, { error: "nothing to save" });
       if (patch.decider) {
-        // Saving a key is the "turn it on"; clearing it turns it off.
-        const planned = deciderSavePatch(patch.decider, cfg.decider);
+        // Saving a key is the "turn it on"; clearing it turns it off, or
+        // falls back to Cloud Pro's included decisions where there are some.
+        const planned = deciderSavePatch(patch.decider, cfg.decider, deciderIncludedHere());
         if (!planned.ok) return json(res, 400, { error: planned.error });
         patch.decider = planned.patch;
       }

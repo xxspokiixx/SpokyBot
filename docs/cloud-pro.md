@@ -183,10 +183,11 @@ ignores them:
 - no `included.*` or other read-only instance is served; the person's own
   engines are the only way to a model.
 
-### Included Boat computers and voice
+### Included Boat computers, voice and decisions
 
-Pro includes Boat cloud computers and ElevenLabs voice with no key to paste.
-When the Admin has both services configured, it also sets:
+Pro includes Boat cloud computers, ElevenLabs voice and the decision model
+(TypeSafe's Jev, [decision-model.md](decision-model.md)) with no key to paste.
+For each service the Admin has configured, it also sets:
 
 | Variable | Fly | Value |
 | --- | --- | --- |
@@ -195,30 +196,54 @@ When the Admin has both services configured, it also sets:
 | `OMB_CLOUD_VOICE_URL` | env | `https://cloud.openmausbot.com/api/cloud/services/voice/v1`, the Admin's voice relay. |
 | `OMB_CLOUD_VOICE_TOKEN` | secret | This machine's voice relay token (`omb_voice_…`). |
 | `OMB_TTS_DEFAULT_VOICE` | env | An ElevenLabs voice id, used until the person picks a voice or another speech provider in Settings. |
+| `OMB_CLOUD_DECIDER_URL` | env | `https://cloud.openmausbot.com/api/cloud/services/decider`, the Admin's Jev relay. It is a Jev base URL, used as it is: the decider adds `/v1/systemone`, the relay's only route, so every included decision goes to exactly `<OMB_CLOUD_DECIDER_URL>/v1/systemone`. |
+| `OMB_CLOUD_DECIDER_TOKEN` | secret | This machine's decision relay token (`omb_decide_…`). It is not a Jev key and works only through the relay. |
 
 A service is included only when both its URL and its token are set
-(`server/included-services.ts`). The real Boat and ElevenLabs keys stay on the
-Admin, which checks the subscription, the monthly caps and which computers
-belong to this machine on every request.
+(`server/included-services.ts`). The real Boat, ElevenLabs and Jev keys stay
+on the Admin, which checks the subscription, the monthly caps and which
+computers belong to this machine on every request.
 
 - **The person's own key always wins.** An included token is a fallback, used
   only while the person has no key of their own: none saved in Settings
-  (`box.token`, `tts.key`) and no `BOX_TOKEN` or `OMB_TTS_KEY` in the
-  environment. Adding a key switches to it at once; removing it falls back to
-  the included service again (for Boat, once that key's cloud computers are
-  deleted: removing a Boat key that still has computers is refused). The
-  choice is made on every request.
+  (`box.token`, `tts.key`, `decider.key`) and no `BOX_TOKEN`, `OMB_TTS_KEY`
+  or `OMB_JEV_API_KEY` in the environment. Adding a key switches to it at
+  once; removing it falls back to the included service again (for Boat, once
+  that key's cloud computers are deleted: removing a Boat key that still has
+  computers is refused). The choice is made on every request.
 - **Each credential goes to one place.** The relays know only the Admin's
-  accounts, so an own key goes only to the provider (`OMB_BOX_API` or
-  `OMB_ELEVENLABS_API` when set, for development and tests, else Boat's and
-  ElevenLabs' own APIs) and an included token only to its relay.
+  accounts, so an own key goes only to the provider (`OMB_BOX_API`,
+  `OMB_ELEVENLABS_API` or `decider.baseUrl` when set, for development and
+  tests, else Boat's, ElevenLabs' and Jev's own APIs) and an included token
+  only to its relay, whatever those settings say.
+- **The decision relay takes two requests, and the app sends it nothing
+  else.** Through the included token the app sends only room routing's
+  request (one question `answer`, a choice with the fixed instructions in
+  `server/decider/room-routing.ts`, and state keys `room`, `humans_in_room`,
+  `bots_in_room`, `new_message` and, when there are recent lines,
+  `recent_messages`) and the Settings key check's fixed request, within the
+  relay's caps (a body of at most 64 KiB, a state of at most 24,000 bytes as
+  JSON). `server/decider/relay.ts` checks each request before it is sent; one
+  that does not fit is not sent, and the room falls back as for any other
+  decision-model failure. Any other decision job, now or added later, uses
+  only the person's own Jev key until the relay accepts it too.
+- **Included decisions are on until switched off.** While the decision model
+  runs on the included token, its master switch counts as on unless the person
+  switched it off in **Settings → Decision model**; an explicit off always
+  wins, and switching it back on needs no key. The per-job switches keep their
+  defaults, so rooms set to Auto ask who answers, and new rooms start on Auto,
+  as with a saved key. An own Jev key is on once saved, as anywhere else, and
+  clearing it falls back to the included decisions without switching them
+  off.
 - **An included token is never the person's key.** It is never written to
   `config.json`, never sent to a client (Settings sees `configured` and
   `included: true`, and says "Included with Cloud Pro"), and Settings never
-  verifies, rotates or clears it. Boat's account-change rules still apply:
-  adding an own Boat key while included cloud computers exist is refused until
-  they are deleted, because the new account cannot reach them.
-- **What holding the tokens does and does not do.** The server reads both
+  verifies, rotates or clears it. The decision model's **Test** button, with
+  no key pasted, makes one tiny call through the relay, never to Jev
+  directly. Boat's account-change rules still apply: adding an own Boat key
+  while included cloud computers exist is refused until they are deleted,
+  because the new account cannot reach them.
+- **What holding the tokens does and does not do.** The server reads the
   tokens at startup, keeps them in memory and removes them from its
   environment, like the bootstrap secret, and they are on the credential list.
   So no process the server starts inherits them, including tools that copy
@@ -228,12 +253,18 @@ belong to this machine on every request.
   running as the same user (a bot with a shell) can read a relay token there.
   That is accepted because a relay token is only this customer's own Cloud Pro
   allowance: it works only through the Admin, only on this machine's cloud
-  computers and voice, and only up to the monthly caps. Whoever holds it can
-  at worst use up this month's included hours or voice characters; it opens
-  no other customer's data and none of the Admin's provider keys.
-- A refusal from the relay (for example, the month's cloud computer hours are
-  used up) is shown as the relay's own message. A resume that fails with a
-  server error is retried on the next poll, as Boat asks.
+  computers, voice and decisions, and only up to the monthly caps. Whoever
+  holds it can at worst use up this month's included hours, voice characters
+  or decisions; it opens no other customer's data and none of the Admin's
+  provider keys.
+- A refusal from the Boat or voice relay (for example, the month's cloud
+  computer hours are used up) is shown as the relay's own message. A resume
+  that fails with a server error is retried on the next poll, as Boat asks.
+- A refusal from the decision relay (401 for an unknown token, 402 without an
+  active subscription, 429 over the month's cap or a rate limit, 502 or 503
+  upstream) never reaches a turn: as with any decision-model failure, the room
+  does what it would without it (its lead answers). Only **Test** shows it,
+  as a fixed sentence.
 
 ## Pairing: the Admin's signed request
 

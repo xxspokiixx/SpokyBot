@@ -1050,17 +1050,20 @@ describe("credential env preference", () => {
       OMB_CLOUD_BOAT_TOKEN: "box_omb_included-relay-token",
       OMB_CLOUD_VOICE_URL: "https://cloud.example.test/api/cloud/services/voice/v1",
       OMB_CLOUD_VOICE_TOKEN: "omb_voice_included-relay-token",
+      OMB_CLOUD_DECIDER_URL: "https://cloud.example.test/api/cloud/services/decider",
+      OMB_CLOUD_DECIDER_TOKEN: "omb_decide_included-relay-token",
     };
     for (const [name, value] of Object.entries(included)) vi.stubEnv(name, value);
     try {
       const cfg = loadConfig();
       expect(cfg.box?.token).toBeUndefined();
       expect(cfg.tts?.key).toBeUndefined();
+      expect(cfg.decider?.key).toBeUndefined();
       expect(instanceConfigs(cfg).computer?.environment).toEqual({});
-      saveConfig({ tts: { voice: "chosen" }, box: { token: "" } });
+      saveConfig({ tts: { voice: "chosen" }, box: { token: "" }, decider: { enabled: true, jobs: { roomRouting: true } } });
       const disk = readFileSync(join(DATA_DIR, "config.json"), "utf8");
       const runtime = JSON.stringify([loadConfig(), instanceConfigs(loadConfig()), persistableInstanceConfigs(loadConfig())]);
-      for (const token of [included.OMB_CLOUD_BOAT_TOKEN, included.OMB_CLOUD_VOICE_TOKEN]) {
+      for (const token of [included.OMB_CLOUD_BOAT_TOKEN, included.OMB_CLOUD_VOICE_TOKEN, included.OMB_CLOUD_DECIDER_TOKEN]) {
         expect(disk).not.toContain(token);
         expect(runtime).not.toContain(token);
       }
@@ -1412,6 +1415,7 @@ describe("workspace credential env strip", () => {
     // own environment at startup; included-services.ts)
     expect(WORKSPACE_CREDENTIAL_ENV).toContain("OMB_CLOUD_BOAT_TOKEN");
     expect(WORKSPACE_CREDENTIAL_ENV).toContain("OMB_CLOUD_VOICE_TOKEN");
+    expect(WORKSPACE_CREDENTIAL_ENV).toContain("OMB_CLOUD_DECIDER_TOKEN");
     expect(WORKSPACE_CREDENTIAL_ENV).toContain("OMB_FISH_AUDIO_API_KEY");
     expect(WORKSPACE_CREDENTIAL_ENV).toContain("OMB_OPENAI_IMAGE_KEY");
     expect(WORKSPACE_CREDENTIAL_ENV).toContain("OMB_BROWSER_CONNECTION");
