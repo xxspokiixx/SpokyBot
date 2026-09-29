@@ -20,7 +20,12 @@ export const ROOM_ROUTING_TIMEOUT_MS = 1_500;
 export const ROOM_ROUTING_MIN_PROBABILITY = 0.6;
 export const EVERYONE_OPTION = "__everyone__";
 const EVERYONE_MEANING = "Several members: the message explicitly needs answers or work from more than one member of the room, for example it asks everyone or asks each member for their part.";
-const INSTRUCTIONS = "Which bot in this room should answer `new_message`? Choose __everyone__ only when the message needs several members to answer.";
+/** Fixed: Cloud Pro's decision relay accepts room routing only with these
+ * exact instructions (relay.ts). */
+export const ROOM_ROUTING_INSTRUCTIONS = "Which bot in this room should answer `new_message`? Choose __everyone__ only when the message needs several members to answer.";
+/** Every key the state may carry; `recent_messages` is left out when there
+ * are none. Cloud Pro's relay accepts no other. */
+export const ROOM_ROUTING_STATE_KEYS = ["room", "humans_in_room", "bots_in_room", "recent_messages", "new_message"] as const;
 
 const NAME_MAX = 80;
 const TITLE_MAX = 120;
@@ -93,7 +98,7 @@ export function roomRoutingRequest(input: RoomRoutingInput) {
     ...(recent.length ? { recent_messages: recent } : {}),
     new_message: { from: clip(input.message.from, NAME_MAX), text: input.message.text.trim().slice(0, 8_000) },
   };
-  return { state, question: { instructions: INSTRUCTIONS, options } };
+  return { state, question: { instructions: ROOM_ROUTING_INSTRUCTIONS, options } };
 }
 
 /** Ask once and turn the answer into a route. Never throws. */

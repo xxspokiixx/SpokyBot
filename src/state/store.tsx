@@ -634,10 +634,12 @@ export interface ConfigStatus {
   };
   /** The decision model: switches and whether a key is on file. The key
    * itself never comes back. `enabled` is the switch as it takes effect
-   * (off while no key is saved). */
+   * (off while no key is saved). `included`: Cloud Pro's decisions, no key
+   * saved. */
   decider?: {
     provider: "jev";
     configured: boolean;
+    included?: boolean;
     enabled: boolean;
     jobs: { roomRouting: boolean };
   };
