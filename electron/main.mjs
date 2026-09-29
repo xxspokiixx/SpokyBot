@@ -2887,6 +2887,9 @@ ipcMain.handle("cloud-move:start", cloudMoveSender("cloud-move:start", () => ens
 ipcMain.handle("cloud-move:cancel", cloudMoveSender("cloud-move:cancel", () => ensureCloudMove().cancel(), { cloudPage: true }));
 ipcMain.handle("cloud-move:dismiss", cloudMoveSender("cloud-move:dismiss", onCloudPage => { dismissCloudMove(); return cloudMoveOverview(onCloudPage); }, { cloudPage: true }));
 ipcMain.handle("cloud-move:restore-previous", cloudMoveSender("cloud-move:restore-previous", () => ensureCloudMove().restorePrevious().then(afterCloudMove)));
+// The Cloud's setup checklist: "Let your Cloud use this Mac" shows the lending
+// switch, as the menu-bar item's Lending settings… does. Nothing is lent here.
+ipcMain.handle("cloud-lending:open", cloudMoveSender("cloud-lending:open", () => openLendingSettings(), { cloudPage: true }));
 // ── end Move to Cloud ──
 
 const savedWorkspace = id => {

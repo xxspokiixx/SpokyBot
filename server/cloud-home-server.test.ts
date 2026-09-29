@@ -152,6 +152,8 @@ it("pairs the app on a signed request and tells it its first run is the engine s
   const session = await api("GET", "/api/auth/session", { remote: true, headers: auth });
   expect(session.body).toMatchObject({ kind: "session", scopes: ["admin", "client"], cloudHome: true });
   expect(session.body).not.toHaveProperty("hosted");
+  // No bot has finished a turn here yet: the setup checklist's step is open.
+  expect((await api("GET", "/api/config", { remote: true, headers: auth })).body.onboarding).not.toHaveProperty("firstTurnAt");
   const { instances } = (await api("GET", "/api/instances", { remote: true, headers: auth })).body;
   expect(instances.map((instance: any) => instance.instanceId)).toContain("claude");
   expect(instances.filter((instance: any) => instance.instanceId.startsWith("included.") || "included" in instance || instance.readOnly)).toEqual([]);
@@ -179,6 +181,31 @@ console.log("dump-env 1.0.0");
   for (const value of [...includedTokens, secret]) expect(JSON.stringify(env)).not.toContain(value);
 });
 
+it("does not count a turn that was stopped before it finished", async () => {
+  writeFileSync(join(home, "hang"), "");
+  const created = await api("POST", "/api/bots", { body: {
+    name: "Stopped fixture", modelSelection: { instanceId: "claude", model: "claude-sonnet-5" }, requireAvailableModel: true,
+  } });
+  expect(created.status, JSON.stringify(created.body)).toBe(201);
+  const botId = created.body.bot.id;
+  const dump = join(home, "spawn-hang.json");
+  try {
+    expect((await api("POST", `/api/bots/${botId}/messages`, { body: { text: "wait for me" } })).status).toBe(202);
+    await expect.poll(() => existsSync(dump), { timeout: 15_000 }).toBe(true);
+  } finally {
+    rmSync(join(home, "hang"), { force: true });
+    await api("POST", `/api/bots/${botId}/interrupt`, { body: {} });
+  }
+  const busy = async () => {
+    const { bots } = (await api("GET", "/api/bots?messages=10")).body as { bots: Array<{ id: string; busy?: boolean }> };
+    return bots.find((bot) => bot.id === botId)?.busy === true;
+  };
+  await expect.poll(busy, { timeout: 15_000 }).toBe(false);
+  expect((await api("GET", "/api/config")).body.onboarding).not.toHaveProperty("firstTurnAt");
+  // A later test reads the next hanging turn's own record.
+  rmSync(dump, { force: true });
+});
+
 it("never hands a gateway's settings or the signing secret to an engine", async () => {
   const created = await api("POST", "/api/bots", { body: {
     name: "Cloud fixture", modelSelection: { instanceId: "claude", model: "claude-sonnet-5" }, requireAvailableModel: true,
@@ -193,6 +220,28 @@ it("never hands a gateway's settings or the signing secret to an engine", async 
   expect(JSON.stringify(env)).not.toContain(token);
   expect(JSON.stringify(env)).not.toContain(secret);
   for (const includedToken of includedTokens) expect(JSON.stringify(env)).not.toContain(includedToken);
+});
+
+it("records when a bot's turn first finished here, once, in the Cloud's own settings", async () => {
+  // The turn above ("hello") finished on this machine.
+  const first = async () => (await api("GET", "/api/config")).body.onboarding?.firstTurnAt as string | undefined;
+  await expect.poll(first, { timeout: 15_000 }).toMatch(/^\d{4}-\d{2}-\d{2}T/);
+  const recorded = await first();
+  expect(JSON.parse(readFileSync(join(home, ".openmausbot", "config.json"), "utf8")).onboarding.firstTurnAt).toBe(recorded);
+  // A later turn leaves it as it was.
+  const created = await api("POST", "/api/bots", { body: {
+    name: "Second fixture", modelSelection: { instanceId: "claude", model: "claude-sonnet-5" }, requireAvailableModel: true,
+  } });
+  expect(created.status, JSON.stringify(created.body)).toBe(201);
+  const botId = created.body.bot.id;
+  expect((await api("POST", `/api/bots/${botId}/messages`, { body: { text: "hello again" } })).status).toBe(202);
+  const replied = async () => {
+    const { bots } = (await api("GET", "/api/bots?messages=10")).body as { bots: Array<{ id: string; busy?: boolean; messages: Array<{ role: string; kind: string }> }> };
+    const bot = bots.find((entry) => entry.id === botId);
+    return Boolean(bot && !bot.busy && bot.messages.some((message) => message.role === "bot" && message.kind === "text"));
+  };
+  await expect.poll(replied, { timeout: 15_000 }).toBe(true);
+  expect(await first()).toBe(recorded);
 });
 
 it("offers its bots the browser and cloud computers only, and tells them they cannot see the person's computer", async () => {

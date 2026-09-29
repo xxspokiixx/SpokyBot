@@ -360,3 +360,43 @@ test("production IPC answers the local window, and the verified Cloud page only 
   context.desktopRemoteAccess = true;
   assert.throws(() => handlers.get("cloud-move:start")({ sender: cloudContents, senderFrame: cloudFrame }), /only available/);
 });
+
+test("the Cloud's setup checklist can open the lending switch here, and nothing else can", async () => {
+  // The bridge carries no arguments, and the Cloud's own page gets it.
+  const local = preload();
+  await local.bridge.cloudLending.open({ origin: "https://evil.example.test", folders: ["/"] });
+  assert.deepEqual(local.invoked, [["cloud-lending:open"]]);
+  const page = preload({ remote: true });
+  assert.ok(page.bridge.cloudLending);
+  assert.deepEqual(Object.keys(page.bridge.cloudLending), ["open"]);
+  // Main opens Settings → OMB Cloud for this window's local page or the
+  // person's verified Cloud in it, and refuses any other page.
+  const source = readFileSync(new URL("./main.mjs", import.meta.url), "utf8");
+  const start = source.indexOf("/** Local Settings, and (for the card)"), end = source.indexOf("// ── end Move to Cloud ──", start);
+  const handlers = new Map(), opened = [];
+  const localFrame = { url: `${LOCAL}/` }, localContents = { mainFrame: localFrame };
+  const cloudFrame = { url: `${ORIGIN}/` }, cloudContents = { mainFrame: cloudFrame };
+  localOrigin.setLocalOrigin(LOCAL);
+  const context = vm.createContext({
+    ipcMain: { handle: (channel, handler) => handlers.set(channel, handler) },
+    senderIsLocal: localOrigin.isLocalSender, workspaceSenderAllowed: environments.workspaceSenderAllowed, cloudPageSenderAllowed,
+    activeEnvironment: environments.activeEnvironment, rendererOrigin: () => LOCAL, desktopRemoteAccess: false,
+    mainWindow: { isDestroyed: () => false, webContents: localContents },
+    environmentsState: { environments: [], activeId: "local" },
+    cloudAccount: { homeTarget: () => ({ origin: ORIGIN }) },
+    openLendingSettings: async (...args) => { opened.push(args); },
+  });
+  vm.runInContext(source.slice(start, end), context);
+  const open = handlers.get("cloud-lending:open");
+  await open({ sender: localContents, senderFrame: localFrame }, { origin: "https://evil.example.test" });
+  context.mainWindow.webContents = cloudContents;
+  context.environmentsState = { environments: [{ id: "cloud", name: "My Cloud", origin: ORIGIN }], activeId: "cloud" };
+  await open({ sender: cloudContents, senderFrame: cloudFrame });
+  assert.deepEqual(opened, [[], []]);
+  for (const event of [{ sender: cloudContents, senderFrame: { url: "https://other.example.test/" } }, { sender: {}, senderFrame: cloudFrame }]) {
+    assert.throws(() => open(event), /only available/);
+  }
+  context.environmentsState = { environments: [{ id: "other", name: "Other", origin: "https://other.example.test" }], activeId: "other" };
+  assert.throws(() => open({ sender: cloudContents, senderFrame: cloudFrame }), /only available/);
+  assert.equal(opened.length, 2);
+});

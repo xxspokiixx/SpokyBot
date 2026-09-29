@@ -118,6 +118,9 @@ const __APP_VERSION__: string;
       cloudAccount?: import("../../electron/cloud-account.mjs").CloudAccountBridge;
       /** Move to Cloud; on a remote page, only the person's own Cloud is answered. */
       cloudMove?: import("../../electron/cloud-move.mjs").CloudMoveBridge;
+      /** The Cloud's setup checklist: shows the lending switch in this app's
+       * own Settings → OMB Cloud (leaving the Cloud's page). */
+      cloudLending?: { open(): Promise<void> };
       companyBackups?: {
         state(): Promise<CompanyBackupState>;
         list(): Promise<{ backups: CompanyBackupEntry[]; usedBytes: number; limits: { ownerQuotaBytes: number; retainedSnapshots: number } }>;

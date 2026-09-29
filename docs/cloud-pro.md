@@ -56,6 +56,46 @@ problem**, **Could not be set up yet**. Only Ready can be connected to.
 Signed out of Cloud, the app makes no Cloud request and nothing on this page
 runs.
 
+### Setup checklist
+
+On a Cloud home a small card, **Set up your Cloud**, sits at the bottom left
+until its steps are done or the person hides it (`src/components/CloudSetup.tsx`,
+`src/lib/cloud-setup.ts`). Only the owner's own devices (an admin session on a
+Cloud home) see it; desktop and self-hosted installs never do and keep their
+welcome flow. Each step's state comes from the Cloud or the app, never from a
+box the person ticks:
+
+1. **Sign in to Claude or ChatGPT**, the one required step: done when any
+   engine on the Cloud can run. From another view, its **Sign in** returns to
+   the engine sign-in above.
+2. **Bring your bots from your computer**: only in the desktop app, while Move
+   to Cloud's card would be offered (an empty Cloud, a computer with work to
+   bring). **Move to Cloud** opens that offer in place (the size, what stays,
+   **Move** and **Not now**). Done after a move; skipped after **Not now**,
+   which the Cloud keeps (`cloud-setup-move-skipped` in its onboarding record)
+   and which also hides the one-time card.
+3. **Try something that runs while you're away**: one example, a daily
+   routine. **Try it** puts it in the chat's composer, unsent. Done when a bot's
+   turn first finishes on the Cloud: the server records `onboarding.firstTurnAt`
+   once, on a Cloud home only, for a turn that finished (not a failed or
+   stopped one) in a bot's conversation or a room. The onboarding record never
+   travels with Move to Cloud, so moved-in chats do not count.
+4. **Optional: Let your Cloud use this Mac**: only in the desktop app on
+   macOS. **Choose what to lend** opens Settings → OMB Cloud on this Mac,
+   leaving the Cloud's page as the menu-bar item's **Lending settings…** does
+   (`cloudLending.open()`: no arguments, answered only for the verified Cloud
+   page or the app's own window). Done when `GET /api/shared-computers` lists
+   a computer.
+
+**Hide setup** is the only dismiss. The Cloud keeps it (`cloud-setup-hidden`
+in its onboarding record), so it holds on every device and after browser
+storage is cleared, and it is the move's **Not now** too. The card also goes
+away by itself once steps 1 and 3 are done. Nothing asks for confirmation.
+After the card, Move to Cloud's one-time card behaves as before.
+
+While a window shows a Cloud home, the sidebar's server switcher reads **My
+Cloud · always on**; in a browser, a plain label says the same.
+
 ### Where bots work
 
 A Cloud home is a headless Linux server, so its bots have two places: the
@@ -537,7 +577,8 @@ here, because the person asked for it. Secrets never travel.
   main answers the Cloud page only when it is the verified Cloud (the origin the
   Cloud session reports) open as the window's active server. That page can
   start a move only from the person's own click (`navigator.userActivation`)
-  and cannot swap back to the previous Cloud.
+  and cannot swap back to the previous Cloud. While the Cloud's setup
+  checklist is up, the same offer is its second step instead of a card.
 
 ### What moves, and what stays
 

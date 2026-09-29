@@ -122,6 +122,18 @@ export function boatNotConfiguredMessage(cloudHome: boolean): string {
   return `Cloud Boat is not configured — add a Boat API key or choose ${cloudHome ? "Browser" : "Local VM"}`;
 }
 
+/** The Cloud's setup checklist (docs/cloud-pro.md) has a "try something"
+ * step that is done once a bot's turn finishes on the machine itself. The
+ * server records when, once, in this Cloud's own onboarding record: that
+ * section never travels with Move to Cloud (workspace-backup-policy.ts), so a
+ * moved-in history of turns does not count. Null when there is nothing to
+ * record: not a Cloud home, already recorded, a failed or stopped turn, or a
+ * thread that is no bot's conversation or room. */
+export function firstCloudTurnPatch(turn: { cloudHome: boolean; recorded: string | undefined; ok: boolean; known: boolean; now?: Date }): { onboarding: { firstTurnAt: string } } | null {
+  if (!turn.cloudHome || turn.recorded || !turn.ok || !turn.known) return null;
+  return { onboarding: { firstTurnAt: (turn.now ?? new Date()).toISOString() } };
+}
+
 /** The Admin's side of the signature (openmaus-cloud cloudPairingSignature). */
 export function cloudPairingSignature(secret: string, timestamp: string, nonce: string, body: Buffer | string): string {
   const bodyHash = createHash("sha256").update(body).digest("base64url");

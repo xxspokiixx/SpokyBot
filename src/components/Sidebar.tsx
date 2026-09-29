@@ -2103,7 +2103,7 @@ export function Sidebar({ open, onClose }: { open: boolean; onClose: () => void 
         </div>
       </div>
 
-      <DesktopWorkspaceSwitcher compact={density === "icons"} />
+      <DesktopWorkspaceSwitcher compact={density === "icons"} cloudHome={state.config?.cloudHome === true} />
       <OrganizationIdentity compact={density === "icons"} />
       {/* Search */}
       <div className={cn("pt-1 pb-3", density === "icons" ? "hidden" : "px-3")}>

@@ -5,13 +5,15 @@ import type { IncomingMessage } from "node:http";
 import { afterEach, expect, it } from "vitest";
 import {
   CLOUD_HOME_MARKER, CLOUD_HOME_RESTART_EXIT_CODE, CLOUD_IGNORED_KEYS, CLOUD_PAIRING_MAX_TTL_S, CLOUD_PAIRING_NONCE_MS, CLOUD_PAIRING_SKEW_S, cloudHomeConfiguration, cloudHomeConfigured,
-  boatNotConfiguredMessage, cloudHomeHost, cloudHomeOffersPlace, cloudHomePlaceRefusal, cloudPairingSignature, createCloudPairing, prepareCloudHomeVolume, withoutIgnoredCloudKeys,
+  boatNotConfiguredMessage, cloudHomeHost, cloudHomeOffersPlace, cloudHomePlaceRefusal, cloudPairingSignature, createCloudPairing, firstCloudTurnPatch, prepareCloudHomeVolume,
+  withoutIgnoredCloudKeys,
 } from "./cloud-home.ts";
 import { cloudHomeChildEnvironments, passwdIds, serverExitAction } from "./cloud-home-start.ts";
 import { hostedModelPolicy } from "./hosted-models.ts";
 import { resolveRequestAuth } from "./request-auth.ts";
 import { SessionRegistry } from "./sessions.ts";
 import { removeTempDir } from "./testing/cleanup.ts";
+import { portableWorkspaceConfig, restoredWorkspaceConfig } from "./workspace-backup-policy.ts";
 
 const directories: string[] = [];
 afterEach(async () => { for (const directory of directories.splice(0)) await removeTempDir(directory); });
@@ -295,4 +297,23 @@ it("starts the server again only when it asks to after a restore, and only a few
   // Stopping for good (Fly asked, or the edge died), or restarting in a loop.
   expect(serverExitAction(CLOUD_HOME_RESTART_EXIT_CODE, true, 0)).toBe("stop");
   expect(serverExitAction(CLOUD_HOME_RESTART_EXIT_CODE, false, 5)).toBe("stop");
+});
+
+it("records the first finished bot turn once, on a Cloud home only, and a moved workspace never brings its own", () => {
+  const now = new Date("2026-09-30T08:00:00.000Z");
+  const turn = { cloudHome: true, recorded: undefined, ok: true, known: true, now };
+  expect(firstCloudTurnPatch(turn)).toEqual({ onboarding: { firstTurnAt: "2026-09-30T08:00:00.000Z" } });
+  // Anywhere else, once recorded, a failed or stopped turn, or a thread that is
+  // no bot's conversation or room: nothing to write.
+  expect(firstCloudTurnPatch({ ...turn, cloudHome: false })).toBeNull();
+  expect(firstCloudTurnPatch({ ...turn, recorded: "2026-09-29T08:00:00.000Z" })).toBeNull();
+  expect(firstCloudTurnPatch({ ...turn, ok: false })).toBeNull();
+  expect(firstCloudTurnPatch({ ...turn, known: false })).toBeNull();
+  // Move to Cloud restores a Mac's settings onto the Cloud; the onboarding
+  // record is not among them, so the Cloud's own answer survives, and a Mac's
+  // turns never tick the Cloud's step.
+  const mac = { language: "en", onboarding: { completedAt: "2026-09-01T00:00:00.000Z", version: 1, firstTurnAt: "2026-08-01T00:00:00.000Z" } };
+  expect(restoredWorkspaceConfig(portableWorkspaceConfig(mac), { onboarding: { hintsSeen: ["cloud-setup-hidden"] } }).onboarding)
+    .toEqual({ hintsSeen: ["cloud-setup-hidden"] });
+  expect(restoredWorkspaceConfig(portableWorkspaceConfig(mac), {}).onboarding).toBeUndefined();
 });

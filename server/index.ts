@@ -290,7 +290,7 @@ import { computerKindForResource, ManagedDesktopPolicy, type ComputerKind } from
 import { hostedModelPolicy, HOSTED_MODEL_POLICY_HEADER, HOSTED_PROVIDER_SETTINGS_ERROR } from "./hosted-models.ts";
 import {
   boatNotConfiguredMessage, CLOUD_HOME_RESTART_EXIT_CODE, CLOUD_IGNORED_KEYS, CLOUD_PAIRING_PATH, cloudHomeConfiguration, cloudHomeOffersPlace, cloudHomePlaceRefusal,
-  createCloudPairing, readSignedBody,
+  createCloudPairing, firstCloudTurnPatch, readSignedBody,
 } from "./cloud-home.ts";
 import { createCloudMoveRoutes } from "./cloud-move-http.ts";
 import { holdIncludedServices } from "./included-services.ts";
@@ -5330,6 +5330,25 @@ const memoryUpkeep = createMemoryUpkeep({
   quietMs: () => captureQuietMs(cfg),
   tidyHour: () => tidyHour(cfg),
   log: (line) => console.log(line),
+});
+
+// OMB Cloud home: the first bot turn that finishes here ticks the setup
+// checklist's "try something" step (firstCloudTurnPatch). The server writes
+// it, not an admin, so it is kept out of any admin's recorded changes.
+bus.subscribe((event: RuntimeEvent) => {
+  if (!CLOUD_HOME || event.type !== "turn.completed" || shouldIgnoreProviderEvent(event)) return;
+  const patch = firstCloudTurnPatch({
+    cloudHome: true, recorded: cfg.onboarding?.firstTurnAt, ok: event.ok,
+    known: Boolean(store.botByThread(event.threadId) ?? store.groupByThread(event.threadId)),
+  });
+  if (!patch) return;
+  try {
+    adminActorScope.exit(() => saveConfig(patch));
+    Object.assign(cfg, loadConfig());
+    broadcast({ kind: "config", ...configStatus() });
+  } catch (error) {
+    console.warn(`cloud home: could not record the first finished turn (${error instanceof Error ? error.message : "unknown"})`);
+  }
 });
 
 // A finished 1:1 turn of an upkeep bot waits for capture. Only the person's
@@ -13504,6 +13523,7 @@ function configStatus() {
       version: cfg.onboarding?.version ?? 0,
       reelSeen: cfg.onboarding?.reelSeen === true,
       hintsSeen: cfg.onboarding?.hintsSeen ?? [],
+      ...(cfg.onboarding?.firstTurnAt ? { firstTurnAt: cfg.onboarding.firstTurnAt } : {}),
     },
     // Which browser this server can give bots: the desktop app's surface,
     // the agent-browser engine, or nothing yet (with the reason).

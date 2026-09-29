@@ -35,9 +35,10 @@ ipcRenderer.on("app:open-settings", (_event, section) => {
 // helpers here. Main enforces the same rule on the sensitive channels.
 const localOrigin = process.argv.find((arg) => arg.startsWith("--omb-local-origin="))?.slice("--omb-local-origin=".length) ?? null;
 const isLocalPage = !localOrigin || location.origin === localOrigin;
-// cloudMove: main answers it on a remote page only when that page is the
-// person's own verified Cloud in this window (Move to Cloud's suggestion card).
-const REMOTE_SAFE = new Set(["platform", "getCapabilities", "onCapabilitiesChanged", "applySkin", "setUnreadCount", "permStatus", "workspaces", "cloudMove"]);
+// cloudMove and cloudLending: main answers them on a remote page only when
+// that page is the person's own verified Cloud in this window (Move to
+// Cloud's card and the Cloud's setup checklist).
+const REMOTE_SAFE = new Set(["platform", "getCapabilities", "onCapabilitiesChanged", "applySkin", "setUnreadCount", "permStatus", "workspaces", "cloudMove", "cloudLending"]);
 
 // Sandboxed preload cannot import TS or sibling modules. Keep this list in
 // parity with shared/workspace-backup-client.ts (covered by the preload test).
@@ -328,6 +329,12 @@ const bridge = {
       ipcRenderer.on("cloud-move:state-changed", handler);
       return () => ipcRenderer.removeListener("cloud-move:state-changed", handler);
     },
+  } : undefined,
+  /** The Cloud's setup checklist: "Let your Cloud use this Mac" opens the
+   * lending switch in this app's own Settings → OMB Cloud. No arguments; it
+   * shows the switch and changes nothing. */
+  cloudLending: process.argv.includes("--omb-company-desktop=1") ? {
+    open: () => ipcRenderer.invoke("cloud-lending:open"),
   } : undefined,
   organization: process.argv.includes("--omb-company-desktop=1") ? {
     settingsOpened: () => ipcRenderer.invoke("organization:settings-opened"),

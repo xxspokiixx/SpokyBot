@@ -41,8 +41,9 @@ export function cloudMoveErrorText(error: CloudMoveState["error"]): string {
   return key ? t(key) : t("cloudMove.error.other", { detail: error.message });
 }
 
-/** Main's snapshot, kept current by its state events. */
-function useCloudMove(bridge: CloudMoveBridge | undefined) {
+/** Main's snapshot, kept current by its state events. With no bridge it
+ * asks nothing (a browser, or a view that does not need it yet). */
+export function useCloudMove(bridge: CloudMoveBridge | undefined) {
   const [overview, setOverview] = useState<CloudMoveOverview | null>(null);
   const [live, setLive] = useState<CloudMoveState | null>(null);
   const [pending, setPending] = useState(false);
@@ -126,18 +127,17 @@ export function CloudMoveSettings() {
   </Card>;
 }
 
-/** On the person's own Cloud, the first time it is empty: bring this
- * computer's bots and chats. Not blocking; Not now hides it for good. */
-export function CloudMoveSuggestion() {
-  const bridge = window.ogb?.cloudMove;
-  const { overview, state, pending, act, load } = useCloudMove(bridge);
-  const [started, setStarted] = useState(false), [hidden, setHidden] = useState(false);
-  if (!bridge || hidden || !(overview?.suggest || started)) return null;
+export type CloudMoveHandle = ReturnType<typeof useCloudMove>;
+
+/** The offer itself, shared by the card below and the Cloud's setup
+ * checklist: what moves and its size, that sign-ins stay here, Move and
+ * Not now, then the move's progress or error. Called as a function so both
+ * keep one element tree. */
+export function cloudMoveOffer(bridge: CloudMoveBridge, move: CloudMoveHandle, on: { start: () => void; notNow: () => void }) {
+  const { overview, state, pending, act, load } = move;
   const running = RUNNING.has(state.phase);
   const local = overview?.local;
-  const title = window.ogb?.platform === "darwin" ? t("cloudMove.suggest.titleMac") : t("cloudMove.suggest.title");
-  return <aside aria-label={title} data-cloud-move-suggestion={state.phase} className="fixed bottom-4 right-4 z-40 w-[22rem] max-w-[calc(100vw-2rem)] rounded-xl border border-hairline/40 bg-card p-4 shadow-lg">
-    <p className="text-[14px] font-medium text-ink">{title}</p>
+  return <>
     {!running && state.phase !== "failed" && <p className="mt-1 text-[13px] text-ink-secondary">{local
       ? t("cloudMove.suggest.body", { bots: local.bots, chats: local.chats, size: formatMoveBytes(local.bytes) })
       : t("cloudMove.intro")}</p>}
@@ -145,11 +145,26 @@ export function CloudMoveSuggestion() {
     {running && <div className="mt-2"><MoveProgress state={state} /></div>}
     {state.phase === "failed" && <p role="alert" className="mt-2 text-[13px] text-danger">{cloudMoveErrorText(state.error)}</p>}
     <div className="mt-3 flex flex-wrap gap-2">
-      {!running && <button type="button" disabled={pending} className="ui-button" onClick={() => { setStarted(true); act(() => bridge.start()); }}>
+      {!running && <button type="button" disabled={pending} className="ui-button" onClick={() => { on.start(); act(() => bridge.start()); }}>
         {state.phase === "failed" && state.resumable ? t("cloudMove.resume") : t("cloudMove.suggest.move")}
       </button>}
-      {!running && <button type="button" disabled={pending} className="ui-button" onClick={() => { setHidden(true); act(() => bridge.dismiss().then(load)); }}>{t("cloudMove.suggest.notNow")}</button>}
+      {!running && <button type="button" disabled={pending} className="ui-button" onClick={() => { on.notNow(); act(() => bridge.dismiss().then(load)); }}>{t("cloudMove.suggest.notNow")}</button>}
       {CANCELLABLE.has(state.phase) && <button type="button" className="ui-button" onClick={() => act(() => bridge.cancel())}>{t("cloudMove.cancel")}</button>}
     </div>
+  </>;
+}
+
+/** On the person's own Cloud, the first time it is empty: bring this
+ * computer's bots and chats. Not blocking; Not now hides it for good. While
+ * the Cloud's setup checklist is up, the offer is one of its steps instead. */
+export function CloudMoveSuggestion() {
+  const bridge = window.ogb?.cloudMove;
+  const move = useCloudMove(bridge);
+  const [started, setStarted] = useState(false), [hidden, setHidden] = useState(false);
+  if (!bridge || hidden || !(move.overview?.suggest || started)) return null;
+  const title = window.ogb?.platform === "darwin" ? t("cloudMove.suggest.titleMac") : t("cloudMove.suggest.title");
+  return <aside aria-label={title} data-cloud-move-suggestion={move.state.phase} className="fixed bottom-4 right-4 z-40 w-[22rem] max-w-[calc(100vw-2rem)] rounded-xl border border-hairline/40 bg-card p-4 shadow-lg">
+    <p className="text-[14px] font-medium text-ink">{title}</p>
+    {cloudMoveOffer(bridge, move, { start: () => setStarted(true), notNow: () => setHidden(true) })}
   </aside>;
 }
