@@ -140,6 +140,25 @@ ignores them:
 - no `included.*` or other read-only instance is served; the person's own
   engines are the only way to a model.
 
+### Included Boat computers and voice
+
+Pro includes Boat cloud computers and ElevenLabs voice with no key to paste.
+When the Admin has both services configured, it also sets:
+
+| Variable | Fly | Value |
+| --- | --- | --- |
+| `OMB_BOX_API` | env | `https://cloud.openmausbot.com/api/cloud/services/boat/api/box/v1`, the Admin's Boat relay. It keeps Boat's own `/api/box/v1` ending, so the Computer engine's model catalog (`<root>/api/provider-models`) resolves through the relay too. |
+| `BOX_TOKEN` | secret | This machine's Boat relay token. It is not a Boat key and works only through the relay. |
+| `OMB_ELEVENLABS_API` | env | `https://cloud.openmausbot.com/api/cloud/services/voice/v1`, the Admin's voice relay. |
+| `OMB_TTS_KEY` | secret | This machine's voice relay token. |
+| `OMB_TTS_DEFAULT_VOICE` | env | An ElevenLabs voice id, used until the person picks a voice or another speech provider in Settings. |
+
+These are settings the app already reads, so the image needs nothing else.
+The real Boat and ElevenLabs keys stay on the Admin, which checks the
+subscription, the monthly caps and which computers belong to this machine on
+every request. `BOX_TOKEN` and `OMB_TTS_KEY` are on the credential list, so no
+engine or tool the server starts inherits them.
+
 ## Pairing: the Admin's signed request
 
 `POST https://<app>.fly.dev/api/cloud/pairing`
