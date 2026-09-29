@@ -187,6 +187,10 @@ it("another person's conversation can neither see nor use the lent desktop", asy
     const refused = await call("shared_computer", { computer_id: storedGrant().id, folder_id: folder.id, action: "read_file", path: "brief.txt" });
     expect(refused.isError).toBe(true);
     expect(JSON.stringify(refused)).not.toContain("Reviewed");
+    // Not a Cloud home: another person's conversation still keeps the bot's
+    // notes as before (the Cloud-only memory rules do not apply here).
+    const noted = await call("memory_update", { action: "append", text: "A note from another person's chat." });
+    expect(noted.isError, JSON.stringify(noted)).toBeFalsy();
   } finally { other.kill(); }
   evidence.push("owner partition: another paired person's bot sees no computers and cannot read the owner's file by id");
 }, 45_000);

@@ -330,12 +330,14 @@ On the Cloud home (`server/shared-computers.ts`, `server/index.ts`):
   comes from outside), a guest's conversation or routine (a device paired
   with chat-only access), a routine someone else rewrote, a room, a bot's
   delegated or peer turn, a local process on the Cloud, or anything the
-  harness cannot trace. A conversation qualifies only while it holds nobody
-  else's words, anywhere in it, before or during the turn: one line from a
-  guest, a teammate bot or a local process (sent, queued, steered or handed
-  in, or history imported with a move), or one card answer from someone else,
-  takes that conversation out of lending for good, because a resumed session
-  carries everything said in it. The bot is told "Someone else wrote in this
+  harness cannot trace. A conversation qualifies only while the owner opened
+  it and it holds nobody else's words, anywhere in it, before or during the
+  turn: one line from a guest, a teammate bot or a local process (sent,
+  queued, steered or handed in, or history imported with a move), one card
+  answer from someone else, or one report of a routine the owner did not
+  write, takes that conversation out of lending for good, because a resumed
+  session carries everything said in it. A conversation a guest opened (and
+  named) is never the owner's, whoever writes in it. The bot is told "Someone else wrote in this
   conversation, so it can't use your Mac. Start a new conversation to use it."
   and the lending switch says the same. The owner's own edits count as theirs,
   and the harness's own automatic card settlements do not count. A
@@ -345,10 +347,50 @@ On the Cloud home (`server/shared-computers.ts`, `server/index.ts`):
   **Computer** setting is off cannot use lent apps and screen.
 - On a Cloud home only the owner's own devices (admin sessions) can answer a
   card or remember an approval; a guest can read along but never answer.
-- What this does not cover: a bot's own memory. Notes a bot keeps while
-  talking with a guest load into that bot's later conversations, the owner's
-  included. Pairing a guest to your Cloud lets them talk to your bots; lend
-  your Mac only while you trust everyone paired there.
+- A guest writes only in conversations it opened: it cannot send into the
+  owner's conversations (not even steer a line into a running turn), and it
+  renames, edits, compacts, switches versions of or deletes only its own. Only
+  the owner's own devices change a bot's name, title, description, standing
+  instructions or notifications (a guest keeps its picture and voice), rename
+  the owner's rooms or change their bulletin, change a conversation's approval
+  level or a bot's default model, or point a routine's results at the owner's
+  conversations. A local process on the Cloud is not the owner for any of
+  these.
+- A bot's memory and its other conversations reach every one of its turns,
+  so on a Cloud home nothing a conversation the owner did not write produces
+  flows into them (`server/lending-memory.ts`):
+  - memory capture skips such conversations, and they leave no line in the
+    bot's daily log;
+  - the bot's memory tools (`memory_update`, `memory_log`) refuse to write from
+    them;
+  - recall, the recent-work brief and, in a turn that may use the Mac, the
+    session tools (`session_search`, `session_read`, `list_threads`) draw
+    only on conversations the owner alone opened and wrote in (a title is
+    words too);
+  - a change while such a turn runs flags the bot: to MEMORY.md, a topic file
+    or a daily log, or to an instruction file its engine reads in one of the
+    bot's working folders or a folder above one (`CLAUDE.md`, `AGENTS.md`,
+    `.mcp.json`, `.claude/settings.json`, skills, agents and commands). A
+    line someone else steers into the owner's running turn makes that turn
+    count as theirs from then on. A link is judged by where it points, and
+    on a Cloud home memory is never read through one. A flagged bot's turns
+    cannot use the Mac, and the bot says "This bot's memory was changed in a
+    conversation you didn't write. Review it in Memory to use your Mac
+    again." The bot's **Memory** panel shows the same notice, lists the files
+    that changed, and **Mark reviewed** (one click, only from one of the
+    owner's own devices, never a local process) accepts exactly what was
+    shown: if anything changed since, the panel shows it again. The owner's
+    own turns, their edits in the Memory panel (save, delete, undo), upkeep
+    on their conversations and the tidy-up never flag it. A damaged record
+    (`lending-memory.json`) flags every bot until the owner reviews it.
+- What this cannot stop: any conversation whose bot can run commands without
+  the owner approving (Auto or Full access, or a remembered command), a
+  guest's included, controls the Cloud machine: it can change other bots'
+  files and these records. Pair only people you trust with your Cloud while
+  you lend your Mac.
+- Not covered yet: a bot whose memory changed can still pass its words to
+  other bots through rooms, `ask_bot` and delegation, and a turn that may use
+  the Mac can still read room names and routine listings through its tools.
 
 ### What the Cloud can see: `GET /api/shared-computers`
 

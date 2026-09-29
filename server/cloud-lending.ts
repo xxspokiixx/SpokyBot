@@ -9,10 +9,10 @@
 //   session with admin scope), or
 // - a scheduled run of a routine whose instructions the owner wrote (created
 //   or edited from one of those devices), or a run the owner started by hand;
-// and the conversation holds nobody else's words, ever: a resumed session
-// carries everything said in it, so one line (or card answer) from a guest,
-// a teammate bot or a local process, before or during the turn, takes that
-// conversation out of lending. The owner starts a new one to lend again.
+// and the conversation was opened by them and holds nobody else's words,
+// ever: a resumed session carries everything said in it, so one line (or
+// card answer) from a guest, a teammate bot or a local process, before or
+// during the turn, takes that conversation out of lending. The owner starts a new one to lend again.
 // Webhook runs, guests, rooms, a bot's delegated or peer turn, and anything
 // unprovable never can.
 // Everything here is pure; server/index.ts supplies the records.
@@ -30,6 +30,12 @@ export interface CloudLendingTurn {
   request: { messageId?: string; generations: ReadonlySet<string>; stopped?: boolean; automation?: RoutineRunTrigger } | undefined;
   generation: string;
   thread: readonly Line[];
+  /** Who opened this conversation (and the room it is in), where recorded.
+   * Whoever opened it chose its title, so it must be the owner too. */
+  starters?: readonly (string | undefined)[];
+  /** The conversation holds a report of work someone else directed (a
+   * routine the owner did not write). */
+  reportsFromOthers?: boolean;
   /** Whether a person key is one of the owner's own devices right now. */
   ownerPerson: (person: string | undefined) => boolean;
   /** Who answered a card (the recorded answerer, or whoever is answering it
@@ -62,14 +68,32 @@ export function cloudHomeLendingRefusal(turn: CloudLendingTurn): CloudLendingRef
       run!.ownerAuthored && (run!.triggerSource !== "manual" || run!.ownerStarted);
   }
   if (!owner) return "not-owner";
+  // A conversation someone else opened (and named) is theirs, whoever writes in it.
+  if (turn.starters?.some((person) => person !== undefined && !turn.ownerPerson(person))) return "someone-else";
+  if (turn.reportsFromOthers) return "someone-else";
   // Nothing anyone else wrote (a guest, a teammate bot, a local process) may
   // be anywhere in this conversation, before or after the request, as a line
   // (sent, queued, steered or handed in) or as the answer to a card. A
   // routine's own prompt line names nobody; its provenance was proven above.
-  const clean = turn.thread.every((line, at) =>
-    (line.role !== "user" || (at === index && request.automation !== undefined) || turn.ownerPerson(personOf(line))) &&
-    (!answeredByPerson(line.card) || turn.ownerPerson(turn.cardAnswerer(line.card!))));
+  const clean = ownerOnlyConversation(turn.thread, turn.ownerPerson, turn.cardAnswerer,
+    request.automation !== undefined ? request.messageId : undefined);
   return clean ? null : "someone-else";
+}
+
+/** A conversation only the owner has written in: every user line is theirs
+ * and every card someone answered was answered by them (`exempt`: one line,
+ * a routine's own prompt, that names nobody). The same test decides which of
+ * a bot's other conversations may feed a turn on a Cloud home (recall, the
+ * recent-work brief, memory capture, the daily log). */
+export function ownerOnlyConversation(
+  thread: readonly Line[],
+  ownerPerson: (person: string | undefined) => boolean,
+  cardAnswerer: (card: Card) => string | undefined,
+  exempt?: string,
+): boolean {
+  return thread.every(line =>
+    (line.role !== "user" || line.id === exempt || ownerPerson(personOf(line))) &&
+    (!answeredByPerson(line.card) || ownerPerson(cardAnswerer(line.card!))));
 }
 
 /** A card someone answered: a person's verdict or words. The harness's own
