@@ -19,6 +19,7 @@ import { EngineGroupLabel } from "./EngineGroupLabel";
 import { ConfirmDialog } from "./ConfirmDialog";
 import { approvalModeFor, modelSwitchNeedsAsk } from "../../shared/approval-mode";
 import { cn } from "@/lib/cn";
+import { useMenuMotion } from "./MenuMotion";
 import { t } from "@/lib/i18n";
 import { COMPACT_SQUARE } from "@/lib/compact-chip";
 
@@ -410,6 +411,7 @@ export function ModelPicker({
 }) {
   const { state, dispatch, refreshInstances, refreshModels: refreshInstanceModels } = useStore();
   const [open, setOpen] = useState(false);
+  const motion = useMenuMotion(open && !bot.busy);
   const [railId, setRailId] = useState<string | null>(null);
   const [pane, setPane] = useState<"main" | "custom">("main");
   const [query, setQuery] = useState("");
@@ -696,7 +698,7 @@ export function ModelPicker({
         trigger
       )}
 
-      {open && !bot.busy && (
+      {motion.shown && (
         <div
           data-model-picker-content
           role="dialog"
@@ -707,6 +709,7 @@ export function ModelPicker({
             contained
               ? "relative mt-3 w-full max-h-[min(420px,50dvh)]"
               : "absolute right-0 top-full z-30 mt-2 w-[420px] max-w-[calc(100vw-2rem)] max-h-[min(600px,calc(100dvh-7rem))] shadow-2xl shadow-black/50",
+            motion.className,
           )}
         >
           {pickerInstances.length > 0 && <ModelEngineRail instances={pickerInstances} selectedInstance={railInstance} claudeInstance={claudeRailInstance} onSelect={selectRail} />}

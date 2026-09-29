@@ -3,6 +3,7 @@ import { useCallback, useEffect, useMemo, useRef, useState, type SetStateAction 
 import { ArrowUp, BookOpen, Clock, Mic, Paperclip, Square, Target, Users, X } from "lucide-react";
 import { useStore, visibleMessages, currentTaskBot, type Bot, type Group, type Message } from "@/state/store";
 import { cn } from "@/lib/cn";
+import { useMenuMotion } from "./MenuMotion";
 import { activeLocale, t } from "@/lib/i18n";
 import { useOwnerOrAdmin } from "@/lib/use-owner-or-admin";
 import {
@@ -356,6 +357,8 @@ export function Composer({
     return mentionChoicesForQuery(pool, mention.query);
   }, [mention, dismissedAt, state.bots, bot?.id, group, members]);
   const mentionPickerOpen = candidates.length > 0;
+  const commandMotion = useMenuMotion(commandPickerOpen);
+  const mentionMotion = useMenuMotion(mentionPickerOpen);
 
   useEffect(
     () => setHighlight(0),
@@ -806,11 +809,11 @@ export function Composer({
             </button>
           </div>
         ))}
-        {commandPickerOpen && (
+        {commandMotion.shown && (
           <div
             role="listbox"
             aria-label={t("composer.commands.aria")}
-            className="absolute bottom-full left-2 z-20 mb-2 w-80 overflow-hidden rounded-xl border border-hairline/40 bg-raised shadow-lg"
+            className={cn("absolute bottom-full left-2 z-20 mb-2 w-80 overflow-hidden rounded-xl border border-hairline/40 bg-raised shadow-lg", commandMotion.className)}
           >
             <div className="border-b border-hairline/20 px-3 py-2 text-[10px] font-semibold uppercase tracking-[0.08em] text-ink-secondary">
               {t("composer.commands.title")}
@@ -846,12 +849,12 @@ export function Composer({
             ))}
           </div>
         )}
-        {mentionPickerOpen && (
+        {mentionMotion.shown && (
           <div
             ref={mentionListRef}
             role="listbox"
             aria-label={t("composer.mention.aria")}
-            className="absolute bottom-full left-2 z-20 mb-2 max-h-72 w-72 overflow-x-hidden overflow-y-auto overscroll-contain rounded-xl border border-hairline/40 bg-raised shadow-lg"
+            className={cn("absolute bottom-full left-2 z-20 mb-2 max-h-72 w-72 overflow-x-hidden overflow-y-auto overscroll-contain rounded-xl border border-hairline/40 bg-raised shadow-lg", mentionMotion.className)}
           >
             {candidates.map((peer, i) => (
               <button

@@ -1,6 +1,7 @@
 import { Check } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import { cn } from "@/lib/cn";
+import { useMenuMotion } from "./MenuMotion";
 import { browserAvailable, builtInBrowserEnabled } from "@/lib/feature-flags";
 import { t } from "@/lib/i18n";
 import { instanceSupportsLocalComputer, localComputerSelectable } from "@/lib/local-computer";
@@ -46,6 +47,7 @@ export function PlaceChip({ bot, task, live, disabled = false, onPin }: {
   onPin: (surface: Place | null) => void;
 }) {
   const [open, setOpen] = useState(false);
+  const motion = useMenuMotion(open);
   const wrapperRef = useRef<HTMLDivElement>(null);
   const { state } = useStore();
   const availability = usePlaceAvailability(bot);
@@ -88,8 +90,8 @@ export function PlaceChip({ bot, task, live, disabled = false, onPin }: {
         <PlaceIcon place={effective} size={16} className="shrink-0 opacity-80" aria-hidden="true" />
         {showLive && <span className="absolute right-1.5 top-1.5 size-1.5 animate-pulse rounded-full bg-success" aria-label={t("place.live")} />}
       </button>
-      {open && (
-        <div role="menu" aria-label={t("place.chipTitle")} className="absolute bottom-full left-0 z-40 mb-2 w-[300px] overflow-hidden rounded-2xl border border-hairline/40 bg-raised shadow-2xl">
+      {motion.shown && (
+        <div role="menu" aria-label={t("place.chipTitle")} className={cn("absolute bottom-full left-0 z-40 mb-2 w-[300px] overflow-hidden rounded-2xl border border-hairline/40 bg-raised shadow-2xl", motion.className)}>
           <div className="border-b border-hairline/20 px-4 py-3 text-[14px] font-medium text-ink">{t("place.chipTitle")}</div>
           <div className="flex flex-col py-1.5">
             <button
