@@ -56,6 +56,32 @@ problem**, **Could not be set up yet**. Only Ready can be connected to.
 Signed out of Cloud, the app makes no Cloud request and nothing on this page
 runs.
 
+### Where bots work
+
+A Cloud home is a headless Linux server, so its bots have two places: the
+built-in browser and cloud computers. It never offers **This computer** (that
+would be the server itself) or a **Local VM** (a Fly machine has no container
+runtime). The person's own Mac is reached only when they lend it (**Let my
+Cloud use this Mac**, below), through the shared-computer tools.
+
+- Neither place is listed in the Computer panel, the composer's place chip, a
+  bot's Works on setting or Settings → Computers (the config answers
+  `"cloudHome": true`), nor in `select_computer`, which also drops `vm_exec`.
+  Auto never lands on either.
+- A bot still set to either (an older or imported setting) has each task
+  refused with a sentence saying so, suggesting Auto, Cloud or Browser and,
+  for This computer, lending the Mac.
+- Every turn's system prompt says the bot runs in the cloud. Asked about the
+  person's own computer, a bot with the shared-computer tools checks for a lent
+  Mac and, finding none, says so and how to lend one; a bot without them says
+  it cannot reach it. Either offers the browser and cloud computers, never a
+  place that cannot exist.
+- The built-in browser is on unless the person switches it off in Settings.
+  The desktop turns it on in its first-run welcome, which a Cloud home skips.
+
+`shared/cloud-home.ts` decides which places are offered, for the server and
+the app alike.
+
 ### Open in the app: `openmausbot://cloud`
 
 The Cloud page (`https://cloud.openmausbot.com/cloud`) can offer **Open in the

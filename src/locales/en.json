@@ -2264,6 +2264,7 @@
   "computer.sleepTitle": "Put the computer to sleep",
   "computer.worksOn": "Works on",
   "computer.worksOnHint": "Choose where this bot can use a computer.",
+  "computer.worksOnHintCloudHome": "Choose where this bot can use a computer. Bots on your OMB Cloud work in the cloud; to let them use your Mac, turn on Let my Cloud use this Mac in Settings → OMB Cloud on it.",
   "computer.destinationAria": "Computer destination",
   "computer.dest.autoDesc": "Choose automatically",
   "computer.dest.cloudDesc": "Hosted desktop",

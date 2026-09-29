@@ -4,7 +4,7 @@ import { cn } from "@/lib/cn";
 import { browserAvailable, builtInBrowserEnabled } from "@/lib/feature-flags";
 import { t } from "@/lib/i18n";
 import { instanceSupportsLocalComputer, localComputerSelectable } from "@/lib/local-computer";
-import { effectivePlace, PLACES, placeLabelKey, type Place } from "@/lib/place";
+import { effectivePlace, PLACES, placeLabelKey, placeOffered, type Place } from "@/lib/place";
 import { useStore, type Bot, type Task } from "@/state/store";
 import { useDesktopCapabilities } from "./DesktopCapabilities";
 import { PlaceIcon } from "./PlaceIcon";
@@ -19,12 +19,13 @@ export function usePlaceAvailability(bot: Bot): PlaceAvailability {
   const instance = state.instances.find((candidate) => candidate.instanceId === bot.modelSelection.instanceId);
   const computerMcp = instance?.capabilities?.computerMcp === true;
   const boxAgent = instance?.driverKind === "boxAgent";
-  // Places the enrolled organisation disallows are never offered.
+  // Places the enrolled organisation disallows, or this server never
+  // offers (an OMB Cloud home), are not reachable.
   const allowed = state.config?.managedPolicy?.computers ?? { thisComputer: true, localVm: true, box: true, vps: true };
   return {
     cloud: (bot.cloudBackend === "vps" ? computerMcp && !boxAgent : computerMcp || boxAgent) && (bot.cloudBackend === "vps" ? allowed.vps : allowed.box),
-    vm: Boolean(instance?.snapshot?.state === "available" && computerMcp && !boxAgent) && allowed.localVm,
-    local: localComputerSelectable({ capabilities, providerSupportsLocal: instanceSupportsLocalComputer(state.instances, bot) }) && allowed.thisComputer,
+    vm: Boolean(instance?.snapshot?.state === "available" && computerMcp && !boxAgent) && allowed.localVm && placeOffered("vm", state.config),
+    local: localComputerSelectable({ capabilities, providerSupportsLocal: instanceSupportsLocalComputer(state.instances, bot) }) && allowed.thisComputer && placeOffered("local", state.config),
     browser: builtInBrowserEnabled(state.config) && browserAvailable(state.config) && instance?.capabilities?.browserMcp === true && !boxAgent,
   };
 }
@@ -46,6 +47,7 @@ export function PlaceChip({ bot, task, live, disabled = false, onPin }: {
 }) {
   const [open, setOpen] = useState(false);
   const wrapperRef = useRef<HTMLDivElement>(null);
+  const { state } = useStore();
   const availability = usePlaceAvailability(bot);
   const effective = effectivePlace(bot, task);
   const pinned = Boolean(task?.surface);
@@ -104,7 +106,7 @@ export function PlaceChip({ bot, task, live, disabled = false, onPin }: {
               </span>
               {!pinned && <Check size={14} className="mt-0.5 shrink-0 text-accent" aria-hidden="true" />}
             </button>
-            {PLACES.map((place) => {
+            {PLACES.filter((place) => placeOffered(place, state.config)).map((place) => {
               const selected = task?.surface === place;
               const reachable = availability[place];
               return (
