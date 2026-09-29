@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { ArrowUpRight, CalendarClock, Cloud, Crown, MessageSquare, X } from "lucide-react";
+import { ArrowUpRight, CalendarClock, Cloud, Crown, Monitor, X } from "lucide-react";
 import type { CloudAccountState } from "../../electron/cloud-account.mjs";
 import { api, useStore, useStreaming } from "@/state/store";
 import { openExternalLink, PRO_URL } from "@/lib/app-links";
@@ -71,7 +71,7 @@ export function ProIntroductionCard({ onDismiss }: { onDismiss: () => void }) {
     <p className="mt-1 text-[12.5px] text-ink-secondary">{t("pro.headline")}</p>
     <ul className="my-3 space-y-2 text-[12.5px]">
       <li className="flex items-center gap-2.5"><Cloud size={17} className="shrink-0 text-ink-secondary" aria-hidden="true" />{t("pro.alwaysOn")}</li>
-      <li className="flex items-center gap-2.5"><MessageSquare size={17} className="shrink-0 text-ink-secondary" aria-hidden="true" />{t("pro.slack")}</li>
+      <li className="flex items-center gap-2.5"><Monitor size={17} className="shrink-0 text-ink-secondary" aria-hidden="true" />{t("pro.computers")}</li>
       <li className="flex items-center gap-2.5"><CalendarClock size={17} className="shrink-0 text-ink-secondary" aria-hidden="true" />{t("pro.schedule")}</li>
     </ul>
     <div className="flex flex-wrap items-center gap-3">

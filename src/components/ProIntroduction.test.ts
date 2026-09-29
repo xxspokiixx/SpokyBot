@@ -32,7 +32,8 @@ afterEach(() => vi.unstubAllGlobals());
 
 it("shows the live benefits without enrolling, charging or refreshing an account", () => {
   const html = render();
-  for (const text of ["Get Pro", "always-on", "Slack", "scheduled tasks", "Don’t show again"]) expect(html).toContain(text);
+  for (const text of ["Get Pro", "always-on", "Cloud computers and voice", "scheduled tasks", "Don’t show again"]) expect(html).toContain(text);
+  expect(html).not.toContain("Slack");
   expect(html).not.toContain("bg-gradient"); expect(html).not.toContain("amber-");
   expect(html).not.toContain("Coming soon"); expect(api).not.toHaveBeenCalled();
   expect(html).not.toContain('aria-modal="true"');
