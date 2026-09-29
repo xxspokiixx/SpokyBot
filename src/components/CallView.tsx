@@ -172,7 +172,7 @@ export function CallTargetButton({
           id={helpId}
           role="group"
           aria-label="Call unavailable"
-          className={cn("absolute right-0 z-30 mt-1.5 w-[280px] rounded-xl border border-hairline bg-panel p-3 text-left shadow-2xl", helpMotion.className)}
+          className={cn("absolute right-0 z-30 mt-1.5 w-[280px] rounded-xl border border-hairline bg-panel p-3 text-left shadow-2xl", helpMotion.className)} {...helpMotion.exitProps}
         >
           <div className="text-[13px] font-medium text-ink">Call unavailable</div>
           <div className="mt-1 text-[12px] leading-[1.45] text-ink-secondary">{reason}</div>

@@ -703,6 +703,7 @@ export function ModelPicker({
           data-model-picker-content
           role="dialog"
           aria-label={t("model.choose")}
+          {...motion.exitProps}
           style={contained ? undefined : placement}
           className={cn(
             "flex overflow-hidden rounded-2xl border border-hairline/50 bg-card",

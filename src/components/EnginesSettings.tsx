@@ -332,7 +332,7 @@ function EngineRow({ instance }: { instance: InstanceInfo }) {
         )}
         {error && <div role="alert" className="mt-1 text-[12px] text-danger">{error}</div>}
         {cliMotion.shown && (
-          <div className={cliMotion.className}>
+          <div className={cliMotion.className} {...cliMotion.exitProps}>
             <CustomPicker
               instance={instance}
               cliDefault={instance.cliDefault}

@@ -366,7 +366,7 @@ function RoomContextMenu({
       data-room-menu
       data-sidebar
       style={{ top, left }}
-      className={cn("fixed z-40 w-[228px] overflow-hidden rounded-xl border border-hairline/50 bg-menu py-1.5 shadow-2xl shadow-black/60", motion.className)}
+      className={cn("fixed z-40 w-[228px] overflow-hidden rounded-xl border border-hairline/50 bg-menu py-1.5 shadow-2xl shadow-black/60", motion.className)} {...motion.exitProps}
     >
       {!remoteClient && (renaming ? (
         <div className="flex items-center gap-1 px-2 py-1">
@@ -600,7 +600,7 @@ function SectionPicker({
     <div
       data-section-picker
       style={{ top, left }}
-      className={cn("fixed z-40 w-[236px] overflow-hidden rounded-xl border border-hairline/50 bg-menu py-2 shadow-2xl shadow-black/60", motion.className)}
+      className={cn("fixed z-40 w-[236px] overflow-hidden rounded-xl border border-hairline/50 bg-menu py-2 shadow-2xl shadow-black/60", motion.className)} {...motion.exitProps}
     >
       <div className="px-3.5 pb-1 text-[10px] font-medium uppercase tracking-[0.08em] text-ink-secondary">
         {t("sidebar.section.moveToContext")}
@@ -702,10 +702,17 @@ export function BotContextMenu({
     window.addEventListener("resize", place);
     return () => window.removeEventListener("resize", place);
   });
+  // Focus moves in once per open and back out on close. It stays apart from
+  // the listeners below: Sidebar passes a fresh onClose every render, and
+  // re-running this with them would pull focus back to the first item.
   useEffect(() => {
     if (!menu) return;
     const opener = document.activeElement instanceof HTMLElement ? document.activeElement : null;
     menuRef.current?.querySelector<HTMLButtonElement>("button:not([disabled])")?.focus();
+    return () => { if (opener?.isConnected) opener.focus(); };
+  }, [menu]);
+  useEffect(() => {
+    if (!menu) return;
     const onDown = (e: MouseEvent) => {
       if (!(e.target instanceof Element) || !e.target.closest("[data-bot-menu]")) onClose();
     };
@@ -717,7 +724,6 @@ export function BotContextMenu({
       window.removeEventListener("mousedown", onDown);
       window.removeEventListener("keydown", onKey);
       window.removeEventListener("blur", onClose);
-      if (opener?.isConnected) opener.focus();
     };
   }, [menu, onClose]);
 
@@ -769,7 +775,7 @@ export function BotContextMenu({
       aria-label={t("sidebar.bot.actions", { name: bot.name })}
       onKeyDown={navigateThreadMenu}
       style={{ top: shown.y, left: shown.x }}
-      className={cn("fixed z-40 max-h-[calc(100dvh-16px)] w-[228px] max-w-[calc(100vw-16px)] overflow-y-auto overscroll-contain rounded-xl border border-hairline/50 bg-menu py-1.5 shadow-2xl shadow-black/60", motion.className)}
+      className={cn("fixed z-40 max-h-[calc(100dvh-16px)] w-[228px] max-w-[calc(100vw-16px)] overflow-y-auto overscroll-contain rounded-xl border border-hairline/50 bg-menu py-1.5 shadow-2xl shadow-black/60", motion.className)} {...motion.exitProps}
     >
       {showThreads && <>
         {item(<Plus size={16} className="text-ink-secondary" />, t("task.newShort"), () => dispatch({ type: "newTask", botId: bot.id }))}
@@ -1956,7 +1962,7 @@ export function Sidebar({ open, onClose }: { open: boolean; onClose: () => void 
                   "absolute top-full z-40 mt-1 w-40 overflow-hidden rounded-xl border border-hairline/50 bg-menu py-1.5 shadow-2xl shadow-black/60",
                   density === "icons" ? "left-0" : "right-0",
                   densityMotion.className,
-                )}>
+                )} {...densityMotion.exitProps}>
                   {(["comfortable", "compact", "icons"] as const).map((option) => (
                     <button
                       key={option}
@@ -2000,7 +2006,7 @@ export function Sidebar({ open, onClose }: { open: boolean; onClose: () => void 
                   density === "icons" ? "left-0" : "right-0",
                   density === "compact" ? "w-60" : "w-72",
                   attentionMotion.className,
-                )}>
+                )} {...attentionMotion.exitProps}>
                   <div className="flex items-center gap-1 pb-1 pl-3.5 pr-2 pt-1.5">
                     <span className="flex-1 text-[13px] font-medium text-ink">{t("attention.title")}</span>
                     <button
@@ -2038,7 +2044,7 @@ export function Sidebar({ open, onClose }: { open: boolean; onClose: () => void 
                 "absolute top-full z-40 mt-1 w-52 overflow-hidden rounded-xl border border-hairline/50 bg-menu py-1.5 shadow-2xl shadow-black/60",
                 density === "icons" ? "left-0" : "right-0",
                 plusMotion.className,
-              )}>
+              )} {...plusMotion.exitProps}>
                 <button
                   onClick={() => {
                     setPlusOpen(false);
@@ -2400,9 +2406,9 @@ export function Sidebar({ open, onClose }: { open: boolean; onClose: () => void 
       />
       {newTeam && <TeamDialog onClose={() => setNewTeam(false)} />}
       {renameTeam && <TeamDialog section={renameTeam} rename onRenamed={renamedTeam} onClose={() => setRenameTeam(null)} />}
-      {teamMotion.shown && teamMotion.value && createPortal(<div className={cn("fixed inset-0 z-40", teamMotion.className === "animate-pop-out pointer-events-none" && "pointer-events-none")} onMouseDown={closeTeamMenu}>
+      {teamMotion.shown && teamMotion.value && createPortal(<div className={cn("fixed inset-0 z-40", teamMotion.closing && "pointer-events-none")} onMouseDown={closeTeamMenu}>
         <div role="menu" aria-label={teamMotion.value.name} style={{ left: teamMotion.value.x, top: teamMotion.value.y }}
-          className={cn("absolute w-[220px] rounded-xl border border-hairline/50 bg-menu p-1.5 text-ink shadow-xl", teamMotion.className)}
+          className={cn("absolute w-[220px] rounded-xl border border-hairline/50 bg-menu p-1.5 text-ink shadow-xl", teamMotion.className)} {...teamMotion.exitProps}
           onMouseDown={event => event.stopPropagation()} onKeyDown={event => {
             if (event.key === "Escape" || event.key === "Tab") { event.preventDefault(); event.stopPropagation(); closeTeamMenu(); return; }
             navigateThreadMenu(event);
