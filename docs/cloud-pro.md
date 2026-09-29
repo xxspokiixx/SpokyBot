@@ -56,6 +56,32 @@ problem**, **Could not be set up yet**. Only Ready can be connected to.
 Signed out of Cloud, the app makes no Cloud request and nothing on this page
 runs.
 
+### Where bots work
+
+A Cloud home is a headless Linux server, so its bots have two places: the
+built-in browser and cloud computers. It never offers **This computer** (that
+would be the server itself) or a **Local VM** (a Fly machine has no container
+runtime). The person's own Mac is reached only when they lend it (**Let my
+Cloud use this Mac**, below), through the shared-computer tools.
+
+- Neither place is listed in the Computer panel, the composer's place chip, a
+  bot's Works on setting or Settings → Computers (the config answers
+  `"cloudHome": true`), nor in `select_computer`, which also drops `vm_exec`.
+  Auto never lands on either.
+- A bot still set to either (an older or imported setting) has each task
+  refused with a sentence saying so, suggesting Auto, Cloud or Browser and,
+  for This computer, lending the Mac.
+- Every turn's system prompt says the bot runs in the cloud. Asked about the
+  person's own computer, a bot with the shared-computer tools checks for a lent
+  Mac and, finding none, says so and how to lend one; a bot without them says
+  it cannot reach it. Either offers the browser and cloud computers, never a
+  place that cannot exist.
+- The built-in browser is on unless the person switches it off in Settings.
+  The desktop turns it on in its first-run welcome, which a Cloud home skips.
+
+`shared/cloud-home.ts` decides which places are offered, for the server and
+the app alike.
+
 ### Open in the app: `openmausbot://cloud`
 
 The Cloud page (`https://cloud.openmausbot.com/cloud`) can offer **Open in the
@@ -98,6 +124,117 @@ for an AppImage) once the installed app has started at least once, since it
 registers itself at startup. Before that, or if the app is not installed, the
 browser has nothing to open (it shows nothing or an error), so the Cloud page
 should keep a download link next to the button.
+
+## Let my Cloud use this Mac
+
+The Cloud is home: bots and chats live there. The person's Mac is a computer
+the Cloud can borrow while it is awake. Lending is off until the person turns
+it on, and it exists only between their own desktop app and their own Cloud
+home. Other users (desktop only, self-hosted, hosted team workspaces) keep
+computer sharing exactly as before: off unless a maintainer sets
+`features.sharedComputers` by hand.
+
+### What the person sees
+
+In **Settings → OMB Cloud**, the **Your Cloud** card has a **Let my Cloud use
+this Mac** switch under **Connect to my Cloud** (it is part of connecting, not
+a dialog). Turning it on shows what can be lent; each change applies at once,
+with no confirmation. The switch and the chosen scopes are the consent.
+
+- **Folders**: chosen with the folder picker. Read-only by default; **Can
+  edit** lets bots create files and overwrite them, but only after reading the
+  current version (the overwrite is checked against its hash). Nothing is ever
+  deleted. At most 256 KiB per file, no symbolic or hard links. The home folder
+  and anything above it cannot be chosen.
+- **Apps and screen**: bots see the screen and use apps as the person, through
+  this app's own computer control (the signed app holds Accessibility and
+  Screen Recording; the Cloud never does). This is broad by nature, since it
+  reaches anything those apps can, and the switch says so. It needs local
+  computer control set up first.
+- **No terminal.** The shell grant of maintainer sharing is never offered here.
+
+The switch can be turned on before the first **Connect to my Cloud**; lending
+starts once this Mac is signed in to the Cloud. Below the choices, **Activity
+on this computer** lists every request the Cloud made, refused ones included.
+
+While lending is on, a menu-bar item shows it (**In use** while the Cloud is
+running something on this Mac) with **Stop lending**. Turning the switch off or
+choosing **Stop lending** stops at once: the Cloud is told, a running action
+is cancelled (the computer-control transport is closed and the screen lease
+released), and nothing more runs. An action an app had already started may
+still finish.
+
+### How it is enforced
+
+On the Mac (the authority; `electron/computer-sharing.mjs`,
+`electron/shared-computer-access.mjs`):
+
+- **Outbound only.** Electron main dials the Cloud's HTTPS address with this
+  app's own session cookie and a per-grant 256-bit secret; there is no
+  listening port. The Cloud can only answer the Mac's long poll.
+- **Bound to the account and the machine.** The grant records the Cloud
+  account id and the machine's origin from the verified Cloud session
+  (`cloud-account.mjs`), and the Cloud home's environment id on first contact.
+  Signing out of OMB Cloud, another account signing in, the Cloud moving to
+  another machine, or another server answering at that address ends lending
+  and switches it off (turning it back on is the person's choice). A Cloud
+  sign-in that must be renewed pauses lending; a minute's re-verification or an
+  unreachable Admin does not. The server must say it is a Cloud home
+  (`cloudHome: true`) and this Mac's session there must be one of the owner's
+  admin devices. Lending never reads the maintainer flag and it never goes to
+  any other server.
+- **Every operation is checked against the grant here**, whatever the server
+  says: the folder must be lent, writes need **Can edit**, screen actions need
+  apps and screen. Jobs are validated against the server's schema first.
+- **What folders never reach**, read-only or not: this app's data and grants,
+  keys and sign-in stores (`~/.ssh`, `~/.gnupg`, `~/.aws`, `~/.config/gh`,
+  `~/.claude`, `~/.codex`, keychains, browser profiles and cookies…) and places
+  that run code (`~/Library/LaunchAgents`, git and shell configuration,
+  `~/.local/bin`), decided by filesystem identity rather than spelling. Writes
+  inside any `.git` directory are refused.
+- **Screen tools are an allow-list** of observation and input. The local
+  driver's tools that work outside the screen (uploading a file by path,
+  recording or replaying to a path, configuration, installing, DevTools,
+  killing a process) are refused and hidden.
+- **Activity log**: `lending-activity.jsonl` in the app's data folder, owner
+  only, last 500 entries: time, action, folder and relative path or tool name,
+  and whether it ran. Never contents, output or typed text.
+
+On the Cloud home (`server/shared-computers.ts`, `server/index.ts`):
+
+- Lending is on for every Cloud home, with no maintainer flag.
+- Only the owner's admin sessions (the Admin's signed pairing gives the
+  desktop one) can lend. A chat-only device the owner paired cannot.
+- The server refuses operations outside the scopes the Mac registered before
+  queuing them, never retries an operation with an unknown outcome, and never
+  substitutes its own files for an offline Mac.
+- A Cloud home is one person's server, so every turn on it acts for that
+  person: a conversation, a routine or a webhook can use the lent Mac within
+  its scopes. Anyone the owner pairs to their Cloud can direct its bots, and so
+  reach what is lent; pair only your own devices. A bot whose **Computer**
+  setting is off cannot use lent apps and screen.
+
+### What the Cloud can see: `GET /api/shared-computers`
+
+For the Cloud UI and the next step (placing a step on the Mac, "Waiting for
+your Mac"). Client scope; on a Cloud home every session sees the person's lent
+computers, elsewhere a session sees only its own person's. No secrets, no
+local paths.
+
+```json
+{ "computers": [ {
+  "id": "5b3e…", "name": "MacBook-Pro",
+  "online": true, "busy": false, "lastSeenAt": 1790000000000,
+  "scopes": { "folders": [ { "id": "9f1c…", "name": "Plans", "write": false } ], "terminal": false, "screen": true }
+} ] }
+```
+
+`online` is false once the Mac has not polled for 40 seconds (asleep, app
+closed, offline); the entry stays until lending is stopped, the Mac's session
+ends, or 14 days pass. The list is in memory and empty after the Cloud
+restarts, until the Mac registers again (within seconds of being online).
+Server code can call `sharedComputers.status(principal)` directly. Bots use
+the `list_shared_computers` and `shared_computer` tools.
 
 ## The image
 
@@ -318,6 +455,9 @@ malformed session summary or grant is treated as none.
   engine. Every model call uses the person's own sign-in or key.
 - A volume binds to one machine and is never adopted by another.
 - Each customer's app lives in its own Fly private network.
+- A lent Mac is reached only through its own outbound connection, within the
+  scopes the person chose, which the Mac itself enforces (see "Let my Cloud use
+  this Mac").
 
 ## Published image
 

@@ -16,7 +16,7 @@ import { selectReplay, DEFAULT_REBUILD_BYTES, MAX_SUMMARY_BYTES } from "./contex
 import { draftSummary, foldPoint } from "./compaction-summary.ts";
 import { compactBudget, contextWindowFor, shouldCompact } from "./context-budget.ts";
 import { autoCompactWindow } from "./drivers/claude.ts";
-import { SharedComputers, sharedComputerOperation, sharedComputerRegistration } from "./shared-computers.ts";
+import { provenRequestPerson, SharedComputers, sharedComputerOperation, sharedComputerRegistration } from "./shared-computers.ts";
 import { SharedComputerControl } from "./shared-computer-control.ts";
 import { RoomHandoffs, type RoomHandoff } from "./room-handoffs.ts";
 import { assertRequestTarget, guardedRequestPath, requestConflict, requestNeedsInput, requestSourceForCard } from "./guarded-requests.ts";
@@ -283,9 +283,12 @@ import {
 import { EventBus } from "./harness/bus.ts";
 import { ProviderRegistry } from "./harness/registry.ts";
 import { ManagedDesktopProviders } from "./managed-desktop.ts";
-import { computerKindForResource, ManagedDesktopPolicy } from "./managed-policy.ts";
+import { computerKindForResource, ManagedDesktopPolicy, type ComputerKind } from "./managed-policy.ts";
 import { hostedModelPolicy, HOSTED_MODEL_POLICY_HEADER, HOSTED_PROVIDER_SETTINGS_ERROR } from "./hosted-models.ts";
-import { CLOUD_IGNORED_KEYS, CLOUD_PAIRING_PATH, cloudHomeConfiguration, createCloudPairing, readSignedBody } from "./cloud-home.ts";
+import {
+  boatNotConfiguredMessage, CLOUD_IGNORED_KEYS, CLOUD_PAIRING_PATH, cloudHomeConfiguration, cloudHomeOffersPlace, cloudHomePlaceRefusal, createCloudPairing,
+  readSignedBody,
+} from "./cloud-home.ts";
 import { holdIncludedServices } from "./included-services.ts";
 import type { ProviderInstance } from "./contracts.ts";
 import { selectDefaultModelSelection, withNewBotEffort } from "./default-model-selection.ts";
@@ -377,6 +380,7 @@ import { checkSoulDrift, readSoulDrift, soulFile, writeSoulMirror } from "./bot-
 import {
   buildSystemPrompt,
   userProfileSystemPrompt,
+  cloudHomePrompt,
   computerPrompt,
   composioSystemPrompt,
   customMcpPrompt,
@@ -623,6 +627,13 @@ const sharedComputers = new SharedComputers(id => sessions.isLive(id));
 // OMB Cloud Pro home machine (server/cloud-home.ts, docs/cloud-pro.md). A
 // partial or invalid boot contract stops the server here, before it serves.
 const CLOUD_HOME = cloudHomeConfiguration();
+/** Lending a computer to this server (the shared-computer routes, the two
+ * agent tools, the advertised capability): the maintainer flag anywhere, and
+ * always on an OMB Cloud home, where it is the person's own Mac lent to their
+ * own Cloud (docs/cloud-pro.md, "Let my Cloud use this Mac"). */
+const lendingEnabled = () => sharedComputersEnabled(cfg) || CLOUD_HOME !== null;
+/** On a Cloud home every lent computer and every turn belong to one person. */
+const CLOUD_HOME_LENDER = "cloud-home";
 const cloudPairing = CLOUD_HOME ? createCloudPairing({ secret: CLOUD_HOME.bootstrapSecret, sessions }) : null;
 if (CLOUD_HOME) {
   // The signing secret is held in memory from here on, and a platform
@@ -786,6 +797,28 @@ function threadPersonKey(threadId: string): string | undefined {
     ? thread.find((message) => message.id === owner.messageId)
     : thread.findLast((message) => message.role === "user");
   return linePersonKey(request) ?? threadStarters.get(threadId);
+}
+
+/** The person whose lent computers this bot turn may use, or null.
+ * Fail closed: only the person whose own message the harness proved started
+ * this exact turn generation (continuations of that same request keep it).
+ * A routine, a webhook, a room, a bot's delegated or peer turn, the owner on
+ * this machine (who lends nothing to itself) and anything unprovable act for
+ * nobody here. Deliberately not the usage ledger's trigger, which defaults to
+ * the owner. */
+function sharedComputerPrincipal(capability: Pick<InternalCapability, "threadId" | "generation">): string | null {
+  // A Cloud home is one person's server: every turn on it acts for them, and
+  // only their own admin devices may lend (see the connect route).
+  if (CLOUD_HOME) return CLOUD_HOME_LENDER;
+  return provenRequestPerson(directRequestOwners.get(capability.threadId), capability.generation,
+    (messageId) => linePersonKey(store.messagesFor(capability.threadId).find((message) => message.id === messageId)));
+}
+
+/** Whose lent computers a status reader may see: the Cloud home's one person
+ * on a Cloud home, else the person behind the asking session. */
+function sessionLendingPrincipal(auth: RequestAuth): string | null {
+  if (CLOUD_HOME) return CLOUD_HOME_LENDER;
+  return auth.kind === "session" ? personKey(auth.session) : null;
 }
 
 /** Whose session may answer a card. The provider CLI's own approval modes and
@@ -1130,7 +1163,7 @@ function adminAuditPlan(method: string, path: string): AuditPlan | null {
   if (method === "GET" || method === "HEAD" || method === "OPTIONS") return null;
   if (path.startsWith("/api/internal/") || path.startsWith("/api/testing/")) return null;
   const plan: AuditPlan = {
-    config: requiredScope(method, path, { sharedComputers: sharedComputersEnabled(cfg) }) === "admin",
+    config: requiredScope(method, path, { sharedComputers: lendingEnabled() }) === "admin",
     createsBots: method === "POST" && (path === "/api/bots" || path === "/api/teams/import" || path === "/api/org-library/add"),
     createsWebhook: method === "POST" && path === "/api/webhooks",
     pairing: method === "POST" && path === "/api/auth/pairing",
@@ -1445,6 +1478,17 @@ const companyRuntimeStarted = new Promise<void>(resolve => { companyRuntimeReady
 /** The enrolled organisation's desktop policy: in memory only, read-only, and
  * inert (null) unless Electron's enrolled parent sends one. */
 const managedPolicy = new ManagedDesktopPolicy({ onChange: () => broadcast({ kind: "config", ...configStatus() }) });
+/** A computer kind this server will not use, refused before anything is
+ * prepared: a Cloud home never offers this computer or a Local VM
+ * (cloud-home.ts), and an enrolled organisation may disallow any kind. */
+function computerPlaceRefusal(kind: ComputerKind): { message: string; code: "cloud_home" | "managed_policy" } | undefined {
+  const cloudHome = CLOUD_HOME ? cloudHomePlaceRefusal(kind === "thisComputer" ? "local" : kind === "localVm" ? "vm" : "cloud") : undefined;
+  if (cloudHome) return { message: cloudHome, code: "cloud_home" };
+  const managed = managedPolicy.computerRefusal(kind);
+  return managed ? { message: managed, code: "managed_policy" } : undefined;
+}
+/** Cloud chosen with no Boat account: a Cloud home suggests the browser, not a Local VM. */
+const BOAT_NOT_CONFIGURED = boatNotConfiguredMessage(Boolean(CLOUD_HOME));
 /** Why the organisation refuses this instance for bots, or undefined. */
 function policyModelRefusal(instance: { instanceId: string; driverKind: string }): string | undefined {
   const engine = BUILT_IN_DRIVERS.find(driver => driver.driverKind === instance.driverKind)?.metadata.displayName;
@@ -1764,7 +1808,10 @@ function agentsIntegration(
       OMB_SKILL_AUTHORING_ENABLED: skillAuthoring ? "1" : "0",
       // The shared-computer tools are advertised only while the workspace
       // gate is on; the routes behind them refuse regardless.
-      OMB_SHARED_COMPUTERS_ENABLED: sharedComputersEnabled(cfg) ? "1" : "0",
+      OMB_SHARED_COMPUTERS_ENABLED: lendingEnabled() ? "1" : "0",
+      // A Cloud home offers no this computer and no Local VM (cloud-home.ts),
+      // so select_computer lists neither and vm_exec is not shown.
+      OMB_CLOUD_HOME: CLOUD_HOME ? "1" : "0",
       // Same capability rule for voice: the tool is offered only when this
       // bot can actually speak, and the route re-checks on every call.
       OMB_VOICE_NOTES: (() => {
@@ -2017,10 +2064,10 @@ function releaseTurnResources(owner: TurnOwner | undefined): void {
 }
 
 async function bindTurnComputer(owner: TurnOwner, resource: string, exclusive = false): Promise<void> {
-  // Every computer claim passes here: a kind the organisation disallows is
-  // refused at claim time, whichever path selected it.
-  const kind = computerKindForResource(resource), refusal = kind && managedPolicy.computerRefusal(kind);
-  if (refusal) throw Object.assign(new Error(refusal), { code: "managed_policy" });
+  // Every computer claim passes here: a kind the organisation disallows, or a
+  // Cloud home never offers, is refused at claim time, whichever path selected it.
+  const kind = computerKindForResource(resource), refusal = kind && computerPlaceRefusal(kind);
+  if (refusal) throw Object.assign(new Error(refusal.message), { code: refusal.code });
   const active = () => activeInternalGenerationByThread.get(owner.threadId) === owner.generation &&
     turnResourceOwners.get(owner.threadId)?.generation === owner.generation;
   let waitingMessage: Message | undefined;
@@ -3068,7 +3115,8 @@ function previewSystemPrompt(bot: BotRecord) {
     { id: "plan", label: "Surface", text: previewPlan.computer === undefined ? "" : surfacePrompt({
       computer: previewPlan.computer && previewPlan.computer !== "off" && computerPromptKind ? previewPlan.computer : null,
       browser: previewPlan.computer === undefined ? false : previewPlan.browser,
-    }, { note: previewPlan.note }) },
+    }, { note: previewPlan.note, cloudHome: Boolean(CLOUD_HOME) }) },
+    { id: "cloud-home", label: "OMB Cloud", text: CLOUD_HOME ? cloudHomePrompt(agentsMounted && lendingEnabled()) : "" },
     { id: "composio", label: "Connected apps", text: caps?.composioMcp && bot.composio !== false && composio.configured(cfg) ? composioSystemPrompt(bot.connectorTools) : "" },
     { id: "mcp", label: "MCP servers", text: caps?.customMcp ? customMcpPrompt(Object.keys(engineMcpServers(bot))) : "" },
     { id: "browser", label: "Browser", text: previewPlan.browser ? BUILT_IN_BROWSER_SYSTEM_PROMPT : "" },
@@ -3156,6 +3204,7 @@ async function botOverview(bot: BotRecord): Promise<BotOverview> {
     })),
     engine,
     browserEnabled: builtInBrowserEnabled(cfg),
+    cloudHome: Boolean(CLOUD_HOME),
     connectedApps,
     sectionPeers,
     timeZone,
@@ -5934,27 +5983,35 @@ async function computerPreviewSurface(bot: BotRecord, threadId?: string) {
     if (remote.ready) return "cloud";
   }
   const target = localVmTargetForStatus(bot.id, threadId);
-  if (instance?.adapter.capabilities.computerMcp && localVmSeen.has(target.key)) {
+  // A Cloud home has neither place (cloud-home.ts), so Auto never shows one.
+  if (!CLOUD_HOME && instance?.adapter.capabilities.computerMcp && localVmSeen.has(target.key)) {
     const vm = await containerComputerStatus(undefined, undefined, target).catch(() => null);
     if (vm && autoLocalVmAttachable(vm)) return "vm";
   }
-  if (shouldMountLocalComputer({ requested: undefined, hostPlatform: process.platform,
+  if (!CLOUD_HOME && shouldMountLocalComputer({ requested: undefined, hostPlatform: process.platform,
     providerSupportsLocal: instance?.adapter.capabilities.localComputerMcp === true }) && readCuaConnection()) return "local";
   if (bot.cloudBackend === "vps") return "cloud"; // show its unavailable reason
   return plan.browser ? "browser" : "off";
 }
 
 /** Discovery is read-only. Starting or creating a configured computer is
- * deferred until a chat tool selects it and the old turn releases its tools. */
+ * deferred until a chat tool selects it and the old turn releases its tools.
+ * A Cloud home lists only the places it has (cloud-home.ts), so a bot never
+ * tells the person to set up this computer or a Local VM there. */
 async function selectableComputers(bot: BotRecord) {
   const caps = registry.get(bot.modelSelection.instanceId)?.adapter.capabilities;
   const off = bot.computer === "off";
   const localEngine = caps?.remoteAgent !== true;
-  return Promise.all((["cloud", "vm", "local", "browser"] as const).map(async surface => {
+  const surfaces = (["cloud", "vm", "local", "browser"] as const).filter(surface => !CLOUD_HOME || cloudHomeOffersPlace(surface));
+  return Promise.all(surfaces.map(async surface => {
     let ready = false;
     let canStart = false;
     let canCreate = false;
-    let reason = "This computer is not configured or running. Open the Computer panel to set it up.";
+    // On a Cloud home "this computer" reads as the person's own; name the
+    // place the reason is about.
+    let reason = CLOUD_HOME && surface === "cloud"
+      ? "The cloud computer is not set up or running. Open the Computer panel to set it up."
+      : "This computer is not configured or running. Open the Computer panel to set it up.";
     try {
       if (off) reason = "Computer access is Off in this bot's settings.";
       else if (surface === "cloud") {
@@ -8503,12 +8560,12 @@ async function startTurn(
         throw new Error("the Computer engine works on the cloud computer — set Works on to Cloud, or choose another engine");
       }
       const wants = plan.computer;
-      // A place the organisation disallows is refused before anything is
-      // prepared; Auto below simply skips disallowed places.
+      // A place the organisation disallows, or a Cloud home never offers, is
+      // refused before anything is prepared; Auto below simply skips them.
       const wantedKind = teamComputer ? "box" : wants === "local" ? "thisComputer" : wants === "vm" ? "localVm"
         : wants === "cloud" ? (cloudBackend === "vps" ? "vps" : "box") : undefined;
-      const placeRefusal = wantedKind && managedPolicy.computerRefusal(wantedKind);
-      if (placeRefusal) throw Object.assign(new Error(placeRefusal), { status: 409, code: "managed_policy" });
+      const placeRefusal = wantedKind && computerPlaceRefusal(wantedKind);
+      if (placeRefusal) throw Object.assign(new Error(placeRefusal.message), { status: 409, code: placeRefusal.code });
       let previewCapture: (() => Promise<{ png: string; format: string }>) | null = null;
       let browserCapture: (() => Promise<{ png: string; format: string }>) | null = null;
       let computerKind: "box" | "vps" | "vm" | "local" | null = null;
@@ -8824,7 +8881,7 @@ async function startTurn(
         }
       }
       if (wants === "cloud" && cloudBackend === "box" && !boat.boatConfigured(cfg)) {
-        throw new Error("Cloud Boat is not configured — add a Boat API key or choose Local VM");
+        throw new Error(BOAT_NOT_CONFIGURED);
       }
       if (wants === "cloud" && cloudBackend === "box" && !integrations.computer) {
         throw new Error("the cloud computer could not be created or reached");
@@ -8835,7 +8892,7 @@ async function startTurn(
       // Auto reaches a Local VM this bot already has before it ever touches the
       // host's own desktop: on a headless server that VM is the only desktop
       // there is, and a person who prepared one meant it to be used.
-      if (wants === undefined && !integrations.computer && !integrations.localComputer && managedPolicy.computerAllowed("localVm") && await attachLocalVm(false)) computerKind = "vm";
+      if (wants === undefined && !integrations.computer && !integrations.localComputer && !computerPlaceRefusal("localVm") && await attachLocalVm(false)) computerKind = "vm";
       // An unattended run on a bot with a VPS configured never lands on the
       // host's own desktop instead: a scheduled job clicking on someone's
       // laptop is worse than a scheduled job that fails and says why.
@@ -8845,7 +8902,7 @@ async function startTurn(
         !integrations.localComputer &&
         wants === undefined &&
         !unattendedVps &&
-        managedPolicy.computerAllowed("thisComputer") &&
+        !computerPlaceRefusal("thisComputer") &&
         shouldMountLocalComputer({
           requested: undefined,
           hostPlatform: process.platform,
@@ -9055,7 +9112,8 @@ async function startTurn(
         { id: "files", label: "File locations", text: worksInWorkspace && opts?.runOn !== "cloud" ? workspaceLocationsPrompt(bot.id, cwd, liveBot?.cwd ?? bot.cwd) : "" },
         { id: "computer", label: "Computer", text: computerPrompt(computerPromptKind) },
         { id: "team-computer", label: "Team computer", text: teamComputerPrompt(teamComputer) },
-        { id: "plan", label: "Surface", text: surfacePrompt({ computer: mountedComputer, browser: Boolean(integrations.browser) }, { pinned: plan.pinned, note: plan.note, canSelect: computerSelectionTurns.has(threadId) }) },
+        { id: "plan", label: "Surface", text: surfacePrompt({ computer: mountedComputer, browser: Boolean(integrations.browser) }, { pinned: plan.pinned, note: plan.note, canSelect: computerSelectionTurns.has(threadId), cloudHome: Boolean(CLOUD_HOME) }) },
+        { id: "cloud-home", label: "OMB Cloud", text: CLOUD_HOME ? cloudHomePrompt(Boolean(integrations.agents) && lendingEnabled()) : "" },
         // gated on the integration, not the key: the hint only goes to a
         // bot whose driver actually mounted the tools
         { id: "composio", label: "Connected apps", text: integrations.composio ? composioSystemPrompt(liveBot?.connectorTools ?? bot.connectorTools) : "" },
@@ -10931,12 +10989,13 @@ async function runGroupMemberTurn(
       readyBot.browser !== false &&
       instance.adapter.capabilities.browserMcp === true,
   });
-  // A place the organisation disallows is refused before anything is
-  // provisioned or started, exactly as a bot thread refuses it.
+  // A place the organisation disallows, or a Cloud home never offers, is
+  // refused before anything is provisioned or started, exactly as a bot
+  // thread refuses it.
   const roomKind = roomTeamComputer ? "box" : roomPlan.computer === "local" ? "thisComputer" : readyBot.computer === "vm" ? "localVm"
     : roomPlan.computer === "cloud" ? (turnProvider(readyBot) === "vps" ? "vps" : "box") : undefined;
-  const roomPlaceRefusal = roomKind && managedPolicy.computerRefusal(roomKind);
-  if (roomPlaceRefusal) throw Object.assign(new Error(roomPlaceRefusal), { code: "managed_policy" });
+  const roomPlaceRefusal = roomKind && computerPlaceRefusal(roomKind);
+  if (roomPlaceRefusal) throw Object.assign(new Error(roomPlaceRefusal.message), { code: roomPlaceRefusal.code });
   // The Computer engine runs on the Boat; this computer has no tools it can
   // reach, exactly as a bot thread refuses it.
   if (roomPlan.computer === "local" && instance.adapter.capabilities.remoteAgent === true) {
@@ -11000,7 +11059,7 @@ async function runGroupMemberTurn(
       integrations.localComputer = mounted.integration;
       roomComputerKind = "vps";
     } else {
-      if (!boat.boatConfigured(cfg)) throw new Error("Cloud Boat is not configured — add a Boat API key or choose Local VM");
+      if (!boat.boatConfigured(cfg)) throw new Error(BOAT_NOT_CONFIGURED);
       const remoteAgent = instance.adapter.capabilities.remoteAgent === true;
       const attached = await attachBotBoat(readyBot, resourceOwner, { explicitCloud: true,
         canMount: instance.adapter.capabilities.usesCloudComputer === true, remoteAgent });
@@ -11157,7 +11216,8 @@ async function runGroupMemberTurn(
     { id: "mcp", label: "MCP servers", text: customMcpPrompt(Object.keys(integrations.custom ?? {})) },
     { id: "computer", label: "Computer", text: computerPrompt(roomComputerPromptKind) },
     { id: "team-computer", label: "Team computer", text: teamComputerPrompt(roomTeamComputer) },
-    { id: "plan", label: "Surface", text: surfacePrompt({ computer: roomTeamComputer ? "cloud" : roomVmTarget ? "vm" : surfaceOfComputerKind(roomComputerKind), browser: Boolean(integrations.browser) }, { note: roomPlan.note }) },
+    { id: "plan", label: "Surface", text: surfacePrompt({ computer: roomTeamComputer ? "cloud" : roomVmTarget ? "vm" : surfaceOfComputerKind(roomComputerKind), browser: Boolean(integrations.browser) }, { note: roomPlan.note, cloudHome: Boolean(CLOUD_HOME) }) },
+    { id: "cloud-home", label: "OMB Cloud", text: CLOUD_HOME ? cloudHomePrompt(Boolean(integrations.agents) && lendingEnabled()) : "" },
     { id: "browser", label: "Browser", text: integrations.browser ? BUILT_IN_BROWSER_SYSTEM_PROMPT : "" },
     { id: "recall", label: "Recall", text: integrations.agents ? SESSION_SEARCH_SYSTEM_PROMPT : "" },
     { id: "recent", label: "Recent work", text: recentWorkPrompt(recentLines) },
@@ -13334,6 +13394,9 @@ function configStatus() {
     profile: { name: cfg.profile?.name ?? "", email: cfg.profile?.email ?? "", aboutMe: cfg.profile?.aboutMe ?? "" },
     // the enrolled organisation's read-only desktop policy; null when not enrolled
     managedPolicy: managedPolicy.summary(),
+    // an OMB Cloud home (cloud-home.ts): the app offers no this computer and
+    // no Local VM here
+    ...(CLOUD_HOME ? { cloudHome: true } : {}),
     // not a secret — the settings picker shows it; "" = follow the system
     language: cfg.language ?? "",
     rooms: { turnTimeoutMinutes: roomTurnTimeoutMinutes(cfg) },
@@ -13770,7 +13833,7 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
     // paired session with the right scope.
     if (method === "GET" && !path.startsWith("/api/") && !path.startsWith("/.well-known/") && serveStatic(res, path)) return;
     if (method === "GET" && path === "/.well-known/openmausbot/environment") {
-      return json(res, 200, environmentDescriptor({ environmentId: ENVIRONMENT_ID, desktopManaged: DESKTOP_MANAGED, emailSignIn: !HOSTED_WORKSPACE && emailSignIn.enabled(), sharedComputers: sharedComputersEnabled(cfg) }));
+      return json(res, 200, environmentDescriptor({ environmentId: ENVIRONMENT_ID, desktopManaged: DESKTOP_MANAGED, emailSignIn: !HOSTED_WORKSPACE && emailSignIn.enabled(), sharedComputers: lendingEnabled() }));
     }
     const domainCheck = /^\/\.well-known\/openmausbot\/domain-check\/([a-f0-9]{64})$/.exec(path);
     if (method === "GET" && domainCheck) {
@@ -13809,7 +13872,7 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
       }
       sessions.clearFailures(source);
       const issued = sessions.issue({ label: label.trim() || labelFromUserAgent(req.headers["user-agent"]), scopes: verified.scopes, userId: verified.userId, email: verified.email });
-      const environment = environmentDescriptor({ environmentId: ENVIRONMENT_ID, desktopManaged: DESKTOP_MANAGED, emailSignIn: true, sharedComputers: sharedComputersEnabled(cfg) });
+      const environment = environmentDescriptor({ environmentId: ENVIRONMENT_ID, desktopManaged: DESKTOP_MANAGED, emailSignIn: true, sharedComputers: lendingEnabled() });
       const secure = requestOrigin(req)?.startsWith("https://") === true;
       res.setHeader("set-cookie", serializeSessionCookie(SESSION_COOKIE, issued.token, { secure, maxAgeSeconds: cookieMaxAgeSeconds(issued.session) }));
       return json(res, 200, { session: issued.session, environment });
@@ -13849,7 +13912,7 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
         console.warn(`pairing refused from ${requestSource(req)}: ${result.error}`);
         return json(res, result.status, { error: result.error });
       }
-      const environment = environmentDescriptor({ environmentId: ENVIRONMENT_ID, desktopManaged: DESKTOP_MANAGED, emailSignIn: emailSignIn.enabled(), sharedComputers: sharedComputersEnabled(cfg) });
+      const environment = environmentDescriptor({ environmentId: ENVIRONMENT_ID, desktopManaged: DESKTOP_MANAGED, emailSignIn: emailSignIn.enabled(), sharedComputers: lendingEnabled() });
       if (wantsCookie) {
         const secure = requestOrigin(req)?.startsWith("https://") === true;
         res.setHeader("set-cookie", serializeSessionCookie(SESSION_COOKIE, result.token, { secure, maxAgeSeconds: cookieMaxAgeSeconds(result.session) }));
@@ -13901,7 +13964,7 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
       url,
       loopbackMutationToken: desktopMutationToken,
       companionMutationToken,
-      features: { sharedComputers: sharedComputersEnabled(cfg) },
+      features: { sharedComputers: lendingEnabled() },
       loopbackTrust: LOOPBACK.trust,
       cliOwnerToken,
     });
@@ -14073,10 +14136,14 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
       const cancelled = sessions.cancelPairing(m[1]);
       return json(res, cancelled ? 200 : 404, cancelled ? { ok: true } : { error: "no such pairing code" });
     }
-    if (method === "POST" && path === "/api/desktop/shared-computer-control" && sharedComputersEnabled(cfg)) {
+    // The desktop's own server always answers its desktop here: lending to the
+    // person's Cloud (docs/cloud-pro.md) needs the lease without the
+    // maintainer flag. It grants nothing by itself; it only keeps local bot
+    // turns and a remote screen action from using the screen at once.
+    if (method === "POST" && path === "/api/desktop/shared-computer-control" && (sharedComputersEnabled(cfg) || DESKTOP_MANAGED)) {
       if (auth.kind !== "loopback") return json(res, 403, { error: "Local desktop only" });
       const body = await readBody(req, 1024);
-      if (!sharedComputersEnabled(cfg)) return json(res, 404, { error: `no route: ${method} ${path}` });
+      if (!sharedComputersEnabled(cfg) && !DESKTOP_MANAGED) return json(res, 404, { error: `no route: ${method} ${path}` });
       if (!z.string().uuid().safeParse(body?.id).success || !["acquire", "release", "renew"].includes(body?.action)) return json(res, 400, { error: "Invalid computer lease" });
       if (body.action === "release") sharedComputerControl.release(body.id);
       else if (body.action === "renew") sharedComputerControl.renew(body.id);
@@ -14094,11 +14161,17 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
     // With features.sharedComputers off the whole family falls through to the
     // generic "no route" 404, so a probe cannot tell a disabled feature from
     // a build that never had one.
-    if (method === "POST" && path.startsWith("/api/shared-computers/") && sharedComputersEnabled(cfg)) {
+    // What the asking person has lent to this server, online or not, with its
+    // scopes (docs/cloud-pro.md, "What the Cloud can see"). Owner-scoped like
+    // the bot routes; no id a session could not already use, and no secret.
+    if (method === "GET" && path === "/api/shared-computers" && lendingEnabled()) {
+      return json(res, 200, { computers: sharedComputers.status(sessionLendingPrincipal(auth)) });
+    }
+    if (method === "POST" && path.startsWith("/api/shared-computers/") && lendingEnabled()) {
       if (auth.kind !== "session") return json(res, 403, { error: "Pair this desktop first" });
       if (!/^application\/json\b/i.test(String(req.headers["content-type"] ?? ""))) return json(res, 415, { error: "JSON required" });
       const body = await readBody(req, 4_000_000);
-      if (!sharedComputersEnabled(cfg)) return json(res, 404, { error: `no route: ${method} ${path}` });
+      if (!lendingEnabled()) return json(res, 404, { error: `no route: ${method} ${path}` });
       if (!sessions.isLive(auth.session.id)) return json(res, 401, { error: "Session ended" });
       const secret = String(req.headers["x-omb-computer-secret"] ?? "");
       if (path === "/api/shared-computers/connect") {
@@ -14106,7 +14179,10 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
         if (!parsed.success) return json(res, 400, { error: "Invalid computer registration" });
         const registration = parsed.data;
         if (registration.environmentId !== ENVIRONMENT_ID) return json(res, 409, { error: "Workspace identity changed. Pair again before sharing this computer." });
-        sharedComputers.register(registration, auth.session.id, secret);
+        // A Cloud home is one person's: only their own devices, which the
+        // Admin's pairing signs in with admin scope, may lend to it.
+        if (CLOUD_HOME && !auth.scopes.includes("admin")) return json(res, 403, { error: "Only your own computers can lend to your Cloud. Connect this computer to your Cloud from its OMB Cloud settings." });
+        sharedComputers.register(registration, { session: auth.session.id, person: CLOUD_HOME ? CLOUD_HOME_LENDER : personKey(auth.session) }, secret);
         return json(res, 200, { ok: true });
       }
       const route = /^\/api\/shared-computers\/([\w-]+)\/(poll|lease|result|disconnect)$/.exec(path);
@@ -14268,11 +14344,13 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
         if (method === "POST" && requested !== "auto" && !parseSurface(requested)) {
           return json(res, 400, { error: "surface must be auto, cloud, vm, local, or browser" });
         }
+        const unoffered = CLOUD_HOME && method === "POST" && requested !== "auto" ? cloudHomePlaceRefusal(parseSurface(requested)!) : undefined;
         const options = await selectableComputers(bot);
         const current = source ? source.mounted ?? "off" : await computerPreviewSurface(bot, bot.threadId);
         requireActiveInternalCapability();
         if (method === "GET") return json(res, 200, { current, canSelect, options });
         if (computerSelectionTurns.get(internalCapability.threadId) !== source) return json(res, 409, { error: "The user request ended before its computer was selected." });
+        if (unoffered) return json(res, 409, { error: unoffered, options });
         const option = requested === "auto"
           ? options.find(option => option.ready && option.surface === current) ?? options.find(option => option.ready && option.surface === "vm") ?? options.find(option => option.ready) ?? options.find(option => option.canStart) ?? options.find(option => option.canCreate && option.surface === "vm") ?? options.find(option => option.canCreate)
           : options.find(option => option.surface === requested);
@@ -14382,12 +14460,20 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
       }
       // Off by default: both fall through to the same "unknown internal
       // endpoint" 404 a never-implemented route returns.
-      if (method === "GET" && path === "/api/internal/shared-computers" && sharedComputersEnabled(cfg)) return json(res, 200, { computers: sharedComputers.list() });
-      if (method === "POST" && path === "/api/internal/shared-computers" && sharedComputersEnabled(cfg)) {
+      // Owner-scoped: a turn sees and uses only the computers of the person it
+      // provably acts for (sharedComputerPrincipal), never anyone else's.
+      if (method === "GET" && path === "/api/internal/shared-computers" && lendingEnabled()) {
+        return json(res, 200, { computers: sharedComputers.list(sharedComputerPrincipal(internalCapability)) });
+      }
+      if (method === "POST" && path === "/api/internal/shared-computers" && lendingEnabled()) {
         const parsed = sharedComputerOperation.safeParse(await readInternalBody());
-        if (!sharedComputersEnabled(cfg)) return json(res, 404, { error: "unknown internal endpoint" });
+        if (!lendingEnabled()) return json(res, 404, { error: "unknown internal endpoint" });
         if (!parsed.success) return json(res, 400, { error: "Invalid shared computer operation" });
-        return json(res, 200, { result: await sharedComputers.request(parsed.data, () => sharedComputersEnabled(cfg) && internalCapabilityIsActive(internalCapability)) });
+        // The bot's own "no computer" setting holds on a lent screen too.
+        if (["computer_tools", "computer_call"].includes(parsed.data.action) && store.bot(internalCapability.botId)?.computer === "off") {
+          return json(res, 403, { error: "This bot has no computer. Change its Computer setting to use a shared computer's apps and screen." });
+        }
+        return json(res, 200, { result: await sharedComputers.request(parsed.data, sharedComputerPrincipal(internalCapability), () => lendingEnabled() && internalCapabilityIsActive(internalCapability)) });
       }
       if (method === "GET" && path === "/api/internal/agents") {
         const sender = internalSender;
@@ -17155,7 +17241,7 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
       const current = resolveRequestAuth(req, {
         sessions, cookieName: SESSION_COOKIE, streamPath: "/api/events", url,
         loopbackMutationToken: desktopMutationToken, companionMutationToken,
-        features: { sharedComputers: sharedComputersEnabled(cfg) }, loopbackTrust: LOOPBACK.trust, cliOwnerToken,
+        features: { sharedComputers: lendingEnabled() }, loopbackTrust: LOOPBACK.trust, cliOwnerToken,
       });
       if (!current.auth) return json(res, current.status, { error: current.error });
       const currentVisible = visibleTo(viewerFor(current.auth));
@@ -21673,7 +21759,7 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
       }
       let browserReferenceCleanupError: unknown = null;
       if (patch.signIn !== undefined) sessions.revalidateEmailSessions();
-      if (!sharedComputersEnabled(cfg)) {
+      if (!lendingEnabled()) {
         sharedComputers.close();
         sharedComputerControl.close();
       }
