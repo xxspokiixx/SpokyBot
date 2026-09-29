@@ -5687,7 +5687,7 @@ async function attachTeamBoat(computer: TeamComputerRecord, botId: string, owner
   if (turnResourceOwners.get(owner.threadId)?.generation !== owner.generation ||
       !turnResources.owns(`computer:box:${machine.id}`, owner)) throw new Error("This computer turn ended while its machine was starting");
   return {
-    integration: { kind: "box" as const, boxId: machine.id, token: boat.boatAccount(cfg)!.token, control: controlIntegration(botId, owner.threadId, owner.generation) },
+    integration: { kind: "box" as const, boxId: machine.id, token: boat.boatAccount(cfg)?.token ?? "", control: controlIntegration(botId, owner.threadId, owner.generation) },
     capture: () => boat.screenshotBoat(cfg, ownerId, machine!.id),
   };
 }
@@ -5799,7 +5799,7 @@ async function attachBotBoat(
   return {
     capture: () => boat.screenshotBoat(cfg, bot.id, machine.id),
     integration: opts.canMount
-      ? { kind: "box" as const, boxId: machine.id, token: boat.boatAccount(cfg)!.token, control: controlIntegration(bot.id, owner.threadId, owner.generation) }
+      ? { kind: "box" as const, boxId: machine.id, token: boat.boatAccount(cfg)?.token ?? "", control: controlIntegration(bot.id, owner.threadId, owner.generation) }
       : null,
   };
 }

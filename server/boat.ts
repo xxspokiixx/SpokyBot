@@ -58,11 +58,8 @@ export function isolatedRemoteCommand(command: string): string {
   ].join(" ");
 }
 
-// The base URL follows the credential in use (included-services.ts): an own
-// token goes to Boat (OMB_BOX_API overrides it so tests can point at a stub),
-// Cloud Pro's included token only to its relay. Boat's provider surface keeps
-// its historical Box-era names: env OMB_BOX_API, base path /api/box/v1, REST
-// paths /boxes/*, and the box_ token prefix.
+// Boat's provider surface keeps its historical Box-era names: env OMB_BOX_API,
+// base path /api/box/v1, REST paths /boxes/*, and the box_ token prefix.
 const READY = new Set(["idle", "ready", "running"]);
 const SLEEPING = new Set(["archived", "archiving", "stopped", "stopping"]);
 const DEFAULT_BOAT_TTL_SECONDS = 8 * 60 * 60;
@@ -174,6 +171,9 @@ function snapshotBoatConfig(cfg: AppConfig): AppConfig {
   return { box: cfg.box ? { token: cfg.box.token } : undefined };
 }
 
+/** The base URL follows the credential in use (included-services.ts): an own
+ * token goes to Boat (OMB_BOX_API points it at a stub in tests), Cloud Pro's
+ * included token only to its relay. */
 function boatFetch(cfg: AppConfig, path: string, opts: RequestInit = {}) {
   const account = boatAccount(cfg);
   return fetch(`${account?.api ?? boatProviderApi()}${path}`, {
