@@ -456,9 +456,10 @@ Exactly what a workspace backup carries (`server/workspace-backup.ts`,
 connections, engine sign-ins (`~/.claude`, `~/.codex`, the server's
 `providers/`), saved credentials, pairing, paired devices and sessions (the
 session registry's open marker included), the server's identity, caches,
-downloaded tools and runtime files. Never this app's Cloud sign-in or the
-computers it lends: both live in the desktop app's own storage, not in the
-workspace. Unsent drafts and window preferences stay on the computer.
+downloaded tools and runtime files. Never this app's Cloud sign-in or what
+it lends (Let my Cloud use this Mac, above): both live in the desktop app's
+own storage, not in the workspace, and a lent Mac reconnects once the Cloud
+has restarted. Unsent drafts and window preferences stay on the computer.
 
 The Cloud keeps its own: every connection section of its config (engine and
 API keys, the included Boat and voice relays, sign-in allow-lists), its
