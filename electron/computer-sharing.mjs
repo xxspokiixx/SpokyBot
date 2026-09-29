@@ -136,7 +136,7 @@ export function createComputerSharing({ file, fetch: fetchImpl, environments, cu
   let closed = false;
   let maintainerOff = false;
   let executing = null;
-  const changed = () => { try { onChange(summary()); } catch { /* an indicator never stops lending */ } };
+  const changed = () => { if (!closed) try { onChange(summary()); } catch { /* an indicator never stops lending */ } };
   const summary = () => ({
     lending: environments().filter(env => records[env.id]?.cloud && records[env.id]?.enabled === true).map(env => env.id),
     busy: executing,
@@ -164,7 +164,10 @@ export function createComputerSharing({ file, fetch: fetchImpl, environments, cu
   };
   const requireGrant = async (env, grant) => {
     if (!grant.cloud) return requireEnabled();
-    const verdict = closed ? { stop: "closed" } : cloudLendingVerdict(grant.cloud, cloud(), env);
+    // Quitting the app only pauses: a check still in flight when it closes
+    // must never switch the person's lending off for the next launch.
+    if (closed) throw new Paused("This app is closing.");
+    const verdict = cloudLendingVerdict(grant.cloud, cloud(), env);
     if (verdict.allow) return;
     if (verdict.stop) { endCloud(env, verdict.stop); throw new Error("Lending to your Cloud stopped."); }
     throw new Paused("Waiting for your Cloud sign-in.");
