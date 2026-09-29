@@ -39,7 +39,7 @@ function desktop({ bytes = 5000, busy = false, exportError = null } = {}) {
 }
 
 /** The Cloud: pairing, the upload slot, jobs, and a restart. */
-function cloudFake({ freeBytes = 1024 ** 4, empty = true, failPut = () => false, dropAnswer = () => false, loseAt = 0, busyRestores = 0, storedPart = 0 } = {}) {
+function cloudFake({ freeBytes = 1024 ** 4, empty = true, failPut = () => false, dropAnswer = () => false, loseAt = 0, busyRestores = 0, storedPart = 0, previewBots = 3 } = {}) {
   const state = { upload: storedPart ? { sha256: "e".repeat(64), bytes: storedPart } : null, received: Buffer.alloc(storedPart), job: null, lastRestoreId: null, restarting: 0,
       previous: null, contents: { bots: 1, rooms: 0, chats: 0 }, empty, discards: 0, restoreAsks: [] },
     log = [], tokens = new Set();
@@ -86,7 +86,7 @@ function cloudFake({ freeBytes = 1024 ** 4, empty = true, failPut = () => false,
       const hash = createHash("sha256").update(state.received).digest("hex");
       assert.equal(hash, state.upload.sha256);
       assert.ok(body.password.length >= 12);
-      state.job = { kind: "preview", state: "done", id: UUID(), summary: { bots: 3, messages: 40 } };
+      state.job = { kind: "preview", state: "done", id: UUID(), summary: { bots: previewBots, messages: 40 } };
       return json(202, { job: { kind: "preview", state: "running" } });
     }
     if (pathname === "/api/cloud-move/restore") {
@@ -243,6 +243,13 @@ test("a Cloud that stays busy, a stop while it checks, and a mismatch each drop 
     assert.match(result.error.message, /was not replaced/);
     assert.equal(stopped.cloud.state.discards, 1);
   } finally { stopped.done(); }
+  const different = harness({ cloud: { previewBots: 2 } });
+  try {
+    const result = await different.move.move();
+    assert.equal(result.error.code, "invalid_backup");
+    assert.equal(different.cloud.state.discards, 1);
+    assert.equal(different.cloud.state.restoreAsks.length, 0);
+  } finally { different.done(); }
 });
 
 test("credits a stored part of an earlier upload when checking the Cloud's room", async () => {
