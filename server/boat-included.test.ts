@@ -16,7 +16,12 @@ const boxId = "bx_23456789";
 let api: Server;
 let base = "";
 let state = "ready";
-let resumeReply: { status: number; body: unknown } = { status: 202, body: { ok: true } };
+/** Whether an accepted resume wakes the computer at once. */
+let wakeOnResume = true;
+/** When set, every request is refused as an invalid credential. */
+let rejectCredentials = false;
+/** Replies to POST /resume in order; the last one repeats. A 2xx wakes the computer. */
+let resumeReplies: Array<{ status: number; body: unknown }> = [];
 const requests: Array<{ method: string; path: string; auth: string }> = [];
 let boat: typeof import("./boat.ts");
 let loadConfig: typeof import("./config.ts").loadConfig;
@@ -37,10 +42,15 @@ beforeAll(async () => {
         res.writeHead(status, { "content-type": "application/json" });
         res.end(JSON.stringify(body));
       };
+      if (rejectCredentials) return send(401, { ok: false, code: "unauthorized", message: "This cloud computer key is not valid." });
       const path = url.pathname.replace(/^\/(boat|relay)\/api\/box\/v1/, "");
       if (path === "/boxes") return send(200, { boxes: [{ id: boxId, name: machineName, state }] });
       if (path === `/boxes/${boxId}` && req.method === "GET") return send(200, { ok: true, box: { id: boxId, name: machineName, state } });
-      if (path === `/boxes/${boxId}/resume`) return send(resumeReply.status, resumeReply.body);
+      if (path === `/boxes/${boxId}/resume`) {
+        const reply = resumeReplies.length > 1 ? resumeReplies.shift()! : resumeReplies[0] ?? { status: 202, body: { ok: true } };
+        if (reply.status < 300 && wakeOnResume) state = "idle";
+        return send(reply.status, reply.body);
+      }
       if (path === `/boxes/${boxId}/desktop`) return send(200, { desktopUrl: "https://desktop.example.test/session" });
       if (path.endsWith("/commands")) return send(200, { exitCode: 0, stdout: "", stderr: "" });
       send(200, { ok: true });
@@ -57,7 +67,9 @@ afterAll(async () => {
 beforeEach(async () => {
   requests.length = 0;
   state = "ready";
-  resumeReply = { status: 202, body: { ok: true } };
+  resumeReplies = [];
+  rejectCredentials = false;
+  wakeOnResume = true;
   vi.stubEnv("BOX_TOKEN", undefined);
   vi.stubEnv("OMB_BOX_API", `${base}/boat/api/box/v1`);
   vi.stubEnv("OMB_CLOUD_BOAT_URL", `${base}/relay/api/box/v1`);
@@ -117,6 +129,12 @@ describe("included Boat computers", () => {
     expect(requests).toEqual([{ method: "GET", path: "/boat/api/box/v1/boxes", auth: "Bearer box_new" }]);
   });
 
+  it("lists the computers with the included wording when the relay rejects its token", async () => {
+    rejectCredentials = true;
+    expect((await boat.listManagedBoats({}, [])).problem).toBe("Cloud Pro's included cloud computers aren't available right now. Try again later.");
+    expect((await boat.listManagedBoats({ box: { token: "box_own" } }, [])).problem).toMatch(/update it in Settings/);
+  });
+
   it("reports configured and included to Settings, never the token", () => {
     expect(boat.describeBoatAccount({})).toEqual({ configured: true, included: true });
     expect(boat.describeBoatAccount({ box: { token: "box_own" } })).toEqual({ configured: true });
@@ -130,7 +148,7 @@ describe("included Boat computers", () => {
 describe("waking a sleeping computer", () => {
   it("reports a refused resume with the relay's own words instead of waiting out the budget", async () => {
     state = "archived";
-    resumeReply = { status: 429, body: { ok: false, type: "sandbox.error", status: 429, code: "limit_reached", message: LIMIT, error: { code: "limit_reached", message: LIMIT, status: 429 } } };
+    resumeReplies = [{ status: 429, body: { ok: false, type: "sandbox.error", status: 429, code: "limit_reached", message: LIMIT, error: { code: "limit_reached", message: LIMIT, status: 429 } } }];
     const started = Date.now();
     await expect(boat.readyBoat({}, botId)).rejects.toThrow(LIMIT);
     await expect(boat.joinBoat({}, botId)).rejects.toThrow(LIMIT);
@@ -141,7 +159,44 @@ describe("waking a sleeping computer", () => {
 
   it("keeps waiting through a conflict, which is a wake already under way", async () => {
     state = "archived";
-    resumeReply = { status: 409, body: { ok: false, code: "conflict", message: "already resuming" } };
+    resumeReplies = [{ status: 409, body: { ok: false, code: "conflict", message: "already resuming" } }];
     await expect(boat.readyBoat({}, botId, 1)).resolves.toBeNull();
+  });
+
+  it("retries a server error on the next poll, as Boat asks, and wakes", async () => {
+    state = "archived";
+    resumeReplies = [
+      { status: 503, body: { ok: false, code: "unavailable", message: "Boat is busy" } },
+      { status: 202, body: { ok: true } },
+    ];
+    // Own key here: this is everyone's wake path, not only Cloud Pro's.
+    await expect(boat.readyBoat({ box: { token: "box_own" } }, botId)).resolves.toMatchObject({ id: boxId, state: "idle" });
+    expect(requests.filter((request) => request.path.endsWith("/resume"))).toHaveLength(2);
+  }, 15_000);
+
+  it("reports the last server error, not a bare timeout, when the wait runs out on it", async () => {
+    state = "archived";
+    resumeReplies = [{ status: 503, body: { ok: false, code: "unavailable", message: "Boat is busy" } }];
+    await expect(boat.readyBoat({ box: { token: "box_own" } }, botId, 1)).rejects.toThrow("waking the cloud computer failed: Boat is busy");
+  });
+
+  it("forgets a server error once a later resume is accepted", async () => {
+    state = "archived";
+    wakeOnResume = false;
+    resumeReplies = [
+      { status: 503, body: { ok: false, code: "unavailable", message: "Boat is busy" } },
+      { status: 202, body: { ok: true } },
+    ];
+    // Two polls fit the budget: 503, then an accepted resume that is still waking.
+    await expect(boat.readyBoat({ box: { token: "box_own" } }, botId, 3_000)).resolves.toBeNull();
+    expect(requests.filter((request) => request.path.endsWith("/resume"))).toHaveLength(2);
+  }, 15_000);
+
+  it("never asks the person to fix a key they never pasted when the relay rejects the included token", async () => {
+    state = "archived";
+    resumeReplies = [{ status: 401, body: { ok: false, code: "unauthorized", message: "This cloud computer key is not valid." } }];
+    await expect(boat.readyBoat({}, botId)).rejects.toThrow("Cloud Pro's included cloud computers aren't available right now. Try again later.");
+    // The same refusal on the person's own key still points them at Settings.
+    await expect(boat.readyBoat({ box: { token: "box_own" } }, botId)).rejects.toThrow(/paste a current token/);
   });
 });

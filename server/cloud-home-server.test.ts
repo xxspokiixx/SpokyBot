@@ -147,6 +147,26 @@ it("pairs the app on a signed request and tells it its first run is the engine s
   expect(JSON.stringify(instances)).not.toContain("cloud.example.test");
 });
 
+it("drops the included tokens from its own environment, so a tool started with it raw never sees them", async () => {
+  // POST /api/cli-test runs `<cli> --version` with a copy of the server's own
+  // environment (a fixed list removed): one of the paths that relies on the
+  // server no longer holding the tokens, like agent-browser, docker and ssh.
+  const dump = join(home, "cli-env.json");
+  const cli = join(home, "dump-env.mjs");
+  writeFileSync(cli, `#!/usr/bin/env node
+import { writeFileSync } from "node:fs";
+writeFileSync(${JSON.stringify(dump)}, JSON.stringify(process.env));
+console.log("dump-env 1.0.0");
+`, { mode: 0o755 });
+  const probe = await api("POST", "/api/cli-test", { body: { cli } });
+  expect(probe.body, JSON.stringify(probe.body)).toMatchObject({ ok: true, version: "dump-env 1.0.0" });
+  const env = JSON.parse(readFileSync(dump, "utf8"));
+  // Proves the dump is the server's environment, not an empty one.
+  expect(env.OMB_CLOUD_BOAT_URL).toBe(included.OMB_CLOUD_BOAT_URL);
+  for (const key of ["OMB_CLOUD_BOAT_TOKEN", "OMB_CLOUD_VOICE_TOKEN", "OMB_CLOUD_BOOTSTRAP_SECRET"]) expect(env).not.toHaveProperty(key);
+  for (const value of [...includedTokens, secret]) expect(JSON.stringify(env)).not.toContain(value);
+});
+
 it("never hands a gateway's settings or the signing secret to an engine", async () => {
   const created = await api("POST", "/api/bots", { body: {
     name: "Cloud fixture", modelSelection: { instanceId: "claude", model: "claude-sonnet-5" }, requireAvailableModel: true,
