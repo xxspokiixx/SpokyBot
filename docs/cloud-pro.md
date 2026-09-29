@@ -154,7 +154,9 @@ with no confirmation. The switch and the chosen scopes are the consent.
 - **No terminal.** The shell grant of maintainer sharing is never offered here.
 
 The switch can be turned on before the first **Connect to my Cloud**; lending
-starts once this Mac is signed in to the Cloud. Below the choices, **Activity
+starts once this Mac is signed in to the Cloud. Lending runs while the app is
+open: quitting it (or the Mac sleeping) only pauses lending, and it resumes
+when the app runs again with the switch still on. Below the choices, **Activity
 on this computer** lists every request the Cloud made, refused ones included.
 
 While lending is on, a menu-bar item shows it (**In use** while the Cloud is

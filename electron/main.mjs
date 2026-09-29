@@ -1715,7 +1715,8 @@ function sharingController() {
     environments: () => environmentsState.environments,
     enabled: refreshSharedComputersAllowed,
     cloud: cloudLendingSnapshot,
-    onChange: summary => lendingIndicator().update({ lending: summary.lending.length > 0, busy: Boolean(summary.busy) }),
+    // "In use" only for the person's Cloud, not a maintainer server's job.
+    onChange: summary => lendingIndicator().update({ lending: summary.lending.length > 0, busy: Boolean(summary.busy && summary.lending.includes(summary.busy.env)) }),
     cuaConnection: () => cuaReady,
     hostControl: async (id, signal) => {
       const lease = async action => {

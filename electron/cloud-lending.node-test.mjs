@@ -254,6 +254,36 @@ test("Stop lending is instant: the Cloud is told, running work is cancelled, and
   assert.deepEqual(summaries.at(-1), { lending: [], busy: null });
 });
 
+test("quitting the app pauses lending; it never switches it off, even mid-reconnect", async t => {
+  const { dir, folderPath, home, sharing } = await lendingFixture(t);
+  await sharing.saveCloud(env, { folders: [{ id: randomUUID(), path: folderPath, write: false }], screen: false });
+  await connected(sharing, 1, home);
+  // The Cloud answers slowly: the app quits while this Mac is checking which
+  // Cloud it is talking to (a reconnect, e.g. after the Mac woke up).
+  const answer = home.fetch;
+  let identityStarted;
+  const started = new Promise(resolve => { identityStarted = resolve; });
+  home.fetch = async (url, init) => {
+    if (new URL(url).pathname === "/api/auth/session") { identityStarted(); await delay(200); }
+    return answer(url, init);
+  };
+  const restarted = createComputerSharing({
+    file: path.join(dir, "profile", "computer-sharing.json"), fetch: (...args) => home.fetch(...args), environments: () => [env], enabled: async () => false,
+    cloud: () => ({ status: "connected", accountId: "acct_1", origin: ORIGIN }), home: path.join(dir, "home"), cuaConnection: async () => null,
+  });
+  sharing.close();
+  restarted.start({ maintainer: false });
+  await started;
+  restarted.close();
+  await delay(400);
+  const after = createComputerSharing({
+    file: path.join(dir, "profile", "computer-sharing.json"), fetch: answer, environments: () => [env], enabled: async () => false,
+    cloud: () => ({ status: "connected", accountId: "acct_1", origin: ORIGIN }), home: path.join(dir, "home"), cuaConnection: async () => null,
+  });
+  t.after(() => after.close());
+  assert.equal(after.cloudState(env).enabled, true, "the next launch still lends");
+});
+
 test("the menu-bar indicator exists only while lending, says when the Cloud is using the Mac, and stops lending", () => {
   const trays = [];
   class Tray {
