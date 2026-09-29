@@ -137,7 +137,7 @@ describe("organisation desktop policy overlay", () => {
 // actual guard (not a copy), and the refusal it asks, against a synthetic
 // policy and, for an OMB Cloud home, the Cloud home switch.
 describe("claim-time computer refusal in bindTurnComputer", () => {
-  const source = readFileSync(new URL("./index.ts", import.meta.url), "utf8");
+  const source = readFileSync(new URL("./index.ts", import.meta.url), "utf8").replace(/\r\n/g, "\n");
   const start = source.indexOf("\nasync function bindTurnComputer(");
   const guardEnd = source.indexOf("  const active = () =>", start);
   const guard = source.slice(start + 1, guardEnd) + "  return \"claimed\";\n}";

@@ -62,7 +62,7 @@ it("says plainly that a Cloud with work is replaced, backed up first, and can be
   const { html } = render(settings);
   expect(html).toContain("Your Cloud already has 3 bots and 12 chats. Moving replaces them. They are backed up on your Cloud first");
   expect(button(settings, "Move to Cloud")).toBeUndefined();
-  expect(button(settings, "Replace my Cloud with this computer&#x27;s workspace") ?? button(settings, "Replace my Cloud with this computer's workspace")).toBeTruthy();
+  expect(button(settings, "Replace my Cloud with this computer&#x27;s bots and chats") ?? button(settings, "Replace my Cloud with this computer's bots and chats")).toBeTruthy();
   expect(html).toContain("2 bots, 5 chats, 300 MB kept on your Cloud");
   expect(html).toContain("What your Cloud has now is kept as the previous Cloud instead, so you can swap again.");
   button(settings, "Swap back to previous Cloud")!.props.onClick!(); await flush();
@@ -100,8 +100,8 @@ it("reports a full Cloud with both sizes, and continues a stopped upload", async
   expect(button(settings, "Continue the move")).toBeTruthy();
   expect(html).toContain("What was already uploaded stays on your Cloud for up to a day");
   expect(cloudMoveErrorText({ code: "restore_failed", message: "Wait for bot turns to finish." }))
-    .toBe("Your Cloud kept its workspace: Wait for bot turns to finish. What this move uploaded was removed from your Cloud.");
-  expect(cloudMoveErrorText({ code: "cancelled", message: "" })).toBe("The move was stopped. Your Cloud's workspace was not replaced.");
+    .toBe("Your Cloud kept everything it had: Wait for bot turns to finish. What this move uploaded was removed from your Cloud.");
+  expect(cloudMoveErrorText({ code: "cancelled", message: "" })).toBe("The move was stopped. Nothing on your Cloud was replaced.");
   expect(cloudMoveErrorText({ code: "export_failed", message: "A workspace file changed during backup. Stop its writer and retry." }))
     .toBe("The move did not finish: A workspace file changed during backup. Stop its writer and retry.");
 });
