@@ -6,10 +6,11 @@
 // and sessions, runtime state) stays where it is on both sides.
 //
 // What this file adds: the workspace's size and contents, a resumable upload
-// slot, the space check for the machine's fixed-size volume, and a backup of
-// the Cloud's own workspace taken before it is replaced, which "Restore
-// previous Cloud" puts back. Everything lives under `.backups`, which no
-// snapshot includes and no restore replaces.
+// slot, the space check for the machine's fixed-size volume, a backup of the
+// Cloud's own workspace taken before it is replaced ("Restore previous Cloud"
+// swaps it back), and the tidying that keeps that backup the only copy left
+// behind. Everything lives under `.backups`, which no snapshot includes and
+// no restore replaces.
 import { createHash, randomBytes } from "node:crypto";
 import { createReadStream, existsSync, lstatSync, mkdirSync, readFileSync, readdirSync, renameSync, rmSync, statfsSync, writeFileSync } from "node:fs";
 import { open } from "node:fs/promises";
@@ -17,7 +18,7 @@ import { join } from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import { writeFileAtomic } from "./atomic.ts";
 import {
-  MAX_WORKSPACE_BACKUP_FILES, MAX_WORKSPACE_BACKUP_UPLOAD_BYTES, omittedFromWorkspaceBackup, readLastWorkspaceRestore, removeWorkspaceBackupJob,
+  MAX_WORKSPACE_BACKUP_FILES, MAX_WORKSPACE_BACKUP_UPLOAD_BYTES, omittedFromWorkspaceBackup, removeWorkspaceBackupJob,
   stageWorkspaceBackup, type WorkspaceBackupSummary,
 } from "./workspace-backup.ts";
 
@@ -223,72 +224,171 @@ export async function completedUpload(dataDir: string, sha256: string): Promise<
 }
 
 // ── The previous Cloud ──────────────────────────────────────────────────
-// A Cloud that already has work is backed up before a move replaces it. The
-// archive's random password sits beside it: this is the machine's own data on
-// its own volume, kept only so the person can put it back.
+// Before a move replaces the Cloud's workspace, and before Restore previous
+// Cloud swaps it back, the workspace about to be replaced is backed up. That
+// one archive is the only undo point kept: once startup has installed the
+// restore, the restore's own safety copy and staged files are deleted
+// (tidyCloudMoveStorage). The archive's random password sits beside it: this
+// is the machine's own data on its own volume.
+//
+// The new backup waits in `cloud-previous.next` until startup has installed
+// the restore it was made for; a restore that never commits or rolls back
+// leaves the previous Cloud as it was.
 
-interface PreviousMeta { password: string; createdAt: string; contents: WorkspaceContents; restoredBy?: string }
-export interface PreviousCloud { createdAt: string; bots: number; rooms: number; chats: number }
+interface PreviousMeta { password: string; createdAt: string; contents: WorkspaceContents; forRestore?: string }
+export interface PreviousCloud { createdAt: string; bots: number; rooms: number; chats: number; bytes: number }
 
 const previousFolder = (dataDir: string) => join(dataDir, ".backups", "cloud-previous");
+const nextPreviousFolder = (dataDir: string) => join(dataDir, ".backups", "cloud-previous.next");
+const moveRestoresPath = (dataDir: string) => join(dataDir, ".backups", "cloud-move-restores.json");
+const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/;
 
-function readPrevious(dataDir: string): PreviousMeta | null {
+function readPrevious(folder: string): PreviousMeta | null {
   try {
-    const value: unknown = JSON.parse(readFileSync(join(previousFolder(dataDir), "previous.json"), "utf8"));
+    const value: unknown = JSON.parse(readFileSync(join(folder, "previous.json"), "utf8"));
     if (!record(value) || typeof value.password !== "string" || typeof value.createdAt !== "string" || !record(value.contents)) return null;
-    if (!lstatSync(join(previousFolder(dataDir), "workspace.ombbackup")).isFile()) return null;
+    if (!lstatSync(join(folder, "workspace.ombbackup")).isFile()) return null;
     return value as unknown as PreviousMeta;
   } catch { return null; }
 }
 
-function restoredAlready(dataDir: string, previous: PreviousMeta): boolean {
-  if (!previous.restoredBy) return false;
-  try { return readLastWorkspaceRestore(dataDir)?.id === previous.restoredBy; } catch { return false; }
-}
-
-/** The previous Cloud that can still be restored, never its password. Once
- * restoring it has been installed, it is no longer offered. */
+/** The previous Cloud that can be put back, never its password. A fresh
+ * Cloud's (its starter bot, nothing else) is kept but not offered. */
 export function previousCloud(dataDir: string): PreviousCloud | null {
-  const previous = readPrevious(dataDir);
-  if (!previous || restoredAlready(dataDir, previous)) return null;
-  return { createdAt: previous.createdAt, ...previous.contents };
+  const previous = readPrevious(previousFolder(dataDir));
+  if (!previous || isEmptyWorkspace(previous.contents)) return null;
+  return { createdAt: previous.createdAt, ...previous.contents, bytes: lstatSync(join(previousFolder(dataDir), "workspace.ombbackup")).size };
 }
 
-/** Back up this workspace as the previous Cloud, replacing an older one only
- * once the new one is complete. `create` is createWorkspaceBackup, run by the
- * caller inside the maintenance gate. */
-export async function savePreviousCloud(dataDir: string, create: (password: string) => Promise<{ id: string; path: string }>): Promise<PreviousCloud> {
+/** Back up this workspace as the next previous Cloud, for the restore
+ * `restoreId`. `create` is createWorkspaceBackup, run by the caller inside
+ * the maintenance gate. It becomes the previous Cloud only once startup has
+ * installed that restore. */
+export async function prepareNextPreviousCloud(dataDir: string, restoreId: string, create: (password: string) => Promise<{ id: string; path: string }>): Promise<Omit<PreviousCloud, "bytes">> {
   const password = randomBytes(32).toString("base64url");
   const contents = workspaceContents(dataDir);
   const created = await create(password);
-  const root = backupsRoot(dataDir), next = join(root, "cloud-previous.next");
+  const next = nextPreviousFolder(dataDir);
   try {
+    backupsRoot(dataDir);
     rmSync(next, { recursive: true, force: true });
     privateFolder(next);
     renameSync(created.path, join(next, "workspace.ombbackup"));
-    const meta: PreviousMeta = { password, createdAt: new Date().toISOString(), contents };
+    const meta: PreviousMeta = { password, createdAt: new Date().toISOString(), contents, forRestore: restoreId };
     writeFileAtomic(join(next, "previous.json"), JSON.stringify(meta), { mode: 0o600 });
-    rmSync(previousFolder(dataDir), { recursive: true, force: true });
-    renameSync(next, previousFolder(dataDir));
     return { createdAt: meta.createdAt, ...contents };
-  } finally {
+  } catch (error) {
     rmSync(next, { recursive: true, force: true });
+    throw error;
+  } finally {
     try { removeWorkspaceBackupJob(dataDir, created.id); } catch { /* The export job expires with the others. */ }
   }
 }
 
-/** Stage the previous Cloud for an ordinary restore. */
-export async function stagePreviousCloud(dataDir: string, appVersion: string): Promise<{ id: string; summary: WorkspaceBackupSummary }> {
-  const previous = readPrevious(dataDir);
-  if (!previous || restoredAlready(dataDir, previous)) throw fail("There is no previous Cloud to restore.", 404);
-  return stageWorkspaceBackup(dataDir, join(previousFolder(dataDir), "workspace.ombbackup"), { password: previous.password, currentAppVersion: appVersion });
+/** Drop a next previous Cloud whose restore did not commit. */
+export function discardNextPreviousCloud(dataDir: string): void {
+  rmSync(nextPreviousFolder(dataDir), { recursive: true, force: true });
 }
 
-/** Record the restore that puts the previous Cloud back. Once startup has
- * installed it, the previous Cloud is no longer offered (a restore that
- * rolled back leaves it on offer). The archive stays until the next move. */
-export function markPreviousCloudRestoring(dataDir: string, restoreId: string): void {
-  const previous = readPrevious(dataDir);
-  if (!previous) return;
-  writeFileAtomic(join(previousFolder(dataDir), "previous.json"), JSON.stringify({ ...previous, restoredBy: restoreId }), { mode: 0o600 });
+/** Stage the previous Cloud for an ordinary restore; its archive stays. */
+export async function stagePreviousCloud(dataDir: string, appVersion: string): Promise<{ id: string; summary: WorkspaceBackupSummary; bytes: number }> {
+  const previous = readPrevious(previousFolder(dataDir));
+  if (!previous || isEmptyWorkspace(previous.contents)) throw fail("There is no previous Cloud to restore.", 404);
+  const archive = join(previousFolder(dataDir), "workspace.ombbackup");
+  const staged = await stageWorkspaceBackup(dataDir, archive, { password: previous.password, currentAppVersion: appVersion });
+  return { ...staged, bytes: lstatSync(archive).size };
+}
+
+/** The archive size of the previous Cloud (0 without one), for space checks. */
+export function previousCloudArchiveBytes(dataDir: string): number {
+  try { return lstatSync(join(previousFolder(dataDir), "workspace.ombbackup")).size; } catch { return 0; }
+}
+
+function readMoveRestores(dataDir: string): string[] {
+  try {
+    const value: unknown = JSON.parse(readFileSync(moveRestoresPath(dataDir), "utf8"));
+    return Array.isArray(value) ? value.filter((id): id is string => typeof id === "string" && UUID.test(id)) : [];
+  } catch { return []; }
+}
+function writeMoveRestores(dataDir: string, ids: string[]): void {
+  backupsRoot(dataDir);
+  if (ids.length) writeFileAtomic(moveRestoresPath(dataDir), JSON.stringify([...new Set(ids)]), { mode: 0o600 });
+  else rmSync(moveRestoresPath(dataDir), { force: true });
+}
+/** Remember a restore made by a move or a swap back, before it commits, so
+ * its safety copy and staged files are tidied once it is installed. */
+export function noteMoveRestore(dataDir: string, restoreId: string): void {
+  writeMoveRestores(dataDir, [...readMoveRestores(dataDir), restoreId]);
+}
+export function forgetMoveRestore(dataDir: string, restoreId: string): void {
+  writeMoveRestores(dataDir, readMoveRestores(dataDir).filter((id) => id !== restoreId));
+}
+
+/** Delete a staged job, and its safety copy, by id: guarded paths only. */
+export function removeMoveFiles(dataDir: string, id: string): void {
+  if (!UUID.test(id)) return;
+  for (const name of [id, `safety-${id}`]) {
+    const path = join(dataDir, ".backups", name);
+    try {
+      const stat = lstatSync(path);
+      if (stat.isDirectory() && !stat.isSymbolicLink()) rmSync(path, { recursive: true, force: true });
+    } catch { /* already gone */ }
+  }
+}
+
+function pendingRestoreId(dataDir: string): string | null {
+  try {
+    const value: unknown = JSON.parse(readFileSync(join(dataDir, ".backups", "pending-restore.json"), "utf8"));
+    return record(value) && typeof value.id === "string" ? value.id : null;
+  } catch { return null; }
+}
+
+/** At a Cloud home's startup, after any pending restore was applied:
+ * - a next previous Cloud becomes the previous Cloud once its restore is
+ *   installed, and is dropped otherwise;
+ * - moves' and swaps' restores, once settled, keep no safety copy or staged
+ *   files (the previous Cloud is the one undo point);
+ * - an upload nobody has touched for a day is deleted.
+ * Never touches a restore still waiting to be applied. */
+export function tidyCloudMoveStorage(dataDir: string, restored: { id?: string; restored?: boolean; rolledBack?: boolean; safetyCopyPath?: string }, now = Date.now()): void {
+  if (!existsSync(join(dataDir, ".backups"))) return;
+  const pending = pendingRestoreId(dataDir);
+  const next = readPrevious(nextPreviousFolder(dataDir));
+  if (next && next.forRestore !== pending) {
+    if (restored.restored && restored.id === next.forRestore) {
+      rmSync(previousFolder(dataDir), { recursive: true, force: true });
+      renameSync(nextPreviousFolder(dataDir), previousFolder(dataDir));
+    } else discardNextPreviousCloud(dataDir);
+  } else if (!next && existsSync(nextPreviousFolder(dataDir)) && !pending) discardNextPreviousCloud(dataDir);
+  const settled = readMoveRestores(dataDir).filter((id) => id !== pending);
+  for (const id of settled) removeMoveFiles(dataDir, id);
+  writeMoveRestores(dataDir, readMoveRestores(dataDir).filter((id) => id === pending));
+  if (restored.id && settled.includes(restored.id)) {
+    // The receipt must not point at a safety copy that is gone.
+    delete restored.safetyCopyPath;
+    try {
+      const receipt = join(dataDir, ".backups", "last-restore.json");
+      const value: unknown = JSON.parse(readFileSync(receipt, "utf8"));
+      if (record(value) && value.id === restored.id && "safetyCopyPath" in value) {
+        delete value.safetyCopyPath;
+        writeFileAtomic(receipt, JSON.stringify(value), { mode: 0o600 });
+      }
+    } catch { /* no receipt */ }
+  }
+  const upload = readUploadMeta(dataDir);
+  if ((upload && upload.updatedAt + UPLOAD_STALE_MS <= now) || (!upload && existsSync(uploadPartPath(dataDir)))) discardUpload(dataDir);
+}
+
+/** Bytes under `.backups`: what backups, safety copies and moves hold on the volume. */
+export function backupsBytes(dataDir: string): number {
+  let bytes = 0;
+  const walk = (directory: string) => {
+    for (const name of readdirSync(directory)) {
+      const stat = lstatSync(join(directory, name));
+      if (stat.isDirectory() && !stat.isSymbolicLink()) walk(join(directory, name));
+      else if (stat.isFile()) bytes += stat.size;
+    }
+  };
+  try { walk(join(dataDir, ".backups")); } catch { /* none yet */ }
+  return bytes;
 }

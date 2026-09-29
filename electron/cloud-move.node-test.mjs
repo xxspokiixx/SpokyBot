@@ -19,7 +19,7 @@ const UUID = () => "3f9c2a4e-8b1d-4c6e-9a7f-" + randomBytes(6).toString("hex");
 const json = (status, body) => new Response(JSON.stringify(body), { status, headers: { "content-type": "application/json" } });
 
 /** This computer's server: an estimate, an export and its download. */
-function desktop({ bytes = 5000, busy = false } = {}) {
+function desktop({ bytes = 5000, busy = false, exportError = null } = {}) {
   const archive = Buffer.concat([MAGIC, randomBytes(bytes - MAGIC.length)]), calls = [];
   const id = UUID();
   return {
@@ -28,7 +28,10 @@ function desktop({ bytes = 5000, busy = false } = {}) {
       calls.push([init.method, route, init.body ? JSON.parse(init.body) : undefined]);
       if (route === "/api/cloud-move/estimate") return json(200, { bots: 3, rooms: 1, chats: 7, bytes, files: 12 });
       if (route === "/api/workspace-backup/status") return json(200, { busy, pendingRestore: false });
-      if (route === "/api/workspace-backup/export") return busy ? json(409, { error: "busy" }) : json(200, { id, bytes, summary: { bots: 3, files: 12, messages: 40 } });
+      if (route === "/api/workspace-backup/export") {
+        if (exportError) return json(400, { error: exportError });
+        return busy ? json(409, { error: "busy" }) : json(200, { id, bytes, summary: { bots: 3, files: 12, messages: 40 } });
+      }
       if (route === `/api/workspace-backup/download/${id}`) return new Response(archive, { status: 200, headers: { "content-length": String(bytes) } });
       return json(404, {});
     },
@@ -36,8 +39,9 @@ function desktop({ bytes = 5000, busy = false } = {}) {
 }
 
 /** The Cloud: pairing, the upload slot, jobs, and a restart. */
-function cloudFake({ freeBytes = 1024 ** 4, empty = true, failPut = () => false, dropAnswer = () => false, loseAt = 0 } = {}) {
-  const state = { upload: null, received: Buffer.alloc(0), job: null, lastRestoreId: null, restarting: 0, previous: null, contents: { bots: 1, rooms: 0, chats: 0 }, empty },
+function cloudFake({ freeBytes = 1024 ** 4, empty = true, failPut = () => false, dropAnswer = () => false, loseAt = 0, busyRestores = 0, storedPart = 0 } = {}) {
+  const state = { upload: storedPart ? { sha256: "e".repeat(64), bytes: storedPart } : null, received: Buffer.alloc(storedPart), job: null, lastRestoreId: null, restarting: 0,
+      previous: null, contents: { bots: 1, rooms: 0, chats: 0 }, empty, discards: 0, restoreAsks: [] },
     log = [], tokens = new Set();
   let lost = false;
   const fetchImpl = async (url, init = {}) => {
@@ -59,8 +63,9 @@ function cloudFake({ freeBytes = 1024 ** 4, empty = true, failPut = () => false,
         upload: state.upload && { ...state.upload, received: state.received.length } });
     }
     const body = init.body && !(init.body instanceof Uint8Array) ? JSON.parse(init.body) : undefined;
+    if (pathname === "/api/cloud-move/discard") { state.discards++; if (state.job?.kind === "preview") state.job = null; return json(200, { ok: true }); }
     if (pathname === "/api/cloud-move/upload") {
-      if (3 * body.bytes > freeBytes) return json(507, { error: "full", freeBytes, neededBytes: 3 * body.bytes });
+      if (3 * body.bytes > freeBytes + state.received.length) return json(507, { error: "full", freeBytes, neededBytes: 3 * body.bytes });
       if (state.upload?.sha256 !== body.sha256) { state.upload = { sha256: body.sha256, bytes: body.bytes }; state.received = Buffer.alloc(0); }
       return json(200, { received: state.received.length, partBytes: 1024 });
     }
@@ -85,6 +90,8 @@ function cloudFake({ freeBytes = 1024 ** 4, empty = true, failPut = () => false,
       return json(202, { job: { kind: "preview", state: "running" } });
     }
     if (pathname === "/api/cloud-move/restore") {
+      state.restoreAsks.push(body.id);
+      if (busyRestores-- > 0) return json(409, { error: "Another move step is running on your Cloud. Wait for it to finish." });
       assert.equal(body.id, state.job.id);
       state.previous = state.empty ? null : { createdAt: new Date().toISOString(), bots: 2, rooms: 0, chats: 4 };
       state.job = null; state.restarting = 2; state.lastRestoreId = body.id;
@@ -207,6 +214,52 @@ test("says a Cloud from before Move to Cloud has to update first", async () => {
     const result = await outdated.move();
     assert.equal(result.error.code, "cloud_outdated");
     assert.equal(f.local.calls.some(([, route]) => route === "/api/workspace-backup/export"), false);
+  } finally { f.done(); }
+});
+
+test("asks a busy Cloud again with the same staged workspace, instead of uploading it twice", async () => {
+  const f = harness({ cloud: { busyRestores: 2 } });
+  try {
+    const result = await f.move.move();
+    assert.equal(result.phase, "done", JSON.stringify(result));
+    assert.equal(f.cloud.state.restoreAsks.length, 3);
+    assert.equal(new Set(f.cloud.state.restoreAsks).size, 1);
+    assert.equal(f.cloud.log.filter(([, path]) => path === "/api/cloud-move/preview").length, 1);
+  } finally { f.done(); }
+});
+
+test("a Cloud that stays busy, a stop while it checks, and a mismatch each drop what the move staged there", async () => {
+  const busy = harness({ cloud: { busyRestores: 10 } });
+  try {
+    const result = await busy.move.move();
+    assert.equal(result.error.code, "cloud_busy");
+    assert.equal(busy.cloud.state.discards, 1);
+    assert.equal(busy.cloud.state.lastRestoreId, null);
+  } finally { busy.done(); }
+  const stopped = harness({ onState: (state, move) => { if (state.phase === "checking") move.cancel(); } });
+  try {
+    const result = await stopped.move.move();
+    assert.equal(result.error.code, "cancelled");
+    assert.match(result.error.message, /was not replaced/);
+    assert.equal(stopped.cloud.state.discards, 1);
+  } finally { stopped.done(); }
+});
+
+test("credits a stored part of an earlier upload when checking the Cloud's room", async () => {
+  // 3 × 5000 bytes plus the margin is more than is free, until the stored part is counted.
+  const f = harness({ cloud: { freeBytes: 256 * 1024 ** 2 + 12_000, storedPart: 4_000 } });
+  try {
+    const result = await f.move.move();
+    assert.equal(result.phase, "done", JSON.stringify(result));
+  } finally { f.done(); }
+});
+
+test("says why this computer's server could not export, in its own words, on one line", async () => {
+  const f = harness({ desktop: { exportError: "Cannot back up user-created symbolic link; replace it with regular files first: workspaces/bot/link\n\u0007" } });
+  try {
+    const result = await f.move.move();
+    assert.equal(result.error.code, "export_failed");
+    assert.equal(result.error.message, "Cannot back up user-created symbolic link; replace it with regular files first: workspaces/bot/link");
   } finally { f.done(); }
 });
 

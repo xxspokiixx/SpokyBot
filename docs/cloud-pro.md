@@ -436,9 +436,9 @@ here, because the person asked for it. Secrets never travel.
   engine sign-in above).
 - When the Cloud already has bots or chats, the button reads **Replace my
   Cloud with this computer's workspace**, and the card says that what the
-  Cloud holds is replaced, backed up first, and put back by **Restore previous
-  Cloud**. There is no confirmation dialog. Without a session on the Cloud yet
-  (never connected), it says the same thing conditionally.
+  Cloud holds is replaced, backed up on the Cloud first, and put back by **Swap
+  back to previous Cloud**. There is no confirmation dialog. Without a session
+  on the Cloud yet (never connected), it says the same thing conditionally.
 - The first time the app shows an empty Cloud (its starter bot at most, no
   rooms, nobody has chatted) and the computer has work of its own, the Cloud's
   page shows a card: **Bring your bots and chats from this Mac** ("this
@@ -447,7 +447,7 @@ here, because the person asked for it. Secrets never travel.
   main answers the Cloud page only when it is the verified Cloud (the origin the
   Cloud session reports) open as the window's active server. That page can
   start a move only from the person's own click (`navigator.userActivation`)
-  and cannot restore the previous Cloud.
+  and cannot swap back to the previous Cloud.
 
 ### What moves, and what stays
 
@@ -455,7 +455,9 @@ Exactly what a workspace backup carries (`server/workspace-backup.ts`,
 `server/workspace-backup-policy.ts`). Never: API keys, provider and MCP
 connections, engine sign-ins (`~/.claude`, `~/.codex`, the server's
 `providers/`), saved credentials, pairing, paired devices and sessions (the
-session registry's open marker included), the server's identity, caches,
+session registry's open marker included: a restore leaves the destination's
+own marker in place, so a crash just before it still ends account sign-ins),
+the server's identity, caches,
 downloaded tools and runtime files. Never this app's Cloud sign-in or what
 it lends (Let my Cloud use this Mac, above): both live in the desktop app's
 own storage, not in the workspace, and a lent Mac reconnects once the Cloud
@@ -487,54 +489,84 @@ do not.
 3. `POST /api/cloud-move/upload {sha256, bytes, files}`. The Cloud refuses more
    than 10 GB of data or 100,000 files (`413`), and checks its free space: the
    upload three times over (the upload, its decrypted copy and its staged
-   files), plus twice its own workspace when it will back that up, plus 256 MB.
-   Cloud volumes have a fixed size (the Admin's `OMB_CLOUD_VOLUME_GB`, 10 by
-   default). Not enough room is `507` with `freeBytes` and `neededBytes`, and
-   the app shows both. Nothing has been moved at that point.
+   files), plus twice its own workspace (the backup it takes first, briefly
+   with its snapshot), plus 256 MB. A part stored by an earlier upload, of any
+   file, counts as free: a new upload replaces it. Cloud volumes have a fixed
+   size (the Admin's `OMB_CLOUD_VOLUME_GB`, 10 by default). Not enough room is
+   `507` with `freeBytes` and `neededBytes`, and the app shows both. Nothing
+   has been moved at that point. A new upload also deletes whatever an earlier
+   attempt staged.
 4. Parts of 16 MB (at most 64): `PUT /api/cloud-move/upload/<sha256>?offset=n`.
    A part already stored is accepted again without being written; any other
    offset answers `409` with `received`; a part that fails is cut back off.
    Main retries with backoff and continues from where the Cloud stands. An
    upload that keeps failing keeps its archive for 30 minutes, so moving again
-   continues it rather than starting over.
+   continues it rather than starting over; the Cloud keeps a stored part for a
+   day, and its startup deletes an older one.
 5. `POST /api/cloud-move/preview {sha256, password}`: the Cloud checks the
    SHA-256 and stages the file as an ordinary backup, which authenticates the
    whole file before parsing anything. Anything that is not a valid backup is
    refused and the upload discarded.
-6. `POST /api/cloud-move/restore {id}`, inside the maintenance gate: a Cloud
-   with work is backed up first (below), then the restore is committed and the
-   server exits with code 75. The launcher (`server/cloud-home-start.ts`)
-   starts only the server again, and startup installs the restore before
-   anything else loads. Preview, restore and undo can take minutes, so each
-   answers `202` and runs as a job the app follows in `GET /api/cloud-move`.
+6. `POST /api/cloud-move/restore {id}`, inside the maintenance gate: the
+   Cloud's workspace is backed up first (below), then the restore is committed
+   and the server exits with code 75. The launcher
+   (`server/cloud-home-start.ts`) starts only the server again, and startup
+   installs the restore before anything else loads. Preview, restore and undo
+   can take minutes, so each answers `202` and runs as a job the app follows
+   in `GET /api/cloud-move`. A Cloud that answers `409` (another step still
+   running) is asked again with the same staged workspace. A restore that
+   fails on the Cloud (bots that stay busy past a few tries of the gate, for
+   one) deletes what it staged and the backup it took.
 7. Main waits until the Cloud reports that restore installed
    (`lastRestoreId`), signs its session out, and opens My Cloud in the window.
 
-### Restore previous Cloud
+Stopping before step 6, or any failure before it, asks the Cloud to drop what
+the move staged (`POST /api/cloud-move/discard`; a preview still running drops
+its result when it ends). A stored upload part stays, for moving again.
 
-Before a Cloud with work is replaced, its workspace is backed up to
-`.backups/cloud-previous` on its own volume, which no backup includes and no
-restore replaces. Its random password is kept beside it: the same volume holds
-the same data unencrypted anyway. **Restore previous Cloud**
-(`POST /api/cloud-move/undo`) restores it the same way, and it is offered
-until that restore is installed. The archive stays until the next move
-replaces it. Every restore also keeps its usual safety copy of the replaced
-files (`.backups/safety-<id>`).
+### Swap back to previous Cloud
+
+Before a move replaces the Cloud's workspace, that workspace is backed up to
+`.backups/cloud-previous` on the Cloud's own volume, which no backup includes
+and no restore replaces. Its random password is kept beside it: the same volume
+holds the same data unencrypted anyway. It is offered as **Swap back to
+previous Cloud** unless it is a fresh Cloud's (its starter bot at most, no
+rooms, nobody has chatted).
+
+Swapping back (`POST /api/cloud-move/undo`) is the same restore the other way
+round: the workspace the Cloud has now is backed up first and becomes the
+previous Cloud, so a swap back can itself be swapped back, and nothing done on
+the Cloud since the move is lost. It needs room for the previous Cloud staged
+and installed plus that backup (`507` otherwise).
+
+That archive is the one undo point kept. A new backup waits in
+`.backups/cloud-previous.next` and replaces it only once startup has installed
+the restore it was made for (a restore that never commits or rolls back leaves
+the previous Cloud as it was). Once a move's or swap's restore is installed,
+startup deletes its safety copy (`.backups/safety-<id>`) and its staged files,
+so `.backups` holds about one workspace, not four. `GET /api/cloud-move`
+reports the previous Cloud's size (`previous.bytes`, shown in Settings) and
+everything `.backups` holds (`heldBytes`). A restore made from Settings →
+Backups keeps its safety copy as before.
 
 ### Move security
 
-- Every Cloud route needs a paired session with admin scope: never the
-  machine's loopback (a bot's shell there) and never a client-scope device. Only
-  a Cloud home receives a workspace; any other server answers `404`, except
-  for sizing its own (`/api/cloud-move/estimate`).
+- Every Cloud route needs a paired session with admin scope. A client-scope
+  device is refused, and so is a bare loopback request. That second refusal
+  is not a wall against the machine itself: a process there (a bot's shell)
+  runs as the server's user, already reads and writes `/data`, and can pair
+  itself as the owner through loopback like any owner tool. Only a Cloud home
+  receives a workspace; any other server answers `404`, except for sizing its
+  own (`/api/cloud-move/estimate`).
 - The upload is bounded by its declared size, the per-part limit and the
   backup's own limits on size and file count.
 - The bundle is the workspace backup: credentials are left out by path and by
   a config allowlist, and checked again at staging (a config with connection
-  settings or webhook secrets is refused). `server/cloud-move.e2e.test.ts`
+  settings or webhook secrets is refused). Staging never decompresses: tar is
+  told not to, and gzip or zstd payloads are refused. `server/cloud-move.e2e.test.ts`
   gives the desktop keys, a driver environment, workspace credentials and a
-  provider login, moves it to a real Cloud home, and scans every file on the
-  Cloud's volume, the staged bundle included, for them.
+  provider login, scans the exported bundle for them, moves it to a real Cloud
+  home, and scans every file on the Cloud's volume.
 - Nothing logs a request body, the password, a file name or bundle contents.
 
 ## Security summary

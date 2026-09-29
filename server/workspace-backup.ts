@@ -87,6 +87,12 @@ function preserved(name: string): boolean {
   const folded = name.toLowerCase();
   return excluded(folded) && folded !== "messages.db-wal" && folded !== "messages.db-shm";
 }
+/** Left where it is by a restore. The session registry's open marker is this
+ * machine's own (never exported or installed): a crash before the restore
+ * still costs account sign-ins, as it would have without one. */
+function keptInPlace(name: string): boolean {
+  return preserved(name) || name.toLowerCase() === "sessions.json.open";
+}
 function folder(path: string): void {
   mkdirSync(path, { recursive: true, mode: 0o700 });
   const stat = lstatSync(path);
@@ -476,16 +482,19 @@ async function decryptArchive(inputPath: string, plaintext: string, password: st
 
 async function inspectTar(path: string): Promise<Map<string, { type: string; size: number }>> {
   const fd = openSync(path, "r");
-  const signature = Buffer.alloc(2);
-  try { readSync(fd, signature, 0, 2, 0); } finally { closeSync(fd); }
-  // This format is uncompressed tar. Reject auto-detected gzip before tar's
-  // parser can inflate an authenticated but malicious decompression bomb.
-  if (signature[0] === 0x1f && signature[1] === 0x8b) throw new Error("Compressed payloads are not supported in this workspace backup version.");
+  const signature = Buffer.alloc(4);
+  try { readSync(fd, signature, 0, 4, 0); } finally { closeSync(fd); }
+  // This format is uncompressed tar. Reject auto-detected gzip and zstd
+  // before tar's parser can inflate an authenticated but malicious
+  // decompression bomb; tar is also told never to decompress (below).
+  if ((signature[0] === 0x1f && signature[1] === 0x8b) || signature.equals(Buffer.from([0x28, 0xb5, 0x2f, 0xfd]))) {
+    throw new Error("Compressed payloads are not supported in this workspace backup version.");
+  }
   const entries = new Map<string, { type: string; size: number }>();
   const names = new Set<string>();
   let bytes = 0;
   let problem = "";
-  await tar.t({ file: path, strict: true, onReadEntry(entry) {
+  await tar.t({ file: path, strict: true, brotli: false, zstd: false, onReadEntry(entry) {
     const name = entry.type === "Directory" ? entry.path.replace(/\/$/, "") : entry.path;
     const expectedRoot = name === "manifest.json" || name === "data" || name.startsWith("data/");
     // ReadEntry normalizes backslashes on Windows; inspect the raw header too
@@ -562,7 +571,7 @@ export async function stageWorkspaceBackup(dataDir: string, archivePath: string,
     const expected = await inspectTar(plaintext);
     const staged = join(job.directory, "staged");
     folder(staged);
-    await tar.x({ file: plaintext, cwd: staged, strict: true, preservePaths: false, umask: 0o077, noChmod: true });
+    await tar.x({ file: plaintext, cwd: staged, strict: true, preservePaths: false, umask: 0o077, noChmod: true, brotli: false, zstd: false });
     const manifest = validateStaged(staged, expected);
     const versions = [manifest.summary.appVersion, options.currentAppVersion ?? ""].map((version) => /^(\d+)\.(\d+)\.(\d+)(?:[-+].*)?$/.exec(version)?.slice(1).map(Number));
     if (versions[0] && versions[1]) {
@@ -881,7 +890,7 @@ export function applyPendingWorkspaceRestore(dataDir: string): WorkspaceRestoreR
   folder(join(safetyCopyPath, "data"));
   const journal: RestoreJournal = {
     id: pending.id, phase: "applying",
-    existing: readdirSync(dataDir).filter((name) => !preserved(name)).sort(),
+    existing: readdirSync(dataDir).filter((name) => !keptInPlace(name)).sort(),
     incoming: readdirSync(prepared).sort(),
   };
   // Top-level source and destination names are checked before recording any

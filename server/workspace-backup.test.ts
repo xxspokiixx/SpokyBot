@@ -5,6 +5,7 @@ import { join } from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import { gzipSync } from "node:zlib";
 import { Header } from "tar";
+import { SessionRegistry } from "./sessions.ts";
 import { afterEach, describe, expect, it } from "vitest";
 import {
   applyPendingWorkspaceRestore, commitPendingWorkspaceRestore, createWorkspaceBackup,
@@ -284,6 +285,31 @@ describe("encrypted full workspace backups", () => {
     for (const path of paths) {
       if (statSync(join(staging, "data", path)).isFile()) expect(readFileSync(join(staging, "data", path), "utf8")).not.toMatch(/ORGANIZATION_(?:CATALOG|RELEASE)_BYTES/);
     }
+  });
+
+  it("leaves the destination's session open-marker in place, so a crash before a restore still ends account sign-ins", async () => {
+    const source = directory(), target = directory();
+    json(join(source, "bots.json"), [{ id: "bot" }]);
+    // The source is running: its marker exists, and is never exported.
+    writeFileSync(join(source, "sessions.json.open"), "Session registry is open.\n");
+    const exported = await createWorkspaceBackup(source, { password: PASSWORD });
+    // The destination crashed with an account session saved.
+    const sessions = new SessionRegistry({ file: join(target, "sessions.json") });
+    sessions.issue({ label: "Member", scopes: ["client"], userId: "user-1" });
+    expect(existsSync(join(target, "sessions.json.open"))).toBe(true);
+    const staged = await stageWorkspaceBackup(target, exported.path, { password: PASSWORD });
+    expect(readJson(join(target, ".backups", staged.id, "staged", "manifest.json")).entries.map((entry: { path: string }) => entry.path)).not.toContain("sessions.json.open");
+    commitPendingWorkspaceRestore(target, staged.id);
+    expect(applyPendingWorkspaceRestore(target)).toMatchObject({ restored: true });
+    expect(existsSync(join(target, "sessions.json.open"))).toBe(true);
+    expect(existsSync(join(target, ".backups", `safety-${staged.id}`, "data", "sessions.json.open"))).toBe(false);
+    expect(new SessionRegistry({ file: join(target, "sessions.json") }).list()).toEqual([]);
+  });
+
+  it("never lets tar decompress a payload: zstd is refused like gzip", async () => {
+    const root = directory();
+    const archive = encryptedPayload(root, Buffer.concat([Buffer.from([0x28, 0xb5, 0x2f, 0xfd]), Buffer.alloc(1020)]));
+    await expect(stageWorkspaceBackup(directory(), archive, { password: PASSWORD })).rejects.toThrow(/Compressed payloads are not supported/);
   });
 
   it("still restores an archive from a release that exported hook tokens, without installing them", async () => {

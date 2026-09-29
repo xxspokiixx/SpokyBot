@@ -4,7 +4,11 @@ export interface CloudMoveStatus {
   contents: MoveContents;
   empty: boolean;
   freeBytes: number;
-  previous: (MoveContents & { createdAt: string }) | null;
+  previous: (MoveContents & { createdAt: string; bytes?: number }) | null;
+  /** A stored part of an earlier upload, freed when the next one begins. */
+  uploadReceived: number;
+  /** What backups and the previous Cloud hold on the volume. */
+  heldBytes: number | null;
   pendingRestore: boolean;
   busy: boolean;
   job: Record<string, unknown> | null;
@@ -29,7 +33,7 @@ export interface CloudMoveState {
 export interface CloudMoveOverview extends CloudMoveState {
   local: MoveEstimate | null;
   /** Null when this app has no session on the Cloud to ask with yet. */
-  cloud: Pick<CloudMoveStatus, "contents" | "empty" | "freeBytes" | "previous"> | null;
+  cloud: Pick<CloudMoveStatus, "contents" | "empty" | "freeBytes" | "previous" | "heldBytes"> | null;
   /** Only on the Cloud's own page: offer to bring this computer's work. */
   suggest: boolean;
 }

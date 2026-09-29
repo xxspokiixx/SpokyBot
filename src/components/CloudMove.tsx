@@ -36,6 +36,7 @@ export function cloudMoveErrorText(error: CloudMoveState["error"]): string {
       ? t("cloudMove.error.cloudFull", { free: formatMoveBytes(error.freeBytes), needed: formatMoveBytes(error.neededBytes) })
       : t("cloudMove.error.cloudFullPlain");
   }
+  if (error.code === "restore_failed") return t("cloudMove.error.notReplaced", { detail: error.message });
   const key = ERROR[error.code];
   return key ? t(key) : t("cloudMove.error.other", { detail: error.message });
 }
@@ -112,6 +113,7 @@ export function CloudMoveSettings() {
       {running && <MoveProgress state={state} />}
       {done && <p role="status" className="text-[13px] text-ink">{done}</p>}
       {state.phase === "failed" && <p role="alert" className="text-[13px] text-danger">{cloudMoveErrorText(state.error)}</p>}
+      {state.phase === "failed" && state.resumable && <p className="text-[12px] text-ink-secondary">{t("cloudMove.resumeNote")}</p>}
       <div className="flex flex-wrap gap-2">
         {!running && <button type="button" disabled={pending} className="ui-button" onClick={() => act(() => bridge.start())}>
           {state.phase === "failed" && state.resumable ? t("cloudMove.resume") : cloud && !cloud.empty ? t("cloudMove.replace") : t("cloudMove.start")}
@@ -119,7 +121,7 @@ export function CloudMoveSettings() {
         {CANCELLABLE.has(state.phase) && <button type="button" className="ui-button" onClick={() => act(() => bridge.cancel())}>{t("cloudMove.cancel")}</button>}
         {!running && previous && <button type="button" disabled={pending} className="ui-button" onClick={() => act(() => bridge.restorePrevious())}>{t("cloudMove.restorePrevious")}</button>}
       </div>
-      {!running && previous && <p className="text-[12px] text-ink-secondary">{t("cloudMove.previous", { date, bots: previous.bots, chats: previous.chats })}</p>}
+      {!running && previous && <p className="text-[12px] text-ink-secondary">{t("cloudMove.previous", { date, bots: previous.bots, chats: previous.chats, size: formatMoveBytes(previous.bytes ?? 0) })}</p>}
     </div>
   </Card>;
 }

@@ -2844,7 +2844,7 @@ async function peekCloudMove(origin) {
     const response = await session.defaultSession.fetch(`${origin}/api/cloud-move`, { credentials: "include", cache: "no-store", redirect: "error", signal: AbortSignal.timeout(5_000) });
     if (!response.ok) { await response.body?.cancel().catch(() => {}); return null; }
     const status = parseCloudMoveStatus(await response.json());
-    return status && { contents: status.contents, empty: status.empty, freeBytes: status.freeBytes, previous: status.previous };
+    return status && { contents: status.contents, empty: status.empty, freeBytes: status.freeBytes, previous: status.previous, heldBytes: status.heldBytes };
   } catch { return null; }
 }
 

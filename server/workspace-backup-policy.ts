@@ -59,8 +59,8 @@ export function redownloadedOrgLibraryPath(path: string): boolean {
  * exported. Unlike the saved auth paths above they are not refused on import:
  * v0.1.85 did export them, and such a backup must still restore, without them.
  * The same holds for the session registry's open marker: it describes the
- * process that wrote it, and installed elsewhere it would make that server
- * drop its own account sign-ins as if it had crashed. */
+ * process that wrote it, so it is never exported or installed, and a restore
+ * leaves the destination's own marker where it is (workspace-backup.ts). */
 export function ephemeralWorkspaceTokenPath(path: string): boolean {
   return /^(?:hook-tokens(?:\/|$)|sessions\.json\.open$)/.test(path);
 }

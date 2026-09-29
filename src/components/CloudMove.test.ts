@@ -27,7 +27,7 @@ const suggestion = () => CloudMoveSuggestion();
 
 let bridge: CloudMoveBridge, push: (state: CloudMoveState) => void;
 const local = { bots: 4, rooms: 1, chats: 37, bytes: 1.5 * 1024 ** 3, files: 900 };
-const emptyCloud = { contents: { bots: 1, rooms: 0, chats: 0 }, empty: true, freeBytes: 9 * 1024 ** 3, previous: null };
+const emptyCloud = { contents: { bots: 1, rooms: 0, chats: 0 }, empty: true, freeBytes: 9 * 1024 ** 3, previous: null, heldBytes: 0 };
 const overview = (extra: Partial<CloudMoveOverview> = {}): CloudMoveOverview => ({ phase: "idle", local, cloud: emptyCloud, suggest: false, ...extra });
 beforeEach(() => {
   f.values = []; f.index = 0; f.effects = []; push = () => {};
@@ -56,15 +56,16 @@ it("before a move, shows what moves and its size, that sign-ins stay here, and s
   expect(bridge.start).toHaveBeenCalledExactlyOnceWith();
 });
 
-it("says plainly that a Cloud with work is replaced, backed up first, and can be put back", async () => {
-  const previous = { createdAt: "2026-09-29T10:00:00.000Z", bots: 2, rooms: 0, chats: 5 };
+it("says plainly that a Cloud with work is replaced, backed up first, and can be swapped back", async () => {
+  const previous = { createdAt: "2026-09-29T10:00:00.000Z", bots: 2, rooms: 0, chats: 5, bytes: 300 * 1024 ** 2 };
   await ready(settings, overview({ cloud: { ...emptyCloud, empty: false, contents: { bots: 3, rooms: 1, chats: 12 }, previous } }));
   const { html } = render(settings);
-  expect(html).toContain("Your Cloud already has 3 bots and 12 chats. Moving replaces them. They are backed up first");
+  expect(html).toContain("Your Cloud already has 3 bots and 12 chats. Moving replaces them. They are backed up on your Cloud first");
   expect(button(settings, "Move to Cloud")).toBeUndefined();
   expect(button(settings, "Replace my Cloud with this computer&#x27;s workspace") ?? button(settings, "Replace my Cloud with this computer's workspace")).toBeTruthy();
-  expect(html).toContain("2 bots, 5 chats");
-  button(settings, "Restore previous Cloud")!.props.onClick!(); await flush();
+  expect(html).toContain("2 bots, 5 chats, 300 MB kept on your Cloud");
+  expect(html).toContain("What your Cloud has now is kept as the previous Cloud instead, so you can swap again.");
+  button(settings, "Swap back to previous Cloud")!.props.onClick!(); await flush();
   expect(bridge.restorePrevious).toHaveBeenCalledExactlyOnceWith();
   expect(bridge.start).not.toHaveBeenCalled();
 });
@@ -82,7 +83,7 @@ it("while moving, shows the step and bytes and offers only Stop until the Cloud 
   expect(view.html).toContain("512 MB of 1 GB");
   expect(view.html).toContain("data-cloud-move=\"uploading\"");
   expect(button(settings, "Move to Cloud")).toBeUndefined();
-  expect(button(settings, "Restore previous Cloud")).toBeUndefined();
+  expect(button(settings, "Swap back to previous Cloud")).toBeUndefined();
   button(settings, "Stop the move")!.props.onClick!(); await flush();
   expect(bridge.cancel).toHaveBeenCalledExactlyOnceWith();
   push({ phase: "restarting", action: "move" });
@@ -97,7 +98,12 @@ it("reports a full Cloud with both sizes, and continues a stopped upload", async
   const { html } = render(settings);
   expect(html).toContain("Your Cloud has 2 GB free and this move needs about 6 GB. Nothing was moved.");
   expect(button(settings, "Continue the move")).toBeTruthy();
-  expect(cloudMoveErrorText({ code: "restore_failed", message: "Wait for bot turns to finish." })).toBe("The move did not finish: Wait for bot turns to finish.");
+  expect(html).toContain("What was already uploaded stays on your Cloud for up to a day");
+  expect(cloudMoveErrorText({ code: "restore_failed", message: "Wait for bot turns to finish." }))
+    .toBe("Your Cloud kept its workspace: Wait for bot turns to finish. What this move uploaded was removed from your Cloud.");
+  expect(cloudMoveErrorText({ code: "cancelled", message: "" })).toBe("The move was stopped. Your Cloud's workspace was not replaced.");
+  expect(cloudMoveErrorText({ code: "export_failed", message: "A workspace file changed during backup. Stop its writer and retry." }))
+    .toBe("The move did not finish: A workspace file changed during backup. Stop its writer and retry.");
 });
 
 it("reports what was moved when it is done", async () => {

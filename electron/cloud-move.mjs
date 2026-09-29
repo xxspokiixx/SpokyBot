@@ -65,10 +65,13 @@ export function parseCloudMoveStatus(value) {
   if (!record(value) || !record(value.contents) || !["bots", "rooms", "chats"].every(key => count(value.contents[key])) ||
     typeof value.empty !== "boolean" || !count(value.freeBytes)) return null;
   const previous = record(value.previous) && typeof value.previous.createdAt === "string" && ["bots", "rooms", "chats"].every(key => count(value.previous[key]))
-    ? { createdAt: value.previous.createdAt, bots: value.previous.bots, rooms: value.previous.rooms, chats: value.previous.chats } : null;
+    ? { createdAt: value.previous.createdAt, bots: value.previous.bots, rooms: value.previous.rooms, chats: value.previous.chats, ...(count(value.previous.bytes) ? { bytes: value.previous.bytes } : {}) } : null;
   return {
     contents: { bots: value.contents.bots, rooms: value.contents.rooms, chats: value.contents.chats },
     empty: value.empty, freeBytes: value.freeBytes, previous,
+    // A stored part of an earlier upload: space the next upload frees first.
+    uploadReceived: record(value.upload) && count(value.upload.received) ? value.upload.received : 0,
+    heldBytes: count(value.heldBytes) ? value.heldBytes : null,
     pendingRestore: value.pendingRestore === true, busy: value.busy === true,
     job: record(value.job) ? value.job : null,
     lastRestoreId: typeof value.lastRestoreId === "string" ? value.lastRestoreId : null,
@@ -89,6 +92,10 @@ async function readJson(response, limit = 256 * 1024) {
   try { return JSON.parse(Buffer.concat(chunks).toString("utf8") || "null"); } catch { return null; }
 }
 async function discard(response) { try { await response?.body?.cancel(); } catch {} }
+/** A server's own error sentence, safe to show: one line, bounded. */
+const sentence = value => typeof value === "string" && value.trim()
+  // oxlint-disable-next-line no-control-regex
+  ? value.replace(/[\x00-\x1f\x7f]+/g, " ").trim().slice(0, 300) : undefined;
 
 /** One move at a time; `state()` is what Settings and the Cloud's card show. */
 export function createCloudMove({ localRequest, pairHome, fetchImpl = fetch, tempRoot, availableBytes, now = Date.now, sleep = defaultSleep,
@@ -110,9 +117,10 @@ export function createCloudMove({ localRequest, pairHome, fetchImpl = fetch, tem
     if (!LOCAL_ROUTES.test(route)) fail("invalid_request", "Unsupported local request.");
     const response = await localRequest(route, { ...init, signal, redirect: "error" });
     if (!response.ok) {
-      await discard(response);
-      if ([409, 503].includes(response.status)) fail("busy", "Wait for bots on this computer to finish what they are doing, then move again.");
-      fail("export_failed", "This computer's workspace could not be prepared for the move.");
+      // This computer's server says why (a file that changed, a link it cannot copy).
+      const said = sentence((await readJson(response).catch(() => null))?.error);
+      if ([409, 503].includes(response.status)) fail("busy", said ?? "Wait for bots on this computer to finish what they are doing, then move again.");
+      fail("export_failed", said ?? "This computer's workspace could not be prepared for the move.");
     }
     const body = await readJson(response, 2 * 1024 ** 2);
     if (!record(body)) fail("export_failed", "This computer's workspace could not be prepared for the move.");
@@ -317,7 +325,7 @@ export function createCloudMove({ localRequest, pairHome, fetchImpl = fetch, tem
 
   function classify(error, signal) {
     return error instanceof CloudMoveError && !(signal?.aborted && error.code !== "cancelled") ? error
-      : signal?.aborted ? new CloudMoveError("cancelled", "The move was cancelled. Nothing on your Cloud was replaced.")
+      : signal?.aborted ? new CloudMoveError("cancelled", "The move was stopped. Your Cloud's workspace was not replaced.")
         : error?.code === "ENOSPC" ? new CloudMoveError("local_full", "This computer does not have enough free disk space to prepare the move.")
           : new CloudMoveError("network", "The move could not reach your Cloud. Check your connection and try again.");
   }
@@ -332,6 +340,11 @@ export function createCloudMove({ localRequest, pairHome, fetchImpl = fetch, tem
       return await work(session, signal);
     } catch (error) {
       const failure = classify(error, signal);
+      // Nothing was replaced: the Cloud drops what this attempt staged there
+      // (a stored upload part stays, so moving again continues it).
+      if (session && !committing) {
+        try { await discard(await cloudFetch(session, "/api/cloud-move/discard", { method: "POST", headers: { "content-type": "application/json" }, body: "{}", signal: AbortSignal.timeout(10_000) })); } catch { /* the next upload drops it */ }
+      }
       // An upload that stopped keeps its archive so Try again continues it.
       if (!RESUMABLE.has(failure.code) || committing) await disposeArchive();
       return publish({ phase: "failed", action, error: { code: failure.code, message: failure.message, ...failure.details },
@@ -350,23 +363,37 @@ export function createCloudMove({ localRequest, pairHome, fetchImpl = fetch, tem
       const [cloud, local] = await Promise.all([cloudStatus(session, signal), estimate(signal)]);
       if (cloud.pendingRestore || cloud.busy || cloud.job?.state === "running") fail("cloud_busy", "Your Cloud is busy. Try again in a minute.");
       if (local.bytes > CLOUD_MOVE_MAX_BYTES) fail("too_large", "This workspace is larger than a move can carry.");
-      // The Cloud checks again, exactly, before the upload starts.
-      if (cloud.freeBytes < 3 * local.bytes + SPACE_MARGIN) fail("cloud_full", "Your Cloud does not have enough free space for this move.", { freeBytes: cloud.freeBytes, neededBytes: 3 * local.bytes + SPACE_MARGIN });
+      // The Cloud checks again, exactly (its own backup included), before the
+      // upload starts. A stored part of an earlier upload is freed first.
+      if (cloud.freeBytes + cloud.uploadReceived < 3 * local.bytes + SPACE_MARGIN) {
+        fail("cloud_full", "Your Cloud does not have enough free space for this move.", { freeBytes: cloud.freeBytes + cloud.uploadReceived, neededBytes: 3 * local.bytes + SPACE_MARGIN });
+      }
       const archived = await archive(local, signal);
       await upload(session, archived, signal);
       publish({ phase: "checking", action: "move" });
       await cloudJson(session, "POST", "/api/cloud-move/preview", { sha256: archived.sha256, password: archived.password }, signal);
       const preview = await waitForPreview(session, signal);
       if (preview.summary.bots !== archived.summary.bots || preview.summary.messages !== archived.summary.messages) fail("invalid_backup", "Your Cloud read a different workspace than this computer sent.");
-      committing = true;
       publish({ phase: "replacing", action: "move", replacing: !cloud.empty });
-      // A dropped answer is settled by the Cloud's own status below.
-      await cloudJson(session, "POST", "/api/cloud-move/restore", { id: preview.id }, signal).catch(error => { if (error?.code !== "network" && !(error instanceof TypeError) && error?.name !== "TimeoutError") throw error; });
+      // A busy Cloud is asked again with the same staged workspace. Once the
+      // request is out it cannot be stopped; a dropped answer is settled by
+      // the Cloud's own status below.
+      for (let attempt = 0; ; attempt++) {
+        signal.throwIfAborted();
+        committing = true;
+        try { await cloudJson(session, "POST", "/api/cloud-move/restore", { id: preview.id }, signal); break; } catch (error) {
+          if (error?.code === "network" || error instanceof TypeError || error?.name === "TimeoutError") break;
+          committing = false;
+          if (error?.code !== "cloud_busy" || attempt >= retryDelaysMs.length) throw error;
+          await sleep(retryDelaysMs[attempt], signal);
+        }
+      }
       await disposeArchive();
       const after = await waitForRestart(session, "restore", { id: preview.id }, signal);
       return publish({ phase: "done", action: "move", moved: after.contents, previous: Boolean(after.previous) });
     }),
-    /** Put back what the Cloud held before the last move. */
+    /** Swap back: the previous Cloud returns, and what the Cloud has now
+     * becomes the previous Cloud, so this can be undone the same way. */
     restorePrevious: () => run("restore", async (session, signal) => {
       const before = await cloudStatus(session, signal);
       if (!before.previous) fail("no_previous", "There is no previous Cloud to restore.");

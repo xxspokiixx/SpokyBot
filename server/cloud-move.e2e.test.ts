@@ -15,6 +15,7 @@ import { afterAll, beforeAll, expect, it } from "vitest";
 import { createCloudMove } from "../electron/cloud-move.mjs";
 import { CLOUD_HOME_RESTART_EXIT_CODE, cloudPairingSignature } from "./cloud-home.ts";
 import { removeTempDir, waitForExit } from "./testing/cleanup.ts";
+import { stageWorkspaceBackup } from "./workspace-backup.ts";
 import { freePortBlock } from "./testing/ports.ts";
 
 const SERVER_DIR = dirname(fileURLToPath(import.meta.url));
@@ -231,24 +232,38 @@ it("moves this computer's bots, chats and rooms to an empty Cloud, which keeps i
   const config = JSON.parse(readFileSync(join(cloud.dataDir, "config.json"), "utf8"));
   expect(config.anthropic).toEqual({ key: CLOUD_KEY });
   expect(config.features?.sharedComputers).toBeUndefined();
-  // No desktop secret anywhere on the Cloud's volume, the staged bundle included.
-  const staged = join(cloud.dataDir, ".backups", readdirSync(join(cloud.dataDir, ".backups")).find((name) => existsSync(join(cloud.dataDir, ".backups", name, "staged", "data")))!, "staged", "data");
-  const bundleConfig = JSON.parse(readFileSync(join(staged, "config.json"), "utf8"));
-  for (const field of ["anthropic", "tts", "box", "instances", "mcpServers", "signIn"]) expect(bundleConfig).not.toHaveProperty(field);
-  expect(existsSync(join(staged, "workspace-credentials.json"))).toBe(false);
-  expect(existsSync(join(staged, "providers"))).toBe(false);
-  expect(existsSync(join(staged, "sessions.json"))).toBe(false);
-  expect(existsSync(join(staged, "sessions.json.open"))).toBe(false);
+  // No desktop secret anywhere on the Cloud's volume.
   for (const file of filesUnder(cloud.home)) {
     const text = readFileSync(file).toString("latin1");
     for (const value of Object.values(SOURCE_SECRETS)) expect(text.includes(value), `${value} in ${file}`).toBe(false);
   }
+  // What the restore replaced is not kept: no safety copy, no staged files.
+  expect(readdirSync(join(cloud.dataDir, ".backups")).filter((name) => name.startsWith("safety-") || /^[0-9a-f-]{36}$/.test(name))).toEqual([]);
   // This computer is unchanged: a copy, not a move of its files.
   expect((await botNames(source)).sort()).toEqual(desktopBots);
   expect(readFileSync(join(source.dataDir, "config.json"), "utf8")).toContain(SOURCE_SECRETS.anthropic);
 }, 150_000);
 
-it("backs up a Cloud that has work before replacing it, and Restore previous Cloud puts it back", async () => {
+it("the bundle a move sends carries no key, sign-in, credential or session of this computer", async () => {
+  const password = "fixture bundle password";
+  const exported = await api(source, "POST", "/api/workspace-backup/export", { body: { password, clientState: {} } });
+  expect(exported.status, JSON.stringify(exported.body)).toBe(200);
+  const archive = join(scratch, "bundle.ombbackup");
+  writeFileSync(archive, Buffer.from(await (await fetch(`${source.base}/api/workspace-backup/download/${exported.body.id}`)).arrayBuffer()));
+  const inspect = mkdtempSync(join(scratch, "bundle-"));
+  const staged = await stageWorkspaceBackup(inspect, archive, { password });
+  const data = join(inspect, ".backups", staged.id, "staged", "data");
+  const config = JSON.parse(readFileSync(join(data, "config.json"), "utf8"));
+  for (const field of ["anthropic", "tts", "box", "instances", "mcpServers", "signIn"]) expect(config).not.toHaveProperty(field);
+  for (const path of ["workspace-credentials.json", "providers", "sessions.json", "sessions.json.open", "environment-id"]) expect(existsSync(join(data, path)), path).toBe(false);
+  for (const file of filesUnder(data)) {
+    const text = readFileSync(file).toString("latin1");
+    for (const value of Object.values(SOURCE_SECRETS)) expect(text.includes(value), `${value} in ${file}`).toBe(false);
+  }
+  expect(readFileSync(join(data, "bots.json"), "utf8")).toContain("Moved Planner");
+}, 60_000);
+
+it("backs up a Cloud that has work before replacing it; swapping back keeps what it replaces, so it can be swapped again", async () => {
   await newBot(cloud, "Cloud-only bot", windowToken);
   const before = await api(cloud, "GET", "/api/cloud-move", { token: windowToken });
   expect(before.body).toMatchObject({ empty: false, previous: null });
@@ -259,15 +274,27 @@ it("backs up a Cloud that has work before replacing it, and Restore previous Clo
   const status = await api(cloud, "GET", "/api/cloud-move", { token: windowToken });
   expect(status.body.previous).toMatchObject({ bots: 3, rooms: 1 });
 
-  const restored = await mover().restorePrevious();
-  expect(restored, cloud.log.slice(-2000)).toMatchObject({ phase: "done", action: "restore" });
+  // Work done on the Cloud after the move is not lost by swapping back.
+  await newBot(cloud, "Post-move work", windowToken);
+  const swapped = await mover().restorePrevious();
+  expect(swapped, cloud.log.slice(-2000)).toMatchObject({ phase: "done", action: "restore" });
   expect((await botNames(cloud, windowToken)).sort()).toEqual(["Cloud-only bot", ...desktopBots].sort());
-  // Offered once: it has been put back.
-  expect((await api(cloud, "GET", "/api/cloud-move", { token: windowToken })).body.previous).toBeNull();
+  expect((await api(cloud, "GET", "/api/cloud-move", { token: windowToken })).body.previous).toMatchObject({ bots: 3, rooms: 1 });
+  const again = await mover().restorePrevious();
+  expect(again, cloud.log.slice(-2000)).toMatchObject({ phase: "done", action: "restore" });
+  expect((await botNames(cloud, windowToken)).sort()).toEqual(["Post-move work", ...desktopBots].sort());
+
+  // One undo point is all that stays: no safety copies, no staged files.
+  const backups = join(cloud.dataDir, ".backups");
+  expect(readdirSync(backups).filter((name) => name.startsWith("safety-") || /^[0-9a-f-]{36}$/.test(name) || name === "cloud-previous.next")).toEqual([]);
+  const held = (await api(cloud, "GET", "/api/cloud-move", { token: windowToken })).body;
+  const archive = lstatSync(join(backups, "cloud-previous", "workspace.ombbackup")).size;
+  expect(held.previous.bytes).toBe(archive);
+  expect(held.heldBytes).toBeLessThan(archive + 256 * 1024);
   const config = JSON.parse(readFileSync(join(cloud.dataDir, "config.json"), "utf8"));
   expect(config.anthropic).toEqual({ key: CLOUD_KEY });
   expect((await api(cloud, "GET", "/api/auth/session", { token: windowToken })).body).toMatchObject({ kind: "session", cloudHome: true });
-}, 200_000);
+}, 300_000);
 
 it("refuses a move too big for a Cloud, an upload that is not a backup, and anyone but the owner's app", async () => {
   const sha256 = (bytes: Buffer) => createHash("sha256").update(bytes).digest("hex");
@@ -288,7 +315,7 @@ it("refuses a move too big for a Cloud, an upload that is not a backup, and anyo
   expect(refused.job.error).toMatch(/not a supported encrypted workspace backup/);
   expect(refused.upload).toBeNull();
 
-  // The machine's loopback (a bot's shell there) and a client device cannot.
+  // A client device cannot, and the machine's own loopback is refused directly.
   expect((await api(cloud, "GET", "/api/cloud-move")).status).toBe(403);
   expect((await api(cloud, "POST", "/api/cloud-move/undo", { body: {} })).status).toBe(403);
   const invite = await api(cloud, "POST", "/api/auth/pairing", { token: windowToken, body: { scopes: ["client"], label: "Phone" } });
@@ -299,4 +326,15 @@ it("refuses a move too big for a Cloud, an upload that is not a backup, and anyo
   // A desktop is not a Cloud home: it never receives a workspace.
   expect((await api(source, "GET", "/api/cloud-move")).status).toBe(404);
   expect((await api(source, "GET", "/api/cloud-move/estimate")).body).toMatchObject({ bots: 2, rooms: 1, chats: 1 });
+}, 60_000);
+
+it("is not a wall against the machine itself: its loopback (a bot's shell, the same user) can pair itself as the owner", async () => {
+  // Documented in docs/cloud-pro.md: a process on the Cloud already reads and
+  // writes /data as the server's user, so this is no escalation.
+  const minted = await api(cloud, "POST", "/api/auth/pairing", { body: { scopes: ["admin", "client"], label: "bot shell" } });
+  expect(minted.status, JSON.stringify(minted.body)).toBe(200);
+  const shell = await api(cloud, "POST", "/api/auth/pair", { body: { code: minted.body.code } });
+  expect(shell.status, JSON.stringify(shell.body)).toBe(200);
+  expect((await api(cloud, "GET", "/api/cloud-move", { token: shell.body.token })).status).toBe(200);
+  await api(cloud, "DELETE", `/api/auth/sessions/${shell.body.session.id}`, { token: windowToken });
 }, 60_000);
