@@ -149,6 +149,26 @@ describe("a bot turn's principal fails closed (audit H1)", () => {
   });
 });
 
+describe("status for the next step's placement", () => {
+  it("reports one person's lent computers, online or asleep, with scopes and no secrets", async () => {
+    vi.useFakeTimers();
+    let live = true;
+    const broker = new SharedComputers(session => session !== alice.session || live);
+    const docs = { id: randomUUID(), name: "Docs", write: true };
+    const mac = registration({ computer: true, folders: [docs] }); broker.register(mac, alice, secret);
+    broker.register(registration({ terminal: true }), bob, other);
+    expect(broker.status(alice.person)).toEqual([{ id: mac.id, name: "Desktop", online: true, busy: false, lastSeenAt: expect.any(Number), scopes: { folders: [docs], terminal: false, screen: true } }]);
+    expect(broker.status(null)).toEqual([]);
+    expect(JSON.stringify(broker.status(alice.person))).not.toContain(secret);
+    await vi.advanceTimersByTimeAsync(40_001); // the Mac went to sleep
+    expect(broker.status(alice.person)).toMatchObject([{ id: mac.id, online: false }]);
+    expect(broker.list(alice.person)).toEqual([]);
+    live = false; // the Mac's session was revoked on the Cloud
+    expect(broker.status(alice.person)).toEqual([]);
+    broker.close();
+  });
+});
+
 describe("server-side scope check (audit M1)", () => {
   const readOnly = { id: randomUUID(), name: "Docs", write: false };
   const writable = { id: randomUUID(), name: "Drafts", write: true };
