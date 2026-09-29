@@ -17,6 +17,7 @@ import { draftSummary, foldPoint } from "./compaction-summary.ts";
 import { compactBudget, contextWindowFor, shouldCompact } from "./context-budget.ts";
 import { autoCompactWindow } from "./drivers/claude.ts";
 import { provenRequestPerson, SharedComputers, sharedComputerOperation, sharedComputerRegistration } from "./shared-computers.ts";
+import { cloudHomeTurnMayLend, createCloudRoutineAuthors } from "./cloud-lending.ts";
 import { SharedComputerControl } from "./shared-computer-control.ts";
 import { RoomHandoffs, type RoomHandoff } from "./room-handoffs.ts";
 import { assertRequestTarget, guardedRequestPath, requestConflict, requestNeedsInput, requestSourceForCard } from "./guarded-requests.ts";
@@ -630,6 +631,10 @@ const CLOUD_HOME = cloudHomeConfiguration();
 const lendingEnabled = () => sharedComputersEnabled(cfg) || CLOUD_HOME !== null;
 /** On a Cloud home every lent computer and every turn belong to one person. */
 const CLOUD_HOME_LENDER = "cloud-home";
+/** Routines whose instructions the Cloud home's owner wrote, and manual runs
+ * the owner started: the only routine turns that may use a lent Mac. */
+const cloudRoutineAuthors = CLOUD_HOME ? createCloudRoutineAuthors(join(DATA_DIR, "lending-routines.json")) : null;
+const ownerStartedRoutineRuns = new Set<string>();
 const cloudPairing = CLOUD_HOME ? createCloudPairing({ secret: CLOUD_HOME.bootstrapSecret, sessions }) : null;
 if (CLOUD_HOME) {
   // The signing secret is held in memory from here on, and a platform
@@ -752,7 +757,7 @@ function messageSender(auth: RequestAuth): ResolvedSender | undefined {
  * email when they signed in with one (a new device is still them), else the
  * paired session itself. Hashed, so a message or a thread can carry it
  * without handing other members a session id. */
-function personKey(session: SessionRecord): string {
+function personKey(session: Pick<SessionRecord, "id" | "email">): string {
   const basis = session.email ? `email:${session.email.trim().toLowerCase()}` : `session:${session.id}`;
   return `p_${createHash("sha256").update(basis).digest("base64url").slice(0, 22)}`;
 }
@@ -802,19 +807,53 @@ function threadPersonKey(threadId: string): string | undefined {
  * this machine (who lends nothing to itself) and anything unprovable act for
  * nobody here. Deliberately not the usage ledger's trigger, which defaults to
  * the owner. */
-function sharedComputerPrincipal(capability: Pick<InternalCapability, "threadId" | "generation">): string | null {
-  // A Cloud home is one person's server: every turn on it acts for them, and
-  // only their own admin devices may lend (see the connect route).
-  if (CLOUD_HOME) return CLOUD_HOME_LENDER;
+function sharedComputerPrincipal(capability: Pick<InternalCapability, "botId" | "threadId" | "generation">): string | null {
+  // A Cloud home lends the owner's Mac only to turns that provably act for
+  // the owner (server/cloud-lending.ts): their own conversation from one of
+  // their devices, or a routine they wrote. Never a guest, a webhook, a room
+  // or a line someone else slipped in.
+  if (CLOUD_HOME) {
+    return cloudHomeTurnMayLend({
+      request: directRequestOwners.get(capability.threadId),
+      generation: capability.generation,
+      thread: store.messagesFor(capability.threadId),
+      ownerPerson: cloudOwnerPerson,
+      routineRun: () => {
+        const run = activeRoutineRunForThread(capability.threadId);
+        if (!run || run.threadId !== capability.threadId || store.taskByThread(capability.botId, capability.threadId)?.routineRunId !== run.id) return null;
+        return {
+          triggerSource: run.triggerSource ?? (run.manual ? "manual" : "schedule"),
+          ownerStarted: ownerStartedRoutineRuns.has(run.id),
+          ownerAuthored: cloudRoutineAuthors?.authored(run.routineId, run) === true,
+        };
+      },
+    }) ? CLOUD_HOME_LENDER : null;
+  }
   return provenRequestPerson(directRequestOwners.get(capability.threadId), capability.generation,
     (messageId) => linePersonKey(store.messagesFor(capability.threadId).find((message) => message.id === messageId)));
 }
 
-/** Whose lent computers a status reader may see: the Cloud home's one person
- * on a Cloud home, else the person behind the asking session. */
+/** Whose lent computers a status reader may see: on a Cloud home, only the
+ * owner's own devices (admin sessions) see the lent Mac, never a guest or a
+ * local process; elsewhere, the person behind the asking session. */
 function sessionLendingPrincipal(auth: RequestAuth): string | null {
-  if (CLOUD_HOME) return CLOUD_HOME_LENDER;
+  if (CLOUD_HOME) return cloudOwnerSession(auth) ? CLOUD_HOME_LENDER : null;
   return auth.kind === "session" ? personKey(auth.session) : null;
+}
+
+/** On a Cloud home: a request from one of the owner's own devices. The
+ * Admin's signed pairing gives the desktop an admin session; a guest the
+ * owner pairs with chat-only access has client scope. Loopback is not the
+ * owner here: nothing the person does reaches a Cloud home that way, only
+ * processes on the machine (a bot's shell) do. */
+function cloudOwnerSession(auth: RequestAuth): boolean {
+  return auth.kind === "session" && auth.scopes.includes("admin");
+}
+
+/** On a Cloud home: whether a message's person key is one of the owner's own
+ * devices right now (a live admin session with that key). */
+function cloudOwnerPerson(person: string | undefined): boolean {
+  return Boolean(person) && sessions.list().some((session) => session.scopes.includes("admin") && personKey(session) === person);
 }
 
 /** Whose session may answer a card. The provider CLI's own approval modes and
@@ -1836,6 +1875,9 @@ const directTurnGenerationByThread = new Map<string, string>();
 // replaces it; unknown control-plane continuations deliberately lose proof.
 const directRequestOwners = new Map<string, {
   generation: string; messageId?: string; generations: Set<string>; turnId: string | null; stopped?: boolean;
+  /** Set when a routine run or a webhook started this request (lending
+   * provenance on a Cloud home: server/cloud-lending.ts). */
+  automation?: RoutineRunTrigger;
 }>();
 // Stop revokes credentials before completion, but the receipt must retain its
 // exact provider-turn owner until that completion or explicit failure cleanup.
@@ -8236,7 +8278,7 @@ async function startTurn(
   if (requestGenerations.size >= 500) { requestGenerations.clear(); requestMessageId = undefined; }
   requestGenerations.add(dispatchClaimId);
   directRequestOwners.set(threadId, { generation: dispatchClaimId, messageId: requestMessageId,
-    generations: requestGenerations, turnId: null });
+    generations: requestGenerations, turnId: null, ...(opts?.automationSource ? { automation: opts.automationSource } : {}) });
   // An unknown control-plane wake may invalidate a prior final, but it must
   // never acquire authority by guessing the latest user as its origin.
   const pendingSource = requestMessageId ?? store.activePath(threadId).findLast(message => message.role === "user")?.id;
@@ -16532,7 +16574,11 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
       const body = await readBody(req);
       const hidden = hiddenRoutineTarget(body, visible);
       if (hidden) return json(res, 404, { error: hidden });
-      return json(res, 201, { routine: routines!.create(body) });
+      const routine = routines!.create(body);
+      // On a Cloud home, a routine the owner writes from their own device may
+      // use their lent Mac when it runs (server/cloud-lending.ts).
+      if (cloudRoutineAuthors && cloudOwnerSession(auth)) cloudRoutineAuthors.record(routine.id, routine);
+      return json(res, 201, { routine });
     }
     // The desktop shell polls this to decide whether to hold the computer
     // awake: a run in flight, or a routine due within the hour.
@@ -16542,6 +16588,7 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
     let routineMatch = path.match(/^\/api\/routines\/([\w-]+)\/run$/);
     if (routineMatch && method === "POST") {
       const run = routines!.runNow(routineMatch[1]);
+      if (run && CLOUD_HOME && cloudOwnerSession(auth)) ownerStartedRoutineRuns.add(run.id);
       return run ? json(res, 201, { run }) : json(res, 404, { error: "no such routine" });
     }
     routineMatch = path.match(/^\/api\/routines\/([\w-]+)$/);
@@ -16549,11 +16596,21 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
       const body = await readBody(req);
       const hidden = hiddenRoutineTarget(body, visible);
       if (hidden) return json(res, 404, { error: hidden });
+      const before = cloudRoutineAuthors ? routines!.listRoutines().find((candidate) => candidate.id === routineMatch![1]) : undefined;
+      const wasOwners = Boolean(before && cloudRoutineAuthors?.authored(before.id, before));
       const routine = routines!.update(routineMatch[1], body);
+      // The owner's own edit keeps (or, when it rewrites the instructions,
+      // makes) the routine theirs. Anyone else's edit changes what it does,
+      // so the recorded fingerprint no longer matches and it stops lending.
+      if (routine && cloudRoutineAuthors && cloudOwnerSession(auth) && (wasOwners || (body && typeof body === "object" && "prompt" in body))) {
+        cloudRoutineAuthors.record(routine.id, routine);
+      }
       return routine ? json(res, 200, { routine }) : json(res, 404, { error: "no such routine" });
     }
     if (routineMatch && method === "DELETE") {
-      return routines!.remove(routineMatch[1])
+      const removed = routines!.remove(routineMatch[1]);
+      if (removed) cloudRoutineAuthors?.forget(routineMatch[1]);
+      return removed
         ? json(res, 200, { ok: true })
         : json(res, 404, { error: "no such routine" });
     }

@@ -7,6 +7,7 @@ import path from "node:path";
 import { createHash } from "node:crypto";
 import { spawn } from "node:child_process";
 import readline from "node:readline";
+import { lentScreenArguments, lentScreenToolListing } from "./lent-screen-tools.mjs";
 
 const LIMIT = 256 * 1024;
 const PROTECTED = "Desktop credentials and sharing settings cannot be accessed through a shared folder";
@@ -32,21 +33,10 @@ export function personalSecretPaths(home) {
   return typeof home === "string" && home ? PERSONAL_SECRETS.map(entry => path.join(home, ...entry.split("/"))) : [];
 }
 
-/** The computer-control tools a lent screen offers: observing windows and
- * operating apps the way a person at the keyboard would. Everything else the
- * local driver can do (upload an arbitrary local file into a page, record or
- * replay to a chosen path, change or update its own configuration, install a
- * binary, open a DevTools port, kill any process) works outside the screen
- * and outside every folder scope, so it is not lent. Unknown tools are
- * refused, so a newer driver lends nothing new until listed here. */
-export const LENT_SCREEN_TOOLS = Object.freeze(new Set([
-  "bring_to_front", "click", "double_click", "right_click", "drag", "scroll", "move_cursor", "hotkey", "press_key",
-  "type_text", "set_value", "launch_app", "list_apps", "list_windows", "get_window_state", "get_accessibility_tree",
-  "get_desktop_state", "get_screen_size", "get_cursor_position", "zoom", "screenshot", "check_permissions",
-  "start_session", "end_session", "get_session_state", "escalate_session",
-  "get_agent_cursor_state", "set_agent_cursor_enabled", "set_agent_cursor_motion", "set_agent_cursor_style",
-  "browser_click", "browser_type", "browser_navigate", "browser_pointer", "browser_dialog", "get_browser_state",
-]));
+/** The computer-control tools a lent screen offers, and the arguments each
+ * accepts: observing windows and operating apps the way a person at the
+ * keyboard would (electron/lent-screen-tools.mjs). */
+export { LENT_SCREEN_TOOLS } from "./lent-screen-tools.mjs";
 
 /** Any component named .git, compared the way a case-folding, Unicode-
  * normalizing filesystem compares it: in the requested path, or in the
@@ -209,12 +199,14 @@ export function createSharedCua(connection) {
       await ready; signal.throwIfAborted();
       if (operation.action === "computer_tools") {
         const listed = await request("tools/list", {}, signal);
-        const tools = Array.isArray(listed?.tools) ? listed.tools.filter(tool => LENT_SCREEN_TOOLS.has(tool?.name)) : [];
-        return text({ ...listed, tools });
+        return text({ ...listed, tools: lentScreenToolListing(listed?.tools) });
       }
       if (typeof operation.tool_name !== "string" || !operation.tool_name) throw new Error("Choose a tool from computer_tools first");
-      if (!LENT_SCREEN_TOOLS.has(operation.tool_name)) throw new Error(`${operation.tool_name.slice(0, 100)} is not part of lent apps and screen`);
-      return request("tools/call", { name: operation.tool_name, arguments: operation.arguments ?? {} }, signal);
+      // Tool and every argument checked here, on this computer: nothing the
+      // server sends reaches the driver unless a lent screen accepts it.
+      const lent = lentScreenArguments(operation.tool_name, operation.arguments);
+      if (lent.error) throw new Error(lent.error);
+      return request("tools/call", { name: operation.tool_name, arguments: lent.arguments }, signal);
     },
     close() { lines.close(); fail(new Error("Computer sharing stopped")); },
   };
