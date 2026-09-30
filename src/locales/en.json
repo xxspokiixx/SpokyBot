@@ -993,6 +993,8 @@
   "composer.error.clipboardImage": "Could not read the clipboard image. Try attaching the image file instead.",
   "composer.dictation.macOnly": "Dictation is only available on macOS for now.",
   "composer.dictation.permission": "Dictation needs Microphone + Speech Recognition access — System Settings → Privacy & Security.",
+  "composer.dictation.disabled": "Turn on Dictation in System Settings → Keyboard, then try again.",
+  "composer.dictation.failed": "Dictation couldn't start. Try again.",
   "composer.dictation.unavailable": "Dictation isn't available in this build.",
   "composer.dictation.start": "Start dictation",
   "composer.dictation.stop": "Stop dictation",
