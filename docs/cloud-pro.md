@@ -364,8 +364,24 @@ On the Cloud home (`server/shared-computers.ts`, `server/index.ts`):
   instructions or notifications (a guest keeps its picture and voice), rename
   the owner's rooms or change their bulletin, change a conversation's approval
   level or a bot's default model, or point a routine's results at the owner's
-  conversations. A local process on the Cloud is not the owner for any of
-  these.
+  conversations. On a guest's device (or one of the owner's paired with
+  chat-only access) the composer of any other conversation is replaced by a
+  **New conversation** button.
+- A conversation a guest opened (or a guest's routine opened for its
+  results, or a room a guest opened) runs in Ask whatever the bot's own
+  level: no Auto reviewer, no Full access, no saved command answers for it.
+  So does a room turn whose latest line from a person is a guest's. It works
+  in a folder of its own, never the bot's project folder the owner's
+  conversations share.
+- Everything the owner's own devices write carries one owner identity, so
+  pairing a device again (or revoking one) never makes the owner's earlier
+  conversations someone else's. A guest never carries it.
+- On a Cloud home a request from the machine itself without a session (a
+  bot's shell, any local process) is only a service, whatever
+  `OMB_LOOPBACK_TRUST` says: it may reach the health check, the Slack
+  worker's guarded routes and a turn's own capability routes, decline a card
+  and nothing else. It cannot open a pairing window, change a setting or a
+  bot, answer a card or review memory.
 - A bot's memory and its other conversations reach every one of its turns,
   so on a Cloud home nothing a conversation the owner did not write produces
   flows into them (`server/lending-memory.ts`):
@@ -378,9 +394,13 @@ On the Cloud home (`server/shared-computers.ts`, `server/index.ts`):
     only on conversations the owner alone opened and wrote in (a title is
     words too);
   - a change while such a turn runs flags the bot: to MEMORY.md, a topic file
-    or a daily log, or to an instruction file its engine reads in one of the
-    bot's working folders or a folder above one (`CLAUDE.md`, `AGENTS.md`,
-    `.mcp.json`, `.claude/settings.json`, skills, agents and commands). A
+    or a daily log, or to an instruction file its engine reads in the folder
+    of a conversation the owner opened, the bot's own folder, or a folder
+    above one (`CLAUDE.md`, `AGENTS.md`, `.mcp.json`,
+    `.claude/settings.json`, skills, agents and commands). A guest's own
+    folder is not watched: nothing there reaches the owner's turns. A skills,
+    agents or commands folder of more than 200 entries is judged as a whole
+    (any entry added or removed there is a change). A
     line someone else steers into the owner's running turn makes that turn
     count as theirs from then on. A link is judged by where it points, and
     on a Cloud home memory is never read through one. A flagged bot's turns
@@ -392,7 +412,8 @@ On the Cloud home (`server/shared-computers.ts`, `server/index.ts`):
     shown: if anything changed since, the panel shows it again. The owner's
     own turns, their edits in the Memory panel (save, delete, undo), upkeep
     on their conversations and the tidy-up never flag it. A damaged record
-    (`lending-memory.json`) flags every bot until the owner reviews it.
+    (`lending-memory.json`) flags every bot that existed when it was found
+    until the owner reviews each; a bot created later starts clean.
 - What this cannot stop: any conversation whose bot can run commands without
   the owner approving (Auto or Full access, or a remembered command), a
   guest's included, controls the Cloud machine: it can change other bots'
@@ -454,8 +475,9 @@ with code 75 and the launcher starts only the server again.
 
 ### Why the server stays on loopback
 
-`server/request-auth.ts` treats an unproxied loopback request as the
-machine's owner. The server therefore never binds a public interface. Caddy
+`server/request-auth.ts` treats an unproxied loopback request on a Cloud
+home as a service, never the owner (see above), and the server never binds
+a public interface. Caddy
 (`deploy/fly/Caddyfile`) forwards every request with `X-Forwarded-Proto:
 https` and `X-Forwarded-For`, so the server sees each one as remote: it needs
 a paired session, whatever `Host` it claims. Caddy trusts `Fly-Client-IP`
@@ -812,10 +834,11 @@ Backups keeps its safety copy as before.
 ### Move security
 
 - Every Cloud route needs a paired session with admin scope. A client-scope
-  device is refused, and so is a bare loopback request. That second refusal
-  is not a wall against the machine itself: a process there (a bot's shell)
-  runs as the server's user, already reads and writes `/data`, and can pair
-  itself as the owner through loopback like any owner tool. Only a Cloud home
+  device is refused, and so is a bare loopback request: on a Cloud home a
+  process on the machine (a bot's shell) is only a service and cannot pair
+  itself as the owner. It still runs as the server's user and can read and
+  write `/data` directly, which is why a bot that runs commands without the
+  owner approving is trusted with the machine (above). Only a Cloud home
   receives a workspace; any other server answers `404`, except for sizing its
   own (`/api/cloud-move/estimate`).
 - The upload is bounded by its declared size, the per-part limit and the

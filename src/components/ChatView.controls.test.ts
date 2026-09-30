@@ -8,7 +8,7 @@ import type { ModelPicker } from "./ModelPicker";
 const fixture = vi.hoisted(() => {
   vi.stubGlobal("window", {});
   vi.stubGlobal("localStorage", { getItem: () => null, setItem: () => {} });
-  return { dispatch: vi.fn(), showToolCalls: false, platform: "other", localReasonCode: "cua-driver-unavailable", localMessage: "", model: null as ComponentProps<typeof ModelPicker> | null,
+  return { dispatch: vi.fn(), canWrite: null as boolean | null, showToolCalls: false, platform: "other", localReasonCode: "cua-driver-unavailable", localMessage: "", model: null as ComponentProps<typeof ModelPicker> | null,
     approval: null as ComponentProps<typeof ApprovalModeSelector> | null };
 });
 vi.mock("@/state/store", async (importOriginal) => {
@@ -26,6 +26,7 @@ vi.mock("./DesktopCapabilities", async (importOriginal) => ({
   useDesktopCapabilities: () => ({ capabilities: { dictation: { available: false }, host: { packaged: true, platform: fixture.platform }, localComputer: { available: false, reasonCode: fixture.localReasonCode, message: fixture.localMessage } }, ready: true }),
 }));
 vi.mock("@/lib/analytics", () => ({ track: vi.fn() }));
+vi.mock("@/lib/cloud-guest", () => ({ useCanWriteIn: () => fixture.canWrite }));
 vi.mock("./ModelPicker", () => ({ ModelPicker: (props: ComponentProps<typeof ModelPicker>) => {
   fixture.model = props;
   return createElement("span", { "data-test-model-control": true });
@@ -35,7 +36,7 @@ vi.mock("./ApprovalModeSelector", () => ({ ApprovalModeSelector: (props: Compone
   return createElement("span", { "data-test-approval-control": true });
 } }));
 
-const { ChatView, ErrorRow, claudeUpdateTarget } = await import("./ChatView");
+const { ChatView, ErrorRow, NewConversationInstead, claudeUpdateTarget } = await import("./ChatView");
 afterAll(() => vi.unstubAllGlobals());
 
 const bot: Bot = {
@@ -241,5 +242,32 @@ describe("screen reader announcements", () => {
     const markup = renderToStaticMarkup(createElement(ChatView, { bot }));
     expect(markup.match(/data-testid="transcript-announcer"/g)).toHaveLength(1);
     expect(markup).toMatch(/<p role="status" aria-live="polite" aria-atomic="true" class="sr-only" data-testid="transcript-announcer">/);
+  });
+});
+
+// On an OMB Cloud home a guest writes only in conversations it opened: in
+// any other, one button starts its own instead of a send that fails.
+describe("a guest's composer on a Cloud home", () => {
+  it("offers a new conversation in one click, with no dialog", () => {
+    const onNew = vi.fn();
+    const markup = renderToStaticMarkup(createElement(NewConversationInstead, { onNew }));
+    expect(markup).toContain("You can only write in conversations you started on this Cloud.");
+    expect(markup).toContain(">New conversation<");
+    expect(markup).not.toContain("<textarea");
+    const tree = NewConversationInstead({ onNew }) as { props: { children: Array<{ type: string; props: { onClick?: () => void } }> } };
+    tree.props.children.find((child) => child.type === "button")!.props.onClick!();
+    expect(onNew).toHaveBeenCalledOnce();
+  });
+
+  it("takes the composer's place only where the device may not write", () => {
+    fixture.canWrite = false;
+    const refused = renderToStaticMarkup(createElement(ChatView, { bot }));
+    expect(refused).toContain('data-testid="cloud-guest-composer"');
+    expect(refused).not.toContain("<textarea");
+    fixture.canWrite = true;
+    const allowed = renderToStaticMarkup(createElement(ChatView, { bot }));
+    expect(allowed).not.toContain('data-testid="cloud-guest-composer"');
+    expect(allowed).toContain("<textarea");
+    fixture.canWrite = null;
   });
 });

@@ -655,9 +655,15 @@ const lendingMemory = CLOUD_HOME ? createLendingMemory({
   files: (botId) => {
     const bot = store.bot(botId);
     // The workspace as a turn dispatch leaves it: a bot's first turn seeds
-    // MEMORY.md, and that seed is not a change anyone made.
-    return botMemoryFiles(bot ? { id: bot.id, cwd: bot.cwd, tasks: store.tasks(bot.id) } : undefined, { workspace: ensureWorkspace, taskWorkspaces: TASK_WORKSPACES_DIR });
+    // MEMORY.md, and that seed is not a change anyone made. Only the folders
+    // of conversations the owner opened: what a guest's own conversation
+    // writes in its own private folder reaches no turn of the owner's.
+    // (A bot's own conversations are never a room's: its opener is enough.)
+    const ownerOpened = (threadId: string) => { const starter = threadStarters.get(threadId); return starter === undefined || cloudOwnerPerson(starter); };
+    return botMemoryFiles(bot ? { id: bot.id, cwd: bot.cwd, tasks: store.tasks(bot.id).filter((task) => ownerOpened(task.threadId)) } : undefined,
+      { workspace: ensureWorkspace, taskWorkspaces: TASK_WORKSPACES_DIR });
   },
+  knownBots: () => store.bots.map((bot) => bot.id),
   log: (line) => console.warn(line),
 }) : null;
 // On a Cloud home memory is never read through a link (server/workspace.ts).
@@ -687,7 +693,7 @@ const sharedWorkspaceFullAccessEnabled = () => SHARED_WORKSPACE_FULL_ACCESS && B
 // Who a loopback request without a session is (server/request-auth.ts
 // LoopbackTrust): the owner on a desktop or a one-person server; a service on
 // a shared workspace, where every bot's shell is a loopback caller too.
-const LOOPBACK = resolveLoopbackTrust({ desktopManaged: DESKTOP_MANAGED, hostedWorkspace: HOSTED_WORKSPACE });
+const LOOPBACK = resolveLoopbackTrust({ desktopManaged: DESKTOP_MANAGED, hostedWorkspace: HOSTED_WORKSPACE, cloudHome: Boolean(CLOUD_HOME) });
 // `openmausbot serve` on a service-trust server hands the server it starts a
 // per-launch secret on stdin, then closes it (server/cli.ts). It opens only
 // the pairing route, for that CLI. Never an environment variable: every
@@ -777,7 +783,7 @@ const turnTriggers = new Map<string, UsageTrigger>();
 function messageSender(auth: RequestAuth): ResolvedSender | undefined {
   if (auth.kind !== "session") return undefined;
   const name = (auth.session.email ?? auth.session.label ?? "").trim();
-  return name ? { name, id: personKey(auth.session) } : undefined;
+  return name ? { name, id: actorKey(auth) } : undefined;
 }
 
 /** An opaque, stable key for the person behind a session: their account
@@ -881,7 +887,8 @@ const LENDING_MEMORY_CHANGED = "This bot's memory was changed in a conversation 
 function cloudLendingRefusal(capability: Pick<InternalCapability, "botId" | "threadId" | "generation">): "unproven" | "not-owner" | "someone-else" | "memory-changed" | null {
   const refusal = cloudHomeLendingRefusal(cloudLendingTurn(capability));
   if (refusal) return refusal;
-  return lendingMemory?.reconcile(capability.botId, foreignTurnRunning(capability.botId)).changedBySomeoneElse ? "memory-changed" : null;
+  // Checked on every Mac action: one snapshot per tick is enough to look.
+  return lendingMemory?.reconcile(capability.botId, foreignTurnRunning(capability.botId), { cached: true }).changedBySomeoneElse ? "memory-changed" : null;
 }
 
 /** Who opened a conversation, and the room it is in: on a Cloud home a
@@ -964,7 +971,7 @@ const CLOUD_OWNER_PROFILE_FIELDS = ["name", "title", "description", "soul", "not
  * cloudGuestSendRefusal instead. Elsewhere always null. */
 function cloudThreadRefusal(auth: RequestAuth, threadId: string): string | null {
   if (!CLOUD_HOME || cloudOwnerSession(auth)) return null;
-  if (auth.kind === "session" && threadStarters.get(threadId) === personKey(auth.session)) return null;
+  if (auth.kind === "session" && threadStarters.get(threadId) === actorKey(auth)) return null;
   return "On this Cloud you can only change conversations you started.";
 }
 
@@ -976,8 +983,61 @@ function cloudThreadRefusal(auth: RequestAuth, threadId: string): string | null 
  * else's all the same (see noteSomeoneElsesLine). */
 function cloudGuestSendRefusal(auth: RequestAuth, threadId: string): string | null {
   if (!CLOUD_HOME || auth.kind !== "session" || cloudOwnerSession(auth)) return null;
-  return threadStarters.get(threadId) === personKey(auth.session)
+  return threadStarters.get(threadId) === actorKey(auth)
     ? null : "On this Cloud you can only write in conversations you started. Start a new conversation with this bot.";
+}
+
+/** On a Cloud home: the one key every line, card answer, conversation and
+ * routine of the owner's own devices carries, whichever device and however
+ * often it was paired again, so re-pairing never demotes what the owner
+ * wrote. Only an admin session is given it: a guest keeps its own key. */
+const CLOUD_OWNER_KEY = CLOUD_HOME ? `p_${createHash("sha256").update(`cloud-owner:${CLOUD_HOME.machineId}`).digest("base64url").slice(0, 22)}` : null;
+/** …and the key of nobody at all: what a conversation made for work no
+ * person can be named for (a routine with no recorded writer) opens as. */
+const CLOUD_NOBODY_KEY = `p_${createHash("sha256").update("cloud-nobody").digest("base64url").slice(0, 22)}`;
+
+/** Who a session acts as, for lines, openers and answers: on a Cloud home
+ * one of the owner's own devices is the owner; anyone else is themselves. */
+function actorKey(auth: RequestAuth & { kind: "session" }): string {
+  return CLOUD_OWNER_KEY && auth.scopes.includes("admin") ? CLOUD_OWNER_KEY : personKey(auth.session);
+}
+
+/** On a Cloud home: whoever is writing a routine in this request (routine
+ * creation and edits can open its results conversation). */
+let routineWriterInFlight: string | undefined;
+function withRoutineWriter<T>(writer: string, work: () => T): T {
+  const previous = routineWriterInFlight;
+  routineWriterInFlight = writer;
+  try { return work(); } finally { routineWriterInFlight = previous; }
+}
+/** Who opens a routine's results conversation on a Cloud home: the writer
+ * of this request, else the owner for a routine they wrote as it stands,
+ * else its last writer when that is not the owner, else nobody. */
+function routineOpener(routineId: string): string {
+  if (routineWriterInFlight) return routineWriterInFlight;
+  const routine = routines?.listRoutines().find((candidate) => candidate.id === routineId);
+  if (routine && CLOUD_OWNER_KEY && cloudRoutineAuthors?.authored(routineId, routine)) return CLOUD_OWNER_KEY;
+  const writer = cloudRoutineAuthors?.writer(routineId);
+  return writer && !cloudOwnerPerson(writer) ? writer : CLOUD_NOBODY_KEY;
+}
+
+/** On a Cloud home: a conversation someone other than the owner opened (a
+ * guest, a guest's routine, or its room). Its turns run in Ask, in a private
+ * folder of their own, and nothing in it reaches the owner's turns. */
+function cloudGuestOpened(threadId: string): boolean {
+  return Boolean(CLOUD_HOME) && cloudThreadStarters(threadId).some((person) => person !== undefined && !cloudOwnerPerson(person));
+}
+
+/** On a Cloud home: a turn a guest drives, which runs in Ask whatever the
+ * bot's own level (no Full access, no Auto reviewer, no saved commands): a
+ * conversation a guest opened, or a room whose latest line from a person is
+ * a guest's. */
+function cloudGuestDriven(threadId: string): boolean {
+  if (!CLOUD_HOME) return false;
+  if (cloudGuestOpened(threadId)) return true;
+  if (!store.groupByThread(threadId)) return false;
+  const person = store.messagesFor(threadId).findLast((line) => line.role === "user" && !line.peerAsk && line.sender?.id)?.sender?.id;
+  return person !== undefined && !cloudOwnerPerson(person);
 }
 
 /** On a Cloud home: a request from one of the owner's own devices. The
@@ -992,7 +1052,10 @@ function cloudOwnerSession(auth: RequestAuth): boolean {
 /** On a Cloud home: whether a message's person key is one of the owner's own
  * devices right now (a live admin session with that key). */
 function cloudOwnerPerson(person: string | undefined): boolean {
-  return Boolean(person) && sessions.list().some((session) => session.scopes.includes("admin") && personKey(session) === person);
+  if (!person) return false;
+  if (person === CLOUD_OWNER_KEY) return true;
+  // Written before the owner had one key: a device of theirs still paired.
+  return sessions.list().some((session) => session.scopes.includes("admin") && personKey(session) === person);
 }
 
 /** On a Cloud home, a session that is not one of the owner's own devices may
@@ -1065,7 +1128,7 @@ function decisionActorFor(auth: RequestAuth): DecisionActor {
 function cardAnswererFor(auth: RequestAuth): CardAnswerer {
   if (auth.kind === "loopback") return auth.trust === "service" ? { kind: "worker" } : { kind: "loopback" };
   return { kind: "session", name: (auth.session.email ?? auth.session.label ?? "").trim() || "Signed-in user",
-    ...(CLOUD_HOME ? { person: personKey(auth.session) } : {}) };
+    ...(CLOUD_HOME ? { person: actorKey(auth) } : {}) };
 }
 
 /** On a Cloud home, who is answering a card right now, by request id: the
@@ -1088,7 +1151,7 @@ async function answeringCardAs(auth: RequestAuth, threadId: string, requestId: s
     const card = store.messagesFor(threadId).find((message) => message.card?.requestId === requestId)?.card;
     return Boolean(card && !card.answered && !card.dismissed && !card.expired);
   })();
-  if (CLOUD_HOME && open) cloudCardAnswersInFlight.set(requestId, auth.kind === "session" ? personKey(auth.session) : undefined);
+  if (CLOUD_HOME && open) cloudCardAnswersInFlight.set(requestId, auth.kind === "session" ? actorKey(auth) : undefined);
   try {
     await withDecisionActor(decisionActorFor(auth), work);
   } finally {
@@ -3450,6 +3513,9 @@ async function botOverview(bot: BotRecord): Promise<BotOverview> {
  * threads it delegates Full too (delegatedFullAccess), so the grant the
  * person gave the Chief covers the work the Chief hands out. */
 const approvalModeForTurn = (bot: BotRecord, peerInitiated = false): ApprovalMode => {
+  // On a Cloud home a conversation a guest opened runs in Ask, whatever the
+  // bot's own level (`bot` is projected onto its conversation).
+  if (cloudGuestDriven(bot.threadId)) return "ask";
   const mode = approvalModeForOrigin(approvalModeFor(bot), { peerInitiated });
   if (!supportsApprovalMode(bot.modelSelection, mode)) {
     return "ask";
@@ -3506,7 +3572,9 @@ function grantDelegatedFullAccess(from: BotRecord, target: BotRecord, threadId: 
 /** A room member's level for one turn. Work a Full-access Chief hands out
  * in a room runs Full for that turn: the room thread is shared, so the
  * level is not stored on it — it rides the handoff. */
-function roomTurnApprovalMode(bot: BotRecord, orchestration?: GroupTurnOrchestration): ApprovalMode {
+function roomTurnApprovalMode(bot: BotRecord, threadId: string, orchestration?: GroupTurnOrchestration): ApprovalMode {
+  // On a Cloud home a room turn a guest drives runs in Ask (cloudGuestDriven).
+  if (cloudGuestDriven(threadId)) return "ask";
   const handoff = orchestration?.roomHandoffId ? roomHandoffs.nodes.get(orchestration.roomHandoffId) : undefined;
   const source = handoff?.parentId ? roomHandoffs.nodes.get(handoff.parentId) : undefined;
   const from = source ? store.bot(source.botId) : undefined;
@@ -6806,10 +6874,13 @@ bus.subscribe((event: RuntimeEvent) => {
       // always reaches the human — even Full access never invents an answer.
       const asker = bot ?? (speaker ? store.bot(speaker.botId) : undefined);
       const unattended = permission && asker && event.requestId ? isUnattended(asker.id, event.threadId) : false;
-      const effectiveApprovalMode = asker ? approvalModeForTurn(asker, isInternalTurn(event.threadId)) : "ask";
+      // A turn a guest drives on a Cloud home is Ask, room turns included,
+      // and no command the owner saved answers for it.
+      const guestDriven = cloudGuestDriven(event.threadId);
+      const effectiveApprovalMode = asker && !guestDriven ? approvalModeForTurn(asker, isInternalTurn(event.threadId)) : "ask";
       // Native shell descriptors are distinct from computer/MCP permissions;
       // choosing a local desktop must not disable an exact shell grant.
-      const command = permission && asker && event.requestId && !event.requiresExplicitApproval && event.command
+      const command = permission && asker && event.requestId && !event.requiresExplicitApproval && event.command && !guestDriven
         ? commandAllowlistCandidate({ ...event.command, providerInstanceId: event.providerInstanceId ?? asker.modelSelection.instanceId })
         : null;
       const verdict = permission && asker && event.requestId
@@ -8807,9 +8878,12 @@ async function startTurn(
       // pin the task to the default so the header chip never shows the
       // bot's folder for a task that runs elsewhere.
       if (opts?.runOn === "cloud") store.pinTaskCwd(bot.id, threadId, undefined, { none: true });
+      // On a Cloud home a conversation a guest opened works only in its own
+      // folder, never the bot's project folder the owner's conversations
+      // share (what it leaves there reaches none of them).
       const pinnedCwd =
         privateWorkspace && opts?.runOn !== "cloud"
-          ? store.pinTaskCwd(bot.id, threadId, privateWorkspace)
+          ? store.pinTaskCwd(bot.id, threadId, privateWorkspace, { privateOnly: cloudGuestOpened(threadId) })
           : null;
       const cwd = pinnedCwd ?? undefined;
       if (cwd && !claimTurnResource(resourceOwner, workspaceResource(cwd))) {
@@ -9922,7 +9996,11 @@ routines = new RoutineManager({
     // run. Keep it distinct: it can belong to a teammate or room, whereas an
     // explicit resultsThreadId must be a visible task owned by the running bot.
     if (!forceNew && routineSourceOwner(routine)) return routine.resultsThreadId;
-    return store.createTask(routine.botId, `${routine.name} · Results`, false)?.threadId;
+    const threadId = store.createTask(routine.botId, `${routine.name} · Results`, false)?.threadId;
+    // On a Cloud home the results conversation is opened by whoever wrote the
+    // routine: it carries their name for it (cloudGuestOpened).
+    if (threadId && CLOUD_HOME) threadStarters.set(threadId, routineOpener(routine.id));
+    return threadId;
   },
   discardResultsThread: (botId, threadId) => {
     const task = store.taskByThread(botId, threadId);
@@ -10965,7 +11043,7 @@ async function runGroupMemberTurn(
   // delegated Full elevation makes the two disagree by construction: every
   // such room turn then reads as "settings changed", retries once, and
   // settles as busy without ever dispatching.
-  const preparedApprovalMode = roomTurnApprovalMode(bot, orchestration);
+  const preparedApprovalMode = roomTurnApprovalMode(bot, threadId, orchestration);
   const preparedSelection = { ...bot.modelSelection };
   const preparedComposio = bot.composio;
   const instance = turnInstance(bot);
@@ -11148,7 +11226,7 @@ async function runGroupMemberTurn(
   if (!readyGroup || !stillOwnsThread || !readyGroup.memberIds.includes(readyBot.id)) return false;
   const setupChanged =
     turnInstance(readyBot) !== instance ||
-    roomTurnApprovalMode(readyBot, orchestration) !== preparedApprovalMode ||
+    roomTurnApprovalMode(readyBot, threadId, orchestration) !== preparedApprovalMode ||
     readyBot.modelSelection.instanceId !== preparedSelection.instanceId ||
     readyBot.modelSelection.model !== preparedSelection.model ||
     readyBot.modelSelection.effort !== preparedSelection.effort ||
@@ -11469,7 +11547,10 @@ async function runGroupMemberTurn(
   // has its folder moved underneath it. Off-host members skip the folder
   // but must not decide the pin: the room's desk is a property of the
   // room, not of whichever member happened to speak first.
-  const cwd = groupTurnCwd(workspace, () => store.pinGroupCwd(readyGroup.id, threadId));
+  // A room a guest opened on a Cloud home works in a folder of its own too.
+  const cwd = workspace && cloudGuestOpened(threadId)
+    ? ensureTaskWorkspace(bot.id, threadId)
+    : groupTurnCwd(workspace, () => store.pinGroupCwd(readyGroup.id, threadId));
   {
     const drift = checkSoulDrift(bot.id, bot.soul ?? "", bot.soulHash ?? "");
     if (drift.drift !== Boolean(bot.soulDrift)) store.patchBot(bot.id, { soulDrift: drift.drift });
@@ -11632,7 +11713,7 @@ async function runGroupMemberTurn(
         text: withRecalled(roomRecalled, text),
         refreshSystemPrompt: true,
         images: turnImages,
-        approvalMode: roomTurnApprovalMode(readyBot, orchestration),
+        approvalMode: roomTurnApprovalMode(readyBot, threadId, orchestration),
         system: roomSystem.text,
         systemStable: roomSystem.stable,
         systemVolatile: roomSystem.volatile,
@@ -14079,7 +14160,7 @@ ROUTES.push(createBotMemoryRoutes({
   ...(lendingMemory ? {
     lendingReview: {
       needed: (botId: string) => {
-        if (!lendingMemory.reconcile(botId, foreignTurnRunning(botId)).changedBySomeoneElse) return null;
+        if (!lendingMemory.reconcile(botId, foreignTurnRunning(botId), { cached: true }).changedBySomeoneElse) return null;
         const { token, changed } = lendingMemory.reviewInfo(botId);
         return { token, changed };
       },
@@ -14386,6 +14467,10 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
               // an OMB Cloud home: the web UI's first run is its engine
               // sign-in (docs/cloud-pro.md). Absent everywhere else.
               ...(CLOUD_HOME ? { cloudHome: true } : {}),
+              // a device that is not one of the owner's own on a Cloud home
+              // writes only in conversations it opened: the composer offers
+              // a new conversation everywhere else.
+              ...(CLOUD_HOME && !cloudOwnerSession(auth) ? { cloudGuest: true, openedThreads: threadStarters.threadsOf(actorKey(auth), 2_000) } : {}),
             },
       );
     }
@@ -16936,10 +17021,12 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
       if (hidden) return json(res, 404, { error: hidden });
       const notYours = routineResultsRefusal(body);
       if (notYours) return json(res, 403, { error: notYours });
-      const routine = routines!.create(body);
+      const writer = auth.kind === "session" ? actorKey(auth) : CLOUD_NOBODY_KEY;
+      const routine = withRoutineWriter(writer, () => routines!.create(body));
       // On a Cloud home, a routine the owner writes from their own device may
       // use their lent Mac when it runs (server/cloud-lending.ts).
       if (cloudRoutineAuthors && cloudOwnerSession(auth)) cloudRoutineAuthors.record(routine.id, routine);
+      cloudRoutineAuthors?.wrote(routine.id, writer);
       return json(res, 201, { routine });
     }
     // The desktop shell polls this to decide whether to hold the computer
@@ -16962,20 +17049,29 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
       if (notYours) return json(res, 403, { error: notYours });
       const before = cloudRoutineAuthors ? routines!.listRoutines().find((candidate) => candidate.id === routineMatch![1]) : undefined;
       const wasOwners = Boolean(before && cloudRoutineAuthors?.authored(before.id, before));
-      const routine = routines!.update(routineMatch[1], body);
+      // Who this edit leaves as the routine's writer: the owner when the
+      // routine stays (or becomes) theirs, a guest when a guest edits it,
+      // else whoever wrote it before.
+      const ownerAuthors = cloudOwnerSession(auth) && (wasOwners || (body && typeof body === "object" && "prompt" in body));
+      const previous = cloudRoutineAuthors?.writer(routineMatch[1]);
+      const writer = ownerAuthors && CLOUD_OWNER_KEY ? CLOUD_OWNER_KEY
+        : auth.kind === "session" && !cloudOwnerSession(auth) ? actorKey(auth)
+          : previous && !cloudOwnerPerson(previous) ? previous : CLOUD_NOBODY_KEY;
+      const routine = withRoutineWriter(writer, () => routines!.update(routineMatch![1], body));
       // The owner's own edit keeps (or, when it rewrites the instructions,
       // makes) the routine theirs. Anyone else's edit, of any field (its
       // schedule, where its results go, whether it is on), makes it no longer
       // the owner's: it stops lending until the owner rewrites it.
       if (routine && cloudRoutineAuthors) {
         if (!cloudOwnerSession(auth)) cloudRoutineAuthors.forget(routine.id);
-        else if (wasOwners || (body && typeof body === "object" && "prompt" in body)) cloudRoutineAuthors.record(routine.id, routine);
+        else if (ownerAuthors) cloudRoutineAuthors.record(routine.id, routine);
+        cloudRoutineAuthors.wrote(routine.id, writer);
       }
       return routine ? json(res, 200, { routine }) : json(res, 404, { error: "no such routine" });
     }
     if (routineMatch && method === "DELETE") {
       const removed = routines!.remove(routineMatch[1]);
-      if (removed) cloudRoutineAuthors?.forget(routineMatch[1]);
+      if (removed) cloudRoutineAuthors?.remove(routineMatch[1]);
       return removed
         ? json(res, 200, { ok: true })
         : json(res, 404, { error: "no such routine" });
@@ -17711,7 +17807,7 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
       if (hiddenMember) return json(res, 400, { error: `unknown channel member: ${String(hiddenMember)}` });
       const group = createChannel(body);
       // On a Cloud home whoever opens a room names it (cloudThreadRefusal).
-      if (CLOUD_HOME && auth.kind === "session") threadStarters.set(group.threadId, personKey(auth.session));
+      if (CLOUD_HOME && auth.kind === "session") threadStarters.set(group.threadId, actorKey(auth));
       return json(res, 201, { group: { ...publicGroupState(group), messages: [] } });
     }
     if (method === "POST" && path === "/api/teams/export") {
@@ -18144,7 +18240,7 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
       const task = store.createGroupTask(group.id, request.data.title);
       if (!task) return json(res, 500, { error: "couldn't create that task" });
       // Who opened it decides who may answer its cards on a shared workspace.
-      if (auth.kind === "session") threadStarters.set(task.threadId, personKey(auth.session));
+      if (auth.kind === "session") threadStarters.set(task.threadId, actorKey(auth));
       const fresh = groupWithThread(store.group(group.id)!);
       broadcast({ kind: "group", group: fresh });
       return json(res, 201, { group: fresh, task });
@@ -20679,7 +20775,7 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
       const task = store.createTask(bot.id, typeof body.title === "string" ? body.title : undefined, true, body.projectId, undefined, body.approvalMode);
       if (!task) return json(res, 500, { error: "couldn't create that task" });
       // Who opened it decides who may answer its cards on a shared workspace.
-      if (auth.kind === "session") threadStarters.set(task.threadId, personKey(auth.session));
+      if (auth.kind === "session") threadStarters.set(task.threadId, actorKey(auth));
       const fresh = botWithThread(store.bot(bot.id)!);
       broadcast({ kind: "bot", bot: fresh });
       return json(res, 201, { bot: fresh, task: wireTask(task) });

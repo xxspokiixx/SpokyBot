@@ -1,8 +1,22 @@
 import { appendFileSync, mkdirSync, mkdtempSync, rmSync, statSync, symlinkSync, utimesSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { afterEach, describe, expect, it } from "vitest";
-import { botMemoryFiles, createLendingMemory, memoryFiles, memoryFingerprint } from "./lending-memory.ts";
+import { afterEach, describe, expect, it, vi } from "vitest";
+
+// How many times the fingerprint touches the disk, for the cost test: the
+// count is what the design promises, whatever the machine's speed.
+const fsCalls = vi.hoisted(() => ({ lstat: 0, opendir: 0, read: 0 }));
+vi.mock("node:fs", async (importOriginal) => {
+  const fs = await importOriginal<typeof import("node:fs")>();
+  return {
+    ...fs,
+    lstatSync: ((...args: Parameters<typeof fs.lstatSync>) => { fsCalls.lstat++; return fs.lstatSync(...args); }) as typeof fs.lstatSync,
+    opendirSync: ((...args: Parameters<typeof fs.opendirSync>) => { fsCalls.opendir++; return fs.opendirSync(...args); }) as typeof fs.opendirSync,
+    readFileSync: ((...args: Parameters<typeof fs.readFileSync>) => { fsCalls.read++; return fs.readFileSync(...args); }) as typeof fs.readFileSync,
+  };
+});
+
+import { botMemoryFiles, createLendingMemory, FOLDER_ENTRY_CAP, memoryFiles, memoryFingerprint } from "./lending-memory.ts";
 
 let dir = "";
 afterEach(() => { if (dir) rmSync(dir, { recursive: true, force: true }); dir = ""; });
@@ -13,8 +27,8 @@ const workspace = () => {
   writeFileSync(join(ws, "MEMORY.md"), "# Memory\n");
   return ws;
 };
-const tracker = (ws: string, folders: string[] = []) =>
-  createLendingMemory({ file: join(dir, "lending-memory.json"), files: () => memoryFiles(ws, folders) });
+const tracker = (ws: string, folders: string[] = [], fleet: readonly string[] = ["bot1", "bot2"]) =>
+  createLendingMemory({ file: join(dir, "lending-memory.json"), files: () => memoryFiles(ws, folders), knownBots: () => fleet });
 
 describe("a bot's memory and a lent Mac (server/lending-memory.ts)", () => {
   it("fingerprints MEMORY.md, topic files and daily logs by content", () => {
@@ -81,18 +95,25 @@ describe("a bot's memory and a lent Mac (server/lending-memory.ts)", () => {
     const tasks = join(dir, "task-workspaces");
     const project = join(dir, "projects", "site");
     mkdirSync(project, { recursive: true });
-    for (const folder of [join(tasks, "bot1", "t-new"), join(dir, "pinned")]) mkdirSync(folder, { recursive: true });
-    for (const folder of [join(tasks, "bot1", "t-new"), join(dir, "pinned"), project]) writeFileSync(join(folder, "AGENTS.md"), "x");
+    for (const folder of [join(tasks, "bot1", "t-ran"), join(tasks, "bot1", "t-new"), join(dir, "pinned")]) mkdirSync(folder, { recursive: true });
+    for (const folder of [join(tasks, "bot1", "t-ran"), join(tasks, "bot1", "t-new"), join(dir, "pinned"), project, join(tasks, "bot1")]) writeFileSync(join(folder, "AGENTS.md"), "x");
     const workspaces: string[] = [];
     const files = (bot: Parameters<typeof botMemoryFiles>[0]) => botMemoryFiles(bot, { workspace: (id) => { workspaces.push(id); return ws; }, taskWorkspaces: tasks });
-    const own = Object.keys(files({ id: "bot1", tasks: [{ threadId: "t-new" }, { threadId: "t-pinned", cwd: join(dir, "pinned") }, { threadId: "t-legacy", cwd: null }] }));
-    expect(own).toContain(join(tasks, "bot1", "t-new", "AGENTS.md"));
+    const own = Object.keys(files({ id: "bot1", tasks: [
+      { threadId: "t-ran", cwd: join(tasks, "bot1", "t-ran") }, { threadId: "t-pinned", cwd: join(dir, "pinned") }, { threadId: "t-new" }, { threadId: "t-legacy", cwd: null },
+    ] }));
+    expect(own).toContain(join(tasks, "bot1", "t-ran", "AGENTS.md"));
     expect(own).toContain(join(dir, "pinned", "AGENTS.md"));
     expect(own).toContain("MEMORY.md");
-    // A bot with its own folder: new conversations work there.
+    // A conversation that never ran has no folder of its own yet; what sits
+    // above the folder its first turn will get is watched all the same.
+    expect(own).not.toContain(join(tasks, "bot1", "t-new", "AGENTS.md"));
+    expect(own).toContain(join(tasks, "bot1", "AGENTS.md"));
+    // …also before any of its conversations ran.
+    expect(Object.keys(files({ id: "bot1", tasks: [{ threadId: "t-new" }] }))).toContain(join(tasks, "bot1", "AGENTS.md"));
+    // A bot with its own folder: its conversations work there.
     const inProject = Object.keys(files({ id: "bot1", cwd: project, tasks: [{ threadId: "t-new" }] }));
     expect(inProject).toContain(join(project, "AGENTS.md"));
-    expect(inProject).not.toContain(join(tasks, "bot1", "t-new", "AGENTS.md"));
     workspaces.length = 0;
     expect(files(undefined)).toEqual({});
     expect(workspaces).toEqual([]);
@@ -175,29 +196,83 @@ describe("a bot's memory and a lent Mac (server/lending-memory.ts)", () => {
     memory.trustedWrite("bot1", () => appendFileSync(join(ws, "memory", "log", "2026-09-29.md"), "- owner's next turn\n"));
     expect(memory.reconcile("bot1", false).changedBySomeoneElse).toBe(true);
   });
-  it("a damaged, oversized or linked record fails closed: every bot needs the owner's review", () => {
+  it("a damaged or linked record fails closed for the bots that existed then, and only those", () => {
     const ws = workspace();
     const record = join(dir, "lending-memory.json");
     writeFileSync(record, "{not json");
     const damaged = tracker(ws);
     expect(damaged.needsReview("bot1")).toBe(true);
     expect(damaged.reconcile("bot1", false).changedBySomeoneElse).toBe(true);
-    // …and says so again after a restart, until the owner reviews it, for a
-    // bot it has not seen yet too.
+    // …and says so again after a restart, until the owner reviews each one,
+    // including a bot that has not been looked at yet.
     expect(tracker(ws).reconcile("bot1", false).changedBySomeoneElse).toBe(true);
-    expect(tracker(ws).needsReview("bot2")).toBe(true);
+    expect(tracker(ws, [], ["bot1", "bot2", "bot3"]).needsReview("bot2")).toBe(true);
+    // A bot created after the damage starts clean, then and after a restart.
+    const later = tracker(ws, [], ["bot1", "bot2", "bot3"]);
+    expect(later.needsReview("bot3")).toBe(false);
+    expect(later.reconcile("bot3", false).changedBySomeoneElse).toBe(false);
+    expect(tracker(ws, [], ["bot1", "bot2", "bot3"]).needsReview("bot3")).toBe(false);
     const reviewing = tracker(ws);
     expect(reviewing.review("bot1", false, reviewing.reviewInfo("bot1").token).ok).toBe(true);
     expect(tracker(ws).reconcile("bot1", false).changedBySomeoneElse).toBe(false);
+    expect(tracker(ws).needsReview("bot2")).toBe(true);
+    // A deleted bot leaves nothing flagged behind.
+    const forgetting = tracker(ws);
+    forgetting.forget("bot2");
+    expect(tracker(ws).needsReview("bot2")).toBe(false);
     writeFileSync(join(dir, "real.json"), JSON.stringify({ version: 1, bots: {} }));
     rmSync(record);
     symlinkSync(join(dir, "real.json"), record);
     expect(tracker(ws).needsReview("bot1")).toBe(true);
-    rmSync(record);
-    writeFileSync(record, JSON.stringify({ version: 1, bots: {}, pad: "x".repeat(4_100_000) }));
-    expect(tracker(ws).needsReview("bot1")).toBe(true);
     // No record at all is a fresh start, not damage.
     rmSync(record);
     expect(tracker(ws).needsReview("bot1")).toBe(false);
+  });
+  it("judges a skills folder too full to read as a whole: any entry added or removed there is a change", () => {
+    const ws = workspace();
+    const project = join(dir, "projects", "big");
+    const skills = join(project, ".claude", "skills");
+    mkdirSync(skills, { recursive: true });
+    for (let i = 0; i < FOLDER_ENTRY_CAP + 50; i++) mkdirSync(join(skills, `skill-${i}`));
+    const files = memoryFiles(ws, [project]);
+    expect(files[skills]).toMatch(/^overflow:/);
+    expect(Object.keys(files).filter((name) => name.startsWith(skills))).toEqual([skills]);
+    const before = memoryFingerprint(ws, [project]);
+    expect(memoryFingerprint(ws, [project])).toBe(before);
+    mkdirSync(join(skills, "planted"));
+    expect(memoryFingerprint(ws, [project])).not.toBe(before);
+  });
+  it("stays cheap with thousands of conversations (each folder looked at once, only names that exist read)", () => {
+    const ws = workspace();
+    const tasks = join(dir, "task-workspaces");
+    // Every conversation ran (a folder each, a few with instruction files),
+    // and a thousand more never did.
+    const bot = { id: "bot1", tasks: Array.from({ length: 4_000 }, (_, i) => ({ threadId: `t${i}`, ...(i < 3_000 ? { cwd: join(tasks, "bot1", `t${i}`) } : {}) })) };
+    for (let i = 0; i < 3_000; i += 1) mkdirSync(join(tasks, "bot1", `t${i}`), { recursive: true });
+    for (let i = 0; i < 3_000; i += 300) writeFileSync(join(tasks, "bot1", `t${i}`, "AGENTS.md"), `folder ${i}`);
+    const snapshot = () => botMemoryFiles(bot, { workspace: () => ws, taskWorkspaces: tasks });
+    const cold = snapshot();
+    expect(Object.keys(cold).filter((name) => name.endsWith("AGENTS.md"))).toHaveLength(10);
+    // Warm, each conversation's folder costs one look (its entries are not
+    // listed again, nothing unchanged is read), a conversation that never ran
+    // costs nothing, and the rest is a handful of fixed look-ups.
+    Object.assign(fsCalls, { lstat: 0, opendir: 0, read: 0 });
+    snapshot();
+    expect(fsCalls.opendir).toBe(0);
+    expect(fsCalls.read).toBe(0);
+    expect(fsCalls.lstat).toBeGreaterThanOrEqual(3_000);
+    expect(fsCalls.lstat).toBeLessThan(3_000 + 10 + 100);
+    // …which is milliseconds, even on a slow runner (about 9 ms on a laptop).
+    const runs: number[] = [];
+    for (let i = 0; i < 5; i++) {
+      const started = performance.now();
+      snapshot();
+      runs.push(performance.now() - started);
+    }
+    expect(Math.min(...runs)).toBeLessThan(process.platform === "win32" ? 250 : 100);
+    // …and the record stays small: only the files that exist are kept.
+    const memory = createLendingMemory({ file: join(dir, "record.json"), files: snapshot, knownBots: () => ["bot1"] });
+    memory.reconcile("bot1", false);
+    expect(statSync(join(dir, "record.json")).size).toBeLessThan(10_000);
   });
 });

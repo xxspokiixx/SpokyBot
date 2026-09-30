@@ -562,6 +562,15 @@ describe("loopback trust: owner on one person's machine, service on a shared wor
     expect(desktop.warning).toMatch(/ignored in the desktop app/);
   });
 
+  it("is always service on an OMB Cloud home, where a local request is only ever a process on the machine", () => {
+    const pick = (env: NodeJS.ProcessEnv) => resolveLoopbackTrust({ env, desktopManaged: false, hostedWorkspace: false, cloudHome: true });
+    expect(pick({})).toEqual({ trust: "service", reason: "OMB Cloud home" });
+    expect(pick({ OMB_LOOPBACK_TRUST: "service" })).toEqual({ trust: "service", reason: "OMB Cloud home" });
+    const forced = pick({ OMB_LOOPBACK_TRUST: "owner" });
+    expect(forced.trust).toBe("service");
+    expect(forced.warning).toMatch(/ignored on an OMB Cloud home/);
+  });
+
   it("lets only the CLI that started the server, holding its secret, mint a pairing code under service trust", () => {
     const secret = "c".repeat(43);
     const as = (method: string, path: string, header?: string, token: string | null = secret) =>

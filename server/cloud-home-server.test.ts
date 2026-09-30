@@ -45,12 +45,19 @@ let base: string;
 let child: ChildProcess;
 let log = "";
 
+let ownerToken = "";
+
+/** A request through the edge. Without `remote`, it comes from one of the
+ * owner's own devices (paired with the Admin's signed request): on a Cloud
+ * home a bare local request is only a service, never the owner. */
 async function api(method: string, path: string, options: { body?: unknown; remote?: boolean; headers?: Record<string, string> } = {}) {
+  const asOwner = !options.remote && ownerToken !== "";
   const response = await fetch(`${base}${path}`, {
     method,
     headers: {
       // What the Caddy edge adds to every request it forwards: never the owner.
-      ...(options.remote ? { host: HOST, "x-forwarded-for": "203.0.113.9", "x-forwarded-proto": "https" } : {}),
+      ...(options.remote || asOwner ? { host: HOST, "x-forwarded-for": "203.0.113.9", "x-forwarded-proto": "https" } : {}),
+      ...(asOwner ? { authorization: `Bearer ${ownerToken}` } : {}),
       ...(options.body === undefined ? {} : { "content-type": "application/json" }),
       ...options.headers,
     },
@@ -114,7 +121,19 @@ await import(${JSON.stringify(pathToFileURL(join(SERVER_DIR, "testing", "fake-cl
     if (Date.now() > deadline) throw new Error(`the Cloud home did not start:\n${log}`);
     await new Promise((resolve) => setTimeout(resolve, 100));
   }
+  ownerToken = await ownerPairing();
 }, 30_000);
+
+/** One of the owner's devices, paired the way the Admin pairs the app. */
+async function ownerPairing(): Promise<string> {
+  const body = JSON.stringify({ label: "OpenMausBot app (Cloud)", ttlSeconds: 300 });
+  const timestamp = String(Math.floor(Date.now() / 1000)), nonce = randomBytes(16).toString("base64url");
+  const granted = await api("POST", "/api/cloud/pairing", { remote: true, headers: {
+    "content-type": "application/json", "x-omb-cloud-timestamp": timestamp, "x-omb-cloud-nonce": nonce,
+    "x-omb-cloud-signature": `v1=${cloudPairingSignature(secret, timestamp, nonce, body)}`,
+  }, body: JSON.parse(body) });
+  return (await api("POST", "/api/auth/pair", { remote: true, body: { code: granted.body.code } })).body.token as string;
+}
 
 afterAll(async () => {
   if (child) await waitForExit(child, { signal: "SIGTERM" });

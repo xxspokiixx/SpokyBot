@@ -15,7 +15,7 @@
 //                      | api-error (the CLI reports a non-auth API error as
 //                        assistant text, then an error result; no model output)
 //   FAKE_CLAUDE_API_ERROR text for the api-error frame (default: overloaded).
-//   FAKE_CLAUDE_DUMP   path to write {argv, env, prompt, systemPrompt,
+//   FAKE_CLAUDE_DUMP   path to write {argv, env, cwd, prompt, systemPrompt,
 //                      mcpConfig} as JSON,
 //                      so the test can assert on argv shape and env hygiene.
 //                      mcpConfig is read back from the --mcp-config file the
@@ -378,7 +378,7 @@ const playTurn = (prompt: JsonValue) => {
     }
     writeFileSync(
       process.env.FAKE_CLAUDE_DUMP,
-      JSON.stringify({ pid: process.pid, argv, env: process.env, prompt, systemPrompt, mcpConfig, settings, settingsMode }, null, 2),
+      JSON.stringify({ pid: process.pid, argv, env: process.env, cwd: process.cwd(), prompt, systemPrompt, mcpConfig, settings, settingsMode }, null, 2),
     );
   }
 

@@ -30,7 +30,7 @@
 // pending window), or from editing this record: a guest who can drive a
 // Full-access bot on the Cloud already controls the machine.
 import { createHash } from "node:crypto";
-import { existsSync, lstatSync, readdirSync, readFileSync, readlinkSync } from "node:fs";
+import { existsSync, lstatSync, opendirSync, readFileSync, readlinkSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import { z } from "zod";
 import { writeFileAtomic } from "./atomic.ts";
@@ -43,6 +43,13 @@ export const WORKING_FOLDER_DIRS = [".claude/skills", ".claude/agents", ".claude
 /** Instruction files an engine reads from its working folder and every
  * folder above it (Claude Code's project memory; Codex's AGENTS.md). */
 export const ANCESTOR_FILES = ["CLAUDE.md", "CLAUDE.local.md", "AGENTS.md", "AGENTS.override.md"] as const;
+/** At most this many entries of one skills, agents or commands folder are
+ * read. A fuller folder is judged as a whole: any entry added, removed or
+ * renamed in it is a change (see `listing`). */
+export const FOLDER_ENTRY_CAP = 200;
+/** A working folder with more top-level entries than this is not listed;
+ * its instruction files are looked up by name instead. */
+const ROOT_ENTRY_CAP = 5_000;
 
 /** What one path is, for the fingerprint: absent (undefined), a link (by
  * target), a regular file (by content), or something else (by type). Cached
@@ -51,7 +58,9 @@ export const ANCESTOR_FILES = ["CLAUDE.md", "CLAUDE.local.md", "AGENTS.md", "AGE
 const contentCache = new Map<string, { key: string; hash: string }>();
 function describe(file: string): string | undefined {
   let stat;
-  try { stat = lstatSync(file, { bigint: true }); } catch { return undefined; }
+  // No exception for the usual case, an absent file: it costs more than the look-up.
+  try { stat = lstatSync(file, { bigint: true, throwIfNoEntry: false }); } catch { return undefined; }
+  if (!stat) return undefined;
   if (stat.isSymbolicLink()) {
     try { return `link:${readlinkSync(file)}`; } catch { return "link:"; }
   }
@@ -61,42 +70,116 @@ function describe(file: string): string | undefined {
   if (cached?.key === key) return cached.hash;
   let hash: string;
   try { hash = `file:${createHash("sha256").update(readFileSync(file)).digest("hex")}`; } catch { hash = "file:unreadable"; }
-  if (contentCache.size > 20_000) contentCache.clear();
+  if (contentCache.size > 50_000) contentCache.clear();
   contentCache.set(file, { key, hash });
   return hash;
 }
 
+/** A folder's entry names, read at most once per change of the folder
+ * itself: adding, removing or renaming an entry moves its modification and
+ * change times (a file edited in place does not, which is why each file is
+ * still looked at by `describe`). At most `cap` names are read; `overflow`
+ * says there were more, and `key` changes whenever the entries do.
+ * undefined: not a folder (absent, never created, a file or a link). */
+type Listing = { key: string; names: ReadonlySet<string>; overflow: boolean };
+const listingCache = new Map<string, Listing>();
+function listing(dir: string, cap: number): Listing | undefined {
+  let stat;
+  try { stat = lstatSync(dir, { bigint: true, throwIfNoEntry: false }); } catch { return undefined; }
+  if (!stat?.isDirectory()) return undefined;
+  const key = `${stat.dev}:${stat.ino}:${stat.mtimeNs}:${stat.ctimeNs}`;
+  const cacheKey = `${cap}\u0000${dir}`;
+  const cached = listingCache.get(cacheKey);
+  if (cached?.key === key) return cached;
+  const names = new Set<string>();
+  let overflow = false;
+  try {
+    const handle = opendirSync(dir);
+    try {
+      for (let entry = handle.readSync(); entry; entry = handle.readSync()) {
+        if (names.size >= cap) { overflow = true; break; }
+        names.add(entry.name);
+      }
+    } finally {
+      handle.closeSync();
+    }
+  } catch {
+    names.clear();
+  }
+  const listed = { key, names, overflow };
+  if (listingCache.size > 50_000) listingCache.clear();
+  listingCache.set(cacheKey, listed);
+  return listed;
+}
+
 /** Every file that shapes a bot's turns, by name, as `describe` sees it:
  * MEMORY.md, memory/*, memory/log/*, and the instruction files in each
- * working folder and the folders above it. */
-export function memoryFiles(workspace: string, workingFolders: readonly string[] = []): Record<string, string> {
+ * working folder and the folders above it. Only names that exist are looked
+ * at, a folder that was never created costs one failed look-up, and each
+ * folder is listed once per change of its entries. */
+export function memoryFiles(workspace: string, workingFolders: readonly string[] = [], alsoAbove: readonly string[] = []): Record<string, string> {
   const files: Record<string, string> = {};
   const add = (name: string, file: string) => {
     const described = describe(file);
     if (described !== undefined) files[name] = described;
   };
-  const list = (dir: string) => { try { return readdirSync(dir).sort(); } catch { return []; } };
   add("MEMORY.md", join(workspace, "MEMORY.md"));
   add("memory", join(workspace, "memory"));
-  for (const name of list(join(workspace, "memory"))) if (name !== "log") add(`memory/${name}`, join(workspace, "memory", name));
+  for (const name of [...listing(join(workspace, "memory"), Infinity)?.names ?? []].sort()) if (name !== "log") add(`memory/${name}`, join(workspace, "memory", name));
   add("memory/log", join(workspace, "memory", "log"));
-  for (const name of list(join(workspace, "memory", "log"))) add(`memory/log/${name}`, join(workspace, "memory", "log", name));
+  for (const name of [...listing(join(workspace, "memory", "log"), Infinity)?.names ?? []].sort()) add(`memory/log/${name}`, join(workspace, "memory", "log", name));
+  /** The names among `wanted` present in `dir` (all of them, unlisted, when
+   * the folder is too full to list). */
+  const present = (dir: string, wanted: readonly string[], listed = listing(dir, ROOT_ENTRY_CAP)) =>
+    listed ? wanted.filter((name) => listed.overflow || listed.names.has(name)) : [];
+  const capped = (dir: string) => {
+    const listed = listing(dir, FOLDER_ENTRY_CAP);
+    if (!listed) return;
+    if (listed.overflow) { files[dir] = `overflow:${listed.key}`; return; }
+    for (const entry of [...listed.names].sort()) {
+      add(join(dir, entry), join(dir, entry));
+      add(join(dir, entry, "SKILL.md"), join(dir, entry, "SKILL.md"));
+    }
+  };
+  const listedRoots = new Map<string, Listing>();
   const ancestors = new Set<string>();
-  for (const folder of [workspace, ...workingFolders]) {
-    const root = resolve(folder);
-    for (const name of WORKING_FOLDER_FILES) add(join(root, name), join(root, name));
-    for (const dir of WORKING_FOLDER_DIRS) {
-      for (const entry of list(join(root, dir))) {
-        add(join(root, dir, entry), join(root, dir, entry));
-        add(join(root, dir, entry, "SKILL.md"), join(root, dir, entry, "SKILL.md"));
+  for (const folder of new Set([workspace, ...workingFolders].map((dir) => resolve(dir)))) {
+    const top = listing(folder, ROOT_ENTRY_CAP);
+    if (top) {
+      listedRoots.set(folder, top);
+      for (const name of present(folder, [".mcp.json", ".claude", ".agents"], top)) {
+        const path = join(folder, name);
+        if (name === ".mcp.json") { add(path, path); continue; }
+        const inner = listing(path, ROOT_ENTRY_CAP);
+        // A link (or a file) in place of the folder is judged by what it is.
+        if (!inner) { add(path, path); continue; }
+        const wanted = name === ".claude" ? ["settings.json", "settings.local.json", "CLAUDE.md", "skills", "agents", "commands"] : ["skills"];
+        for (const entry of present(path, wanted, inner)) {
+          if (entry === "skills" || entry === "agents" || entry === "commands") {
+            const dir = join(path, entry);
+            if (listing(dir, FOLDER_ENTRY_CAP)) capped(dir); else add(dir, dir);
+          } else add(join(path, entry), join(path, entry));
+        }
       }
     }
-    for (let dir = root; ; dir = dirname(dir)) {
+    // Up to the first folder already walked: its parents are there too.
+    for (let dir = folder; !ancestors.has(dir); dir = dirname(dir)) {
       ancestors.add(dir);
       if (dirname(dir) === dir) break;
     }
   }
-  for (const dir of ancestors) for (const name of ANCESTOR_FILES) add(join(dir, name), join(dir, name));
+  // Folders a conversation will work below once it runs (`alsoAbove`): the
+  // instruction files there and above reach its first turn.
+  for (const folder of alsoAbove) {
+    for (let dir = resolve(folder); !ancestors.has(dir); dir = dirname(dir)) {
+      ancestors.add(dir);
+      if (dirname(dir) === dir) break;
+    }
+  }
+  for (const dir of ancestors) {
+    const top = listedRoots.get(dir);
+    for (const name of top ? present(dir, ANCESTOR_FILES, top) : ANCESTOR_FILES) add(join(dir, name), join(dir, name));
+  }
   // "memory" and "memory/log" name the folders themselves: only a link
   // swapped in for one counts.
   for (const folder of ["memory", "memory/log"]) if (files[folder]?.startsWith("other:")) delete files[folder];
@@ -104,22 +187,23 @@ export function memoryFiles(workspace: string, workingFolders: readonly string[]
 }
 
 /** A bot as the tracker sees it: each conversation's folder is the one its
- * next turn uses (store.ts pinTaskCwd: pinned, else the bot's folder, else
- * its own task folder; null runs in no folder of its own). */
+ * turns use (store.ts pinTaskCwd), pinned when it first runs: before that
+ * it has none (the bot's folder, else a task folder not yet created). */
 export interface LendingBot {
   id: string;
   cwd?: string | null;
   tasks: readonly { threadId: string; cwd?: string | null }[];
 }
 
-/** memoryFiles for one bot: its workspace and every folder its
- * conversations work in. A bot that no longer exists has nothing left to
- * judge, and its workspace must not be recreated just to look. */
+/** memoryFiles for one bot: its workspace, its own folder, the folder of
+ * every conversation that has run, and the folders above the task folders
+ * of those that have not yet. A conversation that never ran has no folder
+ * to look in (its first turn creates it). A bot that no longer exists has
+ * nothing left to judge, and its workspace must not be recreated to look. */
 export function botMemoryFiles(bot: LendingBot | undefined, dirs: { workspace: (botId: string) => string; taskWorkspaces: string }): Record<string, string> {
   if (!bot) return {};
-  const folders = bot.tasks.flatMap((task) => typeof task.cwd === "string" ? [task.cwd]
-    : task.cwd === undefined ? [bot.cwd ?? join(dirs.taskWorkspaces, bot.id, task.threadId)] : []);
-  return memoryFiles(dirs.workspace(bot.id), [...new Set([...(bot.cwd ? [bot.cwd] : []), ...folders])]);
+  const folders = bot.tasks.flatMap((task) => typeof task.cwd === "string" ? [task.cwd] : []);
+  return memoryFiles(dirs.workspace(bot.id), [...new Set([...(bot.cwd ? [bot.cwd] : []), ...folders])], [join(dirs.taskWorkspaces, bot.id)]);
 }
 
 /** One hash over a set of files, for the stored record and the review token. */
@@ -154,8 +238,9 @@ const record = z.object({
 const recordsFile = z.object({
   version: z.literal(1),
   bots: z.record(z.string().max(128), record),
-  /** The record could not be read once: a bot with no record is flagged. */
-  unknownFlagged: z.literal(true).optional(),
+  /** The record could not be read once: the bots that existed then (and
+   * have no record since) are flagged. `true` is every bot there is. */
+  unknownFlagged: z.union([z.literal(true), z.array(z.string().max(128)).max(100_000)]).optional(),
 }).strict();
 type Record_ = z.infer<typeof record>;
 
@@ -163,53 +248,85 @@ export interface LendingMemoryDeps {
   file: string;
   /** The bot's files now (memoryFiles). */
   files: (botId: string) => Record<string, string>;
+  /** The bots that exist now: the ones a lost record leaves flagged. */
+  knownBots: () => readonly string[];
   log?: (line: string) => void;
 }
 
-export function createLendingMemory({ file, files: snapshot, log = () => {} }: LendingMemoryDeps) {
+export function createLendingMemory({ file, files: snapshot, knownBots, log = () => {} }: LendingMemoryDeps) {
   let bots: { [botId: string]: Record_ } = {};
   // Fail closed: a damaged, linked or oversized record would otherwise wipe
-  // every flag. Every bot it no longer describes starts flagged instead.
-  let unknownFlagged = false;
-  if (existsSync(file)) {
+  // every flag. Every bot that existed when it was found damaged starts
+  // flagged instead; a bot created later starts clean.
+  let unknownFlagged = new Set<string>();
+  // Read on first use, when the fleet it may need to name exists.
+  let loaded = false;
+  const load = () => {
+    if (loaded) return;
+    loaded = true;
+    if (!existsSync(file)) return;
+    let damaged = false;
     try {
       const stat = lstatSync(file);
       if (!stat.isFile() || stat.isSymbolicLink() || stat.size > 32_000_000) throw new Error("unsafe record");
       const parsed = recordsFile.parse(JSON.parse(readFileSync(file, "utf8")));
       bots = parsed.bots;
-      unknownFlagged = parsed.unknownFlagged === true;
+      if (parsed.unknownFlagged === true) damaged = true;
+      else unknownFlagged = new Set(parsed.unknownFlagged ?? []);
     } catch {
       bots = {};
-      unknownFlagged = true;
-      log("lending: the record of bots' memory could not be read; every bot's memory needs the owner's review before it can use the lent Mac");
+      damaged = true;
     }
-  }
-  const save = () => writeFileAtomic(file, JSON.stringify({ version: 1, bots, ...(unknownFlagged ? { unknownFlagged: true } : {}) }), { mode: 0o600 });
+    if (damaged) {
+      unknownFlagged = new Set(knownBots().filter((botId) => !bots[botId]));
+      log("lending: the record of bots' memory could not be read; every bot's memory needs the owner's review before it can use the lent Mac");
+      try { save(); } catch { /* flagged in memory for this run; the damaged file says so again next time */ }
+    }
+  };
+  const save = () => writeFileAtomic(file, JSON.stringify({ version: 1, bots, ...(unknownFlagged.size ? { unknownFlagged: [...unknownFlagged] } : {}) }), { mode: 0o600 });
   const set = (botId: string, next: Record_) => {
     const before = JSON.stringify(bots[botId] ?? null);
     bots = { ...bots, [botId]: next };
-    if (JSON.stringify(next) !== before) save();
+    const known = unknownFlagged.delete(botId);
+    if (known || JSON.stringify(next) !== before) save();
   };
-  const now = (botId: string) => { const files = snapshot(botId); return { files: digests(files), hash: fingerprintOf(files) }; };
+  // A snapshot taken this tick is reused for the rest of it by checks that
+  // only look (a Mac action, the Memory panel). Anything that starts or ends
+  // a judgement (a foreign turn starting or ending, a review, a write for the
+  // owner) takes a fresh one.
+  const memo = new Map<string, { files: Record<string, string>; hash: string }>();
+  const fresh = (botId: string) => {
+    const files = snapshot(botId);
+    const snap = { files: digests(files), hash: fingerprintOf(files) };
+    if (!memo.size) setImmediate(() => memo.clear());
+    memo.set(botId, snap);
+    return snap;
+  };
+  const now = (botId: string, cached = false) => (cached && memo.get(botId)) || fresh(botId);
   /** A bot seen for the first time: trusted as it is, unless the record was lost. */
-  const first = (current: { files: Record<string, string>; hash: string }, pending: boolean): Record_ =>
-    ({ trusted: current.hash, files: current.files, ...(unknownFlagged ? { flagged: true as const } : {}), ...(pending ? { pending: true as const } : {}) });
+  const first = (botId: string, current: { files: Record<string, string>; hash: string }, pending: boolean): Record_ =>
+    ({ trusted: current.hash, files: current.files, ...(unknownFlagged.has(botId) ? { flagged: true as const } : {}), ...(pending ? { pending: true as const } : {}) });
+  const needs = (botId: string) => bots[botId]?.flagged === true || (!bots[botId] && unknownFlagged.has(botId));
   return {
     /** A turn that is not provably the owner's starts for this bot. What the
      * owner changed before it is adopted first; from here on, changes are
      * judged as someone else's. */
     noteForeignTurn(botId: string) {
+      load();
       const current = bots[botId];
-      if (!current) { set(botId, first(now(botId), true)); return; }
+      if (!current) { set(botId, first(botId, now(botId), true)); return; }
       if (current.flagged || current.pending) { if (!current.pending) set(botId, { ...current, pending: true }); return; }
       const snap = now(botId);
       set(botId, { trusted: snap.hash, files: snap.files, pending: true });
     },
-    /** Judge the files now. `foreignRunning`: such a turn still runs. */
-    reconcile(botId: string, foreignRunning: boolean): { changedBySomeoneElse: boolean } {
-      const snap = now(botId);
+    /** Judge the files now. `foreignRunning`: such a turn still runs.
+     * `cached`: a check that only looks may reuse this tick's snapshot. */
+    reconcile(botId: string, foreignRunning: boolean, opts: { cached?: boolean } = {}): { changedBySomeoneElse: boolean } {
+      load();
       const current = bots[botId];
-      if (!current) { const created = first(snap, foreignRunning); set(botId, created); return { changedBySomeoneElse: created.flagged === true }; }
+      // Clearing "pending" ends a judgement: never on a reused snapshot.
+      const snap = now(botId, opts.cached === true && !(current?.pending && !foreignRunning));
+      if (!current) { const created = first(botId, snap, foreignRunning); set(botId, created); return { changedBySomeoneElse: created.flagged === true }; }
       if (current.flagged) return { changedBySomeoneElse: true };
       if (snap.hash !== current.trusted) {
         if (current.pending) {
@@ -227,15 +344,16 @@ export function createLendingMemory({ file, files: snapshot, log = () => {} }: L
      * files as they are now, and which files differ from the last trusted
      * state. */
     reviewInfo(botId: string): { needed: boolean; token: string; changed: string[] } {
-      const snap = now(botId);
-      const current = bots[botId];
-      return { needed: current?.flagged === true || (!current && unknownFlagged), token: snap.hash, changed: changedFiles(current?.files, snap.files) };
+      load();
+      const snap = now(botId, true);
+      return { needed: needs(botId), token: snap.hash, changed: changedFiles(bots[botId]?.files, snap.files) };
     },
     /** Whether the owner has a change to review (no file access). */
-    needsReview(botId: string): boolean { return bots[botId]?.flagged === true || (!bots[botId] && unknownFlagged); },
+    needsReview(botId: string): boolean { load(); return needs(botId); },
     /** The owner looked at the memory and accepts it exactly as it was shown
      * (`token`). A token that no longer matches the files is refused. */
     review(botId: string, foreignRunning: boolean, token: string): { ok: boolean } {
+      load();
       const snap = now(botId);
       if (token !== snap.hash) return { ok: false };
       set(botId, { trusted: snap.hash, files: snap.files, ...(foreignRunning ? { pending: true as const } : {}) });
@@ -245,14 +363,20 @@ export function createLendingMemory({ file, files: snapshot, log = () => {} }: L
      * owner's when the memory was still exactly as trusted just before it;
      * otherwise left for reconcile to judge. */
     trustedWrite<T>(botId: string, write: () => T): T {
+      load();
       const current = bots[botId];
       const before = now(botId).hash;
       const result = write();
       const after = now(botId);
-      if (!current) set(botId, first(after, false));
+      if (!current) set(botId, first(botId, after, false));
       else if (!current.flagged && before === current.trusted) set(botId, { ...current, trusted: after.hash, files: after.files });
       return result;
     },
-    forget(botId: string) { if (bots[botId]) { const next = { ...bots }; delete next[botId]; bots = next; save(); } },
+    forget(botId: string) {
+      load();
+      memo.delete(botId);
+      const known = unknownFlagged.delete(botId);
+      if (bots[botId]) { const next = { ...bots }; delete next[botId]; bots = next; save(); } else if (known) save();
+    },
   };
 }

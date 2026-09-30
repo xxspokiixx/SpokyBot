@@ -328,13 +328,20 @@ it("refuses a move too big for a Cloud, an upload that is not a backup, and anyo
   expect((await api(source, "GET", "/api/cloud-move/estimate")).body).toMatchObject({ bots: 2, rooms: 1, chats: 1 });
 }, 60_000);
 
-it("is not a wall against the machine itself: its loopback (a bot's shell, the same user) can pair itself as the owner", async () => {
-  // Documented in docs/cloud-pro.md: a process on the Cloud already reads and
-  // writes /data as the server's user, so this is no escalation.
-  const minted = await api(cloud, "POST", "/api/auth/pairing", { body: { scopes: ["admin", "client"], label: "bot shell" } });
-  expect(minted.status, JSON.stringify(minted.body)).toBe(200);
-  const shell = await api(cloud, "POST", "/api/auth/pair", { body: { code: minted.body.code } });
-  expect(shell.status, JSON.stringify(shell.body)).toBe(200);
-  expect((await api(cloud, "GET", "/api/cloud-move", { token: shell.body.token })).status).toBe(200);
-  await api(cloud, "DELETE", `/api/auth/sessions/${shell.body.session.id}`, { token: windowToken });
+it("a process on the machine (a bot's shell, bare loopback) cannot pair itself as the owner or reach any owner route", async () => {
+  // On a Cloud home a request without a session from the machine itself is
+  // only ever a service: it may not open a pairing window of any scope, nor
+  // use the move, the settings, a bot's instructions or a memory review.
+  for (const scopes of [["admin", "client"], ["client"]]) {
+    const minted = await api(cloud, "POST", "/api/auth/pairing", { body: { scopes, label: "bot shell" } });
+    expect(minted.status, JSON.stringify(minted.body)).toBe(403);
+  }
+  for (const [method, path, body] of [
+    ["GET", "/api/cloud-move", undefined], ["GET", "/api/config", undefined], ["GET", "/api/auth/sessions", undefined],
+    ["PATCH", "/api/config", { profile: { name: "Shell" } }],
+  ] as const) {
+    expect((await api(cloud, method, path, body === undefined ? {} : { body })).status, `${method} ${path}`).toBe(403);
+  }
+  // Its health check and the turn capability routes still answer.
+  expect((await api(cloud, "GET", "/api/health")).status).toBe(200);
 }, 60_000);

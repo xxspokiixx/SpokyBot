@@ -830,6 +830,8 @@
   "chat.showRawMarkdown": "Show raw markdown",
   "chat.showRenderedMarkdown": "Show rendered markdown",
   "chat.retry": "Retry",
+  "chat.cloudGuest.notYours": "You can only write in conversations you started on this Cloud.",
+  "chat.cloudGuest.newConversation": "New conversation",
   "chat.claudeUpdate.aria": "Update Claude Code",
   "chat.claudeUpdate.offer": "This model needs a newer Claude Code. I can update Claude for you.",
   "chat.claudeUpdate.doIt": "Update Claude for me",

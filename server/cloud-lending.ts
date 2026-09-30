@@ -122,24 +122,46 @@ export function routineFingerprint(routine: RoutineShape): string {
   ])).digest("hex");
 }
 
-const authorsFile = z.object({ version: z.literal(1), routines: z.record(z.string().max(128), z.string().regex(/^[a-f0-9]{64}$/)) }).strict();
+const authorsFile = z.object({
+  version: z.literal(1),
+  routines: z.record(z.string().max(128), z.string().regex(/^[a-f0-9]{64}$/)),
+  /** Whoever last wrote each routine (a person key), owner or not. */
+  writers: z.record(z.string().max(128), z.string().regex(/^p_[\w-]{22}$/)).optional(),
+}).strict();
 
 /** Which routines the owner wrote, as the fingerprint of what they wrote.
  * Persisted beside the routines (owner-only). A missing or damaged file
  * means none: it never grants anything by being absent. */
 export function createCloudRoutineAuthors(file: string) {
   let routines: Record<string, string> = {};
+  let writers: Record<string, string> = {};
   try {
     if (existsSync(file)) {
       const stat = lstatSync(file);
-      if (stat.isFile() && !stat.isSymbolicLink() && stat.size <= 1_000_000) routines = authorsFile.parse(JSON.parse(readFileSync(file, "utf8"))).routines;
+      if (stat.isFile() && !stat.isSymbolicLink() && stat.size <= 1_000_000) {
+        const parsed = authorsFile.parse(JSON.parse(readFileSync(file, "utf8")));
+        routines = parsed.routines;
+        writers = parsed.writers ?? {};
+      }
     }
-  } catch { routines = {}; }
-  const save = () => writeFileAtomic(file, JSON.stringify({ version: 1, routines }), { mode: 0o600 });
+  } catch { routines = {}; writers = {}; }
+  const save = () => writeFileAtomic(file, JSON.stringify({ version: 1, routines, writers }), { mode: 0o600 });
   return {
     /** The owner wrote this routine as it stands now. */
     record(id: string, routine: RoutineShape) { routines = { ...routines, [id]: routineFingerprint(routine) }; save(); },
+    /** The owner's authorship ends; whoever wrote it last is still named. */
     forget(id: string) { if (Object.hasOwn(routines, id)) { const next = { ...routines }; delete next[id]; routines = next; save(); } },
+    /** Someone (a person key) created or edited this routine. */
+    wrote(id: string, person: string) { if (writers[id] !== person) { writers = { ...writers, [id]: person }; save(); } },
+    /** Who last wrote this routine, when that is known. */
+    writer(id: string): string | undefined { return Object.hasOwn(writers, id) ? writers[id] : undefined; },
+    /** The routine is gone: nothing about it is kept. */
+    remove(id: string) {
+      if (!Object.hasOwn(routines, id) && !Object.hasOwn(writers, id)) return;
+      const nextRoutines = { ...routines }; delete nextRoutines[id]; routines = nextRoutines;
+      const nextWriters = { ...writers }; delete nextWriters[id]; writers = nextWriters;
+      save();
+    },
     /** Whether this routine, as it stands (or as a run snapshotted it), is
      * exactly what the owner wrote. */
     authored(id: string, routine: RoutineShape) { return Object.hasOwn(routines, id) && routines[id] === routineFingerprint(routine); },

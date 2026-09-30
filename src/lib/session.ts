@@ -13,7 +13,9 @@ export interface EnvironmentDescriptor {
 export type SessionState =
   // `service`: a shared server that does not treat this machine as its owner
   | { kind: "loopback"; trust?: "service" }
-  | { kind: "session"; id: string; label: string; scopes: string[]; expiresAt: number }
+  // `cloudGuest`: on an OMB Cloud home, a device that is not one of the
+  // owner's own; it writes only in `openedThreads`, the conversations it opened.
+  | { kind: "session"; id: string; label: string; scopes: string[]; expiresAt: number; cloudGuest?: true; openedThreads?: string[] }
   | { kind: "unauthenticated"; error: string }
   | { kind: "unreachable"; error: string };
 
@@ -39,6 +41,10 @@ export async function readSessionState(fetchImpl: typeof fetch = fetch): Promise
       label: typeof record.label === "string" ? record.label : "",
       scopes: Array.isArray(record.scopes) ? record.scopes.filter((s): s is string => typeof s === "string") : [],
       expiresAt: typeof record.expiresAt === "number" ? record.expiresAt : 0,
+      ...(record.cloudGuest === true ? {
+        cloudGuest: true as const,
+        openedThreads: Array.isArray(record.openedThreads) ? record.openedThreads.filter((id): id is string => typeof id === "string") : [],
+      } : {}),
     };
   }
   return record.trust === "service" ? { kind: "loopback", trust: "service" } : { kind: "loopback" };

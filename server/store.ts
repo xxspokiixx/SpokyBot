@@ -2236,10 +2236,21 @@ export class Store {
    * current folder — unless the task already has a session (a thread from
    * before folders existed), which pins to the default so the folder can't
    * move under it. Returns the pinned value: a path, or null for default. */
-  pinTaskCwd(botId: string, threadId: string, fallbackCwd?: string, opts: { none?: boolean } = {}): string | null {
+  pinTaskCwd(botId: string, threadId: string, fallbackCwd?: string, opts: { none?: boolean; privateOnly?: boolean } = {}): string | null {
     const bot = this.bot(botId);
     const task = bot ? this.taskByThread(botId, threadId) : undefined;
     if (!bot || !task) return null;
+    // Its own folder and nothing else, even over an earlier pin (a Cloud
+    // home's guest conversation never works in the bot's project folder).
+    if (opts.privateOnly) {
+      const only = fallbackCwd ?? null;
+      if (task.cwd !== only) {
+        task.cwd = only;
+        this.saveBots();
+        this.emit({ type: "bot", botId });
+      }
+      return only;
+    }
     if (opts.none) {
       if (task.cwd !== null) {
         task.cwd = null;
