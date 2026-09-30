@@ -102,6 +102,10 @@ export function cloudHomeConfiguration(env: NodeJS.ProcessEnv = process.env): Cl
   return { machineId, adminOrigin, publicOrigin, bootstrapSecret, warnings };
 }
 
+// The secrets and their pipe live in cloud-secrets.ts, which the server
+// reads before anything else (cloud-secrets-boot.ts).
+export { CLOUD_HOME_SECRET_KEYS, CLOUD_SECRETS_FD_ENV, cloudHomeSecrets, takeCloudSecrets, withoutCloudSecrets } from "./cloud-secrets.ts";
+
 /** The environment without a platform gateway's settings (CLOUD_IGNORED_KEYS). */
 export function withoutIgnoredCloudKeys(env: NodeJS.ProcessEnv): NodeJS.ProcessEnv {
   const kept = { ...env };
