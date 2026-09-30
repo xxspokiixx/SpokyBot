@@ -14,11 +14,14 @@
 // this process's environment. No child's environment ever carries them:
 // /proc/<pid>/environ keeps a process's starting environment, readable by
 // anything running as the same user (an engine's shell). The server gets
-// them over an inherited pipe it reads once and closes (cloud-home.ts
-// takeCloudSecrets). This process stays root, so its own environment and
-// memory are out of `maus`'s reach.
+// them over an inherited pipe it reads first thing and closes
+// (cloud-secrets.ts), and an environment built from an allow-list, so a
+// secret the platform adds later never reaches it either. This process stays
+// root, so its own environment and memory are out of `maus`'s reach, and it
+// runs and trusts only code `maus` cannot change: the image's, never the
+// volume's (codeTrustProblem).
 import { spawn, type ChildProcess } from "node:child_process";
-import { chownSync, readFileSync, statSync } from "node:fs";
+import { chownSync, readFileSync, statSync, type Stats } from "node:fs";
 import { dirname, join, posix, resolve } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import {
@@ -39,14 +42,32 @@ export function passwdIds(passwd: string, name: string): { uid: number; gid: num
   return null;
 }
 
-/** The server child's environment: the operator's contract plus fixed
- * ports and paths (Linux paths inside the image, so POSIX joins on every
- * host that builds them, tests included), never a platform gateway's settings
- * and never a secret (`secrets`, handed over the pipe instead). The edge
- * child gets only what it needs to route. */
+/** What the server child may be given from this process's environment, by
+ * name: the process basics, what the image sets, and the Cloud home's
+ * contract that is not secret. Anything else (a secret the platform adds
+ * later, a test's key, a platform gateway's settings) is left out. */
+const SERVER_ENV_NAMES = new Set([
+  "PATH", "SHELL", "HOSTNAME", "LANG", "LANGUAGE", "TZ", "TERM", "TMPDIR", "NO_COLOR", "NODE_ENV", "NODE_EXTRA_CA_CERTS", "SSL_CERT_FILE", "SSL_CERT_DIR",
+  "AGENT_BROWSER_EXECUTABLE_PATH", "OMB_STATIC_DIR", "OMB_DATA_DIR",
+  "OMB_CLOUD_ROLE", "OMB_CLOUD_MACHINE_ID", "OMB_CLOUD_ADMIN_URL", "OMB_CLOUD_IMAGE", "OMB_PUBLIC_URL", "OMB_WEBHOOK_PUBLIC_URL",
+  "OMB_CLOUD_BOAT_URL", "OMB_CLOUD_VOICE_URL", "OMB_CLOUD_DECIDER_URL", "OMB_TTS_DEFAULT_VOICE",
+]);
+export function serverEnvironmentAllowed(name: string): boolean {
+  return SERVER_ENV_NAMES.has(name) || name.startsWith("LC_");
+}
+
+/** The server child's environment: the allowed part of the operator's
+ * contract (serverEnvironmentAllowed) plus fixed ports and paths (Linux
+ * paths inside the image, so POSIX joins on every host that builds them,
+ * tests included), never a platform gateway's settings and never a secret
+ * (`secrets`, handed over the pipe instead). `dropped` names what was left
+ * out, for the log. The edge child gets only what it needs to route. */
 export function cloudHomeChildEnvironments(config: CloudHomeConfig, env: NodeJS.ProcessEnv, home: string) {
+  const offered = withoutCloudSecrets(withoutIgnoredCloudKeys(env));
+  const allowed = Object.fromEntries(Object.entries(offered).filter(([name, value]) => value !== undefined && serverEnvironmentAllowed(name)));
+  const dropped = Object.keys(offered).filter((name) => !serverEnvironmentAllowed(name) && name !== "HOME").sort();
   const server: NodeJS.ProcessEnv = {
-    ...withoutCloudSecrets(withoutIgnoredCloudKeys(env)), HOME: home, OMB_DATA_DIR: env.OMB_DATA_DIR || posix.join(home, ".openmausbot"),
+    ...allowed, HOME: home, OMB_DATA_DIR: env.OMB_DATA_DIR || posix.join(home, ".openmausbot"),
     OMB_PORT: "8799", OMB_WEBHOOK_PORT: "8800", OMB_PUBLIC_URL: config.publicOrigin,
     OMB_WEBHOOK_PUBLIC_URL: env.OMB_WEBHOOK_PUBLIC_URL || config.publicOrigin,
     [CLOUD_SECRETS_FD_ENV]: String(SECRETS_FD),
@@ -56,7 +77,28 @@ export function cloudHomeChildEnvironments(config: CloudHomeConfig, env: NodeJS.
     XDG_DATA_HOME: "/tmp/omb-edge/data", XDG_CONFIG_HOME: "/tmp/omb-edge/config",
     OMB_CLOUD_PUBLIC_HOST: cloudHomeHost(config),
   };
-  return { server, edge, secrets: cloudHomeSecrets(env) };
+  return { server, edge, secrets: cloudHomeSecrets(env), dropped };
+}
+
+/** Why the root supervisor must not run or trust `files`, or null: each
+ * must be root's and not writable by anyone else (nor any folder above it),
+ * and none may live on the volume `home`, which `maus` owns. The image makes its code
+ * root's (deploy/fly/Dockerfile); a file `maus` could rewrite would run as
+ * root at the next start, or be handed the secrets. */
+export function codeTrustProblem(files: readonly string[], home: string, stat: (path: string) => Pick<Stats, "uid" | "mode"> = statSync): string | null {
+  const volume = posix.join(home, "/");
+  for (const file of files) {
+    if (file === home || file.startsWith(volume)) return `${file} is on the volume`;
+    for (let path = file; ; path = dirname(path)) {
+      let owner: Pick<Stats, "uid" | "mode">;
+      try { owner = stat(path); } catch { return `${path} cannot be checked`; }
+      if (owner.uid !== 0) return `${path} is not root's`;
+      // A folder with the sticky bit (/tmp) lets nobody replace root's files.
+      if (owner.mode & 0o022 && !(path !== file && owner.mode & 0o1000)) return `${path} is writable by others than root`;
+      if (dirname(path) === path) break;
+    }
+  }
+  return null;
 }
 
 /** Start the server with its secrets on an inherited pipe (never its
@@ -106,7 +148,15 @@ export function startCloudHome(env: NodeJS.ProcessEnv = process.env) {
     prepareCloudHomeVolume(home, config.machineId);
   }
   const here = dirname(fileURLToPath(import.meta.url));
-  const { server, edge, secrets } = cloudHomeChildEnvironments(config, env, home);
+  const edgeBin = env.OMB_CLOUD_EDGE_BIN || "/usr/local/bin/caddy";
+  const edgeConfig = env.OMB_CLOUD_EDGE_CONFIG || "/app/cloud/Caddyfile";
+  if (ids) {
+    const problem = codeTrustProblem([process.execPath, fileURLToPath(import.meta.url), join(here, "index.js"), edgeBin, edgeConfig], home);
+    if (problem) throw new Error(`This image's code is not safe to run as root: ${problem}. Rebuild it from deploy/fly/Dockerfile.`);
+  }
+  const { server, edge, secrets, dropped } = cloudHomeChildEnvironments(config, env, home);
+  // Names only, never values: what the server does not get from here.
+  if (dropped.length) console.log(`cloud home: not passed to the server: ${dropped.join(", ")}`);
   const children: ChildProcess[] = [];
   let stopping = false;
   const stop = (failed: boolean) => {
@@ -133,7 +183,7 @@ export function startCloudHome(env: NodeJS.ProcessEnv = process.env) {
     return true;
   });
   runServer();
-  watch(spawn(env.OMB_CLOUD_EDGE_BIN || "/usr/local/bin/caddy", ["run", "--config", env.OMB_CLOUD_EDGE_CONFIG || "/app/cloud/Caddyfile", "--adapter", "caddyfile"],
+  watch(spawn(edgeBin, ["run", "--config", edgeConfig, "--adapter", "caddyfile"],
     { env: edge, stdio: "inherit", ...(ids ? { uid: ids.uid, gid: ids.gid } : {}) }));
   process.once("SIGTERM", () => stop(false));
   process.once("SIGINT", () => stop(false));

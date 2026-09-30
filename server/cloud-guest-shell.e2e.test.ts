@@ -98,7 +98,24 @@ if (process.argv[2] !== "--version") { process.env.FAKE_CLAUDE_DUMP = ${JSON.str
   base = `http://127.0.0.1:${port}`;
   const offlinePrelude = `data:text/javascript,${encodeURIComponent('const real = globalThis.fetch; globalThis.fetch = async (url, init) => String(url).startsWith("http://127.0.0.1:") ? real(url, init) : new Response("offline fixture", { status: 503 });')}`;
   // As the launcher starts it: the contract in the environment, the secrets on the pipe.
-  child = spawnWithSecrets(process.execPath, ["--import", offlinePrelude, join(SERVER_DIR, "index.ts")], {
+  // Every process the server starts, and whether the secrets' pipe was still
+  // its descriptor 3 then (it must be read and closed before anything starts).
+  const spawnWatch = join(home, "spawn-watch.mjs");
+  writeFileSync(spawnWatch, `import { createRequire, syncBuiltinESMExports } from "node:module";
+import { appendFileSync, fstatSync } from "node:fs";
+const cp = createRequire(import.meta.url)("node:child_process");
+let pipe; try { pipe = fstatSync(3).ino; } catch {}
+for (const name of ["spawn", "spawnSync", "execFile", "execFileSync", "exec", "execSync", "fork"]) {
+  const original = cp[name];
+  cp[name] = function (...args) {
+    let open = false; try { open = pipe !== undefined && fstatSync(3).ino === pipe; } catch {}
+    appendFileSync(${JSON.stringify(join(home, "spawns.log"))}, name + " " + String(args[0]).slice(0, 60) + (open ? " PIPE-OPEN" : "") + "\\n");
+    return original.apply(this, args);
+  };
+}
+syncBuiltinESMExports();
+`);
+  child = spawnWithSecrets(process.execPath, ["--import", offlinePrelude, "--import", pathToFileURL(spawnWatch).href, join(SERVER_DIR, "index.ts")], {
     PATH: process.env.PATH, ...(process.env.SystemRoot ? { SystemRoot: process.env.SystemRoot } : {}),
     HOME: home, USERPROFILE: home, OMB_DATA_DIR: dataDir, OMB_PORT: String(port), OMB_WEBHOOK_PORT: String(port + 1),
     OMB_CLOUD_ROLE: "home", OMB_CLOUD_MACHINE_ID: "3f9c2a4e-8b1d-4c6e-9a7f-2d5e8c1b0a93", OMB_CLOUD_ADMIN_URL: "https://cloud.example.test",
@@ -149,6 +166,11 @@ const say = (token: string, bot: { id: string }, text: string, threadId: string)
 it("boots with its secrets from the launcher's pipe: the Admin's signed pairing works", () => {
   expect(owner).toMatch(/^omb_sess_/);
   expect(log).not.toContain("its secrets came in this process's environment");
+});
+
+it("reads its secrets before it starts any process: none inherits the pipe", () => {
+  const spawns = existsSync(join(home, "spawns.log")) ? readFileSync(join(home, "spawns.log"), "utf8") : "";
+  expect(spawns).not.toContain("PIPE-OPEN");
 });
 
 it("no engine a bot runs finds the Cloud's secrets: not in its own environment, not in the server's starting one", async () => {

@@ -1,6 +1,9 @@
 // OpenMausBot server — the harness host. Clients hold no transports
 // (upstream rule): the React app dispatches typed commands over HTTP and
 // folds one SSE event stream; every provider process runs here.
+// First, before any module that could start a process: a Cloud home's
+// secrets off the launcher's pipe (cloud-secrets-boot.ts).
+import { BOOT_CLOUD_SECRETS } from "./cloud-secrets-boot.ts";
 import { AsyncLocalStorage } from "node:async_hooks";
 import { createHash, randomBytes, randomUUID, timingSafeEqual } from "node:crypto";
 import { existsSync, readFileSync, realpathSync, rmSync, mkdirSync } from "node:fs";
@@ -290,7 +293,7 @@ import { ManagedDesktopProviders } from "./managed-desktop.ts";
 import { computerKindForResource, ManagedDesktopPolicy, type ComputerKind } from "./managed-policy.ts";
 import { hostedModelPolicy, HOSTED_MODEL_POLICY_HEADER, HOSTED_PROVIDER_SETTINGS_ERROR } from "./hosted-models.ts";
 import {
-  boatNotConfiguredMessage, CLOUD_HOME_RESTART_EXIT_CODE, CLOUD_HOME_SECRET_KEYS, CLOUD_IGNORED_KEYS, takeCloudSecrets, CLOUD_PAIRING_PATH, cloudHomeConfiguration, cloudHomeOffersPlace, cloudHomePlaceRefusal,
+  boatNotConfiguredMessage, CLOUD_HOME_RESTART_EXIT_CODE, CLOUD_HOME_SECRET_KEYS, CLOUD_IGNORED_KEYS, CLOUD_PAIRING_PATH, cloudHomeConfiguration, cloudHomeOffersPlace, cloudHomePlaceRefusal,
   createCloudPairing, firstCloudTurnPatch, readSignedBody,
 } from "./cloud-home.ts";
 import { createCloudMoveRoutes } from "./cloud-move-http.ts";
@@ -636,7 +639,7 @@ const sharedComputers = new SharedComputers(id => sessions.isLive(id));
 // Its secrets come over the launcher's pipe, never this process's
 // environment (cloud-home-start.ts); a server started another way (tests,
 // development) still reads them from its environment.
-const CLOUD_SECRETS = takeCloudSecrets();
+const CLOUD_SECRETS = BOOT_CLOUD_SECRETS;
 const CLOUD_ENV: NodeJS.ProcessEnv = { ...process.env, ...CLOUD_SECRETS };
 const CLOUD_HOME = cloudHomeConfiguration(CLOUD_ENV);
 /** Lending a computer to this server (the shared-computer routes, the two

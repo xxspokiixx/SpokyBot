@@ -8,7 +8,7 @@ import {
   boatNotConfiguredMessage, cloudHomeHost, cloudHomeOffersPlace, cloudHomePlaceRefusal, cloudPairingSignature, createCloudPairing, firstCloudTurnPatch, prepareCloudHomeVolume,
   withoutIgnoredCloudKeys,
 } from "./cloud-home.ts";
-import { cloudHomeChildEnvironments, passwdIds, serverExitAction, spawnWithSecrets } from "./cloud-home-start.ts";
+import { cloudHomeChildEnvironments, codeTrustProblem, passwdIds, serverExitAction, spawnWithSecrets } from "./cloud-home-start.ts";
 import { hostedModelPolicy } from "./hosted-models.ts";
 import { resolveRequestAuth } from "./request-auth.ts";
 import { SessionRegistry } from "./sessions.ts";
@@ -315,6 +315,38 @@ it("gives the edge only its routing name and the server the contract, never a ga
   expect(passwdIds("root:x:0:0::/root:/bin/sh\n", "maus")).toBeNull();
 });
 
+it("gives the server only an allow-listed environment: a secret added later, a test's key or anything unknown never reaches it", () => {
+  const config = cloudHomeConfiguration(contract())!;
+  const env = { ...contract(), PATH: "/usr/bin", LANG: "C.UTF-8", LC_ALL: "C.UTF-8", NODE_ENV: "production", OMB_STATIC_DIR: "/app/dist",
+    OMB_CLOUD_BOAT_URL: "https://cloud.example.test/boat", OMB_TTS_DEFAULT_VOICE: "alloy",
+    OMB_CLOUD_FUTURE_SECRET: "later", OMB_TEST_CLOUD_LEFT_BEHIND_KEY: "k".repeat(43), FLY_API_TOKEN: "fly", SOME_TOKEN: "t", HOME: "/root" };
+  const { server, dropped } = cloudHomeChildEnvironments(config, env, "/data");
+  expect(server).toMatchObject({ PATH: "/usr/bin", LANG: "C.UTF-8", LC_ALL: "C.UTF-8", NODE_ENV: "production", OMB_STATIC_DIR: "/app/dist",
+    OMB_CLOUD_ROLE: "home", OMB_CLOUD_MACHINE_ID: machineId, OMB_CLOUD_ADMIN_URL: "https://cloud.example.test",
+    OMB_CLOUD_BOAT_URL: "https://cloud.example.test/boat", OMB_TTS_DEFAULT_VOICE: "alloy", HOME: "/data" });
+  for (const name of ["OMB_CLOUD_FUTURE_SECRET", "OMB_TEST_CLOUD_LEFT_BEHIND_KEY", "FLY_API_TOKEN", "SOME_TOKEN"]) {
+    expect(server).not.toHaveProperty(name);
+    expect(dropped).toContain(name);
+  }
+  // A secret is never even named as dropped: it goes over the pipe.
+  expect(dropped).not.toContain("OMB_CLOUD_BOOTSTRAP_SECRET");
+});
+
+it("the root supervisor runs and trusts only root's code, never the volume's or anything maus could rewrite", () => {
+  const files = ["/usr/local/bin/node", "/app/dist-server/cloud-home-start.js", "/app/dist-server/index.js", "/usr/local/bin/caddy", "/app/cloud/Caddyfile"];
+  const image = (overrides: Record<string, { uid: number; mode: number }> = {}) => (path: string) =>
+    overrides[path] ?? { uid: 0, mode: path.includes(".") || path.endsWith("node") || path.endsWith("caddy") ? 0o100755 : 0o40755 };
+  expect(codeTrustProblem(files, "/data", image())).toBeNull();
+  expect(codeTrustProblem(files, "/data", image({ "/app/dist-server/index.js": { uid: 1001, mode: 0o100644 } }))).toBe("/app/dist-server/index.js is not root's");
+  expect(codeTrustProblem(files, "/data", image({ "/app/dist-server/cloud-home-start.js": { uid: 0, mode: 0o100666 } }))).toBe("/app/dist-server/cloud-home-start.js is writable by others than root");
+  expect(codeTrustProblem(files, "/data", image({ "/app/dist-server": { uid: 1001, mode: 0o40755 } }))).toBe("/app/dist-server is not root's");
+  expect(codeTrustProblem(files, "/data", image({ "/app": { uid: 0, mode: 0o40777 } }))).toBe("/app is writable by others than root");
+  // A sticky folder (/tmp) does not let anyone replace root's file in it.
+  expect(codeTrustProblem(["/tmp/caddy"], "/data", image({ "/tmp": { uid: 0, mode: 0o41777 } }))).toBeNull();
+  expect(codeTrustProblem([...files, "/data/.local/bin/caddy"], "/data", image())).toBe("/data/.local/bin/caddy is on the volume");
+  expect(codeTrustProblem(files, "/data", () => { throw new Error("ENOENT"); })).toBe("/usr/local/bin/node cannot be checked");
+});
+
 it("ships an edge and a Fly template that keep the server private", () => {
   const caddy = readFileSync(join(import.meta.dirname, "../deploy/fly/Caddyfile"), "utf8");
   expect(caddy).toMatch(/^:8080 \{/m);
@@ -322,6 +354,11 @@ it("ships an edge and a Fly template that keep the server private", () => {
   expect(new Set(upstreams)).toEqual(new Set(["127.0.0.1:8799", "127.0.0.1:8800"]));
   // every forwarded request is marked as proxied
   expect(caddy.match(/header_up X-Forwarded-For \{client_ip\}/g)).toHaveLength(upstreams.length);
+  // The root supervisor's code is root's: maus owns only the volume.
+  const image = readFileSync(join(import.meta.dirname, "../deploy/fly/Dockerfile"), "utf8");
+  expect(image).toMatch(/chown -R root:root \/app\b/);
+  expect(image).toMatch(/chmod -R go-w \/app\b/);
+  expect(image.indexOf("chmod -R go-w /app")).toBeLessThan(image.indexOf("CMD ["));
   const fly = readFileSync(join(import.meta.dirname, "../deploy/fly/fly.toml"), "utf8");
   expect(fly).toMatch(/internal_port = 8080/);
   expect(fly).toMatch(/destination = "\/data"/);

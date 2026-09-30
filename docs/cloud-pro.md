@@ -493,11 +493,22 @@ arrive as the launcher's environment, from the Fly app secrets the Admin
 sets. The launcher never puts them in a child's environment, because
 `/proc/<pid>/environ` keeps a process's starting environment for anything
 running as the same user to read. It writes them to the server over an
-inherited pipe (`OMB_CLOUD_SECRETS_FD`), which the server reads once and
-closes before it starts anything. The launcher's own environment and memory
-belong to root, out of `maus`'s reach. A server started without the pipe
-(tests, development) reads them from its environment and says so in its
-log.
+inherited pipe (`OMB_CLOUD_SECRETS_FD`). The server reads it and closes it
+as its very first step (`server/cloud-secrets-boot.ts`, its first import),
+before any other module loads, so no process it starts inherits the pipe.
+The server's environment is built from an allow-list: the process basics,
+what the image sets and the parts of the boot contract that are not secret
+(`serverEnvironmentAllowed`). Anything else, a secret the platform adds
+later included, never reaches it; the launcher logs the names it left out,
+never their values. The launcher's own environment and memory belong to
+root, out of `maus`'s reach. A server started without the pipe (tests,
+development) reads them from its environment and says so in its log.
+
+The launcher runs and trusts only code `maus` cannot change: the image
+makes `/app` root's and not writable by anyone else, and the launcher
+refuses to start if Node, itself, the server's entry point, Caddy or its
+config (or any folder above them) is not root's, is writable by others, or
+is on the volume. Only the `/data` volume is `maus`'s.
 
 `HOME=/data`, so `~/.claude`, `~/.codex` and OpenMausBot's own data
 (`/data/.openmausbot`) persist on the volume.
@@ -626,10 +637,12 @@ computers belong to this machine on every request.
   memory, and they are on the credential list. So no process the server
   starts inherits them, including tools that copy its environment as it is
   (the browser, docker, ssh, MCP bridges), and no process finds them in the
-  server's `/proc/<pid>/environ`. They are still in the server's memory: a
-  process running as the same user that can trace the server (the kernel's
-  ptrace policy decides) could read them there, which is why a guest's turn
-  gets no shell (above). A relay token is only this customer's own Cloud Pro
+  server's `/proc/<pid>/environ`. They are still in the server's memory, and
+  that is the remaining exposure: the server runs as `maus`, like every
+  engine, so a process running as the same user that may trace it (the
+  kernel's ptrace policy, `kernel.yama.ptrace_scope`, decides) could read
+  them there. That is why a guest's turn gets no shell (above); the complete
+  fix is engines under a user of their own. A relay token is only this customer's own Cloud Pro
   allowance: it works only through the Admin, only on this machine's cloud
   computers, voice and decisions, and only up to the monthly caps.
 - A refusal from the Boat or voice relay (for example, the month's cloud
