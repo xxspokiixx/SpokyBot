@@ -9,13 +9,13 @@ import { hintSeen, hintSeenPatch, welcomeDue } from "@/lib/onboarding";
 import { useUpdaterState } from "@/lib/updater";
 import { t } from "@/lib/i18n";
 
-// Versioned once, for the $39 launch price: a dismissal of the first card
+// Versioned once, for the launch price: a dismissal of the first card
 // ("pro-introduction-dismissed") no longer counts, so everyone sees it once
 // more. After that, updates and replaying the welcome tour never reset it.
 export const PRO_DISMISSED = "pro-introduction-dismissed-v2";
 
 /** The launch price, and the regular price shown struck through beside it. */
-export const PRO_LAUNCH_PRICE = "$39";
+export const PRO_LAUNCH_PRICE = "$49";
 export const PRO_REGULAR_PRICE = "$89";
 
 export function proOfferAvailable(account: CloudAccountState | null): boolean {

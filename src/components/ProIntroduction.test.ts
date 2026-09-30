@@ -42,18 +42,18 @@ it("shows the live benefits without enrolling, charging or refreshing an account
   expect(html).not.toContain("Coming soon"); expect(api).not.toHaveBeenCalled();
   expect(html).not.toContain('aria-modal="true"');
 });
-it("shows the $39 launch price beside the struck-through $89", () => {
+it("shows the $49 launch price beside the struck-through $89", () => {
   const html = render();
-  expect(html).toContain('<span role="img" aria-label="Was $89, now $39 a month: launch price for the first 100 users"><s class="text-ink-secondary">$89</s> $39/month: launch price for the first 100 users</span>');
+  expect(html).toContain('<span role="img" aria-label="Was $89, now $49 a month: launch price for the first 100 users"><s class="text-ink-secondary">$89</s> $49/month: launch price for the first 100 users</span>');
   // Below the benefits, above Get Pro.
-  expect(html.indexOf("Cloud scheduled tasks")).toBeLessThan(html.indexOf("$39/month"));
-  expect(html.indexOf("$39/month")).toBeLessThan(html.indexOf("Get Pro"));
+  expect(html.indexOf("Cloud scheduled tasks")).toBeLessThan(html.indexOf("$49/month"));
+  expect(html.indexOf("$49/month")).toBeLessThan(html.indexOf("Get Pro"));
 });
 it("shows once more to someone who dismissed the first card, then stays dismissed", async () => {
   storage.set(OLD_DISMISSED, "1");
   f.state.config.onboarding.hintsSeen.push(OLD_DISMISSED);
   expect(PRO_DISMISSED).not.toBe(OLD_DISMISSED);
-  expect(render()).toContain("$39/month");
+  expect(render()).toContain("$49/month");
   f.index = 0;
   ProIntroduction({})!.props.onDismiss(); await Promise.resolve();
   expect(storage.get(PRO_DISMISSED)).toBe("1");
@@ -64,7 +64,7 @@ it("shows once more to someone who dismissed the first card, then stays dismisse
   expect(render()).toBe("");
   // Browser storage gone and only the old workspace hint left: it would show again...
   storage.clear(); f.values = [signedOut];
-  expect(render()).toContain("$39/month");
+  expect(render()).toContain("$49/month");
   // ...so the workspace record carries the new dismissal too.
   f.state.config.onboarding.hintsSeen.push(PRO_DISMISSED); f.values = [signedOut];
   expect(render()).toBe("");
