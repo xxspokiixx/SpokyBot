@@ -100,6 +100,7 @@ import { useCloudOwner } from "./CloudOwner";
 import { profileInitials, SidebarProfileMenu } from "./SidebarProfileMenu";
 import { SidebarSectionHeader } from "./SidebarSectionHeader";
 import { useShowThreads } from "@/lib/thread-preferences";
+import { botShowsUnread } from "@/lib/bot-unread";
 import { attentionJumpAction, AttentionThreadRows, crossBotAttentionThreads, SidebarBotActivity, sidebarBotActivityTasks } from "./SidebarBotActivity";
 import { SidebarAttentionPanel } from "./SidebarAttentionPanel";
 import { ShortcutHint } from "./ShortcutHint";
@@ -1141,7 +1142,7 @@ export function BotListItem({
   const working = !waiting && (Boolean(bot.busy) || activityTasks.some((task) => task.busy || task.activity === "working"));
   const teammateWait = !waiting && !working && (Boolean(bot.waitingForTeammates) || activityTasks.some((task) => Boolean(task.waitingForTeammates)));
   const queued = activityTasks.some((task) => task.queued);
-  const unread = bot.unread || activityTasks.some((task) => task.unread);
+  const unread = botShowsUnread(bot);
   // quiet rows drop the last-message preview but keep a line that reports
   // something happening now; an idle bot is just its name
   const statusLine = deleting || working || waiting || teammateWait || queued;
@@ -1160,7 +1161,7 @@ export function BotListItem({
           // pose — N idle rows bobbing at display rate was most of the app's
           // visible-idle CPU (states are keyword-derived, so "working" can be
           // decorative; working/unread/motion are the real signals).
-          animated={working || Boolean(bot.unread) || (mascotMotion?.kind ?? "none") !== "none"}
+          animated={working || unread || (mascotMotion?.kind ?? "none") !== "none"}
         />
         {working && (
           // presence dot: green while the bot is working, ringed in the row's

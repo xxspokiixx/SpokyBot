@@ -33,6 +33,7 @@ import {
 } from "../../shared/skill-request";
 import type { Routine, RoutineInput, RoutineRun, RoutineRunStatusFilter } from "@/lib/routines";
 import type { WebhookAttempt, WebhookIngressStatus, WebhookTrigger } from "@/lib/webhooks";
+import { botShowsUnread } from "@/lib/bot-unread";
 import { answerResponse, dismissResponse } from "@/lib/card-answer";
 import { currentCall } from "@/lib/call";
 import { showNotification, type NotificationTarget } from "@/lib/notify";
@@ -3767,7 +3768,9 @@ export function StoreProvider({ children }: { children: ReactNode }) {
           if (bot.id === stateRef.current.selectedId && stateRef.current.activeView === "chat" &&
               (selectedTask?.unread || (!bot.tasks && bot.unread))) {
             if (selectedTask) selectedTask.unread = false;
-            bot.unread = Boolean(bot.tasks?.some((task) => task.unread));
+            // Hidden routine runs must not put the dot back on the next frame.
+            // No task list: the bot flag is the unread signal.
+            bot.unread = botShowsUnread(bot);
             fetch(`/api/bots/${bot.id}/read`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ threadId: selected?.threadId }) }).catch(() => {});
           }
           rawDispatch({
