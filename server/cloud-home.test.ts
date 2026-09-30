@@ -8,7 +8,7 @@ import {
   boatNotConfiguredMessage, cloudHomeHost, cloudHomeOffersPlace, cloudHomePlaceRefusal, cloudPairingSignature, createCloudPairing, firstCloudTurnPatch, prepareCloudHomeVolume,
   withoutIgnoredCloudKeys,
 } from "./cloud-home.ts";
-import { cloudHomeChildEnvironments, passwdIds, serverExitAction } from "./cloud-home-start.ts";
+import { cloudHomeChildEnvironments, passwdIds, serverExitAction, spawnWithSecrets } from "./cloud-home-start.ts";
 import { hostedModelPolicy } from "./hosted-models.ts";
 import { resolveRequestAuth } from "./request-auth.ts";
 import { SessionRegistry } from "./sessions.ts";
@@ -294,13 +294,20 @@ it("binds a fresh volume to its machine and refuses anyone else's data", () => {
   expect(readFileSync(join(unmarked, "notes.txt"), "utf8")).toBe("someone's data");
 });
 
-it("gives the edge only its routing name and the server the contract, never a gateway's settings", () => {
+it("gives the edge only its routing name and the server the contract, never a gateway's settings or a secret", () => {
+  const relay = { OMB_CLOUD_BOAT_TOKEN: `box_omb_${"b".repeat(43)}`, OMB_CLOUD_VOICE_TOKEN: `omb_voice_${"v".repeat(43)}`, OMB_CLOUD_DECIDER_TOKEN: `omb_decide_${"d".repeat(43)}` };
   const config = cloudHomeConfiguration(withGateway())!;
-  const { server, edge } = cloudHomeChildEnvironments(config, { ...withGateway(), PATH: "/usr/bin" }, "/data");
+  const { server, edge, secrets } = cloudHomeChildEnvironments(config, { ...withGateway(), ...relay, PATH: "/usr/bin" }, "/data");
   expect(server).toMatchObject({ HOME: "/data", OMB_DATA_DIR: "/data/.openmausbot", OMB_PORT: "8799", OMB_WEBHOOK_PORT: "8800",
-    OMB_PUBLIC_URL: "https://omb-u-1a2b3c4d5e6f.fly.dev", OMB_WEBHOOK_PUBLIC_URL: "https://omb-u-1a2b3c4d5e6f.fly.dev", OMB_CLOUD_BOOTSTRAP_SECRET: secret });
+    OMB_PUBLIC_URL: "https://omb-u-1a2b3c4d5e6f.fly.dev", OMB_WEBHOOK_PUBLIC_URL: "https://omb-u-1a2b3c4d5e6f.fly.dev", OMB_CLOUD_SECRETS_FD: "3" });
   for (const key of CLOUD_IGNORED_KEYS) expect(server).not.toHaveProperty(key);
   expect(JSON.stringify(server)).not.toContain(token);
+  // The secrets go over the pipe, never in the server's environment.
+  expect(secrets).toEqual({ OMB_CLOUD_BOOTSTRAP_SECRET: secret, ...relay });
+  for (const value of Object.values(secrets)) {
+    expect(JSON.stringify(server)).not.toContain(value);
+    expect(JSON.stringify(edge)).not.toContain(value);
+  }
   expect(edge.OMB_CLOUD_PUBLIC_HOST).toBe(cloudHomeHost(config));
   expect(JSON.stringify(edge)).not.toContain(token);
   expect(JSON.stringify(edge)).not.toContain(secret);
@@ -351,4 +358,42 @@ it("records the first finished bot turn once, on a Cloud home only, and a moved 
   expect(restoredWorkspaceConfig(portableWorkspaceConfig(mac), { onboarding: { hintsSeen: ["cloud-setup-hidden"] } }).onboarding)
     .toEqual({ hintsSeen: ["cloud-setup-hidden"] });
   expect(restoredWorkspaceConfig(portableWorkspaceConfig(mac), {}).onboarding).toBeUndefined();
+});
+
+// The launcher only runs on Linux (the image); Windows passes descriptors differently.
+it.skipIf(process.platform === "win32")("hands the server its secrets over a pipe it reads once: never its environment, never a grandchild's", async () => {
+  const dir = mkdtempSync(join(tmpdir(), "omb-cloud-secrets-"));
+  try {
+    const script = join(dir, "server.mjs");
+    const out = join(dir, "out.json");
+    // What a server does at startup (takeCloudSecrets), then what an engine
+    // it starts could see: its own environment and its parent's starting one.
+    writeFileSync(script, `
+import { execFileSync, spawnSync } from "node:child_process";
+import { readFileSync, writeFileSync } from "node:fs";
+const { takeCloudSecrets } = await import(${JSON.stringify(join(import.meta.dirname, "cloud-home.ts"))});
+const secrets = takeCloudSecrets();
+const parentEnviron = (pid) => process.platform === "linux"
+  ? readFileSync("/proc/" + pid + "/environ", "utf8")
+  : execFileSync("ps", ["eww", "-p", String(pid), "-o", "command="]).toString();
+const child = spawnSync(process.execPath, ["-e", "process.stdout.write(JSON.stringify(process.env))"], { encoding: "utf8" });
+writeFileSync(${JSON.stringify(out)}, JSON.stringify({ secrets, env: process.env, own: parentEnviron(process.pid), child: child.stdout }));
+`);
+    const env: NodeJS.ProcessEnv = { PATH: process.env.PATH, ...(process.env.SystemRoot ? { SystemRoot: process.env.SystemRoot } : {}), OMB_CLOUD_SECRETS_FD: "3", VISIBLE_PROBE: "visible" };
+    const child = spawnWithSecrets(process.execPath, [script], env, { OMB_CLOUD_BOOTSTRAP_SECRET: secret, OMB_CLOUD_BOAT_TOKEN: "box_omb_probe-token" });
+    await new Promise((resolve) => child.once("exit", resolve));
+    const seen = JSON.parse(readFileSync(out, "utf8"));
+    expect(seen.secrets).toEqual({ OMB_CLOUD_BOOTSTRAP_SECRET: secret, OMB_CLOUD_BOAT_TOKEN: "box_omb_probe-token" });
+    // The probe works: it sees an ordinary variable…
+    if (process.platform !== "win32") expect(seen.own).toContain("VISIBLE_PROBE=visible");
+    // …and no secret, in the server's own starting environment, its live one or its child's.
+    for (const where of [seen.own, JSON.stringify(seen.env), seen.child]) {
+      expect(where).not.toContain(secret);
+      expect(where).not.toContain("box_omb_probe-token");
+    }
+    // Nor does a child learn the pipe exists.
+    expect(seen.child).not.toContain("OMB_CLOUD_SECRETS_FD");
+  } finally {
+    await removeTempDir(dir);
+  }
 });

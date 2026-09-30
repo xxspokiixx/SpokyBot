@@ -672,7 +672,11 @@ export function createOpenAIChatRuntime<Config>(options: RuntimeOptions<Config>)
         sessionModelSwitch: "in-session", customMcp: options.tools !== false, agentsMcp: options.tools !== false, composioMcp: options.tools !== false,
         // The runtime owns the whole tool loop, so it can always take a
         // user message mid-turn: park it, deliver before the next completion.
-        queueing: true },
+        queueing: true,
+        // No shell and no file tool on the host at all: only MCP tools, each
+        // call a card in Ask (the Boat's `exec` runs on the Boat). A guest's
+        // turn is as confined as it gets.
+        guestTurns: "confined" },
       sendTurn,
       interruptTurn: async (threadId, turnId) => {
         const turn = active.get(threadId);

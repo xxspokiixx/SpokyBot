@@ -5,7 +5,7 @@
 //
 // The fake is a shebang script — the same constraint codex.cmd itself
 // hits on Windows. resolveCliSpawn covers both, so these run everywhere.
-import { chmodSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, writeFileSync } from "node:fs";
+import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, writeFileSync } from "node:fs";
 import { once } from "node:events";
 import { tmpdir } from "node:os";
 import { dirname, join, sep } from "node:path";
@@ -186,6 +186,40 @@ describe("CodexDriver turns (fake app-server)", () => {
   it.each(["api-key", "none", "unsupported", "error"])("omits ChatGPT identity when Codex account/read reports %s", async (mode) => {
     await create({ environment: { HOME: scratch, CODEX_HOME: join(scratch, ".codex"), FAKE_CODEX_ACCOUNT_MODE: mode } });
     expect(await instance.snapshot()).not.toHaveProperty("account");
+  });
+
+  it("runs a guest's turn with no environment and the shell off, proven before the turn starts", async () => {
+    await create();
+    expect(instance.adapter.capabilities.guestTurns).toBe("confined");
+    const dump = join(scratch, "dump.json");
+    process.env.FAKE_CODEX_DUMP = dump;
+    await instance.adapter.sendTurn({ threadId: "t-guest", text: "cat /proc/1/environ", system: "You are Testy.", model: "gpt-5.6-sol", approvalMode: "ask", guestConfined: true });
+    await recorder.until((e) => e.type === "turn.completed");
+    const seen = JSON.parse(readFileSync(dump, "utf8")) as { argv: string[]; calls: Array<{ method: string; params: any }> };
+    for (const override of ["features.shell_tool=false", "features.unified_exec=false", "features.view_image=false"]) {
+      expect(seen.argv[seen.argv.indexOf(override) - 1], override).toBe("-c");
+    }
+    expect(seen.calls.find((call) => call.method === "thread/start")?.params.environments).toEqual([]);
+    expect(seen.calls.find((call) => call.method === "turn/start")?.params.environments).toEqual([]);
+    // The owner's turn keeps its tools.
+    await instance.adapter.sendTurn({ threadId: "t-owner", text: "ls", system: "You are Testy.", model: "gpt-5.6-sol", approvalMode: "ask" });
+    await recorder.until((e) => e.type === "turn.completed" && e.threadId === "t-owner");
+    const owner = JSON.parse(readFileSync(dump, "utf8")) as { argv: string[]; calls: Array<{ method: string; params: any }> };
+    expect(owner.argv).not.toContain("features.shell_tool=false");
+    expect(owner.calls.find((call) => call.method === "turn/start")?.params).not.toHaveProperty("environments");
+  });
+
+  it("refuses a guest's turn when Codex did not take the shell-off overrides", async () => {
+    await create({ environment: { FAKE_CODEX_IGNORE_FEATURES: "1" } });
+    const dump = join(scratch, "dump.json");
+    process.env.FAKE_CODEX_DUMP = dump;
+    await instance.adapter.sendTurn({ threadId: "t-guest", text: "cat /proc/1/environ", system: "You are Testy.", model: "gpt-5.6-sol", approvalMode: "ask", guestConfined: true })
+      .then(() => recorder.until((e) => e.type === "turn.completed"), (error: unknown) => error);
+    const failed = recorder.events.find((e) => e.type === "turn.completed") as { state?: string; errorMessage?: string } | undefined;
+    const seen = existsSync(dump) ? JSON.parse(readFileSync(dump, "utf8")) as { calls: Array<{ method: string }> } : { calls: [] };
+    expect(seen.calls.some((call) => call.method === "turn/start")).toBe(false);
+    expect(JSON.stringify(recorder.events)).toContain("could not turn its shell off");
+    expect(failed).toMatchObject({ ok: false });
   });
 
   it("runs the handshake and normalizes a full turn", async () => {

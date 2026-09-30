@@ -370,9 +370,25 @@ On the Cloud home (`server/shared-computers.ts`, `server/index.ts`):
 - A conversation a guest opened (or a guest's routine opened for its
   results, or a room a guest opened) runs in Ask whatever the bot's own
   level: no Auto reviewer, no Full access, no saved command answers for it.
-  So does a room turn whose latest line from a person is a guest's. It works
-  in a folder of its own, never the bot's project folder the owner's
-  conversations share.
+  So does a room turn whose latest line from a person is a guest's, and any
+  work a guest's turn hands a teammate (delegation, coordination, a room
+  handoff), however deep. A delegation or a question to a teammate runs in a
+  new conversation of the guest's own on that teammate, never in the owner's
+  conversation with it, and is never folded into a turn running there. It
+  works in a folder of its own, never the bot's
+  project folder the owner's conversations share, and a card it raises never
+  offers "always allow".
+- A guest's turn gets no shell and reads nothing outside its own folder, on
+  every engine; an engine that cannot run it that way refuses it with one
+  line ("This bot can't take requests from guests on this Cloud. Ask the
+  owner to switch it to Claude."), before anything is recorded:
+
+  | Engine | A guest's turn |
+  | --- | --- |
+  | Claude Code (2.1.257 or newer) | `--restricted` and only Read, Grep, Glob, Edit, Write and WebSearch: no Bash, PowerShell or WebFetch; reads outside its folder refused outright (`blockReadsOutsideWorkingDirectories`, plus deny rules); the folder's own `.mcp.json` and settings never load; only the harness's own MCP tools are pre-allowed, every other call asks the owner. The session's `init` must list no command-running tool, or the turn stops. An older Claude Code refuses. |
+  | Codex / ChatGPT (codex-cli 0.159) | no environment (`environments: []`: no `exec_command`, `apply_patch` or `view_image`, and calls to them are refused), `features.shell_tool`, `unified_exec` and `view_image` off and web search disabled, proven in `config/read` before the turn starts, or the turn refuses. |
+  | API models (OpenAI-compatible, MiniMax, Mistral, Grok API) | no shell or file tool on the machine at all; every MCP call asks the owner. |
+  | Cursor, Qwen, Gemini, Hermes, Pi, OpenCode, Grok Build, Antigravity, Droid, Kimi, a custom ACP engine, Boat | refused: each runs its own shell or reads files outside its folder without asking in Ask (Qwen, Gemini, OpenCode and Pi could have it switched off; that needs a separate process per guest conversation, a follow-up). |
 - Everything the owner's own devices write carries one owner identity, so
   pairing a device again (or revoking one) never makes the owner's earlier
   conversations someone else's. A guest never carries it.
@@ -461,14 +477,27 @@ docker build -t openmausbot .
 docker build -f deploy/fly/Dockerfile --build-arg BASE_IMAGE=openmausbot -t omb-cloud-home .
 ```
 
-At boot the launcher, running as root only for this step, hands the volume's
-mount point to the `maus` user, drops privileges for good, binds the volume to
-this machine (`/data/.omb-cloud-home.json`; another machine's volume, or an
-unmarked volume with data on it, is refused), and runs two children: the
+At boot the launcher, running as root, hands the volume's mount point to the
+`maus` user, binds the volume to this machine as `maus`
+(`/data/.omb-cloud-home.json`; another machine's volume, or an unmarked
+volume with data on it, is refused), and runs two children as `maus`: the
 server on `127.0.0.1:8799` (webhooks on `127.0.0.1:8800`) and Caddy on
-`:8080`. If either exits, both stop and Fly restarts the machine. The one
-exception: after a restore commits (Move to Cloud, below), the server exits
-with code 75 and the launcher starts only the server again.
+`:8080`. It stays a small root supervisor: if either child exits, both stop
+and Fly restarts the machine. The one exception: after a restore commits
+(Move to Cloud, below), the server exits with code 75 and the launcher starts
+only the server again.
+
+The machine's secrets (`OMB_CLOUD_BOOTSTRAP_SECRET` and the relay tokens
+`OMB_CLOUD_BOAT_TOKEN`, `OMB_CLOUD_VOICE_TOKEN`, `OMB_CLOUD_DECIDER_TOKEN`)
+arrive as the launcher's environment, from the Fly app secrets the Admin
+sets. The launcher never puts them in a child's environment, because
+`/proc/<pid>/environ` keeps a process's starting environment for anything
+running as the same user to read. It writes them to the server over an
+inherited pipe (`OMB_CLOUD_SECRETS_FD`), which the server reads once and
+closes before it starts anything. The launcher's own environment and memory
+belong to root, out of `maus`'s reach. A server started without the pipe
+(tests, development) reads them from its environment and says so in its
+log.
 
 `HOME=/data`, so `~/.claude`, `~/.codex` and OpenMausBot's own data
 (`/data/.openmausbot`) persist on the volume.
@@ -592,20 +621,17 @@ computers belong to this machine on every request.
   directly. Boat's account-change rules still apply: adding an own Boat key
   while included cloud computers exist is refused until they are deleted,
   because the new account cannot reach them.
-- **What holding the tokens does and does not do.** The server reads the
-  tokens at startup, keeps them in memory and removes them from its
-  environment, like the bootstrap secret, and they are on the credential list.
-  So no process the server starts inherits them, including tools that copy
-  its environment as it is (the browser, docker, ssh, MCP bridges). It does
-  not make them unreadable: the launcher starts the server with them, so the
-  server's `/proc/<pid>/environ` keeps its startup environment, and an engine
-  running as the same user (a bot with a shell) can read a relay token there.
-  That is accepted because a relay token is only this customer's own Cloud Pro
+- **What holding the tokens does and does not do.** The server receives the
+  tokens over the launcher's pipe, never its environment, keeps them in
+  memory, and they are on the credential list. So no process the server
+  starts inherits them, including tools that copy its environment as it is
+  (the browser, docker, ssh, MCP bridges), and no process finds them in the
+  server's `/proc/<pid>/environ`. They are still in the server's memory: a
+  process running as the same user that can trace the server (the kernel's
+  ptrace policy decides) could read them there, which is why a guest's turn
+  gets no shell (above). A relay token is only this customer's own Cloud Pro
   allowance: it works only through the Admin, only on this machine's cloud
-  computers, voice and decisions, and only up to the monthly caps. Whoever
-  holds it can at worst use up this month's included hours, voice characters
-  or decisions; it opens no other customer's data and none of the Admin's
-  provider keys.
+  computers, voice and decisions, and only up to the monthly caps.
 - A refusal from the Boat or voice relay (for example, the month's cloud
   computer hours are used up) is shown as the relay's own message. A resume
   that fails with a server error is retried on the next poll, as Boat asks.

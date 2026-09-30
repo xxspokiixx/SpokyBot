@@ -290,7 +290,7 @@ import { ManagedDesktopProviders } from "./managed-desktop.ts";
 import { computerKindForResource, ManagedDesktopPolicy, type ComputerKind } from "./managed-policy.ts";
 import { hostedModelPolicy, HOSTED_MODEL_POLICY_HEADER, HOSTED_PROVIDER_SETTINGS_ERROR } from "./hosted-models.ts";
 import {
-  boatNotConfiguredMessage, CLOUD_HOME_RESTART_EXIT_CODE, CLOUD_IGNORED_KEYS, CLOUD_PAIRING_PATH, cloudHomeConfiguration, cloudHomeOffersPlace, cloudHomePlaceRefusal,
+  boatNotConfiguredMessage, CLOUD_HOME_RESTART_EXIT_CODE, CLOUD_HOME_SECRET_KEYS, CLOUD_IGNORED_KEYS, takeCloudSecrets, CLOUD_PAIRING_PATH, cloudHomeConfiguration, cloudHomeOffersPlace, cloudHomePlaceRefusal,
   createCloudPairing, firstCloudTurnPatch, readSignedBody,
 } from "./cloud-home.ts";
 import { createCloudMoveRoutes } from "./cloud-move-http.ts";
@@ -633,7 +633,12 @@ const sessions = new SessionRegistry({
 const sharedComputers = new SharedComputers(id => sessions.isLive(id));
 // OMB Cloud Pro home machine (server/cloud-home.ts, docs/cloud-pro.md). A
 // partial or invalid boot contract stops the server here, before it serves.
-const CLOUD_HOME = cloudHomeConfiguration();
+// Its secrets come over the launcher's pipe, never this process's
+// environment (cloud-home-start.ts); a server started another way (tests,
+// development) still reads them from its environment.
+const CLOUD_SECRETS = takeCloudSecrets();
+const CLOUD_ENV: NodeJS.ProcessEnv = { ...process.env, ...CLOUD_SECRETS };
+const CLOUD_HOME = cloudHomeConfiguration(CLOUD_ENV);
 /** Lending a computer to this server (the shared-computer routes, the two
  * agent tools, the advertised capability): the maintainer flag anywhere, and
  * always on an OMB Cloud home, where it is the person's own Mac lent to their
@@ -680,7 +685,11 @@ if (CLOUD_HOME) {
 }
 // Cloud Pro's included Boat, voice and decision relay tokens, when the Admin
 // set them: held in memory from here on, like the signing secret.
-holdIncludedServices();
+holdIncludedServices(CLOUD_ENV);
+for (const key of CLOUD_HOME_SECRET_KEYS) delete process.env[key];
+if (CLOUD_HOME && Object.keys(CLOUD_SECRETS).length === 0) {
+  console.warn("cloud home: its secrets came in this process's environment, which anything running as the same user can read in /proc; start it with cloud-home-start");
+}
 // Who each thread is for, when a signed-in person can be named (server-private).
 const threadStarters = new ThreadStarters(join(DATA_DIR, "thread-starters.json"));
 const commandAllowlist = new CommandAllowlistStore(join(DATA_DIR, "command-allowlist.json"));
@@ -1028,13 +1037,66 @@ function cloudGuestOpened(threadId: string): boolean {
   return Boolean(CLOUD_HOME) && cloudThreadStarters(threadId).some((person) => person !== undefined && !cloudOwnerPerson(person));
 }
 
+/** On a Cloud home: turns running now that a guest drives through another
+ * conversation (a teammate's handoff started from a guest's turn), by
+ * thread, with their generation. They are guest-driven like the guest's
+ * own conversation while they run (cloudGuestDriven). */
+const guestDrivenTurns = new Map<string, string>();
+
+/** On a Cloud home: whether a handoff's chain started in (or passed
+ * through) a guest-driven conversation: work a guest's turn hands a
+ * teammate is the guest's too, however deep. */
+function cloudGuestDrivenHandoff(nodeId: string | undefined): boolean {
+  if (!CLOUD_HOME || !nodeId) return false;
+  let node = roomHandoffs.nodes.get(nodeId);
+  for (let steps = 0; node && steps < 32; steps++) {
+    // Every conversation the work came through, up to the one it started in.
+    if (node.id !== nodeId && cloudGuestDriven(node.threadId)) return true;
+    if (node.id === node.rootId) break;
+    node = roomHandoffs.nodes.get(node.parentId ?? node.rootId);
+  }
+  return false;
+}
+
+/** Who a conversation a bot opens from another is for: on a Cloud home,
+ * never the owner when a guest drives the source (it opens as the guest's,
+ * or nobody's), so it is confined like the source. */
+function openerFrom(fromThreadId: string): string | undefined {
+  const person = threadPersonKey(fromThreadId);
+  if (!CLOUD_HOME || !cloudGuestDriven(fromThreadId)) return person;
+  return person && !cloudOwnerPerson(person) ? person : CLOUD_NOBODY_KEY;
+}
+
+/** On a Cloud home: the conversation that work a guest-driven turn hands a
+ * teammate (delegate_bot, ask_bot) runs in. It is a fresh one of the guest's
+ * own on the teammate, never the owner's conversation with it, so the work,
+ * and anything that later continues there, stays confined. Undefined when
+ * the source is not guest-driven, null when it could not be made. */
+function guestWorkThread(from: BotRecord, target: BotRecord, fromThreadId: string, brief: string): string | undefined | null {
+  if (!CLOUD_HOME || !cloudGuestDriven(fromThreadId)) return undefined;
+  const title = brief.replace(/\s+/g, " ").trim().slice(0, 60) || `From ${from.name}`;
+  const task = store.createTask(target.id, title, false, undefined, { botId: from.id, name: from.name, at: Date.now() });
+  if (!task) return null;
+  threadStarters.set(task.threadId, openerFrom(fromThreadId));
+  return task.threadId;
+}
+
+/** What a guest is told on a Cloud home when the bot's engine cannot run
+ * without a shell (cloudGuestDriven turns get none). */
+const GUEST_ENGINE_REFUSAL = "This bot can't take requests from guests on this Cloud. Ask the owner to switch it to Claude.";
+
 /** On a Cloud home: a turn a guest drives, which runs in Ask whatever the
- * bot's own level (no Full access, no Auto reviewer, no saved commands): a
- * conversation a guest opened, or a room whose latest line from a person is
- * a guest's. */
+ * bot's own level (no Full access, no Auto reviewer, no saved commands), with
+ * no shell (GUEST_ENGINE_REFUSAL): a conversation a guest opened, a run of a
+ * routine a guest wrote, work a guest's turn handed on (guestDrivenTurns), or
+ * a room whose latest line from a person is a guest's. */
 function cloudGuestDriven(threadId: string): boolean {
   if (!CLOUD_HOME) return false;
-  if (cloudGuestOpened(threadId)) return true;
+  if (guestDrivenTurns.has(threadId) || cloudGuestOpened(threadId)) return true;
+  // A run of a routine a guest wrote (or last edited) is the guest's.
+  const run = activeRoutineRunForThread(threadId);
+  const writer = run ? cloudRoutineAuthors?.writer(run.routineId) : undefined;
+  if (writer && !cloudOwnerPerson(writer)) return true;
   if (!store.groupByThread(threadId)) return false;
   const person = store.messagesFor(threadId).findLast((line) => line.role === "user" && !line.peerAsk && line.sender?.id)?.sender?.id;
   return person !== undefined && !cloudOwnerPerson(person);
@@ -1945,6 +2007,7 @@ function endForeignTurns(threadId: string, generation?: string): void {
 
 function revokeInternalCapabilityGeneration(threadId: string, generation: string): void {
   endForeignTurns(threadId, generation);
+  if (guestDrivenTurns.get(threadId) === generation) guestDrivenTurns.delete(threadId);
   for (const [token, capability] of internalCapabilities) {
     if (capability.threadId === threadId && capability.generation === generation) {
       internalCapabilities.delete(token);
@@ -6988,7 +7051,8 @@ bus.subscribe((event: RuntimeEvent) => {
             : undefined,
           commandAllowlist: command ?? undefined,
           // Provider-owned session grants remain separate from exact commands.
-          allowSession: permission && event.allowSession && !event.requiresExplicitApproval ? true : undefined,
+          // Never on a guest's turn: an "always" for it would outlive it.
+          allowSession: permission && event.allowSession && !event.requiresExplicitApproval && !guestDriven ? true : undefined,
           // The text stays for cards saved before heldCode existed, and for
           // clients that do not know the key yet.
           held: approvalHeldReason(heldContext),
@@ -8506,6 +8570,15 @@ async function startTurn(
   }
   const policyRefusal = policyModelRefusal(instance);
   if (policyRefusal) throw Object.assign(new Error(policyRefusal), { status: 409, code: "managed_policy" });
+  // On a Cloud home a guest's turn never gets a shell or reads outside its
+  // own folder (docs/cloud-pro.md): an engine that cannot run it that way is
+  // refused, in one plain line, before anything is recorded.
+  // (The thread is idle here: a mark a turn that never started left is stale.)
+  guestDrivenTurns.delete(threadId);
+  const guestConfined = cloudGuestDriven(threadId) || cloudGuestDrivenHandoff(opts?.coordination?.id);
+  if (guestConfined && instance.adapter.capabilities.guestTurns !== "confined") {
+    throw Object.assign(new Error(GUEST_ENGINE_REFUSAL), { status: 409, code: "guest_engine" });
+  }
   // Resolve only transport tags from this newly submitted text. The original
   // string remains the durable message. Native-image providers get a
   // path-free prompt and bounded inputs instead of needing a Read tool;
@@ -8607,6 +8680,8 @@ async function startTurn(
   // in the background — boat provisioning can take ~90s and must never
   // hang the HTTP request
   const dispatchClaimId = randomUUID();
+  // Guest-driven for as long as it runs, wherever it runs (cloudGuestDriven).
+  if (guestConfined) guestDrivenTurns.set(threadId, dispatchClaimId);
   const resourceOwner: TurnOwner = { threadId, generation: dispatchClaimId };
   turnResourceOwners.set(threadId, resourceOwner);
   directTurnGenerationByThread.set(threadId, dispatchClaimId);
@@ -9535,6 +9610,7 @@ async function startTurn(
         refreshSystemPrompt: true,
         images: turnImages,
         approvalMode: approvalModeForTurn(bot, commsDepth > 0),
+        ...(guestConfined ? { guestConfined: true } : {}),
         model,
         effort,
         variant,
@@ -11053,8 +11129,13 @@ async function runGroupMemberTurn(
     return true;
   }
   const roomPolicyRefusal = instance ? policyModelRefusal(instance) : undefined;
-  if (!instance || roomPolicyRefusal) {
-    const message = roomPolicyRefusal ?? `${bot.name}'s model is unavailable`;
+  // A room turn a guest drives on a Cloud home is confined like a guest's
+  // own conversation, or refused on an engine that cannot be.
+  if (!groupSpeakers.has(threadId)) guestDrivenTurns.delete(threadId);
+  const roomGuestConfined = cloudGuestDriven(threadId) || cloudGuestDrivenHandoff(orchestration?.roomHandoffId);
+  const roomGuestRefusal = roomGuestConfined && instance?.adapter.capabilities.guestTurns !== "confined" ? GUEST_ENGINE_REFUSAL : undefined;
+  if (!instance || roomPolicyRefusal || roomGuestRefusal) {
+    const message = roomPolicyRefusal ?? roomGuestRefusal ?? `${bot.name}'s model is unavailable`;
     store.appendMessage(threadId, {
       role: "bot",
       kind: "activity",
@@ -11087,6 +11168,7 @@ async function runGroupMemberTurn(
     return true;
   }
   const internalGeneration = beginInternalCapabilityGeneration(threadId);
+  if (roomGuestConfined) guestDrivenTurns.set(threadId, internalGeneration);
   // A room turn is never provably the owner's alone (server/lending-memory.ts).
   if (CLOUD_HOME) noteForeignTurn(bot.id, threadId, internalGeneration);
   const resourceOwner = { threadId, generation: internalGeneration };
@@ -11714,6 +11796,7 @@ async function runGroupMemberTurn(
         refreshSystemPrompt: true,
         images: turnImages,
         approvalMode: roomTurnApprovalMode(readyBot, threadId, orchestration),
+        ...(roomGuestConfined ? { guestConfined: true } : {}),
         system: roomSystem.text,
         systemStable: roomSystem.stable,
         systemVolatile: roomSystem.volatile,
@@ -15616,13 +15699,16 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
         // can check next turn. If the ledger refuses (cap/depth), fall back
         // to the plain busy bounce rather than dropping the refusal reason.
         const queueBusyFallback = (approvalAlreadyGranted = false) => {
+          const guestThread = guestWorkThread(from, target, fromThreadId, message);
+          if (guestThread === null) return json(res, 500, { error: "couldn't open a conversation for that work" });
           const queued = queueDelegation(
             commsBus,
             from,
-            { toBotId, message, reason: "asked while busy", depth, approvalAlreadyGranted },
+            { toBotId, message, reason: "asked while busy", depth, approvalAlreadyGranted, ...(guestThread ? { targetThreadId: guestThread } : {}) },
             MAX_COMMS_DEPTH,
             fromThreadId,
           );
+          if ((queued.result !== "ok" || !queued.id) && guestThread) store.deleteTask(toBotId, guestThread);
           if (queued.result !== "ok" || !queued.id) return json(res, 200, { busy: true, receipt: peerDeliveryReceipt({
             botId: toBotId, botName: target.name, outcome: "failed",
             detail: "the teammate was busy and the delegation queue refused the fallback — the message was not delivered",
@@ -15648,6 +15734,9 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
         // bot whose comms need approval keeps the delegation queue below.
         const tryAsideDelivery = async (): Promise<Record<string, unknown> | null> => {
           if (peerReviewRequired(from, fromThreadId)) return null;
+          // A guest's request never folds into a turn running in the
+          // owner's conversation; it waits for a confined one of its own.
+          if (cloudGuestDriven(fromThreadId)) return null;
           // Busy elsewhere (room turn, sibling thread): the thread this ask
           // targets is not the running one, so there is nothing to fold
           // into here — the queue lane keeps it.
@@ -15762,7 +15851,9 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
           delivery: "ask_bot",
           unattended: isUnattended(currentFrom.id, fromThreadId),
         });
-        const targetThreadId = currentTarget.threadId;
+        const guestThread = guestWorkThread(currentFrom, currentTarget, fromThreadId, message);
+        if (guestThread === null) return json(res, 500, { error: "couldn't open a conversation for that work" });
+        const targetThreadId = guestThread ?? currentTarget.threadId;
         const outcome = await askBotAndWait(toBotId, prefixed, depth, fromBotId, fromThreadId, targetThreadId);
         requireActiveInternalCapability();
         const replySender = store.bot(fromBotId);
@@ -15968,13 +16059,16 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
         if (!connectorThread(from.id, fromThreadId)) {
           return json(res, 403, { error: "source thread does not belong to sender" });
         }
+        const guestThread = guestWorkThread(from, target, fromThreadId, reason ?? message);
+        if (guestThread === null) return json(res, 500, { error: "couldn't open a conversation for that work" });
         const queued = queueDelegation(
           commsBus,
           from,
-          { toBotId, message, reason, depth },
+          { toBotId, message, reason, depth, ...(guestThread ? { targetThreadId: guestThread } : {}) },
           MAX_COMMS_DEPTH,
           fromThreadId,
         );
+        if ((queued.result !== "ok" || !queued.id) && guestThread) store.deleteTask(toBotId, guestThread);
         if (queued.result !== "ok" || !queued.id) {
           // the agent reads this string — a bare enum ("too_deep") tells it
           // nothing about what to do instead
@@ -16132,7 +16226,7 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
                 // A work thread carries one assignment: it is for the person
                 // this coordination serves. The durable pair conversation is
                 // shared by every assignment between two bots, so it names nobody.
-                if (resolved.created && resolved.task.openedBy?.kind === "work") threadStarters.set(resolved.task.threadId, threadPersonKey(address.threadId));
+                if (resolved.created && resolved.task.openedBy?.kind === "work") threadStarters.set(resolved.task.threadId, openerFrom(address.threadId));
                 if (delegatedFullAccess(internalSender, internalCapability.threadId, store.bot(target.botId)!)) {
                   grantDelegatedFullAccess(internalSender, store.bot(target.botId)!, target.threadId);
                 }
@@ -16429,7 +16523,7 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
         if (target.id === from.id) {
           const task = store.createTask(from.id, title, false, projectId, { botId: from.id, name: from.name, at: Date.now() });
           if (!task) return json(res, 500, { error: "couldn't create that thread" });
-          threadStarters.set(task.threadId, threadPersonKey(fromThreadId));
+          threadStarters.set(task.threadId, openerFrom(fromThreadId));
           internalCapability.openedThreads += 1;
           const chip: Omit<Message, "id" | "at"> = {
             role: "bot",
@@ -16470,7 +16564,7 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
         const task = store.createTask(target.id, title, false, projectId, { botId: from.id, name: from.name, at: Date.now() });
         if (!task) return json(res, 500, { error: "couldn't create that thread" });
         // The work is still for the person whose request the opener is on.
-        threadStarters.set(task.threadId, threadPersonKey(fromThreadId));
+        threadStarters.set(task.threadId, openerFrom(fromThreadId));
         if (delegatedFullAccess(from, fromThreadId, target)) grantDelegatedFullAccess(from, target, task.threadId);
         const queued = queueDelegation(
           commsBus,

@@ -128,6 +128,7 @@ beforeAll(async () => {
   const held = join(home, "held-claude.mjs");
   writeFileSync(held, `#!/usr/bin/env node
 if (process.argv[2] === "auth") { console.log(JSON.stringify({ loggedIn: true, email: "person@example.test" })); process.exit(0); }
+process.env.FAKE_CLAUDE_VERSION = "2.1.284";
 if (process.argv[2] !== "--version") { process.env.FAKE_CLAUDE_DUMP = ${JSON.stringify(dumpOf("held"))}; process.env.FAKE_CLAUDE_MODE = "hang"; }
 await import(${JSON.stringify(fake)});
 `, { mode: 0o755 });
@@ -140,6 +141,7 @@ await import(${JSON.stringify(fake)});
 if (process.argv[2] === "auth") { console.log(JSON.stringify({ loggedIn: true, email: "person@example.test" })); process.exit(0); }
 process.env.FAKE_CLAUDE_TEXT_FILE = ${JSON.stringify(join(home, "capture.json"))};
 process.env.FAKE_CLAUDE_TEXT_DUMP = ${JSON.stringify(join(home, "one-shot.json"))};
+process.env.FAKE_CLAUDE_VERSION = "2.1.284";
 if (process.argv[2] !== "--version") { process.env.FAKE_CLAUDE_DUMP = ${JSON.stringify(dumpOf("done"))}; }
 process.env.FAKE_CLAUDE_REPLIES = ${JSON.stringify(JSON.stringify(replies))};
 process.env.FAKE_CLAUDE_REPLY_STATE = ${JSON.stringify(join(home, `${name}-reply-state`))};

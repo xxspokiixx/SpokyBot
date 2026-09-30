@@ -36,6 +36,7 @@ EXPOSE 8080
 # Fly uses the checks in fly.toml; this one serves a plain `docker run`.
 HEALTHCHECK --interval=15s --timeout=5s --start-period=30s --retries=5 \
   CMD curl -sf http://127.0.0.1:8080/api/health | grep -q openmausbot || exit 1
-# Starts as root only to hand a fresh volume to `maus`, then drops privileges
-# before anything else runs (server/cloud-home-start.ts).
+# Starts as root: hands a fresh volume to `maus`, runs the server and the edge
+# as `maus`, and hands the server its secrets over a pipe, never an
+# environment `maus` could read (server/cloud-home-start.ts).
 CMD ["node", "/app/dist-server/cloud-home-start.js"]

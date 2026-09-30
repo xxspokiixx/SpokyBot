@@ -316,6 +316,18 @@ function mcpAppApprovalForm(params: unknown): McpApprovalForm | null {
   return { tool, summary: message, allowResult: { action: "accept", content } };
 }
 
+/** What a guest-driven turn's app-server starts with: the shell, unified
+ * exec and image reads off (codex-cli 0.159.0 `features`), web search too. */
+export const GUEST_CONFINED_CODEX_ARGS = [
+  "-c", "features.shell_tool=false", "-c", "features.unified_exec=false", "-c", "features.view_image=false", "-c", 'web_search="disabled"',
+] as const;
+
+/** Whether the effective config (config/read) shows the shell turned off. */
+export function codexShellDisabled(config: unknown): boolean {
+  const features = plainRecord(plainRecord(config)?.features);
+  return features?.shell_tool === false && features?.unified_exec === false && features?.view_image === false;
+}
+
 /** Codex persists these values on its native thread. Keep them explicit on
  * start, resume, and every turn so switching modes cannot leave a more
  * permissive sandbox/reviewer stuck to the next request. */
@@ -741,7 +753,11 @@ export const CodexDriver: ProviderDriver<CodexConfig> = {
       const launchAttempt = async (attempt: number): Promise<void> => {
         const env = childEnv();
         if (planToken) env.OPENMAUSBOT_CHATGPT_TOKEN = planToken;
-        const appServerArgs = ["app-server", ...(plan ? chatgptPlanCodexArgs() : config.managed ? managedCodexArgs(config.managed) : codexLocalProviderArgs(env, turn.model)), ...codexToolSurfaceArgs()];
+        const appServerArgs = ["app-server", ...(plan ? chatgptPlanCodexArgs() : config.managed ? managedCodexArgs(config.managed) : codexLocalProviderArgs(env, turn.model)), ...codexToolSurfaceArgs(),
+          // A guest-driven turn (SendTurnInput.guestConfined): no shell and
+          // no file reads, whatever the person's own config says (-c wins
+          // over config files). The turn also starts with no environment.
+          ...(turn.guestConfined ? GUEST_CONFINED_CODEX_ARGS : [])];
         if (turn.integrations?.composio) {
           mountMcpServer(appServerArgs, env, "openmausbot_connectors", turn.integrations.composio);
         }
@@ -1488,6 +1504,11 @@ export const CodexDriver: ProviderDriver<CodexConfig> = {
               : "Could not read Codex configuration; cannot safely update bot instructions. Retry after checking Codex.",
           );
         }
+        // Proven before the turn starts: a Codex that did not take the
+        // overrides runs nothing for a guest.
+        if (turn.guestConfined && !codexShellDisabled(effectiveConfig)) {
+          throw new Error("This Codex could not turn its shell off, so it can't take a guest's request on this Cloud. Update Codex, or ask the owner to switch this bot to Claude.");
+        }
         // Only the stable half of the prompt belongs in the developer slot:
         // it is the part that must survive compaction unchanged, and any
         // change to it invalidates the provider's cached prefix. The volatile
@@ -1580,6 +1601,7 @@ export const CodexDriver: ProviderDriver<CodexConfig> = {
               model: selection.model,
               ...(selection.modelProvider ? { modelProvider: selection.modelProvider } : {}),
               ...approvalParams.thread,
+              ...(turn.guestConfined ? { environments: [] } : {}),
               ephemeral: false,
             });
           let started;
@@ -1626,6 +1648,10 @@ export const CodexDriver: ProviderDriver<CodexConfig> = {
             threadId: codexThreadId,
             input: turnInput,
             ...approvalParams.turn,
+            // No environment: no exec_command, apply_patch or view_image, and
+            // any call to them is refused (probed against codex-cli 0.159.0).
+            // Without the experimental API the field is rejected, not ignored.
+            ...(turn.guestConfined ? { environments: [] } : {}),
             // Spread, not `effort: turn.effort ?? null`. Probed against
             // codex-cli 0.146.0: null is indistinguishable from an absent key
             // — both leave the thread's current effort alone, emitting no
@@ -1772,6 +1798,8 @@ export const CodexDriver: ProviderDriver<CodexConfig> = {
       provider: DRIVER_KIND,
       capabilities: {
         sessionModelSwitch: "unsupported",
+        // A guest's turn runs with no environment and the shell off (guestConfined).
+        guestTurns: "confined",
         queueing: true,
         computerMcp: true,
         localComputerMcp: true,
