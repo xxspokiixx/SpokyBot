@@ -492,6 +492,7 @@ import { WebhookManager } from "./webhooks.ts";
 import type { WebhookTrigger } from "../shared/webhooks.ts";
 import { SERVER_ROOT, SPAWNED_PROXIES } from "./proxy-paths.ts";
 import { createUpdateChecker, installKind } from "./update-check.ts";
+import { createUpdateCheckRoutes } from "./routes/update-check.ts";
 import {
   installLibrarySkill,
   listLibrarySkills,
@@ -15399,6 +15400,7 @@ ROUTES.push(createBotMemoryRoutes({
   },
 }));
 ROUTES.push(createDeciderRoutes({ decider }));
+ROUTES.push(createUpdateCheckRoutes({ check: checkForServerUpdate }));
 ROUTES.push(createAntigravityLeftoverRoutes({
   hosted: Boolean(hostedModels),
   isAntigravity: (instanceId) => registry.get(instanceId)?.driverKind === "antigravityAgent",
@@ -23774,13 +23776,6 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
     }
 
     // ── app config (API keys — never echoed back, booleans only) ──
-    if (method === "GET" && path === "/api/updates/check") {
-      try {
-        return json(res, 200, await checkForServerUpdate());
-      } catch (error) {
-        return json(res, 502, { error: `Could not check for updates: ${error instanceof Error ? error.message : String(error)}` });
-      }
-    }
     if (method === "GET" && path === "/api/config") {
       return json(res, 200, configForAccess(configStatus(), auth.scopes.includes("admin")));
     }
