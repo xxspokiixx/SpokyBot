@@ -9,7 +9,7 @@ import { t } from "@/lib/i18n";
 
 export function ToolErrorRecoverySettings() {
   const { state, dispatch } = useStore();
-  const confirmedRounds = state.config?.toolErrors.correctiveRounds ?? 0;
+  const confirmedRounds = state.config?.toolErrors?.correctiveRounds ?? 0;
   const [value, setValue] = useState(String(confirmedRounds));
   const [dirty, setDirty] = useState(false);
   const [error, setError] = useState("");

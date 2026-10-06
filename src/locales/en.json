@@ -589,7 +589,7 @@
   "settings.toolErrors.subtitle": "Let a bot retry a failed tool call in the same turn.",
   "settings.toolErrors.label": "Corrective rounds",
   "settings.toolErrors.rounds": "rounds",
-  "settings.toolErrors.help": "How many times a turn may ask the model to re-run failed tool operations with corrected inputs before it ends. 0 keeps the default: a done after a failure ends the turn. A person's denial is never retried.",
+  "settings.toolErrors.help": "How many times a turn may ask the model to re-run failed tool operations with corrected inputs before it ends. Set to 0 to preserve the existing behavior: a failed tool operation ends the turn through the normal tool-error path. A person's denial is never retried.",
   "settings.toolErrors.error": "Could not save the corrective rounds.",
   "settings.toolErrors.range": "Enter a whole number from 0 to 5.",
   "settings.language.title": "Language",

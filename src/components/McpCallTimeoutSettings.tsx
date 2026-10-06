@@ -10,7 +10,7 @@ import { t } from "@/lib/i18n";
 
 export function McpCallTimeoutSettings() {
   const { state, dispatch } = useStore();
-  const confirmedMinutes = state.config?.mcp.callTimeoutMinutes ?? 10;
+  const confirmedMinutes = state.config?.mcp?.callTimeoutMinutes ?? 10;
   const [value, setValue] = useState(String(confirmedMinutes));
   const [dirty, setDirty] = useState(false);
   const [error, setError] = useState("");
