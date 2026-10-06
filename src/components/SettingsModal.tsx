@@ -42,6 +42,7 @@ import { SkinPicker } from "./SkinPicker";
 import { FONT_IDS, applyFont, readFont, type FontId } from "@/lib/fonts";
 import { RoomTurnTimeoutSettings } from "./RoomTurnTimeoutSettings";
 import { McpCallTimeoutSettings } from "./McpCallTimeoutSettings";
+import { ToolErrorRecoverySettings } from "./ToolErrorRecoverySettings";
 import { AboutMeSettings } from "./AboutMeSettings";
 import { ThreadConcurrencySettings } from "./ThreadConcurrencySettings";
 import { AutomaticRecoverySettings } from "./AutomaticRecoverySettings";
@@ -925,6 +926,9 @@ export function SettingsModal() {
             </Card>
             <Card title={t("settings.mcpCalls.title")} subtitle={t("settings.mcpCalls.subtitle")}>
               <McpCallTimeoutSettings />
+            </Card>
+            <Card title={t("settings.toolErrors.title")} subtitle={t("settings.toolErrors.subtitle")}>
+              <ToolErrorRecoverySettings />
             </Card>
             <ThreadConcurrencySettings />
             {!remoteActive && <RoutinesInConversationRow />}

@@ -11325,7 +11325,14 @@
       "settings.mcpCalls.minutes": "90e63d85fa1ab2c8ed65222f3ebd794b1e524b4b7cf84bec451542d0451b2985",
       "settings.mcpCalls.help": "ab68b50dacfde418b196b13a3bf56f942f61071126f02d0e65e7241197ddefd5",
       "settings.mcpCalls.error": "be999a512b832def08c23ad6e85145183598f18ff9bb79075a419fbec42aba1f",
-      "settings.mcpCalls.range": "5023bf6d4be92ea4f7aab1f63c9d193d628b8ca27ea9983e530b2c4e0c257f70"
+      "settings.mcpCalls.range": "5023bf6d4be92ea4f7aab1f63c9d193d628b8ca27ea9983e530b2c4e0c257f70",
+      "settings.toolErrors.title": "7493273353281379031d2269e248ccff0a459c36cab6a0d28146b88544704c5f",
+      "settings.toolErrors.subtitle": "752a2e083221f959ef8063c61b3ae3851e398a43c361a53a09c8cb2be2bd2214",
+      "settings.toolErrors.label": "01c5c225cfb603a54ac4ac7368a9557064d3b0548f6611cf665a28294999494d",
+      "settings.toolErrors.rounds": "206cd5ee00560b33bfef299d078345297b21b2a5be497d7ef57ae84576ee6100",
+      "settings.toolErrors.help": "6c7da476ffa86102d1a57ba6d26f50ff4048473916740522035067e046b7e88b",
+      "settings.toolErrors.error": "50cd50765a824403cbfa09dab8955b6cc8df75f08525f1396dc10b12bad5ba64",
+      "settings.toolErrors.range": "a7f6e5ec27ee2a58cea29cd4de675cb95e05f20205b1f01bd28b141448b00edc"
     },
     "zh-tw": {
       "pro.getPro": "12657108fe5682e937f179e5f394191b99fad614dbb3bf8759376d5da35d4992",
