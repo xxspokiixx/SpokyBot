@@ -177,6 +177,23 @@ test("pause cancels an already-queued restart and resume does not resurrect it",
   await f.supervisor.shutdown();
 });
 
+test("local switching in main rejects dev mode and overlaps, and adopts the rollback child", () => {
+  const source = readFileSync(new URL("./main.mjs", import.meta.url), "utf8");
+  const start = source.indexOf("async function switchLocalEnvironmentTo(");
+  const body = source.slice(start, source.indexOf("\nasync function switchEnvironment", start));
+  assert.ok(start > 0 && body.length > 0, "the switch helper exists");
+  assert.match(body, /if \(!app\.isPackaged\) return \{ ok: false, error: "dev" \};/);
+  assert.match(body, /if \(localSwitchInFlight\) return \{ ok: false, error: "busy" \};/);
+  assert.match(body, /if \(restored\.proc\) serverSupervisor\.ready\(restored\.proc\);/);
+  const busyCheck = body.indexOf('if (localSwitchInFlight)');
+  const flagSet = body.indexOf("localSwitchInFlight = true;");
+  const pause = body.indexOf("serverSupervisor.pause();");
+  assert.ok(busyCheck < flagSet && flagSet < pause, "a rejected switch must not pause the supervisor");
+  const finallyBlock = body.slice(body.lastIndexOf("} finally {"));
+  assert.match(finallyBlock, /localSwitchInFlight = false;\s*serverSupervisor\.resume\(\);/);
+  assert.match(source, /function createLocalEnvironment\(name, dataDir\) \{\s*if \(!app\.isPackaged\) return \{ ok: false, error: "dev", state: environmentsState \};/);
+});
+
 test("repeated quit requests join the exact same child cleanup", async (t) => {
   let finishStop;
   let stops = 0;

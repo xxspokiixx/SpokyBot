@@ -295,6 +295,9 @@ let serverReady = !app.isPackaged;
 let secureCredentials = {};
 let secureCredentialState = null;
 let desktopDataDirLease = null;
+// One local-environment switch at a time: it stops the child and hands the
+// data-dir lease, and its probe can run a full boot timeout.
+let localSwitchInFlight = false;
 let managedDesktop = null;
 let cloudAccount = null;
 // Settles once a saved Cloud sign-in is restored and checked (or there is none).
@@ -1930,6 +1933,11 @@ let rememberedHome = null;
  * path, including a releaseLease/persistActive throw escaping the
  * orchestrator, the supervisor must not stay paused. */
 async function switchLocalEnvironmentTo(targetDir, targetId) {
+  if (!app.isPackaged) return { ok: false, error: "dev" };
+  // One switch owns the child and the lease until it settles; its probe can
+  // run a full boot timeout, and a second switch sharing that window would
+  // be un-paused by the first's finally mid-handoff.
+  if (localSwitchInFlight) return { ok: false, error: "busy" };
   const previousDir = startupEnvironmentDir(environmentsState, desktopDataDir());
   let startedProc = null;
   const failedSwitch = () => {
@@ -1941,6 +1949,7 @@ async function switchLocalEnvironmentTo(targetDir, targetId) {
     );
     return { ok: false, error: "switch-failed" };
   };
+  localSwitchInFlight = true;
   serverSupervisor.pause();
   try {
     const result = await switchLocalEnvironment({
@@ -1984,7 +1993,12 @@ async function switchLocalEnvironmentTo(targetDir, targetId) {
           desktopDataDirLease = null;
           desktopDataDirLease = acquireDataDirLease(previousDir);
           const restored = await startServerOn(SERVER_PORT, previousDir);
-          if (!restored.proc) slog(`switch rollback could not restart the server on ${previousDir}`);
+          // Adoption is the caller's job (startServerOn only watches):
+          // without the ready mark the rolled-back child is no one's —
+          // serverProc stays null, so the next switch's stopChild would
+          // skip it and collide on the port, and no recovery is armed.
+          if (restored.proc) serverSupervisor.ready(restored.proc);
+          else slog(`switch rollback could not restart the server on ${previousDir}`);
         },
         persistActive: (id) => persistEnvironments(withActive(environmentsState, id)),
         log: slog,
@@ -2000,6 +2014,7 @@ async function switchLocalEnvironmentTo(targetDir, targetId) {
     slog(`environment switch to ${targetDir} failed (${error?.message ?? error})`);
     return failedSwitch();
   } finally {
+    localSwitchInFlight = false;
     serverSupervisor.resume();
   }
 }
@@ -2032,6 +2047,7 @@ async function switchEnvironment(id) {
  * its normalized absolute form with no "." or ".." segments — the registry
  * and every later lease/child on it take this exact string. */
 function createLocalEnvironment(name, dataDir) {
+  if (!app.isPackaged) return { ok: false, error: "dev", state: environmentsState };
   const state = environmentsState;
   let candidateDir;
   if (dataDir === undefined || dataDir === null || dataDir === "") {
