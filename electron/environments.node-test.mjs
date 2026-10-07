@@ -51,8 +51,8 @@ test("persisted state parses defensively and never resurrects Local as a remote"
   );
   assert.deepEqual(parsed, {
     environments: [
-      { id: "a1", name: "Cab mini", origin: "https://mini.example" },
-      { id: "b2", name: "10.0.0.5:8799", origin: "http://10.0.0.5:8799" },
+      { id: "a1", kind: "remote", name: "Cab mini", origin: "https://mini.example" },
+      { id: "b2", kind: "remote", name: "10.0.0.5:8799", origin: "http://10.0.0.5:8799" },
     ],
     activeId: "b2",
   });
@@ -68,7 +68,7 @@ test("adding the same server twice updates the name instead of duplicating; forg
   state = env.withEnvironment(state, { origin: "https://mini.example/pair#code=X", name: "" }, makeId);
   state = env.withEnvironment(state, { origin: "https://mini.example", name: "Cab mini" }, makeId);
   state = env.withEnvironment(state, { origin: "nonsense" }, makeId);
-  assert.deepEqual(state.environments, [{ id: "id1", name: "Cab mini", origin: "https://mini.example" }]);
+  assert.deepEqual(state.environments, [{ id: "id1", kind: "remote", name: "Cab mini", origin: "https://mini.example" }]);
   state = env.withActive(state, "id1");
   assert.equal(env.activeEnvironment(state)?.origin, "https://mini.example");
   assert.equal(env.withActive(state, "nope"), state);
@@ -148,3 +148,94 @@ test("native window identity distinguishes hosted HTML, companion data, and the 
   assert.equal(env.workspaceWindowTitle(state, { serverName: "Office", endpoint: "https://c-office.openmausbot.com" }), "OpenMausBot — Connected to: Office (c-office.openmausbot.com)");
   assert.equal(env.workspaceWindowTitle(env.withActive(state, "local")), "OpenMausBot");
 });
+
+test("a version 1 file parses as all-remote with kind stamped and activeId preserved, and serializes back as version 2", () => {
+  const v1 = JSON.stringify({
+    version: 1,
+    environments: [{ id: "a1", name: "Cab mini", origin: "https://mini.example" }],
+    activeId: "a1",
+  });
+  const parsed = env.parseEnvironments(v1);
+  assert.deepEqual(parsed, {
+    environments: [{ id: "a1", kind: "remote", name: "Cab mini", origin: "https://mini.example" }],
+    activeId: "a1",
+  });
+  assert.equal(JSON.parse(env.serializeEnvironments(parsed)).version, 2);
+  assert.deepEqual(env.parseEnvironments(env.serializeEnvironments(parsed)), parsed);
+});
+
+test("version 2 keeps locals with an absolute dataDir and drops relative, dir-less and unknown-version ones", () => {
+  const parsed = env.parseEnvironments(JSON.stringify({
+    version: 2,
+    environments: [
+      { id: "l1", kind: "local", name: "APRS Chat", dataDir: "/Users/me/.openmausbot-aprs" },
+      { id: "l2", kind: "local", name: "relative", dataDir: "bots/relative" },
+      { id: "l3", kind: "local", name: "no dir at all" },
+      { id: "r1", kind: "remote", name: "Office", origin: "https://box.example" },
+      { id: "l4", kind: "local", name: "same dir again", dataDir: "/Users/me/.openmausbot-aprs" },
+    ],
+    activeId: "l1",
+  }));
+  assert.deepEqual(parsed, {
+    environments: [
+      { id: "l1", kind: "local", name: "APRS Chat", dataDir: "/Users/me/.openmausbot-aprs" },
+      { id: "r1", kind: "remote", name: "Office", origin: "https://box.example" },
+    ],
+    activeId: "l1",
+  });
+  const future = { version: 3, environments: [{ id: "a1", kind: "remote", name: "x", origin: "https://x.example" }], activeId: "a1" };
+  assert.deepEqual(env.parseEnvironments(future), { environments: [], activeId: "local" });
+});
+
+test("withLocalEnvironment registers absolute, non-default, non-nested directories only", () => {
+  const DEFAULT = "/Users/me/.openmausbot";
+  const added = env.withLocalEnvironment({ environments: [], activeId: "local" }, { name: "APRS Chat", dataDir: "/Users/me/.openmausbot-aprs" }, () => "id1", DEFAULT);
+  assert.equal(added.ok, true);
+  assert.deepEqual(added.state.environments, [{ id: "id1", kind: "local", name: "APRS Chat", dataDir: "/Users/me/.openmausbot-aprs" }]);
+  assert.equal(added.state.activeId, "local");
+  const error = (name, dataDir) => env.withLocalEnvironment(added.state, { name, dataDir }, () => "unused", DEFAULT).error;
+  assert.equal(error("APRS", "bots/relative"), "path");
+  assert.equal(error("   ", "/Users/me/.openmausbot-x"), "name");
+  assert.equal(error("x".repeat(61), "/Users/me/.openmausbot-x"), "name");
+  assert.equal(error("Same as default", DEFAULT), "nested");
+  assert.equal(error("Inside default", `${DEFAULT}/nested`), "nested");
+  assert.equal(error("Same as entry", "/Users/me/.openmausbot-aprs"), "duplicate");
+  assert.equal(error("Same entry with a slash", "/Users/me/.openmausbot-aprs/"), "duplicate");
+  assert.equal(error("Inside the entry", "/Users/me/.openmausbot-aprs/sub"), "nested");
+  assert.equal(error("Almost a sibling", "/Users/me/.openmausbot-aprsx"), undefined);
+});
+
+test("activeLocalDataDir reports only an active local environment's directory", () => {
+  const DEFAULT = "/Users/me/.openmausbot";
+  const state = {
+    environments: [
+      { id: "l1", kind: "local", name: "APRS", dataDir: "/Users/me/.openmausbot-aprs" },
+      { id: "r1", kind: "remote", name: "Office", origin: "https://box.example" },
+    ],
+    activeId: "l1",
+  };
+  assert.equal(env.activeLocalDataDir(state, DEFAULT), "/Users/me/.openmausbot-aprs");
+  assert.equal(env.activeLocalDataDir({ ...state, activeId: "local" }, DEFAULT), null);
+  assert.equal(env.activeLocalDataDir({ ...state, activeId: "r1" }, DEFAULT), null);
+});
+
+test("a named local environment is this computer with its path, and gets its own menu row", () => {
+  const localEntry = { id: "l1", kind: "local", name: "APRS Chat", dataDir: "/Users/me/.openmausbot-aprs" };
+  const state = { environments: [localEntry, { id: "r1", kind: "remote", name: "Office", origin: "https://box.example" }], activeId: "l1" };
+  assert.deepEqual(env.workspaceSummary(state), { local: true, name: "APRS Chat", localPath: "/Users/me/.openmausbot-aprs", missing: false });
+  assert.deepEqual(env.workspaceSummary({ ...state, environments: [{ ...localEntry, missing: true }, ...state.environments.slice(1)] }),
+    { local: true, name: "APRS Chat", localPath: "/Users/me/.openmausbot-aprs", missing: true });
+  assert.deepEqual(env.workspaceSummary({ ...state, activeId: "local" }), { local: true, name: "This computer" });
+  assert.deepEqual(env.workspaceSummary({ ...state, activeId: "r1" }), { local: false, name: "Office", origin: "https://box.example" });
+  const calls = [];
+  const items = env.workspaceMenuTemplate(state, { onSwitch: (id) => calls.push(id), onConnect: () => {}, onForget: () => {} });
+  assert.equal(items[0].id, "workspace-local");
+  const row = items.find((item) => item.id === "workspace-l1");
+  assert.equal(row.label, "APRS Chat");
+  assert.equal(row.type, "radio");
+  assert.equal(row.checked, true);
+  assert.equal(items.find((item) => item.id === "workspace-r1").checked, false);
+  row.click();
+  assert.deepEqual(calls, ["l1"]);
+});
+

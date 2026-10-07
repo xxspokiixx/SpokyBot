@@ -1,10 +1,13 @@
-// Saved servers ("environments") for the desktop app, pure and testable.
+// Saved environments for the desktop app, pure and testable.
 //
-// Local is the server this app spawns; a remote environment is a server the
-// user paired with. The app switches by loading that server's own UI, so an
-// environment is just {id, name, origin}. The session credential is the
-// HttpOnly cookie the /pair page set for that origin, held by Chromium's
-// cookie jar, never by this file.
+// "This computer" (LOCAL_ID) is the server this app spawns from the default
+// data dir; a remote environment is a server the user paired with
+// ({id, kind:"remote", name, origin}); a named local environment is another
+// data directory the same server can be restarted onto
+// ({id, kind:"local", name, dataDir}). The app switches by loading that
+// environment, so an entry only names a destination. The session credential
+// for a remote is the HttpOnly cookie the /pair page set for that origin,
+// held by Chromium's cookie jar, never by this file.
 const LOCAL_ID = "local";
 const MAX_NAME = 60;
 
@@ -66,17 +69,23 @@ function parseHostedWorkspaceLink(input) {
   }
 }
 
-/** Remote renderers learn only their current workspace, not the local list. */
+/** Remote renderers learn only their current workspace, not the local list.
+ * A named local environment stays "this computer" — it is another data dir
+ * of the same machine, so it reports local:true with its path; `missing`
+ * mirrors the flag the main process stamps on the entry at read time. */
 function workspaceSummary(state) {
   const active = activeEnvironment(state);
-  return active ? { local: false, name: active.name, origin: active.origin } : { local: true, name: "This computer" };
+  if (!active) return { local: true, name: "This computer" };
+  if (active.kind === "local") return { local: true, name: active.name, localPath: active.dataDir, missing: active.missing === true };
+  return { local: false, name: active.name, origin: active.origin };
 }
 
 /** Native identity must not depend on a hosted renderer's version/title. */
 function workspaceWindowTitle(state, companion) {
   if (companion) return `OpenMausBot — Connected to: ${companion.serverName} (${new URL(companion.endpoint).host})`;
   const active = activeEnvironment(state);
-  return active ? `OpenMausBot — Hosted: ${active.name} (${new URL(active.origin).host})` : "OpenMausBot";
+  if (active && active.kind !== "local") return `OpenMausBot — Hosted: ${active.name} (${new URL(active.origin).host})`;
+  return "OpenMausBot";
 }
 
 /** Renderer navigation stays in the selected workspace. Switching is a main
@@ -106,7 +115,8 @@ function workspaceMenuTemplate(state, { onSwitch, onConnect, onForget }) {
   return [
     { id: "workspace-local", label: "This computer", type: "radio", checked: !active, click: () => onSwitch(LOCAL_ID) },
     ...state.environments.map((entry) => ({
-      id: `workspace-${entry.id}`, label: entry.name, sublabel: new URL(entry.origin).host,
+      id: `workspace-${entry.id}`, label: entry.name,
+      sublabel: entry.kind === "local" ? entry.dataDir : new URL(entry.origin).host,
       type: "radio", checked: entry.id === state.activeId, click: () => onSwitch(entry.id),
     })),
     { type: "separator" },
@@ -128,8 +138,32 @@ function nameFromOrigin(origin) {
   }
 }
 
-/** Parse the persisted file. Unknown or damaged content yields the empty
- * state rather than an error: losing a saved list costs a re-pair, not the app. */
+/** An environment directory is absolute or it is nothing: relative paths
+ * would silently follow the app's cwd, and `~` is a shell illusion here. */
+function cleanDataDir(value) {
+  if (typeof value !== "string") return null;
+  const dir = value.trim();
+  return dir.startsWith("/") ? dir : null;
+}
+
+function dirBasename(dir) {
+  const parts = dir.replace(/\/+$/, "").split("/");
+  return parts[parts.length - 1] || dir;
+}
+
+/** Comparisons run on trailing-`/` paths so `/a/b` never matches `/a/bc`. */
+function asDirPrefix(dir) {
+  return /\/$/.test(dir) ? dir : `${dir}/`;
+}
+
+function cleanId(entry) {
+  return typeof entry?.id === "string" && /^[\w-]{1,64}$/.test(entry.id) && entry.id !== LOCAL_ID ? entry.id : null;
+}
+
+/** Parse the persisted file (version 1 or 2). Unknown or damaged content
+ * yields the empty state rather than an error: losing a saved list costs a
+ * re-pair, not the app. Version 1 entries are all remote; a missing version
+ * predates the field and reads as version 1. */
 function parseEnvironments(raw) {
   let value;
   try {
@@ -137,23 +171,34 @@ function parseEnvironments(raw) {
   } catch {
     return { environments: [], activeId: LOCAL_ID };
   }
+  const version = value?.version ?? 1;
+  if (version !== 1 && version !== 2) return { environments: [], activeId: LOCAL_ID };
   const list = Array.isArray(value?.environments) ? value.environments : [];
   const seen = new Set();
   const environments = [];
   for (const entry of list) {
+    const id = cleanId(entry);
+    if (!id || seen.has(id)) continue;
+    const dataDir = cleanDataDir(entry?.dataDir);
+    if (entry?.kind === "local") {
+      if (!dataDir || seen.has(dataDir)) continue;
+      seen.add(id);
+      seen.add(dataDir);
+      environments.push({ id, kind: "local", name: cleanName(entry.name, dirBasename(dataDir)), dataDir });
+      continue;
+    }
     const origin = normalizeOrigin(entry?.origin);
-    const id = typeof entry?.id === "string" && /^[\w-]{1,64}$/.test(entry.id) ? entry.id : null;
-    if (!origin || !id || id === LOCAL_ID || seen.has(id) || seen.has(origin)) continue;
+    if (!origin || (entry?.kind !== undefined && entry.kind !== "remote") || seen.has(origin)) continue;
     seen.add(id);
     seen.add(origin);
-    environments.push({ id, name: cleanName(entry?.name, nameFromOrigin(origin)), origin });
+    environments.push({ id, kind: "remote", name: cleanName(entry?.name, nameFromOrigin(origin)), origin });
   }
   const activeId = typeof value?.activeId === "string" && environments.some((e) => e.id === value.activeId) ? value.activeId : LOCAL_ID;
   return { environments, activeId };
 }
 
 function serializeEnvironments(state) {
-  return JSON.stringify({ version: 1, environments: state.environments, activeId: state.activeId }, null, 2) + "\n";
+  return JSON.stringify({ version: 2, environments: state.environments, activeId: state.activeId }, null, 2) + "\n";
 }
 
 /** Add or update by origin (re-pairing the same server keeps one entry). */
@@ -163,12 +208,40 @@ function withEnvironment(state, input, makeId) {
   const existing = state.environments.find((e) => e.origin === origin);
   if (existing) {
     const name = cleanName(input?.name, existing.name);
-    const environments = state.environments.map((e) => (e === existing ? { ...e, name } : e));
+    const environments = state.environments.map((e) => (e === existing ? { ...e, kind: "remote", name } : e));
     return { ...state, environments };
   }
   const id = makeId();
-  const environments = [...state.environments, { id, name: cleanName(input?.name, nameFromOrigin(origin)), origin }];
+  const environments = [...state.environments, { id, kind: "remote", name: cleanName(input?.name, nameFromOrigin(origin)), origin }];
   return { ...state, environments };
+}
+
+/** Register a named local environment — another data directory this app can
+ * restart onto. It may not be the default dir (that is "This computer",
+ * addressable without an entry) and may not hide or sit inside a registered
+ * environment's dir or the default: one environment inside another would put
+ * one setup's state files under another's management. */
+function withLocalEnvironment(state, input, makeId, defaultDir) {
+  const name = typeof input?.name === "string" ? input.name.trim().replace(/\s+/g, " ") : "";
+  if (!name || name.length > MAX_NAME) return { ok: false, error: "name" };
+  const dataDir = cleanDataDir(input?.dataDir);
+  if (!dataDir) return { ok: false, error: "path" };
+  const candidate = asDirPrefix(dataDir);
+  const locals = state.environments.filter((e) => e.kind === "local");
+  if (locals.some((e) => asDirPrefix(e.dataDir) === candidate)) return { ok: false, error: "duplicate" };
+  const parents = locals.map((e) => e.dataDir);
+  if (typeof defaultDir === "string" && defaultDir) parents.push(defaultDir);
+  if (parents.some((dir) => candidate.startsWith(asDirPrefix(dir)))) return { ok: false, error: "nested" };
+  const environments = [...state.environments, { id: makeId(), kind: "local", name, dataDir }];
+  return { ok: true, state: { ...state, environments } };
+}
+
+/** The data dir the server child must run on, when a named local environment
+ * is active; null means the caller's own default dir. `defaultDir` stays in
+ * the signature for its callers' symmetry — "This computer" has no entry. */
+function activeLocalDataDir(state, defaultDir) {
+  const active = activeEnvironment(state);
+  return active?.kind === "local" && typeof active.dataDir === "string" ? active.dataDir : null;
 }
 
 function withoutEnvironment(state, id) {
@@ -187,12 +260,13 @@ function activeEnvironment(state) {
 
 /** Origins the main window may navigate to: Local plus every saved server. */
 function allowedOrigins(state, localOrigin) {
-  return new Set([localOrigin, ...state.environments.map((e) => e.origin)]);
+  return new Set([localOrigin, ...state.environments.map((e) => e.origin).filter(Boolean)]);
 }
 
 module.exports = {
   LOCAL_ID,
   activeEnvironment,
+  activeLocalDataDir,
   allowedOrigins,
   normalizeOrigin,
   parseEnvironments,
@@ -201,6 +275,7 @@ module.exports = {
   serializeEnvironments,
   withActive,
   withEnvironment,
+  withLocalEnvironment,
   withoutEnvironment,
   workspaceMenuTemplate,
   workspaceNavigationAllowed,
