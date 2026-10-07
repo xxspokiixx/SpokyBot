@@ -111,6 +111,11 @@ export interface OptionCardData {
   /** Exact provider command eligible for a durable, folder-scoped allow. */
   commandAllowlist?: { command: string; cwd: string; providerInstanceId: string };
   approvalScope?: "local-computer";
+  /** The bot's change applied without a person (a change to itself, or Full
+   * access): shown as one line with Undo instead of the approval box. */
+  autoApplied?: boolean;
+  /** A person undid that change. */
+  undone?: boolean;
   /** Persisted proposal used by the server when the user confirms it. */
   routineRequest?: RoutineRequestCardData;
   /** Staged learned-skill change; applied only after the user confirms this card. */
@@ -647,8 +652,9 @@ export interface ConfigStatus {
   box: { configured: boolean; included?: boolean };
   vps: { configured: boolean; sshAlias: string };
   rooms: { turnTimeoutMinutes: number };
-  /** Per-call ceiling (minutes) for a bot's MCP tools. */
-  mcp: { callTimeoutMinutes: number };
+  /** Per-call ceiling (minutes) for a bot's MCP tools. Absent from servers
+   * older than the setting; read it with mcpCallTimeoutMinutes(). */
+  mcp?: { callTimeoutMinutes: number };
   /** In-turn corrective rounds after a failed tool op; 0 = end the turn. */
   toolErrors: { correctiveRounds: number };
   /** Workspace defaults for new bots; absent effort = no level is sent. */
