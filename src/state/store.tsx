@@ -758,10 +758,12 @@ export interface BrowserProfile {
 // is wiped from state.config whenever a live frame lands, so whichever of a
 // save's own response and its broadcast frame arrives last decides what
 // Settings shows (a saved key's Test button used to vanish that way).
-export type ConfigStatusFrame = Pick<
+// `toolErrors` is Optional on the frame type (servers older than the setting
+// omit it); configStatusFromFrame normalizes an absent section to 0 rounds.
+export type ConfigStatusFrame = Omit<Pick<
   ConfigStatus,
   "xai" | "mistral" | "cerebras" | "anthropic" | "openai" | "openrouter" | "openaiCompat" | "fleet" | "composio" | "box" | "vps" | "rooms" | "mcp" | "toolErrors" | "threads" | "automaticRecovery" | "localVm" | "opencodeGo" | "tts" | "decider" | "imageGen" | "live" | "profile" | "language" | "features" | "onboarding" | "browserEngine" | "browserProfiles" | "edition" | "budgets" | "billing" | "managedPolicy" | "cloudHome"
->;
+>, "toolErrors"> & Partial<Pick<ConfigStatus, "toolErrors">>;
 
 export function configStatusFromFrame(frame: ConfigStatusFrame): ConfigStatus {
   return {
@@ -778,7 +780,7 @@ export function configStatusFromFrame(frame: ConfigStatusFrame): ConfigStatus {
     vps: frame.vps,
     rooms: frame.rooms,
     mcp: frame.mcp,
-    toolErrors: frame.toolErrors,
+    toolErrors: frame.toolErrors ?? { correctiveRounds: 0 },
     threads: frame.threads,
     automaticRecovery: frame.automaticRecovery,
     localVm: frame.localVm,

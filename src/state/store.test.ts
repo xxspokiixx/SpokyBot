@@ -917,6 +917,13 @@ describe("config status frames", () => {
       features: { skillAuthoring: true },
     });
   });
+
+  it("defaults corrective rounds to zero when an older server's frame omits toolErrors", () => {
+    const status = configStatusFromFrame({
+      openai: { configured: true },
+    } as ConfigStatusFrame);
+    expect(status.toolErrors).toEqual({ correctiveRounds: 0 });
+  });
 });
 
 describe("task rename", () => {
