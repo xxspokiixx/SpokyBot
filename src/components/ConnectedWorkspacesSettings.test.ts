@@ -201,6 +201,7 @@ it("confirms before switching to a local environment, and a failed switch says o
   rowButton("Switch to Work")!.props.onClick!();
   await flush();
   expect(confirm).toHaveBeenCalled();
+  expect(confirm.mock.calls[0][0]).toBe("Switch to Work? The app restarts on that environment. Running turns stop.");
   expect(environments.switch).not.toHaveBeenCalled();
   confirm.mockResolvedValue(true);
   rowButton("Switch to Work")!.props.onClick!();
@@ -211,6 +212,18 @@ it("confirms before switching to a local environment, and a failed switch says o
   await flush();
   expect(environments.switch).toHaveBeenCalledWith("env-2");
   expect(render().html).toContain("Couldn't switch.");
+});
+
+it("a failed forget keeps the panel honest: one generic error, no crash", async () => {
+  const environments = stubEnvironments({}, { forget: vi.fn().mockResolvedValue({ ok: false, error: "purge" }) });
+  await mount();
+  rowButton("Forget Work")!.props.onClick!();
+  await mount();
+  textButton("Forget")!.props.onClick!();
+  await flush();
+  expect(environments.forget).toHaveBeenCalledWith("env-1");
+  expect(render().html).toContain("Couldn't forget the environment.");
+  expect(render().html).not.toContain("purge");
 });
 
 it("offers no Forget for the environment this app is on", async () => {

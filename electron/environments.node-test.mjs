@@ -233,6 +233,47 @@ test("startupEnvironmentDir boots on the active local dir and falls back to the 
   assert.equal(env.startupEnvironmentDir({ environments: [], activeId: "local" }, DEFAULT), DEFAULT);
 });
 
+test("bootEnvironmentDir refuses to boot onto a missing named env dir — the default dir instead, flagged", () => {
+  const DEFAULT = "/Users/me/.openmausbot";
+  const gone = { environments: [{ id: "l1", kind: "local", name: "APRS", dataDir: "/Volumes/gone/.openmausbot-aprs", missing: true }], activeId: "l1" };
+  assert.deepEqual(env.bootEnvironmentDir(gone, DEFAULT), { dataDir: DEFAULT, fellBack: true, missingDir: "/Volumes/gone/.openmausbot-aprs" });
+  const present = { environments: [{ ...gone.environments[0], missing: false }], activeId: "l1" };
+  assert.deepEqual(env.bootEnvironmentDir(present, DEFAULT), { dataDir: "/Volumes/gone/.openmausbot-aprs", fellBack: false, missingDir: null });
+  // The default dir is never a fallback: a first boot is allowed to create it.
+  assert.deepEqual(env.bootEnvironmentDir({ environments: [], activeId: "local" }, DEFAULT), { dataDir: DEFAULT, fellBack: false, missingDir: null });
+  const remote = { environments: [{ id: "r1", kind: "remote", name: "Office", origin: "https://box.example", missing: false }], activeId: "r1" };
+  assert.deepEqual(env.bootEnvironmentDir(remote, DEFAULT), { dataDir: DEFAULT, fellBack: false, missingDir: null });
+});
+
+test("data dirs are absolute in POSIX, drive-letter and UNC shape; relative and drive-relative are refused", () => {
+  const kept = (dataDir) => env.parseEnvironments(JSON.stringify({
+    version: 2,
+    environments: [{ id: "l1", kind: "local", name: "n", dataDir }],
+    activeId: "local",
+  })).environments.length;
+  for (const good of ["/Users/me/.openmausbot-aprs", "C:\\Users\\me\\.openmausbot-aprs", "D:/envs/aprs", "\\\\nas\\share\\.openmausbot-x"]) {
+    assert.equal(kept(good), 1, good);
+  }
+  for (const bad of ["bots/relative", "C:bots", "~/.openmausbot-x", "\\single\\backslash", "./x", ""]) {
+    assert.equal(kept(bad), 0, bad);
+  }
+});
+
+test("withLocalEnvironment rejects a candidate that contains a registered local dir, accepts siblings", () => {
+  const DEFAULT = "/Users/me/.openmausbot";
+  const added = env.withLocalEnvironment({ environments: [], activeId: "local" }, { name: "APRS", dataDir: "/Users/me/bots/aprs" }, () => "id1", DEFAULT);
+  assert.equal(added.ok, true);
+  const error = (dataDir) => env.withLocalEnvironment(added.state, { name: "x", dataDir }, () => "unused", DEFAULT).error;
+  assert.equal(error("/Users/me/bots"), "nested");
+  assert.equal(error("/Users/me"), "nested");
+  assert.equal(error("/"), "nested");
+  // Siblings share a parent but neither contains the other.
+  assert.equal(error("/Users/me/bots/other"), undefined);
+  assert.equal(error("/Users/me/botsx"), undefined);
+  const sibling = env.withLocalEnvironment(added.state, { name: "Other", dataDir: "/Users/me/bots/other" }, () => "id2", DEFAULT);
+  assert.equal(sibling.ok, true);
+});
+
 test("a named local environment is this computer with its path, and gets its own menu row", () => {
   const localEntry = { id: "l1", kind: "local", name: "APRS Chat", dataDir: "/Users/me/.openmausbot-aprs" };
   const state = { environments: [localEntry, { id: "r1", kind: "remote", name: "Office", origin: "https://box.example" }], activeId: "l1" };

@@ -139,11 +139,14 @@ function nameFromOrigin(origin) {
 }
 
 /** An environment directory is absolute or it is nothing: relative paths
- * would silently follow the app's cwd, and `~` is a shell illusion here. */
+ * would silently follow the app's cwd, and `~` is a shell illusion here.
+ * Three absolute shapes are recognized by pattern alone — POSIX `/…`,
+ * a Windows drive `X:\` or `X:/`, and a UNC `\\server\share` — because a
+ * path module would resolve relative to this app's cwd and platform. */
 function cleanDataDir(value) {
   if (typeof value !== "string") return null;
   const dir = value.trim();
-  return dir.startsWith("/") ? dir : null;
+  return /^(?:\/|[A-Za-z]:[\\/]|\\\\)/.test(dir) ? dir : null;
 }
 
 function dirBasename(dir) {
@@ -218,9 +221,9 @@ function withEnvironment(state, input, makeId) {
 
 /** Register a named local environment — another data directory this app can
  * restart onto. It may not be the default dir (that is "This computer",
- * addressable without an entry) and may not hide or sit inside a registered
- * environment's dir or the default: one environment inside another would put
- * one setup's state files under another's management. */
+ * addressable without an entry) and may not contain or sit inside a
+ * registered environment's dir or the default: one environment inside
+ * another would put one setup's state files under another's management. */
 function withLocalEnvironment(state, input, makeId, defaultDir) {
   const name = typeof input?.name === "string" ? input.name.trim().replace(/\s+/g, " ") : "";
   if (!name || name.length > MAX_NAME) return { ok: false, error: "name" };
@@ -229,9 +232,13 @@ function withLocalEnvironment(state, input, makeId, defaultDir) {
   const candidate = asDirPrefix(dataDir);
   const locals = state.environments.filter((e) => e.kind === "local");
   if (locals.some((e) => asDirPrefix(e.dataDir) === candidate)) return { ok: false, error: "duplicate" };
-  const parents = locals.map((e) => e.dataDir);
-  if (typeof defaultDir === "string" && defaultDir) parents.push(defaultDir);
-  if (parents.some((dir) => candidate.startsWith(asDirPrefix(dir)))) return { ok: false, error: "nested" };
+  // Two-way containment for registered local dirs: the candidate inside one,
+  // or the candidate swallowing one. The candidate inside the default dir is
+  // refused as before.
+  const insideKnown = (dir) => candidate.startsWith(asDirPrefix(dir));
+  const containsKnown = (dir) => asDirPrefix(dir).startsWith(candidate);
+  if (locals.some((e) => insideKnown(e.dataDir) || containsKnown(e.dataDir))) return { ok: false, error: "nested" };
+  if (typeof defaultDir === "string" && defaultDir && insideKnown(defaultDir)) return { ok: false, error: "nested" };
   const environments = [...state.environments, { id: makeId(), kind: "local", name, dataDir }];
   return { ok: true, state: { ...state, environments } };
 }
@@ -248,6 +255,20 @@ function activeLocalDataDir(state, _defaultDir) {
  * local environment's dir, else the caller's default. */
 function startupEnvironmentDir(state, defaultDir) {
   return activeLocalDataDir(state, defaultDir) ?? defaultDir;
+}
+
+/** The boot decision for a packaged launch. A named local environment whose
+ * directory is missing (the `missing` stamp readEnvironments takes right
+ * before boot) must NOT be leased or created: mkdir would silently raise an
+ * empty setup where the person's data used to be. Boot on the default dir
+ * and flag the fallback so the caller can say so. The default dir itself is
+ * never refused — a first boot is allowed to create it. */
+function bootEnvironmentDir(state, defaultDir) {
+  const active = activeEnvironment(state);
+  if (active?.kind === "local" && typeof active.dataDir === "string" && active.missing === true) {
+    return { dataDir: defaultDir, fellBack: true, missingDir: active.dataDir };
+  }
+  return { dataDir: startupEnvironmentDir(state, defaultDir), fellBack: false, missingDir: null };
 }
 
 function withoutEnvironment(state, id) {
@@ -274,6 +295,7 @@ module.exports = {
   activeEnvironment,
   activeLocalDataDir,
   allowedOrigins,
+  bootEnvironmentDir,
   normalizeOrigin,
   parseEnvironments,
   parsePairingLink,

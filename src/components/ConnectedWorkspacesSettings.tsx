@@ -79,6 +79,7 @@ export function ConnectedWorkspacesSettings() {
   return <>
     <p className="text-[13px] leading-relaxed text-ink-secondary">One desktop app, wherever your bots live. Switching servers does not move or replace your bots, conversations, or provider accounts.</p>
     {saved?.packaged && <Card title="Environments on this computer" subtitle="Separate setups on this computer, each with its own bots, conversations and data folder.">
+      {envError && <p role="alert" className="text-[12px] text-danger">{envError}</p>}
       {locals.length > 0 && <ul className="divide-y divide-hairline/40">
         {locals.map((entry) => {
           const active = entry.id === saved.activeId;
@@ -90,7 +91,7 @@ export function ConnectedWorkspacesSettings() {
             {active ? <span className="flex shrink-0 items-center gap-1 text-[12px] text-ink-secondary"><Check size={13} />Current</span> :
               <button type="button" disabled={busy} aria-label={`Switch to ${entry.name}`}
                 onClick={() => void perform(async () => {
-                  if (!await confirmAction(`Switch to ${entry.name}? The app restarts on that environment.`)) return;
+                  if (!await confirmAction(`Switch to ${entry.name}? The app restarts on that environment. Running turns stop.`)) return;
                   // Main's error strings are an open set ("dev", "busy", …):
                   // one generic sentence for all of them.
                   const result = await bridge.switch(entry.id);
@@ -111,7 +112,10 @@ export function ConnectedWorkspacesSettings() {
         </label>
         <div className="mt-2 flex gap-2">
           <button type="button" disabled={busy} onClick={() => void perform(async () => {
-            if (envPurge) await bridge.forget(forgetEntry.id, true); else await bridge.forget(forgetEntry.id);
+            // Main answers {ok:false} when it refuses or the folder delete fails;
+            // the entry stays, so say so generically and leave the panel open.
+            const result = envPurge ? await bridge.forget(forgetEntry.id, true) : await bridge.forget(forgetEntry.id);
+            if (result && result.ok === false) throw new Error("Couldn't forget the environment.");
             setEnvForget(null);
           }, setEnvError)} className="rounded-lg px-3 py-1.5 text-[12px] font-medium text-danger hover:bg-control disabled:opacity-50">Forget</button>
           <button type="button" onClick={() => setEnvForget(null)} className="rounded-lg px-3 py-1.5 text-[12px] text-ink hover:bg-control">Cancel</button>
@@ -143,7 +147,6 @@ export function ConnectedWorkspacesSettings() {
             }, setEnvError)} className="shrink-0 rounded-lg border border-hairline/40 px-3 text-[12px] text-ink hover:bg-control disabled:opacity-50">Choose…</button>
           </span>
         </label>
-        {envError && <p role="alert" className="text-[12px] text-danger">{envError}</p>}
         <button type="submit" disabled={busy || !envName.trim()} className="flex w-fit items-center gap-2 rounded-lg bg-accent px-3 py-2 text-[13px] font-medium text-accent-ink disabled:opacity-50">
           {busy && <Loader2 size={14} className="animate-spin" />}Create
         </button>

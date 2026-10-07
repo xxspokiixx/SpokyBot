@@ -1717,7 +1717,7 @@ ipcMain.on("desktop:unread-count", (event, value) => {
 // The app switches by loading the chosen server's own UI (electron/menu.mjs).
 // Only {id, name, origin} is stored here; the session credential is the
 // HttpOnly cookie /pair set for that origin, kept by Chromium's cookie jar.
-const { LOCAL_ID, activeEnvironment, allowedOrigins, parseEnvironments, parseHostedWorkspaceLink, serializeEnvironments, startupEnvironmentDir, withActive, withEnvironment, withLocalEnvironment, withoutEnvironment, workspaceMenuTemplate, workspaceNavigationAllowed, workspaceSenderAllowed, workspaceSummary, workspaceWindowTitle } = environmentsModule;
+const { LOCAL_ID, activeEnvironment, allowedOrigins, bootEnvironmentDir, parseEnvironments, parseHostedWorkspaceLink, serializeEnvironments, startupEnvironmentDir, withActive, withEnvironment, withLocalEnvironment, withoutEnvironment, workspaceMenuTemplate, workspaceNavigationAllowed, workspaceSenderAllowed, workspaceSummary, workspaceWindowTitle } = environmentsModule;
 let environmentsState = { environments: [], activeId: LOCAL_ID };
 let computerSharing;
 const sharingPrompts = new Set();
@@ -1940,6 +1940,7 @@ async function switchLocalEnvironmentTo(targetDir, targetId) {
   if (localSwitchInFlight) return { ok: false, error: "busy" };
   const previousDir = startupEnvironmentDir(environmentsState, desktopDataDir());
   let startedProc = null;
+  let switchSucceeded = false;
   const failedSwitch = () => {
     // Orchestrator error strings are an open set ("locked", "unavailable",
     // raw probe outcomes): one generic dialog, the specific string in the log.
@@ -1958,8 +1959,16 @@ async function switchLocalEnvironmentTo(targetDir, targetId) {
       port: SERVER_PORT,
       deps: {
         stopChild: async () => {
-          const proc = serverProc;
-          if (proc && !(await stopUtilityServer(proc))) throw new Error("the server child did not stop");
+          // Swallow everything: the child may already be gone (crash, a
+          // recovery that raced us), and the supervisor is paused, so
+          // nothing is racing this stop. A stop error must not abort a
+          // switch that has nowhere to go but forward.
+          try {
+            const proc = serverProc;
+            if (proc && !(await stopUtilityServer(proc))) throw new Error("the server child did not stop");
+          } catch (error) {
+            slog(`switch stopChild ignored (${error?.message ?? error})`);
+          }
         },
         releaseLease: async () => {
           desktopDataDirLease?.release();
@@ -2008,6 +2017,7 @@ async function switchLocalEnvironmentTo(targetDir, targetId) {
       slog(`environment switch to ${targetDir} failed (${result.error})`);
       return failedSwitch();
     }
+    switchSucceeded = true;
     navigateMainWindow(rendererOrigin());
     return { ok: true };
   } catch (error) {
@@ -2016,6 +2026,21 @@ async function switchLocalEnvironmentTo(targetDir, targetId) {
   } finally {
     localSwitchInFlight = false;
     serverSupervisor.resume();
+    // The rollback above owns the restart on most failure paths, but an
+    // orchestrator rejection before rollback runs (a throwing releaseLease)
+    // or a failed rollback leaves this environment with no server at all.
+    // Fork once more onto whatever is ACTIVE — the default dataDir argument
+    // follows environmentsState. Never on success.
+    if (!switchSucceeded && (!serverProc || !serverSupervisor.isCurrent(serverProc))) {
+      slog(`environment switch to ${targetDir} left no server child; restarting the active environment`);
+      try {
+        const revived = await startServerOn(SERVER_PORT);
+        if (revived.proc) serverSupervisor.ready(revived.proc);
+        else slog(`could not restart the server after the failed environment switch`);
+      } catch (error) {
+        slog(`restart after failed environment switch threw (${error?.message ?? error})`);
+      }
+    }
   }
 }
 
@@ -2248,25 +2273,32 @@ async function cloudHomeSignedIn(origin) {
 async function forgetEnvironment(id, purge = false) {
   const env = environmentsState.environments.find((e) => e.id === id);
   if (!env) return;
-  const { response } = await dialog.showMessageBox({
-    type: "warning",
-    buttons: ["Forget", "Cancel"],
-    defaultId: 1,
-    cancelId: 1,
-    message: `Forget “${env.name}”?`,
-    detail: "This app signs out of that server. The server keeps its own session list; revoke it there too if the device is gone.",
-  });
-  if (response !== 0) return;
+  // The environment this app is running on has no child to move away from
+  // and no folder this dialog could safely remove: switching away is the
+  // step that must come first. The UI hides the button; this is the guard.
+  if (env.kind === "local" && environmentsState.activeId === id) return { ok: false, error: "active" };
+  // A local entry has no server to sign out of; its confirmation is the
+  // Settings keep-or-delete-files panel. Only the remote wording belongs
+  // in a native dialog.
+  if (env.kind !== "local") {
+    const { response } = await dialog.showMessageBox({
+      type: "warning",
+      buttons: ["Forget", "Cancel"],
+      defaultId: 1,
+      cancelId: 1,
+      message: `Forget “${env.name}”?`,
+      detail: "This app signs out of that server. The server keeps its own session list; revoke it there too if the device is gone.",
+    });
+    if (response !== 0) return;
+  }
   sharingController().forget(env);
   const wasActive = environmentsState.activeId === id;
-  persistEnvironments(withoutEnvironment(environmentsState, id));
-  // Leave a removed workspace immediately; forgetting an inactive connection
-  // must not reload the local app or discard a Settings form/chat draft.
-  if (wasActive) navigateMainWindow(activeOrigin());
   if (purge === true && env.kind === "local") {
     // Delete the environment's data dir only when its name is unmistakably
     // an OpenMausBot data dir and it is not (or inside) this app's own
     // default dir — "This computer" must never be rm -rf'd from here.
+    // Until the delete has actually happened the entry stays: a failed
+    // purge must not silently orphan the folder behind the registry's back.
     const resolved = path.resolve(env.dataDir);
     const root = path.resolve(desktopDataDir());
     if (path.basename(resolved).startsWith(".openmausbot") && resolved !== root && !resolved.startsWith(root + path.sep)) {
@@ -2274,12 +2306,17 @@ async function forgetEnvironment(id, purge = false) {
         await fs.promises.rm(resolved, { recursive: true });
       } catch (error) {
         slog(`forget environment: purge failed (${error?.message ?? error})`);
+        return { ok: false, error: "purge" };
       }
     } else {
       slog(`forget environment: purge skipped for ${env.dataDir}`);
     }
   }
-  if (!env.origin) return;
+  persistEnvironments(withoutEnvironment(environmentsState, id));
+  // Leave a removed workspace immediately; forgetting an inactive connection
+  // must not reload the local app or discard a Settings form/chat draft.
+  if (wasActive) navigateMainWindow(activeOrigin());
+  if (!env.origin) return { ok: true };
   try {
     // Revoke the session on the server while the cookie is still here.
     const response = await session.defaultSession.fetch(`${env.origin}/api/auth/logout`, { method: "POST", credentials: "include", headers: { origin: env.origin }, signal: AbortSignal.timeout(5_000) });
@@ -2295,6 +2332,7 @@ async function forgetEnvironment(id, purge = false) {
   } catch (error) {
     slog(`forget server: storage clear failed: ${error?.message ?? error}`);
   }
+  return { ok: true };
 }
 
 /**
@@ -3537,7 +3575,24 @@ app.whenReady().then(async () => {
   // this launch owns its data dir for, so the lease and the child's
   // OMB_DATA_DIR must both follow it. Dev mode keeps today's behavior.
   environmentsState = readEnvironments();
-  const bootDataDir = app.isPackaged ? startupEnvironmentDir(environmentsState, desktopDataDir()) : desktopDataDir();
+  // A named environment whose folder is gone (unmounted volume, deleted) is
+  // NOT leased or created at boot — that would silently raise an empty setup
+  // where the person's data used to be. Come up on This computer and say so;
+  // this mirrors the unhealthy-boot fallback below, before anything touches
+  // the missing dir. Dev mode keeps today's behavior.
+  let bootDataDir = desktopDataDir();
+  if (app.isPackaged) {
+    const boot = bootEnvironmentDir(environmentsState, desktopDataDir());
+    if (boot.fellBack) {
+      slog(`boot environment ${boot.missingDir} is missing; falling back to the default data dir`);
+      persistEnvironments({ ...environmentsState, activeId: LOCAL_ID });
+      dialog.showErrorBox(
+        "The environment's folder is missing",
+        `${boot.missingDir} is not there anymore, so OpenMausBot came up on this computer's default data folder instead. Restore or remount that folder, then choose the environment again from the Server menu.`,
+      );
+    }
+    bootDataDir = boot.dataDir;
+  }
   if (app.isPackaged) {
     try {
       // Acquire before either plaintext credential migration reads or writes

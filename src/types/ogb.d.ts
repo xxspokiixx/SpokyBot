@@ -165,7 +165,9 @@ const __APP_VERSION__: string;
         create: (name: string, dataDir?: string) => Promise<{ ok: boolean; error?: string; state: unknown }>;
         /** Native folder chooser for the create form; { ok: false } on cancel. */
         pickDir: () => Promise<{ ok: boolean; path?: string }>;
-        forget: (id: string, purge?: boolean) => Promise<void>;
+        /** {ok:false} when main refused (active local, failed folder delete); a
+         * cancelled remote confirm and remote success answer nothing. */
+        forget: (id: string, purge?: boolean) => Promise<{ ok: boolean; error?: string } | void>;
         /** `panel` "copy": that server's Copy this computer here panel; otherwise its Computer access. */
         onOpenSettings?: (callback: (computerId?: string | null, panel?: "copy") => void) => () => void;
       };
