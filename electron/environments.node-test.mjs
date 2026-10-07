@@ -294,3 +294,21 @@ test("a named local environment is this computer with its path, and gets its own
   assert.deepEqual(calls, ["l1"]);
 });
 
+
+test("withLocalEnvironment compares Windows-shaped paths by separators and case", () => {
+  const winDefault = "C:\\Users\\me\\.openmausbot";
+  const state = env.withLocalEnvironment({ environments: [], activeId: "local" }, { name: "Site", dataDir: "C:\\Bots\\Site" }, () => "site", winDefault);
+  assert.equal(state.ok, true);
+  const again = (name, dataDir) => env.withLocalEnvironment(state.state, { name, dataDir }, () => "x", winDefault).error;
+  // Same folder written differently (separator style, drive case, trailing slash).
+  assert.equal(again("Copy", "c:/bots/site/"), "duplicate");
+  // A child of an environment — written with either separator.
+  assert.equal(again("Child", "C:\\Bots\\Site\\sub"), "nested");
+  assert.equal(again("Child2", "C:/BOTS/SITE/sub"), "nested");
+  // A folder inside the default dir, with mixed separators.
+  assert.equal(again("Inside default", "c:\\users\\me\\.openmausbot\\envs\\x"), "nested");
+  // UNC containment.
+  const unc = env.withLocalEnvironment({ environments: [], activeId: "local" }, { name: "Share", dataDir: "\\\\NAS\\omb" }, () => "share", "\\\\nas\\other");
+  assert.equal(unc.ok, true);
+  assert.equal(env.withLocalEnvironment(unc.state, { name: "Under", dataDir: "\\\\NAS\\omb\\deep" }, () => "x", "\\\\NAS\\elsewhere").error, "nested");
+});

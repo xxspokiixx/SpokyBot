@@ -1975,7 +1975,12 @@ async function switchLocalEnvironmentTo(targetDir, targetId) {
           desktopDataDirLease = null;
         },
         acquireLease: async (dir) => {
-          desktopDataDirLease = acquireDataDirLease(dir);
+          // Switching to (or rolling back to) the default dir must carry the
+          // same legacy `.opengrokbot` lease guard the boot path uses.
+          desktopDataDirLease =
+            dir === desktopDataDir()
+              ? acquireDataDirLease(dir, { legacyDataDir: path.join(app.getPath("home"), ".opengrokbot") })
+              : acquireDataDirLease(dir);
         },
         createDir: async (dir) => {
           await fs.promises.mkdir(dir, { recursive: true });
@@ -3749,11 +3754,19 @@ app.whenReady().then(async () => {
         app.quit();
         return;
       }
-      await startServerPackaged();
-      dialog.showErrorBox(
-        "The environment was unhealthy",
-        `OpenMausBot could not start on ${bootDataDir} and came up on this computer's default data folder instead. Choose that environment again from the Server menu once it is available.`,
-      );
+      const retried = await startServerPackaged();
+      if (retried) {
+        dialog.showErrorBox(
+          "The environment was unhealthy",
+          `OpenMausBot could not start on ${bootDataDir} and came up on this computer's default data folder instead. Choose that environment again from the Server menu once it is available.`,
+        );
+      } else {
+        dialog.showErrorBox(
+          "OpenMausBot could not start",
+          `OpenMausBot could not start on ${bootDataDir} or on this computer's default data folder. Check that both folders are readable, then start the app again.`,
+        );
+        app.quit();
+      }
     }
   }
   if (desktopShutdownStarted) return;

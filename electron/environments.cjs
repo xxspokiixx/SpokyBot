@@ -150,13 +150,24 @@ function cleanDataDir(value) {
 }
 
 function dirBasename(dir) {
-  const parts = dir.replace(/\/+$/, "").split("/");
+  const parts = pathKey(dir).replace(/\/+$/, "").split("/");
   return parts[parts.length - 1] || dir;
+}
+
+/** Comparison key for directory paths. Windows-shaped paths (drive-letter or
+ * UNC) compare slash-normalized and case-insensitively — Windows itself is
+ * case-insensitive, and the same folder can reach us with either separator.
+ * POSIX paths compare as written. */
+function pathKey(dir) {
+  let d = String(dir).replace(/\\/g, "/");
+  if (/^[A-Za-z]:\//.test(d) || d.startsWith("//")) d = d.toLowerCase();
+  return d;
 }
 
 /** Comparisons run on trailing-`/` paths so `/a/b` never matches `/a/bc`. */
 function asDirPrefix(dir) {
-  return dir.endsWith("/") ? dir : `${dir}/`;
+  const d = pathKey(dir);
+  return d.endsWith("/") ? d : `${d}/`;
 }
 
 function cleanId(entry) {
