@@ -153,7 +153,7 @@ function dirBasename(dir) {
 
 /** Comparisons run on trailing-`/` paths so `/a/b` never matches `/a/bc`. */
 function asDirPrefix(dir) {
-  return /\/$/.test(dir) ? dir : `${dir}/`;
+  return dir.endsWith("/") ? dir : `${dir}/`;
 }
 
 function cleanId(entry) {
@@ -237,11 +237,17 @@ function withLocalEnvironment(state, input, makeId, defaultDir) {
 }
 
 /** The data dir the server child must run on, when a named local environment
- * is active; null means the caller's own default dir. `defaultDir` stays in
+ * is active; null means the caller's own default dir. `_defaultDir` stays in
  * the signature for its callers' symmetry — "This computer" has no entry. */
-function activeLocalDataDir(state, defaultDir) {
+function activeLocalDataDir(state, _defaultDir) {
   const active = activeEnvironment(state);
   return active?.kind === "local" && typeof active.dataDir === "string" ? active.dataDir : null;
+}
+
+/** The directory a launch (or a recovery restart) owns: the active named
+ * local environment's dir, else the caller's default. */
+function startupEnvironmentDir(state, defaultDir) {
+  return activeLocalDataDir(state, defaultDir) ?? defaultDir;
 }
 
 function withoutEnvironment(state, id) {
@@ -273,6 +279,7 @@ module.exports = {
   parsePairingLink,
   parseHostedWorkspaceLink,
   serializeEnvironments,
+  startupEnvironmentDir,
   withActive,
   withEnvironment,
   withLocalEnvironment,

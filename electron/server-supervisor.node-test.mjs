@@ -145,6 +145,38 @@ test("a child that dies during initial startup is not also scheduled for runtime
   assert.equal(f.children.length, 1);
 });
 
+test("a pause publishes the outage but schedules no restart; resume re-arms later exits", async (t) => {
+  const f = fixture(t);
+  const first = f.spawn();
+  f.supervisor.ready(first);
+  f.supervisor.pause();
+  first.emit("exit", 1);
+  assert.deepEqual(f.events.at(-1), ["unavailable"], "a paused outage still publishes");
+  await f.tick(1000);
+  assert.equal(f.children.length, 1, "an exit during pause must not fork a replacement");
+  const second = f.spawn();
+  f.supervisor.ready(second);
+  f.supervisor.resume();
+  second.emit("exit", 1);
+  await f.tick(10);
+  assert.equal(f.children.length, 3, "resume re-arms recovery for a later crash");
+  await f.supervisor.shutdown();
+});
+
+test("pause cancels an already-queued restart and resume does not resurrect it", async (t) => {
+  const f = fixture(t);
+  const first = f.spawn();
+  f.supervisor.ready(first);
+  first.emit("exit", 1);
+  f.supervisor.pause();
+  await f.tick(1000);
+  assert.equal(f.children.length, 1, "pause must drop the queued restart");
+  f.supervisor.resume();
+  await f.tick(1000);
+  assert.equal(f.children.length, 1, "resume must not revive the cancelled restart");
+  await f.supervisor.shutdown();
+});
+
 test("repeated quit requests join the exact same child cleanup", async (t) => {
   let finishStop;
   let stops = 0;

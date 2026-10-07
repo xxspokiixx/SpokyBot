@@ -219,6 +219,20 @@ test("activeLocalDataDir reports only an active local environment's directory", 
   assert.equal(env.activeLocalDataDir({ ...state, activeId: "r1" }, DEFAULT), null);
 });
 
+test("startupEnvironmentDir boots on the active local dir and falls back to the default", () => {
+  const DEFAULT = "/Users/me/.openmausbot";
+  const state = {
+    environments: [
+      { id: "l1", kind: "local", name: "APRS", dataDir: "/Users/me/.openmausbot-aprs" },
+      { id: "r1", kind: "remote", name: "Office", origin: "https://box.example" },
+    ],
+    activeId: "l1",
+  };
+  assert.equal(env.startupEnvironmentDir(state, DEFAULT), "/Users/me/.openmausbot-aprs");
+  assert.equal(env.startupEnvironmentDir({ ...state, activeId: "r1" }, DEFAULT), DEFAULT);
+  assert.equal(env.startupEnvironmentDir({ environments: [], activeId: "local" }, DEFAULT), DEFAULT);
+});
+
 test("a named local environment is this computer with its path, and gets its own menu row", () => {
   const localEntry = { id: "l1", kind: "local", name: "APRS Chat", dataDir: "/Users/me/.openmausbot-aprs" };
   const state = { environments: [localEntry, { id: "r1", kind: "remote", name: "Office", origin: "https://box.example" }], activeId: "l1" };
