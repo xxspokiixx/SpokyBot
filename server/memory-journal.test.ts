@@ -2,7 +2,7 @@
 // see, keeps the prior text so a revert needs nothing else, and never
 // takes down the change it records. Bot writes are caught at the turn
 // boundary; these tests simulate a bot's file tool with a plain write.
-import { existsSync, mkdirSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
+import { chmodSync, existsSync, mkdirSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
@@ -300,6 +300,29 @@ describe("turn boundary", () => {
     writeFileSync(join(workspaceDir(b), "MEMORY.md"), "b learned\n");
     const rows = endMemoryTurn("room-1");
     expect(rows.map((r) => r.botId).sort()).toEqual([a, b].sort());
+  });
+
+  it("does not re-read memory files whose size and mtime are unchanged", async () => {
+    const bot = freshBot();
+    ensureWorkspace(bot);
+    const topic = join(workspaceDir(bot), "memory", "notes.md");
+    const logDir = join(workspaceDir(bot), "memory", "log");
+    mkdirSync(logDir, { recursive: true });
+    writeFileSync(topic, "stable note\n");
+    writeFileSync(join(logDir, "2026-09-10.md"), "- stable line\n");
+    beginMemoryTurn(bot, "t1");
+    expect(endMemoryTurn("t1")).toEqual([]);
+    // mode 000 still stats, and this user cannot read it. A second turn that
+    // opens the file treats it as gone and journals a deletion.
+    for (const path of [join(workspaceDir(bot), "MEMORY.md"), topic, join(logDir, "2026-09-10.md")]) chmodSync(path, 0o000);
+    try {
+      beginMemoryTurn(bot, "t2");
+      expect(endMemoryTurn("t2")).toEqual([]);
+      await flushMemoryJournal(bot);
+      expect(readMemoryJournal(bot, 10)).toEqual([]);
+    } finally {
+      for (const path of [join(workspaceDir(bot), "MEMORY.md"), topic, join(logDir, "2026-09-10.md")]) chmodSync(path, 0o600);
+    }
   });
 
   it("never throws when a workspace vanished mid-turn", () => {
