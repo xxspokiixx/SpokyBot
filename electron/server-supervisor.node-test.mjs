@@ -275,7 +275,8 @@ test("forgetting a local environment with files kept or purged removes it and an
   assert.equal(keep.calls.dialogs.length, 0);
   const purged = runForget({ environments: [LOCAL_FIXTURE], activeId: "local" });
   assert.deepEqual(plain(await purged.context.forgetEnvironment("l1", true)), { ok: true });
-  assert.deepEqual(purged.calls.rm, ["/Users/me/.openmausbot-work"]);
+  // forgetEnvironment hands rm the path.resolve()d dir — drive-prefixed on Windows.
+  assert.deepEqual(purged.calls.rm, [path.resolve(LOCAL_FIXTURE.dataDir)]);
   assert.deepEqual(plain(purged.calls.persisted[0].environments), []);
   assert.equal(purged.calls.dialogs.length, 0);
 });
