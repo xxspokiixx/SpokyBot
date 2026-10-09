@@ -137,4 +137,16 @@ describe("remembering exact command approvals", () => {
       expect(result.html).not.toContain("Always allow");
     }
   });
+
+  it("keeps the answers flat, with a ring only for keyboard focus", () => {
+    const tree = PendingApprovalActions({ pending: pendingApprovals([message()])[0]!, bot, threadId: "thread-1", onCancelTurn: vi.fn(), part: "primary" });
+    const classes = nodes(tree).filter((node) => node.type === "button").map((node) => String((node.props as { className?: string }).className));
+    expect(classes).toHaveLength(3);
+    for (const name of classes) {
+      expect(name).not.toMatch(/(^|\s)(border|shadow|ring-\d)/);
+      expect(name).toContain("focus-visible:ring-2");
+      expect(name).toContain("h-7");
+      expect(name).toContain("text-[13px] font-medium");
+    }
+  });
 });

@@ -139,7 +139,7 @@ function label(pending: Pending): string {
  * 13px medium text centred with room for Arabic and other scripts that
  * reach below the baseline, icon and text on one line with one gap. */
 export const APPROVAL_CONTROL =
-  "inline-flex h-7 shrink-0 items-center justify-center gap-1.5 whitespace-nowrap rounded-full px-3 text-[13px] font-medium leading-5 transition-colors";
+  "inline-flex h-7 shrink-0 items-center justify-center gap-1.5 whitespace-nowrap rounded-full px-3 text-[13px] font-medium leading-5 transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus";
 
 const COMMAND_TOOLS = new Set(["Bash", "shell"]);
 
@@ -214,7 +214,7 @@ export const PendingApprovalPanel = memo(function PendingApprovalPanel({
               ? t("approval.aria.pendingProfile")
               : t("approval.aria.pending")
       }
-      className="px-2.5 py-2"
+      className="px-3 py-2"
     >
       {/* One line at normal widths. When the pane is narrow the answers
           drop under the text instead of squeezing it. */}
@@ -233,7 +233,7 @@ export const PendingApprovalPanel = memo(function PendingApprovalPanel({
           {heldNote && (outbound ? (
             // the reason it asks, as a marker; the sentence is in its tooltip
             // and under the chevron
-            <span title={heldNote} className={cn(APPROVAL_CONTROL, "h-6 cursor-default gap-1 border border-warning/40 px-2 text-[12px] text-warning")}>
+            <span title={heldNote} className={cn(APPROVAL_CONTROL, "h-6 cursor-default gap-1 bg-warning/10 px-2 text-[12px] text-warning")}>
               <Send size={12} aria-hidden="true" />
               {t("approval.compact.maySend")}
             </span>
@@ -257,7 +257,7 @@ export const PendingApprovalPanel = memo(function PendingApprovalPanel({
             aria-label={open ? t("approval.applied.hideDetails") : t("approval.applied.details")}
             title={open ? t("approval.applied.hideDetails") : t("approval.applied.details")}
             onClick={() => setOpen((value) => !value)}
-            className={cn(APPROVAL_CONTROL, "w-7 px-0 text-ink-tertiary hover:bg-control hover:text-ink")}
+            className={cn(APPROVAL_CONTROL, "w-7 px-0 text-ink-tertiary hover:bg-ink/10 hover:text-ink")}
           >
             <ChevronDown size={16} aria-hidden="true" className={cn("transition-transform", open && "rotate-180")} />
           </button>
@@ -277,7 +277,7 @@ export const PendingApprovalPanel = memo(function PendingApprovalPanel({
                   ? t("approval.aria.reviewProfile")
                   : t("approval.aria.reviewDetails")
           }
-          className="max-h-40 overflow-auto whitespace-pre-wrap break-words rounded-lg bg-inset px-2.5 py-1.5 font-mono text-[12px] leading-relaxed text-ink"
+          className="max-h-40 overflow-auto whitespace-pre-wrap break-words rounded-3xl bg-inset px-4 py-3 font-mono text-[12px] leading-relaxed text-ink"
         >
           {pending.commandAllowlist?.command ?? pending.detail}
         </pre>
@@ -353,7 +353,7 @@ export function PendingApprovalActions({
   // Stopping the whole turn is the rare way out, so it lives with the
   // details, away from the answers.
   const more = showMore && !durableRequest ? [
-    <button key="cancel" type="button" onClick={onCancelTurn} className={cn(APPROVAL_CONTROL, "border border-hairline/50 text-ink-secondary hover:bg-control hover:text-ink")}>
+    <button key="cancel" type="button" onClick={onCancelTurn} className={cn(APPROVAL_CONTROL, "bg-ink/[0.07] text-ink-secondary hover:bg-ink/[0.12] hover:text-ink")}>
       {t("approval.action.cancelTurn")}
     </button>,
   ] : [];
@@ -363,7 +363,7 @@ export function PendingApprovalActions({
       type="button"
       onClick={() => decide("deny")}
       autoFocus={isTeamSetup}
-      className={cn(APPROVAL_CONTROL, "border border-danger/40 text-danger hover:bg-danger/10")}
+      className={cn(APPROVAL_CONTROL, "text-danger hover:bg-danger/10")}
     >
       {isSuggestion ? t("approval.action.notNow") : isRoutineRequest || isProfileRequest || isTeamSetup ? t("approval.action.cancel") : t("approval.action.deny")}
     </button>,
@@ -374,7 +374,7 @@ export function PendingApprovalActions({
         onClick={always.run}
         aria-label={always.name}
         title={always.hint}
-        className={cn(APPROVAL_CONTROL, "border border-hairline/60 text-ink hover:bg-control")}
+        className={cn(APPROVAL_CONTROL, "bg-ink/[0.07] text-ink hover:bg-ink/[0.12]")}
       >
         {t("approval.action.alwaysAllow")}
       </button>
@@ -384,7 +384,7 @@ export function PendingApprovalActions({
       type="button"
       onClick={() => decide("allow")}
       disabled={isSkillRequest && !reviewedSha256}
-      className={cn(APPROVAL_CONTROL, "border border-accent bg-accent text-white hover:brightness-110 disabled:cursor-not-allowed disabled:opacity-40")}
+      className={cn(APPROVAL_CONTROL, "bg-accent text-white hover:bg-accent/90 disabled:cursor-not-allowed disabled:opacity-40")}
     >
       {isTeamSetup ? pending.message.card?.options[0] : isSkillRequest
         ? pending.message.card?.skillRequest?.action === "update"

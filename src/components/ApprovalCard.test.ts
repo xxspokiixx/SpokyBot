@@ -515,10 +515,10 @@ describe("ApprovalCard outbound holds", () => {
     expect(html).toContain("Create linear comment ×2");
     expect(html).not.toContain("LINEAR CREATE LINEAR COMMENT");
     expect(html).not.toContain("LINEAR_CREATE_LINEAR_COMMENT");
-    // the arguments are answered in the composer; the transcript line keeps
-    // them behind Details instead of printing the payload a second time
+    // the composer answers it, so the transcript keeps a line for screen
+    // readers only and never prints the payload a second time
     expect(html).not.toContain("issueId");
-    expect(html).toContain("Details");
+    expect(html).toContain('class="sr-only"');
     expect(html).toContain("Waiting for your answer below");
   });
 
@@ -693,6 +693,9 @@ describe("one approval, one card", () => {
     expect(line).toContain("git status");
     expect(line).not.toContain("<pre");
     expect(line).not.toContain("rounded-2xl");
+    // the composer row is the visible one, this line is for screen readers
+    expect(line).toContain('class="sr-only"');
+    expect(line).not.toContain("<button");
 
     const [pending] = pendingApprovals([command()]);
     const panel = renderToStaticMarkup(createElement(PendingApprovalPanel, { pending: pending!, count: 1, index: 0, botName: "Dev" }));
@@ -705,6 +708,13 @@ describe("one approval, one card", () => {
     expect(row).not.toContain("<pre");
     expect(row).toContain('aria-expanded="false"');
     expect(panel).toMatch(/id="approval-details-r-shell" hidden=""/);
+  });
+
+  it("keeps a waiting line visible when the composer has no answer for it", () => {
+    const orphan: Message = { ...command(), card: { ...command().card!, requestId: undefined } };
+    const line = renderToStaticMarkup(createElement(ApprovalCard, { bot: { name: "Dev" }, message: orphan }));
+    expect(line).not.toContain("sr-only");
+    expect(line).toContain("Waiting for your answer below");
   });
 
   it("settles a command into a quiet line with the outcome", () => {

@@ -244,7 +244,7 @@ function AppliedChangeLine({
         <pre
           tabIndex={0}
           aria-label={t("approval.aria.appliedDetails")}
-          className="mt-1.5 max-h-40 overflow-auto whitespace-pre-wrap break-words rounded-lg bg-inset px-3 py-2 font-mono text-[12.5px] leading-relaxed text-ink"
+          className="mt-1.5 max-h-40 overflow-auto whitespace-pre-wrap break-words rounded-3xl bg-inset px-4 py-3 font-mono text-[12.5px] leading-relaxed text-ink"
         >
           {card.subtitle}
         </pre>
@@ -257,6 +257,11 @@ function AppliedChangeLine({
  * where it stands. A command shows itself in small monospace, since that
  * is what the person is deciding on. Anything else (a send's arguments,
  * code run on an app's side) stays behind Details. */
+function firstLineOf(text: string): string {
+  const line = text.split("\n", 1)[0] ?? "";
+  return line.length > 80 ? `${line.slice(0, 79)}…` : line;
+}
+
 function CompactApprovalRow({
   header,
   summary,
@@ -266,6 +271,7 @@ function CompactApprovalRow({
   allowed,
   byVoice,
   waiting,
+  answeredBelow,
 }: {
   header: string;
   summary?: string;
@@ -275,9 +281,20 @@ function CompactApprovalRow({
   allowed: boolean;
   byVoice: ReactNode;
   waiting: boolean;
+  /** the composer is showing this ask with its answers */
+  answeredBelow: boolean;
 }) {
   const [open, setOpen] = useState(false);
   const toggle = () => setOpen((value) => !value);
+  // While the composer shows the ask, a visible line here would say the
+  // same thing twice. Screen readers still find it in place, pointing down.
+  if (waiting && answeredBelow) {
+    return (
+      <div data-approval-row="pending" className="sr-only">
+        {header}{summary ? ` ${summary}` : ""}{detail && showDetailInline ? ` ${firstLineOf(detail)}` : ""}. {t("approval.status.waitingAnswer")}
+      </div>
+    );
+  }
   return (
     <div
       data-tour={waiting ? "approval" : undefined}
@@ -323,7 +340,7 @@ function CompactApprovalRow({
         <pre
           tabIndex={0}
           aria-label={t("approval.aria.details")}
-          className="mt-1.5 max-h-40 overflow-auto whitespace-pre-wrap break-words rounded-lg bg-inset px-3 py-2 font-mono text-[12px] leading-relaxed text-ink"
+          className="mt-1.5 max-h-40 overflow-auto whitespace-pre-wrap break-words rounded-3xl bg-inset px-4 py-3 font-mono text-[12px] leading-relaxed text-ink"
         >
           {detail}
         </pre>
@@ -409,6 +426,8 @@ export function ApprovalCard({
         allowed={settled === "allow" && !expired}
         byVoice={byVoice}
         waiting={waiting}
+        // the same cards pendingApprovals hands the composer
+        answeredBelow={Boolean(card.requestId && card.tool && !card.dismissed)}
       />
     );
   }
