@@ -296,7 +296,6 @@ function CompactApprovalRow({
           <button
             type="button"
             aria-expanded={open}
-            aria-label={t("approval.aria.details")}
             title={detail}
             onClick={toggle}
             className="min-w-0 max-w-full truncate rounded-md bg-inset px-1.5 py-0.5 text-left font-mono text-[12px] text-ink hover:bg-control"
@@ -304,7 +303,7 @@ function CompactApprovalRow({
             {detail}
           </button>
         )}
-        <span className="shrink-0">· {outcome ?? t("approval.status.waitingAnswer")}</span>
+        <span className="shrink-0" aria-live="polite">· {outcome ?? t("approval.status.waitingAnswer")}</span>
         {byVoice}
         {detail && !showDetailInline && (
           <button
