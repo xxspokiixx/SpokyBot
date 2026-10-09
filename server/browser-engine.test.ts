@@ -656,10 +656,12 @@ describe("agentBrowserFrame", () => {
 
   it("returns the picture the browser wrote, base64 encoded", async () => {
     // `screenshot <path>` is argument 2; the CLI writes the file there.
-    const binaryPath = await fakeBinary('require("node:fs").writeFileSync(process.argv[2], "PNGDATA")');
+    const binaryPath = await fakeBinary('require("node:fs").writeFileSync(process.argv[2], "JPEGDATA")');
     const frame = await agentBrowserFrame({ binaryPath, env: { AGENT_BROWSER_SESSION: "bot-1" } });
-    expect(frame.format).toBe("png");
-    expect(Buffer.from(frame.png, "base64").toString()).toBe("PNGDATA");
+    expect(frame.format).toBe("jpeg");
+    expect(Buffer.from(frame.png, "base64").toString()).toBe("JPEGDATA");
+    // JPEG for this command only: the bot's own screenshot tool keeps its format.
+    expect(vi.mocked(spawn).mock.calls[0]![1]!.slice(2)).toEqual(["--screenshot-format", "jpeg", "--screenshot-quality", "80"]);
     expect(existsSync(vi.mocked(spawn).mock.calls[0]![1]![1]!)).toBe(false);
   });
 
