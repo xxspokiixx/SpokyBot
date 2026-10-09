@@ -544,6 +544,7 @@ export function resetMemoryJournalState(): void {
  * next time a turn looked, and would write the journal file back. */
 export function forgetBotMemoryJournal(botId: string): void {
   baselines.delete(botId);
+  baselineStats.delete(botId);
   for (const [threadId, bots] of turnBots) {
     if (!bots.delete(botId)) continue;
     if (bots.size === 0) turnBots.delete(threadId);

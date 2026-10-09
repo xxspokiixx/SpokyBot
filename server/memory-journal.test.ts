@@ -2,10 +2,10 @@
 // see, keeps the prior text so a revert needs nothing else, and never
 // takes down the change it records. Bot writes are caught at the turn
 // boundary; these tests simulate a bot's file tool with a plain write.
-import { chmodSync, existsSync, mkdirSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import {
   BEFORE_CAP,
@@ -13,6 +13,7 @@ import {
   JOURNAL_DIR,
   beginMemoryTurn,
   endMemoryTurn,
+  forgetBotMemoryJournal,
   flushMemoryJournal,
   journalFile,
   journalMemoryDelete,
@@ -25,6 +26,7 @@ import {
 } from "./memory-journal.ts";
 import { MEMORY_INDEX, hashMemoryText, readMemoryDoc } from "./memory-store.ts";
 import { WORKSPACES_DIR, ensureWorkspace, workspaceDir } from "./workspace.ts";
+import * as workspace from "./workspace.ts";
 
 let counter = 0;
 const freshBot = () => `journal-bot-${process.pid}-${counter++}`;
@@ -310,18 +312,23 @@ describe("turn boundary", () => {
     mkdirSync(logDir, { recursive: true });
     writeFileSync(topic, "stable note\n");
     writeFileSync(join(logDir, "2026-09-10.md"), "- stable line\n");
-    beginMemoryTurn(bot, "t1");
-    expect(endMemoryTurn("t1")).toEqual([]);
-    // mode 000 still stats, and this user cannot read it. A second turn that
-    // opens the file treats it as gone and journals a deletion.
-    for (const path of [join(workspaceDir(bot), "MEMORY.md"), topic, join(logDir, "2026-09-10.md")]) chmodSync(path, 0o000);
+    const read = vi.spyOn(workspace, "readMemoryText");
     try {
+      beginMemoryTurn(bot, "t1");
+      expect(read).toHaveBeenCalled();
+      read.mockClear();
+      expect(endMemoryTurn("t1")).toEqual([]);
       beginMemoryTurn(bot, "t2");
       expect(endMemoryTurn("t2")).toEqual([]);
+      expect(read).not.toHaveBeenCalled();
       await flushMemoryJournal(bot);
       expect(readMemoryJournal(bot, 10)).toEqual([]);
+      forgetBotMemoryJournal(bot);
+      beginMemoryTurn(bot, "t3");
+      expect(read).toHaveBeenCalled();
+      expect(endMemoryTurn("t3")).toEqual([]);
     } finally {
-      for (const path of [join(workspaceDir(bot), "MEMORY.md"), topic, join(logDir, "2026-09-10.md")]) chmodSync(path, 0o600);
+      read.mockRestore();
     }
   });
 
