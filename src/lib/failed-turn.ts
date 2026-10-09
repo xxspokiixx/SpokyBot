@@ -7,6 +7,10 @@ import { offersSignIn } from "@/components/EngineSetup";
 import { t } from "@/lib/i18n";
 import type { Bot, InstanceInfo, Message } from "@/state/store";
 import { failedTurnCause } from "../../shared/failed-turn";
+import { toolStepLabel } from "@/lib/tool-step-label";
+
+/** The prefixes a status row is stored with (src/lib/activity-runs.ts). */
+const STATUS_MARKER = /^(?:recovery|notice):\s*/;
 
 export { failedTurnCause };
 
@@ -35,10 +39,11 @@ export function botEngine(bot: Bot | undefined, instances: InstanceInfo[]): Inst
 }
 
 /** One line for a list preview: what a failed turn's row says, minus the
- * "below" a list has no room for; any other activity row its name. */
+ * "below" a list has no room for; a status row its words, without the
+ * `notice:` or `recovery:` marker; a tool step its plain phrase. */
 export function activityPreview(tool: ActivityTool, engine: InstanceInfo | undefined): string {
   const cause = failedTurnCause(tool.name);
-  if (cause === null) return tool.name;
+  if (cause === null) return STATUS_MARKER.test(tool.name) ? tool.name.replace(STATUS_MARKER, "") : toolStepLabel(tool);
   const signedOut = signedOutEngine(tool, engine);
   return signedOut ? t("sidebar.preview.signedOut", { name: signedOut.displayName }) : cause;
 }
