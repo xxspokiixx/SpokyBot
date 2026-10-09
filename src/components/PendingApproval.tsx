@@ -7,7 +7,8 @@
 // the detail printed raw in a monospace block that is NEVER truncated
 // (it scrolls instead), and the buttons ordered least-destructive-last so
 // the primary action sits under your thumb.
-import { memo } from "react";
+import { memo, useState } from "react";
+import { ShieldCheck } from "lucide-react";
 import { useStore, type Bot, type Message } from "@/state/store";
 import { cn } from "@/lib/cn";
 import { t, tFromServer } from "@/lib/i18n";
@@ -134,22 +135,52 @@ function label(pending: Pending): string {
   return key ? t(key) : t("approval.label.requested");
 }
 
+/** The line a plain permission opens with: who wants what, the way the
+ * transcript says it. Proposals, team setup and sends keep their own words. */
+function heading(pending: Pending, botName?: string): string {
+  const card = pending.message.card;
+  const durable = isSkillApproval(pending) || isRoutineApproval(pending) || isProfileApproval(pending) ||
+    Boolean(card?.teamSetupRequest) || Boolean(card?.modelRequest);
+  if (!durable && botName) return t("approval.card.namedWantsTo", { name: botName, action: toolLabel(pending.tool) });
+  return label(pending);
+}
+
 export const PendingApprovalPanel = memo(function PendingApprovalPanel({
   pending,
   count,
   index,
+  botName,
 }: {
   pending: Pending;
   count: number;
   index: number;
+  /** who is asking, for "Dev wants to run a command" */
+  botName?: string;
   /** The active locale. Not read here: it is the memo key, the same way the
    * transcript takes one. Every line in this panel comes from the catalog,
    * and nothing else about a pending approval changes with the language. */
   locale?: string;
 }) {
-  const heldNote = tFromServer(pending.heldCode, pending.held);
   // A held outbound action names where it sends and what, not its slug.
   const outbound = pending.message.card ? outboundSummary(pending.message.card) : undefined;
+  // Code is held because nothing can tell what it will send, not because it
+  // is known to send. Say that, rather than "This sends something".
+  const heldNote = outbound?.opaque && pending.heldCode === "approval.held.outbound"
+    ? t("approval.held.code")
+    : tFromServer(pending.heldCode, pending.held);
+  // Code run on an app's side is unreadable as escaped JSON. It stays one
+  // tap away rather than filling the composer.
+  const [showCode, setShowCode] = useState(false);
+  const detailHidden = outbound?.opaque === true && !showCode;
+  const toolTag = isSkillApproval(pending)
+    ? pending.message.card?.skillRequest?.action === "update" ? "update_skill" : "stage_skill"
+    : isRoutineApproval(pending)
+      ? pending.message.card?.routineRequest?.operation.action === "create"
+        ? "schedule_routine"
+        : "manage_routine"
+      : isProfileApproval(pending)
+        ? "update_profile"
+        : pending.tool;
   return (
     <div
       role="region"
@@ -162,52 +193,55 @@ export const PendingApprovalPanel = memo(function PendingApprovalPanel({
               ? t("approval.aria.pendingProfile")
               : t("approval.aria.pending")
       }
-      className="rounded-t-2xl border-b border-hairline/50 bg-control/40 px-4 py-3"
+      className="px-3 pt-2.5"
     >
-      <div className="flex flex-wrap items-center gap-2" aria-live="polite">
-        <span className="text-[11px] uppercase tracking-[0.18em] text-ink-secondary">
-          {t("approval.pending")}
+      <div className="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1" aria-live="polite">
+        <ShieldCheck size={14} className="shrink-0 text-accent" aria-hidden="true" />
+        <span className="min-w-0 break-words text-[13px] font-medium text-ink">
+          {outbound ? outbound.headline : heading(pending, botName)}
         </span>
+        {outbound ? (
+          outbound.summary && <span className="text-[13px] text-ink-secondary">{outbound.summary}</span>
+        ) : !pending.message.card?.teamSetupRequest && (
+          <span className="font-mono text-[11px] text-ink-tertiary">{toolTag}</span>
+        )}
         {count > 1 && (
-          <span className="rounded-full bg-control px-1.5 py-0.5 text-[11px] tabular-nums text-ink-secondary">
+          <span className="ml-auto rounded-full bg-control px-1.5 py-0.5 text-[11px] tabular-nums text-ink-secondary">
             {t("approval.position", { index: index + 1, count })}
           </span>
         )}
-        <span className="text-[13px] text-ink">{outbound ? outbound.headline : label(pending)}</span>
-        {outbound ? (
-          outbound.summary && <span className="text-[13px] text-ink-secondary">{outbound.summary}</span>
-        ) : !pending.message.card?.teamSetupRequest && <span className="font-mono text-[11px] text-ink-secondary">
-          {isSkillApproval(pending)
-            ? pending.message.card?.skillRequest?.action === "update" ? "update_skill" : "stage_skill"
-            : isRoutineApproval(pending)
-            ? pending.message.card?.routineRequest?.operation.action === "create"
-              ? "schedule_routine"
-              : "manage_routine"
-            : isProfileApproval(pending)
-              ? "update_profile"
-              : pending.tool}
-        </span>}
       </div>
-      {/* never truncated — long commands wrap and scroll */}
-      <pre
-        tabIndex={0}
-        aria-label={
-          isSkillApproval(pending)
-            ? t("approval.aria.reviewSkill")
-            : isRoutineApproval(pending)
-              ? t("approval.aria.reviewRoutine")
-              : isProfileApproval(pending)
-                ? t("approval.aria.reviewProfile")
-                : t("approval.aria.reviewDetails")
-        }
-        className="mt-2 max-h-40 overflow-auto whitespace-pre-wrap break-words font-mono text-[12px] leading-relaxed text-ink"
-      >
-        {pending.commandAllowlist?.command ?? pending.detail}
-      </pre>
+      {detailHidden ? (
+        <button
+          type="button"
+          aria-expanded={false}
+          onClick={() => setShowCode(true)}
+          className="-ml-1.5 mt-1 rounded-md px-1.5 py-0.5 text-[12.5px] text-ink-tertiary hover:bg-inset hover:text-ink-secondary"
+        >
+          {t("approval.applied.details")}
+        </button>
+      ) : (
+        /* never truncated — long commands wrap and scroll */
+        <pre
+          tabIndex={0}
+          aria-label={
+            isSkillApproval(pending)
+              ? t("approval.aria.reviewSkill")
+              : isRoutineApproval(pending)
+                ? t("approval.aria.reviewRoutine")
+                : isProfileApproval(pending)
+                  ? t("approval.aria.reviewProfile")
+                  : t("approval.aria.reviewDetails")
+          }
+          className="mt-2 max-h-40 overflow-auto whitespace-pre-wrap break-words rounded-lg bg-inset px-2.5 py-1.5 font-mono text-[12px] leading-relaxed text-ink"
+        >
+          {pending.commandAllowlist?.command ?? pending.detail}
+        </pre>
+      )}
       {pending.message.card?.skillRequest && (
         <SkillRequestPreview request={pending.message.card.skillRequest} />
       )}
-      {heldNote && <div className="mt-2 text-[12px] text-warning">{heldNote}</div>}
+      {heldNote && <div className="mt-1.5 text-[12px] text-warning">{heldNote}</div>}
     </div>
   );
 });
@@ -251,11 +285,13 @@ export function PendingApprovalActions({
       rememberCommand: rememberCommand || undefined,
     });
 
-  const base = "rounded-full px-3.5 py-1.5 text-[13.5px] transition-colors";
+  const base = "rounded-full px-3 py-1 text-[12.5px] transition-colors";
   return (
-    <div className="flex flex-wrap items-center justify-end gap-2 px-2 py-2">
+    <div className="flex flex-wrap items-center justify-end gap-1.5 px-3 pb-2.5 pt-2">
+      {/* Stopping the whole turn is the rare way out, so it sits apart and
+          quiet, away from the two answers. */}
       {!durableRequest && (
-        <button onClick={onCancelTurn} className={cn(base, "text-ink-secondary hover:bg-control hover:text-ink")}>
+        <button onClick={onCancelTurn} className={cn(base, "mr-auto px-2 text-ink-tertiary hover:bg-control hover:text-ink")}>
           {t("approval.action.cancelTurn")}
         </button>
       )}

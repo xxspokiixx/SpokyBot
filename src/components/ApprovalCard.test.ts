@@ -515,14 +515,21 @@ describe("ApprovalCard outbound holds", () => {
     expect(html).toContain("Create linear comment ×2");
     expect(html).not.toContain("LINEAR CREATE LINEAR COMMENT");
     expect(html).not.toContain("LINEAR_CREATE_LINEAR_COMMENT");
-    expect(html).toContain("issueId");
+    // the arguments are answered in the composer; the transcript line keeps
+    // them behind Details instead of printing the payload a second time
+    expect(html).not.toContain("issueId");
+    expect(html).toContain("Details");
     expect(html).toContain("Waiting for your answer below");
   });
 
-  it("keeps the settled status line", () => {
+  it("settles into one quiet line", () => {
     const html = renderToStaticMarkup(createElement(ApprovalCard, { bot, message: outboundMessage("allow") }));
-    expect(html).toContain("Send to Linear?");
-    expect(html).toContain("Allowed");
+    expect(html).toContain('data-approval-row="settled"');
+    expect(html).toContain("Send to Linear</span>");
+    expect(html).toContain("· Create linear comment ×2");
+    expect(html).toContain("· Allowed");
+    expect(html).not.toContain("issueId");
+    expect(html).not.toContain("always asks first");
   });
 
   it("heads the composer strip the same way", () => {
@@ -641,5 +648,88 @@ describe("ApprovalCard for a change that applied on its own", () => {
     const confirmed = routineCard(createRoutineOperation, { name: "Backlog review" });
     confirmed.card = { ...confirmed.card!, autoApplied: undefined, options: ["Confirm", "Cancel"] };
     expect(render(confirmed)).toContain("Routine scheduled");
+  });
+});
+
+describe("one approval, one card", () => {
+  const command = (answered?: string): Message => ({
+    id: "shell-card",
+    role: "bot",
+    kind: "options",
+    at: 1,
+    card: {
+      title: "Approval needed",
+      subtitle: "git status",
+      options: ["Allow", "Deny"],
+      requestId: "r-shell",
+      tool: "shell",
+      ...(answered ? { answered } : {}),
+    },
+  });
+  const proxy = (answered?: string): Message => ({
+    id: "proxy-card",
+    role: "bot",
+    kind: "options",
+    at: 1,
+    card: {
+      title: "Send on your behalf?",
+      subtitle: 'Composio · Proxy execute\n{"code_to_execute":"res, err = run_composio_tool(\\"GITHUB_GET_A_COMMIT\\", {})"}',
+      options: ["Allow", "Deny"],
+      requestId: "r-proxy",
+      tool: "COMPOSIO_PROXY_EXECUTE",
+      heldCode: "approval.held.outbound",
+      held: "This sends something on your behalf, so it always asks first.",
+      outboundRequest: { tool: "COMPOSIO_PROXY_EXECUTE", app: "Composio", calls: [{ app: "Composio", label: "Proxy execute" }] },
+      ...(answered ? { answered } : {}),
+    },
+  });
+
+  it("keeps a waiting command to one line in the transcript, the composer holds the decision", () => {
+    const line = renderToStaticMarkup(createElement(ApprovalCard, { bot: { name: "Dev" }, message: command() }));
+    expect(line).toContain('data-approval-row="pending"');
+    expect(line).toContain("Dev wants to run a command");
+    expect(line).toContain("git status");
+    expect(line).not.toContain("<pre");
+    expect(line).not.toContain("rounded-2xl");
+
+    const [pending] = pendingApprovals([command()]);
+    const panel = renderToStaticMarkup(createElement(PendingApprovalPanel, { pending: pending!, count: 1, index: 0, botName: "Dev" }));
+    expect(panel).toContain("Dev wants to run a command");
+    expect(panel).toContain('aria-label="Pending approval"');
+    expect(panel).not.toContain("Command approval requested");
+    expect(panel).toContain("git status");
+  });
+
+  it("settles a command into a quiet line with the outcome", () => {
+    const line = renderToStaticMarkup(createElement(ApprovalCard, { bot: { name: "Dev" }, message: command("deny") }));
+    expect(line).toContain('data-approval-row="settled"');
+    expect(line).toContain("· Denied");
+  });
+
+  it("names code run on Composio plainly and keeps the code behind Details", () => {
+    const line = renderToStaticMarkup(createElement(ApprovalCard, { bot: { name: "Ursa" }, message: proxy("allow") }));
+    expect(line).toContain("Run code on Composio</span>");
+    expect(line).toContain("· Allowed");
+    expect(line).not.toContain("Proxy execute");
+    expect(line).not.toContain("code_to_execute");
+    expect(line).not.toContain("always asks first");
+
+    const [pending] = pendingApprovals([proxy()]);
+    const panel = renderToStaticMarkup(createElement(PendingApprovalPanel, { pending: pending!, count: 1, index: 0, botName: "Ursa" }));
+    expect(panel).toContain("Run code on Composio?");
+    expect(panel).not.toContain("code_to_execute");
+    expect(panel).toContain("Details");
+    // the safety note stays where the decision is made
+    expect(panel).toContain("runs code that could send or change things");
+    expect(panel).not.toContain("This sends something");
+  });
+
+  it("keeps a real send's arguments in view in the composer", () => {
+    const send: Message = { ...proxy(), card: { ...proxy().card!, subtitle: 'Slack · Send message\n{"text":"hi"}', tool: "SLACK_SEND_MESSAGE",
+      outboundRequest: { tool: "SLACK_SEND_MESSAGE", app: "Slack", calls: [{ app: "Slack", label: "Send message" }] } } };
+    const [pending] = pendingApprovals([send]);
+    const panel = renderToStaticMarkup(createElement(PendingApprovalPanel, { pending: pending!, count: 1, index: 0 }));
+    expect(panel).toContain("Send to Slack?");
+    expect(panel).toContain("{&quot;text&quot;:&quot;hi&quot;}");
   });
 });

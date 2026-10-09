@@ -4,7 +4,7 @@
 // approval is a decision about one concrete action, so it shows the tool
 // and the actual command/path in monospace, and the choices carry their
 // own behavior instead of being matched by their label text.
-import { useState } from "react";
+import { useState, type ReactNode } from "react";
 import { Check, ShieldCheck, Undo2, X } from "lucide-react";
 import { api, ApiError, type Bot, type Message, type OptionCardData } from "@/state/store";
 import { cn } from "@/lib/cn";
@@ -213,9 +213,9 @@ function AppliedChangeLine({
       .finally(() => setUndoing(false));
   };
   return (
-    <div className="w-full max-w-[840px] text-[13px] text-ink-secondary" data-applied-change={name}>
-      <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
-        {undone ? <Undo2 size={14} className="shrink-0" /> : <Check size={14} className="shrink-0 text-success" />}
+    <div className="w-full max-w-[840px] text-[12.5px] text-ink-tertiary" data-applied-change={name}>
+      <div className="flex flex-wrap items-center gap-x-1.5 gap-y-1">
+        {undone ? <Undo2 size={13} className="shrink-0" /> : <Check size={13} className="shrink-0 text-success/80" />}
         <span className="min-w-0 break-words">
           {summary.line}
           {undone && <span> · {t("approval.applied.undone")}</span>}
@@ -225,7 +225,7 @@ function AppliedChangeLine({
             type="button"
             onClick={undo}
             disabled={undoing}
-            className="rounded-md px-1.5 py-0.5 font-medium text-accent hover:bg-inset disabled:opacity-60"
+            className="rounded-md px-1.5 py-0.5 text-accent hover:bg-inset disabled:opacity-60"
           >
             {undoing ? t("approval.applied.undoing") : t("approval.applied.undo")}
           </button>
@@ -247,6 +247,83 @@ function AppliedChangeLine({
           className="mt-1.5 max-h-40 overflow-auto whitespace-pre-wrap break-words rounded-lg bg-inset px-3 py-2 font-mono text-[12.5px] leading-relaxed text-ink"
         >
           {card.subtitle}
+        </pre>
+      )}
+    </div>
+  );
+}
+
+/** One line for an action the composer answers: who wants what, then
+ * where it stands. A command shows itself in small monospace, since that
+ * is what the person is deciding on. Anything else (a send's arguments,
+ * code run on an app's side) stays behind Details. */
+function CompactApprovalRow({
+  header,
+  summary,
+  detail,
+  showDetailInline,
+  outcome,
+  allowed,
+  byVoice,
+  waiting,
+}: {
+  header: string;
+  summary?: string;
+  detail: string;
+  showDetailInline: boolean;
+  outcome?: string;
+  allowed: boolean;
+  byVoice: ReactNode;
+  waiting: boolean;
+}) {
+  const [open, setOpen] = useState(false);
+  const toggle = () => setOpen((value) => !value);
+  return (
+    <div
+      data-tour={waiting ? "approval" : undefined}
+      data-approval-row={waiting ? "pending" : "settled"}
+      className={cn("w-full max-w-[840px] text-[13px]", waiting ? "text-ink-secondary" : "text-ink-tertiary")}
+    >
+      <div className="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1">
+        {waiting
+          ? <ShieldCheck size={14} className="shrink-0 text-accent" aria-hidden="true" />
+          : allowed
+            ? <Check size={14} className="shrink-0 text-success" aria-hidden="true" />
+            : <X size={14} className="shrink-0" aria-hidden="true" />}
+        <span className={cn("min-w-0 break-words", waiting && "text-ink")}>{header}</span>
+        {summary && <span className="min-w-0 break-words">{waiting ? summary : `· ${summary}`}</span>}
+        {detail && showDetailInline && (
+          <button
+            type="button"
+            aria-expanded={open}
+            aria-label={t("approval.aria.details")}
+            title={detail}
+            onClick={toggle}
+            className="min-w-0 max-w-full truncate rounded-md bg-inset px-1.5 py-0.5 text-left font-mono text-[12px] text-ink hover:bg-control"
+          >
+            {detail}
+          </button>
+        )}
+        <span className="shrink-0">· {outcome ?? t("approval.status.waitingAnswer")}</span>
+        {byVoice}
+        {detail && !showDetailInline && (
+          <button
+            type="button"
+            aria-expanded={open}
+            onClick={toggle}
+            className="rounded-md px-1.5 py-0.5 text-ink-tertiary hover:bg-inset hover:text-ink-secondary"
+          >
+            {open ? t("approval.applied.hideDetails") : t("approval.applied.details")}
+          </button>
+        )}
+      </div>
+      {open && (
+        <pre
+          tabIndex={0}
+          aria-label={t("approval.aria.details")}
+          className="mt-1.5 max-h-40 overflow-auto whitespace-pre-wrap break-words rounded-lg bg-inset px-3 py-2 font-mono text-[12px] leading-relaxed text-ink"
+        >
+          {detail}
         </pre>
       )}
     </div>
@@ -306,6 +383,33 @@ export function ApprovalCard({
           target: card.profileRequest.targetName,
         })
     : undefined;
+
+  // A permission or a held send is answered in the composer, which shows
+  // the whole request while it waits. The transcript keeps one quiet line
+  // for it, so one ask never reads as two cards, and a settled one never
+  // stays a big box. Proposals and team setup keep the full card: their
+  // content is what the person reviews.
+  if (!isRoutineRequest && !isSkillRequest && !isProfileRequest && !isTeamSetup && !card.modelRequest) {
+    const waiting = !settled && !expired;
+    // The question mark belongs to the ask, not to the record of it.
+    const header = outbound
+      ? waiting ? outbound.headline : outbound.headline.replace(/\s*[?？]$/, "")
+      : bot
+        ? t("approval.card.namedWantsTo", { name: bot.name, action: toolLabel(displayTool) })
+        : t("approval.card.wantsTo", { action: toolLabel(displayTool) });
+    return (
+      <CompactApprovalRow
+        header={header}
+        summary={outbound?.summary || undefined}
+        detail={card.subtitle}
+        showDetailInline={!outbound}
+        outcome={outcome}
+        allowed={settled === "allow" && !expired}
+        byVoice={byVoice}
+        waiting={waiting}
+      />
+    );
+  }
 
   return (
     <div
