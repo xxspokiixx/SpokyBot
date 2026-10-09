@@ -1566,6 +1566,10 @@ export const ClaudeDriver: ProviderDriver<ClaudeConfig> = {
         mcpServers.browser = { ...turn.integrations.browser };
         allowed.push("mcp__browser");
       }
+      if (turn.integrations?.data) {
+        mcpServers.data = { ...turn.integrations.data };
+        allowed.push("mcp__data");
+      }
       // dweb network daemon (status / repo / opencode model access) via
       // server/drivers/dweb-proxy.ts — points at the configured dweb instance
       if (turn.integrations?.dweb) {
@@ -1683,6 +1687,9 @@ export const ClaudeDriver: ProviderDriver<ClaudeConfig> = {
         if (process.versions.electron) env.ELECTRON_RUN_AS_NODE = "1";
       }
       const settings: Record<string, unknown> = { ...authSettings };
+      // Project-only settings still discover the personal memory through ancestor
+      // directories when the bot workspace lives below HOME. Keep project memory.
+      if (isolated) settings.claudeMdExcludes = [join(homedir(), ".claude", "CLAUDE.md")];
       if (hooks) settings.hooks = claudeHookSettings(HOOK_HELPER_PATH);
       if (turn.guestConfined) settings.permissions = GUEST_CLAUDE_PERMISSIONS;
       const authSettingsPath = mcpConfigPath && Object.keys(settings).length
@@ -2656,6 +2663,7 @@ export const ClaudeDriver: ProviderDriver<ClaudeConfig> = {
           composioMcp: true,
           phoneMcp: true,
           browserMcp: true,
+          dataMcp: true,
           images: true,
           nativeImageInput: true,
           effortLevels: ["low", "medium", "high", "xhigh", "max"],

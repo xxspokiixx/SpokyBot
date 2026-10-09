@@ -563,7 +563,14 @@ export function setBrowserViewport(binaryPath: string, env: NodeJS.ProcessEnv, t
  * transcript open; a missing picture is better than a stuck fold. */
 const FRAME_TIMEOUT_MS = 10_000;
 
-/** One PNG of a bot's browser, for the transcript's settled frame.
+/** Preview frames are JPEG, as the cloud and VPS computers' frames already
+ * are. A frame of a photo-heavy news page was ~400 KB as PNG in ~115 ms
+ * and ~110 KB at quality 80 in ~30-70 ms. Frames repeat every few seconds
+ * of a turn and go base64 to every connected stream. Text stays legible. */
+const FRAME_JPEG_QUALITY = 80;
+
+/** One JPEG of a bot's browser, for the live preview and the transcript's
+ * settled frame.
  *
  * The Electron browser surface used to supply this and was removed with the
  * engine swap, leaving the computer surfaces as the only frame source — so a
@@ -578,9 +585,10 @@ export function agentBrowserFrame(input: {
   env: Record<string, string>;
   timeoutMs?: number;
 }): Promise<{ png: string; format: string }> {
-  const file = join(tmpdir(), `openmausbot-browser-${randomUUID()}.png`);
+  const file = join(tmpdir(), `openmausbot-browser-${randomUUID()}.jpg`);
   return new Promise((settle, fail) => {
-    const child = spawn(input.binaryPath, ["screenshot", file], {
+    // Per-command flags, so the bot's own screenshot tool keeps its format.
+    const child = spawn(input.binaryPath, ["screenshot", file, "--screenshot-format", "jpeg", "--screenshot-quality", String(FRAME_JPEG_QUALITY)], {
         env: browserRuntimeEnv(input.env),
       stdio: ["ignore", "ignore", "pipe"],
       windowsHide: true,
@@ -600,7 +608,7 @@ export function agentBrowserFrame(input: {
           fail(error);
           return;
         }
-        settle({ png: readFileSync(file).toString("base64"), format: "png" });
+        settle({ png: readFileSync(file).toString("base64"), format: "jpeg" });
       } catch {
         fail(new Error("the browser reported a picture it did not write"));
       } finally {
