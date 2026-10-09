@@ -701,7 +701,7 @@ describe("one approval, one card", () => {
     const panel = renderToStaticMarkup(createElement(PendingApprovalPanel, { pending: pending!, count: 1, index: 0, botName: "Dev" }));
     const row = visibleRow(panel);
     expect(row).toContain("Dev wants to run");
-    expect(row).toMatch(/<code[^>]*>git status<\/code>/);
+    expect(row).toMatch(/<code[^>]*><span class="truncate">git status<\/span><\/code>/);
     expect(panel).toContain('aria-label="Pending approval"');
     expect(panel).not.toContain("Command approval requested");
     // no command box or warning in the default view, they sit behind the chevron

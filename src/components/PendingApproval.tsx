@@ -14,7 +14,7 @@ import { cn } from "@/lib/cn";
 import { t, tFromServer } from "@/lib/i18n";
 import type { LocaleKey } from "@/locales";
 import { SkillRequestPreview } from "@/components/SkillRequestPreview";
-import { toolLabel } from "./ApprovalCard";
+import { APPROVAL_CODE_CHIP, toolLabel } from "./ApprovalCard";
 import { outboundSummary } from "@/lib/approval-summary";
 import { reviewedSkillSha256 } from "../../shared/skill-request";
 import { useOwnerOrAdmin } from "@/lib/use-owner-or-admin";
@@ -217,28 +217,31 @@ export const PendingApprovalPanel = memo(function PendingApprovalPanel({
       className="px-3 py-2"
     >
       {/* One line at normal widths. When the pane is narrow the answers
-          drop under the text instead of squeezing it. */}
-      <div className="flex flex-wrap items-center gap-x-2 gap-y-1.5">
-        <div className="flex min-w-0 flex-1 basis-56 items-center gap-2" aria-live="polite">
-          <ShieldCheck size={15} className="shrink-0 text-accent" aria-hidden="true" />
-          <span className="min-w-0 truncate text-[13px] font-medium leading-5 text-ink" title={line}>{line}</span>
+          drop under the text instead of squeezing it. Items line up on
+          the text baseline, icons on the center. */}
+      <div className="flex flex-wrap items-baseline gap-x-2 gap-y-2">
+        {/* centered on the row, so a mono chip's metrics never move it */}
+        <ShieldCheck size={16} className="shrink-0 self-center text-accent" aria-hidden="true" />
+        <div className="flex min-w-0 flex-1 basis-52 items-baseline gap-2" aria-live="polite">
+          {/* the short label keeps its words; a long command gives way first */}
+          <span className="min-w-0 max-w-[60%] shrink-0 truncate text-[13px] font-medium leading-5 text-ink" title={line}>{line}</span>
           {outbound?.summary && (
             <span className="min-w-0 shrink-[4] truncate text-[13px] leading-5 text-ink-secondary" title={outbound.summary}>{outbound.summary}</span>
           )}
           {inline && (
-            <code className="min-w-0 shrink-[4] truncate rounded-md bg-inset px-1.5 font-mono text-[12px] leading-5 text-ink" title={inline}>
-              {inline}
+            <code className={cn(APPROVAL_CODE_CHIP, "shrink-[4]")} title={inline}>
+              <span className="truncate">{inline}</span>
             </code>
           )}
           {heldNote && (outbound ? (
             // the reason it asks, as a marker; the sentence is in its tooltip
             // and under the chevron
-            <span title={heldNote} className={cn(APPROVAL_CONTROL, "h-6 cursor-default gap-1 bg-warning/10 px-2 text-[12px] text-warning")}>
-              <Send size={12} aria-hidden="true" />
+            <span title={heldNote} className={cn(APPROVAL_CONTROL, "h-auto cursor-default items-baseline bg-warning/10 px-2.5 py-0.5 text-warning")}>
+              <Send size={13} aria-hidden="true" className="self-center" />
               {t("approval.compact.maySend")}
             </span>
           ) : (
-            <span title={heldNote} className="inline-flex shrink-0 text-warning">
+            <span title={heldNote} className="inline-flex shrink-0 self-center text-warning">
               <TriangleAlert size={14} aria-hidden="true" />
               <span className="sr-only">{heldNote}</span>
             </span>
@@ -249,7 +252,7 @@ export const PendingApprovalPanel = memo(function PendingApprovalPanel({
             </span>
           )}
         </div>
-        <div className="ml-auto flex shrink-0 items-center gap-1.5">
+        <div className="ml-auto flex shrink-0 items-baseline gap-2">
           <button
             type="button"
             aria-expanded={open}
@@ -257,7 +260,7 @@ export const PendingApprovalPanel = memo(function PendingApprovalPanel({
             aria-label={open ? t("approval.applied.hideDetails") : t("approval.applied.details")}
             title={open ? t("approval.applied.hideDetails") : t("approval.applied.details")}
             onClick={() => setOpen((value) => !value)}
-            className={cn(APPROVAL_CONTROL, "w-7 px-0 text-ink-tertiary hover:bg-ink/10 hover:text-ink")}
+            className={cn(APPROVAL_CONTROL, "w-7 self-center px-0 text-ink-tertiary hover:bg-ink/10 hover:text-ink")}
           >
             <ChevronDown size={16} aria-hidden="true" className={cn("transition-transform", open && "rotate-180")} />
           </button>
@@ -363,7 +366,7 @@ export function PendingApprovalActions({
       type="button"
       onClick={() => decide("deny")}
       autoFocus={isTeamSetup}
-      className={cn(APPROVAL_CONTROL, "text-danger hover:bg-danger/10")}
+      className={cn(APPROVAL_CONTROL, "bg-ink/[0.07] text-danger hover:bg-danger/15")}
     >
       {isSuggestion ? t("approval.action.notNow") : isRoutineRequest || isProfileRequest || isTeamSetup ? t("approval.action.cancel") : t("approval.action.deny")}
     </button>,
@@ -396,9 +399,9 @@ export function PendingApprovalActions({
     </button>,
   ].filter(Boolean) : [];
   if (part === "primary") return <>{primary}</>;
-  if (part === "more") return more.length ? <div className="flex flex-wrap items-center gap-1.5">{more}</div> : null;
+  if (part === "more") return more.length ? <div className="flex flex-wrap items-center gap-2">{more}</div> : null;
   return (
-    <div className="flex flex-wrap items-center justify-end gap-1.5">
+    <div className="flex flex-wrap items-center justify-end gap-2">
       {more}
       {primary}
     </div>
