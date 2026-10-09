@@ -293,15 +293,18 @@ function CompactApprovalRow({
         <span className={cn("min-w-0 break-words", waiting && "text-ink")}>{header}</span>
         {summary && <span className="min-w-0 break-words">{waiting ? summary : `· ${summary}`}</span>}
         {detail && showDetailInline && (
-          <button
-            type="button"
-            aria-expanded={open}
-            title={detail}
-            onClick={toggle}
-            className="min-w-0 max-w-full truncate rounded-md bg-inset px-1.5 py-0.5 text-left font-mono text-[12px] text-ink hover:bg-control"
-          >
-            {detail}
-          </button>
+          // The command is the button's own name. The group says what it is.
+          <span role="group" aria-label={t("approval.aria.details")} className="min-w-0 max-w-full">
+            <button
+              type="button"
+              aria-expanded={open}
+              title={detail}
+              onClick={toggle}
+              className="block min-w-0 max-w-full truncate rounded-md bg-inset px-1.5 py-0.5 text-left font-mono text-[12px] text-ink hover:bg-control"
+            >
+              {detail}
+            </button>
+          </span>
         )}
         <span className="shrink-0" aria-live="polite">· {outcome ?? t("approval.status.waitingAnswer")}</span>
         {byVoice}
