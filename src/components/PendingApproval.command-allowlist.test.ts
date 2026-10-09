@@ -153,12 +153,12 @@ describe("remembering exact command approvals", () => {
     expect(classes[0]).toContain("text-danger");
   });
 
-  it("lines the row up on the text baseline with the command in a 24px mono pill", () => {
+  it("lines the row up on the text baseline with the command in a 28px mono pill", () => {
     const pending = pendingApprovals([message()])[0]!;
     const html = renderToStaticMarkup(createElement(PendingApprovalPanel, { pending, count: 1, index: 0, botName: "Scout" }));
     const row = html.slice(0, html.indexOf('id="approval-details-'));
     expect(row).toContain("flex flex-wrap items-baseline gap-x-2");
-    expect(row).toMatch(/<code class="[^"]*pb-px pt-\[3px\][^"]*font-mono text-\[12\.5px\] leading-5[^"]*"[^>]*><span class="truncate">git status --short<\/span><\/code>/);
+    expect(row).toMatch(/<code class="[^"]*font-mono text-\[12\.5px\] leading-5[^"]*pb-\[3px\] pt-\[5px\][^"]*"[^>]*><span class="truncate">git status --short<\/span><\/code>/);
     // icons sit on the row's center, not on a text baseline
     expect(row).toMatch(/<svg[^>]*class="[^"]*self-center[^"]*"/);
   });

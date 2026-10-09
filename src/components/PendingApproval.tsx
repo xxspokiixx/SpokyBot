@@ -228,15 +228,16 @@ export const PendingApprovalPanel = memo(function PendingApprovalPanel({
           {outbound?.summary && (
             <span className="min-w-0 shrink-[4] truncate text-[13px] leading-5 text-ink-secondary" title={outbound.summary}>{outbound.summary}</span>
           )}
+          {/* 28px like the buttons: 2px more on each side of the 24px pill */}
           {inline && (
-            <code className={cn(APPROVAL_CODE_CHIP, "shrink-[4]")} title={inline}>
+            <code className={cn(APPROVAL_CODE_CHIP, "shrink-[4] pb-[3px] pt-[5px]")} title={inline}>
               <span className="truncate">{inline}</span>
             </code>
           )}
           {heldNote && (outbound ? (
             // the reason it asks, as a marker; the sentence is in its tooltip
             // and under the chevron
-            <span title={heldNote} className={cn(APPROVAL_CONTROL, "h-auto cursor-default items-baseline bg-warning/10 px-2.5 py-0.5 text-warning")}>
+            <span title={heldNote} className={cn(APPROVAL_CONTROL, "h-auto cursor-default items-baseline bg-warning/10 px-2.5 py-1 text-warning")}>
               <Send size={13} aria-hidden="true" className="self-center" />
               {t("approval.compact.maySend")}
             </span>
