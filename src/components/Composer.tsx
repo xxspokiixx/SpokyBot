@@ -18,6 +18,7 @@ import {
   rememberFailedComposerSend,
   replaceDraftAttachment,
   restoredSendId,
+  restoredRequestText,
   useComposerDraft,
   useComposerChannelMode,
   useDraftAttachmentPending,
@@ -42,6 +43,7 @@ import {
   clipboardHasImages,
   clipboardImageFiles,
   composeMessage,
+  dataContextFor,
   composerShouldRefocus,
   composerTakesFocusOnOpen,
   imageAttachmentFromFile,
@@ -617,8 +619,13 @@ export function Composer({
     // named `body`, not `t` — that name belongs to the catalog lookup now
     // resolvable "#Title" runs leave as canonical links, so the thread id
     // stays machine-readable in the stored send and the model's context
-    const body = composeMessage(serializeThreadRefs(effectiveText, threads, currentBotId), attachments);
-    if (!body) return;
+    const composed = composeMessage(serializeThreadRefs(effectiveText, threads, currentBotId), attachments);
+    if (!composed) return;
+    const body = restoredRequestText(draftId) ?? composed;
+    // The viewed Data result travels as its own field of the send, never in
+    // the words: only for this bot's own thread, and never ahead of an
+    // opening command the server parses first.
+    const dataContext = dataContextFor(body, state.computerOpen ? state.dataView : null, !group && bot ? { botId: bot.id, threadId } : undefined);
     const sentDraft: ComposerDraftSnapshot = {
       draftId,
       revision: draftRevision(draftId),
@@ -651,6 +658,7 @@ export function Composer({
         sendId: sentDraft.sendId,
         replyToId: replyTo?.id,
         threadId,
+        dataContext,
         onError: () => restoreDraft(sentDraft),
       });
       track("message_sent", { driver: bot.modelSelection?.instanceId, queued: busy && !canSteer });

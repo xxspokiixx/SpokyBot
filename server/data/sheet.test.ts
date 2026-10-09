@@ -97,14 +97,18 @@ describe("DataSheetStore", () => {
     expect(store(dir).sheet.cards()).toEqual([]);
   });
 
-  it("records sources by name, replacing an earlier load of the same table", () => {
+  it("records sources by name, replacing an earlier load of the same table, and carries no catalog copy", () => {
     const dir = freshDir();
-    const { sheet } = store(dir);
+    const { sheet, frames } = store(dir);
     const base = { kind: "csv" as const, source: "/tmp/orders.csv", rowCount: 3, columns: [], loadedAt: "2026-10-09T00:00:00.000Z" };
     sheet.recordSource({ name: "orders", ...base });
     sheet.recordSource({ name: "orders", ...base, rowCount: 5 });
     sheet.recordSource({ name: "people", ...base });
+    expect(frames).toHaveLength(3);
     expect(sheet.sheet().sources.map((source) => [source.name, source.rowCount])).toEqual([["orders", 5], ["people", 3]]);
+    // DuckDB owns the table list; a sheet written by an older build loses its stale copy on the next save.
+    expect(sheet.sheet()).not.toHaveProperty("tables");
+    expect(JSON.parse(readFileSync(join(dir, SHEET_FILE), "utf8"))).not.toHaveProperty("tables");
     sheet.removeSource("orders");
     expect(sheet.sheet().sources.map((source) => source.name)).toEqual(["people"]);
   });
