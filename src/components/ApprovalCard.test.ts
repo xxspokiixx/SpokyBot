@@ -652,6 +652,8 @@ describe("ApprovalCard for a change that applied on its own", () => {
 });
 
 describe("one approval, one card", () => {
+  // what shows before the chevron is opened
+  const visibleRow = (html: string) => html.slice(0, html.indexOf('id="approval-details-'));
   const command = (answered?: string): Message => ({
     id: "shell-card",
     role: "bot",
@@ -694,10 +696,15 @@ describe("one approval, one card", () => {
 
     const [pending] = pendingApprovals([command()]);
     const panel = renderToStaticMarkup(createElement(PendingApprovalPanel, { pending: pending!, count: 1, index: 0, botName: "Dev" }));
-    expect(panel).toContain("Dev wants to run a command");
+    const row = visibleRow(panel);
+    expect(row).toContain("Dev wants to run");
+    expect(row).toMatch(/<code[^>]*>git status<\/code>/);
     expect(panel).toContain('aria-label="Pending approval"');
     expect(panel).not.toContain("Command approval requested");
-    expect(panel).toContain("git status");
+    // no command box or warning in the default view, they sit behind the chevron
+    expect(row).not.toContain("<pre");
+    expect(row).toContain('aria-expanded="false"');
+    expect(panel).toMatch(/id="approval-details-r-shell" hidden=""/);
   });
 
   it("settles a command into a quiet line with the outcome", () => {
@@ -716,12 +723,15 @@ describe("one approval, one card", () => {
 
     const [pending] = pendingApprovals([proxy()]);
     const panel = renderToStaticMarkup(createElement(PendingApprovalPanel, { pending: pending!, count: 1, index: 0, botName: "Ursa" }));
-    expect(panel).toContain("Run code on Composio?");
-    expect(panel).not.toContain("code_to_execute");
-    expect(panel).toContain("Details");
-    // the safety note stays where the decision is made
-    expect(panel).toContain("runs code that could send or change things");
+    const row = visibleRow(panel);
+    expect(row).toContain("Run code on Composio?");
+    expect(row).not.toContain("code_to_execute");
+    expect(row).toContain('aria-label="Details"');
+    // the reason it asks is a small chip, the sentence is its tooltip
+    expect(row).toContain(">May send</span>");
+    expect(row).toContain('title="This runs code that could send or change things in your apps, so it always asks first."');
     expect(panel).not.toContain("This sends something");
+    expect(panel.slice(panel.indexOf('id="approval-details-'))).toContain("code_to_execute");
   });
 
   it("keeps a real send's arguments in view in the composer", () => {

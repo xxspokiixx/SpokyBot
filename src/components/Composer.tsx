@@ -920,12 +920,8 @@ export function Composer({
               count={approvals.length}
               index={0}
               locale={activeLocale()}
-            />
-            <PendingApprovalActions
-              pending={approval}
-              threadId={threadId}
-              bot={approvalBot}
-              onCancelTurn={interruptTurn}
+              actions={<PendingApprovalActions part="primary" pending={approval} threadId={threadId} bot={approvalBot} onCancelTurn={interruptTurn} />}
+              more={<PendingApprovalActions part="more" pending={approval} threadId={threadId} bot={approvalBot} onCancelTurn={interruptTurn} />}
             />
           </div>
         )}
