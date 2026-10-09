@@ -18,7 +18,7 @@ describe("ToolActivity in Simple mode", () => {
   it("names the step in plain words and keeps the tool's own name in the details", () => {
     const html = render({ name: "mcp__omb__computer_batch", ok: true, input: '{"actions":[]}' });
     expect(html).toContain("Use the computer · Completed · Tool details");
-    expect(html).toMatch(/<span class="min-w-0 max-w-\[30rem\] truncate">Use the computer<\/span>/);
+    expect(html).toMatch(/<span class="min-w-0 max-w-\[30rem\] truncate leading-5 font-medium">Use the computer<\/span>/);
     expect(html).toContain('data-testid="tool-name"');
     expect(html).toContain("mcp__omb__computer_batch");
   });
@@ -39,7 +39,7 @@ describe("ToolActivity in Advanced mode", () => {
     mode.advanced = true;
     const html = render({ name: "Bash", ok: true, summary: "pnpm test", input: "pnpm test" });
     expect(html).toContain("Bash · Completed · Tool details");
-    expect(html).toMatch(/truncate font-mono">Bash<\/span>/);
+    expect(html).toMatch(/truncate leading-5 font-mono">Bash<\/span>/);
     expect(html).toContain('title="pnpm test"');
     expect(html).not.toContain('data-testid="tool-name"');
   });
@@ -72,6 +72,6 @@ describe("ActivityRun at narrow widths", () => {
     ];
     const html = renderToStaticMarkup(createElement(ActivityRun, { messages: steps, children: null }));
     expect(html).toMatch(/<button[^>]*class="flex min-w-0 max-w-full /);
-    expect(html).toContain('class="min-w-0 max-w-[480px] truncate"');
+    expect(html).toContain('class="min-w-0 max-w-[480px] truncate font-medium leading-5"');
   });
 });

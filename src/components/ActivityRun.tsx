@@ -39,7 +39,7 @@ export function ActivityRun({
             className="flex min-w-0 max-w-full items-center gap-2 rounded-full border border-hairline/40 bg-panel px-3 py-1.5 text-[13px] text-ink-secondary hover:bg-control"
           >
             <ChevronRight size={13} className="shrink-0 rotate-90" />
-            <span className="min-w-0 truncate">{summary}</span>
+            <span className="min-w-0 truncate font-medium leading-5">{summary}</span>
           </button>
         </div>
         {children}
@@ -56,7 +56,7 @@ export function ActivityRun({
         className="flex min-w-0 max-w-full items-center gap-2 rounded-full border border-hairline/40 bg-panel px-3 py-1.5 text-[13px] text-ink-secondary hover:bg-control"
       >
         <Check size={13} className="shrink-0 text-success" />
-        <span className="min-w-0 max-w-[480px] truncate">{summary}</span>
+        <span className="min-w-0 max-w-[480px] truncate font-medium leading-5">{summary}</span>
         <ChevronRight size={13} className="shrink-0" />
       </button>
     </div>
