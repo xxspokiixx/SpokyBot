@@ -734,7 +734,7 @@ describe("one approval, one card", () => {
     expect(panel.slice(panel.indexOf('id="approval-details-'))).toContain("code_to_execute");
   });
 
-  it("keeps a real send's arguments in view in the composer", () => {
+  it("keeps a real send's arguments under the composer details", () => {
     const send: Message = { ...proxy(), card: { ...proxy().card!, subtitle: 'Slack · Send message\n{"text":"hi"}', tool: "SLACK_SEND_MESSAGE",
       outboundRequest: { tool: "SLACK_SEND_MESSAGE", app: "Slack", calls: [{ app: "Slack", label: "Send message" }] } } };
     const [pending] = pendingApprovals([send]);
