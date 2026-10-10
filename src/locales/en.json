@@ -282,6 +282,7 @@
   "question.status.answered": "Answered",
   "question.status.waiting": "Waiting for your answer",
   "question.status.closed": "Closed without an answer",
+  "question.answerPlaceholder": "Type your answer",
   "question.details": "Details",
   "question.hideDetails": "Hide details",
   "question.aria.card": "Question from your bot",
