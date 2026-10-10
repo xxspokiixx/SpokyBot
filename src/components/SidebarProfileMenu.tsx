@@ -140,6 +140,12 @@ function UpdateIcon({ phase, pending, size = 18 }: { phase: UpdatePhase; pending
   return <RefreshCw size={size} />;
 }
 
+/** The phases the round update button beside this row speaks for
+ * (UpdateIndicator), so the row itself stays quiet about them. */
+export function updateHasButton(phase: UpdatePhase): boolean {
+  return phase === "downloading" || phase === "preparing" || phase === "downloaded" || phase === "installing";
+}
+
 /** Whether the updater has something the profile row should say out loud.
  * An idle updater, and the three-second "up to date" tick that follows a
  * check the user asked for from inside the menu, both stay in the menu. */
@@ -367,7 +373,7 @@ export function SidebarProfileMenu() {
             <span className="min-w-0 flex-1 truncate text-[14px] text-ink">{name}</span>
             {/* an update is the one thing worth interrupting the name for, so
               * it sits on the row rather than waiting to be found in the menu */}
-            {update && updateNoteworthy(update.phase, update.pending) && (
+            {update && updateNoteworthy(update.phase, update.pending) && !updateHasButton(update.phase) && (
               <span
                 title={update.label}
                 aria-label={update.label}
