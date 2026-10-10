@@ -62,7 +62,8 @@ import { goalCoordinatorForComposer, groupComposerHint, jevRoomRoutingOn, roomRe
 import { PendingApprovalActions, PendingApprovalPanel, pendingApprovals } from "./PendingApproval";
 import { CallButton } from "./CallView";
 import { useDesktopCapabilities } from "./DesktopCapabilities";
-import { ReplyQuote } from "./ReplyQuote";
+import { ComposerReplyStrip } from "./ReplyQuote";
+import { escapeCancelsReply } from "@/lib/replies";
 import { useThreadRefs } from "./ThreadRefs";
 import {
   QueuedComposerMessages,
@@ -968,15 +969,6 @@ export function Composer({
             />
           </div>
         )}
-        {replyTo && (
-          <div className="mb-2 px-1">
-            <ReplyQuote
-              message={replyTo}
-              fallbackName={bot?.name}
-              onClear={onClearReply}
-            />
-          </div>
-        )}
         <ComposerAttachments
           items={attachments}
           onAdd={addAttachments}
@@ -1020,6 +1012,7 @@ export function Composer({
             chips and the placeholder cannot share a line, the editor takes a
             full line of its own above the chips instead. */}
         <div data-tour="composer" className="@container/composer relative z-[1] rounded-3xl bg-composer px-2 py-1.5 ring-1 ring-composer-ring">
+        {replyTo && <ComposerReplyStrip message={replyTo} fallbackName={bot?.name} onClear={onClearReply} />}
         <div data-composer-row className="flex items-end gap-1 @max-[30rem]/composer:flex-wrap">
           <input
             ref={fileInput}
@@ -1158,6 +1151,12 @@ export function Composer({
                 return;
               }
             }
+            // Escape drops the reply target, the strip's x from the keyboard
+            if (onClearReply && escapeCancelsReply(e.nativeEvent, { replying: Boolean(replyTo), recording })) {
+              e.preventDefault();
+              onClearReply();
+              return;
+            }
             // an empty composer + ArrowUp = edit your last message (like a chat app)
             if (e.key === "ArrowUp" && !hasContent && onEditLast) {
               e.preventDefault();
@@ -1197,6 +1196,8 @@ export function Composer({
               ? t("composer.placeholder.attaching")
               : recording
               ? t("composer.placeholder.listening")
+              : replyTo && !busy
+              ? t("composer.placeholder.reply")
               : busy && canSteer
                 ? pendingCount > 0
                   ? t("composer.placeholder.steerQueued", { name: busyName, key: sendLabel })
