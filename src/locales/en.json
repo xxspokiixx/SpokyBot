@@ -1142,6 +1142,8 @@
   "phoneApp.next": "Installed? Connect your phone next, and scan the pairing code with the app.",
   "sidebar.menu.settings": "Settings",
   "sidebar.menu.about": "About",
+  "sidebar.menu.shortcuts": "Keyboard shortcuts",
+  "sidebar.menu.support": "Help and support",
   "sidebar.menu.help": "Help Center",
   "sidebar.menu.feedback": "Send Feedback",
   "sidebar.update.startingDownload": "Starting download…",
