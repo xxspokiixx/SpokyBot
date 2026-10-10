@@ -122,6 +122,13 @@ off. It keeps the notes in shape without the bot having to decide to:
   A fact that ends on a known day gets its `until` date; a birthday or other
   yearly date never does. Turns started by another bot or by the harness,
   rooms and failed turns are never read.
+  Turns still waiting when the app quits or restarts through its normal
+  shutdown are kept as their ids (never their text) in
+  `memory-capture-pending.json`, at most 50 chats, and read back from the
+  chat at the next start, so what was said just before quitting is still
+  noticed. A crash or a forced kill skips that step (on Windows a `SIGTERM`
+  is one), and those turns are not captured. A chat deleted or rewound
+  meanwhile leaves nothing to read.
 - **Organizing.** Whoever wrote a line in `MEMORY.md` — the bot with
   `memory_update`, the person, or capture — after each capture and in the
   nightly tidy-up one quick model call looks at lines not judged before and

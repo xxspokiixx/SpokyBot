@@ -140,6 +140,7 @@ import { chiefOfStaffSystemPrompt } from "./chief-of-staff.ts";
 import { buildRecall } from "./recall.ts";
 import { hostTimeZone, takesTurnClock, turnClockLine, withTurnClock } from "./turn-clock.ts";
 import { createMemoryUpkeep, upkeepEnabled } from "./memory-upkeep.ts";
+import type { CaptureTurn } from "./memory-capture.ts";
 import { appendAboutMe, commitLearned, planLearned } from "./profile-learned.ts";
 import { canAccessTeam, canReachPeer, coordinatorSupervises, livePeerRoster, livePeerRosterBlock, peerAllowed, peerName, peerRosterSystemPrompt, peerStatus, peerStatusWords, reachablePeers, resolveTeammate, roomPeerRosterSystemPrompt, roomRosterLine, PEER_ACCESS_HELP } from "./peer-roster.ts";
 import {
@@ -6462,6 +6463,14 @@ const memoryUpkeep = createMemoryUpkeep({
     return facts.length;
   },
   sourceLabel: (botId, threadId) => memorySourceLabel({ task: store.taskByThread(botId, threadId), threadId }),
+  // Turns still waiting at the last shutdown, read back from the transcript.
+  // The checks that need only stored state run again; the in-memory ones
+  // (internal, unattended) already passed before the turn was queued.
+  restoreTurn: (botId, threadId, turnId) => {
+    if (store.botByThread(threadId)?.id !== botId || store.groupByThread(threadId) || routines?.runForThread(threadId)) return null;
+    if (CLOUD_HOME && !cloudOwnerOnlyThread(threadId)) return null;
+    return captureTurnFor(threadId, turnId);
+  },
   // On a Cloud home upkeep only works on the owner's conversations (see the
   // capture hook below), so its writes are the owner's (lending-memory.ts).
   ...(lendingMemory ? { writing: <T>(botId: string, write: () => T): T => lendingMemory.trustedWrite(botId, write) } : {}),
@@ -6489,6 +6498,23 @@ bus.subscribe((event: RuntimeEvent) => {
   }
 });
 
+/** One finished turn as capture reads it: the person's message and the bot's
+ * reply, or null when the reply is not on the active path (rewound) or the
+ * message was another bot's ask. */
+function captureTurnFor(threadId: string, turnId: string): CaptureTurn | null {
+  const path = store.activePath(threadId);
+  const replyAt = path.findLastIndex((message) => message.role === "bot" && message.kind === "text" && message.turnId === turnId);
+  if (replyAt < 0) return null;
+  const asked = path.slice(0, replyAt).findLast((message) => message.role === "user" && message.kind === "text");
+  if (!asked || asked.peerAsk) return null;
+  return {
+    person: extractTurnImages(asked.text ?? "").text,
+    bot: path[replyAt]!.text ?? "",
+    owner: !asked.sender,
+    turnId,
+  };
+}
+
 // A finished 1:1 turn of an upkeep bot waits for capture. Only the person's
 // own conversation: not a room, not a turn another bot or the harness
 // started (its "user" line is not the person), not a failed turn.
@@ -6502,16 +6528,8 @@ bus.subscribe((event: RuntimeEvent) => {
     // On a Cloud home the bot's memory reaches its owner's turns (and a lent
     // Mac): nothing is captured from a conversation anyone else wrote in.
     if (CLOUD_HOME && !cloudOwnerOnlyThread(event.threadId)) return;
-    const path = store.activePath(event.threadId);
-    const replyAt = path.findLastIndex((message) => message.role === "bot" && message.kind === "text" && message.turnId === event.turnId);
-    if (replyAt < 0) return;
-    const asked = path.slice(0, replyAt).findLast((message) => message.role === "user" && message.kind === "text");
-    if (!asked || asked.peerAsk) return;
-    memoryUpkeep.noteTurn(bot.id, event.threadId, {
-      person: extractTurnImages(asked.text ?? "").text,
-      bot: path[replyAt]!.text ?? "",
-      owner: !asked.sender,
-    });
+    const turn = captureTurnFor(event.threadId, event.turnId);
+    if (turn) memoryUpkeep.noteTurn(bot.id, event.threadId, turn);
   } catch (error) {
     console.warn(`memory upkeep: could not queue a turn for capture: ${(error as Error).message}`);
   }
