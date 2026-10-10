@@ -157,9 +157,15 @@ full stop are ignored, nothing else — `Balance is -10` and `Balance is 10`,
 
 Every upkeep change is a journal row by **Memory upkeep** and can be undone.
 Upkeep pauses while a backup runs. The model steps need an engine with a
-one-shot text call — Claude, Grok, OpenAI-compatible, Mistral and MiniMax.
-On any other engine the panel says so and only the expiry and exact-duplicate
-steps run.
+one-shot text call — Claude, Grok, OpenAI-compatible, Mistral and MiniMax,
+and the agent engines that speak ACP (Grok CLI, Gemini, Kimi, Droid, Cursor,
+OpenCode, Qwen, Hermes, Antigravity and custom ACP agents). On an ACP engine
+each call starts the engine's own CLI in a fresh session of its own, never a
+chat's, in an empty folder, with no MCP servers and in the ask-first approval
+mode; it is refused and dropped the moment the agent asks for a tool, a file
+or a permission. The text goes only to the provider the bot already uses.
+On any other engine (Pi, for now) the panel says so and only the expiry and
+exact-duplicate steps run.
 
 ## Editing
 

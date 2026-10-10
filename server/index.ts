@@ -6424,7 +6424,8 @@ const memoryUpkeep = createMemoryUpkeep({
     const instance = bot ? registry.get(bot.modelSelection.instanceId) : undefined;
     // an engine the organisation disallows never receives memory text
     if (!bot || !instance || policyModelRefusal(instance)) return null;
-    const generate = instance.generateText?.bind(instance);
+    // generateMemoryText: the ACP engines' upkeep-only one-shot, on their own provider
+    const generate = (instance.generateText ?? instance.generateMemoryText)?.bind(instance);
     return generate ? {
       generateText: async (prompt, options) => {
         // Check every capture, organize and contradiction call, including

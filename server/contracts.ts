@@ -563,6 +563,11 @@ export interface ProviderInstance {
    * The signal is a best-effort cap: drivers that can honor it abort the
    * underlying provider call; the rest keep their own timeout. */
   generateText?(prompt: string, options?: TextGenerationOptions): Promise<string>;
+  /** A one-shot text call for memory upkeep only, on an engine whose turns
+   * are a whole agent process (the ACP family). It starts a fresh tool-free
+   * session on the engine's own provider, so it is never offered to titles or
+   * compaction, which would then spawn a process for every new chat. */
+  generateMemoryText?(prompt: string, options?: TextGenerationOptions): Promise<string>;
   /** Isolated, tool-free permission review on this same provider. Kept
    * separate from generateText so the UI never infers a security capability
    * from a generic helper that may expose prompts in argv or lack approvals. */
