@@ -700,9 +700,9 @@ it("queues a recipient at capacity, preserving its existing task and resuming on
 // Steering is not cancelling. A person who types while teammates work keeps
 // the work: the new turn runs now, the assignments stay out, and it is told
 // which ones — otherwise the model assumes its fan-out died and resends it.
-// Fails only on GitHub runners, passes locally (#2624); skipped in CI until fixed.
-it.skipIf(Boolean(process.env.CI))("runs a message sent while a teammate works, keeps the assignment, and names it in that turn", () => fixture(async f => {
-  f.plan[f.lead.id] = { delayMs: 4000, reply: "CSV export implemented" };
+it("runs a message sent while a teammate works, keeps the assignment, and names it in that turn", () => fixture(async f => {
+  const gate = join(f.session.info.dataDir, "steered-assignment-ready");
+  f.plan[f.lead.id] = { gateFile: gate, reply: "CSV export implemented" };
   f.plan[f.chief.id] = { turns: [
     { steps: structuredClone(f.plan[f.chief.id].steps), reply: "Assigned to Engineering" },
     { reply: "Noted; Engineering is still working on it" },
@@ -724,7 +724,8 @@ it.skipIf(Boolean(process.env.CI))("runs a message sent while a teammate works, 
   expect(told(steered)).toContain(assignment.id);
   expect(told(steered)).toContain("Engineering lead");
   // The teammate was never touched: it finishes and still returns here.
-  expect(f.nodes().find((node: any) => node.id === assignment.id).status).not.toBe("cancelled");
+  expect(f.nodes().find((node: any) => node.id === assignment.id).status).toBe("running");
+  writeFileSync(gate, "finish after the steered turn read its assignments");
   expect((await f.wait()).status).toBe("settled");
   expect(f.nodes().every((node: any) => node.status === "completed")).toBe(true);
   expect((await f.messages(f.chief.activeTaskId)).some((message: any) => message.tool?.name === "Engineering lead replied")).toBe(true);

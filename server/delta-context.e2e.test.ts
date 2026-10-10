@@ -527,10 +527,19 @@ const resultAcrossRestart = async (f: any, stripRecord: boolean) => {
   await expect.poll(() => f.nodes().find((node: any) => node.botId === f.lead.id)?.status, { timeout: 15_000 }).toBe("running");
   await f.api(`/api/bots/${f.chief.id}/interrupt`, { threadId: f.thread });
   await f.wait();
+  const versionGate = f.gate("restart-version");
+  const probeLog = join(f.dataDir, "restart-probes.log");
   await f.restart((bots: any[]) => {
     if (!stripRecord) return;
     for (const task of bots.find((b: any) => b.id === f.chief.id).tasks) { delete task.handedMessages; delete task.handedWatermarks; }
-  });
+  }, "SIGTERM", { FAKE_CLAUDE_HOLD_VERSION: versionGate, FAKE_CLAUDE_PROBE_LOG: probeLog });
+  try {
+    await expect.poll(() => existsSync(probeLog) && readFileSync(probeLog, "utf8").includes("version "), { timeout: 10_000 }).toBe(true);
+    // Hold the capability probe across room-handoff ticks, as on a loaded host.
+    await new Promise((resolve) => setTimeout(resolve, 750));
+  } finally {
+    f.open(versionGate);
+  }
   await expect.poll(async () => (await f.messages()).some((m: any) => m.roomRequest?.phase === "result"), { timeout: 20_000 }).toBe(true);
   f.plan[f.chief.id] = { reply: "Engineering was interrupted" };
   await f.send("What happened to the Engineering work?");
