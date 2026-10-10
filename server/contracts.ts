@@ -119,6 +119,10 @@ export interface SendTurnInput {
    * collide with another bot's live session or broker (see #1017). */
   botId?: string;
   text: string;
+  /** The automatic recall block the harness put in front of the person's
+   * message inside `text`. It informs this turn only, so a driver that
+   * replays the turn as sent later can leave it out. */
+  recalled?: string;
   /** Per-bot approval policy, reasserted by providers on every turn so a
    * resumed native session cannot retain a stale, more permissive mode. */
   approvalMode?: ApprovalMode;
