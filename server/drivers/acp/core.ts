@@ -1564,7 +1564,7 @@ export function createAcpDriver(support: AcpSupport): ProviderDriver<AcpConfig> 
           session.dead = true;
           const current = session.current;
           if (!current) return;
-          emit({ ...base(threadId, current.turnId), type: "runtime.error", ...describeSpawnFailure(e, launch.command) });
+          emit({ ...base(threadId, current.turnId), type: "runtime.error", ...describeSpawnFailure(e, launch.command, cwd) });
           settle(threadId, session, false, "spawn_error");
         });
         child.on("close", (code) => {
