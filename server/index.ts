@@ -12648,6 +12648,9 @@ const webhookIngressStatus = () => ({
 // fresh session with recent room context. A member's reply may @mention
 // teammates; those get one chained turn (hop 1), never deeper.
 const roomHandoffTimer = setInterval(() => {
+  // Recovered reports must see the engine's resume capability before they
+  // decide whether to retain its stored session, just like the boot drain.
+  if (enginesRead) return;
   try { roomHandoffs.tick(); } catch (error) { console.error("room handoffs:", error); }
 }, 250);
 roomHandoffTimer.unref();
