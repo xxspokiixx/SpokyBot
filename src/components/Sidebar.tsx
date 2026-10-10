@@ -15,6 +15,7 @@ import {
   Copy,
   Crown,
   FolderMinus,
+  FolderOpen,
   FolderPlus,
   Library,
   Loader2,
@@ -65,6 +66,8 @@ import { TeamDialog } from "./TeamDialog";
 import { RenameTitle } from "./RenameTitle";
 import { BotPickerList } from "./BotPickerList";
 import { BotProjectDialog, FolderActions, FolderIcon, navigateThreadMenu } from "./BotProjects";
+import { NewTaskFolderDialog } from "./NewTaskFolderDialog";
+import { useOwnerOrAdmin } from "@/lib/use-owner-or-admin";
 import { draggedFolder, FOLDER_DRAG_TYPE, moveFolder, placeFolder } from "@/lib/folder-order";
 import { botUnreadThreadIds, folderUnreadThreadIds, markBotRead, markFolderRead } from "@/lib/folder-read";
 import { orderedThreadList, SidebarThreadRow, stampClock, threadRecency, useRelativeNow, useSnoozeExpiry, visibleSidebarThreads } from "./SidebarThreadRow";
@@ -762,6 +765,7 @@ export function BotContextMenu({
   onDelete,
   onMoveToSection,
   onNewFolder,
+  onNewTaskFolder,
 }: {
   menu: MenuState | null;
   onClose: () => void;
@@ -769,11 +773,13 @@ export function BotContextMenu({
   onDelete: (bot: Bot) => void;
   onMoveToSection: (botId: string) => void;
   onNewFolder: (botId: string) => void;
+  onNewTaskFolder: (botId: string) => void;
 }) {
   const motion = useHeldMenuMotion(menu);
   const shown = motion.value;
   const { state, dispatch } = useStore();
   const showThreads = useShowThreads();
+  const canChooseFolder = useOwnerOrAdmin();
   const remoteClient = window.ogb?.remoteClient?.active === true;
   const bot = shown ? state.bots.find((b) => b.id === shown.botId) : undefined;
   const menuRef = useRef<HTMLDivElement>(null);
@@ -891,6 +897,7 @@ export function BotContextMenu({
     >
       {showThreads && <>
         {item(<Plus size={16} className="text-ink-secondary" />, t("task.newShort"), () => dispatch({ type: "newTask", botId: bot.id }))}
+        {canChooseFolder && item(<FolderOpen size={16} className="shrink-0 text-ink-secondary" />, t("task.folder.new"), () => onNewTaskFolder(bot.id))}
         {item(<FolderPlus size={16} className="text-ink-secondary" />, t("folder.new"), () => onNewFolder(bot.id))}
         {divider("threads")}
       </>}
@@ -1985,6 +1992,8 @@ export function Sidebar({ open, onClose, collapseToIcons = false }: {
   const [newRoom, setNewRoom] = useState(false);
   const [newChatOpen, setNewChatOpen] = useState(false);
   const [newFolderBotId, setNewFolderBotId] = useState<string | null>(null);
+  const [newTaskFolderBotId, setNewTaskFolderBotId] = useState<string | null>(null);
+  const newTaskFolderBot = state.bots.find((bot) => bot.id === newTaskFolderBotId);
   const [teamLibraryOpen, setTeamLibraryOpen] = useState(false);
   const [teamInstallUrl, setTeamInstallUrl] = useState<string | null>(null);
   const [archivedBotsOpen, setArchivedBotsOpen] = useState(false);
@@ -2816,8 +2825,12 @@ export function Sidebar({ open, onClose, collapseToIcons = false }: {
             setSectionPicker({ botId, x: menu.x, y: menu.y });
           }}
           onNewFolder={setNewFolderBotId}
+          onNewTaskFolder={setNewTaskFolderBotId}
         />
       {showThreads && newFolderBotId && state.bots.find((bot) => bot.id === newFolderBotId) && <BotProjectDialog bot={state.bots.find((bot) => bot.id === newFolderBotId)!} onClose={() => setNewFolderBotId(null)} />}
+      {showThreads && newTaskFolderBot && <NewTaskFolderDialog bot={newTaskFolderBot} onClose={() => setNewTaskFolderBotId(null)} onReturnFocus={() => {
+        sidebarRef.current?.querySelector<HTMLElement>(`[data-sidebar-bot-row="${CSS.escape(newTaskFolderBot.id)}"]`)?.focus();
+      }} />}
       <ConfirmDialog
         open={confirm !== null}
         {...(confirm ? botConfirmCopy(confirm.kind, confirm.bot.name) : botConfirmCopy("archive", ""))}
