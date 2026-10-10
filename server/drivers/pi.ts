@@ -25,6 +25,7 @@ import { homedir, tmpdir } from "node:os";
 import { join } from "node:path";
 
 import { PROVIDER_CREDENTIAL_ENV, stripWorkspaceCredentialEnv } from "../config.ts";
+import { openStartupModelCatalog, writeStartupModelCache } from "../startup-model-catalog.ts";
 import { augmentedPath } from "../env-path.ts";
 import { describeSpawnFailure, execCli, killCliTree, spawnCli } from "../procs.ts";
 import {
@@ -64,6 +65,7 @@ import {
 import { appendNative } from "./native.ts";
 import { canUseMcpServer, parseToolScope } from "../../shared/tool-scope.ts";
 import { gateServer, mcpStdioServer, resultBudget } from "../mcp-gate-config.ts";
+import { remoteMcpSpec } from "../mcp-http.ts";
 
 const DRIVER_KIND = "piAgent";
 const PI_ARGS = ["--mode", "rpc", "--no-session"];
@@ -157,14 +159,18 @@ export function buildMcpServers(turn: SendTurnInput): Record<string, unknown> | 
     };
   }
   if (turn.integrations?.browser) servers.browser = { ...turn.integrations.browser };
+  if (turn.integrations?.data) servers.data = { ...turn.integrations.data };
   for (const [name, server] of Object.entries(turn.integrations?.custom ?? {})) servers[name] = { ...server, scope: "custom" };
   for (const [name, server] of Object.entries(servers)) {
     if (parsed.scope !== undefined && !canUseMcpServer(parsed.scope, name)) { delete servers[name]; continue; }
-    const gated = gateServer({ name, server, toolScope: parsed.scope, threadId: turn.threadId, budget: name in (turn.integrations?.custom ?? {}) ? resultBudget() : 0, nodeEnv: NODE_ENV_FLAG });
-    const stdio = gated ?? mcpStdioServer(server, { nodeEnv: NODE_ENV_FLAG });
+    // Pi registers every tool it is given and has no tool search of its own,
+    // so a URL server's big catalog is searched instead (mcp-directory.ts).
+    const directory = remoteMcpSpec(server) !== undefined;
+    const gated = gateServer({ name, server, toolScope: parsed.scope, threadId: turn.threadId, budget: name in (turn.integrations?.custom ?? {}) ? resultBudget() : 0, nodeEnv: NODE_ENV_FLAG, directory });
+    const stdio = gated ?? mcpStdioServer(server, { nodeEnv: NODE_ENV_FLAG, ...(directory ? { directory: { name } } : {}) });
     if (!stdio) throw new Error("Pi MCP server configuration is invalid");
     const original = server as { scope?: string };
-    servers[name] = { ...stdio, ...(original.scope ? { scope: original.scope } : {}) };
+    servers[name] = { ...stdio, ...(original.scope ? { scope: original.scope } : {}), ...(directory ? { directory: true } : {}) };
   }
   return Object.keys(servers).length ? servers : null;
 }
@@ -649,14 +655,21 @@ export const PiDriver: ProviderDriver<PiConfig> = {
       } catch {
         if (base.options.length) models = base;
       }
+      try { writeStartupModelCache(instanceId, models); } catch { /* derived cache */ }
     };
     const refreshModels = async () => {
       await updatePiModelCatalog(config.cli, catalogEnv);
       await readModels();
     };
     // Startup stays local and fast. Only the explicit Refresh button crosses
-    // pi's model-catalog network boundary.
-    await readModels();
+    // pi's model-catalog network boundary. A later start serves the saved
+    // list and reads the local catalog behind listen.
+    const startupModelRefresh = (await openStartupModelCatalog({
+      instanceId,
+      use: (catalog) => { models = catalog; },
+      current: () => models,
+      refresh: readModels,
+    }))?.pending ?? null;
 
     const listeners = new Set<RuntimeEventListener>();
     // one active turn per thread
@@ -681,6 +694,7 @@ export const PiDriver: ProviderDriver<PiConfig> = {
     });
 
     const sendTurn = async (turn: SendTurnInput) => {
+      if (startupModelRefresh) await startupModelRefresh;
       const { threadId } = turn;
       const selection = parseToolScope(turn.toolScope);
       if (!selection.ok) throw new Error(selection.error);
@@ -1141,7 +1155,7 @@ export const PiDriver: ProviderDriver<PiConfig> = {
         }
       }));
       child.on("error", (err) => {
-        const fail = describeSpawnFailure(err as NodeJS.ErrnoException, config.cli);
+        const fail = describeSpawnFailure(err as NodeJS.ErrnoException, config.cli, turn.cwd);
         rejectWaiters(new Error(fail.message));
         emit({ ...base(threadId, turnId), type: "runtime.error", message: fail.message, setup: fail.setup });
         settle(false);
@@ -1336,6 +1350,7 @@ export const PiDriver: ProviderDriver<PiConfig> = {
         return models;
       },
       refreshModels,
+      ...(startupModelRefresh ? { startupModelRefresh } : {}),
       snapshot,
       adapter: {
         provider: DRIVER_KIND,
@@ -1350,6 +1365,7 @@ export const PiDriver: ProviderDriver<PiConfig> = {
           phoneMcp: true,
           customMcp: true,
           browserMcp: true,
+          dataMcp: true,
           // Host control (the user's real Mac) rides the pi-native permission
           // card (`ctx.ui.confirm` → extension_ui_request) gated in the
           // extension, so it is offered exactly when the other engines offer

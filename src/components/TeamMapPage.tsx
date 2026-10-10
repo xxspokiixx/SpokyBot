@@ -2,7 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { ArrowRight, BookOpen, Box, Loader2, Monitor, Network, Plus, Save, Users, X } from "lucide-react";
 
-import { api, formatTime, useStore, type Bot } from "@/state/store";
+import { api, formatTime, openThread, useStore, type Bot } from "@/state/store";
 import {
   EMPTY_TEAM_MAP_SNAPSHOT,
   buildTeamMapEdges,
@@ -12,6 +12,7 @@ import {
   type TeamMapSnapshot,
 } from "@/lib/team-map";
 import { cn } from "@/lib/cn";
+import { useCaptionChrome } from "@/components/DesktopCapabilities";
 import { placeOffered } from "@/lib/place";
 import { TeamCanvas } from "./TeamCanvas";
 import { TeamDialog } from "./TeamDialog";
@@ -22,14 +23,17 @@ import { CanvasComputers } from "./CanvasComputers";
 import type { TeamComputer } from "../../shared/team-computer";
 
 function EdgeRow({ edge, bots }: { edge: TeamMapEdge; bots: Bot[] }) {
-  const { dispatch } = useStore();
+  const { state, dispatch } = useStore();
   const source = bots.find((bot) => bot.id === edge.sourceBotId);
   const target = bots.find((bot) => bot.id === edge.targetBotId);
   if (!source || !target) return null;
   const live = edge.state !== "connected";
   return (
     <button
-      onClick={() => dispatch({ type: "select", id: edge.groupId ?? target.id })}
+      onClick={() => {
+        if (!edge.groupId && edge.threadId) openThread(dispatch, { botId: target.id, threadId: edge.threadId }, state);
+        else dispatch({ type: "select", id: edge.groupId ?? target.id });
+      }}
       className="flex w-full items-center gap-3 rounded-xl border border-hairline/40 bg-card px-3 py-2.5 text-left transition hover:bg-raised/50"
     >
       <div className="flex min-w-0 flex-1 items-center gap-2">
@@ -253,6 +257,7 @@ function SectionContextDialog({ section, label, onClose }: { section: string; la
 
 export function TeamMapPage() {
   const { state, dispatch } = useStore();
+  const { dragProps } = useCaptionChrome();
   const remoteClient = window.ogb?.remoteClient?.active === true;
   const [snapshot, setSnapshot] = useState<TeamMapSnapshot>(EMPTY_TEAM_MAP_SNAPSHOT);
   const [error, setError] = useState<string | null>(null);
@@ -320,7 +325,7 @@ export function TeamMapPage() {
 
   return (
     <main className="flex min-w-0 flex-1 flex-col overflow-hidden bg-app text-ink">
-      <header className="flex shrink-0 flex-wrap items-center justify-between gap-3 border-b border-hairline/40 px-6 py-4 max-md:pl-12">
+      <header {...dragProps} className="flex shrink-0 flex-wrap items-center justify-between gap-3 border-b border-hairline/40 px-6 py-4 max-md:pl-12">
         <div>
           <div className="flex items-center gap-2.5">
             <Network size={18} className="text-ink-secondary" />

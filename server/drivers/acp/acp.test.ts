@@ -14,6 +14,7 @@ import { fileURLToPath } from "node:url";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { ensureDirs, NATIVE_DIR } from "../../config.ts";
+import { BUILT_IN_DATA_SYSTEM_PROMPT } from "../../data/instructions.ts";
 import type { ProviderInstance } from "../../contracts.ts";
 import { TurnNotStartedError } from "../../contracts.ts";
 import { recordEvents, type EventRecorder } from "../../testing/events.ts";
@@ -26,6 +27,7 @@ import { DroidAgentDriver } from "./droid.ts";
 import { CursorAgentDriver } from "./cursor.ts";
 import { QwenAgentDriver } from "./qwen.ts";
 import { removeTempDir } from "../../testing/cleanup.ts";
+import { startFakeHttpMcp } from "../../testing/fake-http-mcp-server.ts";
 import * as procs from "../../procs.ts";
 import * as quietStatus from "./quiet-status.ts";
 
@@ -242,6 +244,7 @@ describe("ACP turns (fake CLI)", () => {
     delete process.env.FAKE_ACP_PERMISSION_TOOL_CALL;
     delete process.env.FAKE_ACP_PERMISSION_OPTIONS;
     delete process.env.FAKE_ACP_QUESTION_OPTIONS;
+    delete process.env.FAKE_ACP_HOLD_ON_CANCELLED;
     delete process.env.XAI_API_KEY;
     delete process.env.OPENCODE_API_KEY;
     delete process.env.CURSOR_API_KEY;
@@ -807,6 +810,25 @@ describe("ACP turns (fake CLI)", () => {
     });
   });
 
+  it.each([false, true])("mounts Data through the existing stdio transport unless excluded (excluded=%s)", async (excluded) => {
+    await create();
+    const dump = join(scratch, "data.json");
+    process.env.FAKE_ACP_DUMP = dump;
+    process.env.FAKE_ACP_DUMP_PROMPT = "1";
+    const data = { command: process.execPath, args: [join(scratch, "data-proxy.mjs")], env: { OMB_DATA_TOKEN: "synthetic-turn-capability" } };
+    expect(instance.adapter.capabilities.dataMcp).toBe(true);
+    await instance.adapter.sendTurn({
+      threadId: "t-data", text: "Update the existing result.", system: BUILT_IN_DATA_SYSTEM_PROMPT,
+      integrations: { data }, ...(excluded ? { toolScope: { allow: ["native:*"] } } : {}),
+    });
+    expect(await recorder.until((event) => event.type === "turn.completed")).toMatchObject({ ok: true });
+    expect(JSON.parse(readFileSync(`${dump}.mcp.json`, "utf8"))).toEqual(excluded ? [] : [{
+      name: "data", ...data, env: [{ name: "OMB_DATA_TOKEN", value: "synthetic-turn-capability" }],
+    }]);
+    const prompt = JSON.parse(readFileSync(`${dump}.prompt.json`, "utf8")) as Array<{ type: string; text?: string }>;
+    expect(prompt.find(block => block.type === "text")?.text).toContain(BUILT_IN_DATA_SYSTEM_PROMPT.trim());
+  });
+
   it("droid takes model and autonomy over the wire, never through argv", async () => {
     // `droid exec -m <id> -o acp` ignores the flag (verified against 0.196.0),
     // so a model that only reached argv would silently run the CLI's own pick.
@@ -945,35 +967,77 @@ describe("ACP turns (fake CLI)", () => {
     notes: { command: "npx", args: [], env: {} },
   };
 
-  it("keeps url servers out of a session with an agent that advertises no remote transport", async () => {
-    await create();
-    const dump = join(scratch, "remote-plain.json");
-    process.env.FAKE_ACP_DUMP = dump;
-    await instance.adapter.sendTurn({ threadId: "t-remote-plain", text: "go", integrations: { custom: remoteServers } });
-    await recorder.until((event) => event.type === "turn.completed");
-    const seen = JSON.parse(readFileSync(dump, "utf8"));
-    expect(seen.mcpServers.map((server: { name: string }) => server.name)).toEqual(["notes"]);
-  });
+  /** The settings a remote-proxy mount carries in its env (mcp-gate-config.ts). */
+  const proxied = (server: { command?: string; args?: string[]; env?: Array<{ name: string; value: string }> }) => {
+    const value = server.env?.find((entry) => entry.name === "OMB_REMOTE_MCP_SERVER")?.value;
+    return value === undefined ? undefined : JSON.parse(value);
+  };
 
-  it("lists a url server in ACP's shape for an agent that advertises its transport", async () => {
-    process.env.FAKE_ACP_MCP_TRANSPORTS = "http";
+  it.each([
+    ["advertises no remote transport", undefined],
+    ["advertises http and sse", "http,sse"],
+  ])("mounts every url server as OpenMausBot's connector for an agent that %s", async (_name, transports) => {
+    if (transports) process.env.FAKE_ACP_MCP_TRANSPORTS = transports;
     try {
       await create();
-      const dump = join(scratch, "remote-http.json");
+      const dump = join(scratch, "remote-mcp.json");
       process.env.FAKE_ACP_DUMP = dump;
-      await instance.adapter.sendTurn({ threadId: "t-remote-http", text: "go", integrations: { custom: remoteServers } });
+      await instance.adapter.sendTurn({ threadId: "t-remote-mcp", text: "go", integrations: { custom: remoteServers } });
       await recorder.until((event) => event.type === "turn.completed");
       const seen = JSON.parse(readFileSync(dump, "utf8"));
-      expect(seen.mcpServers).toContainEqual({
-        type: "http",
-        name: "docs",
-        url: "https://docs.example/mcp",
-        headers: [{ name: "Authorization", value: "Bearer tok-docs" }],
-      });
-      // the agent said http only, so the SSE entry stays out
-      expect(seen.mcpServers.map((server: { name: string }) => server.name)).toEqual(["docs", "notes"]);
+      expect(seen.mcpServers.map((server: { name: string }) => server.name)).toEqual(["docs", "legacy", "notes"]);
+      // never ACP's http/sse shape, so the agent's own client never connects
+      expect(seen.mcpServers.some((server: object) => "url" in server || "type" in server)).toBe(false);
+      const docs = seen.mcpServers.find((server: { name: string }) => server.name === "docs");
+      expect(docs.args.join(" ")).toContain("mcp-remote-proxy");
+      expect(docs.args.join(" ")).not.toContain("tok-docs");
+      expect(proxied(docs)).toEqual(remoteServers.docs);
+      // the agent searches tools itself: the catalog passes through
+      expect(docs.env.some((entry: { name: string }) => entry.name === "OMB_REMOTE_MCP_DIRECTORY")).toBe(false);
+      expect(proxied(seen.mcpServers.find((server: { name: string }) => server.name === "legacy"))).toEqual(remoteServers.legacy);
     } finally {
       delete process.env.FAKE_ACP_MCP_TRANSPORTS;
+    }
+  });
+
+  // A server that deserializes initialize strictly (a Voluum server:
+  // "Unrecognized field 'schemaValidation'") refuses grok 1.0.25's own
+  // handshake (capabilities.extensions). The fake agent connects each
+  // mounted server with that handshake, natively if it were handed a URL.
+  it("lists a strict url server's tools through OpenMausBot's connector, even for an agent that speaks http", async () => {
+    const strict = await startFakeHttpMcp({ strictInitialize: "http-400", strictSchema: "2025-11-25",
+      tools: [{ name: "report", inputSchema: { type: "object" } }, { name: "campaigns", inputSchema: { type: "object" } }],
+      requireHeader: { name: "Authorization", value: "Bearer tok-voluum" } });
+    process.env.FAKE_ACP_MCP_TRANSPORTS = "http,sse";
+    try {
+      await create(GrokAgentDriver, "mcp-tools");
+      await instance.adapter.sendTurn({ threadId: "t-strict-acp", text: "go", integrations: { custom: {
+        voluum: { type: "http", url: strict.url, headers: { Authorization: "Bearer tok-voluum" } },
+      } } });
+      expect(await recorder.until((event) => event.type === "turn.completed")).toMatchObject({ ok: true });
+      const text = recorder.events.find((event) => event.type === "item.completed" && (event as { itemType?: string }).itemType === "assistant_text");
+      expect((text as { text?: string } | undefined)?.text).toBe("voluum: report,campaigns");
+      expect(strict.initializes).toEqual([{ protocolVersion: "2025-06-18", capabilities: {}, clientInfo: { name: "OpenMausBot tool proxy", version: "1" } }]);
+    } finally {
+      delete process.env.FAKE_ACP_MCP_TRANSPORTS;
+      await strict.close();
+    }
+  });
+
+  it("keeps a tool selection's gate in front of the connector", async () => {
+    const strict = await startFakeHttpMcp({ strictInitialize: "http-400", tools: [{ name: "report", inputSchema: { type: "object" } }, { name: "campaigns", inputSchema: { type: "object" } }] });
+    try {
+      // Kimi: Grok also checks its own catalog over _x.ai/mcp/list, which
+      // the fake does not keep
+      await create(KimiAgentDriver, "mcp-tools");
+      await instance.adapter.sendTurn({ threadId: "t-strict-acp-scoped", text: "go", toolScope: { allow: ["native:*", "mcp:voluum:report"] },
+        integrations: { custom: { voluum: { type: "http", url: strict.url, headers: {} } } } });
+      expect(await recorder.until((event) => event.type === "turn.completed")).toMatchObject({ ok: true });
+      const text = recorder.events.find((event) => event.type === "item.completed" && (event as { itemType?: string }).itemType === "assistant_text");
+      expect((text as { text?: string } | undefined)?.text).toBe("voluum: report");
+      expect(strict.initializes).toHaveLength(1);
+    } finally {
+      await strict.close();
     }
   });
 
@@ -1096,11 +1160,61 @@ describe("ACP turns (fake CLI)", () => {
     });
     const resolved = await recorder.until((e) => e.type === "request.resolved");
     expect(resolved).toMatchObject({ behavior: "deny", source: "system" });
-    expect(recorder.events.find((e) => e.type === "runtime.error")).toMatchObject({
-      message: expect.stringContaining("matching answer"),
-    });
+    const error = recorder.events.find((e) => e.type === "runtime.error") as { message: string } | undefined;
+    expect(error?.message).toContain("isn't one of the choices");
+    expect(error?.message).not.toContain("Agent");
     await recorder.until((e) => e.type === "turn.completed");
     expect(readFileSync(answer, "utf8")).toBe("cancelled");
+  });
+
+  it("marks an ACP question as options-only, so the card offers no free text", async () => {
+    await create(GrokAgentDriver, "question");
+    await instance.adapter.sendTurn({ threadId: "t-question-custom", text: "go" });
+    const opened = await recorder.until((e) => e.type === "request.opened");
+    expect(opened).toMatchObject({ questions: [{ question: "Which color?", custom: false }] });
+  });
+
+  // Antigravity's shape: options carry their own ids and names, and after a
+  // "cancelled" outcome the agent waits for session/cancel instead of going on.
+  it.each([
+    { name: "a typed answer", response: { behavior: "answer", message: "The user answered your questions.\n\nQ: Which article?\nA: my own article" }, error: true },
+    { name: "a closed question", response: { behavior: "deny" }, error: false },
+  ])("ends the turn instead of hanging after $name matches no option", async ({ response, error }) => {
+    process.env.FAKE_ACP_HOLD_ON_CANCELLED = "1";
+    process.env.FAKE_ACP_QUESTION_OPTIONS = JSON.stringify([
+      { optionId: "opt-0", kind: "allow_once", name: "Machines of Loving Grace (Recommended)" },
+      { optionId: "opt-1", kind: "allow_once", name: "A new piece on reasoning models" },
+    ]);
+    const answer = join(scratch, "question-hold.txt");
+    process.env.FAKE_ACP_PERMISSION_ANSWER = answer;
+    await create(GrokAgentDriver, "question");
+    await instance.adapter.sendTurn({ threadId: "t-question-hold", text: "go" });
+    const opened = await recorder.until((e) => e.type === "request.opened");
+    await instance.adapter.respondToRequest("t-question-hold", (opened as { requestId: string }).requestId, response as never);
+    const done = await recorder.until((e) => e.type === "turn.completed");
+    expect(done).toMatchObject({ stopReason: "cancelled" });
+    expect(readFileSync(answer, "utf8")).toBe("cancelled");
+    expect(recorder.events.some((e) => e.type === "runtime.error")).toBe(error);
+  });
+
+  it("still sends the picked option id on Antigravity's option shape", async () => {
+    process.env.FAKE_ACP_HOLD_ON_CANCELLED = "1";
+    process.env.FAKE_ACP_QUESTION_OPTIONS = JSON.stringify([
+      { optionId: "opt-0", kind: "allow_once", name: "Machines of Loving Grace (Recommended)" },
+      { optionId: "opt-1", kind: "allow_once", name: "A new piece on reasoning models" },
+    ]);
+    const answer = join(scratch, "question-pick.txt");
+    process.env.FAKE_ACP_PERMISSION_ANSWER = answer;
+    await create(GrokAgentDriver, "question");
+    await instance.adapter.sendTurn({ threadId: "t-question-pick", text: "go" });
+    const opened = await recorder.until((e) => e.type === "request.opened");
+    expect(await instance.adapter.respondToRequest("t-question-pick", (opened as { requestId: string }).requestId, {
+      behavior: "answer",
+      message: "The user answered your questions.\n\nQ: Which color?\nA: A new piece on reasoning models",
+    })).toBe("answered");
+    const done = await recorder.until((e) => e.type === "turn.completed");
+    expect(done).toMatchObject({ ok: true });
+    expect(readFileSync(answer, "utf8")).toBe("opt-1");
   });
 
   it.each([false, true])("maps capped labels back to their option id, refusing collisions (%s)", async collision => {

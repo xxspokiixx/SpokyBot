@@ -12,7 +12,7 @@ import { initAnalytics } from "@/lib/analytics";
 import { Sidebar } from "@/components/Sidebar";
 import { ChatView } from "@/components/ChatView";
 import { GroupView } from "@/components/GroupView";
-import { SIDEBAR_AND_PANEL_FIT, TWO_SIDE_PANELS_FIT, useMediaQuery } from "@/lib/use-media-query";
+import { SIDEBAR_AND_PANEL_FIT, SIDEBAR_INLINE, TWO_SIDE_PANELS_FIT, useMediaQuery } from "@/lib/use-media-query";
 import { PluginsPanel, preloadConnectedApps } from "@/components/PluginsPanel";
 import {
   ActivityPanel, BotSettingsDialog, ComputerPanel, InspectorPanel, KeyboardShortcutsModal, LocalVmWorkspace, NewBotDialog,
@@ -20,11 +20,15 @@ import {
 } from "@/components/lazy-screens";
 import { WorkspaceBackupRecovery } from "@/components/WorkspaceBackupSettings";
 import { UpdateBanner } from "@/components/UpdateBanner";
-import { ProIntroduction } from "@/components/ProIntroduction";
-import { DesktopCapabilitiesProvider, useDesktopCapabilities } from "@/components/DesktopCapabilities";
+import { AppNotices } from "@/components/AppNotices";
+import { CloudAddDialog } from "@/components/CloudAddDialog";
+import { CloudHowTo } from "@/components/CloudHowTo";
+import { DesktopCapabilitiesProvider, useCaptionChrome, useDesktopCapabilities, WindowDragStrip } from "@/components/DesktopCapabilities";
 import { WindowCaptionButtons } from "@/components/WindowCaptionButtons";
 import { NoEngines } from "@/components/NoEngines";
 import { CloudEngineSignIn } from "@/components/CloudEngineSignIn";
+import { CloudIntent } from "@/components/CloudIntent";
+import { cloudIntentDue, cloudIntentShown, useCloudIntent } from "@/lib/cloud-intent";
 import { CloudSetup } from "@/components/CloudSetup";
 import { engineReady } from "@/components/EngineLibrary";
 import { CommandPalette } from "@/components/CommandPalette";
@@ -37,12 +41,15 @@ import { phonePairingSettingsAction, takePhonePairingRequest } from "@/lib/phone
 function Shell({ viewer }: { viewer: WelcomeViewer | null }) {
   const { state, dispatch } = useStore();
   const { capabilities } = useDesktopCapabilities();
+  const captionChrome = useCaptionChrome();
   const unreadCount =
     state.bots.filter((bot) => !bot.hidden && botShowsUnread(bot)).length +
     state.groups.filter((group) => group.unread).length;
   const remoteClient = window.ogb?.remoteClient?.active === true;
   const twoSidePanelsFit = useMediaQuery(TWO_SIDE_PANELS_FIT, true);
   const sidebarAndPanelFit = useMediaQuery(SIDEBAR_AND_PANEL_FIT, true);
+  // md and up the sidebar is always in view (narrower it is a drawer)
+  const sidebarInline = useMediaQuery(SIDEBAR_INLINE, false);
   useEffect(() => {
     if (!window.ogb?.environments) return;
     // A saved server's Computer access panel, or ("copy") its Copy this computer here panel.
@@ -56,14 +63,17 @@ function Shell({ viewer }: { viewer: WelcomeViewer | null }) {
     };
     const url = new URL(window.location.href);
     const requestedSettings = url.searchParams.get("desktop-settings");
+    const cloud = ["cloud", "cloud-settings", "cloud-add", "cloud-add-howto"].includes(requestedSettings ?? "");
     if (requestedSettings === "workspaces" || (requestedSettings === "organization" && window.ogb.organization && !remoteClient) ||
-      ((requestedSettings === "cloud" || requestedSettings === "cloud-settings") && window.ogb.cloudAccount && !remoteClient)) {
+      (cloud && window.ogb.cloudAccount && !remoteClient)) {
       url.searchParams.delete("desktop-settings");
       window.history.replaceState(null, "", `${url.pathname}${url.search}${url.hash}`);
       if (requestedSettings === "organization") dispatch({ type: "toggleAppSettings", open: true, section: "organization" });
       else if (requestedSettings === "cloud") dispatch(CLOUD_LINK_SETTINGS);
-      // The lending menu-bar item: Settings → OMB Cloud, with no automatic action.
+      // The lending menu-bar item: Settings → OpenMausBot Cloud, with no automatic action.
       else if (requestedSettings === "cloud-settings") dispatch({ type: "toggleAppSettings", open: true, section: "cloudAccount" });
+      // Add a Cloud… in the server menu, plain or reached through Show me how.
+      else if (requestedSettings === "cloud-add" || requestedSettings === "cloud-add-howto") dispatch({ type: "openCloudAdd", source: requestedSettings === "cloud-add" ? "app_menu" : "app_howto" });
       else open();
     }
     return window.ogb.environments.onOpenSettings?.(open);
@@ -124,6 +134,14 @@ function Shell({ viewer }: { viewer: WelcomeViewer | null }) {
   // An OMB Cloud home with none of the person's own engines signed in yet:
   // its first run, and every bot until then, is the engine sign-in.
   const cloudSignIn = cloudSignInDue(viewer, state, engineReady);
+  // Before that, its first question: what should it do while you're away. A
+  // job given before any AI waits on the sign-in until an engine can run it.
+  const cloudIntent = useCloudIntent();
+  const cloudAsk = cloudIntentShown(cloudIntentDue({
+    viewer, connected: state.connected, enginesKnown: state.instances.length > 0,
+    onboarding: state.config?.onboarding, reopened: false,
+  }), cloudIntent);
+  const cloudJobWaiting = Boolean(viewer?.cloudHome && viewer.canSave && cloudIntent.pending);
 
   // App-wide shortcuts: ⌘N new bot · ⌘1–9 jump to bot · ⌘⇧[ / ⌘⇧] prev/next · ⌘/ or ? shortcuts cheat sheet.
   // Kept deliberately small; every panel already closes on Esc.
@@ -242,12 +260,17 @@ function Shell({ viewer }: { viewer: WelcomeViewer | null }) {
   // is absent in the browser.
   // "cloud" is openmausbot://cloud (the Cloud page's "Open in the app"):
   // OMB Cloud, marked as opened by the link so that view signs in or connects.
+  // "cloud-add": Add a Cloud… in the server menu (or openmausbot://cloud while
+  // a checkout this app opened is pending), "cloud-add-howto" the same reached
+  // through Show me how: the Add a Cloud dialog.
   useEffect(() => {
-    return window.ogb?.onOpenAppSettings?.(section => dispatch(section === "cloud" && window.ogb?.cloudAccount && !remoteClient
-      ? CLOUD_LINK_SETTINGS
-      : section === "cloud-settings" && window.ogb?.cloudAccount && !remoteClient
-        ? { type: "toggleAppSettings", open: true, section: "cloudAccount" }
-        : { type: "toggleAppSettings", open: true, ...(section === "organization" && window.ogb?.organization && !remoteClient ? { section } : {}) }));
+    return window.ogb?.onOpenAppSettings?.(section => dispatch((section === "cloud-add" || section === "cloud-add-howto") && window.ogb?.cloudAccount && !remoteClient
+      ? { type: "openCloudAdd", source: section === "cloud-add" ? "app_menu" : "app_howto" }
+      : section === "cloud" && window.ogb?.cloudAccount && !remoteClient
+        ? CLOUD_LINK_SETTINGS
+        : section === "cloud-settings" && window.ogb?.cloudAccount && !remoteClient
+          ? { type: "toggleAppSettings", open: true, section: "cloudAccount" }
+          : { type: "toggleAppSettings", open: true, ...(section === "organization" && window.ogb?.organization && !remoteClient ? { section } : {}) }));
   }, [dispatch]);
 
   // The viewer outlives ComputerPanel and can target any bot, so release control
@@ -277,8 +300,10 @@ function Shell({ viewer }: { viewer: WelcomeViewer | null }) {
   return (
     <div className="flex h-full flex-col">
       {/* fixed-position popup, bottom-left — outside the layout flow */}
-      <UpdateBanner />
-      <ProIntroduction quiet={paletteOpen || drawerOpen || Boolean(localVmWorkspaceBotId)} />
+      <UpdateBanner sidebarIndicator={!calendarFocus && (sidebarInline || drawerOpen)} />
+      {/* The one bottom-left card at a time: the card after the update, the
+          free trial's notice (here and on My Cloud), the My Cloud card, the star. */}
+      <AppNotices quiet={paletteOpen || drawerOpen || Boolean(localVmWorkspaceBotId)} viewer={viewer} />
       <div className="relative flex min-h-0 flex-1">
       {!calendarFocus && <button
         type="button"
@@ -316,7 +341,9 @@ function Shell({ viewer }: { viewer: WelcomeViewer | null }) {
           onClose={() => setLocalVmWorkspaceBotId(null)}
           onOpenComputer={openComputerFromWorkspace}
         />
-      ) : cloudSignIn ? (
+      ) : cloudAsk ? (
+        <CloudIntent />
+      ) : cloudSignIn || cloudJobWaiting ? (
         <CloudEngineSignIn />
       ) : noEngines ? (
         <NoEngines />
@@ -325,7 +352,8 @@ function Shell({ viewer }: { viewer: WelcomeViewer | null }) {
       ) : bot ? (
         <ChatView bot={bot} />
       ) : (
-        <main className="flex h-full min-w-0 flex-1 flex-col items-center justify-center gap-3 bg-app text-ink-secondary">
+        <main className="relative flex h-full min-w-0 flex-1 flex-col items-center justify-center gap-3 bg-app text-ink-secondary">
+          <WindowDragStrip />
           <Loader2 size={20} className="animate-spin" />
           <div className="text-[14px]">
             {state.connected ? "No bots yet" : "Connecting to the bot server…"}
@@ -367,6 +395,9 @@ function Shell({ viewer }: { viewer: WelcomeViewer | null }) {
       {!remoteClient && state.inspectorOpen && bot && <InspectorPanel key={bot.threadId} bot={bot} />}
       {!remoteClient && state.activityOpen && bot && <ActivityPanel key={`activity:${bot.id}`} bot={bot} />}
       {state.appSettingsOpen && <SettingsModal />}
+      {/* Add a Cloud: the buying journey's one dialog, and Show me how's one step. */}
+      <CloudAddDialog />
+      <CloudHowTo />
       {/* On the person's Cloud: its setup checklist, and after it Move to
           Cloud's one-time card on an empty Cloud (desktop app only). */}
       <CloudSetup viewer={viewer} />
@@ -382,6 +413,16 @@ function Shell({ viewer }: { viewer: WelcomeViewer | null }) {
       {/* mounted after the modals: same z-50 tier, so DOM order keeps the
           palette on top when one of them is open underneath */}
       <CommandPalette onOpenChange={setPaletteOpen} />
+      {/* The drawer button comes before every header in the DOM, and a later
+          drag region wins, so on a narrow window the header's drag region
+          swallowed it. This no-drag twin, after the headers, cuts the
+          button's corner back out. It paints nothing and takes no clicks. */}
+      {!calendarFocus && <span
+        aria-hidden
+        data-drawer-button-no-drag
+        style={captionChrome.noDragStyle}
+        className="pointer-events-none absolute left-3 top-3 size-[30px] md:hidden"
+      />}
       </div>
       {/* Renderer-drawn caption buttons for the overlay-less frameless
           Windows window. Deliberately the LAST child of the shell: Blink

@@ -78,7 +78,6 @@ Use only mapped, tested commands:
 - [Workspaces screen and the fleet agent](workspaces.md)
 - [Hosted workspace sign-in and revocation](hosted-workspaces.md)
 - [Shared-workspace trust: loopback, card answerers, decision log](shared-workspace-trust.md)
-- [Switchable local environments](local-environments.md)
 - [Shared-workspace governance: bot visibility and admin activity](shared-workspace-governance.md)
 - [Usage ledger](usage-ledger.md)
 - [Bounded built-in tool results](tool-results.md)
@@ -165,6 +164,13 @@ through the real renderer in an isolated fake-engine workspace.
 The [rich tables fixture](rich-tables.md) checks Markdown tables and message-scoped
 CSV/TSV previews, large-file virtualization, sorting, search, export and keyboard
 interaction in a disposable workspace.
+
+The [recent files fixture](computer-files.md) mounts the Files panel with synthetic
+digest rows and real message-scoped downloads from a disposable workspace.
+
+The [Data viewer fixture](data.md) checks real DuckDB loading, querying, export,
+restart persistence, result history and the full renderer's 100,000-row grid
+in a disposable workspace with synthetic data.
 
 The [people invitation fixture](people.md) checks hosted workspace sign-in,
 roles and device revocation through the real HTTP API with a stubbed email

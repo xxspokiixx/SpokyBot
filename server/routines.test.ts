@@ -772,6 +772,51 @@ describe("RoutineManager", () => {
     expect(create("Above maximum", 241).durationMinutes).toBe(240);
   });
 
+  it("refuses to overwrite a routines file it could not read", () => {
+    const h = harness();
+    const input = {
+      name: "Health check",
+      prompt: "Check the fixture",
+      botId: "maus-1",
+      schedule: { type: "interval" as const, everyMinutes: 5, anchorAt: new Date(2026, 7, 17, 8, 0, 0).getTime() },
+    };
+    h.manager.create({ ...input, name: "First" });
+    h.manager.create({ ...input, name: "Second" });
+    const file = h.options.file as string;
+    const corrupt = readFileSync(file, "utf8").slice(0, 100);
+    writeFileSync(file, corrupt);
+    const reloaded = new RoutineManager(h.options);
+    expect(reloaded.listRoutines()).toEqual([]);
+    expect(() => reloaded.create(input)).toThrow(expect.objectContaining({ status: 503 }));
+    expect(() => reloaded.remove("anything")).toThrow(expect.objectContaining({ status: 503 }));
+    expect(() => reloaded.enqueueWebhook({
+      webhookId: "hook-1",
+      webhookName: "Lead",
+      prompt: "Qualify it",
+      botId: "maus-1",
+      runOn: "maus",
+      deliveryId: "evt-1",
+      receivedAt: Date.now(),
+    })).toThrow(expect.objectContaining({ status: 503 }));
+    expect(readFileSync(file, "utf8")).toBe(corrupt);
+  });
+
+  it("treats a routines file with a damaged top-level shape as unreadable", () => {
+    const h = harness();
+    const file = h.options.file as string;
+    const damaged = JSON.stringify({ version: 1, routines: "garbage", runs: [] });
+    writeFileSync(file, damaged);
+    const reloaded = new RoutineManager(h.options);
+    expect(reloaded.listRoutines()).toEqual([]);
+    expect(() => reloaded.create({
+      name: "Health check",
+      prompt: "Check the fixture",
+      botId: "maus-1",
+      schedule: { type: "interval" as const, everyMinutes: 5, anchorAt: new Date(2026, 7, 17, 8, 0, 0).getTime() },
+    })).toThrow(expect.objectContaining({ status: 503 }));
+    expect(readFileSync(file, "utf8")).toBe(damaged);
+  });
+
   it("validates, preserves, and clears the optional safety timeout", () => {
     const h = harness();
     const input = {
@@ -1110,6 +1155,19 @@ describe("RoutineManager", () => {
 
     const reloaded = new RoutineManager(h.options);
     expect(reloaded.listRoutines()).toMatchObject([{ id: valid.id, name: "Valid interval" }]);
+
+    // Unrelated writes must not delete the row that failed to load.
+    const malformedOnDisk = stored.routines.find((routine) => routine.id === malformed.id);
+    reloaded.create({
+      name: "Added later",
+      prompt: "Unrelated write",
+      botId: "maus-valid",
+      schedule: { type: "daily", time: "09:00", weekdays: [1] },
+    });
+    const saved = JSON.parse(readFileSync(h.options.file!, "utf8")) as { routines: Array<{ id: string }> };
+    expect(saved.routines.find((routine) => routine.id === malformed.id)).toEqual(malformedOnDisk);
+    expect(saved.routines).toHaveLength(3);
+    expect(new RoutineManager(h.options).listRoutines().map((routine) => routine.name).sort()).toEqual(["Added later", "Valid interval"]);
   });
 
   it("persists confirmation receipts with the scheduler mutation and removes them after settlement", () => {

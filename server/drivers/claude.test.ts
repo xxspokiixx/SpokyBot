@@ -9,7 +9,7 @@
 import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { createServer as createHttpServer, type IncomingHttpHeaders } from "node:http";
 import { connect, createServer as createNetServer, type AddressInfo, type Socket } from "node:net";
-import { tmpdir } from "node:os";
+import { homedir, tmpdir } from "node:os";
 import { dirname, join, relative } from "node:path";
 import { fileURLToPath } from "node:url";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -1401,6 +1401,7 @@ describe("ClaudeDriver turns (fake CLI)", () => {
     // bot — tens of thousands of tokens per model call that no bot asked for.
     expect(seen.argv).toContain("--strict-mcp-config");
     expect(seen.argv[seen.argv.indexOf("--setting-sources") + 1]).toBe("project");
+    expect(seen.settings.claudeMdExcludes).toEqual([join(homedir(), ".claude", "CLAUDE.md")]);
   });
 
   it("inherits the machine's configuration again when the escape hatch is set", async () => {
@@ -1413,6 +1414,7 @@ describe("ClaudeDriver turns (fake CLI)", () => {
     const seen = JSON.parse(readFileSync(dump, "utf8"));
     expect(seen.argv).not.toContain("--strict-mcp-config");
     expect(seen.argv).not.toContain("--setting-sources");
+    expect(seen.settings?.claudeMdExcludes).toBeUndefined();
   });
 
   it("loads the machine's own MCP servers when the turn asks, keeping the rest isolated", async () => {
@@ -1438,14 +1440,40 @@ describe("ClaudeDriver turns (fake CLI)", () => {
     await instance.adapter.sendTurn({
       threadId: "t-remote-mcp",
       text: "hi",
-      integrations: { custom: { docs: { type: "http", url: "https://docs.example/mcp", headers: { Authorization: "Bearer tok-docs" } } } },
+      integrations: { custom: {
+        docs: { type: "http", url: "https://docs.example/mcp", headers: { Authorization: "Bearer tok-docs" } },
+        legacy: { type: "sse", url: "https://old.example/sse", headers: {} },
+      } },
     });
     await recorder.until((e) => e.type === "turn.completed");
 
     const seen = JSON.parse(readFileSync(dump, "utf8"));
-    // the CLI connects itself; there is no process for the gate to stand between
+    // The one engine that connects by itself: its handshake has only
+    // spec-defined fields (claude.ts), so no OpenMausBot connector here,
+    // unlike every other engine.
     expect(seen.mcpConfig.mcpServers.docs).toEqual({ type: "http", url: "https://docs.example/mcp", headers: { Authorization: "Bearer tok-docs" } });
+    expect(seen.mcpConfig.mcpServers.legacy).toEqual({ type: "sse", url: "https://old.example/sse", headers: {} });
+    expect(JSON.stringify(seen.mcpConfig)).not.toContain("mcp-remote-proxy");
     expect(JSON.stringify(seen.argv)).not.toContain("tok-docs");
+  });
+
+  it("keeps a selected url server's whole catalog: Claude Code searches tools itself", async () => {
+    await create();
+    const dump = join(scratch, "remote-mcp-scoped.json");
+    process.env.FAKE_CLAUDE_DUMP = dump;
+    await instance.adapter.sendTurn({
+      threadId: "t-remote-mcp-scoped",
+      text: "hi",
+      toolScope: { allow: ["native:*", "mcp:docs:*"] },
+      integrations: { custom: { docs: { type: "http", url: "https://docs.example/mcp", headers: { Authorization: "Bearer tok-docs" } } } },
+    });
+    await recorder.until((e) => e.type === "turn.completed");
+    const docs = JSON.parse(readFileSync(dump, "utf8")).mcpConfig.mcpServers.docs;
+    expect(docs.args[0]).toContain("mcp-gate");
+    expect(docs.env).not.toHaveProperty("OMB_GATE_DIRECTORY");
+    const upstream = JSON.parse(docs.env.OMB_GATE_UPSTREAM);
+    expect(upstream.args[0]).toContain("mcp-remote-proxy");
+    expect(upstream.env).not.toHaveProperty("OMB_REMOTE_MCP_DIRECTORY");
   });
 
   it("preserves only the selected account's auth settings in a private file", async () => {
@@ -1458,7 +1486,7 @@ describe("ClaudeDriver turns (fake CLI)", () => {
     await instance.adapter.sendTurn({ threadId: "t-auth-settings", text: "hi" });
     await recorder.until((e) => e.type === "turn.completed");
     const seen = JSON.parse(readFileSync(dump, "utf8"));
-    expect(seen.settings).toEqual({ apiKeyHelper: settings.apiKeyHelper, env: { ANTHROPIC_BASE_URL: settings.env.ANTHROPIC_BASE_URL, ANTHROPIC_AUTH_TOKEN: "synthetic-token" } });
+    expect(seen.settings).toEqual({ claudeMdExcludes: [join(homedir(), ".claude", "CLAUDE.md")], apiKeyHelper: settings.apiKeyHelper, env: { ANTHROPIC_BASE_URL: settings.env.ANTHROPIC_BASE_URL, ANTHROPIC_AUTH_TOKEN: "synthetic-token" } });
     expect(seen.argv[seen.argv.indexOf("--setting-sources") + 1]).toBe("project");
     expect(JSON.stringify(seen.argv)).not.toContain("synthetic");
     const settingsPath = seen.argv[seen.argv.indexOf("--settings") + 1];
@@ -1497,7 +1525,7 @@ describe("ClaudeDriver turns (fake CLI)", () => {
     await instance.adapter.sendTurn({ threadId: "t-auth-explicit", text: "hi" });
     await recorder.until((e) => e.type === "turn.completed");
     const seen = JSON.parse(readFileSync(dump, "utf8"));
-    expect(seen.settings).toBe(null);
+    expect(seen.settings).toEqual({ claudeMdExcludes: [join(homedir(), ".claude", "CLAUDE.md")] });
     expect(seen.env.ANTHROPIC_API_KEY).toBe("workspace-key");
     expect(seen.env.ANTHROPIC_BASE_URL).toBeUndefined();
     expect(readClaudeAuthSettings({ HOME: scratch, CLAUDE_CONFIG_DIR: join(scratch, "other-account") })).toEqual({});
