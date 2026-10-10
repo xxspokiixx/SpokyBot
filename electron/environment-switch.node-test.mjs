@@ -164,3 +164,63 @@ test("validateTargetDir: default fs sees real temp directories", (t) => {
   assert.deepEqual(validateTargetDir(join(dir, "child")), { ok: true, needsCreate: true });
   assert.deepEqual(validateTargetDir(join(dir, "gone", "child")), { ok: false, error: "unavailable" });
 });
+
+test("persistActive failure rolls back and reports persist-failed, never success", async (t) => {
+  const { dir, cleanup } = realDir();
+  t.after(cleanup);
+  const calls = [];
+  const deps = {
+    stopChild: () => { calls.push("stop"); },
+    releaseLease: () => { calls.push("release"); },
+    acquireLease: () => { calls.push("acquire"); return {}; },
+    createDir: () => { calls.push("create"); },
+    startChild: () => { calls.push("start"); return { pid: 6001, port: 8799 }; },
+    probeReady: () => { calls.push("probe"); return "ready"; },
+    rollback: () => { calls.push("rollback"); },
+    persistActive: () => { calls.push("persist"); throw new Error("disk full"); },
+    log: () => {},
+  };
+  const result = await switchLocalEnvironment({ targetDir: dir, targetId: "env-5", deps });
+  assert.deepEqual(result, { ok: false, error: "persist-failed", rolledBack: true });
+  assert.deepEqual(calls, ["stop", "release", "acquire", "start", "probe", "persist", "rollback"]);
+});
+
+test("a rollback that fails reports rolledBack:false", async (t) => {
+  const { dir, cleanup } = realDir();
+  t.after(cleanup);
+  const calls = [];
+  const deps = {
+    stopChild: () => { calls.push("stop"); },
+    releaseLease: () => { calls.push("release"); },
+    acquireLease: () => { calls.push("acquire"); throw new Error("held"); },
+    createDir: () => { calls.push("create"); },
+    startChild: () => { calls.push("start"); return { pid: 6002, port: 8799 }; },
+    probeReady: () => { calls.push("probe"); return "ready"; },
+    rollback: () => { calls.push("rollback"); throw new Error("rollback boom"); },
+    persistActive: () => { calls.push("persist"); },
+    log: () => {},
+  };
+  const result = await switchLocalEnvironment({ targetDir: dir, targetId: "env-6", deps });
+  assert.deepEqual(result, { ok: false, error: "locked", rolledBack: false });
+  assert.ok(calls.includes("rollback"));
+  assert.ok(!calls.includes("persist"));
+});
+
+test("stopChild throwing aborts the switch before release or acquire", async (t) => {
+  const { dir, cleanup } = realDir();
+  t.after(cleanup);
+  const calls = [];
+  const deps = {
+    stopChild: () => { calls.push("stop"); throw new Error("the server child did not stop"); },
+    releaseLease: () => calls.push("release"),
+    acquireLease: () => calls.push("acquire"),
+    createDir: () => calls.push("create"),
+    startChild: () => calls.push("start"),
+    probeReady: () => calls.push("probe"),
+    rollback: () => calls.push("rollback"),
+    persistActive: () => calls.push("persist"),
+    log: () => {},
+  };
+  await assert.rejects(() => switchLocalEnvironment({ targetDir: dir, targetId: "env-7", deps }), /did not stop/);
+  assert.deepEqual(calls, ["stop"]);
+});

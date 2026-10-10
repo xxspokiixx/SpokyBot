@@ -199,9 +199,13 @@ function parseEnvironments(raw) {
     if (!id || seen.has(id)) continue;
     const dataDir = cleanDataDir(entry?.dataDir);
     if (entry?.kind === "local") {
-      if (!dataDir || seen.has(dataDir)) continue;
+      // Dedup on the same normalized key withLocalEnvironment uses, so a
+      // manual or older write of the same folder (trailing slash, separator
+      // style, drive case) never registers two owners of one directory.
+      const dirKey = dataDir ? `dir:${asDirPrefix(dataDir)}` : null;
+      if (!dataDir || seen.has(dirKey)) continue;
       seen.add(id);
-      seen.add(dataDir);
+      seen.add(dirKey);
       environments.push({ id, kind: "local", name: cleanName(entry.name, dirBasename(dataDir)), dataDir });
       continue;
     }
@@ -300,6 +304,15 @@ function activeEnvironment(state) {
   return state.environments.find((e) => e.id === state.activeId) ?? null;
 }
 
+/** The active entry when a REMOTE server is shown — null for "This computer"
+ * and for a named local environment, which both serve this computer's own
+ * renderer. Sites that branch on "a remote server is on screen" must use
+ * this, not `activeEnvironment`. */
+function activeRemote(state) {
+  const active = activeEnvironment(state);
+  return active && active.kind !== "local" ? active : null;
+}
+
 /** Origins the main window may navigate to: Local plus every saved server. */
 function allowedOrigins(state, localOrigin) {
   return new Set([localOrigin, ...state.environments.map((e) => e.origin).filter(Boolean)]);
@@ -309,6 +322,7 @@ module.exports = {
   LOCAL_ID,
   activeEnvironment,
   activeLocalDataDir,
+  activeRemote,
   allowedOrigins,
   bootEnvironmentDir,
   normalizeOrigin,

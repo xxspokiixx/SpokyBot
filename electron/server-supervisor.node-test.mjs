@@ -232,15 +232,21 @@ function runForget(state) {
   const end = MAIN_SOURCE.indexOf("function showContextMenu(", start);
   assert.ok(start > 0 && end > start, "the forget helper exists");
   const calls = { dialogs: [], shares: [], persisted: [], navigated: [], rm: [] };
+  const rmOptions = [];
   const ctx = {
     environmentsState: state,
+    localSwitchInFlight: false,
+    runningDataDir: null,
     dialog: { showMessageBox: async (options) => { calls.dialogs.push(options); return { response: 0 }; } },
     sharingController: () => ({ forget: (entry) => calls.shares.push(entry.id) }),
     persistEnvironments: (next) => { calls.persisted.push(next); context.environmentsState = next; },
     withoutEnvironment: env.withoutEnvironment,
     navigateMainWindow: (url) => calls.navigated.push(url),
     activeOrigin: () => "http://127.0.0.1:8799",
-    fs: { promises: { rm: async (dir) => { calls.rm.push(dir); if (ctx.__rmThrows) throw new Error("busy"); } } },
+    fs: {
+      promises: { rm: async (dir, options) => { calls.rm.push(dir); rmOptions.push(options); if (ctx.__rmThrows) throw new Error("busy"); } },
+      realpathSync: (dir) => dir,
+    },
     path,
     AbortSignal,
     desktopDataDir: () => "/Users/me/.openmausbot",
@@ -249,7 +255,7 @@ function runForget(state) {
   };
   const context = vm.createContext(ctx);
   vm.runInContext(`${MAIN_SOURCE.slice(start, end)}; this.forgetEnvironment = forgetEnvironment;`, context);
-  return { calls, context };
+  return { calls, context, rmOptions };
 }
 
 test("forgetting the ACTIVE local environment is refused with {error:active} and touches nothing", async () => {
@@ -290,6 +296,30 @@ test("forgetting a remote environment keeps its sign-out confirmation and answer
   assert.deepEqual(plain(calls.persisted[0].environments), []);
 });
 
+test("forgetting a local environment whose folder the server child uses is refused with {error:active}", async () => {
+  // The window may show a remote server while the child still runs on this
+  // folder (A → remote R); activeId alone is not the folder in use.
+  const { calls, context } = runForget({ environments: [LOCAL_FIXTURE], activeId: "r-remote" });
+  context.runningDataDir = LOCAL_FIXTURE.dataDir;
+  assert.deepEqual(plain(await context.forgetEnvironment("l1", true)), { ok: false, error: "active" });
+  assert.deepEqual(calls.rm, []);
+  assert.deepEqual(calls.persisted, [], "the live entry stays in the registry");
+});
+
+test("forgetting a local environment while a switch is in flight is refused with {error:busy}", async () => {
+  const { calls, context } = runForget({ environments: [LOCAL_FIXTURE], activeId: "local" });
+  context.localSwitchInFlight = true;
+  assert.deepEqual(plain(await context.forgetEnvironment("l1", true)), { ok: false, error: "busy" });
+  assert.deepEqual(calls.rm, []);
+});
+
+test("a purge of a missing folder still removes the entry (rm runs with force)", async () => {
+  const { calls, context, rmOptions } = runForget({ environments: [LOCAL_FIXTURE], activeId: "local" });
+  assert.deepEqual(plain(await context.forgetEnvironment("l1", true)), { ok: true });
+  assert.deepEqual(calls.rm, [path.resolve(LOCAL_FIXTURE.dataDir)]);
+  assert.deepEqual(plain(rmOptions), [{ recursive: true, force: true }]);
+});
+
 function switchFixture(t, { startResults = [], releaseLeaseThrows = false, stopUtilityServer = async () => true } = {}) {
   const targetDir = mkdtempSync(join(tmpdir(), "omb-switch-fixture-"));
   t.after(() => rmSync(targetDir, { recursive: true, force: true }));
@@ -298,6 +328,7 @@ function switchFixture(t, { startResults = [], releaseLeaseThrows = false, stopU
   const context = vm.createContext({
     app: { isPackaged: true },
     localSwitchInFlight: false,
+    runningDataDir: null,
     serverProc: null,
     SERVER_PORT: 8799,
     serverSupervisor: {
@@ -311,6 +342,7 @@ function switchFixture(t, { startResults = [], releaseLeaseThrows = false, stopU
     stopUtilityServer,
     desktopDataDirLease: { release: () => { if (releaseLeaseThrows) throw new Error("lease release exploded"); } },
     acquireDataDirLease: () => ({ release: () => {} }),
+    acquireDataDirLeaseFor: () => ({ release: () => {} }),
     fs: { promises: { mkdir: async () => {} } },
     startServerOn: async (...args) => {
       forks.push(args);
@@ -361,12 +393,13 @@ test("a successful switch never runs the safety net", async (t) => {
   assert.equal(forks.length, 1, "only the switch's own startChild fork");
 });
 
-test("stopChild swallows child-stop errors — a dead child must not abort the switch", async (t) => {
-  const { context, targetDir } = switchFixture(t, { stopUtilityServer: async () => { throw new Error("the child died on its own"); } });
+test("a child that will not stop aborts the switch before its lease is handed away", async (t) => {
+  const { context, forks, targetDir } = switchFixture(t, { stopUtilityServer: async () => false });
   context.serverProc = { pid: 1 };
   const result = await context.switchLocalEnvironmentTo(targetDir, "l1");
-  assert.deepEqual(plain(result), { ok: true }, "the switch proceeds despite the stop throwing");
-  assert.equal(context.environmentsState.activeId, "l1");
+  assert.deepEqual(plain(result), { ok: false, error: "switch-failed" });
+  assert.equal(forks.length, 0, "no target child starts behind a child that never stopped");
+  assert.equal(context.environmentsState.activeId, "local", "the registry never moves");
 });
 
 test("boot reads the environment decision before the boot lease and never creates the missing dir", () => {

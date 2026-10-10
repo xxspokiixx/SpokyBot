@@ -250,7 +250,7 @@ function deliverPackageInstall(win) {
     showingLocal = new URL(win.webContents.getURL()).origin === rendererOrigin();
   } catch {}
   if (!showingLocal) {
-    if (activeEnvironment(environmentsState)) void workspaceMenuAction(() => switchEnvironment(LOCAL_ID));
+    if (activeRemote(environmentsState)) void workspaceMenuAction(() => switchEnvironment(LOCAL_ID));
     return;
   }
   win.webContents.send("package:install", pendingPackageInstallUrl);
@@ -296,6 +296,11 @@ let serverReady = !app.isPackaged;
 let secureCredentials = {};
 let secureCredentialState = null;
 let desktopDataDirLease = null;
+// The data folder this process actually leases and runs its server child on.
+// It follows the lease — set at boot, on every switch acquire, and on
+// rollback — not environmentsState.activeId, which also points at a remote
+// server or a fallback and so can drift from the folder the child owns.
+let runningDataDir = null;
 // One local-environment switch at a time: it stops the child and hands the
 // data-dir lease, and its probe can run a full boot timeout.
 let localSwitchInFlight = false;
@@ -347,7 +352,7 @@ const serverSupervisor = createServerSupervisor({
     // Existing chat windows reconnect in place, preserving unsent drafts.
     // A window opened during the outage is still on our error page instead.
     for (const win of BrowserWindow.getAllWindows()) {
-      if (!serverUnavailableWindows.has(win) || activeEnvironment(environmentsState)) continue;
+      if (!serverUnavailableWindows.has(win) || activeRemote(environmentsState)) continue;
       void win.loadURL(`http://127.0.0.1:${SERVER_PORT}`).then(() => {
         serverUnavailableWindows.delete(win);
       }).catch((error) => {
@@ -1043,7 +1048,7 @@ function ensureCloudAccount() {
       refreshCloudMenus();
       announceCloudReady(state);
       if (mainWindow && !mainWindow.isDestroyed() && mainWindow.webContents.mainFrame.url.startsWith(`${rendererOrigin()}/`) &&
-        !activeEnvironment(environmentsState) && !desktopRemoteAccess) mainWindow.webContents.send("cloud-account:state-changed", state);
+        !activeRemote(environmentsState) && !desktopRemoteAccess) mainWindow.webContents.send("cloud-account:state-changed", state);
     },
   });
   return cloudAccount;
@@ -1121,7 +1126,7 @@ async function openCloudAdd(source) {
   await cloudAccountRestored();
   const state = ensureCloudAccount().state();
   if (cloudOwned(state)) { await anotherCloudBox(state); return; }
-  if (activeEnvironment(environmentsState)) persistEnvironments(withActive(environmentsState, LOCAL_ID));
+  if (activeRemote(environmentsState)) persistEnvironments(withActive(environmentsState, LOCAL_ID));
   const win = mainWindow && !mainWindow.isDestroyed() ? mainWindow : createWindow({ deferNavigation: true });
   if (!desktopTray?.show()) activateExistingWindow(BrowserWindow.getAllWindows());
   const action = source === "app_howto" ? "cloud-add-howto" : "cloud-add";
@@ -1209,7 +1214,7 @@ function ensureManagedDesktop() {
       // Remote pages never receive local identity events, even if they were
       // loaded in this window after an earlier local subscription.
       if (mainWindow && !mainWindow.isDestroyed() && mainWindow.webContents.mainFrame.url.startsWith(`${rendererOrigin()}/`) &&
-          !activeEnvironment(environmentsState) && !desktopRemoteAccess) {
+          !activeRemote(environmentsState) && !desktopRemoteAccess) {
         mainWindow.webContents.send("organization:state-changed", state);
       }
     },
@@ -1300,7 +1305,7 @@ function receiveCompanyBackupClientState(event, input) {
 
 function publishCompanyBackupState(value) {
   companyBackupState = { ...value, ...(companyBackupSchedule ? { schedule: companyBackupSchedule.state() } : {}) };
-  if (mainWindow && !mainWindow.isDestroyed() && !activeEnvironment(environmentsState) && !desktopRemoteAccess &&
+  if (mainWindow && !mainWindow.isDestroyed() && !activeRemote(environmentsState) && !desktopRemoteAccess &&
       mainWindow.webContents.mainFrame.url.startsWith(`${rendererOrigin()}/`)) mainWindow.webContents.send("company-backups:state-changed", companyBackupState);
 }
 
@@ -1424,7 +1429,7 @@ function receivePhoneSecretSave(proc, rawMessage) {
   return true;
 }
 
-async function startServerOn(port, dataDir = startupEnvironmentDir(environmentsState, desktopDataDir())) {
+async function startServerOn(port, dataDir = runningDataDir ?? startupEnvironmentDir(environmentsState, desktopDataDir())) {
   if (desktopShutdownStarted) return { proc: null, abort: true };
   // A bootstrap beside index.js that turns on Node's compile cache for this
   // child, so a relaunch skips recompiling the server bundle.
@@ -1835,7 +1840,7 @@ ipcMain.on("desktop:unread-count", (event, value) => {
 // The app switches by loading the chosen server's own UI (electron/menu.mjs).
 // Only {id, name, origin} is stored here; the session credential is the
 // HttpOnly cookie /pair set for that origin, kept by Chromium's cookie jar.
-const { LOCAL_ID, activeEnvironment, allowedOrigins, bootEnvironmentDir, parseEnvironments, parseHostedWorkspaceLink, serializeEnvironments, startupEnvironmentDir, withActive, withEnvironment, withLocalEnvironment, withoutEnvironment, workspaceMenuTemplate, workspaceNavigationAllowed, workspaceSenderAllowed, workspaceSummary, workspaceWindowTitle } = environmentsModule;
+const { LOCAL_ID, activeEnvironment, activeRemote, allowedOrigins, bootEnvironmentDir, parseEnvironments, parseHostedWorkspaceLink, serializeEnvironments, startupEnvironmentDir, withActive, withEnvironment, withLocalEnvironment, withoutEnvironment, workspaceMenuTemplate, workspaceNavigationAllowed, workspaceSenderAllowed, workspaceSummary, workspaceWindowTitle } = environmentsModule;
 let environmentsState = { environments: [], activeId: LOCAL_ID };
 let computerSharing;
 const sharingPrompts = new Set();
@@ -1923,7 +1928,7 @@ function stopLending() {
  * window, with none of the openmausbot://cloud link's automatic actions. */
 async function openLendingSettings() {
   if (!app.isPackaged || desktopRemoteAccess || !serverReady) return;
-  if (activeEnvironment(environmentsState)) persistEnvironments(withActive(environmentsState, LOCAL_ID));
+  if (activeRemote(environmentsState)) persistEnvironments(withActive(environmentsState, LOCAL_ID));
   const win = mainWindow && !mainWindow.isDestroyed() ? mainWindow : createWindow({ deferNavigation: true });
   if (!desktopTray?.show()) activateExistingWindow(BrowserWindow.getAllWindows());
   if (!win.webContents.isLoadingMainFrame() && senderIsLocal({ sender: win.webContents })) win.webContents.send("app:open-settings", "cloud-settings");
@@ -2046,6 +2051,15 @@ function navigateMainWindow(url) {
  * (cloud-home.mjs rememberedCloudHome). */
 let rememberedHome = null;
 
+/** The data-directory lease for a switch or rollback target: the default dir
+ * carries the same legacy `.opengrokbot` guard the boot path uses, any other
+ * dir leases plainly. */
+function acquireDataDirLeaseFor(dir) {
+  return dir === desktopDataDir()
+    ? acquireDataDirLease(dir, { legacyDataDir: path.join(app.getPath("home"), ".opengrokbot") })
+    : acquireDataDirLease(dir);
+}
+
 /** Move the server child onto `targetDir`'s environment. The supervisor is
  * paused first: stopping the child here is deliberate, and its recovery
  * would fork on the wrong data dir. resume() is in a finally — on every
@@ -2057,7 +2071,7 @@ async function switchLocalEnvironmentTo(targetDir, targetId) {
   // run a full boot timeout, and a second switch sharing that window would
   // be un-paused by the first's finally mid-handoff.
   if (localSwitchInFlight) return { ok: false, error: "busy" };
-  const previousDir = startupEnvironmentDir(environmentsState, desktopDataDir());
+  const previousDir = runningDataDir ?? startupEnvironmentDir(environmentsState, desktopDataDir());
   let startedProc = null;
   let switchSucceeded = false;
   const failedSwitch = () => {
@@ -2078,28 +2092,21 @@ async function switchLocalEnvironmentTo(targetDir, targetId) {
       port: SERVER_PORT,
       deps: {
         stopChild: async () => {
-          // Swallow everything: the child may already be gone (crash, a
-          // recovery that raced us), and the supervisor is paused, so
-          // nothing is racing this stop. A stop error must not abort a
-          // switch that has nowhere to go but forward.
-          try {
-            const proc = serverProc;
-            if (proc && !(await stopUtilityServer(proc))) throw new Error("the server child did not stop");
-          } catch (error) {
-            slog(`switch stopChild ignored (${error?.message ?? error})`);
-          }
+          // A child that will not die keeps writing to its folder after this
+          // process would hand that folder's lease away. Abort the switch
+          // with the lease still held — the same "stuck-child" refusal
+          // startServerOn applies to a sibling server. An absent or
+          // already-exited child is a successful stop.
+          const proc = serverProc;
+          if (proc && !(await stopUtilityServer(proc))) throw new Error("the server child did not stop");
         },
         releaseLease: async () => {
           desktopDataDirLease?.release();
           desktopDataDirLease = null;
         },
         acquireLease: async (dir) => {
-          // Switching to (or rolling back to) the default dir must carry the
-          // same legacy `.opengrokbot` lease guard the boot path uses.
-          desktopDataDirLease =
-            dir === desktopDataDir()
-              ? acquireDataDirLease(dir, { legacyDataDir: path.join(app.getPath("home"), ".opengrokbot") })
-              : acquireDataDirLease(dir);
+          desktopDataDirLease = acquireDataDirLeaseFor(dir);
+          runningDataDir = dir;
         },
         createDir: async (dir) => {
           await fs.promises.mkdir(dir, { recursive: true });
@@ -2124,14 +2131,19 @@ async function switchLocalEnvironmentTo(targetDir, targetId) {
             slog(`switch rollback lease release failed: ${error?.message ?? error}`);
           }
           desktopDataDirLease = null;
-          desktopDataDirLease = acquireDataDirLease(previousDir);
+          desktopDataDirLease = acquireDataDirLeaseFor(previousDir);
+          runningDataDir = previousDir;
           const restored = await startServerOn(SERVER_PORT, previousDir);
           // Adoption is the caller's job (startServerOn only watches):
           // without the ready mark the rolled-back child is no one's —
           // serverProc stays null, so the next switch's stopChild would
           // skip it and collide on the port, and no recovery is armed.
           if (restored.proc) serverSupervisor.ready(restored.proc);
-          else slog(`switch rollback could not restart the server on ${previousDir}`);
+          else {
+            const error = new Error(`could not restart the server on ${previousDir}`);
+            slog(`switch rollback ${error.message}`);
+            throw error;
+          }
         },
         persistActive: (id) => persistEnvironments(withActive(environmentsState, id)),
         log: slog,
@@ -2172,9 +2184,10 @@ async function switchEnvironment(id) {
   if (id === environmentsState.activeId || (id !== LOCAL_ID && !environmentsState.environments.some((entry) => entry.id === id))) return;
   const entry = environmentsState.environments.find((candidate) => candidate.id === id);
   if (entry?.kind === "local") return await switchLocalEnvironmentTo(entry.dataDir, entry.id);
-  // Leaving a named environment for "This computer" is the same flow onto
-  // the default dir; "This computer" has no entry of its own.
-  if (id === LOCAL_ID && activeEnvironment(environmentsState)?.kind === "local") {
+  // Leaving any named folder for "This computer" is the same flow onto the
+  // default dir, even when the window shows a remote server but the child is
+  // still on a named folder ("This computer" has no entry of its own).
+  if (id === LOCAL_ID && (runningDataDir ?? desktopDataDir()) !== desktopDataDir()) {
     return await switchLocalEnvironmentTo(desktopDataDir(), LOCAL_ID);
   }
   // "My Cloud" opens through the Cloud's own connection: never a page that
@@ -2203,8 +2216,11 @@ function createLocalEnvironment(name, dataDir) {
     const slug = typeof name === "string"
       ? name.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "")
       : "";
-    if (!slug) return { ok: false, error: "name", state };
-    candidateDir = path.join(os.homedir(), `.openmausbot-${slug}`);
+    // A missing or blank name is rejected; a name with no ASCII letters (a
+    // Hindi or Japanese name, say) gets a generated suffix instead — the slug
+    // is a directory hint, not a requirement.
+    if (typeof name !== "string" || !name.trim()) return { ok: false, error: "name", state };
+    candidateDir = path.join(os.homedir(), `.openmausbot-${slug || randomUUID().slice(0, 8)}`);
   } else {
     candidateDir = typeof dataDir === "string" ? dataDir.trim() : "";
     if (
@@ -2251,7 +2267,7 @@ const organizationEntry = createOrganizationEntry({
   openLocalSettings: async () => {
     if (!app.isPackaged) throw new Error("Organization sign-in requires the installed desktop app.");
     if (!serverReady) throw new Error("This installation is unavailable. Restart the app and try organization sign-in again.");
-    if (desktopRemoteAccess || activeEnvironment(environmentsState)) throw new Error("Choose this computer before signing in with your organization.");
+    if (desktopRemoteAccess || activeRemote(environmentsState)) throw new Error("Choose this computer before signing in with your organization.");
     const win = mainWindow && !mainWindow.isDestroyed() ? mainWindow : createWindow({ deferNavigation: true });
     if (!win.webContents.isLoadingMainFrame() && senderIsLocal({ sender: win.webContents })) {
       win.webContents.send("app:open-settings", "organization");
@@ -2289,7 +2305,7 @@ async function openCloudEntry() {
   // Let a saved sign-in finish restoring first: the view must not take it for
   // signed out and start another.
   await cloudAccountRestored();
-  const active = activeEnvironment(environmentsState);
+  const active = activeRemote(environmentsState);
   const showingCloud = Boolean(active) && active.origin === cloudAccount?.homeTarget()?.origin;
   if (active && !showingCloud) persistEnvironments(withActive(environmentsState, LOCAL_ID));
   const win = mainWindow && !mainWindow.isDestroyed() ? mainWindow : createWindow({ deferNavigation: !showingCloud });
@@ -2427,11 +2443,19 @@ async function forgetEnvironment(id, purge = false) {
     // default dir — "This computer" must never be rm -rf'd from here.
     // Until the delete has actually happened the entry stays: a failed
     // purge must not silently orphan the folder behind the registry's back.
+    if (localSwitchInFlight) return { ok: false, error: "busy" };
     const resolved = path.resolve(env.dataDir);
     const root = path.resolve(desktopDataDir());
-    if (path.basename(resolved).startsWith(".openmausbot") && resolved !== root && !resolved.startsWith(root + path.sep)) {
+    // Canonical compare: a symlink named like a data dir must not let the
+    // guard mistake it for a safe target (or miss a real one). realpath
+    // throws on a missing folder, which rm's force:true then removes anyway.
+    const canonical = (dir) => { try { return fs.realpathSync(dir); } catch { return dir; } };
+    const resolvedCanon = canonical(resolved);
+    const rootCanon = canonical(root);
+    if (runningDataDir && canonical(runningDataDir) === resolvedCanon) return { ok: false, error: "active" };
+    if (path.basename(resolved).startsWith(".openmausbot") && resolvedCanon !== rootCanon && !resolvedCanon.startsWith(rootCanon + path.sep)) {
       try {
-        await fs.promises.rm(resolved, { recursive: true });
+        await fs.promises.rm(resolved, { recursive: true, force: true });
       } catch (error) {
         slog(`forget environment: purge failed (${error?.message ?? error})`);
         return { ok: false, error: "purge" };
@@ -2619,7 +2643,7 @@ function createWindow({ deferNavigation = false } = {}) {
   });
   win.webContents.on("did-fail-load", (_event, errorCode, errorDescription, validatedURL, isMainFrame) => {
     if (!isMainFrame || errorCode === -3) return; // -3: aborted by a newer navigation
-    const remote = activeEnvironment(environmentsState);
+    const remote = activeRemote(environmentsState);
     if (!remote) return;
     let origin = null;
     try {
@@ -2752,7 +2776,7 @@ function createWindow({ deferNavigation = false } = {}) {
     });
   }
 
-  const remote = activeEnvironment(environmentsState);
+  const remote = activeRemote(environmentsState);
   if (!serverReady && (desktopRemoteAccess || (app.isPackaged && !remote))) serverUnavailableWindows.add(win);
   // The confirmed native organisation action supplies the fixed local URL.
   if (deferNavigation) return win;
@@ -3751,6 +3775,7 @@ app.whenReady().then(async () => {
       desktopDataDirLease = acquireDataDirLease(bootDataDir, {
         legacyDataDir: path.join(app.getPath("home"), ".opengrokbot"),
       });
+      runningDataDir = bootDataDir;
     } catch (error) {
       dialog.showErrorBox(
         "OpenMausBot could not start safely",
@@ -3891,6 +3916,7 @@ app.whenReady().then(async () => {
         desktopDataDirLease = acquireDataDirLease(desktopDataDir(), {
           legacyDataDir: path.join(app.getPath("home"), ".opengrokbot"),
         });
+        runningDataDir = desktopDataDir();
       } catch (error) {
         dialog.showErrorBox(
           "OpenMausBot could not start safely",

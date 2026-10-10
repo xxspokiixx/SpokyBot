@@ -26,11 +26,13 @@ export async function switchLocalEnvironment({ targetDir, targetId, port = DEFAU
     // rollback(port) kills the failed child (if any), re-acquires the old
     // lease and restarts the old environment. It owns the restart: this
     // module never calls startChild on a failure path, so a failed switch
-    // cannot double-start the server.
+    // cannot double-start the server. A rollback that itself fails is not a
+    // successful rollback.
     try {
       await rollback(port);
     } catch (error2) {
       log(`switch rollback failed: ${error2?.message ?? error2}`);
+      return { ok: false, error, rolledBack: false };
     }
     return { ok: false, error, rolledBack: true };
   };
@@ -86,6 +88,14 @@ export async function switchLocalEnvironment({ targetDir, targetId, port = DEFAU
     return await fail(outcome || "unhealthy");
   }
 
-  await persistActive(targetId);
+  // The registry write is the last step: only after it lands is the target
+  // "the" environment. If it fails, the target child and lease are already
+  // live, so roll them back the same way any earlier failure does.
+  try {
+    await persistActive(targetId);
+  } catch (error) {
+    log(`switch to ${targetDir} aborted: active-ID persistence failed (${error?.message ?? error})`);
+    return await fail("persist-failed");
+  }
   return { ok: true };
 }

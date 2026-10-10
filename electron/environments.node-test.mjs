@@ -330,3 +330,22 @@ test("withLocalEnvironment compares Windows-shaped paths by separators and case"
   assert.equal(unc.ok, true);
   assert.equal(env.withLocalEnvironment(unc.state, { name: "Under", dataDir: "\\\\NAS\\omb\\deep" }, () => "x", "\\\\NAS\\elsewhere").error, "nested");
 });
+
+test("parseEnvironments dedups local dirs on the same normalized key", () => {
+  const parse = (entries) => env.parseEnvironments(JSON.stringify({ version: 2, environments: entries, activeId: "local" })).environments;
+  // Trailing slash is the same folder.
+  assert.deepEqual(parse([
+    { id: "l1", kind: "local", name: "A", dataDir: "/Users/me/.openmausbot-aprs" },
+    { id: "l2", kind: "local", name: "B", dataDir: "/Users/me/.openmausbot-aprs/" },
+  ]).map((entry) => entry.id), ["l1"]);
+  // Windows separator style and drive case are the same folder.
+  assert.deepEqual(parse([
+    { id: "l1", kind: "local", name: "A", dataDir: "C:\\Bots\\Site" },
+    { id: "l2", kind: "local", name: "B", dataDir: "c:/bots/site" },
+  ]).map((entry) => entry.id), ["l1"]);
+  // Distinct siblings survive.
+  assert.equal(parse([
+    { id: "l1", kind: "local", name: "A", dataDir: "/Users/me/.openmausbot-a" },
+    { id: "l2", kind: "local", name: "B", dataDir: "/Users/me/.openmausbot-b" },
+  ]).length, 2);
+});
