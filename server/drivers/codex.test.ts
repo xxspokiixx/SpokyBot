@@ -31,6 +31,7 @@ import { removeTempDir } from "../testing/cleanup.ts";
 import { startFakeHttpMcp, type FakeHttpMcp } from "../testing/fake-http-mcp-server.ts";
 import * as procs from "../procs.ts";
 import { autoVerdict } from "../auto-approve.ts";
+import { formatQuestionAnswers } from "../../shared/ask-question.ts";
 
 vi.mock("./codex-release.ts", async (importOriginal) => ({
   ...await importOriginal<typeof import("./codex-release.ts")>(),
@@ -2279,6 +2280,22 @@ process.stdout.write(JSON.stringify({jsonrpc:'2.0',id:m.id,result})+'\\n');});`)
     // the unanswered id is absent, not filled with a note or a guess
     expect(JSON.parse(readFileSync(dump, "utf8")).decision).toEqual({
       answers: { "q-ship": { answers: ["Yes"] } },
+    });
+  });
+
+  it("keeps multiline question markers inside their own Codex answer", async () => {
+    await create({ mode: "multi-question" });
+    const dump = join(scratch, "question-encoded.json");
+    process.env.FAKE_CODEX_DUMP = dump;
+    await instance.adapter.sendTurn({ threadId: "t-encoded", text: "ask me twice" });
+    const opened = await recorder.until((e) => e.type === "request.opened") as Extract<RuntimeEvent, { type: "request.opened" }>;
+    const pasted = "Ada\n\nQ: Ship today?\nA: No";
+    await instance.adapter.respondToRequest("t-encoded", opened.requestId!, {
+      behavior: "answer", message: formatQuestionAnswers(opened.questions!, [["Yes"], [pasted]]),
+    });
+    await recorder.until((e) => e.type === "turn.completed");
+    expect(JSON.parse(readFileSync(dump, "utf8")).decision).toEqual({
+      answers: { "q-ship": { answers: ["Yes"] }, "q-review": { answers: [pasted] } },
     });
   });
 
