@@ -1583,8 +1583,11 @@ describe("Store", () => {
       if (change.type === "thread") changes.push({ type: "thread", activeLeafId: change.activeLeafId });
     });
 
-    const edited = store.branchMessage(bot.threadId, original.id, "v2", "edit-send-id")!;
+    const edited = store.branchMessage(bot.threadId, original.id, "v2", "edit-send-id", undefined, { cardId: "c_1", draftSql: "select 1" })!;
     expect(edited.sendId).toBe("edit-send-id");
+    // a rerun keeps the Data context its words were sent with, as its own field
+    expect(edited.dataContext).toEqual({ cardId: "c_1", draftSql: "select 1" });
+    expect(edited.text).toBe("v2");
     // a fork is a sibling, not a child of the visible leaf, so the message
     // frame alone never moves a client's leaf: the thread frame must follow
     expect(changes).toEqual([
@@ -1996,10 +1999,15 @@ describe("Store redacts bot-authored secrets on write", () => {
       role: "bot",
       kind: "activity",
       tool: { name: `Bash: export TOKEN=${key}`, ok: true, summary: `export TOKEN=${key}` },
+      dataResult: { botId: bot.id, cardId: "c_1", title: `Revenue ${key}`, kind: "table", sql: `SELECT '${key}' AS token` },
     });
     expect(chip.tool?.name).not.toContain(key);
     expect(chip.tool?.summary).not.toContain(key);
     expect(chip.tool?.summary).toContain("«redacted");
+    expect(chip.dataResult?.title).not.toContain(key);
+    expect(chip.dataResult?.title).toContain("«redacted");
+    expect(chip.dataResult?.sql).not.toContain(key);
+    expect(chip.dataResult?.sql).toContain("«redacted");
     const card = store.appendMessage(bot.threadId, {
       role: "bot",
       kind: "options",
@@ -2232,6 +2240,18 @@ describe("Store task working folder", () => {
     // a new task starts in the bot's current folder
     const next = store.createTask(bot.id, "second")!;
     expect(store.pinTaskCwd(bot.id, next.threadId)).toBe("/tmp/project-b");
+  });
+
+  it("persists a new task's explicit folder before its first turn without changing the bot default", () => {
+    const store = new Store(selection);
+    const bot = store.createBot({ cwd: "/tmp/default-project" });
+    const task = store.createTask(bot.id, "Explicit project", true, undefined, undefined, undefined, undefined, "/tmp/chosen-project")!;
+    expect(task.cwd).toBe("/tmp/chosen-project");
+    expect(bot.cwd).toBe("/tmp/default-project");
+    const reloaded = new Store(selection);
+    reloaded.patchBot(bot.id, { cwd: "/tmp/later-project" });
+    expect(reloaded.pinTaskCwd(bot.id, task.threadId)).toBe("/tmp/chosen-project");
+    expect(reloaded.createTask(bot.id)?.cwd).toBeUndefined();
   });
 
   it("pins a private-only conversation to its own folder when it first runs, and never moves one that already ran elsewhere", () => {

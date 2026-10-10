@@ -4,6 +4,7 @@ import { toolStepLabel } from "./tool-step-label";
 describe("toolStepLabel", () => {
   it.each([
     [{ name: "Bash", summary: "pnpm test" }, "Run a command"],
+    [{ name: "pwd", summary: "pwd" }, "Run a command"],
     [{ name: "Read" }, "Read a file"],
     [{ name: "WebSearch" }, "Search the web"],
     [{ name: "mcp__omb__computer_batch" }, "Use the computer"],

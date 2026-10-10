@@ -52,6 +52,7 @@ import {
   type CredentialTargetId,
 } from "../shared/credential-request.ts";
 
+import { createRoomTurnLevels } from "./room-turn-level.ts";
 import { HELD_NOTE, approvalHeldNote, approvalHeldReason, approvalModeForOrigin, autoVerdict, deliverFullAccessApproval, delegatedApprovalMode } from "./auto-approve.ts";
 import { CommandAllowlistStore, commandAllowlistCandidate } from "./command-allowlist.ts";
 import type { CommandAllowlistCandidate, CommandAllowlistResponse } from "../shared/command-allowlist.ts";
@@ -140,6 +141,7 @@ import { chiefOfStaffSystemPrompt } from "./chief-of-staff.ts";
 import { buildRecall } from "./recall.ts";
 import { hostTimeZone, takesTurnClock, turnClockLine, withTurnClock } from "./turn-clock.ts";
 import { createMemoryUpkeep, upkeepEnabled } from "./memory-upkeep.ts";
+import type { CaptureTurn } from "./memory-capture.ts";
 import { appendAboutMe, commitLearned, planLearned } from "./profile-learned.ts";
 import { canAccessTeam, canReachPeer, coordinatorSupervises, livePeerRoster, livePeerRosterBlock, peerAllowed, peerName, peerRosterSystemPrompt, peerStatus, peerStatusWords, reachablePeers, resolveTeammate, roomPeerRosterSystemPrompt, roomRosterLine, PEER_ACCESS_HELP } from "./peer-roster.ts";
 import {
@@ -284,6 +286,8 @@ import {
   restoreAsideMessages,
 } from "./aside-queue.ts";
 import { promptWithReply, transcriptText } from "./replies.ts";
+import { parseDataContext, type DataContext } from "./data-context.ts";
+import { promptWithDataContext } from "../shared/data-context.ts";
 import { admit, DRAIN_COALESCE_MAX_ITEMS } from "./admission.ts";
 import { _loadPending, buildDelegationFailurePrompt, buildDelegationRevivalPrompt, DELEGATION_TTL_MS, DelegationWakeBudget, discardDelegations, drainDelegations, expireStaleDelegations, findDelegationReceipt, pendingDelegationInfo, pendingDelegationSnapshot, pendingThreads, queueDelegation, recordDelegationReceipt, releaseDelegationsWaitingOn, summarizeDelegatedActivity, type DelegationReceipt, type QueueResult } from "./delegations.ts";
 import {
@@ -424,6 +428,7 @@ import {
   setSkillEnabled,
   skillPackageStamps,
   skillsSystemPrompt,
+  expandSkillCommandTurnText,
   stageSkillWrite,
   undoSkillWrite,
 } from "./skills.ts";
@@ -2245,6 +2250,7 @@ const computerSelectionTurns = new Map<string, {
   botId: string;
   source: Message;
   text: string;
+  dataContext?: DataContext;
   mounted?: Surface;
   selected?: Surface;
   previousSurface?: Surface;
@@ -6232,6 +6238,8 @@ function notify(notification: Notification | null) {
 // Group threads: the fold needs to know WHO is talking — the turn engine
 // records the active member here before dispatching its turn.
 const groupSpeakers = new Map<string, { botId: string; name: string; color: string }>();
+/** The level each running room turn was sent with (room-turn-level.ts). */
+const roomTurnLevels = createRoomTurnLevels();
 
 type RoutedBy = NonNullable<Message["routedBy"]>;
 /** Auto-room rounds the decision model routed, by thread: the named
@@ -6421,7 +6429,8 @@ const memoryUpkeep = createMemoryUpkeep({
     const instance = bot ? registry.get(bot.modelSelection.instanceId) : undefined;
     // an engine the organisation disallows never receives memory text
     if (!bot || !instance || policyModelRefusal(instance)) return null;
-    const generate = instance.generateText?.bind(instance);
+    // generateMemoryText: the ACP engines' upkeep-only one-shot, on their own provider
+    const generate = (instance.generateText ?? instance.generateMemoryText)?.bind(instance);
     return generate ? {
       generateText: async (prompt, options) => {
         // Check every capture, organize and contradiction call, including
@@ -6458,6 +6467,14 @@ const memoryUpkeep = createMemoryUpkeep({
     return facts.length;
   },
   sourceLabel: (botId, threadId) => memorySourceLabel({ task: store.taskByThread(botId, threadId), threadId }),
+  // Turns still waiting at the last shutdown, read back from the transcript.
+  // The checks that need only stored state run again; the in-memory ones
+  // (internal, unattended) already passed before the turn was queued.
+  restoreTurn: (botId, threadId, turnId) => {
+    if (store.botByThread(threadId)?.id !== botId || store.groupByThread(threadId) || routines?.runForThread(threadId)) return null;
+    if (CLOUD_HOME && !cloudOwnerOnlyThread(threadId)) return null;
+    return captureTurnFor(threadId, turnId);
+  },
   // On a Cloud home upkeep only works on the owner's conversations (see the
   // capture hook below), so its writes are the owner's (lending-memory.ts).
   ...(lendingMemory ? { writing: <T>(botId: string, write: () => T): T => lendingMemory.trustedWrite(botId, write) } : {}),
@@ -6485,6 +6502,23 @@ bus.subscribe((event: RuntimeEvent) => {
   }
 });
 
+/** One finished turn as capture reads it: the person's message and the bot's
+ * reply, or null when the reply is not on the active path (rewound) or the
+ * message was another bot's ask. */
+function captureTurnFor(threadId: string, turnId: string): CaptureTurn | null {
+  const path = store.activePath(threadId);
+  const replyAt = path.findLastIndex((message) => message.role === "bot" && message.kind === "text" && message.turnId === turnId);
+  if (replyAt < 0) return null;
+  const asked = path.slice(0, replyAt).findLast((message) => message.role === "user" && message.kind === "text");
+  if (!asked || asked.peerAsk) return null;
+  return {
+    person: extractTurnImages(asked.text ?? "").text,
+    bot: path[replyAt]!.text ?? "",
+    owner: !asked.sender,
+    turnId,
+  };
+}
+
 // A finished 1:1 turn of an upkeep bot waits for capture. Only the person's
 // own conversation: not a room, not a turn another bot or the harness
 // started (its "user" line is not the person), not a failed turn.
@@ -6498,16 +6532,8 @@ bus.subscribe((event: RuntimeEvent) => {
     // On a Cloud home the bot's memory reaches its owner's turns (and a lent
     // Mac): nothing is captured from a conversation anyone else wrote in.
     if (CLOUD_HOME && !cloudOwnerOnlyThread(event.threadId)) return;
-    const path = store.activePath(event.threadId);
-    const replyAt = path.findLastIndex((message) => message.role === "bot" && message.kind === "text" && message.turnId === event.turnId);
-    if (replyAt < 0) return;
-    const asked = path.slice(0, replyAt).findLast((message) => message.role === "user" && message.kind === "text");
-    if (!asked || asked.peerAsk) return;
-    memoryUpkeep.noteTurn(bot.id, event.threadId, {
-      person: extractTurnImages(asked.text ?? "").text,
-      bot: path[replyAt]!.text ?? "",
-      owner: !asked.sender,
-    });
+    const turn = captureTurnFor(event.threadId, event.turnId);
+    if (turn) memoryUpkeep.noteTurn(bot.id, event.threadId, turn);
   } catch (error) {
     console.warn(`memory upkeep: could not queue a turn for capture: ${(error as Error).message}`);
   }
@@ -7430,7 +7456,7 @@ function continueComputerSelection(threadId: string, generation: string | undefi
     // machine's record, so a later Works on change may sweep it.
     store.patchTask(bot.id, threadId, { surface, surfaceSource: "auto" });
     const text = `The computer selection is now ${surfaceLabel(surface)}. Continue the user's original request using the tools mounted for this turn; verify the result before claiming success.\n\n${selection.text}`;
-    void startTurn(bot.id, text, { threadId, userMessage: selection.source, computerSelectionContinuation: true }).catch(error => {
+    void startTurn(bot.id, text, { threadId, userMessage: selection.source, computerSelectionContinuation: true, dataContext: selection.dataContext }).catch(error => {
       if (store.taskByThread(bot.id, threadId)) store.appendMessage(threadId, { role: "bot", kind: "activity",
         tool: { name: `Could not continue on ${surfaceLabel(surface)}: ${error instanceof Error ? error.message : String(error)}`, ok: false } });
     });
@@ -7888,7 +7914,13 @@ bus.subscribe((event: RuntimeEvent) => {
       // A turn a guest drives on a Cloud home is Ask, room turns included,
       // and no command the owner saved answers for it.
       const guestDriven = cloudGuestDriven(event.threadId);
-      const effectiveApprovalMode = asker && !guestDriven ? approvalModeForTurn(asker, isInternalTurn(event.threadId), event.threadId) : "ask";
+      const ownApprovalMode = (who: BotRecord) => approvalModeForTurn(who, isInternalTurn(event.threadId), event.threadId);
+      // A room turn runs at the level it was sent with, which a Chief's
+      // handoff may have raised (roomTurnApprovalMode). The bot's own level
+      // would make a Full room turn ask on engines that leave requests to us.
+      const effectiveApprovalMode = !asker || guestDriven ? "ask"
+        : group && speaker?.botId === asker.id ? roomTurnLevels.forRequest(event.threadId, asker.id, () => ownApprovalMode(asker))
+          : ownApprovalMode(asker);
       // Native shell descriptors are distinct from computer/MCP permissions;
       // choosing a local desktop must not disable an exact shell grant.
       const command = permission && asker && event.requestId && !event.requiresExplicitApproval && event.command && !guestDriven
@@ -9215,7 +9247,7 @@ function drainAsideLane() {
 
 /** Keep a person's words off the transcript until a direct-thread slot is
  * available. Reuse the existing cancellable, idempotent composer queue. */
-async function startOrQueueDirectMessage(botId: string, threadId: string, text: string, replyTo?: Message, sendId?: string, sender?: ResolvedSender, trigger?: UsageTrigger, via?: "call") {
+async function startOrQueueDirectMessage(botId: string, threadId: string, text: string, replyTo?: Message, sendId?: string, sender?: ResolvedSender, trigger?: UsageTrigger, via?: "call", dataContext?: DataContext) {
   const decision = admit("direct", {}, {
     // A room turn holds the bot exactly like the sibling opened-thread queue
     // below: the drain's own block check waits it out, so the words queue
@@ -9229,15 +9261,16 @@ async function startOrQueueDirectMessage(botId: string, threadId: string, text: 
     const queued = queueSteeredMessage(botId, threadId, text, {
       replyToId: replyTo?.id,
       sendId,
+      dataContext,
       reason: decision.reason,
-      prompt: promptWithReply(text, replyTo, cfg.profile?.name?.trim() || "User"),
+      prompt: promptWithReply(promptWithDataContext(text, dataContext), replyTo, cfg.profile?.name?.trim() || "User"),
       sender,
       trigger,
       via,
     });
     return { ok: true as const, queued: true as const, queueId: queued.id, threadId, reason: decision.reason };
   }
-  const message = await startTurn(botId, text, { threadId, replyTo, sendId, sender, trigger, via });
+  const message = await startTurn(botId, text, { threadId, replyTo, sendId, sender, trigger, via, dataContext });
   return { ok: true as const, threadId, message };
 }
 
@@ -9289,13 +9322,16 @@ async function acceptDirectSend(
     sender?: ResolvedSender;
     trigger: UsageTrigger;
     via?: "call";
+    /** The Data result the person was viewing (shared/data-context.ts):
+     * recorded on the message, and put in front of the words the model gets. */
+    dataContext?: DataContext;
     /** A person is proven present (a paired session, or the desktop's owner
      * capability): steering their words in clears the unattended mark. */
     personPresent: boolean;
   },
   guardedStart?: (currentAtStart: BotRecord) => Promise<DirectSendReceipt>,
 ): Promise<DirectSendReceipt> {
-  const { botId, threadId, text, sendId, replyTo, sender, trigger, via, personPresent } = input;
+  const { botId, threadId, text, sendId, replyTo, sender, trigger, via, dataContext, personPresent } = input;
   const refused = directSendRefusal(botId, threadId);
   if (refused) throw refused;
   return sendSequencer.run(
@@ -9357,7 +9393,7 @@ async function acceptDirectSend(
         // the second check carries that fact to the type system.
         if (busyAdmission.action === "steer" && instance?.adapter.steer) {
           steered = await instance.adapter
-            .steer(threadId, promptWithReply(text, replyTo, cfg.profile?.name?.trim() || "User"))
+            .steer(threadId, promptWithReply(promptWithDataContext(text, dataContext), replyTo, cfg.profile?.name?.trim() || "User"))
             .catch((): SteerOutcome => "indeterminate");
         }
         // steer() is awaited adapter work. The turn can settle, the task can
@@ -9392,6 +9428,7 @@ async function acceptDirectSend(
             text,
             replyToId: replyTo?.id,
             sendId,
+            ...(dataContext ? { dataContext } : {}),
             steered: true,
             sender,
             ...(via ? { via } : {}),
@@ -9401,19 +9438,20 @@ async function acceptDirectSend(
           return { ok: true as const, steered: true as const, threadId, message };
         }
         if (!current.busy) {
-          return startOrQueueDirectMessage(botId, threadId, text, replyTo, sendId, sender, trigger, via);
+          return startOrQueueDirectMessage(botId, threadId, text, replyTo, sendId, sender, trigger, via, dataContext);
         }
         const queued = queueSteeredMessage(current.id, threadId, text, {
           replyToId: replyTo?.id,
           sendId,
-          prompt: promptWithReply(text, replyTo, cfg.profile?.name?.trim() || "User"),
+          dataContext,
+          prompt: promptWithReply(promptWithDataContext(text, dataContext), replyTo, cfg.profile?.name?.trim() || "User"),
           sender,
           trigger,
           via,
         });
         return { ok: true as const, queued: true as const, queueId: queued.id, threadId };
       }
-      return startOrQueueDirectMessage(botId, threadId, text, replyTo, sendId, sender, trigger, via);
+      return startOrQueueDirectMessage(botId, threadId, text, replyTo, sendId, sender, trigger, via, dataContext);
     },
   );
 }
@@ -9777,6 +9815,11 @@ async function startTurn(
     /** An external interface relayed the words through the guarded send
      * route (Message.relayed): nobody typed them in a client here. */
     relayed?: boolean;
+    /** The Data result the person was viewing: stored on the user line, and
+     * its hint goes in front of the provider text for this turn and for
+     * every retry of it (edit/regenerate, backup engine, computer
+     * selection), never into the stored words. */
+    dataContext?: DataContext;
     onDispatchError?: (message: string) => void;
     /** Summarize this conversation without asking the agent to do more work. */
     compactOnly?: boolean;
@@ -9881,7 +9924,7 @@ async function startTurn(
   // path-reading drivers retain the attachment tag as their compatibility route.
   const resolvedImages = extractTurnImages(text);
   const usesNativeImageInput = instance.adapter.capabilities.nativeImageInput === true;
-  const providerText = usesNativeImageInput ? resolvedImages.text : text;
+  const providerText = promptWithDataContext(usesNativeImageInput ? resolvedImages.text : text, opts?.dataContext);
   const turnImages = usesNativeImageInput ? resolvedImages.images : [];
   const commsDepth = opts?.commsDepth ?? 0;
   // Classify the turn where the peer paths' depth actually arrives: by the
@@ -9937,7 +9980,7 @@ async function startTurn(
   // an edit hands us its already-branched user message; a plain send appends
   let userMessage = opts?.userMessage;
   if (opts?.editedMessageId) {
-    const edited = store.branchMessage(threadId, opts.editedMessageId, text, opts.sendId, opts.sender);
+    const edited = store.branchMessage(threadId, opts.editedMessageId, text, opts.sendId, opts.sender, opts.dataContext);
     if (!edited) throw Object.assign(new Error("only a user text message can be edited"), { status: 400 });
     store.patchTask(bot.id, threadId, { rewound: true });
     userMessage = edited;
@@ -9951,6 +9994,7 @@ async function startTurn(
           text,
           replyToId: opts?.replyTo?.id,
           sendId: opts?.sendId,
+          ...(opts?.dataContext ? { dataContext: opts.dataContext } : {}),
           peerAsk: opts?.peerAsk,
           sender: opts?.sender,
           ...(opts?.via ? { via: opts.via } : {}),
@@ -10012,7 +10056,7 @@ async function startTurn(
   if (!opts?.computerSelectionContinuation && !opts?.cardContinuation && !opts?.automationSource && !opts?.unattended &&
       !opts?.commsDepth && !opts?.coordination && !inheritedTeamComputer(bot) && bot.computer !== "off" && agentsMounted) {
     const source = store.activePath(threadId).findLast(message => message.id === userMessage?.id && message.role === "user" && !message.peerAsk);
-    if (source) computerSelectionTurns.set(threadId, { generation: dispatchClaimId, botId: bot.id, source, text });
+    if (source) computerSelectionTurns.set(threadId, { generation: dispatchClaimId, botId: bot.id, source, text, dataContext: opts?.dataContext });
   }
   store.setTaskActivity(bot.id, threadId, "working");
   // Watch from admission, not dispatch: a turn can wedge in setup — context
@@ -10143,7 +10187,14 @@ async function startTurn(
       // gate on whether the coaching block itself is active — setupModeActive,
       // which also depends on the bot's soul/description — is decided below,
       // from the same bot snapshot the prompt's soul is built from.
-      const setupText = agentsMounted ? expandSetupTurnText(providerText) : providerText;
+      // A `/name` turn for one of the bot's enabled skills reads as a plain
+      // request to follow that SKILL.md (shared/skill-command.ts). Only where
+      // the skills index rides the prompt: an engine without workspace files
+      // never sees the skill, so it keeps the person's literal text.
+      const skillCommandText = supportsWorkspaceFiles(instance.driverKind)
+        ? expandSkillCommandTurnText(bot.id, providerText, skillsLibraryEnabled(cfg) ? (store.bot(bot.id)?.assignedSkills ?? bot.assignedSkills) : undefined)
+        : providerText;
+      const setupText = agentsMounted ? expandSetupTurnText(skillCommandText) : skillCommandText;
       const userTurnText = promptWithReply(
         skillAuthoring ? expandLearnTurnText(setupText) : setupText,
         opts?.replyTo,
@@ -10992,6 +11043,7 @@ async function startTurn(
         startupRecovery: cfg.automaticRecovery?.enabled === true &&
           (opts?.automaticRecoveryIndex ?? 0) < ((liveBot ?? bot).fallback?.length || (cfg.automaticRecovery.backup ? 1 : 0)),
         text: withTurnClock(clock, withRecalled(recalled, dispatchContext.turnText)),
+        ...(recalled ? { recalled } : {}),
         images: turnImages,
         approvalMode: approvalModeForTurn(bot, commsDepth > 0, threadId),
         toolScope,
@@ -13434,9 +13486,11 @@ async function runGroupMemberTurn(
       });
       finish("timed_out");
     });
+    let releaseTurnLevel = () => {};
     const finish = (value: GroupMemberTurnOutcome) => {
       if (done) return;
       done = true;
+      releaseTurnLevel();
       deadline.stop();
       unsub();
       unregisterStall();
@@ -13484,12 +13538,17 @@ async function runGroupMemberTurn(
     // notes only in a room: a private chat reaches a room through the
     // explicit, disclosed session_search, never automatically
     const roomRecalled = cardContinuation ? "" : autoRecallPrompt(bot, threadId, resolvedLatestImages.text, { conversations: false, userName });
+    // The permission requests this turn raises are judged at the level it
+    // was sent with, a Chief's delegated level included (request.opened).
+    const turnApprovalMode = roomTurnApprovalMode(readyBot, threadId, orchestration);
+    if (!done) releaseTurnLevel = roomTurnLevels.dispatched(threadId, readyBot.id, turnApprovalMode);
     guardTurnDispatch(instance.adapter.sendTurn({
         threadId,
         botId: readyBot.id,
         text: withTurnClock(turnClockLine(Date.now(), hostTimeZone()), withRecalled(roomRecalled, text)),
+        ...(roomRecalled ? { recalled: roomRecalled } : {}),
         images: turnImages,
-        approvalMode: roomTurnApprovalMode(readyBot, threadId, orchestration),
+        approvalMode: turnApprovalMode,
         toolScope: toolScopeForTurn(readyBot.id),
         ...(roomGuestConfined ? { guestConfined: true, confinedWhy: confinedWhy(threadId) } : {}),
         system: roomSystem.text,
@@ -17070,6 +17129,16 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
           compileChart, validateVegaLite, renderer: chartRenderer,
           exportRoots: () => dataExportRoots(internalSender),
           signal: abort.signal, assertActive: requireActiveInternalCapability,
+          onShow: (card) => {
+            // The receipt names the tool that ran; the card's title lives in
+            // dataResult, where no consumer mistakes it for a status or error.
+            store.appendMessage(internalCapability.threadId, {
+              role: "bot", kind: "activity", tool: { name: "data_show", ok: true },
+              dataResult: { botId: internalSender.id, cardId: card.id, title: card.title, kind: card.kind, sql: card.sql },
+              ...(store.groupByThread(internalCapability.threadId)
+                ? { from: { botId: internalSender.id, name: internalSender.name, color: internalSender.color } } : {}),
+            });
+          },
         }) });
       }
       if (method === "POST" && path === "/api/internal/phone/claim") {
@@ -22800,6 +22869,7 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
       if (refused) return json(res, refused.status, refused.body);
       const sendId = parseSendId(body.sendId);
       const replyTo = resolveReplyTarget(threadId, body.replyToId);
+      const dataContext = parseDataContext(body.dataContext);
       const sender = messageSender(auth);
       const guardedStart = guarded
         ? async (currentAtStart: BotRecord): Promise<DirectSendReceipt> => {
@@ -22826,13 +22896,13 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
             }
             // Stored as relayed: a worker's line for someone else, which a
             // Live call on this thread must not read back as typed there.
-            const message = await startTurn(bot.id, text, { threadId, replyTo, sendId, sender, trigger, relayed: true });
+            const message = await startTurn(bot.id, text, { threadId, replyTo, sendId, sender, trigger, relayed: true, dataContext });
             return { ok: true as const, threadId, message };
           }
         : undefined;
       try {
         const receipt = await acceptDirectSend({
-          botId: bot.id, threadId, text, sendId, replyTo, sender, trigger,
+          botId: bot.id, threadId, text, sendId, replyTo, sender, trigger, dataContext,
           // A person steering a webhook turn is present, and auto mode may
           // follow them again. But this route is also reachable from the
           // bot's own shell on a headless server (loopback is the owner
@@ -22912,6 +22982,7 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
           text: item.text,
           replyToId: item.replyToId,
           sendId: item.sendId,
+          ...(item.dataContext ? { dataContext: item.dataContext } : {}),
           queueId: item.messageId,
           peerAsk: item.peerAsk,
           steered: true,
@@ -23006,9 +23077,13 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
       // startTurn admits the rerun before branching. A shared-resource or
       // concurrency-limit refusal must leave the original transcript intact.
       const replyTo = source.replyToId ? resolveReplyTarget(bot.threadId, source.replyToId) : undefined;
+      // Regenerate resends the same words: the rerun gets the Data context
+      // the message was sent with, so the model sees what it saw. Changed
+      // words take the context the client sends now, if any.
+      const dataContext = parseDataContext(body.dataContext) ?? (text === source.text ? source.dataContext : undefined);
       // On a Cloud home an edit is its author's line, so the owner's own edit
       // keeps their conversation theirs for lending (server/cloud-lending.ts).
-      const message = await startTurn(bot.id, text, { threadId: bot.threadId, editedMessageId: messageId, replyTo, sendId, trigger: usageTriggerFor(auth),
+      const message = await startTurn(bot.id, text, { threadId: bot.threadId, editedMessageId: messageId, replyTo, sendId, trigger: usageTriggerFor(auth), dataContext,
         ...(CLOUD_HOME ? { sender: messageSender(auth) } : {}) });
       return json(res, 202, { ok: true, message });
     }
@@ -23373,6 +23448,18 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
       if (!body || typeof body !== "object" || Array.isArray(body)) return json(res, 400, { error: "body must be a JSON object" });
       const bot = store.bot(m[1]);
       if (!bot) return json(res, 404, { error: "no such bot" });
+      let cwd: string | undefined;
+      if (body.cwd !== undefined) {
+        // Opening a conversation is client-scoped, choosing where its file
+        // tools run has the same authority as editing the bot's folder.
+        if (!auth.scopes.includes("admin")) {
+          return json(res, 403, { error: "Choosing a working folder requires the admin scope" });
+        }
+        const checked = validateBotCwd(body.cwd);
+        if (!checked.ok) return json(res, 400, { error: checked.error });
+        if (!checked.cwd) return json(res, 400, { error: "Choose an existing working folder, or omit cwd to use the bot's default" });
+        cwd = checked.cwd;
+      }
       if (body.approvalMode !== undefined && body.approvalMode !== "ask" && body.approvalMode !== "full") {
         return json(res, 400, { error: "new task approvalMode must be ask or full" });
       }
@@ -23391,7 +23478,7 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
       if (body.projectId !== undefined && (typeof body.projectId !== "string" || !store.project(bot.id, body.projectId))) {
         return json(res, 400, { error: "projectId must belong to this bot" });
       }
-      const task = store.createTask(bot.id, typeof body.title === "string" ? body.title : undefined, true, body.projectId, undefined, body.approvalMode);
+      const task = store.createTask(bot.id, typeof body.title === "string" ? body.title : undefined, true, body.projectId, undefined, body.approvalMode, undefined, cwd);
       if (!task) return json(res, 500, { error: "couldn't create that task" });
       // Who opened it decides who may answer its cards on a shared workspace.
       if (auth.kind === "session") threadStarters.set(task.threadId, actorKey(auth));

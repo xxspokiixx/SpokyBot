@@ -71,7 +71,7 @@ export function toolStepLabel(tool: StepTool): string {
   const { name } = tool;
   // Codex and ACP title a command's chip with the command itself, and only a
   // command carries a summary (server/tool-summary.ts commandSummary).
-  if (tool.summary && /\s/.test(name)) return t("toolStep.runCommand");
+  if (tool.summary) return t("toolStep.runCommand");
   if (/\s/.test(name)) return name;
   const bare = name.replace(/^mcp__.+?__(?=.)/, "");
   if (/(?:^|_)browser_/i.test(bare)) return t("toolStep.useBrowser");

@@ -78,9 +78,20 @@ export interface DataColumn {
   sample?: string[];
 }
 
+/** One entry of the bot's table catalog, as GET /data reports it from DuckDB. */
+export interface DataTable {
+  name: string;
+  /** A quoted identifier ready to paste into SQL; `name` remains the identity. */
+  sqlName?: string;
+  rowCount: number;
+  columns: DataColumn[];
+}
+
 /** A table the bot loaded, as the Sources strip and `data_load` report it. */
 export interface DataSource {
   name: string;
+  /** A quoted identifier ready to paste into SQL; name remains the source identity. */
+  sqlName?: string;
   kind: "csv" | "parquet" | "json" | "xlsx" | "folder" | "url" | "postgres" | "mysql" | "sqlite" | "gsheet" | "connector" | "sql";
   /** The path, URL or connection the table came from, with credentials removed. */
   source: string;
@@ -166,7 +177,9 @@ export interface DataSheet {
 }
 
 /** Server → client. One message carries the whole sheet; sheets are small
- * (no rows), so no patches. */
+ * (no rows), so no patches. The database's catalog (every table, including
+ * ones derived with SQL) is not on the sheet: DuckDB owns it, and GET
+ * /api/bots/:id/data reads it fresh as `tables`. */
 export interface DataBroadcast {
   kind: "data";
   botId: string;
@@ -182,8 +195,10 @@ export interface DataPageRequest {
   offset: number;
   limit: number;
   sort?: { column: string; direction: "asc" | "desc" };
-  /** A free-text filter the server turns into `WHERE col ILIKE` over text columns. */
+  /** Case-insensitive literal text matching, across all columns unless filterColumn is set. */
   filter?: string;
+  /** Exact column name to search; values are cast to text. */
+  filterColumn?: string;
 }
 
 export interface DataPage {
@@ -201,6 +216,9 @@ export interface DataRunRequest {
   title?: string;
   /** Chart the result instead of tabling it. */
   chart?: OmbChartSpec;
+  vegaLite?: Record<string, unknown>;
+  /** Replace an existing result only after a successful, current live edit. */
+  live?: boolean;
 }
 
 export interface DataColumnStats {

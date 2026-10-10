@@ -6,10 +6,11 @@ import { rm } from "node:fs/promises";
 import { createRequire } from "node:module";
 import { cpus, tmpdir, totalmem } from "node:os";
 import { join } from "node:path";
-import { afterAll, describe, expect, it } from "vitest";
+import type { DuckDBConnection } from "@duckdb/node-api";
+import { afterAll, describe, expect, it, vi } from "vitest";
 
 import { DATA_LIMITS, DATA_RESULTS_SCHEMA } from "../../shared/data-surface.ts";
-import { closeNames, createDataEngine, dataEngine, duckdbDirectory, instanceSettings, levenshtein, likePattern, type DataEngineOptions } from "./engine.ts";
+import { CLOSE_DRAIN_MS, EXTENSION_INSTALL_TIMEOUT_MS, Lane, closeNames, createDataEngine, dataEngine, drainLanes, duckdbDirectory, instanceSettings, levenshtein, likePattern, loadExtensions, type DataEngineOptions } from "./engine.ts";
 import { DataFailure, type BotDatabase, type DataEngine } from "./types.ts";
 
 const root = mkdtempSync(join(tmpdir(), "omb-data-engine-"));
@@ -49,16 +50,34 @@ const bot = { connection: "bot" as const };
 const panel = { connection: "panel" as const };
 
 afterAll(async () => {
-  await Promise.all(engines.map((e) => e.closeAll()));
+  // On Windows CI, DuckDB's native close blocks the worker thread after
+  // these tests (the hook timed out with no JavaScript timer firing), so no
+  // bound in here can help. The process exit reclaims the handles; the
+  // tests themselves have already decided the result.
+  if (process.platform === "win32") {
+    console.warn("engine.test: leaving the databases to the process on Windows (native close blocks the thread)");
+    return;
+  }
+  // A close gives up on a stuck statement after CLOSE_DRAIN_MS; the hook must
+  // outlast that for every engine.
+  const closing = Promise.all(engines.map((e) => e.closeAll()));
+  const gaveUp = new Promise<"gave-up">((resolve) => setTimeout(() => resolve("gave-up"), CLOSE_DRAIN_MS * 2).unref());
+  if (await Promise.race([closing.then(() => "closed" as const), gaveUp]) === "gave-up") throw new Error("closeAll did not finish");
   // Windows keeps a just-closed database busy for a while (EPERM on rm); a
   // temp directory left on a runner is not a test failure there. rm's retry
   // delay grows linearly, so 10 × 100 ms stays well inside the hook timeout.
-  try {
-    await rm(root, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
-  } catch (error) {
-    if (process.platform !== "win32") throw error;
-    console.warn(`engine.test: left ${root} behind: ${(error as Error).message}`);
-  }
+  await rm(root, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
+}, CLOSE_DRAIN_MS * 4);
+
+describe("closing", () => {
+  it("drains idle lanes at once, and gives up on one that never finishes", async () => {
+    const idle = { run: async <T,>(_sql: string, _options: object, work: () => Promise<T>) => work() };
+    expect(await drainLanes([idle, idle], 1_000)).toBe(true);
+    const stuck = { run: <T,>() => new Promise<T>(() => undefined) };
+    const started = Date.now();
+    expect(await drainLanes([idle, stuck], 50)).toBe(false);
+    expect(Date.now() - started).toBeLessThan(1_000);
+  });
 });
 
 describe("loading the binding", () => {
@@ -137,6 +156,92 @@ describe("instance settings", () => {
   });
 });
 
+describe("extensions", () => {
+  it("installs supported extensions from the official core repository before loading them", async () => {
+    const run = vi.fn<DuckDBConnection["run"]>();
+    await loadExtensions({ run }, ["httpfs", "excel"]);
+    expect(run.mock.calls.map(([sql]) => sql)).toEqual([
+      "INSTALL httpfs FROM core", "LOAD httpfs",
+      "INSTALL excel FROM core", "LOAD excel",
+    ]);
+  });
+
+  it("keeps an offline failure actionable and does not proceed to load", async () => {
+    const run = vi.fn<DuckDBConnection["run"]>().mockRejectedValue(new Error("Could not connect"));
+    const error = await failure(loadExtensions({ run }, ["excel"]));
+    expect(error.error).toMatchObject({ code: "sql_error", message: "Could not connect", retryable: true, hint: expect.stringContaining("excel extension") });
+    expect(error.error.hint).toContain("http://extensions.duckdb.org");
+    expect(run).toHaveBeenCalledTimes(1);
+  });
+
+  /** A binding whose connections answer `SELECT 1`, spend `installMs` on an
+   * INSTALL (honouring interrupt() like a download would), and fail an
+   * INSTALL with `installError` when set. */
+  function fakeBinding(installMs: number) {
+    const statements: string[] = [];
+    const fake = { statements, installError: null as Error | null, interrupts: 0 };
+    const result = (select: boolean) => ({
+      statementType: select ? 1 : 0, rowCount: select ? 1 : 0, columnCount: select ? 1 : 0, chunkCount: select ? 1 : 0,
+      columnName: () => "one", columnType: () => ({ toString: () => "INTEGER" }),
+      getChunk: () => ({ convertRows: (convert: (value: unknown, type: unknown) => unknown) => [[convert(1, { typeId: 0 })]] }),
+    });
+    const connection = () => {
+      let abandon: (() => void) | null = null;
+      return {
+        async run(sql: string) {
+          statements.push(sql);
+          if (sql.startsWith("INSTALL")) {
+            if (fake.installError) throw fake.installError;
+            await new Promise<void>((resolve, reject) => {
+              const timer = setTimeout(resolve, installMs);
+              abandon = () => { clearTimeout(timer); reject(new Error("INTERRUPT Error: Interrupted!")); };
+            });
+          }
+          return result(sql.startsWith("SELECT"));
+        },
+        runAndReadAll: async () => ({ getRowsJson: () => [] }),
+        interrupt() { fake.interrupts++; abandon?.(); },
+        closeSync() {},
+      };
+    };
+    const binding = {
+      version: () => "fake",
+      DuckDBInstance: { create: async () => ({ connect: async () => connection(), closeSync() {} }) },
+      StatementType: { SELECT: 1, EXPLAIN: 2 },
+      DuckDBTypeId: { BLOB: 99 },
+      JsonDuckDBValueConverter: (value: unknown) => value,
+    };
+    return Object.assign(fake, { connection, binding: binding as unknown as NonNullable<DataEngineOptions["binding"]> });
+  }
+
+  it("installs on its own budget ahead of the statement, so a download outlasting the statement timeout still runs it", async () => {
+    const fake = fakeBinding(300);
+    const db = await engine({ binding: fake.binding }).forBot("extensions");
+    const started = Date.now();
+    const seen = await db.run("SELECT 1", { ...bot, timeoutMs: 100, extensions: ["excel"] });
+    expect(Date.now() - started).toBeGreaterThanOrEqual(250);
+    expect(seen.rows).toEqual([[1]]);
+    expect(fake.interrupts).toBe(0);
+    expect(fake.statements.slice(1)).toEqual(["INSTALL excel FROM core", "LOAD excel", "SELECT 1"]);
+    // The budget is the extension step's, not the statement's.
+    expect(EXTENSION_INSTALL_TIMEOUT_MS).toBe(5 * 60_000);
+    fake.installError = new Error("Could not connect");
+    const offline = await failure(db.run("SELECT 1", { ...bot, extensions: ["excel"] }));
+    expect(offline.error).toMatchObject({ code: "sql_error", message: "Could not connect", retryable: true });
+    expect(offline.error.hint).toContain("http://extensions.duckdb.org");
+  });
+
+  it("keeps the extension hint when the install itself is cut off, instead of calling it a slow query", async () => {
+    const fake = fakeBinding(300);
+    const lane = new Lane(fake.connection() as never);
+    const cut = await failure(lane.run("INSTALL excel FROM core", { timeoutMs: 100 }, (conn) => loadExtensions(conn, ["excel"])));
+    expect(fake.interrupts).toBe(1);
+    expect(cut.error).toMatchObject({ code: "sql_error", message: "INTERRUPT Error: Interrupted!", retryable: true });
+    expect(cut.error.hint).toContain("http://extensions.duckdb.org");
+    expect(cut.error.hint).not.toContain("Narrow the query");
+  });
+});
+
 describe("a bot's database", () => {
   const e = engine();
   let db: BotDatabase;
@@ -186,6 +291,18 @@ describe("a bot's database", () => {
     expect((await failure(db.run(`SELECT * FROM ${DATA_RESULTS_SCHEMA}.gone`, bot))).error.code).toBe("table_not_found");
   });
 
+  it("drops a result on the panel's connection without waiting behind the bot's statement", async () => {
+    await ready;
+    await db.materialise("SELECT 1 AS one", "aside", bot);
+    const long = db.run(LONG_QUERY, bot);
+    const started = Date.now();
+    await db.dropResult("aside", "panel");
+    expect(Date.now() - started).toBeLessThan(2_000);
+    db.interrupt("bot");
+    expect((await failure(long)).error.code).toBe("cancelled");
+    expect((await failure(db.run(`SELECT * FROM ${DATA_RESULTS_SCHEMA}.aside`, panel))).error.code).toBe("table_not_found");
+  });
+
   it("pages with a stable order, sorts, and filters by text across every column", async () => {
     await ready;
     const asc = await db.page("sales", { offset: 10, limit: 5, sort: { column: "id", direction: "asc" } });
@@ -212,6 +329,35 @@ describe("a bot's database", () => {
 
     const bad = await failure(db.page("sales", { offset: 0, limit: 5, sort: { column: "nope", direction: "asc" } }));
     expect(bad.error.code).toBe("invalid_input");
+  });
+
+  it("filters only the exact selected column before counting, sorting and paging", async () => {
+    const database = await e.forBot("column-filter");
+    await database.run(`CREATE TABLE entries AS SELECT range AS "order.id", CASE WHEN range % 2 = 0 THEN 'needle' ELSE 'other' END AS "customer ""label""", CASE WHEN range % 2 = 1 THEN 'needle' ELSE 'other' END AS notes FROM range(100)`, bot);
+    const query = { offset: 20, limit: 3, filter: "NEEDLE", sort: { column: "order.id", direction: "desc" as const } };
+    expect((await database.page("entries", query)).rowCount).toBe(100);
+    const scoped = await database.page("entries", { ...query, filterColumn: 'customer "label"' });
+    expect(scoped).toMatchObject({ rowCount: 50, offset: 20 });
+    expect(scoped.rows.map(row => row[0])).toEqual(["58", "56", "54"]);
+    const numeric = await database.page("entries", { offset: 9, limit: 3, filter: "9", filterColumn: "order.id", sort: { column: "order.id", direction: "asc" } });
+    expect(numeric.rowCount).toBe(19);
+    expect(numeric.rows.map(row => row[0])).toEqual(["90", "91", "92"]);
+    expect((await database.page("entries", { ...query, filterColumn: "notes", filter: "" })).rowCount).toBe(100);
+    for (const filter of [undefined, "", "needle"]) {
+      for (const filterColumn of ["missing", "NOTES", 'notes" OR true --']) {
+        expect((await failure(database.page("entries", { offset: 0, limit: 1, filter, filterColumn }))).error.code).toBe("invalid_input");
+      }
+    }
+  });
+
+  it("treats wildcards, backslashes and quotes literally within a selected column", async () => {
+    const database = await e.forBot("literal-column-filter");
+    await database.run(`CREATE TABLE entries AS SELECT * FROM (VALUES (1, '100%_done\\file''s'), (2, '100xxdone/fileXs'), (3, NULL)) AS t(id, "odd.column")`, bot);
+    for (const filter of ["%_", "\\file", "'s"]) {
+      expect(await database.page("entries", { offset: 0, limit: 5, filterColumn: "odd.column", filter })).toMatchObject({ rowCount: 1, rows: [[1, "100%_done\\file's"]] });
+    }
+    expect((await database.page("entries", { offset: 0, limit: 5, filterColumn: "odd.column", filter: "'; DROP TABLE entries; --" })).rowCount).toBe(0);
+    expect((await database.page("entries", { offset: 0, limit: 5 })).rowCount).toBe(3);
   });
 
   it("describes a table or a query: types, null %, approx distinct, min/max as text, three samples", async () => {
@@ -243,7 +389,7 @@ describe("a bot's database", () => {
     expect(described.columns[DATA_LIMITS.describeColumnsMax]).toEqual({ name: `c${DATA_LIMITS.describeColumnsMax}`, type: "INTEGER" });
   });
 
-  it("caches column stats by table and row count", async () => {
+  it("caches column stats until a write, including a same-size replacement or update", async () => {
     await ready;
     await db.run("CREATE OR REPLACE TABLE counted AS SELECT range AS n FROM range(10)", bot);
     const first = await db.stats("counted");
@@ -255,6 +401,16 @@ describe("a bot's database", () => {
     expect(second).not.toBe(first);
     expect(second.rowCount).toBe(11);
     expect(second.columns[0].max).toBe("10");
+    await db.run("CREATE OR REPLACE TABLE counted AS SELECT (range + 100)::INTEGER AS replacement FROM range(11)", bot);
+    const replaced = await db.stats("counted");
+    expect(replaced).not.toBe(second);
+    expect(replaced.columns[0]).toMatchObject({ name: "replacement", type: "INTEGER", min: "100", max: "110" });
+    await db.run("UPDATE counted SET replacement = 9", panel);
+    expect((await db.stats("counted")).columns[0]).toMatchObject({ min: "9", max: "9", approxUnique: 1 });
+    await db.materialise("SELECT 1 AS before", "cached", bot);
+    await db.stats("omb_results.cached");
+    await db.materialise("SELECT 2 AS after", "cached", bot);
+    expect((await db.stats("omb_results.cached")).columns[0]).toMatchObject({ name: "after", min: "2", max: "2" });
   });
 
   it("bins numbers and dates into twenty equal widths and counts the top text values", async () => {
@@ -310,6 +466,25 @@ describe("a bot's database", () => {
     expect(missing.error.code).toBe("table_not_found");
     expect(missing.error.candidates).toContain("sales");
     expect(missing.error.candidates!.length).toBeLessThanOrEqual(5);
+  });
+
+  it("supplies query-ready table names without changing catalog identities", async () => {
+    const names = await engine().forBot("query-names");
+    await names.run('CREATE TABLE "order" AS SELECT 1 AS n', bot);
+    await names.run('CREATE TABLE "My Table" AS SELECT 2 AS n', bot);
+    await names.run('CREATE TABLE "has.dot" AS SELECT 3 AS n', bot);
+    await names.run('CREATE SCHEMA "Other Schema"', bot);
+    await names.run('CREATE TABLE "Other Schema"."select" AS SELECT 4 AS n', bot);
+    const tables = await names.listTables();
+    expect(tables.map(({ name, sqlName }) => ({ name, sqlName }))).toEqual([
+      { name: "Other Schema.select", sqlName: '"Other Schema"."select"' },
+      { name: "My Table", sqlName: '"My Table"' },
+      { name: "has.dot", sqlName: '"has.dot"' },
+      { name: "order", sqlName: '"order"' },
+    ]);
+    for (const table of tables) {
+      expect((await names.run(`SELECT * FROM ${table.sqlName}`, panel)).rowCount).toBe(1);
+    }
   });
 
   it("maps DuckDB errors to codes without rewording them", async () => {

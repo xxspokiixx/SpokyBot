@@ -73,6 +73,21 @@ describe("failed turn text", () => {
     expect(activityPreview({ name: "Messaged @Ada" }, engine())).toBe("Messaged @Ada");
   });
 
+  it("keeps technical tool names in Advanced mode and Data titles in both modes", () => {
+    const tool = { name: "mcp__omb__computer_batch", ok: true };
+    expect(activityPreview(tool, engine(), undefined, true)).toBe(tool.name);
+    expect(activityPreview({ name: "notice: Switched model" }, engine(), undefined, true)).toBe("notice: Switched model");
+    const dataResult = { botId: "bot", cardId: "result", title: "Revenue", kind: "chart" as const };
+    for (const advanced of [false, true]) {
+      expect(activityPreview(tool, engine(), dataResult, advanced)).toBe("Revenue");
+    }
+  });
+
+  it("previews a technical cause as its plain line", () => {
+    expect(activityPreview({ name: 'error: API Error: 529 {"type":"error","error":{"type":"overloaded_error"}}', ok: false }, engine()))
+      .toBe("The service is busy right now. Try again in a moment.");
+  });
+
   it("finds the engine a bot's turns ran on", () => {
     const claude = engine();
     const bot = { modelSelection: { instanceId: "claude", model: "sonnet" } } as Bot;

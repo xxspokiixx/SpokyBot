@@ -368,6 +368,9 @@
   "sidebar.bot.chiefNeedsEngine": "Escolha primeiro Claude ou um provedor de modelos ACP",
   "sidebar.bot.chiefOfStaff": "Chefe de gabinete",
   "sidebar.bot.markUnread": "Marcar como não lida",
+  "sidebar.bot.markAllRead": "Marcar todas as conversas como lidas",
+  "sidebar.bot.markingAllRead": "Marcando conversas como lidas…",
+  "sidebar.bot.markAllReadFailed": "Não foi possível marcar todas as conversas como lidas. As leituras concluídas foram mantidas. Tente novamente.",
   "sidebar.bot.editProfile": "Editar perfil",
   "sidebar.bot.duplicate": "Duplicar",
   "sidebar.bot.archive": "Arquivar",
@@ -1603,5 +1606,8 @@
   "place.view.ccAtOnce.short": "Em uso",
   "place.view.localUnavailable.short": "Não está pronto",
   "place.view.autoTeam.short": "Compartilhado",
-  "pro.name": "MausBot Cloud"
+  "pro.name": "MausBot Cloud",
+  "computer.files.homeFolder": "Pasta pessoal",
+  "computer.files.changeDefaultFolder": "Alterar padrão",
+  "computer.files.pinnedFolderHint": "Esta conversa mantém a pasta atual. Altere a pasta padrão para novas conversas."
 }
