@@ -149,7 +149,8 @@ describe.each(SEND_KEYS)("in %s mode", (mode) => {
 
   it("editing a sent message submits on the same key", () => {
     render(createElement(ChatView, { bot: { ...bot, messages: [{ id: "ask", role: "user", kind: "text", at: 1, text: "Try the new model" }] } }));
-    const edit = host.querySelector<HTMLButtonElement>('button[aria-label="Edit message"]')!;
+    flushSync(() => host.querySelector<HTMLButtonElement>('button[aria-label="Message actions"]')!.click());
+    const edit = [...host.querySelectorAll<HTMLButtonElement>('[role="menuitem"]')].find((item) => item.textContent === "Edit message")!;
     flushSync(() => edit.click());
     const editor = () => host.querySelector<HTMLTextAreaElement>("textarea:not([aria-label])")!;
     expect(editor().value).toBe("Try the new model");
