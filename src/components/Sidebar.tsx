@@ -18,6 +18,7 @@ import {
   FolderPlus,
   Library,
   Loader2,
+  MessageSquarePlus,
   MoreHorizontal,
   Pencil,
   PanelLeftClose,
@@ -57,6 +58,8 @@ import { nextRename } from "@/lib/rename";
 import { useDesktopCapabilities } from "./DesktopCapabilities";
 import { MIN_QUERY, SearchResults } from "./SearchResults";
 import { TeamLibraryPanel } from "./TeamLibraryPanel";
+import { SidebarNewChatPanel } from "./SidebarNewChatPanel";
+import { openCommandPalette } from "./CommandPalette";
 import { ShareTeamDialog } from "./ShareTeamDialog";
 import { TeamDialog } from "./TeamDialog";
 import { RenameTitle } from "./RenameTitle";
@@ -1979,6 +1982,7 @@ export function Sidebar({ open, onClose, collapseToIcons = false }: {
     saveSidebarAttentionPinned(pinned);
   };
   const [newRoom, setNewRoom] = useState(false);
+  const [newChatOpen, setNewChatOpen] = useState(false);
   const [newFolderBotId, setNewFolderBotId] = useState<string | null>(null);
   const [teamLibraryOpen, setTeamLibraryOpen] = useState(false);
   const [teamInstallUrl, setTeamInstallUrl] = useState<string | null>(null);
@@ -2372,6 +2376,16 @@ export function Sidebar({ open, onClose, collapseToIcons = false }: {
           >
             {density === "icons" ? <PanelLeftOpen size={17} /> : <PanelLeftClose size={17} />}
           </button>}
+          {/* The rail hides the search box, so it gets the ⌘K switcher instead. */}
+          {density === "icons" && <button
+            type="button"
+            onClick={openCommandPalette}
+            aria-label={t("sidebar.searchAria")}
+            title={t("sidebar.searchAria")}
+            className="flex size-8 items-center justify-center rounded-md text-ink-secondary hover:bg-raised hover:text-ink focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus"
+          >
+            <Search size={17} strokeWidth={2} />
+          </button>}
           {advanced && <div ref={attentionMenuRef} className={density === "icons" ? "relative" : "contents"}>
             <button
               type="button"
@@ -2435,6 +2449,16 @@ export function Sidebar({ open, onClose, collapseToIcons = false }: {
                 density === "icons" ? "left-0" : "right-0",
                 plusMotion.className,
               )} {...plusMotion.exitProps}>
+                <button
+                  onClick={() => {
+                    setPlusOpen(false);
+                    setNewChatOpen(true);
+                  }}
+                  className="flex w-full items-center gap-3 px-3.5 py-2 text-left text-[14px] text-ink hover:bg-raised/70"
+                >
+                  <MessageSquarePlus size={16} className="text-ink-secondary" />
+                  {t("sidebar.newChat.title")}
+                </button>
                 <button
                   onClick={() => {
                     setPlusOpen(false);
@@ -2893,6 +2917,18 @@ export function Sidebar({ open, onClose, collapseToIcons = false }: {
           }}
         />
       {newRoom && <NewRoomPanel onClose={() => setNewRoom(false)} />}
+      {/* Portaled: below md the sidebar's translate makes it the containing
+          block for fixed children, which would trap the panel inside it. */}
+      {newChatOpen && createPortal(
+        <SidebarNewChatPanel
+          anchor={sidebarRef.current}
+          style={windowNoDragStyle}
+          onClose={() => setNewChatOpen(false)}
+          onNewBot={() => { setNewChatOpen(false); dispatch({ type: "toggleNewBot", open: true }); }}
+          onNewGroup={() => { setNewChatOpen(false); setNewRoom(true); }}
+        />,
+        document.body,
+      )}
       {!remoteClient && archivedBotsOpen && (
         <ArchivedBotsPanel
           bots={archivedBots}
