@@ -193,6 +193,14 @@ describe("thread control placement", () => {
     expect(markup).not.toContain("<button");
     expect(renderToStaticMarkup(createElement(ErrorRow, { message: "Network timeout", onRetry: () => {} }))).toContain("<button");
   });
+  it("draws Retry and the next action on the 28px control step", () => {
+    const retry = renderToStaticMarkup(createElement(ErrorRow, { message: "Network timeout", onRetry: () => {} }));
+    const action = renderToStaticMarkup(createElement(ErrorRow, { message: "Network timeout", action: { label: "Open", onClick: () => {} } }));
+    for (const markup of [retry, action]) {
+      expect(markup).toContain('class="ui-button ui-button-md ');
+      expect(markup).not.toContain("text-[12.5px]");
+    }
+  });
   it("directs ChatGPT plan limits to usage settings rather than repeatedly retrying", () => {
     const markup = renderToStaticMarkup(createElement(ErrorRow, { message: "ChatGPT plan usage limit reached (subscription_sharing_usage_limit_exceeded)", onRetry: () => {} }));
     expect(markup).toContain("Manage usage");

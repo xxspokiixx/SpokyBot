@@ -117,7 +117,7 @@ export function RoomToolChip({ message, roomId }: { message: Message; roomId?: s
             }
           }}
           title={t("room.openBot", { name: comm.withName })}
-          className="flex items-center gap-2 rounded-full border border-hairline/40 bg-panel px-3 py-1.5 text-[13px] text-ink-secondary hover:bg-raised hover:text-ink"
+          className="ui-pill"
         >
           <BotAvatar bot={withBot ?? { name: comm.withName, color: comm.withColor }} state="happy" size={16} animated={false} />
           <span className="max-w-[480px] truncate">{tool.name}</span>
@@ -131,8 +131,8 @@ export function RoomToolChip({ message, roomId }: { message: Message; roomId?: s
     <div className="flex justify-start">
       <div
         className={cn(
-          "flex items-center gap-2 rounded-full border border-hairline/40 bg-panel px-3 py-1.5 text-[13px]",
-          tool.ok === false ? "text-danger" : "text-ink-secondary",
+          "ui-pill",
+          tool.ok === false && "text-danger",
         )}
       >
         {comm && <BotAvatar bot={state.bots.find(b => b.id === comm.withBotId) ?? { name: comm.withName, color: comm.withColor }} state="happy" size={16} animated={false} />}

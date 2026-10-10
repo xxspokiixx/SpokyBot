@@ -1069,7 +1069,7 @@ const MARKDOWN_COMPONENTS: Components = {
     // but outside it — off the left edge in a right-to-left paragraph,
     // where the line ends.
     return (
-      <code dir="ltr" className="rounded bg-inset px-1 py-px text-[13px] break-words [unicode-bidi:isolate]">{children}</code>
+      <code dir="ltr" className="ui-code-chip break-words [unicode-bidi:isolate]">{children}</code>
     );
   },
   // markdown never emits a span itself (no raw HTML); the only
