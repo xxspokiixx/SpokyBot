@@ -3996,5 +3996,8 @@
   "data.chart.loading": "Drawing chart…",
   "data.chart.failed": "The chart could not be drawn: {reason}",
   "data.editor.label": "SQL",
-  "data.editor.resize": "Resize SQL editor"
+  "data.editor.resize": "Resize SQL editor",
+  "computer.files.homeFolder": "Home folder",
+  "computer.files.changeDefaultFolder": "Change default",
+  "computer.files.pinnedFolderHint": "This chat keeps its current folder. Change the default for new chats."
 }
