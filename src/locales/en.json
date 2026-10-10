@@ -152,6 +152,7 @@
   "attach.gallerySingle": "1 attachment",
   "attach.galleryCount": "{count} attachments",
   "attach.showMore": "Show {count} more",
+  "attach.moreCount": "+{count} more",
   "attach.showLess": "Show less",
   "attach.video": "Video",
   "attach.image": "Image",

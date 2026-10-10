@@ -53,7 +53,7 @@ import { ConnectorCard } from "./ConnectorCard";
 import { SecretRequestCard } from "./SecretRequestCard";
 import { hasRoutineExecutionTask, RoutineRunCard } from "./RoutineRunCard";
 import { GoalRunCard } from "./GoalRunCard";
-import { AttachmentGallery, MessageAttachmentGallery } from "./AttachmentGallery";
+import { AttachmentGallery, MessageAttachmentGallery, replyAttachmentGroup } from "./AttachmentGallery";
 import { VoiceNoteBubble, type VoiceNoteAttachment } from "./VoiceNoteBubble";
 import { OptionCard } from "./OptionCard";
 import { GroupCallButton, GroupCallOverlay } from "./GroupCallView";
@@ -222,6 +222,8 @@ function RoomTextMessage({
   }, [focusedSearch, collapsible, focus?.nonce]);
   const speakerBot = members.find((member) => member.id === m.from?.botId);
   const botText = m.text ?? "";
+  // a reply with text lists its files under the text, without the ones it links inline
+  const replyGroup = useMemo(() => !user && botText.trim() ? replyAttachmentGroup(botText, m.attachments) : null, [user, botText, m.attachments]);
   return (
     <div className={cn("group flex w-full flex-col", user ? "items-end" : "items-start")}>
       <div className={cn("flex w-full items-end gap-1.5", user ? "justify-end" : "justify-start")}>
@@ -309,12 +311,13 @@ function RoomTextMessage({
                   ))}
                 </div>
               )}
-              <MessageAttachmentGallery text={botText} attachments={m.attachments} message={{ threadId: group.threadId, messageId: m.id }} className={m.text ? undefined : "mb-0"} eager={eager} />
+              {!botText.trim() && <MessageAttachmentGallery text={botText} attachments={m.attachments} message={{ threadId: group.threadId, messageId: m.id }} className={m.text ? undefined : "mb-0"} eager={eager} />}
               {viewRaw && botText ? (
                 <div data-citation-source={m.id} data-citation-owner-type="group" data-citation-owner={group.id} data-citation-thread={group.threadId}><RawMarkdownView text={botText} /></div>
               ) : botText ? (
-                <div data-citation-source={m.id} data-citation-owner-type="group" data-citation-owner={group.id} data-citation-thread={group.threadId}><ChatMarkdown text={botText} mentionPeers={members} everyone={!group.dm} message={{ threadId: group.threadId, messageId: m.id }} /></div>
+                <div data-citation-source={m.id} data-citation-owner-type="group" data-citation-owner={group.id} data-citation-thread={group.threadId}><ChatMarkdown text={botText} mentionPeers={members} everyone={!group.dm} message={{ threadId: group.threadId, messageId: m.id }} delivered={replyGroup?.delivered} /></div>
               ) : null}
+              {replyGroup && <AttachmentGallery images={replyGroup.images} files={replyGroup.files} message={{ threadId: group.threadId, messageId: m.id }} eager={eager} beneath />}
             </MessageBoundary>
           )}
         </div>

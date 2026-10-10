@@ -87,6 +87,8 @@
 .table-action:hover, .table-action[aria-pressed="true"] { background: var(--color-raised); color: var(--color-ink); }
 .table-action:focus-visible { outline: 2px solid var(--color-accent); outline-offset: 1px; }
 @media (pointer: coarse) { .table-action { min-width: 40px; min-height: 40px; } }
+/* inside a 28px file pill under a reply, the table preview is a 24px circle */
+.file-chip .table-action { width: 24px; height: 24px; min-width: 24px; min-height: 24px; border-radius: 9999px; }
 
 @theme {
   --animate-panel-in: panel-in 0.24s cubic-bezier(0.22, 1, 0.36, 1);
