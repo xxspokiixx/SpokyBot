@@ -2944,6 +2944,8 @@
   "computer.files.changeFolder": "Change",
   "computer.files.recent": "Changed in this chat",
   "computer.files.empty": "Files {name} makes or changes in this chat will show up here.",
+  "computer.files.notShared": "Not shared",
+  "computer.files.notSharedHint": "Ask the bot to share a file link in this chat to save a copy.",
   "computer.simple.whereWorks": "Where {name} works",
   "computer.simple.dest.thisMac": "This Mac",
   "computer.simple.dest.thisPc": "This PC",
