@@ -3,14 +3,17 @@ import { spawn } from "node:child_process";
 import { EventEmitter } from "node:events";
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, statSync, utimesSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { delimiter, join } from "node:path";
+import { delimiter, join, resolve } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import {
   agentBrowserFrame,
   agentBrowserIntegration,
   browserEngineEncryptionKey,
+  cachedAgentBrowserVersion,
+  pendingAgentBrowserVersionProbe,
   browserEngineStatus,
+  describeBrowserEngine,
   browserRestoreKey,
   browserSessionId,
   clearBrowserSessionState,
@@ -404,6 +407,77 @@ describe("finding the browser engine", () => {
     expect(browserEngineStatus({ dataDir, env, exists })).toMatchObject({ kind: "ready", binaryPath: pinned, version: agentBrowserReleaseVersion(resolveAgentBrowserReleaseAsset()) });
   });
 
+  it("reports an unmanaged agent-browser's real version and warns when it is not the pin", () => {
+    const dataDir = mkdtempSync(join(tmpdir(), "omb-engine-unmanaged-"));
+    scratch.push(dataDir);
+    const name = process.platform === "win32" ? "agent-browser.exe" : "agent-browser";
+    const binary = resolve(join(dataDir, "bin"), name);
+    const exists = (file: string) => file === binary;
+    const env = { PATH: join(dataDir, "bin") };
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    try {
+      const mismatched = browserEngineStatus({ dataDir, env, exists, versionOf: () => "0.38.1" });
+      expect(mismatched).toMatchObject({
+        kind: "ready",
+        binaryPath: binary,
+        version: "0.38.1",
+        warning: expect.stringContaining(AGENT_BROWSER_VERSION),
+      });
+      expect(describeBrowserEngine(mismatched)).toContain("0.38.1");
+      expect(describeBrowserEngine(mismatched)).toContain(AGENT_BROWSER_VERSION);
+      expect(warn).toHaveBeenCalledOnce();
+      warn.mockClear();
+      const matched = browserEngineStatus({ dataDir, env, exists, versionOf: () => AGENT_BROWSER_VERSION });
+      expect(matched).toEqual({ kind: "ready", binaryPath: binary, version: AGENT_BROWSER_VERSION });
+      expect(warn).not.toHaveBeenCalled();
+      const unknown = browserEngineStatus({ dataDir, env, exists, versionOf: () => null });
+      expect(unknown).toMatchObject({ kind: "ready", version: "unknown", warning: expect.stringContaining("unknown") });
+      warn.mockClear();
+      // Still probing: ready, no warning yet.
+      const probing = browserEngineStatus({ dataDir, env, exists, versionOf: () => undefined });
+      expect(probing).toEqual({ kind: "ready", binaryPath: binary, version: "unknown" });
+      expect(warn).not.toHaveBeenCalled();
+    } finally {
+      warn.mockRestore();
+    }
+  });
+
+  it("probes an unmanaged binary's version in the background, once per mtime, without blocking on a stalled binary", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "omb-engine-probe-"));
+    scratch.push(dir);
+    const binary = join(dir, "agent-browser");
+    writeFileSync(binary, "fixture");
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    try {
+      let answer: ((output: string) => void) | undefined;
+      const run = vi.fn(() => new Promise<string>((resolve) => { answer = resolve; }));
+      const started = Date.now();
+      expect(cachedAgentBrowserVersion(binary, run)).toBeUndefined();
+      // A second read while the first probe runs neither waits nor spawns.
+      expect(cachedAgentBrowserVersion(binary, run)).toBeUndefined();
+      expect(run).toHaveBeenCalledTimes(1);
+      expect(Date.now() - started).toBeLessThan(500);
+
+      answer!("agent-browser 0.38.1\n");
+      await expect(pendingAgentBrowserVersionProbe(binary)).resolves.toBe("0.38.1");
+      expect(cachedAgentBrowserVersion(binary, run)).toBe("0.38.1");
+      expect(run).toHaveBeenCalledTimes(1);
+      expect(warn).toHaveBeenCalledWith(expect.stringContaining("0.38.1"));
+
+      // A replaced binary is probed again. A probe that fails reads as null.
+      utimesSync(binary, new Date(), new Date(Date.now() + 5_000));
+      const failing = vi.fn(async () => { throw new Error("timed out"); });
+      expect(cachedAgentBrowserVersion(binary, failing)).toBeUndefined();
+      await expect(pendingAgentBrowserVersionProbe(binary)).resolves.toBeNull();
+      expect(cachedAgentBrowserVersion(binary, failing)).toBeNull();
+      expect(failing).toHaveBeenCalledTimes(1);
+
+      expect(cachedAgentBrowserVersion(join(dir, "missing"), run)).toBeNull();
+    } finally {
+      warn.mockRestore();
+    }
+  });
+
   it("knows every target Vercel publishes, and picks the musl build on Alpine", () => {
     for (const [platform, arch] of [["darwin", "arm64"], ["darwin", "x64"], ["linux", "x64"], ["linux", "arm64"], ["win32", "x64"]] as const) {
       const asset = resolveAgentBrowserReleaseAsset(platform, arch);
@@ -582,10 +656,12 @@ describe("agentBrowserFrame", () => {
 
   it("returns the picture the browser wrote, base64 encoded", async () => {
     // `screenshot <path>` is argument 2; the CLI writes the file there.
-    const binaryPath = await fakeBinary('require("node:fs").writeFileSync(process.argv[2], "PNGDATA")');
+    const binaryPath = await fakeBinary('require("node:fs").writeFileSync(process.argv[2], "JPEGDATA")');
     const frame = await agentBrowserFrame({ binaryPath, env: { AGENT_BROWSER_SESSION: "bot-1" } });
-    expect(frame.format).toBe("png");
-    expect(Buffer.from(frame.png, "base64").toString()).toBe("PNGDATA");
+    expect(frame.format).toBe("jpeg");
+    expect(Buffer.from(frame.png, "base64").toString()).toBe("JPEGDATA");
+    // JPEG for this command only: the bot's own screenshot tool keeps its format.
+    expect(vi.mocked(spawn).mock.calls[0]![1]!.slice(2)).toEqual(["--screenshot-format", "jpeg", "--screenshot-quality", "80"]);
     expect(existsSync(vi.mocked(spawn).mock.calls[0]![1]![1]!)).toBe(false);
   });
 

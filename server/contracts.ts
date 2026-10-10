@@ -119,6 +119,10 @@ export interface SendTurnInput {
    * collide with another bot's live session or broker (see #1017). */
   botId?: string;
   text: string;
+  /** The automatic recall block the harness put in front of the person's
+   * message inside `text`. It informs this turn only, so a driver that
+   * replays the turn as sent later can leave it out. */
+  recalled?: string;
   /** Per-bot approval policy, reasserted by providers on every turn so a
    * resumed native session cannot retain a stale, more permissive mode. */
   approvalMode?: ApprovalMode;
@@ -213,6 +217,10 @@ export interface SendTurnInput {
      * that forwards to the Electron-owned WebContentsView the Browser tab
      * shows. One tab per bot, in its own persistent session partition. */
     browser?: { command: string; args: string[]; env: Record<string, string> };
+    /** The Data tools (server/data): an MCP proxy (server/harness-mcp-proxy
+     * data) that forwards to the harness, where DuckDB runs on this bot's
+     * own database and the Computer panel's Data tab shows the sheet. */
+    data?: { command: string; args: string[]; env: Record<string, string> };
     /** dweb network daemon: an MCP proxy exposing dweb status, repo, and
      * opencode model access as tools. url is the dweb HTTP base. */
     dweb?: { url: string };
@@ -285,6 +293,10 @@ export interface ProviderAdapter {
     /** True when the driver can mount the built-in browser MCP. Same rule:
      * a bot must never be told it has a browser its driver cannot hand it. */
     browserMcp?: boolean;
+    /** True when the driver can mount the Data tools MCP (the same stdio
+     * proxy shape as the browser). Same rule: never tell a bot it has data
+     * tools its driver cannot hand it. */
+    dataMcp?: boolean;
     /** True when this engine accepts images in the prompt — gates image
      * paste in the composer. Same rule as computerMcp: never offer an
      * attachment an engine cannot open (a bot told it has an image it
@@ -537,6 +549,9 @@ export interface ProviderInstance {
   readonly models: ModelCatalog;
   /** Refresh a live catalog without recreating the provider instance. */
   readonly refreshModels?: () => Promise<void>;
+  /** Set on a later start while the catalog served from the last run is
+   * still refreshing. A turn awaits it; listen does not. */
+  readonly startupModelRefresh?: Promise<void>;
   /** Optional first-party runtime installation and account setup. */
   readonly installRuntime?: () => Promise<void>;
   readonly startAuthentication?: () => Promise<ProviderAuthenticationStart>;
@@ -553,6 +568,11 @@ export interface ProviderInstance {
    * The signal is a best-effort cap: drivers that can honor it abort the
    * underlying provider call; the rest keep their own timeout. */
   generateText?(prompt: string, options?: TextGenerationOptions): Promise<string>;
+  /** A one-shot text call for memory upkeep only, on an engine whose turns
+   * are a whole agent process (the ACP family). It starts a fresh tool-free
+   * session on the engine's own provider, so it is never offered to titles or
+   * compaction, which would then spawn a process for every new chat. */
+  generateMemoryText?(prompt: string, options?: TextGenerationOptions): Promise<string>;
   /** Isolated, tool-free permission review on this same provider. Kept
    * separate from generateText so the UI never infers a security capability
    * from a generic helper that may expose prompts in argv or lack approvals. */

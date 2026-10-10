@@ -215,11 +215,17 @@ export async function requestMessageFile(
   filePath: string,
   message: MessageAttachmentContext,
   signal: AbortSignal,
+  folder?: { entry?: string; list?: boolean },
 ): Promise<Response> {
   const response = await fetch(`/api/threads/${encodeURIComponent(message.threadId)}/messages/${encodeURIComponent(message.messageId)}/file`, {
     method: "POST",
     headers: { "content-type": "application/json" },
-    body: JSON.stringify({ path: filePath }),
+    // A linked folder answers with its files instead of a 400; an entry is
+    // one of those files, fetched by name under the same message grant.
+    body: JSON.stringify({
+      path: filePath,
+      ...(folder?.entry !== undefined ? { entry: folder.entry } : folder?.list ? { listFolder: true } : {}),
+    }),
     signal,
   });
   if (!response.ok) {
@@ -230,8 +236,15 @@ export async function requestMessageFile(
 }
 
 /** Shared save state for transcript file chips and bot-authored file links. */
-export function useLocalFileSave(filePath: string, name?: string, message?: MessageAttachmentContext) {
+export interface MessageFolderListing {
+  name: string;
+  entries: { name: string; bytes: number; mime: string }[];
+  truncated: boolean;
+}
+
+export function useLocalFileSave(filePath: string, name?: string, message?: MessageAttachmentContext, entry?: string) {
   const [state, setState] = useState<"idle" | "saving" | "saved" | "failed">("idle");
+  const [folder, setFolder] = useState<MessageFolderListing | null>(null);
   const [reason, setReason] = useState("");
   const [savedTo, setSavedTo] = useState("");
   // The server refused because the file sits outside the conversation's
@@ -258,8 +271,9 @@ export function useLocalFileSave(filePath: string, name?: string, message?: Mess
     setReason("");
     setSavedTo("");
     setOutsideWorkspace(false);
+    setFolder(null);
     setState("idle");
-  }, [filePath, message?.messageId, message?.threadId]);
+  }, [filePath, entry, message?.messageId, message?.threadId]);
 
   const save = useCallback(async () => {
     if (saving.current) return;
@@ -280,13 +294,20 @@ export function useLocalFileSave(filePath: string, name?: string, message?: Mess
     const controller = new AbortController();
     request.current = controller;
     try {
-      const response = await requestMessageFile(filePath, message, controller.signal);
+      const response = await requestMessageFile(filePath, message, controller.signal, entry === undefined ? { list: true } : { entry });
+      if (response.headers.get("x-openmausbot-folder") === "1") {
+        const listing = await response.json() as MessageFolderListing;
+        if (!mounted.current || controller.signal.aborted) return;
+        setFolder(listing);
+        setState("idle");
+        return;
+      }
       const blob = await response.blob();
       if (!mounted.current || controller.signal.aborted) return;
       const url = URL.createObjectURL(blob);
       const saved = canonicalDownloadFilename({
         contentDisposition: response.headers.get("content-disposition"),
-        fallback: name || attachmentBasename(filePath),
+        fallback: name || entry || attachmentBasename(filePath),
         source: filePath,
         mime: blob.type || response.headers.get("content-type"),
       });
@@ -323,9 +344,75 @@ export function useLocalFileSave(filePath: string, name?: string, message?: Mess
         saving.current = false;
       }
     }
-  }, [filePath, message?.messageId, message?.threadId, name]);
+  }, [filePath, entry, message?.messageId, message?.threadId, name]);
 
-  return { state, reason, savedTo, outsideWorkspace, save };
+  return { state, reason, savedTo, outsideWorkspace, folder, save };
+}
+
+/** What a failed save says. A file outside the conversation's working folder
+ * is refused on every try, so it is explained in the person's language rather
+ * than with the server's English, and is not offered as a retry. */
+export function saveFailureText(save: { reason: string; outsideWorkspace: boolean }): string {
+  return save.outsideWorkspace ? t("attach.outsideWorkspace") : save.reason;
+}
+
+function folderFileSize(bytes: number): string {
+  if (bytes < 1024) return `${bytes} B`;
+  if (bytes < 1024 * 1024) return `${Math.round(bytes / 102.4) / 10} KB`;
+  return `${Math.round(bytes / (1024 * 102.4)) / 10} MB`;
+}
+
+function MessageFolderFile({ folderPath, name, bytes, message }: {
+  folderPath: string;
+  name: string;
+  bytes: number;
+  message: MessageAttachmentContext;
+}) {
+  const save = useLocalFileSave(folderPath, name, message, name);
+  return (
+    <li className="flex min-w-0 flex-wrap items-center gap-x-1.5">
+      <button
+        type="button"
+        onClick={() => void save.save()}
+        disabled={save.state === "saving"}
+        aria-label={t("attach.saveAria", { name })}
+        className="inline-flex min-h-8 min-w-0 items-center gap-1 break-all text-start text-accent underline decoration-accent/40 hover:decoration-accent disabled:cursor-wait"
+      >
+        {save.state === "saving" ? (
+          <LoaderCircle size={12} className="shrink-0 animate-spin" aria-hidden="true" />
+        ) : save.state === "saved" ? (
+          <Check size={12} className="shrink-0 text-success" aria-hidden="true" />
+        ) : (
+          <FileText size={12} className="shrink-0" aria-hidden="true" />
+        )}
+        {name}
+      </button>
+      <span className="text-ink-secondary">{folderFileSize(bytes)}</span>
+      {save.state === "failed" && <span role="alert" className="text-danger">{save.reason}</span>}
+    </li>
+  );
+}
+
+/** The files directly inside a folder a bot linked; each one saves like a file link. */
+export function MessageFolderFiles({ folderPath, listing, message }: {
+  folderPath: string;
+  listing: MessageFolderListing;
+  message: MessageAttachmentContext;
+}) {
+  return (
+    <span dir="ltr" className="block w-full text-[12px] [unicode-bidi:isolate]">
+      {listing.entries.length === 0 ? (
+        <span className="text-ink-secondary">{t("attach.folderEmpty")}</span>
+      ) : (
+        <ul aria-label={t("attach.folderFilesAria", { name: listing.name })} className="flex flex-col gap-0.5 ps-1">
+          {listing.entries.map((entry) => (
+            <MessageFolderFile key={entry.name} folderPath={folderPath} name={entry.name} bytes={entry.bytes} message={message} />
+          ))}
+        </ul>
+      )}
+      {listing.truncated && <span className="text-ink-secondary">{t("attach.folderTruncated")}</span>}
+    </span>
+  );
 }
 
 // A file outside the conversation's workspace is never served, but the local
@@ -814,15 +901,19 @@ export function MarkdownImagePreview({
   );
 }
 
-export function AttachedFileChip({ file, message, linked = false, className }: {
+export function AttachedFileChip({ file, message, linked = false, compact = false, className }: {
   file: TranscriptFileAttachment;
   message?: MessageAttachmentContext;
   /** A rendered bot-authored Markdown link, still checked by the server on click. */
   linked?: boolean;
+  /** One 28px pill (icon, name, download) for the group under a reply. */
+  compact?: boolean;
   className?: string;
 }) {
   const save = useLocalFileSave(file.path, file.name, message);
   const failed = save.state === "failed";
+  const retryable = failed && !save.outsideWorkspace;
+  if (compact) return <CompactFileChip file={file} message={message} linked={linked} save={save} className={className} />;
   if (!message || (!file.private && !linked)) {
     return (
       <div title={t("attach.legacyFile", { name: file.name })} className={cn("flex max-w-[280px] items-center gap-2 overflow-hidden rounded-lg border border-hairline/40 bg-inset/70 px-2.5 py-2 text-[12px] text-ink-secondary", className)}>
@@ -843,7 +934,7 @@ export function AttachedFileChip({ file, message, linked = false, className }: {
           onClick={() => void save.save()}
           disabled={save.state === "saving"}
           aria-label={
-            failed
+            retryable
               ? t("attach.retrySaveAria", { name: file.name })
               : t("attach.saveAria", { name: file.name })
           }
@@ -855,8 +946,8 @@ export function AttachedFileChip({ file, message, linked = false, className }: {
             <LoaderCircle size={13} className="shrink-0 animate-spin" />
           ) : save.state === "saved" ? (
             <Check size={13} className="shrink-0 text-success" />
-          ) : save.state === "failed" ? (
-            <RotateCcw size={13} className="shrink-0 text-danger" />
+          ) : failed ? (
+            retryable && <RotateCcw size={13} className="shrink-0 text-danger" />
           ) : (
             <Download size={13} className="shrink-0" />
           )}
@@ -875,7 +966,7 @@ export function AttachedFileChip({ file, message, linked = false, className }: {
             ? t("attach.downloading")
             : save.state === "saved"
               ? t("attach.downloaded")
-              : save.reason}
+              : saveFailureText(save)}
           {failed && save.outsideWorkspace && (
             <div className="mt-1 flex flex-wrap items-center gap-x-1.5">
               <OutsideWorkspaceFile filePath={file.path} />
@@ -884,6 +975,68 @@ export function AttachedFileChip({ file, message, linked = false, className }: {
         </div>
       )}
     </div>
+  );
+}
+
+const FILE_CHIP = "inline-flex h-7 max-w-[16rem] items-center rounded-full bg-ink/[0.06] text-[13px] leading-none text-ink-secondary";
+
+function CompactFileChip({ file, message, linked, save, className }: {
+  file: TranscriptFileAttachment;
+  message?: MessageAttachmentContext;
+  linked: boolean;
+  save: ReturnType<typeof useLocalFileSave>;
+  className?: string;
+}) {
+  const failed = save.state === "failed";
+  const retryable = failed && !save.outsideWorkspace;
+  // a file name in any script keeps its own direction inside the pill
+  const name = <span dir="auto" className="min-w-0 truncate text-ink [unicode-bidi:isolate]">{file.name}</span>;
+  if (!message || (!file.private && !linked)) {
+    return (
+      <span title={t("attach.legacyFile", { name: file.name })} className={cn(FILE_CHIP, "gap-1.5 px-2.5", className)}>
+        <FileText size={14} strokeWidth={1.75} className="shrink-0" aria-hidden="true" />
+        {name}
+        <span className="shrink-0 text-[11.5px]">{t("attach.unavailable")}</span>
+      </span>
+    );
+  }
+  return (
+    <span className="inline-flex max-w-full flex-col items-start gap-1">
+      <span
+        title={save.state === "saved" && save.savedTo ? t("attach.savedTo", { path: save.savedTo }) : file.name}
+        className={cn(FILE_CHIP, "file-chip pe-0.5", className)}
+      >
+        <button
+          type="button"
+          onClick={() => void save.save()}
+          disabled={save.state === "saving"}
+          aria-label={retryable ? t("attach.retrySaveAria", { name: file.name }) : t("attach.saveAria", { name: file.name })}
+          className="inline-flex h-7 min-w-0 items-center gap-1.5 rounded-full ps-2.5 pe-2 transition-colors hover:bg-ink/[0.06] hover:text-ink focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus disabled:cursor-wait"
+        >
+          <FileText size={14} strokeWidth={1.75} className="shrink-0" aria-hidden="true" />
+          {name}
+          {save.state === "saving" ? (
+            <LoaderCircle size={13} className="shrink-0 animate-spin" aria-hidden="true" />
+          ) : save.state === "saved" ? (
+            <Check size={13} className="shrink-0 text-success" aria-hidden="true" />
+          ) : failed ? (
+            retryable && <RotateCcw size={13} className="shrink-0 text-danger" aria-hidden="true" />
+          ) : (
+            <Download size={13} strokeWidth={1.75} className="shrink-0" aria-hidden="true" />
+          )}
+        </button>
+        <TableFileButton path={file.path} name={file.name} message={message} />
+      </span>
+      {save.state !== "idle" && save.state !== "saved" && (
+        <span role={failed ? "alert" : "status"} className={cn("px-2.5 text-[11.5px]", failed ? "text-danger" : "text-ink-secondary")}>
+          {save.state === "saving" ? t("attach.downloading") : saveFailureText(save)}
+          {failed && save.outsideWorkspace && (
+            <span className="ms-1.5 inline-flex flex-wrap items-center gap-x-1.5"><OutsideWorkspaceFile filePath={file.path} /></span>
+          )}
+        </span>
+      )}
+      {save.state === "saved" && <span role="status" className="sr-only">{t("attach.downloaded")}</span>}
+    </span>
   );
 }
 

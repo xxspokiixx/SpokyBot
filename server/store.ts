@@ -15,6 +15,7 @@ import type { BotProfilePatch } from "./bot-profile.ts";
 import { peerAllowKey, type PeerAction } from "./peer-approval-key.ts";
 import { DATA_DIR, EVENTS_DIR, NATIVE_DIR, loadBrowserProfileIdAliases } from "./config.ts";
 import * as mdb from "./message-db.ts";
+import { forgetBotMemoryJournal, journalFile } from "./memory-journal.ts";
 import { runCommand, type Command } from "./commands.ts";
 import { workspaceDir } from "./workspace.ts";
 import type { Destination } from "./surface.ts";
@@ -134,7 +135,7 @@ const ASK_NOW = { approvalMode: "ask" as const, autoApprove: false, alwaysAllow:
 
 const TASK_PATCH_FIELDS = [
   "title", "projectId", "modelSelection", "approvalMode", "autoApprove", "alwaysAllow",
-  "unread", "rewound", "archivedAt", "pinned", "pinnedMessageId", "resumeCursors", "lastInstanceId", "cwd",
+  "unread", "lastReadMessageId", "rewound", "archivedAt", "pinned", "pinnedMessageId", "resumeCursors", "lastInstanceId", "cwd",
   "routineRunId", "surface", "surfaceSource", "snoozedUntil", "appliedCompactionId", "contextFloor", "lastContextModel",
 ] as const satisfies readonly (keyof TaskRecord)[];
 export type TaskPatch = Partial<Pick<TaskRecord, typeof TASK_PATCH_FIELDS[number]>>;
@@ -157,6 +158,11 @@ function persistedPin<T extends { pinned?: boolean }>(task: T): T {
 function redactBotAuthored<T extends Omit<Message, "id" | "at"> & { at?: number }>(message: T): T {
   if (message.role !== "bot") return message;
   const out = { ...message };
+  if (out.dataResult) out.dataResult = {
+    ...out.dataResult,
+    title: redactSecretsInText(out.dataResult.title),
+    ...(out.dataResult.sql === undefined ? {} : { sql: redactSecretsInText(out.dataResult.sql) }),
+  };
   if (typeof out.text === "string") out.text = redactSecretsInText(out.text);
   if (out.compaction) out.compaction = { ...out.compaction, summary: redactSecretsInText(out.compaction.summary) };
   if (out.tool?.name) {
@@ -1253,7 +1259,7 @@ export class Store {
     );
   }
 
-  patchGroup(id: string, patch: Partial<Pick<GroupRecord, "name" | "memberIds" | "defaultResponder" | "bulletin" | "unread" | "busyBotId" | "cwd" | "pinnedMessageId" | "section" | "setupCompletedAt" | "setupSkippedAt" | "audienceFloor" | "installedPackage" | "turnTimeoutMinutes">>): GroupRecord | null {
+  patchGroup(id: string, patch: Partial<Pick<GroupRecord, "name" | "memberIds" | "defaultResponder" | "bulletin" | "unread" | "lastReadMessageId" | "busyBotId" | "cwd" | "pinnedMessageId" | "section" | "setupCompletedAt" | "setupSkippedAt" | "audienceFloor" | "installedPackage" | "turnTimeoutMinutes">>): GroupRecord | null {
     const group = this.group(id);
     if (!group) return null;
     if (Object.prototype.hasOwnProperty.call(patch, "section")) {
@@ -1691,7 +1697,7 @@ export class Store {
    * (same parent, new text) and becomes the active leaf. `sendId` is the
    * client's identity for this edit, so its instant bubble reconciles onto
    * the canonical message and a network retry cannot fork twice. */
-  branchMessage(threadId: string, sourceId: string, text: string, sendId?: string, sender?: Message["sender"]): Message | null {
+  branchMessage(threadId: string, sourceId: string, text: string, sendId?: string, sender?: Message["sender"], dataContext?: Message["dataContext"]): Message | null {
     const t = this.thread(threadId);
     const source = t.messages.find((m) => m.id === sourceId);
     if (!source) return null;
@@ -1705,6 +1711,7 @@ export class Store {
       replyToId: source.replyToId,
       ...(sendId ? { sendId } : {}),
       ...(sender ? { sender } : {}),
+      ...(dataContext ? { dataContext } : {}),
     };
     t.messages.push(full);
     t.activeLeafId = full.id;
@@ -1868,6 +1875,9 @@ export class Store {
           title: "", description: "", soul: "", notifications: true, color: COLORS[nextBots.length % COLORS.length], unread: false,
           resumeCursors: {}, createdAt, ...operation.fields, modelSelection,
           approvalMode: "ask", autoApprove: false, composio: false, approvePeerComms: false,
+          // No connector tools until someone grants them. An absent record
+          // would mean every tool once connected apps are turned on.
+          connectorTools: {},
           // A Chief's new teammate is seen by exactly the Chief's audience:
           // a restricted Chief never creates a bot everyone sees.
           ...(chief.visibility && chief.visibility !== "everyone" ? { visibility: structuredClone(chief.visibility) } : {}),
@@ -1992,6 +2002,14 @@ export class Store {
     try {
       rmSync(workspaceDir(id), { recursive: true, force: true });
     } catch {}
+    // The journal lives outside the workspace, so removing the workspace
+    // does not take it. It is this bot's record of what its memory used to
+    // say, and it goes with the bot — the same rule as a thread's event log.
+    try {
+      rmSync(journalFile(id), { force: true });
+    } catch {}
+    mdb.deleteBotMemoryFiles(id);
+    forgetBotMemoryJournal(id);
     // Generated task-workspaces are project files, not bot memory. Keep
     // them (and user-selected cwd folders) when deleting conversations.
     // Approval state deliberately lives outside the bot-writable workspace.
@@ -2816,7 +2834,7 @@ export class Store {
    * model unless the caller hands it another one: a thread opened from
    * another of this bot's threads keeps the model a person picked there. */
   createTask(botId: string, title?: string, activate = true, projectId?: string, openedBy?: TaskOpenedBy, approvalMode?: "ask" | "full",
-    modelSelection?: ModelSelection): TaskRecord | null {
+    modelSelection?: ModelSelection, cwd?: string): TaskRecord | null {
     const bot = this.bot(botId);
     if (!bot) return null;
     if (projectId !== undefined && !this.project(botId, projectId)) return null;
@@ -2826,6 +2844,9 @@ export class Store {
       title: threadTitleFrom(title),
       createdAt,
       updatedAt: createdAt,
+      // Only a new task can receive an explicit working folder. The HTTP
+      // caller validates it; subsequent turns use the existing pin unchanged.
+      ...(cwd !== undefined ? { cwd } : {}),
       ...(projectId ? { projectId } : {}),
       ...(openedBy ? { openedBy: structuredClone(openedBy) } : {}),
       resumeCursors: {},

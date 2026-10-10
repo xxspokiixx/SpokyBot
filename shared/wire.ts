@@ -8,6 +8,7 @@
  * server/store.ts; the wire projection is typed so a new server field
  * fails compilation until it is either declared here or explicitly listed
  * as server-private. */
+import type { DataBroadcast } from "./data-surface.ts";
 import type { ApprovalMode } from "./approval-mode.ts";
 import type { ToolScope } from "./tool-scope.ts";
 import type { CommandAllowlistCandidate } from "./command-allowlist.ts";
@@ -161,6 +162,9 @@ export interface WireTask {
   autoApprove?: boolean;
   alwaysAllow?: string[];
   unread?: boolean;
+  /** The newest message on screen the last time the person read this
+   * conversation. The New divider goes after it. */
+  lastReadMessageId?: string;
   /** true after an edit/branch-switch rewound the visible conversation. */
   rewound?: boolean;
   pinnedMessageId?: string;
@@ -508,6 +512,13 @@ export interface WireMessage {
   comm?: { groupId: string; threadId?: string; withBotId: string; withName: string; withColor: string };
   /** thread chips: "Opened thread #Title on @X". */
   threadRef?: { botId: string; threadId: string; title: string };
+  /** A published Data result, linked to its bot's main viewer. */
+  dataResult?: { botId: string; cardId: string; title: string; kind: "table" | "chart" | "text"; sql?: string };
+  /** user messages: the Data result the person was viewing when they sent
+   * this (shared/data-context.ts). Its own field, so `text` stays exactly
+   * what they typed; the server puts the hint in front of the text it
+   * sends the model for this turn and for every retry of it. */
+  dataContext?: { cardId: string; draftSql?: string };
   /** user messages waiting in the steer-queue while the bot is mid-turn. */
   queued?: boolean;
   /** steer-queue entry this drained user line came from. */
@@ -684,6 +695,9 @@ export interface WireGroup {
   /** The room's shared instructions. */
   bulletin: string;
   unread: boolean;
+  /** The newest message on screen the last time the person read this
+   * conversation. The New divider goes after it. */
+  lastReadMessageId?: string;
   createdAt: number;
   /** true for auto-created bot-bot channels. */
   dm?: boolean;
@@ -777,6 +791,9 @@ export type ServerFrame =
    * computer (absent: a Local VM). */
   | { kind: "computer"; botId: string; state: "provisioning" | "waking"; place?: "cloud" }
   | { kind: "computer-control"; botId: string; held: boolean; helpReason: string | null }
+  /** A bot's data sheet changed (a card added, updated, failed, removed; a
+   * table loaded). Whole sheet each time: see shared/data-surface.ts. */
+  | DataBroadcast
   | { kind: "bot.deleted"; botId: string }
   | { kind: "live.call"; botId: string; threadId: string; call: LiveCallState | null }
   /** The config status object spread flat into the frame; its full typing

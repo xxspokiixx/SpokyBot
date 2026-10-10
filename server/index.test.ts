@@ -8,7 +8,7 @@ import { createHash, randomUUID } from "node:crypto";
 import { once } from "node:events";
 import { createServer, request, type Server } from "node:http";
 import { connect, type Socket } from "node:net";
-import { chmodSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, renameSync, rmSync, statSync, symlinkSync, writeFileSync } from "node:fs";
+import { chmodSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, renameSync, rmSync, statSync, symlinkSync, utimesSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
@@ -49,7 +49,7 @@ async function mintTestCapability(
   baseUrl: string,
   botId: string,
   threadId: string,
-  options: { kind?: "agents" | "connectors" | "computer"; skillAuthoring?: boolean } = {},
+  options: { kind?: "agents" | "connectors" | "computer"; skillAuthoring?: boolean; deliversSavedFiles?: boolean } = {},
 ): Promise<string> {
   const response = await fetch(`${baseUrl}/api/testing/internal-capability`, {
     method: "POST",
@@ -57,7 +57,13 @@ async function mintTestCapability(
       "content-type": "application/json",
       "x-openmausbot-test-capability": TEST_CAPABILITY_KEY,
     },
-    body: JSON.stringify({ botId, threadId, kind: options.kind ?? "agents", skillAuthoring: options.skillAuthoring ?? false }),
+    body: JSON.stringify({
+      botId,
+      threadId,
+      kind: options.kind ?? "agents",
+      skillAuthoring: options.skillAuthoring ?? false,
+      ...(options.deliversSavedFiles ? { deliversSavedFiles: true } : {}),
+    }),
   });
   expect(response.status).toBe(201);
   return ((await response.json()) as { token: string }).token;
@@ -2487,8 +2493,10 @@ describe("harness HTTP API", () => {
         return { status: response.status, body };
       };
 
+      // Below Full Access the specialist waits on one review card.
       const direct = await createOperator(chief.threadId, "Direct Task Operator");
-      expect(direct).toMatchObject({ status: 201, body: { section: "Channel creation test" } });
+      expect(direct).toMatchObject({ status: 201, body: { state: "pending" } });
+      expect(direct.body.detail).toContain('Section: "Channel creation test"');
       // a name is quoted into every other room member's system prompt as one
       // line, so one that spans lines is refused here as it is at the profile
       // endpoints — an injected Chief must not be the way round that door
@@ -2721,18 +2729,103 @@ describe("harness HTTP API", () => {
         return { status: response.status, body: await response.json() as { id?: string; error?: string } };
       };
       const folder = mkdtempSync(join(tmpdir(), "omb-create-cwd-"));
-      const landed = await create(`Folder operator ${chief.id}`, folder);
-      expect(landed.status).toBe(201);
-      createdId = landed.body.id;
-      const state = (await api("GET", "/api/bots?messages=0")).body;
-      expect(state.bots.find((bot: { id?: string }) => bot.id === createdId)?.cwd).toBe(folder);
+      const landed = await create(`Folder operator ${chief.id}`, folder) as { status: number; body: { requestId?: string; state?: string; detail?: string } };
+      expect(landed.body).toMatchObject({ state: "pending" });
+      expect(landed.body.detail).toContain(`Working folder: "${folder}"`);
       const relative = await create(`Relative operator ${chief.id}`, "relative/path");
       expect(relative).toMatchObject({ status: 400, body: { error: "working folder must be an absolute path" } });
       const missing = await create(`Missing operator ${chief.id}`, join(folder, "missing"));
       expect(missing.status).toBe(400);
       expect(missing.body.error).toBe(`that folder doesn't exist: ${join(folder, "missing")}`);
+      // Applying the card resumes the Chief, which retires this turn's token.
+      const applied = await fetch(`${BASE}/api/threads/${chief.threadId}/respond`, {
+        method: "POST",
+        headers: { "content-type": "application/json", origin: BASE },
+        body: JSON.stringify({ requestId: landed.body.requestId, behavior: "allow" }),
+      });
+      const result = await applied.json() as { result: { bots: Array<{ id: string }> } };
+      expect(applied.status, JSON.stringify(result)).toBe(200);
+      createdId = result.result.bots[0]?.id;
+      const state = (await api("GET", "/api/bots?messages=0")).body;
+      expect(state.bots.find((bot: { id?: string }) => bot.id === createdId)?.cwd).toBe(folder);
     } finally {
       if (createdId) await api("DELETE", `/api/bots/${createdId}`);
+      await api("DELETE", `/api/bots/${chief.id}`);
+    }
+  });
+
+  it("keeps create_bot on its review card below Full Access, whatever the Chief always allows", async () => {
+    const chief = (await api("POST", "/api/bots")).body.bot;
+    try {
+      expect((await api("PATCH", `/api/bots/${chief.id}`, { chiefOfStaff: true })).status).toBe(200);
+      // Every key a standing grant could plausibly carry for this tool.
+      const grants = ["create_bot", "mcp__agents__create_bot", "mcp__openmausbot__create_bot", "propose_team_setup", "set_up_team"];
+      expect((await api("PATCH", `/api/bots/${chief.id}`, { alwaysAllow: grants })).status).toBe(200);
+      const granted = (await api("GET", "/api/bots?messages=0")).body.bots.find((bot: { id: string }) => bot.id === chief.id);
+      expect(granted.alwaysAllow).toEqual(grants);
+      const before = (await api("GET", "/api/bots?messages=0")).body.bots.length;
+      const token = await mintTestCapability(BASE, chief.id, chief.threadId);
+      const response = await fetch(`${BASE}/api/internal/create-bot`, {
+        method: "POST",
+        headers: { authorization: `Bearer ${token}`, "content-type": "application/json" },
+        body: JSON.stringify({ name: `Granted operator ${chief.id}`, role: "Ops", instructions: "Work carefully.\nReport back." }),
+      });
+      const card = await response.json() as { state: string; requestId: string; detail: string };
+      expect(response.status).toBe(201);
+      expect(card.state).toBe("pending");
+      expect(card.detail).toContain("+Work carefully.");
+      expect((await api("GET", "/api/bots?messages=0")).body.bots.length).toBe(before);
+      // A team-setup card offers no "Always allow" to remember either.
+      for (const allowKey of grants) {
+        expect((await api("POST", `/api/bots/${chief.id}/always-allow`, { threadId: chief.threadId, allowKey })).status).toBe(409);
+      }
+      const denied = await fetch(`${BASE}/api/threads/${chief.threadId}/respond`, {
+        method: "POST",
+        headers: { "content-type": "application/json", origin: BASE },
+        body: JSON.stringify({ requestId: card.requestId, behavior: "deny" }),
+      });
+      expect((await denied.json() as { result: { state: string } }).result.state).toBe("denied");
+      expect((await api("GET", "/api/bots?messages=0")).body.bots.length).toBe(before);
+    } finally {
+      await api("DELETE", `/api/bots/${chief.id}`);
+    }
+  });
+
+  it("keeps one suggested specialist open per conversation and remembers Not now", async () => {
+    const chief = (await api("POST", "/api/bots")).body.bot;
+    try {
+      expect((await api("PATCH", `/api/bots/${chief.id}`, { chiefOfStaff: true })).status).toBe(200);
+      const before = (await api("GET", "/api/bots?messages=0")).body.bots.length;
+      const token = await mintTestCapability(BASE, chief.id, chief.threadId);
+      const suggest = async (name: string) => {
+        const response = await fetch(`${BASE}/api/internal/create-bot`, {
+          method: "POST",
+          headers: { authorization: `Bearer ${token}`, "content-type": "application/json" },
+          body: JSON.stringify({ name, role: "Checker", instructions: "Check the totals.", suggestion: true }),
+        });
+        return { status: response.status, body: await response.json() as { state?: string; requestId?: string; title?: string; error?: string } };
+      };
+      const first = await suggest(`Suggested ${chief.id}`);
+      expect(first).toMatchObject({ status: 201, body: { state: "pending", title: `Add @Suggested ${chief.id} to the team?` } });
+      const card = (await api("GET", `/api/threads/${chief.threadId}/messages?limit=20`)).body.messages.find((m: { card?: { requestId?: string } }) => m.card?.requestId === first.body.requestId).card;
+      expect(card.options).toEqual(["Add bot", "Not now"]);
+      expect(await suggest(`Second ${chief.id}`)).toMatchObject({ status: 409, body: { error: expect.stringMatching(/already waiting/) } });
+      const notNow = await fetch(`${BASE}/api/threads/${chief.threadId}/respond`, {
+        method: "POST",
+        headers: { "content-type": "application/json", origin: BASE },
+        body: JSON.stringify({ requestId: first.body.requestId, behavior: "deny" }),
+      });
+      expect((await notNow.json() as { result: { state: string } }).result.state).toBe("denied");
+      const fresh = await mintTestCapability(BASE, chief.id, chief.threadId);
+      const again = await fetch(`${BASE}/api/internal/create-bot`, {
+        method: "POST",
+        headers: { authorization: `Bearer ${fresh}`, "content-type": "application/json" },
+        body: JSON.stringify({ name: `Third ${chief.id}`, role: "Checker", instructions: "Check the totals.", suggestion: true }),
+      });
+      expect(again.status).toBe(409);
+      expect((await again.json() as { error: string }).error).toMatch(/not now/);
+      expect((await api("GET", "/api/bots?messages=0")).body.bots.length).toBe(before);
+    } finally {
       await api("DELETE", `/api/bots/${chief.id}`);
     }
   });
@@ -8166,6 +8259,8 @@ describe("harness HTTP API", () => {
       const started = await remote(alice, "POST", base);
       expect(started.status).toBe(200);
       expect(started.cache).toBe("no-store");
+      // no https address to come back to: the person pastes the page it ends on
+      expect(started.body.auth.pasteBack).toBe(true);
       const path = `${base}/${started.body.auth.flowId}`;
       const approval = await fetch(started.body.auth.authorizationUrl, { redirect: "manual" });
       const callbackUrl = approval.headers.get("location")!;
@@ -8198,6 +8293,60 @@ describe("harness HTTP API", () => {
     } finally {
       await api("DELETE", "/api/mcp/servers/headless");
       for (const token of [alice, bob, member]) await remote(token, "POST", "/api/auth/logout");
+      await fake.close();
+      await oauth.close();
+    }
+  });
+
+  it("brings a sign-in started in a browser on another computer back to this server's https address", async () => {
+    const oauth = await startFakeOAuth();
+    const fake = await startFakeHttpMcp({ acceptBearer: oauth.isValid, wwwAuthenticate: oauth.challenge });
+    const opened = await api("POST", "/api/auth/pairing", { scopes: ["admin", "client"] });
+    const token = (await api("POST", "/api/auth/pair", { code: opened.body.code })).body.token as string;
+    // What the edge proxy in front of My Cloud hands the server (node's
+    // fetch drops a custom Host header, so this goes through http.request).
+    const viaProxy = (method: string, path: string, headers: Record<string, string> = {}, body?: unknown) =>
+      new Promise<{ status: number; text: string; headers: Record<string, unknown> }>((resolve, reject) => {
+        const req = request({
+          hostname: "127.0.0.1", port: PORT, path, method,
+          headers: { host: "cloud.example", "x-forwarded-proto": "https", "x-forwarded-for": "192.0.2.20", ...headers },
+        }, (res) => {
+          let raw = "";
+          res.on("data", (chunk) => (raw += chunk));
+          res.on("end", () => resolve({ status: res.statusCode ?? 0, text: raw, headers: res.headers }));
+        });
+        req.on("error", reject);
+        req.end(body === undefined ? undefined : JSON.stringify(body));
+      });
+    const signedIn = { authorization: `Bearer ${token}`, origin: "https://cloud.example", "content-type": "application/json" };
+    const base = "/api/mcp/servers/whop/sign-in";
+    try {
+      expect((await api("POST", "/api/mcp/servers", { name: "whop", url: fake.url })).status).toBe(201);
+      const started = await viaProxy("POST", base, signedIn);
+      expect(started.status).toBe(200);
+      const auth = JSON.parse(started.text).auth;
+      expect(auth.pasteBack).toBeUndefined();
+      expect(new URL(auth.authorizationUrl).searchParams.get("redirect_uri")).toBe("https://cloud.example/mcp-oauth/callback");
+      const callback = new URL((await fetch(auth.authorizationUrl, { redirect: "manual" })).headers.get("location")!);
+      expect(callback.origin + callback.pathname).toBe("https://cloud.example/mcp-oauth/callback");
+
+      const forged = new URL(callback);
+      forged.searchParams.set("state", "forged");
+      expect((await viaProxy("GET", forged.pathname + forged.search)).status).toBe(400);
+      expect(JSON.parse((await viaProxy("GET", `${base}/${auth.flowId}`, signedIn)).text).auth.phase).toBe("waiting");
+
+      const page = await viaProxy("GET", callback.pathname + callback.search);
+      expect(page.status).toBe(200);
+      expect(page.text).toBe("Signed in. You can close this tab and return to OpenMausBot.");
+      expect(page.headers).toMatchObject({ "cache-control": "no-store", "referrer-policy": "no-referrer", "content-type": "text/plain; charset=utf-8" });
+      expect(page.text).not.toContain(callback.searchParams.get("code"));
+      expect(JSON.parse((await viaProxy("GET", `${base}/${auth.flowId}`, signedIn)).text).auth.phase).toBe("succeeded");
+      expect((await viaProxy("GET", callback.pathname + callback.search)).status).toBe(409);
+      expect(oauth.counts.token).toBe(1);
+      expect((await api("POST", "/api/mcp/servers/whop/test")).body.ok).toBe(true);
+    } finally {
+      await api("DELETE", "/api/mcp/servers/whop").catch(() => undefined);
+      await viaProxy("POST", "/api/auth/logout", signedIn).catch(() => undefined);
       await fake.close();
       await oauth.close();
     }
@@ -9884,6 +10033,24 @@ describe("harness HTTP API", () => {
       await api("DELETE", `/api/groups/${room.id}`);
       await api("DELETE", `/api/bots/${first.id}`);
       await api("DELETE", `/api/bots/${second.id}`);
+    }
+  });
+
+  it("records where the person stopped reading a thread", async () => {
+    const bot = (await api("POST", "/api/bots", {})).body.bot;
+    try {
+      const task = async () => (await api("GET", "/api/bots")).body.bots
+        .find((candidate: { id: string }) => candidate.id === bot.id)
+        .tasks.find((candidate: { threadId: string }) => candidate.threadId === bot.threadId);
+      const newest = (await api("GET", `/api/threads/${bot.threadId}/messages?limit=50`)).body.messages.at(-1)?.id;
+      expect(newest).toBeTruthy();
+      expect((await task()).lastReadMessageId).toBeUndefined();
+      expect((await api("PATCH", `/api/bots/${bot.id}`, { unread: true })).status).toBe(200);
+      const read = await api("POST", `/api/bots/${bot.id}/read`, { threadId: bot.threadId });
+      expect(read.status).toBe(200);
+      expect(await task()).toMatchObject({ unread: false, lastReadMessageId: newest });
+    } finally {
+      await api("DELETE", `/api/bots/${bot.id}`);
     }
   });
 
@@ -11659,6 +11826,60 @@ describe("bot memory API", () => {
       for (let count = 2; count < 10; count += 1) expect((await attach({ path: "song.mp3" })).status).toBe(200);
       const flooded = await attach({ path: "song.mp3" });
       expect(flooded.status).toBe(429);
+    } finally {
+      await api("DELETE", `/api/bots/${bot.id}`);
+    }
+  });
+
+  it("delivers a file a host engine's turn saved outside its folders by copy, and nothing else from there", async () => {
+    const bot = (await api("POST", "/api/bots", {})).body.bot;
+    try {
+      const attachWith = (token: string, path: string) => fetch(`${BASE}/api/internal/attach-file`, {
+        method: "POST",
+        headers: { authorization: `Bearer ${token}`, "content-type": "application/json" },
+        body: JSON.stringify({ path }),
+      });
+      // A real turn has made its folders before the engine starts.
+      mkdirSync(workspaceOf(bot.id), { recursive: true });
+      const designs = join(home, "Desktop", "designs", "2026-10-08_News");
+      mkdirSync(designs, { recursive: true });
+      const old = join(designs, "last-week.jpg");
+      writeFileSync(old, "jpeg-old");
+      utimesSync(old, new Date(Date.now() - 3_600_000), new Date(Date.now() - 3_600_000));
+
+      // Without the host-files grant nothing outside the folders is attached, as before.
+      const plain = await mintTestCapability(BASE, bot.id, bot.threadId);
+      writeFileSync(join(designs, "PREVIEW.jpg"), "jpeg-new");
+      expect((await attachWith(plain, join(designs, "PREVIEW.jpg"))).status).toBe(403);
+
+      const token = await mintTestCapability(BASE, bot.id, bot.threadId, { deliversSavedFiles: true });
+      writeFileSync(join(designs, "PREVIEW.jpg"), "jpeg-this-turn");
+      const attached = await attachWith(token, join(designs, "PREVIEW.jpg"));
+      expect(attached.status).toBe(200);
+      const old403 = await attachWith(token, old);
+      expect(old403.status).toBe(403);
+      expect(((await old403.json()) as { error: string }).error).toContain("not saved during this turn");
+      expect((await attachWith(token, designs)).status).toBe(400);
+
+      const dump = await api("GET", `/api/threads/${bot.threadId}/export?format=json`);
+      const delivered = (dump.body.messages as Array<{ id: string; attachments?: Array<{ path: string }> }>)
+        .filter((message) => message.attachments?.length);
+      expect(delivered).toHaveLength(1);
+      const copy = delivered[0]!.attachments![0]!.path;
+      expect(readFileSync(join(designs, "PREVIEW.jpg"), "utf8")).toBe("jpeg-this-turn");
+      const served = await fetch(`${BASE}/api/threads/${bot.threadId}/messages/${delivered[0]!.id}/file`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ path: copy }),
+      });
+      expect(served.status).toBe(200);
+      expect(Buffer.from(await served.arrayBuffer()).toString()).toBe("jpeg-this-turn");
+      // The original folder is still no grant for a message link.
+      expect((await fetch(`${BASE}/api/threads/${bot.threadId}/messages/${delivered[0]!.id}/file`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ path: join(designs, "PREVIEW.jpg") }),
+      })).status).toBe(403);
     } finally {
       await api("DELETE", `/api/bots/${bot.id}`);
     }
