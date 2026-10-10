@@ -23,7 +23,7 @@ import { UpdateBanner } from "@/components/UpdateBanner";
 import { AppNotices } from "@/components/AppNotices";
 import { CloudAddDialog } from "@/components/CloudAddDialog";
 import { CloudHowTo } from "@/components/CloudHowTo";
-import { DesktopCapabilitiesProvider, useDesktopCapabilities } from "@/components/DesktopCapabilities";
+import { DesktopCapabilitiesProvider, useCaptionChrome, useDesktopCapabilities, WindowDragStrip } from "@/components/DesktopCapabilities";
 import { WindowCaptionButtons } from "@/components/WindowCaptionButtons";
 import { NoEngines } from "@/components/NoEngines";
 import { CloudEngineSignIn } from "@/components/CloudEngineSignIn";
@@ -41,6 +41,7 @@ import { phonePairingSettingsAction, takePhonePairingRequest } from "@/lib/phone
 function Shell({ viewer }: { viewer: WelcomeViewer | null }) {
   const { state, dispatch } = useStore();
   const { capabilities } = useDesktopCapabilities();
+  const captionChrome = useCaptionChrome();
   const unreadCount =
     state.bots.filter((bot) => !bot.hidden && botShowsUnread(bot)).length +
     state.groups.filter((group) => group.unread).length;
@@ -351,7 +352,8 @@ function Shell({ viewer }: { viewer: WelcomeViewer | null }) {
       ) : bot ? (
         <ChatView bot={bot} />
       ) : (
-        <main className="flex h-full min-w-0 flex-1 flex-col items-center justify-center gap-3 bg-app text-ink-secondary">
+        <main className="relative flex h-full min-w-0 flex-1 flex-col items-center justify-center gap-3 bg-app text-ink-secondary">
+          <WindowDragStrip />
           <Loader2 size={20} className="animate-spin" />
           <div className="text-[14px]">
             {state.connected ? "No bots yet" : "Connecting to the bot server…"}
@@ -411,6 +413,16 @@ function Shell({ viewer }: { viewer: WelcomeViewer | null }) {
       {/* mounted after the modals: same z-50 tier, so DOM order keeps the
           palette on top when one of them is open underneath */}
       <CommandPalette onOpenChange={setPaletteOpen} />
+      {/* The drawer button comes before every header in the DOM, and a later
+          drag region wins, so on a narrow window the header's drag region
+          swallowed it. This no-drag twin, after the headers, cuts the
+          button's corner back out. It paints nothing and takes no clicks. */}
+      {!calendarFocus && <span
+        aria-hidden
+        data-drawer-button-no-drag
+        style={captionChrome.noDragStyle}
+        className="pointer-events-none absolute left-3 top-3 size-[30px] md:hidden"
+      />}
       </div>
       {/* Renderer-drawn caption buttons for the overlay-less frameless
           Windows window. Deliberately the LAST child of the shell: Blink

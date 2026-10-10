@@ -1159,10 +1159,10 @@ export function ChatView({ bot: profile }: { bot: Bot }) {
   const { state, dispatch } = useStore();
   const remoteClient = window.ogb?.remoteClient?.active === true;
   // Simple mode reaches other threads from the sidebar; the header picker is Advanced only.
-  // Windows has no native caption buttons (renderer-drawn, see
-  // WindowCaptionButtons); this header is the window drag region, and the
-  // icon row shifts below the 26px-tall corner the buttons occupy.
-  const { dragStyle: headerDragStyle, noDragStyle: headerNoDragStyle, controlsShiftStyle } = useCaptionChrome();
+  // Without a native title bar (macOS inset lights, frameless Windows) this
+  // header is the window drag region. On Windows the icon row also shifts
+  // below the 26px-tall corner the renderer-drawn caption buttons occupy.
+  const { dragProps: headerDragProps, noDragStyle: headerNoDragStyle, controlsShiftStyle } = useCaptionChrome();
   const composerDockRef = useRef<HTMLDivElement>(null);
   const composerDock = useComposerDockPad(composerDockRef);
   const advanced = useAdvancedMode();
@@ -1369,7 +1369,7 @@ export function ChatView({ bot: profile }: { bot: Bot }) {
       <GlassBar edge="top" className="z-[25]">
       {/* Header */}
       <div
-        style={headerDragStyle}
+        {...headerDragProps}
         className={cn(
           // @container so the chips on the right can fold to icon bubbles
           // when the column is narrow (side panel open, small window). A
@@ -1432,7 +1432,6 @@ export function ChatView({ bot: profile }: { bot: Bot }) {
                 inputClassName="max-w-[220px] rounded-full bg-inset px-2 py-0.5 text-[14px] font-semibold"
               />
               {chiefOfStaffBadge(bot)}
-              {bot.busy && <WorkingDots className="pr-2 text-ink-secondary" />}
             </div>
           ) : (
             <button
@@ -1453,9 +1452,14 @@ export function ChatView({ bot: profile }: { bot: Bot }) {
               />
               <span className="min-w-0 truncate text-[14px] font-semibold text-ink">{bot.name}</span>
               {chiefOfStaffBadge(bot)}
-              {bot.busy && <WorkingDots className="text-ink-secondary" />}
             </button>
           )}
+          {/* The pill draws no activity of its own: the sidebar avatar's
+              presence dot, the Stop button beside the model chip and the
+              composer already say a turn is running, at every width. The
+              pill keeps one width either way, and a screen reader still
+              hears when the bot starts working. */}
+          <span role="status" className="sr-only" data-chathead-status>{bot.busy ? t("sidebar.preview.working") : ""}</span>
           {!bot.busy && bot.waitingForTeammates && <span className="truncate text-[12px] text-ink-secondary" role="status">Teammates working</span>}
         </div>
         <div

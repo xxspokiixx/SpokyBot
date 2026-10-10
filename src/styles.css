@@ -1976,3 +1976,19 @@ button:disabled.bg-danger {
     --color-warning: color(display-p3 0.5270 0.3546 0.0278);
   }
 }
+
+/* Window drag regions. A header marked by useCaptionChrome().dragProps is
+   the window's title bar on macOS and frameless Windows; every control in it
+   opts back out so it stays clickable, and so do menus and dialogs, which
+   may overlap a header from a portal later in the DOM (Blink resolves
+   regions in DOM order, so a later no-drag cuts into an earlier drag). The
+   property inherits, so a select's or input's wrapper is cut out too: its
+   chevron or icon overlay would otherwise drag over the field. A modal's
+   full-window backdrop is cut out with its dialog, so a press on it over a
+   header still closes the dialog instead of moving the window. */
+[data-window-drag] :has(> :is(select, input)),
+[data-window-drag] :is(button, a[href], input, select, textarea, label, summary, [role="button"], [role="link"], [role="tab"], [role="switch"], [role="checkbox"], [role="radio"], [role="combobox"], [role="slider"], [role="separator"], [contenteditable]:not([contenteditable="false"]), [tabindex]:not([tabindex="-1"])),
+:is([role="menu"], [role="listbox"], [role="dialog"], [role="alertdialog"], [role="tooltip"]),
+.fixed:has(> :is([role="dialog"], [role="alertdialog"], [aria-modal="true"])) {
+  -webkit-app-region: no-drag;
+}

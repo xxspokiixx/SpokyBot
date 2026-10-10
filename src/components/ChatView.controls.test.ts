@@ -113,6 +113,26 @@ describe("header name", () => {
     expect(pill).toContain("Rename Pepper");
   });
 
+  it("draws no working dots in the header pill, keeping one width, while a status still tells a screen reader", () => {
+    for (const advanced of [true, false]) {
+      fixture.advanced = advanced;
+      const busyMarkup = renderToStaticMarkup(createElement(ChatView, { bot: { ...bot, busy: true, tasks: (bot.tasks ?? []).map((task) => ({ ...task, busy: true })) } }));
+      const idleMarkup = renderToStaticMarkup(createElement(ChatView, { bot: { ...bot, busy: false } }));
+      const pillOf = (markup: string) => {
+        const start = markup.indexOf("data-chathead-pill");
+        return markup.slice(start, markup.indexOf("data-chathead-status", start));
+      };
+      expect(pillOf(busyMarkup)).not.toContain("animate-status-pulse");
+      // the same pill markup busy or not, so its width cannot change
+      expect(pillOf(busyMarkup)).toBe(pillOf(idleMarkup));
+      expect(busyMarkup).toMatch(/<span role="status" class="sr-only" data-chathead-status="true">Working…<\/span>/);
+      expect(idleMarkup).toMatch(/<span role="status" class="sr-only" data-chathead-status="true"><\/span>/);
+      // the turn stays visible without the dots: the header's Stop button
+      expect(busyMarkup).toContain('title="Stop this turn"');
+    }
+    fixture.advanced = true;
+  });
+
   it("centres the bot in the header's middle column, with the controls in the last", () => {
     const markup = renderToStaticMarkup(createElement(ChatView, { bot }));
     const row = markup.match(/data-chathead-row="true" class="([^"]*)"/)?.[1] ?? "";
