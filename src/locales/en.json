@@ -1352,6 +1352,7 @@
   "composer.command.goalDesc": "Keep a team working until the goal is complete",
   "composer.command.learnDesc": "Draft a reusable skill from this conversation",
   "composer.command.setupDesc": "Have this bot interview you and set itself up",
+  "composer.command.skillTag": "skill",
   "composer.busy.team": "The team",
   "composer.busy.aBot": "A bot",
   "composer.busy.theBot": "The bot",

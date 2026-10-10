@@ -427,6 +427,7 @@ import {
   setSkillEnabled,
   skillPackageStamps,
   skillsSystemPrompt,
+  expandSkillCommandTurnText,
   stageSkillWrite,
   undoSkillWrite,
 } from "./skills.ts";
@@ -10177,7 +10178,14 @@ async function startTurn(
       // gate on whether the coaching block itself is active — setupModeActive,
       // which also depends on the bot's soul/description — is decided below,
       // from the same bot snapshot the prompt's soul is built from.
-      const setupText = agentsMounted ? expandSetupTurnText(providerText) : providerText;
+      // A `/name` turn for one of the bot's enabled skills reads as a plain
+      // request to follow that SKILL.md (shared/skill-command.ts). Only where
+      // the skills index rides the prompt: an engine without workspace files
+      // never sees the skill, so it keeps the person's literal text.
+      const skillCommandText = supportsWorkspaceFiles(instance.driverKind)
+        ? expandSkillCommandTurnText(bot.id, providerText, skillsLibraryEnabled(cfg) ? (store.bot(bot.id)?.assignedSkills ?? bot.assignedSkills) : undefined)
+        : providerText;
+      const setupText = agentsMounted ? expandSetupTurnText(skillCommandText) : skillCommandText;
       const userTurnText = promptWithReply(
         skillAuthoring ? expandLearnTurnText(setupText) : setupText,
         opts?.replyTo,
