@@ -8,8 +8,9 @@
 // MCP Apps (docs/superpowers/specs/2026-10-14-chat-apps-design.md): each
 // server's "Show its apps in chat" switch is `apps` in the listing (true
 // unless switched off) and PATCH {apps: boolean}. Test also tells the app
-// catalog what it found; a saved or switched server is probed in the
-// background (server/chat-apps-mcp.ts).
+// catalog what it found; a saved or switched-on URL server is probed in the
+// background (server/chat-apps-mcp.ts; a command server only by Test or a
+// turn that mounts it).
 import type { ChatAppsMcp } from "../chat-apps-mcp.ts";
 import type { CloudHomeConfig } from "../cloud-home.ts";
 import type { AppConfig } from "../config.ts";

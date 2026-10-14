@@ -13,8 +13,9 @@
 //   60 a minute per row.
 // - turnMounts: which of a turn's servers are mounted through an observer
 //   (`integrations.mcpApps`, read by mcp-gate-config.ts appMountFor).
-// - the catalog's probes: Settings → Test, a server saved or switched on, and
-//   at startup for servers with no fresh entry.
+// - the catalog's probes: Settings → Test; a URL server saved or switched on,
+//   or at startup with no fresh entry; a server a turn mounts with no fresh
+//   entry. Nothing starts a command server that no turn would.
 import { approvalModeFor } from "../shared/approval-mode.ts";
 import { APP_LIMITS, APP_MIME, appBlockedText, mcpAppFallbackText, oneLine, type AppBlockedReason, type AppCan, type AppDocument, type AppPayload, type AppToolResult } from "../shared/app.ts";
 import { mcpAppNetwork } from "../shared/app-frame/csp.ts";
@@ -45,6 +46,8 @@ const REMOTE_ERROR_CHARS = 1_000;
 /** A background probe waits on nobody: a command server started through
  * `npx` may first have to fetch its package. */
 const BACKGROUND_PROBE_MS = 45_000;
+/** A server probed on its own (a turn, startup) is not probed again sooner. */
+const AUTOMATIC_PROBE_EVERY_MS = 10 * 60_000;
 
 type Json = Record<string, unknown>;
 function isRecord(value: unknown): value is Json {
@@ -90,13 +93,15 @@ export interface ChatAppsMcp {
   access(row: Message & { app: AppPayload }, threadId: string): { can: AppCan; blocked?: AppDocument["blocked"] };
   rpc(request: McpRpcRequest): Promise<McpRpcAnswer>;
   /** For a turn's custom servers: `{ mcpApps }` naming the ones mounted
-   * through an observer, or nothing. Servers without a fresh catalog entry
-   * are probed in the background for the next turn. */
-  turnMounts(custom: Record<string, McpServerSpec>): { mcpApps?: Record<string, { extension: boolean }> };
+   * through an observer, or nothing. Servers the bot may use (`toolScope`)
+   * without a fresh catalog entry are probed in the background for the
+   * next turn, at most every ten minutes. */
+  turnMounts(custom: Record<string, McpServerSpec>, toolScope?: unknown): { mcpApps?: Record<string, { extension: boolean }> };
   /** Settings → Test's probe options for a stored server (the extension,
    * and the catalog record), or nothing when its apps are off. */
   probeOptions(name: string, server: StoredMcpServer): McpProbeOptions;
-  /** A server was saved, switched or signed in to: probe it soon. */
+  /** A server was saved or switched on: probe it soon if it is a URL
+   * server (a command server waits for Test or a turn that mounts it). */
   serverChanged(name: string): void;
   /** A server was removed or edited: forget what was learned, close its connections. */
   forgetServer(name: string): void;
@@ -382,8 +387,26 @@ export function createChatAppsMcp(deps: ChatAppsMcpDeps): ChatAppsMcp {
   }
 
   // ── mounts and probes ────────────────────────────────────────────────
+  //
+  // A probe of a command server starts it on this computer. Nothing here
+  // starts one that no turn would: a command server is probed by Settings →
+  // Test, or in the background only for a turn whose bot may use it (that
+  // turn starts it anyway). A URL server starts nothing locally, so it is
+  // also probed when it is saved or switched on, and at startup.
 
   const queued = new Set<string>();
+  const lastAutomatic = new Map<string, number>();
+  /** A turn or startup found no fresh entry: probe, at most every ten minutes. */
+  const probeStale = (name: string) => {
+    const last = lastAutomatic.get(name);
+    if (last !== undefined && now() - last < AUTOMATIC_PROBE_EVERY_MS) return;
+    lastAutomatic.set(name, now());
+    queueProbe(name);
+  };
+  const remote = (name: string) => {
+    const stored = storedServer(name, deps.storedServers()[name]);
+    return stored !== null && isRemoteMcpServer(stored);
+  };
   let probing: Promise<void> = Promise.resolve();
   let closed = false;
 
@@ -395,8 +418,13 @@ export function createChatAppsMcp(deps: ChatAppsMcpDeps): ChatAppsMcp {
     };
   }
 
-  /** Probe one stored server in the background, one at a time. */
+  /** A URL server was saved or switched on: probe it now. */
   function serverChanged(name: string): void {
+    if (remote(name)) queueProbe(name);
+  }
+
+  /** Probe one stored server in the background, one at a time. */
+  function queueProbe(name: string): void {
     if (closed || queued.has(name)) return;
     queued.add(name);
     probing = probing.then(async () => {
@@ -412,13 +440,13 @@ export function createChatAppsMcp(deps: ChatAppsMcpDeps): ChatAppsMcp {
     }).catch((error: unknown) => log(`probe of ${name} failed: ${String(error)}`));
   }
 
-  function turnMounts(custom: Record<string, McpServerSpec>): { mcpApps?: Record<string, { extension: boolean }> } {
+  function turnMounts(custom: Record<string, McpServerSpec>, toolScope?: unknown): { mcpApps?: Record<string, { extension: boolean }> } {
     const mcpApps: Record<string, { extension: boolean }> = {};
     const stored = deps.storedServers();
     for (const [name, server] of Object.entries(custom)) {
       if (storedServer(name, stored[name])?.apps === false) continue;
       const entry = catalog.get(name, server);
-      if (catalog.stale(name, server)) serverChanged(name);
+      if (catalog.stale(name, server) && canUseMcpServer(toolScope, name)) probeStale(name);
       if (entry?.apps) mcpApps[name] = { extension: entry.uiExtension !== "refused" };
     }
     return Object.keys(mcpApps).length ? { mcpApps } : {};
@@ -430,7 +458,7 @@ export function createChatAppsMcp(deps: ChatAppsMcpDeps): ChatAppsMcp {
   const startup = deps.startupProbes === false ? undefined : setTimeout(() => {
     for (const [name, raw] of Object.entries(deps.storedServers())) {
       const stored = storedServer(name, raw);
-      if (stored?.enabled && stored.apps !== false && catalog.stale(name, stored)) serverChanged(name);
+      if (stored?.enabled && stored.apps !== false && isRemoteMcpServer(stored) && catalog.stale(name, stored)) probeStale(name);
     }
   }, STARTUP_PROBE_DELAY_MS);
   startup?.unref?.();

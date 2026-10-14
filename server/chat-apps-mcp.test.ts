@@ -42,7 +42,7 @@ const REPORT = {
 const cleanup: Array<() => Promise<void> | void> = [];
 afterEach(async () => { for (const step of cleanup.splice(0).reverse()) await step(); });
 
-function setup(options: { servers?: Record<string, Record<string, unknown>>; scope?: BotRecord["toolScope"]; approval?: "ask" | "full"; needsSignIn?: string[] } = {}) {
+function setup(options: { servers?: Record<string, Record<string, unknown>>; scope?: BotRecord["toolScope"]; approval?: "ask" | "full"; needsSignIn?: string[]; probe?: typeof probeMcpServer } = {}) {
   const dataDir = mkdtempSync(join(tmpdir(), "omb-chat-apps-mcp-"));
   cleanup.push(() => removeTempDir(dataDir));
   const threads = new Map<string, Message[]>();
@@ -80,6 +80,7 @@ function setup(options: { servers?: Record<string, Record<string, unknown>>; sco
     })),
     oauth: { authState: (name) => (options.needsSignIn?.includes(name) ? "needs-sign-in" : "none"), accessToken: async () => null },
     startupProbes: false,
+    ...(options.probe ? { probe: options.probe } : {}),
     log: (line) => lines.push(line),
   });
   cleanup.push(() => { mcp.close(); apps.close(); });
@@ -266,16 +267,23 @@ describe("rpc", () => {
 
 describe("mounts and probes", () => {
   it("mounts a server through an observer only once its catalog says it has apps and its switch is on", async () => {
-    const probe = vi.fn(probeMcpServer);
-    const { mcp, servers } = setup();
+    const probe = vi.fn(async () => ({ ok: false as const, error: "offline" }));
+    const { mcp, servers } = setup({ probe });
     expect(mcp.turnMounts({ board: board() })).toEqual({});
+    // a turn that found it unknown asks for one background probe
+    await vi.waitFor(() => expect(probe).toHaveBeenCalledTimes(1));
     mcp.catalog.recordList("board", board(), [{ name: "show_board", _meta: { ui: { resourceUri: BOARD_URI } } }], "ok");
     expect(mcp.turnMounts({ board: board(), plain: { command: "x", args: [], env: {} } })).toEqual({ mcpApps: { board: { extension: true } } });
     mcp.catalog.recordList("board", board(), [{ name: "show_board", _meta: { ui: { resourceUri: BOARD_URI } } }], "refused");
     expect(mcp.turnMounts({ board: board() })).toEqual({ mcpApps: { board: { extension: false } } });
     servers.board = { ...board(), enabled: true, apps: false };
     expect(mcp.turnMounts({ board: board() })).toEqual({});
-    expect(probe).not.toHaveBeenCalled();
+    // a turn that finds it unknown again within ten minutes asks for none
+    servers.board = { ...board(), enabled: true };
+    mcp.catalog.forget("board");
+    expect(mcp.turnMounts({ board: board() })).toEqual({});
+    await new Promise((resolve) => setTimeout(resolve, 50));
+    expect(probe).toHaveBeenCalledTimes(1);
   });
 
   it("learns a server's apps from Settings → Test, and records a refused extension", async () => {
@@ -294,11 +302,31 @@ describe("mounts and probes", () => {
     expect(mcp.probeOptions("off", { ...adapting, apps: false })).toEqual({});
   }, 60_000);
 
-  it("probes a saved server in the background, and forgets a removed one", async () => {
+  it("probes a server a turn finds unknown in the background, at most every ten minutes", async () => {
     const { mcp } = setup();
-    mcp.serverChanged("board");
+    expect(mcp.turnMounts({ board: board() })).toEqual({});
     await vi.waitFor(() => expect(mcp.catalog.get("board", board())?.apps).toBe(true), { timeout: 20_000 });
+    // the next turn mounts it through its observer
+    expect(mcp.turnMounts({ board: board() })).toEqual({ mcpApps: { board: { extension: true } } });
     mcp.forgetServer("board");
+    expect(mcp.turnMounts({ board: board() })).toEqual({});
+    await new Promise((resolve) => setTimeout(resolve, 1_000));
     expect(mcp.catalog.get("board", board())).toBeUndefined();
+  }, 30_000);
+
+  it("probes a saved URL server in the background, never starts a command server no turn would, and forgets a removed one", async () => {
+    const fake = await startFakeHttpMcp({ tools: [{ name: "create_view", inputSchema: { type: "object" }, _meta: { ui: { resourceUri: "ui://draw/v.html" } } }] });
+    cleanup.push(() => fake.close());
+    const probe = vi.fn(probeMcpServer);
+    const draw = { type: "http", url: fake.url, enabled: true };
+    const { mcp } = setup({ servers: { board: { ...board(), enabled: true }, draw }, probe });
+    mcp.serverChanged("board");
+    // a bot whose selection excludes the server does not start it either
+    mcp.turnMounts({ board: board() }, { allow: ["mcp:draw:*"] });
+    mcp.serverChanged("draw");
+    await vi.waitFor(() => expect(mcp.catalog.get("draw", draw)?.apps).toBe(true), { timeout: 20_000 });
+    expect(probe.mock.calls.map(([server]) => "url" in server ? "draw" : "board")).toEqual(["draw"]);
+    mcp.forgetServer("draw");
+    expect(mcp.catalog.get("draw", draw)).toBeUndefined();
   }, 30_000);
 });

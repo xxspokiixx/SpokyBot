@@ -11331,7 +11331,7 @@ async function startTurn(
       // never pre-allowed, so every call rides the normal permission flow.
       if (instance.adapter.capabilities.customMcp === true) {
         const custom = await withMcpSignIn(engineMcpServers(bot), mcpOAuth);
-        if (Object.keys(custom).length) Object.assign(integrations, { custom }, chatAppsMcp.turnMounts(custom));
+        if (Object.keys(custom).length) Object.assign(integrations, { custom }, chatAppsMcp.turnMounts(custom, bot.toolScope));
       }
       // CLI engines work inside the bot's own workspace directory rather
       // than the user's home: a bot with file tools and acceptEdits gets a
