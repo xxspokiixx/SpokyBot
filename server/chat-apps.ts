@@ -333,6 +333,9 @@ export interface ChatApps {
   withAppContext(text: string, threadId: string): { text: string; deliver(): void };
   /** Set by the MCP side (S4) to say what an MCP app may do right now. */
   mcpAccess?: McpAppAccess;
+  /** Set by the MCP side (server/chat-apps-mcp.ts): an observer's report
+   * (`tool: "mcp_app"` on the internal card route) becomes an app row. */
+  recordMcpAppCall?(args: { bot: { id: string; name: string }; threadId: string; input: Record<string, unknown>; authored?(messageId: string): void }): Promise<AgentCardResult>;
   /** Remove unreferenced documents now. */
   sweep(): number;
   close(): void;

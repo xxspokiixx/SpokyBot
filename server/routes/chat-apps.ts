@@ -23,8 +23,9 @@ import type { RequestAuth } from "../request-auth.ts";
 import type { BotRecord, Message, Store } from "../store.ts";
 import { PASS, type RouteHandler } from "./table.ts";
 
-// server/index.ts builds both from this one import.
+// server/index.ts builds all three from this one import.
 export { createChatApps };
+export { createChatAppsMcp } from "../chat-apps-mcp.ts";
 
 export const APP_RPC_METHODS = ["tools/call", "tools/list", "resources/read", "resources/list"] as const;
 
