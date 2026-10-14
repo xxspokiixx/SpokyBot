@@ -7,8 +7,27 @@ import { join } from "node:path";
 import { parseToolScope, type ToolScope } from "../shared/tool-scope.ts";
 
 import { DATA_DIR } from "./config.ts";
+import type { SendTurnInput } from "./contracts.ts";
+import { GATE_APPS_ENV, REMOTE_MCP_APPS_ENV, type AppMount } from "./mcp-app-observer.ts";
 import { DEFAULT_RESULT_BUDGET } from "./mcp-trim.ts";
 import { REMOTE_MCP_CONFIG_ENV, remoteMcpSpec } from "./mcp-http.ts";
+
+export type { AppMount } from "./mcp-app-observer.ts";
+
+/** How one of the person's servers is mounted for MCP Apps
+ * (docs/superpowers/specs/2026-10-14-chat-apps-design.md, Decision 7), the
+ * one decision every driver shares: the observer settings when the server
+ * is an app server for this turn (server/chat-apps-mcp.ts put it in
+ * `integrations.mcpApps`, from the catalog and its "Show its apps in chat"
+ * switch) and the turn can report (its agents capability), else undefined:
+ * the server is mounted exactly as before. */
+export function appMountFor(name: string, turn: Pick<SendTurnInput, "integrations">): AppMount | undefined {
+  const app = turn.integrations?.mcpApps?.[name];
+  const agents = turn.integrations?.agents?.env;
+  if (!app || !Object.hasOwn(turn.integrations?.custom ?? {}, name)) return undefined;
+  if (!agents?.OMB_HARNESS_URL || !agents.OMB_COMMS_TOKEN) return undefined;
+  return { server: name, harnessUrl: agents.OMB_HARNESS_URL, token: agents.OMB_COMMS_TOKEN, extension: app.extension };
+}
 import { SPAWNED_PROXIES } from "./proxy-paths.ts";
 
 /** Characters of a single tool result allowed into context, or 0 to mount
@@ -93,6 +112,8 @@ export interface StdioServerOptions {
    * go in this private record, named OMB_REMOTE_MCP_CONFIG_<64 hex>, and
    * only the name reaches argv. */
   configEnvName?: string;
+  /** MCP Apps: the proxy observes this URL server (appMountFor). */
+  apps?: AppMount;
 }
 
 /** Use the existing remote client when an engine requires a stdio descriptor. */
@@ -116,6 +137,7 @@ export function mcpStdioServer(server: unknown, options: StdioServerOptions = {}
   const settings = {
     OMB_REMOTE_MCP_SERVER: JSON.stringify(remote),
     ...(directory ? { OMB_REMOTE_MCP_DIRECTORY: directory } : {}),
+    ...(options.apps ? { [REMOTE_MCP_APPS_ENV]: JSON.stringify(options.apps) } : {}),
   };
   return {
     command: options.execPath ?? process.execPath,
@@ -132,6 +154,12 @@ export function mcpStdioServer(server: unknown, options: StdioServerOptions = {}
  *
  * An explicit selection also wraps remote servers in the stdio facade.
  * Unrestricted remote servers keep their existing native transport.
+ *
+ * With `apps` (appMountFor) a server is always mounted through an observer,
+ * and only the innermost one observes: a command server through the gate,
+ * with or without a budget or a selection; a URL server through the remote
+ * proxy, inside the gate only when the gate is needed anyway (so the gate
+ * never reports what the proxy beneath it already does).
  *
  * The upstream spec travels in the gate's `env`, which means it travels inside
  * the same 0600 MCP config file the driver already writes for exactly this
@@ -154,22 +182,32 @@ export function gateServer(input: {
   directory?: boolean;
   /** where a remote proxy's network settings come from (default: this process) */
   sourceEnv?: NodeJS.ProcessEnv | Record<string, string | undefined>;
+  /** MCP Apps: observe this server (appMountFor). */
+  apps?: AppMount;
 }): { command: string; args: string[]; env: Record<string, string> } | null {
-  const { name, server, budget } = input;
+  const { name, server, budget, apps } = input;
   const parsed = parseToolScope(input.toolScope);
   if (!parsed.ok) throw new Error(parsed.error);
   const scoped = parsed.scope !== undefined;
-  if (budget <= 0 && !scoped) return null;
-  if (!scoped && remoteMcpSpec(server)) return null;
+  const remote = remoteMcpSpec(server) !== undefined;
+  if (budget <= 0 && !scoped && !apps) return null;
   // The directory is the remote proxy's; it sits inside the gate, which
   // knows to look through call_tool at the tool underneath.
-  const directory = input.directory === true && remoteMcpSpec(server) !== undefined;
-  const spec = mcpStdioServer(server, {
+  const directory = input.directory === true && remote;
+  const proxyOptions = {
     nodeEnv: input.nodeEnv,
     execPath: input.execPath,
     sourceEnv: input.sourceEnv,
     ...(directory ? { directory: { name, ...(scoped ? { toolScope: parsed.scope } : {}) } } : {}),
-  });
+    ...(apps && remote ? { apps } : {}),
+  };
+  if (!scoped && remote) {
+    if (!apps) return null;
+    // An observed URL server needs no gate: the proxy is the observer.
+    const proxy = mcpStdioServer(server, proxyOptions);
+    return proxy ? { command: proxy.command, args: proxy.args ?? [], env: proxy.env ?? {} } : null;
+  }
+  const spec = mcpStdioServer(server, proxyOptions);
   if (!spec) {
     if (scoped) throw new Error("Tool selection requires a supported MCP server.");
     return null;
@@ -181,8 +219,9 @@ export function gateServer(input: {
     OMB_GATE_BUDGET: String(budget),
     ...(scoped ? { OMB_GATE_TOOL_SCOPE: JSON.stringify(parsed.scope) } : {}),
     ...(directory ? { OMB_GATE_DIRECTORY: "1" } : {}),
+    ...(apps && !remote ? { [GATE_APPS_ENV]: JSON.stringify(apps) } : {}),
   };
-  if (input.configEnvName && (!scoped || !/^OMB_GATE_CONFIG_[a-f0-9]{64}$/.test(input.configEnvName))) {
+  if (input.configEnvName && ((!scoped && !(apps && !remote)) || !/^OMB_GATE_CONFIG_[a-f0-9]{64}$/.test(input.configEnvName))) {
     throw new Error("Invalid private MCP gate configuration.");
   }
   return {

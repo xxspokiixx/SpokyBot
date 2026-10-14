@@ -10,6 +10,10 @@
 // Voluum server refuses an engine that adds capabilities.elicitation
 // .schemaValidation. The spec says unknown fields are ignored; such servers
 // do not, and every handshake a client sends is recorded in `initializes`.
+//
+// For MCP Apps it also serves `ui://` resources (`resources`): a tool names
+// one in `_meta.ui.resourceUri`, and `_meta.ui.visibility: ["app"]` makes a
+// tool one only its view may call. Every resources/read is recorded in `reads`.
 import { createServer, type IncomingMessage, type RequestListener, type Server, type ServerResponse } from "node:http";
 import { createServer as createHttpsServer, type Server as HttpsServer } from "node:https";
 import type { AddressInfo } from "node:net";
@@ -66,6 +70,25 @@ export interface FakeHttpMcpOptions {
    * longer clientInfo, yet still not form.schemaValidation, which is where
    * a Voluum server failed */
   strictSchema?: keyof typeof STRICT_INITIALIZE_SCHEMAS;
+  /** MCP Apps: `ui://` resources this server serves (resources/list and
+   * resources/read). Tools name them in `_meta.ui.resourceUri`; a tool whose
+   * `_meta.ui.visibility` is ["app"] is one only its view may call. */
+  resources?: FakeHttpMcpResource[];
+  /** serverInfo.title in the initialize answer */
+  serverTitle?: string;
+}
+
+export interface FakeHttpMcpResource {
+  uri: string;
+  name?: string;
+  mimeType?: string;
+  /** the HTML, or `blob` (base64) */
+  text?: string;
+  blob?: string;
+  /** `_meta` on the resources/read content item */
+  _meta?: Record<string, unknown>;
+  /** `_meta` on the resources/list entry (the draft spec's other location) */
+  listMeta?: Record<string, unknown>;
 }
 
 /** The initialize params a strict 2025-06-18 server knows, field by field:
@@ -131,6 +154,8 @@ export interface FakeHttpMcp {
   replies: unknown[];
   /** the params of every initialize the server received, refused or not */
   initializes: unknown[];
+  /** the uri of every resources/read */
+  reads: string[];
   close(): Promise<void>;
 }
 
@@ -153,6 +178,7 @@ export async function startFakeHttpMcp(options: FakeHttpMcpOptions = {}): Promis
   let tools = options.tools;
   const replies: unknown[] = [];
   const initializes: unknown[] = [];
+  const reads: string[] = [];
   let replied: (() => void) | undefined;
   const ask = () => {
     const waiting = new Promise<void>((resolve) => { replied = resolve; });
@@ -164,7 +190,8 @@ export async function startFakeHttpMcp(options: FakeHttpMcpOptions = {}): Promis
         jsonrpc: "2.0",
         id: frame.id,
         result: {
-          protocolVersion: "2025-06-18", capabilities: { tools: {} }, serverInfo: { name: "fake-http-mcp", version: "1" },
+          protocolVersion: "2025-06-18", capabilities: { tools: {}, ...(options.resources ? { resources: {} } : {}) },
+          serverInfo: { name: "fake-http-mcp", version: "1", ...(options.serverTitle ? { title: options.serverTitle } : {}) },
           ...(options.instructions === undefined ? {} : { instructions: options.instructions }),
         },
       };
@@ -181,6 +208,23 @@ export async function startFakeHttpMcp(options: FakeHttpMcpOptions = {}): Promis
         } };
       }
       return { jsonrpc: "2.0", id: frame.id, result: { tools: all } };
+    }
+    if (frame.method === "resources/list" && options.resources) {
+      return { jsonrpc: "2.0", id: frame.id, result: { resources: options.resources.map((resource) => ({
+        uri: resource.uri, name: resource.name ?? resource.uri, ...(resource.mimeType ? { mimeType: resource.mimeType } : {}),
+        ...(resource.listMeta ? { _meta: resource.listMeta } : {}),
+      })) } };
+    }
+    if (frame.method === "resources/read" && options.resources) {
+      const uri = (frame.params as { uri?: unknown } | undefined)?.uri;
+      reads.push(String(uri));
+      const resource = options.resources.find((candidate) => candidate.uri === uri);
+      if (!resource) return { jsonrpc: "2.0", id: frame.id, error: { code: -32002, message: `Resource not found: ${String(uri)}` } };
+      return { jsonrpc: "2.0", id: frame.id, result: { contents: [{
+        uri: resource.uri, ...(resource.mimeType ? { mimeType: resource.mimeType } : {}),
+        ...(resource.blob !== undefined ? { blob: resource.blob } : { text: resource.text ?? "" }),
+        ...(resource._meta ? { _meta: resource._meta } : {}),
+      }] } };
     }
     if (frame.method === "tools/call" && tools) {
       calls.push(frame.params);
@@ -305,6 +349,7 @@ export async function startFakeHttpMcp(options: FakeHttpMcpOptions = {}): Promis
     get toolsLists() { return toolsLists; },
     replies,
     initializes,
+    reads,
     setTools: (next) => { tools = next; },
     close: () => new Promise<void>((resolve) => {
       server.closeAllConnections();

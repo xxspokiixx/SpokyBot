@@ -230,6 +230,13 @@ export interface SendTurnInput {
      * A server is either a command this machine runs (stdio) or a server
      * reached at a URL; a driver that cannot speak to one kind skips it. */
     custom?: Record<string, McpServerSpec>;
+    /** MCP Apps (server/chat-apps-mcp.ts): the `custom` servers this turn
+     * mounts through an observer, because their catalog says they have apps
+     * and their "Show its apps in chat" switch is on. `extension`: advertise
+     * the UI extension (off once the server refused it). Read through
+     * appMountFor (mcp-gate-config.ts); a server not named here is mounted
+     * exactly as before. */
+    mcpApps?: Record<string, { extension: boolean }>;
   };
   cwd?: string;
   /** Let the engine also load the MCP servers from the person's own CLI

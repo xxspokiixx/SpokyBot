@@ -8,6 +8,12 @@
 // untrimmed text is written to a file, and the model is told in the result
 // where that file is so it can read or grep the rest with its ordinary tools.
 //
+// MCP Apps (OMB_GATE_APPS, a command server only): the gate advertises the
+// UI extension in the CLI's initialize (sending the CLI's own frame instead if
+// the server refuses it), and reports each call of a tool with a UI to the
+// harness before trimming it (mcp-app-observer.ts). On every gate a tool only
+// an app's view may call is dropped from tools/list, and a call to it refused.
+//
 // Why here and not in the driver: on every vendor-CLI engine the tool call and
 // its result never pass through the harness at all. The CLI runs the server
 // itself and appends the raw answer to the session it owns. Standing between
@@ -22,6 +28,7 @@ import { createInterface } from "node:readline";
 import { allowsTool, parseToolScope, type ToolScope } from "../shared/tool-scope.ts";
 
 import { resolveCliSpawn } from "./env-path.ts";
+import { APP_ONLY_REFUSAL, AppObserver, GATE_APPS_ENV, modelVisible, parseAppMount, withUiExtension } from "./mcp-app-observer.ts";
 import { directoryCallTarget, isDirectoryTool } from "./mcp-directory.ts";
 import { DEFAULT_RESULT_BUDGET, trimResultText, trimStructured } from "./mcp-trim.ts";
 import { killCliTree } from "./procs.ts";
@@ -36,8 +43,10 @@ function gateEnvironment(): NodeJS.ProcessEnv {
     const key = process.argv[3];
     if (process.argv.length !== 4 || process.argv[2] !== "--config-env" || !key || !/^OMB_GATE_CONFIG_[a-f0-9]{64}$/.test(key)) throw new Error();
     const value = JSON.parse(process.env[key] ?? "");
+    // A private record is a selection's or an app observer's (mcp-gate-config.ts).
     if (!value || typeof value !== "object" || Array.isArray(value)
-      || !["OMB_GATE_NAME", "OMB_GATE_UPSTREAM", "OMB_GATE_TOOL_SCOPE"].every(name => typeof value[name] === "string")
+      || !["OMB_GATE_NAME", "OMB_GATE_UPSTREAM"].every(name => typeof value[name] === "string")
+      || (typeof value.OMB_GATE_TOOL_SCOPE !== "string" && typeof value[GATE_APPS_ENV] !== "string")
       || !Object.entries(value).every(([name, setting]) => GATE_ENV_KEYS.includes(name) && typeof setting === "string")) throw new Error();
     return value;
   } catch {
@@ -45,7 +54,7 @@ function gateEnvironment(): NodeJS.ProcessEnv {
   }
 }
 /** The gate's own settings never reach the upstream server's environment. */
-const GATE_ENV_KEYS = ["OMB_GATE_NAME", "OMB_GATE_SPILL_DIR", "OMB_GATE_BUDGET", "OMB_GATE_UPSTREAM", "OMB_GATE_SPILL_HINT", "OMB_GATE_TOOL_SCOPE", "OMB_GATE_DIRECTORY"];
+const GATE_ENV_KEYS = ["OMB_GATE_NAME", "OMB_GATE_SPILL_DIR", "OMB_GATE_BUDGET", "OMB_GATE_UPSTREAM", "OMB_GATE_SPILL_HINT", "OMB_GATE_TOOL_SCOPE", "OMB_GATE_DIRECTORY", GATE_APPS_ENV];
 const gateEnv = gateEnvironment();
 const NAME = gateEnv.OMB_GATE_NAME || "mcp";
 const SPILL_DIR = gateEnv.OMB_GATE_SPILL_DIR || "";
@@ -195,6 +204,15 @@ function trimCallResult(result: Json, tool: string): boolean {
 
 // Validate before starting a process: corrupt policy must never become pass-through.
 const scope = toolScope();
+/** MCP Apps: this gate's upstream is a command server whose UI tool calls it reports. */
+const observer = (() => {
+  try {
+    const mount = parseAppMount(gateEnv[GATE_APPS_ENV]);
+    return mount ? new AppObserver(mount, { log: (line) => process.stderr.write(`mcp-gate(${NAME}): ${line}\n`) }) : undefined;
+  } catch { return fail("invalid MCP apps configuration"); }
+})();
+/** Tools only an app's view may call, from the last tools/list this gate relayed. */
+const appOnly = new Set<string>();
 const spec = upstreamSpec();
 if (SPILL_DIR) sweepSpill(SPILL_DIR);
 
@@ -241,7 +259,12 @@ child.on("error", (error) => {
 });
 child.stderr.pipe(process.stderr);
 
-type Pending = { kind: "call"; tool: string; trim: boolean } | { kind: "list" | "other" };
+type Pending =
+  | { kind: "call"; tool: string; trim: boolean; params?: Json }
+  | { kind: "list" | "other" }
+  /** `original`: the CLI's own frame, sent instead if the server refuses the
+   * one with the UI extension. */
+  | { kind: "initialize"; original?: string };
 
 /** The upstream tool one call runs: its own name or call_tool's target, or
  * undefined when the directory answers the call itself. */
@@ -275,6 +298,10 @@ createInterface({ input: process.stdin }).on("line", (line) => {
       return rejectRequest(message.id, -32602, "Tool selection excludes this tool. Check the bot's Access settings.");
     }
   }
+  if (message?.method === "tools/call" && typeof params?.name === "string") {
+    const target = callTarget(params.name, params.arguments);
+    if (target !== undefined && appOnly.has(target)) return rejectRequest(message.id, -32602, APP_ONLY_REFUSAL);
+  }
   if (scope && message?.method === "tools/list" && !id) {
     return rejectRequest(message.id, -32600, "Tool listing needs a request ID");
   }
@@ -283,8 +310,14 @@ createInterface({ input: process.stdin }).on("line", (line) => {
     if (message.method === "tools/call") {
       const name = typeof params?.name === "string" ? params.name : "tool";
       const target = callTarget(name, params?.arguments);
-      pending.set(id, { kind: "call", tool: target ?? name, trim: target !== undefined });
-    } else if (scope) {
+      pending.set(id, { kind: "call", tool: target ?? name, trim: target !== undefined, ...(observer && params ? { params } : {}) });
+    } else if (message.method === "initialize" && observer) {
+      if (observer.mount.extension) {
+        pending.set(id, { kind: "initialize", original: line });
+        return child.stdin.write(`${JSON.stringify({ ...message, params: withUiExtension(message.params) })}\n`);
+      }
+      pending.set(id, { kind: "initialize" });
+    } else if (message.method === "tools/list" || scope) {
       pending.set(id, { kind: message.method === "tools/list" ? "list" : "other" });
     }
   }
@@ -312,8 +345,27 @@ createInterface({ input: child.stdout }).on("line", (line) => {
   const id = typeof message.method === "string" ? undefined : requestKey(message.id);
   const request = id === undefined ? undefined : pending.get(id);
   if (scope && id !== undefined && !request) fail("unrequested upstream response on a restricted connection");
+  // The server refused the handshake with the UI extension: it gets the
+  // CLI's own, and the CLI gets that answer.
+  if (request?.kind === "initialize" && request.original && message.error !== undefined && id !== undefined) {
+    pending.set(id, { kind: "initialize" });
+    process.stderr.write(`mcp-gate(${NAME}): the server refused the MCP Apps extension; connecting without it\n`);
+    child.stdin.write(`${request.original}\n`);
+    return;
+  }
   if (id !== undefined) pending.delete(id);
   const result = message.result;
+  if (request?.kind === "initialize") observer?.initialized(result);
+  // The model never sees a tool only an app's view may call (rule 16).
+  if (request?.kind === "list" && message.error === undefined && isRecord(result) && Array.isArray(result.tools)) {
+    observer?.listed(result);
+    for (const tool of result.tools) {
+      if (!isRecord(tool) || typeof tool.name !== "string") continue;
+      if (modelVisible(tool)) appOnly.delete(tool.name);
+      else appOnly.add(tool.name);
+    }
+    result.tools = result.tools.filter(modelVisible);
+  }
   if (scope && request?.kind === "list" && message.error === undefined) {
     if (!isRecord(result) || !Array.isArray(result.tools)
       || !result.tools.every((tool: unknown) => isRecord(tool) && typeof tool.name === "string" && tool.name.trim().length > 0)
@@ -323,6 +375,7 @@ createInterface({ input: child.stdout }).on("line", (line) => {
     result.tools = result.tools.filter((tool: Json) => (DIRECTORY && isDirectoryTool(tool.name))
       || allowsTool(scope, { kind: "mcp", server: NAME, name: tool.name as string }));
   }
+  if (request?.kind === "call" && observer && message.error === undefined) observer.returned(request.params, result);
   if (request?.kind === "call" && request.trim && isRecord(result)) {
     try {
       if (trimCallResult(result, request.tool)) {
