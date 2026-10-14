@@ -1,9 +1,3 @@
-// The chat-app routes through the route table, over a real store
-// (server/routes/chat-apps.ts; security rules 14 and 15 of
-// docs/superpowers/specs/2026-10-14-chat-apps-design.md): the document is
-// served only for an app row of the thread asked about; context and rpc
-// answer only for an app row of that bot and thread; a bot page has no
-// server to call; and rpc answers 404 until the MCP side is wired.
 import { rmSync } from "node:fs";
 import { createServer, type Server } from "node:http";
 import type { AddressInfo } from "node:net";
@@ -81,7 +75,7 @@ describe("GET /api/threads/:threadId/messages/:messageId/app", () => {
     expect(answer.cache).toBe("private, no-store");
     expect(answer.body).toMatchObject({ v: 1, messageId: id, rev: 0, csp: BOT_HTML_CSP });
     expect(String(answer.body.srcdoc).startsWith(`${CSP_META_PREFIX}${BOT_HTML_CSP}">`)).toBe(true);
-    // A new bot starts with Full access (docs/approval-levels.md).
+    // A new bot starts with Full access.
     expect(answer.body.approval).toBe("full");
   });
 

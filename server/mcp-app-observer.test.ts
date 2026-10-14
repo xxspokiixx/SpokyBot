@@ -1,9 +1,3 @@
-// The MCP Apps observer (server/mcp-app-observer.ts) on its own, and inside
-// the processes that host it: the gate over a command server
-// (testing/fake-stdio-app-server.ts) and the remote proxy over a URL server
-// (testing/fake-http-mcp-server.ts). A fake harness records every report.
-// docs/superpowers/specs/2026-10-14-chat-apps-design.md: "The observer
-// report", "Advertising and filtering", security rule 16.
 import { spawn, type ChildProcessWithoutNullStreams } from "node:child_process";
 import { once } from "node:events";
 import { mkdtempSync, readFileSync, writeFileSync } from "node:fs";
@@ -29,7 +23,6 @@ const FAKE_APP = fileURLToPath(new URL("./testing/fake-stdio-app-server.ts", imp
 const TOKEN = "omb-comms-token-fixture";
 const BOARD_URI = "ui://fake-app/board.html";
 
-/** The URL server's catalog: one UI tool, one plain tool, one app-only tool. */
 const HTTP_TOOLS: FakeHttpMcpTool[] = [
   { name: "create_view", title: "Create view", inputSchema: { type: "object" }, annotations: { readOnlyHint: true }, _meta: { ui: { resourceUri: "ui://draw/view.html" } } },
   { name: "list_notes", inputSchema: { type: "object" } },
@@ -95,7 +88,6 @@ describe("the report's size", () => {
   });
 });
 
-/** A harness that records every report it is sent. */
 async function fakeHarness() {
   const reports: Array<{ headers: IncomingHttpHeaders; body: McpAppReport }> = [];
   const server: Server = createServer((req, res) => {
@@ -129,7 +121,6 @@ describe("the observer in a process", () => {
     scratch = undefined;
   });
 
-  /** Start a descriptor the way an engine does, and talk to it line by line. */
   const start = (descriptor: StdioServer | { command: string; args: string[]; env: Record<string, string> }) => {
     child = spawn(descriptor.command, ["--experimental-strip-types", "--no-warnings", ...(descriptor.args ?? [])], { stdio: "pipe", env: { ...process.env, ...descriptor.env } });
     const lines = createInterface({ input: child.stdout })[Symbol.asyncIterator]();

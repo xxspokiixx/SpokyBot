@@ -22,9 +22,6 @@ export type McpProbeResult =
 
 export const SIGN_IN_REQUIRED = "This server needs you to sign in.";
 
-/** MCP Apps (server/chat-apps-mcp.ts): advertise the UI extension, falling
- * back to the plain handshake when the server refuses it, and hand the raw
- * tool list to the app catalog. Neither changes what the renderer sees. */
 export interface McpProbeOptions {
   extension?: boolean;
   observe?(info: { tools: unknown[]; uiExtension: "ok" | "refused" | "unknown" }): void;
@@ -35,9 +32,6 @@ const MAX_TOOLS = 100;
 export const STDIO_PROBE_TIMEOUT_MS = 8_000;
 export const REMOTE_PROBE_TIMEOUT_MS = REMOTE_MCP_STARTUP_MS;
 
-/** The environment a command server is started with outside a turn (a
- * probe, an MCP app's own connection): this machine's PATH, none of
- * OpenMausBot's credentials, then the server's own env. */
 export function probeEnvironment(server: Pick<StoredStdioMcpServer, "env">): NodeJS.ProcessEnv {
   const env: NodeJS.ProcessEnv = { ...process.env, PATH: augmentedPath() };
   stripWorkspaceCredentialEnv(env);
@@ -87,9 +81,8 @@ export function probeMcpServer(
     : probeStdioMcpServer(server, timeoutMs ?? STDIO_PROBE_TIMEOUT_MS, signal, options);
 }
 
-/** What the catalog is told, after a probe listed the tools: never a reason to fail it. */
 function observeProbe(options: McpProbeOptions, tools: unknown[], uiExtension: "ok" | "refused" | "unknown"): void {
-  try { options.observe?.({ tools, uiExtension }); } catch { /* the catalog's trouble, not the probe's */ }
+  try { options.observe?.({ tools, uiExtension }); } catch {}
 }
 
 async function probeRemoteMcpServer(
@@ -164,7 +157,6 @@ function probeStdioMcpServer(
     let settled = false;
     let stdoutBytes = 0;
     let initialized = false;
-    /** The UI extension: advertised in initialize 1; refused means initialize 3 without it. */
     let uiExtension: "ok" | "refused" | "unknown" = options.extension ? "ok" : "unknown";
     let timer: ReturnType<typeof setTimeout> | undefined;
     const onAbort = () => finish({ ok: false, error: publicProbeError("cancelled") });

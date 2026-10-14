@@ -1,7 +1,3 @@
-// Chat apps in the transcript (docs/superpowers/specs/2026-10-14-chat-apps-design.md):
-// an app row draws as the host's card around its frame, a row whose payload
-// never arrived reads as its text, and the words an app sent as the person
-// carry "Sent from <app>" under them, where typed words carry nothing.
 import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { afterAll, describe, expect, it, vi } from "vitest";

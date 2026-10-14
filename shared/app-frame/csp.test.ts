@@ -1,8 +1,3 @@
-// Security rule 3 (docs/superpowers/specs/2026-10-14-chat-apps-design.md):
-// bot-HTML documents carry exactly the bot policy; MCP documents carry the
-// spec's construction; and a domain entry with a path, a quote, a semicolon,
-// whitespace, `*` alone, `http:` outside the loopback rule or a non-dotted
-// host never appears in a policy.
 import { describe, expect, it } from "vitest";
 
 import { APP_DOMAIN_LIMIT, BOT_HTML_CSP, BOT_HTML_NETWORK, filterAppDomains, mcpAppCsp, mcpAppNetwork, normalizeAppDomain } from "./csp.ts";

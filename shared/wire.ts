@@ -409,11 +409,9 @@ export interface WireMessage {
   /** widget rows (kind "widget"): a bot-authored UI tree. `text` is its
    * readable fallback for clients that do not know the kind. */
   widget?: WidgetPayload;
-  /** app rows (kind "app"): bot HTML or an MCP server's UI (shared/app.ts).
-   * `text` is always the readable fallback. */
+  /** app rows (kind "app"): bot HTML or an MCP server's UI. `text` is always the readable fallback. */
   app?: AppPayload;
-  /** user rows sent by an app's ui/message: which app row sent them. Every
-   * client draws "Sent from <title>" on the bubble. */
+  /** user rows sent by an app's ui/message: the app row that sent them. Every client draws "Sent from <title>". */
   fromApp?: AppFromRef;
   connector?: ConnectorCardData;
   secret?: SecretRequestCardData;

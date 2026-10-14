@@ -1,19 +1,10 @@
 // Run with: node scripts/smoke-app-frames.mjs [--engagement]
 // Linux CI needs xvfb-run.
 //
-// The Electron security test for chat app frames
-// (docs/superpowers/specs/2026-10-14-chat-apps-design.md, "Security rules",
-// rules 1 to 6 and 8). A real AppDocument comes from the server's own path
-// (server/chat-apps.ts: show_html stored, then served as a document); the
-// frame is mounted by the desktop's own frame host
-// (src/components/app/app-frame-host.ts, bundled here) inside a page served
-// with the app's headers, in a window with the app's navigation guard, window
-// open handler and permission handlers. The page inside the frame tries
-// every way out it can, and an HTTP sink on this machine must stay empty.
-//
-// --engagement also clicks into two frames, one after the other, to check that
-// focus entering a frame by the pointer counts as engagement, and that moving
-// to the other frame moves it (focus is emulated: the window stays hidden).
+// A real show_html document, mounted by the desktop's own frame host in a window with the app's navigation
+// guard, window open handler and permission handlers, tries every way out it can; an HTTP sink on this
+// machine must stay empty. --engagement also clicks into two frames in turn: focus entering a frame by the
+// pointer is engagement, and moving to the other frame moves it.
 import electron from "electron";
 import assert from "node:assert/strict";
 import { createServer } from "node:http";
@@ -25,15 +16,11 @@ import { spawn } from "node:child_process";
 
 const ROOT = fileURLToPath(new URL("../", import.meta.url));
 
-// A page pinned to the viewport with its content centred, the way bots often
-// write one: the frame must still grow to the content, not report its own
-// height back (the content would spill out above and below).
+// Pinned to the viewport with its content centred, as bots often write it: the frame must still grow to the content.
 const PINNED = `<!DOCTYPE html><html><head><meta charset="utf-8"><style>body{margin:0;height:100vh;display:flex;align-items:center;justify-content:center}</style></head>
 <body><div style="height:300px;width:120px;background:#888"></div></body></html>`;
 
-// The page a bot would send with show_html. SINK and WSSINK are filled in
-// with the sink's address. Each attempt reports what happened; the frame
-// posts the report to its parent, then tries to navigate itself.
+// SINK and WSSINK are filled in with the sink's address.
 const PROBE = `<!DOCTYPE html>
 <html><head><meta charset="utf-8"><title>Probe</title>
 <link rel="prefetch" href="SINK/prefetch">
@@ -99,19 +86,17 @@ const PROBE = `<!DOCTYPE html>
   const img = document.getElementById("img");
   out.imageLoaded = img.complete && img.naturalWidth > 0;
   parent.postMessage({ probe: out }, "*");
-  // Rule 5 last: the frame navigates itself, by a link and by location.
+  // Last, the frame navigates itself, by a link and by location.
   setTimeout(() => { document.getElementById("self").click(); }, 200);
   setTimeout(() => { location.href = "SINK/location"; }, 600);
 })();
 </script></body></html>`;
 
-/** A tiny page for the engagement check. */
 const CLICKABLE = (name) => `<!DOCTYPE html><html><body style="margin:0"><button id="b" style="width:100%;height:120px">${name}</button></body></html>`;
 /** A page that takes focus by itself, with no click and no pointer over it. */
 const GRABBER = `<!DOCTYPE html><html><body style="margin:0"><button id="b" style="width:100%;height:120px">grab</button>
 <script>setTimeout(() => { window.focus(); document.getElementById("b").focus(); }, 300);</script></body></html>`;
 
-// ── parent: build the document, bundle the host, run Electron, read the sink ──
 if (!process.versions.electron) {
   const { build } = await import("esbuild");
   const { createChatApps } = await import("../server/chat-apps.ts");
@@ -134,7 +119,6 @@ if (!process.versions.electron) {
   const data = mkdtempSync(join(tmpdir(), "omb-app-frame-smoke-"));
   let code = 1;
   try {
-    // A real document, through the server's own show_html path.
     const rows = new Map();
     const thread = (id) => rows.get(id) ?? rows.set(id, []).get(id);
     let next = 1;
@@ -161,7 +145,6 @@ if (!process.versions.electron) {
     const probeDoc = page(PROBE.replaceAll("WSSINK", sinkOrigin.replace("http:", "ws:")).replaceAll("SINK", sinkOrigin), "Probe");
     const pinnedDoc = page(PINNED, "Pinned");
     apps.close();
-    // Rules 2 and 3, on the document the frame gets.
     assert.ok(probeDoc.srcdoc.startsWith(`${CSP_META_PREFIX}${BOT_HTML_CSP}">`), "rule 2: the CSP meta comes first, with the bot policy");
     assert.equal(probeDoc.csp, BOT_HTML_CSP, "rule 3: the bot policy, exactly");
     const clickDocs = engagement ? [page(CLICKABLE("first"), "First"), page(CLICKABLE("second"), "Second"), page(GRABBER, "Grabber")] : [];
@@ -189,7 +172,6 @@ if (!process.versions.electron) {
     for (const name of ["report.json", "heights.json", "engagement.json", "error.txt", ...(code === 0 ? [] : ["console.txt"])]) {
       try { console.log(readFileSync(join(data, name), "utf8")); } catch { /* not written */ }
     }
-    // Everything in the frame has had its chance: the sink saw nothing.
     if (code === 0) {
       assert.deepEqual(sinkHits, [], `the sink received requests from the frame: ${sinkHits.join(", ")}`);
       console.log(`sink: 0 requests (${sinkConnections.length} bare connections)`);
@@ -205,7 +187,6 @@ if (!process.versions.electron) {
   process.exit(code);
 }
 
-// ── child: Electron ──
 const { app, BrowserWindow, session } = electron;
 const [data, inputPath] = process.argv.slice(2);
 assert.ok(data && inputPath, "Run this smoke with Node so its parent owns the temporary profile");
@@ -215,14 +196,11 @@ const { appFrameNavigationAllowed } = await import("../electron/app-frame-guard.
 const { appPermissionHandlers } = await import("../electron/app-permissions.mjs");
 const input = JSON.parse(readFileSync(inputPath, "utf8"));
 const report = (name, text) => writeFileSync(join(data, name), text);
-/** A line of what happened, for a smoke that stalls. */
 const trace = (line) => { try { writeFileSync(join(data, "console.txt"), `${line}\n`, { flag: "a" }); } catch { /* best effort */ } };
 // An uncaught error would open Electron's modal error box and stall the run.
 process.on("uncaughtException", (error) => { report("error.txt", `uncaught: ${error?.stack ?? error}`); app.exit(1); });
 const timeout = setTimeout(() => { report("error.txt", "App frame smoke timed out"); app.exit(1); }, 200_000);
 
-// The host page: the app's own headers, the frame host, a record of what the
-// bridge's adapter was asked to do.
 const HOST_PAGE = `<!DOCTYPE html><html><head><meta charset="utf-8"><title>App frame smoke</title></head>
 <body style="margin:0;width:700px"><div id="frames"></div>
 <script>${input.hostScript.replace(/<\/script/gi, "<\\/script")}</script>
@@ -249,7 +227,6 @@ const HOST_PAGE = `<!DOCTYPE html><html><head><meta charset="utf-8"><title>App f
 
 async function run() {
   const host = createServer((_req, res) => {
-    // server/index.ts PAGE_HEADERS
     res.setHeader("content-security-policy", "frame-ancestors 'none'");
     res.setHeader("x-frame-options", "DENY");
     res.setHeader("referrer-policy", "no-referrer");
@@ -262,7 +239,7 @@ async function run() {
   // A hidden window's app is otherwise napped by macOS, and its timers with it.
   electron.powerSaveBlocker.start("prevent-app-suspension");
   const preload = join(data, "preload.cjs");
-  // A stand-in for the app's preload bridge (rule 6).
+  // A stand-in for the app's preload bridge.
   writeFileSync(preload, `require("electron").contextBridge.exposeInMainWorld("ogb", { openExternal: () => Promise.resolve(true), marker: "preload" });`);
   const win = new BrowserWindow({
     show: false, width: 760, height: 900,
@@ -283,7 +260,6 @@ async function run() {
   });
   const opens = [];
   win.webContents.setWindowOpenHandler(({ url }) => { opens.push(url); return { action: "deny" }; });
-  // electron/main.mjs's guard, as main.mjs installs it.
   const navigations = [];
   win.webContents.on("will-frame-navigate", (details) => {
     if (details.isMainFrame) return;
@@ -294,15 +270,13 @@ async function run() {
     trace(`navigation ${details.url} ${frameOrigin} ${allowed}`);
     if (!allowed) details.preventDefault();
   });
-  // What the frame says it is doing, for a smoke that stalls.
   win.webContents.on("console-message", (event) => trace(event.message));
   await win.loadURL(origin);
   const js = (code) => win.webContents.executeJavaScript(code, true);
 
-  // Rule 6, the control: the host page has the preload bridge.
+  // The control: the host page has the preload bridge.
   assert.equal(await js("typeof window.ogb"), "object");
   await js(`window.__mount("probe", ${JSON.stringify(input.probeDoc)})`);
-  // Rule 1, from the host's side.
   const attrs = await js(`(() => { const f = document.querySelector("#box-probe iframe"); return { sandbox: f.getAttribute("sandbox"), allow: f.hasAttribute("allow"), srcdoc: f.getAttribute("srcdoc") === ${JSON.stringify(input.probeDoc.srcdoc)} }; })()`);
   assert.deepEqual(attrs, { sandbox: "allow-scripts allow-forms", allow: false, srcdoc: true }, "rule 1: the frame element");
 
@@ -325,10 +299,8 @@ async function run() {
   const frameUrl = await js(`(() => { try { return document.querySelector("#box-probe iframe").contentWindow.location.href; } catch (e) { return "cross-origin"; } })()`);
   report("report.json", JSON.stringify({ probe, navigations, opens, permissionAsks, calls, frameUrl }, null, 2));
 
-  // Rule 1: the frame's origin is opaque. The inline script ran.
   assert.equal(probe.origin, "null", "rule 1: origin");
   assert.equal(probe.inlineScript, true);
-  // Rule 4: nothing leaves, nothing is read.
   for (const name of ["fetch", "xhr", "websocket", "localStorage", "cookie", "parentDocument", "topLocation", "clipboard"]) {
     assert.equal(probe[name].ok, false, `rule 4: ${name} must fail (${JSON.stringify(probe[name])})`);
   }
@@ -340,27 +312,21 @@ async function run() {
   // Chromium lists CSP-blocked loads in resource timing too, so whether a CSS
   // image, a script or a prefetch went out is the sink's to say.
   assert.deepEqual(opens, [], "rule 4: target=_blank and window.open reach no handler");
-  // Rule 5: the frame's own navigations were seen and stopped.
   const sinkNavigations = navigations.filter((entry) => entry.url.startsWith(input.sinkOrigin));
   assert.ok(sinkNavigations.length >= 1, "rule 5: the frame tried to navigate itself");
-  // Each was cancelled. The first is seen with the opaque origin; a second one
-  // right after it may find the frame's old render frame already gone, which
-  // the guard treats as unreadable and cancels too.
+  // A second navigation right after the first may find the frame's old render frame already gone, which the
+  // guard treats as unreadable and cancels too.
   for (const entry of sinkNavigations) assert.equal(entry.allowed, false, `rule 5: ${entry.url} (${entry.origin})`);
   assert.equal(sinkNavigations[0].origin, "null", "rule 5: an app frame's navigation is seen with an opaque origin");
   assert.equal(frameUrl, "cross-origin", "the frame is still its own opaque document");
-  // Rule 6: no host bridge in the frame.
   assert.deepEqual([probe.preload, probe.webkitHandlers, probe.androidAppHost], ["undefined", "undefined", "undefined"], "rule 6");
   assert.equal(probe.helper, "function", "the bot helper is there");
-  // Rule 8: no device permission for the frame.
   for (const name of ["microphone", "camera", "displayMedia", "geolocation"]) assert.equal(probe[name].ok, false, `rule 8: ${name} (${JSON.stringify(probe[name])})`);
   assert.notEqual(probe.notification.value, "granted", "rule 8: notifications");
   assert.deepEqual(permissionAsks.filter((ask) => ask.granted), [], "rule 8: nothing granted");
-  // The bridge: a message nobody clicked for is refused, and nothing was sent.
   assert.equal(probe.sendUnengaged.ok, false, "an unengaged mausbot.send is refused");
   assert.deepEqual(calls.filter((call) => call.op === "message"), [], "no message reached the send route");
 
-  // A page pinned to the viewport grows the frame to its content (300px).
   await js(`window.__mount("pinned", ${JSON.stringify(input.pinnedDoc)})`);
   let pinned = 0;
   for (let waited = 0; waited < 20_000 && pinned < 300; waited += 250) {
@@ -376,8 +342,6 @@ async function run() {
   host.close();
 }
 
-/** Click into one frame and then the other: the frame each click lands in
- * is engaged, the other is not. */
 async function checkEngagement(win, js) {
   // A window this smoke opens cannot count on taking the system's focus (a
   // terminal keeps it), so the page is told it has focus, the way DevTools
@@ -403,7 +367,6 @@ async function checkEngagement(win, js) {
   const afterFirst = await engaged();
   await click(await rect("second"));
   const afterSecond = await engaged();
-  // A frame that focuses itself, the pointer elsewhere, is not engaged.
   await js(`window.__mount("grabber", ${JSON.stringify(grabber)})`);
   await new Promise((resolve) => setTimeout(resolve, 1200));
   const grabbed = await js(`({ grabber: window.__hosts.grabber.engaged(), active: document.activeElement === document.querySelector("#box-grabber iframe") })`);

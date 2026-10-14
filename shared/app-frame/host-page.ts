@@ -1,11 +1,6 @@
-// The phones' app host page (docs/superpowers/specs/2026-10-14-chat-apps-design.md,
-// "Phone host page"). scripts/build-app-host.ts bundles this file with
-// bridge.ts into shared/app-frame/app-host.html, which both phones load in
-// their web view: iOS from mausbot-app://host/app-host.html, Android from
-// https://appassets.androidplatform.net/app/app-host.html. The page holds the
-// same sandboxed srcdoc iframe the desktop draws, so the
-// `window.parent.postMessage` contract SDK views assume holds everywhere,
-// and the bridge router runs here exactly as it runs on the desktop.
+// The phones' app host page, loaded in a web view: iOS from mausbot-app://host/app-host.html, Android from
+// https://appassets.androidplatform.net/app/app-host.html. It holds the same sandboxed srcdoc iframe the
+// desktop draws, so the `window.parent.postMessage` contract SDK views assume holds everywhere.
 //
 // Native ↔ page messages, small and versioned:
 //
@@ -83,7 +78,6 @@ export interface AppHostApi {
   reply(callId: string, reply: AppHostReply): void;
 }
 
-/** How the page talks to native. Found on the window, or given (tests). */
 export interface AppHostTransport {
   send(message: AppHostToNative): void;
   /** Android: native's messages arrive here. */
@@ -95,7 +89,6 @@ interface AndroidInjected {
   onmessage?: ((event: { data: unknown }) => void) | null;
 }
 
-/** iOS's script message handler, else Android's injected object, else null. */
 export function findAppHostTransport(win: Window): AppHostTransport | null {
   const webkit = (win as unknown as { webkit?: { messageHandlers?: { appHost?: { postMessage(message: unknown): void } } } }).webkit;
   const ios = webkit?.messageHandlers?.appHost;
@@ -117,7 +110,6 @@ export function findAppHostTransport(win: Window): AppHostTransport | null {
   return null;
 }
 
-/** Start the host page on `win`. Returns the api native calls. */
 export function startAppHostPage(win: Window, given?: AppHostTransport): AppHostApi | null {
   const transport = given ?? findAppHostTransport(win);
   if (!transport) return null;
@@ -165,7 +157,7 @@ export function startAppHostPage(win: Window, given?: AppHostTransport): AppHost
       unmount();
       if (typeof input.engagedAt === "number") engagedAt = input.engagedAt;
       const element = doc.createElement("iframe");
-      // Rule 1: exactly these two tokens, and no `allow` attribute.
+      // Exactly these two sandbox tokens, and no `allow` attribute.
       element.setAttribute("sandbox", "allow-scripts allow-forms");
       element.setAttribute("referrerpolicy", "no-referrer");
       element.setAttribute("title", "App");
@@ -236,9 +228,8 @@ export function startAppHostPage(win: Window, given?: AppHostTransport): AppHost
   return api;
 }
 
-/** The bundle's entry (scripts/build-app-host.ts): start on the real window.
- * On iOS the copy that runs in the page world finds no handler (it lives in
- * the host content world) and stays idle. */
+/** On iOS the copy that runs in the page world finds no handler (it lives in the host content world) and
+ * stays idle. */
 export function bootAppHostPage(): void {
   if (typeof window !== "undefined") startAppHostPage(window);
 }

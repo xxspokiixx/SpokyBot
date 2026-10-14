@@ -35,7 +35,6 @@ interface QueueEntry {
     queuedAt: number;
     via?: "call";
     callId?: string;
-    /** The words an app sent as the person (Message.fromApp). */
     fromApp?: Message["fromApp"];
   }>;
 }

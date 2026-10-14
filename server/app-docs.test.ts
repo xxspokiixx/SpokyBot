@@ -1,5 +1,3 @@
-// The app document store (server/app-docs.ts): content-addressed blobs, the
-// 512 MB ceiling, and the sweep that removes what no row names.
 import { mkdtempSync, readdirSync, statSync, utimesSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -22,7 +20,6 @@ describe("AppDocs", () => {
     expect(put).toEqual({ ok: true, doc: expect.stringMatching(/^[0-9a-f]{64}$/), bytes: Buffer.byteLength("<p>héllo</p>") });
     if (!put.ok) throw new Error("not stored");
     expect(docs.read(put.doc)).toEqual({ doc: put.doc, source: "html", html: "<p>héllo</p>" });
-    // Private to this user.
     expect(statSync(join(dir, "html", files(dir, "html")[0]!)).mode & 0o777).toBe(0o600);
   });
 
@@ -48,9 +45,7 @@ describe("AppDocs", () => {
     expect(first.ok).toBe(true);
     expect(docs.put({ source: "html", html: "b".repeat(300) })).toEqual({ ok: false, reason: "too-large" });
     expect(files(dir, "html")).toHaveLength(1);
-    // The same page again costs nothing.
     expect(docs.put({ source: "html", html: "a".repeat(300) })).toEqual(first);
-    // A fresh instance counts what is on disk.
     expect(new AppDocs(dir, { maxBytes: 600 }).put({ source: "html", html: "c".repeat(300) }).ok).toBe(false);
   });
 
@@ -67,7 +62,6 @@ describe("AppDocs", () => {
     const dropped = docs.put({ source: "mcp", html: "<p>shared</p>", data: { tool: { name: "dropped" } } });
     const alone = docs.put({ source: "html", html: "<p>alone</p>" });
     if (!kept.ok || !dropped.ok || !alone.ok) throw new Error("not stored");
-    // Young: nothing goes, whatever is referenced.
     expect(docs.sweep([])).toBe(0);
     age(dir, APP_DOCS_SWEEP_GRACE_MS + 1_000);
     const before = docs.usage();

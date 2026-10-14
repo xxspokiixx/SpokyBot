@@ -18,16 +18,13 @@ export function replySpeaker(message: Message, userName = "User"): string {
   return message.role === "user" ? userName : (message.from?.name ?? "Assistant");
 }
 
-/** A widget press is known only from the route that checked it (`widgetPress`), never read back from the message text.
- * Likewise an app row carries `appMessage` only when the words came from the app's ui/message (`appMessage` on the
- * same route): its title and where it came from. */
+/** A widget press (`widgetPress`) or an app's ui/message (`appMessage`) is known only from the route that checked
+ * it, never read back from the message text. */
 export type ReplyTarget = Message & {
   widgetPress?: { label: string; action: WidgetAction };
   appMessage?: { title: string; origin: string };
 };
 
-/** The message a send replies to, by id: a text, widget or app row with
- * words in it, or a 404 the route answers with. */
 export function replyTargetIn(messages: readonly Message[], value: unknown): Message | undefined {
   if (value === undefined || value === null || value === "") return undefined;
   if (typeof value !== "string") throw Object.assign(new Error("replyToId must be a message id"), { status: 400 });
@@ -89,14 +86,11 @@ function inAppFence(text: string): string {
   return out;
 }
 
-/** The origin of an app row as the model is told it. */
 function appRowOrigin(target: Message): string {
   const mcp = target.app?.source === "mcp" ? target.app.mcp : undefined;
   return mcp ? `${mcp.serverTitle || mcp.server} · ${mcp.tool}` : "a page you made with show_html";
 }
 
-/** A reply to an app row. With `appMessage` the app sent the words through
- * ui/message; without, the person typed them. */
 function promptWithApp(text: string, target: ReplyTarget): string {
   const sent = target.appMessage;
   const title = replyExcerpt(target.app?.title ?? "", 120);
@@ -144,7 +138,6 @@ export function transcriptText(message: Message, messagesById: ReadonlyMap<strin
   if (!target?.text) return message.text;
   const excerpt = replyExcerpt(target.text, 220);
   if (target.kind === "app") {
-    // Words an app sent as the person, or the person's own reply to it.
     return message.fromApp
       ? `[app: ${replyExcerpt(message.fromApp.title, 120)}]\n${message.text}`
       : `[replying to ${replySpeaker(target, userName)}'s app: “${excerpt}”]\n${message.text}`;

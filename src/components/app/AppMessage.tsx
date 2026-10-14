@@ -1,13 +1,3 @@
-// An app in the transcript (message kind "app"): a bot's own page
-// (show_html) or an MCP server's UI, running in a sandboxed frame inside a
-// card the host draws (docs/superpowers/specs/2026-10-14-chat-apps-design.md).
-//
-// The row owns everything outside the frame: the header, the info panel, the
-// Allow bar, the strips, and the box that keeps the frame's height while it
-// is not running. It takes a slot in the window's pool (app-pool.ts) when it
-// comes into view, fetches its document, and mounts AppFrame. update_html
-// (a new `doc` or `rev`) and Reload tear the frame down first, then mount the
-// new one at the same height.
 import { useCallback, useEffect, useId, useMemo, useRef, useState } from "react";
 import { useStore, type Message } from "@/state/store";
 import { t } from "@/lib/i18n";
@@ -20,20 +10,13 @@ import { APP_POOL_LIMITS, useAppPoolSlot, type AppPool } from "./app-pool";
 import { AppAllowBar, AppHeader, AppInfo, AppOpenButton, AppPlaceholder, AppStrip, APP_SURFACE, type AllowDecision } from "./AppChrome";
 import { AppFrame, type AppFrameHandle, type AppFrameProblem } from "./AppFrame";
 
-/** The message column, up to 760px. */
 const WIDTH = "max-w-[760px]";
-/** The Allow bar answers "declined" after this long. */
 const ALLOW_TIMEOUT_MS = APP_FRAME_LIMITS.allowTimeoutMs;
-/** A fetched document is reused for this long when a frame remounts after
- * the pool took its slot; Reload always fetches again. */
 const DOC_REUSE_MS = 60_000;
 
-/** The last height each (row, revision) reported, so a remount starts there. */
 const heights = new Map<string, number>();
-/** Documents fetched lately, by row and content id. */
 const docs = new Map<string, { doc: AppDocument; at: number }>();
 
-/** Forget remembered heights and documents (tests, and a signed-out window). */
 export function forgetAppRows(): void {
   heights.clear();
   docs.clear();
@@ -41,7 +24,6 @@ export function forgetAppRows(): void {
 
 function rememberDoc(key: string, doc: AppDocument) {
   docs.set(key, { doc, at: Date.now() });
-  // a handful is plenty: they are only for a frame that comes straight back
   while (docs.size > 8) docs.delete(docs.keys().next().value!);
 }
 
@@ -51,8 +33,6 @@ function isAppPayload(value: unknown): value is AppPayload {
   return typeof payload.title === "string" && (payload.source === "html" || payload.source === "mcp") && typeof payload.doc === "string";
 }
 
-/** Whether this row is among its thread's newest app rows, which mount by
- * themselves; older ones wait for "Open app". */
 function useAutoMount(botId: string, threadId: string | undefined, messageId: string): boolean {
   const { state } = useStore();
   const bot = state?.bots?.find((candidate) => candidate.id === botId);
@@ -74,7 +54,6 @@ export function AppMessage({ botId, botName, threadId, message, pool }: {
   pool?: AppPool;
 }) {
   const payload = message.app;
-  // a row with no app to draw still says what it said
   if (!isAppPayload(payload) || !threadId) {
     return message.text
       ? <div className="chat-text w-fit max-w-[min(42rem,78%)] rounded-2xl bg-card px-4 py-2.5 text-[15px] leading-relaxed whitespace-pre-wrap text-ink">{message.text}</div>
@@ -105,14 +84,10 @@ function AppRow({ botId, botName, threadId, message, payload, pool }: {
   const uid = useId();
   const rev = payload.rev ?? 0;
   const bordered = payload.border !== false;
-  /** What a mount fetches: the stored document of this revision. */
   const docKey = payload.doc ? `${message.id}:${payload.doc}:${rev}` : "";
-  // a remount starts where the frame last was; a new revision, where the last one was
   const [height, setHeight] = useState(() => heights.get(`${message.id}:${rev}`) ?? heights.get(`${message.id}:${rev - 1}`) ?? payload.height ?? APP_FRAME_LIMITS.defaultHeight);
   const [infoOpen, setInfoOpen] = useState(false);
-  /** The View asked to close: the frame folds to its header until reopened. */
   const [collapsed, setCollapsed] = useState(false);
-  /** Bumped by Reload: fetch the document again and mount a new frame. */
   const [reload, setReload] = useState(0);
   const [loaded, setLoaded] = useState<Loaded | null>(null);
   const [fetching, setFetching] = useState(false);
@@ -134,7 +109,6 @@ function AppRow({ botId, botName, threadId, message, payload, pool }: {
   }, []);
   const slot = useAppPoolSlot({ key: `${threadId}:${message.id}`, target: row, auto, evict, ...(pool ? { pool } : {}) });
 
-  // The document of this revision, fetched once the row holds a slot.
   const wanted = slot.live && docKey ? `${docKey}:${reload}` : "";
   useEffect(() => {
     if (!wanted) return;
@@ -146,7 +120,6 @@ function AppRow({ botId, botName, threadId, message, payload, pool }: {
       : fetchAppDocument(threadId, message.id, controller.signal).then((doc) => { rememberDoc(docKey, doc); return doc; });
     void fetched.then(
       async (doc) => {
-        // a frame of the previous revision goes first, and is asked to
         if (frame.current) await evict();
         if (!controller.signal.aborted && mounted.current) {
           setProblem(null);
@@ -166,8 +139,6 @@ function AppRow({ botId, botName, threadId, message, payload, pool }: {
     };
   }, [wanted, docKey, reload, threadId, message.id, evict]);
 
-  // The pool took the slot, or the row folded: drop what was loaded so the
-  // next mount fetches what is current.
   useEffect(() => {
     if (!slot.live) setLoaded(null);
   }, [slot.live]);
@@ -177,7 +148,6 @@ function AppRow({ botId, botName, threadId, message, payload, pool }: {
     if (mounted.current) setHeight(next);
   }, [message.id, rev]);
 
-  /** Open Allow questions, oldest first; the bar shows the first. */
   const asksNow = useRef<AllowAsk[]>([]);
   const askAllow = useCallback((tool: string) => new Promise<AllowDecision>((resolve) => {
     const id = ++askSeq.current;
@@ -196,11 +166,8 @@ function AppRow({ botId, botName, threadId, message, payload, pool }: {
     setAsks(asksNow.current);
   }), []);
 
-  // The document running now. A new revision keeps the old frame until its
-  // own document is here; the fetch tears the old one down first.
   const current = slot.live ? loaded?.doc : undefined;
-  // A frame that goes away (or a row that does) takes its open questions with it.
-  // decide() replaces the list rather than changing it, so this walks a stable one
+  // A frame or row that goes away denies its open questions; decide() replaces the list, so this walks a stable one.
   const denyAll = useCallback(() => { for (const ask of asksNow.current) ask.decide("deny"); }, []);
   useEffect(() => { if (!current) denyAll(); }, [current, denyAll]);
   useEffect(() => denyAll, [denyAll]);
@@ -212,7 +179,6 @@ function AppRow({ botId, botName, threadId, message, payload, pool }: {
     if (!slot.live) slot.open();
   };
 
-  // The View asked to be closed: it is asked to tear down first, then folds.
   const { close } = slot;
   const onTeardownRequested = useCallback(() => {
     void evict().then(() => {
@@ -228,8 +194,6 @@ function AppRow({ botId, botName, threadId, message, payload, pool }: {
   const serverName = payload.mcp?.serverTitle || payload.mcp?.server;
   const signIn = () => dispatch({ type: "togglePlugins", open: true, surface: "mcp" });
 
-  // What the strip says: a refusal the frame just met, else the document's
-  // own reason, else the row's.
   const strip = (() => {
     if (problem?.kind === "sign-in") return { text: t("app.strip.signIn", { server: serverName || problem.server }), action: { label: t("app.strip.signInAction"), onClick: signIn } };
     if (problem?.kind === "offline") return { text: t("app.strip.offline"), action: { label: t("app.strip.retry"), onClick: reloadNow } };
@@ -251,7 +215,6 @@ function AppRow({ botId, botName, threadId, message, payload, pool }: {
   const infoId = `${uid}-info`;
 
   const body = collapsed ? null : noPage ? (
-    // nothing to run: the row's own words, as its readable fallback
     message.text ? <div dir="auto" className={cn("line-clamp-6 whitespace-pre-wrap text-[13px] leading-[18px] text-ink-secondary", bordered ? "px-4 pb-3" : "pb-2")}>{message.text}</div> : null
   ) : (
     <div data-app-box className={cn("relative w-full", bordered && "border-t border-ink/[0.08]")} style={{ height }}>

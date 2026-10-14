@@ -1,15 +1,5 @@
-// The server's own connections to MCP app servers (docs/superpowers/specs/
-// 2026-10-14-chat-apps-design.md, Decision 9 and "App connections"): what
-// reads an app's UI resource and runs the calls its view makes, long after
-// the turn whose engine called the tool has ended.
-//
-// One client per (server name, configuration): a URL server through
-// RemoteMcpClient with the headers the caller gives it (a fresh sign-in
-// token), a command server spawned on demand with the probe environment.
-// Both advertise the UI extension and fall back without it when refused.
-// A client closes after 5 idle minutes; at most 6 are open, the least
-// recently used closing first. tools/list is cached for 60 s and read again
-// after the server says it changed.
+// OMB's own connections to MCP app servers: they read an app's UI resource and run its view's calls long
+// after the turn that called the tool has ended. A command server is spawned with the probe environment.
 import { createHash } from "node:crypto";
 
 import { APP_EXTENSION_KEY } from "../shared/app.ts";
@@ -30,26 +20,18 @@ function isRecord(value: unknown): value is Json {
   return Boolean(value) && typeof value === "object" && !Array.isArray(value);
 }
 
-/** One open connection, whatever its transport. */
 export interface AppClient {
   request(method: string, params: unknown, signal: AbortSignal): Promise<unknown>;
   close(): Promise<void>;
-  /** "refused": the server refused the UI extension and took the plain handshake. */
   readonly extensions: "ok" | "refused" | undefined;
-  /** The initialize result's serverInfo. */
   readonly serverInfo: Json | undefined;
-  /** Set when the connection is gone (the process exited). */
   readonly closed: boolean;
 }
 
 export interface AppClientHooks {
-  /** A server notification (notifications/tools/list_changed…). */
   onNotification(method: string): void;
 }
 
-/** A command server spoken to over stdio: the minimal client the probe
- * uses, kept open. Requests the server sends are answered (ping) or
- * refused; JSON-RPC errors become McpRpcError, as over HTTP. */
 class StdioAppClient implements AppClient {
   private readonly child: ReturnType<typeof spawnCli>;
   private readonly pending = new Map<number, { resolve(value: unknown): void; reject(error: Error): void }>();
@@ -128,7 +110,6 @@ class StdioAppClient implements AppClient {
     });
   }
 
-  /** initialize with the UI extension, the plain one if that is refused. */
   async initialize(signal: AbortSignal, extension: boolean): Promise<void> {
     const params = { protocolVersion: "2025-06-18", capabilities: {}, clientInfo: { name: "OpenMausBot", version: "1" } };
     let result: unknown;
@@ -153,7 +134,6 @@ class StdioAppClient implements AppClient {
   }
 }
 
-/** A URL server through OMB's own HTTP client. */
 class RemoteAppClient implements AppClient {
   private readonly client: RemoteMcpClient;
   serverInfo: Json | undefined;
@@ -183,7 +163,6 @@ class RemoteAppClient implements AppClient {
   }
 }
 
-/** Open and initialize one client (the default; tests pass their own). */
 export async function openAppClient(server: McpServerSpec, hooks: AppClientHooks, extension: boolean, signal: AbortSignal): Promise<AppClient> {
   const client = "url" in server ? new RemoteAppClient(server, hooks) : new StdioAppClient(server, hooks);
   try {
@@ -199,7 +178,6 @@ interface Slot {
   name: string;
   server: McpServerSpec;
   client: Promise<AppClient>;
-  /** The client once open: closed synchronously when the server exits. */
   opened?: AppClient;
   used: number;
   idle?: ReturnType<typeof setTimeout>;
@@ -211,12 +189,9 @@ export interface AppConnectionsOptions {
   max?: number;
   now?: () => number;
   open?: typeof openAppClient;
-  /** Every full tools/list read, with whether the server took the extension
-   * (the catalog records it). */
   onTools?(name: string, server: McpServerSpec, tools: Json[], extensions: "ok" | "refused" | undefined): void;
 }
 
-/** Whether a failure means the connection itself is unusable. */
 function connectionLost(error: unknown): boolean {
   return !(error instanceof McpRpcError);
 }
@@ -237,7 +212,6 @@ export class AppConnections {
     this.onTools = options.onTools;
   }
 
-  /** How many connections are open or opening. */
   get size(): number { return this.slots.size; }
 
   private key(name: string, server: McpServerSpec): string {
@@ -248,7 +222,6 @@ export class AppConnections {
     const key = this.key(name, server);
     let slot = this.slots.get(key);
     if (!slot) {
-      // The least recently used goes first.
       while (this.slots.size >= this.max) {
         const oldest = [...this.slots.entries()].sort((a, b) => a[1].used - b[1].used)[0];
         if (!oldest) break;
@@ -279,15 +252,12 @@ export class AppConnections {
     if (!slot) return;
     this.slots.delete(key);
     if (slot.idle) clearTimeout(slot.idle);
-    // An open client starts closing now (a command server's group is sent
-    // SIGTERM before this returns); one still opening closes once it opens.
+    // A command server's group is sent SIGTERM before this returns; a client still opening closes once it opens.
     if (slot.opened) void slot.opened.close().catch(() => {});
     else void slot.client.then((client) => client.close()).catch(() => {});
   }
 
-  /** One request on this server's connection, opened if need be. A
-   * connection that failed (not a JSON-RPC error answer) is closed, so the
-   * next request opens a new one. */
+  /** A connection that failed (not a JSON-RPC error answer) is closed, so the next request opens a new one. */
   async request(name: string, server: McpServerSpec, method: string, params: unknown, signal: AbortSignal, extension = true): Promise<unknown> {
     const key = this.key(name, server);
     const slot = this.slot(name, server, extension);
@@ -301,7 +271,6 @@ export class AppConnections {
     }
   }
 
-  /** The server's whole tool list, cached for 60 s. */
   tools(name: string, server: McpServerSpec, signal: AbortSignal, extension = true): Promise<Json[]> {
     const slot = this.slot(name, server, extension);
     if (slot.tools && this.now() - slot.tools.at < APP_TOOLS_CACHE_MS) return slot.tools.list;
@@ -327,13 +296,11 @@ export class AppConnections {
     return list;
   }
 
-  /** The serverInfo of an open connection (title for a row), if any. */
   async serverInfo(name: string, server: McpServerSpec): Promise<Json | undefined> {
     const slot = this.slots.get(this.key(name, server));
     return slot ? (await slot.client.catch(() => undefined))?.serverInfo : undefined;
   }
 
-  /** Close every connection to this server name (removed or edited). */
   closeServer(name: string): void {
     for (const [key, slot] of this.slots) if (slot.name === name) this.drop(key);
   }

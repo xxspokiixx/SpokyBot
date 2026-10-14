@@ -1,20 +1,6 @@
-// Stored app documents (docs/superpowers/specs/2026-10-14-chat-apps-design.md,
-// "Storage"). Content-addressed under DATA_DIR/app-docs/:
-//
-//   html/<sha256>.html   the page, one blob per distinct HTML, so the same
-//                        ui:// template is stored once across every call
-//   data/<sha256>.json   one row's data (MCP: tool, toolInput, toolResult
-//                        and the filtered network set)
-//   doc/<sha256>.json    { v, source, html, data }: the manifest an
-//                        AppPayload.doc names; its id is the sha256 of
-//                        {html, data} ids
-//
-// A 512 MB ceiling refuses new documents (the row is still written, with its
-// text and `blocked: too-large`). Unreferenced files are removed by a sweep
-// at startup and after a thread is deleted (server/chat-apps.ts); a file
-// written in the last ten minutes is never swept, so a document stored a
-// moment before its row is appended cannot be lost to a sweep that runs in
-// between. Referenced files are never evicted.
+// Content-addressed app documents under DATA_DIR/app-docs/: html/<sha256>.html, data/<sha256>.json, and
+// doc/<sha256>.json, the manifest an AppPayload.doc names. A file written in the last ten minutes is never
+// swept, so a document stored a moment before its row is appended cannot be lost to a sweep in between.
 import { createHash, randomBytes } from "node:crypto";
 import { mkdirSync, readdirSync, readFileSync, renameSync, statSync, unlinkSync, utimesSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
@@ -22,15 +8,12 @@ import { join } from "node:path";
 import type { AppNetwork, AppSource, AppToolDefinition, AppToolResult } from "../shared/app.ts";
 
 export const APP_DOCS_MAX_BYTES = 512 * 1024 * 1024;
-/** Files younger than this survive any sweep. */
 export const APP_DOCS_SWEEP_GRACE_MS = 10 * 60_000;
 
 const ID = /^[0-9a-f]{64}$/;
 const KINDS = { html: ".html", data: ".json", doc: ".json" } as const;
 type Kind = keyof typeof KINDS;
 
-/** One row's data beside its HTML: what the frame is told about the tool
- * call (MCP), and the network set its policy is built from. */
 export interface AppDocData {
   tool?: AppToolDefinition;
   toolInput?: Record<string, unknown>;
@@ -70,7 +53,6 @@ export class AppDocs {
     return join(this.dir, kind, `${id}${KINDS[kind]}`);
   }
 
-  /** Bytes on disk under the store, counted once and kept up to date. */
   usage(): number {
     if (this.used === null) {
       let total = 0;
@@ -88,9 +70,7 @@ export class AppDocs {
     try { return readdirSync(join(this.dir, kind)); } catch { return []; }
   }
 
-  /** Write one blob unless it is already there (then refresh its time, so a
-   * sweep's grace covers the row about to name it). Atomic: a temp file
-   * renamed into place. */
+  /** An existing blob's time is refreshed, so the sweep's grace covers the row about to name it. */
   private write(kind: Kind, id: string, text: string): void {
     const target = this.path(kind, id);
     try {
@@ -106,8 +86,6 @@ export class AppDocs {
     this.used = before + Buffer.byteLength(text);
   }
 
-  /** Store a page and its row's data. Refused (nothing written) when it
-   * would take the store past its ceiling. */
   put(input: { source: AppSource; html: string; data?: AppDocData }): AppDocPut {
     const html = input.html;
     const data = input.data ? JSON.stringify(input.data) : null;
@@ -144,9 +122,6 @@ export class AppDocs {
     }
   }
 
-  /** Remove every document no row names, then every blob no remaining
-   * document names, and stray temp files. Files inside the grace window
-   * stay. Returns how many files were removed. */
   sweep(referenced: Iterable<string>, now = Date.now()): number {
     const wanted = new Set([...referenced].filter((id) => ID.test(id)));
     const old = (kind: Kind, name: string) => {

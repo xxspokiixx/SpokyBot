@@ -1,11 +1,5 @@
-// Bundles the phones' app host page: shared/app-frame/host-page.ts and the
-// bridge router into one static file, shared/app-frame/app-host.html
-// (docs/superpowers/specs/2026-10-14-chat-apps-design.md, "Phone host page").
-// The file is committed. Its first line is a comment with the sha256 of
-// everything after that line; scripts/gen-app-fixtures.ts copies the file
-// into the mobile repo, and the phone tests fail when the hash differs from
-// the fixture's. shared/app-frame/app-host.test.ts fails when the committed
-// file is not what this script builds.
+// Bundles the phones' app host page into the committed shared/app-frame/app-host.html. Its first line holds
+// the sha256 of everything after it, which the phone tests compare with their fixture's.
 //
 //   node --experimental-strip-types scripts/build-app-host.ts           write it
 //   node --experimental-strip-types scripts/build-app-host.ts --check   exit 1 if stale
@@ -17,9 +11,7 @@ import { build } from "esbuild";
 const FRAME_DIR = fileURLToPath(new URL("../shared/app-frame/", import.meta.url));
 export const APP_HOST_HTML = `${FRAME_DIR}app-host.html`;
 
-/** The page around the script: no CSP of its own (a srcdoc frame inherits
- * its parent's policy, and the app's own meta is the one that limits it),
- * a transparent background, the frame as wide as the web view. */
+/** No CSP of its own: a srcdoc frame inherits its parent's policy, and the app's own meta is the one that limits it. */
 function page(script: string): string {
   return [
     "<!DOCTYPE html>",
@@ -38,7 +30,6 @@ export function appHostHash(body: string): string {
   return createHash("sha256").update(body).digest("hex");
 }
 
-/** The first line's hash, or null when the file has none. */
 export function appHostHashOf(html: string): string | null {
   return /^<!-- mausbot app-host v1 sha256:([0-9a-f]{64}) -->\n/.exec(html)?.[1] ?? null;
 }

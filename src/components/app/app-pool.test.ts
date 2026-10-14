@@ -1,7 +1,4 @@
 // @vitest-environment happy-dom
-// The desktop's live-frame budget (spec, "Performance"): never more than
-// three frames, the one seen least recently goes first and is torn down
-// before the next mounts, and a row asks again only on its way into view.
 import { act, createElement, useRef } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";

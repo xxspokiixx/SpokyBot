@@ -1,7 +1,4 @@
 // @vitest-environment happy-dom
-// "Show its apps in chat" in Settings → MCP servers: hidden until the
-// server's listing reports `apps`, and a press saves the other value on the
-// route every other server change uses.
 import { act, createElement } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";

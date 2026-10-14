@@ -1,20 +1,7 @@
-// Writes the chat-app fixtures the phone apps test against, and copies the
-// app host page into both phone apps (docs/superpowers/specs/2026-10-14-chat-apps-design.md,
-// "Phone host page"). Every row and document is produced by the server's own
-// code (server/chat-apps.ts createAppCard and appDocument over a real
-// AppDocs store), so the phones decode exactly what this server sends.
+// Writes the chat-app fixtures the phone apps test against, made by the server's own code, and copies the app
+// host page into both phone apps.
 //
 //   node --experimental-strip-types scripts/gen-app-fixtures.ts <mausbot-mobile checkout>
-//
-// writes, under that checkout:
-//   ios/Tests/CompanionCoreTests/Fixtures/app-messages.json     a thread page of app rows (and a "Sent from" line)
-//   ios/Tests/CompanionCoreTests/Fixtures/app-documents.json    messageId → AppDocument
-//   ios/Tests/CompanionCoreTests/Fixtures/app-expectations.json what each row must decode to, and the host page's sha256
-//   ios/App/Resources/app-host.html                             shared/app-frame/app-host.html, byte for byte
-//   android/app/src/main/assets/app/app-host.html               the same
-//
-// The phone tests fail when the bundled app-host.html's sha256 (its first
-// line) differs from app-expectations.json's `appHostSha256`.
 import { copyFileSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
@@ -40,7 +27,6 @@ const AT = 1792000000000;
 const THREAD = "thread-apps";
 const BOT = { id: "bot-scout", name: "Scout" };
 
-/** Build every fixture in memory, with a throwaway document store. */
 export function buildAppFixtures(): AppFixtures {
   const scratch = mkdtempSync(join(tmpdir(), "omb-app-fixtures-"));
   try {
@@ -71,14 +57,11 @@ export function buildAppFixtures(): AppFixtures {
       const result = createAppCard({ store, docs, bot: BOT, threadId: THREAD, input: { tool: "show_html", ...sample } });
       if (!result.ok) throw new Error(`${name}: ${result.error}`);
     }
-    // update_html: the row keeps its id, its revision moves on, its document changes.
     nextId = "unused";
     const updated = createAppCard({ store, docs, bot: BOT, threadId: THREAD, input: { tool: "update_html", app_id: "app-report", html: APP_SAMPLES.report!.html.replace("$27.75", "$29.10") } });
     if (!updated.ok) throw new Error(updated.error);
-    // Context the model has not been handed yet.
     setAppContext(store, { threadId: THREAD, messageId: "app-counter", content: [{ type: "text", text: "The counter shows 3 cups." }], now: AT + 50_000 });
 
-    // MCP apps, stored the way the MCP side stores them.
     for (const [name, sample] of Object.entries(MCP_APP_SAMPLES)) {
       const { csp: _csp, network } = mcpAppNetwork(sample.resourceMeta.csp, sample.loopback);
       const stored = docs.put({ source: "mcp", html: sample.html, data: { tool: sample.tool, toolInput: sample.toolInput, toolResult: sample.toolResult, network } });
@@ -92,12 +75,10 @@ export function buildAppFixtures(): AppFixtures {
       store.appendMessage(THREAD, { role: "bot", kind: "app", text: mcpAppFallbackText(sample.serverTitle, app.title, sample.toolResult), app });
     }
 
-    // A page the store had no room for: text only.
     nextId = "app-too-large";
     store.appendMessage(THREAD, { role: "bot", kind: "app", text: "[App] Huge map\nA map too large to keep.", app: {
       v: 1, source: "html", title: "Huge map", doc: "", rev: 0, bytes: 250_000, border: true, network: { connect: [], resources: [] }, blocked: "too-large",
     } });
-    // Words an app sent as the person: every client draws "Sent from Coffee counter".
     nextId = "app-sent";
     store.appendMessage(THREAD, { role: "user", kind: "text", text: "I have had 3 cups of coffee today.", replyToId: "app-counter", sendId: "send-app-0000000001", fromApp: { messageId: "app-counter", title: "Coffee counter" } });
     // What a newer server might send, and a payload this build cannot read.
@@ -134,7 +115,6 @@ export function buildAppFixtures(): AppFixtures {
   }
 }
 
-/** Write the fixtures and the host page into a mausbot-mobile checkout. */
 export function writeAppFixtures(root: string): string[] {
   const fixtures = buildAppFixtures();
   const dir = join(root, "ios/Tests/CompanionCoreTests/Fixtures");

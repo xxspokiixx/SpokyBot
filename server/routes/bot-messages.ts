@@ -58,9 +58,6 @@ export interface BotMessageRouteDeps {
     input: {
       botId: string; threadId: string; text: string; sendId?: string; replyTo?: Message; sender?: ResolvedSender;
       trigger: UsageTrigger; dataContext?: DataContext; personPresent: boolean;
-      /** Chat apps: the undelivered app context put in front of the prompt
-       * (server/chat-apps.ts appContextBlock), and the app that sent the
-       * words (Message.fromApp). */
       app?: { context?: string; fromApp?: Message["fromApp"] };
     },
     guardedStart?: (currentAtStart: BotRecord) => Promise<DirectSendReceipt>,
@@ -141,7 +138,6 @@ export function createBotMessageRoutes(deps: BotMessageRouteDeps): RouteHandler 
   const pinnedClientThread = pinnedClientThreadGuard(store);
   /** widget -> sendId of a press on its way in: a second tap before acceptance must not send a second answer. */
   const pressesInFlight = new Map<string, string | undefined>();
-  /** ui/message sends per app row (server/chat-apps.ts). */
   const appMessageRate = new AppMessageRate();
   return async ({ req, res, path, method, auth, json, readBody }) => {
     let m: RegExpMatchArray | null = null;
@@ -156,8 +152,6 @@ export function createBotMessageRoutes(deps: BotMessageRouteDeps): RouteHandler 
       }
       const pressed = body.widgetAction !== undefined && body.widgetAction !== null;
       if (guarded && pressed) return json(res, 400, { error: "guarded sends cannot answer a widget" });
-      // Words an app in this chat sent as the person (`appMessage`, the
-      // bridge's ui/message): the same rule, and never both at once.
       const fromAnApp = body.appMessage !== undefined && body.appMessage !== null;
       if (guarded && fromAnApp) return json(res, 400, { error: "guarded sends cannot speak for an app" });
       if (pressed && fromAnApp) return json(res, 400, { error: "send widgetAction or appMessage, not both" });
@@ -169,7 +163,6 @@ export function createBotMessageRoutes(deps: BotMessageRouteDeps): RouteHandler 
           ? "onBehalfOf must name the person with an email address, a name, or both"
           : "guarded sends require threadId, sendId, text and expectedActiveLeafId" });
       }
-      // An app's words ride in `appMessage`, checked against its row below.
       const typed = pressed || fromAnApp ? "" : String(body.text ?? "").trim();
       if (!pressed && !fromAnApp && !typed) return json(res, 400, { error: "text required" });
       const bot = store.bot(m[1]);
@@ -191,7 +184,6 @@ export function createBotMessageRoutes(deps: BotMessageRouteDeps): RouteHandler 
       const sendId = parseSendId(body.sendId);
       const press = pressed ? prepareWidgetPress(store, threadId, body.widgetAction, sendId) : null;
       if (press && !press.ok) return json(res, press.status, { error: press.error });
-      // An app's message replies to its own row, and says so on the line.
       const appSent = fromAnApp ? prepareAppMessage(store, threadId, body.appMessage) : null;
       if (appSent && !appSent.ok) return json(res, appSent.status, { error: appSent.error });
       const text = press ? press.text : appSent ? appSent.text : typed;
@@ -205,13 +197,10 @@ export function createBotMessageRoutes(deps: BotMessageRouteDeps): RouteHandler 
         return json(res, 409, { error: "That answer is already on its way." });
       }
       const dataContext = press || appSent ? undefined : parseDataContext(body.dataContext);
-      // A retry of a send already accepted gets its original receipt: it
-      // neither carries app context again nor counts against an app's rate.
       const retried = Boolean(sendId && (store.messagesFor(threadId).some((message) => message.sendId === sendId) || queuedSteeredMessage(bot.id, threadId, sendId)));
       const slot = appSent ? appMessageRate.reserve(`${threadId}:${appSent.messageId}`, sendId) : null;
       if (appSent && !slot) return json(res, 429, { error: "This app has sent too many messages. Wait a while, or type your message." });
-      // What the person's apps last told the model they are looking at, once,
-      // in front of this message (a relay is not the person at this screen).
+      // A relay is not the person at this screen: it never carries what their apps last showed.
       const appContext = guarded || retried ? null : appContextBlock(store, threadId);
       const app = appContext || appSent
         ? { ...(appContext ? { context: appContext.block } : {}), ...(appSent ? { fromApp: { messageId: appSent.messageId, title: appSent.title } } : {}) }
@@ -251,7 +240,6 @@ export function createBotMessageRoutes(deps: BotMessageRouteDeps): RouteHandler 
           personPresent: auth.kind === "session" || DESKTOP_MANAGED,
         }, guardedStart);
         press?.settle("queueId" in receipt ? receipt.queueId : undefined);
-        // The context reached the model with these words: not again.
         appContext?.deliver();
         return json(res, 202, receipt);
       } catch (error) {

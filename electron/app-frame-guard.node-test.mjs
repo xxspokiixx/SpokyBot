@@ -1,5 +1,3 @@
-// An app frame (opaque origin) may load only its own document; every other
-// frame and the main frame are left to the window's other rules.
 import assert from "node:assert/strict";
 import test from "node:test";
 

@@ -12,8 +12,6 @@ const CARD_ROUTE = "/api/internal/options-card";
 
 const MASKED = " Something in it read as a secret and was masked before it was stored. Never put secrets in a page or a widget.";
 
-/** show_html and update_html: checked here first so a malformed page costs
- * no round trip; the harness checks again and stores it. */
 async function callAppTool(name: "show_html" | "update_html", args: Json, context: ToolCallContext): Promise<ToolCallResult> {
   const updating = name === "update_html";
   const parsed = updating ? parseUpdateHtmlInput(args) : parseShowHtmlInput(args);

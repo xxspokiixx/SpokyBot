@@ -1,8 +1,3 @@
-// The transcript's bot-authored rich rows: a widget (a UI tree drawn
-// natively, src/components/widget) and an app (HTML in a sandboxed frame,
-// src/components/app). Both are persisted bot output, so one that throws
-// while drawing falls back to its text, and a row whose payload never
-// arrived reads as its text. ChatView hands both kinds here.
 import { AppWindow } from "lucide-react";
 import type { Message } from "@/state/store";
 import { t } from "@/lib/i18n";
@@ -10,8 +5,6 @@ import { AppMessage } from "./app/AppMessage";
 import { MessageBoundary } from "./MessageBoundary";
 import { WidgetMessage } from "./widget/WidgetMessage";
 
-/** The kind ChatView draws a row as: a widget or app row without its
- * payload is plain text. */
 export function richRowKind(message: Message): Message["kind"] {
   if (message.kind === "widget" && !message.widget) return "text";
   if (message.kind === "app" && !message.app) return "text";
@@ -28,8 +21,6 @@ export function RichMessageRow({ botId, botName, threadId, message }: { botId: s
   );
 }
 
-/** The small line under the person's own words that did not come from
- * typing here: spoken on a Live call, or sent by an app in this chat. */
 export function UserLineNote({ message }: { message: Message }) {
   if (message.fromApp?.title) {
     const label = t("app.sentFrom", { title: message.fromApp.title });

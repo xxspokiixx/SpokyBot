@@ -1,12 +1,6 @@
-// Model-shaped chat-app inputs (docs/superpowers/specs/2026-10-14-chat-apps-design.md).
-// APP_SAMPLES are show_html calls the way a bot writes them; MCP_APP_SAMPLES
-// are what an MCP server's UI tool call looks like by the time it is stored
-// (tool definition, input, result, UI resource and its `_meta.ui`), modelled
-// on the official example servers. Tests, the phone fixtures
-// (scripts/gen-app-fixtures.ts) and the verification recipe read these, so
-// a change here is a change to what all three hosts are checked against.
+// show_html calls the way a bot writes them, and MCP app calls as stored, modelled on the official MCP
+// Apps example servers.
 
-/** A page that uses all three helper calls and the theme variables. */
 const COUNTER = `<!DOCTYPE html>
 <html><head><meta charset="utf-8"><style>
 body{margin:0;padding:16px;font-family:var(--font-sans);color:var(--color-text-primary);background:var(--color-background-primary)}
@@ -23,7 +17,6 @@ document.getElementById("tell").onclick = () => mausbot.send("I have had " + cou
 document.getElementById("docs").onclick = () => mausbot.open("https://www.fda.gov/consumers/consumer-updates/spilling-beans-how-much-caffeine-too-much");
 </script></body></html>`;
 
-/** A chart from a CDN library: the bot policy allows cdnjs. */
 const CHART = `<!DOCTYPE html>
 <html><head><meta charset="utf-8">
 <script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.min.js"></script>
@@ -36,7 +29,6 @@ new Chart(document.getElementById("chart"), {
 });
 </script></body></html>`;
 
-/** A formatted report: no script at all. */
 const REPORT = `<html><head><style>
 body{margin:0;padding:16px;font-family:var(--font-sans);color:var(--color-text-primary)}
 table{border-collapse:collapse;width:100%}td,th{padding:6px 8px;border-bottom:1px solid var(--color-border-primary);text-align:left}
@@ -45,10 +37,8 @@ table{border-collapse:collapse;width:100%}td,th{padding:6px 8px;border-bottom:1p
 <tr><td>Scout</td><td>38</td><td>$21.40</td></tr><tr><td>Kiwi</td><td>52</td><td>$6.35</td></tr>
 </table><p>Total: $27.75</p></body></html>`;
 
-/** A fragment: the server wraps it in a document. */
 const FRAGMENT = `<div style="padding:12px;font-family:var(--font-sans)"><b>Tip:</b> press <kbd>⌘K</kbd> to search every chat.</div>`;
 
-/** A small game with its own state. */
 const GAME = `<!DOCTYPE html><html><head><style>
 body{margin:0;padding:12px;font-family:var(--font-sans);color:var(--color-text-primary)}
 .grid{display:grid;grid-template-columns:repeat(3,64px);gap:6px}
@@ -86,10 +76,8 @@ export const APP_SAMPLES: Record<string, AppSample> = {
 };
 
 export interface McpAppSample {
-  /** The mount name in config.json mcpServers. */
   server: string;
   serverTitle: string;
-  /** A command server or a loopback URL: loopback http origins are kept. */
   loopback: boolean;
   tool: { name: string; title?: string; description?: string; inputSchema: object; annotations?: object; _meta: object };
   resourceUri: string;
@@ -117,7 +105,7 @@ export const MCP_APP_SAMPLES: Record<string, McpAppSample> = {
     toolInput: {},
     toolResult: { content: [{ type: "text", text: "2026-10-14T09:30:00.000Z" }], structuredContent: { time: "2026-10-14T09:30:00.000Z" } },
   },
-  // mcp.excalidraw.com: CSP domains, a permission request the host denies, a border.
+  // mcp.excalidraw.com
   excalidraw: {
     server: "excalidraw", serverTitle: "Excalidraw", loopback: false,
     tool: {

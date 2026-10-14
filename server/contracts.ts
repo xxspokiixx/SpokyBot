@@ -146,12 +146,8 @@ export interface SendTurnInput {
     dweb?: { url: string };
     /** The user's MCP servers, mounted without any pre-allow; a driver skips a kind it cannot speak. */
     custom?: Record<string, McpServerSpec>;
-    /** MCP Apps (server/chat-apps-mcp.ts): the `custom` servers this turn
-     * mounts through an observer, because their catalog says they have apps
-     * and their "Show its apps in chat" switch is on. `extension`: advertise
-     * the UI extension (off once the server refused it). Read through
-     * appMountFor (mcp-gate-config.ts); a server not named here is mounted
-     * exactly as before. */
+    /** The `custom` servers this turn mounts through an MCP Apps observer; `extension`: advertise the
+     * UI extension (false once the server refused it). A server not named here is mounted unchanged. */
     mcpApps?: Record<string, { extension: boolean }>;
   };
   cwd?: string;

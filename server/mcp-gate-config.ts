@@ -6,16 +6,10 @@ import type { SendTurnInput } from "./contracts.ts";
 import { GATE_APPS_ENV, REMOTE_MCP_APPS_ENV, type AppMount } from "./mcp-app-observer.ts";
 import { DEFAULT_RESULT_BUDGET } from "./mcp-trim.ts";
 import { REMOTE_MCP_CONFIG_ENV, remoteMcpSpec } from "./mcp-http.ts";
+import { SPAWNED_PROXIES } from "./proxy-paths.ts";
 
 export type { AppMount } from "./mcp-app-observer.ts";
 
-/** How one of the person's servers is mounted for MCP Apps
- * (docs/superpowers/specs/2026-10-14-chat-apps-design.md, Decision 7), the
- * one decision every driver shares: the observer settings when the server
- * is an app server for this turn (server/chat-apps-mcp.ts put it in
- * `integrations.mcpApps`, from the catalog and its "Show its apps in chat"
- * switch) and the turn can report (its agents capability), else undefined:
- * the server is mounted exactly as before. */
 export function appMountFor(name: string, turn: Pick<SendTurnInput, "integrations">): AppMount | undefined {
   const app = turn.integrations?.mcpApps?.[name];
   const agents = turn.integrations?.agents?.env;
@@ -23,7 +17,6 @@ export function appMountFor(name: string, turn: Pick<SendTurnInput, "integration
   if (!agents?.OMB_HARNESS_URL || !agents.OMB_COMMS_TOKEN) return undefined;
   return { server: name, harnessUrl: agents.OMB_HARNESS_URL, token: agents.OMB_COMMS_TOKEN, extension: app.extension };
 }
-import { SPAWNED_PROXIES } from "./proxy-paths.ts";
 
 /** `OMB_MCP_RESULT_BUDGET=0` mounts bot servers directly, for a bot that needs whole payloads. */
 export function resultBudget(env: NodeJS.ProcessEnv = process.env): number {
@@ -74,7 +67,6 @@ export interface StdioServerOptions {
   sourceEnv?: NodeJS.ProcessEnv | Record<string, string | undefined>;
   directory?: { name: string; toolScope?: ToolScope };
   configEnvName?: string;
-  /** MCP Apps: the proxy observes this URL server (appMountFor). */
   apps?: AppMount;
 }
 
@@ -109,13 +101,7 @@ export function mcpStdioServer(server: unknown, options: StdioServerOptions = {}
   };
 }
 
-/** With `apps` (appMountFor) a server is always mounted through an observer,
- * and only the innermost one observes: a command server through the gate,
- * with or without a budget or a selection; a URL server through the remote
- * proxy, inside the gate only when the gate is needed anyway (so the gate
- * never reports what the proxy beneath it already does).
- *
- * The upstream spec travels in the gate's env, inside the 0600 MCP config: credentials must never reach argv, where `ps` shows them. */
+/** The upstream spec travels in the gate's env, inside the 0600 MCP config: credentials must never reach argv, where `ps` shows them. */
 export function gateServer(input: {
   name: string;
   server: unknown;
@@ -127,7 +113,6 @@ export function gateServer(input: {
   configEnvName?: string;
   directory?: boolean;
   sourceEnv?: NodeJS.ProcessEnv | Record<string, string | undefined>;
-  /** MCP Apps: observe this server (appMountFor). */
   apps?: AppMount;
 }): { command: string; args: string[]; env: Record<string, string> } | null {
   const { name, server, budget, apps } = input;
@@ -146,7 +131,6 @@ export function gateServer(input: {
   };
   if (!scoped && remote) {
     if (!apps) return null;
-    // An observed URL server needs no gate: the proxy is the observer.
     const proxy = mcpStdioServer(server, proxyOptions);
     return proxy ? { command: proxy.command, args: proxy.args ?? [], env: proxy.env ?? {} } : null;
   }

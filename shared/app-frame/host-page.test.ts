@@ -1,7 +1,3 @@
-// The phones' host page (host-page.ts, bundled into app-host.html): the
-// committed bundle is what scripts/build-app-host.ts builds, the frame it
-// holds is the locked sandbox of rule 1, and the native ↔ page protocol
-// carries the bridge's calls both ways (iOS objects, Android JSON).
 import { readFileSync } from "node:fs";
 import { Window } from "happy-dom";
 import { afterEach, describe, expect, it } from "vitest";

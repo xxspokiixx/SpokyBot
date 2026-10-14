@@ -257,7 +257,6 @@ jobs:
       - name: Verify app permissions and guarded display capture
         run: node scripts/smoke-app-permissions.mjs
       - name: Verify chat app frames stay sealed
-        # docs/superpowers/specs/2026-10-14-chat-apps-design.md, security rules 1-6 and 8
         run: node scripts/smoke-app-frames.mjs --engagement
       - name: Verify paired phone authorization against packaged harness
         # Forks dist-server/index.js, built by the packaged server step.

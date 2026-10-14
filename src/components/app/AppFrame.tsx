@@ -1,18 +1,3 @@
-// One running app frame in a chat row: the sandboxed srcdoc iframe and the
-// shared bridge router (app-frame-host.ts), with the desktop's answers to
-// what a View asks for (docs/superpowers/specs/2026-10-14-chat-apps-design.md,
-// "Desktop"):
-//
-//   tools/*, resources/*   the rpc route; a 409 asks the person in the Allow
-//                          bar (only while they are using the app), a 401
-//                          says sign in again, a 410 says the server is gone
-//   ui/message             `appMessage` on the send route, after the bot's
-//                          pending settings are saved, as a typed send is
-//   ui/open-link           the system browser (the preload's openExternal)
-//   ui/update-model-context  the context route
-//
-// The frame is created when this mounts and its document is set verbatim;
-// a new document (update_html, Reload) is a new mount.
 import { useLayoutEffect, useRef, type MutableRefObject } from "react";
 import { appVersion, openExternalLink } from "@/lib/app-links";
 import { useStore } from "@/state/store";
@@ -24,11 +9,9 @@ import { appHostContext, appMaxHeight, appThemeContext } from "./app-host-contex
 import type { AllowDecision } from "./AppChrome";
 
 export interface AppFrameHandle {
-  /** Ask the View to tear down (at most a second), then remove the frame. */
   teardown(): Promise<void>;
 }
 
-/** Something the row should say under the frame. */
 export type AppFrameProblem =
   | { kind: "sign-in"; server: string }
   | { kind: "offline" }
@@ -38,16 +21,13 @@ export interface AppFrameProps {
   doc: AppDocument;
   botId: string;
   threadId: string;
-  /** The frame's accessible name: the app's title. */
   title: string;
   height: number;
-  /** Filled while the frame runs, for the pool and Reload. */
   handle: MutableRefObject<AppFrameHandle | null>;
   onHeight(height: number): void;
-  /** The Allow bar: resolves with the person's answer (deny after 2 min). */
   askAllow(tool: string): Promise<AllowDecision>;
   onProblem(problem: AppFrameProblem | null): void;
-  /** The View asked to be closed (ui/notifications/request-teardown). */
+  /** ui/notifications/request-teardown */
   onTeardownRequested(): void;
 }
 
@@ -113,10 +93,8 @@ export function AppFrame(props: AppFrameProps) {
     });
     latest.current.handle.current = { teardown: () => host.teardown() };
 
-    // Skin changes: the theme and the variables follow.
     const skin = typeof MutationObserver === "undefined" ? null : new MutationObserver(() => host.contextChanged(appThemeContext()));
     skin?.observe(document.documentElement, { attributes: true, attributeFilter: ["data-skin"] });
-    // Width and window height: the container's size follows.
     let width = Math.round(container.clientWidth);
     let timer: ReturnType<typeof setTimeout> | undefined;
     const measure = () => {
@@ -139,8 +117,7 @@ export function AppFrame(props: AppFrameProps) {
       window.removeEventListener("resize", later);
       if (timer !== undefined) clearTimeout(timer);
       if (latest.current.handle.current) latest.current.handle.current = null;
-      // The row is going: the frame waits out the View's teardown somewhere
-      // hidden (the pool, Reload and update_html wait on teardown() first).
+      // The row is going: the frame waits out the View's teardown somewhere hidden.
       host.retire();
     };
     // A new document is a new frame; nothing else remounts it.

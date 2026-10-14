@@ -102,15 +102,11 @@ export interface AgentCardArgs {
   input: unknown;
   /** The row a widget call wrote: the calling session made it, so it is never offered back to it as unseen. */
   authored?(messageId: string): void;
-  /** The chat-app services (server/chat-apps.ts createChatApps). */
   apps?: Pick<ChatApps, "createAppCard" | "recordMcpAppCall">;
 }
 
-/** An observer's report of an MCP app call (server/mcp-app-observer.ts). */
 export type McpAppCardInput = { tool: "mcp_app" } & Record<string, unknown>;
 
-/** `tool: "mcp_app"` reads the app's page from its server, so it answers
- * later; every other tool answers at once. */
 export function createAgentCard(args: AgentCardArgs & { input: McpAppCardInput }): Promise<AgentCardResult>;
 export function createAgentCard(args: AgentCardArgs): AgentCardResult;
 export function createAgentCard(args: AgentCardArgs): AgentCardResult | Promise<AgentCardResult> {

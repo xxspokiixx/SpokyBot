@@ -1,12 +1,5 @@
 // The upstream handshake is OMB's own, never the engine's: an engine's client adds capability fields a strict server
 // refuses. stdout carries only protocol frames.
-//
-// MCP Apps (docs/superpowers/specs/2026-10-14-chat-apps-design.md): every
-// proxy drops the tools only an app's view may call from what the engine is
-// listed (directory included) and refuses the engine's calls to them. With
-// OMB_REMOTE_MCP_APPS the proxy also advertises the UI extension (connecting
-// without it if the server refuses it) and reports each call of a tool with
-// a UI to the harness (mcp-app-observer.ts).
 import { createInterface } from "node:readline";
 import { redactSecretsInText } from "../shared/redact.ts";
 import { allowsTool, parseToolScope, type ToolScope } from "../shared/tool-scope.ts";
@@ -106,16 +99,13 @@ function directorySettings(raw: string | undefined): { server: string; scope: To
   return fail("invalid tool directory configuration");
 }
 const directory = directorySettings(settings.OMB_REMOTE_MCP_DIRECTORY);
-/** MCP Apps: this proxy reports its server's UI tool calls. */
 const observer = (() => {
   try {
     const mount = parseAppMount(settings[REMOTE_MCP_APPS_ENV]);
     return mount ? new AppObserver(mount, { log: (line) => process.stderr.write(`mcp-remote-proxy: ${line}\n`) }) : undefined;
   } catch { return fail("invalid MCP apps configuration"); }
 })();
-/** The upstream handshake: OMB's own, with the UI extension when observing. */
 const HANDSHAKE = observer?.mount.extension ? { extensions: { [APP_EXTENSION_KEY]: UI_EXTENSION } } : {};
-/** Tools only an app's view may call, from the last catalog read upstream. */
 const appOnly = new Set<string>();
 
 const REMOTE_ERROR_CHARS = 1_000;
@@ -174,9 +164,7 @@ const tasks = new Set<Promise<void>>();
 let initialized = false;
 let closing = false;
 
-/** One upstream request, as the engine's: a catalog page is observed and
- * loses its app-only tools; a call to an app-only tool is refused, and a
- * call's result is observed before it is relayed. */
+/** A tool only an MCP app's view may call is never listed to the engine, and a call to it is refused. */
 async function upstream(method: string, params: unknown, signal: AbortSignal): Promise<unknown> {
   if (method === "initialize") {
     const result = await client.initialize("OpenMausBot tool proxy", signal, HANDSHAKE);

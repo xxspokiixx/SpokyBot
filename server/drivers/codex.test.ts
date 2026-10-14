@@ -1141,10 +1141,6 @@ process.stdout.write(JSON.stringify({jsonrpc:'2.0',id:m.id,result})+'\\n');});`)
     expect(thread.params.config["shell_environment_policy.exclude"]).toEqual(["OMB_REMOTE_MCP_CONFIG_*", "ELECTRON_RUN_AS_NODE"]);
   });
 
-  // MCP Apps (docs/superpowers/specs/2026-10-14-chat-apps-design.md,
-  // Decision 7): an app server is mounted through the observer that sees its
-  // frames, a command one through the gate even with no selection; a server
-  // without apps is mounted exactly as before.
   it("mounts app servers through their observers and leaves the others as they were", async () => {
     await create();
     const dump = join(scratch, "app-mcp.json");
@@ -1164,7 +1160,6 @@ process.stdout.write(JSON.stringify({jsonrpc:'2.0',id:m.id,result})+'\\n');});`)
     expect(gate).not.toHaveProperty("OMB_GATE_TOOL_SCOPE");
     expect(argv).not.toContain("board-secret");
     expect(JSON.parse(JSON.parse(seen.env[record("draw")]).OMB_REMOTE_MCP_APPS)).toEqual({ server: "draw", ...mount, extension: false });
-    // no apps: mounted directly, as before
     expect(argv).toContain('mcp_servers.notes.command="notes-mcp"');
     expect(seen.argv).toContain("features.shell_snapshot=false");
     const thread = seen.calls.find((call: { method: string }) => call.method === "thread/start");

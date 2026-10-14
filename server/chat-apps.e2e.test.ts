@@ -1,9 +1,3 @@
-// A bot's page through a real server on an isolated fixture
-// (docs/superpowers/specs/2026-10-14-chat-apps-design.md, S2): a turn's own
-// capability shows and replaces a page on the internal card route; a client
-// fetches its document; the page's context and its message reach the engine
-// with the person's next send, the message as a reply that says it came from
-// the app; and a bot page has no server to call.
 import { mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -42,7 +36,6 @@ it("shows, replaces and serves a bot's page, and carries its context and its mes
     const transcript = async (): Promise<any[]> => (await api("GET", `/api/threads/${bot.threadId}/messages`)).messages;
     const card = (body: unknown, expected: number, token: string) => api("POST", "/api/internal/options-card", body, expected, token);
 
-    // ── a turn shows a page, then replaces it ──────────────────────────
     await api("POST", `/api/bots/${bot.id}/messages`, { threadId: bot.threadId, text: "Count my coffees", sendId: "apps-e2e-send-000000001" }, 202);
     let token = "";
     await expect.poll(() => {
@@ -62,15 +55,12 @@ it("shows, replaces and serves a bot's page, and carries its context and its mes
     expect(row).toMatchObject({ role: "bot", kind: "app", text: expect.stringMatching(/^\[App\] Coffee\n/), app: { v: 1, source: "html", title: "Coffee", rev: 1, border: true, height: 200 } });
     expect(row).not.toHaveProperty("from");
 
-    // ── a client mounts it ─────────────────────────────────────────────
     const doc = await api("GET", `/api/threads/${bot.threadId}/messages/${shown.messageId}/app`);
     expect(doc).toMatchObject({ v: 1, messageId: shown.messageId, rev: 1, csp: BOT_HTML_CSP, can: { serverTools: false, message: true } });
     expect(String(doc.srcdoc).startsWith(`${CSP_META_PREFIX}${BOT_HTML_CSP}">`)).toBe(true);
     expect(String(doc.srcdoc)).toContain("Cups today");
-    // A page has no server to call.
     expect(await api("POST", `/api/bots/${bot.id}/apps/${shown.messageId}/rpc`, { threadId: bot.threadId, method: "tools/list" }, 404)).toEqual({ error: "That app has no server to call." });
 
-    // ── the page says what the person sees, then speaks for them ───────
     expect(await api("POST", `/api/bots/${bot.id}/apps/${shown.messageId}/context`, { threadId: bot.threadId, content: [{ type: "text", text: "The counter shows 3 cups." }] })).toEqual({ ok: true });
     const sent = await api("POST", `/api/bots/${bot.id}/messages`, {
       threadId: bot.threadId, sendId: "apps-e2e-send-000000002", appMessage: { messageId: shown.messageId, text: "I have had 3 cups of coffee today." },

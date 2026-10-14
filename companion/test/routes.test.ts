@@ -78,7 +78,6 @@ describe("what the app may do", () => {
     ["DELETE", "/api/groups/room-1/tasks/th_1"],
     ["GET", "/api/threads/th_1/messages"],
     ["GET", "/api/threads/th_1/messages/msg_2/image"],
-    // Chat apps: an app row's document, its own server calls and its context.
     ["GET", "/api/threads/th_1/messages/msg_2/app"],
     ["POST", "/api/bots/bot_123/apps/msg_2/rpc"],
     ["POST", "/api/bots/bot_123/apps/msg_2/context"],
@@ -287,8 +286,6 @@ describe("what it may not", () => {
     expect(allowed("POST", "/api/live/call/end/extra")).toBe(false);
   });
 
-  // Chat apps: the document is read, and an app's own two routes are posted
-  // to, nothing else under them, and no other verb.
   it("allows an app's document, rpc and context and nothing else of apps", () => {
     for (const [method, path] of [
       ["POST", "/api/threads/th_1/messages/msg_2/app"],

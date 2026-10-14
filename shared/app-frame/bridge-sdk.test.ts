@@ -1,9 +1,6 @@
-// Compatibility: the official MCP Apps SDK View (`App` from
-// @modelcontextprotocol/ext-apps, a devDependency used only here) talks to
-// our hand-written bridge router unmodified, over a fake window pair that
-// behaves like an iframe and its parent: postMessage delivers a structured
-// clone asynchronously, with `source` set to the sending window
-// (docs/superpowers/specs/2026-10-14-chat-apps-design.md, Decision 3 and S1).
+// The official MCP Apps SDK View (`App` from @modelcontextprotocol/ext-apps) against our bridge router, over a
+// fake window pair that behaves like an iframe and its parent: postMessage delivers a structured clone
+// asynchronously, with `source` set to the sending window.
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import { App, PostMessageTransport } from "@modelcontextprotocol/ext-apps/app-with-deps";
 

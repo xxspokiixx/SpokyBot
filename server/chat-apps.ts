@@ -1,21 +1,3 @@
-// Chat apps on the server (docs/superpowers/specs/2026-10-14-chat-apps-design.md):
-// a bot's own page (`show_html`, `update_html`), the document a client
-// fetches to mount a frame, the model context an app sets, and the message
-// an app sends as the person.
-//
-// - createAppCard: the two bot tools, reached through the internal card
-//   route (createAgentCard in chat-widgets.ts hands `tool: show_html |
-//   update_html` here). The page is checked, scrubbed of secrets, stored
-//   (server/app-docs.ts) and posted as a row of kind "app".
-// - appDocument: GET /api/threads/:threadId/messages/:messageId/app.
-// - setAppContext / appContextBlock / withAppContext: ui/update-model-context
-//   is kept on the row and handed to the model once, in front of the
-//   person's next message in that thread.
-// - prepareAppMessage / AppMessageRate: ui/message, as `appMessage` on the
-//   existing send route (server/routes/bot-messages.ts).
-//
-// MCP apps (`tool: mcp_app`, recordMcpAppCall and the rpc route's
-// `mcpRpc`) are built in server/chat-apps-mcp.ts on top of this module.
 import {
   APP_LIMITS, appBlockedText, htmlFallbackText, oneLine, parseShowHtmlInput, parseUpdateHtmlInput,
   type AppCan, type AppDocument, type AppPayload,
@@ -30,10 +12,8 @@ import type { Message, StoreChange } from "./store.ts";
 
 const ROOM_REFUSAL = "Pages are not available in rooms yet. Answer in text.";
 const NO_SUCH_PAGE = "No page with that id in this conversation.";
-/** The bot's own words in update_html's answer when the row is an MCP app. */
 const NOT_A_PAGE = "That app came from an MCP server, not from show_html; it cannot be replaced. Show a new page instead.";
 
-/** What this module needs of the store (server/store.ts Store satisfies it). */
 export interface ChatAppsStore extends AgentCardStore {
   onChange?(listener: (change: StoreChange) => void): () => void;
 }
@@ -42,34 +22,29 @@ function isRecord(value: unknown): value is Record<string, unknown> {
   return Boolean(value) && typeof value === "object" && !Array.isArray(value);
 }
 
-/** The app row `messageId` of this thread, or undefined. */
 export function appRow(store: Pick<AgentCardStore, "messagesFor">, threadId: string, messageId: string): (Message & { app: AppPayload }) | undefined {
   const row = store.messagesFor(threadId).find((message) => message.id === messageId);
   return row && row.kind === "app" && isRecord(row.app) ? row as Message & { app: AppPayload } : undefined;
 }
 
-/** How the model and the context block name where an app came from. */
 export function appOrigin(payload: AppPayload): string {
   if (payload.source === "mcp" && payload.mcp) return `${oneLine(payload.mcp.serverTitle || payload.mcp.server)} · ${oneLine(payload.mcp.tool)}`;
   return "a page you made with show_html";
 }
 
-/** A page as stored: scrubbed of secrets. `masked` says the scrub changed it. */
 function scrubbed(html: string, title: string): { html: string; title: string; masked: boolean } {
   const cleanHtml = redactSecretsInText(html);
   const cleanTitle = oneLine(redactSecretsInText(title)).slice(0, APP_LIMITS.title) || "Page";
   return { html: cleanHtml, title: cleanTitle, masked: cleanHtml !== html || cleanTitle !== title };
 }
 
-/** show_html and update_html (spec, "Part 1: bot HTML"). The route has
- * already checked that the conversation is the calling bot's own. */
+/** The route has already checked that the conversation is the calling bot's own. */
 export function createAppCard(args: {
   store: AgentCardStore;
   docs: AppDocs;
   bot: { id: string; name: string };
   threadId: string;
   input: Record<string, unknown>;
-  /** Told the row this call wrote (server/delta-context.ts Handoffs.authored). */
   authored?(messageId: string): void;
 }): AgentCardResult {
   const { store, docs, bot, threadId, input } = args;
@@ -92,8 +67,7 @@ export function createAppCard(args: {
       network: { connect: [...BOT_HTML_NETWORK.connect], resources: [...BOT_HTML_NETWORK.resources] },
       ...(stored.ok ? {} : { blocked: "too-large" as const }),
     };
-    // No `from`: in a direct thread a bot-authored row that carries one is
-    // replayed as another bot's line (as for widgets).
+    // No `from`: in a direct thread a bot-authored row carrying one is replayed as another bot's line.
     const message = store.appendMessage(threadId, { role: "bot", kind: "app", text: fallback, app: payload });
     args.authored?.(message.id);
     return { ok: true, messageId: message.id, ...(page.masked ? { masked: true as const } : {}) };
@@ -122,19 +96,13 @@ export function createAppCard(args: {
   return { ok: true, messageId: patched.id, ...(page.masked ? { masked: true as const } : {}) };
 }
 
-/** What an MCP app may do right now and why not, decided by the MCP side
- * (server/chat-apps-mcp.ts): signed in, still configured, apps on. */
 export type McpAppAccess = (row: Message & { app: AppPayload }, threadId: string) => { can: AppCan; blocked?: AppDocument["blocked"] };
 
-/** Until the MCP side says otherwise, an MCP app renders read-only. */
 const MCP_READ_ONLY: McpAppAccess = (row) => ({
   can: { serverTools: false, serverResources: false, message: true, openLinks: true, modelContext: true },
   blocked: { reason: "server-removed", text: appBlockedText("server-removed", row.app.mcp?.serverTitle ?? row.app.mcp?.server) },
 });
 
-/** The AppDocument of an app row, or null when the row is not an app row of
- * this thread or its document is not stored (a `too-large` row, a swept
- * file, a restored backup without its documents). */
 export function appDocument(args: {
   store: Pick<AgentCardStore, "messagesFor">;
   docs: AppDocs;
@@ -169,8 +137,6 @@ function clip(text: string, limit: number): string {
   return text.length <= limit ? text : `${text.slice(0, limit - 1).trimEnd()}…`;
 }
 
-/** The text a ui/update-model-context stores: its text blocks joined, then
- * its structuredContent as JSON, clipped to 4,000 characters. */
 export function appContextText(content: unknown, structuredContent: unknown): string {
   const texts = Array.isArray(content)
     ? content.flatMap((block) => (isRecord(block) && block.type === "text" && typeof block.text === "string" ? [block.text] : []))
@@ -182,8 +148,6 @@ export function appContextText(content: unknown, structuredContent: unknown): st
   return clip([texts.join("\n").trim(), structured].filter(Boolean).join("\n"), APP_LIMITS.contextText);
 }
 
-/** POST /api/bots/:botId/apps/:messageId/context: the latest context of one
- * app row, overwriting the last. An update with no text clears it. */
 export function setAppContext(
   store: Pick<AgentCardStore, "messagesFor" | "patchMessage">,
   args: { threadId: string; messageId: string; content?: unknown; structuredContent?: unknown; now?: number },
@@ -210,10 +174,8 @@ function inContextFence(text: string): string {
   return out;
 }
 
-/** The context blocks for the person's next message in a thread: one per
- * app row whose latest context the model has not been handed, oldest
- * first, ending in a blank line. `deliver()` marks them handed once the
- * message is accepted; a newer update that arrived meanwhile stays. */
+/** `deliver()` marks the blocks handed once the message is accepted; a newer update that arrived meanwhile
+ * stays undelivered. */
 export function appContextBlock(
   store: Pick<AgentCardStore, "messagesFor" | "patchMessage">,
   threadId: string,
@@ -241,7 +203,6 @@ export function appContextBlock(
   };
 }
 
-/** `text` with the thread's undelivered app context in front of it. */
 export function withAppContext(store: Pick<AgentCardStore, "messagesFor" | "patchMessage">, text: string, threadId: string): { text: string; deliver(): void } {
   const context = appContextBlock(store, threadId);
   return context ? { text: `${context.block}${text}`, deliver: context.deliver } : { text, deliver: () => {} };
@@ -253,8 +214,6 @@ export type AppMessage =
 
 const BAD_APP_MESSAGE = "appMessage must be {messageId, text}, with text of 1 to 4,000 characters.";
 
-/** An app's ui/message on the send route (`appMessage`): the row must be an
- * app row of this thread and the text 1 to 4,000 characters. Writes nothing. */
 export function prepareAppMessage(store: Pick<AgentCardStore, "messagesFor">, threadId: string, appMessage: unknown): AppMessage {
   if (!isRecord(appMessage) || typeof appMessage.messageId !== "string" || !/^[\w-]{1,128}$/.test(appMessage.messageId) || typeof appMessage.text !== "string") {
     return { ok: false, status: 400, error: BAD_APP_MESSAGE };
@@ -266,8 +225,6 @@ export function prepareAppMessage(store: Pick<AgentCardStore, "messagesFor">, th
   return { ok: true, messageId: row.id, text, title: oneLine(row.app.title), origin: appOrigin(row.app) };
 }
 
-/** Per app row, at most 20 messages an hour (the bridge allows ten per ten
- * minutes; this is the backstop). A retry of an accepted send is free. */
 export class AppMessageRate {
   private readonly sent = new Map<string, Array<{ at: number; sendId?: string }>>();
   private readonly limit: number;
@@ -278,8 +235,7 @@ export class AppMessageRate {
     this.windowMs = windowMs;
   }
 
-  /** Room for one more from this row: a release to call if the send is
-   * refused, or null when the row is over its rate. */
+  /** `release()` when the send is refused; null when the row is over its rate. */
   reserve(key: string, sendId: string | undefined, now = Date.now()): { release(): void } | null {
     const recent = (this.sent.get(key) ?? []).filter((entry) => now - entry.at < this.windowMs);
     if (sendId && recent.some((entry) => entry.sendId === sendId)) {
@@ -303,8 +259,6 @@ export class AppMessageRate {
   }
 }
 
-/** A sliding-window limit per key (an app row): the server's backstop for
- * the context and rpc routes. `take` is false when the key is over. */
 export function rowRate(limit: number, windowMs: number): { take(key: string, now?: number): boolean } {
   const stamps = new Map<string, number[]>();
   return {
@@ -316,39 +270,29 @@ export function rowRate(limit: number, windowMs: number): { take(key: string, no
       }
       recent.push(now);
       stamps.set(key, recent);
-      // Keep the map from growing without bound: forget keys gone quiet.
       if (stamps.size > 2_000) for (const [other, list] of stamps) if (!list.some((at) => now - at < windowMs)) stamps.delete(other);
       return true;
     },
   };
 }
 
-/** The chat-app services the server wires once (server/index.ts): the
- * document store, the bot tools, the document route, and the sweep. */
 export interface ChatApps {
   readonly docs: AppDocs;
   createAppCard(args: { bot: { id: string; name: string }; threadId: string; input: Record<string, unknown>; authored?(messageId: string): void }): AgentCardResult;
   appDocument(threadId: string, messageId: string, approval: "full" | "confirm"): AppDocument | null;
   setAppContext(args: { threadId: string; messageId: string; content?: unknown; structuredContent?: unknown }): AppRouteResult;
   withAppContext(text: string, threadId: string): { text: string; deliver(): void };
-  /** Set by the MCP side (S4) to say what an MCP app may do right now. */
   mcpAccess?: McpAppAccess;
-  /** Set by the MCP side (server/chat-apps-mcp.ts): an observer's report
-   * (`tool: "mcp_app"` on the internal card route) becomes an app row. */
   recordMcpAppCall?(args: { bot: { id: string; name: string }; threadId: string; input: Record<string, unknown>; authored?(messageId: string): void }): Promise<AgentCardResult>;
-  /** Remove unreferenced documents now. */
   sweep(): number;
   close(): void;
 }
 
 export function createChatApps(deps: {
   store: ChatAppsStore;
-  /** DATA_DIR: documents live in <dataDir>/app-docs. */
   dataDir: string;
   maxBytes?: number;
-  /** Every doc id a row names; default: the transcript database. */
   references?(): string[];
-  /** Sweep at startup and after a thread is deleted (default true). */
   sweeps?: boolean;
 }): ChatApps {
   const docs = new AppDocs(`${deps.dataDir}/app-docs`, deps.maxBytes ? { maxBytes: deps.maxBytes } : {});
@@ -359,7 +303,6 @@ export function createChatApps(deps: {
       return 0;
     }
   };
-  // One sweep at a time, at the earliest time anything asked for one.
   let pending: ReturnType<typeof setTimeout> | null = null;
   let pendingAt = Infinity;
   const later = (ms: number) => {

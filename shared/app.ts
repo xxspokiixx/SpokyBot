@@ -1,31 +1,22 @@
-// Chat apps (docs/superpowers/specs/2026-10-14-chat-apps-design.md): a page
-// of HTML that runs in a locked, sandboxed frame inside a chat row and talks
-// to MausBot over the MCP Apps bridge (io.modelcontextprotocol/ui, SEP-1865).
-// Two sources share this one wire kind, `app`: bot HTML (`show_html`) and an
-// MCP server's UI (`_meta.ui.resourceUri`).
-//
-// This file is the wire and the model-input rules. The frame document (CSP
-// and srcdoc) is built in shared/app-frame/*, the bridge router in
-// shared/app-frame/bridge.ts, and documents are stored by server/app-docs.ts.
+// Chat apps: HTML in a sandboxed frame inside a chat row, speaking the MCP Apps bridge
+// (io.modelcontextprotocol/ui, SEP-1865). Bot HTML (show_html) and an MCP server's UI
+// (_meta.ui.resourceUri) share the one wire kind, `app`.
 
 export const APP_MIME = "text/html;profile=mcp-app";
 export const APP_PROTOCOL_VERSION = "2026-01-26";
-/** The MCP client capability key OMB advertises for MCP Apps. */
 export const APP_EXTENSION_KEY = "io.modelcontextprotocol/ui";
 
-/** Model input past these is refused with one sentence naming the field. */
 export const APP_LIMITS = {
   /** show_html / update_html `html`, UTF-8 bytes after trimming. */
   htmlBytes: 256 * 1024,
   title: 80,
   fallback: 1_500,
-  /** Visible page text in a written fallback, after `[App] <title>`. */
   fallbackExcerpt: 600,
   heightMin: 80,
   heightMax: 720,
   /** ui/message text, and the appMessage on the send route. */
   messageText: 4_000,
-  /** ui/update-model-context, stored per row and clipped. */
+  /** ui/update-model-context text, stored per row. */
   contextText: 4_000,
   /** An MCP server's UI resource, decoded. */
   mcpHtmlBytes: 2 * 1024 * 1024,
@@ -33,31 +24,30 @@ export const APP_LIMITS = {
   rpcArgumentsBytes: 64 * 1024,
   /** resources/read through the rpc route. */
   rpcResourceBytes: 8 * 1024 * 1024,
-  /** appMessage sends per app row per hour (the server's backstop). */
+  /** appMessage sends per app row per hour. */
   messagesPerHour: 20,
-  /** rpc calls per app row per minute (the server's backstop). */
+  /** rpc calls per app row per minute. */
   rpcPerMinute: 60,
 } as const;
 
 export type AppSource = "html" | "mcp";
 
-/** Origins a frame may reach, after the host's filter. `refused` lists what
- * a server asked for and the filter dropped, for the info popover. */
+/** Origins a frame may reach, after the host's filter. `refused`: what a server asked for and the
+ * filter dropped. */
 export interface AppNetwork {
   connect: string[];
   resources: string[];
   refused?: string[];
 }
 
-/** The latest ui/update-model-context of one app row, delivered with the
- * person's next message in its thread (server/chat-apps.ts withAppContext). */
+/** The latest ui/update-model-context of one app row, delivered with the person's next message in
+ * its thread. */
 export interface AppContextState {
   text: string;
   at: number;
   delivered: boolean;
 }
 
-/** The MCP side of an app row. */
 export interface AppMcpRef {
   /** the mount name in config.json mcpServers */
   server: string;
@@ -69,17 +59,15 @@ export interface AppMcpRef {
   isError?: boolean;
 }
 
-/** An app row's payload (WireMessage.app). Never carries the HTML: a client
- * fetches the AppDocument when it mounts the frame. */
+/** Never carries the HTML: a client fetches the AppDocument when it mounts the frame. */
 export interface AppPayload {
   v: 1;
   source: AppSource;
   /** Header title, one line, ≤ 80 chars. Bot HTML: the bot's title. MCP:
    * the tool's title, else its name. */
   title: string;
-  /** Content id of the stored document (server/app-docs.ts). A new value
-   * means the frame must reload. Empty when nothing could be stored
-   * (`blocked`): the row then shows only its text. */
+  /** Content id of the stored document; a new value means the frame must reload. Empty when nothing
+   * could be stored (`blocked`): the row then shows only its text. */
   doc: string;
   /** 0, bumped by update_html. */
   rev: number;
@@ -102,15 +90,14 @@ export interface AppPayload {
   blocked?: AppBlockedReason;
 }
 
-/** WireMessage.fromApp: a user row an app's ui/message sent. */
+/** A user row an app's ui/message sent. */
 export interface AppFromRef {
   messageId: string;
   title: string;
 }
 
-/** Why an app's server calls are off, or why its document is missing.
- * `unavailable` (the UI resource could not be read when the row was
- * written: offline, wrong mime type) is an addition to the spec's list. */
+/** Why an app's server calls are off, or why its document is missing. `unavailable`: the UI resource
+ * could not be read when the row was written (offline, wrong mime type). */
 export type AppBlockedReason = "signed-out" | "server-removed" | "server-disabled" | "apps-off" | "too-large" | "unavailable";
 
 /** What the frame may do right now; hostCapabilities is built from this. */
@@ -138,10 +125,8 @@ export interface AppToolResult {
   isError?: boolean;
 }
 
-/** What a client fetches to mount a frame
- * (GET /api/threads/:threadId/messages/:messageId/app). Never part of a
- * thread load. A document with `tool` is an MCP app; one without is bot
- * HTML (shared/app-frame/bridge.ts keys the method table on that). */
+/** What a client fetches to mount a frame (GET /api/threads/:threadId/messages/:messageId/app), never
+ * part of a thread load. A document with `tool` is an MCP app; one without is bot HTML. */
 export interface AppDocument {
   v: 1;
   messageId: string;
@@ -163,8 +148,7 @@ export interface AppDocument {
   approval: "full" | "confirm";
 }
 
-/** show_html's input, once checked. `html` is the page as it will be stored
- * (wrapped when it was a fragment), before the server scrubs secrets. */
+/** `html` is wrapped when it was a fragment, and not yet scrubbed of secrets. */
 export interface ShowHtmlInput {
   html: string;
   title: string;
@@ -184,7 +168,6 @@ function isRecord(value: unknown): value is Record<string, unknown> {
   return Boolean(value) && typeof value === "object" && !Array.isArray(value);
 }
 
-/** UTF-8 length of a string without allocating its bytes. */
 export function utf8Bytes(text: string): number {
   let bytes = 0;
   for (let index = 0; index < text.length; index += 1) {
@@ -199,13 +182,11 @@ export function utf8Bytes(text: string): number {
   return bytes;
 }
 
-/** One line: runs of whitespace, line breaks included, become one space. */
 export function oneLine(text: string): string {
   return text.replace(/\s+/g, " ").trim();
 }
 
-/** A page with neither `<html` nor `<body` is a fragment: it is wrapped in a
- * minimal document so the frame gets a head the CSP can lead. */
+/** A fragment gets a minimal document, so the CSP meta can lead its head. */
 export function wrapHtmlFragment(html: string): string {
   if (/<(?:html|body)[\s>/]/i.test(html) || /<(?:html|body)$/i.test(html)) return html;
   return `<!DOCTYPE html><html><head><meta charset="utf-8"></head><body>${html}</body></html>`;
@@ -229,7 +210,6 @@ function checkTitle(value: unknown): AppInputResult<string> {
   return { ok: true, value: title };
 }
 
-/** show_html({ html, title, height?, fallback_text? }) as the model sent it. */
 export function parseShowHtmlInput(input: unknown): AppInputResult<ShowHtmlInput> {
   if (!isRecord(input)) return { ok: false, error: "show_html needs {html, title, height?, fallback_text?}." };
   const html = checkHtml(input.html);
@@ -250,7 +230,6 @@ export function parseShowHtmlInput(input: unknown): AppInputResult<ShowHtmlInput
   return { ok: true, value: out };
 }
 
-/** update_html({ app_id, html, title? }) as the model sent it. */
 export function parseUpdateHtmlInput(input: unknown): AppInputResult<UpdateHtmlInput> {
   if (!isRecord(input)) return { ok: false, error: "update_html needs {app_id, html, title?}." };
   if (typeof input.app_id !== "string" || !/^[\w-]{1,128}$/.test(input.app_id.trim())) {
@@ -269,9 +248,7 @@ export function parseUpdateHtmlInput(input: unknown): AppInputResult<UpdateHtmlI
 
 const ENTITIES: Record<string, string> = { amp: "&", lt: "<", gt: ">", quot: "\"", apos: "'", nbsp: " ", "#39": "'" };
 
-/** The words a person would read on the page: script, style, comments and
- * tags gone, a few entities decoded, whitespace collapsed. A preview, not a
- * parser: it only ever feeds the row's readable fallback. */
+/** A preview, not a parser or a sanitizer: it only ever feeds the row's readable fallback. */
 export function htmlVisibleText(html: string): string {
   return html
     .replace(/<!--[\s\S]*?(?:-->|$)/g, " ")
@@ -291,9 +268,6 @@ function clip(text: string, limit: number): string {
   return text.length <= limit ? text : `${text.slice(0, limit - 1).trimEnd()}…`;
 }
 
-/** An app row's readable fallback (its `text`): `fallback_text` when the bot
- * gave one, else `[App] <title>` and up to 600 characters of the page's
- * visible text. Previews, notifications, channels and replayed history read it. */
 export function htmlFallbackText(title: string, html: string, fallbackText?: string): string {
   const given = fallbackText?.trim();
   if (given) return clip(given, APP_LIMITS.fallback);
@@ -301,8 +275,6 @@ export function htmlFallbackText(title: string, html: string, fallbackText?: str
   return clip(visible ? `[App] ${title}\n${visible}` : `[App] ${title}`, APP_LIMITS.fallback);
 }
 
-/** What an MCP app row reads as: `<serverTitle> · <tool title>` and up to
- * 600 characters of the result's text content. */
 export function mcpAppFallbackText(serverTitle: string, toolTitle: string, result: { content?: unknown } | undefined): string {
   const texts = Array.isArray(result?.content)
     ? result.content.flatMap((block) => (isRecord(block) && block.type === "text" && typeof block.text === "string" ? [block.text] : []))
@@ -312,7 +284,6 @@ export function mcpAppFallbackText(serverTitle: string, toolTitle: string, resul
   return clip(excerpt ? `${head}\n${excerpt}` : head, APP_LIMITS.fallback);
 }
 
-/** The strip under a frame whose server calls are off, per reason. */
 export function appBlockedText(reason: AppBlockedReason, server?: string): string {
   const name = server?.trim() || "This app's server";
   switch (reason) {

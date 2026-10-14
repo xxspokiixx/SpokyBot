@@ -1,6 +1,3 @@
-// Security rule 2 (docs/superpowers/specs/2026-10-14-chat-apps-design.md):
-// every AppDocument.srcdoc starts with our doctype and CSP meta, and no byte
-// of app content precedes it, whatever the app's HTML starts with.
 import { describe, expect, it } from "vitest";
 
 import { BOT_HTML_CSP, mcpAppCsp } from "./csp.ts";

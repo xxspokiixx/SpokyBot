@@ -12,14 +12,9 @@ export interface TurnStdioMcpServer {
 }
 
 /** URL servers always go through OpenMausBot's remote proxy: agents' own MCP clients add capability
- * fields strict servers refuse.
- *
- * An MCP app server (appMountFor) is observed by the innermost OMB component
- * on its path: a URL server by that proxy, a command server by the gate,
- * which it then always goes through. */
+ * fields strict servers refuse. */
 export function turnStdioMcpServers(turn: SendTurnInput): TurnStdioMcpServer[] {
   const servers: TurnStdioMcpServer[] = [];
-  /** Command app servers: their gate is the observer. */
   const observedCommands = new Map<string, AppMount>();
   const add = (name: string, server: { command: string; args: string[]; env?: Record<string, string> } | undefined) => {
     if (server) servers.push({ name, command: server.command, args: server.args, env: server.env ?? {} });

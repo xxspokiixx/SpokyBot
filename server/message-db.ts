@@ -194,7 +194,6 @@ export interface FollowupPayload {
   mode?: "chat" | "goal";
   via?: "api" | "call";
   callId?: string;
-  /** The words an app sent as the person; the drained line keeps it. */
   fromApp?: Message["fromApp"];
   sender?: ResolvedSender;
   trigger?: UsageTrigger;
@@ -452,8 +451,6 @@ export function deleteThread(threadId: string): void {
   });
 }
 
-/** Every stored app document an app row names (server/app-docs.ts sweeps
- * the rest). Rows of every thread and branch count. */
 export function appDocRefs(): string[] {
   const rows = db().prepare("SELECT DISTINCT json_extract(json, '$.app.doc') AS doc FROM messages WHERE kind = 'app'").all() as Array<{ doc: unknown }>;
   return rows.flatMap((row) => (typeof row.doc === "string" && row.doc ? [row.doc] : []));

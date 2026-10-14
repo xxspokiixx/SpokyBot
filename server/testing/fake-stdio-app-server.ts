@@ -1,8 +1,6 @@
 #!/usr/bin/env node
-// A command MCP server with an MCP App (io.modelcontextprotocol/ui), for the
-// chat apps tests (docs/superpowers/specs/2026-10-14-chat-apps-design.md).
-// Newline-delimited JSON-RPC over stdio, no dependencies: it runs as a bare
-// subprocess, as the real example servers do.
+// A command MCP server with an MCP App (io.modelcontextprotocol/ui), for tests: newline-delimited JSON-RPC
+// over stdio, with no dependencies.
 //
 // Tools:
 //   show_board   model and app, read-only, with a UI (ui://fake-app/board.html,
@@ -40,11 +38,8 @@ const send = (frame: unknown) => process.stdout.write(`${JSON.stringify(frame)}\
 const answer = (id: Frame["id"], result: unknown) => send({ jsonrpc: "2.0", id, result });
 const refuse = (id: Frame["id"], code: number, message: string) => send({ jsonrpc: "2.0", id, error: { code, message } });
 
-/** The board's view: a minimal MCP Apps client. It initializes, shows the
- * tool result, answers teardown, and has two buttons for the verification
- * recipe: "Paint it red" calls paint_board (model-visible, not read-only: it
- * needs the person's Allow outside Full access) and "Save board" calls
- * save_board (app-only: it never asks). The answer, or the error, is shown. */
+/** "Paint it red" calls paint_board, which needs the person's Allow outside Full access; "Save board" calls
+ * save_board, app-only, which never asks. */
 const BOARD_SCRIPT = [
   "var seq=0,waiting={};",
   "function ask(method,params){return new Promise(function(resolve){var id=++seq;waiting[id]=resolve;parent.postMessage({jsonrpc:'2.0',id:id,method:method,params:params||{}},'*');});}",

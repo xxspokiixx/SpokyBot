@@ -1,6 +1,3 @@
-// The host context a desktop frame gets: the skin's tokens under the MCP Apps
-// variable names, resolved (a frame cannot read this page's properties), a
-// variable left out when its token is missing, and the frame's limits.
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { appHostContext, appMaxHeight, appStyleVariables } from "./app-host-context";

@@ -1,13 +1,6 @@
-// An app's message and an app's context on the send route
-// (POST /api/bots/:id/messages; docs/superpowers/specs/2026-10-14-chat-apps-design.md,
-// "Messages from an app" and "Model context", security rule 13).
-//
-// What is real: the route module, the store, the chat-app services, the
-// reply prompts and the steer queue. `accept` stands in for server/index.ts
-// acceptDirectSend and does what it does with the chat-app fields: the app
-// context goes in front of the composed prompt on every path, and `fromApp`
-// is stored on the line, whether it starts a turn, is steered in, or waits
-// in the queue and drains later.
+// `accept` stands in for the server's direct send: the app context goes in front of the composed prompt on
+// every path, and `fromApp` is stored on the line, whether it starts a turn, is steered in, or waits in the
+// queue and drains later.
 import { rmSync } from "node:fs";
 import { createServer, type Server } from "node:http";
 import type { AddressInfo } from "node:net";
@@ -69,7 +62,6 @@ async function fixture() {
         const waiting = queuedSteeredMessage(input.botId, input.threadId, input.sendId);
         if (waiting) return { ok: true as const, queued: true as const, queueId: waiting.id, threadId: input.threadId };
       }
-      // As server/index.ts composes it, on every path: the app context first.
       const prompt = (input.app?.context ?? "") + promptWithReply(input.text, input.replyTo);
       state.prompts.push(prompt);
       const fromApp = input.app?.fromApp ? { fromApp: input.app.fromApp } : {};

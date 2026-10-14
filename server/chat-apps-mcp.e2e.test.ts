@@ -1,11 +1,3 @@
-// An MCP app through a real server on an isolated fixture
-// (docs/superpowers/specs/2026-10-14-chat-apps-design.md, S4): Settings →
-// Test learns that a command server has apps; the next turn mounts it behind
-// an observing gate; a tool call through that gate, made as the engine
-// would, becomes an app row whose document carries the whole result and the
-// server's page; the frame's calls reach the server under the bot's rules;
-// a report needs the active turn's capability (rule 18); and switching the
-// server's apps off closes the frame's server calls (410).
 import { spawn, type ChildProcessWithoutNullStreams } from "node:child_process";
 import { once } from "node:events";
 import { existsSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
@@ -44,17 +36,14 @@ it("learns a server's apps, observes its tool call into an app row, and runs its
   const dump = () => JSON.parse(readFileSync(fixture.fixtureDumpPath, "utf8"));
   const logged = () => existsSync(frames) ? readFileSync(frames, "utf8").trim().split("\n").filter(Boolean).map((line) => JSON.parse(line)) : [];
   try {
-    // ── Settings: add the server, switch it on, Test it ────────────────
     await api("POST", "/api/mcp/servers", { name: "board", command: process.execPath, args: ["--experimental-strip-types", "--no-warnings", FAKE_APP], env: { FAKE_APP_LOG: frames } }, 201);
     await api("PATCH", "/api/mcp/servers/board", { enabled: true });
     expect(await api("POST", "/api/mcp/servers/board/test")).toMatchObject({ ok: true });
-    // the probe advertised the extension, and the catalog says the server has apps
     expect(logged().find((frame) => frame.method === "initialize").params.capabilities.extensions).toHaveProperty(APP_EXTENSION_KEY);
     const catalog = JSON.parse(readFileSync(join(fixture.info.dataDir, "mcp-app-catalog.json"), "utf8"));
     expect(catalog.servers.board).toMatchObject({ apps: true, uiExtension: "ok", tools: { show_board: { resourceUri: BOARD_URI } } });
     expect((await api("GET", "/api/mcp/servers")).servers.find((server: any) => server.name === "board")).toMatchObject({ enabled: true, apps: true });
 
-    // ── a turn mounts it behind an observing gate ──────────────────────
     const bot = (await api("POST", "/api/bots", { name: "Scout" }, 201)).bot;
     await api("POST", `/api/bots/${bot.id}/messages`, { threadId: bot.threadId, text: "Show me the board", sendId: "apps-mcp-e2e-send-0001" }, 202);
     let mounts: any;
@@ -66,7 +55,6 @@ it("learns a server's apps, observes its tool call into an app row, and runs its
     expect(mounts.board.args[0]).toContain("mcp-gate");
     expect(JSON.parse(mounts.board.env.OMB_GATE_APPS)).toEqual({ server: "board", harnessUrl: fixture.info.url, token, extension: true });
 
-    // ── the engine calls the tool through that gate ────────────────────
     engineSide = spawn(mounts.board.command, ["--experimental-strip-types", "--no-warnings", ...mounts.board.args], { stdio: "pipe", env: { ...process.env, ...mounts.board.env } });
     const lines = createInterface({ input: engineSide.stdout })[Symbol.asyncIterator]();
     const ask = async (id: number, method: string, params?: unknown) => {
@@ -88,11 +76,9 @@ it("learns a server's apps, observes its tool call into an app row, and runs its
         network: { connect: ["https://api.fake-app.example"], resources: ["https://cdn.fake-app.example"], refused: ["https://bad.example/path"] } },
     });
 
-    // ── rule 18: only the active turn's capability ─────────────────────
     const report = { tool: "mcp_app", server: "board", definition: { name: "show_board", _meta: { ui: { resourceUri: BOARD_URI } } }, call: { arguments: {} }, result: { content: [] } };
     await api("POST", "/api/internal/options-card", report, 401, "not-a-capability");
 
-    // ── a client mounts the frame ──────────────────────────────────────
     const doc = await api("GET", `/api/threads/${bot.threadId}/messages/${row.id}/app`);
     expect(String(doc.srcdoc).startsWith(CSP_META_PREFIX)).toBe(true);
     expect(doc.srcdoc).toContain("<h1>Fake board</h1>");
@@ -102,7 +88,6 @@ it("learns a server's apps, observes its tool call into an app row, and runs its
       can: { serverTools: true, serverResources: true }, approval: expect.stringMatching(/^(full|confirm)$/),
     });
 
-    // ── the frame's calls reach the server ─────────────────────────────
     const rpc = (body: Record<string, unknown>, expected = 200) => api("POST", `/api/bots/${bot.id}/apps/${row.id}/rpc`, { threadId: bot.threadId, ...body }, expected);
     expect(await rpc({ method: "tools/call", params: { name: "save_board", arguments: { state: "s1" } } })).toMatchObject({ content: [{ type: "text", text: "Saved" }] });
     expect(logged().filter((frame) => frame.method === "tools/call").map((frame) => frame.params)).toContainEqual({ name: "save_board", arguments: { state: "s1" } });
@@ -113,12 +98,10 @@ it("learns a server's apps, observes its tool call into an app row, and runs its
     expect(await rpc({ method: "tools/call", params: { name: "peek_board", arguments: {} } }, 403)).toEqual({ error: { code: -32602, message: "That tool is not available to apps." } });
     expect((await rpc({ method: "resources/read", params: { uri: BOARD_URI } })).contents[0].uri).toBe(BOARD_URI);
 
-    // ── the turn ends: its capability goes with it ─────────────────────
     writeFileSync(gate, "finish");
     await expect.poll(async () => (await api("GET", "/api/bots?messages=0")).bots.find((candidate: any) => candidate.id === bot.id).busy, { timeout: 15_000 }).toBe(false);
     await api("POST", "/api/internal/options-card", report, 401, token);
 
-    // ── "Show its apps in chat" off: the frame keeps its page, loses its server ──
     await api("PATCH", "/api/mcp/servers/board", { apps: false });
     expect((await api("GET", "/api/mcp/servers")).servers.find((server: any) => server.name === "board")).toMatchObject({ apps: false });
     expect(await rpc({ method: "tools/list" }, 410)).toMatchObject({ blocked: { reason: "apps-off", text: "Apps from Fake App are switched off in Settings" } });

@@ -1,9 +1,5 @@
 // @vitest-environment happy-dom
-// The desktop frame host: the iframe is exactly what security rule 1 says,
-// its srcdoc is the document's own, the shared router answers only this
-// frame's window, and engagement needs focus to enter the frame while the
-// pointer is over it (or by Tab). happy-dom runs no script in the frame, so
-// the View's side is played by message events whose source is its window.
+// happy-dom runs no script in the frame, so the View is played by message events whose source is its window.
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { APP_SAMPLES } from "../../../shared/app-samples";
@@ -85,7 +81,7 @@ describe("the bridge on the desktop", () => {
     const view = host.iframe.contentWindow!;
     const posted = vi.spyOn(view, "postMessage");
     const request = { jsonrpc: "2.0", id: 1, method: "ui/initialize", params: { protocolVersion: "2026-01-26", appInfo: { name: "x", version: "1" }, appCapabilities: {} } };
-    // another window: dropped without an answer (rule 9)
+    // another window: dropped without an answer
     window.dispatchEvent(new MessageEvent("message", { data: request, source: window }));
     expect(posted).not.toHaveBeenCalled();
     window.dispatchEvent(new MessageEvent("message", { data: request, source: view as unknown as MessageEventSource }));

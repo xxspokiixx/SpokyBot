@@ -1,12 +1,5 @@
 // Per-turn MCP transport for the Chat Completions runtime: approval is the caller's, and only
 // registered, schema-validated calls arrive here.
-//
-// MCP Apps (docs/superpowers/specs/2026-10-14-chat-apps-design.md): no tool
-// only an app's view may call is registered for the model. A command server
-// with apps (appMountFor) is observed here, in process: its initialize
-// advertises the UI extension (without it if the server refuses), and each
-// call of a tool with a UI is reported to the harness. A URL server's proxy
-// child observes it instead.
 import { createHash } from "node:crypto";
 import type { ValidateFunction } from "ajv";
 import { stripControlPlaneEnv } from "../config.ts";
@@ -58,7 +51,6 @@ function object(value: unknown): value is Record<string, unknown> {
   return value !== null && typeof value === "object" && !Array.isArray(value);
 }
 function aborted(): Error { return new Error("MCP operation cancelled"); }
-/** The server answered a request with a JSON-RPC error. */
 class McpRequestRefused extends Error {}
 
 /** A chat-runtime bot's tools never get the operator's control-plane secrets; the entry's own env is applied last. */
@@ -155,8 +147,6 @@ class ChatMcpClient {
     if (Buffer.byteLength(this.buffer) > this.frameBytes) this.fail(new Error("MCP response exceeds the frame limit"));
   }
 
-  /** `keepOnRefusal`: a JSON-RPC error answer leaves the session open (the
-   * UI extension's fallback); any other failure closes it. */
   async call(method: string, params: unknown, signal: AbortSignal, timeout: number, keepOnRefusal = false): Promise<unknown> {
     if (signal.aborted) { await this.close(); throw aborted(); }
     if (this.closed) throw new Error("MCP session closed");
@@ -252,7 +242,6 @@ export async function mountChatTools(integrations: SendTurnInput["integrations"]
   if (!parsed.ok) throw new Error(parsed.error);
   const scope = parsed.scope;
   const servers: Array<[string, Server]> = [];
-  /** Command servers with apps, observed in process. */
   const observers = new Map<string, AppObserver>();
   const searchable = new Set<string>();
   const eligible = (server: string) => scope === undefined || canUseMcpServer(scope, server);

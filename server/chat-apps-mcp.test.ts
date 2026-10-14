@@ -1,11 +1,3 @@
-// MCP Apps on the server (server/chat-apps-mcp.ts) against a real command
-// app server (testing/fake-stdio-app-server.ts) and a URL one
-// (testing/fake-http-mcp-server.ts), reached through the server's own
-// connections: an observer's report becomes an app row (rule 17), what a
-// frame may do (the access hook), and the rpc route's rules (15, signed out,
-// removed, the Allow flow, the rate). Rule 18 (the report's capability) is
-// the internal card route's and is proved in chat-apps-mcp.e2e.test.ts.
-// docs/superpowers/specs/2026-10-14-chat-apps-design.md.
 import { mkdtempSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -29,7 +21,6 @@ const ROOM = "thread-room";
 const BOARD_URI = "ui://fake-app/board.html";
 const board = (env: Record<string, string> = {}) => ({ command: process.execPath, args: ["--experimental-strip-types", "--no-warnings", FAKE_APP], env });
 
-/** The report an observer sends for show_board. */
 const REPORT = {
   tool: "mcp_app",
   server: "board",
@@ -170,7 +161,6 @@ describe("access", () => {
     expect(access().blocked?.reason).toBe("server-disabled");
     delete live.servers.board;
     expect(access().blocked?.reason).toBe("server-removed");
-    // the document carries it to the frame
     expect(live.apps.appDocument(THREAD, "m1", "confirm")).toMatchObject({ can: { serverTools: false }, blocked: { reason: "server-removed" } });
 
     const signedOut = setup({ servers: { draw: { type: "http", url: "https://draw.example/mcp", enabled: true } }, needsSignIn: ["draw"] });
@@ -229,7 +219,6 @@ describe("rpc", () => {
     const read = await rpc("m1", "resources/read", { uri: BOARD_URI });
     expect(read).toMatchObject({ status: 200, body: { contents: [{ uri: BOARD_URI, mimeType: APP_MIME }] } });
     expect((await rpc("m1", "resources/list")).body).toMatchObject({ resources: [{ uri: BOARD_URI }] });
-    // the server's own error, relayed
     expect(await rpc("m1", "resources/read", { uri: "ui://fake-app/missing.html" })).toEqual({ status: 502, body: { error: { code: -32002, message: "Resource not found" } } });
   }, 30_000);
 
@@ -317,7 +306,6 @@ describe("mounts and probes", () => {
     const { mcp } = setup();
     expect(mcp.turnMounts({ board: board() })).toEqual({});
     await vi.waitFor(() => expect(mcp.catalog.get("board", board())?.apps).toBe(true), { timeout: 20_000 });
-    // the next turn mounts it through its observer
     expect(mcp.turnMounts({ board: board() })).toEqual({ mcpApps: { board: { extension: true } } });
     mcp.forgetServer("board");
     expect(mcp.turnMounts({ board: board() })).toEqual({});

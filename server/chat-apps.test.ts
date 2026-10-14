@@ -1,8 +1,3 @@
-// Chat apps on the server (server/chat-apps.ts): show_html and update_html
-// through the internal card route's createAgentCard, the stored document a
-// client mounts, model context, and the checks an app's message meets
-// (docs/superpowers/specs/2026-10-14-chat-apps-design.md, security rules 2,
-// 3, 17 and 19).
 import { mkdtempSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -22,7 +17,7 @@ import type { Message, StoreChange } from "./store.ts";
 
 const THREAD = "thread-scout";
 const SCOUT = { id: "bot-scout", name: "Scout", color: "blue" as const };
-// Shapes shared/redact.ts recognises: an Anthropic key and a GitHub token.
+// Shapes the secret scrub recognises: an Anthropic key and a GitHub token.
 const API_KEY = "sk-ant-api03-abcdefghijklmnopqrstuvwx";
 const GITHUB_TOKEN = "ghp_abcdefghijklmnopqrstuvwxyz0123";
 const PAGE = "<!DOCTYPE html><html><head><style>body{margin:0}</style></head><body><h1>Sales</h1><p>Up 12%</p><script>draw()</script></body></html>";

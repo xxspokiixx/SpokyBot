@@ -5,9 +5,7 @@ import type { McpServerSpec, RemoteMcpSpec, StdioMcpSpec } from "./contracts.ts"
 /** One config.json `mcpServers` entry: the block Claude Code, Cursor and Claude Desktop write. */
 export interface StoredStdioMcpServer extends StdioMcpSpec {
   enabled: boolean;
-  /** "Show its apps in chat" (docs/superpowers/specs/2026-10-14-chat-apps-design.md):
-   * stored only as `false`; on by default. Off, the server is mounted as it
-   * always was and no MCP app of it is shown. */
+  /** "Show its apps in chat": stored only as `false`; on by default. */
   apps?: false;
 }
 /** An app pre-registered with the server's authorization server; its secret is a credential, never listed. */
@@ -19,7 +17,7 @@ export interface McpOAuthClientConfig {
 export interface StoredRemoteMcpServer extends RemoteMcpSpec {
   enabled: boolean;
   oauth?: McpOAuthClientConfig;
-  /** See StoredStdioMcpServer.apps. */
+  /** "Show its apps in chat": stored only as `false`; on by default. */
   apps?: false;
 }
 export type StoredMcpServer = StoredStdioMcpServer | StoredRemoteMcpServer;
@@ -31,7 +29,6 @@ export interface StdioMcpServerListing {
   args: string[];
   envKeys: string[];
   enabled: boolean;
-  /** "Show its apps in chat": true unless switched off. */
   apps: boolean;
 }
 export interface RemoteMcpServerListing {
@@ -40,7 +37,6 @@ export interface RemoteMcpServerListing {
   url: string;
   headerKeys: string[];
   enabled: boolean;
-  /** "Show its apps in chat": true unless switched off. */
   apps: boolean;
   oauth?: { clientId: string; scopes: string[]; clientSecretConfigured: boolean };
 }
@@ -260,8 +256,6 @@ function enabledFor(value: boolean | undefined, mutation: boolean, existing?: St
   return existing ? (value ?? existing.enabled) : false;
 }
 
-/** The apps switch, kept only when off. An edit that does not mention it
- * keeps the current one. */
 function appsFor(value: boolean | undefined, mutation: boolean, existing?: StoredMcpServer): { apps?: false } {
   const on = value ?? (mutation && existing ? existing.apps !== false : true);
   return on ? {} : { apps: false };

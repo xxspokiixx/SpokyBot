@@ -1,13 +1,5 @@
-// What the server injects into a bot's page, right after the CSP meta
-// (document.ts buildSrcdoc with `botHelper`): theme variables with light and
-// dark defaults, and `window.mausbot`, a tiny standard MCP Apps View.
-//
-// The helper speaks the same bridge protocol as any SDK-built view
-// (@modelcontextprotocol/ext-apps `App`), so the host has one protocol. It
-// sends ui/initialize and ui/notifications/initialized, reports its height
-// with ui/notifications/size-changed, applies hostContext.theme and
-// styles.variables on initialize and on host-context-changed, answers
-// ui/resource-teardown, and exposes:
+// Injected into a bot's page after the CSP meta: theme variables with light and dark defaults, and
+// `window.mausbot`, a minimal MCP Apps View on the same bridge as @modelcontextprotocol/ext-apps `App`:
 //
 //   window.mausbot = {
 //     send(text): Promise<void>,        // ui/message
@@ -16,15 +8,11 @@
 //     theme: "light" | "dark",
 //   }
 //
-// A page a bot pasted from an SDK build runs its own App beside this one.
-// The helper's request ids are strings ("mausbot:1") so they never collide
-// with the SDK's numeric ones, and it answers no host request but teardown,
-// so it never races the SDK's own answer.
+// A page pasted from an SDK build runs its own App beside this one: the helper's request ids are strings
+// ("mausbot:1"), never the SDK's numeric ones, and it answers no host request but teardown, so it never
+// races the SDK's answer.
 import { APP_PROTOCOL_VERSION } from "../app.ts";
 
-/** `:root` defaults for the variables show_html's description names, light
- * and dark through `light-dark()`. The host's styles.variables override
- * them on initialize. */
 export const APP_THEME_STYLE = [
   ":root{color-scheme:light dark;",
   "--color-text-primary:light-dark(#1d1d1f,#ececee);",
@@ -36,9 +24,7 @@ export const APP_THEME_STYLE = [
   "--font-mono:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace}",
 ].join("");
 
-/** The helper's source, run as an inline script before the page's own
- * content. Plain ES2017, no imports: it must run as written in every
- * browser engine the apps ship. */
+/** Plain ES2017 with no imports: it runs as written in every browser engine the apps ship in. */
 export const APP_HELPER_SOURCE = `(function () {
   "use strict";
   var parent = window.parent;

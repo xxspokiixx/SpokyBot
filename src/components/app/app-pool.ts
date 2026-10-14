@@ -1,14 +1,8 @@
-// How many app frames run at once on the desktop, and which ones
-// (docs/superpowers/specs/2026-10-14-chat-apps-design.md, "Performance"):
-// at most three live frames per window. A row asks for its frame when it
-// comes within 300px of the viewport; when the pool is full, the frame seen
-// least recently is torn down first (ui/resource-teardown, at most a second)
-// and only then does the new one mount, so the count never goes over. A row
-// whose frame is gone keeps its chrome and a box at its last height.
+// When the pool is full, the frame seen least recently is torn down first and only then does the new one
+// mount, so the count of live frames never goes over.
 import { useCallback, useEffect, useRef, useState, type RefObject } from "react";
 
 export const APP_POOL_LIMITS = {
-  /** Live frames per window. */
   live: 3,
   /** A row this close to the viewport counts as visible (px). */
   marginPx: 300,
@@ -17,7 +11,6 @@ export const APP_POOL_LIMITS = {
 } as const;
 
 export interface AppPoolMember {
-  /** Give the slot back: tear the frame down. Resolves once it is gone. */
   evict(): Promise<void>;
 }
 
@@ -29,14 +22,10 @@ interface Slot {
 }
 
 export interface AppPool {
-  /** Mount `key`'s frame: resolves once there is room (another frame may be
-   * torn down first). Resolves false when the request was withdrawn. */
+  /** Resolves once there is room, or false when the request was withdrawn. */
   acquire(key: string, member: AppPoolMember): Promise<boolean>;
-  /** The row came into view, or left it. */
   seen(key: string, visible: boolean): void;
-  /** The frame is gone (unmounted, collapsed, or the row left the thread). */
   release(key: string): void;
-  /** Keys holding a slot, for tests and the verification recipe. */
   live(): string[];
 }
 
@@ -44,7 +33,6 @@ export function createAppPool(options: { limit?: number; now?: () => number } = 
   const limit = Math.max(1, options.limit ?? APP_POOL_LIMITS.live);
   const now = options.now ?? (() => Date.now());
   const slots = new Map<string, Slot>();
-  /** Requests waiting for room, oldest first. */
   const waiting: Array<{ key: string; member: AppPoolMember; resolve(granted: boolean): void }> = [];
   /** Keys being torn down to make room: they still count. */
   const leaving = new Set<string>();
@@ -57,7 +45,6 @@ export function createAppPool(options: { limit?: number; now?: () => number } = 
     let bestScore = Infinity;
     for (const [key, slot] of slots) {
       if (except.has(key) || leaving.has(key)) continue;
-      // rows out of view always go before rows in view
       const score = (slot.visible ? 1e15 : 0) + slot.seenAt;
       if (score < bestScore) { best = key; bestScore = score; }
     }
@@ -116,14 +103,9 @@ export function createAppPool(options: { limit?: number; now?: () => number } = 
   };
 }
 
-/** The window's pool. */
 export const appPool: AppPool = createAppPool();
 
-/**
- * One row's place in the pool. `auto` rows ask for a frame each time they
- * come into view; the others (older rows, a collapsed app) only when the
- * person asks (`open`). `evict` is the row's own teardown.
- */
+/** `auto` rows ask for a frame each time they come into view; the others only when the person asks (`open`). */
 export function useAppPoolSlot(args: {
   key: string;
   target: RefObject<HTMLElement | null>;
@@ -160,7 +142,7 @@ export function useAppPoolSlot(args: {
   useEffect(() => {
     const element = target.current;
     if (!element) return;
-    // No observer (a test page): the row counts as in view.
+    // Without IntersectionObserver the row counts as in view.
     if (typeof IntersectionObserver === "undefined") {
       pool.seen(key, true);
       if (auto) open();

@@ -107,7 +107,6 @@ describe("scopes", () => {
       ["GET", "/api/bots/x/slack-management"],
       ["POST", "/api/bots/x/sign-in-cards/m/done"], ["POST", "/api/bots/x/sign-in-cards/m/cancel"], ["POST", "/api/bots/x/sign-in-cards/m/save-login"],
       ["GET", "/api/bots/x/browser/live"], ["POST", "/api/bots/x/browser/action"],
-      // chat apps: the document, an MCP app's own server calls, its context (routes/chat-apps.ts)
       ["GET", "/api/threads/t/messages/m/app"], ["POST", "/api/bots/x/apps/m/rpc"], ["POST", "/api/bots/x/apps/m/context"],
     ] as const) expect(requiredScope(method, path), `${method} ${path}`).toBe("client");
     for (const [method, path] of [
@@ -128,7 +127,6 @@ describe("scopes", () => {
       ["POST", "/api/bots/x/sign-in-cards/m/provide"], ["POST", "/api/browser-engine/install"],
       ["GET", "/api/logins"], ["POST", "/api/logins"], ["PATCH", "/api/logins/l1"], ["DELETE", "/api/logins/l1"],
       ["POST", "/api/logins/1password"], ["POST", "/api/logins/1password/refresh"], ["DELETE", "/api/logins/1password"],
-      // only the app routes themselves are a client's
       ["POST", "/api/threads/t/messages/m/app"], ["GET", "/api/bots/x/apps/m/rpc"], ["POST", "/api/bots/x/apps/m/delete"],
       ["POST", "/api/bots/x/apps/m/rpc/extra"], ["DELETE", "/api/bots/x/apps/m/context"],
     ] as const) expect(requiredScope(method, path), `${method} ${path}`).toBe("admin");

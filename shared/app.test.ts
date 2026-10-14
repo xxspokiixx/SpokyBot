@@ -1,6 +1,3 @@
-// show_html's input rules and an app row's readable fallback
-// (docs/superpowers/specs/2026-10-14-chat-apps-design.md, "Input rules" and
-// "Fallback text").
 import { describe, expect, it } from "vitest";
 
 import { APP_LIMITS, appBlockedText, htmlFallbackText, htmlVisibleText, mcpAppFallbackText, parseShowHtmlInput, parseUpdateHtmlInput, utf8Bytes, wrapHtmlFragment } from "./app.ts";

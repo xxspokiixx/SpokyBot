@@ -1416,10 +1416,8 @@ describe("ClaudeDriver turns (fake CLI)", () => {
     expect(JSON.stringify(seen.argv)).not.toContain("tok-docs");
   });
 
-  // MCP Apps (docs/superpowers/specs/2026-10-14-chat-apps-design.md,
-  // Decision 7): Claude Code advertises no UI extension and keeps tool
-  // results to itself, so a URL server with apps goes through OMB's remote
-  // proxy, which observes it; one without apps keeps the CLI's own transport.
+  // Claude Code advertises no MCP Apps UI extension and keeps tool results to itself, so only OMB's
+  // remote proxy can observe a URL app server.
   it("mounts a url app server through the proxy and a url server without apps natively, unchanged", async () => {
     await create();
     const dump = join(scratch, "app-mcp.json");

@@ -20,7 +20,6 @@ function gateEnvironment(): NodeJS.ProcessEnv {
     const key = process.argv[3];
     if (process.argv.length !== 4 || process.argv[2] !== "--config-env" || !key || !/^OMB_GATE_CONFIG_[a-f0-9]{64}$/.test(key)) throw new Error();
     const value = JSON.parse(process.env[key] ?? "");
-    // A private record is a selection's or an app observer's (mcp-gate-config.ts).
     if (!value || typeof value !== "object" || Array.isArray(value)
       || !["OMB_GATE_NAME", "OMB_GATE_UPSTREAM"].every(name => typeof value[name] === "string")
       || (typeof value.OMB_GATE_TOOL_SCOPE !== "string" && typeof value[GATE_APPS_ENV] !== "string")
@@ -155,14 +154,12 @@ function trimCallResult(result: Json, tool: string): boolean {
 
 // Validate before starting a process: corrupt policy must never become pass-through.
 const scope = toolScope();
-/** MCP Apps: this gate's upstream is a command server whose UI tool calls it reports. */
 const observer = (() => {
   try {
     const mount = parseAppMount(gateEnv[GATE_APPS_ENV]);
     return mount ? new AppObserver(mount, { log: (line) => process.stderr.write(`mcp-gate(${NAME}): ${line}\n`) }) : undefined;
   } catch { return fail("invalid MCP apps configuration"); }
 })();
-/** Tools only an app's view may call, from the last tools/list this gate relayed. */
 const appOnly = new Set<string>();
 const spec = upstreamSpec();
 if (SPILL_DIR) sweepSpill(SPILL_DIR);
@@ -206,8 +203,6 @@ child.stderr.pipe(process.stderr);
 type Pending =
   | { kind: "call"; tool: string; trim: boolean; params?: Json }
   | { kind: "list" | "other" }
-  /** `original`: the CLI's own frame, sent instead if the server refuses the
-   * one with the UI extension. */
   | { kind: "initialize"; original?: string };
 
 function callTarget(name: string, args: unknown): string | undefined {
@@ -283,8 +278,6 @@ createInterface({ input: child.stdout }).on("line", (line) => {
   const id = typeof message.method === "string" ? undefined : requestKey(message.id);
   const request = id === undefined ? undefined : pending.get(id);
   if (scope && id !== undefined && !request) fail("unrequested upstream response on a restricted connection");
-  // The server refused the handshake with the UI extension: it gets the
-  // CLI's own, and the CLI gets that answer.
   if (request?.kind === "initialize" && request.original && message.error !== undefined && id !== undefined) {
     pending.set(id, { kind: "initialize" });
     process.stderr.write(`mcp-gate(${NAME}): the server refused the MCP Apps extension; connecting without it\n`);
@@ -294,7 +287,7 @@ createInterface({ input: child.stdout }).on("line", (line) => {
   if (id !== undefined) pending.delete(id);
   const result = message.result;
   if (request?.kind === "initialize") observer?.initialized(result);
-  // The model never sees a tool only an app's view may call (rule 16).
+  // A tool only an MCP app's view may call is never listed to the model, and a call to it is refused.
   if (request?.kind === "list" && message.error === undefined && isRecord(result) && Array.isArray(result.tools)) {
     observer?.listed(result);
     for (const tool of result.tools) {

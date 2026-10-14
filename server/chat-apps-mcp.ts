@@ -1,21 +1,3 @@
-// MCP Apps on the server (docs/superpowers/specs/2026-10-14-chat-apps-design.md,
-// "Part 2: MCP Apps"), on top of server/chat-apps.ts:
-//
-// - recordMcpAppCall: an observer's report (`tool: "mcp_app"` on the internal
-//   card route, under the turn's capability) becomes an `app` row. The UI
-//   resource is read on the server's own connection (mcp-app-connections.ts),
-//   its CSP filtered, the document stored, the catalog told.
-// - access: what an MCP app's frame may do right now (signed in, still
-//   configured, enabled, apps on), the ChatApps.mcpAccess hook.
-// - rpc: POST /api/bots/:botId/apps/:messageId/rpc after the route's row
-//   check. The view's tools/call, tools/list, resources/read and
-//   resources/list reach the app's own server under the bot's rules, at most
-//   60 a minute per row.
-// - turnMounts: which of a turn's servers are mounted through an observer
-//   (`integrations.mcpApps`, read by mcp-gate-config.ts appMountFor).
-// - the catalog's probes: Settings → Test; a URL server saved or switched on,
-//   or at startup with no fresh entry; a server a turn mounts with no fresh
-//   entry. Nothing starts a command server that no turn would.
 import { approvalModeFor } from "../shared/approval-mode.ts";
 import { APP_LIMITS, APP_MIME, appBlockedText, mcpAppFallbackText, oneLine, type AppBlockedReason, type AppCan, type AppDocument, type AppPayload, type AppToolResult } from "../shared/app.ts";
 import { mcpAppNetwork } from "../shared/app-frame/csp.ts";
@@ -36,17 +18,13 @@ import { redactSecretsInText } from "./redact.ts";
 import type { McpRpcAnswer, McpRpcRequest } from "./routes/chat-apps.ts";
 import type { BotRecord, Message, Store } from "./store.ts";
 
-/** A UI resource read is reused for this long, per (server, uri). */
 export const APP_RESOURCE_CACHE_MS = 10 * 60_000;
-/** Startup probes wait this long, so the server is up and quiet first. */
 const STARTUP_PROBE_DELAY_MS = 20_000;
 const RPC_CALL_MS = 120_000;
 const RPC_OTHER_MS = 30_000;
 const REMOTE_ERROR_CHARS = 1_000;
-/** A background probe waits on nobody: a command server started through
- * `npx` may first have to fetch its package. */
+/** A command server started through `npx` may first have to fetch its package. */
 const BACKGROUND_PROBE_MS = 45_000;
-/** A server probed on its own (a turn, startup) is not probed again sooner. */
 const AUTOMATIC_PROBE_EVERY_MS = 10 * 60_000;
 
 type Json = Record<string, unknown>;
@@ -56,29 +34,23 @@ function isRecord(value: unknown): value is Json {
 
 export type ChatAppsMcpStore = Pick<Store, "bot" | "botByThread" | "groupByThread" | "messagesFor" | "appendMessage" | "patchMessage" | "projectBotForTask">;
 
-/** What sign-in gives this module (server/mcp-oauth.ts McpOAuthManager). */
 export type ChatAppsMcpOAuth = Pick<McpOAuthManager, "authState" | "accessToken">;
 
 export interface ChatAppsMcpDeps {
   store: ChatAppsMcpStore;
   apps: ChatApps;
-  /** config.json mcpServers as stored: enabled, and the apps switch. */
   storedServers(): Record<string, unknown>;
-  /** The servers that may reach this bot's engine (index.ts engineMcpServers). */
   mountedServers(bot: BotRecord): Record<string, McpServerSpec>;
   oauth: ChatAppsMcpOAuth;
-  /** DATA_DIR: the catalog is <dataDir>/mcp-app-catalog.json. Absent: in memory. */
   dataDir?: string;
   catalog?: McpAppCatalog;
   connections?: AppConnections;
   probe?: typeof probeMcpServer;
-  /** Probe stale servers at startup (default true). */
   startupProbes?: boolean;
   log?(line: string): void;
   now?(): number;
 }
 
-/** The internal card route's `tool: "mcp_app"` (an observer's report). */
 export interface McpAppCallArgs {
   bot: { id: string; name: string };
   threadId: string;
@@ -92,26 +64,14 @@ export interface ChatAppsMcp {
   recordMcpAppCall(args: McpAppCallArgs): Promise<AgentCardResult>;
   access(row: Message & { app: AppPayload }, threadId: string): { can: AppCan; blocked?: AppDocument["blocked"] };
   rpc(request: McpRpcRequest): Promise<McpRpcAnswer>;
-  /** For a turn's custom servers: `{ mcpApps }` naming the ones mounted
-   * through an observer, or nothing. Servers the bot may use (`toolScope`)
-   * without a fresh catalog entry are probed in the background for the
-   * next turn, at most every ten minutes. */
   turnMounts(custom: Record<string, McpServerSpec>, toolScope?: unknown): { mcpApps?: Record<string, { extension: boolean }> };
-  /** Settings → Test's probe options for a stored server (the extension,
-   * and the catalog record), or nothing when its apps are off. */
-  /** Whether the catalog has seen this stored server offer an app: true,
-   * false, or undefined before it has been probed. */
   hasApps(name: string): boolean | undefined;
   probeOptions(name: string, server: StoredMcpServer): McpProbeOptions;
-  /** A server was saved or switched on: probe it soon if it is a URL
-   * server (a command server waits for Test or a turn that mounts it). */
   serverChanged(name: string): void;
-  /** A server was removed or edited: forget what was learned, close its connections. */
   forgetServer(name: string): void;
   close(): void;
 }
 
-/** A stored server as parsed, or null. */
 function storedServer(name: string, raw: unknown): StoredMcpServer | null {
   if (raw === undefined) return null;
   const parsed = parseStoredMcpServer(name, raw);
@@ -151,17 +111,13 @@ export function createChatAppsMcp(deps: ChatAppsMcpDeps): ChatAppsMcp {
   const rate = rowRate(APP_LIMITS.rpcPerMinute, 60_000);
   const resources = new Map<string, { at: number; read: Promise<ResourceRead> }>();
 
-  /** Advertise the extension to this server unless it refused it. */
   const extensionFor = (name: string, server: McpServerSpec | StoredMcpServer) => catalog.get(name, server)?.uiExtension !== "refused";
 
-  /** The server with a fresh sign-in token, or null when none can be had. */
   const signedIn = async (name: string, server: McpServerSpec): Promise<McpServerSpec | null> => {
     if (!("url" in server)) return server;
     const out = await withMcpSignIn({ [name]: server }, deps.oauth as McpOAuthManager);
     return out[name] ?? null;
   };
-
-  // ── the UI resource ──────────────────────────────────────────────────
 
   const readResource = (name: string, server: McpServerSpec, uri: string): Promise<ResourceRead> => {
     const key = `${name}\u0000${mcpServerConfigHash(server)}\u0000${uri}`;
@@ -180,7 +136,7 @@ export function createChatAppsMcp(deps: ChatAppsMcpDeps): ChatAppsMcp {
         if (html === undefined || Buffer.byteLength(html) > APP_LIMITS.mcpHtmlBytes) return { ok: false, reason: html === undefined ? "unavailable" : "too-large" };
         let ui = uiMeta(item);
         if (!ui) {
-          // The draft spec's other location: the resources/list entry.
+          // The MCP Apps draft also allows `_meta.ui` on the resources/list entry.
           const listed = await connections.request(name, server, "resources/list", {}, AbortSignal.timeout(RPC_OTHER_MS), extension).catch(() => undefined);
           const entry = isRecord(listed) && Array.isArray(listed.resources) ? listed.resources.find((resource) => isRecord(resource) && resource.uri === uri) : undefined;
           ui = uiMeta(entry);
@@ -191,18 +147,15 @@ export function createChatAppsMcp(deps: ChatAppsMcpDeps): ChatAppsMcp {
       }
     })();
     resources.set(key, { at: now(), read });
-    // A failure is not kept: the next call tries again.
     void read.then((value) => { if (!value.ok && resources.get(key)?.read === read) resources.delete(key); });
     if (resources.size > 200) for (const [other, entry] of resources) if (now() - entry.at >= APP_RESOURCE_CACHE_MS) resources.delete(other);
     return read;
   };
 
-  // ── recordMcpAppCall ─────────────────────────────────────────────────
-
   async function recordMcpAppCall(args: McpAppCallArgs): Promise<AgentCardResult> {
     const { threadId, input } = args;
-    // Rule 17: no row for a room, an unmounted server, one outside the
-    // bot's scope or one whose apps are off. The observer reads nothing back.
+    // No row for a room, an unmounted server, one outside the bot's scope or one whose apps are off; the
+    // observer reads nothing back.
     if (store.groupByThread(threadId)) return { ok: false, status: 409, error: "Apps are not shown in rooms yet." };
     const bot = store.bot(args.bot.id);
     if (!bot) return { ok: false, status: 404, error: "No such bot." };
@@ -270,12 +223,9 @@ export function createChatAppsMcp(deps: ChatAppsMcpDeps): ChatAppsMcp {
     return { ok: true, messageId: message.id };
   }
 
-  // ── access ───────────────────────────────────────────────────────────
-
   const OPEN: AppCan = { serverTools: true, serverResources: true, message: true, openLinks: true, modelContext: true };
   const CLOSED: AppCan = { ...OPEN, serverTools: false, serverResources: false };
 
-  /** Why this row's server calls are off right now, or null when they are on. */
   function blockedReason(name: string, threadId: string): AppBlockedReason | null {
     const stored = storedServer(name, deps.storedServers()[name]);
     if (!stored) return "server-removed";
@@ -294,14 +244,12 @@ export function createChatAppsMcp(deps: ChatAppsMcpDeps): ChatAppsMcp {
     return { can: { ...CLOSED }, blocked: { reason, text: appBlockedText(reason, ref?.serverTitle ?? ref?.server) } };
   }
 
-  // ── rpc ──────────────────────────────────────────────────────────────
-
   const approvalOf = (botId: string, threadId: string): "full" | "confirm" => {
     const task = store.projectBotForTask(botId, threadId);
     return task && approvalModeFor({ ...task, threadId }) === "full" ? "full" : "confirm";
   };
 
-  /** A server's own error words, for the view: nothing configured, nothing secret-shaped. */
+  /** Nothing configured and nothing secret-shaped reaches the view. */
   const serverErrorText = (detail: string, server: McpServerSpec): string => {
     let text = detail.slice(0, REMOTE_ERROR_CHARS * 4);
     const configured = "url" in server ? [server.url, ...Object.values(server.headers)] : Object.values(server.env);
@@ -324,7 +272,6 @@ export function createChatAppsMcp(deps: ChatAppsMcpDeps): ChatAppsMcp {
       return { status: 200, body: isRecord(result) ? result : {} };
     }
     const tools = await connections.tools(name, server, AbortSignal.timeout(RPC_OTHER_MS), extension);
-    /** What the app may call: visible to apps, and within the bot's selection. */
     const callable = (tool: Json) => {
       const visibility = toolVisibility(tool);
       if (!visibility.includes("app")) return false;
@@ -334,7 +281,6 @@ export function createChatAppsMcp(deps: ChatAppsMcpDeps): ChatAppsMcp {
     };
     if (method === "tools/list") return { status: 200, body: { tools: tools.filter(callable) } };
 
-    // tools/call (rule 15)
     if (typeof params.name !== "string" || !params.name || (params.arguments !== undefined && !isRecord(params.arguments))) {
       return rpcError(400, -32602, "tools/call needs {name, arguments?}.");
     }
@@ -366,7 +312,7 @@ export function createChatAppsMcp(deps: ChatAppsMcpDeps): ChatAppsMcp {
     const ref = row.app.mcp;
     const tool = method === "tools/call" && typeof params.name === "string" ? ` tool=${params.name.slice(0, 120)}` : "";
     const done = (answer: McpRpcAnswer): McpRpcAnswer => {
-      // Rule: every app-initiated call is logged; its arguments never are.
+      // Every app-initiated call is logged; its arguments never are.
       log(`rpc bot=${bot.id} server=${ref?.server ?? "-"} method=${method}${tool} → ${answer.status}`);
       return answer;
     };
@@ -389,17 +335,11 @@ export function createChatAppsMcp(deps: ChatAppsMcpDeps): ChatAppsMcp {
     }
   }
 
-  // ── mounts and probes ────────────────────────────────────────────────
-  //
-  // A probe of a command server starts it on this computer. Nothing here
-  // starts one that no turn would: a command server is probed by Settings →
-  // Test, or in the background only for a turn whose bot may use it (that
-  // turn starts it anyway). A URL server starts nothing locally, so it is
-  // also probed when it is saved or switched on, and at startup.
+  // A probe of a command server starts it on this computer, so one is probed only by Settings → Test, or in
+  // the background for a turn whose bot may use it (that turn starts it anyway).
 
   const queued = new Set<string>();
   const lastAutomatic = new Map<string, number>();
-  /** A turn or startup found no fresh entry: probe, at most every ten minutes. */
   const probeStale = (name: string) => {
     const last = lastAutomatic.get(name);
     if (last !== undefined && now() - last < AUTOMATIC_PROBE_EVERY_MS) return;
@@ -421,12 +361,10 @@ export function createChatAppsMcp(deps: ChatAppsMcpDeps): ChatAppsMcp {
     };
   }
 
-  /** A URL server was saved or switched on: probe it now. */
   function serverChanged(name: string): void {
     if (remote(name)) queueProbe(name);
   }
 
-  /** Probe one stored server in the background, one at a time. */
   function queueProbe(name: string): void {
     if (closed || queued.has(name)) return;
     queued.add(name);
@@ -455,7 +393,6 @@ export function createChatAppsMcp(deps: ChatAppsMcpDeps): ChatAppsMcp {
     return Object.keys(mcpApps).length ? { mcpApps } : {};
   }
 
-  // The command servers this module started do not outlive the server.
   const onExit = () => connections.closeAll();
   process.once("exit", onExit);
   const startup = deps.startupProbes === false ? undefined : setTimeout(() => {

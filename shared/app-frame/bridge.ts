@@ -1,33 +1,6 @@
-// The host side of the MCP Apps bridge (io.modelcontextprotocol/ui, stable
-// 2026-01-26) for one app frame: one router, written once, that runs in the
-// desktop renderer and, bundled into shared/app-frame/app-host.html, in the
-// phones' web views (docs/superpowers/specs/2026-10-14-chat-apps-design.md,
-// "The frame host"). Every rule that must be the same on all three platforms
-// lives here: the method table, the handshake order, engagement gating, rate
-// limits, the size clamp and teardown.
-//
-// The router never touches a window. A platform hands it each `message`
-// event it sees (`handleMessage`) and supplies an adapter for everything the
-// router cannot do itself:
-//
-//   post            deliver one JSON-RPC message to the View
-//                   (desktop: iframe.contentWindow.postMessage(message, "*"))
-//   callRpc         tools/call, tools/list, resources/read, resources/list,
-//                   through POST /api/bots/:botId/apps/:messageId/rpc. The
-//                   platform draws the Allow bar on a 409 `confirm` (only
-//                   when `engaged` says the person is interacting) and
-//                   rejects with { code, message } on any refusal.
-//   sendMessage     ui/message → `appMessage` on POST /api/bots/:botId/messages
-//   openLink        ui/open-link → the system browser
-//   setContext      ui/update-model-context → POST .../apps/:messageId/context
-//   resize          the frame's height, already clamped
-//   engaged         whether the person is interacting with this frame now
-//   teardownRequested  the View asked to be torn down (draft notification)
-//   now             a clock, for the rate limits
-//
-// Security rules 9 to 12 of the spec are enforced here and tested in
-// bridge.test.ts; the SDK compatibility test drives this router with the
-// official `App` class.
+// The host side of the MCP Apps bridge (io.modelcontextprotocol/ui, stable 2026-01-26) for one app frame. It
+// runs in the desktop renderer and, bundled, in the phones' web views, so it never touches a window: a platform
+// hands it each `message` event and an adapter for the rest.
 import { APP_LIMITS, APP_PROTOCOL_VERSION, utf8Bytes, type AppDocument } from "../app.ts";
 
 export type JsonRpcId = string | number;
@@ -44,23 +17,18 @@ export type JsonRpcMessage =
   | { jsonrpc: "2.0"; id: JsonRpcId; result: unknown }
   | { jsonrpc: "2.0"; id: JsonRpcId; error: JsonRpcError };
 
-/** The server-proxied methods (MCP apps only, through the rpc route). */
 export const APP_RPC_METHODS = ["tools/call", "tools/list", "resources/read", "resources/list"] as const;
 export type AppRpcMethod = (typeof APP_RPC_METHODS)[number];
 
 export const RPC_METHOD_NOT_FOUND = -32601;
 export const RPC_INVALID_PARAMS = -32602;
-/** The host refused or could not do it: not engaged, over a rate, offline,
- * signed out, declined. */
 export const RPC_HOST_REFUSED = -32000;
 
-/** Per-frame limits the bridge enforces (the server limits are a backstop). */
 export const APP_FRAME_LIMITS = {
-  /** An incoming message larger than this (as JSON, UTF-8) is dropped. */
   messageBytes: 1_000_000,
   minHeight: 48,
   defaultHeight: 160,
-  /** Used when the host context names no maxHeight. */
+  /** When the host context names no maxHeight. */
   maxHeight: 720,
   linkChars: 2_048,
   teardownMs: 1_000,
@@ -78,9 +46,7 @@ export const APP_FRAME_LIMITS = {
   },
 } as const;
 
-/** The context a View is given (McpUiHostContext); the platform builds it
- * (theme and skin tokens, container size, locale) and the bridge adds
- * `toolInfo` for an MCP document. */
+/** McpUiHostContext; the bridge adds `toolInfo` for an MCP document. */
 export interface AppHostContext {
   theme?: "light" | "dark";
   styles?: { variables?: Record<string, string | undefined>; css?: { fonts?: string } };
@@ -104,10 +70,8 @@ export interface AppContextUpdate {
 
 export interface AppBridgeAdapter {
   post(message: JsonRpcMessage): void;
-  /** Resolves with the JSON-RPC `result`; rejects with { code, message }.
-   * `engaged` is the engagement at the moment the View asked, for the
-   * Allow bar: a call that needs it is refused when the person is not
-   * interacting. */
+  /** Resolves with the JSON-RPC `result`; rejects with { code, message }. A call that needs the Allow bar
+   * is refused when the person was not `engaged` at the moment the View asked. */
   callRpc(method: AppRpcMethod, params: Record<string, unknown>, context: { engaged: boolean }): Promise<unknown>;
   sendMessage(text: string): Promise<void>;
   openLink(url: string): Promise<void> | void;
@@ -122,34 +86,27 @@ export interface AppBridgeOptions {
   doc: AppDocument;
   hostContext: AppHostContext;
   adapter: AppBridgeAdapter;
-  /** The frame's window (desktop: iframe.contentWindow). A message event
-   * whose `source` is anything else is dropped. */
+  /** The frame's window: a message event whose `source` is anything else is dropped. */
   source(): unknown;
-  /** hostInfo.version: the app's version. */
+  /** hostInfo.version */
   hostVersion: string;
   /** Overrides hostContext.containerDimensions.maxHeight for the clamp. */
   limits?: { maxHeight?: number };
-  /** notifications/message from the View, at most 50 a minute (dev builds
-   * print them; release builds pass nothing). */
+  /** notifications/message from the View, at most 50 a minute. */
   log?(params: unknown): void;
-  /** Timers, for tests. Default: the global setTimeout/clearTimeout. */
   timers?: { set(run: () => void, ms: number): unknown; clear(handle: unknown): void };
 }
 
 export interface AppBridge {
-  /** One `message` event from the window that holds the frame. */
   handleMessage(event: { source: unknown; data: unknown }): void;
-  /** Theme, skin or width changed: sent as host-context-changed once the
-   * View is initialized, else folded into what it will be sent. */
+  /** Sent as host-context-changed once the View is initialized, else folded into what it will be sent. */
   contextChanged(partial: AppHostContext): void;
   /** ui/resource-teardown; resolves when the View answers or after 1 s. */
   teardown(): Promise<void>;
-  /** Stop: no more messages in or out, timers cleared. */
   dispose(): void;
   readonly initialized: boolean;
 }
 
-/** hostCapabilities for a document, built from `can` (spec, "Bridge methods"). */
 export function hostCapabilitiesFor(doc: AppDocument): Record<string, unknown> {
   const mcp = isMcpDocument(doc);
   return {
@@ -163,7 +120,6 @@ export function hostCapabilitiesFor(doc: AppDocument): Record<string, unknown> {
   };
 }
 
-/** A document with a tool definition is an MCP app; one without is a bot's page. */
 export function isMcpDocument(doc: AppDocument): boolean {
   return Boolean(doc.tool);
 }
@@ -185,7 +141,6 @@ function jsonBytes(value: unknown): number | null {
   return utf8Bytes(text);
 }
 
-/** A JSON-RPC 2.0 message of at most 1 MB, or null (rule 9). */
 export function asJsonRpcMessage(data: unknown): JsonRpcMessage | null {
   if (!isRecord(data) || data.jsonrpc !== "2.0") return null;
   const bytes = jsonBytes(data);
@@ -202,7 +157,6 @@ export function asJsonRpcMessage(data: unknown): JsonRpcMessage | null {
   return null;
 }
 
-/** Sliding windows: a call is allowed only when every window has room. */
 function rateLimiter(rules: ReadonlyArray<readonly [number, number]>, now: () => number) {
   const stamps: number[] = [];
   const longest = Math.max(...rules.map(([ms]) => ms));
@@ -219,7 +173,6 @@ function rateLimiter(rules: ReadonlyArray<readonly [number, number]>, now: () =>
   };
 }
 
-/** An error a platform's callRpc rejected with, as the View is told. */
 function rpcErrorFrom(error: unknown): JsonRpcError {
   if (isRecord(error) && typeof error.code === "number" && Number.isInteger(error.code)) {
     return { code: error.code, message: typeof error.message === "string" && error.message ? error.message : "The host refused this." };
@@ -227,7 +180,6 @@ function rpcErrorFrom(error: unknown): JsonRpcError {
   return { code: RPC_HOST_REFUSED, message: error instanceof Error && error.message ? error.message : "The host could not do that." };
 }
 
-/** An http(s) URL a View may open, normalised, or null (rule 12). */
 export function openableLink(value: unknown): string | null {
   if (typeof value !== "string" || !value || value.length > APP_FRAME_LIMITS.linkChars) return null;
   let url: URL;
@@ -237,7 +189,6 @@ export function openableLink(value: unknown): string | null {
   return url.href.length <= APP_FRAME_LIMITS.linkChars ? url.href : null;
 }
 
-/** The text of a ui/message, or null when it is not text-only, empty or too long. */
 function messageText(params: Record<string, unknown> | undefined): string | null {
   if (!params || params.role !== "user" || !Array.isArray(params.content) || params.content.length === 0) return null;
   const texts: string[] = [];
@@ -275,7 +226,7 @@ export function createAppBridge(options: AppBridgeOptions): AppBridge {
     rpc: rateLimiter(APP_FRAME_LIMITS.rates.rpc, now),
     log: rateLimiter([[60_000, APP_FRAME_LIMITS.logsPerMinute]], now),
   };
-  // ui/update-model-context: the latest wins, at most one per second.
+  // ui/update-model-context: the latest wins, at most one a second.
   let contextLatest: AppContextUpdate | null = null;
   let contextTimer: unknown = null;
   let contextSentAt = -Infinity;
@@ -302,7 +253,7 @@ export function createAppBridge(options: AppBridgeOptions): AppBridge {
     const update = contextLatest;
     contextLatest = null;
     contextSentAt = now();
-    Promise.resolve().then(() => adapter.setContext(update)).catch(() => { /* the next update replaces it */ });
+    Promise.resolve().then(() => adapter.setContext(update)).catch(() => {});
   };
 
   const afterInitialized = () => {
@@ -346,7 +297,7 @@ export function createAppBridge(options: AppBridgeOptions): AppBridge {
         hostContext: context,
       });
     }
-    // Rule 10: nothing but the initialize answer before `initialized`.
+    // Nothing but the initialize answer reaches a View before `initialized`.
     if (!initialized) return;
     switch (method) {
       case "ping":
@@ -425,7 +376,7 @@ export function createAppBridge(options: AppBridgeOptions): AppBridge {
         adapter.teardownRequested();
         return;
       default:
-        // Any other notification (tool list changes, cancellations) is dropped.
+        // Other notifications (tool list changes, cancellations) are dropped.
     }
   };
 
@@ -434,7 +385,7 @@ export function createAppBridge(options: AppBridgeOptions): AppBridge {
     handleMessage(event) {
       if (disposed) return;
       const frame = options.source();
-      // Rule 9: only the frame's own window, and only well-formed JSON-RPC.
+      // Only the frame's own window, and only well-formed JSON-RPC.
       if (frame === null || frame === undefined || event.source !== frame) return;
       const message = asJsonRpcMessage(event.data);
       if (!message) return;

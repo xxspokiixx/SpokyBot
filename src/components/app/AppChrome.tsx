@@ -1,11 +1,3 @@
-// What the host draws around an app frame, outside it, where the frame can
-// never paint (docs/superpowers/specs/2026-10-14-chat-apps-design.md,
-// "Layout and sizing" and "Engagement and limits"): the header with the
-// title, where the app came from, its info and Reload; the Allow bar a
-// write call waits on; the strips that say why an app cannot reach its
-// server; and the box that holds a frame's place while it is not running.
-// The look is the widget card's (src/components/widget/WidgetMessage.tsx),
-// with AskCard's controls.
 import { useEffect, useState, type ReactNode } from "react";
 import { AppWindow, CircleAlert, Info, Loader2, RotateCw } from "lucide-react";
 import { cn } from "@/lib/cn";
@@ -13,9 +5,7 @@ import { t } from "@/lib/i18n";
 import type { AppNetwork } from "../../../shared/app";
 import { ASK_CHIP, ASK_CHIP_IDLE, ASK_PRIMARY_BUTTON, ASK_QUIET_BUTTON } from "../AskCard";
 
-/** The widget card's surface: the composer's tone, its 1px ring, the 24px corner. */
 export const APP_SURFACE = "w-full overflow-hidden rounded-3xl bg-composer ring-1 ring-composer-ring";
-/** A round icon button in the header, AskCard's quiet control at 28px. */
 const ICON_BUTTON =
   "flex size-7 shrink-0 items-center justify-center rounded-full text-ink-tertiary transition-colors hover:bg-ink/[0.07] hover:text-ink focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus disabled:opacity-40";
 
@@ -26,7 +16,6 @@ export function formatAppBytes(bytes: number): string {
   return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
 }
 
-/** The header line: title, where the app came from, info and Reload. */
 export function AppHeader({
   title,
   origin,
@@ -42,7 +31,6 @@ export function AppHeader({
   infoId: string;
   infoOpen: boolean;
   onInfo(): void;
-  /** Absent when there is nothing to reload (no stored page). */
   onReload?: () => void;
   reloading?: boolean;
   bordered: boolean;
@@ -83,7 +71,6 @@ function OriginList({ origins }: { origins: readonly string[] }) {
   return <span className="[overflow-wrap:anywhere]">{origins.join(", ")}</span>;
 }
 
-/** What the frame may reach, what was refused, its size, and what is off. */
 export function AppInfo({ id, network, bytes, bordered }: { id: string; network: AppNetwork; bytes: number; bordered: boolean }) {
   const rows: Array<[string, ReactNode]> = [
     [t("app.info.loads"), <OriginList key="r" origins={network.resources} />],
@@ -109,7 +96,6 @@ export function AppInfo({ id, network, bytes, bordered }: { id: string; network:
 
 export type AllowDecision = "once" | "always" | "deny";
 
-/** "<title> wants to <tool>." with Allow, Allow for this app, and Deny. */
 export function AppAllowBar({ title, tool, onDecide, bordered }: { title: string; tool: string; onDecide(decision: AllowDecision): void; bordered: boolean }) {
   // An app named after its tool would read "Get Time wants to Get Time."
   const ask = title.trim().toLowerCase() === tool.trim().toLowerCase() ? t("app.allow.askSame", { tool }) : t("app.allow.ask", { title, tool });
@@ -130,8 +116,6 @@ export function AppAllowBar({ title, tool, onDecide, bordered }: { title: string
   );
 }
 
-/** One line on why the app cannot do something right now, with the one
- * thing that fixes it. */
 export function AppStrip({ text, action, bordered, tone = "warning" }: {
   text: string;
   action?: { label: string; onClick(): void };
@@ -147,9 +131,7 @@ export function AppStrip({ text, action, bordered, tone = "warning" }: {
   );
 }
 
-/** The frame's box while no frame runs in it: the same height, so the
- * transcript does not jump. `open` offers to start it; `loading` shows a
- * spinner once opening has taken a moment. */
+/** Keeps the frame's height while no frame runs, so the transcript does not jump. */
 export function AppPlaceholder({ height, loading, open, label, children }: {
   height: number;
   loading?: boolean;
@@ -177,7 +159,6 @@ export function AppPlaceholder({ height, loading, open, label, children }: {
   );
 }
 
-/** Start a frame that is not running: "Open app", "Open again". */
 export function AppOpenButton({ label, onClick }: { label: string; onClick(): void }) {
   return (
     <button type="button" onClick={onClick} className={cn(ASK_CHIP, ASK_CHIP_IDLE)}>

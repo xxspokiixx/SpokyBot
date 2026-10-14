@@ -1,20 +1,10 @@
-// The host context the desktop gives an app frame (McpUiHostContext,
-// docs/superpowers/specs/2026-10-14-chat-apps-design.md, "Bridge methods"):
-// the skin's light or dark lean, the skin's tokens under the MCP Apps
-// standard's variable names, the frame's width and height limit, the
-// locale, and what kind of host this is.
-//
-// The variables are read from the live document, so all nine skins (and any
-// skin added later) map without a table per skin. Each one is the current
-// skin's own value, resolved: a frame cannot see this document's custom
-// properties. A skin change sends the new set (host-context-changed).
+// Style variables are read resolved from the live document, so every skin maps without a table per skin: a
+// frame cannot see this document's custom properties.
 import { appVersion } from "@/lib/app-links";
 import { readColorScheme, type ColorScheme } from "@/lib/color-scheme";
 import { activeLocale } from "@/lib/i18n";
 import type { AppHostContext } from "../../../shared/app-frame/bridge";
 
-/** Spec variable → CSS in the app's own tokens. A frame sits on the app
- * card's surface (the composer tone), so that is its primary background. */
 const VARIABLES: ReadonlyArray<readonly [string, string]> = [
   ["--color-background-primary", "var(--color-composer)"],
   ["--color-background-secondary", "var(--color-inset)"],
@@ -61,7 +51,6 @@ const VARIABLES: ReadonlyArray<readonly [string, string]> = [
   ["--font-weight-medium", "500"],
   ["--font-weight-semibold", "600"],
   ["--font-weight-bold", "700"],
-  // The chat's own type scale (the widget card's sizes).
   ["--font-text-xs-size", "12px"], ["--font-text-xs-line-height", "16px"],
   ["--font-text-sm-size", "13px"], ["--font-text-sm-line-height", "18px"],
   ["--font-text-md-size", "14px"], ["--font-text-md-line-height", "20px"],
@@ -88,10 +77,7 @@ const VARIABLES: ReadonlyArray<readonly [string, string]> = [
 
 const TOKEN = /var\((--[\w-]+)\)/g;
 
-/** The spec's style variables for the current skin, resolved. A variable
- * whose token this document does not define is left out, so the View's
- * own default applies (and a test page without the app's CSS sends none
- * of the colours). */
+/** A variable whose token this document does not define is left out, so the View's own default applies. */
 export function appStyleVariables(root: Element | null = typeof document === "undefined" ? null : document.documentElement): Record<string, string> {
   const style = root && typeof getComputedStyle === "function" ? getComputedStyle(root) : null;
   const out: Record<string, string> = {};
@@ -107,7 +93,6 @@ export function appStyleVariables(root: Element | null = typeof document === "un
   return out;
 }
 
-/** The tallest a frame may grow on the desktop: 70% of the window, at most 720px. */
 export function appMaxHeight(): number {
   const viewport = typeof window !== "undefined" && window.innerHeight > 0 ? window.innerHeight : 1_000;
   return Math.max(48, Math.round(Math.min(720, viewport * 0.7)));
@@ -122,12 +107,10 @@ export function appPlatform(): "desktop" | "web" {
   return typeof window !== "undefined" && window.ogb ? "desktop" : "web";
 }
 
-/** Theme and skin: what a skin change sends. */
 export function appThemeContext(scheme: ColorScheme = readColorScheme()): Pick<AppHostContext, "theme" | "styles"> {
   return { theme: scheme, styles: { variables: appStyleVariables() } };
 }
 
-/** The whole host context for a frame `width` px wide. */
 export function appHostContext(args: { width: number; maxHeight: number }): AppHostContext {
   let timeZone: string | undefined;
   try { timeZone = Intl.DateTimeFormat().resolvedOptions().timeZone; } catch { timeZone = undefined; }

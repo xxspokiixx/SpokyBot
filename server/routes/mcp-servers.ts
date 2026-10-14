@@ -23,13 +23,10 @@ export interface McpServerRouteDeps {
   mcpPolicyRefusal(name: string, server: object): string | undefined;
   persistMcpServers(next: Record<string, unknown>): void;
   savedCustomDomain(): string | null;
-  /** MCP Apps: the catalog's probes, and forgetting a removed server. */
   appCatalog?: Pick<ChatAppsMcp, "probeOptions" | "serverChanged" | "forgetServer"> & Partial<Pick<ChatAppsMcp, "hasApps">>;
 }
 
 export function createMcpServerRoutes(deps: McpServerRouteDeps): RouteHandler {
-  /** The listing, with `hasApps` on each server the app catalog knows about,
-   * so Settings offers "Show its apps in chat" only where there are apps. */
   const withHasApps = <T,>(body: T): T => {
     const hasApps = deps.appCatalog?.hasApps;
     const servers = (body as { servers?: unknown }).servers;
@@ -222,7 +219,6 @@ export function createMcpServerRoutes(deps: McpServerRouteDeps): RouteHandler {
         if (!existing.ok) return json(res, 400, { error: existing.error });
         const body = await readBody(req);
         if (method === "PATCH") {
-          // One switch at a time: on/off, or "Show its apps in chat".
           const key = body && typeof body === "object" && !Array.isArray(body) && Object.keys(body).length === 1 ? Object.keys(body)[0] : undefined;
           if ((key !== "enabled" && key !== "apps") || typeof body[key] !== "boolean") {
             return json(res, 400, { error: "Only an enabled or apps boolean can be changed here." });

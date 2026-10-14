@@ -1,9 +1,3 @@
-// The two chat-app tools of the agents catalog
-// (docs/superpowers/specs/2026-10-14-chat-apps-design.md, "Part 1: bot HTML"),
-// spread into TOOL_DEFINITIONS in agents-catalog.ts. Definitions only;
-// agents-call-cards.ts carries a call to the internal card route and
-// server/chat-apps.ts stores the page. Every word here is sent to the model
-// on every turn and pinned by agents-catalog-wire.test.ts.
 export const APP_TOOL_DEFINITIONS = [
   {
     name: "show_html",

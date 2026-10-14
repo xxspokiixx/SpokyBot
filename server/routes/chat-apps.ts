@@ -1,21 +1,3 @@
-// Chat-app routes (docs/superpowers/specs/2026-10-14-chat-apps-design.md,
-// "Routes and the phone allowlist"):
-//
-//   GET  /api/threads/:threadId/messages/:messageId/app   the AppDocument a
-//        client mounts a frame from; never part of a thread load. Read like
-//        the transcript (the same scope as .../messages/:id/image).
-//   POST /api/bots/:botId/apps/:messageId/context          {threadId, content?,
-//        structuredContent?}: ui/update-model-context, kept on the row and
-//        handed to the model with the person's next message.
-//   POST /api/bots/:botId/apps/:messageId/rpc              {threadId, method,
-//        params, confirmed?}: an MCP app's tools/call, tools/list,
-//        resources/read and resources/list. This module checks that the row
-//        is an MCP app row of this bot and thread (else 404) and hands the
-//        rest to `deps.mcpRpc` (server/chat-apps-mcp.ts); without it, 404.
-//
-// Scopes are in server/request-auth.ts (client) and companion/src/routes.ts
-// (phones). A ui/message is not a route of its own: it is `appMessage` on
-// POST /api/bots/:botId/messages (server/routes/bot-messages.ts).
 import { approvalModeFor } from "../../shared/approval-mode.ts";
 import { APP_LIMITS, type AppPayload } from "../../shared/app.ts";
 import { appRow, createChatApps, rowRate, type ChatApps } from "../chat-apps.ts";
@@ -23,13 +5,11 @@ import type { RequestAuth } from "../request-auth.ts";
 import type { BotRecord, Message, Store } from "../store.ts";
 import { PASS, type RouteHandler } from "./table.ts";
 
-// server/index.ts builds all three from this one import.
 export { createChatApps };
 export { createChatAppsMcp } from "../chat-apps-mcp.ts";
 
 export const APP_RPC_METHODS = ["tools/call", "tools/list", "resources/read", "resources/list"] as const;
 
-/** One MCP app → server call, after this module's row check. */
 export interface McpRpcRequest {
   auth: RequestAuth;
   bot: BotRecord;
@@ -50,10 +30,8 @@ export interface McpRpcAnswer {
 export interface ChatAppRouteDeps {
   store: Pick<Store, "bot" | "botByThread" | "groupByThread" | "messagesFor" | "patchMessage" | "projectBotForTask" | "taskByThread">;
   apps: ChatApps;
-  /** On a Cloud home, a guest changes only conversations it started
-   * (index.ts cloudThreadRefusal). */
+  /** On a Cloud home, a guest changes only conversations it started. */
   threadRefusal?(auth: RequestAuth, threadId: string): string | null;
-  /** MCP app → server calls (server/chat-apps-mcp.ts). Absent: 404. */
   mcpRpc?(request: McpRpcRequest): Promise<McpRpcAnswer>;
 }
 
@@ -66,10 +44,8 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 
 export function createChatAppRoutes(deps: ChatAppRouteDeps): RouteHandler {
   const { store, apps } = deps;
-  // The bridge coalesces context to one update a second; this is the backstop.
   const contextRate = rowRate(120, 60_000);
 
-  /** Whether the person's approval mode lets an app's write calls run without the Allow bar. */
   const approvalOf = (threadId: string): "full" | "confirm" => {
     const bot = store.botByThread(threadId);
     const task = bot ? store.projectBotForTask(bot.id, threadId) : null;
@@ -80,8 +56,7 @@ export function createChatAppRoutes(deps: ChatAppRouteDeps): RouteHandler {
     let m = DOCUMENT.exec(path);
     if (m && method === "GET") {
       const threadId = m[1]!;
-      // Same guard as the image route: an unknown thread answers before
-      // the store materialises it.
+      // An unknown thread answers before the store materialises it.
       if (!store.botByThread(threadId) && !store.groupByThread(threadId)) return json(res, 404, { error: "no such conversation" });
       if (!appRow(store, threadId, m[2]!)) return json(res, 404, { error: "no app on that message" });
       const doc = apps.appDocument(threadId, m[2]!, approvalOf(threadId));
@@ -105,7 +80,6 @@ export function createChatAppRoutes(deps: ChatAppRouteDeps): RouteHandler {
     const refused = deps.threadRefusal?.(auth, threadId);
     if (refused) return json(res, 403, { error: refused });
     const row = appRow(store, threadId, messageId);
-    // An app row of this bot's thread: no `from`, or this bot's own.
     if (!row || (row.from && row.from.botId !== bot.id)) return json(res, 404, { error: "That app is not in this conversation." });
 
     if (action === "context") {
@@ -114,7 +88,6 @@ export function createChatAppRoutes(deps: ChatAppRouteDeps): RouteHandler {
       return result.ok ? json(res, 200, { ok: true }) : json(res, result.status, { error: result.error });
     }
 
-    // Rule 15: a bot's page has no server to call.
     if (row.app.source !== "mcp") return json(res, 404, { error: "That app has no server to call." });
     if (typeof body.method !== "string" || !(APP_RPC_METHODS as readonly string[]).includes(body.method)) {
       return json(res, 400, { error: `method must be one of ${APP_RPC_METHODS.join(", ")}` });

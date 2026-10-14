@@ -1,9 +1,3 @@
-// What an app row asks of the server (docs/superpowers/specs/2026-10-14-chat-apps-design.md,
-// "Routes and the phone allowlist"): the document a frame mounts from, an MCP
-// app's calls to its own server, the model context it sets, and the message
-// it sends as the person. The bridge router (shared/app-frame/bridge.ts)
-// decides whether a call may go at all; this module only carries it and turns
-// every refusal into the JSON-RPC error the View is told.
 import { api, ApiError } from "@/state/store";
 import type { AppBlockedReason, AppDocument } from "../../../shared/app";
 import { RPC_HOST_REFUSED, type AppContextUpdate, type AppRpcMethod, type JsonRpcError } from "../../../shared/app-frame/bridge";
@@ -20,8 +14,6 @@ function isRecord(value: unknown): value is Record<string, unknown> {
   return Boolean(value) && typeof value === "object" && !Array.isArray(value);
 }
 
-/** The server answered, and said no: `status` and its sentence. Anything
- * else (no answer at all) is `offline`. */
 export type AppFetchFailure = { offline: true } | { offline: false; status: number; error: string };
 
 export class AppDocumentError extends Error {
@@ -38,8 +30,6 @@ function failureOf(error: unknown): AppFetchFailure {
   return { offline: true };
 }
 
-/** GET the AppDocument a frame mounts from. Never cached by the server:
- * `can` and `blocked` follow sign-in and settings. */
 export async function fetchAppDocument(threadId: string, messageId: string, signal?: AbortSignal): Promise<AppDocument> {
   try {
     const doc = await api<AppDocument>(appDocumentPath(threadId, messageId), { signal });
@@ -52,10 +42,8 @@ export async function fetchAppDocument(threadId: string, messageId: string, sign
   }
 }
 
-/** Why an rpc call was refused, as the rpc route says it. */
 export interface AppRpcRefusal {
   status: number;
-  /** What the View is told. */
   error: JsonRpcError;
   /** 401: the person must sign in to this server again. */
   signIn?: { server: string };
@@ -87,7 +75,6 @@ function rpcRefusal(error: unknown): AppRpcRefusal {
   return refusal;
 }
 
-/** One MCP app → server call through POST /api/bots/:botId/apps/:messageId/rpc. */
 export async function callAppRpc(args: {
   botId: string;
   threadId: string;
@@ -108,8 +95,6 @@ export async function callAppRpc(args: {
   }
 }
 
-/** ui/update-model-context: kept on the row, handed to the model with the
- * person's next message. */
 export async function postAppContext(args: { botId: string; threadId: string; messageId: string; update: AppContextUpdate }): Promise<void> {
   await api(appActionPath(args.botId, args.messageId, "context"), {
     method: "POST",
@@ -117,13 +102,9 @@ export async function postAppContext(args: { botId: string; threadId: string; me
   });
 }
 
-/** Minted the way the store mints one for a typed send. */
 export const newAppSendId = (): string => crypto.randomUUID();
 
-/** ui/message: the person's next message, sent by the app, as `appMessage`
- * on the route a typed message uses. The server writes it as a reply to the
- * app row with `fromApp`, and starts, steers or queues a turn as for any
- * message. Rejects with the server's sentence, or "Offline". */
+/** Rejects with the server's sentence, or "Offline". */
 export async function sendAppMessage(args: { botId: string; threadId: string; messageId: string; text: string; sendId: string }): Promise<void> {
   try {
     await api(`/api/bots/${encodeURIComponent(args.botId)}/messages`, {

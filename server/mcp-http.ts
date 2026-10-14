@@ -190,15 +190,10 @@ export class RemoteMcpClient {
     this.onNotification = options.onNotification;
   }
 
-  /** Whether the server took the extensions this client advertised: "ok",
-   * "refused" (it refused that initialize, and the plain one passed), or
-   * undefined when none were advertised. */
   extensions: "ok" | "refused" | undefined;
 
-  /** `extensions` (MCP Apps: io.modelcontextprotocol/ui) go in
-   * `capabilities.extensions`. A strict server may refuse a field it does not
-   * know (HTTP 400, or a JSON-RPC error): then the plain handshake is sent
-   * once more without them, and `extensions` says "refused". */
+  /** A strict server refuses an initialize field it does not know (HTTP 400 or a JSON-RPC error), so a
+   * refused handshake with `extensions` is sent once more without them. */
   async initialize(clientName: string, signal: AbortSignal, options: { extensions?: Record<string, unknown> } = {}): Promise<unknown> {
     const params = { protocolVersion: PROTOCOL_VERSION, capabilities: {}, clientInfo: { name: clientName, version: "1" } };
     let result: unknown;
@@ -208,7 +203,6 @@ export class RemoteMcpClient {
         this.extensions = "ok";
       } catch (error) {
         if (signal.aborted || !(error instanceof McpRpcError || (error instanceof McpHttpError && error.status === 400))) throw error;
-        // Nothing of the refused handshake carries over.
         this.sessionId = null;
         this.extensions = "refused";
         result = await this.request("initialize", params, signal);

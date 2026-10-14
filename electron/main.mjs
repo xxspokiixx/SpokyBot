@@ -2293,7 +2293,7 @@ function createWindow({ deferNavigation = false } = {}) {
   // No page may embed the local server, or any saved server, in this preload-bearing window.
   win.webContents.on("will-frame-navigate", (details) => {
     if (details.isMainFrame) return;
-    if (!appFrameNavigationAllowed(details)) return void details.preventDefault(); // a chat app frame loads only its own page
+    if (!appFrameNavigationAllowed(details)) return void details.preventDefault();
     let target = null;
     let page = null;
     try {

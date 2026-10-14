@@ -1,11 +1,3 @@
-// How each engine mounts an MCP app server (docs/superpowers/specs/
-// 2026-10-14-chat-apps-design.md, Decision 7 and "Who observes, per
-// engine"): through the innermost OMB component on its path, which observes
-// it, and never twice; a server without apps exactly as before. Claude Code
-// and Codex are covered in their own driver tests; this file covers the
-// shared decision (mcp-gate-config.ts appMountFor and gateServer's `apps`),
-// the ACP family and Muse Code (turn-mcp.ts), Pi, and the Chat Completions
-// runtime, whose client observes in process.
 import { createServer, type Server } from "node:http";
 import type { AddressInfo } from "node:net";
 import { fileURLToPath } from "node:url";

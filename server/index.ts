@@ -8223,7 +8223,6 @@ async function acceptDirectSend(
     callId?: string;
     dataContext?: DataContext;
     personPresent: boolean;
-    /** Chat apps: undelivered app context for the prompt, and the app that sent these words (server/chat-apps.ts). */
     app?: { context?: string; fromApp?: Message["fromApp"] };
   },
   guardedStart?: (currentAtStart: BotRecord) => Promise<DirectSendReceipt>,
@@ -8639,7 +8638,6 @@ async function startTurn(
     callId?: string;
     relayed?: boolean;
     dataContext?: DataContext;
-    /** Chat apps: app context in front of the provider text, and the app that sent the words (stored as fromApp). */
     app?: { context?: string; fromApp?: Message["fromApp"] };
     onDispatchError?: (message: string) => void;
     compactOnly?: boolean;
@@ -13941,7 +13939,7 @@ ROUTES.push(createBotMessageRoutes({
   deliverLateQuestionAnswer, interruptDirectThread, cancelDirectTurnDispatch, revokeInternalCapabilitiesForThread,
   cancelGroupTurnOperations, closeOpenApprovals,
 }));
-const chatApps = createChatApps({ store, dataDir: DATA_DIR }); // Chat apps: bot pages and MCP apps (routes/chat-apps.ts, chat-apps-mcp.ts).
+const chatApps = createChatApps({ store, dataDir: DATA_DIR });
 const chatAppsMcp = createChatAppsMcp({ store, apps: chatApps, dataDir: DATA_DIR, storedServers: () => cfg.mcpServers ?? {}, mountedServers: engineMcpServers, oauth: mcpOAuth });
 ROUTES.push(createChatAppRoutes({ store, apps: chatApps, threadRefusal: cloudThreadRefusal, mcpRpc: chatAppsMcp.rpc }));
 // `let` slots are read per request.

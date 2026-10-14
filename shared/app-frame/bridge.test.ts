@@ -1,7 +1,3 @@
-// The bridge router (shared/app-frame/bridge.ts) against security rules 9 to
-// 12 and the method table of docs/superpowers/specs/2026-10-14-chat-apps-design.md:
-// handshake order, the method table, engagement, rate limits, the size clamp,
-// teardown, malformed and oversized messages, and the wrong `source`.
 import { describe, expect, it } from "vitest";
 
 import type { AppDocument } from "../app.ts";

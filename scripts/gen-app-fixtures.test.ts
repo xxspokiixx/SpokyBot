@@ -1,6 +1,3 @@
-// The phone fixtures for chat apps (scripts/gen-app-fixtures.ts) are what
-// the server stores and serves, they are the same every run, and the host
-// page they ship with is the committed one, hash included.
 import { mkdtempSync, readFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";

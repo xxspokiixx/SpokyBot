@@ -1,19 +1,8 @@
-// One app frame on the desktop, without React: the sandboxed srcdoc iframe,
-// the shared bridge router wired to it, and the person's engagement with it
-// (docs/superpowers/specs/2026-10-14-chat-apps-design.md, "Desktop" and
-// "Engagement and limits"). AppFrame.tsx mounts it; the Electron security
-// smoke (scripts/smoke-app-frames.mjs) bundles this same file, so the frame
-// it probes is the one the app draws.
-//
-// Protocol logic lives only in shared/app-frame/bridge.ts. This file does
-// what a platform must: create the frame, hand the router each `message`
-// event of this window, post to the frame, and say whether the person is
-// interacting with it.
 import type { AppDocument } from "../../../shared/app";
 import { APP_FRAME_LIMITS, createAppBridge, type AppBridgeAdapter, type AppHostContext } from "../../../shared/app-frame/bridge";
 
-/** Security rule 1: exactly these two tokens. Never allow-same-origin,
- * allow-popups or allow-top-navigation; and no `allow` attribute. */
+/** Exactly these two tokens: never allow-same-origin, allow-popups or allow-top-navigation, and no `allow`
+ * attribute. */
 export const APP_FRAME_SANDBOX = "allow-scripts allow-forms";
 
 /** Focus that entered the frame within this long after a Tab press came
@@ -31,16 +20,11 @@ export interface AppEngagement {
   dispose(): void;
 }
 
-/** Desktop engagement for one iframe element. Focus moving into a frame is
- * seen from outside as the window's `blur` (or the iframe element's own
- * `focus`) with the iframe as the active element; the pointer must be over
- * it then, so a frame cannot focus itself into being "engaged".
- *
- * "Over it" has two signs. A frame in this page's process gives its element
- * pointerenter and pointerleave. A frame Chromium puts in a process of its
- * own (Chrome isolates sandboxed frames; the remote web client runs there)
- * gives the page nothing once the pointer is inside it, so the page keeps
- * where it last saw the pointer: on its way in, that is at the frame's edge. */
+/** Focus moving into a frame is seen from outside as the window's `blur` (or the iframe element's own
+ * `focus`) with the iframe as the active element; the pointer must be over it then, so a frame cannot focus
+ * itself into being engaged. A frame Chromium puts in a process of its own (Chrome isolates sandboxed
+ * frames) gives the page no pointer events once the pointer is inside it, so the page keeps where it last
+ * saw the pointer: on its way in, that is at the frame's edge. */
 export function trackAppEngagement(iframe: HTMLIFrameElement): AppEngagement {
   const doc = iframe.ownerDocument;
   const win = doc.defaultView;
@@ -82,7 +66,6 @@ export function trackAppEngagement(iframe: HTMLIFrameElement): AppEngagement {
   doc.addEventListener("pointermove", onMove, { capture: true, passive: true });
   doc.documentElement.addEventListener("mouseleave", onGone);
   win?.addEventListener("blur", soon);
-  // Focus came back to the app (or to another frame): no longer engaged.
   win?.addEventListener("focus", onLeft);
   return {
     engaged: () => {
@@ -104,19 +87,13 @@ export function trackAppEngagement(iframe: HTMLIFrameElement): AppEngagement {
   };
 }
 
-/** What the platform does for the router, less what this file does itself
- * (post, engagement, the clock). */
 export type AppFrameAdapter = Omit<AppBridgeAdapter, "post" | "engaged" | "now">;
 
 export interface AppFrameHostOptions {
-  /** The element the frame goes in. */
   container: HTMLElement;
   doc: AppDocument;
-  /** The frame's accessible name. */
   title: string;
-  /** Starting height (px), before the View reports its own. */
   height: number;
-  /** Theme, skin, width and maxHeight (containerDimensions.maxHeight is the clamp). */
   hostContext: AppHostContext;
   hostVersion: string;
   adapter: AppFrameAdapter;
@@ -129,9 +106,7 @@ export interface AppFrameHost {
   contextChanged(partial: AppHostContext): void;
   /** ui/resource-teardown (at most a second), then the frame is removed. */
   teardown(): Promise<void>;
-  /** The row is leaving the page now (a thread switch): the frame moves,
-   * running, to a hidden place of its own, is asked to tear down there (at
-   * most a second), then goes. A browser that cannot move a frame without
+  /** The frame moves, running, to a hidden place to be torn down; a browser that cannot move a frame without
    * reloading it removes it at once. */
   retire(): void;
   /** Remove now, without asking the View. */
@@ -140,8 +115,6 @@ export interface AppFrameHost {
 
 const PARKED_ID = "omb-app-frames-leaving";
 
-/** Where the frames of rows that left the page wait out their teardown:
- * off screen, inert, and hidden from assistive technology. */
 function parkingPlace(doc: Document): HTMLElement {
   const existing = doc.getElementById(PARKED_ID);
   if (existing) return existing;
@@ -156,8 +129,7 @@ function parkingPlace(doc: Document): HTMLElement {
 
 type MovableParent = HTMLElement & { moveBefore?: (node: Node, child: Node | null) => void };
 
-/** The frame element, as rule 1 requires. Its srcdoc is set by the caller,
- * verbatim, only once the bridge listens. */
+/** The caller sets its srcdoc, verbatim, only once the bridge listens. */
 export function createAppIframe(doc: Document, title: string, height: number, theme?: "light" | "dark"): HTMLIFrameElement {
   const iframe = doc.createElement("iframe");
   iframe.setAttribute("sandbox", APP_FRAME_SANDBOX);
@@ -183,7 +155,6 @@ export function mountAppFrame(options: AppFrameHostOptions): AppFrameHost {
   const iframe = createAppIframe(ownerDocument, options.title, options.height, options.hostContext.theme);
   const engagement = trackAppEngagement(iframe);
   let gone = false;
-  /** Its row has left: the View is being torn down where nobody sees it. */
   let leaving = false;
   const bridge = createAppBridge({
     doc,
@@ -203,8 +174,6 @@ export function mountAppFrame(options: AppFrameHostOptions): AppFrameHost {
       now: () => Date.now(),
     },
   });
-  // Security rule 9 is the router's: it drops any event whose source is not
-  // this frame's window, and anything that is not JSON-RPC of at most 1 MB.
   const onMessage = (event: MessageEvent) => bridge.handleMessage({ source: event.source, data: event.data });
   win?.addEventListener("message", onMessage);
   // The router listens before the frame can speak: it loads on insertion.

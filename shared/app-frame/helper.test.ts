@@ -1,7 +1,3 @@
-// The helper injected into a bot's page (helper.ts) is a standard View:
-// run as written against the bridge router, `window.mausbot` sends, opens
-// and sets context through the same protocol an SDK view uses, applies the
-// host's theme, reports its size and answers teardown.
 import { Window } from "happy-dom";
 import { afterEach, describe, expect, it } from "vitest";
 

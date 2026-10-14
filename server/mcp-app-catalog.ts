@@ -1,18 +1,6 @@
-// Which of the person's MCP servers have apps (docs/superpowers/specs/
-// 2026-10-14-chat-apps-design.md, "App catalog"), persisted to
-// DATA_DIR/mcp-app-catalog.json.
-//
-// One entry per server name, kept for the configuration it was learned from
-// (`hash`: the command, its arguments and environment, or the URL; never a
-// sign-in token): an edited server is a server never seen. An entry says
-// whether the server has apps (a tool with a `ui://` UI), whether it took
-// OMB's UI extension, and the app-relevant tools (those with a UI or a
-// visibility), which is what Settings and the approval rules read.
-//
-// Filled by the Settings → Test probe and the background probe
-// (server/chat-apps-mcp.ts), the app connections' tools/list
-// (mcp-app-connections.ts) and every reported app call. Mount code consults
-// `apps` (Decision 7): a server never probed or observed is mounted as today.
+// Which of the person's MCP servers have apps, persisted to DATA_DIR/mcp-app-catalog.json. An entry belongs
+// to the configuration it was learned from, so an edited server is a server never seen, and a server never
+// probed or observed is mounted unchanged.
 import { createHash, randomBytes } from "node:crypto";
 import { mkdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";
 import { dirname } from "node:path";
@@ -20,7 +8,6 @@ import { dirname } from "node:path";
 import type { McpServerSpec } from "./contracts.ts";
 import { toolUiResource, toolVisibility, uiMeta, type AppVisibility } from "./mcp-app-observer.ts";
 
-/** An entry older than this is probed again in the background. */
 export const MCP_APP_CATALOG_STALE_MS = 7 * 24 * 60 * 60_000;
 const MAX_TOOLS = 500;
 
@@ -50,10 +37,7 @@ function isRecord(value: unknown): value is Json {
   return Boolean(value) && typeof value === "object" && !Array.isArray(value);
 }
 
-/** What a server is, for the catalog: a URL server's type and address, a
- * command server's command, arguments and environment. Headers are left
- * out, so a refreshed sign-in token is the same server. Hashed: no
- * credential is stored. */
+/** Headers are left out, so a refreshed sign-in token is the same server; hashed, so no credential is stored. */
 export function mcpServerConfigHash(server: McpServerSpec | Json): string {
   const record = server as Json;
   const identity = typeof record.url === "string"
@@ -62,8 +46,6 @@ export function mcpServerConfigHash(server: McpServerSpec | Json): string {
   return createHash("sha256").update(JSON.stringify(identity)).digest("hex");
 }
 
-/** The catalog's view of one tool definition, or null when it is not an app
- * tool (no UI and no visibility). */
 export function catalogTool(tool: unknown): McpAppCatalogTool | null {
   if (!isRecord(tool) || typeof tool.name !== "string") return null;
   const resourceUri = toolUiResource(tool);
@@ -91,7 +73,6 @@ export class McpAppCatalog {
   private readonly now: () => number;
   private entries: Map<string, StoredEntry> | null = null;
 
-  /** `file` null: kept in memory only (tests). */
   constructor(file: string | null, options: { now?: () => number } = {}) {
     this.file = file;
     this.now = options.now ?? Date.now;
@@ -121,7 +102,6 @@ export class McpAppCatalog {
     }
   }
 
-  /** The entry for this server as configured now, or undefined. */
   get(name: string, server: McpServerSpec | Json): McpAppCatalogEntry | undefined {
     const entry = this.load().get(name);
     if (!entry || entry.hash !== mcpServerConfigHash(server)) return undefined;
@@ -129,7 +109,6 @@ export class McpAppCatalog {
     return rest;
   }
 
-  /** No entry, or one older than MCP_APP_CATALOG_STALE_MS. */
   stale(name: string, server: McpServerSpec | Json): boolean {
     const entry = this.get(name, server);
     return !entry || this.now() - entry.at > MCP_APP_CATALOG_STALE_MS;
@@ -141,15 +120,13 @@ export class McpAppCatalog {
     const before = entries.get(name);
     const stored: StoredEntry = { ...next, hash: mcpServerConfigHash(server) };
     entries.set(name, stored);
-    // A record that changes nothing but its time is saved at most hourly.
     const { at: _a, ...was } = before ?? { at: 0 };
     const { at: _b, ...now } = stored;
     if (!before || JSON.stringify(was) !== JSON.stringify(now) || stored.at - before.at > 60 * 60_000) this.save();
     return next;
   }
 
-  /** A whole tools/list (a probe, an app connection): the server's tools and
-   * whether it took the extension. `uiExtension` undefined keeps what was known. */
+  /** `uiExtension` undefined keeps what was known. */
   recordList(name: string, server: McpServerSpec | Json, tools: unknown[], uiExtension?: UiExtensionState): McpAppCatalogEntry {
     const known: Record<string, McpAppCatalogTool> = {};
     for (const tool of tools) {
@@ -164,7 +141,6 @@ export class McpAppCatalog {
     }));
   }
 
-  /** One observed app call: this server has apps, and this is its tool. */
   recordTool(name: string, server: McpServerSpec | Json, definition: unknown): McpAppCatalogEntry | undefined {
     const tool = catalogTool(definition);
     if (!tool || !tool.resourceUri) return undefined;
@@ -176,7 +152,6 @@ export class McpAppCatalog {
     }));
   }
 
-  /** Forget a server (removed from Settings). */
   forget(name: string): void {
     if (this.load().delete(name)) this.save();
   }

@@ -1,10 +1,5 @@
 // @vitest-environment happy-dom
-// An app row on the desktop: the chrome the host draws around the frame
-// (header, info, Allow bar, strips, placeholder), the document it mounts
-// from, and what the frame's requests turn into: an appMessage on the send
-// route, an rpc that waits on Allow, a sign-in strip, a new frame for
-// update_html, a fold for request-teardown. happy-dom runs no script in the
-// frame, so the View is played by message events from the frame's window.
+// happy-dom runs no script in the frame, so the View is played by message events from the frame's window.
 import { act, createElement } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { renderToStaticMarkup } from "react-dom/server";

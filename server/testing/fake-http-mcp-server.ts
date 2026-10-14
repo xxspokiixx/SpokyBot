@@ -2,10 +2,6 @@
 // older SSE transport; it records headers and can hold requests open. `strictInitialize` refuses any
 // initialize field outside the base schema with "Unrecognized field '<name>'", as Jackson-strict
 // servers do although the spec says unknown fields are ignored.
-//
-// For MCP Apps it also serves `ui://` resources (`resources`): a tool names
-// one in `_meta.ui.resourceUri`, and `_meta.ui.visibility: ["app"]` makes a
-// tool one only its view may call. Every resources/read is recorded in `reads`.
 import { createServer, type IncomingMessage, type RequestListener, type Server, type ServerResponse } from "node:http";
 import { createServer as createHttpsServer, type Server as HttpsServer } from "node:https";
 import type { AddressInfo } from "node:net";
@@ -53,9 +49,7 @@ export interface FakeHttpMcpOptions {
   /** with strictInitialize: the schema the server knows (default "2025-06-18"); "2025-11-25" adds
    * elicitation.form/url but still not form.schemaValidation */
   strictSchema?: keyof typeof STRICT_INITIALIZE_SCHEMAS;
-  /** MCP Apps: `ui://` resources this server serves (resources/list and
-   * resources/read). Tools name them in `_meta.ui.resourceUri`; a tool whose
-   * `_meta.ui.visibility` is ["app"] is one only its view may call. */
+  /** MCP Apps `ui://` resources for resources/list and resources/read */
   resources?: FakeHttpMcpResource[];
   /** serverInfo.title in the initialize answer */
   serverTitle?: string;
@@ -70,7 +64,7 @@ export interface FakeHttpMcpResource {
   blob?: string;
   /** `_meta` on the resources/read content item */
   _meta?: Record<string, unknown>;
-  /** `_meta` on the resources/list entry (the draft spec's other location) */
+  /** `_meta` on the resources/list entry, where the MCP Apps draft also allows it */
   listMeta?: Record<string, unknown>;
 }
 
