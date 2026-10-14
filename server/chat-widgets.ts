@@ -123,7 +123,7 @@ function canonicalWidget(input: Record<string, unknown>): CanonicalWidget {
  * chat-app tools (show_html, update_html: server/chat-apps.ts), or (no
  * `tool`) the legacy options card. The route has already checked that the
  * conversation is the calling bot's own. */
-export function createAgentCard(args: {
+export interface AgentCardArgs {
   store: AgentCardStore;
   bot: { id: string; name: string; color: MausColor };
   threadId: string;
@@ -133,10 +133,23 @@ export function createAgentCard(args: {
    * not seen (server/delta-context.ts Handoffs.authored). */
   authored?(messageId: string): void;
   /** The chat-app services (server/chat-apps.ts createChatApps). */
-  apps?: Pick<ChatApps, "createAppCard">;
-}): AgentCardResult {
+  apps?: Pick<ChatApps, "createAppCard" | "recordMcpAppCall">;
+}
+
+/** An observer's report of an MCP app call (server/mcp-app-observer.ts). */
+export type McpAppCardInput = { tool: "mcp_app" } & Record<string, unknown>;
+
+/** `tool: "mcp_app"` reads the app's page from its server, so it answers
+ * later; every other tool answers at once. */
+export function createAgentCard(args: AgentCardArgs & { input: McpAppCardInput }): Promise<AgentCardResult>;
+export function createAgentCard(args: AgentCardArgs): AgentCardResult;
+export function createAgentCard(args: AgentCardArgs): AgentCardResult | Promise<AgentCardResult> {
   const { store, bot, threadId, input } = args;
   if (!isRecord(input) || input.tool === undefined) return createOptionsCard(args);
+  if (input.tool === "mcp_app") {
+    if (!args.apps?.recordMcpAppCall) return Promise.resolve({ ok: false, status: 400, error: "MCP apps are not available on this computer." });
+    return args.apps.recordMcpAppCall({ bot, threadId, input, ...(args.authored ? { authored: args.authored } : {}) });
+  }
   if (input.tool === "show_html" || input.tool === "update_html") {
     if (!args.apps) return { ok: false, status: 400, error: "Pages are not available on this computer." };
     return args.apps.createAppCard({ bot, threadId, input, ...(args.authored ? { authored: args.authored } : {}) });

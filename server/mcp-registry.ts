@@ -7,6 +7,10 @@ import type { McpServerSpec, RemoteMcpSpec, StdioMcpSpec } from "./contracts.ts"
  * stored entry: a command this machine runs, or a URL to connect to. */
 export interface StoredStdioMcpServer extends StdioMcpSpec {
   enabled: boolean;
+  /** "Show its apps in chat" (docs/superpowers/specs/2026-10-14-chat-apps-design.md):
+   * stored only as `false`; on by default. Off, the server is mounted as it
+   * always was and no MCP app of it is shown. */
+  apps?: false;
 }
 /** An app registered in advance with the server's authorization server,
  * for servers that do not let apps register themselves. The secret is a
@@ -19,6 +23,8 @@ export interface McpOAuthClientConfig {
 export interface StoredRemoteMcpServer extends RemoteMcpSpec {
   enabled: boolean;
   oauth?: McpOAuthClientConfig;
+  /** See StoredStdioMcpServer.apps. */
+  apps?: false;
 }
 export type StoredMcpServer = StoredStdioMcpServer | StoredRemoteMcpServer;
 
@@ -29,6 +35,8 @@ export interface StdioMcpServerListing {
   args: string[];
   envKeys: string[];
   enabled: boolean;
+  /** "Show its apps in chat": true unless switched off. */
+  apps: boolean;
 }
 export interface RemoteMcpServerListing {
   name: string;
@@ -36,6 +44,8 @@ export interface RemoteMcpServerListing {
   url: string;
   headerKeys: string[];
   enabled: boolean;
+  /** "Show its apps in chat": true unless switched off. */
+  apps: boolean;
   /** present when a pre-registered sign-in app is set */
   oauth?: { clientId: string; scopes: string[]; clientSecretConfigured: boolean };
 }
@@ -111,6 +121,7 @@ const stdioEntrySchema = z.object({
   args: z.array(z.string().max(4_096)).max(MAX_ARGS).optional(),
   env: z.record(z.string(), z.string().max(16_384)).optional(),
   enabled: z.boolean().optional(),
+  apps: z.boolean().optional(),
 }).strict();
 
 const stdioMutationSchema = stdioEntrySchema.extend({
@@ -137,6 +148,7 @@ const remoteEntrySchema = z.object({
   headers: z.record(z.string(), z.string().max(16_384)).optional(),
   oauth: oauthClientSchema.optional(),
   enabled: z.boolean().optional(),
+  apps: z.boolean().optional(),
 }).strict();
 
 const remoteMutationSchema = remoteEntrySchema.extend({
@@ -228,6 +240,7 @@ function parseStdio(raw: unknown, mutation: boolean, existing?: StoredMcpServer)
       args: parsed.data.args ?? [],
       env: env.values,
       enabled: enabledFor(parsed.data.enabled, mutation, existing),
+      ...appsFor(parsed.data.apps, mutation, existing),
     },
   };
 }
@@ -257,6 +270,7 @@ function parseRemote(raw: unknown, mutation: boolean, existing?: StoredMcpServer
       headers: headers.values,
       ...(oauth.value ? { oauth: oauth.value } : {}),
       enabled: enabledFor(parsed.data.enabled, mutation, existing),
+      ...appsFor(parsed.data.apps, mutation, existing),
     },
   };
 }
@@ -267,6 +281,13 @@ function parseRemote(raw: unknown, mutation: boolean, existing?: StoredMcpServer
 function enabledFor(value: boolean | undefined, mutation: boolean, existing?: StoredMcpServer): boolean {
   if (!mutation) return value !== false;
   return existing ? (value ?? existing.enabled) : false;
+}
+
+/** The apps switch, kept only when off. An edit that does not mention it
+ * keeps the current one. */
+function appsFor(value: boolean | undefined, mutation: boolean, existing?: StoredMcpServer): { apps?: false } {
+  const on = value ?? (mutation && existing ? existing.apps !== false : true);
+  return on ? {} : { apps: false };
 }
 
 export function parseStoredMcpServer(name: string, raw: unknown): Parsed {
@@ -337,6 +358,7 @@ export function listMcpServers(raw: Record<string, unknown> | undefined): McpSer
         url: server.url,
         headerKeys: Object.keys(server.headers).sort(),
         enabled: server.enabled,
+        apps: server.apps !== false,
         ...(server.oauth ? {
           oauth: { clientId: server.oauth.clientId, scopes: server.oauth.scopes ?? [], clientSecretConfigured: Boolean(server.oauth.clientSecret) },
         } : {}),
@@ -348,6 +370,7 @@ export function listMcpServers(raw: Record<string, unknown> | undefined): McpSer
       args: server.args,
       envKeys: Object.keys(server.env).sort(),
       enabled: server.enabled,
+      apps: server.apps !== false,
     }];
   });
 }

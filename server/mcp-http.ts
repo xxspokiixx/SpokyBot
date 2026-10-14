@@ -213,13 +213,33 @@ export class RemoteMcpClient {
     this.onNotification = options.onNotification;
   }
 
-  /** The MCP handshake: initialize, then the initialized notification. */
-  async initialize(clientName: string, signal: AbortSignal): Promise<unknown> {
-    const result = await this.request("initialize", {
-      protocolVersion: PROTOCOL_VERSION,
-      capabilities: {},
-      clientInfo: { name: clientName, version: "1" },
-    }, signal);
+  /** Whether the server took the extensions this client advertised: "ok",
+   * "refused" (it refused that initialize, and the plain one passed), or
+   * undefined when none were advertised. */
+  extensions: "ok" | "refused" | undefined;
+
+  /** The MCP handshake: initialize, then the initialized notification.
+   * `extensions` (MCP Apps: io.modelcontextprotocol/ui) go in
+   * `capabilities.extensions`. A strict server may refuse a field it does not
+   * know (HTTP 400, or a JSON-RPC error): then the plain handshake is sent
+   * once more without them, and `extensions` says "refused". */
+  async initialize(clientName: string, signal: AbortSignal, options: { extensions?: Record<string, unknown> } = {}): Promise<unknown> {
+    const params = { protocolVersion: PROTOCOL_VERSION, capabilities: {}, clientInfo: { name: clientName, version: "1" } };
+    let result: unknown;
+    if (options.extensions && Object.keys(options.extensions).length) {
+      try {
+        result = await this.request("initialize", { ...params, capabilities: { extensions: options.extensions } }, signal);
+        this.extensions = "ok";
+      } catch (error) {
+        if (signal.aborted || !(error instanceof McpRpcError || (error instanceof McpHttpError && error.status === 400))) throw error;
+        // Nothing of the refused handshake carries over.
+        this.sessionId = null;
+        this.extensions = "refused";
+        result = await this.request("initialize", params, signal);
+      }
+    } else {
+      result = await this.request("initialize", params, signal);
+    }
     if (isRecord(result) && typeof result.protocolVersion === "string") this.protocolVersion = result.protocolVersion;
     await this.notify("notifications/initialized", undefined, signal);
     return result;

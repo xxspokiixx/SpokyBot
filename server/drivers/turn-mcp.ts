@@ -5,7 +5,7 @@
 // every such engine the same way.
 import type { SendTurnInput } from "../contracts.ts";
 import { canUseMcpServer } from "../../shared/tool-scope.ts";
-import { gateServer, mcpStdioServer } from "../mcp-gate-config.ts";
+import { appMountFor, gateServer, mcpStdioServer, type AppMount } from "../mcp-gate-config.ts";
 
 export interface TurnStdioMcpServer {
   name: string;
@@ -17,9 +17,15 @@ export interface TurnStdioMcpServer {
 /** A URL server is always mounted as OpenMausBot's remote proxy, even for an
  * agent that speaks HTTP itself: the proxy opens the connection with the same
  * minimal handshake as Settings → Test (mcp-http.ts), where an agent's own MCP
- * client adds capability fields a strict server refuses. */
+ * client adds capability fields a strict server refuses.
+ *
+ * An MCP app server (appMountFor) is observed by the innermost OMB component
+ * on its path: a URL server by that proxy, a command server by the gate,
+ * which it then always goes through. */
 export function turnStdioMcpServers(turn: SendTurnInput): TurnStdioMcpServer[] {
   const servers: TurnStdioMcpServer[] = [];
+  /** Command app servers: their gate is the observer. */
+  const observedCommands = new Map<string, AppMount>();
   const add = (name: string, server: { command: string; args: string[]; env?: Record<string, string> } | undefined) => {
     if (server) servers.push({ name, command: server.command, args: server.args, env: server.env ?? {} });
   };
@@ -35,14 +41,19 @@ export function turnStdioMcpServers(turn: SendTurnInput): TurnStdioMcpServer[] {
   // this is defense in depth).
   for (const [name, server] of Object.entries(turn.integrations?.custom ?? {})) {
     if (servers.some((existing) => existing.name === name)) continue;
-    const stdio = "url" in server ? mcpStdioServer(server, { nodeEnv: { ELECTRON_RUN_AS_NODE: "1" } }) : server;
+    const apps = appMountFor(name, turn);
+    if (apps && !("url" in server)) observedCommands.set(name, apps);
+    const stdio = "url" in server ? mcpStdioServer(server, { nodeEnv: { ELECTRON_RUN_AS_NODE: "1" }, ...(apps ? { apps } : {}) })
+      : apps && turn.toolScope === undefined ? gateServer({ name, server, threadId: turn.threadId, budget: 0, apps, nodeEnv: { ELECTRON_RUN_AS_NODE: "1" } })
+      : server;
     if (!stdio) continue;
     servers.push({ name, command: stdio.command, args: stdio.args ?? [], env: stdio.env ?? {} });
   }
   if (turn.toolScope === undefined) return servers;
   return servers.filter((server) => canUseMcpServer(turn.toolScope, server.name)).map((server) => {
+    const apps = observedCommands.get(server.name);
     const gated = gateServer({ name: server.name, server: { command: server.command, args: server.args, env: server.env },
-      threadId: turn.threadId, budget: 0, toolScope: turn.toolScope, nodeEnv: { ELECTRON_RUN_AS_NODE: "1" } });
+      threadId: turn.threadId, budget: 0, toolScope: turn.toolScope, nodeEnv: { ELECTRON_RUN_AS_NODE: "1" }, ...(apps ? { apps } : {}) });
     if (!gated) throw new Error("Tool selection requires an MCP gate.");
     return { name: server.name, command: gated.command, args: gated.args, env: gated.env };
   });

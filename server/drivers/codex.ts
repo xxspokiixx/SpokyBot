@@ -59,7 +59,7 @@ import { parseProtocolAskQuestions, questionAnswersById, questionChoices } from 
 import { codexVersionBehind, readLatestCodexRelease } from "./codex-release.ts";
 import { canUseMcpServer } from "../../shared/tool-scope.ts";
 import { assertToolScopeSupported } from "../../shared/tool-scope-support.ts";
-import { gateServer, mcpStdioServer } from "../mcp-gate-config.ts";
+import { appMountFor, gateServer, mcpStdioServer } from "../mcp-gate-config.ts";
 import { CALL_TOOL, DESCRIBE_TOOL, SEARCH_TOOL, directoryCallTarget } from "../mcp-directory.ts";
 
 export { decodeCodexSelection, readCodexModelCatalog, STATIC_CODEX_MODELS } from "./codex-catalog.ts";
@@ -897,16 +897,16 @@ export const CodexDriver: ProviderDriver<CodexConfig> = {
           // A plan turn has no tool_search (chatgptPlanCodexArgs): its URL
           // servers are also searched through the proxy's tool directory.
           // Own-login and Company turns keep Codex's hosted tool_search, so
-          // their catalog passes through whole.
+          // their catalog passes through whole. An MCP app server is observed.
           const directory = plan && "url" in server;
-          if (turn.toolScope === undefined && !("url" in server)) return server;
+          const apps = appMountFor(name, turn);
+          if (turn.toolScope === undefined && !("url" in server) && !apps) return server;
           const hash = createHash("sha256").update(mountName).digest("hex");
-          // A proxy's network settings come from the environment Codex runs
-          // with: Codex itself starts MCP children with only a few names.
-          const proxy = turn.toolScope === undefined
-            ? mcpStdioServer(server, { nodeEnv: { ELECTRON_RUN_AS_NODE: "1" }, ...(directory ? { directory: { name } } : {}), configEnvName: `OMB_REMOTE_MCP_CONFIG_${hash}`, sourceEnv: env })
+          // A proxy's network settings come from the environment Codex runs with.
+          const proxy = turn.toolScope === undefined && "url" in server
+            ? mcpStdioServer(server, { nodeEnv: { ELECTRON_RUN_AS_NODE: "1" }, ...(directory ? { directory: { name } } : {}), configEnvName: `OMB_REMOTE_MCP_CONFIG_${hash}`, sourceEnv: env, apps })
             : gateServer({ name, server, threadId, budget: 0, toolScope: turn.toolScope, nodeEnv: { ELECTRON_RUN_AS_NODE: "1" },
-              configEnvName: `OMB_GATE_CONFIG_${hash}`, directory, sourceEnv: env });
+              configEnvName: `OMB_GATE_CONFIG_${hash}`, directory, sourceEnv: env, apps });
           if (proxy && directory) directoryMounts.add(mountName);
           if (!proxy) return null;
           // The proxy's own network switches go in its env table, so the

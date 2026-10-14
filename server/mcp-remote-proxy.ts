@@ -11,6 +11,13 @@
 // the server says it changed, and a small catalog still passes through. The
 // same setting carries the bot's tool selection, so search, describe and
 // call_tool only ever see the tools the bot may use.
+//
+// MCP Apps (docs/superpowers/specs/2026-10-14-chat-apps-design.md): every
+// proxy drops the tools only an app's view may call from what the engine is
+// listed (directory included) and refuses the engine's calls to them. With
+// OMB_REMOTE_MCP_APPS the proxy also advertises the UI extension (connecting
+// without it if the server refuses it) and reports each call of a tool with
+// a UI to the harness (mcp-app-observer.ts).
 import { createInterface } from "node:readline";
 import { redactSecretsInText } from "../shared/redact.ts";
 import { allowsTool, parseToolScope, type ToolScope } from "../shared/tool-scope.ts";
@@ -37,7 +44,9 @@ import {
   plainHttpProxyFetch,
   remoteMcpSpec,
 } from "./mcp-http.ts";
+import { APP_ONLY_REFUSAL, AppObserver, REMOTE_MCP_APPS_ENV, UI_EXTENSION, modelVisible, parseAppMount } from "./mcp-app-observer.ts";
 import { lenientToolValidator, schemaProblems } from "./mcp-schema-validator.ts";
+import { APP_EXTENSION_KEY } from "../shared/app.ts";
 
 type Json = Record<string, unknown>;
 function isRecord(value: unknown): value is Json {
@@ -74,7 +83,7 @@ class Refusal extends Error {
   }
 }
 
-const SETTINGS = ["OMB_REMOTE_MCP_SERVER", "OMB_REMOTE_MCP_DIRECTORY"];
+const SETTINGS = ["OMB_REMOTE_MCP_SERVER", "OMB_REMOTE_MCP_DIRECTORY", REMOTE_MCP_APPS_ENV];
 /** Codex hands every MCP child one shared environment, so a mount there
  * names its own private record (`--config-env NAME`) holding the same
  * settings. Either way they leave this process's environment once read. */
@@ -118,6 +127,17 @@ function directorySettings(raw: string | undefined): { server: string; scope: To
   return fail("invalid tool directory configuration");
 }
 const directory = directorySettings(settings.OMB_REMOTE_MCP_DIRECTORY);
+/** MCP Apps: this proxy reports its server's UI tool calls. */
+const observer = (() => {
+  try {
+    const mount = parseAppMount(settings[REMOTE_MCP_APPS_ENV]);
+    return mount ? new AppObserver(mount, { log: (line) => process.stderr.write(`mcp-remote-proxy: ${line}\n`) }) : undefined;
+  } catch { return fail("invalid MCP apps configuration"); }
+})();
+/** The upstream handshake: OMB's own, with the UI extension when observing. */
+const HANDSHAKE = observer?.mount.extension ? { extensions: { [APP_EXTENSION_KEY]: UI_EXTENSION } } : {};
+/** Tools only an app's view may call, from the last catalog read upstream. */
+const appOnly = new Set<string>();
 
 /** Characters of a server's own error message the engine may read. */
 const REMOTE_ERROR_CHARS = 1_000;
@@ -187,6 +207,31 @@ const tasks = new Set<Promise<void>>();
 let initialized = false;
 let closing = false;
 
+/** One upstream request, as the engine's: a catalog page is observed and
+ * loses its app-only tools; a call to an app-only tool is refused, and a
+ * call's result is observed before it is relayed. */
+async function upstream(method: string, params: unknown, signal: AbortSignal): Promise<unknown> {
+  if (method === "initialize") {
+    const result = await client.initialize("OpenMausBot tool proxy", signal, HANDSHAKE);
+    if (client.extensions === "refused") process.stderr.write("mcp-remote-proxy: the server refused the MCP Apps extension; connected without it\n");
+    observer?.initialized(result);
+    return result;
+  }
+  if (method === "tools/call" && isRecord(params) && appOnly.has(params.name as string)) throw new Refusal(-32602, APP_ONLY_REFUSAL);
+  const result = await client.request(method, params, signal);
+  if (method === "tools/list" && isRecord(result) && Array.isArray(result.tools)) {
+    observer?.listed(result);
+    for (const tool of result.tools) {
+      if (!isRecord(tool) || typeof tool.name !== "string") continue;
+      if (modelVisible(tool)) appOnly.delete(tool.name);
+      else appOnly.add(tool.name);
+    }
+    return { ...result, tools: result.tools.filter(modelVisible) };
+  }
+  if (method === "tools/call") observer?.returned(params, result);
+  return result;
+}
+
 /** Every page of the upstream catalog, read under its own deadline so a
  * cancelled first request does not cancel it for the next one. */
 async function readCatalog(): Promise<CatalogTool[]> {
@@ -195,7 +240,7 @@ async function readCatalog(): Promise<CatalogTool[]> {
   const cursors = new Set<string>();
   let cursor: string | undefined;
   for (let page = 0; page < CATALOG_PAGES; page += 1) {
-    const result = await client.request("tools/list", cursor === undefined ? {} : { cursor }, signal);
+    const result = await upstream("tools/list", cursor === undefined ? {} : { cursor }, signal);
     if (!isRecord(result) || !Array.isArray(result.tools)) throw new Error("invalid tool catalog");
     for (const tool of result.tools) {
       if (isRecord(tool) && typeof tool.name === "string" && tool.name.trim()) tools.push(tool as CatalogTool);
@@ -268,16 +313,16 @@ async function callTool(params: unknown, signal: AbortSignal): Promise<unknown> 
     if ("answer" in call) return call.answer;
     // The catalog holds only selected tools; checked again all the same.
     if (!allowed(call.name)) return { content: [{ type: "text", text: SELECTION_EXCLUDES }], isError: true };
-    return client.request("tools/call", { ...(isRecord(params._meta) ? { _meta: params._meta } : {}), name: call.name, arguments: call.arguments }, signal);
+    return upstream("tools/call", { ...(isRecord(params._meta) ? { _meta: params._meta } : {}), name: call.name, arguments: call.arguments }, signal);
   }
   // A tool listed while the catalog was small stays callable by its name.
   if (!allowed(params.name)) throw new Refusal(-32602, SELECTION_EXCLUDES);
-  return client.request("tools/call", params, signal);
+  return upstream("tools/call", params, signal);
 }
 
 async function directed(message: Json, signal: AbortSignal): Promise<unknown> {
   if (message.method === "initialize") {
-    const result = await client.initialize("OpenMausBot tool proxy", signal);
+    const result = await upstream("initialize", undefined, signal);
     if (!isRecord(result)) return result;
     const info = isRecord(result.serverInfo) ? result.serverInfo : {};
     const title = typeof info.title === "string" ? info.title : typeof info.name === "string" ? info.name : undefined;
@@ -293,7 +338,7 @@ async function directed(message: Json, signal: AbortSignal): Promise<unknown> {
     return { tools: searched ? tools.listed(context) : tools.tools };
   }
   if (message.method === "tools/call") return callTool(message.params, signal);
-  return client.request(message.method as string, message.params, signal);
+  return upstream(message.method as string, message.params, signal);
 }
 
 async function handle(message: Json): Promise<void> {
@@ -324,11 +369,7 @@ async function handle(message: Json): Promise<void> {
   const deadline = message.method !== "tools/call" ? 30_000 : directory ? 120_000 : undefined;
   const signal = deadline === undefined ? controller.signal : AbortSignal.any([controller.signal, AbortSignal.timeout(deadline)]);
   try {
-    const result = directory
-      ? await directed(message, signal)
-      : message.method === "initialize"
-        ? await client.initialize("OpenMausBot tool proxy", signal)
-        : await client.request(message.method, message.params, signal);
+    const result = directory ? await directed(message, signal) : await upstream(message.method, message.params, signal);
     if (message.method === "initialize") initialized = true;
     send({ jsonrpc: "2.0", id: message.id, result });
   } catch (failure) {

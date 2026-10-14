@@ -449,7 +449,7 @@ import { screenFrameHash, screenSurfaceForTool, screenTouchingTool, settledFrame
 import { asSchedule, RoutineRequestService } from "./routine-requests.ts";
 import { directApply, UNDO_STALE, type DirectApply } from "./direct-apply.ts";
 import { createAgentCard } from "./chat-widgets.ts";
-import { createChatAppRoutes, createChatApps } from "./routes/chat-apps.ts";
+import { createChatAppRoutes, createChatApps, createChatAppsMcp } from "./routes/chat-apps.ts";
 import { buildBotOverview, type BotOverview, connectedAppsFacts } from "./bot-overview.ts";
 import { ProfileRequestService } from "./profile-requests.ts";
 import { ModelRequestService } from "./model-requests.ts";
@@ -11331,7 +11331,7 @@ async function startTurn(
       // never pre-allowed, so every call rides the normal permission flow.
       if (instance.adapter.capabilities.customMcp === true) {
         const custom = await withMcpSignIn(engineMcpServers(bot), mcpOAuth);
-        if (Object.keys(custom).length) integrations.custom = custom;
+        if (Object.keys(custom).length) Object.assign(integrations, { custom }, chatAppsMcp.turnMounts(custom, bot.toolScope));
       }
       // CLI engines work inside the bot's own workspace directory rather
       // than the user's home: a bot with file tools and acceptEdits gets a
@@ -17407,9 +17407,9 @@ ROUTES.push(createBotMessageRoutes({
   deliverLateQuestionAnswer, interruptDirectThread, cancelDirectTurnDispatch, revokeInternalCapabilitiesForThread,
   cancelGroupTurnOperations, closeOpenApprovals,
 }));
-// Chat apps: bot pages and MCP app documents, their context and server calls (routes/chat-apps.ts).
-const chatApps = createChatApps({ store, dataDir: DATA_DIR });
-ROUTES.push(createChatAppRoutes({ store, apps: chatApps, threadRefusal: cloudThreadRefusal }));
+const chatApps = createChatApps({ store, dataDir: DATA_DIR }); // Chat apps: bot pages and MCP apps (routes/chat-apps.ts, chat-apps-mcp.ts).
+const chatAppsMcp = createChatAppsMcp({ store, apps: chatApps, dataDir: DATA_DIR, storedServers: () => cfg.mcpServers ?? {}, mountedServers: engineMcpServers, oauth: mcpOAuth });
+ROUTES.push(createChatAppRoutes({ store, apps: chatApps, threadRefusal: cloudThreadRefusal, mcpRpc: chatAppsMcp.rpc }));
 // Conversation reads and uploads: the /api/bots snapshot, message pages, a
 // message's image or file, uploads, attachments, search, the export and a
 // conversation's job. `let` slots are read per request, visibility as the preamble does.
@@ -17718,7 +17718,7 @@ ROUTES.push(createMcpServerRoutes({
   cloudHome: CLOUD_HOME,
   fallbackPublicUrl: FALLBACK_PUBLIC_URL,
   mcpConfigBusy: { get: () => mcpConfigBusy, set: (busy) => { mcpConfigBusy = busy; } },
-  mcpServerResponse, mcpServerBody, mcpPolicyRefusal, persistMcpServers, savedCustomDomain,
+  mcpServerResponse, mcpServerBody, mcpPolicyRefusal, persistMcpServers, savedCustomDomain, appCatalog: chatAppsMcp,
 }));
 ROUTES.push(createComputerRoutes({
   store, cfg, sessions, teamComputers, computerControl,

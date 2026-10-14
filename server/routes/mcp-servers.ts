@@ -4,6 +4,14 @@
 // remote one, add one or paste a block of them, and edit, enable or remove
 // one. Writes share index.ts's `mcpConfigBusy` with the internal
 // mcp-servers route; it reaches here as a get/set view.
+//
+// MCP Apps (docs/superpowers/specs/2026-10-14-chat-apps-design.md): each
+// server's "Show its apps in chat" switch is `apps` in the listing (true
+// unless switched off) and PATCH {apps: boolean}. Test also tells the app
+// catalog what it found; a saved or switched-on URL server is probed in the
+// background (server/chat-apps-mcp.ts; a command server only by Test or a
+// turn that mounts it).
+import type { ChatAppsMcp } from "../chat-apps-mcp.ts";
 import type { CloudHomeConfig } from "../cloud-home.ts";
 import type { AppConfig } from "../config.ts";
 import { hostedWorkspaceConfiguration } from "../enterprise.ts";
@@ -35,12 +43,14 @@ export interface McpServerRouteDeps {
   /** Saves the servers and tells every client. */
   persistMcpServers(next: Record<string, unknown>): void;
   savedCustomDomain(): string | null;
+  /** MCP Apps: the catalog's probes, and forgetting a removed server. */
+  appCatalog?: Pick<ChatAppsMcp, "probeOptions" | "serverChanged" | "forgetServer">;
 }
 
 export function createMcpServerRoutes(deps: McpServerRouteDeps): RouteHandler {
   const {
     cfg, sessions, mcpOAuth, cloudHome: CLOUD_HOME, fallbackPublicUrl: FALLBACK_PUBLIC_URL, mcpConfigBusy,
-    mcpServerResponse, mcpServerBody, mcpPolicyRefusal, persistMcpServers, savedCustomDomain,
+    mcpServerResponse, mcpServerBody, mcpPolicyRefusal, persistMcpServers, savedCustomDomain, appCatalog,
   } = deps;
   const MAX_CONCURRENT_MCP_PROBES = 2;
   let mcpProbesInFlight = 0;
@@ -72,7 +82,7 @@ export function createMcpServerRoutes(deps: McpServerRouteDeps): RouteHandler {
           const signedIn = (await withMcpSignIn({ [name]: target }, mcpOAuth))[name];
           if (signedIn) target = { ...signedIn, enabled: target.enabled } as typeof target;
         }
-        const result = await probeMcpServer(target, undefined, controller.signal);
+        const result = await probeMcpServer(target, undefined, controller.signal, appCatalog?.probeOptions(name, parsed.server) ?? {});
         if (!result.ok && result.auth === "required" && isRemoteMcpServer(target)) mcpOAuth.markNeedsSignIn(name, target.url);
         return json(res, 200, result);
       } finally {
@@ -157,6 +167,7 @@ export function createMcpServerRoutes(deps: McpServerRouteDeps): RouteHandler {
         const refusal = mcpPolicyRefusal(name, parsed.server);
         if (refusal) return json(res, 403, { error: refusal, code: "managed_policy" });
         persistMcpServers({ ...current, [name]: parsed.server });
+        appCatalog?.serverChanged(name);
         return json(res, 201, mcpServerResponse());
       } finally {
         mcpConfigBusy.set(false);
@@ -214,6 +225,7 @@ export function createMcpServerRoutes(deps: McpServerRouteDeps): RouteHandler {
           delete next[name];
           persistMcpServers(next);
           mcpOAuth.forget(name);
+          appCatalog?.forgetServer(name);
           return json(res, 200, mcpServerResponse());
         }
 
@@ -221,11 +233,14 @@ export function createMcpServerRoutes(deps: McpServerRouteDeps): RouteHandler {
         if (!existing.ok) return json(res, 400, { error: existing.error });
         const body = await readBody(req);
         if (method === "PATCH") {
-          if (!body || typeof body !== "object" || Array.isArray(body)
-            || Object.keys(body).length !== 1 || typeof body.enabled !== "boolean") {
-            return json(res, 400, { error: "Only an enabled boolean can be changed here." });
+          // One switch at a time: on/off, or "Show its apps in chat".
+          const key = body && typeof body === "object" && !Array.isArray(body) && Object.keys(body).length === 1 ? Object.keys(body)[0] : undefined;
+          if ((key !== "enabled" && key !== "apps") || typeof body[key] !== "boolean") {
+            return json(res, 400, { error: "Only an enabled or apps boolean can be changed here." });
           }
-          persistMcpServers({ ...current, [name]: { ...existing.server, enabled: body.enabled } });
+          const { apps: _apps, ...rest } = existing.server;
+          persistMcpServers({ ...current, [name]: key === "enabled" ? { ...existing.server, enabled: body.enabled } : { ...rest, ...(body.apps ? {} : { apps: false }) } });
+          if (body[key] === true) appCatalog?.serverChanged(name);
           return json(res, 200, mcpServerResponse());
         }
 
@@ -234,6 +249,8 @@ export function createMcpServerRoutes(deps: McpServerRouteDeps): RouteHandler {
         const refusal = mcpPolicyRefusal(name, parsed.server);
         if (refusal) return json(res, 403, { error: refusal, code: "managed_policy" });
         persistMcpServers({ ...current, [name]: parsed.server });
+        appCatalog?.forgetServer(name);
+        appCatalog?.serverChanged(name);
         // a sign-in belongs to one address; a token never follows the entry elsewhere
         const before = isRemoteMcpServer(existing.server) ? existing.server.url : null;
         const after = isRemoteMcpServer(parsed.server) ? parsed.server.url : null;
