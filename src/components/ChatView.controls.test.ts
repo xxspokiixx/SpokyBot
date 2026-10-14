@@ -158,6 +158,17 @@ describe("glass header", () => {
     // The transcript is padded by the header's measured height.
     expect(markup.slice(scroller)).toMatch(/class="glass-scroller-content[^"]*"[^>]*role="log"/);
   });
+
+  it("holds every row's positioned parts inside the transcript, so nothing in it can make the window scroll", () => {
+    // A reply quote's screen-reader label is absolutely positioned. With no
+    // positioned ancestor inside the scroller it was placed against the pane
+    // around it, out past the window, and the window became scrollable by
+    // script: an app frame's own scrollIntoView then lifted the whole app
+    // (header and sidebar) off the top, with no scrollbar to bring it back.
+    const markup = renderToStaticMarkup(createElement(ChatView, { bot }));
+    const transcript = markup.match(/class="(glass-scroller-content[^"]*)"[^>]*role="log"/)?.[1] ?? "";
+    expect(transcript.split(" ")).toContain("relative");
+  });
 });
 
 describe("thread control placement", () => {
