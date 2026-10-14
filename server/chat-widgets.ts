@@ -12,6 +12,7 @@ import {
   type WidgetAction, type WidgetNode, type WidgetPayload, type WidgetRoot, type WidgetSettled,
 } from "../shared/widget.ts";
 import type { MausColor } from "../shared/wire.ts";
+import type { ChatApps } from "./chat-apps.ts";
 import { createOptionsCard } from "./options-card.ts";
 import { isSecretName, mask, redactSecretsInText } from "./redact.ts";
 import type { Message } from "./store.ts";
@@ -118,7 +119,8 @@ function canonicalWidget(input: Record<string, unknown>): CanonicalWidget {
   return { ok: true, root, text: text || EMPTY_FALLBACK, masked: stable(root) !== stable(parsed.value) };
 }
 
-/** One call on the internal card route: show_widget, update_widget, or (no
+/** One call on the internal card route: show_widget, update_widget, the
+ * chat-app tools (show_html, update_html: server/chat-apps.ts), or (no
  * `tool`) the legacy options card. The route has already checked that the
  * conversation is the calling bot's own. */
 export function createAgentCard(args: {
@@ -130,9 +132,15 @@ export function createAgentCard(args: {
    * it, so it must not be offered back to that session as a message it has
    * not seen (server/delta-context.ts Handoffs.authored). */
   authored?(messageId: string): void;
+  /** The chat-app services (server/chat-apps.ts createChatApps). */
+  apps?: Pick<ChatApps, "createAppCard">;
 }): AgentCardResult {
   const { store, bot, threadId, input } = args;
   if (!isRecord(input) || input.tool === undefined) return createOptionsCard(args);
+  if (input.tool === "show_html" || input.tool === "update_html") {
+    if (!args.apps) return { ok: false, status: 400, error: "Pages are not available on this computer." };
+    return args.apps.createAppCard({ bot, threadId, input, ...(args.authored ? { authored: args.authored } : {}) });
+  }
   if (input.tool !== "show_widget" && input.tool !== "update_widget") {
     return { ok: false, status: 400, error: "tool: must be show_widget or update_widget." };
   }

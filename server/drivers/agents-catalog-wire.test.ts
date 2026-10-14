@@ -105,26 +105,28 @@ const FULL = "skills+shared+voice";
 // assignment_status (delegate_bot, ask_bot, send_to_bot, check_delegation,
 // wait_delegation) are gone, so every profile is 3,175 B lighter than PR 3's (fill_login, saved website logins, adds 670 B)
 // and carries the one surface alone (docs/runtime-contract.md §9).
+// Chat apps (docs/superpowers/specs/2026-10-14-chat-apps-design.md): show_html
+// and update_html add 2,692 B to every profile, on purpose.
 const BUDGET_BASELINE: Record<string, number> = {
-  "default": 54535,
-  "voice": 55276,
-  "shared": 56280,
-  "shared+voice": 57021,
-  "skills": 56588,
-  "skills+voice": 57329,
-  "skills+shared": 58333,
-  "skills+shared+voice": 59074,
-  "non-chief": 44885,
-  "voice+non-chief": 45626,
-  "shared+non-chief": 46630,
-  "shared+voice+non-chief": 47371,
-  "skills+non-chief": 46938,
-  "skills+voice+non-chief": 47679,
-  "skills+shared+non-chief": 48683,
-  "skills+shared+voice+non-chief": 49424,
-  "skills+shared+voice+cloud-home": 58129,
-  "skills+shared+voice+non-chief+cloud-home": 48479,
-  "default+legacy-switches": 54535,
+  "default": 57227,
+  "voice": 57968,
+  "shared": 58972,
+  "shared+voice": 59713,
+  "skills": 59280,
+  "skills+voice": 60021,
+  "skills+shared": 61025,
+  "skills+shared+voice": 61766,
+  "non-chief": 47577,
+  "voice+non-chief": 48318,
+  "shared+non-chief": 49322,
+  "shared+voice+non-chief": 50063,
+  "skills+non-chief": 49630,
+  "skills+voice+non-chief": 50371,
+  "skills+shared+non-chief": 51375,
+  "skills+shared+voice+non-chief": 52116,
+  "skills+shared+voice+cloud-home": 60821,
+  "skills+shared+voice+non-chief+cloud-home": 51171,
+  "default+legacy-switches": 57227,
 };
 
 const RPC_PREFIX = '{"jsonrpc":"2.0","id":1,"result":';

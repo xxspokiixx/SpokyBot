@@ -246,7 +246,7 @@ import { chiefForBot, INCIDENTS_THREAD_TITLE, IncidentLedger, incidentChip, inci
 /** A session_read answer competes with the transcript for the context
  * window; a computer-use turn's output can run to hundreds of KB. */
 const SESSION_READ_MAX_CHARS = 8_000;
-import { promptWithReply, transcriptText } from "./replies.ts";
+import { promptWithReply, replyTargetIn, transcriptText } from "./replies.ts";
 import type { DataContext } from "./data-context.ts";
 import { promptWithDataContext } from "../shared/data-context.ts";
 import { admit, DRAIN_COALESCE_MAX_ITEMS } from "./admission.ts";
@@ -449,6 +449,7 @@ import { screenFrameHash, screenSurfaceForTool, screenTouchingTool, settledFrame
 import { asSchedule, RoutineRequestService } from "./routine-requests.ts";
 import { directApply, UNDO_STALE, type DirectApply } from "./direct-apply.ts";
 import { createAgentCard } from "./chat-widgets.ts";
+import { createChatAppRoutes, createChatApps } from "./routes/chat-apps.ts";
 import { buildBotOverview, type BotOverview, connectedAppsFacts } from "./bot-overview.ts";
 import { ProfileRequestService } from "./profile-requests.ts";
 import { ModelRequestService } from "./model-requests.ts";
@@ -10172,7 +10173,7 @@ function drainQueuedSendsNow() {
 
 /** Keep a person's words off the transcript until a direct-thread slot is
  * available. Reuse the existing cancellable, idempotent composer queue. */
-async function startOrQueueDirectMessage(botId: string, threadId: string, text: string, replyTo?: Message, sendId?: string, sender?: ResolvedSender, trigger?: UsageTrigger, via?: "call", callId?: string, dataContext?: DataContext) {
+async function startOrQueueDirectMessage(botId: string, threadId: string, text: string, replyTo?: Message, sendId?: string, sender?: ResolvedSender, trigger?: UsageTrigger, via?: "call", callId?: string, dataContext?: DataContext, app?: { context?: string; fromApp?: Message["fromApp"] }) {
   const decision = admit("direct", {}, {
     // A room turn holds the bot exactly like the sibling opened-thread queue
     // below: the drain's own block check waits it out, so the words queue
@@ -10186,9 +10187,9 @@ async function startOrQueueDirectMessage(botId: string, threadId: string, text: 
     const queued = queueSteeredMessage(botId, threadId, text, {
       replyToId: replyTo?.id,
       sendId,
-      dataContext,
+      dataContext, fromApp: app?.fromApp,
       reason: decision.reason,
-      prompt: promptWithReply(promptWithDataContext(text, dataContext), replyTo, cfg.profile?.name?.trim() || "User"),
+      prompt: (app?.context ?? "") + promptWithReply(promptWithDataContext(text, dataContext), replyTo, cfg.profile?.name?.trim() || "User"),
       sender,
       trigger,
       via,
@@ -10196,7 +10197,7 @@ async function startOrQueueDirectMessage(botId: string, threadId: string, text: 
     });
     return { ok: true as const, queued: true as const, queueId: queued.id, threadId, reason: decision.reason };
   }
-  const message = await startTurn(botId, text, { threadId, replyTo, sendId, sender, trigger, via, callId, dataContext });
+  const message = await startTurn(botId, text, { threadId, replyTo, sendId, sender, trigger, via, callId, dataContext, app });
   return { ok: true as const, threadId, message };
 }
 
@@ -10256,10 +10257,12 @@ async function acceptDirectSend(
     /** A person is proven present (a paired session, or the desktop's owner
      * capability): steering their words in clears the unattended mark. */
     personPresent: boolean;
+    /** Chat apps: undelivered app context for the prompt, and the app that sent these words (server/chat-apps.ts). */
+    app?: { context?: string; fromApp?: Message["fromApp"] };
   },
   guardedStart?: (currentAtStart: BotRecord) => Promise<DirectSendReceipt>,
 ): Promise<DirectSendReceipt> {
-  const { botId, threadId, text, sendId, replyTo, sender, trigger, via, callId, dataContext, personPresent } = input;
+  const { botId, threadId, text, sendId, replyTo, sender, trigger, via, callId, dataContext, personPresent, app } = input;
   const refused = directSendRefusal(botId, threadId);
   if (refused) throw refused;
   return sendSequencer.run(
@@ -10332,7 +10335,7 @@ async function acceptDirectSend(
         // steer was offered only when a live instance could take it;
         // the second check carries that fact to the type system.
         if (busyAdmission.action === "steer" && instance?.adapter.steer) {
-          const prompt = promptWithReply(promptWithDataContext(steerInput.text, dataContext), replyTo, cfg.profile?.name?.trim() || "User");
+          const prompt = (app?.context ?? "") + promptWithReply(promptWithDataContext(steerInput.text, dataContext), replyTo, cfg.profile?.name?.trim() || "User");
           steered = await (steerInput.images.length > 0
             ? instance.adapter.steer(threadId, prompt, steerInput.images)
             : instance.adapter.steer(threadId, prompt))
@@ -10370,7 +10373,7 @@ async function acceptDirectSend(
             text,
             replyToId: replyTo?.id,
             sendId,
-            ...(dataContext ? { dataContext } : {}),
+            ...(dataContext ? { dataContext } : {}), ...(app?.fromApp ? { fromApp: app.fromApp } : {}),
             steered: true,
             sender,
             ...spokenLineFields(via, callId),
@@ -10382,13 +10385,13 @@ async function acceptDirectSend(
           return { ok: true as const, steered: true as const, threadId, message };
         }
         if (!current.busy) {
-          return startOrQueueDirectMessage(botId, threadId, text, replyTo, sendId, sender, trigger, via, callId, dataContext);
+          return startOrQueueDirectMessage(botId, threadId, text, replyTo, sendId, sender, trigger, via, callId, dataContext, app);
         }
         const queued = queueSteeredMessage(current.id, threadId, text, {
           replyToId: replyTo?.id,
           sendId,
-          dataContext,
-          prompt: promptWithReply(promptWithDataContext(text, dataContext), replyTo, cfg.profile?.name?.trim() || "User"),
+          dataContext, fromApp: app?.fromApp,
+          prompt: (app?.context ?? "") + promptWithReply(promptWithDataContext(text, dataContext), replyTo, cfg.profile?.name?.trim() || "User"),
           sender,
           trigger,
           via,
@@ -10396,7 +10399,7 @@ async function acceptDirectSend(
         });
         return { ok: true as const, queued: true as const, queueId: queued.id, threadId };
       }
-      return startOrQueueDirectMessage(botId, threadId, text, replyTo, sendId, sender, trigger, via, callId, dataContext);
+      return startOrQueueDirectMessage(botId, threadId, text, replyTo, sendId, sender, trigger, via, callId, dataContext, app);
     },
   );
 }
@@ -10799,6 +10802,8 @@ async function startTurn(
      * every retry of it (edit/regenerate, backup engine, computer
      * selection), never into the stored words. */
     dataContext?: DataContext;
+    /** Chat apps: app context in front of the provider text, and the app that sent the words (stored as fromApp). */
+    app?: { context?: string; fromApp?: Message["fromApp"] };
     onDispatchError?: (message: string) => void;
     /** Summarize this conversation without asking the agent to do more work. */
     compactOnly?: boolean;
@@ -10978,7 +10983,7 @@ async function startTurn(
           text,
           replyToId: opts?.replyTo?.id,
           sendId: opts?.sendId,
-          ...(opts?.dataContext ? { dataContext: opts.dataContext } : {}),
+          ...(opts?.dataContext ? { dataContext: opts.dataContext } : {}), ...(opts?.app?.fromApp ? { fromApp: opts.app.fromApp } : {}),
           peerAsk: opts?.peerAsk,
           sender: opts?.sender,
           ...spokenLineFields(opts?.via, opts?.callId),
@@ -11230,7 +11235,7 @@ async function startTurn(
         ? expandSkillCommandTurnText(bot.id, providerText, skillsLibraryEnabled(cfg) ? (store.bot(bot.id)?.assignedSkills ?? bot.assignedSkills) : undefined)
         : providerText;
       const setupText = agentsMounted ? expandSetupTurnText(skillCommandText) : skillCommandText;
-      const userTurnText = promptWithReply(
+      const userTurnText = (opts?.app?.context ?? "") + promptWithReply(
         skillAuthoring ? expandLearnTurnText(setupText) : setupText,
         opts?.replyTo,
         cfg.profile?.name?.trim() || "User",
@@ -15797,15 +15802,7 @@ function roomSetupPending(group: GroupRecord): boolean {
   );
 }
 
-function resolveReplyTarget(threadId: string, value: unknown): Message | undefined {
-  if (value === undefined || value === null || value === "") return undefined;
-  if (typeof value !== "string") throw Object.assign(new Error("replyToId must be a message id"), { status: 400 });
-  const target = store.messagesFor(threadId).find((message) => message.id === value);
-  if (!target || (target.kind !== "text" && target.kind !== "widget") || !target.text?.trim()) {
-    throw Object.assign(new Error("the message being replied to is no longer available"), { status: 404 });
-  }
-  return target;
-}
+function resolveReplyTarget(threadId: string, value: unknown): Message | undefined { return replyTargetIn(store.messagesFor(threadId), value); }
 
 const CONNECTOR_SLUG = /^[a-z0-9][a-z0-9_-]{0,80}$/;
 
@@ -17410,6 +17407,9 @@ ROUTES.push(createBotMessageRoutes({
   deliverLateQuestionAnswer, interruptDirectThread, cancelDirectTurnDispatch, revokeInternalCapabilitiesForThread,
   cancelGroupTurnOperations, closeOpenApprovals,
 }));
+// Chat apps: bot pages and MCP app documents, their context and server calls (routes/chat-apps.ts).
+const chatApps = createChatApps({ store, dataDir: DATA_DIR });
+ROUTES.push(createChatAppRoutes({ store, apps: chatApps, threadRefusal: cloudThreadRefusal }));
 // Conversation reads and uploads: the /api/bots snapshot, message pages, a
 // message's image or file, uploads, attachments, search, the export and a
 // conversation's job. `let` slots are read per request, visibility as the preamble does.
@@ -18552,9 +18552,9 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
         }
         const body = await readInternalBody();
         requireActiveInternalCapability();
-        const result = createAgentCard({
+        const result = await createAgentCard({
           store,
-          bot: internalSender,
+          bot: internalSender, apps: chatApps,
           threadId: internalCapability.threadId,
           input: body, authored: (id) => handoffs.authored(internalCapability.threadId, internalCapability.generation, id),
         });

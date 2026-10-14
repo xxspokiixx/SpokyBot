@@ -240,6 +240,8 @@ export interface FollowupPayload {
   /** The Live call a "call" line was spoken on (Message.callId). Only with
    * `via: "call"`; restore and crash recovery drop it from any other row. */
   callId?: string;
+  /** The words an app sent as the person; the drained line keeps it. */
+  fromApp?: Message["fromApp"];
   /** Who queued these words. Absent on the owner's own sends and on every
    * row written before this existed; both read as the profile name. */
   sender?: ResolvedSender;
@@ -537,6 +539,13 @@ export function deleteThread(threadId: string): void {
     connection.prepare("DELETE FROM messages WHERE thread_id = ?").run(threadId);
     connection.prepare("DELETE FROM thread_state WHERE thread_id = ?").run(threadId);
   });
+}
+
+/** Every stored app document an app row names (server/app-docs.ts sweeps
+ * the rest). Rows of every thread and branch count. */
+export function appDocRefs(): string[] {
+  const rows = db().prepare("SELECT DISTINCT json_extract(json, '$.app.doc') AS doc FROM messages WHERE kind = 'app'").all() as Array<{ doc: unknown }>;
+  return rows.flatMap((row) => (typeof row.doc === "string" && row.doc ? [row.doc] : []));
 }
 
 /** Every thread whose stored messages mention `fragment` anywhere (an

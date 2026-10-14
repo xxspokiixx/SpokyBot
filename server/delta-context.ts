@@ -27,11 +27,11 @@ export interface ContextMessage {
 }
 
 /** Active-branch messages a provider reads as conversation context: text,
- * widgets (by their text fallback), digests, compaction records and room
- * results. A Live call's row (kind "call") is a record for people, never
- * context. */
+ * widgets and apps (by their text fallback), digests, compaction records and
+ * room results. A Live call's row (kind "call") is a record for people,
+ * never context. */
 export function isContextMessage(m: Pick<Message, "kind" | "text" | "digest" | "roomRequest">): boolean {
-  return Boolean(((m.kind === "text" || m.kind === "widget") && m.text) || (m.kind === "digest" && m.digest) || m.kind === "compaction" || m.roomRequest?.phase === "result");
+  return Boolean(((m.kind === "text" || m.kind === "widget" || m.kind === "app") && m.text) || (m.kind === "digest" && m.digest) || m.kind === "compaction" || m.roomRequest?.phase === "result");
 }
 
 /** What one native session has been handed on a task. */
@@ -314,7 +314,7 @@ export class Handoffs {
   }
 
   /** A context message the running turn wrote itself through one of its
-   * tools (show_widget): the session made it, so it is counted as received
+   * tools (show_widget, show_html): the session made it, so it is counted as received
    * with the turn's replies and never offered back as unseen. `claimId` is
    * the calling turn's; a call that outlived its turn records nothing. */
   authored(threadId: string, claimId: string, messageId: string): void {

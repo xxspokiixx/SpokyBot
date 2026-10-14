@@ -1,20 +1,48 @@
 // The agents tools that draw a card in the chat: the Watcher's legacy options
-// card and the two widget tools (agents-widget-tools.ts). They live here
-// rather than in agents-call.ts, which is at its size ratchet; callTool hands
-// these names over and returns the answer as it stands.
+// card, the two widget tools (agents-widget-tools.ts) and the two chat-app
+// tools (agents-app-tools.ts). They live here rather than in agents-call.ts,
+// which is at its size ratchet; callTool hands these names over and returns
+// the answer as it stands.
 //
-// All three post to the one internal card route. server/chat-widgets.ts
-// (createAgentCard) tells them apart by the body's `tool` and is where a
-// widget is stored; the checks here only save a round trip.
+// All five post to the one internal card route. server/chat-widgets.ts
+// (createAgentCard) tells them apart by the body's `tool` and hands the app
+// tools to server/chat-apps.ts; the checks here only save a round trip.
+import { parseShowHtmlInput, parseUpdateHtmlInput } from "../../shared/app.ts";
 import { parseOptionsCardInput, WATCHER_OPTIONS_CARD_BOT_ID } from "../../shared/options-card.ts";
 import { parseWidgetInput, widgetAdvice } from "../../shared/widget.ts";
 
 import type { ToolCallContext, ToolCallResult } from "./agents-call.ts";
 import type { Json } from "./agents-client.ts";
 
-export const CARD_TOOL_NAMES: ReadonlySet<string> = new Set(["create_options_card", "show_widget", "update_widget"]);
+export const CARD_TOOL_NAMES: ReadonlySet<string> = new Set(["create_options_card", "show_widget", "update_widget", "show_html", "update_html"]);
 
 const CARD_ROUTE = "/api/internal/options-card";
+
+const MASKED = " Something in it read as a secret and was masked before it was stored. Never put secrets in a page or a widget.";
+
+/** show_html and update_html: checked here first so a malformed page costs
+ * no round trip; the harness checks again and stores it. */
+async function callAppTool(name: "show_html" | "update_html", args: Json, context: ToolCallContext): Promise<ToolCallResult> {
+  const updating = name === "update_html";
+  const parsed = updating ? parseUpdateHtmlInput(args) : parseShowHtmlInput(args);
+  if (!parsed.ok) return { text: parsed.error, isError: true };
+  const body = updating
+    ? { tool: name, app_id: args.app_id, html: args.html, ...(typeof args.title === "string" ? { title: args.title } : {}) }
+    : {
+        tool: name, html: args.html, title: args.title,
+        ...(typeof args.height === "number" ? { height: args.height } : {}),
+        ...(typeof args.fallback_text === "string" ? { fallback_text: args.fallback_text } : {}),
+      };
+  const answer = await context.client.apiResponse(CARD_ROUTE, { method: "POST", body: JSON.stringify(body) });
+  if (!answer.ok) return { text: String(answer.body.error ?? (updating ? "Could not update that page." : "Could not show that page.")), isError: true };
+  const messageId = String(answer.body.messageId ?? "");
+  const masked = answer.body.masked === true ? MASKED : "";
+  return {
+    text: (updating
+      ? `Updated app ${messageId}.`
+      : `Shown as app ${messageId}. To change it, call update_html with app_id "${messageId}".`) + masked,
+  };
+}
 
 export async function callCardTool(name: string, args: Json, context: ToolCallContext): Promise<ToolCallResult> {
   const { api, apiResponse } = context.client;
@@ -32,6 +60,8 @@ export async function callCardTool(name: string, args: Json, context: ToolCallCo
       text: `Rendered the native options card in this Watcher thread (message ${String(result.messageId ?? "created")}). Wait for the person's click or custom response; the card itself authorizes no external action.`,
     };
   }
+
+  if (name === "show_html" || name === "update_html") return callAppTool(name, args, context);
 
   // The harness normalises the tree again and is the one that stores it;
   // checking here first means a malformed widget costs the model no round

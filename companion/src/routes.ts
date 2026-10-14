@@ -210,6 +210,15 @@ const ALLOWED: ReadonlyArray<{ method: string; path: RegExp }> = [
   // a transcript, its images, and answering an approval
   { method: "GET", path: /^\/api\/threads\/[\w-]+\/messages$/ },
   { method: "GET", path: /^\/api\/threads\/[\w-]+\/messages\/[\w-]+\/image$/ },
+  // Chat apps (server/routes/chat-apps.ts). The document is transcript data:
+  // a sandboxed page and the tool call it shows, scoped to its thread like
+  // the image above. `rpc` reaches only the app's own MCP server, under the
+  // bot's tool selection and approval rules, with write calls behind the
+  // person's Allow. `context` is bounded text (4,000 characters) handed to
+  // the model once, with the next message.
+  { method: "GET", path: /^\/api\/threads\/[\w-]+\/messages\/[\w-]+\/app$/ },
+  { method: "POST", path: /^\/api\/bots\/[\w-]+\/apps\/[\w-]+\/rpc$/ },
+  { method: "POST", path: /^\/api\/bots\/[\w-]+\/apps\/[\w-]+\/context$/ },
   MESSAGE_FILE_ROUTE,
   { method: "POST", path: /^\/api\/threads\/[\w-]+\/messages\/[\w-]+\/reactions$/ },
   { method: "GET", path: /^\/api\/threads\/[\w-]+\/export$/ },
