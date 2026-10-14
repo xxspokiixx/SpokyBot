@@ -1,16 +1,5 @@
-// A stdio facade for HTTP/SSE MCP servers: how every engine except Claude
-// Code reaches them. Its upstream handshake is OMB's own (RemoteMcpClient,
-// the one Settings → Test uses), never the engine's: an engine's client adds
-// capability fields a strict server refuses. Configuration stays in private
-// environment data; stdout contains only protocol frames.
-//
-// A driver whose engine cannot search tools on its own also sets
-// OMB_REMOTE_MCP_DIRECTORY. Then a big catalog is searched instead of listed
-// (mcp-directory.ts): tools/list answers search_tools, describe_tool and
-// call_tool, the upstream catalog is read once per process and again after
-// the server says it changed, and a small catalog still passes through. The
-// same setting carries the bot's tool selection, so search, describe and
-// call_tool only ever see the tools the bot may use.
+// The upstream handshake is OMB's own, never the engine's: an engine's client adds capability fields a strict server
+// refuses. stdout carries only protocol frames.
 //
 // MCP Apps (docs/superpowers/specs/2026-10-14-chat-apps-design.md): every
 // proxy drops the tools only an app's view may call from what the engine is
@@ -64,12 +53,6 @@ function fail(message: string): never {
   process.exit(1);
 }
 
-/** What the engine is told when the server refuses its credentials (HTTP
- * 401). This proxy cannot tell an OpenMausBot sign-in from a header the
- * person typed (both arrive as headers), so the words cover both: a sign-in
- * token that ran out during a long turn is refreshed when the next message
- * starts, while a revoked sign-in or a wrong key needs the person. Our own
- * words, nothing remote. */
 const CREDENTIALS_REFUSED = "This MCP server refused its credentials (HTTP 401). If it uses a sign-in, send the message again: "
   + "OpenMausBot refreshes sign-ins when a message starts. If it still fails, open Plugins → MCP servers and sign in to it again, "
   + "or check its header values.";
@@ -84,9 +67,7 @@ class Refusal extends Error {
 }
 
 const SETTINGS = ["OMB_REMOTE_MCP_SERVER", "OMB_REMOTE_MCP_DIRECTORY", REMOTE_MCP_APPS_ENV];
-/** Codex hands every MCP child one shared environment, so a mount there
- * names its own private record (`--config-env NAME`) holding the same
- * settings. Either way they leave this process's environment once read. */
+/** Codex hands every MCP child one shared environment, so a mount names its own record; settings leave this env once read. */
 function privateSettings(): Record<string, string | undefined> {
   if (process.argv.length === 2) {
     const settings = Object.fromEntries(SETTINGS.map((name) => [name, process.env[name]]));
@@ -102,18 +83,16 @@ function privateSettings(): Record<string, string | undefined> {
     if (isRecord(value) && Object.entries(value).every(([name, setting]) => SETTINGS.includes(name) && typeof setting === "string")) {
       return value as Record<string, string>;
     }
-  } catch { /* invalid private config */ }
+  } catch {}
   return {};
 }
 
 const settings = privateSettings();
 let spec;
-try { spec = remoteMcpSpec(JSON.parse(settings.OMB_REMOTE_MCP_SERVER ?? "")); } catch { /* invalid private config */ }
+try { spec = remoteMcpSpec(JSON.parse(settings.OMB_REMOTE_MCP_SERVER ?? "")); } catch {}
 if (!spec) fail("invalid remote MCP configuration");
 
-/** The directory's settings: which server this is (the name tool selections
- * use) and the bot's selection. Present but invalid never becomes a proxy
- * without them: a selection that cannot be read must not widen to all. */
+/** A selection that cannot be read must never widen to all tools. */
 function directorySettings(raw: string | undefined): { server: string; scope: ToolScope | undefined } | undefined {
   if (raw === undefined) return undefined;
   try {
@@ -123,7 +102,7 @@ function directorySettings(raw: string | undefined): { server: string; scope: To
       const parsed = parseToolScope(value.toolScope);
       if (parsed.ok) return { server: value.name, scope: parsed.scope };
     }
-  } catch { /* reported below */ }
+  } catch {}
   return fail("invalid tool directory configuration");
 }
 const directory = directorySettings(settings.OMB_REMOTE_MCP_DIRECTORY);
@@ -139,11 +118,8 @@ const HANDSHAKE = observer?.mount.extension ? { extensions: { [APP_EXTENSION_KEY
 /** Tools only an app's view may call, from the last catalog read upstream. */
 const appOnly = new Set<string>();
 
-/** Characters of a server's own error message the engine may read. */
 const REMOTE_ERROR_CHARS = 1_000;
-/** Everything configured for this server that a remote error must not
- * echo: the address (whole, without its query, its path, long path
- * segments, query values) and every header value (whole and word by word). */
+/** Configured values (address parts, header values) a remote error must never echo. */
 const configured: string[] = (() => {
   const values = new Set<string>([spec.url]);
   try {
@@ -153,16 +129,13 @@ const configured: string[] = (() => {
     if (url.pathname.length > 1) values.add(url.pathname);
     for (const segment of url.pathname.split("/")) if (segment.length >= 16) values.add(segment);
     for (const value of url.searchParams.values()) if (value.length >= 4) values.add(value);
-  } catch { /* checked by remoteMcpSpec */ }
+  } catch {}
   for (const value of Object.values(spec.headers)) {
     if (value.trim().length >= 4) values.add(value.trim());
     for (const word of value.split(/\s+/)) if (word.length >= 8) values.add(word);
   }
   return [...values].filter((value) => value.length >= 4).sort((a, b) => b.length - a.length);
 })();
-/** A server's own error text, for the engine: what the model needs to fix
- * a call (a missing argument, an unknown id), with nothing configured and
- * nothing secret-shaped left in it, and bounded. */
 function remoteErrorText(detail: string): string {
   let text = detail.slice(0, REMOTE_ERROR_CHARS * 8);
   for (const value of configured) text = text.split(value).join("«redacted»");
@@ -172,28 +145,22 @@ function remoteErrorText(detail: string): string {
 }
 const allowed = (name: string) => !directory?.scope || allowsTool(directory.scope, { kind: "mcp", server: directory.server, name });
 
-// ── the directory (only with OMB_REMOTE_MCP_DIRECTORY) ──
-
-/** The bot's part of the upstream catalog, and whether it is searched. */
 interface Catalog { tools: ToolDirectory; searched: boolean }
 const CATALOG_PAGES = 100;
 const CATALOG_MS = 120_000;
 let catalog: Catalog | undefined;
 let loading: Promise<Catalog> | undefined;
 let generation = 0;
-/** Once searched, always searched in this process: the engine was handed
- * call_tool, and a tool it found must stay reachable through it. */
+/** Once searched, always searched: the engine was handed call_tool, and a tool it found must stay reachable. */
 let searching = false;
 const context: DirectoryContext = { server: directory?.server ?? "" };
 
 const closed = new AbortController();
-/** An http:// server behind the person's HTTP proxy is reached through it. */
 const viaProxy = plainHttpProxyFetch(process.env);
 const client = new RemoteMcpClient(spec, {
   maxBytes: MAX_REMOTE_MCP_BYTES,
   ...(viaProxy ? { fetch: viaProxy } : {}),
   onNotification: (message) => {
-    // The catalog changed upstream: read it again on the next request.
     if (directory && message.method === "notifications/tools/list_changed") {
       generation += 1;
       catalog = undefined;
@@ -232,8 +199,7 @@ async function upstream(method: string, params: unknown, signal: AbortSignal): P
   return result;
 }
 
-/** Every page of the upstream catalog, read under its own deadline so a
- * cancelled first request does not cancel it for the next one. */
+/** Under its own deadline, so a cancelled first request does not cancel the read for the next one. */
 async function readCatalog(): Promise<CatalogTool[]> {
   const signal = AbortSignal.any([closed.signal, AbortSignal.timeout(CATALOG_MS)]);
   const tools: CatalogTool[] = [];
@@ -254,10 +220,6 @@ async function readCatalog(): Promise<CatalogTool[]> {
   throw new Error("tool catalog has too many pages");
 }
 
-/** One forgiving validator per tool definition (lenientToolValidator), or
- * null where there is none worth running. The server enforces its own
- * schema either way: a tool without a validator, or one whose validator
- * throws (a schema that refers to itself forever), is called unchecked. */
 const validators = new WeakMap<CatalogTool, ValidateFunction | null>();
 function argumentProblems(tool: CatalogTool, args: Json): string[] | undefined {
   let validate = validators.get(tool);
@@ -270,7 +232,6 @@ function argumentProblems(tool: CatalogTool, args: Json): string[] | undefined {
   catch { return undefined; }
 }
 
-/** Settles with `promise`, or rejects when this request's own signal fires. */
 function raced<T>(promise: Promise<T>, signal: AbortSignal): Promise<T> {
   if (signal.aborted) return Promise.reject(new Error("aborted"));
   return new Promise<T>((resolve, reject) => {
@@ -304,18 +265,14 @@ async function callTool(params: unknown, signal: AbortSignal): Promise<unknown> 
   if (!isRecord(params) || typeof params.name !== "string" || (params.arguments !== undefined && !isRecord(params.arguments))) {
     throw new Refusal(-32602, "Invalid tool call");
   }
-  // With the directory on these names always mean the directory: a catalog
-  // that uses one of them itself is searched, never listed.
   if (params.name === SEARCH_TOOL) return (await currentCatalog(signal)).tools.search(params.arguments);
   if (params.name === DESCRIBE_TOOL) return (await currentCatalog(signal)).tools.describe(params.arguments);
   if (params.name === CALL_TOOL) {
     const call = (await currentCatalog(signal)).tools.call(params.arguments);
     if ("answer" in call) return call.answer;
-    // The catalog holds only selected tools; checked again all the same.
     if (!allowed(call.name)) return { content: [{ type: "text", text: SELECTION_EXCLUDES }], isError: true };
     return upstream("tools/call", { ...(isRecord(params._meta) ? { _meta: params._meta } : {}), name: call.name, arguments: call.arguments }, signal);
   }
-  // A tool listed while the catalog was small stays callable by its name.
   if (!allowed(params.name)) throw new Refusal(-32602, SELECTION_EXCLUDES);
   return upstream("tools/call", params, signal);
 }
@@ -332,7 +289,6 @@ async function directed(message: Json, signal: AbortSignal): Promise<unknown> {
     return { ...result, instructions: bounded(result.instructions, INSTRUCTIONS_CHARS) };
   }
   if (message.method === "tools/list") {
-    // One page holds everything; a cursor is one this proxy never gave.
     if (isRecord(message.params) && message.params.cursor !== undefined) throw new Refusal(-32602, "Invalid cursor");
     const { tools, searched } = await currentCatalog(signal);
     return { tools: searched ? tools.listed(context) : tools.tools };
@@ -353,19 +309,15 @@ async function handle(message: Json): Promise<void> {
     return;
   }
   if (!id) {
-    // initialize() has already sent this once with its negotiated version.
     if (message.method === "notifications/initialized" && initialized) return;
     try { await client.notify(message.method, message.params, AbortSignal.timeout(30_000)); }
-    catch { /* notifications have no reply and must not print remote details */ }
+    catch {}
     return;
   }
   if (pending.has(id)) { error(message.id, -32600, "Duplicate request ID"); return; }
   const controller = new AbortController();
   pending.set(id, controller);
-  // A tool call has no deadline of its own here: the engine keeps its own
-  // (Gemini CLI and Qwen Code wait ten minutes) and cancels through this
-  // proxy, which cancels upstream. Only the directory, mounted for engines
-  // that cannot search tools, keeps two minutes.
+  // Engines keep their own tool-call deadline (Gemini CLI and Qwen Code wait ten minutes) and cancel through this proxy.
   const deadline = message.method !== "tools/call" ? 30_000 : directory ? 120_000 : undefined;
   const signal = deadline === undefined ? controller.signal : AbortSignal.any([controller.signal, AbortSignal.timeout(deadline)]);
   try {
@@ -373,9 +325,7 @@ async function handle(message: Json): Promise<void> {
     if (message.method === "initialize") initialized = true;
     send({ jsonrpc: "2.0", id: message.id, result });
   } catch (failure) {
-    // Transport failures may carry URLs or header values: never relayed. A
-    // server's own JSON-RPC error is its answer (a bad argument, an unknown
-    // id), relayed with its code once nothing configured or secret is left.
+    // Transport failures may carry URLs or header values: never relayed.
     if (failure instanceof Refusal) error(message.id, failure.code, failure.message);
     else if (failure instanceof McpRpcError) error(message.id, failure.code ?? -32603, remoteErrorText(failure.detail));
     else if (failure instanceof McpHttpError && failure.status === 401) error(message.id, -32603, CREDENTIALS_REFUSED);

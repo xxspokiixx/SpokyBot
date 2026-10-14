@@ -1,16 +1,3 @@
-// The custom MCP servers (a local command or a URL; secrets write-only),
-// moved out of server/index.ts's inline routes into the route table
-// (server/routes/README.md): list them, test one, sign in to and out of a
-// remote one, add one or paste a block of them, and edit, enable or remove
-// one. Writes share index.ts's `mcpConfigBusy` with the internal
-// mcp-servers route; it reaches here as a get/set view.
-//
-// MCP Apps (docs/superpowers/specs/2026-10-14-chat-apps-design.md): each
-// server's "Show its apps in chat" switch is `apps` in the listing (true
-// unless switched off) and PATCH {apps: boolean}. Test also tells the app
-// catalog what it found; a saved or switched-on URL server is probed in the
-// background (server/chat-apps-mcp.ts; a command server only by Test or a
-// turn that mounts it).
 import type { ChatAppsMcp } from "../chat-apps-mcp.ts";
 import type { CloudHomeConfig } from "../cloud-home.ts";
 import type { AppConfig } from "../config.ts";
@@ -26,21 +13,14 @@ import { PASS, type RouteHandler } from "./table.ts";
 export interface McpServerRouteDeps {
   cfg: Pick<AppConfig, "mcpServers">;
   sessions: Pick<SessionRegistry, "isLive">;
-  /** The whole manager: `withMcpSignIn` takes it to attach a signed-in server's tokens for a test. */
   mcpOAuth: McpOAuthManager;
-  /** The Cloud home this server is, if any (index.ts `CLOUD_HOME`): a remote sign-in may come back to its public origin. */
   cloudHome: Pick<CloudHomeConfig, "publicOrigin"> | null;
-  /** The public address configured for this server (index.ts `FALLBACK_PUBLIC_URL`). */
   fallbackPublicUrl: string | null;
-  /** The MCP-settings lock, shared with the internal mcp-servers route. */
   mcpConfigBusy: BusyFlag;
-  /** The servers as the settings panel shows them: secrets as booleans, sign-in state attached. */
+  /** Secrets as booleans, sign-in state attached. */
   mcpServerResponse(): Record<string, unknown>;
-  /** The fields a request may set on a server, with its secrets write-only. */
   mcpServerBody(body: unknown): Record<string, unknown>;
-  /** A managed policy's refusal of this server, or nothing. */
   mcpPolicyRefusal(name: string, server: object): string | undefined;
-  /** Saves the servers and tells every client. */
   persistMcpServers(next: Record<string, unknown>): void;
   savedCustomDomain(): string | null;
   /** MCP Apps: the catalog's probes, and forgetting a removed server. */
@@ -69,7 +49,6 @@ export function createMcpServerRoutes(deps: McpServerRouteDeps): RouteHandler {
   const MAX_CONCURRENT_MCP_PROBES = 2;
   let mcpProbesInFlight = 0;
   return async ({ req, res, path, method, auth, json, readBody }) => {
-    // ── custom MCP servers (a local command or a URL; secrets write-only) ──
     if (method === "GET" && path === "/api/mcp/servers") {
       return json(res, 200, withHasApps(mcpServerResponse()));
     }
@@ -105,7 +84,6 @@ export function createMcpServerRoutes(deps: McpServerRouteDeps): RouteHandler {
       }
     }
 
-    // The loopback listener, the public callback and authenticated paste-back complete the same flow.
     const mcpSignIn = /^\/api\/mcp\/servers\/([a-z][a-z0-9_-]{0,31})\/(sign-in|sign-out)(?:\/([0-9a-f-]{36}))?$/.exec(path);
     if (mcpSignIn) {
       const [, name, action, flowId] = mcpSignIn;
@@ -138,9 +116,7 @@ export function createMcpServerRoutes(deps: McpServerRouteDeps): RouteHandler {
           return json(res, 200, { auth: await mcpOAuth.completeCallback(name!, flowId, body.callbackUrl, owner) });
         }
         if (action === "sign-in" && method === "POST" && !flowId) {
-          // A browser on another computer cannot reach this machine's
-          // loopback: it comes back to the https address it is using now,
-          // when that is one this server vouches for (mcpCallbackOrigin).
+          // A browser on another computer comes back to the https address it uses now, when this server vouches for it.
           const remote = auth.kind === "session" && (isProxied(req) || !isLoopbackHost(req.headers.host));
           const origin = remote
             ? mcpCallbackOrigin(provesSameOrigin(req) ? requestOrigin(req) : null,
@@ -188,8 +164,7 @@ export function createMcpServerRoutes(deps: McpServerRouteDeps): RouteHandler {
       }
     }
 
-    // Paste-to-add: the {"mcpServers": {...}} block every other agent tool
-    // writes. Same rules as POST: disabled until explicitly enabled.
+    // The {"mcpServers": {...}} block other agent tools write; imported servers stay disabled until enabled.
     if (method === "POST" && path === "/api/mcp/servers/import") {
       if (!String(req.headers["content-type"] ?? "").toLowerCase().startsWith("application/json")) {
         return json(res, 415, { error: "content-type must be application/json" });
@@ -265,14 +240,12 @@ export function createMcpServerRoutes(deps: McpServerRouteDeps): RouteHandler {
         persistMcpServers({ ...current, [name]: parsed.server });
         appCatalog?.forgetServer(name);
         appCatalog?.serverChanged(name);
-        // a sign-in belongs to one address; a token never follows the entry elsewhere
+        // A sign-in belongs to one address: a token never follows the entry elsewhere.
         const before = isRemoteMcpServer(existing.server) ? existing.server.url : null;
         const after = isRemoteMcpServer(parsed.server) ? parsed.server.url : null;
-        // ...and to one sign-in app with its scopes; a new secret for the same app keeps it
+        // ...and to one sign-in app with its scopes; a new secret for the same app keeps it.
         const app = (server: typeof existing.server) => isRemoteMcpServer(server) && server.oauth
           ? JSON.stringify([server.oauth.clientId, server.oauth.scopes ?? []]) : null;
-        // Any other edit (a new header, say) drops a sign-in request that has
-        // no tokens behind it; the next Test asks again if it still applies.
         if (before !== after || app(existing.server) !== app(parsed.server)
           || (after && mcpOAuth.authState(name, after) === "needs-sign-in")) mcpOAuth.forget(name);
         return json(res, 200, withHasApps(mcpServerResponse()));

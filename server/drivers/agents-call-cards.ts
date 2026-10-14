@@ -1,12 +1,4 @@
-// The agents tools that draw a card in the chat: the Watcher's legacy options
-// card, the two widget tools (agents-widget-tools.ts) and the two chat-app
-// tools (agents-app-tools.ts). They live here rather than in agents-call.ts,
-// which is at its size ratchet; callTool hands these names over and returns
-// the answer as it stands.
-//
-// All five post to the one internal card route. server/chat-widgets.ts
-// (createAgentCard) tells them apart by the body's `tool` and hands the app
-// tools to server/chat-apps.ts; the checks here only save a round trip.
+// The agents tools that draw a chat card: the Watcher's options card, the widget tools and the page tools.
 import { parseShowHtmlInput, parseUpdateHtmlInput } from "../../shared/app.ts";
 import { parseOptionsCardInput, WATCHER_OPTIONS_CARD_BOT_ID } from "../../shared/options-card.ts";
 import { parseWidgetInput, widgetAdvice } from "../../shared/widget.ts";
@@ -63,9 +55,6 @@ export async function callCardTool(name: string, args: Json, context: ToolCallCo
 
   if (name === "show_html" || name === "update_html") return callAppTool(name, args, context);
 
-  // The harness normalises the tree again and is the one that stores it;
-  // checking here first means a malformed widget costs the model no round
-  // trip and reads the same sentence either way.
   const parsed = parseWidgetInput(args.widget);
   if (!parsed.ok) return { text: parsed.error, isError: true };
   const updating = name === "update_widget";
