@@ -119,6 +119,85 @@ describe("the bridge on the desktop", () => {
   });
 });
 
+describe("a row leaving the page", () => {
+  type Movable = { moveBefore?: (node: Node, child: Node | null) => void };
+  const proto = HTMLElement.prototype as unknown as Movable;
+  const original = proto.moveBefore;
+  afterEach(() => {
+    if (original) proto.moveBefore = original;
+    else delete proto.moveBefore;
+    document.getElementById("omb-app-frames-leaving")?.remove();
+  });
+
+  function initialized() {
+    const calls = adapter();
+    const host = mountAppFrame({ container, doc, title: "Coffee counter", height: 200, hostContext: {}, hostVersion: "1", adapter: calls });
+    const view = host.iframe.contentWindow!;
+    const posted = vi.spyOn(view, "postMessage");
+    const send = (data: unknown) => window.dispatchEvent(new MessageEvent("message", { data, source: view as unknown as MessageEventSource }));
+    send({ jsonrpc: "2.0", id: 1, method: "ui/initialize", params: {} });
+    send({ jsonrpc: "2.0", method: "ui/notifications/initialized", params: {} });
+    const teardownRequest = () => posted.mock.calls.map(([message]) => message as any).find((message) => message.method === "ui/resource-teardown");
+    return { host, calls, send, teardownRequest };
+  }
+
+  /** Chromium's state-keeping move. happy-dom has none, and re-inserting a
+   * frame there gives it a new window, so the stub records the move and
+   * leaves the frame (and its window) where it is. */
+  function stubMove() {
+    const moves: Array<{ place: HTMLElement; node: Node }> = [];
+    proto.moveBefore = function (this: HTMLElement, node: Node) { moves.push({ place: this, node }); };
+    return moves;
+  }
+
+  it("moves the running frame somewhere hidden, asks the View to tear down, and removes it once it answers", async () => {
+    const moves = stubMove();
+    const { host, calls, send, teardownRequest } = initialized();
+    const iframe = host.iframe;
+    const width = iframe.style.width;
+    host.retire();
+    const place = document.getElementById("omb-app-frames-leaving")!;
+    expect(moves).toEqual([{ place, node: iframe }]);
+    expect(iframe.style.width).not.toBe(width);
+    expect(place.getAttribute("aria-hidden")).toBe("true");
+    expect(place.hasAttribute("inert")).toBe(true);
+    // the View is asked, and is not engaged while it closes
+    const request = teardownRequest();
+    expect(request).toBeTruthy();
+    expect(host.engaged()).toBe(false);
+    // a size it reports while closing is not the row's any more
+    send({ jsonrpc: "2.0", method: "ui/notifications/size-changed", params: { height: 300 } });
+    expect(calls.resize).not.toHaveBeenCalled();
+    send({ jsonrpc: "2.0", id: request.id, result: {} });
+    await tick();
+    expect(iframe.isConnected).toBe(false);
+  });
+
+  it("removes a frame whose View never answers after a second", async () => {
+    stubMove();
+    vi.useFakeTimers();
+    try {
+      const { host, teardownRequest } = initialized();
+      host.retire();
+      expect(teardownRequest()).toBeTruthy();
+      expect(host.iframe.isConnected).toBe(true);
+      await vi.advanceTimersByTimeAsync(1_000);
+      expect(host.iframe.isConnected).toBe(false);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("removes the frame at once where a frame cannot move without reloading, still asking the View", () => {
+    delete proto.moveBefore;
+    const { host, teardownRequest } = initialized();
+    host.retire();
+    expect(teardownRequest()).toBeTruthy();
+    expect(host.iframe.isConnected).toBe(false);
+    expect(document.getElementById("omb-app-frames-leaving")).toBeNull();
+  });
+});
+
 describe("engagement", () => {
   function setup() {
     const iframe = createAppIframe(document, "App", 100);

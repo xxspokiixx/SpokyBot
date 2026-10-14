@@ -129,9 +129,32 @@ export interface AppFrameHost {
   contextChanged(partial: AppHostContext): void;
   /** ui/resource-teardown (at most a second), then the frame is removed. */
   teardown(): Promise<void>;
+  /** The row is leaving the page now (a thread switch): the frame moves,
+   * running, to a hidden place of its own, is asked to tear down there (at
+   * most a second), then goes. A browser that cannot move a frame without
+   * reloading it removes it at once. */
+  retire(): void;
   /** Remove now, without asking the View. */
   destroy(): void;
 }
+
+const PARKED_ID = "omb-app-frames-leaving";
+
+/** Where the frames of rows that left the page wait out their teardown:
+ * off screen, inert, and hidden from assistive technology. */
+function parkingPlace(doc: Document): HTMLElement {
+  const existing = doc.getElementById(PARKED_ID);
+  if (existing) return existing;
+  const place = doc.createElement("div");
+  place.id = PARKED_ID;
+  place.setAttribute("aria-hidden", "true");
+  place.setAttribute("inert", "");
+  Object.assign(place.style, { position: "fixed", left: "-100000px", top: "0", width: "0", height: "0", overflow: "hidden", pointerEvents: "none" });
+  doc.body.appendChild(place);
+  return place;
+}
+
+type MovableParent = HTMLElement & { moveBefore?: (node: Node, child: Node | null) => void };
 
 /** The frame element, as rule 1 requires. Its srcdoc is set by the caller,
  * verbatim, only once the bridge listens. */
@@ -160,6 +183,8 @@ export function mountAppFrame(options: AppFrameHostOptions): AppFrameHost {
   const iframe = createAppIframe(ownerDocument, options.title, options.height, options.hostContext.theme);
   const engagement = trackAppEngagement(iframe);
   let gone = false;
+  /** Its row has left: the View is being torn down where nobody sees it. */
+  let leaving = false;
   const bridge = createAppBridge({
     doc,
     hostContext: options.hostContext,
@@ -172,9 +197,9 @@ export function mountAppFrame(options: AppFrameHostOptions): AppFrameHost {
       post: (message) => iframe.contentWindow?.postMessage(message, "*"),
       resize: (height) => {
         iframe.style.height = `${height}px`;
-        options.adapter.resize(height);
+        if (!leaving) options.adapter.resize(height);
       },
-      engaged: () => engagement.engaged(),
+      engaged: () => !leaving && engagement.engaged(),
       now: () => Date.now(),
     },
   });
@@ -209,6 +234,31 @@ export function mountAppFrame(options: AppFrameHostOptions): AppFrameHost {
       if (gone) return;
       await bridge.teardown();
       destroy();
+    },
+    retire() {
+      if (gone || leaving) return;
+      leaving = true;
+      // A row leaving the page takes its element with it, and removing a
+      // frame unloads it before the View could answer. Element.moveBefore
+      // moves it with its page still running (Chromium 133 on); elsewhere,
+      // or before the View is initialized, it goes now.
+      const movable = typeof (ownerDocument.body as MovableParent | null)?.moveBefore === "function";
+      const place = movable && bridge.initialized && iframe.isConnected ? parkingPlace(ownerDocument) as MovableParent : null;
+      if (!place?.moveBefore) {
+        void bridge.teardown();
+        destroy();
+        return;
+      }
+      try {
+        // keep its size, so the View does not reflow while it closes
+        iframe.style.width = `${Math.round(iframe.getBoundingClientRect().width) || 0}px`;
+        place.moveBefore(iframe, null);
+      } catch {
+        void bridge.teardown();
+        destroy();
+        return;
+      }
+      void bridge.teardown().finally(destroy);
     },
     destroy,
   };

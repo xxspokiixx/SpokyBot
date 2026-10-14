@@ -139,10 +139,9 @@ export function AppFrame(props: AppFrameProps) {
       window.removeEventListener("resize", later);
       if (timer !== undefined) clearTimeout(timer);
       if (latest.current.handle.current) latest.current.handle.current = null;
-      // The row is going: tell the View, then go with it (a row leaving the
-      // page cannot wait; the pool, Reload and update_html wait on teardown()).
-      void host.teardown();
-      host.destroy();
+      // The row is going: the frame waits out the View's teardown somewhere
+      // hidden (the pool, Reload and update_html wait on teardown() first).
+      host.retire();
     };
     // A new document is a new frame; nothing else remounts it.
   }, [doc, botId, threadId]);
