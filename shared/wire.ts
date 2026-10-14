@@ -25,6 +25,7 @@ import type { SkillRequestCardData } from "./skill-request.ts";
 import type { QuestionRequestCardData } from "./ask-question.ts";
 import type { RoutineRunCardData } from "./routine-run.ts";
 import type { WidgetPayload } from "./widget.ts";
+import type { AppFromRef, AppPayload } from "./app.ts";
 import type { GroupGoalRunCardData } from "./group-goal-run.ts";
 import type { RuntimeEvent } from "./runtime-events.ts";
 import type { Notification } from "./notification.ts";
@@ -428,7 +429,7 @@ export interface WireMessage {
   roomRequest?: { id: string; phase: "request" | "result" };
   id: string;
   role: "bot" | "user";
-  kind: "text" | "options" | "activity" | "screen" | "connector" | "secret" | "signin" | "routine.run" | "goal.run" | "digest" | "compaction" | "call" | "widget";
+  kind: "text" | "options" | "activity" | "screen" | "connector" | "secret" | "signin" | "routine.run" | "goal.run" | "digest" | "compaction" | "call" | "widget" | "app";
   text?: string;
   digest?: TurnDigest;
   compaction?: {
@@ -452,6 +453,12 @@ export interface WireMessage {
    * `text` is always its readable fallback, for clients that do not know
    * the kind. */
   widget?: WidgetPayload;
+  /** app rows (kind "app"): bot HTML or an MCP server's UI (shared/app.ts).
+   * `text` is always the readable fallback. */
+  app?: AppPayload;
+  /** user rows sent by an app's ui/message: which app row sent them. Every
+   * client draws "Sent from <title>" on the bubble. */
+  fromApp?: AppFromRef;
   connector?: ConnectorCardData;
   secret?: SecretRequestCardData;
   /** signin rows: the bot asked the person to sign in to a site themselves. */
