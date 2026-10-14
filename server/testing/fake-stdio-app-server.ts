@@ -40,8 +40,27 @@ const send = (frame: unknown) => process.stdout.write(`${JSON.stringify(frame)}\
 const answer = (id: Frame["id"], result: unknown) => send({ jsonrpc: "2.0", id, result });
 const refuse = (id: Frame["id"], code: number, message: string) => send({ jsonrpc: "2.0", id, error: { code, message } });
 
+/** The board's view: a minimal MCP Apps client. It initializes, shows the
+ * tool result, answers teardown, and has two buttons for the verification
+ * recipe: "Paint it red" calls paint_board (model-visible, not read-only: it
+ * needs the person's Allow outside Full access) and "Save board" calls
+ * save_board (app-only: it never asks). The answer, or the error, is shown. */
+const BOARD_SCRIPT = [
+  "var seq=0,waiting={};",
+  "function ask(method,params){return new Promise(function(resolve){var id=++seq;waiting[id]=resolve;parent.postMessage({jsonrpc:'2.0',id:id,method:method,params:params||{}},'*');});}",
+  "function el(id){return document.getElementById(id);}",
+  "addEventListener('message',function(e){var m=e.data;if(e.source!==parent||!m||m.jsonrpc!=='2.0')return;",
+  "if(m.id!==undefined&&waiting[m.id]){var done=waiting[m.id];delete waiting[m.id];done(m);return;}",
+  "if(m.method==='ui/notifications/tool-result')el('status').textContent='Result: '+JSON.stringify(m.params.structuredContent||null);",
+  "if(m.method==='ui/resource-teardown'&&m.id!==undefined)parent.postMessage({jsonrpc:'2.0',id:m.id,result:{}},'*');});",
+  "function show(m){el('out').textContent=m.error?'Error '+m.error.code+': '+m.error.message:'OK: '+JSON.stringify(m.result.content);}",
+  "el('paint').onclick=function(){ask('tools/call',{name:'paint_board',arguments:{color:'red'}}).then(show);};",
+  "el('save').onclick=function(){ask('tools/call',{name:'save_board',arguments:{state:'saved'}}).then(show);};",
+  "ask('ui/initialize',{protocolVersion:'2026-01-26',appInfo:{name:'fake-board',version:'1'},appCapabilities:{}}).then(function(){parent.postMessage({jsonrpc:'2.0',method:'ui/notifications/initialized'},'*');});",
+].join("");
+
 function boardHtml(): string {
-  const page = "<!DOCTYPE html><html><head><meta charset=\"utf-8\"><title>Board</title></head><body><h1>Fake board</h1><script>window.parent.postMessage({jsonrpc:\"2.0\",id:1,method:\"ui/initialize\",params:{}},\"*\")</script></body></html>";
+  const page = `<!DOCTYPE html><html><head><meta charset="utf-8"><title>Board</title></head><body><h1>Fake board</h1><p id="status">Waiting for the result</p><button id="paint">Paint it red</button> <button id="save">Save board</button><pre id="out"></pre><script>${BOARD_SCRIPT}</script></body></html>`;
   const target = Number(process.env.FAKE_APP_HTML_BYTES ?? 0);
   return target > page.length ? page.replace("</body>", `<!--${"x".repeat(target - page.length - 7)}--></body>`) : page;
 }
