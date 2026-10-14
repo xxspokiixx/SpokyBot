@@ -111,14 +111,16 @@ export type AllowDecision = "once" | "always" | "deny";
 
 /** "<title> wants to <tool>." with Allow, Allow for this app, and Deny. */
 export function AppAllowBar({ title, tool, onDecide, bordered }: { title: string; tool: string; onDecide(decision: AllowDecision): void; bordered: boolean }) {
+  // An app named after its tool would read "Get Time wants to Get Time."
+  const ask = title.trim().toLowerCase() === tool.trim().toLowerCase() ? t("app.allow.askSame", { tool }) : t("app.allow.ask", { title, tool });
   return (
     <div
       role="group"
-      aria-label={t("app.allow.ask", { title, tool })}
+      aria-label={ask}
       data-app-allow
       className={cn("flex flex-wrap items-center gap-x-3 gap-y-2 border-t border-ink/[0.12] py-3", bordered ? "mx-4" : "mt-2")}
     >
-      <span dir="auto" className="min-w-0 flex-[1_1_220px] text-[13px] leading-[18px] text-ink">{t("app.allow.ask", { title, tool })}</span>
+      <span dir="auto" className="min-w-0 flex-[1_1_220px] text-[13px] leading-[18px] text-ink">{ask}</span>
       <div className="flex flex-wrap items-center gap-2">
         <button type="button" onClick={() => onDecide("once")} className={ASK_PRIMARY_BUTTON}>{t("app.allow.once")}</button>
         <button type="button" onClick={() => onDecide("always")} className={cn(ASK_CHIP, ASK_CHIP_IDLE)}>{t("app.allow.always")}</button>

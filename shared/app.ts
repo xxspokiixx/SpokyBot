@@ -317,9 +317,9 @@ export function appBlockedText(reason: AppBlockedReason, server?: string): strin
   const name = server?.trim() || "This app's server";
   switch (reason) {
     case "signed-out": return `Sign in to ${name} again`;
-    case "server-removed":
-    case "server-disabled":
-    case "apps-off": return `${name} is no longer connected`;
+    case "server-removed": return `${name} is no longer connected`;
+    case "server-disabled": return `${name} is switched off in Settings`;
+    case "apps-off": return `Apps from ${name} are switched off in Settings`;
     case "too-large": return "This app is too large to store";
     case "unavailable": return `${name} did not send this app's page`;
   }

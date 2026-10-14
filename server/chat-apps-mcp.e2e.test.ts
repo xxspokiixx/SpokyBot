@@ -121,7 +121,7 @@ it("learns a server's apps, observes its tool call into an app row, and runs its
     // ── "Show its apps in chat" off: the frame keeps its page, loses its server ──
     await api("PATCH", "/api/mcp/servers/board", { apps: false });
     expect((await api("GET", "/api/mcp/servers")).servers.find((server: any) => server.name === "board")).toMatchObject({ apps: false });
-    expect(await rpc({ method: "tools/list" }, 410)).toMatchObject({ blocked: { reason: "apps-off", text: "Fake App is no longer connected" } });
+    expect(await rpc({ method: "tools/list" }, 410)).toMatchObject({ blocked: { reason: "apps-off", text: "Apps from Fake App are switched off in Settings" } });
     expect(await api("GET", `/api/threads/${bot.threadId}/messages/${row.id}/app`)).toMatchObject({ can: { serverTools: false }, blocked: { reason: "apps-off" } });
   } finally {
     if (engineSide && engineSide.exitCode === null) { const closed = once(engineSide, "close"); engineSide.kill(); await closed; }

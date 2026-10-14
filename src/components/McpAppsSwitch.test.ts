@@ -27,8 +27,8 @@ afterEach(() => {
   vi.unstubAllGlobals();
 });
 
-const draw = (server: { name: string; apps?: boolean }, onSaved = vi.fn()) => {
-  act(() => root.render(createElement(McpAppsSwitch<{ name: string; apps?: boolean }>, { server, disabled: false, onSaved })));
+const draw = (server: { name: string; apps?: boolean; hasApps?: boolean }, onSaved = vi.fn()) => {
+  act(() => root.render(createElement(McpAppsSwitch<{ name: string; apps?: boolean; hasApps?: boolean }>, { server, disabled: false, onSaved })));
   return onSaved;
 };
 
@@ -38,10 +38,19 @@ describe("the apps switch", () => {
     expect(host.innerHTML).toBe("");
   });
 
+  it("is hidden while it is on for a server not seen to offer an app, and shown while off so it can come back", () => {
+    draw({ name: "notion", apps: true });
+    expect(host.innerHTML).toBe("");
+    draw({ name: "notion", apps: true, hasApps: false });
+    expect(host.innerHTML).toBe("");
+    draw({ name: "notion", apps: false, hasApps: false });
+    expect(host.querySelector('[role="switch"]')).not.toBeNull();
+  });
+
   it("shows the server's value and saves the other one", async () => {
     const saved = [{ name: "excalidraw", apps: false }];
     fetchMock.mockResolvedValue(new Response(JSON.stringify({ servers: saved }), { status: 200, headers: { "content-type": "application/json" } }));
-    const onSaved = draw({ name: "excalidraw", apps: true });
+    const onSaved = draw({ name: "excalidraw", apps: true, hasApps: true });
     const toggle = host.querySelector<HTMLButtonElement>('[role="switch"]')!;
     expect(host.textContent).toContain("Show its apps in chat");
     expect(toggle.getAttribute("aria-checked")).toBe("true");

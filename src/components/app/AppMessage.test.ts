@@ -15,6 +15,7 @@ import type { AppDocument, AppPayload } from "../../../shared/app";
 import { APP_SAMPLES, MCP_APP_SAMPLES } from "../../../shared/app-samples";
 import { botHtmlDocument, mcpAppDocument } from "../../../shared/app-frame/document";
 import { createAppPool, type AppPool } from "./app-pool";
+import { AppAllowBar } from "./AppChrome";
 import { AppMessage, forgetAppRows } from "./AppMessage";
 
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
@@ -340,5 +341,14 @@ describe("an MCP app", () => {
     fetchMock.mockImplementation(async () => json(200, mcpDoc()));
     await mount(row(mcpPayload({ border: false })));
     expect(find("[data-app] > div")!.className).not.toContain("rounded-3xl");
+  });
+});
+
+describe("the Allow bar", () => {
+  it("names the app and the tool, and asks plainly when they share a name", () => {
+    const bar = (title: string, tool: string) => renderToStaticMarkup(createElement(AppAllowBar, { title, tool, onDecide() {}, bordered: true }));
+    expect(bar("Show board", "Paint board")).toContain("Show board wants to Paint board.");
+    expect(bar("Get Time", "get time")).toContain("Run get time?");
+    expect(bar("Get Time", "get time")).not.toContain("wants to");
   });
 });

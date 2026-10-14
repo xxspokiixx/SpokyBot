@@ -3,7 +3,8 @@
 // default. Off, the server is mounted exactly as it was before apps: no app
 // UI advertised, no app rows. Drawn only for a server whose listing reports
 // `apps` (server/routes/mcp-servers.ts), so a server that cannot say stays
-// as it was.
+// as it was, and only once the app catalog has seen it offer an app
+// (`hasApps`), or while it is switched off so it can be switched back on.
 import { useState } from "react";
 import { Loader2 } from "lucide-react";
 import { t } from "@/lib/i18n";
@@ -11,7 +12,7 @@ import { api } from "@/state/store";
 import { Switch } from "./SettingsPrimitives";
 
 export function McpAppsSwitch<T>({ server, disabled, onSaved }: {
-  server: { name: string; apps?: boolean };
+  server: { name: string; apps?: boolean; hasApps?: boolean };
   disabled: boolean;
   /** The listing the server answers with, as every other change does. */
   onSaved(servers: T[]): void;
@@ -19,6 +20,7 @@ export function McpAppsSwitch<T>({ server, disabled, onSaved }: {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   if (typeof server.apps !== "boolean") return null;
+  if (server.apps && server.hasApps !== true) return null;
   const on = server.apps;
   const toggle = async () => {
     setBusy(true);

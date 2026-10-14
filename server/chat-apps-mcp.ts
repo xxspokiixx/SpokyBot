@@ -99,6 +99,9 @@ export interface ChatAppsMcp {
   turnMounts(custom: Record<string, McpServerSpec>, toolScope?: unknown): { mcpApps?: Record<string, { extension: boolean }> };
   /** Settings → Test's probe options for a stored server (the extension,
    * and the catalog record), or nothing when its apps are off. */
+  /** Whether the catalog has seen this stored server offer an app: true,
+   * false, or undefined before it has been probed. */
+  hasApps(name: string): boolean | undefined;
   probeOptions(name: string, server: StoredMcpServer): McpProbeOptions;
   /** A server was saved or switched on: probe it soon if it is a URL
    * server (a command server waits for Test or a turn that mounts it). */
@@ -465,6 +468,10 @@ export function createChatAppsMcp(deps: ChatAppsMcpDeps): ChatAppsMcp {
 
   const service: ChatAppsMcp = {
     catalog, connections, recordMcpAppCall, access, rpc, turnMounts, probeOptions, serverChanged,
+    hasApps(name) {
+      const raw = deps.storedServers()[name];
+      return raw && typeof raw === "object" ? catalog.get(name, raw as Record<string, unknown>)?.apps : undefined;
+    },
     forgetServer(name) {
       catalog.forget(name);
       connections.closeServer(name);

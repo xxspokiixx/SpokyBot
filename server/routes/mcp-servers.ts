@@ -44,10 +44,24 @@ export interface McpServerRouteDeps {
   persistMcpServers(next: Record<string, unknown>): void;
   savedCustomDomain(): string | null;
   /** MCP Apps: the catalog's probes, and forgetting a removed server. */
-  appCatalog?: Pick<ChatAppsMcp, "probeOptions" | "serverChanged" | "forgetServer">;
+  appCatalog?: Pick<ChatAppsMcp, "probeOptions" | "serverChanged" | "forgetServer"> & Partial<Pick<ChatAppsMcp, "hasApps">>;
 }
 
 export function createMcpServerRoutes(deps: McpServerRouteDeps): RouteHandler {
+  /** The listing, with `hasApps` on each server the app catalog knows about,
+   * so Settings offers "Show its apps in chat" only where there are apps. */
+  const withHasApps = <T,>(body: T): T => {
+    const hasApps = deps.appCatalog?.hasApps;
+    const servers = (body as { servers?: unknown }).servers;
+    if (!hasApps || !Array.isArray(servers)) return body;
+    return {
+      ...body,
+      servers: servers.map((server: { name?: unknown }) => {
+        const known = typeof server?.name === "string" ? hasApps(server.name) : undefined;
+        return known === undefined ? server : { ...server, hasApps: known };
+      }),
+    };
+  };
   const {
     cfg, sessions, mcpOAuth, cloudHome: CLOUD_HOME, fallbackPublicUrl: FALLBACK_PUBLIC_URL, mcpConfigBusy,
     mcpServerResponse, mcpServerBody, mcpPolicyRefusal, persistMcpServers, savedCustomDomain, appCatalog,
@@ -57,7 +71,7 @@ export function createMcpServerRoutes(deps: McpServerRouteDeps): RouteHandler {
   return async ({ req, res, path, method, auth, json, readBody }) => {
     // ── custom MCP servers (a local command or a URL; secrets write-only) ──
     if (method === "GET" && path === "/api/mcp/servers") {
-      return json(res, 200, mcpServerResponse());
+      return json(res, 200, withHasApps(mcpServerResponse()));
     }
 
     const mcpTest = /^\/api\/mcp\/servers\/([a-z][a-z0-9_-]{0,31})\/test$/.exec(path);
@@ -102,7 +116,7 @@ export function createMcpServerRoutes(deps: McpServerRouteDeps): RouteHandler {
       const url = parsed.server.url;
       if (action === "sign-out" && method === "POST" && !flowId) {
         await mcpOAuth.signOut(name!, url);
-        return json(res, 200, mcpServerResponse());
+        return json(res, 200, withHasApps(mcpServerResponse()));
       }
       const owner = auth.kind === "session" ? auth.session.id : "loopback";
       res.setHeader("Cache-Control", "no-store");
@@ -168,7 +182,7 @@ export function createMcpServerRoutes(deps: McpServerRouteDeps): RouteHandler {
         if (refusal) return json(res, 403, { error: refusal, code: "managed_policy" });
         persistMcpServers({ ...current, [name]: parsed.server });
         appCatalog?.serverChanged(name);
-        return json(res, 201, mcpServerResponse());
+        return json(res, 201, withHasApps(mcpServerResponse()));
       } finally {
         mcpConfigBusy.set(false);
       }
@@ -203,7 +217,7 @@ export function createMcpServerRoutes(deps: McpServerRouteDeps): RouteHandler {
         const refused = names.filter(name => mcpPolicyRefusal(name, parsed.servers[name] as object));
         if (refused.length) return json(res, 403, { error: `${mcpPolicyRefusal(refused[0]!, parsed.servers[refused[0]!] as object)} Not approved: ${refused.join(", ")}.`, code: "managed_policy" });
         persistMcpServers({ ...current, ...parsed.servers });
-        return json(res, 201, { ...mcpServerResponse(), added: names });
+        return json(res, 201, { ...withHasApps(mcpServerResponse()), added: names });
       } finally {
         mcpConfigBusy.set(false);
       }
@@ -226,7 +240,7 @@ export function createMcpServerRoutes(deps: McpServerRouteDeps): RouteHandler {
           persistMcpServers(next);
           mcpOAuth.forget(name);
           appCatalog?.forgetServer(name);
-          return json(res, 200, mcpServerResponse());
+          return json(res, 200, withHasApps(mcpServerResponse()));
         }
 
         const existing = parseStoredMcpServer(name, current[name]);
@@ -241,7 +255,7 @@ export function createMcpServerRoutes(deps: McpServerRouteDeps): RouteHandler {
           const { apps: _apps, ...rest } = existing.server;
           persistMcpServers({ ...current, [name]: key === "enabled" ? { ...existing.server, enabled: body.enabled } : { ...rest, ...(body.apps ? {} : { apps: false }) } });
           if (body[key] === true) appCatalog?.serverChanged(name);
-          return json(res, 200, mcpServerResponse());
+          return json(res, 200, withHasApps(mcpServerResponse()));
         }
 
         const parsed = parseMcpServerMutation(name, body, existing.server);
@@ -261,7 +275,7 @@ export function createMcpServerRoutes(deps: McpServerRouteDeps): RouteHandler {
         // no tokens behind it; the next Test asks again if it still applies.
         if (before !== after || app(existing.server) !== app(parsed.server)
           || (after && mcpOAuth.authState(name, after) === "needs-sign-in")) mcpOAuth.forget(name);
-        return json(res, 200, mcpServerResponse());
+        return json(res, 200, withHasApps(mcpServerResponse()));
       } finally {
         mcpConfigBusy.set(false);
       }

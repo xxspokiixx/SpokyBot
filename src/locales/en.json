@@ -4318,6 +4318,7 @@
   "app.openAgain": "Open again",
   "app.loading": "Opening the app",
   "app.allow.ask": "{title} wants to {tool}.",
+  "app.allow.askSame": "Run {tool}?",
   "app.allow.once": "Allow",
   "app.allow.always": "Allow for this app",
   "app.allow.deny": "Deny",

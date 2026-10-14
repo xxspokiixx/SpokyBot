@@ -165,7 +165,7 @@ describe("access", () => {
     const access = () => live.mcp.access(live.row("m1"), THREAD);
     expect(access()).toEqual({ can: { serverTools: true, serverResources: true, message: true, openLinks: true, modelContext: true } });
     live.servers.board = { ...board(), enabled: true, apps: false };
-    expect(access()).toMatchObject({ can: { serverTools: false, serverResources: false, message: true }, blocked: { reason: "apps-off", text: "Fake App is no longer connected" } });
+    expect(access()).toMatchObject({ can: { serverTools: false, serverResources: false, message: true }, blocked: { reason: "apps-off", text: "Apps from Fake App are switched off in Settings" } });
     live.servers.board = { ...board(), enabled: false };
     expect(access().blocked?.reason).toBe("server-disabled");
     delete live.servers.board;
@@ -237,7 +237,7 @@ describe("rpc", () => {
     const { record, rpc, servers, store, row, mcp, bot } = setup();
     await record();
     servers.board = { ...board(), enabled: true, apps: false };
-    expect(await rpc("m1", "tools/list")).toEqual({ status: 410, body: { error: { code: -32000, message: "Fake App is no longer connected" }, blocked: { reason: "apps-off", text: "Fake App is no longer connected" } } });
+    expect(await rpc("m1", "tools/list")).toEqual({ status: 410, body: { error: { code: -32000, message: "Apps from Fake App are switched off in Settings" }, blocked: { reason: "apps-off", text: "Apps from Fake App are switched off in Settings" } } });
     delete servers.board;
     expect((await rpc("m1", "tools/list")).body).toMatchObject({ blocked: { reason: "server-removed" } });
     const page = store.appendMessage(THREAD, { role: "bot", kind: "app", text: "x", app: { v: 1, source: "html", title: "p", doc: "", rev: 0, bytes: 0, border: true, network: { connect: [], resources: [] } } });
@@ -284,6 +284,17 @@ describe("mounts and probes", () => {
     expect(mcp.turnMounts({ board: board() })).toEqual({});
     await new Promise((resolve) => setTimeout(resolve, 50));
     expect(probe).toHaveBeenCalledTimes(1);
+  });
+
+  it("tells Settings which stored servers have been seen to offer an app", () => {
+    const { mcp, servers } = setup({ probe: vi.fn(async () => ({ ok: false as const, error: "offline" })) });
+    servers.board = { ...board(), enabled: true };
+    expect(mcp.hasApps("board")).toBeUndefined();
+    mcp.catalog.recordList("board", board(), [{ name: "show_board", _meta: { ui: { resourceUri: BOARD_URI } } }], "ok");
+    expect(mcp.hasApps("board")).toBe(true);
+    mcp.catalog.recordList("board", board(), [{ name: "plain_tool" }], "ok");
+    expect(mcp.hasApps("board")).toBe(false);
+    expect(mcp.hasApps("nowhere")).toBeUndefined();
   });
 
   it("learns a server's apps from Settings → Test, and records a refused extension", async () => {
