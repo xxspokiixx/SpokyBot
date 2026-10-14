@@ -777,3 +777,30 @@ S1 and S2 (2026-10-14). Small deviations from the text above, so later tasks bui
 - **Replay.** `transcriptText` reads words an app sent as `[app: <title>]`, and a typed reply to an app row as `[replying to <speaker>'s app: “…”]`.
 - **Storage.** `DATA_DIR/app-docs/{html,data,doc}/<sha256>`; an MCP row's data blob also holds its filtered `network`. Sweeps run 30 s after start and 2 s after a thread is deleted, and never remove a file younger than ten minutes. `ChatApps.mcpAccess` is the hook S4 sets; until then an MCP row's document renders read-only (`blocked: server-removed`).
 - **Fixtures.** `scripts/gen-app-fixtures.ts <mausbot-mobile checkout>` writes `app-messages.json`, `app-documents.json` and `app-expectations.json` (with `appHostSha256`) under `ios/Tests/CompanionCoreTests/Fixtures`, and copies `app-host.html` to both phone apps. `node --experimental-strip-types scripts/build-app-host.ts [--check]` rebuilds the host page.
+
+S3, the desktop renderer and Electron (2026-10-14):
+
+- **Files.** The iframe, the bridge wiring and engagement live in `src/components/app/app-frame-host.ts`, with no React, so `scripts/smoke-app-frames.mjs` bundles the code the app runs. `AppFrame.tsx` wraps it. ChatView's widget and app cases are one `RichMessageRow` (`src/components/RichMessageRow.tsx`). That file also draws the line under the person's own bubble (`UserLineNote`: "Sent from <app>", and the existing "via call"). ChatView is 3 lines shorter, and its ratchet is now 1845.
+- **Engagement in a frame Chromium isolates.** Chrome puts sandboxed frames in a process of their own. This is the remote web client's case. The page then gets no `pointerenter` and no `:hover` for the frame's element; this was measured with CDP input on Chrome 155. So focus entering a frame also counts when the page last saw the pointer within 40 px of the frame and the pointer has not left the window since. On the way in, the last `pointermove` the page sees is at the frame's edge. Measured in Electron 43.7.9, with focus emulated:
+  - a click in one frame engages it;
+  - a click in a second frame moves engagement to the second;
+  - a frame that focuses itself without a gesture does become the active element, but is not engaged.
+
+  That last result settles the "Could not verify" item: a frame can take focus by itself, so the pointer condition is needed.
+- **Disposed frames in `will-frame-navigate`.** A frame's second self-navigation, right after a cancelled one, can arrive with a `WebFrameMain` whose render frame is gone. Reading `frame.origin` then throws "Render frame was disposed before WebFrameMain could be accessed". Uncaught in `main.mjs`, this opens Electron's modal error box and stalls the main process; the smoke hung in exactly this way. `appFrameNavigationAllowed` catches the error and cancels: a subframe that cannot be read may load only `about:srcdoc` or `about:blank`.
+- **Permissions, as measured.** Camera, microphone, geolocation and display capture are refused by Chromium's Permissions Policy before they reach the session handler, because the frame is cross-origin and has no `allow` attribute. A notification request reaches the handler from `about:srcdoc`, and `appPermissionAllowed` refuses it. `navigator.clipboard.writeText` rejects with NotAllowedError. `sendBeacon` returns true, because it only queues, while the CSP blocks the request; the empty sink is the proof.
+- **Host context.** `styles.variables` carries the current skin's resolved values, not `light-dark()` pairs, because a frame cannot read the page's custom properties; a skin change sends them again. Border variables are a tint of the ink over the card (`color-mix(in srgb, ink 20%, composer)`), not the skin's hairline: in Midnight the hairline is a few steps from the card colour and disappeared.
+- **Refusals the row draws:**
+  - A 409 `confirm` while the person is not engaged answers the View `-32000` and draws no Allow bar.
+  - A 401 draws the strip "Sign in to <server> again"; its button opens Settings → MCP servers (`togglePlugins`, surface `mcp`). The View gets `-32000 "Sign-in needed"`.
+  - A 410 draws the strip from the body's `blocked: {reason, text}`, else `server-removed`. **S4: put `blocked` in the 410 body.**
+  - No answer at all draws "Reconnect to use this app" with Try again.
+- **"Show its apps in chat".** `McpAppsSwitch` is drawn only for a server whose listing carries a boolean `apps`. It saves with `PATCH /api/mcp/servers/:name {apps}` and takes back the `servers` listing, as Enable does. **S4: report `apps: boolean` on every server in `GET /api/mcp/servers` (true unless switched off), accept `{apps}` on PATCH, and answer with `{servers}`.**
+- **Info.** The info "popover" is a panel inside the card, under the header. Denied permissions are one fixed line, because the payload does not record what a server asked for.
+- **Pool:**
+  - A frame being torn down keeps its slot until its teardown ends, so the live count never goes over 3.
+  - A frame the pool took while its row was in view comes back the next time the row is scrolled to, or when the person presses "Open app".
+  - A document is reused for 60 s when a frame remounts after the pool took its slot. Reload always fetches again.
+  - Which rows count as the newest 20 is read from the store's copy of the thread.
+- **request-teardown.** The row waits for the View's answer to `ui/resource-teardown`, then folds to its header with "Open again".
+- **CI.** The macOS `electron-smokes` job runs `node scripts/smoke-app-frames.mjs --engagement`. The smoke holds a `powerSaveBlocker`: macOS naps a hidden Electron window started from a terminal, and its timers stall.
