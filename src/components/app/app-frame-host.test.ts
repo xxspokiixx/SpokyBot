@@ -61,6 +61,22 @@ describe("the frame element", () => {
     host.destroy();
     expect(container.querySelector("iframe")).toBeNull();
   });
+
+  it("follows a skin change: the frame's color scheme becomes the new theme", () => {
+    // A View that adopts the dark theme inside a frame still marked light gets
+    // an opaque canvas from Chromium (the schemes differ), a dark slab on the
+    // card instead of the card showing through.
+    const host = mountAppFrame({ container, doc, title: "Coffee counter", height: 200, hostContext: { theme: "light" }, hostVersion: "test", adapter: adapter() });
+    expect(host.iframe.style.colorScheme).toBe("light");
+    host.contextChanged({ theme: "dark" });
+    expect(host.iframe.style.colorScheme).toBe("dark");
+    // a change that is not a theme leaves it alone
+    host.contextChanged({ containerDimensions: { width: 600, maxHeight: 500 } });
+    expect(host.iframe.style.colorScheme).toBe("dark");
+    host.contextChanged({ theme: "light" });
+    expect(host.iframe.style.colorScheme).toBe("light");
+    host.destroy();
+  });
 });
 
 describe("the bridge on the desktop", () => {

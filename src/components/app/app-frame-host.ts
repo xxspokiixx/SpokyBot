@@ -197,7 +197,14 @@ export function mountAppFrame(options: AppFrameHostOptions): AppFrameHost {
   return {
     iframe,
     engaged: () => engagement.engaged(),
-    contextChanged: (partial) => { if (!gone) bridge.contextChanged(partial); },
+    contextChanged: (partial) => {
+      if (gone) return;
+      // The frame's scheme follows the theme, as at creation: a View that
+      // adopts the new theme in a frame still marked with the old one gets an
+      // opaque canvas from Chromium instead of the card showing through.
+      if (partial.theme) iframe.style.colorScheme = partial.theme;
+      bridge.contextChanged(partial);
+    },
     async teardown() {
       if (gone) return;
       await bridge.teardown();
