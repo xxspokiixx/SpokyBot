@@ -85,11 +85,29 @@ export const APP_HELPER_SOURCE = `(function () {
     if (message.method === "ui/notifications/host-context-changed") apply(message.params);
     else if (message.method === "ui/resource-teardown" && message.id !== undefined) post({ jsonrpc: "2.0", id: message.id, result: {} });
   });
+  // The page's own height, not the frame's: many pages pin html or body to
+  // the viewport (height: 100vh, min-height: 100vh) and centre their content
+  // in it, which in a frame that sizes to its content only ever reports the
+  // frame's current height while the content spills out above and below.
+  // Both are freed for the measurement and put back before the next paint.
   var measure = function () {
-    var before = root.style.height;
-    root.style.height = "max-content";
+    var body = document.body;
+    var boxes = body ? [root, body] : [root];
+    var saved = boxes.map(function (box) { return [box.style.height, box.style.minHeight, box.style.maxHeight]; });
+    boxes.forEach(function (box) {
+      box.style.setProperty("height", "max-content", "important");
+      box.style.setProperty("min-height", "0", "important");
+      box.style.setProperty("max-height", "none", "important");
+    });
     var height = Math.ceil(root.getBoundingClientRect().height);
-    root.style.height = before;
+    boxes.forEach(function (box, index) {
+      box.style.removeProperty("height");
+      box.style.removeProperty("min-height");
+      box.style.removeProperty("max-height");
+      if (saved[index][0]) box.style.height = saved[index][0];
+      if (saved[index][1]) box.style.minHeight = saved[index][1];
+      if (saved[index][2]) box.style.maxHeight = saved[index][2];
+    });
     return height;
   };
   var watchSize = function () {

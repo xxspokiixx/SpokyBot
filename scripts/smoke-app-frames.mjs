@@ -25,6 +25,12 @@ import { spawn } from "node:child_process";
 
 const ROOT = fileURLToPath(new URL("../", import.meta.url));
 
+// A page pinned to the viewport with its content centred, the way bots often
+// write one: the frame must still grow to the content, not report its own
+// height back (the content would spill out above and below).
+const PINNED = `<!DOCTYPE html><html><head><meta charset="utf-8"><style>body{margin:0;height:100vh;display:flex;align-items:center;justify-content:center}</style></head>
+<body><div style="height:300px;width:120px;background:#888"></div></body></html>`;
+
 // The page a bot would send with show_html. SINK and WSSINK are filled in
 // with the sink's address. Each attempt reports what happened; the frame
 // posts the report to its parent, then tries to navigate itself.
@@ -153,6 +159,7 @@ if (!process.versions.electron) {
       return doc;
     };
     const probeDoc = page(PROBE.replaceAll("WSSINK", sinkOrigin.replace("http:", "ws:")).replaceAll("SINK", sinkOrigin), "Probe");
+    const pinnedDoc = page(PINNED, "Pinned");
     apps.close();
     // Rules 2 and 3, on the document the frame gets.
     assert.ok(probeDoc.srcdoc.startsWith(`${CSP_META_PREFIX}${BOT_HTML_CSP}">`), "rule 2: the CSP meta comes first, with the bot policy");
@@ -167,7 +174,7 @@ if (!process.versions.electron) {
       bundle: true, write: false, format: "iife", platform: "browser", target: ["chrome120"],
     });
     const input = join(data, "input.json");
-    writeFileSync(input, JSON.stringify({ probeDoc, clickDocs, hostScript: bundle.outputFiles[0].text, sinkOrigin, engagement }));
+    writeFileSync(input, JSON.stringify({ probeDoc, pinnedDoc, clickDocs, hostScript: bundle.outputFiles[0].text, sinkOrigin, engagement }));
     const env = { ...process.env };
     delete env.ELECTRON_RUN_AS_NODE;
     const child = spawn(electron, [fileURLToPath(import.meta.url), data, input], { stdio: "inherit", env });
@@ -179,7 +186,7 @@ if (!process.versions.electron) {
     }));
     clearTimeout(timer);
     // Electron's exit can drop piped output: the child writes its report to a file.
-    for (const name of ["report.json", "engagement.json", "error.txt", ...(code === 0 ? [] : ["console.txt"])]) {
+    for (const name of ["report.json", "heights.json", "engagement.json", "error.txt", ...(code === 0 ? [] : ["console.txt"])]) {
       try { console.log(readFileSync(join(data, name), "utf8")); } catch { /* not written */ }
     }
     // Everything in the frame has had its chance: the sink saw nothing.
@@ -234,7 +241,7 @@ const HOST_PAGE = `<!DOCTYPE html><html><head><meta charset="utf-8"><title>App f
       hostContext: { theme: "light", containerDimensions: { width: 700, maxHeight: 600 } },
       adapter: {
         callRpc: record("rpc"), sendMessage: record("message"), openLink: record("open-link"), setContext: record("context"),
-        resize: () => {}, teardownRequested: record("teardown-request"),
+        resize: (height) => { window.__calls.push({ frame: name, op: "resize", args: [height] }); }, teardownRequested: record("teardown-request"),
       },
     });
   };
@@ -352,6 +359,16 @@ async function run() {
   // The bridge: a message nobody clicked for is refused, and nothing was sent.
   assert.equal(probe.sendUnengaged.ok, false, "an unengaged mausbot.send is refused");
   assert.deepEqual(calls.filter((call) => call.op === "message"), [], "no message reached the send route");
+
+  // A page pinned to the viewport grows the frame to its content (300px).
+  await js(`window.__mount("pinned", ${JSON.stringify(input.pinnedDoc)})`);
+  let pinned = 0;
+  for (let waited = 0; waited < 20_000 && pinned < 300; waited += 250) {
+    await new Promise((resolve) => setTimeout(resolve, 250));
+    pinned = await js(`Math.max(0, ...window.__calls.filter((call) => call.frame === "pinned" && call.op === "resize").map((call) => call.args[0]))`);
+  }
+  assert.ok(pinned >= 300, `a page pinned to the viewport reports its content's height, not the frame's (got ${pinned})`);
+  report("heights.json", JSON.stringify({ pinned }));
 
   if (input.engagement) await checkEngagement(win, js);
   await win.webContents.executeJavaScript("1");
