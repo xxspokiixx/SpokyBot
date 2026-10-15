@@ -241,6 +241,14 @@ export function CloudAddDialog({ now = Date.now }: { now?: () => number }) {
     const timer = setTimeout(() => { if (auto > 1) setAuto(auto - 1); else openCloud(); }, 1000);
     return () => clearTimeout(timer);
   }, [auto]);
+  // Focus left the window while counting: the person is elsewhere, so nothing switches; Open {name} waits for them.
+  const counting = typeof auto === "number";
+  useEffect(() => {
+    if (!counting) return;
+    const stop = () => setAuto("off");
+    window.addEventListener("blur", stop);
+    return () => window.removeEventListener("blur", stop);
+  }, [counting]);
   if (!open || !view || !request || !bridge || view.kind === "settings") return null;
 
   const offerShown = offer ?? null;

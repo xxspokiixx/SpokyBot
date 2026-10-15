@@ -354,6 +354,21 @@ describe("the sheet", () => {
     expect(bridge.checkout).toHaveBeenLastCalledWith("personal", "app_menu");
   });
 
+  it("the countdown stops when the window loses focus: nothing switches while the person is elsewhere", async () => {
+    vi.useFakeTimers();
+    const listeners = new Map<string, () => void>();
+    vi.stubGlobal("window", { ogb: { cloudAccount: bridge }, addEventListener: vi.fn((name: string, listener: () => void) => listeners.set(name, listener)),
+      removeEventListener: vi.fn((name: string) => listeners.delete(name)) });
+    account = paid({ machine: ready, checkout: { plan: "pro", startedAt: NOW - 120_000, link: true } });
+    expect(await settle()).toContain("Opening in 3…");
+    listeners.get("blur")!();
+    const away = await settle();
+    expect(away).not.toContain("Opening in"); expect(away).toContain("Open My Cloud");
+    vi.advanceTimersByTime(5000); await settle();
+    expect(bridge.connectHome).not.toHaveBeenCalled();
+    expect(listeners.has("blur"), "not listening once it stopped").toBe(false);
+  });
+
   it("ready shown ends the purchase for main; a later Add a Cloud… (bought, opened or told) is one Cloud for now, with no countdown", async () => {
     vi.useFakeTimers();
     account = paid({ machine: ready, checkout: { plan: "pro", startedAt: NOW - 120_000, link: true } });
