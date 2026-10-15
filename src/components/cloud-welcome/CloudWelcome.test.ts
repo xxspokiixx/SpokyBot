@@ -32,7 +32,7 @@ vi.mock("@/components/TeamLibraryPanel", async () => {
   return { TeamLibraryPanel: ({ onImported }: { onImported: () => void }) => { fixture.imported = onImported; return h("div", { "data-team-library": "" }); } };
 });
 import { CloudWelcome } from "./CloudWelcome";
-import { CLOUD_SETUP_MOVE_SKIPPED, CLOUD_WELCOME_DONE, welcomeStepHint } from "@/lib/cloud-setup";
+import { CLOUD_SETUP_MOVE_SKIPPED, CLOUD_WELCOME_DONE, CLOUD_WELCOME_SHOWN as SHOWN, welcomeStepHint } from "@/lib/cloud-setup";
 import { pendingMemory, resetCloudWelcome, useCloudWelcome } from "@/lib/cloud-welcome";
 
 const local = { bots: 6, rooms: 1, chats: 142, bytes: 1.2 * 1024 ** 3, files: 900, routines: 4 };
@@ -124,7 +124,19 @@ describe("CloudWelcome", () => {
     expect(button("Copy to Studio Cloud")).toBeDefined();
     for (const label of ["Memory from Claude or ChatGPT", "A backup file"]) expect(button(label)).toBeDefined();
     expect(sent()).toEqual([]);
-    expect(fixture.api).not.toHaveBeenCalled();
+    expect(hintsPut()).toEqual([[SHOWN]]);
+  });
+
+  it("notes the first time it shows, so a chat before its first step does not end it, and only once", () => {
+    render();
+    expect(hintsPut()).toEqual([[SHOWN]]);
+    flushSync(() => root.unmount());
+    root = createRoot(host);
+    resetCloudWelcome();
+    fixture.api.mockClear();
+    fixture.state.config.onboarding = { ...EMPTY_ONBOARDING, hintsSeen: [SHOWN] };
+    render();
+    expect(hintsPut()).toEqual([]);
   });
 
   it("copies with the existing copy, holds the choices while it runs, and after it lands moves on to the AI", async () => {
@@ -142,7 +154,7 @@ describe("CloudWelcome", () => {
     expect(host.querySelector('[data-welcome-rail="bring"]')!.hasAttribute("data-finished")).toBe(true);
     click("Continue");
     expect(bridge.dismiss).toHaveBeenCalledOnce();
-    expect(hintsPut().at(-1)).toEqual([welcomeStepHint("bring")]);
+    expect(hintsPut().at(-1)).toEqual([SHOWN, welcomeStepHint("bring")]);
     expect(text()).toContain("Your bots think with your own Claude or ChatGPT plan. Sign in once on Studio Cloud.");
     expect(document.activeElement?.id).toBe("cloud-welcome-step");
     expect(sent()).toEqual([]);
@@ -157,7 +169,7 @@ describe("CloudWelcome", () => {
     await vi.waitFor(() => expect(text()).toContain("Copied 6 bots and 142 chats to Studio Cloud."));
     expect(host.querySelector('[data-bring-choice="copy"]')!.getAttribute("aria-checked")).toBe("true");
     click("Continue");
-    expect(hintsPut().at(-1)).toEqual([welcomeStepHint("bring")]);
+    expect(hintsPut().at(-1)).toEqual([SHOWN, welcomeStepHint("bring")]);
   });
 
   it("does not offer to copy into a Cloud that already has chats, and moves on without replacing anything", async () => {
@@ -169,7 +181,7 @@ describe("CloudWelcome", () => {
     expect([...document.body.querySelectorAll("button")].some((node) => node.textContent?.startsWith("Copy to"))).toBe(false);
     click("Continue");
     expect(bridge.start).not.toHaveBeenCalled();
-    expect(hintsPut().at(-1)).toEqual([welcomeStepHint("bring"), CLOUD_SETUP_MOVE_SKIPPED]);
+    expect(hintsPut().at(-1)).toEqual([SHOWN, welcomeStepHint("bring"), CLOUD_SETUP_MOVE_SKIPPED]);
   });
 
   it("starting fresh opens the team library, and skipping keeps the copy's card from coming back", async () => {
@@ -179,7 +191,7 @@ describe("CloudWelcome", () => {
     click("Choose a team");
     expect(host.querySelector("[data-team-library]")).not.toBeNull();
     flushSync(() => fixture.imported!());
-    expect(hintsPut().at(-1)).toEqual([welcomeStepHint("bring")]);
+    expect(hintsPut().at(-1)).toEqual([SHOWN, welcomeStepHint("bring")]);
     expect(bridge.dismiss).not.toHaveBeenCalled();
     expect(host.querySelector('[data-welcome-step="engine"]')).not.toBeNull();
     flushSync(() => root.unmount());
@@ -190,7 +202,7 @@ describe("CloudWelcome", () => {
     await vi.waitFor(() => expect(text()).toContain("142 chats"));
     click("Skip for now");
     expect(bridge.dismiss).toHaveBeenCalledOnce();
-    expect(hintsPut().at(-1)).toEqual([welcomeStepHint("bring"), CLOUD_SETUP_MOVE_SKIPPED]);
+    expect(hintsPut().at(-1)).toEqual([SHOWN, welcomeStepHint("bring"), CLOUD_SETUP_MOVE_SKIPPED]);
   });
 
   it("outside the desktop app, starts fresh and says where the copy is", () => {
@@ -231,7 +243,7 @@ describe("CloudWelcome", () => {
     expect(text()).toContain("You have $5 of Claude credit, so your bots can start right now.");
     for (const tile of ["claude", "codex"]) expect(host.querySelector(`[data-cloud-choice="${tile}"]`)).not.toBeNull();
     click("Use my credit for now");
-    expect(hintsPut().at(-1)).toEqual([welcomeStepHint("bring"), welcomeStepHint("engine")]);
+    expect(hintsPut().at(-1)).toEqual([welcomeStepHint("bring"), SHOWN, welcomeStepHint("engine")]);
     expect(host.querySelector('[data-welcome-step="files"]')).not.toBeNull();
   });
 
@@ -268,9 +280,9 @@ describe("CloudWelcome", () => {
     fixture.state = { ...fixture.state, selectedId: "b2" };
     render();
     expect(welcome.current!.aside).toBe(true);
-    expect(fixture.api).not.toHaveBeenCalled();
+    expect(hintsPut()).toEqual([[SHOWN]]);
     click("Skip setup");
-    expect(hintsPut().at(-1)).toEqual([CLOUD_WELCOME_DONE]);
+    expect(hintsPut().at(-1)).toEqual([SHOWN, CLOUD_WELCOME_DONE]);
     expect(welcome.current!.ended).toBe(true);
   });
 });

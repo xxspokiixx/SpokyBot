@@ -5,7 +5,7 @@ import { WindowDragStrip } from "@/components/DesktopCapabilities";
 import { track } from "@/lib/analytics";
 import { reopenCloudIntent } from "@/lib/cloud-intent";
 import {
-  CLOUD_SETUP_MOVE_SKIPPED, CLOUD_WELCOME_DONE, WELCOME_STEPS, welcomeStepFinished, welcomeStepHint, welcomeView, welcomeViewAfter,
+  CLOUD_SETUP_MOVE_SKIPPED, CLOUD_WELCOME_DONE, CLOUD_WELCOME_SHOWN, WELCOME_STEPS, welcomeStepFinished, welcomeStepHint, welcomeView, welcomeViewAfter,
   type WelcomeStep, type WelcomeView,
 } from "@/lib/cloud-setup";
 import {
@@ -14,6 +14,7 @@ import {
 } from "@/lib/cloud-welcome";
 import { cn } from "@/lib/cn";
 import { t } from "@/lib/i18n";
+import { hintSeen } from "@/lib/onboarding";
 import { useShowThreads } from "@/lib/thread-preferences";
 import type { LocaleKey } from "@/locales";
 import { api, openBot, useStore } from "@/state/store";
@@ -44,7 +45,11 @@ export function CloudWelcome() {
   const copied = move.state.phase === "done" && move.state.action !== "restore";
   const memoryAdded = welcome.memory !== null && memoryKept(state.config?.profile?.aboutMe, welcome.memory);
 
-  useEffect(() => { markWelcomeSeen(); }, []);
+  useEffect(() => {
+    markWelcomeSeen();
+    if (!hintSeen(record, CLOUD_WELCOME_SHOWN)) remember([CLOUD_WELCOME_SHOWN]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
   useEffect(() => {
     track("cloud_welcome_step", { step: view });
     if (!navigated.current) return;

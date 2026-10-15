@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
-  CLOUD_INTENT_ASKED, CLOUD_INTENT_GIVEN, CLOUD_SETUP_HIDDEN, CLOUD_SETUP_MOVE_SKIPPED, CLOUD_WELCOME_DONE, cloudSetupItems, cloudSetupStage,
+  CLOUD_INTENT_ASKED, CLOUD_INTENT_GIVEN, CLOUD_SETUP_HIDDEN, CLOUD_SETUP_MOVE_SKIPPED, CLOUD_WELCOME_DONE, CLOUD_WELCOME_SHOWN, cloudSetupItems, cloudSetupStage,
   cloudWelcomeStage, moveStatus, welcomeStepHint, welcomeView, welcomeViewAfter, type CloudSetupFacts,
 } from "./cloud-setup";
 import { EMPTY_ONBOARDING, type OnboardingStatus } from "./onboarding";
@@ -31,6 +31,13 @@ describe("cloudWelcomeStage", () => {
     expect(cloudWelcomeStage(facts({ onboarding: before() }))).toBe("none");
     expect(cloudWelcomeStage(facts({ onboarding: record({ firstTurnAt: "2026-10-01T08:00:00.000Z" }) }))).toBe("none");
     expect(cloudWelcomeStage(facts({ onboarding: record({ hintsSeen: finished("bring"), firstTurnAt: "2026-10-01T08:00:00.000Z" }) }))).toBe("pending");
+  });
+
+  it("once shown, stays open through a chat that finishes before its first step, say from a phone", () => {
+    const turned = { firstTurnAt: "2026-10-16T08:00:00.000Z" };
+    expect(cloudWelcomeStage(facts({ onboarding: record({ ...turned, hintsSeen: [CLOUD_WELCOME_SHOWN] }) }))).toBe("pending");
+    expect(cloudWelcomeStage(facts({ onboarding: record({ ...turned, hintsSeen: [CLOUD_WELCOME_SHOWN, CLOUD_INTENT_ASKED] }) }))).toBe("pending");
+    expect(cloudWelcomeStage(facts({ onboarding: record(turned) }))).toBe("none");
   });
 
   it("ends for good when done or skipped, and when setup is hidden", () => {

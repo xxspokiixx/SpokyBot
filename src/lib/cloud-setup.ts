@@ -6,6 +6,7 @@ export const CLOUD_SETUP_MOVE_SKIPPED = "cloud-setup-move-skipped";
 export const CLOUD_INTENT_ASKED = "cloud-intent-asked";
 export const CLOUD_INTENT_GIVEN = "cloud-intent-given";
 export const CLOUD_WELCOME_DONE = "cloud-welcome-done";
+export const CLOUD_WELCOME_SHOWN = "cloud-welcome-shown";
 
 export const WELCOME_STEPS = ["bring", "engine", "files"] as const;
 export type WelcomeStep = (typeof WELCOME_STEPS)[number];
@@ -33,12 +34,15 @@ export interface CloudSetupFacts {
 
 type StageFacts = Pick<CloudSetupFacts, "viewer" | "connected" | "enginesKnown" | "onboarding">;
 
-/** "none" off the owner's Cloud home, and on a Cloud set up before the welcome: it answered the first-job question or worked. */
+/**
+ * "none" off the owner's Cloud home, and on a Cloud set up before the welcome: one that answered the first-job
+ * question or worked without the welcome ever showing there. Once shown, a chat (from a phone, say) does not end it.
+ */
 export function cloudWelcomeStage(facts: StageFacts): "none" | "waiting" | "pending" | "ended" {
   if (!facts.viewer?.cloudHome || !facts.viewer.canSave) return "none";
   if (!facts.connected || !facts.enginesKnown || !facts.onboarding) return "waiting";
   const record = facts.onboarding;
-  const started = WELCOME_STEPS.some((step) => welcomeStepFinished(record, step));
+  const started = hintSeen(record, CLOUD_WELCOME_SHOWN) || WELCOME_STEPS.some((step) => welcomeStepFinished(record, step));
   if (!started && (hintSeen(record, CLOUD_INTENT_ASKED) || record.firstTurnAt)) return "none";
   return hintSeen(record, CLOUD_WELCOME_DONE) || hintSeen(record, CLOUD_SETUP_HIDDEN) ? "ended" : "pending";
 }
