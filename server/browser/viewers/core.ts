@@ -556,7 +556,8 @@ export class ViewerHub {
     return {
       type: "control",
       canOperate: viewer.options.canOperate,
-      controller: owner === viewer.id ? "you" : owner !== null ? "another-viewer" : control.agents > 0 ? "agent" : "unclaimed",
+      // "you" means this viewer's input runs now: while a takeover waits for the bot's work, the bot still has it.
+      controller: owner === viewer.id ? (control.canControl(viewer.id) ? "you" : "agent") : owner !== null ? "another-viewer" : control.agents > 0 ? "agent" : "unclaimed",
       held: owner !== null,
       owned: owner === viewer.id,
       controlling: control.canControl(viewer.id),
