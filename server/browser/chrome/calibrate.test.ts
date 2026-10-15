@@ -30,7 +30,8 @@ describe("reading a Chrome's own identity", () => {
   it.skipIf(process.platform === "win32")("starts the binary headless over a pipe, off the keychain, on the account's real home, and says when it exits", async () => {
     const dir = folder();
     const chrome = join(dir, "chrome");
-    writeFileSync(chrome, `#!/bin/sh\nprintf '%s' "$HOME" > '${dir}/home'\nprintf '%s\\n' "$@" > '${dir}/args'\nexit 3\n`, { mode: 0o755 });
+    // Only the pipe launch is recorded: on Linux a failed launch runs the binary again with --version to diagnose it.
+    writeFileSync(chrome, `#!/bin/sh\ncase " $* " in *" --remote-debugging-pipe "*) printf '%s' "$HOME" > '${dir}/home'; printf '%s\\n' "$@" > '${dir}/args';; esac\nexit 3\n`, { mode: 0o755 });
     await expect(calibrateIdentity({ executablePath: chrome, host: "desktop", env: { PATH: "/usr/bin:/bin", HOME: "/tmp/not-a-home" }, tmpRoot: dir, handshakeTimeoutMs: 10_000 })).rejects.toThrow(/exited|closed its DevTools pipe/);
     expect(readFileSync(join(dir, "home"), "utf8")).toBe(userInfo().homedir);
     const args = readFileSync(join(dir, "args"), "utf8").split("\n");
