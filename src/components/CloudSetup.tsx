@@ -30,7 +30,7 @@ function storeCollapsed(collapsed: boolean) {
 }
 
 const CARD = "fixed bottom-4 left-4 z-40 max-h-[calc(100dvh-32px)] w-[300px] max-w-[calc(100vw-32px)] origin-bottom-left overflow-y-auto rounded-2xl border border-hairline/50 bg-menu text-ink shadow-[0_18px_48px_-16px_rgba(0,0,0,0.55),0_4px_12px_-6px_rgba(0,0,0,0.3)]";
-const PRIMARY = "inline-flex h-8 shrink-0 items-center gap-1.5 rounded-lg bg-accent px-3 text-[12.5px] font-medium text-white transition-transform duration-150 ease-out active:scale-[0.97]";
+const PRIMARY = "inline-flex h-8 shrink-0 items-center gap-1.5 rounded-lg bg-accent px-3 text-[12.5px] font-medium text-accent-ink transition-transform duration-150 ease-out active:scale-[0.97]";
 
 function nextRunLabel(at: number | null, now = Date.now()): string | null {
   if (!at) return null;
