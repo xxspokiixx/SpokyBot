@@ -6,8 +6,11 @@ import { CLOUD_ORIGIN, STAGING_CLOUD_ORIGIN, checkoutDestination, cloudOrigin, c
 const accessToken = `omc_${"S".repeat(43)}`;
 
 test("OMB_CLOUD_STAGING=1, and only that, points the app at the fixed staging Admin with its own token file", () => {
-  assert.deepEqual(cloudTarget({}), { origin: CLOUD_ORIGIN, file: "cloud-account.bin", staging: false });
-  assert.deepEqual(cloudTarget({ OMB_CLOUD_STAGING: "1" }), { origin: "https://omb-cloud-staging.fly.dev", file: "cloud-account-staging.bin", staging: true });
+  assert.deepEqual(cloudTarget({}), { origin: CLOUD_ORIGIN, staging: false, file: "cloud-account.bin", environments: "environments.json", sync: "cloud-sync", look: "cloud-home-look.json" });
+  assert.deepEqual(cloudTarget({ OMB_CLOUD_STAGING: "1" }), { origin: "https://omb-cloud-staging.fly.dev", staging: true, file: "cloud-account-staging.bin",
+    environments: "environments-staging.json", sync: "cloud-sync-staging", look: "cloud-home-look-staging.json" });
+  const production = Object.values(cloudTarget({})), staging = Object.values(cloudTarget({ OMB_CLOUD_STAGING: "1" }));
+  assert.ok(staging.filter(value => typeof value === "string").every(name => !production.includes(name)), "no file or address shared with production");
   assert.equal(STAGING_CLOUD_ORIGIN, "https://omb-cloud-staging.fly.dev");
   for (const value of ["0", "true", "yes", " 1", "1 ", "01", "2", "", "https://evil.example.test", "https://omb-cloud-staging.fly.dev"]) {
     assert.deepEqual(cloudTarget({ OMB_CLOUD_STAGING: value }), cloudTarget({}), JSON.stringify(value));
@@ -64,8 +67,12 @@ test("a staging client talks only to the staging Admin, says it is staging, and 
   try { assert.equal("staging" in (await production.start()), false, "production states never carry the marker"); } finally { production.close(); }
 });
 
-test("main keeps each Admin's sign-in in its own file and gives the client the chosen Admin", () => {
+test("main keeps each Admin's sign-in, saved servers, Files state and Cloud name in their own files, and gives the client the chosen Admin", () => {
   const main = readFileSync(new URL("./main.mjs", import.meta.url), "utf8");
+  assert.match(main, /function environmentsFile\(\) \{\n  return path\.join\(app\.getPath\("userData"\), cloudTarget\(process\.env\)\.environments\);/);
+  assert.match(main, /stateDir: cloudTarget\(process\.env\)\.sync,/);
+  assert.match(main, /lookFile\(\(\) => path\.join\(app\.getPath\("userData"\), cloudTarget\(process\.env\)\.look\), fs\)/);
+  for (const name of ['"environments.json"', '"cloud-home-look.json"']) assert.equal(main.includes(name), false, `no fixed ${name}`);
   const ensure = main.slice(main.indexOf("function ensureCloudAccount() {"), main.indexOf("\n}\n", main.indexOf("function ensureCloudAccount() {")));
   assert.match(ensure, /createCloudAccountStore\(\{ file: path\.join\(app\.getPath\("userData"\), cloudTarget\(process\.env\)\.file\)/);
   assert.match(ensure, /origin: cloudTarget\(process\.env\)\.origin,/);

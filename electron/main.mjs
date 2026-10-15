@@ -1631,7 +1631,7 @@ async function offerComputerSharing(win) {
 }
 
 function environmentsFile() {
-  return path.join(app.getPath("userData"), "environments.json");
+  return path.join(app.getPath("userData"), cloudTarget(process.env).environments);
 }
 
 function readEnvironments() {
@@ -2912,7 +2912,7 @@ const savedWorkspace = id => {
   return env;
 };
 // The buying sheet (cloud-buy.mjs): its channels, and the Cloud's name and colour (Servers entry once listed).
-const cloudLook = createCloudLook({ store: lookFile(() => path.join(app.getPath("userData"), "cloud-home-look.json"), fs), accountId: () => cloudAccount?.state().account?.id ?? null,
+const cloudLook = createCloudLook({ store: lookFile(() => path.join(app.getPath("userData"), cloudTarget(process.env).look), fs), accountId: () => cloudAccount?.state().account?.id ?? null,
   homeEntry: cloudHomeEntry, saveEntry: (origin, look) => persistEnvironments(withEnvironmentLook(environmentsState, origin, look)) });
 const cloudBuy = installCloudBuy({ ipcMain, guard: localWorkspaceOnly, client: ensureCloudAccount, offersReady: cloudOffersReady, clipboard, look: cloudLook });
 ipcMain.handle("sharing:state", localWorkspaceOnly("sharing:state", async (_event, id) => {
@@ -2987,7 +2987,7 @@ const cloudSync = installCloudFiles({
   app, ipcMain, dialog, shell, powerMonitor, localWorkspaceOnly, localDataDir: desktopDataDir(),
   fetch: (...args) => session.defaultSession.fetch(...args),
   send: (channel, value) => { if (mainWindow && !mainWindow.isDestroyed()) mainWindow.webContents.send(channel, value); },
-  cloudOrigin: () => myCloud(), cloudAccount: () => ensureCloudAccount(),
+  cloudOrigin: () => myCloud(), cloudAccount: () => ensureCloudAccount(), stateDir: cloudTarget(process.env).sync,
 });
 
 // window.confirm() has no parent window, so (tiling) window managers cannot center it over the app.

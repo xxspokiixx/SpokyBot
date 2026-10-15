@@ -5,10 +5,12 @@ import { cleanCode, cleanEmail, parseSignInStart, SIGN_IN_START, SIGN_IN_TRIES, 
 export const CLOUD_ORIGIN = "https://cloud.openmausbot.com";
 /** The staging Admin (Dodo test mode, real test Clouds): a fixed address, on only with OMB_CLOUD_STAGING=1. */
 export const STAGING_CLOUD_ORIGIN = "https://omb-cloud-staging.fly.dev";
-/** Which Admin this app signs in to, and the file that sign-in is kept in: staging never reads or writes production's. */
+/** Which Admin this app signs in to, and the files that depend on it (the sign-in, saved servers with the Cloud's
+ * entry, Files' state, the Cloud's chosen name): staging never reads or writes production's. */
 export function cloudTarget(env = process.env) {
-  return env?.OMB_CLOUD_STAGING === "1" ? { origin: STAGING_CLOUD_ORIGIN, file: "cloud-account-staging.bin", staging: true }
-    : { origin: CLOUD_ORIGIN, file: "cloud-account.bin", staging: false };
+  return env?.OMB_CLOUD_STAGING === "1"
+    ? { origin: STAGING_CLOUD_ORIGIN, staging: true, file: "cloud-account-staging.bin", environments: "environments-staging.json", sync: "cloud-sync-staging", look: "cloud-home-look-staging.json" }
+    : { origin: CLOUD_ORIGIN, staging: false, file: "cloud-account.bin", environments: "environments.json", sync: "cloud-sync", look: "cloud-home-look.json" };
 }
 const TOKEN = /^omc_[A-Za-z0-9_-]{43}$/;
 const CODE = /^[A-HJ-NP-Z2-9]{5}-[A-HJ-NP-Z2-9]{5}$/;
