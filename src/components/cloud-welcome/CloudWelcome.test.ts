@@ -205,6 +205,14 @@ describe("CloudWelcome", () => {
     expect(hintsPut().at(-1)).toEqual([SHOWN, welcomeStepHint("bring"), CLOUD_SETUP_MOVE_SKIPPED]);
   });
 
+  it("in a desktop app connected to another server as its client, offers no copy from here either", () => {
+    window.ogb = { ...window.ogb!, remoteClient: { active: true } } as unknown as typeof window.ogb;
+    render();
+    expect(text()).toContain("Open the desktop app to bring your bots from your computer.");
+    expect(host.querySelector('[role="radiogroup"]')).toBeNull();
+    expect(bridge.state).not.toHaveBeenCalled();
+  });
+
   it("outside the desktop app, starts fresh and says where the copy is", () => {
     delete window.ogb;
     render();

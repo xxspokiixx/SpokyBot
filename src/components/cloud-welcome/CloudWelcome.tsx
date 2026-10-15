@@ -40,7 +40,7 @@ export function CloudWelcome() {
   const [view, setView] = useState<WelcomeView>(() => requestedView(takeWelcomeRequest()) ?? welcomeView(record));
   const heading = useRef<HTMLHeadingElement>(null);
   const navigated = useRef(false);
-  const bridge = window.ogb?.cloudMove;
+  const bridge = window.ogb?.remoteClient?.active ? undefined : window.ogb?.cloudMove;
   const move = useCloudMove(bridge);
   const copied = move.state.phase === "done" && move.state.action !== "restore";
   const memoryAdded = welcome.memory !== null && memoryKept(state.config?.profile?.aboutMe, welcome.memory);
