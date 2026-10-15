@@ -159,6 +159,20 @@ names, and adds servers switched off—even if the pasted config says enabled.
 It does not install, execute or connect to them. Test explicitly, then enable
 the servers you trust.
 
+The desktop app's first-run tour does the same for you in its **Bring what you
+already use** step (`server/setup-import.ts`). On the computer running
+OpenMausBot, and only for the desktop app's own window there, it reads the
+`mcpServers` of Claude Code (only the top-level key of `~/.claude.json`),
+Claude Desktop, Cursor (`~/.cursor/mcp.json`) and Gemini CLI
+(`~/.gemini/settings.json`), and the `[mcp_servers.*]` tables of Codex's
+`config.toml`. Each server goes through Paste config's parser, switched off;
+one already here by name, command or address is left alone, and the list stops
+at its limit. Token variables (Codex `bearer_token_env_var`) are not resolved:
+add the token as a header when you test the server. The step copies the
+person's own skills (`~/.claude/skills`, `~/.codex/skills`) into every bot's
+Skills, switched on. It never opens credential, session or history files, and
+it is skipped when there is nothing new.
+
 Open a bot’s **Tools → Access → MCP servers** to narrow the enabled global
 servers offered to it. Existing bots keep all enabled global servers until you
 choose a subset; switching them all off means none. **Use every enabled server**

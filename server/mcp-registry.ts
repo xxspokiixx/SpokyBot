@@ -296,6 +296,17 @@ function pickMcpServerFields(record: Record<string, unknown>): Record<string, un
   return out;
 }
 
+/** The fields Add server and Edit may set, `enabled` included. */
+export function mcpServerBody(body: unknown): Record<string, unknown> {
+  const out: Record<string, unknown> = {};
+  if (!body || typeof body !== "object") return out;
+  const record = body as Record<string, unknown>;
+  for (const key of ["command", "args", "env", "type", "url", "headers", "oauth", "enabled", "resultBudget"]) {
+    if (record[key] !== undefined) out[key] = record[key];
+  }
+  return out;
+}
+
 export type DisabledMcpServerAdd =
   | { ok: true; name: string; server: StoredMcpServer; next: Record<string, unknown> }
   | { ok: false; status: number; error: string };
