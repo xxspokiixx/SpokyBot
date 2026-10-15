@@ -3,6 +3,13 @@ import { CLOUD_MACHINE_CONNECTABLE, parseCloudCredit, parseCloudOffer, parseClou
 import { cleanCode, cleanEmail, parseSignInStart, SIGN_IN_START, SIGN_IN_TRIES, SIGN_IN_VERIFY, signInIdentity, startFailure, verifyFailure } from "./cloud-signin.mjs";
 
 export const CLOUD_ORIGIN = "https://cloud.openmausbot.com";
+/** The staging Admin (Dodo test mode, real test Clouds): a fixed address, on only with OMB_CLOUD_STAGING=1. */
+export const STAGING_CLOUD_ORIGIN = "https://omb-cloud-staging.fly.dev";
+/** Which Admin this app signs in to, and the file that sign-in is kept in: staging never reads or writes production's. */
+export function cloudTarget(env = process.env) {
+  return env?.OMB_CLOUD_STAGING === "1" ? { origin: STAGING_CLOUD_ORIGIN, file: "cloud-account-staging.bin", staging: true }
+    : { origin: CLOUD_ORIGIN, file: "cloud-account.bin", staging: false };
+}
 const TOKEN = /^omc_[A-Za-z0-9_-]{43}$/;
 const CODE = /^[A-HJ-NP-Z2-9]{5}-[A-HJ-NP-Z2-9]{5}$/;
 const PRIVATE_CODE = /^[A-Za-z0-9_-]{43}$/;
@@ -18,19 +25,20 @@ const OFFER_MS = 10 * 60_000, OFFER_RETRY_MS = 30_000;
 const CHECKOUT_WATCH_MS = 30 * 60_000, CHECKOUT_KEPT_MS = 24 * 3600_000;
 export const CHECKOUT_SOURCES = Object.freeze(["app_card", "app_howto", "app_menu", "app_settings", "app_routines", "update_popup"]);
 const CHECKOUT_ORIGIN = "https://checkout.dodopayments.com", TEST_CHECKOUT_ORIGIN = "https://test.checkout.dodopayments.com";
-/** Only Dodo's own HTTPS checkout origin, with no credentials and no fragment; anything else is never opened. */
-export function checkoutDestination(value, { fixture = false } = {}) {
+/** Only Dodo's own HTTPS checkout origin, with no credentials and no fragment; anything else is never opened. Staging's
+ * Admin sells in Dodo's test mode, so its checkouts are only Dodo's test page. */
+export function checkoutDestination(value, { fixture = false, staging = false } = {}) {
   if (typeof value !== "string" || value.length > 2048) return null;
   let url;
   try { url = new URL(value); } catch { return null; }
-  const allowed = fixture ? [CHECKOUT_ORIGIN, TEST_CHECKOUT_ORIGIN] : [CHECKOUT_ORIGIN];
+  const allowed = fixture ? [CHECKOUT_ORIGIN, TEST_CHECKOUT_ORIGIN] : staging ? [TEST_CHECKOUT_ORIGIN] : [CHECKOUT_ORIGIN];
   if (!allowed.includes(url.origin) || url.username || url.password || url.hash || value.includes("#")) return null;
   return url.href;
 }
 // Never accept an address from the renderer.
 export function cloudOrigin(value = CLOUD_ORIGIN, fixture = false) {
   const url = new URL(value);
-  if (value !== url.origin || (value !== CLOUD_ORIGIN && !(fixture && url.protocol === "http:" && ["127.0.0.1", "[::1]"].includes(url.hostname)))) {
+  if (value !== url.origin || (![CLOUD_ORIGIN, STAGING_CLOUD_ORIGIN].includes(value) && !(fixture && url.protocol === "http:" && ["127.0.0.1", "[::1]"].includes(url.hostname)))) {
     throw new Error("Invalid MausBot Cloud address.");
   }
   return value;
@@ -52,6 +60,7 @@ export function createCloudAccountClient({ store, openBrowser, platform, deviceN
   origin = CLOUD_ORIGIN, fixture = false, fetch: fetcher = globalThis.fetch, now = Date.now, onState = () => {},
   setTimer = setTimeout, clearTimer = clearTimeout, warn = message => console.warn(message) }) {
   origin = cloudOrigin(origin, fixture);
+  const staging = origin === STAGING_CLOUD_ORIGIN;
   let grant = null, issued = null, cleanup = null, pending = null, cleanupNeeded = false;
   let value = { status: "signed-out", message: "restoring" }, generation = 0, timer = null, closed = false, clearing = null, refreshing = null;
   let verifiedUntil = 0, restoring = false, controller = new AbortController(), failures = 0;
@@ -69,7 +78,10 @@ export function createCloudAccountClient({ store, openBrowser, platform, deviceN
   };
   const checkout = () => opened && now() - opened.startedAt < CHECKOUT_KEPT_MS
     ? { plan: opened.plan, startedAt: opened.startedAt, ...(opened.signIn ? { signIn: true } : {}), ...(opened.url ? { link: true } : {}) } : null;
-  const withCheckout = current => { const open = checkout(); return open ? { ...current, checkout: open } : current; };
+  const withCheckout = current => {
+    const open = checkout(), next = open ? { ...current, checkout: open } : current;
+    return staging ? { ...next, staging: true } : next;
+  };
   const state = () => {
     if (value.status === "connected") {
       if (grant && grant.expiresAt <= now()) return structuredClone(withCheckout(view("reauth-required", "expired")));
@@ -315,7 +327,7 @@ export function createCloudAccountClient({ store, openBrowser, platform, deviceN
     let destination;
     try {
       const result = await request("checkout", { method: "POST", body: { plan, source }, token: signedIn.token });
-      destination = checkoutDestination(result?.url, { fixture });
+      destination = checkoutDestination(result?.url, { fixture, staging });
       if (result?.cloudContractVersion !== 1 || !destination) return { outcome: "failed", state: state() };
     } catch (error) {
       if (!error?.opaque && error?.status === 409) return { outcome: "conflict", state: await refresh() };

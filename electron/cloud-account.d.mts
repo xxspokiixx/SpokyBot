@@ -32,6 +32,8 @@ export interface CloudAccountState {
    * starts the 30-minute watch again). `link`: main keeps its page, so Reopen
    * and Copy link use that same page. */
   checkout?: { plan: string; startedAt: number; signIn?: true; link?: true };
+  /** This app talks to the staging Admin (OMB_CLOUD_STAGING=1): test payments, test Clouds. */
+  staging?: true;
 }
 /** The email-code sign-in (cloud-signin.mjs). `sent`: the code is on its
  * way (`resendAt`: when another may be asked for). `browser`: this Cloud signs
@@ -111,8 +113,10 @@ export interface CloudPlanBridge {
 }
 
 export declare const CLOUD_ORIGIN: string;
+export declare const STAGING_CLOUD_ORIGIN: string;
+export declare function cloudTarget(env?: Record<string, string | undefined>): { origin: string; file: string; staging: boolean };
 export declare const CHECKOUT_SOURCES: readonly string[];
-export declare function checkoutDestination(value: unknown, options?: { fixture?: boolean }): string | null;
+export declare function checkoutDestination(value: unknown, options?: { fixture?: boolean; staging?: boolean }): string | null;
 export declare function cloudOrigin(value?: string, fixture?: boolean): string;
 export interface CloudAccountStore {
   read(): Promise<unknown>;
