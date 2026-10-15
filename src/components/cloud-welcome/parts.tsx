@@ -1,6 +1,7 @@
-import type { ReactNode, Ref } from "react";
+import { useEffect, useState, type ReactNode, type Ref } from "react";
 import type { LucideIcon } from "lucide-react";
 import { cn } from "@/lib/cn";
+import { t } from "@/lib/i18n";
 
 export const PRIMARY = "ui-button ui-button-primary min-h-9 px-4 text-[13.5px]";
 export const SECONDARY = "ui-button min-h-9 px-4 text-[13.5px]";
@@ -30,4 +31,18 @@ export function Chip({ children }: { children: ReactNode }) {
 
 export function Footer({ children, className }: { children: ReactNode; className?: string }) {
   return <div className={cn("flex flex-wrap items-center gap-2", className)}>{children}</div>;
+}
+
+/** The name this app keeps for the server open in the window; My Cloud wherever the app has none. */
+export function useCloudName(): string {
+  const bridge = window.ogb?.workspaces;
+  const [name, setName] = useState<string | null>(null);
+  useEffect(() => {
+    let alive = true;
+    void bridge?.state().then((current) => {
+      if (alive && current && current.local === false && current.name.trim()) setName(current.name.trim());
+    }).catch(() => {});
+    return () => { alive = false; };
+  }, [bridge]);
+  return name ?? t("cloudSetup.myCloud");
 }

@@ -5,49 +5,42 @@ import { useModalDialog } from "@/hooks/use-modal-dialog";
 import { useCopyFeedback } from "@/lib/copy-text";
 import { ABOUT_ME_LIMIT, withMemory } from "@/lib/cloud-welcome";
 import { activeLocale, t } from "@/lib/i18n";
-import { api, useStore, type Action, type ConfigStatus } from "@/state/store";
-import { PRIMARY, SECONDARY } from "./parts";
+import { useStore } from "@/state/store";
+import { PRIMARY, QUIET, SECONDARY } from "./parts";
 
-export async function saveAboutMe(aboutMe: string, dispatch: (action: Action) => void): Promise<void> {
-  const config = await api<ConfigStatus>("/api/config", { method: "PUT", body: JSON.stringify({ profile: { aboutMe } }), timeoutMs: 10_000 });
-  dispatch({ type: "profileSaved", profile: { aboutMe: config.profile?.aboutMe ?? aboutMe } });
-}
+export type MemoryTrouble = "failed" | "too-long";
 
-export function MemoryImport({ name, onClose, onSaved }: { name: string; onClose: () => void; onSaved: (memory: string) => void }) {
-  const { state, dispatch } = useStore();
+/** Takes the answer from Claude or ChatGPT and hands it on to be added to About me. */
+export function MemoryImport({ name, initial = "", trouble = null, onClose, onAdd, onDiscard }: {
+  name: string;
+  initial?: string;
+  /** Why a paste kept on this device is shown again. */
+  trouble?: MemoryTrouble | null;
+  onClose: () => void;
+  onAdd: (memory: string) => void;
+  onDiscard?: () => void;
+}) {
+  const { state } = useStore();
   const dialog = useRef<HTMLDivElement>(null);
   useModalDialog(dialog, onClose);
   const prompt = t("cloudWelcome.memory.prompt");
   const copy = useCopyFeedback(prompt);
-  const [memory, setMemory] = useState("");
-  const [saving, setSaving] = useState(false);
-  const [failed, setFailed] = useState(false);
+  const [memory, setMemory] = useState(initial);
   const before = state.config?.profile?.aboutMe ?? "";
-  const after = withMemory(before, memory);
-  const over = after.length - ABOUT_ME_LIMIT;
-  const ready = memory.trim().length > 0 && over <= 0 && !saving;
-  const save = async () => {
-    if (!ready) return;
-    setSaving(true);
-    setFailed(false);
-    try {
-      await saveAboutMe(after, dispatch);
-      onSaved(memory.trim());
-    } catch {
-      setFailed(true);
-      setSaving(false);
-    }
-  };
+  const over = withMemory(before, memory).length - ABOUT_ME_LIMIT;
+  const ready = memory.trim().length > 0 && over <= 0;
   // Portaled: a size container (the welcome) is the containing block of its fixed descendants.
   return createPortal(<div className="fixed inset-0 z-50 flex items-center justify-center bg-black/55 p-4 backdrop-blur-[2px]"
     onMouseDown={(event) => event.target === event.currentTarget && onClose()}>
-    <div ref={dialog} role="dialog" aria-modal="true" aria-labelledby="cloud-memory-title" aria-describedby="cloud-memory-intro" tabIndex={-1} data-cloud-memory
+    <div ref={dialog} role="dialog" aria-modal="true" aria-labelledby="cloud-memory-title" aria-describedby="cloud-memory-intro" tabIndex={-1} data-cloud-memory={trouble ?? "new"}
       className="animate-pop-in flex max-h-[min(720px,calc(100dvh-2rem))] w-full max-w-[540px] flex-col gap-4 overflow-y-auto rounded-2xl border border-hairline/50 bg-panel p-6 shadow-2xl outline-none">
       <header className="flex flex-col gap-1.5">
         <h2 id="cloud-memory-title" className="text-[17px] font-semibold text-ink">{t("cloudWelcome.memory.title")}</h2>
-        <p id="cloud-memory-intro" className="text-[13px] leading-relaxed text-ink-secondary">{t("cloudWelcome.memory.intro", { name })}</p>
+        <p id="cloud-memory-intro" className="text-[13px] leading-relaxed text-ink-secondary">
+          {t(trouble ? "cloudWelcome.memory.notAdded" : "cloudWelcome.memory.intro", { name })}
+        </p>
       </header>
-      <section className="flex flex-col gap-2">
+      {!trouble && <section className="flex flex-col gap-2">
         <h3 className="text-[13px] font-medium text-ink">{t("cloudWelcome.memory.ask")}</h3>
         <div className="flex items-start gap-2 rounded-xl border border-hairline/50 bg-inset px-3 py-2.5">
           <p data-memory-prompt className="min-w-0 flex-1 select-all text-[13.5px] leading-relaxed text-ink">{prompt}</p>
@@ -56,9 +49,9 @@ export function MemoryImport({ name, onClose, onSaved }: { name: string; onClose
             {copy.state === "copied" ? t("engineSetup.copied") : copy.state === "failed" ? t("common.copyFailed") : t("engineSetup.copy")}
           </button>
         </div>
-      </section>
+      </section>}
       <section className="flex flex-col gap-2">
-        <label htmlFor="cloud-memory-answer" className="text-[13px] font-medium text-ink">{t("cloudWelcome.memory.paste")}</label>
+        <label htmlFor="cloud-memory-answer" className="text-[13px] font-medium text-ink">{t(trouble ? "cloudWelcome.memory.kept" : "cloudWelcome.memory.paste")}</label>
         <textarea id="cloud-memory-answer" autoFocus rows={6} value={memory} onChange={(event) => setMemory(event.target.value)}
           placeholder={t("cloudWelcome.memory.placeholder")}
           className="min-h-[132px] w-full resize-y rounded-xl border border-hairline/50 bg-inset px-3 py-2.5 text-[13.5px] leading-relaxed text-ink placeholder:text-ink-tertiary focus:border-accent/60 focus:outline-none" />
@@ -71,10 +64,11 @@ export function MemoryImport({ name, onClose, onSaved }: { name: string; onClose
         </div>
       </section>}
       {over > 0 && <p role="alert" className="text-[12.5px] text-danger">{t("cloudWelcome.memory.tooLong", { count: new Intl.NumberFormat(activeLocale()).format(over) })}</p>}
-      {failed && <p role="alert" className="text-[12.5px] text-danger">{t("cloudWelcome.memory.failed")}</p>}
-      <footer className="flex flex-wrap justify-end gap-2">
-        <button type="button" className={SECONDARY} onClick={onClose}>{t("common.cancel")}</button>
-        <button type="button" className={PRIMARY} disabled={!ready} onClick={() => void save()}>{t("cloudWelcome.memory.add")}</button>
+      {trouble === "failed" && <p role="alert" className="text-[12.5px] text-danger">{t("cloudWelcome.memory.failed")}</p>}
+      <footer className="flex flex-wrap items-center justify-end gap-2">
+        {onDiscard && <button type="button" className={`${QUIET} mr-auto`} onClick={onDiscard}>{t("cloudWelcome.memory.discard")}</button>}
+        <button type="button" className={SECONDARY} onClick={onClose}>{t(trouble ? "cloudWelcome.memory.later" : "common.cancel")}</button>
+        <button type="button" className={PRIMARY} disabled={!ready} onClick={() => onAdd(memory.trim())}>{t("cloudWelcome.memory.add")}</button>
       </footer>
     </div>
   </div>, document.body);

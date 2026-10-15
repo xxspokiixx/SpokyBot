@@ -1,8 +1,8 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { CloudMoveOverview } from "../../electron/cloud-move.mjs";
 import {
-  ABOUT_ME_LIMIT, cloudFirstRun, cloudWelcomeShown, copyPossible, endWelcomeHere, hasWork, markWelcomeSeen, memoryKept, noteWelcomeHints, pendingMemory,
-  rememberPendingMemory, resetCloudWelcome, returnToWelcome, stepAsideWelcome, suggestedChoice, takeWelcomeRequest, useCloudWelcome,
+  ABOUT_ME_LIMIT, cloudFirstRun, cloudWelcomeShown, copyPossible, endWelcomeHere, hasWork, markWelcomeSeen, memoryKept, memoryStep, noteWelcomeHints,
+  pendingMemory, rememberPendingMemory, resetCloudWelcome, returnToWelcome, stepAsideWelcome, suggestedChoice, takeWelcomeRequest, useCloudWelcome,
   welcomeCredit, withEarlyHints, withMemory,
 } from "./cloud-welcome";
 import { EMPTY_ONBOARDING } from "./onboarding";
@@ -84,21 +84,62 @@ describe("memory from Claude or ChatGPT", () => {
     expect(ABOUT_ME_LIMIT).toBe(24_000);
   });
 
-  it("waits on this device until the copy lands, since a copy brings this computer's About me", () => {
+  it("waits on this device until a saved About me has it, and through a reload", async () => {
     const saved = new Map<string, string>();
     vi.stubGlobal("localStorage", {
       getItem: (key: string) => saved.get(key) ?? null,
       setItem: (key: string, value: string) => { saved.set(key, value); },
       removeItem: (key: string) => { saved.delete(key); },
     });
+    resetCloudWelcome();
     expect(pendingMemory()).toBeNull();
     rememberPendingMemory("  - Likes tea  ");
     expect(pendingMemory()).toBe("- Likes tea");
+    expect(saved.get("omb.cloudWelcome.memory")).toBe("- Likes tea");
+    vi.resetModules();
+    const reloaded = await import("./cloud-welcome");
+    expect(reloaded.pendingMemory()).toBe("- Likes tea");
     rememberPendingMemory(null);
     expect(pendingMemory()).toBeNull();
+    expect(saved.has("omb.cloudWelcome.memory")).toBe(false);
+  });
+
+  it("is still kept for this session where the browser blocks storage", () => {
     vi.stubGlobal("localStorage", { getItem: () => { throw new Error("blocked"); }, setItem: () => { throw new Error("blocked"); }, removeItem: () => {} });
+    resetCloudWelcome();
     expect(() => rememberPendingMemory("- Likes tea")).not.toThrow();
-    expect(pendingMemory()).toBeNull();
+    expect(pendingMemory()).toBe("- Likes tea");
+  });
+});
+
+describe("memoryStep", () => {
+  const facts = (extra: Partial<Parameters<typeof memoryStep>[0]> = {}) => ({
+    memory: "- Likes tea", aboutMe: "This Mac's own About me.", known: true, copying: false, landed: false, settled: false, ...extra,
+  });
+
+  it("adds a waiting paste to whatever About me the Cloud has now, after a blank line", () => {
+    expect(memoryStep(facts())).toEqual({ kind: "save", aboutMe: "This Mac's own About me.\n\n- Likes tea" });
+    expect(memoryStep(facts({ aboutMe: undefined }))).toEqual({ kind: "save", aboutMe: "- Likes tea" });
+    expect(memoryStep(facts({ landed: true }))).toEqual({ kind: "save", aboutMe: "This Mac's own About me.\n\n- Likes tea" });
+  });
+
+  it("writes nothing while a copy runs, before the Cloud has answered, or with nothing waiting", () => {
+    expect(memoryStep(facts({ copying: true }))).toEqual({ kind: "wait" });
+    expect(memoryStep(facts({ known: false }))).toEqual({ kind: "wait" });
+    expect(memoryStep(facts({ memory: null }))).toEqual({ kind: "wait" });
+  });
+
+  it("lets go only once About me has it, no copy can come from the welcome, and none has just landed", () => {
+    const kept = { aboutMe: "This Mac's own About me.\n\n- Likes tea" };
+    expect(memoryStep(facts({ ...kept, settled: true }))).toEqual({ kind: "clear" });
+    expect(memoryStep(facts({ ...kept, settled: false }))).toEqual({ kind: "keep" });
+    expect(memoryStep(facts({ ...kept, settled: true, landed: true }))).toEqual({ kind: "keep" });
+  });
+
+  it("does not write past About me's limit, and says so instead of dropping the paste", () => {
+    const full = "x".repeat(ABOUT_ME_LIMIT - 5);
+    expect(memoryStep(facts({ aboutMe: full, settled: true }))).toEqual({ kind: "too-long" });
+    expect(memoryStep(facts({ aboutMe: "x".repeat(ABOUT_ME_LIMIT - "- Likes tea".length - 2) })).kind).toBe("save");
   });
 });
 

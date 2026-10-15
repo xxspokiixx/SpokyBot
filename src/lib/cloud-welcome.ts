@@ -16,10 +16,16 @@ interface Snapshot {
   requested: string | null;
   /** Shown in this session: it stays while the Cloud restarts under it (a copy ends with one). */
   seen: boolean;
+  /** Pasted memory this device keeps until a saved About me has it. */
+  memory: string | null;
 }
 
-const INITIAL: Snapshot = { aside: false, ended: false, early: [], requested: null, seen: false };
-let snapshot: Snapshot = INITIAL;
+const PENDING_MEMORY = "omb.cloudWelcome.memory";
+function stored(key: string): string | null {
+  try { return globalThis.localStorage?.getItem(key) || null; } catch { return null; }
+}
+const initial = (): Snapshot => ({ aside: false, ended: false, early: [], requested: null, seen: false, memory: stored(PENDING_MEMORY) });
+let snapshot: Snapshot = initial();
 const listeners = new Set<() => void>();
 
 function update(next: Partial<Snapshot>) {
@@ -48,7 +54,7 @@ export function noteWelcomeHints(ids: readonly string[]): void {
   update({ early: [...new Set([...snapshot.early, ...ids])] });
 }
 /** Only for tests: the store is module state. */
-export function resetCloudWelcome(): void { update(INITIAL); }
+export function resetCloudWelcome(): void { update(initial()); }
 
 export function withEarlyHints(record: OnboardingStatus | undefined, early: readonly string[]): OnboardingStatus | undefined {
   if (!record || early.every((id) => record.hintsSeen.includes(id))) return record;
@@ -110,16 +116,30 @@ export function memoryKept(aboutMe: string | undefined, memory: string): boolean
   return (aboutMe ?? "").includes(memory.trim());
 }
 
-const PENDING_MEMORY = "omb.cloudWelcome.memory";
-
-/** A copy replaces About me with this computer's: what was pasted is added again once it lands. */
+/** A copy replaces About me with this computer's, so what was pasted waits on this device until a saved About me has it. */
 export function rememberPendingMemory(memory: string | null): void {
+  const kept = memory?.trim() || null;
   try {
-    if (memory?.trim()) globalThis.localStorage?.setItem(PENDING_MEMORY, memory.trim());
+    if (kept) globalThis.localStorage?.setItem(PENDING_MEMORY, kept);
     else globalThis.localStorage?.removeItem(PENDING_MEMORY);
   } catch {}
+  update({ memory: kept });
 }
 
-export function pendingMemory(): string | null {
-  try { return globalThis.localStorage?.getItem(PENDING_MEMORY) || null; } catch { return null; }
+export function pendingMemory(): string | null { return snapshot.memory; }
+
+export type MemoryStep = { kind: "wait" | "keep" | "clear" | "too-long" } | { kind: "save"; aboutMe: string };
+
+/**
+ * What to do with a waiting paste. Nothing is written while a copy runs. It is cleared only once the Cloud's
+ * saved About me has it, no copy can still come from the welcome (`settled`), and none has just landed: until
+ * this page has the Cloud's new About me, the one it holds may be the one the copy replaced.
+ */
+export function memoryStep(facts: {
+  memory: string | null; aboutMe: string | undefined; known: boolean; copying: boolean; landed: boolean; settled: boolean;
+}): MemoryStep {
+  if (!facts.memory || !facts.known || facts.copying) return { kind: "wait" };
+  if (memoryKept(facts.aboutMe, facts.memory)) return { kind: facts.settled && !facts.landed ? "clear" : "keep" };
+  const aboutMe = withMemory(facts.aboutMe, facts.memory);
+  return aboutMe.length > ABOUT_ME_LIMIT ? { kind: "too-long" } : { kind: "save", aboutMe };
 }

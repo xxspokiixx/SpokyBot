@@ -203,7 +203,7 @@ describe("CloudWelcome", () => {
     expect([...host.querySelectorAll("button")].some((node) => node.textContent?.startsWith("Copy to"))).toBe(false);
   });
 
-  it("adds memory from Claude or ChatGPT to About me, and again after a copy brings this computer's About me", async () => {
+  it("takes memory from Claude or ChatGPT with a preview of About me, keeps it on this device, and says it is added only once About me has it", async () => {
     render();
     click("Memory from Claude or ChatGPT");
     const dialog = document.querySelector('[role="dialog"]')!;
@@ -213,17 +213,12 @@ describe("CloudWelcome", () => {
     flushSync(() => box.dispatchEvent(new Event("input", { bubbles: true })));
     expect(dialog.querySelector("[data-memory-preview]")!.textContent).toBe("I run a design studio.\n\n- Lives in Berlin\n- Likes tea");
     click("Add to About me");
-    await vi.waitFor(() => expect(document.querySelector('[role="dialog"]')).toBeNull());
-    expect(fixture.api).toHaveBeenCalledWith("/api/config", expect.objectContaining({ body: JSON.stringify({ profile: { aboutMe: "I run a design studio.\n\n- Lives in Berlin\n- Likes tea" } }) }));
-    expect(text()).toContain("Added to About me.");
+    expect(document.querySelector('[role="dialog"]')).toBeNull();
     expect(pendingMemory()).toBe("- Lives in Berlin\n- Likes tea");
-    fixture.api.mockClear();
-    fixture.state = { ...fixture.state, config: { ...fixture.state.config, profile: { name: "Ada", email: "", aboutMe: "This Mac's own About me." } } };
-    flushSync(() => push({ phase: "done", action: "move", destination: CLOUD, moved: { bots: 6, rooms: 1, chats: 142 } }));
+    expect(text()).not.toContain("Added to About me.");
+    fixture.state = { ...fixture.state, config: { ...fixture.state.config, profile: { ...fixture.state.config.profile, aboutMe: "I run a design studio.\n\n- Lives in Berlin\n- Likes tea" } } };
     render();
-    await vi.waitFor(() => expect(fixture.api).toHaveBeenCalledWith("/api/config", expect.objectContaining({
-      body: JSON.stringify({ profile: { aboutMe: "This Mac's own About me.\n\n- Lives in Berlin\n- Likes tea" } }),
-    })));
+    expect(text()).toContain("Added to About me.");
   });
 
   it("resumes where it was left, and offers the trial's credit for now", async () => {

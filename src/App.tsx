@@ -35,6 +35,7 @@ import { CloudIntent } from "@/components/CloudIntent";
 import { cloudIntentDue, cloudIntentShown, useCloudIntent } from "@/lib/cloud-intent";
 import { CloudSetup } from "@/components/CloudSetup";
 import { CloudWelcome } from "@/components/cloud-welcome/CloudWelcome";
+import { WelcomeKeeper } from "@/components/cloud-welcome/WelcomeKeeper";
 import { cloudWelcomeStage } from "@/lib/cloud-setup";
 import { cloudFirstRun, cloudWelcomeShown, useCloudWelcome } from "@/lib/cloud-welcome";
 import { engineReady } from "@/components/EngineLibrary";
@@ -357,6 +358,7 @@ function Shell({ viewer }: { viewer: WelcomeViewer | null }) {
       <CloudAddDialog />
       <CloudHowTo />
       <CloudSetup viewer={viewer} welcomeShown={welcomeOnScreen} />
+      <WelcomeKeeper viewer={viewer} />
       {state.pluginsOpen && <PluginsPanel />}
       {state.triggersOpen && <TriggersPanel />}
       {state.newBotOpen && <NewBotDialog />}

@@ -164,7 +164,7 @@ export function WelcomeBring({ name, move, headingRef, memoryAdded, onMemory, on
     </div>
     {status}
     <Footer>{actions}</Footer>
-    {memoryOpen && <MemoryImport name={name} onClose={() => setMemoryOpen(false)} onSaved={(memory) => { setMemoryOpen(false); onMemory(memory); }} />}
+    {memoryOpen && <MemoryImport name={name} onClose={() => setMemoryOpen(false)} onAdd={(memory) => { setMemoryOpen(false); onMemory(memory); }} />}
     {teams && <TeamLibraryPanel returnFocusRef={teamButton} onClose={() => setTeams(false)}
       onImported={() => { onTeam(); setTeams(false); onFinish("team"); }} />}
   </section>;

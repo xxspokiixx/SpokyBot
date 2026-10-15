@@ -9,15 +9,15 @@ import {
   type WelcomeStep, type WelcomeView,
 } from "@/lib/cloud-setup";
 import {
-  endWelcomeHere, markWelcomeSeen, memoryKept, noteWelcomeHints, pendingMemory, rememberPendingMemory, stepAsideWelcome, takeWelcomeRequest,
-  useCloudWelcome, withEarlyHints, withMemory,
+  endWelcomeHere, markWelcomeSeen, memoryKept, noteWelcomeHints, rememberPendingMemory, stepAsideWelcome, takeWelcomeRequest, useCloudWelcome,
+  withEarlyHints,
 } from "@/lib/cloud-welcome";
 import { cn } from "@/lib/cn";
 import { t } from "@/lib/i18n";
 import { useShowThreads } from "@/lib/thread-preferences";
 import type { LocaleKey } from "@/locales";
 import { api, openBot, useStore } from "@/state/store";
-import { saveAboutMe } from "./MemoryImport";
+import { useCloudName } from "./parts";
 import { WelcomeBring, type BringOutcome } from "./WelcomeBring";
 import { WelcomeDone, WelcomeEngine, WelcomeFiles } from "./WelcomeSteps";
 
@@ -30,20 +30,6 @@ const STEP_TEXT: Record<WelcomeStep, { title: LocaleKey; hint: LocaleKey }> = {
 const requestedView = (value: string | null): WelcomeView | null =>
   value === "done" || WELCOME_STEPS.includes(value as WelcomeStep) ? value as WelcomeView : null;
 
-/** The name this app keeps for the server open in the window; My Cloud wherever the app has none. */
-function useCloudName(): string {
-  const bridge = window.ogb?.workspaces;
-  const [name, setName] = useState<string | null>(null);
-  useEffect(() => {
-    let alive = true;
-    void bridge?.state().then((current) => {
-      if (alive && current && current.local === false && current.name.trim()) setName(current.name.trim());
-    }).catch(() => {});
-    return () => { alive = false; };
-  }, [bridge]);
-  return name ?? t("cloudSetup.myCloud");
-}
-
 export function CloudWelcome() {
   const { state, dispatch } = useStore();
   const showThreads = useShowThreads();
@@ -51,14 +37,12 @@ export function CloudWelcome() {
   const record = withEarlyHints(state.config?.onboarding, welcome.early);
   const name = useCloudName();
   const [view, setView] = useState<WelcomeView>(() => requestedView(takeWelcomeRequest()) ?? welcomeView(record));
-  const [memoryAdded, setMemoryAdded] = useState(() => pendingMemory() !== null);
   const heading = useRef<HTMLHeadingElement>(null);
   const navigated = useRef(false);
   const bridge = window.ogb?.cloudMove;
   const move = useCloudMove(bridge);
   const copied = move.state.phase === "done" && move.state.action !== "restore";
-  const aboutMe = state.config?.profile?.aboutMe;
-  const configKnown = Boolean(state.config);
+  const memoryAdded = welcome.memory !== null && memoryKept(state.config?.profile?.aboutMe, welcome.memory);
 
   useEffect(() => { markWelcomeSeen(); }, []);
   useEffect(() => {
@@ -78,12 +62,6 @@ export function CloudWelcome() {
     } else if (state.selectedId !== anchor.current) stepAsideWelcome();
   }, [state.selectedId]);
 
-  useEffect(() => {
-    const memory = pendingMemory();
-    if (!memory || !copied || !configKnown || memoryKept(aboutMe, memory)) return;
-    void saveAboutMe(withMemory(aboutMe, memory), dispatch).catch(() => {});
-  }, [copied, configKnown, aboutMe, dispatch]);
-
   const remember = (ids: string[]) => {
     noteWelcomeHints(ids);
     const hintsSeen = [...new Set([...(state.config?.onboarding?.hintsSeen ?? []), ...welcome.early, ...ids])];
@@ -100,15 +78,11 @@ export function CloudWelcome() {
     go(welcomeViewAfter(withEarlyHints(record, ids), step));
   };
   const finishBring = (outcome: BringOutcome) => {
-    const memory = pendingMemory();
-    if (memory && copied && !memoryKept(aboutMe, memory)) void saveAboutMe(withMemory(aboutMe, memory), dispatch).catch(() => {});
-    rememberPendingMemory(null);
     if (outcome !== "team") void bridge?.dismiss().catch(() => {});
     finish("bring", outcome === "skipped" ? [CLOUD_SETUP_MOVE_SKIPPED] : []);
   };
   const end = (reason: "done" | "skipped") => {
     track("cloud_welcome_ended", { reason, at: view });
-    rememberPendingMemory(null);
     remember([CLOUD_WELCOME_DONE]);
     endWelcomeHere();
   };
@@ -130,7 +104,7 @@ export function CloudWelcome() {
   let content;
   if (view === "bring") {
     content = <WelcomeBring name={name} move={bridge ? move : null} headingRef={heading} memoryAdded={memoryAdded}
-      onMemory={(memory) => { rememberPendingMemory(memory); setMemoryAdded(true); }}
+      onMemory={rememberPendingMemory}
       onBackup={() => dispatch({ type: "toggleAppSettings", open: true, section: "backups" })}
       onTeam={() => { reanchor.current = true; }}
       onFinish={finishBring} />;
