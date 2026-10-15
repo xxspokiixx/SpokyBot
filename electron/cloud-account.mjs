@@ -289,7 +289,8 @@ export function createCloudAccountClient({ store, openBrowser, platform, deviceN
     if (!address) return { outcome: "invalid-email" };
     if (!app) return { outcome: "browser" };
     const stamp = generation;
-    emailed = null;
+    // A code already sent stays good until a new one is: a refused Resend (too many, offline) must not lose it.
+    if (emailed && emailed.email !== address) emailed = null;
     try {
       const started = parseSignInStart(await request(null, { method: "POST", path: SIGN_IN_START, body: { email: address, ...app } }));
       if (!current(stamp)) return { outcome: "failed" };

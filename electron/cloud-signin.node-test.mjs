@@ -152,6 +152,23 @@ test("limits, an expired code and the Admin's refusals each come back as one pla
   assert.equal(f.saved, null);
 });
 
+test("a refused Resend keeps the code already sent; a successful one replaces it; another address drops it", async t => {
+  const f = await fixture(t);
+  await f.client.emailStart("person@example.test");
+  for (const refusal of [{ status: 429, body: { error: "rate_limited", errorDescription: "x", interval: 60 } }, { status: 502, body: "<!doctype html>Bad gateway" }]) {
+    f.start = refusal;
+    assert.notEqual((await f.client.emailStart("person@example.test")).outcome, "sent");
+  }
+  f.start = null;
+  assert.equal((await f.client.emailVerify(CODE)).outcome, "signed-in", "the first code still works");
+  const g = await fixture(t);
+  await g.client.emailStart("person@example.test");
+  g.start = { status: 429, body: { error: "rate_limited", errorDescription: "x", interval: 60 } };
+  await g.client.emailStart("other@example.test");
+  assert.deepEqual(await g.client.emailVerify(CODE), { outcome: "expired" }, "a code for another address is not this one's");
+  assert.equal(g.requests.filter(row => row.route.endsWith("/verify")).length, 0);
+});
+
 test("a token that cannot be stored is revoked and nothing is signed in; cancelling forgets the attempt", async t => {
   const f = await fixture(t);
   await f.client.emailStart("person@example.test");
