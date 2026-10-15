@@ -3,9 +3,9 @@
 // web UI's, on the new engine only: a page's file picker is answered by POST …/browser/upload and a finished download
 // is fetched from GET …/browser/download/:id. Never mix login frames into the general events feed, which every device
 // reads.
-import { createReadStream } from "node:fs";
+import { createReadStream, rmSync } from "node:fs";
 import type { IncomingMessage } from "node:http";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import { Readable, Transform } from "node:stream";
 
 import { storeUploads } from "../browser-upload.ts";
@@ -87,6 +87,12 @@ export function createBrowserViewerRoutes(deps: BrowserViewerRouteDeps): RouteHa
     const botId = (live ?? stream ?? upload ?? download)?.[1];
     if (!botId) return PASS;
     res.setHeader("cache-control", "no-store");
+    const pending = stream ? deps.upgrades.pending(req) : undefined;
+    if (stream) {
+      if (method !== "GET") return json(res, 405, { error: "method not allowed" });
+      if (!pending) return json(res, 426, { error: "WebSocket upgrade required" });
+      if (!isSameOrigin(req)) return json(res, 403, { error: "forbidden: cross-origin request" });
+    }
     const browser = await deps.browser(botId);
     if ("error" in browser) return json(res, browser.status, { error: browser.error });
     // Discovery may have awaited while the portal closed this owner's streams: never open a late replacement on the earlier authorization.
@@ -111,11 +117,7 @@ export function createBrowserViewerRoutes(deps: BrowserViewerRouteDeps): RouteHa
       return json(res, 405, { error: "method not allowed" });
     }
 
-    if (stream) {
-      if (method !== "GET") return json(res, 405, { error: "method not allowed" });
-      const pending = deps.upgrades.pending(req);
-      if (!pending) return json(res, 426, { error: "WebSocket upgrade required" });
-      if (!isSameOrigin(req)) return json(res, 403, { error: "forbidden: cross-origin request" });
+    if (stream && pending) {
       if (pending.socket.destroyed) return;
       if (!isCurrent()) return json(res, 409, { error: "This browser session changed. Reopen the browser panel." });
       // From here the stream reads the socket itself.
@@ -145,7 +147,10 @@ export function createBrowserViewerRoutes(deps: BrowserViewerRouteDeps): RouteHa
       }
       const paths = storeUploads(files, join(deps.dataDir, "browser-uploads"));
       const answered = await deps.viewers.answerFileChooser(browser, owner, chooser, paths).catch(() => false);
-      if (!answered) return json(res, 409, { error: "The page's file picker is no longer open." });
+      if (!answered) {
+        for (const file of paths) rmSync(dirname(file), { recursive: true, force: true });
+        return json(res, 409, { error: "The page's file picker is no longer open." });
+      }
       res.writeHead(204).end();
       return;
     }

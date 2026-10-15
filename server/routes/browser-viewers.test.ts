@@ -1,7 +1,7 @@
 // The v2 stream's routes, ported from pingdotgg/t3code@00cdceb1 apps/server/src/preview/ServerBrowserStream.test.ts
 // (MIT License, Copyright (c) 2026 T3 Tools Inc.): frames and acknowledgements over a real WebSocket, input only from a
 // view that may operate, the file picker's upload, a download, and the host-setup close.
-import { mkdtempSync, readFileSync, writeFileSync } from "node:fs";
+import { mkdtempSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from "node:http";
 import type { AddressInfo } from "node:net";
 import { tmpdir } from "node:os";
@@ -150,7 +150,7 @@ describe("the v2 stream", () => {
     expect(texts).toEqual([{ type: "viewport", width: 1280, height: 800, setting: { mode: "fill" }, zoom: 1 }]);
     expect(fixture.inputs).toEqual(interactive ? [...mutations, null] : []);
     expect(fixture.attachments).toEqual([{
-      owner: "local-owner", canOperate: interactive, maxWidth: 1280, maxHeight: 800, quality: 70, pace: "hi", authPrompts: true,
+      owner: "local-owner", canOperate: interactive, maxWidth: 1280, maxHeight: 800, quality: 70, pace: "hi", authPrompts: true, pagePopups: true,
       ...(interactive ? { size: { width: 1600, height: 1000 } } : {}),
     }]);
   });
@@ -214,6 +214,8 @@ describe("the page's file picker and downloads", () => {
     const stale = await upload("stale");
     expect(stale.status).toBe(409);
     expect(await stale.json()).toEqual({ error: "The page's file picker is no longer open." });
+    // The answered upload's file stays for the page to read; the refused one's is gone.
+    expect(readdirSync(join(fixture.dataDir, "browser-uploads"))).toHaveLength(1);
     expect((await fetch(`http://${fixture.origin}/api/bots/pepper/browser/upload?chooser=chooser-1`, { method: "POST", body: "plain" })).status).toBe(415);
     expect((await fetch(`http://${fixture.origin}/api/bots/nobody/browser/upload?chooser=chooser-1`, { method: "POST" })).status).toBe(404);
   });

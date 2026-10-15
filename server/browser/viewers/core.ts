@@ -97,6 +97,8 @@ export interface ViewerOptions {
   size?: { width: number; height: number } | null;
   /** The viewer can show a site's HTTP sign-in prompt to its person; the v1 view cannot. */
   authPrompts?: boolean;
+  /** The viewer draws a page's dropdown lists and its cursor shape; the v1 view cannot, so its presses reach the page. */
+  pagePopups?: boolean;
 }
 
 /** What a hub needs from the browser service. */
@@ -198,6 +200,7 @@ export class Viewer {
       quality: Math.min(100, Math.max(1, Math.round(options.quality ?? 70))),
       pace: options.pace ?? "hi",
       authPrompts: options.authPrompts === true,
+      pagePopups: options.pagePopups === true,
     };
   }
 
@@ -832,11 +835,11 @@ export class ViewerHub {
         const y = num(message.y);
         if (type === "mousePressed" && button !== "none" && viewer.pressedButtons.size >= HELD_LIMIT) return;
         if (type === "mouseReleased" && viewer.swallowed.delete(button)) return;
-        if (type === "mousePressed" && button === "left" && num(message.clickCount, 1) <= 1 && await this.#openSelect(viewer, tab, x, y)) {
+        if (type === "mousePressed" && button === "left" && viewer.options.pagePopups && num(message.clickCount, 1) <= 1 && await this.#openSelect(viewer, tab, x, y)) {
           viewer.swallowed.add(button);
           return;
         }
-        if (type === "mouseMoved" && button === "none") void this.#cursor(viewer, tab, x, y);
+        if (type === "mouseMoved" && button === "none" && viewer.options.pagePopups) void this.#cursor(viewer, tab, x, y);
         await session.send("Input.dispatchMouseEvent", {
           type, x, y, button,
           buttons: num(message.buttons, [...viewer.pressedButtons.keys()].reduce((bits, held) => bits | (held === "left" ? 1 : held === "right" ? 2 : 4), 0)),

@@ -266,6 +266,7 @@ export class StreamV2 {
       quality: intParam(params, "quality", DEFAULT_QUALITY, 100),
       pace: "hi",
       authPrompts: true,
+      pagePopups: true,
       ...(size && request.canOperate ? { size } : {}),
     };
     try {

@@ -183,6 +183,22 @@ suite("the v2 stream on real Chrome", () => {
     await client.close();
   }, hostTimeout(90_000));
 
+  it("leaves a phone's press on a list to the page, as the v1 view always did", async () => {
+    await opened("/form-phone", FORM.replace("</script>", "document.getElementById(\"s\").addEventListener(\"mousedown\", () => { document.title = \"pressed\"; });</script>"));
+    const outputs: string[] = [];
+    const viewer = await real.service.attachViewer(target, { owner: "phone", canOperate: true, maxWidth: 1280, maxHeight: 1280, pace: "lo" }, (output) => {
+      outputs.push(output.type);
+      if (output.type === "frame") output.ack();
+    });
+    await viewer.input({ type: "takeControl" });
+    await viewer.input({ type: "mouse", action: "down", x: 60, y: 115, button: "left", buttons: 1, clickCount: 1, modifiers: 0 });
+    await viewer.input({ type: "mouse", action: "up", x: 60, y: 115, button: "left", buttons: 0, clickCount: 1, modifiers: 0 });
+    await until(() => real.peek<string>(target, "document.title"), (title) => title === "pressed");
+    expect(outputs).not.toContain("selectPopup");
+    await viewer.input({ type: "releaseControl" });
+    await viewer.close();
+  }, hostTimeout(90_000));
+
   it("offers what the page downloaded to the person holding the browser, and serves the file", async () => {
     await opened("/form-download", FORM);
     const client = await connect("width=1280&height=800&maxWidth=2560&maxHeight=1600");

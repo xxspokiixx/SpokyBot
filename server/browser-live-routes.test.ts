@@ -82,7 +82,7 @@ describe("live browser route authorization", () => {
     expect(await refused(remote)).toBe(1006);
     expect(await refused({ ...remote, cookie: ownerCookie, origin: "https://attacker.invalid" })).toBe(1006);
     const plain = await fetch(stream.replace(/^ws/, "http"), { headers: { ...remote, authorization: `Bearer ${clientToken}` } });
-    expect(plain.status).toBe(503);
+    expect(plain.status).toBe(426);
   });
 
   it("does not let client sessions change the bot's browser identity or shared logins", async () => {

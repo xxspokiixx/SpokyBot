@@ -89,7 +89,11 @@ HTTP sign-in, a person's hold, restart and idle close) and
 `server/browser/viewers/viewers.e2e.test.ts` (the page filling the viewer
 at the screen's device scale, resizes, presets, acknowledged frames, a
 scroll ending on a sharp frame, and the phone's v1 live view against its
-golden from agent-browser).
+golden from agent-browser) and `server/browser/viewers/stream-v2.e2e.test.ts`
+(the panel's WebSocket stream through its routes: a 1600x1000 panel getting a
+1600x1000 page and 3200x2000 frames on a 2x screen, the page's file picker
+answered by an upload, a dropdown list drawn by the viewer, a download served
+to it, the page's cursor and copied text).
 
 - The job uses the runner's installed Google Chrome (`OMB_CDP_E2E=1`) on the
   same platforms as the vitest shards: Linux and Windows on PRs, plus macOS
@@ -102,9 +106,12 @@ golden from agent-browser).
 - It is advisory, outside the `CI` gate, until it has run green for a while.
 - Locally: `OMB_CDP_CHROME=<chrome executable> pnpm exec vitest run
   server/browser/cdp/s4- server/browser/checklist.e2e
-  server/browser/viewers/viewers.e2e` (or `OMB_CDP_E2E=1` for the installed
-  Google Chrome). Without either the suites skip. `OMB_CDP_TEST_TMP` moves the
-  throwaway profiles.
+  server/browser/viewers/viewers.e2e server/browser/viewers/stream-v2.e2e` (or
+  `OMB_CDP_E2E=1` for the installed Google Chrome). Without either the suites
+  skip. `OMB_CDP_TEST_TMP` moves the throwaway profiles.
+- `pnpm bench:browser-stream` measures the panel's stream on the installed
+  Google Chrome with this computer's display: frame and page sizes, input to
+  photon, frame rate, bytes and CPU. It is not part of CI.
 
 ## Main and releases
 
