@@ -763,6 +763,7 @@
   "cloudSetup.ready.later": "Wait for the schedule",
   "cloudSetup.myCloud": "My Cloud",
   "cloudSetup.alwaysOn": "always on",
+  "cloudWelcome.engine.connected": "Connected",
   "organization.additive": "Company models are added alongside your existing personal and local models. Those models and accounts stay available.",
   "organization.privacy": "Connecting does not upload your chat history. Requests sent to Company models go through your organization’s gateway.",
   "organization.desktopOnly": "Connect an organization in the desktop app on this computer.",
