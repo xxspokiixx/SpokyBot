@@ -83,7 +83,6 @@ export function LiveBrowser({ bot, signIn }: { bot: Bot; signIn?: BrowserSignIn 
   }, []);
   // Another profile may run on the other engine: it gets the stream again if it has one.
   useEffect(() => { setFallback(false); }, [bot.id, bot.browserProfile]);
-  // A new profile, or the other transport, is a new connection from a clean slate.
   useEffect(() => {
     setTabs([]);
     setNav(stream ? NO_NAV : { ...NO_NAV, canGoBack: true, canGoForward: true });

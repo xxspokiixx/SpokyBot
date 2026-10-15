@@ -120,7 +120,6 @@ export function createBrowserViewerRoutes(deps: BrowserViewerRouteDeps): RouteHa
     if (stream && pending) {
       if (pending.socket.destroyed) return;
       if (!isCurrent()) return json(res, 409, { error: "This browser session changed. Reopen the browser panel." });
-      // From here the stream reads the socket itself.
       pending.release();
       const opened = deps.viewers.stream({
         session: browser.session, spec: browser.spec, botId: browser.botId, owner,
