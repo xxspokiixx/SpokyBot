@@ -3291,7 +3291,7 @@ app.whenReady().then(async () => {
   registerUpdaterIpc({ pageAllowed: updaterPageAllowed });
   registerDesktopPrefs({ ipcMain, ...jsonFile(path.join(app.getPath("userData"), "desktop-prefs.json")), cloudOffered: () => cloudAccountRestored().then(cloudOffersReady),
     page: event => senderIsLocal(event) ? "local" : workspaceSenderAllowed(event, mainWindow?.webContents, environmentsState, rendererOrigin()) ? "server" : null,
-    thisComputer: () => serverReady ? workspaceMenuAction(() => switchEnvironment(LOCAL_ID)).then(() => true) : Promise.resolve(false) });
+    thisComputer: async () => { let ok = false; if (serverReady) await workspaceMenuAction(async () => { ok = (await switchEnvironment(LOCAL_ID))?.ok !== false; }); return ok; } });
   // Before the window, so the harness has the CUA descriptor on first render.
   cuaReady =
     !desktopRemoteAccess && (process.platform === "darwin" || process.platform === "linux" || process.platform === "win32")

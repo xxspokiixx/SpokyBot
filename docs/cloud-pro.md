@@ -1203,11 +1203,12 @@ time, and none after one closes until another launch:
      (source `update_popup`) for someone who can buy, Settings → MausBot Cloud
      for anyone else.
 
-   Any button, its X, Escape or a click outside end it for good. It takes
-   focus at its title, keeps Tab inside, takes Escape only while focus is in
-   it, and gives focus back when it closes unless focus has moved on.
-   `cloud_pro_popup` ([docs/analytics.md](analytics.md)) counts it, as shown
-   at most once a day on a desktop until it is closed. Only on this computer's
+   Any button, its X, Escape or a click outside end it for good; until then
+   it comes back on a later launch. It takes focus at its title, keeps Tab
+   inside, takes Escape only while focus is in it, and gives focus back when
+   it closes unless focus has moved on. `cloud_pro_popup`
+   ([docs/analytics.md](analytics.md)) counts it as shown at most once a day
+   on a desktop, however often it comes back. Only on this computer's
    page, where the app knows the email, does an `upgrade`, `manage` or
    `see_plans` by someone signed in to MausBot Cloud first tie their
    analytics to their Cloud account's email; Continue on this computer is

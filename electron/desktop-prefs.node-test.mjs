@@ -172,7 +172,7 @@ test("the preload gives every page of the window the notices, and only This comp
   assert.ok(safe.includes('"desktopNotices"')); assert.ok(!safe.includes("desktopAnalytics"));
 });
 
-test("production wiring: main answers this computer's page and the active saved server's own page, and no other", () => {
+test("production wiring: main answers this computer's page and the active saved server's own page, and no other", async () => {
   const main = readFileSync(new URL("./main.mjs", import.meta.url), "utf8").replace(/\r\n/g, "\n");
   const start = main.indexOf("  registerDesktopPrefs({"), end = main.indexOf("\n", main.indexOf("thisComputer:", start));
   assert.ok(start >= 0 && end > start, "main.mjs registers the desktop prefs");
@@ -181,14 +181,18 @@ test("production wiring: main answers this computer's page and the active saved 
   const contents = { mainFrame: serverFrame };
   const calls = [];
   localOrigin.setLocalOrigin(LOCAL);
-  vm.runInNewContext(main.slice(start, end), {
+  let switched = async id => { calls.push(["switch", id]); };
+  const context = vm.createContext({
     registerDesktopPrefs: value => { options = value; }, jsonFile: file => ({ read: () => file, write: () => {} }), ipcMain: {},
     path: { join: (...parts) => parts.join("/") }, app: { getPath: () => "/user-data" },
     senderIsLocal: localOrigin.isLocalSender, workspaceSenderAllowed: environments.workspaceSenderAllowed,
     mainWindow: { webContents: contents }, environmentsState: { environments: [{ id: "vps", name: "VPS", origin: VPS }], activeId: "vps" },
     rendererOrigin: () => LOCAL, cloudAccountRestored: async () => calls.push("restored"), cloudOffersReady: async () => { calls.push("offers"); return true; },
-    serverReady: true, LOCAL_ID: "local", workspaceMenuAction: async action => action(), switchEnvironment: async id => calls.push(["switch", id]),
+    serverReady: true, LOCAL_ID: "local", switchEnvironment: id => switched(id),
+    // main's own: a failed switch shows its dialog and resolves.
+    workspaceMenuAction: async action => { try { await action(); } catch { calls.push("dialog"); } },
   });
+  vm.runInContext(main.slice(start, end), context);
   assert.equal(options.read(), "/user-data/desktop-prefs.json");
   assert.equal(options.page({ sender: { mainFrame: localFrame }, senderFrame: localFrame }), "local");
   assert.equal(options.page({ sender: contents, senderFrame: serverFrame }), "server");
@@ -196,8 +200,16 @@ test("production wiring: main answers this computer's page and the active saved 
   assert.equal(options.page({ sender: {}, senderFrame: serverFrame }), null, "another window");
   const evil = { url: "https://evil.example.test/" };
   assert.equal(options.page({ sender: { mainFrame: evil }, senderFrame: evil }), null, "a page that is not the active server");
-  return Promise.all([options.cloudOffered(), options.thisComputer()]).then(([offered, switched]) => {
-    assert.equal(offered, true); assert.equal(switched, true);
-    assert.deepEqual(calls, ["restored", ["switch", "local"], "offers"]);
-  });
+  const [offered, done] = await Promise.all([options.cloudOffered(), options.thisComputer()]);
+  assert.equal(offered, true); assert.equal(done, true);
+  assert.deepEqual(calls, ["restored", ["switch", "local"], "offers"]);
+  switched = async () => { throw new Error("could not save the servers list"); };
+  assert.equal(await options.thisComputer(), false, "a switch that threw");
+  assert.equal(calls.at(-1), "dialog", "still shows main's dialog");
+  switched = async () => ({ ok: false, error: "switch-failed" });
+  assert.equal(await options.thisComputer(), false, "a local environment switch that failed");
+  switched = async () => ({ ok: true });
+  assert.equal(await options.thisComputer(), true);
+  context.serverReady = false;
+  assert.equal(await options.thisComputer(), false, "no server to switch to");
 });
