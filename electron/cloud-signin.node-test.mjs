@@ -21,6 +21,7 @@ async function fixture(t, options = {}) {
       return send(200, { cloudContractVersion: 1, attempt: ATTEMPT, expiresIn: 600, resendAfter: 30, signupOpen: true });
     }
     if (req.url === "/api/cloud/app/sign-in/verify" && req.method === "POST") {
+      if (f.verifyGate) await f.verifyGate;
       if (f.verify) return send(f.verify.status, f.verify.body);
       const input = JSON.parse(body);
       if (input.attempt !== ATTEMPT) return send(410, { error: "expired", errorDescription: "This sign-in expired or was already used. Start again in the app." });
@@ -167,6 +168,21 @@ test("a refused Resend keeps the code already sent; a successful one replaces it
   await g.client.emailStart("other@example.test");
   assert.deepEqual(await g.client.emailVerify(CODE), { outcome: "expired" }, "a code for another address is not this one's");
   assert.equal(g.requests.filter(row => row.route.endsWith("/verify")).length, 0);
+});
+
+test("cancelled while the code is checked: a token the Admin issued anyway is revoked, nothing is stored or signed in", async t => {
+  const f = await fixture(t);
+  await f.client.emailStart("person@example.test");
+  let release = () => {};
+  f.verifyGate = new Promise(resolve => { release = resolve; });
+  const verifying = f.client.emailVerify(CODE);
+  await until(() => f.requests.some(row => row.route.endsWith("/verify")));
+  f.client.emailCancel();
+  release();
+  assert.deepEqual(await verifying, { outcome: "failed" });
+  const revoked = f.requests.find(row => row.route === "/api/cloud/desktop/session" && row.method === "DELETE");
+  assert.ok(revoked, "the issued token was revoked"); assert.equal(revoked.token, `Bearer ${accessToken}`);
+  assert.equal(f.saved, null); assert.notEqual(f.client.state().status, "connected");
 });
 
 test("a token that cannot be stored is revoked and nothing is signed in; cancelling forgets the attempt", async t => {

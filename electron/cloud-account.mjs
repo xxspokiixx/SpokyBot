@@ -225,10 +225,11 @@ export function createCloudAccountClient({ store, openBrowser, platform, deviceN
     entry.operation = synchronize(generation).finally(() => { if (refreshing === entry) refreshing = null; });
     refreshing = entry; return entry.operation;
   }
-  /** A token the Admin just issued: stored where every sign-in goes, then this computer is signed in with it. */
-  async function adopt(result, stamp) {
+  /** A token the Admin just issued: stored where every sign-in goes, then this computer is signed in with it. One no
+   * longer wanted (the sign-in was superseded or cancelled meanwhile) is revoked, never left behind. */
+  async function adopt(result, stamp, wanted = () => true) {
     const next = validateGrant({ origin, token: result?.accessToken, ...identity(result) });
-    if (!current(stamp)) { await revoke(next).catch(() => {}); return false; }
+    if (!current(stamp) || !wanted()) { await revoke(next).catch(() => {}); return false; }
     if (next.expiresAt <= now()) throw new Error("Expired Cloud credential.");
     issued = next;
     await store.write(next);
@@ -310,7 +311,7 @@ export function createCloudAccountClient({ store, openBrowser, platform, deviceN
     const stamp = generation;
     try {
       const result = await request(null, { method: "POST", path: SIGN_IN_VERIFY, body: { attempt: attempt.attempt, code: digits } });
-      if (emailed !== attempt || !(await adopt(result, stamp))) return { outcome: "failed" };
+      if (!(await adopt(result, stamp, () => emailed === attempt))) return { outcome: "failed" };
       return { outcome: "signed-in", state: await refresh() };
     } catch (error) {
       if (!current(stamp)) return { outcome: "failed" };
