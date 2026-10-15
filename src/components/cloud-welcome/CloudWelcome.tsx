@@ -9,7 +9,7 @@ import {
   type WelcomeStep, type WelcomeView,
 } from "@/lib/cloud-setup";
 import {
-  endWelcomeHere, markWelcomeSeen, memoryKept, noteWelcomeHints, rememberPendingMemory, stepAsideWelcome, takeWelcomeRequest, useCloudWelcome,
+  endWelcomeHere, markWelcomeSeen, memoryKept, rememberPendingMemory, saveWelcomeHints, stepAsideWelcome, takeWelcomeRequest, useCloudWelcome,
   withEarlyHints,
 } from "@/lib/cloud-welcome";
 import { cn } from "@/lib/cn";
@@ -17,7 +17,7 @@ import { t } from "@/lib/i18n";
 import { hintSeen } from "@/lib/onboarding";
 import { useShowThreads } from "@/lib/thread-preferences";
 import type { LocaleKey } from "@/locales";
-import { api, openBot, useStore } from "@/state/store";
+import { openBot, useStore } from "@/state/store";
 import { useCloudName } from "./parts";
 import { WelcomeBring, type BringOutcome } from "./WelcomeBring";
 import { WelcomeDone, WelcomeEngine, WelcomeFiles } from "./WelcomeSteps";
@@ -67,12 +67,7 @@ export function CloudWelcome() {
     } else if (state.selectedId !== anchor.current) stepAsideWelcome();
   }, [state.selectedId]);
 
-  const remember = (ids: string[]) => {
-    noteWelcomeHints(ids);
-    const hintsSeen = [...new Set([...(state.config?.onboarding?.hintsSeen ?? []), ...welcome.early, ...ids])];
-    void api("/api/config", { method: "PUT", body: JSON.stringify({ onboarding: { hintsSeen } }) })
-      .then((config) => dispatch({ type: "configStatus", config })).catch(() => {});
-  };
+  const remember = (ids: string[]) => { void saveWelcomeHints(state.config?.onboarding, ids, dispatch); };
   const go = (next: WelcomeView) => {
     navigated.current = true;
     setView(next);

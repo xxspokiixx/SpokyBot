@@ -9,14 +9,14 @@ import { brand } from "@/lib/brand";
 import { cloudIntentDue, cloudIntentShown, jobRoutine, reopenCloudIntent, useCloudIntent } from "@/lib/cloud-intent";
 import { cn } from "@/lib/cn";
 import { CLOUD_INTENT_GIVEN, CLOUD_SETUP_HIDDEN, CLOUD_SETUP_MOVE_SKIPPED, cloudSetupItems, cloudSetupStage, cloudWelcomeStage, type CloudSetupItem, type CloudSetupStep } from "@/lib/cloud-setup";
-import { endWelcomeHere, returnToWelcome, useCloudWelcome, withEarlyHints } from "@/lib/cloud-welcome";
+import { endWelcomeHere, returnToWelcome, saveWelcomeHints, useCloudWelcome, withEarlyHints } from "@/lib/cloud-welcome";
 import { t } from "@/lib/i18n";
 import type { MausMotion } from "@/lib/mascot";
-import { hintSeenPatch, type WelcomeViewer } from "@/lib/onboarding";
+import { hintSeen, type WelcomeViewer } from "@/lib/onboarding";
 import type { LocaleKey } from "@/locales";
 import type { Routine } from "@/lib/routines";
 import { useShowThreads } from "@/lib/thread-preferences";
-import { api, openBot, useStore } from "@/state/store";
+import { openBot, useStore } from "@/state/store";
 
 const TITLE: Record<CloudSetupStep, LocaleKey> = {
   cloud: "cloudSetup.cloud.title", job: "cloudSetup.job.title", engine: "cloudSetup.engine.title", plan: "cloudSetup.plan.title", move: "cloudSetup.move.title",
@@ -147,9 +147,7 @@ export function CloudSetup({ viewer, welcomeShown = false }: { viewer: WelcomeVi
   const todo = items.filter((item) => item.status === "todo");
   const current = (todo.find((item) => item.id === chosen) ?? todo[0])?.id;
   const remember = (id: string) => {
-    const patch = hintSeenPatch(record, id);
-    if (patch) void api("/api/config", { method: "PUT", body: JSON.stringify(patch) })
-      .then((config) => dispatch({ type: "configStatus", config })).catch(() => {});
+    if (!hintSeen(record, id)) void saveWelcomeHints(state.config?.onboarding, [id], dispatch);
   };
   const hide = () => {
     setHidden(true);

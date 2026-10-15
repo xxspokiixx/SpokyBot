@@ -40,6 +40,16 @@ import { CloudWelcome } from "./CloudWelcome";
 import { WelcomeKeeper } from "./WelcomeKeeper";
 import { pendingMemory, rememberPendingMemory, resetCloudWelcome, useCloudWelcome } from "@/lib/cloud-welcome";
 
+function useCloudWelcomeNow() {
+  let value: ReturnType<typeof useCloudWelcome> | null = null;
+  function Probe() { value = useCloudWelcome(); return null; }
+  const probeHost = document.createElement("div");
+  const probe = createRoot(probeHost);
+  flushSync(() => probe.render(createElement(Probe)));
+  flushSync(() => probe.unmount());
+  return value!;
+}
+
 const owner = { hosted: false, canSave: true, cloudHome: true };
 const local = { bots: 6, rooms: 1, chats: 142, bytes: 1024 ** 3, files: 900, routines: 4 };
 const CLOUD = { id: "cloud", name: "Studio Cloud", origin: "https://omb-u-1a2b3c4d5e6f.fly.dev", kind: "cloud" as const };
@@ -68,7 +78,12 @@ const click = (label: string) => {
   flushSync(() => target.click());
 };
 const aboutMePuts = () => fixture.api.mock.calls.map(([, init]: [string, RequestInit]) => JSON.parse(String(init.body)).profile?.aboutMe).filter(Boolean);
-const setAboutMe = (aboutMe: string) => flushSync(() => fixture.set({ ...fixture.state, config: { ...fixture.state.config, profile: { ...fixture.state.config.profile, aboutMe } } }));
+let server: any;
+/** What a copy does to the Cloud: its About me changes there, and the page learns of it. */
+const setAboutMe = (aboutMe: string) => {
+  server = { ...server, profile: { ...server.profile, aboutMe } };
+  flushSync(() => fixture.set({ ...fixture.state, config: { ...fixture.state.config, profile: { ...fixture.state.config.profile, aboutMe } } }));
+};
 const restartApp = (next: CloudMoveOverview) => {
   flushSync(() => root.unmount());
   resetCloudWelcome();
@@ -91,14 +106,17 @@ beforeEach(() => {
     connected: true, selectedId: "b1", activeView: "chat", routines: [], bots: [{ id: "b1", threadId: "t1", name: "Maus" }], instances: [{ instanceId: "claude" }],
     config: { cloudHome: true, onboarding: { ...EMPTY_ONBOARDING }, profile: { name: "", email: "", aboutMe: "Cloud About me." } },
   };
-  fixture.api = vi.fn(async (_path: string, init?: RequestInit) => {
+  server = structuredClone(fixture.state.config);
+  // Like the server: each save applies when it arrives, and every answer is the whole config as it is then.
+  fixture.api = vi.fn((_path: string, init?: RequestInit) => {
     const patch = JSON.parse(String(init?.body ?? "{}"));
-    if (patch.profile && failProfile) throw Object.assign(new Error("Settings are already being updated. Try again in a moment."), { status: 409 });
-    return {
-      ...fixture.state.config,
-      ...(patch.onboarding ? { onboarding: { ...fixture.state.config.onboarding, ...patch.onboarding } } : {}),
-      ...(patch.profile ? { profile: { ...fixture.state.config.profile, ...patch.profile } } : {}),
+    if (patch.profile && failProfile) return Promise.reject(Object.assign(new Error("Settings are already being updated. Try again in a moment."), { status: 409 }));
+    server = {
+      ...server,
+      ...(patch.onboarding ? { onboarding: { ...server.onboarding, ...patch.onboarding } } : {}),
+      ...(patch.profile ? { profile: { ...server.profile, ...patch.profile } } : {}),
     };
+    return Promise.resolve().then(() => structuredClone(server));
   });
   push = () => {};
   bridge = {
@@ -132,7 +150,7 @@ describe("memory pasted in the welcome", () => {
 
   it("after the app restarted with a copy landed, is added to the About me the copy brought, and kept until the welcome moves on", async () => {
     rememberPendingMemory(PASTE);
-    fixture.state.config.profile.aboutMe = "This Mac's own About me.";
+    fixture.state.config.profile.aboutMe = server.profile.aboutMe = "This Mac's own About me.";
     vi.mocked(bridge.state).mockResolvedValue(overview({ cloud: copiedCloud, suggest: false }));
     mount();
     expect(text()).not.toContain("Added to About me.");
@@ -157,6 +175,7 @@ describe("memory pasted in the welcome", () => {
     expect(pendingMemory()).toBe(PASTE);
     setAboutMe("This Mac's own About me.");
     await vi.waitFor(() => expect(aboutMePuts()).toEqual(["Cloud About me.\n\n- Likes tea", "This Mac's own About me.\n\n- Likes tea"]));
+    await vi.waitFor(() => expect(fixture.state.config.profile.aboutMe).toBe("This Mac's own About me.\n\n- Likes tea"));
     expect(pendingMemory()).toBe(PASTE);
     restartApp(overview({ cloud: copiedCloud, suggest: false }));
     await vi.waitFor(() => expect(pendingMemory()).toBeNull());
@@ -165,7 +184,7 @@ describe("memory pasted in the welcome", () => {
 
   it("when it no longer fits the About me a copy brought, stays on this device and is shown again with why", async () => {
     rememberPendingMemory(PASTE);
-    fixture.state.config.profile.aboutMe = "x".repeat(23_990);
+    fixture.state.config.profile.aboutMe = server.profile.aboutMe = "x".repeat(23_990);
     vi.mocked(bridge.state).mockResolvedValue(overview({ cloud: copiedCloud, suggest: false }));
     mount();
     await vi.waitFor(() => expect(document.querySelector('[data-cloud-memory="too-long"]')).not.toBeNull());
@@ -197,3 +216,16 @@ describe("memory pasted in the welcome", () => {
     expect(document.querySelector("[data-cloud-memory]")).toBeNull();
   });
 });
+
+describe("an end of the welcome kept on this device", () => {
+  it("reaches the Cloud's record when it can, and is then let go", async () => {
+    localStorage.setItem("omb.cloudWelcome.done", "1");
+    resetCloudWelcome();
+    mount();
+    expect(text()).not.toContain("What should Studio Cloud start with?");
+    await vi.waitFor(() => expect(server.onboarding.hintsSeen).toContain("cloud-welcome-done"));
+    await vi.waitFor(() => expect(localStorage.getItem("omb.cloudWelcome.done")).toBeNull());
+    expect(useCloudWelcomeNow().doneHere).toBe(false);
+  });
+});
+

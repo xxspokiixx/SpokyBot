@@ -1,9 +1,9 @@
 import { useEffect, useRef, useState } from "react";
 import type { CloudMoveState } from "../../../electron/cloud-move.mjs";
 import { useCloudMove } from "@/components/CloudMove";
-import { cloudWelcomeStage, welcomeStepFinished } from "@/lib/cloud-setup";
-import { memoryStep, rememberPendingMemory, useCloudWelcome, withEarlyHints } from "@/lib/cloud-welcome";
-import type { WelcomeViewer } from "@/lib/onboarding";
+import { CLOUD_WELCOME_DONE, cloudWelcomeStage, welcomeStepFinished } from "@/lib/cloud-setup";
+import { forgetWelcomeDoneHere, memoryStep, rememberPendingMemory, saveWelcomeHints, useCloudWelcome, withEarlyHints } from "@/lib/cloud-welcome";
+import { hintSeen, type WelcomeViewer } from "@/lib/onboarding";
 import { api, useStore, type Action, type ConfigStatus } from "@/state/store";
 import { MemoryImport, type MemoryTrouble } from "./MemoryImport";
 import { useCloudName } from "./parts";
@@ -22,10 +22,20 @@ function KeptMemory({ memory, trouble, onAgain, onLater }: { memory: string; tro
     onAdd={(text) => { rememberPendingMemory(text); onAgain(); }} />;
 }
 
-/** Outlives the welcome, so memory pasted there reaches About me even when a copy replaces About me after the welcome ends. */
+/**
+ * Outlives the welcome: memory pasted there reaches About me even when a copy replaces About me after the welcome
+ * ends, and an end of the welcome this device kept reaches the Cloud's record.
+ */
 export function WelcomeKeeper({ viewer }: { viewer: WelcomeViewer | null }) {
   const { state, dispatch } = useStore();
   const welcome = useCloudWelcome();
+  const saved = state.config?.onboarding;
+  const resend = Boolean(welcome.doneHere && viewer?.cloudHome && viewer.canSave && state.connected && saved);
+  useEffect(() => {
+    if (!resend || !saved) return;
+    if (hintSeen(saved, CLOUD_WELCOME_DONE)) forgetWelcomeDoneHere();
+    else void saveWelcomeHints(saved, [CLOUD_WELCOME_DONE], dispatch).then((done) => { if (done) forgetWelcomeDoneHere(); });
+  }, [resend, saved, dispatch]);
   const memory = viewer?.cloudHome && viewer.canSave ? welcome.memory : null;
   const move = useCloudMove(memory && !window.ogb?.remoteClient?.active ? window.ogb?.cloudMove : undefined);
   const record = withEarlyHints(state.config?.onboarding, welcome.early);

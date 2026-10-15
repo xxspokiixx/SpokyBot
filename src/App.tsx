@@ -36,8 +36,7 @@ import { cloudIntentDue, cloudIntentShown, useCloudIntent } from "@/lib/cloud-in
 import { CloudSetup } from "@/components/CloudSetup";
 import { CloudWelcome } from "@/components/cloud-welcome/CloudWelcome";
 import { WelcomeKeeper } from "@/components/cloud-welcome/WelcomeKeeper";
-import { cloudWelcomeStage } from "@/lib/cloud-setup";
-import { cloudFirstRun, cloudWelcomeShown, useCloudWelcome } from "@/lib/cloud-welcome";
+import { cloudFirstRun, cloudWelcomeVisible, useCloudWelcome } from "@/lib/cloud-welcome";
 import { engineReady } from "@/components/EngineLibrary";
 import { CommandPalette } from "@/components/CommandPalette";
 import { setLocale } from "@/lib/i18n";
@@ -128,8 +127,8 @@ function Shell({ viewer }: { viewer: WelcomeViewer | null }) {
   }), cloudIntent);
   const cloudJobWaiting = Boolean(viewer?.cloudHome && viewer.canSave && cloudIntent.pending);
   const welcome = useCloudWelcome();
-  const welcomeStage = cloudWelcomeStage({ viewer, connected: state.connected, enginesKnown: state.instances.length > 0, onboarding: state.config?.onboarding });
-  const welcomeOnScreen = cloudWelcomeShown(welcomeStage, welcome) && state.activeView === "chat" && !(!remoteClient && localVmWorkspaceBotId);
+  const welcomeOnScreen = cloudWelcomeVisible({ viewer, connected: state.connected, enginesKnown: state.instances.length > 0, onboarding: state.config?.onboarding }, welcome)
+    && state.activeView === "chat" && !(!remoteClient && localVmWorkspaceBotId);
   const firstRun = cloudFirstRun({ welcome: welcomeOnScreen, intent: cloudAsk, signIn: cloudSignIn || cloudJobWaiting });
 
   useEffect(() => {

@@ -1,7 +1,9 @@
 import { useSyncExternalStore } from "react";
 import type { CloudMoveOverview } from "../../electron/cloud-move.mjs";
 import type { CloudPlanSnapshot } from "../../electron/cloud-account.mjs";
-import type { OnboardingStatus } from "@/lib/onboarding";
+import { CLOUD_SETUP_HIDDEN, CLOUD_WELCOME_DONE, cloudWelcomeStage } from "@/lib/cloud-setup";
+import type { OnboardingStatus, WelcomeViewer } from "@/lib/onboarding";
+import { api, type Action, type ConfigStatus } from "@/state/store";
 
 export type BringChoice = "copy" | "fresh";
 
@@ -18,13 +20,25 @@ interface Snapshot {
   seen: boolean;
   /** Pasted memory this device keeps until a saved About me has it. */
   memory: string | null;
+  /** The welcome ended here but the Cloud could not save it: this device keeps it until the Cloud does. */
+  doneHere: boolean;
 }
 
 const PENDING_MEMORY = "omb.cloudWelcome.memory";
+const DONE_HERE = "omb.cloudWelcome.done";
 function stored(key: string): string | null {
   try { return globalThis.localStorage?.getItem(key) || null; } catch { return null; }
 }
-const initial = (): Snapshot => ({ aside: false, ended: false, early: [], requested: null, seen: false, memory: stored(PENDING_MEMORY) });
+function store(key: string, value: string | null): void {
+  try {
+    if (value) globalThis.localStorage?.setItem(key, value);
+    else globalThis.localStorage?.removeItem(key);
+  } catch {}
+}
+const initial = (): Snapshot => {
+  const doneHere = stored(DONE_HERE) !== null;
+  return { aside: false, ended: doneHere, early: doneHere ? [CLOUD_WELCOME_DONE] : [], requested: null, seen: false, memory: stored(PENDING_MEMORY), doneHere };
+};
 let snapshot: Snapshot = initial();
 const listeners = new Set<() => void>();
 
@@ -63,6 +77,47 @@ export function withEarlyHints(record: OnboardingStatus | undefined, early: read
 
 export function cloudWelcomeShown(stage: string, welcome: Pick<Snapshot, "aside" | "ended" | "seen">): boolean {
   return (stage === "pending" || (stage === "waiting" && welcome.seen)) && !welcome.aside && !welcome.ended;
+}
+
+/** Whether the welcome fills the main pane, from the Cloud's record with the hints written here that it has not saved yet. */
+export function cloudWelcomeVisible(
+  facts: { viewer: WelcomeViewer | null; connected: boolean; enginesKnown: boolean; onboarding: OnboardingStatus | undefined },
+  welcome: Pick<Snapshot, "aside" | "ended" | "seen" | "early">,
+): boolean {
+  return cloudWelcomeShown(cloudWelcomeStage({ ...facts, onboarding: withEarlyHints(facts.onboarding, welcome.early) }), welcome);
+}
+
+export function keepWelcomeDoneHere(): void {
+  store(DONE_HERE, "1");
+  update({ doneHere: true, ended: true, early: [...new Set([...snapshot.early, CLOUD_WELCOME_DONE])] });
+}
+export function forgetWelcomeDoneHere(): void {
+  store(DONE_HERE, null);
+  update({ doneHere: false });
+}
+
+export const WELCOME_SAVE_RETRY_MS = 1500;
+const ENDING = new Set([CLOUD_WELCOME_DONE, CLOUD_SETUP_HIDDEN]);
+
+/**
+ * Adds hints to the Cloud's onboarding record, with one retry (a busy Cloud answers 409 for a moment). When an end
+ * of the welcome still cannot be saved, this device keeps it, so the welcome does not come back on the next launch.
+ */
+export async function saveWelcomeHints(
+  record: OnboardingStatus | undefined, ids: readonly string[], dispatch: (action: Action) => void,
+  wait: (ms: number) => Promise<void> = (ms) => new Promise((resolve) => setTimeout(resolve, ms)),
+): Promise<boolean> {
+  noteWelcomeHints(ids);
+  const hintsSeen = [...new Set([...(record?.hintsSeen ?? []), ...snapshot.early, ...ids])];
+  const put = () => api<ConfigStatus>("/api/config", { method: "PUT", body: JSON.stringify({ onboarding: { hintsSeen } }) });
+  try {
+    const config = await put().catch(async () => { await wait(WELCOME_SAVE_RETRY_MS); return put(); });
+    dispatch({ type: "configStatus", config });
+    return true;
+  } catch {
+    if (ids.some((id) => ENDING.has(id))) keepWelcomeDoneHere();
+    return false;
+  }
 }
 
 /** What a Cloud's main pane opens on first: the welcome before anything that can start a chat (the first-job question, a job waiting for the sign-in). */
@@ -119,10 +174,7 @@ export function memoryKept(aboutMe: string | undefined, memory: string): boolean
 /** A copy replaces About me with this computer's, so what was pasted waits on this device until a saved About me has it. */
 export function rememberPendingMemory(memory: string | null): void {
   const kept = memory?.trim() || null;
-  try {
-    if (kept) globalThis.localStorage?.setItem(PENDING_MEMORY, kept);
-    else globalThis.localStorage?.removeItem(PENDING_MEMORY);
-  } catch {}
+  store(PENDING_MEMORY, kept);
   update({ memory: kept });
 }
 
