@@ -226,7 +226,7 @@ export const CHECKOUT_WAIT_MS = 30 * 60_000;
 export type CloudSignInProblem = "invalid-email" | "rate-limited" | "failed" | "wrong-code" | "expired" | "signup-closed" | "device-limit" | "sso" | "two-factor" | "browser";
 export type CloudSignInPhase =
   | { step: "email"; intent: boolean; problem: CloudSignInProblem | null }
-  | { step: "code"; intent: boolean; email: string; resendAt: number; problem: CloudSignInProblem | null; triesLeft: number | null }
+  | { step: "code"; intent: boolean; email: string; resendAt: number; problem: CloudSignInProblem | null; triesLeft: number | null; signupOpen?: boolean }
   | { step: "done"; intent: boolean };
 
 /** What the setup screen says about the plan that started: its tier, the running trial and the trial's credit. */

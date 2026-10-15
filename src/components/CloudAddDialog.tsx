@@ -266,7 +266,8 @@ export function CloudAddDialog({ now = Date.now }: { now?: () => number }) {
     setBusy(true);
     void bridge.signInStart(form.email).then(result => {
       if (result.outcome === "sent") {
-        setSignIn({ step: "code", intent: phase.intent, email: result.email, resendAt: result.resendAt, problem: null, triesLeft: null });
+        setSignIn({ step: "code", intent: phase.intent, email: result.email, resendAt: result.resendAt, problem: null, triesLeft: null,
+          ...(result.signupOpen === false ? { signupOpen: false } : {}) });
         setForm({ email: result.email, code: "" });
         track("cloud_signin", { step: "code_sent", source: request.source });
       } else setSignIn({ ...phase, problem: result.outcome });

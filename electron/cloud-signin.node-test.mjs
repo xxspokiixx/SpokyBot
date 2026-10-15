@@ -55,7 +55,8 @@ test("the email, the code and the Admin's answers are read strictly", () => {
   assert.deepEqual(signInIdentity({ deviceName: "Mac", platform: "darwin", appVersion: "0.1.113" }), { deviceName: "Mac", platform: "darwin", appVersion: "0.1.113" });
   assert.equal(signInIdentity({ deviceName: "Mac", platform: "ios", appVersion: "1" }), null, "this app signs in as a desktop only");
   assert.equal(signInIdentity({ deviceName: "Mac", platform: "linux", appVersion: "dev build!" }).appVersion, "0.0.0");
-  assert.deepEqual(parseSignInStart({ cloudContractVersion: 1, attempt: ATTEMPT, expiresIn: 600, resendAfter: 30 }), { attempt: ATTEMPT, expiresIn: 600, resendAfter: 30 });
+  assert.deepEqual(parseSignInStart({ cloudContractVersion: 1, attempt: ATTEMPT, expiresIn: 600, resendAfter: 30 }), { attempt: ATTEMPT, expiresIn: 600, resendAfter: 30, signupOpen: true });
+  assert.equal(parseSignInStart({ cloudContractVersion: 1, attempt: ATTEMPT, expiresIn: 600, signupOpen: false }).signupOpen, false);
   for (const bad of [null, { attempt: ATTEMPT, expiresIn: 600 }, { cloudContractVersion: 1, attempt: "short", expiresIn: 600 }, { cloudContractVersion: 1, attempt: ATTEMPT, expiresIn: 5 }]) {
     assert.equal(parseSignInStart(bad), null, JSON.stringify(bad));
   }
@@ -69,7 +70,7 @@ test("the email, the code and the Admin's answers are read strictly", () => {
 test("happy path: the code is sent, the right code signs this computer in with the token stored like the browser sign-in's", async t => {
   const f = await fixture(t);
   const sent = await f.client.emailStart(" Person@Example.TEST ");
-  assert.deepEqual(sent, { outcome: "sent", email: "person@example.test", expiresAt: f.now + 600_000, resendAt: f.now + 30_000 });
+  assert.deepEqual(sent, { outcome: "sent", email: "person@example.test", expiresAt: f.now + 600_000, resendAt: f.now + 30_000, signupOpen: true });
   const start = f.requests.find(row => row.route === "/api/cloud/app/sign-in/start");
   assert.deepEqual(JSON.parse(start.body), { email: "person@example.test", deviceName: "Fixture computer", platform: "darwin", appVersion: "0.1.113" });
   assert.equal(start.type, "application/json"); assert.equal(start.origin, undefined, "no Origin: the Admin refuses a cross-origin one");
@@ -86,6 +87,12 @@ test("happy path: the code is sent, the right code signs this computer in with t
   assert.deepEqual(f.browsers, [], "no browser at all");
   assert.equal((await f.client.emailVerify(CODE)).outcome, "expired", "an attempt is used once");
   await assert.rejects(f.client.emailStart("person@example.test"), /Sign out before/, "signed in: no second sign-in");
+});
+
+test("with new accounts closed the Admin still answers \"sent\" (only an existing address gets mail), and the page is told", async t => {
+  const f = await fixture(t);
+  f.start = { status: 200, body: { cloudContractVersion: 1, attempt: ATTEMPT, expiresIn: 600, resendAfter: 30, signupOpen: false } };
+  assert.deepEqual(await f.client.emailStart("new@example.test"), { outcome: "sent", email: "new@example.test", expiresAt: f.now + 600_000, resendAt: f.now + 30_000, signupOpen: false });
 });
 
 test("a wrong code says the tries left; the last one asks for a new code; nothing is stored", async t => {

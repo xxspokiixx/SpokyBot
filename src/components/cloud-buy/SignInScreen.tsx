@@ -86,6 +86,7 @@ export function SignInScreen({ phase, email, code, profileEmail, busy, now, onBa
           onFocus={event => event.currentTarget.select()}
           className={`${FIELD} min-w-0 px-0 py-2.5 text-center text-[20px] font-semibold tabular-nums`} />)}
       </div>
+      {phase.signupOpen === false && <p data-cloud-signup-closed className="text-[12.5px] leading-relaxed text-ink-secondary">{t("cloudBuy.signIn.signupClosedNote")}</p>}
       <div className="flex min-h-6 items-center justify-between gap-3 text-[12.5px] text-ink-tertiary">
         {busy ? <span role="status" className="inline-flex items-center gap-1.5"><Loader2 size={13} className="animate-spin motion-reduce:animate-none" aria-hidden="true" />{t("cloudBuy.signIn.checking")}</span>
           : phase.resendAt > now ? <span>{t("cloudBuy.signIn.resendIn", { time: clock(phase.resendAt - now) })}</span>

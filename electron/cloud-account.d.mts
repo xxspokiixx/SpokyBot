@@ -39,7 +39,7 @@ export interface CloudAccountState {
  * way (`resendAt`: when another may be asked for). `browser`: this Cloud signs
  * in only in the browser (single sign-on there, or an older Admin). */
 export type CloudSignInStart =
-  | { outcome: "sent"; email: string; expiresAt: number; resendAt: number }
+  | { outcome: "sent"; email: string; expiresAt: number; resendAt: number; /** False: new accounts are closed, so only an existing one gets a code. */ signupOpen: boolean }
   | { outcome: import("./cloud-signin.mjs").CloudSignInStartFailure };
 /** `signed-in`: stored and read like the browser sign-in; `wrong-code` says
  * the tries left; `expired` needs a new code. */

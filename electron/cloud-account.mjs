@@ -295,7 +295,7 @@ export function createCloudAccountClient({ store, openBrowser, platform, deviceN
       if (!current(stamp)) return { outcome: "failed" };
       if (!started) return { outcome: "failed" };
       emailed = { attempt: started.attempt, email: address, expiresAt: now() + started.expiresIn * 1000, wrong: 0 };
-      return { outcome: "sent", email: address, expiresAt: emailed.expiresAt, resendAt: now() + started.resendAfter * 1000 };
+      return { outcome: "sent", email: address, expiresAt: emailed.expiresAt, resendAt: now() + started.resendAfter * 1000, signupOpen: started.signupOpen };
     } catch (error) {
       return current(stamp) ? { outcome: startFailure(error) } : { outcome: "failed" };
     }

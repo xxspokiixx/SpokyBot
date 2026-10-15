@@ -172,6 +172,7 @@
   "cloudBuy.signIn.expired": "That code can't be used any more. Send a new one.",
   "cloudBuy.signIn.newCode": "Send a new code",
   "cloudBuy.signIn.signupClosed": "New Cloud accounts aren't available yet.",
+  "cloudBuy.signIn.signupClosedNote": "New MausBot accounts aren't open yet: a code comes only if this email already has one. Change it to the one you signed up with.",
   "cloudBuy.signIn.deviceLimit": "This account has too many computers signed in. Sign one out on your Plan page, then try again.",
   "cloudBuy.signIn.sso": "Your organization uses single sign-on.",
   "cloudBuy.signIn.twoFactor": "This account uses two-step verification, so it signs in through your browser.",

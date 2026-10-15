@@ -31,12 +31,13 @@ export function signInIdentity({ deviceName, platform, appVersion }) {
   return { deviceName, platform, appVersion: typeof appVersion === "string" && APP_VERSION.test(appVersion) ? appVersion : "0.0.0" };
 }
 
-/** The start answer, or null: the attempt, how long it lasts and when a new code may be sent. */
+/** The start answer, or null: the attempt, how long it lasts, when a new code may be sent, and whether new accounts
+ * are open (closed, a code reaches only an address that already has one: the Admin answers the same either way). */
 export function parseSignInStart(result) {
   if (result?.cloudContractVersion !== 1 || !ATTEMPT.test(result.attempt ?? "")) return null;
   const expiresIn = Number.isSafeInteger(result.expiresIn) && result.expiresIn >= 60 && result.expiresIn <= 3600 ? result.expiresIn : null;
   const resendAfter = Number.isSafeInteger(result.resendAfter) && result.resendAfter >= 0 && result.resendAfter <= 600 ? result.resendAfter : 30;
-  return expiresIn ? { attempt: result.attempt, expiresIn, resendAfter } : null;
+  return expiresIn ? { attempt: result.attempt, expiresIn, resendAfter, signupOpen: result.signupOpen !== false } : null;
 }
 
 /** Only the Admin's own JSON answer names a reason; a page from in between is a failure to reach it. */

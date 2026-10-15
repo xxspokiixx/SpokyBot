@@ -149,6 +149,12 @@ describe("each screen of the sheet says one thing and offers one next step", () 
     expect(text(panel(view, { busy: true }).html)).toContain("Checking the code…");
   });
 
+  it("Sign in, code: with new accounts closed it says a code comes only to an email that already has one", () => {
+    const phase = { step: "code" as const, intent: true, email: EMAIL, resendAt: NOW + 21_000, problem: null, triesLeft: null };
+    expect(text(panel({ kind: "sign-in", phase: { ...phase, signupOpen: false } }).html)).toContain("New MausBot accounts aren't open yet: a code comes only if this email already has one.");
+    expect(text(panel({ kind: "sign-in", phase }).html)).not.toContain("aren't open yet");
+  });
+
   it("Sign in: the Admin's answers in plain words, with the one way on", () => {
     const code = (problem: any, triesLeft: number | null = null): CloudAddView => ({ kind: "sign-in", phase: { step: "code", intent: true, email: EMAIL, resendAt: NOW - 1, problem, triesLeft } });
     expect(text(panel(code("wrong-code", 3)).html)).toContain("That code isn't right. 3 tries left.");
@@ -302,6 +308,13 @@ describe("the sheet", () => {
     expect(await settle()).toContain("Waiting for your payment");
     expect(track).toHaveBeenCalledWith("cloud_signin", { step: "signed_in", source: "app_menu" });
     expect(track).toHaveBeenCalledWith("cloud_checkout_opened", { plan: "max", trial: true, source: "app_menu" });
+  });
+
+  it("the Admin's word that new accounts are closed reaches the code step", async () => {
+    bridge.signInStart.mockResolvedValueOnce({ outcome: "sent", email: EMAIL, expiresAt: NOW + 600_000, resendAt: NOW + 30_000, signupOpen: false });
+    await settle(); await press("Start free trial");
+    tree().find(node => node.type === "form")!.props.onSubmit({ preventDefault() {} }); await flush();
+    expect(await settle()).toContain("New MausBot accounts aren't open yet");
   });
 
   it("a wrong code says the tries left and empties the boxes; single sign-on continues in the browser with the plan", async () => {
