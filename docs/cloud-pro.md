@@ -1168,26 +1168,50 @@ cards at the bottom left (`lib/notices.ts`), asked in order, one on screen at a
 time, and none after one closes until another launch:
 
 1. **The Cloud Pro popup** (`CloudProPopup`, id `cloud-pro-update-2026-10`):
-   one centered dialog, once, on every installed desktop app whatever its
-   plan (a new install once its onboarding is done); never in a remote
-   client's window (the computer it connects to gets it), on a Cloud home or
-   on a branded build, which sells no Cloud. It waits while the plan or the
-   Admin's offer is loading and while another dialog or a call is open, and,
-   when the Cloud can't be reached, for a later launch. Its main button
-   follows the plan, and nothing in it leaves the app: with none, **Start free
-   trial** (while the Admin offers one) or **Upgrade to Cloud Pro** opens the
-   Add a Cloud dialog (source `update_popup`), and so does **Compare plans**
-   (the dialog lists every plan); on any plan (a trial, Personal, Pro, Max or
-   one that needs attention) **Manage plan** opens Settings → MausBot Cloud,
-   and there is no Compare plans. Personal → Pro is not self-serve yet, so
-   Personal gets Manage plan rather than an Upgrade that would end at "write
-   to us". Its numbers are the Admin's. Any button, its X,
-   Escape or a click outside end it for good (browser storage and the
-   workspace's hint record). It takes focus at its title, keeps Tab inside
-   and gives focus back when it closes. `cloud_pro_popup`
-   ([docs/analytics.md](analytics.md)) counts it, and a click by someone
-   signed in to MausBot Cloud first ties their analytics to their Cloud
-   account's email.
+   one centered dialog, once per installed desktop app whatever its plan (a
+   new install once its onboarding is done), on whichever page its window
+   shows: this computer's, My Cloud's or another saved server's. Showing it
+   never switches the window. Main keeps whether this desktop has seen it
+   (`electron/desktop-prefs.mjs`, a small file in the app's data folder), so
+   every page and every port the app's own page is served on agree; a close
+   kept earlier in this computer's page's storage or its workspace's hint
+   record still counts, and is handed to main. Never in a window connected to
+   another computer as its remote client, which has no Cloud sign-in, Add a
+   Cloud dialog or Settings → MausBot Cloud to send anyone to, nor on a branded
+   build, which sells no Cloud. It waits while main, the plan or the Admin's
+   offer is loading and while another dialog (modal or not, the tour's
+   spotlight included) or a call is open, and, when the Cloud can't be
+   reached, for a later launch. Nothing in it opens a checkout:
+   - **On this computer's page**, with no plan, **Start free trial** (while
+     the Admin offers one) or **Upgrade to Cloud Pro** opens the Add a Cloud
+     dialog (source `update_popup`), and so does **Compare plans** (the dialog
+     lists every plan); on any plan (a trial, Personal, Pro, Max or one that
+     needs attention) **Manage plan** opens Settings → MausBot Cloud, and
+     there is no Compare plans. Personal → Pro is not self-serve yet, so
+     Personal gets Manage plan rather than an Upgrade that would end at
+     "write to us". Its numbers are the Admin's.
+   - **On My Cloud's page**, from the plan main tells that page
+     (`cloud-plan:state`, asked once main has restored the Cloud sign-in), a
+     plan, payment trouble or an ended sign-in gets **Manage plan**, which
+     opens the plan page (`cloud-plan:manage`): that page has no Settings →
+     MausBot Cloud to manage a plan in. A plan still being checked waits for
+     a later launch; with none read, it is as on another server.
+   - **On another saved server's page**, which is told nothing about the
+     plan, it shows no plan, price or Compare plans: **Continue on this
+     computer** switches the window to This computer (main does it once, and
+     only on a click), where the click finishes: the Add a Cloud dialog
+     (source `update_popup`) for someone who can buy, Settings → MausBot Cloud
+     for anyone else.
+
+   Any button, its X, Escape or a click outside end it for good. It takes
+   focus at its title, keeps Tab inside, takes Escape only while focus is in
+   it, and gives focus back when it closes unless focus has moved on.
+   `cloud_pro_popup` ([docs/analytics.md](analytics.md)) counts it, as shown
+   at most once a day on a desktop until it is closed. Only on this computer's
+   page, where the app knows the email, does an `upgrade`, `manage` or
+   `see_plans` by someone signed in to MausBot Cloud first tie their
+   analytics to their Cloud account's email; Continue on this computer is
+   counted there, and nothing counted on a server's page is tied to it.
 2. **The card after the update** (`CloudTrialIntro`, id `cloud-trial-intro-v1`):
    MausBot Cloud's free trial for someone signed out or with no plan who
    has used the app before this launch, only while the Admin offers a trial
@@ -1225,8 +1249,12 @@ again** (one step, the plan unaffected) instead of offering a plan. A `401` or
 `403` page from anything in between (Cloudflare's bot check, a proxy), or any
 other refusal, is a failed check like a dropped connection: it never ends the
 sign-in. Nobody signed in with a paid plan, in payment trouble, with a payment
-being linked, or whose state is unknown is offered a plan anywhere in the app;
-the Cloud Pro popup sends them to Settings → MausBot Cloud instead.
+being linked, or whose state is unknown is offered a plan anywhere in the app.
+The Cloud Pro popup gives a plan, payment trouble and a payment being linked
+**Manage plan**; of the states it cannot verify, it waits while the sign-in is
+still restoring or connecting, waits for a later launch while the check is
+`unavailable`, and gives Manage plan only to an ended sign-in
+(`reauth-required`).
 
 In the Server menu, **My Cloud** goes through the same connection as
 **Open My Cloud** (no pairing code to type); when it cannot, the app

@@ -1,3 +1,6 @@
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
+import vm from "node:vm";
 import { Children, createElement, isValidElement, type EffectCallback, type ReactElement, type ReactNode } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -6,6 +9,7 @@ import type { CloudOffer, CloudTrial } from "../../electron/cloud-home.mjs";
 import { withTourFinished } from "@/lib/guided-tour";
 import { setLocale } from "@/lib/i18n";
 import { EMPTY_ONBOARDING, LOCAL_VIEWER, type WelcomeViewer } from "@/lib/onboarding";
+import { registerDesktopPrefs } from "../../electron/desktop-prefs.mjs";
 
 const f = vi.hoisted(() => ({ values: [] as unknown[], index: 0, effects: [] as EffectCallback[], state: {} as any, updater: null as any, dispatch: null as any, brand: "default" }));
 vi.mock("react", async original => ({ ...await original<typeof import("react")>(),
@@ -51,6 +55,42 @@ let viewer: WelcomeViewer | null;
 let bridges: { cloud: Record<string, ReturnType<typeof vi.fn>>; plan: Record<string, ReturnType<typeof vi.fn>> };
 let now: number;
 
+const PRELOAD = readFileSync(join(process.cwd(), "electron", "preload.cjs"), "utf8").replace(/\r\n/g, "\n");
+const LOCAL_ORIGIN = "http://127.0.0.1:8799", MY_CLOUD = "https://omb-u-1.fly.dev", VPS = "https://bots.example.test";
+type Page = "local" | "server";
+type Handler = (event: { page: Page; returnValue?: unknown }, ...args: unknown[]) => unknown;
+interface Desktop { handlers: Map<string, Handler>; listeners: Map<string, Handler>; saved: { seen?: string[] } | null; offered: boolean; switches: number }
+let desk: Desktop;
+
+// Main's own record for this one desktop, behind its real IPC.
+function desktopMachine(): Desktop {
+  const machine: Desktop = { handlers: new Map(), listeners: new Map(), saved: null, offered: true, switches: 0 };
+  registerDesktopPrefs({
+    ipcMain: { handle: (channel, handler) => void machine.handlers.set(channel, handler as Handler), on: (channel, listener) => void machine.listeners.set(channel, listener as Handler) },
+    read: () => machine.saved, write: value => { machine.saved = JSON.parse(JSON.stringify(value)); }, page: event => (event as { page: Page }).page,
+    cloudOffered: async () => machine.offered, thisComputer: async () => { machine.switches += 1; return true; }, now: () => now,
+  });
+  return machine;
+}
+
+// The real preload, as this desktop's window loads it for a page; the Cloud account and plan answer from this file's fakes.
+function windowOn(origin: string, { click = true } = {}) {
+  const page: Page = origin === LOCAL_ORIGIN ? "local" : "server";
+  let ogb: Record<string, unknown> = {};
+  vm.runInNewContext(PRELOAD, {
+    process: { platform: "darwin", argv: [`--omb-local-origin=${LOCAL_ORIGIN}`, "--omb-company-desktop=1"] },
+    location: { origin }, navigator: { userActivation: { isActive: click } }, TextEncoder,
+    require: () => ({ webUtils: {}, contextBridge: { exposeInMainWorld: (_name: string, value: Record<string, unknown>) => { ogb = value; } },
+      ipcRenderer: { on() {}, removeListener() {}, send() {},
+        sendSync: (channel: string) => { const event = { page, returnValue: undefined as unknown }; desk.listeners.get(channel)?.(event); return event.returnValue; },
+        invoke: async (channel: string, ...args: unknown[]) => desk.handlers.get(channel)?.({ page }, ...args) } }),
+  });
+  const fakes: Record<string, unknown> = { cloudAccount: bridges.cloud, cloudPlan: bridges.plan, openExternal: vi.fn(async () => true), organization: undefined };
+  return { ...ogb, ...Object.fromEntries(Object.entries(fakes).filter(([key]) => key in ogb)) };
+}
+const showWindow = (origin: string, options?: { click?: boolean }) =>
+  vi.stubGlobal("window", { ogb: windowOn(origin, options), addEventListener: vi.fn(), removeEventListener: vi.fn() });
+
 const flush = async () => { for (let i = 0; i < 10; i++) await Promise.resolve(); };
 const render = () => { f.index = 0; f.effects = []; return renderToStaticMarkup(createElement(AppNotices, { viewer, now: () => now })); };
 async function settle(rounds = 4) { for (let i = 0; i < rounds; i++) { render(); f.effects.forEach(effect => effect()); await flush(); } return render(); }
@@ -68,12 +108,12 @@ const press = (label: string) => {
   expect(button, label).toBeTruthy(); button!.props.onClick();
 };
 const returning = () => { f.state.bots = [{ tasks: [{ threadId: "t", createdAt: 1, usage: { turns: 2 } }] }]; };
-const launchCardsSeen = () => { storage.set(CLOUD_PRO_UPDATE_NOTICE, "1"); storage.set(PRODUCT_HUNT_NOTICE, "1"); };
+const launchCardsSeen = () => { desk.saved = { seen: [CLOUD_PRO_UPDATE_NOTICE] }; storage.set(PRODUCT_HUNT_NOTICE, "1"); };
 const hints = () => f.state.config.onboarding.hintsSeen as string[];
 
 beforeEach(() => {
   vi.clearAllMocks(); vi.useFakeTimers({ toFake: ["setInterval", "clearInterval"] });
-  storage = new Map(); f.values = []; f.index = 0; f.effects = []; f.updater = null; f.brand = "default"; f.dispatch = vi.fn(); now = NOW;
+  storage = new Map(); f.values = []; f.index = 0; f.effects = []; f.updater = null; f.brand = "default"; f.dispatch = vi.fn(); now = NOW; desk = desktopMachine();
   setLocale("en"); viewer = LOCAL_VIEWER; account = signedOut; snapshot = { status: "none" }; offer = TRIAL_OFFER;
   f.state = { connected: true, bots: [], groups: [], instances: [{ instanceId: "claude", snapshot: { state: "available", authenticated: true } }],
     config: { onboarding: { ...EMPTY_ONBOARDING, completedAt: "2026-09-01", version: 1, hintsSeen: withTourFinished(undefined) } } };
@@ -90,8 +130,8 @@ beforeEach(() => {
       signInAgain: vi.fn(async () => account), connectHome: vi.fn(async () => account), openDashboard: vi.fn(async () => account) },
     plan: { state: vi.fn(async () => { if (snapshot instanceof Error) throw snapshot; return snapshot; }), manage: vi.fn(async () => {}), useThisComputer: vi.fn(), noticeSeen: vi.fn(async () => {}) },
   };
-  vi.stubGlobal("window", { ogb: { remoteClient: { active: false }, cloudAccount: bridges.cloud, cloudPlan: bridges.plan, openExternal: vi.fn(async () => true) },
-    addEventListener: vi.fn(), removeEventListener: vi.fn() });
+  showWindow(LOCAL_ORIGIN);
+  vi.stubGlobal("document", { activeElement: null, body: null, getElementById: () => null, querySelector: () => null, querySelectorAll: () => [] });
 });
 afterEach(() => { vi.unstubAllGlobals(); vi.useRealTimers(); setLocale("en"); });
 
@@ -232,7 +272,7 @@ describe("the free trial's notice, here and on My Cloud", () => {
 
   it("on My Cloud's own page, only the trial's notice, after its sign-in and setup checklist", async () => {
     viewer = { hosted: false, canSave: true, cloudHome: true };
-    vi.stubGlobal("window", { ogb: { cloudPlan: bridges.plan }, addEventListener: vi.fn(), removeEventListener: vi.fn() });
+    showWindow(MY_CLOUD);
     returning();
     snapshot = { status: "none", trial: trial("ended", { deleteAt: NOW + 3 * DAY, keep: "checkout" }), notice: "ended" };
     f.state.config.onboarding.hintsSeen = [...withTourFinished(undefined), "cloud-setup-hidden"];
@@ -309,10 +349,13 @@ describe("the Product Hunt launch card", () => {
 
 describe("the Cloud Pro popup after the update", () => {
   const POPUP = "MausBot Cloud Pro";
+  const ID = CLOUD_PRO_UPDATE_NOTICE;
   let modal: boolean;
   const popupEvents = (action: string) => vi.mocked(track).mock.calls.filter(([event, props]) => event === "cloud_pro_popup" && (props as { action?: string }).action === action);
   const lastOrder = (calls: { mock: { invocationCallOrder: number[] } }) => calls.mock.invocationCallOrder.at(-1)!;
-  const fresh = () => { storage.delete(CLOUD_PRO_UPDATE_NOTICE); f.state.config.onboarding.hintsSeen = withTourFinished(undefined); };
+  const seenOnDesktop = () => desk.saved?.seen ?? [];
+  const fresh = () => { desk = desktopMachine(); storage.delete(ID); f.state.config.onboarding.hintsSeen = withTourFinished(undefined); };
+  const TITLE = { id: "cloud-pro-popup-title" }, DIALOG = { contains: (node: unknown) => node === TITLE };
   const keydown = (key: string, shiftKey = false) => {
     const handler = vi.mocked(window.addEventListener).mock.calls.filter(([type]) => type === "keydown").at(-1)![1] as (event: unknown) => void;
     const event = { key, shiftKey, preventDefault: vi.fn(), stopPropagation: vi.fn() };
@@ -321,11 +364,18 @@ describe("the Cloud Pro popup after the update", () => {
   };
   const tierPlan = (tier: string, extra: Partial<CloudAccountState> = {}) =>
     paid({ entitlement: { plan: "pro", tier, status: "active", expiresAt: NOW + 30 * DAY, version: 2 }, ...extra });
+  const onMyCloud = (plan: CloudPlanSnapshot) => {
+    snapshot = plan; viewer = { hosted: false, canSave: true, cloudHome: true }; f.state.config.cloudHome = true;
+    f.state.config.onboarding.hintsSeen = [...withTourFinished(undefined), "cloud-setup-hidden"]; showWindow(MY_CLOUD);
+  };
+  const onSavedServer = (options?: { click?: boolean }) => { viewer = { hosted: true, canSave: true }; showWindow(VPS, options); };
+  const onThisComputer = () => { viewer = LOCAL_VIEWER; delete f.state.config.cloudHome; f.state.config.onboarding.hintsSeen = withTourFinished(undefined); showWindow(LOCAL_ORIGIN); };
 
   beforeEach(() => {
     fresh(); modal = false;
-    vi.stubGlobal("document", { activeElement: null, body: null, getElementById: () => null,
-      querySelector: (selector: string) => modal && selector.startsWith('[aria-modal="true"]') ? {} : null });
+    vi.stubGlobal("document", { activeElement: TITLE, body: null, getElementById: () => null,
+      querySelector: (selector: string) => selector === "[data-cloud-pro-popup]" ? DIALOG : null,
+      querySelectorAll: () => modal ? [{ closest: () => null, checkVisibility: () => true }] : [] });
   });
 
   it("every install gets it once, before every other card, as a modal dialog with the Admin's offer; Start free trial opens Add a Cloud from it", async () => {
@@ -341,13 +391,13 @@ describe("the Cloud Pro popup after the update", () => {
     expect(popupEvents("shown")).toEqual([["cloud_pro_popup", { action: "shown", plan: "none", signed_in: false }]]);
     expect(await settle()).toContain(POPUP);
     expect(popupEvents("shown")).toHaveLength(1);
-    expect(storage.get(CLOUD_PRO_UPDATE_NOTICE)).toBeUndefined();
+    expect(seenOnDesktop()).toEqual([]);
 
     press("Start free trial");
     expect(f.dispatch).toHaveBeenCalledWith({ type: "openCloudAdd", source: "update_popup" });
     expect(popupEvents("upgrade")).toEqual([["cloud_pro_popup", { action: "upgrade", plan: "none", signed_in: false }]]);
     expect(identifyEmail).not.toHaveBeenCalled();
-    expect(storage.get(CLOUD_PRO_UPDATE_NOTICE)).toBe("1"); await flush(); expect(hints()).toContain(CLOUD_PRO_UPDATE_NOTICE);
+    await flush(); expect(seenOnDesktop()).toEqual([ID]);
     expect(render()).toBe("");
     const next = await launch();
     expect(next).not.toContain(POPUP); expect(next).toContain("live on Product Hunt");
@@ -364,6 +414,19 @@ describe("the Cloud Pro popup after the update", () => {
     const html = await launch();
     expect(html).toContain(POPUP); expect(html).not.toContain(INTRO);
     expect(popupEvents("shown")).toHaveLength(1);
+  });
+
+  it("is counted as shown once a day on this desktop, not on every reload, until it is closed", async () => {
+    expect(await launch()).toContain(POPUP);
+    for (let i = 0; i < 3; i++) expect(await launch()).toContain(POPUP);
+    expect(popupEvents("shown")).toHaveLength(1);
+    now = NOW + DAY;
+    expect(await launch()).toContain(POPUP);
+    expect(popupEvents("shown")).toHaveLength(2);
+    press("Not now"); await flush();
+    now = NOW + 2 * DAY;
+    expect(await launch()).not.toContain(POPUP);
+    expect(popupEvents("shown")).toHaveLength(2);
   });
 
   it("someone signed in with no plan: each click is tied to their Cloud account's email before it is counted, and only once across reloads", async () => {
@@ -383,7 +446,7 @@ describe("the Cloud Pro popup after the update", () => {
     expect(lastOrder(vi.mocked(identifyEmail))).toBeLessThan(lastOrder(vi.mocked(track)));
     expect(render()).toBe("");
     storage.clear(); storage.set(PRODUCT_HUNT_NOTICE, "1");
-    expect(await launch()).not.toContain(POPUP);
+    expect(await launch(), "the desktop keeps it, not the page's storage").not.toContain(POPUP);
 
     vi.clearAllMocks(); fresh(); await launch();
     press("Upgrade to Cloud Pro");
@@ -395,26 +458,136 @@ describe("the Cloud Pro popup after the update", () => {
 
   it("a trial or any plan gets Manage plan in Settings → MausBot Cloud, in the app; no Compare plans, never a checkout or the browser", async () => {
     const cases = [
-      { state: paid({ trial: trial("active") }), plan: "trial", label: "Manage plan", action: "manage", line: "Pro free trial · verified by MausBot Cloud" },
-      { state: paid(), plan: "pro", label: "Manage plan", action: "manage", line: "Pro active · verified by MausBot Cloud" },
-      { state: tierPlan("max"), plan: "max", label: "Manage plan", action: "manage", line: "Max active · verified by MausBot Cloud" },
-      { state: tierPlan("personal"), plan: "personal", label: "Manage plan", action: "manage", line: "Personal active · verified by MausBot Cloud" },
+      { state: paid({ trial: trial("active") }), plan: "trial", line: "Pro free trial · verified by MausBot Cloud" },
+      { state: paid(), plan: "pro", line: "Pro active · verified by MausBot Cloud" },
+      { state: tierPlan("max"), plan: "max", line: "Max active · verified by MausBot Cloud" },
+      { state: tierPlan("personal"), plan: "personal", line: "Personal active · verified by MausBot Cloud" },
     ];
-    for (const { state, plan, label, action, line } of cases) {
-      vi.clearAllMocks(); fresh(); account = state;
+    for (const { state, plan, line } of cases) {
+      vi.clearAllMocks(); fresh(); account = state; showWindow(LOCAL_ORIGIN);
       const html = await launch();
-      expect(html, plan).toContain(POPUP); expect(html, plan).toContain(label); expect(html, plan).toContain(line);
+      expect(html, plan).toContain(POPUP); expect(html, plan).toContain("Manage plan"); expect(html, plan).toContain(line);
       for (const gone of ["Start free trial", "Free for", "/month", "Compare plans", "Upgrade to Cloud Pro"]) expect(html, plan).not.toContain(gone);
       expect(popupEvents("shown"), plan).toEqual([["cloud_pro_popup", { action: "shown", plan, signed_in: true }]]);
-      press(label); await flush();
+      press("Manage plan"); await flush();
       expect(f.dispatch, plan).toHaveBeenCalledWith({ type: "toggleAppSettings", open: true, section: "cloudAccount" });
       expect(bridges.cloud.openDashboard, plan).not.toHaveBeenCalled(); expect(window.ogb?.openExternal, plan).not.toHaveBeenCalled();
+      expect(bridges.plan.manage, plan).not.toHaveBeenCalled();
       expect(f.dispatch, plan).not.toHaveBeenCalledWith(expect.objectContaining({ type: "openCloudAdd" }));
       expect(identifyEmail, plan).toHaveBeenCalledWith("person@example.test", { submitted: false });
-      expect(popupEvents(action), plan).toEqual([["cloud_pro_popup", { action, plan, signed_in: true }]]);
-      expect(storage.get(CLOUD_PRO_UPDATE_NOTICE), plan).toBe("1"); expect(render(), plan).toBe("");
+      expect(popupEvents("manage"), plan).toEqual([["cloud_pro_popup", { action: "manage", plan, signed_in: true }]]);
+      expect(seenOnDesktop(), plan).toEqual([ID]); expect(render(), plan).toBe("");
       expect(bridges.cloud.offer, plan).not.toHaveBeenCalled();
     }
+  });
+
+  it("a desktop signed in with an organization gets it too", async () => {
+    account = paid();
+    (window.ogb as Record<string, unknown>).organization = { state: async () => ({ status: "connected", organization: { id: "o", name: "Acme" } }), onState: () => () => {} };
+    const html = await launch();
+    expect(html).toContain(POPUP); expect(html).toContain("Manage plan");
+    expect(popupEvents("shown")).toEqual([["cloud_pro_popup", { action: "shown", plan: "pro", signed_in: true }]]);
+  });
+
+  it("a desktop whose window opens on My Cloud gets it there once; a plan's Manage plan opens the plan page, never Settings or a checkout", async () => {
+    account = paid();
+    onMyCloud({ status: "paid", tier: "pro" });
+    const html = await launch();
+    expect(html).toContain(POPUP); expect(html).toContain("Manage plan"); expect(html).toContain("Pro active · verified by MausBot Cloud");
+    for (const gone of ["Compare plans", "Upgrade to Cloud Pro", "Start free trial", "/month", "Continue on this computer"]) expect(html).not.toContain(gone);
+    expect(popupEvents("shown")).toEqual([["cloud_pro_popup", { action: "shown", plan: "pro", signed_in: true }]]);
+    expect(bridges.cloud.state).not.toHaveBeenCalled();
+    press("Manage plan"); await flush();
+    expect(bridges.plan.manage).toHaveBeenCalledOnce();
+    expect(f.dispatch).not.toHaveBeenCalled();
+    expect(popupEvents("manage")).toEqual([["cloud_pro_popup", { action: "manage", plan: "pro", signed_in: true }]]);
+    expect(identifyEmail, "My Cloud's page is not told the email").not.toHaveBeenCalled();
+    expect(seenOnDesktop()).toEqual([ID]); expect(desk.switches).toBe(0);
+    expect(await launch()).not.toContain(POPUP);
+    onThisComputer();
+    expect(await launch(), "the same desktop on This computer: already seen").not.toContain(POPUP);
+    expect(popupEvents("shown")).toHaveLength(1);
+  });
+
+  it("on My Cloud: a trial, a lapsed plan and an ended sign-in manage on the plan page; no plan read, or one being checked, never offers one", async () => {
+    const cases: Array<[CloudPlanSnapshot, string, boolean, string]> = [
+      [{ status: "paid", tier: "pro", trial: trial("active") }, "trial", true, "Pro free trial · verified by MausBot Cloud"],
+      [{ status: "paid", tier: "max" }, "max", true, "Max active · verified by MausBot Cloud"],
+      [{ status: "attention", tier: "pro" }, "none", true, "Pro · not active right now"],
+      [{ status: "signin", tier: "pro" }, "unknown", false, "Sign in again to use My Cloud on this computer. Your plan is not affected."],
+    ];
+    for (const [plan, name, signedIn, line] of cases) {
+      vi.clearAllMocks(); fresh(); onMyCloud(plan);
+      const html = await launch();
+      expect(html, name).toContain("Manage plan"); expect(html, name).toContain(line); expect(html, name).not.toContain("Compare plans");
+      expect(popupEvents("shown"), name).toEqual([["cloud_pro_popup", { action: "shown", plan: name, signed_in: signedIn }]]);
+      press("Manage plan"); expect(bridges.plan.manage, name).toHaveBeenCalledOnce();
+    }
+    vi.clearAllMocks(); fresh(); onMyCloud({ status: "checking", tier: "pro" }); returning();
+    const checking = await launch();
+    expect(checking).not.toContain(POPUP);
+    expect(seenOnDesktop()).toEqual([]);
+    for (const plan of [{ status: "none" as const }, new Error("only available in this app's window")]) {
+      vi.clearAllMocks(); fresh(); onMyCloud(plan as CloudPlanSnapshot); if (plan instanceof Error) snapshot = plan;
+      const html = await launch();
+      expect(html).toContain("Continue on this computer");
+      for (const gone of ["Manage plan", "Compare plans", "Upgrade to Cloud Pro", "/month"]) expect(html).not.toContain(gone);
+    }
+  });
+
+  it("waits for main to restore the Cloud sign-in before it reads the plan on My Cloud's page", async () => {
+    let answer!: () => void;
+    const restored = new Promise<void>(resolve => { answer = resolve; });
+    desk.offered = true;
+    const state = desk.handlers.get("desktop-notices:state")!;
+    desk.handlers.set("desktop-notices:state", async (...args) => { await restored; return state(...args); });
+    onMyCloud({ status: "paid", tier: "pro" });
+    expect(await launch()).toBe("");
+    expect(bridges.plan.state).not.toHaveBeenCalled();
+    answer(); await flush();
+    expect(await settle()).toContain("Manage plan");
+    expect(bridges.plan.state).toHaveBeenCalled();
+  });
+
+  it("a saved server's page is told no plan: Continue on this computer switches the window, and This computer opens Add a Cloud for someone who can buy", async () => {
+    account = free; offer = { ...PLAIN_OFFER };
+    onSavedServer();
+    const html = await launch();
+    expect(html).toContain(POPUP); expect(html).toContain("Continue on this computer"); expect(html).toContain("Not now");
+    for (const gone of ["Manage plan", "Compare plans", "Upgrade to Cloud Pro", "Start free trial", "/month", "verified by"]) expect(html).not.toContain(gone);
+    expect(bridges.plan.state).not.toHaveBeenCalled(); expect(bridges.cloud.state).not.toHaveBeenCalled();
+    expect(popupEvents("shown")).toEqual([["cloud_pro_popup", { action: "shown", plan: "unknown", signed_in: false }]]);
+
+    press("Continue on this computer"); await flush();
+    expect(desk.switches).toBe(1); expect(seenOnDesktop()).toEqual([ID]);
+    expect(f.dispatch).not.toHaveBeenCalled(); expect(identifyEmail).not.toHaveBeenCalled(); expect(popupEvents("upgrade")).toEqual([]);
+    expect(render()).toBe("");
+
+    onThisComputer();
+    expect(await launch()).not.toContain(POPUP);
+    expect(f.dispatch).toHaveBeenCalledWith({ type: "openCloudAdd", source: "update_popup" });
+    expect(identifyEmail).toHaveBeenCalledWith("person@example.test", { submitted: false });
+    expect(popupEvents("upgrade")).toEqual([["cloud_pro_popup", { action: "upgrade", plan: "none", signed_in: true }]]);
+    expect(lastOrder(vi.mocked(identifyEmail))).toBeLessThan(lastOrder(vi.mocked(track)));
+    await launch();
+    expect(f.dispatch, "once").toHaveBeenCalledTimes(1);
+  });
+
+  it("from a saved server's page a plan ends in Settings → MausBot Cloud on This computer, never a checkout; nothing switches without a click", async () => {
+    account = tierPlan("personal");
+    onSavedServer();
+    await launch(); press("Continue on this computer"); await flush();
+    onThisComputer(); await launch();
+    expect(f.dispatch).toHaveBeenCalledWith({ type: "toggleAppSettings", open: true, section: "cloudAccount" });
+    expect(f.dispatch).not.toHaveBeenCalledWith(expect.objectContaining({ type: "openCloudAdd" }));
+    expect(popupEvents("manage")).toEqual([["cloud_pro_popup", { action: "manage", plan: "personal", signed_in: true }]]);
+
+    vi.clearAllMocks(); fresh(); account = free;
+    onSavedServer({ click: false });
+    await launch(); press("Continue on this computer"); await flush();
+    expect(desk.switches).toBe(0); expect(seenOnDesktop(), "closed for good all the same").toEqual([ID]);
+    onThisComputer(); expect(await launch()).not.toContain(POPUP);
+    expect(f.dispatch).not.toHaveBeenCalled(); expect(track).not.toHaveBeenCalledWith("cloud_pro_popup", expect.objectContaining({ action: "upgrade" }));
   });
 
   it("never shows one account's offer for another while the new one loads", async () => {
@@ -440,7 +613,7 @@ describe("the Cloud Pro popup after the update", () => {
         expect(render(), "a press inside the dialog").toContain(POPUP);
         backdrop.props.onMouseDown({ target: backdrop, currentTarget: backdrop });
       } else press(how);
-      expect(storage.get(CLOUD_PRO_UPDATE_NOTICE), how).toBe("1"); await flush(); expect(hints(), how).toContain(CLOUD_PRO_UPDATE_NOTICE);
+      await flush(); expect(seenOnDesktop(), how).toEqual([ID]);
       expect(render(), how).toBe("");
       expect(await launch(), how).not.toContain(POPUP);
     }
@@ -449,23 +622,40 @@ describe("the Cloud Pro popup after the update", () => {
     expect(identifyEmail).not.toHaveBeenCalled();
   });
 
-  it("never on a remote client's window, a Cloud home or a branded build", async () => {
+  it("an Escape meant for something else leaves it up", async () => {
+    expect(await launch()).toContain(POPUP);
+    (document as { activeElement: unknown }).activeElement = { id: "spotlight-button" };
+    const escape = keydown("Escape");
+    expect(escape.preventDefault).not.toHaveBeenCalled(); expect(escape.stopPropagation).not.toHaveBeenCalled();
+    expect(render()).toContain(POPUP); expect(popupEvents("close")).toEqual([]);
+    await flush(); expect(seenOnDesktop()).toEqual([]);
+  });
+
+  it("an earlier close kept by this computer's page or its workspace still counts, and the desktop learns it", async () => {
+    for (const keep of [() => storage.set(ID, "1"), () => { f.state.config.onboarding.hintsSeen = [...withTourFinished(undefined), ID]; }]) {
+      fresh(); keep();
+      expect(await launch()).not.toContain(POPUP);
+      await flush(); expect(seenOnDesktop()).toEqual([ID]);
+      onMyCloud({ status: "paid", tier: "pro" });
+      expect(await launch()).not.toContain(POPUP);
+      onThisComputer();
+    }
+    expect(popupEvents("shown")).toEqual([]);
+  });
+
+  it("never in a remote client's window, on a branded build, or on a desktop that sells no Cloud", async () => {
     (window.ogb as Record<string, any>).remoteClient.active = true;
     expect(await launch()).not.toContain(POPUP);
-    (window.ogb as Record<string, any>).remoteClient.active = false;
-    f.state.config.cloudHome = true;
+    showWindow(LOCAL_ORIGIN); f.brand = "file";
     expect(await launch()).not.toContain(POPUP);
-    delete f.state.config.cloudHome; f.brand = "file";
+    f.brand = "default"; desk.offered = false;
     expect(await launch()).not.toContain(POPUP);
-    f.brand = "default";
-    viewer = { hosted: false, canSave: true, cloudHome: true };
-    vi.stubGlobal("window", { ogb: { cloudPlan: bridges.plan }, addEventListener: vi.fn(), removeEventListener: vi.fn() });
-    snapshot = { status: "none", trial: trial("ended", { deleteAt: NOW + 3 * DAY, keep: "checkout" }), notice: "ended" };
-    f.state.config.onboarding.hintsSeen = [...withTourFinished(undefined), "cloud-setup-hidden"];
-    const home = await launch();
-    expect(home).toContain("Your free trial has ended"); expect(home).not.toContain(POPUP);
+    onMyCloud({ status: "paid", tier: "pro" });
+    expect(await launch()).not.toContain(POPUP);
+    onSavedServer();
+    expect(await launch()).not.toContain(POPUP);
     expect(popupEvents("shown")).toEqual([]);
-    expect(storage.get(CLOUD_PRO_UPDATE_NOTICE)).toBeUndefined();
+    expect(seenOnDesktop()).toEqual([]);
   });
 
   it("waits, and holds back the cards after it, while the plan or the offer loads, a dialog or a call is open, or the app is busy or updating", async () => {
@@ -473,6 +663,7 @@ describe("the Cloud Pro popup after the update", () => {
     const waits: Array<() => void> = [
       () => { account = { status: "signed-out", message: "restoring" }; }, () => { account = { status: "connecting" }; },
       () => { bridges.cloud.offer.mockImplementation(() => new Promise(() => {})); },
+      () => { desk.handlers.set("desktop-notices:state", () => new Promise(() => {})); },
       () => { modal = true; }, () => { f.state.liveCall = { status: "live" }; },
       () => { f.state.appSettingsOpen = true; }, () => { f.state.cloudAdd = { source: "app_menu" }; }, () => { f.updater = { status: "downloaded" }; },
       () => { f.state.bots = [{ busy: true, tasks: [{ threadId: "t", createdAt: 1, usage: { turns: 2 } }] }]; },
@@ -480,10 +671,10 @@ describe("the Cloud Pro popup after the update", () => {
     for (const wait of waits) {
       const saved = structuredClone(f.state); wait();
       expect(await launch(), wait.toString()).toBe("");
-      f.state = saved; f.updater = null; account = signedOut; modal = false; bridges.cloud.offer.mockImplementation(async () => offer);
+      f.state = saved; f.updater = null; account = signedOut; modal = false; bridges.cloud.offer.mockImplementation(async () => offer); desk = desktopMachine();
     }
     expect(popupEvents("shown")).toEqual([]);
-    expect(storage.get(CLOUD_PRO_UPDATE_NOTICE)).toBeUndefined();
+    expect(seenOnDesktop()).toEqual([]);
     f.state.liveCall = { status: "ended" };
     expect(await launch()).toContain(POPUP);
     modal = true;
@@ -500,7 +691,7 @@ describe("the Cloud Pro popup after the update", () => {
     account = signedOut; offer = null;
     const unreachable = await launch();
     expect(unreachable).not.toContain(POPUP); expect(unreachable).toContain(STAR);
-    expect(storage.get(CLOUD_PRO_UPDATE_NOTICE)).toBeUndefined();
+    expect(seenOnDesktop()).toEqual([]);
     offer = TRIAL_OFFER;
     expect(await launch()).toContain(POPUP);
   });
