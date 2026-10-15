@@ -43,7 +43,9 @@ Contract version: `1` (`cloudContractVersion` on the wire).
    none), three steps on the left and the step on the right. It is only for the
    owner's own session on a Cloud home, and never for a Cloud set up before it
    (one that answered the first-job question, or where a bot has finished a
-   turn).
+   turn, before the welcome ever showed there). The first time it shows, it
+   says so in the Cloud's record (`cloud-welcome-shown`), so a chat that
+   finishes before its first step (from a phone, say) does not end it.
    1. **Bring your stuff** comes first, before anything starts a chat: a copy
       from the Cloud's own page goes only into an empty Cloud (its starter bot
       at most, no rooms, no chat with a message from the person), so a first
@@ -56,12 +58,23 @@ Contract version: `1` (`cloudContractVersion` on the wire).
       progress, **Stop the copy**, and its errors and notes as in Settings; once
       it lands, what came over and what arrived paused. **Skip for now** keeps
       the copy's card from coming back (`cloud-setup-move-skipped`). In a
-      browser or on a phone it offers Start fresh and says that the desktop app
-      brings bots from a computer. **Also bring in**: **Memory from Claude or
-      ChatGPT** shows a prompt to copy into either and adds the answer to the
-      end of About me, with a preview; this device keeps that answer until the
-      step ends, because a copy brings this computer's About me, and adds it
-      again once a copy lands. **A backup file** opens Settings → Backups.
+      browser, on a phone, or in a desktop app that is another server's client,
+      it offers Start fresh and says that the desktop app brings bots from a
+      computer. On a Cloud that already has bots or chats of its own (a copy
+      made before, a chat from a phone), it offers neither: it says **Your bots
+      are already here**, and **Continue** moves on. **Also bring in**:
+      **Memory from Claude or ChatGPT** shows a prompt to copy into either and
+      takes the answer, with a preview of About me with it added at the end.
+      Because a copy brings this computer's About me, this device keeps the
+      answer (browser storage, `omb.cloudWelcome.memory`) until the Cloud's
+      saved About me has it, no copy can still come from the welcome, and none
+      has just landed. One keeper, which outlives the welcome
+      (`WelcomeKeeper.tsx`), adds it whenever About me lacks it and no copy is
+      running, so it reaches About me after a copy even when the welcome was
+      skipped or the app restarted in between. When it no longer fits About
+      me's 24,000 characters, or saving fails, the dialog opens again with it
+      and says why; **Later** keeps it, **Discard it** drops it. **A backup
+      file** opens Settings → Backups.
    2. **Connect your AI**: the engine sign-in's own tiles and sign-in panel
       (below), with **Connected** on one that can run. While the trial's Claude
       credit lasts and nothing of the person's own can run, a line says so
@@ -79,8 +92,14 @@ Contract version: `1` (`cloudContractVersion` on the wire).
    which never travels with a copy, so the welcome opens where it was left on
    any device; the steps can be visited in any order from the left. It ends for
    good at its last step or with **Skip setup** (`cloud-welcome-done`), and
-   with Hide setup. Picking another bot or room in the sidebar steps it aside
-   for the session; **Continue setup** on the setup card brings it back.
+   with Hide setup. A save the Cloud refuses (a 409 while provider settings
+   are being changed, say) is tried once more; an end that still cannot be
+   saved is kept on this device (`omb.cloudWelcome.done`), so the welcome does
+   not come back on the next launch, and is sent again when the Cloud answers.
+   The main pane and the setup card read the record the same way, with the
+   hints written here and not saved yet. Picking another bot or room in the
+   sidebar steps it aside for the session; **Continue setup** on the setup card
+   brings it back.
 5. The first-job question, **What should your Cloud do while you're away?**
    (`src/components/CloudIntent.tsx`, `src/lib/cloud-intent.ts`), is asked
    only when asked for: from the welcome's last step, or the setup card's

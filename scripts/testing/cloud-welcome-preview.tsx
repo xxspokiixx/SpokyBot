@@ -1,6 +1,7 @@
 // The whole app as a new Cloud's owner sees it (scripts/verify-cloud-welcome.ts answers the session as one).
 // ?desktop=1 adds the reduced bridge a Cloud's page gets in the desktop app, with this computer's work to copy;
-// ?copy=uploading|done shows a copy under way or landed; ?step= opens the welcome on a step; ?skin= picks a skin.
+// ?copy=uploading|done shows a copy under way or landed; ?cloud=full a Cloud with bots of its own; ?step= opens the
+// welcome on a step; ?skin= picks a skin.
 import { createRoot } from "react-dom/client";
 import type { CloudMoveOverview, CloudMoveState } from "../../electron/cloud-move.mjs";
 import App from "../../src/App";
@@ -20,7 +21,9 @@ function installCloudPage(copy: string | null) {
     : copy === "done" ? { phase: "done", action: "move", destination, moved: { bots: 6, rooms: 2, chats: 142 }, routines: 4 } : { phase: "idle" };
   const overview: CloudMoveOverview = {
     ...state, local, suggest: true, destination, blocked: null,
-    cloud: { contents: { bots: 1, rooms: 0, chats: 0 }, empty: true, freeBytes: 18 * GB, previous: null, heldBytes: 0 },
+    cloud: params.get("cloud") === "full"
+      ? { contents: { bots: 6, rooms: 2, chats: 142 }, empty: false, freeBytes: 14 * GB, previous: null, heldBytes: 0 }
+      : { contents: { bots: 1, rooms: 0, chats: 0 }, empty: true, freeBytes: 18 * GB, previous: null, heldBytes: 0 },
     fit: { fit: "now", neededBytes: 3.9 * GB, freeBytes: 18 * GB },
   };
   window.ogb = {
