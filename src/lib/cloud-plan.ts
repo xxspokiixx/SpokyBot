@@ -255,6 +255,9 @@ export function cloudAddView(account: CloudAccountState | null | undefined, offe
   const view = cloudPlanView(account);
   const started = (): CloudStarted => ({ tier: account?.entitlement?.tier ?? account?.purchase?.tier ?? null,
     trial: account?.trial && trialRunning(account.trial) ? account.trial : null, credit: account?.credit?.state === "active" ? account.credit : null });
+  // Asked to sign in (Settings, the card, Already have a plan?): that needs no offer, and is the way back for a saved
+  // sign-in that could not be read and was removed.
+  if (signIn && !error && (view.kind === "signed-out" || view.kind === "removed")) return { kind: "sign-in", phase: signIn };
   switch (view.kind) {
     case "unknown": return { kind: "checking" };
     case "connecting": return { kind: "signing-in", code: account?.enrollment?.userCode ?? null, checkout: Boolean(account?.checkout) };

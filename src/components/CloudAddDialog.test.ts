@@ -441,6 +441,16 @@ describe("the sheet", () => {
     expect(bridge.checkout).not.toHaveBeenCalled();
   });
 
+  it("Settings' Sign in after a saved sign-in was removed signs in here, instead of handing back to Settings at once", async () => {
+    f.state = { cloudAdd: { source: "app_settings", signIn: true }, config: {} };
+    account = { status: "signed-out", message: "restore-removed" }; offer = null;
+    expect(await settle()).toContain("Sign in to MausBot Cloud");
+    expect(f.dispatch).not.toHaveBeenCalledWith({ type: "closeCloudAdd" });
+    tree().find(node => node.props.id === "cloud-add-email")!.props.onChange({ target: { value: EMAIL } }); await settle();
+    tree().find(node => node.type === "form")!.props.onSubmit({ preventDefault() {} }); await flush();
+    expect(bridge.signInStart).toHaveBeenCalledExactlyOnceWith(EMAIL);
+  });
+
   it("a refused checkout says why and changes nothing; a conflict shows what the account is now", async () => {
     account = free;
     await settle();

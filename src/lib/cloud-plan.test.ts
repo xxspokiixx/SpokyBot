@@ -237,6 +237,18 @@ describe("the buying sheet, one view per state", () => {
     expect(cloudAddView(paid({ machine: { status: "provisioning" } }), undefined, at).kind, "Add a Cloud… during setup shows the setup").toBe("starting");
   });
 
+  it("asked to sign in, the sheet signs in: with no offer to be had, and for a saved sign-in that was removed (else Settings' to say)", () => {
+    const plain: CloudSignInPhase = { step: "email", intent: false, problem: null };
+    const removed: CloudAccountState = { status: "signed-out", message: "restore-removed" };
+    for (const offer of [undefined, null, OFFER]) {
+      expect(cloudAddView(removed, offer, { ...at, signIn: plain }), `removed, offer ${JSON.stringify(offer)?.slice(0, 20)}`).toEqual({ kind: "sign-in", phase: plain });
+      expect(cloudAddView({ status: "signed-out" }, offer, { ...at, signIn: plain }), "signed out, whatever the offer").toEqual({ kind: "sign-in", phase: plain });
+    }
+    expect(cloudAddView(removed, OFFER, at)).toEqual({ kind: "settings" });
+    expect(cloudAddView({ status: "signed-out" }, null, at)).toEqual({ kind: "unreachable" });
+    expect(cloudAddView({ status: "signed-out" }, OFFER, { ...at, signIn: plain, error: "failed" })).toEqual({ kind: "error", reason: "failed" });
+  });
+
   it("the in-app sign-in is a view of its own while signed out, then the checkout it leads to", () => {
     const email: CloudSignInPhase = { step: "email", intent: true, problem: null };
     expect(cloudAddView({ status: "signed-out" }, OFFER, { ...at, signIn: email })).toEqual({ kind: "sign-in", phase: email });
@@ -246,8 +258,7 @@ describe("the buying sheet, one view per state", () => {
     expect(cloudAddView(connected(), OFFER, { ...at, signIn: { step: "done", intent: true } }), "Signed in. Opening secure checkout…")
       .toEqual({ kind: "sign-in", phase: { step: "done", intent: true } });
     expect(cloudAddView(connected({ checkout: { plan: "pro", startedAt: NOW, link: true } }), OFFER, { ...at, signIn: { step: "done", intent: true } }).kind).toBe("waiting");
-    expect(cloudAddView({ status: "signed-out" }, undefined, { ...at, signIn: email }).kind).toBe("checking");
-    expect(cloudAddView({ status: "signed-out" }, null, { ...at, signIn: email }).kind).toBe("unreachable");
+    expect(cloudAddView({ status: "signed-out" }, undefined, { ...at, signIn: email }).kind, "sign-in needs no offer").toBe("sign-in");
   });
 
   it("never offers anything to someone who pays or may pay: a problem, an ended sign-in or an unreachable Cloud is Settings' to say", () => {
