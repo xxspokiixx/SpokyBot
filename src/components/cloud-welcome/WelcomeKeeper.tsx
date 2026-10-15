@@ -44,7 +44,7 @@ export function WelcomeKeeper({ viewer }: { viewer: WelcomeViewer | null }) {
     memory, aboutMe: state.config?.profile?.aboutMe, known: state.connected && Boolean(state.config),
     copying: move.state.action === "move" && COPYING.has(move.state.phase),
     landed: move.state.action === "move" && move.state.phase === "done",
-    settled: stage !== "pending" || welcomeStepFinished(record, "bring"),
+    settled: (stage !== "pending" && stage !== "waiting") || welcomeStepFinished(record, "bring"),
   });
   const [trouble, setTrouble] = useState<MemoryTrouble | null>(null);
   const [attempt, setAttempt] = useState(0);

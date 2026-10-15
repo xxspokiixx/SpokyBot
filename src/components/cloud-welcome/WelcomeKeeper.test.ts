@@ -182,6 +182,19 @@ describe("memory pasted in the welcome", () => {
     expect(aboutMePuts()).toHaveLength(2);
   });
 
+  it("is not let go while the page is still learning what the Cloud has, before its engines answer", async () => {
+    rememberPendingMemory(PASTE);
+    fixture.state = { ...fixture.state, instances: [], config: { ...fixture.state.config, profile: { ...fixture.state.config.profile, aboutMe: "Cloud About me.\n\n- Likes tea" } } };
+    server.profile.aboutMe = "Cloud About me.\n\n- Likes tea";
+    mount();
+    await new Promise((resolve) => setTimeout(resolve, 50));
+    expect(pendingMemory()).toBe(PASTE);
+    flushSync(() => fixture.set({ ...fixture.state, instances: [{ instanceId: "claude" }] }));
+    await new Promise((resolve) => setTimeout(resolve, 50));
+    expect(pendingMemory()).toBe(PASTE);
+    expect(aboutMePuts()).toEqual([]);
+  });
+
   it("when it no longer fits the About me a copy brought, stays on this device and is shown again with why", async () => {
     rememberPendingMemory(PASTE);
     fixture.state.config.profile.aboutMe = server.profile.aboutMe = "x".repeat(23_990);
