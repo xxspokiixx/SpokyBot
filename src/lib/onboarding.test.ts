@@ -218,6 +218,16 @@ describe("beat machine", () => {
     expect(beatsFor({ dictation: true, reel: true, hosted: false })).toEqual(["hello", "reel", "engines", "permissions", "phone", "bot"]);
   });
 
+  it("puts the import step right after the engines, only when this computer has something to bring in", () => {
+    expect(beatsFor({ dictation: true, reel: false, setupImport: true })).toEqual(["hello", "engines", "import", "permissions", "phone", "bot"]);
+    expect(beatsFor({ dictation: false, reel: true, setupImport: true })).toEqual(["hello", "reel", "engines", "import", "phone", "bot"]);
+    expect(beatsFor({ dictation: true, reel: false, setupImport: false })).toEqual(beatsFor({ dictation: true, reel: false }));
+    expect(beatsFor({ dictation: true, reel: true, hosted: true, setupImport: true })).toEqual(["hello", "bot"]);
+    expect(nextBeat(beatsFor({ dictation: true, reel: false, setupImport: true }), "engines")).toBe("import");
+    expect(flowDotsShown("import")).toBe(true);
+    expect(beatWidth("import")).toBeGreaterThan(beatWidth("hello"));
+  });
+
   it("walks forward and back and stops at the ends", () => {
     const beats = beatsFor({ dictation: true, reel: false });
     expect(nextBeat(beats, "hello")).toBe("engines");

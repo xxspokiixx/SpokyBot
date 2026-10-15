@@ -71,12 +71,14 @@ export function hintSeenPatch(
 }
 
 
-export type BeatId = "hello" | "reel" | "engines" | "permissions" | "phone" | "bot";
+export type BeatId = "hello" | "reel" | "engines" | "import" | "permissions" | "phone" | "bot";
 
 export interface BeatOptions {
   dictation: boolean;
   reel: boolean;
   hosted?: boolean;
+  /** This computer has skills or MCP servers from another AI tool to bring in. */
+  setupImport?: boolean;
 }
 
 export function beatsFor(options: BeatOptions): BeatId[] {
@@ -84,6 +86,7 @@ export function beatsFor(options: BeatOptions): BeatId[] {
   const beats: BeatId[] = ["hello"];
   if (options.reel) beats.push("reel");
   beats.push("engines");
+  if (options.setupImport) beats.push("import");
   if (options.dictation) beats.push("permissions");
   beats.push("phone", "bot");
   return beats;
@@ -107,6 +110,8 @@ export function beatWidth(beat: BeatId): number {
       return 680;
     case "phone":
       return 620;
+    case "import":
+      return 540;
     case "reel":
       return 720;
     case "bot":

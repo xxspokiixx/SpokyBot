@@ -6,8 +6,10 @@ import { WelcomeFlow } from "@/components/onboarding/WelcomeFlow";
 import { Select } from "@/components/Select";
 import type { MausMotion } from "@/lib/mascot";
 import { type BeatId, beatsFor } from "@/lib/onboarding";
+import type { SetupImportClient } from "@/lib/setup-import";
 import { SKINS, type SkinId } from "@/lib/skins";
 import { StoreProvider, type Bot } from "@/state/store";
+import type { SetupDetection, SetupImportResult } from "../shared/setup-import";
 import "./styles.css";
 
 const PREVIEW_BOT = {
@@ -17,9 +19,37 @@ const PREVIEW_BOT = {
   soul: "",
 } as unknown as Bot;
 
-const BEATS = beatsFor({ dictation: true, reel: true });
+const BEATS = beatsFor({ dictation: true, reel: true, setupImport: true });
 
-/** ?beat=engines&skin=linen&reduced=1&all=1 opens any state directly. */
+// A fixture: the preview never looks at this computer's own skills or MCP servers.
+const PREVIEW_DETECTION: SetupDetection = {
+  skills: Array.from({ length: 30 }, (_, i) => ({ name: `skill-${i + 1}`, source: "claudeCode" as const })),
+  tools: [
+    { name: "github", source: "claudeCode" },
+    { name: "linear", source: "claudeCode" },
+    { name: "notion", source: "cursor" },
+    { name: "figma", source: "cursor" },
+  ],
+};
+
+/** ?import=notes answers with something left out; ?import=fail fails. */
+function previewImport(mode: string | null): SetupImportClient {
+  return {
+    detect: async () => PREVIEW_DETECTION,
+    apply: async (request) => {
+      await new Promise((resolve) => setTimeout(resolve, 500));
+      if (mode === "fail") throw new Error("fixture failure");
+      const notes = mode === "notes";
+      const result: SetupImportResult = {
+        ...(request.skills ? { skills: { added: PREVIEW_DETECTION.skills.slice(notes ? 1 : 0).map((skill) => skill.name), present: [], skipped: notes ? [{ name: "skill-1", reason: "conflict" as const }] : [], filesLeftOut: notes ? 2 : 0 } } : {}),
+        ...(request.tools ? { tools: { added: ["github", "linear", "notion", "figma"], present: [], skipped: [] } } : {}),
+      };
+      return result;
+    },
+  };
+}
+
+/** ?beat=engines&skin=linen&reduced=1&all=1 opens any state directly; ?w=390&h=760 sizes the stage like a narrow window. */
 function fromUrl() {
   const params = new URLSearchParams(location.search);
   const beat = params.get("beat") as BeatId | null;
@@ -30,12 +60,13 @@ function fromUrl() {
     reduced: params.get("reduced") === "1",
     all: params.get("all") === "1",
     entrance: (params.get("entrance") ?? "arrive") as Exclude<MausMotion, "none">,
+    importMode: params.get("import"),
+    size: { width: Number(params.get("w")) || 1100, height: Number(params.get("h")) || 720 },
   };
 }
 
-function Stage({ skin, beat, run, scale = 1, entrance }: { skin: SkinId; beat: BeatId; run: number; scale?: number; entrance: Exclude<MausMotion, "none"> }) {
-  const width = 1100;
-  const height = 720;
+function Stage({ skin, beat, run, scale = 1, entrance, importMode = null }: { skin: SkinId; beat: BeatId; run: number; scale?: number; entrance: Exclude<MausMotion, "none">; importMode?: string | null }) {
+  const { width, height } = fromUrl().size;
   return (
     <div
       data-skin={skin}
@@ -51,6 +82,7 @@ function Stage({ skin, beat, run, scale = 1, entrance }: { skin: SkinId; beat: B
           initialBeat={beat}
           bot={PREVIEW_BOT}
           onDone={() => {}}
+          setupImport={{ client: previewImport(importMode), detection: PREVIEW_DETECTION }}
         />
       </div>
     </div>
@@ -129,12 +161,12 @@ function Preview() {
           {SKINS.map((s) => (
             <div key={s.id} className="flex flex-col gap-1.5">
               <div className="text-[12px] text-ink-secondary">{s.name}</div>
-              <Stage skin={s.id} beat={beat} run={run} scale={0.42} entrance={initial.entrance} />
+              <Stage skin={s.id} beat={beat} run={run} scale={0.42} entrance={initial.entrance} importMode={initial.importMode} />
             </div>
           ))}
         </div>
       ) : (
-        <Stage skin={skin} beat={beat} run={run} entrance={initial.entrance} />
+        <Stage skin={skin} beat={beat} run={run} entrance={initial.entrance} importMode={initial.importMode} />
       )}
     </div>
   );

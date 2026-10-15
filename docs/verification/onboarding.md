@@ -80,3 +80,25 @@ Not covered here: the real Electron preload bridge and a real Admin enrolment
 (see [organization connection](organization-settings.md), not rerun for this
 change), and a real hosted tenant's browser. The hosted beat set was rendered
 from a temporary preview entry, not reached through a hosted sign-in.
+
+## Bring what you already use (Oct 16 2026)
+
+The step after the engines beat: skills and MCP servers another AI tool keeps on
+this computer, brought in with one button. Desktop app only, and skipped when
+nothing new is found within two seconds.
+
+```sh
+pnpm exec vitest run server/setup-import.test.ts server/toml-lite.test.ts server/routes/setup-import.test.ts server/setup-import.e2e.test.ts src/components/onboarding/beats/ImportBeat.test.ts src/lib/setup-import.test.ts src/lib/onboarding.test.ts
+```
+
+Every test builds its own temporary home; none reads the real `~/.claude`,
+`~/.codex` or other dotfiles. The detector test plants credential, session,
+history and transcript files holding a sentinel, records every path the step
+touches, and checks that none of them was listed or opened and that the
+sentinel reaches no answer, saved server or copied skill. The route test
+refuses a paired device, a service loopback and a hosted or Cloud server; the
+end-to-end test runs the real server from `launchVerificationServer` against a
+planted home. Screenshots of the step in Midnight and Daylight, at a narrow
+width, working, failed and with its result came from `onboarding-preview.html`
+with a fixture detection (`?beat=import`, `?import=notes`, `?import=fail`,
+`?w=390&h=760`). Not covered here: the packaged Electron window itself.
