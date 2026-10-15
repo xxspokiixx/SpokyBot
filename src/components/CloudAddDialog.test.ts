@@ -18,6 +18,7 @@ vi.mock("@/lib/analytics", () => ({ track: vi.fn() }));
 import { CloudAddDialog, CloudAddPanel, CloudAddSheet, planFromKey, type CloudAddActions, type CloudAddUi } from "./CloudAddDialog";
 import { cloudAddView, type CloudAddView } from "@/lib/cloud-plan";
 import { track } from "@/lib/analytics";
+import { showWelcome } from "@/lib/onboarding";
 
 const DAY = 86_400_000, NOW = new Date(2026, 9, 8, 12).getTime();
 const allowances = (cpus: number, diskGb: number, maxDiskGb: number, computers: number, computerHours: number) =>
@@ -241,6 +242,7 @@ describe("each screen of the sheet says one thing and offers one next step", () 
     const sheet = (kind: CloudAddView["kind"], staging = false) => renderToStaticMarkup(createElement(CloudAddSheet, { kind, staging, onClose: vi.fn(), children: "x" }));
     expect(sheet("offer")).toContain("max-w-[900px]"); expect(sheet("starting")).toContain("max-w-[720px]"); expect(sheet("waiting")).toContain("max-w-[540px]");
     expect(sheet("offer")).toContain('aria-label="Close"');
+    expect(sheet("offer"), "above Settings and the welcome flow (z-50), which it opens over").toContain("fixed inset-0 z-[60]");
     expect(sheet("offer")).not.toContain("data-cloud-staging");
     expect(text(sheet("offer", true))).toMatch(/Staging ?: This app uses the staging MausBot Cloud: test payments and test Clouds, not real ones\./);
   });
@@ -357,6 +359,22 @@ describe("the sheet", () => {
     expect(away).not.toContain("Opening in"); expect(away).toContain("Switch between This computer and My Cloud");
     vi.advanceTimersByTime(5000); await settle();
     expect(bridge.connectHome).not.toHaveBeenCalled();
+  });
+
+  it("over the welcome flow a ready Cloud never switches the window: no countdown, main hears no sheet in front, Open {name} stays", async () => {
+    vi.useFakeTimers();
+    const hide = showWelcome();
+    try {
+      f.state = { cloudAdd: { source: "app_onboarding" }, config: {} };
+      account = paid({ trial: trial(), credit, machine: ready, checkout: { plan: "pro", startedAt: NOW - 120_000, link: true } });
+      const html = await settle();
+      expect(html).toContain("My Cloud is ready"); expect(html).toContain("Open My Cloud"); expect(html).not.toContain("Opening in");
+      vi.advanceTimersByTime(10_000); await settle();
+      expect(bridge.connectHome).not.toHaveBeenCalled();
+      expect(bridge.sheet, "main notifies instead, as for a closed sheet").not.toHaveBeenCalledWith(true);
+      await press("Open My Cloud");
+      expect(bridge.connectHome, "only when the person asks").toHaveBeenCalledOnce();
+    } finally { hide(); }
   });
 
   it("the name and colour go to main as they are chosen (after a pause), and the last ones before the Cloud opens", async () => {

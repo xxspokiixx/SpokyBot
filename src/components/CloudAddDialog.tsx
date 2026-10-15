@@ -10,6 +10,7 @@ import { cn } from "@/lib/cn";
 import { cloudColor, cloudNameShown, DEFAULT_CLOUD_COLOR } from "@/lib/cloud-look";
 import { cloudAddView, offerPlan, type CloudAddView, type CloudSignInPhase } from "@/lib/cloud-plan";
 import { t } from "@/lib/i18n";
+import { welcomeOnScreen } from "@/lib/onboarding";
 import { useStore } from "@/state/store";
 import { ChooseScreen } from "./cloud-buy/ChooseScreen";
 import { OneCloudScreen, StatusScreen } from "./cloud-buy/OneCloudScreen";
@@ -82,9 +83,10 @@ export function CloudAddPanel({ view, ui, actions }: { view: CloudAddView; ui: C
 
 const WIDTH: Partial<Record<CloudAddView["kind"], string>> = { offer: "max-w-[900px]", starting: "max-w-[720px]", ready: "max-w-[720px]" };
 
-/** The sheet over the app: one width per screen, the close button, and the staging mark when the app is on staging. */
+/** The sheet over the app: one width per screen, the close button, and the staging mark when the app is on staging.
+ * Above the z-50 layers (Settings, the welcome flow), which it may be opened over. */
 export function CloudAddSheet({ kind, staging, onClose, children }: { kind: CloudAddView["kind"]; staging: boolean; onClose: () => void; children: ReactNode }) {
-  return <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4 sm:p-6" onMouseDown={event => event.target === event.currentTarget && onClose()}>
+  return <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/50 p-4 sm:p-6" onMouseDown={event => event.target === event.currentTarget && onClose()}>
     <div role="dialog" aria-modal="true" aria-labelledby="cloud-add-title" data-cloud-add-dialog tabIndex={-1}
       className={cn("animate-pop-in relative max-h-full w-full overflow-y-auto overscroll-contain rounded-[18px] border border-hairline/70 bg-panel shadow-2xl outline-none", WIDTH[kind] ?? "max-w-[540px]")}>
       <button type="button" onClick={onClose} aria-label={t("cloudAdd.close")} className="ui-icon-button absolute end-3.5 top-3.5 z-10"><X size={18} /></button>
@@ -122,6 +124,8 @@ export function CloudAddDialog({ now = Date.now }: { now?: () => number }) {
   const [arrived, setArrived] = useState(false);
   const open = Boolean(request && bridge);
   const profileEmail = state.config?.profile?.email?.trim() || null;
+  // Over the welcome flow the sheet is as good as closed for "ready": main notifies, and nothing switches the window away.
+  const overWelcome = welcomeOnScreen();
   useEffect(() => {
     if (!open || !bridge) return;
     let active = true, updated = false;
@@ -165,10 +169,10 @@ export function CloudAddDialog({ now = Date.now }: { now?: () => number }) {
     return () => { window.removeEventListener("keydown", onKey, true); if (opener?.isConnected) opener.focus(); };
   }, [open]);
   useEffect(() => {
-    if (!open || !bridge?.sheet) return;
+    if (!open || !bridge?.sheet || overWelcome) return;
     void bridge.sheet(true).catch(() => {});
     return () => { void bridge.sheet?.(false).catch(() => {}); };
-  }, [open, bridge]);
+  }, [open, bridge, overWelcome]);
   const kind = view?.kind ?? null;
   const focusKey = view?.kind === "sign-in" ? `sign-in-${view.phase.step}` : kind;
   useEffect(() => {
@@ -200,7 +204,7 @@ export function CloudAddDialog({ now = Date.now }: { now?: () => number }) {
   // Ready while this sheet is open in the focused window: "Opening in 3…", then the Cloud opens; Not now stops it.
   useEffect(() => {
     if (kind !== "ready" || auto !== null) return;
-    setAuto(typeof document.hasFocus === "function" && document.hasFocus() ? 3 : "off");
+    setAuto(!overWelcome && typeof document.hasFocus === "function" && document.hasFocus() ? 3 : "off");
   }, [kind]);
   const resendAt = signIn?.step === "code" ? signIn.resendAt : 0;
   useEffect(() => {

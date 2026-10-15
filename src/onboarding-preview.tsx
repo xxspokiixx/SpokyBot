@@ -1,5 +1,6 @@
 // Dev-only gallery of the welcome flow's beats, served at /onboarding-preview.html; not in the packaged app.
 import { StrictMode, useEffect, useState } from "react";
+import type { CloudOffer } from "../electron/cloud-home.mjs";
 import { createRoot } from "react-dom/client";
 import { DesktopCapabilitiesProvider } from "@/components/DesktopCapabilities";
 import { WelcomeFlow } from "@/components/onboarding/WelcomeFlow";
@@ -17,9 +18,14 @@ const PREVIEW_BOT = {
   soul: "",
 } as unknown as Bot;
 
-const BEATS = beatsFor({ dictation: true, reel: true });
+const BEATS = beatsFor({ dictation: true, reel: true, cloud: true });
 
-/** ?beat=engines&skin=linen&reduced=1&all=1 opens any state directly. */
+/** The Cloud beat's stand-in for the Admin's offer (the app reads its own). */
+const PREVIEW_CLOUD_OFFER: CloudOffer = { recommended: "pro", creditUsd: 5, reminderDays: 1, refundDays: 14, plans: [
+  { tier: "personal", label: "Personal", amount: 2900, trialDays: 3 }, { tier: "pro", label: "Pro", amount: 4900, trialDays: 3 },
+  { tier: "max", label: "Max", amount: 9900, trialDays: 3 }] };
+
+/** ?beat=engines&skin=linen&reduced=1&all=1 opens any state directly; &w=420&h=780 sizes the stage (a narrow window). */
 function fromUrl() {
   const params = new URLSearchParams(location.search);
   const beat = params.get("beat") as BeatId | null;
@@ -30,12 +36,14 @@ function fromUrl() {
     reduced: params.get("reduced") === "1",
     all: params.get("all") === "1",
     entrance: (params.get("entrance") ?? "arrive") as Exclude<MausMotion, "none">,
+    width: Number(params.get("w")) || 1100,
+    height: Number(params.get("h")) || 720,
   };
 }
 
-function Stage({ skin, beat, run, scale = 1, entrance }: { skin: SkinId; beat: BeatId; run: number; scale?: number; entrance: Exclude<MausMotion, "none"> }) {
-  const width = 1100;
-  const height = 720;
+function Stage({ skin, beat, run, scale = 1, entrance, width = 1100, height = 720 }: {
+  skin: SkinId; beat: BeatId; run: number; scale?: number; entrance: Exclude<MausMotion, "none">; width?: number; height?: number;
+}) {
   return (
     <div
       data-skin={skin}
@@ -49,6 +57,7 @@ function Stage({ skin, beat, run, scale = 1, entrance }: { skin: SkinId; beat: B
           dictation
           entrance={entrance}
           initialBeat={beat}
+          cloudOffer={PREVIEW_CLOUD_OFFER}
           bot={PREVIEW_BOT}
           onDone={() => {}}
         />
@@ -134,7 +143,7 @@ function Preview() {
           ))}
         </div>
       ) : (
-        <Stage skin={skin} beat={beat} run={run} entrance={initial.entrance} />
+        <Stage skin={skin} beat={beat} run={run} entrance={initial.entrance} width={initial.width} height={initial.height} />
       )}
     </div>
   );

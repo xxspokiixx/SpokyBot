@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useRef, useState, type KeyboardEvent as ReactKeyboardEvent } from "react";
+import type { CloudOffer } from "../../../electron/cloud-home.mjs";
 import { MausAvatar } from "@/components/Avatar";
 import { useDesktopCapabilities } from "@/components/DesktopCapabilities";
 import { setEmailGateDone, track } from "@/lib/analytics";
@@ -13,9 +14,11 @@ import {
   flowDotsShown,
   nextBeat,
   previousBeat,
+  showWelcome,
   type BeatId,
 } from "@/lib/onboarding";
 import { api, useStore, type Bot } from "@/state/store";
+import { CloudBeat, useCloudBeatOffer } from "./beats/CloudBeat";
 import { EnginesBeat } from "./beats/EnginesBeat";
 import { HelloBeat } from "./beats/HelloBeat";
 import { MeetYourBotBeat } from "./beats/MeetYourBotBeat";
@@ -32,6 +35,7 @@ const MASCOT_FOR_BEAT: Record<BeatId, MausState> = {
   engines: "searching",
   permissions: "listening",
   phone: "sending",
+  cloud: "working",
   bot: "celebrate",
 };
 
@@ -49,6 +53,8 @@ function beatTitle(beat: BeatId): string | null {
       return t("onboarding.reel.title");
     case "phone":
       return t("onboarding.phone.title");
+    case "cloud":
+      return t("onboarding.cloud.title");
   }
 }
 
@@ -65,6 +71,7 @@ export function WelcomeFlow({
   entrance = "arrive",
   hosted = false,
   onOpenOrganisation,
+  cloudOffer,
 }: {
   bot: Bot | null;
   onDone: () => void;
@@ -76,10 +83,13 @@ export function WelcomeFlow({
   entrance?: Motion;
   hosted?: boolean;
   onOpenOrganisation?: () => void;
+  /** The preview's stand-in for the Admin's offer (the Cloud beat); the app reads its own. */
+  cloudOffer?: CloudOffer | null;
 }) {
   const { dispatch } = useStore();
   const { capabilities } = useDesktopCapabilities();
-  const beats = beatsFor({ dictation: dictation ?? capabilities.dictation.available, reel, hosted });
+  const offer = useCloudBeatOffer(hosted, cloudOffer);
+  const beats = beatsFor({ dictation: dictation ?? capabilities.dictation.available, reel, hosted, cloud: offer !== null });
   const [beat, setBeat] = useState<BeatId>(() => (initialBeat && beats.includes(initialBeat) ? initialBeat : "hello"));
   const [mascot, setMascot] = useState<MausState>(MASCOT_FOR_BEAT[beat]);
   const [motion, setMotion] = useState<{ kind: Motion; key: number }>({ kind: "blink", key: 0 });
@@ -98,6 +108,9 @@ export function WelcomeFlow({
   useEffect(() => {
     track("onboarding_step", { step: beat, replay });
   }, [beat, replay]);
+
+  // A Cloud sheet opened over the welcome never switches the window away from it (CloudAddDialog).
+  useEffect(() => (embedded ? undefined : showWelcome()), [embedded]);
 
   const go = useCallback(
     (target: BeatId) => {
@@ -222,6 +235,7 @@ export function WelcomeFlow({
           {beat === "engines" && <EnginesBeat {...beatProps} hosted={hosted} onOpenOrganisation={onOpenOrganisation} />}
           {beat === "permissions" && <PermissionsBeat {...beatProps} />}
           {beat === "phone" && <PhoneBeat {...beatProps} />}
+          {beat === "cloud" && offer && <CloudBeat {...beatProps} offer={offer} />}
           {beat === "bot" && (
             <MeetYourBotBeat
               bot={bot}

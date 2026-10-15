@@ -3,7 +3,7 @@ import type { CloudAccountState, CloudPlanSnapshot } from "../../electron/cloud-
 import { CHECKOUT_SOURCES } from "../../electron/cloud-account.mjs";
 import type { CloudCredit, CloudOffer, CloudOfferPlan, CloudTrial } from "../../electron/cloud-home.mjs";
 import { buyOfferAllowed, CLOUD_SOURCES, cloudAddView, cloudCreditLine, cloudIntroView, cloudNoticeKind, cloudPlanLine, cloudPlanView, cloudTrialNotice, cloudTrialView,
-  dueToday, moneyBackLine, offerPlan, offerTrialDays, personalAmount, planRow, planTerms, trialTimeline, usd, type CloudSignInPhase } from "./cloud-plan";
+  cloudBeatTerms, dueToday, moneyBackLine, offerPlan, offerTrialDays, personalAmount, planRow, planTerms, trialTimeline, usd, type CloudSignInPhase } from "./cloud-plan";
 import { setLocale } from "./i18n";
 
 const DAY = 86_400_000;
@@ -116,6 +116,7 @@ const NOW = new Date(2026, 9, 8, 12).getTime();
 describe("what is for sale, as the Admin says", () => {
   it("the sources the app counts are main's own allow-list", () => {
     expect([...CLOUD_SOURCES]).toEqual([...CHECKOUT_SOURCES]);
+    expect(CLOUD_SOURCES, "the welcome's Cloud beat").toContain("app_onboarding");
   });
 
   it("each plan card: its name, the Admin's price, cloud computers at once and three allowance chips; Most popular is the Admin's recommended plan", () => {
@@ -148,6 +149,16 @@ describe("what is for sale, as the Admin says", () => {
     expect(moneyBackLine(OFFER)).toBe("14-day money-back on every plan.");
     expect(moneyBackLine({ ...OFFER, refundDays: undefined })).toBeNull();
     expect(personalAmount(OFFER)).toBe(2900); expect(personalAmount(null)).toBeNull();
+  });
+
+  it("the welcome's Cloud beat says the Admin's offer in one line: trial and lowest price, credit and money-back only when offered", () => {
+    expect(cloudBeatTerms(OFFER)).toEqual({ trial: true, action: "Start free trial",
+      line: "Free for 7 days, then from $29/month + tax. Includes $5 of Claude credit. 14-day money-back." });
+    expect(cloudBeatTerms({ ...OFFER, creditUsd: undefined, refundDays: undefined }).line).toBe("Free for 7 days, then from $29/month + tax.");
+    expect(cloudBeatTerms(noTrial(OFFER))).toEqual({ trial: false, action: "See plans", line: "From $29/month + tax. 14-day money-back." });
+    expect(cloudBeatTerms({ ...OFFER, plans: [{ ...PLANS[0]!, trialDays: undefined }, PLANS[1]!, PLANS[2]!] }).line, "the lowest price among plans with the trial")
+      .toContain("then from $49/month");
+    expect(cloudBeatTerms({ ...noTrial(OFFER), creditUsd: 5 }).line, "credit comes only with a trial").not.toContain("credit");
   });
 
   it("the timeline: today (and the credit), the reminder only while the Admin sends one, and the first charge", () => {

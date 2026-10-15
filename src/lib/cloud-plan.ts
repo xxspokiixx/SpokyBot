@@ -129,7 +129,7 @@ export function cloudNoticeKind(view: CloudPlanView, account: CloudAccountState 
 }
 
 
-export const CLOUD_SOURCES = ["app_card", "app_howto", "app_menu", "app_settings", "app_routines", "update_popup"] as const;
+export const CLOUD_SOURCES = ["app_card", "app_howto", "app_menu", "app_settings", "app_routines", "update_popup", "app_onboarding"] as const;
 export type CloudSource = (typeof CLOUD_SOURCES)[number];
 
 export function offerPlanLabel(plan: CloudOfferPlan): string {
@@ -190,6 +190,18 @@ export function planTerms(offer: CloudOffer, plan: CloudOfferPlan): { trial: boo
     ? { trial: true, due: dueToday(0), money: t("cloudBuy.moneyTrial", { days: plan.trialDays, price }), action: t("cloudIntro.start"), moneyBack }
     : { trial: false, due: t("cloudBuy.duePaid", { price }), money: t("cloudBuy.moneyPaid", { price }), action: t("cloudBuy.continue", { price }), moneyBack };
 }
+/** The welcome's Cloud beat: the Admin's offer in one line (trial days and the lowest price, the credit, money-back) and
+ * its one action, Start free trial, or See plans without a trial. No number is the app's own. */
+export function cloudBeatTerms(offer: CloudOffer): { trial: boolean; line: string; action: string } {
+  const days = offerTrialDays(offer);
+  const priced = days ? offer.plans.filter(plan => plan.trialDays) : offer.plans;
+  const price = usd(Math.min(...priced.map(plan => plan.amount)) / 100);
+  const line = [days ? t("onboarding.cloud.trial", { days, price }) : t("onboarding.cloud.price", { price }),
+    days && offer.creditUsd ? t("onboarding.cloud.credit", { credit: usd(offer.creditUsd) }) : null,
+    offer.refundDays ? t("onboarding.cloud.moneyBack", { days: offer.refundDays }) : null].filter(Boolean).join(" ");
+  return { trial: Boolean(days), line, action: days ? t("cloudIntro.start") : t("onboarding.cloud.seePlans") };
+}
+
 export function dueToday(cents: number): string {
   return new Intl.NumberFormat("en-US", { style: "currency", currency: "USD", minimumFractionDigits: 2 }).format(cents / 100);
 }
