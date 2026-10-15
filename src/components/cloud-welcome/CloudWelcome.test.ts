@@ -77,7 +77,7 @@ beforeEach(() => {
   fixture.plan = null;
   fixture.imported = null;
   fixture.state = {
-    connected: true, selectedId: "b1", activeView: "chat", routines: [],
+    connected: true, selectedId: "b1", activeView: "chat", routines: [], groups: [],
     bots: [{ id: "b1", threadId: "t1", name: "Maus" }, { id: "b2", threadId: "t2", name: "Ada", chiefOfStaff: true }],
     instances: [claude, codex],
     config: { cloudHome: true, onboarding: { ...EMPTY_ONBOARDING }, profile: { name: "", email: "", aboutMe: "I run a design studio." } },
@@ -172,16 +172,27 @@ describe("CloudWelcome", () => {
     expect(hintsPut().at(-1)).toEqual([SHOWN, welcomeStepHint("bring")]);
   });
 
-  it("does not offer to copy into a Cloud that already has chats, and moves on without replacing anything", async () => {
-    vi.mocked(bridge.state).mockResolvedValue(overview({ suggest: false, cloud: { ...emptyCloud, contents: { bots: 1, rooms: 0, chats: 1 }, empty: false } }));
+  it("on a Cloud that already has bots or chats, says they are already here instead of offering a copy or a fresh start", async () => {
+    vi.mocked(bridge.state).mockResolvedValue(overview({ suggest: false, cloud: { ...emptyCloud, contents: { bots: 6, rooms: 1, chats: 142 }, empty: false } }));
     render();
-    await vi.waitFor(() => expect(host.querySelector('[data-bring-choice="fresh"]')!.getAttribute("aria-checked")).toBe("true"));
-    flushSync(() => (host.querySelector('[data-bring-choice="copy"]') as HTMLButtonElement).click());
-    expect(text()).toContain("Studio Cloud already has bots and chats of its own, so nothing was copied.");
-    expect([...document.body.querySelectorAll("button")].some((node) => node.textContent?.startsWith("Copy to"))).toBe(false);
+    await vi.waitFor(() => expect(text()).toContain("Studio Cloud already has bots or chats of its own, so nothing is copied over them from here."));
+    expect(text()).toContain("Your bots are already here");
+    expect(host.querySelector("[data-bring-choice]")).toBeNull();
+    expect(button("Choose a team")).toBeUndefined();
+    expect(button("Memory from Claude or ChatGPT")).toBeDefined();
     click("Continue");
     expect(bridge.start).not.toHaveBeenCalled();
-    expect(hintsPut().at(-1)).toEqual([SHOWN, welcomeStepHint("bring"), CLOUD_SETUP_MOVE_SKIPPED]);
+    expect(bridge.dismiss).not.toHaveBeenCalled();
+    expect(hintsPut().at(-1)).toEqual([SHOWN, welcomeStepHint("bring")]);
+    expect(host.querySelector('[data-welcome-step="engine"]')).not.toBeNull();
+  });
+
+  it("outside the desktop app, tells the same from the bots and rooms the Cloud shows", () => {
+    delete window.ogb;
+    fixture.state = { ...fixture.state, bots: [...fixture.state.bots, { id: "b3", threadId: "t3", name: "Rex" }] };
+    render();
+    expect(text()).toContain("Your bots are already here");
+    expect(text()).not.toContain("Open the desktop app to bring your bots from your computer.");
   });
 
   it("starting fresh opens the team library, and skipping keeps the copy's card from coming back", async () => {
@@ -207,6 +218,7 @@ describe("CloudWelcome", () => {
 
   it("in a desktop app connected to another server as its client, offers no copy from here either", () => {
     window.ogb = { ...window.ogb!, remoteClient: { active: true } } as unknown as typeof window.ogb;
+    fixture.state.bots = [fixture.state.bots[0]];
     render();
     expect(text()).toContain("Open the desktop app to bring your bots from your computer.");
     expect(host.querySelector('[role="radiogroup"]')).toBeNull();
@@ -215,6 +227,7 @@ describe("CloudWelcome", () => {
 
   it("outside the desktop app, starts fresh and says where the copy is", () => {
     delete window.ogb;
+    fixture.state.bots = [fixture.state.bots[0]];
     render();
     expect(text()).toContain("Welcome to My Cloud");
     expect(text()).toContain("Open the desktop app to bring your bots from your computer.");

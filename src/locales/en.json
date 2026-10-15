@@ -786,6 +786,8 @@
   "cloudWelcome.bring.desktopTitle": "Everything from your computer",
   "cloudWelcome.bring.desktopOnly": "Open the desktop app to bring your bots from your computer.",
   "cloudWelcome.bring.copied": "Copied {bots} and {chats} to {name}.",
+  "cloudWelcome.bring.hereTitle": "Your bots are already here",
+  "cloudWelcome.bring.hereBody": "{name} already has bots or chats of its own, so nothing is copied over them from here.",
   "cloudWelcome.count.bots": "{count} bots",
   "cloudWelcome.count.botsOne": "1 bot",
   "cloudWelcome.count.chats": "{count} chats",

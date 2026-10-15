@@ -103,7 +103,7 @@ beforeEach(() => {
   resetCloudWelcome();
   failProfile = false;
   fixture.state = {
-    connected: true, selectedId: "b1", activeView: "chat", routines: [], bots: [{ id: "b1", threadId: "t1", name: "Maus" }], instances: [{ instanceId: "claude" }],
+    connected: true, selectedId: "b1", activeView: "chat", routines: [], groups: [], bots: [{ id: "b1", threadId: "t1", name: "Maus" }], instances: [{ instanceId: "claude" }],
     config: { cloudHome: true, onboarding: { ...EMPTY_ONBOARDING }, profile: { name: "", email: "", aboutMe: "Cloud About me." } },
   };
   server = structuredClone(fixture.state.config);

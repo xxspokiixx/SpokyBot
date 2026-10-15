@@ -1,5 +1,5 @@
 import { useRef, useState, type KeyboardEvent, type ReactNode, type Ref } from "react";
-import { Archive, Check, CloudUpload, Laptop, MessageSquareText, Sparkles } from "lucide-react";
+import { Archive, Check, CloudUpload, Laptop, MessageSquareText, Sparkles, Users } from "lucide-react";
 import type { CloudMoveState } from "../../../electron/cloud-move.mjs";
 import { formatMoveBytes, moveView, type CloudMoveHandle } from "@/components/CloudMove";
 import { TeamLibraryPanel } from "@/components/TeamLibraryPanel";
@@ -10,7 +10,7 @@ import type { LocaleKey } from "@/locales";
 import { MemoryImport } from "./MemoryImport";
 import { CARD, CARD_IDLE, CARD_PICKED, CardIcon, Chip, Footer, PRIMARY, QUIET, SECONDARY, StepHeading } from "./parts";
 
-export type BringOutcome = "copied" | "team" | "skipped";
+export type BringOutcome = "copied" | "team" | "here" | "skipped";
 
 function counted(count: number, one: LocaleKey, many: LocaleKey): string {
   return count === 1 ? t(one) : t(many, { count: new Intl.NumberFormat(activeLocale()).format(count) });
@@ -30,10 +30,12 @@ function MoveProgress({ done, total, label }: { done: number; total: number; lab
   </div>;
 }
 
-export function WelcomeBring({ name, move, headingRef, memoryAdded, onMemory, onBackup, onTeam, onFinish }: {
+export function WelcomeBring({ name, move, cloudHasWork, headingRef, memoryAdded, onMemory, onBackup, onTeam, onFinish }: {
   name: string;
   /** Null outside the desktop app, where nothing can be copied from this computer. */
   move: CloudMoveHandle | null;
+  /** The Cloud has bots or chats of its own (a copy from before, a chat from a phone): nothing is copied over them. */
+  cloudHasWork: boolean;
   headingRef: Ref<HTMLHeadingElement>;
   memoryAdded: boolean;
   onMemory: (memory: string) => void;
@@ -53,7 +55,9 @@ export function WelcomeBring({ name, move, headingRef, memoryAdded, onMemory, on
   const view = move ? moveView(overview, state, { onServerPage: true }) : null;
   const running = view?.running === true;
   const copied = state.phase === "done" && state.action !== "restore";
-  const choice = (state.action === "move" && state.phase !== "idle") || copied ? "copy" : chosen ?? suggestedChoice(desktop, overview);
+  const underWay = (state.action === "move" && state.phase !== "idle") || copied;
+  const here = cloudHasWork && !underWay;
+  const choice = underWay ? "copy" : chosen ?? suggestedChoice(desktop, overview);
   const copying = desktop && choice === "copy";
   const local = overview?.local;
 
@@ -111,7 +115,9 @@ export function WelcomeBring({ name, move, headingRef, memoryAdded, onMemory, on
 
   const skip = <button type="button" className={QUIET} onClick={() => onFinish("skipped")}>{t("cloudIntent.skip")}</button>;
   let actions: ReactNode;
-  if (!copying) {
+  if (here) {
+    actions = <button type="button" className={PRIMARY} onClick={() => onFinish("here")}>{t("onboarding.continue")}</button>;
+  } else if (!copying) {
     actions = <>
       <button ref={teamButton} type="button" className={PRIMARY} onClick={() => setTeams(true)}>{t("cloudWelcome.bring.chooseTeam")}</button>
       {skip}
@@ -136,7 +142,13 @@ export function WelcomeBring({ name, move, headingRef, memoryAdded, onMemory, on
 
   return <section aria-labelledby="cloud-welcome-step" data-welcome-step="bring" className="flex flex-col gap-5">
     <StepHeading headingRef={headingRef} title={t("cloudWelcome.bring.title", { name })} sub={t("cloudWelcome.bring.sub")} />
-    {desktop
+    {here
+      ? <div data-bring-here className={cn(CARD, CARD_IDLE)}>
+          <CardIcon icon={Users} />
+          <span className="text-[14.5px] font-semibold text-ink">{t("cloudWelcome.bring.hereTitle")}</span>
+          <span className="text-[12.5px] leading-relaxed text-ink-secondary">{t("cloudWelcome.bring.hereBody", { name })}</span>
+        </div>
+      : desktop
       ? <div role="radiogroup" aria-label={t("cloudWelcome.bring.choices")} onKeyDown={onArrows} className="grid gap-3 @lg/step:grid-cols-2">
           {copyCard}
           {card("fresh", freshBody)}

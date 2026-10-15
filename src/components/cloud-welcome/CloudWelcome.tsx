@@ -43,6 +43,9 @@ export function CloudWelcome() {
   const bridge = window.ogb?.remoteClient?.active ? undefined : window.ogb?.cloudMove;
   const move = useCloudMove(bridge);
   const copied = move.state.phase === "done" && move.state.action !== "restore";
+  const visible = state.bots.filter((bot) => !bot.hidden);
+  const bot = visible.find((candidate) => candidate.chiefOfStaff) ?? visible[0] ?? null;
+  const cloudHasWork = move.overview?.cloud ? !move.overview.cloud.empty : visible.length > 1 || state.groups.length > 0;
   const memoryAdded = welcome.memory !== null && memoryKept(state.config?.profile?.aboutMe, welcome.memory);
 
   useEffect(() => {
@@ -78,7 +81,7 @@ export function CloudWelcome() {
     go(welcomeViewAfter(withEarlyHints(record, ids), step));
   };
   const finishBring = (outcome: BringOutcome) => {
-    if (outcome !== "team") void bridge?.dismiss().catch(() => {});
+    if (outcome === "copied" || outcome === "skipped") void bridge?.dismiss().catch(() => {});
     finish("bring", outcome === "skipped" ? [CLOUD_SETUP_MOVE_SKIPPED] : []);
   };
   const end = (reason: "done" | "skipped") => {
@@ -86,8 +89,7 @@ export function CloudWelcome() {
     remember([CLOUD_WELCOME_DONE]);
     endWelcomeHere();
   };
-  const visible = state.bots.filter((bot) => !bot.hidden);
-  const bot = visible.find((candidate) => candidate.chiefOfStaff) ?? visible[0] ?? null;
+
   const sayHi = () => {
     end("done");
     dispatch({ type: "showChat" });
@@ -103,7 +105,7 @@ export function CloudWelcome() {
 
   let content;
   if (view === "bring") {
-    content = <WelcomeBring name={name} move={bridge ? move : null} headingRef={heading} memoryAdded={memoryAdded}
+    content = <WelcomeBring name={name} move={bridge ? move : null} cloudHasWork={cloudHasWork} headingRef={heading} memoryAdded={memoryAdded}
       onMemory={rememberPendingMemory}
       onBackup={() => dispatch({ type: "toggleAppSettings", open: true, section: "backups" })}
       onTeam={() => { reanchor.current = true; }}
