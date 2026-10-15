@@ -260,12 +260,13 @@ export function LiveBrowser({ bot, signIn }: { bot: Bot; signIn?: BrowserSignIn 
         onControl={onControl}
         onMessage={onMessage}
         onConnectedChange={(next) => { setConnected(next); if (next) { setStarting(false); setError(""); } }}
+        onFirstFrame={() => setStarting(false)}
         onUnauthorized={() => { if (stream) setFallback(true); else setGone(true); }}
         onGone={() => setGone(true)}
         onClose={(code, reason) => { if (code === 1013 && reason) setError(reason); }}
         onLeave={() => address.current?.focus()}
       />
-      {heldElsewhere || gone || !connected ? (
+      {heldElsewhere || gone || !connected || starting ? (
         <div className="absolute inset-0 z-10 flex flex-col items-center justify-center gap-3 bg-card/95 p-6 text-center text-[13px] text-ink-secondary">
           {heldElsewhere ? <Hand size={24} /> : gone ? <Globe size={24} /> : <Loader2 size={24} className="animate-spin" />}
           <span>{heldElsewhere ? BROWSER_HELD_ELSEWHERE : gone ? "Browser disconnected" : !starting ? "Opening the live browser…" : stream ? "Starting the browser…" : t("browser.live.botBusy", { name: bot.name })}</span>

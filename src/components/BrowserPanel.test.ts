@@ -127,6 +127,21 @@ describe("the browser panel's connection", () => {
     expect(host.querySelector("[data-browser-transport]")!.getAttribute("data-browser-transport")).toBe("live");
   });
 
+  it("says the browser is starting until its first frame arrives", async () => {
+    await render();
+    const socket = FakeSocket.instances.at(-1)!;
+    await act(async () => {
+      socket.open();
+      socket.message({ type: "starting" });
+      socket.control("unclaimed");
+    });
+    await flush();
+    expect(host.textContent).toContain("Starting the browser…");
+    await act(async () => socket.message(new ArrayBuffer(8)));
+    await flush();
+    expect(host.textContent).not.toContain("Starting the browser…");
+  });
+
   it("shows the tab's address and enables history from what the stream says", async () => {
     const socket = await streaming();
     expect((host.querySelector<HTMLInputElement>('input[aria-label="Browser address"]')!).value).toBe("https://example.com/");
