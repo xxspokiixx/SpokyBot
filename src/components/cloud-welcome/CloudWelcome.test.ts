@@ -33,7 +33,7 @@ vi.mock("@/components/TeamLibraryPanel", async () => {
 });
 import { CloudWelcome } from "./CloudWelcome";
 import { CLOUD_SETUP_MOVE_SKIPPED, CLOUD_WELCOME_DONE, CLOUD_WELCOME_SHOWN as SHOWN, welcomeStepHint } from "@/lib/cloud-setup";
-import { pendingMemory, resetCloudWelcome, useCloudWelcome } from "@/lib/cloud-welcome";
+import { resetCloudWelcome, useCloudWelcome } from "@/lib/cloud-welcome";
 
 const local = { bots: 6, rooms: 1, chats: 142, bytes: 1.2 * 1024 ** 3, files: 900, routines: 4 };
 const emptyCloud = { contents: { bots: 1, rooms: 0, chats: 0 }, empty: true, freeBytes: 9 * 1024 ** 3, previous: null, heldBytes: 0 };
@@ -80,12 +80,11 @@ beforeEach(() => {
     connected: true, selectedId: "b1", activeView: "chat", routines: [], groups: [],
     bots: [{ id: "b1", threadId: "t1", name: "Maus" }, { id: "b2", threadId: "t2", name: "Ada", chiefOfStaff: true }],
     instances: [claude, codex],
-    config: { cloudHome: true, onboarding: { ...EMPTY_ONBOARDING }, profile: { name: "", email: "", aboutMe: "I run a design studio." } },
+    config: { cloudHome: true, onboarding: { ...EMPTY_ONBOARDING }, profile: { name: "", email: "", aboutMe: "" } },
   };
   fixture.api.mockImplementation(async (path: string, init?: RequestInit) => {
     const patch = JSON.parse(String(init?.body ?? "{}"));
     if (patch.onboarding) return { ...fixture.state.config, onboarding: { ...fixture.state.config.onboarding, ...patch.onboarding } };
-    if (patch.profile) return { ...fixture.state.config, profile: { ...fixture.state.config.profile, ...patch.profile } };
     throw new Error(`unexpected ${path}`);
   });
   push = () => {};
@@ -122,7 +121,11 @@ describe("CloudWelcome", () => {
     expect(host.querySelector('[data-bring-choice="copy"]')!.getAttribute("aria-checked")).toBe("true");
     expect(host.querySelector('[aria-current="step"]')!.getAttribute("data-welcome-rail")).toBe("bring");
     expect(button("Copy to Studio Cloud")).toBeDefined();
-    for (const label of ["Memory from Claude or ChatGPT", "A backup file"]) expect(button(label)).toBeDefined();
+    expect(text()).not.toContain("Also bring in");
+    expect([...document.body.querySelectorAll("button")].map((node) => node.textContent?.trim())).toEqual([
+      "1Bring your stuffBots, chats, memory (Not done yet)", "2Connect your AIClaude or ChatGPT (Not done yet)", "3Files and appsOptional (Not done yet)",
+      "Skip setup", expect.stringContaining("Everything from this Mac"), expect.stringContaining("Start fresh"), "Copy to Studio Cloud", "Skip for now",
+    ]);
     expect(sent()).toEqual([]);
     expect(hintsPut()).toEqual([[SHOWN]]);
   });
@@ -179,7 +182,6 @@ describe("CloudWelcome", () => {
     expect(text()).toContain("Your bots are already here");
     expect(host.querySelector("[data-bring-choice]")).toBeNull();
     expect(button("Choose a team")).toBeUndefined();
-    expect(button("Memory from Claude or ChatGPT")).toBeDefined();
     click("Continue");
     expect(bridge.start).not.toHaveBeenCalled();
     expect(bridge.dismiss).not.toHaveBeenCalled();
@@ -234,24 +236,6 @@ describe("CloudWelcome", () => {
     expect(host.querySelector('[role="radiogroup"]')).toBeNull();
     expect(button("Choose a team")).toBeDefined();
     expect([...host.querySelectorAll("button")].some((node) => node.textContent?.startsWith("Copy to"))).toBe(false);
-  });
-
-  it("takes memory from Claude or ChatGPT with a preview of About me, keeps it on this device, and says it is added only once About me has it", async () => {
-    render();
-    click("Memory from Claude or ChatGPT");
-    const dialog = document.querySelector('[role="dialog"]')!;
-    expect(dialog.textContent).toContain("List everything you remember about me as short bullet points.");
-    const box = dialog.querySelector("textarea")!;
-    Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, "value")!.set!.call(box, "- Lives in Berlin\n- Likes tea");
-    flushSync(() => box.dispatchEvent(new Event("input", { bubbles: true })));
-    expect(dialog.querySelector("[data-memory-preview]")!.textContent).toBe("I run a design studio.\n\n- Lives in Berlin\n- Likes tea");
-    click("Add to About me");
-    expect(document.querySelector('[role="dialog"]')).toBeNull();
-    expect(pendingMemory()).toBe("- Lives in Berlin\n- Likes tea");
-    expect(text()).not.toContain("Added to About me.");
-    fixture.state = { ...fixture.state, config: { ...fixture.state.config, profile: { ...fixture.state.config.profile, aboutMe: "I run a design studio.\n\n- Lives in Berlin\n- Likes tea" } } };
-    render();
-    expect(text()).toContain("Added to About me.");
   });
 
   it("resumes where it was left, and offers the trial's credit for now", async () => {

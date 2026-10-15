@@ -103,14 +103,9 @@ the trial's Claude credit in the engine list. Open the printed `previewUrl`:
 
 What was checked this way (Oct 16 2026): every step and the done state in
 Midnight and Daylight at 1280×860, 1024×760 and 390×844, the bring and engine
-steps in the other seven skins, the memory dialog over the whole window, and
+steps in the other seven skins, and
 the setup card in short beside Routines; after review, "Your bots are already
-here" (`?cloud=full`), "Added to About me" once the keeper has saved a paste
-(set `omb.cloudWelcome.memory` in the page's storage first), and the memory
-dialog shown again when the paste no longer fits (an About me near 24,000
-characters on the fixture). Driving it this way found the keeper letting go
-of a paste while the page was still loading the Cloud; its test is in
-`src/components/cloud-welcome/WelcomeKeeper.test.ts`. Steps finished there are written to
+here" (`?cloud=full`) and step 1 with only its two choices. Steps finished there are written to
 the fixture's onboarding record; the record can be cleared with
 `PUT /api/config` (`{"onboarding":{"hintsSeen":[]}}`). The real copy, Electron
 main's empty-Cloud check and its preload bridge are not exercised here; they

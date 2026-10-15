@@ -4,9 +4,9 @@ vi.mock("@/state/store", async (original) => ({ ...await original<typeof import(
 import { api } from "@/state/store";
 import { CLOUD_SETUP_HIDDEN, CLOUD_WELCOME_DONE, welcomeStepHint } from "./cloud-setup";
 import {
-  ABOUT_ME_LIMIT, cloudFirstRun, cloudWelcomeShown, cloudWelcomeVisible, copyPossible, endWelcomeHere, hasWork, markWelcomeSeen, memoryKept, memoryStep,
-  noteWelcomeHints, pendingMemory, rememberPendingMemory, resetCloudWelcome, returnToWelcome, saveWelcomeHints, stepAsideWelcome, suggestedChoice,
-  takeWelcomeRequest, useCloudWelcome, WELCOME_SAVE_RETRY_MS, welcomeCredit, withEarlyHints, withMemory,
+  cloudFirstRun, cloudWelcomeShown, cloudWelcomeVisible, copyPossible, endWelcomeHere, hasWork, markWelcomeSeen, noteWelcomeHints, resetCloudWelcome,
+  returnToWelcome, saveWelcomeHints, stepAsideWelcome, suggestedChoice, takeWelcomeRequest, useCloudWelcome, WELCOME_SAVE_RETRY_MS, welcomeCredit,
+  withEarlyHints,
 } from "./cloud-welcome";
 import { EMPTY_ONBOARDING } from "./onboarding";
 
@@ -74,75 +74,6 @@ describe("welcomeCredit", () => {
     expect(welcomeCredit([{}], { status: "paid", credit: { grantedUsd: 5, remainingUsd: 0, state: "used_up" } })).toEqual({ state: "used_up" });
     expect(welcomeCredit([{}], null)).toBeNull();
     expect(welcomeCredit([], { status: "paid" })).toBeNull();
-  });
-});
-
-describe("memory from Claude or ChatGPT", () => {
-  it("is added to the end of About me, after a blank line", () => {
-    expect(withMemory("I run a studio.\n", "  - Lives in Berlin\n- Likes tea  ")).toBe("I run a studio.\n\n- Lives in Berlin\n- Likes tea");
-    expect(withMemory(undefined, "- Likes tea")).toBe("- Likes tea");
-    expect(withMemory("Kept.", "   ")).toBe("Kept.");
-    expect(memoryKept("I run a studio.\n\n- Likes tea", " - Likes tea ")).toBe(true);
-    expect(memoryKept("This computer's own About me", "- Likes tea")).toBe(false);
-    expect(ABOUT_ME_LIMIT).toBe(24_000);
-  });
-
-  it("waits on this device until a saved About me has it, and through a reload", async () => {
-    const saved = new Map<string, string>();
-    vi.stubGlobal("localStorage", {
-      getItem: (key: string) => saved.get(key) ?? null,
-      setItem: (key: string, value: string) => { saved.set(key, value); },
-      removeItem: (key: string) => { saved.delete(key); },
-    });
-    resetCloudWelcome();
-    expect(pendingMemory()).toBeNull();
-    rememberPendingMemory("  - Likes tea  ");
-    expect(pendingMemory()).toBe("- Likes tea");
-    expect(saved.get("omb.cloudWelcome.memory")).toBe("- Likes tea");
-    vi.resetModules();
-    const reloaded = await import("./cloud-welcome");
-    expect(reloaded.pendingMemory()).toBe("- Likes tea");
-    rememberPendingMemory(null);
-    expect(pendingMemory()).toBeNull();
-    expect(saved.has("omb.cloudWelcome.memory")).toBe(false);
-  });
-
-  it("is still kept for this session where the browser blocks storage", () => {
-    vi.stubGlobal("localStorage", { getItem: () => { throw new Error("blocked"); }, setItem: () => { throw new Error("blocked"); }, removeItem: () => {} });
-    resetCloudWelcome();
-    expect(() => rememberPendingMemory("- Likes tea")).not.toThrow();
-    expect(pendingMemory()).toBe("- Likes tea");
-  });
-});
-
-describe("memoryStep", () => {
-  const facts = (extra: Partial<Parameters<typeof memoryStep>[0]> = {}) => ({
-    memory: "- Likes tea", aboutMe: "This Mac's own About me.", known: true, copying: false, landed: false, settled: false, ...extra,
-  });
-
-  it("adds a waiting paste to whatever About me the Cloud has now, after a blank line", () => {
-    expect(memoryStep(facts())).toEqual({ kind: "save", aboutMe: "This Mac's own About me.\n\n- Likes tea" });
-    expect(memoryStep(facts({ aboutMe: undefined }))).toEqual({ kind: "save", aboutMe: "- Likes tea" });
-    expect(memoryStep(facts({ landed: true }))).toEqual({ kind: "save", aboutMe: "This Mac's own About me.\n\n- Likes tea" });
-  });
-
-  it("writes nothing while a copy runs, before the Cloud has answered, or with nothing waiting", () => {
-    expect(memoryStep(facts({ copying: true }))).toEqual({ kind: "wait" });
-    expect(memoryStep(facts({ known: false }))).toEqual({ kind: "wait" });
-    expect(memoryStep(facts({ memory: null }))).toEqual({ kind: "wait" });
-  });
-
-  it("lets go only once About me has it, no copy can come from the welcome, and none has just landed", () => {
-    const kept = { aboutMe: "This Mac's own About me.\n\n- Likes tea" };
-    expect(memoryStep(facts({ ...kept, settled: true }))).toEqual({ kind: "clear" });
-    expect(memoryStep(facts({ ...kept, settled: false }))).toEqual({ kind: "keep" });
-    expect(memoryStep(facts({ ...kept, settled: true, landed: true }))).toEqual({ kind: "keep" });
-  });
-
-  it("does not write past About me's limit, and says so instead of dropping the paste", () => {
-    const full = "x".repeat(ABOUT_ME_LIMIT - 5);
-    expect(memoryStep(facts({ aboutMe: full, settled: true }))).toEqual({ kind: "too-long" });
-    expect(memoryStep(facts({ aboutMe: "x".repeat(ABOUT_ME_LIMIT - "- Likes tea".length - 2) })).kind).toBe("save");
   });
 });
 

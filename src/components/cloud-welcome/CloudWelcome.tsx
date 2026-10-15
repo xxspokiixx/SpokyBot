@@ -8,10 +8,7 @@ import {
   CLOUD_SETUP_MOVE_SKIPPED, CLOUD_WELCOME_DONE, CLOUD_WELCOME_SHOWN, WELCOME_STEPS, welcomeStepFinished, welcomeStepHint, welcomeView, welcomeViewAfter,
   type WelcomeStep, type WelcomeView,
 } from "@/lib/cloud-setup";
-import {
-  endWelcomeHere, markWelcomeSeen, memoryKept, rememberPendingMemory, saveWelcomeHints, stepAsideWelcome, takeWelcomeRequest, useCloudWelcome,
-  withEarlyHints,
-} from "@/lib/cloud-welcome";
+import { endWelcomeHere, markWelcomeSeen, saveWelcomeHints, stepAsideWelcome, takeWelcomeRequest, useCloudWelcome, withEarlyHints } from "@/lib/cloud-welcome";
 import { cn } from "@/lib/cn";
 import { t } from "@/lib/i18n";
 import { hintSeen } from "@/lib/onboarding";
@@ -46,7 +43,6 @@ export function CloudWelcome() {
   const visible = state.bots.filter((bot) => !bot.hidden);
   const bot = visible.find((candidate) => candidate.chiefOfStaff) ?? visible[0] ?? null;
   const cloudHasWork = move.overview?.cloud ? !move.overview.cloud.empty : visible.length > 1 || state.groups.length > 0;
-  const memoryAdded = welcome.memory !== null && memoryKept(state.config?.profile?.aboutMe, welcome.memory);
 
   useEffect(() => {
     markWelcomeSeen();
@@ -105,9 +101,7 @@ export function CloudWelcome() {
 
   let content;
   if (view === "bring") {
-    content = <WelcomeBring name={name} move={bridge ? move : null} cloudHasWork={cloudHasWork} headingRef={heading} memoryAdded={memoryAdded}
-      onMemory={rememberPendingMemory}
-      onBackup={() => dispatch({ type: "toggleAppSettings", open: true, section: "backups" })}
+    content = <WelcomeBring name={name} move={bridge ? move : null} cloudHasWork={cloudHasWork} headingRef={heading}
       onTeam={() => { reanchor.current = true; }}
       onFinish={finishBring} />;
   } else if (view === "engine") content = <WelcomeEngine name={name} headingRef={heading} onFinish={() => finish("engine")} />;

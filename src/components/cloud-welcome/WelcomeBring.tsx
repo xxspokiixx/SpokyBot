@@ -1,5 +1,5 @@
 import { useRef, useState, type KeyboardEvent, type ReactNode, type Ref } from "react";
-import { Archive, Check, CloudUpload, Laptop, MessageSquareText, Sparkles, Users } from "lucide-react";
+import { Check, CloudUpload, Laptop, Sparkles, Users } from "lucide-react";
 import type { CloudMoveState } from "../../../electron/cloud-move.mjs";
 import { formatMoveBytes, moveView, type CloudMoveHandle } from "@/components/CloudMove";
 import { TeamLibraryPanel } from "@/components/TeamLibraryPanel";
@@ -7,7 +7,6 @@ import { suggestedChoice, type BringChoice } from "@/lib/cloud-welcome";
 import { cn } from "@/lib/cn";
 import { activeLocale, t } from "@/lib/i18n";
 import type { LocaleKey } from "@/locales";
-import { MemoryImport } from "./MemoryImport";
 import { CARD, CARD_IDLE, CARD_PICKED, CardIcon, Chip, Footer, PRIMARY, QUIET, SECONDARY, StepHeading } from "./parts";
 
 export type BringOutcome = "copied" | "team" | "here" | "skipped";
@@ -30,16 +29,13 @@ function MoveProgress({ done, total, label }: { done: number; total: number; lab
   </div>;
 }
 
-export function WelcomeBring({ name, move, cloudHasWork, headingRef, memoryAdded, onMemory, onBackup, onTeam, onFinish }: {
+export function WelcomeBring({ name, move, cloudHasWork, headingRef, onTeam, onFinish }: {
   name: string;
   /** Null outside the desktop app, where nothing can be copied from this computer. */
   move: CloudMoveHandle | null;
   /** The Cloud has bots or chats of its own (a copy from before, a chat from a phone): nothing is copied over them. */
   cloudHasWork: boolean;
   headingRef: Ref<HTMLHeadingElement>;
-  memoryAdded: boolean;
-  onMemory: (memory: string) => void;
-  onBackup: () => void;
   /** Before the team library selects the bots it adds, so that is not read as the person leaving. */
   onTeam: () => void;
   onFinish: (outcome: BringOutcome) => void;
@@ -48,7 +44,6 @@ export function WelcomeBring({ name, move, cloudHasWork, headingRef, memoryAdded
   const overview = move?.overview ?? null;
   const [chosen, setChosen] = useState<BringChoice | null>(null);
   const [teams, setTeams] = useState(false);
-  const [memoryOpen, setMemoryOpen] = useState(false);
   const teamButton = useRef<HTMLButtonElement>(null);
   const mac = window.ogb?.platform === "darwin";
   const state: CloudMoveState = move?.state ?? { phase: "idle" };
@@ -161,22 +156,8 @@ export function WelcomeBring({ name, move, cloudHasWork, headingRef, memoryAdded
             <span className="text-[12.5px] leading-relaxed text-ink-secondary">{t("cloudWelcome.bring.desktopOnly")}</span>
           </div>
         </div>}
-    <div className="flex flex-col gap-2">
-      <span className="text-[12.5px] text-ink-tertiary">{t("cloudWelcome.more")}</span>
-      <div className="flex flex-wrap gap-2">
-        <button type="button" className="ui-pill border-hairline/60" disabled={running} onClick={() => setMemoryOpen(true)}>
-          {memoryAdded ? <Check size={14} aria-hidden="true" className="text-success" /> : <MessageSquareText size={14} aria-hidden="true" />}
-          {t("cloudWelcome.more.memory")}
-        </button>
-        <button type="button" className="ui-pill border-hairline/60" disabled={running} onClick={onBackup}>
-          <Archive size={14} aria-hidden="true" />{t("cloudWelcome.more.backup")}
-        </button>
-      </div>
-      {memoryAdded && <p role="status" className="text-[12px] text-ink-secondary">{t("cloudWelcome.memory.added")}</p>}
-    </div>
     {status}
     <Footer>{actions}</Footer>
-    {memoryOpen && <MemoryImport name={name} onClose={() => setMemoryOpen(false)} onAdd={(memory) => { setMemoryOpen(false); onMemory(memory); }} />}
     {teams && <TeamLibraryPanel returnFocusRef={teamButton} onClose={() => setTeams(false)}
       onImported={() => { onTeam(); setTeams(false); onFinish("team"); }} />}
   </section>;
