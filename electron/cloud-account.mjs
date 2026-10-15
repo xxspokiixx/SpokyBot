@@ -77,7 +77,7 @@ export function createCloudAccountClient({ store, openBrowser, platform, deviceN
     return { status, ...(message ? { message } : {}), ...(grant ? { account: grant.account, deviceId: grant.device.id, expiresAt: grant.expiresAt } : {}), ...(known ? { lastPlan: known } : {}) };
   };
   const checkout = () => opened && now() - opened.startedAt < CHECKOUT_KEPT_MS
-    ? { plan: opened.plan, startedAt: opened.startedAt, ...(opened.signIn ? { signIn: true } : {}), ...(opened.url ? { link: true } : {}) } : null;
+    ? { plan: opened.plan, startedAt: opened.startedAt, ...(opened.signIn ? { signIn: true } : {}), ...(opened.url ? { link: true } : {}), ...(opened.done ? { done: true } : {}) } : null;
   const withCheckout = current => {
     const open = checkout(), next = open ? { ...current, checkout: open } : current;
     return staging ? { ...next, staging: true } : next;
@@ -399,6 +399,8 @@ export function createCloudAccountClient({ store, openBrowser, platform, deviceN
     /** For main's clipboard only: the kept checkout page, while it is the one being waited on. */
     checkoutLink: () => (opened?.url && now() - opened.startedAt < CHECKOUT_KEPT_MS ? opened.url : null),
     checkoutPending: watching,
+    /** The Cloud this checkout bought was opened, announced or shown ready: the purchase is over (Add a Cloud… says one Cloud for now). */
+    checkoutDone() { if (opened && !opened.done) { opened = { ...opened, done: true }; publish(value); } },
     async signInAgain() {
       if (state().status !== "reauth-required") throw new Error("This computer is still signed in to MausBot Cloud.");
       publish({ status: "connecting" });

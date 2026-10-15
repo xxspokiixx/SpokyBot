@@ -266,7 +266,9 @@ export function cloudAddView(account: CloudAccountState | null | undefined, offe
       const machine = account?.machine;
       if (!machine || machine.status === "provisioning") return { kind: "starting", ...started(), step: machine?.setup?.step ?? null, slow: machine?.setup?.slow === true, received: false };
       if (machine.status !== "ready") return { kind: "settings" };
-      return account?.checkout || arrived ? { kind: "ready", ...started() } : { kind: "has-cloud" };
+      // Ready while this purchase is not over (main marks it done once the Cloud was opened, announced or shown ready), or
+      // for this sheet's own journey; afterwards Add a Cloud… is one Cloud for now.
+      return (account?.checkout && !account.checkout.done) || arrived ? { kind: "ready", ...started() } : { kind: "has-cloud" };
     }
     case "signed-out": case "free": {
       if (error) return { kind: "error", reason: error };

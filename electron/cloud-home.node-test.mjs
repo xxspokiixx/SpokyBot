@@ -202,9 +202,10 @@ test("main lists the machine from verified states only, and connects without a d
   assert.deepEqual([context.environmentsState.environments[0].name, context.environmentsState.environments[0].color], ["Studio", "purple"], "listed as named while it was set up");
   context.environmentsState = { environments: [], activeId: environments.LOCAL_ID }; look = null;
 
-  let minted = 0;
-  client = { homeTarget: () => ({ origin }), pairHome: async () => { minted++; return { origin, code, expiresAt: NOW + 1 }; }, state: () => ({ status: "connected" }) };
+  let minted = 0, done = 0;
+  client = { homeTarget: () => ({ origin }), pairHome: async () => { minted++; return { origin, code, expiresAt: NOW + 1 }; }, state: () => ({ status: "connected" }), checkoutDone: () => done++ };
   await context.connectCloudHome();
+  assert.equal(done, 1, "opened: the purchase is over");
   assert.deepEqual(probes, [[`${origin}/api/auth/session`, "include"]]);
   assert.deepEqual(navigated, [`${origin}/pair#code=${code}`]);
   assert.equal(context.environmentsState.activeId, "cloud-home-id");

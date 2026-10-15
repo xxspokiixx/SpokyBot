@@ -31,7 +31,7 @@ export interface CloudAccountState {
    * one: `signIn`) in the last 24 hours: the plan, and when (Reopen checkout
    * starts the 30-minute watch again). `link`: main keeps its page, so Reopen
    * and Copy link use that same page. */
-  checkout?: { plan: string; startedAt: number; signIn?: true; link?: true };
+  checkout?: { plan: string; startedAt: number; signIn?: true; link?: true; done?: true };
   /** This app talks to the staging Admin (OMB_CLOUD_STAGING=1): test payments, test Clouds. */
   staging?: true;
 }
@@ -83,6 +83,8 @@ export interface CloudAccountBridge {
   setLook?(name: string, color: string): Promise<CloudHomeLook>;
   /** The buying sheet is open on this page (main then opens the ready Cloud there rather than notifying). */
   sheet?(open: boolean): Promise<void>;
+  /** The sheet showed the ready Cloud: the purchase is over. */
+  readySeen?(): Promise<void>;
   /** Lists the Cloud machine under Servers and opens it in this window. */
   connectHome(): Promise<CloudAccountState>;
   /** The same, opening the Cloud's Settings on its phone pairing. */
@@ -150,6 +152,8 @@ export interface CloudAccountClient {
   reopenCheckout(plan?: string, source?: string): Promise<CloudCheckoutResult>;
   /** Main only (the clipboard): the kept checkout page, or null. */
   checkoutLink(): string | null;
+  /** The Cloud this checkout bought was opened, announced or shown ready. */
+  checkoutDone(): void;
   /** Waiting on a checkout this app opened (the first 30 minutes). */
   checkoutPending(): boolean;
   interest(kind: "another_cloud"): Promise<void>;

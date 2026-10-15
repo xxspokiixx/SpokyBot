@@ -233,6 +233,10 @@ describe("the buying sheet, one view per state", () => {
     const ready = { status: "ready" as const, origin: "https://omb-u-1.fly.dev" };
     expect(cloudAddView(paid({ machine: ready, checkout: { plan: "pro", startedAt: NOW - 3600_000 } }), undefined, at)).toEqual({ kind: "ready", tier: "pro", trial: null, credit: null });
     expect(cloudAddView(paid({ machine: ready }), undefined, at), "Add a Cloud… with a Cloud: one Cloud for now").toEqual({ kind: "has-cloud" });
+    expect(cloudAddView(paid({ machine: ready, checkout: { plan: "pro", startedAt: NOW - 3600_000, done: true } }), undefined, at),
+      "a purchase that is over (opened, announced or shown ready): one Cloud for now").toEqual({ kind: "has-cloud" });
+    expect(cloudAddView(paid({ machine: ready, checkout: { plan: "pro", startedAt: NOW, done: true } }), undefined, { ...at, arrived: true }).kind,
+      "unless this sheet followed it").toBe("ready");
     expect(cloudAddView(paid({ machine: ready }), undefined, { ...at, arrived: true }), "signed in here just now: theirs to open").toMatchObject({ kind: "ready" });
     expect(cloudAddView(paid({ machine: { status: "provisioning" } }), undefined, at).kind, "Add a Cloud… during setup shows the setup").toBe("starting");
   });

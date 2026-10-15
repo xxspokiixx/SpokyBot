@@ -284,6 +284,18 @@ test("signed in, a checkout is the Admin's for this account, opened in the brows
   f.now += 24 * 3600_000; assert.equal(f.client.state().checkout, undefined); assert.equal(f.client.checkoutLink(), null);
 });
 
+test("the purchase is over once its Cloud was opened, announced or shown ready: the checkout says done, once", async t => {
+  const f = await fixture(t); await f.connect();
+  f.checkout = { status: 200, body: { cloudContractVersion: 1, url: "https://test.checkout.dodopayments.com/session/cks_done" } };
+  await f.client.checkout("pro", "app_menu");
+  const published = f.states.length;
+  f.client.checkoutDone();
+  assert.deepEqual(f.client.state().checkout, { plan: "pro", startedAt: f.now, link: true, done: true });
+  assert.equal(f.states.length, published + 1, "the page hears it");
+  f.client.checkoutDone(); assert.equal(f.states.length, published + 1, "once");
+  const none = await fixture(t); none.client.checkoutDone(); assert.equal(none.client.state().checkout, undefined, "nothing to end");
+});
+
 test("after a restart mid-checkout, the checkout the Admin still holds is watched from first sight like this app's own", async t => {
   const f = await fixture(t); await f.connect();
   f.offer = { plans: plans(), recommended: "pro", trialDays: 7, checkout: { plan: "personal", openUntil: f.now + 3600_000 } };

@@ -108,7 +108,7 @@ export function createCloudLook({ store, accountId, homeEntry, saveEntry }) {
 /** openmausbot://cloud, the same with or without a checkout waiting: the sheet while a purchase made here is under way
  * (a checkout opened in the last day, a payment being linked, setup), else Settings, which signs in or opens the Cloud. */
 export function cloudLinkOpensSheet(state) {
-  return Boolean(state?.checkout || state?.purchase || state?.machine?.status === "provisioning");
+  return Boolean((state?.checkout && !state.checkout.done) || state?.purchase || state?.machine?.status === "provisioning");
 }
 
 /** Paid, and the Cloud still being made: a payment linked, no machine yet, or one setting up. */
@@ -120,7 +120,7 @@ const settingUp = state => state?.status === "connected" && (Boolean(state.purch
  * app restarted mid-setup). Not when the sheet is open in the focused window: the sheet opens the Cloud itself
  * ("Opening in 3…"). A click opens the Cloud.
  */
-export function createCloudReadyNotice({ Notification, focused, sheetOpen, name, open }) {
+export function createCloudReadyNotice({ Notification, focused, sheetOpen, name, open, shown = () => {} }) {
   let announced = null, watched = false;
   return state => {
     if (settingUp(state)) { watched = true; return false; }
@@ -131,6 +131,7 @@ export function createCloudReadyNotice({ Notification, focused, sheetOpen, name,
     const note = new Notification({ title: `${name()} is ready`, body: "Click to open it. It keeps your bots running 24/7." });
     note.on("click", () => open());
     note.show();
+    shown();
     return true;
   };
 }
@@ -162,6 +163,7 @@ export function installCloudBuy({ ipcMain, guard, client, offersReady, clipboard
   handle("interest", () => client().interest("another_cloud"));
   handle("look", () => look.current());
   handle("setLook", (_event, name, color) => look.save(plain(name), plain(color)));
+  handle("readySeen", () => { client().checkoutDone(); });
   handle("sheet", (event, open) => {
     sheetOpen = open === true;
     const page = event?.sender;

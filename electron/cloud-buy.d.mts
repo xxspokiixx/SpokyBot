@@ -18,6 +18,8 @@ export declare function createCloudLook(options: {
 export declare function createCloudReadyNotice(options: {
   Notification: { isSupported(): boolean; new (options: { title: string; body: string }): { on(event: "click", listener: () => void): void; show(): void } };
   focused(): boolean; sheetOpen(): boolean; name(): string; open(): void;
+  /** Told once the notification is shown (main marks the checkout done). */
+  shown?(): void;
 }): (state: unknown) => boolean;
 export declare function installCloudBuy(options: {
   ipcMain: { handle(channel: string, handler: (...args: any[]) => unknown): void };

@@ -942,7 +942,7 @@ async function openCloudAdd(source) {
   else await win.loadURL(`${rendererOrigin()}/?desktop-settings=${action}`);
 }
 const announceCloudReady = createCloudReadyNotice({ Notification, focused: () => Boolean(mainWindow && !mainWindow.isDestroyed() && mainWindow.isFocused()),
-  sheetOpen: () => cloudBuy.sheetOpen(), name: () => cloudLook.current().name,
+  sheetOpen: () => cloudBuy.sheetOpen(), name: () => cloudLook.current().name, shown: () => cloudAccount?.checkoutDone(),
   open: () => { if (!desktopTray?.show()) activateExistingWindow(BrowserWindow.getAllWindows()); void workspaceMenuAction(() => connectCloudHome()); } });
 
 function ensureManagedDesktop() {
@@ -1993,7 +1993,7 @@ async function connectCloudHome(open = null) {
   next = withActive(next, entry.id);
   persistEnvironments(next);
   navigateMainWindow(cloudHomeConnectUrl({ origin: target.origin, grant }, Date.now(), open));
-  return client.state();
+  client.checkoutDone(); return client.state();
 }
 
 async function cloudHomeSignedIn(origin) {

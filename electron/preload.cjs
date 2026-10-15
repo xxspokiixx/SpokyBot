@@ -286,6 +286,7 @@ const bridge = {
     look: () => ipcRenderer.invoke("cloud-account:look"),
     setLook: (name, color) => ipcRenderer.invoke("cloud-account:setLook", String(name), String(color)),
     sheet: open => ipcRenderer.invoke("cloud-account:sheet", open === true),
+    readySeen: () => ipcRenderer.invoke("cloud-account:readySeen"),
     connectHome: () => ipcRenderer.invoke("cloud-account:connectHome"),
     connectHomeForPhone: () => ipcRenderer.invoke("cloud-account:connectHomeForPhone"),
     onState: cb => {

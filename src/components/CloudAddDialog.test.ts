@@ -276,6 +276,7 @@ describe("the sheet", () => {
       signInVerify: vi.fn(async () => ({ outcome: "signed-in", state: free })), signInCancel: vi.fn(async () => {}),
       reopenCheckout: vi.fn(async () => ({ outcome: "opened", state: account })), copyCheckoutLink: vi.fn(async () => true), interest: vi.fn(async () => {}),
       look: vi.fn(async () => ({ name: "My Cloud", color: "blue" })), setLook: vi.fn(async (name: string, color: string) => ({ name, color })), sheet: vi.fn(async () => {}),
+      readySeen: vi.fn(async () => {}),
       connectHome: vi.fn(async () => account) };
     vi.stubGlobal("window", { ogb: { cloudAccount: bridge }, addEventListener: vi.fn(), removeEventListener: vi.fn() });
     vi.stubGlobal("document", { querySelector: () => null, activeElement: opener, body: {}, hasFocus: () => focused });
@@ -338,6 +339,20 @@ describe("the sheet", () => {
     tree().find(node => node.props["data-plan"] === "personal")!.props.onClick();
     await press("Start free trial");
     expect(bridge.checkout).toHaveBeenLastCalledWith("personal", "app_menu");
+  });
+
+  it("ready shown ends the purchase for main; a later Add a Cloud… (bought, opened or told) is one Cloud for now, with no countdown", async () => {
+    vi.useFakeTimers();
+    account = paid({ machine: ready, checkout: { plan: "pro", startedAt: NOW - 120_000, link: true } });
+    expect(await settle()).toContain("Opening in 3…");
+    expect(bridge.readySeen).toHaveBeenCalledOnce();
+    await press("Not now");
+    f.values = []; f.ran = []; bridge.readySeen.mockClear();
+    account = paid({ machine: ready, checkout: { plan: "pro", startedAt: NOW - 120_000, link: true, done: true } });
+    const again = await settle();
+    expect(again).toContain("One Cloud per account for now"); expect(again).not.toContain("Opening in");
+    vi.advanceTimersByTime(5000); await settle();
+    expect(bridge.connectHome).not.toHaveBeenCalled();
   });
 
   it("ready while open in the focused window: Opening in 3…, then the Cloud opens; Not now stops it; unfocused, Open {name}", async () => {
