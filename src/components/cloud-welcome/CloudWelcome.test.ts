@@ -123,7 +123,7 @@ describe("CloudWelcome", () => {
     expect(button("Copy to Studio Cloud")).toBeDefined();
     expect(text()).not.toContain("Also bring in");
     expect([...document.body.querySelectorAll("button")].map((node) => node.textContent?.trim())).toEqual([
-      "1Bring your stuffBots, chats, memory (Not done yet)", "2Connect your AIClaude or ChatGPT (Not done yet)", "3Files and appsOptional (Not done yet)",
+      "1Bring your stuffYour bots and chats (Not done yet)", "2Connect your AIClaude or ChatGPT (Not done yet)", "3Files and appsOptional (Not done yet)",
       "Skip setup", expect.stringContaining("Everything from this Mac"), expect.stringContaining("Start fresh"), "Copy to Studio Cloud", "Skip for now",
     ]);
     expect(sent()).toEqual([]);

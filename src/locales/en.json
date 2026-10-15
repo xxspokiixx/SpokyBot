@@ -768,7 +768,7 @@
   "cloudWelcome.steps": "Setup steps",
   "cloudWelcome.skip": "Skip setup",
   "cloudWelcome.step.bring": "Bring your stuff",
-  "cloudWelcome.step.bringHint": "Bots, chats, memory",
+  "cloudWelcome.step.bringHint": "Your bots and chats",
   "cloudWelcome.step.engineHint": "Claude or ChatGPT",
   "cloudWelcome.step.files": "Files and apps",
   "cloudWelcome.step.filesHint": "Optional",
