@@ -12,10 +12,12 @@ import { randomUUID } from "node:crypto";
 import type { CdpBrowser } from "../cdp/browser.ts";
 import type { CdpSession, Params } from "../cdp/connection.ts";
 import type { Download } from "../cdp/downloads.ts";
-import { valueInWorld } from "../cdp/evaluate.ts";
+import { callOnNode, valueInWorld } from "../cdp/evaluate.ts";
+import type { OpenFileChooser } from "../cdp/files.ts";
 import { editingCommands, keyDescription, US_KEYBOARD } from "../cdp/keyboard.ts";
 import type { ProfileControl, TakeResult } from "../control.ts";
 import type { Tab } from "../tabs.ts";
+import { ACCEPT_OF, chooseOption, cursorAt, selectAt, type SelectPopup } from "./popups.ts";
 
 /** Chromium keeps three frames unacknowledged, so acking 100 ms after arrival caps a viewer near 30 fps. */
 export const ACK_PACE_MS = { hi: 100, lo: 200 } as const;
@@ -32,6 +34,9 @@ const AGENT_CURSOR_MOVE_MS = 160;
 const AGENT_CURSOR_CLICK_LEAD_MS = 40;
 const TEXT_LIMIT = 10_000;
 const HELD_LIMIT = 64;
+const CURSOR_EVERY_MS = 120;
+/** Chrome's own zoom range. */
+export const ZOOM_LIMITS = { min: 0.25, max: 5 } as const;
 
 /** The viewport sizes a person can pick: fill follows the panel; a preset letterboxes in it. */
 export const VIEWPORT_PRESETS = {
@@ -59,18 +64,21 @@ export type Controller = "agent" | "you" | "another-viewer" | "unclaimed";
 
 export type ViewerOutput =
   | { type: "frame"; data: Buffer; metadata: FrameMetadata; still: boolean; ack: () => void }
-  | { type: "viewport"; width: number; height: number; setting: ViewportSetting }
+  | { type: "viewport"; width: number; height: number; setting: ViewportSetting; zoom: number }
   | { type: "control"; canOperate: boolean; controller: Controller; held: boolean; owned: boolean; controlling: boolean; stale: boolean; generation: number; dialog: { type: string; message: string; defaultValue: string } | null }
   | { type: "tabs"; tabs: Array<{ tabId: string; title: string; url: string; active: boolean }> }
   | { type: "url"; url: string }
+  | { type: "nav"; tabId: string; url: string; loading: boolean; canGoBack: boolean; canGoForward: boolean }
   | { type: "status"; connected: boolean; screencasting: boolean; viewportWidth: number; viewportHeight: number }
   | { type: "clipboard"; text: string }
   | { type: "probe"; x: number; y: number; editable: boolean }
   | { type: "pointer"; phase: "move" | "click"; x: number; y: number; sequence: number }
-  | { type: "fileChooser"; id: string; multiple: boolean }
+  | { type: "fileChooser"; id: string; multiple: boolean; accept: string }
   | { type: "fileChooserClosed"; id: string }
   | { type: "download"; id: string; fileName: string; sizeBytes: number }
   | { type: "popup"; tabId: string }
+  | ({ type: "selectPopup"; id: string } & SelectPopup)
+  | { type: "cursor"; shape: string }
   | { type: "authPrompt"; origin: string; realm: string }
   | { type: "authPromptClosed" }
   | { type: "starting" }
@@ -172,6 +180,11 @@ export class Viewer {
   scrolledAt = 0;
   readonly pressedKeys = new Map<string, { key: string; code: string }>();
   readonly pressedButtons = new Map<"left" | "middle" | "right", { x: number; y: number }>();
+  /** The <select> this viewer's press opened, drawn by the viewer: its press and release never reach the page. */
+  select: { id: string; tab: Tab } | null = null;
+  readonly swallowed = new Set<string>();
+  cursor = "default";
+  cursorAt = 0;
   closed = false;
 
   constructor(hub: ViewerHub, options: ViewerOptions, push: (output: ViewerOutput) => void) {
@@ -338,7 +351,7 @@ export class Viewer {
     try {
       const metrics = await session.send<{ cssVisualViewport: { pageX: number; pageY: number; clientWidth: number; clientHeight: number; scale?: number } }>("Page.getLayoutMetrics");
       const view = metrics.cssVisualViewport;
-      const ratio = await tab.page.devicePixelRatio();
+      const ratio = (await tab.page.devicePixelRatio()) * this.#hub.zoom;
       const scale = Math.min(1, this.options.maxWidth / Math.max(1, view.clientWidth * ratio), this.options.maxHeight / Math.max(1, view.clientHeight * ratio));
       const capture = () => session.send<{ data: string }>("Page.captureScreenshot", {
         format: "jpeg",
@@ -415,7 +428,11 @@ export class ViewerHub {
   readonly host: HubHost;
   readonly viewers = new Set<Viewer>();
   setting: ViewportSetting = { mode: "fill" };
+  zoom = 1;
   #order = 0;
+  #chooser: { id: string; tab: Tab; viewer: Viewer; open: OpenFileChooser } | null = null;
+  #offering: Promise<void> = Promise.resolve();
+  readonly #loading = new WeakMap<Tab, boolean>();
   #pointerSequence = 0;
   #capturing = new Map<Tab, number>();
   #applied: string | null = null;
@@ -441,7 +458,13 @@ export class ViewerHub {
     return viewportFor(this.setting, latest ? { width: latest.width, height: latest.height } : null);
   }
 
-  /** Resizes the real window; only a preset narrower than any Chrome window is emulated, as DevTools' device mode does. */
+  /** The CSS size the page lays out in: the viewport shrunk by the zoom, as Chrome zooms. */
+  layout(): { width: number; height: number } {
+    const size = this.viewport();
+    return { width: Math.max(1, Math.round(size.width / this.zoom)), height: Math.max(1, Math.round(size.height / this.zoom)) };
+  }
+
+  /** Resizes the real window; a zoom, or a preset narrower than any Chrome window, is emulated, as DevTools' device mode does. */
   applyViewport(): Promise<void> {
     this.#applying = this.#applying.then(() => this.#apply(), () => this.#apply());
     return this.#applying;
@@ -451,8 +474,9 @@ export class ViewerHub {
     const browser = this.host.browser();
     if (!browser) return;
     const size = this.viewport();
-    const emulated = size.width < MIN_WINDOW_WIDTH;
-    const key = `${size.width}x${size.height}${emulated ? "e" : ""}`;
+    const zoom = this.zoom;
+    const emulated = size.width < MIN_WINDOW_WIDTH || zoom !== 1;
+    const key = `${size.width}x${size.height}@${zoom}`;
     const active = this.host.active();
     if (this.#applied === key && browser.viewport?.width === Math.max(size.width, MIN_WINDOW_WIDTH)) return;
     this.#applied = key;
@@ -462,14 +486,15 @@ export class ViewerHub {
       this.#emulated = false;
     }
     await browser.setViewport({ width: Math.max(size.width, MIN_WINDOW_WIDTH), height: size.height }).catch(() => {});
+    const layout = this.layout();
     if (emulated) {
       for (const tab of this.host.tabs()) {
         const ratio = await tab.page.devicePixelRatio().catch(() => 1);
-        await tab.page.session.send("Emulation.setDeviceMetricsOverride", { width: size.width, height: size.height, deviceScaleFactor: ratio, mobile: false }).catch(() => {});
+        await tab.page.session.send("Emulation.setDeviceMetricsOverride", { width: layout.width, height: layout.height, deviceScaleFactor: ratio * zoom, mobile: false }).catch(() => {});
       }
       this.#emulated = true;
     }
-    if (active) this.broadcast({ type: "viewport", ...size, setting: this.setting });
+    if (active) this.broadcast({ type: "viewport", ...layout, setting: this.setting, zoom });
     this.broadcastStatus();
   }
 
@@ -492,10 +517,12 @@ export class ViewerHub {
       await viewer.hide(owner !== null && owner !== viewer.id);
       await this.applyViewport();
       viewer.push(this.controlFor(viewer));
-      viewer.push({ type: "viewport", ...this.viewport(), setting: this.setting });
+      viewer.push({ type: "viewport", ...this.layout(), setting: this.setting, zoom: this.zoom });
       this.pushTabs(viewer);
       viewer.push(this.statusFor());
       await viewer.bind(this.host.active());
+      const active = this.host.active();
+      if (active) this.navChanged(active);
       return viewer;
     } catch (error) {
       await this.detach(viewer);
@@ -517,7 +544,7 @@ export class ViewerHub {
     const owner = this.host.control.owner;
     for (const viewer of this.viewers) {
       if (holderOnly && owner !== viewer.id) continue;
-      if (!holderOnly && owner !== null && owner !== viewer.id && (output.type === "tabs" || output.type === "url" || output.type === "pointer")) continue;
+      if (!holderOnly && owner !== null && owner !== viewer.id && (output.type === "tabs" || output.type === "url" || output.type === "nav" || output.type === "pointer")) continue;
       viewer.push(output);
     }
   }
@@ -545,6 +572,41 @@ export class ViewerHub {
       void viewer.hide(owner !== null && owner !== viewer.id);
       viewer.push(this.controlFor(viewer));
     }
+    void this.offerFileChooser();
+  }
+
+  /** The page's open file picker goes to the person holding the browser, under an id that changes whenever they do. */
+  offerFileChooser(): Promise<void> {
+    this.#offering = this.#offering.then(() => this.#offer(), () => this.#offer());
+    return this.#offering;
+  }
+
+  async #offer(): Promise<void> {
+    const owner = this.host.control.owner;
+    const holder = owner === null ? null : [...this.viewers].find((viewer) => viewer.id === owner && !viewer.closed) ?? null;
+    const tab = this.host.active();
+    const open = tab?.page.fileChoosers.open ?? null;
+    const offered = this.#chooser;
+    if (offered && offered.viewer === holder && offered.tab === tab && offered.open === open) return;
+    if (offered) {
+      this.#chooser = null;
+      offered.viewer.push({ type: "fileChooserClosed", id: offered.id });
+    }
+    if (!holder || !tab || !open) return;
+    const accept = await callOnNode<string>(tab.page.frames, open, ACCEPT_OF).catch(() => "");
+    // Whatever changed meanwhile queued its own offer.
+    if (tab.page.fileChoosers.open !== open || this.host.control.owner !== holder.id || holder.closed || this.#chooser) return;
+    const chooser = { id: randomUUID(), tab, viewer: holder, open };
+    this.#chooser = chooser;
+    holder.push({ type: "fileChooser", id: chooser.id, multiple: open.multiple, accept: typeof accept === "string" ? accept : "" });
+  }
+
+  /** The holder's files for the picker it was offered; false when that picker is no longer open, or is not theirs. */
+  async answerFileChooser(owner: string, id: string, paths: readonly string[]): Promise<boolean> {
+    const chooser = this.#chooser;
+    if (!chooser || chooser.id !== id || chooser.viewer.options.owner !== owner || chooser.tab.page.fileChoosers.open !== chooser.open) return false;
+    await this.host.control.human(chooser.viewer.id, chooser.tab, () => chooser.tab.page.fileChoosers.answer(paths, { waitMs: 0 }));
+    return true;
   }
 
   tabsMessage(): ViewerOutput {
@@ -576,6 +638,25 @@ export class ViewerHub {
     this.broadcast(this.tabsMessage());
     if (active) this.broadcast({ type: "url", url: active.page.url() });
     for (const viewer of this.viewers) void viewer.bind(active);
+    if (active) this.navChanged(active);
+    void this.offerFileChooser();
+  }
+
+  loading(tab: Tab, loading: boolean): void {
+    this.#loading.set(tab, loading);
+    this.navChanged(tab);
+  }
+
+  /** The address bar of the tab in front: where it is, whether it loads, and where its history goes. */
+  navChanged(tab: Tab): void {
+    if (tab !== this.host.active() || !this.viewers.size) return;
+    void tab.page.session.send<{ currentIndex: number; entries: unknown[] }>("Page.getNavigationHistory").then((history) => {
+      if (tab !== this.host.active()) return;
+      this.broadcast({
+        type: "nav", tabId: tab.id, url: tab.page.url(), loading: this.#loading.get(tab) === true,
+        canGoBack: history.currentIndex > 0, canGoForward: history.currentIndex < history.entries.length - 1,
+      });
+    }, () => undefined);
   }
 
   titlesChanged(): void {
@@ -586,6 +667,7 @@ export class ViewerHub {
     if (tab !== this.host.active()) return;
     this.broadcast({ type: "url", url: tab.page.url() });
     this.broadcast(this.tabsMessage());
+    this.navChanged(tab);
   }
 
   started(): void {
@@ -669,6 +751,13 @@ export class ViewerHub {
         await this.applyViewport();
         return;
       }
+      case "zoom": {
+        const factor = num(message.factor, 0);
+        if (!control.canControl(viewer.id) || !(factor > 0)) return;
+        this.zoom = Math.round(Math.min(ZOOM_LIMITS.max, Math.max(ZOOM_LIMITS.min, factor)) * 100) / 100;
+        await this.applyViewport();
+        return;
+      }
     }
     const tab = this.host.active();
     if (!tab || !control.canControl(viewer.id)) {
@@ -697,8 +786,36 @@ export class ViewerHub {
         if (closing) await this.host.closeTab(closing);
         return;
       }
+      case "selectChoose": {
+        const select = viewer.select;
+        viewer.select = null;
+        const index = num(message.index, -1);
+        if (!select || select.id !== message.id || select.tab !== tab || !Number.isInteger(index) || index < 0) return;
+        await control.human(viewer.id, tab, () => chooseOption(tab.page, select.id, index));
+        return;
+      }
     }
     await control.human(viewer.id, tab, () => this.#dispatch(viewer, tab, message));
+  }
+
+  /** A press on a dropdown list: the viewer draws its options, since no frame shows Chrome's own popup. */
+  async #openSelect(viewer: Viewer, tab: Tab, x: number, y: number): Promise<boolean> {
+    const id = randomUUID();
+    const popup = await selectAt(tab.page, x, y, id).catch(() => null);
+    if (!popup) return false;
+    viewer.select = { id, tab };
+    viewer.push({ type: "selectPopup", id, ...popup });
+    return true;
+  }
+
+  async #cursor(viewer: Viewer, tab: Tab, x: number, y: number): Promise<void> {
+    const now = Date.now();
+    if (now - viewer.cursorAt < CURSOR_EVERY_MS) return;
+    viewer.cursorAt = now;
+    const shape = await cursorAt(tab.page, x, y).catch(() => null);
+    if (shape === null || shape === viewer.cursor || viewer.tab !== tab) return;
+    viewer.cursor = shape;
+    viewer.push({ type: "cursor", shape });
   }
 
   async #dispatch(viewer: Viewer, tab: Tab, message: Record<string, unknown>): Promise<void> {
@@ -713,6 +830,12 @@ export class ViewerHub {
         const x = num(message.x);
         const y = num(message.y);
         if (type === "mousePressed" && button !== "none" && viewer.pressedButtons.size >= HELD_LIMIT) return;
+        if (type === "mouseReleased" && viewer.swallowed.delete(button)) return;
+        if (type === "mousePressed" && button === "left" && num(message.clickCount, 1) <= 1 && await this.#openSelect(viewer, tab, x, y)) {
+          viewer.swallowed.add(button);
+          return;
+        }
+        if (type === "mouseMoved" && button === "none") void this.#cursor(viewer, tab, x, y);
         await session.send("Input.dispatchMouseEvent", {
           type, x, y, button,
           buttons: num(message.buttons, [...viewer.pressedButtons.keys()].reduce((bits, held) => bits | (held === "left" ? 1 : held === "right" ? 2 : 4), 0)),

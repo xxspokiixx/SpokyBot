@@ -16,8 +16,10 @@ import { ProcessRegistry, sweep } from "./chrome/processes.ts";
 import { browserRoot } from "./chrome/profile.ts";
 import { browserLanguage, browserTimeZone } from "./chrome/wrapper.ts";
 import { displayScreen } from "./display.ts";
+import type { Download } from "./cdp/downloads.ts";
 import { BrowserService, type BrowserTarget } from "./service.ts";
 import { LiveV1 } from "./viewers/live-v1.ts";
+import { StreamV2, type StreamRequest } from "./viewers/stream-v2.ts";
 
 /** A spec's command when the new engine runs the session; its one argument is the profile key. */
 export const CHROME_ENGINE = "omb-cdp";
@@ -49,11 +51,12 @@ export interface ChromeEngineOptions {
   log?: (line: string) => void;
 }
 
-/** The new engine: one Chrome launcher (no agent-browser wrapper), the browser service, its v1 live view and its sweep. */
+/** The new engine: one Chrome launcher (no agent-browser wrapper), the browser service, its live views and its sweep. */
 export class ChromeEngine {
   readonly launcher: ChromeLauncher;
   readonly service: BrowserService;
   readonly live: LiveV1;
+  readonly stream: StreamV2;
   readonly #targets = new Map<string, string>();
   readonly #registry: ProcessRegistry;
   readonly #options: ChromeEngineOptions;
@@ -96,6 +99,7 @@ export class ChromeEngine {
       ...(options.log ? { log: options.log } : {}),
     });
     this.live = new LiveV1({ service: this.service, target: (session) => this.target(session) });
+    this.stream = new StreamV2({ service: this.service });
   }
 
   /** The spec a session gets on the new engine, remembered so its live view finds the profile. */
@@ -145,6 +149,7 @@ export class ChromeEngine {
     if (this.#timer) clearInterval(this.#timer);
     this.#timer = null;
     this.live.closeAll();
+    this.stream.closeAll();
     await this.service.closeAll();
   }
 
@@ -227,8 +232,12 @@ export class RuntimeRouter {
 }
 
 type OpenOptions = Parameters<BrowserLive["open"]>[0];
+type SessionSpec = { session: string; spec: { command: string; args?: readonly string[] } };
 
-/** BrowserLive's API: a viewer of a new-engine session gets the v1 adapter, every other the agent-browser one. */
+/**
+ * BrowserLive's API: a viewer of a new-engine session gets the v1 adapter, every other the agent-browser one. The v2
+ * stream, its file pickers and its downloads exist on the new engine only.
+ */
 export class LiveRouter {
   readonly #old: BrowserLive;
   readonly #chrome: ChromeEngine;
@@ -250,9 +259,25 @@ export class LiveRouter {
     return this.#chrome.live.has(options.viewerId) ? this.#chrome.live.action(options) : this.#old.action(options);
   }
 
+  /** False when the session runs on agent-browser, whose only view is v1. */
+  stream({ session, spec, ...request }: SessionSpec & Omit<StreamRequest, "target">): boolean {
+    const target = chromeTarget(session, spec);
+    if (!target) return false;
+    this.#chrome.stream.open({ ...request, target });
+    return true;
+  }
+
+  answerFileChooser({ session, spec }: SessionSpec, owner: string, chooserId: string, paths: readonly string[]): Promise<boolean> {
+    return chromeTarget(session, spec) ? this.#chrome.service.answerFileChooser(session, owner, chooserId, paths) : Promise.resolve(false);
+  }
+
+  download({ session, spec }: SessionSpec, id: string): Download | undefined {
+    return chromeTarget(session, spec) ? this.#chrome.service.download(session, id) : undefined;
+  }
+
   handBack(session: string): void { this.#chrome.live.handBack(session); this.#old.handBack(session); }
-  closeForSession(session: string): void { this.#chrome.live.closeForSession(session); this.#old.closeForSession(session); }
-  closeForOwner(owner: string): void { this.#chrome.live.closeForOwner(owner); this.#old.closeForOwner(owner); }
-  closeForBot(botId: string): void { this.#chrome.live.closeForBot(botId); this.#old.closeForBot(botId); }
-  closeAll(): void { this.#chrome.live.closeAll(); this.#old.closeAll(); }
+  closeForSession(session: string): void { this.#chrome.live.closeForSession(session); this.#chrome.stream.closeForSession(session); this.#old.closeForSession(session); }
+  closeForOwner(owner: string): void { this.#chrome.live.closeForOwner(owner); this.#chrome.stream.closeForOwner(owner); this.#old.closeForOwner(owner); }
+  closeForBot(botId: string): void { this.#chrome.live.closeForBot(botId); this.#chrome.stream.closeForBot(botId); this.#old.closeForBot(botId); }
+  closeAll(): void { this.#chrome.live.closeAll(); this.#chrome.stream.closeAll(); this.#old.closeAll(); }
 }

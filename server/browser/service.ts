@@ -203,6 +203,9 @@ export class BrowserService {
       run.offs.push(page.session.on("Page.loadEventFired", () => {
         if (profile.hub.size) void browser.refreshTargets().then(() => profile.hub.titlesChanged(), () => undefined);
       }));
+      run.offs.push(page.session.on("Page.frameStartedLoading", (params) => { if (params.frameId === page.frames.mainFrameId) profile.hub.loading(tab, true); }));
+      run.offs.push(page.session.on("Page.frameStoppedLoading", (params) => { if (params.frameId === page.frames.mainFrameId) profile.hub.loading(tab, false); }));
+      run.offs.push(page.fileChoosers.onChange(() => void profile.hub.offerFileChooser()));
       if (opener && profile.control.owner !== null) {
         profile.hub.popup(tab);
         void browser.bringToFront(page).then(() => profile.hub.tabsChanged(), () => undefined);
@@ -577,6 +580,17 @@ export class BrowserService {
 
   heldBy(session: string): string | null {
     return this.#bySession(session)?.control.owner ?? null;
+  }
+
+  /** A person's files for the page's open picker, which their view was offered as `chooserId`. */
+  answerFileChooser(session: string, owner: string, chooserId: string, paths: readonly string[]): Promise<boolean> {
+    return this.#bySession(session)?.hub.answerFileChooser(owner, chooserId, paths) ?? Promise.resolve(false);
+  }
+
+  /** A file this session's browser finished downloading. */
+  download(session: string, id: string): Download | undefined {
+    const download = this.#bySession(session)?.run?.browser.downloads?.list().find((candidate) => candidate.id === id);
+    return download?.state === "completed" && download.path ? download : undefined;
   }
 
   canControl(session: string, owner: string): boolean {

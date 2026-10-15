@@ -190,3 +190,66 @@ describe("viewers of one browser", () => {
     for (const refused of ["javascript:alert(1)", "file:///etc/passwd", "https://a:b@example.com", "data:text/html,x", "https://example.com/\nx"]) expect(personUrl(refused)).toBeNull();
   });
 });
+
+describe("what the panel shows besides the page", () => {
+  const mainSession = (sent: Array<{ method: string; sessionId: string | null }>) => sent.find((entry) => entry.method === "Page.enable" && entry.sessionId?.startsWith("S"))?.sessionId ?? null;
+
+  it("offers the page's file picker to the person holding the browser only, under a new id when control moves", async () => {
+    const { service, target, watch, chrome, page } = await setup();
+    const first = await watch();
+    const second = await watch();
+    await first.viewer.input({ type: "takeControl" });
+    const session = mainSession(chrome().sentTo(page()));
+    chrome().event("Page.fileChooserOpened", { frameId: page().targetId, mode: "selectMultiple", backendNodeId: 1 }, session!);
+    await sleep(20);
+    const offered = first.outputs.find((output): output is Extract<ViewerOutput, { type: "fileChooser" }> => output.type === "fileChooser");
+    expect(offered).toMatchObject({ multiple: true, accept: "" });
+    expect(second.outputs.some((output) => output.type === "fileChooser")).toBe(false);
+    expect(await service.answerFileChooser(target.session, "someone-else", offered!.id, [])).toBe(false);
+    await first.viewer.input({ type: "releaseControl" });
+    await second.viewer.input({ type: "takeControl" });
+    await sleep(20);
+    expect(first.outputs).toContainEqual({ type: "fileChooserClosed", id: offered!.id });
+    const reoffered = second.outputs.find((output): output is Extract<ViewerOutput, { type: "fileChooser" }> => output.type === "fileChooser");
+    expect(reoffered?.id).not.toBe(offered!.id);
+    expect(await service.answerFileChooser(target.session, "local-owner", offered!.id, [])).toBe(false);
+    expect(await service.answerFileChooser(target.session, "local-owner", reoffered!.id, [])).toBe(true);
+    expect(chrome().sentTo(page())).toContainEqual(expect.objectContaining({ method: "DOM.setFileInputFiles", params: { files: [], backendNodeId: 1 } }));
+    await sleep(20);
+    expect(second.outputs).toContainEqual({ type: "fileChooserClosed", id: reoffered!.id });
+  });
+
+  it("zooms as Chrome does: the page lays out in fewer CSS pixels drawn larger, and the window keeps its size", async () => {
+    const { watch, chrome, page } = await setup();
+    const { viewer, outputs } = await watch({ size: { width: 1600, height: 1000 } });
+    await viewer.input({ type: "takeControl" });
+    await viewer.input({ type: "zoom", factor: 1.25 });
+    expect(chrome().viewport).toEqual({ width: 1600, height: 1000 });
+    expect(chrome().sentTo(page())).toContainEqual(expect.objectContaining({ method: "Emulation.setDeviceMetricsOverride", params: { width: 1280, height: 800, deviceScaleFactor: 2.5, mobile: false } }));
+    expect(outputs.at(-2)).toEqual({ type: "viewport", width: 1280, height: 800, setting: { mode: "fill" }, zoom: 1.25 });
+    await viewer.input({ type: "zoom", factor: 9 });
+    expect(outputs.filter((output) => output.type === "viewport").at(-1)).toMatchObject({ width: 320, height: 200, zoom: 5 });
+    await viewer.input({ type: "zoom", factor: 1 });
+    expect(chrome().sentTo(page()).at(-1)?.method).not.toBe("Emulation.setDeviceMetricsOverride");
+    expect(outputs.filter((output) => output.type === "viewport").at(-1)).toMatchObject({ width: 1600, height: 1000, zoom: 1 });
+  });
+
+  it("refuses a zoom from a viewer that does not hold the browser", async () => {
+    const { watch, chrome, page } = await setup();
+    const { viewer } = await watch({ size: { width: 1600, height: 1000 } });
+    await viewer.input({ type: "zoom", factor: 2 });
+    expect(chrome().sentTo(page()).some((sent) => sent.method === "Emulation.setDeviceMetricsOverride")).toBe(false);
+  });
+
+  it("tells viewers where the tab in front is, whether it loads, and where its history goes", async () => {
+    const { watch } = await setup();
+    const { viewer, outputs } = await watch();
+    await sleep(20);
+    expect(outputs.filter((output) => output.type === "nav").at(-1)).toMatchObject({ url: "https://example.com/", canGoBack: true, canGoForward: false, loading: false });
+    await viewer.input({ type: "takeControl" });
+    await viewer.input({ type: "history", delta: -1 });
+    await sleep(30);
+    expect(outputs.filter((output) => output.type === "nav").at(-1)).toMatchObject({ url: "about:blank", canGoBack: false, canGoForward: true });
+  });
+});
+

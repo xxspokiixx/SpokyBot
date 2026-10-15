@@ -608,6 +608,8 @@ import { createTeamRoutes } from "./routes/teams.ts";
 import { createThreadModelRoutes } from "./routes/thread-models.ts";
 import { createUndoRoutes } from "./routes/undo.ts";
 import { createDesktopViewer, desktopViewerUrl } from "./routes/desktop-viewer.ts";
+import { createUpgrades } from "./routes/upgrades.ts";
+import { createBrowserViewerRoutes } from "./routes/browser-viewers.ts";
 import { localDesktopTarget, localVmViewerStatus, viewerTargetId } from "./desktop-viewer-targets.ts";
 import { createAntigravityLeftoverRoutes } from "./routes/antigravity-leftovers.ts";
 import { createAntigravityAccountRoutes } from "./routes/antigravity-accounts.ts";
@@ -5212,7 +5214,9 @@ function audienceChanged(): void {
   }
 }
 // Before any revocation callback: Cloud boot can revoke sessions before routes are registered.
+const upgrades = createUpgrades();
 const desktopViewer = createDesktopViewer({
+  upgrades,
   target: (id) => {
     if (id.startsWith("vps/")) {
       const botId = id.slice(4);
@@ -13886,6 +13890,25 @@ ROUTES.push(createStatusRoutes({
 }));
 
 ROUTES.push(desktopViewer.route);
+ROUTES.push(createBrowserViewerRoutes({
+  upgrades, viewers: browserLive, dataDir: DATA_DIR,
+  browser: async (botId) => {
+    const bot = store.bot(botId);
+    if (!bot) return { status: 404, error: "no such bot" };
+    if (!builtInBrowserEnabled(cfg) || bot.browser === false) return { status: 409, error: "Enable this bot's browser in its profile first." };
+    const browser = await browserIntegration(bot.id, bot.browserProfile);
+    return browser ? { botId: bot.id, session: browser.session, spec: browser.spec } : { status: 503, error: "Install the browser engine first." };
+  },
+  authorize: async (req, auth) => !HOSTED_WORKSPACE || auth.kind !== "session" ? null
+    : workspaceAccess ? workspaceAccess.authorize(req, auth) : { status: 503, error: "Workspace sign-in is unavailable." },
+  current: (botId, session, auth) => {
+    const current = store.bot(botId);
+    return !!current && current.browser !== false && builtInBrowserEnabled(cfg) && currentBrowserSession(current.id, current.browserProfile) === session
+      && (auth.kind !== "session" || sessions.isLive(auth.session.id));
+  },
+  restartRefusal: (session) => browserRestartRefusal(browserRuntime.interrupted(session), store.bots.filter((candidate) => candidate.busy
+    && currentBrowserSession(candidate.id, candidate.browserProfile) === session).map((candidate) => ({ waitingOnBrowser: computerControl.snapshot(candidate.id).help?.place === "browser" }))),
+}));
 
 // Live calls: the client holds the WebRTC audio; the key never leaves the harness, which creates the session.
 function liveBotFor(botId: string): LiveBot {
@@ -16522,46 +16545,6 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
         : json(res, 404, { error: "no such webhook" });
     }
 
-    // Never mix login frames into the general events feed, which every device reads.
-    const liveBrowserMatch = /^\/api\/bots\/([\w-]+)\/browser\/(live|action)$/.exec(path);
-    if (liveBrowserMatch) {
-      res.setHeader("cache-control", "no-store");
-      const bot = store.bot(liveBrowserMatch[1]);
-      if (!bot) return json(res, 404, { error: "no such bot" });
-      if (!builtInBrowserEnabled(cfg) || bot.browser === false) {
-        return json(res, 409, { error: "Enable this bot's browser in its profile first." });
-      }
-      const browser = await browserIntegration(bot.id, bot.browserProfile);
-      if (!browser) return json(res, 503, { error: "Install the browser engine first." });
-      // Discovery may have awaited while the portal closed this owner's streams: never open a late replacement on the earlier authorization.
-      if (HOSTED_WORKSPACE && auth.kind === "session") {
-        const failure = workspaceAccess
-          ? await workspaceAccess.authorize(req, auth)
-          : { status: 503, error: "Workspace sign-in is unavailable." };
-        if (failure) return json(res, failure.status, { error: failure.error });
-      }
-      const owner = auth.kind === "session" ? auth.session.id : "local-owner";
-      const isCurrent = () => {
-        const current = store.bot(bot.id);
-        return !!current && current.browser !== false && builtInBrowserEnabled(cfg)
-          && currentBrowserSession(current.id, current.browserProfile) === browser.session
-          && (auth.kind !== "session" || sessions.isLive(auth.session.id));
-      };
-      if (method === "GET" && liveBrowserMatch[2] === "live") {
-        req.socket.setTimeout(0);
-        return await browserLive.open({ botId: bot.id, session: browser.session, spec: browser.spec, owner, isCurrent, res });
-      }
-      if (method === "POST" && liveBrowserMatch[2] === "action") {
-        const body = await readBody(req, 32_768);
-        if (!isCurrent()) return json(res, 409, { error: "This browser session changed. Reopen the browser panel." });
-        if (typeof body?.viewerId !== "string") return json(res, 400, { error: "A live browser connection is required." });
-        const refused = body.type === "restart" && browserRestartRefusal(browserRuntime.interrupted(browser.session), store.bots.filter((candidate) => candidate.busy
-          && currentBrowserSession(candidate.id, candidate.browserProfile) === browser.session).map((candidate) => ({ waitingOnBrowser: computerControl.snapshot(candidate.id).help?.place === "browser" })));
-        if (refused) return json(res, 409, { error: refused });
-        return json(res, 200, await browserLive.action({ viewerId: body.viewerId, botId: bot.id, owner, body }));
-      }
-      return json(res, 405, { error: "method not allowed" });
-    }
     if (method === "GET" && path === "/api/events") {
       const viewer = viewerFor(auth);
       const visibleNow = visibleTo(viewer);
@@ -17358,7 +17341,7 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
 };
 
 const server = createServer(handleRequest);
-desktopViewer.attach(server, handleRequest);
+upgrades.attach(server, handleRequest);
 
 calendarCalls.start();
 
@@ -17482,7 +17465,7 @@ let tunnelListener: ReturnType<typeof createServer> | null = null;
 if (TUNNEL_SOCKET) {
   if (process.platform !== "win32") rmSync(TUNNEL_SOCKET, { force: true });
   tunnelListener = createServer(handleRequest);
-  desktopViewer.attach(tunnelListener, handleRequest);
+  upgrades.attach(tunnelListener, handleRequest);
   tunnelListener.listen(TUNNEL_SOCKET, () => {
     console.log(`openmausbot tunnel listener on ${TUNNEL_SOCKET}`);
   });
@@ -17526,6 +17509,7 @@ const gracefulShutdown = createGracefulShutdown({
       sharedComputerControl.close();
       browserLive.closeAll();
       desktopViewer.closeAll();
+      upgrades.close();
       for (const idle of localVmIdles.values()) idle.cancel();
       vps.closeAllVpsDesktopTunnels();
       watchdog.stop();

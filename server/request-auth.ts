@@ -303,6 +303,8 @@ export const CLIENT_ALLOW: ReadonlyArray<{ methods: readonly string[]; path: Reg
   // A member reaches only the bots shown to them.
   { methods: ["GET"], path: /^\/api\/bots\/[\w-]+\/browser\/live$/ },
   { methods: ["POST"], path: /^\/api\/bots\/[\w-]+\/browser\/action$/ },
+  { methods: ["GET"], path: /^\/api\/bots\/[\w-]+\/browser\/(?:stream|download\/[\w-]+)$/ },
+  { methods: ["POST"], path: /^\/api\/bots\/[\w-]+\/browser\/upload$/ },
   { methods: ["GET"], path: /^\/api\/bots\/[\w-]+\/connector-cards\/[\w-]+\/status$/ },
   { methods: ["POST"], path: /^\/api\/bots\/[\w-]+\/connector-cards\/[\w-]+\/(?:resume|dismiss)$/ },
   { methods: ["POST"], path: /^\/api\/bots\/[\w-]+\/always-allow$/ }, // must match a pending card
@@ -392,6 +394,8 @@ function mutatingPublicRoute(method: string, path: string): boolean {
   ) return true;
   // Hands out a desktop's VNC password and control.
   if (path.startsWith("/api/desktop-viewer/")) return true;
+  // Drives a bot's browser: a WebSocket upgrade is a GET, but what it carries is input.
+  if (/^\/api\/bots\/[\w-]+\/browser\/stream$/.test(path)) return true;
   if (["GET", "HEAD", "OPTIONS"].includes(upper)) return false;
   // Internal routes carry their own per-boot authorization; pairing-code exchange is public (the one-time code is its authorization).
   return !path.startsWith("/api/internal/") &&

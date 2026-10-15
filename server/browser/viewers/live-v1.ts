@@ -51,7 +51,8 @@ interface V1Viewer {
   restarting: boolean;
 }
 
-function displayUrl(value: unknown): string {
+/** An address a viewer may show: a web page's, never its credentials. */
+export function displayUrl(value: unknown): string {
   if (typeof value !== "string" || value.length > 8192) return "";
   try {
     const url = new URL(value);
