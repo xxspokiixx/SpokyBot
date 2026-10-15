@@ -185,10 +185,11 @@ export function CloudAddDialog({ now = Date.now }: { now?: () => number }) {
     if (["starting", "ready"].includes(kind) && !reported.includes(kind)) track("cloud_dialog_view", { view: kind });
     if (first || !reported.includes(kind)) setReported([...reported, kind]);
   }, [kind]);
+  // The setup screen saves what its preview shows, even untouched, so the switcher matches it; One Cloud for now changes nothing.
   useEffect(() => {
     if (!kind || !["starting", "ready", "has-cloud"].includes(kind) || look || !bridge?.look) return;
     let active = true;
-    void bridge.look().then(next => { if (active) setLook({ typed: next.name, color: cloudColor(next.color) ?? DEFAULT_CLOUD_COLOR, dirty: false }); }, () => {});
+    void bridge.look().then(next => { if (active) setLook({ typed: next.name, color: cloudColor(next.color) ?? DEFAULT_CLOUD_COLOR, dirty: kind !== "has-cloud" }); }, () => {});
     return () => { active = false; };
   }, [kind]);
   useEffect(() => {

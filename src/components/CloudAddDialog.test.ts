@@ -363,6 +363,9 @@ describe("the sheet", () => {
     vi.useFakeTimers();
     account = paid({ machine: { status: "provisioning", setup: { step: "starting" } } });
     expect(await settle()).toContain("Setting up your new Cloud");
+    vi.advanceTimersByTime(400); await flush();
+    expect(bridge.setLook).toHaveBeenCalledExactlyOnceWith("My Cloud", "blue");
+    bridge.setLook.mockClear();
     tree().find(node => node.props.id === "cloud-add-name")!.props.onChange({ target: { value: "Studio" } });
     tree().find(node => node.props["data-color"] === "purple")!.props.onClick();
     expect(await settle()).toContain("Starting Studio");
@@ -381,10 +384,13 @@ describe("the sheet", () => {
   });
 
   it("Add a Cloud… with a Cloud: one Cloud for now, Email me and Open; during setup, the setup", async () => {
+    vi.useFakeTimers();
     account = paid({ machine: ready });
     bridge.look.mockResolvedValue({ name: "Studio", color: "teal" });
     expect(await settle()).toContain("One Cloud per account for now");
     expect(await settle()).toContain("You have Studio.");
+    vi.advanceTimersByTime(1000); await flush();
+    expect(bridge.setLook, "an existing Cloud is never recoloured by opening the sheet").not.toHaveBeenCalled();
     expect(await press("Email me when I can add another")).toContain("Thanks. We'll email you");
     expect(bridge.interest).toHaveBeenCalledOnce();
     await press("Open Studio"); expect(bridge.connectHome).toHaveBeenCalledOnce();
