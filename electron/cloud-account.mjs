@@ -1,5 +1,6 @@
 import { createManagedDesktopStore, retryDelay, unreadableRecord } from "./managed-desktop.mjs";
 import { CLOUD_MACHINE_CONNECTABLE, parseCloudCredit, parseCloudOffer, parseCloudPurchase, parseCloudSummary, parseCloudTrial, parsePairingGrant, parsePublicOffer, withoutTrial } from "./cloud-home.mjs";
+import { cleanCode, cleanEmail, parseSignInStart, SIGN_IN_START, SIGN_IN_TRIES, SIGN_IN_VERIFY, signInIdentity, startFailure, verifyFailure } from "./cloud-signin.mjs";
 
 export const CLOUD_ORIGIN = "https://cloud.openmausbot.com";
 const TOKEN = /^omc_[A-Za-z0-9_-]{43}$/;
@@ -9,6 +10,8 @@ const TIER = /^[a-z][a-z0-9-]{0,23}$/;
 const REFRESH_MS = 60_000;
 const STEADY_MS = 15 * 60_000;
 const SETUP_REFRESH_MS = 15_000;
+/** While a checkout this app opened waits for its payment and setup: the session every 3 s (30 minutes at most). */
+const WATCH_REFRESH_MS = 3_000;
 const CHECKING_AFTER = 2;
 const MAX_ENROLL_SECONDS = 1800;
 const OFFER_MS = 10 * 60_000, OFFER_RETRY_MS = 30_000;
@@ -54,14 +57,18 @@ export function createCloudAccountClient({ store, openBrowser, platform, deviceN
   let verifiedUntil = 0, restoring = false, controller = new AbortController(), failures = 0;
   let plan = null, savedHint = null;
   let offerCache = null, offerPending = null;
+  /** The checkout this app opened, its address kept here for Reopen and Copy link: never published, never asked for again. */
   let opened = null;
+  /** An email code on its way: the attempt the Admin answered, kept in main only. */
+  let emailed = null;
   const newerPlans = new Set();
   const lastPlan = () => plan && grant && plan.accountId === grant.account.id ? { ...(plan.tier ? { tier: plan.tier } : {}), active: plan.active } : null;
   const view = (status, message) => {
     const known = status === "connected" ? null : lastPlan();
     return { status, ...(message ? { message } : {}), ...(grant ? { account: grant.account, deviceId: grant.device.id, expiresAt: grant.expiresAt } : {}), ...(known ? { lastPlan: known } : {}) };
   };
-  const checkout = () => opened && now() - opened.startedAt < CHECKOUT_KEPT_MS ? { plan: opened.plan, startedAt: opened.startedAt, ...(opened.signIn ? { signIn: true } : {}) } : null;
+  const checkout = () => opened && now() - opened.startedAt < CHECKOUT_KEPT_MS
+    ? { plan: opened.plan, startedAt: opened.startedAt, ...(opened.signIn ? { signIn: true } : {}), ...(opened.url ? { link: true } : {}) } : null;
   const withCheckout = current => { const open = checkout(); return open ? { ...current, checkout: open } : current; };
   const state = () => {
     if (value.status === "connected") {
@@ -79,7 +86,7 @@ export function createCloudAccountClient({ store, openBrowser, platform, deviceN
     stopTimer();
     if (!closed) { timer = setTimer(() => { timer = null; void work().catch(() => {}); }, Math.max(1, delay)); timer?.unref?.(); }
   };
-  const reset = () => { generation++; stopTimer(); controller.abort(); controller = new AbortController(); pending = null; verifiedUntil = 0; failures = 0; return generation; };
+  const reset = () => { generation++; stopTimer(); controller.abort(); controller = new AbortController(); pending = null; emailed = null; verifiedUntil = 0; failures = 0; return generation; };
   const current = stamp => !closed && generation === stamp;
   const versionHeader = text(appVersion, 40) && /^[0-9A-Za-z][0-9A-Za-z.+-]{0,39}$/.test(appVersion) ? { "x-openmausbot-version": appVersion } : {};
   async function request(route, { method = "GET", body, token, signal = controller.signal, path = `/api/cloud/desktop/${route}` } = {}) {
@@ -181,9 +188,9 @@ export function createCloudAccountClient({ store, openBrowser, platform, deviceN
         access.status === "active" && access.expiresAt !== null ? access.expiresAt : Infinity);
       publish({ ...view("connected"), entitlement: access, ...(machine ? { machine } : {}), ...(purchase ? { purchase } : {}),
         ...(trial ? { trial } : {}), ...(credit ? { credit } : {}), ...(offer ? { offer } : {}), verifiedAt: now(), verifiedUntil });
-      const settingUp = machine?.status === "provisioning" || (access.status === "active" && !machine) || Boolean(purchase)
-        || (watching() && access.status !== "active");
-      schedule(refresh, Math.min(settingUp ? SETUP_REFRESH_MS : REFRESH_MS, verifiedUntil - now()));
+      const settingUp = machine?.status === "provisioning" || (access.status === "active" && !machine) || Boolean(purchase);
+      const delay = watching() && machine?.status !== "ready" ? WATCH_REFRESH_MS : settingUp ? SETUP_REFRESH_MS : REFRESH_MS;
+      schedule(refresh, Math.min(delay, verifiedUntil - now()));
     } catch (error) {
       if (!current(stamp)) return state();
       if (signInEnded(error)) { verifiedUntil = 0; failures = 0; stopTimer(); return publish(view("reauth-required", "access-ended")); }
@@ -201,20 +208,25 @@ export function createCloudAccountClient({ store, openBrowser, platform, deviceN
     entry.operation = synchronize(generation).finally(() => { if (refreshing === entry) refreshing = null; });
     refreshing = entry; return entry.operation;
   }
+  /** A token the Admin just issued: stored where every sign-in goes, then this computer is signed in with it. */
+  async function adopt(result, stamp) {
+    const next = validateGrant({ origin, token: result?.accessToken, ...identity(result) });
+    if (!current(stamp)) { await revoke(next).catch(() => {}); return false; }
+    if (next.expiresAt <= now()) throw new Error("Expired Cloud credential.");
+    issued = next;
+    await store.write(next);
+    if (!current(stamp)) return false;
+    grant = next; issued = null; pending = null; emailed = null; savedHint = null;
+    if (plan?.accountId !== next.account.id) plan = null;
+    return true;
+  }
   async function poll() {
     const attempt = pending, stamp = generation;
     if (!attempt || !current(stamp)) return state();
     if (now() >= attempt.expiresAt) { pending = null; opened = null; return publish({ status: "signed-out", message: "enrollment-expired" }); }
     try {
       const result = await request("token", { method: "POST", body: { deviceCode: attempt.deviceCode } });
-      const next = validateGrant({ origin, token: result.accessToken, ...identity(result) });
-      if (!current(stamp)) { await revoke(next).catch(() => {}); return state(); }
-      if (next.expiresAt <= now()) throw new Error("Expired Cloud credential.");
-      issued = next;
-      await store.write(next);
-      if (!current(stamp)) return state();
-      grant = next; issued = null; pending = null; savedHint = null;
-      if (plan?.accountId !== next.account.id) plan = null;
+      if (!(await adopt(result, stamp))) return state();
       const intent = opened;
       const signedIn = await refresh();
       if (intent && current(stamp) && opened === intent && signedIn.status === "connected") {
@@ -252,6 +264,48 @@ export function createCloudAccountClient({ store, openBrowser, platform, deviceN
     } catch { if (current(stamp)) { pending = null; opened = null; publish({ status: "signed-out", message: "signin-failed" }); } }
     return state();
   }
+  const signInBlocked = () => closed || restoring || clearing || grant || issued || cleanupNeeded;
+  /** Sends the 8-digit code to `email`. Nothing is signed in yet; the answer says what the sheet shows next. */
+  async function emailStart(email) {
+    if (signInBlocked() || value.status === "connecting") throw new Error("Sign out before starting another Cloud connection.");
+    const address = cleanEmail(email), app = signInIdentity({ deviceName, platform, appVersion });
+    if (!address) return { outcome: "invalid-email" };
+    if (!app) return { outcome: "browser" };
+    const stamp = generation;
+    emailed = null;
+    try {
+      const started = parseSignInStart(await request(null, { method: "POST", path: SIGN_IN_START, body: { email: address, ...app } }));
+      if (!current(stamp)) return { outcome: "failed" };
+      if (!started) return { outcome: "failed" };
+      emailed = { attempt: started.attempt, email: address, expiresAt: now() + started.expiresIn * 1000, wrong: 0 };
+      return { outcome: "sent", email: address, expiresAt: emailed.expiresAt, resendAt: now() + started.resendAfter * 1000 };
+    } catch (error) {
+      return current(stamp) ? { outcome: startFailure(error) } : { outcome: "failed" };
+    }
+  }
+  /** Checks the code; on success the token is stored like the browser sign-in's and the session is read at once. */
+  async function emailVerify(code) {
+    const attempt = emailed, digits = cleanCode(code);
+    if (!attempt || now() >= attempt.expiresAt) { emailed = null; return { outcome: "expired" }; }
+    if (!digits) return { outcome: "wrong-code", triesLeft: SIGN_IN_TRIES - attempt.wrong };
+    if (signInBlocked()) throw new Error("Sign out before starting another Cloud connection.");
+    const stamp = generation;
+    try {
+      const result = await request(null, { method: "POST", path: SIGN_IN_VERIFY, body: { attempt: attempt.attempt, code: digits } });
+      if (emailed !== attempt || !(await adopt(result, stamp))) return { outcome: "failed" };
+      return { outcome: "signed-in", state: await refresh() };
+    } catch (error) {
+      if (!current(stamp)) return { outcome: "failed" };
+      if (issued) { await signOut(); return { outcome: "failed" }; }
+      const outcome = verifyFailure(error);
+      if (outcome === "wrong-code" && emailed === attempt) {
+        attempt.wrong++;
+        if (attempt.wrong < SIGN_IN_TRIES) return { outcome, triesLeft: SIGN_IN_TRIES - attempt.wrong };
+      }
+      if (emailed === attempt) emailed = null;
+      return { outcome: outcome === "wrong-code" ? "expired" : outcome };
+    }
+  }
   async function openCheckout(plan, source) {
     if (typeof plan !== "string" || !TIER.test(plan) || !CHECKOUT_SOURCES.includes(source)) throw new Error("Invalid Cloud checkout.");
     const current = state();
@@ -272,9 +326,21 @@ export function createCloudAccountClient({ store, openBrowser, platform, deviceN
     }
     if (grant !== signedIn) return { outcome: "failed", state: state() };
     await openBrowser(destination);
-    opened = { plan, source, startedAt: now() };
+    opened = { plan, source, startedAt: now(), url: destination };
     publish(value);
-    schedule(refresh, SETUP_REFRESH_MS);
+    schedule(refresh, WATCH_REFRESH_MS);
+    return { outcome: "opened", state: state() };
+  }
+  /** Reopen checkout: the same page again, never a new one from the Admin; only with none kept here (the browser
+   * sign-in led to it, or the app restarted) is the Admin asked, and it reopens the open one. Watches 30 minutes more. */
+  async function reopenCheckout(plan, source) {
+    const kept = opened;
+    if (!kept?.url) return openCheckout(kept?.plan ?? plan, kept?.source ?? source);
+    await openBrowser(kept.url);
+    if (opened !== kept) return { outcome: "failed", state: state() };
+    opened = { ...kept, startedAt: now() };
+    publish(value);
+    schedule(refresh, WATCH_REFRESH_MS);
     return { outcome: "opened", state: state() };
   }
   /** A sign-in that may only be locked in the keychain is kept, never removed, and read again shortly. */
@@ -309,7 +375,12 @@ export function createCloudAccountClient({ store, openBrowser, platform, deviceN
     state,
     start,
     begin: () => begin(),
+    emailStart, emailVerify,
+    emailCancel() { emailed = null; },
     checkout: openCheckout,
+    reopenCheckout,
+    /** For main's clipboard only: the kept checkout page, while it is the one being waited on. */
+    checkoutLink: () => (opened?.url && now() - opened.startedAt < CHECKOUT_KEPT_MS ? opened.url : null),
     checkoutPending: watching,
     async signInAgain() {
       if (state().status !== "reauth-required") throw new Error("This computer is still signed in to MausBot Cloud.");
