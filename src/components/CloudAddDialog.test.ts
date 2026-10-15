@@ -279,7 +279,7 @@ describe("the sheet", () => {
       checkout: vi.fn(async (plan: string): Promise<CloudCheckoutResult> => ({ outcome: "opened", state: { ...free, checkout: { plan, startedAt: NOW, link: true } } })),
       begin: vi.fn(async () => ({ status: "connecting" })), reopen: vi.fn(async () => account), cancel: vi.fn(async () => ({ status: "signed-out" })),
       signInStart: vi.fn(async (email: string) => ({ outcome: "sent", email: email.trim().toLowerCase(), expiresAt: NOW + 600_000, resendAt: NOW + 30_000 })),
-      signInVerify: vi.fn(async () => ({ outcome: "signed-in", state: free })), signInCancel: vi.fn(async () => {}),
+      signInVerify: vi.fn(async () => ({ outcome: "signed-in", state: { ...free, offer: TRIAL } })), signInCancel: vi.fn(async () => {}),
       reopenCheckout: vi.fn(async () => ({ outcome: "opened", state: account })), copyCheckoutLink: vi.fn(async () => true), interest: vi.fn(async () => {}),
       look: vi.fn(async () => ({ name: "My Cloud", color: "blue" })), setLook: vi.fn(async (name: string, color: string) => ({ name, color })), sheet: vi.fn(async () => {}),
       readySeen: vi.fn(async () => {}),
@@ -315,6 +315,23 @@ describe("the sheet", () => {
     await settle(); await press("Start free trial");
     tree().find(node => node.type === "form")!.props.onSubmit({ preventDefault() {} }); await flush();
     expect(await settle()).toContain("New MausBot accounts aren't open yet");
+  });
+
+  it("signed in to an account whose own terms differ (a trial already used): back to Choose with its terms, never a checkout said to be $0.00", async () => {
+    await settle(); await press("Start free trial");
+    tree().find(node => node.type === "form")!.props.onSubmit({ preventDefault() {} }); await flush(); await settle();
+    const own = { ...PLAIN, recommended: "pro" };
+    bridge.signInVerify.mockResolvedValueOnce({ outcome: "signed-in", state: { ...free, offer: own } });
+    offer = own;
+    tree().filter(node => node.type === "input")[0]!.props.onChange({ target: { value: "48201937" }, currentTarget: { parentElement: { querySelectorAll: () => [] } } });
+    await flush(); await flush();
+    expect(bridge.checkout).not.toHaveBeenCalled();
+    push({ ...free, offer: own });
+    const html = await settle();
+    expect(html).toContain("You're signed in. These are the plans for your account");
+    expect(html).toContain("Continue · $49/month"); expect(html).not.toContain("$0.00");
+    await press("Continue · $49/month");
+    expect(bridge.checkout).toHaveBeenCalledExactlyOnceWith("pro", "app_menu");
   });
 
   it("a wrong code says the tries left and empties the boxes; single sign-on continues in the browser with the plan", async () => {

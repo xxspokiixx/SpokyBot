@@ -147,6 +147,7 @@
   "cloudBuy.cancelEasy": "Cancel in two clicks",
   "cloudBuy.moneyBack": "{days}-day money-back",
   "cloudBuy.haveAccount": "Already have a plan? Sign in",
+  "cloudBuy.termsChanged": "You're signed in. These are the plans for your account, so check the price before you continue.",
   "cloudBuy.back": "Plans",
   "cloudBuy.signIn.title": "Create your MausBot account",
   "cloudBuy.signIn.titlePlain": "Sign in to MausBot Cloud",

@@ -202,6 +202,13 @@ export function cloudBeatTerms(offer: CloudOffer): { trial: boolean; line: strin
   return { trial: Boolean(days), line, action: days ? t("cloudIntro.start") : t("onboarding.cloud.seePlans") };
 }
 
+/** The plan picked before signing in costs and starts the same for this account (its session's own offer); otherwise
+ * Choose shows the account's terms before any checkout, so "$0.00 today" is never said of a paid one. */
+export function sameTerms(shown: CloudOffer | null | undefined, mine: CloudOffer | null | undefined, tier: string): boolean {
+  const before = shown?.plans.find(plan => plan.tier === tier), now = mine?.plans.find(plan => plan.tier === tier);
+  return Boolean(before && now && before.amount === now.amount && (before.trialDays ?? 0) === (now.trialDays ?? 0));
+}
+
 export function dueToday(cents: number): string {
   return new Intl.NumberFormat("en-US", { style: "currency", currency: "USD", minimumFractionDigits: 2 }).format(cents / 100);
 }
@@ -236,7 +243,7 @@ export type CloudAddView =
   | { kind: "checking" }
   | { kind: "unreachable" }
   | { kind: "error"; reason: "failed" | "rate-limited" }
-  | { kind: "offer"; offer: CloudOffer; signedOut: boolean; notice: "code-expired" | "signin-ended" | "preparing" | null }
+  | { kind: "offer"; offer: CloudOffer; signedOut: boolean; notice: "code-expired" | "signin-ended" | "preparing" | "terms" | null }
   | { kind: "sign-in"; phase: CloudSignInPhase }
   | { kind: "signing-in"; code: string | null; checkout: boolean }
   | { kind: "waiting"; plan: string; browser: "checkout" | "signin"; late: boolean; link: boolean; email: string | null }
@@ -247,8 +254,10 @@ export type CloudAddView =
 
 /** The one state → view function of the buying sheet: every Cloud state is one message and one next step. */
 export function cloudAddView(account: CloudAccountState | null | undefined, offer: CloudOffer | null | undefined,
-  { now, error = null, choosing = false, conflict = false, signIn = null, arrived = false }: {
+  { now, error = null, choosing = false, conflict = false, signIn = null, arrived = false, terms = false }: {
     now: number; error?: "failed" | "rate-limited" | null; choosing?: boolean; conflict?: boolean; signIn?: CloudSignInPhase | null;
+    /** Signed in here to an account whose own terms differ from those shown: Choose says so. */
+    terms?: boolean;
     /** Signed in from this sheet just now: a ready Cloud is theirs to open, not a second one to ask for. */
     arrived?: boolean;
   }): CloudAddView {
@@ -283,7 +292,8 @@ export function cloudAddView(account: CloudAccountState | null | undefined, offe
           link: opened?.link === true, email: account?.account?.email ?? null };
       }
       const notice = account?.status === "signed-out" && account.message === "enrollment-expired" ? "code-expired"
-        : account?.status === "signed-out" && (account.message === "enrollment-ended" || account.message === "signin-failed") ? "signin-ended" : conflict ? "preparing" : null;
+        : account?.status === "signed-out" && (account.message === "enrollment-ended" || account.message === "signin-failed") ? "signin-ended"
+          : conflict ? "preparing" : terms ? "terms" : null;
       return { kind: "offer", offer, signedOut: view.kind === "signed-out", notice };
     }
     default: return { kind: "settings" };

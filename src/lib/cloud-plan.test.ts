@@ -3,7 +3,7 @@ import type { CloudAccountState, CloudPlanSnapshot } from "../../electron/cloud-
 import { CHECKOUT_SOURCES } from "../../electron/cloud-account.mjs";
 import type { CloudCredit, CloudOffer, CloudOfferPlan, CloudTrial } from "../../electron/cloud-home.mjs";
 import { buyOfferAllowed, CLOUD_SOURCES, cloudAddView, cloudCreditLine, cloudIntroView, cloudNoticeKind, cloudPlanLine, cloudPlanView, cloudTrialNotice, cloudTrialView,
-  cloudBeatTerms, dueToday, moneyBackLine, offerPlan, offerTrialDays, personalAmount, planRow, planTerms, trialTimeline, usd, type CloudSignInPhase } from "./cloud-plan";
+  cloudBeatTerms, dueToday, moneyBackLine, offerPlan, offerTrialDays, personalAmount, planRow, planTerms, sameTerms, trialTimeline, usd, type CloudSignInPhase } from "./cloud-plan";
 import { setLocale } from "./i18n";
 
 const DAY = 86_400_000;
@@ -159,6 +159,17 @@ describe("what is for sale, as the Admin says", () => {
     expect(cloudBeatTerms({ ...OFFER, plans: [{ ...PLANS[0]!, trialDays: undefined }, PLANS[1]!, PLANS[2]!] }).line, "the lowest price among plans with the trial")
       .toContain("then from $49/month");
     expect(cloudBeatTerms({ ...noTrial(OFFER), creditUsd: 5 }).line, "credit comes only with a trial").not.toContain("credit");
+  });
+
+  it("the account's own terms are the same as those shown only with the same price and the same trial for that plan", () => {
+    expect(sameTerms(OFFER, OFFER, "pro")).toBe(true);
+    expect(sameTerms(OFFER, noTrial(OFFER), "pro"), "a trial already used").toBe(false);
+    expect(sameTerms(OFFER, { ...OFFER, plans: OFFER.plans.map(plan => ({ ...plan, amount: plan.amount + 100 })) }, "pro"), "another price").toBe(false);
+    expect(sameTerms(OFFER, { ...OFFER, plans: OFFER.plans.map(plan => ({ ...plan, trialDays: 3 })) }, "pro"), "other trial days").toBe(false);
+    expect(sameTerms(OFFER, undefined, "pro"), "no offer of its own").toBe(false);
+    expect(sameTerms(OFFER, { ...OFFER, plans: [PLANS[0]!] }, "pro"), "not sold to it").toBe(false);
+    expect(cloudAddView({ status: "connected", account: { id: "a", email: "p@example.test" }, entitlement: { plan: "free", status: "inactive", expiresAt: null, version: 1 } },
+      OFFER, { now: NOW, terms: true })).toMatchObject({ kind: "offer", notice: "terms" });
   });
 
   it("the timeline: today (and the credit), the reminder only while the Admin sends one, and the first charge", () => {
