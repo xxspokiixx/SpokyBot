@@ -180,6 +180,10 @@ export function CloudAddDialog({ now = Date.now }: { now?: () => number }) {
     if ((document.activeElement as HTMLElement | null)?.closest?.("[data-cloud-add-dialog]")) return;
     (document.querySelector("[data-cloud-add-dialog] [data-autofocus]") as HTMLElement | null ?? document.querySelector("#cloud-add-title") as HTMLElement | null)?.focus();
   }, [focusKey]);
+  // Pay or Setting up seen in this sheet: when the Cloud is ready, it is theirs to open here (not "one Cloud for now").
+  useEffect(() => {
+    if ((kind === "waiting" || kind === "starting") && !arrived) setArrived(true);
+  }, [kind]);
   useEffect(() => {
     if (!kind || !request) return;
     if (kind === "settings") { close(); dispatch({ type: "toggleAppSettings", open: true, section: "cloudAccount" }); return; }

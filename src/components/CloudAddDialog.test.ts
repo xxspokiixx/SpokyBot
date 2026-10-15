@@ -252,7 +252,7 @@ describe("the sheet", () => {
   let account: CloudAccountState;
   let offer: CloudOffer | null;
   let bridge: Record<string, ReturnType<typeof vi.fn>>;
-  let focused = true;
+  let focused = true, push: (state: CloudAccountState) => void = () => {};
   const opener = { focus: vi.fn(), isConnected: true };
   const flush = async () => { for (let i = 0; i < 10; i++) await Promise.resolve(); };
   const runEffects = () => f.effects.forEach(({ effect, deps }, i) => {
@@ -269,7 +269,7 @@ describe("the sheet", () => {
   beforeEach(() => {
     f.values = []; f.index = 0; f.effects = []; f.ran = []; f.dispatch = vi.fn(); f.state = { cloudAdd: { source: "app_menu" }, config: { profile: { email: EMAIL } } };
     account = { status: "signed-out" }; offer = TRIAL; focused = true; opener.focus.mockClear();
-    bridge = { state: vi.fn(async () => account), onState: vi.fn(() => () => {}), offer: vi.fn(async () => offer),
+    bridge = { state: vi.fn(async () => account), onState: vi.fn((callback: (state: CloudAccountState) => void) => { push = callback; return () => {}; }), offer: vi.fn(async () => offer),
       checkout: vi.fn(async (plan: string): Promise<CloudCheckoutResult> => ({ outcome: "opened", state: { ...free, checkout: { plan, startedAt: NOW, link: true } } })),
       begin: vi.fn(async () => ({ status: "connecting" })), reopen: vi.fn(async () => account), cancel: vi.fn(async () => ({ status: "signed-out" })),
       signInStart: vi.fn(async (email: string) => ({ outcome: "sent", email: email.trim().toLowerCase(), expiresAt: NOW + 600_000, resendAt: NOW + 30_000 })),
@@ -359,6 +359,17 @@ describe("the sheet", () => {
     expect(away).not.toContain("Opening in"); expect(away).toContain("Switch between This computer and My Cloud");
     vi.advanceTimersByTime(5000); await settle();
     expect(bridge.connectHome).not.toHaveBeenCalled();
+  });
+
+  it("after a restart mid-checkout: Pay from the Admin's open checkout, then setup, then ready is theirs to open, not one Cloud for now", async () => {
+    focused = false;
+    account = free; offer = { ...TRIAL, checkout: { plan: "pro", openUntil: NOW + 3600_000 } };
+    expect(await settle()).toContain("Waiting for your payment");
+    push(paid({ trial: trial(), machine: { status: "provisioning", setup: { step: "storage" } } }));
+    expect(await settle()).toContain("Setting up your new Cloud");
+    push(paid({ trial: trial(), machine: ready }));
+    const html = await settle();
+    expect(html).toContain("My Cloud is ready"); expect(html).not.toContain("One Cloud per account");
   });
 
   it("over the welcome flow a ready Cloud never switches the window: no countdown, main hears no sheet in front, Open {name} stays", async () => {

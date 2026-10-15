@@ -284,6 +284,29 @@ test("signed in, a checkout is the Admin's for this account, opened in the brows
   f.now += 24 * 3600_000; assert.equal(f.client.state().checkout, undefined); assert.equal(f.client.checkoutLink(), null);
 });
 
+test("after a restart mid-checkout, the checkout the Admin still holds is watched from first sight like this app's own", async t => {
+  const f = await fixture(t); await f.connect();
+  f.offer = { plans: plans(), recommended: "pro", trialDays: 7, checkout: { plan: "personal", openUntil: f.now + 3600_000 } };
+  const seen = await f.client.refresh();
+  assert.deepEqual(seen.checkout, { plan: "personal", startedAt: f.now }, "no page is kept: no link");
+  assert.equal(f.client.checkoutPending(), true, "watched: focus reads the session at once");
+  assert.equal(f.delay, 3_000, "every 3 seconds");
+  f.now += 10 * 60_000; await f.client.refresh();
+  assert.equal(f.client.state().checkout.startedAt, f.now - 10 * 60_000, "first sight, not every sight");
+  f.now += 20 * 60_000; await f.client.refresh();
+  assert.equal(f.client.checkoutPending(), false, "30 minutes at most"); assert.equal(f.delay, 60_000);
+  f.browsers = []; const DODO = "https://test.checkout.dodopayments.com/session/cks_held";
+  f.checkout = { status: 200, body: { cloudContractVersion: 1, url: DODO } };
+  assert.equal((await f.client.reopenCheckout("pro", "app_card")).outcome, "opened");
+  assert.deepEqual(JSON.parse(f.requests.findLast(row => row.route === "/api/cloud/desktop/checkout").body), { plan: "personal", source: "app_card" },
+    "the plan the Admin holds, under the page's source");
+  assert.deepEqual(f.browsers, [DODO]);
+  const paid = await fixture(t); await paid.connect();
+  paid.entitlement = { plan: "pro", tier: "pro", status: "active", expiresAt: paid.now + 86400_000, version: 1 };
+  paid.offer = { plans: plans(), recommended: "pro", checkout: { plan: "pro", openUntil: paid.now + 3600_000 } };
+  assert.equal((await paid.client.refresh()).checkout, undefined, "nothing to watch once paid");
+});
+
 test("Reopen checkout with no page kept (the browser sign-in led to checkout) asks the Admin once, then keeps its page", async t => {
   const f = await fixture(t);
   const DODO = "https://test.checkout.dodopayments.com/session/cks_reopened";

@@ -111,16 +111,22 @@ export function cloudLinkOpensSheet(state) {
   return Boolean(state?.checkout || state?.purchase || state?.machine?.status === "provisioning");
 }
 
+/** Paid, and the Cloud still being made: a payment linked, no machine yet, or one setting up. */
+const settingUp = state => state?.status === "connected" && (Boolean(state.purchase) || state.machine?.status === "provisioning"
+  || (state.entitlement?.status === "active" && !state.machine));
+
 /**
- * "{name} is ready", once per checkout this app opened. Not when the sheet is open in the focused window: the sheet
- * opens the Cloud itself ("Opening in 3…"). A click opens the Cloud.
+ * "{name} is ready", once per checkout this app opened, or once for a setup this app watched (bought elsewhere, or the
+ * app restarted mid-setup). Not when the sheet is open in the focused window: the sheet opens the Cloud itself
+ * ("Opening in 3…"). A click opens the Cloud.
  */
 export function createCloudReadyNotice({ Notification, focused, sheetOpen, name, open }) {
-  let announced = null;
+  let announced = null, watched = false;
   return state => {
-    const opened = state?.checkout?.startedAt;
-    if (!opened || state.status !== "connected" || state.machine?.status !== "ready" || announced === opened) return false;
-    announced = opened;
+    if (settingUp(state)) { watched = true; return false; }
+    const key = state?.checkout?.startedAt ?? (watched ? "watched-setup" : null);
+    if (!key || state.status !== "connected" || state.machine?.status !== "ready" || announced === key) return false;
+    announced = key; watched = false;
     if ((focused() && sheetOpen()) || !Notification.isSupported()) return false;
     const note = new Notification({ title: `${name()} is ready`, body: "Click to open it. It keeps your bots running 24/7." });
     note.on("click", () => open());

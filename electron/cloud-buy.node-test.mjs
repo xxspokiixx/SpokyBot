@@ -100,6 +100,14 @@ test("{name} is ready once per checkout from here: not while the sheet is open i
   assert.equal(announce(ready(3)), true, "focused but the sheet is closed: told");
   Note.isSupported = () => false;
   assert.equal(announce(ready(4)), false);
+  Note.isSupported = () => true; focused = false;
+  const paid = (machine) => ({ status: "connected", entitlement: { plan: "pro", status: "active" }, ...(machine ? { machine } : {}) });
+  const watched = createCloudReadyNotice({ Notification: Note, focused: () => false, sheetOpen: () => false, name: () => "Lab", open: () => {} });
+  assert.equal(watched(paid({ status: "ready", origin })), false, "a ready Cloud this app never saw being set up: nothing");
+  assert.equal(watched(paid(null)), false); assert.equal(watched(paid({ status: "provisioning" })), false);
+  assert.equal(watched(paid({ status: "ready", origin })), true, "set up while this app watched (bought elsewhere, or restarted): told");
+  assert.equal(shown.at(-1).options.title, "Lab is ready");
+  assert.equal(watched(paid({ status: "ready", origin })), false, "once");
 });
 
 test("openmausbot://cloud shows the sheet while a purchase from here is under way, whether or not its checkout is still watched", () => {

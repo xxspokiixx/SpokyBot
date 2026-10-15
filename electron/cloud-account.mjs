@@ -196,6 +196,11 @@ export function createCloudAccountClient({ store, openBrowser, platform, deviceN
       }
       plan = hint ? { accountId: grant.account.id, ...hint } : null;
       failures = 0;
+      // A checkout the Admin still holds open, with none kept here (this app restarted mid-checkout): watched as this
+      // app's own from first sight, so payment, setup and "ready" are followed as closely as before the restart.
+      if (!opened && offer?.checkout && offer.checkout.openUntil > now() && access.status !== "active") {
+        opened = { plan: offer.checkout.plan, source: null, startedAt: now() };
+      }
       verifiedUntil = Math.min(grant.expiresAt, now() + STEADY_MS,
         access.status === "active" && access.expiresAt !== null ? access.expiresAt : Infinity);
       publish({ ...view("connected"), entitlement: access, ...(machine ? { machine } : {}), ...(purchase ? { purchase } : {}),
