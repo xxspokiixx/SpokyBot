@@ -1,6 +1,6 @@
 import { randomBytes } from "node:crypto";
 import { lstatSync, mkdirSync, readFileSync, readlinkSync, writeFileSync } from "node:fs";
-import { dirname, join } from "node:path";
+import { dirname, join, resolve } from "node:path";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 
 import { launchVerificationServer, runControlOmb, type VerificationServer } from "../scripts/control-omb.ts";
@@ -51,14 +51,15 @@ describe("bringing in another AI tool's setup through the desktop app's own serv
     const linked = (family: string, name: string) => {
       try {
         const link = join(dump.cwd, family, "skills", name);
-        return lstatSync(link).isSymbolicLink() ? readlinkSync(link) : "not a link";
+        // A Windows junction reads back with a \\?\ prefix.
+        return lstatSync(link).isSymbolicLink() ? resolve(readlinkSync(link).replace(/^\\\\\?\\/, "")) : "not a link";
       } catch {
         return null;
       }
     };
     return { argv: dump.argv, system: dump.systemPrompt ?? "", message: JSON.stringify(dump.prompt ?? ""), linked };
   };
-  const copyOf = (name: string) => join(fixture.info.dataDir, "imported-skills", name);
+  const copyOf = (name: string) => resolve(fixture.info.dataDir, "imported-skills", name);
 
   beforeAll(async () => {
     globalThis.fetch = (input, init = {}) => realFetch(input, { ...init,

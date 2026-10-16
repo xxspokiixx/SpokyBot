@@ -1,6 +1,6 @@
 import { createHash, randomUUID } from "node:crypto";
 import { chmodSync, existsSync, lstatSync, mkdirSync, readlinkSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
-import { join } from "node:path";
+import { join, resolve } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 
 import { DATA_DIR, type AppConfig } from "./config.ts";
@@ -46,6 +46,8 @@ function store(inputs: ImportedSkillInput[]) {
 const sha = (text: string) => createHash("sha256").update(text).digest("hex");
 
 const names = (skills: Array<{ name: string }>) => skills.map((skill) => skill.name);
+/** Where a link points, as one path; a Windows junction reads back with a \\?\ prefix. */
+const target = (link: string) => resolve(readlinkSync(link).replace(/^\\\\\?\\/, ""));
 
 describe("skills brought in from this computer", () => {
   it("reach a bot made after they came in exactly as the first: listing, index, /name and task folder links", () => {
@@ -60,7 +62,7 @@ describe("skills brought in from this computer", () => {
       expect(expandImportedSkillCommand("/other thing", skills)).toBe("/other thing");
       const folder = ensureTaskWorkspaceWithSkills(bot, "thread-1", skills);
       for (const family of [".claude", ".agents", ".grok"]) {
-        expect(readlinkSync(join(folder, family, "skills", "pdf"))).toBe(join(IMPORTED_SKILLS_DIR, "pdf"));
+        expect(target(join(folder, family, "skills", "pdf"))).toBe(resolve(IMPORTED_SKILLS_DIR, "pdf"));
       }
       expect(names(importedSkillListings(bot, new Set()))).toEqual(["pdf", "review"]);
     }
@@ -141,13 +143,13 @@ describe("skills brought in from this computer", () => {
     const claudeSkills = join(folder, ".claude", "skills");
     mkdirSync(join(claudeSkills, "notes"), { recursive: true });
     syncImportedSkillLinks(bot, folder, importedSkillsFor(bot, new Set()));
-    expect(readlinkSync(join(claudeSkills, "review"))).toBe(join(IMPORTED_SKILLS_DIR, "review"));
+    expect(target(join(claudeSkills, "review"))).toBe(resolve(IMPORTED_SKILLS_DIR, "review"));
     // The bot's own skill takes the name: the imported link gives way, and the bot's own link and folder stay.
     installSkill(bot, "mine", [{ path: "SKILL.md", content: skillMd("pdf", "Mine.") }]);
     setSkillEnabled(bot, "pdf", true);
     ensureTaskWorkspaceWithSkills(bot, "thread-2", importedSkillsFor(bot, new Set(["pdf"])));
-    expect(readlinkSync(join(claudeSkills, "pdf"))).not.toBe(join(IMPORTED_SKILLS_DIR, "pdf"));
-    expect(readlinkSync(join(claudeSkills, "pdf"))).toContain(join("workspaces", bot, "skills", "pdf"));
+    expect(target(join(claudeSkills, "pdf"))).not.toBe(resolve(IMPORTED_SKILLS_DIR, "pdf"));
+    expect(target(join(claudeSkills, "pdf"))).toContain(join("workspaces", bot, "skills", "pdf"));
     expect(lstatSync(join(claudeSkills, "notes")).isDirectory()).toBe(true);
     // Nothing wanted any more: the imported link goes, the rest stays.
     syncImportedSkillLinks(bot, folder, []);
