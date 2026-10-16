@@ -1585,6 +1585,13 @@ section is only what the Cloud adds.
 - **The restart.** The Cloud's launcher (`server/cloud-home-start.ts`) starts
   only the server again on exit 75, and startup settles who owns what came
   (`server/cloud-owner.ts`): a copied routine is the owner's.
+- **Bring newer chats.** On a Cloud with work of its own, the same panel offers
+  **Bring newer chats to My Cloud**, which adds only the conversations and
+  messages it lacks and replaces nothing (docs/copy-workspace.md, Bring newer
+  chats).
+- **After the copy.** My Cloud becomes the server this app opens, and this
+  computer's page says in one line that the bots now live on My Cloud, with
+  **Open My Cloud**, so the two are not used side by side by accident.
 - **Older Clouds.** A Cloud from before Copy to My Cloud answers `404` and the app
   says it has not updated yet; one from before any server could receive a copy
   still receives one from this app (its routes are the same).
