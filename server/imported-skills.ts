@@ -2,7 +2,8 @@
 // each in <data>/imported-skills, offered to every bot at each of its turns, after its own and its library skills, so a
 // bot made later gets them as the first one does. The copies are read-only and checked file by file whenever they are
 // read: a copy that changed, such as a bot editing a script every bot runs, is left out until it is brought in again.
-// A bot can switch any of them off. A turn whose engine already loads the folder a skill came from (Claude Code with "Also use my Claude Code
+// A bot can switch any of them off; one the scan flagged stays off until a person switches it on for that bot after
+// reading it. A turn whose engine already loads the folder a skill came from (Claude Code with "Also use my Claude Code
 // skills", Codex with the person's own CODEX_HOME) leaves the copy out, so no engine sees a skill twice.
 import { createHash, randomUUID } from "node:crypto";
 import {
@@ -43,7 +44,8 @@ const entrySchema = z.object({
 });
 export type ImportedSkillEntry = z.infer<typeof entrySchema>;
 const indexSchema = z.record(z.string(), entrySchema);
-const choicesSchema = z.object({ off: z.array(z.string()) });
+/** `on` holds the files a person read before switching a flagged skill on, so a copy brought in again is off again. */
+const choicesSchema = z.object({ off: z.array(z.string()), on: z.record(z.string(), sha256Hex).default({}) });
 type Choices = z.infer<typeof choicesSchema>;
 
 /** Every imported skill by name; empty when there are none or the index cannot be trusted. */
@@ -67,7 +69,7 @@ function readChoices(botId: string): Choices {
     const parsed = choicesSchema.safeParse(JSON.parse(readFileSync(choicesPath(botId), "utf8")));
     if (parsed.success) return parsed.data;
   } catch {}
-  return { off: [] };
+  return { off: [], on: {} };
 }
 
 function readBytes(path: string): Buffer | null {
@@ -271,8 +273,9 @@ export interface ImportedSkillView {
   file: string;
 }
 
-function enabledFor(name: string, _entry: ImportedSkillEntry, choices: Choices): boolean {
-  return !choices.off.includes(name);
+function enabledFor(name: string, entry: ImportedSkillEntry, choices: Choices): boolean {
+  if (choices.off.includes(name)) return false;
+  return entry.warnings.length === 0 || choices.on[name] === entry.filesSha256;
 }
 
 const comparable = (path: string) => {
@@ -340,13 +343,18 @@ export function isImportedSkill(name: string): boolean {
   return Object.hasOwn(readImportedSkills(), name);
 }
 
-/** One bot's switch, kept for that bot whatever is brought in later. */
+/** One bot's switch. Off stays off whatever is brought in later; on, for a flagged skill, holds only for the files the
+ * person read. */
 export function setImportedSkillEnabled(botId: string, name: string, enabled: boolean): SkillListing | { error: string } {
   const entry = readImportedSkills()[name];
   if (!entry) return { error: `no skill named "${name}" was brought in from this computer` };
   if (enabled && !importedSkillIntact(name, entry)) return { error: `"${name}" ${IMPORTED_CHANGED_WARNING}` };
-  const off = readChoices(botId).off.filter((other) => other !== name);
-  const next: Choices = { off: enabled ? off : [...off, name].sort() };
+  const choices = readChoices(botId);
+  const off = choices.off.filter((other) => other !== name);
+  const { [name]: _read, ...on } = choices.on;
+  const next: Choices = enabled
+    ? { off, on: entry.warnings.length ? { ...on, [name]: entry.filesSha256 } : on }
+    : { off: [...off, name].sort(), on };
   mkdirSync(dirname(choicesPath(botId)), { recursive: true, mode: 0o700 });
   writeFileAtomic(choicesPath(botId), `${JSON.stringify(next, null, 2)}\n`, { mode: 0o600 });
   return importedSkillListings(botId, new Set()).find((skill) => skill.name === name)!;

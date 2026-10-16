@@ -18,9 +18,9 @@ export interface SetupImportRequest {
 export type SkillSkip = "conflict" | "failed";
 export type ToolSkip = "limit" | "policy" | "busy";
 
-/** Names and counts only. */
+/** Names and counts only. `review`: skills added switched off, because the scan flagged them, until a person reads them. */
 export interface SetupImportResult {
-  skills?: { added: string[]; present: string[]; skipped: Array<{ name: string; reason: SkillSkip }>; filesLeftOut: number };
+  skills?: { added: string[]; present: string[]; skipped: Array<{ name: string; reason: SkillSkip }>; filesLeftOut: number; review: string[] };
   tools?: { added: string[]; present: string[]; skipped: Array<{ name: string; reason: ToolSkip }> };
 }
 

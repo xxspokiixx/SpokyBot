@@ -68,7 +68,7 @@ describe("bringing in another AI tool's setup through the real server", () => {
     const brought = await api("POST", "/api/setup-import", { skills: true, tools: true });
     expect(brought.status).toBe(200);
     expect(JSON.parse(brought.text)).toEqual({
-      skills: { added: ["release-notes", "review-pr"], present: [], skipped: [], filesLeftOut: 0 },
+      skills: { added: ["release-notes", "review-pr"], present: [], skipped: [], filesLeftOut: 0, review: [] },
       tools: { added: ["github"], present: [], skipped: [] },
     });
 

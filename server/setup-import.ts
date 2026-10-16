@@ -253,11 +253,21 @@ function freshSkill(skill: FoundSkill, held: ImportedSkillEntry | undefined): bo
   return !held || (held.origin === skill.origin && !alreadyHere(skill, held));
 }
 
-/** One copy for every bot, made once however many bots there are or will be. */
+const MAX_WARNINGS = 20;
+
+/** The scan over SKILL.md and every file copied beside it, which can hold the same instructions. */
+function skillWarnings(skillMd: string, files: readonly SkillFile[]): string[] {
+  const all = [...scanSkillText(skillMd), ...files.flatMap((file) => scanSkillText(file.content).map((warning) => `${file.path}: ${warning}`))];
+  const unique = [...new Set(all)];
+  return unique.length > MAX_WARNINGS ? [...unique.slice(0, MAX_WARNINGS), `${unique.length - MAX_WARNINGS} more warnings in its files`] : unique;
+}
+
+/** One copy for every bot, made once however many bots there are or will be. One the scan flags comes in switched off:
+ * a person switches it on for a bot after reading it, as with any other import. */
 function importSkills(machine: SetupMachine): NonNullable<SetupImportResult["skills"]> {
   const index = readImportedSkills();
   const budget = { bytes: 0 };
-  const result: NonNullable<SetupImportResult["skills"]> = { added: [], present: [], skipped: [], filesLeftOut: 0 };
+  const result: NonNullable<SetupImportResult["skills"]> = { added: [], present: [], skipped: [], filesLeftOut: 0, review: [] };
   const skip = (name: string, reason: SkillSkip) => result.skipped.push({ name, reason });
   const inputs: ImportedSkillInput[] = [];
   for (const skill of findSkills(machine)) {
@@ -283,16 +293,20 @@ function importSkills(machine: SetupMachine): NonNullable<SetupImportResult["ski
         origin: skill.origin,
         label: skill.label,
         sha256: skill.sha256,
-        warnings: scanSkillText(skill.text),
+        warnings: skillWarnings(skill.text, copy.files),
         ...(skill.parsed.license ? { license: skill.parsed.license } : {}),
         ...(skill.parsed.compatibility ? { compatibility: skill.parsed.compatibility } : {}),
       },
     });
   }
+  const flagged = new Set(inputs.filter((one) => one.entry.warnings.length).map((one) => one.name));
   for (const stored of storeImportedSkills(inputs)) {
     result.filesLeftOut += stored.leftOut;
-    if (stored.stored) result.added.push(stored.name);
-    else skip(stored.name, "failed");
+    if (!stored.stored) skip(stored.name, "failed");
+    else {
+      result.added.push(stored.name);
+      if (flagged.has(stored.name)) result.review.push(stored.name);
+    }
   }
   return result;
 }

@@ -87,19 +87,20 @@ describe("what the step says", () => {
 
   it("sums up in one line, with a note only for what was left out", () => {
     expect(importOutcome({
-      skills: { added: ["pdf", "review"], present: [], skipped: [], filesLeftOut: 0 },
+      skills: { added: ["pdf", "review"], present: [], skipped: [], filesLeftOut: 0, review: [] },
       tools: { added: ["notion"], present: [], skipped: [] },
     })).toEqual({ line: "Added 2 skills and 1 tool.", notes: [] });
-    expect(importOutcome({ skills: { added: ["pdf"], present: [], skipped: [], filesLeftOut: 0 } }).line).toBe("Added 1 skill.");
+    expect(importOutcome({ skills: { added: ["pdf"], present: [], skipped: [], filesLeftOut: 0, review: [] } }).line).toBe("Added 1 skill.");
     expect(importOutcome({ tools: { added: [], present: ["notion"], skipped: [] } })).toEqual({ line: "All of it was already here.", notes: [] });
     expect(importOutcome({
-      skills: { added: ["pdf"], present: [], skipped: [{ name: "review", reason: "conflict" }, { name: "lint", reason: "failed" }], filesLeftOut: 2 },
+      skills: { added: ["pdf", "deploy"], present: [], skipped: [{ name: "review", reason: "conflict" }, { name: "lint", reason: "failed" }], filesLeftOut: 2, review: ["deploy"] },
       tools: { added: ["a", "b", "c", "d"], present: [], skipped: [
         { name: "e", reason: "limit" }, { name: "f", reason: "limit" }, { name: "g", reason: "policy" }, { name: "h", reason: "busy" },
       ] },
     })).toEqual({
-      line: "Added 1 skill and 4 tools.",
+      line: "Added 2 skills and 4 tools.",
       notes: [
+        "deploy: switched off until you check what the scan found, in a bot's Skills settings.",
         "Skipped review: a different skill with that name is already here.",
         "Couldn't copy lint. Try again from the bot's Skills settings.",
         "Large or non-text files in skill folders were left out.",

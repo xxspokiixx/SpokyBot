@@ -36,7 +36,7 @@ const FOUND: SetupDetection = {
   tools: [{ name: "notion", source: "cursor" }],
 };
 const BROUGHT: SetupImportResult = {
-  skills: { added: ["pdf", "review"], present: [], skipped: [], filesLeftOut: 0 },
+  skills: { added: ["pdf", "review"], present: [], skipped: [], filesLeftOut: 0, review: [] },
   tools: { added: ["notion"], present: [], skipped: [] },
 };
 const props = { onNext: vi.fn(), onSkip: vi.fn(), setMascot: vi.fn(), bump: vi.fn(), onResult: vi.fn() };

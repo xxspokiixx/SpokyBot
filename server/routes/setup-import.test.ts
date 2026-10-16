@@ -100,7 +100,7 @@ describe("the setup import routes", () => {
     expect(brought.status).toBe(200);
     const text = await brought.text();
     expect(JSON.parse(text)).toEqual({
-      skills: { added: ["pdf"], present: [], skipped: [], filesLeftOut: 0 },
+      skills: { added: ["pdf"], present: [], skipped: [], filesLeftOut: 0, review: [] },
       tools: { added: ["notion"], present: [], skipped: [] },
     });
     expect(text).not.toContain("notion_secret");

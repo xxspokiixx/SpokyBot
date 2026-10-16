@@ -82,6 +82,7 @@ export function importOutcome(result: SetupImportResult): { line: string; notes:
     const matching = entries?.filter((entry) => entry.reason === reason) ?? [];
     if (matching.length) notes.push(t(key, { names: named(matching) }));
   };
+  if (result.skills?.review?.length) notes.push(t("onboarding.import.review", { names: named(result.skills.review.map((name) => ({ name }))) }));
   skipped(result.skills?.skipped, "conflict", "onboarding.import.conflict");
   skipped(result.skills?.skipped, "failed", "onboarding.import.failed");
   if (result.skills?.filesLeftOut) notes.push(t("onboarding.import.filesLeftOut"));

@@ -179,7 +179,11 @@ of Staff team or a package. Each turn lists them after the bot's own skills,
 with a budget of their own, links them into the task folder's `.claude`,
 `.agents` and `.grok` skills, and runs them as `/name`. A bot's own or library
 skill of the same name wins; **Bot Settings → Skills** shows the rest as
-coming from this computer, with a switch for that bot. A copy whose files
+coming from this computer, with a switch for that bot. A skill the scan flags
+(a download piped into a shell, invisible characters, a long encoded blob, in
+SKILL.md or any file beside it) comes in switched off for every bot: read it
+there, then switch it on for that bot; it is off again if it is brought in
+with other files. A copy whose files
 change afterwards is left out until it is brought in again. A turn whose
 engine already loads the folder a skill came from leaves the copy out, so
 nothing is listed twice: Claude Code with **Also use my Claude Code skills**

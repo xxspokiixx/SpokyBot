@@ -41,7 +41,7 @@ function previewImport(mode: string | null): SetupImportClient {
       if (mode === "fail") throw new Error("fixture failure");
       const notes = mode === "notes";
       const result: SetupImportResult = {
-        ...(request.skills ? { skills: { added: PREVIEW_DETECTION.skills.slice(notes ? 1 : 0).map((skill) => skill.name), present: [], skipped: notes ? [{ name: "skill-1", reason: "conflict" as const }] : [], filesLeftOut: notes ? 2 : 0 } } : {}),
+        ...(request.skills ? { skills: { added: PREVIEW_DETECTION.skills.slice(notes ? 1 : 0).map((skill) => skill.name), present: [], skipped: notes ? [{ name: "skill-1", reason: "conflict" as const }] : [], filesLeftOut: notes ? 2 : 0, review: notes ? ["skill-2"] : [] } } : {}),
         ...(request.tools ? { tools: { added: ["github", "linear", "notion", "figma"], present: [], skipped: [] } } : {}),
       };
       return result;
