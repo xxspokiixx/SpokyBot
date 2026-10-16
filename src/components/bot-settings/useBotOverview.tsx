@@ -6,7 +6,13 @@ import { ConfirmDialog } from "../ConfirmDialog";
 import type { HistoryRow } from "./HistorySection";
 import type { PromptPreviewData } from "./PromptPreview";
 
-export function useBotOverview(bot: Bot, want: { overview: boolean; prompt: boolean }) {
+/**
+ * Reads the bot's overview and prompt preview while `want` asks for them. By default every change to the bot's facts
+ * reads them again. `followEdits: false` reads only when `want` changes: the Simple bot panel edits those facts inline
+ * (its Instructions field patches on every keystroke), and a read first flushes the patch queue, so following edits
+ * there would save, record a history row and read once per keystroke.
+ */
+export function useBotOverview(bot: Bot, want: { overview: boolean; prompt: boolean; followEdits?: boolean }) {
   const { state, flushBotPatches } = useStore();
   const [overview, setOverview] = useState<BotOverview | null>(null);
   const [overviewError, setOverviewError] = useState(false);
@@ -55,6 +61,11 @@ export function useBotOverview(bot: Bot, want: { overview: boolean; prompt: bool
     ],
   );
 
+  const followEdits = want.followEdits ?? true;
+  const editedFacts = followEdits ? factsSignature : null;
+  const routines = followEdits ? state.routines : null;
+  const webhooks = followEdits ? state.webhooks : null;
+
   // Await the existing write queue rather than racing a second debounce.
   useEffect(() => {
     if (!want.overview && !want.prompt) return;
@@ -90,7 +101,7 @@ export function useBotOverview(bot: Bot, want: { overview: boolean; prompt: bool
     return () => {
       cancelled = true;
     };
-  }, [bot.id, want.overview, want.prompt, factsSignature, state.routines, state.webhooks, flushBotPatches]);
+  }, [bot.id, want.overview, want.prompt, editedFacts, routines, webhooks, flushBotPatches]);
 
   return { overview, overviewError, prompt, promptError };
 }

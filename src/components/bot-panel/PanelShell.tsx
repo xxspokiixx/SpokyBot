@@ -47,7 +47,13 @@ export function BotPanel({ bot, derived, slackUrl = null, headerClassName, linke
   const editorRef = useRef<HTMLDivElement>(null);
   const page = stack.at(-1) ?? null;
 
-  const overview = useBotOverview(bot, { overview: true, prompt: page === "prompt" || page === "overview" });
+  // Read when a view that shows it appears (the Details tab's setup row, the Setup and Overview pages), never while
+  // the Details tab's own fields are being typed into.
+  const overview = useBotOverview(bot, {
+    overview: (page === null && tab === "details") || page === "setup" || page === "overview",
+    prompt: page === "prompt" || page === "overview",
+    followEdits: false,
+  });
   const history = useBotHistory(bot, page === "history");
 
   const scrollTop = () => bodyRef.current?.scrollTo({ top: 0 });
