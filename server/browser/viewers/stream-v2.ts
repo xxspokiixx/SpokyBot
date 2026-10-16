@@ -13,7 +13,7 @@ import { WebSocketServer, type RawData, type WebSocket } from "ws";
 
 import { BrowserHostError, SETUP_COMMAND } from "../chrome/host-setup.ts";
 import type { BrowserService, BrowserTarget } from "../service.ts";
-import { requestedSize, type Viewer, type ViewerOptions, type ViewerOutput } from "./core.ts";
+import { FRAME_CAP_LIMITS, requestedSize, type Viewer, type ViewerOptions, type ViewerOutput } from "./core.ts";
 import { displayUrl } from "./live-v1.ts";
 
 /** Close codes the stream client acts on. */
@@ -37,6 +37,9 @@ const MAX_MESSAGE_BYTES = 64 * 1024;
 const VIEWERS_PER_PROFILE = 4;
 const VIEWERS_TOTAL = 16;
 const RECHECK_MS = 5_000;
+/** A client that does not answer the server's close frame is cut off this long after it was sent. */
+const CLOSE_GRACE_MS = 2_000;
+const GONE = "This browser view is no longer available.";
 const PING_MS = 15_000;
 /** Input that arrives while the viewer is still attaching (its control state is already on the wire) waits for it. */
 const EARLY_INPUT_LIMIT = 64;
@@ -94,6 +97,8 @@ class StreamSession {
   readonly unacknowledged: Array<() => void> = [];
   viewer: Viewer | null = null;
   closed = false;
+  /** The server is closing this view: nothing the client sends reaches the browser any more. */
+  closing = false;
   #early: unknown[] = [];
   #restarting = false;
 
@@ -113,7 +118,7 @@ class StreamSession {
   }
 
   push(output: ViewerOutput): void {
-    if (this.closed) {
+    if (this.closed || this.closing) {
       if (output.type === "frame") output.ack();
       return;
     }
@@ -143,7 +148,7 @@ class StreamSession {
 
   /** A notice the person should read, such as why a restart was refused. */
   notice(message: string): void {
-    if (!this.closed) this.ws.send(JSON.stringify({ type: "notice", message }));
+    if (!this.closed && !this.closing) this.ws.send(JSON.stringify({ type: "notice", message }));
   }
 
   receive(data: RawData, binary: boolean, service: BrowserService): void {
@@ -156,7 +161,13 @@ class StreamSession {
     }
     // Ownership serializes actions in the service. Keep reading so dialog replies and takeover can unblock an action
     // already waiting on the page.
-    if (!this.request.canOperate) return;
+    if (!this.request.canOperate || this.closing) return;
+    // Security: every message is checked as every v1 action is, so a person signed out or no longer allowed to see the
+    // bot never acts on its browser again.
+    if (!this.request.isCurrent()) {
+      this.close(STREAM_CLOSE.gone, GONE);
+      return;
+    }
     if (!this.viewer) {
       if (this.#early.length < EARLY_INPUT_LIMIT) this.#early.push(message);
       return;
@@ -183,7 +194,7 @@ class StreamSession {
       this.notice(refused);
       return;
     }
-    if (this.#restarting || !this.viewer) return;
+    if (this.#restarting || !this.viewer || this.closing) return;
     this.#restarting = true;
     try {
       await service.restart(this.request.target.session, this.viewer.id);
@@ -194,9 +205,13 @@ class StreamSession {
     }
   }
 
+  /** Lets the viewer go at once, releasing any control and held input, then tells the client why and cuts it off. */
   close(code: number, reason: string): void {
-    if (this.closed) return;
-    try { this.ws.close(code, reason.slice(0, 120)); } catch { this.kill(); }
+    if (this.closed || this.closing) return;
+    this.closing = true;
+    void this.viewer?.close().catch(() => undefined);
+    try { this.ws.close(code, reason.slice(0, 120)); } catch { this.kill(); return; }
+    setTimeout(() => this.kill(), CLOSE_GRACE_MS).unref();
   }
 
   /** Releases Chromium from every frame still in flight and lets the viewer go. */
@@ -244,7 +259,7 @@ export class StreamV2 {
     }, PING_MS);
     ping.unref();
     const recheck = setInterval(() => {
-      if (!request.isCurrent()) session.close(STREAM_CLOSE.gone, "This browser view is no longer available.");
+      if (!request.isCurrent()) session.close(STREAM_CLOSE.gone, GONE);
     }, RECHECK_MS);
     recheck.unref();
     ws.on("pong", () => { alive = true; });
@@ -261,8 +276,8 @@ export class StreamV2 {
     const options: ViewerOptions = {
       owner: request.owner,
       canOperate: request.canOperate,
-      maxWidth: intParam(params, "maxWidth", 1280, 7680),
-      maxHeight: intParam(params, "maxHeight", 800, 4320),
+      maxWidth: intParam(params, "maxWidth", 1280, FRAME_CAP_LIMITS.maxWidth),
+      maxHeight: intParam(params, "maxHeight", 800, FRAME_CAP_LIMITS.maxHeight),
       quality: intParam(params, "quality", DEFAULT_QUALITY, 100),
       pace: "hi",
       authPrompts: true,
@@ -271,7 +286,7 @@ export class StreamV2 {
     };
     try {
       const viewer = await this.#service.attachViewer(request.target, options, (output) => session.push(output));
-      if (session.closed) await viewer.close();
+      if (session.closed || session.closing) await viewer.close();
       else session.attached(viewer, this.#service);
     } catch (error) {
       if (error instanceof BrowserHostError) session.close(STREAM_CLOSE.hostSetup, JSON.stringify({ need: error.kind, command: SETUP_COMMAND }));
@@ -287,6 +302,8 @@ export class StreamV2 {
   closeForOwner(owner: string): void { this.#closeWhere((request) => request.owner === owner); }
   closeForBot(botId: string): void { this.#closeWhere((request) => request.botId === botId); }
   closeAll(): void { this.#closeWhere(() => true); }
+  /** Closes now every view the 5 s recheck would close. */
+  recheck(): void { for (const session of this.#sessions) if (!session.request.isCurrent()) session.close(STREAM_CLOSE.gone, GONE); }
 
   #closeWhere(match: (request: StreamRequest) => boolean): void {
     for (const session of this.#sessions) if (match(session.request)) session.close(STREAM_CLOSE.gone, "This browser view closed.");

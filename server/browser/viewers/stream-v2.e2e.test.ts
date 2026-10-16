@@ -1,6 +1,6 @@
 // The v2 stream on real Chrome, through its routes and a real WebSocket, as the desktop panel uses it: the page fills
-// the panel at the screen's real scale, the person answers the page's file picker and dropdown lists, takes its
-// downloads and its copied text.
+// the panel at the screen's real scale and every drag ends sharp, a zoom follows new tabs, the person answers the
+// page's file picker and dropdown lists, takes its downloads and its copied text.
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from "node:http";
 import type { AddressInfo } from "node:net";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
@@ -24,6 +24,9 @@ const META = 4;
 const CONTROL = 2;
 const COPY_MODIFIER = process.platform === "darwin" ? META : CONTROL;
 
+const STILL = `<!doctype html><title>still</title><style>html,body{margin:0;height:100%;background:#fff;font:16px system-ui}</style><p>still page</p>`;
+const REPORT = `<!doctype html><title>report</title><style>html,body{margin:0;height:100%}#c{position:absolute;left:50%;top:50%;width:80px;height:80px;margin:-40px 0 0 -40px;background:#c33}</style><div id="c"></div>
+<script>addEventListener("mousedown", (event) => { document.title = "at " + event.clientX + "," + event.clientY + (event.target.id === "c" ? " hit" : " miss") + " of " + innerWidth + "x" + innerHeight; });</script>`;
 const ANIMATED = `<!doctype html><title>animated</title><style>@keyframes spin{to{transform:rotate(360deg)}}#s{width:60px;height:60px;background:#36c;animation:spin 1s linear infinite}</style><div id="s"></div>`;
 const FORM = `<!doctype html><title>form</title><style>body{margin:0}#f{position:absolute;left:20px;top:20px;width:240px;height:40px}#s{position:absolute;left:20px;top:100px;width:200px;height:30px}#d{position:absolute;left:20px;top:160px}#p{position:absolute;left:20px;top:220px;margin:0}</style>
 <input id="f" type="file" multiple accept=".txt,text/plain">
@@ -62,6 +65,7 @@ suite("the v2 stream on real Chrome", () => {
         open: async () => {},
         action: async () => ({ ok: true }),
         stream: ({ session: _session, spec: _spec, ...request }) => { stream.open({ ...request, target }); return true; },
+        fileChooserOffered: (_browser, owner, chooser) => real.service.fileChooserOffered(target.session, owner, chooser),
         answerFileChooser: (_browser, owner, chooser, paths) => real.service.answerFileChooser(target.session, owner, chooser, paths),
         download: (_browser, id) => real.service.download(target.session, id),
       },
@@ -130,6 +134,7 @@ suite("the v2 stream on real Chrome", () => {
     client.send({ type: "takeControl" });
     await until(() => client.messages.filter((message) => message.type === "control").at(-1), (control) => control?.controller === "you");
   };
+  const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
   const click = (client: Client, x: number, y: number) => {
     client.send({ type: "mouse", action: "move", x, y, button: "none", buttons: 0, clickCount: 0, modifiers: 0 });
     client.send({ type: "mouse", action: "down", x, y, button: "left", buttons: 1, clickCount: 1, modifiers: 0 });
@@ -149,6 +154,73 @@ suite("the v2 stream on real Chrome", () => {
     await until(() => client.frames.at(-1), (frame) => frame?.width === 2400 && frame.height === 1800);
     await client.close();
     await until(pageSize, same([1280, 800, 2]));
+  }, hostTimeout(90_000));
+
+  it("ends every drag of the panel on a sharp frame of the final size, on a page that never repaints by itself", async () => {
+    await opened("/still", STILL);
+    const client = await connect("width=1200&height=800&maxWidth=3200&maxHeight=2000");
+    await until(pageSize, same([1200, 800, 2]));
+    for (let trial = 0; trial < 6; trial++) {
+      const grow = trial % 2 === 0;
+      const sizes = Array.from({ length: 10 }, (_, step) => (grow ? [1240 + step * 40, 820 + step * 20] : [1560 - step * 40, 980 - step * 20]));
+      for (const [width, height] of sizes) {
+        client.send({ type: "resize", width, height });
+        await sleep(150);
+      }
+      const [width, height] = sizes.at(-1)!;
+      await until(pageSize, same([width, height, 2]));
+      await until(() => client.frames.at(-1), (frame) => frame?.width === width! * 2 && frame.height === height! * 2, 3_000);
+    }
+    await client.close();
+  }, hostTimeout(120_000));
+
+  it("keeps the page of the person holding the browser when another view opens, and raises a frame cap in place", async () => {
+    await opened("/held", STILL);
+    const holder = await connect("width=1200&height=800&maxWidth=2400&maxHeight=1600");
+    await takeControl(holder);
+    await until(pageSize, same([1200, 800, 2]));
+    const other = await connect("width=700&height=1000&maxWidth=1400&maxHeight=2000");
+    await until(() => other.messages.filter((message) => message.type === "control").at(-1), (control) => control?.controller === "another-viewer");
+    await sleep(1_000);
+    expect(await pageSize()).toEqual([1200, 800, 2]);
+    await other.close();
+    holder.send({ type: "resize", width: 1512, height: 900 });
+    holder.send({ type: "frameCap", maxWidth: 3024, maxHeight: 1800 });
+    await until(() => holder.frames.at(-1), (frame) => frame?.width === 3024 && frame.height === 1800);
+    expect(holder.messages.filter((message) => message.type === "control").at(-1)).toMatchObject({ controller: "you" });
+    expect(real.service.heldBy(target.session)).not.toBeNull();
+    await holder.close();
+  }, hostTimeout(90_000));
+
+  it("zooms a tab the person opens after zooming, so their click lands where they aim", async () => {
+    await opened("/zoom", STILL);
+    const client = await connect("width=1500&height=900&maxWidth=3000&maxHeight=1800");
+    await takeControl(client);
+    await until(pageSize, same([1500, 900, 2]));
+    client.send({ type: "zoom", factor: 1.5 });
+    await until(pageSize, same([1000, 600, 3]));
+    const told = client.messages.filter((message) => message.type === "viewport").length;
+    client.send({ type: "tabNew", url: fx.page("/zoom-tab", REPORT) });
+    await until(() => real.peek<string>(target, "document.title"), (title) => title === "report");
+    await until(pageSize, same([1000, 600, 3]));
+    await until(() => client.messages.filter((message) => message.type === "viewport").slice(told).at(-1), (message) => message?.width === 1000 && message.height === 600 && message.zoom === 1.5);
+    click(client, 500, 300);
+    expect(await until(() => real.peek<string>(target, "document.title"), (title) => title.startsWith("at "))).toBe("at 500,300 hit of 1000x600");
+    await client.close();
+  }, hostTimeout(90_000));
+
+  it("plays the picture in picture of the person holding a zoomed page, whose smaller stills leave the zoom alone", async () => {
+    await opened("/pip", ANIMATED);
+    const panel = await connect("width=1500&height=900&maxWidth=3000&maxHeight=1800");
+    await takeControl(panel);
+    panel.send({ type: "zoom", factor: 1.5 });
+    await until(pageSize, same([1000, 600, 3]));
+    const pip = await connect("maxWidth=1280&maxHeight=1280&interactive=false");
+    await until(() => pip.frames.length, (count) => count >= 5);
+    await sleep(1_000);
+    expect(await pageSize()).toEqual([1000, 600, 3]);
+    await pip.close();
+    await panel.close();
   }, hostTimeout(90_000));
 
   it("sends the page's file picker to the person holding the browser, and their files to the page", async () => {

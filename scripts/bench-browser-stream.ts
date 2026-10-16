@@ -84,6 +84,7 @@ const route = createBrowserViewerRoutes({
     open: async () => {},
     action: async () => ({ ok: true }),
     stream: ({ session: _session, spec: _spec, ...request }) => { stream.open({ ...request, target }); return true; },
+    fileChooserOffered: () => false,
     answerFileChooser: async () => false,
     download: () => undefined,
   },

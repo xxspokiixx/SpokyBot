@@ -99,6 +99,17 @@ describe("the picture and the page", () => {
     expect(client.send).toHaveBeenCalledWith({ type: "resize", width: 1200, height: 900 });
   });
 
+  it("raises its frame cap in place when the panel outgrows it, so the person keeps the browser they hold", async () => {
+    const { client, connect, show } = await mount();
+    await show(control("you"));
+    vi.mocked(HTMLElement.prototype.getBoundingClientRect).mockReturnValue({ left: 0, top: 0, x: 0, y: 0, right: 1800, bottom: 1100, width: 1800, height: 1100, toJSON() {} } as DOMRect);
+    await act(async () => { for (const observer of observers) observer(); });
+    await act(async () => { await new Promise((resolve) => setTimeout(resolve, 600)); });
+    expect(client.send).toHaveBeenCalledWith({ type: "frameCap", maxWidth: 3600, maxHeight: 2200 });
+    expect(connect).toHaveBeenCalledOnce();
+    expect(client.stop).not.toHaveBeenCalled();
+  });
+
   it("sizes the page to this panel again when it takes control, so the page fits the view in use", async () => {
     const { client, show } = await mount();
     await show(control("agent"));
@@ -210,7 +221,7 @@ describe("what the page asks of the person", () => {
     expect(client.send).not.toHaveBeenCalledWith(expect.objectContaining({ id: "list-2" }));
   });
 
-  it("answers a page's dialog only from the person in control", async () => {
+  it("answers a page's dialog only from the person in control, and shows none of it while another viewer holds the browser", async () => {
     const { client, show } = await mount();
     const dialog = { type: "confirm", message: "Leave this page?", defaultValue: "" };
     await show(control("agent", { dialog }));
@@ -219,6 +230,28 @@ describe("what the page asks of the person", () => {
     await show(control("you", { dialog }));
     await act(async () => button("Accept").click());
     expect(client.send).toHaveBeenCalledWith({ type: "dialog", accept: true });
+    await show(control("another-viewer", { dialog }));
+    expect(host.textContent).not.toContain("Leave this page?");
+  });
+
+  it("answers a site's sign-in prompt by the tab and challenge it showed", async () => {
+    const { client, show, events } = await mount();
+    await show(control("agent"));
+    await act(async () => events().onMessage?.({ type: "authPrompt", tabId: "t2", id: "c7", origin: "http://intranet.example", realm: "Staff" }));
+    await show(control("agent"));
+    expect(host.querySelector('[aria-label="Sign in to this site"]')).toBeNull();
+    await show(control("you"));
+    expect(host.textContent).toContain("http://intranet.example asks for “Staff”");
+    host.querySelector<HTMLInputElement>('input[name="username"]')!.value = "ada";
+    host.querySelector<HTMLInputElement>('input[name="password"]')!.value = "secret";
+    await act(async () => { host.querySelector<HTMLFormElement>('[aria-label="Sign in to this site"]')!.requestSubmit(); });
+    expect(client.send).toHaveBeenCalledWith({ type: "authAnswer", tabId: "t2", id: "c7", username: "ada", password: "secret" });
+    expect(host.querySelector('[aria-label="Sign in to this site"]')).toBeNull();
+    await act(async () => events().onMessage?.({ type: "authPrompt", tabId: "t1", id: "c8", origin: "http://other.example", realm: "" }));
+    await act(async () => events().onMessage?.({ type: "authPromptClosed", id: "c7" }));
+    expect(host.textContent).toContain("http://other.example");
+    await act(async () => events().onMessage?.({ type: "authPromptClosed", id: "c8" }));
+    expect(host.querySelector('[aria-label="Sign in to this site"]')).toBeNull();
   });
 
   it("shows the bot's cursor where it acts, and hides it while the person has control", async () => {

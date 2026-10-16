@@ -68,7 +68,7 @@ describe("preview stream control", () => {
     expect(browserStreamAccess("a b", { protocol: "https:", host: "cloud.test" }).wsBase).toBe("wss://cloud.test/api/bots/a%20b/browser");
   });
 
-  it("does not navigate before ownership is granted, but sizes the page for a viewer that may operate", () => {
+  it("does not navigate before ownership is granted, but sizes the page for a viewer that may operate, as soon as it may", () => {
     const { client, socket } = connect();
     expect(client.send({ type: "resize", width: 390, height: 844 })).toBe(false);
     expect(client.send({ type: "navigate", url: "http://example.test" })).toBe(false);
@@ -80,9 +80,25 @@ describe("preview stream control", () => {
     expect(client.send({ type: "text", text: "owned" })).toBe(true);
     expect(socket.sent.map((entry) => JSON.parse(entry))).toEqual([
       { type: "resize", width: 390, height: 844 },
+      { type: "resize", width: 390, height: 844 },
       { type: "takeControl" },
       { type: "text", text: "owned" },
     ]);
+    client.stop();
+  });
+
+  it("raises a watcher's frame cap in place, and sends a size or cap asked for while the socket opened once it may", () => {
+    const { client, socket } = connect();
+    expect(client.send({ type: "resize", width: 1200, height: 900 })).toBe(false);
+    expect(client.send({ type: "frameCap", maxWidth: 2400, maxHeight: 1800 })).toBe(false);
+    socket.control(agent);
+    expect(socket.sent.map((entry) => JSON.parse(entry))).toEqual([
+      { type: "frameCap", maxWidth: 2400, maxHeight: 1800 },
+      { type: "resize", width: 1200, height: 900 },
+    ]);
+    expect(client.send({ type: "frameCap", maxWidth: 3200, maxHeight: 2000 })).toBe(true);
+    socket.control({ ...agent, generation: 2 });
+    expect(socket.sent).toHaveLength(3);
     client.stop();
   });
 
@@ -176,15 +192,19 @@ describe("preview stream downloads, uploads and messages", () => {
     expect(onUnauthorized).toHaveBeenCalledOnce();
   });
 
-  it("reconnects after the browser restarted", () => {
+  it("reconnects after the browser restarted, with the newest size and frame cap the viewer asked for", () => {
     vi.useFakeTimers();
     const onConnectedChange = vi.fn();
-    createPreviewStreamClient(target, events({ onConnectedChange }));
+    const client = createPreviewStreamClient({ ...target, width: 1600, height: 1000 }, events({ onConnectedChange }));
     const first = FakeSocket.current;
+    first.control(agent);
+    client.send({ type: "resize", width: 1200, height: 900 });
+    client.send({ type: "frameCap", maxWidth: 3024, maxHeight: 1800 });
     first.closeWith(1012, "reconnect");
     expect(onConnectedChange.mock.calls).toEqual([[true], [false]]);
     vi.advanceTimersByTime(500);
     expect(FakeSocket.current).not.toBe(first);
+    expect(Object.fromEntries(new URL(FakeSocket.current.url).searchParams)).toEqual({ maxWidth: "3024", maxHeight: "1800", width: "1200", height: "900" });
     vi.useRealTimers();
   });
 });

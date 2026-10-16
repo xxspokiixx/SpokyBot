@@ -9,15 +9,17 @@
 // input held by a viewer that leaves is released at once.
 import { randomUUID } from "node:crypto";
 
+import type { AuthChallenge } from "../cdp/auth.ts";
 import type { CdpBrowser } from "../cdp/browser.ts";
 import type { CdpSession, Params } from "../cdp/connection.ts";
 import type { Download } from "../cdp/downloads.ts";
-import { callOnNode, valueInWorld } from "../cdp/evaluate.ts";
+import { callOnNode } from "../cdp/evaluate.ts";
 import type { OpenFileChooser } from "../cdp/files.ts";
 import { editingCommands, keyDescription, US_KEYBOARD } from "../cdp/keyboard.ts";
 import type { ProfileControl, TakeResult } from "../control.ts";
+import { personUrl } from "../dispatch.ts";
 import type { Tab } from "../tabs.ts";
-import { ACCEPT_OF, chooseOption, cursorAt, selectAt, type SelectPopup } from "./popups.ts";
+import { ACCEPT_OF, chooseOption, cursorAt, editableAt, selectAt, type SelectPopup } from "./popups.ts";
 
 /** Chromium keeps three frames unacknowledged, so acking 100 ms after arrival caps a viewer near 30 fps. */
 export const ACK_PACE_MS = { hi: 100, lo: 200 } as const;
@@ -28,6 +30,8 @@ const MOTION_WINDOW_MS = 300;
 const MOTION_QUALITY = 50;
 export const UNATTACHED_VIEWPORT = { width: 1280, height: 800 } as const;
 export const VIEWPORT_LIMITS = { minWidth: 100, minHeight: 100, maxWidth: 3840, maxHeight: 2160 } as const;
+/** The largest frame a viewer may ask for, in device pixels. */
+export const FRAME_CAP_LIMITS = { maxWidth: 7680, maxHeight: 4320 } as const;
 /** Chrome keeps a window at least this wide (measured on 153); a narrower page needs emulation. */
 export const MIN_WINDOW_WIDTH = 500;
 const AGENT_CURSOR_MOVE_MS = 160;
@@ -79,8 +83,8 @@ export type ViewerOutput =
   | { type: "popup"; tabId: string }
   | ({ type: "selectPopup"; id: string } & SelectPopup)
   | { type: "cursor"; shape: string }
-  | { type: "authPrompt"; origin: string; realm: string }
-  | { type: "authPromptClosed" }
+  | { type: "authPrompt"; tabId: string; id: string; origin: string; realm: string }
+  | { type: "authPromptClosed"; id: string }
   | { type: "starting" }
   | { type: "gone"; reason: string };
 
@@ -124,24 +128,6 @@ const modifiersOf = (message: Record<string, unknown>) => {
   return Number.isInteger(value) && value >= 0 && value < 16 ? value : 0;
 };
 const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
-
-// Touch viewers raise the keyboard for editable targets, frames included. Read in the isolated world.
-const EDITABLE_AT_POINT = `((x, y) => {
-  let element = document.elementFromPoint(x, y);
-  while (element && element.shadowRoot) {
-    const inner = element.shadowRoot.elementFromPoint(x, y);
-    if (!inner || inner === element) break;
-    element = inner;
-  }
-  if (element && element.tagName === "LABEL" && element.control) element = element.control;
-  if (!element) return false;
-  if (element.tagName === "IFRAME" || element.tagName === "FRAME") return true;
-  if (element.isContentEditable) return true;
-  if (element.tagName === "TEXTAREA") return !element.disabled && !element.readOnly;
-  if (element.tagName !== "INPUT") return false;
-  const nonText = ["button", "checkbox", "color", "file", "hidden", "image", "radio", "range", "reset", "submit"];
-  return !nonText.includes(element.type) && !element.disabled && !element.readOnly;
-})`;
 
 /** The CSS size `setting` gives the page, `requested` being the panel size of the viewer that asked last. */
 export function viewportFor(setting: ViewportSetting, requested: { width: number; height: number } | null): { width: number; height: number } {
@@ -322,18 +308,7 @@ export class Viewer {
       this.#recent = [];
       void this.#start(1);
     }
-    if (this.#settle) clearTimeout(this.#settle);
-    this.#settle = setTimeout(() => {
-      this.#settle = null;
-      if (!this.#motion && !this.#mayHaveDropped) return;
-      this.#mayHaveDropped = false;
-      if (this.#motion) {
-        this.#motion = false;
-        this.#recent = [];
-        void this.#start(1);
-      }
-      void this.pushStill();
-    }, SETTLE_MS);
+    this.#armSettle();
     let acked = false;
     const ack = () => {
       if (acked) return;
@@ -346,6 +321,39 @@ export class Viewer {
     this.push({ type: "frame", data: Buffer.from(String(params.data ?? ""), "base64"), metadata: params.metadata as FrameMetadata, still: false, ack });
   }
 
+  /** The page changed under the screencast (its size or zoom): Chromium may not repaint for it, so a still follows once frames stop. */
+  refreshSoon(): void {
+    if (this.closed || !this.#session) return;
+    this.#mayHaveDropped = true;
+    this.#armSettle();
+  }
+
+  #armSettle(): void {
+    if (this.#settle) clearTimeout(this.#settle);
+    this.#settle = setTimeout(() => {
+      this.#settle = null;
+      if (!this.#motion && !this.#mayHaveDropped) return;
+      this.#mayHaveDropped = false;
+      if (this.#motion) {
+        this.#motion = false;
+        this.#recent = [];
+        void this.#start(1);
+      }
+      void this.pushStill();
+    }, SETTLE_MS);
+  }
+
+  /** The viewer can show larger frames now: its screencast restarts at the new cap, in place, and a still shows the page at it. */
+  async setFrameCap(width: unknown, height: unknown): Promise<void> {
+    const maxWidth = Math.min(Math.round(num(width)), FRAME_CAP_LIMITS.maxWidth);
+    const maxHeight = Math.min(Math.round(num(height)), FRAME_CAP_LIMITS.maxHeight);
+    if (!(maxWidth >= 1 && maxHeight >= 1) || (maxWidth === this.options.maxWidth && maxHeight === this.options.maxHeight)) return;
+    this.options.maxWidth = maxWidth;
+    this.options.maxHeight = maxHeight;
+    await this.#start(this.#scale);
+    await this.pushStill();
+  }
+
   /** A picture of the page as it is now, at this viewer's size; a scaled one pauses every viewer of the tab. */
   async pushStill(): Promise<void> {
     const tab = this.tab;
@@ -356,7 +364,8 @@ export class Viewer {
       const view = metrics.cssVisualViewport;
       const ratio = (await tab.page.devicePixelRatio()) * this.#hub.zoom;
       const scale = Math.min(1, this.options.maxWidth / Math.max(1, view.clientWidth * ratio), this.options.maxHeight / Math.max(1, view.clientHeight * ratio));
-      const capture = () => session.send<{ data: string }>("Page.captureScreenshot", {
+      // A scaled capture on any session but the one that emulates a zoom resets the page's device scale factor (Chrome 155).
+      const capture = () => (scale < 1 ? tab.page.session : session).send<{ data: string }>("Page.captureScreenshot", {
         format: "jpeg",
         quality: this.options.quality,
         ...(scale < 1 ? { clip: { x: view.pageX, y: view.pageY, width: view.clientWidth, height: view.clientHeight, scale } } : {}),
@@ -434,6 +443,7 @@ export class ViewerHub {
   zoom = 1;
   #order = 0;
   #chooser: { id: string; tab: Tab; viewer: Viewer; open: OpenFileChooser } | null = null;
+  #authOffered: { viewer: Viewer; id: string } | null = null;
   #offering: Promise<void> = Promise.resolve();
   readonly #loading = new WeakMap<Tab, boolean>();
   #pointerSequence = 0;
@@ -491,14 +501,30 @@ export class ViewerHub {
     await browser.setViewport({ width: Math.max(size.width, MIN_WINDOW_WIDTH), height: size.height }).catch(() => {});
     const layout = this.layout();
     if (emulated) {
-      for (const tab of this.host.tabs()) {
-        const ratio = await tab.page.devicePixelRatio().catch(() => 1);
-        await tab.page.session.send("Emulation.setDeviceMetricsOverride", { width: layout.width, height: layout.height, deviceScaleFactor: ratio * zoom, mobile: false }).catch(() => {});
-      }
+      for (const tab of this.host.tabs()) await this.#emulate(tab, layout);
       this.#emulated = true;
     }
     if (active) this.broadcast({ type: "viewport", ...layout, setting: this.setting, zoom });
     this.broadcastStatus();
+    for (const viewer of this.viewers) viewer.refreshSoon();
+  }
+
+  /** A zoom, or a page narrower than any window, is emulated tab by tab, so a tab that opens needs it too. */
+  #emulateTabs(): Promise<void> {
+    const emulate = async () => {
+      if (!this.#emulated) return;
+      const layout = this.layout();
+      for (const tab of this.host.tabs()) await this.#emulate(tab, layout);
+      this.broadcast({ type: "viewport", ...layout, setting: this.setting, zoom: this.zoom });
+      for (const viewer of this.viewers) viewer.refreshSoon();
+    };
+    this.#applying = this.#applying.then(emulate, emulate);
+    return this.#applying;
+  }
+
+  async #emulate(tab: Tab, layout: { width: number; height: number }): Promise<void> {
+    const ratio = await tab.page.devicePixelRatio().catch(() => 1);
+    await tab.page.session.send("Emulation.setDeviceMetricsOverride", { width: layout.width, height: layout.height, deviceScaleFactor: ratio * this.zoom, mobile: false }).catch(() => {});
   }
 
   /** A tab came to the front or opened: its window takes the current size. */
@@ -510,14 +536,13 @@ export class ViewerHub {
   async attach(options: ViewerOptions, push: (output: ViewerOutput) => void): Promise<Viewer> {
     const viewer = new Viewer(this, options, push);
     const size = options.size ? requestedSize(options.size.width, options.size.height) : null;
-    if (size && options.canOperate) viewer.requested = { ...size, order: ++this.#order };
+    if (size && options.canOperate && this.host.control.owner === null) viewer.requested = { ...size, order: ++this.#order };
     this.viewers.add(viewer);
     try {
       viewer.push({ type: "starting" });
       await this.host.running();
       if (viewer.closed) return viewer;
-      const owner = this.host.control.owner;
-      await viewer.hide(owner !== null && owner !== viewer.id);
+      await viewer.hide(this.#hides(viewer));
       await this.applyViewport();
       viewer.push(this.controlFor(viewer));
       viewer.push({ type: "viewport", ...this.layout(), setting: this.setting, zoom: this.zoom });
@@ -552,10 +577,19 @@ export class ViewerHub {
     }
   }
 
+  /** Another person holds the browser: this viewer sees none of it, unless it only watches for that same person (their picture in picture). */
+  #hides(viewer: Viewer): boolean {
+    const owner = this.host.control.owner;
+    if (owner === null || owner === viewer.id) return false;
+    const holder = [...this.viewers].find((candidate) => candidate.id === owner);
+    return viewer.options.canOperate || holder?.options.owner !== viewer.options.owner;
+  }
+
   controlFor(viewer: Viewer): ViewerOutput {
     const control = this.host.control;
     const owner = control.owner;
-    const dialog = this.host.active()?.page.dialogs.pending ?? null;
+    // Security: a dialog's text can be a code meant for the person holding the browser.
+    const dialog = owner === null || owner === viewer.id ? this.host.active()?.page.dialogs.pending ?? null : null;
     return {
       type: "control",
       canOperate: viewer.options.canOperate,
@@ -571,12 +605,24 @@ export class ViewerHub {
   }
 
   broadcastControl(): void {
-    const owner = this.host.control.owner;
     for (const viewer of this.viewers) {
-      void viewer.hide(owner !== null && owner !== viewer.id);
+      void viewer.hide(this.#hides(viewer));
       viewer.push(this.controlFor(viewer));
     }
     void this.offerFileChooser();
+    this.offerAuthPrompt();
+  }
+
+  /** The newest HTTP sign-in a tab waits on goes to the person holding the browser, named by tab and challenge, so their answer reaches that one only. */
+  offerAuthPrompt(): void {
+    const owner = this.host.control.owner;
+    const holder = [...this.viewers].find((viewer) => viewer.id === owner && viewer.options.authPrompts && !viewer.closed);
+    const asking = holder ? newestChallenge(this.host.tabs()) : null;
+    const offered = this.#authOffered;
+    if (offered && offered.viewer === holder && offered.id === asking?.challenge.id) return;
+    if (offered) offered.viewer.push({ type: "authPromptClosed", id: offered.id });
+    this.#authOffered = holder && asking ? { viewer: holder, id: asking.challenge.id } : null;
+    if (holder && asking) holder.push({ type: "authPrompt", tabId: asking.tab.id, id: asking.challenge.id, origin: asking.challenge.origin, realm: asking.challenge.realm });
   }
 
   /** The page's open file picker goes to the person holding the browser, under an id that changes whenever they do. */
@@ -605,10 +651,16 @@ export class ViewerHub {
     holder.push({ type: "fileChooser", id: chooser.id, multiple: open.multiple, accept: typeof accept === "string" ? accept : "" });
   }
 
+  /** Whether the page's open picker was offered to `owner` as `id`. */
+  fileChooserOffered(owner: string, id: string): boolean {
+    const chooser = this.#chooser;
+    return chooser !== null && chooser.id === id && chooser.viewer.options.owner === owner && chooser.tab.page.fileChoosers.open === chooser.open;
+  }
+
   /** The holder's files for the picker it was offered; false when that picker is no longer open, or is not theirs. */
   async answerFileChooser(owner: string, id: string, paths: readonly string[]): Promise<boolean> {
     const chooser = this.#chooser;
-    if (!chooser || chooser.id !== id || chooser.viewer.options.owner !== owner || chooser.tab.page.fileChoosers.open !== chooser.open) return false;
+    if (!chooser || !this.fileChooserOffered(owner, id)) return false;
     await this.host.control.human(chooser.viewer.id, chooser.tab, () => chooser.tab.page.fileChoosers.answer(paths, { waitMs: 0 }));
     return true;
   }
@@ -642,8 +694,10 @@ export class ViewerHub {
     this.broadcast(this.tabsMessage());
     if (active) this.broadcast({ type: "url", url: active.page.url() });
     for (const viewer of this.viewers) void viewer.bind(active);
+    if (this.#emulated) void this.#emulateTabs().catch(() => undefined);
     if (active) this.navChanged(active);
     void this.offerFileChooser();
+    this.offerAuthPrompt();
   }
 
   loading(tab: Tab, loading: boolean): void {
@@ -762,6 +816,9 @@ export class ViewerHub {
         await this.applyViewport();
         return;
       }
+      case "frameCap":
+        await viewer.setFrameCap(message.maxWidth, message.maxHeight);
+        return;
     }
     const tab = this.host.active();
     if (!tab || !control.canControl(viewer.id)) {
@@ -773,10 +830,18 @@ export class ViewerHub {
         if (typeof message.accept === "boolean") await tab.page.answerDialog({ accept: message.accept, ...(typeof message.promptText === "string" ? { promptText: message.promptText.slice(0, 4_000) } : {}) });
         this.broadcastControl();
         return;
-      case "authAnswer":
-        if (typeof message.username === "string" && typeof message.password === "string") await tab.page.auth.answer({ username: message.username.slice(0, 1_024), password: message.password.slice(0, 1_024) });
-        else await tab.page.auth.answer(null);
+      case "authAnswer": {
+        // Security: what the person typed goes only to the challenge they were shown, and only while it is still open.
+        const asking = typeof message.tabId === "string" ? this.host.tab(message.tabId) : undefined;
+        if (!asking || asking.page.auth.pending?.id !== message.id) {
+          this.#authOffered = null;
+          this.offerAuthPrompt();
+          return;
+        }
+        if (typeof message.username === "string" && typeof message.password === "string") await asking.page.auth.answer({ username: message.username.slice(0, 1_024), password: message.password.slice(0, 1_024) });
+        else await asking.page.auth.answer(null);
         return;
+      }
       case "tabSelect": {
         const next = typeof message.tabId === "string" ? this.host.tab(message.tabId) : undefined;
         if (next) await control.human(viewer.id, next, () => this.host.showTab(next));
@@ -904,26 +969,17 @@ export class ViewerHub {
       case "probe": {
         const x = num(message.x);
         const y = num(message.y);
-        const editable = await valueInWorld<boolean>(tab.page.frames, tab.page.frames.mainFrameId, `${EDITABLE_AT_POINT}(${x}, ${y})`).catch(() => false);
-        viewer.push({ type: "probe", x, y, editable: editable === true });
+        viewer.push({ type: "probe", x, y, editable: await editableAt(tab.page, x, y).catch(() => false) });
         return;
       }
     }
   }
 }
 
-/** An address a person typed: a bare host means https, loopback http; never credentials or another scheme. */
-export function personUrl(raw: string): string | null {
-  const text = raw.trim().slice(0, 8_192);
-  if (!text || [...text].some((char) => char <= " " || char === "\u007f" || char === "\\")) return null;
-  const candidate = /^[a-z][a-z\d+.-]*:\/\//iu.test(text) ? text : `${/^(?:localhost|127\.0\.0\.1|\[::1\])(?:[:/]|$)/iu.test(text) ? "http" : "https"}://${text}`;
-  try {
-    const url = new URL(candidate);
-    return (url.protocol === "http:" || url.protocol === "https:") && url.hostname && !url.username && !url.password ? url.href : null;
-  } catch {
-    return null;
-  }
-}
+const newestChallenge = (tabs: readonly Tab[]) => tabs.reduce<{ tab: Tab; challenge: AuthChallenge } | null>((newest, tab) => {
+  const challenge = tab.page.auth.pending;
+  return challenge && (!newest || challenge.since >= newest.challenge.since) ? { tab, challenge } : newest;
+}, null);
 
 function parseSetting(value: unknown): ViewportSetting | null {
   const setting = record(value);

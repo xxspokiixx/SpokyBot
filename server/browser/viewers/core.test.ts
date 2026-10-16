@@ -6,7 +6,8 @@ import { afterAll, afterEach, describe, expect, it } from "vitest";
 import { removeTempDir } from "../../testing/cleanup.ts";
 import { BrowserService } from "../service.ts";
 import { FakeBackend, FakeChrome, type FakeDocument } from "../testing/fake-chrome.ts";
-import { ACK_PACE_MS, MIN_WINDOW_WIDTH, personUrl, requestedSize, SETTLE_MS, UNATTACHED_VIEWPORT, viewportFor, type ViewerOutput } from "./core.ts";
+import { personUrl } from "../dispatch.ts";
+import { ACK_PACE_MS, MIN_WINDOW_WIDTH, requestedSize, SETTLE_MS, UNATTACHED_VIEWPORT, viewportFor, type ViewerOutput } from "./core.ts";
 
 const folders: string[] = [];
 const services: BrowserService[] = [];
@@ -83,6 +84,29 @@ describe("the page fills the panel", () => {
     expect(chrome().sentTo(page()).some((sent) => sent.method === "Emulation.clearDeviceMetricsOverride")).toBe(true);
     expect(viewportFor({ mode: "preset", preset: "phone", landscape: true }, null)).toEqual({ width: 844, height: 390 });
   });
+
+  it("ends a drag on a still of the final size, though Chromium sends no frame for it", async () => {
+    const { watch } = await setup();
+    const { viewer, outputs } = await watch({ size: { width: 1600, height: 1000 } });
+    await sleep(SETTLE_MS + 50);
+    const before = outputs.length;
+    for (const width of [1500, 1400, 1300]) await viewer.input({ type: "resize", width, height: 900 });
+    await sleep(SETTLE_MS + 100);
+    const stills = outputs.slice(before).filter((output): output is Extract<ViewerOutput, { type: "frame" }> => output.type === "frame" && output.still);
+    expect(stills).toHaveLength(1);
+    expect(stills[0]!.metadata).toMatchObject({ deviceWidth: 1300, deviceHeight: 900 });
+  });
+
+  it("leaves the page of the person holding the browser alone when another view opens", async () => {
+    const { watch, chrome } = await setup();
+    const holder = await watch({ size: { width: 1400, height: 900 } });
+    await holder.viewer.input({ type: "takeControl" });
+    const other = await watch({ size: { width: 700, height: 1000 } });
+    expect(chrome().viewport).toEqual({ width: 1400, height: 900 });
+    expect(other.outputs).toContainEqual(expect.objectContaining({ type: "viewport", width: 1400, height: 900 }));
+    await other.viewer.close();
+    expect(chrome().viewport).toEqual({ width: 1400, height: 900 });
+  });
 });
 
 describe("a viewer's screencast", () => {
@@ -129,6 +153,21 @@ describe("a viewer's screencast", () => {
     expect(outputs.filter((output) => output.type === "frame" && output.still).length).toBe(stillsBefore + 1);
   });
 
+  it("restarts at a bigger frame cap in place, so the person keeps the browser they hold", async () => {
+    const { service, target, watch, chrome } = await setup();
+    const { viewer, outputs } = await watch({ maxWidth: 2400, maxHeight: 1600, size: { width: 1200, height: 800 } });
+    await viewer.input({ type: "takeControl" });
+    const stills = () => outputs.filter((output) => output.type === "frame" && output.still).length;
+    const before = stills();
+    await viewer.input({ type: "frameCap", maxWidth: 3024, maxHeight: 1800 });
+    const lastStart = () => chrome().sent.filter((sent) => sent.method === "Page.startScreencast").at(-1)?.params;
+    expect(lastStart()).toMatchObject({ maxWidth: 3024, maxHeight: 1800 });
+    expect(stills()).toBe(before + 1);
+    expect(service.heldBy(target.session)).toBe(viewer.id);
+    await viewer.input({ type: "frameCap", maxWidth: 99_999, maxHeight: 99_999 });
+    expect(lastStart()).toMatchObject({ maxWidth: 7680, maxHeight: 4320 });
+  });
+
   it("stops every screencast on the tab while the bot takes a screenshot, then starts them again", async () => {
     const { service, target, watch, chrome } = await setup();
     await watch();
@@ -160,6 +199,28 @@ describe("viewers of one browser", () => {
     expect(other.outputs.slice(seen).some((output) => output.type === "frame")).toBe(true);
   });
 
+  it("keeps the picture in picture of the person holding the browser playing, and shows other people's views nothing", async () => {
+    const { service, target, watch, chrome, page } = await setup();
+    const panel = await watch();
+    const passive = async (owner: string) => {
+      const outputs: ViewerOutput[] = [];
+      await service.attachViewer(target, { owner, canOperate: false, maxWidth: 1280, maxHeight: 1280 }, (output) => {
+        outputs.push(output);
+        if (output.type === "frame") output.ack();
+      });
+      return outputs;
+    };
+    const pip = await passive("local-owner");
+    const elsewhere = await passive("phone-session");
+    await panel.viewer.input({ type: "takeControl" });
+    await sleep(20);
+    const [pipBefore, elsewhereBefore] = [pip.length, elsewhere.length];
+    chrome().paint(page());
+    await sleep(20);
+    expect(pip.slice(pipBefore).some((output) => output.type === "frame")).toBe(true);
+    expect(elsewhere.slice(elsewhereBefore).some((output) => output.type === "frame")).toBe(false);
+  });
+
   it("asks the person holding the browser for an HTTP sign-in, and answers the page with what they typed", async () => {
     const { service, target, watch, chrome, page } = await setup();
     const { viewer, outputs } = await watch({ authPrompts: true });
@@ -168,10 +229,40 @@ describe("viewers of one browser", () => {
     expect(session).toBeTruthy();
     chrome().event("Fetch.authRequired", { requestId: "auth-1", authChallenge: { source: "Server", origin: "https://intranet.example", scheme: "basic", realm: "Staff" } }, session!);
     await sleep(10);
-    expect(outputs).toContainEqual({ type: "authPrompt", origin: "https://intranet.example", realm: "Staff" });
-    await viewer.input({ type: "authAnswer", username: "ada", password: "secret" });
+    const prompt = outputs.find((output): output is Extract<ViewerOutput, { type: "authPrompt" }> => output.type === "authPrompt");
+    expect(prompt).toMatchObject({ id: "auth-1", origin: "https://intranet.example", realm: "Staff" });
+    await viewer.input({ type: "authAnswer", tabId: prompt!.tabId, id: prompt!.id, username: "ada", password: "secret" });
     expect(chrome().sentTo(page())).toContainEqual(expect.objectContaining({ method: "Fetch.continueWithAuth", params: { requestId: "auth-1", authChallengeResponse: { response: "ProvideCredentials", username: "ada", password: "secret" } } }));
     expect(service.heldBy(target.session)).toBe(viewer.id);
+  });
+
+  it("names each HTTP sign-in by tab and challenge, and gives the person's answer only to the one they were shown", async () => {
+    const { watch, chrome, page } = await setup();
+    const { viewer, outputs } = await watch({ authPrompts: true });
+    await viewer.input({ type: "takeControl" });
+    const first = page();
+    await viewer.input({ type: "tabNew", url: "https://second.example/" });
+    await sleep(30);
+    const second = page();
+    const fetchSession = (tab: typeof first) => chrome().sentTo(tab).find((sent) => sent.method === "Fetch.enable")!.sessionId!;
+    const challenge = (tab: typeof first, requestId: string, origin: string, realm: string) =>
+      chrome().event("Fetch.authRequired", { requestId, authChallenge: { source: "Server", origin, scheme: "basic", realm } }, fetchSession(tab));
+    challenge(first, "x-1", "http://x.example", "X");
+    await sleep(10);
+    challenge(second, "y-1", "http://y.example", "Y");
+    await sleep(10);
+    const prompts = () => outputs.filter((output): output is Extract<ViewerOutput, { type: "authPrompt" }> => output.type === "authPrompt");
+    const shown = prompts().at(-1)!;
+    expect(shown).toMatchObject({ id: "y-1", origin: "http://y.example", realm: "Y" });
+    expect(outputs).toContainEqual({ type: "authPromptClosed", id: "x-1" });
+    const answers = () => chrome().sent.filter((sent) => sent.method === "Fetch.continueWithAuth");
+    await viewer.input({ type: "authAnswer", tabId: shown.tabId, id: "x-1", username: "y-user", password: "y-password" });
+    expect(answers()).toEqual([]);
+    expect(prompts().at(-1)).toMatchObject({ id: "y-1" });
+    await viewer.input({ type: "authAnswer", tabId: shown.tabId, id: "y-1", username: "y-user", password: "y-password" });
+    expect(answers()).toEqual([expect.objectContaining({ params: { requestId: "y-1", authChallengeResponse: { response: "ProvideCredentials", username: "y-user", password: "y-password" } } })]);
+    expect(chrome().sentTo(second)).toContainEqual(expect.objectContaining({ method: "Fetch.continueWithAuth" }));
+    expect(prompts().at(-1)).toMatchObject({ id: "x-1", origin: "http://x.example" });
   });
 
   it("cancels an HTTP sign-in at once when no one watching can answer it, so the site's refusal shows", async () => {
@@ -232,6 +323,34 @@ describe("what the panel shows besides the page", () => {
     await viewer.input({ type: "zoom", factor: 1 });
     expect(chrome().sentTo(page()).at(-1)?.method).not.toBe("Emulation.setDeviceMetricsOverride");
     expect(outputs.filter((output) => output.type === "viewport").at(-1)).toMatchObject({ width: 1600, height: 1000, zoom: 1 });
+  });
+
+  it("zooms the tabs that open later too, the person's and the page's own, so input still maps onto them", async () => {
+    const { watch, chrome, page } = await setup();
+    const { viewer, outputs } = await watch({ size: { width: 1600, height: 1000 } });
+    await viewer.input({ type: "takeControl" });
+    await viewer.input({ type: "zoom", factor: 1.25 });
+    const zoomed = { method: "Emulation.setDeviceMetricsOverride", params: { width: 1280, height: 800, deviceScaleFactor: 2.5, mobile: false } };
+    await viewer.input({ type: "tabNew", url: "https://example.org/" });
+    await sleep(30);
+    const added = page();
+    expect(chrome().sentTo(added)).toContainEqual(expect.objectContaining(zoomed));
+    const popup = chrome().popup(added, "https://example.net/");
+    await sleep(30);
+    expect(chrome().sentTo(popup)).toContainEqual(expect.objectContaining(zoomed));
+    expect(outputs.filter((output) => output.type === "viewport").at(-1)).toMatchObject({ width: 1280, height: 800, zoom: 1.25 });
+  });
+
+  it("shows a page's dialog only to the person holding the browser while someone holds it", async () => {
+    const { watch, chrome, page } = await setup();
+    const holder = await watch();
+    const other = await watch();
+    await holder.viewer.input({ type: "takeControl" });
+    chrome().event("Page.javascriptDialogOpening", { type: "alert", message: "Your one-time code is 918273", defaultPrompt: "", url: "https://example.com/" }, mainSession(chrome().sentTo(page()))!);
+    await sleep(20);
+    const control = (outputs: ViewerOutput[]) => outputs.filter((output) => output.type === "control").at(-1);
+    expect(control(holder.outputs)).toMatchObject({ controller: "you", dialog: { type: "alert", message: "Your one-time code is 918273" } });
+    expect(control(other.outputs)).toMatchObject({ controller: "another-viewer", dialog: null });
   });
 
   it("refuses a zoom from a viewer that does not hold the browser", async () => {

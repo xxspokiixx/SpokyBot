@@ -1,6 +1,7 @@
 // Adapted from pingdotgg/t3code@00cdceb1 packages/client-runtime/src/preview/serverBrowserStream.ts, MIT License,
 // Copyright (c) 2026 T3 Tools Inc. (full text in third_party/t3-code/LICENSE); modified: OpenMausBot's routes and
-// access, a viewer that may operate sizes the page while it only watches, and OpenMausBot's own messages are passed on.
+// access, a viewer that may operate sizes the page while it only watches, a larger frame cap is sent in place and a
+// reconnect opens with the newest size and cap, and OpenMausBot's own messages are passed on.
 
 /** The browser's host cannot run Chrome until it is set up; the close reason names the fix. */
 export const PREVIEW_STREAM_HOST_SETUP_CLOSE_CODE = 4503;
@@ -126,6 +127,8 @@ export type PreviewStreamInput =
     }
   | { readonly type: "text"; readonly text: string }
   | { readonly type: "resize"; readonly width: number; readonly height: number }
+  /** The viewer can show larger frames now: the screencast restarts at the new cap without reconnecting. */
+  | { readonly type: "frameCap"; readonly maxWidth: number; readonly maxHeight: number }
   | { readonly type: "navigate"; readonly url: string }
   | { readonly type: "history"; readonly delta: -1 | 1 }
   | { readonly type: "reload"; readonly ignoreCache?: boolean }
@@ -135,7 +138,8 @@ export type PreviewStreamInput =
   | { readonly type: "tabNew"; readonly url?: string }
   | { readonly type: "tabClose"; readonly tabId: string }
   | { readonly type: "selectChoose"; readonly id: string; readonly index: number }
-  | { readonly type: "authAnswer"; readonly username?: string; readonly password?: string }
+  /** Answers the sign-in prompt `id` of tab `tabId`, as it was shown; without a username and password it cancels it. */
+  | { readonly type: "authAnswer"; readonly tabId: string; readonly id: string; readonly username?: string; readonly password?: string }
   | { readonly type: "restart" };
 
 export interface PreviewStreamDownload {
@@ -261,23 +265,27 @@ export interface PreviewStreamClient {
 
 /** A viewer that may operate sizes the page while it watches, and may restart it; everything else needs control. */
 const allowed = (input: PreviewStreamInput, control: PreviewStreamControl): boolean =>
-  input.type === "takeControl" || input.type === "resize" || input.type === "restart" || control.controller === "you";
+  input.type === "takeControl" || input.type === "resize" || input.type === "frameCap" || input.type === "restart" || control.controller === "you";
 
 const ACK_MESSAGE = JSON.stringify({ type: "ack" });
 export function createPreviewStreamClient(
   target: PreviewStreamTarget,
   events: PreviewStreamEvents,
 ): PreviewStreamClient {
-  const query = new URLSearchParams({
-    maxWidth: String(Math.max(1, Math.round(target.maxWidth))),
-    maxHeight: String(Math.max(1, Math.round(target.maxHeight))),
-  });
-  if (target.width !== undefined && target.height !== undefined) {
-    query.set("width", String(Math.round(target.width)));
-    query.set("height", String(Math.round(target.height)));
-  }
-  if (target.interactive === false) query.set("interactive", "false");
-  const url = withAccessQuery(`${target.access.wsBase}/stream?${query.toString()}`, target.access);
+  let cap = { width: target.maxWidth, height: target.maxHeight };
+  let size = target.width !== undefined && target.height !== undefined ? { width: target.width, height: target.height } : null;
+  const streamUrl = () => {
+    const query = new URLSearchParams({
+      maxWidth: String(Math.max(1, Math.round(cap.width))),
+      maxHeight: String(Math.max(1, Math.round(cap.height))),
+    });
+    if (size) {
+      query.set("width", String(Math.round(size.width)));
+      query.set("height", String(Math.round(size.height)));
+    }
+    if (target.interactive === false) query.set("interactive", "false");
+    return withAccessQuery(`${target.access.wsBase}/stream?${query.toString()}`, target.access);
+  };
   let stopped = false;
   let socket: WebSocket | null = null;
   let retryTimer: ReturnType<typeof setTimeout> | null = null;
@@ -287,7 +295,8 @@ export function createPreviewStreamClient(
 
   const connect = () => {
     if (stopped) return;
-    const ws = new WebSocket(url);
+    const opening = { cap, size };
+    const ws = new WebSocket(streamUrl());
     ws.binaryType = "arraybuffer";
     socket = ws;
     let opened = false;
@@ -402,7 +411,11 @@ export function createPreviewStreamClient(
           dialog,
           ...(stale === true ? { stale: true } : {}),
         };
+        const first = control === null;
         control = nextControl;
+        // A size or cap the viewer asked for while this socket was opening reaches the server now.
+        if (first && canOperate && cap !== opening.cap) ws.send(JSON.stringify({ type: "frameCap", maxWidth: cap.width, maxHeight: cap.height }));
+        if (first && canOperate && size && size !== opening.size) ws.send(JSON.stringify({ type: "resize", ...size }));
         events.onControl?.(nextControl);
       } else if (typeof type === "string") {
         events.onMessage?.(message as Record<string, unknown>);
@@ -440,6 +453,8 @@ export function createPreviewStreamClient(
 
   return {
     send: (input) => {
+      if (input.type === "resize") size = { width: input.width, height: input.height };
+      else if (input.type === "frameCap") cap = { width: input.maxWidth, height: input.maxHeight };
       if (socket?.readyState !== WebSocket.OPEN) return false;
       if (!control?.canOperate) return false;
       if (!allowed(input, control)) return false;

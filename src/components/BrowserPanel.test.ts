@@ -46,10 +46,11 @@ class FixtureEventSource {
   emit(name: string, data: unknown) { for (const listener of this.listeners.get(name) ?? []) listener(new MessageEvent(name, { data: JSON.stringify(data) })); }
 }
 
+let observers: Array<() => void> = [];
 class FakeResizeObserver {
-  constructor(readonly callback: () => void) {}
+  constructor(readonly callback: () => void) { observers.push(callback); }
   observe() { queueMicrotask(this.callback); }
-  disconnect() {}
+  disconnect() { observers = observers.filter((callback) => callback !== this.callback); }
 }
 
 const bot = { id: "pepper", name: "Pepper" } as Bot;
@@ -57,6 +58,7 @@ let host: HTMLDivElement;
 let root: Root;
 
 beforeEach(() => {
+  observers = [];
   FakeSocket.instances = [];
   FixtureEventSource.instances = [];
   fixture.api.mockReset().mockResolvedValue({ ok: true });
@@ -182,6 +184,19 @@ describe("who holds the browser", () => {
     await flush();
     const mouse = socket.sent.filter((message) => message.type === "mouse");
     expect(mouse.map((message) => [message.action, message.x, message.y])).toEqual([["down", 400, 250], ["up", 400, 250]]);
+  });
+
+  it("keeps the browser for the person holding it when the panel grows past its frame cap, as full screen does", async () => {
+    const socket = await streaming("unclaimed");
+    await act(async () => pill().click());
+    await act(async () => socket.control("you"));
+    await flush();
+    vi.mocked(HTMLElement.prototype.getBoundingClientRect).mockReturnValue({ left: 0, top: 0, x: 0, y: 0, right: 1800, bottom: 1100, width: 1800, height: 1100, toJSON() {} } as DOMRect);
+    await act(async () => { for (const observer of observers) observer(); });
+    await act(async () => { await new Promise((resolve) => setTimeout(resolve, 600)); });
+    expect(FakeSocket.instances).toEqual([socket]);
+    expect(socket.sent).toContainEqual({ type: "frameCap", maxWidth: 3600, maxHeight: 2200 });
+    expect(pill().dataset.pill).toBe("yours");
   });
 
   it("says another device holds the browser, and sends nothing from this one", async () => {

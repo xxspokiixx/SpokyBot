@@ -1,6 +1,7 @@
 // What a screencast cannot show. Headless Chrome draws a <select>'s list in a popup widget of its own, outside the
 // frames a screencast sends, so the person's view draws the options itself and answers with the one chosen. The page's
-// cursor shape travels the same way. All of it runs in the isolated world, where the page cannot see it.
+// cursor shape travels the same way, and so does whether a point takes text, for a touch viewer's keyboard. All of it
+// runs in the isolated world, where the page cannot see it.
 import { valueInWorld } from "../cdp/evaluate.ts";
 import type { CdpPage } from "../cdp/page.ts";
 
@@ -50,6 +51,8 @@ const HELD_SELECT = `((token) => {
 })`;
 
 const cssNumber = (value: number) => (Number.isFinite(value) ? value : 0);
+
+const NON_TEXT_INPUTS = JSON.stringify(["button", "checkbox", "color", "file", "hidden", "image", "radio", "range", "reset", "submit"]);
 
 /** The dropdown <select> under a point in the tab's main frame, kept under `token` so the choice lands on that list. */
 export async function selectAt(page: CdpPage, x: number, y: number, token: string): Promise<SelectPopup | null> {
@@ -106,7 +109,7 @@ const CURSOR_AT = `((x, y) => {
   const keyword = value.split(",").pop().trim();
   if (keyword !== "auto") return keyword;
   if (element.isContentEditable || element.tagName === "TEXTAREA") return "text";
-  if (element.tagName === "INPUT" && !["button", "checkbox", "color", "file", "hidden", "image", "radio", "range", "reset", "submit"].includes(element.type)) return "text";
+  if (element.tagName === "INPUT" && !${NON_TEXT_INPUTS}.includes(element.type)) return "text";
   return element.closest && element.closest("a[href]") ? "pointer" : "default";
 })`;
 
@@ -114,6 +117,20 @@ const CURSOR_AT = `((x, y) => {
 export async function cursorAt(page: CdpPage, x: number, y: number): Promise<string> {
   const shape = await valueInWorld<string>(page.frames, page.frames.mainFrameId, `${CURSOR_AT}(${cssNumber(x)}, ${cssNumber(y)})`);
   return typeof shape === "string" && CURSORS.has(shape) ? shape : "default";
+}
+
+const EDITABLE_AT = `((x, y) => {
+  let element = (${ELEMENT_AT})(x, y);
+  if (element && element.tagName === "LABEL" && element.control) element = element.control;
+  if (!element) return false;
+  if (element.tagName === "IFRAME" || element.tagName === "FRAME" || element.isContentEditable) return true;
+  if (element.tagName === "TEXTAREA") return !element.disabled && !element.readOnly;
+  return element.tagName === "INPUT" && !${NON_TEXT_INPUTS}.includes(element.type) && !element.disabled && !element.readOnly;
+})`;
+
+/** Whether the point takes text, frames included: a touch viewer raises its keyboard for it. */
+export async function editableAt(page: CdpPage, x: number, y: number): Promise<boolean> {
+  return await valueInWorld<boolean>(page.frames, page.frames.mainFrameId, `${EDITABLE_AT}(${cssNumber(x)}, ${cssNumber(y)})`) === true;
 }
 
 /** A file picker's `accept` attribute, for the person's own picker. */

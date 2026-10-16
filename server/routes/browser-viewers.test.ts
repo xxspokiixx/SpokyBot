@@ -1,9 +1,9 @@
 // The v2 stream's routes, ported from pingdotgg/t3code@00cdceb1 apps/server/src/preview/ServerBrowserStream.test.ts
 // (MIT License, Copyright (c) 2026 T3 Tools Inc.): frames and acknowledgements over a real WebSocket, input only from a
 // view that may operate, the file picker's upload, a download, and the host-setup close.
-import { mkdtempSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
-import { createServer, type IncomingMessage, type Server, type ServerResponse } from "node:http";
-import type { AddressInfo } from "node:net";
+import { existsSync, mkdtempSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
+import { createServer, request, type IncomingMessage, type Server, type ServerResponse } from "node:http";
+import type { AddressInfo, Socket } from "node:net";
 import { tmpdir } from "node:os";
 import { basename, join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
@@ -43,9 +43,12 @@ const mutations = [
 
 interface Fixture {
   origin: string;
+  stream: StreamV2;
   attachments: ViewerOptions[];
   inputs: unknown[];
   answers: Array<{ owner: string; chooser: string; files: Array<{ name: string; text: string }> }>;
+  /** Uploads that reached the check for an offered picker. */
+  pickerChecks: number;
   dataDir: string;
 }
 
@@ -61,7 +64,7 @@ async function serve({ attach, current = () => true, download }: {
   current?: () => boolean;
   download?: (id: string) => Download | undefined;
 } = {}): Promise<Fixture> {
-  const fixture: Fixture = { origin: "", attachments: [], inputs: [], answers: [], dataDir: mkdtempSync(join(tmpdir(), "omb-browser-viewers-")) };
+  const fixture = { origin: "", attachments: [], inputs: [], answers: [], pickerChecks: 0, dataDir: mkdtempSync(join(tmpdir(), "omb-browser-viewers-")) } as unknown as Fixture;
   folders.push(fixture.dataDir);
   const viewer = { id: "viewer", input: async (message: unknown) => { fixture.inputs.push(message); }, close: async () => {} } as unknown as Viewer;
   const service = {
@@ -72,6 +75,7 @@ async function serve({ attach, current = () => true, download }: {
     restart: async () => {},
   } as unknown as BrowserService;
   const stream = new StreamV2({ service });
+  fixture.stream = stream;
   const upgrades = createUpgrades();
   const deps: BrowserViewerRouteDeps = {
     upgrades,
@@ -82,6 +86,10 @@ async function serve({ attach, current = () => true, download }: {
       stream: ({ session, spec: _spec, ...request }) => {
         stream.open({ ...request, target: { session, key: "bot:pepper" } });
         return true;
+      },
+      fileChooserOffered: (_browser, _owner, chooser) => {
+        fixture.pickerChecks++;
+        return chooser === "chooser-1";
       },
       answerFileChooser: async (_browser, owner, chooser, paths) => {
         fixture.answers.push({ owner, chooser, files: paths.map((path) => ({ name: basename(path), text: readFileSync(path, "utf8") })) });
@@ -106,6 +114,31 @@ async function serve({ attach, current = () => true, download }: {
   fixture.origin = `127.0.0.1:${(server.address() as AddressInfo).port}`;
   return fixture;
 }
+
+/** A client that keeps its socket after the server's close frame: it reads what the server sends and never answers. */
+function stubbornStream(fixture: Fixture): Promise<Socket> {
+  const [host, port] = fixture.origin.split(":");
+  return new Promise((resolve, reject) => {
+    const req = request({ host, port: Number(port), path: "/api/bots/pepper/browser/stream", headers: { Upgrade: "websocket", Connection: "Upgrade", "Sec-WebSocket-Key": "dGhlIHNhbXBsZSBub25jZQ==", "Sec-WebSocket-Version": "13" } });
+    req.once("upgrade", (_res, socket) => resolve((socket as Socket).resume()));
+    req.once("response", (res) => reject(new Error(`refused: ${res.statusCode}`)));
+    req.once("error", reject);
+    req.end();
+  });
+}
+
+/** One masked text frame, as a client sends it. */
+function textFrame(message: unknown): Buffer {
+  const payload = Buffer.from(JSON.stringify(message));
+  const mask = Buffer.from([7, 1, 8, 3]);
+  return Buffer.concat([Buffer.from([0x81, 0x80 | payload.length]), mask, payload.map((byte, index) => byte ^ mask[index % 4]!)]);
+}
+
+const until = async (check: () => boolean, timeoutMs = 5_000) => {
+  for (const deadline = Date.now() + timeoutMs; !check(); await new Promise((resolve) => setTimeout(resolve, 10))) {
+    if (Date.now() > deadline) throw new Error("timed out");
+  }
+};
 
 const withResolvers = <T = void>() => {
   let resolve!: (value: T) => void;
@@ -189,6 +222,47 @@ describe("the v2 stream", () => {
     expect(await closed(stale)).toBe(1006);
   });
 
+  it("lets a closed view go at once: its input stops reaching the browser, and a client that keeps its socket is cut off", async () => {
+    let closes = 0;
+    const fixture = await serve({
+      attach: async () => ({ id: "viewer", input: async (message: unknown) => { fixture.inputs.push(message); }, close: async () => { closes++; } }) as unknown as Viewer,
+    });
+    const socket = await stubbornStream(fixture);
+    const ended = new Promise<number>((resolve) => socket.once("close", () => resolve(Date.now())));
+    socket.write(textFrame({ type: "takeControl" }));
+    await until(() => fixture.inputs.length === 1);
+    const closedAt = Date.now();
+    fixture.stream.closeForOwner("local-owner");
+    expect(closes).toBe(1);
+    socket.write(textFrame({ type: "navigate", url: "https://after-sign-out.example/" }));
+    expect(await ended - closedAt).toBeLessThan(5_000);
+    expect(fixture.inputs).toEqual([{ type: "takeControl" }]);
+  });
+
+  it("checks each message as each v1 action is checked: a person who may no longer see the bot is cut off at once", async () => {
+    let current = true;
+    const fixture = await serve({ current: () => current });
+    const opened = async () => {
+      const socket = new WebSocket(`ws://${fixture.origin}/api/bots/pepper/browser/stream`);
+      await new Promise((resolve) => socket.addEventListener("open", resolve));
+      return { socket, closed: new Promise<number>((resolve) => socket.addEventListener("close", (event) => resolve(event.code))) };
+    };
+    const first = await opened();
+    first.socket.send(JSON.stringify({ type: "takeControl" }));
+    await until(() => fixture.inputs.length === 1);
+    current = false;
+    first.socket.send(JSON.stringify({ type: "navigate", url: "https://hidden.example/" }));
+    expect(await first.closed).toBe(STREAM_CLOSE.gone);
+    expect(fixture.inputs).toEqual([{ type: "takeControl" }]);
+    current = true;
+    const second = await opened();
+    current = false;
+    const recheckedAt = Date.now();
+    fixture.stream.recheck();
+    expect(await second.closed).toBe(STREAM_CLOSE.gone);
+    expect(Date.now() - recheckedAt).toBeLessThan(1_000);
+  });
+
   it.each([
     { error: new BrowserHostError("sandbox"), need: "sandbox" },
     { error: new BrowserHostError("libraries", ["libnss3.so"]), need: "libraries" },
@@ -218,6 +292,37 @@ describe("the page's file picker and downloads", () => {
     expect(readdirSync(join(fixture.dataDir, "browser-uploads"))).toHaveLength(1);
     expect((await fetch(`http://${fixture.origin}/api/bots/pepper/browser/upload?chooser=chooser-1`, { method: "POST", body: "plain" })).status).toBe(415);
     expect((await fetch(`http://${fixture.origin}/api/bots/nobody/browser/upload?chooser=chooser-1`, { method: "POST" })).status).toBe(404);
+  });
+
+  it("refuses an upload for a picker this person was not offered before reading any of it", async () => {
+    const fixture = await serve();
+    const [host, port] = fixture.origin.split(":");
+    const body = request({ host, port: Number(port), method: "POST", path: "/api/bots/pepper/browser/upload?chooser=bogus", headers: { "content-type": "multipart/form-data; boundary=x", "content-length": String(90 * 1024 * 1024) } });
+    body.on("error", () => {});
+    const answered = new Promise<number>((resolve) => body.once("response", (res) => { res.resume(); resolve(res.statusCode!); }));
+    body.write(Buffer.alloc(64 * 1024));
+    expect(await answered).toBe(409);
+    body.destroy();
+    expect(fixture.answers).toEqual([]);
+    expect(existsSync(join(fixture.dataDir, "browser-uploads"))).toBe(false);
+  });
+
+  it("takes one upload at a time from each person", async () => {
+    const fixture = await serve();
+    const [host, port] = fixture.origin.split(":");
+    const head = "--x\r\nContent-Disposition: form-data; name=\"file\"; filename=\"notes.txt\"\r\nContent-Type: text/plain\r\n\r\nhello";
+    const tail = "\r\n--x--\r\n";
+    const first = request({ host, port: Number(port), method: "POST", path: "/api/bots/pepper/browser/upload?chooser=chooser-1", headers: { "content-type": "multipart/form-data; boundary=x", "content-length": String(Buffer.byteLength(head + tail)) } });
+    const firstAnswered = new Promise<number>((resolve) => first.once("response", (res) => { res.resume(); resolve(res.statusCode!); }));
+    first.write(head);
+    await until(() => fixture.pickerChecks === 1);
+    const second = new FormData();
+    second.append("file", new File(["again"], "again.txt"));
+    const refused = await fetch(`http://${fixture.origin}/api/bots/pepper/browser/upload?chooser=chooser-1`, { method: "POST", body: second });
+    expect(refused.status).toBe(429);
+    first.end(tail);
+    expect(await firstAnswered).toBe(204);
+    expect(fixture.answers).toEqual([{ owner: "local-owner", chooser: "chooser-1", files: [{ name: "notes.txt", text: "hello" }] }]);
   });
 
   it("refuses more than 20 files at once", async () => {

@@ -59,15 +59,29 @@ export interface ToolContext {
   downloads(): Download[];
 }
 
-/** What a person typed or a bot passed as an address: a bare host means https, loopback http. */
+/** A typed address with its scheme: a bare host means https, loopback http. */
+const withScheme = (text: string) => /^[a-z][a-z\d+.-]*:\/\//iu.test(text) ? text : `${/^(?:localhost|127\.0\.0\.1|\[::1\])(?:[:/]|$)/iu.test(text) ? "http" : "https"}://${text}`;
+
+/** What a bot passed as an address. */
 export function agentUrl(raw: string): string {
   const text = raw.trim();
   if (text === "about:blank" || /^data:/iu.test(text)) return text;
-  const candidate = /^[a-z][a-z\d+.-]*:\/\//iu.test(text) ? text : `${/^(?:localhost|127\.0\.0\.1|\[::1\])(?:[:/]|$)/iu.test(text) ? "http" : "https"}://${text}`;
   let url: URL;
-  try { url = new URL(candidate); } catch { throw new DriverError("refused", `${text.slice(0, 200)} is not an address the browser can open.`); }
+  try { url = new URL(withScheme(text)); } catch { throw new DriverError("refused", `${text.slice(0, 200)} is not an address the browser can open.`); }
   if (!navigable(url.href)) throw new DriverError("refused", `Only http(s), about:blank and data: addresses open here, not ${url.protocol}.`);
   return url.href;
+}
+
+/** An address a person typed in the panel: http(s) only, never credentials, and null rather than an error. */
+export function personUrl(raw: string): string | null {
+  const text = raw.trim().slice(0, 8_192);
+  if (!text || [...text].some((char) => char <= " " || char === "\u007f" || char === "\\")) return null;
+  try {
+    const url = new URL(withScheme(text));
+    return (url.protocol === "http:" || url.protocol === "https:") && url.hostname && !url.username && !url.password ? url.href : null;
+  } catch {
+    return null;
+  }
 }
 
 function remaining(context: ToolContext, preferred = DEFAULT_ACTION_MS): number {

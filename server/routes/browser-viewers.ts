@@ -23,13 +23,14 @@ const DOWNLOAD = /^\/api\/bots\/([\w-]+)\/browser\/download\/([\w-]{1,64})$/;
 const CHOOSER = /^[\w-]{1,64}$/;
 const UPLOAD_MAX_FILES = 20;
 const UPLOAD_MAX_BYTES = 100 * 1024 * 1024;
+const PICKER_CLOSED = "The page's file picker is no longer open.";
 
 type Spec = Parameters<BrowserLive["open"]>[0]["spec"];
 type Failure = { status: number; error: string };
 
 export interface BrowserViewerRouteDeps {
   upgrades: Upgrades;
-  viewers: Pick<LiveRouter, "open" | "action" | "stream" | "answerFileChooser" | "download">;
+  viewers: Pick<LiveRouter, "open" | "action" | "stream" | "fileChooserOffered" | "answerFileChooser" | "download">;
   /** A bot with its browser on, and the session and spec that browser runs as. */
   browser(botId: string): Promise<{ botId: string; session: string; spec: Spec } | Failure>;
   /** Hosted workspaces check the member's sign-in again before a view opens. */
@@ -77,8 +78,23 @@ async function uploadedFiles(req: IncomingMessage): Promise<Array<{ name: string
   return Promise.all(files.map(async (file) => ({ name: file.name, bytes: new Uint8Array(await file.arrayBuffer()) })));
 }
 
+/** Gives an upload's files to the page's picker; null when it took them, else why not. Files it did not take are deleted. */
+async function answerUpload(req: IncomingMessage, deps: BrowserViewerRouteDeps, browser: { session: string; spec: Spec }, owner: string, chooser: string): Promise<(Failure & { unread?: boolean }) | null> {
+  let files: Array<{ name: string; bytes: Uint8Array }>;
+  try { files = await uploadedFiles(req); }
+  catch (error) {
+    if (!(error instanceof UploadError)) throw error;
+    return { status: error.status, error: error.message, unread: true };
+  }
+  const paths = storeUploads(files, join(deps.dataDir, "browser-uploads"));
+  if (await deps.viewers.answerFileChooser(browser, owner, chooser, paths).catch(() => false)) return null;
+  for (const file of paths) rmSync(dirname(file), { recursive: true, force: true });
+  return { status: 409, error: PICKER_CLOSED };
+}
+
 export function createBrowserViewerRoutes(deps: BrowserViewerRouteDeps): RouteHandler {
   deps.upgrades.route((path) => STREAM.test(path));
+  const uploading = new Set<string>();
   return async ({ req, res, url, path, method, auth, json, readBody }) => {
     const live = LIVE.exec(path);
     const stream = live ? null : STREAM.exec(path);
@@ -136,22 +152,22 @@ export function createBrowserViewerRoutes(deps: BrowserViewerRouteDeps): RouteHa
       if (method !== "POST") return json(res, 405, { error: "method not allowed" });
       const chooser = url.searchParams.get("chooser") ?? "";
       if (!CHOOSER.test(chooser)) return json(res, 400, { error: "Name the page's file picker." });
-      let files: Array<{ name: string; bytes: Uint8Array }>;
-      try { files = await uploadedFiles(req); }
-      catch (error) {
-        if (!(error instanceof UploadError)) throw error;
-        // The rest of a refused body is never read.
+      // Security: a body is read into memory only for the picker this person was offered, one upload of theirs at a time.
+      const refused = !deps.viewers.fileChooserOffered(browser, owner, chooser) ? { status: 409, error: PICKER_CLOSED }
+        : uploading.has(owner) ? { status: 429, error: "Your previous upload is still on its way. Wait for it, then try again." } : null;
+      if (refused) {
         res.setHeader("connection", "close");
-        return json(res, error.status, { error: error.message });
+        return json(res, refused.status, { error: refused.error });
       }
-      const paths = storeUploads(files, join(deps.dataDir, "browser-uploads"));
-      const answered = await deps.viewers.answerFileChooser(browser, owner, chooser, paths).catch(() => false);
-      if (!answered) {
-        for (const file of paths) rmSync(dirname(file), { recursive: true, force: true });
-        return json(res, 409, { error: "The page's file picker is no longer open." });
+      uploading.add(owner);
+      const unanswered = await answerUpload(req, deps, browser, owner, chooser).finally(() => uploading.delete(owner));
+      if (!unanswered) {
+        res.writeHead(204).end();
+        return;
       }
-      res.writeHead(204).end();
-      return;
+      // The rest of a refused body is never read.
+      if (unanswered.unread) res.setHeader("connection", "close");
+      return json(res, unanswered.status, { error: unanswered.error });
     }
 
     if (method !== "GET") return json(res, 405, { error: "method not allowed" });

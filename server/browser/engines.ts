@@ -267,6 +267,10 @@ export class LiveRouter {
     return true;
   }
 
+  fileChooserOffered({ session, spec }: SessionSpec, owner: string, chooserId: string): boolean {
+    return chromeTarget(session, spec) ? this.#chrome.service.fileChooserOffered(session, owner, chooserId) : false;
+  }
+
   answerFileChooser({ session, spec }: SessionSpec, owner: string, chooserId: string, paths: readonly string[]): Promise<boolean> {
     return chromeTarget(session, spec) ? this.#chrome.service.answerFileChooser(session, owner, chooserId, paths) : Promise.resolve(false);
   }
@@ -280,4 +284,6 @@ export class LiveRouter {
   closeForOwner(owner: string): void { this.#chrome.live.closeForOwner(owner); this.#chrome.stream.closeForOwner(owner); this.#old.closeForOwner(owner); }
   closeForBot(botId: string): void { this.#chrome.live.closeForBot(botId); this.#chrome.stream.closeForBot(botId); this.#old.closeForBot(botId); }
   closeAll(): void { this.#chrome.live.closeAll(); this.#chrome.stream.closeAll(); this.#old.closeAll(); }
+  /** Who may see what changed: every v2 view that no longer shows its browser to a person allowed to see it closes now. */
+  recheck(): void { this.#chrome.stream.recheck(); }
 }

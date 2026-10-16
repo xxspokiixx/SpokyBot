@@ -22,12 +22,12 @@ import { isUnanswered } from "./cdp/errors.ts";
 import type { CdpPage } from "./cdp/page.ts";
 import { browserRoot, profileDir, profileHash, profileKind, removeProfile, workspaceId } from "./chrome/profile.ts";
 import { BROWSER_CONTROL_REFUSAL, ProfileControl, type TakeResult } from "./control.ts";
-import { executeTool, toolFailure, type ToolContext } from "./dispatch.ts";
+import { executeTool, personUrl, toolFailure, type ToolContext } from "./dispatch.ts";
 import { HealthShown, pageHealthLine } from "./health.ts";
 import { errorResult, shapeResult, textResult, type ToolResult } from "./shape.ts";
 import { TabRegistry, type Tab } from "./tabs.ts";
 import { parseToolCall, RESTART_TOOL, TOOL_LIST } from "./tools.ts";
-import { personUrl, ViewerHub, type Viewer, type ViewerOptions, type ViewerOutput } from "./viewers/core.ts";
+import { ViewerHub, type Viewer, type ViewerOptions, type ViewerOutput } from "./viewers/core.ts";
 
 /** One profile's browser as the server names it: the session (bot-<id>, a profile's partition, guest-…) and its key. */
 export interface BrowserTarget {
@@ -193,10 +193,7 @@ export class BrowserService {
       if (known) return;
       profile.control.adopt(tab);
       page.auth.answerable = () => profile.hub.answersAuth();
-      run.offs.push(page.auth.onChange((challenge) => {
-        if (challenge) profile.hub.broadcast({ type: "authPrompt", origin: challenge.origin, realm: challenge.realm }, { holderOnly: true });
-        else profile.hub.broadcast({ type: "authPromptClosed" }, { holderOnly: true });
-      }));
+      run.offs.push(page.auth.onChange(() => profile.hub.offerAuthPrompt()));
       run.offs.push(page.dialogs.onOpen(() => profile.hub.broadcastControl()), page.dialogs.onClose(() => profile.hub.broadcastControl()));
       run.offs.push(page.frames.onChange((change) => { if (change.frameId === page.frames.mainFrameId) profile.hub.urlChanged(tab); }));
       run.offs.push(page.session.on("Page.navigatedWithinDocument", (params) => { if (params.frameId === page.frames.mainFrameId) profile.hub.urlChanged(tab); }));
@@ -580,6 +577,11 @@ export class BrowserService {
 
   heldBy(session: string): string | null {
     return this.#bySession(session)?.control.owner ?? null;
+  }
+
+  /** Whether the page's open picker was offered to `owner`'s view as `chooserId`: an upload for any other is refused unread. */
+  fileChooserOffered(session: string, owner: string, chooserId: string): boolean {
+    return this.#bySession(session)?.hub.fileChooserOffered(owner, chooserId) ?? false;
   }
 
   /** A person's files for the page's open picker, which their view was offered as `chooserId`. */

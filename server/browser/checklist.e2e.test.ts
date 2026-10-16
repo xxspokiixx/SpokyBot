@@ -150,13 +150,16 @@ suite("the bots' browser service on real Chrome", () => {
     const target = bot();
     const url = privatePage("/private");
     await real.call(target, "agent_browser_open", { url: page("/before-private", "<p>before</p>") });
+    const prompts: Array<{ tabId: string; id: string }> = [];
     const viewer = await real.service.attachViewer(target, { owner: "local-owner", canOperate: true, maxWidth: 1280, maxHeight: 800, authPrompts: true }, (output) => {
       if (output.type === "frame") output.ack();
+      if (output.type === "authPrompt") prompts.push(output);
     });
     expect(real.text(await real.call(target, "agent_browser_navigate", { url }))).toContain("the site asks for a user name and password");
     expect((await status(target)).signInPrompt).toEqual({ origin: new URL(url).origin, realm: "checklist" });
     await viewer.input({ type: "takeControl" });
-    await viewer.input({ type: "authAnswer", username: "ada", password: "secret" });
+    const prompt = await until(() => prompts.at(-1), (shown) => shown !== undefined);
+    await viewer.input({ type: "authAnswer", tabId: prompt!.tabId, id: prompt!.id, username: "ada", password: "secret" });
     await until(() => real.peek<string>(target, "document.title"), (title) => title === "private");
     await viewer.input({ type: "releaseControl" });
     await viewer.close();

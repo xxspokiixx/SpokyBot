@@ -5205,12 +5205,11 @@ const sseClients = new Set<SseClient>();
 let audienceChangedAt = 0;
 function audienceChanged(): void {
   audienceChangedAt = lastSeq;
+  browserLive.recheck();
   for (const client of sseClients) {
     if (client.viewer.kind !== "member") continue;
     sseClients.delete(client);
-    try {
-      client.res.end();
-    } catch {}
+    try { client.res.end(); } catch {}
   }
 }
 // Before any revocation callback: Cloud boot can revoke sessions before routes are registered.
@@ -13904,7 +13903,7 @@ ROUTES.push(createBrowserViewerRoutes({
   current: (botId, session, auth) => {
     const current = store.bot(botId);
     return !!current && current.browser !== false && builtInBrowserEnabled(cfg) && currentBrowserSession(current.id, current.browserProfile) === session
-      && (auth.kind !== "session" || sessions.isLive(auth.session.id));
+      && (auth.kind !== "session" || (sessions.isLive(auth.session.id) && visibleTo(viewerFor(auth)).bot(botId)));
   },
   restartRefusal: (session) => browserRestartRefusal(browserRuntime.interrupted(session), store.bots.filter((candidate) => candidate.busy
     && currentBrowserSession(candidate.id, candidate.browserProfile) === session).map((candidate) => ({ waitingOnBrowser: computerControl.snapshot(candidate.id).help?.place === "browser" }))),

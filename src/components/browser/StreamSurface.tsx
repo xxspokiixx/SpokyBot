@@ -1,8 +1,9 @@
 // Adapted from pingdotgg/t3code@00cdceb1 apps/web/src/browser/ServerBrowserSurface.tsx, MIT License, Copyright (c)
 // 2026 T3 Tools Inc. (full text in third_party/t3-code/LICENSE); modified: OpenMausBot's UI, the panel picks the
 // transport (the v2 stream, or the v1 view as a fallback), page input goes through the panel's control rules so the
-// first press takes the browser, Shift+Escape returns to the address bar, and the page's dropdown lists, cursor shape
-// and HTTP sign-in are drawn here.
+// first press takes the browser, Shift+Escape returns to the address bar, a larger frame cap is sent in place rather
+// than by reconnecting, so the person keeps the browser they hold, and the page's dropdown lists, cursor shape and HTTP
+// sign-in are drawn here.
 import { Download, FileUp, Loader2, X } from "lucide-react";
 import {
   type FormEvent,
@@ -206,7 +207,7 @@ export function StreamSurface(props: {
   const [agentCursor, setAgentCursor] = useState<(ReturnType<typeof mapToSurface> & { phase: PreviewStreamPointer["phase"]; sequence: number }) | null>(null);
   const [select, setSelect] = useState<SelectState | null>(null);
   const [cursor, setCursor] = useState("default");
-  const [authPrompt, setAuthPrompt] = useState<{ origin: string; realm: string } | null>(null);
+  const [authPrompt, setAuthPrompt] = useState<{ tabId: string; id: string; origin: string; realm: string } | null>(null);
   const [notices, setNotices] = useState<Notice[]>([]);
   const [hostSetup, setHostSetup] = useState<PreviewStreamHostSetup | null>(null);
   const noticeId = useRef(0);
@@ -220,9 +221,9 @@ export function StreamSurface(props: {
   const touchRef = useRef<TouchGesture | null>(null);
   const probeRef = useRef<TouchProbe | null>(null);
   const lastProbeRef = useRef<{ x: number; y: number; editable: boolean; at: number } | null>(null);
-  // Frame cap in device px, fixed per connection. It grows with the surface and never shrinks, so only outgrowing it
-  // reconnects.
-  const [cap, setCap] = useState<{ width: number; height: number } | null>(null);
+  // Frame cap in device px. It grows with the surface and never shrinks; the stream opens once the first one is known.
+  const capRef = useRef<{ width: number; height: number } | null>(null);
+  const [capKnown, setCapKnown] = useState(false);
 
   const notify = useCallback((notice: NoticeInput) => {
     const id = ++noticeId.current;
@@ -301,9 +302,12 @@ export function StreamSurface(props: {
       const ratio = window.devicePixelRatio || 1;
       const width = Math.round(size.width * ratio);
       const height = Math.round(size.height * ratio);
-      setCap((current) => (current !== null && current.width >= width && current.height >= height
-        ? current
-        : { width: Math.max(width, current?.width ?? 0), height: Math.max(height, current?.height ?? 0) }));
+      const current = capRef.current;
+      if (current !== null && current.width >= width && current.height >= height) return;
+      const next = { width: Math.max(width, current?.width ?? 0), height: Math.max(height, current?.height ?? 0) };
+      capRef.current = next;
+      if (current === null) setCapKnown(true);
+      else clientRef.current?.send({ type: "frameCap", maxWidth: next.width, maxHeight: next.height });
     };
     const measure = () => {
       timer = null;
@@ -314,7 +318,7 @@ export function StreamSurface(props: {
       if (previous?.width === size.width && previous.height === size.height) return;
       sizeRef.current = size;
       if (followSize) clientRef.current?.send({ type: "resize", ...size });
-      // Outgrowing the cap reconnects the stream, so grow it once the size settles rather than on every throttled
+      // Outgrowing the cap restarts the screencast, so grow it once the size settles rather than on every throttled
       // resize of a drag.
       if (capTimer !== null) clearTimeout(capTimer);
       capTimer = setTimeout(growCap, previous === null ? 0 : RESIZE_THROTTLE_MS * 2);
@@ -336,7 +340,8 @@ export function StreamSurface(props: {
   useEffect(() => {
     const canvas = canvasRef.current;
     const size = sizeRef.current;
-    if (hostSetup || !cap || !canvas || !size) return;
+    const cap = capRef.current;
+    if (hostSetup || !capKnown || !cap || !canvas || !size) return;
     hasFrameRef.current = false;
     setPainted(false);
     const painter = createPreviewFramePainter(canvas, () => {
@@ -353,7 +358,6 @@ export function StreamSurface(props: {
       if (next?.dialog?.message !== previous?.dialog?.message || next?.dialog?.defaultValue !== previous?.dialog?.defaultValue) setPromptText(next?.dialog?.defaultValue ?? "");
       if (next?.controller !== "you") {
         setSelect(null);
-        setAuthPrompt(null);
       } else if (previous?.controller !== "you" && followSize && sizeRef.current) {
         clientRef.current?.send({ type: "resize", ...sizeRef.current });
       }
@@ -402,10 +406,10 @@ export function StreamSurface(props: {
             if (rect) setSelect({ id: message.id, options: message.options as SelectPopupOption[], selectedIndex: Number(message.selectedIndex), rect });
           } else if (message.type === "cursor" && typeof message.shape === "string") {
             setCursor(message.shape);
-          } else if (message.type === "authPrompt" && typeof message.origin === "string") {
-            setAuthPrompt({ origin: message.origin, realm: typeof message.realm === "string" ? message.realm : "" });
+          } else if (message.type === "authPrompt" && typeof message.tabId === "string" && typeof message.id === "string" && typeof message.origin === "string") {
+            setAuthPrompt({ tabId: message.tabId, id: message.id, origin: message.origin, realm: typeof message.realm === "string" ? message.realm : "" });
           } else if (message.type === "authPromptClosed") {
-            setAuthPrompt(null);
+            setAuthPrompt((shown) => (shown && shown.id !== message.id ? shown : null));
           } else if (message.type === "notice" && typeof message.message === "string") {
             notify({ kind: "error", message: message.message });
           }
@@ -438,7 +442,7 @@ export function StreamSurface(props: {
       setAgentCursor(null);
       clearInput();
     };
-  }, [cap, clearInput, connect, followSize, hostSetup, notify]);
+  }, [capKnown, clearInput, connect, followSize, hostSetup, notify]);
 
   useEffect(() => {
     const canvas = canvasRef.current;
@@ -711,7 +715,7 @@ export function StreamSurface(props: {
             </div>
           </div>
         ) : null}
-        {control?.dialog ? (
+        {control?.dialog && control.controller !== "another-viewer" ? (
           <div className="absolute inset-x-3 top-3 z-20 mx-auto flex max-w-sm flex-col gap-2 rounded-xl border border-hairline/60 bg-card p-3 text-ink shadow-xl" role="dialog" aria-label="Browser dialog">
             <p className="break-words text-[13px]">{control.dialog.message}</p>
             {you ? (
@@ -730,7 +734,8 @@ export function StreamSurface(props: {
             origin={authPrompt.origin}
             realm={authPrompt.realm}
             onAnswer={(answer) => {
-              direct(answer ? { type: "authAnswer", username: answer.username, password: answer.password } : { type: "authAnswer" });
+              const shown = { tabId: authPrompt.tabId, id: authPrompt.id };
+              direct(answer ? { type: "authAnswer", ...shown, username: answer.username, password: answer.password } : { type: "authAnswer", ...shown });
               setAuthPrompt(null);
             }}
           />
