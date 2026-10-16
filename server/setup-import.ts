@@ -121,8 +121,6 @@ export function setupPaths(machine: Pick<SetupMachine, "home" | "platform" | "en
   };
 }
 
-// ---- Skills ----
-
 interface FoundSkill {
   name: string;
   source: SkillSource;
@@ -417,8 +415,6 @@ function importSkills(machine: SetupMachine): NonNullable<SetupImportResult["ski
   return result;
 }
 
-// ---- MCP servers ----
-
 interface FoundTool {
   name: string;
   source: SetupSource;
@@ -682,8 +678,6 @@ function importTools(machine: SetupMachine, host: SetupHost): NonNullable<SetupI
     host.mcpConfigBusy.set(false);
   }
 }
-
-// ---- Finding and bringing in ----
 
 /** What is new here, by name and source; an empty list when nothing is. */
 export function detectSetup(machine: SetupMachine, host: SetupHost): SetupDetection {
