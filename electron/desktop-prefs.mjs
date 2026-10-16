@@ -1,14 +1,15 @@
 // What this desktop keeps whatever page its window shows, whichever port its own page is served on: the notices it
-// has shown, and its usage-analytics switch.
+// has shown, whether This computer's first-run welcome is done, and its usage-analytics switch.
 import fs from "node:fs";
 import { localDay } from "./cloud-trial-notice.mjs";
+import { ONBOARDING_CLOUD_HINT, onboardingRecord } from "./onboarding-record.mjs";
 
 export { DESKTOP_PORTS } from "./desktop-ports.mjs";
 /** The only notices a page may record, so no page can write anything else into the file. */
 export const DESKTOP_NOTICES = Object.freeze(["cloud-pro-update-2026-10"]);
 const CLOUD_PRO = DESKTOP_NOTICES[0];
-export const HANDOFF_MS = 2 * 60_000;
-const HANDOFF_PAGES = new Map([["cloud-pro", ["cloud", "server"]], ["manage", ["cloud"]]]);
+const HANDOFFS = new Map([["cloud-pro", { settings: "cloud-add", pages: ["cloud", "server"] }], ["manage", { settings: "cloud-settings", pages: ["cloud"] }]]);
+const VIA = { cloud: "my_cloud", server: "server" };
 const DAY = /^\d{4}-\d{2}-\d{2}$/;
 
 /** Security: a write that fails (a full disk, a kill mid-write) leaves the last whole record, analytics opt-out included. */
@@ -35,7 +36,7 @@ function parse(raw) {
     const day = record.shown && typeof record.shown === "object" ? record.shown[id] : undefined;
     return typeof day === "string" && DAY.test(day) ? [[id, day]] : [];
   }));
-  return { seen, shown, ...(typeof record.analytics === "boolean" ? { analytics: record.analytics } : {}) };
+  return { seen, shown, ...(record.onboarded === true ? { onboarded: true } : {}), ...(typeof record.analytics === "boolean" ? { analytics: record.analytics } : {}) };
 }
 
 /** A record that cannot be written is still kept for this launch. */
@@ -61,6 +62,11 @@ export function createDesktopPrefs({ read, write, now = Date.now }) {
       save({ ...saved, shown: { ...saved.shown, [id]: day } });
       return true;
     },
+    onboarded: () => current().onboarded === true,
+    markOnboarded() {
+      const saved = current();
+      if (!saved.onboarded) save({ ...saved, onboarded: true });
+    },
     /** null until a choice is saved. */
     analytics: () => current().analytics ?? null,
     setAnalytics(enabled) { save({ ...current(), analytics: enabled === true }); },
@@ -70,40 +76,50 @@ export function createDesktopPrefs({ read, write, now = Date.now }) {
 /**
  * `page(event)`: "local" for this computer's page, "cloud" for My Cloud's own page as main verifies it, "server" for
  * another saved server open in this desktop's window, null for anything else. `cloudOffered()`: this desktop sells
- * MausBot Cloud, asked once its Cloud sign-in is restored. `thisComputer()`: switches the window to This computer,
- * false when it cannot.
+ * MausBot Cloud, asked once its Cloud sign-in is restored. `localConfig()`: This computer's own workspace's config.json.
+ * `thisComputer(landing)`: switches the window to This computer and loads its page at `landing`, false when it cannot.
  */
-export function registerDesktopPrefs({ ipcMain, read, write, page, cloudOffered, thisComputer, now = Date.now }) {
+export function registerDesktopPrefs({ ipcMain, read, write, page, cloudOffered, thisComputer, localConfig = () => null, now = Date.now }) {
   let prefs = null;
   const store = () => prefs ??= createDesktopPrefs({ read, write, now });
-  let switched = false, handoff = null;
+  let switching = false;
   const from = (channel, pages, handler) => (event, ...args) => {
     const asking = page(event);
     if (!pages.includes(asking)) throw new Error(`${channel} is only available in this app's window`);
     return handler(asking, ...args);
   };
+  // This computer's workspace record counts on every page, before This computer's page has loaded: an earlier close, or the welcome's Cloud beat.
+  const state = async () => {
+    const cloud = await cloudOffered();
+    let own = onboardingRecord(null);
+    try { own = onboardingRecord(localConfig()); } catch {}
+    const seen = store().seen(), closed = own.hints.includes(CLOUD_PRO) || own.hints.includes(ONBOARDING_CLOUD_HINT);
+    return { seen: closed && !seen.includes(CLOUD_PRO) ? [...seen, CLOUD_PRO] : seen, cloud, onboarded: own.finished || store().onboarded() };
+  };
   const ANY = ["local", "cloud", "server"];
-  ipcMain.handle("desktop-notices:state", from("desktop-notices:state", ANY, async () => ({ seen: store().seen(), cloud: await cloudOffered() })));
-  ipcMain.handle("desktop-notices:seen", from("desktop-notices:seen", ANY, (_, id) => { store().markSeen(id); if (id === CLOUD_PRO) handoff = null; }));
+  ipcMain.handle("desktop-notices:state", from("desktop-notices:state", ANY, state));
+  ipcMain.handle("desktop-notices:seen", from("desktop-notices:seen", ANY, (_, id) => store().markSeen(id)));
   ipcMain.handle("desktop-notices:shown", from("desktop-notices:shown", ANY, (_, id) => store().shown(id)));
-  // Security: a server's page brings the window to This computer only once a launch while the popup is unseen, and hands
-  // This computer's page only the popup's own click: Continue on this computer, which that page finishes from the plan it
-  // knows itself; only My Cloud's own page hands over Manage plan.
+  ipcMain.handle("desktop-notices:onboarded", from("desktop-notices:onboarded", ["local"], () => store().markOnboarded()));
+  // Security: a server's page brings the window to This computer only while the popup is unseen, once This computer's
+  // welcome is done, and the switch marks it seen. This computer's page opens only what main names for the popup's own
+  // click: Continue on this computer opens what that page's own popup would for the plan it knows; only My Cloud's own
+  // page hands over Manage plan.
   ipcMain.handle("desktop-notices:this-computer", from("desktop-notices:this-computer", ["cloud", "server"], async (asking, intent) => {
-    if (!HANDOFF_PAGES.get(intent)?.includes(asking)) throw new Error("This page cannot hand that click to This computer");
-    if (switched) return false;
-    switched = true;
-    let moved = false;
+    const handoff = HANDOFFS.get(intent);
+    if (!handoff?.pages.includes(asking)) throw new Error("This page cannot hand that click to This computer");
+    if (switching) return false;
+    switching = true;
     try {
-      if (!(await cloudOffered()) || store().seen().includes(CLOUD_PRO)) return false;
-      handoff = { intent, until: now() + HANDOFF_MS };
-      moved = await thisComputer() === true;
-      return moved;
+      const notices = await state();
+      if (!notices.cloud || notices.seen.includes(CLOUD_PRO) || !notices.onboarded) return false;
+      if (await thisComputer(`?desktop-settings=${handoff.settings}&source=update_popup&via=${VIA[asking]}`) !== true) return false;
+      store().markSeen(CLOUD_PRO);
+      return true;
     } finally {
-      if (!moved) { switched = false; handoff = null; }
+      switching = false;
     }
   }));
-  ipcMain.handle("desktop-notices:handoff", from("desktop-notices:handoff", ["local"], () => handoff && now() < handoff.until ? { ...handoff } : null));
   // Security: a server's page learns only that this desktop turned analytics off, never that it is on.
   ipcMain.on("desktop-analytics:read", event => {
     try {
