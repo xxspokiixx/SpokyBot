@@ -50,8 +50,8 @@ export interface BrowserServiceOptions {
   maxRunning: number;
   idleMs(): number;
   scrub?: (text: string) => string;
-  /** What the egress gate refused for this session since it was last asked, as one line. */
-  egressNotice?: (session: string) => string | null;
+  /** What the egress gate of this profile's browser refused since it was last asked, as one line. */
+  egressNotice?: (key: string) => string | null;
   onTiming?: (timing: BrowserTiming) => void;
   callBudgetMs?: number;
   laneWaitMs?: number;
@@ -415,6 +415,7 @@ export class BrowserService {
     }
     beforeDispatch?.();
     if (control.owner !== null) throw new Error(BROWSER_CONTROL_REFUSAL);
+    control.call = parsed.call.name;
     try {
       const result = await executeTool(this.#context(profile, run, deadline), parsed.call);
       beforeDispatch?.();
@@ -427,6 +428,8 @@ export class BrowserService {
       const failure = toolFailure(error);
       if (!failure) throw error;
       return failure;
+    } finally {
+      if (control.call === parsed.call.name) control.call = null;
     }
   }
 
@@ -443,7 +446,7 @@ export class BrowserService {
       pointer: (tab) => profile.hub.pointer(tab),
       paused: (tab, work) => profile.hub.paused(tab, work),
       health: (tab) => this.#health(profile, tab),
-      secretOnPage: (tab) => this.#holds.refuses(profile.session, async () => tab.page.url()),
+      secretOnPage: (tab) => this.#holds.refuses(profile.session, async () => tab.page.url(), tab.page.targetId),
       saveScreenshot: (data, pageUrl) => this.#saveScreenshot(profile, data, pageUrl),
       downloads: () => run.browser.downloads?.list() ?? [],
     };
@@ -453,7 +456,7 @@ export class BrowserService {
     let shown = profile.shown.get(tab);
     if (!shown) profile.shown.set(tab, shown = new HealthShown());
     const line = pageHealthLine(tab.page.takeHealth(), { pageUrl: tab.page.url(), loaderId: tab.page.lifecycle.loaderId, shown });
-    const gate = this.#options.egressNotice?.(profile.session) ?? null;
+    const gate = this.#options.egressNotice?.(profile.key) ?? null;
     return [line, gate].filter(Boolean).join(" ") || null;
   }
 
@@ -531,14 +534,15 @@ export class BrowserService {
     });
   }
 
-  /** Runs in the browser's lane, so no capture or read happens while a secret is typed. */
+  /** Runs in the browser's lane, so no capture or read happens while a secret is typed; a hold it leaves is the typing tab's. */
   async withSecretInput<T extends { ok: boolean; text: string; held?: SecretHold }>(target: BrowserTarget, fn: () => Promise<T>): Promise<T> {
     const profile = this.profile(target);
     const outcome = await this.#lanes.run(profile.key, async () => {
       await this.running(profile);
       return profile.control.agent(null, async () => {
+        const tab = profile.active();
         const filled = await fn();
-        if (filled.held) this.#holds.hold(profile.session, filled.held);
+        if (filled.held) this.#holds.hold(profile.session, { ...filled.held, ...(tab ? { tab: tab.page.targetId } : {}) });
         return filled;
       });
     }, this.#options.laneWaitMs);
@@ -625,6 +629,7 @@ export class BrowserService {
       tabs: () => profile.tabs.list(),
       tab: (id: string) => profile.tabs.get(id),
       running: async () => { await this.running(profile); },
+      pageLimit: () => (profile.run && !profile.run.closing ? profile.run.opened.pageLimit ?? null : null),
       take: async (owner: string): Promise<TakeResult> => {
         await this.running(profile);
         const taken = await profile.control.take(owner);

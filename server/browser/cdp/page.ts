@@ -84,6 +84,7 @@ export class CdpPage implements ActionContext, WaitContext {
   #crashed = false;
   #devicePixelRatio: number | null = null;
   #documentStatus: { loaderId: string; status: number } | null = null;
+  #emulated: { width: number; height: number } | null = null;
 
   constructor(host: PageHost, session: CdpSession, info: TargetInfo) {
     this.#host = host;
@@ -103,8 +104,12 @@ export class CdpPage implements ActionContext, WaitContext {
     this.fileChoosers.watch(session);
     this.health.watch(session);
     this.frames.onChange((change) => {
-      if (change.kind === "navigated" && change.frameId === this.frames.mainFrameId) this.refs.invalidateAll();
-      else this.refs.invalidateFrames(change.affected);
+      if (change.kind === "navigated" && change.frameId === this.frames.mainFrameId) {
+        this.refs.invalidateAll();
+        this.fileChoosers.forget();
+      } else {
+        this.refs.invalidateFrames(change.affected);
+      }
     });
     this.dialogs.onClose(() => this.refs.invalidateAll());
     session.on("Target.attachedToTarget", (params) => this.#child(params));
@@ -267,6 +272,22 @@ export class CdpPage implements ActionContext, WaitContext {
     const result = await this.#settle(() => this.session.send("Page.reload", {}), readiness, timeoutMs);
     this.#crashed = false;
     return result;
+  }
+
+  /** The size the page is laid out at apart from its window's, or null when it fills its window. */
+  get emulated(): { width: number; height: number } | null {
+    return this.#emulated;
+  }
+
+  /** Lays the page out at `size` whatever its window's size, as DevTools' device mode does; null ends that. */
+  async emulateSize(size: { width: number; height: number } | null): Promise<void> {
+    if (!size) {
+      this.#emulated = null;
+      await this.session.send("Emulation.clearDeviceMetricsOverride");
+      return;
+    }
+    await this.session.send("Emulation.setDeviceMetricsOverride", { width: size.width, height: size.height, deviceScaleFactor: await this.devicePixelRatio().catch(() => 1), mobile: false });
+    this.#emulated = size;
   }
 
   async devicePixelRatio(): Promise<number> {

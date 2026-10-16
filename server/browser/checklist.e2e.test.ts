@@ -1,6 +1,6 @@
 // The bots' browser service on real Chrome, item by item: the tools and their refs, sign-ins kept when the browser
 // starts again, erase and temporary profiles, uploads, downloads, dialogs, popups, HTTP sign-in, a person's hold,
-// restart and idle close.
+// restart, idle close, and what the egress gate refused.
 import { existsSync, mkdtempSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
@@ -11,6 +11,7 @@ import { FixtureServer } from "./cdp/testing/fixtures.ts";
 import { CHROME, testRoot } from "./cdp/testing/real-chrome.ts";
 import { browserRoot, profileDir, profileHash, workspaceId } from "./chrome/profile.ts";
 import { BROWSER_CONTROL_REFUSAL } from "./control.ts";
+import { BrowserEgress } from "./egress/registry.ts";
 import type { BrowserTarget } from "./service.ts";
 import { startService, until, type RealService } from "./testing/real-service.ts";
 
@@ -199,4 +200,21 @@ suite("the bots' browser service on real Chrome", () => {
     expect(await real.service.closeIdle(1)).toContain(target.key);
     expect(real.text(await real.call(target, "agent_browser_status"))).toContain("Your browser sat unused and was closed to free memory");
   }, hostTimeout(90_000));
+});
+
+suite("a bot's browser behind its egress gate on real Chrome", () => {
+  it("tells the bot in its next answer what the gate refused, opened and read under the browser's own key", async () => {
+    const egress = new BrowserEgress();
+    egress.configure({ host: "desktop", config: () => undefined });
+    const real = await startService({ egressPort: (key) => egress.open(key), egressNotice: (key) => egress.takeNotice(key) });
+    try {
+      const target = { session: "egress-1", key: "bot:egress-1" };
+      const url = `data:text/html,${encodeURIComponent(`<title>egress</title><img src="http://169.254.169.254/omb-egress-test.png">`)}`;
+      const opened = real.text(await real.call(target, "agent_browser_open", { url }));
+      expect(opened).toContain(`The page tried to reach "169.254.169.254:80" (blocked:`);
+    } finally {
+      await real.close();
+      await egress.close();
+    }
+  }, hostTimeout(120_000));
 });

@@ -28,6 +28,8 @@ export interface BrowserOptions {
   maxPages?: number;
   /** The page size every headless window is fitted to; null leaves the window as Chrome made it. */
   viewport?: { width: number; height: number } | null;
+  /** The screen pages are told about, in CSS pixels: a window never grows past it, as no real window can. */
+  screen?: { width: number; height: number } | null;
   /** Tabs hold HTTP authentication challenges for an answer instead of failing them. */
   handleAuth?: boolean;
   /** The person's own browser: only tabs this driver opens are attached to; theirs are left alone. */
@@ -163,16 +165,20 @@ export class CdpBrowser implements PageHost {
    */
   async #fitWindow(page: CdpPage): Promise<void> {
     const viewport = this.#viewport;
-    if (!viewport || page.closed) return;
+    if (!viewport || page.closed || page.emulated) return;
     const root = this.connection.root;
     const measure = () => valueInWorld<[number, number]>(page.frames, page.frames.mainFrameId, "[innerWidth, innerHeight]");
     try {
       const { windowId } = await root.send<{ windowId: number }>("Browser.getWindowForTarget", { targetId: page.targetId });
       let size = await measure();
+      const screen = this.#options.screen;
       for (let round = 0; round < FIT_ROUNDS && (size[0] !== viewport.width || size[1] !== viewport.height); round++) {
         const { bounds } = await root.send<{ bounds: { width?: number; height?: number } }>("Browser.getWindowBounds", { windowId });
         if (!bounds.width || !bounds.height) return;
-        await root.send("Browser.setWindowBounds", { windowId, bounds: { width: bounds.width + viewport.width - size[0], height: bounds.height + viewport.height - size[1] } });
+        const width = Math.min(bounds.width + viewport.width - size[0], screen?.width ?? Infinity);
+        const height = Math.min(bounds.height + viewport.height - size[1], screen?.height ?? Infinity);
+        if (width === bounds.width && height === bounds.height) return;
+        await root.send("Browser.setWindowBounds", { windowId, bounds: { width, height } });
         const before = size;
         for (let poll = 0; poll < 20 && size[0] === before[0] && size[1] === before[1]; poll++) {
           await new Promise((resolve) => setTimeout(resolve, 25));
