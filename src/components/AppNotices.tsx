@@ -11,7 +11,7 @@ import { jobRoutine, useCloudIntent } from "@/lib/cloud-intent";
 import { CLOUD_INTENT_GIVEN, cloudSetupStage } from "@/lib/cloud-setup";
 import { cornerPopupWaits } from "@/lib/corner-popup";
 import { CLOUD_INTRO, CLOUD_NOTICE, CLOUD_PRO_UPDATE_NOTICE, CLOUD_TRIAL_NOTICE, dismissNotice, introShown, introStage, nextNotice, noticeSeen, PRODUCT_HUNT_NOTICE, PRODUCT_HUNT_UNTIL, PRODUCT_HUNT_URL, STAR_NOTICE, usedBefore } from "@/lib/notices";
-import { cloudSignInDue, hintSeen, type WelcomeViewer } from "@/lib/onboarding";
+import { cloudSignInDue, hintSeen, ONBOARDING_CLOUD_HINT, type WelcomeViewer } from "@/lib/onboarding";
 import { useUpdaterState } from "@/lib/updater";
 import { t } from "@/lib/i18n";
 import { engineReady } from "./EngineLibrary";
@@ -98,7 +98,7 @@ export function AppNotices({ quiet = false, viewer = null, now = Date.now }: { q
   const stage = introStage(record, now());
   const trialDue = cloudTrialNotice(plan);
   const popupHere = Boolean(desktop) && (!local || Boolean(bridge)) && brandStatus().source !== "file";
-  const seenHere = local && (noticeSeen(record, CLOUD_PRO_UPDATE_NOTICE) || hintSeen(record, "onboarding-cloud-v1"));
+  const seenHere = local && (noticeSeen(record, CLOUD_PRO_UPDATE_NOTICE) || hintSeen(record, ONBOARDING_CLOUD_HINT));
   const popupPending = popupHere && (handoff === true
     || (!seenHere && (!desktopState || (desktopState.cloud && !desktopState.seen.includes(CLOUD_PRO_UPDATE_NOTICE)))));
   const wantOffer = Boolean(bridge?.offer) && ((introAllowed && view !== null && buyOfferAllowed(view) && stage !== "done") || trialDue?.state === "active"
