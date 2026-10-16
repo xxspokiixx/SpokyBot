@@ -28,7 +28,7 @@ export interface RealService {
   close(): Promise<void>;
 }
 
-export async function startService({ screen, ...options }: Partial<BrowserServiceOptions> & { screen?: ScreenSpec } = {}): Promise<RealService> {
+export async function startService({ screen, egressPort, ...options }: Partial<BrowserServiceOptions> & { screen?: ScreenSpec; egressPort?: (key: string) => Promise<number | null> } = {}): Promise<RealService> {
   if (!CHROME) throw new Error("No Chrome to test with.");
   const executablePath = CHROME;
   const sandbox = !sandboxDisabled(process.env);
@@ -41,7 +41,7 @@ export async function startService({ screen, ...options }: Partial<BrowserServic
     binary: async () => ({ path: executablePath, identity: calibrated }),
     screen: async () => screen ?? { width: 1920, height: 1080, deviceScaleFactor: 1 },
     locale: () => "en-US",
-    egressPort: async () => null,
+    egressPort: egressPort ?? (async () => null),
     sandbox,
     handshakeTimeoutMs: FIRST_LAUNCH_MS,
   });

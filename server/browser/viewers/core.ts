@@ -9,6 +9,7 @@
 // input held by a viewer that leaves is released at once.
 import { randomUUID } from "node:crypto";
 
+import type { PointerReporter } from "../cdp/actions.ts";
 import type { AuthChallenge } from "../cdp/auth.ts";
 import type { CdpBrowser } from "../cdp/browser.ts";
 import type { CdpSession, Params } from "../cdp/connection.ts";
@@ -20,6 +21,7 @@ import type { ProfileControl, TakeResult } from "../control.ts";
 import { personUrl } from "../dispatch.ts";
 import type { Tab } from "../tabs.ts";
 import { ACCEPT_OF, chooseOption, cursorAt, editableAt, selectAt, type SelectPopup } from "./popups.ts";
+import { MIN_WINDOW_WIDTH, VIEWPORT_LIMITS, VIEWPORT_PRESETS, viewportFor, ZOOM_LIMITS, zoomedLayout, type ViewportSetting } from "./viewport.ts";
 
 /** Chromium keeps three frames unacknowledged, so acking 100 ms after arrival caps a viewer near 30 fps. */
 export const ACK_PACE_MS = { hi: 100, lo: 200 } as const;
@@ -28,31 +30,13 @@ export const SETTLE_MS = 200;
 const MOTION_FRAMES = 4;
 const MOTION_WINDOW_MS = 300;
 const MOTION_QUALITY = 50;
-export const UNATTACHED_VIEWPORT = { width: 1280, height: 800 } as const;
-export const VIEWPORT_LIMITS = { minWidth: 100, minHeight: 100, maxWidth: 3840, maxHeight: 2160 } as const;
 /** The largest frame a viewer may ask for, in device pixels. */
 export const FRAME_CAP_LIMITS = { maxWidth: 7680, maxHeight: 4320 } as const;
-/** Chrome keeps a window at least this wide (measured on 153); a narrower page needs emulation. */
-export const MIN_WINDOW_WIDTH = 500;
 const AGENT_CURSOR_MOVE_MS = 160;
 const AGENT_CURSOR_CLICK_LEAD_MS = 40;
 const TEXT_LIMIT = 10_000;
 const HELD_LIMIT = 64;
 const CURSOR_EVERY_MS = 120;
-/** Chrome's own zoom range. */
-export const ZOOM_LIMITS = { min: 0.25, max: 5 } as const;
-
-/** The viewport sizes a person can pick: fill follows the panel; a preset letterboxes in it. */
-export const VIEWPORT_PRESETS = {
-  desktop: { width: 1280, height: 800 },
-  tablet: { width: 820, height: 1180 },
-  phone: { width: 390, height: 844 },
-} as const;
-
-export type ViewportSetting =
-  | { mode: "fill" }
-  | { mode: "preset"; preset: keyof typeof VIEWPORT_PRESETS; landscape?: boolean }
-  | { mode: "fixed"; width: number; height: number };
 
 export interface FrameMetadata {
   deviceWidth: number;
@@ -103,6 +87,8 @@ export interface ViewerOptions {
   authPrompts?: boolean;
   /** The viewer draws a page's dropdown lists and its cursor shape; the v1 view cannot, so its presses reach the page. */
   pagePopups?: boolean;
+  /** The viewer draws the agent's pointer, which the agent's actions wait for; false for the v1 view, which draws none. */
+  pointer?: boolean;
 }
 
 /** What a hub needs from the browser service. */
@@ -113,6 +99,8 @@ export interface HubHost {
   tabs(): Tab[];
   tab(id: string): Tab | undefined;
   running(): Promise<void>;
+  /** The largest page the browser's windows may show on its screen; null when nothing limits it. */
+  pageLimit(): { width: number; height: number } | null;
   take(owner: string): Promise<TakeResult>;
   release(owner: string, releaseInput: (tab: Tab) => Promise<boolean>): Promise<void>;
   openTab(url: string | null, owner: string): Promise<Tab>;
@@ -129,15 +117,7 @@ const modifiersOf = (message: Record<string, unknown>) => {
 };
 const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 
-/** The CSS size `setting` gives the page, `requested` being the panel size of the viewer that asked last. */
-export function viewportFor(setting: ViewportSetting, requested: { width: number; height: number } | null): { width: number; height: number } {
-  if (setting.mode === "fixed") return { width: setting.width, height: setting.height };
-  if (setting.mode === "preset") {
-    const preset = VIEWPORT_PRESETS[setting.preset];
-    return setting.landscape ? { width: preset.height, height: preset.width } : { ...preset };
-  }
-  return requested ?? { ...UNATTACHED_VIEWPORT };
-}
+const appliedKey = (size: { width: number; height: number }, zoom: number) => `${size.width}x${size.height}@${zoom}`;
 
 /** A viewer's resize request, or null when it is out of range (a collapsed panel, say) and the page keeps its size. */
 export function requestedSize(width: unknown, height: unknown): { width: number; height: number } | null {
@@ -187,6 +167,7 @@ export class Viewer {
       pace: options.pace ?? "hi",
       authPrompts: options.authPrompts === true,
       pagePopups: options.pagePopups === true,
+      pointer: options.pointer !== false,
     };
   }
 
@@ -449,6 +430,8 @@ export class ViewerHub {
   #pointerSequence = 0;
   #capturing = new Map<Tab, number>();
   #applied: string | null = null;
+  /** The page size and zoom last applied, which viewers map their input with. */
+  #shown: { width: number; height: number; zoom: number } | null = null;
   #emulated = false;
   #applying: Promise<void> = Promise.resolve();
 
@@ -465,16 +448,10 @@ export class ViewerHub {
     return [...this.viewers].some((viewer) => viewer.options.canOperate && viewer.options.authPrompts);
   }
 
-  /** The page size now: the setting's, or in fill mode the size the latest viewer still watching asked for. */
+  /** The page size now: the setting's, or in fill mode the size the latest viewer still watching asked for, within the screen. */
   viewport(): { width: number; height: number } {
     const latest = [...this.viewers].map((viewer) => viewer.requested).filter((size) => size !== null).sort((a, b) => b.order - a.order)[0] ?? null;
-    return viewportFor(this.setting, latest ? { width: latest.width, height: latest.height } : null);
-  }
-
-  /** The CSS size the page lays out in: the viewport shrunk by the zoom, as Chrome zooms. */
-  layout(): { width: number; height: number } {
-    const size = this.viewport();
-    return { width: Math.max(1, Math.round(size.width / this.zoom)), height: Math.max(1, Math.round(size.height / this.zoom)) };
+    return viewportFor(this.setting, latest ? { width: latest.width, height: latest.height } : null, this.host.pageLimit());
   }
 
   /** Resizes the real window; a zoom, or a preset narrower than any Chrome window, is emulated, as DevTools' device mode does. */
@@ -489,42 +466,46 @@ export class ViewerHub {
     const size = this.viewport();
     const zoom = this.zoom;
     const emulated = size.width < MIN_WINDOW_WIDTH || zoom !== 1;
-    const key = `${size.width}x${size.height}@${zoom}`;
+    const key = appliedKey(size, zoom);
     const active = this.host.active();
     if (this.#applied === key && browser.viewport?.width === Math.max(size.width, MIN_WINDOW_WIDTH)) return;
     this.#applied = key;
     // The window is fitted by measuring the page, which an emulated size would misreport.
     if (this.#emulated) {
-      for (const tab of this.host.tabs()) await tab.page.session.send("Emulation.clearDeviceMetricsOverride").catch(() => {});
+      for (const tab of this.host.tabs()) await tab.page.emulateSize(null).catch(() => {});
       this.#emulated = false;
     }
-    await browser.setViewport({ width: Math.max(size.width, MIN_WINDOW_WIDTH), height: size.height }).catch(() => {});
-    const layout = this.layout();
+    const fitted = await browser.setViewport({ width: Math.max(size.width, MIN_WINDOW_WIDTH), height: size.height }).catch(() => null);
+    const layout = zoomedLayout(size, zoom);
     if (emulated) {
-      for (const tab of this.host.tabs()) await this.#emulate(tab, layout);
+      for (const tab of this.host.tabs()) await tab.page.emulateSize(layout, zoom).catch(() => {});
       this.#emulated = true;
     }
-    if (active) this.broadcast({ type: "viewport", ...layout, setting: this.setting, zoom });
+    // Chrome's first tab carries a bar the others lack, so a window held to its screen can give it a shorter page.
+    this.#shown = { ...(emulated || !fitted ? layout : fitted), zoom };
+    if (active) this.broadcast({ type: "viewport", ...this.#shown, setting: this.setting });
     this.broadcastStatus();
     for (const viewer of this.viewers) viewer.refreshSoon();
   }
 
-  /** A zoom, or a page narrower than any window, is emulated tab by tab, so a tab that opens needs it too. */
+  /** A zoom, or a page narrower than any window, is emulated tab by tab, so a tab that opens takes the one applied. */
   #emulateTabs(): Promise<void> {
     const emulate = async () => {
-      if (!this.#emulated) return;
-      const layout = this.layout();
-      for (const tab of this.host.tabs()) await this.#emulate(tab, layout);
-      this.broadcast({ type: "viewport", ...layout, setting: this.setting, zoom: this.zoom });
+      const shown = this.#shown;
+      if (!this.#emulated || !shown) return;
+      for (const tab of this.host.tabs()) await tab.page.emulateSize(shown, shown.zoom).catch(() => {});
+      this.broadcast({ type: "viewport", ...shown, setting: this.setting });
       for (const viewer of this.viewers) viewer.refreshSoon();
     };
     this.#applying = this.#applying.then(emulate, emulate);
     return this.#applying;
   }
 
-  async #emulate(tab: Tab, layout: { width: number; height: number }): Promise<void> {
-    const ratio = await tab.page.devicePixelRatio().catch(() => 1);
-    await tab.page.session.send("Emulation.setDeviceMetricsOverride", { width: layout.width, height: layout.height, deviceScaleFactor: ratio * this.zoom, mobile: false }).catch(() => {});
+  /** A size or zoom a viewer asks for waits for the action running on the tab in front: a bot's click aims at the page as it was laid out. */
+  #resizeForViewers(): Promise<void> {
+    const tab = this.host.active();
+    if (!tab || this.#applied === appliedKey(this.viewport(), this.zoom)) return this.applyViewport();
+    return Promise.resolve().then(() => tab.control.system(() => this.applyViewport())).catch(() => this.applyViewport());
   }
 
   /** A tab came to the front or opened: its window takes the current size. */
@@ -543,9 +524,9 @@ export class ViewerHub {
       await this.host.running();
       if (viewer.closed) return viewer;
       await viewer.hide(this.#hides(viewer));
-      await this.applyViewport();
+      void this.#resizeForViewers().catch(() => undefined);
       viewer.push(this.controlFor(viewer));
-      viewer.push({ type: "viewport", ...this.layout(), setting: this.setting, zoom: this.zoom });
+      viewer.push({ type: "viewport", ...(this.#shown ?? { ...zoomedLayout(this.viewport(), this.zoom), zoom: this.zoom }), setting: this.setting });
       this.pushTabs(viewer);
       viewer.push(this.statusFor());
       await viewer.bind(this.host.active());
@@ -565,7 +546,7 @@ export class ViewerHub {
     else await viewer.releaseInput();
     await viewer.teardown();
     this.broadcastControl();
-    if (viewer.requested) await this.applyViewport();
+    if (viewer.requested) void this.#resizeForViewers().catch(() => undefined);
   }
 
   broadcast(output: ViewerOutput, { holderOnly = false }: { holderOnly?: boolean } = {}): void {
@@ -688,7 +669,7 @@ export class ViewerHub {
     this.broadcast(this.statusFor());
   }
 
-  /** The tab in front, or the tabs, changed. */
+  /** The tab in front, or the tabs, changed. A zoom, or a page narrower than any window, is emulated on every tab, new ones too. */
   tabsChanged(): void {
     const active = this.host.active();
     this.broadcast(this.tabsMessage());
@@ -750,13 +731,14 @@ export class ViewerHub {
     this.broadcast({ type: "popup", tabId: tab.id }, { holderOnly: true });
   }
 
-  /** The agent's pointer glides to where it acts and pulses before a press, for people watching the tab. */
-  pointer(tab: Tab): ((point: { x: number; y: number }, phase: "move" | "click") => Promise<void>) | undefined {
-    if (![...this.viewers].some((viewer) => viewer.tab === tab)) return undefined;
+  /** The agent's pointer glides to where it acts and pulses before a press, for people watching the tab who can see it. */
+  pointer(tab: Tab): PointerReporter | undefined {
+    const drawing = () => [...this.viewers].filter((viewer) => viewer.tab === tab && viewer.options.pointer);
+    if (drawing().length === 0) return undefined;
     return async ({ x, y }, phase) => {
       const show = (next: "move" | "click") => {
         const sequence = ++this.#pointerSequence;
-        for (const viewer of this.viewers) if (viewer.tab === tab) viewer.push({ type: "pointer", phase: next, x, y, sequence });
+        for (const viewer of drawing()) viewer.push({ type: "pointer", phase: next, x, y, sequence });
       };
       show("move");
       await sleep(AGENT_CURSOR_MOVE_MS);
@@ -798,7 +780,7 @@ export class ViewerHub {
         const size = requestedSize(message.width, message.height);
         if (!size || (control.owner !== null && control.owner !== viewer.id)) return;
         viewer.requested = { ...size, order: ++this.#order };
-        if (this.setting.mode === "fill") await this.applyViewport();
+        if (this.setting.mode === "fill") await this.#resizeForViewers();
         return;
       }
       case "viewport": {
@@ -806,14 +788,14 @@ export class ViewerHub {
         const setting = parseSetting(message.setting);
         if (!setting) return;
         this.setting = setting;
-        await this.applyViewport();
+        await this.#resizeForViewers();
         return;
       }
       case "zoom": {
         const factor = num(message.factor, 0);
         if (!control.canControl(viewer.id) || !(factor > 0)) return;
         this.zoom = Math.round(Math.min(ZOOM_LIMITS.max, Math.max(ZOOM_LIMITS.min, factor)) * 100) / 100;
-        await this.applyViewport();
+        await this.#resizeForViewers();
         return;
       }
       case "frameCap":

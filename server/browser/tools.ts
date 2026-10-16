@@ -94,7 +94,7 @@ export const TOOL_INPUTS = {
     tab: actTab.optional(),
   }),
   agent_browser_upload: z.object({
-    files: z.array(z.string().min(1).max(4_096)).min(1).max(10).describe("Absolute paths of files the person attached to this conversation or files in your own working folder; any other path is refused. An empty list cancels an open file picker."),
+    files: z.array(z.string().min(1).max(4_096)).min(1).max(10).describe("Absolute paths of files the person attached to this conversation or files in your own working folder; any other path is refused."),
     ref: ref.optional(), selector: selector.optional(),
     tab: actTab.optional(),
   }),

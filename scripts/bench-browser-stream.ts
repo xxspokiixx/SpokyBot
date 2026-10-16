@@ -202,7 +202,7 @@ for (let step = 0; step < 15; step++) {
 }
 await sleep(800);
 const scrolled = frames.slice(scrollFrom);
-const full = { width: WIDTH * screen.deviceScaleFactor, height: HEIGHT * screen.deviceScaleFactor };
+const full = { width: pageSize[0] * pageSize[2], height: pageSize[1] * pageSize[2] };
 const motionFrames = scrolled.filter((frame) => frame.width < full.width);
 const settle = scrolled.find((frame) => frame.at > lastWheel && frame.width === full.width);
 
