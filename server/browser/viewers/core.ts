@@ -343,7 +343,7 @@ export class Viewer {
     try {
       const metrics = await session.send<{ cssVisualViewport: { pageX: number; pageY: number; clientWidth: number; clientHeight: number; scale?: number } }>("Page.getLayoutMetrics");
       const view = metrics.cssVisualViewport;
-      const ratio = (await tab.page.devicePixelRatio()) * this.#hub.zoom;
+      const ratio = (await tab.page.devicePixelRatio()) * (tab.page.emulated?.zoom ?? 1);
       const scale = Math.min(1, this.options.maxWidth / Math.max(1, view.clientWidth * ratio), this.options.maxHeight / Math.max(1, view.clientHeight * ratio));
       // A scaled capture on any session but the one that emulates a zoom resets the page's device scale factor (Chrome 155).
       const capture = () => (scale < 1 ? tab.page.session : session).send<{ data: string }>("Page.captureScreenshot", {
@@ -748,8 +748,18 @@ export class ViewerHub {
     };
   }
 
-  /** Scaled captures repaint every screencast of the tab, so those pause until it is done. */
-  async paused<T>(tab: Tab, work: () => Promise<T>): Promise<T> {
+  /**
+   * Scaled captures repaint every screencast of the tab, so those pause until it is done. Chrome draws one by changing
+   * the page's emulation and then restoring what it found when it began (155), which would undo a zoom or a narrow page
+   * applied meanwhile: captures and size changes take turns.
+   */
+  paused<T>(tab: Tab, work: () => Promise<T>): Promise<T> {
+    const turn = this.#applying.then(() => this.#pausing(tab, work), () => this.#pausing(tab, work));
+    this.#applying = turn.then(() => undefined, () => undefined);
+    return turn;
+  }
+
+  async #pausing<T>(tab: Tab, work: () => Promise<T>): Promise<T> {
     const watching = [...this.viewers].filter((viewer) => viewer.tab === tab);
     this.#capturing.set(tab, (this.#capturing.get(tab) ?? 0) + 1);
     await Promise.all(watching.map((viewer) => viewer.pause()));

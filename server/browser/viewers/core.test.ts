@@ -418,6 +418,37 @@ describe("what the panel shows besides the page", () => {
     expect(outputs.filter((output) => output.type === "viewport").at(-1)).toMatchObject({ width: 1280, height: 800, zoom: 1.25 });
   });
 
+  it("keeps a zoom applied while a scaled still is being taken, which Chrome would otherwise undo when it ends", async () => {
+    const { service, target, watch, chrome, page } = await setup();
+    const panel = await watch({ size: { width: 1500, height: 900 }, maxWidth: 3000, maxHeight: 1800 });
+    await panel.viewer.input({ type: "takeControl" });
+    const pip = await service.attachViewer(target, { owner: "local-owner", canOperate: false, maxWidth: 1280, maxHeight: 1280 }, (output) => {
+      if (output.type === "frame") output.ack();
+    });
+    chrome().delay = (method) => (method === "Page.captureScreenshot" ? 150 : 0);
+    const clipped = () => chrome().sent.filter((sent) => sent.method === "Page.captureScreenshot" && sent.params.clip).length;
+    const before = clipped();
+    const still = pip.pushStill();
+    await until(clipped, (count) => count > before);
+    await panel.viewer.input({ type: "zoom", factor: 1.5 });
+    await still;
+    expect(page().emulated).toEqual({ width: 1000, height: 600 });
+  });
+
+  it("sizes a still by the zoom the page is drawn at, not by one still being applied", async () => {
+    const { watch, chrome } = await setup();
+    const panel = await watch({ size: { width: 1500, height: 900 }, maxWidth: 3000, maxHeight: 1800 });
+    await panel.viewer.input({ type: "takeControl" });
+    chrome().delay = (method) => (method === "Emulation.setDeviceMetricsOverride" ? 150 : 0);
+    const zooming = panel.viewer.input({ type: "zoom", factor: 1.5 });
+    await until(() => chrome().sent.some((sent) => sent.method === "Emulation.setDeviceMetricsOverride"), Boolean);
+    const clipped = () => chrome().sent.filter((sent) => sent.method === "Page.captureScreenshot" && sent.params.clip).length;
+    const before = clipped();
+    await panel.viewer.pushStill();
+    expect(clipped()).toBe(before);
+    await zooming;
+  });
+
   it("leaves a zoomed tab's window alone when the bot brings that tab back to the front", async () => {
     const { watch, chrome, call } = await setup();
     const { viewer } = await watch({ size: { width: 1600, height: 1000 } });
