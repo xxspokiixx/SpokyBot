@@ -380,7 +380,8 @@ describe("Full Access team setup", () => {
     expect(h.peer.title).toBe("Research lead");
     expect(h.apply).toHaveBeenCalledTimes(1);
     expect(h.messages).toHaveLength(1);
-    expect(append.mock.calls[0][1].card).toMatchObject({ answered: "allow", options: [], teamSetupRequest: { resumed: true, result: { state: "applied" } } });
+    // Applied on its own: nobody's answer, so the Chief's conversation stays the owner's alone.
+    expect(append.mock.calls[0][1].card).toMatchObject({ answered: "allow", autoApplied: true, options: [], teamSetupRequest: { resumed: true, result: { state: "applied" } } });
     expect(h.messages.some(({ card }) => card && !card.answered && !card.dismissed)).toBe(false);
     expect(await h.resolve(response.requestId)).toMatchObject({ duplicate: true, result: { state: "applied" } });
     expect(h.apply).toHaveBeenCalledTimes(1);

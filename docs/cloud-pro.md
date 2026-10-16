@@ -243,10 +243,28 @@ proposal card is theirs (the card records who allowed it, and what it
 showed: a routine from before counts only while it still runs exactly that,
 the same instructions, bot, schedule and place, with no attachment), and so
 is one created at once in the owner's own Full-access conversation, or by a
-run of one of the owner's routines. Approving a change (an edit, a pause, a
-resume) keeps a routine the owner's only if it already was: it never makes
-anyone else's routine theirs. One a bot creates or changes at once from any
-other conversation is nobody's, like anyone else's edit. Resuming, moving or
+run of one of the owner's routines. A bot's own change applied with an Undo
+receipt (a skill it authored, a team it set up) is nobody's answer, so it
+never takes a conversation out of being the owner's own. Approving a change
+(an edit, a pause, a resume) keeps a routine the owner's only if it already
+was: it never makes anyone else's routine theirs.
+
+A routine runs at the level of the conversation it was made in. One a bot
+creates at once, or changes while it is the owner's, in a conversation where
+only the owner spoke (it was opened, written in and answered only by proven
+keys, the owner's own devices, and nothing came in by webhook; what bots
+posted there, such as receipts and routine reports, does not count) is the
+owner's for its level, so its runs keep the bot's own level, Full access
+included. It is proven for lending and memory only when that conversation also
+holds no report of anyone else's routine. One a bot creates or changes at once
+from any other conversation (someone else's line or answer, an adopted key's,
+another bot's message, a webhook's post or run) is nobody's, like anyone
+else's edit. At each start, a nobody's routine a bot made is the owner's again
+when its creating card is still in that conversation, only the owner spoke
+there before it, and the routine still runs exactly what that card showed;
+proven too when no report of anyone else's routine came before the card. A
+confined routine run's approval card says why: open it and save it once to run
+it with full access. Resuming, moving or
 retiming a routine keeps it the owner's when they are its writer and no
 fingerprint of theirs is on it yet (a template, a restore); a fingerprint
 that no longer matches what it runs is renewed only by the owner rewriting
