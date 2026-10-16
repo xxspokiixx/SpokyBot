@@ -336,10 +336,8 @@ describe("the bot panel in Simple mode", () => {
     expect(sectionTarget("usage").anchor).toBe("activity");
   });
 
-  it.each([
-    ["apps", "PluginsPanel's limited app tools"], ["mcp", "an MCP server's access"], ["tools", "a place's tool selection"],
-    ["folder", "the computer's working folder"],
-  ] as const)("opens Access on the %s page for %s, the page that holds it", (page) => {
+  // App tool grants (PluginsPanel), MCP access, a place's tool selection, the working folder.
+  it.each(["apps", "mcp", "tools", "folder"] as const)("opens Access on the %s page when a link names it", (page) => {
     try {
       openBotSettings(fixture.dispatch, "access", { page });
       expect(shown(panel(makeBot(), "access"))).toEqual({ tab: undefined, page });
