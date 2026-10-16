@@ -292,6 +292,8 @@ import { CLOUD_PERSONAL_REFUSAL, settleCloudOwnership, type CloudOwnership } fro
 import { createCloudMoveRoutes, workspaceShared } from "./cloud-move-http.ts";
 import { RESTART_EXIT_CODE } from "./restart.ts";
 import { holdIncludedServices, trialCreditCredential } from "./included-services.ts";
+import { startCloudConnectedApps, type CloudConnectedApps } from "./cloud-connected-apps.ts";
+import { managedComposioBrokerUrl } from "../electron/managed-composio.mjs";
 import { CloudCreditProvider } from "./cloud-credit-provider.ts";
 import { TRIAL_CREDIT_OWN_AI } from "./trial-credit.ts";
 import type { ProviderInstance } from "./contracts.ts";
@@ -1690,6 +1692,29 @@ utilityParentPort?.on("message", (event) => {
     console.error(`[desktop-sync] rejected private parent message: ${error instanceof Error ? error.message : String(error)}`);
   }
 });
+/** Hosts whose connected apps come from OpenMausBot's service: the desktop app's parent sends its access above, and a
+ * Cloud home, whose plan includes it, registers itself (cloud-connected-apps.ts). */
+const MANAGED_CONNECTED_APPS = DESKTOP_MANAGED || CLOUD_HOME !== null;
+let cloudConnectedApps: CloudConnectedApps | null = null;
+function startManagedConnectedApps(): void {
+  if (!CLOUD_HOME) return;
+  const configured = process.env.OMB_COMPOSIO_BROKER_URL;
+  // The built server is what a Cloud runs; from source (development, tests) only an explicit URL registers anywhere.
+  const brokerUrl = managedComposioBrokerUrl(configured, !import.meta.url.endsWith(".ts"));
+  if (!brokerUrl) {
+    if (configured?.trim()) console.warn("cloud home: connected-apps service URL rejected: HTTPS or a loopback HTTP URL is required");
+    return;
+  }
+  cloudConnectedApps = startCloudConnectedApps({
+    dataDir: DATA_DIR,
+    brokerUrl,
+    apply: (access) => {
+      composio.setManagedBrokerAccess(access);
+      broadcast({ kind: "config", ...configStatus() });
+    },
+    log: (line) => console.log(`cloud home: ${line}`),
+  });
+}
 
 const bus = new EventBus();
 bus.attach(registry.instances());
@@ -16954,7 +16979,7 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
       return json(res, 200, {
         configured: composio.configured(cfg),
         mode: composio.connectionMode(cfg),
-        setup: composio.connectorSetup(cfg),
+        setup: composio.connectorSetup(cfg, MANAGED_CONNECTED_APPS),
         source,
         cards,
         ...(pagination ? { pagination } : {}),
@@ -17453,6 +17478,7 @@ restoreChannelMessages();
 server.listen(PORT, "127.0.0.1", async () => {
   companyRuntimeReady();
   console.log(`openmausbot server on http://127.0.0.1:${PORT}`);
+  startManagedConnectedApps();
   browserSweep.start();
   if (builtInBrowserEnabled(cfg)) chromeLauncher.start();
   followupsReady = true;
@@ -17527,6 +17553,7 @@ const gracefulShutdown = createGracefulShutdown({
       skillReview.stop();
       webhookIngress?.server.close();
       tunnelListener?.close();
+      cloudConnectedApps?.stop();
     },
     async () => { await managedDesktop.close(); await registry.disposeAll(); },
     async () => { await dataEngine.closeAll().catch((error) => console.warn("data: close failed", error)); },

@@ -984,6 +984,19 @@ computers belong to this machine on every request.
   does what it would without it (its lead answers). Only **Test** shows it,
   as a fixed sentence.
 
+### Included connected apps
+
+Connected apps (Gmail, Outlook, Slack, LinkedIn, Calendly and the rest of the
+catalog) come with the plan through OpenMausBot's managed connection service,
+the same one the packaged desktop app uses. The Admin sets nothing for it: at
+every start the server registers the Cloud's own installation if it has none,
+keeps the token owner-only in `/data/.openmausbot/connected-apps-installation.json`
+(never in a backup, a move or `config.json`), checks it with the service, and
+retries with backoff while the service is down, without holding up the start.
+An owner's own Composio project key still wins. The details are in
+[composio.md](composio.md#mausbot-cloud). `OMB_COMPOSIO_BROKER_URL` (env, not
+secret, optional) points a Cloud at another service, such as a staging one.
+
 ### Trial Claude credit
 
 A free trial may come with a one-time Claude credit (the Admin's
