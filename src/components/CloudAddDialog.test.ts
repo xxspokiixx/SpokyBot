@@ -254,6 +254,18 @@ describe("each screen of the sheet says one thing and offers one next step", () 
     expect(sheet("offer")).not.toContain("data-cloud-staging");
     expect(text(sheet("offer", true))).toMatch(/Staging ?: This app uses the staging MausBot Cloud: test payments and test Clouds, not real ones\./);
   });
+
+  it("a click beside the sheet closes it while choosing, never mid sign-in, checkout or setup", () => {
+    const outside = (kind: CloudAddView["kind"]) => {
+      const onClose = vi.fn(), backdrop = CloudAddSheet({ kind, staging: false, onClose, children: "x" });
+      const event = { target: "backdrop", currentTarget: "backdrop" };
+      (backdrop.props as { onMouseDown: (event: unknown) => void }).onMouseDown(event);
+      (backdrop.props as { onMouseDown: (event: unknown) => void }).onMouseDown({ target: "sheet", currentTarget: "backdrop" });
+      return onClose.mock.calls.length;
+    };
+    for (const kind of ["offer", "has-cloud", "ready", "error", "unreachable", "checking"] as const) expect(outside(kind), kind).toBe(1);
+    for (const kind of ["sign-in", "signing-in", "waiting", "starting"] as const) expect(outside(kind), kind).toBe(0);
+  });
 });
 
 describe("the sheet", () => {

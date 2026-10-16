@@ -83,11 +83,13 @@ export function CloudAddPanel({ view, ui, actions }: { view: CloudAddView; ui: C
 }
 
 const WIDTH: Partial<Record<CloudAddView["kind"], string>> = { offer: "max-w-[900px]", starting: "max-w-[720px]", ready: "max-w-[720px]" };
+/** Mid sign-in, checkout or setup a stray click beside the sheet (say, back from paying in the browser) must not lose it: there only Close and Esc do. */
+const HELD: ReadonlySet<CloudAddView["kind"]> = new Set(["sign-in", "signing-in", "waiting", "starting"]);
 
 /** The sheet over the app: one width per screen, the close button, and the staging mark when the app is on staging.
  * Above the z-50 layers (Settings, the welcome flow), which it may be opened over. */
 export function CloudAddSheet({ kind, staging, onClose, children }: { kind: CloudAddView["kind"]; staging: boolean; onClose: () => void; children: ReactNode }) {
-  return <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/50 p-4 sm:p-6" onMouseDown={event => event.target === event.currentTarget && onClose()}>
+  return <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/50 p-4 sm:p-6" onMouseDown={event => event.target === event.currentTarget && !HELD.has(kind) && onClose()}>
     <div role="dialog" aria-modal="true" aria-labelledby="cloud-add-title" data-cloud-add-dialog tabIndex={-1}
       className={cn("animate-pop-in relative max-h-full w-full overflow-y-auto overscroll-contain rounded-[18px] border border-hairline/70 bg-panel shadow-2xl outline-none", WIDTH[kind] ?? "max-w-[540px]")}>
       <button type="button" onClick={onClose} aria-label={t("cloudAdd.close")} className="ui-icon-button absolute end-3.5 top-3.5 z-10"><X size={18} /></button>
