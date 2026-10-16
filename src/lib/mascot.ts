@@ -72,25 +72,6 @@ export const MAUS_COLORS = {
   coral: "#E5634E",
 } satisfies Record<MausColor, string>;
 
-function mix(hex: string, toward: string, t: number): string {
-  const a = Number.parseInt(hex.slice(1), 16);
-  const b = Number.parseInt(toward.slice(1), 16);
-  const channel = (shift: number) => {
-    const va = (a >> shift) & 0xff;
-    const vb = (b >> shift) & 0xff;
-    return Math.round(va + (vb - va) * t);
-  };
-  return `#${[channel(16), channel(8), channel(0)]
-    .map((part) => part.toString(16).padStart(2, "0"))
-    .join("")}`;
-}
-
-/** A Maus colour as the mascot's body paints it: light, base and shade. */
-export function mausGradient(color: MausColor): [string, string, string] {
-  const fill = MAUS_COLORS[color] ?? MAUS_COLORS.green;
-  return [mix(fill, "#ffffff", 0.55), fill, mix(fill, "#000000", 0.42)];
-}
-
 export const MAUS_MOTIONS = [
   "arrive",
   "switch",

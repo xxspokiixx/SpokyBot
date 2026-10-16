@@ -92,7 +92,7 @@ it("the beat: what Cloud does, the night shift scene, the Admin's offer in one l
   expect(f.api).toHaveBeenCalledWith("/api/config", { method: "PUT", body: JSON.stringify({ onboarding: { hintsSeen: ["onboarding-cloud-v1"] } }) });
   expect(button("Start free trial").hasAttribute("data-primary"), "the welcome focuses it").toBe(true);
   const scene = () => host.querySelector("[data-cloud-scene='beat']")!;
-  expect(scene().getAttribute("aria-label")).toBe("Four bots keep working on a cloud under the moon while this computer sleeps");
+  expect(scene().getAttribute("aria-label")).toBe("Three bots keep working on a cloud under the moon while this computer sleeps");
   expect(scene().hasAttribute("data-paused")).toBe(false);
   await act(async () => { button("Start free trial").click(); });
   expect(f.dispatch).toHaveBeenCalledWith({ type: "openCloudAdd", source: "app_onboarding" });
