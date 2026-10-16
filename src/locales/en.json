@@ -21,7 +21,7 @@
   "highlevel.disconnectConfirm": "Disconnect HighLevel? Bots lose access to its contacts, deals and conversations until you connect again.",
   "highlevel.useToken": "Use a Private Integration token instead",
   "highlevel.useSignIn": "Sign in instead",
-  "highlevel.tokenHelp": "In HighLevel or your CRM, open Settings → Private Integrations, create one with contacts, opportunities, conversations and calendars permissions, and paste it here.",
+  "highlevel.tokenHelp": "In HighLevel or your CRM, open the sub-account you want to connect, go to Settings → Private Integrations and create one with these permissions: View Locations, View Contacts, Edit Contacts, View Opportunities, Edit Opportunities and View Custom Fields (for the conversation and calendar tools, also View Conversations, View Conversation Messages, View Calendars and View Calendar Events). Paste the token here with that sub-account's location ID (Settings → Business Profile).",
   "highlevel.tokenField": "Private Integration token",
   "highlevel.locationField": "Location ID",
   "highlevel.tokenIncomplete": "Paste the token and the location ID.",
