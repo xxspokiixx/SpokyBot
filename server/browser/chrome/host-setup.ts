@@ -93,29 +93,30 @@ const MISSING_LIBRARY = /^\s*(\S+) => not found$/gm;
 /** glibc's loader abort, naming the first library it could not load. */
 const LOADER_ERROR = /error while loading shared libraries: ([^:\s]+)/;
 
-function run(command: string, args: readonly string[]): Promise<string> {
+function run(command: string, args: readonly string[], env: NodeJS.ProcessEnv): Promise<string> {
   return new Promise((resolve) => {
-    execFile(command, [...args], { timeout: 5_000, encoding: "utf8", windowsHide: true }, (_error, stdout, stderr) => resolve(`${stdout ?? ""}${stderr ?? ""}`));
+    execFile(command, [...args], { timeout: 5_000, encoding: "utf8", windowsHide: true, env }, (_error, stdout, stderr) => resolve(`${stdout ?? ""}${stderr ?? ""}`));
   });
 }
 
 /**
- * Shared libraries the loader cannot find. The browser's own `--version`
- * decides whether any are missing; `ldd` only lists them after the loader
- * fails, because it can report libraries a host provides another way (NixOS's nix-ld).
+ * Shared libraries the loader cannot find, with the environment the browser
+ * was launched in. The browser's own `--version` decides whether any are
+ * missing; `ldd` only lists them after the loader fails, because it can report
+ * libraries a host provides another way (NixOS's nix-ld).
  */
-export async function missingLibraries(executable: string): Promise<string[]> {
-  const loaderError = LOADER_ERROR.exec(await run(executable, ["--version"]))?.[1];
+export async function missingLibraries(executable: string, env: NodeJS.ProcessEnv = process.env): Promise<string[]> {
+  const loaderError = LOADER_ERROR.exec(await run(executable, ["--version"], env))?.[1];
   if (loaderError === undefined) return [];
-  const listed = [...(await run("ldd", [executable])).matchAll(MISSING_LIBRARY)].map((match) => match[1]!);
+  const listed = [...(await run("ldd", [executable], env)).matchAll(MISSING_LIBRARY)].map((match) => match[1]!);
   return listed.length > 0 ? listed : [loaderError];
 }
 
 /** After a launch fails, the host setup it is missing, or null when neither explains it. */
-export async function diagnoseLaunchFailure(input: { executable: string; output: string; platform?: NodeJS.Platform }): Promise<BrowserHostError | null> {
+export async function diagnoseLaunchFailure(input: { executable: string; output: string; platform?: NodeJS.Platform; env?: NodeJS.ProcessEnv }): Promise<BrowserHostError | null> {
   if (input.output.includes(NO_SANDBOX_SIGNATURE)) return new BrowserHostError("sandbox");
   if ((input.platform ?? process.platform) !== "linux") return null;
-  const libraries = await missingLibraries(input.executable);
+  const libraries = await missingLibraries(input.executable, input.env);
   return libraries.length ? new BrowserHostError("libraries", libraries) : null;
 }
 
