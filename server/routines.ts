@@ -14,7 +14,7 @@ import { isRoutineProblemRun } from "../shared/routines.ts";
 import { ROUTINE_PARTS, type PartPair, type RoutinePart } from "./package-parts.ts";
 import {
   composeExecutionPrompt, continuityCarry, retriesTransiently, ROUTINE_DEFERRAL_NOTICE_MS, ROUTINE_SKIPPED_WHILE_WAITING, ROUTINE_SUPERSEDED,
-  ROUTINE_TRANSIENT_RETRY_MS, routineHostWarning, skipNeedsNotice, supersededBy,
+  ROUTINE_TRANSIENT_RETRY_MS, routineFailure, routineHostWarning, skipNeedsNotice, supersededBy,
 } from "./routine-execution.ts";
 
 export interface RoutineIntervalWindow {
@@ -1573,7 +1573,7 @@ export class RoutineManager {
     } else if (event.type === "turn.completed") {
       if (event.cost != null) run.cost = (run.cost ?? 0) + event.cost;
       if (event.denials?.length) run.denials = [...new Set([...(run.denials ?? []), ...event.denials])];
-      const failure = event.ok ? "" : run.error ?? event.stopReason ?? "The bot did not complete this run";
+      const failure = event.ok ? "" : routineFailure(run.error, event.stopReason);
       const worked = this.workedRuns.delete(run.id);
       if (failure && !retriesTransiently(run, failure, worked)) {
         this.failRun(run, failure);

@@ -1,3 +1,4 @@
+import { stopCause } from "./drivers/engine-errors.ts";
 import { classifyError } from "./drivers/retry.ts";
 import { redactSecretsInText } from "./redact.ts";
 import type { Routine, RoutineContextAttachment, RoutineRun, RoutineRunOn, RoutineRunTrigger } from "./routines.ts";
@@ -124,6 +125,11 @@ export function routineHostWarning(routine: { prompt: string; runOn: RoutineRunO
 }
 
 export const ROUTINE_TRANSIENT_RETRY_MS = 15_000;
+
+/** Why a run failed: its own error, else its engine's stop reason in words, never a bare token like "stop_sequence". */
+export function routineFailure(error: string | undefined, stopReason: string | null | undefined): string {
+  return error ?? stopCause(stopReason) ?? "The bot did not complete this run";
+}
 
 /** A run that failed on a passing provider error before doing anything gets one more try. */
 export function retriesTransiently(run: Pick<RoutineRun, "target" | "output" | "retryAt">, detail: string, didWork: boolean): boolean {
