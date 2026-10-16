@@ -1250,7 +1250,7 @@ export function ChatView({ bot: profile }: { bot: Bot }) {
           ) : (
             <button
               type="button"
-              data-chathead-pill
+              data-chathead-pill data-tour="bot-pill"
               onClick={() => dispatch({ type: "toggleSettings", open: true })}
               title={t("chat.openProfile")}
               aria-label={t("chat.openProfileAria", { name: bot.name })}
