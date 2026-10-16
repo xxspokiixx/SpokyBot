@@ -1299,8 +1299,8 @@ time, and none after one closes until another launch:
    `navigator.userActivation`). It loads This computer's page on the click
    (`?desktop-settings=cloud-settings` for Manage plan, `cloud-add` for
    Continue on this computer, with `source=update_popup` and the page clicked,
-   `via=my_cloud` or `server`) and records the popup as seen once the window
-   has switched. The preload and main refuse anything else: `cloud-pro`
+   `via=my_cloud` or `server`) and records the popup as seen once that page
+   has loaded. The preload and main refuse anything else: `cloud-pro`
    (Continue on this computer) from My Cloud's or another saved server's
    page, and `manage` (Manage plan) only from My Cloud's own page, as main
    verifies it. This computer's page opens it at once, whatever else is
@@ -1312,7 +1312,8 @@ time, and none after one closes until another launch:
    switches, the main button is held; a switch main cannot make (This
    computer's server is not ready, another switch is under way, or the
    switch fails) keeps the popup up with a line saying so and the button to
-   try again, and leaves the popup for a later launch.
+   try again, and leaves the popup for a later launch, as does a page that
+   does not load.
 
    Any button, its X, Escape or a click outside end it for good; until then
    it comes back on a later launch. It takes focus at its title, keeps Tab

@@ -77,7 +77,8 @@ export function createDesktopPrefs({ read, write, now = Date.now }) {
  * `page(event)`: "local" for this computer's page, "cloud" for My Cloud's own page as main verifies it, "server" for
  * another saved server open in this desktop's window, null for anything else. `cloudOffered()`: this desktop sells
  * MausBot Cloud, asked once its Cloud sign-in is restored. `localConfig()`: This computer's own workspace's config.json.
- * `thisComputer(landing)`: switches the window to This computer and loads its page at `landing`, false when it cannot.
+ * `thisComputer(landing)`: switches the window to This computer and loads its page at `landing`; false when it cannot,
+ * or when that page does not load.
  */
 export function registerDesktopPrefs({ ipcMain, read, write, page, cloudOffered, thisComputer, localConfig = () => null, now = Date.now }) {
   let prefs = null;
@@ -102,7 +103,7 @@ export function registerDesktopPrefs({ ipcMain, read, write, page, cloudOffered,
   ipcMain.handle("desktop-notices:shown", from("desktop-notices:shown", ANY, (_, id) => store().shown(id)));
   ipcMain.handle("desktop-notices:onboarded", from("desktop-notices:onboarded", ["local"], () => store().markOnboarded()));
   // Security: a server's page brings the window to This computer only while the popup is unseen, once This computer's
-  // welcome is done, and the switch marks it seen. This computer's page opens only what main names for the popup's own
+  // welcome is done, and the switch marks it seen once that page has loaded. This computer's page opens only what main names for the popup's own
   // click: Continue on this computer opens what that page's own popup would for the plan it knows; only My Cloud's own
   // page hands over Manage plan.
   ipcMain.handle("desktop-notices:this-computer", from("desktop-notices:this-computer", ["cloud", "server"], async (asking, intent) => {

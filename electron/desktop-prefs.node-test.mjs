@@ -287,11 +287,11 @@ test("production wiring: main answers this computer's page, My Cloud's own page 
   const contents = { mainFrame: serverFrame };
   const calls = [];
   localOrigin.setLocalOrigin(LOCAL);
-  let switched = async id => { calls.push(["switch", id]); };
+  let switched = async id => { calls.push(["switch", id]); }, loads = true;
   const context = vm.createContext({
     registerDesktopPrefs: value => { options = value; }, jsonFile: file => ({ read: () => file, write: () => {} }), ipcMain: {},
     path: { join: (...parts) => parts.join("/") }, app: { getPath: () => "/user-data" }, desktopDataDir: () => "/home/.openmausbot",
-    navigateMainWindow: url => calls.push(["navigate", url]),
+    navigateMainWindow: async url => { calls.push(["navigate", url]); return loads; },
     senderIsLocal: localOrigin.isLocalSender, workspaceSenderAllowed: environments.workspaceSenderAllowed,
     mainWindow: { webContents: contents }, environmentsState: { environments: [{ id: "vps", name: "VPS", origin: VPS }], activeId: "vps" },
     rendererOrigin: () => LOCAL, cloudAccountRestored: async () => calls.push("restored"), cloudOffersReady: async () => { calls.push("offers"); return true; },
@@ -326,7 +326,14 @@ test("production wiring: main answers this computer's page, My Cloud's own page 
   switched = async () => ({ ok: true });
   assert.equal(await options.thisComputer(landing), true);
   assert.equal(navigated(), 2);
-  context.serverReady = false;
+  loads = false;
+  assert.equal(await options.thisComputer(landing), false, "a page that does not load counts as no switch, so the popup is not seen");
+  assert.equal(navigated(), 3);
+  loads = true; context.serverReady = false;
   assert.equal(await options.thisComputer(landing), false, "no server to switch to");
-  assert.equal(navigated(), 2);
+  assert.equal(navigated(), 3);
+  const navigate = main.slice(main.indexOf("function navigateMainWindow(url) {"), main.indexOf("\n}\n", main.indexOf("function navigateMainWindow(url) {")) + 3);
+  const load = vm.runInNewContext(`${navigate}; navigateMainWindow`, { mainWindow: { isDestroyed: () => false, loadURL: async url => { if (url.endsWith("fail")) throw new Error("ERR_CONNECTION_REFUSED"); } } });
+  assert.equal(await load(`${LOCAL}/ok`), true); assert.equal(await load(`${LOCAL}/fail`), false, "a failed load answers false, never throws");
+  assert.equal(await vm.runInNewContext(`${navigate}; navigateMainWindow`, { mainWindow: null })(`${LOCAL}/`), false, "no window");
 });

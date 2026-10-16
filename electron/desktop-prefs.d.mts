@@ -24,8 +24,9 @@ export interface DesktopNoticesBridge {
   /**
    * A server's page only, right after a click on it: switches the window to This computer while the Cloud Pro popup is
    * unseen and This computer's welcome is done, loads its page on that click (`?desktop-settings=cloud-add` or
-   * `cloud-settings`, with `source=update_popup` and `via=my_cloud` or `server`) and marks the popup seen. False when
-   * main cannot switch. Any other intent, or "manage" from a page main does not verify as My Cloud's, is refused.
+   * `cloud-settings`, with `source=update_popup` and `via=my_cloud` or `server`) and, once it has loaded, marks the
+   * popup seen. False when main cannot switch or that page does not load. Any other intent, or "manage" from a page
+   * main does not verify as My Cloud's, is refused.
    */
   thisComputer(intent: DesktopHandoffIntent): Promise<boolean>;
   /** This computer's page only: its first-run welcome is done. */
