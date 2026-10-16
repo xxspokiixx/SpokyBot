@@ -116,6 +116,12 @@ function fromBase64url(value: string): Uint8Array<ArrayBuffer> {
   return bytes;
 }
 
+/** The one spelling newState makes. The last character's two spare bits carry nothing, so "…A", "…B", "…C" and "…D"
+ * decode to the same bytes: only the canonical one may open a flow. */
+function canonicalState(state: string): boolean {
+  return STATE.test(state) && base64url(fromBase64url(state)) === state;
+}
+
 function hex(bytes: ArrayBuffer): string {
   return Array.from(new Uint8Array(bytes), (byte) => byte.toString(16).padStart(2, "0")).join("");
 }
@@ -326,7 +332,7 @@ export async function highLevelCallback(
   if (limited) return limited;
   const url = new URL(request.url);
   const state = url.searchParams.get("state") ?? "";
-  if (!STATE.test(state)) return PAGES.expired();
+  if (!canonicalState(state)) return PAGES.expired();
   const lookup = await flowLookup(state);
   const row = await flowRow(env, lookup);
   if (!row || row.claimed_at !== null || row.ciphertext !== null || expired(row, now)) return PAGES.expired();
@@ -362,6 +368,7 @@ export async function claimHighLevelFlow(request: Request, env: Env): Promise<Re
   const now = Date.now();
   const limited = await takeLimit(request, env, "claim", HIGHLEVEL_CLAIM_LIMIT, now);
   if (limited) return limited;
+  if (!canonicalState(body.state)) return errorResponse(404, "highlevel_unknown_state");
   const lookup = await flowLookup(body.state);
   const row = await flowRow(env, lookup);
   if (!row || expired(row, now)) return errorResponse(404, "highlevel_unknown_state");
