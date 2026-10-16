@@ -4,7 +4,8 @@ import { t } from "@/lib/i18n";
 import { useCopyFeedback } from "@/lib/copy-text";
 import { botUnreadThreadIds, markBotRead } from "@/lib/folder-read";
 import { useShowThreads } from "@/lib/thread-preferences";
-import { api, openBot, useStore, type Bot } from "@/state/store";
+import { api, useStore, type Bot } from "@/state/store";
+import { announceArchiveNotice, archiveBotWithNotice } from "../bot-archive";
 import { currentArchivableBot, type BotConfirmKind } from "../Sidebar";
 
 export function teamNames(state: Pick<ReturnType<typeof useStore>["state"], "sections" | "bots" | "groups">): string[] {
@@ -53,23 +54,20 @@ export function useBotActions(bot: Bot) {
     }
   };
 
+  // The sidebar's own archive path: its corner notice says "Archived" with Undo, or why it failed.
   const archive = async () => {
     const current = currentArchivableBot(state.bots, bot.id);
     if (!current) return;
-    const activeBots = state.bots.filter((candidate) => !candidate.hidden);
-    try {
-      const response = await api(`/api/bots/${current.id}`, {
-        method: "PATCH",
-        body: JSON.stringify({ hidden: true }),
-      });
-      dispatch({ type: "botPatched", bot: response.bot });
-      if (state.selectedId === current.id) {
-        const next = activeBots.find((candidate) => candidate.id !== current.id);
-        if (next) openBot(dispatch, next, showThreads);
-      }
-    } catch (cause) {
-      dispatch({ type: "error", message: cause instanceof Error ? cause.message : String(cause) });
-    }
+    await archiveBotWithNotice(current, {
+      bots: state.bots,
+      selectedId: state.selectedId,
+      dispatch,
+      showThreads,
+      notify: (notice) => {
+        // With no sidebar on screen (the calendar), a failure still has to be said somewhere.
+        if (!announceArchiveNotice(notice) && notice?.error) dispatch({ type: "error", message: notice.text });
+      },
+    });
   };
 
   const requestArchive = () => {
