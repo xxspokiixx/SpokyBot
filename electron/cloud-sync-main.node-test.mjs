@@ -9,13 +9,13 @@ test("Files keeps its settings in the folder main names (the staging Admin's own
   const { existsSync } = await import("node:fs");
   for (const [stateDir, folder] of [[undefined, "cloud-sync"], ["cloud-sync-staging", "cloud-sync-staging"]]) {
     const dir = realpathSync(mkdtempSync(join(tmpdir(), "omb-files-dir-")));
-    t.after(() => rmSync(dir, { recursive: true, force: true }));
     const installed = installCloudFiles({
       app: { getPath: (name) => join(dir, name) }, ipcMain: { handle: () => {} }, dialog: {}, shell: { trashItem: async () => {} }, powerMonitor: { on: () => {} },
       fetch: async () => { throw new Error("offline"); }, localWorkspaceOnly: (_channel, handler) => handler, send: () => {}, cloudOrigin: () => null,
       cloudAccount: () => ({ openDashboard: async () => {} }), localDataDir: join(dir, "home", ".openmausbot"), ...(stateDir ? { stateDir } : {}),
     });
-    t.after(() => installed.close());
+    // Close before removing: Windows will not delete a folder whose Files database is still open.
+    t.after(() => { installed.close(); rmSync(dir, { recursive: true, force: true }); });
     assert.ok(existsSync(join(dir, "userData", folder, "settings.json")), folder);
     assert.equal(existsSync(join(dir, "userData", folder === "cloud-sync" ? "cloud-sync-staging" : "cloud-sync")), false);
   }

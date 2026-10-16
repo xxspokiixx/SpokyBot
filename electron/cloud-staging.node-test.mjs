@@ -68,7 +68,7 @@ test("a staging client talks only to the staging Admin, says it is staging, and 
 });
 
 test("main keeps each Admin's sign-in, saved servers, Files state and Cloud name in their own files, and gives the client the chosen Admin", () => {
-  const main = readFileSync(new URL("./main.mjs", import.meta.url), "utf8");
+  const main = readFileSync(new URL("./main.mjs", import.meta.url), "utf8").replace(/\r\n/g, "\n");
   assert.match(main, /function environmentsFile\(\) \{\n  return path\.join\(app\.getPath\("userData"\), cloudTarget\(process\.env\)\.environments\);/);
   assert.match(main, /stateDir: cloudTarget\(process\.env\)\.sync,/);
   assert.match(main, /lookFile\(\(\) => path\.join\(app\.getPath\("userData"\), cloudTarget\(process\.env\)\.look\), fs\)/);
