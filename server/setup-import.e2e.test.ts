@@ -117,7 +117,8 @@ describe("bringing in another AI tool's setup through the desktop app's own serv
     expect(preview.sections.find((section) => section.id === "skills")?.text).toContain("- review-pr: Reviews a pull request.");
     // `/name` runs one too, for a bot that never had it in its own Skills.
     expect((await turn(later, "/review-pr the open change")).message).toContain(
-      `The user ran your review-pr skill with /review-pr. Read ${JSON.stringify(join(copyOf("review-pr"), "SKILL.md")).replaceAll('"', '\\"')}`,
+      // `message` is the prompt as JSON, so the sentence appears JSON-escaped (on Windows the path's \ twice over).
+      JSON.stringify(`The user ran your review-pr skill with /review-pr. Read ${JSON.stringify(join(copyOf("review-pr"), "SKILL.md"))}`).slice(1, -1),
     );
     const mcp = await api("GET", "/api/mcp/servers");
     expect(JSON.parse(mcp.text).servers).toEqual([
