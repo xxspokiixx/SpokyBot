@@ -15,19 +15,34 @@ afterAll(async () => { for (const folder of folders) await removeTempDir(folder)
 
 const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 
+async function until<T>(read: () => T, check: (value: T) => boolean, timeoutMs = 2_000): Promise<T> {
+  const deadline = Date.now() + timeoutMs;
+  for (;;) {
+    const value = read();
+    if (check(value)) return value;
+    if (Date.now() > deadline) throw new Error(`still ${JSON.stringify(value)} after ${timeoutMs} ms`);
+    await sleep(5);
+  }
+}
+
+const same = (expected: unknown) => (actual: unknown) => JSON.stringify(actual) === JSON.stringify(expected);
+
 const PAGE: FakeDocument = { title: "Page", text: "hello", elements: [{ role: "textbox", name: "Name", selector: "#name", editable: true, box: [10, 10, 200, 30] }] };
 
-async function setup() {
+type WatchOptions = { size?: { width: number; height: number }; maxWidth?: number; maxHeight?: number; pace?: "hi" | "lo"; ack?: boolean; authPrompts?: boolean; pointer?: boolean };
+
+async function setup({ pageLimit = null, document = PAGE }: { pageLimit?: { width: number; height: number } | null; document?: FakeDocument } = {}) {
   const dataDir = mkdtempSync(join(tmpdir(), "omb-viewers-"));
   folders.push(dataDir);
-  const backend = new FakeBackend(() => new FakeChrome({ documents: () => PAGE }));
+  const backend = new FakeBackend(() => new FakeChrome({ documents: () => ({ ...document, elements: document.elements.map((element) => ({ ...element })) }) }), { pageLimit });
   const service = new BrowserService({ dataDir, backend: () => backend, maxRunning: 4, idleMs: () => 600_000, takeoverMs: 200 });
   services.push(service);
   const target = { session: "bot-a", key: "bot:a" };
-  await service.agentRpc(target, "tools/call", { name: "agent_browser_open", arguments: { url: "https://example.com/" } });
-  const watch = async (options: { size?: { width: number; height: number }; maxWidth?: number; maxHeight?: number; pace?: "hi" | "lo"; ack?: boolean; authPrompts?: boolean } = {}) => {
+  const call = (name: string, args: Record<string, unknown> = {}) => service.agentRpc(target, "tools/call", { name, arguments: args }) as Promise<{ content: Array<{ type: string; text?: string }>; isError?: boolean }>;
+  await call("agent_browser_open", { url: "https://example.com/" });
+  const watch = async (options: WatchOptions = {}) => {
     const outputs: ViewerOutput[] = [];
-    const viewer = await service.attachViewer(target, { owner: "local-owner", canOperate: true, maxWidth: options.maxWidth ?? 3200, maxHeight: options.maxHeight ?? 2000, pace: options.pace ?? "hi", authPrompts: options.authPrompts === true, ...(options.size ? { size: options.size } : {}) }, (output) => {
+    const viewer = await service.attachViewer(target, { owner: "local-owner", canOperate: true, maxWidth: options.maxWidth ?? 3200, maxHeight: options.maxHeight ?? 2000, pace: options.pace ?? "hi", authPrompts: options.authPrompts === true, ...(options.pointer === false ? { pointer: false } : {}), ...(options.size ? { size: options.size } : {}) }, (output) => {
       outputs.push(output);
       if (output.type === "frame" && options.ack !== false) output.ack();
     });
@@ -35,7 +50,7 @@ async function setup() {
   };
   const chrome = () => backend.chrome;
   const page = () => [...chrome().pages.values()].at(-1)!;
-  return { service, target, watch, chrome, page };
+  return { service, target, call, watch, chrome, page };
 }
 
 describe("the page fills the panel", () => {
@@ -43,19 +58,19 @@ describe("the page fills the panel", () => {
     const { watch, chrome } = await setup();
     expect(chrome().viewport).toEqual(UNATTACHED_VIEWPORT);
     const { viewer, outputs } = await watch({ size: { width: 1600, height: 1000 } });
-    expect(chrome().viewport).toEqual({ width: 1600, height: 1000 });
-    expect(outputs).toContainEqual(expect.objectContaining({ type: "viewport", width: 1600, height: 1000 }));
+    await until(() => chrome().viewport, same({ width: 1600, height: 1000 }));
+    await until(() => outputs, (seen) => seen.some((output) => output.type === "viewport" && output.width === 1600 && output.height === 1000));
     await viewer.input({ type: "resize", width: 1200, height: 900 });
     expect(chrome().viewport).toEqual({ width: 1200, height: 900 });
     await viewer.close();
-    expect(chrome().viewport).toEqual(UNATTACHED_VIEWPORT);
+    await until(() => chrome().viewport, same(UNATTACHED_VIEWPORT));
   });
 
   it("follows the latest request, keeps its size for a collapsed panel, and stops at 3840x2160", async () => {
     const { watch, chrome } = await setup();
     const first = await watch({ size: { width: 1400, height: 900 } });
     const second = await watch({ size: { width: 1000, height: 700 } });
-    expect(chrome().viewport).toEqual({ width: 1000, height: 700 });
+    await until(() => chrome().viewport, same({ width: 1000, height: 700 }));
     await first.viewer.input({ type: "resize", width: 1500, height: 950 });
     expect(chrome().viewport).toEqual({ width: 1500, height: 950 });
     await second.viewer.input({ type: "resize", width: 1800, height: 40 });
@@ -63,9 +78,45 @@ describe("the page fills the panel", () => {
     await second.viewer.input({ type: "resize", width: 9000, height: 9000 });
     expect(chrome().viewport).toEqual({ width: 3840, height: 2160 });
     await second.viewer.close();
-    expect(chrome().viewport).toEqual({ width: 1500, height: 950 });
+    await until(() => chrome().viewport, same({ width: 1500, height: 950 }));
     expect(requestedSize(99, 500)).toBeNull();
     expect(requestedSize(100.4, 100)).toEqual({ width: 100, height: 100 });
+  });
+
+  it("waits for the bot's running action before it resizes the page, and lets the viewer in at once", async () => {
+    const { watch, chrome, call } = await setup();
+    chrome().delay = (method) => (method === "Accessibility.getFullAXTree" ? 800 : 0);
+    const snapshot = call("agent_browser_snapshot");
+    await sleep(30);
+    const started = Date.now();
+    const { viewer, outputs } = await watch({ size: { width: 1600, height: 1000 } });
+    expect(Date.now() - started).toBeLessThan(500);
+    expect(outputs).toContainEqual(expect.objectContaining({ type: "viewport", ...UNATTACHED_VIEWPORT }));
+    const resizing = viewer.input({ type: "resize", width: 1200, height: 900 });
+    await sleep(100);
+    expect(chrome().viewport).toEqual(UNATTACHED_VIEWPORT);
+    expect((await snapshot).isError).toBeUndefined();
+    await resizing;
+    await until(() => chrome().viewport, same({ width: 1200, height: 900 }));
+  });
+
+  it("never makes a window larger than its screen: a filled panel keeps its shape, a set size its width", async () => {
+    const { watch, chrome, page } = await setup({ pageLimit: { width: 1440, height: 757 } });
+    expect(chrome().viewport).toEqual({ width: 1211, height: 757 });
+    const { viewer, outputs } = await watch({ size: { width: 1600, height: 1000 } });
+    await until(() => chrome().viewport, same({ width: 1211, height: 757 }));
+    await viewer.input({ type: "resize", width: 1000, height: 700 });
+    expect(chrome().viewport).toEqual({ width: 1000, height: 700 });
+    await viewer.input({ type: "resize", width: 2000, height: 800 });
+    expect(chrome().viewport).toEqual({ width: 1440, height: 576 });
+    await viewer.input({ type: "takeControl" });
+    await viewer.input({ type: "viewport", setting: { mode: "preset", preset: "tablet" } });
+    expect(chrome().viewport).toEqual({ width: 820, height: 757 });
+    await viewer.input({ type: "viewport", setting: { mode: "preset", preset: "phone" } });
+    expect(chrome().viewport).toEqual({ width: MIN_WINDOW_WIDTH, height: 757 });
+    expect(chrome().sentTo(page())).toContainEqual(expect.objectContaining({ method: "Emulation.setDeviceMetricsOverride", params: expect.objectContaining({ width: 390, height: 757 }) }));
+    expect(outputs.filter((output) => output.type === "viewport").at(-1)).toMatchObject({ width: 390, height: 757 });
+    expect(chrome().window.height).toBeLessThanOrEqual(757 + 143);
   });
 
   it("resizes the real window, so a page narrower than any window comes from a preset only, emulated", async () => {
@@ -82,6 +133,31 @@ describe("the page fills the panel", () => {
     expect(chrome().viewport).toEqual({ width: 1600, height: 1000 });
     expect(chrome().sentTo(page()).some((sent) => sent.method === "Emulation.clearDeviceMetricsOverride")).toBe(true);
     expect(viewportFor({ mode: "preset", preset: "phone", landscape: true }, null)).toEqual({ width: 844, height: 390 });
+  });
+
+  it("tells viewers the page a window held to its screen leaves a tab with a taller bar", async () => {
+    const { watch, chrome, page } = await setup({ pageLimit: { width: 1440, height: 757 } });
+    page().bar = 56;
+    const { viewer, outputs } = await watch({ size: { width: 1600, height: 1000 } });
+    await viewer.input({ type: "resize", width: 1000, height: 900 });
+    expect(chrome().window.height).toBe(757 + 143);
+    expect(outputs.filter((output) => output.type === "viewport").at(-1)).toMatchObject({ width: 841, height: 701 });
+  });
+
+  it("emulates a page narrower than any window on a tab that opens later too", async () => {
+    const { watch, chrome, call } = await setup();
+    const { viewer } = await watch();
+    await viewer.input({ type: "takeControl" });
+    await viewer.input({ type: "viewport", setting: { mode: "preset", preset: "phone" } });
+    await viewer.input({ type: "releaseControl" });
+    expect((await call("agent_browser_tabs", { action: "new" })).isError).toBeUndefined();
+    const opened = [...chrome().pages.values()].at(-1)!;
+    await until(() => opened.emulated ?? null, same({ width: 390, height: 844 }));
+    const resizes = () => chrome().sent.filter((sent) => sent.method === "Browser.setWindowBounds").length;
+    const before = resizes();
+    expect((await call("agent_browser_tabs", { action: "switch", tab: "t1" })).isError).toBeUndefined();
+    expect(resizes()).toBe(before);
+    expect(chrome().window.width).toBe(MIN_WINDOW_WIDTH);
   });
 });
 

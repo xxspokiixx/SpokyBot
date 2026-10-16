@@ -347,7 +347,7 @@ export async function executeTool(context: ToolContext, call: ToolCall): Promise
       const target = call.input.ref !== undefined || call.input.selector !== undefined ? element(call.input, false) as { ref: string } | { selector: string } : undefined;
       return act(context, tab, async () => {
         await tab.page.upload(call.input.files, target);
-        return textResult(call.input.files.length ? `Put ${call.input.files.length} file${call.input.files.length === 1 ? "" : "s"} into the page. Submit its form as usual.` : "Cancelled the file picker.");
+        return textResult(`Put ${call.input.files.length} file${call.input.files.length === 1 ? "" : "s"} into the page. Submit its form as usual.`);
       }, { observeChange: true });
     }
     case "agent_browser_wait": {

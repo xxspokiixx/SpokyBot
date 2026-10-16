@@ -28,6 +28,8 @@ export interface BrowserOptions {
   maxPages?: number;
   /** The page size every headless window is fitted to; null leaves the window as Chrome made it. */
   viewport?: { width: number; height: number } | null;
+  /** The screen pages are told about, in CSS pixels: a window never grows past it, as no real window can. */
+  screen?: { width: number; height: number } | null;
   /** Tabs hold HTTP authentication challenges for an answer instead of failing them. */
   handleAuth?: boolean;
   /** The person's own browser: only tabs this driver opens are attached to; theirs are left alone. */
@@ -126,7 +128,7 @@ export class CdpBrowser implements PageHost {
     const page = new CdpPage(this, session, info);
     this.#pages.set(info.targetId, page);
     this.#active = page;
-    const running = page.ready.then(() => this.#fitWindow(page));
+    const running = page.ready.then(async () => { await this.#fitWindow(page); });
     this.#running.set(page, running);
     void running.then(
       () => {
@@ -159,29 +161,36 @@ export class CdpBrowser implements PageHost {
    * Chrome's startup tab carries a 56 px bar the others lack (measured on the
    * Linux and Windows runners). So the tab in front is measured, when it opens
    * and whenever it comes to the front, and its window resized until the page
-   * is the viewport, a few rounds at most.
+   * is the viewport, a few rounds at most. Answers the page's size as it ends
+   * up, which a window held to its screen can leave smaller.
    */
-  async #fitWindow(page: CdpPage): Promise<void> {
+  async #fitWindow(page: CdpPage): Promise<{ width: number; height: number } | null> {
     const viewport = this.#viewport;
-    if (!viewport || page.closed) return;
+    if (!viewport || page.closed || page.emulated) return null;
     const root = this.connection.root;
     const measure = () => valueInWorld<[number, number]>(page.frames, page.frames.mainFrameId, "[innerWidth, innerHeight]");
     try {
       const { windowId } = await root.send<{ windowId: number }>("Browser.getWindowForTarget", { targetId: page.targetId });
       let size = await measure();
+      const screen = this.#options.screen;
       for (let round = 0; round < FIT_ROUNDS && (size[0] !== viewport.width || size[1] !== viewport.height); round++) {
         const { bounds } = await root.send<{ bounds: { width?: number; height?: number } }>("Browser.getWindowBounds", { windowId });
-        if (!bounds.width || !bounds.height) return;
-        await root.send("Browser.setWindowBounds", { windowId, bounds: { width: bounds.width + viewport.width - size[0], height: bounds.height + viewport.height - size[1] } });
+        if (!bounds.width || !bounds.height) break;
+        const width = Math.min(bounds.width + viewport.width - size[0], screen?.width ?? Infinity);
+        const height = Math.min(bounds.height + viewport.height - size[1], screen?.height ?? Infinity);
+        if (width === bounds.width && height === bounds.height) break;
+        await root.send("Browser.setWindowBounds", { windowId, bounds: { width, height } });
         const before = size;
         for (let poll = 0; poll < 20 && size[0] === before[0] && size[1] === before[1]; poll++) {
           await new Promise((resolve) => setTimeout(resolve, 25));
           size = await measure();
         }
-        if (size[0] === before[0] && size[1] === before[1]) return;
+        if (size[0] === before[0] && size[1] === before[1]) break;
       }
+      return { width: size[0], height: size[1] };
     } catch (error) {
       if (!isGone(error)) throw error;
+      return null;
     }
   }
 
@@ -193,12 +202,13 @@ export class CdpBrowser implements PageHost {
   /**
    * Resizes the window the tab in front sits in, so its page is `size` and the
    * outer and inner sizes stay what a real window of that size reports. Chrome
-   * keeps a window at least 500 CSS pixels wide (measured on 153).
+   * keeps a window at least 500 CSS pixels wide (measured on 153). Answers the
+   * size that page got, or null when no page was fitted.
    */
-  async setViewport(size: { width: number; height: number } | null): Promise<void> {
+  async setViewport(size: { width: number; height: number } | null): Promise<{ width: number; height: number } | null> {
     this.#viewport = size ? { width: Math.round(size.width), height: Math.round(size.height) } : null;
     const page = this.#active;
-    if (page && !page.closed) await this.#fitWindow(page);
+    return page && !page.closed ? this.#fitWindow(page) : null;
   }
 
   /**

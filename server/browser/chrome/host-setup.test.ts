@@ -1,6 +1,13 @@
-import { describe, expect, it } from "vitest";
+import { mkdtempSync, readFileSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { afterAll, describe, expect, it } from "vitest";
 
-import { appArmorProfile, BrowserHostError, diagnoseLaunchFailure, sandboxBlocked, sandboxDisabled, USERNS_RESTRICTION } from "./host-setup.ts";
+import { removeTempDir } from "../../testing/cleanup.ts";
+import { appArmorProfile, BrowserHostError, diagnoseLaunchFailure, missingLibraries, sandboxBlocked, sandboxDisabled, USERNS_RESTRICTION } from "./host-setup.ts";
+
+const folders: string[] = [];
+afterAll(async () => { for (const folder of folders) await removeTempDir(folder); });
 
 describe("host setup", () => {
   it("pins the AppArmor exemption to one root-owned executable", () => {
@@ -18,6 +25,17 @@ describe("host setup", () => {
     expect(await diagnoseLaunchFailure({ executable: "/opt/chrome", output: "something else", platform: "darwin" })).toBeNull();
     expect(sandboxDisabled({})).toBe(false);
     expect(sandboxDisabled({ OMB_BROWSER_SANDBOX: "0" })).toBe(true);
+  });
+
+  it.skipIf(process.platform === "win32")("asks the browser's own loader which libraries are missing, in the environment the browser launched with", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "omb-host-setup-test-"));
+    folders.push(dir);
+    const chrome = join(dir, "chrome");
+    writeFileSync(chrome, `#!/bin/sh\nprintf '%s' "$HOME" > '${dir}/home'\necho "chrome: error while loading shared libraries: libnss3.so: cannot open shared object file" >&2\nexit 127\n`, { mode: 0o755 });
+    const env = { PATH: "/usr/bin:/bin", HOME: "/home/someone" };
+    expect(await missingLibraries(chrome, env)).toEqual(["libnss3.so"]);
+    expect(readFileSync(join(dir, "home"), "utf8")).toBe("/home/someone");
+    expect(await diagnoseLaunchFailure({ executable: chrome, output: "", platform: "linux", env })).toMatchObject({ kind: "libraries", libraries: ["libnss3.so"] });
   });
 
   it("sees a blocked sandbox only where user namespaces are restricted and no profile is installed", () => {

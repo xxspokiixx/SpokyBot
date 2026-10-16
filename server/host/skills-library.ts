@@ -5,6 +5,10 @@ import { narrowestAudience, intersectAudience } from "../bot-visibility.ts";
 import { DATA_DIR, type AppConfig } from "../config.ts";
 import { appendDecision } from "../decision-log.ts";
 import { UNDO_STALE, type DirectApply } from "../direct-apply.ts";
+import {
+  expandImportedSkillCommand, importedSkillListings, importedSkillsFor, importedSkillsPrompt, nativeSkillFolders, readImportedSkillFile,
+  type ImportedSkillView, type SkillTurnEngine,
+} from "../imported-skills.ts";
 import { redactSecretsInText } from "../redact.ts";
 import { readLibrarySkillFile, readSkillLibraryIndex, skillsLibraryEnabled } from "../skill-library.ts";
 import {
@@ -18,8 +22,9 @@ import {
   updateSharedLearnedSkill,
   type ShareBot,
 } from "../skill-share.ts";
-import { listSkills, readSkillFile, resolveBotSkills, type SkillListing } from "../skills.ts";
+import { expandSkillCommandTurnText, listSkills, readSkillFile, resolveBotSkills, skillsSystemPrompt, type SkillListing } from "../skills.ts";
 import type { BotRecord, Message, Store } from "../store.ts";
+import { claudeUserSkillsEnabled } from "../turn-settings.ts";
 
 type ReceiptArgs = {
   botId: string;
@@ -43,7 +48,12 @@ export interface SkillsLibraryHostDeps {
   store: Store;
   cfg: AppConfig;
   appendSkillRequestCard(args: ReceiptArgs): { requestId: string; summary: string };
+  /** An engine instance's saved config and environment: they decide which skill folders it loads by itself. */
+  engineConfig?(instanceId: string): { config?: unknown; environment?: Record<string, string> } | undefined;
 }
+
+/** The engine instance a turn runs on. */
+type TurnInstance = { instanceId: string; driverKind: string };
 
 type UndoResult =
   | { claimed: true; state: "undone" }
@@ -61,16 +71,21 @@ export function createSkillsLibraryHost(deps: SkillsLibraryHostDeps) {
   const { store, cfg } = deps;
   const mode = () => shareLearnedSkillsMode(cfg);
 
-  const listBotSkills = (bot: BotRecord) =>
+  /** The bot's own skills, and its library skills while the library is on; an imported skill of the same name yields. */
+  const ownSkills = (bot: BotRecord) =>
     skillsLibraryEnabled(cfg) ? resolveBotSkills(bot.id, bot.assignedSkills) : listSkills(bot.id);
+  const listBotSkills = (bot: BotRecord): SkillListing[] => {
+    const own = ownSkills(bot);
+    return [...own, ...importedSkillListings(bot.id, new Set(own.map((skill) => skill.name)))];
+  };
   const readBotSkillFile = (bot: BotRecord, name: string): string | null => {
     const own = readSkillFile(bot.id, name);
-    if (own !== null || !skillsLibraryEnabled(cfg)) return own;
-    // Private wins collisions: a private skill that no longer verifies must not fall through to a same-named library skill.
+    if (own !== null) return own;
+    // Private wins collisions: a private skill that no longer verifies must not fall through to a same-named shared one.
     if (listSkills(bot.id).some((skill) => skill.name === name)) return null;
     // The library fallback is by assignment only, never by name alone.
-    if (!bot.assignedSkills?.includes(name)) return null;
-    return readLibrarySkillFile(name);
+    if (skillsLibraryEnabled(cfg) && bot.assignedSkills?.includes(name)) return readLibrarySkillFile(name);
+    return readImportedSkillFile(name);
   };
 
   const shareBotsNow = (): ShareBot[] =>
@@ -91,6 +106,23 @@ export function createSkillsLibraryHost(deps: SkillsLibraryHostDeps) {
   const conversationStartedAt = (threadId: string): number | undefined => store.messagesFor(threadId)[0]?.at;
   // The bot record predates awaited setup work; an assignment PUT in that window must still reach this prompt.
   const liveAssigned = (bot: BotRecord) => store.bot(bot.id)?.assignedSkills ?? bot.assignedSkills;
+  const conversationSkills = (bot: BotRecord, threadId: string): string[] | undefined =>
+    skillsLibraryEnabled(cfg) ? conversationAssignedSkills(bot.id, liveAssigned(bot), conversationStartedAt(threadId)) : undefined;
+
+  const engineOf = (instance: TurnInstance | undefined): SkillTurnEngine | undefined => {
+    if (!instance) return undefined;
+    const saved = deps.engineConfig?.(instance.instanceId);
+    return {
+      driverKind: instance.driverKind,
+      ...(saved?.config !== undefined ? { config: saved.config } : {}),
+      ...(saved?.environment ? { environment: saved.environment } : {}),
+    };
+  };
+  /** This computer's skills for one turn: after the bot's own and library skills (`assigned`), less what the turn's
+   * engine already loads from the same folder. */
+  const importsFor = (bot: BotRecord, assigned: readonly string[] | undefined, instance: TurnInstance | undefined): ImportedSkillView[] =>
+    importedSkillsFor(bot.id, new Set(resolveBotSkills(bot.id, assigned).map((skill) => skill.name)),
+      nativeSkillFolders(engineOf(instance), { claudeUserSkills: claudeUserSkillsEnabled(cfg) }));
 
   const editable = (botId: string, name: string): boolean =>
     mode() !== "off" && sharedSkillEditable(botId, store.bot(botId)?.assignedSkills, name);
@@ -185,9 +217,26 @@ export function createSkillsLibraryHost(deps: SkillsLibraryHostDeps) {
 
     conversationStartedAt,
 
-    conversationSkills(bot: BotRecord, threadId: string): string[] | undefined {
-      if (!skillsLibraryEnabled(cfg)) return undefined;
-      return conversationAssignedSkills(bot.id, liveAssigned(bot), conversationStartedAt(threadId));
+    conversationSkills,
+
+    /** A turn's skills index, or the preview's without a thread: the bot's own and library skills, then the ones from
+     * this computer, each with a budget of its own. */
+    skillsIndex(bot: BotRecord, threadId: string | undefined, instance?: TurnInstance): string {
+      const assigned = threadId === undefined ? (skillsLibraryEnabled(cfg) ? bot.assignedSkills : undefined) : conversationSkills(bot, threadId);
+      return skillsSystemPrompt(bot.id, assigned, threadId === undefined ? undefined : conversationStartedAt(threadId)) +
+        importedSkillsPrompt(importsFor(bot, assigned, instance));
+    },
+
+    /** The imported skills a turn links into its task folder: the same ones its index lists. */
+    turnImports(bot: BotRecord, threadId: string, instance?: TurnInstance): ImportedSkillView[] {
+      return importsFor(bot, conversationSkills(bot, threadId), instance);
+    },
+
+    /** `/name` for one of the bot's own, library or imported skills. */
+    expandSkillCommand(bot: BotRecord, text: string, instance?: TurnInstance): string {
+      const assigned = skillsLibraryEnabled(cfg) ? liveAssigned(bot) : undefined;
+      const own = expandSkillCommandTurnText(bot.id, text, assigned);
+      return own !== text ? own : expandImportedSkillCommand(text, importsFor(bot, assigned, instance));
     },
 
     shareNote(bot: BotRecord, threadId: string, enabled: boolean): TurnShareNote {

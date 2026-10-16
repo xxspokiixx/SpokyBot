@@ -13,7 +13,7 @@ vi.mock("./DesktopCapabilities", () => ({ useDesktopCapabilities: () => ({ capab
 import { CloudAccountSettings, CloudPlanOnCloud, cloudLinkAction, cloudPlanLabel } from "./CloudAccountSettings";
 type Node = ReactElement<{ children?: ReactNode; onClick?: () => void }>;
 function nodes(value: ReactNode): Node[] { if (!isValidElement(value)) return []; const node = value as Node; return [node, ...Children.toArray(node.props.children).flatMap(nodes)]; }
-function render(props?: { linkRequest?: number; cloudHome?: boolean; onConnectPhone?: () => void; onAddCloud?: () => void }) { f.index = 0; f.effects = []; let tree: ReactNode; function Capture() { tree = CloudAccountSettings(props); return tree; }
+function render(props?: { linkRequest?: number; cloudHome?: boolean; onConnectPhone?: () => void; onAddCloud?: () => void; onSignIn?: () => void }) { f.index = 0; f.effects = []; let tree: ReactNode; function Capture() { tree = CloudAccountSettings(props); return tree; }
   const html = renderToStaticMarkup(createElement(Capture)); return { html, nodes: nodes(tree) }; }
 const flush = async () => { for (let i = 0; i < 20; i++) await Promise.resolve(); };
 const click = (label: string) => { const button = render().nodes.find(node => node.type === "button" && node.props.children === label); expect(button).toBeTruthy(); button!.props.onClick!(); };
@@ -467,4 +467,15 @@ it("on My Cloud, Settings shows the trial and its credit, and its button names t
   await flush(); expect(plan.manage).toHaveBeenCalledExactlyOnceWith();
   plan.state.mockResolvedValueOnce({ status: "paid", tier: "pro" }); f.values = []; view(); f.effects[0](); await flush();
   all(view().html, ["Pro active · verified by MausBot Cloud", "Manage in your browser"]); none(view().html, ["free trial", "Claude credit"]);
+});
+it("Sign in is the sheet's email code when Settings hands it over; the staging Admin is marked plainly", async () => {
+  const onSignIn = vi.fn();
+  await ready();
+  render({ onSignIn }).nodes.find(node => node.type === "button" && node.props.children === "Sign in to your Cloud plan")!.props.onClick!();
+  await flush();
+  expect(onSignIn).toHaveBeenCalledOnce(); expect(bridge.begin).not.toHaveBeenCalled();
+  expect(render().html).not.toContain("data-cloud-staging");
+  push({ ...free, staging: true });
+  const staging = render().html;
+  expect(staging).toContain("data-cloud-staging"); expect(staging).toContain(">Staging<");
 });

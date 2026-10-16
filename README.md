@@ -48,6 +48,18 @@ Talk to them like contacts. Watch them work. Approve what matters.
 <br>
 <br>
 
+<sub>Powered by <a href="https://boat.dev">boat.dev</a></sub>
+<br>
+<a href="https://boat.dev">
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="docs/assets/sponsors/boat-logo-white.svg">
+    <img src="docs/assets/sponsors/boat-logo.svg" alt="Boat (boat.dev)" height="34">
+  </picture>
+</a>
+
+<br>
+<br>
+
 <img src="docs/screenshots/hero.png" alt="OpenMausBot — a Telegram-style chat app where every chat is a real AI agent" width="900">
 
 </div>
@@ -234,6 +246,7 @@ expressions · screenshots of the bot's work folded into the transcript.
 ![Vite](https://img.shields.io/badge/Vite-646CFF?logo=vite&logoColor=white)
 ![Tailwind CSS](https://img.shields.io/badge/Tailwind%20CSS-0F172A?logo=tailwindcss&logoColor=38BDF8)
 ![Composio](https://img.shields.io/badge/Composio-e6493a)
+![Boat](https://img.shields.io/badge/Boat-sponsor-111111)
 ![Cua](https://img.shields.io/badge/Cua%20Driver-1f2937)
 ![ElevenLabs](https://img.shields.io/badge/ElevenLabs-000000?logo=elevenlabs&logoColor=white)
 ![Fish Audio](https://img.shields.io/badge/Fish%20Audio-2563eb)
@@ -246,7 +259,7 @@ expressions · screenshots of the bot's work folded into the transcript.
 | **Claude · Codex · Grok** | The agents behind every bot, run through their local CLIs |
 | **Electron** | Desktop shells for macOS, Windows, and Ubuntu |
 | **React + Vite + Tailwind CSS** | The chat app UI and its build |
-| **Boat** ([boat.dev](https://boat.dev)) | Each bot's cloud computer |
+| **Boat** ([boat.dev](https://boat.dev)) | Each bot's cloud computer · our sponsor |
 | **Composio** | Connected apps — Gmail, Slack, GitHub, and more |
 | **Cua Driver** | Native computer use on your own machine |
 | **ElevenLabs · Fish Audio** | Hosted voices for bots that talk back |

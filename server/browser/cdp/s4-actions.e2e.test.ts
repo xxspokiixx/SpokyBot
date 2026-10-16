@@ -344,6 +344,10 @@ suite("S4 snapshot, refs and actions on real Chrome", () => {
     await page.click({ selector: "#m" });
     await page.upload([one, two]);
     expect(await read(`document.getElementById("names").textContent`)).toBe("one.txt:10;one.txt:10,two.txt:11;");
+    await page.click({ selector: "#f" });
+    expect(await page.fileChoosers.opened(2_000)).not.toBeNull();
+    await open("<p>The page with the picker is gone.</p>");
+    expect(page.fileChoosers.open).toBeNull();
   });
 
   it("finds elements by role and by text, strictly", async () => {

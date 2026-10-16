@@ -43,9 +43,9 @@ export interface ChromeEngineOptions {
   host: HostKind;
   env?: NodeJS.ProcessEnv;
   platform?: NodeJS.Platform;
-  egressPort(session: string): Promise<number>;
+  egressPort(key: string): Promise<number>;
   idleMs(): number;
-  egressNotice(session: string): string | null;
+  egressNotice(key: string): string | null;
   log?: (line: string) => void;
 }
 
@@ -81,7 +81,7 @@ export class ChromeEngine {
       locale: () => locale,
       acceptLanguages: () => (locale ? acceptLanguageFor(locale).replace(/;q=[\d.]+/gu, "") : "en-US,en"),
       timezone: () => browserTimeZone(env, platform) ?? null,
-      egressPort: (session) => options.egressPort(session),
+      egressPort: (key) => options.egressPort(key),
       registry: this.#registry,
       sandbox,
       ...(options.log ? { log: options.log } : {}),

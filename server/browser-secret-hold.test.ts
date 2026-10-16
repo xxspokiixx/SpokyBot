@@ -22,6 +22,16 @@ describe("a secret held on a page", () => {
     expect(await holds.refuses("s", at("https://example.com/login"))).toBe(false);
   });
 
+  it("belongs to the tab it was typed in: a page in another tab neither meets the hold nor ends it", async () => {
+    const holds = new SecretHolds(async () => true);
+    holds.hold("s", { url: "https://example.com/login", ms: 60_000, tab: "T1" });
+    expect(await holds.refuses("s", at("https://example.com/other"), "T2")).toBe(false);
+    expect(await holds.refuses("s", at("https://example.com/login"), "T2")).toBe(false);
+    expect(await holds.refuses("s", at("https://example.com/login"), "T1")).toBe(true);
+    expect(await holds.refuses("s", at("https://example.com/next"), "T1")).toBe(false);
+    expect(await holds.refuses("s", at("https://example.com/login"), "T1")).toBe(false);
+  });
+
   it("counts a page whose address cannot be read as the held one", async () => {
     const holds = new SecretHolds(async () => true);
     holds.hold("s", { url: "https://example.com/login", ms: 60_000 });

@@ -35,6 +35,8 @@ const EXCLUDED = new Set([
   "decider-log",
   "cloud-owner.json",
   "sync",
+  // "Also use my Claude Code skills": a link to the person's own ~/.claude/skills, made again on each turn.
+  "claude-user-skills",
 ]);
 const EXCLUSION_NOTES = [
   "Device pairing, server identity, live leases and runtime files (existing destination identities are preserved).",

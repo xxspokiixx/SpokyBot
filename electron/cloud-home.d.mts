@@ -90,5 +90,5 @@ export declare function myCloudOrigin(known: {
 }): string | null;
 export declare function isCloudHomeEntry(entry: { origin?: string } | null | undefined, known?: { homeOrigin?: string | null; remembered?: RememberedCloudHome | null }): boolean;
 export declare function parsePairingGrant(input: unknown, origin: string, now: number): CloudHomeGrant | null;
-export declare function withCloudHome<T extends { environments: Array<{ id: string; name: string; origin: string }>; activeId: string }>(state: T, machine: CloudMachine | null | undefined, makeId: () => string): T;
+export declare function withCloudHome<T extends { environments: Array<{ id: string; name: string; origin: string; color?: string; home?: true }>; activeId: string }>(state: T, machine: CloudMachine | null | undefined, makeId: () => string, look?: { name?: string | null; color?: string | null } | null): T;
 export declare function cloudHomeConnectUrl(target: CloudHomeTarget, now: number, open?: "phone" | null): string;

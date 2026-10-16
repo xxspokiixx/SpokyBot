@@ -1,7 +1,9 @@
 import { useEffect, useState } from "react";
 import { ChevronDown, Cloud, Laptop } from "lucide-react";
 import { cn } from "@/lib/cn";
+import { cloudColor } from "@/lib/cloud-look";
 import { t } from "@/lib/i18n";
+import { CloudTile } from "./cloud-buy/parts";
 
 export function openServerMenu(bridge: { menu: (options?: { from?: "howto" }) => Promise<void> }, { howTo = false, onClosed }: { howTo?: boolean; onClosed?: () => void } = {}): Promise<void> {
   return bridge.menu(howTo ? { from: "howto" } : undefined).finally(() => { if (howTo) onClosed?.(); });
@@ -19,7 +21,7 @@ export function DesktopWorkspaceSwitcher({ compact = false, inline = false, clou
   compact?: boolean; inline?: boolean; cloudHome?: boolean; owner?: string | null; howTo?: boolean; onMenuClosed?: () => void;
 }) {
   const bridge = window.ogb?.workspaces;
-  const [current, setCurrent] = useState<{ local: boolean; name: string; origin?: string } | null>(null);
+  const [current, setCurrent] = useState<{ local: boolean; name: string; origin?: string; color?: string } | null>(null);
   const [open, setOpen] = useState(false);
   const [error, setError] = useState("");
   useEffect(() => {
@@ -61,7 +63,7 @@ export function DesktopWorkspaceSwitcher({ compact = false, inline = false, clou
       data-tour="server-switcher" title={title} onClick={openMenu}
       className="flex h-7 min-w-0 max-w-full items-center gap-1.5 overflow-hidden rounded-md px-1.5 text-left text-[12.5px] font-medium text-ink hover:bg-control focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus"
       style={{ WebkitAppRegion: "no-drag" } as React.CSSProperties}>
-      <Icon size={14} aria-hidden="true" className="shrink-0 text-ink-secondary" />
+      {cloudColor(current?.color) ? <CloudTile color={current?.color} size={16} /> : <Icon size={14} aria-hidden="true" className="shrink-0 text-ink-secondary" />}
       <span className="min-w-0 truncate @max-[96px]/sidebar-top:hidden">{name}</span>
       <ChevronDown size={11} aria-hidden="true" className="shrink-0 text-ink-secondary" />
     </button>
@@ -73,7 +75,7 @@ export function DesktopWorkspaceSwitcher({ compact = false, inline = false, clou
       onClick={openMenu}
       className={cn("flex w-full items-center gap-2 rounded-lg py-2 text-left text-[13px] font-medium text-ink hover:bg-control focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus", compact ? "justify-center px-1" : "px-2")}
       style={{ WebkitAppRegion: "no-drag" } as React.CSSProperties}>
-      <Icon size={16} className="shrink-0 text-ink-secondary" />
+      {cloudColor(current?.color) ? <CloudTile color={current?.color} size={20} /> : <Icon size={16} className="shrink-0 text-ink-secondary" />}
       {!compact && <><span className="min-w-0 flex-1 truncate">{name}{cloudHome && <AlwaysOn />}</span><ChevronDown size={13} className="shrink-0 text-ink-secondary" /></>}
     </button>
     {error && <p role="alert" className="mt-1 text-[11px] text-danger">{error}</p>}
