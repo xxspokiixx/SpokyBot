@@ -90,7 +90,7 @@ beforeEach(() => {
   push = () => {};
   bridge = {
     state: vi.fn().mockResolvedValue(overview()), start: vi.fn().mockResolvedValue({ phase: "preparing" }), cancel: vi.fn().mockResolvedValue({ phase: "failed" }),
-    restorePrevious: vi.fn(), dismiss: vi.fn().mockResolvedValue(overview({ suggest: false })),
+    restorePrevious: vi.fn(), bring: vi.fn(), dismiss: vi.fn().mockResolvedValue(overview({ suggest: false })),
     onState: vi.fn((callback) => { push = callback; return () => {}; }),
   };
   lending = { open: vi.fn().mockResolvedValue(undefined) };

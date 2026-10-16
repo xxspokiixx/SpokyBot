@@ -1299,9 +1299,9 @@ export class Store {
     return { messages: messages.slice(start), hasMore: start > 0, activeLeafId };
   }
 
-  importTranscript(threadId: string, messages: Message[], activeLeafId: string | null): void {
-    if (this.messagesFor(threadId).length) throw new Error("Cannot import over an existing conversation");
-    mdb.importThread(threadId, messages, activeLeafId);
+  importTranscript(threadId: string, messages: Message[], activeLeafId: string | null, relinked?: ReadonlyArray<{ id: string; parentId: string | null }>): void {
+    if (!relinked && this.messagesFor(threadId).length) throw new Error("Cannot import over an existing conversation");
+    mdb.importThread(threadId, messages, activeLeafId, relinked);
     this.threads.delete(threadId);
     const newest = messages.reduce((max, message) => Math.max(max, message.at), Number.NEGATIVE_INFINITY);
     const newestOrder = messages.reduce((max, message) => movesThreadToTop(message) ? Math.max(max, message.turnCompletedAt ?? message.at) : max, Number.NEGATIVE_INFINITY);

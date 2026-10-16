@@ -328,6 +328,7 @@ const bridge = {
       : navigator.userActivation?.isActive === true ? ipcRenderer.invoke("cloud-move:start") : Promise.reject(new Error("Choose Copy to start copying.")),
     cancel: () => ipcRenderer.invoke("cloud-move:cancel"),
     restorePrevious: id => ipcRenderer.invoke("cloud-move:restore-previous", ...savedServer(id)),
+    bring: id => isLocalPage ? ipcRenderer.invoke("cloud-move:bring", ...savedServer(id)) : Promise.reject(new Error("Bring newer chats from this computer's Settings.")),
     dismiss: id => ipcRenderer.invoke("cloud-move:dismiss", ...savedServer(id)),
     onState: cb => {
       const handler = (_event, state) => cb(state);
