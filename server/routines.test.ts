@@ -5,6 +5,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 
 import type { GroupGoalRunStatus } from "../shared/group-goal-run.ts";
 import { isRoutineProblemRun } from "../shared/routines.ts";
+import { ROUTINE_SKIPPED_WHILE_WAITING, ROUTINE_SUPERSEDED } from "./routine-execution.ts";
 import {
   nextOccurrence,
   RoutineManager,
@@ -253,6 +254,172 @@ describe("bounded scheduled overlap and run health", () => {
       expect(saved.skippedRuns).toBeUndefined(); expect(saved.lastSkippedAt).toBeUndefined(); expect(saved.overlap).toBeUndefined();
     }
     expect(() => h.manager.update(routine.id, { overlap: "invalid" as "queue" })).toThrow("skip or queue");
+  });
+});
+
+describe("a run left waiting for the person", () => {
+  const monday = Date.parse("2026-10-12T05:00:00Z");
+  const minutes = (count: number) => count * 60_000;
+  const daily = { name: "Morning check", prompt: "Sign in and check the dashboard", botId: "maus-1",
+    schedule: { type: "cron" as const, expression: "30 7 * * 1-5", timeZone: "Europe/London" } };
+  const event = (threadId: string) => ({ eventId: `event-${threadId}`, provider: "fake", threadId, createdAt: new Date(0).toISOString() });
+  /** The bot asked the person to sign in and ended its turn: its conversation stays parked on them. */
+  const parkOnPerson = (h: ReturnType<typeof harness>, threadId: string) => {
+    const parked = h.options.hasPendingDelegations;
+    h.options.hasPendingDelegations = (candidate) => candidate === threadId || parked?.(candidate) === true;
+    h.manager.handleRuntimeEvent({ ...event(threadId), type: "turn.completed", ok: true });
+  };
+  const ask = (h: ReturnType<typeof harness>, threadId: string) => h.manager.handleRuntimeEvent({
+    ...event(threadId), type: "request.opened", requestType: "question", tool: "ask", summary: "Which account should I use?",
+  });
+
+  it.each(["skip", "queue"] as const)("starts the next day's run instead of skipping it behind an unanswered sign-in (%s overlap)", async (overlap) => {
+    const h = harness(monday);
+    const routine = h.manager.create({ ...daily, ...(overlap === "queue" ? { overlap } : {}) });
+    const day1 = routine.nextRunAt!;
+    expect(new Date(day1).toISOString()).toBe("2026-10-12T06:30:00.000Z");
+    h.setNow(day1); await h.manager.tick();
+    h.setNow(day1 + minutes(2)); parkOnPerson(h, "thread-1");
+    expect(h.manager.listRuns()[0]).toMatchObject({ status: "waiting", waitingSince: day1 + minutes(2) });
+
+    const day2 = h.manager.listRoutines()[0].nextRunAt!;
+    expect(new Date(day2).toISOString()).toBe("2026-10-13T06:30:00.000Z");
+    h.setNow(day2); await h.manager.tick();
+
+    const [today, yesterday] = h.manager.listRuns();
+    expect(yesterday).toMatchObject({ status: "cancelled", error: ROUTINE_SUPERSEDED, finishedAt: day2, threadId: "thread-1" });
+    expect(today).toMatchObject({ status: "running", scheduledFor: day2, triggerSource: "schedule", threadId: "thread-2" });
+    expect(h.interruptedTurns).toEqual([{ botId: "maus-1", threadId: "thread-1" }]);
+    expect(h.started.map((turn) => turn.threadId)).toEqual(["thread-1", "thread-2"]);
+    expect(h.failed).toEqual([]);
+    expect(h.manager.listRoutines()[0]).toMatchObject({ nextRunAt: Date.parse("2026-10-14T06:30:00Z") });
+    expect(h.manager.listRoutines()[0].skippedRuns).toBeUndefined();
+    expect(JSON.parse(readFileSync(h.options.file!, "utf8")).runs.find((run: RoutineRun) => run.threadId === "thread-1"))
+      .toMatchObject({ status: "cancelled", error: ROUTINE_SUPERSEDED });
+  });
+
+  it("leaves a question asked shortly before the next occurrence alone, then replaces it at the one after", async () => {
+    const h = harness(monday);
+    const routine = h.manager.create({ ...daily, schedule: { type: "interval", everyMinutes: 60, anchorAt: monday } });
+    const first = routine.nextRunAt!;
+    h.setNow(first); await h.manager.tick();
+    h.setNow(first + minutes(5)); ask(h, "thread-1");
+    h.setNow(first + minutes(10));
+    h.manager.handleRuntimeEvent({ ...event("thread-1"), type: "request.resolved", behavior: "answer", source: "user" });
+    h.setNow(first + minutes(45)); ask(h, "thread-1");
+
+    h.setNow(first + minutes(60)); await h.manager.tick();
+    expect(h.manager.listRuns()).toHaveLength(1);
+    expect(h.manager.listRuns()[0]).toMatchObject({ status: "waiting", waitingSince: first + minutes(45) });
+    expect(h.manager.listRoutines()[0]).toMatchObject({ skippedRuns: 1, lastSkippedAt: first + minutes(60) });
+    expect(h.failed).toEqual([]);
+
+    h.setNow(first + minutes(120)); await h.manager.tick();
+    const [next, asked] = h.manager.listRuns();
+    expect(asked).toMatchObject({ status: "cancelled", error: ROUTINE_SUPERSEDED, threadId: "thread-1" });
+    expect(next).toMatchObject({ status: "running", scheduledFor: first + minutes(120), threadId: "thread-2" });
+    expect(h.interruptedTurns).toEqual([{ botId: "maus-1", threadId: "thread-1" }]);
+  });
+
+  it.each(["skip", "queue"] as const)("keeps today's %s overlap behind a run that was answered and is still working", async (overlap) => {
+    const h = harness(monday);
+    const routine = h.manager.create({ ...daily, ...(overlap === "queue" ? { overlap } : {}) });
+    h.setNow(routine.nextRunAt!); await h.manager.tick();
+    h.setNow(routine.nextRunAt! + minutes(5)); ask(h, "thread-1");
+    h.setNow(routine.nextRunAt! + minutes(10));
+    h.manager.handleRuntimeEvent({ ...event("thread-1"), type: "request.resolved", behavior: "answer", source: "user" });
+    const day2 = h.manager.listRoutines()[0].nextRunAt!;
+    h.setNow(day2); await h.manager.tick();
+    h.setNow(day2 + minutes(31)); await h.manager.tick();
+
+    expect(h.started).toHaveLength(1);
+    expect(h.interruptedTurns).toEqual([]);
+    expect(h.failed).toEqual([]);
+    expect(h.manager.listRuns().find((run) => run.threadId === "thread-1")?.status).toBe("running");
+    if (overlap === "skip") {
+      expect(h.manager.listRuns()).toHaveLength(1);
+      expect(h.manager.listRoutines()[0]).toMatchObject({ skippedRuns: 1, lastSkippedAt: day2 });
+      expect(h.deferred).toEqual([]);
+    } else {
+      expect(h.manager.listRuns()[0]).toMatchObject({ status: "queued", scheduledFor: day2, deferredAt: day2 });
+      expect(h.deferred).toHaveLength(1);
+    }
+  });
+
+  it("keeps a run whose delegated work is still open, and tells the owner once about the occurrences it skips", async () => {
+    const h = harness(monday);
+    h.options.handedOffWorkLive = (threadId) => threadId === "thread-1";
+    const routine = h.manager.create({ ...daily, schedule: { type: "interval", everyMinutes: 5, anchorAt: monday } });
+    h.setNow(routine.nextRunAt!); await h.manager.tick();
+    parkOnPerson(h, "thread-1");
+    for (let minute = 10; minute <= 120; minute += 5) {
+      h.setNow(monday + minutes(minute)); await h.manager.tick();
+    }
+
+    const missed = h.manager.listRuns().filter((run) => run.status === "missed");
+    expect(missed).toEqual([expect.objectContaining({ error: ROUTINE_SKIPPED_WHILE_WAITING, scheduledFor: monday + minutes(35) })]);
+    expect(h.failed.map((run) => run.id)).toEqual([missed[0]!.id]);
+    expect(h.manager.listRuns().find((run) => run.threadId === "thread-1")?.status).toBe("waiting");
+    expect(h.interruptedTurns).toEqual([]);
+    expect(h.started).toHaveLength(1);
+    expect(h.manager.listRoutines()[0].skippedRuns).toBe(23);
+  });
+
+  it("replaces a waiting run-now and a room goal that needs input through the same stop as the Stop button", async () => {
+    const h = harness(monday);
+    const bot = h.manager.create(daily);
+    const room = h.manager.create({ ...daily, name: "Team check", target: "room-goal", botId: "chief-1", groupId: "room-1" });
+    h.manager.runNow(bot.id); await h.manager.tick();
+    h.setNow(bot.nextRunAt! - minutes(40)); ask(h, "thread-1");
+    h.setNow(room.nextRunAt!); await h.manager.tick();
+    const goal = h.manager.listRuns().find((run) => run.target === "room-goal")!;
+    h.setNow(room.nextRunAt! + minutes(1));
+    expect(h.manager.finishGoalRun(goal.id, "needs-input", "Which launch date?")).toMatchObject({ status: "waiting" });
+
+    expect(h.manager.listRuns().find((run) => run.manual)).toMatchObject({ status: "cancelled", error: ROUTINE_SUPERSEDED });
+    const day2 = h.manager.listRoutines().find((routine) => routine.id === room.id)!.nextRunAt!;
+    h.setNow(day2); await h.manager.tick();
+    expect(h.manager.listRuns().find((run) => run.id === goal.id)).toMatchObject({ status: "cancelled", goalStatus: "stopped", error: ROUTINE_SUPERSEDED });
+    expect(h.interruptedGoals).toEqual([{ groupId: "room-1", threadId: "goal-thread-1" }]);
+    expect(h.startedGoals).toHaveLength(2);
+  });
+
+  it("carries a wait across a restart, and times a wait saved by an older version from the restart", async () => {
+    const h = harness(monday);
+    const routine = h.manager.create(daily);
+    const day1 = routine.nextRunAt!;
+    h.setNow(day1); await h.manager.tick();
+    parkOnPerson(h, "thread-1");
+    await h.manager.tick();
+    const day2 = h.manager.listRoutines()[0].nextRunAt!;
+
+    h.setNow(day1 + minutes(60));
+    expect(new RoutineManager(h.options).listRuns()[0]).toMatchObject({ status: "waiting", waitingSince: day1 });
+    const disk = JSON.parse(readFileSync(h.options.file!, "utf8"));
+    delete disk.runs[0].waitingSince;
+    writeFileSync(h.options.file!, JSON.stringify(disk));
+    h.setNow(day2 - minutes(20));
+    const restarted = new RoutineManager(h.options);
+    expect(restarted.listRuns()[0]).toMatchObject({ status: "waiting", waitingSince: day2 - minutes(20) });
+
+    h.setNow(day2); await restarted.tick();
+    expect(restarted.listRuns()).toHaveLength(1);
+    expect(restarted.listRoutines()[0].skippedRuns).toBe(1);
+    const day3 = restarted.listRoutines()[0].nextRunAt!;
+    h.setNow(day3); await restarted.tick();
+    expect(restarted.listRuns().map((run) => [run.threadId, run.status])).toEqual([["thread-2", "running"], ["thread-1", "cancelled"]]);
+  });
+
+  it("keeps the wait when this computer was offline too long to start the occurrence", async () => {
+    const h = harness(monday);
+    const routine = h.manager.create(daily);
+    h.setNow(routine.nextRunAt!); await h.manager.tick();
+    parkOnPerson(h, "thread-1");
+    h.setNow(h.manager.listRoutines()[0].nextRunAt! + minutes(13 * 60)); await h.manager.tick();
+
+    expect(h.interruptedTurns).toEqual([]);
+    expect(h.manager.listRuns().map((run) => run.status)).toEqual(["missed", "waiting"]);
+    expect(h.started).toHaveLength(1);
   });
 });
 
