@@ -37,6 +37,8 @@ export interface FakePage {
   focused: number | null;
   /** Emulation.setDeviceMetricsOverride's size, which the page then reports instead of its window's. */
   emulated?: { width: number; height: number } | null;
+  /** A bar of this height over the page, as Chrome's first tab has. */
+  bar?: number;
   screencasts: Map<string, { params: Record<string, unknown>; acked: number; sent: number }>;
 }
 
@@ -231,7 +233,7 @@ export class FakeChrome implements CdpTransport {
   }
 
   #evaluate(page: FakePage, expression: string): unknown {
-    const viewport = page.emulated ?? this.viewport;
+    const viewport = page.emulated ?? { width: this.viewport.width, height: this.viewport.height - (page.bar ?? 0) };
     if (expression === "[innerWidth, innerHeight]") return [viewport.width, viewport.height];
     if (expression === "devicePixelRatio") return this.dpr;
     if (expression === "document.readyState") return "complete";

@@ -479,13 +479,15 @@ export class ViewerHub {
       for (const tab of this.host.tabs()) await tab.page.emulateSize(null).catch(() => {});
       this.#emulated = false;
     }
-    await browser.setViewport({ width: Math.max(size.width, MIN_WINDOW_WIDTH), height: size.height }).catch(() => {});
+    const fitted = await browser.setViewport({ width: Math.max(size.width, MIN_WINDOW_WIDTH), height: size.height }).catch(() => null);
     if (emulated) {
       for (const tab of this.host.tabs()) await tab.page.emulateSize(size).catch(() => {});
       this.#emulated = true;
     }
-    this.#shown = size;
-    if (active) this.broadcast({ type: "viewport", ...size, setting: this.setting });
+    // Chrome's first tab carries a bar the others lack, so a window held to its screen can give it a shorter page.
+    const shown = emulated || !fitted ? size : fitted;
+    this.#shown = shown;
+    if (active) this.broadcast({ type: "viewport", ...shown, setting: this.setting });
     this.broadcastStatus();
   }
 

@@ -135,6 +135,15 @@ describe("the page fills the panel", () => {
     expect(viewportFor({ mode: "preset", preset: "phone", landscape: true }, null)).toEqual({ width: 844, height: 390 });
   });
 
+  it("tells viewers the page a window held to its screen leaves a tab with a taller bar", async () => {
+    const { watch, chrome, page } = await setup({ pageLimit: { width: 1440, height: 757 } });
+    page().bar = 56;
+    const { viewer, outputs } = await watch({ size: { width: 1600, height: 1000 } });
+    await viewer.input({ type: "resize", width: 1000, height: 900 });
+    expect(chrome().window.height).toBe(757 + 143);
+    expect(outputs.filter((output) => output.type === "viewport").at(-1)).toMatchObject({ width: 841, height: 701 });
+  });
+
   it("emulates a page narrower than any window on a tab that opens later too", async () => {
     const { watch, chrome, call } = await setup();
     const { viewer } = await watch();

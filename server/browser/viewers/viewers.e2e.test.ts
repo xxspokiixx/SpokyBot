@@ -198,18 +198,25 @@ suite("a bot's browser on a laptop's screen", () => {
       expect((await real.call(target, "agent_browser_open", { url: fx.page("/plain", "<!doctype html><title>plain</title><p>plain</p>") })).isError).toBeUndefined();
       type Geometry = { inner: [number, number]; outer: [number, number]; avail: [number, number] };
       const geometry = () => real.peek<Geometry>(target, "({ inner: [innerWidth, innerHeight], outer: [outerWidth, outerHeight], avail: [screen.availWidth, screen.availHeight] })");
-      const onScreen = (seen: Geometry) => seen.outer[0] <= seen.avail[0] && seen.outer[1] <= seen.avail[1];
-      const shows = (size: { width: number; height: number }) => (seen: Geometry) => seen.inner[0] === size.width && seen.inner[1] === size.height;
-      expect(onScreen(await until(geometry, shows(fits({ width: 1280, height: 800 }))))).toBe(true);
+      const viewports: Array<{ width: number; height: number }> = [];
+      // A tab with a taller bar than the limit allows for gets a shorter page, never a larger window.
+      const showsWithin = async (size: { width: number; height: number }, told = true) => {
+        const seen = await until(geometry, (value) => value.inner[0] === size.width && value.inner[1] <= size.height);
+        expect(seen.outer[0]).toBeLessThanOrEqual(seen.avail[0]);
+        expect(seen.outer[1]).toBeLessThanOrEqual(seen.avail[1]);
+        if (told) await until(() => viewports.at(-1), (last) => last?.width === seen.inner[0] && last.height === seen.inner[1]);
+      };
+      await showsWithin(fits({ width: 1280, height: 800 }), false);
       const viewer = await real.service.attachViewer(target, { owner: "local-owner", canOperate: true, maxWidth: 3200, maxHeight: 2000, size: { width: 1600, height: 1000 } }, (output) => {
         if (output.type === "frame") output.ack();
+        else if (output.type === "viewport") viewports.push({ width: output.width, height: output.height });
       });
-      expect(onScreen(await until(geometry, shows(fits({ width: 1600, height: 1000 }))))).toBe(true);
+      await showsWithin(fits({ width: 1600, height: 1000 }));
       await viewer.input({ type: "resize", width: 3000, height: 1800 });
-      expect(onScreen(await until(geometry, shows(fits({ width: 3000, height: 1800 }))))).toBe(true);
+      await showsWithin(fits({ width: 3000, height: 1800 }));
       await viewer.input({ type: "takeControl" });
       await viewer.input({ type: "viewport", setting: { mode: "preset", preset: "tablet" } });
-      expect(onScreen(await until(geometry, shows({ width: 820, height: pageLimit(screen).height })))).toBe(true);
+      await showsWithin({ width: 820, height: pageLimit(screen).height });
       await viewer.input({ type: "releaseControl" });
       await viewer.close();
     } finally {
