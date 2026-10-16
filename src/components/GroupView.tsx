@@ -1492,7 +1492,7 @@ export function GroupView({ group }: { group: Group }) {
         ) : (
         <div
           ref={transcriptRef}
-          className="glass-scroller-content mx-auto flex w-full max-w-[var(--chat-column-max)] flex-col gap-3"
+          className="glass-scroller-content chat-column flex w-full flex-col gap-3"
           style={{ paddingBottom: composerDock.pad }}
           role="log"
           aria-live="off"
@@ -1593,7 +1593,7 @@ export function GroupView({ group }: { group: Group }) {
         <JumpToLatestButton onClick={jumpToLatest} style={{ bottom: composerDock.height }} />
       )}
 
-      <div ref={composerDockRef} className="absolute inset-x-0 bottom-0 z-[2] mx-auto max-w-[calc(var(--chat-column-max)+2.5rem)]">
+      <div ref={composerDockRef} className="absolute inset-x-0 bottom-0 z-[2] chat-column-dock">
       <Composer
         key={group.threadId}
         group={group}

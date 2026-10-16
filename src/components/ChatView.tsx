@@ -1363,7 +1363,7 @@ export function ChatView({ bot: profile }: { bot: Bot }) {
       >
         <div
           ref={transcriptRef}
-          className="glass-scroller-content mx-auto flex w-full max-w-[var(--chat-column-max)] flex-col gap-3"
+          className="glass-scroller-content chat-column flex w-full flex-col gap-3"
           style={{ paddingBottom: composerDock.pad }}
           role="log"
           // off: a polite log re-reads every tick and chip while the bot works; TranscriptAnnouncer speaks once when
@@ -1443,7 +1443,7 @@ export function ChatView({ bot: profile }: { bot: Bot }) {
 
       <TranscriptAnnouncer threadKey={transcriptKey} snapshot={announcement} />
 
-      <div ref={composerDockRef} className="pointer-events-none absolute inset-x-0 bottom-0 z-[2] mx-auto max-w-[calc(var(--chat-column-max)+2.5rem)]">
+      <div ref={composerDockRef} className="pointer-events-none absolute inset-x-0 bottom-0 z-[2] chat-column-dock">
       {lastRunStep && showRun(recordedRun) && showRunCard && runDismissed.get(transcriptKey) !== lastRunStep.id && (
         <div className="flex justify-end px-5 pb-2">
           <VerifyCard

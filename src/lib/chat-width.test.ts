@@ -44,22 +44,27 @@ describe("chat width", () => {
     }
   });
 
-  it.each(CHAT_WIDTH_IDS)("caps the %s column no narrower than its bubbles reach", (id) => {
+  it.each(CHAT_WIDTH_IDS)("sizes the %s column so its bubbles still reach their cap", (id) => {
     const selector = id === DEFAULT_CHAT_WIDTH ? ":root" : `:root\\[data-chat-width="${id}"\\]`;
     const body = css.match(new RegExp(`${selector}\\s*\\{\\s*(--chat-bubble-max[^}]*)\\}`))?.[1] ?? "";
-    const token = (name: string) => body.match(new RegExp(`--${name}:\\s*([\\d.]+)(rem|%)`))?.slice(1) ?? [];
-    const [column, columnUnit] = token("chat-column-max");
+    const token = (name: string) => body.match(new RegExp(`--${name}:\\s*([\\d.]+)(rem|%)?`))?.slice(1) ?? [];
+    const [min, minUnit] = token("chat-column-min");
+    const [ratio] = token("chat-column-ratio");
     const [bubble, bubbleUnit] = token("chat-bubble-max");
     const [pct] = token("chat-bubble-pct");
-    expect(column, `${id} sets --chat-column-max`).toBeDefined();
-    if (columnUnit === "rem" && bubbleUnit === "rem") expect(Number(column) * Number(pct) / 100).toBeGreaterThanOrEqual(Number(bubble));
+    expect(minUnit, `${id} sets --chat-column-min in rem`).toBe("rem");
+    expect(Number(ratio), `${id} sets --chat-column-ratio`).toBeGreaterThan(0);
+    expect(Number(ratio)).toBeLessThanOrEqual(1);
+    if (bubbleUnit === "rem") expect(Number(min) * Number(pct) / 100).toBeGreaterThanOrEqual(Number(bubble));
   });
 
-  it("centers the transcript and the composer in one capped column, in a chat and in a room", () => {
+  it("centers the transcript and the composer in one column, in a chat and in a room", () => {
+    expect(css).toMatch(/\.chat-column \{[^}]*margin-inline: auto;[^}]*max\(var\(--chat-column-min\), calc\(var\(--chat-column-ratio\) \* 100%\)\)/);
+    expect(css).toMatch(/\.chat-column-dock \{[^}]*margin-inline: auto;[^}]*calc\(var\(--chat-column-ratio\) \* \(100% - 2\.5rem\)\)\) \+ 2\.5rem\)/);
     for (const f of ["ChatView", "GroupView"]) {
       const source = readFileSync(join(root, "components", `${f}.tsx`), "utf8");
-      expect(source, f).toMatch(/glass-scroller-content mx-auto [^"]*max-w-\[var\(--chat-column-max\)\]/);
-      expect(source, f).toMatch(/ref=\{composerDockRef\} className="[^"]*mx-auto max-w-\[calc\(var\(--chat-column-max\)\+2\.5rem\)\]"/);
+      expect(source, f).toMatch(/className="glass-scroller-content chat-column /);
+      expect(source, f).toMatch(/ref=\{composerDockRef\} className="[^"]* chat-column-dock"/);
     }
   });
 
