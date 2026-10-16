@@ -11094,11 +11094,15 @@ async function runClaimedGroupMemberTurn(
 
   const worksInWorkspace = supportsWorkspaceFiles(instance.driverKind);
   const workspace = worksInWorkspace ? ensureWorkspace(bot.id) : undefined;
-  if (workspace && bot.memoryEnabled !== false) beginMemoryTurn(bot.id, threadId);
   // The room's folder pins at its first dispatch, so a room that already worked somewhere never has its folder moved.
   const cwd = workspace && cloudGuestOpened(threadId)
     ? ensureTaskWorkspaceWithSkills(bot.id, threadId, skillsHost.turnImports(bot, threadId, instance))
     : groupTurnCwd(workspace, () => store.pinGroupCwd(readyGroup.id, threadId));
+  // Only the room's pinned folder can be gone; the engine would blame the bot's own folder.
+  if (cwd && !existsSync(cwd)) {
+    throw new Error(`This room's working folder no longer exists: ${cwd}. Create that folder again: a room keeps the folder it started in.`);
+  }
+  if (workspace && bot.memoryEnabled !== false) beginMemoryTurn(bot.id, threadId);
   {
     const drift = checkSoulDrift(bot.id, bot.soul ?? "", bot.soulHash ?? "");
     if (drift.drift !== Boolean(bot.soulDrift)) store.patchBot(bot.id, { soulDrift: drift.drift });
