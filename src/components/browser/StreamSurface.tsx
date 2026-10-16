@@ -354,6 +354,8 @@ export function StreamSurface(props: {
       if (next?.controller !== "you") {
         setSelect(null);
         setAuthPrompt(null);
+      } else if (previous?.controller !== "you" && followSize && sizeRef.current) {
+        clientRef.current?.send({ type: "resize", ...sizeRef.current });
       }
       if (!operable(next)) {
         clearInput();
@@ -436,7 +438,7 @@ export function StreamSurface(props: {
       setAgentCursor(null);
       clearInput();
     };
-  }, [cap, clearInput, connect, hostSetup, notify]);
+  }, [cap, clearInput, connect, followSize, hostSetup, notify]);
 
   useEffect(() => {
     const canvas = canvasRef.current;

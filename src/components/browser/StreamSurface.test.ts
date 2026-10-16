@@ -99,6 +99,14 @@ describe("the picture and the page", () => {
     expect(client.send).toHaveBeenCalledWith({ type: "resize", width: 1200, height: 900 });
   });
 
+  it("sizes the page to this panel again when it takes control, so the page fits the view in use", async () => {
+    const { client, show } = await mount();
+    await show(control("agent"));
+    client.send.mockClear();
+    await show(control("you"));
+    expect(client.send).toHaveBeenCalledWith({ type: "resize", width: 1600, height: 1000 });
+  });
+
   it("sends a watcher's press in page pixels to the panel's control rules, but nothing while another viewer holds the browser", async () => {
     const { input, canvas, page, show } = await mount();
     await show(control("agent"));
