@@ -622,6 +622,19 @@ describe("encrypted full workspace backups", () => {
     expect(exported.summary.warnings.some((warning) => warning.startsWith("2 symbolic link(s) in conversation work folders"))).toBe(true);
   });
 
+  it("leaves out the link to the person's own Claude Code skills, which the app makes again on each turn", async () => {
+    const root = directory();
+    const outside = directory();
+    writeFileSync(join(outside, "SKILL.md"), "the person's own skill");
+    mkdirSync(join(root, "claude-user-skills", ".claude"), { recursive: true });
+    symlinkSync(outside, join(root, "claude-user-skills", ".claude", "skills"), process.platform === "win32" ? "junction" : "dir");
+    json(join(root, "bots.json"), []);
+    const exported = await createWorkspaceBackup(root, { password: PASSWORD });
+    const target = directory();
+    const staged = await stageWorkspaceBackup(target, exported.path, { password: PASSWORD });
+    expect(existsSync(join(target, ".backups", staged.id, "staged", "data", "claude-user-skills"))).toBe(false);
+  });
+
   it("carries the skills brought in from this computer, and counts task folder links to them as the app's", async () => {
     const root = directory();
     const copy = join(root, "imported-skills", "pdf");
