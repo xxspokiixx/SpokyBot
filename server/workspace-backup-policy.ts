@@ -58,14 +58,15 @@ export function liveDataEnginePath(path: string): boolean {
   return /^bots\/[^/]+\/(?:data\.duckdb(?:\.wal)?$|data-tmp(?:\/|$))/.test(path);
 }
 
-/** Read the link text, never follow it. */
+/** Read the link text, never follow it. A link points at the bot's own skill, or at the same-named skill brought in
+ * from this computer (imported-skills.ts), which the backup carries. */
 export function managedTaskSkillLink(source: string, path: string, roots: string[]): boolean {
-  const match = /^task-workspaces\/([^/]+)\/[^/]+\/\.(?:claude|agents|grok)\/skills\/[^/]+$/.exec(path);
+  const match = /^task-workspaces\/([^/]+)\/[^/]+\/\.(?:claude|agents|grok)\/skills\/([^/]+)$/.exec(path);
   if (!match) return false;
   let target: string;
   try { target = resolve(dirname(source), readlinkSync(source).replace(/^\\\\\?\\/, "")); } catch { return false; }
   return roots.some((root) => {
     const rel = relative(join(root, "workspaces", match[1], "skills"), target);
-    return rel !== "" && !rel.startsWith("..") && !isAbsolute(rel);
+    return (rel !== "" && !rel.startsWith("..") && !isAbsolute(rel)) || relative(join(root, "imported-skills", match[2]), target) === "";
   });
 }

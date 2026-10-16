@@ -164,10 +164,10 @@ export function isCloudHomeEntry(entry, { homeOrigin = null, remembered = null }
   return Boolean(entry?.origin) && (entry.origin === homeOrigin || entry.origin === remembered?.origin);
 }
 
-/** A hint, never a verified Cloud. */
+/** A hint, never a verified Cloud: the entry this app listed for it (`home`), or one still under the default name. */
 export function savedCloudHomeOrigin(state) {
   const saved = Array.isArray(state?.environments) ? state.environments : [];
-  return saved.find((entry) => entry?.name === CLOUD_HOME_NAME)?.origin ?? null;
+  return (saved.find((entry) => entry?.home === true) ?? saved.find((entry) => entry?.name === CLOUD_HOME_NAME))?.origin ?? null;
 }
 
 export function parsePairingGrant(input, origin, now) {
@@ -177,10 +177,13 @@ export function parsePairingGrant(input, origin, now) {
   return { origin, code: input.code, expiresAt: input.expiresAt };
 }
 
-export function withCloudHome(state, machine, makeId) {
+/** Listed once, under the name and colour its owner chose while it was set up (`look`), else My Cloud; never renamed here after. */
+export function withCloudHome(state, machine, makeId, look = null) {
   if (!machine?.origin || machine.status === "provisioning") return state;
   if (state.environments.some((entry) => entry.origin === machine.origin)) return state;
-  return environments.withEnvironment(state, { origin: machine.origin, name: CLOUD_HOME_NAME }, makeId);
+  const added = environments.withEnvironment(state, { origin: machine.origin, name: look?.name || CLOUD_HOME_NAME }, makeId);
+  const color = environments.ENTRY_COLORS.includes(look?.color) ? look.color : null;
+  return { ...added, environments: added.environments.map((entry) => entry.origin === machine.origin ? { ...entry, ...(color ? { color } : {}), home: true } : entry) };
 }
 
 /** The one-time code goes in the hash, never a query. */

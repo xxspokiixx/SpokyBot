@@ -17,7 +17,8 @@ export interface ManagedSkill {
   enabled: boolean;
   source: string;
   warnings: string[];
-  origin?: "private" | "library";
+  /** "imported": one copy brought in from this computer for every bot, switched per bot and never removed from one. */
+  origin?: "private" | "library" | "imported";
 }
 
 interface LibraryPoolSkill {
@@ -461,9 +462,12 @@ export function SkillsSection({ bot }: { bot: Bot }) {
                     className="min-w-0 flex-1 text-left"
                   >
                     <div className="truncate font-mono text-[12.5px] text-ink">{skill.name}</div>
-                    {libraryOn && (
-                      <span className="ml-1.5 rounded bg-control px-1 py-px font-mono text-[9.5px] uppercase tracking-wide text-ink-secondary">
-                        {skill.origin === "library" ? "library" : "private"}
+                    {(libraryOn || skill.origin === "imported") && (
+                      <span
+                        className="ml-1.5 rounded bg-control px-1 py-px font-mono text-[9.5px] uppercase tracking-wide text-ink-secondary"
+                        title={skill.origin === "imported" ? t("skills.origin.importedHint") : undefined}
+                      >
+                        {skill.origin === "imported" ? t("skills.origin.imported") : skill.origin === "library" ? "library" : "private"}
                       </span>
                     )}
                     <div className="mt-0.5 line-clamp-2 text-[11.5px] text-ink-secondary">{skill.description}</div>
@@ -475,15 +479,17 @@ export function SkillsSection({ bot }: { bot: Bot }) {
                     disabled={Boolean(working)}
                     onClick={() => void toggle(skill)}
                   />
-                  <button
-                    aria-label={`Remove ${skill.name}`}
-                    title="Remove skill"
-                    disabled={Boolean(working)}
-                    onClick={() => void remove(skill)}
-                    className="flex size-8 shrink-0 items-center justify-center rounded-md text-ink-secondary hover:bg-danger/10 hover:text-danger disabled:opacity-40"
-                  >
-                    <Trash2 size={15} />
-                  </button>
+                  {skill.origin !== "imported" && (
+                    <button
+                      aria-label={`Remove ${skill.name}`}
+                      title="Remove skill"
+                      disabled={Boolean(working)}
+                      onClick={() => void remove(skill)}
+                      className="flex size-8 shrink-0 items-center justify-center rounded-md text-ink-secondary hover:bg-danger/10 hover:text-danger disabled:opacity-40"
+                    >
+                      <Trash2 size={15} />
+                    </button>
+                  )}
                 </div>
                 <div className="mt-1 truncate text-[10.5px] text-ink-secondary" title={skill.source}>Source: {skill.source}</div>
                 {skill.warnings.length > 0 && (

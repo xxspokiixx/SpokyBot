@@ -1,4 +1,4 @@
-import { lstatSync, mkdirSync, readlinkSync, statSync, symlinkSync, unlinkSync } from "node:fs";
+import { lstatSync, mkdirSync, readlinkSync, rmdirSync, statSync, symlinkSync, unlinkSync } from "node:fs";
 import { homedir } from "node:os";
 import { join, resolve } from "node:path";
 import { claudeUserMcpEnabled, mcpCallTimeoutMinutes, type AppConfig } from "./config.ts";
@@ -34,6 +34,27 @@ export function claudeUserSkillsDir(dataDir: string, home = homedir()): string |
   }
 }
 
+/** The link and its folders, once the switch is off; only the link itself, never what it points to. */
+export function forgetClaudeUserSkillsDir(dataDir: string): void {
+  const root = join(dataDir, "claude-user-skills");
+  const link = join(root, ".claude", "skills");
+  try {
+    if (lstatSync(link).isSymbolicLink()) {
+      try {
+        unlinkSync(link);
+      } catch {
+        // A Windows junction is removed as a folder.
+        rmdirSync(link);
+      }
+    }
+  } catch {}
+  for (const folder of [join(root, ".claude"), root]) {
+    try {
+      rmdirSync(folder);
+    } catch {}
+  }
+}
+
 /** The fields of an engine turn that come from Settings. */
 export function settingsTurnFields(cfg: AppConfig, dataDir: string, restrictsMcp: boolean, home = homedir()): {
   mcpFromUserConfig: boolean;
@@ -42,6 +63,7 @@ export function settingsTurnFields(cfg: AppConfig, dataDir: string, restrictsMcp
   toolErrorCorrectiveRounds: number;
 } {
   const userSkillsDir = claudeUserSkillsEnabled(cfg) ? claudeUserSkillsDir(dataDir, home) : null;
+  if (!claudeUserSkillsEnabled(cfg)) forgetClaudeUserSkillsDir(dataDir);
   return {
     mcpFromUserConfig: claudeUserMcpEnabled(cfg) && !restrictsMcp,
     ...(userSkillsDir ? { userSkillsDir } : {}),

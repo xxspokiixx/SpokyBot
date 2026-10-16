@@ -29,6 +29,14 @@ const KEY_PREFIXES: RegExp[] = [
   /\bnpm_[A-Za-z0-9]{20,}/g, // npm
   /\beyJ[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}\b/g, // jwt
 ];
+const KEY_PREFIX_TESTS = KEY_PREFIXES.map((re) => new RegExp(re.source));
+const PRIVATE_KEY_BLOCK = /-----BEGIN [A-Z ]*PRIVATE KEY-----/;
+
+/** Only shapes that are unmistakably a credential (a provider's key prefix, a private key block), never a name or a
+ * placeholder: text holding one is a credential store, not instructions. */
+export function holdsCredential(text: string): boolean {
+  return PRIVATE_KEY_BLOCK.test(text) || KEY_PREFIX_TESTS.some((re) => re.test(text));
+}
 const BEARER = /(\bBearer\s+)([A-Za-z0-9._~+/=-]{12,})/g;
 const PEM_BLOCK = /(-----BEGIN [A-Z ]*PRIVATE KEY-----)([\s\S]*?)(-----END [A-Z ]*PRIVATE KEY-----)/g;
 /** key=value / key: value / key="value" where the key is secret-shaped.

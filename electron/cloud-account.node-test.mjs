@@ -227,10 +227,10 @@ test("Dodo's own checkout page is the only checkout address ever opened", () => 
     assert.equal(checkoutDestination(url), null, String(url));
   }
   assert.equal(checkoutDestination("https://test.checkout.dodopayments.com/session/cks_123", { fixture: true }), "https://test.checkout.dodopayments.com/session/cks_123");
-  assert.deepEqual([...CHECKOUT_SOURCES], ["app_card", "app_howto", "app_menu", "app_settings", "app_routines", "update_popup"]);
+  assert.deepEqual([...CHECKOUT_SOURCES], ["app_card", "app_howto", "app_menu", "app_settings", "app_routines", "update_popup", "app_onboarding"]);
 });
 
-test("signed in, a checkout is the Admin's for this account, opened in the browser only when it is Dodo's; then the session is asked every 15 seconds for 30 minutes", async t => {
+test("signed in, a checkout is the Admin's for this account, opened in the browser only when it is Dodo's; then the session is asked every 3 seconds for 30 minutes", async t => {
   const f = await fixture(t); await f.connect(); f.browsers = [];
   const DODO = "https://test.checkout.dodopayments.com/session/cks_fixture";
   f.checkout = { status: 200, body: { cloudContractVersion: 1, url: DODO } };
@@ -242,13 +242,27 @@ test("signed in, a checkout is the Admin's for this account, opened in the brows
   const request = f.requests.findLast(row => row.route === "/api/cloud/desktop/checkout");
   assert.deepEqual(JSON.parse(request.body), { plan: "pro", source: "app_menu" });
   assert.equal(request.token, `Bearer ${accessToken}`); assert.equal(request.version, "0.1.fixture");
-  assert.deepEqual(result.state.checkout, { plan: "pro", startedAt: f.now });
-  assert.equal(f.client.checkoutPending(), true); assert.equal(f.delay, 15_000);
+  assert.deepEqual(result.state.checkout, { plan: "pro", startedAt: f.now, link: true }, "main keeps the page; the state only says so");
+  assert.ok(!JSON.stringify(f.states).includes("cks_fixture"), "the checkout page never reaches a published state");
+  assert.equal(f.client.checkoutLink(), DODO);
+  assert.equal(f.client.checkoutPending(), true); assert.equal(f.delay, 3_000);
   f.tick(); await until(() => f.delay !== null && f.requests.filter(row => row.route === "/api/cloud/desktop/session").length >= 2);
-  assert.equal(f.delay, 15_000, "still free: asked again in 15 seconds");
+  assert.equal(f.delay, 3_000, "still free: asked again in 3 seconds");
+  const asked = f.requests.filter(row => row.route === "/api/cloud/desktop/checkout").length;
+  for (let i = 0; i < 12; i++) assert.equal((await f.client.reopenCheckout()).outcome, "opened");
+  assert.equal(f.requests.filter(row => row.route === "/api/cloud/desktop/checkout").length, asked, "Reopen checkout never asks the Admin for another");
+  assert.deepEqual(f.browsers, Array(13).fill(DODO), "the same page each time");
   f.now += 30 * 60_000; assert.equal(f.client.checkoutPending(), false);
   await f.client.refresh(); assert.equal(f.delay, 60_000);
-  assert.deepEqual(f.client.state().checkout, { plan: "pro", startedAt: f.now - 30 * 60_000 });
+  assert.deepEqual(f.client.state().checkout, { plan: "pro", startedAt: f.now - 30 * 60_000, link: true });
+  await f.client.reopenCheckout(); assert.equal(f.browsers.at(-1), DODO);
+  assert.equal(f.client.checkoutPending(), true, "reopened after 30 minutes: watched again"); assert.equal(f.delay, 3_000);
+  f.entitlement = { plan: "pro", tier: "pro", status: "active", expiresAt: f.now + 3 * 86400_000, version: 1 };
+  f.cloud = { state: "setting_up", setup: { step: "storage" } };
+  await f.client.refresh(); assert.equal(f.delay, 3_000, "paid and setting up, still watched: every 3 seconds");
+  f.cloud = { state: "ready", origin: "https://home-7f3k2.fly.dev" };
+  await f.client.refresh(); assert.equal(f.delay, 60_000, "ready: back to every minute");
+  f.entitlement = { plan: "free", status: "inactive", expiresAt: null, version: 2 }; f.cloud = undefined; await f.client.refresh();
   for (const url of ["https://evil.example.test/pay", "https://user:pw@test.checkout.dodopayments.com/s", `${DODO}#token`]) {
     f.checkout = { status: 200, body: { cloudContractVersion: 1, url } }; f.browsers = [];
     assert.equal((await f.client.checkout("pro", "app_menu")).outcome, "failed", url); assert.deepEqual(f.browsers, []);
@@ -267,7 +281,57 @@ test("signed in, a checkout is the Admin's for this account, opened in the brows
   f.checkout = { status: 404, body: "<!doctype html>not here" };
   assert.equal((await f.client.checkout("max", "app_card")).outcome, "opened");
   assert.deepEqual(f.browsers, [`${f.origin}/cloud?checkout=start&plan=max&src=app_card`]);
-  f.now += 24 * 3600_000; assert.equal(f.client.state().checkout, undefined);
+  f.now += 24 * 3600_000; assert.equal(f.client.state().checkout, undefined); assert.equal(f.client.checkoutLink(), null);
+});
+
+test("the purchase is over once its Cloud was opened, announced or shown ready: the checkout says done, once", async t => {
+  const f = await fixture(t); await f.connect();
+  f.checkout = { status: 200, body: { cloudContractVersion: 1, url: "https://test.checkout.dodopayments.com/session/cks_done" } };
+  await f.client.checkout("pro", "app_menu");
+  const published = f.states.length;
+  f.client.checkoutDone();
+  assert.deepEqual(f.client.state().checkout, { plan: "pro", startedAt: f.now, link: true, done: true });
+  assert.equal(f.states.length, published + 1, "the page hears it");
+  f.client.checkoutDone(); assert.equal(f.states.length, published + 1, "once");
+  const none = await fixture(t); none.client.checkoutDone(); assert.equal(none.client.state().checkout, undefined, "nothing to end");
+});
+
+test("after a restart mid-checkout, the checkout the Admin still holds is watched from first sight like this app's own", async t => {
+  const f = await fixture(t); await f.connect();
+  f.offer = { plans: plans(), recommended: "pro", trialDays: 7, checkout: { plan: "personal", openUntil: f.now + 3600_000 } };
+  const seen = await f.client.refresh();
+  assert.deepEqual(seen.checkout, { plan: "personal", startedAt: f.now }, "no page is kept: no link");
+  assert.equal(f.client.checkoutPending(), true, "watched: focus reads the session at once");
+  assert.equal(f.delay, 3_000, "every 3 seconds");
+  f.now += 10 * 60_000; await f.client.refresh();
+  assert.equal(f.client.state().checkout.startedAt, f.now - 10 * 60_000, "first sight, not every sight");
+  f.now += 20 * 60_000; await f.client.refresh();
+  assert.equal(f.client.checkoutPending(), false, "30 minutes at most"); assert.equal(f.delay, 60_000);
+  f.browsers = []; const DODO = "https://test.checkout.dodopayments.com/session/cks_held";
+  f.checkout = { status: 200, body: { cloudContractVersion: 1, url: DODO } };
+  assert.equal((await f.client.reopenCheckout("pro", "app_card")).outcome, "opened");
+  assert.deepEqual(JSON.parse(f.requests.findLast(row => row.route === "/api/cloud/desktop/checkout").body), { plan: "personal", source: "app_card" },
+    "the plan the Admin holds, under the page's source");
+  assert.deepEqual(f.browsers, [DODO]);
+  const paid = await fixture(t); await paid.connect();
+  paid.entitlement = { plan: "pro", tier: "pro", status: "active", expiresAt: paid.now + 86400_000, version: 1 };
+  paid.offer = { plans: plans(), recommended: "pro", checkout: { plan: "pro", openUntil: paid.now + 3600_000 } };
+  assert.equal((await paid.client.refresh()).checkout, undefined, "nothing to watch once paid");
+});
+
+test("Reopen checkout with no page kept (the browser sign-in led to checkout) asks the Admin once, then keeps its page", async t => {
+  const f = await fixture(t);
+  const DODO = "https://test.checkout.dodopayments.com/session/cks_reopened";
+  f.checkout = { status: 200, body: { cloudContractVersion: 1, url: DODO } }; f.offer = { plans: plans(), recommended: "pro", trialDays: 7 };
+  await f.client.checkout("pro", "app_card");
+  f.approved = true; f.tick(); await until(() => f.client.state().status === "connected");
+  assert.equal(f.client.checkoutLink(), null); assert.equal(f.client.state().checkout.link, undefined);
+  f.browsers = [];
+  assert.equal((await f.client.reopenCheckout("max", "app_menu")).outcome, "opened");
+  assert.deepEqual(JSON.parse(f.requests.findLast(row => row.route === "/api/cloud/desktop/checkout").body), { plan: "pro", source: "app_card" }, "the plan chosen here, not the page's word");
+  await f.client.reopenCheckout("max", "app_menu");
+  assert.equal(f.requests.filter(row => row.route === "/api/cloud/desktop/checkout").length, 1);
+  assert.deepEqual(f.browsers, [DODO, DODO]);
 });
 
 test("signed out, a checkout is a sign-in first: the verified link only gains the intent, and a failed sign-in forgets it", async t => {

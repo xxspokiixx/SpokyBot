@@ -28,9 +28,27 @@ export interface CloudAccountState {
   /** Connected: what this account may buy now (the session's `offer`), for wording only. */
   offer?: import("./cloud-home.mjs").CloudOffer;
   /** A checkout this app opened (or a sign-in it started on the way to
-   * one: `signIn`) in the last 24 hours: the plan, and when. */
-  checkout?: { plan: string; startedAt: number; signIn?: true };
+   * one: `signIn`) in the last 24 hours: the plan, and when (Reopen checkout
+   * starts the 30-minute watch again). `link`: main keeps its page, so Reopen
+   * and Copy link use that same page. */
+  checkout?: { plan: string; startedAt: number; signIn?: true; link?: true; done?: true };
+  /** This app talks to the staging Admin (OMB_CLOUD_STAGING=1): test payments, test Clouds. */
+  staging?: true;
 }
+/** The email-code sign-in (cloud-signin.mjs). `sent`: the code is on its
+ * way (`resendAt`: when another may be asked for). `browser`: this Cloud signs
+ * in only in the browser (single sign-on there, or an older Admin). */
+export type CloudSignInStart =
+  | { outcome: "sent"; email: string; expiresAt: number; resendAt: number; /** False: new accounts are closed, so only an existing one gets a code. */ signupOpen: boolean }
+  | { outcome: import("./cloud-signin.mjs").CloudSignInStartFailure };
+/** `signed-in`: stored and read like the browser sign-in; `wrong-code` says
+ * the tries left; `expired` needs a new code. */
+export type CloudSignInVerify =
+  | { outcome: "signed-in"; state: CloudAccountState }
+  | { outcome: "wrong-code"; triesLeft: number }
+  | { outcome: Exclude<import("./cloud-signin.mjs").CloudSignInVerifyFailure, "wrong-code"> };
+/** How the Cloud is shown in this app's switcher and Settings → Servers. */
+export interface CloudHomeLook { name: string; color: import("./cloud-buy.mjs").CloudColor }
 /** What opening a checkout did: `opened` in the browser; `signing-in` (signed
  * out, the browser signs in first); `conflict` (the account changed, now read
  * again); `rate-limited`; or `failed` (nothing was opened). */
@@ -50,6 +68,23 @@ export interface CloudAccountBridge {
   offer?(): Promise<import("./cloud-home.mjs").CloudOffer | null>;
   /** Opens a checkout for a plan of the offer in the browser; `source` is one of CHECKOUT_SOURCES. */
   checkout?(plan: string, source: string): Promise<CloudCheckoutResult>;
+  /** The email-code sign-in; the attempt and the token never reach the page. Absent on an older app. */
+  signInStart?(email: string): Promise<CloudSignInStart>;
+  signInVerify?(code: string): Promise<CloudSignInVerify>;
+  signInCancel?(): Promise<void>;
+  /** The checkout this app opened, again (never a new one while main keeps it); the plan and source only when none is kept. */
+  reopenCheckout?(plan: string, source: string): Promise<CloudCheckoutResult>;
+  /** Copies that checkout's page to the clipboard in main; false when none is kept. */
+  copyCheckoutLink?(): Promise<boolean>;
+  /** "Email me when I can add another". */
+  interest?(): Promise<void>;
+  /** The Cloud's name and colour (chosen while it is set up), and saving them. */
+  look?(): Promise<CloudHomeLook>;
+  setLook?(name: string, color: string): Promise<CloudHomeLook>;
+  /** The buying sheet is open on this page (main then opens the ready Cloud there rather than notifying). */
+  sheet?(open: boolean): Promise<void>;
+  /** The sheet showed the ready Cloud: the purchase is over. */
+  readySeen?(): Promise<void>;
   /** Lists the Cloud machine under Servers and opens it in this window. */
   connectHome(): Promise<CloudAccountState>;
   /** The same, opening the Cloud's Settings on its phone pairing. */
@@ -80,8 +115,14 @@ export interface CloudPlanBridge {
 }
 
 export declare const CLOUD_ORIGIN: string;
+export declare const STAGING_CLOUD_ORIGIN: string;
+export declare function cloudTarget(env?: Record<string, string | undefined>): {
+  origin: string; staging: boolean;
+  /** Under userData: the sign-in, saved servers, Files' folder, the Cloud's chosen name. */
+  file: string; environments: string; sync: string; look: string;
+};
 export declare const CHECKOUT_SOURCES: readonly string[];
-export declare function checkoutDestination(value: unknown, options?: { fixture?: boolean }): string | null;
+export declare function checkoutDestination(value: unknown, options?: { fixture?: boolean; staging?: boolean }): string | null;
 export declare function cloudOrigin(value?: string, fixture?: boolean): string;
 export interface CloudAccountStore {
   read(): Promise<unknown>;
@@ -109,6 +150,14 @@ export interface CloudAccountClient {
   openDashboard(): Promise<CloudAccountState>;
   offer(): Promise<import("./cloud-home.mjs").CloudOffer | null>;
   checkout(plan: string, source: string): Promise<CloudCheckoutResult>;
+  emailStart(email: string): Promise<CloudSignInStart>;
+  emailVerify(code: string): Promise<CloudSignInVerify>;
+  emailCancel(): void;
+  reopenCheckout(plan?: string, source?: string): Promise<CloudCheckoutResult>;
+  /** Main only (the clipboard): the kept checkout page, or null. */
+  checkoutLink(): string | null;
+  /** The Cloud this checkout bought was opened, announced or shown ready. */
+  checkoutDone(): void;
   /** Waiting on a checkout this app opened (the first 30 minutes). */
   checkoutPending(): boolean;
   interest(kind: "another_cloud"): Promise<void>;

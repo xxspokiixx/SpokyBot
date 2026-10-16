@@ -159,6 +159,50 @@ names, and adds servers switched off—even if the pasted config says enabled.
 It does not install, execute or connect to them. Test explicitly, then enable
 the servers you trust.
 
+The desktop app's first-run tour does the same for you in its **Bring what you
+already use** step (`server/setup-import.ts`). On the computer running
+OpenMausBot, and only for the desktop app's own window there, it reads the
+`mcpServers` of Claude Code (only the top-level key of `~/.claude.json`),
+Claude Desktop, Cursor (`~/.cursor/mcp.json`) and Gemini CLI
+(`~/.gemini/settings.json`), and the `[mcp_servers.*]` tables of Codex's
+`config.toml`. Each server goes through Paste config's parser, switched off;
+one already here by command or address is left alone, a different server
+under a name already taken is skipped and named in the result, a name
+OpenMausBot keeps for itself (`browser`, `computer`, `data`…) gets an `mcp-`
+prefix, a trailing comma is accepted, and the list stops at its limit. One
+entry or file it cannot read drops only itself, and a kind that cannot be
+saved is reported as failed while the other still comes in. With **Also use
+my Claude Code MCP servers** on, Claude Code's own servers are not offered:
+Claude bots already run them. Token variables (Codex `bearer_token_env_var`)
+are not resolved: add the token as a header when you test the server.
+
+The step also brings in the person's own skills (`~/.claude/skills`,
+`~/.codex/skills`). Each one is copied once, read-only except on Windows, into
+`<data>/imported-skills` (`server/imported-skills.ts`), and every bot uses
+that copy on every engine that works with files: the bot the tour sets up,
+and any bot made later from the New bot dialog, the API, a template, a Chief
+of Staff team or a package. Each turn lists them after the bot's own skills,
+with a budget of their own, links them into the task folder's `.claude`,
+`.agents` and `.grok` skills, and runs them as `/name`. A bot's own or library
+skill of the same name wins; **Bot Settings → Skills** shows the rest as
+coming from this computer, with a switch for that bot. A skill the scan flags
+(a download piped into a shell, invisible characters, a long encoded blob, in
+SKILL.md or any file beside it) comes in switched off for every bot: read it
+there, then switch it on for that bot; it is off again if it is brought in
+with other files. Inside a skill folder it copies text files only, never
+links, files with another hard link, credential or session files (such as
+`token.json`, `session.json`, `password.txt`, `secrets/`, `*.env`) or a file
+holding a provider key, and counts what it leaves out. A skill folder that is
+a link is followed only while it stays in the home folder, out of the folders
+macOS guards (Documents, Desktop, Downloads, Library and the media folders)
+and out of the tools' own folders outside their skills. A copy whose files
+change afterwards is left out until it is brought in again. A turn whose
+engine already loads the folder a skill came from leaves the copy out, so
+nothing is listed twice: Claude Code with **Also use my Claude Code skills**
+on, and Codex on the person's own `CODEX_HOME`. The copies travel with
+backups and Copy to My Cloud. The step never opens credential, session or
+history files, and it is skipped when there is nothing new.
+
 Open a bot’s **Tools → Access → MCP servers** to narrow the enabled global
 servers offered to it. Existing bots keep all enabled global servers until you
 choose a subset; switching them all off means none. **Use every enabled server**
@@ -250,7 +294,10 @@ reference files included, and Claude Code picks up your edits within the
 session. Your hooks, MCP servers and `CLAUDE.md` stay out, so a bot with a
 tool selection keeps working. In `config.json` it is
 `"features": { "claudeUserSkills": true }`. Skills in a bot project's own
-`.claude/skills` load either way.
+`.claude/skills` load either way. The link folder is left out of backups and
+removed when the switch goes off; a skill brought in from `~/.claude/skills`
+is left out of a Claude turn while the switch is on, since Claude already has
+the original.
 
 The switch drops the CLI flag `--strict-mcp-config` (Claude Code 1.0.60+)
 while keeping `--setting-sources project` (1.0.122+). The environment variable
@@ -281,7 +328,10 @@ Address entries are HTTPS only. The host is compared label by label, where
 and the path separately, where `*` matches anything.
 
 Limits: a personal **Codex** engine also loads MCP servers from your own
-`~/.codex/config.toml`, which OpenMausBot does not filter. An organization that
+`~/.codex/config.toml`, which OpenMausBot does not filter. A server here that
+`config.toml` already runs, with the same command, arguments and environment
+or the same address and headers (as one brought in from there is), is not
+mounted a second time on a turn without a tool selection. An organization that
 must block those can allow only company models, or leave personal Codex off
 its engine list. Company Codex uses its own separate home, without your
 `config.toml`.

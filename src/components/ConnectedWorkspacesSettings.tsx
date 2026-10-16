@@ -3,6 +3,8 @@ import { Check, Cloud, Laptop, Loader2, Trash2 } from "lucide-react";
 import { Card } from "./SettingsPrimitives";
 import { ComputerSharingSettings } from "./ComputerSharingSettings";
 import { CloudMoveSettings } from "./CloudMove";
+import { CloudTile } from "./cloud-buy/parts";
+import { cloudColor } from "@/lib/cloud-look";
 import { useStore } from "@/state/store";
 import { sharedComputersEnabled } from "@/lib/feature-flags";
 import { t } from "@/lib/i18n";
@@ -143,11 +145,11 @@ export function ConnectedWorkspacesSettings() {
     <Card title="Your servers" subtitle="Saved on this computer. Your hosted bots keep running when you switch away.">
       {!saved ? <p role="status" className="text-[13px] text-ink-secondary">{error ? "Saved servers could not be loaded." : "Loading servers…"}</p> :
         <ul className="divide-y divide-hairline/40">
-          {[{ id: "local", name: "This computer", origin: "" }, ...saved.environments.filter((entry) => entry.kind !== "local")].map((entry) => {
+          {[{ id: "local", name: "This computer", origin: "", color: undefined }, ...saved.environments.filter((entry) => entry.kind !== "local")].map((entry) => {
             const active = entry.id === saved.activeId;
             const Icon = entry.id === "local" ? Laptop : Cloud;
             return <li key={entry.id} className="flex items-center gap-3 py-3">
-              <Icon size={18} className="shrink-0 text-ink-secondary" />
+              {cloudColor(entry.color) ? <CloudTile color={entry.color} size={20} /> : <Icon size={18} className="shrink-0 text-ink-secondary" />}
               <div className="min-w-0 flex-1"><div className="truncate text-[13px] font-medium text-ink">{entry.name}</div>
                 <div className="break-all text-[12px] text-ink-secondary">{entry.origin || "Local bots and conversations"}</div></div>
               {active ? <span className="flex shrink-0 items-center gap-1 text-[12px] text-ink-secondary"><Check size={13} />Current</span> :

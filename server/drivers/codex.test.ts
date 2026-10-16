@@ -189,6 +189,17 @@ describe("CodexDriver turns (fake app-server)", () => {
     expect(restored.calls.find((call: { method: string }) => call.method === "thread/resume").params.config.mcp_servers.notes_openmausbot.default_tools_approval_mode).toBe("prompt");
   });
 
+  it("still mounts its own copy of a config.toml server when a tool selection switches config.toml's off", async () => {
+    const dump = join(scratch, "scope-same.json"); process.env.FAKE_CODEX_DUMP = dump;
+    mkdirSync(join(scratch, ".codex"), { recursive: true }); writeFileSync(join(scratch, ".codex/config.toml"), '[mcp_servers.notes]\nurl="https://example.test/notes"\n');
+    await create({ environment: { HOME: scratch, CODEX_HOME: join(scratch, ".codex"), FAKE_CODEX_MCP_OVERRIDES: "1" } });
+    await instance.adapter.sendTurn({ threadId: "scope-same", text: "Fixture", toolScope: { allow: ["native:*", "mcp:notes:read"] }, integrations: { custom: { notes: { type: "http", url: "https://example.test/notes", headers: {} } } } });
+    await recorder.until((event) => event.type === "turn.completed");
+    const seen = JSON.parse(readFileSync(dump, "utf8"));
+    expect(seen.argv).toContain("mcp_servers.notes.enabled=false");
+    expect(Object.keys(seen.calls.find((call: { method: string }) => call.method === "thread/start").params.config.mcp_servers)).toEqual(["notes_openmausbot"]);
+  });
+
   it("refuses a scoped prompt when effective Codex configuration still has an ambient MCP server", async () => {
     const dump = join(scratch, "scope-ambient.json"); process.env.FAKE_CODEX_DUMP = dump;
     await create({ environment: { HOME: scratch, CODEX_HOME: join(scratch, ".codex") } });
@@ -1113,6 +1124,26 @@ process.stdout.write(JSON.stringify({jsonrpc:'2.0',id:m.id,result})+'\\n');});`)
     const argv = JSON.parse(readFileSync(dump, "utf8")).argv.join(" ");
     expect(argv).toContain("mcp_servers.fibery_openmausbot.command");
     expect(argv).not.toContain("mcp_servers.fibery.command");
+    expect(argv).toContain("mcp_servers.notes.command");
+  });
+
+  it("does not mount a second copy of a server the user's config.toml already runs, as one brought in from there", async () => {
+    const codexHome = join(scratch, "same-server-codex-home");
+    mkdirSync(codexHome, { recursive: true });
+    writeFileSync(join(codexHome, "config.toml"), '[mcp_servers.sentry]\ncommand = "npx"\nargs = ["-y", "@sentry/mcp-server"]\n');
+    await create({ environment: { CODEX_HOME: codexHome } });
+    const dump = join(scratch, "same-server.json");
+    process.env.FAKE_CODEX_DUMP = dump;
+
+    await instance.adapter.sendTurn({
+      threadId: "t-same-server",
+      text: "go",
+      integrations: { custom: { sentry: { command: "npx", args: ["-y", "@sentry/mcp-server"], env: {} }, notes: { command: "npx", args: ["-y", "@x/notes-mcp"], env: {} } } },
+    });
+    await recorder.until((event) => event.type === "turn.completed");
+    const argv = JSON.parse(readFileSync(dump, "utf8")).argv.join(" ");
+    expect(argv).not.toContain("mcp_servers.sentry_openmausbot");
+    expect(argv).not.toContain("mcp_servers.sentry.command");
     expect(argv).toContain("mcp_servers.notes.command");
   });
 

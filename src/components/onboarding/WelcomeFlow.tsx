@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useRef, useState, type KeyboardEvent as ReactKeyboardEvent } from "react";
+import type { CloudOffer } from "../../../electron/cloud-home.mjs";
 import { MausAvatar } from "@/components/Avatar";
 import { useDesktopCapabilities } from "@/components/DesktopCapabilities";
 import { setEmailGateDone, track } from "@/lib/analytics";
@@ -6,6 +7,7 @@ import { brand } from "@/lib/brand";
 import { cn } from "@/lib/cn";
 import { t } from "@/lib/i18n";
 import type { MausMotion, MausState } from "@/lib/mascot";
+import { detectSetupWithin, localSetupImport, setupImportApi, type SetupImportClient } from "@/lib/setup-import";
 import {
   beatWidth,
   beatsFor,
@@ -13,11 +15,15 @@ import {
   flowDotsShown,
   nextBeat,
   previousBeat,
+  showWelcome,
   type BeatId,
 } from "@/lib/onboarding";
 import { api, useStore, type Bot } from "@/state/store";
+import { CloudBeat, useCloudBeatOffer } from "./beats/CloudBeat";
+import type { SetupDetection, SetupImportResult } from "../../../shared/setup-import";
 import { EnginesBeat } from "./beats/EnginesBeat";
 import { HelloBeat } from "./beats/HelloBeat";
+import { ImportBeat } from "./beats/ImportBeat";
 import { MeetYourBotBeat } from "./beats/MeetYourBotBeat";
 import { PermissionsBeat } from "./beats/PermissionsBeat";
 import { PhoneBeat } from "./beats/PhoneBeat";
@@ -30,8 +36,10 @@ const MASCOT_FOR_BEAT: Record<BeatId, MausState> = {
   hello: "happy",
   reel: "curious",
   engines: "searching",
+  import: "receiving",
   permissions: "listening",
   phone: "sending",
+  cloud: "working",
   bot: "celebrate",
 };
 
@@ -41,6 +49,8 @@ function beatTitle(beat: BeatId): string | null {
       return t("onboarding.welcome", { app: brand().name });
     case "engines":
       return t("onboarding.engines.title");
+    case "import":
+      return t("onboarding.import.title");
     case "permissions":
       return t("onboarding.perms.title");
     case "bot":
@@ -49,10 +59,15 @@ function beatTitle(beat: BeatId): string | null {
       return t("onboarding.reel.title");
     case "phone":
       return t("onboarding.phone.title");
+    case "cloud":
+      return t("onboarding.cloud.title");
   }
 }
 
 type Motion = Exclude<MausMotion, "none">;
+
+/** Found later than these, the import step would land behind the person, so it is left out. */
+const BEFORE_IMPORT: readonly BeatId[] = ["hello", "reel", "engines"];
 
 export function WelcomeFlow({
   bot,
@@ -65,6 +80,8 @@ export function WelcomeFlow({
   entrance = "arrive",
   hosted = false,
   onOpenOrganisation,
+  cloudOffer,
+  setupImport,
 }: {
   bot: Bot | null;
   onDone: () => void;
@@ -76,15 +93,25 @@ export function WelcomeFlow({
   entrance?: Motion;
   hosted?: boolean;
   onOpenOrganisation?: () => void;
+  /** The preview's stand-in for the Admin's offer (the Cloud beat); the app reads its own. */
+  cloudOffer?: CloudOffer | null;
+  /** Where the import step looks; the desktop app's own window looks on its own server. `detection` skips the look. */
+  setupImport?: { client: SetupImportClient; detection?: SetupDetection } | null;
 }) {
   const { dispatch } = useStore();
   const { capabilities } = useDesktopCapabilities();
-  const beats = beatsFor({ dictation: dictation ?? capabilities.dictation.available, reel, hosted });
+  const offer = useCloudBeatOffer(hosted, cloudOffer);
+  const importClient = setupImport === undefined ? (localSetupImport(hosted) ? setupImportApi : null) : setupImport?.client ?? null;
+  const [detection, setDetection] = useState<SetupDetection | null>(setupImport?.detection ?? null);
+  const [importResult, setImportResult] = useState<SetupImportResult | null>(null);
+  const [importBusy, setImportBusy] = useState(false);
+  const beats = beatsFor({ dictation: dictation ?? capabilities.dictation.available, reel, hosted, setupImport: detection !== null, cloud: offer !== null });
   const [beat, setBeat] = useState<BeatId>(() => (initialBeat && beats.includes(initialBeat) ? initialBeat : "hello"));
   const [mascot, setMascot] = useState<MausState>(MASCOT_FOR_BEAT[beat]);
   const [motion, setMotion] = useState<{ kind: Motion; key: number }>({ kind: "blink", key: 0 });
   const cardRef = useRef<HTMLDivElement>(null);
   const finishing = useRef(false);
+  const beatNow = useRef(beat);
 
   const bump = useCallback((kind: Motion) => setMotion((m) => ({ kind, key: m.key + 1 })), []);
 
@@ -96,8 +123,22 @@ export function WelcomeFlow({
   }, []);
 
   useEffect(() => {
+    beatNow.current = beat;
     track("onboarding_step", { step: beat, replay });
   }, [beat, replay]);
+
+  // A Cloud sheet opened over the welcome never switches the window away from it (CloudAddDialog).
+  useEffect(() => (embedded ? undefined : showWelcome()), [embedded]);
+  // Looked for once, from the first beat; nothing found in time leaves the step out.
+  useEffect(() => {
+    if (!importClient || detection) return;
+    const look = detectSetupWithin(importClient);
+    void look.found.then((found) => {
+      if (found && BEFORE_IMPORT.includes(beatNow.current)) setDetection(found);
+    });
+    return look.cancel;
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   const go = useCallback(
     (target: BeatId) => {
@@ -220,8 +261,19 @@ export function WelcomeFlow({
           {beat === "hello" && <HelloBeat {...beatProps} hosted={hosted} />}
           {beat === "reel" && <FeatureReel {...beatProps} />}
           {beat === "engines" && <EnginesBeat {...beatProps} hosted={hosted} onOpenOrganisation={onOpenOrganisation} />}
+          {beat === "import" && detection && importClient && (
+            <ImportBeat
+              {...beatProps}
+              detection={detection}
+              client={importClient}
+              result={importResult}
+              onResult={(result) => setImportResult((stored) => stored ?? result)}
+              onBusy={setImportBusy}
+            />
+          )}
           {beat === "permissions" && <PermissionsBeat {...beatProps} />}
           {beat === "phone" && <PhoneBeat {...beatProps} />}
+          {beat === "cloud" && offer && <CloudBeat {...beatProps} offer={offer} />}
           {beat === "bot" && (
             <MeetYourBotBeat
               bot={bot}
@@ -234,7 +286,7 @@ export function WelcomeFlow({
 
         <div className="mt-6 flex shrink-0 items-center justify-between">
           {previous ? (
-            <QuietButton onClick={() => go(previous)}>{t("onboarding.back")}</QuietButton>
+            <QuietButton onClick={() => go(previous)} disabled={importBusy} className="disabled:opacity-50">{t("onboarding.back")}</QuietButton>
           ) : (
             <span />
           )}

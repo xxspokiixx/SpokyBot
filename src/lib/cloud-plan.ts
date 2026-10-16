@@ -129,13 +129,12 @@ export function cloudNoticeKind(view: CloudPlanView, account: CloudAccountState 
 }
 
 
-export const CLOUD_SOURCES = ["app_card", "app_howto", "app_menu", "app_settings", "app_routines", "update_popup"] as const;
+export const CLOUD_SOURCES = ["app_card", "app_howto", "app_menu", "app_settings", "app_routines", "update_popup", "app_onboarding"] as const;
 export type CloudSource = (typeof CLOUD_SOURCES)[number];
 
 export function offerPlanLabel(plan: CloudOfferPlan): string {
   return Object.hasOwn(PLAN_LABEL, plan.tier) ? PLAN_LABEL[plan.tier]! : plan.label ?? cloudPlanLabel(plan.tier);
 }
-const monthly = (amount: number) => t("cloudAdd.perMonth", { price: usd(amount / 100) });
 
 export function offerPlan(offer: CloudOffer, chosen?: string | null): CloudOfferPlan {
   return offer.plans.find(plan => plan.tier === chosen) ?? offer.plans.find(plan => plan.tier === offer.recommended) ?? offer.plans[0]!;
@@ -159,19 +158,59 @@ export function planDetails(plan: CloudOfferPlan): { main: string; machine: stri
   return { main: `${computers} · ${storage}`, machine: t("cloudAdd.machine", { cpus: a.cpus, memory, hours: a.computerHours }) };
 }
 
-export function planRow(plan: CloudOfferPlan): { tier: string; name: string; price: string; popular: boolean; details: { main: string; machine: string } | null } {
-  return { tier: plan.tier, name: offerPlanLabel(plan), price: monthly(plan.amount), popular: plan.tier === "pro", details: planDetails(plan) };
+/** One plan card: its name, the Admin's price, what differs (cloud computers at once) and three allowance chips. */
+export interface CloudPlanRow { tier: string; name: string; price: string; popular: boolean; line: string | null; chips: string[] }
+export function planRow(plan: CloudOfferPlan, recommended?: string): CloudPlanRow {
+  const a = plan.allowances;
+  const chips = a ? [
+    t("cloudBuy.chip.machine", { cpus: a.cpus, memory: Math.max(1, Math.round(a.memoryMb / 1024)) }),
+    a.maxDiskGb > a.diskGb ? t("cloudBuy.chip.storageGrows", { gb: a.diskGb, max: a.maxDiskGb }) : t("cloudAdd.storage", { gb: a.diskGb }),
+    t("cloudBuy.chip.hours", { hours: a.computerHours }),
+  ] : [];
+  return { tier: plan.tier, name: offerPlanLabel(plan), price: usd(plan.amount / 100), popular: plan.tier === recommended,
+    line: a ? (a.computers === 1 ? t("cloudAdd.oneComputer") : t("cloudAdd.computers", { count: a.computers })) : null, chips };
 }
 
 const DAY_MS = 86_400_000;
+/** Today, the reminder (while the Admin sends one) and the first charge; nothing without a trial. */
 export function trialTimeline(offer: CloudOffer, plan: CloudOfferPlan, now: number): Array<{ when: string; text: string }> {
   if (!plan.trialDays) return [];
   const charge = now + plan.trialDays * DAY_MS;
-  const today = { when: t("cloudAdd.today"), text: offer.creditUsd
-    ? `${t("cloudAdd.timeline.start")} ${t("cloudAdd.timeline.credit", { credit: usd(offer.creditUsd) })}` : t("cloudAdd.timeline.start") };
+  const today = { when: t("cloudAdd.today"), text: offer.creditUsd ? t("cloudBuy.timeline.startCredit", { credit: usd(offer.creditUsd) }) : t("cloudBuy.timeline.start") };
   const reminder = offer.reminderDays && offer.reminderDays < plan.trialDays
-    ? [{ when: shortDate(charge - offer.reminderDays * DAY_MS), text: t("cloudAdd.timeline.reminder") }] : [];
-  return [today, ...reminder, { when: shortDate(charge), text: t("cloudAdd.timeline.charge", { plan: offerPlanLabel(plan), price: monthly(plan.amount) }) }];
+    ? [{ when: shortDate(charge - offer.reminderDays * DAY_MS), text: t("cloudBuy.timeline.reminder") }] : [];
+  return [today, ...reminder, { when: shortDate(charge), text: t("cloudBuy.timeline.charge", { price: usd(plan.amount / 100) }) }];
+}
+
+/** What the chosen plan costs, in one place: due today, the money line (the card is needed for a trial), the button. */
+export function planTerms(offer: CloudOffer, plan: CloudOfferPlan): { trial: boolean; due: string; money: string; action: string; moneyBack: string | null } {
+  const price = usd(plan.amount / 100);
+  const moneyBack = offer.refundDays ? t("cloudBuy.moneyBack", { days: offer.refundDays }) : null;
+  return plan.trialDays
+    ? { trial: true, due: dueToday(0), money: t("cloudBuy.moneyTrial", { days: plan.trialDays, price }), action: t("cloudIntro.start"), moneyBack }
+    : { trial: false, due: t("cloudBuy.duePaid", { price }), money: t("cloudBuy.moneyPaid", { price }), action: t("cloudBuy.continue", { price }), moneyBack };
+}
+/** The welcome's Cloud beat: the Admin's offer in one line (trial days and the lowest price, the credit, money-back) and
+ * its one action, Start free trial, or See plans without a trial. No number is the app's own. */
+export function cloudBeatTerms(offer: CloudOffer): { trial: boolean; line: string; action: string } {
+  const days = offerTrialDays(offer);
+  const priced = days ? offer.plans.filter(plan => plan.trialDays) : offer.plans;
+  const price = usd(Math.min(...priced.map(plan => plan.amount)) / 100);
+  const line = [days ? t("onboarding.cloud.trial", { days, price }) : t("onboarding.cloud.price", { price }),
+    days && offer.creditUsd ? t("onboarding.cloud.credit", { credit: usd(offer.creditUsd) }) : null,
+    offer.refundDays ? t("onboarding.cloud.moneyBack", { days: offer.refundDays }) : null].filter(Boolean).join(" ");
+  return { trial: Boolean(days), line, action: days ? t("cloudIntro.start") : t("onboarding.cloud.seePlans") };
+}
+
+/** The plan picked before signing in costs and starts the same for this account (its session's own offer); otherwise
+ * Choose shows the account's terms before any checkout, so "$0.00 today" is never said of a paid one. */
+export function sameTerms(shown: CloudOffer | null | undefined, mine: CloudOffer | null | undefined, tier: string): boolean {
+  const before = shown?.plans.find(plan => plan.tier === tier), now = mine?.plans.find(plan => plan.tier === tier);
+  return Boolean(before && now && before.amount === now.amount && (before.trialDays ?? 0) === (now.trialDays ?? 0));
+}
+
+export function dueToday(cents: number): string {
+  return new Intl.NumberFormat("en-US", { style: "currency", currency: "USD", minimumFractionDigits: 2 }).format(cents / 100);
 }
 
 
@@ -190,47 +229,72 @@ export function cloudIntroView(offer: CloudOffer | null | undefined): { badge: s
 
 export const CHECKOUT_WAIT_MS = 30 * 60_000;
 
+/** The in-app sign-in's step, kept by the sheet: where it is and what the Admin last said, never a code or token. */
+export type CloudSignInProblem = "invalid-email" | "rate-limited" | "failed" | "wrong-code" | "expired" | "signup-closed" | "device-limit" | "sso" | "two-factor" | "browser";
+export type CloudSignInPhase =
+  | { step: "email"; intent: boolean; problem: CloudSignInProblem | null }
+  | { step: "code"; intent: boolean; email: string; resendAt: number; problem: CloudSignInProblem | null; triesLeft: number | null; signupOpen?: boolean }
+  | { step: "done"; intent: boolean };
+
+/** What the setup screen says about the plan that started: its tier, the running trial and the trial's credit. */
+export interface CloudStarted { tier: string | null; trial: CloudTrial | null; credit: CloudCredit | null }
+
 export type CloudAddView =
   | { kind: "checking" }
   | { kind: "unreachable" }
   | { kind: "error"; reason: "failed" | "rate-limited" }
-  | { kind: "offer"; offer: CloudOffer; signedOut: boolean; waited: false | "trial" | "paid"; notice: "code-expired" | "signin-ended" | "preparing" | null }
+  | { kind: "offer"; offer: CloudOffer; signedOut: boolean; notice: "code-expired" | "signin-ended" | "preparing" | "terms" | null }
+  | { kind: "sign-in"; phase: CloudSignInPhase }
   | { kind: "signing-in"; code: string | null; checkout: boolean }
-  | { kind: "waiting"; plan: string; browser: "checkout" | "signin" }
-  | { kind: "received"; line: string }
-  | { kind: "starting"; trial: CloudTrial | null; step: CloudSetupStep | null; slow: boolean }
-  | { kind: "ready" }
+  | { kind: "waiting"; plan: string; browser: "checkout" | "signin"; late: boolean; link: boolean; email: string | null }
+  | ({ kind: "starting"; step: CloudSetupStep | null; slow: boolean; received: boolean } & CloudStarted)
+  | ({ kind: "ready" } & CloudStarted)
   | { kind: "has-cloud" }
   | { kind: "settings" };
 
+/** The one state → view function of the buying sheet: every Cloud state is one message and one next step. */
 export function cloudAddView(account: CloudAccountState | null | undefined, offer: CloudOffer | null | undefined,
-  { now, error = null, choosing = false, conflict = false }: { now: number; error?: "failed" | "rate-limited" | null; choosing?: boolean; conflict?: boolean }): CloudAddView {
+  { now, error = null, choosing = false, conflict = false, signIn = null, arrived = false, terms = false }: {
+    now: number; error?: "failed" | "rate-limited" | null; choosing?: boolean; conflict?: boolean; signIn?: CloudSignInPhase | null;
+    /** Signed in here to an account whose own terms differ from those shown: Choose says so. */
+    terms?: boolean;
+    /** Signed in from this sheet just now: a ready Cloud is theirs to open, not a second one to ask for. */
+    arrived?: boolean;
+  }): CloudAddView {
   const view = cloudPlanView(account);
+  const started = (): CloudStarted => ({ tier: account?.entitlement?.tier ?? account?.purchase?.tier ?? null,
+    trial: account?.trial && trialRunning(account.trial) ? account.trial : null, credit: account?.credit?.state === "active" ? account.credit : null });
+  // Asked to sign in (Settings, the card, Already have a plan?): that needs no offer, and is the way back for a saved
+  // sign-in that could not be read and was removed.
+  if (signIn && !error && (view.kind === "signed-out" || view.kind === "removed")) return { kind: "sign-in", phase: signIn };
   switch (view.kind) {
     case "unknown": return { kind: "checking" };
     case "connecting": return { kind: "signing-in", code: account?.enrollment?.userCode ?? null, checkout: Boolean(account?.checkout) };
-    case "purchase": return { kind: "received", line: cloudPlanLine(view) ?? "" };
+    case "purchase": return { kind: "starting", ...started(), step: null, slow: false, received: true };
     case "paid": {
       const machine = account?.machine;
-      if (!machine || machine.status === "provisioning") {
-        return { kind: "starting", trial: account?.trial && trialRunning(account.trial) ? account.trial : null, step: machine?.setup?.step ?? null, slow: machine?.setup?.slow === true };
-      }
+      if (!machine || machine.status === "provisioning") return { kind: "starting", ...started(), step: machine?.setup?.step ?? null, slow: machine?.setup?.slow === true, received: false };
       if (machine.status !== "ready") return { kind: "settings" };
-      return account?.checkout ? { kind: "ready" } : { kind: "has-cloud" };
+      // Ready while this purchase is not over (main marks it done once the Cloud was opened, announced or shown ready), or
+      // for this sheet's own journey; afterwards Add a Cloud… is one Cloud for now.
+      return (account?.checkout && !account.checkout.done) || arrived ? { kind: "ready", ...started() } : { kind: "has-cloud" };
     }
     case "signed-out": case "free": {
       if (error) return { kind: "error", reason: error };
       if (offer === undefined) return { kind: "checking" };
       if (offer === null) return { kind: "unreachable" };
-      const opened = account?.checkout ?? null, fresh = opened !== null && now - opened.startedAt < CHECKOUT_WAIT_MS;
+      const opened = account?.checkout ?? null;
+      if (signIn && !opened && (view.kind === "signed-out" || signIn.step === "done")) return { kind: "sign-in", phase: signIn };
       const open = offer.checkout && offer.checkout.openUntil > now ? offer.checkout : null;
-      if (view.kind === "free" && !choosing && (fresh || (open && !opened))) {
-        return { kind: "waiting", plan: (fresh ? opened!.plan : open!.plan), browser: fresh && opened!.signIn && !open ? "signin" : "checkout" };
+      if (view.kind === "free" && !choosing && (opened || open)) {
+        const late = opened ? now - opened.startedAt >= CHECKOUT_WAIT_MS : false;
+        return { kind: "waiting", plan: opened?.plan ?? open!.plan, browser: opened?.signIn && !opened.link && !open ? "signin" : "checkout", late,
+          link: opened?.link === true, email: account?.account?.email ?? null };
       }
-      const waited = view.kind === "free" && opened !== null && !fresh ? offer.plans.find(plan => plan.tier === opened.plan)?.trialDays ? "trial" : "paid" : false;
       const notice = account?.status === "signed-out" && account.message === "enrollment-expired" ? "code-expired"
-        : account?.status === "signed-out" && (account.message === "enrollment-ended" || account.message === "signin-failed") ? "signin-ended" : conflict ? "preparing" : null;
-      return { kind: "offer", offer, signedOut: view.kind === "signed-out", waited, notice };
+        : account?.status === "signed-out" && (account.message === "enrollment-ended" || account.message === "signin-failed") ? "signin-ended"
+          : conflict ? "preparing" : terms ? "terms" : null;
+      return { kind: "offer", offer, signedOut: view.kind === "signed-out", notice };
     }
     default: return { kind: "settings" };
   }
