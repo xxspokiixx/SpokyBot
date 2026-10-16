@@ -639,8 +639,10 @@ describe("encrypted full workspace backups", () => {
     const root = directory();
     const copy = join(root, "imported-skills", "pdf");
     mkdirSync(join(copy, "scripts"), { recursive: true });
-    writeFileSync(join(copy, "SKILL.md"), "# pdf", { mode: 0o400 });
-    writeFileSync(join(copy, "scripts", "run.sh"), "echo run\n", { mode: 0o500 });
+    // Read-only as the app writes them; on Windows it keeps them writable.
+    const readOnly = (mode: number) => (process.platform === "win32" ? {} : { mode });
+    writeFileSync(join(copy, "SKILL.md"), "# pdf", readOnly(0o400));
+    writeFileSync(join(copy, "scripts", "run.sh"), "echo run\n", readOnly(0o500));
     const kind = process.platform === "win32" ? "junction" : "dir";
     const task = join(root, "task-workspaces", "bot", "thread");
     for (const family of [".claude", ".agents", ".grok"]) mkdirSync(join(task, family, "skills"), { recursive: true });

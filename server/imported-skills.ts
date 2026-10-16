@@ -178,7 +178,9 @@ export interface StoredImport {
   leftOut: number;
 }
 
-const fileMode = (executable: boolean) => (executable ? 0o500 : 0o400);
+/** Read-only, so a bot editing a copy in place has to go out of its way; the hash check is what keeps a changed copy out.
+ * Not on Windows, where a read-only file can stop the folder holding it from being removed or replaced. */
+const fileMode = (executable: boolean) => (process.platform === "win32" ? 0o600 : executable ? 0o500 : 0o400);
 
 /** Into a fresh folder nothing links to: parents level by level, never over a file. */
 function writeStaged(folder: string, input: ImportedSkillInput): number {
