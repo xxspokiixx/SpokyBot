@@ -32,7 +32,8 @@ vi.mock("@/components/Avatar", () => ({ MausAvatar: () => null }));
 // Each beat has its own recipe; here only which ones the flow offers.
 vi.mock("./beats/HelloBeat", () => ({ HelloBeat: () => null }));
 vi.mock("./beats/EnginesBeat", () => ({ EnginesBeat: () => null }));
-vi.mock("./beats/ImportBeat", () => ({ ImportBeat: () => null }));
+const importBeat = vi.hoisted(() => ({ props: null as null | { onBusy?: (busy: boolean) => void; onResult: (result: unknown) => void } }));
+vi.mock("./beats/ImportBeat", () => ({ ImportBeat: (props: typeof importBeat.props) => { importBeat.props = props; return null; } }));
 vi.mock("./beats/PhoneBeat", () => ({ PhoneBeat: () => null }));
 vi.mock("./beats/MeetYourBotBeat", () => ({ MeetYourBotBeat: () => null }));
 import { WelcomeFlow } from "./WelcomeFlow";
@@ -104,5 +105,20 @@ describe("the import step in the welcome flow", () => {
     expect(html).toContain("Step 3 of 5");
     for (const effect of fixture.effects) effect();
     expect(client.detect).not.toHaveBeenCalled();
+  });
+
+  it("holds Back while things are coming in, and keeps the first result", () => {
+    const client = { detect: vi.fn(), apply: vi.fn() };
+    const props = { setupImport: { client, detection: FOUND }, initialBeat: "import" as const };
+    const back = (html: string) => /<button[^>]*>Back<\/button>/.exec(html)![0];
+    expect(back(render(props))).not.toContain('disabled=""');
+    importBeat.props!.onBusy!(true);
+    expect(back(render(props))).toContain('disabled=""');
+    const first = { skills: { added: ["pdf"], present: [], skipped: [], filesLeftOut: 0, review: [] } };
+    importBeat.props!.onResult(first);
+    importBeat.props!.onResult({ skills: { added: [], present: ["pdf"], skipped: [], filesLeftOut: 0, review: [] } });
+    importBeat.props!.onBusy!(false);
+    expect(back(render(props))).not.toContain('disabled=""');
+    expect((importBeat.props as unknown as { result: unknown }).result).toEqual(first);
   });
 });

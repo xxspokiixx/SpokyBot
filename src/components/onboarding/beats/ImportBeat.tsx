@@ -61,12 +61,14 @@ function ImportRow({ icon, label, summary, hint, sources, checked, disabled, onC
   );
 }
 
-export function ImportBeat({ onNext, onSkip, setMascot, bump, detection, client, result, onResult }: BeatProps & {
+export function ImportBeat({ onNext, onSkip, setMascot, bump, detection, client, result, onResult, onBusy }: BeatProps & {
   detection: SetupDetection;
   client: SetupImportClient;
   /** Kept by the flow, so going back shows what was added instead of offering it again. */
   result: SetupImportResult | null;
   onResult: (result: SetupImportResult) => void;
+  /** While bringing in, so the flow holds Back: leaving would offer the step again and start a second run. */
+  onBusy?: (busy: boolean) => void;
 }) {
   const hasSkills = detection.skills.length > 0;
   const hasTools = detection.tools.length > 0;
@@ -89,6 +91,7 @@ export function ImportBeat({ onNext, onSkip, setMascot, bump, detection, client,
   const bring = async () => {
     if (working || !(chosen.skills || chosen.tools)) return;
     setStatus("working");
+    onBusy?.(true);
     setMascot("working");
     try {
       const brought = await client.apply({ ...(chosen.skills ? { skills: true } : {}), ...(chosen.tools ? { tools: true } : {}) });
@@ -102,6 +105,8 @@ export function ImportBeat({ onNext, onSkip, setMascot, bump, detection, client,
       setStatus("failed");
       setMascot("confused");
       bump("failure");
+    } finally {
+      onBusy?.(false);
     }
   };
 

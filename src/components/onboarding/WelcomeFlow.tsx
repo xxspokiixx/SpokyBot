@@ -94,6 +94,7 @@ export function WelcomeFlow({
   const importClient = setupImport === undefined ? (localSetupImport(hosted) ? setupImportApi : null) : setupImport?.client ?? null;
   const [detection, setDetection] = useState<SetupDetection | null>(setupImport?.detection ?? null);
   const [importResult, setImportResult] = useState<SetupImportResult | null>(null);
+  const [importBusy, setImportBusy] = useState(false);
   const beats = beatsFor({ dictation: dictation ?? capabilities.dictation.available, reel, hosted, setupImport: detection !== null });
   const [beat, setBeat] = useState<BeatId>(() => (initialBeat && beats.includes(initialBeat) ? initialBeat : "hello"));
   const [mascot, setMascot] = useState<MausState>(MASCOT_FOR_BEAT[beat]);
@@ -249,7 +250,14 @@ export function WelcomeFlow({
           {beat === "reel" && <FeatureReel {...beatProps} />}
           {beat === "engines" && <EnginesBeat {...beatProps} hosted={hosted} onOpenOrganisation={onOpenOrganisation} />}
           {beat === "import" && detection && importClient && (
-            <ImportBeat {...beatProps} detection={detection} client={importClient} result={importResult} onResult={setImportResult} />
+            <ImportBeat
+              {...beatProps}
+              detection={detection}
+              client={importClient}
+              result={importResult}
+              onResult={(result) => setImportResult((stored) => stored ?? result)}
+              onBusy={setImportBusy}
+            />
           )}
           {beat === "permissions" && <PermissionsBeat {...beatProps} />}
           {beat === "phone" && <PhoneBeat {...beatProps} />}
@@ -265,7 +273,7 @@ export function WelcomeFlow({
 
         <div className="mt-6 flex shrink-0 items-center justify-between">
           {previous ? (
-            <QuietButton onClick={() => go(previous)}>{t("onboarding.back")}</QuietButton>
+            <QuietButton onClick={() => go(previous)} disabled={importBusy} className="disabled:opacity-50">{t("onboarding.back")}</QuietButton>
           ) : (
             <span />
           )}

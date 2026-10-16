@@ -39,7 +39,7 @@ const BROUGHT: SetupImportResult = {
   skills: { added: ["pdf", "review"], present: [], skipped: [], filesLeftOut: 0, review: [] },
   tools: { added: ["notion"], present: [], skipped: [] },
 };
-const props = { onNext: vi.fn(), onSkip: vi.fn(), setMascot: vi.fn(), bump: vi.fn(), onResult: vi.fn() };
+const props = { onNext: vi.fn(), onSkip: vi.fn(), setMascot: vi.fn(), bump: vi.fn(), onResult: vi.fn(), onBusy: vi.fn() };
 const apply = vi.fn();
 const importClient = { detect: vi.fn(), apply };
 
@@ -119,6 +119,22 @@ describe("the import step", () => {
     none.primary.props.onClick!();
     await flush();
     expect(apply).toHaveBeenCalledOnce();
+  });
+
+  it("tells the flow it is busy for exactly as long as a run lasts", async () => {
+    let settle!: (result: SetupImportResult) => void;
+    apply.mockReturnValue(new Promise<SetupImportResult>((resolve) => { settle = resolve; }));
+    render().primary.props.onClick!();
+    await flush();
+    expect(props.onBusy.mock.calls).toEqual([[true]]);
+    settle(BROUGHT);
+    await flush();
+    expect(props.onBusy.mock.calls).toEqual([[true], [false]]);
+    fixture.values = [];
+    apply.mockRejectedValue(new Error("offline"));
+    render().primary.props.onClick!();
+    await flush();
+    expect(props.onBusy.mock.calls.slice(2)).toEqual([[true], [false]]);
   });
 
   it("says when bringing in failed and lets the person try again or skip", async () => {
