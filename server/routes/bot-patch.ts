@@ -88,7 +88,7 @@ export function createBotPatchRoutes(deps: BotPatchRouteDeps): RouteHandler {
       if (!body || typeof body !== "object" || Array.isArray(body)) {
         return json(res, 400, { error: "body must be a JSON object" });
       }
-      if (auth.kind === "session" && !auth.scopes.includes("admin")) {
+      if ((auth.kind === "session" && !auth.scopes.includes("admin")) || req.headers["x-openmausbot-companion"] === "1") {
         const field = clientBotPatchViolation(body);
         if (field) return json(res, 403, { error: `forbidden: this session may change how a bot looks, not "${field}" (needs the admin scope)` });
       }

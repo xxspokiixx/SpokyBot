@@ -93,6 +93,7 @@ const ALLOWED: ReadonlyArray<{ method: string; path: RegExp }> = [
 
   { method: "GET", path: /^\/api\/bots$/ },
   { method: "POST", path: /^\/api\/bots$/ },
+  { method: "PATCH", path: /^\/api\/bots\/[\w-]+$/ },
   // Can only file visible bots; cannot alter execution policy.
   { method: "POST", path: /^\/api\/sidebar-sections$/ },
   { method: "POST", path: /^\/api\/bots\/[\w-]+\/messages$/ },
