@@ -74,6 +74,11 @@ export function BotPanel({ bot, derived, slackUrl = null, headerClassName, linke
     if (next === "memory") setMemoryMounted(true);
     scrollTop();
   };
+  const closeEditor = () => {
+    setEditorOpen(false);
+    // The card held focus: hand it back to the avatar that opened it, before the card goes, not to the page body.
+    editorRef.current?.querySelector<HTMLElement>("[data-panel-avatar]")?.focus();
+  };
   const back = () => {
     setStack((current) => current.slice(0, -1));
     scrollTop();
@@ -98,7 +103,7 @@ export function BotPanel({ bot, derived, slackUrl = null, headerClassName, linke
     // sits in, and the avatar editor, do not.
     const ownDialog = inDialog && !inDialog.contains(event.currentTarget) && inDialog !== editorRef.current && !editorRef.current?.contains(inDialog);
     if (ownDialog) return;
-    if (editorOpen) setEditorOpen(false);
+    if (editorOpen) closeEditor();
     else if (stack.length > 0) back();
     else return;
     event.preventDefault();
@@ -139,8 +144,8 @@ export function BotPanel({ bot, derived, slackUrl = null, headerClassName, linke
               />
               {editorOpen && (
                 <>
-                  <div className="fixed inset-0 z-20" aria-hidden="true" data-panel-scrim onClick={() => setEditorOpen(false)} />
-                  <AvatarEditorCard bot={bot} activeState={derived.activeState} onPatch={derived.patch} onClose={() => setEditorOpen(false)} />
+                  <div className="fixed inset-0 z-20" aria-hidden="true" data-panel-scrim onClick={closeEditor} />
+                  <AvatarEditorCard bot={bot} activeState={derived.activeState} onPatch={derived.patch} onClose={closeEditor} />
                 </>
               )}
             </div>

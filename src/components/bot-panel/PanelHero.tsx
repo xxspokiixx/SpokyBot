@@ -1,4 +1,4 @@
-import { useRef, useState, type KeyboardEvent } from "react";
+import { useEffect, useRef, useState, type KeyboardEvent } from "react";
 import { Pencil } from "lucide-react";
 
 import { cn } from "@/lib/cn";
@@ -15,6 +15,15 @@ const inlineInputCls =
 function useInlineEdit(save: (value: string) => void) {
   const [draft, setDraft] = useState<string | null>(null);
   const settled = useRef(false);
+  const refocus = useRef(false);
+  const buttonRef = useRef<HTMLButtonElement>(null);
+  // Enter and Escape take away the focused field: focus goes back to the button that opened it, not the page body.
+  // A blur commit leaves focus where the person put it.
+  useEffect(() => {
+    if (draft !== null || !refocus.current) return;
+    refocus.current = false;
+    buttonRef.current?.focus();
+  }, [draft]);
   const start = (value: string) => {
     settled.current = false;
     setDraft(value);
@@ -27,11 +36,13 @@ function useInlineEdit(save: (value: string) => void) {
     if (event.key === "Enter") {
       event.preventDefault();
       settled.current = true;
+      refocus.current = true;
       commit();
     } else if (event.key === "Escape") {
       event.preventDefault();
       event.stopPropagation();
       settled.current = true;
+      refocus.current = true;
       setDraft(null);
     }
   };
@@ -39,7 +50,7 @@ function useInlineEdit(save: (value: string) => void) {
     if (settled.current) return;
     commit();
   };
-  return { draft, setDraft, start, onKeyDown, onBlur };
+  return { draft, setDraft, start, onKeyDown, onBlur, buttonRef };
 }
 
 export function PanelHero({ bot, activeState, patch, editorOpen, onToggleEditor }: {
@@ -99,6 +110,7 @@ export function PanelHero({ bot, activeState, patch, editorOpen, onToggleEditor 
           />
         ) : (
           <button
+            ref={name.buttonRef}
             type="button"
             data-panel-rename
             title={t("botPanel.rename")}
@@ -126,6 +138,7 @@ export function PanelHero({ bot, activeState, patch, editorOpen, onToggleEditor 
         />
       ) : (
         <button
+          ref={label.buttonRef}
           type="button"
           data-panel-label
           onClick={() => label.start(bot.title)}

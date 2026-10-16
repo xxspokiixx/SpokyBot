@@ -173,3 +173,51 @@ describe("Escape in the bot panel", () => {
     expect(dialogCloses).not.toHaveBeenCalled();
   });
 });
+
+describe("focus around the hero", () => {
+  const avatar = () => host.querySelector<HTMLElement>("[data-panel-avatar]");
+  const card = () => host.querySelector("[data-panel-avatar-editor]");
+
+  it("moves focus into the avatar editor, and back to the avatar however it closes", async () => {
+    render(null);
+    await settle();
+    avatar()!.focus();
+    click(avatar());
+    await settle();
+    expect(card()).not.toBeNull();
+    expect(document.activeElement?.getAttribute("data-avatar-tab")).toBe("bot");
+
+    const event = press(document.activeElement, "Escape");
+    expect(event.defaultPrevented).toBe(true);
+    expect(card()).toBeNull();
+    expect(document.activeElement).toBe(avatar());
+    expect(dialogCloses).not.toHaveBeenCalled();
+
+    click(avatar());
+    await settle();
+    click(host.querySelector("[data-panel-scrim]"));
+    expect(card()).toBeNull();
+    expect(document.activeElement).toBe(avatar());
+    // Focus is back where Escape is heard: the next one is the dialog's.
+    press(document.activeElement, "Escape");
+    expect(dialogCloses).toHaveBeenCalledTimes(1);
+  });
+
+  it.each([["data-panel-rename", "Enter"], ["data-panel-rename", "Escape"], ["data-panel-label", "Enter"], ["data-panel-label", "Escape"]])(
+    "gives focus back to the %s button after %s, so the next Escape still works",
+    async (attr, key) => {
+      render(null);
+      await settle();
+      click(host.querySelector(`[${attr}]`));
+      const input = host.querySelector<HTMLInputElement>(`[${attr}-input]`);
+      expect(document.activeElement).toBe(input);
+      press(input, key);
+      await settle();
+      expect(host.querySelector(`[${attr}-input]`)).toBeNull();
+      expect(document.activeElement).toBe(host.querySelector(`[${attr}]`));
+      expect(dialogCloses).not.toHaveBeenCalled();
+      press(document.activeElement, "Escape");
+      expect(dialogCloses).toHaveBeenCalledTimes(1);
+    },
+  );
+});

@@ -1,4 +1,4 @@
-import { useState, type KeyboardEvent } from "react";
+import { useEffect, useRef, useState, type KeyboardEvent } from "react";
 import { ImagePlus, Loader2, Trash2 } from "lucide-react";
 
 import { cn } from "@/lib/cn";
@@ -55,6 +55,11 @@ export function AvatarEditorCard({ bot, activeState, onPatch, onClose }: {
   const { fileRef, crop, uploading, generating, setSavingConnection, busy, error, upload, removeImage, generate } = image;
   const showsImage = crop !== "mascot" && Boolean(bot.avatarUrl);
   const [tab, setTab] = useState<AvatarEditorTab>(showsImage ? "upload" : "bot");
+  const tabsRef = useRef<HTMLDivElement>(null);
+  // The card is a dialog: focus moves into it, onto the tab it opened on, so Escape and Tab work from the start.
+  useEffect(() => {
+    tabsRef.current?.querySelector<HTMLElement>('[aria-selected="true"]')?.focus();
+  }, []);
   const pickMascot = (patch: AvatarPatch) => onPatch(crop === "mascot" ? patch : { ...patch, avatarCrop: "mascot" });
   const body = bot.mascotBody ?? "cursor";
 
@@ -73,7 +78,7 @@ export function AvatarEditorCard({ bot, activeState, onPatch, onClose }: {
       onKeyDown={onKeyDown}
       className="absolute inset-x-[-6px] top-[92px] z-30 overflow-hidden rounded-2xl border border-ink/[0.08] bg-menu text-left shadow-2xl shadow-black/50"
     >
-      <div className="flex items-center gap-0.5 border-b border-ink/[0.06] p-2">
+      <div ref={tabsRef} className="flex items-center gap-0.5 border-b border-ink/[0.06] p-2">
         {TABS.map(([id, label]) => (
           <button
             key={id}
