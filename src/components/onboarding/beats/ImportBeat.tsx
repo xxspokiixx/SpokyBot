@@ -1,6 +1,6 @@
 // "Bring what you already use": the skills and MCP servers another AI tool keeps on this computer, in one step.
 import { useEffect, useState, type ReactNode } from "react";
-import { BookOpen, Check, Plug } from "lucide-react";
+import { BookOpen, Check, Info, Plug } from "lucide-react";
 import { ClaudeMark, CodexMark, CursorMark, PresetProviderMark } from "@/components/ProviderIcons";
 import { track } from "@/lib/analytics";
 import { cn } from "@/lib/cn";
@@ -111,12 +111,13 @@ export function ImportBeat({ onNext, onSkip, setMascot, bump, detection, client,
   };
 
   if (result) {
-    const { line, notes } = importOutcome(result);
+    const { line, notes, done } = importOutcome(result);
     return (
       <div className="flex flex-col">
         <div className="animate-rise mt-4 flex items-start gap-3 rounded-xl border border-hairline/40 bg-card px-3.5 py-3" role="status">
-          <span className="check-in mt-px flex size-5 shrink-0 items-center justify-center rounded-full bg-success/15 text-success">
-            <Check size={12} strokeWidth={3} />
+          <span className={cn("check-in mt-px flex size-5 shrink-0 items-center justify-center rounded-full",
+            done ? "bg-success/15 text-success" : "bg-control text-ink-secondary")}>
+            {done ? <Check size={12} strokeWidth={3} /> : <Info size={12} strokeWidth={2.5} />}
           </span>
           <div className="min-w-0">
             <p className="text-[13.5px] font-medium text-ink">{line}</p>

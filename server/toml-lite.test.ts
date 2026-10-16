@@ -115,6 +115,9 @@ literal = '''
       'a = "\\q"',
       "a.b = 1\na.b.c = 2",
       `a = ${"[".repeat(80)}${"]".repeat(80)}`,
+      `[mcp_servers.evil.command${".a".repeat(60_000)}]\nx = 1`,
+      `${"k.".repeat(40)}k = 1`,
+      `a = { ${"b.".repeat(40)}c = 1 }`,
     ]) {
       expect(() => parseToml(bad), bad).toThrow(TomlError);
     }

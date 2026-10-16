@@ -1,6 +1,6 @@
 import { z } from "zod";
 
-import type { AppConfig } from "../config.ts";
+import { claudeUserMcpEnabled, type AppConfig } from "../config.ts";
 import { applySetupImport, detectSetup, thisMachine, type SetupHost, type SetupMachine } from "../setup-import.ts";
 import type { BusyFlag } from "./config.ts";
 import { PASS, type RouteHandler } from "./table.ts";
@@ -31,6 +31,7 @@ export function createSetupImportRoutes(deps: SetupImportRouteDeps): RouteHandle
     mcpPolicyRefusal: deps.mcpPolicyRefusal,
     persistMcpServers: deps.persistMcpServers,
     mcpConfigBusy: deps.mcpConfigBusy,
+    claudeUserMcp: () => claudeUserMcpEnabled(deps.cfg),
   };
   return async ({ req, res, path, method, auth, json, readBody }) => {
     if (path !== SETUP_IMPORT_PATH) return PASS;

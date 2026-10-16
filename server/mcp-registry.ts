@@ -417,6 +417,12 @@ export function parseMcpServersImport(
   return { ok: true, servers };
 }
 
+/** What Paste config names a server another tool calls `raw`; a name OpenMausBot keeps for itself gets an mcp- prefix. */
+export function importedMcpServerName(raw: string): string {
+  const slug = slugMcpName(raw);
+  return RESERVED_MCP_NAMES.has(slug) ? `mcp-${slug}`.slice(0, 32) : slug;
+}
+
 function slugMcpName(raw: string): string {
   const slug = raw.trim().toLowerCase().replace(/[^a-z0-9_-]+/g, "-").replace(/^-+|-+$/g, "").slice(0, 32);
   return /^[a-z]/.test(slug) ? slug : slug ? `mcp-${slug}`.slice(0, 32) : "";

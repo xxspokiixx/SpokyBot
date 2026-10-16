@@ -68,8 +68,9 @@ export function toolsSummary(detection: SetupDetection): string {
     : t("onboarding.import.toolsFrom", { count: detection.tools.length, sources });
 }
 
-/** One line for what was added, and a note for anything left out. */
-export function importOutcome(result: SetupImportResult): { line: string; notes: string[] } {
+/** One line for what was added, and a note for anything left out. `done` is false when nothing came in but something
+ * was left out, so the line is not shown as a success. */
+export function importOutcome(result: SetupImportResult): { line: string; notes: string[]; done: boolean } {
   const skills = result.skills?.added.length ?? 0;
   const tools = result.tools?.added.length ?? 0;
   const parts = [
@@ -84,10 +85,13 @@ export function importOutcome(result: SetupImportResult): { line: string; notes:
   };
   if (result.skills?.review?.length) notes.push(t("onboarding.import.review", { names: named(result.skills.review.map((name) => ({ name }))) }));
   skipped(result.skills?.skipped, "conflict", "onboarding.import.conflict");
-  skipped(result.skills?.skipped, "failed", "onboarding.import.failed");
+  skipped(result.tools?.skipped, "conflict", "onboarding.import.toolConflict");
+  skipped([...(result.skills?.skipped ?? []), ...(result.tools?.skipped ?? [])], "failed", "onboarding.import.failed");
   if (result.skills?.filesLeftOut) notes.push(t("onboarding.import.filesLeftOut"));
   skipped(result.tools?.skipped, "limit", "onboarding.import.limit");
   skipped(result.tools?.skipped, "policy", "onboarding.import.policy");
   skipped(result.tools?.skipped, "busy", "onboarding.import.busy");
-  return { line: parts.length ? t("onboarding.import.added", { list: list(parts) }) : t("onboarding.import.nothingNew"), notes };
+  const leftOut = Boolean(result.skills?.skipped.length || result.tools?.skipped.length);
+  if (parts.length) return { line: t("onboarding.import.added", { list: list(parts) }), notes, done: true };
+  return { line: leftOut ? t("onboarding.import.nothingAdded") : t("onboarding.import.nothingNew"), notes, done: !leftOut };
 }

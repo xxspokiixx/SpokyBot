@@ -151,6 +151,14 @@ describe("the import step", () => {
     expect(props.onNext).toHaveBeenCalledOnce();
   });
 
+  it("shows a result where nothing came in, because it failed, without the success mark", () => {
+    const failed = render({ result: { skills: { added: [], present: [], skipped: [{ name: "pdf", reason: "failed" }], filesLeftOut: 0, review: [] } } });
+    expect(failed.html).toContain("Nothing new was added.");
+    expect(failed.html).toContain("Couldn&#x27;t bring in pdf. Try again later from Settings → Replay welcome tour.");
+    expect(failed.html).not.toContain("bg-success/15");
+    expect(render({ result: BROUGHT }).html).toContain("bg-success/15");
+  });
+
   it("does not move on by itself when it comes back to a result", () => {
     vi.useFakeTimers();
     render({ result: BROUGHT });

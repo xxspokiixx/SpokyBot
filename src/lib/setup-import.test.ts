@@ -89,25 +89,35 @@ describe("what the step says", () => {
     expect(importOutcome({
       skills: { added: ["pdf", "review"], present: [], skipped: [], filesLeftOut: 0, review: [] },
       tools: { added: ["notion"], present: [], skipped: [] },
-    })).toEqual({ line: "Added 2 skills and 1 tool.", notes: [] });
+    })).toEqual({ line: "Added 2 skills and 1 tool.", notes: [], done: true });
     expect(importOutcome({ skills: { added: ["pdf"], present: [], skipped: [], filesLeftOut: 0, review: [] } }).line).toBe("Added 1 skill.");
-    expect(importOutcome({ tools: { added: [], present: ["notion"], skipped: [] } })).toEqual({ line: "All of it was already here.", notes: [] });
+    expect(importOutcome({ tools: { added: [], present: ["notion"], skipped: [] } })).toEqual({ line: "All of it was already here.", notes: [], done: true });
     expect(importOutcome({
       skills: { added: ["pdf", "deploy"], present: [], skipped: [{ name: "review", reason: "conflict" }, { name: "lint", reason: "failed" }], filesLeftOut: 2, review: ["deploy"] },
       tools: { added: ["a", "b", "c", "d"], present: [], skipped: [
         { name: "e", reason: "limit" }, { name: "f", reason: "limit" }, { name: "g", reason: "policy" }, { name: "h", reason: "busy" },
+        { name: "github", reason: "conflict" }, { name: "sentry", reason: "failed" },
       ] },
     })).toEqual({
       line: "Added 2 skills and 4 tools.",
+      done: true,
       notes: [
         "deploy: switched off until you check what the scan found, in a bot's Skills settings.",
         "Skipped review: a different skill with that name is already here.",
-        "Couldn't copy lint. Try again from the bot's Skills settings.",
+        "Skipped github: a different MCP server with that name is already here.",
+        "Couldn't bring in lint and sentry. Try again later from Settings → Replay welcome tour.",
         "Large or non-text files in skill folders were left out.",
         "e and f didn't fit: your list of MCP servers is full.",
         "Your organization doesn't allow g.",
         "Your MCP servers were being changed. Add h later in Plugins → MCP servers.",
       ],
     });
+  });
+
+  it("never calls it a success when nothing came in because everything failed or was left out", () => {
+    expect(importOutcome({
+      skills: { added: [], present: [], skipped: [{ name: "pdf", reason: "failed" }], filesLeftOut: 0, review: [] },
+      tools: { added: [], present: ["notion"], skipped: [{ name: "linear", reason: "busy" }] },
+    })).toMatchObject({ line: "Nothing new was added.", done: false });
   });
 });

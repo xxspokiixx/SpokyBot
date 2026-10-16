@@ -11,6 +11,8 @@ const isTable = (value: unknown): value is Table => typeof value === "object" &&
 const BARE_KEY = /[A-Za-z0-9_-]/;
 const VALUE_END = /[\s,\]}#]/;
 const MAX_DEPTH = 64;
+/** Dotted keys and table headers nest too: without a cap one header of many parts is a table too deep to walk. */
+const MAX_KEY_PARTS = 16;
 
 export function parseToml(source: string): Table {
   const text = source.charCodeAt(0) === 0xfeff ? source.slice(1) : source;
@@ -158,6 +160,7 @@ export function parseToml(source: string): Table {
       parts.push(simpleKey());
       spaces();
       if (text[i] !== ".") return parts;
+      if (parts.length >= MAX_KEY_PARTS) fail("key has too many parts");
       i += 1;
     }
   }

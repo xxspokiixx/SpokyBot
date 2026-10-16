@@ -13,7 +13,7 @@ import type { SetupDetection, SetupImportRequest, SetupImportResult, SetupSource
 import { holdsCredential } from "../shared/redact.ts";
 import { parseSkillMd, scanSkillText, SKILL_FILE_MAX_BYTES, type ParsedSkill } from "../shared/skill-md.ts";
 import { importedSkillIntact, readImportedSkills, storeImportedSkills, type ImportedSkillEntry, type ImportedSkillInput } from "./imported-skills.ts";
-import { isRemoteMcpServer, MAX_MCP_SERVERS, parseMcpServersImport, parseStoredMcpServer, type StoredMcpServer } from "./mcp-registry.ts";
+import { importedMcpServerName, isRemoteMcpServer, MAX_MCP_SERVERS, parseMcpServersImport, parseStoredMcpServer, type StoredMcpServer } from "./mcp-registry.ts";
 import { parseToml } from "./toml-lite.ts";
 
 /** The file operations finding and copying use, so tests can see every path touched. Each answers null on failure. */
@@ -40,6 +40,8 @@ export interface SetupHost {
   mcpPolicyRefusal(name: string, server: object): string | undefined;
   persistMcpServers(next: Record<string, unknown>): void;
   mcpConfigBusy: { get(): boolean; set(busy: boolean): void };
+  /** "Also use my Claude Code MCP servers" is on: Claude bots already run Claude Code's own, so they are not offered. */
+  claudeUserMcp?(): boolean;
 }
 
 const nodeFs: SetupFs = {
@@ -91,8 +93,8 @@ export function thisMachine(): SetupMachine {
 type ToolFormat = "claudeJson" | "json" | "toml";
 
 const CONFIG_MAX_BYTES = 1024 * 1024;
-/** ~/.claude.json also keeps every project's history, so it can be large; only its mcpServers member is read. */
-const CLAUDE_JSON_MAX_BYTES = 64 * 1024 * 1024;
+/** ~/.claude.json also keeps every project's history, so it can be large; only its mcpServers member is parsed. */
+const CLAUDE_JSON_MAX_BYTES = 256 * 1024 * 1024;
 
 /** Every path finding reads, and nothing else. */
 export function setupPaths(machine: Pick<SetupMachine, "home" | "platform" | "env">) {
@@ -520,6 +522,32 @@ export function withoutJsonComments(text: string): string {
   return out;
 }
 
+/** Cursor and others accept a comma before a closing bracket; JSON.parse does not. */
+export function withoutTrailingCommas(text: string): string {
+  let out = "";
+  for (let at = 0; at < text.length;) {
+    const char = text[at]!;
+    if (char === '"') {
+      const end = skipString(text, at);
+      if (end < 0) return out + text.slice(at);
+      out += text.slice(at, end);
+      at = end;
+      continue;
+    }
+    if (char === ",") {
+      let next = at + 1;
+      while (next < text.length && /\s/.test(text[next]!)) next++;
+      if (text[next] === "}" || text[next] === "]") {
+        at += 1;
+        continue;
+      }
+    }
+    out += char;
+    at++;
+  }
+  return out;
+}
+
 /** Strings, numbers and booleans as text; anything else is dropped. */
 function textValues(value: unknown): Record<string, string> | undefined {
   if (!isRecord(value)) return undefined;
@@ -568,7 +596,7 @@ function toolEntries(machine: SetupMachine, tool: ReturnType<typeof setupPaths>[
       const servers = topLevelJsonMember(text, "mcpServers");
       return isRecord(servers) ? servers : null;
     }
-    const parsed: unknown = tool.format === "toml" ? parseToml(text) : JSON.parse(withoutJsonComments(text));
+    const parsed: unknown = tool.format === "toml" ? parseToml(text) : JSON.parse(withoutTrailingCommas(withoutJsonComments(text)));
     const servers = isRecord(parsed) ? parsed[tool.format === "toml" ? "mcp_servers" : "mcpServers"] : undefined;
     return isRecord(servers) ? servers : null;
   } catch {
@@ -576,9 +604,21 @@ function toolEntries(machine: SetupMachine, tool: ReturnType<typeof setupPaths>[
   }
 }
 
+/** One tool's entry as Paste config reads it; null for one it cannot, which leaves the others alone. */
+function foundTool(source: SetupSource, rawName: string, raw: Record<string, unknown>): FoundTool | null {
+  try {
+    const parsed = parseMcpServersImport(JSON.stringify({ mcpServers: { [importedMcpServerName(rawName)]: pasteEntry(source, raw) } }));
+    if (!parsed.ok) return null;
+    const [name, server] = Object.entries(parsed.servers)[0]!;
+    return { name, source, server, identity: identity(server) };
+  } catch {
+    return null;
+  }
+}
+
 /** Every server the tools list, normalised and switched off by Paste config's parser, sorted into new, already here,
- * and refused by the organization; a server two tools list is kept once. */
-function findTools(machine: SetupMachine, current: Record<string, unknown>, refusal: SetupHost["mcpPolicyRefusal"]) {
+ * named like a different one here, and refused by the organization; a server two tools list is kept once. */
+function findTools(machine: SetupMachine, current: Record<string, unknown>, host: Pick<SetupHost, "mcpPolicyRefusal" | "claudeUserMcp">) {
   const existing = Object.entries(current).flatMap(([name, raw]) => {
     const parsed = parseStoredMcpServer(name, raw);
     return parsed.ok ? [identity(parsed.server)] : [];
@@ -589,45 +629,54 @@ function findTools(machine: SetupMachine, current: Record<string, unknown>, refu
   const seenIds = new Set<string>();
   const fresh: FoundTool[] = [];
   const present: FoundTool[] = [];
+  const conflicts: FoundTool[] = [];
   const refused: FoundTool[] = [];
+  const inPlace = host.claudeUserMcp?.() === true;
   for (const tool of setupPaths(machine).tools) {
+    if (inPlace && tool.source === "claudeCode") continue;
     const entries = toolEntries(machine, tool);
     for (const [rawName, raw] of Object.entries(entries ?? {})) {
       if (!isRecord(raw)) continue;
-      const parsed = parseMcpServersImport(JSON.stringify({ mcpServers: { [rawName]: pasteEntry(tool.source, raw) } }));
-      if (!parsed.ok) continue;
-      const [name, server] = Object.entries(parsed.servers)[0]!;
-      const found: FoundTool = { name, source: tool.source, server, identity: identity(server) };
-      if (seenNames.has(name) || seenIds.has(found.identity)) continue;
-      seenNames.add(name);
+      const found = foundTool(tool.source, rawName, raw);
+      if (!found || seenNames.has(found.name) || seenIds.has(found.identity)) continue;
+      seenNames.add(found.name);
       seenIds.add(found.identity);
-      if (takenNames.has(name) || takenIds.has(found.identity)) present.push(found);
-      else if (refusal(name, server)) refused.push(found);
+      if (takenIds.has(found.identity)) present.push(found);
+      else if (takenNames.has(found.name)) conflicts.push(found);
+      else if (host.mcpPolicyRefusal(found.name, found.server)) refused.push(found);
       else fresh.push(found);
     }
   }
-  return { fresh, present, refused };
+  return { fresh, present, conflicts, refused };
 }
 
 function importTools(machine: SetupMachine, host: SetupHost): NonNullable<SetupImportResult["tools"]> {
   const skipped = (tools: FoundTool[], reason: ToolSkip) => tools.map((tool) => ({ name: tool.name, reason }));
   // Single-flight with the MCP servers routes: a read of the list must not interleave with another save.
   if (host.mcpConfigBusy.get()) {
-    return { added: [], present: [], skipped: skipped(findTools(machine, host.mcpServers(), host.mcpPolicyRefusal).fresh, "busy") };
+    return { added: [], present: [], skipped: skipped(findTools(machine, host.mcpServers(), host).fresh, "busy") };
   }
   host.mcpConfigBusy.set(true);
   try {
     const current = host.mcpServers();
-    const { fresh, present, refused } = findTools(machine, current, host.mcpPolicyRefusal);
+    const { fresh, present, conflicts, refused } = findTools(machine, current, host);
     const room = Math.max(0, MAX_MCP_SERVERS - Object.keys(current).length);
     const adding = fresh.slice(0, room);
+    let saved = true;
     if (adding.length) {
-      host.persistMcpServers({ ...current, ...Object.fromEntries(adding.map((tool) => [tool.name, { ...tool.server, enabled: false }])) });
+      try {
+        host.persistMcpServers({ ...current, ...Object.fromEntries(adding.map((tool) => [tool.name, { ...tool.server, enabled: false }])) });
+      } catch {
+        saved = false;
+      }
     }
     return {
-      added: adding.map((tool) => tool.name),
+      added: saved ? adding.map((tool) => tool.name) : [],
       present: present.map((tool) => tool.name),
-      skipped: [...skipped(fresh.slice(room), "limit"), ...skipped(refused, "policy")],
+      skipped: [
+        ...(saved ? [] : skipped(adding, "failed")), ...skipped(fresh.slice(room), "limit"), ...skipped(conflicts, "conflict"),
+        ...skipped(refused, "policy"),
+      ],
     };
   } finally {
     host.mcpConfigBusy.set(false);
@@ -642,14 +691,36 @@ export function detectSetup(machine: SetupMachine, host: SetupHost): SetupDetect
   const skills = findSkills(machine).filter((skill) => freshSkill(skill, index[skill.name])).map(({ name, source }) => ({ name, source }));
   const current = host.mcpServers();
   const tools = Object.keys(current).length < MAX_MCP_SERVERS
-    ? findTools(machine, current, host.mcpPolicyRefusal).fresh.map(({ name, source }) => ({ name, source }))
+    ? findTools(machine, current, host).fresh.map(({ name, source }) => ({ name, source }))
     : [];
   return { skills, tools };
 }
 
+/** Each kind on its own: one that fails reports what it was bringing in as failed, and the other still comes in. */
 export function applySetupImport(machine: SetupMachine, host: SetupHost, request: SetupImportRequest): SetupImportResult {
+  const failed = <Reason extends string>(names: () => string[], reason: Reason) => {
+    try {
+      return names().map((name) => ({ name, reason }));
+    } catch {
+      return [];
+    }
+  };
+  const skills = (): NonNullable<SetupImportResult["skills"]> => {
+    try {
+      return importSkills(machine);
+    } catch {
+      return { added: [], present: [], skipped: failed(() => findSkills(machine).map((skill) => skill.name), "failed"), filesLeftOut: 0, review: [] };
+    }
+  };
+  const tools = (): NonNullable<SetupImportResult["tools"]> => {
+    try {
+      return importTools(machine, host);
+    } catch {
+      return { added: [], present: [], skipped: failed(() => findTools(machine, host.mcpServers(), host).fresh.map((tool) => tool.name), "failed") };
+    }
+  };
   return {
-    ...(request.skills ? { skills: importSkills(machine) } : {}),
-    ...(request.tools ? { tools: importTools(machine, host) } : {}),
+    ...(request.skills ? { skills: skills() } : {}),
+    ...(request.tools ? { tools: tools() } : {}),
   };
 }

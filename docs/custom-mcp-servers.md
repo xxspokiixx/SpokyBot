@@ -166,9 +166,15 @@ OpenMausBot, and only for the desktop app's own window there, it reads the
 Claude Desktop, Cursor (`~/.cursor/mcp.json`) and Gemini CLI
 (`~/.gemini/settings.json`), and the `[mcp_servers.*]` tables of Codex's
 `config.toml`. Each server goes through Paste config's parser, switched off;
-one already here by name, command or address is left alone, and the list stops
-at its limit. Token variables (Codex `bearer_token_env_var`) are not resolved:
-add the token as a header when you test the server.
+one already here by command or address is left alone, a different server
+under a name already taken is skipped and named in the result, a name
+OpenMausBot keeps for itself (`browser`, `computer`, `data`…) gets an `mcp-`
+prefix, a trailing comma is accepted, and the list stops at its limit. One
+entry or file it cannot read drops only itself, and a kind that cannot be
+saved is reported as failed while the other still comes in. With **Also use
+my Claude Code MCP servers** on, Claude Code's own servers are not offered:
+Claude bots already run them. Token variables (Codex `bearer_token_env_var`)
+are not resolved: add the token as a header when you test the server.
 
 The step also brings in the person's own skills (`~/.claude/skills`,
 `~/.codex/skills`). Each one is copied once, read-only, into

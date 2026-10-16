@@ -61,7 +61,7 @@ function machineFor(home: string, platform: NodeJS.Platform = "darwin", env: Rec
   return { machine, ops, touched: () => ops.map((entry) => entry.path) };
 }
 
-function hostFor(options: { servers?: Record<string, unknown>; refuse?: string[] } = {}) {
+function hostFor(options: { servers?: Record<string, unknown>; refuse?: string[]; claudeUserMcp?: boolean; saveFails?: boolean } = {}) {
   let servers = options.servers ?? {};
   let busy = false;
   const saves: Array<Record<string, unknown>> = [];
@@ -69,10 +69,12 @@ function hostFor(options: { servers?: Record<string, unknown>; refuse?: string[]
     mcpServers: () => servers,
     mcpPolicyRefusal: (name) => (options.refuse?.includes(name) ? "Not on your organization's approved list." : undefined),
     persistMcpServers: (next) => {
+      if (options.saveFails) throw new Error("config.json could not be written");
       servers = next;
       saves.push(next);
     },
     mcpConfigBusy: { get: () => busy, set: (value) => { busy = value; } },
+    claudeUserMcp: () => options.claudeUserMcp === true,
   };
   return { host, saves, servers: () => servers, busy: { set: (value: boolean) => { busy = value; } } };
 }
@@ -247,6 +249,40 @@ describe("finding what another AI tool already set up on this computer", () => {
     put(home, ".gemini/settings.json", JSON.stringify({ mcpServers: { ok: { command: "ok-tool" }, bad: { args: ["no command"] }, list: [] } }));
     const { machine } = machineFor(home);
     expect(detectSetup(machine, hostFor().host).tools).toEqual([{ name: "ok", source: "gemini" }]);
+  });
+
+  it("reads past a hostile config.toml: one table header 60,000 levels deep only drops that file", () => {
+    const home = fixtureHome();
+    put(home, ".codex/config.toml", `[mcp_servers.evil.command${".a".repeat(60_000)}]\nx = 1\n[mcp_servers.fine]\ncommand = "fine-tool"\n`);
+    put(home, ".gemini/settings.json", JSON.stringify({ mcpServers: { ok: { command: "ok-tool" } } }));
+    put(home, ".claude/skills/pdf/SKILL.md", skillMd("pdf"));
+    const { machine } = machineFor(home);
+    const { host } = hostFor();
+    expect(detectSetup(machine, host).tools).toEqual([{ name: "ok", source: "gemini" }]);
+    expect(applySetupImport(machine, host, { skills: true, tools: true })).toMatchObject({ skills: { added: ["pdf"] }, tools: { added: ["ok"] } });
+  });
+
+  it("accepts a trailing comma, gives a name OpenMausBot keeps for itself an mcp- prefix, and calls a different server by a taken name a conflict", () => {
+    const home = fixtureHome();
+    put(home, ".cursor/mcp.json", '{ "mcpServers": { "notion": { "url": "https://mcp.notion.com/mcp", }, }, }');
+    put(home, ".gemini/settings.json", JSON.stringify({ mcpServers: { browser: { command: "my-browser-tool" }, github: { command: "docker", args: ["run", "github-mcp"] } } }));
+    const { machine } = machineFor(home);
+    const github = { command: "npx", args: ["-y", "@modelcontextprotocol/server-github"], env: {}, enabled: true };
+    const { host, servers } = hostFor({ servers: { github } });
+    expect(detectSetup(machine, host).tools).toEqual([{ name: "notion", source: "cursor" }, { name: "mcp-browser", source: "gemini" }]);
+    expect(applySetupImport(machine, host, { tools: true }).tools).toEqual({
+      added: ["notion", "mcp-browser"], present: [], skipped: [{ name: "github", reason: "conflict" }],
+    });
+    expect(servers().github).toEqual(github);
+  });
+
+  it("leaves Claude Code's own servers out while Claude bots already run them in place", () => {
+    const home = fixtureHome();
+    plantTools(home);
+    const { machine } = machineFor(home);
+    const sources = new Set(detectSetup(machine, hostFor({ claudeUserMcp: true }).host).tools.map((tool) => tool.source));
+    expect(sources.has("claudeCode")).toBe(false);
+    expect(sources.has("cursor")).toBe(true);
   });
 
   it("leaves out servers already here by name, command or address, ones the organization refuses, and all of them when the list is full", () => {
@@ -582,6 +618,25 @@ describe("bringing MCP servers in", () => {
     expect(Object.keys(servers())).toHaveLength(20);
     expect((servers().notion as { enabled: boolean }).enabled).toBe(true);
     expect(applySetupImport(machine, host, { tools: true }).tools?.added).toEqual([]);
+  });
+
+  it("reports what could not be saved as failed, and the other kind still comes in", () => {
+    const home = fixtureHome();
+    plantTools(home);
+    put(home, ".claude/skills/pdf/SKILL.md", skillMd("pdf"));
+    const { machine } = machineFor(home);
+    const tools = applySetupImport(machine, hostFor({ saveFails: true }).host, { skills: true, tools: true });
+    expect(tools.skills?.added).toEqual(["pdf"]);
+    expect(tools.tools?.added).toEqual([]);
+    expect(tools.tools?.skipped.map((entry) => entry.reason)).toEqual(Array(9).fill("failed"));
+    // The skills kind failing whole (its folder is not a folder) leaves the tools alone.
+    rmSync(IMPORTED_SKILLS_DIR, { recursive: true, force: true });
+    put(dirname(IMPORTED_SKILLS_DIR), "imported-skills", "not a folder");
+    put(home, ".claude/skills/lint/SKILL.md", skillMd("lint"));
+    const { host } = hostFor();
+    const skills = applySetupImport(machine, host, { skills: true, tools: true });
+    expect(skills.skills).toEqual({ added: [], present: [], skipped: [{ name: "lint", reason: "failed" }, { name: "pdf", reason: "failed" }], filesLeftOut: 0, review: [] });
+    expect(skills.tools?.added).toHaveLength(9);
   });
 
   it("waits out another MCP change instead of interleaving with it", () => {
