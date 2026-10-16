@@ -4,6 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import vm from "node:vm";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
+import { cloudTarget } from "./cloud-account.mjs";
 import { myCloudOrigin, rememberedCloudHome, savedCloudHomeOrigin } from "./cloud-home.mjs";
 import { cloudPageSenderAllowed } from "./cloud-move.mjs";
 import environments from "./environments.cjs";
@@ -50,7 +51,7 @@ function mainRule() {
     cloudAccount: { homeTarget: () => ({ origin: CLOUD }), state: () => ({ status: "connected", account: { id: "a1" } }) },
     rememberedHome: null, savedCloudHomeOrigin, cloudSignInRestored: true,
     // ensureCloudAccount's world: a packaged app, and a sign-in client whose state the test sets.
-    app: { isPackaged: true, getPath: () => "/unused", getVersion: () => "1.0.0" }, process: { platform: "darwin" },
+    app: { isPackaged: true, getPath: () => "/unused", getVersion: () => "1.0.0" }, process: { platform: "darwin", env: {} }, cloudTarget,
     path: { join: (...parts) => parts.join("/") }, os: { hostname: () => "mac" }, shell: {}, safeStorage: {},
     createCloudAccountStore: () => ({}), rememberCloudHome: () => {}, rememberedCloudHome, computerSharing: null,
     sendUpdaterState: () => {}, refreshCloudMenus: () => {}, announceCloudReady: () => {},

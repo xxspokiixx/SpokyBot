@@ -4,7 +4,7 @@ import { createServer } from "node:http";
 import { readFileSync } from "node:fs";
 import vm from "node:vm";
 import { createCloudAccountClient } from "./cloud-account.mjs";
-import { CLOUD_HOME_NAME, cloudHomeConnectUrl, cloudPlanDisk, isCloudHomeEntry, parseCloudCredit, parseCloudOffer, parseCloudPurchase, parseCloudSummary, parseCloudTrial, parsePairingGrant, parsePublicOffer, rememberedCloudHome, withCloudHome, withoutTrial } from "./cloud-home.mjs";
+import { CLOUD_HOME_NAME, cloudHomeConnectUrl, cloudPlanDisk, isCloudHomeEntry, parseCloudCredit, parseCloudOffer, parseCloudPurchase, parseCloudSummary, parseCloudTrial, parsePairingGrant, parsePublicOffer, rememberedCloudHome, savedCloudHomeOrigin, withCloudHome, withoutTrial } from "./cloud-home.mjs";
 import environments from "./environments.cjs";
 
 const NOW = 1_800_000_000_000;
@@ -46,9 +46,27 @@ test("the machine is listed under Servers once, never renamed and never made act
   assert.equal(withCloudHome(local, null, () => "x"), local);
   assert.equal(withCloudHome(local, { status: "provisioning", origin }, () => "x"), local);
   const listed = withCloudHome(local, { status: "ready", origin }, () => "cloud-1");
-  assert.deepEqual(listed, { environments: [{ id: "cloud-1", kind: "remote", name: CLOUD_HOME_NAME, origin }], activeId: environments.LOCAL_ID });
+  assert.deepEqual(listed, { environments: [{ id: "cloud-1", kind: "remote", name: CLOUD_HOME_NAME, origin, home: true }], activeId: environments.LOCAL_ID });
   const renamed = { ...listed, environments: [{ ...listed.environments[0], name: "Work cloud" }] };
   assert.equal(withCloudHome(renamed, { status: "stopped", origin }, () => "cloud-2"), renamed);
+  assert.equal(savedCloudHomeOrigin(renamed), origin, "the hint follows the entry this app listed, whatever it is called");
+});
+
+test("the name and colour chosen while it was set up are what it is listed under; anything else is My Cloud in no colour", () => {
+  const local = { environments: [], activeId: environments.LOCAL_ID };
+  assert.deepEqual(withCloudHome(local, { status: "ready", origin }, () => "cloud-1", { name: "Studio", color: "teal" }).environments,
+    [{ id: "cloud-1", kind: "remote", name: "Studio", origin, color: "teal", home: true }]);
+  assert.deepEqual(withCloudHome(local, { status: "ready", origin }, () => "cloud-1", { name: "", color: "#ff0000" }).environments,
+    [{ id: "cloud-1", kind: "remote", name: CLOUD_HOME_NAME, origin, home: true }]);
+  const saved = environments.parseEnvironments(environments.serializeEnvironments(withCloudHome(local, { status: "ready", origin }, () => "cloud-1", { name: "Studio", color: "teal" })));
+  assert.deepEqual(saved.environments, [{ id: "cloud-1", kind: "remote", name: "Studio", origin, color: "teal", home: true }]);
+  assert.deepEqual(environments.parseEnvironments({ environments: [{ id: "c", origin, color: "url(javascript:x)", home: "yes" }] }).environments,
+    [{ id: "c", kind: "remote", name: new URL(origin).host, origin }], "a colour is one of six names; anything else is dropped");
+  const recolored = environments.withEnvironmentLook(saved, origin, { name: "Studio two", color: "red" });
+  assert.deepEqual(recolored.environments[0], { id: "cloud-1", kind: "remote", name: "Studio two", origin, color: "red", home: true });
+  assert.equal(environments.withEnvironmentLook(recolored, origin, { name: "Studio two", color: "red" }), recolored, "nothing to change: the same state");
+  assert.equal(environments.withEnvironmentLook(recolored, "https://elsewhere.example", { name: "X", color: "red" }), recolored);
+  assert.deepEqual(environments.workspaceSummary({ ...recolored, activeId: "cloud-1" }), { local: false, name: "Studio two", origin, color: "red" });
 });
 
 test("connecting uses the pairing page with the code in the hash, or the machine itself", () => {
@@ -162,11 +180,11 @@ test("main lists the machine from verified states only, and connects without a d
   const start = source.indexOf("function rememberCloudHome("), end = source.indexOf("async function forgetEnvironment(", start);
   assert.ok(start > 0 && end > start);
   const persisted = [], navigated = [], dialogs = [], probes = [];
-  let client, signedIn = false;
+  let client, signedIn = false, look = null;
   const context = vm.createContext({
     environmentsState: { environments: [], activeId: environments.LOCAL_ID },
     persistEnvironments: next => { persisted.push(next); context.environmentsState = next; },
-    navigateMainWindow: url => navigated.push(url), withCloudHome, cloudHomeConnectUrl, withActive: environments.withActive,
+    navigateMainWindow: url => navigated.push(url), withCloudHome, cloudHomeConnectUrl, withActive: environments.withActive, cloudLook: { pending: () => look },
     randomUUID: () => "cloud-home-id", slog: () => {}, Date: { now: () => NOW }, AbortSignal,
     session: { defaultSession: { fetch: async (url, init) => { probes.push([url, init.credentials]); return { ok: signedIn, json: async () => ({ kind: signedIn ? "session" : undefined }) }; } } },
     dialog: { showMessageBox: async () => { dialogs.push(1); return { response: 1 }; } },
@@ -176,14 +194,18 @@ test("main lists the machine from verified states only, and connects without a d
   context.rememberCloudHome({ status: "unavailable", machine: { status: "ready", origin } });
   context.rememberCloudHome({ status: "signed-out" });
   assert.deepEqual(persisted, []);
+  look = { name: "Studio", color: "purple" };
   context.rememberCloudHome({ status: "connected", machine: { status: "ready", origin } });
   context.rememberCloudHome({ status: "connected", machine: { status: "ready", origin } });
   assert.equal(persisted.length, 1);
   assert.equal(context.environmentsState.activeId, environments.LOCAL_ID);
+  assert.deepEqual([context.environmentsState.environments[0].name, context.environmentsState.environments[0].color], ["Studio", "purple"], "listed as named while it was set up");
+  context.environmentsState = { environments: [], activeId: environments.LOCAL_ID }; look = null;
 
-  let minted = 0;
-  client = { homeTarget: () => ({ origin }), pairHome: async () => { minted++; return { origin, code, expiresAt: NOW + 1 }; }, state: () => ({ status: "connected" }) };
+  let minted = 0, done = 0;
+  client = { homeTarget: () => ({ origin }), pairHome: async () => { minted++; return { origin, code, expiresAt: NOW + 1 }; }, state: () => ({ status: "connected" }), checkoutDone: () => done++ };
   await context.connectCloudHome();
+  assert.equal(done, 1, "opened: the purchase is over");
   assert.deepEqual(probes, [[`${origin}/api/auth/session`, "include"]]);
   assert.deepEqual(navigated, [`${origin}/pair#code=${code}`]);
   assert.equal(context.environmentsState.activeId, "cloud-home-id");

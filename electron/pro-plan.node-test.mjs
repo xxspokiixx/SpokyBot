@@ -6,6 +6,7 @@ import {
   PRO_PLAN_ENV, PRO_PLAN_MESSAGE, createProPlanRelay, liveCallsAllowed,
   proPlanEnvironment, proPlanFromEnvironment, proPlanFromMessage, proPlanMessage,
 } from "./pro-plan.mjs";
+import { cloudTarget } from "./cloud-account.mjs";
 
 const active = tier => ({ plan: "pro", ...(tier ? { tier } : {}), status: "active", expiresAt: 1_900_000_000_000, version: 2 });
 const lapsed = { plan: "pro", tier: "pro", status: "inactive", expiresAt: null, version: 3 };
@@ -127,7 +128,7 @@ test("main starts its server with the answer and hands it every change", () => {
   const context = vm.createContext({
     proPlanRelay: createProPlanRelay(), serverProc: null, slog: line => logged.push(line),
     cloudAccount: null, desktopRemoteAccess: false, mainWindow: null, computerSharing: null,
-    app: { isPackaged: true, getPath: () => "/unused", getVersion: () => "1.0.0" }, process: { platform: "darwin" },
+    app: { isPackaged: true, getPath: () => "/unused", getVersion: () => "1.0.0" }, process: { platform: "darwin", env: {} }, cloudTarget,
     path: { join: (...parts) => parts.join("/") }, os: { hostname: () => "mac" }, shell: {}, safeStorage: {},
     createCloudAccountStore: () => ({}), rememberCloudHome: () => {}, rememberedCloudHome: () => null, rememberedHome: null, sendUpdaterState: () => {},
     refreshCloudMenus: () => {}, announceCloudReady: () => {},

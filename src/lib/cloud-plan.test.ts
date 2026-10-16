@@ -3,7 +3,7 @@ import type { CloudAccountState, CloudPlanSnapshot } from "../../electron/cloud-
 import { CHECKOUT_SOURCES } from "../../electron/cloud-account.mjs";
 import type { CloudCredit, CloudOffer, CloudOfferPlan, CloudTrial } from "../../electron/cloud-home.mjs";
 import { buyOfferAllowed, CLOUD_SOURCES, cloudAddView, cloudCreditLine, cloudIntroView, cloudNoticeKind, cloudPlanLine, cloudPlanView, cloudTrialNotice, cloudTrialView,
-  moneyBackLine, offerPlan, offerTrialDays, personalAmount, planRow, trialTimeline, usd } from "./cloud-plan";
+  cloudBeatTerms, dueToday, moneyBackLine, offerPlan, offerTrialDays, personalAmount, planRow, planTerms, sameTerms, trialTimeline, usd, type CloudSignInPhase } from "./cloud-plan";
 import { setLocale } from "./i18n";
 
 const DAY = 86_400_000;
@@ -116,16 +116,28 @@ const NOW = new Date(2026, 9, 8, 12).getTime();
 describe("what is for sale, as the Admin says", () => {
   it("the sources the app counts are main's own allow-list", () => {
     expect([...CLOUD_SOURCES]).toEqual([...CHECKOUT_SOURCES]);
+    expect(CLOUD_SOURCES, "the welcome's Cloud beat").toContain("app_onboarding");
   });
 
-  it("each plan's row leads with what differs, then the machine; Pro is the most popular; the price is the Admin's", () => {
-    expect(PLANS.map(planRow)).toEqual([
-      { tier: "personal", name: "Personal", price: "$29/month + tax", popular: false, details: { main: "1 cloud computer at once · 10 GB storage", machine: "1 vCPU · 1 GB memory · 50 cloud computer hours a month" } },
-      { tier: "pro", name: "Pro", price: "$49/month + tax", popular: true, details: { main: "Up to 4 cloud computers at once · 40 GB storage, grows to 50 GB", machine: "4 vCPU · 4 GB memory · 200 cloud computer hours a month" } },
-      { tier: "max", name: "Max", price: "$99/month + tax", popular: false, details: { main: "Up to 8 cloud computers at once · 80 GB storage, grows to 100 GB", machine: "8 vCPU · 8 GB memory · 400 cloud computer hours a month" } },
+  it("each plan card: its name, the Admin's price, cloud computers at once and three allowance chips; Most popular is the Admin's recommended plan", () => {
+    expect(PLANS.map(plan => planRow(plan, OFFER.recommended))).toEqual([
+      { tier: "personal", name: "Personal", price: "$29", popular: false, line: "1 cloud computer at once", chips: ["1 CPU · 1 GB", "10 GB storage", "50 h cloud computers"] },
+      { tier: "pro", name: "Pro", price: "$49", popular: true, line: "Up to 4 cloud computers at once", chips: ["4 CPU · 4 GB", "40–50 GB storage", "200 h cloud computers"] },
+      { tier: "max", name: "Max", price: "$99", popular: false, line: "Up to 8 cloud computers at once", chips: ["8 CPU · 8 GB", "80–100 GB storage", "400 h cloud computers"] },
     ]);
-    expect(planRow({ tier: "team", label: "Team", amount: 19900 })).toEqual({ tier: "team", name: "Team", price: "$199/month + tax", popular: false, details: null });
-    expect(planRow({ tier: "pro", amount: 5831 }).price).toBe("$58.31/month + tax");
+    expect(PLANS.map(plan => planRow(plan, "max").popular), "never Pro by itself").toEqual([false, false, true]);
+    expect(PLANS.map(plan => planRow(plan).popular)).toEqual([false, false, false]);
+    expect(planRow({ tier: "team", label: "Team", amount: 19900 })).toEqual({ tier: "team", name: "Team", price: "$199", popular: false, line: null, chips: [] });
+    expect(planRow({ tier: "pro", amount: 5831 }).price).toBe("$58.31");
+  });
+
+  it("the money in one line: a trial says the card is needed and nothing is charged until it ends; a plan without one is due today", () => {
+    expect(planTerms(OFFER, PLANS[1]!)).toEqual({ trial: true, due: "$0.00", money: "Card needed, nothing charged for 7 days. Then $49/month + tax. Cancel in the app any time.",
+      action: "Start free trial", moneyBack: "14-day money-back" });
+    expect(planTerms(noTrial(OFFER), noTrial(OFFER).plans[2]!)).toEqual({ trial: false, due: "$99 + tax",
+      money: "Then $99/month + tax, each month from today. Cancel in the app any time.", action: "Continue · $99/month", moneyBack: "14-day money-back" });
+    expect(planTerms({ ...OFFER, refundDays: undefined }, PLANS[0]!).moneyBack).toBeNull();
+    expect(dueToday(0)).toBe("$0.00"); expect(dueToday(4900)).toBe("$49.00");
   });
 
   it("the trial leads with the preselected plan's days; money-back only when the Admin offers it", () => {
@@ -139,15 +151,36 @@ describe("what is for sale, as the Admin says", () => {
     expect(personalAmount(OFFER)).toBe(2900); expect(personalAmount(null)).toBeNull();
   });
 
-  it("the timeline: nothing today (and the credit), the reminder only while the Admin sends one, the charge and how to avoid it", () => {
+  it("the welcome's Cloud beat says the Admin's offer in one line: trial and lowest price, credit and money-back only when offered", () => {
+    expect(cloudBeatTerms(OFFER)).toEqual({ trial: true, action: "Start free trial",
+      line: "Free for 7 days, then from $29/month + tax. Includes $5 of Claude credit. 14-day money-back." });
+    expect(cloudBeatTerms({ ...OFFER, creditUsd: undefined, refundDays: undefined }).line).toBe("Free for 7 days, then from $29/month + tax.");
+    expect(cloudBeatTerms(noTrial(OFFER))).toEqual({ trial: false, action: "See plans", line: "From $29/month + tax. 14-day money-back." });
+    expect(cloudBeatTerms({ ...OFFER, plans: [{ ...PLANS[0]!, trialDays: undefined }, PLANS[1]!, PLANS[2]!] }).line, "the lowest price among plans with the trial")
+      .toContain("then from $49/month");
+    expect(cloudBeatTerms({ ...noTrial(OFFER), creditUsd: 5 }).line, "credit comes only with a trial").not.toContain("credit");
+  });
+
+  it("the account's own terms are the same as those shown only with the same price and the same trial for that plan", () => {
+    expect(sameTerms(OFFER, OFFER, "pro")).toBe(true);
+    expect(sameTerms(OFFER, noTrial(OFFER), "pro"), "a trial already used").toBe(false);
+    expect(sameTerms(OFFER, { ...OFFER, plans: OFFER.plans.map(plan => ({ ...plan, amount: plan.amount + 100 })) }, "pro"), "another price").toBe(false);
+    expect(sameTerms(OFFER, { ...OFFER, plans: OFFER.plans.map(plan => ({ ...plan, trialDays: 3 })) }, "pro"), "other trial days").toBe(false);
+    expect(sameTerms(OFFER, undefined, "pro"), "no offer of its own").toBe(false);
+    expect(sameTerms(OFFER, { ...OFFER, plans: [PLANS[0]!] }, "pro"), "not sold to it").toBe(false);
+    expect(cloudAddView({ status: "connected", account: { id: "a", email: "p@example.test" }, entitlement: { plan: "free", status: "inactive", expiresAt: null, version: 1 } },
+      OFFER, { now: NOW, terms: true })).toMatchObject({ kind: "offer", notice: "terms" });
+  });
+
+  it("the timeline: today (and the credit), the reminder only while the Admin sends one, and the first charge", () => {
     expect(trialTimeline(OFFER, PLANS[1]!, NOW)).toEqual([
-      { when: "Today", text: "Your trial starts. Nothing is charged today. $5 of Claude credit included." },
-      { when: "Oct 13", text: "We email you a reminder." },
-      { when: "Oct 15", text: "Pro starts at $49/month + tax. Cancel before then and pay nothing." },
+      { when: "Today", text: "Trial starts, with $5 of Claude credit" },
+      { when: "Oct 13", text: "Reminder email" },
+      { when: "Oct 15", text: "$49/month begins" },
     ]);
     expect(trialTimeline({ ...OFFER, reminderDays: undefined, creditUsd: undefined }, PLANS[0]!, NOW)).toEqual([
-      { when: "Today", text: "Your trial starts. Nothing is charged today." },
-      { when: "Oct 15", text: "Personal starts at $29/month + tax. Cancel before then and pay nothing." },
+      { when: "Today", text: "Trial starts" },
+      { when: "Oct 15", text: "$29/month begins" },
     ]);
     expect(trialTimeline(OFFER, { ...PLANS[2]!, trialDays: undefined }, NOW)).toEqual([]);
   });
@@ -165,7 +198,7 @@ describe("what is for sale, as the Admin says", () => {
   });
 });
 
-describe("the Add a Cloud dialog, one view per state", () => {
+describe("the buying sheet, one view per state", () => {
   const connected = (extra: Partial<CloudAccountState> = {}): CloudAccountState => ({ status: "connected", account: { id: "a", email: "person@example.test" },
     entitlement: { plan: "free", status: "inactive", expiresAt: null, version: 1 }, ...extra });
   const paid = (extra: Partial<CloudAccountState> = {}) => connected({ entitlement: { plan: "pro", tier: "pro", status: "active", expiresAt: NOW + 30 * DAY, version: 2 }, ...extra });
@@ -175,8 +208,8 @@ describe("the Add a Cloud dialog, one view per state", () => {
     expect(cloudAddView(null, undefined, at)).toEqual({ kind: "checking" });
     expect(cloudAddView({ status: "signed-out", message: "restoring" }, OFFER, at)).toEqual({ kind: "checking" });
     expect(cloudAddView({ status: "signed-out" }, undefined, at)).toEqual({ kind: "checking" });
-    expect(cloudAddView({ status: "signed-out" }, OFFER, at)).toEqual({ kind: "offer", offer: OFFER, signedOut: true, waited: false, notice: null });
-    expect(cloudAddView(connected(), noTrial(OFFER), at)).toEqual({ kind: "offer", offer: noTrial(OFFER), signedOut: false, waited: false, notice: null });
+    expect(cloudAddView({ status: "signed-out" }, OFFER, at)).toEqual({ kind: "offer", offer: OFFER, signedOut: true, notice: null });
+    expect(cloudAddView(connected(), noTrial(OFFER), at)).toEqual({ kind: "offer", offer: noTrial(OFFER), signedOut: false, notice: null });
     expect(cloudAddView({ status: "signed-out" }, null, at)).toEqual({ kind: "unreachable" });
     expect(cloudAddView(connected(), OFFER, { ...at, error: "rate-limited" })).toEqual({ kind: "error", reason: "rate-limited" });
   });
@@ -185,29 +218,62 @@ describe("the Add a Cloud dialog, one view per state", () => {
     expect(cloudAddView({ status: "connecting", enrollment: { userCode: "ABCDE-FGHJK", expiresAt: NOW + 600_000 }, checkout: { plan: "pro", startedAt: NOW, signIn: true } }, OFFER, at))
       .toEqual({ kind: "signing-in", code: "ABCDE-FGHJK", checkout: true });
     expect(cloudAddView({ status: "connecting" }, OFFER, at)).toEqual({ kind: "signing-in", code: null, checkout: false });
-    const opened = connected({ checkout: { plan: "max", startedAt: NOW - 29 * 60_000 } });
-    expect(cloudAddView(opened, OFFER, at)).toEqual({ kind: "waiting", plan: "max", browser: "checkout" });
-    expect(cloudAddView(opened, OFFER, { ...at, choosing: true })).toEqual({ kind: "offer", offer: OFFER, signedOut: false, waited: false, notice: null });
-    expect(cloudAddView(opened, OFFER, { now: NOW + 2 * 60_000 })).toEqual({ kind: "offer", offer: OFFER, signedOut: false, waited: "trial", notice: null });
-    expect(cloudAddView(opened, noTrial(OFFER), { now: NOW + 2 * 60_000 })).toMatchObject({ kind: "offer", waited: "paid" });
+    const email = "person@example.test";
+    const opened = connected({ checkout: { plan: "max", startedAt: NOW - 29 * 60_000, link: true } });
+    expect(cloudAddView(opened, OFFER, at)).toEqual({ kind: "waiting", plan: "max", browser: "checkout", late: false, link: true, email });
+    expect(cloudAddView(opened, OFFER, { ...at, choosing: true })).toEqual({ kind: "offer", offer: OFFER, signedOut: false, notice: null });
+    expect(cloudAddView(opened, OFFER, { now: NOW + 2 * 60_000 }), "after 30 minutes: We haven't seen a payment yet, with Reopen and Change plan")
+      .toEqual({ kind: "waiting", plan: "max", browser: "checkout", late: true, link: true, email });
     const signedIn = connected({ checkout: { plan: "pro", startedAt: NOW - 60_000, signIn: true } });
-    expect(cloudAddView(signedIn, OFFER, at)).toEqual({ kind: "waiting", plan: "pro", browser: "signin" });
-    expect(cloudAddView(signedIn, { ...OFFER, checkout: { plan: "pro", openUntil: NOW + 3600_000 } }, at)).toEqual({ kind: "waiting", plan: "pro", browser: "checkout" });
+    expect(cloudAddView(signedIn, OFFER, at)).toEqual({ kind: "waiting", plan: "pro", browser: "signin", late: false, link: false, email });
+    expect(cloudAddView(signedIn, { ...OFFER, checkout: { plan: "pro", openUntil: NOW + 3600_000 } }, at)).toMatchObject({ kind: "waiting", plan: "pro", browser: "checkout" });
     const open = { ...OFFER, checkout: { plan: "personal", openUntil: NOW + 3600_000 } };
-    expect(cloudAddView(connected(), open, at)).toEqual({ kind: "waiting", plan: "personal", browser: "checkout" });
+    expect(cloudAddView(connected(), open, at)).toEqual({ kind: "waiting", plan: "personal", browser: "checkout", late: false, link: false, email });
     expect(cloudAddView(connected(), { ...open, checkout: { plan: "personal", openUntil: NOW - 1 } }, at).kind).toBe("offer");
     expect(cloudAddView({ status: "signed-out", checkout: { plan: "pro", startedAt: NOW } }, OFFER, at).kind).toBe("offer");
   });
 
-  it("then: the payment received, My Cloud starting (the trial's terms), and ready only after this app's checkout", () => {
-    expect(cloudAddView(connected({ purchase: { state: "confirming", tier: "pro", paidAt: NOW } }), OFFER, at)).toEqual({ kind: "received", line: "Pro · payment received" });
+  it("then: the payment received, the Cloud set up (the plan, trial and credit for its badge), and ready after this app's checkout or sign-in", () => {
+    expect(cloudAddView(connected({ purchase: { state: "confirming", tier: "pro", paidAt: NOW } }), OFFER, at))
+      .toEqual({ kind: "starting", tier: "pro", trial: null, credit: null, step: null, slow: false, received: true });
     const running = trial("active", { endsAt: NOW + 7 * DAY, chargeAt: NOW + 7 * DAY });
-    expect(cloudAddView(paid({ trial: running }), undefined, at)).toEqual({ kind: "starting", trial: running, step: null, slow: false });
+    expect(cloudAddView(paid({ trial: running, credit }), undefined, at)).toEqual({ kind: "starting", tier: "pro", trial: running, credit, step: null, slow: false, received: false });
+    expect(cloudAddView(paid({ credit: { ...credit, remainingUsd: 0, state: "used_up" } }), undefined, at)).toMatchObject({ kind: "starting", credit: null });
     expect(cloudAddView(paid({ machine: { status: "provisioning", setup: { step: "storage", slow: true } } }), undefined, at))
-      .toEqual({ kind: "starting", trial: null, step: "storage", slow: true });
+      .toEqual({ kind: "starting", tier: "pro", trial: null, credit: null, step: "storage", slow: true, received: false });
     const ready = { status: "ready" as const, origin: "https://omb-u-1.fly.dev" };
-    expect(cloudAddView(paid({ machine: ready, checkout: { plan: "pro", startedAt: NOW - 3600_000 } }), undefined, at)).toEqual({ kind: "ready" });
-    expect(cloudAddView(paid({ machine: ready }), undefined, at)).toEqual({ kind: "has-cloud" });
+    expect(cloudAddView(paid({ machine: ready, checkout: { plan: "pro", startedAt: NOW - 3600_000 } }), undefined, at)).toEqual({ kind: "ready", tier: "pro", trial: null, credit: null });
+    expect(cloudAddView(paid({ machine: ready }), undefined, at), "Add a Cloud… with a Cloud: one Cloud for now").toEqual({ kind: "has-cloud" });
+    expect(cloudAddView(paid({ machine: ready, checkout: { plan: "pro", startedAt: NOW - 3600_000, done: true } }), undefined, at),
+      "a purchase that is over (opened, announced or shown ready): one Cloud for now").toEqual({ kind: "has-cloud" });
+    expect(cloudAddView(paid({ machine: ready, checkout: { plan: "pro", startedAt: NOW, done: true } }), undefined, { ...at, arrived: true }).kind,
+      "unless this sheet followed it").toBe("ready");
+    expect(cloudAddView(paid({ machine: ready }), undefined, { ...at, arrived: true }), "signed in here just now: theirs to open").toMatchObject({ kind: "ready" });
+    expect(cloudAddView(paid({ machine: { status: "provisioning" } }), undefined, at).kind, "Add a Cloud… during setup shows the setup").toBe("starting");
+  });
+
+  it("asked to sign in, the sheet signs in: with no offer to be had, and for a saved sign-in that was removed (else Settings' to say)", () => {
+    const plain: CloudSignInPhase = { step: "email", intent: false, problem: null };
+    const removed: CloudAccountState = { status: "signed-out", message: "restore-removed" };
+    for (const offer of [undefined, null, OFFER]) {
+      expect(cloudAddView(removed, offer, { ...at, signIn: plain }), `removed, offer ${JSON.stringify(offer)?.slice(0, 20)}`).toEqual({ kind: "sign-in", phase: plain });
+      expect(cloudAddView({ status: "signed-out" }, offer, { ...at, signIn: plain }), "signed out, whatever the offer").toEqual({ kind: "sign-in", phase: plain });
+    }
+    expect(cloudAddView(removed, OFFER, at)).toEqual({ kind: "settings" });
+    expect(cloudAddView({ status: "signed-out" }, null, at)).toEqual({ kind: "unreachable" });
+    expect(cloudAddView({ status: "signed-out" }, OFFER, { ...at, signIn: plain, error: "failed" })).toEqual({ kind: "error", reason: "failed" });
+  });
+
+  it("the in-app sign-in is a view of its own while signed out, then the checkout it leads to", () => {
+    const email: CloudSignInPhase = { step: "email", intent: true, problem: null };
+    expect(cloudAddView({ status: "signed-out" }, OFFER, { ...at, signIn: email })).toEqual({ kind: "sign-in", phase: email });
+    const code: CloudSignInPhase = { step: "code", intent: true, email: "p@example.test", resendAt: NOW + 30_000, problem: "wrong-code", triesLeft: 3 };
+    expect(cloudAddView({ status: "signed-out" }, OFFER, { ...at, signIn: code })).toEqual({ kind: "sign-in", phase: code });
+    expect(cloudAddView(connected(), OFFER, { ...at, signIn: email }).kind, "signed in meanwhile: the sign-in is over").toBe("offer");
+    expect(cloudAddView(connected(), OFFER, { ...at, signIn: { step: "done", intent: true } }), "Signed in. Opening secure checkout…")
+      .toEqual({ kind: "sign-in", phase: { step: "done", intent: true } });
+    expect(cloudAddView(connected({ checkout: { plan: "pro", startedAt: NOW, link: true } }), OFFER, { ...at, signIn: { step: "done", intent: true } }).kind).toBe("waiting");
+    expect(cloudAddView({ status: "signed-out" }, undefined, { ...at, signIn: email }).kind, "sign-in needs no offer").toBe("sign-in");
   });
 
   it("never offers anything to someone who pays or may pay: a problem, an ended sign-in or an unreachable Cloud is Settings' to say", () => {

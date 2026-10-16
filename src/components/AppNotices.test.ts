@@ -177,10 +177,10 @@ describe("the card after the update", () => {
     expect(track).toHaveBeenCalledWith("cloud_card_action", { action: "close" });
   });
 
-  it("Sign in to your Cloud plan starts today's sign-in and only hides the card for now", async () => {
+  it("Sign in to your Cloud plan opens the sheet at its own sign-in and only hides the card for now", async () => {
     returning(); await launch();
     press("Sign in to your Cloud plan");
-    expect(f.dispatch).toHaveBeenCalledWith({ type: "toggleAppSettings", open: true, section: "cloudAccount", cloudLink: true });
+    expect(f.dispatch).toHaveBeenCalledWith({ type: "openCloudAdd", source: "app_card", signIn: true });
     expect(storage.get(CLOUD_INTRO)).toBeUndefined(); expect(render()).toBe("");
     now = NOW + DAY; expect(await launch()).toContain(INTRO);
   });

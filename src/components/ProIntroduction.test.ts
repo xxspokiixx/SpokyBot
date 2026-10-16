@@ -48,17 +48,20 @@ const press = (label: string, Component = ProSettingsCard) => {
   expect(button, label).toBeTruthy(); button!.props.onClick!();
 };
 
-it("for someone who may buy: what Cloud does, the Admin's lowest price and money-back, Start free trial (the dialog) and Compare plans", async () => {
+it("for someone who may buy: what Cloud does, the Admin's lowest price and money-back; Start free trial and Compare plans both open the sheet, never the website", async () => {
   const html = await card(signedOut);
   for (const text of ["MausBot Cloud", "Keeps your bots and routines running 24/7, even when this computer is off.", "MausBot Cloud plans from $29/month + tax.",
     "14-day money-back on every plan.", "OpenMausBot on this computer stays free and open source.", "Compare plans", "Start free trial", "Sign in to your Cloud plan"]) expect(html).toContain(text);
   for (const gone of ["OMB", "$89", "launch price", "New features first", "Get Pro", "OpenMausBot Pro", "OpenMausBot Cloud"]) expect(html).not.toContain(gone);
   press("Start free trial");
   expect(f.dispatch).toHaveBeenCalledWith({ type: "openCloudAdd", source: "app_settings" });
+  f.dispatch.mockClear();
   press("Compare plans"); await flush();
-  expect(openExternal).toHaveBeenCalledWith("https://www.openmausbot.com/pricing?src=app_settings");
+  expect(f.dispatch).toHaveBeenCalledExactlyOnceWith({ type: "openCloudAdd", source: "app_settings" });
+  expect(openExternal).not.toHaveBeenCalled();
   press("Sign in to your Cloud plan");
-  expect(f.dispatch).toHaveBeenCalledWith({ type: "toggleAppSettings", open: true, section: "cloudAccount", cloudLink: true });
+  expect(f.dispatch).toHaveBeenCalledWith({ type: "openCloudAdd", source: "app_settings", signIn: true });
+  expect(html).toMatch(/class="ui-button ui-button-primary"[^>]*>Start free trial</);
 });
 
 it("without a trial it says Add a Cloud; signed in, no sign-in link; without the Admin's numbers, no price and no money-back", async () => {
@@ -111,7 +114,9 @@ it("for a Live call, offers the current Cloud plans only to signed-out or verifi
   const out = await card(signedOut, LiveProPrompt);
   for (const text of ["Live calls from your phone need a Pro plan", "Personal, Pro or Max", "MausBot Cloud plans from $29/month", "Start free trial", "Compare plans", "Sign in to your Cloud plan"]) expect(out).toContain(text);
   press("Sign in to your Cloud plan", LiveProPrompt);
-  expect(f.dispatch).toHaveBeenCalledWith({ type: "toggleAppSettings", open: true, section: "cloudAccount", cloudLink: true });
+  expect(f.dispatch).toHaveBeenCalledWith({ type: "openCloudAdd", source: "app_settings", signIn: true });
+  press("Compare plans", LiveProPrompt); await flush();
+  expect(openExternal).not.toHaveBeenCalled();
   press("Start free trial", LiveProPrompt);
   expect(f.dispatch).toHaveBeenCalledWith({ type: "openCloudAdd", source: "app_settings" });
   const free = await card(plan(), LiveProPrompt);
