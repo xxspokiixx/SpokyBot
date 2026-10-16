@@ -95,10 +95,10 @@ describe("sign-in flow", () => {
     const state = [...relay.states.keys()].at(-1)!;
     relay.complete(state);
     await until(() => svc.signInStatus(started.flowId), (status) => status?.phase === "connected");
-    expect(svc.status()).toMatchObject({ state: "connected", kind: "oauth", location: { id: FAKE_LOCATION_ID, name: "Precision Profiles" } });
+    expect(svc.status()).toMatchObject({ state: "connected", kind: "oauth", location: { id: FAKE_LOCATION_ID, name: "Example Profiles" } });
     expect(svc.status().connectedAt).toEqual(expect.any(Number));
     expect(svc.connected()).toBe(true);
-    expect(svc.store.get()).toMatchObject({ kind: "oauth", locationName: "Precision Profiles", companyId: "company_1", userId: "user_1", scopes: expect.stringContaining("contacts.write") });
+    expect(svc.store.get()).toMatchObject({ kind: "oauth", locationName: "Example Profiles", companyId: "company_1", userId: "user_1", scopes: expect.stringContaining("contacts.write") });
     // The flow's answer stays readable, and the tokens are nowhere in the status.
     expect(JSON.stringify(svc.status())).not.toMatch(/hl_access|hl_refresh/u);
     expect(svc.signInStatus(started.flowId)).toEqual({ phase: "connected" });
@@ -148,7 +148,7 @@ describe("sign-in flow", () => {
     await expect(svc.connectWithToken("pit-abcdefgh12345678", FAKE_LOCATION_ID)).rejects.toThrow(/^HighLevel did not accept this token \(401\)\./u);
     expect(svc.store.get()).toBeNull();
     hl.tokens.add("pit-abcdefgh12345678");
-    expect(await svc.connectWithToken(" pit-abcdefgh12345678 ", ` ${FAKE_LOCATION_ID} `)).toMatchObject({ state: "connected", kind: "token", location: { id: FAKE_LOCATION_ID, name: "Precision Profiles" } });
+    expect(await svc.connectWithToken(" pit-abcdefgh12345678 ", ` ${FAKE_LOCATION_ID} `)).toMatchObject({ state: "connected", kind: "token", location: { id: FAKE_LOCATION_ID, name: "Example Profiles" } });
     expect(svc.store.get()).toMatchObject({ kind: "token", accessToken: "pit-abcdefgh12345678", companyId: "company_1" });
     expect(svc.store.get()?.refreshToken).toBeUndefined();
     svc.store.markNeedsSignIn("HighLevel rejected the Private Integration token.");
@@ -206,7 +206,7 @@ describe("owner routes", () => {
     expect(JSON.stringify(missing.body)).not.toContain("pit-route");
     hl.pathOverrides.clear();
     const connected = await request(routes, "POST", "/api/highlevel/token", admin, { token: " pit-route-token-123 ", locationId: FAKE_LOCATION_ID });
-    expect(connected).toMatchObject({ status: 200, body: { state: "connected", kind: "token", location: { id: FAKE_LOCATION_ID, name: "Precision Profiles" } } });
+    expect(connected).toMatchObject({ status: 200, body: { state: "connected", kind: "token", location: { id: FAKE_LOCATION_ID, name: "Example Profiles" } } });
     expect(JSON.stringify(connected.body)).not.toContain("pit-route");
     expect(await request(routes, "DELETE", "/api/highlevel", admin)).toEqual({ status: 200, body: { state: "signed-out" } });
     relay.unavailable = true;

@@ -113,7 +113,7 @@ export async function startFakeHighLevel(options: { locationId?: string } = {}):
     }
     if ((m = /^\/locations\/([^/]+)$/u.exec(path)) && method === "GET") {
       if (m[1] !== locationId) return answer(403, { statusCode: 403, message: "The token does not have access to this location." });
-      return answer(200, { location: { id: locationId, companyId: "company_1", name: "Precision Profiles", timezone: "America/Chicago", email: "hello@fixture.test", phone: "+15550009999", website: "https://fixture.test", address: "2 Main St", city: "Austin", state: "TX", country: "US", postalCode: "78701", settings: {}, social: {}, business: {} } });
+      return answer(200, { location: { id: locationId, companyId: "company_1", name: "Example Profiles", timezone: "America/Chicago", email: "hello@fixture.test", phone: "+15550009999", website: "https://fixture.test", address: "2 Main St", city: "Austin", state: "TX", country: "US", postalCode: "78701", settings: {}, social: {}, business: {} } });
     }
     return answer(404, { statusCode: 404, message: `fixture has no route for ${method} ${path}` });
   });

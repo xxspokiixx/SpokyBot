@@ -35,7 +35,7 @@ function harness(connection: Partial<Parameters<HighLevelStore["put"]>[0]> & { k
   const accessToken = connection.accessToken ?? "hl_access_seed";
   hl.tokens.add(accessToken);
   relay.refreshTokens.add("hl_refresh_seed");
-  store.put({ kind: "oauth", accessToken, refreshToken: "hl_refresh_seed", expiresAt: clock + 3_600_000, locationId: FAKE_LOCATION_ID, locationName: "Precision Profiles", scopes: "contacts.write", ...connection });
+  store.put({ kind: "oauth", accessToken, refreshToken: "hl_refresh_seed", expiresAt: clock + 3_600_000, locationId: FAKE_LOCATION_ID, locationName: "Example Profiles", scopes: "contacts.write", ...connection });
   const upstream = createHighLevelRelay(relay.url);
   const client = new HighLevelClient({ store, refresh: (token) => upstream.refresh(token), apiUrl: hl.url, now: () => clock, sleep: async (ms) => { slept.push(ms); clock += ms; } });
   return { dir, store, client };
@@ -54,7 +54,7 @@ describe("HighLevelStore", () => {
       expect(statSync(join(dir, HIGHLEVEL_KEY_FILE)).mode & 0o777).toBe(0o600);
     }
     const again = new HighLevelStore({ dataDir: dir });
-    expect(again.get()).toMatchObject({ kind: "oauth", accessToken: "hl_access_seed", refreshToken: "hl_refresh_seed", locationId: FAKE_LOCATION_ID, locationName: "Precision Profiles", state: "signed-in" });
+    expect(again.get()).toMatchObject({ kind: "oauth", accessToken: "hl_access_seed", refreshToken: "hl_refresh_seed", locationId: FAKE_LOCATION_ID, locationName: "Example Profiles", state: "signed-in" });
     expect(again.secretValues()).toEqual(["hl_access_seed", "hl_refresh_seed"]);
     again.rotate({ accessToken: "hl_access_2", refreshToken: "hl_refresh_2", expiresAt: 5 });
     expect(new HighLevelStore({ dataDir: dir }).get()).toMatchObject({ accessToken: "hl_access_2", refreshToken: "hl_refresh_2", expiresAt: 5, state: "signed-in" });
@@ -161,7 +161,7 @@ describe("HighLevelClient requests", () => {
     expect(events.events[0]).toEqual({ id: "evt_1", title: "Intro call", calendarId: "cal_1", contactId: "contact_1", appointmentStatus: "confirmed", startTime: "2026-03-10T15:00:00.000Z", endTime: "2026-03-10T15:30:00.000Z", assignedUserId: "user_1", address: "Zoom", notes: "bring deck" });
     await expect(client.listEvents({ startTime: "yesterday", endTime: "2026-03-11T00:00:00Z" })).rejects.toThrow(/startTime must be an ISO 8601/u);
     const location = await client.getLocation();
-    expect(location).toMatchObject({ id: FAKE_LOCATION_ID, name: "Precision Profiles", timezone: "America/Chicago", city: "Austin" });
+    expect(location).toMatchObject({ id: FAKE_LOCATION_ID, name: "Example Profiles", timezone: "America/Chicago", city: "Austin" });
     expect(location.customFields).toEqual([
       { id: "cf_lead", name: "Lead Source", key: "contact.lead_source", dataType: "TEXT", model: "contact" },
       { id: "cf_budget", name: "Budget", key: "contact.budget", dataType: "NUMERICAL", model: "contact" },
@@ -395,7 +395,7 @@ describe("a missing permission is not a sign-out", () => {
 describe("lookupLocation", () => {
   it("validates a Private Integration token against its location and returns the name", async () => {
     hl.tokens.add("pit-valid-token-123");
-    expect(await lookupLocation({ token: "pit-valid-token-123", locationId: FAKE_LOCATION_ID, apiUrl: hl.url })).toEqual({ id: FAKE_LOCATION_ID, name: "Precision Profiles", companyId: "company_1", timezone: "America/Chicago" });
+    expect(await lookupLocation({ token: "pit-valid-token-123", locationId: FAKE_LOCATION_ID, apiUrl: hl.url })).toEqual({ id: FAKE_LOCATION_ID, name: "Example Profiles", companyId: "company_1", timezone: "America/Chicago" });
     expect(last().headers.version).toBe(HIGHLEVEL_VERSION);
     await expect(lookupLocation({ token: "pit-valid-token-123", locationId: "other_location", apiUrl: hl.url })).rejects.toMatchObject({ status: 403, message: expect.stringMatching(/^This token does not belong to that location \(403\)/u) });
     await expect(lookupLocation({ token: "pit-bad", locationId: FAKE_LOCATION_ID, apiUrl: hl.url })).rejects.toMatchObject({ status: 401, message: expect.stringMatching(/^HighLevel did not accept this token \(401\)/u) });
