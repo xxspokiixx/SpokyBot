@@ -12,6 +12,7 @@ import {
   type ManagedComposioCredentials,
 } from "../electron/managed-composio.mjs";
 import { writeFileAtomic } from "./atomic.ts";
+import { managedComposioBrokerUrl } from "../electron/managed-composio.mjs";
 
 /** In the data folder; excluded from backups (workspace-backup-policy.ts), so a restore keeps the Cloud's own. */
 export const CLOUD_CONNECTED_APPS_FILE = "connected-apps-installation.json";
@@ -153,4 +154,23 @@ export function startCloudConnectedApps(options: CloudConnectedAppsOptions): Clo
       timer = null;
     },
   };
+}
+
+let cloudHome: CloudConnectedApps | null = null;
+/** A Cloud home's plan includes the connected-apps service, so it registers itself. The built server uses OpenMausBot's
+ * service; from source (development, tests) only an explicit OMB_COMPOSIO_BROKER_URL registers anywhere. */
+export function startCloudHomeConnectedApps(input: { cloudHome: boolean; dataDir: string; apply: CloudConnectedAppsOptions["apply"] }): void {
+  if (!input.cloudHome || cloudHome) return;
+  const configured = process.env.OMB_COMPOSIO_BROKER_URL;
+  const brokerUrl = managedComposioBrokerUrl(configured, !import.meta.url.endsWith(".ts"));
+  if (!brokerUrl) {
+    if (configured?.trim()) console.warn("cloud home: connected-apps service URL rejected: HTTPS or a loopback HTTP URL is required");
+    return;
+  }
+  cloudHome = startCloudConnectedApps({ dataDir: input.dataDir, brokerUrl, apply: input.apply, log: (line) => console.log(`cloud home: ${line}`) });
+}
+
+export function stopCloudHomeConnectedApps(): void {
+  cloudHome?.stop();
+  cloudHome = null;
 }

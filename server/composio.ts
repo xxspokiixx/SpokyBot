@@ -273,8 +273,7 @@ export function connectorAvailability(
   return storeState === "unavailable" ? "unreadable" : "unconfigured";
 }
 
-/** Only a host the managed service comes with (the packaged desktop app, OMB_DESKTOP_PARENT=1, or a Cloud home) treats a
- * missing one as an outage; anywhere else it means setup. */
+/** Only a host the managed service comes with (the desktop app, OMB_DESKTOP_PARENT=1, or a Cloud home) calls a missing one an outage. */
 export type ConnectorSetup = "ready" | "needs-setup" | "service-unavailable";
 
 export function connectorSetup(
