@@ -3,7 +3,7 @@ import { Check, Crown, X } from "lucide-react";
 import type { CloudAccountState, CloudPlanSnapshot } from "../../electron/cloud-account.mjs";
 import type { CloudOffer } from "../../electron/cloud-home.mjs";
 import type { DesktopNoticesBridge, DesktopNoticesState } from "../../electron/desktop-prefs.mjs";
-import { identifyEmail, track } from "@/lib/analytics";
+import { analyticsChoiceKnown, identifyEmail, track } from "@/lib/analytics";
 import { buyOfferAllowed, cloudIntroView, cloudPlanLabel, cloudPlanLine, cloudPlanView, moneyBackLine, trialRunning, usd, type CloudPlanView, type CloudSource } from "@/lib/cloud-plan";
 import { t } from "@/lib/i18n";
 import { cloudPlanFromAccount, cloudPlanFromSnapshot, type CloudPlanFacts } from "@/lib/usage-snapshot";
@@ -14,9 +14,10 @@ export const CLOUD_PRO_POPUP_SOURCE = "update_popup" satisfies CloudSource;
 export type CloudProPopupAction = "shown" | "upgrade" | "manage" | "see_plans" | "not_now" | "close";
 
 export interface CloudProPopupView {
-  /** Never a checkout: the Add a Cloud dialog, Settings → MausBot Cloud, the plan page from My Cloud's page, or This
-   * computer, which finishes the click. */
-  primary: { label: string; via: "add-cloud" | "settings" | "plan-page" | "this-computer" };
+  /** Never a checkout, never the browser: the Add a Cloud dialog or Settings → MausBot Cloud on this computer's page; on a
+   * server's page, This computer, where My Cloud's Manage plan opens Settings → MausBot Cloud and any other shows the
+   * popup again. */
+  primary: { label: string; via: "add-cloud" | "settings" | "settings-on-this-computer" | "this-computer" };
   /** Compare plans, for someone who can buy: the dialog lists every plan. A payer has nothing to compare there yet. */
   seePlans: boolean;
   plan: CloudPlanFacts["plan"] | "trial";
@@ -38,7 +39,7 @@ export function cloudProPopupWho(account: CloudAccountState | null): Who {
 }
 
 const included = () => [t("cloudIntro.routines"), t("cloudIntro.phone"), t("cloudIntro.included")];
-const manageView = (who: Who, via: "settings" | "plan-page", current: string | null): CloudProPopupView =>
+const manageView = (who: Who, via: "settings" | "settings-on-this-computer", current: string | null): CloudProPopupView =>
   ({ ...who, primary: { via, label: t("cloudProPopup.manage") }, seePlans: false, badge: null, points: included(), price: null, moneyBack: null, current });
 
 /** This computer's page. */
@@ -80,15 +81,15 @@ function snapshotPlanView(snapshot: CloudPlanSnapshot): CloudPlanView | null {
   return null;
 }
 
-/** My Cloud's own page, from the plan main tells that page: a plan manages on the plan page, one being checked waits, and
- * with none read it is as on a saved server. */
+/** My Cloud's own page, from the plan main tells that page: a plan manages in Settings on This computer, one being
+ * checked waits, and with none read it is as on a saved server. */
 export function cloudProCloudPageView(snapshot: CloudPlanSnapshot | null): CloudProPopupView | "loading" | "offline" {
   if (!snapshot) return "loading";
   if (snapshot.status === "checking") return "offline";
   const view = snapshotPlanView(snapshot);
   if (!view) return cloudProElsewhereView();
   const facts = cloudPlanFromSnapshot(snapshot);
-  return manageView({ plan: facts.trial ? "trial" : facts.plan, signedIn: view.kind !== "reauth", email: null }, "plan-page",
+  return manageView({ plan: facts.trial ? "trial" : facts.plan, signedIn: view.kind !== "reauth", email: null }, "settings-on-this-computer",
     view.kind === "reauth" ? t("pro.reauthShort") : cloudPlanLine(view));
 }
 
@@ -107,15 +108,15 @@ export function useDesktopNotices(desktop: DesktopNoticesBridge | undefined): De
 const CLICKS: ReadonlySet<CloudProPopupAction> = new Set(["upgrade", "manage", "see_plans"]);
 
 export function reportCloudProPopup(action: CloudProPopupAction, who: Who) {
-  if (who.email && CLICKS.has(action)) identifyEmail(who.email, { submitted: false });
+  if (who.email && CLICKS.has(action) && analyticsChoiceKnown()) identifyEmail(who.email, { submitted: false });
   track("cloud_pro_popup", { action, plan: who.plan, signed_in: who.signedIn });
 }
 
 const TITLE = "cloud-pro-popup-title";
 const POPUP = "[data-cloud-pro-popup]";
-const OTHER_DIALOGS = '[role="dialog"], [role="alertdialog"], [aria-modal="true"], [data-tour-card]';
+const OTHER_DIALOGS = '[role="dialog"], [role="alertdialog"], [aria-modal="true"], [data-tour-card], [data-cloud-setup-ready]';
 
-/** Any dialog on screen counts, modal or not. */
+/** Any dialog on screen counts, modal or not, and the card that says a new Cloud is set up. */
 export function otherDialogOpen(): boolean {
   return [...document.querySelectorAll<HTMLElement>(OTHER_DIALOGS)].some(element => !element.closest(POPUP) && element.checkVisibility());
 }

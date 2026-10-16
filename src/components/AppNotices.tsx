@@ -7,7 +7,8 @@ import { APP_REPOSITORY } from "@/lib/app-links";
 import { track } from "@/lib/analytics";
 import { brandStatus } from "@/lib/brand";
 import { buyOfferAllowed, cloudNoticeKind, cloudPlanView, cloudTrialNotice, cloudTrialView, offerTrialDays, personalAmount } from "@/lib/cloud-plan";
-import { cloudSetupStage } from "@/lib/cloud-setup";
+import { jobRoutine, useCloudIntent } from "@/lib/cloud-intent";
+import { CLOUD_INTENT_GIVEN, cloudSetupStage } from "@/lib/cloud-setup";
 import { cornerPopupWaits } from "@/lib/corner-popup";
 import { CLOUD_INTRO, CLOUD_NOTICE, CLOUD_PRO_UPDATE_NOTICE, CLOUD_TRIAL_NOTICE, dismissNotice, introShown, introStage, nextNotice, noticeSeen, PRODUCT_HUNT_NOTICE, PRODUCT_HUNT_UNTIL, PRODUCT_HUNT_URL, STAR_NOTICE, usedBefore } from "@/lib/notices";
 import { cloudSignInDue, type WelcomeViewer } from "@/lib/onboarding";
@@ -43,6 +44,7 @@ function ProductHuntCard({ onDone }: { onDone: (action: "upvote" | "not_now" | "
 }
 
 const trialKey = (trial: { state: string; endsAt: number }) => `${trial.state}:${trial.endsAt}`;
+const CLOUD_SETTINGS = { type: "toggleAppSettings", open: true, section: "cloudAccount" } as const;
 
 export function AppNotices({ quiet = false, viewer = null, now = Date.now }: { quiet?: boolean; viewer?: WelcomeViewer | null; now?: () => number }) {
   const { state, dispatch } = useStore();
@@ -65,8 +67,9 @@ export function AppNotices({ quiet = false, viewer = null, now = Date.now }: { q
   const [failed, setFailed] = useState(false);
   const [busy, setBusy] = useState(false);
   const [popupShown, setPopupShown] = useState(false);
-  const [handoff, setHandoff] = useState(false);
+  const [handoff, setHandoff] = useState<boolean | null>(bridge && desktop ? null : false);
   const updater = useUpdaterState();
+  const intent = useCloudIntent();
   useEffect(() => {
     if (!bridge) return;
     let active = true, updated = false;
@@ -86,7 +89,7 @@ export function AppNotices({ quiet = false, viewer = null, now = Date.now }: { q
   useEffect(() => {
     if (!bridge || !desktop) return;
     let active = true;
-    void desktop.takeHandoff().then(taken => { if (active && taken) setHandoff(true); }, () => {});
+    void desktop.handoff().then(handed => { if (active) setHandoff(handed === true); }, () => { if (active) setHandoff(false); });
     return () => { active = false; };
   }, [bridge, desktop]);
   const view = bridge ? cloudPlanView(account) : null;
@@ -96,7 +99,8 @@ export function AppNotices({ quiet = false, viewer = null, now = Date.now }: { q
   const trialDue = cloudTrialNotice(plan);
   const popupHere = Boolean(desktop) && (!local || Boolean(bridge)) && brandStatus().source !== "file";
   const seenHere = local && noticeSeen(record, CLOUD_PRO_UPDATE_NOTICE);
-  const popupPending = popupHere && !seenHere && (!desktopState || (desktopState.cloud && !desktopState.seen.includes(CLOUD_PRO_UPDATE_NOTICE)));
+  const popupPending = popupHere && (handoff === true
+    || (!seenHere && (!desktopState || (desktopState.cloud && !desktopState.seen.includes(CLOUD_PRO_UPDATE_NOTICE)))));
   const wantOffer = Boolean(bridge?.offer) && ((introAllowed && view !== null && buyOfferAllowed(view) && stage !== "done") || trialDue?.state === "active"
     || (popupPending && view !== null && buyOfferAllowed(view)));
   const offerKey = wantOffer ? `${view?.kind}:${JSON.stringify(account?.offer ?? null)}` : null;
@@ -110,13 +114,6 @@ export function AppNotices({ quiet = false, viewer = null, now = Date.now }: { q
   useEffect(() => {
     if (seenHere && desktopState && !desktopState.seen.includes(CLOUD_PRO_UPDATE_NOTICE)) void desktop?.seen(CLOUD_PRO_UPDATE_NOTICE).catch(() => {});
   }, [seenHere, desktopState]);
-  useEffect(() => {
-    if (!handoff || !view || view.kind === "unknown" || view.kind === "connecting") return;
-    setHandoff(false);
-    const buy = buyOfferAllowed(view);
-    reportCloudProPopup(buy ? "upgrade" : "manage", cloudProPopupWho(account));
-    dispatch(buy ? { type: "openCloudAdd", source: CLOUD_PRO_POPUP_SOURCE } : { type: "toggleAppSettings", open: true, section: "cloudAccount" });
-  }, [handoff, view?.kind]);
   const popupState = !popupPending ? null : !desktopState || !viewer ? "loading"
     : bridge ? cloudProPopupView(account, !bridge.offer ? null : offerFor === offerKey ? offer : undefined)
     : planBridge ? cloudProCloudPageView(plan) : cloudProElsewhereView();
@@ -125,9 +122,10 @@ export function AppNotices({ quiet = false, viewer = null, now = Date.now }: { q
 
   const trial = plan?.trial;
   const key = trial ? trialKey(trial) : null;
+  const setupRecord = record && (intent.pending || intent.sent) ? { ...record, hintsSeen: [...record.hintsSeen, CLOUD_INTENT_GIVEN] } : record;
   const setupHere = cloudSignInDue(viewer, state, engineReady)
     || ["waiting", "shown"].includes(cloudSetupStage({ viewer, connected: state.connected, enginesKnown: state.instances.length > 0,
-      engineReady: state.instances.some(engineReady), onboarding: record }));
+      engineReady: state.instances.some(engineReady), onboarding: setupRecord, planned: Boolean(jobRoutine(state.routines, intent.sent)) }));
   const waits = cornerPopupWaits(state, updater, { quiet, idle: true, viewer }) || Boolean(state.cloudAdd) || state.cloudHowTo || setupHere;
   const kind = view ? cloudNoticeKind(view, account) : null;
   const introDue = (): boolean | null => {
@@ -139,8 +137,10 @@ export function AppNotices({ quiet = false, viewer = null, now = Date.now }: { q
     return introOpen || stage === "due" ? true : null;
   };
   const cards = Boolean(bridge || planBridge);
+  const handoffDue = view !== null && view.kind !== "unknown" && view.kind !== "connecting" && !popupBlocked;
   const notice = !closed && !waits && (cards || popupHere) ? nextNotice({
-    [CLOUD_PRO_UPDATE_NOTICE]: popupState === "loading" || (popupView !== null && popupBlocked) ? null : popupView !== null,
+    [CLOUD_PRO_UPDATE_NOTICE]: !popupPending ? false : handoff === null ? null : handoff ? handoffDue || null
+      : popupState === "loading" || (popupView !== null && popupBlocked) ? null : popupView !== null,
     [PRODUCT_HUNT_NOTICE]: !cards || brandStatus().source === "file" || now() >= PRODUCT_HUNT_UNTIL ? false
       : organization === null ? null : !organization,
     [CLOUD_INTRO]: introDue(),
@@ -162,6 +162,11 @@ export function AppNotices({ quiet = false, viewer = null, now = Date.now }: { q
     } else if (notice === CLOUD_TRIAL_NOTICE && trialOpen !== shownKey) {
       setTrialOpen(shownKey);
       void planBridge?.noticeSeen?.().catch(() => {});
+    } else if (shownKey === CLOUD_PRO_UPDATE_NOTICE && handoff) {
+      setHandoff(false); setClosed(true);
+      reportCloudProPopup("manage", cloudProPopupWho(account));
+      void desktop?.seen(CLOUD_PRO_UPDATE_NOTICE).catch(() => {});
+      dispatch(CLOUD_SETTINGS);
     } else if (shownKey === CLOUD_PRO_UPDATE_NOTICE && !popupShown && popupView) {
       setPopupShown(true);
       void desktop?.shown(CLOUD_PRO_UPDATE_NOTICE).then(first => { if (first) reportCloudProPopup("shown", popupView); }, () => {});
@@ -177,19 +182,16 @@ export function AppNotices({ quiet = false, viewer = null, now = Date.now }: { q
   if (toast) return <NoticeToast text={toast} onDone={() => setToast(null)} />;
   if (!notice) return null;
 
-  if (notice === CLOUD_PRO_UPDATE_NOTICE && popupView && desktop) {
+  if (notice === CLOUD_PRO_UPDATE_NOTICE && popupView && desktop && !handoff) {
     const report = (action: CloudProPopupAction) => reportCloudProPopup(action, popupView);
     const end = () => { void desktop.seen(CLOUD_PRO_UPDATE_NOTICE).catch(() => {}); close(); };
     const plans = (action: CloudProPopupAction) => { report(action); end(); dispatch({ type: "openCloudAdd", source: CLOUD_PRO_POPUP_SOURCE }); };
+    const thisComputer = (then?: "manage") => { close(); void desktop.thisComputer(then).catch(() => {}); };
     const primary = {
       "add-cloud": () => plans("upgrade"),
-      settings: () => { report("manage"); end(); dispatch({ type: "toggleAppSettings", open: true, section: "cloudAccount" }); },
-      "plan-page": () => { report("manage"); end(); void planBridge?.manage().catch(() => {}); },
-      // Main marks it seen as it switches; This computer's page counts the click by the plan it finds there.
-      "this-computer": () => {
-        close();
-        void desktop.thisComputer().catch(() => false).then(switched => { if (!switched) return desktop.seen(CLOUD_PRO_UPDATE_NOTICE); }).catch(() => {});
-      },
+      settings: () => { report("manage"); end(); dispatch(CLOUD_SETTINGS); },
+      "settings-on-this-computer": () => thisComputer("manage"),
+      "this-computer": () => thisComputer(),
     }[popupView.primary.via];
     return <CloudProPopup view={popupView}
       onPrimary={primary}

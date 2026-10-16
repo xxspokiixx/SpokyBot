@@ -17,20 +17,24 @@ sent.
 - Events are tied to a random id that PostHog keeps in the page's storage. If you shared your email on the first-run
   screen, your events are tied to that email from then on (`email_submitted`). If you are signed in to MausBot Cloud in
   the desktop app and choose the Cloud Pro popup's main button or Compare plans, your events on this computer's page are
-  tied to your Cloud account's email from then on (`cloud_pro_popup`). A server's page, My Cloud's included, is never
-  told that email, so a click counted there ties nothing. Nothing else identifies you.
+  tied to your Cloud account's email from then on (`cloud_pro_popup`); My Cloud's Manage plan ends on this computer's
+  page and is counted there. A server's page, My Cloud's included, is never told that email. While the desktop app has
+  kept no analytics choice of its own yet, such a click on its page served on a port other than its first ties nothing,
+  because an opt-out made before may be kept in the first port's storage. Nothing else identifies you.
 
 ## Turning it off
 
 **Settings → General → Usage analytics.** When it is off, nothing loads and nothing is sent: no events, no daily
 snapshot, and none of the snapshot's requests.
 
-The desktop app keeps the switch for this computer's page itself, so it holds whichever port the app serves that page
-on (it moves to another when its usual one is taken). It is read before anything loads, and before any email is tied to
-your events. A switch turned off only in the page's storage, before the app kept it, moves to the app the first time
-that page runs. Each server page (your MausBot Cloud, a self-hosted server, each browser you use) keeps its own switch
-in that page's storage. Turning it off in the desktop app does not turn it off on My Cloud's page, so switch it off
-there too.
+The desktop app keeps the switch for this computer's page itself, so it holds whichever port the app serves that page on
+(it moves to another when its usual one is taken). It is read before anything loads, and before any email is tied to
+your events. A switch turned off only in the page's storage, before the app kept it, does not hold on another port until
+the app serves its page on that port again, which moves it to the app; while the app has kept no choice yet, its page on
+a port other than its first ties no email to your events. Each server page (your MausBot Cloud, a self-hosted server,
+each browser you use) keeps its own switch in that page's storage. With the switch off in the desktop app, a server page
+that the app's window shows, My Cloud's included, starts with it off too once that server runs this version; turning it
+on there lasts until that page reloads. In a browser, switch it off on each server's page.
 
 ## Never sent
 
@@ -129,7 +133,7 @@ use their own Boat key, and how many bots run on cloud computers, without sendin
 | `app_first_open` | The first time this app page starts with analytics on | `platform`: `desktop`, `browser` |
 | `app_opened` | Each time this app page starts with analytics on | `platform`: `desktop`, `browser` |
 | `email_submitted` | You shared your email on the first-run screen; your events are tied to that email from then on | none |
-| `$identify` | PostHog's own event, sent with `email_submitted`, and before a `cloud_pro_popup` `upgrade`, `manage` or `see_plans` counted on this computer's page for someone signed in to MausBot Cloud, to tie your events to that email. When your events were already tied to an email, PostHog sends its `$set` event with the new one instead | `$set`: `email`, the email you shared or your Cloud account's email; `$anon_distinct_id`: the random id your events had before |
+| `$identify` | PostHog's own event, sent with `email_submitted`, and before a `cloud_pro_popup` `upgrade`, `manage` or `see_plans` counted on this computer's page for someone signed in to MausBot Cloud (not while the app has kept no analytics choice of its own and serves that page on a port other than its first), to tie your events to that email. When your events were already tied to an email, PostHog sends its `$set` event with the new one instead | `$set`: `email`, the email you shared or your Cloud account's email; `$anon_distinct_id`: the random id your events had before |
 | `email_skipped` | You skipped the email on the first-run screen | none |
 | `onboarding_step` | A first-run tour step is shown | `step`: `hello`, `reel`, `engines`, `permissions`, `phone`, `bot`; `replay`: true/false |
 | `onboarding_completed` | The first-run tour ends | `reason`: `completed`, `skipped`; `at`: the step it ended on; `replay`: true/false |
@@ -149,7 +153,7 @@ use their own Boat key, and how many bots run on cloud computers, without sendin
 | `app_snapshot` | Once a day, as described above | The properties in the snapshot table |
 | `cloud_card_shown` | The MausBot Cloud card is shown | `variant`: `signed_out`, `free` |
 | `cloud_card_action` | You act on the MausBot Cloud card | `action`: `start`, `howto`, `signin`, `not_now`, `close` |
-| `cloud_pro_popup` | The Cloud Pro popup (once on each desktop after an update, on whichever page its window shows) is shown, counted at most once a day on that desktop until it is closed, or you choose one of its buttons. On this computer's page, signed in to MausBot Cloud, `upgrade`, `manage` or `see_plans` first ties your events to your Cloud account's email (`$identify`); `shown`, `not_now`, `close` and anything counted on a server's page never do. A page that is not told your plan (a saved server's other than My Cloud's, or My Cloud's while it reads no plan) offers Continue on this computer, which is counted on this computer's page once the window is there, as `upgrade` or `manage` by the plan found there | `action`: `shown`, `upgrade` (Start free trial or Upgrade to Cloud Pro), `manage` (Manage plan), `see_plans` (Compare plans), `not_now`, `close` (the X, Escape or a click outside); `plan`: `none`, `trial`, `personal`, `pro`, `max`, `other` (a plan newer than the app), `unknown` (the sign-in ended, or a page that is not told the plan); `signed_in`: true/false, signed in to MausBot Cloud in the app (false on a page that is not told) |
+| `cloud_pro_popup` | The Cloud Pro popup (once on each desktop after an update, on whichever page its window shows) is shown, counted at most once a day on that desktop until it is closed, or you choose one of its buttons. On this computer's page, signed in to MausBot Cloud, `upgrade`, `manage` or `see_plans` first ties your events to your Cloud account's email (`$identify`); `shown`, `not_now`, `close` and anything counted on a server's page never do. Manage plan on My Cloud's page switches the window to this computer and is counted there as `manage`. A page that is not told your plan (a saved server's other than My Cloud's, or My Cloud's while it reads no plan) offers Continue on this computer, which counts nothing: the popup shows again on this computer's page, which counts what you choose there | `action`: `shown`, `upgrade` (Start free trial or Upgrade to Cloud Pro), `manage` (Manage plan), `see_plans` (Compare plans), `not_now`, `close` (the X, Escape or a click outside); `plan`: `none`, `trial`, `personal`, `pro`, `max`, `other` (a plan newer than the app), `unknown` (the sign-in ended, or a page that is not told the plan); `signed_in`: true/false, signed in to MausBot Cloud in the app (false on a page that is not told) |
 | `cloud_howto` | The "Show me how" tip ends | `result`: `no_button`, `skipped`, `closed` |
 | `cloud_dialog_shown` | The Add a Cloud dialog opens | `source`: `app_card`, `app_howto`, `app_menu`, `app_settings`, `app_routines`, `update_popup` (the Cloud Pro popup); `view`: the dialog's first screen |
 | `cloud_dialog_view` | The Add a Cloud dialog reaches a step | `view`: `received`, `starting`, `ready` |

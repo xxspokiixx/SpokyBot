@@ -39,7 +39,7 @@ ipcRenderer.on("app:open-settings", (_event, section) => {
 const localOrigin = process.argv.find((arg) => arg.startsWith("--omb-local-origin="))?.slice("--omb-local-origin=".length) ?? null;
 const isLocalPage = !localOrigin || location.origin === localOrigin;
 const savedServer = id => isLocalPage && typeof id === "string" && /^[\w-]{1,64}$/.test(id) ? [id] : [];
-const REMOTE_SAFE = new Set(["platform", "getCapabilities", "onCapabilitiesChanged", "applySkin", "setUnreadCount", "permStatus", "workspaces", "cloudMove", "cloudLending", "cloudPlan", "desktopNotices"]);
+const REMOTE_SAFE = new Set(["platform", "getCapabilities", "onCapabilitiesChanged", "applySkin", "setUnreadCount", "permStatus", "workspaces", "cloudMove", "cloudLending", "cloudPlan", "desktopNotices", "desktopAnalytics"]);
 function updaterOffered() {
   try { return ipcRenderer.sendSync("update:offered") === true; } catch { return false; }
 }
@@ -376,16 +376,16 @@ const bridge = {
     state: () => ipcRenderer.invoke("desktop-notices:state"),
     seen: id => ipcRenderer.invoke("desktop-notices:seen", String(id)),
     shown: id => ipcRenderer.invoke("desktop-notices:shown", String(id)),
-    thisComputer: () => !isLocalPage && navigator.userActivation?.isActive === true
-      ? ipcRenderer.invoke("desktop-notices:this-computer") : Promise.reject(new Error("Choose Continue on this computer to switch.")),
-    takeHandoff: () => ipcRenderer.invoke("desktop-notices:handoff"),
+    thisComputer: then => !isLocalPage && navigator.userActivation?.isActive === true
+      ? ipcRenderer.invoke("desktop-notices:this-computer", then === "manage" ? "manage" : null) : Promise.reject(new Error("Choose Continue on this computer to switch.")),
+    handoff: () => ipcRenderer.invoke("desktop-notices:handoff"),
   },
   desktopAnalytics: {
     enabled: () => {
       if (analyticsChoice === undefined) analyticsChoice = savedAnalyticsChoice();
       return analyticsChoice;
     },
-    set: enabled => { analyticsChoice = enabled === true; return ipcRenderer.invoke("desktop-analytics:set", analyticsChoice); },
+    ...(isLocalPage ? { set: enabled => { analyticsChoice = enabled === true; return ipcRenderer.invoke("desktop-analytics:set", analyticsChoice); } } : {}),
   },
 };
 

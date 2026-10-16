@@ -1,3 +1,4 @@
+export { DESKTOP_PORTS } from "./desktop-ports.mjs";
 export declare const DESKTOP_NOTICES: readonly string[];
 export declare const HANDOFF_MS: number;
 export interface DesktopNoticesState {
@@ -12,16 +13,22 @@ export interface DesktopNoticesBridge {
   seen(id: string): Promise<void>;
   /** True the first time today the notice counts as shown on this desktop. */
   shown(id: string): Promise<boolean>;
-  /** A saved server's page only, on a click: switches the window to This computer, which finishes the Cloud Pro popup's click. */
-  thisComputer(): Promise<boolean>;
-  /** This computer's page only: true once, right after a saved server's page switched the window here. */
-  takeHandoff(): Promise<boolean>;
+  /**
+   * A server's page only, right after a click on it: switches the window to This computer, once a launch while the Cloud
+   * Pro popup is unseen, where the popup shows again. With "manage", from My Cloud's own page only, This computer's page
+   * opens Settings → MausBot Cloud instead, as that popup's Manage plan.
+   */
+  thisComputer(then?: "manage"): Promise<boolean>;
+  /** This computer's page only: true from My Cloud's page handing over its Manage plan click until the popup is seen, for a
+   * short while. */
+  handoff(): Promise<boolean>;
 }
-/** This computer's page only: the desktop's own switch, the same on every port its page is served from. */
+/** The desktop's own switch, the same on every port its page is served from. */
 export interface DesktopAnalyticsBridge {
-  /** null until a choice is saved. */
+  /** null until a choice is saved; a server's page is told only false, when this desktop turned analytics off. */
   enabled(): boolean | null;
-  set(enabled: boolean): Promise<void>;
+  /** This computer's page only. */
+  set?(enabled: boolean): Promise<void>;
 }
 export interface DesktopPrefs {
   seen(): string[];
@@ -30,13 +37,14 @@ export interface DesktopPrefs {
   analytics(): boolean | null;
   setAnalytics(enabled: boolean): void;
 }
-export declare function jsonFile(file: string): { read(): unknown; write(value: unknown): void };
+type Files = Pick<typeof import("node:fs"), "readFileSync" | "writeFileSync" | "renameSync" | "rmSync">;
+export declare function jsonFile(file: string, files?: Files): { read(): unknown; write(value: unknown): void };
 export declare function createDesktopPrefs(options: { read(): unknown; write(value: unknown): void; now?: () => number }): DesktopPrefs;
 export declare function registerDesktopPrefs(options: {
   ipcMain: { handle(channel: string, handler: (event: unknown, ...args: unknown[]) => unknown): void; on(channel: string, listener: (event: { returnValue?: unknown }) => void): void };
   read(): unknown;
   write(value: unknown): void;
-  page(event: unknown): "local" | "server" | null;
+  page(event: unknown): "local" | "cloud" | "server" | null;
   cloudOffered(): Promise<boolean>;
   thisComputer(): Promise<boolean>;
   now?: () => number;

@@ -3,16 +3,27 @@
 import fs from "node:fs";
 import { localDay } from "./cloud-trial-notice.mjs";
 
+export { DESKTOP_PORTS } from "./desktop-ports.mjs";
 /** The only notices a page may record, so no page can write anything else into the file. */
 export const DESKTOP_NOTICES = Object.freeze(["cloud-pro-update-2026-10"]);
 const CLOUD_PRO = DESKTOP_NOTICES[0];
 export const HANDOFF_MS = 2 * 60_000;
 const DAY = /^\d{4}-\d{2}-\d{2}$/;
 
-export function jsonFile(file) {
+/** Security: a write that fails (a full disk, a kill mid-write) leaves the last whole record, analytics opt-out included. */
+export function jsonFile(file, files = fs) {
   return {
-    read: () => JSON.parse(fs.readFileSync(file, "utf8")),
-    write: value => fs.writeFileSync(file, JSON.stringify(value), { mode: 0o600 }),
+    read: () => JSON.parse(files.readFileSync(file, "utf8")),
+    write: value => {
+      const temporary = `${file}.${process.pid}.tmp`;
+      try {
+        files.writeFileSync(temporary, JSON.stringify(value), { mode: 0o600 });
+        files.renameSync(temporary, file);
+      } catch (error) {
+        try { files.rmSync(temporary, { force: true }); } catch {}
+        throw error;
+      }
+    },
   };
 }
 
@@ -56,38 +67,46 @@ export function createDesktopPrefs({ read, write, now = Date.now }) {
 }
 
 /**
- * `page(event)`: "local" for this computer's page, "server" for the saved server open in this desktop's window, null
- * for anything else. `cloudOffered()`: this desktop sells MausBot Cloud, asked once its Cloud sign-in is restored.
- * `thisComputer()`: switches the window to This computer, false when it cannot.
+ * `page(event)`: "local" for this computer's page, "cloud" for My Cloud's own page as main verifies it, "server" for
+ * another saved server open in this desktop's window, null for anything else. `cloudOffered()`: this desktop sells
+ * MausBot Cloud, asked once its Cloud sign-in is restored. `thisComputer()`: switches the window to This computer,
+ * false when it cannot.
  */
 export function registerDesktopPrefs({ ipcMain, read, write, page, cloudOffered, thisComputer, now = Date.now }) {
   let prefs = null;
   const store = () => prefs ??= createDesktopPrefs({ read, write, now });
-  let handoffAt = 0;
+  let switched = false, handoffAt = 0;
   const from = (channel, pages, handler) => (event, ...args) => {
-    if (!pages.includes(page(event))) throw new Error(`${channel} is only available in this app's window`);
-    return handler(...args);
+    const asking = page(event);
+    if (!pages.includes(asking)) throw new Error(`${channel} is only available in this app's window`);
+    return handler(asking, ...args);
   };
-  const ANY = ["local", "server"];
+  const ANY = ["local", "cloud", "server"];
   ipcMain.handle("desktop-notices:state", from("desktop-notices:state", ANY, async () => ({ seen: store().seen(), cloud: await cloudOffered() })));
-  ipcMain.handle("desktop-notices:seen", from("desktop-notices:seen", ANY, id => { store().markSeen(id); }));
-  ipcMain.handle("desktop-notices:shown", from("desktop-notices:shown", ANY, id => store().shown(id)));
-  // A saved server's page switches the window once, for the Cloud Pro popup it showed; This computer's page then finishes the click.
-  ipcMain.handle("desktop-notices:this-computer", from("desktop-notices:this-computer", ["server"], async () => {
-    if (!(await cloudOffered()) || store().seen().includes(CLOUD_PRO)) return false;
-    store().markSeen(CLOUD_PRO);
-    handoffAt = now();
-    if (await thisComputer()) return true;
-    handoffAt = 0;
-    return false;
+  ipcMain.handle("desktop-notices:seen", from("desktop-notices:seen", ANY, (_, id) => { store().markSeen(id); if (id === CLOUD_PRO) handoffAt = 0; }));
+  ipcMain.handle("desktop-notices:shown", from("desktop-notices:shown", ANY, (_, id) => store().shown(id)));
+  // Security: a server's page only brings the window to This computer, once a launch while the popup is unseen, where
+  // the popup asks again; only My Cloud's own page hands This computer's page a Manage plan click to finish.
+  ipcMain.handle("desktop-notices:this-computer", from("desktop-notices:this-computer", ["cloud", "server"], async (asking, then) => {
+    if (switched) return false;
+    switched = true;
+    let moved = false;
+    try {
+      if (!(await cloudOffered()) || store().seen().includes(CLOUD_PRO)) return false;
+      handoffAt = asking === "cloud" && then === "manage" ? now() : 0;
+      moved = await thisComputer() === true;
+      return moved;
+    } finally {
+      if (!moved) { switched = false; handoffAt = 0; }
+    }
   }));
-  ipcMain.handle("desktop-notices:handoff", from("desktop-notices:handoff", ["local"], () => {
-    const taken = handoffAt > 0 && now() - handoffAt < HANDOFF_MS;
-    handoffAt = 0;
-    return taken;
-  }));
+  ipcMain.handle("desktop-notices:handoff", from("desktop-notices:handoff", ["local"], () => handoffAt > 0 && now() - handoffAt < HANDOFF_MS));
+  // Security: a server's page learns only that this desktop turned analytics off, never that it is on.
   ipcMain.on("desktop-analytics:read", event => {
-    try { event.returnValue = page(event) === "local" ? store().analytics() : null; } catch { event.returnValue = null; }
+    try {
+      const asking = page(event), saved = store().analytics();
+      event.returnValue = asking === "local" ? saved : asking && saved === false ? false : null;
+    } catch { event.returnValue = null; }
   });
-  ipcMain.handle("desktop-analytics:set", from("desktop-analytics:set", ["local"], enabled => { store().setAnalytics(enabled === true); }));
+  ipcMain.handle("desktop-analytics:set", from("desktop-analytics:set", ["local"], (_, enabled) => { store().setAnalytics(enabled === true); }));
 }
