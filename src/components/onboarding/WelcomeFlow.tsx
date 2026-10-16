@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useRef, useState, type KeyboardEvent as ReactKeyboardEvent } from "react";
+import type { CloudOffer } from "../../../electron/cloud-home.mjs";
 import { MausAvatar } from "@/components/Avatar";
 import { useDesktopCapabilities } from "@/components/DesktopCapabilities";
 import { setEmailGateDone, track } from "@/lib/analytics";
@@ -14,9 +15,11 @@ import {
   flowDotsShown,
   nextBeat,
   previousBeat,
+  showWelcome,
   type BeatId,
 } from "@/lib/onboarding";
 import { api, useStore, type Bot } from "@/state/store";
+import { CloudBeat, useCloudBeatOffer } from "./beats/CloudBeat";
 import type { SetupDetection, SetupImportResult } from "../../../shared/setup-import";
 import { EnginesBeat } from "./beats/EnginesBeat";
 import { HelloBeat } from "./beats/HelloBeat";
@@ -36,6 +39,7 @@ const MASCOT_FOR_BEAT: Record<BeatId, MausState> = {
   import: "receiving",
   permissions: "listening",
   phone: "sending",
+  cloud: "working",
   bot: "celebrate",
 };
 
@@ -55,6 +59,8 @@ function beatTitle(beat: BeatId): string | null {
       return t("onboarding.reel.title");
     case "phone":
       return t("onboarding.phone.title");
+    case "cloud":
+      return t("onboarding.cloud.title");
   }
 }
 
@@ -74,6 +80,7 @@ export function WelcomeFlow({
   entrance = "arrive",
   hosted = false,
   onOpenOrganisation,
+  cloudOffer,
   setupImport,
 }: {
   bot: Bot | null;
@@ -86,16 +93,19 @@ export function WelcomeFlow({
   entrance?: Motion;
   hosted?: boolean;
   onOpenOrganisation?: () => void;
+  /** The preview's stand-in for the Admin's offer (the Cloud beat); the app reads its own. */
+  cloudOffer?: CloudOffer | null;
   /** Where the import step looks; the desktop app's own window looks on its own server. `detection` skips the look. */
   setupImport?: { client: SetupImportClient; detection?: SetupDetection } | null;
 }) {
   const { dispatch } = useStore();
   const { capabilities } = useDesktopCapabilities();
+  const offer = useCloudBeatOffer(hosted, cloudOffer);
   const importClient = setupImport === undefined ? (localSetupImport(hosted) ? setupImportApi : null) : setupImport?.client ?? null;
   const [detection, setDetection] = useState<SetupDetection | null>(setupImport?.detection ?? null);
   const [importResult, setImportResult] = useState<SetupImportResult | null>(null);
   const [importBusy, setImportBusy] = useState(false);
-  const beats = beatsFor({ dictation: dictation ?? capabilities.dictation.available, reel, hosted, setupImport: detection !== null });
+  const beats = beatsFor({ dictation: dictation ?? capabilities.dictation.available, reel, hosted, setupImport: detection !== null, cloud: offer !== null });
   const [beat, setBeat] = useState<BeatId>(() => (initialBeat && beats.includes(initialBeat) ? initialBeat : "hello"));
   const [mascot, setMascot] = useState<MausState>(MASCOT_FOR_BEAT[beat]);
   const [motion, setMotion] = useState<{ kind: Motion; key: number }>({ kind: "blink", key: 0 });
@@ -117,6 +127,8 @@ export function WelcomeFlow({
     track("onboarding_step", { step: beat, replay });
   }, [beat, replay]);
 
+  // A Cloud sheet opened over the welcome never switches the window away from it (CloudAddDialog).
+  useEffect(() => (embedded ? undefined : showWelcome()), [embedded]);
   // Looked for once, from the first beat; nothing found in time leaves the step out.
   useEffect(() => {
     if (!importClient || detection) return;
@@ -261,6 +273,7 @@ export function WelcomeFlow({
           )}
           {beat === "permissions" && <PermissionsBeat {...beatProps} />}
           {beat === "phone" && <PhoneBeat {...beatProps} />}
+          {beat === "cloud" && offer && <CloudBeat {...beatProps} offer={offer} />}
           {beat === "bot" && (
             <MeetYourBotBeat
               bot={bot}

@@ -7,8 +7,9 @@ import { createDownloadMarker } from "./cloud-sync-mark.mjs";
 
 const TOKEN_MS = 30 * 60_000;
 
-export function installCloudFiles({ app, ipcMain, dialog, shell, powerMonitor, fetch, localWorkspaceOnly, send, cloudOrigin, cloudAccount, localDataDir, now = Date.now }) {
-  const dir = path.join(app.getPath("userData"), "cloud-sync");
+/** `stateDir`: Files' own folder under userData; the staging Admin keeps its own (cloud-account.mjs cloudTarget). */
+export function installCloudFiles({ app, ipcMain, dialog, shell, powerMonitor, fetch, localWorkspaceOnly, send, cloudOrigin, cloudAccount, localDataDir, now = Date.now, stateDir = "cloud-sync" }) {
+  const dir = path.join(app.getPath("userData"), stateDir);
   const service = createCloudFilesService({
     settingsFile: path.join(dir, "settings.json"), stateFile: path.join(dir, "state.db"),
     documentsDir: app.getPath("documents"), homeDir: app.getPath("home"), localDataDir, cloudOrigin, fetch,

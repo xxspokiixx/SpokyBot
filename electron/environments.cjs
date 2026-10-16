@@ -1,6 +1,9 @@
 // A remote's session credential is the HttpOnly cookie /pair set, held by Chromium's cookie jar, never by this file.
 const LOCAL_ID = "local";
 const MAX_NAME = 60;
+/** A saved server's colour: one of these names, never a value a page could style with. The renderer maps each to its skin's tone. */
+const ENTRY_COLORS = Object.freeze(["blue", "teal", "purple", "orange", "red", "yellow"]);
+const cleanColor = (value) => (ENTRY_COLORS.includes(value) ? value : null);
 
 function normalizeOrigin(input) {
   if (typeof input !== "string") return null;
@@ -59,7 +62,7 @@ function workspaceSummary(state) {
   const active = activeEnvironment(state);
   if (!active) return { local: true, name: "This computer" };
   if (active.kind === "local") return { local: true, name: active.name, localPath: active.dataDir, missing: active.missing === true };
-  return { local: false, name: active.name, origin: active.origin };
+  return { local: false, name: active.name, origin: active.origin, ...(cleanColor(active.color) ? { color: active.color } : {}) };
 }
 
 /** Native identity must not depend on a hosted renderer's version/title. */
@@ -89,15 +92,18 @@ function workspaceSenderAllowed(event, contents, state, localOrigin) {
   }
 }
 
-/** Native menu choices, never renderer-supplied destinations or callbacks. */
-function workspaceMenuTemplate(state, { onSwitch, onConnect, onForget, onAddCloud, sublabels = {} }) {
+/** Native menu choices, never renderer-supplied destinations or callbacks. `iconFor`: a saved colour's small dot, when main can draw one. */
+function workspaceMenuTemplate(state, { onSwitch, onConnect, onForget, onAddCloud, sublabels = {}, iconFor = null }) {
   const active = activeEnvironment(state);
   return [
     { id: "workspace-local", label: "This computer", type: "radio", checked: !active, click: () => onSwitch(LOCAL_ID) },
-    ...state.environments.map((entry) => ({
-      id: `workspace-${entry.id}`, label: entry.name, sublabel: Object.hasOwn(sublabels, entry.id) ? sublabels[entry.id] : entry.kind === "local" ? entry.dataDir : new URL(entry.origin).host,
-      type: "radio", checked: entry.id === state.activeId, click: () => onSwitch(entry.id),
-    })),
+    ...state.environments.map((entry) => {
+      const icon = iconFor && cleanColor(entry.color) ? iconFor(entry.color) : null;
+      return {
+        id: `workspace-${entry.id}`, label: entry.name, sublabel: Object.hasOwn(sublabels, entry.id) ? sublabels[entry.id] : entry.kind === "local" ? entry.dataDir : new URL(entry.origin).host,
+        ...(icon ? { icon } : {}), type: "radio", checked: entry.id === state.activeId, click: () => onSwitch(entry.id),
+      };
+    }),
     ...(onAddCloud ? [{ id: "workspace-add-cloud", label: "Add a Cloud…", sublabel: "Keeps your bots running 24/7", click: onAddCloud }] : []),
     { type: "separator" },
     { id: "workspace-connect", label: "Connect to a server…", click: onConnect },
@@ -176,7 +182,9 @@ function parseEnvironments(raw) {
     if (!origin || (entry?.kind !== undefined && entry.kind !== "remote") || seen.has(origin)) continue;
     seen.add(id);
     seen.add(origin);
-    environments.push({ id, kind: "remote", name: cleanName(entry?.name, nameFromOrigin(origin)), origin, ...(entry?.microphone === true ? { microphone: true } : {}) });
+    const color = cleanColor(entry?.color);
+    environments.push({ id, kind: "remote", name: cleanName(entry?.name, nameFromOrigin(origin)), origin, ...(entry?.microphone === true ? { microphone: true } : {}),
+      ...(color ? { color } : {}), ...(entry?.home === true ? { home: true } : {}) });
   }
   const activeId = typeof value?.activeId === "string" && environments.some((e) => e.id === value.activeId) ? value.activeId : LOCAL_ID;
   return { environments, activeId };
@@ -198,6 +206,16 @@ function withEnvironment(state, input, makeId) {
   const id = makeId();
   const environments = [...state.environments, { id, kind: "remote", name: cleanName(input?.name, nameFromOrigin(origin)), origin }];
   return { ...state, environments };
+}
+
+/** A saved server's name and colour, as its owner chose them (the Cloud's own setup); an invalid colour is left as it was. */
+function withEnvironmentLook(state, origin, { name, color } = {}) {
+  const key = normalizeOrigin(origin);
+  const existing = key ? state.environments.find((e) => e.origin === key) : null;
+  if (!existing) return state;
+  const next = { ...existing, name: cleanName(name, existing.name), ...(cleanColor(color) ? { color } : {}) };
+  if (next.name === existing.name && next.color === existing.color) return state;
+  return { ...state, environments: state.environments.map((e) => (e === existing ? next : e)) };
 }
 
 function withLocalEnvironment(state, input, makeId, defaultDir) {
@@ -264,6 +282,7 @@ function allowedOrigins(state, localOrigin) {
 }
 
 module.exports = {
+  ENTRY_COLORS,
   LOCAL_ID,
   activeEnvironment,
   activeLocalDataDir,
@@ -278,6 +297,7 @@ module.exports = {
   startupEnvironmentDir,
   withActive,
   withEnvironment,
+  withEnvironmentLook,
   withLocalEnvironment,
   withMicrophone,
   withoutEnvironment,

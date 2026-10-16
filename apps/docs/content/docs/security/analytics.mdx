@@ -130,10 +130,11 @@ use their own Boat key, and how many bots run on cloud computers, without sendin
 | `email_submitted` | You shared your email on the first-run screen; your events are tied to that email from then on | none |
 | `$identify` | PostHog's own event, sent with `email_submitted`, and before a `cloud_pro_popup` click by someone signed in to MausBot Cloud, to tie your events to that email. When your events were already tied to an email, PostHog sends its `$set` event with the new one instead | `$set`: `email`, the email you shared or your Cloud account's email; `$anon_distinct_id`: the random id your events had before |
 | `email_skipped` | You skipped the email on the first-run screen | none |
-| `onboarding_step` | A first-run tour step is shown | `step`: `hello`, `reel`, `engines`, `import`, `permissions`, `phone`, `bot`; `replay`: true/false |
+| `onboarding_step` | A first-run tour step is shown | `step`: `hello`, `reel`, `engines`, `import`, `permissions`, `phone`, `cloud`, `bot`; `replay`: true/false |
 | `onboarding_completed` | The first-run tour ends | `reason`: `completed`, `skipped`; `at`: the step it ended on; `replay`: true/false |
 | `setup_import_applied` | You bring in the skills and MCP servers the first-run tour found from other AI tools on this computer | `skills`, `tools`: how many were added. Never their names or where they came from |
 | `setup_import_skipped` | You skip that step | `skills`, `tools`: how many it found |
+| `onboarding_cloud` | You answer the first-run tour's MausBot Cloud step | `action`: `start_trial` (Start free trial, or See plans when the offer has no trial), `not_now`; `trial`: true/false, with `start_trial`: the offer has a free trial |
 | `phone_setup_skipped`, `phone_setup_completed` | The phone step of the first-run tour was skipped or finished | none |
 | `message_sent` | You send a message | To a bot: `driver`: engine; `queued`: true/false. To a room: `room`: true; `mode`: `chat`, `goal`; `queued`: true/false |
 | `call_started` | You start a call with a bot | `driver`: engine; `mode`: `turns`, `live` |
@@ -152,8 +153,9 @@ use their own Boat key, and how many bots run on cloud computers, without sendin
 | `cloud_card_action` | You act on the MausBot Cloud card | `action`: `start`, `howto`, `signin`, `not_now`, `close` |
 | `cloud_pro_popup` | The Cloud Pro popup the desktop app shows once after an update is shown (once per launch until it is closed), or you choose one of its buttons. Signed in to MausBot Cloud, a click on `upgrade`, `manage` or `see_plans` first ties your events to your Cloud account's email (`$identify`); `shown`, `not_now` and `close` never do | `action`: `shown`, `upgrade` (Start free trial or Upgrade to Cloud Pro), `manage` (Manage plan), `see_plans` (Compare plans), `not_now`, `close` (the X, Escape or a click outside); `plan`: `none`, `trial`, `personal`, `pro`, `max`, `other` (a plan newer than the app), `unknown` (the sign-in ended); `signed_in`: true/false, signed in to MausBot Cloud in the app |
 | `cloud_howto` | The "Show me how" tip ends | `result`: `no_button`, `skipped`, `closed` |
-| `cloud_dialog_shown` | The Add a Cloud dialog opens | `source`: `app_card`, `app_howto`, `app_menu`, `app_settings`, `app_routines`, `update_popup` (the Cloud Pro popup); `view`: the dialog's first screen |
+| `cloud_dialog_shown` | The Add a Cloud dialog opens | `source`: `app_card`, `app_howto`, `app_menu`, `app_settings`, `app_routines`, `update_popup` (the Cloud Pro popup), `app_onboarding` (the first-run tour's MausBot Cloud step); `view`: the dialog's first screen |
 | `cloud_dialog_view` | The Add a Cloud dialog reaches a step | `view`: `received`, `starting`, `ready` |
+| `cloud_signin` | Signing in to MausBot Cloud inside the Add a Cloud dialog takes a step | `step`: `code_sent` (a sign-in code was emailed), `signed_in`, `browser` (Continue in browser); `source`: as for `cloud_dialog_shown` |
 | `cloud_checkout_opened` | A Cloud checkout opens in the browser | `plan`: Cloud plan; `trial`: true/false; `source`: as for `cloud_dialog_shown` |
 | `cloud_setup_started` | A new Cloud starts its first job | none |
 | `cloud_intent_submitted` | You tell a new Cloud what to do first | `idea`: `digest`, `watch`, `research`, `plan`, or none for your own words; `edited`: true/false |

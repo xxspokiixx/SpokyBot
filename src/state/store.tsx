@@ -638,7 +638,7 @@ export interface AppState {
   appSettingsCloudLink: number;
   appSettingsPhonePairing: number;
   shortcutsOpen: boolean;
-  cloudAdd: { source: import("@/lib/cloud-plan").CloudSource } | null;
+  cloudAdd: { source: import("@/lib/cloud-plan").CloudSource; signIn?: true } | null;
   cloudHowTo: boolean;
   welcomeOpen: boolean;
   tourOpen: boolean;
@@ -898,7 +898,7 @@ export type Action =
   | { type: "unreadDividerDone"; threadId: string }
   | { type: "toggleAppSettings"; open?: boolean; section?: AppSettingsSection; cloudLink?: boolean; phonePairing?: boolean }
   | { type: "toggleShortcuts"; open?: boolean }
-  | { type: "openCloudAdd"; source: import("@/lib/cloud-plan").CloudSource }
+  | { type: "openCloudAdd"; source: import("@/lib/cloud-plan").CloudSource; signIn?: true }
   | { type: "closeCloudAdd" }
   | { type: "cloudHowTo"; open: boolean }
   | { type: "toggleWelcome"; open?: boolean }
@@ -1690,7 +1690,7 @@ export function reducer(state: AppState, action: Action): AppState {
       };
     }
     case "openCloudAdd":
-      return { ...state, cloudAdd: state.cloudAdd ?? { source: action.source }, cloudHowTo: false };
+      return { ...state, cloudAdd: state.cloudAdd ?? { source: action.source, ...(action.signIn ? { signIn: true as const } : {}) }, cloudHowTo: false };
     case "closeCloudAdd":
       return state.cloudAdd ? { ...state, cloudAdd: null } : state;
     case "cloudHowTo":
