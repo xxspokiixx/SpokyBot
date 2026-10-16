@@ -200,7 +200,9 @@ describe("Private Integration token", () => {
     const tokenField = host.querySelector<HTMLInputElement>('input[aria-label="Private Integration token"]')!;
     const locationField = host.querySelector<HTMLInputElement>('input[aria-label="Location ID"]')!;
     expect(tokenField.type).toBe("password");
-    expect(text()).toContain("open Settings → Private Integrations");
+    expect(text()).toContain("go to Settings → Private Integrations");
+    // The one permission the token check itself needs, and the one contact reads use to name custom fields.
+    expect(text()).toMatch(/permissions: View Locations, View Contacts, Edit Contacts, View Opportunities, Edit Opportunities and View Custom Fields/u);
 
     await act(async () => host.querySelector<HTMLButtonElement>('form[data-highlevel-token-form] button[type="submit"]')!.click());
     await settle();
@@ -233,10 +235,11 @@ describe("Private Integration token", () => {
       setter.call(locationField, "loc_x");
       locationField!.dispatchEvent(new Event("input", { bubbles: true }));
     });
-    fixture.api.mockImplementationOnce(async () => { throw new Error("HighLevel refused this token (401)."); });
+    const refusal = "This token does not belong to that location (403): it was created in another sub-account or at the agency level. Create the Private Integration inside the sub-account whose location ID you entered.";
+    fixture.api.mockImplementationOnce(async () => { throw new Error(refusal); });
     await act(async () => host.querySelector<HTMLButtonElement>('form[data-highlevel-token-form] button[type="submit"]')!.click());
     await settle();
-    expect(host.querySelector('[role="alert"]')?.textContent).toBe("HighLevel refused this token (401).");
+    expect(host.querySelector('[role="alert"]')?.textContent).toBe(refusal);
     // The field keeps what was typed so it can be corrected, masked; nothing else in the card repeats it.
     expect(tokenField!.type).toBe("password");
     expect(text()).not.toContain("pit-secret");

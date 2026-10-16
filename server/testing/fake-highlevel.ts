@@ -20,6 +20,8 @@ export interface FakeHighLevel {
   tokens: Set<string>;
   /** Shifted one per request before any routing. */
   overrides: FakeHighLevelOverride[];
+  /** Standing answers for "METHOD /path", given only to an accepted token: a missing scope, not a dead token. */
+  pathOverrides: Map<string, FakeHighLevelOverride>;
   close(): Promise<void>;
 }
 
@@ -49,6 +51,7 @@ export async function startFakeHighLevel(options: { locationId?: string } = {}):
   const calls: FakeHighLevelCall[] = [];
   const tokens = new Set<string>();
   const overrides: FakeHighLevelOverride[] = [];
+  const pathOverrides = new Map<string, FakeHighLevelOverride>();
   const server: Server = createServer(async (req, res) => {
     let raw = "";
     for await (const chunk of req) raw += chunk;
@@ -68,6 +71,8 @@ export async function startFakeHighLevel(options: { locationId?: string } = {}):
     const bearer = /^Bearer (.+)$/u.exec(headers.authorization ?? "")?.[1];
     if (!bearer || !tokens.has(bearer)) return answer(401, { statusCode: 401, message: "Invalid JWT" });
     if (headers.version !== "2021-07-28" && headers.version !== "2021-04-15") return answer(400, { message: "Version header is missing" });
+    const standing = pathOverrides.get(`${call.method} ${url.pathname}`);
+    if (standing) return answer(standing.status, standing.body ?? { message: `fixture ${standing.status}` }, standing.headers);
     const { method } = call;
     const path = url.pathname;
     let m: RegExpExecArray | null;
@@ -116,7 +121,7 @@ export async function startFakeHighLevel(options: { locationId?: string } = {}):
   const address = server.address();
   if (!address || typeof address === "string") throw new Error("fake HighLevel did not bind");
   return {
-    url: `http://127.0.0.1:${address.port}`, locationId, calls, tokens, overrides,
+    url: `http://127.0.0.1:${address.port}`, locationId, calls, tokens, overrides, pathOverrides,
     close: () => new Promise<void>((resolve) => { server.closeAllConnections(); server.close(() => resolve()); }),
   };
 }
