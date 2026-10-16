@@ -156,6 +156,8 @@ use their own Boat key, and how many bots run on cloud computers, without sendin
 | `cloud_setup_started` | A new Cloud starts its first job | none |
 | `cloud_intent_submitted` | You tell a new Cloud what to do first | `idea`: `digest`, `watch`, `research`, `plan`, or none for your own words; `edited`: true/false |
 | `cloud_intent_skipped` | You skip that question | none |
+| `cloud_welcome_step` | A step of a new Cloud's welcome is shown | `step`: `bring`, `engine`, `files`, `done` |
+| `cloud_welcome_ended` | A new Cloud's welcome ends | `reason`: `done`, `skipped`; `at`: the step it ended on |
 | `product_hunt_card` | You act on the Product Hunt card | `action`: `upvote`, `not_now`, `close` |
 
 `api_key_saved` reports `ok` for a key the server checks with its provider before saving it (Boat, Composio,

@@ -29,8 +29,9 @@ and keep their swap back in those folders.
   bots and chats from this Mac** ("this computer" elsewhere), with **Copy** and
   **Not now**. Not now hides it for that server for good. A server added
   earlier shows it the next time it is opened, while it is still empty. On an
-  OMB Cloud whose setup checklist is up, the same offer is the checklist's
-  second step instead (docs/cloud-pro.md). **Copy** there switches the window
+  OMB Cloud, the same offer is the first step of its welcome instead (before
+  anything there starts a chat), and later the setup card's **Bring your
+  stuff** step (docs/cloud-pro.md). **Copy** there switches the window
   to this computer, on Settings → Servers with that server's panel open, and
   the person starts the copy there (Security, below); on the person's own
   OMB Cloud, verified through the Admin, it starts the copy at once.

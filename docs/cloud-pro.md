@@ -37,14 +37,69 @@ Contract version: `1` (`cloudContractVersion` on the wire).
 3. When it is ready, the machine appears under **Servers** as **My Cloud**, and
    the card offers **Open My Cloud**. One click opens the machine in the
    app window, signed in. There is no second confirmation.
-4. The first thing the Cloud asks is **What should your Cloud do while you're
-   away?** (`src/components/CloudIntent.tsx`, `src/lib/cloud-intent.ts`): a box
-   drawn like the composer, with `/setup` fixed in front of the text, four
+4. The first thing the Cloud shows is its welcome
+   (`src/components/cloud-welcome/`, `src/lib/cloud-welcome.ts`): **Welcome to
+   {name}** (the name this app keeps for the server, **My Cloud** where it has
+   none), three steps on the left and the step on the right. It is only for the
+   owner's own session on a Cloud home, and never for a Cloud set up before it
+   (one that answered the first-job question, or where a bot has finished a
+   turn, before the welcome ever showed there). The first time it shows, it
+   says so in the Cloud's record (`cloud-welcome-shown`), so a chat that
+   finishes before its first step (from a phone, say) does not end it.
+   1. **Bring your stuff** comes first, before anything starts a chat: a copy
+      from the Cloud's own page goes only into an empty Cloud (its starter bot
+      at most, no rooms, no chat with a message from the person), so a first
+      chat would leave only Replace. In the desktop app it offers **Everything
+      from this Mac** ("this computer" elsewhere), counting this computer's
+      bots, chats and routines and its size, chosen when this computer has work
+      to bring and the copy can run (the checks in docs/copy-workspace.md, not
+      whether its one-time card was put off), and **Start fresh**, which opens
+      the team library. **Copy to {name}** runs the copy in place, with its
+      progress, **Stop the copy**, and its errors and notes as in Settings; once
+      it lands, what came over and what arrived paused. **Skip for now** keeps
+      the copy's card from coming back (`cloud-setup-move-skipped`). In a
+      browser, on a phone, or in a desktop app that is another server's client,
+      it offers Start fresh and says that the desktop app brings bots from a
+      computer. On a Cloud that already has bots or chats of its own (a copy
+      made before, a chat from a phone), it offers neither: it says **Your bots
+      are already here**, and **Continue** moves on. A backup file is
+      imported from Settings → Backups, as on any server.
+   2. **Connect your AI**: the engine sign-in's own tiles and sign-in panel
+      (below), with **Connected** on one that can run. While the trial's Claude
+      credit lasts and nothing of the person's own can run, a line says so
+      (with the amount where the desktop app knows it), and **Use my credit for
+      now** moves on.
+   3. **Files and apps**, optional: **Share folders** opens Settings → MausBot
+      Cloud in this computer's window, one click from Files (a browser is told
+      to use the desktop app), and **Connect apps** opens Connected apps on the
+      Cloud.
+   4. **{name} is ready**: **Say hi to your Chief of Staff** (or to the first
+      bot) opens its chat, and **Give it a job** asks the first-job question.
+
+   Each finished step is kept in the Cloud's onboarding record
+   (`cloud-welcome-bring`, `cloud-welcome-engine`, `cloud-welcome-files`),
+   which never travels with a copy, so the welcome opens where it was left on
+   any device; the steps can be visited in any order from the left. It ends for
+   good at its last step or with **Skip setup** (`cloud-welcome-done`), and
+   with Hide setup. A save the Cloud refuses (a 409 while provider settings
+   are being changed, say) is tried once more; an end that still cannot be
+   saved is kept on this device (`omb.cloudWelcome.done`), so the welcome does
+   not come back on the next launch, and a small keeper beside the setup card
+   (`WelcomeKeeper.tsx`) sends it again when the Cloud answers.
+   The main pane and the setup card read the record the same way, with the
+   hints written here and not saved yet. Picking another bot or room in the
+   sidebar steps it aside for the session; **Continue setup** on the setup card
+   brings it back.
+5. The first-job question, **What should your Cloud do while you're away?**
+   (`src/components/CloudIntent.tsx`, `src/lib/cloud-intent.ts`), is asked
+   only when asked for: from the welcome's last step, or the setup card's
+   **Give it a job** on a Cloud set up before the welcome. It is a box drawn
+   like the composer, with `/setup` fixed in front of the text, four
    ideas that fill it in (a news digest, watching a page, a research roundup,
    a daily plan); hovering one previews its full text in the box. It is never a
    gate: **Skip for now** sits in plain view under the ideas, Escape skips while
-   the box is empty, and picking another bot in the sidebar goes to that bot,
-   leaving the question to the setup card's **Give it a job**. The answer is sent as `/setup <job>`
+   the box is empty, and picking another bot in the sidebar goes to that bot.
+   The answer is sent as `/setup <job>`
    (server/setup-mode.ts), so the bot asks at most four questions and sets
    itself up for the job in the chat. With an engine already able to run, it
    is sent at once; the box becomes the composer on the way (a named View
@@ -52,11 +107,10 @@ Contract version: `1` (`cloudContractVersion` on the wire).
    waits on this device (`omb.cloudIntent.pending` in browser storage) and
    the engine sign-in shows it at the top, with **Edit**. The Cloud keeps
    that the question was answered (`cloud-intent-asked`) and that a job was
-   given (`cloud-intent-given`) in its onboarding record, so no device asks
-   again; a Cloud where a bot has already finished a turn is never asked.
-   The question is asked only of the owner's own session on a Cloud home.
-5. Then, with no engine signed in, the engine sign-in
-   (`src/components/CloudEngineSignIn.tsx`): provider tiles side by side (two,
+   given (`cloud-intent-given`) in its onboarding record.
+6. With no engine signed in, the engine sign-in
+   (`src/components/CloudEngineSignIn.tsx`; the welcome's second step shows the
+   same tiles and panel while it is open): provider tiles side by side (two,
    or three where the image carries the Grok CLI), where the picked one opens
    its sign-in in a panel underneath, and an API key below them:
    - **Claude**: the existing paste-code flow (open Anthropic's
@@ -75,7 +129,7 @@ Contract version: `1` (`cloudContractVersion` on the wire).
    When a waiting job's engine can run, the screen says **Connected. Starting
    your job…** for a moment, the choices step back, and the job goes to the
    chat as above.
-6. Until one of those engines can run, every bot on the Cloud, including the
+7. Until one of those engines can run, every bot on the Cloud, including the
    default one, shows this sign-in rather than a chat that fails its first
    turn. Once one can run, the chat takes its place. Sign-ins stay on the
    machine's volume (`~/.claude`, `~/.codex`, `~/.grok`, the server's own
@@ -83,9 +137,9 @@ Contract version: `1` (`cloudContractVersion` on the wire).
    so in one line and offers an xAI key instead.
 
 The Cloud's `GET /api/auth/session` answers `"cloudHome": true` for a paired
-session; that is how the web UI knows to open the engine sign-in instead of
-the welcome flow, which describes the person's own computer (it can still be
-replayed from Settings).
+session; that is how the web UI knows to open the Cloud's welcome and engine
+sign-in instead of the welcome flow, which describes the person's own computer
+(it can still be replayed from Settings).
 
 ### Use My Cloud on your phone
 
@@ -238,7 +292,23 @@ chevron minimizes the card to its segments on this device only
 the last required step finishes in the session that is open,
 the card gives way once to **Your Cloud is ready**, with the guide mascot;
 a Cloud that opens already done shows nothing. Each step's state comes from
-the Cloud or the app, never from a box the person ticks:
+the Cloud or the app, never from a box the person ticks.
+
+It is the welcome's steps in short, never a second checklist beside it: while
+the welcome fills the window the card does not show (nor does the one-time
+Copy this computer here card). When the person steps away from the welcome,
+the card lists **Create your Cloud** (done from the start), **Bring your
+stuff** (done after a copy or a team from the library, skipped after Start
+fresh or Skip for now), **Connect your AI** (done once the welcome's step was
+passed with an engine that can run, the trial's credit included; skipped when
+passed without one) and **Files and apps**, and the step that leads offers
+**Continue setup**, which opens the welcome on that step. After the welcome
+ends, the card stays only while no engine can run, or while a job given at
+the welcome's end waits for its routine (the steps below), and then gives way
+once to **Your Cloud is ready**.
+
+A Cloud set up before the welcome (it answered the first-job question, or a
+bot has finished a turn there) keeps the first-job checklist:
 
 1. **Create your Cloud**: done from the start; the Cloud exists.
 2. **Give it a first job**: done once a job is given to the first question
@@ -273,11 +343,12 @@ settings…**.
 
 **Hide setup** is the only dismiss. The Cloud keeps it (`cloud-setup-hidden`
 in its onboarding record), so it holds on every device and after browser
-storage is cleared, and it is the move's **Not now** too. The card also goes
+storage is cleared, and it is the move's **Not now** and the welcome's end
+too. The card also goes
 away by itself once an engine can run and the Cloud has done something: with
 a first job given, its routine exists (the bot's first turn only asks its
-questions, so a finished turn is not enough); without one, a bot has finished
-a turn there. With a routine, **Your Cloud is ready** names it and its next
+questions, so a finished turn is not enough); without one, the welcome has
+ended, or on a Cloud set up before it, a bot has finished a turn there. With a routine, **Your Cloud is ready** names it and its next
 run, and **Run it now** starts it at once so the first result need not wait
 for the schedule. Nothing asks for confirmation.
 After the card, the one-time Copy this computer here card behaves as on any

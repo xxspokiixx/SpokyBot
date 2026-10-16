@@ -1,6 +1,5 @@
 import { useSyncExternalStore } from "react";
-import { CLOUD_INTENT_ASKED } from "@/lib/cloud-setup";
-import { hintSeen, type OnboardingStatus, type WelcomeViewer } from "@/lib/onboarding";
+import type { OnboardingStatus, WelcomeViewer } from "@/lib/onboarding";
 
 const KEY = "omb.cloudIntent.pending";
 const SENT_KEY = "omb.cloudIntent.sent";
@@ -11,6 +10,7 @@ export function setupMessage(job: string): string {
   return `/setup ${job.trim()}`;
 }
 
+/** A new Cloud opens on its welcome, which brings this computer's bots over before any chat: the question waits to be asked for. */
 export function cloudIntentDue(facts: {
   viewer: WelcomeViewer | null;
   connected: boolean;
@@ -20,8 +20,7 @@ export function cloudIntentDue(facts: {
 }): boolean {
   if (!facts.viewer?.cloudHome || !facts.viewer.canSave) return false;
   if (!facts.connected || !facts.enginesKnown || !facts.onboarding) return false;
-  if (facts.reopened) return true;
-  return !hintSeen(facts.onboarding, CLOUD_INTENT_ASKED) && !facts.onboarding.firstTurnAt;
+  return facts.reopened;
 }
 
 type Snapshot = {
