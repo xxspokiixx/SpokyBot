@@ -87,6 +87,22 @@ describe("the header's right side", () => {
     fixture.advanced = true;
   });
 
+  it("keeps the computer and ⋯ in a remote client's Simple header, whose settings panel has no room for them", () => {
+    fixture.advanced = false;
+    window.ogb = { remoteClient: { active: true } } as NonNullable<Window["ogb"]>;
+    try {
+      const { markup } = header();
+      expect(markup).not.toContain("data-test-model-control");
+      expect(markup).toContain('data-tour="computer"');
+      expect(markup).toContain('data-testid="chat-more"');
+      const more = fixture.menus.find((menu) => menu.ariaLabel === "More")!;
+      expect(more.items.map((item) => item.key)).toEqual(["find", "new-thread", "copy", "download"]);
+    } finally {
+      delete window.ogb;
+      fixture.advanced = true;
+    }
+  });
+
   it("keeps Stop in the Simple header while a turn runs", () => {
     fixture.advanced = false;
     const { controls } = header({ ...bot, busy: true, tasks: (bot.tasks ?? []).map((task) => ({ ...task, busy: true })) });

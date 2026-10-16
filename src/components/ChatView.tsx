@@ -1300,10 +1300,10 @@ export function ChatView({ bot: profile }: { bot: Bot }) {
             </button>
           )}
           <ThreadContextWarning bot={bot} messages={messages} />
-          {/* Simple mode moves the model, the computer and ⋯ into the bot panel. */}
+          {/* Simple mode moves the model, the computer and ⋯ into the bot panel; a remote client's panel has neither. */}
           {advanced && !remoteClient && <ModelPicker key={bot.threadId} bot={bot} threadId={bot.threadId} />}
           <LiveCallChip currentBotId={bot.id} onOpen={(botId, threadId) => openThread(dispatch, { botId, threadId }, state, showThreads)} />
-          {advanced && <button
+          {(advanced || remoteClient) && <button
             data-tour="computer"
             onClick={() => dispatch({ type: "toggleComputer" })}
             className={cn(
@@ -1314,7 +1314,7 @@ export function ChatView({ bot: profile }: { bot: Bot }) {
           >
             <Monitor size={18} />{busy && place === "browser" && <span aria-hidden="true" className="absolute right-1 top-1 size-1.5 animate-pulse rounded-full bg-success" data-testid="computer-button-live" />}
           </button>}
-          {advanced && <ChatHeaderMenu key={`menu:${bot.threadId}`} bot={bot} />}
+          {(advanced || remoteClient) && <ChatHeaderMenu key={`menu:${bot.threadId}`} bot={bot} />}
         </div>
         </div>
       </div>
