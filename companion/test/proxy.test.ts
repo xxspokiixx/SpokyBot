@@ -281,7 +281,7 @@ describe("the sidecar in front of an unmodified harness", () => {
   it("saves a paired device's bot appearance and returns it to other clients", async () => {
     const { body } = await device("GET", "/api/bots");
     const bot = body.bots[0];
-    const appearance = { color: "#168aad", mascotBody: "star", mascotExpression: "happy" };
+    const appearance = { color: "teal", mascotBody: "star", mascotExpression: "happy" };
     const saved = await device("PATCH", `/api/bots/${bot.id}`, { body: appearance });
     expect(saved.status, JSON.stringify(saved.body)).toBe(200);
     expect(saved.body.bot).toMatchObject(appearance);
@@ -298,7 +298,7 @@ describe("the sidecar in front of an unmodified harness", () => {
     const { body } = await device("GET", "/api/bots");
     const bot = body.bots[0];
     const path = `/api/bots/${bot.id}`;
-    const appearance = { color: "#ef476f", mascotBody: "diamond", mascotExpression: "sleeping" };
+    const appearance = { color: "coral", mascotBody: "diamond", mascotExpression: "sleeping" };
     for (const token of [null, "omb_wrong"]) {
       expect((await device("PATCH", path, { token, body: appearance })).status).toBe(401);
     }
@@ -313,6 +313,45 @@ describe("the sidecar in front of an unmodified harness", () => {
       const refused = await device("PATCH", path, { body: { ...appearance, ...protectedPatch } });
       expect(refused.status, JSON.stringify(protectedPatch)).toBe(403);
       expect(refused.body.error).toContain(Object.keys(protectedPatch)[0]);
+      expect(refused.body.error).toContain("host computer");
+      const refreshed = await device("GET", "/api/bots");
+      expect(refreshed.body.bots.find((candidate: { id: string }) => candidate.id === bot.id)).toEqual(bot);
+    }
+  });
+
+  it("saves the avatar panel's reset and shape choices from a paired device", async () => {
+    const { body } = await device("GET", "/api/bots");
+    const bot = body.bots[0];
+    const path = `/api/bots/${bot.id}`;
+    const shape = await device("PATCH", path, { body: { color: "purple", avatarCrop: "square", avatarZoom: 1.5, avatarFocusX: 0.25, avatarFocusY: 0.75 } });
+    expect(shape.status, JSON.stringify(shape.body)).toBe(200);
+    expect(shape.body.bot).toMatchObject({ color: "purple", avatarCrop: "square", avatarZoom: 1.5, avatarFocusX: 0.25, avatarFocusY: 0.75 });
+
+    const reset = await device("PATCH", path, { body: { avatarCrop: "mascot", color: "green", mascotExpression: null, mascotBody: "cursor" } });
+    expect(reset.status, JSON.stringify(reset.body)).toBe(200);
+    const host = await fetch(`${HARNESS}/api/bots`).then((response) => response.json()) as { bots: Array<{ id: string }> };
+    expect(host.bots.find((candidate) => candidate.id === bot.id))
+      .toMatchObject({ avatarCrop: "mascot", color: "green", mascotBody: "cursor" });
+    expect((await device("PATCH", path, { body: { avatarUrl: "/etc/passwd" } })).status).toBe(400);
+  });
+
+  it("refuses appearance values clients cannot draw without changing the bot", async () => {
+    const { body } = await device("GET", "/api/bots");
+    const bot = body.bots[0];
+    for (const invalid of [
+      { color: "#168aad" },
+      { color: "<script>" },
+      { color: { nested: true } },
+      { mascotExpression: 12345 },
+      { mascotExpression: "x".repeat(81) },
+      { mascotBody: "nope" },
+      { pinned: [1, 2] },
+      { avatarCrop: "triangle" },
+      { avatarFocusX: "left" },
+    ]) {
+      const refused = await device("PATCH", `/api/bots/${bot.id}`, { body: invalid });
+      expect(refused.status, JSON.stringify(invalid)).toBe(400);
+      expect(refused.body.error).toContain(Object.keys(invalid)[0]);
       const refreshed = await device("GET", "/api/bots");
       expect(refreshed.body.bots.find((candidate: { id: string }) => candidate.id === bot.id)).toEqual(bot);
     }
@@ -323,7 +362,7 @@ describe("the sidecar in front of an unmodified harness", () => {
     const bot = body.bots[0];
     const refused = await device("PATCH", `/api/bots/${bot.id}`, {
       headers: { "x-openmausbot-companion": "0" },
-      body: { color: "#ef476f", autoApprove: true },
+      body: { color: "coral", autoApprove: true },
     });
     expect(refused.status).toBe(403);
     expect(refused.body.error).toContain("autoApprove");
