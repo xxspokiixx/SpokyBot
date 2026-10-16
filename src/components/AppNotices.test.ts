@@ -748,6 +748,15 @@ describe("the Cloud Pro popup after the update", () => {
     expect(popupEvents("shown")).toEqual([]);
   });
 
+  it("a desktop whose first-run onboarding already offered Cloud counts it as seen, here and on My Cloud", async () => {
+    f.state.config.onboarding.hintsSeen = [...withTourFinished(undefined), "onboarding-cloud-v1"];
+    expect(await launch()).not.toContain(POPUP);
+    await flush(); expect(seenOnDesktop()).toEqual([ID]);
+    onMyCloud({ status: "paid", tier: "pro" });
+    expect(await launch()).not.toContain(POPUP);
+    expect(popupEvents("shown")).toEqual([]);
+  });
+
   it("never in a remote client's window, on a branded build, or on a desktop that sells no Cloud", async () => {
     (window.ogb as Record<string, any>).remoteClient.active = true;
     expect(await launch()).not.toContain(POPUP);
