@@ -94,7 +94,10 @@ export function BotPanel({ bot, derived, slackUrl = null, headerClassName, linke
     if (event.key !== "Escape" || event.defaultPrevented) return;
     const target = event.target as Partial<Element> | null;
     const inDialog = typeof target?.closest === "function" ? target.closest('[role="dialog"], [role="alertdialog"]') : null;
-    if (inDialog && inDialog !== editorRef.current && !editorRef.current?.contains(inDialog)) return;
+    // A dialog of its own (one this panel opened, perhaps portaled) owns its Escape; the settings dialog this panel
+    // sits in, and the avatar editor, do not.
+    const ownDialog = inDialog && !inDialog.contains(event.currentTarget) && inDialog !== editorRef.current && !editorRef.current?.contains(inDialog);
+    if (ownDialog) return;
     if (editorOpen) setEditorOpen(false);
     else if (stack.length > 0) back();
     else return;

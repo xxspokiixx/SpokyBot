@@ -79,7 +79,8 @@ export function BotSettingsDialog({ bot, overlay = false }: {
       if (nested && nested.getClientRects().length > 0) return;
       // BotInstructionsDialog portals to document.body: a key pressed with focus outside this dialog is not ours.
       if (dialog && event.target instanceof Node && !dialog.contains(event.target)) return;
-      if (event.key === "Escape") {
+      // A popover or field inside that already handled this Escape keeps the panel open.
+      if (event.key === "Escape" && !event.defaultPrevented) {
         event.preventDefault();
         dispatch({ type: "toggleSettings", open: false });
       }

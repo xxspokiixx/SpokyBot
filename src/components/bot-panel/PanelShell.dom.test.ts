@@ -48,8 +48,9 @@ const derived = { activeState: "idle", patch: vi.fn() } as never;
 
 let host: HTMLDivElement;
 let root: Root;
+// The panel sits inside BotSettingsDialog's <aside role="dialog">, as it does in the app.
 const render = (linkedSection: BotSettingsSection | null) =>
-  flushSync(() => root.render(createElement(BotPanel, { bot, derived, linkedSection, onClose })));
+  flushSync(() => root.render(createElement("aside", { role: "dialog" }, createElement(BotPanel, { bot, derived, linkedSection, onClose }))));
 // Passive effects and the renders they schedule.
 const settle = async () => {
   for (let i = 0; i < 3; i++) await new Promise((resolve) => setTimeout(resolve, 0));
@@ -60,16 +61,34 @@ const click = (element: Element | null) => {
   if (!element) throw new Error("nothing to click");
   flushSync(() => element.dispatchEvent(new MouseEvent("click", { bubbles: true, detail: 1 })));
 };
+const press = (element: Element | null, key: string) => {
+  if (!element) throw new Error("nothing to press");
+  const event = new KeyboardEvent("keydown", { key, bubbles: true, cancelable: true });
+  flushSync(() => element.dispatchEvent(event));
+  return event;
+};
+const menu = () => document.querySelector("[data-sidebar-popover-menu]");
+const moreButton = () => host.querySelector('[data-testid="chat-more"]')?.closest("button") ?? null;
+// What BotSettingsDialog's window listener would do with the key: close the whole panel.
+const dialogCloses = vi.fn();
+const onWindowKey = (event: KeyboardEvent) => {
+  if (event.key === "Escape" && !event.defaultPrevented) dialogCloses();
+};
 
 beforeEach(() => {
   fixture.dispatch.mockReset();
   onClose.mockReset();
+  dialogCloses.mockReset();
+  window.addEventListener("keydown", onWindowKey);
+  // Menus close at once instead of animating out.
+  document.documentElement.dataset.reducedMotion = "true";
   vi.spyOn(HTMLElement.prototype, "scrollIntoView").mockImplementation(() => {});
   host = document.createElement("div");
   document.body.append(host);
   root = createRoot(host);
 });
 afterEach(() => {
+  window.removeEventListener("keydown", onWindowKey);
   flushSync(() => root.unmount());
   host.remove();
   // A link without a page lands where its section does, so no test sees another's page.
@@ -105,5 +124,52 @@ describe("named links into the bot panel", () => {
     render("usage");
     await settle();
     expect(tab()).toBe("settings");
+  });
+});
+
+describe("Escape in the bot panel", () => {
+  const onPage = async () => {
+    openBotSettings(fixture.dispatch, "model");
+    render("model");
+    await settle();
+    expect(page()).toBe("model");
+  };
+
+  it("goes back from a drill-in page instead of closing the panel, though the panel sits in a dialog", async () => {
+    await onPage();
+    const back = host.querySelector<HTMLElement>("[data-panel-back]");
+    back?.focus();
+    const event = press(back, "Escape");
+    expect(event.defaultPrevented).toBe(true);
+    expect([tab(), page()]).toEqual(["details", null]);
+    expect(dialogCloses).not.toHaveBeenCalled();
+    // On a tab, Escape is the dialog's: it closes the panel.
+    press(host.querySelector('[data-panel-tab="details"]'), "Escape");
+    expect(dialogCloses).toHaveBeenCalledTimes(1);
+  });
+
+  it("closes the ⋯ menu first, on a tab and on a page, and only the next Escape reaches the panel", async () => {
+    render(null);
+    await settle();
+    moreButton()?.focus();
+    click(moreButton());
+    expect(menu()).not.toBeNull();
+    press(moreButton(), "Escape");
+    expect(menu()).toBeNull();
+    expect(dialogCloses).not.toHaveBeenCalled();
+    expect(document.activeElement).toBe(moreButton());
+
+    flushSync(() => root.unmount());
+    root = createRoot(host);
+    await onPage();
+    moreButton()?.focus();
+    click(moreButton());
+    expect(menu()).not.toBeNull();
+    press(moreButton(), "Escape");
+    expect(menu()).toBeNull();
+    expect(page()).toBe("model");
+    press(moreButton(), "Escape");
+    expect([tab(), page()]).toEqual(["details", null]);
+    expect(dialogCloses).not.toHaveBeenCalled();
   });
 });
