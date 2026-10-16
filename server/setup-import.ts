@@ -1,20 +1,18 @@
 // The welcome flow's "Bring what you already use": finds the skills and MCP servers of a person's other AI tools on
 // this computer and brings them in. It opens only the paths setupPaths names, plus the text files inside each skill
 // folder; credential, session and history files are never listed, opened or copied, and nothing found leaves this
-// computer. Skills are copied into every bot's own skills, switched on; MCP servers go through the same parser as
-// Plugins → MCP servers → Paste config, switched off.
+// computer. Skills are copied once into this computer's imported skills, which every bot uses (imported-skills.ts);
+// MCP servers go through the same parser as Plugins → MCP servers → Paste config, switched off.
 import { createHash } from "node:crypto";
-import { closeSync, constants, fstatSync, lstatSync, mkdirSync, openSync, readdirSync, readSync, statSync, writeFileSync, type Stats } from "node:fs";
+import { closeSync, constants, fstatSync, lstatSync, openSync, readdirSync, readSync, statSync, type Stats } from "node:fs";
 import { homedir } from "node:os";
 import { isAbsolute, join } from "node:path";
 
 import type { SetupDetection, SetupImportRequest, SetupImportResult, SetupSource, SkillSkip, SkillSource, ToolSkip } from "../shared/setup-import.ts";
-import { parseSkillMd, SKILL_FILE_MAX_BYTES } from "../shared/skill-md.ts";
+import { parseSkillMd, scanSkillText, SKILL_FILE_MAX_BYTES, type ParsedSkill } from "../shared/skill-md.ts";
+import { importedSkillIntact, readImportedSkills, storeImportedSkills, type ImportedSkillEntry, type ImportedSkillInput } from "./imported-skills.ts";
 import { isRemoteMcpServer, MAX_MCP_SERVERS, parseMcpServersImport, parseStoredMcpServer, type StoredMcpServer } from "./mcp-registry.ts";
-import { directoryEntryState } from "./skill-storage.ts";
-import { installSkill, listSkills, removeSkill, setSkillEnabled } from "./skills.ts";
 import { parseToml } from "./toml-lite.ts";
-import { workspaceDir } from "./workspace.ts";
 
 /** The file operations finding and copying use, so tests can see every path touched. Each answers null on failure. */
 export interface SetupFs {
@@ -32,11 +30,8 @@ export interface SetupMachine {
   fs: SetupFs;
 }
 
-/** What finding and bringing in need from the server. */
+/** What finding and bringing in need from the server. Skills need nothing from it: they are kept once for every bot. */
 export interface SetupHost {
-  bots(): ReadonlyArray<{ id: string }>;
-  /** The shared skills library's entries while it is switched on, null while it is off. */
-  library(): Record<string, { sha256: string }> | null;
   mcpServers(): Record<string, unknown>;
   mcpPolicyRefusal(name: string, server: object): string | undefined;
   persistMcpServers(next: Record<string, unknown>): void;
@@ -121,7 +116,12 @@ export function setupPaths(machine: Pick<SetupMachine, "home" | "platform" | "en
 interface FoundSkill {
   name: string;
   source: SkillSource;
+  parsed: ParsedSkill;
+  /** The folder it is read from. */
   folder: string;
+  /** The tool's skills folder, and the skill's own folder in it. */
+  root: string;
+  origin: string;
   /** Where it came from, as the bot's Skills settings show it. */
   label: string;
   text: string;
@@ -155,7 +155,7 @@ function findSkills(machine: SetupMachine): FoundSkill[] {
       const parsed = text === null ? null : parseSkillMd(text);
       if (!parsed || "error" in parsed || names.has(parsed.name)) continue;
       names.add(parsed.name);
-      found.push({ name: parsed.name, source, folder: dir, label: `${label}/${folder}`, text: text!, sha256: sha256(text!) });
+      found.push({ name: parsed.name, source, parsed, folder: dir, root, origin: dir, label: `${label}/${folder}`, text: text!, sha256: sha256(text!) });
     }
   }
   return found;
@@ -213,7 +213,8 @@ function skillFiles(fs: SetupFs, dir: string, budget: { bytes: number }): { file
       // Decided by name before anything is opened.
       if (name.startsWith(".") || privateName(name)) continue;
       const path = relative ? `${relative}/${name}` : name;
-      if (path === "SKILL.md") continue;
+      // Read already; on a disk that ignores case, skill.md is that same file.
+      if (!relative && name.toLowerCase() === "skill.md") continue;
       const full = join(folder, name);
       const info = fs.lstat(full);
       if (!info) continue;
@@ -242,70 +243,56 @@ function skillFiles(fs: SetupFs, dir: string, budget: { bytes: number }): { file
   return { files, leftOut };
 }
 
-/** Into the folder installSkill just made, level by level, never through a symlink and never over a file. */
-function writeSkillFiles(root: string, files: readonly SkillFile[]) {
-  if (directoryEntryState(root) !== "directory") throw new Error("the skill folder is not a real directory");
-  for (const file of files) {
-    const parts = file.path.split("/");
-    let folder = root;
-    for (const part of parts.slice(0, -1)) {
-      folder = join(folder, part);
-      const state = directoryEntryState(folder);
-      if (state === "missing") mkdirSync(folder, { mode: 0o700 });
-      else if (state !== "directory") throw new Error("a skill folder is not a real directory");
-    }
-    writeFileSync(join(folder, parts[parts.length - 1]!), file.content, { mode: file.executable ? 0o700 : 0o600, flag: "wx" });
-  }
+/** The same skill from the same folder, already here and unchanged. */
+function alreadyHere(skill: FoundSkill, held: ImportedSkillEntry | undefined): boolean {
+  return Boolean(held) && held!.origin === skill.origin && held!.sha256 === skill.sha256 && importedSkillIntact(skill.name, held!);
 }
 
-/** Installed off first, files added, then switched on, so a bot never sees a half-copied skill. */
-function installForBot(botId: string, skill: FoundSkill, files: readonly SkillFile[]): boolean {
-  const installed = installSkill(botId, skill.label, [{ path: "SKILL.md", content: skill.text }]);
-  if ("error" in installed) return false;
-  try {
-    writeSkillFiles(join(workspaceDir(botId), "skills", skill.name), files);
-  } catch {
-    removeSkill(botId, skill.name);
-    return false;
-  }
-  return !("error" in setSkillEnabled(botId, skill.name, true));
+/** New, or changed since it was brought in; a name another folder's skill already holds is not offered. */
+function freshSkill(skill: FoundSkill, held: ImportedSkillEntry | undefined): boolean {
+  return !held || (held.origin === skill.origin && !alreadyHere(skill, held));
 }
 
-type BotSkills = Map<string, Map<string, string>>;
-const botSkills = (bots: ReadonlyArray<{ id: string }>): BotSkills =>
-  new Map(bots.map((bot) => [bot.id, new Map(listSkills(bot.id).map((skill) => [skill.name, skill.sha256]))]));
-
-/** New when the library (while on) does not have the name and at least one bot has no skill by that name. */
-function freshSkill(skill: FoundSkill, owned: BotSkills, library: Record<string, unknown> | null): boolean {
-  if (library && Object.hasOwn(library, skill.name)) return false;
-  return [...owned.values()].some((names) => !names.has(skill.name));
-}
-
-function importSkills(machine: SetupMachine, host: SetupHost): NonNullable<SetupImportResult["skills"]> {
-  const bots = host.bots();
-  const library = host.library();
-  const owned = botSkills(bots);
+/** One copy for every bot, made once however many bots there are or will be. */
+function importSkills(machine: SetupMachine): NonNullable<SetupImportResult["skills"]> {
+  const index = readImportedSkills();
   const budget = { bytes: 0 };
   const result: NonNullable<SetupImportResult["skills"]> = { added: [], present: [], skipped: [], filesLeftOut: 0 };
   const skip = (name: string, reason: SkillSkip) => result.skipped.push({ name, reason });
+  const inputs: ImportedSkillInput[] = [];
   for (const skill of findSkills(machine)) {
-    const shelved = library && Object.hasOwn(library, skill.name) ? library[skill.name]! : null;
-    if (shelved) {
-      if (shelved.sha256 === skill.sha256) result.present.push(skill.name);
-      else skip(skill.name, "conflict");
+    const held = index[skill.name];
+    if (alreadyHere(skill, held)) {
+      result.present.push(skill.name);
       continue;
     }
-    const targets = bots.filter((bot) => !owned.get(bot.id)?.has(skill.name));
-    if (!targets.length) {
-      if (bots.length && bots.every((bot) => owned.get(bot.id)?.get(skill.name) === skill.sha256)) result.present.push(skill.name);
-      else if (bots.length) skip(skill.name, "conflict");
+    if (held && held.origin !== skill.origin) {
+      skip(skill.name, "conflict");
       continue;
     }
     const copy = skillFiles(machine.fs, skill.folder, budget);
     result.filesLeftOut += copy.leftOut;
-    const added = targets.filter((bot) => installForBot(bot.id, skill, copy.files)).length;
-    if (added) result.added.push(skill.name);
-    else skip(skill.name, "failed");
+    inputs.push({
+      name: skill.name,
+      skillMd: skill.text,
+      files: copy.files,
+      entry: {
+        description: skill.parsed.description,
+        source: skill.source,
+        root: skill.root,
+        origin: skill.origin,
+        label: skill.label,
+        sha256: skill.sha256,
+        warnings: scanSkillText(skill.text),
+        ...(skill.parsed.license ? { license: skill.parsed.license } : {}),
+        ...(skill.parsed.compatibility ? { compatibility: skill.parsed.compatibility } : {}),
+      },
+    });
+  }
+  for (const stored of storeImportedSkills(inputs)) {
+    result.filesLeftOut += stored.leftOut;
+    if (stored.stored) result.added.push(stored.name);
+    else skip(stored.name, "failed");
   }
   return result;
 }
@@ -533,11 +520,8 @@ function importTools(machine: SetupMachine, host: SetupHost): NonNullable<SetupI
 
 /** What is new here, by name and source; an empty list when nothing is. */
 export function detectSetup(machine: SetupMachine, host: SetupHost): SetupDetection {
-  const owned = botSkills(host.bots());
-  const library = host.library();
-  const skills = owned.size
-    ? findSkills(machine).filter((skill) => freshSkill(skill, owned, library)).map(({ name, source }) => ({ name, source }))
-    : [];
+  const index = readImportedSkills();
+  const skills = findSkills(machine).filter((skill) => freshSkill(skill, index[skill.name])).map(({ name, source }) => ({ name, source }));
   const current = host.mcpServers();
   const tools = Object.keys(current).length < MAX_MCP_SERVERS
     ? findTools(machine, current, host.mcpPolicyRefusal).fresh.map(({ name, source }) => ({ name, source }))
@@ -547,7 +531,7 @@ export function detectSetup(machine: SetupMachine, host: SetupHost): SetupDetect
 
 export function applySetupImport(machine: SetupMachine, host: SetupHost, request: SetupImportRequest): SetupImportResult {
   return {
-    ...(request.skills ? { skills: importSkills(machine, host) } : {}),
+    ...(request.skills ? { skills: importSkills(machine) } : {}),
     ...(request.tools ? { tools: importTools(machine, host) } : {}),
   };
 }

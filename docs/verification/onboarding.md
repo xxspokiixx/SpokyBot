@@ -88,7 +88,7 @@ this computer, brought in with one button. Desktop app only, and skipped when
 nothing new is found within two seconds.
 
 ```sh
-pnpm exec vitest run server/setup-import.test.ts server/toml-lite.test.ts server/routes/setup-import.test.ts server/setup-import.e2e.test.ts src/components/onboarding/beats/ImportBeat.test.ts src/lib/setup-import.test.ts src/lib/onboarding.test.ts
+pnpm exec vitest run server/setup-import.test.ts server/imported-skills.test.ts server/toml-lite.test.ts server/routes/setup-import.test.ts server/setup-import.e2e.test.ts src/components/onboarding/beats/ImportBeat.test.ts src/lib/setup-import.test.ts src/lib/onboarding.test.ts
 ```
 
 Every test builds its own temporary home; none reads the real `~/.claude`,
@@ -98,7 +98,11 @@ touches, and checks that none of them was listed or opened and that the
 sentinel reaches no answer, saved server or copied skill. The route test
 refuses a paired device, a service loopback and a hosted or Cloud server; the
 end-to-end test runs the real server from `launchVerificationServer` against a
-planted home. Screenshots of the step in Midnight and Daylight, at a narrow
-width, working, failed and with its result came from `onboarding-preview.html`
-with a fixture detection (`?beat=import`, `?import=notes`, `?import=fail`,
-`?w=390&h=760`). Not covered here: the packaged Electron window itself.
+planted home, and checks that the starter bot and a bot made afterwards both
+get the skills in their turn's index, task folder links and `/name`, that a
+Claude turn with "Also use my Claude Code skills" on sees a Claude Code skill
+once, and that a bot can switch one off for itself. Screenshots of the step in
+Midnight and Daylight, at a narrow width, working, failed and with its result
+came from `onboarding-preview.html` with a fixture detection (`?beat=import`,
+`?import=notes`, `?import=fail`, `?w=390&h=760`). Not covered here: the
+packaged Electron window itself.

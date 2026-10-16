@@ -1,16 +1,16 @@
 import { randomUUID } from "node:crypto";
-import { mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { createServer, type Server } from "node:http";
 import type { AddressInfo } from "node:net";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 
-import type { AppConfig } from "../config.ts";
+import { DATA_DIR, type AppConfig } from "../config.ts";
 import { json, readBody } from "../harness/http.ts";
+import { IMPORTED_SKILLS_DIR, importedSkillsFor } from "../imported-skills.ts";
 import type { RequestAuth } from "../request-auth.ts";
 import { thisMachine } from "../setup-import.ts";
-import { listSkills } from "../skills.ts";
 import { removeTempDir } from "../testing/cleanup.ts";
 import { createSetupImportRoutes } from "./setup-import.ts";
 import { dispatchRoutes } from "./table.ts";
@@ -20,6 +20,8 @@ const homes: string[] = [];
 afterEach(async () => {
   await Promise.all(servers.splice(0).map((server) => new Promise((done) => server.close(done))));
   await Promise.all(homes.splice(0).map((home) => removeTempDir(home)));
+  rmSync(IMPORTED_SKILLS_DIR, { recursive: true, force: true });
+  rmSync(join(DATA_DIR, "skill-state", "imported-skills.json"), { force: true });
 });
 
 const AUTH: Record<string, RequestAuth> = {
@@ -48,7 +50,6 @@ async function serve({ local = true, home = fixtureHome() }: { local?: boolean; 
   const routes = [createSetupImportRoutes({
     local,
     cfg,
-    bots: () => [bot, { id: "hidden-bot", hidden: true }],
     mcpConfigBusy: { get: () => busy, set: (value) => { busy = value; } },
     mcpPolicyRefusal: () => undefined,
     persistMcpServers: (next) => { cfg.mcpServers = next; },
@@ -84,7 +85,7 @@ describe("the setup import routes", () => {
     const hosted = await serve({ local: false });
     expect((await hosted.call("GET", "/api/setup-import")).status).toBe(403);
     expect((await hosted.call("POST", "/api/setup-import", { body: { skills: true, tools: true } })).status).toBe(403);
-    expect(listSkills(local.bot.id)).toEqual([]);
+    expect(importedSkillsFor(local.bot.id, new Set())).toEqual([]);
     expect(local.cfg.mcpServers).toEqual({});
   });
 
@@ -103,8 +104,7 @@ describe("the setup import routes", () => {
       tools: { added: ["notion"], present: [], skipped: [] },
     });
     expect(text).not.toContain("notion_secret");
-    expect(listSkills(bot.id).map((skill) => [skill.name, skill.enabled])).toEqual([["pdf", true]]);
-    expect(listSkills("hidden-bot")).toEqual([]);
+    expect(importedSkillsFor(bot.id, new Set()).map((skill) => skill.name)).toEqual(["pdf"]);
     expect(cfg.mcpServers).toEqual({ notion: { type: "http", url: "https://mcp.notion.com/mcp", headers: { Authorization: "Bearer notion_secret" }, enabled: false } });
     expect(await (await call("GET", "/api/setup-import")).json()).toEqual({ skills: [], tools: [] });
 
@@ -116,7 +116,7 @@ describe("the setup import routes", () => {
     const { call, cfg, bot } = await serve();
     const tools = await call("POST", "/api/setup-import", { body: { tools: true } });
     expect(await tools.json()).toEqual({ tools: { added: ["notion"], present: [], skipped: [] } });
-    expect(listSkills(bot.id)).toEqual([]);
+    expect(importedSkillsFor(bot.id, new Set())).toEqual([]);
     expect(Object.keys(cfg.mcpServers ?? {})).toEqual(["notion"]);
 
     expect((await call("POST", "/api/setup-import", { body: {} })).status).toBe(400);

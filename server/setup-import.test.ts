@@ -1,9 +1,11 @@
-import { createHash, randomUUID } from "node:crypto";
-import { chmodSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, statSync, symlinkSync, writeFileSync } from "node:fs";
+import { randomUUID } from "node:crypto";
+import { chmodSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, statSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join, relative, sep } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 
+import { DATA_DIR } from "./config.ts";
+import { IMPORTED_SKILLS_DIR, importedSkillsFor, readImportedSkills } from "./imported-skills.ts";
 import { removeTempDir } from "./testing/cleanup.ts";
 import {
   applySetupImport, detectSetup, privateName, setupPaths, SKILL_COPY_LIMITS, thisMachine, topLevelJsonMember, withoutJsonComments,
@@ -17,6 +19,9 @@ const SENTINEL = "SENTINEL-credential-7f3a91";
 const homes: string[] = [];
 afterEach(async () => {
   await Promise.all(homes.splice(0).map((home) => removeTempDir(home)));
+  // This computer's imported skills are one set for the whole data folder: each test starts without any.
+  rmSync(IMPORTED_SKILLS_DIR, { recursive: true, force: true });
+  rmSync(join(DATA_DIR, "skill-state", "imported-skills.json"), { force: true });
 });
 
 function fixtureHome(): string {
@@ -35,7 +40,6 @@ function put(home: string, path: string, content: string | Buffer, mode?: number
 
 const skillMd = (name: string, body = "Run scripts/extract.py on the file.") =>
   `---\nname: ${name}\ndescription: Works with ${name} files.\n---\n\n# ${name}\n\n${body}\n`;
-const sha = (text: string) => createHash("sha256").update(text).digest("hex");
 
 /** Records every path finding or copying touches. */
 function machineFor(home: string, platform: NodeJS.Platform = "darwin", env: Record<string, string | undefined> = {}) {
@@ -51,14 +55,11 @@ function machineFor(home: string, platform: NodeJS.Platform = "darwin", env: Rec
   return { machine, touched };
 }
 
-function hostFor(options: { bots?: string[]; servers?: Record<string, unknown>; library?: Record<string, { sha256: string }> | null; refuse?: string[] } = {}) {
+function hostFor(options: { servers?: Record<string, unknown>; refuse?: string[] } = {}) {
   let servers = options.servers ?? {};
   let busy = false;
   const saves: Array<Record<string, unknown>> = [];
-  const bots = (options.bots ?? [`bot-${randomUUID().slice(0, 8)}`]).map((id) => ({ id }));
   const host: SetupHost = {
-    bots: () => bots,
-    library: () => options.library ?? null,
     mcpServers: () => servers,
     mcpPolicyRefusal: (name) => (options.refuse?.includes(name) ? "Not on your organization's approved list." : undefined),
     persistMcpServers: (next) => {
@@ -67,7 +68,7 @@ function hostFor(options: { bots?: string[]; servers?: Record<string, unknown>; 
     },
     mcpConfigBusy: { get: () => busy, set: (value) => { busy = value; } },
   };
-  return { host, bots, saves, servers: () => servers, busy: { set: (value: boolean) => { busy = value; } } };
+  return { host, saves, servers: () => servers, busy: { set: (value: boolean) => { busy = value; } } };
 }
 
 const newBot = () => `bot-${randomUUID().slice(0, 8)}`;
@@ -176,17 +177,30 @@ describe("finding what another AI tool already set up on this computer", () => {
     ]);
   });
 
-  it("leaves out a skill every bot already has, and one the switched-on library already holds", () => {
+  it("offers a skill until it is brought in, again once it or its copy changes, and never one another folder's skill named so", () => {
     const home = fixtureHome();
     plantSkills(home);
     const { machine } = machineFor(home);
-    const [first, second] = [newBot(), newBot()];
-    installSkill(first, "elsewhere", [{ path: "SKILL.md", content: skillMd("review", "Review the diff.") }]);
-    expect(detectSetup(machine, hostFor({ bots: [first, second] }).host).skills.map((skill) => skill.name)).toEqual(["pdf", "review"]);
-    installSkill(second, "elsewhere", [{ path: "SKILL.md", content: skillMd("review", "Something else.") }]);
-    expect(detectSetup(machine, hostFor({ bots: [first, second] }).host).skills.map((skill) => skill.name)).toEqual(["pdf"]);
-    expect(detectSetup(machine, hostFor({ bots: [first, second], library: { pdf: { sha256: "0".repeat(64) } } }).host).skills).toEqual([]);
-    expect(detectSetup(machine, hostFor({ bots: [] }).host).skills).toEqual([]);
+    const { host } = hostFor();
+    // No bot is needed: the skills are kept once for all of them.
+    expect(detectSetup(machine, host).skills.map((skill) => skill.name)).toEqual(["pdf", "review"]);
+    applySetupImport(machine, host, { skills: true });
+    expect(detectSetup(machine, host).skills).toEqual([]);
+    // A bot made afterwards changes nothing here.
+    installSkill(newBot(), "elsewhere", [{ path: "SKILL.md", content: skillMd("review", "Something else.") }]);
+    expect(detectSetup(machine, host).skills).toEqual([]);
+    put(home, ".claude/skills/pdf/SKILL.md", skillMd("pdf", "A newer pdf skill."));
+    expect(detectSetup(machine, host).skills).toEqual([{ name: "pdf", source: "claudeCode" }]);
+    applySetupImport(machine, host, { skills: true });
+    const copy = join(IMPORTED_SKILLS_DIR, "review", "SKILL.md");
+    chmodSync(copy, 0o600);
+    writeFileSync(copy, skillMd("review", "Edited by a bot."));
+    expect(detectSetup(machine, host).skills).toEqual([{ name: "review", source: "codex" }]);
+    // Another tool's skill by the same name is a different skill: it is not offered, and bringing in skips it.
+    rmSync(join(home, ".codex", "skills", "review"), { recursive: true });
+    put(home, ".claude/skills/review-copy/SKILL.md", skillMd("review", "Another review skill."));
+    expect(detectSetup(machine, host).skills).toEqual([]);
+    expect(applySetupImport(machine, host, { skills: true }).skills?.skipped).toEqual([{ name: "review", reason: "conflict" }]);
   });
 
   it("reads MCP servers from Claude Code, Claude Desktop, Cursor, Codex and Gemini CLI, each server once", () => {
@@ -249,7 +263,7 @@ describe("finding what another AI tool already set up on this computer", () => {
     plantSkills(home);
     const planted = plantPrivateFiles(home);
     const { machine, touched } = machineFor(home);
-    const { host, bots, servers } = hostFor();
+    const { host, servers } = hostFor();
     const detection = detectSetup(machine, host);
     const result = applySetupImport(machine, host, { skills: true, tools: true });
 
@@ -267,7 +281,7 @@ describe("finding what another AI tool already set up on this computer", () => {
     expect(said).not.toContain(SENTINEL);
     expect(said).not.toContain("project-only");
     expect(JSON.stringify({ detection, result })).not.toMatch(/ghp_secret_value|lin_secret_value|sntrys_secret_value/);
-    expect(contentsUnder(join(workspaceDir(bots[0]!.id), "skills"))).not.toContain(SENTINEL);
+    expect(contentsUnder(IMPORTED_SKILLS_DIR)).not.toContain(SENTINEL);
   });
 
   it("reads one top-level JSON member without parsing the rest", () => {
@@ -283,55 +297,53 @@ describe("finding what another AI tool already set up on this computer", () => {
 });
 
 describe("bringing skills in", () => {
-  it("copies each skill's text files into every bot, switched on, and leaves out binary, oversized, linked and private files", () => {
+  it("copies each skill's text files once, read-only, for every bot, and leaves out binary, oversized, linked and private files", () => {
     const home = fixtureHome();
     plantSkills(home);
     plantPrivateFiles(home);
     const { machine } = machineFor(home);
-    const { host, bots } = hostFor({ bots: [newBot(), newBot()] });
+    const { host } = hostFor();
     const result = applySetupImport(machine, host, { skills: true });
     expect(result).toEqual({ skills: { added: ["pdf", "review"], present: [], skipped: [], filesLeftOut: 3 } });
-    for (const { id } of bots) {
-      const skills = listSkills(id);
-      expect(skills.map((skill) => [skill.name, skill.enabled, skill.source])).toEqual([
-        ["pdf", true, "~/.claude/skills/pdf"],
-        ["review", true, "~/.codex/skills/review"],
-      ]);
-      const folder = join(workspaceDir(id), "skills", "pdf");
-      expect(filesUnder(folder)).toEqual(["SKILL.md", "references", "references/forms.md", "scripts", "scripts/extract.py"]);
-      expect(readFileSync(join(folder, "SKILL.md"), "utf8")).toBe(skillMd("pdf"));
-      if (process.platform !== "win32") {
-        expect(statSync(join(folder, "scripts", "extract.py")).mode & 0o100).toBe(0o100);
-        expect(statSync(join(folder, "references", "forms.md")).mode & 0o111).toBe(0);
-      }
+    const folder = join(IMPORTED_SKILLS_DIR, "pdf");
+    expect(filesUnder(folder)).toEqual(["SKILL.md", "references", "references/forms.md", "scripts", "scripts/extract.py"]);
+    expect(readFileSync(join(folder, "SKILL.md"), "utf8")).toBe(skillMd("pdf"));
+    if (process.platform !== "win32") {
+      expect(statSync(join(folder, "scripts", "extract.py")).mode & 0o777).toBe(0o500);
+      expect(statSync(join(folder, "references", "forms.md")).mode & 0o777).toBe(0o400);
     }
+    expect(readImportedSkills().pdf).toMatchObject({
+      source: "claudeCode", label: "~/.claude/skills/pdf", root: join(home, ".claude", "skills"), origin: join(home, ".claude", "skills", "pdf"),
+    });
+    // Nothing is written into any bot: a bot made before or after uses the same copy.
+    const before = newBot();
+    expect(existsSync(workspaceDir(before))).toBe(false);
+    for (const bot of [before, newBot()]) expect(importedSkillsFor(bot, new Set()).map((skill) => skill.name)).toEqual(["pdf", "review"]);
   });
 
   it("adds a skill once: a second run finds it present and changes nothing", () => {
     const home = fixtureHome();
     put(home, ".claude/skills/pdf/SKILL.md", skillMd("pdf"));
     const { machine } = machineFor(home);
-    const { host, bots } = hostFor();
+    const { host } = hostFor();
     expect(applySetupImport(machine, host, { skills: true }).skills?.added).toEqual(["pdf"]);
+    const stored = readImportedSkills().pdf;
     expect(applySetupImport(machine, host, { skills: true })).toEqual({ skills: { added: [], present: ["pdf"], skipped: [], filesLeftOut: 0 } });
-    expect(listSkills(bots[0]!.id).map((skill) => skill.name)).toEqual(["pdf"]);
+    expect(readImportedSkills().pdf).toEqual(stored);
     expect(detectSetup(machine, host).skills).toEqual([]);
   });
 
-  it("never overwrites a bot's own skill or a library skill of the same name", () => {
+  it("never touches a bot's own skill of the same name: that bot keeps its own, the others get the one brought in", () => {
     const home = fixtureHome();
     put(home, ".claude/skills/pdf/SKILL.md", skillMd("pdf"));
     const { machine } = machineFor(home);
     const mine = newBot();
     installSkill(mine, "my own", [{ path: "SKILL.md", content: skillMd("pdf", "My own version.") }]);
-    expect(applySetupImport(machine, hostFor({ bots: [mine] }).host, { skills: true }).skills?.skipped).toEqual([{ name: "pdf", reason: "conflict" }]);
+    expect(applySetupImport(machine, hostFor().host, { skills: true }).skills?.added).toEqual(["pdf"]);
     expect(readFileSync(join(workspaceDir(mine), "skills", "pdf", "SKILL.md"), "utf8")).toContain("My own version.");
-
-    const other = newBot();
-    const library = (sha256: string) => hostFor({ bots: [other], library: { pdf: { sha256 } } }).host;
-    expect(applySetupImport(machine, library(sha(skillMd("pdf"))), { skills: true }).skills?.present).toEqual(["pdf"]);
-    expect(applySetupImport(machine, library("0".repeat(64)), { skills: true }).skills?.skipped).toEqual([{ name: "pdf", reason: "conflict" }]);
-    expect(listSkills(other)).toEqual([]);
+    expect(listSkills(mine).map((skill) => skill.source)).toEqual(["my own"]);
+    expect(importedSkillsFor(mine, new Set(listSkills(mine).map((skill) => skill.name)))).toEqual([]);
+    expect(importedSkillsFor(newBot(), new Set()).map((skill) => skill.name)).toEqual(["pdf"]);
   });
 
   it("stops copying a skill's files at its file count, and every skill's at the total size", () => {
@@ -344,15 +356,47 @@ describe("bringing skills in", () => {
     const total = SKILL_COPY_LIMITS.totalBytes;
     SKILL_COPY_LIMITS.totalBytes = SKILL_COPY_LIMITS.skillFiles * 4 + 100;
     try {
-      const { host, bots } = hostFor();
-      const result = applySetupImport(machine, host, { skills: true });
+      const result = applySetupImport(machine, hostFor().host, { skills: true });
       expect(result.skills?.added).toEqual(["many", "second"]);
       expect(result.skills?.filesLeftOut).toBe(6);
-      expect(filesUnder(join(workspaceDir(bots[0]!.id), "skills", "many", "refs"))).toHaveLength(SKILL_COPY_LIMITS.skillFiles);
-      expect(filesUnder(join(workspaceDir(bots[0]!.id), "skills", "second"))).toEqual(["SKILL.md"]);
+      expect(filesUnder(join(IMPORTED_SKILLS_DIR, "many", "refs"))).toHaveLength(SKILL_COPY_LIMITS.skillFiles);
+      expect(filesUnder(join(IMPORTED_SKILLS_DIR, "second"))).toEqual(["SKILL.md"]);
     } finally {
       SKILL_COPY_LIMITS.totalBytes = total;
     }
+  });
+
+  it("brings in a skill whose SKILL.md is spelled skill.md or Skill.md, and one file a disk ignoring case cannot hold stays out alone", () => {
+    const home = fixtureHome();
+    put(home, ".claude/skills/lower/skill.md", skillMd("lower"));
+    put(home, ".claude/skills/lower/notes.md", "# Notes\n");
+    put(home, ".claude/skills/mixed/Skill.md", skillMd("mixed"));
+    put(home, ".claude/skills/pair/SKILL.md", skillMd("pair"));
+    put(home, ".claude/skills/pair/README.md", "# Read me\n");
+    const { machine } = machineFor(home);
+    // A source that tells README.md from readme.md, as a Linux disk or a git checkout does.
+    const pair = join(home, ".claude", "skills", "pair");
+    const real = machine.fs;
+    const twin = (path: string) => (path === join(pair, "readme.md") ? join(pair, "README.md") : path);
+    machine.fs = {
+      ...real,
+      readdir: (path) => (path === pair ? ["README.md", "SKILL.md", "readme.md"] : real.readdir(path)),
+      lstat: (path) => real.lstat(twin(path)),
+      read: (path, max, follow) => real.read(twin(path), max, follow),
+    };
+    const caseBlind = existsSync(join(home, ".claude", "skills", "lower", "SKILL.md"));
+    const caseBlindData = (() => {
+      mkdirSync(IMPORTED_SKILLS_DIR, { recursive: true });
+      writeFileSync(join(IMPORTED_SKILLS_DIR, "Probe"), "");
+      const blind = existsSync(join(IMPORTED_SKILLS_DIR, "probe"));
+      rmSync(join(IMPORTED_SKILLS_DIR, "Probe"));
+      return blind;
+    })();
+    const result = applySetupImport(machine, hostFor().host, { skills: true });
+    expect(result.skills?.added).toEqual(caseBlind ? ["lower", "mixed", "pair"] : ["pair"]);
+    expect(result.skills?.filesLeftOut).toBe(caseBlindData ? 1 : 0);
+    if (caseBlind) expect(filesUnder(join(IMPORTED_SKILLS_DIR, "lower"))).toEqual(["SKILL.md", "notes.md"]);
+    expect(filesUnder(join(IMPORTED_SKILLS_DIR, "pair"))).toEqual(caseBlindData ? ["README.md", "SKILL.md"] : ["README.md", "SKILL.md", "readme.md"]);
   });
 });
 

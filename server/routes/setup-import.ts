@@ -2,7 +2,6 @@ import { z } from "zod";
 
 import type { AppConfig } from "../config.ts";
 import { applySetupImport, detectSetup, thisMachine, type SetupHost, type SetupMachine } from "../setup-import.ts";
-import { readSkillLibraryIndex, skillsLibraryEnabled } from "../skill-library.ts";
 import type { BusyFlag } from "./config.ts";
 import { PASS, type RouteHandler } from "./table.ts";
 
@@ -10,7 +9,6 @@ export interface SetupImportRouteDeps {
   /** False on a MausBot Cloud home or a hosted organization server: the files there are not the person's own. */
   local: boolean;
   cfg: Pick<AppConfig, "mcpServers" | "features">;
-  bots(): ReadonlyArray<{ id: string; hidden?: boolean }>;
   mcpConfigBusy: BusyFlag;
   mcpPolicyRefusal(name: string, server: object): string | undefined;
   persistMcpServers(next: Record<string, unknown>): void;
@@ -27,8 +25,6 @@ const requestSchema = z.object({ skills: z.boolean().optional(), tools: z.boolea
 export function createSetupImportRoutes(deps: SetupImportRouteDeps): RouteHandler {
   const machine = deps.machine ?? thisMachine;
   const host: SetupHost = {
-    bots: () => deps.bots().filter((bot) => !bot.hidden),
-    library: () => (skillsLibraryEnabled(deps.cfg) ? readSkillLibraryIndex() : null),
     mcpServers: () => deps.cfg.mcpServers ?? {},
     mcpPolicyRefusal: deps.mcpPolicyRefusal,
     persistMcpServers: deps.persistMcpServers,

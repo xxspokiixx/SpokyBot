@@ -100,7 +100,7 @@ describe("what the step says", () => {
     })).toEqual({
       line: "Added 1 skill and 4 tools.",
       notes: [
-        "Skipped review: your bots already have a different skill with that name.",
+        "Skipped review: a different skill with that name is already here.",
         "Couldn't copy lint. Try again from the bot's Skills settings.",
         "Large or non-text files in skill folders were left out.",
         "e and f didn't fit: your list of MCP servers is full.",

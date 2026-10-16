@@ -168,10 +168,24 @@ Claude Desktop, Cursor (`~/.cursor/mcp.json`) and Gemini CLI
 `config.toml`. Each server goes through Paste config's parser, switched off;
 one already here by name, command or address is left alone, and the list stops
 at its limit. Token variables (Codex `bearer_token_env_var`) are not resolved:
-add the token as a header when you test the server. The step copies the
-person's own skills (`~/.claude/skills`, `~/.codex/skills`) into every bot's
-Skills, switched on. It never opens credential, session or history files, and
-it is skipped when there is nothing new.
+add the token as a header when you test the server.
+
+The step also brings in the person's own skills (`~/.claude/skills`,
+`~/.codex/skills`). Each one is copied once, read-only, into
+`<data>/imported-skills` (`server/imported-skills.ts`), and every bot uses
+that copy on every engine that works with files: the bot the tour sets up,
+and any bot made later from the New bot dialog, the API, a template, a Chief
+of Staff team or a package. Each turn lists them after the bot's own skills,
+with a budget of their own, links them into the task folder's `.claude`,
+`.agents` and `.grok` skills, and runs them as `/name`. A bot's own or library
+skill of the same name wins; **Bot Settings → Skills** shows the rest as
+coming from this computer, with a switch for that bot. A copy whose files
+change afterwards is left out until it is brought in again. A turn whose
+engine already loads the folder a skill came from leaves the copy out, so
+nothing is listed twice: Claude Code with **Also use my Claude Code skills**
+on, and Codex on the person's own `CODEX_HOME`. The copies travel with
+backups and Copy to My Cloud. The step never opens credential, session or
+history files, and it is skipped when there is nothing new.
 
 Open a bot’s **Tools → Access → MCP servers** to narrow the enabled global
 servers offered to it. Existing bots keep all enabled global servers until you

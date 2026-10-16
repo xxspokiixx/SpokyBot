@@ -144,7 +144,7 @@ describe("the import step", () => {
       result: { ...BROUGHT, skills: { ...BROUGHT.skills!, skipped: [{ name: "lint", reason: "conflict" }] } },
     });
     expect(html).toContain("Added 2 skills and 1 tool.");
-    expect(html).toContain("Skipped lint: your bots already have a different skill with that name.");
+    expect(html).toContain("Skipped lint: a different skill with that name is already here.");
     expect(html).not.toContain("type=\"checkbox\"");
     expect(skip).toBeUndefined();
     primary.props.onClick!();
