@@ -72,7 +72,7 @@ export function PanelHero({ bot, activeState, patch, editorOpen, onToggleEditor 
         <BotAvatar bot={bot} size={76} state={activeState} />
         <span
           aria-hidden="true"
-          className="absolute inset-0 flex items-center justify-center rounded-[22px] bg-black/0 text-white opacity-0 transition-[opacity,background-color] group-hover:bg-black/40 group-hover:opacity-100 group-focus-visible:bg-black/40 group-focus-visible:opacity-100 motion-reduce:transition-none"
+          className="absolute inset-0 flex items-center justify-center rounded-[22px] bg-black/0 text-white opacity-0 transition-[opacity,background-color] group-hover:bg-black/40 group-hover:opacity-100 group-focus-visible:bg-black/40 group-focus-visible:opacity-100 group-focus-within:opacity-100 touch:opacity-100 motion-reduce:transition-none"
         >
           <Pencil size={20} />
         </span>
@@ -106,7 +106,7 @@ export function PanelHero({ bot, activeState, patch, editorOpen, onToggleEditor 
             className="group/name inline-flex max-w-full items-center gap-1.5 rounded-[7px] px-1.5 py-px text-[18px] font-semibold text-ink hover:bg-ink/[0.04]"
           >
             <span className="min-w-0 truncate">{bot.name}</span>
-            <Pencil size={13} aria-hidden="true" className="shrink-0 text-ink-tertiary opacity-0 transition-opacity group-hover/name:opacity-100 group-focus-visible/name:opacity-100" />
+            <Pencil size={13} aria-hidden="true" className="shrink-0 text-ink-tertiary opacity-0 transition-opacity group-hover/name:opacity-100 group-focus-visible/name:opacity-100 group-focus-within/name:opacity-100 touch:opacity-100" />
           </button>
         )}
       </h2>
