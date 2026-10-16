@@ -874,7 +874,7 @@ computers belong to this machine on every request.
   only the person's own Jev key until the relay accepts it too. The relay
   speaks Jev's API only: included decisions are Jev's, and with OpenRouter
   selected in **Settings → Decision model** nothing is included (it needs an
-  OpenRouter key of the person's own).
+  OpenRouter key: one saved there, or the one under **Settings → API keys**).
 - **Included decisions are on until switched off.** While the decision model
   runs on the included token, its master switch counts as on unless the person
   switched it off in **Settings → Decision model**; an explicit off always
