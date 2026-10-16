@@ -12,10 +12,12 @@ import { callCapabilityHelp } from "@/lib/call-capability";
 import { requestCallStart } from "@/lib/call-start-request";
 import { useOnCall } from "@/lib/call";
 import { isLiveCallRunning, useLiveMedia } from "@/lib/live-call-media";
+import { useStore } from "@/state/store";
 import { cn } from "@/lib/cn";
 import { t } from "@/lib/i18n";
 import type { ApprovalModeSelector } from "./ApprovalModeSelector";
 import { useDesktopCapabilities } from "./DesktopCapabilities";
+import { liveLineHeldElsewhere } from "./LiveCallBar";
 import { SidebarPopoverMenu, type SidebarMenuItem } from "./SidebarPopoverMenu";
 
 type ApprovalChoice = ComponentProps<typeof ApprovalModeSelector>;
@@ -107,7 +109,10 @@ export function ComposerPlusMenu({ onAttach, goal, approval, callBotId }: {
   const turnsHere = !ready || capabilities.dictation.available;
   const callMode = effectiveCallMode(storedMode, { turnsHere, canLive: true });
   const turnsHelp = turnsHere ? null : callCapabilityHelp(capabilities, Boolean(window.ogb?.speechStart));
-  const calling = callBotId !== undefined && (onCall === callBotId || isLiveCallRunning(media.phase));
+  const { state } = useStore();
+  // As the call button, which hides while Live is the mode and its line is held on another device.
+  const lineHeldElsewhere = callMode === "live" && liveLineHeldElsewhere(media, state.liveCall);
+  const calling = callBotId !== undefined && (onCall === callBotId || isLiveCallRunning(media.phase) || lineHeldElsewhere);
   const items: SidebarMenuItem[] = [
     { key: "attach", label: t("composer.attach"), icon: <Paperclip size={16} />, onSelect: onAttach },
     ...(goal ? [{

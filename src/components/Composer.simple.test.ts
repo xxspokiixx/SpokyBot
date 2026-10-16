@@ -9,18 +9,20 @@ import type { Bot, Group } from "@/state/store";
 import { restoreComposerDraft } from "@/lib/drafts";
 import { MAUS_COLORS } from "@/lib/mascot";
 import { onCallStartRequest } from "@/lib/call-start-request";
+import { setCallMode } from "@/lib/call-mode";
 
 const fixture = vi.hoisted(() => ({
   advanced: false,
   dispatch: vi.fn(),
   call: null as Record<string, unknown> | null,
   groupCall: null as Record<string, unknown> | null,
+  liveCall: null as unknown,
 }));
 const ENGINE = "claude-3f0c2b1e-9d1a-4c55-8a51-0a3a6f1e2b7c";
 vi.mock("@/state/store", async (importOriginal) => {
   const original = await importOriginal<typeof import("@/state/store")>();
   return { ...original, useStore: () => ({
-    state: { ...original.initialState, bots: [bot, peer], instances: [{
+    state: { ...original.initialState, bots: [bot, peer], liveCall: fixture.liveCall, instances: [{
       instanceId: ENGINE, driverKind: "claudeAgent", displayName: "Claude", capabilities: { agentsMcp: true },
     }] },
     dispatch: fixture.dispatch,
@@ -69,6 +71,8 @@ function openPlus() {
 
 beforeEach(() => {
   fixture.advanced = false;
+  fixture.liveCall = null;
+  setCallMode("turns");
   fixture.call = null;
   fixture.groupCall = null;
   vi.stubGlobal("ResizeObserver", class { observe() {} disconnect() {} });
@@ -118,6 +122,21 @@ describe("the Simple composer in a bot chat", () => {
     openPlus();
     click(item("call:live"));
     expect(started).toHaveBeenCalledExactlyOnceWith("live");
+    stop();
+  });
+
+  it("offers no call while Live is the mode and its line is held on another device, as the hidden call button", () => {
+    const started = vi.fn();
+    const stop = onCallStartRequest("atlas", started);
+    setCallMode("live");
+    fixture.liveCall = { callId: "phone-call", botId: "atlas", threadId: "atlas-thread", client: "ios", voice: "marin", startedAt: 1, status: "live" };
+    render({ bot });
+    openPlus();
+    for (const key of ["call:turns", "call:live"]) {
+      expect(item(key)?.disabled, key).toBe(true);
+      click(item(key));
+    }
+    expect(started).not.toHaveBeenCalled();
     stop();
   });
 

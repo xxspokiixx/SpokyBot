@@ -105,6 +105,7 @@ export function CallTargetButton({
   const liveMode = canLive && mode === "live";
   const turnsReady = capabilitiesReady && supported && voiceReady;
   const unavailable = !active && !liveElsewhere && !liveMode && !turnsReady;
+  const lineHeldElsewhere = liveMode && !onCall && liveLineHeldElsewhere(media, state.liveCall);
   const voiceSetupRequired = capabilitiesReady && supported && !voiceReady;
   const cloudHome = state.config?.cloudHome === true;
   const [helpOpen, setHelpOpen] = useState(false);
@@ -184,7 +185,8 @@ export function CallTargetButton({
   // The Simple composer's + menu: the same choice as this button's own call-mode menu, which it replaces there.
   const requestedStart = useRef<(next: CallMode) => void>(() => {});
   requestedStart.current = (next) => {
-    if (active || liveElsewhere || (next === "live" && !canLive)) return;
+    // Hidden below while Live's line is held on another device: the + menu must not start a second call either.
+    if (active || liveElsewhere || (next === "live" && !canLive) || lineHeldElsewhere) return;
     closePopovers();
     setCallMode(next);
     start(next);
@@ -223,7 +225,7 @@ export function CallTargetButton({
     if (opened) proRef.current?.focus();
   }, [proPopover]);
 
-  if (liveMode && !onCall && liveLineHeldElsewhere(media, state.liveCall)) return null;
+  if (lineHeldElsewhere) return null;
   return (
     <div ref={rootRef} className="relative flex items-center gap-0.5">
       <button
