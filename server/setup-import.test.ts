@@ -1,5 +1,6 @@
+import { execFileSync, spawn } from "node:child_process";
 import { randomUUID } from "node:crypto";
-import { chmodSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, statSync, symlinkSync, writeFileSync } from "node:fs";
+import { chmodSync, existsSync, linkSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, statSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join, relative, sep } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
@@ -8,7 +9,7 @@ import { DATA_DIR } from "./config.ts";
 import { IMPORTED_SKILLS_DIR, importedSkillListings, importedSkillsFor, readImportedSkills, setImportedSkillEnabled } from "./imported-skills.ts";
 import { removeTempDir } from "./testing/cleanup.ts";
 import {
-  applySetupImport, detectSetup, privateName, setupPaths, SKILL_COPY_LIMITS, thisMachine, topLevelJsonMember, withoutJsonComments,
+  applySetupImport, detectSetup, secretName, setupPaths, SKILL_COPY_LIMITS, thisMachine, topLevelJsonMember, withoutJsonComments,
   type SetupFs, type SetupHost, type SetupMachine,
 } from "./setup-import.ts";
 import { installSkill, listSkills } from "./skills.ts";
@@ -41,18 +42,23 @@ function put(home: string, path: string, content: string | Buffer, mode?: number
 const skillMd = (name: string, body = "Run scripts/extract.py on the file.") =>
   `---\nname: ${name}\ndescription: Works with ${name} files.\n---\n\n# ${name}\n\n${body}\n`;
 
-/** Records every path finding or copying touches. */
+/** Records every path finding or copying touches, and how. */
 function machineFor(home: string, platform: NodeJS.Platform = "darwin", env: Record<string, string | undefined> = {}) {
-  const touched: string[] = [];
+  const ops: Array<{ op: keyof SetupFs; path: string }> = [];
   const real = thisMachine().fs;
+  const seen = <T>(op: keyof SetupFs, path: string, value: T) => {
+    ops.push({ op, path });
+    return value;
+  };
   const fs: SetupFs = {
-    lstat: (path) => { touched.push(path); return real.lstat(path); },
-    stat: (path) => { touched.push(path); return real.stat(path); },
-    readdir: (path) => { touched.push(path); return real.readdir(path); },
-    read: (path, max, follow) => { touched.push(path); return real.read(path, max, follow); },
+    lstat: (path) => seen("lstat", path, real.lstat(path)),
+    readdir: (path) => seen("readdir", path, real.readdir(path)),
+    readlink: (path) => seen("readlink", path, real.readlink(path)),
+    realpath: (path) => seen("realpath", path, real.realpath(path)),
+    read: (path, max, follow, oneLink) => seen("read", path, real.read(path, max, follow, oneLink)),
   };
   const machine: SetupMachine = { home, platform, env, fs };
-  return { machine, touched };
+  return { machine, ops, touched: () => ops.map((entry) => entry.path) };
 }
 
 function hostFor(options: { servers?: Record<string, unknown>; refuse?: string[] } = {}) {
@@ -138,7 +144,7 @@ function plantSkills(home: string) {
   put(home, ".claude/skills/pdf/.credentials.json", SENTINEL);
   put(home, ".claude/skills/pdf/notes/.env", SENTINEL);
   put(home, ".claude/skills/pdf/secrets/token.txt", SENTINEL);
-  put(home, ".claude/skills/pdf/history.txt", SENTINEL);
+  put(home, ".claude/skills/pdf/session.json", SENTINEL);
   put(home, ".claude/skills/pdf/sessions/last.json", SENTINEL);
   symlinkSync(join(home, ".codex", "auth.json"), join(home, ".claude", "skills", "pdf", "linked.md"));
   put(home, ".claude/skills/broken/SKILL.md", "no frontmatter here\n");
@@ -262,7 +268,7 @@ describe("finding what another AI tool already set up on this computer", () => {
     plantTools(home);
     plantSkills(home);
     const planted = plantPrivateFiles(home);
-    const { machine, touched } = machineFor(home);
+    const { machine, ops, touched } = machineFor(home);
     const { host, servers } = hostFor();
     const detection = detectSetup(machine, host);
     const result = applySetupImport(machine, host, { skills: true, tools: true });
@@ -270,18 +276,125 @@ describe("finding what another AI tool already set up on this computer", () => {
     const allowed = setupPaths(machine);
     const roots = allowed.skills.map((skill) => skill.root);
     const files = new Set(allowed.tools.map((tool) => tool.path));
-    const stray = touched.filter((path) => !files.has(path) && !roots.some((root) => path === root || path.startsWith(root + sep)));
-    expect(stray).toEqual([]);
-    for (const path of planted) expect(touched).not.toContain(path);
-    const inSkills = touched.filter((path) => roots.some((root) => path.startsWith(root + sep))).map((path) => relative(home, path));
+    const inRoot = (path: string) => roots.some((root) => path === root || path.startsWith(root + sep));
+    // Opened or listed: the tools' config files and what is inside their skills folders, nothing else.
+    expect(ops.filter(({ op, path }) => (op === "read" || op === "readdir") && !files.has(path) && !inRoot(path))).toEqual([]);
+    // Only looked at, never opened: also the home folder and the tools' own folders on the way.
+    const passed = new Set([home, ...[".claude", ".codex", ".gemini", ".cursor"].map((folder) => join(home, folder))]);
+    expect(ops.filter(({ path }) => !files.has(path) && !inRoot(path) && !passed.has(path))).toEqual([]);
+    for (const path of planted) expect(touched()).not.toContain(path);
+    const inSkills = touched().filter((path) => roots.some((root) => path.startsWith(root + sep))).map((path) => relative(home, path));
     expect(inSkills.filter((path) => path.split(sep).some((part) => part.startsWith(".") && part !== ".claude" && part !== ".codex"))).toEqual([]);
-    expect(inSkills.filter((path) => path.split(sep).some(privateName))).toEqual([]);
+    expect(inSkills.filter((path) => path.split(sep).some(secretName))).toEqual([]);
 
     const said = JSON.stringify({ detection, result, saved: servers() });
     expect(said).not.toContain(SENTINEL);
     expect(said).not.toContain("project-only");
     expect(JSON.stringify({ detection, result })).not.toMatch(/ghp_secret_value|lin_secret_value|sntrys_secret_value/);
     expect(contentsUnder(IMPORTED_SKILLS_DIR)).not.toContain(SENTINEL);
+  });
+
+  it("follows a linked skill folder only while it stays a skill folder in the home folder, never into a folder macOS guards or a tool's logins", () => {
+    const home = fixtureHome();
+    const outside = fixtureHome();
+    const link = (target: string, path: string) => {
+      mkdirSync(dirname(join(home, path)), { recursive: true });
+      symlinkSync(target, join(home, path), process.platform === "win32" ? "junction" : "dir");
+    };
+    put(home, "dotfiles/skills/kept/SKILL.md", skillMd("kept"));
+    link(join(home, "dotfiles", "skills", "kept"), ".claude/skills/kept");
+    put(home, "Documents/repo/in-documents/SKILL.md", skillMd("in-documents"));
+    put(home, "Documents/repo/in-documents/config.json", JSON.stringify({ apiKey: SENTINEL }));
+    link(join(home, "Documents", "repo", "in-documents"), ".claude/skills/in-documents");
+    // Through another link first, then into Documents.
+    link(join(home, "Documents", "repo"), "hop");
+    link(join(home, "hop", "in-documents"), ".claude/skills/hopped");
+    put(outside, "away/SKILL.md", skillMd("away"));
+    link(join(outside, "away"), ".claude/skills/away");
+    // A skill folder that is really Codex's own folder, a SKILL.md planted in it beside its login.
+    put(home, ".codex/SKILL.md", skillMd("sneaky"));
+    put(home, ".codex/auth.json", SENTINEL);
+    link(join(home, ".codex"), ".claude/skills/sneaky");
+    // A SKILL.md that is itself a link.
+    put(home, "dotfiles/real/SKILL.md", skillMd("linked-md"));
+    mkdirSync(join(home, ".claude", "skills", "linked-md"), { recursive: true });
+    symlinkSync(join(home, "dotfiles", "real", "SKILL.md"), join(home, ".claude", "skills", "linked-md", "SKILL.md"));
+    const { machine, touched } = machineFor(home, "darwin");
+    const { host } = hostFor();
+    expect(detectSetup(machine, host).skills).toEqual([{ name: "kept", source: "claudeCode" }]);
+    expect(applySetupImport(machine, host, { skills: true }).skills?.added).toEqual(["kept"]);
+    expect(touched().filter((path) => path.startsWith(join(home, "Documents") + sep) || path.startsWith(outside))).toEqual([]);
+    expect(touched()).not.toContain(join(home, ".codex", "auth.json"));
+    expect(contentsUnder(IMPORTED_SKILLS_DIR)).not.toContain(SENTINEL);
+    // A skills folder that is a tool's whole folder is not read at all.
+    rmSync(join(home, ".codex", "skills"), { recursive: true, force: true });
+    link(join(home, ".codex"), ".codex/skills");
+    expect(detectSetup(machine, host).skills).toEqual([]);
+    const configs = new Set(setupPaths(machine).tools.map((tool) => tool.path));
+    expect(touched().filter((path) => path.startsWith(join(home, ".codex") + sep) && !path.startsWith(join(home, ".codex", "skills")) && !configs.has(path))).toEqual([]);
+  });
+
+  it("leaves out secret-looking files, hard links and files holding a credential, copies instructions about them, and counts each", () => {
+    const home = fixtureHome();
+    put(home, ".codex/auth.json", SENTINEL);
+    put(home, ".claude/skills/ops/SKILL.md", skillMd("ops"));
+    for (const name of ["session.json", "token.json", "password.txt", "cookies.txt", "service-account.json", "api_key.txt", "storage_state.json", "prod.env"]) {
+      put(home, `.claude/skills/ops/${name}`, SENTINEL);
+    }
+    put(home, ".claude/skills/ops/secrets/prod.yaml", SENTINEL);
+    linkSync(join(home, ".codex", "auth.json"), join(home, ".claude", "skills", "ops", "notes.md"));
+    put(home, ".claude/skills/ops/config.json", JSON.stringify({ apiKey: `sk-ant-api03-${SENTINEL}-0123456789abcdef` }));
+    const ordinary = ["auth.py", "history.md", "references/credentials.md", "references/secrets-management.md", "templates/projects/plan.md", "tokenizer.json", "logs/format.md"];
+    for (const path of ordinary) put(home, `.claude/skills/ops/${path}`, `# ${path}\n`);
+    const { machine, touched } = machineFor(home);
+    const result = applySetupImport(machine, hostFor().host, { skills: true }).skills!;
+    expect(result.added).toEqual(["ops"]);
+    expect(result.filesLeftOut).toBe(11);
+    const copied = filesUnder(join(IMPORTED_SKILLS_DIR, "ops")).filter((path) => statSync(join(IMPORTED_SKILLS_DIR, "ops", path)).isFile());
+    expect(copied).toEqual(["SKILL.md", ...ordinary].sort());
+    expect(contentsUnder(IMPORTED_SKILLS_DIR)).not.toContain(SENTINEL);
+    // A hard link of a credential is never read, whatever it is called.
+    const credential = statSync(join(home, ".codex", "auth.json"));
+    expect(touched().filter((path) => existsSync(path) && statSync(path).ino === credential.ino && statSync(path).dev === credential.dev)).toEqual([join(home, ".claude", "skills", "ops", "notes.md")]);
+  });
+
+  it.skipIf(process.platform === "win32")("never waits on a FIFO in place of a config file or a SKILL.md", () => {
+    const home = fixtureHome();
+    const fifos = [join(home, ".cursor", "mcp.json"), join(home, ".claude", "skills", "pipe", "SKILL.md")];
+    for (const fifo of fifos) {
+      mkdirSync(dirname(fifo), { recursive: true });
+      execFileSync("mkfifo", [fifo]);
+    }
+    put(home, ".gemini/settings.json", JSON.stringify({ mcpServers: { ok: { command: "ok-tool" } } }));
+    // A writer that shows up a second later: a read that opens a FIFO would wait for it (or forever without one).
+    const writer = spawn(process.execPath, ["-e", `
+      const fs = require("node:fs");
+      const fifos = ${JSON.stringify(fifos)};
+      const knock = () => { for (const fifo of fifos) { try { fs.closeSync(fs.openSync(fifo, fs.constants.O_WRONLY | fs.constants.O_NONBLOCK)); } catch {} } };
+      setTimeout(() => { const timer = setInterval(knock, 100); setTimeout(() => clearInterval(timer), 10000); }, 1000);
+    `], { stdio: "ignore" });
+    try {
+      const { machine } = machineFor(home);
+      const started = Date.now();
+      expect(detectSetup(machine, hostFor().host)).toEqual({ skills: [], tools: [{ name: "ok", source: "gemini" }] });
+      expect(Date.now() - started).toBeLessThan(800);
+    } finally {
+      writer.kill();
+    }
+  });
+
+  it("leaves out a config file over its size cap, and a file with another hard link when asked", () => {
+    const home = fixtureHome();
+    put(home, ".cursor/mcp.json", JSON.stringify({ mcpServers: { big: { command: "big-tool" } }, padding: "x".repeat(1024 * 1024) }));
+    put(home, ".gemini/settings.json", JSON.stringify({ mcpServers: { small: { command: "small-tool" } } }));
+    const { machine } = machineFor(home);
+    expect(detectSetup(machine, hostFor().host).tools).toEqual([{ name: "small", source: "gemini" }]);
+    const fs = thisMachine().fs;
+    const original = put(home, "notes/original.md", "# Notes\n");
+    linkSync(original, join(home, "notes", "twin.md"));
+    expect(fs.read(join(home, "notes", "twin.md"), 1024, false, true)).toBeNull();
+    expect(fs.read(join(home, "notes", "twin.md"), 1024, false)?.toString()).toBe("# Notes\n");
+    expect(fs.read(original, 4, false)).toBeNull();
   });
 
   it("reads one top-level JSON member without parsing the rest", () => {
@@ -304,7 +417,8 @@ describe("bringing skills in", () => {
     const { machine } = machineFor(home);
     const { host } = hostFor();
     const result = applySetupImport(machine, host, { skills: true });
-    expect(result).toEqual({ skills: { added: ["pdf", "review"], present: [], skipped: [], filesLeftOut: 3, review: [] } });
+    // A picture, a file over the size cap, a link, and four credential or session names, each counted.
+    expect(result).toEqual({ skills: { added: ["pdf", "review"], present: [], skipped: [], filesLeftOut: 7, review: [] } });
     const folder = join(IMPORTED_SKILLS_DIR, "pdf");
     expect(filesUnder(folder)).toEqual(["SKILL.md", "references", "references/forms.md", "scripts", "scripts/extract.py"]);
     expect(readFileSync(join(folder, "SKILL.md"), "utf8")).toBe(skillMd("pdf"));

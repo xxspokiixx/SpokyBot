@@ -1,14 +1,16 @@
 // The welcome flow's "Bring what you already use": finds the skills and MCP servers of a person's other AI tools on
 // this computer and brings them in. It opens only the paths setupPaths names, plus the text files inside each skill
-// folder; credential, session and history files are never listed, opened or copied, and nothing found leaves this
-// computer. Skills are copied once into this computer's imported skills, which every bot uses (imported-skills.ts);
+// folder; credential, session and history files are never listed, opened or copied, and nothing found is uploaded.
+// A link out of a skills folder is followed only while it stays in the home folder, out of the folders macOS guards
+// and out of the tools' own logins and history. Skills are copied once into this computer's imported skills, which every bot uses (imported-skills.ts);
 // MCP servers go through the same parser as Plugins → MCP servers → Paste config, switched off.
 import { createHash } from "node:crypto";
-import { closeSync, constants, fstatSync, lstatSync, openSync, readdirSync, readSync, statSync, type Stats } from "node:fs";
+import { closeSync, constants, fstatSync, lstatSync, openSync, readdirSync, readlinkSync, readSync, realpathSync, statSync, type Stats } from "node:fs";
 import { homedir } from "node:os";
-import { isAbsolute, join } from "node:path";
+import { dirname, isAbsolute, join, relative, resolve } from "node:path";
 
 import type { SetupDetection, SetupImportRequest, SetupImportResult, SetupSource, SkillSkip, SkillSource, ToolSkip } from "../shared/setup-import.ts";
+import { holdsCredential } from "../shared/redact.ts";
 import { parseSkillMd, scanSkillText, SKILL_FILE_MAX_BYTES, type ParsedSkill } from "../shared/skill-md.ts";
 import { importedSkillIntact, readImportedSkills, storeImportedSkills, type ImportedSkillEntry, type ImportedSkillInput } from "./imported-skills.ts";
 import { isRemoteMcpServer, MAX_MCP_SERVERS, parseMcpServersImport, parseStoredMcpServer, type StoredMcpServer } from "./mcp-registry.ts";
@@ -17,10 +19,12 @@ import { parseToml } from "./toml-lite.ts";
 /** The file operations finding and copying use, so tests can see every path touched. Each answers null on failure. */
 export interface SetupFs {
   lstat(path: string): Stats | null;
-  stat(path: string): Stats | null;
   readdir(path: string): string[] | null;
-  /** A regular file of at most `max` bytes; `follow: false` refuses a symlink. */
-  read(path: string, max: number, follow?: boolean): Buffer | null;
+  readlink(path: string): string | null;
+  /** Asked of the home folder only. */
+  realpath(path: string): string | null;
+  /** A regular file of at most `max` bytes; `follow: false` refuses a symlink, `oneLink` a file with other hard links. */
+  read(path: string, max: number, follow?: boolean, oneLink?: boolean): Buffer | null;
 }
 
 export interface SetupMachine {
@@ -42,23 +46,26 @@ const nodeFs: SetupFs = {
   lstat: (path) => {
     try { return lstatSync(path); } catch { return null; }
   },
-  stat: (path) => {
-    try { return statSync(path); } catch { return null; }
-  },
   readdir: (path) => {
     try { return readdirSync(path); } catch { return null; }
   },
-  read: (path, max, follow = true) => {
+  readlink: (path) => {
+    try { return readlinkSync(path).replace(/^\\\\\?\\/, ""); } catch { return null; }
+  },
+  realpath: (path) => {
+    try { return realpathSync(path); } catch { return null; }
+  },
+  read: (path, max, follow = true, oneLink = false) => {
     let fd: number | null = null;
     try {
       // Checked before opening, and opened non-blocking: a FIFO in place of a file must not hang the request.
       const before = follow ? statSync(path) : lstatSync(path);
-      if (!before.isFile() || before.size > max) return null;
+      if (!before.isFile() || before.size > max || (oneLink && before.nlink > 1)) return null;
       const noFollow = !follow && process.platform !== "win32" ? constants.O_NOFOLLOW : 0;
       const nonBlock = process.platform !== "win32" ? constants.O_NONBLOCK : 0;
       fd = openSync(path, constants.O_RDONLY | noFollow | nonBlock);
       const opened = fstatSync(fd);
-      if (!opened.isFile() || opened.size > max) return null;
+      if (!opened.isFile() || opened.size > max || (oneLink && opened.nlink > 1)) return null;
       const buffer = Buffer.alloc(opened.size);
       let offset = 0;
       while (offset < buffer.length) {
@@ -97,6 +104,7 @@ export function setupPaths(machine: Pick<SetupMachine, "home" | "platform" | "en
       : join(home, ".config", "Claude");
   const codexLabel = codexHome === join(home, ".codex") ? "~/.codex/skills" : "$CODEX_HOME/skills";
   return {
+    codexHome,
     skills: [
       { source: "claudeCode", root: join(home, ".claude", "skills"), label: "~/.claude/skills" },
       { source: "codex", root: join(codexHome, "skills"), label: codexLabel },
@@ -130,32 +138,123 @@ interface FoundSkill {
 
 const MAX_SKILL_FOLDERS = 500;
 
-/** Credentials, sessions, history, transcripts, logs and caches inside a skill folder: never opened or copied. */
-export function privateName(name: string): boolean {
+const SECRET_WORDS = /(?:^|[^a-z])(?:o?auth|tokens?|sessions?|cookies?|passw\w*|secrets?|credentials?|api[-_]?keys?|keys?|bearer|storage[-_]?state|service[-_]?accounts?|private[-_]?keys?)(?:[^a-z]|$)/;
+const SECRET_FOLDERS = /^(?:secrets?|credentials?|sessions?|cookies?|tokens?|keys?|private[-_]?keys?|service[-_]?accounts?)$/;
+const KEY_STORES = /\.(?:pem|key|p12|pfx|jks|keystore|kdbx|ppk|keychain|keychain-db|sqlite3?|db|env)$|^id_(?:rsa|dsa|ecdsa|ed25519)/;
+/** Data formats a credential is kept in. Instructions and code may well be named after one (credentials.md, auth.py). */
+const DATA_EXTENSIONS = new Set(["json", "jsonc", "jsonl", "yaml", "yml", "toml", "ini", "cfg", "conf", "txt", "text", "csv", "tsv", "xml"]);
+
+/** A name inside a skill folder that holds a credential, a session or a key rather than instructions or code: it is left
+ * out, decided before anything is opened. */
+export function secretName(name: string): boolean {
   const lower = name.toLowerCase();
-  return /auth[^/\\]*\.json$/.test(lower) || lower.includes("credential") || lower.includes("secret") || lower.startsWith("history") ||
-    /^(?:sessions|archived_sessions|projects|logs?|cache|shell-snapshots|statsig|todos)$/.test(lower) ||
-    /\.(?:pem|key|p12|pfx|keychain|keychain-db|sqlite3?|db|log)$/.test(lower) || /^id_(?:rsa|dsa|ecdsa|ed25519)/.test(lower);
+  if (SECRET_FOLDERS.test(lower) || KEY_STORES.test(lower)) return true;
+  const dot = lower.lastIndexOf(".");
+  return dot > 0 && DATA_EXTENSIONS.has(lower.slice(dot + 1)) && SECRET_WORDS.test(lower.slice(0, dot));
+}
+
+/** Folders macOS asks the person about before an app looks inside. */
+const GUARDED_HOME_FOLDERS = new Set(["desktop", "documents", "downloads", "library", "movies", "music", "pictures"]);
+const MAX_LINK_HOPS = 16;
+
+interface Places {
+  /** The home folder as given and as it really is: nothing outside them is looked at. */
+  homes: string[];
+  darwin: boolean;
+  /** Where the tools keep their logins and history. */
+  toolHomes: string[];
+  /** Each skills folder that is safe to read, to where it really is. */
+  roots: Map<string, string>;
+  skillRoots: string[];
+}
+
+const within = (base: string, path: string) => {
+  const rel = relative(base, path);
+  return rel === "" || (!rel.startsWith("..") && !isAbsolute(rel));
+};
+const samePath = (a: string, b: string) => relative(a, b) === "";
+
+/** Where `path` really is, each link followed one at a time while it stays in the home folder and out of the folders
+ * macOS guards; null when a link leads anywhere else, or nothing is there. Nothing outside is ever looked at. */
+function locate(machine: SetupMachine, places: Pick<Places, "homes" | "darwin">, path: string): { path: string; info: Stats } | null {
+  let current = resolve(path);
+  for (let hops = 0; hops <= MAX_LINK_HOPS; hops++) {
+    const home = places.homes.find((candidate) => within(candidate, current));
+    if (!home) return null;
+    const parts = relative(home, current).split(/[\\/]/).filter(Boolean);
+    if (places.darwin && parts.length && GUARDED_HOME_FOLDERS.has(parts[0]!.toLowerCase())) return null;
+    let at = home;
+    let info = machine.fs.lstat(home);
+    let next: string | null = null;
+    for (let index = 0; index < parts.length && next === null; index++) {
+      at = join(at, parts[index]!);
+      info = machine.fs.lstat(at);
+      if (!info) return null;
+      if (info.isSymbolicLink()) {
+        const target = machine.fs.readlink(at);
+        if (target === null) return null;
+        next = resolve(dirname(at), target, ...parts.slice(index + 1));
+      }
+    }
+    if (next === null) return info ? { path: at, info } : null;
+    current = next;
+  }
+  return null;
+}
+
+function placesFor(machine: SetupMachine): Places {
+  const real = machine.fs.realpath(machine.home);
+  const homes = [...new Set([machine.home, ...(real ? [real] : [])])];
+  const darwin = machine.platform === "darwin";
+  /** A path under the home folder in each of its spellings, and where it really is. */
+  const forms = (path: string) => {
+    const rel = relative(machine.home, path);
+    const spellings = rel.startsWith("..") || isAbsolute(rel) ? [path] : homes.map((home) => join(home, rel));
+    const found = locate(machine, { homes, darwin }, path);
+    return [...new Set([...spellings, ...(found ? [found.path] : [])])];
+  };
+  const paths = setupPaths(machine);
+  const toolHomes = [join(machine.home, ".claude"), paths.codexHome, join(machine.home, ".gemini"), join(machine.home, ".cursor")].flatMap(forms);
+  const roots = new Map<string, string>();
+  for (const { root } of paths.skills) {
+    const found = locate(machine, { homes, darwin }, root);
+    // A skills folder that is the home folder or a tool's own folder (or holds one) would list their private files.
+    if (!found?.info.isDirectory() || homes.some((home) => within(found.path, home)) || toolHomes.some((tool) => within(found.path, tool))) continue;
+    roots.set(root, found.path);
+  }
+  return { homes, darwin, toolHomes, roots, skillRoots: [...roots.keys()].flatMap(forms) };
+}
+
+/** A skill folder must stay a skill folder wherever its link leads: never a skills folder itself, nor a place in a
+ * tool's own folder (~/.claude, $CODEX_HOME, ~/.gemini, ~/.cursor) outside its skills. */
+function skillFolderAllowed(places: Places, real: string): boolean {
+  if (places.homes.some((home) => within(real, home)) || places.skillRoots.some((root) => samePath(root, real))) return false;
+  return !places.toolHomes.some((tool) => within(tool, real)) || places.skillRoots.some((root) => within(root, real));
 }
 
 const sha256 = (text: string) => createHash("sha256").update(text).digest("hex");
 
 /** Skill folders with a valid SKILL.md, Claude Code's first; a name found twice keeps its first folder. */
 function findSkills(machine: SetupMachine): FoundSkill[] {
+  const places = placesFor(machine);
   const found: FoundSkill[] = [];
   const names = new Set<string>();
   for (const { source, root, label } of setupPaths(machine).skills) {
+    const real = places.roots.get(root);
+    if (!real) continue;
     // Dot folders hold the tools' own built-in skills (Codex's .system), not the person's.
-    const folders = (machine.fs.readdir(root) ?? []).filter((folder) => !folder.startsWith(".")).sort().slice(0, MAX_SKILL_FOLDERS);
+    const folders = (machine.fs.readdir(real) ?? []).filter((folder) => !folder.startsWith(".")).sort().slice(0, MAX_SKILL_FOLDERS);
     for (const folder of folders) {
-      const dir = join(root, folder);
-      if (!machine.fs.stat(dir)?.isDirectory()) continue;
-      const bytes = machine.fs.read(join(dir, "SKILL.md"), SKILL_FILE_MAX_BYTES, false);
+      const dir = locate(machine, places, join(real, folder));
+      if (!dir?.info.isDirectory() || !skillFolderAllowed(places, dir.path)) continue;
+      const bytes = machine.fs.read(join(dir.path, "SKILL.md"), SKILL_FILE_MAX_BYTES, false);
       const text = bytes ? utf8(bytes) : null;
       const parsed = text === null ? null : parseSkillMd(text);
       if (!parsed || "error" in parsed || names.has(parsed.name)) continue;
       names.add(parsed.name);
-      found.push({ name: parsed.name, source, parsed, folder: dir, root, origin: dir, label: `${label}/${folder}`, text: text!, sha256: sha256(text!) });
+      found.push({
+        name: parsed.name, source, parsed, folder: dir.path, root, origin: join(root, folder), label: `${label}/${folder}`, text: text!, sha256: sha256(text!),
+      });
     }
   }
   return found;
@@ -203,22 +302,27 @@ function utf8(bytes: Buffer): string | null {
   }
 }
 
-/** The text files beside SKILL.md, within the limits. Symlinks are never followed; anything left out is counted. */
+/** The text files beside SKILL.md, within the limits. Links are never followed, a file with another hard link (which
+ * may be a credential elsewhere) is not read, and one holding a credential is not copied; anything left out is counted. */
 function skillFiles(fs: SetupFs, dir: string, budget: { bytes: number }): { files: SkillFile[]; leftOut: number } {
   const files: SkillFile[] = [];
   let leftOut = 0;
   let bytes = 0;
   const walk = (folder: string, relative: string, depth: number) => {
     for (const name of (fs.readdir(folder) ?? []).sort()) {
+      if (name.startsWith(".")) continue;
       // Decided by name before anything is opened.
-      if (name.startsWith(".") || privateName(name)) continue;
+      if (secretName(name)) {
+        leftOut += 1;
+        continue;
+      }
       const path = relative ? `${relative}/${name}` : name;
       // Read already; on a disk that ignores case, skill.md is that same file.
       if (!relative && name.toLowerCase() === "skill.md") continue;
       const full = join(folder, name);
       const info = fs.lstat(full);
       if (!info) continue;
-      if (info.isSymbolicLink()) {
+      if (info.isSymbolicLink() || (info.isFile() && info.nlink > 1)) {
         leftOut += 1;
       } else if (info.isDirectory()) {
         if (SKIPPED_FOLDERS.has(name.toLowerCase())) continue;
@@ -227,9 +331,9 @@ function skillFiles(fs: SetupFs, dir: string, budget: { bytes: number }): { file
       } else if (info.isFile()) {
         const fits = textFile(name) && info.size <= SKILL_COPY_LIMITS.fileBytes && files.length < SKILL_COPY_LIMITS.skillFiles &&
           bytes + info.size <= SKILL_COPY_LIMITS.skillBytes && budget.bytes + info.size <= SKILL_COPY_LIMITS.totalBytes;
-        const raw = fits ? fs.read(full, SKILL_COPY_LIMITS.fileBytes, false) : null;
+        const raw = fits ? fs.read(full, SKILL_COPY_LIMITS.fileBytes, false, true) : null;
         const content = raw ? utf8(raw) : null;
-        if (content === null) {
+        if (content === null || holdsCredential(content)) {
           leftOut += 1;
           continue;
         }

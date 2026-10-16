@@ -183,7 +183,13 @@ coming from this computer, with a switch for that bot. A skill the scan flags
 (a download piped into a shell, invisible characters, a long encoded blob, in
 SKILL.md or any file beside it) comes in switched off for every bot: read it
 there, then switch it on for that bot; it is off again if it is brought in
-with other files. A copy whose files
+with other files. Inside a skill folder it copies text files only, never
+links, files with another hard link, credential or session files (such as
+`token.json`, `session.json`, `password.txt`, `secrets/`, `*.env`) or a file
+holding a provider key, and counts what it leaves out. A skill folder that is
+a link is followed only while it stays in the home folder, out of the folders
+macOS guards (Documents, Desktop, Downloads, Library and the media folders)
+and out of the tools' own folders outside their skills. A copy whose files
 change afterwards is left out until it is brought in again. A turn whose
 engine already loads the folder a skill came from leaves the copy out, so
 nothing is listed twice: Claude Code with **Also use my Claude Code skills**

@@ -2046,7 +2046,7 @@
   "onboarding.org.manage": "Organization settings",
   "onboarding.org.personalOptional": "Your company models are ready. The model providers below are your own, and optional.",
   "onboarding.import.title": "Bring what you already use",
-  "onboarding.import.intro": "We found these on this computer. Your bots can use them right away. Nothing leaves this computer.",
+  "onboarding.import.intro": "We found these on this computer. Your bots can use them right away. They're copied here; nothing is uploaded.",
   "onboarding.import.skills": "Skills",
   "onboarding.import.skillsFrom": "{count} from {sources}",
   "onboarding.import.skillsHint": "Copied in, so your bots can use them on every engine.",
