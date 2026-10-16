@@ -77,6 +77,7 @@
   "cloudProPopup.title": "MausBot Cloud Pro",
   "cloudProPopup.upgrade": "Upgrade to Cloud Pro",
   "cloudProPopup.manage": "Manage plan",
+  "cloudProPopup.thisComputer": "Continue on this computer",
   "cloudHowTo.title": "Add a Cloud from here",
   "cloudHowTo.body": "Click this menu, then choose Add a Cloud. It's also where you switch between this computer and My Cloud.",
   "cloudHowTo.skip": "Skip",

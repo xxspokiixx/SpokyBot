@@ -60,6 +60,7 @@
   "cloudProPopup.title": "MausBot Cloud Pro",
   "cloudProPopup.upgrade": "Cloud Pro'ya yükselt",
   "cloudProPopup.manage": "Planı yönet",
+  "cloudProPopup.thisComputer": "Bu bilgisayarda devam et",
   "cloudHowTo.title": "Buradan bir Cloud ekleyin",
   "cloudHowTo.body": "Bu menüye tıklayın, ardından Cloud ekle seçeneğini belirleyin. Bu bilgisayar ile Cloud'unuz arasında geçiş de buradan yapılır.",
   "cloudHowTo.skip": "Atla",

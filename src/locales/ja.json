@@ -59,6 +59,7 @@
   "cloudProPopup.title": "MausBot Cloud Pro",
   "cloudProPopup.upgrade": "Cloud Pro にアップグレード",
   "cloudProPopup.manage": "プランを管理",
+  "cloudProPopup.thisComputer": "このコンピューターで続ける",
   "cloudHowTo.title": "ここから Cloud を追加できます",
   "cloudHowTo.body": "このメニューをクリックして、「Add a Cloud」を選んでください。このコンピューターと My Cloud の切り替えもここで行います。",
   "cloudHowTo.skip": "スキップ",

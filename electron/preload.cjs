@@ -39,10 +39,14 @@ ipcRenderer.on("app:open-settings", (_event, section) => {
 const localOrigin = process.argv.find((arg) => arg.startsWith("--omb-local-origin="))?.slice("--omb-local-origin=".length) ?? null;
 const isLocalPage = !localOrigin || location.origin === localOrigin;
 const savedServer = id => isLocalPage && typeof id === "string" && /^[\w-]{1,64}$/.test(id) ? [id] : [];
-const REMOTE_SAFE = new Set(["platform", "getCapabilities", "onCapabilitiesChanged", "applySkin", "setUnreadCount", "permStatus", "workspaces", "cloudMove", "cloudLending", "cloudPlan"]);
+const REMOTE_SAFE = new Set(["platform", "getCapabilities", "onCapabilitiesChanged", "applySkin", "setUnreadCount", "permStatus", "workspaces", "cloudMove", "cloudLending", "cloudPlan", "desktopNotices", "desktopAnalytics"]);
 function updaterOffered() {
   try { return ipcRenderer.sendSync("update:offered") === true; } catch { return false; }
 }
+function savedAnalyticsChoice() {
+  try { const saved = ipcRenderer.sendSync("desktop-analytics:read"); return typeof saved === "boolean" ? saved : null; } catch { return null; }
+}
+let analyticsChoice;
 const remoteKeys = isLocalPage ? REMOTE_SAFE : new Set([...REMOTE_SAFE, ...(updaterOffered() ? ["updater"] : [])]);
 
 // Keep in parity with shared/workspace-backup-client.ts (a sandboxed preload cannot import it).
@@ -379,6 +383,21 @@ const bridge = {
     activity: id => ipcRenderer.invoke("sharing:activity", id),
   },
   confirm: message => ipcRenderer.invoke("dialog:confirm", message),
+  desktopNotices: {
+    state: () => ipcRenderer.invoke("desktop-notices:state"),
+    seen: id => ipcRenderer.invoke("desktop-notices:seen", String(id)),
+    shown: id => ipcRenderer.invoke("desktop-notices:shown", String(id)),
+    thisComputer: intent => isLocalPage || navigator.userActivation?.isActive !== true ? Promise.reject(new Error("Choose Continue on this computer to switch."))
+      : intent === "manage" || intent === "cloud-pro" ? ipcRenderer.invoke("desktop-notices:this-computer", intent) : Promise.reject(new Error("The popup hands over only its own click.")),
+    handoff: () => ipcRenderer.invoke("desktop-notices:handoff"),
+  },
+  desktopAnalytics: {
+    enabled: () => {
+      if (analyticsChoice === undefined) analyticsChoice = savedAnalyticsChoice();
+      return analyticsChoice;
+    },
+    ...(isLocalPage ? { set: enabled => { analyticsChoice = enabled === true; return ipcRenderer.invoke("desktop-analytics:set", analyticsChoice); } } : {}),
+  },
 };
 
 contextBridge.exposeInMainWorld(
