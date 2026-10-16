@@ -64,3 +64,22 @@ it("is the Show me how tip's anchor, and opens the menu as reached from the tip 
   await openServerMenu({ menu }, { onClosed });
   expect(menu).toHaveBeenLastCalledWith(undefined); expect(onClosed).toHaveBeenCalledTimes(2);
 });
+
+it("draws Simple mode's switcher as a rounded pill that names the server in full, without the laptop icon", () => {
+  vi.stubGlobal("window", { ogb: { workspaces: { state: () => new Promise(() => {}), menu: () => Promise.resolve() } } });
+  const pill = renderToStaticMarkup(createElement(DesktopWorkspaceSwitcher, { inline: true, pill: true }));
+  expect(pill).toMatch(/aria-label="Switch server: Servers" aria-haspopup="menu" aria-expanded="false"[^>]*class="[^"]*\bh-8\b[^"]*\brounded-full\b[^"]*\bbg-raised\/50\b[^"]*\btext-\[13px\][^"]*\bfont-medium\b/);
+  expect(pill).toContain('<span class="min-w-0 truncate">Servers</span>');
+  expect(pill).toContain("lucide-chevron-down");
+  expect(pill).not.toContain("lucide-laptop");
+  expect(pill).not.toContain("@max-[96px]");
+  const inline = renderToStaticMarkup(createElement(DesktopWorkspaceSwitcher, { inline: true }));
+  expect(inline).toContain("lucide-laptop");
+  expect(inline).toMatch(/class="[^"]*\bh-7\b[^"]*\brounded-md\b[^"]*\btext-\[12\.5px\]/);
+  expect(inline).not.toContain("rounded-full");
+
+  vi.stubGlobal("window", {});
+  const browser = renderToStaticMarkup(createElement(DesktopWorkspaceSwitcher, { inline: true, pill: true, cloudHome: true }));
+  expect(visibleText(browser)).toBe("My Cloud");
+  expect(browser).toMatch(/class="[^"]*\bh-8\b[^"]*\brounded-full\b/);
+});
