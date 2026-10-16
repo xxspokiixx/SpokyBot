@@ -2,13 +2,13 @@
 import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 
 import type { ModelCatalog } from "../contracts.ts";
 import { resetPathCacheForTests } from "../env-path.ts";
 import { removeTempDir } from "../testing/cleanup.ts";
 import { makeFakeDriver } from "../testing/fake-driver.ts";
-import { ProviderRegistry } from "./registry.ts";
+import { ProviderRegistry, SNAPSHOT_DEADLINE_MS } from "./registry.ts";
 
 describe("ProviderRegistry", () => {
   it("creates live instances for known drivers", async () => {
@@ -195,6 +195,28 @@ describe("ProviderRegistry", () => {
 
     const [described] = await registry.describe();
     expect(described.snapshot).toMatchObject({ state: "unavailable", reason: "provider probe exploded" });
+  });
+
+  it("describe() reports a snapshot() that never settles as unavailable, so the other engines are still read", async () => {
+    vi.useFakeTimers();
+    try {
+      const stuck = makeFakeDriver({ kind: "stuck", hangSnapshot: true });
+      const fine = makeFakeDriver({ kind: "fine" });
+      const registry = new ProviderRegistry([stuck.driver, fine.driver]);
+      await registry.load({ a: { driver: "stuck" }, b: { driver: "fine" } });
+
+      const read = registry.describe();
+      await vi.advanceTimersByTimeAsync(SNAPSHOT_DEADLINE_MS);
+      const described = Object.fromEntries((await read).map((d) => [d.instanceId, d.snapshot.state]));
+      expect(described).toEqual({ a: "unavailable", b: "available" });
+
+      const direct = registry.get("a")!.snapshot();
+      const settled = expect(direct).rejects.toThrow("did not report its status within a minute");
+      await vi.advanceTimersByTimeAsync(SNAPSHOT_DEADLINE_MS);
+      await settled;
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it("forwards a live instance's declared effort levels in describe()", async () => {
