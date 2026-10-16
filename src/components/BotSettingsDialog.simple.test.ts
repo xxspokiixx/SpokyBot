@@ -493,13 +493,17 @@ describe("the Details tab", () => {
     expect(onOpen).toHaveBeenLastCalledWith("setup");
   });
 
-  it("sets the default model in the contained picker, with Thinking on its own row", () => {
+  it("picks the model in the contained picker for the open thread, with Thinking on its own row", () => {
     fixture.derived.engine = { driverKind: "claudeAgent", capabilities: { effortLevels: ["low", "medium", "high", "max"] } };
     const bot = makeBot({ modelSelection: { instanceId: "claude", model: "claude-opus-5-5", effort: "medium" } });
     const rendered = details(bot);
     const picker = ofType(rendered, ModelPicker)!;
-    expect(picker.props).toMatchObject({ bot, contained: true });
-    expect(picker.props.threadId).toBeUndefined();
+    // As the Advanced header's picker: the thread's view of the bot and its thread, so a Cloud guest's pick stays in
+    // their own conversation while an owner's also sets the bot's default.
+    expect(picker.props).toMatchObject({ bot, contained: true, threadId: "thread-scout" });
+    expect(picker.key).toMatch(/thread-scout$/);
+    const onOwnModel = makeBot({ tasks: [{ threadId: "thread-scout", title: "Side", createdAt: 1, modelSelection: { instanceId: "claude", model: "claude-haiku-4-5" } }] });
+    expect((ofType(details(onOwnModel), ModelPicker)!.props.bot as Bot).modelSelection.model).toBe("claude-haiku-4-5");
     expect(String(find(rendered, "data-simple-default-model").props.className)).toContain("[&_[data-simple-effort]]:hidden");
     expect(rendered.html).toContain("More thinking is slower and more careful.");
     const thinking = segment(rendered, "data-thinking-choice");

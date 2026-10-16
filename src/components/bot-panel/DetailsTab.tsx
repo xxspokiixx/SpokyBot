@@ -9,7 +9,7 @@ import type { Routine } from "@/lib/routines";
 import { routineFinished, routineNextLabel } from "@/lib/routine-display";
 import { scheduleLabel } from "@/lib/schedule-label";
 import { firstSentence } from "@/lib/soul";
-import { useStore, type Bot } from "@/state/store";
+import { currentTaskBot, useStore, type Bot } from "@/state/store";
 import type { ApprovalMode } from "../../../shared/approval-mode";
 import type { EffortLevel } from "../../../shared/wire";
 import type { ReplyStyle } from "../../../shared/reply-style";
@@ -90,8 +90,11 @@ export function DetailsTab({ bot, derived, overview, onOpen }: {
 
       <Card label={t("model.simple.model")} anchor="model">
         <div className={cn(rowCls, "block", thinkingLevels.length > 0 && "[&_[data-simple-effort]]:hidden")} data-simple-default-model>
+          {/* The open thread, as the Advanced header's picker: a Cloud guest changes only their own conversation. */}
           <ModelPicker
-            bot={bot}
+            key={bot.threadId}
+            bot={currentTaskBot(bot)}
+            threadId={bot.threadId}
             contained
             label={<span className="text-[13.5px] font-medium text-ink">{t("model.simple.model")}</span>}
           />
