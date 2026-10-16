@@ -294,7 +294,10 @@ reference files included, and Claude Code picks up your edits within the
 session. Your hooks, MCP servers and `CLAUDE.md` stay out, so a bot with a
 tool selection keeps working. In `config.json` it is
 `"features": { "claudeUserSkills": true }`. Skills in a bot project's own
-`.claude/skills` load either way.
+`.claude/skills` load either way. The link folder is left out of backups and
+removed when the switch goes off; a skill brought in from `~/.claude/skills`
+is left out of a Claude turn while the switch is on, since Claude already has
+the original.
 
 The switch drops the CLI flag `--strict-mcp-config` (Claude Code 1.0.60+)
 while keeping `--setting-sources project` (1.0.122+). The environment variable
@@ -325,7 +328,10 @@ Address entries are HTTPS only. The host is compared label by label, where
 and the path separately, where `*` matches anything.
 
 Limits: a personal **Codex** engine also loads MCP servers from your own
-`~/.codex/config.toml`, which OpenMausBot does not filter. An organization that
+`~/.codex/config.toml`, which OpenMausBot does not filter. A server here that
+`config.toml` already runs, with the same command, arguments and environment
+or the same address and headers (as one brought in from there is), is not
+mounted a second time on a turn without a tool selection. An organization that
 must block those can allow only company models, or leave personal Codex off
 its engine list. Company Codex uses its own separate home, without your
 `config.toml`.
