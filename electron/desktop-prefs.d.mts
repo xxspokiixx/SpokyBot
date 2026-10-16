@@ -7,6 +7,17 @@ export interface DesktopNoticesState {
   /** This desktop sells MausBot Cloud: the installed app, not a branded build, not connected to another computer. */
   cloud: boolean;
 }
+/**
+ * A click on the Cloud Pro popup that a server's page hands This computer's page to finish, without the popup showing
+ * there: "manage" (My Cloud's own page only) opens Settings → MausBot Cloud; "cloud-pro", sent by a page that cannot know
+ * the plan, does what This computer's own popup offers for the plan it knows: the Add a Cloud dialog, or Settings.
+ */
+export type DesktopHandoffIntent = "manage" | "cloud-pro";
+export interface DesktopHandoff {
+  intent: DesktopHandoffIntent;
+  /** Epoch ms after which the click is too old to finish. */
+  until: number;
+}
 /** On every page this desktop's window shows: this computer's, My Cloud's or another saved server's. */
 export interface DesktopNoticesBridge {
   state(): Promise<DesktopNoticesState>;
@@ -15,13 +26,12 @@ export interface DesktopNoticesBridge {
   shown(id: string): Promise<boolean>;
   /**
    * A server's page only, right after a click on it: switches the window to This computer, once a launch while the Cloud
-   * Pro popup is unseen, where the popup shows again. With "manage", from My Cloud's own page only, This computer's page
-   * opens Settings → MausBot Cloud instead, as that popup's Manage plan.
+   * Pro popup is unseen, and hands This computer's page that click. Any other intent, or "manage" from a page main does
+   * not verify as My Cloud's, is refused.
    */
-  thisComputer(then?: "manage"): Promise<boolean>;
-  /** This computer's page only: true from My Cloud's page handing over its Manage plan click until the popup is seen, for a
-   * short while. */
-  handoff(): Promise<boolean>;
+  thisComputer(intent: DesktopHandoffIntent): Promise<boolean>;
+  /** This computer's page only: the click a server's page handed over, until the popup is seen, while fresh. */
+  handoff(): Promise<DesktopHandoff | null>;
 }
 /** The desktop's own switch, the same on every port its page is served from. */
 export interface DesktopAnalyticsBridge {

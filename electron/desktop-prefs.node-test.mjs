@@ -107,58 +107,77 @@ test("every page of this desktop's window reads and records the same notices; no
   assert.deepEqual((await desktopMain({ offered: false }).ask("desktop-notices:state", "server")).cloud, false);
 });
 
-test("a server's page brings the window to This computer once a launch, for a popup not yet seen, and marks nothing", async () => {
-  const main = desktopMain();
-  assert.throws(() => main.ask("desktop-notices:this-computer", "local"), /only available/, "This computer's page has nothing to switch to");
-  assert.throws(() => main.ask("desktop-notices:handoff", "server"), /only available/, "a server's page never takes a click");
-  assert.throws(() => main.ask("desktop-notices:handoff", "cloud"), /only available/);
-  assert.equal(await main.ask("desktop-notices:this-computer", "server", "manage"), true);
-  assert.deepEqual(main.calls.filter(call => call === "this-computer"), ["this-computer"]);
-  assert.equal(main.saved(), null, "the popup is still unseen: This computer's page shows it again");
-  assert.equal(await main.ask("desktop-notices:handoff", "local"), false, "a saved server's page hands over no click, even one it calls Manage plan");
-  assert.equal(await main.ask("desktop-notices:this-computer", "server"), false, "once a launch");
-  assert.equal(await main.ask("desktop-notices:this-computer", "cloud", "manage"), false);
-  assert.deepEqual(main.calls.filter(call => call === "this-computer"), ["this-computer"]);
-
-  const seen = desktopMain();
-  await seen.ask("desktop-notices:seen", "local", POPUP);
-  assert.equal(await seen.ask("desktop-notices:this-computer", "server"), false, "a seen popup switches nothing");
-  const unsold = desktopMain({ offered: false });
-  assert.equal(await unsold.ask("desktop-notices:this-computer", "server"), false);
-  assert.equal(unsold.calls.includes("this-computer"), false);
+test("main takes only the popup's own click: Continue on this computer from My Cloud's or a saved server's page, Manage plan from My Cloud's own page alone", async () => {
+  const refused = [["server", "manage"], ["server", undefined], ["cloud", undefined], ["cloud", null], ["server", "upgrade"], ["cloud", "Cloud-Pro"],
+    ["server", "__proto__"], ["cloud", "constructor"], ["server", { intent: "cloud-pro" }], ["cloud", ["manage"]]];
+  for (const [page, intent] of refused) {
+    const main = desktopMain(), name = `${page} ${JSON.stringify(intent)}`;
+    await assert.rejects(main.ask("desktop-notices:this-computer", page, intent), /cannot hand that click/, name);
+    assert.deepEqual(main.calls, [], `${name}: nothing is asked, nothing moves`);
+    assert.equal(await main.ask("desktop-notices:handoff", "local"), null, name);
+    assert.equal(await main.ask("desktop-notices:this-computer", page, "cloud-pro"), true, `${name}: not the launch's one switch`);
+  }
+  for (const page of ["local", null, "elsewhere"]) {
+    for (const intent of ["cloud-pro", "manage"]) assert.throws(() => desktopMain().ask("desktop-notices:this-computer", page, intent), /only available/, `${page} ${intent}`);
+  }
+  for (const page of ["cloud", "server", null]) assert.throws(() => desktopMain().ask("desktop-notices:handoff", page), /only available/, "a server's page never takes a click");
 });
 
-test("My Cloud's own page hands over its Manage plan click: This computer's page finds it until the popup is seen, while fresh", async () => {
-  const main = desktopMain();
-  assert.equal(await main.ask("desktop-notices:this-computer", "cloud"), true);
-  assert.equal(await main.ask("desktop-notices:handoff", "local"), false, "Continue on this computer from My Cloud hands over nothing");
-  const manage = desktopMain();
-  assert.equal(await manage.ask("desktop-notices:this-computer", "cloud", "manage"), true);
-  assert.equal(manage.saved(), null, "This computer's page marks it seen once it opens Settings");
-  assert.equal(await manage.ask("desktop-notices:handoff", "local"), true);
-  assert.equal(await manage.ask("desktop-notices:handoff", "local"), true, "a page that reloads before it finishes finds it again");
-  await manage.ask("desktop-notices:seen", "local", "other-notice");
-  assert.equal(await manage.ask("desktop-notices:handoff", "local"), true);
-  await manage.ask("desktop-notices:seen", "local", POPUP);
-  assert.equal(await manage.ask("desktop-notices:handoff", "local"), false, "finished");
+test("Continue on this computer brings the window to This computer with the click, from a saved server's page or My Cloud's, once a launch while the popup is unseen", async () => {
+  for (const page of ["server", "cloud"]) {
+    const main = desktopMain(), handed = { intent: "cloud-pro", until: NOON + HANDOFF_MS };
+    assert.equal(await main.ask("desktop-notices:this-computer", page, "cloud-pro"), true, page);
+    assert.deepEqual(main.calls.filter(call => call === "this-computer"), ["this-computer"]);
+    assert.equal(main.saved(), null, "This computer's page marks it seen once it finishes the click");
+    assert.deepEqual(await main.ask("desktop-notices:handoff", "local"), handed, page);
+    assert.equal(await main.ask("desktop-notices:this-computer", page, "cloud-pro"), false, "once a launch");
+    assert.equal(await main.ask("desktop-notices:this-computer", "cloud", "manage"), false);
+    assert.deepEqual(await main.ask("desktop-notices:handoff", "local"), handed, "a later ask hands nothing else over");
+    assert.deepEqual(main.calls.filter(call => call === "this-computer"), ["this-computer"]);
+  }
+  const seen = desktopMain();
+  await seen.ask("desktop-notices:seen", "local", POPUP);
+  assert.equal(await seen.ask("desktop-notices:this-computer", "server", "cloud-pro"), false, "a seen popup switches nothing");
+  assert.equal(await seen.ask("desktop-notices:handoff", "local"), null);
+  const unsold = desktopMain({ offered: false });
+  assert.equal(await unsold.ask("desktop-notices:this-computer", "server", "cloud-pro"), false);
+  assert.equal(unsold.calls.includes("this-computer"), false);
+  assert.equal(await unsold.ask("desktop-notices:handoff", "local"), null);
+});
 
-  const late = desktopMain();
-  await late.ask("desktop-notices:this-computer", "cloud", "manage"); late.later(HANDOFF_MS);
-  assert.equal(await late.ask("desktop-notices:handoff", "local"), false, "a stale click is dropped");
+test("This computer's page finds a handed-over click until the popup is seen, for two minutes from the click", async () => {
+  for (const [page, intent] of [["cloud", "manage"], ["cloud", "cloud-pro"], ["server", "cloud-pro"]]) {
+    const main = desktopMain(), handed = { intent, until: NOON + HANDOFF_MS }, name = `${page} ${intent}`;
+    assert.equal(await main.ask("desktop-notices:this-computer", page, intent), true, name);
+    assert.deepEqual(await main.ask("desktop-notices:handoff", "local"), handed, name);
+    assert.deepEqual(await main.ask("desktop-notices:handoff", "local"), handed, "a page that reloads before it finishes finds it again");
+    await main.ask("desktop-notices:seen", "local", "other-notice");
+    main.later(HANDOFF_MS - 1);
+    assert.deepEqual(await main.ask("desktop-notices:handoff", "local"), handed, `${name}: still fresh`);
+    await main.ask("desktop-notices:seen", "local", POPUP);
+    assert.equal(await main.ask("desktop-notices:handoff", "local"), null, `${name}: finished`);
+
+    const late = desktopMain();
+    await late.ask("desktop-notices:this-computer", page, intent); late.later(HANDOFF_MS);
+    assert.equal(await late.ask("desktop-notices:handoff", "local"), null, `${name}: a stale click is dropped`);
+  }
 });
 
 test("a switch that fails hands nothing over and marks nothing, so a later click or launch can try again", async () => {
   let switches = false;
   const main = desktopMain({ switches: () => switches });
-  assert.equal(await main.ask("desktop-notices:this-computer", "cloud", "manage"), false);
-  assert.equal(await main.ask("desktop-notices:handoff", "local"), false);
+  for (const [page, intent] of [["cloud", "manage"], ["server", "cloud-pro"]]) {
+    assert.equal(await main.ask("desktop-notices:this-computer", page, intent), false);
+    assert.equal(await main.ask("desktop-notices:handoff", "local"), null);
+  }
   assert.equal(main.saved(), null);
   switches = true;
-  assert.equal(await main.ask("desktop-notices:this-computer", "cloud", "manage"), true, "not counted as the launch's one switch");
-  assert.equal(await main.ask("desktop-notices:handoff", "local"), true);
+  assert.equal(await main.ask("desktop-notices:this-computer", "server", "cloud-pro"), true, "not counted as the launch's one switch");
+  assert.deepEqual(await main.ask("desktop-notices:handoff", "local"), { intent: "cloud-pro", until: NOON + HANDOFF_MS });
   const both = desktopMain({ switches: async () => { await new Promise(resolve => setTimeout(resolve, 5)); return true; } });
-  const [first, second] = await Promise.all([both.ask("desktop-notices:this-computer", "server"), both.ask("desktop-notices:this-computer", "server")]);
+  const [first, second] = await Promise.all([both.ask("desktop-notices:this-computer", "server", "cloud-pro"), both.ask("desktop-notices:this-computer", "cloud", "manage")]);
   assert.deepEqual([first, second], [true, false], "two clicks at once switch once");
+  assert.equal((await both.ask("desktop-notices:handoff", "local")).intent, "cloud-pro", "and hand over the first");
 });
 
 test("the analytics switch is This computer's page's to set; a server's page in the window is told only that it is off", async () => {
@@ -207,15 +226,17 @@ test("the preload gives every page of the window the notices and the switch's st
     await page.bridge.desktopNotices.state(); await page.bridge.desktopNotices.seen({ toString: () => POPUP }); await page.bridge.desktopNotices.shown(POPUP);
     await page.bridge.desktopNotices.handoff();
     assert.deepEqual(page.invoked, [["desktop-notices:state"], ["desktop-notices:seen", POPUP], ["desktop-notices:shown", POPUP], ["desktop-notices:handoff"]]);
-    await assert.rejects(page.bridge.desktopNotices.thisComputer(), /Choose Continue on this computer/, "only on a click");
+    await assert.rejects(page.bridge.desktopNotices.thisComputer("cloud-pro"), /Choose Continue on this computer/, "only on a click");
     const clicked = preload(origin, { activation: true });
-    await clicked.bridge.desktopNotices.thisComputer(); await clicked.bridge.desktopNotices.thisComputer("manage");
-    await clicked.bridge.desktopNotices.thisComputer({ toString: () => "manage" });
-    assert.deepEqual(clicked.invoked, [["desktop-notices:this-computer", null], ["desktop-notices:this-computer", "manage"], ["desktop-notices:this-computer", null]]);
+    await clicked.bridge.desktopNotices.thisComputer("cloud-pro"); await clicked.bridge.desktopNotices.thisComputer("manage");
+    for (const intent of [undefined, null, "", "upgrade", "MANAGE", { toString: () => "manage" }, ["cloud-pro"], new String("cloud-pro")]) {
+      await assert.rejects(clicked.bridge.desktopNotices.thisComputer(intent), /only its own click/, String(intent));
+    }
+    assert.deepEqual(clicked.invoked, [["desktop-notices:this-computer", "cloud-pro"], ["desktop-notices:this-computer", "manage"]], "nothing else reaches main");
   }
   const local = preload(LOCAL, { activation: true, saved: false });
   assert.equal(typeof local.bridge.desktopNotices.state, "function");
-  await assert.rejects(local.bridge.desktopNotices.thisComputer(), /Choose Continue/, "This computer's page has nothing to switch to");
+  await assert.rejects(local.bridge.desktopNotices.thisComputer("cloud-pro"), /Choose Continue/, "This computer's page has nothing to switch to");
   assert.deepEqual(local.synced, [], "nothing is asked until analytics asks");
   assert.equal(local.bridge.desktopAnalytics.enabled(), false, "answered at once, before anything loads");
   assert.equal(local.bridge.desktopAnalytics.enabled(), false);

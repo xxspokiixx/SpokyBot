@@ -8,6 +8,7 @@ export { DESKTOP_PORTS } from "./desktop-ports.mjs";
 export const DESKTOP_NOTICES = Object.freeze(["cloud-pro-update-2026-10"]);
 const CLOUD_PRO = DESKTOP_NOTICES[0];
 export const HANDOFF_MS = 2 * 60_000;
+const HANDOFF_PAGES = new Map([["cloud-pro", ["cloud", "server"]], ["manage", ["cloud"]]]);
 const DAY = /^\d{4}-\d{2}-\d{2}$/;
 
 /** Security: a write that fails (a full disk, a kill mid-write) leaves the last whole record, analytics opt-out included. */
@@ -75,7 +76,7 @@ export function createDesktopPrefs({ read, write, now = Date.now }) {
 export function registerDesktopPrefs({ ipcMain, read, write, page, cloudOffered, thisComputer, now = Date.now }) {
   let prefs = null;
   const store = () => prefs ??= createDesktopPrefs({ read, write, now });
-  let switched = false, handoffAt = 0;
+  let switched = false, handoff = null;
   const from = (channel, pages, handler) => (event, ...args) => {
     const asking = page(event);
     if (!pages.includes(asking)) throw new Error(`${channel} is only available in this app's window`);
@@ -83,24 +84,26 @@ export function registerDesktopPrefs({ ipcMain, read, write, page, cloudOffered,
   };
   const ANY = ["local", "cloud", "server"];
   ipcMain.handle("desktop-notices:state", from("desktop-notices:state", ANY, async () => ({ seen: store().seen(), cloud: await cloudOffered() })));
-  ipcMain.handle("desktop-notices:seen", from("desktop-notices:seen", ANY, (_, id) => { store().markSeen(id); if (id === CLOUD_PRO) handoffAt = 0; }));
+  ipcMain.handle("desktop-notices:seen", from("desktop-notices:seen", ANY, (_, id) => { store().markSeen(id); if (id === CLOUD_PRO) handoff = null; }));
   ipcMain.handle("desktop-notices:shown", from("desktop-notices:shown", ANY, (_, id) => store().shown(id)));
-  // Security: a server's page only brings the window to This computer, once a launch while the popup is unseen, where
-  // the popup asks again; only My Cloud's own page hands This computer's page a Manage plan click to finish.
-  ipcMain.handle("desktop-notices:this-computer", from("desktop-notices:this-computer", ["cloud", "server"], async (asking, then) => {
+  // Security: a server's page brings the window to This computer only once a launch while the popup is unseen, and hands
+  // This computer's page only the popup's own click: Continue on this computer, which that page finishes from the plan it
+  // knows itself; only My Cloud's own page hands over Manage plan.
+  ipcMain.handle("desktop-notices:this-computer", from("desktop-notices:this-computer", ["cloud", "server"], async (asking, intent) => {
+    if (!HANDOFF_PAGES.get(intent)?.includes(asking)) throw new Error("This page cannot hand that click to This computer");
     if (switched) return false;
     switched = true;
     let moved = false;
     try {
       if (!(await cloudOffered()) || store().seen().includes(CLOUD_PRO)) return false;
-      handoffAt = asking === "cloud" && then === "manage" ? now() : 0;
+      handoff = { intent, until: now() + HANDOFF_MS };
       moved = await thisComputer() === true;
       return moved;
     } finally {
-      if (!moved) { switched = false; handoffAt = 0; }
+      if (!moved) { switched = false; handoff = null; }
     }
   }));
-  ipcMain.handle("desktop-notices:handoff", from("desktop-notices:handoff", ["local"], () => handoffAt > 0 && now() - handoffAt < HANDOFF_MS));
+  ipcMain.handle("desktop-notices:handoff", from("desktop-notices:handoff", ["local"], () => handoff && now() < handoff.until ? { ...handoff } : null));
   // Security: a server's page learns only that this desktop turned analytics off, never that it is on.
   ipcMain.on("desktop-analytics:read", event => {
     try {

@@ -15,8 +15,8 @@ export type CloudProPopupAction = "shown" | "upgrade" | "manage" | "see_plans" |
 
 export interface CloudProPopupView {
   /** Never a checkout, never the browser: the Add a Cloud dialog or Settings → MausBot Cloud on this computer's page; on a
-   * server's page, This computer, where My Cloud's Manage plan opens Settings → MausBot Cloud and any other shows the
-   * popup again. */
+   * server's page, This computer, whose page finishes the click without showing the popup: My Cloud's Manage plan in
+   * Settings → MausBot Cloud, and Continue on this computer as its own popup's main button would for the plan it knows. */
   primary: { label: string; via: "add-cloud" | "settings" | "settings-on-this-computer" | "this-computer" };
   /** Compare plans, for someone who can buy: the dialog lists every plan. A payer has nothing to compare there yet. */
   seePlans: boolean;
