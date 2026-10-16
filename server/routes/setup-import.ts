@@ -6,7 +6,9 @@ import type { BusyFlag } from "./config.ts";
 import { PASS, type RouteHandler } from "./table.ts";
 
 export interface SetupImportRouteDeps {
-  /** False on a MausBot Cloud home or a hosted organization server: the files there are not the person's own. */
+  /** True only on the desktop app's own server. Never on `openmausbot serve`, where any local process, a bot's shell
+   * among them, is the owner's loopback; nor on a Cloud home or a hosted organization server, whose files are not the
+   * person's own. */
   local: boolean;
   cfg: Pick<AppConfig, "mcpServers" | "features">;
   mcpConfigBusy: BusyFlag;

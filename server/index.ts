@@ -13852,7 +13852,7 @@ ROUTES.push(createMcpServerRoutes({
   mcpConfigBusy: { get: () => mcpConfigBusy, set: (busy) => { mcpConfigBusy = busy; } },
   mcpServerResponse, mcpPolicyRefusal, persistMcpServers, savedCustomDomain,
 }));
-ROUTES.push(createSetupImportRoutes({ local: !CLOUD_HOME && !HOSTED_WORKSPACE, cfg, mcpPolicyRefusal, persistMcpServers,
+ROUTES.push(createSetupImportRoutes({ local: DESKTOP_MANAGED && !CLOUD_HOME && !HOSTED_WORKSPACE, cfg, mcpPolicyRefusal, persistMcpServers,
   mcpConfigBusy: { get: () => mcpConfigBusy, set: (busy) => { mcpConfigBusy = busy; } } }));
 ROUTES.push(createComputerRoutes({
   store, cfg, sessions, teamComputers, computerControl,

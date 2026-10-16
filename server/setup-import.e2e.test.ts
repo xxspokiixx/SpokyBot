@@ -1,3 +1,4 @@
+import { randomBytes } from "node:crypto";
 import { lstatSync, mkdirSync, readFileSync, readlinkSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
@@ -7,8 +8,27 @@ import { launchVerificationServer, runControlOmb, type VerificationServer } from
 // The fixture server's HOME is its own disposable data folder, so the files planted here are the only ones it can find.
 const SENTINEL = "SENTINEL-e2e-credential-51c0";
 
-describe("bringing in another AI tool's setup through the real server", () => {
+it("is refused on a server that is not the desktop app's own, where any local process is the owner's loopback", async () => {
+  const headless = await launchVerificationServer();
+  try {
+    mkdirSync(join(headless.info.dataDir, ".claude", "skills", "notes"), { recursive: true });
+    writeFileSync(join(headless.info.dataDir, ".claude", "skills", "notes", "SKILL.md"), "---\nname: notes\ndescription: Takes notes.\n---\n\nWrite it down.\n");
+    for (const [method, body] of [["GET", undefined], ["POST", JSON.stringify({ skills: true, tools: true })]] as const) {
+      const response = await fetch(`${headless.info.url}/api/setup-import`, {
+        method, headers: { "content-type": "application/json", origin: headless.info.url }, ...(body ? { body } : {}),
+      });
+      expect(response.status, method).toBe(403);
+    }
+  } finally {
+    await headless.close();
+  }
+});
+
+describe("bringing in another AI tool's setup through the desktop app's own server", () => {
   let fixture: VerificationServer;
+  // As the desktop app runs it: every change carries the app's owner capability.
+  const owner = randomBytes(32).toString("base64url");
+  const realFetch = globalThis.fetch;
   const api = async (method: string, path: string, body?: unknown) => {
     const response = await fetch(`${fixture.info.url}${path}`, {
       method,
@@ -41,9 +61,12 @@ describe("bringing in another AI tool's setup through the real server", () => {
   const copyOf = (name: string) => join(fixture.info.dataDir, "imported-skills", name);
 
   beforeAll(async () => {
-    fixture = await launchVerificationServer();
+    globalThis.fetch = (input, init = {}) => realFetch(input, { ...init,
+      headers: { ...Object.fromEntries(new Headers(init.headers)), "x-openmausbot-desktop-owner": owner } });
+    fixture = await launchVerificationServer({ ...process.env, OMB_TEST_DESKTOP_OWNER_TOKEN: owner });
   });
   afterAll(async () => {
+    globalThis.fetch = realFetch;
     await fixture?.close();
   });
 
