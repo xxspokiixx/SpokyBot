@@ -2,7 +2,7 @@ import { userInfo } from "node:os";
 import { describe, expect, it } from "vitest";
 
 import { gateChromeFlags } from "../egress/gate.ts";
-import { accountHome, chromeArgs, chromeEnv, screenInfo, SERVER_SCREEN } from "./flags.ts";
+import { accountHome, chromeArgs, chromeEnv, fitPage, pageLimit, screenInfo, SERVER_SCREEN } from "./flags.ts";
 
 const UA = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/153.0.0.0 Safari/537.36";
 
@@ -51,6 +51,17 @@ describe("Chrome's command line", () => {
 
   it("opens the window at the page size asked for", () => {
     expect(chromeArgs({ userDataDir: "/p", mode: "headless", host: "desktop", viewport: { width: 1280, height: 800 } })).toContain("--window-size=1280,943");
+  });
+
+  it("keeps a headless window within its screen, and a page that must shrink keeps its shape", () => {
+    expect(pageLimit({ width: 1512, height: 982, deviceScaleFactor: 2 }, "darwin")).toEqual({ width: 1512, height: 839 });
+    expect(pageLimit(SERVER_SCREEN, "linux")).toEqual({ width: 1920, height: 937 });
+    expect(pageLimit(SERVER_SCREEN, "win32")).toEqual({ width: 1904, height: 929 });
+    expect(fitPage({ width: 1280, height: 800 }, { width: 1512, height: 839 })).toEqual({ width: 1280, height: 800 });
+    expect(fitPage({ width: 1600, height: 1000 }, { width: 1512, height: 839 })).toEqual({ width: 1342, height: 839 });
+    expect(fitPage({ width: 1280, height: 800 }, { width: 1440, height: 757 })).toEqual({ width: 1211, height: 757 });
+    expect(fitPage({ width: 3000, height: 800 }, { width: 1512, height: 839 })).toEqual({ width: 1512, height: 403 });
+    expect(fitPage({ width: 1600, height: 1000 }, null)).toEqual({ width: 1600, height: 1000 });
   });
 
   it("turns the sandbox off only on an explicit opt-out, and reopens restored tabs without a start page", () => {
