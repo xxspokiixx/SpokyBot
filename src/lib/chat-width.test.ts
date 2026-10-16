@@ -44,6 +44,25 @@ describe("chat width", () => {
     }
   });
 
+  it.each(CHAT_WIDTH_IDS)("caps the %s column no narrower than its bubbles reach", (id) => {
+    const selector = id === DEFAULT_CHAT_WIDTH ? ":root" : `:root\\[data-chat-width="${id}"\\]`;
+    const body = css.match(new RegExp(`${selector}\\s*\\{\\s*(--chat-bubble-max[^}]*)\\}`))?.[1] ?? "";
+    const token = (name: string) => body.match(new RegExp(`--${name}:\\s*([\\d.]+)(rem|%)`))?.slice(1) ?? [];
+    const [column, columnUnit] = token("chat-column-max");
+    const [bubble, bubbleUnit] = token("chat-bubble-max");
+    const [pct] = token("chat-bubble-pct");
+    expect(column, `${id} sets --chat-column-max`).toBeDefined();
+    if (columnUnit === "rem" && bubbleUnit === "rem") expect(Number(column) * Number(pct) / 100).toBeGreaterThanOrEqual(Number(bubble));
+  });
+
+  it("centers the transcript and the composer in one capped column, in a chat and in a room", () => {
+    for (const f of ["ChatView", "GroupView"]) {
+      const source = readFileSync(join(root, "components", `${f}.tsx`), "utf8");
+      expect(source, f).toMatch(/glass-scroller-content mx-auto [^"]*max-w-\[var\(--chat-column-max\)\]/);
+      expect(source, f).toMatch(/ref=\{composerDockRef\} className="[^"]*mx-auto max-w-\[calc\(var\(--chat-column-max\)\+2\.5rem\)\]"/);
+    }
+  });
+
   it("registers every stylesheet block", () => {
     for (const id of blocks) expect<readonly string[]>(CHAT_WIDTH_IDS).toContain(id);
   });
