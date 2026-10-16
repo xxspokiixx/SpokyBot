@@ -120,7 +120,7 @@ export async function launchChrome(options: LaunchOptions): Promise<ChromeProces
   } catch (error) {
     killTree(child, "SIGKILL");
     await Promise.race([exited, new Promise((resolve) => setTimeout(resolve, 2_000))]);
-    const diagnosis = await diagnoseLaunchFailure({ executable: options.executablePath, output }).catch(() => null);
+    const diagnosis = await diagnoseLaunchFailure({ executable: options.executablePath, output, env }).catch(() => null);
     throw new ChromeLaunchError(diagnosis?.message ?? (error instanceof Error ? error.message : String(error)), output);
   }
   const pid = child.pid!;

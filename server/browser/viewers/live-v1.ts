@@ -187,7 +187,7 @@ export class LiveV1 {
     }, WAITING_AFTER_MS);
     waiting.unref?.();
     try {
-      const core = await this.#service.attachViewer(target, { owner: options.owner, canOperate: true, ...LO_TIER, pace: "lo" }, (output) => this.#output(viewer, output));
+      const core = await this.#service.attachViewer(target, { owner: options.owner, canOperate: true, ...LO_TIER, pace: "lo", pointer: false }, (output) => this.#output(viewer, output));
       (viewer as { id: string }).id = core.id;
       viewer.core = core;
       if (!this.#current(viewer)) { this.#close(viewer); return; }

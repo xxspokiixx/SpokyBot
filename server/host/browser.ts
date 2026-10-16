@@ -76,8 +76,8 @@ export function createBrowserHost(deps: BrowserHostDeps) {
   const chromeEngine = new ChromeEngine({
     dataDir: DATA_DIR,
     host,
-    egressPort: (session) => browserEgress.open(session),
-    egressNotice: (session) => browserEgress.takeNotice(session),
+    egressPort: (key) => browserEgress.open(key),
+    egressNotice: (key) => browserEgress.takeNotice(key),
     idleMs: () => browserIdleMs(cfg),
     log: (line) => console.warn(line),
   });

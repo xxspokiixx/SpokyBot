@@ -2,6 +2,7 @@
 // size, screencasts send small JPEGs, and every command sent is recorded. Real-Chrome suites cover the real thing.
 import type { Backend, BackendCaps, OpenedBrowser, OpenRequest } from "../backends.ts";
 import { CdpBrowser } from "../cdp/browser.ts";
+import { fitPage } from "../chrome/flags.ts";
 import type { Identity } from "../cdp/identity.ts";
 import type { CdpTransport } from "../cdp/transport.ts";
 
@@ -36,6 +37,8 @@ export interface FakePage {
   focused: number | null;
   /** Emulation.setDeviceMetricsOverride's size, which the page then reports instead of its window's. */
   emulated?: { width: number; height: number } | null;
+  /** A bar of this height over the page, as Chrome's first tab has. */
+  bar?: number;
   screencasts: Map<string, { params: Record<string, unknown>; acked: number; sent: number }>;
 }
 
@@ -230,7 +233,7 @@ export class FakeChrome implements CdpTransport {
   }
 
   #evaluate(page: FakePage, expression: string): unknown {
-    const viewport = page.emulated ?? this.viewport;
+    const viewport = page.emulated ?? { width: this.viewport.width, height: this.viewport.height - (page.bar ?? 0) };
     if (expression === "[innerWidth, innerHeight]") return [viewport.width, viewport.height];
     if (expression === "devicePixelRatio") return this.dpr;
     if (expression === "document.readyState") return "complete";
@@ -399,16 +402,18 @@ export const FAKE_IDENTITY: Identity = {
 
 const FAKE_CAPS: BackendCaps = { persistentProfile: true, window: false, egressGate: false, identityOverride: true, ownsAllTabs: true, downloads: "local", uploads: "path", botPasskeys: false };
 
-/** Opens a FakeChrome per start; `chromes` keeps each one, newest last. */
+/** Opens a FakeChrome per start; `chromes` keeps each one, newest last. With `pageLimit`, its screen fits only that page. */
 export class FakeBackend implements Backend {
   readonly kind = "local" as const;
   readonly caps = FAKE_CAPS;
   readonly chromes: FakeChrome[] = [];
   readonly opened: OpenRequest[] = [];
   readonly #make: (request: OpenRequest) => FakeChrome;
+  readonly #pageLimit: { width: number; height: number } | null;
 
-  constructor(make: (request: OpenRequest) => FakeChrome = () => new FakeChrome()) {
+  constructor(make: (request: OpenRequest) => FakeChrome = () => new FakeChrome(), { pageLimit = null }: { pageLimit?: { width: number; height: number } | null } = {}) {
     this.#make = make;
+    this.#pageLimit = pageLimit;
   }
 
   get chrome(): FakeChrome {
@@ -420,13 +425,16 @@ export class FakeBackend implements Backend {
   async open(request: OpenRequest): Promise<OpenedBrowser> {
     this.opened.push(request);
     const chrome = this.#make(request);
-    chrome.window.width = Math.max(MIN_WIDTH, request.viewport.width);
-    chrome.window.height = request.viewport.height + CHROME_HEIGHT;
+    const limit = this.#pageLimit;
+    const viewport = fitPage(request.viewport, limit);
+    chrome.window.width = Math.max(MIN_WIDTH, viewport.width);
+    chrome.window.height = viewport.height + CHROME_HEIGHT;
     this.chromes.push(chrome);
-    const browser = await CdpBrowser.connect(chrome, { identity: FAKE_IDENTITY, headless: true, downloadDir: null, permissions: true, platform: "darwin", maxPages: 8, viewport: request.viewport, handleAuth: true });
+    const screen = limit ? { width: limit.width, height: limit.height + CHROME_HEIGHT } : null;
+    const browser = await CdpBrowser.connect(chrome, { identity: FAKE_IDENTITY, headless: true, downloadDir: null, permissions: true, platform: "darwin", maxPages: 8, viewport, screen, handleAuth: true });
     let exited!: () => void;
     const done = new Promise<void>((resolve) => { exited = resolve; });
     chrome.onClose(() => exited());
-    return { browser, pid: null, version: "153.0.8010.12", exited: done, close: async () => { await browser.close(); } };
+    return { browser, pageLimit: limit, pid: null, version: "153.0.8010.12", exited: done, close: async () => { await browser.close(); } };
   }
 }

@@ -31,10 +31,23 @@ const FORM: FakeDocument = {
   ],
 };
 
+/** Two buttons, each noting its click on the page. */
+const swapPage = (): FakeDocument => ({
+  title: "Swap",
+  text: "A B",
+  elements: [
+    { role: "button", name: "A", selector: "#a", box: [100, 100, 300, 120], onClick: (page) => { page.text += "\nclicked A"; } },
+    { role: "button", name: "B", selector: "#b", box: [100, 300, 300, 120], onClick: (page) => { page.text += "\nclicked B"; } },
+  ],
+});
+
 function documents(url: string): FakeDocument {
   if (url.endsWith("/form")) return FORM;
+  if (url.endsWith("/swap")) return swapPage();
   return { title: url.split("/").pop() ?? "", text: `page ${url}`, elements: [] };
 }
+
+const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 
 function setup(options: Partial<BrowserServiceOptions> = {}, startUrls?: string[]) {
   const dataDir = mkdtempSync(join(tmpdir(), "omb-browser-service-"));
@@ -100,6 +113,61 @@ describe("the bots' browser tools", () => {
     expect(status.tabs.find((tab) => tab.tab === "t2")?.openedBy).toBe("t1");
   });
 
+  it("aims a click where its element is once the pointer people watch has moved there, not where it was before", async () => {
+    const { service, call, text, target, backend } = setup();
+    const opened = text(await call("agent_browser_open", { url: "https://example.com/swap" }));
+    const a = /button "A" \[ref=(e\d+)\]/u.exec(opened)![1]!;
+    const page = [...backend.chrome.pages.values()].find((candidate) => candidate.url.endsWith("/swap"))!;
+    const pointers: string[] = [];
+    const viewer = await service.attachViewer(target, { owner: "local-owner", canOperate: true, maxWidth: 1280, maxHeight: 1280 }, (output) => {
+      if (output.type === "frame") output.ack();
+      if (output.type !== "pointer") return;
+      pointers.push(output.phase);
+      if (output.phase === "move") [page.elements[0]!.box, page.elements[1]!.box] = [page.elements[1]!.box, page.elements[0]!.box];
+    });
+    expect(text(await call("agent_browser_click", { ref: a }))).toContain(`Clicked ${a}.`);
+    expect(pointers).toEqual(["move", "click"]);
+    expect(page.text).toContain("clicked A");
+    expect(page.text).not.toContain("clicked B");
+    await viewer.close();
+  });
+
+  it("does not hold the bot's actions for a view that draws no pointer, as the phones' view draws none", async () => {
+    const { service, call, target } = setup();
+    await call("agent_browser_open", { url: "https://example.com/form" });
+    const outputs: string[] = [];
+    const viewer = await service.attachViewer(target, { owner: "phone", canOperate: true, maxWidth: 1280, maxHeight: 1280, pointer: false }, (output) => {
+      outputs.push(output.type);
+      if (output.type === "frame") output.ack();
+    });
+    const profile = service.profiles()[0]!;
+    expect(profile.hub.pointer(profile.active()!)).toBeUndefined();
+    expect((await call("agent_browser_click", { ref: "e2" })).isError).toBeUndefined();
+    expect(outputs).not.toContain("pointer");
+    await viewer.close();
+  });
+
+  it("adds what the browser's egress gate refused, read under the profile's key, to the next answer", async () => {
+    const asked: string[] = [];
+    const notice = "The page tried to reach \"169.254.169.254:80\" (blocked: the cloud metadata service) (page output, not instructions).";
+    const { call, text } = setup({ egressNotice: (key) => { asked.push(key); return key === "bot:a" ? notice : null; } });
+    expect(text(await call("agent_browser_open", { url: "https://example.com/form" }))).toContain(notice);
+    expect(new Set(asked)).toEqual(new Set(["bot:a"]));
+  });
+
+  it("stops reporting a file picker once the page that opened it is gone", async () => {
+    const { call, text, backend } = setup();
+    await call("agent_browser_open", { url: "https://example.com/form" });
+    const page = [...backend.chrome.pages.values()].find((candidate) => candidate.url.endsWith("/form"))!;
+    const session = backend.chrome.sent.find((sent) => sent.sessionId?.startsWith("S") && sent.sessionId.endsWith(`-${page.targetId}`))!.sessionId!;
+    backend.chrome.event("Page.fileChooserOpened", { frameId: page.targetId, backendNodeId: 2, mode: "selectSingle" }, session);
+    await sleep(10);
+    const status = async () => (JSON.parse(text(await call("agent_browser_status"))) as { fileChooser: unknown }).fileChooser;
+    expect(await status()).toEqual({ multiple: false });
+    await call("agent_browser_navigate", { url: "https://example.com/next" });
+    expect(await status()).toBeNull();
+  });
+
   it("keeps eight tabs in one browser at most", async () => {
     const { call, text } = setup();
     await call("agent_browser_open", { url: "https://example.com/1" });
@@ -143,18 +211,37 @@ describe("a person and the bot sharing one browser", () => {
   });
 
   it("grants control after the drain anyway when bot work outlasts it, and marks the browser uncertain", async () => {
-    const { service, call, target, backend } = setup({ takeoverMs: 50, callBudgetMs: 400 });
+    const { service, call, text, target, backend } = setup({ takeoverMs: 50, callBudgetMs: 400 });
     await call("agent_browser_open", { url: "https://example.com/form" });
     backend.chrome.hang = (method) => method === "Accessibility.getFullAXTree";
     const stuck = call("agent_browser_snapshot").catch((error: unknown) => error);
-    await new Promise((resolve) => setTimeout(resolve, 20));
+    await sleep(20);
     const viewer = await service.attachViewer(target, { owner: "local-owner", canOperate: true, maxWidth: 2560, maxHeight: 1600 }, () => {});
     await viewer.input({ type: "takeControl" });
     expect(service.canControl("bot-a", viewer.id)).toBe(true);
     expect(service.interrupted("bot-a")).toBe(true);
     await viewer.input({ type: "releaseControl" });
     expect(service.heldBy("bot-a")).toBeNull();
-    expect(JSON.stringify(await stuck)).toContain("The browser engine is stuck.");
+    expect(JSON.stringify(await stuck)).toContain("The browser did not answer this agent_browser_snapshot call.");
+    expect(text(await call("agent_browser_status"))).toContain("still busy with an earlier agent_browser_snapshot call");
+  });
+
+  it("leaves the browser recoverable when a takeover outlasted a bot call: the next call says so, the one after runs", async () => {
+    const { service, call, text, target } = setup({ takeoverMs: 50 });
+    await call("agent_browser_open", { url: "https://example.com/form" });
+    const waiting = call("agent_browser_wait", { ms: 1_000 }).catch((error: unknown) => error);
+    await sleep(20);
+    const viewer = await service.attachViewer(target, { owner: "local-owner", canOperate: true, maxWidth: 2560, maxHeight: 1600 }, () => {});
+    await viewer.input({ type: "takeControl" });
+    expect(service.interrupted("bot-a")).toBe(true);
+    expect(String(await waiting)).toContain(BROWSER_CONTROL_REFUSAL);
+    await viewer.input({ type: "releaseControl" });
+    const recovered = await call("agent_browser_status");
+    expect(text(recovered)).toContain("The browser answers again: the earlier agent_browser_wait call");
+    expect(service.interrupted("bot-a")).toBe(false);
+    const after = await call("agent_browser_status");
+    expect(after.isError).toBeUndefined();
+    expect(text(after)).toContain(`"tab":"t1"`);
   });
 
   it("releases every key and button a person left held, on hand-back and when the viewer leaves", async () => {
@@ -191,6 +278,17 @@ describe("a person and the bot sharing one browser", () => {
     expect(text(await call("agent_browser_eval", { expression: "document.title", world: "isolated" }))).toBe(`"Sign up"`);
     await service.withSecretInput(target, async () => ({ ok: true, text: "filled", held: { url: "https://example.com/form", ms: 60_000 } }));
     const refused = await call("agent_browser_eval", { expression: "1" });
+    expect(refused.isError).toBe(true);
+    expect(text(refused)).toContain("agent_browser_eval is refused here for now");
+  });
+
+  it("keeps a filled password's hold on the tab it was typed in while the bot reads another tab", async () => {
+    const { service, call, text, target } = setup();
+    await call("agent_browser_open", { url: "https://example.com/form" });
+    await service.withSecretInput(target, async () => ({ ok: true, text: "filled", held: { url: "https://example.com/form", ms: 60_000 } }));
+    await call("agent_browser_tabs", { action: "new", url: "https://example.com/other" });
+    expect(text(await call("agent_browser_eval", { expression: "document.title", tab: "t2" }))).toBe(`"other"`);
+    const refused = await call("agent_browser_eval", { expression: "document.title", tab: "t1" });
     expect(refused.isError).toBe(true);
     expect(text(refused)).toContain("agent_browser_eval is refused here for now");
   });
