@@ -229,7 +229,7 @@ describe("a person and the bot sharing one browser", () => {
   it("leaves the browser recoverable when a takeover outlasted a bot call: the next call says so, the one after runs", async () => {
     const { service, call, text, target } = setup({ takeoverMs: 50 });
     await call("agent_browser_open", { url: "https://example.com/form" });
-    const waiting = call("agent_browser_wait", { ms: 300 }).catch((error: unknown) => error);
+    const waiting = call("agent_browser_wait", { ms: 1_000 }).catch((error: unknown) => error);
     await sleep(20);
     const viewer = await service.attachViewer(target, { owner: "local-owner", canOperate: true, maxWidth: 2560, maxHeight: 1600 }, () => {});
     await viewer.input({ type: "takeControl" });

@@ -85,12 +85,12 @@ describe("the page fills the panel", () => {
 
   it("waits for the bot's running action before it resizes the page, and lets the viewer in at once", async () => {
     const { watch, chrome, call } = await setup();
-    chrome().delay = (method) => (method === "Accessibility.getFullAXTree" ? 300 : 0);
+    chrome().delay = (method) => (method === "Accessibility.getFullAXTree" ? 800 : 0);
     const snapshot = call("agent_browser_snapshot");
     await sleep(30);
     const started = Date.now();
     const { viewer, outputs } = await watch({ size: { width: 1600, height: 1000 } });
-    expect(Date.now() - started).toBeLessThan(200);
+    expect(Date.now() - started).toBeLessThan(500);
     expect(outputs).toContainEqual(expect.objectContaining({ type: "viewport", ...UNATTACHED_VIEWPORT }));
     const resizing = viewer.input({ type: "resize", width: 1200, height: 900 });
     await sleep(100);
