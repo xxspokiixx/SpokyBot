@@ -15,6 +15,8 @@ export interface FakeDriverOptions {
   failCreate?: string;
   /** snapshot() rejects with this message (describe-downgrade path). */
   failSnapshot?: string;
+  /** snapshot() never settles, like a status probe stuck on its CLI. */
+  hangSnapshot?: boolean;
   /** effort levels this fake driver declares, forwarded onto capabilities. */
   effortLevels?: readonly EffortLevel[];
 }
@@ -59,6 +61,7 @@ export function makeFakeDriver(opts: FakeDriverOptions = {}): FakeDriverHandle {
           models: handle.driver.models,
           snapshot: async (): Promise<ProviderSnapshot> => {
             if (opts.failSnapshot) throw new Error(opts.failSnapshot);
+            if (opts.hangSnapshot) await new Promise<never>(() => {});
             return { state: "available", version: "0.0.0-fake" };
           },
           adapter: {
