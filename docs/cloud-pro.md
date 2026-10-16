@@ -249,6 +249,24 @@ never takes a conversation out of being the owner's own. Approving a change
 (an edit, a pause, a resume) keeps a routine the owner's only if it already
 was: it never makes anyone else's routine theirs.
 
+A Cloud only its owner has ever used has nobody to confine. While no trace of
+a second person exists anywhere on it (no session other than the owner's own
+devices, current or revoked; no earlier key that was never proven the owner's;
+no line, card answer, conversation or routine recorded under anyone else's
+key; and a record that can be read), every routine and conversation runs at
+its bot's own level, whatever writer it has on record. Only what came in from
+outside stays confined: a routine a bot made or changed in a conversation a
+webhook drove (its run, a payload posted into it, or work it handed on) is
+recorded as the outside's, and runs without full access until the owner opens
+it and saves it once. Routines from before this that a webhook-driven
+conversation made or changed are recorded the same way, once. The first trace
+of a second person makes the Cloud shared for good: cloud-owner.json records
+when, nothing clears it, and a restore never brings or removes it. If that
+happens after a start found only the owner, every routine a bot made in a
+conversation only the owner spoke in (lines copied from the owner's desktop
+count) is recorded as the owner's at that moment; from then on the rules below
+apply.
+
 A routine runs at the level of the conversation it was made in. One a bot
 creates at once, or changes while it is the owner's, in a conversation where
 only the owner spoke (it was opened, written in and answered only by proven

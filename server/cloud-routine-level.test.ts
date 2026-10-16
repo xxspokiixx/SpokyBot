@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { approvalShape, createdShape as shapeOfCard, ownerSpokeOnly, ownersRoutinesMadeInChat, type OwnersRoutinesInput } from "./cloud-routine-level.ts";
+import { approvalShape, createdShape as shapeOfCard, ownerSpokeOnly, ownersRoutinesMadeInChat, routinesKeptAtSharing, type OwnersRoutinesInput } from "./cloud-routine-level.ts";
 import { asSchedule } from "./routine-requests.ts";
 
 const createdShape = (line: Parameters<typeof shapeOfCard>[0]) => shapeOfCard(line, asSchedule);
@@ -72,5 +72,23 @@ describe("a routine a bot made where only the owner spoke runs at the owner's le
     expect(ids(ownersRoutinesMadeInChat(input(thread, { recorded: () => true })))).toEqual([]);
     expect(ids(ownersRoutinesMadeInChat(input(thread, { routines: [{ id: "r1" }] })))).toEqual([]);
     expect(ids(ownersRoutinesMadeInChat(input([said("m1", OWNER), made("r2")])))).toEqual([]);
+  });
+
+  it("when the Cloud first becomes shared, keeps a routine made in the owner's chat, copied desktop lines included, never one a guest or a webhook drove", () => {
+    const kept = (thread: any[], overrides: Partial<Parameters<typeof routinesKeptAtSharing>[0]> = {}) =>
+      routinesKeptAtSharing({ ...input(thread), outsideThread: () => false, ...overrides });
+    expect(kept([said("d1"), made("r1")])).toEqual(["r1"]);
+    expect(kept([said("m1", OWNER), report, made("r1")])).toEqual(["r1"]);
+    expect(kept([said("d1"), made("r1")], { writer: () => undefined })).toEqual(["r1"]);
+    expect(kept([said("d1"), made("r1")], { outsideThread: (threadId) => threadId === "chat" })).toEqual([]);
+    expect(kept([said("g1", GUEST), made("r1")])).toEqual([]);
+    expect(kept([{ ...said("p1"), peerAsk: { botId: "teammate" } }, made("r1")])).toEqual([]);
+    expect(kept([said("d1"), made("r1")], { starters: () => [NOBODY] })).toEqual([]);
+    expect(kept([said("d1"), made("r1")], { writer: () => GUEST })).toEqual([]);
+    expect(kept([said("d1"), made("r1")], { writer: () => "p_outside" })).toEqual([]);
+    expect(kept([said("d1")])).toEqual([]);
+    // The level rule for a live chat never counts a line without a sender as the owner's.
+    expect(ownerSpokeOnly([said("d1")], [undefined], ownerPerson, cardAnswerer)).toBe(false);
+    expect(ownerSpokeOnly([said("d1")], [undefined], ownerPerson, cardAnswerer, true)).toBe(true);
   });
 });
