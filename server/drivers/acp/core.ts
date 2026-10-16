@@ -2003,8 +2003,12 @@ export function createAcpDriver(support: AcpSupport): ProviderDriver<AcpConfig> 
         },
         dispose: async () => {
           await deviceSignIn?.dispose();
+          const disposingSessions = Array.from(sessions);
           for (const { stop } of active.values()) stop();
-          for (const threadId of Array.from(sessions.keys())) closeSession(threadId, "dispose");
+          for (const [threadId, session] of disposingSessions) {
+            closeSession(threadId, "dispose");
+            settle(threadId, session, true, "cancelled");
+          }
           for (const [threadId, children] of retiring) {
             for (const child of children) void retireChild(threadId, child);
           }

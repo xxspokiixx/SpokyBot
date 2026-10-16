@@ -1872,6 +1872,19 @@ describe("ACP turns (fake CLI)", () => {
     expect(recorder.events.some(e => e.type === "runtime.error")).toBe(false);
   });
 
+  it("preserves a streamed partial reply before disposal removes its listeners", async () => {
+    await create(GrokAgentDriver, "stall-after-text");
+    await instance.adapter.sendTurn({ threadId: "t-dispose-partial", text: "go" });
+    await recorder.until((event) => event.type === "content.delta" && event.streamKind === "assistant_text");
+
+    await instance.dispose();
+
+    expect(recorder.events.filter((event) => event.type === "item.completed" && event.itemType === "assistant_text"))
+      .toEqual([expect.objectContaining({ text: "half an answer, then silence" })]);
+    expect(recorder.events.filter((event) => event.type === "turn.completed"))
+      .toEqual([expect.objectContaining({ threadId: "t-dispose-partial", stopReason: "cancelled" })]);
+  });
+
   it("defaults the prompt idle guard above an agent's longest normal silence", () => {
     expect(DEFAULT_ACP_PROMPT_IDLE_MS).toBeGreaterThan(600_000);
   });
