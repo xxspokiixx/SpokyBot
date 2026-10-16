@@ -71,12 +71,14 @@ export function hintSeenPatch(
 }
 
 
-export type BeatId = "hello" | "reel" | "engines" | "permissions" | "phone" | "cloud" | "bot";
+export type BeatId = "hello" | "reel" | "engines" | "import" | "permissions" | "phone" | "cloud" | "bot";
 
 export interface BeatOptions {
   dictation: boolean;
   reel: boolean;
   hosted?: boolean;
+  /** This computer has skills or MCP servers from another AI tool to bring in. */
+  setupImport?: boolean;
   /** MausBot Cloud can be bought from this desktop now (cloudBeatWanted); the first bot stays the last beat. */
   cloud?: boolean;
 }
@@ -86,6 +88,7 @@ export function beatsFor(options: BeatOptions): BeatId[] {
   const beats: BeatId[] = ["hello"];
   if (options.reel) beats.push("reel");
   beats.push("engines");
+  if (options.setupImport) beats.push("import");
   if (options.dictation) beats.push("permissions");
   beats.push("phone");
   if (options.cloud) beats.push("cloud");
@@ -140,6 +143,8 @@ export function beatWidth(beat: BeatId): number {
       return 680;
     case "phone":
       return 620;
+    case "import":
+      return 540;
     case "reel":
       return 720;
     case "bot":

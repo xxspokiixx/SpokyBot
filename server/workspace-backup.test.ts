@@ -622,6 +622,43 @@ describe("encrypted full workspace backups", () => {
     expect(exported.summary.warnings.some((warning) => warning.startsWith("2 symbolic link(s) in conversation work folders"))).toBe(true);
   });
 
+  it("leaves out the link to the person's own Claude Code skills, which the app makes again on each turn", async () => {
+    const root = directory();
+    const outside = directory();
+    writeFileSync(join(outside, "SKILL.md"), "the person's own skill");
+    mkdirSync(join(root, "claude-user-skills", ".claude"), { recursive: true });
+    symlinkSync(outside, join(root, "claude-user-skills", ".claude", "skills"), process.platform === "win32" ? "junction" : "dir");
+    json(join(root, "bots.json"), []);
+    const exported = await createWorkspaceBackup(root, { password: PASSWORD });
+    const target = directory();
+    const staged = await stageWorkspaceBackup(target, exported.path, { password: PASSWORD });
+    expect(existsSync(join(target, ".backups", staged.id, "staged", "data", "claude-user-skills"))).toBe(false);
+  });
+
+  it("carries the skills brought in from this computer, and counts task folder links to them as the app's", async () => {
+    const root = directory();
+    const copy = join(root, "imported-skills", "pdf");
+    mkdirSync(join(copy, "scripts"), { recursive: true });
+    // Read-only as the app writes them; on Windows it keeps them writable.
+    const readOnly = (mode: number) => (process.platform === "win32" ? {} : { mode });
+    writeFileSync(join(copy, "SKILL.md"), "# pdf", readOnly(0o400));
+    writeFileSync(join(copy, "scripts", "run.sh"), "echo run\n", readOnly(0o500));
+    const kind = process.platform === "win32" ? "junction" : "dir";
+    const task = join(root, "task-workspaces", "bot", "thread");
+    for (const family of [".claude", ".agents", ".grok"]) mkdirSync(join(task, family, "skills"), { recursive: true });
+    symlinkSync(copy, join(task, ".claude", "skills", "pdf"), kind);
+    symlinkSync(copy, join(task, ".agents", "skills", "pdf"), kind);
+    // Under another name it is not the app's link.
+    symlinkSync(copy, join(task, ".grok", "skills", "renamed"), kind);
+    const exported = await createWorkspaceBackup(root, { password: PASSWORD });
+    expect(exported.summary.warnings.some((warning) => warning.startsWith("2 managed skill discovery link(s)"))).toBe(true);
+    expect(exported.summary.warnings.some((warning) => warning.startsWith("1 symbolic link(s) in conversation work folders"))).toBe(true);
+    const target = directory();
+    const staged = await stageWorkspaceBackup(target, exported.path, { password: PASSWORD });
+    const data = join(target, ".backups", staged.id, "staged", "data");
+    expect(readFileSync(join(data, "imported-skills", "pdf", "scripts", "run.sh"), "utf8")).toBe("echo run\n");
+  });
+
   it("recovers an interrupted top-level swap before any application state is loaded", async () => {
     const source = directory();
     json(join(source, "bots.json"), []);

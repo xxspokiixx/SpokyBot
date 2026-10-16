@@ -725,7 +725,7 @@ export function sharedComputersEnabled(cfg: AppConfig): boolean {
   return cfg.features?.sharedComputers === true;
 }
 
-export function claudeUserMcpEnabled(cfg: AppConfig): boolean {
+export function claudeUserMcpEnabled(cfg: Pick<AppConfig, "features">): boolean {
   return cfg.features?.claudeUserMcp === true;
 }
 

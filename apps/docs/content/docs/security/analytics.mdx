@@ -130,8 +130,10 @@ use their own Boat key, and how many bots run on cloud computers, without sendin
 | `email_submitted` | You shared your email on the first-run screen; your events are tied to that email from then on | none |
 | `$identify` | PostHog's own event, sent with `email_submitted`, and before a `cloud_pro_popup` click by someone signed in to MausBot Cloud, to tie your events to that email. When your events were already tied to an email, PostHog sends its `$set` event with the new one instead | `$set`: `email`, the email you shared or your Cloud account's email; `$anon_distinct_id`: the random id your events had before |
 | `email_skipped` | You skipped the email on the first-run screen | none |
-| `onboarding_step` | A first-run tour step is shown | `step`: `hello`, `reel`, `engines`, `permissions`, `phone`, `cloud`, `bot`; `replay`: true/false |
+| `onboarding_step` | A first-run tour step is shown | `step`: `hello`, `reel`, `engines`, `import`, `permissions`, `phone`, `cloud`, `bot`; `replay`: true/false |
 | `onboarding_completed` | The first-run tour ends | `reason`: `completed`, `skipped`; `at`: the step it ended on; `replay`: true/false |
+| `setup_import_applied` | You bring in the skills and MCP servers the first-run tour found from other AI tools on this computer | `skills`, `tools`: how many were added. Never their names or where they came from |
+| `setup_import_skipped` | You skip that step | `skills`, `tools`: how many it found |
 | `onboarding_cloud` | You answer the first-run tour's MausBot Cloud step | `action`: `start_trial` (Start free trial, or See plans when the offer has no trial), `not_now`; `trial`: true/false, with `start_trial`: the offer has a free trial |
 | `phone_setup_skipped`, `phone_setup_completed` | The phone step of the first-run tour was skipped or finished | none |
 | `message_sent` | You send a message | To a bot: `driver`: engine; `queued`: true/false. To a room: `room`: true; `mode`: `chat`, `goal`; `queued`: true/false |
