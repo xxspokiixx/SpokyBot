@@ -20,6 +20,13 @@ const yamlEsmPlugin = {
   },
 };
 
+// ws is CommonJS and requires Node's own modules, which an ESM bundle reaches
+// only through a require of its own (esbuild otherwise throws "Dynamic require
+// of "events" is not supported" when it loads).
+const NODE_REQUIRE = {
+  js: 'import { createRequire as __ombCreateRequire } from "node:module";\nconst require = __ombCreateRequire(import.meta.url);',
+};
+
 // Every file run as its own process.
 const ENTRY_POINTS = [
   "index.ts",
@@ -63,6 +70,7 @@ await build({
   allowOverwrite: true,
   logLevel: "info",
   plugins: [yamlEsmPlugin],
+  banner: NODE_REQUIRE,
 });
 
 // External MCP clients launch this as an independent stdio process, so release
