@@ -13552,22 +13552,12 @@ const workspaceBackupAccess = {
   }, keepLocked),
   status: () => ({ busy: workspaceMaintenance.active, pendingRestore: workspaceMaintenance.pendingRestore }),
 };
-const workspaceBackupRoutes = createWorkspaceBackupRoutes({
-  dataDir: DATA_DIR,
-  appVersion: serverVersion(),
-  readBody,
-  restored: workspaceRestore,
-  ...workspaceBackupAccess,
-});
+const workspaceCopyAccess = { dataDir: DATA_DIR, appVersion: serverVersion(), readBody, restored: workspaceRestore, ...workspaceBackupAccess };
+const workspaceBackupRoutes = createWorkspaceBackupRoutes(workspaceCopyAccess);
 let restartRequested = false;
 const cloudMoveRoutes = createCloudMoveRoutes({
-  dataDir: DATA_DIR,
-  appVersion: serverVersion(),
-  environmentId: ENVIRONMENT_ID,
+  ...workspaceCopyAccess, environmentId: ENVIRONMENT_ID, store,
   sharedWorkspace: () => workspaceShared({ hosted: HOSTED_WORKSPACE, cloudHome: Boolean(CLOUD_HOME), signIn: signInAllowList() }),
-  readBody,
-  restored: workspaceRestore,
-  ...workspaceBackupAccess,
   restart: () => { restartRequested = true; gracefulShutdown(); },
 });
 
