@@ -15,6 +15,7 @@ vi.mock("react", async original => ({ ...await original<typeof import("react")>(
 }));
 vi.mock("@/state/store", () => ({ useStore: () => ({ state: f.state, dispatch: f.dispatch }) }));
 vi.mock("@/lib/analytics", () => ({ track: vi.fn() }));
+vi.mock("./cloud-buy/CloudMascotScene", () => ({ CloudMascotScene: ({ variant }: { variant: string }) => createElement("div", { "data-cloud-scene": variant }) }));
 import { CloudAddDialog, CloudAddPanel, CloudAddSheet, planFromKey, type CloudAddActions, type CloudAddUi } from "./CloudAddDialog";
 import { cloudAddView, type CloudAddView } from "@/lib/cloud-plan";
 import { track } from "@/lib/analytics";
@@ -79,6 +80,7 @@ describe("each screen of the sheet says one thing and offers one next step", () 
       "Due today", "$0.00", "Card needed, nothing charged for 7 days. Then $49/month + tax. Cancel in the app any time.",
       "Today", "Trial starts, with $5 of Claude credit", "Oct 13", "Reminder email", "Oct 15", "$49/month begins",
       "Start free trial", "Secure checkout in your browser", "Apple Pay", "G Pay", "Card", "Cancel in two clicks", "14-day money-back", "Already have a plan? Sign in"]);
+    expect(html, "the night shift scene between the lede and the benefits").toMatch(/this computer is off\.<\/p><\/div><div data-cloud-scene="hero"><\/div><ul/);
     expect(html).toContain('role="radio" aria-checked="true" tabindex="0" data-plan="pro"');
     expect(html).toContain('role="radio" aria-checked="false" tabindex="-1" data-plan="max"');
     expect(html.match(/Most popular/g)).toHaveLength(1);

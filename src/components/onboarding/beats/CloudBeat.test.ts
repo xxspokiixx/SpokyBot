@@ -10,6 +10,7 @@ const f = vi.hoisted(() => ({ state: {} as any, dispatch: vi.fn(), api: vi.fn(),
 vi.mock("@/state/store", () => ({ useStore: () => ({ state: f.state, dispatch: f.dispatch }), api: (...args: unknown[]) => f.api(...args) }));
 vi.mock("@/lib/analytics", () => ({ track: vi.fn() }));
 vi.mock("@/lib/brand", async original => ({ ...await original<typeof import("@/lib/brand")>(), brandStatus: () => ({ source: f.branded ? "file" : "default" }) }));
+vi.mock("@/components/Avatar", () => ({ MausAvatar: () => null }));
 const { CloudBeat, useCloudBeatOffer } = await import("./CloudBeat");
 const { track } = await import("@/lib/analytics");
 
@@ -79,7 +80,7 @@ it("an offer that has not come in time leaves the beat out for this welcome, and
   expect(host.textContent).toBe("none");
 });
 
-it("the beat: what Cloud does, the Admin's offer in one line, Start free trial opens the sheet over the welcome, which goes on once it closes", async () => {
+it("the beat: what Cloud does, the night shift scene, the Admin's offer in one line, Start free trial opens the sheet over the welcome, which goes on once it closes", async () => {
   const onNext = vi.fn(), onSkip = vi.fn(), setMascot = vi.fn();
   const beat = () => createElement(CloudBeat, { offer: OFFER, onNext, onSkip, setMascot, bump: vi.fn() });
   await mount(beat());
@@ -90,13 +91,19 @@ it("the beat: what Cloud does, the Admin's offer in one line, Start free trial o
     "You can add a Cloud any time from the switcher."]) expect(text).toContain(words);
   expect(f.api).toHaveBeenCalledWith("/api/config", { method: "PUT", body: JSON.stringify({ onboarding: { hintsSeen: ["onboarding-cloud-v1"] } }) });
   expect(button("Start free trial").hasAttribute("data-primary"), "the welcome focuses it").toBe(true);
+  const scene = () => host.querySelector("[data-cloud-scene='beat']")!;
+  expect(scene().getAttribute("aria-label")).toBe("Four bots keep working on a cloud under the moon while this computer sleeps");
+  expect(scene().hasAttribute("data-paused")).toBe(false);
   await act(async () => { button("Start free trial").click(); });
   expect(f.dispatch).toHaveBeenCalledWith({ type: "openCloudAdd", source: "app_onboarding" });
   expect(track).toHaveBeenCalledWith("onboarding_cloud", { action: "start_trial", trial: true });
+  expect(scene().hasAttribute("data-paused"), "held from the moment the sheet is asked for").toBe(true);
   f.state = { ...f.state, cloudAdd: { source: "app_onboarding" } }; await rerender(beat());
   expect(onNext, "not while the sheet is open").not.toHaveBeenCalled();
+  expect(scene().hasAttribute("data-paused"), "held under the open sheet").toBe(true);
   f.state = { ...f.state, cloudAdd: null }; await rerender(beat());
   expect(onNext).toHaveBeenCalledOnce();
+  expect(scene().hasAttribute("data-paused"), "moving again once the sheet is gone").toBe(false);
   await act(async () => { button("Not now").click(); });
   expect(onSkip).toHaveBeenCalledOnce(); expect(track).toHaveBeenCalledWith("onboarding_cloud", { action: "not_now" });
 });

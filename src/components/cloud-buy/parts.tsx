@@ -58,25 +58,6 @@ export function CloudTile({ color, size = 22 }: { color: unknown; size?: number 
     className="grid shrink-0 place-items-center rounded-[7px] text-white"><Cloud size={Math.round(size * 0.62)} strokeWidth={2.2} /></span>;
 }
 
-/** Three bots asleep on a cloud under the moon. Each tone is a skin token, so it reads in light and dark skins. */
-export function CloudArt() {
-  const bot = "var(--color-accent)", eye = "var(--color-accent-ink)", edge = "color-mix(in srgb, var(--color-accent) 30%, var(--color-hairline))";
-  return <svg viewBox="0 0 360 120" role="img" aria-label={t("cloudBuy.art")} className="block h-auto max-h-[104px] w-full">
-    <defs><mask id="cloud-buy-moon"><rect width="360" height="120" fill="white" /><circle cx="326" cy="25" r="13" fill="black" /></mask></defs>
-    <circle cx="318" cy="30" r="15" fill="var(--identity-yellow)" mask="url(#cloud-buy-moon)" />
-    {[[40, 22, 1.6], [96, 12, 1.2], [262, 14, 1.4], [210, 30, 1]].map(([cx, cy, r]) => <circle key={`${cx}`} cx={cx} cy={cy} r={r} fill={edge} />)}
-    <path d="M70 104h214a30 30 0 0 0 0-60 44 44 0 0 0-84-14 34 34 0 0 0-58 18 26 26 0 0 0-72 22v34Z"
-      fill="color-mix(in srgb, white 90%, var(--color-accent))" stroke={edge} strokeWidth="1.5" />
-    <rect x="132" y="50" width="30" height="24" rx="7" fill={bot} /><circle cx="142" cy="61" r="2.6" fill={eye} /><circle cx="152" cy="61" r="2.6" fill={eye} />
-    <path d="M147 50v-6" stroke={bot} strokeWidth="2.5" strokeLinecap="round" />
-    <g opacity=".85"><rect x="172" y="44" width="34" height="28" rx="8" fill={bot} /><path d="M189 44v-7" stroke={bot} strokeWidth="2.5" strokeLinecap="round" /></g>
-    <path d="M181 57q3 3 6 0M193 57q3 3 6 0" stroke={eye} strokeWidth="2.2" fill="none" strokeLinecap="round" />
-    <g opacity=".7"><rect x="216" y="52" width="28" height="22" rx="7" fill={bot} /></g>
-    <circle cx="225" cy="62" r="2.4" fill={eye} /><circle cx="235" cy="62" r="2.4" fill={eye} />
-    <text x="250" y="44" fontSize="11" fontWeight="600" fill="var(--color-accent-text)">z z</text>
-  </svg>;
-}
-
 export function Badge({ children }: { children: ReactNode }) {
   return <span className="inline-flex items-center gap-1.5 self-start rounded-full bg-success/12 px-2.5 py-1 text-[12px] font-semibold text-success">
     <Check size={13} strokeWidth={2.6} aria-hidden="true" />{children}

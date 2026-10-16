@@ -1,5 +1,5 @@
 // Dev-only gallery of the Cloud buying sheet, served at /cloud-buy-preview.html; not in the packaged app.
-// ?state=choose|sign-in-email|sign-in-code|sign-in-sso|pay|pay-late|setup|ready|has-cloud|unreachable&skin=midnight&staging=1
+// ?state=choose|sign-in-email|sign-in-code|sign-in-sso|pay|pay-late|setup|ready|has-cloud|unreachable&skin=midnight&staging=1&reduced=1
 import { StrictMode } from "react";
 import { createRoot } from "react-dom/client";
 import { Cloud, FolderOpen, MessageSquare, Repeat } from "lucide-react";
@@ -57,6 +57,7 @@ function Preview() {
   const params = new URLSearchParams(location.search);
   const skin = (SKIN_IDS as readonly string[]).includes(params.get("skin") ?? "") ? params.get("skin") as SkinId : "midnight";
   document.documentElement.dataset.skin = skin;
+  if (params.get("reduced") === "1") document.documentElement.dataset.reducedMotion = "true";
   setLocale("en");
   const state = params.get("state") ?? "choose";
   const view = VIEWS[state] ?? VIEWS.choose!;

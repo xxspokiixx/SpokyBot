@@ -7,7 +7,7 @@ import {
   useState,
   type PointerEvent as ReactPointerEvent,
 } from "react";
-import { MAUS_COLORS, type MausColor, type MausMotion, type MausState } from "@/lib/mascot";
+import { mausGradient, type MausColor, type MausMotion, type MausState } from "@/lib/mascot";
 import { CursorAvatar, type CursorAvatarHandle } from "./CursorAvatar";
 import { avatarCropRadius, botAvatarProfile, clampAvatarFocus, clampAvatarZoom, type BotAvatarCrop } from "../../shared/bot-avatar";
 import { MASCOT_BODIES, botMascotBody, type MascotBodyId } from "../../shared/mascot-bodies";
@@ -38,24 +38,6 @@ const MOTION_FACE: MotionFaces = {
 };
 
 const MOTION_FACE_MS = 1400;
-
-function mix(hex: string, toward: string, t: number): string {
-  const a = Number.parseInt(hex.slice(1), 16);
-  const b = Number.parseInt(toward.slice(1), 16);
-  const channel = (shift: number) => {
-    const va = (a >> shift) & 0xff;
-    const vb = (b >> shift) & 0xff;
-    return Math.round(va + (vb - va) * t);
-  };
-  return `#${[channel(16), channel(8), channel(0)]
-    .map((part) => part.toString(16).padStart(2, "0"))
-    .join("")}`;
-}
-
-const gradientFor = (color: MausColor): [string, string, string] => {
-  const fill = MAUS_COLORS[color] ?? MAUS_COLORS.green;
-  return [mix(fill, "#ffffff", 0.55), fill, mix(fill, "#000000", 0.42)];
-};
 
 export function roomAvatarGradient(color: MausColor): [string, string, string] {
   const fill = `var(--identity-${color})`;
@@ -159,7 +141,7 @@ function MausAvatarComponent(
         expression={expression}
         size={size}
         silhouette={silhouette}
-        gradient={gradient ?? gradientFor(color)}
+        gradient={gradient ?? mausGradient(color)}
         title={label ?? null}
         lookAround={lookAround ?? (forward ? 0 : 1)}
         gaze={{ x: (gaze?.x ?? 0) + pointer.x, y: (gaze?.y ?? 0) + pointer.y }}

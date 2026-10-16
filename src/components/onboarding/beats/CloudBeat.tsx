@@ -4,7 +4,7 @@ import { useEffect, useState } from "react";
 import { Check } from "lucide-react";
 import type { CloudAccountState } from "../../../../electron/cloud-account.mjs";
 import type { CloudOffer } from "../../../../electron/cloud-home.mjs";
-import { CloudArt } from "@/components/cloud-buy/parts";
+import { CloudMascotScene } from "@/components/cloud-buy/CloudMascotScene";
 import { track } from "@/lib/analytics";
 import { brandStatus } from "@/lib/brand";
 import { buyOfferAllowed, cloudBeatTerms, cloudPlanView } from "@/lib/cloud-plan";
@@ -70,7 +70,7 @@ export function CloudBeat({ offer, onNext, onSkip, setMascot }: BeatProps & { of
   const notNow = () => { track("onboarding_cloud", { action: "not_now" }); onSkip(); };
   return <div data-cloud-beat className="flex flex-col">
     <p className="animate-rise mt-1 text-[13.5px] leading-relaxed text-ink-secondary">{t("onboarding.cloud.body")}</p>
-    <div className="animate-rise mt-3 rounded-xl bg-linear-to-b from-accent/12 to-transparent px-6 pt-3" style={staggerIndex(1)}><CloudArt /></div>
+    <div className="animate-rise mt-3" style={staggerIndex(1)}><CloudMascotScene variant="beat" paused={sheet !== null} /></div>
     <ul aria-label={t("onboarding.cloud.ticks")} className="stagger mt-3 flex flex-col gap-2">
       {TICKS.map((key, index) => <li key={key} className="animate-rise flex items-center gap-2.5 text-[13.5px] text-ink" style={staggerIndex(index + 2)}>
         <span aria-hidden="true" className="grid size-5 shrink-0 place-items-center rounded-full bg-accent/12 text-accent-text"><Check size={13} strokeWidth={2.6} /></span>{t(key)}

@@ -6,7 +6,8 @@ import { cn } from "@/lib/cn";
 import { offerPlan, planRow, planTerms, trialTimeline } from "@/lib/cloud-plan";
 import { t } from "@/lib/i18n";
 import type { LocaleKey } from "@/locales";
-import { CloudArt, LINK, PRIMARY_WIDE } from "./parts";
+import { CloudMascotScene } from "./CloudMascotScene";
+import { LINK, PRIMARY_WIDE } from "./parts";
 
 const BENEFITS: ReadonlyArray<readonly [LucideIcon, LocaleKey, LocaleKey]> = [
   [Moon, "cloudBuy.benefit.awayTitle", "cloudBuy.benefit.away"],
@@ -45,7 +46,7 @@ export function ChooseScreen({ offer, chosen, now, busy, signedOut, notice, onCh
         <h2 id="cloud-add-title" tabIndex={-1} className="mb-1.5 mt-1 text-[27px] font-bold leading-[1.12] tracking-[-0.025em] text-ink outline-none [text-wrap:balance]">{t("cloudBuy.title")}</h2>
         <p className="max-w-[34ch] text-[14px] leading-relaxed text-ink-secondary">{t("cloudBuy.lede")}</p>
       </div>
-      <CloudArt />
+      <CloudMascotScene variant="hero" />
       <ul aria-label={t("cloudBuy.benefits")} className="flex flex-col gap-3">
         {BENEFITS.map(([Icon, title, body]) => <li key={title} className="grid grid-cols-[30px_minmax(0,1fr)] items-start gap-2.5">
           <span aria-hidden="true" className="grid size-[30px] place-items-center rounded-[9px] bg-accent/12 text-accent-text"><Icon size={17} /></span>
