@@ -280,6 +280,17 @@ const bridge = {
     openDashboard: () => ipcRenderer.invoke("cloud-account:openDashboard"),
     offer: () => ipcRenderer.invoke("cloud-account:offer"),
     checkout: (plan, source) => ipcRenderer.invoke("cloud-account:checkout", String(plan), String(source)),
+    // The buying sheet: plain text in, outcomes out; the attempt, the token and the checkout page stay in main.
+    signInStart: email => ipcRenderer.invoke("cloud-account:signInStart", String(email)),
+    signInVerify: code => ipcRenderer.invoke("cloud-account:signInVerify", String(code)),
+    signInCancel: () => ipcRenderer.invoke("cloud-account:signInCancel"),
+    reopenCheckout: (plan, source) => ipcRenderer.invoke("cloud-account:reopenCheckout", String(plan), String(source)),
+    copyCheckoutLink: () => ipcRenderer.invoke("cloud-account:copyCheckoutLink"),
+    interest: () => ipcRenderer.invoke("cloud-account:interest"),
+    look: () => ipcRenderer.invoke("cloud-account:look"),
+    setLook: (name, color) => ipcRenderer.invoke("cloud-account:setLook", String(name), String(color)),
+    sheet: open => ipcRenderer.invoke("cloud-account:sheet", open === true),
+    readySeen: () => ipcRenderer.invoke("cloud-account:readySeen"),
     connectHome: () => ipcRenderer.invoke("cloud-account:connectHome"),
     connectHomeForPhone: () => ipcRenderer.invoke("cloud-account:connectHomeForPhone"),
     onState: cb => {

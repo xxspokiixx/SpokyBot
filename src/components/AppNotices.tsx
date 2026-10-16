@@ -2,7 +2,7 @@ import { useEffect, useState } from "react";
 import { Rocket, Star } from "lucide-react";
 import type { CloudAccountState } from "../../electron/cloud-account.mjs";
 import type { CloudOffer } from "../../electron/cloud-home.mjs";
-import { api, CLOUD_LINK_SETTINGS, useStore } from "@/state/store";
+import { api, useStore } from "@/state/store";
 import { APP_REPOSITORY } from "@/lib/app-links";
 import { track } from "@/lib/analytics";
 import { brandStatus } from "@/lib/brand";
@@ -205,7 +205,7 @@ export function AppNotices({ quiet = false, viewer = null, now = Date.now }: { q
     return <CloudTrialIntroCard offer={offer}
       onStart={() => { done("start"); dispatch({ type: "openCloudAdd", source: "app_card" }); }}
       onHowTo={() => { done("howto"); dispatch({ type: "cloudHowTo", open: true }); }}
-      onSignIn={view?.kind === "signed-out" ? () => { track("cloud_card_action", { action: "signin" }); close(); dispatch(CLOUD_LINK_SETTINGS); } : undefined}
+      onSignIn={view?.kind === "signed-out" ? () => { track("cloud_card_action", { action: "signin" }); close(); dispatch({ type: "openCloudAdd", source: "app_card", signIn: true }); } : undefined}
       onNotNow={() => { done("not_now"); setToast(t("cloudIntro.later")); }}
       onDismiss={() => { done("close"); setToast(t("cloudIntro.later")); }} />;
   }

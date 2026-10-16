@@ -151,26 +151,23 @@ test("the Cloud entry checks the owned server, waits for the saved sign-in, and 
   }
   assert.ok(entry.indexOf("if (desktopRemoteAccess) throw") < guard, "companion client mode is not changed by the link");
   assert.doesNotMatch(entry, /dialog\.|confirm/);
-  assert.match(entry, /const action = cloudAccount\?\.checkoutPending\(\) \? "cloud-add" : "cloud";/);
+  assert.match(entry, /const action = cloudLinkOpensSheet\(cloudAccount\?\.state\(\)\) \? "cloud-add" : "cloud";/);
+  assert.match(entry, /void cloudAccount\?\.refresh\(\)\.catch\(\(\) => \{\}\);/, "every link asks for the session at once, with or without a checkout waiting");
   assert.deepEqual([...entry.matchAll(/webContents\.send\(([^)]*)\)/g)].map(match => match[1]), ['"app:open-settings", action']);
   assert.deepEqual([...entry.matchAll(/loadURL\((.*)\);/g)].map(match => match[1]), ["`${rendererOrigin()}/?desktop-settings=${action}`"]);
 });
 
-test("Add a Cloud… is decided in main: someone with a Cloud gets the native box and stays put; anyone else gets the dialog on this computer's page", () => {
+test("Add a Cloud… is always the sheet on this computer's page, never a native box: the sheet says setting up or one Cloud for now", () => {
   const add = between("async function openCloudAdd(source)", "\n}\n");
   assert.ok(add.indexOf("if (!cloudOffersAllowed() || !serverReady) return;") < add.indexOf("await cloudAccountRestored();"));
-  const box = add.indexOf("if (cloudOwned(state)) { await anotherCloudBox(state); return; }");
-  assert.ok(box > add.indexOf("await cloudAccountRestored();"));
-  for (const action of ["persistEnvironments(", "createWindow(", "win.webContents.send(", "win.loadURL("]) assert.ok(add.indexOf(action) > box, `${action} after the box`);
+  const restored = add.indexOf("await cloudAccountRestored();");
+  for (const action of ["persistEnvironments(", "createWindow(", "win.webContents.send(", "win.loadURL("]) assert.ok(add.indexOf(action) > restored, `${action} after the restore`);
+  assert.doesNotMatch(add, /dialog\.|anotherCloudBox|cloudOwned/);
+  assert.equal(main.includes("You already have My Cloud"), false, "the native box is gone");
   assert.ok(add.indexOf("persistEnvironments(withActive(environmentsState, LOCAL_ID))") < add.indexOf("win.webContents.send("));
   assert.match(add, /const action = source === "app_howto" \? "cloud-add-howto" : "cloud-add";/);
   assert.deepEqual([...add.matchAll(/webContents\.send\(([^)]*)\)/g)].map(match => match[1]), ['"app:open-settings", action']);
   assert.deepEqual([...add.matchAll(/loadURL\((.*)\);/g)].map(match => match[1]), ["`${rendererOrigin()}/?desktop-settings=${action}`"]);
-  assert.match(between("function cloudOwned(state)", "\n}\n"), /state\?\.status === "connected" && state\.entitlement\?\.plan === "pro" && state\.entitlement\.status === "active"/);
-  const native = between("async function anotherCloudBox(state)", "\n}\n");
-  assert.match(native, /message: "You already have My Cloud"/);
-  assert.match(native, /buttons: \["Email me when it’s ready", "Open My Cloud", "Cancel"\]/);
-  assert.match(native, /await ensureCloudAccount\(\)\.interest\("another_cloud"\);/);
   assert.match(between("function cloudOffersAllowed()", "\n}\n"), /return app\.isPackaged && !desktopRemoteAccess && brandedBuild === false;/);
   assert.match(between("async function readCloudOfferBrand()", "\n}\n"), /fetch\(`http:\/\/127\.0\.0\.1:\$\{SERVER_PORT\}\/api\/brand`/);
 });

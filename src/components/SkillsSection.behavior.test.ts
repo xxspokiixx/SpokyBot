@@ -114,4 +114,16 @@ describe("Skills library review and assignment controls", () => {
     await flush();
     expect(fixture.request).toHaveBeenCalledWith("/api/skills-library/order-audit", expect.objectContaining({ method: "PATCH", body: '{"enabled":true}' }));
   });
+
+  it("shows a skill from this computer with this bot's switch, and no way to delete the one copy every bot shares", async () => {
+    const imported = { name: "pdf", description: "Works with PDFs", enabled: true, source: "~/.claude/skills/pdf", warnings: [], origin: "imported" };
+    fixture.values = [[imported], [], [], "", [], false, "", "", null, { current: false }, null, "", false, ""];
+    fixture.request.mockImplementation(async (_url, options) => options?.method ? {} : { text: source });
+    const tree = render(true);
+    expect(tree.find((node) => node.props["aria-label"] === "Remove pdf")).toBeUndefined();
+    expect(tree.some((node) => node.props.children === "this computer")).toBe(true);
+    named(tree, "Disable pdf").props.onClick!();
+    await flush();
+    expect(fixture.request).toHaveBeenCalledWith("/api/bots/bot/skills/pdf", expect.objectContaining({ method: "PATCH", body: '{"enabled":false}' }));
+  });
 });

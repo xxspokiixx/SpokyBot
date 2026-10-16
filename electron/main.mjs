@@ -85,7 +85,8 @@ import { createComputerSharing, validateSharedFolders } from "./computer-sharing
 import { acquireDataDirLease } from "./data-dir-lease.mjs";
 import { switchLocalEnvironment } from "./environment-switch.mjs";
 import { createManagedDesktopClient, createManagedDesktopRelay, createManagedDesktopStore } from "./managed-desktop.mjs";
-import { CHECKOUT_SOURCES, cloudMenuSublabel, cloudPlanSnapshot, createCloudAccountClient, createCloudAccountStore } from "./cloud-account.mjs";
+import { CHECKOUT_SOURCES, cloudMenuSublabel, cloudPlanSnapshot, cloudTarget, createCloudAccountClient, createCloudAccountStore } from "./cloud-account.mjs";
+import { cloudLinkOpensSheet, colorDotIcons, createCloudLook, createCloudReadyNotice, installCloudBuy, lookFile } from "./cloud-buy.mjs";
 import { createTrialNotices } from "./cloud-trial-notice.mjs";
 import { DESKTOP_PORTS, jsonFile, registerDesktopPrefs } from "./desktop-prefs.mjs";
 import { createProPlanRelay } from "./pro-plan.mjs";
@@ -861,12 +862,12 @@ function ensureCloudAccount() {
   if (cloudAccount) return cloudAccount;
   if (!app.isPackaged || desktopRemoteAccess) throw new Error("MausBot Cloud sign-in requires the local desktop app.");
   cloudAccount = createCloudAccountClient({
-    store: createCloudAccountStore({ file: path.join(app.getPath("userData"), "cloud-account.bin"), encryption: {
+    store: createCloudAccountStore({ file: path.join(app.getPath("userData"), cloudTarget(process.env).file), encryption: {
       available: async () => (await safeStorage.isAsyncEncryptionAvailable()) &&
         (process.platform !== "linux" || safeStorage.getSelectedStorageBackend() !== "basic_text"),
       encrypt: value => safeStorage.encryptStringAsync(value), decrypt: value => safeStorage.decryptStringAsync(value),
     } }),
-    platform: process.platform, deviceName: os.hostname().slice(0, 100) || "My computer", appVersion: app.getVersion(),
+    platform: process.platform, deviceName: os.hostname().slice(0, 100) || "My computer", appVersion: app.getVersion(), origin: cloudTarget(process.env).origin,
     openBrowser: url => shell.openExternal(url),
     onState: state => {
       rememberCloudHome(state);
@@ -905,16 +906,19 @@ async function cloudOffersReady() {
   if (brandedBuild === null && serverReady) await readCloudOfferBrand();
   return cloudOffersAllowed();
 }
-const CLOUD_TRIAL_ENDS_AHEAD = ["active", "ending"];
 const menuDate = value => new Intl.DateTimeFormat(app.getLocale() || "en-US", { day: "numeric", month: "short" }).format(new Date(value));
-function cloudMenuSublabels() {
+function cloudHomeEntry() {
   const homeOrigin = cloudAccount?.homeTarget()?.origin ?? null;
-  const entry = environmentsState.environments.find(candidate => isCloudHomeEntry(candidate, { homeOrigin, remembered: rememberedHome }));
+  return environmentsState.environments.find(candidate => isCloudHomeEntry(candidate, { homeOrigin, remembered: rememberedHome })) ?? null;
+}
+function cloudMenuSublabels() {
+  const entry = cloudHomeEntry();
   const line = entry ? cloudMenuSublabel(cloudAccount?.state(), menuDate) : null;
   return entry && line ? { [entry.id]: line } : {};
 }
+const cloudColorDot = colorDotIcons(nativeImage);
 function cloudMenuOptions(source = "app_menu") {
-  return { sublabels: cloudMenuSublabels(), ...(cloudOffersAllowed() ? { onAddCloud: () => void workspaceMenuAction(() => openCloudAdd(source)) } : {}) };
+  return { sublabels: cloudMenuSublabels(), iconFor: cloudColorDot, ...(cloudOffersAllowed() ? { onAddCloud: () => void workspaceMenuAction(() => openCloudAdd(source)) } : {}) };
 }
 let cloudMenuKey = "";
 function refreshCloudMenus() {
@@ -923,14 +927,10 @@ function refreshCloudMenus() {
   cloudMenuKey = key;
   refreshApplicationMenu();
 }
-function cloudOwned(state) {
-  return state?.status === "connected" && state.entitlement?.plan === "pro" && state.entitlement.status === "active";
-}
+/** Add a Cloud… is always the sheet on this computer's page, which says what is true now (setting up, one Cloud for now). */
 async function openCloudAdd(source) {
   if (!cloudOffersAllowed() || !serverReady) return;
   await cloudAccountRestored();
-  const state = ensureCloudAccount().state();
-  if (cloudOwned(state)) { await anotherCloudBox(state); return; }
   if (activeRemote(environmentsState)) persistEnvironments(withActive(environmentsState, LOCAL_ID));
   const win = mainWindow && !mainWindow.isDestroyed() ? mainWindow : createWindow({ deferNavigation: true });
   if (!desktopTray?.show()) activateExistingWindow(BrowserWindow.getAllWindows());
@@ -938,35 +938,9 @@ async function openCloudAdd(source) {
   if (!win.webContents.isLoadingMainFrame() && senderIsLocal({ sender: win.webContents })) win.webContents.send("app:open-settings", action);
   else await win.loadURL(`${rendererOrigin()}/?desktop-settings=${action}`);
 }
-async function anotherCloudBox(state) {
-  const parent = mainWindow && !mainWindow.isDestroyed() ? mainWindow : undefined;
-  const trial = CLOUD_TRIAL_ENDS_AHEAD.includes(state.trial?.state) ? `Your free trial ends on ${menuDate(state.trial.endsAt)}. ` : "";
-  const options = {
-    type: "info", message: "You already have My Cloud",
-    detail: `${trial}More than one Cloud per account is coming. Want an email when you can add another?`,
-    buttons: ["Email me when it’s ready", "Open My Cloud", "Cancel"], defaultId: 0, cancelId: 2,
-  };
-  const { response } = parent ? await dialog.showMessageBox(parent, options) : await dialog.showMessageBox(options);
-  if (response === 1) { await connectCloudHome(); return; }
-  if (response !== 0) return;
-  try {
-    await ensureCloudAccount().interest("another_cloud");
-    await dialog.showMessageBox({ type: "info", message: "Thanks. We’ll email you when you can add another Cloud." });
-  } catch {
-    await dialog.showMessageBox({ type: "error", message: "Could not reach MausBot Cloud", detail: "Nothing was saved. Check your connection and try again." });
-  }
-}
-let cloudReadyAnnounced = null;
-function announceCloudReady(state) {
-  const opened = state?.checkout?.startedAt;
-  if (!opened || state.status !== "connected" || state.machine?.status !== "ready" || cloudReadyAnnounced === opened) return;
-  cloudReadyAnnounced = opened;
-  if (mainWindow && !mainWindow.isDestroyed() && mainWindow.isFocused()) return;
-  if (!Notification.isSupported()) return;
-  const note = new Notification({ title: "My Cloud is ready", body: "Open it from the menu at the top of the sidebar." });
-  note.on("click", () => { if (!desktopTray?.show()) activateExistingWindow(BrowserWindow.getAllWindows()); });
-  note.show();
-}
+const announceCloudReady = createCloudReadyNotice({ Notification, focused: () => Boolean(mainWindow && !mainWindow.isDestroyed() && mainWindow.isFocused()),
+  sheetOpen: () => cloudBuy.sheetOpen(), name: () => cloudLook.current().name, shown: () => cloudAccount?.checkoutDone(),
+  open: () => { if (!desktopTray?.show()) activateExistingWindow(BrowserWindow.getAllWindows()); void workspaceMenuAction(() => connectCloudHome()); } });
 
 function ensureManagedDesktop() {
   if (managedDesktop) return managedDesktop;
@@ -1545,7 +1519,7 @@ ipcMain.on("desktop:unread-count", (event, value) => {
   applyUnreadBadge(sender);
 });
 
-const { LOCAL_ID, activeEnvironment, activeRemote, allowedOrigins, bootEnvironmentDir, parseEnvironments, parseHostedWorkspaceLink, serializeEnvironments, startupEnvironmentDir, withActive, withEnvironment, withLocalEnvironment, withMicrophone, withoutEnvironment, workspaceMenuTemplate, workspaceNavigationAllowed, workspaceSenderAllowed, workspaceSummary, workspaceWindowTitle } = environmentsModule;
+const { LOCAL_ID, activeEnvironment, activeRemote, allowedOrigins, bootEnvironmentDir, parseEnvironments, parseHostedWorkspaceLink, serializeEnvironments, startupEnvironmentDir, withActive, withEnvironment, withEnvironmentLook, withLocalEnvironment, withMicrophone, withoutEnvironment, workspaceMenuTemplate, workspaceNavigationAllowed, workspaceSenderAllowed, workspaceSummary, workspaceWindowTitle } = environmentsModule;
 let environmentsState = { environments: [], activeId: LOCAL_ID };
 let computerSharing;
 const sharingPrompts = new Set();
@@ -1654,7 +1628,7 @@ async function offerComputerSharing(win) {
 }
 
 function environmentsFile() {
-  return path.join(app.getPath("userData"), "environments.json");
+  return path.join(app.getPath("userData"), cloudTarget(process.env).environments);
 }
 
 function readEnvironments() {
@@ -1941,8 +1915,8 @@ async function openCloudEntry() {
   if (active && !showingCloud) persistEnvironments(withActive(environmentsState, LOCAL_ID));
   const win = mainWindow && !mainWindow.isDestroyed() ? mainWindow : createWindow({ deferNavigation: !showingCloud });
   if (showingCloud) return true;
-  const action = cloudAccount?.checkoutPending() ? "cloud-add" : "cloud";
-  if (action === "cloud-add") void cloudAccount.refresh().catch(() => {});
+  const action = cloudLinkOpensSheet(cloudAccount?.state()) ? "cloud-add" : "cloud";
+  void cloudAccount?.refresh().catch(() => {});
   if (!win.webContents.isLoadingMainFrame() && senderIsLocal({ sender: win.webContents })) {
     win.webContents.send("app:open-settings", action);
   } else {
@@ -1998,7 +1972,7 @@ async function connectHostedWorkspace(input, name) {
 
 function rememberCloudHome(state) {
   try {
-    const next = withCloudHome(environmentsState, state?.status === "connected" ? state.machine : null, () => randomUUID());
+    const next = withCloudHome(environmentsState, state?.status === "connected" ? state.machine : null, () => randomUUID(), cloudLook.pending());
     if (next !== environmentsState) persistEnvironments(next);
   } catch (error) {
     slog(`cloud home: could not list the Cloud machine under Servers (${error?.message ?? error})`);
@@ -2010,13 +1984,13 @@ async function connectCloudHome(open = null) {
   const target = client.homeTarget();
   if (!target) throw new Error("My Cloud is not ready to connect yet.");
   const grant = (await cloudHomeSignedIn(target.origin)) ? null : await client.pairHome();
-  let next = withCloudHome(environmentsState, { status: "ready", origin: target.origin }, () => randomUUID());
+  let next = withCloudHome(environmentsState, { status: "ready", origin: target.origin }, () => randomUUID(), cloudLook.pending());
   const entry = next.environments.find((candidate) => candidate.origin === target.origin);
   if (!entry) throw new Error("My Cloud could not be added to Servers.");
   next = withActive(next, entry.id);
   persistEnvironments(next);
   navigateMainWindow(cloudHomeConnectUrl({ origin: target.origin, grant }, Date.now(), open));
-  return client.state();
+  client.checkoutDone(); return client.state();
 }
 
 async function cloudHomeSignedIn(origin) {
@@ -2934,6 +2908,10 @@ const savedWorkspace = id => {
   if (!env) throw new Error("This server is no longer connected");
   return env;
 };
+// The buying sheet (cloud-buy.mjs): its channels, and the Cloud's name and colour (Servers entry once listed).
+const cloudLook = createCloudLook({ store: lookFile(() => path.join(app.getPath("userData"), cloudTarget(process.env).look), fs), accountId: () => cloudAccount?.state().account?.id ?? null,
+  homeEntry: cloudHomeEntry, saveEntry: (origin, look) => persistEnvironments(withEnvironmentLook(environmentsState, origin, look)) });
+const cloudBuy = installCloudBuy({ ipcMain, guard: localWorkspaceOnly, client: ensureCloudAccount, offersReady: cloudOffersReady, clipboard, look: cloudLook });
 ipcMain.handle("sharing:state", localWorkspaceOnly("sharing:state", async (_event, id) => {
   await requireSharedComputers();
   return sharingController().state(savedWorkspace(id).id);
@@ -3006,7 +2984,7 @@ const cloudSync = installCloudFiles({
   app, ipcMain, dialog, shell, powerMonitor, localWorkspaceOnly, localDataDir: desktopDataDir(),
   fetch: (...args) => session.defaultSession.fetch(...args),
   send: (channel, value) => { if (mainWindow && !mainWindow.isDestroyed()) mainWindow.webContents.send(channel, value); },
-  cloudOrigin: () => myCloud(), cloudAccount: () => ensureCloudAccount(),
+  cloudOrigin: () => myCloud(), cloudAccount: () => ensureCloudAccount(), stateDir: cloudTarget(process.env).sync,
 });
 
 // window.confirm() has no parent window, so (tiling) window managers cannot center it over the app.

@@ -1,8 +1,7 @@
 import { useEffect, useId, useState } from "react";
 import { Cloud, Crown } from "lucide-react";
 import type { CloudAccountState } from "../../electron/cloud-account.mjs";
-import { CLOUD_LINK_SETTINGS, useStore } from "@/state/store";
-import { openExternalLink, PRICING_URL, withSource } from "@/lib/app-links";
+import { useStore } from "@/state/store";
 import { buyOfferAllowed, cloudPlanLine, cloudPlanView, moneyBackLine, offerTrialDays, usd, type CloudPlanView } from "@/lib/cloud-plan";
 import { useCloudOffer } from "@/lib/use-cloud-offer";
 import { t } from "@/lib/i18n";
@@ -46,11 +45,11 @@ export function ProSettingsCard() {
       <div className="flex flex-col items-end gap-1">
         <div className="flex flex-wrap items-center gap-3">
           <button type="button" className="cursor-pointer text-[12.5px] text-ink-secondary underline underline-offset-2 hover:text-ink"
-            onClick={() => void openExternalLink(withSource(PRICING_URL, "app_settings")).catch(() => {})}>{t("pro.seePlans")}</button>
-          <button type="button" className="ui-button" onClick={() => dispatch({ type: "openCloudAdd", source: "app_settings" })}>{t(trial ? "cloudIntro.start" : "cloudAccount.upgrade")}</button>
+            onClick={() => dispatch({ type: "openCloudAdd", source: "app_settings" })}>{t("pro.seePlans")}</button>
+          <button type="button" className="ui-button ui-button-primary" onClick={() => dispatch({ type: "openCloudAdd", source: "app_settings" })}>{t(trial ? "cloudIntro.start" : "cloudAccount.upgrade")}</button>
         </div>
         {view.kind === "signed-out" && <button type="button" className="cursor-pointer text-[12.5px] font-medium text-accent-text underline underline-offset-2 hover:text-ink"
-          onClick={() => dispatch(CLOUD_LINK_SETTINGS)}>{t("cloudAccount.signIn")}</button>}
+          onClick={() => dispatch({ type: "openCloudAdd", source: "app_settings", signIn: true })}>{t("cloudAccount.signIn")}</button>}
       </div>
     </section>;
   }
@@ -82,11 +81,11 @@ export function LiveProPrompt() {
     </div>
     <p className="text-[12.5px] leading-[1.45] text-ink-secondary">{t("call.live.proExplain")}</p>
     {offering ? <>
-      {view?.kind === "signed-out" && <button type="button" className="text-left text-[12.5px] text-accent-text underline underline-offset-2" onClick={() => dispatch(CLOUD_LINK_SETTINGS)}>{t("cloudAccount.signIn")}</button>}
+      {view?.kind === "signed-out" && <button type="button" className="text-left text-[12.5px] text-accent-text underline underline-offset-2" onClick={() => dispatch({ type: "openCloudAdd", source: "app_settings", signIn: true })}>{t("cloudAccount.signIn")}</button>}
       {cheapest !== null && <p className="text-[12px] text-ink-secondary">{t("pro.fromPrice", { price: usd(cheapest / 100) })}</p>}
       <div className="flex flex-wrap items-center gap-3">
-        <button type="button" className="ui-button" onClick={() => dispatch({ type: "openCloudAdd", source: "app_settings" })}>{t(offerTrialDays(offer) !== null ? "cloudIntro.start" : "cloudAccount.upgrade")}</button>
-        <button type="button" className="text-[12.5px] text-ink-secondary underline underline-offset-2" onClick={() => void openExternalLink(withSource(PRICING_URL, "app_settings")).catch(() => {})}>{t("pro.seePlans")}</button>
+        <button type="button" className="ui-button ui-button-primary" onClick={() => dispatch({ type: "openCloudAdd", source: "app_settings" })}>{t(offerTrialDays(offer) !== null ? "cloudIntro.start" : "cloudAccount.upgrade")}</button>
+        <button type="button" className="text-[12.5px] text-ink-secondary underline underline-offset-2" onClick={() => dispatch({ type: "openCloudAdd", source: "app_settings" })}>{t("pro.seePlans")}</button>
       </div>
     </> : view && <>
       {line && <p className="text-[12.5px] text-ink">{line}</p>}

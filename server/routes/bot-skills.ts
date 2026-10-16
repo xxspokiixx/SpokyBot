@@ -2,6 +2,7 @@ import { z } from "zod";
 
 import type { SkillsLibrarySkillWire } from "../../shared/wire.ts";
 import type { AppConfig } from "../config.ts";
+import { importedSkillListings, setImportedSkillEnabled } from "../imported-skills.ts";
 import { botSkillTemplateSchema } from "../new-bot-defaults.ts";
 import { fetchSkillFromSource } from "../skill-fetch.ts";
 import { installLibrarySkill, listLibrarySkills, readLibrarySkillFile, readSkillLibraryIndex, setLibrarySkillReviewState, skillsLibraryEnabled } from "../skill-library.ts";
@@ -47,7 +48,7 @@ export function createBotSkillsRoutes(deps: BotSkillsRouteDeps): RouteHandler {
       if (skillsLibraryEnabled(cfg)) {
         const { skills, library } = listBotSkillsWithOrigin(m[1]!, store.bot(m[1])!.assignedSkills);
         return json(res, 200, {
-          skills,
+          skills: [...skills, ...importedSkillListings(m[1]!, new Set(skills.map((skill) => skill.name)))],
           library,
           assignedSkills: store.bot(m[1])!.assignedSkills,
           staged: listStagedSkillWrites(m[1]).map(stagedSkillListing),
@@ -80,6 +81,13 @@ export function createBotSkillsRoutes(deps: BotSkillsRouteDeps): RouteHandler {
     if (m && method === "PATCH") {
       const parsed = z.object({ enabled: z.boolean() }).safeParse(await readBody(req));
       if (!parsed.success) return json(res, 400, { error: "enabled must be true or false" });
+      const bot = store.bot(m[1]);
+      // A skill from this computer that none of the bot's own or library skills shadows: this bot's switch for it.
+      if (bot && listBotSkills(bot).some((skill) => skill.name === m![2] && (skill as { origin?: string }).origin === "imported")) {
+        const result = setImportedSkillEnabled(bot.id, m[2]!, parsed.data.enabled);
+        if ("error" in result) return json(res, 409, { error: result.error });
+        return json(res, 200, { skill: result });
+      }
       const result = setSkillEnabled(m[1]!, m[2]!, parsed.data.enabled);
       if ("error" in result) return json(res, 404, { error: result.error });
       return json(res, 200, { skill: result });

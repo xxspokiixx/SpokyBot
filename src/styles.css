@@ -2199,3 +2199,58 @@ button:disabled.bg-danger {
   background-color: var(--bubble-selection, color-mix(in srgb, #000000 35%, var(--color-bubble-user)));
   color: var(--bubble-selection-ink, #ffffff);
 }
+
+/* The Cloud night shift scene: a night sky tinted by the skin's accent, an
+   evening sky in light skins. Only stars twinkle and the z's drift up; the
+   z's need transform-box to grow around their own centre instead of the
+   SVG's origin. */
+.cloud-scene {
+  --cloud-scene-sky-top: light-dark(color-mix(in oklab, var(--color-accent) 26%, #3d4598), color-mix(in oklab, var(--color-accent) 14%, #080d26));
+  --cloud-scene-sky-bottom: light-dark(color-mix(in oklab, var(--color-accent) 16%, #a49ae0), color-mix(in oklab, var(--color-accent) 20%, #262b68));
+  --cloud-scene-haze: light-dark(rgb(255 191 211 / 0.42), color-mix(in oklab, color-mix(in oklab, var(--color-accent) 35%, #8a6cf0) 42%, transparent));
+  --cloud-scene-glow: color-mix(in oklab, color-mix(in oklab, var(--color-accent) 70%, #ffffff) 40%, transparent);
+  --cloud-scene-rose: rgb(244 114 182 / 0.32);
+  --cloud-scene-cloud-top: #f4f3ff;
+  --cloud-scene-cloud-low: light-dark(color-mix(in oklab, var(--color-accent) 8%, #d6d3f6), color-mix(in oklab, var(--color-accent) 10%, #cdc4f2));
+  --cloud-scene-cloud-shade: light-dark(color-mix(in oklab, var(--color-accent) 10%, #b4aeea), color-mix(in oklab, var(--color-accent) 16%, #9fa3df));
+  --cloud-scene-mist: rgb(190 194 255 / 0.3);
+  --cloud-scene-hill-top: light-dark(color-mix(in oklab, var(--color-accent) 10%, #5a5fb0), color-mix(in oklab, var(--color-accent) 10%, #2b3170));
+  --cloud-scene-hill-bottom: light-dark(color-mix(in oklab, var(--color-accent) 8%, #3a3f8a), color-mix(in oklab, var(--color-accent) 8%, #141838));
+  --cloud-scene-rim: rgb(206 212 255 / 0.5);
+  --cloud-scene-star: #fff7dd;
+  --cloud-scene-lamp: #ffcf87;
+  --cloud-scene-bubble: rgb(176 186 255 / 0.34);
+  --cloud-scene-bubble-edge: rgb(255 255 255 / 0.9);
+  --cloud-scene-moon-glow: rgb(255 222 140 / 0.42);
+  --cloud-scene-ring: light-dark(color-mix(in oklab, var(--color-accent) 22%, transparent), rgb(255 255 255 / 0.08));
+  position: relative;
+  width: 100%;
+  overflow: hidden;
+  isolation: isolate;
+  border-radius: 16px;
+  color-scheme: var(--code-color-scheme);
+  background:
+    radial-gradient(70% 85% at 38% 110%, var(--cloud-scene-haze), transparent 72%),
+    radial-gradient(45% 70% at 4% 0%, var(--cloud-scene-glow), transparent 70%),
+    radial-gradient(40% 60% at 100% 100%, var(--cloud-scene-rose), transparent 72%),
+    linear-gradient(180deg, var(--cloud-scene-sky-top), var(--cloud-scene-sky-bottom));
+  box-shadow: inset 0 0 0 1px var(--cloud-scene-ring);
+}
+.cloud-scene-beat { border-radius: 12px; }
+.cloud-scene-stage { position: relative; margin-inline: auto; width: min(100%, 320px); aspect-ratio: 320 / 150; }
+.cloud-scene-beat .cloud-scene-stage { width: min(100%, 400px); aspect-ratio: 400 / 116; }
+.cloud-scene-layer { position: absolute; inset: 0; width: 100%; height: 100%; overflow: visible; pointer-events: none; }
+.cloud-scene-box { position: absolute; }
+.cloud-scene-box > span { display: flex; width: 100%; height: 100%; }
+.cloud-scene-box > span > svg { width: 100%; height: 100%; }
+.cloud-scene-twinkle { animation: cloud-scene-twinkle 6s ease-in-out infinite; }
+.cloud-scene-z { transform-box: fill-box; transform-origin: center; animation: cloud-scene-z 6s linear infinite; }
+.cloud-scene-z:nth-child(2) { animation-delay: -2s; }
+.cloud-scene-z:nth-child(3) { animation-delay: -4s; }
+.cloud-scene[data-paused] * { animation-play-state: paused; }
+@keyframes cloud-scene-twinkle { 0%, 100% { opacity: 0.3; } 50% { opacity: 1; } }
+@keyframes cloud-scene-z {
+  0% { opacity: 0; transform: translate(0, 0) scale(0.5); }
+  15%, 70% { opacity: 1; }
+  100% { opacity: 0; transform: translate(20px, -34px) scale(1.1); }
+}
