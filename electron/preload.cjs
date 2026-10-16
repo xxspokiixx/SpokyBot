@@ -389,7 +389,6 @@ const bridge = {
     shown: id => ipcRenderer.invoke("desktop-notices:shown", String(id)),
     thisComputer: intent => isLocalPage || navigator.userActivation?.isActive !== true ? Promise.reject(new Error("Choose Continue on this computer to switch."))
       : intent === "manage" || intent === "cloud-pro" ? ipcRenderer.invoke("desktop-notices:this-computer", intent) : Promise.reject(new Error("The popup hands over only its own click.")),
-    handoff: () => ipcRenderer.invoke("desktop-notices:handoff"),
   },
   desktopAnalytics: {
     enabled: () => {
