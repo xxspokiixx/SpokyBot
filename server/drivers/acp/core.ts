@@ -549,6 +549,10 @@ export function createAcpDriver(support: AcpSupport): ProviderDriver<AcpConfig> 
         ? new DeviceAuthController(support.deviceSignIn, { cli: config.cli, environment: () => childEnv(), onAuthenticated: refreshModels })
         : null;
       const listeners = new Set<RuntimeEventListener>();
+      let disposing = false;
+      const requireRunning = () => {
+        if (disposing) throw new Error(`${support.displayName} is shutting down`);
+      };
       interface Turn {
         stop: () => void;
         interrupt: () => void;
@@ -1269,7 +1273,9 @@ export function createAcpDriver(support: AcpSupport): ProviderDriver<AcpConfig> 
       };
 
       const sendTurn = async (turn: SendTurnInput) => {
+        requireRunning();
         if (startupModelRefresh) await startupModelRefresh;
+        requireRunning();
         const parsedScope = parseToolScope(turn.toolScope);
         if (!parsedScope.ok) throw new Error(parsedScope.error);
         turn = { ...turn, toolScope: parsedScope.scope };
@@ -1291,12 +1297,15 @@ export function createAcpDriver(support: AcpSupport): ProviderDriver<AcpConfig> 
         if (
           support.requireAuthenticationBeforeSpawn
           && !skipSubscriptionAuthForLocalInject(turn.model)
-          && !(await support.isAuthenticated(env, turnConfig, instanceId))
         ) {
-          emit({ ...base(threadId, turnId), type: "turn.started" });
-          emit({ ...base(threadId, turnId), type: "runtime.error", message: support.loginNote, setup: true });
-          emit({ ...base(threadId, turnId), type: "turn.completed", ok: false, stopReason: "auth_required", cost: null });
-          return { turnId };
+          const authenticated = await support.isAuthenticated(env, turnConfig, instanceId);
+          requireRunning();
+          if (!authenticated) {
+            emit({ ...base(threadId, turnId), type: "turn.started" });
+            emit({ ...base(threadId, turnId), type: "runtime.error", message: support.loginNote, setup: true });
+            emit({ ...base(threadId, turnId), type: "turn.completed", ok: false, stopReason: "auth_required", cost: null });
+            return { turnId };
+          }
         }
         const resolvedModel = support.resolveTurnModel?.(turn.model, env);
         const mcpServers = acpMcpServers(turn);
@@ -1314,6 +1323,7 @@ export function createAcpDriver(support: AcpSupport): ProviderDriver<AcpConfig> 
             ? await support.resolveCommand(env, turnConfig, instanceId)
             : { command: turnConfig.cli };
         } catch (error) {
+          requireRunning();
           emit({ ...base(threadId, turnId), type: "turn.started" });
           emit({
             ...base(threadId, turnId),
@@ -1325,6 +1335,7 @@ export function createAcpDriver(support: AcpSupport): ProviderDriver<AcpConfig> 
           return { turnId };
         }
 
+        requireRunning();
         const spawnArgs = support.spawnArgs(turnConfig, cliTurn);
         const spawnEnv = launch.env ?? env;
       // The child env is part of the spawn contract, hashed so secrets never sit in the key.
@@ -2002,6 +2013,7 @@ export function createAcpDriver(support: AcpSupport): ProviderDriver<AcpConfig> 
           },
         },
         dispose: async () => {
+          disposing = true;
           await deviceSignIn?.dispose();
           const disposingSessions = Array.from(sessions);
           for (const { stop } of active.values()) stop();
