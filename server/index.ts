@@ -19,7 +19,7 @@ import { RoomContextTracker, roomResetNote } from "./room-context.ts";
 import { createRoomTranscript, GROUP_CONTEXT_MESSAGES } from "./host/room-transcript.ts";
 import { createRoomSessions } from "./host/room-sessions.ts";
 import { provenRequestPerson, SharedComputers, sharedComputerOperation, sharedComputerRegistration } from "./shared-computers.ts";
-import { cloudHomeLendingRefusal, createCloudRoutineAuthors, ownerOnlyConversation, type CloudLendingTurn } from "./cloud-lending.ts";
+import { cloudHomeLendingRefusal, createCloudRoutineAuthors, ownerOnlyConversation, type CloudLendingTurn } from "./cloud-lending.ts"; import { startCloudHomeConnectedApps, stopCloudHomeConnectedApps } from "./cloud-connected-apps.ts";
 import { botMemoryFiles, createLendingMemory } from "./lending-memory.ts";
 import { SharedComputerControl } from "./shared-computer-control.ts";
 import { createCoordinator, type ComposedTurn, type Coordinator, type HandoffOpener, type HandoffOptions, type HandoffView, type HostTurnResult } from "./coordinator.ts";
@@ -16954,7 +16954,7 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
       return json(res, 200, {
         configured: composio.configured(cfg),
         mode: composio.connectionMode(cfg),
-        setup: composio.connectorSetup(cfg),
+        setup: composio.connectorSetup(cfg, DESKTOP_MANAGED || CLOUD_HOME !== null),
         source,
         cards,
         ...(pagination ? { pagination } : {}),
@@ -17453,7 +17453,7 @@ restoreChannelMessages();
 server.listen(PORT, "127.0.0.1", async () => {
   companyRuntimeReady();
   console.log(`openmausbot server on http://127.0.0.1:${PORT}`);
-  browserSweep.start();
+  browserSweep.start(); startCloudHomeConnectedApps({ cloudHome: CLOUD_HOME !== null, dataDir: DATA_DIR, apply: (access) => { composio.setManagedBrokerAccess(access); broadcast({ kind: "config", ...configStatus() }); } });
   if (builtInBrowserEnabled(cfg)) chromeLauncher.start();
   followupsReady = true;
   drainQueuedSends();
@@ -17526,7 +17526,7 @@ const gracefulShutdown = createGracefulShutdown({
       cacheKeepWarm.dispose();
       skillReview.stop();
       webhookIngress?.server.close();
-      tunnelListener?.close();
+      tunnelListener?.close(); stopCloudHomeConnectedApps();
     },
     async () => { await managedDesktop.close(); await registry.disposeAll(); },
     async () => { await dataEngine.closeAll().catch((error) => console.warn("data: close failed", error)); },
