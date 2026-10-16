@@ -66,7 +66,7 @@ const LOCAL_ORIGIN = "http://127.0.0.1:8799", MY_CLOUD = "https://omb-u-1.fly.de
 type Page = "local" | "cloud" | "server";
 type Handler = (event: { page: Page; returnValue?: unknown }, ...args: unknown[]) => unknown;
 interface Desktop {
-  handlers: Map<string, Handler>; listeners: Map<string, Handler>; saved: { seen?: string[]; onboarded?: boolean } | null; offered: boolean; moves: boolean; switches: number;
+  handlers: Map<string, Handler>; listeners: Map<string, Handler>; saved: { seen?: string[] } | null; offered: boolean; moves: boolean; switches: number;
   /** Where main loaded This computer's page after a switch. */
   landing: string | null;
   /** This computer's own workspace config.json, as main reads it. */
@@ -884,21 +884,19 @@ describe("the Cloud Pro popup after the update", () => {
     expect(popupEvents("shown")).toEqual([]);
   });
 
-  it("a server's page waits until This computer's first-run welcome is done, which This computer's page tells main", async () => {
-    desk.config = { onboarding: { completedAt: "", version: 0, hintsSeen: [] } };
-    account = paid(); onMyCloud({ status: "paid", tier: "pro" });
-    expect(await launch(), "My Cloud, with This computer's welcome still to come").not.toContain(POPUP);
-    onSavedServer();
-    expect(await launch(), "a saved server").not.toContain(POPUP);
-    expect(popupEvents("shown")).toEqual([]);
-    onThisComputer(); f.state.config.onboarding = { ...EMPTY_ONBOARDING };
-    expect(await launch(), "This computer's own welcome is due").toBe("");
-    expect(desk.saved?.onboarded, "nothing to tell main yet").toBeUndefined();
-    f.state.config.onboarding = { ...EMPTY_ONBOARDING, completedAt: "2026-10-16", version: 1, hintsSeen: withTourFinished(undefined) };
-    await launch();
-    expect(desk.saved?.onboarded, "its page says the welcome is done").toBe(true);
-    onMyCloud({ status: "paid", tier: "pro" });
-    expect(await launch()).toContain(POPUP);
+  it("a window that opens on My Cloud or a saved server gets it whatever This computer's welcome record says or lacks", async () => {
+    // An install from before the welcome kept a record, a welcome never finished, or no config.json main can read.
+    for (const config of [{ onboarding: { completedAt: "", version: 0, hintsSeen: [] } }, {}, null]) {
+      fresh(); account = paid(); desk.config = config;
+      onMyCloud({ status: "paid", tier: "pro" });
+      expect(await launch(), `${JSON.stringify(config)} on My Cloud`).toContain(POPUP);
+      onSavedServer();
+      expect(await launch(), `${JSON.stringify(config)} on a saved server`).toContain(POPUP);
+      press("Continue on this computer");
+      await flush();
+      expect(desk.switches, JSON.stringify(config)).toBe(1);
+      expect(seenOnDesktop(), JSON.stringify(config)).toEqual([ID]);
+    }
   });
 
   it("never in a remote client's window, on a branded build, or on a desktop that sells no Cloud", async () => {

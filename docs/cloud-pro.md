@@ -1244,17 +1244,18 @@ time, and none after one closes until another launch:
    shows: this computer's, My Cloud's or another saved server's. A server's
    page shows it only once that server runs this version (My Cloud once the
    Cloud is updated), so a window that only ever shows a server on an older
-   version does not get it, and only once This computer's first-run welcome
-   is done: main reads that from This computer's own workspace record
-   (`config.json` in its data folder), or This computer's page tells it (a
-   welcome finished before the welcome kept a record). Showing it never
-   switches the window. Main keeps whether this desktop has seen it
+   version does not get it. It does not wait for This computer's first-run
+   welcome there: a window that opens on My Cloud or a saved server may
+   never load This computer's page, and an install from before the welcome
+   kept a record has no record of finishing it, so waiting would leave those
+   desktops without the popup. Showing it never switches the window. Main keeps whether this desktop has seen it
    (`electron/desktop-prefs.mjs`, a small file in the app's data folder,
    written to a temporary file and renamed over the old one, so a failed
    write keeps the last record), and every page and every port the app's own
    page is served on agree. This computer's workspace record counts as seen
-   on every page, before its page has loaded on this build: a close kept
-   there earlier, or the welcome's MausBot Cloud step, which also keeps the
+   on every page, before its page has loaded on this build (main reads
+   `config.json` in its data folder): a close kept there earlier, or the
+   welcome's MausBot Cloud step, which also keeps the
    card after the update away; a close kept only in this computer's page's
    storage counts once that page has loaded, and is handed to main. The
    welcome leaves its MausBot Cloud step out once main says this desktop has
@@ -1293,8 +1294,8 @@ time, and none after one closes until another launch:
      right now, is waited on for ten seconds at most, then it is Settings →
      MausBot Cloud, which says where it stands.
 
-   Main makes either switch only for a popup this desktop has not seen, once
-   This computer's welcome is done, and only when the page asks right after
+   Main makes either switch only for a popup this desktop has not seen, and
+   only when the page asks right after
    a click or a key press on it (the preload checks
    `navigator.userActivation`). It loads This computer's page on the click
    (`?desktop-settings=cloud-settings` for Manage plan, `cloud-add` for

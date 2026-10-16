@@ -103,7 +103,7 @@ export function useDesktopNotices(desktop: DesktopNoticesBridge | undefined): De
   useEffect(() => {
     if (!desktop) return;
     let active = true;
-    void desktop.state().then(next => { if (active) setAnswer(next); }, () => { if (active) setAnswer({ seen: [], cloud: false, onboarded: false }); });
+    void desktop.state().then(next => { if (active) setAnswer(next); }, () => { if (active) setAnswer({ seen: [], cloud: false }); });
     return () => { active = false; };
   }, [desktop]);
   return desktop ? answer : null;

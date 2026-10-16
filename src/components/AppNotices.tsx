@@ -5,14 +5,14 @@ import type { CloudOffer } from "../../electron/cloud-home.mjs";
 import type { DesktopHandoffIntent } from "../../electron/desktop-prefs.mjs";
 import { api, useStore } from "@/state/store";
 import { APP_REPOSITORY } from "@/lib/app-links";
-import { emailGateDone, track } from "@/lib/analytics";
+import { track } from "@/lib/analytics";
 import { brandStatus } from "@/lib/brand";
 import { buyOfferAllowed, cloudNoticeKind, cloudPlanView, cloudTrialNotice, cloudTrialView, offerTrialDays, personalAmount } from "@/lib/cloud-plan";
 import { jobRoutine, useCloudIntent } from "@/lib/cloud-intent";
 import { CLOUD_INTENT_GIVEN, cloudSetupStage } from "@/lib/cloud-setup";
 import { cornerPopupWaits } from "@/lib/corner-popup";
 import { CLOUD_INTRO, CLOUD_NOTICE, CLOUD_PRO_UPDATE_NOTICE, CLOUD_TRIAL_NOTICE, dismissNotice, introShown, introStage, nextNotice, noticeSeen, PRODUCT_HUNT_NOTICE, PRODUCT_HUNT_UNTIL, PRODUCT_HUNT_URL, STAR_NOTICE, usedBefore } from "@/lib/notices";
-import { cloudSignInDue, LOCAL_VIEWER, onboardingCloudOffered, welcomeDue, type WelcomeViewer } from "@/lib/onboarding";
+import { cloudSignInDue, onboardingCloudOffered, type WelcomeViewer } from "@/lib/onboarding";
 import { useUpdaterState } from "@/lib/updater";
 import { t } from "@/lib/i18n";
 import { engineReady } from "./EngineLibrary";
@@ -96,8 +96,7 @@ export function AppNotices({ quiet = false, viewer = null, now = Date.now }: { q
   const popupHere = Boolean(desktop) && (!local || Boolean(bridge)) && brandStatus().source !== "file";
   const seenHere = local && (noticeSeen(record, CLOUD_PRO_UPDATE_NOTICE) || onboardingCloudOffered(record));
   const popupPending = popupHere && !seenHere && (!desktopState
-    || (desktopState.cloud && !desktopState.seen.includes(CLOUD_PRO_UPDATE_NOTICE) && (local || desktopState.onboarded)));
-  const welcomeDone = local && Boolean(state.config) && !welcomeDue(state.config, { remoteClient: false, legacyDone: emailGateDone(), ...LOCAL_VIEWER });
+    || (desktopState.cloud && !desktopState.seen.includes(CLOUD_PRO_UPDATE_NOTICE)));
   const wantOffer = Boolean(bridge?.offer) && ((introAllowed && view !== null && buyOfferAllowed(view) && stage !== "done") || trialDue?.state === "active"
     || (popupPending && view !== null && buyOfferAllowed(view)));
   const offerKey = wantOffer ? `${view?.kind}:${JSON.stringify(account?.offer ?? null)}` : null;
@@ -111,9 +110,6 @@ export function AppNotices({ quiet = false, viewer = null, now = Date.now }: { q
   useEffect(() => {
     if (seenHere && desktopState && !desktopState.seen.includes(CLOUD_PRO_UPDATE_NOTICE)) void desktop?.seen(CLOUD_PRO_UPDATE_NOTICE).catch(() => {});
   }, [seenHere, desktopState]);
-  useEffect(() => {
-    if (welcomeDone && desktopState && !desktopState.onboarded) void desktop?.onboarded?.().catch(() => {});
-  }, [welcomeDone, desktopState]);
   const page = local ? "local" : planBridge ? "my_cloud" : "server";
   const popupState = !popupPending ? null : !desktopState || !viewer ? "loading"
     : bridge ? cloudProPopupView(account, !bridge.offer ? null : offerFor === offerKey ? offer : undefined)

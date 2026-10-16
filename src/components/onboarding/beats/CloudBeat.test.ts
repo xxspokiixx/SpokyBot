@@ -70,12 +70,12 @@ it("the beat's offer: an account that may buy and the Admin's offer; nothing for
 });
 
 it("no beat once main says this desktop has seen the Cloud Pro popup; it waits for main's answer, and none is no beat", async () => {
-  const notices = (state: () => Promise<{ seen: string[]; cloud: boolean; onboarded: boolean }>) => ({ desktopNotices: { state: vi.fn(state) } });
-  desktop(signedOut, async () => OFFER, notices(async () => ({ seen: ["cloud-pro-update-2026-10"], cloud: true, onboarded: true })));
+  const notices = (state: () => Promise<{ seen: string[]; cloud: boolean }>) => ({ desktopNotices: { state: vi.fn(state) } });
+  desktop(signedOut, async () => OFFER, notices(async () => ({ seen: ["cloud-pro-update-2026-10"], cloud: true })));
   await mount(createElement(Probe)); expect(host.textContent, "seen").toBe("none");
   await act(async () => root!.unmount()); root = null;
   let answer: (seen: string[]) => void = () => {};
-  desktop(signedOut, async () => OFFER, notices(() => new Promise(resolve => { answer = seen => resolve({ seen, cloud: true, onboarded: false }); })));
+  desktop(signedOut, async () => OFFER, notices(() => new Promise(resolve => { answer = seen => resolve({ seen, cloud: true }); })));
   await mount(createElement(Probe)); expect(host.textContent, "main has not answered").toBe("none");
   await act(async () => { answer([]); await Promise.resolve(); });
   expect(host.textContent, "not seen").toBe("offer:2");

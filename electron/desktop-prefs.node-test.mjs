@@ -7,7 +7,7 @@ import test from "node:test";
 import vm from "node:vm";
 import { createDesktopPrefs, DESKTOP_NOTICES, DESKTOP_PORTS, jsonFile, registerDesktopPrefs } from "./desktop-prefs.mjs";
 import { localDay } from "./cloud-trial-notice.mjs";
-import { ONBOARDING_CLOUD_HINT, onboardingRecord, WELCOME_VERSION } from "./onboarding-record.mjs";
+import { ONBOARDING_CLOUD_HINT, onboardingHints, WELCOME_VERSION } from "./onboarding-record.mjs";
 
 const require = createRequire(import.meta.url);
 const environments = require("./environments.cjs");
@@ -28,11 +28,8 @@ test("the popup is the one notice a page can record; seen and analytics survive 
   prefs.markSeen(POPUP); prefs.markSeen(POPUP);
   assert.deepEqual(prefs.seen(), [POPUP]); assert.equal(writes.length, 1);
   prefs.setAnalytics(false);
-  assert.equal(prefs.onboarded(), false);
-  prefs.markOnboarded(); prefs.markOnboarded();
-  assert.equal(writes.length, 3, "onboarded is written once");
   const restarted = createDesktopPrefs({ read: () => saved, write: value => { saved = value; }, now: () => NOON });
-  assert.deepEqual(restarted.seen(), [POPUP]); assert.equal(restarted.analytics(), false); assert.equal(restarted.onboarded(), true);
+  assert.deepEqual(restarted.seen(), [POPUP]); assert.equal(restarted.analytics(), false);
   restarted.setAnalytics("yes"); assert.equal(restarted.analytics(), false, "only true turns it on");
   restarted.setAnalytics(true); assert.equal(restarted.analytics(), true);
 
@@ -41,10 +38,9 @@ test("the popup is the one notice a page can record; seen and analytics survive 
   broken.markSeen(POPUP); broken.setAnalytics(false);
   assert.deepEqual(broken.seen(), [POPUP], "kept for this launch when the file cannot be written");
   assert.equal(broken.analytics(), false);
-  for (const record of ["nonsense", [POPUP], { seen: "all", shown: [], analytics: "off", onboarded: "yes" }, { seen: [POPUP, "<b>"], shown: { [POPUP]: "today" }, onboarded: 1 }]) {
+  for (const record of ["nonsense", [POPUP], { seen: "all", shown: [], analytics: "off" }, { seen: [POPUP, "<b>"], shown: { [POPUP]: "today" } }]) {
     const prefs = createDesktopPrefs({ read: () => record, write: () => {}, now: () => NOON });
     assert.equal(prefs.analytics(), null, JSON.stringify(record));
-    assert.equal(prefs.onboarded(), false, JSON.stringify(record));
     assert.ok(prefs.seen().every(id => id === POPUP), JSON.stringify(record));
     if (!prefs.seen().length) assert.equal(prefs.shown(POPUP), true, JSON.stringify(record));
   }
@@ -67,6 +63,9 @@ test("a write that fails leaves the last whole record on disk, analytics opt-out
     assert.equal(next.analytics(), false, "the opt-out survives");
     assert.deepEqual(next.seen(), []);
     assert.deepEqual(createDesktopPrefs(jsonFile(path.join(dir, "missing.json"))).seen(), [], "no file yet");
+    const notepad = path.join(dir, "config.json");
+    fs.writeFileSync(notepad, `\uFEFF${JSON.stringify({ onboarding: { hintsSeen: [ONBOARDING_CLOUD_HINT] } })}`);
+    assert.deepEqual(onboardingHints(jsonFile(notepad).read()), [ONBOARDING_CLOUD_HINT], "a byte-order mark, as Notepad saves on Windows");
   } finally { rmSync(dir, { recursive: true, force: true }); }
 });
 
@@ -103,46 +102,41 @@ function desktopMain({ offered = true, switches = () => true, page = event => ev
 
 test("every page of this desktop's window reads and records the same notices; nothing else is answered", async () => {
   const main = desktopMain();
-  assert.deepEqual(main.channels, ["desktop-notices:state", "desktop-notices:seen", "desktop-notices:shown", "desktop-notices:onboarded", "desktop-notices:this-computer", "desktop-analytics:set"]);
-  for (const page of ["local", "cloud", "server"]) assert.deepEqual(await main.ask("desktop-notices:state", page), { seen: [], cloud: true, onboarded: true });
+  assert.deepEqual(main.channels, ["desktop-notices:state", "desktop-notices:seen", "desktop-notices:shown", "desktop-notices:this-computer", "desktop-analytics:set"]);
+  for (const page of ["local", "cloud", "server"]) assert.deepEqual(await main.ask("desktop-notices:state", page), { seen: [], cloud: true });
   assert.equal(await main.ask("desktop-notices:shown", "server", POPUP), true);
   assert.equal(await main.ask("desktop-notices:shown", "local", POPUP), false, "once a day for the desktop, not per page");
   await main.ask("desktop-notices:seen", "server", POPUP);
-  assert.deepEqual(await main.ask("desktop-notices:state", "local"), { seen: [POPUP], cloud: true, onboarded: true });
+  assert.deepEqual(await main.ask("desktop-notices:state", "local"), { seen: [POPUP], cloud: true });
   for (const channel of main.channels) assert.throws(() => main.ask(channel, null, POPUP), /only available in this app's window/, channel);
   assert.deepEqual((await desktopMain({ offered: false }).ask("desktop-notices:state", "server")).cloud, false);
 });
 
-test("This computer's own record counts on every page before its page loads on this build: an earlier close or the welcome's Cloud beat, and its finished welcome", async () => {
+test("This computer's own record counts on every page before its page loads on this build: an earlier close or the welcome's Cloud beat", async () => {
   assert.equal(ONBOARDING_CLOUD_HINT, "onboarding-cloud-v1");
   const record = (onboarding) => () => ({ composio: { apiKey: "" }, onboarding });
   for (const hint of [POPUP, ONBOARDING_CLOUD_HINT]) {
     const main = desktopMain({ config: record({ completedAt: "2026-10-01", version: 1, hintsSeen: ["tour-finished", hint] }) });
-    for (const page of ["local", "cloud", "server"]) assert.deepEqual(await main.ask("desktop-notices:state", page), { seen: [POPUP], cloud: true, onboarded: true }, `${hint} ${page}`);
+    for (const page of ["local", "cloud", "server"]) assert.deepEqual(await main.ask("desktop-notices:state", page), { seen: [POPUP], cloud: true }, `${hint} ${page}`);
     assert.equal(await main.ask("desktop-notices:this-computer", "server", "cloud-pro"), false, `${hint}: nothing to switch for`);
     assert.deepEqual(main.calls.filter(call => call === "this-computer"), []);
     assert.equal(main.saved(), null, "read, never written into this desktop's record");
   }
-  const unfinished = [null, {}, { completedAt: "", version: 1 }, { completedAt: "  ", version: 1 }, { completedAt: "2026-10-01", version: 0 },
-    { completedAt: "2026-10-01" }, { completedAt: 20261001, version: 1 }, { completedAt: "2026-10-01", version: "1" }];
-  for (const onboarding of unfinished) {
-    const main = desktopMain({ config: record(onboarding) });
-    assert.deepEqual(await main.ask("desktop-notices:state", "server"), { seen: [], cloud: true, onboarded: false }, JSON.stringify(onboarding));
-  }
-  for (const config of [() => { throw new Error("ENOENT"); }, () => "nonsense", () => ({ onboarding: { hintsSeen: POPUP } }), () => ({ onboarding: { hintsSeen: [{ id: POPUP }] } })]) {
-    assert.deepEqual(await desktopMain({ config }).ask("desktop-notices:state", "cloud"), { seen: [], cloud: true, onboarded: false }, String(config));
-  }
-  assert.deepEqual(onboardingRecord({ onboarding: { completedAt: "x", version: 2, hintsSeen: ["a", 1, null, "b"] } }), { finished: true, hints: ["a", "b"] });
+  assert.deepEqual(onboardingHints({ onboarding: { completedAt: "x", version: 2, hintsSeen: ["a", 1, null, "b"] } }), ["a", "b"]);
 });
 
-test("This computer's page says when its welcome is done, for a record the workspace does not show (an email gate from before the welcome); no other page can", async () => {
-  const main = desktopMain({ config: () => ({ onboarding: { completedAt: "", version: 0, hintsSeen: [] } }) });
-  assert.equal((await main.ask("desktop-notices:state", "cloud")).onboarded, false);
-  for (const page of ["cloud", "server", null]) assert.throws(() => main.ask("desktop-notices:onboarded", page), /only available/, String(page));
-  assert.equal((await main.ask("desktop-notices:state", "cloud")).onboarded, false);
-  await main.ask("desktop-notices:onboarded", "local");
-  assert.equal((await main.ask("desktop-notices:state", "cloud")).onboarded, true);
-  assert.equal(main.saved().onboarded, true, "kept for later launches");
+test("every desktop gets the popup on whichever page its window opens, whatever This computer's welcome record says or lacks", async () => {
+  // An install from before the welcome kept a record, a welcome never finished, no config.json, or one main cannot read.
+  const records = [() => ({ onboarding: { completedAt: "", version: 0, hintsSeen: [] } }), () => ({ composio: {} }), () => null, () => "nonsense",
+    () => { throw new Error("ENOENT"); }, () => { throw new SyntaxError("Unexpected token"); }, () => ({ onboarding: { hintsSeen: POPUP } }), () => ({ onboarding: { hintsSeen: [{ id: POPUP }] } })];
+  for (const config of records) {
+    for (const [page, intent] of [["cloud", "manage"], ["server", "cloud-pro"]]) {
+      const main = desktopMain({ config }), name = `${String(config)} ${page}`;
+      assert.deepEqual(await main.ask("desktop-notices:state", page), { seen: [], cloud: true }, name);
+      assert.equal(await main.ask("desktop-notices:this-computer", page, intent), true, `${name}: its click switches`);
+      assert.deepEqual(main.saved().seen, [POPUP], name);
+    }
+  }
 });
 
 test("main takes only the popup's own click: Continue on this computer from My Cloud's or a saved server's page, Manage plan from My Cloud's own page alone", async () => {
@@ -181,10 +175,6 @@ test("the click brings the window to This computer's page on what it opens there
   const unsold = desktopMain({ offered: false });
   assert.equal(await unsold.ask("desktop-notices:this-computer", "server", "cloud-pro"), false);
   assert.equal(unsold.calls.includes("this-computer"), false);
-  const welcoming = desktopMain({ config: () => ({ onboarding: { completedAt: "", version: 0, hintsSeen: [] } }) });
-  assert.equal(await welcoming.ask("desktop-notices:this-computer", "cloud", "manage"), false, "not into This computer's unfinished welcome");
-  assert.equal(welcoming.calls.includes("this-computer"), false);
-  assert.equal(welcoming.saved(), null);
 });
 
 test("a switch that fails marks nothing, so a later click or launch can try again; two clicks at once switch once", async () => {
@@ -246,7 +236,6 @@ test("the preload gives every page of the window the notices and the switch's st
     assert.deepEqual(asked(), ["desktop-analytics:read"]);
     assert.equal(page.bridge.desktopAnalytics.set, undefined, "a server's page cannot change the desktop's switch");
     await page.bridge.desktopNotices.state(); await page.bridge.desktopNotices.seen({ toString: () => POPUP }); await page.bridge.desktopNotices.shown(POPUP);
-    assert.equal(page.bridge.desktopNotices.onboarded, undefined, "only This computer's page says its welcome is done");
     assert.deepEqual(page.invoked, [["desktop-notices:state"], ["desktop-notices:seen", POPUP], ["desktop-notices:shown", POPUP]]);
     await assert.rejects(page.bridge.desktopNotices.thisComputer("cloud-pro"), /Choose Continue on this computer/, "only on a click");
     const clicked = preload(origin, { activation: true });
@@ -259,8 +248,6 @@ test("the preload gives every page of the window the notices and the switch's st
   const local = preload(LOCAL, { activation: true, saved: false });
   assert.equal(typeof local.bridge.desktopNotices.state, "function");
   await assert.rejects(local.bridge.desktopNotices.thisComputer("cloud-pro"), /Choose Continue/, "This computer's page has nothing to switch to");
-  await local.bridge.desktopNotices.onboarded();
-  assert.deepEqual(local.invoked.splice(0), [["desktop-notices:onboarded"]]);
   assert.deepEqual(local.synced, [], "nothing is asked until analytics asks");
   assert.equal(local.bridge.desktopAnalytics.enabled(), false, "answered at once, before anything loads");
   assert.equal(local.bridge.desktopAnalytics.enabled(), false);

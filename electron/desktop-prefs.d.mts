@@ -6,8 +6,6 @@ export interface DesktopNoticesState {
   seen: string[];
   /** This desktop sells MausBot Cloud: the installed app, not a branded build, not connected to another computer. */
   cloud: boolean;
-  /** This computer's first-run welcome is done, as its workspace's record or its page says. */
-  onboarded: boolean;
 }
 /**
  * A click on the Cloud Pro popup that a server's page hands This computer's page to finish, without the popup showing
@@ -23,14 +21,11 @@ export interface DesktopNoticesBridge {
   shown(id: string): Promise<boolean>;
   /**
    * A server's page only, right after a click on it: switches the window to This computer while the Cloud Pro popup is
-   * unseen and This computer's welcome is done, loads its page on that click (`?desktop-settings=cloud-add` or
-   * `cloud-settings`, with `source=update_popup` and `via=my_cloud` or `server`) and, once it has loaded, marks the
-   * popup seen. False when main cannot switch or that page does not load. Any other intent, or "manage" from a page
+   * unseen, loads its page on that click (`?desktop-settings=cloud-add` or `cloud-settings`, with `source=update_popup`
+   * and `via=my_cloud` or `server`) and, once it has loaded, marks the popup seen. False when main cannot switch or that page does not load. Any other intent, or "manage" from a page
    * main does not verify as My Cloud's, is refused.
    */
   thisComputer(intent: DesktopHandoffIntent): Promise<boolean>;
-  /** This computer's page only: its first-run welcome is done. */
-  onboarded?(): Promise<void>;
 }
 /** The desktop's own switch, the same on every port its page is served from. */
 export interface DesktopAnalyticsBridge {
@@ -43,8 +38,6 @@ export interface DesktopPrefs {
   seen(): string[];
   markSeen(id: string): void;
   shown(id: string): boolean;
-  onboarded(): boolean;
-  markOnboarded(): void;
   analytics(): boolean | null;
   setAnalytics(enabled: boolean): void;
 }
