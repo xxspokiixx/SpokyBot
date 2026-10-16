@@ -16,6 +16,7 @@ import { t } from "@/lib/i18n";
 import { ShortcutHint } from "./ShortcutHint";
 import { SidebarPopoverMenu, type SidebarMenuItem } from "./SidebarPopoverMenu";
 import { orderedThreadList } from "./SidebarThreadRow";
+import { openBotSettings } from "./bot-panel/panel-link";
 
 // A submenu cannot scroll, so it lists the most recent threads and the row says how many there are.
 const THREADS_LISTED = 12;
@@ -89,7 +90,7 @@ function useChatMoreItems(profile: Bot): { items: SidebarMenuItem[]; on: boolean
       icon: <Gauge size={16} />,
       separatorBefore: true,
       trailing: <span title={usage.detail} data-testid="usage-chip" className={cn("tabular-nums text-[12px]", usage.tone === "danger" ? "text-danger" : usage.tone === "warning" ? "text-warning" : "text-ink-secondary")}>{usage.short}</span>,
-      onSelect: () => dispatch({ type: "toggleSettings", open: true, section: "usage" }),
+      onSelect: () => openBotSettings(dispatch, "usage"),
     } satisfies SidebarMenuItem] : []),
     ...(remoteClient ? [] : [{
       key: "activity",

@@ -13,16 +13,17 @@ import { AvatarEditorCard } from "./AvatarEditorCard";
 import { ComputerTab } from "./ComputerTab";
 import { DetailsTab } from "./DetailsTab";
 import { LibraryTab } from "./LibraryTab";
-import { PANEL_TABS, PAGES, sectionTarget, TAB_LABEL, type PageId, type PanelTab, type PanelTarget } from "./page-registry";
+import { PANEL_TABS, PAGES, TAB_LABEL, type PageId, type PanelTab, type PanelTarget } from "./page-registry";
 import { PageBody, pageSurfaceCls } from "./pages";
+import { linkTarget, usePanelLink, type PanelLink } from "./panel-link";
 import { PanelHero } from "./PanelHero";
 import { PageHeader } from "./rows";
 import { SettingsTab } from "./SettingsTab";
 
 const roundButtonCls = "flex size-8 shrink-0 items-center justify-center rounded-full bg-ink/[0.06] text-ink hover:bg-ink/[0.11]";
 
-function initialTarget(section: BotSettingsSection | null): PanelTarget {
-  return section ? sectionTarget(section) : { tab: "details" };
+function initialTarget(section: BotSettingsSection | null, link: PanelLink | null): PanelTarget {
+  return section ? linkTarget(section, link) : { tab: "details" };
 }
 
 export function BotPanel({ bot, derived, slackUrl = null, headerClassName, linkedSection, onClose }: {
@@ -34,14 +35,15 @@ export function BotPanel({ bot, derived, slackUrl = null, headerClassName, linke
   onClose: () => void;
 }) {
   const { dragProps } = useCaptionChrome();
-  const [tab, setTab] = useState<PanelTab>(() => initialTarget(linkedSection).tab);
+  const link = usePanelLink();
+  const [tab, setTab] = useState<PanelTab>(() => initialTarget(linkedSection, link).tab);
   const [stack, setStack] = useState<PageId[]>(() => {
-    const page = initialTarget(linkedSection).page;
+    const page = initialTarget(linkedSection, link).page;
     return page ? [page] : [];
   });
-  const [anchor, setAnchor] = useState<string | null>(() => initialTarget(linkedSection).anchor ?? null);
+  const [anchor, setAnchor] = useState<string | null>(() => initialTarget(linkedSection, link).anchor ?? null);
   const [editorOpen, setEditorOpen] = useState(false);
-  const [memoryMounted, setMemoryMounted] = useState(() => initialTarget(linkedSection).page === "memory");
+  const [memoryMounted, setMemoryMounted] = useState(() => initialTarget(linkedSection, link).page === "memory");
   const [query, setQuery] = useState("");
   const bodyRef = useRef<HTMLDivElement>(null);
   const editorRef = useRef<HTMLDivElement>(null);
@@ -77,9 +79,10 @@ export function BotPanel({ bot, derived, slackUrl = null, headerClassName, linke
     scrollTop();
   };
 
+  // A new link re-runs this even when it names the section already linked, so a repeated link lands there again.
   useEffect(() => {
-    if (linkedSection) go(sectionTarget(linkedSection));
-  }, [linkedSection]);
+    if (linkedSection) go(linkTarget(linkedSection, link));
+  }, [linkedSection, link]);
 
   useEffect(() => {
     if (!anchor || page) return;

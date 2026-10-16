@@ -28,6 +28,7 @@ import { useDesktopCapabilities } from "./DesktopCapabilities";
 import { callCapabilityHelp, type CallCapabilityHelp } from "@/lib/call-capability";
 import { onCallStartRequest } from "@/lib/call-start-request";
 import { VoiceSetupDialog } from "./VoiceSetupDialog";
+import { openBotSettings } from "./bot-panel/panel-link";
 
 type Phase = "listening" | "sending" | "working" | "speaking";
 const CALL_ENDPOINT_MS = 850;
@@ -372,7 +373,7 @@ export function CallTargetButton({
                 setHelpOpen(false);
                 if (remoteClient) {
                   if (setupBot.id !== targetId) openBot(dispatch, setupBot, showThreads);
-                  dispatch({ type: "toggleSettings", open: true, section: "voice" });
+                  openBotSettings(dispatch, "voice");
                   return;
                 }
                 setVoiceSetupOpen(true);

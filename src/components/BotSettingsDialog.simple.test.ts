@@ -101,6 +101,7 @@ const { PageBody, SetupPage } = await import("./bot-panel/pages");
 const { AppsCard, BrowserLogins } = await import("./bot-panel/apps-and-logins");
 const { botLibraryItems, memoryEntries } = await import("./bot-panel/library-items");
 const { PAGES, sectionTarget } = await import("./bot-panel/page-registry");
+const { openBotSettings } = await import("./bot-panel/panel-link");
 const { PageHeader } = await import("./bot-panel/rows");
 const { ChatMoreMenu } = await import("./ChatMoreMenu");
 const { SoulField } = await import("./SoulField");
@@ -333,6 +334,21 @@ describe("the bot panel in Simple mode", () => {
 
   it("scrolls Usage into view on the Settings tab", () => {
     expect(sectionTarget("usage").anchor).toBe("activity");
+  });
+
+  it.each([
+    ["apps", "PluginsPanel's limited app tools"], ["mcp", "an MCP server's access"], ["tools", "a place's tool selection"],
+    ["folder", "the computer's working folder"],
+  ] as const)("opens Access on the %s page for %s, the page that holds it", (page) => {
+    try {
+      openBotSettings(fixture.dispatch, "access", { page });
+      expect(shown(panel(makeBot(), "access"))).toEqual({ tab: undefined, page });
+    } finally {
+      // A link without a page lands where the section does: later tests see no trace of this one.
+      openBotSettings(vi.fn(), "access");
+    }
+    fresh();
+    expect(shown(panel(makeBot(), "access"))).toEqual({ tab: "computer", page: undefined });
   });
 });
 
