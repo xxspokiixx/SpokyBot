@@ -61,7 +61,7 @@ import { acpSessionOperationKey, acpShellRequest, answersAlone, permissionLaunch
 import { openQuestionRequest, questionRequestFor, type AcpQuestionRequest } from "./question-requests.ts";
 import { commandSummary, toolDetailPreview } from "../../tool-summary.ts";
 import { extractMcpImages } from "../../mcp-tool-images.ts";
-import { redactSecretsInText } from "../../redact.ts";
+import { acpRpcError } from "./rpc-error.ts";
 import { recoveryPromptFor } from "../../resume-recovery.ts";
 import { sessionIdlePolicy } from "../session-idle.ts";
 import { classifyError } from "../retry.ts";
@@ -76,29 +76,6 @@ const ACCOUNT_ERROR_CODES: ReadonlySet<ProviderErrorCode> = new Set<AccountError
 ]);
 const isAccountError = (code: ProviderErrorCode | undefined): code is AccountErrorCode =>
   code !== undefined && ACCOUNT_ERROR_CODES.has(code);
-
-/** ACP vendors put the actionable cause in error.data under a generic JSON-RPC message. Only known
- * text fields surface, redacted, never a response body or config dump. */
-function acpRpcError(value: any, method: string): Error {
-  const message = typeof value?.message === "string" ? value.message : "ACP request failed";
-  const data = value?.data;
-  const detail = typeof data === "string" ? data
-    : typeof data?.details === "string" ? data.details
-    : typeof data?.message === "string" ? data.message
-    : typeof data?.error?.message === "string" ? data.error.message
-    : "";
-  const context = [
-    method,
-    typeof data?.service === "string" ? `service: ${data.service}` : "",
-    typeof data?.errorName === "string" ? data.errorName : "",
-  ].filter(Boolean).join(", ");
-  const diagnostic = `${detail && detail !== message ? `${message}: ${detail}` : message} (${context})`;
-  const error = new Error(redactSecretsInText(diagnostic).slice(0, 1500));
-  return Object.assign(error, { code: value?.code, data,
-    // -32603 is JSON-RPC's internal error; invalid params, unsupported methods and auth refusals keep the session.
-    acpSessionFailure: value?.code === -32603,
-  });
-}
 
 export interface AcpConfig {
   cli: string;
