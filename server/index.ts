@@ -5565,7 +5565,7 @@ const watchdog = new TurnWatchdog({
     const minutes = Math.round(TURN_STALL_MS / 60_000);
     const stalled = stoppedTurnText(turn.threadId, liveTurnByThread.get(turn.threadId), STALL_CAUSE);
     if (routineRun?.target === "bot") {
-      routines?.failThread(turn.threadId, `No activity for ${minutes} minutes — the routine was stopped`);
+      routines?.failThread(turn.threadId, `No activity for ${minutes} minutes — the routine was stopped`, { cause: "stalled" });
     }
     store.appendMessage(turn.threadId, {
       role: "bot",
@@ -8326,7 +8326,7 @@ async function startTurn(
   const bot = store.projectBotForTask(botId, threadId);
   if (!bot) throw Object.assign(new Error("no such task"), { status: 404 });
   if (bot.approvalGrant) {
-    throw Object.assign(new Error("this bot's approval level is still being confirmed — try again"), { status: 409 });
+    throw Object.assign(new Error("this bot's approval level is still being confirmed — try again"), { status: 409, code: "settling" });
   }
   const answer = turnAnswers(threadId, opts);
   let computerSkipped: string | undefined;
@@ -8334,12 +8334,12 @@ async function startTurn(
   if (transitionError && !answer.incident) throw Object.assign(new Error(transitionError), { status: 409 });
   if (transitionError) computerSkipped = transitionError;
   if (providerInstancesChanging.has(bot.modelSelection.instanceId)) {
-    throw Object.assign(new Error("this provider account is being updated — try again shortly"), { status: 409 });
+    throw Object.assign(new Error("this provider account is being updated — try again shortly"), { status: 409, code: "settling" });
   }
   assertWithinBudget(cfg, DATA_DIR);
   if (boatLifecycleBusyBots.has(botId)) {
     const changing = "this bot's cloud computer is being changed — wait for it to finish";
-    if (!answer.incident) throw Object.assign(new Error(changing), { status: 409 });
+    if (!answer.incident) throw Object.assign(new Error(changing), { status: 409, code: "settling" });
     computerSkipped ??= changing;
   }
   if (threadBusy(botId, threadId)) throw Object.assign(new Error("this thread is already working — interrupt it first"), { status: 409, code: "thread_busy" });
@@ -9614,30 +9614,22 @@ routines = new RoutineManager({
   },
   interruptGoal: interruptRoutineGroupGoal,
   onRunChanged: (run) => { cloudHealth?.noteRoutineRun(run); syncRoutineRunToSource(run); },
-  onRunFailed: (run) => {
+  onRunCut: (run) => run.groupId ? coordinator.cancelRoom(run.groupId, run.threadId!, ROUTINE_RESTARTED) : coordinator.cancelDirect(run.threadId!, ROUTINE_RESTARTED),
+  onRunFailed: (run, alert) => {
     cloudHealth?.noteRoutineRun(run);
-    if (run.threadId) {
-      if (run.error === ROUTINE_RESTARTED) {
-        if (run.groupId) coordinator.cancelRoom(run.groupId, run.threadId, run.error);
-        else coordinator.cancelDirect(run.threadId, run.error);
-      }
-    }
     const bot = store.bot(run.botId);
-    if (!bot) return;
-    const detail = run.error ? `${run.routineName}: ${run.error}` : run.routineName;
+    if (!bot || alert === null) return;
+    const said = alert?.detail ?? run.error, detail = said ? `${run.routineName}: ${said}` : run.routineName;
     const notificationBot = routineSourceOwner(run)?.bot ?? bot;
     notify(buildNotification("routine-failed", notificationBot, routineSourceThread(run) ?? run.threadId ?? bot.threadId, detail));
     reportIncident({ kind: "routine-failed", bot, threadId: run.threadId ?? bot.threadId, detail });
   },
-  onRunDeferred: (run) => {
+  onRunDeferred: (run, alert) => {
     const bot = store.bot(run.botId);
     if (!bot) return;
-    const minutes = run.deferredAt != null && run.deferredNoticeAt != null
-      ? Math.max(1, Math.round((run.deferredNoticeAt - run.deferredAt) / 60_000))
-      : null;
-    const detail = `${redactSecretsInText(run.routineName)}: target busy${minutes != null ? ` for ${minutes} minutes` : ""}`;
-    const notificationBot = routineSourceOwner(run)?.bot ?? bot;
-    notify(buildNotification("routine-deferred", notificationBot, routineSourceThread(run) ?? bot.threadId, detail));
+    const minutes = run.deferredAt != null && run.deferredNoticeAt != null ? Math.max(1, Math.round((run.deferredNoticeAt - run.deferredAt) / 60_000)) : null;
+    const detail = `${redactSecretsInText(run.routineName)}: ${alert?.detail ?? `target busy${minutes != null ? ` for ${minutes} minutes` : ""}`}`;
+    notify(buildNotification("routine-deferred", routineSourceOwner(run)?.bot ?? bot, routineSourceThread(run) ?? bot.threadId, detail));
   },
 });
 // Settle Cloud ownership before anything is served and before any routine can run.
@@ -17483,7 +17475,7 @@ const gracefulShutdown = createGracefulShutdown({
       for (const idle of localVmIdles.values()) idle.cancel();
       vps.closeAllVpsDesktopTunnels();
       watchdog.stop();
-      routines?.stop();
+      routines?.close();
       calendarCalls?.stop();
       memoryUpkeep.stop();
       cacheKeepWarm.dispose();
