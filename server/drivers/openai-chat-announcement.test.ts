@@ -13,6 +13,20 @@ describe("announcesAction", () => {
     expect(announcesAction(text)).toBe(true);
   });
 
+  it("recognizes Qwen's next action after an explanation of the missing terminal output", () => {
+    expect(announcesAction("The screenshot shows the terminal is open with a blank prompt, but I don't see the expected output text from the file creation and readback commands. The terminal appears to have been launched fresh, and the command to create the file and read it back hasn't executed yet or hasn't been completed.\n\nI need to explicitly send a command to the terminal to create the file and then read it back. Since the terminal is running with PID 171, I'll send commands through it.\n\nLet me execute the commands: create the file with the required content and then cat it to verify.")).toBe(true);
+  });
+
+  it.each([
+    "The instructions say:\n\n> I'll delete the file.",
+    "An example:\n\n```sh\nI'll execute the command\n```",
+    "The work is complete.\n\nI'll be available tomorrow.",
+    "The next step needs approval.\n\nShould I execute the command?",
+    `The output is verified. ${"x".repeat(500)}\n\nHere are the results:`,
+  ])("does not treat quoted instructions or final explanations as pending actions: %s", text => {
+    expect(announcesAction(text)).toBe(false);
+  });
+
   it.each([
     "",
     "I'm working in the Cua Local VM.",

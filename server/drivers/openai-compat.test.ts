@@ -56,7 +56,7 @@ describe("OpenAICompatDriver", () => {
     const recorder = recordEvents(instance.adapter);
     try {
       await instance.adapter.sendTurn({ threadId: "nudge", text: "Open the terminal." });
-      expect(await recorder.until(event => event.type === "turn.completed")).toMatchObject({ ok: true });
+      expect(await recorder.until(event => event.type === "turn.completed")).toMatchObject({ ok: count !== 2 });
       expect(bodies).toHaveLength(count);
       expect(bodies[0]!.model).toBe("qwen/qwen3.5-35b-a3b");
       if (count === 2) {
