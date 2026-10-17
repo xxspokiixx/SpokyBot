@@ -59,7 +59,7 @@ describe("WebhookRequestService", () => {
     const [message] = store.messagesFor("thread-a");
     expect(message!.card).toMatchObject({ answered: "allow", autoApplied: true, dismissed: true, options: [], tool: "create_trigger",
       webhookRequest: { version: 1, botId: "bot-a", threadId: "thread-a", resultId: webhook!.id, operation: { action: "create" } } });
-    expect(applied.summary).toBe("When its link is called, Support follows: Draft a follow-up for the lead in the payload.");
+    expect(applied.summary).toBe("When another app sends something, Support follows: Draft a follow-up for the lead in the payload.");
     // The secret was discarded: nothing returned or stored on the card carries one, and the stored file keeps only its hash.
     expect(JSON.stringify({ applied, card: message!.card })).not.toMatch(/whsec_/);
     expect(readFileSync(join(dir, "webhooks.json"), "utf8")).not.toMatch(/whsec_/);

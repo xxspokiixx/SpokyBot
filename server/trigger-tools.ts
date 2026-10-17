@@ -79,7 +79,7 @@ export function agentWebhook(webhook: WebhookTrigger, latestRun?: RoutineRun) {
     kind: "webhook" as const,
     name: redactSecretsInText(webhook.name),
     ...instructionsOf(webhook.prompt),
-    when: "When its link is called. The person copies the link from the Triggers page or the trigger card; you never see its secret.",
+    when: "When another app sends something to its address. The person copies the address from the Automations page or the automation's card in chat; you never see its secret.",
     enabled: webhook.enabled,
     runOn: webhook.runOn,
     eventTypes: webhook.eventTypes ?? [],

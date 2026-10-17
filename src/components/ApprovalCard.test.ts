@@ -601,7 +601,7 @@ describe("ApprovalCard for a change that applied on its own", () => {
     const at = new Date();
     at.setHours(14, 30, 0, 0);
     const markup = render(routineCard(update, { name: "Check before dentist", schedule: { type: "once", at: at.getTime() }, appliedUpdatedAt: 2, before }));
-    expect(markup).toMatch(/Scout updated a routine: Check before dentist, today 2:30/);
+    expect(markup).toMatch(/Scout changed an automation: Check before dentist, today 2:30/);
     expect(markup).toContain(">Undo<");
     expect(markup).toContain(">Details<");
     expect(markup).not.toContain("30 14 * * 3");
@@ -614,7 +614,7 @@ describe("ApprovalCard for a change that applied on its own", () => {
       { ...update, changes: { schedule: { type: "cron", expression: "*/7 3-5 * * 1", timeZone: "UTC" } } },
       { name: "Odd hours", schedule: { type: "cron", expression: "*/7 3-5 * * 1", timeZone: "UTC" } },
     ));
-    expect(markup).toContain("Scout updated a routine: Odd hours");
+    expect(markup).toContain("Scout changed an automation: Odd hours");
     expect(markup).not.toContain("*/7");
   });
 
@@ -622,11 +622,11 @@ describe("ApprovalCard for a change that applied on its own", () => {
     const undone = { ...routineCard(update, { name: "Backlog review", appliedUpdatedAt: 2, before }) };
     undone.card = { ...undone.card!, undone: true };
     const markup = render(undone);
-    expect(markup).toContain("Scout updated a routine: Backlog review");
+    expect(markup).toContain("Scout changed an automation: Backlog review");
     expect(markup).toContain(" · Undone");
     expect(markup).not.toContain(">Undo<");
     const run = render(routineCard({ action: "run_now", routineId: "routine-1", expectedUpdatedAt: 1 }, { name: "Backlog review" }));
-    expect(run).toContain("Scout started a routine: Backlog review");
+    expect(run).toContain("Scout ran an automation: Backlog review");
     expect(run).not.toContain(">Undo<");
   });
 

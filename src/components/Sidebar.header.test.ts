@@ -268,7 +268,7 @@ describe("sidebar glass head and foot", () => {
       expect(head).toBeLessThan(topRow);
       expect(topRow).toBeLessThan(search);
       expect(search).toBeLessThan(list);
-      // Triggers leads the list itself, ahead of every bot, and is never one of the foot's places.
+      // Automations leads the list itself, ahead of every bot, and is never one of the foot's places.
       expect(list).toBeLessThan(triggers);
       expect(triggers).toBeLessThan(foot);
       expect(list).toBeLessThan(foot);
@@ -280,7 +280,7 @@ describe("sidebar glass head and foot", () => {
 });
 
 describe("sidebar foot in Simple mode", () => {
-  it.each(["comfortable", "compact"] as const)("keeps only the profile row, with Apps at its end, and Triggers at the top of the list (%s)", (density) => {
+  it.each(["comfortable", "compact"] as const)("keeps only the profile row, with Apps at its end, and Automations at the top of the list (%s)", (density) => {
     fixture.advanced = false;
     fixture.density = density;
     const html = render();
@@ -292,7 +292,7 @@ describe("sidebar foot in Simple mode", () => {
     expect(html.indexOf('data-sidebar-nav="apps"')).toBeGreaterThan(foot);
   });
 
-  it("keeps one Triggers row and no Routines row in Advanced mode, and still one Apps", () => {
+  it("keeps one Automations row and no Routines row in Advanced mode, and still one Apps", () => {
     fixture.advanced = true;
     const html = render();
     expect(html).not.toContain('data-sidebar-nav="routines"');

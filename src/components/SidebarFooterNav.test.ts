@@ -43,7 +43,7 @@ beforeEach(() => {
 afterEach(() => vi.unstubAllGlobals());
 
 describe("sidebar footer places", () => {
-  it.each(["comfortable", "compact"] as const)("keeps Team map in Advanced mode, with Apps beside the profile instead and no Routines or Triggers (%s)", (density) => {
+  it.each(["comfortable", "compact"] as const)("keeps Team map in Advanced mode, with Apps beside the profile instead and no Routines or Automations row (%s)", (density) => {
     fixture.advanced = true;
     const { html } = render(density);
     expect(html).toContain('data-sidebar-nav="team-map"');
@@ -74,7 +74,7 @@ describe("sidebar footer places", () => {
   });
 });
 
-describe("Triggers, first in the sidebar", () => {
+describe("Automations, first in the sidebar", () => {
   function renderRow(density: SidebarDensity) {
     let tree!: ReturnType<typeof SidebarTriggersRow>;
     function Capture() { tree = SidebarTriggersRow({ density }); return tree; }
@@ -85,10 +85,10 @@ describe("Triggers, first in the sidebar", () => {
     fixture.advanced = advanced;
     const { html } = renderRow(density);
     expect(html).toMatch(/data-tour="nav-automations" data-sidebar-nav="triggers"/);
-    expect(html).toContain(density === "icons" ? 'aria-label="Triggers" title="Triggers"' : ">Triggers</span>");
+    expect(html).toContain(density === "icons" ? 'aria-label="Automations" title="Automations"' : ">Automations</span>");
   });
 
-  it("opens the Triggers list through the store, and marks it current while open", () => {
+  it("opens the Automations list through the store, and marks it current while open", () => {
     const { nodes: tree } = renderRow("comfortable");
     (tree.find((node) => node.props.id === "triggers")!.props.onClick as () => void)();
     expect(fixture.dispatch).toHaveBeenLastCalledWith({ type: "showRoutines", view: "list" });
@@ -130,7 +130,7 @@ describe("Tools header", () => {
     expect(onToggleCollapsed).toHaveBeenCalledTimes(1);
   });
 
-  it("puts no failed-routine dot on the Tools header: it lives on the Triggers row", () => {
+  it("puts no failed-routine dot on the Tools header: it lives on the Automations row", () => {
     fixture.advanced = true;
     fixture.state.routineRuns = [{ id: "r", status: "failed", scheduledFor: 1 }];
     expect(render("comfortable", { collapsed: true }).html).not.toContain('data-testid="section-alert"');

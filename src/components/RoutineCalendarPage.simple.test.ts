@@ -42,7 +42,6 @@ vi.mock("@/lib/analytics", () => ({ track: vi.fn() }));
 const { initialState } = await import("@/state/store");
 const { EventDetails, EventEditor } = await import("./RoutineCalendarPage");
 const { TriggersPage: RoutinesPage } = await import("./TriggersPage");
-const { calendarRangeLabel, startOfWeek } = await import("@/lib/routine-calendar");
 const { scheduleLabel } = await import("@/lib/schedule-label");
 
 afterAll(() => vi.unstubAllGlobals());
@@ -121,94 +120,71 @@ beforeEach(() => {
   fixture.state = { ...initialState, bots: [bot], routines: [routine], routineRuns: runs };
 });
 
-describe("Triggers header", () => {
-  const startingWith = (tree: Node[], text: string) => [...buttons(tree).entries()].find(([label]) => label.startsWith(text))?.[1];
+describe("Automations page", () => {
+  const failing: RoutineRun = { ...runAt(5, "failed"), id: "fail-1", routineId: "inbox", routineName: "Inbox check", error: "Claude is signed out" };
+  const inbox: Routine = { ...routine, id: "inbox", name: "Inbox check", prompt: "Check the inbox for urgent mail.", nextRunAt: Date.now() + 7_200_000 };
 
-  it("shows the title, the list first, the view switch, History and New trigger", () => {
+  it("shows the title, List · Calendar, and New, and nothing else above the list", () => {
     const tree = page();
     const header = buttons(tree);
-    expect(tree.some((node) => node.type === "h1" && textOf(node.props.children) === "Triggers")).toBe(true);
-    for (const label of ["List", "Day", "Week", "History", "New trigger"]) {
-      expect(header.has(label), label).toBe(true);
-    }
+    expect(tree.some((node) => node.type === "h1" && textOf(node.props.children) === "Automations")).toBe(true);
+    for (const label of ["List", "Calendar", "New"]) expect(header.has(label), label).toBe(true);
+    for (const gone of ["Day", "Week", "History", "Run logs", "All", "Schedules", "Webhooks"]) expect(header.has(gone), gone).toBe(false);
     expect(header.get("List")!["aria-pressed"]).toBe(true);
-    expect(tree.find(named("RoutineList"))).toBeDefined();
-    expect(header.has("Previous dates")).toBe(false);
   });
 
-  it("switches between List, Day and Week, with dates only on the calendar", () => {
+  it("lists each automation as one sentence with a plain status line and a switch", () => {
+    const html = markup(createElement(RoutinesPage, { onBack: vi.fn(), onOpenRoom: vi.fn() }));
+    expect(html).toContain("Every day at 6:30 AM, Runner summarises my inbox and calendar".replace("my inbox", "your inbox"));
+    expect(html).toMatch(/Working · last ran [^<]+ · next [^<]+/);
+    expect(html).not.toMatch(/Latest: |Not run yet|runs OK this week|Run logs/);
+  });
+
+  it("puts Needs you first, with its plain reason and the one button that fixes it", () => {
+    fixture.state = { ...fixture.state!, routines: [routine, inbox], routineRuns: [...runs, failing] };
+    const html = markup(createElement(RoutinesPage, { onBack: vi.fn(), onOpenRoom: vi.fn() }));
+    expect(html.indexOf('data-automation-status="needs-you"')).toBeGreaterThan(-1);
+    expect(html.indexOf('data-automation-status="needs-you"')).toBeLessThan(html.indexOf('data-automation-status="working"'));
+    expect(html).toContain("Needs you: It&#x27;s signed out. Sign in again so it can run.");
+    expect(html).toContain("Sign in</button>");
+  });
+
+  it("opens one simple panel from a sentence", () => {
+    const sentence = [...buttons(page()).keys()].find((label) => label.startsWith("Every day at 6:30"))!;
+    click(buttons(page()).get(sentence));
+    expect(page().find(named("AutomationPanel"))!.props.automation).toMatchObject({ id: routine.id, kind: "schedule" });
+  });
+
+  it("switches to the calendar, where an event opens the same panel", () => {
+    click(buttons(page()).get("Calendar"));
     let tree = page();
-    expect(tree.find(named("CalendarGrid"))).toBeUndefined();
-    click(buttons(tree).get("Day"));
+    const calendar = tree.find(named("AutomationsCalendar"))!;
+    expect(calendar).toBeDefined();
+    (calendar.props.onOpenAutomation as (id: string) => void)(routine.id);
     tree = page();
-    expect(tree.find(named("CalendarGrid"))!.props.days).toBe(1);
-    expect(buttons(tree).get("Day")!["aria-pressed"]).toBe(true);
-    expect(buttons(tree).has("Previous dates")).toBe(true);
-    click(buttons(tree).get("Week"));
-    tree = page();
-    expect(tree.find(named("CalendarGrid"))!.props.days).toBe(7);
-    expect(tree.some((node) => textOf(node.props.children) === calendarRangeLabel(startOfWeek(Date.now()), 7))).toBe(true);
-    click(buttons(tree).get("List"));
-    tree = page();
-    expect(tree.find(named("CalendarGrid"))).toBeUndefined();
-    expect(tree.find(named("RoutineList"))).toBeDefined();
+    expect(tree.find(named("AutomationPanel"))!.props.automation).toMatchObject({ id: routine.id });
   });
 
-  it("keeps the run history one click away", () => {
-    click(buttons(page()).get("History"));
-    expect(page().find(named("RoutineLogs"))).toBeDefined();
+  it("opens the New box, and shows the bot filter only for a long list shared by several bots", () => {
+    click(buttons(page()).get("New"));
+    expect(page().find(named("NewAutomation"))!.props.initialText).toBe("");
+    expect(page().some((node) => node.props["aria-label"] === "All bots")).toBe(false);
+    const many = Array.from({ length: 9 }, (_, index) => ({ ...routine, id: `r${index}`, botId: index % 2 ? bot.id : "other" }));
+    fixture.state = { ...fixture.state!, routines: many, bots: [bot, { ...bot, id: "other", name: "Other" }] };
+    expect(page().some((node) => node.props["aria-label"] === "All bots")).toBe(true);
   });
 
-  it("lists webhooks with the schedules, filtered by kind, with no separate Webhooks tab", () => {
-    fixture.state = { ...fixture.state!, webhooks: [{ id: "hook", endpointId: "wh_x", name: "Interested replies", prompt: "", botId: bot.id, runOn: "maus", enabled: true, createdAt: 0, updatedAt: 0, deliveryCount: 0 }] };
-    let tree = page();
-    expect(buttons(tree).has("Webhooks")).toBe(false);
-    expect(tree.find(named("RoutineList"))).toBeDefined();
-    expect(tree.find(named("WebhookTriggerList"))!.props.webhooks).toHaveLength(1);
-    click(startingWith(tree, "Webhooks"));
-    tree = page();
-    expect(tree.find(named("RoutineList"))).toBeUndefined();
-    expect(tree.find(named("WebhookTriggerList"))).toBeDefined();
-    click(startingWith(tree, "Schedules"));
-    tree = page();
-    expect(tree.find(named("RoutineList"))).toBeDefined();
-    expect(tree.find(named("WebhookTriggerList"))).toBeUndefined();
-  });
-
-  it("asks what starts a new trigger, then opens the plain schedule editor in Simple mode", () => {
-    click(buttons(page()).get("New trigger"));
-    const menu = page();
-    expect(startingWith(menu, "When another app calls a link")).toBeDefined();
-    click(startingWith(menu, "On a schedule"));
-    expect(page().find(named("EventEditor"))!.props.seed).toMatchObject({ kind: "routine", botIds: [] });
-  });
-
-  it("opens the webhook editor from When another app calls a link", () => {
-    click(buttons(page()).get("New trigger"));
-    click(startingWith(page(), "When another app calls a link"));
-    expect(page().find(named("WebhookEditor"))!.props.webhook).toBeUndefined();
-  });
-
-  it("greets an empty workspace with what a trigger is and how to ask a bot for one", () => {
+  it("greets an empty list, and its example fills the New box", () => {
     fixture.state = { ...fixture.state!, routines: [], webhooks: [], routineRuns: [], routinesLoadState: "ready" };
     const html = markup(createElement(RoutinesPage, { onBack: vi.fn(), onOpenRoom: vi.fn() }));
-    expect(html).toContain("No triggers yet");
-    expect(html).toContain("Try telling a bot");
+    expect(html).toContain("Your bots can do things on their own.");
+    expect(html).toContain("Try: every morning, summarize my inbox");
+    click(buttons(page()).get("Try: every morning, summarize my inbox"));
+    expect(page().find(named("NewAutomation"))!.props.initialText).toBe("every morning, summarize my inbox");
   });
 });
 
 describe("routine drawer", () => {
-  it("opens beside the grid when an occurrence is selected and rings it", () => {
-    click(buttons(page()).get("Week"));
-    let tree = page();
-    const grid = tree.find(named("CalendarGrid"))!;
-    const item = routineItem(routine);
-    (grid.props.onOpen as (value: unknown) => void)(item);
-    tree = page();
-    expect(tree.find(named("EventDetails"))!.props.item).toMatchObject({ id: item.id, routine: { id: routine.id } });
-    expect(tree.find(named("CalendarGrid"))!.props.selectedId).toBe(item.id);
-  });
-
   it("shows bot, plain schedule, instructions, where it runs, results and the last three runs", () => {
     const { html } = details(routineItem(routine));
     for (const text of ["Bot", "Runner", "Schedule", scheduleLabel(routine.schedule), "What to do", routine.prompt,

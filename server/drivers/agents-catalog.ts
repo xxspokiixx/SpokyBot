@@ -125,7 +125,7 @@ const ROUTINE_SCHEDULE_SCHEMA = {
 
 // Written out in full on each tool: $ref/$defs do not survive provider conversions.
 const TRIGGER_FIELDS_SCHEMA = {
-  name: { type: "string", minLength: 1, maxLength: 80, description: "Short name shown on the trigger card and the Triggers page." },
+  name: { type: "string", minLength: 1, maxLength: 80, description: "Short name shown on the automation's card and the Automations page." },
   instructions: {
     type: "string",
     minLength: 1,
@@ -638,7 +638,7 @@ const TOOL_DEFINITIONS = [
   {
     name: "create_trigger",
     description:
-      "Set up work that happens on its own: when <something happens>, a bot does <instructions>. Call it in this turn whenever the person describes recurring or event-based work (\"every morning send me…\", \"when another app calls…\"); never ask for confirmation first. It applies at once and the person sees a card with Edit, Pause and Undo. when=schedule runs on a time rule (call list_triggers first for relative dates: it has the authoritative time and timezone); when=webhook gives a link another app calls (the person copies it from the card; you never see its secret). Something to do once, now, is not a trigger. for_bot_id: a trigger for ANOTHER bot in your section, which keeps that bot's engine and permissions.",
+      "Set up work that happens on its own: when <something happens>, a bot does <instructions>. Call it in this turn whenever the person describes recurring or event-based work (\"every morning send me…\", \"when another app calls…\"); never ask for confirmation first. It applies at once and the person sees a card with Edit, Pause and Undo. when=schedule runs on a time rule (call list_triggers first for relative dates: it has the authoritative time and timezone); when=webhook gives an address another app sends to (the person copies it from the card; you never see its secret). To the person these are automations. Something to do once, now, is not a trigger. for_bot_id: a trigger for ANOTHER bot in your section, which keeps that bot's engine and permissions.",
     inputSchema: {
       type: "object",
       additionalProperties: false,

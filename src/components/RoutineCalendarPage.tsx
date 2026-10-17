@@ -321,14 +321,14 @@ export function EventEditor({
   lockedBotId,
   defaultRunOn,
   routinesOnly = false,
-  onClose,
+  plain = false, onClose,
   onSavedCall,
 }: {
   seed: EventSeed;
   bots: Bot[];
   lockedBotId?: string;
   defaultRunOn?: RoutineRunOn;
-  routinesOnly?: boolean;
+  routinesOnly?: boolean; plain?: boolean;
   onClose: () => void;
   onSavedCall: (call: CalendarCall) => void;
 }) {
@@ -583,7 +583,7 @@ export function EventEditor({
     && !cron?.error,
   );
   const canSwitchKind = !routinesOnly && !existingRoutine && !existingCall && !lockedBotId;
-  const advanced = useAdvancedMode();
+  const advanced = useAdvancedMode() && !plain;
   const [moreOpen, setMoreOpen] = useState(() => !(["none", "daily", "weekdays", "weekly"] as RecurrenceChoice[]).includes(recurrence)
     || routineTarget === "room-goal"
     || attachments.length > 0
@@ -883,7 +883,7 @@ export function EventEditor({
             </div>
           );
   const headerTitle = !advanced && kind === "routine"
-    ? t(existingRoutine ? "routines.editor.edit" : "routines.editor.new")
+    ? t(plain ? (existingRoutine ? "automations.editor.edit" : "automations.editor.new") : existingRoutine ? "routines.editor.edit" : "routines.editor.new")
     : existingRoutine || existingCall ? "Edit event" : "New event";
   const repeatChoices = [
     ["none", "routines.repeat.once"],
@@ -1225,7 +1225,7 @@ function CalendarEventCard({
   const ownerIds = isCall ? item.call.botIds : [run?.botId ?? routine?.botId ?? ""];
   const ownerBots = ownerIds.flatMap((id) => bots.find((bot) => bot.id === id) ?? []);
   const primary = ownerBots[0];
-  const name = isCall ? item.call.name : run?.routineName ?? routine?.name ?? "Routine";
+  const name = isCall ? item.call.name : run?.routineName ?? routine?.name ?? "Automation";
   const color = isCall ? "var(--color-accent)" : primary ? MAUS_COLORS[primary.color] : "var(--color-ink-tertiary)";
   const paused = Boolean(routine && !run && !routine.enabled);
   const [previewDuration, setPreviewDuration] = useState(item.durationMinutes);
@@ -1266,7 +1266,7 @@ function CalendarEventCard({
       data-event-card
       type="button"
       draggable={canMove}
-      title={routine?.schedule.type === "cron" ? "Open this routine to edit its repeating schedule and time zone." : undefined}
+      title={routine?.schedule.type === "cron" ? "Open this automation to change its repeating schedule and time zone." : undefined}
       onDragStart={(event) => {
         if (!canMove) return event.preventDefault();
         event.dataTransfer.effectAllowed = "move";
@@ -1298,7 +1298,7 @@ function CalendarEventCard({
         {previewDuration >= 30 && (isCall ? <Video size={compact ? 11 : 13} className="mt-0.5 shrink-0" /> : primary ? <BotAvatar bot={primary} state={status ? statusState(status) : paused ? "sleeping" : "idle"} size={compact ? 18 : 22} animated={status === "running" || status === "waiting"} /> : null)}
         <div className="min-w-0 flex-1">
           <div className={cn("truncate text-[11px] font-semibold", previewDuration < 30 ? "leading-none" : "leading-tight")}>{name}</div>
-          {previewDuration >= 30 && <div className="mt-0.5 truncate text-[9.5px] opacity-80">{niceTime(item.at)} · {paused ? t("routines.pausedSchedule") : intervalCadence ?? (isCall ? `${ownerBots.length} bot${ownerBots.length === 1 ? "" : "s"}` : isRoomGoal ? `Team goal · ${room?.name ?? "Group"}${statusLabel ? ` · ${statusLabel}` : ""}` : statusLabel ?? primary?.name)}</div>}
+          {previewDuration >= 30 && <div className="mt-0.5 flex min-w-0 items-center gap-1 text-[9.5px] opacity-80">{!isCall && <span data-event-status={paused ? "paused" : status === "failed" || status === "missed" || status === "waiting" ? "needs-you" : "working"} className={cn("size-1.5 shrink-0 rounded-full", paused ? "bg-ink-tertiary" : status === "failed" || status === "missed" || status === "waiting" ? "bg-warning" : "bg-success")} />}<span className="truncate">{niceTime(item.at)} · {isCall ? `${ownerBots.length} bot${ownerBots.length === 1 ? "" : "s"}` : isRoomGoal ? room?.name ?? "Group" : intervalCadence ? `${primary?.name ?? ""} · ${intervalCadence}` : primary?.name}</span></div>}
         </div>
         {previewDuration >= 30 && ownerBots.length > 1 && <span className="rounded bg-inset/60 px-1 py-0.5 text-[8px]">+{ownerBots.length - 1}</span>}
       </div>
@@ -1743,13 +1743,13 @@ export function RoutineEditor({
   routine,
   bots,
   lockedBotId,
-  defaultRunOn,
+  defaultRunOn, plain,
   onClose,
 }: {
   routine?: Routine;
   bots: Bot[];
   lockedBotId?: string;
-  defaultRunOn?: RoutineRunOn;
+  defaultRunOn?: RoutineRunOn; plain?: boolean;
   onClose: () => void;
 }) {
   const at = routine?.schedule.type === "once"
@@ -1761,5 +1761,5 @@ export function RoutineEditor({
       : routine?.schedule.type === "cron"
         ? routine.nextRunAt ?? nextHour()
       : nextHour();
-  return <EventEditor seed={{ kind: "routine", at, durationMinutes: routine?.durationMinutes ?? 30, botIds: lockedBotId ? [lockedBotId] : routine ? [routine.botId] : [], routine }} bots={bots} lockedBotId={lockedBotId} defaultRunOn={defaultRunOn} onClose={onClose} onSavedCall={() => {}} />;
+  return <EventEditor seed={{ kind: "routine", at, durationMinutes: routine?.durationMinutes ?? 30, botIds: lockedBotId ? [lockedBotId] : routine ? [routine.botId] : [], routine }} bots={bots} lockedBotId={lockedBotId} defaultRunOn={defaultRunOn} plain={plain} onClose={onClose} onSavedCall={() => {}} />;
 }

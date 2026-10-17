@@ -1,6 +1,6 @@
 // Webhook triggers a bot makes or changes from chat. Every change applies at once (OpenMausBot adds no confirmation
 // card of its own); the conversation gets a receipt card with Undo. A bot-made webhook's secret is never shown to the
-// bot: the person copies the link from the card or the Triggers page, which mints it then.
+// bot: the person copies the address from the card or the Automations page, which mints it then.
 import { z } from "zod";
 
 import type { WebhookRequestCardData, WebhookRequestDefinition, WebhookRequestOperation, WebhookRequestSnapshot } from "../shared/webhook-request.ts";
@@ -97,17 +97,17 @@ function managerInput(definition: Partial<WebhookRequestDefinition>) {
 /** What the card and the tool result say the trigger does, credential-scrubbed. */
 export function webhookTriggerSentence(webhook: Pick<WebhookTrigger, "prompt" | "eventTypes">, botName: string): string {
   const instructions = redactSecretsInText(webhook.prompt).trim();
-  const events = webhook.eventTypes?.length ? ` (only ${webhook.eventTypes.join(", ")} events)` : "";
-  return `When its link is called${events}, ${botName} ${instructions ? `follows: ${instructions.slice(0, 400)}` : "does the task each call sends"}`;
+  const events = webhook.eventTypes?.length ? ` (only ${webhook.eventTypes.join(", ")})` : "";
+  return `When another app sends something${events}, ${botName} ${instructions ? `follows: ${instructions.slice(0, 400)}` : "does what it is asked"}`;
 }
 
 const ACTION_TITLE: Record<WebhookRequestOperation["action"], string> = {
-  create: "Webhook trigger created",
-  update: "Webhook trigger changed",
-  pause: "Webhook trigger paused",
-  resume: "Webhook trigger resumed",
-  run_now: "Webhook trigger tested",
-  delete: "Webhook trigger deleted",
+  create: "Automation set up",
+  update: "Automation changed",
+  pause: "Automation paused",
+  resume: "Automation resumed",
+  run_now: "Automation ran once",
+  delete: "Automation deleted",
 };
 
 interface WebhookRequestServiceOptions {

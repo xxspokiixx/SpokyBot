@@ -1,142 +1,90 @@
 import { lazy, Suspense, useState } from "react";
-import { CalendarClock, Check, Copy, ExternalLink, Pause, Pencil, Play, Undo2, Webhook, Zap } from "lucide-react";
+import { Undo2, Zap } from "lucide-react";
 
+import { automationFor, automationSentence, automationStatus, cardAutomation, lastWhen, nextWhen, runLine } from "@/lib/automations";
 import { cn } from "@/lib/cn";
-import { copyText } from "@/lib/copy-text";
-import { routineRunLabel, routineRunTone } from "@/lib/routine-display";
-import { useShowThreads } from "@/lib/thread-preferences";
-import { cardTrigger, fireSummary, triggerView } from "@/lib/triggers";
-import { loadWebhookCredentials, saveWebhookCredential, webhookCredentialStore } from "@/lib/webhook-credentials";
-import { niceTime } from "@/lib/schedule-label";
-import type { WebhookCredential } from "@/lib/webhooks";
-import { api, ApiError, openBotThread, useStore, type OptionCardData } from "@/state/store";
+import { t } from "@/lib/i18n";
+import { saveWebhookCredential, webhookCredentialStore } from "@/lib/webhook-credentials";
+import { api, ApiError, useStore, type OptionCardData } from "@/state/store";
+import { useAutomationActions } from "./automations/actions";
 
-// The editors live with the Triggers page; a chat only loads one when Edit is pressed.
+// The editors live with the Automations page; a chat only loads one when Edit is pressed.
 const RoutineEditor = lazy(async () => ({ default: (await import("./RoutinesPage")).RoutineEditor }));
 const WebhookEditor = lazy(async () => ({ default: (await import("./WebhookTrigger")).WebhookEditor }));
 
-const ACTION = "inline-flex h-7 items-center gap-1.5 rounded-full px-2.5 text-[12.5px] font-medium hover:bg-inset focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus disabled:opacity-50";
+const ACTION = "rounded-md px-1.5 py-0.5 font-medium hover:bg-inset focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus disabled:opacity-50";
 
-/** The live card a trigger made in chat leaves in the conversation: what fires it, who does what, and what happened last. */
+/** What a chat-made automation leaves in the conversation: one sentence, what happens next or what happened last. */
 export function TriggerCard({ card, threadId }: { card: OptionCardData; threadId?: string }) {
   const { state, dispatch } = useStore();
-  const showThreads = useShowThreads();
+  const actions = useAutomationActions();
   const [editing, setEditing] = useState(false);
-  const [busy, setBusy] = useState<"undo" | "pause" | "copy" | null>(null);
-  const [copied, setCopied] = useState(false);
+  const [undoing, setUndoing] = useState(false);
   const [error, setError] = useState<string>();
-  const ref = cardTrigger(card);
+  const ref = cardAutomation(card);
   if (!ref) return null;
-  const view = triggerView(ref, { routines: state.routines, webhooks: state.webhooks, runs: state.routineRuns });
-  const routine = ref.kind === "schedule" ? state.routines.find((candidate) => candidate.id === ref.id) : undefined;
-  const webhook = ref.kind === "webhook" ? state.webhooks.find((candidate) => candidate.id === ref.id) : undefined;
-  const name = view?.name ?? card.routineRequest?.undo?.name ?? card.webhookRequest?.undo?.name ?? card.title;
+  const automation = automationFor(ref, { routines: state.routines, webhooks: state.webhooks, runs: state.routineRuns });
+  const fallbackName = card.routineRequest?.undo?.name ?? card.webhookRequest?.undo?.name ?? card.title;
 
-  if (card.undone || !view) {
-    const loading = !card.undone && (ref.kind === "schedule" ? state.routinesLoadState === "loading" : false);
-    if (loading) return null;
+  if (card.undone || !automation) {
+    if (!card.undone && ref.kind === "schedule" && state.routinesLoadState === "loading") return null;
     return (
       <div data-trigger-card={ref.id} className="flex w-full max-w-[840px] items-center gap-2 text-[12.5px] text-ink-tertiary">
         {card.undone ? <Undo2 size={13} /> : <Zap size={13} />}
-        <span>{card.undone ? `Trigger “${name}” removed · undone` : `Trigger “${name}” no longer exists`}</span>
+        <span>{card.undone ? t("automations.card.removed") : `${t("automations.card.gone")} · ${fallbackName}`}</span>
       </div>
     );
   }
 
-  const bot = state.bots.find((candidate) => candidate.id === view.botId);
-  const last = view.lastFire;
+  const botName = state.bots.find((bot) => bot.id === automation.botId)?.name ?? t("routines.unavailableBot");
+  const sentence = automationSentence(automation, botName);
+  const status = automationStatus(automation);
+  const last = automation.runs.find((run) => run.status !== "queued");
+  const next = automation.nextRunAt != null ? nextWhen(automation.nextRunAt) : null;
+  let line: string;
+  if (status.state === "paused") line = t("automations.status.paused");
+  else if (status.state === "needs-you") line = t("automations.needsYou", { reason: status.reason ?? "" });
+  else if (last) {
+    const result = runLine(last);
+    line = [`${t("automations.card.lastRan", { when: lastWhen(last.startedAt ?? last.scheduledFor) })} ${result.mark} ${result.text}`, next && t("automations.next", { when: next })].filter(Boolean).join(" · ");
+  } else line = next ? t("automations.card.next", { when: next }) : t("automations.notRunYet");
+
   const undo = () => {
-    if (!threadId || !card.requestId || busy) return;
-    setBusy("undo");
+    if (!threadId || !card.requestId || undoing) return;
+    setUndoing(true);
     setError(undefined);
     api(`/api/threads/${threadId}/undo`, { method: "POST", body: JSON.stringify({ requestId: card.requestId }) })
       .catch((failure: unknown) => setError(failure instanceof ApiError && failure.body?.code === "changed-since"
-        ? "It changed since, so it can't be undone here. Change it on the Triggers page."
-        : `Couldn't undo: ${failure instanceof Error ? failure.message : String(failure)}`))
-      .finally(() => setBusy(null));
+        ? t("automations.card.changedSince")
+        : failure instanceof Error ? failure.message : String(failure)))
+      .finally(() => setUndoing(false));
   };
-  const togglePause = () => {
-    if (busy) return;
-    setError(undefined);
-    if (routine) return dispatch({ type: "updateRoutine", routineId: routine.id, patch: { enabled: !routine.enabled } });
-    if (!webhook) return;
-    setBusy("pause");
-    api(`/api/webhooks/${webhook.id}`, { method: "PATCH", body: JSON.stringify({ enabled: !webhook.enabled, verificationPending: false }) })
-      .then((response) => dispatch({ type: "webhookPatched", webhook: response.webhook }))
-      .catch((failure: unknown) => setError(failure instanceof Error ? failure.message : String(failure)))
-      .finally(() => setBusy(null));
-  };
-  const copyLink = async () => {
-    if (!webhook || busy) return;
-    setBusy("copy");
-    setError(undefined);
-    try {
-      let credential: WebhookCredential | undefined = loadWebhookCredentials(webhookCredentialStore())[webhook.id];
-      if (!credential) {
-        // A bot-made webhook has no usable secret until the person asks for its link: this mints it, once.
-        const response = await api(`/api/webhooks/${webhook.id}/rotate`, { method: "POST" });
-        credential = response.credential as WebhookCredential;
-        dispatch({ type: "webhookPatched", webhook: response.webhook });
-        saveWebhookCredential(webhookCredentialStore(), webhook.id, credential);
-      }
-      if (await copyText(credential.url) !== "copied") throw new Error("Couldn't copy the link");
-      setCopied(true);
-      setTimeout(() => setCopied(false), 1_800);
-    } catch (failure) {
-      setError(failure instanceof Error ? failure.message : String(failure));
-    } finally {
-      setBusy(null);
-    }
-  };
-  const status = !view.enabled ? "Paused" : last ? undefined : view.next ?? "Waiting for its first run";
-  const visibleBots = state.bots.filter((candidate) => !candidate.hidden);
+  const visibleBots = state.bots.filter((bot) => !bot.hidden);
 
   return (
-    <section
-      data-trigger-card={view.id}
-      aria-label={`Trigger: ${view.name}`}
-      className={cn("w-full max-w-[640px] rounded-2xl border bg-card px-4 py-3.5", view.enabled ? "border-accent/35" : "border-hairline/40")}
-    >
-      <div className="flex items-center gap-2 text-[11.5px] font-semibold uppercase tracking-wider text-ink-tertiary">
-        <Zap size={13} className={view.enabled ? "text-accent" : undefined} />
-        <span>{view.enabled ? "Trigger on" : "Trigger paused"}</span>
-        <button type="button" onClick={() => dispatch({ type: "showRoutines", view: "list", routineId: view.id })} className="ml-auto flex items-center gap-1 rounded-md px-1.5 py-0.5 text-[11.5px] font-medium normal-case tracking-normal text-accent-text hover:bg-inset">Open in Triggers<ExternalLink size={11} /></button>
+    <section data-trigger-card={automation.id} data-automation-status={status.state} aria-label={sentence} className="w-full max-w-[640px] rounded-xl border border-hairline/45 bg-card px-3.5 py-2.5 text-[13px]">
+      <div className="flex items-start gap-2">
+        <Zap size={14} className={cn("mt-0.5 shrink-0", status.state === "needs-you" ? "text-warning" : automation.enabled ? "text-accent" : "text-ink-tertiary")} />
+        <button type="button" onClick={() => dispatch({ type: "showRoutines", view: "list", routineId: automation.id })} className="min-w-0 text-left font-medium leading-snug text-ink hover:text-accent-text">
+          {t("automations.card.setUp", { sentence })}
+        </button>
       </div>
-      <div className="mt-2 flex items-start gap-2.5">
-        <span className="mt-0.5 flex size-7 shrink-0 items-center justify-center rounded-lg bg-accent/10 text-accent">{view.kind === "schedule" ? <CalendarClock size={14} /> : <Webhook size={14} />}</span>
-        <div className="min-w-0">
-          <div className="text-[14px] font-semibold text-ink">{view.name}</div>
-          <div className="mt-0.5 text-[12.5px] text-ink-secondary">{view.when}</div>
-          <div className="mt-1 line-clamp-2 text-[12.5px] leading-relaxed text-ink">
-            <span className="font-medium">→ {bot?.name ?? "A bot"}</span> {view.instructions ? view.instructions : "does the task each call sends"}
-          </div>
-        </div>
+      <div className="mt-1 flex items-center gap-2 pl-[22px] text-[12px]">
+        <span className={cn("min-w-0 flex-1 truncate", status.state === "needs-you" ? "text-warning" : "text-ink-secondary")} title={line}>{line}</span>
+        <span className="flex shrink-0 items-center gap-0.5 text-ink-secondary">
+          <button type="button" onClick={() => actions.toggle(automation)} className={ACTION}>{automation.enabled ? t("automations.pause") : t("automations.resume")}</button>
+          <span aria-hidden="true">·</span>
+          <button type="button" onClick={() => setEditing(true)} className={ACTION}>{t("automations.edit")}</button>
+          {automation.kind === "webhook" && <><span aria-hidden="true">·</span><button type="button" disabled={Boolean(actions.busy)} onClick={() => void actions.copyAddress(automation.id)} className={ACTION}>{actions.copied === automation.id ? t("automations.address.copied") : t("automations.address.copy")}</button></>}
+          {threadId && card.requestId && <><span aria-hidden="true">·</span><button type="button" onClick={undo} disabled={undoing} className={cn(ACTION, "text-accent")}>{undoing ? t("automations.card.undoing") : t("automations.card.undo")}</button></>}
+        </span>
       </div>
-      <div className="mt-2.5 min-h-5 text-[12.5px]" aria-live="polite">
-        {last ? (
-          <>
-            <div className="flex flex-wrap items-center gap-x-1.5 gap-y-0.5">
-              <span className="text-ink-secondary">Last fired {niceTime(last.startedAt ?? last.scheduledFor)} ·</span>
-              <span className={routineRunTone(last)}>{last.status === "waiting" ? "Needs your input" : routineRunLabel(last)}</span>
-              {last.threadId && bot && <button type="button" onClick={() => openBotThread(dispatch, bot, last.threadId!, showThreads)} className="rounded-md px-1 font-medium text-accent-text hover:bg-inset">Open</button>}
-              {view.firesToday > 1 && <span className="text-ink-tertiary">· {view.firesToday} today</span>}
-              {view.enabled && view.next && <span className="text-ink-tertiary">· {view.next}</span>}
-            </div>
-            {fireSummary(last) && <p className="mt-0.5 line-clamp-2 text-ink-secondary">{fireSummary(last)}</p>}
-          </>
-        ) : <span className="text-ink-secondary">{status}</span>}
-      </div>
-      {error && <div role="alert" className="mt-1.5 text-[12px] text-warning">{error}</div>}
-      <div className="mt-2 flex flex-wrap items-center gap-1 border-t border-hairline/30 pt-2">
-        <button type="button" onClick={() => setEditing(true)} className={cn(ACTION, "text-ink")}><Pencil size={13} />Edit</button>
-        <button type="button" onClick={togglePause} disabled={busy === "pause"} className={cn(ACTION, "text-ink")}>{view.enabled ? <Pause size={13} /> : <Play size={13} />}{view.enabled ? "Pause" : "Resume"}</button>
-        {webhook && <button type="button" onClick={() => void copyLink()} disabled={busy === "copy"} className={cn(ACTION, "text-ink")}>{copied ? <Check size={13} className="text-success" /> : <Copy size={13} />}{copied ? "Copied" : "Copy link"}</button>}
-        {threadId && card.requestId && <button type="button" onClick={undo} disabled={busy === "undo"} className={cn(ACTION, "text-accent")}><Undo2 size={13} />{busy === "undo" ? "Undoing…" : "Undo"}</button>}
-      </div>
+      {(error || actions.error) && <div role="alert" className="mt-1 pl-[22px] text-[12px] text-warning">{error ?? actions.error}</div>}
       {editing && (
         <Suspense fallback={null}>
-          {routine && <RoutineEditor routine={routine} bots={visibleBots} onClose={() => setEditing(false)} />}
-          {webhook && <WebhookEditor webhook={webhook} bots={visibleBots} onClose={() => setEditing(false)} onCredential={(credential, id) => saveWebhookCredential(webhookCredentialStore(), id, credential)} />}
+          {automation.kind === "schedule"
+            ? <RoutineEditor routine={state.routines.find((routine) => routine.id === automation.id)} bots={visibleBots} plain onClose={() => setEditing(false)} />
+            : <WebhookEditor webhook={state.webhooks.find((webhook) => webhook.id === automation.id)} bots={visibleBots} onClose={() => setEditing(false)} onCredential={(credential, id) => saveWebhookCredential(webhookCredentialStore(), id, credential)} />}
         </Suspense>
       )}
     </section>

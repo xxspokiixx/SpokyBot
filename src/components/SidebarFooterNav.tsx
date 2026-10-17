@@ -69,7 +69,7 @@ export function SidebarTriggersRow({ density }: { density: SidebarDensity }) {
     <div className={iconsOnly ? "mb-1" : "mb-1.5"}>
       <NavRow
         id="triggers"
-        label={t("sidebar.nav.triggers")}
+        label={t("sidebar.nav.automations")}
         tourId="nav-automations"
         iconsOnly={iconsOnly}
         active={active}

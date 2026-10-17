@@ -1,5 +1,5 @@
 // The trigger tools a bot uses from chat: list_triggers, create_trigger and manage_trigger. Every change applies at
-// once (no confirmation card); the harness records it on a trigger card with Edit, Pause and Undo.
+// once (no confirmation card); the harness records it on the automation's card with Pause, Edit and Undo.
 import { normalizeCronSchedule } from "../../shared/routine-schedule.ts";
 
 import type { ToolCallContext, ToolCallResult } from "./agents-call.ts";

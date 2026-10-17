@@ -12,7 +12,7 @@ import { cronScheduleLabel } from "../../shared/cron-label";
 import { PROFILE_REQUEST_FIELDS, type ProfileRequestField } from "../../shared/profile-request";
 import type { RoutineRequestSchedule } from "../../shared/routine-request";
 import type { SkillShareRecord } from "../../shared/skill-request";
-import { cardTrigger } from "@/lib/triggers";
+import { cardAutomation } from "@/lib/automations";
 import { TriggerCard } from "./TriggerCard";
 
 interface ToolLabels {
@@ -28,27 +28,19 @@ const ROUTINE_SETTLED_LABEL = {
   delete: "approval.status.routineDeleted",
 } as const;
 
-const WEBHOOK_APPLIED_LINE = {
-  create: "approval.applied.webhook.create",
-  update: "approval.applied.webhook.update",
-  pause: "approval.applied.webhook.pause",
-  resume: "approval.applied.webhook.resume",
-  run_now: "approval.applied.webhook.runNow",
-  delete: "approval.applied.webhook.delete",
-} as const;
-
 const SKILL_SETTLED_LABEL = {
   create: "approval.status.skillEnabled",
   update: "approval.status.skillUpdated",
 } as const;
 
-const ROUTINE_APPLIED_LINE = {
-  create: "approval.applied.routine.create",
-  update: "approval.applied.routine.update",
-  pause: "approval.applied.routine.pause",
-  resume: "approval.applied.routine.resume",
-  run_now: "approval.applied.routine.runNow",
-  delete: "approval.applied.routine.delete",
+/** Schedules and webhooks alike are "automations" to a person. */
+const AUTOMATION_APPLIED_LINE = {
+  create: "approval.applied.automation.create",
+  update: "approval.applied.automation.update",
+  pause: "approval.applied.automation.pause",
+  resume: "approval.applied.automation.resume",
+  run_now: "approval.applied.automation.runNow",
+  delete: "approval.applied.automation.delete",
 } as const;
 
 const SKILL_APPLIED_LINE = {
@@ -149,12 +141,12 @@ export function appliedChange(card: OptionCardData, name: string): { line: strin
         : operation.action === "pause" || operation.action === "resume" ? undo?.appliedUpdatedAt !== undefined
           : operation.action === "delete" ? Boolean(undo?.before)
             : false;
-    return { line: t(ROUTINE_APPLIED_LINE[operation.action], { name, title }), canUndo };
+    return { line: t(AUTOMATION_APPLIED_LINE[operation.action], { name, title }), canUndo };
   }
   const webhook = card.webhookRequest;
   if (webhook) {
     const target = webhook.operation.forBot ? ` · ${t("approval.applied.forBot", { target: `@${webhook.operation.forBot.name}` })}` : "";
-    return { line: t(WEBHOOK_APPLIED_LINE[webhook.operation.action], { name, title: `${webhook.undo?.name ?? ""}${target}` }), canUndo: webhook.operation.action !== "run_now" };
+    return { line: t(AUTOMATION_APPLIED_LINE[webhook.operation.action], { name, title: `${webhook.undo?.name ?? ""}${target}` }), canUndo: webhook.operation.action !== "run_now" };
   }
   const skill = card.skillRequest;
   if (skill) {
@@ -408,7 +400,7 @@ export function ApprovalCard({
 }) {
   const card = message.card;
   if (!card) return null;
-  if (cardTrigger(card)) return <TriggerCard card={card} threadId={threadId} />;
+  if (cardAutomation(card)) return <TriggerCard card={card} threadId={threadId} />;
   const applied = card.autoApplied === true && card.answered === "allow" && !card.held
     ? appliedChange(card, bot?.name ?? t("approval.someone"))
     : undefined;

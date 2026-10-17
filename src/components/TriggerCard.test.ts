@@ -65,44 +65,39 @@ beforeEach(() => {
   fixture.state = { bots: [bot], routines: [routine], webhooks: [webhook], routineRuns: [], routinesLoadState: "ready" };
 });
 
-describe("the live trigger card a chat-made trigger leaves", () => {
-  it("shows what fires it, who does what, and the next run, with Edit, Pause and Undo — never a confirmation", () => {
+describe("the chat card a bot-made automation leaves", () => {
+  const sentence = "Every weekday at 9 AM, Scout summarizes the inbox and posts the three priorities";
+
+  it("says what was set up in one sentence, what happens next, and offers Pause, Edit and Undo — never a confirmation", () => {
     const html = render(scheduleCard);
     expect(html).toContain('data-trigger-card="routine-1"');
-    expect(html).toContain("Trigger on");
-    expect(html).toContain("Morning brief");
-    expect(html).toContain("→ Scout");
-    expect(html).toContain("Summarize the inbox");
-    expect(html).toContain("Next ");
-    for (const label of ["Edit", "Pause", "Undo"]) expect(html).toContain(`${label}</button>`);
-    expect(html).not.toMatch(/Confirm|Waiting for your confirmation/);
+    expect(html).toContain(`Set up: ${sentence}`);
+    expect(html).toContain("Next: ");
+    for (const label of ["Pause", "Edit", "Undo"]) expect(html).toContain(`${label}</button>`);
+    expect(html).not.toMatch(/TRIGGER ON|Trigger on|Open in Triggers|Confirm/);
   });
 
-  it("updates as runs come in: last fired, its result, and how many today", () => {
+  it("updates as runs come in: last ran, its one-line result and the next run, on one line", () => {
     fixture.state.routineRuns = [
       { id: "run-2", routineId: "routine-1", botId: "bot-1", status: "completed", scheduledFor: now - 60_000, startedAt: now - 60_000, createdAt: now - 60_000, threadId: "exec-2", output: "Three priorities: invoices, hiring, launch.\nMore detail." },
-      { id: "run-1", routineId: "routine-1", botId: "bot-1", status: "failed", scheduledFor: now - 120_000, startedAt: now - 120_000, createdAt: now - 120_000, error: "Gmail token expired" },
     ];
     const html = render(scheduleCard);
-    expect(html).toContain("Last fired");
-    expect(html).toContain("Completed");
-    expect(html).toContain("Three priorities: invoices, hiring, launch.");
+    expect(html).toMatch(/Last ran today [^<]* ✓ Three priorities: invoices, hiring, launch\. · next /);
     expect(html).not.toContain("More detail.");
-    expect(html).toContain("2 today");
-    expect(html).toContain("Open</button>");
+    expect(html).not.toContain("Next: ");
   });
 
-  it("says when a run needs the person", () => {
+  it("says Needs you with the plain reason when a run is waiting on the person", () => {
     fixture.state.routineRuns = [{ id: "run-3", routineId: "routine-1", botId: "bot-1", status: "waiting", attention: "Approve the reply to Ada?", scheduledFor: now, createdAt: now }];
-    expect(render(scheduleCard)).toContain("Needs your input");
+    expect(render(scheduleCard)).toContain("Needs you: It&#x27;s waiting for your answer.");
   });
 
-  it("pauses through the store, and reads Trigger paused with Resume once paused", () => {
+  it("pauses through the store, and says Paused with Resume once paused", () => {
     click(scheduleCard, "Pause");
     expect(fixture.dispatch).toHaveBeenCalledWith({ type: "updateRoutine", routineId: "routine-1", patch: { enabled: false } });
     fixture.state.routines = [{ ...routine, enabled: false }];
     const html = render(scheduleCard);
-    expect(html).toContain("Trigger paused");
+    expect(html).toContain(">Paused<");
     expect(html).toContain("Resume</button>");
   });
 
@@ -111,32 +106,31 @@ describe("the live trigger card a chat-made trigger leaves", () => {
     expect(fixture.api).toHaveBeenCalledWith("/api/threads/thread-1/undo", { method: "POST", body: JSON.stringify({ requestId: "request-1" }) });
   });
 
-  it("opens the trigger's drawer on the Triggers page", () => {
-    click(scheduleCard, "Open in Triggers");
+  it("opens the automation's panel on the Automations page from the sentence itself", () => {
+    click(scheduleCard, `Set up: ${sentence}`);
     expect(fixture.dispatch).toHaveBeenCalledWith({ type: "showRoutines", view: "list", routineId: "routine-1" });
   });
 
-  it("shows a webhook trigger waiting for its first call, with Copy link and no secret on the card", () => {
+  it("says when another app sends something, offers Copy address, and shows no address or secret on the card", () => {
     const html = render(webhookCard);
-    expect(html).toContain('data-trigger-card="hook-1"');
-    expect(html).toContain("When its link is called");
-    expect(html).toContain("Waiting for the first call");
-    expect(html).toContain("Copy link</button>");
-    expect(html).not.toMatch(/whsec_|wh_abc/);
+    expect(html).toContain("Set up: When another app sends something, Scout drafts a follow-up for the lead");
+    expect(html).toContain("hasn&#x27;t run yet");
+    expect(html).toContain("Copy address</button>");
+    expect(html).not.toMatch(/whsec_|wh_abc|webhook/i);
   });
 
-  it("pauses a webhook trigger through its own API", async () => {
+  it("pauses one another app sends to through its own API", async () => {
     fixture.api.mockResolvedValue({ webhook: { ...webhook, enabled: false } });
     click(webhookCard, "Pause");
     await vi.waitFor(() => expect(fixture.dispatch).toHaveBeenCalledWith({ type: "webhookPatched", webhook: { ...webhook, enabled: false } }));
     expect(fixture.api).toHaveBeenCalledWith("/api/webhooks/hook-1", { method: "PATCH", body: JSON.stringify({ enabled: false, verificationPending: false }) });
   });
 
-  it("collapses to one muted line once undone, or when the trigger is gone", () => {
-    expect(render({ ...scheduleCard, card: { ...scheduleCard.card!, undone: true } })).toContain("Trigger “Morning brief” removed · undone");
+  it("collapses to one muted line once undone, or when the automation is gone", () => {
+    expect(render({ ...scheduleCard, card: { ...scheduleCard.card!, undone: true } })).toContain("Automation removed · undone");
     fixture.state.routines = [];
     const gone = render(scheduleCard);
-    expect(gone).toContain("no longer exists");
+    expect(gone).toContain("This automation no longer exists");
     expect(gone).not.toContain("Pause</button>");
   });
 });
