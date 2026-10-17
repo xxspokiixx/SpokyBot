@@ -1,17 +1,15 @@
-// X research routes: the four internal calls behind the agents server's x_*
-// tools.
+// The internal calls behind the agents server's x_* and research_* tools.
 //
-// The internal handler runs inside index.ts's /api/internal/ block, after the
-// capability bearer is checked (the route table runs before that block). It
-// still re-checks the Cloud plan's credential and the bot's own switch on every
-// call: the tool list a bot was shown at the start of its turn is not
-// permission to spend. The Admin's relay checks the plan again.
+// The handler runs inside index.ts's /api/internal/ block, after the capability bearer is checked (the route table runs
+// before that block). It re-checks the credential and the bot's own switch on every call: the tool list a bot was shown
+// at the start of its turn is not permission to spend.
 import type { ServerResponse } from "node:http";
 import { z } from "zod";
 import type { json as sendJson } from "../harness/http.ts";
 import type { ServiceCredential } from "../included-services.ts";
+import { costLine, createResearchClient, RESEARCH_ID, RESEARCH_SEARCH_MAX, type ResearchClient } from "../research.ts";
 import {
-  createXRelayClient,
+  createXClient,
   DEFAULT_POSTS,
   MAX_POSTS,
   normalizeHandle,
@@ -24,12 +22,13 @@ import {
 import { PASS } from "./table.ts";
 
 export interface XResearchDeps {
-  /** The included relay credential (included-services.ts xCredential), read per request. */
+  /** The person's own treg key, else the plan's relay credential (researchCredential), read per request. */
   credential: () => ServiceCredential | null;
-  /** bot.xResearch === true */
+  /** The bot's research switch: on unless switched off. */
   botEnabled: (botId: string) => boolean;
-  /** Tests pass a fake; the server builds the real client per call. */
+  /** Tests pass fakes; the server builds the real clients per call. */
   client?: (credential: ServiceCredential) => XResearchClient;
+  research?: (credential: ServiceCredential) => ResearchClient;
   /** This server is a Cloud home: a refused relay token is the Admin's to replace, not a sign-in to redo. */
   cloudHome?: boolean;
 }
@@ -45,8 +44,10 @@ export interface XInternalContext {
   readBody: () => Promise<unknown>;
 }
 
-const PREFIX = "/api/internal/x/";
-const ACTIONS = new Set(["search", "user-posts", "post", "profile"]);
+const X_PREFIX = "/api/internal/x/";
+const X_ACTIONS = new Set(["search", "user-posts", "post", "profile"]);
+const RESEARCH_PREFIX = "/api/internal/research/";
+const RESEARCH_ACTIONS = new Set(["search", "endpoint", "call"]);
 
 /** 401 is never used: on internal routes it means the capability expired. */
 function statusFor(code: XResearchErrorCode): number {
@@ -59,6 +60,13 @@ const searchBody = z.object({ query: z.string().trim().min(1).max(512), sort: z.
 const userPostsBody = z.object({ handle: z.string(), limit, sinceId, includeReplies: z.boolean().optional() });
 const postBody = z.object({ post: z.string(), replies: z.boolean().optional() });
 const profileBody = z.object({ handle: z.string() });
+const researchId = z.string().regex(RESEARCH_ID, "id must be a research endpoint id from research_search, such as apollo.people.search");
+const researchSearchBody = z.object({ job: z.string().trim().min(1).max(300), limit: z.number().int().min(1).max(RESEARCH_SEARCH_MAX).optional() });
+const researchCallBody = z.object({
+  id: researchId,
+  params: z.union([z.record(z.string().max(200), z.unknown()), z.array(z.unknown()).max(1000)]).optional(),
+  query: z.record(z.string().min(1).max(200), z.unknown()).optional(),
+});
 
 function parse<T>(schema: z.ZodType<T>, body: unknown): T {
   const parsed = schema.safeParse(body ?? {});
@@ -97,21 +105,35 @@ async function run(action: string, body: unknown, client: XResearchClient): Prom
   return client.profile(handleFrom(input.handle));
 }
 
+async function research(action: string, body: unknown, client: ResearchClient): Promise<unknown> {
+  if (action === "search") {
+    const input = parse(researchSearchBody, body);
+    return client.search({ job: input.job, limit: input.limit ?? 5 });
+  }
+  if (action === "endpoint") return client.endpoint(parse(z.object({ id: researchId }), body).id);
+  const input = parse(researchCallBody, body);
+  const answer = await client.call({ id: input.id, ...(input.params === undefined ? {} : { params: input.params }), ...(input.query ? { query: input.query } : {}) });
+  const cost = costLine(answer);
+  return { result: answer.result, ...(cost ? { cost } : {}), ...(answer.callId ? { callId: answer.callId } : {}), ...(answer.upstreamFailed ? { upstreamFailed: answer.upstreamFailed } : {}) };
+}
+
 export function createXResearchInternalRoutes(deps: XResearchDeps) {
-  const clientFor = deps.client ?? ((credential: ServiceCredential) => createXRelayClient({ url: credential.api, token: credential.token }));
+  const xClientFor = deps.client ?? ((credential: ServiceCredential) => createXClient(credential));
+  const researchClientFor = deps.research ?? ((credential: ServiceCredential) => createResearchClient(credential));
   return async (ctx: XInternalContext): Promise<typeof PASS | void> => {
-    if (ctx.method !== "POST" || !ctx.path.startsWith(PREFIX)) return PASS;
-    const action = ctx.path.slice(PREFIX.length);
-    if (!ACTIONS.has(action)) return PASS;
+    if (ctx.method !== "POST") return PASS;
+    const prefix = ctx.path.startsWith(X_PREFIX) ? X_PREFIX : ctx.path.startsWith(RESEARCH_PREFIX) ? RESEARCH_PREFIX : null;
+    const action = prefix ? ctx.path.slice(prefix.length) : "";
+    if (!prefix || !(prefix === X_PREFIX ? X_ACTIONS : RESEARCH_ACTIONS).has(action)) return PASS;
     const credential = deps.credential();
     if (!credential) return void ctx.json(ctx.res, 403, { error: X_MESSAGES.noKey });
     if (!deps.botEnabled(ctx.botId)) return void ctx.json(ctx.res, 403, { error: X_MESSAGES.botOff });
     const body = await ctx.readBody();
     try {
-      ctx.json(ctx.res, 200, await run(action, body, clientFor(credential)));
+      ctx.json(ctx.res, 200, prefix === X_PREFIX ? await run(action, body, xClientFor(credential)) : await research(action, body, researchClientFor(credential)));
     } catch (error) {
       if (!(error instanceof XResearchError)) throw error;
-      const message = error.code === "bad_key" && deps.cloudHome ? X_MESSAGES.homeBadKey : error.message;
+      const message = error.code === "bad_key" && deps.cloudHome && credential.included ? X_MESSAGES.homeBadKey : error.message;
       ctx.json(ctx.res, statusFor(error.code), { error: message, code: error.code });
     }
   };

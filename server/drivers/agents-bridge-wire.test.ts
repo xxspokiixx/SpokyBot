@@ -95,7 +95,7 @@ const BUDGET_BASELINE: Record<string, number> = {
   "skills+shared+voice+cloud-home": 15419,
   "skills+shared+voice+non-chief+cloud-home": 15308,
   "skills+shared+voice+escalations": 15667,
-  "skills+shared+voice+escalations+x": 15762,
+  "skills+shared+voice+escalations+x": 15813,
   "default+legacy-switches": 14613,
 };
 

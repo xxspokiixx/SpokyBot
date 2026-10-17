@@ -10,7 +10,7 @@ import { harnessClientFromEnv } from "./agents-client.ts";
 import type { HarnessClient, Json } from "./agents-client.ts";
 import { memorySearchText } from "./memory-search-text.ts";
 import { boundedAgentResult } from "./agents-result.ts";
-import { callXTool, X_TOOL_NAMES } from "./agents-x-tools.ts";
+import { callResearchTool, RESEARCH_TOOL_NAMES } from "./agents-research-tools.ts";
 
 export interface ToolCallContext {
   botId: string;
@@ -410,7 +410,7 @@ export async function callTool(name: string, args: Json, context: ToolCallContex
     return { text: `Attached ${String(body.name ?? "the file")} (${Number(body.bytes ?? 0)} bytes). It now appears in the chat with a preview.` };
   }
   if (CARD_TOOL_NAMES.has(name)) return callCardTool(name, args, context);
-  if (X_TOOL_NAMES.has(name)) return callXTool(name, args, context);
+  if (RESEARCH_TOOL_NAMES.has(name)) return callResearchTool(name, args, context);
   // Second lock: with sharing off the catalog already omits these tools.
   if (SHARED_COMPUTER_TOOL_NAMES.has(name) && !context.sharedComputers) {
     return { text: "Computer sharing is turned off in this workspace. There are no shared computers to use.", isError: true };

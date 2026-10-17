@@ -1,5 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 import { X_MESSAGES, XResearchError, type XResearchClient } from "../x-research.ts";
+import type { ResearchClient } from "../research.ts";
 import type { ServiceCredential } from "../included-services.ts";
 import { PASS } from "./table.ts";
 import { createXResearchInternalRoutes, type XInternalContext } from "./x-research.ts";
@@ -114,4 +115,46 @@ describe("X research internal routes", () => {
     const other = createXResearchInternalRoutes({ credential: () => included, botEnabled: () => true, client: () => fakeClient({ search: vi.fn(async () => { throw new XResearchError("rate_limited", X_MESSAGES.rateLimited); }) }), cloudHome: true });
     expect(await callInternal(other, { body: { query: "maus" } })).toMatchObject({ status: 502, body: { error: X_MESSAGES.rateLimited } });
   });
+
+  it("keeps the Cloud home sentence for the plan's token only: a refused own treg key says to check the key", async () => {
+    const ownKey: ServiceCredential = { token: "treg_own", api: "https://treg.to", included: false };
+    const client = fakeClient({ search: vi.fn(async () => { throw new XResearchError("bad_key", X_MESSAGES.ownBadKey); }) });
+    const home = createXResearchInternalRoutes({ credential: () => ownKey, botEnabled: () => true, client: () => client, cloudHome: true });
+    expect(await callInternal(home, { body: { query: "maus" } })).toMatchObject({ status: 502, body: { error: X_MESSAGES.ownBadKey } });
+  });
 });
+
+describe("research internal routes", () => {
+  const ownKey: ServiceCredential = { token: "treg_own", api: "https://treg.to", included: false };
+  const fakeResearch = (overrides: Partial<ResearchClient> = {}): ResearchClient => ({
+    search: vi.fn(async () => ({ query: "q", results: [] })),
+    endpoint: vi.fn(async () => ({ endpoint: { id: "apollo.people.search" } })),
+    call: vi.fn(async () => ({ result: { people: [] }, costUsd: 0.002, callId: "c1" })),
+    ...overrides,
+  });
+  const routes = (research = fakeResearch(), credential: () => ServiceCredential | null = () => ownKey, botEnabled = (id: string) => id === "bot-1") =>
+    ({ research, handler: createXResearchInternalRoutes({ credential, botEnabled, research: () => research }) });
+
+  it("runs search, endpoint and call on the same credential and switch as the X tools, and shows the call's cost", async () => {
+    const { research, handler } = routes();
+    expect(await callInternal(handler, { path: "/api/internal/research/search", body: { job: "work emails" } })).toMatchObject({ status: 200, body: { query: "q" } });
+    expect(research.search).toHaveBeenCalledWith({ job: "work emails", limit: 5 });
+    await callInternal(handler, { path: "/api/internal/research/endpoint", body: { id: "apollo.people.search" } });
+    expect(research.endpoint).toHaveBeenCalledWith("apollo.people.search");
+    expect(await callInternal(handler, { path: "/api/internal/research/call", body: { id: "apollo.people.search", params: { q: "maus" } } }))
+      .toMatchObject({ status: 200, body: { result: { people: [] }, cost: "$0.0020", callId: "c1" } });
+    expect(research.call).toHaveBeenCalledWith({ id: "apollo.people.search", params: { q: "maus" } });
+  });
+
+  it("refuses without a credential or with the bot switched off, before any spend, and refuses ids that are paths or URLs", async () => {
+    const research = fakeResearch();
+    expect(await callInternal(routes(research, () => null).handler, { path: "/api/internal/research/call", body: { id: "apollo.people.search" } })).toMatchObject({ status: 403, body: { error: X_MESSAGES.noKey } });
+    expect(await callInternal(routes(research).handler, { botId: "bot-2", path: "/api/internal/research/call", body: { id: "apollo.people.search" } })).toMatchObject({ status: 403, body: { error: X_MESSAGES.botOff } });
+    for (const id of ["stripe/v1/charges", "https://api.example.com/x", "../catalog", ""]) {
+      expect((await callInternal(routes(research).handler, { path: "/api/internal/research/call", body: { id } })).status, id).toBe(400);
+    }
+    expect(research.call).not.toHaveBeenCalled();
+    expect((await callInternal(routes(research).handler, { path: "/api/internal/research/unknown", body: {} })).out).toBe(PASS);
+  });
+});
+

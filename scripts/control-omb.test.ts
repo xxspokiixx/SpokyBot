@@ -60,6 +60,7 @@ describe("the fixture's X research relay", () => {
       expect(env, url).not.toHaveProperty("OMB_CLOUD_X_URL");
       expect(env, url).not.toHaveProperty("OMB_CLOUD_X_TOKEN");
     }
-    expect(childEnv({ OMB_TREG_URL: "http://127.0.0.1:4200" })).not.toHaveProperty("OMB_TREG_URL");
+    expect(childEnv({ OMB_TREG_URL: " http://127.0.0.1:4300 " })).toMatchObject({ OMB_TREG_URL: "http://127.0.0.1:4300" });
+    for (const url of ["https://treg.to", "http://localhost:4300", "http://127.0.0.1:4300/x", ""]) expect(childEnv({ OMB_TREG_URL: url }), url).not.toHaveProperty("OMB_TREG_URL");
   });
 });

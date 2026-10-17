@@ -3,14 +3,14 @@ import { CREDENTIAL_TARGETS } from "../../shared/credential-request.ts";
 import { OPTIONS_CARD_LIMITS, WATCHER_OPTIONS_CARD_BOT_ID } from "../../shared/options-card.ts";
 import { agentToolAnnotations } from "../agent-tool-policy.ts";
 import { WIDGET_TOOL_DEFINITIONS } from "./agents-widget-tools.ts";
-import { X_TOOL_DEFINITIONS, X_TOOL_NAMES } from "./agents-x-tools.ts";
+import { RESEARCH_TOOL_DEFINITIONS, RESEARCH_TOOL_NAMES } from "./agents-research-tools.ts";
 
 /** Which tools a turn is shown. Presentation only: the server still authenticates and scopes every call. */
 export interface CatalogProfile {
   skillAuthoring: boolean;
   sharedComputers: boolean;
   voiceNotes: boolean;
-  /** X research is switched on for this bot and the plan's relay credential is held. Absent means off. */
+  /** A treg key or a Cloud plan's research credential is held and this bot's research switch is on. Absent means off. */
   xResearch?: boolean;
   cloudHome: boolean;
   memoryEnabled?: boolean;
@@ -537,7 +537,7 @@ const TOOL_DEFINITIONS = [
       required: ["text"],
     },
   },
-  ...X_TOOL_DEFINITIONS,
+  ...RESEARCH_TOOL_DEFINITIONS,
   {
     name: "memory_update",
     description:
@@ -926,12 +926,12 @@ function catalogTools(profile: CatalogProfile) {
   const VOICE_READY_TOOLS = profile.voiceNotes
     ? SHAREABLE_TOOLS
     : SHAREABLE_TOOLS.filter((tool) => !VOICE_TOOL_NAMES.has(tool.name));
-  const X_READY_TOOLS = profile.xResearch === true
+  const RESEARCH_READY_TOOLS = profile.xResearch === true
     ? VOICE_READY_TOOLS
-    : VOICE_READY_TOOLS.filter((tool) => !X_TOOL_NAMES.has(tool.name));
+    : VOICE_READY_TOOLS.filter((tool) => !RESEARCH_TOOL_NAMES.has(tool.name));
   const ROLE_TOOLS = profile.chief
-    ? X_READY_TOOLS
-    : X_READY_TOOLS.filter((tool) => !CHIEF_ONLY_TOOL_NAMES.has(tool.name)).map((tool) => {
+    ? RESEARCH_READY_TOOLS
+    : RESEARCH_READY_TOOLS.filter((tool) => !CHIEF_ONLY_TOOL_NAMES.has(tool.name)).map((tool) => {
       if (!CHIEF_TARGET_TOOL_NAMES.has(tool.name)) return tool;
       const properties = Object.fromEntries(Object.entries(tool.inputSchema.properties).filter(([key]) => key !== "for_bot_id"));
       return { ...tool, description: tool.description.replace(CHIEF_PROFILE_TARGET, ""), inputSchema: { ...tool.inputSchema, properties } };

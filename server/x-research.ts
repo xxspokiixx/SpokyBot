@@ -1,17 +1,12 @@
-// X research: the x_* agents tools' only way out. A thin client over the
-// MausBot Cloud Admin's X relay (openmaus-cloud server/cloud-services.ts),
-// which calls treg (treg.to, "OpenRouter for agent tools") on our account for
-// paying Cloud plans only, within each plan's monthly calls. A Cloud home has
-// the relay token in its env; a desktop gets its own with its Cloud sign-in
-// (included-services.ts). It hands back compact posts and profiles, never a
-// scraper's raw JSON, and turns every failure into an XResearchError carrying
-// a sentence a bot can pass on.
+// X research: the x_* agents tools' only way out, through treg (treg.to). With the person's own treg key it calls treg
+// directly, billed to their treg balance; otherwise it calls the MausBot Cloud Admin's relay, which calls treg on our
+// account for paying Cloud plans within each plan's monthly calls. It hands back compact posts and profiles, never a
+// scraper's raw JSON, and turns every failure into an XResearchError carrying a sentence a bot can pass on.
 //
-// Each job calls the cheapest scraper treg lists for it, with its paging and
-// sort options; when that one is down, it falls back once to treg's routed
-// endpoint, which works through the other scrapers in turn. Scrapers name the
-// same fields differently, so rows are read through short alias lists. A
-// managed relay (step 2) replaces this module only.
+// Each job calls the cheapest scraper treg lists for it, with its paging and sort options; when that one is down, it
+// falls back once to treg's routed endpoint, which works through the other scrapers in turn. Scrapers name the same
+// fields differently, so rows are read through short alias lists.
+import type { ServiceCredential } from "./included-services.ts";
 
 /** Posts one call may return. Fifty compact posts stay under the agents
  * server's result cap. */
@@ -45,13 +40,15 @@ export const TREG_X_ENDPOINTS = {
   profile: "treg.x.user.profile",
 } as const;
 
-export type XResearchErrorCode = "bad_input" | "bad_key" | "no_credit" | "rate_limited" | "not_found" | "unavailable";
+export type XResearchErrorCode = "bad_input" | "bad_key" | "no_credit" | "rate_limited" | "not_found" | "unavailable" | "in_progress";
+export const TREG_TOP_UP_URL = "https://treg.to";
 
 /** Every sentence a bot or the Settings page can be shown about X research. */
 export const X_MESSAGES = {
-  noKey: "X research is included with MausBot Cloud plans. Sign in to a paid plan under App Settings → MausBot Cloud to use it.",
-  botOff: "X research is off for this bot. Turn it on in this bot's settings under Access.",
+  noKey: "Research isn't set up on this server. Add a treg key in Settings → API keys, or use a paid MausBot Cloud plan.",
+  botOff: "Research is off for this bot. Turn it on in this bot's settings under Access.",
   badKey: "Sign in to MausBot Cloud again in Settings to use X research.",
+  ownBadKey: "treg rejected your key. Check it in Settings → API keys.",
   /** A Cloud home's relay token is the Admin's to replace; the person has no sign-in to redo there. */
   homeBadKey: "X research isn't connected on this Cloud right now. It comes with your plan, so there is nothing to sign in to: try again later, and tell MausBot support if it keeps happening.",
   noPlan: "X research comes with MausBot Cloud plans, and this account's plan isn't active.",
@@ -307,8 +304,48 @@ export function errorFor(status: number, body: unknown): XResearchError {
 
 const unavailable = () => new XResearchError("unavailable", X_MESSAGES.unavailable);
 
+/** What treg's own refusal says, from its JSON `detail` (a sentence, or `{error, message}`) or `message`. */
+function tregDetail(body: unknown): string | undefined {
+  const said = firstText(at(body, "detail"), at(body, "detail", "message"), at(body, "message"), at(body, "detail", "error"), at(body, "error"));
+  return said?.replace(/\s+/g, " ").trim().slice(0, 300);
+}
+
+const micro = (value: unknown) => (typeof value === "number" && Number.isFinite(value) && value >= 0 ? value : null);
+export const dollarsText = (usd: number) => `$${usd >= 0.01 || usd === 0 ? usd.toFixed(2) : usd.toPrecision(2)}`;
+
+/** A refusal from treg itself, on the person's own key, as the sentence treg means: nothing here limits that key. */
+export function tregErrorFor(status: number, body: unknown, headers?: Headers): XResearchError {
+  const detail = tregDetail(body);
+  const callId = headers?.get("x-treg-call-id")?.trim();
+  if ((status === 401 || status === 403) && !callId) return new XResearchError("bad_key", X_MESSAGES.ownBadKey);
+  if (status === 402) {
+    const balance = micro(at(body, "balance_micro") ?? at(body, "detail", "balance_micro"));
+    const needs = micro(at(body, "estimated_cost_micro") ?? at(body, "detail", "estimated_cost_micro"));
+    const link = firstText(at(body, "topup_url"), at(body, "detail", "topup_url"));
+    const topUp = link && /^https:\/\/[^\s"<>]{1,300}$/.test(link) ? link : TREG_TOP_UP_URL;
+    const amounts = balance === null ? "" : ` (balance ${dollarsText(balance / 1_000_000)}${needs ? `, this call needs about ${dollarsText(needs / 1_000_000)}` : ""})`;
+    return new XResearchError("no_credit", `Your treg balance is too low for this call${amounts}. Top up at ${topUp}, then try again.`);
+  }
+  if (status === 404) {
+    const near = at(body, "detail", "did_you_mean");
+    const suggestions = Array.isArray(near) ? near.filter((id): id is string => typeof id === "string").slice(0, 5) : [];
+    return new XResearchError("not_found", `${detail ?? "treg has no such endpoint."}${suggestions.length ? ` Did you mean ${suggestions.join(", ")}?` : ""}`);
+  }
+  if (status === 409) return new XResearchError("in_progress", "That call is still running at treg. Try it again in a moment.");
+  if (status === 410) return new XResearchError("unavailable", "That call finished at treg, but its answer wasn't kept. Run it again.");
+  if (status === 422) return new XResearchError("bad_input", `treg refused that request${detail ? `: ${detail}` : ". Check its parameters."}`);
+  if (status === 429 || status === 503) {
+    const wait = Number(at(body, "retry_after_s") ?? at(body, "detail", "retry_after_s") ?? headers?.get("retry-after"));
+    const when = Number.isFinite(wait) && wait > 0 ? `Try again in ${Math.ceil(wait)} seconds.` : "Try again shortly.";
+    const what = status === 429 ? "treg is rate-limiting this call" : "treg is busy right now";
+    return new XResearchError(status === 429 ? "rate_limited" : "unavailable", `${what}${detail ? ` (${detail})` : ""}. ${when}`);
+  }
+  if (status < 500 && callId) return new XResearchError("bad_input", `The provider refused that request (HTTP ${status})${detail ? `: ${detail}` : "."}`);
+  return new XResearchError("unavailable", `treg couldn't complete that request (HTTP ${status})${detail ? `: ${detail}` : ""}. Try again shortly.`);
+}
+
 /** Read the body in chunks and give up the moment it crosses the cap. */
-async function readCapped(response: Response): Promise<string> {
+export async function readCapped(response: Response): Promise<string> {
   const announced = Number(response.headers.get("content-length") ?? 0);
   if (announced > MAX_BODY_BYTES) throw unavailable();
   if (!response.body) return "";
@@ -353,27 +390,36 @@ interface ListOptions {
   knownHandle?: string;
 }
 
-/** `url` is the relay base (OMB_CLOUD_X_URL, or a desktop's from its Cloud
- * sign-in) and `token` its relay token: the only things that leave here. */
-export function createXRelayClient(options: { url: string; token: string; fetcher?: typeof fetch; timeoutMs?: number }): XResearchClient {
+/** The headers that carry a research credential: the person's own key as treg's `X-Treg-Token`, the plan's relay
+ * token as a bearer. Security: nothing else about the credential leaves here. */
+export function tregAuthHeaders(credential: ServiceCredential): Record<string, string> {
+  return credential.included ? { authorization: `Bearer ${credential.token}` } : { "x-treg-token": credential.token };
+}
+
+/** `url` and `token` are the relay's (OMB_CLOUD_X_URL, or a desktop's from its Cloud sign-in), or, with `own`, treg's
+ * own base URL and the person's treg key. */
+export function createXRelayClient(options: { url: string; token: string; own?: boolean; fetcher?: typeof fetch; timeoutMs?: number }): XResearchClient {
   const fetcher = options.fetcher ?? fetch;
   const base = options.url.replace(/\/+$/, "");
   const timeoutMs = options.timeoutMs ?? X_CLIENT_TIMEOUT_MS;
+  const auth = tregAuthHeaders({ token: options.token, api: base, included: options.own !== true });
 
   async function send(path: string, body: Row): Promise<Row> {
     let status: number;
     let ok: boolean;
     let raw: string;
+    let headers: Headers;
     try {
       const response = await fetcher(`${base}${path}`, {
         method: "POST",
-        headers: { authorization: `Bearer ${options.token}`, accept: "application/json", "content-type": "application/json" },
+        headers: { ...auth, accept: "application/json", "content-type": "application/json" },
         body: JSON.stringify(body),
         redirect: "error",
         signal: AbortSignal.timeout(timeoutMs),
       });
       status = response.status;
       ok = response.ok;
+      headers = response.headers;
       raw = await readCapped(response);
     } catch (error) {
       if (error instanceof XResearchError) throw error;
@@ -385,7 +431,7 @@ export function createXRelayClient(options: { url: string; token: string; fetche
     } catch {
       parsed = null;
     }
-    if (!ok) throw errorFor(status, parsed);
+    if (!ok) throw options.own ? tregErrorFor(status, parsed, headers) : errorFor(status, parsed);
     if (!isRow(parsed)) throw unavailable();
     return parsed;
   }
@@ -480,4 +526,9 @@ export function createXRelayClient(options: { url: string; token: string; fetche
       };
     },
   };
+}
+
+/** The X client for a research credential: straight to treg with the person's own key, else through the plan's relay. */
+export function createXClient(credential: ServiceCredential, options: { fetcher?: typeof fetch; timeoutMs?: number } = {}): XResearchClient {
+  return createXRelayClient({ url: credential.api, token: credential.token, own: !credential.included, ...options });
 }

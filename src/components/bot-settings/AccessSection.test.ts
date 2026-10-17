@@ -216,29 +216,56 @@ describe("AccessSection Works on", () => {
   });
 });
 
-describe("X research card", () => {
-  it("is a Cloud plan feature: locked, with the switch off and disabled, when this server has no plan credential", () => {
-    fixture.config = { xResearch: { included: false } } as Partial<ConfigStatus>;
+describe("Research (treg) card", () => {
+  type Node = ReactElement<{ children?: ReactNode; [key: string]: unknown }>;
+  const nodes = (value: ReactNode): Node[] => {
+    if (!isValidElement(value)) return [];
+    const node = value as Node;
+    return [node, ...Children.toArray(node.props.children).flatMap(nodes)];
+  };
+  const SWITCH = 'aria-label="Let this bot use research"';
+  const capture = (bot: Bot, derived = makeDerived()) => {
+    let tree!: ReturnType<typeof AccessSection>;
+    function Capture() { tree = AccessSection({ bot, derived }); return tree; }
+    renderToStaticMarkup(createElement(StoreProvider, null, createElement(Capture)));
+    const card = nodes(tree).find((node) => (node.type as { name?: string }).name === "ResearchCard")!;
+    // The card's own hooks run inside a render of their own.
+    let rendered: ReactNode = null;
+    function Card() { rendered = (card.type as (props: unknown) => ReactNode)(card.props); return rendered; }
+    renderToStaticMarkup(createElement(StoreProvider, null, createElement(Card)));
+    return { derived, card: nodes(rendered) };
+  };
+
+  it("with neither a treg key nor a plan, asks for a treg key, opens API keys, and offers no switch", () => {
+    fixture.config = { xResearch: { included: false }, treg: { configured: false } } as Partial<ConfigStatus>;
     const html = render(makeBot());
-    expect(html).toContain("X research is included with MausBot Cloud plans.");
-    expect(html).toMatch(/aria-label="Let this bot search and read X"[^>]* disabled=""/);
+    expect(html).toContain("Add your treg key in Settings → API keys to let bots research X, companies, people and more.");
+    expect(html).toMatch(new RegExp(`${SWITCH}[^>]* disabled=""`));
+    expect(html).toMatch(new RegExp(`${SWITCH}[^>]*aria-checked="false"`));
+    const open = capture(makeBot()).card.find((node) => node.type === "button" && typeof node.props.onClick === "function")!;
+    (open.props.onClick as () => void)();
+    expect(fixture.dispatch).toHaveBeenCalledWith({ type: "toggleAppSettings", open: true, section: "connections" });
   });
 
-  it("offers the switch when the plan is included, and says what each search costs the plan", () => {
+  it("is on by default for every bot with the person's own treg key, and says it bills their treg balance", () => {
+    fixture.config = { xResearch: { included: false }, treg: { configured: true } } as Partial<ConfigStatus>;
+    const html = render(makeBot());
+    expect(html).toMatch(new RegExp(`${SWITCH}[^>]*aria-checked="true"`));
+    expect(html).not.toMatch(new RegExp(`${SWITCH}[^>]* disabled=""`));
+    expect(html).toContain("through your treg key. Calls are billed to your treg balance.");
+    expect(html).not.toContain("Open API keys");
+  });
+
+  it("is on by default with a Cloud plan, and turns off for one bot with one patch", () => {
     fixture.config = { xResearch: { included: true } } as Partial<ConfigStatus>;
-    const off = render(makeBot());
-    expect(off).toContain("Let this bot search and read X without an X account.");
-    expect(off).not.toMatch(/aria-label="Let this bot search and read X"[^>]* disabled=""/);
-    const on = render(makeBot({ xResearch: true }));
-    expect(on).toMatch(/aria-label="Let this bot search and read X"[^>]*aria-checked="true"/);
-    expect(on).toContain("Included with your MausBot Cloud plan.");
-  });
-
-  it("says plainly when the plan's Cloud does not offer X research right now, instead of connecting forever", () => {
-    fixture.config = { xResearch: { included: false, unavailable: true } } as Partial<ConfigStatus>;
-    const html = render(makeBot());
-    expect(html).toContain("X research isn’t available from MausBot Cloud right now.");
-    expect(html).not.toContain("Connecting");
+    expect(render(makeBot())).toContain("Included with your MausBot Cloud plan");
+    const { card, derived } = capture(makeBot());
+    const toggle = card.find((node) => node.props["aria-label"] === "Let this bot use research")!;
+    (toggle.props.onClick as () => void)();
+    expect(derived.patch).toHaveBeenCalledWith({ xResearch: false });
+    const off = render(makeBot({ xResearch: false }));
+    expect(off).toMatch(new RegExp(`${SWITCH}[^>]*aria-checked="false"`));
+    expect(off).toContain("Off for this bot.");
   });
 
   it("is not offered while a new bot or the New bot defaults are being drafted", async () => {
@@ -247,13 +274,7 @@ describe("X research card", () => {
     const { api } = await import("@/state/store");
     const html = renderToStaticMarkup(createElement(StoreProvider, null,
       createElement(BotEditorContext.Provider, { value: { request: api, draft: true } }, createElement(AccessSection, { bot: makeBot(), derived: makeDerived() }))));
-    expect(html).not.toContain("Let this bot search and read X");
-  });
-
-  it("still lets a bot that is on be turned off after the plan has gone", () => {
-    fixture.config = { xResearch: { included: false } } as Partial<ConfigStatus>;
-    const html = render(makeBot({ xResearch: true }));
-    expect(html).not.toMatch(/aria-label="Let this bot search and read X"[^>]* disabled=""/);
+    expect(html).not.toContain("Let this bot use research");
   });
 });
 

@@ -789,8 +789,8 @@
     ]
   },
   "skills+shared+voice+escalations+x": {
-    "bytes": 64118,
-    "sha256": "4542f635fc5834b80a5ac4bdc0259c84476fdc0f97175c96e01efa33665f73c1",
+    "bytes": 65784,
+    "sha256": "9b81c7203e35899a336b922bb9fda2432d6aee3569cab860cd29e2b026cc93ab",
     "tools": [
       "tool_result_read",
       "list_shared_computers",
@@ -824,6 +824,9 @@
       "x_user_posts",
       "x_post",
       "x_profile",
+      "research_search",
+      "research_endpoint",
+      "research_call",
       "memory_update",
       "retry_thread",
       "memory_log",

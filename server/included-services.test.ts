@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { jevEndpoint } from "./decider/jev.ts";
-import { applyIncludedXMessage, boatCredential, deciderCredential, trialCreditCredential, voiceCredential, xCredential, xResearchStatus } from "./included-services.ts";
+import { applyIncludedXMessage, boatCredential, deciderCredential, researchCredential, trialCreditCredential, voiceCredential, xCredential, xResearchStatus } from "./included-services.ts";
 
 const RELAY_BOAT = "https://cloud.example.test/api/cloud/services/boat/api/box/v1";
 const RELAY_VOICE = "https://cloud.example.test/api/cloud/services/voice/v1";
@@ -206,3 +206,25 @@ describe("X research status for the app's Settings", () => {
     expect(xResearchStatus({ OMB_CLOUD_X_URL: RELAY_X, OMB_CLOUD_X_TOKEN: "omb_x_home" })).toEqual({ included: true });
   });
 });
+
+describe("research credential", () => {
+  const RELAY_X = "https://cloud.example.test/api/cloud/services/x";
+  const plan = { OMB_CLOUD_X_URL: RELAY_X, OMB_CLOUD_X_TOKEN: "omb_x_home" };
+
+  it("is the person's own treg key, sent straight to treg, and it wins over the plan's relay credential", () => {
+    expect(researchCredential(" treg_own ", {})).toEqual({ token: "treg_own", api: "https://treg.to", included: false });
+    expect(researchCredential("treg_own", plan)).toEqual({ token: "treg_own", api: "https://treg.to", included: false });
+  });
+
+  it("is the plan's relay credential without an own key, and nothing with neither", () => {
+    expect(researchCredential(undefined, plan)).toEqual({ token: "omb_x_home", api: RELAY_X, included: true });
+    expect(researchCredential("  ", plan)).toEqual({ token: "omb_x_home", api: RELAY_X, included: true });
+    expect(researchCredential(undefined, {})).toBeNull();
+  });
+
+  it("sends an own key only to treg over https, or to a loopback stand-in", () => {
+    expect(researchCredential("k", { OMB_TREG_URL: "http://127.0.0.1:4300/" })?.api).toBe("http://127.0.0.1:4300");
+    for (const url of ["http://evil.example.test", "ftp://treg.to", "not a url"]) expect(researchCredential("k", { OMB_TREG_URL: url })?.api, url).toBe("https://treg.to");
+  });
+});
+

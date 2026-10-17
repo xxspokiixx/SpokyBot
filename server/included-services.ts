@@ -140,8 +140,27 @@ export function xResearchStatus(env: NodeJS.ProcessEnv = process.env): { include
   return desktopXRefused ? { included: false, unavailable: true } : { included: false };
 }
 
-/** X research's credential: a Cloud home's included token, else a signed-in
- * desktop's. There is no own-key path: X research is a Cloud plan feature. */
+/** The plan's research credential: a Cloud home's included token, else a signed-in desktop's. */
 export function xCredential(env: NodeJS.ProcessEnv = process.env): ServiceCredential | null {
   return (held ?? includedFrom(env)).x ?? desktopX;
+}
+
+export const TREG_API_DEFAULT = "https://treg.to";
+/** Security: the person's treg key goes only to treg (https), or to a loopback stand-in in development and tests. */
+export function tregProviderApi(env: NodeJS.ProcessEnv = process.env): string {
+  const configured = env.OMB_TREG_URL?.trim().replace(/\/+$/, "");
+  if (!configured) return TREG_API_DEFAULT;
+  try {
+    const parsed = new URL(configured);
+    return parsed.protocol === "https:" || (parsed.protocol === "http:" && LOOPBACK.has(parsed.hostname)) ? configured : TREG_API_DEFAULT;
+  } catch {
+    return TREG_API_DEFAULT;
+  }
+}
+
+/** The X and research tools' credential: the person's own treg key (sent straight to treg, `included` false) wins over
+ * the plan's relay credential; null with neither, and then no bot is shown the tools. */
+export function researchCredential(ownKey: string | undefined, env: NodeJS.ProcessEnv = process.env): ServiceCredential | null {
+  const own = ownKey?.trim();
+  return own ? { token: own, api: tregProviderApi(env), included: false } : xCredential(env);
 }

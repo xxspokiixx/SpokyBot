@@ -3,7 +3,7 @@ import { renderToStaticMarkup } from "react-dom/server";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { StoreProvider } from "@/state/store";
 import * as store from "@/state/store";
-import { AnthropicEveryClaudeBot, ApiKeyRow, desktopCredentialSlot, looksLikeKey, OpenAiCompatUrl, OpenCodeProviderKeys } from "./ApiKeys";
+import { AnthropicEveryClaudeBot, ApiKeyRow, desktopCredentialSlot, looksLikeKey, OpenAiCompatUrl, OpenCodeProviderKeys, tregVerdict } from "./ApiKeys";
 
 afterEach(() => { vi.unstubAllGlobals(); vi.restoreAllMocks(); });
 
@@ -146,8 +146,25 @@ describe("provider key rows", () => {
 });
 
 
+describe("the treg key row", () => {
+  it("is write-only and shows where to get a key, under the field", () => {
+    const html = render(createElement(ApiKeyRow, { section: "treg", testProvider: "treg" }));
+    expect(html).toContain("treg key");
+    expect(html).toContain('type="password"');
+    expect(html).toContain('value=""');
+    expect(html).toMatch(/<a href="https:\/\/treg\.to"[^>]*>Get a key at treg\.to/);
+  });
+
+  it("says treg is working with the balance, or names the exact problem", () => {
+    expect(tregVerdict({ ok: true, check: "treg", balanceUsd: 4.25 } as never)).toBe("treg is working ✓ Balance: $4.25.");
+    expect(tregVerdict({ ok: true })).toBe("treg is working ✓");
+    expect(tregVerdict({ ok: false, message: "treg rejected this key. Copy it again from treg.to." })).toBe("treg rejected this key. Copy it again from treg.to.");
+  });
+});
+
 describe("desktop credential slots", () => {
   it("saves the desktop-held keys in the encrypted store, so Clear removes them there too", () => {
+    expect(desktopCredentialSlot("treg")).toBe("tregApiKey");
     expect(desktopCredentialSlot("box")).toBe("boxToken");
     expect(desktopCredentialSlot("openai")).toBeUndefined();
   });

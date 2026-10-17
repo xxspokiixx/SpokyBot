@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
-import { createXRelayClient, errorFor, X_CLIENT_TIMEOUT_MS, normalizeHandle, parsePostRef, toPost, X_MESSAGES, XResearchError } from "./x-research.ts";
+import { createXClient, createXRelayClient, errorFor, tregErrorFor, X_CLIENT_TIMEOUT_MS, normalizeHandle, parsePostRef, toPost, X_MESSAGES, XResearchError } from "./x-research.ts";
 
 /** 2026-10-08T00:12:34Z */
 const CREATED = 1791418354;
@@ -449,6 +449,50 @@ describe("errors", () => {
     const { fetcher, calls } = fakeFetch({ status: 429, body: { error: "quota_exceeded", message: sentence } });
     const error = await failure(clientWith(fetcher).search({ query: "maus", sort: "latest", limit: 20 }));
     expect(error).toMatchObject({ code: "rate_limited", message: sentence });
+    expect(calls).toHaveLength(1);
+  });
+});
+
+describe("with the person's own treg key", () => {
+  const own = { token: "treg_own_key", api: "https://treg.example.test", included: false };
+
+  it("calls treg directly with X-Treg-Token and no bearer, and sends no cost ceiling of ours", async () => {
+    const { fetcher, calls } = fakeFetch({ body: anyapi({ items: [searchRow("101")], nextCursor: "" }) });
+    const page = await createXClient(own, { fetcher }).search({ query: "maus", sort: "latest", limit: 20 });
+    expect(page.posts.map((post) => post.id)).toEqual(["101"]);
+    expect(calls[0]!.url.toString()).toBe("https://treg.example.test/call/anyapi.x.search.posts");
+    expect(calls[0]!.headers.get("x-treg-token")).toBe("treg_own_key");
+    expect(calls[0]!.headers.get("authorization")).toBeNull();
+    expect(calls[0]!.headers.get("x-treg-route-max-cost")).toBeNull();
+  });
+
+  it("goes through the relay with a bearer when the credential is the plan's", async () => {
+    const { fetcher, calls } = fakeFetch({ body: anyapi({ items: [], nextCursor: "" }) });
+    await createXClient({ token: "omb_xd_plan", api: RELAY, included: true }, { fetcher }).search({ query: "maus", sort: "latest", limit: 20 });
+    expect(calls[0]!.url.toString()).toBe(`${RELAY}/call/anyapi.x.search.posts`);
+    expect(calls[0]!.headers.get("authorization")).toBe("Bearer omb_xd_plan");
+    expect(calls[0]!.headers.get("x-treg-token")).toBeNull();
+  });
+
+  it("passes treg's own refusals on as sentences: the key, the balance with its top-up link, a bad request, a rate limit", () => {
+    expect(tregErrorFor(401, { detail: "invalid token" })).toMatchObject({ code: "bad_key", message: X_MESSAGES.ownBadKey });
+    expect(tregErrorFor(402, { balance_micro: 1200, estimated_cost_micro: 7500, topup_url: "https://treg.to/billing" })).toMatchObject({
+      code: "no_credit",
+      message: "Your treg balance is too low for this call (balance $0.0012, this call needs about $0.0075). Top up at https://treg.to/billing, then try again.",
+    });
+    expect(tregErrorFor(402, { detail: { balance_micro: 0, topup_url: "javascript:alert(1)" } }).message).toContain("Top up at https://treg.to,");
+    expect(tregErrorFor(422, { detail: "limit must be at most 50" })).toMatchObject({ code: "bad_input", message: "treg refused that request: limit must be at most 50" });
+    expect(tregErrorFor(429, { detail: { error: "share_busy", message: "AnyAPI is busy", retry_after_s: 12 } })).toMatchObject({
+      code: "rate_limited", message: "treg is rate-limiting this call (AnyAPI is busy). Try again in 12 seconds.",
+    });
+    expect(tregErrorFor(503, { treg_saturated: true }, new Headers({ "retry-after": "5" })).message).toBe("treg is busy right now. Try again in 5 seconds.");
+    expect(tregErrorFor(403, { detail: "provider says no" }, new Headers({ "x-treg-call-id": "c1" }))).toMatchObject({ code: "bad_input", message: "The provider refused that request (HTTP 403): provider says no" });
+  });
+
+  it("asks to check the key in Settings when treg refuses it, and does not fall back", async () => {
+    const { fetcher, calls } = fakeFetch({ status: 401, body: { detail: "invalid token" } });
+    const error = await failure(createXClient(own, { fetcher }).search({ query: "maus", sort: "latest", limit: 20 }));
+    expect(error).toMatchObject({ code: "bad_key", message: X_MESSAGES.ownBadKey });
     expect(calls).toHaveLength(1);
   });
 });

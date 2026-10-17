@@ -2212,8 +2212,8 @@ describe("X research's included relay token", () => {
     }
   });
 
-  it("is a workspace credential that never reaches an engine, and there is no own treg token any more", () => {
+  it("keeps the plan's research token and the person's own treg key as workspace credentials that never reach an engine", () => {
     expect(WORKSPACE_CREDENTIAL_ENV).toContain("OMB_CLOUD_X_TOKEN");
-    expect(WORKSPACE_CREDENTIAL_ENV).not.toContain("OMB_TREG_TOKEN");
+    expect(WORKSPACE_CREDENTIAL_ENV).toContain("OMB_TREG_KEY");
   });
 });

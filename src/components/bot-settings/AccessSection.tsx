@@ -1,8 +1,8 @@
 import { useEffect, useState } from "react";
 import { browserUnavailableReason } from "@/lib/feature-flags";
-import { ChevronDown, ChevronRight, Crown, FolderOpen, Plus } from "lucide-react";
+import { ChevronDown, ChevronRight, FolderOpen, Plus } from "lucide-react";
 
-import { api, CLOUD_LINK_SETTINGS, useStore, type Bot } from "@/state/store";
+import { api, useStore, type Bot } from "@/state/store";
 import { useBotEditor } from "./BotEditorContext";
 import { cn } from "@/lib/cn";
 import { t } from "@/lib/i18n";
@@ -495,44 +495,31 @@ function ConnectorToolsGrants({
   );
 }
 
-/** X research: four read-only X tools included with MausBot Cloud plans,
- * relayed by our Cloud within each plan's monthly calls. Off unless the person
- * turns it on for this bot; a bot already on can always be switched off, even
- * after the plan has gone. Without the plan, the card says so and offers the
- * way to it (signing in, or a plan) on the desktop app. */
-function XResearchCard({ bot, patch }: { bot: Bot; patch: (patch: { xResearch: boolean }) => void }) {
+/** Research through treg (the X tools and the general research tools): on for every bot whenever this server holds a
+ * treg key or a Cloud plan's research credential, and switchable off per bot. */
+function ResearchCard({ bot, patch }: { bot: Bot; patch: (patch: { xResearch: boolean }) => void }) {
   const { state, dispatch } = useStore();
-  const action = xResearchAction(useCloudPlan()?.view ?? null);
-  const included = state.config?.xResearch?.included === true, unavailable = state.config?.xResearch?.unavailable === true;
-  const on = bot.xResearch === true;
+  const connecting = xResearchAction(useCloudPlan()?.view ?? null) === "connecting" && state.config?.xResearch?.unavailable !== true;
+  const ownKey = state.config?.treg?.configured === true, included = state.config?.xResearch?.included === true;
+  const available = ownKey || included;
+  const on = bot.xResearch !== false;
+  const line = !available ? t(connecting ? "research.connecting" : "research.addKey")
+    : !on ? t("research.off") : t(ownKey ? "research.ownOn" : "research.planOn");
   return (
     <div className="flex items-center justify-between gap-4 rounded-xl bg-card p-4" data-testid="access-x-research">
       <div>
-        <div className="flex items-center gap-1.5 text-[15px] font-medium text-ink">
-          X research
-          {!included && <Crown size={13} aria-hidden="true" className="text-ink-secondary" />}
-        </div>
-        <div className="mt-0.5 text-[13px] text-ink-secondary">
-          {included ? t(on ? "xResearch.includedOn" : "xResearch.includedOff")
-            : t(unavailable ? "xResearch.unavailable" : action === "connecting" ? "xResearch.connecting" : "xResearch.locked")}
-        </div>
-        {!included && !unavailable && (action === "sign-in" || action === "get-pro") && (
-          <div className="mt-2 flex items-center gap-3">
-            {action === "sign-in" && (
-              <button type="button" className="text-[12.5px] font-medium text-accent-text underline underline-offset-2 hover:text-ink" onClick={() => dispatch(CLOUD_LINK_SETTINGS)}>
-                {t("cloudAccount.signIn")}
-              </button>
-            )}
-            {action === "get-pro" && (
-              <button type="button" className="ui-button" onClick={() => dispatch({ type: "openCloudAdd", source: "app_settings" })}>{t("pro.seePlans")}</button>
-            )}
-          </div>
+        <div className="text-[15px] font-medium text-ink">{t("research.title")}</div>
+        <div className="mt-0.5 text-[13px] text-ink-secondary">{line}</div>
+        {!available && !connecting && (
+          <button type="button" className="ui-button mt-2" onClick={() => dispatch({ type: "toggleAppSettings", open: true, section: "connections" })}>
+            {t("research.openKeys")}
+          </button>
         )}
       </div>
       <Switch
-        checked={on}
-        aria-label="Let this bot search and read X"
-        disabled={!included && !on}
+        checked={available && on}
+        aria-label={t("research.switch")}
+        disabled={!available}
         onClick={() => patch({ xResearch: !on })}
         className="disabled:cursor-not-allowed"
       />
@@ -764,7 +751,7 @@ export function AccessSection({
         )}
       </div>}
 
-      {!draft && shows("xResearch") && <XResearchCard bot={bot} patch={patch} />}
+      {!draft && shows("xResearch") && <ResearchCard bot={bot} patch={patch} />}
 
       {!draft && shows("webhooks") && <div className="rounded-xl bg-card p-4">
         <div className="text-[15px] font-medium text-ink">Webhooks</div>
