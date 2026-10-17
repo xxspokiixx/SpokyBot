@@ -84,7 +84,7 @@ export class CdpPage implements ActionContext, WaitContext {
   #crashed = false;
   #devicePixelRatio: number | null = null;
   #documentStatus: { loaderId: string; status: number } | null = null;
-  #emulated: { width: number; height: number } | null = null;
+  #emulated: { width: number; height: number; zoom: number } | null = null;
 
   constructor(host: PageHost, session: CdpSession, info: TargetInfo) {
     this.#host = host;
@@ -274,20 +274,21 @@ export class CdpPage implements ActionContext, WaitContext {
     return result;
   }
 
-  /** The size the page is laid out at apart from its window's, or null when it fills its window. */
-  get emulated(): { width: number; height: number } | null {
+  /** The size the page is laid out at apart from its window's, and how many times larger it is drawn; null when it fills its window. */
+  get emulated(): { width: number; height: number; zoom: number } | null {
     return this.#emulated;
   }
 
-  /** Lays the page out at `size` whatever its window's size, as DevTools' device mode does; null ends that. */
-  async emulateSize(size: { width: number; height: number } | null): Promise<void> {
+  /** Lays the page out at `size` whatever its window's size, drawn `zoom` times larger, as DevTools' device mode does; null ends that. */
+  async emulateSize(size: { width: number; height: number } | null, zoom = 1): Promise<void> {
     if (!size) {
       this.#emulated = null;
       await this.session.send("Emulation.clearDeviceMetricsOverride");
       return;
     }
-    await this.session.send("Emulation.setDeviceMetricsOverride", { width: size.width, height: size.height, deviceScaleFactor: await this.devicePixelRatio().catch(() => 1), mobile: false });
-    this.#emulated = size;
+    const ratio = await this.devicePixelRatio().catch(() => 1);
+    await this.session.send("Emulation.setDeviceMetricsOverride", { width: size.width, height: size.height, deviceScaleFactor: ratio * zoom, mobile: false });
+    this.#emulated = { width: size.width, height: size.height, zoom };
   }
 
   async devicePixelRatio(): Promise<number> {

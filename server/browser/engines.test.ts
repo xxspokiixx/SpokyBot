@@ -33,8 +33,12 @@ function engines(options: RuntimeRouterOptions = {}) {
       interrupted: vi.fn(() => true),
       interruptedCount: vi.fn(() => 2),
       close: vi.fn(async () => undefined),
+      fileChooserOffered: vi.fn(() => true),
+      answerFileChooser: vi.fn(async () => true),
+      download: vi.fn(() => ({ id: "d1" })),
     },
     live: { open: vi.fn(async () => undefined), action: vi.fn(async () => "chrome"), has: vi.fn((viewerId: string) => viewerId === "v-chrome"), handBack: vi.fn(), closeForSession: vi.fn(), closeForOwner: vi.fn(), closeForBot: vi.fn(), closeAll: vi.fn() },
+    stream: { open: vi.fn(), closeForSession: vi.fn(), closeForOwner: vi.fn(), closeForBot: vi.fn(), closeAll: vi.fn(), recheck: vi.fn() },
     close: vi.fn(async () => undefined),
   };
   const runtime = new RuntimeRouter(old as unknown as BrowserRuntime, chrome as unknown as ChromeEngine, options);
@@ -152,13 +156,36 @@ describe("the live view router", () => {
     expect(oldLive.action).toHaveBeenCalledOnce();
   });
 
-  it("closes viewers on both engines", () => {
+  it("closes viewers on both engines, streams included, and streams no longer allowed", () => {
     const { oldLive, chrome, live } = engines();
     live.closeForSession("s");
+    live.closeForOwner("o");
     live.closeAll();
+    live.recheck();
+    expect(chrome.stream.recheck).toHaveBeenCalledOnce();
     expect(chrome.live.closeForSession).toHaveBeenCalledWith("s");
+    expect(chrome.stream.closeForSession).toHaveBeenCalledWith("s");
+    expect(chrome.stream.closeForOwner).toHaveBeenCalledWith("o");
     expect(oldLive.closeForSession).toHaveBeenCalledWith("s");
     expect(chrome.live.closeAll).toHaveBeenCalledOnce();
+    expect(chrome.stream.closeAll).toHaveBeenCalledOnce();
     expect(oldLive.closeAll).toHaveBeenCalledOnce();
+  });
+
+  it("streams, takes uploads for and serves downloads of new-engine sessions only", async () => {
+    const { chrome, live } = engines();
+    const request = { botId: "a", owner: "o", canOperate: true, params: new URLSearchParams(), req: {} as never, socket: {} as never, head: Buffer.alloc(0), isCurrent: () => true, restartRefusal: () => null };
+    expect(live.stream({ session: "s", spec: AGENT_BROWSER, ...request })).toBe(false);
+    expect(chrome.stream.open).not.toHaveBeenCalled();
+    expect(live.stream({ session: "s", spec: CHROME, ...request })).toBe(true);
+    expect(chrome.stream.open).toHaveBeenCalledWith({ ...request, target: { session: "s", key: "bot:a" } });
+    expect(live.fileChooserOffered({ session: "s", spec: AGENT_BROWSER }, "o", "c")).toBe(false);
+    expect(live.fileChooserOffered({ session: "s", spec: CHROME }, "o", "c")).toBe(true);
+    expect(chrome.service.fileChooserOffered).toHaveBeenCalledWith("s", "o", "c");
+    await expect(live.answerFileChooser({ session: "s", spec: AGENT_BROWSER }, "o", "c", [])).resolves.toBe(false);
+    await expect(live.answerFileChooser({ session: "s", spec: CHROME }, "o", "c", ["/f"])).resolves.toBe(true);
+    expect(chrome.service.answerFileChooser).toHaveBeenCalledWith("s", "o", "c", ["/f"]);
+    expect(live.download({ session: "s", spec: AGENT_BROWSER }, "d1")).toBeUndefined();
+    expect(live.download({ session: "s", spec: CHROME }, "d1")).toEqual({ id: "d1" });
   });
 });

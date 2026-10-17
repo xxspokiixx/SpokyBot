@@ -11,7 +11,7 @@ const EXACT: Record<string, number> = {
   'path === "/': 111,
   "path.match(": 29,
   "path.startsWith(": 10,
-  ".exec(path)": 8,
+  ".exec(path)": 7,
   ".test(path)": 0,
   ".includes(path)": 2,
 };

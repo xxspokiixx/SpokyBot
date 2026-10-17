@@ -96,8 +96,9 @@ Focused automated coverage:
 pnpm exec vitest run server/browser-engine.test.ts server/browser-runtime.test.ts \
   server/harness-mcp-proxy.test.ts server/browser-live.test.ts \
   server/browser-live-routes.test.ts server/browser-codex-path.integration.test.ts \
-  src/lib/browser-input-queue.test.ts src/lib/browser-control.test.ts src/lib/browser-profiles.test.ts \
-  src/components/BrowserProfilesManager.test.ts src/components/BrowserViewport.test.ts \
+  src/lib/browser-stream-v1.test.ts src/lib/browser-stream-client.test.ts src/lib/browser-control.test.ts \
+  src/lib/browser-profiles.test.ts src/components/BrowserProfilesManager.test.ts \
+  src/components/browser/StreamSurface.test.ts server/routes/browser-viewers.test.ts \
   src/components/BrowserPanel.test.ts src/components/SignInRequestCard.test.ts \
   server/sign-in-request.e2e.test.ts server/login-fill.test.ts server/login-store.test.ts \
   server/totp.test.ts server/routes/logins.test.ts src/components/LoginsSettings.test.ts \
