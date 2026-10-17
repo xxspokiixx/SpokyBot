@@ -495,7 +495,7 @@ function ConnectorToolsGrants({
   );
 }
 
-/** X research: four read-only X tools included with OpenMausBot Cloud plans,
+/** X research: four read-only X tools included with MausBot Cloud plans,
  * relayed by our Cloud within each plan's monthly calls. Off unless the person
  * turns it on for this bot; a bot already on can always be switched off, even
  * after the plan has gone. Without the plan, the card says so and offers the

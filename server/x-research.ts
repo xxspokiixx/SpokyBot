@@ -1,5 +1,5 @@
 // X research: the x_* agents tools' only way out. A thin client over the
-// OpenMausBot Cloud Admin's X relay (openmaus-cloud server/cloud-services.ts),
+// MausBot Cloud Admin's X relay (openmaus-cloud server/cloud-services.ts),
 // which calls treg (treg.to, "OpenRouter for agent tools") on our account for
 // paying Cloud plans only, within each plan's monthly calls. A Cloud home has
 // the relay token in its env; a desktop gets its own with its Cloud sign-in
@@ -49,12 +49,12 @@ export type XResearchErrorCode = "bad_input" | "bad_key" | "no_credit" | "rate_l
 
 /** Every sentence a bot or the Settings page can be shown about X research. */
 export const X_MESSAGES = {
-  noKey: "X research is included with OpenMausBot Cloud plans. Sign in to a paid plan under App Settings → OpenMausBot Cloud to use it.",
+  noKey: "X research is included with MausBot Cloud plans. Sign in to a paid plan under App Settings → MausBot Cloud to use it.",
   botOff: "X research is off for this bot. Turn it on in this bot's settings under Access.",
-  badKey: "Sign in to OpenMausBot Cloud again in Settings to use X research.",
+  badKey: "Sign in to MausBot Cloud again in Settings to use X research.",
   /** A Cloud home's relay token is the Admin's to replace; the person has no sign-in to redo there. */
-  homeBadKey: "X research isn't connected on this Cloud right now. It comes with your plan, so there is nothing to sign in to: try again later, and contact OpenMausBot support if it keeps happening.",
-  noPlan: "X research comes with OpenMausBot Cloud plans, and this account's plan isn't active.",
+  homeBadKey: "X research isn't connected on this Cloud right now. It comes with your plan, so there is nothing to sign in to: try again later, and tell MausBot support if it keeps happening.",
+  noPlan: "X research comes with MausBot Cloud plans, and this account's plan isn't active.",
   rateLimited: "X research is busy right now. Try again in a moment.",
   badRequest: "That X research request was refused. Check the query, handle or post link.",
   unavailable: "X research is temporarily unavailable. Try again shortly.",

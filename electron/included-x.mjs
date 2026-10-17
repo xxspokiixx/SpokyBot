@@ -1,5 +1,5 @@
 // X research's relay access on the desktop: while this computer's
-// OpenMausBot Cloud sign-in is on an active paid plan, fetch that sign-in's
+// MausBot Cloud sign-in is on an active paid plan, fetch that sign-in's
 // own relay token from the Admin once and hand it to the local server over
 // the private parent port (server/included-services.ts). Kept in memory only.
 //
@@ -70,8 +70,7 @@ export function createIncludedXSync({ fetchAccess, send }) {
 }
 
 /**
- * main.mjs's wiring: this sign-in's own access (cloud-account.mjs xResearchAccess), posted to whichever local server is
- * running over the private parent port (server/included-services.ts applyIncludedXMessage).
+ * The sync posting this sign-in's access to whichever local server is running, over the private parent port.
  * @param {{ account: () => { xResearchAccess(): Promise<{ url: string; token: string } | null> } | null,
  *   server: () => { postMessage(message: unknown): void } | null, log: (line: string) => void }} options
  */

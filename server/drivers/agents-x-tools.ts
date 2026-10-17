@@ -1,7 +1,6 @@
-// The agents catalog's read-only X research tools, and the internal route each one calls (server/routes/x-research.ts).
-// The routes validate the arguments, re-check the relay credential and the bot's switch, and answer in compact JSON the
-// bot reads as is. Every call counts against the person's Cloud plan's X calls, so a bot is shown these tools only when
-// its person switched X research on for it and the plan's relay credential is held (CatalogProfile.xResearch).
+// The agents catalog's read-only X research tools and the internal route behind each. Every call counts against the
+// person's Cloud plan's X calls, so a bot is shown them only when switched on with the plan's relay credential held, and
+// each route checks both again before it spends.
 import type { ToolCallContext, ToolCallResult } from "./agents-call.ts";
 import type { Json } from "./agents-client.ts";
 
@@ -17,7 +16,7 @@ export const X_TOOL_DEFINITIONS = [
   {
     name: "x_search",
     description:
-      "Search posts on X (Twitter) without an X account; included with the user's OpenMausBot Cloud plan. Each call counts against the plan's monthly X research calls, so write one well-filtered query instead of many broad ones. The query takes X operators: from:handle, to:handle, \"exact phrase\", since:YYYY-MM-DD, until:YYYY-MM-DD, min_faves:N, -filter:replies, lang:en, OR. Bare words are all required, so use a short phrase or OR between alternatives. Returns compact posts (link, author, time, text, likes, reposts, replies, quotes, views) and newestId. To monitor X, for example in a routine, keep newestId and pass it back as sinceId next time to get only newer posts. Read-only: you cannot post, like or reply.",
+      "Search posts on X (Twitter) without an X account; included with the user's MausBot Cloud plan. Each call counts against the plan's monthly X research calls, so write one well-filtered query instead of many broad ones. The query takes X operators: from:handle, to:handle, \"exact phrase\", since:YYYY-MM-DD, until:YYYY-MM-DD, min_faves:N, -filter:replies, lang:en, OR. Bare words are all required, so use a short phrase or OR between alternatives. Returns compact posts (link, author, time, text, likes, reposts, replies, quotes, views) and newestId. To monitor X, for example in a routine, keep newestId and pass it back as sinceId next time to get only newer posts. Read-only: you cannot post, like or reply.",
     inputSchema: {
       type: "object",
       additionalProperties: false,

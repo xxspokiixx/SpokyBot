@@ -10,7 +10,7 @@ export interface CatalogProfile {
   skillAuthoring: boolean;
   sharedComputers: boolean;
   voiceNotes: boolean;
-  /** Switched on for X research with the plan's relay credential held (agents-x-tools.ts). Absent means off. */
+  /** X research is switched on for this bot and the plan's relay credential is held. Absent means off. */
   xResearch?: boolean;
   cloudHome: boolean;
   memoryEnabled?: boolean;

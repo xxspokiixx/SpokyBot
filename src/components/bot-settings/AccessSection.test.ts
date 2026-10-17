@@ -220,7 +220,7 @@ describe("X research card", () => {
   it("is a Cloud plan feature: locked, with the switch off and disabled, when this server has no plan credential", () => {
     fixture.config = { xResearch: { included: false } } as Partial<ConfigStatus>;
     const html = render(makeBot());
-    expect(html).toContain("X research is included with OpenMausBot Cloud plans.");
+    expect(html).toContain("X research is included with MausBot Cloud plans.");
     expect(html).toMatch(/aria-label="Let this bot search and read X"[^>]* disabled=""/);
   });
 
@@ -231,13 +231,13 @@ describe("X research card", () => {
     expect(off).not.toMatch(/aria-label="Let this bot search and read X"[^>]* disabled=""/);
     const on = render(makeBot({ xResearch: true }));
     expect(on).toMatch(/aria-label="Let this bot search and read X"[^>]*aria-checked="true"/);
-    expect(on).toContain("Included with your OpenMausBot Cloud plan.");
+    expect(on).toContain("Included with your MausBot Cloud plan.");
   });
 
   it("says plainly when the plan's Cloud does not offer X research right now, instead of connecting forever", () => {
     fixture.config = { xResearch: { included: false, unavailable: true } } as Partial<ConfigStatus>;
     const html = render(makeBot());
-    expect(html).toContain("X research isn’t available from OpenMausBot Cloud right now.");
+    expect(html).toContain("X research isn’t available from MausBot Cloud right now.");
     expect(html).not.toContain("Connecting");
   });
 
