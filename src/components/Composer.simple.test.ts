@@ -106,6 +106,11 @@ describe("the Simple composer in a bot chat", () => {
     expect(menu()!.textContent).toContain("Call mode");
   });
 
+  it("leaves the area behind and below the composer see-through, with no solid backdrop", () => {
+    render({ bot });
+    expect(container.querySelector("[data-composer-backdrop]")).toBeNull();
+  });
+
   it("attaches through the same file picker as the paperclip", () => {
     const picker = vi.spyOn(HTMLInputElement.prototype, "click").mockImplementation(() => {});
     render({ bot });
@@ -180,6 +185,7 @@ describe("the Advanced composer", () => {
     expect(container.querySelector('[aria-haspopup="menu"][aria-label$="for Claude"]')).not.toBeNull();
     expect(fixture.call).toMatchObject({ placement: "composer" });
     expect(fixture.call?.fill).toBeUndefined();
+    expect(container.querySelector("[data-composer-backdrop]")).not.toBeNull();
   });
 
   it("keeps the room's Goal chip and its header call button", () => {

@@ -1963,7 +1963,7 @@ export function Sidebar({ open, onClose, collapseToIcons = false }: {
       </GlassBar>
 
       {density !== "icons" && <SidebarResizeHandle sizing={sizing} sidebarRef={sidebarRef} style={windowNoDragStyle} />}
-      {!advanced && !collapseToIcons && <SidebarEdgeToggle collapsed={rail} onToggle={toggleCollapsed} style={windowNoDragStyle} />}
+      {!advanced && !collapseToIcons && <SidebarEdgeToggle collapsed={rail} onToggle={toggleCollapsed} style={windowNoDragStyle} anchorRef={sidebarRef} />}
 
       <GlassScroller className={rail ? "[scrollbar-gutter:stable_both-edges]" : "px-2"}>
         <div className={cn("flex flex-col", advanced ? "gap-0.5" : "gap-1 pt-2")}>
