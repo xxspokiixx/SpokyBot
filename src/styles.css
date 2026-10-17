@@ -1138,6 +1138,7 @@ body {
    keyboard focus scrolls them clear, and the scrollbar runs only between the
    bars (a bar over it would swallow the drag). */
 .glass-scroller {
+  isolation: isolate;
   scroll-padding-top: var(--glass-top, 0px);
   scroll-padding-bottom: calc(var(--glass-bottom, 0px) + var(--glass-bottom-reach, 0px));
 }
