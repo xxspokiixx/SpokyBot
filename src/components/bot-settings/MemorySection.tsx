@@ -267,18 +267,17 @@ export function MemorySection({ bot, active = true, onToggle }: { bot: Bot; acti
   return (
     <div className="flex flex-col gap-4">
       <div className="rounded-xl bg-card p-4">
-        <div className="text-[15px] font-medium text-ink">Memory</div>
+        <div className="text-[15px] font-medium text-ink">{t("memory.title")}</div>
         <label className="mt-3 flex items-center gap-2 text-[13px] text-ink">
           <input type="checkbox" checked={bot.memoryEnabled !== false} disabled={bot.busy} onChange={(event) => onToggle(event.target.checked)} />
-          Let this bot use memory
+          {t("memory.enable")}
         </label>
         <p className="mt-1 text-[12.5px] text-ink-secondary">
-          Off stops memory prompts, recall, native memory tools, upkeep, and automatic turn logs. Existing files remain available for review.
+          {t("memory.enableHelp")}
           {bot.busy ? " Stop this bot's turn before changing this setting." : ""}
         </p>
         <p className="mt-1 text-[13px] leading-relaxed text-ink-secondary">
-          Notes this bot keeps between tasks. They are plain markdown files in a folder on this computer — open them in any
-          editor, or in Obsidian.
+          {t("memory.notesHelp")}
         </p>
         {overview && (
           <div className="mt-3 flex flex-wrap items-center gap-2">
@@ -334,7 +333,7 @@ export function MemorySection({ bot, active = true, onToggle }: { bot: Bot; acti
             <span className="truncate font-mono text-[12.5px] text-ink">{editing.path}</span>
             {editing.path !== MEMORY_INDEX && (
               <button type="button" className={quietButtonCls} onClick={() => void open(MEMORY_INDEX)}>
-                Back to MEMORY.md
+                {t("memory.backToIndex")}
               </button>
             )}
           </div>
@@ -359,7 +358,7 @@ export function MemorySection({ bot, active = true, onToggle }: { bot: Bot; acti
             onChange={(e) => setEditing({ ...editing, text: e.target.value, dirty: true })}
           />
           {editing.readOnly ? (
-            <p className="mt-2 text-[12px] text-ink-secondary">Daily logs are the bot's own record of what it did; they are not loaded into conversations and are read-only here.</p>
+            <p className="mt-2 text-[12px] text-ink-secondary">{t("memory.logsReadOnly")}</p>
           ) : (
             <div className="mt-2 flex items-center gap-3">
               <button type="button" onClick={() => void save(editing.hash)} disabled={saving || !editing.dirty} className={buttonCls}>
@@ -367,19 +366,19 @@ export function MemorySection({ bot, active = true, onToggle }: { bot: Bot; acti
               </button>
               {editing.dirty && (
                 <button type="button" className={quietButtonCls} disabled={saving} onClick={() => void open(editing.path)}>
-                  Discard changes
+                  {t("memory.discard")}
                 </button>
               )}
             </div>
           )}
           {savedDraft !== null && (
             <div className="mt-3">
-              <div className="mb-1 text-[12px] text-ink-secondary">Your unsaved draft, kept so nothing is lost:</div>
+              <div className="mb-1 text-[12px] text-ink-secondary">{t("memory.unsavedDraft")}</div>
               <pre className="max-h-[160px] overflow-auto whitespace-pre-wrap rounded-lg border border-hairline/40 bg-inset p-3 font-mono text-[12px] leading-relaxed text-ink">
                 {savedDraft}
               </pre>
               <button type="button" className={cn(quietButtonCls, "mt-1")} onClick={() => setSavedDraft(null)}>
-                Dismiss draft
+                {t("memory.dismissDraft")}
               </button>
             </div>
           )}
@@ -427,9 +426,9 @@ export function MemorySection({ bot, active = true, onToggle }: { bot: Bot; acti
       )}
 
       <div className="rounded-xl bg-card p-4">
-        <div className="text-[15px] font-medium text-ink">Changes</div>
+        <div className="text-[15px] font-medium text-ink">{t("memory.changes")}</div>
         <p className="mt-1 text-[13px] leading-relaxed text-ink-secondary">
-          Every change to these files, whoever made it. Undo puts a file back the way it was before that change.
+          {t("memory.changesHelp")}
         </p>
         <div className="mt-3">
           <MemoryJournalList rows={journal} botName={bot.name} reverting={reverting} onRevert={(row) => void revert(row)} />
@@ -603,7 +602,7 @@ export function MemoryFileRows({
       <div className="text-[12px] font-medium uppercase tracking-[0.08em] text-ink-secondary">{title}</div>
       <div className="mt-0.5 text-[12px] text-ink-secondary">{hint}</div>
       {files.length === 0 ? (
-        <div className="mt-2 text-[12.5px] text-ink-secondary">None yet.</div>
+        <div className="mt-2 text-[12.5px] text-ink-secondary">{t("memory.noneYet")}</div>
       ) : (
         <div className="mt-2 overflow-hidden rounded-lg border border-hairline/40">
           {files.map((file) => (
@@ -651,8 +650,8 @@ export function MemoryJournalList({
   onRevert: (row: MemoryJournalRow) => void;
   now?: number;
 }) {
-  if (!rows) return <div className="text-[13px] text-ink-secondary">Loading…</div>;
-  if (rows.length === 0) return <div className="text-[13px] text-ink-secondary">No changes recorded yet.</div>;
+  if (!rows) return <div className="text-[13px] text-ink-secondary">{t("memory.loading")}</div>;
+  if (rows.length === 0) return <div className="text-[13px] text-ink-secondary">{t("memory.noChanges")}</div>;
   return (
     <div className="flex flex-col gap-2">
       {rows.map((row) => {
