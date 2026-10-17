@@ -18426,7 +18426,12 @@
       "botOverview.setup.soul": "84f2ef07922e753061a4ab965921c917ddaade108c98bbe7b9e5d029e9f204c0",
       "botOverview.setup.folder": "7ce8981ba999b79ec4e9789a9a14124bb95762e54e2d8d580a427aa84accbe7d",
       "botOverview.setup.apps": "5a83f5695a3c85ab806fd37d4d09abdc9380b41657ccfaf3234561950abe549b",
-      "botOverview.setup.schedule": "5f6d291c6db2a8f4b627cb892f682e2f50d2d3511b95d1a45ccbc25a913bc519"
+      "botOverview.setup.schedule": "5f6d291c6db2a8f4b627cb892f682e2f50d2d3511b95d1a45ccbc25a913bc519",
+      "botOverview.line.privateWorkspace": "368bea6a80554e32d74bd2e9683325b12b8aaf6587559b93b7720fe414de7ce7",
+      "botOverview.line.browser": "88fe44c81447f64f963773cc73227ba8dd8ea0cb0219058ee7aa839395131365",
+      "botOverview.line.noApps": "a859c1024afd8d7b40c380a54e752590d760c89fba38c4f5ad48da648ff1224b",
+      "botOverview.line.noSchedule": "7f1a754819d69f2241046ce66f33a0cb074e46152c5070427fe8009f07cf5b85",
+      "botOverview.line.computer": "bd9a9eda3d707d4da8d386fd1424091fcac4022b63f9bd15939f337a00cf2d37"
     },
     "zh": {
       "pro.fromPrice": "a48a04a457d60b08b54fc83e7a6c4584ffedb1e23621859084900c8521a3af7b",

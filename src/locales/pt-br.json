@@ -4865,4 +4865,10 @@
   "botOverview.setup.folder": "Escolha uma pasta de trabalho",
   "botOverview.setup.apps": "Conecte os apps necessários",
   "botOverview.setup.schedule": "Adicione uma rotina ou um gatilho"
+,
+  "botOverview.line.privateWorkspace": "Funciona no próprio espaço de trabalho privado.",
+  "botOverview.line.browser": "Tem o navegador integrado.",
+  "botOverview.line.noApps": "Não tem apps conectados.",
+  "botOverview.line.noSchedule": "Não vai agir com base em uma rotina.",
+  "botOverview.line.computer": "Preferência de computador: {preference}."
 }

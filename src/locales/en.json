@@ -5011,4 +5011,10 @@
   "botOverview.setup.folder": "Choose a working folder",
   "botOverview.setup.apps": "Connect the apps it needs",
   "botOverview.setup.schedule": "Add a schedule or a trigger"
+,
+  "botOverview.line.privateWorkspace": "Works in its private workspace.",
+  "botOverview.line.browser": "Has the built-in browser.",
+  "botOverview.line.noApps": "Has no connected apps.",
+  "botOverview.line.noSchedule": "Won't act on a schedule.",
+  "botOverview.line.computer": "Computer preference: {preference}."
 }

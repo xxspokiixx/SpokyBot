@@ -31,6 +31,15 @@ export function OverviewSection({
   const setup = overview.setup ?? [];
   const remaining = setup.filter((step) => !step.done);
   const setupLabel = (id: string, fallback: string) => t(`botOverview.setup.${id}` as never) || fallback;
+  const overviewLine = (line: string) => {
+    if (line === "Works in its private workspace.") return t("botOverview.line.privateWorkspace");
+    if (line === "Has the built-in browser.") return t("botOverview.line.browser");
+    if (line === "Has no connected apps.") return t("botOverview.line.noApps");
+    if (line === "Won't act on a schedule.") return t("botOverview.line.noSchedule");
+    const computer = line.match(/^Computer preference: (.+)\.$/);
+    if (computer) return t("botOverview.line.computer", { preference: computer[1] });
+    return line;
+  };
 
   return (
     <div className="flex flex-col gap-4">
@@ -106,7 +115,7 @@ export function OverviewSection({
         ) : (
           <ul className="mt-2 flex flex-col gap-1.5 text-[13px] leading-relaxed text-ink">
             {overview.does.map((line, i) => (
-              <li key={i}>{line}</li>
+              <li key={i}>{overviewLine(line)}</li>
             ))}
           </ul>
         )}
@@ -119,7 +128,7 @@ export function OverviewSection({
         ) : (
           <ul className="mt-2 flex flex-col gap-1.5 text-[13px] leading-relaxed text-ink">
             {overview.reaches.map((line, i) => (
-              <li key={i}>{line}</li>
+              <li key={i}>{overviewLine(line)}</li>
             ))}
           </ul>
         )}
@@ -129,7 +138,7 @@ export function OverviewSection({
         <div className="text-[15px] font-medium text-ink">{t("botOverview.wont")}</div>
         <ul className="mt-2 flex flex-col gap-1.5 text-[13px] leading-relaxed text-ink">
           {overview.wont.map((line, i) => (
-            <li key={i}>{line}</li>
+            <li key={i}>{overviewLine(line)}</li>
           ))}
         </ul>
       </div>
