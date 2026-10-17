@@ -4992,4 +4992,17 @@
   "botOverview.promptPreviewCount": "Prompt preview · {bytes} bytes ≈ {tokens} tokens",
   "botOverview.promptError": "Couldn’t load the prompt preview.",
   "botOverview.bytes": "{count} bytes"
+,
+  "botSettings.search": "Search",
+  "botSettings.searchAria": "Search settings",
+  "botSettings.searchNone": "Nothing matches “{query}”",
+  "botSettings.sections.skills": "Skills",
+  "botSettings.sections.memory": "Memory",
+  "botSettings.sections.routines": "Routines",
+  "botSettings.sections.access": "Access",
+  "botSettings.sections.model": "Model",
+  "botSettings.sections.permissions": "Permissions",
+  "botSettings.sections.voice": "Voice & alerts",
+  "botSettings.sections.history": "History",
+  "botSettings.sections.usage": "Usage"
 }

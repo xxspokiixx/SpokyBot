@@ -4846,4 +4846,17 @@
   "botOverview.promptPreviewCount": "Prévia do prompt · {bytes} bytes ≈ {tokens} tokens",
   "botOverview.promptError": "Não foi possível carregar a prévia do prompt.",
   "botOverview.bytes": "{count} bytes"
+,
+  "botSettings.search": "Buscar",
+  "botSettings.searchAria": "Buscar configurações",
+  "botSettings.searchNone": "Nada corresponde a “{query}”",
+  "botSettings.sections.skills": "Habilidades",
+  "botSettings.sections.memory": "Memória",
+  "botSettings.sections.routines": "Rotinas",
+  "botSettings.sections.access": "Acesso",
+  "botSettings.sections.model": "Modelo",
+  "botSettings.sections.permissions": "Permissões",
+  "botSettings.sections.voice": "Voz e alertas",
+  "botSettings.sections.history": "Histórico",
+  "botSettings.sections.usage": "Uso"
 }

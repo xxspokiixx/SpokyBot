@@ -18409,7 +18409,19 @@
       "botOverview.promptPreview": "eae5513df7ffedf3c8fecd0e7017004f3ac7df6b55b981aeb1ae1acbcdc5187f",
       "botOverview.promptPreviewCount": "e5b34ac2bf95b0d3ef3ea00d128348ac8bd6771874fd613220a88c8161e937f5",
       "botOverview.promptError": "36fcc8e4c7dac8a37fd05d458f8c4de71431b497dcb499c584b2e65e04bbf4e7",
-      "botOverview.bytes": "2879934f7b7ceb7a002b576b1ce37fb47ed4bdba83808fc5709844d6052d2c9b"
+      "botOverview.bytes": "2879934f7b7ceb7a002b576b1ce37fb47ed4bdba83808fc5709844d6052d2c9b",
+      "botSettings.search": "49c266baaaa70981ea188fa714d5c40cf13830d786a861c9943ae0d26a7f3fe9",
+      "botSettings.searchAria": "255b076dd82855431a4ce9a722d77d41f47755ab11be14fc686fd71415cdeef0",
+      "botSettings.searchNone": "5bb5e3f3f8eaec582b5d4972b1a1007e7c7704cf3c2f998524b473ac56f29eb9",
+      "botSettings.sections.skills": "66d0f523a379b2de6f8d5fba3a817ebc395f7bcaa54cc132ca9dfa665d1e9378",
+      "botSettings.sections.memory": "c3963aedaac6c83c04cf8fb997b479c61e66b3caeecfadd2f2d4bd5b0aef1778",
+      "botSettings.sections.routines": "61b7bb44e2b47b7c0ccaccff4872fdcf3e298345d0f003ea4bf54e8c84e2a889",
+      "botSettings.sections.access": "ec5ba0abb717da87aab2655bd4b4a40f93f2a591a0ade63611c42925c49c17e9",
+      "botSettings.sections.model": "5e2c614c23f02239bc03c6c04fcb681950f9e72bf8fdff6be79c79841cbb10c0",
+      "botSettings.sections.permissions": "abccc78cc93c07931feccfbd0665c003373b48334fd8d4cf5c6d0c714e68f26e",
+      "botSettings.sections.voice": "cad3b82bec0946c3316f83f4eae54cab1b0465ad9a02c6a1a98f55c30ef657d1",
+      "botSettings.sections.history": "0e769600933790607b2a13b33ddfade0fa17810eb62c3b28ee23e59516516491",
+      "botSettings.sections.usage": "8d59829c1e15afe1a7fae93e8e5e32d8511bec5fd598a09f4fea6033b31e8a66"
     },
     "zh": {
       "pro.fromPrice": "a48a04a457d60b08b54fc83e7a6c4584ffedb1e23621859084900c8521a3af7b",
