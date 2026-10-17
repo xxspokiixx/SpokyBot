@@ -5365,5 +5365,10 @@
   "memory.openObsidian": "Open in Obsidian",
   "memory.showFileManager": "Show in file manager",
   "memory.upkeep.help": "Keeps these notes in shape without the bot having to remember: notices facts you mention in chats and files them — core facts here, detail in topic files it creates — and tidies up every night: expired notes are archived, duplicates merged, contradicted notes crossed out. Facts about you are added to About me (Settings → General), where every bot reads them and you can remove any. Every change shows below and can be undone.",
-  "memory.capacity.sentence": "{lines} of {maxLines} lines · {bytes} of {maxBytes} — only the first {maxLoaded} lines load each turn."
+  "memory.capacity.sentence": "{lines} of {maxLines} lines · {bytes} of {maxBytes} — only the first {maxLoaded} lines load each turn.",
+  "history.loading": "Loading…",
+  "history.empty": "No changes recorded yet.",
+  "history.refreshError": "Couldn’t refresh history.",
+  "history.undo": "Undo this change",
+  "history.restoreUnavailable": "The exact previous instructions are unavailable, so this change cannot be undone."
 }

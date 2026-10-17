@@ -18768,7 +18768,12 @@
       "voice.chatterboxLabel": "2fe576c243eb325686d5f698c4527e42d15b11ffb0e9b82a65a2493fb9b2757d",
       "voice.chatterboxLocal": "9a9b2d014eac288c0099f233076a9625208f09f3178bb4b8403ea71e8529add7",
       "voice.serverAddressError": "5b6b94d647f716408309d8881d8ce6a33c8ff1ec04d1c962764f08bd708f5b2a",
-      "common.saved": "b5c120b316c237a0deab3140267aebedba61947d3ae268d708a53d5be119e9fb"
+      "common.saved": "b5c120b316c237a0deab3140267aebedba61947d3ae268d708a53d5be119e9fb",
+      "history.loading": "ba3bbbe10d8bef66441c88536ce7b8e724e2829b59a3da658654f4961cd61ae5",
+      "history.empty": "0dbc9c4de60a9ee1f7e3fe863f4ee69ec5338c845dac151f1a3ffa8715ffbd95",
+      "history.refreshError": "e7758a6440760f6fc1d6262cd5a3edd9062e678454d35465d94f75bfc4d434aa",
+      "history.undo": "c1497e901b9e70aa938edfbd2d99841e49e00458d40816da793c6a1af625677d",
+      "history.restoreUnavailable": "2d272762ebacd385aead54c56b9597070130fcc0fe95b3ccfe3e6ea8ffad730e"
     },
     "zh": {
       "pro.fromPrice": "a48a04a457d60b08b54fc83e7a6c4584ffedb1e23621859084900c8521a3af7b",
