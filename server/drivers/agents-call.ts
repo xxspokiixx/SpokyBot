@@ -449,14 +449,13 @@ export async function callTool(name: string, args: Json, context: ToolCallContex
     if (canonical.group_id === undefined) canonical.group_id = args.groupId;
     if (canonical.done_when === undefined) canonical.done_when = args.doneWhen;
     const ids = canonical.bot_ids;
+    const optional = (key: string, type: "boolean" | "string") => canonical[key] === undefined || typeof canonical[key] === type;
     const usable = Array.isArray(ids) && ids.length > 0 && ids.every((id) => typeof id === "string")
       && typeof canonical.message === "string" && canonical.message.trim().length > 0
       && (canonical.thread === undefined || canonical.thread === "standing" || canonical.thread === "new")
       && (canonical.reply === undefined || canonical.reply === "resume" || canonical.reply === "none")
-      && (canonical.consult === undefined || typeof canonical.consult === "boolean")
-      && (canonical.in_my_folder === undefined || typeof canonical.in_my_folder === "boolean")
-      && (canonical.done_when === undefined || typeof canonical.done_when === "string")
-      && (canonical.reason === undefined || typeof canonical.reason === "string");
+      && optional("consult", "boolean") && optional("in_my_folder", "boolean")
+      && optional("done_when", "string") && optional("reason", "string");
     if (!usable) {
       return {
         text: `coordinate_bots takes snake_case arguments: bot_ids (an array of 1-4 teammate ids) and message are required; group_id, reason, rework, thread ("standing" or "new"), reply ("resume" or "none"), consult (true or false), in_my_folder (true or false) and done_when are optional. Received: ${Object.keys(args).join(", ") || "none"}.`,
