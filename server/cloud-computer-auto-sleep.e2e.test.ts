@@ -259,13 +259,15 @@ describe("a cloud computer goes to sleep after use and wakes on the next", () =>
   }, 60_000);
 
   let teamBox = "";
+  let ada: { id: string; name: string; threadId: string };
+  let ben: { id: string; name: string; threadId: string };
 
   it("a team's shared computer sleeps only once every bot on the team is idle", async () => {
     const requestId = randomUUID();
     await apiOk("POST", "/api/team-computers", { requestId, name: "Ops desktop", acknowledgeCost: true });
     teamBox = rows.at(-1)!.id;
-    const ada = await newBot("Ada", { ...model("uses"), section: "Ops" });
-    const ben = await newBot("Ben", { ...model("slow"), section: "Ops", computer: "off" });
+    ada = await newBot("Ada", { ...model("uses"), section: "Ops" });
+    ben = await newBot("Ben", { ...model("slow"), section: "Ops", computer: "off" });
     await apiOk("PATCH", `/api/team-computers/${requestId}`, { section: "Ops", acknowledgeSharedAccess: true });
 
     rmSync(gate, { force: true });
@@ -297,6 +299,57 @@ describe("a cloud computer goes to sleep after use and wakes on the next", () =>
     expect(stopsOf(workerBox).at(-1)!.at - started).toBeGreaterThanOrEqual(IDLE_MS);
     expect(rows.every(row => row.state === "archived")).toBe(true);
   }, 90_000);
+
+  // A routine due within 30 minutes keeps the computer it will use on: waking it again would spend one start from the
+  // Boat account's shared pool. These routines are scheduled minutes ahead and never run during the journey.
+  const routineAt = (botId: string, inMs: number) => apiOk("POST", "/api/routines", {
+    name: "Inbox sweep", prompt: "Sweep the inbox", botId, schedule: { type: "once", at: Date.now() + inMs },
+  }).then(body => body.routine as { id: string; nextRunAt: number });
+
+  it("a routine due within 30 minutes keeps its bot's computer on; paused, two hours away, or with the computer off, it does not", async () => {
+    await apiOk("POST", `/api/bots/${worker.id}/computer/provision`, {});
+    const before = stopsOf(workerBox).length;
+    const routine = await routineAt(worker.id, 20 * 60_000);
+    await pause(IDLE_MS * 3);
+    expect(stopsOf(workerBox)).toHaveLength(before);
+
+    await apiOk("PATCH", `/api/routines/${routine.id}`, { enabled: false });
+    const paused = Date.now();
+    const stops = await until(() => stopsOf(workerBox), found => found.length === before + 1);
+    expect(stops.at(-1)!.at - paused).toBeGreaterThanOrEqual(IDLE_MS - 500);
+
+    await apiOk("PATCH", `/api/routines/${routine.id}`, { enabled: true, schedule: { type: "once", at: Date.now() + 2 * 60 * 60_000 } });
+    await apiOk("POST", `/api/bots/${worker.id}/computer/provision`, {});
+    const on = Date.now();
+    const later = await until(() => stopsOf(workerBox), found => found.length === before + 2);
+    expect(later.at(-1)!.at - on).toBeLessThan(IDLE_MS * 3);
+
+    // Switched to Off, the bot's routine no longer uses that computer, so it does not hold it either.
+    await apiOk("PATCH", `/api/routines/${routine.id}`, { schedule: { type: "once", at: Date.now() + 20 * 60_000 } });
+    await apiOk("POST", `/api/bots/${worker.id}/computer/provision`, {});
+    await apiOk("PATCH", `/api/bots/${worker.id}`, { computer: "off" });
+    const off = Date.now();
+    const offStops = await until(() => stopsOf(workerBox), found => found.length === before + 3);
+    expect(offStops.at(-1)!.at - off).toBeLessThan(IDLE_MS * 3);
+    await apiOk("PATCH", `/api/bots/${worker.id}`, { computer: "cloud" });
+    await apiOk("DELETE", `/api/routines/${routine.id}`);
+  }, 60_000);
+
+  it("a teammate's routine keeps the team's shared computer on; one for a teammate whose computer is off does not", async () => {
+    const cy = await newBot("Cy", { ...model("uses"), section: "Ops" });
+    const teammate = await routineAt(cy.id, 20 * 60_000);
+    const offline = await routineAt(ben.id, 20 * 60_000);
+    await send(ada.id, "Take a screenshot of the team desktop");
+    await idle(ada.id);
+    const before = stopsOf(teamBox).length;
+    expect(rows.find(row => row.id === teamBox)!.state).toBe("ready");
+    await pause(IDLE_MS * 3);
+    expect(stopsOf(teamBox)).toHaveLength(before);
+
+    await apiOk("DELETE", `/api/routines/${teammate.id}`);
+    await until(() => stopsOf(teamBox), found => found.length === before + 1);
+    await apiOk("DELETE", `/api/routines/${offline.id}`);
+  }, 60_000);
 
   it.skipIf(process.platform === "win32")("never touches a VPS: its activity starts no idle stop of any kind", async () => {
     expect((await api("PUT", "/api/config", { vps: { sshAlias: "fixture-vps" } })).status).toBe(200);
