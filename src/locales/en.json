@@ -750,6 +750,8 @@
   "cloudHome.connectHelp": "Opens My Cloud in this window. Switch back to This computer from the menu at the top of the sidebar.",
   "cloudHome.filesLink": "Share folders with My Cloud in Files",
   "cloudHome.connectFailed": "Could not open My Cloud. Try again in a moment.",
+  "cloudHome.unreachableHost": "The server My Cloud runs on is being restarted by our hosting provider. My Cloud and its files are safe, and it comes back on its own, usually within about 20 minutes.",
+  "cloudHome.unreachable": "My Cloud hasn't answered for a few minutes. Nothing was lost, and we've been told.",
   "lending.activity.title": "Activity on this computer",
   "lending.activity.empty": "Nothing yet. Every request from the server's bots will be listed here, including refused ones.",
   "lending.activity.refused": "refused",
