@@ -30,7 +30,6 @@ export function LiveBrowser({ bot, signIn }: { bot: Bot; signIn?: BrowserSignIn 
   const [tabs, setTabs] = useState<BrowserTab[]>([]);
   const [address, setAddress] = useState("");
   const [connected, setConnected] = useState(false);
-  const [reconnecting, setReconnecting] = useState(false);
   const [control, setControl] = useState({ held: false, controlling: false, owned: false });
   const [pending, setPending] = useState(false);
   const [error, setError] = useState("");
@@ -110,7 +109,7 @@ export function LiveBrowser({ bot, signIn }: { bot: Bot; signIn?: BrowserSignIn 
     let reconnectTimer: ReturnType<typeof setTimeout> | undefined;
     viewer.current = ""; pendingOperation.current = null; haltMessage.current = "";
     urlEditing.current = false; pageNow.current = null;
-    setFrame(null); setTabs([]); setAddress(""); setConnected(false); setReconnecting(false); setError(""); setBusy(false);
+    setFrame(null); setTabs([]); setAddress(""); setConnected(false); setError(""); setBusy(false);
     setControl({ held: false, controlling: false, owned: false }); setPending(false);
     controlNow.current = NO_CONTROL; setTakeStatus("");
     // The view this panel had when its stream dropped: the server returns its hold to this reconnect only.
@@ -128,14 +127,12 @@ export function LiveBrowser({ bot, signIn }: { bot: Bot; signIn?: BrowserSignIn 
       if (delay !== undefined) {
         reconnectCount.current++;
         message = t("browser.panel.connectionInterrupted");
-        setReconnecting(true);
         reconnectTimer = setTimeout(() => {
           if (!ownsConnection()) return;
           generation.current++;
           setAttempt((value) => value + 1);
         }, delay);
       }
-      if (delay === undefined) setReconnecting(false);
       setError(message); setBusy(false); setConnected(false); setFrame(null); setControl({ held: false, controlling: false, owned: false });
       controlNow.current = NO_CONTROL; setTakeStatus("");
       // Keep this generation alive: a successful restart closes its stream before the action reply arrives and must
@@ -163,7 +160,7 @@ export function LiveBrowser({ bot, signIn }: { bot: Bot; signIn?: BrowserSignIn 
     listen("waiting", () => { if (!viewer.current) setBusy(true); });
     listen("ready", (data) => {
       if (typeof data.viewerId !== "string" || !data.viewerId) return;
-      setBusy(false); setReconnecting(false);
+      setBusy(false);
       const expected = data.viewerId;
       viewer.current = expected;
       resumeFrom.current = "";
@@ -306,6 +303,7 @@ export function LiveBrowser({ bot, signIn }: { bot: Bot; signIn?: BrowserSignIn 
       }
     }
   };
+  const reconnecting = error === t("browser.panel.connectionInterrupted");
   const heldElsewhere = control.held && !control.owned;
   const interactive = connected && !heldElsewhere && !pending;
   const typingReady = interactive && control.owned && control.controlling;
