@@ -13,7 +13,7 @@ import {
   localizedRelativeTime,
   journalSource,
   journalSourceKey,
-  journalSummary,
+  fileLabel,
   openMemoryLocation,
   revertMemoryChange,
   saveMemoryDoc,
@@ -68,6 +68,18 @@ function localizedTidySummary(report: Parameters<typeof tidySummary>[0]): string
   add(report.organized, "memory.upkeep.summary.filed.one", "memory.upkeep.summary.filed.many");
   const summary = parts.length ? parts.join(", ") : t("memory.upkeep.summary.none");
   return summary.charAt(0).toUpperCase() + summary.slice(1);
+}
+
+function localizedJournalSummary(row: MemoryJournalRow, botName: string): string {
+  const who = row.actor === "bot" ? botName : row.actor === "import" ? t("memory.journal.actor.import") : row.actor === "upkeep" ? t("memory.journal.actor.upkeep") : t("memory.journal.actor.you");
+  const file = fileLabel(row.path);
+  const topic = row.path === MEMORY_INDEX ? file : row.path.startsWith("memory/log/") ? t("memory.journal.log", { file }) : t("memory.journal.topic", { file });
+  const lines = (count: number) => t(count === 1 ? "memory.journal.line.one" : "memory.journal.line.many", { count });
+  if (row.kind === "created") return t("memory.journal.created", { who, topic, detail: row.added ? t("memory.journal.withLines", { lines: lines(row.added) }) : "" });
+  if (row.kind === "deleted") return t("memory.journal.deleted", { who, topic });
+  if (row.added && !row.removed) return t("memory.journal.added", { who, lines: lines(row.added), topic });
+  if (row.removed && !row.added) return t("memory.journal.removed", { who, lines: lines(row.removed), topic });
+  return t("memory.journal.rewrote", { who, lines: lines(Math.max(row.added, row.removed)), topic });
 }
 
 export function LendingReviewNotice({ changed, stale, busy, onReviewed }: { changed: readonly string[]; stale: boolean; busy: boolean; onReviewed: () => void }) {
@@ -669,7 +681,7 @@ export function MemoryJournalList({
           <div key={row.id} className="rounded-lg bg-inset px-3 py-2">
             <div className="flex items-start justify-between gap-3">
               <div className="min-w-0 flex-1 text-[13px] leading-relaxed text-ink">
-                <span>{journalSummary(row, botName)}</span>
+                <span>{localizedJournalSummary(row, botName)}</span>
                 {" · "}
                 <span className="text-ink-secondary">{localizedRelativeTime(row.at, activeLocale(), now)}</span>
                 {source && (

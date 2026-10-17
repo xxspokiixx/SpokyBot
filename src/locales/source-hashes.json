@@ -18572,7 +18572,20 @@
       "memory.source.chat": "75b80c3d4ec67697426164482a468677524790ef3893078d5bdc0836dd7fdbb3",
       "memory.source.task": "eb24257c630c99846475c471414ec5864ca82d28427fea8ff43969756e934b80",
       "memory.source.settings": "a61a4cd7efa8895ccc53dab4c5f4144df66b76bb91bf17269ac89be16180a6dc",
-      "memory.source.api": "33913a3c987b34c6dbbf65f9f06eda4aa68ff7d45479d6d561cff4acedfba8c9"
+      "memory.source.api": "33913a3c987b34c6dbbf65f9f06eda4aa68ff7d45479d6d561cff4acedfba8c9",
+      "memory.journal.actor.you": "08b041935798fbf6fd6ff51099ffedb140a475889986d14f5559ff8e7fc571dd",
+      "memory.journal.actor.import": "3f442efbe8ca3833b72280de701fb52e7dac61843c825aa96eb681c731705e52",
+      "memory.journal.actor.upkeep": "96b7c58507ad1005907c89034def6ccd05304f35fcf3b3907dde4f9914e0e9d7",
+      "memory.journal.log": "227faa411d2aac76e5e79d95b9267427b8bfd924b412853abd29d6041e83aa17",
+      "memory.journal.topic": "0b1f96758b7dff25521ead087c151830875a11ab1359066c3fe806f2d0de00bb",
+      "memory.journal.line.one": "7de203a2e088001752135c695cf840f4623207ec7f27cbeeac8371bdda02b61d",
+      "memory.journal.line.many": "69955e2c682db58538a7f20c69a27d6d9c7711528f21ce6c9978f86030726b43",
+      "memory.journal.withLines": "912f6330dd83217539e5479e0d2e931a7d004eca89be32165245c4bb1f985cd5",
+      "memory.journal.created": "cfdac2fbea16dcb9025e4edae4dc1c57d754475c6657f08d2baed6a534f9df58",
+      "memory.journal.deleted": "c16d29ec33029be09e8088f17850b8ac3c32466a47197e4d9ac7089eac1c2cb3",
+      "memory.journal.added": "144aae4d0d750417974bbbad9c5997092f179fbe0dc4ab5d21fb5d833d7eb71d",
+      "memory.journal.removed": "ccff5e472a2e157cc5f43dd1dc13838dbf7a0e80a60cbbc6c99702994fd3b073",
+      "memory.journal.rewrote": "cc845fc172374dfa030174a508ac26b020746970c1bf85c8cca71d44b2c1389f"
     },
     "zh": {
       "pro.fromPrice": "a48a04a457d60b08b54fc83e7a6c4584ffedb1e23621859084900c8521a3af7b",
