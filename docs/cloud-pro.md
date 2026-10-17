@@ -415,6 +415,15 @@ Cloud use this computer**, below), through the shared-computer tools.
   place that cannot exist.
 - The built-in browser is on unless the person switches it off in Settings.
   The desktop turns it on in its first-run welcome, which a Cloud home skips.
+- The built-in browser never opens Reddit (`reddit.com`, `redd.it`,
+  `redditmedia.com`, `redditstatic.com`, `reddit.app.link` and their
+  subdomains): Reddit blocks bots that browse from data-centre addresses and can
+  ban the person's account. The egress gate refuses those names, whether the
+  page was typed, linked, redirected to or framed, and a bot's call that would
+  open one is told so and pointed at the Reddit connected app or the person's
+  own computer (`server/browser/egress/reddit.ts`). A cloud computer's
+  `open_url` refuses them the same way. The desktop's and a self-hosted
+  server's browsers are not limited.
 
 `shared/cloud-home.ts` decides which places are offered, for the server and
 the app alike.
