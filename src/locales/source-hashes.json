@@ -18458,7 +18458,18 @@
       "botIdentity.ai.customHint": "23837c54f4955191d8bc8f56509dca23571ed51bb403ae69655e44018bbcdedb",
       "botIdentity.ai.shared": "c86b88619b5f17d1151133f227a2c121add5ed457308fd871ab14fc27458c8f5",
       "botIdentity.ai.generating": "d20a4476a0a85978547a5781e7e575e8358f102137bf253706db20ee0fe6061c",
-      "botIdentity.ai.generate": "ef312e379b25da818430bbc749c993a8d9b461d40d2b34fc2dcb4f6908146d28"
+      "botIdentity.ai.generate": "ef312e379b25da818430bbc749c993a8d9b461d40d2b34fc2dcb4f6908146d28",
+      "botIdentity.ai.baseUrl": "70589413a3c9793339fcf764276727ac652fa7dfe2f15fb5671251303a52ca49",
+      "botIdentity.ai.imageModel": "c1329b9fbe25eeb806af69fbffc373cd415e74ad8d05a087e8e36f34288777ec",
+      "botIdentity.ai.optional": "ec91fdd9256cb75ae611249b50cb7eb16533f0fa91b86239ec1d439a1ea033b8",
+      "botIdentity.ai.savedKey": "3fd11696b5a635ec03594969cdce54ed520013b69da504a695dcb80ef77b5114",
+      "botIdentity.ai.keyless": "30754b8365e359328829aa4379b1d9eef2124da0efb7ab06ab94b85df88b874c",
+      "botIdentity.ai.pasteKey": "8358f1f0a95beda918848d2d18effd58f6480ae594c340d8cc6078edce7e5189",
+      "botIdentity.ai.removeKey": "946b51ef67af12f11f782e22c7ac6e1f9eea0f554892a7ad8b1c7ab8a022dcda",
+      "botIdentity.ai.saveConnection": "df24ef128adf67e1234f0740ff776e366e48ebc3392d67c6fb5ade7ff1edb851",
+      "botIdentity.ai.saveKey": "b6e0aef2a9f1eda5d44e17f83826029b93502e4c5efe98d56febf36fc8f3b45e",
+      "botIdentity.ai.connectionSettings": "b4ddb3c1ca6cd2891d2cf028561f73bfc42aeadc8a4802c4d93ef913cd097a12",
+      "botIdentity.ai.saveBeforeGenerate": "3932693b62e068600eb2a136fb39d7766973f4dbb15b247d01652ca0682a13e1"
     },
     "zh": {
       "pro.fromPrice": "a48a04a457d60b08b54fc83e7a6c4584ffedb1e23621859084900c8521a3af7b",

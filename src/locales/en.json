@@ -5047,4 +5047,16 @@
   "botIdentity.ai.shared": "This connection is shared by all bot avatars.",
   "botIdentity.ai.generating": "Generating…",
   "botIdentity.ai.generate": "Generate avatar"
+,
+  "botIdentity.ai.baseUrl": "Base URL",
+  "botIdentity.ai.imageModel": "Image model",
+  "botIdentity.ai.optional": "optional",
+  "botIdentity.ai.savedKey": "Saved key · paste to replace",
+  "botIdentity.ai.keyless": "Leave blank for a keyless connection",
+  "botIdentity.ai.pasteKey": "Paste API key",
+  "botIdentity.ai.removeKey": "Remove saved key",
+  "botIdentity.ai.saveConnection": "Save connection",
+  "botIdentity.ai.saveKey": "Save key",
+  "botIdentity.ai.connectionSettings": "Connection settings",
+  "botIdentity.ai.saveBeforeGenerate": "Save your connection changes before generating."
 }

@@ -152,7 +152,7 @@ export function AvatarImageGenerator({
       {provider === "custom" && (
         <>
           <label className="block text-[11.5px] text-ink-secondary">
-            Base URL
+            {t("botIdentity.ai.baseUrl")}
             <input
               type="url"
               value={customUrl}
@@ -164,7 +164,7 @@ export function AvatarImageGenerator({
             />
           </label>
           <label className="block text-[11.5px] text-ink-secondary">
-            Image model
+            {t("botIdentity.ai.imageModel")}
             <input
               value={customModel}
               disabled={busy}
@@ -180,7 +180,7 @@ export function AvatarImageGenerator({
         </>
       )}
       <label className="block text-[11.5px] text-ink-secondary">
-        {providerInfo.keyLabel}{provider === "custom" ? " (optional)" : ""}
+        {providerInfo.keyLabel}{provider === "custom" ? ` (${t("botIdentity.ai.optional")})` : ""}
         <input
           type="password"
           value={imageKey}
@@ -192,7 +192,7 @@ export function AvatarImageGenerator({
               void saveConnection();
             }
           }}
-          placeholder={keyConfigured ? "Saved key · paste to replace" : provider === "custom" ? "Leave blank for a keyless connection" : "Paste API key"}
+          placeholder={keyConfigured ? t("botIdentity.ai.savedKey") : provider === "custom" ? t("botIdentity.ai.keyless") : t("botIdentity.ai.pasteKey")}
           autoComplete="off"
           className={`${INPUT_CLASS} mt-1`}
         />
@@ -206,7 +206,7 @@ export function AvatarImageGenerator({
       <div className="flex items-center justify-end gap-2">
         {keyConfigured && (
           <button type="button" onClick={() => void removeKey()} disabled={busy} className="mr-auto rounded-md py-1.5 text-[11.5px] text-ink-secondary hover:text-danger disabled:opacity-50">
-            Remove saved key
+            {t("botIdentity.ai.removeKey")}
           </button>
         )}
         <button
@@ -216,7 +216,7 @@ export function AvatarImageGenerator({
           className={BUTTON_CLASS}
         >
           {saving ? <Loader2 size={13} className="animate-spin" /> : <Check size={13} />}
-          {provider === "custom" ? "Save connection" : "Save key"}
+          {provider === "custom" ? t("botIdentity.ai.saveConnection") : t("botIdentity.ai.saveKey")}
         </button>
       </div>
     </div>
@@ -242,7 +242,7 @@ export function AvatarImageGenerator({
 
       {configured ? (
         <details key={provider} className="mt-3 rounded-lg border border-hairline/40 px-3 py-2">
-          <summary className="cursor-pointer text-[11.5px] text-ink-secondary">Connection settings</summary>
+          <summary className="cursor-pointer text-[11.5px] text-ink-secondary">{t("botIdentity.ai.connectionSettings")}</summary>
           <div className="mt-3">{connectionForm}</div>
         </details>
       ) : <div className="mt-3">{connectionForm}</div>}
@@ -273,7 +273,7 @@ export function AvatarImageGenerator({
           {generating ? t("botIdentity.ai.generating") : t("botIdentity.ai.generate")}
         </button>
       </div>
-      {unsaved && <p role="status" className="mt-2 text-[11px] text-ink-secondary">Save your connection changes before generating.</p>}
+      {unsaved && <p role="status" className="mt-2 text-[11px] text-ink-secondary">{t("botIdentity.ai.saveBeforeGenerate")}</p>}
       {error && <div role="alert" className="mt-3 text-[12px] text-danger">{error}</div>}
     </div>
   );

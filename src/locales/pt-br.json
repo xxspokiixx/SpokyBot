@@ -4901,4 +4901,16 @@
   "botIdentity.ai.shared": "Esta conexão é compartilhada por todos os avatares dos bots.",
   "botIdentity.ai.generating": "Gerando…",
   "botIdentity.ai.generate": "Gerar avatar"
+,
+  "botIdentity.ai.baseUrl": "URL base",
+  "botIdentity.ai.imageModel": "Modelo de imagem",
+  "botIdentity.ai.optional": "opcional",
+  "botIdentity.ai.savedKey": "Chave salva · cole para substituir",
+  "botIdentity.ai.keyless": "Deixe em branco para uma conexão sem chave",
+  "botIdentity.ai.pasteKey": "Cole a chave da API",
+  "botIdentity.ai.removeKey": "Remover chave salva",
+  "botIdentity.ai.saveConnection": "Salvar conexão",
+  "botIdentity.ai.saveKey": "Salvar chave",
+  "botIdentity.ai.connectionSettings": "Configurações da conexão",
+  "botIdentity.ai.saveBeforeGenerate": "Salve as alterações da conexão antes de gerar."
 }
