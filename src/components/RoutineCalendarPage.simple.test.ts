@@ -157,6 +157,8 @@ describe("Automations page", () => {
 
   it("switches to the calendar, where an event opens the same panel", () => {
     click(buttons(page()).get("Calendar"));
+    expect(fixture.dispatch).toHaveBeenLastCalledWith({ type: "showRoutines", view: "calendar", botId: undefined });
+    fixture.state = { ...fixture.state!, routinesFocus: { view: "calendar", nonce: 1 } };
     let tree = page();
     const calendar = tree.find(named("AutomationsCalendar"))!;
     expect(calendar).toBeDefined();

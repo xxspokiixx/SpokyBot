@@ -28,7 +28,7 @@ export function TriggersPage({ onBack, onOpenRoom }: { onBack: () => void; onOpe
   const actions = useAutomationActions();
   const backButtonRef = useRef<HTMLButtonElement>(null);
   const focus = state.routinesFocus;
-  const [view, setView] = useState<"list" | "calendar">(focus?.view === "calendar" ? "calendar" : "list");
+  const view = focus?.view === "calendar" ? "calendar" : "list";
   const [openId, setOpenId] = useState<string | null>(focus?.section !== "logs" ? focus?.routineId ?? null : null);
   const [botFilter, setBotFilter] = useState(focus?.botId ?? "all");
   const [newText, setNewText] = useState<string | null>(null);
@@ -38,7 +38,6 @@ export function TriggersPage({ onBack, onOpenRoom }: { onBack: () => void; onOpe
   const botName = (botId: string) => state.bots.find((bot) => bot.id === botId)?.name ?? t("routines.unavailableBot");
 
   useEffect(() => {
-    setView(focus?.view === "calendar" ? "calendar" : "list");
     setBotFilter(focus?.botId ?? "all");
     // "Open" from a chat card or a notice names the automation: open its panel.
     if (focus?.routineId && focus.section !== "logs") setOpenId(focus.routineId);
@@ -65,7 +64,7 @@ export function TriggersPage({ onBack, onOpenRoom }: { onBack: () => void; onOpe
 
   return (
     <main className="flex h-full min-w-0 flex-1 flex-col bg-app animate-workspace-in">
-      <header className={cn("shrink-0 border-b border-hairline/35 bg-app py-3 pr-4", macInset ? "pl-[86px]" : "pl-4")} style={windowDragStyle}>
+      <header className={cn("shrink-0 border-b border-hairline/35 bg-app py-3 pr-4", macInset && view === "calendar" ? "pl-[86px]" : "pl-4")} style={windowDragStyle}>
         <div className="flex items-center gap-2">
           <button type="button" ref={backButtonRef} onClick={onBack} aria-label="Back" title="Back" className="flex size-9 shrink-0 items-center justify-center rounded-lg text-ink-secondary hover:bg-raised hover:text-ink" style={windowNoDragStyle}><ArrowLeft size={18} /></button>
           <h1 data-tour="automations-page" className="mr-1 text-[18px] font-semibold tracking-tight text-ink">{t("automations.title")}</h1>
@@ -78,7 +77,7 @@ export function TriggersPage({ onBack, onOpenRoom }: { onBack: () => void; onOpe
             )}
             <div role="group" aria-label={t("automations.view")} className="flex items-center rounded-lg border border-hairline/50 bg-panel p-0.5">
               {(["list", "calendar"] as const).map((option) => (
-                <button key={option} type="button" aria-pressed={view === option} onClick={() => setView(option)}
+                <button key={option} type="button" aria-pressed={view === option} onClick={() => dispatch({ type: "showRoutines", view: option, botId: botFilter === "all" ? undefined : botFilter })}
                   className={cn("rounded-md px-3 py-1 text-[12.5px] font-medium", view === option ? "bg-raised text-ink shadow-sm" : "text-ink-secondary hover:text-ink")}>
                   {option === "list" ? t("automations.list") : t("automations.calendar")}
                 </button>

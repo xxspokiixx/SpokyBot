@@ -60,27 +60,6 @@ function NavRow({
   );
 }
 
-/** The one way to Triggers (schedules and webhooks): first in the sidebar, in every mode and density. */
-export function SidebarTriggersRow({ density }: { density: SidebarDensity }) {
-  const { state, dispatch } = useStore();
-  const iconsOnly = density === "icons";
-  const active = state.activeView === "routines";
-  return (
-    <div className={iconsOnly ? "mb-1" : "mb-1.5"}>
-      <NavRow
-        id="triggers"
-        label={t("sidebar.nav.automations")}
-        tourId="nav-automations"
-        iconsOnly={iconsOnly}
-        active={active}
-        attention={state.routineRuns.some((run) => isRoutineProblemRun(run) && !run.seenAt)}
-        icon={() => <Zap size={iconsOnly ? 20 : 18} className={active ? "text-accent" : "text-ink-secondary"} />}
-        onClick={() => dispatch({ type: "showRoutines", view: "list" })}
-      />
-    </div>
-  );
-}
-
 export function SidebarAppsButton() {
   const { state, dispatch } = useStore();
   const label = t("sidebar.nav.apps");
@@ -118,9 +97,21 @@ export function SidebarFooterNav({
   const advanced = useAdvancedMode();
   const iconsOnly = density === "icons";
   const toolsLayout = useSidebarToolsLayout();
-  const toolbar = !iconsOnly && toolsLayout === "toolbar";
+  const toolbar = advanced && !iconsOnly && toolsLayout === "toolbar";
   const iconSize = iconsOnly && !rail ? 20 : 18;
   const tone = (active: boolean) => (active ? "text-accent" : "text-ink-secondary");
+  const automationsNeedYou = state.routineRuns.some((run) => isRoutineProblemRun(run) && !run.seenAt);
+  const automationsRow = <NavRow
+    id="automations"
+    label={t("sidebar.nav.automations")}
+    tourId="nav-automations"
+    iconsOnly={iconsOnly || toolbar}
+    rail={rail}
+    active={state.activeView === "routines"}
+    attention={automationsNeedYou}
+    icon={(active) => <Zap size={iconSize} className={tone(active)} />}
+    onClick={() => dispatch({ type: "showRoutines", view: "list" })}
+  />;
   const filesRow = useCloudFilesReady() && <NavRow
     id="files"
     label={t("sidebar.nav.files")}
@@ -130,11 +121,12 @@ export function SidebarFooterNav({
     icon={(active) => <FolderOpen size={iconSize} className={tone(active)} />}
     onClick={() => dispatch({ type: "showFiles" })}
   />;
-  // Simple mode keeps Files, on its own without the Tools header.
-  if (!advanced && !iconsOnly) return filesRow ? <nav aria-label={t("sidebar.nav.files")} className="flex flex-col gap-0.5">{filesRow}</nav> : null;
+  // Simple mode keeps Automations and Files, without the Tools header.
+  if (!advanced && !iconsOnly) return <nav aria-label={t("sidebar.tools")} className="flex flex-col gap-0.5">{automationsRow}{filesRow}</nav>;
 
   const rows = (
     <>
+      {automationsRow}
       {iconsOnly && <NavRow
         id="apps"
         label={t("sidebar.nav.apps")}
@@ -168,6 +160,7 @@ export function SidebarFooterNav({
       <SidebarSectionHeader
         name={t("sidebar.tools")}
         collapsed={collapsed}
+        alert={collapsed && automationsNeedYou}
         onToggle={onToggleCollapsed}
         reorderable={false}
         dragging={false}
