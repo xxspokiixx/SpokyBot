@@ -72,9 +72,11 @@ set a level on follows the default, and so does each of its threads without a
 level of its own. Bots and threads that saved Ask before Full access became
 the default keep it: choose Full access in the bot's settings, or **Set for
 all bots in this team…**, to move a bot and every one of its threads at once.
-Ask, Auto, and Custom retain their existing OMB configuration review cards.
-Full actions return an applied result and leave a settled receipt, so the bot
-continues in the same turn. Invalid input, unavailable services, or failed
+OpenMausBot adds no review card of its own at any level: a bot's profile,
+working folder, model, skill, team setup and team memory changes apply at
+once and leave a one-line receipt with Undo, so the bot continues in the same
+turn. Routine requests keep their own rule until Triggers v2 replaces them,
+and on My Cloud a turn a guest or a webhook drove still waits for the owner. Invalid input, unavailable services, or failed
 writes return errors, not a request to approve again. An expired native
 permission request is not turned into another Allow/Deny card.
 

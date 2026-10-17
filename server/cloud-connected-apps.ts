@@ -35,6 +35,8 @@ export interface CloudConnectedAppsOptions {
   brokerUrl: string;
   /** composio.setManagedBrokerAccess, plus anything that tells clients. */
   apply(access: ManagedComposioAccess | null): void;
+  /** OMB_CLOUD_CONNECTED_APPS_GRANT: the Admin's proof that this is a paid Cloud, which raises its daily app-event limit. */
+  cloudGrant?: string;
   fetchImpl?: typeof fetch;
   log?: (line: string) => void;
   retryDelaysMs?: readonly number[];
@@ -88,6 +90,7 @@ export function startCloudConnectedApps(options: CloudConnectedAppsOptions): Clo
   let stopped = false;
   let applied: string | null | undefined;
   let current: Promise<void> = Promise.resolve();
+  const grant = options.cloudGrant?.trim() || undefined;
 
   const apply = (access: ManagedComposioAccess | null) => {
     const token = access?.token ?? null;
@@ -104,6 +107,32 @@ export function startCloudConnectedApps(options: CloudConnectedAppsOptions): Clo
     failures += 1;
     timer = setTimer(() => { timer = null; current = attempt(); }, Math.round(base * (1 + 0.2 * random())));
     timer.unref?.();
+  };
+
+  /** Settled once the service took the grant or refused it for good (4xx, including a service without the route);
+   *  a 5xx or a network failure is tried again with the same backoff. */
+  const presentGrant = async (access: ManagedComposioAccess): Promise<boolean> => {
+    let status: number;
+    try {
+      const response = await (options.fetchImpl ?? globalThis.fetch)(`${access.url}/v1/installation/cloud`, {
+        method: "PUT",
+        headers: { authorization: `Bearer ${access.token}`, "content-type": "application/json" },
+        body: JSON.stringify({ grant }),
+        redirect: "error",
+        signal: AbortSignal.timeout(15_000),
+      });
+      status = response.status;
+      await response.text().catch(() => "");
+    } catch (error) {
+      log(`connected apps: the Cloud plan could not be confirmed (${error instanceof Error ? error.message : String(error)}); trying again later`);
+      return false;
+    }
+    if (status >= 500) {
+      log(`connected apps: the Cloud plan could not be confirmed (HTTP ${status}); trying again later`);
+      return false;
+    }
+    log(status < 300 ? "connected apps: Cloud plan confirmed" : `connected apps: the service did not take this Cloud's grant (HTTP ${status})`);
+    return true;
   };
 
   const attempt = async (): Promise<void> => {
@@ -133,8 +162,10 @@ export function startCloudConnectedApps(options: CloudConnectedAppsOptions): Clo
       // An unsaved token would be a different installation after the next restart, its connected accounts left behind.
       const usable = typeof token === "string" && (token === held || token === saved);
       if (held && token !== held && !usable) rmSync(file, { force: true });
-      apply(usable ? managedComposioAccess(options.brokerUrl, credentials) : null);
-      if (usable) failures = 0;
+      const access = usable ? managedComposioAccess(options.brokerUrl, credentials) : null;
+      apply(access);
+      if (!usable) retryLater();
+      else if (!access || !grant || await presentGrant(access)) failures = 0;
       else retryLater();
     } catch (error) {
       log(`connected apps: ${error instanceof Error ? error.message : String(error)}`);
@@ -159,7 +190,7 @@ export function startCloudConnectedApps(options: CloudConnectedAppsOptions): Clo
 let cloudHome: CloudConnectedApps | null = null;
 /** A Cloud home's plan includes the connected-apps service, so it registers itself. The built server uses OpenMausBot's
  * service; from source (development, tests) only an explicit OMB_COMPOSIO_BROKER_URL registers anywhere. */
-export function startCloudHomeConnectedApps(input: { cloudHome: boolean; dataDir: string; apply: CloudConnectedAppsOptions["apply"] }): void {
+export function startCloudHomeConnectedApps(input: { cloudHome: boolean; dataDir: string; apply: CloudConnectedAppsOptions["apply"]; cloudGrant?: string }): void {
   if (!input.cloudHome || cloudHome) return;
   const configured = process.env.OMB_COMPOSIO_BROKER_URL;
   const brokerUrl = managedComposioBrokerUrl(configured, !import.meta.url.endsWith(".ts"));
@@ -167,7 +198,7 @@ export function startCloudHomeConnectedApps(input: { cloudHome: boolean; dataDir
     if (configured?.trim()) console.warn("cloud home: connected-apps service URL rejected: HTTPS or a loopback HTTP URL is required");
     return;
   }
-  cloudHome = startCloudConnectedApps({ dataDir: input.dataDir, brokerUrl, apply: input.apply, log: (line) => console.log(`cloud home: ${line}`) });
+  cloudHome = startCloudConnectedApps({ dataDir: input.dataDir, brokerUrl, apply: input.apply, cloudGrant: input.cloudGrant, log: (line) => console.log(`cloud home: ${line}`) });
 }
 
 export function stopCloudHomeConnectedApps(): void {
