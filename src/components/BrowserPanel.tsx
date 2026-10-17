@@ -8,13 +8,11 @@ import { BrowserViewport, type BrowserFrame } from "./BrowserViewport";
 import { createBrowserInputQueue } from "@/lib/browser-input-queue";
 import { createBrowserControl, type BrowserInteraction, type BrowserTakeStatus } from "@/lib/browser-control";
 import { resolveAddressBarInput } from "@/lib/browser-address";
-import { BROWSER_HELD_ELSEWHERE } from "../../shared/browser-held";
 
 interface BrowserTab { tabId: string; title: string; url: string; active: boolean }
 type ViewerFrame = BrowserFrame & { viewerId: string; generation: number };
 const button = "rounded-md p-1.5 text-ink-secondary hover:bg-inset hover:text-ink disabled:opacity-40 disabled:cursor-not-allowed";
 const RECONNECT_DELAYS = [1_000, 2_000, 4_000, 8_000, 15_000];
-const RECONNECT_MESSAGE = "Connection interrupted. Reconnecting the browser view…";
 // The server sends a heartbeat every 10 s: a view that heard nothing for longer lost its stream without an error.
 const SILENT_MS = 25_000;
 const SILENCE_CHECK_MS = 5_000;
@@ -74,12 +72,12 @@ export function LiveBrowser({ bot, signIn }: { bot: Bot; signIn?: BrowserSignIn 
   }, [showTyping]);
 
   const action = useCallback(async (body: Record<string, unknown>, expected = viewer.current) => {
-    if (!expected) throw new Error("Open the browser connection first.");
+    if (!expected) throw new Error(t("browser.panel.connectionFirst"));
     // 120s matches the server's browser requestTimeoutMs.
     return api(`/api/bots/${encodeURIComponent(bot.id)}/browser/action`, { method: "POST", body: JSON.stringify({ ...body, viewerId: expected }), timeoutMs: 120_000 });
   }, [bot.id]);
   const interact = useCallback((item: BrowserInteraction) => {
-    if (controlNow.current.held && !controlNow.current.owned) { setError(BROWSER_HELD_ELSEWHERE); return; }
+    if (controlNow.current.held && !controlNow.current.owned) { setError(t("browser.panel.heldElsewhere")); return; }
     browserControl.current?.interact(item);
   }, []);
   const input = useCallback((body: Record<string, unknown>) => interact({ input: body }), [interact]);
@@ -128,7 +126,7 @@ export function LiveBrowser({ bot, signIn }: { bot: Bot; signIn?: BrowserSignIn 
       const delay = retryable ? RECONNECT_DELAYS[reconnectCount.current] : undefined;
       if (delay !== undefined) {
         reconnectCount.current++;
-        message = RECONNECT_MESSAGE;
+        message = t("browser.panel.connectionInterrupted");
         reconnectTimer = setTimeout(() => {
           if (!ownsConnection()) return;
           generation.current++;
@@ -146,12 +144,12 @@ export function LiveBrowser({ bot, signIn }: { bot: Bot; signIn?: BrowserSignIn 
     // A 404 from an action: the server closed this view, so input must go to a new one rather than halt here.
     const viewGone = (cause: unknown, expected: string) => {
       if ((cause as { status?: unknown } | null)?.status !== 404 || stopped || !ownsConnection() || viewer.current !== expected) return false;
-      dropped(RECONNECT_MESSAGE, true);
+      dropped(t("browser.panel.connectionInterrupted"), true);
       return true;
     };
     wake.current = (focused) => {
       if (!ownsConnection()) return;
-      if (!stopped && viewer.current && Date.now() - heardAt > SILENT_MS) dropped(RECONNECT_MESSAGE, true);
+      if (!stopped && viewer.current && Date.now() - heardAt > SILENT_MS) dropped(t("browser.panel.connectionInterrupted"), true);
       if (!stopped || !focused || !revivable) return;
       // Back at the window: retry now, whether a retry was waiting or they had run out.
       clearTimeout(reconnectTimer);
@@ -310,7 +308,7 @@ export function LiveBrowser({ bot, signIn }: { bot: Bot; signIn?: BrowserSignIn 
   const typingReady = interactive && control.owned && control.controlling;
   const taking = takeStatus === "pending" || takeStatus === "slow";
   const commandsReady = interactive && !taking;
-  const reconnecting = error === RECONNECT_MESSAGE;
+  const reconnecting = error === t("browser.panel.connectionInterrupted");
   const pill = "flex max-w-full items-center gap-1.5 whitespace-nowrap rounded-full border bg-menu px-2.5 py-1 text-[11px] shadow-sm sm:text-[12px]";
   return <div ref={panel} className="flex min-h-0 flex-1 flex-col overflow-hidden rounded-2xl border border-hairline/40 bg-card text-ink">
     <div className="flex min-h-12 items-center gap-1 px-2 pt-1.5">
@@ -357,7 +355,7 @@ export function LiveBrowser({ bot, signIn }: { bot: Bot; signIn?: BrowserSignIn 
         onReturnToToolbar={() => addressInput.current?.focus()}
         acknowledge={(seq) => { if (generation.current === frame.generation && viewer.current === frame.viewerId) void action({ type: "ack", seq }, frame.viewerId).catch(() => {}); }}
         onDecodeError={() => { if (generation.current === frame.generation && viewer.current === frame.viewerId) setError("A browser frame could not be decoded. Close and reopen the panel to reconnect."); }} />
-        : <div className="flex min-h-64 flex-col items-center justify-center gap-3 p-6 text-center text-[13px] text-ink-secondary">{connected && heldElsewhere ? <Hand size={24} /> : error && !reconnecting ? <Globe size={24} /> : <Loader2 size={24} className="animate-spin" />}<span>{heldElsewhere ? BROWSER_HELD_ELSEWHERE : reconnecting ? "Reconnecting…" : error ? "Browser disconnected" : busy ? t("browser.live.botBusy", { name: bot.name }) : "Opening the live browser…"}</span></div>}
+        : <div className="flex min-h-64 flex-col items-center justify-center gap-3 p-6 text-center text-[13px] text-ink-secondary">{connected && heldElsewhere ? <Hand size={24} /> : error && !reconnecting ? <Globe size={24} /> : <Loader2 size={24} className="animate-spin" />}<span>{heldElsewhere ? t("browser.panel.heldElsewhere") : reconnecting ? t("browser.panel.reconnecting") : error ? t("browser.panel.disconnected") : busy ? t("browser.live.botBusy", { name: bot.name }) : t("browser.panel.opening")}</span></div>}
       <div role="status" className="pointer-events-none absolute inset-x-0 top-2 flex justify-center px-3">
         {takeStatus === "slow" ? <span className={`${pill} border-hairline text-ink-secondary`}>
           <Loader2 size={13} className="shrink-0 animate-spin" aria-hidden="true" /><span className="truncate">{t("browser.control.waiting", { name: bot.name })}</span>

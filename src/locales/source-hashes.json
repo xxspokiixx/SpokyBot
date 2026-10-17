@@ -19068,7 +19068,13 @@
       "vm.workspace.stopped": "3ba016c47eac5270bd37701c34c66d6c3eefd4d436626acb2e11f1766e5ae45a",
       "vm.workspace.notReady": "572223c15e0768b71870b3fbe82186256484ffc1cf777510a869b586dd23f87a",
       "vm.workspace.retryStatus": "bd13bebaa8ab34040bc882555f538f08c71d251123bda89093aa253879c88f71",
-      "vm.workspace.openComputer": "a2b6428e3c5d274f1b547cd08b3f8af5bff9d09e2aca6f18463f0d91a00f429a"
+      "vm.workspace.openComputer": "a2b6428e3c5d274f1b547cd08b3f8af5bff9d09e2aca6f18463f0d91a00f429a",
+      "browser.panel.connectionFirst": "b51b958f60677b7a196ddb87d3cfc2a371e005f0742f5dcbced73f7f0aafa4b6",
+      "browser.panel.heldElsewhere": "660728f8cf0d09f321cb67a2a22476d5dea136419df054606414e95bc560a517",
+      "browser.panel.reconnecting": "27b80374e1151af6df7824a358606c77502548bff4d467e4ae2e146801f601ce",
+      "browser.panel.disconnected": "6a9875f775742f63dc8ffd7b57f83aa712eb20e1be7b936b077f80c40d192528",
+      "browser.panel.opening": "3bb18d0581f68bafd0dde34b257b84dcec4c0a69176202284b4c4c3bdd0541bb",
+      "browser.panel.connectionInterrupted": "f388d3ffc36bdc334e1ac4f168237097721fa6f436ac8503c7a6308ae6ad2ba5"
     },
     "zh": {
       "pro.fromPrice": "a48a04a457d60b08b54fc83e7a6c4584ffedb1e23621859084900c8521a3af7b",
