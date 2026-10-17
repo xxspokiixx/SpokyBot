@@ -6,6 +6,7 @@ import { firstSentence, soulPatchFor, utf8Bytes } from "@/lib/soul";
 import { useStore, type Bot } from "@/state/store";
 import { useBotEditor } from "./bot-settings/BotEditorContext";
 import { inputCls } from "./bot-settings/field";
+import { t } from "@/lib/i18n";
 
 type SoulRead = { soul: string; revision: string; bytes: number; limit: number; file: string; drift: boolean; fileText?: string };
 
@@ -104,7 +105,7 @@ export function SoulField({
           simple ? "min-h-[140px] resize-y rounded-xl text-[14px] leading-relaxed" : "min-h-[220px] resize-y font-mono leading-relaxed",
           over && "ring-2 ring-red-500/60",
         )}
-        placeholder={simple ? simple.placeholder : "Who this bot is and the rules it never breaks. Keep it short; put step-by-step procedure into a skill."}
+        placeholder={simple ? simple.placeholder : t("bot.soul.placeholder")}
         aria-invalid={over || undefined}
         disabled={resolving}
         value={draft}

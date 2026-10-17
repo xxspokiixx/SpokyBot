@@ -151,17 +151,16 @@ export function TeamMemoryDialog({ section, label, onClose }: { section: string;
             <div className="flex items-center gap-2">
               <Brain size={19} className="text-accent" />
               <h2 id="team-memory-title" className="text-[20px] font-semibold tracking-[-0.01em] text-ink">
-                {label} team memory
+                {t("teamMemory.title", { name: label })}
               </h2>
             </div>
             <p className="mt-1.5 max-w-[560px] text-[12.5px] leading-relaxed text-ink-secondary">
-              People, places, decisions and terms every bot in this section shares. Every bot proposal waits for an
-              admin&apos;s review before it is shared. Your own additions are shared immediately. Edit or remove anything.
+              {t("teamMemory.description")}
             </p>
           </div>
           <button
             onClick={onClose}
-            aria-label="Close team memory"
+            aria-label={t("teamMemory.close")}
             className="flex size-9 shrink-0 items-center justify-center rounded-lg text-ink-secondary hover:bg-raised hover:text-ink"
           >
             <X size={19} />
@@ -171,7 +170,7 @@ export function TeamMemoryDialog({ section, label, onClose }: { section: string;
         <div className="min-h-0 flex-1 overflow-y-auto px-6 py-5 sm:px-8">
           {entries === null && !error && (
             <div className="flex min-h-[200px] items-center justify-center text-ink-secondary">
-              <Loader2 size={20} className="animate-spin" aria-label="Loading team memory" />
+              <Loader2 size={20} className="animate-spin" aria-label={t("teamMemory.loading")} />
             </div>
           )}
           {entries && <p className="mb-3 text-[12px] text-ink-secondary">{t("teamMemory.loadedSummary", { loaded: loadedIds.length, total: entries.filter(entry => entry.status === "accepted").length })}</p>}
@@ -180,7 +179,7 @@ export function TeamMemoryDialog({ section, label, onClose }: { section: string;
 
           {proposed.length > 0 && (
             <section className="mb-5 rounded-xl border border-accent/30 bg-accent/5 p-3">
-              <h3 className="text-[11px] font-semibold uppercase tracking-[0.08em] text-accent">Waiting for you</h3>
+              <h3 className="text-[11px] font-semibold uppercase tracking-[0.08em] text-accent">{t("teamMemory.waiting")}</h3>
               <ul className="mt-2 space-y-2">
                 {proposed.map((entry) => (
                   <li key={entry.id} className="flex items-start gap-3 text-[13px]">
