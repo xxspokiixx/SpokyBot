@@ -9,7 +9,8 @@ export const SIMPLE_TOP_BUTTON = "flex size-[30px] shrink-0 items-center justify
 export const SIMPLE_RAIL_BUTTON = "flex size-9 shrink-0 items-center justify-center rounded-xl text-ink-secondary hover:bg-raised/60 hover:text-ink focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus";
 
 /** The small bump on the sidebar's right edge that collapses it to the rail and back (Simple mode).
- * Vertically centred: at the top of the 80px rail it would sit inside the macOS traffic-light zone, which swallows clicks before 88px. */
+ * It sits level with the top row, beside the + button; the Simple rail is 92px wide so the bump stays clear of the macOS
+ * traffic-light zone, which swallows clicks before 88px. */
 export function SidebarEdgeToggle({ collapsed, onToggle, style }: { collapsed: boolean; onToggle: () => void; style?: CSSProperties }) {
   const Arrow = collapsed ? ChevronRight : ChevronLeft;
   return (
@@ -21,7 +22,7 @@ export function SidebarEdgeToggle({ collapsed, onToggle, style }: { collapsed: b
       aria-expanded={!collapsed}
       title={t(collapsed ? "sidebar.density.expand" : "sidebar.density.collapse")}
       style={style}
-      className="absolute -right-[14px] top-1/2 z-30 hidden h-8 w-[14px] -translate-y-1/2 items-center justify-center rounded-r-[4px] border border-l-0 border-hairline/50 bg-panel text-ink-tertiary shadow-[1px_0_2px_rgb(0_0_0/0.06)] hover:bg-raised hover:text-ink focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus md:flex"
+      className="absolute -right-[14px] top-[7px] z-30 hidden h-8 w-[14px] items-center justify-center rounded-r-[4px] border border-l-0 border-hairline/50 bg-panel text-ink-tertiary shadow-[1px_0_2px_rgb(0_0_0/0.06)] hover:bg-raised hover:text-ink focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus md:flex"
     >
       <Arrow size={12} strokeWidth={2.25} aria-hidden="true" />
     </button>

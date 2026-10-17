@@ -233,7 +233,7 @@ describe("Simple-mode sidebar layout", () => {
     toggle.onToggle();
     expect(fixture.storage.get(SIDEBAR_DENSITY_KEY)).toBe("icons");
     const { root, tree } = render();
-    expect(root.props.className).toContain("w-[80px]");
+    expect(root.props.className).toContain("w-[92px]");
     expect(sectionOrder(tree)).toEqual([BOTS_SECTION_ID, CHANNELS_SECTION_ID, userSectionId("Work")]);
     expect(listedBots(tree)).toEqual(["atlas", "bea", "dodo"]);
     expect(headers(tree)).toEqual([]);

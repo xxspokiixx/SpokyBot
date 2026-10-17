@@ -160,7 +160,7 @@ describe("sidebar top row", () => {
     expect(classesOf(row, "data-sidebar-top-slot")).toEqual(["@container/sidebar-top", "flex", "min-w-0", "flex-1", "items-center", "justify-end"]);
     expect(classesOf(row, "data-sidebar-top-switcher")).not.toContain("max-w-[140px]");
     expect(classesOf(row, "data-sidebar-top-buttons")).toEqual(expect.arrayContaining(["shrink-0", "gap-1", "pl-0.5"]));
-    expect(html).toMatch(/data-sidebar-edge-toggle="true" aria-label="Collapse sidebar to avatars" aria-expanded="true" title="Collapse to avatars" style="-webkit-app-region:no-drag" class="[^"]*\babsolute\b[^"]*\btop-1\/2\b[^"]*\brounded-r-\[4px\][^"]*"><svg[^>]*lucide-chevron-left/);
+    expect(html).toMatch(/data-sidebar-edge-toggle="true" aria-label="Collapse sidebar to avatars" aria-expanded="true" title="Collapse to avatars" style="-webkit-app-region:no-drag" class="[^"]*\babsolute\b[^"]*\btop-\[7px\][^"]*\brounded-r-\[4px\][^"]*"><svg[^>]*lucide-chevron-left/);
     expect(row).toMatch(/aria-label="Switch server: Servers"[^>]*class="[^"]*\bh-8\b[^"]*\brounded-full\b[^"]*\bbg-raised\/50\b[^"]*\btext-\[13px\][^"]*" style="-webkit-app-region:no-drag"/);
     expect(row).toContain('<span class="min-w-0 truncate @max-[124px]/sidebar-top:hidden">Servers</span>');
     expect(row).toContain('class="lucide lucide-laptop hidden shrink-0 text-ink-secondary @max-[124px]/sidebar-top:block"');
