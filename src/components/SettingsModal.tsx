@@ -160,6 +160,7 @@ export function sectionMatches(section: (typeof SECTIONS)[number], query: string
 const PROFILE_AVATAR_MAX_BYTES = 10 * 1024 * 1024;
 const PROFILE_AVATAR_MIN_DIMENSION = 64;
 const PROFILE_AVATAR_MAX_DIMENSION = 8192;
+const PROFILE_AVATAR_TYPES = new Set(["image/png", "image/jpeg", "image/gif", "image/webp"]);
 
 type ProfileAvatarDraft = { file: File; previewUrl: string; width: number; height: number; zoom: number };
 
@@ -172,6 +173,7 @@ async function imageDimensions(file: File): Promise<{ width: number; height: num
       element.onerror = () => reject(new Error("invalid-image"));
       element.src = url;
     });
+    if (image.naturalWidth <= 0 || image.naturalHeight <= 0) throw new Error("invalid-image");
     return { width: image.naturalWidth, height: image.naturalHeight };
   } finally {
     URL.revokeObjectURL(url);
@@ -187,6 +189,7 @@ async function croppedProfileAvatar(file: File, zoom: number): Promise<File> {
       element.onerror = () => reject(new Error("invalid-image"));
       element.src = url;
     });
+    if (image.naturalWidth <= 0 || image.naturalHeight <= 0) throw new Error("invalid-image");
     const side = Math.min(image.naturalWidth, image.naturalHeight) / Math.max(1, zoom);
     const sx = (image.naturalWidth - side) / 2;
     const sy = (image.naturalHeight - side) / 2;
@@ -211,6 +214,17 @@ function ProfileFields() {
   const [avatarBusy, setAvatarBusy] = useState(false);
   const [avatarError, setAvatarError] = useState<string | null>(null);
   const [avatarDraft, setAvatarDraft] = useState<ProfileAvatarDraft | null>(null);
+  const avatarDraftRef = useRef<ProfileAvatarDraft | null>(null);
+  const replaceAvatarDraft = (next: ProfileAvatarDraft | null) => {
+    const previous = avatarDraftRef.current;
+    if (previous && previous !== next) URL.revokeObjectURL(previous.previewUrl);
+    avatarDraftRef.current = next;
+    setAvatarDraft(next);
+  };
+  useEffect(() => () => {
+    const draft = avatarDraftRef.current;
+    if (draft) URL.revokeObjectURL(draft.previewUrl);
+  }, []);
   useEffect(() => {
     setName(state.config?.profile?.name ?? "");
     setEmail(state.config?.profile?.email ?? "");
@@ -245,10 +259,10 @@ function ProfileFields() {
                 <div className="text-[12px] font-medium text-ink">{t("settings.profile.avatar.cropTitle")}</div>
                 <div className="text-[11px] text-ink-secondary">{avatarDraft.width} × {avatarDraft.height}px</div>
                 <label className="mt-1 block text-[11px] text-ink-secondary">{t("settings.profile.avatar.zoom")}
-                  <input type="range" min="1" max="2.5" step="0.05" value={avatarDraft.zoom} onChange={(event) => setAvatarDraft({ ...avatarDraft, zoom: Number(event.target.value) })} className="ml-2 w-28 align-middle accent-accent" />
+                  <input aria-label={t("settings.profile.avatar.zoom")} type="range" min="1" max="2.5" step="0.05" value={avatarDraft.zoom} onChange={(event) => { const next = { ...avatarDraft, zoom: Number(event.target.value) }; avatarDraftRef.current = next; setAvatarDraft(next); }} className="ml-2 w-28 align-middle accent-accent" />
                 </label>
               </div>
-              <button type="button" className="rounded-md px-2 py-1 text-[12px] text-ink-secondary hover:bg-control" onClick={() => { URL.revokeObjectURL(avatarDraft.previewUrl); setAvatarDraft(null); }}>{t("settings.profile.avatar.cancel")}</button>
+              <button type="button" className="rounded-md px-2 py-1 text-[12px] text-ink-secondary hover:bg-control" onClick={() => replaceAvatarDraft(null)}>{t("settings.profile.avatar.cancel")}</button>
               <button type="button" className="rounded-md bg-control px-2 py-1 text-[12px] text-ink hover:bg-raised-hover" disabled={avatarBusy} onClick={() => {
                 setAvatarBusy(true); setAvatarError(null);
                 void croppedProfileAvatar(avatarDraft.file, avatarDraft.zoom)
@@ -259,7 +273,7 @@ function ProfileFields() {
                     return fetch("/api/config", { method: "PUT", headers: { "content-type": "application/json" }, body: JSON.stringify({ profile: { avatarUrl: next } }) });
                   })
                   .then((response) => { if (!response.ok) throw new Error("avatar"); return response.json() as Promise<ConfigStatus>; })
-                  .then((config) => { if (config.profile) { setAvatarUrl(config.profile.avatarUrl ?? ""); dispatch({ type: "profileSaved", profile: { avatarUrl: config.profile.avatarUrl } }); } setAvatarDraft(null); })
+                  .then((config) => { if (config.profile) { setAvatarUrl(config.profile.avatarUrl ?? ""); dispatch({ type: "profileSaved", profile: { avatarUrl: config.profile.avatarUrl } }); } replaceAvatarDraft(null); })
                   .catch(() => setAvatarError(t("settings.profile.avatar.saveError")))
                   .finally(() => setAvatarBusy(false));
               }}>{t("settings.profile.avatar.save")}</button>
@@ -273,17 +287,18 @@ function ProfileFields() {
             event.currentTarget.value = "";
             if (!file) return;
             setAvatarError(null);
-            if (!file.type.startsWith("image/")) { setAvatarError(t("settings.profile.avatar.invalidType")); return; }
+            const declaredType = file.type.split(";", 1)[0].trim().toLowerCase();
+            if (!PROFILE_AVATAR_TYPES.has(declaredType)) { setAvatarError(t("settings.profile.avatar.invalidType")); return; }
             if (file.size > PROFILE_AVATAR_MAX_BYTES) { setAvatarError(t("settings.profile.avatar.tooLarge")); return; }
             void imageDimensions(file).then(({ width, height }) => {
               if (width < PROFILE_AVATAR_MIN_DIMENSION || height < PROFILE_AVATAR_MIN_DIMENSION) throw new Error("too-small");
               if (width > PROFILE_AVATAR_MAX_DIMENSION || height > PROFILE_AVATAR_MAX_DIMENSION) throw new Error("too-large-dimensions");
               const previewUrl = URL.createObjectURL(file);
-              setAvatarDraft({ file, previewUrl, width, height, zoom: 1 });
+              replaceAvatarDraft({ file, previewUrl, width, height, zoom: 1 });
             }).catch((error) => setAvatarError(error instanceof Error && error.message === "too-small" ? t("settings.profile.avatar.tooSmall") : error instanceof Error && error.message === "too-large-dimensions" ? t("settings.profile.avatar.tooLargeDimensions") : t("settings.profile.avatar.invalidType")));
           }} />
         </label>
-        {avatarUrl && !avatarDraft && <button type="button" className="text-[12px] text-ink-secondary underline" onClick={() => { setAvatarUrl(""); void fetch("/api/config", { method: "PUT", headers: { "content-type": "application/json" }, body: JSON.stringify({ profile: { avatarUrl: "" } }) }).then(() => dispatch({ type: "profileSaved", profile: { avatarUrl: undefined } })); }}>{t("settings.profile.avatar.remove")}</button>}
+        {avatarUrl && !avatarDraft && <button type="button" className="text-[12px] text-ink-secondary underline" onClick={() => { setAvatarError(null); void fetch("/api/config", { method: "PUT", headers: { "content-type": "application/json" }, body: JSON.stringify({ profile: { avatarUrl: "" } }) }).then((response) => { if (!response.ok) throw new Error("avatar-remove"); return response.json() as Promise<ConfigStatus>; }).then((config) => { setAvatarUrl(config.profile?.avatarUrl ?? ""); dispatch({ type: "profileSaved", profile: { avatarUrl: undefined } }); }).catch(() => setAvatarError(t("settings.profile.avatar.saveError"))); }}>{t("settings.profile.avatar.remove")}</button>}
       </div>
       {avatarError && <div role="alert" className="text-[12px] text-danger">{avatarError}</div>}
       <input aria-label={t("settings.profile.name")} value={name} onChange={(e) => setName(e.target.value)} onBlur={save} placeholder={t("settings.profile.name")} className={inputClass} />
