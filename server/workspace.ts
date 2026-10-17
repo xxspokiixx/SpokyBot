@@ -54,6 +54,12 @@ Las notas más largas van en memory/<tema>.md y se leen cuando es necesario.
 `,
 };
 
+const MEMORY_SEED_VALUES = new Set(Object.values(MEMORY_SEEDS));
+
+function isMemorySeed(text: string): boolean {
+  return MEMORY_SEED_VALUES.has(text);
+}
+
 function memorySeedFor(language?: string): string {
   const normalized = (language?.trim() || Intl.DateTimeFormat().resolvedOptions().locale).toLowerCase().replaceAll("_", "-");
   if (normalized === "pt" || normalized.startsWith("pt-")) return MEMORY_SEEDS["pt-br"];
@@ -140,7 +146,7 @@ export function loadMemory(botId: string, opts: { now?: Date } = {}): { text: st
   } catch {
     return null;
   }
-  if (!raw.trim() || raw === MEMORY_SEED) return null;
+  if (!raw.trim() || isMemorySeed(raw)) return null;
   let truncated = false;
   const visible = withoutExpired(raw, memoryDate(opts.now));
   let text = visible.text;
@@ -167,7 +173,7 @@ export function readMemoryFile(botId: string) {
   } catch {
     return { text: "", truncated: false };
   }
-  if (!raw.trim() || raw === MEMORY_SEED) return { text: "", truncated: false };
+  if (!raw.trim() || isMemorySeed(raw)) return { text: "", truncated: false };
   return { text: raw, truncated: memoryOverBudget(raw) };
 }
 
@@ -208,7 +214,7 @@ export function memoryFilesOnDisk(botId: string): Array<{ path: string; mtimeMs:
 const memoryIndexDates = new Map<string, string>();
 
 function searchableMemoryText(path: string, text: string): string {
-  if (path === "MEMORY.md" && text === MEMORY_SEED) return "";
+  if (path === "MEMORY.md" && isMemorySeed(text)) return "";
   if (path === "memory/archive.md" || path.startsWith(`memory/${MEMORY_LOG_DIR}/`)) return text;
   return withoutSuperseded(withoutExpired(text, memoryDate()).text);
 }
@@ -322,7 +328,7 @@ export function updateMemory(botId: string, update: MemoryUpdate, opts: MemoryUp
   const dir = ensureWorkspace(botId);
   // Not readMemoryFile's fallback: a failed read must never become an overwrite of old notes.
   const raw = readMemoryText(join(dir, "MEMORY.md"));
-  const current = raw === MEMORY_SEED ? "" : raw;
+  const current = isMemorySeed(raw) ? "" : raw;
   const today = memoryDate(opts.now);
   const appendEntry = (base: string, entry: string) => `${base}${base && !base.endsWith("\n") ? "\n" : ""}${entry}\n`;
   let next: string;
