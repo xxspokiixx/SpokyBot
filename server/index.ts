@@ -6178,7 +6178,8 @@ const localVmIdleMs = () => localVmIdleTimeoutMinutes(cfg) * 60_000;
 const LOCAL_VM_DESKTOP_WAIT_MS = 90_000;
 const localVmIdles = new Map<string, ComputerIdleTimer>();
 const cloudComputerPower = createCloudComputerPower({
-  cfg, owners: managedBoatOwners, broadcast, log: line => console.warn(line),
+  cfg, owners: managedBoatOwners, broadcast, log: line => console.warn(line), routines: () => routines?.listRoutines() ?? [],
+  routineComputer: routine => { const bot = store.bot(routine.botId); return bot && turnProvider(bot, routine.runOn) === "box" ? botComputerControlKey(bot) : null; },
   busy: owner => computerProviderConfigTransitions.has("box") || boatLifecycleBusyBots.has(owner) || managedBoatOwners().some(entry => entry.botId === owner && entry.inUse),
   claim: owner => { const team = teamComputers.list().find(entry => teamComputerOwner(entry.id) === owner); return team ? claimTeamComputerLifecycle(team) : claimBotComputerLifecycle(owner); },
 });
@@ -10399,7 +10400,6 @@ function teammateReportContext(requestId: string, readerBotId?: string): string 
 }
 
 const roomTranscript = createRoomTranscript({ store, teammateReportContext });
-
 
 /** Scrubbed of secrets and attachment markup before it leaves this machine. */
 function roomRoutingInput(

@@ -1,16 +1,23 @@
-// A Boat this installation runs is on only while something uses it: a turn or a person wakes it, and it goes to sleep
-// once it has been idle for CLOUD_COMPUTER_IDLE_MS. Boat bills while a computer is on, up to its own eight-hour auto-stop.
+// A Boat this installation runs is on only while something uses it: a turn or a person wakes it, and it goes to sleep once
+// it has been idle for CLOUD_COMPUTER_IDLE_MS and no routine that uses it is due within ROUTINE_DUE_SOON_MS. Boat bills
+// while a computer is on, up to its own eight-hour auto-stop.
 import * as boat from "../boat.ts";
 import { boatCreateRecoverySnapshot } from "../boat-create-idempotency.ts";
 import { hasPendingBoatDeletionForBot } from "../boat-delete-journal.ts";
 import { ComputerIdleTimer } from "../computer-idle.ts";
 import type { AppConfig } from "../config.ts";
 import { redactSecretsInText } from "../redact.ts";
+import type { Routine } from "../routines.ts";
 import type { BotRecord } from "../store.ts";
 import type { TurnOwner } from "../turn-resources.ts";
 
 export const CLOUD_COMPUTER_IDLE_MS = Math.max(1_000, Number(process.env.OMB_CLOUD_COMPUTER_IDLE_MS) || 10 * 60_000);
+/** A computer stays on while a routine that uses it is due this soon. Longer than the idle window, so a routine every 30
+ * minutes or more often never waits on a wake: each wake spends one start from the Boat account's pool, shared by every customer. */
+export const ROUTINE_DUE_SOON_MS = 30 * 60_000;
 const MAX_LISTING_RETRY_MS = 60 * 60_000;
+
+type ScheduledRoutine = Pick<Routine, "botId" | "runOn" | "enabled" | "nextRunAt">;
 
 export interface CloudComputerPowerDeps {
   cfg: AppConfig;
@@ -20,6 +27,9 @@ export interface CloudComputerPowerDeps {
   /** Takes the owner's lifecycle lane synchronously, so no turn starts on it until released; throws when it is taken or in use. */
   claim(owner: string): () => void;
   owners(): boat.ManagedBoatOwner[];
+  routines(): readonly ScheduledRoutine[];
+  /** The owner of the cloud computer this routine's turns use, or null when they use none. */
+  routineComputer(routine: ScheduledRoutine): string | null;
   broadcast(payload: Record<string, unknown>): void;
   log(line: string): void;
 }
@@ -33,7 +43,10 @@ export function createCloudComputerPower(deps: CloudComputerPowerDeps) {
   let listingRetry: ReturnType<typeof setTimeout> | null = null;
   let closed = false;
 
-  const busy = (owner: string) => (starting.get(owner) ?? 0) > 0 || deps.busy(owner);
+  /** A paused routine, or one whose next run cannot be worked out, has no next run and keeps nothing on. */
+  const routineDueSoon = (owner: string) => deps.routines().some(routine => routine.enabled && routine.nextRunAt !== null &&
+    routine.nextRunAt - Date.now() <= ROUTINE_DUE_SOON_MS && deps.routineComputer(routine) === owner);
+  const busy = (owner: string) => (starting.get(owner) ?? 0) > 0 || deps.busy(owner) || routineDueSoon(owner);
 
   function forget(owner: string): void {
     timers.get(owner)?.cancel();
