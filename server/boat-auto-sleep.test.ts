@@ -75,6 +75,8 @@ describe("a cloud computer goes to sleep after its idle window", () => {
       busy: () => busy,
       claim: () => () => {},
       owners: () => [{ botId, name: "Auto sleep", inUse: busy }],
+      routines: () => [],
+      routineComputer: () => null,
       broadcast: () => {},
       log: line => logs.push(line),
     });

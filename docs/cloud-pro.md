@@ -415,6 +415,15 @@ Cloud use this computer**, below), through the shared-computer tools.
   place that cannot exist.
 - The built-in browser is on unless the person switches it off in Settings.
   The desktop turns it on in its first-run welcome, which a Cloud home skips.
+- The built-in browser never opens Reddit (`reddit.com`, `redd.it`,
+  `redditmedia.com`, `redditstatic.com`, `reddit.app.link` and their
+  subdomains): Reddit blocks bots that browse from data-centre addresses and can
+  ban the person's account. The egress gate refuses those names, whether the
+  page was typed, linked, redirected to or framed, and a bot's call that would
+  open one is told so and pointed at the Reddit connected app or the person's
+  own computer (`server/browser/egress/reddit.ts`). A cloud computer's
+  `open_url` refuses them the same way. The desktop's and a self-hosted
+  server's browsers are not limited.
 
 `shared/cloud-home.ts` decides which places are offered, for the server and
 the app alike.
@@ -1016,7 +1025,9 @@ computers belong to this machine on every request.
   that fails with a server error is retried on the next poll, as Boat asks.
 - An included cloud computer goes to sleep through the relay's `POST
   /boxes/{id}/stop` after 10 idle minutes, as one on a person's own key does
-  at Boat; a refused stop is retried later, a longer wait each time.
+  at Boat; a refused stop is retried later, a longer wait each time. A
+  computer stays on when a routine that uses it runs within the next 30
+  minutes, since every wake counts against the Boat account's shared starts.
 - A refusal from the decision relay (401 for an unknown token, 402 without an
   active subscription, 429 over the month's cap or a rate limit, 502 or 503
   upstream) never reaches a turn: as with any decision-model failure, the room

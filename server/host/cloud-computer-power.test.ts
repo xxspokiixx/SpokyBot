@@ -35,9 +35,10 @@ vi.mock("../boat-create-idempotency.ts", async (importOriginal) => ({
   boatCreateRecoverySnapshot: () => [...fake.creating].map(botId => ({ botId, resolved: false, boxId: null })),
 }));
 
-const { CLOUD_COMPUTER_IDLE_MS, createCloudComputerPower } = await import("./cloud-computer-power.ts");
+const { CLOUD_COMPUTER_IDLE_MS, ROUTINE_DUE_SOON_MS, createCloudComputerPower } = await import("./cloud-computer-power.ts");
 
 const MINUTE = 60_000;
+const HOUR = 60 * MINUTE;
 const boxIdOf = (owner: string) => `bx_${owner}`;
 const turn = (threadId: string, generation = "g1") => ({ threadId, generation });
 const bot = (id: string) => ({ id, name: id }) as BotRecord;
@@ -48,6 +49,9 @@ describe("cloud computer power", () => {
   let refuseClaim: boolean;
   let logs: string[];
   let broadcasts: Record<string, unknown>[];
+  let routines: { botId: string; runOn: "maus" | "cloud"; enabled: boolean; nextRunAt: number | null }[];
+  /** Which cloud computer each bot's routine turns use; a bot left out uses none. */
+  let computers: Map<string, string>;
   let power: ReturnType<typeof createCloudComputerPower>;
 
   const sleeps = () => fake.sleepBoat.mock.calls.map(([, owner]) => owner as string);
@@ -68,6 +72,8 @@ describe("cloud computer power", () => {
     refuseClaim = false;
     logs = [];
     broadcasts = [];
+    routines = [];
+    computers = new Map();
     power = createCloudComputerPower({
       cfg: { box: { token: "box_test" } },
       busy: owner => busy.has(owner),
@@ -77,6 +83,8 @@ describe("cloud computer power", () => {
         return () => claims.push(`release ${owner}`);
       },
       owners: () => [],
+      routines: () => routines,
+      routineComputer: routine => computers.get(routine.botId) ?? null,
       broadcast: payload => broadcasts.push(payload),
       log: line => logs.push(line),
     });
@@ -384,5 +392,98 @@ describe("cloud computer power", () => {
     expect(sleeps()).toEqual([]);
     await vi.advanceTimersByTimeAsync(MINUTE);
     expect(sleeps()).toEqual(["bot-a"]);
+  });
+
+  describe("a routine due soon", () => {
+    const due = (botId: string, inMs: number, computer = botId) => {
+      computers.set(botId, computer);
+      const routine = { botId, runOn: "maus" as const, enabled: true, nextRunAt: Date.now() + inMs };
+      routines.push(routine);
+      return routine;
+    };
+    /** The scheduler moves the routine on to its next run, and this run's turn holds the computer for two minutes. */
+    const run = async (routine: (typeof routines)[number], nextInMs: number, threadId: string) => {
+      routine.nextRunAt = Date.now() + nextInMs;
+      await power.start(bot(routine.botId), turn(threadId));
+      busy.add(routine.botId);
+      await vi.advanceTimersByTimeAsync(2 * MINUTE);
+      busy.delete(routine.botId);
+      power.released(turn(threadId));
+    };
+
+    it("means within 30 minutes, longer than the idle window", () => {
+      expect(ROUTINE_DUE_SOON_MS).toBe(30 * MINUTE);
+      expect(ROUTINE_DUE_SOON_MS).toBeGreaterThan(CLOUD_COMPUTER_IDLE_MS);
+    });
+
+    it("keeps its bot's computer on when it is due in 20 minutes; after that run, with the next a day off, it sleeps", async () => {
+      fake.states.set("bot-a", "ready");
+      const routine = due("bot-a", 20 * MINUTE);
+      power.used("bot-a");
+      await vi.advanceTimersByTimeAsync(20 * MINUTE);
+      expect(sleeps()).toEqual([]);
+      await run(routine, 24 * HOUR, "run");
+      expect(fake.readyBoat).not.toHaveBeenCalled();
+      await vi.advanceTimersByTimeAsync(10 * MINUTE - 1);
+      expect(sleeps()).toEqual([]);
+      await vi.advanceTimersByTimeAsync(1);
+      expect(sleeps()).toEqual(["bot-a"]);
+    });
+
+    it.each([[15, 1], [30, 1], [60, 4]])("a routine every %i minutes wakes its computer %i time(s) in four runs", async (everyMinutes, wakes) => {
+      fake.states.set("bot-a", "archived");
+      const routine = due("bot-a", everyMinutes * MINUTE);
+      for (let n = 0; n < 4; n++) {
+        await vi.advanceTimersByTimeAsync(routine.nextRunAt - Date.now());
+        await run(routine, everyMinutes * MINUTE, `run-${n}`);
+      }
+      expect(fake.readyBoat).toHaveBeenCalledTimes(wakes);
+      expect(sleeps()).toHaveLength(wakes - 1);
+    });
+
+    it("a teammate's routine keeps the team's shared computer on, and no other computer", async () => {
+      fake.states.set("computer_ops", "ready");
+      fake.states.set("carl", "ready");
+      const routine = due("ben", 15 * MINUTE, "computer_ops");
+      power.attached(turn("ada"), "computer_ops");
+      power.released(turn("ada"));
+      power.used("carl");
+      await vi.advanceTimersByTimeAsync(15 * MINUTE);
+      expect(sleeps()).toEqual(["carl"]);
+
+      routine.nextRunAt = Date.now() + 2 * HOUR;
+      power.attached(turn("ben"), "computer_ops");
+      busy.add("computer_ops");
+      await vi.advanceTimersByTimeAsync(2 * MINUTE);
+      busy.delete("computer_ops");
+      power.released(turn("ben"));
+      await vi.advanceTimersByTimeAsync(10 * MINUTE);
+      expect(sleeps()).toEqual(["carl", "computer_ops"]);
+    });
+
+    it("due in two hours, it lets the computer sleep, and that run wakes it", async () => {
+      fake.states.set("bot-a", "ready");
+      const routine = due("bot-a", 2 * HOUR);
+      power.used("bot-a");
+      await vi.advanceTimersByTimeAsync(10 * MINUTE);
+      expect(sleeps()).toEqual(["bot-a"]);
+
+      await vi.advanceTimersByTimeAsync(routine.nextRunAt - Date.now());
+      await run(routine, 2 * HOUR, "run");
+      expect(fake.readyBoat).toHaveBeenCalledOnce();
+      await vi.advanceTimersByTimeAsync(10 * MINUTE);
+      expect(sleeps()).toEqual(["bot-a", "bot-a"]);
+    });
+
+    it("paused, with no next run it can work out, or for a bot that uses no cloud computer, it keeps nothing on", async () => {
+      for (const owner of ["paused", "unscheduled", "elsewhere"]) fake.states.set(owner, "ready");
+      due("paused", 20 * MINUTE).enabled = false;
+      Object.assign(due("unscheduled", 20 * MINUTE), { nextRunAt: null });
+      due("elsewhere", 20 * MINUTE);
+      computers.delete("elsewhere");
+      for (const owner of ["paused", "unscheduled", "elsewhere"]) power.used(owner);
+      await vi.advanceTimersByTimeAsync(10 * MINUTE);
+      expect(sleeps().sort()).toEqual(["elsewhere", "paused", "unscheduled"]);
+    });
   });
 });

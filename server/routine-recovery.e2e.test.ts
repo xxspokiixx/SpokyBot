@@ -62,9 +62,17 @@ async function server(env: NodeJS.ProcessEnv = {}) {
   const engineHas = (text = "Summarise my inbox.") => expect.poll(() => {
     try { return JSON.stringify(JSON.parse(readFileSync(dump, "utf8")).prompt).includes(text); } catch { return false; }
   }, { timeout: hostTimeout(30_000) }).toBe(true);
+  /** The server has read the engine's announcement of its `turns`th turn in this thread: a hanging turn sends nothing
+   * after it, and a frame read once the stall marker exists starts that turn's stall window over. */
+  const engineAnnounced = (threadId: string, turns: number) => expect.poll(() => {
+    try {
+      return readFileSync(join(dataDir, "native", `${threadId}.ndjson`), "utf8").split("\n")
+        .filter((line) => line.includes('"dir":"in"') && line.includes('"subtype":"init"')).length;
+    } catch { return 0; }
+  }, { timeout: hostTimeout(30_000) }).toBeGreaterThanOrEqual(turns);
   const prompts = async (threadId: string) => ((await api("GET", `/api/threads/${threadId}/messages?limit=200`)).messages as any[])
     .filter((message) => message.role === "user").map((message) => String(message.text ?? ""));
-  return { url, dataDir, logPath, api, bot, engine, dump, engineHas, routine, runs, run, runNow, notified, prompts };
+  return { url, dataDir, logPath, api, bot, engine, dump, engineHas, engineAnnounced, routine, runs, run, runNow, notified, prompts };
 }
 
 it("starts a routine again once after its engine stalls, and it completes in the same conversation", async () => {
@@ -73,6 +81,7 @@ it("starts a routine again once after its engine stalls, and it completes in the
   const { id } = await s.runNow((await s.routine()).id);
   await s.engineHas();
   const { threadId } = await s.run(id);
+  await s.engineAnnounced(threadId, 1);
 
   writeFileSync(join(s.dataDir, "stall-turns"), "");
   await expect.poll(() => s.run(id), { timeout: hostTimeout(15_000) }).toMatchObject({
@@ -93,11 +102,14 @@ it("fails a routine that stalls again on its retry, with a record that says so",
   s.engine("hang");
   const { id } = await s.runNow((await s.routine()).id);
   await s.engineHas();
-  // The marker stalls only the turns already watched when it is written.
+  const { threadId } = await s.run(id);
+  // The marker stalls only the turns already watched, and quiet, when it is written.
+  await s.engineAnnounced(threadId, 1);
   writeFileSync(join(s.dataDir, "stall-turns"), "");
   await expect.poll(async () => (await s.run(id))?.retried, { timeout: hostTimeout(15_000) }).toBe("stalled");
   rmSync(join(s.dataDir, "stall-turns"));
   await s.engineHas("this run's first start stopped when its engine stalled");
+  await s.engineAnnounced(threadId, 2);
   writeFileSync(join(s.dataDir, "stall-turns"), "");
 
   const error = `Failed after one automatic retry: ${STALLED}`;
