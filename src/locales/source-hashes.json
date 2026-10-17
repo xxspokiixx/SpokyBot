@@ -18523,7 +18523,6 @@
       "memory.cantUndo": "a4c59bb643d6cb44ef20196c5dce05bf6e36ea969c1b4726ce79cca1e42c1d85",
       "memory.upkeep.help": "7a341f06cc7d9c05b15da5766d5536529d29d318ecbc20adf5cd70d98cc829c4",
       "memory.upkeep.lastTidy": "0be9763898177282890dc50f68c6a1a0a3bb14ad8f492a38fe47aceafb9deac9",
-      "memory.upkeep.lastNoticed": "0c8cd92b705058ffa5f65cc6a3e4ecdc5bf96478ef59654b1f7cacb68b312f58",
       "memory.conflict.title": "b70858a2adc3c9768c263386a599c17d9914278be36bf375711204a37f9f4257",
       "memory.conflict.help": "e0e0670a727b2b057f771ecd8faa870486e33105c66826629b72fa0c7d0f7c12",
       "memory.reload": "bdc090ec61e3fcfc65f469951dfe00f3f2ecfc6003c44deac8e05b7237092de6",
@@ -18569,7 +18568,7 @@
       "memory.source.tidy": "0d2fded672f4c3670d7afdebaf3b80600d114ff5e417565744c5409200c312be",
       "memory.source.organize": "a67f76b19319f078a00bacb41762c805d685ec9e6b9bdbab82ce1fc70b290ff0",
       "memory.source.capture": "a0843fadfc6f3c96769fa01df8f93a282e366b99902bb167528b7eccd6aef3ee",
-      "memory.source.chat": "75b80c3d4ec67697426164482a468677524790ef3893078d5bdc0836dd7fdbb3",
+      "memory.source.chat": "81941b44ed344acb8360d9d788e2da28fcbfff6d00abbf40b7334e7b26c844e3",
       "memory.source.task": "eb24257c630c99846475c471414ec5864ca82d28427fea8ff43969756e934b80",
       "memory.source.settings": "a61a4cd7efa8895ccc53dab4c5f4144df66b76bb91bf17269ac89be16180a6dc",
       "memory.source.api": "33913a3c987b34c6dbbf65f9f06eda4aa68ff7d45479d6d561cff4acedfba8c9",
@@ -19001,7 +19000,14 @@
       "teamMemory.detailLabel": "fb5f27d5457c464102286366ef3827b11923e7f3aa1faa7eea95249e36a39abf",
       "teamMemory.adding": "c6de6f45c827f464b161b668ae93192ce4e6585c4029d8dd71795cbd7f922719",
       "teamMemory.add": "9fd728c66c9a256b121472dabf32a34317aed01d8427d70ec830289cf23a7cc8",
-      "teamMemory.addEntry": "4ffceb081e496e7cb44798381b462d0ae61897b417c453470ff3a20bdd41b46e"
+      "teamMemory.addEntry": "4ffceb081e496e7cb44798381b462d0ae61897b417c453470ff3a20bdd41b46e",
+      "model.effort.none": "dc937b59892604f5a86ac96936cd7ff09e25f18ae6b758e8014a24c7fa039e91",
+      "model.effort.low": "f793de205ead5ac302c4a1627829dea41f176b1068b993a32373fc869918374b",
+      "model.effort.medium": "8e588cd187741f1cd76f5fab77b7208782a8c21d764ce7d7a4cf3ac4e0968873",
+      "model.effort.high": "c4ebc6d4a5832cd9415f906ad03661110c705a72381c8b8b145761d02e2dd23a",
+      "memory.upkeep.lastNoticed.one": "de7a806cd040966903bd9ea362309e159fd698c3b27c273b53e26da5babb80b1",
+      "memory.upkeep.lastNoticed.many": "3c12e4ab9e436814396491e485c5848070b711862b2280d800de602a8235cd90",
+      "memory.source.captureWithTitle": "88386dd1097ebf8b30a4954d14b7233f53e96e9e8048b2b930f31aa0c7dbe919"
     },
     "zh": {
       "pro.fromPrice": "a48a04a457d60b08b54fc83e7a6c4584ffedb1e23621859084900c8521a3af7b",

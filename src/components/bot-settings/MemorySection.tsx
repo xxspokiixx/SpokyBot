@@ -525,7 +525,7 @@ export function MemoryUpkeepCard({
           </button>
           <span className="text-[12.5px] text-ink-secondary">
             {status?.lastTidy ? t("memory.upkeep.lastTidy", { time: localizedRelativeTime(status.lastTidy.at, activeLocale()), summary: localizedTidySummary(status.lastTidy).toLowerCase() }) : t("memory.upkeep.notTidied")}
-            {status?.lastCapture && noticedCount(status.lastCapture) ? ` ${t("memory.upkeep.lastNoticed", { count: noticedCount(status.lastCapture), time: localizedRelativeTime(status.lastCapture.at, activeLocale()) })}` : ""}
+            {status?.lastCapture && noticedCount(status.lastCapture) ? ` ${t(noticedCount(status.lastCapture) === 1 ? "memory.upkeep.lastNoticed.one" : "memory.upkeep.lastNoticed.many", { count: noticedCount(status.lastCapture), time: localizedRelativeTime(status.lastCapture.at, activeLocale()) })}` : ""}
           </span>
         </div>
       )}
@@ -687,7 +687,7 @@ export function MemoryJournalList({
                 {source && (
                   <>
                     {" · "}
-                    <span className="text-ink-secondary">{sourceKey ? t(sourceKey) : source}</span>
+                    <span className="text-ink-secondary">{sourceKey ? t(sourceKey, row.threadTitle ? { title: row.threadTitle } : undefined) : source}</span>
                   </>
                 )}
               </div>
