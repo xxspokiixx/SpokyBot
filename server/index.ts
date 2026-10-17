@@ -3140,6 +3140,7 @@ const store = new Store(
   () => bootSelection,
   (selection) => withNewBotEffort(selection, cfg.newBots?.effort, registry.get(selection.instanceId)?.adapter.capabilities.effortLevels),
   (instanceId) => registry.cliTarget(instanceId)?.driverKind,
+  cfg.language ?? Intl.DateTimeFormat().resolvedOptions().locale,
 );
 const creditMoves = cloudCredit && createCreditMoves({ credit: cloudCredit, store, context: selectionContext, threadBusy, saveDefault: saveNewBotModel,
   defaults: () => [cfg.defaultModelSelection, cfg.newBotDefaults?.profile.modelSelection], engineName: id => registry.get(id)?.displayName ?? id,
