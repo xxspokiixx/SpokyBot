@@ -175,6 +175,8 @@ async function openApp(server: { url: string; port: number; dataDir: string; log
     expect(calls[0]).toMatch(/✗ Wrong secret$/);
     expect(calls[1]).toMatch(/✓ Received$/);
     expect(await text('aside[aria-label="Automation"] section[aria-label="Last thing it received"]')).toContain('"lead": "Ada Lovelace"');
+    expect(await text('aside[aria-label="Automation"] details')).toContain("Secret: ••••••••");
+    expect(await evaluate(`document.querySelector('aside[aria-label="Automation"]').innerHTML.includes("whsec_")`), "the secret stays masked when More opens").toBe(false);
     await evaluate(`document.querySelectorAll('aside[aria-label="Automation"] [data-call] button')[1].click(); true`);
     await expect.poll(() => evaluate(`document.querySelectorAll('aside[aria-label="Automation"] [data-call]')[1].querySelector("pre")?.innerText ?? ""`)).toContain('"email": "ada@example.com"');
     await screenshot("more-recent-calls");
@@ -505,6 +507,7 @@ await import(${JSON.stringify(pathToFileURL(join(ROOT, "server", "testing", "fak
     await expect.poll(() => evaluate(`[...document.querySelectorAll('aside[aria-label="Automation"] [data-call]')].map((item) => item.innerText.replace(/\\n/g, " "))`))
       .toEqual([expect.stringMatching(/✗ Wrong secret$/), expect.stringMatching(/✓ Received$/)]);
     expect(await text('aside[aria-label="Automation"] section[aria-label="Last thing it received"]')).toContain('"lead": "Ada Lovelace"');
+    expect(await evaluate(`document.querySelector('aside[aria-label="Automation"]').innerHTML.includes("whsec_")`), "the secret stays masked when More opens").toBe(false);
     await screenshot("cloud-panel");
     await click("Close");
 

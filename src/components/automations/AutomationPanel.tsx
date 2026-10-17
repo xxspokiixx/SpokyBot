@@ -3,6 +3,7 @@ import { Check, Copy, Pause, Pencil, Play, RotateCw, Trash2, X } from "lucide-re
 
 import { automationStatus, capital, lastReceived, lastWhen, runLine, STATUS_WORD, webhookCalls, type Automation } from "@/lib/automations";
 import { cn } from "@/lib/cn";
+import { copyText } from "@/lib/copy-text";
 import { t } from "@/lib/i18n";
 import { loadWebhookCredentials, webhookCredentialStore } from "@/lib/webhook-credentials";
 import { useStore } from "@/state/store";
@@ -31,6 +32,14 @@ export function AutomationPanel({ automation, sentence, onClose, onEdit, onDelet
   const calls = webhook ? webhookCalls(webhook.id, state.webhookAttempts) : [];
   const received = webhook ? lastReceived(webhook, state.webhookAttempts) : null;
   const [openCall, setOpenCall] = useState<string | null>(null);
+  // Shown only on Show: More is opened for Recent calls, often on a shared screen.
+  const [secretShown, setSecretShown] = useState(false);
+  const [secretCopied, setSecretCopied] = useState(false);
+  const copySecret = async (secret: string) => {
+    if (await copyText(secret) !== "copied") { actions.setError(t("automations.address.copyFailed")); return; }
+    setSecretCopied(true);
+    setTimeout(() => setSecretCopied(false), 1_800);
+  };
 
   return (
     <aside aria-label={t("automations.panel.label")} className="flex h-full w-[min(380px,100vw)] shrink-0 flex-col border-l border-hairline/40 bg-panel">
@@ -81,7 +90,13 @@ export function AutomationPanel({ automation, sentence, onClose, onEdit, onDelet
                   )}
                 </section>
                 <p className="font-medium text-ink">{t("automations.address.showSecret")}</p>
-                <p className="break-all font-mono text-[11px]">{credential ? t("automations.address.secret", { secret: credential.secret }) : t("automations.address.secretUnknown")}</p>
+                {credential ? (
+                  <div className="flex flex-wrap items-center gap-x-2 gap-y-1" data-secret={secretShown ? "shown" : "masked"}>
+                    <span className="min-w-0 break-all font-mono text-[11px]">{t("automations.address.secret", { secret: secretShown ? credential.secret : "••••••••" })}</span>
+                    <button type="button" aria-label={t(secretShown ? "automations.address.hideSecretLabel" : "automations.address.showSecretLabel")} onClick={() => setSecretShown((shown) => !shown)} className="rounded-md px-1.5 py-0.5 font-medium text-ink hover:bg-raised">{t(secretShown ? "automations.address.hideSecret" : "automations.address.revealSecret")}</button>
+                    <button type="button" aria-label={t("automations.address.copySecretLabel")} onClick={() => void copySecret(credential.secret)} className="rounded-md px-1.5 py-0.5 font-medium text-ink hover:bg-raised">{secretCopied ? t("automations.address.copied") : t("automations.address.copySecret")}</button>
+                  </div>
+                ) : <p className="break-all font-mono text-[11px]">{t("automations.address.secretUnknown")}</p>}
                 <p>{t("automations.address.header")}</p>
                 {webhook.eventTypes?.length ? <p>{t("automations.address.events", { events: webhook.eventTypes.join(", ") })}</p> : null}
                 <button type="button" disabled={Boolean(actions.busy)} onClick={() => { if (window.confirm(t("automations.address.replaceConfirm"))) void actions.copyAddress(webhook.id, true); }} className="flex items-center gap-1.5 rounded-lg border border-hairline/50 px-2.5 py-1.5 text-ink hover:bg-raised"><RotateCw size={12} />{t("automations.address.replace")}</button>

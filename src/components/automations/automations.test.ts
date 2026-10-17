@@ -4,6 +4,7 @@ import { flushSync } from "react-dom";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
+import { saveWebhookCredential } from "@/lib/webhook-credentials";
 import type { Bot } from "@/state/store";
 
 const fixture = vi.hoisted(() => ({
@@ -17,6 +18,19 @@ vi.mock("@/state/store", async (importOriginal) => ({
   api: (...args: unknown[]) => fixture.api(...args),
 }));
 vi.mock("@/lib/thread-preferences", () => ({ useShowThreads: () => false }));
+const copied = vi.hoisted(() => ({ texts: [] as string[] }));
+const credentials = vi.hoisted(() => {
+  const items = new Map<string, string>();
+  return { items, store: { getItem: (key: string) => items.get(key) ?? null, setItem: (key: string, value: string) => { items.set(key, value); }, removeItem: (key: string) => { items.delete(key); } } };
+});
+vi.mock("@/lib/webhook-credentials", async (importOriginal) => ({
+  ...await importOriginal<typeof import("@/lib/webhook-credentials")>(),
+  webhookCredentialStore: () => credentials.store,
+}));
+vi.mock("@/lib/copy-text", async (importOriginal) => ({
+  ...await importOriginal<typeof import("@/lib/copy-text")>(),
+  copyText: async (text: string) => { copied.texts.push(text); return "copied"; },
+}));
 
 const { NewAutomation, defaultBot } = await import("./NewAutomation");
 const { AutomationPanel } = await import("./AutomationPanel");
@@ -219,5 +233,37 @@ describe("the calendar", () => {
     expect(dots("Morning summary").length).toBeGreaterThan(0);
     expect(dots("Morning summary").every((status) => status === "working")).toBe(true);
     expect(container.querySelector('[data-event-card][aria-label^="Orphan check"]')).toBeNull();
+  });
+});
+
+describe("the secret, under More", () => {
+  const secret = "whsec_fixture-secret-value";
+  beforeEach(() => {
+    copied.texts = [];
+    credentials.items.clear();
+    saveWebhookCredential(credentials.store as never, "hook-1", { endpointUrl: "http://127.0.0.1:8800/hooks/wh_abc", url: `http://127.0.0.1:8800/hooks/wh_abc/${secret}`, secret });
+  });
+  afterEach(() => { credentials.items.clear(); });
+
+  it("is masked when More opens, copies without showing, and shows only on Show, for that panel", async () => {
+    const [automation] = automationsFrom({ routines: [], webhooks: [webhook] as never, runs: [] });
+    const props = { automation: automation!, sentence: "s", onClose: vi.fn(), onEdit: vi.fn(), onDeleted: vi.fn() };
+    let container = mount(createElement(AutomationPanel, props));
+    const more = () => container.querySelector("details")!;
+    expect(more().textContent).toContain("Recent calls");
+    expect(more().textContent).toContain("Secret: ••••••••");
+    expect(container.innerHTML).not.toContain(secret);
+    flushSync(() => container.querySelector<HTMLButtonElement>('button[aria-label="Copy the secret"]')!.click());
+    await vi.waitFor(() => expect(copied.texts).toEqual([secret]));
+    await vi.waitFor(() => expect(container.querySelector('button[aria-label="Copy the secret"]')!.textContent).toBe("Copied"));
+    expect(container.innerHTML).not.toContain(secret);
+    flushSync(() => container.querySelector<HTMLButtonElement>('button[aria-label="Show the secret"]')!.click());
+    expect(more().textContent).toContain(`Secret: ${secret}`);
+    flushSync(() => container.querySelector<HTMLButtonElement>('button[aria-label="Hide the secret"]')!.click());
+    expect(container.innerHTML).not.toContain(secret);
+    flushSync(() => container.querySelector<HTMLButtonElement>('button[aria-label="Show the secret"]')!.click());
+    root!.unmount();
+    container = mount(createElement(AutomationPanel, props));
+    expect(container.innerHTML).not.toContain(secret);
   });
 });

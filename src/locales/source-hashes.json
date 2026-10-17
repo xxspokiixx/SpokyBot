@@ -6477,7 +6477,14 @@
       "automations.calls.wrongSecret": "bef76f26c54c73fe83f134675920b37efdf2d779cf27642ca3c74970949d89a5",
       "automations.received.help": "0c1dca5404849e8faeeee9f35ed98cb49a8403cd147e4bd4c1a7d92cf2af04c3",
       "automations.calls.tooMany": "03f02e995fe5a3543c0e7139920330c14e4f8acd826b1bc82cb3cc519769008a",
-      "automations.calls.wrongSecretTimes": "974a84470a98c1836baae85b5b0c41d88c8d6bf2c20796ec67607046e6a626ca"
+      "automations.calls.wrongSecretTimes": "974a84470a98c1836baae85b5b0c41d88c8d6bf2c20796ec67607046e6a626ca",
+      "automations.address.revealSecret": "0df6f1cad36c49da768a6efdcc2c4be102f5729f7381cb53e4ff8061d17eaeb6",
+      "automations.address.hideSecret": "ac20a57bfde0bbc40bfe70895eb1cfacc944aaff06ca784053623c569b3e1b3d",
+      "automations.address.copySecret": "e21f935f11d7e966dbbae78da9daa378fe8142a14e7c0cd7434183005faa6c5c",
+      "automations.address.showSecretLabel": "d518dd8aaa7fb94b467b8f0b7576df00079a9a801e7a109bf47525992b1d173c",
+      "automations.address.hideSecretLabel": "8f4cd2f6bc60314926ce9d4440552eb65de7ef3f718e816e741142d49046a8bc",
+      "automations.address.copySecretLabel": "cb07899c43f927f18b79ac6dc8338b58f71efc6baa6edea48a9b8c59ecaa3412",
+      "automations.address.copyFailed": "a5549df61a4988f9e98c73c02f9641a9310e3ad3717a796768fd1446a375c676"
     },
     "fr": {
       "pro.fromPrice": "a48a04a457d60b08b54fc83e7a6c4584ffedb1e23621859084900c8521a3af7b",
@@ -19215,7 +19222,14 @@
       "automations.calls.wrongSecret": "bef76f26c54c73fe83f134675920b37efdf2d779cf27642ca3c74970949d89a5",
       "automations.received.help": "0c1dca5404849e8faeeee9f35ed98cb49a8403cd147e4bd4c1a7d92cf2af04c3",
       "automations.calls.tooMany": "03f02e995fe5a3543c0e7139920330c14e4f8acd826b1bc82cb3cc519769008a",
-      "automations.calls.wrongSecretTimes": "974a84470a98c1836baae85b5b0c41d88c8d6bf2c20796ec67607046e6a626ca"
+      "automations.calls.wrongSecretTimes": "974a84470a98c1836baae85b5b0c41d88c8d6bf2c20796ec67607046e6a626ca",
+      "automations.address.revealSecret": "0df6f1cad36c49da768a6efdcc2c4be102f5729f7381cb53e4ff8061d17eaeb6",
+      "automations.address.hideSecret": "ac20a57bfde0bbc40bfe70895eb1cfacc944aaff06ca784053623c569b3e1b3d",
+      "automations.address.copySecret": "e21f935f11d7e966dbbae78da9daa378fe8142a14e7c0cd7434183005faa6c5c",
+      "automations.address.showSecretLabel": "d518dd8aaa7fb94b467b8f0b7576df00079a9a801e7a109bf47525992b1d173c",
+      "automations.address.hideSecretLabel": "8f4cd2f6bc60314926ce9d4440552eb65de7ef3f718e816e741142d49046a8bc",
+      "automations.address.copySecretLabel": "cb07899c43f927f18b79ac6dc8338b58f71efc6baa6edea48a9b8c59ecaa3412",
+      "automations.address.copyFailed": "a5549df61a4988f9e98c73c02f9641a9310e3ad3717a796768fd1446a375c676"
     },
     "zh": {
       "pro.fromPrice": "a48a04a457d60b08b54fc83e7a6c4584ffedb1e23621859084900c8521a3af7b",
