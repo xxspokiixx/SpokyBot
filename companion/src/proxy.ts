@@ -16,6 +16,7 @@ import {
   isCloudDesktopAccess,
   isMessageFileDownload,
 } from "./routes.ts";
+import { sendTunnelJson } from "./tunnel-gzip.ts";
 import { CompanionViewerRelay } from "./viewer-relay.ts";
 import { createSseScrubber, isJson, scrub } from "./wire.ts";
 
@@ -580,10 +581,9 @@ export function createProxyHandler(options: ProxyOptions) {
           delete headers["content-length"];
           delete headers["content-encoding"];
           delete headers["transfer-encoding"];
-          res.writeHead(status, {
-            ...privateHeaders(headers),
-            "content-length": Buffer.byteLength(text),
-          });
+          const reply = privateHeaders(headers);
+          if (sendTunnelJson(res, status, reply, text)) return;
+          res.writeHead(status, { ...reply, "content-length": Buffer.byteLength(text) });
           res.end(text);
         }
       },
