@@ -155,6 +155,43 @@ describe("the browser panel's connection", () => {
   });
 });
 
+describe("a v1 live view whose stream dropped", () => {
+  const live = () => FixtureEventSource.instances.at(-1)!;
+  const emit = (name: string, data: unknown) => act(async () => live().emit(name, data));
+
+  it("asks for the hold its last view had when the person reconnects", async () => {
+    fixture.state.config.browserEngine = { kind: "engine", engine: "agent-browser" };
+    await render();
+    await emit("ready", { viewerId: "old-viewer" });
+    await emit("error", { message: "Browser connection ended." });
+    expect(host.textContent).toContain("Browser disconnected");
+    await act(async () => button("Reconnect").click());
+    await flush();
+    expect(live().url).toBe("/api/bots/pepper/browser/live?resume=old-viewer");
+    await emit("ready", { viewerId: "new-viewer" });
+    expect(host.textContent).not.toContain("Browser disconnected");
+  });
+
+  it("comes back when the window is focused after its retries ran out", async () => {
+    fixture.state.config.browserEngine = { kind: "engine", engine: "agent-browser" };
+    await render();
+    vi.useFakeTimers();
+    await emit("ready", { viewerId: "old-viewer" });
+    for (const delay of [1_000, 2_000, 4_000, 8_000, 15_000]) {
+      await emit("error", { retryable: true });
+      await act(async () => { await vi.advanceTimersByTimeAsync(delay); });
+    }
+    await emit("error", { retryable: true });
+    expect(FixtureEventSource.instances).toHaveLength(6);
+    expect(host.textContent).toContain("Browser disconnected");
+    await act(async () => { window.dispatchEvent(new Event("focus")); });
+    expect(FixtureEventSource.instances).toHaveLength(7);
+    expect(live().url).toBe("/api/bots/pepper/browser/live?resume=old-viewer");
+    await emit("ready", { viewerId: "back-viewer" });
+    expect(host.textContent).not.toContain("Browser disconnected");
+  });
+});
+
 describe("who holds the browser", () => {
   it("says the bot has it, takes it on Take control, and hands it back", async () => {
     const socket = await streaming("agent");

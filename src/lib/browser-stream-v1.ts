@@ -11,7 +11,13 @@ export interface LiveStreamClient extends PreviewStreamClient {
   readonly transport: ControlTransport;
 }
 
+/** The view a panel had when its stream dropped. The server gives that view's hold back to the panel's next view only. */
+export interface LiveResume { viewer: string }
+
 const RECONNECT_DELAYS = [1_000, 2_000, 4_000, 8_000, 15_000];
+// The server sends a heartbeat every 10 s: a view that heard nothing for longer lost its stream without an error.
+const SILENT_MS = 25_000;
+const SILENCE_CHECK_MS = 5_000;
 const QUEUE_LIMIT = 32;
 const CHAR_LIMIT = 4_096;
 const clamp = (value: number, low: number, high: number) => Math.max(low, Math.min(high, Number.isFinite(value) ? value : 0));
@@ -135,33 +141,70 @@ export function liveControl(value: { held?: unknown; owned?: unknown; controllin
 
 /**
  * Opens the v1 view of a bot's browser. Frames come as base64 JPEG and wait for an acknowledgement each; the view
- * reconnects a few times after a dropped connection, never replaying input, and then stops.
+ * reconnects a few times after a dropped connection, never replaying input, and asks the server for the hold its last
+ * view had. It reconnects at once when the window is focused, shown or back online, also after its retries ran out.
  */
-export function createLiveStreamClient(botId: string, events: PreviewStreamEvents, post: LivePost): LiveStreamClient {
+export function createLiveStreamClient(botId: string, events: PreviewStreamEvents, post: LivePost, resume: LiveResume = { viewer: "" }): LiveStreamClient {
   let stopped = false;
+  /** Stopped because its retries ran out, not refused for good: coming back to the window tries again. */
+  let revivable = false;
+  let closed = false;
   let source: EventSource | null = null;
   let viewerId = "";
+  let heardAt = 0;
   let attempts = 0;
   let generation = 0;
   let control: PreviewStreamControl | null = null;
   let viewport: { width: number; height: number } | null = null;
   let retry: ReturnType<typeof setTimeout> | null = null;
-  const queue = createLiveInputQueue((body) => (viewerId ? post(body, viewerId) : Promise.reject(new Error("Open the browser connection first."))), (cause) => {
+
+  const dropped = (live: EventSource, retryable: boolean) => {
+    live.close();
+    source = null;
+    const wasConnected = viewerId !== "";
+    if (wasConnected) resume.viewer = viewerId;
+    viewerId = "";
+    control = null;
+    queue.clear();
+    if (wasConnected) events.onConnectedChange(false);
+    if (stopped) return;
+    const delay = retryable ? RECONNECT_DELAYS[attempts++] : undefined;
+    if (delay === undefined) {
+      stopped = true;
+      revivable = retryable;
+      events.onGone?.();
+      return;
+    }
+    retry = setTimeout(connect, delay);
+  };
+  /** A 404 for this view's input: the server closed the view, so input must go to a new one rather than halt here. */
+  const viewGone = (cause: unknown, sentTo: string) => {
+    if ((cause as { status?: unknown } | null)?.status !== 404 || !source || !sentTo || viewerId !== sentTo) return false;
+    dropped(source, true);
+    return true;
+  };
+  const postTo = (body: Body, sentTo: string) => post(body, sentTo).catch((cause: unknown) => { viewGone(cause, sentTo); throw cause; });
+  const queue = createLiveInputQueue((body) => (viewerId ? postTo(body, viewerId) : Promise.reject(new Error("Open the browser connection first."))), (cause) => {
     events.onMessage?.({ type: "notice", message: cause instanceof Error ? cause.message : String(cause) });
   });
 
   const connect = () => {
+    retry = null;
     if (stopped) return;
-    const live = new EventSource(`/api/bots/${encodeURIComponent(botId)}/browser/live`);
+    const query = resume.viewer ? `?resume=${encodeURIComponent(resume.viewer)}` : "";
+    const live = new EventSource(`/api/bots/${encodeURIComponent(botId)}/browser/live${query}`);
     source = live;
+    heardAt = Date.now();
     const listen = (name: string, handler: (data: Record<string, unknown>) => void) => live.addEventListener(name, (event) => {
       if (source !== live) return;
+      heardAt = Date.now();
       try { handler(JSON.parse((event as MessageEvent).data) as Record<string, unknown>); } catch {}
     });
     listen("waiting", () => events.onMessage?.({ type: "starting" }));
     listen("ready", (data) => {
       if (typeof data.viewerId !== "string" || !data.viewerId) return;
       viewerId = data.viewerId;
+      resume.viewer = "";
       events.onConnectedChange(true);
     });
     listen("heartbeat", () => { attempts = 0; });
@@ -205,24 +248,28 @@ export function createLiveStreamClient(botId: string, events: PreviewStreamEvent
           if (typeof data.message === "string") events.onMessage?.({ type: "notice", message: data.message });
         } catch {}
       }
-      live.close();
-      source = null;
-      const wasConnected = viewerId !== "";
-      viewerId = "";
-      control = null;
-      queue.clear();
-      if (wasConnected) events.onConnectedChange(false);
-      if (stopped) return;
-      const delay = retryable ? RECONNECT_DELAYS[attempts++] : undefined;
-      if (delay === undefined) {
-        stopped = true;
-        events.onGone?.();
-        return;
-      }
-      retry = setTimeout(connect, delay);
+      dropped(live, retryable);
     });
   };
   connect();
+
+  // Switching apps, sleep or a network change can drop the stream unnoticed or outlast the retries: check again on return.
+  const wake = (focused: boolean) => {
+    if (closed) return;
+    if (source && viewerId && Date.now() - heardAt > SILENT_MS) dropped(source, true);
+    if (!focused || (retry === null && !(stopped && revivable))) return;
+    if (retry !== null) clearTimeout(retry);
+    stopped = false;
+    revivable = false;
+    attempts = 0;
+    connect();
+  };
+  const returned = () => { if (document.visibilityState !== "hidden") wake(true); };
+  const silence = setInterval(() => wake(false), SILENCE_CHECK_MS);
+  const page = typeof window === "undefined" ? null : window;
+  page?.addEventListener("focus", returned);
+  page?.addEventListener("online", returned);
+  if (page) document.addEventListener("visibilitychange", returned);
 
   const send = (input: PreviewStreamInput) => {
     if (!viewerId || !control?.canOperate) return false;
@@ -237,9 +284,16 @@ export function createLiveStreamClient(botId: string, events: PreviewStreamEvent
     send,
     stop: () => {
       stopped = true;
+      closed = true;
+      clearInterval(silence);
+      page?.removeEventListener("focus", returned);
+      page?.removeEventListener("online", returned);
+      if (page) document.removeEventListener("visibilitychange", returned);
       if (retry !== null) clearTimeout(retry);
       source?.close();
       source = null;
+      // A reconnect of the same panel carries on with this view's hold, as one after a dropped stream does.
+      if (viewerId) resume.viewer = viewerId;
       viewerId = "";
       queue.clear();
     },
@@ -254,10 +308,10 @@ export function createLiveStreamClient(botId: string, events: PreviewStreamEvent
       stopped: () => queue.stopped(),
       take: async () => {
         if (!viewerId) throw new Error("The browser view is not connected. Reconnect it, then try again.");
-        const reply = await post({ type: "take" }, viewerId) as { waited?: unknown } | null;
+        const reply = await postTo({ type: "take" }, viewerId) as { waited?: unknown } | null;
         return { waited: reply?.waited === true };
       },
-      release: async () => { if (viewerId) await post({ type: "release" }, viewerId); },
+      release: async () => { if (viewerId) await postTo({ type: "release" }, viewerId); },
     },
   };
 }

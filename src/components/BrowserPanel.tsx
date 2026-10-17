@@ -11,7 +11,7 @@ import { createBrowserControl, streamTransport, type BrowserControl, type Browse
 import { resolveAddressBarInput } from "@/lib/browser-address";
 import { closeBrowserPictureInPicture, openBrowserPictureInPicture, supportsBrowserPictureInPicture, useBrowserPictureInPicture } from "@/lib/browser-pip";
 import { browserStreamAccess, createPreviewStreamClient, type PreviewStreamClient, type PreviewStreamControl, type PreviewStreamInput, type PreviewViewportSetting } from "@/lib/browser-stream-client";
-import { createLiveStreamClient, type LiveStreamClient } from "@/lib/browser-stream-v1";
+import { createLiveStreamClient, type LiveResume, type LiveStreamClient } from "@/lib/browser-stream-v1";
 import { BROWSER_HELD_ELSEWHERE } from "../../shared/browser-held";
 
 const button = "rounded-md p-1.5 text-ink-secondary hover:bg-inset hover:text-ink disabled:opacity-40 disabled:cursor-not-allowed";
@@ -29,6 +29,7 @@ function tabsOf(value: unknown): BrowserTab[] {
 /**
  * A bot's browser: the page fills the panel, streamed over the v2 WebSocket when the new engine runs it, else over the
  * v1 live view. Security: a new connection never silently restores permission to type and never replays old input.
+ * Only the server returns a hold, and only to this panel's reconnect after its own v1 stream dropped.
  */
 export function LiveBrowser({ bot, signIn }: { bot: Bot; signIn?: BrowserSignIn }) {
   const { state } = useStore();
@@ -60,6 +61,8 @@ export function LiveBrowser({ bot, signIn }: { bot: Bot; signIn?: BrowserSignIn 
   const controlRef = useRef<PreviewStreamControl | null>(null);
   const controlListeners = useRef(new Set<(control: PreviewStreamControl | null) => void>());
   const browserControl = useRef<BrowserControl | null>(null);
+  // The v1 view this panel had for this bot and profile when its stream dropped: only its reconnect gets the hold back.
+  const resume = useRef<LiveResume & { key: string }>({ key: "", viewer: "" });
   const keepNow = useRef(false);
   const signInHandled = useRef(0);
   const signInPage = useRef<string | null>(null);
@@ -91,12 +94,15 @@ export function LiveBrowser({ bot, signIn }: { bot: Bot; signIn?: BrowserSignIn 
     pageNow.current = null;
   }, [bot.id, bot.browserProfile, attempt, stream]);
 
-  const connect = useCallback<SurfaceConnect>((target, events) => stream
-    ? createPreviewStreamClient({ access: browserStreamAccess(bot.id), ...target }, events)
-    : createLiveStreamClient(bot.id, events, (body, viewerId) => api(`/api/bots/${encodeURIComponent(bot.id)}/browser/action`, {
+  const connect = useCallback<SurfaceConnect>((target, events) => {
+    if (stream) return createPreviewStreamClient({ access: browserStreamAccess(bot.id), ...target }, events);
+    const key = `${bot.id}\n${bot.browserProfile ?? ""}`;
+    if (resume.current.key !== key) resume.current = { key, viewer: "" };
+    return createLiveStreamClient(bot.id, events, (body, viewerId) => api(`/api/bots/${encodeURIComponent(bot.id)}/browser/action`, {
       // 120 s matches the server's browser requestTimeoutMs.
       method: "POST", body: JSON.stringify({ ...body, viewerId }), timeoutMs: 120_000,
-    })), [bot.id, stream]);
+    }), resume.current);
+  }, [bot.id, bot.browserProfile, stream]);
 
   const interact = useCallback((input: PreviewStreamInput) => {
     if (controlRef.current?.controller === "another-viewer") { setError(BROWSER_HELD_ELSEWHERE); return; }
@@ -258,7 +264,7 @@ export function LiveBrowser({ bot, signIn }: { bot: Bot; signIn?: BrowserSignIn 
         onClient={onClient}
         onControl={onControl}
         onMessage={onMessage}
-        onConnectedChange={(next) => { setConnected(next); if (next) { setStarting(false); setError(""); } }}
+        onConnectedChange={(next) => { setConnected(next); if (next) { setStarting(false); setGone(false); setError(""); } }}
         onFirstFrame={() => setStarting(false)}
         onUnauthorized={() => { if (stream) setFallback(true); else setGone(true); }}
         onGone={() => setGone(true)}

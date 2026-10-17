@@ -143,6 +143,166 @@ describe("the v1 live client", () => {
   });
 });
 
+describe("a v1 live view whose stream dropped", () => {
+  const interrupted = (source: FixtureEventSource) => source.fail();
+  let page: EventTarget;
+  let shown: EventTarget & { visibilityState: string };
+  beforeEach(() => {
+    vi.useFakeTimers();
+    page = new EventTarget();
+    shown = Object.assign(new EventTarget(), { visibilityState: "visible" });
+    vi.stubGlobal("window", page);
+    vi.stubGlobal("document", shown);
+  });
+  function open(resume = { viewer: "" }) {
+    const post = vi.fn<(body: Record<string, unknown>, viewerId: string) => Promise<unknown>>().mockResolvedValue({ ok: true });
+    const handlers = events({ onMessage: vi.fn(), onControl: vi.fn(), onGone: vi.fn() });
+    const client = createLiveStreamClient("pepper", handlers, post, resume);
+    return { client, post, handlers, resume };
+  }
+  const latest = () => FixtureEventSource.instances.at(-1)!;
+
+  it("asks to carry on with the view it had until a new one is ready", () => {
+    const { client } = open();
+    expect(latest().url).toBe("/api/bots/pepper/browser/live");
+    latest().emit("ready", { viewerId: "old-viewer" });
+    interrupted(latest());
+    vi.advanceTimersByTime(1_000);
+    expect(latest().url).toBe("/api/bots/pepper/browser/live?resume=old-viewer");
+    interrupted(latest());
+    vi.advanceTimersByTime(2_000);
+    expect(latest().url).toBe("/api/bots/pepper/browser/live?resume=old-viewer");
+    latest().emit("ready", { viewerId: "new-viewer" });
+    latest().emit("heartbeat", {});
+    interrupted(latest());
+    vi.advanceTimersByTime(1_000);
+    expect(latest().url).toBe("/api/bots/pepper/browser/live?resume=new-viewer");
+    latest().emit("ready", { viewerId: "newest-viewer" });
+    client.stop();
+  });
+
+  it("hands the view it had to the panel's next client, as Reconnect does", () => {
+    const resume = { viewer: "" };
+    const first = open(resume);
+    latest().emit("ready", { viewerId: "old-viewer" });
+    first.client.stop();
+    const second = open(resume);
+    expect(latest().url).toBe("/api/bots/pepper/browser/live?resume=old-viewer");
+    latest().emit("ready", { viewerId: "new-viewer" });
+    expect(resume.viewer).toBe("");
+    second.client.stop();
+  });
+
+  it("reconnects at once when the window is focused again after its retries ran out", () => {
+    const { client, handlers } = open();
+    latest().emit("ready", { viewerId: "old-viewer" });
+    for (const delay of [1_000, 2_000, 4_000, 8_000, 15_000]) {
+      interrupted(latest());
+      vi.advanceTimersByTime(delay);
+    }
+    interrupted(latest());
+    vi.advanceTimersByTime(60_000);
+    expect(FixtureEventSource.instances).toHaveLength(6);
+    expect(handlers.onGone).toHaveBeenCalledOnce();
+    shown.visibilityState = "hidden"; shown.dispatchEvent(new Event("visibilitychange"));
+    expect(FixtureEventSource.instances).toHaveLength(6);
+    shown.visibilityState = "visible"; page.dispatchEvent(new Event("focus"));
+    expect(FixtureEventSource.instances).toHaveLength(7);
+    expect(latest().url).toBe("/api/bots/pepper/browser/live?resume=old-viewer");
+    latest().emit("ready", { viewerId: "back-viewer" });
+    expect(handlers.onConnectedChange).toHaveBeenLastCalledWith(true);
+    client.stop();
+  });
+
+  it("retries a waiting reconnect at once when the network comes back", () => {
+    const { client } = open();
+    interrupted(latest());
+    expect(FixtureEventSource.instances).toHaveLength(1);
+    page.dispatchEvent(new Event("online"));
+    expect(FixtureEventSource.instances).toHaveLength(2);
+    vi.advanceTimersByTime(1_000);
+    expect(FixtureEventSource.instances).toHaveLength(2);
+    client.stop();
+  });
+
+  it("does not retry a refusal for good on focus", () => {
+    const { client } = open();
+    latest().fail({ message: "Browser access is disabled" });
+    page.dispatchEvent(new Event("focus"));
+    shown.dispatchEvent(new Event("visibilitychange"));
+    expect(FixtureEventSource.instances).toHaveLength(1);
+    client.stop();
+  });
+
+  it("treats a stream that went silent as dropped", () => {
+    const { client, handlers } = open();
+    const source = latest();
+    source.emit("ready", { viewerId: "quiet-viewer" });
+    vi.advanceTimersByTime(20_000);
+    source.emit("heartbeat", {});
+    vi.advanceTimersByTime(24_000);
+    expect(source.close).not.toHaveBeenCalled();
+    vi.advanceTimersByTime(6_000);
+    expect(source.close).toHaveBeenCalledOnce();
+    expect(handlers.onConnectedChange).toHaveBeenLastCalledWith(false);
+    vi.advanceTimersByTime(1_000);
+    expect(latest().url).toBe("/api/bots/pepper/browser/live?resume=quiet-viewer");
+    client.stop();
+  });
+
+  it("reconnects at once when the window comes back to a silent stream", () => {
+    const { client } = open();
+    const source = latest();
+    source.emit("ready", { viewerId: "quiet-viewer" });
+    vi.advanceTimersByTime(26_000);
+    expect(source.close).not.toHaveBeenCalled();
+    page.dispatchEvent(new Event("focus"));
+    expect(source.close).toHaveBeenCalledOnce();
+    expect(FixtureEventSource.instances).toHaveLength(2);
+    client.stop();
+  });
+
+  it("reconnects when the server no longer has the view its input went to", async () => {
+    const { client, post, handlers } = open();
+    const source = latest();
+    source.emit("ready", { viewerId: "gone-viewer" });
+    source.emit("control", { held: true, owned: true, controlling: true });
+    post.mockRejectedValueOnce(Object.assign(new Error("This browser view is no longer available. Reopen the browser panel."), { status: 404 }));
+    client.transport.send({ type: "mouse", action: "down", x: 4, y: 5, button: "left", buttons: 1, clickCount: 1, modifiers: 0 });
+    await vi.advanceTimersByTimeAsync(0);
+    expect(source.close).toHaveBeenCalledOnce();
+    expect(handlers.onMessage).not.toHaveBeenCalledWith(expect.objectContaining({ type: "notice" }));
+    vi.advanceTimersByTime(1_000);
+    expect(latest().url).toBe("/api/bots/pepper/browser/live?resume=gone-viewer");
+    client.stop();
+  });
+
+  it("keeps its hold after reconnecting: input and Hand back go to the new view", async () => {
+    const { client, post } = open();
+    latest().emit("ready", { viewerId: "old-viewer" });
+    interrupted(latest());
+    vi.advanceTimersByTime(1_000);
+    latest().emit("ready", { viewerId: "new-viewer" });
+    latest().emit("control", { held: true, owned: true, controlling: true });
+    client.transport.send({ type: "mouse", action: "down", x: 4, y: 5, button: "left", buttons: 1, clickCount: 1, modifiers: 0 });
+    await client.transport.settle();
+    await client.transport.release();
+    expect(post.mock.calls.filter(([body]) => body.type !== "ack").map(([body, viewer]) => [body.type, viewer])).toEqual([
+      ["input_mouse", "new-viewer"], ["release", "new-viewer"],
+    ]);
+    client.stop();
+  });
+
+  it("stops listening to the window once stopped", () => {
+    const { client } = open();
+    interrupted(latest());
+    client.stop();
+    page.dispatchEvent(new Event("focus"));
+    vi.advanceTimersByTime(60_000);
+    expect(FixtureEventSource.instances).toHaveLength(1);
+  });
+});
+
 describe("the v1 input queue", () => {
   const move = (x: number) => ({ type: "input_mouse", eventType: "mouseMoved", x, y: 10 });
   const wheel = (deltaY: number) => ({ type: "input_mouse", eventType: "mouseWheel", x: 10, y: 10, deltaY });

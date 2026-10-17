@@ -49,6 +49,8 @@ interface Fixture {
   answers: Array<{ owner: string; chooser: string; files: Array<{ name: string; text: string }> }>;
   /** Uploads that reached the check for an offered picker. */
   pickerChecks: number;
+  /** The v1 views opened, by the view each asked to carry on from. */
+  resumes: Array<string | null | undefined>;
   dataDir: string;
 }
 
@@ -64,7 +66,7 @@ async function serve({ attach, current = () => true, download }: {
   current?: () => boolean;
   download?: (id: string) => Download | undefined;
 } = {}): Promise<Fixture> {
-  const fixture = { origin: "", attachments: [], inputs: [], answers: [], pickerChecks: 0, dataDir: mkdtempSync(join(tmpdir(), "omb-browser-viewers-")) } as unknown as Fixture;
+  const fixture = { origin: "", attachments: [], inputs: [], answers: [], pickerChecks: 0, resumes: [], dataDir: mkdtempSync(join(tmpdir(), "omb-browser-viewers-")) } as unknown as Fixture;
   folders.push(fixture.dataDir);
   const viewer = { id: "viewer", input: async (message: unknown) => { fixture.inputs.push(message); }, close: async () => {} } as unknown as Viewer;
   const service = {
@@ -81,7 +83,10 @@ async function serve({ attach, current = () => true, download }: {
     upgrades,
     dataDir: fixture.dataDir,
     viewers: {
-      open: async () => {},
+      open: async (options) => {
+        fixture.resumes.push(options.resume);
+        options.res.writeHead(204).end();
+      },
       action: async () => ({ ok: true }),
       stream: ({ session, spec: _spec, ...request }) => {
         stream.open({ ...request, target: { session, key: "bot:pepper" } });
@@ -272,6 +277,15 @@ describe("the v2 stream", () => {
     const { code, reason } = await new Promise<{ code: number; reason: string }>((resolve) => socket.addEventListener("close", (event) => resolve({ code: event.code, reason: event.reason })));
     expect(code).toBe(STREAM_CLOSE.hostSetup);
     expect(JSON.parse(reason)).toEqual({ need, command: SETUP_COMMAND });
+  });
+});
+
+describe("the v1 live view", () => {
+  it("passes on the view a reconnecting panel had, so its dropped hold can be returned", async () => {
+    const fixture = await serve();
+    expect((await fetch(`http://${fixture.origin}/api/bots/pepper/browser/live?resume=old-viewer`)).status).toBe(204);
+    expect((await fetch(`http://${fixture.origin}/api/bots/pepper/browser/live`)).status).toBe(204);
+    expect(fixture.resumes).toEqual(["old-viewer", null]);
   });
 });
 

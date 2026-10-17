@@ -120,7 +120,7 @@ export function createBrowserViewerRoutes(deps: BrowserViewerRouteDeps): RouteHa
     if (live) {
       if (method === "GET" && live[2] === "live") {
         req.socket.setTimeout(0);
-        return await deps.viewers.open({ botId: browser.botId, session: browser.session, spec: browser.spec, owner, isCurrent, res });
+        return await deps.viewers.open({ botId: browser.botId, session: browser.session, spec: browser.spec, owner, isCurrent, res, resume: url.searchParams.get("resume") });
       }
       if (method === "POST" && live[2] === "action") {
         const body = await readBody(req, 32_768);
