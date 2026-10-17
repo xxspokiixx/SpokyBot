@@ -299,7 +299,7 @@ function BotPicker({
       {!locked && bots.length > 5 && (
         <label className="mb-2 flex items-center gap-2 rounded-lg border border-transparent bg-panel px-2.5 py-2 text-ink-secondary focus-within:border-focus">
           <Search size={14} />
-          <input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Find a bot" className="min-w-0 flex-1 bg-transparent text-[12px] text-ink outline-none placeholder:text-ink-tertiary" />
+          <input value={query} onChange={(event) => setQuery(event.target.value)} placeholder={t("routines.findBot")} className="min-w-0 flex-1 bg-transparent text-[12px] text-ink outline-none placeholder:text-ink-tertiary" />
         </label>
       )}
       <div className="grid max-h-48 grid-cols-1 gap-1 overflow-y-auto sm:grid-cols-2">
@@ -615,13 +615,13 @@ export function EventEditor({
 
   const kindSwitchControl = canSwitchKind && (
             <div className={cn(advanced && "ml-10", "inline-flex rounded-lg bg-inset p-1")}>
-              <button type="button" onClick={() => { setKind("routine"); setBotIds((ids) => ids.slice(0, 1)); }} className={cn("rounded-md px-4 py-1.5 text-[12.5px] font-medium", kind === "routine" ? "bg-raised text-ink shadow" : "text-ink-secondary")}>Routine</button>
-              <button type="button" onClick={() => { setKind("call"); if (recurrence === "interval" || isCronChoice(recurrence)) setRecurrence("none"); }} className={cn("rounded-md px-4 py-1.5 text-[12.5px] font-medium", kind === "call" ? "bg-raised text-ink shadow" : "text-ink-secondary")}>Call</button>
+              <button type="button" onClick={() => { setKind("routine"); setBotIds((ids) => ids.slice(0, 1)); }} className={cn("rounded-md px-4 py-1.5 text-[12.5px] font-medium", kind === "routine" ? "bg-raised text-ink shadow" : "text-ink-secondary")}>{t("routines.kind.routine")}</button>
+              <button type="button" onClick={() => { setKind("call"); if (recurrence === "interval" || isCronChoice(recurrence)) setRecurrence("none"); }} className={cn("rounded-md px-4 py-1.5 text-[12.5px] font-medium", kind === "call" ? "bg-raised text-ink shadow" : "text-ink-secondary")}>{t("routines.kind.call")}</button>
             </div>
           );
   const routineTypeControl = kind === "routine" && !lockedBotId && (
             <div className={cn(advanced && "ml-10")}>
-              <div className="mb-2 text-[11px] font-medium uppercase tracking-wider text-ink-secondary">Routine type</div>
+              <div className="mb-2 text-[11px] font-medium uppercase tracking-wider text-ink-secondary">{t("routines.editor.type")}</div>
               <div className="grid gap-2 sm:grid-cols-2">
                 <button
                   type="button"
@@ -629,7 +629,7 @@ export function EventEditor({
                   className={cn("flex items-start gap-3 rounded-xl border p-3 text-left transition", routineTarget === "bot" ? "border-accent/60 bg-accent/10" : "border-hairline/50 bg-inset hover:bg-raised")}
                 >
                   <UserRoundPlus size={17} className={cn("mt-0.5 shrink-0", routineTarget === "bot" ? "text-accent" : "text-ink-secondary")} />
-                  <span><span className="block text-[12.5px] font-medium text-ink">Bot task</span><span className="mt-1 block text-[11px] leading-relaxed text-ink-secondary">One bot owns and completes each run.</span></span>
+                  <span><span className="block text-[12.5px] font-medium text-ink">{t("routines.editor.botTask")}</span><span className="mt-1 block text-[11px] leading-relaxed text-ink-secondary">{t("routines.editor.botTaskHelp")}</span></span>
                 </button>
                 <button
                   type="button"
@@ -637,7 +637,7 @@ export function EventEditor({
                   className={cn("flex items-start gap-3 rounded-xl border p-3 text-left transition", routineTarget === "room-goal" ? "border-accent/60 bg-accent/10" : "border-hairline/50 bg-inset hover:bg-raised")}
                 >
                   <Target size={17} className={cn("mt-0.5 shrink-0", routineTarget === "room-goal" ? "text-accent" : "text-ink-secondary")} />
-                  <span><span className="block text-[12.5px] font-medium text-ink">Team goal</span><span className="mt-1 block text-[11px] leading-relaxed text-ink-secondary">A lead coordinates the group until the goal settles.</span></span>
+                  <span><span className="block text-[12.5px] font-medium text-ink">{t("routines.editor.teamGoal")}</span><span className="mt-1 block text-[11px] leading-relaxed text-ink-secondary">{t("routines.editor.teamGoalHelp")}</span></span>
                 </button>
               </div>
             </div>
@@ -868,7 +868,7 @@ export function EventEditor({
             {isRoomGoal ? (
               <div className="min-w-0 flex-1 rounded-xl border border-hairline/50 bg-inset px-3.5 py-3">
                 <div className="text-[12.5px] font-medium text-ink">Use the group’s shared context</div>
-                <div className="mt-1 text-[11px] leading-relaxed text-ink-secondary">Team goals cannot carry routine attachments. Put shared context in the goal instructions or the group instructions.</div>
+                <div className="mt-1 text-[11px] leading-relaxed text-ink-secondary">{t("routines.editor.teamGoalAttachments")}</div>
               </div>
             ) : <div className="min-w-0 flex-1 space-y-2">
               <input ref={fileInput} type="file" multiple className="hidden" onChange={(event) => { void pickFiles(event.target.files); event.target.value = ""; }} />
@@ -1176,8 +1176,8 @@ function QuickComposer({
         <input autoFocus value={name} onChange={(event) => setName(event.target.value)} placeholder="Add title" onKeyDown={(event) => { if (event.key === "Enter" && valid) void save(); }} className="w-full border-b border-hairline/60 bg-transparent pb-2 text-[18px] font-medium text-ink outline-none placeholder:text-ink-tertiary focus:border-accent" />
         {!routinesOnly && (
           <div className="flex items-center gap-1 border-b border-hairline/35 pb-2">
-            <button type="button" onClick={() => { setKind("routine"); setBotIds((ids) => ids.slice(0, 1)); }} className={cn("rounded-lg px-3 py-1.5 text-[12px] font-medium", kind === "routine" ? "bg-accent/15 text-accent" : "text-ink-secondary hover:bg-raised hover:text-ink")}>Routine</button>
-            <button type="button" onClick={() => setKind("call")} className={cn("rounded-lg px-3 py-1.5 text-[12px] font-medium", kind === "call" ? "bg-accent/15 text-accent" : "text-ink-secondary hover:bg-raised hover:text-ink")}>Call</button>
+            <button type="button" onClick={() => { setKind("routine"); setBotIds((ids) => ids.slice(0, 1)); }} className={cn("rounded-lg px-3 py-1.5 text-[12px] font-medium", kind === "routine" ? "bg-accent/15 text-accent" : "text-ink-secondary hover:bg-raised hover:text-ink")}>{t("routines.kind.routine")}</button>
+            <button type="button" onClick={() => setKind("call")} className={cn("rounded-lg px-3 py-1.5 text-[12px] font-medium", kind === "call" ? "bg-accent/15 text-accent" : "text-ink-secondary hover:bg-raised hover:text-ink")}>{t("routines.kind.call")}</button>
           </div>
         )}
         <div className="flex items-start gap-3 text-[12.5px] text-ink">
@@ -1317,7 +1317,7 @@ function CalendarEventCard({
         {previewDuration >= 30 && (isCall ? <Video size={compact ? 11 : 13} className="mt-0.5 shrink-0" /> : primary ? <BotAvatar bot={primary} state={status ? statusState(status) : paused ? "sleeping" : "idle"} size={compact ? 18 : 22} animated={status === "running" || status === "waiting"} /> : null)}
         <div className="min-w-0 flex-1">
           <div className={cn("truncate text-[11px] font-semibold", previewDuration < 30 ? "leading-none" : "leading-tight")}>{name}</div>
-          {previewDuration >= 30 && <div className="mt-0.5 truncate text-[9.5px] opacity-80">{niceTime(item.at)} · {paused ? t("routines.pausedSchedule") : intervalCadence ?? (isCall ? `${ownerBots.length} bot${ownerBots.length === 1 ? "" : "s"}` : isRoomGoal ? `Team goal · ${room?.name ?? "Group"}${statusLabel ? ` · ${statusLabel}` : ""}` : statusLabel ?? primary?.name)}</div>}
+          {previewDuration >= 30 && <div className="mt-0.5 truncate text-[9.5px] opacity-80">{niceTime(item.at)} · {paused ? t("routines.pausedSchedule") : intervalCadence ?? (isCall ? `${ownerBots.length} ${t("routines.botCount", { count: ownerBots.length })}` : isRoomGoal ? `${t("routines.editor.teamGoal")} · ${room?.name ?? t("routines.group")}${statusLabel ? ` · ${statusLabel}` : ""}` : statusLabel ?? primary?.name)}</div>}
         </div>
         {previewDuration >= 30 && ownerBots.length > 1 && <span className="rounded bg-inset/60 px-1 py-0.5 text-[8px]">+{ownerBots.length - 1}</span>}
       </div>
@@ -1744,7 +1744,7 @@ export function PausedList({
                 {room ? <span className="flex size-9 shrink-0 items-center justify-center rounded-full bg-accent/12 text-accent"><UsersRound size={17} /></span> : bot && <BotAvatar bot={bot} state="sleeping" size={36} animated={false} />}
                 <div className="min-w-0 flex-1">
                   <div className="truncate text-[12.5px] font-medium text-ink">{routine.name}</div>
-                  <div className="mt-0.5 truncate text-[10.5px] text-ink-secondary">{room ? `Team goal · ${room.name} · ` : ""}{scheduleLabel(routine.schedule)}</div>
+                  <div className="mt-0.5 truncate text-[10.5px] text-ink-secondary">{room ? `${t("routines.editor.teamGoal")} · ${room.name} · ` : ""}{scheduleLabel(routine.schedule)}</div>
                 </div>
                 {room && <button onClick={() => { onOpenRoom(room.id); onClose(); }} className="rounded-lg px-2 py-1.5 text-[11px] text-ink-secondary hover:bg-inset">Group</button>}
                 <button onClick={() => dispatch({ type: "updateRoutine", routineId: routine.id, patch: { enabled: true } })} className="rounded-lg bg-accent/15 px-2.5 py-1.5 text-[11px] font-medium text-accent">Resume</button>
@@ -2015,7 +2015,7 @@ export function RoutinesPage({ onBack, onOpenRoom }: { onBack: () => void; onOpe
           {unseenFailures > 0 && <button type="button" onClick={() => dispatch({ type: "showRoutines", section: "logs", runStatus: "problems" })} className="flex items-center gap-1.5 rounded-full bg-danger/10 px-2.5 py-1.5 text-[10.5px] text-danger" title="Open problem run logs" aria-label="Open problem run logs"><CircleAlert size={11} />{unseenFailures}</button>}
           {paused.length > 0 && <button type="button" onClick={() => setPausedOpen(true)} aria-label="View paused routines" className="flex items-center gap-1.5 rounded-full border border-hairline/50 px-2.5 py-1.5 text-[10.5px] text-ink-secondary hover:bg-raised"><Pause size={11} />{paused.length}</button>}
           <div className="ml-auto flex items-center gap-2">
-            <Select size="sm" aria-label="Filter schedule by bot" value={botFilter} onChange={(event) => { setBotFilter(event.target.value); setRoutineFilter(undefined); }} className="max-w-[180px]"><option value="all">All bots</option>{visibleBots.map((bot) => <option key={bot.id} value={bot.id}>{bot.name}</option>)}</Select>
+            <Select size="sm" aria-label={t("routines.filterBot")} value={botFilter} onChange={(event) => { setBotFilter(event.target.value); setRoutineFilter(undefined); }} className="max-w-[180px]"><option value="all">{t("routines.allBots")}</option>{visibleBots.map((bot) => <option key={bot.id} value={bot.id}>{bot.name}</option>)}</Select>
           </div>
           {error && <button type="button" onClick={() => setError("")} className="flex items-center gap-1.5 rounded-lg bg-danger/10 px-2.5 py-1.5 text-[10.5px] text-danger"><CircleAlert size={11} />{error}<X size={11} /></button>}
           {datedView && state.routinesLoadState === "error" && <p role="alert" className="w-full text-[11.5px] text-danger">{t("routines.loadError")}</p>}
@@ -2030,9 +2030,9 @@ export function RoutinesPage({ onBack, onOpenRoom }: { onBack: () => void; onOpe
             <div className="min-h-0 flex-1 overflow-y-auto"><RoutineLogs runs={filteredRuns} bots={state.bots} loading={state.routinesLoadState === "loading" && filteredRuns.length === 0} error={state.routinesLoadState === "error"} routineId={routineFilter} status={statusFilter} onStatusChange={setStatusFilter} onClearRoutine={() => setRoutineFilter(undefined)} onOpen={openRun} /></div>
           ) : layout === "list" ? (
             <div className="min-h-0 flex-1 overflow-y-auto"><div className="mx-auto w-full max-w-4xl space-y-5 p-4 sm:p-6">
-              <div><h2 className="text-[17px] font-semibold text-ink">{t("routines.title")}</h2><p className="mt-1 text-[12px] text-ink-secondary">All schedules, including paused and finished routines.</p></div>
+              <div><h2 className="text-[17px] font-semibold text-ink">{t("routines.title")}</h2><p className="mt-1 text-[12px] text-ink-secondary">{t("routines.allSchedulesHint")}</p></div>
               <RoutineList routines={filteredRoutines} runs={state.routineRuns} bots={state.bots} loading={state.routinesLoadState === "loading" && filteredRoutines.length === 0} error={state.routinesLoadState === "error"} onOpen={openRoutine} onLogs={openLogs} onToggle={(routine) => dispatch({ type: "updateRoutine", routineId: routine.id, patch: { enabled: !routine.enabled } })} />
-              {!routinesOnly && calls.some((call) => botFilter === "all" || call.botIds.includes(botFilter)) && <section className="space-y-2" aria-label="Scheduled calls"><h2 className="text-[15px] font-semibold text-ink">Scheduled calls</h2>{calls.filter((call) => botFilter === "all" || call.botIds.includes(botFilter)).map((call) => <button key={call.id} type="button" onClick={() => setSelected({ kind: "call", id: call.id, at: call.schedule.type === "once" ? call.schedule.at : atLocalTime(Date.now(), call.schedule.time), durationMinutes: call.durationMinutes, call })} className="flex w-full items-center gap-3 rounded-xl border border-hairline/40 bg-card p-4 text-left hover:bg-raised"><Video size={17} className="text-accent" /><span><span className="block text-[13px] font-medium text-ink">{call.name}</span><span className="mt-1 block text-[11.5px] text-ink-secondary">{scheduleLabel(call.schedule)}</span></span></button>)}</section>}
+              {!routinesOnly && calls.some((call) => botFilter === "all" || call.botIds.includes(botFilter)) && <section className="space-y-2" aria-label={t("routines.scheduledCalls")}><h2 className="text-[15px] font-semibold text-ink">{t("routines.scheduledCalls")}</h2>{calls.filter((call) => botFilter === "all" || call.botIds.includes(botFilter)).map((call) => <button key={call.id} type="button" onClick={() => setSelected({ kind: "call", id: call.id, at: call.schedule.type === "once" ? call.schedule.at : atLocalTime(Date.now(), call.schedule.time), durationMinutes: call.durationMinutes, call })} className="flex w-full items-center gap-3 rounded-xl border border-hairline/40 bg-card p-4 text-left hover:bg-raised"><Video size={17} className="text-accent" /><span><span className="block text-[13px] font-medium text-ink">{call.name}</span><span className="mt-1 block text-[11.5px] text-ink-secondary">{scheduleLabel(call.schedule)}</span></span></button>)}</section>}
             </div></div>
           ) : (
             <div className="flex min-h-0 flex-1">
@@ -2073,21 +2073,21 @@ function RoutineWakeBar() {
   }, [bridge]);
   if (!bridge || !state) return null;
   const status = !state.keepAwake
-    ? "Off — this computer may sleep through a scheduled routine."
+    ? t("routines.wake.off")
     : state.onBattery
-      ? "On battery, so not holding; plug in to keep it awake."
+      ? t("routines.wake.battery")
       : state.hold
-        ? state.reason === "running" ? "Holding it awake now: a routine is running." : `Holding it awake now: a routine is due at ${state.at ? niceTime(state.at) : "the top of the hour"}.`
-        : "Holds it awake for the hour before a routine and while one runs, while plugged in. A closed lid still sleeps.";
+        ? state.reason === "running" ? t("routines.wake.running") : t("routines.wake.due", { time: state.at ? niceTime(state.at) : t("routines.wake.topOfHour") })
+        : t("routines.wake.holding");
   return (
     <div className="flex items-center justify-between gap-4 border-b border-hairline/35 bg-panel/60 px-4 py-2.5">
       <div className="min-w-0 text-[12px] leading-relaxed text-ink-secondary">
-        <span className="font-medium text-ink">Keep this computer awake for routines.</span> {status}
+        <span className="font-medium text-ink">{t("routines.wake.title")}</span> {status}
       </div>
       <Switch
         checked={state.keepAwake}
         disabled={busy}
-        aria-label="Keep this computer awake for scheduled routines"
+        aria-label={t("routines.wake.aria")}
         onClick={() => {
           setBusy(true);
           bridge.keepAwake(!state.keepAwake).then(setState).catch(() => {}).finally(() => setBusy(false));
