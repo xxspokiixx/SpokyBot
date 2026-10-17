@@ -591,7 +591,7 @@ export function LocalVmWorkspace({
       },
       async setInteractive(contextId) {
         const bridge = window.ogb?.desktopWorkspace;
-        if (!bridge) throw new Error("The two-desktop view bridge is unavailable");
+        if (!bridge) throw new Error(t("vm.workspace.bridgeUnavailable"));
         return bridge.setInteractive(contextId);
       },
     }),
@@ -633,7 +633,7 @@ export function LocalVmWorkspace({
         setControlledBotId(null);
       })
       .catch(() => {
-        setControlError("The removed pane could not hand control back safely.");
+        setControlError(t("vm.workspace.handoffFailed"));
       });
   }, [controlPort, slots]);
 
@@ -700,7 +700,7 @@ export function LocalVmWorkspace({
           ...controlPort,
           async setInteractive(nextContextId) {
             if (nextContextId && contextForBot(botId) !== nextContextId) {
-              throw new Error("The Local VM pane changed during control acquisition");
+              throw new Error(t("vm.workspace.paneChanged"));
             }
             return controlPort.setInteractive(nextContextId);
           },
@@ -713,7 +713,7 @@ export function LocalVmWorkspace({
         );
         setControlledBotId(null);
         if (result.status === "held-elsewhere") {
-          setControlError("This VM is already controlled in another viewer. Hand it back there first.");
+          setControlError(t("vm.workspace.alreadyControlled"));
           return;
         }
         if (!mountedRef.current) {
@@ -766,7 +766,7 @@ export function LocalVmWorkspace({
           <Monitor size={18} />
         </div>
         <div className="min-w-0 flex-1">
-          <h1 className="truncate text-[14px] font-semibold text-ink">Local VM view</h1>
+          <h1 className="truncate text-[14px] font-semibold text-ink">{t("vm.workspace.viewTitle")}</h1>
           <p className="truncate text-[11.5px] text-ink-secondary">
             Two live desktops · one active controller · watch-only by default
           </p>
