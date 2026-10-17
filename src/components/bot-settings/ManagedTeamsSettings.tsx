@@ -26,7 +26,7 @@ export function ManagedTeamsSettings({
             <input type="checkbox" className="accent-accent" checked={selected.includes(team)}
               onChange={event => setSelected(current => event.target.checked
                 ? [...current, team] : current.filter(value => value !== team))} />
-            {team || t("botAccess.teams.general")}
+            {team === "General" || !team ? t("botAccess.teams.general") : team}
           </label>
         ))}
         {!choices.length && <p className="text-[13px] text-ink-secondary">{t("botAccess.teams.empty")}</p>}
