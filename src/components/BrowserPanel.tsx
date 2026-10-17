@@ -317,37 +317,37 @@ export function LiveBrowser({ bot, signIn }: { bot: Bot; signIn?: BrowserSignIn 
       <div className="flex min-w-0 flex-1 items-center gap-1 overflow-x-auto">
         {tabs.length ? tabs.map((tab) => <div key={tab.tabId} className={`flex max-w-52 shrink-0 items-center gap-1 rounded-xl px-1 text-[12px] ${tab.active ? "bg-inset text-ink" : "text-ink-secondary"}`}>
           <Globe size={13} className="ml-1.5 shrink-0 opacity-60" />
-          <button className="truncate px-1 py-2 text-left disabled:cursor-default" disabled={!commandsReady} onClick={() => command({ type: "tab-select", tabId: tab.tabId })} title={tab.title || tab.url}>{tab.title || "New tab"}</button>
-          <button className={button} aria-label={`Close ${tab.title || "tab"}`} disabled={!commandsReady} onClick={() => command({ type: "tab-close", tabId: tab.tabId })}><X size={13} /></button>
-        </div>) : <div className="flex items-center gap-2 rounded-xl bg-inset px-3 py-2 text-[12px] text-ink-secondary"><Globe size={13} />New tab</div>}
-        <button className={`${button} shrink-0`} disabled={!commandsReady} aria-label="New tab" title="New tab" onClick={() => command({ type: "tab-new" })}><Plus size={17} /></button>
+          <button className="truncate px-1 py-2 text-left disabled:cursor-default" disabled={!commandsReady} onClick={() => command({ type: "tab-select", tabId: tab.tabId })} title={tab.title || tab.url}>{tab.title || t("browser.panel.newTab")}</button>
+          <button className={button} aria-label={t("browser.panel.closeTab", { title: tab.title || t("browser.panel.tab") })} disabled={!commandsReady} onClick={() => command({ type: "tab-close", tabId: tab.tabId })}><X size={13} /></button>
+        </div>) : <div className="flex items-center gap-2 rounded-xl bg-inset px-3 py-2 text-[12px] text-ink-secondary"><Globe size={13} />{t("browser.panel.newTab")}</div>}
+        <button className={`${button} shrink-0`} disabled={!commandsReady} aria-label={t("browser.panel.newTab")} title={t("browser.panel.newTab")} onClick={() => command({ type: "tab-new" })}><Plus size={17} /></button>
       </div>
       <button type="button" className={`${button} flex shrink-0 items-center gap-1 px-2 text-[12px] ${control.owned ? "bg-accent/15 text-accent-text" : ""}`}
         aria-pressed={control.owned} disabled={!connected || heldElsewhere || pending || (taking && !control.owned)}
         onClick={control.owned ? handBack : takeControl}>
         <Hand size={15} />{control.owned ? t("browser.control.handBack") : t("browser.control.take")}
       </button>
-      <button className={button} title={fullscreen ? "Exit full screen" : "Full screen"} aria-label={fullscreen ? "Exit full screen" : "Full screen"} onClick={toggleFullscreen}>{fullscreen ? <Minimize2 size={16} /> : <Maximize2 size={16} />}</button>
+      <button className={button} title={fullscreen ? t("browser.panel.exitFullscreen") : t("browser.panel.fullscreen")} aria-label={fullscreen ? t("browser.panel.exitFullscreen") : t("browser.panel.fullscreen")} onClick={toggleFullscreen}>{fullscreen ? <Minimize2 size={16} /> : <Maximize2 size={16} />}</button>
       <button className={`${button} rounded-xl bg-inset p-2`} title={t("browser.panel.profileTitle", { name: profileName })} aria-label={t("browser.panel.profiles")} aria-expanded={showProfiles} onClick={() => { browserControl.current?.handBack(); setShowProfiles(true); }}><UserRound size={16} /></button>
     </div>
-    <form className="flex h-12 items-center gap-1 border-b border-hairline/40 px-2" onSubmit={(e) => { e.preventDefault(); const url = resolveAddressBarInput(address); if (commandsReady && url) command({ type: "navigate", url }); else if (address.trim()) setError("Enter a web address or something to search for."); }}>
+    <form className="flex h-12 items-center gap-1 border-b border-hairline/40 px-2" onSubmit={(e) => { e.preventDefault(); const url = resolveAddressBarInput(address); if (commandsReady && url) command({ type: "navigate", url }); else if (address.trim()) setError(t("browser.panel.enterAddress")); }}>
       <div className="flex shrink-0 items-center">
-        <button type="button" className={button} disabled={!commandsReady} aria-label="Back" onClick={() => command({ type: "back" })}><ArrowLeft size={17} /></button>
-        <button type="button" className={button} disabled={!commandsReady} aria-label="Forward" onClick={() => command({ type: "forward" })}><ArrowRight size={17} /></button>
-        <button type="button" className={button} disabled={!commandsReady} aria-label="Reload page" onClick={() => command({ type: "reload" })}><RotateCw size={17} /></button>
+        <button type="button" className={button} disabled={!commandsReady} aria-label={t("browser.panel.back")} onClick={() => command({ type: "back" })}><ArrowLeft size={17} /></button>
+        <button type="button" className={button} disabled={!commandsReady} aria-label={t("browser.panel.forward")} onClick={() => command({ type: "forward" })}><ArrowRight size={17} /></button>
+        <button type="button" className={button} disabled={!commandsReady} aria-label={t("browser.panel.reload")} onClick={() => command({ type: "reload" })}><RotateCw size={17} /></button>
       </div>
-      <input ref={addressInput} aria-label="Browser address" readOnly={!commandsReady} value={address} onChange={(e) => setAddress(e.target.value)} onFocus={(e) => { urlEditing.current = true; if (commandsReady) e.target.select(); }} onBlur={() => { urlEditing.current = false; }} placeholder={connected ? "about:blank" : "Connecting…"} spellCheck={false} className="mx-1 min-w-0 flex-1 rounded-lg bg-transparent px-2 py-1.5 text-center text-[12px] outline-none placeholder:text-ink-secondary focus:bg-inset focus:text-left" />
+      <input ref={addressInput} aria-label={t("browser.panel.address")} readOnly={!commandsReady} value={address} onChange={(e) => setAddress(e.target.value)} onFocus={(e) => { urlEditing.current = true; if (commandsReady) e.target.select(); }} onBlur={() => { urlEditing.current = false; }} placeholder={connected ? "about:blank" : t("browser.panel.connecting")} spellCheck={false} className="mx-1 min-w-0 flex-1 rounded-lg bg-transparent px-2 py-1.5 text-center text-[12px] outline-none placeholder:text-ink-secondary focus:bg-inset focus:text-left" />
       <details className="relative shrink-0">
-        <summary className={`${button} list-none cursor-pointer [&::-webkit-details-marker]:hidden`} aria-label="Browser menu" title="Browser menu"><EllipsisVertical size={17} /></summary>
+        <summary className={`${button} list-none cursor-pointer [&::-webkit-details-marker]:hidden`} aria-label={t("browser.panel.menu")} title={t("browser.panel.menu")}><EllipsisVertical size={17} /></summary>
         <div className="absolute right-0 top-full z-20 mt-2 flex w-44 flex-col rounded-xl border border-hairline/50 bg-card p-1.5 text-[12px] shadow-xl">
-          <button type="button" className="rounded-md px-3 py-2 text-left hover:bg-inset disabled:opacity-40" disabled={!typingReady} onClick={(e) => { e.currentTarget.closest("details")?.removeAttribute("open"); setMasked(false); setShowTyping(true); }}>Type or paste text…</button>
+          <button type="button" className="rounded-md px-3 py-2 text-left hover:bg-inset disabled:opacity-40" disabled={!typingReady} onClick={(e) => { e.currentTarget.closest("details")?.removeAttribute("open"); setMasked(false); setShowTyping(true); }}>{t("browser.panel.typeTextMenu")}</button>
           <button type="button" className="rounded-md px-3 py-2 text-left hover:bg-inset disabled:opacity-40" disabled={!typingReady} onClick={(e) => { e.currentTarget.closest("details")?.removeAttribute("open"); setMasked(true); setShowTyping(true); }}>{t("browser.typeSecret")}</button>
-          <button type="button" className="rounded-md px-3 py-2 text-left hover:bg-inset" onClick={(e) => { e.currentTarget.closest("details")?.removeAttribute("open"); reconnect(); }}>Reconnect view</button>
+          <button type="button" className="rounded-md px-3 py-2 text-left hover:bg-inset" onClick={(e) => { e.currentTarget.closest("details")?.removeAttribute("open"); reconnect(); }}>{t("browser.panel.reconnectView")}</button>
           <button type="button" className="rounded-md px-3 py-2 text-left hover:bg-inset disabled:opacity-40" disabled={!connected || pending || taking} onClick={(e) => {
             e.currentTarget.closest("details")?.removeAttribute("open");
-            if (!window.confirm("Restart this profile’s browser? Open tabs will close. Saved logins are kept. Stop any bots using it first.")) return;
+            if (!window.confirm(t("browser.panel.confirmRestart"))) return;
             void execute({ type: "restart" });
-          }}>Restart browser…</button>
+          }}>{t("browser.panel.restartBrowser")}</button>
         </div>
       </details>
     </form>
