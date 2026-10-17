@@ -94,7 +94,7 @@ function useChatMoreItems(profile: Bot): { items: SidebarMenuItem[]; on: boolean
     } satisfies SidebarMenuItem] : []),
     ...(remoteClient ? [] : [{
       key: "activity",
-      label: "Activity",
+      label: t("activity.panel.title"),
       icon: <ListChecks size={16} />,
       active: state.activityOpen,
       separatorBefore: !usage,
