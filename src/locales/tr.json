@@ -4040,7 +4040,7 @@
   "place.view.ccWaking.short": "Uyandırılıyor…",
   "place.view.ccWaking.line": "{bot} adlı botun bulut bilgisayarı uyandırılıyor. Bu birkaç saniye sürer.",
   "place.view.ccOn.short": "Açık",
-  "place.view.ccOn.line": "{bot} adlı botun bulut bilgisayarı açık.",
+  "place.view.ccOn.line": "{bot} adlı botun bulut bilgisayarı açık. 10 dakika kullanılmazsa uyku moduna geçer.",
   "place.view.ccAsleep.short": "Uykuda",
   "place.view.ccAsleep.line": "{bot} adlı botun bulut bilgisayarı uykuda. {bot} ihtiyaç duyduğunda birkaç saniye içinde uyanır.",
   "place.view.ccNoHours.short": "Saat kalmadı",

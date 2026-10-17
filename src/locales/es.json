@@ -4362,7 +4362,7 @@
   "place.view.ccWaking.short": "Despertando…",
   "place.view.ccWaking.line": "Despertando el equipo en la nube de {bot}. Tarda unos segundos.",
   "place.view.ccOn.short": "Encendido",
-  "place.view.ccOn.line": "El equipo en la nube de {bot} está encendido.",
+  "place.view.ccOn.line": "El equipo en la nube de {bot} está encendido. Entra en reposo tras 10 minutos sin uso.",
   "place.view.ccAsleep.short": "En reposo",
   "place.view.ccAsleep.line": "El equipo en la nube de {bot} está en reposo. Se despierta en unos segundos cuando {bot} lo necesita.",
   "place.view.ccNoHours.short": "Sin horas disponibles",

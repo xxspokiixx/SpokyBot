@@ -4040,7 +4040,7 @@
   "place.view.ccWaking.short": "Đang bật lại…",
   "place.view.ccWaking.line": "Đang bật lại máy tính đám mây của {bot}. Quá trình này mất vài giây.",
   "place.view.ccOn.short": "Bật",
-  "place.view.ccOn.line": "Máy tính đám mây của {bot} đang bật.",
+  "place.view.ccOn.line": "Máy tính đám mây của {bot} đang bật. Máy sẽ ngủ sau 10 phút không dùng.",
   "place.view.ccAsleep.short": "Đang ngủ",
   "place.view.ccAsleep.line": "Máy tính đám mây của {bot} đang ngủ. Máy sẽ hoạt động lại sau vài giây khi {bot} cần.",
   "place.view.ccNoHours.short": "Đã hết giờ sử dụng",
