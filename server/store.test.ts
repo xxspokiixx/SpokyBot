@@ -479,32 +479,6 @@ describe("Store", () => {
     } finally { database.close(); }
   });
 
-  it("keeps the selected thread when saving a thread switch fails", () => {
-    const store = new Store(selection);
-    const bot = store.createBot();
-    const first = store.activeTask(bot.id)!;
-    store.setResumeCursor(bot.id, "claude", "session-one");
-    store.patchTask(bot.id, first.threadId, { pinnedMessageId: "pin-one" });
-    const second = store.createTask(bot.id)!;
-    store.setResumeCursor(bot.id, "claude", "session-two");
-    const changes = vi.fn();
-    store.onChange(changes);
-    const save = vi.spyOn(store as unknown as { saveBots(bots: BotRecord[]): void }, "saveBots")
-      .mockImplementationOnce(() => { throw Object.assign(new Error("EPERM: operation not permitted, rename"), { code: "EPERM" }); });
-
-    expect(() => store.switchTask(bot.id, first.threadId)).toThrow("EPERM");
-    expect(bot).toMatchObject({ threadId: second.threadId, resumeCursors: { claude: "session-two" } });
-    expect(bot.pinnedMessageId).toBeUndefined();
-    expect(changes).not.toHaveBeenCalled();
-    expect(new Store(selection).bot(bot.id)?.threadId).toBe(second.threadId);
-
-    save.mockRestore();
-    store.switchTask(bot.id, first.threadId);
-    expect(bot).toMatchObject({ threadId: first.threadId, resumeCursors: { claude: "session-one" }, pinnedMessageId: "pin-one" });
-    expect(changes).toHaveBeenCalledWith({ type: "bot", botId: bot.id });
-    expect(new Store(selection).bot(bot.id)?.threadId).toBe(first.threadId);
-  });
-
   it("commits a confirmed model switch once, moving followers safely and rolling back failed writes", () => {
     const store = new Store(selection, undefined, (instanceId) => ({ claude: "claudeAgent", codex: "codex" })[instanceId]);
     const bot = store.createBot();

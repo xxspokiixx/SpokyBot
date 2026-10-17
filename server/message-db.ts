@@ -527,9 +527,9 @@ export function deleteThread(threadId: string): void {
   deleteThreads([threadId]);
 }
 
-/** One transaction: every listed thread goes, or none does. */
-export function deleteThreads(threadIds: readonly string[]): void {
-  if (threadIds.length === 0) return;
+/** One transaction: every listed thread goes, or none does; `beforeCommit` throwing keeps them all. */
+export function deleteThreads(threadIds: readonly string[], beforeCommit?: () => void): void {
+  if (threadIds.length === 0 && !beforeCommit) return;
   writeFollowups((connection) => {
     const statements = [
       connection.prepare("DELETE FROM chat_followups WHERE thread_id = ?"),
@@ -538,6 +538,7 @@ export function deleteThreads(threadIds: readonly string[]): void {
       connection.prepare("DELETE FROM notification_log WHERE thread_id = ?"),
     ];
     for (const id of threadIds) for (const statement of statements) statement.run(id);
+    beforeCommit?.();
   });
 }
 
