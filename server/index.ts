@@ -453,7 +453,8 @@ import { createBrowserHost } from "./host/browser.ts";
 import { createScreenFrameSource, type ScreenCapture } from "./screen-frame-source.ts";
 import { screenFrameHash, screenSurfaceForTool, screenTouchingTool, settledFrameIsNews } from "./screen-frame-gate.ts";
 import { asSchedule, RoutineRequestService } from "./routine-requests.ts"; import { ownerSpokeOnly } from "./cloud-routine-level.ts";
-import { directApply, UNDO_STALE, type DirectApply } from "./direct-apply.ts";
+import { appliesNow, directApply, UNDO_STALE, type DirectApply } from "./direct-apply.ts";
+import { createTeamMemoryRequests } from "./team-memory-requests.ts";
 import { createAgentCard } from "./chat-widgets.ts";
 import { buildBotOverview, type BotOverview, connectedAppsFacts } from "./bot-overview.ts";
 import { ProfileRequestService } from "./profile-requests.ts";
@@ -3423,18 +3424,13 @@ function fullAccessForSource(botId: string, threadId: string): boolean {
   return sourceApprovalMode(botId, threadId) === "full";
 }
 
-
-function selfApplyBlocked(threadId: string): boolean {
-  return cloudGuestDriven(threadId);
+function appliesDirectly(botId: string, threadId: string): DirectApply | null {
+  return appliesNow({ fullAccess: fullAccessForSource(botId, threadId), ownerMustConfirm: cloudGuestDriven(threadId) || !connectorThread(botId, threadId) });
 }
 
-function appliesDirectly(botId: string, threadId: string, targetBotId: string): DirectApply | null {
-  return directApply({
-    fullAccess: fullAccessForSource(botId, threadId),
-    botId,
-    targetBotId,
-    blocked: selfApplyBlocked(threadId) || !connectorThread(botId, threadId),
-  });
+/** Routine requests keep their rule (direct-apply.ts) until Triggers v2 replaces the routine tools. */
+function routineAppliesDirectly(botId: string, threadId: string, targetBotId: string): DirectApply | null {
+  return directApply({ fullAccess: fullAccessForSource(botId, threadId), botId, targetBotId, blocked: cloudGuestDriven(threadId) || !connectorThread(botId, threadId) });
 }
 
 function peerReviewRequired(bot: BotRecord, threadId: string): boolean {
@@ -5901,7 +5897,7 @@ const skillReview = createSkillReview({
   busy: (botId) => workspaceMaintenance.active || botHasActiveTurn(botId),
   transcript: (botId, threadId) => {
     const owned = connectorThread(botId, threadId);
-    if (!owned || selfApplyBlocked(threadId)) return null;
+    if (!owned || cloudGuestDriven(threadId)) return null;
     return { messages: store.activePath(threadId), room: Boolean(owned.group) };
   },
   skills: (botId) => skillsHost.reviewSkills(botId, listSkills(botId).map((skill) => ({
@@ -5916,7 +5912,7 @@ const skillReview = createSkillReview({
   apply: (botId, threadId, change) => {
     const bot = store.bot(botId);
     if (!bot) return { ok: false, error: "unknown bot" };
-    const direct = appliesDirectly(botId, threadId, botId);
+    const direct = appliesDirectly(botId, threadId);
     if (!direct) return { ok: false, error: "this conversation cannot apply skill changes without review" };
     if (change.action === "update" && skillsHost.editable(botId, change.name)) return skillsHost.applyReviewUpdate(bot, threadId, change, direct);
     const staged = stageSkillWrite(botId, {
@@ -9747,7 +9743,7 @@ async function cloudRoutineReadiness(botId: string, threadId?: string): Promise<
 const routineRequests = new RoutineRequestService({
   store,
   routines,
-  autoApply: appliesDirectly,
+  autoApply: routineAppliesDirectly,
   cloudReady: cloudRoutineReadiness,
   canPersist: proposalPersistence,
   // The card can sit open indefinitely, so the target is re-authorized at confirm, not just at proposal.
@@ -9959,38 +9955,15 @@ const validateModelProposal = (selection: ModelSelection, current?: BotRecord): 
   return null;
 };
 const teamMemory = new TeamMemory(join(DATA_DIR, "team-memory.json"));
+const teamMemoryRequests = createTeamMemoryRequests({ teamMemory, store, sectionKey: sectionContextKey, decide: (row) => appendDecision(DATA_DIR, row) });
 const outboundRequests = new OutboundRequestService();
 const outboundCounts = new OutboundCounts(join(DATA_DIR, "outbound-counts.json"));
 const OUTBOUND_HOLD_MS = 9 * 60_000;
 
 function resolveAndSendTrust(res: ServerResponse, threadId: string, requestId: string, behavior: "allow" | "deny" | "answer"): boolean {
-  const teamMemoryCard = store.messagesFor(threadId).find(
-    (message) => message.card?.requestId === requestId && message.card.teamMemoryRequest,
-  );
-  if (teamMemoryCard?.card?.teamMemoryRequest) {
-    const request = teamMemoryCard.card.teamMemoryRequest;
-    const proposer = teamMemoryCard.from?.botId ? store.bot(teamMemoryCard.from.botId) : store.botByThread(threadId);
-    const result = teamMemory.resolveProposal(request.entryId, behavior === "allow" ? "accept" : "reject");
-    if (!result.claimed) {
-      if (!teamMemoryCard.card.answered) {
-        store.patchMessage(threadId, teamMemoryCard.id, { card: { ...teamMemoryCard.card, answered: "unavailable", dismissed: true } });
-      }
-      json(res, 200, { ok: true, outcome: "unavailable" });
-      return true;
-    }
-    if (result.state === "already_settled") {
-      json(res, 200, { ok: true, outcome: "allowed-once", alreadySettled: true });
-      return true;
-    }
-    store.patchMessage(threadId, teamMemoryCard.id, {
-      card: { ...teamMemoryCard.card, answered: result.state === "accepted" ? "allow" : "deny" },
-    });
-    appendDecision(DATA_DIR, {
-      threadId, requestId, botId: proposer?.id, botName: proposer?.name,
-      tool: "propose_team_memory", summary: teamMemoryCard.card.subtitle,
-      decision: result.state === "accepted" ? "user-approved" : "user-denied", source: "user",
-    });
-    json(res, 200, { ok: true, outcome: result.state === "accepted" ? "allowed-once" : "rejected" });
+  const remembered = teamMemoryRequests.resolve(threadId, requestId, behavior);
+  if (remembered) {
+    json(res, 200, remembered);
     return true;
   }
   const outboundCard = store.messagesFor(threadId).find(
@@ -10041,7 +10014,7 @@ const modelRequests = new ModelRequestService({
 const teamSetupTeams = () => [...new Set(["", ...readSections(), ...store.bots.map((bot) => sectionKey(bot.section)), ...store.groups.map((group) => sectionKey(group.section))])];
 const teamSetupRequests = new TeamSetupRequestService({
   store, teams: teamSetupTeams, canAccessTeam, canPersist: proposalPersistence, maxBots: MAX_WORKSPACE_BOTS,
-  autoApply: fullAccessForSource,
+  autoApply: appliesDirectly,
   validateChange: (before, fields) => assertTeamComputerChangeIdle(before, { ...before, ...fields }),
   ownsThread: (botId, threadId) => Boolean(connectorThread(botId, threadId)),
   targetBusy: (botId, sourceThreadId) => {
@@ -10308,7 +10281,7 @@ function undoSkillCard(botId: string, threadId: string, messageId: string): Undo
   return { claimed: true, state: "undone" };
 }
 
-function undoAppliedChange(res: ServerResponse, threadId: string, requestId: string): void {
+async function undoAppliedChange(res: ServerResponse, threadId: string, requestId: string): Promise<void> {
   const message = store.messagesFor(threadId).find((candidate) => candidate.card?.requestId === requestId);
   const card = message?.card;
   if (!message || !card) return json(res, 404, { error: "this change is no longer in the conversation" });
@@ -10345,6 +10318,10 @@ function undoAppliedChange(res: ServerResponse, threadId: string, requestId: str
     result = undone;
   } else if (card.skillRequest) {
     result = undoSkillCard(botId, threadId, message.id);
+  } else if (card.teamMemoryRequest) {
+    result = teamMemoryRequests.undo(threadId, requestId);
+  } else if (card.teamSetupRequest) {
+    result = await teamSetupRequests.undo({ botId, threadId, requestId });
   }
   if (!result.claimed) return json(res, 409, { error: "Only a change that applied on its own can be undone here." });
   if (result.state === "invalid") {
@@ -14891,35 +14868,13 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
         if (!(TEAM_MEMORY_KINDS as readonly string[]).includes(body.kind)) {
           return json(res, 400, { error: `kind must be one of ${TEAM_MEMORY_KINDS.join(", ")}` });
         }
-        let proposed: ReturnType<TeamMemory["propose"]>;
         try {
-          proposed = teamMemory.propose(
-            from.section,
-            { key: body.key, kind: body.kind as TeamMemoryKind, name: body.name, detail: body.detail, aliases: body.aliases },
-            { botId: from.id, botName: from.name, threadId: body.fromThreadId, at: Date.now() },
-          );
+          const input = { key: body.key, kind: body.kind as TeamMemoryKind, name: body.name, detail: body.detail, aliases: body.aliases };
+          const submitted = teamMemoryRequests.submit(from, body.fromThreadId, Boolean(owner.group), input, appliesDirectly(from.id, body.fromThreadId));
+          return json(res, submitted.status, submitted.body);
         } catch (error) {
           return json(res, 400, { error: error instanceof Error ? error.message : String(error) });
         }
-        const summary = `${proposed.entry.kind[0].toUpperCase()}${proposed.entry.kind.slice(1)}: ${proposed.entry.name}${proposed.entry.aliases.length ? ` (also ${proposed.entry.aliases.join(", ")})` : ""} — ${proposed.entry.detail}`;
-        const card = store.appendMessage(body.fromThreadId, {
-          role: "bot",
-          kind: "options",
-          ...(owner.group ? { from: { botId: from.id, name: from.name, color: from.color } } : {}),
-          card: {
-            title: "Remember this for the team?",
-            subtitle: summary,
-            options: ["Remember", "Skip"],
-            requestId: proposed.entry.id,
-            tool: "propose_team_memory",
-            teamMemoryRequest: { section: sectionContextKey(from.section), entryId: proposed.entry.id, kind: proposed.entry.kind },
-          },
-        });
-        appendDecision(DATA_DIR, {
-          threadId: body.fromThreadId, requestId: proposed.entry.id, botId: from.id, botName: from.name,
-          tool: "propose_team_memory", summary, decision: "card-shown", source: "team-memory",
-        });
-        return json(res, 201, { status: "proposed", requestId: proposed.entry.id, messageId: card.id, summary });
       }
       if (method === "POST" && path === "/api/internal/profile-requests") {
         const parsed = z.object({
@@ -14993,7 +14948,7 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
             .map((bot) => ({ id: bot.id, name: bot.name, title: bot.title, section: bot.section ?? "", modelSelection: bot.modelSelection, chiefOfStaff: Boolean(bot.chiefOfStaff) })),
           instances: instances.map((instance) => ({ instanceId: instance.instanceId, driverKind: instance.driverKind, displayName: instance.displayName,
             state: instance.snapshot.state, models: instance.models, effortLevels: instance.capabilities?.effortLevels ?? [] })),
-          scope: "Bot model defaults apply to groups and new threads; existing threads retain their models. Full Access applies requested team setup immediately; other modes return a review card. Existing unauthorized teams remain outside this Chief's scope.",
+          scope: "Bot model defaults apply to groups and new threads; existing threads retain their models. Requested team setup applies immediately, and the person can undo it. Existing unauthorized teams remain outside this Chief's scope.",
         });
       }
       if (method === "POST" && path === "/api/internal/team-setup-requests") {
@@ -15007,7 +14962,7 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
           ...(owner.group ? { from: { botId: chief.id, name: chief.name, color: chief.color } } : {}) });
         if (proposed.state === "applied" || proposed.state === "pending") appendDecision(DATA_DIR, { threadId: internalCapability.threadId, requestId: proposed.requestId, botId: chief.id,
           tool: "set_up_team", summary: proposed.detail, decision: proposed.state === "applied" ? "auto-approved" : "card-shown",
-          source: proposed.state === "pending" ? "profile" : "full-access" });
+          source: "appliedBy" in proposed ? proposed.appliedBy : "profile" });
         return json(res, 201, proposed);
       }
       if (method === "POST" && path === "/api/internal/bot-deletion-requests") {
@@ -15021,7 +14976,7 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
           ...(owner.group ? { from: { botId: chief.id, name: chief.name, color: chief.color } } : {}) });
         if (proposed.state === "applied" || proposed.state === "pending") appendDecision(DATA_DIR, { threadId: internalCapability.threadId, requestId: proposed.requestId, botId: chief.id,
           tool: "delete_bot", summary: proposed.detail, decision: proposed.state === "applied" ? "auto-approved" : "card-shown",
-          source: proposed.state === "pending" ? "profile" : "full-access" });
+          source: "appliedBy" in proposed ? proposed.appliedBy : "profile" });
         return json(res, 201, proposed);
       }
       // session_search searches the calling bot's own threads only: search across bots would be an isolation change.
@@ -15135,7 +15090,7 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
         if (!connectorThread(from.id, fromThreadId)) {
           return json(res, 403, { error: "source conversation does not belong to sender" });
         }
-        const direct = appliesDirectly(from.id, fromThreadId, from.id);
+        const direct = appliesDirectly(from.id, fromThreadId);
         const persistence = skillProposalPersistence(from.id, fromThreadId, !direct);
         if (!persistence.ok) return json(res, persistence.status, { error: persistence.error });
         const action = body.action === "create" || body.action === "update" ? body.action : "";
@@ -15771,7 +15726,7 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
           internalCapability.createdBots += 1;
           appendDecision(DATA_DIR, { threadId: fromThreadId, requestId: proposed.requestId, botId: chief.id,
             tool: "create_bot", summary: proposed.detail, decision: proposed.state === "applied" ? "auto-approved" : "card-shown",
-            source: proposed.state === "pending" ? "profile" : "full-access" });
+            source: "appliedBy" in proposed ? proposed.appliedBy : "profile" });
         }
         if (proposed.state === "pending") return json(res, 201, proposed);
         const createdId = "result" in proposed ? proposed.result.bots.find((bot) => bot.action === "created")?.id : undefined;

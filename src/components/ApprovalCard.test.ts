@@ -683,6 +683,24 @@ describe("ApprovalCard for a change that applied on its own", () => {
     expect(skill).toContain("Scout added a skill: file-expense");
   });
 
+  it("reads team setup and team memory as one line, with Undo except for a deletion", () => {
+    const setup = { version: 1 as const, requestId: "t", botId: "bot-1", threadId: "thread-1", reason: "asked", createdAt: 1, requesterRevision: "r", newTeams: [] };
+    const team = render(applied({ tool: "set_up_team", teamSetupRequest: { ...setup, operations: [], resumed: true,
+      result: { state: "applied", newTeams: [], bots: [{ id: "b2", name: "Mira", action: "created" }, { id: "b3", name: "Ada", action: "updated" }] },
+      undo: { created: ["b2"], before: [], revisions: {} } } }));
+    expect(team).toContain("Scout set up the team: added @Mira; updated @Ada");
+    expect(team).toContain(">Undo<");
+    const deleted = render(applied({ tool: "delete_bot", teamSetupRequest: { ...setup, operations: [], deletion: { botId: "b3", name: "Ada", expectedRevision: "r" },
+      result: { state: "applied", newTeams: [], bots: [{ id: "b3", name: "Ada", action: "deleted" }] } } }));
+    expect(deleted).toContain("Scout deleted @Ada");
+    expect(deleted).not.toContain(">Undo<");
+    const memory = render(applied({ tool: "propose_team_memory", subtitle: "Person: Ada Lovelace — Runs the payroll review.",
+      teamMemoryRequest: { section: "", entryId: "e", kind: "person", revision: "v1" } }));
+    expect(memory).toContain("Scout saved to team memory: Person: Ada Lovelace");
+    expect(memory).toContain(">Undo<");
+    expect(memory).not.toContain("Remember");
+  });
+
   it("keeps the approval box for a card a person confirmed", () => {
     const confirmed = routineCard(createRoutineOperation, { name: "Backlog review" });
     confirmed.card = { ...confirmed.card!, autoApplied: undefined, options: ["Confirm", "Cancel"] };

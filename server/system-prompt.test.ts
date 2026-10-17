@@ -224,13 +224,17 @@ describe("shared sentences", () => {
   it("configuration prompts follow actual applied or pending results without elevating another bot", () => {
     expect(PROFILE_PROMPT).toContain("propose_profile");
     for (const prompt of [PROFILE_PROMPT, ROUTINE_PROMPT, LEARN_PROMPT]) {
-      expect(prompt).toContain("a change to your own routines, skills, profile or model applies immediately");
-      expect(prompt).toContain("A change for another bot may wait for the person");
       expect(prompt).toContain("continue the requested work without asking for another confirmation");
-      expect(prompt).toContain("If it reports a pending review, end the turn and wait");
       expect(prompt).toContain("Never claim success before an applied result");
       expect(prompt).toContain("Full Access does not grant another bot broader permissions");
       expect(prompt).not.toContain("nothing changes until the user confirms");
+    }
+    // Routines keep their own rule until Triggers v2; skills and profile apply at every level.
+    expect(ROUTINE_PROMPT).toContain("A change for another bot may wait for the person");
+    for (const prompt of [PROFILE_PROMPT, LEARN_PROMPT]) {
+      expect(prompt).toContain("applies immediately at every access level and the person sees it with an Undo");
+      expect(prompt).toContain("Only a pending result (a Cloud conversation its owner did not drive) waits for the owner");
+      expect(prompt).not.toContain("may wait for the person");
     }
     expect(LEARN_PROMPT).toContain("only when the user explicitly asks to revise that exact name");
     expect(CREDENTIAL_PROMPT).toContain("secure credential request");
