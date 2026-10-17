@@ -1,5 +1,5 @@
 import { ChevronLeft, ChevronRight, Search, X } from "lucide-react";
-import { useLayoutEffect, useState, type CSSProperties, type Ref, type RefObject } from "react";
+import { useEffect, useState, type CSSProperties, type Ref, type RefObject } from "react";
 import { createPortal } from "react-dom";
 
 import { cn } from "@/lib/cn";
@@ -21,7 +21,8 @@ export function SidebarEdgeToggle({ collapsed, onToggle, style, anchorRef }: {
   anchorRef?: RefObject<HTMLElement | null>;
 }) {
   const [edge, setEdge] = useState<number | null>(null);
-  useLayoutEffect(() => {
+  // A passive effect, not a layout one: React attaches the parent <aside>'s ref after its children's layout effects run.
+  useEffect(() => {
     const anchor = anchorRef?.current;
     if (!anchor) return;
     const measure = () => setEdge(Math.round(anchor.getBoundingClientRect().right));
