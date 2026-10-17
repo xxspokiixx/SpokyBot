@@ -10,10 +10,10 @@ import {
   fetchMemoryJournal,
   fetchMemoryOverview,
   formatBytes,
+  localizedRelativeTime,
   journalSource,
   journalSummary,
   openMemoryLocation,
-  relativeTime,
   revertMemoryChange,
   saveMemoryDoc,
   fetchUpkeepStatus,
@@ -30,7 +30,7 @@ import {
   markMemoryReviewed,
 } from "@/lib/memory";
 import { shortPath } from "@/lib/short-path";
-import { t } from "@/lib/i18n";
+import { activeLocale, t } from "@/lib/i18n";
 import { roomMemoryCaptureEnabled } from "@/lib/feature-flags";
 import { api, ApiError, useStore, type Bot, type ConfigStatus } from "@/state/store";
 import { Switch } from "../SettingsPrimitives";
@@ -55,6 +55,19 @@ interface Conflict {
 }
 
 const errorText = (e: unknown) => (e instanceof Error ? e.message : String(e));
+
+function localizedTidySummary(report: Parameters<typeof tidySummary>[0]): string {
+  const parts: string[] = [];
+  const add = (count: number | undefined, one: "memory.upkeep.summary.archived.one" | "memory.upkeep.summary.merged.one" | "memory.upkeep.summary.crossed.one" | "memory.upkeep.summary.filed.one", many: "memory.upkeep.summary.archived.many" | "memory.upkeep.summary.merged.many" | "memory.upkeep.summary.crossed.many" | "memory.upkeep.summary.filed.many") => {
+    if (count) parts.push(t(count === 1 ? one : many, { count }));
+  };
+  add(report.expired, "memory.upkeep.summary.archived.one", "memory.upkeep.summary.archived.many");
+  add(report.duplicates, "memory.upkeep.summary.merged.one", "memory.upkeep.summary.merged.many");
+  add(report.superseded, "memory.upkeep.summary.crossed.one", "memory.upkeep.summary.crossed.many");
+  add(report.organized, "memory.upkeep.summary.filed.one", "memory.upkeep.summary.filed.many");
+  const summary = parts.length ? parts.join(", ") : t("memory.upkeep.summary.none");
+  return summary.charAt(0).toUpperCase() + summary.slice(1);
+}
 
 export function LendingReviewNotice({ changed, stale, busy, onReviewed }: { changed: readonly string[]; stale: boolean; busy: boolean; onReviewed: () => void }) {
   return (
@@ -253,7 +266,7 @@ export function MemorySection({ bot, active = true, onToggle }: { bot: Bot; acti
       setJournal(await fetchMemoryJournal(bot.id));
       setUpkeep(await fetchUpkeepStatus(bot.id));
       if (editing && !editing.dirty) await open(editing.path);
-      setNotice(`${tidySummary(report)}.${report.note ? ` ${report.note}` : ""}`);
+      setNotice(`${localizedTidySummary(report)}.${report.note ? ` ${report.note}` : ""}`);
     } catch (e) {
       setError(errorText(e));
     } finally {
@@ -498,8 +511,8 @@ export function MemoryUpkeepCard({
             {tidying ? t("memory.upkeep.tidying") : t("memory.upkeep.tidyNow")}
           </button>
           <span className="text-[12.5px] text-ink-secondary">
-            {status?.lastTidy ? t("memory.upkeep.lastTidy", { time: relativeTime(status.lastTidy.at), summary: tidySummary(status.lastTidy).toLowerCase() }) : t("memory.upkeep.notTidied")}
-            {status?.lastCapture && noticedCount(status.lastCapture) ? ` ${t("memory.upkeep.lastNoticed", { count: noticedCount(status.lastCapture), time: relativeTime(status.lastCapture.at) })}` : ""}
+            {status?.lastTidy ? t("memory.upkeep.lastTidy", { time: localizedRelativeTime(status.lastTidy.at, activeLocale()), summary: localizedTidySummary(status.lastTidy).toLowerCase() }) : t("memory.upkeep.notTidied")}
+            {status?.lastCapture && noticedCount(status.lastCapture) ? ` ${t("memory.upkeep.lastNoticed", { count: noticedCount(status.lastCapture), time: localizedRelativeTime(status.lastCapture.at, activeLocale()) })}` : ""}
           </span>
         </div>
       )}
@@ -611,7 +624,7 @@ export function MemoryFileRows({
                 <FileText size={14} className="shrink-0 text-ink-secondary" />
                 <span className="truncate font-mono text-[12.5px] text-ink">{file.name}</span>
                 <span className="shrink-0 text-[11.5px] text-ink-secondary">
-                  {formatBytes(file.bytes)} · {relativeTime(file.modifiedAt)}
+                  {formatBytes(file.bytes)} · {localizedRelativeTime(file.modifiedAt, activeLocale())}
                 </span>
               </button>
               <button
@@ -656,7 +669,7 @@ export function MemoryJournalList({
               <div className="min-w-0 flex-1 text-[13px] leading-relaxed text-ink">
                 <span>{journalSummary(row, botName)}</span>
                 {" · "}
-                <span className="text-ink-secondary">{relativeTime(row.at, now)}</span>
+                <span className="text-ink-secondary">{localizedRelativeTime(row.at, activeLocale(), now)}</span>
                 {source && (
                   <>
                     {" · "}
