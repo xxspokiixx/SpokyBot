@@ -38,9 +38,9 @@ export function DesktopWorkspaceSwitcher({ compact = false, inline = false, pill
       <Cloud size={18} aria-hidden="true" />
     </div>;
     if (inline) return <div data-cloud-home-indicator data-workspace-switcher="inline" title={label}
-      className={pill ? "flex h-8 min-w-0 items-center rounded-full bg-raised/50 px-3 text-[13px] font-medium text-ink" : "flex min-w-0 items-center gap-1.5 px-1.5 text-[12.5px] font-medium text-ink"}>
-      {!pill && <Cloud size={14} aria-hidden="true" className="shrink-0 text-ink-secondary" />}
-      <span className="min-w-0 truncate">{t("cloudSetup.myCloud")}</span>
+      className={pill ? "flex h-8 min-w-0 items-center gap-1 rounded-full bg-raised/50 px-3 text-[13px] font-medium text-ink" : "flex min-w-0 items-center gap-1.5 px-1.5 text-[12.5px] font-medium text-ink"}>
+      <Cloud size={pill ? 15 : 14} aria-hidden="true" className={pill ? "hidden shrink-0 text-ink-secondary @max-[124px]/sidebar-top:block" : "shrink-0 text-ink-secondary"} />
+      <span className={pill ? "min-w-0 truncate @max-[124px]/sidebar-top:hidden" : "min-w-0 truncate"}>{t("cloudSetup.myCloud")}</span>
       <span className="sr-only"> · {t("cloudSetup.alwaysOn")}{whose ? ` · ${whose}` : ""}</span>
     </div>;
     return <div data-cloud-home-indicator className={cn("py-1.5", compact ? "px-2" : "px-3")}>
@@ -77,8 +77,8 @@ export function DesktopWorkspaceSwitcher({ compact = false, inline = false, pill
         ? "flex h-8 min-w-0 max-w-full items-center gap-1 overflow-hidden rounded-full bg-raised/50 pl-2.5 pr-1.5 text-left text-[13px] font-medium text-ink hover:bg-raised aria-expanded:bg-raised focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus"
         : "flex h-7 min-w-0 max-w-full items-center gap-1.5 overflow-hidden rounded-md px-1.5 text-left text-[12.5px] font-medium text-ink hover:bg-control focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus"}
       style={{ WebkitAppRegion: "no-drag" } as React.CSSProperties}>
-      {cloudColor(current?.color) ? <CloudTile color={current?.color} size={16} /> : !pill && <Icon size={14} aria-hidden="true" className="shrink-0 text-ink-secondary" />}
-      <span className={pill ? "min-w-0 truncate" : "min-w-0 truncate @max-[96px]/sidebar-top:hidden"}>{name}</span>
+      {cloudColor(current?.color) ? <CloudTile color={current?.color} size={16} /> : <Icon size={pill ? 15 : 14} aria-hidden="true" data-switcher-icon className={pill ? "hidden shrink-0 text-ink-secondary @max-[124px]/sidebar-top:block" : "shrink-0 text-ink-secondary"} />}
+      <span className={pill ? "min-w-0 truncate @max-[124px]/sidebar-top:hidden" : "min-w-0 truncate @max-[96px]/sidebar-top:hidden"}>{name}</span>
       <ChevronDown size={pill ? 12 : 11} aria-hidden="true" className={pill ? "shrink-0 text-ink-tertiary" : "shrink-0 text-ink-secondary"} />
     </button>
     {error && <p role="alert" className="absolute right-2 top-full z-40 mt-1 w-56 max-w-[calc(100%-1rem)] rounded-md bg-menu px-2 py-1 text-[11px] text-danger shadow-lg">{error}</p>}

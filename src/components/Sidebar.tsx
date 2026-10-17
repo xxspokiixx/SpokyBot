@@ -122,7 +122,7 @@ import { SidebarProfileMenu } from "./SidebarProfileMenu";
 import { UpdateIndicator } from "./UpdateIndicator";
 import { SidebarSectionHeader } from "./SidebarSectionHeader";
 import { SidebarResizeHandle, useSidebarWidth } from "./SidebarResizeHandle";
-import { SIMPLE_RAIL_BUTTON, SIMPLE_TOP_BUTTON, SidebarCollapseToggle, SidebarSearchPill, SidebarSearchToggle } from "./SidebarSimpleTop";
+import { SIMPLE_RAIL_BUTTON, SIMPLE_TOP_BUTTON, SidebarEdgeToggle, SidebarSearchPill, SidebarSearchToggle } from "./SidebarSimpleTop";
 import { SidebarRailSeparator, SimpleRailFooter } from "./SidebarSimpleRail";
 import { useShowThreads } from "@/lib/thread-preferences";
 import { botShowsUnread } from "@/lib/bot-unread";
@@ -1784,8 +1784,8 @@ export function Sidebar({ open, onClose, collapseToIcons = false }: {
       className={cn(
         "relative flex h-full shrink-0 flex-col border-r border-hairline/40 bg-panel",
         sizing.resizing ? "transition-none" : "transition-[width] duration-200",
-        density === "icons" ? "w-[80px]" : density === "compact" ? "w-[272px] md:w-[var(--sidebar-width)]" : advanced ? "w-[320px] md:w-[var(--sidebar-width)]" : "w-[318px] md:w-[var(--sidebar-width)]",
-        sidePanelOpen ? density === "compact" ? "md:max-w-[272px]" : advanced ? "md:max-w-[320px]" : "md:max-w-[318px]" : "md:max-w-[calc(100vw-320px)]",
+        density === "icons" ? "w-[80px]" : density === "compact" ? "w-[272px] md:w-[var(--sidebar-width)]" : advanced ? "w-[320px] md:w-[var(--sidebar-width)]" : "w-[288px] md:w-[var(--sidebar-width)]",
+        sidePanelOpen ? density === "compact" ? "md:max-w-[272px]" : advanced ? "md:max-w-[320px]" : "md:max-w-[288px]" : "md:max-w-[calc(100vw-320px)]",
         // max-md: rather than an md: cancel: Tailwind v4 emits the native `translate`, and any value but `none` makes
         // this a containing block for its `fixed` descendants.
         "max-md:absolute max-md:inset-y-0 max-md:left-0 max-md:z-40",
@@ -1815,7 +1815,7 @@ export function Sidebar({ open, onClose, collapseToIcons = false }: {
           </div>
         ) : null}
         {density !== "icons" && (
-          <div data-sidebar-top-slot className={cn(!simple && "@container/sidebar-top", "flex min-w-0 flex-1 items-center")}>
+          <div data-sidebar-top-slot className={cn("@container/sidebar-top flex min-w-0 flex-1 items-center", simple && "justify-end")}>
             {!simple && <div data-sidebar-top-spacer className="min-w-0 flex-1 @min-[96px]/sidebar-top:min-w-6" />}
             <div data-sidebar-top-switcher className={simple ? "flex min-w-0 items-center" : "flex min-w-0 max-w-[140px] items-center"}>
               <DesktopWorkspaceSwitcher inline pill={simple} cloudHome={state.config?.cloudHome === true} owner={cloudOwner} howTo={state.cloudHowTo} onMenuClosed={endHowTo} />
@@ -1827,7 +1827,6 @@ export function Sidebar({ open, onClose, collapseToIcons = false }: {
           className={cn("relative flex shrink-0 items-center", density === "icons" ? "flex-col gap-1" : simple ? "gap-1 pl-0.5" : "ml-0.5 gap-0.5")}
           style={windowNoDragStyle}
         >
-          {simple && <SidebarCollapseToggle collapsed={false} onToggle={toggleCollapsed} />}
           {simple && <SidebarSearchToggle ref={searchToggleRef} open={searchShown} onToggle={() => (searchShown ? closeSearch() : setSearchOpen(true))} />}
           {!collapseToIcons && (advanced || density === "icons") && <button
             type="button"
@@ -1964,6 +1963,7 @@ export function Sidebar({ open, onClose, collapseToIcons = false }: {
       </GlassBar>
 
       {density !== "icons" && <SidebarResizeHandle sizing={sizing} sidebarRef={sidebarRef} style={windowNoDragStyle} />}
+      {!advanced && !collapseToIcons && <SidebarEdgeToggle collapsed={rail} onToggle={toggleCollapsed} style={windowNoDragStyle} />}
 
       <GlassScroller className={rail ? "[scrollbar-gutter:stable_both-edges]" : "px-2"}>
         <div className={cn("flex flex-col", advanced ? "gap-0.5" : "gap-1 pt-2")}>
@@ -2114,7 +2114,6 @@ export function Sidebar({ open, onClose, collapseToIcons = false }: {
       />
 
       {rail ? <SimpleRailFooter
-        onExpand={collapseToIcons ? undefined : toggleCollapsed}
         onSearch={() => {
           if (collapseToIcons) return openCommandPalette();
           setSearchOpen(true);

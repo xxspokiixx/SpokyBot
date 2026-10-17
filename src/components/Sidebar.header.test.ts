@@ -140,7 +140,7 @@ describe("sidebar top row", () => {
     expect(html.match(/Switch server:/g)).toHaveLength(1);
   });
 
-  it("in Simple mode puts the lights, the server pill, the collapse toggle, then a round search and a round + on one macOS row", () => {
+  it("in Simple mode keeps the server pill, a round search and a round + together on the right of one macOS row, with the collapse bump on the edge", () => {
     fixture.advanced = false;
     fixture.windowChrome = "mac-inset";
     desktop();
@@ -148,24 +148,22 @@ describe("sidebar top row", () => {
     const row = topRow(html);
     expect(row).toMatch(/^data-sidebar-top-row="true" class="[^"]*\bitems-center\b[^"]*" style="-webkit-app-region:drag;height:46px"/);
     const { lights, slot, spacer, switcher, buttons } = order(row);
-    const toggle = row.indexOf("data-sidebar-collapse-toggle");
     const search = row.indexOf("data-sidebar-search-toggle");
     expect(spacer).toBe(-1);
     expect(lights).toBeGreaterThan(-1);
     expect(slot).toBeGreaterThan(lights);
     expect(switcher).toBeGreaterThan(slot);
     expect(buttons).toBeGreaterThan(switcher);
-    expect(toggle).toBeGreaterThan(buttons);
-    expect(search).toBeGreaterThan(toggle);
-    expect(row.slice(buttons).match(/<button/g)).toHaveLength(3);
-    expect(classesOf(row, "data-sidebar-top-slot")).toEqual(["flex", "min-w-0", "flex-1", "items-center"]);
+    expect(search).toBeGreaterThan(buttons);
+    expect(row).not.toContain("data-sidebar-collapse-toggle");
+    expect(row.slice(buttons).match(/<button/g)).toHaveLength(2);
+    expect(classesOf(row, "data-sidebar-top-slot")).toEqual(["@container/sidebar-top", "flex", "min-w-0", "flex-1", "items-center", "justify-end"]);
     expect(classesOf(row, "data-sidebar-top-switcher")).not.toContain("max-w-[140px]");
     expect(classesOf(row, "data-sidebar-top-buttons")).toEqual(expect.arrayContaining(["shrink-0", "gap-1", "pl-0.5"]));
-    expect(row).toMatch(/aria-label="Collapse sidebar to avatars" aria-expanded="true" title="Collapse to avatars" class="[^"]*\bsize-7\b[^"]*\brounded-full\b[^"]*"><svg[^>]*lucide-panel-left/);
-    expect(row).not.toMatch(/data-sidebar-collapse-toggle[^>]*\bbg-raised\/50\b/);
+    expect(html).toMatch(/data-sidebar-edge-toggle="true" aria-label="Collapse sidebar to avatars" aria-expanded="true" title="Collapse to avatars" style="-webkit-app-region:no-drag" class="[^"]*\babsolute\b[^"]*\brounded-r-lg\b[^"]*"><svg[^>]*lucide-chevron-left/);
     expect(row).toMatch(/aria-label="Switch server: Servers"[^>]*class="[^"]*\bh-8\b[^"]*\brounded-full\b[^"]*\bbg-raised\/50\b[^"]*\btext-\[13px\][^"]*" style="-webkit-app-region:no-drag"/);
-    expect(row).toContain('<span class="min-w-0 truncate">Servers</span>');
-    expect(row).not.toContain("lucide-laptop");
+    expect(row).toContain('<span class="min-w-0 truncate @max-[124px]/sidebar-top:hidden">Servers</span>');
+    expect(row).toContain('class="lucide lucide-laptop hidden shrink-0 text-ink-secondary @max-[124px]/sidebar-top:block"');
     expect(row).toMatch(/data-sidebar-search-toggle="true" aria-label="Search bots and messages" aria-expanded="false" title="Search bots and messages" class="[^"]*\bsize-\[30px\][^"]*\brounded-full\b/);
     expect(html).toMatch(/aria-label="New or share" class="[^"]*\bsize-\[30px\][^"]*\brounded-full\b/);
     expect(html).not.toContain('title="Active Threads"');
@@ -202,7 +200,7 @@ describe("sidebar top row", () => {
     expect(buttons).toBeGreaterThan(spacer);
   });
 
-  it("collapses Simple mode to a rail: only the lights on top, and expand, search, +, server, Apps and profile at the foot", () => {
+  it("collapses Simple mode to a rail: only the lights on top, the expand bump on the edge, and search, +, server, Apps and profile at the foot", () => {
     fixture.advanced = false;
     fixture.density = "icons";
     fixture.windowChrome = "mac-inset";
@@ -218,8 +216,9 @@ describe("sidebar top row", () => {
       expect(index, marker).toBeGreaterThan(-1);
       return index;
     };
+    expect(html).toMatch(/data-sidebar-edge-toggle="true" aria-label="Expand sidebar" aria-expanded="false"[^>]*><svg[^>]*lucide-chevron-right/);
+    expect(foot).not.toContain('aria-label="Expand sidebar"');
     const positions = [
-      at('aria-label="Expand sidebar"'),
       at('aria-label="Search bots and messages"'),
       at('aria-label="New or share"'),
       at('data-workspace-switcher="rail"'),

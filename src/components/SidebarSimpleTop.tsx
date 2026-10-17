@@ -1,5 +1,5 @@
-import { PanelLeft, Search, X } from "lucide-react";
-import type { Ref } from "react";
+import { ChevronLeft, ChevronRight, Search, X } from "lucide-react";
+import type { CSSProperties, Ref } from "react";
 
 import { cn } from "@/lib/cn";
 import { t } from "@/lib/i18n";
@@ -8,18 +8,21 @@ export const SIMPLE_TOP_BUTTON = "flex size-[30px] shrink-0 items-center justify
 
 export const SIMPLE_RAIL_BUTTON = "flex size-9 shrink-0 items-center justify-center rounded-xl text-ink-secondary hover:bg-raised/60 hover:text-ink focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus";
 
-export function SidebarCollapseToggle({ collapsed, onToggle }: { collapsed: boolean; onToggle: () => void }) {
+/** The small bump on the sidebar's right edge that collapses it to the rail and back (Simple mode). */
+export function SidebarEdgeToggle({ collapsed, onToggle, style }: { collapsed: boolean; onToggle: () => void; style?: CSSProperties }) {
+  const Arrow = collapsed ? ChevronRight : ChevronLeft;
   return (
     <button
       type="button"
-      data-sidebar-collapse-toggle
+      data-sidebar-edge-toggle
       onClick={onToggle}
       aria-label={t(collapsed ? "sidebar.density.expand" : "sidebar.density.collapseAria")}
       aria-expanded={!collapsed}
       title={t(collapsed ? "sidebar.density.expand" : "sidebar.density.collapse")}
-      className={collapsed ? SIMPLE_RAIL_BUTTON : "flex size-7 shrink-0 items-center justify-center rounded-full text-ink-secondary hover:bg-raised/60 hover:text-ink focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus"}
+      style={style}
+      className="absolute -right-[14px] top-[9px] z-30 hidden h-7 w-[14px] items-center justify-center rounded-r-lg border border-l-0 border-hairline/50 bg-panel text-ink-tertiary shadow-[1px_0_2px_rgb(0_0_0/0.06)] hover:bg-raised hover:text-ink focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus md:flex"
     >
-      <PanelLeft size={17} strokeWidth={1.75} aria-hidden="true" />
+      <Arrow size={12} strokeWidth={2.25} aria-hidden="true" />
     </button>
   );
 }
