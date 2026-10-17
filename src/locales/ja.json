@@ -3620,7 +3620,7 @@
   "place.view.ccWaking.short": "スリープ解除中…",
   "place.view.ccWaking.line": "{bot} のクラウドコンピューターのスリープを解除中です。数秒かかります。",
   "place.view.ccOn.short": "オン",
-  "place.view.ccOn.line": "{bot} のクラウドコンピューターは稼働中です。",
+  "place.view.ccOn.line": "{bot} のクラウドコンピューターは稼働中です。10 分間使われないとスリープします。",
   "place.view.ccAsleep.short": "スリープ中",
   "place.view.ccAsleep.line": "{bot} のクラウドコンピューターはスリープ中です。{bot} が必要とすると、数秒でスリープを解除します。",
   "place.view.ccNoHours.short": "残り時間なし",

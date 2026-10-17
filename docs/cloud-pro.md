@@ -1016,6 +1016,11 @@ computers belong to this machine on every request.
 - A refusal from the Boat or voice relay (for example, the month's cloud
   computer hours are used up) is shown as the relay's own message. A resume
   that fails with a server error is retried on the next poll, as Boat asks.
+- An included cloud computer goes to sleep through the relay's `POST
+  /boxes/{id}/stop` after 10 idle minutes, as one on a person's own key does
+  at Boat; a refused stop is retried later, a longer wait each time. A
+  computer stays on when a routine that uses it runs within the next 30
+  minutes, since every wake counts against the Boat account's shared starts.
 - A refusal from the decision relay (401 for an unknown token, 402 without an
   active subscription, 429 over the month's cap or a rate limit, 502 or 503
   upstream) never reaches a turn: as with any decision-model failure, the room
