@@ -1229,6 +1229,14 @@ without them works as before; a malformed one is dropped, never the machine):
   `storage`, `starting` or `checking`): the app shows the same four steps as
   the Cloud page, and says when setup is slow.
 - `cloud.retryAt` (ms) when `failed`: the time of the next automatic try.
+- `cloud.unreachable: {cause, since}` while `ready`: the Admin's health checks
+  can't reach the Cloud. `cause` is `host` (the server it runs on is being
+  restarted by the hosting provider; it comes back by itself) or `no_answer`
+  (it missed three checks in a row); `since` (ms) is its first missed check.
+  While it is there, Settings says why in place of "My Cloud is ready" and
+  hides Open My Cloud, the Cloud link opens nothing, and a connection that fails
+  says the same sentence (read from the session again just after the failure)
+  instead of "Cloud request failed".
 - `cloud.disk: {gb, maxGb}`: the volume now and the most the plan lets it grow
   to. Only with it does a copy to the Cloud count on a larger disk (and ask the
   Admin to grow it, below). Without it the app assumes nothing: a copy is measured
