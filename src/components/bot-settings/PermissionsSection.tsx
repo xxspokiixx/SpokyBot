@@ -32,6 +32,7 @@ export function PermissionsSection({
   const { state, dispatch } = useStore();
   const ownerOrAdmin = useOwnerOrAdmin();
   const { draft } = useBotEditor();
+  const displaySectionName = sectionName === "General" ? t("botAccess.teams.general") : sectionName;
   const [localAutoWarning, setLocalAutoWarning] = useState<string | null>(null);
   const [commandAllowlistTarget, setCommandAllowlistTarget] = useState<{ botId: string; botName: string } | null>(null);
   const shows = (part: PermissionsPart) => !parts || parts.includes(part);
@@ -69,7 +70,7 @@ export function PermissionsSection({
           </span>
           <div className="min-w-0 flex-1">
             <div className="text-[15px] font-medium text-ink">{t("permissions.chief.title")}</div>
-            <div className="text-[11.5px] text-ink-secondary">{t("permissions.chief.oneFor", { section: sectionName })}</div>
+            <div className="text-[11.5px] text-ink-secondary">{t("permissions.chief.oneFor", { section: displaySectionName })}</div>
           </div>
           <Switch
             checked={Boolean(bot.chiefOfStaff)}
@@ -84,12 +85,12 @@ export function PermissionsSection({
           {bot.chiefOfStaff && !canCoordinate
             ? t("permissions.chief.unsupportedCurrent")
             : bot.chiefOfStaff
-              ? t("permissions.chief.active", { section: sectionName })
+              ? t("permissions.chief.active", { section: displaySectionName })
               : !canCoordinate
                 ? t("permissions.chief.unsupported")
                 : currentChief
-                  ? t("permissions.chief.replace", { section: sectionName, current: currentChief.name })
-                  : t("permissions.chief.make", { section: sectionName })}
+                  ? t("permissions.chief.replace", { section: displaySectionName, current: currentChief.name })
+                  : t("permissions.chief.make", { section: displaySectionName })}
         </div>
         <ProposalStatus bot={bot} kind="chief" />
         {bot.chiefOfStaff && <ManagedTeamsSettings
