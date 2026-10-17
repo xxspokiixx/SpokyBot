@@ -19007,7 +19007,22 @@
       "model.effort.high": "c4ebc6d4a5832cd9415f906ad03661110c705a72381c8b8b145761d02e2dd23a",
       "memory.upkeep.lastNoticed.one": "de7a806cd040966903bd9ea362309e159fd698c3b27c273b53e26da5babb80b1",
       "memory.upkeep.lastNoticed.many": "3c12e4ab9e436814396491e485c5848070b711862b2280d800de602a8235cd90",
-      "memory.source.captureWithTitle": "88386dd1097ebf8b30a4954d14b7233f53e96e9e8048b2b930f31aa0c7dbe919"
+      "memory.source.captureWithTitle": "88386dd1097ebf8b30a4954d14b7233f53e96e9e8048b2b930f31aa0c7dbe919",
+      "browser.panel.profileTitle": "173146a310ef620cb116bcd133445267ce9d5991b9602dfb7254a1d21fd200cd",
+      "browser.panel.profiles": "7c4ee8d74f0e2a5ba159c9f679a1cdfd64be506d7abb43524bae1385863a4d45",
+      "browser.panel.closeProfiles": "795b73916404ed68f7e2bc4e8b5c8ce5f66e887ad1cf459186f443f590f7b87a",
+      "browser.panel.closeTyping": "f8cf9fa0e9f54340d9263f05465ad6a73040b2fb4a460df252ef1d2763f3d94f",
+      "browser.panel.typeTextTitle": "5047413bcdee8515b7e540326c747e9fa9a9714570cafbdcdadfd801a4699107",
+      "browser.panel.typeTextField": "88a85fc808ea77d6753fe3f234821fd196e89dfcb15f7cd300b27ab28f9b4882",
+      "browser.panel.typeTextPlaceholder": "3298bf78898c74feb8e7c933b6d0083c1753b23b9b5f40743de17b414c76271b",
+      "browser.panel.typeButton": "baaddf70fb5d432b8bd948ef91d6f910124a6d138edae4d5f000c4610ddc8eae",
+      "browser.panel.enableBot": "fb7ec4f311f197961e182927dc1118abf03c347f31dd579031ec61d195b611ed",
+      "browser.panel.installIncomplete": "d8384bf82b120e7d1f48628c96758b934360d91c0c06f01a1bf27a0bfb49059a",
+      "browser.panel.engineNotInstalled": "4e596fc3e05629c697a3c37636336e4e7a0263d59b8309733fa2327ef0cd7593",
+      "browser.panel.installIncompleteHelp": "c5be0d518211fe9860ecd905a01b406ec77de74cc1ee8d4d34148a1cf653c25f",
+      "browser.panel.installing": "9d7e484b328e04a1572f3f38d576752a62cb8a4aa771514ed30ac10a6b1b854d",
+      "browser.panel.retryInstall": "0906864a1b50272e89e5ddb9c2ac1c9d3b8aecb08cf4821edec488e4f2d9cfde",
+      "browser.panel.installEngine": "a3cabf5a9623a1f86da1a9951891b8a60b4d6b15affd2948efcf5a15e0b76891"
     },
     "zh": {
       "pro.fromPrice": "a48a04a457d60b08b54fc83e7a6c4584ffedb1e23621859084900c8521a3af7b",

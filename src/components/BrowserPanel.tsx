@@ -328,7 +328,7 @@ export function LiveBrowser({ bot, signIn }: { bot: Bot; signIn?: BrowserSignIn 
         <Hand size={15} />{control.owned ? t("browser.control.handBack") : t("browser.control.take")}
       </button>
       <button className={button} title={fullscreen ? "Exit full screen" : "Full screen"} aria-label={fullscreen ? "Exit full screen" : "Full screen"} onClick={toggleFullscreen}>{fullscreen ? <Minimize2 size={16} /> : <Maximize2 size={16} />}</button>
-      <button className={`${button} rounded-xl bg-inset p-2`} title={`Browser profile: ${profileName}`} aria-label="Browser profiles" aria-expanded={showProfiles} onClick={() => { browserControl.current?.handBack(); setShowProfiles(true); }}><UserRound size={16} /></button>
+      <button className={`${button} rounded-xl bg-inset p-2`} title={t("browser.panel.profileTitle", { name: profileName })} aria-label={t("browser.panel.profiles")} aria-expanded={showProfiles} onClick={() => { browserControl.current?.handBack(); setShowProfiles(true); }}><UserRound size={16} /></button>
     </div>
     <form className="flex h-12 items-center gap-1 border-b border-hairline/40 px-2" onSubmit={(e) => { e.preventDefault(); const url = resolveAddressBarInput(address); if (commandsReady && url) command({ type: "navigate", url }); else if (address.trim()) setError("Enter a web address or something to search for."); }}>
       <div className="flex shrink-0 items-center">
@@ -369,19 +369,19 @@ export function LiveBrowser({ bot, signIn }: { bot: Bot; signIn?: BrowserSignIn 
       </div>
     </div>
     <dialog ref={profilesDialog} onClose={() => setShowProfiles(false)} onClick={(e) => { if (e.target === e.currentTarget) setShowProfiles(false); }} className="m-auto w-[min(420px,calc(100%-32px))] max-h-[80vh] overflow-auto rounded-2xl border border-hairline/50 bg-card p-5 text-ink shadow-2xl backdrop:bg-black/40">
-      <div className="mb-4 flex items-center justify-between"><h2 className="text-[15px] font-medium">Browser profiles</h2><button className={button} aria-label="Close browser profiles" onClick={() => setShowProfiles(false)}><X size={16} /></button></div>
+      <div className="mb-4 flex items-center justify-between"><h2 className="text-[15px] font-medium">{t("browser.panel.profiles")}</h2><button className={button} aria-label={t("browser.panel.closeProfiles")} onClick={() => setShowProfiles(false)}><X size={16} /></button></div>
       {(heldElsewhere || (control.owned && (pending || taking))) && <p className="mb-3 text-[12px] text-ink-secondary">{t(heldElsewhere ? "browser.profiles.heldElsewhere" : "browser.profiles.busy")}</p>}
       <BrowserProfilesManager bot={bot} disabled={pending || control.held} onProfileChanged={() => { setShowProfiles(false); reconnect(); }} />
     </dialog>
     {/* Security: a password or code typed here goes only to the page's focused field; it is never held in state, logged or shown. */}
     <dialog ref={typingDialog} onClose={() => { const field = typingDialog.current?.querySelector("input"); if (field) field.value = ""; setShowTyping(false); }} className="m-auto w-[min(420px,calc(100%-32px))] rounded-2xl border border-hairline/50 bg-card p-5 text-ink shadow-2xl backdrop:bg-black/40">
-      <div className="mb-3 flex items-center justify-between"><h2 className="text-[14px] font-medium">{masked ? t("browser.typeSecret.title") : "Type into the selected page field"}</h2><button className={button} aria-label="Close typing" onClick={() => setShowTyping(false)}><X size={16} /></button></div>
+      <div className="mb-3 flex items-center justify-between"><h2 className="text-[14px] font-medium">{masked ? t("browser.typeSecret.title") : t("browser.panel.typeTextTitle")}</h2><button className={button} aria-label={t("browser.panel.closeTyping")} onClick={() => setShowTyping(false)}><X size={16} /></button></div>
       <form className="flex flex-col gap-3" onSubmit={(e) => {
       e.preventDefault(); const field = e.currentTarget.elements.namedItem("pageText") as HTMLInputElement;
       if (typingReady && field.value) { input({ type: "input_keyboard", eventType: "char", text: field.value }); field.value = ""; setShowTyping(false); }
-    }}><input key={masked ? "secret" : "text"} name="pageText" type={masked ? "password" : "text"} aria-label={masked ? t("browser.typeSecret.field") : "Text for the page"} autoComplete={masked ? "new-password" : "off"} spellCheck={false} maxLength={4096} placeholder={masked ? "••••••••" : "Type or paste text"} className="rounded-lg bg-inset px-3 py-2 text-[13px] outline-none focus:ring-1 focus:ring-accent" />
+    }}><input key={masked ? "secret" : "text"} name="pageText" type={masked ? "password" : "text"} aria-label={masked ? t("browser.typeSecret.field") : t("browser.panel.typeTextField")} autoComplete={masked ? "new-password" : "off"} spellCheck={false} maxLength={4096} placeholder={masked ? "••••••••" : t("browser.panel.typeTextPlaceholder")} className="rounded-lg bg-inset px-3 py-2 text-[13px] outline-none focus:ring-1 focus:ring-accent" />
       {masked && <p className="flex items-center gap-1 text-[11.5px] text-ink-tertiary"><LockKeyhole size={11} aria-hidden="true" />{t("browser.typeSecret.note")}</p>}
-      <button disabled={!typingReady} className="self-end rounded-lg bg-accent px-4 py-2 text-[12px] text-accent-ink disabled:opacity-40">Type</button></form>
+      <button disabled={!typingReady} className="self-end rounded-lg bg-accent px-4 py-2 text-[12px] text-accent-ink disabled:opacity-40">{t("browser.panel.typeButton")}</button></form>
     </dialog>
   </div>;
 }
@@ -400,12 +400,12 @@ export function BrowserPanel({ bot, signIn }: { bot: Bot; signIn?: BrowserSignIn
     catch (cause) { setError(cause instanceof Error ? cause.message : String(cause)); }
     finally { setRequested(false); }
   };
-  if (bot.browser === false) return <div className="p-5 text-[13px] text-ink-secondary">Enable the browser in this bot’s profile to use it.</div>;
+  if (bot.browser === false) return <div className="p-5 text-[13px] text-ink-secondary">{t("browser.panel.enableBot")}</div>;
   if (engine?.kind === "engine" && !installing && !engine.installError) return <LiveBrowser key={bot.id} bot={bot} signIn={signIn} />;
   return <div className="flex min-h-0 flex-1 flex-col items-start justify-center gap-3 rounded-xl bg-card p-5">
-    <div className="text-[15px] font-medium text-ink">{engine?.kind === "engine" ? "Browser installation incomplete" : "Browser engine not installed"}</div>
-    <p className="text-[13px] leading-relaxed text-ink-secondary">{engine?.kind === "engine" ? "agent-browser is installed, but Chrome setup has not finished. Retry the browser installation." : browserUnavailableReason(state.config)}</p>
-    {engine?.installable || engine?.kind === "engine" ? <button type="button" onClick={() => void install()} disabled={installing || admin !== true} className="rounded-lg bg-accent px-3 py-1.5 text-[13px] font-medium text-accent-ink disabled:opacity-60">{installing ? "Installing… (a one-time download of about 160 MB)" : engine?.kind === "engine" ? "Retry browser installation" : "Install the browser engine"}</button> : null}
+    <div className="text-[15px] font-medium text-ink">{engine?.kind === "engine" ? t("browser.panel.installIncomplete") : t("browser.panel.engineNotInstalled")}</div>
+    <p className="text-[13px] leading-relaxed text-ink-secondary">{engine?.kind === "engine" ? t("browser.panel.installIncompleteHelp") : browserUnavailableReason(state.config)}</p>
+    {engine?.installable || engine?.kind === "engine" ? <button type="button" onClick={() => void install()} disabled={installing || admin !== true} className="rounded-lg bg-accent px-3 py-1.5 text-[13px] font-medium text-accent-ink disabled:opacity-60">{installing ? t("browser.panel.installing") : engine?.kind === "engine" ? t("browser.panel.retryInstall") : t("browser.panel.installEngine")}</button> : null}
     {(engine?.installError || error) && <p role="alert" className="text-[12px] text-danger">{error ?? engine?.installError}</p>}
   </div>;
 }
