@@ -4888,4 +4888,17 @@
   "botIdentity.expression": "Expressão",
   "botIdentity.color": "Cor",
   "botIdentity.body": "Corpo"
+,
+  "botIdentity.crop.mascot": "Mascote",
+  "botIdentity.crop.circle": "Círculo",
+  "botIdentity.crop.rounded": "Arredondado",
+  "botIdentity.crop.square": "Quadrado",
+  "botIdentity.ai.generateWith": "Gerar com IA",
+  "botIdentity.ai.provider": "Provedor de imagem",
+  "botIdentity.ai.openaiHint": "GPT Image 2 · rascunho quadrado de baixa qualidade. Cobrado na sua conta da API da OpenAI.",
+  "botIdentity.ai.xaiHint": "Grok Imagine · a cobrança da API é separada da sua assinatura Grok.",
+  "botIdentity.ai.customHint": "Conecte um roteador ou provedor de imagens local.",
+  "botIdentity.ai.shared": "Esta conexão é compartilhada por todos os avatares dos bots.",
+  "botIdentity.ai.generating": "Gerando…",
+  "botIdentity.ai.generate": "Gerar avatar"
 }

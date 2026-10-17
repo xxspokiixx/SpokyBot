@@ -4,6 +4,7 @@ import { Check, Loader2, Sparkles } from "lucide-react";
 import { api, useStore, type ConfigStatus } from "@/state/store";
 import { normalizeImageGenerationUrl, type AvatarImageProvider } from "../../shared/image-generation";
 import { Select } from "./Select";
+import { t } from "@/lib/i18n";
 
 const PROVIDERS = {
   openai: { label: "OpenAI", keyLabel: "OpenAI image API key", credential: "openaiImageApiKey" },
@@ -224,19 +225,19 @@ export function AvatarImageGenerator({
   return (
     <div className="mt-5 border-t border-hairline/40 pt-4">
       <div className="flex items-center gap-2 text-[13px] font-medium text-ink">
-        <Sparkles size={14} className="text-accent" /> Generate with AI
+        <Sparkles size={14} className="text-accent" /> {t("botIdentity.ai.generateWith")}
       </div>
       <label className="mt-3 block text-[11.5px] text-ink-secondary">
-        Image provider
+        {t("botIdentity.ai.provider")}
         <Select value={provider} onChange={(event) => void chooseProvider(event.target.value as AvatarImageProvider)} disabled={busy || !state.config} className="mt-1 w-full">
           {Object.entries(PROVIDERS).map(([value, info]) => <option key={value} value={value}>{info.label}</option>)}
         </Select>
       </label>
       <p className="mt-1.5 text-[11px] leading-relaxed text-ink-secondary">
-        {provider === "openai" ? "GPT Image 2 · low-quality square draft. Billed to your OpenAI API account."
-          : provider === "xai" ? "Grok Imagine · API billing is separate from your Grok subscription."
-            : "Connect a local router or image provider."}
-        {" "}This connection is shared by all bot avatars.
+        {provider === "openai" ? t("botIdentity.ai.openaiHint")
+          : provider === "xai" ? t("botIdentity.ai.xaiHint")
+            : t("botIdentity.ai.customHint")}
+        {" "}{t("botIdentity.ai.shared")}
       </p>
 
       {configured ? (
@@ -269,7 +270,7 @@ export function AvatarImageGenerator({
           className="flex items-center gap-1.5 rounded-lg bg-accent px-3 py-1.5 text-[12.5px] font-medium text-white hover:brightness-110 disabled:opacity-50"
         >
           {generating ? <Loader2 size={13} className="animate-spin" /> : <Sparkles size={13} />}
-          {generating ? "Generating…" : "Generate avatar"}
+          {generating ? t("botIdentity.ai.generating") : t("botIdentity.ai.generate")}
         </button>
       </div>
       {unsaved && <p role="status" className="mt-2 text-[11px] text-ink-secondary">Save your connection changes before generating.</p>}

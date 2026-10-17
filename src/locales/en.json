@@ -5034,4 +5034,17 @@
   "botIdentity.expression": "Expression",
   "botIdentity.color": "Color",
   "botIdentity.body": "Body"
+,
+  "botIdentity.crop.mascot": "Mascot",
+  "botIdentity.crop.circle": "Circle",
+  "botIdentity.crop.rounded": "Rounded",
+  "botIdentity.crop.square": "Square",
+  "botIdentity.ai.generateWith": "Generate with AI",
+  "botIdentity.ai.provider": "Image provider",
+  "botIdentity.ai.openaiHint": "GPT Image 2 · low-quality square draft. Billed to your OpenAI API account.",
+  "botIdentity.ai.xaiHint": "Grok Imagine · API billing is separate from your Grok subscription.",
+  "botIdentity.ai.customHint": "Connect a local router or image provider.",
+  "botIdentity.ai.shared": "This connection is shared by all bot avatars.",
+  "botIdentity.ai.generating": "Generating…",
+  "botIdentity.ai.generate": "Generate avatar"
 }

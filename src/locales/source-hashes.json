@@ -18446,7 +18446,19 @@
       "botIdentity.shape": "e0e492707f85ff1f9c23155494a54382b52bf34888091adc7a6bb338ef78f88d",
       "botIdentity.expression": "c67415bcff328a59fd399e2a7ca9691e0044192fb7480ae501644339965d046d",
       "botIdentity.color": "6b73191a0a4b67420e61d51c9f207c35277eaf18fbbf5beb52a320a23fe09653",
-      "botIdentity.body": "6ccaa6415b5ee449e3c5c716f57b4608ebe3b780f5aa6b077bc5d8eee5d961f9"
+      "botIdentity.body": "6ccaa6415b5ee449e3c5c716f57b4608ebe3b780f5aa6b077bc5d8eee5d961f9",
+      "botIdentity.crop.mascot": "612a2d03fcae41b8930fd414ac806fa75e2765dcdd9f09539d3f0f87302f29b9",
+      "botIdentity.crop.circle": "b93d3bcecff5d7493a58a41ea44f7196a46295f6512ebc06940510676a666384",
+      "botIdentity.crop.rounded": "0a62cd800f27098e67ad0232c3648442a21795b2038a8e16c9a8f15424ded110",
+      "botIdentity.crop.square": "c11092bc0861591e9ce5d9a97e83d4fae3c6954a318977865fa85f5b3eeafda8",
+      "botIdentity.ai.generateWith": "0dbd8403738631379e917f1311d1c58261a83114f3749fb885dc9f2e8af4787d",
+      "botIdentity.ai.provider": "45b2ecbc11b2ea3cb7aa7bbaa086f061f32a0b3a416cdfa050fe08e0e8185298",
+      "botIdentity.ai.openaiHint": "290588644abbeaa91eb2235327ca5cf3d6ee29f5bab8e472ea51c1647f53752f",
+      "botIdentity.ai.xaiHint": "f22e9bf2672607f712e94de4c81626c8d1f6d4e13492bd3d4c8beb314b240b86",
+      "botIdentity.ai.customHint": "23837c54f4955191d8bc8f56509dca23571ed51bb403ae69655e44018bbcdedb",
+      "botIdentity.ai.shared": "c86b88619b5f17d1151133f227a2c121add5ed457308fd871ab14fc27458c8f5",
+      "botIdentity.ai.generating": "d20a4476a0a85978547a5781e7e575e8358f102137bf253706db20ee0fe6061c",
+      "botIdentity.ai.generate": "ef312e379b25da818430bbc749c993a8d9b461d40d2b34fc2dcb4f6908146d28"
     },
     "zh": {
       "pro.fromPrice": "a48a04a457d60b08b54fc83e7a6c4584ffedb1e23621859084900c8521a3af7b",
