@@ -18474,7 +18474,16 @@
       "botIdentity.ai.xaiKey": "c721f285a7efaa90b3d97a62bb6752cf02b83fa9509d3c37e6355cd09137e37a",
       "botIdentity.ai.customKey": "fad63e62cd6b4dc5329c7f67b0d0fbd164c33b2769ff19e0dfb56a78a0a6df30",
       "botIdentity.ai.directionPlaceholder": "6b8be464d939b64495ffe2199e08c6988c0142402684fee16872c47c0aecad02",
-      "botIdentity.ai.directionLabel": "8390024003ec1356e41d189b9bfa2d6f220dd9b4d33ee3a90235efa732f95be0"
+      "botIdentity.ai.directionLabel": "8390024003ec1356e41d189b9bfa2d6f220dd9b4d33ee3a90235efa732f95be0",
+      "botIdentity.soul.label": "fde4471e4fbff470202f0620dce0b8a558615a5b76222d88facd703e3cf0c55c",
+      "botIdentity.soul.moveToFile": "d7d1f659f77c0deefd42c18ad01ed38ca5774ffd0e53dc1b920c63cc7d142ac0",
+      "botIdentity.soul.externalEdit": "27ba9a84613b3b51cd8d36727a1e0897258d5542926b6d946d105be124b7775d",
+      "botIdentity.soul.externalEditHelp": "270c53dbce2b49551f6f7f8735a24e9c777c9301c0011076f80fb171efdf23a9",
+      "botIdentity.soul.fileLabel": "9395e29a927a3a4015df624055dec300a0c4d6244917950623224671960cf75f",
+      "botIdentity.soul.useFile": "e954c333f5724255a911c42d4bd5339843999ae302ef763023b1bc46eb558a56",
+      "botIdentity.soul.keepSaved": "a532c91cf109b39c38289625c7226041b6ce0c638964a4394661dab769310514",
+      "botIdentity.soul.contextHelp": "ece27607a792c08e3870015f162677f16cd32191a8f060a66c4aa575fac06f20",
+      "botIdentity.soul.mirroredTo": "792167b9d06a1cf6bb9e59dd4261d349c4be17ff3e854556baa6922e3e660883"
     },
     "zh": {
       "pro.fromPrice": "a48a04a457d60b08b54fc83e7a6c4584ffedb1e23621859084900c8521a3af7b",

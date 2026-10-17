@@ -4919,4 +4919,14 @@
   "botIdentity.ai.customKey": "Chave de API de imagem personalizada",
   "botIdentity.ai.directionPlaceholder": "Instrução opcional, por exemplo: “um navegador calmo inspirado em {name}”",
   "botIdentity.ai.directionLabel": "Instrução para gerar o avatar"
+,
+  "botIdentity.soul.label": "Instruções permanentes (SOUL.md)",
+  "botIdentity.soul.moveToFile": "Mover instruções para SOUL.md",
+  "botIdentity.soul.externalEdit": "O SOUL.md no disco foi editado fora do app.",
+  "botIdentity.soul.externalEditHelp": "O bot continua usando a versão salva até você escolher.",
+  "botIdentity.soul.fileLabel": "Arquivo:",
+  "botIdentity.soul.useFile": "Usar o arquivo",
+  "botIdentity.soul.keepSaved": "Manter a versão salva",
+  "botIdentity.soul.contextHelp": "Fica no contexto deste bot em todos os turnos.",
+  "botIdentity.soul.mirroredTo": "Espelhado em"
 }
