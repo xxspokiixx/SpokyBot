@@ -12,6 +12,7 @@ import {
   formatBytes,
   localizedRelativeTime,
   journalSource,
+  journalSourceKey,
   journalSummary,
   openMemoryLocation,
   revertMemoryChange,
@@ -663,6 +664,7 @@ export function MemoryJournalList({
     <div className="flex flex-col gap-2">
       {rows.map((row) => {
         const source = journalSource(row);
+        const sourceKey = journalSourceKey(row);
         return (
           <div key={row.id} className="rounded-lg bg-inset px-3 py-2">
             <div className="flex items-start justify-between gap-3">
@@ -673,7 +675,7 @@ export function MemoryJournalList({
                 {source && (
                   <>
                     {" · "}
-                    <span className="text-ink-secondary">{source}</span>
+                    <span className="text-ink-secondary">{sourceKey ? t(sourceKey) : source}</span>
                   </>
                 )}
               </div>

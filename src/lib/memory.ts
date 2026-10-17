@@ -251,6 +251,19 @@ export function journalSource(row: MemoryJournalRow): string | null {
   return null;
 }
 
+export function journalSourceKey(row: MemoryJournalRow): "memory.source.undo" | "memory.source.disk" | "memory.source.tidy" | "memory.source.organize" | "memory.source.capture" | "memory.source.chat" | "memory.source.task" | "memory.source.settings" | "memory.source.api" | null {
+  if (row.via === "revert") return "memory.source.undo";
+  if (row.via === "disk") return "memory.source.disk";
+  if (row.via === "tidy") return "memory.source.tidy";
+  if (row.via === "organize") return "memory.source.organize";
+  if (row.via === "capture") return "memory.source.capture";
+  if (row.threadTitle) return "memory.source.chat";
+  if (row.actor === "bot") return "memory.source.task";
+  if (row.via === "ui") return "memory.source.settings";
+  if (row.via === "api") return "memory.source.api";
+  return null;
+}
+
 export function fileManagerLabel(platform: string | undefined): string {
   if (platform === "darwin") return "Show in Finder";
   if (platform === "win32") return "Show in Explorer";

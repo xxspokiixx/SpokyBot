@@ -18563,7 +18563,16 @@
       "memory.upkeep.summary.crossed.one": "07d022187da4d58b02638d87b15993b66071c0feaae294aee0386f9429460e54",
       "memory.upkeep.summary.crossed.many": "cdd4c23e55429a3006d4bbde07e5eb48df9c48ec0c55c6b0349b2b946cd60a30",
       "memory.upkeep.summary.filed.one": "a20f1234329151d4f44f9ac53ae42a004f6ad276915a3cd900c17f55fe80fa39",
-      "memory.upkeep.summary.filed.many": "529930e5b639754ba9ea613d15aef8d41fe0ad4189bfb2cd43d7b52f3cd6074f"
+      "memory.upkeep.summary.filed.many": "529930e5b639754ba9ea613d15aef8d41fe0ad4189bfb2cd43d7b52f3cd6074f",
+      "memory.source.undo": "5d4391f62a35045ae3bfd5de07cf26b861037175e9a415957c521f26d3fd2401",
+      "memory.source.disk": "4d4d5d9df5e8ebb33b7d2446586cb37f63d12adbb119821ec3006d65aa29b63d",
+      "memory.source.tidy": "0d2fded672f4c3670d7afdebaf3b80600d114ff5e417565744c5409200c312be",
+      "memory.source.organize": "a67f76b19319f078a00bacb41762c805d685ec9e6b9bdbab82ce1fc70b290ff0",
+      "memory.source.capture": "a0843fadfc6f3c96769fa01df8f93a282e366b99902bb167528b7eccd6aef3ee",
+      "memory.source.chat": "75b80c3d4ec67697426164482a468677524790ef3893078d5bdc0836dd7fdbb3",
+      "memory.source.task": "eb24257c630c99846475c471414ec5864ca82d28427fea8ff43969756e934b80",
+      "memory.source.settings": "a61a4cd7efa8895ccc53dab4c5f4144df66b76bb91bf17269ac89be16180a6dc",
+      "memory.source.api": "33913a3c987b34c6dbbf65f9f06eda4aa68ff7d45479d6d561cff4acedfba8c9"
     },
     "zh": {
       "pro.fromPrice": "a48a04a457d60b08b54fc83e7a6c4584ffedb1e23621859084900c8521a3af7b",
