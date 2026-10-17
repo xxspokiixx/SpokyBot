@@ -73,7 +73,7 @@ export function eventPrompt(instructions: string, block: string): string {
     "[USER-CONFIGURED TRIGGER INSTRUCTIONS]",
     configured,
     "[/USER-CONFIGURED TRIGGER INSTRUCTIONS]",
-    "Each UNTRUSTED APP EVENT DATA block below is one event; handle each one on its own.",
+    "The email, message or record these instructions mean is in the UNTRUSTED APP EVENT DATA below. Each block is one event; handle each one on its own.",
     "",
     block,
   ].join("\n");

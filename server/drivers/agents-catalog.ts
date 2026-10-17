@@ -130,7 +130,7 @@ const TRIGGER_FIELDS_SCHEMA = {
     type: "string",
     minLength: 1,
     maxLength: 20_000,
-    description: "Complete steps for each run, which does NOT see this conversation. Put judgement here, e.g. \"if it is not about an order, stop\".",
+    description: "Complete steps for each run, which does NOT see this conversation, in the person's plain words (\"draft a reply\"), never \"event data\", \"payload\", \"webhook\" or \"trigger\". Put judgement here, e.g. \"if it is not about an order, stop\".",
   },
   schedule: { ...ROUTINE_SCHEDULE_SCHEMA, description: `Only for when=schedule. ${ROUTINE_SCHEDULE_SCHEMA.description}` },
   webhook_event_types: {
@@ -666,7 +666,7 @@ const TOOL_DEFINITIONS = [
   {
     name: "create_trigger",
     description:
-      "Set up work that happens on its own: when <something happens>, a bot does <instructions>. Call it in this turn whenever the person describes recurring or event-based work (\"every morning send me…\", \"whenever I get an email from…\", \"when another app calls…\"); never ask for confirmation first. It applies at once and the person sees a card with Edit, Pause and Undo. when=schedule runs on a time rule (call list_triggers first for relative dates: it has the authoritative time and timezone); when=app_event runs when something happens in a connected app (list_trigger_events first; prefer it to a schedule that keeps checking); when=webhook gives an address another app sends to (the person copies it from the card; you never see its secret). To the person these are automations. Something to do once, now, is not a trigger. for_bot_id: a trigger for ANOTHER bot in your section, which keeps that bot's engine and permissions.",
+      "Set up work that happens on its own: when <something happens>, a bot does <instructions>. Call it in this turn whenever the person describes recurring or event-based work (\"every morning send me…\", \"whenever I get an email from…\", \"when another app calls…\"); never ask for confirmation first. It applies at once and the person sees a card with Edit, Pause and Undo. when=schedule runs on a time rule (call list_triggers first for relative dates: it has the authoritative time and timezone); when=app_event runs when something happens in a connected app (list_trigger_events first; prefer it to a schedule that keeps checking); when=webhook gives an address another app sends to (the person copies it from the card; you never see its secret). To the person these are automations: write name and instructions as they would say them. Something to do once, now, is not a trigger. for_bot_id: a trigger for ANOTHER bot in your section, which keeps that bot's engine and permissions.",
     inputSchema: {
       type: "object",
       additionalProperties: false,

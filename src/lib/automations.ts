@@ -151,8 +151,11 @@ function thirdPerson(verb: string): string {
 }
 
 /** What the bot does, as a short phrase: the first clause of its instructions, addressed to the person. */
+/** Words a bot may leave at the end of its instructions that a person never says: "…a reply to the email in the event data". */
+const TECHNICAL_TAIL = /\s+(?:in|from|of|inside)\s+(?:the\s+)?(?:(?:incoming|webhook|trigger|app)\s+)?(?:event(?:'s)?(?:\s+(?:data|payload|body))?|payload|webhook(?:\s+(?:data|body|payload|call))?|trigger(?:\s+(?:data|payload))?)$/i;
+
 export function doesPhrase(instructions: string, english = activeLocale().startsWith("en")): string {
-  let clause = instructions.replace(/^\s*please\s+/i, "").split(/[.:;!?\n]|\s[—–-]\s/)[0]?.trim() ?? "";
+  let clause = instructions.replace(/^\s*please\s+/i, "").split(/[.:;!?\n]|\s[—–-]\s/)[0]?.trim().replace(TECHNICAL_TAIL, "") ?? "";
   if (!clause) return t("automations.does.default");
   if (english) {
     clause = clause.replace(/\bme\b/gi, "you").replace(/\bmy\b/gi, "your").replace(/\bmine\b/gi, "yours").replace(/\bI\b/g, "you");

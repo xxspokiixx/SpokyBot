@@ -75,7 +75,8 @@ it.skipIf(!ready)("sets one up from chat and from + New, shows its sentence and 
   if (await skipTour.isVisible().catch(() => false)) await skipTour.click();
   const card = page.locator("[data-trigger-card]").first();
   await card.waitFor({ timeout: 30_000 });
-  await expect.poll(() => card.textContent(), { timeout: 15_000 }).toContain("When you get an email from acme.com, Scout drafts a reply to the email in the event data");
+  await expect.poll(() => card.textContent(), { timeout: 15_000 }).toContain("When you get an email from acme.com, Scout drafts a reply to the email");
+  expect(await card.textContent()).not.toContain("event data");
   expect(await card.textContent()).toContain("Checks every 15 minutes · waiting for the first email");
   await shot("chat-card-set-up.png");
 

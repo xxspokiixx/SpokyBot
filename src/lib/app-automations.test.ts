@@ -31,6 +31,16 @@ describe("an app-event automation in plain words", () => {
       .toBe("When “Deal stage updated” happens in Hubspot, Ops posts a kickoff note");
   });
 
+  it("leaves technical words a bot put at the end of its instructions out of the sentence", () => {
+    expect(automationSentence(automation({ prompt: "Draft a reply to the email in the event data. Do not send it." }), "Scout"))
+      .toBe("When you get an email from Acme, Scout drafts a reply to the email");
+    expect(automationSentence(automation({ prompt: "Add the lead from the webhook payload" }), "Scout")).toBe("When you get an email from Acme, Scout adds the lead");
+    expect(automationSentence(automation({ prompt: "Log the order in the payload" }), "Scout")).toBe("When you get an email from Acme, Scout logs the order");
+    expect(automationSentence(automation({ prompt: "Summarize the event for me" }), "Scout")).toBe("When you get an email from Acme, Scout summarizes the event for you");
+    const [hook] = automationsFrom({ routines: [], webhooks: [{ id: "h", endpointId: "wh_1", name: "Sales form", prompt: "Draft a follow-up from the webhook data.", botId: "scout", runOn: "maus", enabled: true, createdAt: 0, updatedAt: 0, deliveryCount: 0 }], runs: [] });
+    expect(automationSentence(hook!, "Scout")).toBe("When your sales form sends something, Scout drafts a follow-up");
+  });
+
   it("says it checks every 15 minutes and waits for the first email, then shows the last run", () => {
     expect(statusLine(automation(), NOW)).toBe("Working · checks every 15 minutes · waiting for the first email");
     expect(statusLine(automation({ lastEventAt: NOW - 60_000 }, [run("completed", NOW - 60_000)]), NOW)).toMatch(/^Working · last ran today .+ · checks every 15 minutes$/);

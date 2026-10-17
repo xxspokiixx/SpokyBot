@@ -300,3 +300,18 @@ describe("createAppTriggerHost", () => {
     expect(broker.harness.composio.instances.size).toBe(0);
   });
 });
+
+describe("instructions in the person's words", () => {
+  it("tells the bot to write plain actions, and tells each run where its event is", async () => {
+    const { TRIGGER_PROMPT } = await import("./system-prompt.ts");
+    const { availableTools, catalogProfileFromEnv } = await import("./drivers/agents-catalog.ts");
+    const { eventPrompt } = await import("./app-events.ts");
+    expect(TRIGGER_PROMPT).toContain('in the plain words the person would use ("draft a reply", "add the lead to the sheet"): never "event data", "payload", "webhook" or "trigger"');
+    const create = availableTools(catalogProfileFromEnv({})).find((tool) => tool.name === "create_trigger")!;
+    expect(create.description).toContain("write name and instructions as they would say them");
+    expect((create.inputSchema.properties as Record<string, { description?: string }>).instructions!.description)
+      .toContain("in the person's plain words (\"draft a reply\"), never \"event data\", \"payload\", \"webhook\" or \"trigger\"");
+    expect(eventPrompt("Draft a reply.", "[UNTRUSTED APP EVENT DATA]\n{}\n[/UNTRUSTED APP EVENT DATA]"))
+      .toContain("The email, message or record these instructions mean is in the UNTRUSTED APP EVENT DATA below.");
+  });
+});
