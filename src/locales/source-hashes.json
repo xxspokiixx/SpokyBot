@@ -18383,7 +18383,18 @@
       "routines.wake.running": "56e1138a9f20e95b6b304e5a0487258c59e25a3e381e7cd44222d62c126dd044",
       "routines.wake.due": "d801d1cd0abbe56d2d8c23eb5ff91ee10bdbb1fd05f6e5aef5c4c9241f6a16c1",
       "routines.wake.topOfHour": "16367e638b1a3c609f253e7b6919c7d03d9aa1172f4b41a3dd657a1bb7e52699",
-      "routines.wake.holding": "d54882dddbc3e653e5f22c2f8530356d2c6db71be0bf9f437ee575cbce120f3f"
+      "routines.wake.holding": "d54882dddbc3e653e5f22c2f8530356d2c6db71be0bf9f437ee575cbce120f3f",
+      "botSettings.sections.overview": "d4b1ea5708dd532930a85188b45aff6f0a3ed458500c7577e0127a538eb0d100",
+      "botSettings.sections.identity": "999f23fcd7bec7075e54bb5dea0d9c548bfe7261f95b911ed8e23d2f4188724f",
+      "botSettings.sections.soul": "70629416ece0407f8118ec37871763a520cf5ef56dce2818fd847ed84ea4d483",
+      "botSettings.identity.name": "dcd1d5223f73b3a965c07e3ff5dbee3eedcfedb806686a05b9b3868a2c3d6d50",
+      "botSettings.identity.title": "7e8cd2056da73a7fefb6cd91f4e5d199d08d9058c517b9a2476b1b520324d674",
+      "botSettings.identity.titlePlaceholder": "9a67f7bf404e40e5ad17f8906ed7d922b8d44fd1e1eb8be2070d3758130a1c9d",
+      "botSettings.identity.blurb": "9a7196d27d70507d3e2dfce95a0716093453faef98d50361a13dda956b4a8d57",
+      "botSettings.identity.viewFull": "763b8be19a893189a10d4b0c132e574b5c1076ef95665435489565c63b5db3a1",
+      "botSettings.identity.blurbPlaceholder": "f30ead27906a25dd9b5bc40ba9ca7b8db72972a6cf0f7a9dabe1b24d889c6ad5",
+      "botSettings.identity.blurbHelp": "7a168c1fc7c9102a44e462cfa8bd6d63cbf49950a2e9755bee948bfa6e069fdf",
+      "botSettings.soul.description": "c7526d8cf720b3b18432db226882874518eb2480d871cb6c65a9486f9fdd755e"
     },
     "zh": {
       "pro.fromPrice": "a48a04a457d60b08b54fc83e7a6c4584ffedb1e23621859084900c8521a3af7b",
