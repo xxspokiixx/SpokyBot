@@ -104,4 +104,14 @@ describe("X research internal routes", () => {
     expect(await callInternal(badToken.handler, { body: { query: "maus" } }))
       .toMatchObject({ status: 502, body: { error: X_MESSAGES.badKey, code: "bad_key" } });
   });
+
+  it("tells a Cloud home's bot the relay refused the Cloud's token, never to sign in again", async () => {
+    const client = fakeClient({ search: vi.fn(async () => { throw new XResearchError("bad_key", X_MESSAGES.badKey); }) });
+    const home = createXResearchInternalRoutes({ credential: () => included, botEnabled: () => true, client: () => client, cloudHome: true });
+    const answer = await callInternal(home, { body: { query: "maus" } });
+    expect(answer).toMatchObject({ status: 502, body: { error: X_MESSAGES.homeBadKey, code: "bad_key" } });
+    expect(answer.body.error).not.toMatch(/sign in again/i);
+    const other = createXResearchInternalRoutes({ credential: () => included, botEnabled: () => true, client: () => fakeClient({ search: vi.fn(async () => { throw new XResearchError("rate_limited", X_MESSAGES.rateLimited); }) }), cloudHome: true });
+    expect(await callInternal(other, { body: { query: "maus" } })).toMatchObject({ status: 502, body: { error: X_MESSAGES.rateLimited } });
+  });
 });

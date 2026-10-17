@@ -68,3 +68,21 @@ export function createIncludedXSync({ fetchAccess, send }) {
     },
   };
 }
+
+/**
+ * main.mjs's wiring: this sign-in's own access (cloud-account.mjs xResearchAccess), posted to whichever local server is
+ * running over the private parent port (server/included-services.ts applyIncludedXMessage).
+ * @param {{ account: () => { xResearchAccess(): Promise<{ url: string; token: string } | null> } | null,
+ *   server: () => { postMessage(message: unknown): void } | null, log: (line: string) => void }} options
+ */
+export function createDesktopIncludedX({ account, server, log }) {
+  return createIncludedXSync({
+    fetchAccess: () => account()?.xResearchAccess() ?? Promise.resolve(null),
+    send: (access, note) => {
+      const proc = server();
+      if (!proc) return;
+      try { proc.postMessage({ type: "openmausbot:included-x", access, ...(note?.offered === false ? { offered: false } : {}) }); }
+      catch (error) { log(`X research access sync failed: ${error?.message ?? error}`); }
+    },
+  });
+}

@@ -1,9 +1,6 @@
-// A bot's working folder — where its shell tools run. Validated here, once,
-// so a bad path is refused at PATCH time with a reason the settings panel
-// can show, rather than surfacing later as a driver spawn failure.
 import { statSync } from "node:fs";
 import { homedir } from "node:os";
-import { isAbsolute, resolve } from "node:path";
+import { isAbsolute, relative, resolve } from "node:path";
 
 export type CwdValidation = { ok: true; cwd: string | null } | { ok: false; error: string };
 
@@ -23,4 +20,12 @@ export function validateBotCwd(input: unknown): CwdValidation {
   }
   if (!stat.isDirectory()) return { ok: false, error: `that path is not a folder: ${cwd}` };
   return { ok: true, cwd };
+}
+
+/** A conversation's folder a teammate may be sent to: one that still exists, outside OpenMausBot's own data (a bot's private workspace). */
+export function sharedProjectFolder(cwd: string | null | undefined, dataDir: string): string | undefined {
+  const checked = cwd ? validateBotCwd(cwd) : undefined;
+  if (!checked?.ok || !checked.cwd) return undefined;
+  const inside = relative(resolve(dataDir), checked.cwd);
+  return inside === "" || (!inside.startsWith("..") && !isAbsolute(inside)) ? undefined : checked.cwd;
 }

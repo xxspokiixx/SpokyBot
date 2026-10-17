@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
-import { createIncludedXSync } from "./included-x.mjs";
+import { createDesktopIncludedX, createIncludedXSync } from "./included-x.mjs";
 
 const access = { url: "https://cloud.openmausbot.com/api/cloud/services/x", token: `omb_xd_${"a".repeat(43)}` };
 const paid = (deviceId = "device-1") => ({ status: "connected", deviceId, entitlement: { plan: "pro", status: "active", tier: "pro" } });
@@ -125,5 +125,27 @@ describe("when the Admin says no to a paid sign-in", () => {
     await first;
     await vi.waitFor(() => expect(other.fetchAccess).toHaveBeenCalledTimes(2));
     await vi.waitFor(() => expect(other.sent).toEqual([access]));
+  });
+});
+
+describe("main.mjs's wiring of included X research access", () => {
+  it("asks the current sign-in and posts its answer to whichever server is running, re-sending to a restarted one", async () => {
+    const posted = [], logged = [];
+    let account = null, proc = null;
+    const x = createDesktopIncludedX({ account: () => account, server: () => proc, log: (line) => logged.push(line) });
+    await x.onState(paid());
+    expect(posted).toEqual([]);
+    account = { xResearchAccess: vi.fn(async () => null) };
+    proc = { postMessage: (message) => posted.push(message) };
+    await x.onState(paid("device-2"));
+    expect(posted).toEqual([{ type: "openmausbot:included-x", access: null, offered: false }]);
+    account.xResearchAccess.mockResolvedValue(access);
+    await x.onState(paid("device-3"));
+    proc = { postMessage: (message) => posted.push({ restarted: message }) };
+    x.serverStarted();
+    expect(posted.slice(1)).toEqual([{ type: "openmausbot:included-x", access }, { restarted: { type: "openmausbot:included-x", access } }]);
+    proc = { postMessage: () => { throw new Error("port closed"); } };
+    x.serverStarted();
+    expect(logged).toEqual(["X research access sync failed: port closed"]);
   });
 });

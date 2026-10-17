@@ -30,6 +30,8 @@ export interface XResearchDeps {
   botEnabled: (botId: string) => boolean;
   /** Tests pass a fake; the server builds the real client per call. */
   client?: (credential: ServiceCredential) => XResearchClient;
+  /** This server is a Cloud home: a refused relay token is the Admin's to replace, not a sign-in to redo. */
+  cloudHome?: boolean;
 }
 
 export interface XInternalContext {
@@ -109,7 +111,8 @@ export function createXResearchInternalRoutes(deps: XResearchDeps) {
       ctx.json(ctx.res, 200, await run(action, body, clientFor(credential)));
     } catch (error) {
       if (!(error instanceof XResearchError)) throw error;
-      ctx.json(ctx.res, statusFor(error.code), { error: error.message, code: error.code });
+      const message = error.code === "bad_key" && deps.cloudHome ? X_MESSAGES.homeBadKey : error.message;
+      ctx.json(ctx.res, statusFor(error.code), { error: message, code: error.code });
     }
   };
 }

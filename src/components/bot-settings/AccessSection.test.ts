@@ -5,29 +5,43 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { StoreProvider, type Bot, type ConfigStatus } from "@/state/store";
 import type { useBotSettingsDerived } from "./useBotSettingsDerived";
 
-const fixture = vi.hoisted(() => ({ dispatch: vi.fn(), mcpError: false, servers: null as null | Array<{ name: string; enabled: boolean }>, config: null as unknown }));
+const fixture = vi.hoisted(() => ({
+  dispatch: vi.fn(),
+  mcpError: false,
+  servers: null as null | Array<{ name: string; enabled: boolean }>,
+  config: null as unknown,
+  apps: { phase: "loading", apps: [], connectedSlugs: [] } as import("./useBotApps").BotApps,
+}));
 vi.mock("@/state/store", async (importOriginal) => {
   const original = await importOriginal<typeof import("@/state/store")>();
   return { ...original, useStore: () => ({ state: { ...original.initialState, config: fixture.config ?? original.initialState.config }, dispatch: fixture.dispatch }) };
 });
+// The connected-apps list (Composio accounts plus the native HighLevel connection) is seeded per test.
+vi.mock("./useBotApps", async (importOriginal) => ({
+  ...await importOriginal<typeof import("./useBotApps")>(),
+  useBotApps: () => fixture.apps,
+}));
 vi.mock("@/lib/mcp-servers", async (importOriginal) => ({
   ...await importOriginal<typeof import("@/lib/mcp-servers")>(),
   useMcpServers: () => ({ servers: fixture.servers, error: fixture.mcpError, refresh: vi.fn() }),
 }));
 
-// DesktopCapabilities reads `window.ogb` at module scope for its context
-// default; the src test suite runs under vitest's "node" environment (no
-// window), so it must be stubbed the same way SidebarBotListItem.test.ts does.
+// DesktopCapabilities reads window.ogb at module scope, and this suite runs in the node environment.
 vi.mock("../DesktopCapabilities", () => ({
   useDesktopCapabilities: () => ({ capabilities: { host: { homeDir: undefined } } }),
 }));
 
 const { AccessSection } = await import("./AccessSection");
 
-// WorkingFolder (moved into this file) reads window.ogb?.pickFolder directly
-// at render time, same "node" environment gap as above — stub per test, the
-// way desktop.test.ts and EngineUpdateNotice.test.ts do.
-beforeEach(() => { vi.stubGlobal("window", {}); fixture.dispatch.mockReset(); fixture.mcpError = false; fixture.servers = null; fixture.config = null; });
+// WorkingFolder reads window.ogb?.pickFolder at render time, so window is stubbed per test.
+beforeEach(() => {
+  vi.stubGlobal("window", {});
+  fixture.dispatch.mockReset();
+  fixture.mcpError = false;
+  fixture.servers = null;
+  fixture.config = null;
+  fixture.apps = { phase: "loading", apps: [], connectedSlugs: [] };
+});
 afterEach(() => vi.unstubAllGlobals());
 
 function makeBot(overrides: Partial<Bot> = {}): Bot {
@@ -180,7 +194,6 @@ describe("AccessSection Works on", () => {
     const markup = render(makeBot());
     expect(markup).toContain("Where Scout works: Chooses for you");
     expect(markup).toContain("Open Computer panel");
-    // No second picker here: the six places live in the Computer panel only.
     expect([...markup.matchAll(/>(Auto|Cloud|Local VM|This computer|Browser|Off)<\/button>/g)]).toEqual([]);
     expect(render(makeBot({ computer: "off" }))).toContain("Where Scout works: No screen");
 
@@ -241,5 +254,66 @@ describe("X research card", () => {
     fixture.config = { xResearch: { included: false } } as Partial<ConfigStatus>;
     const html = render(makeBot({ xResearch: true }));
     expect(html).not.toMatch(/aria-label="Let this bot search and read X"[^>]* disabled=""/);
+  });
+});
+
+describe("AccessSection Record browser steps", () => {
+  type Node = ReactElement<{ children?: ReactNode; [key: string]: unknown }>;
+  const nodes = (value: ReactNode): Node[] => {
+    if (!isValidElement(value)) return [];
+    const node = value as Node;
+    return [node, ...Children.toArray(node.props.children).flatMap(nodes)];
+  };
+  const browserOn = () => makeDerived({ browserEnabled: true, desktopBrowser: true, canUseBrowser: true });
+
+  it("asks for the browser first, then says what it saves and for how long, with no prompt", () => {
+    expect(render(makeBot())).toContain("Turn on the browser first.");
+    expect(render(makeBot(), browserOn())).toContain("Browser steps are not saved.");
+    const on = render(makeBot({ recordBrowserSteps: true }), browserOn());
+    expect(on).toContain("Saves a screenshot and a short note of each click, typing and page change");
+    expect(on).toContain("Kept with this conversation for 30 days.");
+    expect(on).toContain('aria-label="Record browser steps"');
+  });
+
+  it("turns it on with one bot patch", () => {
+    const derived = browserOn();
+    let tree!: ReturnType<typeof AccessSection>;
+    function Capture() { tree = AccessSection({ bot: makeBot(), derived }); return tree; }
+    renderToStaticMarkup(createElement(StoreProvider, null, createElement(Capture)));
+    const row = nodes(tree).find((node) => typeof node.props.onChange === "function" && "browserOn" in node.props)!;
+    (row.props.onChange as (on: boolean) => void)(true);
+    expect(derived.patch).toHaveBeenCalledWith({ recordBrowserSteps: true });
+  });
+
+  it("says the screenshots show the person's own Chrome when the bot uses it", () => {
+    fixture.config = { browserEngine: { myChrome: true }, browserProfiles: [{ id: "mine", browser: "chrome" }] } as unknown as Partial<ConfigStatus>;
+    expect(render(makeBot({ recordBrowserSteps: true, browserProfile: "mine" }), browserOn())).toContain("This bot uses your own Chrome, so the screenshots show your Chrome.");
+    expect(render(makeBot({ recordBrowserSteps: true }), browserOn())).not.toContain("your own Chrome");
+  });
+});
+
+describe("AccessSection per-app scopes", () => {
+  const app = (slug: string, label: string) => ({ slug, label, blurb: "", card: { logo: null, domain: null, label }, scope: "write" as const });
+
+  it("lists HighLevel by name next to the Composio apps once the server reports it connected", () => {
+    fixture.apps = { phase: "ready", connectedSlugs: ["gmail", "highlevel"], apps: [app("gmail", "Gmail"), app("highlevel", "HighLevel")] };
+    const html = render(makeBot({ connectorScopes: { apps: { gmail: "write" } } }));
+    expect(html).toContain('aria-label="highlevel access"');
+    expect(html).toMatch(/<span class="min-w-0 text-\[13px\] text-ink">HighLevel</);
+    expect(html).not.toContain("not connected");
+    // Tool-by-tool grants are Composio's list; HighLevel is scoped by read/write only.
+    expect([...html.matchAll(/truncate font-mono text-\[12\.5px\] text-ink">([^<]*)</g)].map((match) => match[1])).toEqual(["gmail"]);
+  });
+
+  it("leaves HighLevel out while it is not connected", () => {
+    fixture.apps = { phase: "ready", connectedSlugs: ["gmail"], apps: [app("gmail", "Gmail")] };
+    const html = render(makeBot({ connectorScopes: { apps: { gmail: "write" } } }));
+    expect(html).not.toContain("HighLevel");
+    expect(html).not.toContain("highlevel");
+  });
+
+  it("shows no scope rows until the account list is known", () => {
+    const html = render(makeBot({ connectorScopes: { apps: { gmail: "write" } } }));
+    expect(html).not.toContain("Limit this bot to specific apps");
   });
 });

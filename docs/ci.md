@@ -66,6 +66,46 @@ half hours. Now:
   Electron smokes.
 - `ci-stop-closed.yml` cancels a PR's CI run when the PR is merged or closed. PR runs share a group named by the PR number (`ci-pr-<n>`), never by `github.ref`: a merged PR's closed event reports the base branch as `github.ref`, which made every merge cancel main's CI (fixed Oct 3 2026).
 
+## Browser driver (S4)
+
+`browser driver S4 (<os>)` runs the omb-cdp conformance suites
+(`server/browser/cdp/s4-*.e2e.test.ts`) against real Chrome: snapshots across
+out-of-process frames and closed shadow roots, every action, dialogs,
+downloads, popups and tabs, both evaluation worlds, waiting, the calibrated
+identity against the headed browser and across page, worker, service worker,
+frame and request headers, Chrome exiting after its controller is killed, and
+the latency targets. Each suite records every CDP command its browsers were
+sent and fails on `Runtime.enable`, `Runtime.addBinding`, `Console.*`,
+`Debugger.*`, `Profiler.*` or an evaluation in the page's own world that the
+test did not ask for. The unit tests in the vitest shards hold the same rule
+without a browser: the method guard refuses those methods and no driver
+source names them.
+
+The same job runs the new browser's suites on that Chrome:
+`server/browser/checklist.e2e.test.ts` (the design's checklist items the
+browser service owns: tools and refs, sign-ins kept across a restart of the
+browser, erase and temporary profiles, uploads, downloads, dialogs, popups,
+HTTP sign-in, a person's hold, restart and idle close) and
+`server/browser/viewers/viewers.e2e.test.ts` (the page filling the viewer
+at the screen's device scale, resizes, presets, acknowledged frames, a
+scroll ending on a sharp frame, and the phone's v1 live view against its
+golden from agent-browser).
+
+- The job uses the runner's installed Google Chrome (`OMB_CDP_E2E=1`) on the
+  same platforms as the vitest shards: Linux and Windows on PRs, plus macOS
+  on main, merge groups and manual runs. Linux runs under Xvfb so the
+  headed-identity case has a display.
+- On Linux it then builds the server image's `runtime` stage and runs the
+  suites inside it as a non-root user against the image's Chrome for
+  Testing, with `OMB_BROWSER_SANDBOX=0` because the image has no setuid
+  sandbox helper yet.
+- It is advisory, outside the `CI` gate, until it has run green for a while.
+- Locally: `OMB_CDP_CHROME=<chrome executable> pnpm exec vitest run
+  server/browser/cdp/s4- server/browser/checklist.e2e
+  server/browser/viewers/viewers.e2e` (or `OMB_CDP_E2E=1` for the installed
+  Google Chrome). Without either the suites skip. `OMB_CDP_TEST_TMP` moves the
+  throwaway profiles.
+
 ## Main and releases
 
 Main keeps one CI run going and one waiting. Each merge replaces the waiting

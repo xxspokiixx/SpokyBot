@@ -1,14 +1,10 @@
-// Every value the old SettingsPanel derived from state before rendering,
-// lifted verbatim (SettingsPanel.tsx:541-611) so the section files that
-// consume them (Identity, Soul, and — in later commits — the rest) can
-// stay pure prop-takers. This hook is the one place in the bot settings
-// dialog that still reaches into useStore.
 import { useDesktopCapabilities } from "../DesktopCapabilities";
 import { browserAvailable, builtInBrowserEnabled } from "@/lib/feature-flags";
 import { stateForBot } from "@/lib/mascot";
 import { useStore, type Bot } from "@/state/store";
 import { approvalModeFor } from "../../../shared/approval-mode";
 import { connectorGrantsState, type ConnectorGrantsState } from "@/lib/connector-grants";
+import { highLevelConnected, useHighLevelStatus } from "@/lib/highlevel-status";
 
 export type BotPatch = Partial<
   Pick<
@@ -34,6 +30,7 @@ export type BotPatch = Partial<
     | "outbound"
     | "fallback"
     | "speakReplies"
+    | "replyStyle"
     | "memoryEnabled"
     | "xResearch"
     | "voice"
@@ -42,17 +39,15 @@ export type BotPatch = Partial<
     | "approvePeerComms"
     | "composio"
     | "browser"
+    | "recordBrowserSteps"
     | "mcpServers"
     | "modelSelection"
   >
 > & {
   computer?: Bot["computer"] | null;
-  /** null drops the explicit record and returns the bot to the legacy
-   * all-tools boolean. */
   connectorTools?: Bot["connectorTools"] | null;
   connectorScopes?: Bot["connectorScopes"] | null;
   acknowledgeLocalAuto?: boolean;
-  confirmFullAccess?: boolean;
   acknowledgePeerScope?: boolean;
 };
 
@@ -63,15 +58,14 @@ export function useBotSettingsDerived(bot: Bot) {
   const activeState = stateForBot(bot);
   const mascotMotion = state.mascotMotion?.botId === bot.id ? state.mascotMotion : null;
   const engine = state.instances.find((instance) => instance.instanceId === bot.modelSelection.instanceId);
-  // The approval level (ask / auto / full / custom) as the shared rule reads
-  // it from the record — bots saved before approvalMode existed still carry
-  // only autoApprove. Full and Custom need the packaged desktop's trusted
-  // channel (SettingsPanel used the same test before the dialog replaced it).
   const approvalMode = approvalModeFor(bot);
   const trustedModesAvailable = Boolean(window.ogb?.approvals && capabilities.host.packaged);
   const canCoordinate = engine?.capabilities?.agentsMcp === true;
-  const canUseConnectedApps = engine?.capabilities?.composioMcp === true;
-  const connectedAppsConfigured = state.config?.composio?.configured === true;
+  // Connected apps reach a bot through Composio's MCP or the native HighLevel one; either lets the switch work.
+  const canUseConnectedApps = engine?.capabilities?.composioMcp === true || engine?.capabilities?.highlevelMcp === true;
+  // A native HighLevel connection counts as a connected app even where the Composio service is not set up (a Cloud home).
+  const highlevel = useHighLevelStatus();
+  const connectedAppsConfigured = state.config?.composio?.configured === true || highLevelConnected(highlevel);
   const connectedAppsEnabled = bot.composio !== false;
   const connectorGrantState: ConnectorGrantsState = connectorGrantsState(bot);
   const canUseBrowser = engine?.capabilities?.browserMcp === true;

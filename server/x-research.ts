@@ -52,6 +52,8 @@ export const X_MESSAGES = {
   noKey: "X research is included with OpenMausBot Cloud plans. Sign in to a paid plan under App Settings → OpenMausBot Cloud to use it.",
   botOff: "X research is off for this bot. Turn it on in this bot's settings under Access.",
   badKey: "Sign in to OpenMausBot Cloud again in Settings to use X research.",
+  /** A Cloud home's relay token is the Admin's to replace; the person has no sign-in to redo there. */
+  homeBadKey: "X research isn't connected on this Cloud right now. It comes with your plan, so there is nothing to sign in to: try again later, and contact OpenMausBot support if it keeps happening.",
   noPlan: "X research comes with OpenMausBot Cloud plans, and this account's plan isn't active.",
   rateLimited: "X research is busy right now. Try again in a moment.",
   badRequest: "That X research request was refused. Check the query, handle or post link.",

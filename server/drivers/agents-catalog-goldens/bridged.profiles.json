@@ -1,0 +1,413 @@
+{
+  "default": {
+    "bytes": 14893,
+    "sha256": "cc48f6d0e9ddbcabb23d37330877d877bcecc3cf77dcf066265c531be228335a",
+    "tools": [
+      "tool_result_read",
+      "list_room_targets",
+      "coordinate_bots",
+      "list_bots",
+      "list_rooms",
+      "select_computer",
+      "attach_file",
+      "post_to_room",
+      "request_credential",
+      "request_sign_in",
+      "fill_login",
+      "memory_update",
+      "find_tool",
+      "use_tool"
+    ]
+  },
+  "voice": {
+    "bytes": 15634,
+    "sha256": "fcf32e43440bd89e549f48582efd6967567aca77bf74a450746232b55262b2d8",
+    "tools": [
+      "tool_result_read",
+      "list_room_targets",
+      "coordinate_bots",
+      "list_bots",
+      "list_rooms",
+      "select_computer",
+      "attach_file",
+      "post_to_room",
+      "request_credential",
+      "request_sign_in",
+      "fill_login",
+      "send_voice_note",
+      "memory_update",
+      "find_tool",
+      "use_tool"
+    ]
+  },
+  "shared": {
+    "bytes": 14933,
+    "sha256": "3675aabb209850898b670a19838c152db78f0f3163ad864107c110be7b8f4c24",
+    "tools": [
+      "tool_result_read",
+      "list_room_targets",
+      "coordinate_bots",
+      "list_bots",
+      "list_rooms",
+      "select_computer",
+      "attach_file",
+      "post_to_room",
+      "request_credential",
+      "request_sign_in",
+      "fill_login",
+      "memory_update",
+      "find_tool",
+      "use_tool"
+    ]
+  },
+  "shared+voice": {
+    "bytes": 15674,
+    "sha256": "60c5112cb91a72f37f23464eeede997a7b3adf4a10b46cb139db2d17b8aa6618",
+    "tools": [
+      "tool_result_read",
+      "list_room_targets",
+      "coordinate_bots",
+      "list_bots",
+      "list_rooms",
+      "select_computer",
+      "attach_file",
+      "post_to_room",
+      "request_credential",
+      "request_sign_in",
+      "fill_login",
+      "send_voice_note",
+      "memory_update",
+      "find_tool",
+      "use_tool"
+    ]
+  },
+  "skills": {
+    "bytes": 14920,
+    "sha256": "2b0d8234651da6e1741f35fd1dacd6a304b78a53a0bf7834f7fdbb22daf34236",
+    "tools": [
+      "tool_result_read",
+      "list_room_targets",
+      "coordinate_bots",
+      "list_bots",
+      "list_rooms",
+      "select_computer",
+      "attach_file",
+      "post_to_room",
+      "request_credential",
+      "request_sign_in",
+      "fill_login",
+      "memory_update",
+      "find_tool",
+      "use_tool"
+    ]
+  },
+  "skills+voice": {
+    "bytes": 15661,
+    "sha256": "70e72a2d23f2ae935fc42b68684583cc8531c6b3190a0619f7fd6284a7adc8a3",
+    "tools": [
+      "tool_result_read",
+      "list_room_targets",
+      "coordinate_bots",
+      "list_bots",
+      "list_rooms",
+      "select_computer",
+      "attach_file",
+      "post_to_room",
+      "request_credential",
+      "request_sign_in",
+      "fill_login",
+      "send_voice_note",
+      "memory_update",
+      "find_tool",
+      "use_tool"
+    ]
+  },
+  "skills+shared": {
+    "bytes": 14960,
+    "sha256": "3fa81a3b60b2ca09cef6b496cdd8dbc0264778c506a7322928a8dad358119f9c",
+    "tools": [
+      "tool_result_read",
+      "list_room_targets",
+      "coordinate_bots",
+      "list_bots",
+      "list_rooms",
+      "select_computer",
+      "attach_file",
+      "post_to_room",
+      "request_credential",
+      "request_sign_in",
+      "fill_login",
+      "memory_update",
+      "find_tool",
+      "use_tool"
+    ]
+  },
+  "skills+shared+voice": {
+    "bytes": 15701,
+    "sha256": "891b9560282cd339cf7128f3fa9ae32eb37fde7cc83e1fbecc2492a02790dc07",
+    "tools": [
+      "tool_result_read",
+      "list_room_targets",
+      "coordinate_bots",
+      "list_bots",
+      "list_rooms",
+      "select_computer",
+      "attach_file",
+      "post_to_room",
+      "request_credential",
+      "request_sign_in",
+      "fill_login",
+      "send_voice_note",
+      "memory_update",
+      "find_tool",
+      "use_tool"
+    ]
+  },
+  "non-chief": {
+    "bytes": 14782,
+    "sha256": "f1677c36b8718f395ef093c6abe22804e02394102419e0371d5b871f7be0dd6f",
+    "tools": [
+      "tool_result_read",
+      "list_room_targets",
+      "coordinate_bots",
+      "list_bots",
+      "list_rooms",
+      "select_computer",
+      "attach_file",
+      "post_to_room",
+      "request_credential",
+      "request_sign_in",
+      "fill_login",
+      "memory_update",
+      "find_tool",
+      "use_tool"
+    ]
+  },
+  "voice+non-chief": {
+    "bytes": 15523,
+    "sha256": "2dd054cdefecc8a6496966236c7c97c8c89dd73308874ad464f4206864f971e4",
+    "tools": [
+      "tool_result_read",
+      "list_room_targets",
+      "coordinate_bots",
+      "list_bots",
+      "list_rooms",
+      "select_computer",
+      "attach_file",
+      "post_to_room",
+      "request_credential",
+      "request_sign_in",
+      "fill_login",
+      "send_voice_note",
+      "memory_update",
+      "find_tool",
+      "use_tool"
+    ]
+  },
+  "shared+non-chief": {
+    "bytes": 14822,
+    "sha256": "6038dd056b5c44b7e74d94818907d0346ba3e1be9c68d9ef4165e2cc234988e8",
+    "tools": [
+      "tool_result_read",
+      "list_room_targets",
+      "coordinate_bots",
+      "list_bots",
+      "list_rooms",
+      "select_computer",
+      "attach_file",
+      "post_to_room",
+      "request_credential",
+      "request_sign_in",
+      "fill_login",
+      "memory_update",
+      "find_tool",
+      "use_tool"
+    ]
+  },
+  "shared+voice+non-chief": {
+    "bytes": 15563,
+    "sha256": "5b865193bb32b4766301b45ca309c07311e3df1f7e3b966d277cc1e805863a3c",
+    "tools": [
+      "tool_result_read",
+      "list_room_targets",
+      "coordinate_bots",
+      "list_bots",
+      "list_rooms",
+      "select_computer",
+      "attach_file",
+      "post_to_room",
+      "request_credential",
+      "request_sign_in",
+      "fill_login",
+      "send_voice_note",
+      "memory_update",
+      "find_tool",
+      "use_tool"
+    ]
+  },
+  "skills+non-chief": {
+    "bytes": 14809,
+    "sha256": "345150b2a6f8d218656899ac74b86837b164ec7c70ff6639e347023258469520",
+    "tools": [
+      "tool_result_read",
+      "list_room_targets",
+      "coordinate_bots",
+      "list_bots",
+      "list_rooms",
+      "select_computer",
+      "attach_file",
+      "post_to_room",
+      "request_credential",
+      "request_sign_in",
+      "fill_login",
+      "memory_update",
+      "find_tool",
+      "use_tool"
+    ]
+  },
+  "skills+voice+non-chief": {
+    "bytes": 15550,
+    "sha256": "532c308965687609241e013edded3e65f0c0724939a1badfeed17d2f8381d10c",
+    "tools": [
+      "tool_result_read",
+      "list_room_targets",
+      "coordinate_bots",
+      "list_bots",
+      "list_rooms",
+      "select_computer",
+      "attach_file",
+      "post_to_room",
+      "request_credential",
+      "request_sign_in",
+      "fill_login",
+      "send_voice_note",
+      "memory_update",
+      "find_tool",
+      "use_tool"
+    ]
+  },
+  "skills+shared+non-chief": {
+    "bytes": 14849,
+    "sha256": "b33a4aaa948bca6e90a32a6eabb7ddac71833822d52f9cc8fe85d8f7792b6cda",
+    "tools": [
+      "tool_result_read",
+      "list_room_targets",
+      "coordinate_bots",
+      "list_bots",
+      "list_rooms",
+      "select_computer",
+      "attach_file",
+      "post_to_room",
+      "request_credential",
+      "request_sign_in",
+      "fill_login",
+      "memory_update",
+      "find_tool",
+      "use_tool"
+    ]
+  },
+  "skills+shared+voice+non-chief": {
+    "bytes": 15590,
+    "sha256": "99c4dd749b48c5b0af5ae777bcd8af3c1b8140992997ab802611b0b6b407f1b5",
+    "tools": [
+      "tool_result_read",
+      "list_room_targets",
+      "coordinate_bots",
+      "list_bots",
+      "list_rooms",
+      "select_computer",
+      "attach_file",
+      "post_to_room",
+      "request_credential",
+      "request_sign_in",
+      "fill_login",
+      "send_voice_note",
+      "memory_update",
+      "find_tool",
+      "use_tool"
+    ]
+  },
+  "skills+shared+voice+cloud-home": {
+    "bytes": 15699,
+    "sha256": "810e832b1f9f2ddee30f0b48143bbe88a5cdf2b1cae824ac6782ff36ac326eff",
+    "tools": [
+      "tool_result_read",
+      "list_room_targets",
+      "coordinate_bots",
+      "list_bots",
+      "list_rooms",
+      "select_computer",
+      "attach_file",
+      "post_to_room",
+      "request_credential",
+      "request_sign_in",
+      "fill_login",
+      "send_voice_note",
+      "memory_update",
+      "find_tool",
+      "use_tool"
+    ]
+  },
+  "skills+shared+voice+non-chief+cloud-home": {
+    "bytes": 15588,
+    "sha256": "a939a8e59399615c45db6ef7d5de471bc5135fb4f7612fdb5028069c736beb7b",
+    "tools": [
+      "tool_result_read",
+      "list_room_targets",
+      "coordinate_bots",
+      "list_bots",
+      "list_rooms",
+      "select_computer",
+      "attach_file",
+      "post_to_room",
+      "request_credential",
+      "request_sign_in",
+      "fill_login",
+      "send_voice_note",
+      "memory_update",
+      "find_tool",
+      "use_tool"
+    ]
+  },
+  "skills+shared+voice+escalations": {
+    "bytes": 15719,
+    "sha256": "472b9fa6c343c50e953d4071a1d37d8a35ac0f16d6763f178f052867ec9520d0",
+    "tools": [
+      "tool_result_read",
+      "list_room_targets",
+      "coordinate_bots",
+      "list_bots",
+      "list_rooms",
+      "select_computer",
+      "attach_file",
+      "post_to_room",
+      "request_credential",
+      "request_sign_in",
+      "fill_login",
+      "send_voice_note",
+      "memory_update",
+      "find_tool",
+      "use_tool"
+    ]
+  },
+  "default+legacy-switches": {
+    "bytes": 14893,
+    "sha256": "cc48f6d0e9ddbcabb23d37330877d877bcecc3cf77dcf066265c531be228335a",
+    "tools": [
+      "tool_result_read",
+      "list_room_targets",
+      "coordinate_bots",
+      "list_bots",
+      "list_rooms",
+      "select_computer",
+      "attach_file",
+      "post_to_room",
+      "request_credential",
+      "request_sign_in",
+      "fill_login",
+      "memory_update",
+      "find_tool",
+      "use_tool"
+    ]
+  }
+}

@@ -4,13 +4,16 @@ import { Box, ExternalLink, Loader2, Monitor, Plus, RefreshCw, X } from "lucide-
 import { api, useStore } from "@/state/store";
 import type { TeamComputer } from "../../shared/team-computer";
 import { ConfirmDialog } from "./ConfirmDialog";
+import { Select } from "./Select";
 
 const control = "rounded-lg px-3 py-2 text-[12px] text-ink-secondary hover:bg-control hover:text-ink disabled:opacity-40";
 const field = "w-full rounded-lg border border-hairline/60 bg-inset px-3 py-2 text-[12px] text-ink outline-none focus:border-accent";
 type Inventory = { computers: TeamComputer[]; configured: boolean; problem?: string };
 
-/** This shelf is only an owner control. Its list is read-only; every paid
- * lifecycle action is a deliberate button press, never a render effect. */
+/**
+ * Owner control: the list is read-only, and every paid lifecycle action is a deliberate button press, never a render
+ * effect.
+ */
 export function CanvasComputers({ open, createRequest, drop, sections, onClose, onDropHandled, onChange }: {
   open: boolean;
   createRequest: number;
@@ -59,8 +62,7 @@ export function CanvasComputers({ open, createRequest, drop, sections, onClose, 
     return () => { highlighted.current?.removeAttribute("data-computer-dropping"); };
   }, [open, clearDrag]);
   useEffect(() => { heldHereRef.current = heldHere; }, [heldHere]);
-  // The shelf mounts conditionally; a control lease this client took must
-  // not outlive it. Best-effort release, mirroring LocalVmWorkspace.
+  // A control lease this client took must not outlive the shelf.
   useEffect(() => () => {
     const held = heldHereRef.current;
     if (!held) return;
@@ -223,8 +225,6 @@ export function CanvasComputers({ open, createRequest, drop, sections, onClose, 
               if (pending.current || pointer.current || event.button !== 0 || !event.isPrimary) return;
               event.currentTarget.focus({ preventScroll: true });
               pointer.current = { id: event.pointerId, x: event.clientX, y: event.clientY, moved: false, computer, handle: event.currentTarget };
-              // This handle has no click action. Capture immediately so the
-              // first movement can leave the narrow shelf without losing it.
               event.currentTarget.setPointerCapture(event.pointerId);
             }} onPointerMove={dragMove} onPointerUp={dragEnd} onPointerCancel={clearDrag}
             onLostPointerCapture={() => { if (pointer.current) clearDrag(); }}
@@ -234,11 +234,11 @@ export function CanvasComputers({ open, createRequest, drop, sections, onClose, 
           </div>
           {computer.problem && <p className="mt-2 text-[11px] text-danger">{computer.problem}</p>}
           <label className="sr-only" htmlFor={`computer-team-${computer.id}`}>Team for {computer.name}</label>
-          <select id={`computer-team-${computer.id}`} className={`${field} mt-3`} disabled={busy !== null} value={computer.section === null ? "unassigned" : `team:${computer.section}`}
+          <Select id={`computer-team-${computer.id}`} className="mt-3 w-full" disabled={busy !== null} value={computer.section === null ? "unassigned" : `team:${computer.section}`}
             onChange={(event) => requestAssignment(computer, event.target.value === "unassigned" ? null : event.target.value.slice(5))}>
             <option value="unassigned">Not assigned</option>
             {sections.filter((section) => computer.section === null || section.key === computer.section).map((section) => <option key={section.key} value={`team:${section.key}`}>{section.name}</option>)}
-          </select>
+          </Select>
           {computer.section !== null && <p className="mt-1.5 text-[10px] text-ink-secondary">Unassign to move to another team.</p>}
           <div className="mt-2 flex flex-wrap gap-1">
             {!ready && !starting && <button className={control} title="Starts this cloud computer; your provider's usage charges apply" disabled={busy !== null || held} onClick={() => void mutate(computer.id, () => post(computer.id, "provision", { acknowledgeCost: true }))}>Start / retry</button>}
@@ -248,8 +248,8 @@ export function CanvasComputers({ open, createRequest, drop, sections, onClose, 
               setHeldHere(computer.id);
               return post(computer.id, "join");
             }, (value) => {
-              // Only expose a deliberate link. A blocked popup must not trigger
-              // another lifecycle request, and provider URLs are never iframes.
+              // Security: only a deliberate https link; a blocked popup must not trigger another lifecycle request, and
+              // provider URLs are never iframes.
               if (typeof value.joinUrl === "string" && value.joinUrl.startsWith("https://")) setViewer({ id: computer.id, url: value.joinUrl });
             })}>Open desktop <ExternalLink size={11} /></button>}
             {heldHereNow && <button className={`${control} text-accent`} disabled={busy !== null} onClick={() => void mutate(computer.id, () => post(computer.id, "control", { action: "release", controlLeaseId: controlLeaseId.current }), () => { setHeldHere(null); setViewer(null); })}>Return to bots</button>}
