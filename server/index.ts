@@ -4380,7 +4380,7 @@ const coordinator: Coordinator = createCoordinator({
         const followupEnded = followupEndedRoots.has(child.id);
         const followupLine = followupEndedRoots.get(child.id);
         followupEndedRoots.delete(child.id);
-        if (child.outcome === "stopped" || (followupEnded && !followupLine)) return;
+        if (child.status === "completed" || child.outcome === "stopped" || (followupEnded && !followupLine)) return;
         if (child.goalRunId) return;
         const room = child.groupId ? store.group(child.groupId) : undefined;
         if (child.groupId ? !room || !store.groupTaskByThread(room.id, child.threadId) : !store.taskByThread(child.botId, child.threadId)) return;
