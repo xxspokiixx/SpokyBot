@@ -37,6 +37,7 @@ describe("what the app may do", () => {
     ["GET", "/api/companion/endpoints"],
     ["GET", "/api/bots"],
     ["POST", "/api/bots"],
+    ["PATCH", "/api/bots/bot_123"],
     ["POST", "/api/sidebar-sections"],
     ["POST", "/api/bots/bot_123/messages"],
     ["PATCH", "/api/bots/bot_123/cards/msg_2"],
@@ -238,7 +239,12 @@ describe("what it may not", () => {
     expect(allowed("GET", "/api/threads/th_1/messages/msg_2/file")).toBe(false);
     expect(allowed("POST", "/api/threads/th_1/messages/msg_2/file/extra")).toBe(false);
     expect(allowed("GET", "/api/groups/room-1")).toBe(false);
-    expect(allowed("PATCH", "/api/bots/bot_123")).toBe(false);
+    expect(allowed("GET", "/api/bots/bot_123")).toBe(false);
+    expect(allowed("POST", "/api/bots/bot_123")).toBe(false);
+    expect(allowed("PUT", "/api/bots/bot_123")).toBe(false);
+    expect(allowed("PATCH", "/api/bots/bot_123/extra")).toBe(false);
+    expect(allowed("PATCH", "/api/bots/bot_123/../other")).toBe(false);
+    expect(ask("PATCH", "/api/bots/bot_123", false)?.status).toBe(401);
     expect(allowed("GET", "/api/bots/bot_123/model")).toBe(false);
     expect(allowed("POST", "/api/bots/bot_123/model")).toBe(false);
     expect(allowed("PATCH", "/api/bots/bot_123/model/extra")).toBe(false);
