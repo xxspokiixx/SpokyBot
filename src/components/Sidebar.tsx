@@ -40,6 +40,7 @@ import { liveActivityLabel } from "@/lib/live-activity";
 import { llmThreadTitlesEnabled } from "@/lib/feature-flags";
 
 import { BotAvatar } from "./Avatar";
+import { BotModelBadge } from "./BotModelBadge";
 import { stateForBot } from "@/lib/mascot";
 import { cn } from "@/lib/cn";
 import { searchMatchesThreads, useSearchDisclosure } from "@/lib/search-disclosure";
@@ -1176,9 +1177,7 @@ export const BotListItem = memo(function BotListItem(props: BotRowProps) {
   const hasThreadList = (bot.tasks?.filter((task) => !task.routineRunId).length ?? 1) > 1 || (bot.projects?.length ?? 0) > 0 || Boolean(query);
   const iconOnly = density === "icons";
   const expanded = showThreads && !iconOnly && threadsOpen && hasThreadList;
-  useEffect(() => {
-    if (iconOnly) setRenaming(false);
-  }, [iconOnly]);
+  useEffect(() => { if (iconOnly) setRenaming(false); }, [iconOnly]);
   const avatarSize = iconOnly ? 44 : density === "compact" ? (showThreads ? 26 : 36) : (showThreads ? 32 : 44);
   const visible = useVisibleMessages(bot);
   const last = lastNonReceipt(visible);
@@ -1212,6 +1211,7 @@ export const BotListItem = memo(function BotListItem(props: BotRowProps) {
           motionKey={mascotMotion?.nonce ?? 0}
           animated={working || unread || (mascotMotion?.kind ?? "none") !== "none"}
         />
+        <BotModelBadge bot={bot} instances={instances} avatarSize={avatarSize} />
         {working && (
           <span
             data-testid="working-dot"
