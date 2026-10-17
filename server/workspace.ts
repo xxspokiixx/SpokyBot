@@ -33,19 +33,40 @@ export const MEMORY_ENTRY_MAX_CHARS = 1_000;
 export const MEMORY_ENTRY_MAX_LINES = 20;
 export const ARCHIVE_TOPIC = "archive.md";
 
-const MEMORY_SEED = `# Memory
+const MEMORY_SEEDS: Record<string, string> = {
+  en: `# Memory
 
 Durable notes this bot keeps between tasks. The first ${MEMORY_MAX_LINES} lines
 load at the start of every session — keep this file short and curated.
 Longer notes belong in memory/<topic>.md files, read on demand.
-`;
+`,
+  "pt-br": `# Memória
 
-export function ensureWorkspace(botId: string): string {
+Notas permanentes que este bot mantém entre tarefas. As primeiras ${MEMORY_MAX_LINES} linhas
+são carregadas no início de cada sessão — mantenha este arquivo curto e organizado.
+Notas mais longas ficam em memory/<tópico>.md e são lidas quando necessário.
+`,
+  es: `# Memoria
+
+Notas permanentes que este bot mantiene entre tareas. Las primeras ${MEMORY_MAX_LINES} líneas
+se cargan al inicio de cada sesión — mantén este archivo corto y organizado.
+Las notas más largas van en memory/<tema>.md y se leen cuando es necesario.
+`,
+};
+
+function memorySeedFor(language?: string): string {
+  const normalized = (language?.trim() || Intl.DateTimeFormat().resolvedOptions().locale).toLowerCase().replaceAll("_", "-");
+  if (normalized === "pt" || normalized.startsWith("pt-")) return MEMORY_SEEDS["pt-br"];
+  if (normalized === "es" || normalized.startsWith("es-")) return MEMORY_SEEDS.es;
+  return MEMORY_SEEDS[normalized] ?? MEMORY_SEEDS.en;
+}
+
+export function ensureWorkspace(botId: string, language?: string): string {
   const dir = join(WORKSPACES_DIR, botId);
   // Memories can hold personal details: other local accounts must not read them.
   mkdirSync(join(dir, "memory"), { recursive: true, mode: 0o700 });
   const memoryFile = join(dir, "MEMORY.md");
-  if (!existsSync(memoryFile)) writeFileAtomic(memoryFile, MEMORY_SEED, { mode: 0o600 });
+  if (!existsSync(memoryFile)) writeFileAtomic(memoryFile, memorySeedFor(language), { mode: 0o600 });
   return dir;
 }
 
