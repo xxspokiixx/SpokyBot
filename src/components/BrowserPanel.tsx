@@ -8,13 +8,11 @@ import { BrowserViewport, type BrowserFrame } from "./BrowserViewport";
 import { createBrowserInputQueue } from "@/lib/browser-input-queue";
 import { createBrowserControl, type BrowserInteraction, type BrowserTakeStatus } from "@/lib/browser-control";
 import { resolveAddressBarInput } from "@/lib/browser-address";
-import { BROWSER_HELD_ELSEWHERE } from "../../shared/browser-held";
 
 interface BrowserTab { tabId: string; title: string; url: string; active: boolean }
 type ViewerFrame = BrowserFrame & { viewerId: string; generation: number };
 const button = "rounded-md p-1.5 text-ink-secondary hover:bg-inset hover:text-ink disabled:opacity-40 disabled:cursor-not-allowed";
 const RECONNECT_DELAYS = [1_000, 2_000, 4_000, 8_000, 15_000];
-const RECONNECT_MESSAGE = "Connection interrupted. Reconnecting the browser view…";
 // The server sends a heartbeat every 10 s: a view that heard nothing for longer lost its stream without an error.
 const SILENT_MS = 25_000;
 const SILENCE_CHECK_MS = 5_000;
@@ -74,12 +72,12 @@ export function LiveBrowser({ bot, signIn }: { bot: Bot; signIn?: BrowserSignIn 
   }, [showTyping]);
 
   const action = useCallback(async (body: Record<string, unknown>, expected = viewer.current) => {
-    if (!expected) throw new Error("Open the browser connection first.");
+    if (!expected) throw new Error(t("browser.panel.connectionFirst"));
     // 120s matches the server's browser requestTimeoutMs.
     return api(`/api/bots/${encodeURIComponent(bot.id)}/browser/action`, { method: "POST", body: JSON.stringify({ ...body, viewerId: expected }), timeoutMs: 120_000 });
   }, [bot.id]);
   const interact = useCallback((item: BrowserInteraction) => {
-    if (controlNow.current.held && !controlNow.current.owned) { setError(BROWSER_HELD_ELSEWHERE); return; }
+    if (controlNow.current.held && !controlNow.current.owned) { setError(t("browser.panel.heldElsewhere")); return; }
     browserControl.current?.interact(item);
   }, []);
   const input = useCallback((body: Record<string, unknown>) => interact({ input: body }), [interact]);
@@ -128,7 +126,7 @@ export function LiveBrowser({ bot, signIn }: { bot: Bot; signIn?: BrowserSignIn 
       const delay = retryable ? RECONNECT_DELAYS[reconnectCount.current] : undefined;
       if (delay !== undefined) {
         reconnectCount.current++;
-        message = RECONNECT_MESSAGE;
+        message = t("browser.panel.connectionInterrupted");
         reconnectTimer = setTimeout(() => {
           if (!ownsConnection()) return;
           generation.current++;
@@ -146,12 +144,12 @@ export function LiveBrowser({ bot, signIn }: { bot: Bot; signIn?: BrowserSignIn 
     // A 404 from an action: the server closed this view, so input must go to a new one rather than halt here.
     const viewGone = (cause: unknown, expected: string) => {
       if ((cause as { status?: unknown } | null)?.status !== 404 || stopped || !ownsConnection() || viewer.current !== expected) return false;
-      dropped(RECONNECT_MESSAGE, true);
+      dropped(t("browser.panel.connectionInterrupted"), true);
       return true;
     };
     wake.current = (focused) => {
       if (!ownsConnection()) return;
-      if (!stopped && viewer.current && Date.now() - heardAt > SILENT_MS) dropped(RECONNECT_MESSAGE, true);
+      if (!stopped && viewer.current && Date.now() - heardAt > SILENT_MS) dropped(t("browser.panel.connectionInterrupted"), true);
       if (!stopped || !focused || !revivable) return;
       // Back at the window: retry now, whether a retry was waiting or they had run out.
       clearTimeout(reconnectTimer);
@@ -216,7 +214,7 @@ export function LiveBrowser({ bot, signIn }: { bot: Bot; signIn?: BrowserSignIn 
     source.addEventListener("error", (event) => {
       // A closed EventSource may still deliver a queued error; it must not clear the replacement viewer or input.
       if (stopped || !ownsConnection()) return;
-      let message = "Browser connection ended. Reconnect to continue watching.";
+      let message = t("browser.panel.connectionEnded");
       let retryable = !(event instanceof MessageEvent);
       if (event instanceof MessageEvent) {
         try {
@@ -305,59 +303,59 @@ export function LiveBrowser({ bot, signIn }: { bot: Bot; signIn?: BrowserSignIn 
       }
     }
   };
+  const reconnecting = error === t("browser.panel.connectionInterrupted");
   const heldElsewhere = control.held && !control.owned;
   const interactive = connected && !heldElsewhere && !pending;
   const typingReady = interactive && control.owned && control.controlling;
   const taking = takeStatus === "pending" || takeStatus === "slow";
   const commandsReady = interactive && !taking;
-  const reconnecting = error === RECONNECT_MESSAGE;
   const pill = "flex max-w-full items-center gap-1.5 whitespace-nowrap rounded-full border bg-menu px-2.5 py-1 text-[11px] shadow-sm sm:text-[12px]";
   return <div ref={panel} className="flex min-h-0 flex-1 flex-col overflow-hidden rounded-2xl border border-hairline/40 bg-card text-ink">
     <div className="flex min-h-12 items-center gap-1 px-2 pt-1.5">
       <div className="flex min-w-0 flex-1 items-center gap-1 overflow-x-auto">
         {tabs.length ? tabs.map((tab) => <div key={tab.tabId} className={`flex max-w-52 shrink-0 items-center gap-1 rounded-xl px-1 text-[12px] ${tab.active ? "bg-inset text-ink" : "text-ink-secondary"}`}>
           <Globe size={13} className="ml-1.5 shrink-0 opacity-60" />
-          <button className="truncate px-1 py-2 text-left disabled:cursor-default" disabled={!commandsReady} onClick={() => command({ type: "tab-select", tabId: tab.tabId })} title={tab.title || tab.url}>{tab.title || "New tab"}</button>
-          <button className={button} aria-label={`Close ${tab.title || "tab"}`} disabled={!commandsReady} onClick={() => command({ type: "tab-close", tabId: tab.tabId })}><X size={13} /></button>
-        </div>) : <div className="flex items-center gap-2 rounded-xl bg-inset px-3 py-2 text-[12px] text-ink-secondary"><Globe size={13} />New tab</div>}
-        <button className={`${button} shrink-0`} disabled={!commandsReady} aria-label="New tab" title="New tab" onClick={() => command({ type: "tab-new" })}><Plus size={17} /></button>
+          <button className="truncate px-1 py-2 text-left disabled:cursor-default" disabled={!commandsReady} onClick={() => command({ type: "tab-select", tabId: tab.tabId })} title={tab.title || tab.url}>{tab.title || t("browser.panel.newTab")}</button>
+          <button className={button} aria-label={t("browser.panel.closeTab", { title: tab.title || t("browser.panel.tab") })} disabled={!commandsReady} onClick={() => command({ type: "tab-close", tabId: tab.tabId })}><X size={13} /></button>
+        </div>) : <div className="flex items-center gap-2 rounded-xl bg-inset px-3 py-2 text-[12px] text-ink-secondary"><Globe size={13} />{t("browser.panel.newTab")}</div>}
+        <button className={`${button} shrink-0`} disabled={!commandsReady} aria-label={t("browser.panel.newTab")} title={t("browser.panel.newTab")} onClick={() => command({ type: "tab-new" })}><Plus size={17} /></button>
       </div>
       <button type="button" className={`${button} flex shrink-0 items-center gap-1 px-2 text-[12px] ${control.owned ? "bg-accent/15 text-accent-text" : ""}`}
         aria-pressed={control.owned} disabled={!connected || heldElsewhere || pending || (taking && !control.owned)}
         onClick={control.owned ? handBack : takeControl}>
         <Hand size={15} />{control.owned ? t("browser.control.handBack") : t("browser.control.take")}
       </button>
-      <button className={button} title={fullscreen ? "Exit full screen" : "Full screen"} aria-label={fullscreen ? "Exit full screen" : "Full screen"} onClick={toggleFullscreen}>{fullscreen ? <Minimize2 size={16} /> : <Maximize2 size={16} />}</button>
-      <button className={`${button} rounded-xl bg-inset p-2`} title={`Browser profile: ${profileName}`} aria-label="Browser profiles" aria-expanded={showProfiles} onClick={() => { browserControl.current?.handBack(); setShowProfiles(true); }}><UserRound size={16} /></button>
+      <button className={button} title={fullscreen ? t("browser.panel.exitFullscreen") : t("browser.panel.fullscreen")} aria-label={fullscreen ? t("browser.panel.exitFullscreen") : t("browser.panel.fullscreen")} onClick={toggleFullscreen}>{fullscreen ? <Minimize2 size={16} /> : <Maximize2 size={16} />}</button>
+      <button className={`${button} rounded-xl bg-inset p-2`} title={t("browser.panel.profileTitle", { name: profileName })} aria-label={t("browser.panel.profiles")} aria-expanded={showProfiles} onClick={() => { browserControl.current?.handBack(); setShowProfiles(true); }}><UserRound size={16} /></button>
     </div>
-    <form className="flex h-12 items-center gap-1 border-b border-hairline/40 px-2" onSubmit={(e) => { e.preventDefault(); const url = resolveAddressBarInput(address); if (commandsReady && url) command({ type: "navigate", url }); else if (address.trim()) setError("Enter a web address or something to search for."); }}>
+    <form className="flex h-12 items-center gap-1 border-b border-hairline/40 px-2" onSubmit={(e) => { e.preventDefault(); const url = resolveAddressBarInput(address); if (commandsReady && url) command({ type: "navigate", url }); else if (address.trim()) setError(t("browser.panel.enterAddress")); }}>
       <div className="flex shrink-0 items-center">
-        <button type="button" className={button} disabled={!commandsReady} aria-label="Back" onClick={() => command({ type: "back" })}><ArrowLeft size={17} /></button>
-        <button type="button" className={button} disabled={!commandsReady} aria-label="Forward" onClick={() => command({ type: "forward" })}><ArrowRight size={17} /></button>
-        <button type="button" className={button} disabled={!commandsReady} aria-label="Reload page" onClick={() => command({ type: "reload" })}><RotateCw size={17} /></button>
+        <button type="button" className={button} disabled={!commandsReady} aria-label={t("browser.panel.back")} onClick={() => command({ type: "back" })}><ArrowLeft size={17} /></button>
+        <button type="button" className={button} disabled={!commandsReady} aria-label={t("browser.panel.forward")} onClick={() => command({ type: "forward" })}><ArrowRight size={17} /></button>
+        <button type="button" className={button} disabled={!commandsReady} aria-label={t("browser.panel.reload")} onClick={() => command({ type: "reload" })}><RotateCw size={17} /></button>
       </div>
-      <input ref={addressInput} aria-label="Browser address" readOnly={!commandsReady} value={address} onChange={(e) => setAddress(e.target.value)} onFocus={(e) => { urlEditing.current = true; if (commandsReady) e.target.select(); }} onBlur={() => { urlEditing.current = false; }} placeholder={connected ? "about:blank" : "Connecting…"} spellCheck={false} className="mx-1 min-w-0 flex-1 rounded-lg bg-transparent px-2 py-1.5 text-center text-[12px] outline-none placeholder:text-ink-secondary focus:bg-inset focus:text-left" />
+      <input ref={addressInput} aria-label={t("browser.panel.address")} readOnly={!commandsReady} value={address} onChange={(e) => setAddress(e.target.value)} onFocus={(e) => { urlEditing.current = true; if (commandsReady) e.target.select(); }} onBlur={() => { urlEditing.current = false; }} placeholder={connected ? "about:blank" : t("browser.panel.connecting")} spellCheck={false} className="mx-1 min-w-0 flex-1 rounded-lg bg-transparent px-2 py-1.5 text-center text-[12px] outline-none placeholder:text-ink-secondary focus:bg-inset focus:text-left" />
       <details className="relative shrink-0">
-        <summary className={`${button} list-none cursor-pointer [&::-webkit-details-marker]:hidden`} aria-label="Browser menu" title="Browser menu"><EllipsisVertical size={17} /></summary>
+        <summary className={`${button} list-none cursor-pointer [&::-webkit-details-marker]:hidden`} aria-label={t("browser.panel.menu")} title={t("browser.panel.menu")}><EllipsisVertical size={17} /></summary>
         <div className="absolute right-0 top-full z-20 mt-2 flex w-44 flex-col rounded-xl border border-hairline/50 bg-card p-1.5 text-[12px] shadow-xl">
-          <button type="button" className="rounded-md px-3 py-2 text-left hover:bg-inset disabled:opacity-40" disabled={!typingReady} onClick={(e) => { e.currentTarget.closest("details")?.removeAttribute("open"); setMasked(false); setShowTyping(true); }}>Type or paste text…</button>
+          <button type="button" className="rounded-md px-3 py-2 text-left hover:bg-inset disabled:opacity-40" disabled={!typingReady} onClick={(e) => { e.currentTarget.closest("details")?.removeAttribute("open"); setMasked(false); setShowTyping(true); }}>{t("browser.panel.typeTextMenu")}</button>
           <button type="button" className="rounded-md px-3 py-2 text-left hover:bg-inset disabled:opacity-40" disabled={!typingReady} onClick={(e) => { e.currentTarget.closest("details")?.removeAttribute("open"); setMasked(true); setShowTyping(true); }}>{t("browser.typeSecret")}</button>
-          <button type="button" className="rounded-md px-3 py-2 text-left hover:bg-inset" onClick={(e) => { e.currentTarget.closest("details")?.removeAttribute("open"); reconnect(); }}>Reconnect view</button>
+          <button type="button" className="rounded-md px-3 py-2 text-left hover:bg-inset" onClick={(e) => { e.currentTarget.closest("details")?.removeAttribute("open"); reconnect(); }}>{t("browser.panel.reconnectView")}</button>
           <button type="button" className="rounded-md px-3 py-2 text-left hover:bg-inset disabled:opacity-40" disabled={!connected || pending || taking} onClick={(e) => {
             e.currentTarget.closest("details")?.removeAttribute("open");
-            if (!window.confirm("Restart this profile’s browser? Open tabs will close. Saved logins are kept. Stop any bots using it first.")) return;
+            if (!window.confirm(t("browser.panel.confirmRestart"))) return;
             void execute({ type: "restart" });
-          }}>Restart browser…</button>
+          }}>{t("browser.panel.restartBrowser")}</button>
         </div>
       </details>
     </form>
-    {error && <div role={reconnecting ? "status" : "alert"} className={`flex items-center justify-between gap-2 border-b border-hairline/30 px-3 py-2 text-[12px] ${reconnecting ? "text-ink-secondary" : "text-danger"}`}><span>{error}</span>{!connected && <button className="shrink-0 underline" onClick={reconnect}>Reconnect</button>}</div>}
+    {error && <div role={reconnecting ? "status" : "alert"} className={`flex items-center justify-between gap-2 border-b border-hairline/30 px-3 py-2 text-[12px] ${reconnecting ? "text-ink-secondary" : "text-danger"}`}><span>{error}</span>{!connected && <button className="shrink-0 underline" onClick={reconnect}>{t("browser.panel.reconnect")}</button>}</div>}
     <div className="relative min-h-0 flex-1 overflow-hidden bg-inset/40">
       {frame ? <BrowserViewport frame={frame} {...viewport} driving={interactive} input={input}
         onReturnToToolbar={() => addressInput.current?.focus()}
         acknowledge={(seq) => { if (generation.current === frame.generation && viewer.current === frame.viewerId) void action({ type: "ack", seq }, frame.viewerId).catch(() => {}); }}
         onDecodeError={() => { if (generation.current === frame.generation && viewer.current === frame.viewerId) setError("A browser frame could not be decoded. Close and reopen the panel to reconnect."); }} />
-        : <div className="flex min-h-64 flex-col items-center justify-center gap-3 p-6 text-center text-[13px] text-ink-secondary">{connected && heldElsewhere ? <Hand size={24} /> : error && !reconnecting ? <Globe size={24} /> : <Loader2 size={24} className="animate-spin" />}<span>{heldElsewhere ? BROWSER_HELD_ELSEWHERE : reconnecting ? "Reconnecting…" : error ? "Browser disconnected" : busy ? t("browser.live.botBusy", { name: bot.name }) : "Opening the live browser…"}</span></div>}
+        : <div className="flex min-h-64 flex-col items-center justify-center gap-3 p-6 text-center text-[13px] text-ink-secondary">{connected && heldElsewhere ? <Hand size={24} /> : error && !reconnecting ? <Globe size={24} /> : <Loader2 size={24} className="animate-spin" />}<span>{heldElsewhere ? t("browser.panel.heldElsewhere") : reconnecting ? t("browser.panel.reconnecting") : error ? t("browser.panel.disconnected") : busy ? t("browser.live.botBusy", { name: bot.name }) : t("browser.panel.opening")}</span></div>}
       <div role="status" className="pointer-events-none absolute inset-x-0 top-2 flex justify-center px-3">
         {takeStatus === "slow" ? <span className={`${pill} border-hairline text-ink-secondary`}>
           <Loader2 size={13} className="shrink-0 animate-spin" aria-hidden="true" /><span className="truncate">{t("browser.control.waiting", { name: bot.name })}</span>
@@ -369,19 +367,19 @@ export function LiveBrowser({ bot, signIn }: { bot: Bot; signIn?: BrowserSignIn 
       </div>
     </div>
     <dialog ref={profilesDialog} onClose={() => setShowProfiles(false)} onClick={(e) => { if (e.target === e.currentTarget) setShowProfiles(false); }} className="m-auto w-[min(420px,calc(100%-32px))] max-h-[80vh] overflow-auto rounded-2xl border border-hairline/50 bg-card p-5 text-ink shadow-2xl backdrop:bg-black/40">
-      <div className="mb-4 flex items-center justify-between"><h2 className="text-[15px] font-medium">Browser profiles</h2><button className={button} aria-label="Close browser profiles" onClick={() => setShowProfiles(false)}><X size={16} /></button></div>
+      <div className="mb-4 flex items-center justify-between"><h2 className="text-[15px] font-medium">{t("browser.panel.profiles")}</h2><button className={button} aria-label={t("browser.panel.closeProfiles")} onClick={() => setShowProfiles(false)}><X size={16} /></button></div>
       {(heldElsewhere || (control.owned && (pending || taking))) && <p className="mb-3 text-[12px] text-ink-secondary">{t(heldElsewhere ? "browser.profiles.heldElsewhere" : "browser.profiles.busy")}</p>}
       <BrowserProfilesManager bot={bot} disabled={pending || control.held} onProfileChanged={() => { setShowProfiles(false); reconnect(); }} />
     </dialog>
     {/* Security: a password or code typed here goes only to the page's focused field; it is never held in state, logged or shown. */}
     <dialog ref={typingDialog} onClose={() => { const field = typingDialog.current?.querySelector("input"); if (field) field.value = ""; setShowTyping(false); }} className="m-auto w-[min(420px,calc(100%-32px))] rounded-2xl border border-hairline/50 bg-card p-5 text-ink shadow-2xl backdrop:bg-black/40">
-      <div className="mb-3 flex items-center justify-between"><h2 className="text-[14px] font-medium">{masked ? t("browser.typeSecret.title") : "Type into the selected page field"}</h2><button className={button} aria-label="Close typing" onClick={() => setShowTyping(false)}><X size={16} /></button></div>
+      <div className="mb-3 flex items-center justify-between"><h2 className="text-[14px] font-medium">{masked ? t("browser.typeSecret.title") : t("browser.panel.typeTextTitle")}</h2><button className={button} aria-label={t("browser.panel.closeTyping")} onClick={() => setShowTyping(false)}><X size={16} /></button></div>
       <form className="flex flex-col gap-3" onSubmit={(e) => {
       e.preventDefault(); const field = e.currentTarget.elements.namedItem("pageText") as HTMLInputElement;
       if (typingReady && field.value) { input({ type: "input_keyboard", eventType: "char", text: field.value }); field.value = ""; setShowTyping(false); }
-    }}><input key={masked ? "secret" : "text"} name="pageText" type={masked ? "password" : "text"} aria-label={masked ? t("browser.typeSecret.field") : "Text for the page"} autoComplete={masked ? "new-password" : "off"} spellCheck={false} maxLength={4096} placeholder={masked ? "••••••••" : "Type or paste text"} className="rounded-lg bg-inset px-3 py-2 text-[13px] outline-none focus:ring-1 focus:ring-accent" />
+    }}><input key={masked ? "secret" : "text"} name="pageText" type={masked ? "password" : "text"} aria-label={masked ? t("browser.typeSecret.field") : t("browser.panel.typeTextField")} autoComplete={masked ? "new-password" : "off"} spellCheck={false} maxLength={4096} placeholder={masked ? "••••••••" : t("browser.panel.typeTextPlaceholder")} className="rounded-lg bg-inset px-3 py-2 text-[13px] outline-none focus:ring-1 focus:ring-accent" />
       {masked && <p className="flex items-center gap-1 text-[11.5px] text-ink-tertiary"><LockKeyhole size={11} aria-hidden="true" />{t("browser.typeSecret.note")}</p>}
-      <button disabled={!typingReady} className="self-end rounded-lg bg-accent px-4 py-2 text-[12px] text-accent-ink disabled:opacity-40">Type</button></form>
+      <button disabled={!typingReady} className="self-end rounded-lg bg-accent px-4 py-2 text-[12px] text-accent-ink disabled:opacity-40">{t("browser.panel.typeButton")}</button></form>
     </dialog>
   </div>;
 }
@@ -400,12 +398,12 @@ export function BrowserPanel({ bot, signIn }: { bot: Bot; signIn?: BrowserSignIn
     catch (cause) { setError(cause instanceof Error ? cause.message : String(cause)); }
     finally { setRequested(false); }
   };
-  if (bot.browser === false) return <div className="p-5 text-[13px] text-ink-secondary">Enable the browser in this bot’s profile to use it.</div>;
+  if (bot.browser === false) return <div className="p-5 text-[13px] text-ink-secondary">{t("browser.panel.enableBot")}</div>;
   if (engine?.kind === "engine" && !installing && !engine.installError) return <LiveBrowser key={bot.id} bot={bot} signIn={signIn} />;
   return <div className="flex min-h-0 flex-1 flex-col items-start justify-center gap-3 rounded-xl bg-card p-5">
-    <div className="text-[15px] font-medium text-ink">{engine?.kind === "engine" ? "Browser installation incomplete" : "Browser engine not installed"}</div>
-    <p className="text-[13px] leading-relaxed text-ink-secondary">{engine?.kind === "engine" ? "agent-browser is installed, but Chrome setup has not finished. Retry the browser installation." : browserUnavailableReason(state.config)}</p>
-    {engine?.installable || engine?.kind === "engine" ? <button type="button" onClick={() => void install()} disabled={installing || admin !== true} className="rounded-lg bg-accent px-3 py-1.5 text-[13px] font-medium text-accent-ink disabled:opacity-60">{installing ? "Installing… (a one-time download of about 160 MB)" : engine?.kind === "engine" ? "Retry browser installation" : "Install the browser engine"}</button> : null}
+    <div className="text-[15px] font-medium text-ink">{engine?.kind === "engine" ? t("browser.panel.installIncomplete") : t("browser.panel.engineNotInstalled")}</div>
+    <p className="text-[13px] leading-relaxed text-ink-secondary">{engine?.kind === "engine" ? t("browser.panel.installIncompleteHelp") : browserUnavailableReason(state.config)}</p>
+    {engine?.installable || engine?.kind === "engine" ? <button type="button" onClick={() => void install()} disabled={installing || admin !== true} className="rounded-lg bg-accent px-3 py-1.5 text-[13px] font-medium text-accent-ink disabled:opacity-60">{installing ? t("browser.panel.installing") : engine?.kind === "engine" ? t("browser.panel.retryInstall") : t("browser.panel.installEngine")}</button> : null}
     {(engine?.installError || error) && <p role="alert" className="text-[12px] text-danger">{error ?? engine?.installError}</p>}
   </div>;
 }

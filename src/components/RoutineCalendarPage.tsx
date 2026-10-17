@@ -280,7 +280,7 @@ function BotPicker({
       {!locked && bots.length > 5 && (
         <label className="mb-2 flex items-center gap-2 rounded-lg border border-transparent bg-panel px-2.5 py-2 text-ink-secondary focus-within:border-focus">
           <Search size={14} />
-          <input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Find a bot" className="min-w-0 flex-1 bg-transparent text-[12px] text-ink outline-none placeholder:text-ink-tertiary" />
+          <input value={query} onChange={(event) => setQuery(event.target.value)} placeholder={t("routines.findBot")} className="min-w-0 flex-1 bg-transparent text-[12px] text-ink outline-none placeholder:text-ink-tertiary" />
         </label>
       )}
       <div className="grid max-h-48 grid-cols-1 gap-1 overflow-y-auto sm:grid-cols-2">
@@ -596,13 +596,13 @@ export function EventEditor({
 
   const kindSwitchControl = canSwitchKind && (
             <div className={cn(advanced && "ml-10", "inline-flex rounded-lg bg-inset p-1")}>
-              <button type="button" onClick={() => { setKind("routine"); setBotIds((ids) => ids.slice(0, 1)); }} className={cn("rounded-md px-4 py-1.5 text-[12.5px] font-medium", kind === "routine" ? "bg-raised text-ink shadow" : "text-ink-secondary")}>Routine</button>
-              <button type="button" onClick={() => { setKind("call"); if (recurrence === "interval" || isCronChoice(recurrence)) setRecurrence("none"); }} className={cn("rounded-md px-4 py-1.5 text-[12.5px] font-medium", kind === "call" ? "bg-raised text-ink shadow" : "text-ink-secondary")}>Call</button>
+              <button type="button" onClick={() => { setKind("routine"); setBotIds((ids) => ids.slice(0, 1)); }} className={cn("rounded-md px-4 py-1.5 text-[12.5px] font-medium", kind === "routine" ? "bg-raised text-ink shadow" : "text-ink-secondary")}>{t("routines.kind.routine")}</button>
+              <button type="button" onClick={() => { setKind("call"); if (recurrence === "interval" || isCronChoice(recurrence)) setRecurrence("none"); }} className={cn("rounded-md px-4 py-1.5 text-[12.5px] font-medium", kind === "call" ? "bg-raised text-ink shadow" : "text-ink-secondary")}>{t("routines.kind.call")}</button>
             </div>
           );
   const routineTypeControl = kind === "routine" && !lockedBotId && (
             <div className={cn(advanced && "ml-10")}>
-              <div className="mb-2 text-[11px] font-medium uppercase tracking-wider text-ink-secondary">Routine type</div>
+              <div className="mb-2 text-[11px] font-medium uppercase tracking-wider text-ink-secondary">{t("routines.editor.type")}</div>
               <div className="grid gap-2 sm:grid-cols-2">
                 <button
                   type="button"
@@ -610,7 +610,7 @@ export function EventEditor({
                   className={cn("flex items-start gap-3 rounded-xl border p-3 text-left transition", routineTarget === "bot" ? "border-accent/60 bg-accent/10" : "border-hairline/50 bg-inset hover:bg-raised")}
                 >
                   <UserRoundPlus size={17} className={cn("mt-0.5 shrink-0", routineTarget === "bot" ? "text-accent" : "text-ink-secondary")} />
-                  <span><span className="block text-[12.5px] font-medium text-ink">Bot task</span><span className="mt-1 block text-[11px] leading-relaxed text-ink-secondary">One bot owns and completes each run.</span></span>
+                  <span><span className="block text-[12.5px] font-medium text-ink">{t("routines.editor.botTask")}</span><span className="mt-1 block text-[11px] leading-relaxed text-ink-secondary">{t("routines.editor.botTaskHelp")}</span></span>
                 </button>
                 <button
                   type="button"
@@ -618,7 +618,7 @@ export function EventEditor({
                   className={cn("flex items-start gap-3 rounded-xl border p-3 text-left transition", routineTarget === "room-goal" ? "border-accent/60 bg-accent/10" : "border-hairline/50 bg-inset hover:bg-raised")}
                 >
                   <Target size={17} className={cn("mt-0.5 shrink-0", routineTarget === "room-goal" ? "text-accent" : "text-ink-secondary")} />
-                  <span><span className="block text-[12.5px] font-medium text-ink">Team goal</span><span className="mt-1 block text-[11px] leading-relaxed text-ink-secondary">A lead coordinates the group until the goal settles.</span></span>
+                  <span><span className="block text-[12.5px] font-medium text-ink">{t("routines.editor.teamGoal")}</span><span className="mt-1 block text-[11px] leading-relaxed text-ink-secondary">{t("routines.editor.teamGoalHelp")}</span></span>
                 </button>
               </div>
             </div>
@@ -849,7 +849,7 @@ export function EventEditor({
             {isRoomGoal ? (
               <div className="min-w-0 flex-1 rounded-xl border border-hairline/50 bg-inset px-3.5 py-3">
                 <div className="text-[12.5px] font-medium text-ink">Use the group’s shared context</div>
-                <div className="mt-1 text-[11px] leading-relaxed text-ink-secondary">Team goals cannot carry routine attachments. Put shared context in the goal instructions or the group instructions.</div>
+                <div className="mt-1 text-[11px] leading-relaxed text-ink-secondary">{t("routines.editor.teamGoalAttachments")}</div>
               </div>
             ) : <div className="min-w-0 flex-1 space-y-2">
               <input ref={fileInput} type="file" multiple className="hidden" onChange={(event) => { void pickFiles(event.target.files); event.target.value = ""; }} />
@@ -1157,8 +1157,8 @@ export function QuickComposer({
         <input autoFocus value={name} onChange={(event) => setName(event.target.value)} placeholder="Add title" onKeyDown={(event) => { if (event.key === "Enter" && valid) void save(); }} className="w-full border-b border-hairline/60 bg-transparent pb-2 text-[18px] font-medium text-ink outline-none placeholder:text-ink-tertiary focus:border-accent" />
         {!routinesOnly && (
           <div className="flex items-center gap-1 border-b border-hairline/35 pb-2">
-            <button type="button" onClick={() => { setKind("routine"); setBotIds((ids) => ids.slice(0, 1)); }} className={cn("rounded-lg px-3 py-1.5 text-[12px] font-medium", kind === "routine" ? "bg-accent/15 text-accent" : "text-ink-secondary hover:bg-raised hover:text-ink")}>Routine</button>
-            <button type="button" onClick={() => setKind("call")} className={cn("rounded-lg px-3 py-1.5 text-[12px] font-medium", kind === "call" ? "bg-accent/15 text-accent" : "text-ink-secondary hover:bg-raised hover:text-ink")}>Call</button>
+            <button type="button" onClick={() => { setKind("routine"); setBotIds((ids) => ids.slice(0, 1)); }} className={cn("rounded-lg px-3 py-1.5 text-[12px] font-medium", kind === "routine" ? "bg-accent/15 text-accent" : "text-ink-secondary hover:bg-raised hover:text-ink")}>{t("routines.kind.routine")}</button>
+            <button type="button" onClick={() => setKind("call")} className={cn("rounded-lg px-3 py-1.5 text-[12px] font-medium", kind === "call" ? "bg-accent/15 text-accent" : "text-ink-secondary hover:bg-raised hover:text-ink")}>{t("routines.kind.call")}</button>
           </div>
         )}
         <div className="flex items-start gap-3 text-[12.5px] text-ink">
@@ -1298,7 +1298,7 @@ function CalendarEventCard({
         {previewDuration >= 30 && (isCall ? <Video size={compact ? 11 : 13} className="mt-0.5 shrink-0" /> : primary ? <BotAvatar bot={primary} state={status ? statusState(status) : paused ? "sleeping" : "idle"} size={compact ? 18 : 22} animated={status === "running" || status === "waiting"} /> : null)}
         <div className="min-w-0 flex-1">
           <div className={cn("truncate text-[11px] font-semibold", previewDuration < 30 ? "leading-none" : "leading-tight")}>{name}</div>
-          {previewDuration >= 30 && <div className="mt-0.5 flex min-w-0 items-center gap-1 text-[9.5px] opacity-80">{!isCall && <span data-event-status={paused ? "paused" : status === "failed" || status === "missed" || status === "waiting" ? "needs-you" : "working"} className={cn("size-1.5 shrink-0 rounded-full", paused ? "bg-ink-tertiary" : status === "failed" || status === "missed" || status === "waiting" ? "bg-warning" : "bg-success")} />}<span className="truncate">{niceTime(item.at)} · {isCall ? `${ownerBots.length} bot${ownerBots.length === 1 ? "" : "s"}` : isRoomGoal ? room?.name ?? "Group" : intervalCadence ? `${primary?.name ?? ""} · ${intervalCadence}` : primary?.name}</span></div>}
+          {previewDuration >= 30 && <div className="mt-0.5 flex min-w-0 items-center gap-1 text-[9.5px] opacity-80">{!isCall && <span data-event-status={paused ? "paused" : status === "failed" || status === "missed" || status === "waiting" ? "needs-you" : "working"} className={cn("size-1.5 shrink-0 rounded-full", paused ? "bg-ink-tertiary" : status === "failed" || status === "missed" || status === "waiting" ? "bg-warning" : "bg-success")} />}<span className="truncate">{niceTime(item.at)} · {isCall ? t(ownerBots.length === 1 ? "routines.botCountOne" : "routines.botCountMany", { count: ownerBots.length }) : isRoomGoal ? room?.name ?? t("routines.group") : intervalCadence ? `${primary?.name ?? ""} · ${intervalCadence}` : primary?.name}</span></div>}
         </div>
         {previewDuration >= 30 && ownerBots.length > 1 && <span className="rounded bg-inset/60 px-1 py-0.5 text-[8px]">+{ownerBots.length - 1}</span>}
       </div>
@@ -1725,7 +1725,7 @@ export function PausedList({
                 {room ? <span className="flex size-9 shrink-0 items-center justify-center rounded-full bg-accent/12 text-accent"><UsersRound size={17} /></span> : bot && <BotAvatar bot={bot} state="sleeping" size={36} animated={false} />}
                 <div className="min-w-0 flex-1">
                   <div className="truncate text-[12.5px] font-medium text-ink">{routine.name}</div>
-                  <div className="mt-0.5 truncate text-[10.5px] text-ink-secondary">{room ? `Team goal · ${room.name} · ` : ""}{scheduleLabel(routine.schedule)}</div>
+                  <div className="mt-0.5 truncate text-[10.5px] text-ink-secondary">{room ? `${t("routines.editor.teamGoal")} · ${room.name} · ` : ""}{scheduleLabel(routine.schedule)}</div>
                 </div>
                 {room && <button onClick={() => { onOpenRoom(room.id); onClose(); }} className="rounded-lg px-2 py-1.5 text-[11px] text-ink-secondary hover:bg-inset">Group</button>}
                 <button onClick={() => dispatch({ type: "updateRoutine", routineId: routine.id, patch: { enabled: true } })} className="rounded-lg bg-accent/15 px-2.5 py-1.5 text-[11px] font-medium text-accent">Resume</button>
