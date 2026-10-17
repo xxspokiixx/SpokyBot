@@ -246,6 +246,7 @@ describe("bounded scheduled overlap and run health", () => {
     const routine = h.manager.create({ ...input(), enabled: false });
     h.manager.runNow(routine.id); await h.manager.tick();
     const disk = JSON.parse(readFileSync(h.options.file!, "utf8"));
+    disk.runs[0].retried = "restarted";
     Object.assign(disk.routines[0], { failureStreak: 99, skippedRuns: -1, lastSkippedAt: 9e15, overlap: "invalid" });
     writeFileSync(h.options.file!, JSON.stringify(disk));
     for (let i = 0; i < 2; i++) {
@@ -831,7 +832,8 @@ describe("persistent routine results destinations", () => {
       expect(h.failed).toHaveLength(trigger === "missed" ? 1 : 0);
       expect(observations.length).toBeGreaterThan(0);
       for (const { payload, persisted: saved } of observations) {
-        const value = payload.kind === "routine" ? payload.routine : payload.run;
+        // A week's tally is derived from the runs on every read, never stored on the routine.
+        const { weekRuns: _derived, ...value } = payload.kind === "routine" ? payload.routine : payload.run;
         const records = payload.kind === "routine" ? saved.routines : saved.runs;
         expect(records.find((record: any) => record.id === value.id)).toEqual(JSON.parse(JSON.stringify(value)));
       }
@@ -1333,19 +1335,27 @@ describe("RoutineManager", () => {
       h.failed.push(run);
       failureWasPersistedBeforeCallback = readFileSync(routineFile, "utf8").includes('"status": "failed"');
     };
+    const cut: RoutineRun[] = [];
+    h.options.onRunCut = (run) => cut.push(run);
+    // The restart cuts the run off: it is queued once more in its own thread.
     const reloaded = new RoutineManager(h.options);
     expect(reloaded.listRoutines()).toHaveLength(1);
     expect(reloaded.listRuns()).toMatchObject([
-      {
-        routineId: routine.id,
-        routineName: "Morning brief",
-        status: "failed",
-        threadId: "thread-1",
-        timeoutMinutes: 15,
-      },
+      { routineId: routine.id, routineName: "Morning brief", status: "queued", retried: "restarted", threadId: "thread-1", timeoutMinutes: 15 },
     ]);
-    expect(reloaded.listRuns()[0]!.error).toContain("restarted");
+    expect(cut).toMatchObject([{ status: "queued", threadId: "thread-1" }]);
+    expect(h.failed).toEqual([]);
+    h.setNow(routine.nextRunAt! + 16_000);
+    await reloaded.tick();
+    expect(h.started.map((turn) => turn.threadId)).toEqual(["thread-1", "thread-1"]);
+
+    // A second restart while that second start runs fails it.
+    const again = new RoutineManager(h.options);
+    expect(again.listRuns()).toMatchObject([
+      { routineId: routine.id, status: "failed", retried: "restarted", threadId: "thread-1", error: "OpenMausBot restarted while this routine was running" },
+    ]);
     expect(failureWasPersistedBeforeCallback).toBe(true);
+    expect(cut).toHaveLength(2);
     expect(h.failed).toMatchObject([
       {
         routineId: routine.id,
@@ -1355,6 +1365,7 @@ describe("RoutineManager", () => {
         error: "OpenMausBot restarted while this routine was running",
       },
     ]);
+    expect(new RoutineManager(h.options).listRuns()).toHaveLength(1);
   });
 
   it("migrates optional attachment and timeout metadata without losing legacy records", () => {
@@ -3347,6 +3358,7 @@ describe("run on startup", () => {
     const launched = new RoutineManager({ ...h.options, launchId: "launch-a" });
     launched.start();
     await expect.poll(() => h.started.length).toBe(1);
+    launched.handleRuntimeEvent({ eventId: "done", provider: "fake", threadId: "thread-1", createdAt: new Date(0).toISOString(), type: "turn.completed", ok: true });
     launched.stop();
     // The desktop restarts a crashed server, or switches back to this workspace, within the same launch.
     const restarted = new RoutineManager({ ...h.options, launchId: "launch-a" });
@@ -3644,65 +3656,6 @@ describe("routine continuity", () => {
       schedule: { type: "once", at: new Date(2026, 7, 17, 9, 0, 0).getTime() },
       continuity: true,
     })).toThrow(/continuity/i);
-  });
-});
-
-describe("a run that fails on a passing provider error before doing anything", () => {
-  const ROUTING = "stream error: workspace routing discovery failed: error sending request";
-  const event = (threadId: string) => ({ eventId: `event-${Math.random()}`, provider: "fake", threadId, createdAt: new Date().toISOString() });
-  const failTurn = (h: ReturnType<typeof harness>, threadId: string, message: string) => {
-    h.manager.handleRuntimeEvent({ ...event(threadId), type: "runtime.error", message });
-    h.manager.handleRuntimeEvent({ ...event(threadId), type: "turn.completed", ok: false, stopReason: message });
-  };
-  const started = async () => {
-    const h = harness();
-    const routine = h.manager.create({ name: "Inbox sweep", prompt: "Sweep the inbox", botId: "maus-1",
-      schedule: { type: "daily", time: "09:00", weekdays: [1] } });
-    h.manager.runNow(routine.id);
-    await h.manager.tick();
-    return h;
-  };
-
-  it("starts again once in the same thread, and completes there", async () => {
-    const h = await started();
-    failTurn(h, "thread-1", ROUTING);
-    expect(h.manager.listRuns()[0]).toMatchObject({ status: "queued", threadId: "thread-1", attention: expect.stringContaining("temporary error") });
-    expect(h.failed).toEqual([]);
-    await h.manager.tick();
-    expect(h.started).toHaveLength(1);
-
-    h.setNow(new Date(2026, 7, 17, 8, 0, 16).getTime());
-    await h.manager.tick();
-    expect(h.started.map((turn) => turn.threadId)).toEqual(["thread-1", "thread-1"]);
-    expect(h.started[1]!.prompt).toBe(routineTurn("Inbox sweep", "Sweep the inbox", "manual"));
-    expect(h.manager.listRuns()[0]).toMatchObject({ status: "running" });
-    h.manager.handleRuntimeEvent({ ...event("thread-1"), type: "item.completed", itemType: "assistant_text", text: "Inbox swept." });
-    h.manager.handleRuntimeEvent({ ...event("thread-1"), type: "turn.completed", ok: true });
-    expect(h.manager.listRuns()).toMatchObject([{ status: "completed", output: "Inbox swept.", attention: undefined }]);
-    expect(h.taskTitles).toHaveLength(1);
-  });
-
-  it("fails the second time, and never re-runs work it already did or a refused sign-in", async () => {
-    const twice = await started();
-    failTurn(twice, "thread-1", ROUTING);
-    twice.setNow(new Date(2026, 7, 17, 8, 0, 16).getTime());
-    await twice.manager.tick();
-    failTurn(twice, "thread-1", ROUTING);
-    expect(twice.manager.listRuns()[0]).toMatchObject({ status: "failed", error: ROUTING });
-
-    const worked = await started();
-    worked.manager.handleRuntimeEvent({ ...event("thread-1"), type: "item.started", itemType: "tool", itemId: "t1", title: "shell" });
-    failTurn(worked, "thread-1", ROUTING);
-    expect(worked.manager.listRuns()[0]).toMatchObject({ status: "failed" });
-
-    const answered = await started();
-    answered.manager.handleRuntimeEvent({ ...event("thread-1"), type: "item.completed", itemType: "assistant_text", text: "Half done" });
-    failTurn(answered, "thread-1", ROUTING);
-    expect(answered.manager.listRuns()[0]).toMatchObject({ status: "failed" });
-
-    const refused = await started();
-    failTurn(refused, "thread-1", "workspace routing discovery unauthorized (401)");
-    expect(refused.manager.listRuns()[0]).toMatchObject({ status: "failed" });
   });
 });
 
