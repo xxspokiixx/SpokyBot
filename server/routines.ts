@@ -10,17 +10,20 @@ import { redactSecretsInText } from "./redact.ts";
 import type { GroupGoalRunStatus } from "../shared/group-goal-run.ts";
 import type { RoutineRequestOperation } from "../shared/routine-request.ts";
 import { normalizeCronSchedule, nextCronRuns, type RoutineCronSchedule } from "../shared/routine-schedule.ts";
-import { isRoutineProblemRun } from "../shared/routines.ts";
+import {
+  isRoutineProblemRun, type RoutineContextAttachment, type RoutineIntervalWindow, type RoutineRetryCause, type RoutineRunStatus, type RoutineRunTrigger,
+} from "../shared/routines.ts";
 import { ROUTINE_PARTS, type PartPair, type RoutinePart } from "./package-parts.ts";
 import {
-  composeExecutionPrompt, continuityCarry, retriesTransiently, ROUTINE_DEFERRAL_NOTICE_MS, ROUTINE_SKIPPED_WHILE_WAITING, ROUTINE_SUPERSEDED,
-  ROUTINE_TRANSIENT_RETRY_MS, routineFailure, routineHostWarning, skipNeedsNotice, supersededBy,
+  composeExecutionPrompt, continuityCarry, ROUTINE_DEFERRAL_NOTICE_MS, ROUTINE_SKIPPED_WHILE_WAITING, ROUTINE_SUPERSEDED,
+  routineFailure, routineHostWarning, skipNeedsNotice, supersededBy,
 } from "./routine-execution.ts";
+import {
+  dispatchRefusal, engineFacts, loadOwnerNotices, recoverRun, requeueOnce, weekRuns, type RoutineAlert, type RoutineFailureFacts, type RoutineOwnerNotice,
+} from "./routine-recovery.ts";
+import { activeMs, askOf, settleAsk, waitingFor, type RoutineRunAsk } from "./routine-waits.ts";
 
-export interface RoutineIntervalWindow {
-  start: string;
-  end: string;
-}
+export type { RoutineContextAttachment, RoutineIntervalWindow, RoutineRunStatus, RoutineRunTrigger };
 
 export interface RoutineIntervalSchedule {
   type: "interval";
@@ -53,26 +56,7 @@ export type RoutineRunOn = "maus" | "cloud";
 export type RoutineTarget = "bot" | "room-goal";
 export type RoutineGoalStatus = Exclude<GroupGoalRunStatus, "working">;
 
-export interface RoutineContextAttachment {
-  id: string;
-  kind: "file" | "image";
-  name: string;
-  path: string;
-  size: number;
-}
-
 const persistedSourceThreadId = z.string().trim().min(1).optional().catch(undefined);
-
-export type RoutineRunTrigger = "schedule" | "manual" | "webhook" | "startup";
-
-export type RoutineRunStatus =
-  | "queued"
-  | "running"
-  | "waiting"
-  | "completed"
-  | "failed"
-  | "cancelled"
-  | "missed";
 
 export interface Routine {
   id: string;
@@ -93,6 +77,7 @@ export interface Routine {
   skippedRuns?: number;
   lastSkippedAt?: number;
   failureStreak?: number;
+  weekRuns?: { ok: number; total: number };
   warning?: string;
   sourceThreadId?: string;
   resultsThreadId?: string;
@@ -140,10 +125,14 @@ export interface RoutineRun {
   manual: boolean;
   deferredAt?: number;
   deferredNoticeAt?: number;
-  /** Set once a transient failure re-queued the run; it starts again no earlier than this. */
+  /** A queued run starts no earlier than this. */
   retryAt?: number;
+  retried?: RoutineRetryCause;
   /** When its current wait began; read only while the run is waiting. */
   waitingSince?: number;
+  asked?: RoutineRunAsk;
+  /** Time spent waiting on the person's answers, which the run limit does not count. */
+  waitedMs?: number;
   triggerSource?: RoutineRunTrigger;
   webhookId?: string;
   deliveryId?: string;
@@ -212,6 +201,7 @@ interface RoutineFile {
   routineRequestReceipts?: RoutineRequestReceipt[];
   webhookRunReceipts?: WebhookRunReceipt[];
   startupLaunchId?: string;
+  ownerNotices?: RoutineOwnerNotice[];
 }
 
 const webhookRunReceiptSchema = z.object({
@@ -269,8 +259,10 @@ export interface RoutineManagerOptions {
     outcome?: { status: "stopped" | "limit-reached"; detail: string },
   ) => Promise<void>;
   onRunChanged?: (run: RoutineRun) => void;
-  onRunFailed?: (run: RoutineRun) => void;
-  onRunDeferred?: (run: RoutineRun) => void;
+  onRunFailed?: (run: RoutineRun, alert?: RoutineAlert | null) => void;
+  onRunDeferred?: (run: RoutineRun, alert?: RoutineAlert) => void;
+  /** A run a restart cut off, before it starts again or fails: its old turn's work must not resume as well. */
+  onRunCut?: (run: RoutineRun) => void;
   hasPendingDelegations?: (threadId: string) => boolean;
   /** Work this thread handed to another bot is still open, so its wait is not only on the person. */
   handedOffWorkLive?: (threadId: string) => boolean;
@@ -687,7 +679,9 @@ export class RoutineManager {
   private startupRunsQueued = false;
   private startupLaunchId: string | undefined;
   private ticking = false;
-  private readonly workedRuns = new Set<string>();
+  private closing = false;
+  private ownerNotices: RoutineOwnerNotice[] = [];
+  private readonly failureFacts = new Map<string, RoutineFailureFacts>();
   /** Saves are refused while set, so an empty state never overwrites an unreadable file. */
   private unreadable = false;
   private frozenPending = false;
@@ -772,6 +766,7 @@ export class RoutineManager {
           })
         : [];
       this.frozenPending = disk.frozenResultsCleared !== true;
+      this.ownerNotices = loadOwnerNotices(disk.ownerNotices);
       if (typeof disk.startupLaunchId === "string") this.startupLaunchId = disk.startupLaunchId;
       const known = new Set(this.webhookRunReceipts.map((r) => JSON.stringify([r.webhookId, r.deliveryId])));
       for (const run of this.runs) {
@@ -795,27 +790,24 @@ export class RoutineManager {
         console.error(`routines: ignoring unreadable ${this.file}: ${reason}`);
       }
     }
-    const recovered: RoutineRun[] = [];
-    for (const run of this.runs) {
-      if (run.status === "running" || run.status === "waiting") {
-        if (run.threadId && run.target === "bot" && this.options.hasPendingDelegations?.(run.threadId) === true) {
-          this.wait(run, "Waiting for delegated work to finish");
-          continue;
-        }
-        run.status = "failed";
+    const cut: RoutineRun[] = [];
+    for (const run of this.runs.filter((candidate) => candidate.status === "running" || candidate.status === "waiting")) {
+      settleAsk(run, undefined, this.now());
+      if (run.threadId && run.target === "bot" && this.options.hasPendingDelegations?.(run.threadId) === true) {
+        this.wait(run, "Waiting for delegated work to finish");
+        continue;
+      }
+      if (!requeueOnce(run, "restarted", ROUTINE_RESTARTED, this.now())) {
+        Object.assign(run, { status: "failed", error: ROUTINE_RESTARTED, attention: undefined, finishedAt: this.now() } satisfies Partial<RoutineRun>);
         if (run.target === "room-goal") run.goalStatus = "failed";
-        run.error = ROUTINE_RESTARTED;
-        run.attention = undefined;
-        run.finishedAt = this.now();
-        recovered.push(cloneRun(run));
       }
+      cut.push(cloneRun(run));
     }
-    if (recovered.length > 0) {
-      this.save();
-      for (const run of recovered) {
-        this.notifyRunChanged(run);
-        this.options.onRunFailed?.(run);
-      }
+    if (cut.length > 0) this.save();
+    for (const run of cut) {
+      if (run.threadId) this.options.onRunCut?.(run);
+      this.notifyRunChanged(run);
+      if (run.status === "failed") this.options.onRunFailed?.(run);
     }
   }
 
@@ -839,8 +831,8 @@ export class RoutineManager {
     const success = outcomes.findIndex(run => run.status === "completed");
     const failures = success < 0 ? outcomes.length : success;
     const { installedPackage: _installedPackage, ...visible } = cloneRoutine(routine);
-    const warning = routineHostWarning(routine);
-    return { ...visible, ...(failures ? { failureStreak: failures } : {}), ...(warning ? { warning } : {}) };
+    const warning = routineHostWarning(routine), week = weekRuns(this.runs, routine.id, this.now());
+    return { ...visible, ...(failures ? { failureStreak: failures } : {}), ...(week ? { weekRuns: week } : {}), ...(warning ? { warning } : {}) };
   }
 
   packageStamps(): Array<{ routineId: string; botId: string; enabled: boolean; stamp: RoutinePackageStamp }> {
@@ -862,10 +854,10 @@ export class RoutineManager {
 
   wakeHold(horizonMs = WAKE_HORIZON_MS): { hold: boolean; reason?: "running" | "due"; at?: number } {
     const now = this.now();
-    if (this.runs.some((run) => ["queued", "running", "waiting"].includes(run.status))) return { hold: true, reason: "running" };
-    const due = this.routines
-      .filter((routine) => routine.enabled && routine.nextRunAt != null && routine.nextRunAt <= now + horizonMs)
-      .map((routine) => routine.nextRunAt!)
+    const startsLater = (run: RoutineRun) => run.status === "queued" && (run.retryAt ?? 0) > now;
+    if (this.runs.some((run) => ["queued", "running", "waiting"].includes(run.status) && !startsLater(run))) return { hold: true, reason: "running" };
+    const due = [...this.routines.filter((routine) => routine.enabled).map((routine) => routine.nextRunAt), ...this.runs.filter(startsLater).map((run) => run.retryAt)]
+      .filter((at): at is number => at != null && at <= now + horizonMs)
       .sort((a, b) => a - b)[0];
     return due === undefined ? { hold: false } : { hold: true, reason: "due", at: due };
   }
@@ -1318,6 +1310,12 @@ export class RoutineManager {
     this.timer = null;
   }
 
+  /** At shutdown: a run whose turn the shutdown cuts stays running on disk, for the next start to pick up once. */
+  close() {
+    this.closing = true;
+    this.stop();
+  }
+
   private queueStartupRuns(): boolean {
     const launchId = this.options.launchId;
     if (launchId !== undefined && launchId === this.startupLaunchId) return true;
@@ -1360,25 +1358,9 @@ export class RoutineManager {
     try {
       const now = this.now();
       for (const run of this.runs) {
-        if (
-          !["running", "waiting"].includes(run.status) ||
-          run.startedAt == null ||
-          run.timeoutMinutes == null ||
-          now - run.startedAt < run.timeoutMinutes * 60_000
-        ) continue;
-        const threadId = run.threadId;
-        const detail = `Stopped after reaching the ${run.timeoutMinutes}-minute run limit`;
-        if (run.target === "room-goal") run.goalStatus = "limit-reached";
-        this.failRun(run, detail);
-        if (!threadId) continue;
-        if (run.target === "room-goal" && run.groupId) {
-          await this.options.interruptGoal?.(run.groupId, threadId, {
-            status: "limit-reached",
-            detail,
-          }).catch(() => {});
-        } else {
-          await this.options.interruptTurn?.(run.botId, threadId).catch(() => {});
-        }
+        if (!["running", "waiting"].includes(run.status) || run.startedAt == null || run.timeoutMinutes == null ||
+          activeMs(run, now) < run.timeoutMinutes * 60_000) continue;
+        await this.stopRun(run, `Stopped after reaching the ${run.timeoutMinutes}-minute run limit`, "limit-reached");
       }
       const dueRoutines = this.routines.filter(
         (routine) => routine.enabled && routine.nextRunAt != null && routine.nextRunAt <= now,
@@ -1457,7 +1439,7 @@ export class RoutineManager {
             (!requiresCurrentDayOccurrence || (latest !== null && isSameLocalDay(latest, now)));
           if (!mayDispatch) {
             if (nextOccurrence(definition.schedule, now) === null) {
-              this.missQueuedRun(run, "The routine ended before this scheduled run could start");
+              this.failRun(run, "The routine ended before this scheduled run could start", "missed");
             }
             continue;
           }
@@ -1486,7 +1468,7 @@ export class RoutineManager {
         const startedAt = this.now();
         const suffix = ` · ${new Date(startedAt).toLocaleString("en-US", { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" })}`;
         const title = `${run.routineName.slice(0, 80 - suffix.length).trimEnd()}${suffix}`;
-        const joined = run.target === "room-goal" ? null : (run.retryAt !== undefined && run.threadId) || this.options.joinConversation?.(run) || null;
+        const joined = run.target === "room-goal" ? null : run.threadId || this.options.joinConversation?.(run) || null;
         const task = joined
           ? { threadId: joined }
           : run.target === "room-goal"
@@ -1529,14 +1511,14 @@ export class RoutineManager {
             await this.options.startTurn(
               run.botId,
               task.threadId,
-              composeExecutionPrompt({ name: run.routineName, trigger: triggerSource, runOn: run.runOn ?? "maus" }, prompt, run.attachments, continuityCarry(run, this.routines, this.runs)),
+              composeExecutionPrompt({ name: run.routineName, trigger: triggerSource, runOn: run.runOn ?? "maus" }, prompt, run.attachments, continuityCarry(run, this.routines, this.runs), run.retried),
               run.runOn ?? "maus",
               triggerSource,
               (message) => this.failThread(task.threadId, message),
             );
           }
         } catch (error) {
-          this.failThread(task.threadId, error instanceof Error ? error.message : String(error));
+          this.failThread(task.threadId, error instanceof Error ? error.message : String(error), dispatchRefusal(error));
         }
       }
     } finally {
@@ -1547,6 +1529,7 @@ export class RoutineManager {
   handleRuntimeEvent(event: RuntimeEvent): RoutineRun | null {
     const run = this.runs.find((r) => r.threadId === event.threadId && ["running", "waiting"].includes(r.status));
     if (!run) return null;
+    if (event.type === "turn.started" || event.type === "turn.completed") settleAsk(run, undefined, this.now());
     // A room goal's orchestrator owns its result (finishGoalRun); a member's completion is intermediate.
     if (
       run.target === "room-goal" &&
@@ -1559,35 +1542,35 @@ export class RoutineManager {
       run.status = "running";
       run.attention = undefined;
     } else if (event.type === "request.opened") {
-      this.wait(run, redactSecretsInText(event.summary).trim().slice(0, 500) || undefined);
+      run.asked ??= askOf(event, this.now());
+      this.wait(run, waitingFor(run.asked));
     } else if (event.type === "request.resolved") {
+      const unanswered = settleAsk(run, event, this.now());
+      if (unanswered) {
+        void this.stopRun(run, unanswered, "stopped");
+        return cloneRun(run);
+      }
       run.status = "running";
       run.attention = undefined;
     } else if (event.type === "item.completed" && event.itemType === "assistant_text") {
       run.output = redactSecretsInText(event.text).trim().slice(0, 2_000);
     } else if (event.type === "runtime.error") {
       run.error = redactSecretsInText(event.message).slice(0, 500);
-    } else if (event.type === "turn.retrying" || event.type === "item.started") {
-      if (event.type === "item.started") this.workedRuns.add(run.id);
-      return null;
+      this.failureFacts.set(run.id, engineFacts(event));
     } else if (event.type === "turn.completed") {
+      if (this.closing && (!event.ok || event.stopReason === "cancelled" || event.stopReason === "interrupted")) return null;
       if (event.cost != null) run.cost = (run.cost ?? 0) + event.cost;
       if (event.denials?.length) run.denials = [...new Set([...(run.denials ?? []), ...event.denials])];
-      const failure = event.ok ? "" : routineFailure(run.error, event.stopReason);
-      const worked = this.workedRuns.delete(run.id);
-      if (failure && !retriesTransiently(run, failure, worked)) {
-        this.failRun(run, failure);
-        queueMicrotask(() => void this.tick());
+      if (!event.ok) {
+        this.settleFailure(run, routineFailure(run.error, event.stopReason), { ...this.failureFacts.get(run.id), stopReason: event.stopReason });
         return cloneRun(run);
       }
-      const pending = !failure && this.options.hasPendingDelegations?.(event.threadId) === true;
-      if (pending) this.wait(run, "Waiting for delegated work to finish");
+      this.failureFacts.delete(run.id);
+      if (this.options.hasPendingDelegations?.(event.threadId) === true) this.wait(run, "Waiting for delegated work to finish");
       else {
-        run.status = failure ? "queued" : "completed";
-        run.attention = failure ? `Starting again shortly after a temporary error: ${failure}`.slice(0, 500) : undefined;
+        Object.assign(run, { status: "completed", attention: undefined, finishedAt: this.now() } satisfies Partial<RoutineRun>);
+        this.ownerNotices = this.ownerNotices.filter((notice) => notice.botId !== run.botId);
       }
-      if (failure) run.retryAt = this.now() + ROUTINE_TRANSIENT_RETRY_MS;
-      else if (!pending) run.finishedAt = this.now();
       run.error = undefined;
     } else {
       return null;
@@ -1598,10 +1581,21 @@ export class RoutineManager {
     return cloneRun(run);
   }
 
-  failThread(threadId: string, message: string) {
+  failThread(threadId: string, message: string, facts: RoutineFailureFacts = {}) {
     const run = this.runs.find((r) => r.threadId === threadId && ["running", "waiting"].includes(r.status));
-    if (!run) return;
-    this.failRun(run, message);
+    if (run) this.settleFailure(run, message, facts);
+  }
+
+  private settleFailure(run: RoutineRun, failure: string, facts: RoutineFailureFacts) {
+    this.failureFacts.delete(run.id);
+    if (this.closing) return;
+    const recovery = recoverRun(run, failure, facts, this.now(), this.ownerNotices);
+    if (!recovery.queued) this.failRun(run, recovery.error, "failed", recovery.alert);
+    else {
+      this.save();
+      this.emitRun(run);
+      if (recovery.alert) this.options.onRunDeferred?.(cloneRun(run), recovery.alert);
+    }
     queueMicrotask(() => void this.tick());
   }
 
@@ -1645,24 +1639,22 @@ export class RoutineManager {
     run.attention = attention;
   }
 
-  private failRun(run: RoutineRun, message: string) {
-    run.status = "failed";
-    run.attention = undefined;
-    run.error = redactSecretsInText(message).slice(0, 500);
-    run.finishedAt = this.now();
-    this.save();
-    this.emitRun(run);
-    this.options.onRunFailed?.(cloneRun(run));
+  private async stopRun(run: RoutineRun, detail: string, status: "stopped" | "limit-reached") {
+    if (run.target === "room-goal") run.goalStatus = status;
+    this.failRun(run, detail);
+    if (!run.threadId) return;
+    if (run.target === "room-goal" && run.groupId) await this.options.interruptGoal?.(run.groupId, run.threadId, { status, detail }).catch(() => {});
+    else await this.options.interruptTurn?.(run.botId, run.threadId).catch(() => {});
   }
 
-  private missQueuedRun(run: RoutineRun, message: string) {
-    run.status = "missed";
+  private failRun(run: RoutineRun, message: string, status: "failed" | "missed" = "failed", alert?: RoutineAlert | null) {
+    run.status = status;
     run.attention = undefined;
     run.error = redactSecretsInText(message).slice(0, 500);
     run.finishedAt = this.now();
     this.save();
     this.emitRun(run);
-    this.options.onRunFailed?.(cloneRun(run));
+    this.options.onRunFailed?.(cloneRun(run), alert);
   }
 
   private advancePastOccurrence(routine: Routine, now: number, occurrence: number) {
@@ -1871,6 +1863,7 @@ export class RoutineManager {
       routineRequestReceipts: this.routineRequestReceipts,
       webhookRunReceipts: this.webhookRunReceipts,
       ...(this.startupLaunchId === undefined ? {} : { startupLaunchId: this.startupLaunchId }),
+      ...(this.ownerNotices.length ? { ownerNotices: this.ownerNotices } : {}),
     } satisfies RoutineFile, null, 2), { mode: 0o600 });
   }
 }

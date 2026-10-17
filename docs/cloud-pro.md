@@ -243,10 +243,46 @@ proposal card is theirs (the card records who allowed it, and what it
 showed: a routine from before counts only while it still runs exactly that,
 the same instructions, bot, schedule and place, with no attachment), and so
 is one created at once in the owner's own Full-access conversation, or by a
-run of one of the owner's routines. Approving a change (an edit, a pause, a
-resume) keeps a routine the owner's only if it already was: it never makes
-anyone else's routine theirs. One a bot creates or changes at once from any
-other conversation is nobody's, like anyone else's edit. Resuming, moving or
+run of one of the owner's routines. A bot's own change applied with an Undo
+receipt (a skill it authored, a team it set up) is nobody's answer, so it
+never takes a conversation out of being the owner's own. Approving a change
+(an edit, a pause, a resume) keeps a routine the owner's only if it already
+was: it never makes anyone else's routine theirs.
+
+A Cloud only its owner has ever used has nobody to confine. While no trace of
+a second person exists anywhere on it (no session other than the owner's own
+devices, current or revoked; no earlier key that was never proven the owner's;
+no line, card answer, conversation or routine recorded under anyone else's
+key; and a record that can be read), every routine and conversation runs at
+its bot's own level, whatever writer it has on record. Only what came in from
+outside stays confined: a routine a bot made or changed in a conversation a
+webhook drove (its run, a payload posted into it, or work it handed on) is
+recorded as the outside's, and runs without full access until the owner opens
+it and saves it once. Routines from before this that a webhook-driven
+conversation made or changed are recorded the same way, once. The first trace
+of a second person makes the Cloud shared for good: cloud-owner.json records
+when, nothing clears it, and a restore never brings or removes it. If that
+happens after a start found only the owner, every routine a bot made in a
+conversation only the owner spoke in (lines copied from the owner's desktop
+count) is recorded as the owner's at that moment; from then on the rules below
+apply.
+
+A routine runs at the level of the conversation it was made in. One a bot
+creates at once, or changes while it is the owner's, in a conversation where
+only the owner spoke (it was opened, written in and answered only by proven
+keys, the owner's own devices, and nothing came in by webhook; what bots
+posted there, such as receipts and routine reports, does not count) is the
+owner's for its level, so its runs keep the bot's own level, Full access
+included. It is proven for lending and memory only when that conversation also
+holds no report of anyone else's routine. One a bot creates or changes at once
+from any other conversation (someone else's line or answer, an adopted key's,
+another bot's message, a webhook's post or run) is nobody's, like anyone
+else's edit. At each start, a nobody's routine a bot made is the owner's again
+when its creating card is still in that conversation, only the owner spoke
+there before it, and the routine still runs exactly what that card showed;
+proven too when no report of anyone else's routine came before the card. A
+confined routine run's approval card says why: open it and save it once to run
+it with full access. Resuming, moving or
 retiming a routine keeps it the owner's when they are its writer and no
 fingerprint of theirs is on it yet (a template, a restore); a fingerprint
 that no longer matches what it runs is renewed only by the owner rewriting
@@ -997,6 +1033,13 @@ An owner's own Composio project key still wins. The details are in
 [composio.md](composio.md#mausbot-cloud). `OMB_COMPOSIO_BROKER_URL` (env, not
 secret, optional) points a Cloud at another service, such as a staging one.
 
+For a paid plan the Admin also sets `OMB_CLOUD_CONNECTED_APPS_GRANT` (secret):
+a grant it signs for the machine id, which the server presents to the service
+once it holds its token. The service then gives this installation a paid
+Cloud's app-event limit (2,000 a day instead of a desktop's 500). Without it a
+Cloud gets the desktop limit. The grant's format is in
+[the broker's README](../cloudflare/composio-broker/README.md#paid-clouds).
+
 ### Trial Claude credit
 
 A free trial may come with a one-time Claude credit (the Admin's
@@ -1014,7 +1057,8 @@ credit, the Admin also sets:
   adds one read-only **Trial credit · Claude** engine: the OpenAI-compatible
   driver (`openai-compat`, the same chat engine and tools as any API key) with
   the relay as its address and the token as its own key, on the models the
-  relay lists, cheapest first (OpenRouter's `provider/model` ids too). Never Claude Code and never Codex: the
+  relay lists, the default first (the Admin lists Sonnet first, Haiku after;
+  OpenRouter's `provider/model` ids too). Never Claude Code and never Codex: the
   platform's key is never used to run another product's agent for anyone, and
   no `ANTHROPIC_*` variable or Claude config folder ever holds the token. It
   is never saved to `config.json` and has no sign-in. The token is held like
@@ -1024,10 +1068,29 @@ credit, the Admin also sets:
 - **Out of the box.** A new Cloud's first bot runs on it when nothing of the
   person's own can run there (the first start waits up to 15 seconds for the
   relay's model list), so My Cloud opens on the chat, not the engine sign-in.
+  A bot runs on the credit's default model unless the person picks another;
+  when the relay's default changes (Haiku to Sonnet), bots still on the old
+  default follow it.
+- **Every bot runs.** While nothing of the person's own is signed in, a bot on
+  an engine My Cloud can't run (a desktop copy's own Claude or Codex, signed
+  out here, or an engine only that desktop has) moves onto the credit when the
+  engines are read: at start, when the credit's list arrives, when the app
+  reads the engines, and before a message to that bot is sent. Where it came
+  from is kept in `providers/trial-credit/moved.json` (it never travels in a
+  backup or a move). An engine whose sign-in can't be read yet is left alone
+  (`server/cloud-credit-moves.ts`).
 - **Their own always wins.** A new bot gets the person's own engine whenever
-  one can run. From the moment one can (a sign-in, a key), each bot and
-  conversation still on the credit moves to it, with one line in each, and the
-  credit is not offered to bots any more.
+  one can run. From the moment one is signed in for sure (a sign-in, a key),
+  each bot and conversation still on the credit moves to it, with one line in
+  each, and the credit is not offered to bots any more. A bot that came from
+  another engine goes back to that engine and model when it is the one signed
+  in; otherwise it takes the new-bot default among the person's own.
+- **Checked once connected.** Right after an engine is connected in the
+  welcome's **Connect your AI** step or the engine sign-in, the app sends it
+  one tiny real message (`POST /api/instances/:id/check`) and says
+  **Claude is working** or what to fix (sign in again, the provider's own
+  refusal in plain words), with **Test again**. No step is added; an engine
+  already connected is not checked again.
 - **Used up or gone.** The relay's refusal reads as one plain sentence that
   names the next step, never the API's JSON (`server/trial-credit.ts`), told
   apart by the relay's own error `code`, which it puts first in its error
@@ -1036,7 +1099,8 @@ credit, the Admin also sets:
   `invalid_api_key` (a token it no longer knows) is no longer on this Cloud.
   The engine then stops offering itself until another token arrives (kept
   across restarts), and with no AI of their own My Cloud opens on its engine
-  sign-in, saying why. A `401`, `402` or `403` without the relay's code (a
+  sign-in, saying why. In a chat, used up or gone is a quiet note with
+  **Connect your own AI**, never an error. A `401`, `402` or `403` without the relay's code (a
   proxy's page) is an ordinary failed turn. `429` (paused for now: the day's
   ceiling, a Cloud being stopped, or the Admin's own account with Anthropic)
   and `400` `trial_credit_too_low` (too little left for this chat; a new chat
@@ -1193,6 +1257,14 @@ without them works as before; a malformed one is dropped, never the machine):
   `storage`, `starting` or `checking`): the app shows the same four steps as
   the Cloud page, and says when setup is slow.
 - `cloud.retryAt` (ms) when `failed`: the time of the next automatic try.
+- `cloud.unreachable: {cause, since}` while `ready`: the Admin's health checks
+  can't reach the Cloud. `cause` is `host` (the server it runs on is being
+  restarted by the hosting provider; it comes back by itself) or `no_answer`
+  (it missed three checks in a row); `since` (ms) is its first missed check.
+  While it is there, Settings says why in place of "My Cloud is ready" and
+  hides Open My Cloud, the Cloud link opens nothing, and a connection that fails
+  says the same sentence (read from the session again just after the failure)
+  instead of "Cloud request failed".
 - `cloud.disk: {gb, maxGb}`: the volume now and the most the plan lets it grow
   to. Only with it does a copy to the Cloud count on a larger disk (and ask the
   Admin to grow it, below). Without it the app assumes nothing: a copy is measured

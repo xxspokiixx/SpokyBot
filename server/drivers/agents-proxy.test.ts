@@ -489,17 +489,18 @@ describe("agents-proxy MCP surface", () => {
     const list = await rpc("tools/list");
     for (const tool of new Set(proposalCases.map(entry => entry.tool))) {
       const description = list.result.tools.find((entry: { name: string }) => entry.name === tool).description;
-        // Team setup applies only at Full access; a bot's own routines, skills and profile at any level.
-      if (tool === "propose_team_setup" || tool === "propose_bot_deletion") {
-        expect(description).toContain("granted Full Access may apply the change immediately");
-        expect(description).toContain("Never claim success from the permission mode alone");
-      } else {
+      // Routines keep their own rule until Triggers v2; everything else applies at every level.
+      if (tool === "propose_routine" || tool === "propose_routine_action") {
         expect(description).toContain("a change to your own routines, skills, profile or model applies immediately");
         expect(description).toContain("a change for another bot may wait for the person's confirmation");
-        expect(description).toContain("Never claim success without an applied result");
+        expect(description).toContain("If applied, continue the requested work without another confirmation");
+        expect(description).toContain("Only a pending result requires ending the turn");
+      } else {
+        expect(description).toContain("it applies immediately at every access level, and the person sees it with an Undo where possible");
+        expect(description).toContain("If applied, continue the work without another confirmation");
+        expect(description).toContain("Only a pending result (a Cloud conversation its owner did not drive)");
       }
-      expect(description).toContain("If applied, continue the requested work without another confirmation");
-      expect(description).toContain("Only a pending result requires ending the turn");
+      expect(description).toContain("Never claim success without an applied result");
       expect(description).toContain("does not elevate another bot's execution permissions");
     }
     const credential = list.result.tools.find((entry: { name: string }) => entry.name === "request_credential");
@@ -665,7 +666,7 @@ describe("agents-proxy MCP surface", () => {
     expect(coordinate.description).toContain("consult true asks a question");
     expect(coordinate.description).toContain('reply "none" is a one-way notice');
     expect(coordinate.description).toContain("never call assignment_status in the same turn");
-    expect(Object.keys(coordinate.inputSchema.properties)).toEqual(["group_id", "bot_ids", "message", "reason", "rework", "thread", "reply", "consult", "done_when"]);
+    expect(Object.keys(coordinate.inputSchema.properties)).toEqual(["group_id", "bot_ids", "message", "reason", "rework", "thread", "in_my_folder", "reply", "consult", "done_when"]);
     expect(coordinate.inputSchema.properties.thread.enum).toEqual(["standing", "new"]);
     expect(coordinate.inputSchema.properties.reply.enum).toEqual(["resume", "none"]);
     expect(coordinate.inputSchema.properties.consult.type).toBe("boolean");
@@ -2210,7 +2211,7 @@ describe("coordinate_bots arguments", () => {
       lastCoordinateBody = null;
       const res = await callTool("coordinate_bots", args);
       expect(res.result.isError, JSON.stringify(args)).toBe(true);
-      expect(res.result.content[0].text).toContain('thread ("standing" or "new"), reply ("resume" or "none"), consult (true or false) and done_when are optional');
+      expect(res.result.content[0].text).toContain('thread ("standing" or "new"), reply ("resume" or "none"), consult (true or false), in_my_folder (true or false) and done_when are optional');
       expect(lastCoordinateBody).toBeNull();
     }
   });
@@ -2236,7 +2237,7 @@ describe("coordinate_bots arguments", () => {
     });
     expect(res.result.isError).toBe(true);
     const text = res.result.content[0].text;
-    for (const field of ["bot_ids", "message", "group_id", "reason", "rework", "thread", "reply", "consult", "done_when"]) {
+    for (const field of ["bot_ids", "message", "group_id", "reason", "rework", "thread", "reply", "consult", "in_my_folder", "done_when"]) {
       expect(text).toContain(field);
     }
     expect(text).toContain("botIds");

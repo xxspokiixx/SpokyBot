@@ -166,7 +166,7 @@ const ROUTINE_FIELDS_SCHEMA = {
 } as const;
 
 const CHIEF_PROFILE_TARGET = " A Chief of Staff may pass for_bot_id (from list_bots) for a requested change to another bot in its section.";
-const PROPOSAL_OUTCOME = " Read the result: granted Full Access may apply the change immediately. If applied, continue the requested work without another confirmation. Only a pending result requires ending the turn and waiting for the in-app decision. Never claim success from the permission mode alone; report failed or cancelled results honestly. This does not elevate another bot's execution permissions.";
+const APPLIES_OUTCOME = " Read the result: it applies immediately at every access level, and the person sees it with an Undo where possible. If applied, continue the work without another confirmation. Only a pending result (a Cloud conversation its owner did not drive) means ending the turn to wait for the owner. Never claim success without an applied result; report failures honestly. This does not elevate another bot's execution permissions.";
 const SELF_CHANGE_OUTCOME = " Read the result: a change to your own routines, skills, profile or model applies immediately, and the person sees it with an Undo; a change for another bot may wait for the person's confirmation. If applied, continue the requested work without another confirmation. Only a pending result requires ending the turn and waiting for the in-app decision. Never claim success without an applied result; report failed or cancelled results honestly. This does not elevate another bot's execution permissions.";
 
 const START_THREAD_SELF_ID = "Leave out, or use your own bot ID. For teammates use coordinate_bots.";
@@ -233,7 +233,8 @@ const TOOL_DEFINITIONS = [
       message: { type: "string", minLength: 1, maxLength: 4000, description: "Question or task for these teammates; later requests in the same conversation can build on earlier ones. Send separate requests when responsibilities differ." },
       reason: { type: "string", maxLength: 200, description: "Optional one line for the person about why this goes to them (shown as a chip)." },
       rework: { type: "boolean", description: "True only to send concrete work again to someone whose request already finished or failed: a correction, a re-check or a retry." },
-      thread: { type: "string", enum: ["standing", "new"], description: "standing (default): the one work thread this conversation has with each teammate. new: open a new thread on the teammate for this, its own history and run; its result still returns here." },
+      thread: { type: "string", enum: ["standing", "new"], description: "standing (default): this conversation's one work thread with each teammate. new: a new thread on the teammate, its own history and run (in_my_folder: in your folder); its result still returns here." },
+      in_my_folder: { type: "boolean" },
       reply: { type: "string", enum: ["resume", "none"], description: "resume (default): the result resumes you. none: a one-way notice that is never awaited; nothing comes back and nothing resumes you." },
       consult: { type: "boolean", description: "True for a question: the teammate answers from what it knows, acting on nothing, and you are resumed with the answer. Leave out for work." },
       done_when: { type: "string", maxLength: 1000, description: "Optional: what must be true for this to count as done, in one or two sentences; the teammate is held to it." },
@@ -355,7 +356,7 @@ const TOOL_DEFINITIONS = [
   {
     name: "create_bot",
     description:
-      "Create a specialist bot in your section. Chief of Staff only. Below Full Access the user approves a card first. instructions become its soul. Omit modelSelection to use the workspace default, or choose exact IDs from list_team_setup. Connected apps and automatic approvals start disabled. Assign work through coordinate_bots. Maximum four new bots per turn.",
+      "Create a specialist bot in your section. Chief of Staff only. It is created immediately and the person can undo it. instructions become its soul. Omit modelSelection to use the workspace default, or choose exact IDs from list_team_setup. Connected apps start disabled and the bot runs at the workspace's default access level. Assign work through coordinate_bots. Maximum four new bots per turn.",
     inputSchema: {
       type: "object",
       properties: {
@@ -383,7 +384,7 @@ const TOOL_DEFINITIONS = [
   },
   {
     name: "propose_team_setup",
-    description: "Chief of Staff only: submit all requested specialist creation, profile/model configuration, Chief assignments, and authorized team moves in ONE combined plan. Use exact catalog engine/model IDs from list_team_setup. Combine all fields for each bot; use the same create key or botId to coalesce repeated entries. New teams must be named explicitly in newTeams and have a specialist in this plan; access is granted only to those new teams. Existing unauthorized teams cannot be included. Models change bot defaults for groups/new threads; existing threads and execution permissions stay unchanged. If review is pending, the decision and structured result automatically resume you once; do not ask again, poll, or repeat the proposal." + PROPOSAL_OUTCOME,
+    description: "Chief of Staff only: submit all requested specialist creation, profile/model configuration, Chief assignments, and authorized team moves in ONE combined plan. Use exact catalog engine/model IDs from list_team_setup. Combine all fields for each bot; use the same create key or botId to coalesce repeated entries. New teams must be named explicitly in newTeams and have a specialist in this plan; access is granted only to those new teams. Existing unauthorized teams cannot be included. Models change bot defaults for groups/new threads; existing threads and execution permissions stay unchanged. If review is pending, the decision and structured result automatically resume you once; do not ask again, poll, or repeat the proposal." + APPLIES_OUTCOME,
     inputSchema: {
       type: "object", additionalProperties: false,
       properties: {
@@ -412,7 +413,7 @@ const TOOL_DEFINITIONS = [
   },
   {
     name: "propose_bot_deletion",
-    description: "Chief of Staff only: when the user explicitly asks to delete a named teammate, submit a separate deletion request for that exact bot. Deletion removes its conversations, memory, instructions, skills, and any computer owned only by it; generated project files and shared team computers remain. Running work or an unavailable computer provider can block deletion safely. Never delete yourself, substitute an archive, or put deletion into a setup batch. If review is pending, the decision and result resume you once." + PROPOSAL_OUTCOME,
+    description: "Chief of Staff only: when the user explicitly asks to delete a named teammate, submit a separate deletion request for that exact bot. Deletion removes its conversations, memory, instructions, skills, and any computer owned only by it; generated project files and shared team computers remain. Running work or an unavailable computer provider can block deletion safely. Never delete yourself, substitute an archive, or put deletion into a setup batch. If review is pending, the decision and result resume you once." + APPLIES_OUTCOME,
     inputSchema: { type: "object", additionalProperties: false, properties: {
       bot_id: { type: "string", minLength: 1 }, reason: { type: "string", minLength: 1, maxLength: 500 },
     }, required: ["bot_id", "reason"] },
@@ -672,7 +673,7 @@ const TOOL_DEFINITIONS = [
   {
     name: "propose_profile",
     description:
-      "Submit user-requested changes to your own name, title, description, standing instructions (SOUL.md), working folder (cwd), or your alert and voice toggles (notifications, speakReplies). Keep SOUL.md short — who you are and the rules you never break; put step-by-step procedure into a skill instead." + CHIEF_PROFILE_TARGET + SELF_CHANGE_OUTCOME,
+      "Submit user-requested changes to your own name, title, description, standing instructions (SOUL.md), working folder (cwd), or your alert and voice toggles (notifications, speakReplies). Keep SOUL.md short — who you are and the rules you never break; put step-by-step procedure into a skill instead." + CHIEF_PROFILE_TARGET + APPLIES_OUTCOME,
     inputSchema: {
       type: "object",
       additionalProperties: false,
@@ -684,7 +685,7 @@ const TOOL_DEFINITIONS = [
         cwd: {
           type: "string",
           maxLength: 1024,
-          description: "Absolute path of the folder your tools read and write in (for example /Users/me/Projects/site). It must already exist. An empty string means your private workspace. A new folder waits for the person's confirmation unless this conversation has Full access.",
+          description: "Absolute path of the folder your tools read and write in (for example /Users/me/Projects/site). It must already exist. An empty string means your private workspace.",
         },
         notifications: {
           type: "boolean",
@@ -706,7 +707,7 @@ const TOOL_DEFINITIONS = [
   {
     name: "propose_model",
     description:
-      "Submit a user-requested switch of this bot's default engine and model. Use the exact instance and model ids the person named, or for a Chief the ids from the team-setup catalog. The result warns about capabilities the switch gains or loses; existing threads keep their current models." + SELF_CHANGE_OUTCOME,
+      "Submit a user-requested switch of this bot's default engine and model. Use the exact instance and model ids the person named, or for a Chief the ids from the team-setup catalog. The result warns about capabilities the switch gains or loses; existing threads keep their current models." + APPLIES_OUTCOME,
     inputSchema: {
       type: "object",
       additionalProperties: false,
@@ -735,7 +736,7 @@ const TOOL_DEFINITIONS = [
   {
     name: "propose_team_memory",
     description:
-      "Propose a shared fact or decision. Additions and replacements wait for admin review; accepted facts stay unchanged until then. End this turn while pending; do not claim it is remembered.",
+      "Save a shared fact or decision for your team. It applies immediately, with an Undo for the person; on a pending result end this turn and do not claim it is remembered.",
     inputSchema: {
       type: "object",
       additionalProperties: false,
@@ -759,7 +760,7 @@ const TOOL_DEFINITIONS = [
   {
     name: "skill_manage",
     description:
-      "Submit a new or updated reusable SKILL.md. Never update unless the user explicitly asked to revise that named skill. If the result is pending, a create stays inactive and an update leaves the current version unchanged." + SELF_CHANGE_OUTCOME,
+      "Submit a new or updated reusable SKILL.md. Never update unless the user explicitly asked to revise that named skill. If the result is pending, a create stays inactive and an update leaves the current version unchanged." + APPLIES_OUTCOME,
     inputSchema: {
       type: "object",
       additionalProperties: false,
