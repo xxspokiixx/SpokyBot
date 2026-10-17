@@ -1324,7 +1324,7 @@ export function ComputerPanel({
             </button>
           )}
           <div
-            className="mx-9 flex min-w-0 touch-pan-x gap-0.5 overflow-x-auto rounded-full bg-inset p-1 whitespace-nowrap"
+            className="mx-9 flex min-w-0 touch-pan-x gap-0.5 overflow-x-auto rounded-full bg-inset p-1 whitespace-nowrap [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
             data-tour="computer-tabs"
             data-testid="computer-tabs"
             role="tablist"
