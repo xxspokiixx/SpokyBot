@@ -13,6 +13,7 @@ import {
 } from "@/lib/export-transcript";
 import { cn } from "@/lib/cn";
 import { t } from "@/lib/i18n";
+import { localizedTaskTitle } from "@/lib/task-title";
 import { ShortcutHint } from "./ShortcutHint";
 import { SidebarPopoverMenu, type SidebarMenuItem } from "./SidebarPopoverMenu";
 import { orderedThreadList } from "./SidebarThreadRow";
@@ -60,7 +61,7 @@ function useChatMoreItems(profile: Bot): { items: SidebarMenuItem[]; on: boolean
       value: String(threads.length),
       submenu: threads.slice(0, THREADS_LISTED).map((task) => ({
         key: `thread:${task.threadId}`,
-        label: task.title || t("task.newShort"),
+      label: localizedTaskTitle(task.title || t("task.newShort")),
         active: task.threadId === bot.threadId,
         onSelect: () => openBotThread(dispatch, profile, task.threadId, showThreads),
       })),
@@ -94,7 +95,7 @@ function useChatMoreItems(profile: Bot): { items: SidebarMenuItem[]; on: boolean
     } satisfies SidebarMenuItem] : []),
     ...(remoteClient ? [] : [{
       key: "activity",
-      label: "Activity",
+      label: t("activity.panel.title"),
       icon: <ListChecks size={16} />,
       active: state.activityOpen,
       separatorBefore: !usage,
