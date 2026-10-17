@@ -594,6 +594,13 @@ export function readStagedWorkspaceBackup(dataDir: string, id: string): Workspac
   return { id, ...privateMetadata(manifest) };
 }
 
+/** A staged backup's own data folder, and the folder it was made from. */
+export function stagedWorkspaceData(dataDir: string, id: string): { data: string; sourceDataDir: string } {
+  readStagedWorkspaceBackup(dataDir, id);
+  const staged = join(jobPath(dataDir, id), "staged");
+  return { data: join(staged, "data"), sourceDataDir: validateManifest(privateJson(join(staged, "manifest.json"))).sourceDataDir };
+}
+
 export function commitPendingWorkspaceRestore(dataDir: string, id: string) {
   const root = backupRoot(dataDir);
   if (existsSync(join(root, "pending-restore.json"))) throw new Error("A workspace restore is already waiting for restart.");

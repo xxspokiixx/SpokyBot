@@ -72,6 +72,14 @@ use an appropriate event/webhook workflow instead of a fake weekly schedule.
   for the same cron routine does not accumulate overlapping copies (a run is
   waiting while teammates still owe it results on the job runtime,
   docs/runtime-contract.md §9).
+- A run that asks you for an approval or an answer waits for you. Its card and
+  the Routines log say what it waits for ("Waiting for your approval to use
+  COMPOSIO_SEARCH_TOOLS"), the approval notification names the routine, and the
+  time it waits does not count toward its optional run limit, which bounds
+  active work only. If the engine's own wait for an approval runs out with
+  nobody's answer, the run stops with "Stopped: nobody answered the approval to
+  use …" and the routine-failed notification. A run still waiting when its
+  routine's next occurrence is due gives way to that occurrence.
 - Existing one-time, daily/weekday and interval schedules are not migrated or
   reinterpreted. Team exports retain cron expressions and zones; imports remain
   paused until enabled. Older phone apps safely treat cron as a newer schedule;

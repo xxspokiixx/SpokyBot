@@ -243,10 +243,46 @@ proposal card is theirs (the card records who allowed it, and what it
 showed: a routine from before counts only while it still runs exactly that,
 the same instructions, bot, schedule and place, with no attachment), and so
 is one created at once in the owner's own Full-access conversation, or by a
-run of one of the owner's routines. Approving a change (an edit, a pause, a
-resume) keeps a routine the owner's only if it already was: it never makes
-anyone else's routine theirs. One a bot creates or changes at once from any
-other conversation is nobody's, like anyone else's edit. Resuming, moving or
+run of one of the owner's routines. A bot's own change applied with an Undo
+receipt (a skill it authored, a team it set up) is nobody's answer, so it
+never takes a conversation out of being the owner's own. Approving a change
+(an edit, a pause, a resume) keeps a routine the owner's only if it already
+was: it never makes anyone else's routine theirs.
+
+A Cloud only its owner has ever used has nobody to confine. While no trace of
+a second person exists anywhere on it (no session other than the owner's own
+devices, current or revoked; no earlier key that was never proven the owner's;
+no line, card answer, conversation or routine recorded under anyone else's
+key; and a record that can be read), every routine and conversation runs at
+its bot's own level, whatever writer it has on record. Only what came in from
+outside stays confined: a routine a bot made or changed in a conversation a
+webhook drove (its run, a payload posted into it, or work it handed on) is
+recorded as the outside's, and runs without full access until the owner opens
+it and saves it once. Routines from before this that a webhook-driven
+conversation made or changed are recorded the same way, once. The first trace
+of a second person makes the Cloud shared for good: cloud-owner.json records
+when, nothing clears it, and a restore never brings or removes it. If that
+happens after a start found only the owner, every routine a bot made in a
+conversation only the owner spoke in (lines copied from the owner's desktop
+count) is recorded as the owner's at that moment; from then on the rules below
+apply.
+
+A routine runs at the level of the conversation it was made in. One a bot
+creates at once, or changes while it is the owner's, in a conversation where
+only the owner spoke (it was opened, written in and answered only by proven
+keys, the owner's own devices, and nothing came in by webhook; what bots
+posted there, such as receipts and routine reports, does not count) is the
+owner's for its level, so its runs keep the bot's own level, Full access
+included. It is proven for lending and memory only when that conversation also
+holds no report of anyone else's routine. One a bot creates or changes at once
+from any other conversation (someone else's line or answer, an adopted key's,
+another bot's message, a webhook's post or run) is nobody's, like anyone
+else's edit. At each start, a nobody's routine a bot made is the owner's again
+when its creating card is still in that conversation, only the owner spoke
+there before it, and the routine still runs exactly what that card showed;
+proven too when no report of anyone else's routine came before the card. A
+confined routine run's approval card says why: open it and save it once to run
+it with full access. Resuming, moving or
 retiming a routine keeps it the owner's when they are its writer and no
 fingerprint of theirs is on it yet (a template, a restore); a fingerprint
 that no longer matches what it runs is renewed only by the owner rewriting
@@ -1193,6 +1229,14 @@ without them works as before; a malformed one is dropped, never the machine):
   `storage`, `starting` or `checking`): the app shows the same four steps as
   the Cloud page, and says when setup is slow.
 - `cloud.retryAt` (ms) when `failed`: the time of the next automatic try.
+- `cloud.unreachable: {cause, since}` while `ready`: the Admin's health checks
+  can't reach the Cloud. `cause` is `host` (the server it runs on is being
+  restarted by the hosting provider; it comes back by itself) or `no_answer`
+  (it missed three checks in a row); `since` (ms) is its first missed check.
+  While it is there, Settings says why in place of "My Cloud is ready" and
+  hides Open My Cloud, the Cloud link opens nothing, and a connection that fails
+  says the same sentence (read from the session again just after the failure)
+  instead of "Cloud request failed".
 - `cloud.disk: {gb, maxGb}`: the volume now and the most the plan lets it grow
   to. Only with it does a copy to the Cloud count on a larger disk (and ask the
   Admin to grow it, below). Without it the app assumes nothing: a copy is measured
@@ -1549,6 +1593,13 @@ section is only what the Cloud adds.
 - **The restart.** The Cloud's launcher (`server/cloud-home-start.ts`) starts
   only the server again on exit 75, and startup settles who owns what came
   (`server/cloud-owner.ts`): a copied routine is the owner's.
+- **Bring newer chats.** On a Cloud with work of its own, the same panel offers
+  **Bring newer chats to My Cloud**, which adds only the conversations and
+  messages it lacks and replaces nothing (docs/copy-workspace.md, Bring newer
+  chats).
+- **After the copy.** My Cloud becomes the server this app opens, and this
+  computer's page says in one line that the bots now live on My Cloud, with
+  **Open My Cloud**, so the two are not used side by side by accident.
 - **Older Clouds.** A Cloud from before Copy to My Cloud answers `404` and the app
   says it has not updated yet; one from before any server could receive a copy
   still receives one from this app (its routes are the same).
