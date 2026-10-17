@@ -1,6 +1,7 @@
+import type { RoutineRetryCause } from "../shared/routines.ts";
 import { stopCause } from "./drivers/engine-errors.ts";
-import { classifyError } from "./drivers/retry.ts";
 import { redactSecretsInText } from "./redact.ts";
+import { retryNote } from "./routine-recovery.ts";
 import type { Routine, RoutineContextAttachment, RoutineRun, RoutineRunOn, RoutineRunTrigger } from "./routines.ts";
 
 export interface RoutineContinuityCarry {
@@ -66,8 +67,9 @@ export function composeExecutionPrompt(
   prompt: string,
   attachments: readonly RoutineContextAttachment[] | undefined,
   carry?: RoutineContinuityCarry | null,
+  retried?: RoutineRetryCause,
 ): string {
-  const parts = [`${routineHeader(routine.name, routine.trigger)}${prompt}`];
+  const parts = [`${routineHeader(routine.name, routine.trigger)}${prompt}`, retried ? retryNote(retried) : ""];
   const foreign = foreignPaths([prompt, ...(attachments ?? []).map((attachment) => attachment.path)], runHostPlatform(routine.runOn));
   if (foreign.length) {
     parts.push(`[OpenMausBot: this run is on a ${hostName(runHostPlatform(routine.runOn))} computer, where ${foreign.join(", ")} cannot exist. If the work needs ${foreign.length > 1 ? "them" : "it"}, say plainly what is missing instead of reporting success.]`);
@@ -124,16 +126,9 @@ export function routineHostWarning(routine: { prompt: string; runOn: RoutineRunO
   return `This routine names ${foreign.join(", ")}, which cannot exist on the ${hostName(host)} computer that runs it. Change ${foreign.length > 1 ? "them" : "it"} to a path on that computer, or attach the file to the routine.`;
 }
 
-export const ROUTINE_TRANSIENT_RETRY_MS = 15_000;
-
 /** Why a run failed: its own error, else its engine's stop reason in words, never a bare token like "stop_sequence". */
 export function routineFailure(error: string | undefined, stopReason: string | null | undefined): string {
   return error ?? stopCause(stopReason) ?? "The bot did not complete this run";
-}
-
-/** A run that failed on a passing provider error before doing anything gets one more try. */
-export function retriesTransiently(run: Pick<RoutineRun, "target" | "output" | "retryAt">, detail: string, didWork: boolean): boolean {
-  return run.target === "bot" && run.retryAt === undefined && !run.output && !didWork && classifyError({ text: detail }).transient;
 }
 
 /** How long a routine may be held up before it acts: a deferred run tells the owner, a waiting run gives way. */

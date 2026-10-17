@@ -13,7 +13,7 @@ const NEW = "b".repeat(64);
 const NEWER = "c".repeat(64);
 
 type Reply = Response | Error;
-interface Call { method: string; path: string; authorization: string | null }
+interface Call { method: string; path: string; authorization: string | null; body?: string }
 
 /** A connected-apps service that answers each route from its own queue, the last reply repeating. */
 function fakeBroker(routes: Record<string, Reply[]>) {
@@ -22,7 +22,7 @@ function fakeBroker(routes: Record<string, Reply[]>) {
     const url = new URL(String(input));
     const method = init?.method ?? "GET";
     const key = `${method} ${url.pathname}`;
-    calls.push({ method, path: url.pathname, authorization: new Headers(init?.headers).get("authorization") });
+    calls.push({ method, path: url.pathname, authorization: new Headers(init?.headers).get("authorization"), ...(init?.body ? { body: String(init.body) } : {}) });
     const queue = routes[key];
     if (!queue?.length) throw new Error(`unexpected ${key}`);
     const reply = queue.length > 1 ? queue.shift()! : queue[0]!;
@@ -265,5 +265,58 @@ describe("a Cloud home's connected-apps installation", () => {
     } finally {
       fetchSpy.mockRestore();
     }
+  });
+});
+
+describe("a paid Cloud's grant", () => {
+  const GRANT = `v1.omb-machine-1.${"g".repeat(43)}`;
+  const grantCalls = (calls: Call[]) => calls.filter((call) => call.path === "/v1/installation/cloud");
+
+  it("presents the Admin's grant with the installation's token, once", async () => {
+    store(OLD);
+    const broker = fakeBroker({
+      "GET /v1/me": [json(200, { installationId: "install-old" })],
+      "PUT /v1/installation/cloud": [json(200, { plan: "cloud", eventsPerDay: 2000 })],
+    });
+    await start(broker.fetchImpl, { cloudGrant: GRANT }).settled();
+    expect(broker.calls).toEqual([
+      { method: "GET", path: "/v1/me", authorization: `Bearer ${OLD}` },
+      { method: "PUT", path: "/v1/installation/cloud", authorization: `Bearer ${OLD}`, body: JSON.stringify({ grant: GRANT }) },
+    ]);
+    expect(applied).toEqual([{ url: BROKER, token: OLD }]);
+    expect(timers).toEqual([]);
+    expect(lines).toContain("connected apps: Cloud plan confirmed");
+    expect(lines.join("\n")).not.toContain(GRANT);
+  });
+
+  it("presents it for the new token after registering again", async () => {
+    store(OLD);
+    const broker = fakeBroker({
+      "GET /v1/me": [json(401, { error: "unauthorized" })],
+      "POST /v1/installations": [registered(NEW, "install-new")],
+      "PUT /v1/installation/cloud": [json(200, {})],
+    });
+    await start(broker.fetchImpl, { cloudGrant: GRANT }).settled();
+    expect(grantCalls(broker.calls).map((call) => call.authorization)).toEqual([`Bearer ${NEW}`]);
+  });
+
+  it("keeps connected apps on while the service cannot take the grant, retries with backoff, and stops at a refusal", async () => {
+    store(OLD);
+    const broker = fakeBroker({
+      "GET /v1/me": [json(200, {})],
+      "PUT /v1/installation/cloud": [json(503, { error: "service unavailable" }), new TypeError("fetch failed"), json(404, { error: "not found" })],
+    });
+    const apps = start(broker.fetchImpl, { cloudGrant: GRANT });
+    await apps.settled();
+    expect(connectionMode({})).toBe("managed");
+    for (const expected of [33_000, 66_000]) {
+      expect(timers.map((timer) => timer.ms)).toEqual([expected]);
+      timers.shift()!.run();
+      await apps.settled();
+    }
+    expect(timers).toEqual([]);
+    expect(grantCalls(broker.calls)).toHaveLength(3);
+    expect(lines.at(-1)).toBe("connected apps: the service did not take this Cloud's grant (HTTP 404)");
+    expect(applied).toEqual([{ url: BROKER, token: OLD }]);
   });
 });

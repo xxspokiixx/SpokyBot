@@ -10,7 +10,7 @@ import { launchVerificationServer, runControlOmb } from "../scripts/control-omb.
 import { waitForExit } from "./testing/cleanup.ts";
 import { readHandoffs } from "./testing/handoff-rows.ts";
 
-it("applies requested Full Access workflows through MCP without duplicate approvals, while exact Ask tasks still wait", async () => {
+it("applies requested Full Access workflows through MCP without duplicate approvals, and the same changes apply in an Ask task with Undo", async () => {
   const fixture = await launchVerificationServer({}, undefined, undefined, undefined, undefined, { scripted: true });
   const { url, dataDir, logPath } = fixture.info;
   const planPath = join(dataDir, "room-plan.json");
@@ -206,22 +206,21 @@ it("applies requested Full Access workflows through MCP without duplicate approv
     expect((await messages(peerTurn.threadId)).some(message => message.kind === "activity" && /^Full access — delegated by Clive, a Chief of Staff on Full access$/.test(message.tool?.name ?? ""))).toBe(true);
     evidence.push({ delegatedFullAccess: { peerThreadId: peerTurn.threadId, permissionMode: peerTurn.permissionMode } });
 
-    const askTurn = await run(chief, ask.threadId, "Change my own profile, routine and named skill, and prepare a specialist for review in this Ask task.", [
-      step("propose_profile", { title: "Applied in Ask", reason: "The bot's own profile applies at any level" }),
+    const askTurn = await run(chief, ask.threadId, "Change my own profile, routine and named skill, and add a specialist in this Ask task.", [
+      step("propose_profile", { title: "Applied in Ask", reason: "Applies at every level" }),
       step("propose_routine", { name: "Own Ask report", instructions: "Report from the Ask task.", schedule }),
       step("skill_manage", { action: "create", skill_md: skill("own-ask-review", "Applies at once as the bot's own skill."), source: "conversation" }),
-      step("propose_team_setup", { reason: "Ask task specialist review", operations: [specialist("Pending specialist", "Operations")] }),
-    ], { pending: true, guarded: "ask" });
+      step("propose_team_setup", { reason: "Ask task specialist", operations: [specialist("Ask specialist", "Operations")] }),
+    ], { guarded: "ask" });
     expect(askTurn.permissionMode).not.toBe("bypassPermissions");
-    const askCards = await unanswered(ask.threadId);
-    expect(askCards).toHaveLength(1);
-    expect(askCards[0].card.teamSetupRequest).toBeDefined();
+    expect(await unanswered(ask.threadId)).toHaveLength(0);
     expect((await bots()).find(bot => bot.id === chief.id).title).toBe("Applied in Ask");
-    expect((await bots()).some(bot => bot.name === "Pending specialist")).toBe(false);
+    expect((await bots()).some(bot => bot.name === "Ask specialist")).toBe(true);
     expect((await api("GET", "/api/routines")).routines).toHaveLength(2);
     expect((await api("GET", `/api/bots/${chief.id}/skills`)).skills.some((item: any) => item.name === "own-ask-review" && item.enabled)).toBe(true);
     const receipts = (await messages(ask.threadId)).filter(message => message.card?.autoApplied);
-    expect(receipts.map(message => Boolean(message.card.profileRequest || message.card.routineRequest || message.card.skillRequest))).toEqual([true, true, true]);
+    expect(receipts.map(message => Boolean(message.card.profileRequest || message.card.routineRequest || message.card.skillRequest || message.card.teamSetupRequest)))
+      .toEqual([true, true, true, true]);
     for (const receipt of receipts) {
       expect(await api("POST", `/api/threads/${ask.threadId}/undo`, { requestId: receipt.card.requestId })).toMatchObject({ ok: true, undone: true });
       expect(await api("POST", `/api/threads/${ask.threadId}/undo`, { requestId: receipt.card.requestId })).toMatchObject({ alreadyUndone: true });
@@ -230,6 +229,7 @@ it("applies requested Full Access workflows through MCP without duplicate approv
     expect((await bots()).find(bot => bot.id === chief.id).title).toBe("Monthly reporting Chief");
     expect((await api("GET", "/api/routines")).routines).toHaveLength(1);
     expect((await api("GET", `/api/bots/${chief.id}/skills`)).skills.some((item: any) => item.name === "own-ask-review")).toBe(false);
+    expect((await bots()).some(bot => bot.name === "Ask specialist")).toBe(false);
 
     const inverseTurn = await run(inverse, inverse.activeTaskId, "Apply my requested title in this Full Access task even though my bot default is Ask.", [
       step("propose_profile", { title: "Applied from Full task", reason: "User requested this title" }),
