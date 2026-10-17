@@ -30,6 +30,7 @@ export function OverviewSection({
 
   const setup = overview.setup ?? [];
   const remaining = setup.filter((step) => !step.done);
+  const setupLabel = (id: string, fallback: string) => t(`botOverview.setup.${id}` as never) || fallback;
 
   return (
     <div className="flex flex-col gap-4">
@@ -49,7 +50,7 @@ export function OverviewSection({
                 {!step.section ? (
                   <div className="flex items-center gap-2.5 px-1 py-1 text-[13px] text-ink">
                     <Circle aria-hidden="true" size={14} className="shrink-0 text-ink-secondary" />
-                    <span>{step.label}</span>
+                    <span>{setupLabel(step.id, step.label)}</span>
                   </div>
                 ) : (
                   <button
@@ -58,7 +59,7 @@ export function OverviewSection({
                     className="flex w-full items-center gap-2.5 rounded-lg px-1 py-1 text-left text-[13px] text-ink hover:bg-inset"
                   >
                     <Circle aria-hidden="true" size={14} className="shrink-0 text-ink-secondary" />
-                    <span className="flex-1">{step.label}</span>
+                    <span className="flex-1">{setupLabel(step.id, step.label)}</span>
                     <span className="text-[12px] text-ink-secondary">→</span>
                   </button>
                 )}

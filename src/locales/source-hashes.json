@@ -18421,7 +18421,12 @@
       "botSettings.sections.permissions": "abccc78cc93c07931feccfbd0665c003373b48334fd8d4cf5c6d0c714e68f26e",
       "botSettings.sections.voice": "cad3b82bec0946c3316f83f4eae54cab1b0465ad9a02c6a1a98f55c30ef657d1",
       "botSettings.sections.history": "0e769600933790607b2a13b33ddfade0fa17810eb62c3b28ee23e59516516491",
-      "botSettings.sections.usage": "8d59829c1e15afe1a7fae93e8e5e32d8511bec5fd598a09f4fea6033b31e8a66"
+      "botSettings.sections.usage": "8d59829c1e15afe1a7fae93e8e5e32d8511bec5fd598a09f4fea6033b31e8a66",
+      "botOverview.setup.identity": "325f3559a90489d2d7f7d66b8c1c17e4b86ba7e5a79b4f89d8369e085119daee",
+      "botOverview.setup.soul": "84f2ef07922e753061a4ab965921c917ddaade108c98bbe7b9e5d029e9f204c0",
+      "botOverview.setup.folder": "7ce8981ba999b79ec4e9789a9a14124bb95762e54e2d8d580a427aa84accbe7d",
+      "botOverview.setup.apps": "5a83f5695a3c85ab806fd37d4d09abdc9380b41657ccfaf3234561950abe549b",
+      "botOverview.setup.schedule": "5f6d291c6db2a8f4b627cb892f682e2f50d2d3511b95d1a45ccbc25a913bc519"
     },
     "zh": {
       "pro.fromPrice": "a48a04a457d60b08b54fc83e7a6c4584ffedb1e23621859084900c8521a3af7b",

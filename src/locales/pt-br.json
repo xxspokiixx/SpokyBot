@@ -4859,4 +4859,10 @@
   "botSettings.sections.voice": "Voz e alertas",
   "botSettings.sections.history": "Histórico",
   "botSettings.sections.usage": "Uso"
+,
+  "botOverview.setup.identity": "Dê um nome e uma função",
+  "botOverview.setup.soul": "Escreva as instruções permanentes",
+  "botOverview.setup.folder": "Escolha uma pasta de trabalho",
+  "botOverview.setup.apps": "Conecte os apps necessários",
+  "botOverview.setup.schedule": "Adicione uma rotina ou um gatilho"
 }
