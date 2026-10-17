@@ -4,6 +4,8 @@ import { api, useStore, type AppSettingsSection, type ConfigStatus } from "@/sta
 import { builtInBrowserEnabled, routinesInConversationEnabled, showToolCallsEnabled, skillAuthoringEnabled, skillsLibraryEnabled } from "@/lib/feature-flags";
 import { localeChoices, type LocaleKey } from "@/locales";
 import { t } from "@/lib/i18n";
+import { imageAttachmentFromFile } from "@/lib/composer-attachments";
+import { botAvatarUrlFromStoredPath } from "../../shared/bot-avatar";
 import { withTourReset } from "@/lib/guided-tour";
 import { completionPatch } from "@/lib/onboarding";
 import { AnthropicEveryClaudeBot, ApiKeyRow, OpenCodeProviderKeys, VpsConnection } from "./ApiKeys";
@@ -159,20 +161,23 @@ function ProfileFields() {
   const { state, dispatch } = useStore();
   const [name, setName] = useState(state.config?.profile?.name ?? "");
   const [email, setEmail] = useState(state.config?.profile?.email ?? "");
+  const [avatarUrl, setAvatarUrl] = useState(state.config?.profile?.avatarUrl ?? "");
+  const [avatarBusy, setAvatarBusy] = useState(false);
   useEffect(() => {
     setName(state.config?.profile?.name ?? "");
     setEmail(state.config?.profile?.email ?? "");
-  }, [state.config?.profile?.name, state.config?.profile?.email]);
+    setAvatarUrl(state.config?.profile?.avatarUrl ?? "");
+  }, [state.config?.profile?.name, state.config?.profile?.email, state.config?.profile?.avatarUrl]);
 
   const save = () => {
     void fetch("/api/config", {
       method: "PUT",
       headers: { "content-type": "application/json" },
-      body: JSON.stringify({ profile: { name: name.trim(), email: email.trim().toLowerCase() } }),
+      body: JSON.stringify({ profile: { name: name.trim(), email: email.trim().toLowerCase(), avatarUrl: avatarUrl || undefined } }),
     })
       .then((r) => { if (!r.ok) throw new Error("Profile save failed"); return r.json(); })
       .then((config: ConfigStatus) => {
-        if (config.profile) dispatch({ type: "profileSaved", profile: { name: config.profile.name, email: config.profile.email } });
+        if (config.profile) dispatch({ type: "profileSaved", profile: { name: config.profile.name, email: config.profile.email, avatarUrl: config.profile.avatarUrl } });
       })
       .catch(() => {});
   };
@@ -181,6 +186,30 @@ function ProfileFields() {
     "w-full rounded-lg border border-hairline/40 bg-inset px-3 py-2 text-[14px] text-ink placeholder:text-ink-secondary focus:outline-none";
   return (
     <div className="flex flex-col gap-3">
+      <div className="flex items-center gap-3">
+        {avatarUrl ? <img src={avatarUrl} alt="" className="size-12 rounded-full object-cover" /> : <div className="size-12 rounded-full bg-raised" />}
+        <label className="cursor-pointer rounded-lg bg-control px-3 py-2 text-[12px] text-ink hover:bg-raised-hover">
+          {avatarBusy ? t("settings.profile.avatar.uploading") : t("settings.profile.avatar.choose")}
+          <input type="file" accept="image/png,image/jpeg,image/gif,image/webp" className="sr-only" disabled={avatarBusy} onChange={(event) => {
+            const file = event.target.files?.[0];
+            event.currentTarget.value = "";
+            if (!file) return;
+            setAvatarBusy(true);
+            void imageAttachmentFromFile(file)
+              .then((saved) => {
+                const next = saved ? botAvatarUrlFromStoredPath(saved.path) : null;
+                if (!next) throw new Error("avatar");
+                setAvatarUrl(next);
+                return fetch("/api/config", { method: "PUT", headers: { "content-type": "application/json" }, body: JSON.stringify({ profile: { avatarUrl: next } }) });
+              })
+              .then((response) => { if (!response.ok) throw new Error("avatar"); return response.json() as Promise<ConfigStatus>; })
+              .then((config) => { if (config.profile) dispatch({ type: "profileSaved", profile: { avatarUrl: config.profile.avatarUrl } }); })
+              .catch(() => setAvatarUrl(state.config?.profile?.avatarUrl ?? ""))
+              .finally(() => setAvatarBusy(false));
+          }} />
+        </label>
+        {avatarUrl && <button type="button" className="text-[12px] text-ink-secondary underline" onClick={() => { setAvatarUrl(""); void fetch("/api/config", { method: "PUT", headers: { "content-type": "application/json" }, body: JSON.stringify({ profile: { avatarUrl: "" } }) }).then(() => dispatch({ type: "profileSaved", profile: { avatarUrl: undefined } })); }}>{t("settings.profile.avatar.remove")}</button>}
+      </div>
       <input aria-label={t("settings.profile.name")} value={name} onChange={(e) => setName(e.target.value)} onBlur={save} placeholder={t("settings.profile.name")} className={inputClass} />
       <input
         type="email"

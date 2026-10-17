@@ -18343,7 +18343,10 @@
       "apiInstances.remove": "e6a3c4a1250a6ad3f10faa22333e5e50a6ba78e5b28a3b26f5743d9f8c7ede93",
       "apiInstances.refreshModels": "e02941c724226f34078fcecb136a334ee7a61ee81f07632f9be4fe021997f678",
       "apiInstances.empty": "ddc8655e13eeb047e4ca2953782271878d3db6be801b604d23d8fa225f74a3be",
-      "apiInstances.failed": "a1c3bf780712478020bd28bd6f81293fb8e3a92c2ddff117b254155b617a17f1"
+      "apiInstances.failed": "a1c3bf780712478020bd28bd6f81293fb8e3a92c2ddff117b254155b617a17f1",
+      "settings.profile.avatar.choose": "9c5bb7ae0e7da3f4b0676f7ceef03a964b9bf6dc948f311bcaf55266ac9b9194",
+      "settings.profile.avatar.uploading": "5ce44dd77dae789f322b4bc032812a77a989e90c31928743f4fbdb26321011c2",
+      "settings.profile.avatar.remove": "f46512ab2099fb0c1fecaaa5b24c230b0019c6974f266ad72d2d10c0c091c95e"
     },
     "zh": {
       "pro.fromPrice": "a48a04a457d60b08b54fc83e7a6c4584ffedb1e23621859084900c8521a3af7b",
