@@ -19,6 +19,7 @@ function NavRow({
   active = false,
   attention = false,
   iconsOnly,
+  rail = false,
   tourId,
   onClick,
 }: {
@@ -28,6 +29,7 @@ function NavRow({
   active?: boolean;
   attention?: boolean;
   iconsOnly: boolean;
+  rail?: boolean;
   tourId?: string;
   onClick: () => void;
 }) {
@@ -42,7 +44,7 @@ function NavRow({
       aria-current={active ? "page" : undefined}
       className={cn(
         "relative flex items-center rounded-xl transition-colors",
-        iconsOnly ? "mx-auto size-[46px] shrink-0 justify-center" : "w-full min-h-9 gap-3 px-3 py-1.5 text-left",
+        rail ? "size-9 shrink-0 justify-center" : iconsOnly ? "mx-auto size-[46px] shrink-0 justify-center" : "w-full min-h-9 gap-3 px-3 py-1.5 text-left",
         active ? "bg-raised text-ink" : "text-ink hover:bg-raised/50",
       )}
     >
@@ -51,7 +53,7 @@ function NavRow({
       {attention && (
         <span
           data-testid="routines-attention"
-          className={cn("size-2 shrink-0 rounded-full bg-danger", iconsOnly && "absolute right-2 top-2")}
+          className={cn("size-2 shrink-0 rounded-full bg-danger", iconsOnly && (rail ? "absolute right-1 top-1" : "absolute right-2 top-2"))}
         />
       )}
     </button>
@@ -82,10 +84,12 @@ export function SidebarAppsButton() {
 
 export function SidebarFooterNav({
   density,
+  rail = false,
   collapsed = false,
   onToggleCollapsed,
 }: {
   density: SidebarDensity;
+  rail?: boolean;
   collapsed?: boolean;
   onToggleCollapsed?: () => void;
 }) {
@@ -94,13 +98,14 @@ export function SidebarFooterNav({
   const iconsOnly = density === "icons";
   const toolsLayout = useSidebarToolsLayout();
   const toolbar = !iconsOnly && toolsLayout === "toolbar";
-  const iconSize = iconsOnly ? 20 : 18;
+  const iconSize = iconsOnly && !rail ? 20 : 18;
   const tone = (active: boolean) => (active ? "text-accent" : "text-ink-secondary");
   const routinesNeedYou = state.routineRuns.some((run) => isRoutineProblemRun(run) && !run.seenAt);
   const filesRow = useCloudFilesReady() && <NavRow
     id="files"
     label={t("sidebar.nav.files")}
     iconsOnly={iconsOnly}
+    rail={rail}
     active={state.activeView === "files"}
     icon={(active) => <FolderOpen size={iconSize} className={tone(active)} />}
     onClick={() => dispatch({ type: "showFiles" })}
@@ -133,6 +138,7 @@ export function SidebarFooterNav({
         label={t("sidebar.nav.apps")}
         tourId="nav-apps"
         iconsOnly={iconsOnly}
+        rail={rail}
         active={state.pluginsOpen}
         icon={(active) => <Puzzle size={iconSize} className={tone(active)} />}
         onClick={() => dispatch({ type: "togglePlugins", open: true })}
@@ -153,7 +159,7 @@ export function SidebarFooterNav({
   );
 
   if (iconsOnly) {
-    return <nav data-tour="tools" aria-label={t("sidebar.tools")} className="flex flex-col items-center gap-1">{rows}</nav>;
+    return <nav data-tour="tools" aria-label={t("sidebar.tools")} className={cn("flex flex-col items-center", rail ? "gap-0.5" : "gap-1")}>{rows}</nav>;
   }
   return (
     <div data-tour="tools">

@@ -25,6 +25,7 @@
   "cloudProPopup.title": "MausBot Cloud Pro",
   "cloudProPopup.upgrade": "升级到 Cloud Pro",
   "cloudProPopup.manage": "管理方案",
+  "cloudProPopup.thisComputer": "在这台电脑上继续",
   "cloudHowTo.title": "从这里添加 Cloud",
   "cloudHowTo.body": "点击这个菜单，然后选择“Add a Cloud”。你也可以在这里切换这台电脑和 My Cloud。",
   "cloudHowTo.skip": "跳过",
