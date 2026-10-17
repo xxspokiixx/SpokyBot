@@ -389,7 +389,7 @@ export function MemorySection({ bot, active = true, onToggle }: { bot: Bot; acti
         <div className="rounded-xl bg-card p-4">
           <MemoryFileRows
             title={t("memory.topicFiles")}
-            hint=t("memory.topicFilesHint")
+            hint={t("memory.topicFilesHint")}
             files={overview.topics}
             selected={editing?.path}
             onOpen={(file) => void open(file.path)}
@@ -414,7 +414,7 @@ export function MemorySection({ bot, active = true, onToggle }: { bot: Bot; acti
             <div className="mt-4">
               <MemoryFileRows
                 title={t("memory.dailyLogs")}
-                hint=t("memory.dailyLogsHint")
+                hint={t("memory.dailyLogsHint")}
                 files={overview.logs}
                 selected={editing?.path}
                 onOpen={(file) => void open(file.path)}
