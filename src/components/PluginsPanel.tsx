@@ -41,6 +41,54 @@ export interface ToolkitCard {
   categories?: string[];
 }
 
+const APP_CATEGORY_COPY: Record<string, string> = {
+  productivity: "productivity",
+  "developer tools": "developerTools",
+  communication: "communication",
+  files: "files",
+  "sales and crm": "salesCrm",
+  design: "design",
+  marketing: "marketing",
+  analytics: "analytics",
+};
+
+const CONNECTOR_COPY: Record<string, string> = {
+  "google calendar": "googleCalendar",
+  "google sheets": "googleSheets",
+  "google docs": "googleDocs",
+  notion: "notion",
+  github: "github",
+  linear: "linear",
+  sentry: "sentry",
+  jira: "jira",
+  slack: "slack",
+  gmail: "gmail",
+  discord: "discord",
+  "google drive": "googleDrive",
+  posthog: "posthog",
+  "x (twitter)": "xTwitter",
+  reddit: "reddit",
+  zapier: "zapier",
+  hubspot: "hubspot",
+  salesforce: "salesforce",
+  asana: "asana",
+  trello: "trello",
+  dropbox: "dropbox",
+  airtable: "airtable",
+  figma: "figma",
+  stripe: "stripe",
+};
+
+function appCategoryLabel(name: string): string {
+  const id = APP_CATEGORY_COPY[name.trim().toLowerCase()];
+  return id ? t(`apps.category.${id}`) : name;
+}
+
+function connectorDescription(card: Pick<ToolkitCard, "label" | "blurb">): string {
+  const id = CONNECTOR_COPY[card.label.trim().toLowerCase()];
+  return id ? t(`apps.catalog.${id}.blurb`) : card.blurb;
+}
+
 let cachedConnectorStatus: Record<string, ConnectorStatus> | null = null;
 let cachedConnectorStatusAt = 0;
 let cachedConnectorStatusAuthoritative = true;
@@ -511,7 +559,7 @@ export function PluginsPanel() {
   };
 
   const matching = (cards ?? []).filter(
-    (c) => !search || `${c.label} ${c.slug} ${c.blurb}`.toLowerCase().includes(search.toLowerCase()),
+    (c) => !search || `${c.label} ${c.slug} ${connectorDescription(c)}`.toLowerCase().includes(search.toLowerCase()),
   );
   const isConnected = (slug: string) => Boolean(status[slug]?.connected || status[slug]?.accounts?.length);
   const filter: AppsFilter = surface === "mcp" ? "mcp" : tab === "connected" ? "connected" : "all";
@@ -562,7 +610,7 @@ export function PluginsPanel() {
     ? t("connectors.section.yours")
     : search
       ? t("connectors.section.results")
-      : category ?? (sections.length > 1 ? t("apps.section.all") : t("connectors.section.available"));
+      : category ? appCategoryLabel(category) : (sections.length > 1 ? t("apps.section.all") : t("connectors.section.available"));
   const pill = "inline-flex h-7 shrink-0 items-center justify-center gap-2 rounded-full px-3 text-[13px] font-medium leading-5 transition-colors";
   const pillTone = (selected: boolean) => selected
     ? "bg-ink text-app"
@@ -676,17 +724,17 @@ export function PluginsPanel() {
                 onClick={() => pickCategory(category === name ? null : name)}
                 className={cn(pill, pillTone(filter === "all" && category === name))}
               >
-                {name}
+                {appCategoryLabel(name)}
               </button>
             ))}
             {moreCategories.length > 0 && (
               <SidebarPopoverMenu
                 placement="below"
                 ariaLabel={t("apps.moreCategories")}
-                items={moreCategories.map((name) => ({ key: name, label: name, active: category === name, onSelect: () => pickCategory(name) }))}
+                items={moreCategories.map((name) => ({ key: name, label: appCategoryLabel(name), active: category === name, onSelect: () => pickCategory(name) }))}
                 renderTrigger={({ open }) => (
                   <span className={cn(pill, pillTone(filter === "all" && categoryInMore), open && !categoryInMore && "bg-raised-hover text-ink")}>
-                    {categoryInMore ? category : t("apps.more")}
+                    {categoryInMore ? appCategoryLabel(category) : t("apps.more")}
                     <ChevronDown size={14} aria-hidden="true" />
                   </span>
                 )}
@@ -777,7 +825,7 @@ export function PluginsPanel() {
                 <AppsSection
                   key={section.category}
                   id={`apps-section-${section.category}`}
-                  title={section.category}
+                  title={appCategoryLabel(section.category)}
                   viewAll={section.more ? { label: t("apps.viewAll"), onClick: () => pickCategory(section.category) } : undefined}
                 >
                   {section.cards.map((card) => renderTile(card))}
@@ -887,7 +935,7 @@ export function PluginsPanel() {
           ? t("connectors.signedOut")
           : failed && !accounts.length
             ? t("connectors.authExpired")
-            : card.blurb
+            : connectorDescription(card)
     );
     return (
       <div
