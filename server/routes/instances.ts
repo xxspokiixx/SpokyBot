@@ -14,6 +14,7 @@ import type { InstanceConfigMap, ModelSelection } from "../contracts.ts";
 import { BUILT_IN_DRIVERS } from "../drivers/builtIn.ts";
 import { findCliCandidates, resetPathCache } from "../env-path.ts";
 import type { ProviderRegistry } from "../harness/registry.ts";
+import { checkEngine } from "../engine-check.ts";
 import { HOSTED_PROVIDER_SETTINGS_ERROR } from "../hosted-models.ts";
 import type { ProviderAuthSessions } from "../provider-auth-sessions.ts";
 import { providerIconPatchSchema, withInstanceIcon } from "../provider-icon.ts";
@@ -143,7 +144,7 @@ export function createInstanceRoutes(deps: InstanceRouteDeps): RouteHandler {
       const state = await providerAuthSessions.status(authStatus[1], auth.kind === "session" ? auth.session.id : "loopback", url.searchParams.get("flowId") ?? "");
       return json(res, 200, { auth: state });
     }
-    const instanceAction = /^\/api\/instances\/([\w.-]+)\/(refresh-models|install|auth\/start|auth\/complete|auth\/cancel|auth\/sign-out)$/.exec(path);
+    const instanceAction = /^\/api\/instances\/([\w.-]+)\/(refresh-models|install|check|auth\/start|auth\/complete|auth\/cancel|auth\/sign-out)$/.exec(path);
     if (method === "POST" && instanceAction) {
       if (!String(req.headers["content-type"] ?? "").toLowerCase().startsWith("application/json")) {
         return json(res, 415, { error: "content-type must be application/json" });
@@ -153,6 +154,12 @@ export function createInstanceRoutes(deps: InstanceRouteDeps): RouteHandler {
       const owner = auth.kind === "session" ? auth.session.id : "loopback";
       if (action.startsWith("auth/")) res.setHeader("cache-control", "no-store");
       try {
+        if (action === "check") {
+          const instance = registry.get(instanceId);
+          if (!instance) return json(res, 404, { error: "unknown instance" });
+          res.setHeader("cache-control", "no-store");
+          return json(res, 200, await checkEngine(instance));
+        }
         if (action === "refresh-models") {
           if (!(await registry.refreshModels(instanceId))) return json(res, 404, { error: "unknown instance" });
           return json(res, 200, { instances: await describeInstances() });

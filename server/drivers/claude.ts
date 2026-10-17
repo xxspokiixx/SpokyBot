@@ -2059,7 +2059,7 @@ export const ClaudeDriver: ProviderDriver<ClaudeConfig> = {
             }
           }
           if (code === 0) finish();
-          else finish(new Error(stderr.trim() || `Claude review exited ${code}`));
+          else finish(new Error(stderr.trim() || stdout.trim().slice(0, 500) || `Claude review exited ${code}`));
         });
         if (signal?.aborted) onAbort();
         else {
