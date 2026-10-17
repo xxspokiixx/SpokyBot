@@ -22,14 +22,17 @@ count). It opens Today on the new install and expects the empty state with
 **Set up your first routine**, sends one message, runs a routine named
 "Morning briefing", then expects the tiles in order (emails read, drafts,
 emails sent, messages, reports, leads, routines), the time saved, both lines,
-and that a line opens its conversation. The screenshot lands where
-`OMB_TODAY_SCREENSHOT` points.
+that a line opens its conversation, and that Simple mode keeps Today at the
+top of its sidebar. The screenshots land where `OMB_TODAY_SCREENSHOT` points
+(`-simple.png` beside it for Simple mode).
 
 What the screenshots look like when the recipe passes:
 
 ![Today on a new install: one next step, no numbers](evidence/today/today-empty.png)
 
 ![Today after one chat turn and one routine run: tiles, time saved and the timeline](evidence/today/today.png)
+
+![The same page in Simple mode, with Today at the top of its sidebar](evidence/today/today-simple.png)
 
 `pnpm bench:today` seeds a throwaway `messages.db` (default 50,000 messages over
 30 days) in a temporary home and prints the median read time for today and the

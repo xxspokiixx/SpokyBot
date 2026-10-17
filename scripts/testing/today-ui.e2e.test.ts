@@ -65,4 +65,11 @@ const TOOL_CALLS = [
 
   await evaluate("[...document.querySelectorAll('[data-today-line] button')].find((button) => button.innerText.includes('Replied to Sam')).click()");
   await expect.poll(() => evaluate("!!document.querySelector('textarea[aria-label=\"Message Pepper\"]')"), { timeout: 30_000 }).toBe(true);
+
+  // Simple mode keeps Today at the top of its own sidebar.
+  await evaluate("localStorage.setItem('omb-advanced-mode', '0'); location.reload()");
+  await expect.poll(() => evaluate("!!document.querySelector('[data-sidebar-nav=today]')"), { timeout: 30_000 }).toBe(true);
+  await evaluate("document.querySelector('[data-sidebar-nav=today]').click()");
+  await expect.poll(page, { timeout: 30_000 }).toContain("Morning briefing");
+  if (process.env.OMB_TODAY_SCREENSHOT) await ui("screenshot", "--out", process.env.OMB_TODAY_SCREENSHOT.replace(/\.png$/, "-simple.png"));
 }, 300_000);
