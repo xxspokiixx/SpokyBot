@@ -38,7 +38,7 @@ export function matchesFilter(app: string, filter: AppTriggerFilter | undefined,
   return true;
 }
 
-/** "From Ada <ada@example.com> · Order #1042", from whichever of those fields the event has. */
+/** "From Ada <ada@example.com> · Where is my order?", from whichever of those fields the event has. */
 export function eventPreview(data: Record<string, unknown>): string | undefined {
   const first = (fields: string[]) => fields.map((field) => data[field]).find((value): value is string => typeof value === "string" && value.trim() !== "");
   const from = first(FIELDS.from);
