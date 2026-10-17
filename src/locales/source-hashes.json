@@ -18773,7 +18773,16 @@
       "history.empty": "0dbc9c4de60a9ee1f7e3fe863f4ee69ec5338c845dac151f1a3ffa8715ffbd95",
       "history.refreshError": "e7758a6440760f6fc1d6262cd5a3edd9062e678454d35465d94f75bfc4d434aa",
       "history.undo": "c1497e901b9e70aa938edfbd2d99841e49e00458d40816da793c6a1af625677d",
-      "history.restoreUnavailable": "2d272762ebacd385aead54c56b9597070130fcc0fe95b3ccfe3e6ea8ffad730e"
+      "history.restoreUnavailable": "2d272762ebacd385aead54c56b9597070130fcc0fe95b3ccfe3e6ea8ffad730e",
+      "activity.panel.aria": "d5b9291b18e7324e5b8df92ba22fc4b8c4b0f32175ce778f2b99c80e79feaac4",
+      "activity.panel.title": "38da1505ca8373288489495101b14f24ac95078f520ad64df18272aa6054f750",
+      "activity.panel.reload": "10d39b0ca399655f1364ab73b3bb21aa7344eba4f392e603bd23a9b2907fc01b",
+      "activity.panel.close": "8efbb1cad6945ccea6788973de2e8973c14ae7cf1bb10a0a68e16cb7d0213d11",
+      "activity.panel.subtitle": "ce5fe236d23c742fec197bedf06098cdafdff70189641b5f71b81be8073e5924",
+      "activity.panel.error": "c5b07fc6304c44d3964a1551c1e8260e49ded4219b6e1d6035dcbd8632bcd5f6",
+      "activity.panel.empty": "f9ebb74570acba69899de0e0a52bb5e621a8333e5b2bd737f9910da6fc00c1fe",
+      "activity.panel.loading": "ba3bbbe10d8bef66441c88536ce7b8e724e2829b59a3da658654f4961cd61ae5",
+      "activity.panel.openOtherTask": "d4e7afcc45ec07ebb91ff67abf0948fff8ea58715b8ac29c75727a126d6d205d"
     },
     "zh": {
       "pro.fromPrice": "a48a04a457d60b08b54fc83e7a6c4584ffedb1e23621859084900c8521a3af7b",
