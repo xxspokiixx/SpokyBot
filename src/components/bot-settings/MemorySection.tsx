@@ -9,7 +9,6 @@ import {
   fetchMemoryDoc,
   fetchMemoryJournal,
   fetchMemoryOverview,
-  fileManagerLabel,
   formatBytes,
   journalSource,
   journalSummary,
