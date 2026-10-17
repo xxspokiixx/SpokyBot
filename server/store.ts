@@ -430,6 +430,10 @@ function taskCountsAsBotUnread(task: { unread?: boolean; routineRunId?: string }
   return Boolean(task.unread) && !task.routineRunId;
 }
 
+function activeTaskFields(task: TaskRecord): Pick<BotRecord, "threadId" | "resumeCursors" | "rewound" | "pinnedMessageId"> {
+  return { threadId: task.threadId, resumeCursors: structuredClone(task.resumeCursors), rewound: task.rewound, pinnedMessageId: task.pinnedMessageId };
+}
+
 interface ThreadState {
   messages: Message[];
   activeLeafId: string | null;
@@ -2330,10 +2334,7 @@ export class Store {
   }
 
   private mirrorActiveTask(bot: BotRecord, task: TaskRecord) {
-    bot.threadId = task.threadId;
-    bot.resumeCursors = structuredClone(task.resumeCursors);
-    bot.rewound = task.rewound;
-    bot.pinnedMessageId = task.pinnedMessageId;
+    Object.assign(bot, activeTaskFields(task));
   }
 
   createTask(botId: string, title?: string, activate = true, projectId?: string, openedBy?: TaskOpenedBy, approvalMode?: "ask" | "full",
@@ -2408,8 +2409,9 @@ export class Store {
     const bot = this.bot(botId);
     const task = bot?.tasks?.find((t) => t.threadId === threadId);
     if (!bot || !task) return null;
-    this.mirrorActiveTask(bot, task);
-    this.saveBots();
+    const active = activeTaskFields(task);
+    this.saveBots(this.bots.map((candidate) => candidate === bot ? { ...bot, ...active } : candidate));
+    Object.assign(bot, active);
     this.emit({ type: "bot", botId });
     return bot;
   }
