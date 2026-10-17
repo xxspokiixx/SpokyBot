@@ -18913,7 +18913,10 @@
       "apps.catalog.dropbox.blurb": "f78cb14a525d9ab25ff880832d77d418e2b646dc784e6b4fb1a23ac46b553305",
       "apps.catalog.airtable.blurb": "e7d62faed08080b3501889a318612e5fd6468c7f1c4b6f86410ffcc803345597",
       "apps.catalog.figma.blurb": "cfb852a80a3e292027603d5703b586e2d21c4d2df2ab644bb7d39ce6f48ce65b",
-      "apps.catalog.stripe.blurb": "a5929b81b4439a71fd757678172c323c49560d56643c5f1d6cba1cb15954d5dc"
+      "apps.catalog.stripe.blurb": "a5929b81b4439a71fd757678172c323c49560d56643c5f1d6cba1cb15954d5dc",
+      "planUsage.signInAgain": "a43a33e260e164ff0e2c0fdf5cad5a6fac3fb71d5d3fb12969bae57bfcc63a44",
+      "planUsage.provider.chatgptPlan": "17db35179c356ce3afadf948298706043cd11e2bef7d19f5aa4d41db5f6edcbd",
+      "planUsage.provider.claudeApiKey": "488d6c8fe617748648969cffbe8bf6f848cd78ed04ab64fef01277c99462462b"
     },
     "zh": {
       "pro.fromPrice": "a48a04a457d60b08b54fc83e7a6c4584ffedb1e23621859084900c8521a3af7b",
