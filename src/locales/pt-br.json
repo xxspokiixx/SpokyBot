@@ -4936,4 +4936,16 @@
   "botIdentity.dialog.emptyHelp": "Adicione-as no perfil deste bot.",
   "botIdentity.dialog.contextHelp": "Incluídas no contexto deste bot em todos os turnos.",
   "common.done": "Concluído"
+,
+  "skills.learned.title": "Habilidades aprendidas",
+  "skills.library.addLabel": "Adicionar uma habilidade da biblioteca",
+  "skills.library.addPlaceholder": "Adicionar uma habilidade da biblioteca…",
+  "skills.library.allAssigned": "Todas as habilidades da biblioteca já estão atribuídas a este bot.",
+  "skills.library.manageHint": "Importe e gerencie habilidades da biblioteca em Configurações → Habilidades.",
+  "skills.import.placeholder": "owner/repo, https://github.com/…/SKILL.md ou https://skills.sh/…",
+  "skills.import.label": "Importar uma habilidade",
+  "skills.import.importing": "Importando…",
+  "skills.import.button": "Importar",
+  "skills.loading": "Carregando…",
+  "skills.empty": "Nenhuma habilidade instalada ainda."
 }

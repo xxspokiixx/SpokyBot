@@ -18489,7 +18489,18 @@
       "botIdentity.dialog.empty": "3a6170c5480d43f6e33c6612737ccf4da4e8341207d17893555686b8d20802eb",
       "botIdentity.dialog.emptyHelp": "0fddf01336d97bf6c6242afdd627756fb0134dcad216a1c87a0dbe913a35ec17",
       "botIdentity.dialog.contextHelp": "d5827ab6487ec4be7f35ccc02e6b5b60d0fe2e79f9f1e3c9a90fe4fb45d4a788",
-      "common.done": "11a6767d5674c7e45f7e00dc525762275b3a48491ad6045427d2609cc496c516"
+      "common.done": "11a6767d5674c7e45f7e00dc525762275b3a48491ad6045427d2609cc496c516",
+      "skills.learned.title": "875d017caf9307f51aeacbbc26f59ee6419d73b528a9f8cd01a37f25847f3c39",
+      "skills.library.addLabel": "1cd3fa5ce336299b07ff56d4057afa6f1cb6d1b63e2c3a02394e0ed51b7a7cff",
+      "skills.library.addPlaceholder": "d0d756bbd9caa3496fc4f00ca9c3d7be9e82a4c14a0e7d36b8535afb427be6d8",
+      "skills.library.allAssigned": "32792ae50eeb3eeeaeb06723d76d0188a193fe65e61ae04928e22a61746c101d",
+      "skills.library.manageHint": "21c54e5deb0d3d95470521fc64db5fb5f50fc7ca55561e100a56920c0fff91f1",
+      "skills.import.placeholder": "7a7d61b4a4aca7cd6432cd8c3f1f4fe7d3158505a02939d8bff0328db10f383d",
+      "skills.import.label": "211f9507b0900fb656127f356c641b69cf7bf0bd7ce1dc93feabcd844acd8a17",
+      "skills.import.importing": "c01c4324f1fa14fc76957936626e11a5150c24e748dbd08cc46848dfcbe37d00",
+      "skills.import.button": "2cff9baabf56ca002610e113bc94deb6ededddfc3c130365b6e88ed5195bf774",
+      "skills.loading": "ba3bbbe10d8bef66441c88536ce7b8e724e2829b59a3da658654f4961cd61ae5",
+      "skills.empty": "53c7b7a359da0f84415bdac86c340674feea531e7961cee4a30cd562a6550525"
     },
     "zh": {
       "pro.fromPrice": "a48a04a457d60b08b54fc83e7a6c4584ffedb1e23621859084900c8521a3af7b",

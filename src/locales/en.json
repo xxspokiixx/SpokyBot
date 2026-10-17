@@ -5082,4 +5082,16 @@
   "botIdentity.dialog.emptyHelp": "Add them from this bot’s profile.",
   "botIdentity.dialog.contextHelp": "Included in this bot’s context on every turn.",
   "common.done": "Done"
+,
+  "skills.learned.title": "Learned skills",
+  "skills.library.addLabel": "Add a skill from the library",
+  "skills.library.addPlaceholder": "Add a skill from the library…",
+  "skills.library.allAssigned": "Every skill in the library is already assigned to this bot.",
+  "skills.library.manageHint": "Import and manage library skills in Settings → Skills.",
+  "skills.import.placeholder": "owner/repo, https://github.com/…/SKILL.md, or https://skills.sh/…",
+  "skills.import.label": "Import a skill",
+  "skills.import.importing": "Importing…",
+  "skills.import.button": "Import",
+  "skills.loading": "Loading…",
+  "skills.empty": "No installed skills yet."
 }
