@@ -28,6 +28,7 @@ import {
 } from "lucide-react";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
+import type { LocaleKey } from "@/locales";
 
 import { ShareTeamDialog } from "./ShareTeamDialog";
 import { OrgLibraryTab } from "./TeamLibraryPanelOrg";
@@ -67,7 +68,7 @@ const CATALOG_COPY: Record<string, string> = {
 
 function catalogCopy(entry: TeamCatalogEntry): TeamCatalogEntry {
   const id = CATALOG_COPY[entry.name.trim().toLowerCase()];
-  return id ? { ...entry, name: t(`templates.catalog.${id}.name`), summary: t(`templates.catalog.${id}.summary`), outcome: t(`templates.catalog.${id}.summary`) } : entry;
+  return id ? { ...entry, name: t(`templates.catalog.${id}.name` as LocaleKey), summary: t(`templates.catalog.${id}.summary` as LocaleKey), outcome: t(`templates.catalog.${id}.summary` as LocaleKey) } : entry;
 }
 
 export interface TeamImportResult {
@@ -647,7 +648,7 @@ export function TeamLibraryPanel({
             <p className={cn("mt-1 text-[13px] text-ink-secondary", pending && "ml-9")}>
                 {pending
                   ? pending.kind === "backup"
-                    ? t("templates.backupSummary", { bots: pending.members.length, conversations: pending.conversations })
+                    ? t("templates.backupSummary", { bots: pending.members.length, conversations: pending.conversations ?? 0 })
                     : pending.kind === "package"
                     ? pending.library
                       ? t("teamImport.library")

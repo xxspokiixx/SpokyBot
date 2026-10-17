@@ -5507,6 +5507,7 @@
   "memory.noChanges": "No changes recorded yet.",
   "memory.noneYet": "None yet.",
   "memory.delete": "Delete",
+  "memory.confirmDelete": "Delete {name}?",
   "memory.undoing": "Undoing…",
   "memory.undo": "Undo",
   "memory.cantUndo": "Can't undo"

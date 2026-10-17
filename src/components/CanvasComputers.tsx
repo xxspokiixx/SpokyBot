@@ -6,6 +6,7 @@ import type { TeamComputer } from "../../shared/team-computer";
 import { ConfirmDialog } from "./ConfirmDialog";
 import { Select } from "./Select";
 import { t } from "@/lib/i18n";
+import type { LocaleKey } from "@/locales";
 
 const control = "rounded-lg px-3 py-2 text-[12px] text-ink-secondary hover:bg-control hover:text-ink disabled:opacity-40";
 const field = "w-full rounded-lg border border-hairline/60 bg-inset px-3 py-2 text-[12px] text-ink outline-none focus:border-accent";
@@ -14,7 +15,7 @@ type Inventory = { computers: TeamComputer[]; configured: boolean; problem?: str
 function computerStateLabel(state: string, updating: boolean): string {
   if (updating) return t("canvasComputers.updating");
   const key = ({ idle: "idle", ready: "ready", running: "running", init: "starting", provisioning: "provisioning", provisioned: "starting", cloning: "starting", starting: "starting", sleeping: "sleeping" } as Record<string, string>)[state];
-  return key ? t(`canvasComputers.state.${key}`) : state;
+  return key ? t(`canvasComputers.state.${key}` as LocaleKey) : state;
 }
 
 /**

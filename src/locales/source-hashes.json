@@ -18917,6 +18917,7 @@
       "memory.noChanges": "0dbc9c4de60a9ee1f7e3fe863f4ee69ec5338c845dac151f1a3ffa8715ffbd95",
       "memory.noneYet": "bd3ce633497fa23b75c81ac06132f0d2777c1332a31c263ea35639144c8ad576",
       "memory.delete": "e2d0a54968ead24efc0dffa6ac78fc606dceec34a0f586177a74a54cc2272cf8",
+      "memory.confirmDelete": "a4b982a9e0bc24133bce18717f9db74bd70095b79c24ee45c57a8194fb727d4d",
       "memory.undoing": "62daa93abbe81f3280709ae2fb96b31471db88178a5cb2bf387ec11cdda8cf98",
       "memory.undo": "a8283ade31856f71220db0e6f60a257c6889dc4dad0f275f66ad44b9ed9bf8d5",
       "memory.cantUndo": "a4c59bb643d6cb44ef20196c5dce05bf6e36ea969c1b4726ce79cca1e42c1d85",

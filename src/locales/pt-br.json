@@ -5361,6 +5361,7 @@
   "memory.noChanges": "Nenhuma alteração registrada ainda.",
   "memory.noneYet": "Nenhum ainda.",
   "memory.delete": "Excluir",
+  "memory.confirmDelete": "Excluir {name}?",
   "memory.undoing": "Desfazendo…",
   "memory.undo": "Desfazer",
   "memory.cantUndo": "Não é possível desfazer"

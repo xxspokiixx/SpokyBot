@@ -81,12 +81,12 @@ const CONNECTOR_COPY: Record<string, string> = {
 
 function appCategoryLabel(name: string): string {
   const id = APP_CATEGORY_COPY[name.trim().toLowerCase()];
-  return id ? t(`apps.category.${id}`) : name;
+  return id ? t(`apps.category.${id}` as LocaleKey) : name;
 }
 
 function connectorDescription(card: Pick<ToolkitCard, "label" | "blurb">): string {
   const id = CONNECTOR_COPY[card.label.trim().toLowerCase()];
-  return id ? t(`apps.catalog.${id}.blurb`) : card.blurb;
+  return id ? t(`apps.catalog.${id}.blurb` as LocaleKey) : card.blurb;
 }
 
 let cachedConnectorStatus: Record<string, ConnectorStatus> | null = null;
