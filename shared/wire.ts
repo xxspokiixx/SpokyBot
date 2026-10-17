@@ -12,6 +12,7 @@ import type { ReplyStyle } from "./reply-style.ts";
 import type { CredentialTargetId } from "./credential-request.ts";
 import type { TeamSetupRequest } from "./team-setup.ts";
 import type { RoutineRequestCardData } from "./routine-request.ts";
+import type { WebhookRequestCardData } from "./webhook-request.ts";
 import type { ProfileRequestCardData } from "./profile-request.ts";
 import type { PlaceRow } from "./place-view.ts";
 import type { ModelRequestCardData } from "./model-request.ts";
@@ -572,6 +573,8 @@ export interface OptionCardData {
   undone?: boolean;
   /** A durable chat-created routine proposal. */
   routineRequest?: RoutineRequestCardData;
+  /** A webhook trigger a bot made or changed from chat. */
+  webhookRequest?: WebhookRequestCardData;
   /** A durable profile-change proposal (propose_profile). */
   profileRequest?: ProfileRequestCardData;
   /** A durable default-model proposal (propose_model). */

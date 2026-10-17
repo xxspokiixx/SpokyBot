@@ -114,7 +114,7 @@ import {
 import { sidebarSectionAttention } from "@/lib/sidebar-attention";
 import { botListItemPointerIntent } from "@/lib/sidebar-selection";
 import { phoneSettingsAction, SidebarPhoneButton } from "./SidebarPhoneButton";
-import { SidebarAppsButton, SidebarFooterNav } from "./SidebarFooterNav";
+import { SidebarAppsButton, SidebarFooterNav, SidebarTriggersRow } from "./SidebarFooterNav";
 import { GlassBar, GlassScrollFrame, GlassScroller } from "./GlassScrollFrame";
 import { DesktopWorkspaceSwitcher } from "./DesktopWorkspaceSwitcher";
 import { useCloudOwner } from "./CloudOwner";
@@ -2257,9 +2257,8 @@ export function Sidebar({ open, onClose, collapseToIcons = false }: {
 
       <GlassScroller className="px-2">
         <div className="flex flex-col gap-0.5">
-          {matchingBots.length === 0 && visibleGroups.length === 0 && q && q.length < MIN_QUERY && (
-            <div className="px-3 py-6 text-center text-[13px] text-ink-secondary">{t("sidebar.noMatch", { query })}</div>
-          )}
+          {!q && <SidebarTriggersRow density={density} />}
+          {matchingBots.length === 0 && visibleGroups.length === 0 && q && q.length < MIN_QUERY && <div className="px-3 py-6 text-center text-[13px] text-ink-secondary">{t("sidebar.noMatch", { query })}</div>}
           {unsectionedChief && (
             <div className="mb-1.5">
               <BotListItem {...botRow(unsectionedChief)} />

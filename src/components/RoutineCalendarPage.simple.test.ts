@@ -40,7 +40,8 @@ vi.mock("./DesktopCapabilities", async (importOriginal) => ({
 vi.mock("@/lib/analytics", () => ({ track: vi.fn() }));
 
 const { initialState } = await import("@/state/store");
-const { EventDetails, EventEditor, RoutinesPage } = await import("./RoutineCalendarPage");
+const { EventDetails, EventEditor } = await import("./RoutineCalendarPage");
+const { TriggersPage: RoutinesPage } = await import("./TriggersPage");
 const { calendarRangeLabel, startOfWeek } = await import("@/lib/routine-calendar");
 const { scheduleLabel } = await import("@/lib/schedule-label");
 
@@ -120,58 +121,85 @@ beforeEach(() => {
   fixture.state = { ...initialState, bots: [bot], routines: [routine], routineRuns: runs };
 });
 
-describe("Routines header", () => {
-  it("shows the title, date navigation, view switch, run logs and New routine", () => {
+describe("Triggers header", () => {
+  const startingWith = (tree: Node[], text: string) => [...buttons(tree).entries()].find(([label]) => label.startsWith(text))?.[1];
+
+  it("shows the title, the list first, the view switch, History and New trigger", () => {
     const tree = page();
     const header = buttons(tree);
-    expect(tree.some((node) => node.type === "h1" && textOf(node.props.children) === "Routines")).toBe(true);
-    for (const label of ["Previous dates", "Next dates", "Today", "Day", "Week", "List", "Run logs", "New routine"]) {
+    expect(tree.some((node) => node.type === "h1" && textOf(node.props.children) === "Triggers")).toBe(true);
+    for (const label of ["List", "Day", "Week", "History", "New trigger"]) {
       expect(header.has(label), label).toBe(true);
     }
-    expect(tree.some((node) => textOf(node.props.children) === calendarRangeLabel(startOfWeek(Date.now()), 7))).toBe(true);
-    expect(header.get("Week")!["aria-pressed"]).toBe(true);
+    expect(header.get("List")!["aria-pressed"]).toBe(true);
+    expect(tree.find(named("RoutineList"))).toBeDefined();
+    expect(header.has("Previous dates")).toBe(false);
   });
 
-  it("switches between Day, Week and List", () => {
+  it("switches between List, Day and Week, with dates only on the calendar", () => {
     let tree = page();
-    expect(tree.find(named("CalendarGrid"))!.props.days).toBe(7);
-
+    expect(tree.find(named("CalendarGrid"))).toBeUndefined();
     click(buttons(tree).get("Day"));
     tree = page();
     expect(tree.find(named("CalendarGrid"))!.props.days).toBe(1);
     expect(buttons(tree).get("Day")!["aria-pressed"]).toBe(true);
-
+    expect(buttons(tree).has("Previous dates")).toBe(true);
+    click(buttons(tree).get("Week"));
+    tree = page();
+    expect(tree.find(named("CalendarGrid"))!.props.days).toBe(7);
+    expect(tree.some((node) => textOf(node.props.children) === calendarRangeLabel(startOfWeek(Date.now()), 7))).toBe(true);
     click(buttons(tree).get("List"));
     tree = page();
     expect(tree.find(named("CalendarGrid"))).toBeUndefined();
     expect(tree.find(named("RoutineList"))).toBeDefined();
-    expect(buttons(tree).has("Previous dates")).toBe(false);
-
-    click(buttons(tree).get("Week"));
-    tree = page();
-    expect(tree.find(named("CalendarGrid"))!.props.days).toBe(7);
   });
 
-  it("keeps Run logs one click away", () => {
-    click(buttons(page()).get("Run logs"));
+  it("keeps the run history one click away", () => {
+    click(buttons(page()).get("History"));
     expect(page().find(named("RoutineLogs"))).toBeDefined();
   });
 
-  it("offers the Webhooks tab only in Advanced mode", () => {
-    expect(buttons(page()).has("Webhooks")).toBe(false);
-    fixture.advanced = true;
-    fixture.values = [];
-    expect(buttons(page()).has("Webhooks")).toBe(true);
+  it("lists webhooks with the schedules, filtered by kind, with no separate Webhooks tab", () => {
+    fixture.state = { ...fixture.state!, webhooks: [{ id: "hook", endpointId: "wh_x", name: "Interested replies", prompt: "", botId: bot.id, runOn: "maus", enabled: true, createdAt: 0, updatedAt: 0, deliveryCount: 0 }] };
+    let tree = page();
+    expect(buttons(tree).has("Webhooks")).toBe(false);
+    expect(tree.find(named("RoutineList"))).toBeDefined();
+    expect(tree.find(named("WebhookTriggerList"))!.props.webhooks).toHaveLength(1);
+    click(startingWith(tree, "Webhooks"));
+    tree = page();
+    expect(tree.find(named("RoutineList"))).toBeUndefined();
+    expect(tree.find(named("WebhookTriggerList"))).toBeDefined();
+    click(startingWith(tree, "Schedules"));
+    tree = page();
+    expect(tree.find(named("RoutineList"))).toBeDefined();
+    expect(tree.find(named("WebhookTriggerList"))).toBeUndefined();
   });
 
-  it("opens the plain editor from New routine in Simple mode", () => {
-    click(buttons(page()).get("New routine"));
+  it("asks what starts a new trigger, then opens the plain schedule editor in Simple mode", () => {
+    click(buttons(page()).get("New trigger"));
+    const menu = page();
+    expect(startingWith(menu, "When another app calls a link")).toBeDefined();
+    click(startingWith(menu, "On a schedule"));
     expect(page().find(named("EventEditor"))!.props.seed).toMatchObject({ kind: "routine", botIds: [] });
+  });
+
+  it("opens the webhook editor from When another app calls a link", () => {
+    click(buttons(page()).get("New trigger"));
+    click(startingWith(page(), "When another app calls a link"));
+    expect(page().find(named("WebhookEditor"))!.props.webhook).toBeUndefined();
+  });
+
+  it("greets an empty workspace with what a trigger is and how to ask a bot for one", () => {
+    fixture.state = { ...fixture.state!, routines: [], webhooks: [], routineRuns: [], routinesLoadState: "ready" };
+    const html = markup(createElement(RoutinesPage, { onBack: vi.fn(), onOpenRoom: vi.fn() }));
+    expect(html).toContain("No triggers yet");
+    expect(html).toContain("Try telling a bot");
   });
 });
 
 describe("routine drawer", () => {
   it("opens beside the grid when an occurrence is selected and rings it", () => {
+    click(buttons(page()).get("Week"));
     let tree = page();
     const grid = tree.find(named("CalendarGrid"))!;
     const item = routineItem(routine);

@@ -1,4 +1,4 @@
-import { CalendarDays, FolderOpen, Network, Puzzle, Zap } from "lucide-react";
+import { FolderOpen, Network, Puzzle, Zap } from "lucide-react";
 import type { ReactNode } from "react";
 
 import { cn } from "@/lib/cn";
@@ -58,6 +58,27 @@ function NavRow({
   );
 }
 
+/** The one way to Triggers (schedules and webhooks): first in the sidebar, in every mode and density. */
+export function SidebarTriggersRow({ density }: { density: SidebarDensity }) {
+  const { state, dispatch } = useStore();
+  const iconsOnly = density === "icons";
+  const active = state.activeView === "routines";
+  return (
+    <div className={iconsOnly ? "mb-1" : "mb-1.5"}>
+      <NavRow
+        id="triggers"
+        label={t("sidebar.nav.triggers")}
+        tourId="nav-automations"
+        iconsOnly={iconsOnly}
+        active={active}
+        attention={state.routineRuns.some((run) => isRoutineProblemRun(run) && !run.seenAt)}
+        icon={() => <Zap size={iconsOnly ? 20 : 18} className={active ? "text-accent" : "text-ink-secondary"} />}
+        onClick={() => dispatch({ type: "showRoutines", view: "list" })}
+      />
+    </div>
+  );
+}
+
 export function SidebarAppsButton() {
   const { state, dispatch } = useStore();
   const label = t("sidebar.nav.apps");
@@ -96,7 +117,6 @@ export function SidebarFooterNav({
   const toolbar = !iconsOnly && toolsLayout === "toolbar";
   const iconSize = iconsOnly ? 20 : 18;
   const tone = (active: boolean) => (active ? "text-accent" : "text-ink-secondary");
-  const routinesNeedYou = state.routineRuns.some((run) => isRoutineProblemRun(run) && !run.seenAt);
   const filesRow = useCloudFilesReady() && <NavRow
     id="files"
     label={t("sidebar.nav.files")}
@@ -110,24 +130,6 @@ export function SidebarFooterNav({
 
   const rows = (
     <>
-      {advanced && <NavRow
-        id="routines"
-        label={t("sidebar.nav.routines")}
-        tourId="nav-automations"
-        iconsOnly={iconsOnly || toolbar}
-        active={state.activeView === "routines"}
-        attention={routinesNeedYou}
-        icon={(active) => <CalendarDays size={iconSize} className={tone(active)} />}
-        onClick={() => dispatch({ type: "showRoutines" })}
-      />}
-      {advanced && <NavRow
-        id="triggers"
-        label={t("sidebar.nav.triggers")}
-        iconsOnly={iconsOnly || toolbar}
-        active={state.triggersOpen}
-        icon={(active) => <Zap size={iconSize} className={tone(active)} />}
-        onClick={() => dispatch({ type: "toggleTriggers", open: true })}
-      />}
       {iconsOnly && <NavRow
         id="apps"
         label={t("sidebar.nav.apps")}
@@ -160,7 +162,6 @@ export function SidebarFooterNav({
       <SidebarSectionHeader
         name={t("sidebar.tools")}
         collapsed={collapsed}
-        alert={collapsed && routinesNeedYou}
         onToggle={onToggleCollapsed}
         reorderable={false}
         dragging={false}

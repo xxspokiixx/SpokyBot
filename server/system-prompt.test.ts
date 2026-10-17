@@ -18,7 +18,7 @@ import {
   CREDENTIAL_PROMPT,
   LEARN_PROMPT,
   PROFILE_PROMPT,
-  ROUTINE_PROMPT,
+  TRIGGER_PROMPT,
   ROUTINE_EXECUTION_PROMPT,
   WEBHOOK_PROMPT,
   SIGN_IN_PROMPT,
@@ -199,7 +199,7 @@ describe("computerPrompt", () => {
 
 describe("shared sentences", () => {
   it("each begins with one space so they concatenate onto the persona line", () => {
-    for (const sentence of [COMPOSIO_PROMPT, CREDENTIAL_PROMPT, ROUTINE_PROMPT, ROUTINE_EXECUTION_PROMPT, LEARN_PROMPT, WEBHOOK_PROMPT, PROFILE_PROMPT, SIGN_IN_PROMPT]) {
+    for (const sentence of [COMPOSIO_PROMPT, CREDENTIAL_PROMPT, TRIGGER_PROMPT, ROUTINE_EXECUTION_PROMPT, LEARN_PROMPT, WEBHOOK_PROMPT, PROFILE_PROMPT, SIGN_IN_PROMPT]) {
       expect(sentence.startsWith(" ")).toBe(true);
       expect(sentence.startsWith("  ")).toBe(false);
     }
@@ -223,7 +223,7 @@ describe("shared sentences", () => {
 
   it("configuration prompts follow actual applied or pending results without elevating another bot", () => {
     expect(PROFILE_PROMPT).toContain("propose_profile");
-    for (const prompt of [PROFILE_PROMPT, ROUTINE_PROMPT, LEARN_PROMPT]) {
+    for (const prompt of [PROFILE_PROMPT, LEARN_PROMPT]) {
       expect(prompt).toContain("a change to your own routines, skills, profile or model applies immediately");
       expect(prompt).toContain("A change for another bot may wait for the person");
       expect(prompt).toContain("continue the requested work without asking for another confirmation");
@@ -233,6 +233,11 @@ describe("shared sentences", () => {
       expect(prompt).not.toContain("nothing changes until the user confirms");
     }
     expect(LEARN_PROMPT).toContain("only when the user explicitly asks to revise that exact name");
+    // Triggers have no pending state: the bot sets them up in the same turn and the person undoes from the card.
+    expect(TRIGGER_PROMPT).toContain("set it up with create_trigger in this turn");
+    expect(TRIGGER_PROMPT).toContain("Do not ask for confirmation");
+    expect(TRIGGER_PROMPT).toContain("Edit, Pause and Undo");
+    expect(TRIGGER_PROMPT).not.toMatch(/pending|explicitly asks/);
     expect(CREDENTIAL_PROMPT).toContain("secure credential request");
     expect(CREDENTIAL_PROMPT).not.toContain("applied immediately");
   });

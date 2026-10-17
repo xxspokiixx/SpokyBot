@@ -21,7 +21,7 @@ vi.mock("./DesktopCapabilities", async (importOriginal) => ({
 vi.mock("@/lib/analytics", () => ({ track: vi.fn() }));
 
 const { initialState } = await import("@/state/store");
-const { RoutinesPage } = await import("./RoutineCalendarPage");
+const { TriggersPage: RoutinesPage } = await import("./TriggersPage");
 
 const bot: Bot = {
   id: "runner", threadId: "execution", name: "Runner", title: "", description: "", color: "green",

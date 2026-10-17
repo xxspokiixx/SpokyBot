@@ -11,10 +11,6 @@ export type DirectApplyCheck = (botId: string, threadId: string, targetBotId: st
 /** What Undo says, applying nothing, once the thing changed since. */
 export const UNDO_STALE = "Changed since, so it can't be undone here.";
 
-/** A bot applying its own routines directly keeps at most this many
- * enabled; past it, a create or resume shows today's card instead. */
-export const SELF_ROUTINE_CAP = 20;
-
 export function directApply(args: {
   fullAccess: boolean;
   botId: string;

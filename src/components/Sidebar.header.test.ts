@@ -205,10 +205,14 @@ describe("sidebar glass head and foot", () => {
       const search = at('aria-label="Search bots and messages"');
       const list = at('class="glass-scroller ');
       const foot = at('data-glass-bar="bottom"');
-      const places = at('data-sidebar-nav="routines"');
+      const triggers = at('data-sidebar-nav="triggers"');
+      const places = at('data-sidebar-nav="team-map"');
       expect(head).toBeLessThan(topRow);
       expect(topRow).toBeLessThan(search);
       expect(search).toBeLessThan(list);
+      // Triggers leads the list itself, ahead of every bot, and is never one of the foot's places.
+      expect(list).toBeLessThan(triggers);
+      expect(triggers).toBeLessThan(foot);
       expect(list).toBeLessThan(foot);
       expect(foot).toBeLessThan(places);
       expect(html.match(/data-glass-frame=""/g)).toHaveLength(1);
@@ -218,22 +222,23 @@ describe("sidebar glass head and foot", () => {
 });
 
 describe("sidebar foot in Simple mode", () => {
-  it.each(["comfortable", "compact"] as const)("keeps only the profile row, with Apps at its end (%s)", (density) => {
+  it.each(["comfortable", "compact"] as const)("keeps only the profile row, with Apps at its end, and Triggers at the top of the list (%s)", (density) => {
     fixture.advanced = false;
     fixture.density = density;
     const html = render();
     const foot = html.indexOf('data-glass-bar="bottom"');
     expect(html).not.toContain('data-sidebar-nav="routines"');
-    expect(html).not.toContain('data-sidebar-nav="triggers"');
+    expect(html.match(/data-sidebar-nav="triggers"/g)).toHaveLength(1);
+    expect(html.indexOf('data-sidebar-nav="triggers"')).toBeLessThan(foot);
     expect(html.match(/data-sidebar-nav="apps"/g)).toHaveLength(1);
     expect(html.indexOf('data-sidebar-nav="apps"')).toBeGreaterThan(foot);
   });
 
-  it("keeps Routines and Triggers in Advanced mode, and still one Apps", () => {
+  it("keeps one Triggers row and no Routines row in Advanced mode, and still one Apps", () => {
     fixture.advanced = true;
     const html = render();
-    expect(html).toContain('data-sidebar-nav="routines"');
-    expect(html).toContain('data-sidebar-nav="triggers"');
+    expect(html).not.toContain('data-sidebar-nav="routines"');
+    expect(html.match(/data-sidebar-nav="triggers"/g)).toHaveLength(1);
     expect(html.match(/data-sidebar-nav="apps"/g)).toHaveLength(1);
   });
 });

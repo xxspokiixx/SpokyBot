@@ -142,8 +142,8 @@ it("applies requested Full Access workflows through MCP without duplicate approv
     const created = await run(chief, chief.activeTaskId,
       "Set up my monthly reporting profile, save its reusable skill, schedule 9am New York time on the first of each month, and create Mira in Research.", [
         step("propose_profile", { title: "Monthly reporting Chief", soul: "Report only verified fixture results.", reason: "Requested reporting profile" }),
-        step("list_routines", {}),
-        step("propose_routine", { name: "Monthly fixture report", instructions: "Summarize fixture-only monthly results.", schedule }),
+        step("list_triggers", {}),
+        step("create_trigger", { when: "schedule", name: "Monthly fixture report", instructions: "Summarize fixture-only monthly results.", schedule }),
         step("skills_list", {}),
         step("skill_manage", { action: "create", skill_md: skill("monthly-fixture-review", "Read fixture notes and summarize the month."), source: "conversation" }),
         step("list_team_setup", {}),
@@ -153,8 +153,9 @@ it("applies requested Full Access workflows through MCP without duplicate approv
         step("create_bot", { name: "Theo", role: "Totals checker", instructions: "Check fixture totals before each report." }),
       ], { guarded: "full" });
     expect(created.permissionMode).toBe("bypassPermissions");
-    for (const entry of created.evidence.filter((item: any) => ["propose_profile", "propose_routine", "skill_manage", "propose_team_setup"].includes(item.step?.tool))) {
-      expect(entry.response.result.content[0].text).toContain("No additional confirmation is needed");
+    for (const entry of created.evidence.filter((item: any) => ["propose_profile", "create_trigger", "skill_manage", "propose_team_setup"].includes(item.step?.tool))) {
+      // Triggers never wait on anything: their tool says so in its own words.
+      expect(entry.response.result.content[0].text).toContain(entry.step.tool === "create_trigger" ? "Do not ask for confirmation" : "No additional confirmation is needed");
       expect(entry.response.result.content[0].text).not.toContain("End this turn and wait");
     }
     const updatedChief = (await bots()).find(bot => bot.id === chief.id);
@@ -179,7 +180,7 @@ it("applies requested Full Access workflows through MCP without duplicate approv
 
     await run(chief, chief.activeTaskId, "Update the named monthly skill, pause the report, update Mira, then delete Mira as requested.", [
       step("skill_manage", { action: "update", skill_name: "monthly-fixture-review", skill_md: skill("monthly-fixture-review", "Read fixture notes, verify totals, and report missing data."), source: "conversation" }),
-      step("list_routines", {}), step("propose_routine_action", { action: "pause", routine_id: routine.id }),
+      step("list_triggers", {}), step("manage_trigger", { action: "pause", trigger_id: routine.id }),
       step("propose_team_setup", { reason: "Requested Mira update", operations: [{ action: "update", botId: mira.id, fields: { title: "Verified research specialist" } }] }),
       step("propose_bot_deletion", { bot_id: mira.id, reason: "User explicitly requested removal after the fixture check" }),
       step("propose_team_setup", { reason: "Out-of-scope fixture check", operations: [{ action: "update", botId: inverse.id, fields: { title: "Must not apply" } }] }, true),
@@ -208,7 +209,7 @@ it("applies requested Full Access workflows through MCP without duplicate approv
 
     const askTurn = await run(chief, ask.threadId, "Change my own profile, routine and named skill, and prepare a specialist for review in this Ask task.", [
       step("propose_profile", { title: "Applied in Ask", reason: "The bot's own profile applies at any level" }),
-      step("propose_routine", { name: "Own Ask report", instructions: "Report from the Ask task.", schedule }),
+      step("create_trigger", { when: "schedule", name: "Own Ask report", instructions: "Report from the Ask task.", schedule }),
       step("skill_manage", { action: "create", skill_md: skill("own-ask-review", "Applies at once as the bot's own skill."), source: "conversation" }),
       step("propose_team_setup", { reason: "Ask task specialist review", operations: [specialist("Pending specialist", "Operations")] }),
     ], { pending: true, guarded: "ask" });
