@@ -95,7 +95,7 @@ const BUDGET_BASELINE: Record<string, number> = {
   "skills+shared+voice+cloud-home": 15419,
   "skills+shared+voice+non-chief+cloud-home": 15308,
   "skills+shared+voice+escalations": 15667,
-  "skills+shared+voice+escalations+x": 15813,
+  "skills+shared+voice+escalations+x": 15804,
   "default+legacy-switches": 14613,
 };
 
@@ -335,7 +335,7 @@ describe("agents proxy with the tool bridge on, from the packaged bundle", () =>
     const env = { ...PROFILES["non-chief"]!, ...BRIDGE_ON };
     const fromSource = await proxyAnswers(PROXY_SOURCE, env, BRIDGE_REQUESTS);
     const [found, shapeless, outside] = await proxyAnswers(bundled, env, BRIDGE_REQUESTS);
-    expect((JSON.parse(found!.result!.content![0]!.text) as { matches: Tool[] }).matches[0]!.name).toBe("propose_routine");
+    expect((JSON.parse(found!.result!.content![0]!.text) as { matches: Tool[] }).matches[0]!.name).toBe("create_trigger");
     expect(shapeless!.result!.isError).toBe(true);
     expect(shapeless!.result!.content![0]!.text).toContain('use_tool needs { "name": ');
     // a bot that is not a Chief: create_bot is not one of its tools
