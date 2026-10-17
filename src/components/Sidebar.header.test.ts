@@ -62,11 +62,11 @@ describe("sidebar header", () => {
     },
   );
 
-  it.each(["comfortable", "compact"] as const)("keeps only add in Simple mode at %s density", (density) => {
+  it.each(["comfortable", "compact"] as const)("keeps collapse and add but no activity menu in Simple mode at %s density", (density) => {
     fixture.advanced = false;
     fixture.density = density;
     const html = render();
-    expect(html).not.toContain('aria-label="Collapse sidebar to avatars"');
+    expect(html).toContain('aria-label="Collapse sidebar to avatars"');
     expect(html).not.toContain('aria-label="Active Threads"');
     expect(html).toContain('aria-label="New or share"');
   });
@@ -140,7 +140,7 @@ describe("sidebar top row", () => {
     expect(html.match(/Switch server:/g)).toHaveLength(1);
   });
 
-  it("in Simple mode puts the lights, the server pill, then a round search and a round + on one macOS row", () => {
+  it("in Simple mode puts the lights, the server pill, the collapse toggle, then a round search and a round + on one macOS row", () => {
     fixture.advanced = false;
     fixture.windowChrome = "mac-inset";
     desktop();
@@ -148,23 +148,26 @@ describe("sidebar top row", () => {
     const row = topRow(html);
     expect(row).toMatch(/^data-sidebar-top-row="true" class="[^"]*\bitems-center\b[^"]*" style="-webkit-app-region:drag;height:46px"/);
     const { lights, slot, spacer, switcher, buttons } = order(row);
+    const toggle = row.indexOf("data-sidebar-collapse-toggle");
     const search = row.indexOf("data-sidebar-search-toggle");
     expect(spacer).toBe(-1);
     expect(lights).toBeGreaterThan(-1);
     expect(slot).toBeGreaterThan(lights);
     expect(switcher).toBeGreaterThan(slot);
     expect(buttons).toBeGreaterThan(switcher);
-    expect(search).toBeGreaterThan(buttons);
-    expect(row.slice(buttons).match(/<button/g)).toHaveLength(2);
+    expect(toggle).toBeGreaterThan(buttons);
+    expect(search).toBeGreaterThan(toggle);
+    expect(row.slice(buttons).match(/<button/g)).toHaveLength(3);
     expect(classesOf(row, "data-sidebar-top-slot")).toEqual(["flex", "min-w-0", "flex-1", "items-center"]);
     expect(classesOf(row, "data-sidebar-top-switcher")).not.toContain("max-w-[140px]");
-    expect(classesOf(row, "data-sidebar-top-buttons")).toEqual(expect.arrayContaining(["shrink-0", "gap-1"]));
+    expect(classesOf(row, "data-sidebar-top-buttons")).toEqual(expect.arrayContaining(["shrink-0", "gap-1", "pl-0.5"]));
+    expect(row).toMatch(/aria-label="Collapse sidebar to avatars" aria-expanded="true" title="Collapse to avatars" class="[^"]*\bsize-7\b[^"]*\brounded-full\b[^"]*"><svg[^>]*lucide-panel-left/);
+    expect(row).not.toMatch(/data-sidebar-collapse-toggle[^>]*\bbg-raised\/50\b/);
     expect(row).toMatch(/aria-label="Switch server: Servers"[^>]*class="[^"]*\bh-8\b[^"]*\brounded-full\b[^"]*\bbg-raised\/50\b[^"]*\btext-\[13px\][^"]*" style="-webkit-app-region:no-drag"/);
     expect(row).toContain('<span class="min-w-0 truncate">Servers</span>');
     expect(row).not.toContain("lucide-laptop");
-    expect(row).toMatch(/data-sidebar-search-toggle="true" aria-label="Search bots and messages" aria-expanded="false" title="Search bots and messages" class="[^"]*\bsize-8\b[^"]*\brounded-full\b/);
-    expect(html).toMatch(/aria-label="New or share" class="[^"]*\bsize-8\b[^"]*\brounded-full\b/);
-    expect(html).not.toContain('title="Collapse to avatars"');
+    expect(row).toMatch(/data-sidebar-search-toggle="true" aria-label="Search bots and messages" aria-expanded="false" title="Search bots and messages" class="[^"]*\bsize-\[30px\][^"]*\brounded-full\b/);
+    expect(html).toMatch(/aria-label="New or share" class="[^"]*\bsize-\[30px\][^"]*\brounded-full\b/);
     expect(html).not.toContain('title="Active Threads"');
     expect(html).not.toContain("data-sidebar-search-pill");
     expect(html).not.toContain('placeholder="Search"');
@@ -197,6 +200,37 @@ describe("sidebar top row", () => {
     const { spacer, buttons } = order(row);
     expect(spacer).toBeGreaterThan(row.indexOf("bg-[#28c840]"));
     expect(buttons).toBeGreaterThan(spacer);
+  });
+
+  it("collapses Simple mode to a rail: only the lights on top, and expand, search, +, server, Apps and profile at the foot", () => {
+    fixture.advanced = false;
+    fixture.density = "icons";
+    fixture.windowChrome = "mac-inset";
+    desktop();
+    const html = render();
+    const top = html.slice(html.indexOf("data-sidebar-top-row"), html.indexOf('data-glass-bar="bottom"'));
+    expect(top).toContain("data-traffic-light-space");
+    expect(top).not.toContain("data-sidebar-top-buttons");
+    expect(top).not.toContain("data-workspace-switcher");
+    const foot = html.slice(html.indexOf("data-sidebar-rail-footer"));
+    const at = (marker: string) => {
+      const index = foot.indexOf(marker);
+      expect(index, marker).toBeGreaterThan(-1);
+      return index;
+    };
+    const positions = [
+      at('aria-label="Expand sidebar"'),
+      at('aria-label="Search bots and messages"'),
+      at('aria-label="New or share"'),
+      at('data-workspace-switcher="rail"'),
+      at('data-sidebar-nav="apps"'),
+      at("transition-colors size-10"),
+    ];
+    expect(positions).toEqual([...positions].sort((a, b) => a - b));
+    expect(foot).toMatch(/data-workspace-switcher="rail"[^>]*><button[^>]*aria-label="Switch server: Servers"/);
+    expect(foot).not.toContain('data-sidebar-nav="routines"');
+    expect(html.match(/Switch server:/g)).toHaveLength(1);
+    expect(html.match(/aria-label="New or share"/g)).toHaveLength(1);
   });
 
   it("stacks the icons rail unchanged and keeps the icon-only switcher beneath it", () => {

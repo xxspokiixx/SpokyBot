@@ -84,9 +84,9 @@ describe("bot-first sidebar", () => {
     { advanced: true, enabled: true, density: "compact", size: 26, spacing: ["gap-1.5", "py-1", "pl-6"] },
     { advanced: true, enabled: true, density: "icons", size: 44, spacing: ["justify-center", "px-1", "py-1.5"] },
     { advanced: true, enabled: false, density: "comfortable", size: 44, spacing: ["gap-3", "py-2", "pl-2.5", "pr-9"] },
-    { advanced: false, enabled: false, density: "comfortable", size: 36, spacing: ["gap-2.5", "py-1.5", "pl-2", "pr-3", "group-hover:pr-9"] },
+    { advanced: false, enabled: false, density: "comfortable", size: 36, spacing: ["gap-2.5", "py-2", "pl-2", "pr-3", "group-hover:pr-9"] },
     { advanced: false, enabled: false, density: "compact", size: 36, spacing: ["gap-2.5", "py-1.5", "pl-2", "pr-9"] },
-    { advanced: false, enabled: false, density: "icons", size: 44, spacing: ["justify-center", "px-1", "py-1.5"] },
+    { advanced: false, enabled: false, density: "icons", size: 36, spacing: ["h-[52px]", "justify-center"] },
   ] as const)("sizes bot portraits and row spacing in $density density with threads $enabled (advanced $advanced)", ({ advanced, enabled, density, size, spacing }) => {
     fixture.advanced = advanced;
     fixture.showThreads = enabled;
@@ -122,17 +122,19 @@ describe("bot-first sidebar", () => {
     });
   }
 
-  it.each([false, true])("uses 14px medium names in Simple comfortable rows and keeps 15px semibold otherwise (advanced %s)", (advanced) => {
+  it.each([false, true])("uses 14px regular names in Simple comfortable rows and keeps 15px semibold otherwise (advanced %s)", (advanced) => {
     fixture.advanced = advanced;
     fixture.showThreads = false;
     const markup = renderToStaticMarkup(createElement(BotListItem, rowProps("comfortable", { ...bot, tasks: [], projects: [] })));
     const name = markup.match(/<span class="flex min-w-0 grow items-center gap-1\.5 truncate text-ink ([^"]*)"/)?.[1];
-    expect(name).toBe(advanced ? "text-[15px] font-semibold leading-5" : "text-[14px] font-medium leading-[19px]");
+    expect(name).toBe(advanced ? "text-[15px] font-semibold leading-5" : "text-[14px] font-normal leading-[19px]");
     expect(markup).toContain("truncate text-[13px] leading-[18px]");
   });
 
   it.each([
-    { advanced: false, density: "comfortable", face: 36, spacing: ["gap-2.5", "py-1.5", "pl-2", "pr-3"], name: "font-medium", preview: "text-[13px]" },
+    { advanced: false, density: "comfortable", face: 36, spacing: ["gap-2.5", "py-2", "pl-2", "pr-3"], name: "font-normal", preview: "text-[13px]" },
+    { advanced: false, density: "icons", face: 36, spacing: ["h-[52px]", "justify-center"], name: "font-semibold", preview: "text-[11px]" },
+    { advanced: true, density: "icons", face: 44, spacing: ["justify-center", "px-1", "py-1.5"], name: "font-semibold", preview: "text-[11px]" },
     { advanced: true, density: "comfortable", face: 32, spacing: ["gap-2", "py-1.5", "pl-6", "pr-9"], name: "font-semibold", preview: "text-[11px]" },
     { advanced: false, density: "compact", face: 26, spacing: ["gap-1.5", "py-1", "pl-6", "pr-9"], name: "font-semibold", preview: "text-[11px]" },
   ] as const)("sizes group chat rows in $density density (advanced $advanced)", ({ advanced, density, face, spacing, name, preview }) => {

@@ -43,11 +43,12 @@ vi.mock("@/state/store", async (importOriginal) => {
 
 import { initialState } from "@/state/store";
 import { BOTS_SECTION_ID, CHANNELS_SECTION_ID, PINNED_SECTION_ID, userSectionId } from "@/lib/sidebar-layout";
-import { SIDEBAR_COLLAPSED_SECTIONS_KEY, SIDEBAR_SECTION_ORDER_KEY, SIDEBAR_WIDTH_KEY, SIMPLE_SIDEBAR_WIDTH_KEY } from "@/lib/sidebar-preferences";
+import { SIDEBAR_COLLAPSED_SECTIONS_KEY, SIDEBAR_DENSITY_KEY, SIDEBAR_SECTION_ORDER_KEY, SIDEBAR_WIDTH_KEY, SIMPLE_SIDEBAR_WIDTH_KEY, setSidebarDensity } from "@/lib/sidebar-preferences";
 import { Sidebar, TeamMenuItems } from "./Sidebar";
 import { SidebarResizeHandle } from "./SidebarResizeHandle";
 import { SidebarSectionHeader } from "./SidebarSectionHeader";
-import { SidebarSearchPill, SidebarSearchToggle } from "./SidebarSimpleTop";
+import { SidebarCollapseToggle, SidebarSearchPill, SidebarSearchToggle } from "./SidebarSimpleTop";
+import { SidebarRailSeparator, SimpleRailFooter } from "./SidebarSimpleRail";
 
 const bot = (id: string, extra: Partial<Bot> = {}): Bot => ({
   id, threadId: `${id}-thread`, name: id, title: "", description: "", notifications: true,
@@ -65,10 +66,10 @@ function nodes(value: ReactNode): ReactElement<Props>[] {
     return [child, ...nodes(child.props.children)];
   });
 }
-function render() {
+function render(collapseToIcons = false) {
   fixture.index = 0;
   fixture.effects = [];
-  const root = Sidebar({ open: false, onClose: () => {} }) as ReactElement<Props>;
+  const root = Sidebar({ open: false, onClose: () => {}, collapseToIcons }) as ReactElement<Props>;
   return { root, tree: [root, ...nodes(root.props.children)] };
 }
 const sectionOrder = (tree: ReactElement<Props>[]) => tree.map((node) => node.props["data-sidebar-section-id"]).filter(Boolean);
@@ -95,7 +96,10 @@ beforeEach(() => {
     removeItem: (key: string) => { fixture.storage.delete(key); },
   });
 });
-afterEach(() => { vi.unstubAllGlobals(); });
+afterEach(() => {
+  setSidebarDensity("comfortable");
+  vi.unstubAllGlobals();
+});
 
 describe("Simple-mode sidebar layout", () => {
   it("lists ungrouped bots first with no heading, then Group chats and teams as thin lines", () => {
@@ -199,10 +203,10 @@ describe("Simple-mode sidebar layout", () => {
     expect(listedBots(render().tree)).toHaveLength(3);
   });
 
-  it("opens at 288px in Simple and 320px in Advanced, each remembering its own resized width", () => {
+  it("opens at 318px in Simple and 320px in Advanced, each remembering its own resized width", () => {
     const width = () => render().root.props.style!["--sidebar-width"];
-    expect(width()).toBe("288px");
-    expect(render().root.props.className).toContain("w-[288px]");
+    expect(width()).toBe("318px");
+    expect(render().root.props.className).toContain("w-[318px]");
     fixture.values = [];
     fixture.advanced = true;
     expect(width()).toBe("320px");
@@ -214,7 +218,7 @@ describe("Simple-mode sidebar layout", () => {
     fixture.advanced = false;
     expect(width()).toBe("300px");
     const handle = render().tree.find((node) => node.type === SidebarResizeHandle)!.props as Parameters<typeof SidebarResizeHandle>[0];
-    expect(handle.sizing.defaultWidth).toBe(288);
+    expect(handle.sizing.defaultWidth).toBe(318);
     expect(handle.sizing.valueNow).toBe(300);
     fixture.advanced = true;
     render();
@@ -222,5 +226,52 @@ describe("Simple-mode sidebar layout", () => {
       try { effect(); } catch {}
     }
     expect(width()).toBe("360px");
+  });
+  it("collapses to a rail from the top-row toggle, keeping the Simple order with a hairline between sections", () => {
+    const toggle = render().tree.find((node) => node.type === SidebarCollapseToggle)!.props as Parameters<typeof SidebarCollapseToggle>[0];
+    expect(toggle.collapsed).toBe(false);
+    toggle.onToggle();
+    expect(fixture.storage.get(SIDEBAR_DENSITY_KEY)).toBe("icons");
+    const { root, tree } = render();
+    expect(root.props.className).toContain("w-[80px]");
+    expect(sectionOrder(tree)).toEqual([BOTS_SECTION_ID, CHANNELS_SECTION_ID, userSectionId("Work")]);
+    expect(listedBots(tree)).toEqual(["atlas", "bea", "dodo"]);
+    expect(headers(tree)).toEqual([]);
+    expect(tree.filter((node) => node.type === SidebarRailSeparator)).toHaveLength(2);
+    expect(tree.some((node) => node.type === SidebarCollapseToggle || node.type === SidebarSearchToggle)).toBe(false);
+    expect(tree.some((node) => node.props["data-sidebar-top-buttons"] !== undefined)).toBe(false);
+  });
+
+  it("puts expand, search and the same + menu at the foot of the rail", () => {
+    setSidebarDensity("icons");
+    const footer = () => render().tree.find((node) => node.type === SimpleRailFooter)!.props as Parameters<typeof SimpleRailFooter>[0];
+    const plus = () => nodes(footer().plus).find((node) => node.type === "button" && node.props["aria-label"] === "New or share")!;
+    (plus().props.onClick as () => void)();
+    const menu = nodes(footer().plus).find((node) => /\bw-52\b/.test(node.props.className ?? ""))!;
+    expect(menu.props.className).toEqual(expect.stringContaining("bottom-0 left-full"));
+    expect(nodes(footer().plus).some((node) => node.type === "button" && Children.toArray(node.props.children).includes("Create team"))).toBe(true);
+    expect(footer().onExpand).toBeTypeOf("function");
+    footer().onExpand!();
+    expect(fixture.storage.get(SIDEBAR_DENSITY_KEY)).toBe("comfortable");
+    expect(render().tree.some((node) => node.type === SimpleRailFooter)).toBe(false);
+  });
+
+  it("opens the search pill from the rail's search button by expanding the sidebar", () => {
+    setSidebarDensity("icons");
+    expect(render().tree.some((node) => node.type === SidebarSearchPill)).toBe(false);
+    (render().tree.find((node) => node.type === SimpleRailFooter)!.props as Parameters<typeof SimpleRailFooter>[0]).onSearch();
+    const { tree } = render();
+    expect(tree.some((node) => node.type === SimpleRailFooter)).toBe(false);
+    expect(tree.some((node) => node.type === SidebarSearchPill)).toBe(true);
+  });
+
+  it("opens the command palette instead when a side panel holds the sidebar collapsed", () => {
+    const opened = vi.fn();
+    window.addEventListener("omb:open-command-palette", opened);
+    const footer = render(true).tree.find((node) => node.type === SimpleRailFooter)!.props as Parameters<typeof SimpleRailFooter>[0];
+    expect(footer.onExpand).toBeUndefined();
+    footer.onSearch();
+    expect(opened).toHaveBeenCalledOnce();
+    expect(render(true).tree.some((node) => node.type === SimpleRailFooter)).toBe(true);
   });
 });

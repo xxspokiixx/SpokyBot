@@ -11,7 +11,7 @@ import {
 } from "@/lib/sidebar-preferences";
 
 export function sidebarDefaultWidth(density: SidebarDensity, simple: boolean): number {
-  return density === "compact" ? 272 : simple ? 288 : 320;
+  return density === "compact" ? 272 : simple ? 318 : 320;
 }
 
 export type SidebarSizing = ReturnType<typeof useSidebarWidth>;

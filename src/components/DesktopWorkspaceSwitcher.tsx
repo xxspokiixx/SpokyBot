@@ -4,6 +4,7 @@ import { cn } from "@/lib/cn";
 import { cloudColor } from "@/lib/cloud-look";
 import { t } from "@/lib/i18n";
 import { CloudTile } from "./cloud-buy/parts";
+import { SIMPLE_RAIL_BUTTON } from "./SidebarSimpleTop";
 
 export function openServerMenu(bridge: { menu: (options?: { from?: "howto" }) => Promise<void> }, { howTo = false, onClosed }: { howTo?: boolean; onClosed?: () => void } = {}): Promise<void> {
   return bridge.menu(howTo ? { from: "howto" } : undefined).finally(() => { if (howTo) onClosed?.(); });
@@ -17,8 +18,8 @@ function AlwaysOn() {
  * Security: the dropdown is native; a remote workspace cannot choose a destination or read the other workspaces saved
  * here.
  */
-export function DesktopWorkspaceSwitcher({ compact = false, inline = false, pill = false, cloudHome = false, owner = null, howTo = false, onMenuClosed }: {
-  compact?: boolean; inline?: boolean; pill?: boolean; cloudHome?: boolean; owner?: string | null; howTo?: boolean; onMenuClosed?: () => void;
+export function DesktopWorkspaceSwitcher({ compact = false, inline = false, pill = false, rail = false, cloudHome = false, owner = null, howTo = false, onMenuClosed }: {
+  compact?: boolean; inline?: boolean; pill?: boolean; rail?: boolean; cloudHome?: boolean; owner?: string | null; howTo?: boolean; onMenuClosed?: () => void;
 }) {
   const bridge = window.ogb?.workspaces;
   const [current, setCurrent] = useState<{ local: boolean; name: string; origin?: string; color?: string } | null>(null);
@@ -33,6 +34,9 @@ export function DesktopWorkspaceSwitcher({ compact = false, inline = false, pill
     if (!cloudHome) return null;
     const whose = owner ? t("sidebar.cloudOwner", { email: owner }) : "";
     const label = `${t("cloudSetup.myCloud")} · ${t("cloudSetup.alwaysOn")}${whose ? ` · ${whose}` : ""}`;
+    if (rail) return <div data-cloud-home-indicator data-workspace-switcher="rail" role="img" aria-label={label} title={label} className="flex size-9 items-center justify-center text-ink-secondary">
+      <Cloud size={18} aria-hidden="true" />
+    </div>;
     if (inline) return <div data-cloud-home-indicator data-workspace-switcher="inline" title={label}
       className={pill ? "flex h-8 min-w-0 items-center rounded-full bg-raised/50 px-3 text-[13px] font-medium text-ink" : "flex min-w-0 items-center gap-1.5 px-1.5 text-[12.5px] font-medium text-ink"}>
       {!pill && <Cloud size={14} aria-hidden="true" className="shrink-0 text-ink-secondary" />}
@@ -58,6 +62,14 @@ export function DesktopWorkspaceSwitcher({ compact = false, inline = false, pill
     void openServerMenu(bridge, { howTo, onClosed: onMenuClosed }).catch(() => setError(t("sidebar.switchServerError")))
       .finally(() => setOpen(false));
   };
+  if (rail) return <div data-workspace-switcher="rail" className="relative">
+    <button type="button" aria-label={label} aria-haspopup="menu" aria-expanded={open} data-cloud-home-indicator={cloudHome || undefined}
+      data-tour="server-switcher" title={title} onClick={openMenu} className={cn(SIMPLE_RAIL_BUTTON, "aria-expanded:bg-raised")}
+      style={{ WebkitAppRegion: "no-drag" } as React.CSSProperties}>
+      {cloudColor(current?.color) ? <CloudTile color={current?.color} size={18} /> : <Icon size={18} aria-hidden="true" />}
+    </button>
+    {error && <p role="alert" className="absolute bottom-0 left-full z-40 ml-2 w-56 rounded-md bg-menu px-2 py-1 text-[11px] text-danger shadow-lg">{error}</p>}
+  </div>;
   if (inline) return <div data-workspace-switcher="inline" className="flex min-w-0">
     <button type="button" aria-label={label} aria-haspopup="menu" aria-expanded={open} data-cloud-home-indicator={cloudHome || undefined}
       data-tour="server-switcher" title={title} onClick={openMenu}
