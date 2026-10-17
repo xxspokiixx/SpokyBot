@@ -18483,7 +18483,13 @@
       "botIdentity.soul.useFile": "e954c333f5724255a911c42d4bd5339843999ae302ef763023b1bc46eb558a56",
       "botIdentity.soul.keepSaved": "a532c91cf109b39c38289625c7226041b6ce0c638964a4394661dab769310514",
       "botIdentity.soul.contextHelp": "ece27607a792c08e3870015f162677f16cd32191a8f060a66c4aa575fac06f20",
-      "botIdentity.soul.mirroredTo": "792167b9d06a1cf6bb9e59dd4261d349c4be17ff3e854556baa6922e3e660883"
+      "botIdentity.soul.mirroredTo": "792167b9d06a1cf6bb9e59dd4261d349c4be17ff3e854556baa6922e3e660883",
+      "botIdentity.dialog.title": "f8553a3d610dc2982deaaac216669a72b5f4e47338cd79cb846d2026851936dd",
+      "botIdentity.dialog.close": "e869efe84785b913885e539f4d009f364c7ce7e1e39c65b87a8f1b3f9b968020",
+      "botIdentity.dialog.empty": "3a6170c5480d43f6e33c6612737ccf4da4e8341207d17893555686b8d20802eb",
+      "botIdentity.dialog.emptyHelp": "0fddf01336d97bf6c6242afdd627756fb0134dcad216a1c87a0dbe913a35ec17",
+      "botIdentity.dialog.contextHelp": "d5827ab6487ec4be7f35ccc02e6b5b60d0fe2e79f9f1e3c9a90fe4fb45d4a788",
+      "common.done": "11a6767d5674c7e45f7e00dc525762275b3a48491ad6045427d2609cc496c516"
     },
     "zh": {
       "pro.fromPrice": "a48a04a457d60b08b54fc83e7a6c4584ffedb1e23621859084900c8521a3af7b",

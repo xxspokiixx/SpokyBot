@@ -4929,4 +4929,11 @@
   "botIdentity.soul.keepSaved": "Manter a versão salva",
   "botIdentity.soul.contextHelp": "Fica no contexto deste bot em todos os turnos.",
   "botIdentity.soul.mirroredTo": "Espelhado em"
+,
+  "botIdentity.dialog.title": "Instruções do bot",
+  "botIdentity.dialog.close": "Fechar instruções do bot",
+  "botIdentity.dialog.empty": "Nenhuma instrução ainda",
+  "botIdentity.dialog.emptyHelp": "Adicione-as no perfil deste bot.",
+  "botIdentity.dialog.contextHelp": "Incluídas no contexto deste bot em todos os turnos.",
+  "common.done": "Concluído"
 }
