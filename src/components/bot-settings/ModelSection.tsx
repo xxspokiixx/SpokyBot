@@ -39,7 +39,7 @@ export function ModelSection({ bot }: { bot: Bot }) {
             <div className="text-[15px] font-medium text-ink">{modelVariants ? t("model.simple.reasoning") : t("model.section.effort")}</div>
             {/* Codex applies a level to the whole thread and cannot take one back, so this says what the app sends, not where the engine ends up. */}
             <div className="mt-0.5 text-[13px] text-ink-secondary">
-              {modelVariants ? (draft ? t("model.section.startingReasoning") : t("model.section.threads")) : t("model.section.effortHelp", { suffix: bot.modelSelection.effort ? "" : t("model.section.defaultSuffix") })}
+              {modelVariants ? (draft ? t("model.section.startingReasoning") : t("model.section.threads")) : t(bot.modelSelection.effort ? "model.section.effortHelp" : "model.section.effortHelpDefault")}
             </div>
             <ProposalStatus bot={bot} kind="chief" />
           </div>

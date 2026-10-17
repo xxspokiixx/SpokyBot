@@ -432,7 +432,7 @@ export function MemorySection({ bot, active = true, onToggle }: { bot: Bot; acti
               }}
             />
             <button type="button" className={buttonCls} disabled={!newTopic.trim()} onClick={() => void createTopic()}>
-              New topic
+              {t("memory.newTopic")}
             </button>
           </div>
           {overview.logs.length > 0 && (
@@ -588,14 +588,14 @@ export function ConflictNotice({
     <div className="mt-2 rounded-lg border border-warning/25 bg-warning/10 p-3 text-[12.5px] leading-relaxed text-ink">
       <div className="font-medium">{t("memory.conflict.title", { name: botName })}</div>
       <div className="mt-0.5 text-ink-secondary">
-        Nothing has been saved. Reload to see {botName}'s version (your draft is kept below), or overwrite it with yours.
+        {t("memory.conflict.help", { name: botName })}
       </div>
       <div className="mt-2 flex gap-2">
         <button type="button" className={buttonCls} disabled={busy} onClick={onReload}>
-          Reload
+          {t("memory.reload")}
         </button>
         <button type="button" className={buttonCls} disabled={busy} onClick={onOverwrite}>
-          Overwrite with mine
+          {t("memory.overwrite")}
         </button>
       </div>
     </div>

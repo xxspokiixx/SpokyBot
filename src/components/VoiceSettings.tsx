@@ -77,11 +77,11 @@ export function VoiceSettings({
       : null;
   const key = cloudProvider ? voiceKeyDraftValue(keyDraft, cloudProvider.id) : "";
   const hostProviderLabel = provider === "fish"
-    ? `Host · ${t("voice.fish.label")}`
+    ? t("voice.hostLabel", { provider: t("voice.fish.label") })
     : provider === "elevenlabs"
-      ? `Host · ${t("voice.elevenlabs.label")}`
+      ? t("voice.hostLabel", { provider: t("voice.elevenlabs.label") })
       : provider === "chatterbox"
-        ? `Host · ${t("voice.chatterboxLabel")}`
+        ? t("voice.hostLabel", { provider: t("voice.chatterboxLabel") })
         : provider === "xai" ? t("voice.grok.host") : t("voice.host");
   const systemVoicesAvailable = capabilities.host.platform === "darwin";
   const hostConfigured = Boolean(tts?.configured);

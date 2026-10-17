@@ -444,7 +444,7 @@ export class Store {
   private defaultSelection: () => ModelSelection;
   private completeNewBotSelection: (selection: ModelSelection) => ModelSelection;
   private driverKindOf: (instanceId: string) => string | undefined;
-  private initialLanguage: string;
+  private initialLanguage: string | (() => string);
   private listeners = new Set<(change: StoreChange) => void>();
   private registeringInitialSections = true;
   /** Clearing this slot must not clear a concurrently running task's activity. */
@@ -455,7 +455,7 @@ export class Store {
     completeNewBotSelection: (selection: ModelSelection) => ModelSelection = (selection) => selection,
     /** Unknown counts as another driver, so Full and Custom fall back to Ask. */
     driverKindOf: (instanceId: string) => string | undefined = () => undefined,
-    initialLanguage = Intl.DateTimeFormat().resolvedOptions().locale,
+    initialLanguage: string | (() => string) = Intl.DateTimeFormat().resolvedOptions().locale,
   ) {
     this.defaultSelection = defaultSelection;
     this.completeNewBotSelection = completeNewBotSelection;
@@ -1541,7 +1541,7 @@ export class Store {
       this.appendMessage(bot.threadId, {
         role: "bot",
         kind: "text",
-        text: initialGreeting(name, this.initialLanguage),
+        text: initialGreeting(name, typeof this.initialLanguage === "function" ? this.initialLanguage() : this.initialLanguage),
       });
     }
     return bot;

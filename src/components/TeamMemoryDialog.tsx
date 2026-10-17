@@ -5,6 +5,7 @@ import { Brain, Check, Loader2, Pin, Plus, Trash2, X } from "lucide-react";
 
 import { api } from "@/state/store";
 import { t } from "@/lib/i18n";
+import type { LocaleKey } from "@/locales";
 import { cn } from "@/lib/cn";
 import { Select } from "./Select";
 
@@ -25,7 +26,7 @@ interface Entry {
   history?: Array<{ name: string; detail: string; at: number }>;
 }
 
-const KINDS: Array<{ kind: Kind; titleKey: string; hintKey: string }> = [
+const KINDS: Array<{ kind: Kind; titleKey: LocaleKey; hintKey: LocaleKey }> = [
   { kind: "person", titleKey: "teamMemory.kind.people", hintKey: "teamMemory.kind.peopleHint" },
   { kind: "place", titleKey: "teamMemory.kind.places", hintKey: "teamMemory.kind.placesHint" },
   { kind: "decision", titleKey: "teamMemory.kind.decisions", hintKey: "teamMemory.kind.decisionsHint" },

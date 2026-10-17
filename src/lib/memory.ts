@@ -218,7 +218,7 @@ export function capacityStatus(index: MemoryCapacity): CapacityStatus {
 
 export function fileLabel(path: string): string {
   if (path === MEMORY_INDEX) return "MEMORY.md";
-  if (path.startsWith("memory/log/")) return `the ${path.slice("memory/log/".length).replace(/\.md$/, "")} log`;
+  if (path.startsWith("memory/log/")) return path.slice("memory/log/".length).replace(/\.md$/, "");
   return path.replace(/^memory\//, "").replace(/\.md$/, "");
 }
 
