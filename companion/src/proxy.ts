@@ -114,11 +114,9 @@ const sendJson = (res: ServerResponse, status: number, body: unknown): void => {
     return;
   }
   const text = JSON.stringify(body);
-  res.writeHead(status, {
-    "content-type": "application/json",
-    "content-length": Buffer.byteLength(text),
-    ...PRIVATE_RESPONSE_HEADERS,
-  });
+  const headers = { "content-type": "application/json", ...PRIVATE_RESPONSE_HEADERS };
+  if (sendTunnelJson(res, status, headers, text)) return;
+  res.writeHead(status, { ...headers, "content-length": Buffer.byteLength(text) });
   res.end(text);
 };
 

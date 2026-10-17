@@ -10,6 +10,10 @@ import { gzipTunnelReplies } from "../src/tunnel-gzip.ts";
 const TOKEN = "omb_test_token";
 const BOTS = { bots: Array.from({ length: 100 }, (_, i) => ({ id: `b${i}`, name: `Bot ${i}` })), resumeCursors: { agent: "secret" } };
 const SCRUBBED = JSON.stringify({ bots: BOTS.bots });
+/** Long enough that the sidecar's own endpoints reply passes 1 KB. */
+const ENDPOINTS = Array.from({ length: 8 }, (_, i) => ({
+  url: `https://c-${i}-${"x".repeat(50)}.${"y".repeat(50)}.example.com`, kind: "hosted" as const, priority: i,
+}));
 
 let harness: Server;
 let origin: Server;
@@ -34,6 +38,7 @@ beforeAll(async () => {
     authenticate: (t) => (t === TOKEN ? { id: "phone-1", cloudDesktopAccess: true, browserControlAccess: false } : null),
     redeem: () => ({ error: "not used here" }),
     serverName: () => "Test computer",
+    endpoints: () => ENDPOINTS,
   });
   origin = createServer(gzipTunnelReplies(proxy));
   lan = createServer(proxy);
@@ -82,6 +87,13 @@ describe("gzip on the managed HTTPS origin", () => {
     expect(gunzipSync(reply.raw).toString("utf8")).toBe(SCRUBBED);
   });
 
+  it("gzips a large reply the sidecar answers itself", async () => {
+    const reply = await phone(ports.origin, "/api/companion/endpoints");
+    expect(reply.headers["content-encoding"]).toBe("gzip");
+    expect(reply.headers.vary).toBe("Authorization, Accept-Encoding");
+    expect(JSON.parse(gunzipSync(reply.raw).toString("utf8")).endpoints).toHaveLength(8);
+  });
+
   it("streams events unbuffered and unencoded", async () => {
     const reply = await phone(ports.origin, "/api/events");
     expect(reply.open).toBe(true);
@@ -95,5 +107,9 @@ describe("gzip on the managed HTTPS origin", () => {
     expect(reply.headers.vary).toBe("Authorization");
     expect(reply.headers["content-length"]).toBe(String(Buffer.byteLength(SCRUBBED)));
     expect(reply.raw.toString("utf8")).toBe(SCRUBBED);
+    const endpoints = await phone(ports.lan, "/api/companion/endpoints");
+    expect(endpoints.headers["content-encoding"]).toBeUndefined();
+    expect(endpoints.headers["content-length"]).toBe(String(endpoints.raw.length));
+    expect(endpoints.raw.length).toBeGreaterThan(1024);
   });
 });
