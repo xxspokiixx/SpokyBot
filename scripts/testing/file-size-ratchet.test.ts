@@ -15,8 +15,8 @@ const HARD_CAP = 2000;
 const LISTED_FROM = 1000;
 
 const LINES: Record<string, number> = {
-  "server/index.ts": 17438,
-  "src/state/store.tsx": 3617,
+  "server/index.ts": 17324,
+  "src/state/store.tsx": 3604,
   "electron/main.mjs": 3470,
   "server/store.ts": 2475,
   "src/components/Sidebar.tsx": 2340,
@@ -25,10 +25,10 @@ const LINES: Record<string, number> = {
   "server/drivers/codex.ts": 1872,
   "server/routines.ts": 1869,
   "src/components/ComputerPanel.tsx": 1918,
-  "src/components/RoutineCalendarPage.tsx": 2099,
+  "src/components/RoutineCalendarPage.tsx": 1765,
   "server/config.ts": 1455,
   "src/components/ChatView.tsx": 1492,
-  "server/routine-requests.ts": 1680,
+  "server/routine-requests.ts": 1677,
   "src/components/GroupView.tsx": 1616,
   "src/components/LocalComputerSection.tsx": 1605,
   "src/components/CursorAvatar.tsx": 1441,
@@ -44,7 +44,6 @@ const LINES: Record<string, number> = {
   "src/components/PhoneSetupFlow.tsx": 1283,
   "server/cli.ts": 1080,
   "src/components/SettingsModal.tsx": 1101,
-  "server/drivers/agents-call.ts": 1137,
   "src/components/ChatMarkdown.tsx": 1039,
   "src/components/PluginsPanel.tsx": 1113,
   "server/org-library.ts": 1003,

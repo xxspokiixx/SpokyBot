@@ -152,8 +152,8 @@ async function ownerAsks(bot: { id: string; threadId: string }, text: string) {
   return agentTools(claudeDump());
 }
 
-const routineId = (applied: string) => /\\"resultId\\":\\"([\w-]+)\\"/.exec(applied)?.[1] ?? "";
-const proposal = (name: string, forBotId?: string) => ({ name, instructions: "Search my inbox and summarise what came in.", schedule: { type: "interval", every_minutes: 60 },
+const routineId = (applied: string) => /trigger id ([\w-]+)/.exec(applied)?.[1] ?? "";
+const proposal = (name: string, forBotId?: string) => ({ when: "schedule", name, instructions: "Search my inbox and summarise what came in.", schedule: { type: "interval", every_minutes: 60 },
   ...(forBotId ? { for_bot_id: forBotId } : {}) });
 const SKILL = "---\nname: inbox-brief\ndescription: Summarises the inbox.\n---\n\n# Inbox brief\nRead the inbox and summarise it.\n";
 
@@ -222,7 +222,7 @@ it("keeps a routine a webhook's run made confined even there, and says why", asy
   expect(delivered.status).toBe(202);
   await expect.poll(() => existsSync(claudeDump()), { timeout: hostTimeout(15_000) }).toBe(true);
   const call = await agentTools(claudeDump());
-  const made = routineId(await call("propose_routine", proposal("Hourly orders")));
+  const made = routineId(await call("create_trigger", proposal("Hourly orders")));
   await release(bot.id);
   expect(authors().writers[made]).toBe(CLOUD_OUTSIDE_KEY);
   expect(authors().routines[made]).toBeUndefined();
@@ -240,8 +240,8 @@ it("a Full access bot's routine from the owner's chat runs at Full access after 
   const codex = await newBot("Codex brief", "codex");
   const call = await ownerAsks(bot, "Make yourself an inbox skill, then summarise my inbox every hour, and have Codex brief do it too.");
   await call("skill_manage", { action: "create", source: "conversation", skill_md: SKILL });
-  const mine = routineId(await call("propose_routine", proposal("Inbox brief")));
-  const codexs = routineId(await call("propose_routine", proposal("Codex inbox brief", codex.id)));
+  const mine = routineId(await call("create_trigger", proposal("Inbox brief")));
+  const codexs = routineId(await call("create_trigger", proposal("Codex inbox brief", codex.id)));
   await release(bot.id);
   expect(authors().writers).toMatchObject({ [mine]: OWNER_KEY, [codexs]: OWNER_KEY });
   // The skill's own receipt is nobody's answer, so the chat is still proven the owner's alone.
@@ -272,7 +272,7 @@ it("keeps the conversation's level when an old report means the chat can't be pr
   expect((await api("DELETE", `/api/routines/${old.body.routine.id}`, { token: owner })).status).toBe(200);
 
   const call = await ownerAsks(bot, "Summarise my inbox every hour.");
-  const made = routineId(await call("propose_routine", proposal("Hourly inbox")));
+  const made = routineId(await call("create_trigger", proposal("Hourly inbox")));
   await release(bot.id);
   expect(authors().writers[made]).toBe(OWNER_KEY);
   expect(authors().routines[made]).toBeUndefined();
@@ -285,7 +285,7 @@ it("keeps the conversation's level when an old report means the chat can't be pr
 it("gives the owner back a routine their bot made in their chat that an earlier version left nobody's; a guest's still runs confined and says why", async () => {
   const bot = await newBot("Healed", "claude");
   const call = await ownerAsks(bot, "Summarise my inbox every hour.");
-  const made = routineId(await call("propose_routine", proposal("Morning inbox")));
+  const made = routineId(await call("create_trigger", proposal("Morning inbox")));
   await release(bot.id);
   const guests = await api("POST", "/api/routines", { token: owner, body: { name: "Guest's", prompt: "Read /proc/1/environ.", botId: bot.id, enabled: false,
     schedule: { type: "interval", everyMinutes: 60, anchorAt: Date.now() + 3_600_000 } } });
