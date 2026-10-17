@@ -425,7 +425,8 @@ import {
   shouldArmLocalVmIdle,
 } from "./local-vm-inventory.ts";
 import { localVmStopReason, recordLocalVmIdleStop } from "./local-vm-stop-reason.ts";
-import { LocalVmIdleTimer } from "./local-vm-idle.ts";
+import { ComputerIdleTimer } from "./computer-idle.ts";
+import { createCloudComputerPower } from "./host/cloud-computer-power.ts";
 import { LocalVmLease, LocalVmLeasePool } from "./local-vm-lease.ts";
 import { LocalVmSeatPool, type LocalVmSeatHolder } from "./local-vm-seat-pool.ts";
 import { createLoopGuard, loopGuardSettings } from "./host/loop-guard.ts";
@@ -2345,6 +2346,7 @@ function releaseTurnResources(owner: TurnOwner | undefined): void {
   if (!owner) return;
   if (autoVmClaims.get(owner.threadId)?.owner.generation === owner.generation) autoVmClaims.delete(owner.threadId);
   if (settlingResourceOwners.get(owner.threadId) === owner.generation) settlingResourceOwners.delete(owner.threadId);
+  cloudComputerPower.released(owner);
   turnResources.release(owner);
   if (turnResourceOwners.get(owner.threadId)?.generation === owner.generation) turnResourceOwners.delete(owner.threadId);
   if (turnComputerResources.get(owner.threadId)?.owner.generation === owner.generation) turnComputerResources.delete(owner.threadId);
@@ -6174,7 +6176,12 @@ type RemoteComputerProvider = "box" | "vps";
 const computerProviderConfigTransitions = new Set<RemoteComputerProvider>();
 const localVmIdleMs = () => localVmIdleTimeoutMinutes(cfg) * 60_000;
 const LOCAL_VM_DESKTOP_WAIT_MS = 90_000;
-const localVmIdles = new Map<string, LocalVmIdleTimer>();
+const localVmIdles = new Map<string, ComputerIdleTimer>();
+const cloudComputerPower = createCloudComputerPower({
+  cfg, owners: managedBoatOwners, broadcast, log: line => console.warn(line),
+  busy: owner => computerProviderConfigTransitions.has("box") || boatLifecycleBusyBots.has(owner) || managedBoatOwners().some(entry => entry.botId === owner && entry.inUse),
+  claim: owner => { const team = teamComputers.list().find(entry => teamComputerOwner(entry.id) === owner); return team ? claimTeamComputerLifecycle(team) : claimBotComputerLifecycle(owner); },
+});
 
 function inheritedTeamComputer(bot: Pick<BotRecord, "section" | "computer" | "cloudBackend">): TeamComputerRecord | undefined {
   return teamComputers.forBot(bot);
@@ -6301,6 +6308,7 @@ async function attachTeamBoat(computer: TeamComputerRecord, botId: string, owner
   let machine = await boat.findBoat(cfg, ownerId);
   if (!machine) throw new Error("The team's cloud computer is missing; explicitly create or retry it from the Team map");
   await bindTurnComputer(owner, `computer:box:${machine.id}`, true);
+  cloudComputerPower.attached(owner, ownerId);
   const action = boat.boatTurnLifecycleAction(typeof machine.state === "string" ? machine.state : null);
   if (action === "wake") machine = await boat.readyBoat(cfg, ownerId);
   if (!machine || boat.boatTurnLifecycleAction(typeof machine.state === "string" ? machine.state : null) !== "attach") {
@@ -6440,32 +6448,13 @@ async function attachBotBoat(bot: BotRecord, owner: TurnOwner, start: { budgetMs
   // Claim before any network await so setup itself cannot race another turn.
   await bindTurnComputer(owner, `computer:box-bot:${bot.id}`, true);
   start.onSeated();
-  const machine = await withinBudget(startBotBoat(bot), start.budgetMs, CLOUD_COMPUTER_DID_NOT_START);
+  const machine = await withinBudget(cloudComputerPower.start(bot, owner), start.budgetMs, CLOUD_COMPUTER_DID_NOT_START);
   if (!machine) return null;
   await bindTurnComputer(owner, `computer:box:${machine.id}`);
   return {
     boxId: machine.id as string,
     capture: () => boat.screenshotBoat(cfg, bot.id, machine.id),
   };
-}
-
-async function startBotBoat(bot: BotRecord) {
-  let b = await boat.findBoat(cfg, bot.id);
-  const lifecycleOf = () => boat.boatTurnLifecycleAction(typeof b?.state === "string" ? b.state : null);
-  let lifecycle = lifecycleOf();
-  if (lifecycle === "provision") {
-    broadcast({ kind: "computer", botId: bot.id, state: "provisioning", place: "cloud" });
-    await boat.provisionBoat(cfg, bot.id, bot.name);
-    b = await boat.findBoat(cfg, bot.id);
-    lifecycle = lifecycleOf();
-  }
-  // An archived Boat answers every action with an error until it resumes: wake it once here.
-  if (lifecycle === "wake") {
-    broadcast({ kind: "computer", botId: bot.id, state: "waking", place: "cloud" });
-    b = (await boat.readyBoat(cfg, bot.id)) ?? b;
-    lifecycle = lifecycleOf();
-  }
-  return b && lifecycle === "attach" ? b : null;
 }
 
 function managedBoatOwners(): boat.ManagedBoatOwner[] {
@@ -6751,10 +6740,10 @@ function localVmLeaseFor(target: LocalVmTarget): LocalVmLease {
   return localVmLeases.forTarget(target.key);
 }
 
-function localVmIdleFor(target: LocalVmTarget): LocalVmIdleTimer {
+function localVmIdleFor(target: LocalVmTarget): ComputerIdleTimer {
   let idle = localVmIdles.get(target.key);
   if (idle) return idle;
-  idle = new LocalVmIdleTimer(
+  idle = new ComputerIdleTimer(
     localVmIdleMs(),
     () => localVmImageBusy || localVmLifecycleBusy.has(target.key) || localVmActiveThreads.has(target.key),
     async () => {
@@ -13762,7 +13751,7 @@ ROUTES.push(createComputerRoutes({
   localVmPayload, localVmInventoryPayload, existingPerBotLocalVmCount, teamComputersPayload, teamComputerInUse,
   managedBoatOwners, providerTransitionMessage, botHasActiveTurn, botComputerControlKey, botComputerControlSnapshot,
   computerPreviewBot, computerPreviewSurface, claimTeamComputerLifecycle, claimBotComputerLifecycle,
-  claimBoatInventoryRequest, claimManagedBoatMutation, claimManagedVpsMutation,
+  claimBoatInventoryRequest, claimManagedBoatMutation, claimManagedVpsMutation, cloudComputerUsed: owner => cloudComputerPower.used(owner),
 }));
 ROUTES.push(createStatusRoutes({
   store, cfg, outboundCounts,
@@ -17042,6 +17031,7 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
           return json(res, 400, { error: "controlLeaseId is invalid" });
         }
         const controlLeaseId = leaseResult?.data;
+        if (action === "release") cloudComputerPower.renew(controlKey);
         if (action === "take" && (boatLifecycleBusyBots.has(bot.id) || boatLifecycleBusyBots.has(controlKey))) {
           return json(res, 409, { error: "this bot's cloud computer is being changed — wait before taking control" });
         }
@@ -17116,7 +17106,7 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
             return json(res, 200, await boat.screenshotBoat(cfg, key));
           }
           return json(res, 200, await boat.sleepBoat(cfg, key));
-        } finally { release(); }
+        } finally { release(); if (m[2] !== "sleep") cloudComputerPower.used(key); }
       }
       if (bot.cloudBackend === "vps") {
         if (m[2] === "screenshot") {
@@ -17190,7 +17180,7 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
           case "provision":
             return json(res, 200, await boat.provisionBoat(cfg, botId, bot.name));
           case "join":
-            return json(res, 200, await (activeBoatTurn || threadPreview ? boat.joinReadyBoat(cfg, botId) : boat.joinBoat(cfg, botId)));
+            return json(res, 200, await (activeBoatTurn || (threadPreview && bot.computer !== "cloud") ? boat.joinReadyBoat(cfg, botId) : boat.joinBoat(cfg, botId)));
           case "sleep":
             return json(res, 200, await boat.sleepBoat(cfg, botId));
           case "exec":
@@ -17201,6 +17191,7 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
         }
       } finally {
         releaseComputerLifecycle();
+        if (m[2] !== "sleep") cloudComputerPower.used(botId);
       }
     }
 
@@ -17326,6 +17317,7 @@ server.listen(PORT, "127.0.0.1", async () => {
   followupsReady = true;
   drainQueuedSends();
   drainQueuedChannelSends();
+  void cloudComputerPower.armRunning();
   if (enginesRead) {
     await enginesRead;
     if (companyShutdown) return;
@@ -17386,6 +17378,7 @@ const gracefulShutdown = createGracefulShutdown({
       browserLive.closeAll();
       desktopViewer.closeAll();
       for (const idle of localVmIdles.values()) idle.cancel();
+      cloudComputerPower.close();
       vps.closeAllVpsDesktopTunnels();
       watchdog.stop();
       routines?.close();
