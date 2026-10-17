@@ -5017,4 +5017,10 @@
   "botOverview.line.noApps": "Has no connected apps.",
   "botOverview.line.noSchedule": "Won't act on a schedule.",
   "botOverview.line.computer": "Computer preference: {preference}."
+,
+  "botOverview.preference.auto": "Auto; availability is checked when a task starts",
+  "botOverview.preference.cloud": "cloud computer",
+  "botOverview.preference.vm": "Local VM",
+  "botOverview.preference.local": "this computer",
+  "botOverview.preference.browser": "browser only"
 }

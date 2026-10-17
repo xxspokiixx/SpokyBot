@@ -4871,4 +4871,10 @@
   "botOverview.line.noApps": "Não tem apps conectados.",
   "botOverview.line.noSchedule": "Não vai agir com base em uma rotina.",
   "botOverview.line.computer": "Preferência de computador: {preference}."
+,
+  "botOverview.preference.auto": "Automático; a disponibilidade é verificada quando uma tarefa começa",
+  "botOverview.preference.cloud": "computador na nuvem",
+  "botOverview.preference.vm": "VM local",
+  "botOverview.preference.local": "este computador",
+  "botOverview.preference.browser": "somente navegador"
 }
