@@ -31,6 +31,16 @@ describe("routine list", () => {
     expect(list()).not.toContain("Recent consecutive failures:");
     expect(list()).not.toContain("Scheduled occurrences skipped while busy:");
   });
+  it("says how many of the week's runs went fine, and which run started again by itself", () => {
+    const markup = list({ routines: [{ ...routine, weekRuns: { ok: 6, total: 7 } }], runs: [{ ...run, retried: "stalled" }] });
+    expect(markup).toContain("6 of 7 runs OK this week");
+    expect(markup).toContain("Latest: Retried after the engine stalled · Completed");
+    expect(list()).not.toContain("runs OK this week");
+    expect(logs({ runs: [{ ...run, status: "failed", retried: "restarted", error: "OpenMausBot restarted while this routine was running" }] }))
+      .toContain("Retried after OpenMausBot restarted · Failed");
+    expect(logs({ runs: [{ ...run, status: "queued", retried: "usage_limit", attention: "Waiting for the engine's usage limit to reset" }] }))
+      .toContain(">Queued<");
+  });
   it("retains visible records and latest results during a failed refresh", () => {
     const markup = list({ error: true });
     expect(markup).toContain('role="alert"');

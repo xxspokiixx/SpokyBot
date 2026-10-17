@@ -961,8 +961,7 @@ export async function callTool(name: string, args: Json, context: ToolCallContex
     const detail = String(args.detail ?? "").trim();
     if (!kind || !entryName || !detail) return { text: "propose_team_memory needs kind, name, and detail.", isError: true };
     const r = await api("/api/internal/team-memory", {
-      method: "POST",
-      body: JSON.stringify({
+      method: "POST", body: JSON.stringify({
         fromBotId: BOT_ID,
         fromThreadId: THREAD_ID,
         kind,
@@ -972,7 +971,7 @@ export async function callTool(name: string, args: Json, context: ToolCallContex
         aliases: Array.isArray(args.aliases) ? args.aliases.filter((alias) => typeof alias === "string") : undefined,
       }),
     });
-    return confirmationResult(r, `remembering ${entryName} for the team`, "entry");
+    return confirmationResult(r, `the team memory entry for ${entryName}`, "entry");
   }
   if (name === "session_search") {
     const q = String(args.query ?? "").trim();
