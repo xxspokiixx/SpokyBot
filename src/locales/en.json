@@ -5147,4 +5147,9 @@
   "memory.capacity.lines": "Lines",
   "memory.capacity.size": "Size",
   "memory.capacity.used": "{label} used"
+,
+  "memory.openObsidian": "Open in Obsidian",
+  "memory.showFileManager": "Show in file manager",
+  "memory.upkeep.help": "Keeps these notes in shape without the bot having to remember: notices facts you mention in chats and files them — core facts here, detail in topic files it creates — and tidies up every night: expired notes are archived, duplicates merged, contradicted notes crossed out. Facts about you are added to About me (Settings → General), where every bot reads them and you can remove any. Every change shows below and can be undone.",
+  "memory.capacity.sentence": "{lines} of {maxLines} lines · {bytes} of {maxBytes} — only the first {maxLoaded} lines load each turn."
 }

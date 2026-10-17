@@ -18521,7 +18521,7 @@
       "memory.undoing": "62daa93abbe81f3280709ae2fb96b31471db88178a5cb2bf387ec11cdda8cf98",
       "memory.undo": "a8283ade31856f71220db0e6f60a257c6889dc4dad0f275f66ad44b9ed9bf8d5",
       "memory.cantUndo": "a4c59bb643d6cb44ef20196c5dce05bf6e36ea969c1b4726ce79cca1e42c1d85",
-      "memory.upkeep.help": "e4a61563828577215f2fa244374b2f4bd4c119d2f41c19b7806a0c2147bf2e40",
+      "memory.upkeep.help": "7a341f06cc7d9c05b15da5766d5536529d29d318ecbc20adf5cd70d98cc829c4",
       "memory.upkeep.lastTidy": "0be9763898177282890dc50f68c6a1a0a3bb14ad8f492a38fe47aceafb9deac9",
       "memory.upkeep.lastNoticed": "0c8cd92b705058ffa5f65cc6a3e4ecdc5bf96478ef59654b1f7cacb68b312f58",
       "memory.conflict.title": "b70858a2adc3c9768c263386a599c17d9914278be36bf375711204a37f9f4257",
@@ -18551,7 +18551,10 @@
       "memory.capacity.title": "f2739926ed8de2ddbf26edd11c0695ac20b7929614e12de67d60ffa10353832f",
       "memory.capacity.lines": "3b26a5427458edd20c9ec7f0954847adb8e0e692f739cc1bca3ab7438bc9c171",
       "memory.capacity.size": "1af851907331c0ed99e7c63b4e55df808bc5fc4c990a1cf80ca8c0f76daf1f3b",
-      "memory.capacity.used": "515626cd8fe023290a0f6c5acca350150af22635ee45e9cc025e62c5d114b704"
+      "memory.capacity.used": "515626cd8fe023290a0f6c5acca350150af22635ee45e9cc025e62c5d114b704",
+      "memory.openObsidian": "1a4d2fc397995d6402f2b8dc5aa333b1290e87e4a6718a16c46d8b23e8ede955",
+      "memory.showFileManager": "3ca4dad5ccc03ac1e41a424763259109c8b89ade3613019ce30b1b52007426d6",
+      "memory.capacity.sentence": "316c454d101a982bb0e87111bf0504c7e8899e1e9cf31f5e93d8830730faf6f1"
     },
     "zh": {
       "pro.fromPrice": "a48a04a457d60b08b54fc83e7a6c4584ffedb1e23621859084900c8521a3af7b",

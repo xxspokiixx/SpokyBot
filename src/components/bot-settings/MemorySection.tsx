@@ -285,11 +285,11 @@ export function MemorySection({ bot, active = true, onToggle }: { bot: Bot; acti
               {shortPath(overview.workspacePath, home)}
             </span>
             <button type="button" className={buttonCls} onClick={() => void openLocation("obsidian")}>
-              Open in Obsidian
+              {t("memory.openObsidian")}
             </button>
             <button type="button" className={cn(buttonCls, "inline-flex items-center gap-1.5")} onClick={() => void openLocation("folder")}>
               <FolderOpen size={14} />
-              {fileManagerLabel(capabilities.host.platform)}
+              {t("memory.showFileManager")}
             </button>
           </div>
         )}
@@ -467,12 +467,7 @@ export function MemoryUpkeepCard({
       <div className="flex items-start justify-between gap-3">
         <div className="min-w-0">
           <div className="text-[15px] font-medium text-ink">{t("memory.upkeep.title")}</div>
-          <p className="mt-1 text-[13px] leading-relaxed text-ink-secondary">
-            Keeps these notes in shape without the bot having to remember to: notices facts you mention in chats and files them —
-            core facts here, detail in topic files it creates — and tidies up every night: expired notes are archived, duplicates
-            merged, contradicted notes crossed out. Facts about you are added to About me (Settings → General), where every bot reads
-            them and you can remove any. Every change shows below and can be undone.
-          </p>
+          <p className="mt-1 text-[13px] leading-relaxed text-ink-secondary">{t("memory.upkeep.help")}</p>
         </div>
         <Switch checked={enabled} aria-label={t("memory.upkeep.title")} onClick={onToggle} />
       </div>
@@ -527,9 +522,9 @@ export function MemoryGauge({ index }: { index: MemoryCapacity }) {
       <GaugeBar label={t("memory.capacity.lines")} share={status.lineShare} fill={fill} />
       <GaugeBar label={t("memory.capacity.size")} share={status.byteShare} fill={fill} />
       <p className={cn("mt-2 text-[12.5px] leading-relaxed", status.level === "over" ? "text-danger" : "text-ink-secondary")}>
-        {status.warning ?? status.sentence}
+          {status.warning ?? t("memory.capacity.sentence", { lines: index.lines, maxLines: index.maxLines, bytes: formatBytes(index.bytes), maxBytes: formatBytes(index.maxBytes), maxLoaded: index.maxLines })}
       </p>
-      {status.warning && <p className="mt-1 text-[12px] text-ink-secondary">{status.sentence}</p>}
+      {status.warning && <p className="mt-1 text-[12px] text-ink-secondary">{t("memory.capacity.sentence", { lines: index.lines, maxLines: index.maxLines, bytes: formatBytes(index.bytes), maxBytes: formatBytes(index.maxBytes), maxLoaded: index.maxLines })}</p>}
     </div>
   );
 }

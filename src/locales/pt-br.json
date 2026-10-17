@@ -5001,4 +5001,9 @@
   "memory.capacity.lines": "Linhas",
   "memory.capacity.size": "Tamanho",
   "memory.capacity.used": "{label} usado"
+,
+  "memory.openObsidian": "Abrir no Obsidian",
+  "memory.showFileManager": "Mostrar no gerenciador de arquivos",
+  "memory.upkeep.help": "Mantém estas notas organizadas sem o bot precisar lembrar: registra fatos mencionados nas conversas, arquiva notas expiradas, junta duplicatas e marca contradições. Fatos sobre você vão para Sobre mim (Configurações → Geral), onde todos os bots leem e você pode remover qualquer um. Cada alteração aparece abaixo e pode ser desfeita.",
+  "memory.capacity.sentence": "{lines} de {maxLines} linhas · {bytes} de {maxBytes} — apenas as primeiras {maxLoaded} linhas são carregadas em cada turno."
 }
