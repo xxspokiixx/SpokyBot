@@ -18469,7 +18469,12 @@
       "botIdentity.ai.saveConnection": "df24ef128adf67e1234f0740ff776e366e48ebc3392d67c6fb5ade7ff1edb851",
       "botIdentity.ai.saveKey": "b6e0aef2a9f1eda5d44e17f83826029b93502e4c5efe98d56febf36fc8f3b45e",
       "botIdentity.ai.connectionSettings": "b4ddb3c1ca6cd2891d2cf028561f73bfc42aeadc8a4802c4d93ef913cd097a12",
-      "botIdentity.ai.saveBeforeGenerate": "3932693b62e068600eb2a136fb39d7766973f4dbb15b247d01652ca0682a13e1"
+      "botIdentity.ai.saveBeforeGenerate": "3932693b62e068600eb2a136fb39d7766973f4dbb15b247d01652ca0682a13e1",
+      "botIdentity.ai.openaiKey": "3c83ff65e901256b1589d5a0755e7cd3e5aadba57d6368ae03af7e045343d8ed",
+      "botIdentity.ai.xaiKey": "c721f285a7efaa90b3d97a62bb6752cf02b83fa9509d3c37e6355cd09137e37a",
+      "botIdentity.ai.customKey": "fad63e62cd6b4dc5329c7f67b0d0fbd164c33b2769ff19e0dfb56a78a0a6df30",
+      "botIdentity.ai.directionPlaceholder": "6b8be464d939b64495ffe2199e08c6988c0142402684fee16872c47c0aecad02",
+      "botIdentity.ai.directionLabel": "8390024003ec1356e41d189b9bfa2d6f220dd9b4d33ee3a90235efa732f95be0"
     },
     "zh": {
       "pro.fromPrice": "a48a04a457d60b08b54fc83e7a6c4584ffedb1e23621859084900c8521a3af7b",

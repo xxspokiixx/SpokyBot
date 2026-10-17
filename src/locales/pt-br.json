@@ -4913,4 +4913,10 @@
   "botIdentity.ai.saveKey": "Salvar chave",
   "botIdentity.ai.connectionSettings": "Configurações da conexão",
   "botIdentity.ai.saveBeforeGenerate": "Salve as alterações da conexão antes de gerar."
+,
+  "botIdentity.ai.openaiKey": "Chave da API de imagens da OpenAI",
+  "botIdentity.ai.xaiKey": "Chave da API da Grok",
+  "botIdentity.ai.customKey": "Chave de API de imagem personalizada",
+  "botIdentity.ai.directionPlaceholder": "Instrução opcional, por exemplo: “um navegador calmo inspirado em {name}”",
+  "botIdentity.ai.directionLabel": "Instrução para gerar o avatar"
 }

@@ -180,7 +180,7 @@ export function AvatarImageGenerator({
         </>
       )}
       <label className="block text-[11.5px] text-ink-secondary">
-        {providerInfo.keyLabel}{provider === "custom" ? ` (${t("botIdentity.ai.optional")})` : ""}
+        {t(provider === "openai" ? "botIdentity.ai.openaiKey" : provider === "xai" ? "botIdentity.ai.xaiKey" : "botIdentity.ai.customKey")}{provider === "custom" ? ` (${t("botIdentity.ai.optional")})` : ""}
         <input
           type="password"
           value={imageKey}
@@ -252,8 +252,8 @@ export function AvatarImageGenerator({
         disabled={busy}
         onChange={(event) => setDirection(event.target.value.slice(0, 400))}
         maxLength={400}
-        placeholder={`Optional direction, e.g. “a calm navigator inspired by ${botLabel}”`}
-        aria-label="Avatar generation direction"
+        placeholder={t("botIdentity.ai.directionPlaceholder", { name: botLabel })}
+        aria-label={t("botIdentity.ai.directionLabel")}
         className={`${INPUT_CLASS} mt-3 min-h-[72px] resize-none`}
       />
       <div className="mt-2 flex items-center justify-between gap-3">

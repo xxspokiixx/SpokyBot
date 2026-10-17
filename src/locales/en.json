@@ -5059,4 +5059,10 @@
   "botIdentity.ai.saveKey": "Save key",
   "botIdentity.ai.connectionSettings": "Connection settings",
   "botIdentity.ai.saveBeforeGenerate": "Save your connection changes before generating."
+,
+  "botIdentity.ai.openaiKey": "OpenAI image API key",
+  "botIdentity.ai.xaiKey": "Grok API key",
+  "botIdentity.ai.customKey": "Custom image API key",
+  "botIdentity.ai.directionPlaceholder": "Optional direction, e.g. “a calm navigator inspired by {name}”",
+  "botIdentity.ai.directionLabel": "Avatar generation direction"
 }
