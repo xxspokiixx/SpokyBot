@@ -56,6 +56,20 @@ interface TeamCatalog {
   teams: TeamCatalogEntry[];
 }
 
+const CATALOG_COPY: Record<string, string> = {
+  "seo growth team": "seoGrowth",
+  "engineering team": "engineering",
+  "100x marketing team": "marketing100x",
+  "reddit lead miner": "redditLeadMiner",
+  "competitor watch": "competitorWatch",
+  "inbox follow-up": "inboxFollowup",
+};
+
+function catalogCopy(entry: TeamCatalogEntry): TeamCatalogEntry {
+  const id = CATALOG_COPY[entry.name.trim().toLowerCase()];
+  return id ? { ...entry, name: t(`templates.catalog.${id}.name`), summary: t(`templates.catalog.${id}.summary`), outcome: t(`templates.catalog.${id}.summary`) } : entry;
+}
+
 export interface TeamImportResult {
   name: string;
   members: number;
@@ -838,16 +852,18 @@ export function TeamLibraryPanel({
                   )}
                   {!catalogLoading && catalog && (
                     <div className="grid grid-cols-1 gap-x-10 md:grid-cols-2">
-                      {visibleTeams.map((entry, index) => (
+                      {visibleTeams.map((entry, index) => {
+                        const copy = catalogCopy(entry);
+                        return (
                         <article key={entry.slug} className="flex min-h-[104px] items-center gap-3 border-b border-hairline/35 px-1 py-4">
                           <TeamGlyph index={index} />
                           <div className="min-w-0 flex-1">
-                            <h3 className="truncate text-[14px] font-medium text-ink">{entry.name}</h3>
-                            <p className="mt-0.5 truncate text-[12.5px] text-ink-secondary">{entry.outcome ?? entry.summary}</p>
+                            <h3 className="truncate text-[14px] font-medium text-ink">{copy.name}</h3>
+                            <p className="mt-0.5 truncate text-[12.5px] text-ink-secondary">{copy.outcome ?? copy.summary}</p>
                             <p className="mt-1 truncate text-[11.5px] text-ink-tertiary">
-                              {entry.members} bots · {entry.skills.length} playbooks
+                              {t("templates.botCount", { count: entry.members })} · {t("templates.playbookCount", { count: entry.skills.length })}
                               {entry.requires.apps.length > 0 && ` · ${entry.requires.apps.join(", ")}`}
-                              {entry.setupMinutes && ` · ~${entry.setupMinutes} min`}
+                              {entry.setupMinutes && ` · ${t("templates.minutes", { count: entry.setupMinutes })}`}
                             </p>
                           </div>
                           <button
@@ -859,7 +875,8 @@ export function TeamLibraryPanel({
                             {busySlug === entry.slug ? t("templates.loadingShort") : t("templates.load")}
                           </button>
                         </article>
-                      ))}
+                        );
+                      })}
                     </div>
                   )}
                   {!catalogLoading && catalog && visibleTeams.length === 0 && (
