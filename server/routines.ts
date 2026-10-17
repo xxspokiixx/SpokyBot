@@ -16,6 +16,7 @@ import {
   composeExecutionPrompt, continuityCarry, retriesTransiently, ROUTINE_DEFERRAL_NOTICE_MS, ROUTINE_SKIPPED_WHILE_WAITING, ROUTINE_SUPERSEDED,
   ROUTINE_TRANSIENT_RETRY_MS, routineFailure, routineHostWarning, skipNeedsNotice, supersededBy,
 } from "./routine-execution.ts";
+import { activeMs, askOf, settleAsk, waitingFor, type RoutineRunAsk } from "./routine-waits.ts";
 
 export interface RoutineIntervalWindow {
   start: string;
@@ -144,6 +145,9 @@ export interface RoutineRun {
   retryAt?: number;
   /** When its current wait began; read only while the run is waiting. */
   waitingSince?: number;
+  asked?: RoutineRunAsk;
+  /** Time spent waiting on the person's answers, which the run limit does not count. */
+  waitedMs?: number;
   triggerSource?: RoutineRunTrigger;
   webhookId?: string;
   deliveryId?: string;
@@ -798,6 +802,7 @@ export class RoutineManager {
     const recovered: RoutineRun[] = [];
     for (const run of this.runs) {
       if (run.status === "running" || run.status === "waiting") {
+        settleAsk(run, undefined, this.now());
         if (run.threadId && run.target === "bot" && this.options.hasPendingDelegations?.(run.threadId) === true) {
           this.wait(run, "Waiting for delegated work to finish");
           continue;
@@ -1360,25 +1365,9 @@ export class RoutineManager {
     try {
       const now = this.now();
       for (const run of this.runs) {
-        if (
-          !["running", "waiting"].includes(run.status) ||
-          run.startedAt == null ||
-          run.timeoutMinutes == null ||
-          now - run.startedAt < run.timeoutMinutes * 60_000
-        ) continue;
-        const threadId = run.threadId;
-        const detail = `Stopped after reaching the ${run.timeoutMinutes}-minute run limit`;
-        if (run.target === "room-goal") run.goalStatus = "limit-reached";
-        this.failRun(run, detail);
-        if (!threadId) continue;
-        if (run.target === "room-goal" && run.groupId) {
-          await this.options.interruptGoal?.(run.groupId, threadId, {
-            status: "limit-reached",
-            detail,
-          }).catch(() => {});
-        } else {
-          await this.options.interruptTurn?.(run.botId, threadId).catch(() => {});
-        }
+        if (!["running", "waiting"].includes(run.status) || run.startedAt == null || run.timeoutMinutes == null ||
+          activeMs(run, now) < run.timeoutMinutes * 60_000) continue;
+        await this.stopRun(run, `Stopped after reaching the ${run.timeoutMinutes}-minute run limit`, "limit-reached");
       }
       const dueRoutines = this.routines.filter(
         (routine) => routine.enabled && routine.nextRunAt != null && routine.nextRunAt <= now,
@@ -1457,7 +1446,7 @@ export class RoutineManager {
             (!requiresCurrentDayOccurrence || (latest !== null && isSameLocalDay(latest, now)));
           if (!mayDispatch) {
             if (nextOccurrence(definition.schedule, now) === null) {
-              this.missQueuedRun(run, "The routine ended before this scheduled run could start");
+              this.failRun(run, "The routine ended before this scheduled run could start", "missed");
             }
             continue;
           }
@@ -1547,6 +1536,7 @@ export class RoutineManager {
   handleRuntimeEvent(event: RuntimeEvent): RoutineRun | null {
     const run = this.runs.find((r) => r.threadId === event.threadId && ["running", "waiting"].includes(r.status));
     if (!run) return null;
+    if (event.type === "turn.started" || event.type === "turn.completed") settleAsk(run, undefined, this.now());
     // A room goal's orchestrator owns its result (finishGoalRun); a member's completion is intermediate.
     if (
       run.target === "room-goal" &&
@@ -1559,8 +1549,14 @@ export class RoutineManager {
       run.status = "running";
       run.attention = undefined;
     } else if (event.type === "request.opened") {
-      this.wait(run, redactSecretsInText(event.summary).trim().slice(0, 500) || undefined);
+      run.asked ??= askOf(event, this.now());
+      this.wait(run, waitingFor(run.asked));
     } else if (event.type === "request.resolved") {
+      const unanswered = settleAsk(run, event, this.now());
+      if (unanswered) {
+        void this.stopRun(run, unanswered, "stopped");
+        return cloneRun(run);
+      }
       run.status = "running";
       run.attention = undefined;
     } else if (event.type === "item.completed" && event.itemType === "assistant_text") {
@@ -1645,18 +1641,16 @@ export class RoutineManager {
     run.attention = attention;
   }
 
-  private failRun(run: RoutineRun, message: string) {
-    run.status = "failed";
-    run.attention = undefined;
-    run.error = redactSecretsInText(message).slice(0, 500);
-    run.finishedAt = this.now();
-    this.save();
-    this.emitRun(run);
-    this.options.onRunFailed?.(cloneRun(run));
+  private async stopRun(run: RoutineRun, detail: string, status: "stopped" | "limit-reached") {
+    if (run.target === "room-goal") run.goalStatus = status;
+    this.failRun(run, detail);
+    if (!run.threadId) return;
+    if (run.target === "room-goal" && run.groupId) await this.options.interruptGoal?.(run.groupId, run.threadId, { status, detail }).catch(() => {});
+    else await this.options.interruptTurn?.(run.botId, run.threadId).catch(() => {});
   }
 
-  private missQueuedRun(run: RoutineRun, message: string) {
-    run.status = "missed";
+  private failRun(run: RoutineRun, message: string, status: "failed" | "missed" = "failed") {
+    run.status = status;
     run.attention = undefined;
     run.error = redactSecretsInText(message).slice(0, 500);
     run.finishedAt = this.now();
