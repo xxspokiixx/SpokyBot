@@ -151,7 +151,10 @@
               "standing",
               "new"
             ],
-            "description": "standing (default): the one work thread this conversation has with each teammate. new: open a new thread on the teammate for this, its own history and run; its result still returns here."
+            "description": "standing (default): this conversation's one work thread with each teammate. new: a new thread on the teammate, its own history and run (in_my_folder: in your folder); its result still returns here."
+          },
+          "in_my_folder": {
+            "type": "boolean"
           },
           "reply": {
             "type": "string",
