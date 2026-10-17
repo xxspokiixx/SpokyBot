@@ -105,7 +105,7 @@ export interface OptionCardData extends Pick<WireOptionCard, "fixedOptions" | "w
   routineRequest?: RoutineRequestCardData;
   skillRequest?: SkillRequestCardData;
   outboundRequest?: { tool: string; app: string | null; calls?: Array<{ app: string | null; label: string }> };
-  teamMemoryRequest?: { section: string; entryId: string; kind: string };
+  teamMemoryRequest?: { section: string; entryId: string; kind: string; revision?: string };
   profileRequest?: ProfileRequestCardData;
   modelRequest?: ModelRequestCardData;
   teamSetupRequest?: import("../../shared/team-setup").TeamSetupRequest;

@@ -80,6 +80,25 @@ use an appropriate event/webhook workflow instead of a fake weekly schedule.
   nobody's answer, the run stops with "Stopped: nobody answered the approval to
   use …" and the routine-failed notification. A run still waiting when its
   routine's next occurrence is due gives way to that occurrence.
+- An unattended run (scheduled, webhook or Run now) recovers from a passing
+  failure by itself, the same on the desktop, a headless server and a Cloud
+  home (`server/routine-recovery.ts`):
+  - Its engine stalled, OpenMausBot restarted while it ran, the provider
+    rate-limited it, or the provider failed for a moment: it starts once more
+    in the same conversation after a short wait (15 s; a minute after a rate
+    limit), told to check what its first start already did. A second failure
+    fails it: "Failed after one automatic retry: …".
+  - A run that a shutdown or crash cut off is picked up once when OpenMausBot
+    starts again; the same run, never a copy.
+  - Its bot or conversation was busy when it started: it waits there,
+    checking every 30 s, for up to an hour.
+  - Signed out, out of credit, payment required, a usage limit or an engine
+    that needs setting up: no retry. The owner gets one notification per bot
+    and cause saying what to do, and no more until one of that bot's runs
+    completes. A usage limit that says when it resets (Claude Code does) puts
+    the run back for just after the reset, if that is within 12 hours.
+  - The log says what happened ("Retried after the engine stalled ·
+    Completed"), and each routine shows "N of M runs OK this week".
 - Existing one-time, daily/weekday and interval schedules are not migrated or
   reinterpreted. Team exports retain cron expressions and zones; imports remain
   paused until enabled. Older phone apps safely treat cron as a newer schedule;

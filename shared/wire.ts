@@ -532,7 +532,8 @@ export const movesThreadToTop = (message: Pick<WireMessage, "role" | "kind" | "p
 export interface OptionCardData {
   /** calls: one per outbound call the card covers, in subtitle order. */
   outboundRequest?: { tool: string; app: string | null; calls?: Array<{ app: string | null; label: string }> };
-  teamMemoryRequest?: { section: string; entryId: string; kind: string };
+  /** `revision`: the entry as it applied without a person, so Undo can tell it changed since. */
+  teamMemoryRequest?: { section: string; entryId: string; kind: string; revision?: string };
   title: string;
   subtitle: string;
   options: string[];

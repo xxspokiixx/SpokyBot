@@ -180,6 +180,17 @@ export function appliedChange(card: OptionCardData, name: string): { line: strin
       : t("approval.applied.modelOther", { name, target: `@${model.targetName}`, title });
     return { line, canUndo: true };
   }
+  const setup = card.teamSetupRequest;
+  if (setup?.deletion) return { line: t("approval.applied.botDeleted", { name, target: `@${setup.deletion.name}` }), canUndo: false };
+  if (setup?.result) {
+    const names = (action: "created" | "updated") => setup.result!.bots.filter((bot) => bot.action === action).map((bot) => `@${bot.name}`).join(", ");
+    const title = [names("created") && t("approval.applied.teamAdded", { names: names("created") }),
+      names("updated") && t("approval.applied.teamUpdated", { names: names("updated") })].filter(Boolean).join("; ");
+    return { line: t("approval.applied.teamSetup", { name, title }), canUndo: Boolean(setup.undo) };
+  }
+  if (card.teamMemoryRequest) {
+    return { line: t("approval.applied.teamMemory", { name, title: card.subtitle.split(" — ")[0] ?? "" }), canUndo: Boolean(card.teamMemoryRequest.revision) };
+  }
   return undefined;
 }
 

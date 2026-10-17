@@ -1033,6 +1033,13 @@ An owner's own Composio project key still wins. The details are in
 [composio.md](composio.md#mausbot-cloud). `OMB_COMPOSIO_BROKER_URL` (env, not
 secret, optional) points a Cloud at another service, such as a staging one.
 
+For a paid plan the Admin also sets `OMB_CLOUD_CONNECTED_APPS_GRANT` (secret):
+a grant it signs for the machine id, which the server presents to the service
+once it holds its token. The service then gives this installation a paid
+Cloud's app-event limit (2,000 a day instead of a desktop's 500). Without it a
+Cloud gets the desktop limit. The grant's format is in
+[the broker's README](../cloudflare/composio-broker/README.md#paid-clouds).
+
 ### Trial Claude credit
 
 A free trial may come with a one-time Claude credit (the Admin's
@@ -1050,7 +1057,8 @@ credit, the Admin also sets:
   adds one read-only **Trial credit · Claude** engine: the OpenAI-compatible
   driver (`openai-compat`, the same chat engine and tools as any API key) with
   the relay as its address and the token as its own key, on the models the
-  relay lists, cheapest first (OpenRouter's `provider/model` ids too). Never Claude Code and never Codex: the
+  relay lists, the default first (the Admin lists Sonnet first, Haiku after;
+  OpenRouter's `provider/model` ids too). Never Claude Code and never Codex: the
   platform's key is never used to run another product's agent for anyone, and
   no `ANTHROPIC_*` variable or Claude config folder ever holds the token. It
   is never saved to `config.json` and has no sign-in. The token is held like
@@ -1060,10 +1068,29 @@ credit, the Admin also sets:
 - **Out of the box.** A new Cloud's first bot runs on it when nothing of the
   person's own can run there (the first start waits up to 15 seconds for the
   relay's model list), so My Cloud opens on the chat, not the engine sign-in.
+  A bot runs on the credit's default model unless the person picks another;
+  when the relay's default changes (Haiku to Sonnet), bots still on the old
+  default follow it.
+- **Every bot runs.** While nothing of the person's own is signed in, a bot on
+  an engine My Cloud can't run (a desktop copy's own Claude or Codex, signed
+  out here, or an engine only that desktop has) moves onto the credit when the
+  engines are read: at start, when the credit's list arrives, when the app
+  reads the engines, and before a message to that bot is sent. Where it came
+  from is kept in `providers/trial-credit/moved.json` (it never travels in a
+  backup or a move). An engine whose sign-in can't be read yet is left alone
+  (`server/cloud-credit-moves.ts`).
 - **Their own always wins.** A new bot gets the person's own engine whenever
-  one can run. From the moment one can (a sign-in, a key), each bot and
-  conversation still on the credit moves to it, with one line in each, and the
-  credit is not offered to bots any more.
+  one can run. From the moment one is signed in for sure (a sign-in, a key),
+  each bot and conversation still on the credit moves to it, with one line in
+  each, and the credit is not offered to bots any more. A bot that came from
+  another engine goes back to that engine and model when it is the one signed
+  in; otherwise it takes the new-bot default among the person's own.
+- **Checked once connected.** Right after an engine is connected in the
+  welcome's **Connect your AI** step or the engine sign-in, the app sends it
+  one tiny real message (`POST /api/instances/:id/check`) and says
+  **Claude is working** or what to fix (sign in again, the provider's own
+  refusal in plain words), with **Test again**. No step is added; an engine
+  already connected is not checked again.
 - **Used up or gone.** The relay's refusal reads as one plain sentence that
   names the next step, never the API's JSON (`server/trial-credit.ts`), told
   apart by the relay's own error `code`, which it puts first in its error
@@ -1072,7 +1099,8 @@ credit, the Admin also sets:
   `invalid_api_key` (a token it no longer knows) is no longer on this Cloud.
   The engine then stops offering itself until another token arrives (kept
   across restarts), and with no AI of their own My Cloud opens on its engine
-  sign-in, saying why. A `401`, `402` or `403` without the relay's code (a
+  sign-in, saying why. In a chat, used up or gone is a quiet note with
+  **Connect your own AI**, never an error. A `401`, `402` or `403` without the relay's code (a
   proxy's page) is an ordinary failed turn. `429` (paused for now: the day's
   ceiling, a Cloud being stopped, or the Admin's own account with Anthropic)
   and `400` `trial_credit_too_low` (too little left for this chat; a new chat

@@ -1841,7 +1841,7 @@ export function createAcpDriver(support: AcpSupport): ProviderDriver<AcpConfig> 
               emit({
                 ...base(threadId, turnId), type: "runtime.error",
                 message: (accountError ? support.describeAccountError?.(code, cliTurn.model) : undefined) ?? engineFailureMessage(support.displayName, message) ?? message,
-                ...(needsAuth ? { setup: true } : {}),
+                ...(needsAuth ? { setup: true } : {}), ...((e as any)?.acpPromptStall === true ? { stalled: true } : {}),
               });
               // Never replay an accepted prompt (it may have run tools); evict before listeners start the next turn.
               if (!needsAuth && !accountError && ((e as any)?.acpPromptStall === true || (e as any)?.acpSessionFailure === true
