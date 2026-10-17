@@ -4830,4 +4830,20 @@
   "apiInstances.refreshModels": "Detectar modelos de {name} de novo",
   "apiInstances.empty": "Nenhum outro servidor ainda.",
   "apiInstances.failed": "Não foi possível salvar o servidor. Verifique os campos e tente novamente."
+,
+  "botOverview.loading": "Carregando…",
+  "botOverview.refreshError": "Não foi possível atualizar — mostrando a última visão geral carregada.",
+  "botOverview.readAll": "Ler tudo",
+  "botOverview.does": "Faz",
+  "botOverview.doesEmpty": "Nada agendado ou aprendido ainda.",
+  "botOverview.canReach": "Pode acessar",
+  "botOverview.reachEmpty": "Nada ainda.",
+  "botOverview.wont": "Não faz",
+  "botOverview.recentChanges": "Alterações recentes",
+  "botOverview.viewAll": "Ver tudo",
+  "botOverview.recentEmpty": "Nada mudou recentemente.",
+  "botOverview.promptPreview": "Prévia do prompt",
+  "botOverview.promptPreviewCount": "Prévia do prompt · {bytes} bytes ≈ {tokens} tokens",
+  "botOverview.promptError": "Não foi possível carregar a prévia do prompt.",
+  "botOverview.bytes": "{count} bytes"
 }

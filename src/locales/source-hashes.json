@@ -18394,7 +18394,22 @@
       "botSettings.identity.viewFull": "763b8be19a893189a10d4b0c132e574b5c1076ef95665435489565c63b5db3a1",
       "botSettings.identity.blurbPlaceholder": "f30ead27906a25dd9b5bc40ba9ca7b8db72972a6cf0f7a9dabe1b24d889c6ad5",
       "botSettings.identity.blurbHelp": "7a168c1fc7c9102a44e462cfa8bd6d63cbf49950a2e9755bee948bfa6e069fdf",
-      "botSettings.soul.description": "c7526d8cf720b3b18432db226882874518eb2480d871cb6c65a9486f9fdd755e"
+      "botSettings.soul.description": "c7526d8cf720b3b18432db226882874518eb2480d871cb6c65a9486f9fdd755e",
+      "botOverview.loading": "ba3bbbe10d8bef66441c88536ce7b8e724e2829b59a3da658654f4961cd61ae5",
+      "botOverview.refreshError": "57f9e4196102fb8186413e8717893c9705632a0518f87dc88e76769241419c78",
+      "botOverview.readAll": "dbf0e2ddf8e54dcb0c96c0bd670de041e3b0e6db302db3d523d24a0665207d38",
+      "botOverview.does": "c3c25857485f013571610fea4359a139f334e1e84ebb3c827e466fc4eeca6931",
+      "botOverview.doesEmpty": "ddacb6ce3dc2e32a751be47b995bf9598d04b21082d2cc07c87defb680d86a22",
+      "botOverview.canReach": "ce503633c2a276e3f6d8fc9dcd9be8c379a5aa2236eb0aecb43c225ebc53536d",
+      "botOverview.reachEmpty": "e056734effa8d1905527d01e4cd406a82e5193edccf86c5ff0787b8556c6af9c",
+      "botOverview.wont": "fd7eb1e25884588e519e8fc3f5aba4cd7d53c36f96b7062f8be323ea09006a9a",
+      "botOverview.recentChanges": "f66a12ef4fd99fa604a5229012d70e40f68a73c531b583e5e9b6a77ed5a5c6fc",
+      "botOverview.viewAll": "30a64216eaeac5d3a328c11bf5e3269d10a3ca0d50aa7a8b99337ab429b73cb2",
+      "botOverview.recentEmpty": "0b9f681ead4af53624541cb432546c56327472ec45c4a82cf203a955048e2962",
+      "botOverview.promptPreview": "eae5513df7ffedf3c8fecd0e7017004f3ac7df6b55b981aeb1ae1acbcdc5187f",
+      "botOverview.promptPreviewCount": "e5b34ac2bf95b0d3ef3ea00d128348ac8bd6771874fd613220a88c8161e937f5",
+      "botOverview.promptError": "36fcc8e4c7dac8a37fd05d458f8c4de71431b497dcb499c584b2e65e04bbf4e7",
+      "botOverview.bytes": "2879934f7b7ceb7a002b576b1ce37fb47ed4bdba83808fc5709844d6052d2c9b"
     },
     "zh": {
       "pro.fromPrice": "a48a04a457d60b08b54fc83e7a6c4584ffedb1e23621859084900c8521a3af7b",

@@ -4976,4 +4976,20 @@
   "apiInstances.refreshModels": "Detect models for {name} again",
   "apiInstances.empty": "No other servers yet.",
   "apiInstances.failed": "Couldn't save the server. Check the fields and try again."
+,
+  "botOverview.loading": "Loading…",
+  "botOverview.refreshError": "Couldn’t refresh — showing the last loaded overview.",
+  "botOverview.readAll": "Read all",
+  "botOverview.does": "Does",
+  "botOverview.doesEmpty": "Nothing scheduled or learned yet.",
+  "botOverview.canReach": "Can reach",
+  "botOverview.reachEmpty": "Nothing yet.",
+  "botOverview.wont": "Won’t",
+  "botOverview.recentChanges": "Recent changes",
+  "botOverview.viewAll": "View all",
+  "botOverview.recentEmpty": "Nothing changed recently.",
+  "botOverview.promptPreview": "Prompt preview",
+  "botOverview.promptPreviewCount": "Prompt preview · {bytes} bytes ≈ {tokens} tokens",
+  "botOverview.promptError": "Couldn’t load the prompt preview.",
+  "botOverview.bytes": "{count} bytes"
 }
