@@ -4362,7 +4362,7 @@
   "place.view.ccWaking.short": "Acordando…",
   "place.view.ccWaking.line": "Acordando o computador na nuvem de {bot}. Isso leva alguns segundos.",
   "place.view.ccOn.short": "Ligado",
-  "place.view.ccOn.line": "O computador na nuvem de {bot} está ligado.",
+  "place.view.ccOn.line": "O computador na nuvem de {bot} está ligado. Ele dorme após 10 minutos sem uso.",
   "place.view.ccAsleep.short": "Dormindo",
   "place.view.ccAsleep.line": "O computador na nuvem de {bot} está dormindo. Ele acorda em alguns segundos quando {bot} precisar.",
   "place.view.ccNoHours.short": "Sem horas restantes",

@@ -3702,7 +3702,7 @@
   "place.backOnAuto": "此對話已恢復為「自動」。",
   "access.worksOn": "{name} 的執行位置：{short}",
   "place.view.ccOn.short": "已啟用",
-  "place.view.ccOn.line": "{bot} 的雲端電腦已啟用。",
+  "place.view.ccOn.line": "{bot} 的雲端電腦已啟用。閒置 10 分鐘後會進入休眠。",
   "place.view.ccAsleep.short": "休眠中",
   "place.view.ccAsleep.line": "{bot} 的雲端電腦正在休眠。{bot} 需要時，它會在幾秒內喚醒。",
   "place.view.ccNoHours.short": "時數已用完",
