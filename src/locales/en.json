@@ -5023,4 +5023,15 @@
   "botOverview.preference.vm": "Local VM",
   "botOverview.preference.local": "this computer",
   "botOverview.preference.browser": "browser only"
+,
+  "botIdentity.avatar": "Avatar",
+  "botIdentity.resetMascot": "Reset mascot",
+  "botIdentity.uploadImage": "Upload image",
+  "botIdentity.removeAvatar": "Remove custom avatar image",
+  "botIdentity.removeImage": "Remove custom image",
+  "botIdentity.imageTypes": "PNG, JPEG, GIF, or WebP · up to 10 MB",
+  "botIdentity.shape": "Shape",
+  "botIdentity.expression": "Expression",
+  "botIdentity.color": "Color",
+  "botIdentity.body": "Body"
 }
