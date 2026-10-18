@@ -655,9 +655,14 @@ export interface LiveCallRecord {
   title?: string;
 }
 
+/** `live`: the key saved for Live calls only; `openai`: the OpenAI API key from Settings → API keys, used when there is no `live` key. */
+export type LiveKeySource = "live" | "openai";
+
 /** Non-secret Live settings, as GET /api/config and PATCH /api/live/settings report them. */
 export interface LiveSettings {
+  /** A Live call has a key to use (`keySource` says which); never the key itself. */
   configured: boolean;
+  keySource?: LiveKeySource;
   voice: string;
   readTypedReplies: boolean;
   idleMinutes: number;

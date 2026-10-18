@@ -450,10 +450,11 @@ account, companion client mode and restarting the app before a check succeeds
 stays refused. In a web browser, the browser asks for the microphone for
 the Cloud's address.
 
-- **The key is the person's own.** No Cloud plan includes Live calls: the
-  person pastes an OpenAI API key from a project with GPT-Live access. It is
-  saved on the Cloud (`PUT /api/config`, as a server page has no credential
-  store), and the Live copy says so.
+- **The key is the person's own.** No Cloud plan includes the key, and no plan
+  is needed for Live calls: they use the OpenAI key in Settings → API keys, or
+  a separate Live key, from a project with GPT-Live access. It is saved on the
+  Cloud (`PUT /api/config`, as a server page has no credential store), and the
+  Live copy says so.
 - **The voice knows where it runs.** In the bot's own words
   (`CLOUD_HOME_PLACE` in `server/system-prompt.ts`), it is told it runs on
   the person's My Cloud, not on their own computer, and that the bot changes
