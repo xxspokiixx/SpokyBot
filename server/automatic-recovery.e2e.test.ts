@@ -91,6 +91,12 @@ async function withRecoveryFixture(
     await expect.poll(async () => {
       try { return (await fetch(url + "/api/health", { signal: AbortSignal.timeout(1_000) })).ok; } catch { return false; }
     }, { timeout: 20_000 }).toBe(true);
+    // A later start listens before Codex lists its models (startup-model-catalog.ts), and a recovery backup must be
+    // a model the engine offers.
+    if (options.codexBackup) await expect.poll(async () => {
+      const { instances } = await api("GET", "/api/instances") as { instances: any[] };
+      return instances.find((instance) => instance.instanceId === "codex")?.models.options.some((option: any) => option.id === "gpt-fake-default");
+    }, { timeout: 20_000 }).toBe(true);
     // Armed once the server is up: the failure is the turns' to meet, not the
     // model discovery the server runs while it starts.
     writeFileSync(failureFile, JSON.stringify(options.error ?? transient));
