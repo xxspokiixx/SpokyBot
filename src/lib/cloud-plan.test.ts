@@ -129,7 +129,7 @@ describe("what is for sale, as the Admin says", () => {
     expect(PLANS.map(plan => planRow(plan).popular)).toEqual([false, false, false]);
     expect(planRow({ tier: "team", label: "Team", amount: 19900 })).toEqual({ tier: "team", name: "Team", price: "$199", popular: false, line: null, sleeps: null, chips: [] });
     // A plan the Admin says sleeps when idle says so on its card.
-    expect(planRow({ tier: "starter", label: "Starter", amount: 1500, allowances: { cpus: 2, memoryMb: 2048, diskGb: 10, maxDiskGb: 10, computers: 1, computerHours: 10, voiceCharacters: 10_000, sleeps: true } }).sleeps)
+    expect(planRow({ tier: "starter", label: "Starter", amount: 2900, allowances: { cpus: 2, memoryMb: 2048, diskGb: 10, maxDiskGb: 10, computers: 1, computerHours: 10, voiceCharacters: 10_000, sleeps: true } }).sleeps)
       .toBeTruthy();
     expect(planRow({ tier: "pro", amount: 5831 }).price).toBe("$58.31");
   });
