@@ -1,7 +1,8 @@
 // Voice-latency measurement harness. Drives the real app — renderer store
-// speak path, the Speaker, the server TTS route and the configured provider —
+// speak path, the Speaker, the server TTS route and the provider call —
 // against the committed corpus fixture, through the same disposable
-// verification fixture `control-omb ui` uses. See
+// verification fixture `control-omb ui` uses. The record protocol is the
+// deterministic stub: no live engine call, no engine key. See
 // fixtures/voice-latency/README.md for the protocol.
 import { execFileSync } from "node:child_process";
 import { createHash } from "node:crypto";
@@ -13,7 +14,8 @@ import { fileURLToPath, pathToFileURL } from "node:url";
 import { runControlOmb, launchVerificationServer, type VerificationServer } from "../control-omb.ts";
 import { agentBrowser, ensureUiBrowser, sessionEnv } from "./control-omb-ui.ts";
 import { mountPreview, type MountedPreview } from "./preview-fixture.ts";
-import { CADENCE } from "./voice-latency-corpus.ts";
+import { CADENCE, corpusFixtureId, readLfText, SYNTHESIS } from "./voice-latency-corpus.ts";
+import { launchVoiceLatencyStub, STUB_KEY, STUB_MODEL, STUB_VOICE } from "./voice-latency-stub.ts";
 import {
   summarizeVoiceTurn,
   summarizeVoiceRun,
@@ -45,13 +47,6 @@ interface Manifest {
   replies: ManifestReply[];
 }
 
-interface TtsConfig {
-  provider: string;
-  model?: string;
-  voice?: string;
-  key: string;
-}
-
 interface ReplyRow {
   replyId: string;
   shape: string;
@@ -64,6 +59,7 @@ interface ReplyRow {
   totalGapMs: number;
   longestGapMs: number;
   measured: boolean;
+  modeled: boolean;
 }
 
 const sha256 = (text: string): string => createHash("sha256").update(text).digest("hex");
@@ -71,51 +67,6 @@ const sha256 = (text: string): string => createHash("sha256").update(text).diges
 const sleep = (ms: number): Promise<void> => new Promise((resolve) => setTimeout(resolve, ms));
 function readJson(path: string): unknown {
   return JSON.parse(readFileSync(path, "utf8"));
-}
-
-function readTtsConfig(raw: unknown, env: NodeJS.ProcessEnv, home: string): TtsConfig {
-  if (!raw || typeof raw !== "object" || !("tts" in raw)) throw new Error("live config has no tts section");
-  const tts = (raw as { tts: unknown }).tts;
-  if (!ttsShape(tts)) throw new Error("live config tts section is malformed");
-  // Same precedence the app uses (server/config.ts): OMB_TTS_KEY wins, because
-  // the desktop app's relay token never reaches a verification fixture.
-  const key = env.OMB_TTS_KEY?.trim() || tts.key;
-  if (!key) {
-    throw new Error("no ElevenLabs key: set OMB_TTS_KEY for the run (the live config carries only provider/voice)");
-  }
-  // The configured voice lives per bot when cfg.tts.voice is empty; the
-  // harness's probe bot needs it explicitly or /api/tts/prepare reports not
-  // ready and speak() aborts before any audio.
-  const voice = tts.voice?.trim() || env.OMB_TTS_VOICE?.trim() || firstBotVoice(join(home, ".openmausbot", "bots.json"));
-  if (!voice) throw new Error("no configured voice: cfg.tts.voice, OMB_TTS_VOICE and bots.json are all empty");
-  const model = tts.model ?? env.OMB_TTS_MODEL ?? "eleven_flash_v2_5";
-  return { ...tts, voice, model, key };
-  function ttsShape(value: unknown): value is TtsConfig {
-    if (!value || typeof value !== "object") return false;
-    const held = value as Record<string, unknown>;
-    return typeof held.provider === "string"
-      && (held.key === undefined || typeof held.key === "string")
-      && (held.model === undefined || typeof held.model === "string")
-      && (held.voice === undefined || typeof held.voice === "string");
-  }
-}
-
-function firstBotVoice(path: string): string | undefined {
-  try {
-    const raw = readJson(path) as unknown;
-    const bots = Array.isArray(raw)
-      ? raw
-      : raw && typeof raw === "object" && Array.isArray((raw as { bots?: unknown }).bots)
-        ? (raw as { bots: unknown[] }).bots
-        : [];
-    for (const bot of bots) {
-      if (bot && typeof bot === "object") {
-        const voice = (bot as { voice?: unknown }).voice;
-        if (typeof voice === "string" && voice.trim()) return voice;
-      }
-    }
-  } catch {}
-  return undefined;
 }
 
 function readCorpus(raw: unknown): CorpusReply[] {
@@ -183,8 +134,8 @@ const sampleComplete = (sample: VoiceProbeSample): boolean =>
 
 async function main(): Promise<void> {
   const { limit, label } = parseArgs(process.argv.slice(2));
-  const corpusText = readFileSync(CORPUS_PATH, "utf8");
-  const corpusSha = sha256(corpusText);
+  const corpusText = readLfText(CORPUS_PATH);
+  const corpusSha = corpusFixtureId(corpusText);
   const manifest = readManifest(readJson(MANIFEST_PATH));
   if (manifest.corpusFixtureId !== corpusSha) {
     throw new Error(`corpus fixture drift: manifest ${manifest.corpusFixtureId} != file ${corpusSha}`);
@@ -194,10 +145,10 @@ async function main(): Promise<void> {
 
   const { binary, chrome } = await ensureUiBrowser(process.env, (line) => console.error(line));
 
-  // The live TTS config, as configured: copied into the disposable fixture so
-  // the run speaks through the real provider. The key is never printed.
-  const home = process.env.HOME ?? "~";
-  const tts = readTtsConfig(readJson(join(home, ".openmausbot", "config.json")), process.env, home);
+  // The record protocol's synthesis endpoint: loopback, keyless, modeled
+  // timing at the manifest's pinned RTF. Launched before the fixture so the
+  // provider override can point at it.
+  const stub = await launchVoiceLatencyStub();
 
   // Marker routing, not ordered slots: the driver replays a user message over
   // several CLI launches, and slot order would misalign replies across them.
@@ -210,6 +161,7 @@ async function main(): Promise<void> {
     FAKE_CLAUDE_MARKER_REPLIES: markerPath,
     FAKE_CLAUDE_TOOL_CALLS: "[]",
     FAKE_CLAUDE_STREAM_CADENCE: `${CADENCE.chunkChars}:${CADENCE.intervalMs}`,
+    OMB_ELEVENLABS_API: stub.url,
   };
 
   let fixture: VerificationServer | undefined;
@@ -220,7 +172,11 @@ async function main(): Promise<void> {
     const stop = new AbortController();
     process.once("SIGINT", () => stop.abort());
     process.once("SIGTERM", () => stop.abort());
-    fixture = await launchVerificationServer({ ...process.env, ...fakeEnv }, stop.signal, undefined,
+    const serverEnv: NodeJS.ProcessEnv = { ...process.env, ...fakeEnv };
+    // Keyless record run: an exported live key would otherwise ride the
+    // parent env into measurement, even though nothing reads it here.
+    delete serverEnv.OMB_TTS_KEY;
+    fixture = await launchVerificationServer(serverEnv, stop.signal, undefined,
       { binaryPath: binary, executablePath: chrome ?? "" });
 
     const api = async (method: string, path: string, body?: unknown): Promise<Record<string, unknown>> => {
@@ -234,11 +190,11 @@ async function main(): Promise<void> {
       return parsed as Record<string, unknown>;
     };
 
-    await api("PATCH", "/api/config", { tts });
+    await api("PATCH", "/api/config", { tts: { provider: "elevenlabs", key: STUB_KEY, model: STUB_MODEL, voice: STUB_VOICE } });
     const created = await runControlOmb(["new-bot", "--name", "VoiceProbe", "--url", fixture.info.url]) as { bot: { id: string } };
     const botId = created.bot.id;
-    await api("PATCH", `/api/bots/${botId}`, { speakReplies: true, ...(tts.voice ? { voice: tts.voice } : {}) });
-    console.error(`tts provider=${tts.provider} model=${tts.model ?? "(provider default)"} voice=${tts.voice ?? "(default)"}`);
+    await api("PATCH", `/api/bots/${botId}`, { speakReplies: true, voice: STUB_VOICE });
+    console.error(`tts provider=elevenlabs(stub) model=${STUB_MODEL} voice=${STUB_VOICE} synthesis=modeled rtf=${SYNTHESIS.rtf} audioMsPerChar=${SYNTHESIS.audioMsPerChar}`);
 
     preview = await mountPreview(fixture, {
       entry: "/scripts/testing/threads-preview.tsx",
@@ -372,6 +328,7 @@ async function main(): Promise<void> {
         totalGapMs: summary?.totalGapMs ?? 0,
         longestGapMs: summary?.longestGapMs ?? 0,
         measured: summary !== null,
+        modeled: true,
       });
       console.error(`${reply.id} blocks=${summary?.blocksMeasured ?? "?"}/${expected} first=${summary?.t0ToFirstAudioMs ?? "?"}ms gaps=${summary?.gapCount ?? "?"} longest=${summary?.longestGapMs ?? "?"}ms frames=${frames?.length ?? 0}`);
     }
@@ -391,12 +348,18 @@ async function main(): Promise<void> {
       measuredBuildCommit: process.env.OMB_MEASURED_COMMIT ?? "(unset: worktree HEAD)",
       date: new Date().toISOString(),
       machine: { hostname: hostname(), platform: process.platform, arch: process.arch },
-      configSummary: { provider: tts.provider, model: tts.model ?? null, voice: tts.voice ?? null },
+      configSummary: { provider: "elevenlabs (record stub)", model: STUB_MODEL, voice: STUB_VOICE },
+      synthesis: {
+        protocol: "elevenlabs-wire stub on loopback; no live engine call, no engine key",
+        modeled: true,
+        rtf: SYNTHESIS.rtf,
+        audioMsPerChar: SYNTHESIS.audioMsPerChar,
+        synthesisMsPerChar: SYNTHESIS.rtf * SYNTHESIS.audioMsPerChar,
+      },
       cadence: CADENCE,
-      gapThresholdMs: 200,
       limit: limit ?? null,
       userAgent,
-      totals,
+      totals: { ...totals, modeled: true },
       replies: rows,
     };
     mkdirSync(LOGS_DIR, { recursive: true });
@@ -408,12 +371,14 @@ async function main(): Promise<void> {
       logPath,
       logFixtureId: sha256(body),
       corpusFixtureId: corpusSha,
-      totals,
+      synthesis: log.synthesis,
+      totals: log.totals,
     }, null, 2)}\n`);
   } finally {
     if (browserEnv) await agentBrowser(binary, browserEnv, ["close"], 15_000).catch(() => {});
     await preview?.close();
     await fixture?.close();
+    await stub.close();
   }
 }
 

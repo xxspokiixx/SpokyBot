@@ -10,7 +10,9 @@ replays before and after it.
 - `corpus.json` — the adversarial corpus (canonical form, trailing newline).
   `corpusFixtureId` = sha256 of this exact file.
 - `manifest.json` — fixture ID, per-reply char/block counts from the real
-  `toUtterances` splitter (`server/tts/speech-text.ts`), shape pins, totals.
+  `toUtterances` splitter (`server/tts/speech-text.ts`), shape pins, totals,
+  and the protocol pins both sides share (replay cadence, gap threshold,
+  modeled synthesis timing).
 - `logs/before-<sha12>.json` — the baseline run, recorded before any of the
   speak-pipeline changes. A later after-run lands beside it as
   `logs/after-<sha12>.json` with the same corpus sha in the name.
@@ -29,6 +31,22 @@ medium 26, staccato one 92-char block, mixed reply whose last block is 319.
 Totals: 116 blocks, mean ~66 chars.
 
 ## Protocol
+
+Synthesis comes from the record stub, not the live engine:
+`voice-latency-stub.ts` serves the ElevenLabs wire shape
+(`server/tts/elevenlabs.ts`) on loopback, and the harness points the fixture
+server at it through `OMB_ELEVENLABS_API`. No live engine call, no engine key:
+record runs need no `OMB_TTS_KEY` and never reach api.elevenlabs.io; the stub
+key in the fixture config is a literal that only ever reaches loopback.
+
+Modeled timing, identical on both sides and pinned in `manifest.json`
+(`synthesis`): clip duration 70 ms per text char, synthesis latency RTF 0.5 ×
+that (35 ms/char). This reproduces the pinned worst case: a 319-char block
+models 11.2 s of synthesis. The stub returns silent MPEG-1 Layer III frames
+(26.12 ms each) whose count carries the modeled clip duration, so the
+browser's real playback time is the model. Every synthesis-derived number in a
+run log is labeled `"modeled": true` (log `synthesis` block, `totals`, each
+reply row).
 
 Delta replay cadence, identical on both sides: `FAKE_CLAUDE_STREAM_CADENCE`
 (server/testing/fake-claude-cli.ts) streams each scripted reply as 24-char
@@ -64,21 +82,15 @@ src/state/store.test.ts and src/lib/tts/index.test.ts pin that.
 node --experimental-strip-types scripts/testing/voice-latency-harness.ts --label before
 ```
 
-One warmup reply is spoken and discarded, then every corpus reply in order.
-Each log row: reply id, shape, t0-to-first-audio ms, gap count, total gap ms,
-longest gap ms (plus t0→message-frame and message-frame→first-audio splits).
-The summary carries worst-case first audio, total gaps, single longest gap,
-corpus fixture ID, base commit, measured-build commit, date, machine, and the
-config summary (provider/model/voice name only — keys are never logged).
-
-The harness reads the live `~/.openmausbot/config.json` tts section and copies
-it into the disposable fixture server (loopback only, torn down after the run);
-it never modifies the live config. Resolution: key from `OMB_TTS_KEY` (the
-installed app keeps its key outside config.json), voice from config, then
-`OMB_TTS_VOICE`, then the first bot voice in `~/.openmausbot/bots.json` (the
-live config ships `voice: ""`); model from config, then `OMB_TTS_MODEL`, then
-`eleven_flash_v2_5`. For plumbing checks against a fake provider,
-`OMB_ELEVENLABS_API` points the fixture server at a stub instead of
-api.elevenlabs.io.
-Deterministic pieces (corpus regeneration, manifest consistency, gap
-accounting) are unit-tested; the live measurement itself is a run, not a test.
+No environment setup: the run is keyless and self-contained (it launches the
+stub, the disposable fixture server and the browser itself, and never reads
+the live `~/.openmausbot/config.json`). One warmup reply is spoken and
+discarded, then every corpus reply in order. Each log row: reply id, shape,
+t0-to-first-audio ms, gap count, total gap ms, longest gap ms (plus
+t0→message-frame and message-frame→first-audio splits). The summary carries
+worst-case first audio, total gaps, single longest gap, corpus fixture ID,
+base commit, measured-build commit, date, machine, the config labels
+(provider/model/voice name only) and the synthesis model (protocol, RTF,
+ms-per-char). Deterministic pieces (corpus regeneration, manifest consistency,
+stub timing math, gap accounting) are unit-tested; the live measurement itself
+is a run, not a test.
