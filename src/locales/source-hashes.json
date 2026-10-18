@@ -6456,7 +6456,18 @@
       "apiInstances.remove": "e6a3c4a1250a6ad3f10faa22333e5e50a6ba78e5b28a3b26f5743d9f8c7ede93",
       "apiInstances.refreshModels": "e02941c724226f34078fcecb136a334ee7a61ee81f07632f9be4fe021997f678",
       "apiInstances.empty": "ddc8655e13eeb047e4ca2953782271878d3db6be801b604d23d8fa225f74a3be",
-      "apiInstances.failed": "a1c3bf780712478020bd28bd6f81293fb8e3a92c2ddff117b254155b617a17f1"
+      "apiInstances.failed": "a1c3bf780712478020bd28bd6f81293fb8e3a92c2ddff117b254155b617a17f1",
+      "browser.passkey.title": "d57a9f051ea01f3fcab1f00f0f05ee7fac6db1b4503e613fe21727e2f1e82c58",
+      "browser.passkey.body": "d89f5fb5f6e2a6714e6791f9e14b809c799970023623c175671b4e10cd24888f",
+      "browser.passkey.appsGoogle": "a224d1b5a970aba47b2642fad0a7ce086c3db20c437d3108044cf616f8e3bd9d",
+      "browser.passkey.appsMicrosoft": "bc2c0ab2b306028f5b6b877e832dd01499a9961bbea2651dadb5b9ea5a2feb71",
+      "browser.passkey.connect": "48f95856d5a47e4bad25a3f28122a78e07dd3d1db4c70a9b0c6dfa63ca13fcc1",
+      "browser.passkey.otherWayGoogle": "90ed17f1f746b9042d48e5014b0603a2ac5c6349b6421c45793946edc82447a6",
+      "browser.passkey.otherWayMicrosoft": "3a47a2dcebd3797e667fb45f9dd00ea1ba5542fae1915ee9abd2735b46b92023",
+      "browser.passkey.lentPc": "d42509d904a75ba92996c4c28c7e4f46fe5b6aaddadd74201336976cfc16e702",
+      "browser.passkey.lendPc": "66cffdcf5c8111df9a6ee53dd6b829d9a413212fb1d10465c7a26bd5d8f8c397",
+      "browser.passkey.learnMore": "1445799c033a2d17e2bad5d8610879e71ff0d73a8a3c2b932b43ad0449dac3a1",
+      "browser.passkey.dismiss": "48845bff334a50a59aaecf499f28a7a24c3b4b891b8b18a9f1169ad8e8a6b261"
     },
     "fr": {
       "pro.fromPrice": "a48a04a457d60b08b54fc83e7a6c4584ffedb1e23621859084900c8521a3af7b",
@@ -19173,7 +19184,18 @@
       "history.empty": "0dbc9c4de60a9ee1f7e3fe863f4ee69ec5338c845dac151f1a3ffa8715ffbd95",
       "history.refreshError": "e7758a6440760f6fc1d6262cd5a3edd9062e678454d35465d94f75bfc4d434aa",
       "history.undo": "c1497e901b9e70aa938edfbd2d99841e49e00458d40816da793c6a1af625677d",
-      "history.restoreUnavailable": "2d272762ebacd385aead54c56b9597070130fcc0fe95b3ccfe3e6ea8ffad730e"
+      "history.restoreUnavailable": "2d272762ebacd385aead54c56b9597070130fcc0fe95b3ccfe3e6ea8ffad730e",
+      "browser.passkey.title": "d57a9f051ea01f3fcab1f00f0f05ee7fac6db1b4503e613fe21727e2f1e82c58",
+      "browser.passkey.body": "d89f5fb5f6e2a6714e6791f9e14b809c799970023623c175671b4e10cd24888f",
+      "browser.passkey.appsGoogle": "a224d1b5a970aba47b2642fad0a7ce086c3db20c437d3108044cf616f8e3bd9d",
+      "browser.passkey.appsMicrosoft": "bc2c0ab2b306028f5b6b877e832dd01499a9961bbea2651dadb5b9ea5a2feb71",
+      "browser.passkey.connect": "48f95856d5a47e4bad25a3f28122a78e07dd3d1db4c70a9b0c6dfa63ca13fcc1",
+      "browser.passkey.otherWayGoogle": "90ed17f1f746b9042d48e5014b0603a2ac5c6349b6421c45793946edc82447a6",
+      "browser.passkey.otherWayMicrosoft": "3a47a2dcebd3797e667fb45f9dd00ea1ba5542fae1915ee9abd2735b46b92023",
+      "browser.passkey.lentPc": "d42509d904a75ba92996c4c28c7e4f46fe5b6aaddadd74201336976cfc16e702",
+      "browser.passkey.lendPc": "66cffdcf5c8111df9a6ee53dd6b829d9a413212fb1d10465c7a26bd5d8f8c397",
+      "browser.passkey.learnMore": "1445799c033a2d17e2bad5d8610879e71ff0d73a8a3c2b932b43ad0449dac3a1",
+      "browser.passkey.dismiss": "48845bff334a50a59aaecf499f28a7a24c3b4b891b8b18a9f1169ad8e8a6b261"
     },
     "zh": {
       "pro.fromPrice": "a48a04a457d60b08b54fc83e7a6c4584ffedb1e23621859084900c8521a3af7b",
