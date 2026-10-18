@@ -571,7 +571,8 @@ export function TeamLibraryPanel({
   const normalizedSearch = search.trim().toLowerCase();
   const visibleTeams = (catalog?.teams ?? []).filter((entry) => {
     if (!normalizedSearch) return true;
-    return `${entry.name} ${entry.summary} ${entry.category} ${entry.skills.join(" ")} ${entry.requires.apps.join(" ")}`
+    const copy = catalogCopy(entry);
+    return `${copy.name} ${copy.summary} ${entry.name} ${entry.summary} ${entry.category} ${entry.skills.join(" ")} ${entry.requires.apps.join(" ")}`
       .toLowerCase()
       .includes(normalizedSearch);
   });
