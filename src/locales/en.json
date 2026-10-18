@@ -1567,6 +1567,8 @@
   "sidebar.update.howDesktop": "Updated from the OpenMausBot app on the computer running this server",
   "sidebar.update.managed": "This server is kept up to date for you",
   "sidebar.update.checkFailed": "Couldn't check for updates — try again",
+  "sidebar.update.reloadPage": "Reload for v{version}",
+  "sidebar.update.pageVersion": "This page is still running v{version}",
   "sidebar.phone.checking": "Checking device status",
   "sidebar.phone.unavailable": "Device status unavailable",
   "sidebar.phone.off": "Remote access off",
