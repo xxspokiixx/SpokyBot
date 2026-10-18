@@ -407,6 +407,8 @@ test("the lent driver gets the host's system environment, never its credentials"
   const dir = await scratch(t);
   const saved = { ...process.env };
   t.after(() => { for (const key of Object.keys(process.env)) if (!(key in saved)) delete process.env[key]; Object.assign(process.env, saved); });
+  // Real folders: on Windows USERPROFILE is os.homedir(), which sharing resolves to keep the home out of reach.
+  for (const name of ["profile-home", "temp", "tmp"]) await mkdir(path.join(dir, name));
   Object.assign(process.env, { SystemRoot: "C:\\Windows", USERPROFILE: path.join(dir, "profile-home"), TEMP: path.join(dir, "temp"), TMP: path.join(dir, "tmp"), ANTHROPIC_API_KEY: "sk-ant-fixture", OMB_CONTROL_TOKEN: "fixture-token" });
   const connection = await environmentDriver(dir);
   const { results } = await lend(t, dir, {
