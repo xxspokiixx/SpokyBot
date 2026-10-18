@@ -104,6 +104,39 @@ you already have.
 
 If any step fails, everything the import created is removed again.
 
+## From Grok Bot
+
+A shared Grok Bot link (`https://x.ai/bot/<id>`) can become a Maus bot from
+**Templates → Import → From Grok Bot**. Pasting the link into the GitHub box,
+or opening `openmausbot://install?url=https://x.ai/bot/<id>`, does the same.
+
+1. Paste the link. Maus reads the public page and shows a card with the
+   bot's name, creator and description. That is all the public page holds:
+   its instructions, skills and routines are visible only inside Grok Bot.
+2. Press **Copy export prompt**, paste it into your own Grok Bot (the one you
+   added from the link, or made yourself), and paste its reply into the box.
+   The reply is one JSON block (`"format": "openmaus.grok/1"`).
+   [pi-grokbot-import](https://github.com/Shixuuu/pi-grokbot-import)'s
+   `grokbot-bundle/v1` files work too, pasted or dropped as a `.json` file.
+3. The usual preview opens. **Add** imports it like any shared team.
+
+What comes over: the name and description, the full standing instructions
+(cut at 24,000 bytes, with a note), skills (switched off), routines with a
+cron or a plain time such as "weekdays at 9am" (paused), the apps it used as
+connector requirements, and memories when you asked for them. Routines that
+start on an event (a Slack message, a GitHub event, an email) or whose
+schedule cannot be read are listed under **Left out** with their original
+text, so you can set them up by hand. The model, the computer, logins and MCP
+servers never come over; the bot uses your own engine and apps.
+
+Without Grok Bot, **Start from description** makes a bot from the public name
+and description alone, credited "Based on x.ai/bot/<id>".
+
+Maus only reads `https://x.ai/bot/<id>` (redirects must stay on x.ai, 20 s,
+2 MB) through `POST /api/team-library/grok` (admin scope). It never signs in
+anywhere and never opens `grokbot://` links. The mapping lives in
+`shared/grok-import.ts`.
+
 ## The file format
 
 `openmaus.package` version 2, defined in `shared/package-format.ts`, the one

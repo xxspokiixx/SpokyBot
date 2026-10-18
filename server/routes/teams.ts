@@ -30,7 +30,7 @@ import type { RoutineManager } from "../routines.ts";
 import { readSectionContext } from "../section-context.ts";
 import { sectionKey, type BotRecord, type GroupRecord, type Store } from "../store.ts";
 import { createTeamBackup, importTeamBackup } from "../team-backup.ts";
-import { fetchGithubTeam, fetchLibraryTeam, fetchTeamCatalog } from "../team-library.ts";
+import { fetchGithubTeam, fetchGrokTemplateCard, fetchLibraryTeam, fetchTeamCatalog } from "../team-library.ts";
 import { createTeamManifest, parseTeamManifest } from "../team-manifest.ts";
 import { PASS, type RouteHandler } from "./table.ts";
 
@@ -215,6 +215,21 @@ export function createTeamRoutes(deps: TeamRouteDeps): RouteHandler {
       } catch (error) {
         const status = (error as { status?: number }).status === 404 ? 404 : 400;
         return json(res, status, { error: error instanceof Error ? error.message : "The GitHub team could not be loaded" });
+      }
+    }
+    if (method === "POST" && path === "/api/team-library/grok") {
+      // The public card only (name, creator, description): the full setup comes from the person's own Grok Bot.
+      const body = await readBody(req);
+      if (typeof body.url !== "string" || !body.url.trim()) {
+        return json(res, 400, { error: "A Grok Bot share link is required" });
+      }
+      try {
+        return json(res, 200, await fetchGrokTemplateCard(body.url));
+      } catch (error) {
+        const status = (error as { status?: number }).status;
+        return json(res, status === 400 || status === 404 ? status : 502, {
+          error: error instanceof Error ? error.message : "The Grok Bot could not be loaded",
+        });
       }
     }
     if (method === "GET" && path === "/api/teams/scout") {

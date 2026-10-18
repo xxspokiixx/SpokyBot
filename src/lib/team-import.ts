@@ -1,6 +1,7 @@
 import { parse as parseYaml } from "yaml";
 import { parseTeamBackup, TEAM_BACKUP_CONTENTS } from "../../shared/team-backup";
 import { NEWER_PACKAGE_MESSAGE, PACKAGE_VERSION, parsePackageDocument, type PackageDocument } from "../../shared/package-format";
+import { grokExportToPackage, isGrokExport, parseGrokExport, type GrokLeftOut } from "../../shared/grok-import";
 
 export interface PendingTeamImport {
   manifest: unknown;
@@ -26,10 +27,31 @@ export interface PendingTeamImport {
   notes?: number;
   presets?: string[];
   library?: boolean;
+  /** The warnings list what a Grok Bot export could not carry. */
+  leftOut?: boolean;
+}
+
+export interface GrokPreviewOptions {
+  /** The x.ai/bot link the export came from, credited as the author's link. */
+  sourceUrl?: string;
+  /** For routines whose export named no zone; the computer's own by default. */
+  timeZone?: string;
+}
+
+const leftOutLine = (item: GrokLeftOut) =>
+  `${item.name}: ${item.reason}.${item.original ? ` It said: ${item.original.length > 2_000 ? `${item.original.slice(0, 1_999)}…` : item.original}` : ""}`;
+
+/** A Grok Bot export (pasted reply or file) as the package preview, with what was left out as warnings. */
+export function grokImportPreview(input: unknown, options: GrokPreviewOptions = {}): PendingTeamImport {
+  const timeZone = options.timeZone ?? Intl.DateTimeFormat().resolvedOptions().timeZone;
+  const { document, leftOut } = grokExportToPackage(parseGrokExport(input), { ...options, timeZone });
+  const preview = sharedTeamPreview(document, document);
+  return leftOut.length ? { ...preview, warnings: leftOut.map(leftOutLine), leftOut: true } : preview;
 }
 
 /** Client-side preview only; the server remains the trust boundary. */
 export function teamImportPreview(manifest: unknown): PendingTeamImport {
+  if (isGrokExport(manifest)) return grokImportPreview(manifest);
   if (typeof manifest === "string") manifest = markdownPackage(manifest);
   if (!manifest || typeof manifest !== "object" || Array.isArray(manifest)) {
     throw new Error("This file does not contain a team.");

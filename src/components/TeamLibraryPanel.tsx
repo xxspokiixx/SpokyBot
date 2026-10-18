@@ -7,33 +7,19 @@ import type { PackageDocument } from "../../shared/package-format";
 import type { Routine } from "@/lib/routines";
 import { api, useStore, type Bot, type Group } from "@/state/store";
 import {
-  ArrowLeft,
-  BookOpen,
-  CalendarClock,
-  NotebookPen,
-  Check,
-  Compass,
-  Crown,
-  ExternalLink,
-  FolderOpen,
-  Github,
-  Loader2,
-  MessageSquare,
-  Plug,
-  Search,
-  Share2,
-  UploadCloud,
-  Users,
-  X,
+  ArrowLeft, BookOpen, CalendarClock, NotebookPen, Check, Compass, Crown, ExternalLink, FolderOpen, Github, Loader2,
+  MessageSquare, Plug, Search, Share2, UploadCloud, Users, X,
 } from "lucide-react";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { catalogCopy, catalogMatches, type TeamCatalog, type TeamCatalogEntry } from "@/lib/team-catalog";
 
+import { GrokImportBox } from "./GrokImportBox";
 import { ShareTeamDialog } from "./ShareTeamDialog";
 import { OrgLibraryTab } from "./TeamLibraryPanelOrg";
 import { MAX_TEAM_BACKUP_BYTES } from "../../shared/team-backup";
 import { takeImportName } from "../../shared/import-name";
+import { grokShareIdFrom } from "../../shared/grok-import";
 const COMMUNITY_TEAMS_REPOSITORY = "https://github.com/milind-soni/openmausbot-teams";
 
 export interface TeamImportResult {
@@ -43,7 +29,7 @@ export interface TeamImportResult {
   connections?: number;
 }
 
-type ImportSource = "library" | "file" | "github";
+type ImportSource = "library" | "file" | "github" | "grok";
 type TeamTab = "org" | "explore" | "import" | "scout" | "share";
 
 interface ScoutResult {
@@ -122,7 +108,7 @@ export function TeamImportDetails({ pending, importedNames, org = false }: {
         </div>
       )}
       {Boolean(pending.warnings?.length) && <div className="mt-4 rounded-xl border border-hairline px-4 py-3 text-[12.5px] text-ink-secondary">
-        <div className="mb-2 font-medium text-ink">{t("templates.backupNotes")}</div>
+        <div className="mb-2 font-medium text-ink">{pending.leftOut ? t("grokImport.leftOut") : t("templates.backupNotes")}</div>
         {pending.warnings?.map((warning, index) => <p key={index}>{warning}</p>)}
       </div>}
       {(pending.kind === "package" || pending.kind === "backup") && (
@@ -228,6 +214,7 @@ export function TeamLibraryPanel({
   const [source, setSource] = useState<ImportSource>("file");
   const [githubUrl, setGithubUrl] = useState("");
   const [githubLoading, setGithubLoading] = useState(false);
+  const [grokLink, setGrokLink] = useState<string | null>(null);
   const [importing, setImporting] = useState(false);
   const [dragging, setDragging] = useState(false);
   const [search, setSearch] = useState("");
@@ -366,6 +353,7 @@ export function TeamLibraryPanel({
 
   const loadGithubUrl = async (requestedUrl: string) => {
     if (!requestedUrl.trim()) return;
+    if (grokShareIdFrom(requestedUrl)) return setGrokLink(requestedUrl.trim());
     setGithubLoading(true);
     setError("");
     try {
@@ -913,6 +901,7 @@ export function TeamLibraryPanel({
                       </div>
                     </div>
                   </div>
+                  <GrokImportBox link={grokLink} onPreview={(preview) => previewManifest(preview, "grok")} />
                   {error && <div role="alert" className="mt-4 rounded-lg bg-danger/10 px-3 py-2 text-[12.5px] text-danger">{error}</div>}
                 </div>
               )}
