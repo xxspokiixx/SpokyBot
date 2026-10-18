@@ -2362,7 +2362,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       showError(error);
       void api<SavedSnapshot>("/api/bots?messages=0").then((snapshot) => {
         const saved = savedStateAction(owner, snapshot);
-        if (saved?.type === "botPatched") rawDispatch({ ...saved, bot: withTaskWrites(saved.bot) });
+        if (saved?.type === "botPatched") rawDispatch({ ...saved, bot: withTaskWrites({ ...saved.bot, ...botPatchQueue.overlayFor(saved.bot.id) }) });
         else if (saved) rawDispatch(saved);
       }).catch(() => {});
     };

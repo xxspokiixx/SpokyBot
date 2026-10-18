@@ -107,13 +107,6 @@ export type TaskPatch = Partial<Pick<TaskRecord, typeof TASK_PATCH_FIELDS[number
 
 export type GroupTaskPatch = Partial<Pick<GroupTaskRecord, "title" | "pinned">> & { turnTimeoutMinutes?: number | null };
 
-const GROUP_TASK_PATCH_ACTIONS = { title: "the thread's name", pinned: "the thread's pin", turnTimeoutMinutes: "the thread's turn time limit" } as const;
-
-function groupTaskPatchAction(patch: GroupTaskPatch): string {
-  const fields = (Object.keys(GROUP_TASK_PATCH_ACTIONS) as (keyof GroupTaskPatch)[]).filter((key) => patch[key] !== undefined);
-  return fields.length === 1 ? GROUP_TASK_PATCH_ACTIONS[fields[0]!] : "the thread change";
-}
-
 function mirrorActiveGroupTask(group: GroupRecord, task: GroupTaskRecord): void {
   Object.assign(group, { threadId: task.threadId, pinnedCwd: task.pinnedCwd, pinnedMessageId: task.pinnedMessageId });
 }
@@ -1033,8 +1026,8 @@ export class Store {
       group.setupCompletedAt = setup?.completed ? createdAt : null;
       group.setupSkippedAt = null;
     }
+    saveRegistryFor("groups.json", dm ? "the new chat" : "the new room", () => this.saveGroups([group, ...this.groups]));
     this.groups.unshift(group);
-    this.saveGroups();
     this.emit({ type: "group", groupId: group.id });
     return group;
   }
@@ -1092,8 +1085,9 @@ export class Store {
   deleteGroup(id: string): boolean {
     const group = this.group(id);
     if (!group) return false;
-    this.groups = this.groups.filter((g) => g.id !== id);
-    this.saveGroups();
+    const remaining = this.groups.filter((g) => g.id !== id);
+    saveRegistryFor("groups.json", group.dm ? "the chat deletion" : "the room deletion", () => this.saveGroups(remaining));
+    this.groups = remaining;
     for (const threadId of new Set([group.threadId, ...(group.tasks ?? []).map((task) => task.threadId)])) {
       this.deleteThreadRecord(threadId);
     }
@@ -1192,7 +1186,7 @@ export class Store {
     const group = this.group(groupId);
     const task = this.groupTaskByThread(groupId, threadId);
     if (!group || !task) return null;
-    this.commitGroupChange(group, groupTaskPatchAction(patch), () => {
+    this.commitGroupChange(group, "the thread change", () => {
       if (patch.title !== undefined) task.title = patch.title.trim().slice(0, 80) || UNTITLED_TASK;
       if (patch.pinned) task.pinned = true;
       else if (patch.pinned === false) delete task.pinned;

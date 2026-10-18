@@ -225,6 +225,27 @@ describe("groups.json save failures", () => {
     expect(new Store(selection).groupTaskByThread(room.id, second.threadId)).toEqual(unchanged);
   });
 
+  it("does not show a room that was never saved", () => {
+    const store = new Store(selection);
+    const members = [store.createBot().id, store.createBot().id];
+    failNextGroupSave(store);
+
+    expect(() => store.createGroup("Never saved", members)).toThrow("Couldn't save the new room");
+    expect(store.groups.map((group) => group.name)).not.toContain("Never saved");
+  });
+
+  it("keeps a room and its conversations when its deletion cannot be saved", () => {
+    const { store, room, second, changes } = roomWithTwoThreads();
+    store.appendMessage(second.threadId, { role: "user", kind: "text", text: "Keep this conversation" });
+    changes.mockClear();
+    failNextGroupSave(store);
+
+    expect(() => store.deleteGroup(room.id)).toThrow("Couldn't save the room deletion");
+    expect(store.group(room.id)).toBe(room);
+    expect(changes).not.toHaveBeenCalled();
+    expect(store.messagesFor(second.threadId).map((message) => message.text)).toEqual(["Keep this conversation"]);
+  });
+
   it("restores a room's settings and its active thread's pin when they cannot be saved", () => {
     const { store, room, second, changes } = roomWithTwoThreads();
     const unchanged = structuredClone(room);
