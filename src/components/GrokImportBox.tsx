@@ -172,6 +172,9 @@ export function GrokImportBox({ link, onPreview, bare }: { link: string | null; 
       setCard(answer);
       loaded.current = value.trim();
       if (answer.export) preview(() => grokImportPreview(answer.export, { sourceUrl: answer.url }));
+      // A refused or expired sign-in is forgotten by the server: show that, not the stale "Signed in".
+      // SAFETY: this endpoint is owned by the app and returns CursorStatus.
+      if (answer.exportNote) void api("/api/team-library/cursor").then((status) => setCursor(status as CursorStatus), () => {});
     } catch (cause) {
       setCard(null);
       setError(errorText(cause));

@@ -20,6 +20,8 @@ import { addHeldSecretScrubber, HELD_SECRET_MASK } from "./redact.ts";
 export const CURSOR_API = "https://api2.cursor.sh";
 export const CURSOR_LOGIN_PAGE = "https://cursor.com/loginDeepControl";
 export const CURSOR_SESSION_FILE = "cursor-session.json";
+/** The public client id Cursor's own CLI uses for its browser sign-in and token refresh. */
+const CURSOR_CLI_CLIENT_ID = "KbZUR41cY7W6zRSdpSUJ7I7mLYBKOCmB";
 export const IMPORT_DETAILS_PATH = "/aiserver.v1.GrokBotService/GetGrokBotTemplateImportDetails";
 const SIGN_IN_WINDOW_MS = 10 * 60_000;
 const TIMEOUT_MS = 20_000;
@@ -111,7 +113,19 @@ function recipeUrl(value: unknown): URL | null {
   }
 }
 
-export function createCursorSession(options: { dataDir: string; fetcher?: typeof fetch; now?: () => number }): CursorSession {
+/** Cursor's own short reason for refusing, for the note and the log: its error code and message, never a token. */
+function cursorReason(details: unknown, text: string): string {
+  const parts: string[] = [];
+  if (isRecord(details)) {
+    for (const key of ["code", "message"]) if (typeof details[key] === "string") parts.push(details[key] as string);
+  }
+  const marker = text.match(/ERROR_[A-Z_]+/);
+  if (marker && !parts.some((part) => part.includes(marker[0]))) parts.push(marker[0]);
+  return parts.join(" · ").replace(/[A-Za-z0-9_-]{24,}\.[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}/g, "[token]").slice(0, 160);
+}
+
+export function createCursorSession(options: { dataDir: string; fetcher?: typeof fetch; now?: () => number; log?: (line: string) => void }): CursorSession {
+  const log = options.log ?? ((line: string) => console.log(line));
   const file = join(options.dataDir, CURSOR_SESSION_FILE);
   const now = options.now ?? Date.now;
   const fetcher = () => options.fetcher ?? fetch;
@@ -119,26 +133,32 @@ export function createCursorSession(options: { dataDir: string; fetcher?: typeof
   let lastError = "";
   let polling: Promise<void> | null = null;
 
-  const readToken = (): string | null => {
+  const readSaved = (): { accessToken: string | null; refreshToken: string | null } => {
     try {
       const saved: unknown = JSON.parse(readFileSync(file, "utf8"));
-      return isRecord(saved) && typeof saved.accessToken === "string" && saved.accessToken ? saved.accessToken : null;
+      const text = (key: string) => (isRecord(saved) && typeof saved[key] === "string" && saved[key] ? saved[key] as string : null);
+      return { accessToken: text("accessToken"), refreshToken: text("refreshToken") };
     } catch {
-      return null;
+      return { accessToken: null, refreshToken: null };
     }
   };
-  let token = readToken();
+  let { accessToken: token, refreshToken: refresh } = readSaved();
   // A token that slips into any text the app redacts (logs, tool output) is masked by value.
-  addHeldSecretScrubber((text) => (token && text.includes(token) ? text.split(token).join(HELD_SECRET_MASK) : text));
+  addHeldSecretScrubber((text) => {
+    for (const secret of [token, refresh]) if (secret && text.includes(secret)) text = text.split(secret).join(HELD_SECRET_MASK);
+    return text;
+  });
 
   const forget = () => {
     token = null;
+    refresh = null;
     rmSync(file, { force: true });
   };
-  const save = (accessToken: string) => {
+  const save = (accessToken: string, refreshToken: string | null) => {
     mkdirSync(options.dataDir, { recursive: true, mode: 0o700 });
-    writeFileAtomic(file, `${JSON.stringify({ version: 1, accessToken, savedAt: now() })}\n`, { mode: 0o600 });
+    writeFileAtomic(file, `${JSON.stringify({ version: 1, accessToken, ...(refreshToken ? { refreshToken } : {}), savedAt: now() })}\n`, { mode: 0o600 });
     token = accessToken;
+    refresh = refreshToken;
   };
   const signedIn = () => {
     if (!token) return false;
@@ -170,8 +190,15 @@ export function createCursorSession(options: { dataDir: string; fetcher?: typeof
     }
     let response: Response;
     try {
-      const query = new URLSearchParams({ uuid: sign.uuid, verifier: sign.verifier });
-      response = await cursorFetch(`/auth/poll?${query}`, { method: "GET", headers: { "x-cursor-client-type": "cli" } }, false);
+      response = await cursorFetch("/auth/poll", {
+        method: "POST",
+        headers: { "content-type": "application/json", "x-cursor-client-type": "cli" },
+        body: JSON.stringify({ uuid: sign.uuid, verifier: sign.verifier }),
+      }, false);
+      if (response.status === 404 || response.status === 405) {
+        const query = new URLSearchParams({ uuid: sign.uuid, verifier: sign.verifier });
+        response = await cursorFetch(`/auth/poll?${query}`, { method: "GET", headers: { "x-cursor-client-type": "cli" } }, false);
+      }
     } catch {
       return; // a network blip: keep waiting
     }
@@ -184,12 +211,34 @@ export function createCursorSession(options: { dataDir: string; fetcher?: typeof
     }
     const body = parseJson(await readCapped(response).catch(() => ""));
     const accessToken = isRecord(body) ? body.accessToken ?? body.access_token : undefined;
+    const refreshToken = isRecord(body) ? body.refreshToken ?? body.refresh_token : undefined;
     if (typeof accessToken !== "string" || !accessToken) {
       lastError = "Cursor's answer had no sign-in in it. Try again.";
       return;
     }
-    save(accessToken);
+    save(accessToken, typeof refreshToken === "string" && refreshToken ? refreshToken : null);
     lastError = "";
+  };
+
+  /** One refresh with the refresh token Cursor gave at sign-in, as Cursor's CLI does; true when a new token is saved. */
+  const renew = async (): Promise<boolean> => {
+    if (!refresh) return false;
+    try {
+      const response = await cursorFetch("/oauth/token", {
+        method: "POST",
+        headers: { "content-type": "application/json", "x-cursor-client-type": "cli" },
+        body: JSON.stringify({ grant_type: "refresh_token", client_id: CURSOR_CLI_CLIENT_ID, refresh_token: refresh }),
+      }, false);
+      if (!response.ok) return false;
+      const body = parseJson(await readCapped(response));
+      const accessToken = isRecord(body) ? body.accessToken ?? body.access_token : undefined;
+      const refreshToken = isRecord(body) ? body.refreshToken ?? body.refresh_token : undefined;
+      if (typeof accessToken !== "string" || !accessToken) return false;
+      save(accessToken, typeof refreshToken === "string" && refreshToken ? refreshToken : refresh);
+      return true;
+    } catch {
+      return false;
+    }
   };
 
   return {
@@ -211,24 +260,32 @@ export function createCursorSession(options: { dataDir: string; fetcher?: typeof
     },
     async fetchTemplate(card) {
       if (!signedIn()) throw new CursorFallback(lastError || "Sign in with Cursor to import everything at once.");
-      let response: Response;
-      try {
-        response = await cursorFetch(IMPORT_DETAILS_PATH, {
-          method: "POST",
-          headers: { "content-type": "application/json", "connect-protocol-version": "1" },
-          body: JSON.stringify({ shareId: card.shareId }),
-        }, true);
-      } catch (error) {
-        if (error instanceof CursorFallback) throw error;
-        throw new CursorFallback("Cursor could not be reached.");
-      }
-      const text = await readCapped(response).catch((error: unknown) => {
-        throw error instanceof CursorFallback ? error : new CursorFallback("Cursor could not be reached.");
-      });
-      const details = parseJson(text);
-      if (response.status === 401 || (isRecord(details) && details.code === "unauthenticated") || text.includes("ERROR_NOT_LOGGED_IN")) {
+      const ask = async () => {
+        let response: Response;
+        try {
+          response = await cursorFetch(IMPORT_DETAILS_PATH, {
+            method: "POST",
+            headers: { "content-type": "application/json", "connect-protocol-version": "1" },
+            body: JSON.stringify({ shareId: card.shareId }),
+          }, true);
+        } catch (error) {
+          if (error instanceof CursorFallback) throw error;
+          throw new CursorFallback("Cursor could not be reached.");
+        }
+        const text = await readCapped(response).catch((error: unknown) => {
+          throw error instanceof CursorFallback ? error : new CursorFallback("Cursor could not be reached.");
+        });
+        const details = parseJson(text);
+        const refused = response.status === 401 || (isRecord(details) && details.code === "unauthenticated") || text.includes("ERROR_NOT_LOGGED_IN");
+        return { response, text, details, refused };
+      };
+      let { response, text, details, refused } = await ask();
+      if (refused && (await renew())) ({ response, text, details, refused } = await ask());
+      if (refused) {
+        const reason = cursorReason(details, text);
+        log(`cursor: template details refused (HTTP ${response.status}${reason ? `: ${reason}` : ""})`);
         forget();
-        throw new CursorFallback("Your Cursor sign-in has expired. Sign in again.");
+        throw new CursorFallback(`Cursor refused the sign-in (HTTP ${response.status}${reason ? `: ${reason}` : ""}). Sign in again.`);
       }
       if (response.status === 404) throw new CursorFallback("Cursor does not share this template's setup.");
       if (!response.ok) throw new CursorFallback(`Cursor could not share this template's setup (HTTP ${response.status}).`);

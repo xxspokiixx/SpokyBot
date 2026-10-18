@@ -44,8 +44,9 @@ function harness(answer: (call: Call) => Response | Promise<Response>, start = 1
     calls.push(call);
     return answer(call);
   }) as unknown as typeof fetch;
-  const session = createCursorSession({ dataDir, fetcher, now: () => clock });
-  return { session, calls, dataDir, file: join(dataDir, CURSOR_SESSION_FILE), tick: (ms: number) => { clock += ms; } };
+  const logs: string[] = [];
+  const session = createCursorSession({ dataDir, fetcher, now: () => clock, log: (line) => logs.push(line) });
+  return { session, calls, logs, dataDir, file: join(dataDir, CURSOR_SESSION_FILE), tick: (ms: number) => { clock += ms; } };
 }
 const header = (call: Call, name: string) => new Headers(call.init.headers).get(name);
 
@@ -56,7 +57,7 @@ async function signIn(h: ReturnType<typeof harness>) {
 
 /** A Cursor that approves the sign-in, then serves import details and the recipe download. */
 const cursorServer = (overrides: { details?: (call: Call) => Response; blob?: (call: Call) => Response } = {}) => (call: Call) => {
-  if (call.url.startsWith("https://api2.cursor.sh/auth/poll?")) return json({ accessToken: TOKEN, refreshToken: "refresh-value" });
+  if (call.url.startsWith("https://api2.cursor.sh/auth/poll")) return json({ accessToken: TOKEN, refreshToken: "refresh-value" });
   if (call.url === "https://api2.cursor.sh/aiserver.v1.GrokBotService/GetGrokBotTemplateImportDetails") {
     return overrides.details?.(call) ?? json({ blobGetUrl: "https://blobs.cursor-cdn.example/recipe.json?sig=abc" });
   }
@@ -86,12 +87,14 @@ describe("Cursor sign-in", () => {
     const status = await h.session.status();
     expect(status).toEqual({ signedIn: true, waiting: false });
     expect(JSON.stringify(status)).not.toContain(TOKEN);
-    expect(h.calls).toHaveLength(2);
+    // Not approved yet: the POST poll, then the CLI's GET fallback; approved: the POST answers.
+    expect(h.calls.map((call) => call.init.method)).toEqual(["POST", "GET", "POST"]);
     for (const call of h.calls) {
       const poll = new URL(call.url);
       expect(poll.origin + poll.pathname).toBe("https://api2.cursor.sh/auth/poll");
-      expect(poll.searchParams.get("uuid")).toBe(new URL(url).searchParams.get("uuid"));
-      expect(createHash("sha256").update(poll.searchParams.get("verifier")!).digest("base64url")).toBe(challenge);
+      const sent = call.init.method === "POST" ? JSON.parse(String(call.init.body)) : Object.fromEntries(poll.searchParams);
+      expect(sent.uuid).toBe(new URL(url).searchParams.get("uuid"));
+      expect(createHash("sha256").update(sent.verifier).digest("base64url")).toBe(challenge);
       expect(header(call, "x-cursor-client-type")).toBe("cli");
       expect(header(call, "authorization")).toBeNull();
       expect(call.init.redirect).toBe("error");
@@ -100,7 +103,7 @@ describe("Cursor sign-in", () => {
     if (process.platform !== "win32") expect(statSync(h.file).mode & 0o777).toBe(0o600);
     // Once signed in, a status check calls nobody.
     await h.session.status();
-    expect(h.calls).toHaveLength(2);
+    expect(h.calls).toHaveLength(3);
   });
 
   it("gives up after ten minutes, and says so when Cursor refuses", async () => {
@@ -187,7 +190,11 @@ describe("Cursor template import", () => {
   it("falls back with one line on 401, a bad shape, a failed download or no network", async () => {
     const expired = harness(cursorServer({ details: () => json({ code: "unauthenticated", message: "ERROR_NOT_LOGGED_IN" }, 401) }));
     await signIn(expired);
-    await expect(expired.session.fetchTemplate(card)).rejects.toThrow(new CursorFallback("Your Cursor sign-in has expired. Sign in again."));
+    // Cursor's own reason is shown and logged, never a token; the refresh was tried once (it failed: no route).
+    await expect(expired.session.fetchTemplate(card)).rejects.toThrow(new CursorFallback("Cursor refused the sign-in (HTTP 401: unauthenticated · ERROR_NOT_LOGGED_IN). Sign in again."));
+    expect(expired.calls.filter((call) => call.url.endsWith("/oauth/token"))).toHaveLength(1);
+    expect(expired.logs.join("\n")).toContain("cursor: template details refused (HTTP 401: unauthenticated · ERROR_NOT_LOGGED_IN)");
+    expect(expired.logs.join("\n")).not.toContain(TOKEN);
     expect(existsSync(expired.file)).toBe(false);
     expect(await expired.session.status()).toMatchObject({ signedIn: false });
 
@@ -209,6 +216,29 @@ describe("Cursor template import", () => {
     });
     await signIn(offline);
     await expect(offline.session.fetchTemplate(card)).rejects.toThrow("Cursor could not be reached.");
+  });
+
+  it("refreshes the token once with the refresh token from sign-in, then asks again", async () => {
+    const FRESH = jwt(4_102_444_801);
+    const h = harness((call) => {
+      if (call.url.startsWith("https://api2.cursor.sh/auth/poll")) return json({ accessToken: TOKEN, refreshToken: "refresh-value" });
+      if (call.url === "https://api2.cursor.sh/oauth/token") return json({ access_token: FRESH, refresh_token: "refresh-2" });
+      if (call.url.endsWith("/GetGrokBotTemplateImportDetails")) {
+        return header(call, "authorization") === `Bearer ${FRESH}` ? json({ blobGetUrl: "https://blobs.cursor-cdn.example/recipe.json?sig=abc" }) : json({ code: "unauthenticated" }, 401);
+      }
+      if (call.url.startsWith("https://blobs.cursor-cdn.example/")) return json(recipe);
+      return json({}, 500);
+    });
+    await signIn(h);
+    expect(JSON.parse(readFileSync(h.file, "utf8")).refreshToken).toBe("refresh-value");
+    await expect(h.session.fetchTemplate(card)).resolves.toBeTruthy();
+    const refresh = h.calls.filter((call) => call.url === "https://api2.cursor.sh/oauth/token");
+    expect(refresh).toHaveLength(1);
+    expect(JSON.parse(String(refresh[0]!.init.body))).toEqual({ grant_type: "refresh_token", client_id: "KbZUR41cY7W6zRSdpSUJ7I7mLYBKOCmB", refresh_token: "refresh-value" });
+    expect(header(refresh[0]!, "authorization")).toBeNull();
+    expect(h.calls.filter((call) => call.url.endsWith("/GetGrokBotTemplateImportDetails"))).toHaveLength(2);
+    expect(JSON.parse(readFileSync(h.file, "utf8"))).toMatchObject({ accessToken: FRESH, refreshToken: "refresh-2" });
+    expect(redactSecretsInText(`a refresh-2 b`)).not.toContain("refresh-2");
   });
 
   it("takes an inline recipe or a grokbot-bundle/v1 straight from the details", async () => {
