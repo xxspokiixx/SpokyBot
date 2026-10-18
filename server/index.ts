@@ -14133,7 +14133,7 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
       if (action === "poll") return json(res, 200, { job: await sharedComputers.poll(id, auth.session.id, secret, responseGone(res)) });
       if (action === "lease") return json(res, 200, { active: sharedComputers.liveJob(id, auth.session.id, secret, String(body?.jobId)) });
       if (action === "result") sharedComputers.complete(id, auth.session.id, secret, String(body?.jobId), body?.result);
-      if (action === "disconnect") sharedComputers.disconnect(id, auth.session.id, secret);
+      if (action === "disconnect") sharedComputers.disconnect(id, auth.session.id, secret, body?.paused === true);
       return json(res, 200, { ok: true });
     }
     if (method === "GET" && path === "/api/auth/sessions") {

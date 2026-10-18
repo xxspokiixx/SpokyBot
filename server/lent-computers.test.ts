@@ -2,13 +2,13 @@ import { randomUUID } from "node:crypto";
 import { mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { awayNotice, deviceWord, LentComputers } from "./lent-computers.ts";
 import { SharedComputers, sharedComputerRegistration } from "./shared-computers.ts";
 
 const dirs: string[] = [];
-afterEach(() => { for (const dir of dirs.splice(0)) rmSync(dir, { recursive: true, force: true }); });
+afterEach(() => { vi.useRealTimers(); for (const dir of dirs.splice(0)) rmSync(dir, { recursive: true, force: true }); });
 const file = () => { const dir = mkdtempSync(join(tmpdir(), "omb-lent-")); dirs.push(dir); return join(dir, "lent-computers.json"); };
 const secret = "a".repeat(64);
 const lend = (extra: Record<string, unknown> = {}) => ({ id: randomUUID(), name: "ASH-PC", environmentId: randomUUID(),
@@ -68,6 +68,8 @@ describe("the shared-computer registry with that memory", () => {
   });
 
   it("tells a bot a lent PC is offline by name and since when, and that a stopped one is no longer lent", async () => {
+    // A request first waits up to 15 s for a computer seen this recently to reconnect: run that wait on fake time.
+    vi.useFakeTimers();
     let live = true;
     const path = file();
     const broker = new SharedComputers(() => live, new LentComputers(path));
@@ -77,8 +79,10 @@ describe("the shared-computer registry with that memory", () => {
     expect(broker.known("cloud-home")).toEqual([expect.objectContaining({ id: pc.id, name: "ASH-PC", platform: "win32", online: true, lent: true, scopes: { folders: 1, terminal: false, screen: true } })]);
     live = false;
     expect(broker.away("cloud-home").say).toMatch(/^Their PC ASH-PC is lent to My Cloud but offline \(last online \d{4}-\d\d-\d\d \d\d:\d\d UTC\)/u);
-    await expect(broker.request({ computer_id: pc.id, action: "computer_tools" }, "cloud-home", () => true))
+    const offline = expect(broker.request({ computer_id: pc.id, action: "computer_tools" }, "cloud-home", () => true))
       .rejects.toThrow("ASH-PC is offline: OpenMausBot on that PC is closed, or the PC is asleep or off. Ask them to open it; it reconnects by itself.");
+    await vi.advanceTimersByTimeAsync(15_250);
+    await offline;
     // A restarted server has no registrations, and still knows.
     const restarted = new SharedComputers(() => false, new LentComputers(path));
     expect(restarted.known("cloud-home")).toEqual([expect.objectContaining({ name: "ASH-PC", online: false, lent: true })]);
@@ -88,6 +92,19 @@ describe("the shared-computer registry with that memory", () => {
     expect(broker.known("cloud-home")).toEqual([expect.objectContaining({ lent: false, online: false })]);
     expect(broker.away("cloud-home").say).toMatch(/^Their PC ASH-PC is no longer lent to My Cloud/u);
     expect(broker.away(null)).toEqual({});
+    broker.close();
+  });
+
+  it("keeps a paused computer lent: it reads as offline, never as turned off, and an older desktop's disconnect still stops it", () => {
+    const broker = new SharedComputers(() => true, new LentComputers(file()));
+    const pc = lend({ platform: "win32" });
+    broker.register(pc, { session: "s1", person: "cloud-home" }, secret);
+    broker.disconnect(pc.id, "s1", secret, true);
+    expect(broker.known("cloud-home")).toEqual([expect.objectContaining({ lent: true, online: false })]);
+    expect(broker.away("cloud-home").say).toMatch(/^Their PC ASH-PC is lent to My Cloud but offline/u);
+    broker.register(pc, { session: "s1", person: "cloud-home" }, secret);
+    broker.disconnect(pc.id, "s1", secret);
+    expect(broker.known("cloud-home")).toEqual([expect.objectContaining({ lent: false })]);
     broker.close();
   });
 });

@@ -210,9 +210,11 @@ export class SharedComputers {
     this.lent?.used(entry.owner.person, id);
     this.finish(entry, job, job.active() ? null : failure("The requesting turn ended"), result);
   }
-  disconnect(id: string, session: string, secret: string) {
+  /** `paused`: the desktop still lends and comes back by itself (waiting for its Cloud sign-in), so it reads as offline,
+   * not as no longer lent. Older desktops never send it. */
+  disconnect(id: string, session: string, secret: string, paused = false) {
     const entry = this.authorize(id, session, secret);
-    this.lent?.stopped(entry.owner.person, id);
+    if (paused) this.lent?.seen(entry.owner.person, id); else this.lent?.stopped(entry.owner.person, id);
     this.computers.delete(SharedComputers.key(session, id)); entry.wake?.();
     for (const job of entry.jobs.values()) this.finish(entry, job, failure("Computer disconnected. An in-flight action may have completed; inspect before retrying."));
   }

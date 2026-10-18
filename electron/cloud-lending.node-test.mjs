@@ -36,7 +36,7 @@ async function scratch(t) {
 
 function cloudHome({ cloudHome = true, scopes = ["admin", "client"], details = false } = {}) {
   const json = (value, status = 200) => ({ ok: status < 400, status, body: (async function* () { yield Buffer.from(JSON.stringify(value)); })() });
-  const state = { paired: true, environmentId: randomUUID(), sessionId: randomUUID(), connects: [], disconnects: 0, results: [], queue: [], waiting: null };
+  const state = { paired: true, environmentId: randomUUID(), sessionId: randomUUID(), connects: [], disconnects: 0, disconnectBodies: [], results: [], queue: [], waiting: null };
   const nextJob = () => new Promise(resolve => { state.waiting = resolve; });
   state.push = operation => {
     const job = { id: randomUUID(), operation: { computer_id: state.connects.at(-1).id, ...operation } };
@@ -55,7 +55,7 @@ function cloudHome({ cloudHome = true, scopes = ["admin", "client"], details = f
     }
     if (route.endsWith("/lease")) return json({ active: true });
     if (route.endsWith("/result")) { state.results.push(body.result); return json({ ok: true }); }
-    if (route.endsWith("/disconnect")) { state.disconnects++; return json({ ok: true }); }
+    if (route.endsWith("/disconnect")) { state.disconnects++; state.disconnectBodies.push(body); return json({ ok: true }); }
     throw new Error(`no route ${route}`);
   };
   return state;
@@ -236,6 +236,8 @@ test("another Cloud account or another machine ends lending; a sign-in that need
     sharing.cloudChanged();
     assert.deepEqual([sharing.cloudState(env).enabled, sharing.cloudState(env).connected, sharing.cloudState(env).problem], [true, false, "paused"]);
     assert.ok(home.disconnects >= 1, "the Cloud stops seeing it while paused");
+    await until(() => home.disconnectBodies.length >= 1, "the pause to reach the Cloud");
+    assert.ok(home.disconnectBodies.every(body => body.paused === true), "a pause tells the Cloud it is still lent");
     setCloud({ status: "connected", accountId: "acct_1", origin: ORIGIN });
     sharing.cloudChanged();
     await connected(sharing, 2, home);
@@ -254,6 +256,7 @@ test("Stop lending is instant: the Cloud is told, running work is cancelled, and
   assert.equal(stopped.enabled, false);
   await until(() => !alive(pid), "the driver transport to be closed");
   await until(() => home.disconnects >= 1, "the Cloud to be told");
+  assert.deepEqual(home.disconnectBodies, [{}], "Stop lending is no pause");
   home.push({ action: "computer_call", tool_name: "click", arguments: {} });
   await delay(300);
   assert.equal((await readFile(driver.calls, "utf8")).trim(), "drag");

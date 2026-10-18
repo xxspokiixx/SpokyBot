@@ -292,7 +292,7 @@ export function createComputerSharing({ file, fetch: fetchImpl, environments, cu
           }
         } catch (error) {
           if (error instanceof Paused) {
-            if (running.get(env.id) === live) disconnect(env, grant);
+            if (running.get(env.id) === live) disconnect(env, grant, true);
             status.set(env.id, { connected: false, problem: "paused" });
             changed();
             break;
@@ -314,9 +314,10 @@ export function createComputerSharing({ file, fetch: fetchImpl, environments, cu
     const grant = records[id];
     return { enabled: grant?.enabled === true, folders: Array.isArray(grant?.folders) ? grant.folders : [], terminal: grant?.terminal === true, computer: grant?.computer === true, ...status.get(id) };
   };
-  const disconnect = (env, grant) => {
+  // `paused`: lending waits (for the Cloud sign-in, say) and resumes by itself, so the server keeps it as lent, not stopped.
+  const disconnect = (env, grant, paused = false) => {
     stop(env.id);
-    if (grant?.secret) void request(env, `/api/shared-computers/${grant.id}/disconnect`, {}, undefined, grant.secret).catch(() => {});
+    if (grant?.secret) void request(env, `/api/shared-computers/${grant.id}/disconnect`, paused ? { paused: true } : {}, undefined, grant.secret).catch(() => {});
   };
   // One truthful state for My Cloud, whichever control lent to it: a grant from Settings → Servers → Computer access
   // (kept from before that panel left My Cloud's entry) is lending too, terminal and all, and shows as such.
@@ -401,7 +402,7 @@ export function createComputerSharing({ file, fetch: fetchImpl, environments, cu
         if (!grant?.cloud || grant.enabled !== true) continue;
         const verdict = cloudLendingVerdict(grant.cloud, cloud(), env);
         if (verdict.stop) endCloud(env, verdict.stop);
-        else if (verdict.pause) { if (running.has(env.id)) { disconnect(env, grant); status.set(env.id, { connected: false, problem: "paused" }); changed(); } }
+        else if (verdict.pause) { if (running.has(env.id)) { disconnect(env, grant, true); status.set(env.id, { connected: false, problem: "paused" }); changed(); } }
         else if (!running.has(env.id) && validRecord(grant)) run(env, grant);
       }
     },
