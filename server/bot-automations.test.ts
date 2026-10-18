@@ -2,7 +2,7 @@ import { describe, expect, it, vi } from "vitest";
 
 import { tieAutomationsToBots } from "./bot-automations.ts";
 
-function fixture(bots: string[], owners: { routines?: string[]; runs?: string[]; webhooks?: string[] }) {
+function fixture(bots: string[], owners: { routines?: string[]; runs?: string[]; webhooks?: string[]; apps?: string[] }) {
   let listener: ((change: { type: string; botId?: string }) => void) | undefined;
   const store = {
     bots: bots.map((id) => ({ id })),
@@ -14,6 +14,7 @@ function fixture(bots: string[], owners: { routines?: string[]; runs?: string[];
       removeForBot: vi.fn(), listRoutines: () => (owners.routines ?? []).map((botId) => ({ botId })), listRuns: () => (owners.runs ?? []).map((botId) => ({ botId })),
     },
     webhooks: { removeForBot: vi.fn(), list: () => (owners.webhooks ?? []).map((botId) => ({ botId })) },
+    apps: { remove: vi.fn(async (_id: string) => true), list: () => (owners.apps ?? []).map((botId, index) => ({ id: `app-${index}`, botId })) },
   };
   tieAutomationsToBots(store, automations as never);
   return { automations, emit: (change: { type: string; botId?: string }) => listener!(change) };
@@ -41,6 +42,18 @@ describe("a bot's automations live and die with it", () => {
     expect(automations.routines.removeForBot).toHaveBeenCalledWith("scout");
     expect(automations.webhooks.removeForBot).toHaveBeenCalledWith("scout");
     expect(error).toHaveBeenCalledTimes(1);
+    error.mockRestore();
+  });
+
+  it("removes a deleted bot's app events too, at start and on delete, and a failed removal is only logged", async () => {
+    const { automations, emit } = fixture(["scout", "writer"], { apps: ["gone", "scout", "writer", "scout"] });
+    expect(automations.apps.remove.mock.calls).toEqual([["app-0"]]);
+    automations.apps.remove.mockClear();
+    automations.apps.remove.mockRejectedValueOnce(new Error("unreadable app-triggers.json"));
+    const error = vi.spyOn(console, "error").mockImplementation(() => {});
+    emit({ type: "bot.deleted", botId: "scout" });
+    expect(automations.apps.remove.mock.calls).toEqual([["app-1"], ["app-3"]]);
+    await vi.waitFor(() => expect(error).toHaveBeenCalledTimes(1));
     error.mockRestore();
   });
 });
