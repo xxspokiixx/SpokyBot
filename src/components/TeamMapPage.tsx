@@ -21,6 +21,7 @@ import { TeamMemoryDialog } from "./TeamMemoryDialog";
 import { ConfirmDialog } from "./ConfirmDialog";
 import { t } from "@/lib/i18n";
 import { CanvasComputers } from "./CanvasComputers";
+import { useMapComputers, useShowComputers } from "@/lib/map-computers";
 import { openBotSettings } from "./bot-panel/panel-link";
 import type { TeamComputer } from "../../shared/team-computer";
 
@@ -285,6 +286,9 @@ export function TeamMapPage() {
     return buildTeamMapSections(bots, names).sort((a, b) => order(a.key) - order(b.key));
   }, [bots, state.sections, state.groups]);
   const edges = useMemo(() => buildTeamMapEdges(bots, snapshot), [bots, snapshot]);
+  const anyComputer = bots.some((bot) => bot.computer === "cloud" && bot.cloudBackend !== "vps") || computers.some((computer) => computer.section !== null);
+  const { show: showComputers, loaded: computersChoiceLoaded, choose: setShowComputers } = useShowComputers(anyComputer);
+  const mapComputers = useMapComputers(!remoteClient && computersChoiceLoaded && showComputers);
 
   const refresh = useCallback(async () => {
     try {
@@ -338,6 +342,13 @@ export function TeamMapPage() {
           <p className="mt-1 text-[12px] text-ink-secondary">{t("canvas.description")}</p>
         </div>
         {!remoteClient && <div className="flex items-center gap-2">
+          <button onClick={() => setShowComputers(!showComputers)} aria-pressed={showComputers} title={t("canvas.showComputersHint")}
+            className={cn("flex items-center gap-2 rounded-lg border px-3 py-2 text-[12px] font-medium transition-colors", showComputers ? "border-accent/40 bg-accent/10 text-ink" : "border-hairline/60 bg-panel text-ink-secondary hover:bg-control hover:text-ink")}>
+            <span aria-hidden className={cn("relative h-4 w-7 shrink-0 rounded-full transition-colors", showComputers ? "bg-accent" : "bg-control")}>
+              <span className={cn("absolute top-0.5 size-3 rounded-full bg-white shadow-sm transition-[left]", showComputers ? "left-3.5" : "left-0.5")} />
+            </span>
+            {t("canvas.showComputers")}
+          </button>
           <button onClick={() => setComputersOpen((value) => !value)} aria-label={t("canvas.computers")} aria-expanded={computersOpen} className="rounded-lg p-2 text-ink-secondary hover:bg-control hover:text-ink"><Monitor size={17} /></button>
           <details className="relative" onBlur={(event) => { if (!event.currentTarget.contains(event.relatedTarget)) event.currentTarget.removeAttribute("open"); }} onKeyDown={(event) => {
             if (event.key === "Escape") { event.currentTarget.removeAttribute("open"); event.currentTarget.querySelector("summary")?.focus(); }
@@ -361,6 +372,8 @@ export function TeamMapPage() {
       <TeamCanvas sections={sections} canManage={!remoteClient} onMove={requestMove}
         connectedBotIds={state.settingsOpen ? edges.flatMap((edge) => edge.sourceBotId === state.selectedId ? [edge.targetBotId] : edge.targetBotId === state.selectedId ? [edge.sourceBotId] : []) : []}
         onComputer={(bot) => openBotSettings(dispatch, "access", { botId: bot.id })}
+        computers={showComputers && computersChoiceLoaded && !remoteClient ? mapComputers.computers : undefined} computerFrames={mapComputers.frames}
+        onOpenComputer={(computer) => computer.kind === "team" ? setComputersOpen(true) : dispatch({ type: "toggleComputer", open: true, botId: computer.id })}
         teamComputers={Object.fromEntries(computers.filter((computer) => computer.section !== null).map((computer) => [computer.section!, { name: computer.name, state: computer.state }]))}
         onTeamComputer={() => setComputersOpen(true)}
         onComputerDrop={(id, section) => { if (!remoteClient) { setComputersOpen(true); setComputerDrop({ id, section }); } }}

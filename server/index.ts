@@ -451,7 +451,7 @@ import { browserEgress } from "./browser/egress/registry.ts";
 import { browserEngineEncryptionKey, clearBrowserSessionState, browserEngineStatus, browserSessionId } from "./browser-engine.ts";
 import { chromeLauncher } from "./browser/chrome/launcher.ts";
 import { createBrowserHost } from "./host/browser.ts";
-import { createScreenFrameSource, type ScreenCapture } from "./screen-frame-source.ts";
+import { createScreenFrameSource, rememberTurnFrame, type ScreenCapture } from "./screen-frame-source.ts";
 import { screenFrameHash, screenSurfaceForTool, screenTouchingTool, settledFrameIsNews } from "./screen-frame-gate.ts";
 import { asSchedule, RoutineRequestService } from "./routine-requests.ts"; import { ownerSpokeOnly } from "./cloud-routine-level.ts";
 import { parseTriggerRequest, triggerTarget } from "./trigger-tools.ts"; import { WebhookRequestError, WebhookRequestService } from "./webhook-requests.ts"; import { createAppTriggerHost } from "./app-trigger-host.ts";
@@ -8101,7 +8101,7 @@ function startScreenPoller(
       held: botComputerControlSnapshot(botId, teamComputerTurns.get(threadId)?.computerId).held,
       revision: computerControlRevision.get(botId) ?? 0,
     }),
-    onFrame: (frame) => broadcast({ kind: "screen", botId, threadId, ...frame }),
+    onFrame: (frame, surface) => { if (surface === "computer") rememberTurnFrame(turnComputerResources.get(threadId)?.resource, frame); broadcast({ kind: "screen", botId, threadId, surface, ...frame }); },
     minGapMs: SCREEN_MIN_GAP_MS,
   }), {
     timer: null as ReturnType<typeof setInterval> | null,

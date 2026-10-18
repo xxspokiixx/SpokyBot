@@ -884,7 +884,7 @@ export type Action =
   | { type: "toggleSettings"; open?: boolean; section?: BotSettingsSection; botId?: string }
   | { type: "togglePlugins"; open?: boolean; surface?: "apps" | "mcp" }
   | { type: "toggleNewBot"; open?: boolean }
-  | { type: "toggleComputer"; open?: boolean }
+  | { type: "toggleComputer"; open?: boolean; botId?: string }
   | { type: "openDataResult"; botId: string; cardId: string }
   | { type: "dataResultFocusConsumed"; requestId: number }
   | { type: "openSignIn"; botId: string; messageId: string; url: string; site: string; place: import("../../shared/wire").Surface }
@@ -1604,7 +1604,7 @@ export function reducer(state: AppState, action: Action): AppState {
     case "toggleComputer": {
       const open = action.open ?? !state.computerOpen;
       return {
-        ...state,
+        ...state, selectedId: action.botId !== undefined && state.bots.some((bot) => bot.id === action.botId) ? action.botId : state.selectedId,
         computerOpen: open,
         settingsOpen: open ? false : state.settingsOpen,
         inspectorOpen: open ? false : state.inspectorOpen,
