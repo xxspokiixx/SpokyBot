@@ -4245,7 +4245,7 @@
       "keys.anthropic.everyBotOff": "bd235ff03b98244041882e2517deb4fdcbc0971a0b8f8946e44487a4cb3148d7",
       "keys.anthropic.link": "924d58fe9499ef2a605058edb985ce6fe5dafe33225e51223bd2b0f9a5456a12",
       "keys.openai.label": "51aa8bdcedfdb0c9eefbf91a6fa25d78b4c367be285bd472553cc0b461d983c8",
-      "keys.openai.desc": "ce8bdda40887f89bf19fe71fc117cf28992ffc66453a41f1e20c25a4671cc5ab",
+      "keys.openai.desc": "75f72e79fed596c86473fb2c7a9c8aad7ab9476e53433f8f1048fdf837231867",
       "keys.openai.note": "073a8688897143d3f84fb481a7f73d1ec51ceb560d569f4273a1d47eefdbe1a0",
       "keys.openai.link": "27985be8e326aa594b2deb368365742088cbdd116ce09be44fb02bde79b9fdd5",
       "keys.openrouter.label": "89616b71606749cb60ff685a8d3a659868399545345331bed992a755e5c9e2c4",
@@ -6401,8 +6401,6 @@
       "call.live.keyField": "8a1a377d9ca70f0acbd973215facff061b3401a7a4d8f1438da1f8548d3edf8f",
       "call.live.keySaving": "23e39291d6135814ed7c936e278974544b0df5fbf0eb0427b6700979b7472a93",
       "call.live.keySaveAndCall": "df961cc8e8c1dd1729084a14c17c6571a29c40a4b7d2a03ccadead19883b14b2",
-      "call.live.proTitle": "8fa3b8d30ca7bb89c7253fe6829c899eba72b6ee2d31599fe2d1556fce8f8cf1",
-      "call.live.proExplain": "e7665083c0907f5e8db5c6d9f8b41bd4b76fa5c11d207adb33bc5318fcbeb0df",
       "settings.group.you": "08b041935798fbf6fd6ff51099ffedb140a475889986d14f5559ff8e7fc571dd",
       "settings.group.ai": "11fb682be0a0233d5fb899721ecfc1827d20f0d2ff2e093310efa61efca8af1c",
       "settings.group.computers": "680cb3c6fca7fcc26ded16f9dbf24735b31f2107affcdb74f08fcf27d6fa74f6",
@@ -6604,7 +6602,10 @@
       "automations.preview.needsYou": "40dbf04af1f8b0c265162193e3a8f41090e13a66dea44649dd5d1aca9430154b",
       "automations.preview.stopped": "c950f55e893a783d05be5b275d472ce1c5fc4e92ee89b3987a0208a809bf200b",
       "automations.preview.missed": "ef276c0daed4c191933dfc4e5cc7227c650c1e627b785024ecf029ee65aaddc7",
-      "automations.preview.running": "f839f179c335c3cd3382fdee286e7024b856bed95f27d00df9cb46def1b9cc94"
+      "automations.preview.running": "f839f179c335c3cd3382fdee286e7024b856bed95f27d00df9cb46def1b9cc94",
+      "call.live.needsKey": "f19604e787f46e0f1350eff7b6fe69205f16e42cd5beeaf4b91bc6eeac310916",
+      "call.live.openApiKeys": "3bde85282febbce927de815dbea17b921ecdff743bf2460b9f892b692078dbe7",
+      "call.live.keyFromApiKeys": "f7777cbe98f7763a643526cbbf1a8e49fc59a19fc64735c7270bfe44cc9368cc"
     },
     "fr": {
       "pro.fromPrice": "a48a04a457d60b08b54fc83e7a6c4584ffedb1e23621859084900c8521a3af7b",
@@ -12540,7 +12541,7 @@
       "keys.anthropic.everyBotOff": "bd235ff03b98244041882e2517deb4fdcbc0971a0b8f8946e44487a4cb3148d7",
       "keys.anthropic.link": "924d58fe9499ef2a605058edb985ce6fe5dafe33225e51223bd2b0f9a5456a12",
       "keys.openai.label": "51aa8bdcedfdb0c9eefbf91a6fa25d78b4c367be285bd472553cc0b461d983c8",
-      "keys.openai.desc": "ce8bdda40887f89bf19fe71fc117cf28992ffc66453a41f1e20c25a4671cc5ab",
+      "keys.openai.desc": "75f72e79fed596c86473fb2c7a9c8aad7ab9476e53433f8f1048fdf837231867",
       "keys.openai.note": "073a8688897143d3f84fb481a7f73d1ec51ceb560d569f4273a1d47eefdbe1a0",
       "keys.openai.link": "27985be8e326aa594b2deb368365742088cbdd116ce09be44fb02bde79b9fdd5",
       "keys.openrouter.label": "89616b71606749cb60ff685a8d3a659868399545345331bed992a755e5c9e2c4",
@@ -14929,8 +14930,6 @@
       "call.live.keyField": "8a1a377d9ca70f0acbd973215facff061b3401a7a4d8f1438da1f8548d3edf8f",
       "call.live.keySaving": "23e39291d6135814ed7c936e278974544b0df5fbf0eb0427b6700979b7472a93",
       "call.live.keySaveAndCall": "df961cc8e8c1dd1729084a14c17c6571a29c40a4b7d2a03ccadead19883b14b2",
-      "call.live.proTitle": "8fa3b8d30ca7bb89c7253fe6829c899eba72b6ee2d31599fe2d1556fce8f8cf1",
-      "call.live.proExplain": "e7665083c0907f5e8db5c6d9f8b41bd4b76fa5c11d207adb33bc5318fcbeb0df",
       "settings.group.you": "08b041935798fbf6fd6ff51099ffedb140a475889986d14f5559ff8e7fc571dd",
       "settings.group.ai": "11fb682be0a0233d5fb899721ecfc1827d20f0d2ff2e093310efa61efca8af1c",
       "settings.group.computers": "680cb3c6fca7fcc26ded16f9dbf24735b31f2107affcdb74f08fcf27d6fa74f6",
@@ -15501,7 +15500,10 @@
       "history.empty": "0dbc9c4de60a9ee1f7e3fe863f4ee69ec5338c845dac151f1a3ffa8715ffbd95",
       "history.refreshError": "e7758a6440760f6fc1d6262cd5a3edd9062e678454d35465d94f75bfc4d434aa",
       "history.undo": "c1497e901b9e70aa938edfbd2d99841e49e00458d40816da793c6a1af625677d",
-      "history.restoreUnavailable": "2d272762ebacd385aead54c56b9597070130fcc0fe95b3ccfe3e6ea8ffad730e"
+      "history.restoreUnavailable": "2d272762ebacd385aead54c56b9597070130fcc0fe95b3ccfe3e6ea8ffad730e",
+      "call.live.needsKey": "f19604e787f46e0f1350eff7b6fe69205f16e42cd5beeaf4b91bc6eeac310916",
+      "call.live.openApiKeys": "3bde85282febbce927de815dbea17b921ecdff743bf2460b9f892b692078dbe7",
+      "call.live.keyFromApiKeys": "f7777cbe98f7763a643526cbbf1a8e49fc59a19fc64735c7270bfe44cc9368cc"
     },
     "pt-br": {
       "whop.description": "1a07cf04ef17029448d3781415cbac16d54e66b821907a40d94e0e6349710e70",
@@ -18306,7 +18308,7 @@
       "keys.anthropic.everyBotOff": "bd235ff03b98244041882e2517deb4fdcbc0971a0b8f8946e44487a4cb3148d7",
       "keys.anthropic.link": "924d58fe9499ef2a605058edb985ce6fe5dafe33225e51223bd2b0f9a5456a12",
       "keys.openai.label": "51aa8bdcedfdb0c9eefbf91a6fa25d78b4c367be285bd472553cc0b461d983c8",
-      "keys.openai.desc": "ce8bdda40887f89bf19fe71fc117cf28992ffc66453a41f1e20c25a4671cc5ab",
+      "keys.openai.desc": "75f72e79fed596c86473fb2c7a9c8aad7ab9476e53433f8f1048fdf837231867",
       "keys.openai.note": "073a8688897143d3f84fb481a7f73d1ec51ceb560d569f4273a1d47eefdbe1a0",
       "keys.openai.link": "27985be8e326aa594b2deb368365742088cbdd116ce09be44fb02bde79b9fdd5",
       "keys.openrouter.label": "89616b71606749cb60ff685a8d3a659868399545345331bed992a755e5c9e2c4",
@@ -20603,8 +20605,6 @@
       "call.live.keyField": "8a1a377d9ca70f0acbd973215facff061b3401a7a4d8f1438da1f8548d3edf8f",
       "call.live.keySaving": "23e39291d6135814ed7c936e278974544b0df5fbf0eb0427b6700979b7472a93",
       "call.live.keySaveAndCall": "df961cc8e8c1dd1729084a14c17c6571a29c40a4b7d2a03ccadead19883b14b2",
-      "call.live.proTitle": "8fa3b8d30ca7bb89c7253fe6829c899eba72b6ee2d31599fe2d1556fce8f8cf1",
-      "call.live.proExplain": "e7665083c0907f5e8db5c6d9f8b41bd4b76fa5c11d207adb33bc5318fcbeb0df",
       "settings.group.you": "08b041935798fbf6fd6ff51099ffedb140a475889986d14f5559ff8e7fc571dd",
       "settings.group.ai": "11fb682be0a0233d5fb899721ecfc1827d20f0d2ff2e093310efa61efca8af1c",
       "settings.group.computers": "680cb3c6fca7fcc26ded16f9dbf24735b31f2107affcdb74f08fcf27d6fa74f6",
@@ -21240,7 +21240,10 @@
       "automations.preview.needsYou": "40dbf04af1f8b0c265162193e3a8f41090e13a66dea44649dd5d1aca9430154b",
       "automations.preview.stopped": "c950f55e893a783d05be5b275d472ce1c5fc4e92ee89b3987a0208a809bf200b",
       "automations.preview.missed": "ef276c0daed4c191933dfc4e5cc7227c650c1e627b785024ecf029ee65aaddc7",
-      "automations.preview.running": "f839f179c335c3cd3382fdee286e7024b856bed95f27d00df9cb46def1b9cc94"
+      "automations.preview.running": "f839f179c335c3cd3382fdee286e7024b856bed95f27d00df9cb46def1b9cc94",
+      "call.live.needsKey": "f19604e787f46e0f1350eff7b6fe69205f16e42cd5beeaf4b91bc6eeac310916",
+      "call.live.openApiKeys": "3bde85282febbce927de815dbea17b921ecdff743bf2460b9f892b692078dbe7",
+      "call.live.keyFromApiKeys": "f7777cbe98f7763a643526cbbf1a8e49fc59a19fc64735c7270bfe44cc9368cc"
     },
     "zh": {
       "pro.fromPrice": "a48a04a457d60b08b54fc83e7a6c4584ffedb1e23621859084900c8521a3af7b",
@@ -25602,7 +25605,7 @@
       "keys.anthropic.everyBotOff": "bd235ff03b98244041882e2517deb4fdcbc0971a0b8f8946e44487a4cb3148d7",
       "keys.anthropic.link": "924d58fe9499ef2a605058edb985ce6fe5dafe33225e51223bd2b0f9a5456a12",
       "keys.openai.label": "51aa8bdcedfdb0c9eefbf91a6fa25d78b4c367be285bd472553cc0b461d983c8",
-      "keys.openai.desc": "ce8bdda40887f89bf19fe71fc117cf28992ffc66453a41f1e20c25a4671cc5ab",
+      "keys.openai.desc": "75f72e79fed596c86473fb2c7a9c8aad7ab9476e53433f8f1048fdf837231867",
       "keys.openai.note": "073a8688897143d3f84fb481a7f73d1ec51ceb560d569f4273a1d47eefdbe1a0",
       "keys.openai.link": "27985be8e326aa594b2deb368365742088cbdd116ce09be44fb02bde79b9fdd5",
       "keys.openrouter.label": "89616b71606749cb60ff685a8d3a659868399545345331bed992a755e5c9e2c4",
@@ -27498,7 +27501,10 @@
       "place.view.ccSignIn.lineMyCloud": "6355755039d6f4bc1a8ff134a46e7b29ff8c0f9a45da01340d4c39001303afa2",
       "computer.files.homeFolder": "6772da558a23e28185deb8d4bb7cdb20ae916f13a03eca9a9e5c0d4deffd4944",
       "computer.files.changeDefaultFolder": "d849aca289a009020a597abaf279d8db449aca92344e9d91485cf1cf0aadc144",
-      "computer.files.pinnedFolderHint": "b69c3a6863aa1de63d33f31fcd2ec1b43df5dab08c1a8dd931aec171adff9885"
+      "computer.files.pinnedFolderHint": "b69c3a6863aa1de63d33f31fcd2ec1b43df5dab08c1a8dd931aec171adff9885",
+      "call.live.needsKey": "f19604e787f46e0f1350eff7b6fe69205f16e42cd5beeaf4b91bc6eeac310916",
+      "call.live.openApiKeys": "3bde85282febbce927de815dbea17b921ecdff743bf2460b9f892b692078dbe7",
+      "call.live.keyFromApiKeys": "f7777cbe98f7763a643526cbbf1a8e49fc59a19fc64735c7270bfe44cc9368cc"
     },
     "uk": {
       "pro.fromPrice": "a48a04a457d60b08b54fc83e7a6c4584ffedb1e23621859084900c8521a3af7b",
@@ -31889,7 +31895,7 @@
       "keys.anthropic.everyBotOff": "bd235ff03b98244041882e2517deb4fdcbc0971a0b8f8946e44487a4cb3148d7",
       "keys.anthropic.link": "924d58fe9499ef2a605058edb985ce6fe5dafe33225e51223bd2b0f9a5456a12",
       "keys.openai.label": "51aa8bdcedfdb0c9eefbf91a6fa25d78b4c367be285bd472553cc0b461d983c8",
-      "keys.openai.desc": "ce8bdda40887f89bf19fe71fc117cf28992ffc66453a41f1e20c25a4671cc5ab",
+      "keys.openai.desc": "75f72e79fed596c86473fb2c7a9c8aad7ab9476e53433f8f1048fdf837231867",
       "keys.openai.note": "073a8688897143d3f84fb481a7f73d1ec51ceb560d569f4273a1d47eefdbe1a0",
       "keys.openai.link": "27985be8e326aa594b2deb368365742088cbdd116ce09be44fb02bde79b9fdd5",
       "keys.openrouter.label": "89616b71606749cb60ff685a8d3a659868399545345331bed992a755e5c9e2c4",
@@ -33867,8 +33873,6 @@
       "call.live.keyField": "8a1a377d9ca70f0acbd973215facff061b3401a7a4d8f1438da1f8548d3edf8f",
       "call.live.keySaving": "23e39291d6135814ed7c936e278974544b0df5fbf0eb0427b6700979b7472a93",
       "call.live.keySaveAndCall": "df961cc8e8c1dd1729084a14c17c6571a29c40a4b7d2a03ccadead19883b14b2",
-      "call.live.proTitle": "8fa3b8d30ca7bb89c7253fe6829c899eba72b6ee2d31599fe2d1556fce8f8cf1",
-      "call.live.proExplain": "e7665083c0907f5e8db5c6d9f8b41bd4b76fa5c11d207adb33bc5318fcbeb0df",
       "settings.group.you": "08b041935798fbf6fd6ff51099ffedb140a475889986d14f5559ff8e7fc571dd",
       "settings.group.ai": "11fb682be0a0233d5fb899721ecfc1827d20f0d2ff2e093310efa61efca8af1c",
       "settings.group.computers": "680cb3c6fca7fcc26ded16f9dbf24735b31f2107affcdb74f08fcf27d6fa74f6",
@@ -34010,7 +34014,10 @@
       "apiInstances.remove": "e6a3c4a1250a6ad3f10faa22333e5e50a6ba78e5b28a3b26f5743d9f8c7ede93",
       "apiInstances.refreshModels": "e02941c724226f34078fcecb136a334ee7a61ee81f07632f9be4fe021997f678",
       "apiInstances.empty": "ddc8655e13eeb047e4ca2953782271878d3db6be801b604d23d8fa225f74a3be",
-      "apiInstances.failed": "a1c3bf780712478020bd28bd6f81293fb8e3a92c2ddff117b254155b617a17f1"
+      "apiInstances.failed": "a1c3bf780712478020bd28bd6f81293fb8e3a92c2ddff117b254155b617a17f1",
+      "call.live.needsKey": "f19604e787f46e0f1350eff7b6fe69205f16e42cd5beeaf4b91bc6eeac310916",
+      "call.live.openApiKeys": "3bde85282febbce927de815dbea17b921ecdff743bf2460b9f892b692078dbe7",
+      "call.live.keyFromApiKeys": "f7777cbe98f7763a643526cbbf1a8e49fc59a19fc64735c7270bfe44cc9368cc"
     },
     "tr": {
       "whop.description": "1a07cf04ef17029448d3781415cbac16d54e66b821907a40d94e0e6349710e70",
@@ -36301,7 +36308,7 @@
       "keys.anthropic.everyBotOff": "bd235ff03b98244041882e2517deb4fdcbc0971a0b8f8946e44487a4cb3148d7",
       "keys.anthropic.link": "924d58fe9499ef2a605058edb985ce6fe5dafe33225e51223bd2b0f9a5456a12",
       "keys.openai.label": "51aa8bdcedfdb0c9eefbf91a6fa25d78b4c367be285bd472553cc0b461d983c8",
-      "keys.openai.desc": "ce8bdda40887f89bf19fe71fc117cf28992ffc66453a41f1e20c25a4671cc5ab",
+      "keys.openai.desc": "75f72e79fed596c86473fb2c7a9c8aad7ab9476e53433f8f1048fdf837231867",
       "keys.openai.note": "073a8688897143d3f84fb481a7f73d1ec51ceb560d569f4273a1d47eefdbe1a0",
       "keys.openai.link": "27985be8e326aa594b2deb368365742088cbdd116ce09be44fb02bde79b9fdd5",
       "keys.openrouter.label": "89616b71606749cb60ff685a8d3a659868399545345331bed992a755e5c9e2c4",
@@ -38279,8 +38286,6 @@
       "call.live.keyField": "8a1a377d9ca70f0acbd973215facff061b3401a7a4d8f1438da1f8548d3edf8f",
       "call.live.keySaving": "23e39291d6135814ed7c936e278974544b0df5fbf0eb0427b6700979b7472a93",
       "call.live.keySaveAndCall": "df961cc8e8c1dd1729084a14c17c6571a29c40a4b7d2a03ccadead19883b14b2",
-      "call.live.proTitle": "8fa3b8d30ca7bb89c7253fe6829c899eba72b6ee2d31599fe2d1556fce8f8cf1",
-      "call.live.proExplain": "e7665083c0907f5e8db5c6d9f8b41bd4b76fa5c11d207adb33bc5318fcbeb0df",
       "settings.group.you": "08b041935798fbf6fd6ff51099ffedb140a475889986d14f5559ff8e7fc571dd",
       "settings.group.ai": "11fb682be0a0233d5fb899721ecfc1827d20f0d2ff2e093310efa61efca8af1c",
       "settings.group.computers": "680cb3c6fca7fcc26ded16f9dbf24735b31f2107affcdb74f08fcf27d6fa74f6",
@@ -38422,7 +38427,10 @@
       "apiInstances.remove": "e6a3c4a1250a6ad3f10faa22333e5e50a6ba78e5b28a3b26f5743d9f8c7ede93",
       "apiInstances.refreshModels": "e02941c724226f34078fcecb136a334ee7a61ee81f07632f9be4fe021997f678",
       "apiInstances.empty": "ddc8655e13eeb047e4ca2953782271878d3db6be801b604d23d8fa225f74a3be",
-      "apiInstances.failed": "a1c3bf780712478020bd28bd6f81293fb8e3a92c2ddff117b254155b617a17f1"
+      "apiInstances.failed": "a1c3bf780712478020bd28bd6f81293fb8e3a92c2ddff117b254155b617a17f1",
+      "call.live.needsKey": "f19604e787f46e0f1350eff7b6fe69205f16e42cd5beeaf4b91bc6eeac310916",
+      "call.live.openApiKeys": "3bde85282febbce927de815dbea17b921ecdff743bf2460b9f892b692078dbe7",
+      "call.live.keyFromApiKeys": "f7777cbe98f7763a643526cbbf1a8e49fc59a19fc64735c7270bfe44cc9368cc"
     }
   }
 }
