@@ -2,9 +2,12 @@ import { createRoot } from "react-dom/client";
 import { Composer } from "../../src/components/Composer";
 import { DesktopCapabilitiesProvider } from "../../src/components/DesktopCapabilities";
 import { initialDesktopCapabilities } from "../../src/lib/desktop";
+import { setLocale } from "../../src/lib/i18n";
 import { StoreProvider, useStore } from "../../src/state/store";
 import { createSpeechTranscript } from "../../electron/speech-transcript.mjs";
 import "../../src/styles.css";
+
+setLocale("en");
 
 type Line = { text?: string; partial?: boolean; utteranceFinal?: boolean; speechStart?: number };
 let normalize = createSpeechTranscript();

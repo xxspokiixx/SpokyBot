@@ -20,7 +20,7 @@ Launch the isolated fake-engine browser fixture:
 node --experimental-strip-types scripts/control-omb.ts ui launch --entry dictation
 ```
 
-Use its printed `ui` handle for every command. Click `音声入力を開始` with
+Use its printed `ui` handle for every command. Click `Start dictation` with
 `control-omb ui click --ui HANDLE --name ...`. This fixture never opens a microphone.
 With `control-omb ui eval --ui HANDLE --js ...`, call:
 
@@ -32,7 +32,7 @@ window.dictationFixture.hear({ text: "", partial: true });
 ```
 
 The textarea must contain `架空の一文目。 架空の二文目。`. Both the stop-microphone
-and send-arrow buttons must remain available. Click `メッセージを送信`, then inject:
+and send-arrow buttons must remain available. Click `Send message`, then inject:
 
 ```js
 window.dictationFixture.late("架空の一文目。 架空の二文目。");
@@ -79,3 +79,11 @@ empty after both an old callback and additional speech. Capture was false
 after the send arrow. The unit suite also exercises 200 utterance boundaries,
 Enter-to-send, manual corrections, thread switching, and recognition failure.
 The native microphone itself was not used for this automated check.
+
+A separate local file-only check streamed synthetic Japanese speech with
+three-second silent gaps into the native on-device recognizer. It retained
+all three utterances through the production Electron transport, preload and
+Composer. Sending during recognition stopped capture, and the textarea stayed
+empty for twenty seconds afterward. The native callback was unchanged; only
+the test helper's microphone input was replaced by real-time file buffers.
+This checks actual recognition boundaries, but not physical microphone quality.
