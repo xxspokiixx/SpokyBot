@@ -35,7 +35,7 @@ describe("self-hosted update row", () => {
   });
 
   it("asks a page older than its server to reload instead of calling it up to date", () => {
-    // #3001: the server was updated while this page kept running the bundle About reports
+    // The server was updated while this page kept running the bundle About reports
     const stale = check({ current: "0.1.114" });
     expect(serverCheckPhase(stale, "0.1.113")).toBe("reload");
     expect(serverUpdateRow("reload", stale, "0.1.113")).toEqual({
