@@ -90,7 +90,7 @@ import { cloudLinkOpensSheet, colorDotIcons, createCloudLook, createCloudReadyNo
 import { createTrialNotices } from "./cloud-trial-notice.mjs";
 import { DESKTOP_PORTS, jsonFile, registerDesktopPrefs } from "./desktop-prefs.mjs";
 import { createDesktopIncludedX } from "./included-x.mjs";
-import { cloudHomeConnectUrl, cloudPlanDisk, cloudUnreachableText, isCloudHomeEntry, myCloudOrigin, rememberedCloudHome, savedCloudHomeOrigin, signInCloudSession, withCloudHome } from "./cloud-home.mjs";
+import { cloudHomeConnectUrl, cloudPlanDisk, cloudUnreachableText, createCloudPowerGate, isCloudHomeEntry, myCloudOrigin, openSleepingCloud, rememberedCloudHome, savedCloudHomeOrigin, signInCloudSession, withCloudHome } from "./cloud-home.mjs";
 import { installCloudFiles } from "./cloud-sync-main.mjs";
 import { createCloudEntry } from "./cloud-entry.mjs";
 import { cloudPageSenderAllowed, createCloudMove, mintOwnerCode, moveBlocked, moveFit, moveRefusal, moveSenderDestination, parseCloudMoveStatus } from "./cloud-move.mjs";
@@ -326,6 +326,7 @@ let companyRestoreCommitting = false;
 let companyBackupConfigurationRevision = 0;
 const managedDesktopRelay = createManagedDesktopRelay();
 const includedX = createDesktopIncludedX({ account: () => cloudAccount, server: () => serverProc, log: slog });
+const cloudPower = createCloudPowerGate({ power: () => cloudAccount?.power() ?? null, wanted: () => Boolean(cloudSync?.running() || computerSharing?.lendingToCloud()) });
 const utilityServerExits = new WeakMap();
 const UTILITY_SERVER_STOP_TIMEOUT_MS = 6_500;
 const trustedApprovalMode = createTrustedApprovalModeCoordinator({ randomId: randomUUID });
@@ -865,12 +866,12 @@ function ensureCloudAccount() {
       encrypt: value => safeStorage.encryptStringAsync(value), decrypt: value => safeStorage.decryptStringAsync(value),
     } }),
     platform: process.platform, deviceName: os.hostname().slice(0, 100) || "My computer", appVersion: app.getVersion(), origin: cloudTarget(process.env).origin,
-    openBrowser: url => shell.openExternal(url),
+    openBrowser: url => shell.openExternal(url), awaitingWake: () => cloudPower.awaiting(),
     onState: state => {
       rememberCloudHome(state);
       rememberedHome = rememberedCloudHome(rememberedHome, state);
       sendUpdaterState();
-      computerSharing?.cloudChanged();
+      cloudPower.changed(); computerSharing?.cloudChanged();
       void includedX.onState(state);
       refreshCloudMenus();
       announceCloudReady(state);
@@ -1533,7 +1534,7 @@ function sharingController() {
     fetch: (...args) => session.defaultSession.fetch(...args),
     environments: () => environmentsState.environments,
     enabled: refreshSharedComputersAllowed,
-    cloud: cloudLendingSnapshot, reconnect: origin => signInCloudSession({ origin, mine: myCloud(), pair: () => ensureCloudAccount().pairHome(), fetch: (...args) => session.defaultSession.fetch(...args) }),
+    cloud: cloudLendingSnapshot, power: cloudPower, reconnect: origin => signInCloudSession({ origin, mine: myCloud(), pair: () => ensureCloudAccount().pairHome(), fetch: (...args) => session.defaultSession.fetch(...args) }),
     onChange: summary => lendingIndicator().update({ lending: summary.lending.length > 0, busy: Boolean(summary.busy && summary.lending.includes(summary.busy.env)) }),
     cuaConnection: () => cuaReady, screenLocked: () => powerMonitor.getSystemIdleState(1) === "locked",
     hostControl: async (id, signal) => {
@@ -1969,23 +1970,22 @@ async function connectCloudHome(open = null) {
   const client = ensureCloudAccount();
   const target = client.homeTarget();
   if (!target) throw new Error("My Cloud is not ready to connect yet.");
-  const grant = (await cloudHomeSignedIn(target.origin)) ? null : await client.pairHome();
+  const signedIn = await openSleepingCloud({ power: client.power(), wake: client.wakeHome, waking: client.setWaking, signedIn: timeoutMs => cloudHomeSignedIn(target.origin, timeoutMs) });
+  const grant = signedIn ? null : await client.pairHome();
   let next = withCloudHome(environmentsState, { status: "ready", origin: target.origin }, () => randomUUID(), cloudLook.pending());
   const entry = next.environments.find((candidate) => candidate.origin === target.origin);
   if (!entry) throw new Error("My Cloud could not be added to Servers.");
   next = withActive(next, entry.id);
   persistEnvironments(next);
   navigateMainWindow(cloudHomeConnectUrl({ origin: target.origin, grant }, Date.now(), open));
-  client.checkoutDone(); return client.state();
+  cloudPower.woke(); client.checkoutDone(); return client.state();
 }
 
-async function cloudHomeSignedIn(origin) {
+async function cloudHomeSignedIn(origin, timeoutMs = 5_000) {
   try {
-    const response = await session.defaultSession.fetch(`${origin}/api/auth/session`, { credentials: "include", signal: AbortSignal.timeout(5_000) });
+    const response = await session.defaultSession.fetch(`${origin}/api/auth/session`, { credentials: "include", signal: AbortSignal.timeout(timeoutMs) });
     return response.ok && (await response.json())?.kind === "session";
-  } catch {
-    return false;
-  }
+  } catch { return false; }
 }
 
 // Per-server microphone consent; "Don't Allow" holds until quit or forget, so a page cannot keep re-asking.
@@ -2965,7 +2965,7 @@ const cloudSync = installCloudFiles({
   app, ipcMain, dialog, shell, powerMonitor, localWorkspaceOnly, localDataDir: desktopDataDir(),
   fetch: (...args) => session.defaultSession.fetch(...args),
   send: (channel, value) => { if (mainWindow && !mainWindow.isDestroyed()) mainWindow.webContents.send(channel, value); },
-  cloudOrigin: () => myCloud(), cloudAccount: () => ensureCloudAccount(), stateDir: cloudTarget(process.env).sync,
+  cloudOrigin: () => myCloud(), cloudAccount: () => ensureCloudAccount(), stateDir: cloudTarget(process.env).sync, power: cloudPower,
 });
 
 // window.confirm() has no parent window, so (tiling) window managers cannot center it over the app.
