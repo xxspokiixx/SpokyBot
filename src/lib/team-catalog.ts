@@ -37,3 +37,11 @@ export function catalogCopy(entry: TeamCatalogEntry): TeamCatalogEntry {
   const id = CATALOG_COPY[entry.name.trim().toLowerCase()];
   return id ? { ...entry, name: t(`templates.catalog.${id}.name` as LocaleKey), summary: t(`templates.catalog.${id}.summary` as LocaleKey), outcome: entry.outcome ? t(`templates.catalog.${id}.outcome` as LocaleKey) : undefined } : entry;
 }
+
+/** Search matches a team by its localized name and summary as well as its English ones, its category, skills and apps. */
+export function catalogMatches(entry: TeamCatalogEntry, search: string): boolean {
+  const copy = catalogCopy(entry);
+  return `${copy.name} ${copy.summary} ${entry.name} ${entry.summary} ${entry.category} ${entry.skills.join(" ")} ${entry.requires.apps.join(" ")}`
+    .toLowerCase()
+    .includes(search);
+}
