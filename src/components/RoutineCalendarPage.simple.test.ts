@@ -40,7 +40,7 @@ vi.mock("./DesktopCapabilities", async (importOriginal) => ({
 vi.mock("@/lib/analytics", () => ({ track: vi.fn() }));
 
 const { initialState } = await import("@/state/store");
-const { EventDetails, EventEditor } = await import("./RoutineCalendarPage");
+const { EventDetails, EventEditor, RoutineEditor } = await import("./RoutineCalendarPage");
 const { TriggersPage: RoutinesPage } = await import("./TriggersPage");
 const { scheduleLabel } = await import("@/lib/schedule-label");
 
@@ -174,6 +174,32 @@ describe("Automations page", () => {
     const many = Array.from({ length: 9 }, (_, index) => ({ ...routine, id: `r${index}`, botId: index % 2 ? bot.id : "other" }));
     fixture.state = { ...fixture.state!, routines: many, bots: [bot, { ...bot, id: "other", name: "Other" }] };
     expect(page().some((node) => node.props["aria-label"] === "All bots")).toBe(true);
+  });
+
+  it("starts Set it up yourself with the bot the New box would have asked, else the only bot, so Save is not dead", () => {
+    click(buttons(page()).get("New"));
+    (page().find(named("NewAutomation"))!.props.onSetUpYourself as (kind: string, botId: string) => void)("schedule", bot.id);
+    const editor = page().find(named("RoutineEditor"))!;
+    expect(editor.props.initialBotId).toBe(bot.id);
+    const chosen = (props: Record<string, unknown>) => (RoutineEditor(props as never) as ReactElement<{ seed: { botIds: string[] } }>).props.seed.botIds;
+    const other = { ...bot, id: "other", name: "Other" };
+    expect(chosen(editor.props)).toEqual([bot.id]);
+    expect(chosen({ ...editor.props, initialBotId: "other", bots: [bot, other] })).toEqual(["other"]);
+    expect(chosen({ ...editor.props, initialBotId: undefined })).toEqual([bot.id]);
+    expect(chosen({ ...editor.props, initialBotId: undefined, bots: [bot, other] })).toEqual([]);
+  });
+
+  it("starts the webhook editor with the bot the New box would have asked too", async () => {
+    const { WebhookEditor } = await import("./WebhookTrigger");
+    click(buttons(page()).get("New"));
+    (page().find(named("NewAutomation"))!.props.onSetUpYourself as (kind: string, botId: string) => void)("webhook", bot.id);
+    expect(page().find(named("WebhookEditor"))!.props.initialBotId).toBe(bot.id);
+    const other = { ...bot, id: "other", name: "Other" };
+    fixture.values = [];
+    const tree = capture(() => WebhookEditor({ bots: [bot, other], initialBotId: "other", onClose: vi.fn(), onCredential: vi.fn() }));
+    const picked = tree.filter((node) => node.type === "button" && String(node.props.className).includes("border-accent/70")).map((node) => textOf(node.props.children));
+    expect(picked).toContain("Other");
+    expect(picked).not.toContain(bot.name);
   });
 
   it("greets an empty list, and its example fills the New box", () => {

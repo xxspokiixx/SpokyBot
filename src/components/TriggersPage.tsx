@@ -32,7 +32,7 @@ export function TriggersPage({ onBack, onOpenRoom }: { onBack: () => void; onOpe
   const [openId, setOpenId] = useState<string | null>(focus?.section !== "logs" ? focus?.routineId ?? null : null);
   const [botFilter, setBotFilter] = useState(focus?.botId ?? "all");
   const [newText, setNewText] = useState<string | null>(null);
-  const [editing, setEditing] = useState<{ kind: SetUpKind; id?: string } | null>(null);
+  const [editing, setEditing] = useState<{ kind: SetUpKind; id?: string; botId?: string } | null>(null);
   const routinesOnly = window.ogb?.remoteClient?.active === true;
   const visibleBots = state.bots.filter((bot) => !bot.hidden);
   const botName = (botId: string) => state.bots.find((bot) => bot.id === botId)?.name ?? t("routines.unavailableBot");
@@ -131,11 +131,11 @@ export function TriggersPage({ onBack, onOpenRoom }: { onBack: () => void; onOpe
       </div>
 
       {newText !== null && (
-        <NewAutomation initialText={newText} onClose={() => setNewText(null)} onSetUpYourself={(kind) => { setNewText(null); setEditing({ kind }); }} />
+        <NewAutomation initialText={newText} onClose={() => setNewText(null)} onSetUpYourself={(kind, botId) => { setNewText(null); setEditing({ kind, botId }); }} />
       )}
-      {editing?.kind === "schedule" && (editRoutine || !editing.id) && <RoutineEditor routine={editRoutine} bots={visibleBots} plain onClose={() => setEditing(null)} />}
+      {editing?.kind === "schedule" && (editRoutine || !editing.id) && <RoutineEditor routine={editRoutine} bots={visibleBots} initialBotId={editing.botId} plain onClose={() => setEditing(null)} />}
       {editing?.kind === "webhook" && (editWebhook || !editing.id) && (
-        <WebhookEditor webhook={editWebhook} bots={visibleBots} onClose={() => setEditing(null)} onCredential={(credential, id) => { saveWebhookCredential(webhookCredentialStore(), id, credential); setOpenId(id); }} />
+        <WebhookEditor webhook={editWebhook} bots={visibleBots} initialBotId={editing.botId} onClose={() => setEditing(null)} onCredential={(credential, id) => { saveWebhookCredential(webhookCredentialStore(), id, credential); setOpenId(id); }} />
       )}
     </main>
   );
