@@ -15,8 +15,8 @@ export function claudeAuthFailure(frame: { error?: unknown; is_api_error_message
   return frame.error === "authentication_failed" || classifyError({ text }).reason === "auth";
 }
 
-/** Claude Code 2.1.295 refuses a signed-out turn with `error: "authentication_failed"` and a turn past its usage limit
- * with `api_error: "usage_limit_reached"` (`error: "rate_limit"`), each as a synthetic api-error frame. */
+/** Claude Code 2.1.295 refuses a signed-out turn with an `authentication_failed` error, and a turn past its usage limit
+ * with a `usage_limit_reached` api error (a `rate_limit` error), each as a synthetic api-error frame. */
 function syntheticRefusal(frame: Frame): Refusal | undefined {
   const content = frame.message?.content;
   if (frame.type !== "assistant" || frame.message?.model !== "<synthetic>" ||
