@@ -1051,26 +1051,24 @@ export class Store {
     if (Object.prototype.hasOwnProperty.call(patch, "section")) {
       this.rememberSections([patch.section]);
     }
-    const previousBusyBotId = group.busyBotId;
-    Object.assign(group, patch);
+    const { busyBotId, ...stored } = patch;
     if (Object.prototype.hasOwnProperty.call(patch, "busyBotId")) {
-      if (patch.busyBotId && patch.busyBotId !== previousBusyBotId) group.turnStartedAt = Date.now();
-      else if (!patch.busyBotId) delete group.turnStartedAt;
+      if (busyBotId && busyBotId !== group.busyBotId) group.turnStartedAt = Date.now();
+      else if (!busyBotId) delete group.turnStartedAt;
+      group.busyBotId = busyBotId ?? null;
     }
-    if (Object.prototype.hasOwnProperty.call(patch, "turnTimeoutMinutes") && patch.turnTimeoutMinutes == null) {
-      delete group.turnTimeoutMinutes;
-    }
-    if (!group.dm && Object.prototype.hasOwnProperty.call(patch, "pinnedMessageId")) {
-      const active = this.activeGroupTask(group.id);
-      if (active) active.pinnedMessageId = patch.pinnedMessageId;
-    }
-    group.defaultResponder = normalizeGroupDefaultResponder(
-      group.defaultResponder,
-      group.memberIds,
-      Boolean(group.dm),
-    );
-    if (Object.prototype.hasOwnProperty.call(patch, "memberIds")) pruneRoomHolds(group);
-    this.saveGroups();
+    this.commitGroupChange(group, group.dm ? "the chat's settings" : "the room's settings", () => {
+      Object.assign(group, stored);
+      if (Object.prototype.hasOwnProperty.call(stored, "turnTimeoutMinutes") && stored.turnTimeoutMinutes == null) {
+        delete group.turnTimeoutMinutes;
+      }
+      if (!group.dm && Object.prototype.hasOwnProperty.call(stored, "pinnedMessageId")) {
+        const active = this.activeGroupTask(group.id);
+        if (active) active.pinnedMessageId = stored.pinnedMessageId;
+      }
+      group.defaultResponder = normalizeGroupDefaultResponder(group.defaultResponder, group.memberIds, Boolean(group.dm));
+      if (Object.prototype.hasOwnProperty.call(stored, "memberIds")) pruneRoomHolds(group);
+    });
     this.emit({ type: "group", groupId: group.id });
     return group;
   }

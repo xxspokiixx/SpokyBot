@@ -225,6 +225,40 @@ describe("groups.json save failures", () => {
     expect(new Store(selection).groupTaskByThread(room.id, second.threadId)).toEqual(unchanged);
   });
 
+  it("restores a room's settings and its active thread's pin when they cannot be saved", () => {
+    const { store, room, second, changes } = roomWithTwoThreads();
+    const unchanged = structuredClone(room);
+    failNextGroupSave(store);
+
+    expect(() => store.patchGroup(room.id, { name: "Renamed", bulletin: "Ship it", pinnedMessageId: "pin-two", unread: true }))
+      .toThrow("Couldn't save the room's settings: another program is holding OpenMausBot's groups.json, or its folder is read-only.");
+    expect(room).toEqual(unchanged);
+    expect(second.pinnedMessageId).toBeUndefined();
+    expect(changes).not.toHaveBeenCalled();
+    expect(new Store(selection).group(room.id)?.name).toBe("Launch team");
+  });
+
+  it("clears a finished turn's speaker even when the room cannot be saved", () => {
+    const { store, room } = roomWithTwoThreads();
+    store.patchGroup(room.id, { busyBotId: room.memberIds[0]! });
+    failNextGroupSave(store);
+
+    expect(() => store.patchGroup(room.id, { busyBotId: null, unread: true })).toThrow(RegistrySaveError);
+    expect(room.busyBotId).toBeNull();
+    expect(room.turnStartedAt).toBeUndefined();
+    expect(room.unread).toBe(false);
+  });
+
+  it("restores a direct chat's turn limit when it cannot be saved", () => {
+    const store = new Store(selection);
+    const chat = store.createGroup("", [store.createBot().id, store.createBot().id], true);
+    store.patchGroup(chat.id, { turnTimeoutMinutes: 10 });
+    failNextGroupSave(store);
+
+    expect(() => store.patchGroup(chat.id, { turnTimeoutMinutes: null })).toThrow("Couldn't save the chat's settings");
+    expect(chat.turnTimeoutMinutes).toBe(10);
+  });
+
   it("keeps a room thread and its conversation when its deletion cannot be saved, and deletes both on retry", () => {
     const { store, room, first, second, changes } = roomWithTwoThreads();
     store.appendMessage(second.threadId, { role: "user", kind: "text", text: "Keep this conversation" });

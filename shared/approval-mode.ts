@@ -48,7 +48,6 @@ export interface ApprovalFields {
   alwaysAllow?: string[];
 }
 
-/** A thread runs at its own approval fields and falls back to its bot's for any it does not store. */
 export function threadApproval(thread: ApprovalFields, bot: ApprovalFields): ApprovalFields {
   return {
     approvalMode: thread.approvalMode ?? (thread.autoApprove === undefined ? bot.approvalMode : undefined),
