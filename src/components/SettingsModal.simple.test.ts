@@ -65,6 +65,7 @@ vi.mock("./UsageSection", () => ({ UsageSection: marker("usage") }));
 vi.mock("./WorkspaceBackupSettings", () => ({ WorkspaceBackupSettings: marker("backups") }));
 vi.mock("./RoomTurnTimeoutSettings", () => ({ RoomTurnTimeoutSettings: () => null }));
 vi.mock("./CompanyBackupSettings", () => ({ CompanyBackupSettings: () => null }));
+vi.mock("./ImportSettings", () => ({ ImportSettings: marker("import") }));
 
 const desktop = { ogb: { environments: {}, organization: {}, cloudAccount: {} } };
 
@@ -141,11 +142,12 @@ describe("Settings in Simple mode", () => {
     expect(html).toContain('aria-label="Enable the built-in browser"');
   });
 
-  it("stacks OMB Cloud and Organization on Account in the desktop app", () => {
+  it("stacks OMB Cloud, Organization and Import on Account in the desktop app", () => {
     fixture.section = "cloudAccount";
     const html = render();
     expect(currentPage(html)).toBe("account");
-    expect(blocks(html)).toEqual(["cloudAccount", "organization"]);
+    expect(blocks(html)).toEqual(["cloudAccount", "organization", "import"]);
+    expect(markers(html)).toContain("import");
   });
 
   it("adds People and Activity to Account for a hosted workspace's admins in a browser", () => {
@@ -185,6 +187,7 @@ describe("Settings in Simple mode", () => {
     ["computer", "computers"],
     ["cloudAccount", "account"],
     ["organization", "account"],
+    ["import", "account"],
   ])("lands a deep link to %s on %s", (section, page) => {
     fixture.section = section;
     const html = render();
