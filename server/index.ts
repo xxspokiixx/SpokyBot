@@ -206,7 +206,7 @@ import { describeSpawnFailure, execCli } from "./procs.ts";
 import { buildMentionNotification, buildNotification, buildSpendNotification, type Notification } from "./notify.ts";
 import {
   isModelVariant,
-  TurnNotStartedError, TurnAuthenticationRefusedError,
+  TurnNotStartedError, TurnAuthenticationRefusedError, TurnUsageLimitRefusedError,
   type ModelSelection,
   type RequestOutcome,
   type RuntimeEvent,
@@ -453,7 +453,8 @@ import { chromeLauncher } from "./browser/chrome/launcher.ts";
 import { createBrowserHost } from "./host/browser.ts";
 import { createScreenFrameSource, type ScreenCapture } from "./screen-frame-source.ts";
 import { screenFrameHash, screenSurfaceForTool, screenTouchingTool, settledFrameIsNews } from "./screen-frame-gate.ts";
-import { asSchedule, RoutineRequestService } from "./routine-requests.ts"; import { ownerSpokeOnly } from "./cloud-routine-level.ts";
+import { asSchedule, RoutineRequestService } from "./routine-requests.ts"; import { ownerSpokeOnly } from "./cloud-routine-level.ts"; import { routineRunCard, routineRunFallbackText } from "./routine-run-card.ts";
+import { engineLabel, LimitResetClock, nearLimitNote } from "./limit-resets.ts"; import { planAccountsFromInstances } from "./plan-usage.ts"; import { failoverLine, LimitFailovers, limitBackupAllowed } from "./limit-failover.ts"; import { createLimitResetRoutes } from "./routes/limit-resets.ts";
 import { parseTriggerRequest, triggerTarget } from "./trigger-tools.ts"; import { WebhookRequestError, WebhookRequestService } from "./webhook-requests.ts"; import { createAppTriggerHost } from "./app-trigger-host.ts";
 import { appliesNow, directApply, UNDO_STALE, type DirectApply } from "./direct-apply.ts";
 import { createTeamMemoryRequests } from "./team-memory-requests.ts";
@@ -6875,6 +6876,7 @@ bus.subscribe((event: RuntimeEvent) => {
     broadcast({ kind: "runtime", event: publicEvent });
   }
   const routineRun = privateImageEvent ? null : (routines?.handleRuntimeEvent(event) ?? null);
+  if (event.type === "runtime.error") limitClock.noteRefusal(runningTurnEngines.get(event.threadId)?.instanceId, event.limitResetsAt);
   const ownerBot = store.botByThread(event.threadId);
   const bot = ownerBot ? botForThread(ownerBot.id, event.threadId) ?? undefined : undefined;
   const group = bot ? undefined : store.groupByThread(event.threadId);
@@ -8252,6 +8254,7 @@ async function startTurn(
     };
   }
   healThreadModel(botId, threadId);
+  limitFailovers.restore(botId, threadId);
   const bot = store.projectBotForTask(botId, threadId);
   if (!bot) throw Object.assign(new Error("no such task"), { status: 404 });
   if (bot.approvalGrant) {
@@ -9071,13 +9074,15 @@ async function startTurn(
       if (strictResume && !(opts?.cardContinuation && continuingRoutine) && dispatchedConfig !== plannedConfig) dispatchContext = decideContext(dispatchedConfig);
       // Before sendTurn: an adapter may emit the whole turn before it resolves.
       handoffs.dispatching(threadId, dispatchClaimId, dispatchContext.handoff);
-      const clock = takesTurnClock(userTurnText) ? turnClockLine(Date.now(), hostTimeZone()) : "";
+      const clock = takesTurnClock(userTurnText) ? turnClockLine(Date.now(), hostTimeZone()) + nearLimitNote(limitClock.limit(instanceId), engineName(instanceId), hostTimeZone()) : "";
       const shareNote = skillsHost.shareNote(bot, threadId, Boolean(privateWorkspace));
+      const startupRecovery = cfg.automaticRecovery?.enabled === true && (opts?.automaticRecoveryIndex ?? 0) < ((liveBot ?? bot).fallback?.length || (cfg.automaticRecovery.backup ? 1 : 0));
+      const limitedUntil = startupRecovery ? limitClock.blockedUntil(instanceId) : null;
+      if (limitedUntil) throw new TurnUsageLimitRefusedError(`limit-${randomUUID()}`, `${engineName(instanceId)} is at its usage limit.`, limitedUntil);
       const dispatch = await guardTurnDispatch(shareNote.after(instance.adapter.sendTurn({
         threadId,
         botId: bot.id,
-        startupRecovery: cfg.automaticRecovery?.enabled === true &&
-          (opts?.automaticRecoveryIndex ?? 0) < ((liveBot ?? bot).fallback?.length || (cfg.automaticRecovery.backup ? 1 : 0)),
+        startupRecovery,
         text: withTurnClock(clock, withRecalled(recalled, dispatchContext.turnText + shareNote.text)),
         ...(recalled ? { recalled } : {}),
         images: dispatchContext.images,
@@ -9150,6 +9155,7 @@ async function startTurn(
         directTurnClaimIsCurrent(bot.id, dispatchClaimId, threadId);
       if (e instanceof TurnNotStartedError) {
         retireProviderTurn(e.turnId);
+        if (e instanceof TurnUsageLimitRefusedError) limitClock.noteRefusal(instanceId, e.resetsAt);
         if (!mayRecover) e = new DirectTurnSetupCancelled("turn stopped during provider setup");
       }
       handoffs.abandon(threadId, dispatchClaimId);
@@ -9201,7 +9207,8 @@ async function startTurn(
         ? current?.fallback?.length ? current.fallback : cfg.automaticRecovery.backup ? [cfg.automaticRecovery.backup] : []
         : [];
       const nextIndex = backups.findIndex((candidate, index) => index >= (opts?.automaticRecoveryIndex ?? 0) &&
-        registry.get(candidate.instanceId)?.enabled && (!(e instanceof TurnAuthenticationRefusedError) || candidate.instanceId !== instanceId) &&
+        registry.get(candidate.instanceId)?.enabled && (e instanceof TurnUsageLimitRefusedError ? limitBackupAllowed(instance, registry.get(candidate.instanceId)!, instanceConfigs(cfg)[candidate.instanceId])
+          : !(e instanceof TurnAuthenticationRefusedError) || candidate.instanceId !== instanceId) &&
         (candidate.instanceId !== instanceId || candidate.model !== model));
       const backup = backups[nextIndex];
       if (mayRecover && backup && current && (!opts?.cardContinuation || opts.coordination) &&
@@ -9225,8 +9232,9 @@ async function startTurn(
             store.switchTaskModel(bot.id, threadId, checked.selection, false, false, {
               ...hostedModels?.resetTask(current.modelSelection, checked.selection), rewound: true,
             });
+            if (e instanceof TurnUsageLimitRefusedError) limitFailovers.record({ botId: bot.id, threadId, from: current.modelSelection, to: checked.selection, resetsAt: e.resetsAt ?? null, at: Date.now() });
             store.appendMessage(threadId, { role: "bot", kind: "activity", tool: {
-              name: `recovery: Automatic recovery: ${instance.displayName || instance.driverKind} ${e instanceof TurnAuthenticationRefusedError ? "is signed out" : "could not start"}. Trying ${target.displayName || target.driverKind} · ${checked.selection.model} once in this thread.`, ok: true,
+              name: e instanceof TurnUsageLimitRefusedError ? `recovery: ${failoverLine(engineName(instanceId), engineName(target.instanceId), e.resetsAt)}` : `recovery: Automatic recovery: ${instance.displayName || instance.driverKind} ${e instanceof TurnAuthenticationRefusedError ? "is signed out" : "could not start"}. Trying ${target.displayName || target.driverKind} · ${checked.selection.model} once in this thread.`, ok: true,
             } });
             if (opts?.coordination) directCoordinationSettlers.delete(dispatchClaimId);
             else settleDirectCoordination(dispatchClaimId, { ok: false, text: message });
@@ -9245,7 +9253,7 @@ async function startTurn(
         role: "bot",
         kind: "activity",
         turnSucceeded: false,
-        tool: failedTurnTool(message, e instanceof PlaceUnavailableError ? { place: e.row } : {}),
+        tool: failedTurnTool(message, e instanceof PlaceUnavailableError ? { place: e.row } : e instanceof TurnUsageLimitRefusedError ? { limitResetsAt: e.resetsAt } : {}),
       });
       if (opts?.automationSource === undefined && !opts?.commsDepth && !opts?.cardContinuation) {
         notify(
@@ -9297,56 +9305,6 @@ function legacyResultsThread(routineName: string, task: TaskRecord): boolean {
 
 function routineSourceThread(run: RoutineRun): string | null {
   return routineSourceOwner(run)?.threadId ?? null;
-}
-
-function routineRunCard(run: RoutineRun): NonNullable<Message["routineRun"]> {
-  const visibleSummary = run.status === "waiting" ? run.attention : run.output;
-  const summary = visibleSummary ? redactSecretsInText(visibleSummary).slice(0, 2_000) : undefined;
-  const error = run.error ? redactSecretsInText(run.error).slice(0, 500) : undefined;
-  const card: NonNullable<Message["routineRun"]> = {
-    runId: run.id,
-    routineId: run.routineId,
-    routineName: redactSecretsInText(run.routineName),
-    scheduledFor: run.scheduledFor,
-    status: run.status,
-  };
-  if (run.goalStatus) card.goalStatus = run.goalStatus;
-  if (run.deferredAt != null && run.status === "queued") card.deferredAt = run.deferredAt;
-  if (run.threadId) card.executionThreadId = run.threadId;
-  if (summary) card.summary = summary;
-  if (error) card.error = error;
-  return card;
-}
-
-function routineRunFallbackText(card: NonNullable<Message["routineRun"]>): string {
-  const goalState = card.goalStatus === "needs-input"
-    ? "needs your input"
-    : card.goalStatus === "blocked"
-      ? "was blocked"
-      : card.goalStatus === "limit-reached"
-        ? "reached its limit"
-        : card.goalStatus === "stopped"
-          ? "was stopped"
-          : card.goalStatus === "failed"
-            ? "failed"
-            : undefined;
-  const state = goalState ?? (
-    card.status === "waiting"
-      ? "needs your attention"
-      : card.status === "completed"
-        ? "completed"
-        : card.status === "failed"
-          ? "failed"
-          : card.status === "cancelled"
-            ? "was cancelled"
-            : card.status === "missed"
-              ? "was missed"
-              : card.status === "queued" && card.deferredAt != null
-                ? "deferred: target busy"
-              : card.status
-  );
-  const detail = card.summary ?? card.error;
-  return `Routine “${card.routineName}” ${state}${detail ? `\n\n${detail}` : ""}`;
 }
 
 function syncRoutineRunToSource(run: RoutineRun): string | null {
@@ -9457,8 +9415,19 @@ async function stopBotForEmergencyApprovalDowngrade(botId: string): Promise<void
   await directStop;
 }
 
+const engineName = (engine: string) => engineLabel(engine, registry.get(engine) ?? undefined);
+const limitClock = new LimitResetClock({ accounts: () => planAccountsFromInstances(instanceConfigs(cfg)), onChange: () => routines?.retimeLimitResets(),
+  waiting: () => Boolean(routines?.listRoutines().some((routine) => routine.enabled && routine.schedule.type === "limit_reset")) });
+const limitFailovers = new LimitFailovers({ file: join(DATA_DIR, "limit-failovers.json"), blockedUntil: (engine) => limitClock.blockedUntil(engine), engineName,
+  threadModel: (botId, threadId) => store.projectBotForTask(botId, threadId)?.modelSelection ?? null,
+  note: (threadId, line) => store.appendMessage(threadId, { role: "bot", kind: "activity", tool: { name: `recovery: ${line}`, ok: true } }),
+  switchBack: ({ botId, threadId, from, to }) => {
+    const current = store.projectBotForTask(botId, threadId), checked = current ? checkedTaskModelSwitch(current, from, false, false, true) : null;
+    return Boolean(checked?.ok && store.switchTaskModel(botId, threadId, checked.selection, false, false, { ...hostedModels?.resetTask(to, checked.selection), rewound: true }));
+  } });
 routines = new RoutineManager({
-  emit: broadcast,
+  emit: broadcast, limitResetAt: (engine) => limitClock.resetAt(engine),
+  limitBackup: (botId) => cfg.automaticRecovery?.enabled === true && Boolean(store.bot(botId)?.fallback?.length || cfg.automaticRecovery.backup),
   launchId: DESKTOP_MANAGED && /^[\w-]{1,100}$/.test(process.env.OMB_DESKTOP_LAUNCH_ID ?? "")
     ? process.env.OMB_DESKTOP_LAUNCH_ID : undefined,
   hasPendingDelegations: runtimeWorkPending, handedOffWorkLive: (threadId) => coordinator.outstandingFor(threadId).length > 0,
@@ -9487,7 +9456,8 @@ routines = new RoutineManager({
     return task;
   },
   joinConversation: (run) => {
-    if (!routinesInConversationEnabled(cfg) || run.target !== "bot") return null;
+    const continues = routines?.listRoutines().some((routine) => routine.id === run.routineId && routine.schedule.type === "limit_reset");
+    if ((!routinesInConversationEnabled(cfg) && !continues) || run.target !== "bot") return null;
     const source = routineSourceOwner(run);
     if (!source || source.group || source.bot.id !== run.botId) return null;
     return source.threadId;
@@ -9669,7 +9639,7 @@ async function cloudRoutineReadiness(botId: string, threadId?: string): Promise<
 }
 const routineRequests = new RoutineRequestService({
   store,
-  routines,
+  routines, engines: { name: engineName, resetAt: (engine) => limitClock.resetAt(engine), botEngine: (botId) => store.bot(botId)?.modelSelection.instanceId },
   autoApply: routineAppliesDirectly,
   cloudReady: cloudRoutineReadiness,
   canPersist: proposalPersistence,
@@ -10203,6 +10173,9 @@ const appTriggers = createAppTriggerHost({ store, webhooks, routines: () => rout
   audit: (row) => appendDecision(DATA_DIR, { ...row, decision: "auto-approved", source: "routine" }) });
 tieAutomationsToBots(store, { routines: routines!, webhooks, apps: appTriggers.manager });
 ROUTES.push(appTriggers.routes);
+ROUTES.push(createLimitResetRoutes({ clock: limitClock, routines: routines!, requests: routineRequests, engineName, threadEngine: (botId, threadId) => turnSelection(botId, threadId)?.instanceId,
+  threadTitle: (botId, threadId) => store.bot(botId) && !store.bot(botId)!.hidden ? store.taskByThread(botId, threadId)?.title ?? null : null,
+  created: (id, auth) => cloudRoutineAuthors?.wrote(id, auth.kind === "session" ? actorKey(auth) : CLOUD_NOBODY_KEY) }));
 
 let webhookIngress: WebhookIngress | null = null;
 let webhookIngressError: string | null = null;
@@ -17170,6 +17143,7 @@ server.listen(PORT, "127.0.0.1", async () => {
   }
   // Only once every registry is initialized and the endpoint listens: earlier dispatch can hit uninitialized bindings.
   routines!.start();
+  limitClock.start();
   memoryUpkeep.start();
 });
 
