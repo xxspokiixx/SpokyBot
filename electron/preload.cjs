@@ -238,6 +238,8 @@ const bridge = {
       throw new Error(message.replace(/^Error invoking remote method '[^']*':\s*(?:Error:\s*)?/, ""));
     }),
   revealInFolder: (filePath) => ipcRenderer.invoke("desktop:reveal-file", filePath),
+  // This app's own logs folder (server.log, desktop-crashes.log, updater.log); the page names no path.
+  openLogsFolder: () => ipcRenderer.invoke("desktop:open-logs"),
   setCredential: (name, value) => ipcRenderer.invoke("credential:set", name, value),
 
   updater: {
