@@ -367,3 +367,44 @@ describe("turning a webhook back on, Run now, and a deleted bot's webhooks", () 
     expect(saved.deleted).toEqual([]);
   });
 });
+
+describe("wrong-secret calls, counted", () => {
+  const wrong = (manager: WebhookManager, endpointId: string) => manager.recordUnauthorized(endpointId);
+  const refusals = (manager: WebhookManager) => manager.listAttempts().filter((attempt) => attempt.statusCode === 401).map((attempt) => [attempt.receivedAt, attempt.reason]);
+
+  it("never counts an older refusal from before a restart into today's", () => {
+    const h = harness();
+    const { webhook } = create(h.manager);
+    const start = new Date("2026-08-16T10:00:00.000Z").getTime();
+    wrong(h.manager, webhook.endpointId);
+    h.manager.update(webhook.id, { name: "Renamed" });
+    const later = start + 2 * 24 * 60 * 60_000;
+    h.setNow(later);
+    const restarted = new WebhookManager(h.options);
+    wrong(restarted, webhook.endpointId);
+    h.setNow(later + 30_000);
+    wrong(restarted, webhook.endpointId);
+    expect(refusals(restarted)).toEqual([[start, "Invalid webhook URL or secret"], [later + 30_000, "Invalid webhook URL or secret (2 requests)"]]);
+  });
+
+  it("starts a new count after a call that got in, or after a pause, and keeps one burst's count across a restart", () => {
+    const h = harness();
+    const { webhook, secret } = create(h.manager);
+    const start = new Date("2026-08-16T10:00:00.000Z").getTime();
+    wrong(h.manager, webhook.endpointId);
+    h.manager.receive(webhook.endpointId, secret, { payload: {}, deliveryId: "real" });
+    h.setNow(start + 60_000);
+    wrong(h.manager, webhook.endpointId);
+    h.setNow(start + 60 * 60_000);
+    wrong(h.manager, webhook.endpointId);
+    h.manager.update(webhook.id, { name: "Renamed" });
+    h.setNow(start + 61 * 60_000);
+    const restarted = new WebhookManager(h.options);
+    wrong(restarted, webhook.endpointId);
+    expect(refusals(restarted)).toEqual([
+      [start, "Invalid webhook URL or secret"],
+      [start + 60_000, "Invalid webhook URL or secret"],
+      [start + 61 * 60_000, "Invalid webhook URL or secret (2 requests)"],
+    ]);
+  });
+});

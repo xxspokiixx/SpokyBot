@@ -88,6 +88,7 @@ const MAX_EVENT_CHARS = 48_000;
 const RATE_WINDOW_MS = 60_000;
 const RATE_LIMIT = 10;
 const UNAUTHORIZED_REASON = "Invalid webhook URL or secret";
+const UNAUTHORIZED_BURST_MS = 15 * 60_000;
 export const DEFAULT_MAX_PENDING_RUNS = 3;
 export const MAX_PENDING_RUNS_LIMIT = 50;
 const maxPendingRunsSchema = z.number().int().min(1).max(MAX_PENDING_RUNS_LIMIT);
@@ -304,7 +305,6 @@ export class WebhookManager {
   private attempts: WebhookAttempt[] = [];
   private deleted: Array<z.output<typeof deletedWebhookSchema>> = [];
   private rate = new Map<string, number[]>();
-  private unauthorized = new Map<string, number>();
   /** Saves are refused while set, so an empty state never overwrites an unreadable file. */
   private unreadable = false;
 
@@ -402,7 +402,6 @@ export class WebhookManager {
     this.deliveries = this.deliveries.filter((delivery) => !delivery.key.startsWith(`${trigger.endpointId}:`));
     this.attempts = this.attempts.filter((attempt) => attempt.webhookId !== trigger.id);
     this.rate.delete(trigger.endpointId);
-    this.unauthorized.delete(trigger.id);
     this.options.cancelQueued?.(trigger.id, "The webhook was deleted before this delivery started");
     this.save();
     this.options.emit?.({ kind: "webhook.deleted", webhookId: id });
@@ -448,7 +447,6 @@ export class WebhookManager {
     this.deliveries = this.deliveries.filter((delivery) => !endpoints.some((prefix) => delivery.key.startsWith(prefix)));
     for (const trigger of gone) {
       this.rate.delete(trigger.endpointId);
-      this.unauthorized.delete(trigger.id);
       this.options.cancelQueued?.(trigger.id, "The assigned MAUS was deleted");
     }
     this.save();
@@ -494,24 +492,17 @@ export class WebhookManager {
     return this.recordRejectedForTrigger(trigger, statusCode, reason, event);
   }
 
-  /** Anyone who reaches the receiver can send a wrong secret: one rolling record per webhook, saved with the next real change. */
+  /** Anyone who reaches the receiver can send a wrong secret: one rolling record per burst, saved with the next real change. */
   recordUnauthorized(endpointId: string, event: Partial<WebhookEvent> = {}): WebhookAttempt | null {
     const trigger = this.webhooks.find((candidate) => candidate.endpointId === endpointId);
     if (!trigger) return null;
-    const at = this.attempts.findLastIndex((attempt) =>
-      attempt.webhookId === trigger.id && attempt.outcome === "rejected" && attempt.statusCode === 401);
-    if (at === -1) {
-      this.unauthorized.set(trigger.id, 1);
-      return this.appendAttempt(trigger, event, { outcome: "rejected", statusCode: 401, reason: UNAUTHORIZED_REASON, deliveryId: event.deliveryId });
+    const details = (count: number) => ({ outcome: "rejected" as const, statusCode: 401, reason: count > 1 ? `${UNAUTHORIZED_REASON} (${count} requests)` : UNAUTHORIZED_REASON, deliveryId: event.deliveryId });
+    const at = this.attempts.findLastIndex((attempt) => attempt.webhookId === trigger.id);
+    const burst = at === -1 ? undefined : this.attempts[at]!;
+    if (!burst || burst.outcome !== "rejected" || burst.statusCode !== 401 || this.now() - burst.receivedAt > UNAUTHORIZED_BURST_MS) {
+      return this.appendAttempt(trigger, event, details(1));
     }
-    const count = (this.unauthorized.get(trigger.id) ?? 1) + 1;
-    this.unauthorized.set(trigger.id, count);
-    const attempt = this.buildAttempt(trigger, event, {
-      outcome: "rejected",
-      statusCode: 401,
-      reason: `${UNAUTHORIZED_REASON} (${count} requests)`,
-      deliveryId: event.deliveryId,
-    }, this.attempts[at]!.id);
+    const attempt = this.buildAttempt(trigger, event, details(Number(/\((\d+) requests\)$/.exec(burst.reason ?? "")?.[1] ?? 1) + 1), burst.id);
     this.attempts[at] = attempt;
     this.options.emit?.({ kind: "webhook.attempt", attempt: { ...attempt } });
     return attempt;

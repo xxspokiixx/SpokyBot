@@ -6484,7 +6484,13 @@
       "automations.address.showSecretLabel": "d518dd8aaa7fb94b467b8f0b7576df00079a9a801e7a109bf47525992b1d173c",
       "automations.address.hideSecretLabel": "8f4cd2f6bc60314926ce9d4440552eb65de7ef3f718e816e741142d49046a8bc",
       "automations.address.copySecretLabel": "cb07899c43f927f18b79ac6dc8338b58f71efc6baa6edea48a9b8c59ecaa3412",
-      "automations.address.copyFailed": "a5549df61a4988f9e98c73c02f9641a9310e3ad3717a796768fd1446a375c676"
+      "automations.address.copyFailed": "a5549df61a4988f9e98c73c02f9641a9310e3ad3717a796768fd1446a375c676",
+      "automations.preview.finished": "679f7db4a8e624faa8fe51a5d93c03b4e6735120e86dd5e8562f58215c6ba95a",
+      "automations.preview.failed": "5ce27668cd127c867aa3f2d53d837bdc4c1ad12a8715b21bf80abc72b3b89111",
+      "automations.preview.needsYou": "40dbf04af1f8b0c265162193e3a8f41090e13a66dea44649dd5d1aca9430154b",
+      "automations.preview.stopped": "c950f55e893a783d05be5b275d472ce1c5fc4e92ee89b3987a0208a809bf200b",
+      "automations.preview.missed": "ef276c0daed4c191933dfc4e5cc7227c650c1e627b785024ecf029ee65aaddc7",
+      "automations.preview.running": "f839f179c335c3cd3382fdee286e7024b856bed95f27d00df9cb46def1b9cc94"
     },
     "fr": {
       "pro.fromPrice": "a48a04a457d60b08b54fc83e7a6c4584ffedb1e23621859084900c8521a3af7b",
@@ -19229,7 +19235,13 @@
       "automations.address.showSecretLabel": "d518dd8aaa7fb94b467b8f0b7576df00079a9a801e7a109bf47525992b1d173c",
       "automations.address.hideSecretLabel": "8f4cd2f6bc60314926ce9d4440552eb65de7ef3f718e816e741142d49046a8bc",
       "automations.address.copySecretLabel": "cb07899c43f927f18b79ac6dc8338b58f71efc6baa6edea48a9b8c59ecaa3412",
-      "automations.address.copyFailed": "a5549df61a4988f9e98c73c02f9641a9310e3ad3717a796768fd1446a375c676"
+      "automations.address.copyFailed": "a5549df61a4988f9e98c73c02f9641a9310e3ad3717a796768fd1446a375c676",
+      "automations.preview.finished": "679f7db4a8e624faa8fe51a5d93c03b4e6735120e86dd5e8562f58215c6ba95a",
+      "automations.preview.failed": "5ce27668cd127c867aa3f2d53d837bdc4c1ad12a8715b21bf80abc72b3b89111",
+      "automations.preview.needsYou": "40dbf04af1f8b0c265162193e3a8f41090e13a66dea44649dd5d1aca9430154b",
+      "automations.preview.stopped": "c950f55e893a783d05be5b275d472ce1c5fc4e92ee89b3987a0208a809bf200b",
+      "automations.preview.missed": "ef276c0daed4c191933dfc4e5cc7227c650c1e627b785024ecf029ee65aaddc7",
+      "automations.preview.running": "f839f179c335c3cd3382fdee286e7024b856bed95f27d00df9cb46def1b9cc94"
     },
     "zh": {
       "pro.fromPrice": "a48a04a457d60b08b54fc83e7a6c4584ffedb1e23621859084900c8521a3af7b",
