@@ -16,6 +16,8 @@ replays before and after it.
 - `logs/before-<sha12>.json` — the baseline run, recorded before any of the
   speak-pipeline changes. A later after-run lands beside it as
   `logs/after-<sha12>.json` with the same corpus sha in the name.
+- `logs/firstbyte-<sha12>.json` — the synthesis-leg row for the
+  319-char reply (see Streamed delivery below).
 
 Regenerate (must reproduce the committed bytes exactly):
 
@@ -47,6 +49,17 @@ models 11.2 s of synthesis. The stub returns silent MPEG-1 Layer III frames
 browser's real playback time is the model. Every synthesis-derived number in a
 run log is labeled `"modeled": true` (log `synthesis` block, `totals`, each
 reply row).
+
+Streamed delivery: `synthesize()` asks the wire for streamed audio
+(`stream=true`), and the stub honors the flag — first chunk at the pinned
+modeled first-byte latency (`synthesis.firstByteMs`), remaining chunks spread
+so the last byte still lands at the whole-clip synthesis time. Generation is
+unchanged; only delivery streams. A request without the flag (the before
+build) gets the whole clip after the full delay, so before/after totals stay
+comparable. The synthesis-leg proof row for the 319-char reply is
+`logs/firstbyte-<sha12>.json`, produced by
+`node --experimental-strip-types scripts/testing/voice-latency-firstbyte.ts`;
+every timing in it is modeled.
 
 Delta replay cadence, identical on both sides: `FAKE_CLAUDE_STREAM_CADENCE`
 (server/testing/fake-claude-cli.ts) streams each scripted reply as 24-char

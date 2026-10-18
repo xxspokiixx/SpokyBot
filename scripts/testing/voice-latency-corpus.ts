@@ -17,8 +17,10 @@ export const GAP_THRESHOLD_MS = 200;
 export const CADENCE = { chunkChars: 24, intervalMs: 150 } as const;
 /** Modeled synthesis timing for the record stub: synthesis takes RTF × the
  * modeled clip duration (audioMsPerChar per text char). Pins the worst
- * case: 319 chars × 0.5 × 70 ms = 11.2 s of synthesis. */
-export const SYNTHESIS = { rtf: 0.5, audioMsPerChar: 70 } as const;
+ * case: 319 chars × 0.5 × 70 ms = 11.2 s of synthesis. firstByteMs is
+ * the modeled provider TTFT for streamed delivery: a protocol pin,
+ * not a measurement. */
+export const SYNTHESIS = { rtf: 0.5, audioMsPerChar: 70, firstByteMs: 300 } as const;
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 export const CORPUS_PATH = join(HERE, "fixtures", "voice-latency", "corpus.json");

@@ -13,7 +13,8 @@
   },
   "synthesis": {
     "rtf": 0.5,
-    "audioMsPerChar": 70
+    "audioMsPerChar": 70,
+    "firstByteMs": 300
   },
   "totals": {
     "replies": 24,

@@ -18,9 +18,12 @@ export const STUB_VOICE = "omb-stub-voice";
 export const STUB_KEY = "omb-record-stub";
 
 /** Modeled synthesis latency: RTF × modeled clip duration, one value per
- * text char. 319 chars → 11,165 ms, the review's 11.2 s worst case. */
+ * text char. 319 chars → 11,165 ms, the pinned 11.2 s worst case. */
 export const synthesisDelayMs = (chars: number): number =>
   chars * SYNTHESIS.rtf * SYNTHESIS.audioMsPerChar;
+
+/** Chunks a streamed response is spread over. */
+const STREAM_CHUNKS = 8;
 
 // One MPEG-1 Layer III frame at the requested wire format (44.1 kHz, 64 kbps,
 // mono, no CRC): 208 bytes = 144 × 64000 / 44100. A zero payload decodes as
@@ -69,11 +72,27 @@ export function launchVoiceLatencyStub(): Promise<VoiceLatencyStub> {
           return fail(400, "text required");
         }
         const chars = [...body.text].length;
-        setTimeout(() => {
-          const bytes = silenceMp3(chars * SYNTHESIS.audioMsPerChar);
-          res.writeHead(200, { "content-type": "audio/mpeg", "content-length": String(bytes.byteLength) });
-          res.end(bytes);
-        }, synthesisDelayMs(chars));
+        const bytes = silenceMp3(chars * SYNTHESIS.audioMsPerChar);
+        const totalMs = synthesisDelayMs(chars);
+        if (new URL(req.url ?? "/", "http://stub").searchParams.get("stream") !== "true") {
+          setTimeout(() => {
+            res.writeHead(200, { "content-type": "audio/mpeg", "content-length": String(bytes.byteLength) });
+            res.end(bytes);
+          }, totalMs);
+          return;
+        }
+        // Streamed delivery, modeled: first chunk at the pinned first-byte
+        // latency, the rest spread so the last byte still lands at the
+        // whole-clip synthesis time — generation is unchanged, delivery streams.
+        const firstAt = Math.min(SYNTHESIS.firstByteMs, totalMs / 2);
+        const chunkBytes = Math.ceil(bytes.byteLength / STREAM_CHUNKS);
+        res.writeHead(200, { "content-type": "audio/mpeg" });
+        for (let j = 0; j < STREAM_CHUNKS; j += 1) {
+          const chunk = bytes.subarray(j * chunkBytes, Math.min((j + 1) * chunkBytes, bytes.byteLength));
+          setTimeout(() => res.write(chunk), Math.round(firstAt + ((totalMs - firstAt) * j) / (STREAM_CHUNKS - 1)));
+        }
+        setTimeout(() => res.end(), totalMs);
+        return;
       });
       return;
     }
