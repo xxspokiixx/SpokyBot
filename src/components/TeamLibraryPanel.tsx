@@ -28,7 +28,7 @@ import {
 } from "lucide-react";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
-import { catalogCopy, type TeamCatalog, type TeamCatalogEntry } from "@/lib/team-catalog";
+import { catalogCopy, catalogMatches, type TeamCatalog, type TeamCatalogEntry } from "@/lib/team-catalog";
 
 import { ShareTeamDialog } from "./ShareTeamDialog";
 import { OrgLibraryTab } from "./TeamLibraryPanelOrg";
@@ -569,12 +569,7 @@ export function TeamLibraryPanel({
   };
 
   const normalizedSearch = search.trim().toLowerCase();
-  const visibleTeams = (catalog?.teams ?? []).filter((entry) => {
-    if (!normalizedSearch) return true;
-    return `${entry.name} ${entry.summary} ${entry.category} ${entry.skills.join(" ")} ${entry.requires.apps.join(" ")}`
-      .toLowerCase()
-      .includes(normalizedSearch);
-  });
+  const visibleTeams = (catalog?.teams ?? []).filter((entry) => !normalizedSearch || catalogMatches(entry, normalizedSearch));
 
   return createPortal(
     <div

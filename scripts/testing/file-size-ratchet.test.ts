@@ -47,7 +47,7 @@ const LINES: Record<string, number> = {
   "src/components/ChatMarkdown.tsx": 1039,
   "src/components/PluginsPanel.tsx": 1113,
   "server/org-library.ts": 1003,
-  "src/components/TeamLibraryPanel.tsx": 1102,
+  "src/components/TeamLibraryPanel.tsx": 1097,
   "src/components/AttachmentPreview.tsx": 1044,
 };
 

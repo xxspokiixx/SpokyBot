@@ -23,6 +23,7 @@ import {
   dispatchRefusal, engineFacts, loadOwnerNotices, recoverRun, requeueOnce, weekRuns, type RoutineAlert, type RoutineFailureFacts, type RoutineOwnerNotice,
 } from "./routine-recovery.ts";
 import { activeMs, askOf, settleAsk, waitingFor, type RoutineRunAsk } from "./routine-waits.ts";
+import { failsLikeLastOutcome, outcomesNewestFirst } from "./routine-outcomes.ts";
 import { EVENT_RETRY_WINDOW_MS, loadEventReceipts, MAX_EVENT_RECEIPTS, type EventRunReceipt } from "./routine-event-receipts.ts";
 
 export type { RoutineContextAttachment, RoutineIntervalWindow, RoutineRunStatus, RoutineRunTrigger };
@@ -747,18 +748,8 @@ export class RoutineManager {
     this.save();
   }
 
-  private outcomesNewestFirst(routineId: string, exceptRunId?: string): RoutineRun[] {
-    return this.runs.filter(run => run.routineId === routineId && run.id !== exceptRunId && (run.status === "failed" || run.status === "completed")).reverse()
-      .sort((a, b) => (b.finishedAt ?? b.createdAt) - (a.finishedAt ?? a.createdAt) || b.createdAt - a.createdAt);
-  }
-
-  private failsLikeLastOutcome(run: RoutineRun): boolean {
-    const last = this.outcomesNewestFirst(run.routineId, run.id)[0];
-    return last?.status === "failed" && last.error === run.error;
-  }
-
   private routineWithHealth(routine: Routine): Routine {
-    const outcomes = this.outcomesNewestFirst(routine.id);
+    const outcomes = outcomesNewestFirst(this.runs, routine.id);
     const success = outcomes.findIndex(run => run.status === "completed");
     const failures = success < 0 ? outcomes.length : success;
     const { installedPackage: _installedPackage, ...visible } = cloneRoutine(routine);
@@ -1598,7 +1589,7 @@ export class RoutineManager {
     run.finishedAt = this.now();
     this.save();
     this.emitRun(run);
-    this.options.onRunFailed?.(cloneRun(run), alert === undefined && this.failsLikeLastOutcome(run) ? null : alert);
+    this.options.onRunFailed?.(cloneRun(run), alert === undefined && failsLikeLastOutcome(this.runs, run) ? null : alert);
   }
 
   private advancePastOccurrence(routine: Routine, now: number, occurrence: number) {
