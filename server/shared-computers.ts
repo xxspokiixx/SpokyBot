@@ -32,12 +32,28 @@ export type KnownLentComputer = {
   id: string; name: string; platform: "darwin" | "win32" | "linux" | null; online: boolean; busy: boolean; lent: boolean;
   lastSeenAt: number; lastUsedAt: number | null; scopes: { folders: number; terminal: boolean; screen: boolean };
 };
-type Job = { id: string; operation: Operation; active: () => boolean; sent: boolean; resolve: (result: unknown) => void; reject: (error: Error) => void; timer: NodeJS.Timeout };
-type Computer = { registration: Registration; owner: SharedComputerOwner; secret: string; seen: number; jobs: Map<string, Job>; wake?: () => void };
+type Job = {
+  id: string; operation: Operation; active: () => boolean; sent: boolean; leased: boolean; resolve: (result: unknown) => void; reject: (error: Error) => void;
+  timer: NodeJS.Timeout; delivery?: NodeJS.Timeout;
+};
+type Computer = { registration: Registration; owner: SharedComputerOwner; secret: string; seen: number; jobs: Map<string, Job>; wake?: () => void; polls: number };
 const failure = (message: string, status = 409) => Object.assign(new Error(message), { status });
 const TOTAL = 100;
 const RETAIN_MS = 14 * 24 * 60 * 60_000;
+/** The desktop leases a job before it runs it, so a job not leased by then went to a poll whose answer never arrived. */
+const DELIVERY_MS = 10_000;
+/** How long a request waits for a computer seen this recently to finish reconnecting. */
+const RECONNECTING_MS = 60_000;
+const RECONNECT_WAIT_MS = 15_000;
 const OFFLINE = "This shared computer is offline. Keep its desktop app open; do not substitute files on the server.";
+const lentButOffline = (name: string, seen: number, device: "PC" | "Mac" | "computer" = "computer") => `${name} is lent but has been offline for ${Math.max(1, Math.round((Date.now() - seen) / 60_000))} min: OpenMausBot on it is closed, the ${device} is asleep or locked, or its desktop app is signed out of MausBot Cloud. Tell the person in one sentence to open OpenMausBot on that ${device}; do not substitute files on the server.`;
+
+/** Aborts when the client of a long poll goes away before it is answered. */
+export function responseGone(res: { once(event: "close", listener: () => void): unknown; readonly writableEnded: boolean }): AbortSignal {
+  const gone = new AbortController();
+  res.once("close", () => { if (!res.writableEnded) gone.abort(); });
+  return gone.signal;
+}
 
 /** The desktop's grant is the authority and checks every operation again; the server just never queues work outside what it lends. */
 export function sharedComputerScopeRefusal(registration: Registration, operation: Pick<Operation, "action" | "folder_id">): string | null {
@@ -93,7 +109,7 @@ export class SharedComputers {
       for (const job of entry.jobs.values()) this.finish(entry, job, failure("This computer's access changed. An in-flight action may have completed; inspect before retrying."));
     }
     if (this.computers.size >= TOTAL) throw failure("Too many shared computers");
-    this.computers.set(key, { registration, owner: { ...owner }, secret, seen: Date.now(), jobs: new Map() });
+    this.computers.set(key, { registration, owner: { ...owner }, secret, seen: Date.now(), jobs: new Map(), polls: 0 });
     this.remember(registration, owner.person);
   }
   private remember(registration: Registration, person: string) {
@@ -142,34 +158,50 @@ export class SharedComputers {
       },
     }));
   }
-  async poll(id: string, session: string, secret: string) {
+  /** The newest poll wins: one whose client dropped never takes the next job, and the reconnecting desktop is not refused. */
+  async poll(id: string, session: string, secret: string, gone?: AbortSignal) {
     const entry = this.authorize(id, session, secret);
-    if (entry.wake) throw failure("A computer poll is already running");
+    const mine = ++entry.polls;
+    entry.wake?.();
     entry.seen = Date.now();
     this.lent?.seen(entry.owner.person, id);
     const next = () => {
+      if (entry.polls !== mine || gone?.aborted) return null;
       for (const job of entry.jobs.values()) {
         if (!job.active()) { this.finish(entry, job, failure("The requesting turn ended")); continue; }
-        if (!job.sent) { job.sent = true; return { id: job.id, operation: job.operation }; }
+        if (!job.sent) { this.send(entry, job); return { id: job.id, operation: job.operation }; }
       }
       return null;
     };
     const queued = next();
     if (queued) return queued;
     await new Promise<void>(resolve => {
-      const timer = setTimeout(() => { entry.wake = undefined; resolve(); }, 20_000);
-      entry.wake = () => { clearTimeout(timer); entry.wake = undefined; resolve(); };
+      const wake = () => { clearTimeout(timer); gone?.removeEventListener("abort", wake); if (entry.wake === wake) entry.wake = undefined; resolve(); };
+      const timer = setTimeout(wake, 20_000);
+      gone?.addEventListener("abort", wake, { once: true });
+      entry.wake = wake;
     });
     this.authorize(id, session, secret);
     entry.seen = Date.now();
     this.lent?.seen(entry.owner.person, id);
     return next();
   }
+  private send(entry: Computer, job: Job) {
+    job.sent = true;
+    job.delivery = setTimeout(() => {
+      if (job.leased || entry.jobs.get(job.id) !== job) return;
+      entry.jobs.delete(job.id);
+      job.id = randomUUID(); job.sent = false;
+      entry.jobs.set(job.id, job); entry.wake?.();
+    }, DELIVERY_MS);
+  }
   liveJob(id: string, session: string, secret: string, jobId: string) {
     const entry = this.authorize(id, session, secret);
     entry.seen = Date.now();
     const job = entry.jobs.get(jobId);
-    return job?.sent === true && job.active();
+    if (job?.sent !== true) return false;
+    job.leased = true; clearTimeout(job.delivery);
+    return job.active();
   }
   complete(id: string, session: string, secret: string, jobId: string, result: unknown) {
     const entry = this.authorize(id, session, secret);
@@ -185,17 +217,27 @@ export class SharedComputers {
     for (const job of entry.jobs.values()) this.finish(entry, job, failure("Computer disconnected. An in-flight action may have completed; inspect before retrying."));
   }
   /** Another person's computer answers exactly like one that does not exist. */
-  request(operation: Operation, principal: string | null, active: () => boolean): Promise<unknown> {
-    if (!principal) return Promise.reject(failure("This conversation cannot use a shared computer: only a conversation started by the person who shared it can.", 403));
-    const entry = [...this.computers.values()].find(candidate => candidate.registration.id === operation.computer_id && candidate.owner.person === principal && this.online(candidate));
-    if (!entry) return Promise.reject(failure(this.offline(principal, operation.computer_id)));
+  async request(operation: Operation, principal: string | null, active: () => boolean): Promise<unknown> {
+    if (!principal) throw failure("This conversation cannot use a shared computer: only a conversation started by the person who shared it can.", 403);
+    const lent = () => [...this.computers.values()].find(candidate => candidate.registration.id === operation.computer_id && candidate.owner.person === principal);
+    for (const deadline = Date.now() + RECONNECT_WAIT_MS; ;) {
+      const known = lent();
+      if (known && this.online(known)) break;
+      if (!known || Date.now() - known.seen > RECONNECTING_MS || Date.now() >= deadline || !active()) {
+        throw failure(known && this.sessionLive(known.owner.session)
+          ? lentButOffline(known.registration.name, known.seen, deviceWord(known.registration.platform))
+          : this.offline(principal, operation.computer_id));
+      }
+      await new Promise(resolve => setTimeout(resolve, 250));
+    }
+    const entry = lent()!;
     const refusal = sharedComputerScopeRefusal(entry.registration, operation);
-    if (refusal) return Promise.reject(failure(refusal, 403));
-    if (entry.jobs.size >= 1) return Promise.reject(failure("This shared computer is busy. Wait for its current action to finish."));
-    if (!active()) return Promise.reject(failure("The requesting turn ended", 401));
+    if (refusal) throw failure(refusal, 403);
+    if (entry.jobs.size >= 1) throw failure("This shared computer is busy. Wait for its current action to finish.");
+    if (!active()) throw failure("The requesting turn ended", 401);
     return new Promise((resolve, reject) => {
       const id = randomUUID();
-      const job: Job = { id, operation, active, sent: false, resolve, reject, timer: setTimeout(() => this.finish(entry, job, failure("Computer action timed out. Its outcome is unknown; inspect before retrying.")), 45_000) };
+      const job: Job = { id, operation, active, sent: false, leased: false, resolve, reject, timer: setTimeout(() => this.finish(entry, job, failure("Computer action timed out. Its outcome is unknown; inspect before retrying.")), 45_000) };
       entry.jobs.set(id, job); entry.wake?.();
     });
   }
@@ -216,7 +258,7 @@ export class SharedComputers {
     this.computers.clear();
   }
   private finish(entry: Computer, job: Job, error: Error | null, result?: unknown) {
-    clearTimeout(job.timer); entry.jobs.delete(job.id);
+    clearTimeout(job.timer); clearTimeout(job.delivery); entry.jobs.delete(job.id);
     if (error) job.reject(error); else job.resolve(result);
   }
 }

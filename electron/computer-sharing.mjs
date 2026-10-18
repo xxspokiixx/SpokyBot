@@ -6,6 +6,7 @@ import { randomBytes, randomUUID } from "node:crypto";
 import { setTimeout as delay } from "node:timers/promises";
 import { createSharedCua, executeSharedOperation, personalSecretPaths, sharedComputerError } from "./shared-computer-access.mjs";
 import { createLendingActivity, describeSharedOperation } from "./lending-activity.mjs";
+import { cuaUnavailable, SCREEN_LOCKED } from "./lent-screen-failures.mjs";
 
 const uuid = value => typeof value === "string" && /^[a-f0-9]{8}-[a-f0-9]{4}-[1-8][a-f0-9]{3}-[89ab][a-f0-9]{3}-[a-f0-9]{12}$/i.test(value);
 const DATA_VOLUME = "/System/Volumes/Data";
@@ -103,7 +104,7 @@ const RECONNECT_EVERY_MS = 15 * 60_000;
 /** Outbound HTTPS only: no local listening port, and pairing cookies and the connector secret stay in Electron. */
 /** `reconnect(origin)`: signs this app back in to the person's own Cloud when its session there has ended, so lending
  * resumes by itself; at most every 15 minutes. */
-export function createComputerSharing({ file, fetch: fetchImpl, environments, cuaConnection, hostControl, protectedPaths = [], enabled = async () => false, home = os.homedir(), activityFile, cloud = () => null, onChange = () => {}, reconnect = null, now = Date.now }) {
+export function createComputerSharing({ file, fetch: fetchImpl, environments, cuaConnection, hostControl, screenLocked = () => false, protectedPaths = [], enabled = async () => false, home = os.homedir(), activityFile, cloud = () => null, onChange = () => {}, reconnect = null, now = Date.now }) {
   const protectedRoots = [path.dirname(file), ...protectedPaths.filter(entry => typeof entry === "string" && entry), ...personalSecretPaths(home)];
   const activity = createLendingActivity(activityFile ?? path.join(path.dirname(file), "lending-activity.jsonl"));
   let records = {};
@@ -266,6 +267,7 @@ export function createComputerSharing({ file, fetch: fetchImpl, environments, cu
             try {
               await lease(); jobSignal.throwIfAborted();
               if (grant.computer && ["computer_tools", "computer_call"].includes(job.operation.action)) {
+                if (job.operation.action === "computer_call" && screenLocked()) throw new Error(SCREEN_LOCKED);
                 if (!hostControl) throw new Error("The local computer control gate is unavailable");
                 control = await hostControl(job.id, jobSignal);
                 jobSignal.throwIfAborted();
@@ -274,7 +276,7 @@ export function createComputerSharing({ file, fetch: fetchImpl, environments, cu
                 if (!live.cua) {
                   const connection = await cuaConnection();
                   jobSignal.throwIfAborted();
-                  if (!connection?.mcpCommand || !Array.isArray(connection.mcpArgs)) throw new Error("Computer control is unavailable. Enable it in the local app and grant OS permissions first.");
+                  if (!connection?.mcpCommand || !Array.isArray(connection.mcpArgs)) throw new Error(cuaUnavailable(connection?.reason));
                   live.cua = createSharedCua(connection);
                 }
                 return live.cua;
