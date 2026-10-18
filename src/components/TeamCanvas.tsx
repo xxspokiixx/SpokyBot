@@ -9,6 +9,7 @@ import { COMPUTER_DRAG_TYPE, fitTeams, layoutTeams, orderBots, parseBotOrders, p
 import { bestColumns, polylinePath, teamGeometry, type TeamGeometry } from "@/lib/team-canvas-computers";
 import { teamComputersFor, type ShownFrame } from "@/lib/map-computers";
 import { activityPreview, botEngine } from "@/lib/failed-turn";
+import { computerStepLine } from "@/lib/computer-step";
 import type { MapComputer, MapComputerState } from "../../shared/map-computer";
 import { BotAvatar } from "./Avatar";
 import { ComputerNode } from "./ComputerNode";
@@ -86,7 +87,7 @@ function currentActivity(bot: Bot | undefined, instances: ReturnType<typeof useS
   if (!bot?.busy) return undefined;
   const open = bot.tasks?.find((task) => task.threadId === bot.threadId);
   const last = !open || open.busy ? bot.messages.findLast((message) => message.kind === "activity" && message.tool) : undefined;
-  if (last?.tool) return activityPreview(last.tool, botEngine(bot, instances), last.dataResult);
+  if (last?.tool) return computerStepLine(last.tool) ?? activityPreview(last.tool, botEngine(bot, instances), last.dataResult);
   return bot.tasks?.find((task) => task.busy && task.threadId !== bot.threadId && task.title.trim())?.title;
 }
 
