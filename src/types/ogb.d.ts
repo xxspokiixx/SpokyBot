@@ -123,6 +123,8 @@ const __APP_VERSION__: string;
       /** The Cloud's setup checklist: shows the lending switch in this app's
        * own Settings → OMB Cloud (leaving the Cloud's page). */
       cloudLending?: { open(): Promise<void> };
+      /** This computer's Settings → Logins only: what of Logins My Cloud has, and Also use on My Cloud. */
+      cloudLogins?: import("../../electron/cloud-logins.mjs").CloudLoginsBridge;
       /** Settings on the person's own Cloud: the plan, read only. */
       cloudPlan?: import("../../electron/cloud-account.mjs").CloudPlanBridge;
       desktopNotices?: import("../../electron/desktop-prefs.mjs").DesktopNoticesBridge;

@@ -339,6 +339,11 @@ const bridge = {
   cloudLending: process.argv.includes("--omb-company-desktop=1") ? {
     open: () => ipcRenderer.invoke("cloud-lending:open"),
   } : undefined,
+  // This computer's Settings only (never a remote page): what of Logins My Cloud has, and Also use on My Cloud.
+  cloudLogins: process.argv.includes("--omb-company-desktop=1") && isLocalPage ? {
+    state: () => ipcRenderer.invoke("cloud-logins:state"),
+    send: what => ipcRenderer.invoke("cloud-logins:send", what?.kind === "login" ? { kind: "login", id: String(what.id) } : { kind: "1password" }),
+  } : undefined,
   cloudPlan: process.argv.includes("--omb-company-desktop=1") ? {
     state: () => ipcRenderer.invoke("cloud-plan:state"),
     manage: () => isLocalPage || navigator.userActivation?.isActive === true
