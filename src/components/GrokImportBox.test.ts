@@ -49,6 +49,15 @@ describe("From Grok Bot", () => {
     expect(text(view({ card }))).not.toContain("Cursor");
   });
 
+  it("offers the Cursor sign-in before any link is loaded, once, and keeps it on the card after", () => {
+    const empty = text(view({ cursor: { signedIn: false, waiting: false } }));
+    expect(empty).toContain("Sign in with Cursor to import everything");
+    expect(text(view({ cursor: { signedIn: true, waiting: false } }))).toContain("Signed in to Cursor · Sign out");
+    const card = { shareId: "d8OshqLZvtcKDcNluPuyo", name: "DOGE", description: "", url: "https://x.ai/bot/d8OshqLZvtcKDcNluPuyo" };
+    const withCard = text(view({ card, cursor: { signedIn: false, waiting: false } }));
+    expect(withCard.split("Sign in with Cursor to import everything").length - 1).toBe(1);
+  });
+
   it("titles what an export could not carry as Left out in the preview", () => {
     const pending = grokImportPreview({
       format: "openmaus.grok/1", name: "Overheard", instructions: "Watch for mentions.",

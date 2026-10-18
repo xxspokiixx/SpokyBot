@@ -48,10 +48,10 @@ export interface GrokImportViewProps {
 const chip = "flex items-center gap-1.5 rounded-full bg-raised px-3.5 py-2 text-[12.5px] text-ink hover:bg-raised-hover disabled:opacity-50";
 
 function CursorLine({ cursor, card, onSignIn, onSignOut }: {
-  cursor: CursorStatus | null; card: GrokCardAnswer; onSignIn: () => void; onSignOut: () => void;
+  cursor: CursorStatus | null; card: GrokCardAnswer | null; onSignIn: () => void; onSignOut: () => void;
 }) {
   if (!cursor) return null;
-  const note = card.exportNote || cursor.error;
+  const note = card?.exportNote || cursor.error;
   return (
     <div className="mt-3 text-[12px] text-ink-secondary">
       {cursor.signedIn ? (
@@ -96,6 +96,7 @@ export function GrokImportView(props: GrokImportViewProps) {
           {t("templates.load")}
         </button>
       </div>
+      {!card && <CursorLine cursor={props.cursor} card={null} onSignIn={props.onCursorSignIn} onSignOut={props.onCursorSignOut} />}
       {card && (
         <article className="mt-4 rounded-xl border border-hairline px-4 py-3">
           <div className="flex items-center gap-2 text-[14px] font-medium text-ink"><GrokBotMark size={15} />{card.name}</div>
