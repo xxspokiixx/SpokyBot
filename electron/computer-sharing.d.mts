@@ -55,8 +55,11 @@ export function createComputerSharing(options: {
   environments: () => Workspace[];
   enabled?: () => Promise<boolean>;
   protectedPaths?: string[];
-  cuaConnection: () => Promise<{ mcpCommand: string; mcpArgs: string[]; mcpEnv?: Record<string, string> } | null>;
+  /** The desktop's cua connection, or why it did not start (`reason` stays on this computer). */
+  cuaConnection: () => Promise<{ mcpCommand: string; mcpArgs: string[]; mcpEnv?: Record<string, string> } | { mode: "unavailable"; reason: string } | null>;
   hostControl?: (id: string, signal: AbortSignal) => Promise<{ renew(): Promise<unknown>; release(): Promise<unknown> }>;
+  /** The OS reports the screen locked: a screen action is refused with the fix instead of failing in the driver. */
+  screenLocked?: () => boolean;
   /** Home directory whose credential and autostart locations are protected. */
   home?: string;
   activityFile?: string;
