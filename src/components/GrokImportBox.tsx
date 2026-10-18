@@ -1,10 +1,12 @@
-import { Bot, Check, Copy, Loader2, LogIn, Sparkles } from "lucide-react";
+import { Check, Copy, Loader2, Sparkles } from "lucide-react";
 import { useCallback, useEffect, useRef, useState } from "react";
 
+import { cn } from "@/lib/cn";
 import { useCopyFeedback, type CopyFeedback } from "@/lib/copy-text";
 import { t } from "@/lib/i18n";
 import { grokImportPreview, teamImportPreview, type PendingTeamImport } from "@/lib/team-import";
 import { api } from "@/state/store";
+import { GrokBotMark } from "./GrokBotMark";
 import { GROK_EXPORT_PROMPT, grokStarterPackage, type GrokExport, type GrokTemplateCard } from "../../shared/grok-import";
 
 const errorText = (cause: unknown) => (cause instanceof Error ? cause.message : String(cause));
@@ -24,6 +26,8 @@ async function openInBrowser(url: string): Promise<void> {
 }
 
 export interface GrokImportViewProps {
+  /** No frame or heading of its own: the host (Settings, the welcome import step) gives both. */
+  bare?: boolean;
   url: string;
   card: GrokCardAnswer | null;
   loading: boolean;
@@ -59,7 +63,7 @@ function CursorLine({ cursor, card, onSignIn, onSignOut }: {
       ) : cursor.waiting ? (
         <span className="flex items-center gap-1.5"><Loader2 size={13} className="animate-spin" />{t("grokImport.cursorWaiting")}</span>
       ) : (
-        <button onClick={onSignIn} className={chip}><LogIn size={13} />{t("grokImport.cursorSignIn")}</button>
+        <button onClick={onSignIn} className={chip}><GrokBotMark size={13} />{t("grokImport.cursorSignIn")}</button>
       )}
       {note && <p className="mt-1.5">{note}</p>}
     </div>
@@ -68,12 +72,12 @@ function CursorLine({ cursor, card, onSignIn, onSignOut }: {
 
 /** Templates → Import → From Grok Bot: the share card, the export prompt, the reply box and the starter. */
 export function GrokImportView(props: GrokImportViewProps) {
-  const { url, card, loading, reply, error, copyState } = props;
+  const { url, card, loading, reply, error, copyState, bare } = props;
   return (
-    <section className="mt-5 rounded-2xl bg-raised/25 px-6 py-5" aria-labelledby="grok-import-title">
-      <Bot size={25} className="text-ink-secondary" />
-      <h3 id="grok-import-title" className="mt-3 text-[14px] font-medium text-ink">{t("grokImport.title")}</h3>
-      <p className="mt-1 text-[12.5px] leading-relaxed text-ink-secondary">{t("grokImport.hint")}</p>
+    <section className={bare ? "" : "mt-5 rounded-2xl bg-raised/25 px-6 py-5"} aria-label={t("grokImport.title")}>
+      {!bare && <GrokBotMark size={25} />}
+      {!bare && <h3 className="mt-3 text-[14px] font-medium text-ink">{t("grokImport.title")}</h3>}
+      <p className={cn("text-[12.5px] leading-relaxed text-ink-secondary", !bare && "mt-1")}>{t("grokImport.hint")}</p>
       <div className="mt-4 flex gap-2">
         <input
           value={url}
@@ -94,7 +98,7 @@ export function GrokImportView(props: GrokImportViewProps) {
       </div>
       {card && (
         <article className="mt-4 rounded-xl border border-hairline px-4 py-3">
-          <div className="text-[14px] font-medium text-ink">{card.name}</div>
+          <div className="flex items-center gap-2 text-[14px] font-medium text-ink"><GrokBotMark size={15} />{card.name}</div>
           {card.creator && <div className="text-[12px] text-ink-secondary">{t("grokImport.by", { name: card.creator })}</div>}
           {card.description && <p className="mt-1.5 text-[12.5px] leading-relaxed text-ink-secondary">{card.description}</p>}
           <CursorLine cursor={props.cursor} card={card} onSignIn={props.onCursorSignIn} onSignOut={props.onCursorSignOut} />
@@ -136,7 +140,7 @@ export function GrokImportView(props: GrokImportViewProps) {
 
 /** Loads the card for a pasted link (or `link`, from the GitHub box or an install link) and hands previews to the panel.
  * Signed in to Cursor, the card's answer carries the whole setup and its preview opens at once. */
-export function GrokImportBox({ link, onPreview }: { link: string | null; onPreview: (preview: PendingTeamImport) => void }) {
+export function GrokImportBox({ link, onPreview, bare }: { link: string | null; onPreview: (preview: PendingTeamImport) => void; bare?: boolean }) {
   const [url, setUrl] = useState("");
   const [card, setCard] = useState<GrokCardAnswer | null>(null);
   const [loading, setLoading] = useState(false);
@@ -223,6 +227,7 @@ export function GrokImportBox({ link, onPreview }: { link: string | null; onPrev
 
   return (
     <GrokImportView
+      bare={bare}
       url={url}
       card={card}
       loading={loading}

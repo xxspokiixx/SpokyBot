@@ -109,6 +109,10 @@ If any step fails, everything the import created is removed again.
 A shared Grok Bot link (`https://x.ai/bot/<id>`) can become a Maus bot from
 **Templates → Import → From Grok Bot**. Pasting the link into the GitHub box,
 or opening `openmausbot://install?url=https://x.ai/bot/<id>`, does the same.
+The same Grok Bot import is on **Settings → Import** (next to Backups, with
+**From your AI apps**: the welcome tour's skills and MCP tools import from
+Claude Code, Codex, Cursor, Claude Desktop and Gemini) and as an optional
+"Have a Grok Bot? Paste its link" row in the welcome tour's import step.
 
 1. Paste the link. Maus reads the public page and shows a card with the
    bot's name, creator and description. That is all the public page holds:

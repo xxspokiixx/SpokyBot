@@ -2,7 +2,9 @@ import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it, vi } from "vitest";
 
+import { StoreContext } from "@/state/store";
 import { GrokImportView, type GrokImportViewProps } from "./GrokImportBox";
+import { GrokImportFlow } from "./GrokImportFlow";
 import { TeamImportDetails } from "./TeamLibraryPanel";
 import { grokImportPreview } from "@/lib/team-import";
 
@@ -56,4 +58,22 @@ describe("From Grok Bot", () => {
     expect(shown).toContain("Left out Routine “On mention”: it starts on an event, not a clock.");
     expect(shown).not.toContain("Backup notes");
   });
+
+  it("shows the Grok Bot mark on the card, the sign-in button and the box heading", () => {
+    const card = { shareId: "d8OshqLZvtcKDcNluPuyo", name: "DOGE", description: "", url: "https://x.ai/bot/d8OshqLZvtcKDcNluPuyo" };
+    const markup = view({ card, cursor: { signedIn: false, waiting: false } });
+    expect(markup.match(/viewBox="0 0 70 70"/g)).toHaveLength(3);
+    expect(view({ bare: true }).match(/viewBox="0 0 70 70"/g)).toBeNull();
+    expect(text(view({ bare: true }))).not.toContain("From Grok Bot");
+  });
+
+  it("starts the shared flow on the link box, framed or bare", () => {
+    const value = { state: { bots: [], config: {} }, dispatch: vi.fn() } as never;
+    const flow = (bare: boolean) => renderToStaticMarkup(createElement(StoreContext.Provider, { value }, createElement(GrokImportFlow, { bare })));
+    expect(flow(false)).toContain('aria-label="Grok Bot share link"');
+    expect(text(flow(false))).toContain("From Grok Bot");
+    expect(text(flow(true))).not.toContain("From Grok Bot");
+    expect(flow(true)).toContain("Copy export prompt");
+  });
 });
+

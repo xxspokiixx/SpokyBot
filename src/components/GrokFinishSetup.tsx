@@ -41,7 +41,9 @@ export function openSetupChat(helper: Bot, imported: Bot, notes: GrokSetupNotes,
 }
 
 /** After Add: what is left, and one button that opens the helper's chat with the message ready to send. */
-export function GrokFinishSetup({ notes, imported, onDone }: { notes: GrokSetupNotes; imported: Bot; onDone: () => void }) {
+export function GrokFinishSetup({ notes, imported, onDone, className = "min-h-0 flex-1 overflow-y-auto px-6 pb-6 pt-6 sm:px-8" }: {
+  notes: GrokSetupNotes; imported: Bot; onDone: () => void; className?: string;
+}) {
   const { state, dispatch } = useStore();
   const helper = setupHelper(state.bots, imported);
   const routines = notes.leftOut.filter((item) => item.kind === "routine").length;
@@ -50,7 +52,7 @@ export function GrokFinishSetup({ notes, imported, onDone }: { notes: GrokSetupN
     onDone();
   };
   return (
-    <div className="min-h-0 flex-1 overflow-y-auto px-6 pb-6 pt-6 sm:px-8">
+    <div className={className}>
       <div className="flex items-center gap-2 text-[15px] font-medium text-ink">
         <Check size={17} className="text-success" />
         {t("grokFinish.added", { name: imported.name })}
