@@ -18,18 +18,23 @@ export interface LendingActivityEntry {
   ok: boolean;
   error?: string;
 }
-/** What this Mac lends to the person's own Cloud (Settings → OMB Cloud). */
+/** What this computer lends to the person's own Cloud (Settings → MausBot Cloud). */
 export interface CloudLendingState {
   enabled: boolean;
   folders: SharedFolder[];
   /** Apps and screen. */
   screen: boolean;
-  /** An action from the Cloud is running on this Mac right now. */
+  /** An action from the Cloud is running on this computer right now. */
   busy: boolean;
   connected?: boolean;
   /** Why lending is not connected, for localized copy. */
-  problem?: "connect-first" | "not-cloud" | "waiting" | "paused" | "signed-out" | "account-changed" | "machine-changed";
+  problem?: "connect-first" | "not-cloud" | "waiting" | "paused" | "signed-out" | "account-changed" | "machine-changed" | "access-off";
   error?: string;
+  /** Lent through Settings → Servers → Computer access rather than this switch; that grant may include the terminal. */
+  via?: "access";
+  terminal?: boolean;
+  /** Why and when lending last stopped, kept across restarts: "you" (the switch or Stop lending), or what stopped it. */
+  stopped?: { reason: string; at: number };
 }
 export interface CloudLendingSnapshot {
   /** Signed in to OMB Cloud with a known machine saved under Servers. */
@@ -60,8 +65,11 @@ export function createComputerSharing(options: {
   /** Home directory whose credential and autostart locations are protected. */
   home?: string;
   activityFile?: string;
-  /** The verified Cloud sign-in: { status, accountId, origin }. */
+  /** The verified Cloud sign-in: { status, accountId, origin }; status "restoring" while a saved sign-in is read. */
   cloud?: () => { status: string; accountId: string | null; origin: string | null } | null;
+  /** Signs this app back in to the person's own Cloud after its session there ended; true when it did. */
+  reconnect?: ((origin: string) => Promise<boolean> | boolean) | null;
+  now?: () => number;
   onChange?: (summary: { lending: string[]; busy: { env: string; action: string } | null }) => void;
 }): {
   state(id: string): SharingState;
