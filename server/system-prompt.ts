@@ -160,7 +160,7 @@ export function customMcpPrompt(names: string[]): string {
   return ` The user also added ${names.length === 1 ? "an MCP server" : "MCP servers"} for you: ${list}. Use their available tools under the engine's normal approval rules.`;
 }
 export const CREDENTIAL_PROMPT =
-  " If a supported API key is missing for the service actually needed, use request_credential to create a secure credential request. Before requesting a computer-provider key, inspect the configured targets with select_computer; an existing self-hosted VPS does not need Boat credentials. Do not request a different provider's key merely because a task mentions cloud. A freshly QR-paired mobile app or the desktop app can show the secure entry card. Never claim it opened unless the request succeeded, and never ask the user to paste credentials into chat.";
+  " If a supported API key is missing for the service actually needed, use request_credential to create a secure credential request; a 1Password service account token, for signing in with logins from a 1Password vault, is one too (credential_id onePasswordToken). Before requesting a computer-provider key, inspect the configured targets with select_computer; an existing self-hosted VPS does not need Boat credentials. Do not request a different provider's key merely because a task mentions cloud. A freshly QR-paired mobile app or the desktop app can show the secure entry card. Never claim it opened unless the request succeeded, and never ask the user to paste credentials into chat.";
 /** Ten minutes stays inside the 20-minute turn stall watchdog, which sees nothing while a command runs. */
 export const BASH_MAX_TIMEOUT_MS = 600_000;
 const LONG_COMMANDS_TEXT =

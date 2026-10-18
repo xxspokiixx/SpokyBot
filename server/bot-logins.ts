@@ -72,6 +72,11 @@ export class BotLogins {
     this.onePassword.markUsed(id);
   }
 
+  /** The settings, plus whether a 1Password token is held: what a credential card's "configured" check reads. */
+  credentialConfig<T extends object>(config: T): T & { onePassword: { connected: boolean } } {
+    return { ...config, onePassword: { connected: Boolean(this.store.onePasswordToken()) } };
+  }
+
   routes(botExists: (id: string) => boolean): LoginRouteDeps {
     return {
       list: () => this.store.list(),
