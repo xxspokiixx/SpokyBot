@@ -1740,13 +1740,13 @@ export function PausedList({
 export function RoutineEditor({
   routine,
   bots,
-  lockedBotId,
+  lockedBotId, initialBotId,
   defaultRunOn, plain,
   onClose,
 }: {
   routine?: Routine;
   bots: Bot[];
-  lockedBotId?: string;
+  lockedBotId?: string; initialBotId?: string;
   defaultRunOn?: RoutineRunOn; plain?: boolean;
   onClose: () => void;
 }) {
@@ -1759,5 +1759,5 @@ export function RoutineEditor({
       : routine?.schedule.type === "cron"
         ? routine.nextRunAt ?? nextHour()
       : nextHour();
-  return <EventEditor seed={{ kind: "routine", at, durationMinutes: routine?.durationMinutes ?? 30, botIds: lockedBotId ? [lockedBotId] : routine ? [routine.botId] : [], routine }} bots={bots} lockedBotId={lockedBotId} defaultRunOn={defaultRunOn} plain={plain} onClose={onClose} onSavedCall={() => {}} />;
+  return <EventEditor seed={{ kind: "routine", at, durationMinutes: routine?.durationMinutes ?? 30, botIds: lockedBotId ? [lockedBotId] : routine ? [routine.botId] : initialBotId ? [initialBotId] : bots.length === 1 ? [bots[0]!.id] : [], routine }} bots={bots} lockedBotId={lockedBotId} defaultRunOn={defaultRunOn} plain={plain} onClose={onClose} onSavedCall={() => {}} />;
 }

@@ -21,7 +21,8 @@ export function defaultBot(bots: readonly Bot[], selectedId: string): Bot | unde
 export function NewAutomation({ initialText = "", onClose, onSetUpYourself }: {
   initialText?: string;
   onClose: () => void;
-  onSetUpYourself: (kind: SetUpKind) => void;
+  /** The bot this box would have asked, so the editor starts with it chosen. */
+  onSetUpYourself: (kind: SetUpKind, botId: string) => void;
 }) {
   const { state, dispatch } = useStore();
   const bots = state.bots.filter((bot) => !bot.hidden);
@@ -64,7 +65,7 @@ export function NewAutomation({ initialText = "", onClose, onSetUpYourself }: {
             </div>
             <div className="mt-5 flex items-center justify-between gap-2">
               <button type="button" onClick={() => setYourself(false)} className="rounded-lg px-2 py-1.5 text-[12.5px] text-ink-secondary hover:bg-raised hover:text-ink">{t("automations.newBox.back")}</button>
-              <button type="button" onClick={() => onSetUpYourself(kind)} className="rounded-xl bg-accent px-4 py-2 text-[13px] font-medium text-accent-ink hover:brightness-110">{t("automations.newBox.continue")}</button>
+              <button type="button" onClick={() => onSetUpYourself(kind, bot?.id ?? "")} className="rounded-xl bg-accent px-4 py-2 text-[13px] font-medium text-accent-ink hover:brightness-110">{t("automations.newBox.continue")}</button>
             </div>
           </>
         ) : (

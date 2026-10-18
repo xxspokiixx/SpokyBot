@@ -94,7 +94,7 @@ describe("+ New", () => {
     flushSync(() => button(container, "Set it up yourself").click());
     flushSync(() => button(container, "When another app sends something").click());
     flushSync(() => button(container, "Continue").click());
-    expect(onSetUpYourself).toHaveBeenCalledWith("webhook");
+    expect(onSetUpYourself).toHaveBeenCalledWith("webhook", "bot-a");
   });
 });
 
