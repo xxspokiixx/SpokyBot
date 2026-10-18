@@ -20,6 +20,8 @@ import { addHeldSecretScrubber, HELD_SECRET_MASK } from "./redact.ts";
 export const CURSOR_API = "https://api2.cursor.sh";
 export const CURSOR_LOGIN_PAGE = "https://cursor.com/loginDeepControl";
 export const CURSOR_SESSION_FILE = "cursor-session.json";
+/** Cursor shares a template's setup only with accounts that have Grok Bot. */
+export const GROK_BOT_PLAN_NOTE = "Importing everything needs a Cursor account with Grok Bot (Cursor Ultra, or a Premium team seat). Use Copy export prompt in your Grok Bot instead, or Start from description.";
 /** The public client id Cursor's own CLI uses for its browser sign-in and token refresh. */
 const CURSOR_CLI_CLIENT_ID = "KbZUR41cY7W6zRSdpSUJ7I7mLYBKOCmB";
 export const IMPORT_DETAILS_PATH = "/aiserver.v1.GrokBotService/GetGrokBotTemplateImportDetails";
@@ -284,6 +286,8 @@ export function createCursorSession(options: { dataDir: string; fetcher?: typeof
       if (refused) {
         const reason = cursorReason(details, text);
         log(`cursor: template details refused (HTTP ${response.status}${reason ? `: ${reason}` : ""})`);
+        // Signed in, but the account has no Grok Bot: signing in again would not help, so the sign-in is kept.
+        if (/requires an ultra|premium .*seat|ERROR_UNAUTHORIZED/i.test(reason)) throw new CursorFallback(GROK_BOT_PLAN_NOTE);
         forget();
         throw new CursorFallback(`Cursor refused the sign-in (HTTP ${response.status}${reason ? `: ${reason}` : ""}). Sign in again.`);
       }

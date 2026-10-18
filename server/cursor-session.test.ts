@@ -4,7 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-import { CURSOR_SESSION_FILE, CursorFallback, createCursorSession, cursorLogin } from "./cursor-session.ts";
+import { CURSOR_SESSION_FILE, CursorFallback, GROK_BOT_PLAN_NOTE, createCursorSession, cursorLogin } from "./cursor-session.ts";
 import { redactSecretsInText } from "./redact.ts";
 import type { GrokTemplateCard } from "../shared/grok-import.ts";
 
@@ -216,6 +216,14 @@ describe("Cursor template import", () => {
     });
     await signIn(offline);
     await expect(offline.session.fetchTemplate(card)).rejects.toThrow("Cursor could not be reached.");
+  });
+
+  it("says a Grok Bot plan is needed, and keeps the sign-in, when Cursor refuses an account without one", async () => {
+    const h = harness(cursorServer({ details: () => json({ code: "unauthenticated", message: "Grok Bot requires an Ultra subscription or a Premium self-serve team seat", details: [{ debug: { error: "ERROR_UNAUTHORIZED" } }] }, 401) }));
+    await signIn(h);
+    await expect(h.session.fetchTemplate(card)).rejects.toThrow(new CursorFallback(GROK_BOT_PLAN_NOTE));
+    expect(existsSync(h.file)).toBe(true);
+    expect(await h.session.status()).toMatchObject({ signedIn: true });
   });
 
   it("refreshes the token once with the refresh token from sign-in, then asks again", async () => {
