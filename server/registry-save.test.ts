@@ -205,12 +205,13 @@ describe("groups.json save failures", () => {
   });
 
   it("restores a room thread's name, pin, time limit, title and folder when they cannot be saved", () => {
-    const { store, room, second } = roomWithTwoThreads();
+    const { store, room, second, changes } = roomWithTwoThreads();
     const unchanged = structuredClone(second);
     const attempts = [
-      () => store.renameGroupTask(room.id, second.threadId, "Renamed"),
-      () => store.setGroupTaskPinned(room.id, second.threadId, true),
-      () => store.setGroupTaskTurnTimeout(room.id, second.threadId, 15),
+      () => store.patchGroupTask(room.id, second.threadId, { title: "Renamed" }),
+      () => store.patchGroupTask(room.id, second.threadId, { pinned: true }),
+      () => store.patchGroupTask(room.id, second.threadId, { turnTimeoutMinutes: 15 }),
+      () => store.patchGroupTask(room.id, second.threadId, { title: "Renamed", pinned: true, turnTimeoutMinutes: 15 }),
       () => store.titleGroupTaskFromFirstMessage(room.id, "Plan the launch", second.threadId),
       () => store.pinGroupCwd(room.id, second.threadId),
     ];
@@ -220,6 +221,8 @@ describe("groups.json save failures", () => {
       expect(second).toEqual(unchanged);
     }
     expect(room.pinnedCwd).toBeUndefined();
+    expect(changes).not.toHaveBeenCalled();
+    expect(new Store(selection).groupTaskByThread(room.id, second.threadId)).toEqual(unchanged);
   });
 
   it("keeps a room thread and its conversation when its deletion cannot be saved, and deletes both on retry", () => {

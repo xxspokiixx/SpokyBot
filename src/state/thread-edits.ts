@@ -1,6 +1,6 @@
 import type { Action, AppState, GroupTask } from "./store";
 
-export type ThreadEdit = Extract<Action, { type: "renameTask" | "renameGroupTask" | "pinGroupTask" }> | (Extract<Action, { type: "setConversationTurnLimit" }> & { dm: false });
+export type ThreadEdit = Extract<Action, { type: "renameTask" | "renameGroupTask" | "pinGroupTask" } | { type: "setConversationTurnLimit"; dm: false }>;
 
 export function patchGroupTask(state: AppState, groupId: string, threadId: string, patch: Partial<GroupTask>): AppState {
   return {

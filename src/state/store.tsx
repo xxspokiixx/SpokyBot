@@ -799,7 +799,7 @@ export type Action =
   | { type: "switchGroupTask"; groupId: string; threadId: string }
   | { type: "renameGroupTask"; groupId: string; threadId: string; title: string }
   | { type: "pinGroupTask"; groupId: string; threadId: string; pinned: boolean; title: string }
-  | { type: "setConversationTurnLimit"; groupId: string; threadId: string; minutes: number | null; dm: boolean }
+  | ({ type: "setConversationTurnLimit"; groupId: string; threadId: string; minutes: number | null } & ({ dm: true } | { dm: false }))
   | { type: "deleteGroupTask"; groupId: string; threadId: string }
   | { type: "interruptGroup"; groupId: string; threadId?: string; onError?: () => void }
   | { type: "setGroupHold"; groupId: string; botId: string; held: boolean }
@@ -3108,12 +3108,15 @@ export function StoreProvider({ children }: { children: ReactNode }) {
             body: JSON.stringify({ pinned: action.pinned, title: action.title }),
           }).catch(undoOnFailure(undoThreadEdit(stateRef.current, action)));
           break;
-        case "setConversationTurnLimit":
-          api(action.dm ? `/api/groups/${action.groupId}` : `/api/groups/${action.groupId}/tasks/${action.threadId}`, {
+        case "setConversationTurnLimit": {
+          const saved = api(action.dm ? `/api/groups/${action.groupId}` : `/api/groups/${action.groupId}/tasks/${action.threadId}`, {
             method: "PATCH",
             body: JSON.stringify({ turnTimeoutMinutes: action.minutes }),
-          }).catch(action.dm ? showError : undoOnFailure(undoThreadEdit(stateRef.current, { ...action, dm: false })));
+          });
+          if (action.dm) saved.catch(showError);
+          else saved.catch(undoOnFailure(undoThreadEdit(stateRef.current, action)));
           break;
+        }
         case "deleteGroupTask":
           api<{ group?: Partial<Group> & { id: string } }>(`/api/groups/${action.groupId}/tasks/${action.threadId}`, { method: "DELETE" })
             .then((r) => r?.group && dispatch({ type: "groupPatched", group: r.group }))

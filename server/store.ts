@@ -105,6 +105,19 @@ const TASK_PATCH_FIELDS = [
 ] as const satisfies readonly (keyof TaskRecord)[];
 export type TaskPatch = Partial<Pick<TaskRecord, typeof TASK_PATCH_FIELDS[number]>>;
 
+export type GroupTaskPatch = Partial<Pick<GroupTaskRecord, "title" | "pinned">> & { turnTimeoutMinutes?: number | null };
+
+const GROUP_TASK_PATCH_ACTIONS = { title: "the thread's name", pinned: "the thread's pin", turnTimeoutMinutes: "the thread's turn time limit" } as const;
+
+function groupTaskPatchAction(patch: GroupTaskPatch): string {
+  const fields = (Object.keys(GROUP_TASK_PATCH_ACTIONS) as (keyof GroupTaskPatch)[]).filter((key) => patch[key] !== undefined);
+  return fields.length === 1 ? GROUP_TASK_PATCH_ACTIONS[fields[0]!] : "the thread change";
+}
+
+function mirrorActiveGroupTask(group: GroupRecord, task: GroupTaskRecord): void {
+  Object.assign(group, { threadId: task.threadId, pinnedCwd: task.pinnedCwd, pinnedMessageId: task.pinnedMessageId });
+}
+
 function persistedPin<T extends { pinned?: boolean }>(task: T): T {
   if (task.pinned === true) return task;
   if (!("pinned" in task)) return task;
@@ -1162,7 +1175,7 @@ export class Store {
     };
     this.commitGroupChange(group, "the new thread", () => {
       group.tasks = [task, ...(group.tasks ?? [])];
-      if (activate) Object.assign(group, { threadId: task.threadId, pinnedCwd: undefined, pinnedMessageId: undefined });
+      if (activate) mirrorActiveGroupTask(group, task);
     });
     this.emit({ type: "group", groupId });
     return task;
@@ -1172,47 +1185,31 @@ export class Store {
     const group = this.group(groupId);
     const task = group?.tasks?.find((candidate) => candidate.threadId === threadId);
     if (!group || group.dm || !task) return null;
-    this.commitGroupChange(group, "the thread switch", () => {
-      Object.assign(group, { threadId: task.threadId, pinnedCwd: task.pinnedCwd, pinnedMessageId: task.pinnedMessageId });
-    });
+    this.commitGroupChange(group, "the thread switch", () => mirrorActiveGroupTask(group, task));
     this.emit({ type: "group", groupId });
     return group;
   }
 
-  setGroupTaskPinned(groupId: string, threadId: string, pinned: boolean): GroupTaskRecord | null {
+  patchGroupTask(groupId: string, threadId: string, patch: GroupTaskPatch): GroupTaskRecord | null {
+    const group = this.group(groupId);
     const task = this.groupTaskByThread(groupId, threadId);
-    if (!task) return null;
-    this.commitGroupChange(this.group(groupId)!, "the thread's pin", () => {
-      if (pinned) task.pinned = true;
-      else delete task.pinned;
+    if (!group || !task) return null;
+    this.commitGroupChange(group, groupTaskPatchAction(patch), () => {
+      if (patch.title !== undefined) task.title = patch.title.trim().slice(0, 80) || UNTITLED_TASK;
+      if (patch.pinned) task.pinned = true;
+      else if (patch.pinned === false) delete task.pinned;
+      if (patch.turnTimeoutMinutes === null) delete task.turnTimeoutMinutes;
+      else if (patch.turnTimeoutMinutes !== undefined) task.turnTimeoutMinutes = patch.turnTimeoutMinutes;
     });
-    this.emit({ type: "group", groupId });
-    return task;
-  }
-
-  setGroupTaskTurnTimeout(groupId: string, threadId: string, minutes: number | null): GroupTaskRecord | null {
-    const task = this.groupTaskByThread(groupId, threadId);
-    if (!task) return null;
-    this.commitGroupChange(this.group(groupId)!, "the thread's turn time limit", () => {
-      if (minutes == null) delete task.turnTimeoutMinutes;
-      else task.turnTimeoutMinutes = minutes;
-    });
-    this.emit({ type: "group", groupId });
-    return task;
-  }
-
-  renameGroupTask(groupId: string, threadId: string, title: string): GroupTaskRecord | null {
-    const task = this.groupTaskByThread(groupId, threadId);
-    if (!task) return null;
-    this.commitGroupChange(this.group(groupId)!, "the thread's name", () => { task.title = title.trim().slice(0, 80) || UNTITLED_TASK; });
     this.emit({ type: "group", groupId });
     return task;
   }
 
   titleGroupTaskFromFirstMessage(groupId: string, text: string, threadId?: string): GroupTaskRecord | null {
+    const group = this.group(groupId);
     const task = threadId ? this.groupTaskByThread(groupId, threadId) : this.activeGroupTask(groupId);
-    if (!task || task.titleFromFirstMessage || task.title !== UNTITLED_TASK) return null;
-    this.commitGroupChange(this.group(groupId)!, "the thread's title", () => {
+    if (!group || !task || task.titleFromFirstMessage || task.title !== UNTITLED_TASK) return null;
+    this.commitGroupChange(group, "the thread's title", () => {
       task.title = titleFromMessage(text);
       task.titleFromFirstMessage = true;
     });
@@ -1223,7 +1220,7 @@ export class Store {
   retitleGroupTask(groupId: string, threadId: string, machineTitle: string, title: string): GroupTaskRecord | null {
     const task = this.groupTaskByThread(groupId, threadId);
     if (!task || task.title !== machineTitle) return null;
-    return this.renameGroupTask(groupId, threadId, threadTitleFrom(title));
+    return this.patchGroupTask(groupId, threadId, { title: threadTitleFrom(title) });
   }
 
   deleteGroupTask(groupId: string, threadId: string): GroupRecord | null {
@@ -1244,8 +1241,7 @@ export class Store {
     const doomed = new Set(deleted);
     mdb.deleteThreads(deleted, () => this.commitGroupChange(group, "the thread deletion", () => {
       group.tasks = group.tasks!.filter((task) => !doomed.has(task.threadId));
-      const next = group.tasks[0]!;
-      if (doomed.has(group.threadId)) Object.assign(group, { threadId: next.threadId, pinnedCwd: next.pinnedCwd, pinnedMessageId: next.pinnedMessageId });
+      if (doomed.has(group.threadId)) mirrorActiveGroupTask(group, group.tasks[0]!);
     }));
     for (const id of deleted) this.deleteThreadRecord(id, true);
     this.emit({ type: "group", groupId });
