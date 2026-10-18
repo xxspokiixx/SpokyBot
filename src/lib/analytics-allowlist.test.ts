@@ -88,6 +88,7 @@ describe("app, role and key lists", () => {
     const expected = {
       boxToken: "boat", xaiApiKey: "xai", opencodeGoApiKey: "opencode_go", ttsKey: "elevenlabs", fishAudioKey: "fish_audio",
       openaiImageApiKey: "openai_image",
+      onePasswordToken: "onepassword",
     };
     expect(Object.keys(expected).sort()).toEqual(Object.keys(CREDENTIAL_TARGETS).sort());
     for (const [target, provider] of Object.entries(expected)) expect(credentialProvider(target)).toBe(provider);

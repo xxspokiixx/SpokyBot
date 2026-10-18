@@ -680,7 +680,8 @@ describe("agents-proxy MCP surface", () => {
       expect(tool(name).description, name).not.toMatch(/\b(delegate_bot|ask_bot)\b/);
     }
     const credential = tool("request_credential");
-    expect(credential.description).toContain("freshly QR-paired mobile app show a secure entry card");
+    expect(credential.description).toContain("the app shows a secure entry card, as does a freshly QR-paired phone");
+    expect(credential.description).toContain("1Password service account token (onePasswordToken)");
     expect(credential.description).toContain("Never claim a secure field opened unless this request succeeds");
   });
 
