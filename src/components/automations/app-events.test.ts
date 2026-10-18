@@ -73,7 +73,15 @@ describe("app events, set up by the person", () => {
     flushSync(() => button(container, "Set it up yourself").click());
     flushSync(() => button(container, "When something happens in an app").click());
     flushSync(() => button(container, "Continue").click());
-    expect(onSetUpYourself).toHaveBeenCalledWith("app");
+    expect(onSetUpYourself).toHaveBeenCalledWith("app", "bot-a");
+  });
+
+  it("starts with the bot the New box chose, as the schedule and webhook editors do", async () => {
+    const writer = { ...scout, id: "bot-b", name: "Writer", threadId: "thread-b" } as unknown as Bot;
+    fixture.api.mockResolvedValue(catalog);
+    mount(createElement(AppEventEditor, { bots: [scout, writer], initialBotId: "bot-b", onClose: vi.fn() }));
+    await vi.waitFor(() => expect(fixture.api).toHaveBeenCalledWith("/api/app-triggers/events?botId=bot-b"));
+    expect(fixture.api).not.toHaveBeenCalledWith("/api/app-triggers/events?botId=bot-a");
   });
 
   it("picks from the bot's connected apps, filters in plain words, and creates it", async () => {

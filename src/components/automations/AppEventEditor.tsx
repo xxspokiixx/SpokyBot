@@ -15,9 +15,9 @@ import { suggestedName } from "../WebhookTrigger";
 const FIELD = "w-full rounded-xl border border-hairline/60 bg-panel px-3.5 py-2.5 text-[13px] text-ink outline-none placeholder:text-ink-tertiary focus:border-accent/70";
 const LABEL = "mb-1.5 block text-[11.5px] font-medium text-ink-secondary";
 
-export function AppEventEditor({ trigger, bots, onClose, onSaved }: { trigger?: AppTrigger; bots: Bot[]; onClose: () => void; onSaved?: (trigger: AppTrigger) => void }) {
+export function AppEventEditor({ trigger, bots, initialBotId, onClose, onSaved }: { trigger?: AppTrigger; bots: Bot[]; initialBotId?: string; onClose: () => void; onSaved?: (trigger: AppTrigger) => void }) {
   const { dispatch } = useStore();
-  const [botId, setBotId] = useState(trigger?.botId ?? bots[0]?.id ?? "");
+  const [botId, setBotId] = useState(trigger?.botId ?? (initialBotId && bots.some((bot) => bot.id === initialBotId) ? initialBotId : bots[0]?.id) ?? "");
   const [catalog, setCatalog] = useState<AppEventCatalog | null>(null);
   const [app, setApp] = useState(trigger?.app ?? "");
   const [event, setEvent] = useState(trigger?.event ?? "");

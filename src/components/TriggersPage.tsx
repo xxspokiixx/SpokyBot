@@ -142,7 +142,7 @@ export function TriggersPage({ onBack, onOpenRoom }: { onBack: () => void; onOpe
       {editing?.kind === "webhook" && (editWebhook || !editing.id) && (
         <WebhookEditor webhook={editWebhook} bots={visibleBots} initialBotId={editing.botId} onClose={() => setEditing(null)} onCredential={(credential, id) => { saveWebhookCredential(webhookCredentialStore(), id, credential); setOpenId(id); }} />
       )}
-      {editing?.kind === "app" && (editApp || !editing.id) && <AppEventEditor trigger={editApp} bots={visibleBots} onClose={() => setEditing(null)} onSaved={(trigger) => setOpenId(trigger.id)} />}
+      {editing?.kind === "app" && (editApp || !editing.id) && <AppEventEditor trigger={editApp} bots={visibleBots} initialBotId={editing.botId} onClose={() => setEditing(null)} onSaved={(trigger) => setOpenId(trigger.id)} />}
     </main>
   );
 }
