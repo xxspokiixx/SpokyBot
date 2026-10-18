@@ -10,6 +10,7 @@ import { redactSecretsInText } from "./redact.ts";
 import type { GroupGoalRunStatus } from "../shared/group-goal-run.ts";
 import type { RoutineRequestOperation } from "../shared/routine-request.ts";
 import { normalizeCronSchedule, nextCronRuns, type RoutineCronSchedule } from "../shared/routine-schedule.ts";
+import { clockMinutes, INTERVAL_RESTRICTION_SEARCH_MS, intervalAllowsOccurrence, intervalHasRestrictions, isSameLocalDay, latestIntervalOccurrence, MAX_DATE_MS, nextAlignedInterval } from "./routine-intervals.ts";
 import {
   isRoutineProblemRun, type RoutineContextAttachment, type RoutineIntervalWindow, type RoutineRetryCause, type RoutineRunStatus, type RoutineRunTrigger,
 } from "../shared/routines.ts";
@@ -25,6 +26,7 @@ import { activeMs, askOf, settleAsk, waitingFor, type RoutineRunAsk } from "./ro
 import { EVENT_RETRY_WINDOW_MS, loadEventReceipts, MAX_EVENT_RECEIPTS, type EventRunReceipt } from "./routine-event-receipts.ts";
 
 export type { RoutineContextAttachment, RoutineIntervalWindow, RoutineRunStatus, RoutineRunTrigger };
+export { intervalHasRestrictions } from "./routine-intervals.ts";
 
 export interface RoutineIntervalSchedule {
   type: "interval";
@@ -268,10 +270,6 @@ const CATCH_UP_MS = 12 * 60 * 60_000;
 const WAKE_HORIZON_MS = 60 * 60_000;
 
 export const ROUTINE_RESTARTED = "OpenMausBot restarted while this routine was running";
-const MAX_DATE_MS = 8_640_000_000_000_000;
-const LOCAL_DAY_MS = 24 * 60 * 60_000;
-const INTERVAL_RESTRICTION_SEARCH_MS = 9 * LOCAL_DAY_MS;
-const CLOCK_TIME = /^([01]\d|2[0-3]):([0-5]\d)$/;
 const MAX_RUNS = 2_000;
 const MAX_ATTACHMENTS = 50;
 const attachmentSchema = z.object({
@@ -415,11 +413,6 @@ function cleanIntervalWeekdays(value: unknown): number[] | undefined {
   return weekdays.length === ALL_DAYS.length ? undefined : weekdays;
 }
 
-function clockMinutes(value: string): number | null {
-  const match = CLOCK_TIME.exec(value);
-  return match ? Number(match[1]) * 60 + Number(match[2]) : null;
-}
-
 function cleanIntervalWindow(value: unknown, everyMinutes: number): RoutineIntervalWindow | undefined {
   if (value == null) return undefined;
   if (typeof value !== "object" || Array.isArray(value)) {
@@ -512,39 +505,6 @@ function loadSchedule(value: unknown, after: number): RoutineSchedule | null {
   }
 }
 
-export function intervalHasRestrictions(
-  schedule: Pick<RoutineIntervalSchedule, "weekdays" | "window" | "endsAt">,
-): boolean {
-  return schedule.weekdays !== undefined || schedule.window !== undefined || schedule.endsAt !== undefined;
-}
-
-function intervalAllowsOccurrence(schedule: RoutineIntervalSchedule, at: number): boolean {
-  if (schedule.endsAt !== undefined && at > schedule.endsAt) return false;
-  const date = new Date(at);
-  if (schedule.weekdays && !schedule.weekdays.includes(date.getDay())) return false;
-  if (schedule.window) {
-    const minute = date.getHours() * 60 + date.getMinutes();
-    const start = clockMinutes(schedule.window.start)!;
-    const end = clockMinutes(schedule.window.end)!;
-    if (minute < start || minute >= end) return false;
-  }
-  return true;
-}
-
-function isSameLocalDay(left: number, right: number): boolean {
-  const a = new Date(left);
-  const b = new Date(right);
-  return a.getFullYear() === b.getFullYear() && a.getMonth() === b.getMonth() && a.getDate() === b.getDate();
-}
-
-function nextAlignedInterval(schedule: RoutineIntervalSchedule, after: number): number | null {
-  if (schedule.anchorAt > after) return schedule.anchorAt;
-  const intervalMs = schedule.everyMinutes * 60_000;
-  const intervalsElapsed = Math.floor((after - schedule.anchorAt) / intervalMs);
-  const candidate = schedule.anchorAt + (intervalsElapsed + 1) * intervalMs;
-  return Number.isSafeInteger(candidate) && candidate <= MAX_DATE_MS ? candidate : null;
-}
-
 export function nextOccurrence(schedule: RoutineSchedule, after: number): number | null {
   if (schedule.type === "once") return schedule.at > after ? schedule.at : null;
   if (schedule.type === "cron") return nextCronRuns(schedule, after, 1)[0] ?? null;
@@ -568,25 +528,6 @@ export function nextOccurrence(schedule: RoutineSchedule, after: number): number
     d.setDate(d.getDate() + offset);
     d.setHours(hour, minute, 0, 0);
     if (d.getTime() > after && weekdays.has(d.getDay())) return d.getTime();
-  }
-  return null;
-}
-
-function latestIntervalOccurrence(
-  schedule: RoutineIntervalSchedule,
-  at: number,
-): number | null {
-  const intervalMs = schedule.everyMinutes * 60_000;
-  const ceiling = Math.min(at, schedule.endsAt ?? at);
-  if (schedule.anchorAt > ceiling) return null;
-  let candidate = schedule.anchorAt + Math.floor((ceiling - schedule.anchorAt) / intervalMs) * intervalMs;
-  if (!intervalHasRestrictions(schedule)) return candidate;
-  const maxCandidates = Math.ceil(INTERVAL_RESTRICTION_SEARCH_MS / intervalMs) + 2;
-  for (let checked = 0; checked < maxCandidates; checked++) {
-    if (intervalAllowsOccurrence(schedule, candidate)) return candidate;
-    const previous = candidate - intervalMs;
-    if (!Number.isSafeInteger(previous) || previous < schedule.anchorAt) return null;
-    candidate = previous;
   }
   return null;
 }
@@ -1269,6 +1210,24 @@ export class RoutineManager {
     });
     for (const run of updated) this.emitRun(run);
     return updated.map(cloneRun);
+  }
+
+  /** The computer's clock moved to another time zone (a Cloud took its owner's): a daily or weekly time, or an interval
+   * kept to some days or hours, now falls at another instant. A cron rule names its own zone, a one-time run is an
+   * instant and a plain interval counts elapsed time, so those keep theirs. Returns how many moved. */
+  rescheduleLocalTimes(): number {
+    const now = this.now();
+    const moved = this.routines.filter((routine) => {
+      const local = routine.schedule.type === "daily" || (routine.schedule.type === "interval" && intervalHasRestrictions(routine.schedule));
+      if (!routine.enabled || routine.nextRunAt == null || !local) return false;
+      const next = nextOccurrence(routine.schedule, now);
+      if (next === routine.nextRunAt) return false;
+      routine.nextRunAt = next;
+      return true;
+    });
+    if (moved.length) this.save();
+    for (const routine of moved) this.emitRoutine(routine);
+    return moved.length;
   }
 
   get isTicking(): boolean { return this.ticking; }
