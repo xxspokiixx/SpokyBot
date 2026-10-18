@@ -1288,7 +1288,10 @@ a prompt, a URL, an email address, a token, or an engine's account
 (`ProviderSnapshot.account`). Only fixed codes, counts, times, versions, engine
 kinds, random ids, connector slugs, booleans and machine numbers. Connected
 apps are looked up in the background at most every 30 minutes, so a slow
-provider never holds the answer. Cloud computers are not listed: through the
+provider never holds the answer. `connectors.items` lists only apps the
+person set up: connected now, or connected once and since expired or failed.
+An app never connected, HighLevel without a saved connection included, is not
+listed. Cloud computers are not listed: through the
 Admin's Boat relay that would count as using an included service and hold back
 updates; a cloud computer that fails a turn arrives as its place's code
 (`cc-unavailable`, `cc-no-start`, `cc-provider`, …).

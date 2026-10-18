@@ -51,6 +51,18 @@ export class TurnAuthenticationRefusedError extends TurnNotStartedError {
   override readonly name = "TurnAuthenticationRefusedError";
 }
 
+/** The engine's usage limit refused the turn before any model or tool activity (or is known to be refusing until
+ * `resetsAt`), and no process of it is running the turn. */
+export class TurnUsageLimitRefusedError extends TurnNotStartedError {
+  override readonly name = "TurnUsageLimitRefusedError";
+  readonly resetsAt: number | undefined;
+
+  constructor(turnId: TurnId, message: string, resetsAt?: number) {
+    super(turnId, message);
+    this.resetsAt = resetsAt;
+  }
+}
+
 /** Variants are opaque provider IDs, not the cross-engine effort enum. */
 export function isModelVariant(value: unknown): value is string {
   return typeof value === "string" && value.length > 0 && value.length <= 256 &&
