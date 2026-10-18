@@ -162,6 +162,8 @@ const __APP_VERSION__: string;
             missing?: boolean;
             /** One of the six Cloud colours (environments.cjs ENTRY_COLORS). */
             color?: string;
+            /** The person's own My Cloud. */
+            home?: boolean;
           }>;
         }>;
         /** Local targets answer {ok, error?} (error strings are an open set); remote ones answer nothing. */
