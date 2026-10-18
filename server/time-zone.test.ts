@@ -40,7 +40,7 @@ describe("the zone a Cloud home tells time in", () => {
     expect(env.TZ).toBe("Asia/Kolkata");
     expect(currentTimeZone(env)).toBe("Asia/Kolkata");
     expect(JSON.parse(readFileSync(join(dataDir, TIME_ZONE_FILE), "utf8"))).toEqual({ version: 1, timeZone: "Asia/Kolkata" });
-    expect(statSync(join(dataDir, TIME_ZONE_FILE)).mode & 0o777).toBe(0o600);
+    if (process.platform !== "win32") expect(statSync(join(dataDir, TIME_ZONE_FILE)).mode & 0o777).toBe(0o600);
     expect(useTimeZone(dataDir, "Asia/Kolkata", env)).toBe(false);
     const restarted: NodeJS.ProcessEnv = {};
     expect(adoptSavedTimeZone(dataDir, restarted)).toBe("Asia/Kolkata");
